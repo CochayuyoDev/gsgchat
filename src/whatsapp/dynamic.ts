@@ -1,0 +1,126 @@
+/**
+ * Cliente de la Cloud API que lee las credenciales vigentes en cada llamada.
+ *
+ * Sin esto, cambiar el token desde /setup obligaria a reiniciar el proceso:
+ * el cliente se construye una vez al arrancar y se queda con los valores de
+ * entonces. Aqui se reconstruye por llamada (son solo closures, no hay coste
+ * real) y se falla con un mensaje util si todavia no hay credenciales.
+ */
+
+import type { SettingsService } from '../settings/service.js';
+import { createWhatsAppClient, WhatsAppApiError, type WhatsAppClient } from './client.js';
+
+export class NotConfiguredError extends Error {
+  constructor(missing: string[]) {
+    super(
+      `WhatsApp no esta configurado todavia (faltan: ${missing.join(', ')}). Completalo en /setup.`,
+    );
+    this.name = 'NotConfiguredError';
+  }
+}
+
+export function createDynamicWhatsAppClient(settings: SettingsService): WhatsAppClient {
+  function inner(): WhatsAppClient {
+    const missing = settings.missing();
+    if (missing.length) throw new NotConfiguredError(missing);
+
+    const credentials = settings.current();
+    return createWhatsAppClient({
+      token: credentials.token,
+      phoneNumberId: credentials.phoneNumberId,
+      businessAccountId: credentials.businessAccountId,
+      graphVersion: credentials.graphVersion,
+    });
+  }
+
+  // Los metodos son async a proposito: asi la falta de credenciales llega
+  // como promesa rechazada y no como excepcion sincrona, que se escaparia
+  // de cualquier .catch() del llamador.
+  return {
+    sendText: async (...args) => inner().sendText(...args),
+    sendLocation: async (...args) => inner().sendLocation(...args),
+    sendLocationRequest: async (...args) => inner().sendLocationRequest(...args),
+    sendButtons: async (...args) => inner().sendButtons(...args),
+    sendTemplate: async (...args) => inner().sendTemplate(...args),
+    markAsRead: async (...args) => inner().markAsRead(...args),
+    createTemplate: async (...args) => inner().createTemplate(...args),
+    listTemplates: async () => inner().listTemplates(),
+  };
+}
+
+export interface ConnectionCheck {
+  ok: boolean;
+  detail: string;
+  displayName?: string;
+  phoneNumber?: string;
+  templates?: number;
+}
+
+/**
+ * Prueba las credenciales contra la Graph API antes de darlas por buenas.
+ * Guardar un token invalido y descubrirlo en el primer envio masivo es
+ * exactamente lo que hay que evitar.
+ */
+export async function checkConnection(
+  credentials: {
+    token: string;
+    phoneNumberId: string;
+    businessAccountId: string;
+    graphVersion: string;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<ConnectionCheck> {
+  const { token, phoneNumberId, businessAccountId, graphVersion } = credentials;
+  const missing = [
+    !token && 'token',
+    !phoneNumberId && 'phoneNumberId',
+    !businessAccountId && 'businessAccountId',
+  ].filter(Boolean) as string[];
+
+  if (missing.length) return { ok: false, detail: `faltan datos: ${missing.join(', ')}` };
+
+  try {
+    const url = `https://graph.facebook.com/${graphVersion}/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`;
+    const response = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` } });
+    const payload = (await response.json()) as {
+      display_phone_number?: string;
+      verified_name?: string;
+      error?: { message?: string; code?: number };
+    };
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        detail: payload.error?.message ?? `HTTP ${response.status}`,
+      };
+    }
+
+    const client = createWhatsAppClient({ token, phoneNumberId, businessAccountId, graphVersion });
+    let templates: number | undefined;
+    try {
+      templates = (await client.listTemplates()).length;
+    } catch (error) {
+      // El numero responde pero la WABA no: casi siempre es el ID equivocado
+      // o al token le falta whatsapp_business_management.
+      return {
+        ok: false,
+        detail:
+          error instanceof WhatsAppApiError
+            ? `el numero responde pero la cuenta de negocio no: ${error.message}`
+            : 'el numero responde pero no se pudo leer el catalogo de plantillas',
+        displayName: payload.verified_name,
+        phoneNumber: payload.display_phone_number,
+      };
+    }
+
+    return {
+      ok: true,
+      detail: 'credenciales validas',
+      displayName: payload.verified_name,
+      phoneNumber: payload.display_phone_number,
+      templates,
+    };
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : 'error de red' };
+  }
+}

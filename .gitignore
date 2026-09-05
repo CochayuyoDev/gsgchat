@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+
+# Credenciales: nunca al repositorio.
+.env
+.env.*
+!.env.example
+# Clave de cifrado, token de admin y firma de los enlaces de rastreo.
+# Se genera sola en el primer arranque.
+.secrets.json
