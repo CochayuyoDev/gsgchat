@@ -24,6 +24,7 @@ import type { Sender } from '../outbound/sender.js';
 import type { InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { ExtractionSuccess } from '../types.js';
+import type { MessageKind } from '../db/messages.js';
 import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
 
 export interface InboundDeps {
@@ -51,6 +52,48 @@ function matchesKeyword(text: string, keywords: string[]): boolean {
 
 function describe(result: ExtractionSuccess): string {
   return `${result.lat.toFixed(6)}, ${result.lng.toFixed(6)}`;
+}
+
+/**
+ * Como se guarda un entrante en la conversacion.
+ *
+ * Los tipos que el bot no sabe atender (una foto, un audio, un contacto
+ * compartido) igual se anotan: en el chat el operador tiene que VER que el
+ * cliente mando algo, aunque el sistema no pueda responderlo solo.
+ */
+export function readInbound(message: InboundMessage): { kind: MessageKind; body: string; payload: Record<string, unknown> | null } {
+  if (message.type === 'location' && message.location) {
+    const { latitude, longitude, name } = message.location;
+    return {
+      kind: 'location',
+      body: `Ubicacion: ${name ? `${name} — ` : ''}${latitude}, ${longitude}`,
+      payload: { location: message.location },
+    };
+  }
+  if (message.type === 'interactive' && message.interactive) {
+    const reply = message.interactive.button_reply ?? message.interactive.list_reply;
+    return {
+      kind: 'interactive',
+      body: reply?.title ?? '(respuesta a un boton)',
+      payload: { interactive: message.interactive },
+    };
+  }
+  if (message.button?.text) {
+    return { kind: 'interactive', body: message.button.text, payload: { button: message.button } };
+  }
+  if (message.text?.body) {
+    return { kind: 'text', body: message.text.body, payload: null };
+  }
+  const known: MessageKind[] = ['image', 'audio', 'video', 'document', 'sticker'];
+  const kind = (known as string[]).includes(message.type) ? (message.type as MessageKind) : 'unknown';
+  const etiquetas: Record<string, string> = {
+    image: '(foto)',
+    audio: '(audio)',
+    video: '(video)',
+    document: '(documento)',
+    sticker: '(sticker)',
+  };
+  return { kind, body: etiquetas[kind] ?? `(mensaje de tipo ${message.type})`, payload: null };
 }
 
 /** Aplica una regla: responde si tiene texto e inscribe si apunta a una secuencia. */
@@ -88,6 +131,19 @@ export async function handleInboundMessage(
   const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
   await repos.contacts.touchInbound(phone, receivedAt);
   contact.lastInboundAt = receivedAt;
+
+  // La conversacion se guarda ANTES de decidir que hacer con el mensaje: si
+  // el bot no sabe atenderlo, el operador tiene que verlo igual en el chat.
+  const leido = readInbound(message);
+  await repos.messages.add({
+    contactId: contact.id,
+    direction: 'in',
+    wamid: message.id,
+    kind: leido.kind,
+    body: leido.body,
+    payload: leido.payload,
+    createdAt: receivedAt,
+  });
 
   // Acuse de lectura: mejora la percepcion y no cuesta cuota.
   await wa.markAsRead(message.id).catch(() => undefined);

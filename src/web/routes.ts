@@ -14,7 +14,10 @@ import { FIELD_LABELS, type CredentialField, type SettingsService } from '../set
 import { syncTemplates } from '../templates/registry.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { checkConnection } from '../whatsapp/dynamic.js';
-import { panelPage, setupPage } from './pages.js';
+import { panelPage } from './pages.js';
+import { connectPage } from './connect-page.js';
+import { chatPage } from './chat-page.js';
+import { registerConnectRoutes } from './connect-routes.js';
 
 export interface WebDeps {
   config: Config;
@@ -28,6 +31,7 @@ const credentialsSchema = z.object({
   token: z.string().optional(),
   phoneNumberId: z.string().optional(),
   businessAccountId: z.string().optional(),
+  appId: z.string().optional(),
   appSecret: z.string().optional(),
   verifyToken: z.string().optional(),
   mapsApiKey: z.string().optional(),
@@ -42,12 +46,20 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   const html = (body: string) => ({ body, type: 'text/html; charset=utf-8' });
 
-  app.get('/', async (_request, reply) => reply.redirect(settings.isConfigured() ? '/panel' : '/setup'));
+  // Conectado, lo primero que se quiere ver son los chats.
+  app.get('/', async (_request, reply) => reply.redirect(settings.isConfigured() ? '/chat' : '/setup'));
 
   app.get('/setup', async (_request, reply) => {
-    const page = html(setupPage(FIELD_LABELS));
+    const page = html(connectPage(FIELD_LABELS));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
+
+  app.get('/chat', async (_request, reply) => {
+    const page = html(chatPage(settings.isConfigured()));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  await registerConnectRoutes(app, { config, settings, wa });
 
   app.get('/panel', async (_request, reply) => {
     const page = html(panelPage(settings.isConfigured()));

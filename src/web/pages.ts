@@ -99,6 +99,7 @@ const AUTH_JS = String.raw`
     options = options || {};
     var res = await fetch(path, {
       method: options.method || 'GET',
+      cache: 'no-store',
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token() },
       body: options.body ? JSON.stringify(options.body) : undefined
     });
@@ -434,7 +435,7 @@ export function panelPage(configured: boolean): string {
 
   const body = `
 <header><h1>Panel</h1><span id="state" class="pill hidden"></span>
-  <span class="right"><a href="/setup" class="muted">Conexion</a> &nbsp; <button class="ghost sm" id="logout">Cambiar token</button></span></header>
+  <span class="right"><a href="/chat">Chat</a> &nbsp; <a href="/setup" class="muted">Conexion</a> &nbsp; <button class="ghost sm" id="logout">Cambiar token</button></span></header>
 <p class="muted">Enviar mensajes, compartir ubicacion, automatizar seguimientos y lanzar campanas sin tocar la terminal.</p>
 ${warning}
 

@@ -18,6 +18,10 @@ export interface WhatsAppCredentials {
   token: string;
   phoneNumberId: string;
   businessAccountId: string;
+  /** Id de la app de Meta: con el y la clave secreta se registra el webhook. */
+  appId: string;
+  /** Configuracion de registro incorporado: habilita el boton de conexion rapida. */
+  signupConfigId: string;
   appSecret: string;
   verifyToken: string;
   graphVersion: string;
@@ -33,6 +37,8 @@ export const FIELD_LABELS: Record<CredentialField, string> = {
   token: 'Token permanente',
   phoneNumberId: 'Phone number ID',
   businessAccountId: 'WhatsApp Business Account ID',
+  appId: 'ID de la app',
+  signupConfigId: 'ID de la configuracion de registro incorporado',
   appSecret: 'Clave secreta de la app',
   verifyToken: 'Token de verificacion del webhook',
   mapsApiKey: 'Clave de Google Maps (opcional)',
@@ -77,6 +83,8 @@ export async function createSettingsService(
     token: config.WHATSAPP_TOKEN,
     phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID,
     businessAccountId: config.WHATSAPP_BUSINESS_ACCOUNT_ID,
+    appId: config.WHATSAPP_APP_ID,
+    signupConfigId: config.WHATSAPP_SIGNUP_CONFIG_ID,
     appSecret: config.WHATSAPP_APP_SECRET,
     verifyToken: config.WHATSAPP_VERIFY_TOKEN,
     graphVersion: config.GRAPH_API_VERSION,

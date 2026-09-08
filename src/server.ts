@@ -80,6 +80,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     return reply.code(500).send({ error: 'error interno; revisa el log del servidor' });
   });
 
+  // Nada de /admin se cachea. El chat pide el mismo hilo cada pocos
+  // segundos y el navegador reutilizaba la primera respuesta: la pantalla se
+  // quedaba congelada aunque el mensaje ya estuviera enviado.
+  app.addHook('onSend', async (request, reply) => {
+    if (request.url.startsWith('/admin')) reply.header('cache-control', 'no-store');
+  });
+
   await app.register(websocket);
 
   const hub = new TrackingHub({ tracking: repos.tracking });

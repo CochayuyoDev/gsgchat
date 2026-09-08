@@ -1,10 +1,10 @@
 # wa-locator
 
-Conecta tu cuenta de WhatsApp Business (API oficial de Meta) y automatiza
-mensajes y seguimientos: respuestas por palabra clave, secuencias de varios
-pasos, envios programados, campanas con plantilla, ubicacion en vivo y
-extraccion de coordenadas desde cualquier link de mapa. Con las guardas
-anti-bloqueo cableadas para no quemar el numero.
+Conecta tu cuenta de WhatsApp Business (API oficial de Meta), habla con tus
+clientes desde una pantalla igual que WhatsApp y automatiza el resto: respuestas
+por palabra clave, seguimientos de varios pasos, envios programados, campanas
+con plantilla, ubicacion en vivo y extraccion de coordenadas de cualquier link
+de mapa. Con las guardas anti-bloqueo cableadas para no quemar el numero.
 
 ```bash
 docker compose up -d          # app + postgres + redis, todo junto
@@ -37,35 +37,62 @@ npm run templates:lint
 
 ---
 
-## Como se conecta una cuenta
+## Como se conecta tu cuenta
 
-Todo desde `/setup`, sin editar ficheros.
+Todo desde `/setup`. Hay dos caminos y los dos terminan igual.
 
-1. **Consigue las credenciales en Meta.** App de tipo Empresa en
-   [developers.facebook.com](https://developers.facebook.com/apps) con el
-   producto WhatsApp, numero registrado en WhatsApp Manager y un token
-   permanente de usuario del sistema con `whatsapp_business_messaging` y
-   `whatsapp_business_management`. **El numero no puede estar activo en la app
-   normal de WhatsApp ni en WhatsApp Business**; si lo esta, borra antes esa
-   cuenta desde la app. Meta regala un numero de prueba para empezar.
-2. **Pegalas en `/setup`.** Se guardan cifradas (AES-256-GCM) en la tabla
-   `settings` y ganan sobre las variables de entorno. Cambiar un token no
-   obliga a reiniciar.
-3. **Copia de `/setup` la URL y el token del webhook a Meta**, y suscribe
-   `messages`, `message_template_status_update`,
-   `message_template_quality_update` y `phone_number_quality_update`.
-4. **Pulsa "Suscribir app"**. Sin ese paso Meta no manda ni un webhook aunque
-   la URL este perfecta: es el olvido mas comun.
-5. **Registra el numero** con su PIN de seis digitos (solo la primera vez).
-6. **Mandate un mensaje de prueba** con la plantilla `hello_world`.
+**El rapido: "Conectar con Facebook".** Un boton abre la ventana de Meta, entras
+con tu cuenta, eliges tu numero y vuelves conectado. Es el registro incorporado
+(Embedded Signup) y es lo mas parecido al codigo QR de WhatsApp Web que permite
+la via oficial. Hay que activarlo una vez en la app de Meta (WhatsApp,
+Configuracion, Registro incorporado) y pegar aqui su ID de configuracion.
 
-"Comprobar estado" responde las cuatro preguntas de golpe: si el token vale, si
-el numero responde y con que calidad y tier, si la app esta suscrita y si el
-webhook esta completo.
+**El manual: tres datos.** El token permanente, el ID de la app y su clave
+secreta. Con eso el sistema:
+
+1. averigua a que cuentas de negocio llega el token (`debug_token`) y que
+   numeros tiene cada una;
+2. si hay varios, pregunta cual;
+3. guarda las credenciales cifradas y se inventa el token de verificacion;
+4. **registra el webhook en Meta por API**, sin que copies nada a mano;
+5. suscribe la app a la cuenta de negocio;
+6. comprueba que el numero responde y dice su calidad y su tier.
+
+Antes eran seis campos y un viaje al panel de Meta a pegar la URL del webhook.
+
+**No hay codigo QR y no lo va a haber.** El QR es como se conecta un *telefono*
+a WhatsApp Web; usarlo desde un servidor obliga a emular ese cliente (Baileys,
+whatsapp-web.js), esta fuera de los terminos y termina con el numero baneado sin
+aviso. La pantalla lo explica ahi mismo en vez de dejar al usuario buscandolo.
+
+Dos cosas mas que la pantalla resuelve sola:
+
+- **Numero nuevo:** se activa con su PIN de seis digitos desde ahi.
+- **Mensaje de prueba:** manda `hello_world` a tu propio telefono para
+  comprobarlo de punta a punta.
 
 En local Meta necesita una URL publica:
-`npx cloudflared tunnel --url http://localhost:3000`, y esa URL en
-`PUBLIC_BASE_URL`.
+`npx cloudflared tunnel --url http://localhost:3000`, y esa URL en el campo
+correspondiente (o en `PUBLIC_BASE_URL`).
+
+---
+
+## El chat
+
+`/chat` es la pantalla principal: lista de conversaciones a la izquierda, hilo a
+la derecha, burbujas verdes y blancas, hora y doble check. Escribes y se manda.
+
+Lo que la separa de un chat cualquiera:
+
+- **Sabe cuando NO se puede escribir.** Pasadas 24 h desde el ultimo mensaje del
+  cliente, el cuadro de texto se cambia por el selector de plantillas aprobadas,
+  con la razon escrita. A un contacto dado de baja no se le puede escribir, y lo
+  dice.
+- **Guarda todo lo que llega**, incluido lo que el bot no sabe atender: una foto,
+  un audio o un documento aparecen en el hilo para que lo vea una persona.
+- **Manda ubicaciones**: pegas un link de mapa y sale el pin, o pides la
+  ubicacion del cliente con el boton nativo.
+- Todo pasa por las mismas guardas que el resto del sistema.
 
 ---
 
@@ -147,8 +174,8 @@ WhatsApp Cloud API
 | `src/templates/` | catalogo, linter, registro local y sincronizacion con Meta |
 | `src/outbound/` | gates, warm-up, sender y cola |
 | `src/tracking/` | tokens, hub de posiciones y paginas de rastreo |
-| `src/admin/` | API de operacion |
-| `src/web/` | `/setup` y `/panel` |
+| `src/admin/` | API de operacion y del chat |
+| `src/web/` | `/chat`, `/setup` y `/panel` |
 | `src/runtime.ts` | arranque comun del servidor y de los CLIs |
 
 ---
@@ -278,7 +305,8 @@ Nada de esto necesita editar ficheros ni usar la terminal.
 
 | Ruta | Que es |
 |---|---|
-| `/setup` | credenciales, estado de la conexion, suscribir la app, registrar el numero y mandar un mensaje de prueba |
+| `/chat` | conversaciones, como WhatsApp: leer, responder, mandar pin, pedir ubicacion |
+| `/setup` | conectar la cuenta (boton de Facebook o tres datos), activar el numero y mandarse una prueba |
 | `/panel` | diez pestanas: estado, enviar, contactos, ubicaciones, en vivo, campanas, automatizacion, plantillas, historial y extraer |
 | `/t/<token>` | pagina de rastreo (Google Maps si hay clave; si no, OpenStreetMap) |
 
@@ -316,6 +344,12 @@ Todas bajo `Authorization: Bearer $ADMIN_TOKEN`.
 | GET/POST/DELETE | `/admin/tracking` | sesiones de rastreo |
 | POST | `/admin/messages/text` · `/location` · `/ask-location` | envios sueltos |
 | POST | `/admin/geo/extract` | extrae lat/lng sin enviar nada |
+| GET | `/admin/chat/conversations` | lista de chats con su ultimo mensaje y no leidos |
+| GET | `/admin/chat/:contactId` | el hilo, con si se puede escribir y por que |
+| POST | `/admin/chat/send` | texto, pin de ubicacion, boton de ubicacion o plantilla |
+| POST | `/admin/chat/start` | abrir chat con un numero nuevo |
+| POST | `/admin/connect` | conexion completa a partir de token, app y clave |
+| POST | `/admin/connect/signup` | vuelta de la ventana de Meta (registro incorporado) |
 | GET/POST | `/admin/settings` | credenciales: leer enmascaradas / guardar y probar |
 | GET | `/admin/settings/status` | radiografia de la conexion |
 | POST | `/admin/settings/subscribe` · `/register` · `/test-message` | activar la cuenta |
@@ -329,7 +363,7 @@ Publicas: `GET /webhooks/whatsapp` (verificacion), `POST /webhooks/whatsapp`,
 
 1. `docker compose up -d`. Arranca aunque no haya credenciales y aplica las
    migraciones solo.
-2. Conecta la cuenta en `/setup` siguiendo los seis pasos de arriba.
+2. Conecta la cuenta en `/setup`: el boton de Facebook, o pegando los tres datos.
 3. `npm run templates:push` (o el boton del panel) y esperar aprobacion.
 4. `npm run templates:sync`.
 5. Cargar contactos **con su opt-in y su origen** desde la pestana Contactos.
@@ -341,7 +375,7 @@ la pagina de rastreo.
 
 ## Tests
 
-234 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
+277 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
 en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
 verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
 WebAssembly, asi que tampoco hacen falta Docker ni un servidor.

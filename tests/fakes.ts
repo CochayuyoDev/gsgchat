@@ -19,9 +19,11 @@ import type { PhoneNumberInfo, WhatsAppClient } from '../src/whatsapp/client.js'
 import type { Config } from '../src/config.js';
 import { createSettingsService, type SettingsRepo, type SettingsService } from '../src/settings/service.js';
 import { createFakeAutomation, type FakeAutomation } from './fakes-automation.js';
+import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
 
 export interface FakeRepos extends Repos {
   automation: FakeAutomation;
+  messages: FakeMessages;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -34,7 +36,7 @@ export interface FakeRepos extends Repos {
 let seq = 1;
 
 export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos {
-  const contactsByPhone = new Map<string, Contact & { createdAt: Date }>();
+  const contactsByPhone = new Map<string, Contact & { createdAt: Date; chatReadAt?: Date | null }>();
   const deliveries: Array<Record<string, unknown>> = [];
   const locations: Array<Record<string, unknown>> = [];
   const templates = new Map<string, Template>();
@@ -65,6 +67,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     _campaigns: campaigns,
     _links: links,
     automation: createFakeAutomation(contactById),
+    messages: createFakeMessages(() => [...contactsByPhone.values()]),
 
     contacts: {
       async getByPhone(phone) {
@@ -79,7 +82,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           if (name) existing.name = name;
           return existing;
         }
-        const contact: Contact & { createdAt: Date } = {
+        const contact: Contact & { createdAt: Date; chatReadAt?: Date | null } = {
           id: `c${seq++}`,
           phone,
           name: name ?? null,

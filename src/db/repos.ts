@@ -9,6 +9,7 @@
 import type { Pool } from './pool.js';
 import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
+import { createMessagesRepo, type MessagesRepo } from './messages.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -252,6 +253,7 @@ export interface Repos {
   tracking: TrackingRepo;
   campaigns: CampaignsRepo;
   automation: AutomationRepo;
+  messages: MessagesRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -894,6 +896,7 @@ export function createRepos(pool: Pool): Repos {
     tracking,
     campaigns,
     automation: createAutomationRepo(pool),
+    messages: createMessagesRepo(pool),
   };
 }
 

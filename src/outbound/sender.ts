@@ -123,6 +123,20 @@ export function createSender(deps: SenderDeps): Sender {
         const result = await dispatch(wa, job, template);
         await repos.deliveries.markSent(deliveryId, result.wamid);
 
+        // El chat lee de `messages`: sin esta fila el operador manda algo y no
+        // lo ve aparecer en la conversacion.
+        await repos.messages.add({
+          contactId: contact.id,
+          direction: 'out',
+          wamid: result.wamid,
+          kind: job.kind === 'freeform' ? 'text' : job.kind,
+          body: describeOutgoing(job, template),
+          payload: job.location ? { location: job.location } : job.interactive ? { interactive: job.interactive } : null,
+          status: 'sent',
+          deliveryId,
+          createdAt: at,
+        });
+
         // Solo lo iniciado por la empresa consume cupo diario: responder
         // dentro de la ventana de servicio no gasta warm-up.
         const businessInitiated = job.kind === 'template' || !isWithinServiceWindow(contact, at);
@@ -139,6 +153,34 @@ export function createSender(deps: SenderDeps): Sender {
       }
     },
   };
+}
+
+/**
+ * Como se lee ese mensaje en la conversacion. Una plantilla se guarda ya
+ * renderizada: en el chat interesa lo que le llego al cliente, no el nombre
+ * de la plantilla ni sus variables sueltas.
+ */
+function describeOutgoing(
+  job: SendJob,
+  template: Awaited<ReturnType<Repos['templates']['get']>>,
+): string {
+  switch (job.kind) {
+    case 'template':
+      if (!template) return job.templateName ?? 'plantilla';
+      try {
+        return renderTemplate(template, job.variables ?? []).preview;
+      } catch {
+        return template.body ?? (job.templateName ?? 'plantilla');
+      }
+    case 'location':
+      return job.location
+        ? `Ubicacion: ${job.location.name ? `${job.location.name} — ` : ''}${job.location.latitude}, ${job.location.longitude}`
+        : 'Ubicacion';
+    case 'interactive':
+      return job.interactive?.body ?? '';
+    default:
+      return job.text ?? '';
+  }
 }
 
 async function dispatch(

@@ -460,6 +460,92 @@ describe('automatizacion sobre Postgres', () => {
   });
 });
 
+describe('conversaciones sobre Postgres', () => {
+  it('guarda entrantes y salientes y arma el hilo en orden', async () => {
+    const contact = (await repos.contacts.getByPhone('5215510000001'))!;
+    const base = new Date('2026-03-10T12:00:00Z');
+    const en = (segundos: number) => new Date(base.getTime() + segundos * 1000);
+
+    await repos.messages.add({ contactId: contact.id, direction: 'in', wamid: 'w1', kind: 'text', body: 'hola', createdAt: en(0) });
+    await repos.messages.add({ contactId: contact.id, direction: 'out', wamid: 'w2', kind: 'text', body: 'que tal', status: 'sent', createdAt: en(1) });
+    // Mismo segundo que el anterior: el orden lo tiene que desempatar el id.
+    await repos.messages.add({ contactId: contact.id, direction: 'out', wamid: 'w3', kind: 'text', body: 'te ayudo?', status: 'sent', createdAt: en(1) });
+
+    const hilo = await repos.messages.listMessages(contact.id, 50);
+    expect(hilo.map((m) => m.body)).toEqual(['hola', 'que tal', 'te ayudo?']);
+    expect(hilo[0]).toMatchObject({ direction: 'in', kind: 'text' });
+  });
+
+  it('el payload vuelve como objeto, no como texto', async () => {
+    const contact = (await repos.contacts.getByPhone('5215510000001'))!;
+    await repos.messages.add({
+      contactId: contact.id,
+      direction: 'in',
+      wamid: 'w-loc',
+      kind: 'location',
+      body: 'Ubicacion: 19.43, -99.13',
+      payload: { location: { latitude: 19.43, longitude: -99.13 } },
+    });
+
+    const hilo = await repos.messages.listMessages(contact.id, 50);
+    const ubicacion = hilo.find((m) => m.wamid === 'w-loc')!;
+    expect(ubicacion.payload).toMatchObject({ location: { latitude: 19.43 } });
+  });
+
+  it('el mismo wamid dos veces no duplica: actualiza el estado', async () => {
+    const contact = (await repos.contacts.getByPhone('5215510000001'))!;
+    const antes = (await repos.messages.listMessages(contact.id, 200)).length;
+
+    await repos.messages.add({ contactId: contact.id, direction: 'out', wamid: 'w2', kind: 'text', body: 'que tal', status: 'delivered' });
+
+    const despues = await repos.messages.listMessages(contact.id, 200);
+    expect(despues).toHaveLength(antes);
+    expect(despues.find((m) => m.wamid === 'w2')?.status).toBe('delivered');
+
+    await repos.messages.setStatusByWamid('w2', 'read');
+    const hilo = await repos.messages.listMessages(contact.id, 200);
+    expect(hilo.find((m) => m.wamid === 'w2')?.status).toBe('read');
+  });
+
+  it('la lista de chats trae el ultimo mensaje y los no leidos', async () => {
+    const contact = (await repos.contacts.getByPhone('5215510000001'))!;
+    const chats = await repos.messages.listConversations({ limit: 50, offset: 0 });
+    const mio = chats.find((c) => c.contactId === contact.id)!;
+
+    expect(mio.lastMessage).not.toBeNull();
+    expect(mio.unread).toBeGreaterThan(0);
+    expect(await repos.messages.unreadTotal()).toBeGreaterThan(0);
+
+    // Marcar leido baja el contador de ese chat y el total.
+    await repos.messages.markRead(contact.id, new Date());
+    const despues = await repos.messages.listConversations({ limit: 50, offset: 0 });
+    expect(despues.find((c) => c.contactId === contact.id)!.unread).toBe(0);
+  });
+
+  it('un contacto sin mensajes aparece igual, al final', async () => {
+    const chats = await repos.messages.listConversations({ limit: 50, offset: 0 });
+    const sinMensajes = chats.filter((c) => c.lastMessage === null);
+    expect(sinMensajes.length).toBeGreaterThan(0);
+    expect(chats[0]!.lastMessage).not.toBeNull();
+  });
+
+  it('la busqueda filtra por telefono y por nombre', async () => {
+    expect(await repos.messages.listConversations({ q: '0000001', limit: 50, offset: 0 })).toHaveLength(1);
+    expect(await repos.messages.listConversations({ q: 'luis', limit: 50, offset: 0 })).toHaveLength(1);
+  });
+
+  it('el hilo se pagina hacia atras', async () => {
+    const contact = (await repos.contacts.getByPhone('5215510000001'))!;
+    const todos = await repos.messages.listMessages(contact.id, 200);
+    const ultimos = await repos.messages.listMessages(contact.id, 2);
+    expect(ultimos).toHaveLength(2);
+    expect(ultimos.at(-1)!.id).toBe(todos.at(-1)!.id);
+
+    const anteriores = await repos.messages.listMessages(contact.id, 2, ultimos[0]!.id);
+    expect(anteriores.every((m) => m.id < ultimos[0]!.id)).toBe(true);
+  });
+});
+
 describe('credenciales sobre Postgres', () => {
   it('se guardan cifradas y se releen', async () => {
     const config = loadConfig({

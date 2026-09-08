@@ -128,6 +128,8 @@ export async function processChange(
           code: status.errors?.[0]?.code ? String(status.errors[0].code) : undefined,
           title: status.errors?.[0]?.title,
         });
+        // El doble check del chat sale de aqui.
+        await repos.messages.setStatusByWamid(status.id, status.status);
       }
 
       const profileName = value.contacts?.[0]?.profile?.name;

@@ -138,6 +138,46 @@ for (const phone of ['5215512345678', '5215511112222']) {
   });
 }
 
+// --- una conversacion de ejemplo, para que el chat no nazca vacio ------
+const hace = (minutos: number) => new Date(Date.now() - minutos * 60_000);
+
+for (const [minutos, direccion, texto] of [
+  [190, 'in', 'Hola, buenas tardes'],
+  [188, 'out', 'Hola Ana, gracias por escribir. En que te ayudamos?'],
+  [180, 'in', 'Queria saber si llegan a Coyoacan'],
+  [176, 'out', 'Si, llegamos a toda la ciudad. Compartenos tu ubicacion y te confirmo el costo.'],
+  [40, 'in', 'Ubicacion: 19.4284, -99.1676'],
+  [38, 'out', 'Ubicacion registrada: 19.428400, -99.167600\nhttps://www.google.com/maps/search/?api=1&query=19.4284,-99.1676'],
+  [35, 'in', 'Perfecto, cuanto tardan?'],
+] as Array<[number, 'in' | 'out', string]>) {
+  await repos.messages.add({
+    contactId: contact.id,
+    direction: direccion,
+    kind: texto.startsWith('Ubicacion:') ? 'location' : 'text',
+    body: texto,
+    status: direccion === 'out' ? 'read' : null,
+    createdAt: hace(minutos),
+  });
+}
+
+const luisChat = (await repos.contacts.getByPhone('5215587654321'))!;
+await repos.contacts.touchInbound(luisChat.phone, hace(1500));
+await repos.messages.add({
+  contactId: luisChat.id,
+  direction: 'in',
+  kind: 'text',
+  body: 'Buenas, quiero cotizar 20 piezas',
+  createdAt: hace(1500),
+});
+await repos.messages.add({
+  contactId: luisChat.id,
+  direction: 'out',
+  kind: 'text',
+  body: 'Con gusto, Luis Reparto. Un asesor te contacta en breve.',
+  status: 'delivered',
+  createdAt: hace(1499),
+});
+
 const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
 const link = await repos.tracking.createLink(contact.id, 'Pedido A-1024', expiresAt);
 await repos.tracking.addPoint(link.id, { lat: 19.4326, lng: -99.1332, accuracy: 12 });
@@ -184,6 +224,7 @@ await app.listen({ port: PORT, host: '127.0.0.1' });
 console.log(`
   wa-locator - servidor de demostracion (datos en memoria)
 
+  Chat         ${BASE}/chat
   Configuracion ${BASE}/setup
   Panel        ${BASE}/panel
   Salud        ${BASE}/health
