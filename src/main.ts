@@ -4,34 +4,18 @@
  * Arranca aunque no haya credenciales de WhatsApp: en ese caso levanta igual
  * y las pide por pantalla en /setup. Los secretos propios (token de admin,
  * firma de los enlaces de rastreo) se generan solos la primera vez y quedan
- * en .secrets.json, para no obligar a editar un .env a mano.
+ * en .secrets.json, para no obligar a editar un .env a mano. Las migraciones
+ * pendientes se aplican al arrancar, asi que `npm run migrate` es opcional.
  */
 
-import { loadConfig } from './config.js';
-import { createPool } from './db/pool.js';
-import { createRepos, createSettingsRepo } from './db/repos.js';
-import { createSettingsService } from './settings/service.js';
-import { bootstrapSecrets } from './settings/crypto.js';
-import { createDynamicWhatsAppClient } from './whatsapp/dynamic.js';
+import { createRuntime } from './runtime.js';
 import { createSender } from './outbound/sender.js';
 import { createOutboundQueue, createOutboundWorker } from './outbound/queue.js';
 import { buildServer } from './server.js';
+import { startScheduler } from './automation/engine.js';
 
-const secrets = bootstrapSecrets(process.cwd());
-process.env.ADMIN_TOKEN ??= secrets.adminToken;
-process.env.TRACKING_SECRET ??= secrets.trackingSecret;
-
-const config = loadConfig();
-const pool = createPool(config.DATABASE_URL);
-const repos = createRepos(pool);
-
-const settings = await createSettingsService(
-  createSettingsRepo(pool),
-  config,
-  secrets.settingsKey,
-);
-
-const wa = createDynamicWhatsAppClient(settings);
+const runtime = await createRuntime({ migrate: true });
+const { config, repos, settings, wa } = runtime;
 
 const sender = createSender({
   repos,
@@ -62,12 +46,19 @@ const worker = createOutboundWorker({
   },
 });
 
+// Seguimientos y mensajes programados: se procesan cada 10 s.
+const stopScheduler = startScheduler({
+  repos,
+  sender,
+  log: (message, detail) => app.log.warn(detail ?? {}, message),
+});
+
 await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
 const missing = settings.missing();
 console.log(`
   wa-locator en http://localhost:${config.PORT}
-
+${runtime.migrated.length ? `\n  Migraciones aplicadas: ${runtime.migrated.join(', ')}\n` : ''}
   ${missing.length ? `Configuracion pendiente  http://localhost:${config.PORT}/setup  (faltan: ${missing.join(', ')})` : `Panel  http://localhost:${config.PORT}/panel`}
 
   Token de administracion: ${config.ADMIN_TOKEN}
@@ -76,10 +67,11 @@ console.log(`
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'cerrando');
+  stopScheduler();
   await worker.close();
   await queue.close();
   await app.close();
-  await pool.end();
+  await runtime.close();
   process.exit(0);
 }
 

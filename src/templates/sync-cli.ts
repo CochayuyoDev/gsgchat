@@ -1,23 +1,22 @@
-/** Uso: npm run templates:sync */
-import { loadConfig } from '../config.js';
-import { createPool } from '../db/pool.js';
-import { createRepos } from '../db/repos.js';
-import { createWhatsAppClient } from '../whatsapp/client.js';
+/**
+ * Uso: npm run templates:sync
+ *
+ * Trae estado y calidad de cada plantilla desde Meta al registro local. Usa
+ * las mismas credenciales que el servidor (las de /setup ganan sobre el .env).
+ */
+import { createRuntime } from '../runtime.js';
 import { syncTemplates } from './registry.js';
 
-const config = loadConfig();
-const pool = createPool(config.DATABASE_URL);
+const runtime = await createRuntime();
 
 try {
-  const repos = createRepos(pool);
-  const wa = createWhatsAppClient({
-    token: config.WHATSAPP_TOKEN,
-    phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID,
-    businessAccountId: config.WHATSAPP_BUSINESS_ACCOUNT_ID,
-    graphVersion: config.GRAPH_API_VERSION,
-  });
+  const missing = runtime.settings.missing();
+  if (missing.length) {
+    console.error(`WhatsApp no esta configurado (faltan: ${missing.join(', ')}). Completalo en /setup.`);
+    process.exit(1);
+  }
 
-  const templates = await syncTemplates(wa, repos);
+  const templates = await syncTemplates(runtime.wa, runtime.repos);
   for (const t of templates) {
     console.log(
       `${t.status.padEnd(9)} ${(t.quality ?? 'UNKNOWN').padEnd(7)} ${t.category.padEnd(14)} ${t.name} (${t.language}) - ${t.variables} vars`,
@@ -25,5 +24,5 @@ try {
   }
   console.log(`\n${templates.length} plantillas sincronizadas.`);
 } finally {
-  await pool.end();
+  await runtime.close();
 }

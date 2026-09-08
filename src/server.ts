@@ -5,9 +5,11 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
+import { ZodError } from 'zod';
 import type { Config } from './config.js';
 import type { Repos } from './db/repos.js';
-import type { WhatsAppClient } from './whatsapp/client.js';
+import { WhatsAppApiError, type WhatsAppClient } from './whatsapp/client.js';
+import { NotConfiguredError } from './whatsapp/dynamic.js';
 import type { Sender } from './outbound/sender.js';
 import type { OutboundQueue } from './outbound/queue.js';
 import { registerWebhookRoutes } from './whatsapp/webhook.js';
@@ -16,6 +18,7 @@ import { registerAdminRoutes } from './admin/routes.js';
 import { registerWebRoutes } from './web/routes.js';
 import type { SettingsService } from './settings/service.js';
 import { TrackingHub } from './tracking/realtime.js';
+import { TemplateRenderError } from './templates/render.js';
 
 export interface ServerDeps {
   config: Config;
@@ -33,7 +36,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: deps.logger ?? true,
     trustProxy: true,
-    bodyLimit: 2 * 1024 * 1024,
+    bodyLimit: 4 * 1024 * 1024,
     // Los tokens de rastreo van en el path y superan los 100 caracteres del
     // limite por defecto de Fastify, que devolvia 414 en todos los enlaces.
     routerOptions: { maxParamLength: 512 },
@@ -48,6 +51,33 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } catch (error) {
       done(error as Error, undefined);
     }
+  });
+
+  // Errores con un mensaje que el panel pueda ensenar tal cual. Sin esto, un
+  // cuerpo mal formado o la falta de credenciales salian como 500 generico.
+  app.setErrorHandler((raw: unknown, request, reply) => {
+    const error = raw instanceof Error ? raw : new Error(String(raw));
+    if (error instanceof ZodError) {
+      const detail = error.issues.map((i) => `${i.path.join('.') || 'cuerpo'}: ${i.message}`).join('; ');
+      return reply.code(400).send({ error: `datos invalidos: ${detail}` });
+    }
+    if (error instanceof NotConfiguredError) {
+      return reply.code(409).send({ error: error.message });
+    }
+    if (error instanceof WhatsAppApiError) {
+      return reply
+        .code(502)
+        .send({ error: `Meta respondio: ${error.message}`, code: error.code, title: error.title });
+    }
+    if (error instanceof TemplateRenderError) {
+      return reply.code(400).send({ error: error.message });
+    }
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status && status >= 400 && status < 500) {
+      return reply.code(status).send({ error: error.message });
+    }
+    request.log.error({ err: error }, 'error no controlado');
+    return reply.code(500).send({ error: 'error interno; revisa el log del servidor' });
   });
 
   await app.register(websocket);
@@ -66,9 +96,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     queue,
     sender,
     settings,
+    wa,
+    hub,
     adminToken: config.ADMIN_TOKEN,
   });
-  await registerWebRoutes(app, { config, settings });
+  await registerWebRoutes(app, { config, settings, wa, sender, repos });
 
   return app;
 }

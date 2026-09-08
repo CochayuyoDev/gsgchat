@@ -1,4 +1,32 @@
 services:
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      DATABASE_URL: postgres://wa:wa@postgres:5432/wa_locator
+      REDIS_URL: redis://redis:6379
+      # Opcionales: si no se definen, se pegan en /setup y quedan cifradas en la base.
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_BUSINESS_ACCOUNT_ID: ${WHATSAPP_BUSINESS_ACCOUNT_ID:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      GEO_BBOX: ${GEO_BBOX:-mexico}
+    volumes:
+      # Token de administracion y clave de cifrado: se generan en el primer
+      # arranque y deben sobrevivir a un recreate.
+      - appdata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -29,5 +57,6 @@ services:
       retries: 10
 
 volumes:
+  appdata:
   pgdata:
   redisdata:

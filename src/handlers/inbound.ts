@@ -1,19 +1,30 @@
 /**
  * Logica de conversacion sobre los mensajes entrantes.
  *
- * Aqui se conecta el geo core con WhatsApp. El orden de preferencia importa:
- * si el cliente uso el boton de adjuntar ubicacion no hay nada que parsear y
- * la coordenada es exacta; por eso cuando manda texto sin coordenadas se le
- * responde con `location_request_message` en vez de pedirle que pegue un link.
+ * Aqui se conecta el geo core con WhatsApp y con la automatizacion. El
+ * orden de preferencia importa:
+ *
+ *  1. ubicacion nativa: no hay nada que parsear y la coordenada es exacta;
+ *  2. botones de confirmacion de una ubicacion dudosa;
+ *  3. palabras de baja y alta (no admiten excepciones);
+ *  4. reglas de respuesta automatica por palabra clave;
+ *  5. coordenadas dentro del texto (links de mapas, DMS, plus codes...);
+ *  6. bienvenida o comodin, si hay regla; si no, el boton nativo para pedir
+ *     la ubicacion (configurable).
+ *
+ * Ademas, cualquier mensaje del cliente cuenta como respuesta: las
+ * secuencias de seguimiento con `stopOnReply` se cancelan.
  */
 
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
-import type { Repos } from '../db/repos.js';
+import type { Contact, Repos } from '../db/repos.js';
+import type { AutoReply } from '../db/automation.js';
 import type { Sender } from '../outbound/sender.js';
 import type { InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { ExtractionSuccess } from '../types.js';
+import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
 
 export interface InboundDeps {
   repos: Repos;
@@ -42,6 +53,25 @@ function describe(result: ExtractionSuccess): string {
   return `${result.lat.toFixed(6)}, ${result.lng.toFixed(6)}`;
 }
 
+/** Aplica una regla: responde si tiene texto e inscribe si apunta a una secuencia. */
+async function applyRule(rule: AutoReply, contact: Contact, deps: InboundDeps): Promise<void> {
+  const { repos, sender } = deps;
+  if (rule.reply?.trim()) {
+    await sender.send({
+      phone: contact.phone,
+      kind: 'freeform',
+      category: 'UTILITY',
+      text: renderPlaceholders(rule.reply, contact),
+    });
+  }
+  if (rule.sequenceId) {
+    const sequence = await repos.automation.getSequence(rule.sequenceId);
+    if (sequence?.enabled) {
+      await enrollContact({ repos, sender }, sequence, contact, `regla: ${rule.name}`);
+    }
+  }
+}
+
 export async function handleInboundMessage(
   message: InboundMessage,
   profileName: string | undefined,
@@ -51,12 +81,20 @@ export async function handleInboundMessage(
   const phone = message.from;
 
   const contact = await repos.contacts.upsertFromInbound(phone, profileName);
+  // Antes de anotar el entrante: asi se sabe si es el primer mensaje.
+  const isFirstMessage = !contact.lastInboundAt;
   // El entrante abre la ventana de servicio de 24 h: sin esto el sender
   // creeria que toda respuesta necesita plantilla.
-  await repos.contacts.touchInbound(phone, new Date(Number(message.timestamp) * 1000 || Date.now()));
+  const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
+  await repos.contacts.touchInbound(phone, receivedAt);
+  contact.lastInboundAt = receivedAt;
 
   // Acuse de lectura: mejora la percepcion y no cuesta cuota.
   await wa.markAsRead(message.id).catch(() => undefined);
+
+  // Cualquier mensaje del cliente es una respuesta: corta los seguimientos
+  // que estaban esperando precisamente eso.
+  await onInboundReply(repos, contact);
 
   const reply = (text: string) =>
     sender.send({ phone, kind: 'freeform', category: 'UTILITY', text });
@@ -117,13 +155,24 @@ export async function handleInboundMessage(
     return;
   }
 
-  // --- texto con posible link de mapa ----------------------------------
-  const result = await extractLocation(text, { bbox: config.bbox });
+  // --- reglas y coordenadas --------------------------------------------
+  const [rules, prefs, result] = await Promise.all([
+    repos.automation.listRules(),
+    repos.automation.getPrefs(),
+    extractLocation(text, { bbox: config.bbox }),
+  ]);
+
+  const rule = matchRule(rules, text, { isFirstMessage, hasCoordinates: result.ok });
+  if (rule) await applyRule(rule, contact, deps);
 
   if (!result.ok) {
-    await askForLocation(
-      'No encontre coordenadas en ese mensaje. Comparte tu ubicacion con el boton de abajo.',
-    );
+    // La regla ya contesto; si no habia regla, se pide la ubicacion con el
+    // boton nativo (salvo que el operador lo haya apagado).
+    if (!rule && prefs.askLocationFallback) {
+      await askForLocation(
+        'No encontre coordenadas en ese mensaje. Comparte tu ubicacion con el boton de abajo.',
+      );
+    }
     return;
   }
 

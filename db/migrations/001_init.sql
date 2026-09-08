@@ -4,7 +4,16 @@
 -- geography(Point) para no obligar a PostGIS. Si mas adelante hacen falta
 -- consultas por distancia, anadir la extension y una columna generada.
 
-create extension if not exists pgcrypto;
+-- gen_random_uuid() es nativo desde PostgreSQL 13. La extension solo hace
+-- falta en versiones anteriores, y en algunos entornos (Postgres gestionado,
+-- builds reducidos) no se puede crear: por eso el intento no es fatal.
+do $$
+begin
+  create extension if not exists pgcrypto;
+exception
+  when others then null;
+end
+$$;
 
 -- Contactos y su estado de consentimiento. `opt_in_at` es el campo que
 -- decide si un mensaje sale o no: sin el, el sender no envia.

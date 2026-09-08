@@ -43,6 +43,10 @@ export function createDynamicWhatsAppClient(settings: SettingsService): WhatsApp
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),
+    getPhoneNumber: async () => inner().getPhoneNumber(),
+    subscribeApp: async () => inner().subscribeApp(),
+    listSubscribedApps: async () => inner().listSubscribedApps(),
+    registerPhone: async (...args) => inner().registerPhone(...args),
     createTemplate: async (...args) => inner().createTemplate(...args),
     listTemplates: async () => inner().listTemplates(),
   };

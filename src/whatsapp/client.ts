@@ -26,6 +26,15 @@ export class WhatsAppApiError extends Error {
   }
 }
 
+export interface PhoneNumberInfo {
+  displayPhoneNumber: string;
+  verifiedName: string;
+  /** GREEN | YELLOW | RED | NA (sin datos todavia). */
+  qualityRating: string;
+  /** TIER_250, TIER_1K, TIER_10K, TIER_100K, TIER_UNLIMITED o vacio. */
+  messagingLimitTier: string;
+}
+
 export interface WhatsAppClientOptions {
   token: string;
   phoneNumberId: string;
@@ -66,6 +75,21 @@ export interface WhatsAppClient {
     components?: TemplateComponent[],
   ): Promise<SendResult>;
   markAsRead(messageId: string): Promise<void>;
+  /** Estado del numero segun Meta: calidad y tier de envio. */
+  getPhoneNumber(): Promise<PhoneNumberInfo>;
+  /**
+   * Suscribe la app a la cuenta de negocio. Sin este paso Meta no manda
+   * ningun webhook aunque la URL este bien configurada: es el olvido mas
+   * comun al conectar una cuenta.
+   */
+  subscribeApp(): Promise<{ success: boolean }>;
+  /** Apps ya suscritas a la cuenta de negocio. */
+  listSubscribedApps(): Promise<Array<{ id: string; name: string }>>;
+  /**
+   * Registra el numero en la Cloud API con el PIN de verificacion en dos
+   * pasos. Hace falta una vez por numero (o tras migrarlo desde la app).
+   */
+  registerPhone(pin: string): Promise<{ success: boolean }>;
   /** Da de alta una plantilla para revision de Meta. */
   createTemplate(input: {
     name: string;
@@ -206,6 +230,48 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
           message_id: messageId,
         }),
       });
+    },
+
+    async getPhoneNumber() {
+      const url = `${baseUrl}/${graphVersion}/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,messaging_limit_tier`;
+      const payload = await call<{
+        display_phone_number?: string;
+        verified_name?: string;
+        quality_rating?: string;
+        messaging_limit_tier?: string;
+      }>(url, { method: 'GET' });
+      return {
+        displayPhoneNumber: payload.display_phone_number ?? '',
+        verifiedName: payload.verified_name ?? '',
+        qualityRating: (payload.quality_rating ?? 'NA').toUpperCase(),
+        messagingLimitTier: payload.messaging_limit_tier ?? '',
+      };
+    },
+
+    async subscribeApp() {
+      const url = `${baseUrl}/${graphVersion}/${businessAccountId}/subscribed_apps`;
+      const payload = await call<{ success?: boolean }>(url, { method: 'POST', body: '{}' });
+      return { success: Boolean(payload.success) };
+    },
+
+    async listSubscribedApps() {
+      const url = `${baseUrl}/${graphVersion}/${businessAccountId}/subscribed_apps`;
+      const payload = await call<{
+        data?: Array<{ whatsapp_business_api_data?: { id?: string; name?: string } }>;
+      }>(url, { method: 'GET' });
+      return (payload.data ?? []).map((row) => ({
+        id: row.whatsapp_business_api_data?.id ?? '',
+        name: row.whatsapp_business_api_data?.name ?? '',
+      }));
+    },
+
+    async registerPhone(pin) {
+      const url = `${baseUrl}/${graphVersion}/${phoneNumberId}/register`;
+      const payload = await call<{ success?: boolean }>(url, {
+        method: 'POST',
+        body: JSON.stringify({ messaging_product: 'whatsapp', pin }),
+      });
+      return { success: Boolean(payload.success) };
     },
 
     async createTemplate(input) {

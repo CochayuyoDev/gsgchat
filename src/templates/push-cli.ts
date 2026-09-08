@@ -4,13 +4,14 @@
  *   npm run templates:push    revisa y, si no hay errores, las sube a Meta
  *
  * El push se niega a subir una plantilla con errores de lint: un rechazo de
- * Meta no es gratis, cuenta en el historial de la cuenta.
+ * Meta no es gratis, cuenta en el historial de la cuenta. Usa las mismas
+ * credenciales que el servidor (las pegadas en /setup ganan sobre el .env).
  */
 
-import { loadConfig } from '../config.js';
-import { createWhatsAppClient, WhatsAppApiError } from '../whatsapp/client.js';
+import { createRuntime } from '../runtime.js';
 import { CATALOG } from './catalog.js';
 import { hasErrors, lintTemplate } from './lint.js';
+import { pushTemplates } from './push.js';
 
 const dryRun = process.argv.includes('--lint') || !process.argv.includes('--push');
 
@@ -50,30 +51,20 @@ if (blocking) {
   process.exit(1);
 }
 
-const config = loadConfig();
-const wa = createWhatsAppClient({
-  token: config.WHATSAPP_TOKEN,
-  phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID,
-  businessAccountId: config.WHATSAPP_BUSINESS_ACCOUNT_ID,
-  graphVersion: config.GRAPH_API_VERSION,
-});
-
-for (const template of clean) {
-  try {
-    const result = await wa.createTemplate({
-      name: template.name,
-      language: template.language,
-      category: template.category,
-      body: template.body,
-      // Los ejemplos que ve el revisor de Meta salen de la documentacion
-      // de cada variable del catalogo.
-      examples: template.variables.map((description) => `[${description}]`),
-      footer: template.footer,
-    });
-    console.log(`  ALTA     ${template.name} -> ${result.status} (${result.id})`);
-  } catch (error) {
-    const detail =
-      error instanceof WhatsAppApiError ? `${error.message} (code ${error.code})` : String(error);
-    console.error(`  FALLO    ${template.name}: ${detail}`);
+const runtime = await createRuntime();
+try {
+  const missing = runtime.settings.missing();
+  if (missing.length) {
+    console.error(`\nWhatsApp no esta configurado (faltan: ${missing.join(', ')}). Completalo en /setup.`);
+    process.exit(1);
   }
+
+  const results = await pushTemplates(runtime.wa, runtime.repos, clean);
+  for (const result of results) {
+    if (result.ok) console.log(`  ALTA     ${result.name} -> ${result.status} (${result.id})`);
+    else console.error(`  FALLO    ${result.name}: ${result.error}`);
+  }
+  process.exitCode = results.every((r) => r.ok) ? 0 : 1;
+} finally {
+  await runtime.close();
 }

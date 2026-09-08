@@ -6,6 +6,10 @@
  *  - se responde 200 de inmediato y se procesa despues. Meta reintenta y
  *    acaba desuscribiendo el webhook si tardas; procesar dentro del request
  *    es como se pierden mensajes en produccion.
+ *
+ * Y una tercera que evita respuestas dobles: Meta reintenta entregas que
+ * cree perdidas, asi que el mismo mensaje puede llegar dos veces. Cada id
+ * se recuerda un rato y la repeticion se ignora.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -15,20 +19,32 @@ import { verifyChallenge, verifySignature } from './signature.js';
 import type { ChangeValue, WebhookPayload } from './types.js';
 import { handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
 import type { SettingsService } from '../settings/service.js';
+import { TtlCache } from '../util/cache.js';
 
 export interface WebhookDeps extends InboundDeps {
   repos: Repos;
   config: Config;
   settings: SettingsService;
+  /** Ids de mensajes ya procesados; si falta, no se deduplica. */
+  seen?: TtlCache<true>;
 }
 
 type RawRequest = FastifyRequest & { rawBody?: Buffer };
+
+/** Motivo con el que el sistema pausa solo; se usa para reanudar solo eso. */
+export const AUTO_PAUSE_REASON = 'calidad en ROJO reportada por Meta';
+
+export function createSeenCache(): TtlCache<true> {
+  // Meta reintenta durante horas como mucho; 24 h y 20.000 ids cubren de sobra.
+  return new TtlCache<true>(24 * 60 * 60 * 1000, 20_000);
+}
 
 export async function registerWebhookRoutes(
   app: FastifyInstance,
   deps: WebhookDeps,
 ): Promise<void> {
-  const { repos, settings } = deps;
+  const { settings } = deps;
+  const withSeen: WebhookDeps = { ...deps, seen: deps.seen ?? createSeenCache() };
 
   // Handshake de verificacion.
   app.get('/webhooks/whatsapp', async (request, reply) => {
@@ -60,13 +76,11 @@ export async function registerWebhookRoutes(
 
     const payload = request.body as WebhookPayload;
     setImmediate(() => {
-      void processPayload(payload, deps).catch((error) => {
+      void processPayload(payload, withSeen).catch((error) => {
         request.log.error({ err: error }, 'fallo procesando el webhook');
       });
     });
   });
-
-  void repos;
 }
 
 export async function processPayload(payload: WebhookPayload, deps: WebhookDeps): Promise<void> {
@@ -77,12 +91,34 @@ export async function processPayload(payload: WebhookPayload, deps: WebhookDeps)
   }
 }
 
+/**
+ * Traduce el evento de calidad del numero a un semaforo.
+ *
+ * El payload real de `phone_number_quality_update` no trae el color: trae
+ * `event` = FLAGGED (el numero paso a rojo), UNFLAGGED (volvio a verde),
+ * DOWNGRADE / UPGRADE (cambio de tier, que Meta solo baja cuando la calidad
+ * flaquea) u ONBOARDING. Se admite ademas el color literal por si Meta lo
+ * incluye en el futuro o alguien lo manda a mano.
+ */
+export function qualityFromEvent(event: string | undefined): 'GREEN' | 'YELLOW' | 'RED' | null {
+  const value = (event ?? '').toUpperCase();
+  if (!value) return null;
+  if (value.includes('RED')) return 'RED';
+  if (value.includes('YELLOW')) return 'YELLOW';
+  if (value.includes('GREEN')) return 'GREEN';
+  if (value.includes('UNFLAG')) return 'GREEN';
+  if (value.includes('FLAG')) return 'RED';
+  if (value.includes('DOWNGRADE')) return 'YELLOW';
+  if (value.includes('UPGRADE')) return 'GREEN';
+  return null;
+}
+
 export async function processChange(
   field: string,
   value: ChangeValue,
   deps: WebhookDeps,
 ): Promise<void> {
-  const { repos, settings } = deps;
+  const { repos, settings, seen } = deps;
   const phoneNumberId = settings.current().phoneNumberId;
 
   switch (field) {
@@ -96,6 +132,10 @@ export async function processChange(
 
       const profileName = value.contacts?.[0]?.profile?.name;
       for (const message of value.messages ?? []) {
+        if (seen && message.id) {
+          if (seen.get(message.id)) continue;
+          seen.set(message.id, true);
+        }
         await handleInboundMessage(message, profileName, deps);
       }
       return;
@@ -129,18 +169,23 @@ export async function processChange(
       return;
     }
 
-    // Circuit breaker del numero: en rojo se pausa todo lo saliente.
+    // Circuit breaker del numero: en rojo se pausa todo lo saliente y, cuando
+    // Meta lo levanta, se reanuda solo si fue el sistema quien pauso.
     case 'phone_number_quality_update': {
-      const quality = (value.event ?? value.current_limit ?? '').toUpperCase();
-      const mapped =
-        quality.includes('RED') ? 'RED' : quality.includes('YELLOW') ? 'YELLOW' : 'GREEN';
+      if (value.current_limit) {
+        await repos.numberState.setTier(phoneNumberId, value.current_limit);
+      }
+      const mapped = qualityFromEvent(value.event);
+      if (!mapped) return;
+
       await repos.numberState.setQuality(phoneNumberId, mapped);
       if (mapped === 'RED') {
-        await repos.numberState.setPaused(
-          phoneNumberId,
-          true,
-          'calidad en ROJO reportada por Meta',
-        );
+        await repos.numberState.setPaused(phoneNumberId, true, AUTO_PAUSE_REASON);
+        return;
+      }
+      const state = await repos.numberState.get(phoneNumberId);
+      if (state.paused && state.pausedReason === AUTO_PAUSE_REASON) {
+        await repos.numberState.setPaused(phoneNumberId, false);
       }
       return;
     }

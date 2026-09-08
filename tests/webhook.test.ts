@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { signPayload, verifyChallenge, verifySignature } from '../src/whatsapp/signature.js';
-import { processChange } from '../src/whatsapp/webhook.js';
+import { createSeenCache, processChange } from '../src/whatsapp/webhook.js';
 import { createSender } from '../src/outbound/sender.js';
 import { loadConfig } from '../src/config.js';
 import { approvedTemplate, createFakeRepos, createFakeSettings, createFakeWhatsApp } from './fakes.js';
@@ -219,5 +219,59 @@ describe('eventos de estado y calidad', () => {
     const state = await repos.numberState.get('PNID');
     expect(state.quality).toBe('RED');
     expect(state.paused).toBe(true);
+  });
+});
+
+describe('eventos reales de calidad del numero', () => {
+  it('FLAGGED pone el numero en rojo y lo pausa; UNFLAGGED lo reanuda', async () => {
+    const { deps, repos } = await build();
+    await processChange('phone_number_quality_update', { event: 'FLAGGED', current_limit: 'TIER_1K' }, deps);
+
+    let state = await repos.numberState.get('PNID');
+    expect(state).toMatchObject({ quality: 'RED', paused: true, tier: 'TIER_1K' });
+
+    await processChange('phone_number_quality_update', { event: 'UNFLAGGED', current_limit: 'TIER_1K' }, deps);
+    state = await repos.numberState.get('PNID');
+    expect(state).toMatchObject({ quality: 'GREEN', paused: false });
+  });
+
+  it('UNFLAGGED no levanta una pausa manual', async () => {
+    const { deps, repos } = await build();
+    await repos.numberState.setPaused('PNID', true, 'pausa manual');
+    await processChange('phone_number_quality_update', { event: 'UNFLAGGED' }, deps);
+    expect((await repos.numberState.get('PNID')).paused).toBe(true);
+  });
+
+  it('DOWNGRADE deja el numero en amarillo y guarda el tier', async () => {
+    const { deps, repos } = await build();
+    await processChange('phone_number_quality_update', { event: 'DOWNGRADE', current_limit: 'TIER_250' }, deps);
+    expect(await repos.numberState.get('PNID')).toMatchObject({ quality: 'YELLOW', paused: false, tier: 'TIER_250' });
+  });
+
+  it('ONBOARDING no toca la calidad', async () => {
+    const { deps, repos } = await build();
+    await processChange('phone_number_quality_update', { event: 'ONBOARDING', current_limit: 'TIER_250' }, deps);
+    expect(await repos.numberState.get('PNID')).toMatchObject({ quality: 'GREEN', tier: 'TIER_250' });
+  });
+});
+
+describe('deduplicacion de entrantes', () => {
+  it('el mismo mensaje reintentado por Meta se procesa una sola vez', async () => {
+    const { deps, wa } = await build();
+    const withSeen = { ...deps, seen: createSeenCache() };
+    const payload = inbound({ text: { body: 'hola' } });
+
+    await processChange('messages', payload, withSeen);
+    await processChange('messages', payload, withSeen);
+
+    expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
+  });
+
+  it('sin cache no se deduplica (los tests unitarios no la necesitan)', async () => {
+    const { deps, wa } = await build();
+    const payload = inbound({ text: { body: 'hola' } });
+    await processChange('messages', payload, deps);
+    await processChange('messages', payload, deps);
+    expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(2);
   });
 });

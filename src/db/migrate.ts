@@ -4,19 +4,32 @@
  * dependencias nuevas.
  */
 
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../config.js';
 import { createPool } from './pool.js';
 
-const MIGRATIONS_DIR = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'db',
-  'migrations',
-);
+/**
+ * Los .sql viven en db/migrations. Con tsx este fichero esta en src/db y el
+ * salto de dos niveles llega; compilado esta en dist/src/db y hacen falta
+ * tres. Se prueban los dos y ademas el directorio de trabajo, que es lo que
+ * usa la imagen de Docker.
+ */
+function findMigrationsDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(process.cwd(), 'db', 'migrations'),
+    path.join(here, '..', '..', 'db', 'migrations'),
+    path.join(here, '..', '..', '..', 'db', 'migrations'),
+  ];
+  const found = candidates.find((dir) => existsSync(dir));
+  if (!found) throw new Error(`no encuentro db/migrations (busque en: ${candidates.join(', ')})`);
+  return found;
+}
+
+const MIGRATIONS_DIR = findMigrationsDir();
 
 export async function migrate(connectionString: string): Promise<string[]> {
   const pool = createPool(connectionString);

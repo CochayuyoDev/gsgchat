@@ -1,7 +1,12 @@
 /** Dobles en memoria: permiten probar gates, sender y webhook sin Postgres. */
 
 import type {
+  Campaign,
   Contact,
+  ContactListItem,
+  DeliveryListItem,
+  DeliveryStatus,
+  LocationListItem,
   Repos,
   Template,
   TemplateCategory,
@@ -9,27 +14,33 @@ import type {
   TrackPoint,
   TrackingLink,
 } from '../src/db/repos.js';
-import type { WhatsAppClient } from '../src/whatsapp/client.js';
+import { normalizePhone } from '../src/db/repos.js';
+import type { PhoneNumberInfo, WhatsAppClient } from '../src/whatsapp/client.js';
 import type { Config } from '../src/config.js';
 import { createSettingsService, type SettingsRepo, type SettingsService } from '../src/settings/service.js';
+import { createFakeAutomation, type FakeAutomation } from './fakes-automation.js';
 
 export interface FakeRepos extends Repos {
+  automation: FakeAutomation;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
   _templates: Map<string, Template>;
   _points: Map<string, TrackPoint[]>;
+  _campaigns: Map<string, Campaign>;
+  _links: Map<string, TrackingLink>;
 }
 
 let seq = 1;
 
 export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos {
-  const contactsByPhone = new Map<string, Contact>();
+  const contactsByPhone = new Map<string, Contact & { createdAt: Date }>();
   const deliveries: Array<Record<string, unknown>> = [];
   const locations: Array<Record<string, unknown>> = [];
   const templates = new Map<string, Template>();
   const points = new Map<string, TrackPoint[]>();
-  const links = new Map<string, TrackingLink>();
+  const links = new Map<string, TrackingLink & { createdAt: Date }>();
+  const campaigns = new Map<string, Campaign>();
   const counters = new Map<string, number>();
 
   let numberState: NumberState = {
@@ -38,10 +49,12 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     paused: false,
     pausedReason: null,
     warmupStartedOn: new Date('2020-01-01T00:00:00Z'),
+    tier: null,
     ...overrides,
   };
 
   const dayKey = (day: Date) => day.toISOString().slice(0, 10);
+  const contactById = (id: string) => [...contactsByPhone.values()].find((c) => c.id === id);
 
   const repos: FakeRepos = {
     _contacts: contactsByPhone,
@@ -49,13 +62,16 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     _locations: locations,
     _templates: templates,
     _points: points,
+    _campaigns: campaigns,
+    _links: links,
+    automation: createFakeAutomation(contactById),
 
     contacts: {
       async getByPhone(phone) {
         return contactsByPhone.get(phone) ?? null;
       },
       async getById(id) {
-        return [...contactsByPhone.values()].find((c) => c.id === id) ?? null;
+        return contactById(id) ?? null;
       },
       async upsertFromInbound(phone, name) {
         const existing = contactsByPhone.get(phone);
@@ -63,7 +79,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           if (name) existing.name = name;
           return existing;
         }
-        const contact: Contact = {
+        const contact: Contact & { createdAt: Date } = {
           id: `c${seq++}`,
           phone,
           name: name ?? null,
@@ -71,6 +87,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           optInSource: null,
           optOutAt: null,
           lastInboundAt: null,
+          createdAt: new Date(),
         };
         contactsByPhone.set(phone, contact);
         return contact;
@@ -94,12 +111,56 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           .filter((c) => c.optInAt && !c.optOutAt)
           .slice(offset, offset + limit);
       },
+      async list(query) {
+        const q = query.q?.trim().toLowerCase();
+        const all = [...contactsByPhone.values()]
+          .filter((c) => {
+            if (q && !c.phone.includes(q) && !(c.name ?? '').toLowerCase().includes(q)) return false;
+            switch (query.state ?? 'all') {
+              case 'opted_in':
+                return Boolean(c.optInAt && !c.optOutAt);
+              case 'opted_out':
+                return Boolean(c.optOutAt);
+              case 'pending':
+                return !c.optInAt && !c.optOutAt;
+              default:
+                return true;
+            }
+          })
+          .sort(
+            (a, b) =>
+              (b.lastInboundAt ?? b.createdAt).getTime() - (a.lastInboundAt ?? a.createdAt).getTime(),
+          );
+        const items: ContactListItem[] = all.slice(query.offset, query.offset + query.limit).map((c) => {
+          const last = [...locations].reverse().find((l) => l.contactId === c.id);
+          return {
+            ...c,
+            lastLocation: last
+              ? { lat: last.lat as number, lng: last.lng as number, at: last.createdAt as Date }
+              : null,
+          };
+        });
+        return { items, total: all.length };
+      },
+      async bulkOptIn(entries, source) {
+        let count = 0;
+        for (const entry of entries) {
+          const phone = normalizePhone(entry.phone);
+          if (phone.length < 6) continue;
+          const c = await repos.contacts.upsertFromInbound(phone, entry.name?.trim() || undefined);
+          c.optInAt = new Date();
+          c.optInSource = source;
+          c.optOutAt = null;
+          count++;
+        }
+        return count;
+      },
     },
 
     locations: {
       async save(contactId, result, rawInput) {
         const id = seq++;
-        locations.push({ id, contactId, ...result, rawInput, confirmed: false });
+        locations.push({ id, contactId, ...result, rawInput, confirmed: false, createdAt: new Date() });
         return id;
       },
       async confirm(locationId) {
@@ -109,6 +170,30 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       async latestFor(contactId) {
         const row = [...locations].reverse().find((l) => l.contactId === contactId);
         return row ? { lat: row.lat as number, lng: row.lng as number } : null;
+      },
+      async listRecent(query) {
+        const items: LocationListItem[] = [];
+        for (const row of [...locations].reverse()) {
+          const contact = contactById(row.contactId as string);
+          if (!contact) continue;
+          if (query.phone && contact.phone !== query.phone) continue;
+          items.push({
+            id: row.id as number,
+            contactId: contact.id,
+            phone: contact.phone,
+            name: contact.name,
+            lat: row.lat as number,
+            lng: row.lng as number,
+            source: row.source as string,
+            confidence: row.confidence as string,
+            precisionMeters: row.precisionMeters as number,
+            rawInput: (row.rawInput as string) ?? null,
+            resolvedUrl: (row.resolvedUrl as string) ?? null,
+            confirmed: Boolean(row.confirmed),
+            createdAt: row.createdAt as Date,
+          });
+        }
+        return items.slice(query.offset, query.offset + query.limit);
       },
     },
 
@@ -120,15 +205,15 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       },
       async markSent(id, wamid) {
         const row = deliveries.find((d) => d.id === id);
-        if (row) Object.assign(row, { status: 'sent', wamid });
+        if (row) Object.assign(row, { status: 'sent', wamid, sentAt: new Date() });
       },
       async markBlocked(id, reason) {
         const row = deliveries.find((d) => d.id === id);
-        if (row) Object.assign(row, { status: 'blocked_by_gate', reason });
+        if (row) Object.assign(row, { status: 'blocked_by_gate', reason, errorTitle: reason, failedAt: new Date() });
       },
       async updateByWamid(wamid, status, error) {
         const row = deliveries.find((d) => d.wamid === wamid);
-        if (row) Object.assign(row, { status, error });
+        if (row) Object.assign(row, { status, error, errorCode: error?.code ?? null, errorTitle: error?.title ?? null });
       },
       async countMarketingSince(contactId, since) {
         return deliveries.filter(
@@ -146,6 +231,38 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           stats[key] = (stats[key] ?? 0) + 1;
         }
         return stats;
+      },
+      async listRecent(query) {
+        const items: DeliveryListItem[] = [];
+        for (const d of [...deliveries].reverse()) {
+          const contact = contactById(d.contactId as string);
+          if (!contact) continue;
+          if (query.status && d.status !== query.status) continue;
+          if (query.campaignId && d.campaignId !== query.campaignId) continue;
+          if (query.phone && contact.phone !== query.phone) continue;
+          const campaign = d.campaignId ? campaigns.get(d.campaignId as string) : undefined;
+          items.push({
+            id: d.id as number,
+            campaignId: (d.campaignId as string) ?? null,
+            campaignName: campaign?.name ?? null,
+            contactId: contact.id,
+            phone: contact.phone,
+            name: contact.name,
+            wamid: (d.wamid as string) ?? null,
+            kind: d.kind as string,
+            templateName: (d.templateName as string) ?? null,
+            category: d.category as TemplateCategory,
+            status: d.status as DeliveryStatus,
+            errorCode: (d.errorCode as string) ?? null,
+            errorTitle: (d.errorTitle as string) ?? null,
+            queuedAt: d.queuedAt as Date,
+            sentAt: (d.sentAt as Date) ?? null,
+            deliveredAt: null,
+            readAt: null,
+            failedAt: (d.failedAt as Date) ?? null,
+          });
+        }
+        return items.slice(query.offset, query.offset + query.limit);
       },
     },
 
@@ -179,6 +296,9 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       async setPaused(_id, paused, reason) {
         numberState = { ...numberState, paused, pausedReason: reason ?? null };
       },
+      async setTier(_id, tier) {
+        numberState = { ...numberState, tier };
+      },
     },
 
     counters: {
@@ -199,7 +319,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
 
     tracking: {
       async createLink(contactId, label, expiresAt) {
-        const link: TrackingLink = { id: `l${seq++}`, contactId, label, expiresAt, revokedAt: null };
+        const link = { id: `l${seq++}`, contactId, label, expiresAt, revokedAt: null, createdAt: new Date() };
         links.set(link.id, link);
         return link;
       },
@@ -212,21 +332,51 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       },
       async addPoint(linkId, point) {
         const list = points.get(linkId) ?? [];
-        list.push(point);
+        list.push({ ...point, recordedAt: point.recordedAt ?? new Date() });
         points.set(linkId, list);
       },
       async listPoints(linkId, limit = 500) {
         return (points.get(linkId) ?? []).slice(-limit);
       },
+      async listActive(now) {
+        return [...links.values()]
+          .filter((l) => !l.revokedAt && l.expiresAt.getTime() > now.getTime())
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .map((l) => {
+            const contact = l.contactId ? contactById(l.contactId) : undefined;
+            const list = points.get(l.id) ?? [];
+            const last = list.at(-1);
+            return {
+              ...l,
+              phone: contact?.phone ?? null,
+              name: contact?.name ?? null,
+              pointCount: list.length,
+              lastPoint: last ? { lat: last.lat, lng: last.lng, at: last.recordedAt ?? new Date() } : null,
+            };
+          });
+      },
     },
 
     campaigns: {
-      async create() {
-        return `camp${seq++}`;
+      async create(input) {
+        const id = `camp${seq++}`;
+        campaigns.set(id, { id, ...input, status: 'draft', createdAt: new Date() });
+        return id;
       },
-      async setStatus() {},
+      async setStatus(id, status) {
+        const c = campaigns.get(id);
+        if (c) c.status = status;
+      },
+      async get(id) {
+        return campaigns.get(id) ?? null;
+      },
       async list() {
-        return [];
+        const all = [...campaigns.values()].sort(
+          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+        );
+        return Promise.all(
+          all.map(async (c) => ({ ...c, stats: await repos.deliveries.campaignStats(c.id) })),
+        );
       },
     },
   };
@@ -237,6 +387,11 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
 export interface FakeWhatsApp extends WhatsAppClient {
   sent: Array<Record<string, unknown>>;
   failNext?: Error;
+  /** Lo que devuelve getPhoneNumber; editable desde los tests. */
+  phoneInfo: PhoneNumberInfo;
+  /** Lo que devuelve listTemplates; editable desde los tests. */
+  remoteTemplates: Awaited<ReturnType<WhatsAppClient['listTemplates']>>;
+  subscribedApps: Array<{ id: string; name: string }>;
 }
 
 export function createFakeWhatsApp(): FakeWhatsApp {
@@ -255,6 +410,14 @@ export function createFakeWhatsApp(): FakeWhatsApp {
 
   const client: FakeWhatsApp = {
     sent,
+    phoneInfo: {
+      displayPhoneNumber: '+52 1 55 0000 0000',
+      verifiedName: 'Demo',
+      qualityRating: 'GREEN',
+      messagingLimitTier: 'TIER_1K',
+    },
+    remoteTemplates: [],
+    subscribedApps: [],
     sendText: (to, body) => record({ kind: 'text', to, body }),
     sendLocation: (to, location) => record({ kind: 'location', to, location }),
     sendLocationRequest: (to, body) => record({ kind: 'location_request', to, body }),
@@ -264,12 +427,37 @@ export function createFakeWhatsApp(): FakeWhatsApp {
     async markAsRead(messageId) {
       sent.push({ kind: 'read', messageId });
     },
+    async getPhoneNumber() {
+      if (client.failNext) {
+        const error = client.failNext;
+        client.failNext = undefined;
+        throw error;
+      }
+      return client.phoneInfo;
+    },
+    async subscribeApp() {
+      sent.push({ kind: 'subscribe_app' });
+      client.subscribedApps = [{ id: 'app_demo', name: 'wa-locator' }];
+      return { success: true };
+    },
+    async listSubscribedApps() {
+      return client.subscribedApps;
+    },
+    async registerPhone(pin) {
+      sent.push({ kind: 'register_phone', pin });
+      return { success: true };
+    },
     async createTemplate(input) {
+      if (client.failNext) {
+        const error = client.failNext;
+        client.failNext = undefined;
+        throw error;
+      }
       sent.push({ kind: 'create_template', ...input });
-      return { id: 'tpl_1', status: 'PENDING' };
+      return { id: `tpl_${++counter}`, status: 'PENDING' };
     },
     async listTemplates() {
-      return [];
+      return client.remoteTemplates;
     },
   };
 

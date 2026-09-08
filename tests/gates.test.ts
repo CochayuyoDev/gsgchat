@@ -31,6 +31,7 @@ function snapshot(overrides: Partial<GateSnapshot> = {}): GateSnapshot {
       quality: 'GREEN',
       paused: false,
       pausedReason: null,
+      tier: null,
       warmupStartedOn: new Date('2026-01-01T00:00:00Z'),
     },
     marketingLast7d: 0,
