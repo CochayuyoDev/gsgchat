@@ -115,7 +115,8 @@ describe('mensajes entrantes', () => {
   });
 
   it('un texto sin coordenadas dispara el boton nativo de ubicacion', async () => {
-    const { deps, wa } = await build();
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true });
     await processChange('messages', inbound({ text: { body: 'hola, quiero cotizar' } }), deps);
     expect(wa.sent.some((m) => m.kind === 'location_request')).toBe(true);
   });
@@ -257,7 +258,8 @@ describe('eventos reales de calidad del numero', () => {
 
 describe('deduplicacion de entrantes', () => {
   it('el mismo mensaje reintentado por Meta se procesa una sola vez', async () => {
-    const { deps, wa } = await build();
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true });
     const withSeen = { ...deps, seen: createSeenCache() };
     const payload = inbound({ text: { body: 'hola' } });
 
@@ -268,7 +270,8 @@ describe('deduplicacion de entrantes', () => {
   });
 
   it('sin cache no se deduplica (los tests unitarios no la necesitan)', async () => {
-    const { deps, wa } = await build();
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true });
     const payload = inbound({ text: { body: 'hola' } });
     await processChange('messages', payload, deps);
     await processChange('messages', payload, deps);

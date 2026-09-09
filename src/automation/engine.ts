@@ -30,13 +30,52 @@ const normalize = (text: string): string =>
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '');
 
-/** {nombre}, {telefono} y {fecha} dentro de un texto o una variable. */
-export function renderPlaceholders(value: string, contact: Contact, now: Date = new Date()): string {
+/**
+ * "Buenos dias", "Buenas tardes" o "Buenas noches" segun la hora del negocio.
+ *
+ * La hora que importa es la del cliente, no la del servidor: este puede estar
+ * en cualquier parte, y un "buenos dias" a medianoche delata al robot. Por eso
+ * se calcula con la zona horaria configurada (TIMEZONE) y no con la del
+ * proceso.
+ *
+ * Los cortes son los del habla, no los astronomicos: la tarde empieza a las 12
+ * y la noche a las 19.
+ */
+export function saludoPorHora(now: Date = new Date(), timezone = 'America/Lima'): string {
+  let hora: number;
+  try {
+    hora = Number(
+      new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        hour12: false,
+        timeZone: timezone,
+      }).format(now),
+    );
+  } catch {
+    // Zona horaria invalida: mejor saludar con la del servidor que reventar.
+    hora = now.getHours();
+  }
+  // Intl devuelve 24 para la medianoche en algunas versiones de Node.
+  if (hora === 24) hora = 0;
+
+  if (hora < 12) return 'Buenos dias';
+  if (hora < 19) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+/** {nombre}, {telefono}, {saludo} y {fecha} dentro de un texto o una variable. */
+export function renderPlaceholders(
+  value: string,
+  contact: Contact,
+  now: Date = new Date(),
+  timezone = 'America/Lima',
+): string {
   const name = contact.name?.trim() || '';
   return value
     .replace(/\{nombre\}/gi, name)
     .replace(/\{telefono\}/gi, contact.phone)
-    .replace(/\{fecha\}/gi, now.toLocaleDateString('es-MX'))
+    .replace(/\{saludo\}/gi, saludoPorHora(now, timezone))
+    .replace(/\{fecha\}/gi, now.toLocaleDateString('es-PE', { timeZone: timezone }))
     .replace(/\s{2,}/g, ' ')
     .trim();
 }

@@ -93,6 +93,22 @@ for (const template of CATALOG) {
   });
 }
 
+// Un saludo de bienvenida para empezar con algo puesto.
+//
+// El disparador `first_message` es el que garantiza lo que hay que garantizar:
+// sale UNA vez por persona, la primera que escribe, y nunca mas. Solo se crea
+// si no hay ninguna regla todavia, para no pisar lo que configure la tienda
+// desde /panel.
+if (!(await repos.automation.listRules()).length) {
+  await repos.automation.createRule({
+    name: 'Bienvenida',
+    trigger: 'first_message',
+    reply: 'Hola, {saludo}. Gracias por escribir a GSG Courier. Cuentanos que necesitas enviar y de que distrito a que distrito, y te cotizamos.',
+    enabled: true,
+    priority: 100,
+  });
+}
+
 const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false });
 await app.listen({ port: PORT, host: '127.0.0.1' });
 

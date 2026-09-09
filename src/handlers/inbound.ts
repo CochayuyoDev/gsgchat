@@ -115,7 +115,7 @@ async function applyRule(rule: AutoReply, contact: Contact, deps: InboundDeps): 
       phone: contact.phone,
       kind: 'freeform',
       category: 'UTILITY',
-      text: renderPlaceholders(rule.reply, contact),
+      text: renderPlaceholders(rule.reply, contact, new Date(), deps.config.timezone),
     });
   }
   if (rule.sequenceId) {

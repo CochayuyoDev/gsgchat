@@ -88,6 +88,14 @@ const schema = z.object({
    * quien esta dentro no vuelve a preguntar.
    */
   COVERAGE_NAME: z.string().default(''),
+
+  /**
+   * Zona horaria del negocio, para los saludos y las fechas.
+   *
+   * El servidor puede estar en cualquier parte; lo que importa es que hora es
+   * para el cliente. Sin esto, un "buenos dias" sale de madrugada.
+   */
+  TIMEZONE: z.string().default('America/Lima'),
 });
 
 export type RawConfig = z.infer<typeof schema>;
@@ -98,6 +106,8 @@ export interface Config extends RawConfig {
   bbox?: BoundingBox;
   /** Nombre de la zona atendida, para los mensajes al cliente. */
   coverageName: string;
+  /** Zona horaria del negocio: decide el saludo y las fechas. */
+  timezone: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -113,6 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     optOutKeywords: csv(raw.OPT_OUT_KEYWORDS),
     optInKeywords: csv(raw.OPT_IN_KEYWORDS),
     bbox: raw.GEO_BBOX === 'lima' ? LIMA_BBOX : raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
+    timezone: raw.TIMEZONE,
     coverageName:
       raw.COVERAGE_NAME.trim() ||
       (raw.GEO_BBOX === 'lima' ? 'todo Lima y Callao' : raw.GEO_BBOX === 'mexico' ? 'Mexico' : ''),

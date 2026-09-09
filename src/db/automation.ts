@@ -150,7 +150,15 @@ export interface AutomationPrefs {
   askLocationFallback: boolean;
 }
 
-export const DEFAULT_PREFS: AutomationPrefs = { askLocationFallback: true };
+/**
+ * Apagado a proposito.
+ *
+ * Con esto encendido, CUALQUIER mensaje sin coordenadas recibe un "no
+ * encontre coordenadas, comparte tu ubicacion": el cliente escribe "hola" y le
+ * contesta un robot pidiendole el pin. Es ruido y confunde. Quien de verdad
+ * quiera pedir la ubicacion siempre, lo enciende desde /panel.
+ */
+export const DEFAULT_PREFS: AutomationPrefs = { askLocationFallback: false };
 
 // ------------------------------------------------------------- interfaz
 

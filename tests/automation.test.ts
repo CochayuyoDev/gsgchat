@@ -2,14 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSender } from '../src/outbound/sender.js';
 import { loadConfig } from '../src/config.js';
 import { processChange } from '../src/whatsapp/webhook.js';
-import {
-  cancelEnrollment,
-  enrollContact,
-  matchRule,
-  onInboundReply,
-  renderPlaceholders,
-  runDueMessages,
-} from '../src/automation/engine.js';
+import { cancelEnrollment, enrollContact, matchRule, onInboundReply, renderPlaceholders, runDueMessages, saludoPorHora } from '../src/automation/engine.js';
 import type { AutoReply } from '../src/db/automation.js';
 import { approvedTemplate, createFakeRepos, createFakeSettings, createFakeWhatsApp } from './fakes.js';
 import type { ChangeValue, InboundMessage } from '../src/whatsapp/types.js';
@@ -338,7 +331,8 @@ describe('reglas sobre mensajes entrantes', () => {
   });
 
   it('sin regla y con el fallback encendido, si la pide', async () => {
-    const { deps, wa } = await build();
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true });
     await processChange('messages', inbound({ text: { body: 'hola' } }), deps);
     expect(wa.sent.some((m) => m.kind === 'location_request')).toBe(true);
   });
@@ -368,5 +362,67 @@ describe('reglas sobre mensajes entrantes', () => {
 
     const enrollment = (await repos.automation.listEnrollments({ limit: 10, offset: 0 }))[0]!;
     expect(enrollment.status).toBe('cancelled');
+  });
+});
+
+/**
+ * El saludo por hora.
+ *
+ * La hora que decide es la del negocio, no la del servidor: este puede estar
+ * en cualquier parte, y un "buenos dias" a medianoche delata al robot.
+ */
+describe('saludo segun la hora', () => {
+  const enLima = (iso: string) => new Date(iso);
+
+  it('de madrugada y por la mañana, buenos dias', () => {
+    // 14:00 UTC son las 09:00 en Lima (UTC-5).
+    expect(saludoPorHora(enLima('2026-03-10T14:00:00Z'), 'America/Lima')).toBe('Buenos dias');
+    expect(saludoPorHora(enLima('2026-03-10T06:00:00Z'), 'America/Lima')).toBe('Buenos dias');
+  });
+
+  it('a partir del mediodia, buenas tardes', () => {
+    expect(saludoPorHora(enLima('2026-03-10T17:00:00Z'), 'America/Lima')).toBe('Buenas tardes');
+    expect(saludoPorHora(enLima('2026-03-10T23:30:00Z'), 'America/Lima')).toBe('Buenas tardes');
+  });
+
+  it('a partir de las siete, buenas noches', () => {
+    // 00:00 UTC son las 19:00 del dia anterior en Lima.
+    expect(saludoPorHora(enLima('2026-03-11T00:00:00Z'), 'America/Lima')).toBe('Buenas noches');
+    expect(saludoPorHora(enLima('2026-03-11T04:00:00Z'), 'America/Lima')).toBe('Buenas noches');
+  });
+
+  it('manda la zona del negocio, no la del servidor', () => {
+    // El mismo instante: las cinco de la tarde en Lima, las once de la noche
+    // en Madrid. Seis horas de diferencia bastan para cambiar el saludo.
+    const instante = enLima('2026-03-10T22:00:00Z');
+    expect(saludoPorHora(instante, 'America/Lima')).toBe('Buenas tardes');
+    expect(saludoPorHora(instante, 'Europe/Madrid')).toBe('Buenas noches');
+  });
+
+  it('una zona horaria invalida no tumba el saludo', () => {
+    expect(['Buenos dias', 'Buenas tardes', 'Buenas noches']).toContain(
+      saludoPorHora(new Date(), 'Zona/Inventada'),
+    );
+  });
+
+  it('{saludo} se sustituye en la respuesta de una regla', () => {
+    const contacto = {
+      id: 'c1',
+      phone: '51963145055',
+      name: 'Roberto',
+      optInAt: null,
+      optInSource: null,
+      optOutAt: null,
+      lastInboundAt: null,
+    };
+
+    const texto = renderPlaceholders(
+      'Hola {nombre}, {saludo}. Gracias por escribir.',
+      contacto,
+      enLima('2026-03-10T14:00:00Z'),
+      'America/Lima',
+    );
+
+    expect(texto).toBe('Hola Roberto, Buenos dias. Gracias por escribir.');
   });
 });
