@@ -79,3 +79,19 @@ export const MEXICO_BBOX: BoundingBox = {
   minLng: -118.5,
   maxLng: -86.5,
 };
+
+/**
+ * Lima Metropolitana y la Provincia Constitucional del Callao.
+ *
+ * Los limites son los de la mancha urbana con holgura, no los politicos: de
+ * Ancon por el norte a Pucusana por el sur, y de la isla San Lorenzo por el
+ * oeste a Chosica por el este. Se prefiere pasarse a quedarse corto, porque un
+ * falso rechazo se lo come el cliente que comparte su ubicacion y no entiende
+ * por que no se la aceptan.
+ */
+export const LIMA_BBOX: BoundingBox = {
+  minLat: -12.6,
+  maxLat: -11.5,
+  minLng: -77.3,
+  maxLng: -76.5,
+};

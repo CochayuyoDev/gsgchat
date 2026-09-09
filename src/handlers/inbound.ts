@@ -175,7 +175,9 @@ export async function handleInboundMessage(
   const explicarFallo = (reason: FailureReason): string => {
     switch (reason) {
       case 'outside_bbox':
-        return 'Esa ubicacion queda fuera de la zona que atendemos.';
+        return config.coverageName
+          ? `Esa ubicacion queda fuera de nuestra cobertura. Atendemos ${config.coverageName}.`
+          : 'Esa ubicacion queda fuera de la zona que atendemos.';
       case 'null_island':
       case 'out_of_range':
         return 'Esas coordenadas no son validas. Intenta enviarla de nuevo, por favor.';

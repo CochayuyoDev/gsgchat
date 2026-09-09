@@ -6,7 +6,7 @@
 
 import 'dotenv/config';
 import { z } from 'zod';
-import { MEXICO_BBOX } from './geo/validate.js';
+import { LIMA_BBOX, MEXICO_BBOX } from './geo/validate.js';
 import type { BoundingBox } from './types.js';
 
 const csv = (value: string) =>
@@ -78,7 +78,16 @@ const schema = z.object({
   OPT_OUT_KEYWORDS: z.string().default('baja,stop,cancelar,unsubscribe'),
   OPT_IN_KEYWORDS: z.string().default('alta,acepto'),
 
-  GEO_BBOX: z.enum(['mexico', 'none']).default('none'),
+  GEO_BBOX: z.enum(['lima', 'mexico', 'none']).default('none'),
+
+  /**
+   * Como se llama la zona que se atiende, para decirselo al cliente.
+   *
+   * Un "queda fuera de la zona que atendemos" a secas obliga a preguntar cual
+   * es. Con el nombre puesto, quien esta fuera lo sabe en el mismo mensaje y
+   * quien esta dentro no vuelve a preguntar.
+   */
+  COVERAGE_NAME: z.string().default(''),
 });
 
 export type RawConfig = z.infer<typeof schema>;
@@ -87,6 +96,8 @@ export interface Config extends RawConfig {
   optOutKeywords: string[];
   optInKeywords: string[];
   bbox?: BoundingBox;
+  /** Nombre de la zona atendida, para los mensajes al cliente. */
+  coverageName: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -101,6 +112,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ...raw,
     optOutKeywords: csv(raw.OPT_OUT_KEYWORDS),
     optInKeywords: csv(raw.OPT_IN_KEYWORDS),
-    bbox: raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
+    bbox: raw.GEO_BBOX === 'lima' ? LIMA_BBOX : raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
+    coverageName:
+      raw.COVERAGE_NAME.trim() ||
+      (raw.GEO_BBOX === 'lima' ? 'todo Lima y Callao' : raw.GEO_BBOX === 'mexico' ? 'Mexico' : ''),
   };
 }

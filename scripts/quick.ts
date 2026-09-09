@@ -47,11 +47,10 @@ const config = loadConfig({
   ADMIN_TOKEN_AUTOFILL: 'true',
   TRACKING_SECRET: secrets.trackingSecret,
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? '',
-  // Sin caja geografica: el arranque corto no sabe en que pais esta quien lo
-  // usa, y una caja equivocada rechaza ubicaciones perfectamente validas con
-  // un "no pude leer esa ubicacion" que no explica nada. Se acota con
-  // GEO_BBOX=mexico cuando de verdad se opera solo alli.
-  GEO_BBOX: process.env.GEO_BBOX ?? 'none',
+  // La zona que se atiende. Vacio o sin definir significa "no acotar": una
+  // caja equivocada rechaza ubicaciones perfectamente validas, que es peor que
+  // no comprobar nada. Valores: lima (Lima y Callao), mexico, none.
+  GEO_BBOX: process.env.GEO_BBOX?.trim() || 'none',
 } as NodeJS.ProcessEnv);
 
 const { pool } = await openPglite(DATA_DIR);
