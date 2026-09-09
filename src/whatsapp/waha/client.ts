@@ -179,14 +179,16 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
      */
     async sendLocationRequest(to, body) {
       const texto = `${body}\n\nMándamela con el clip 📎 → Ubicación → Enviar tu ubicación actual.`;
-      return sendText(to, texto);
+      const enviado = await sendText(to, texto);
+      return { ...enviado, body: texto };
     },
 
     /** Los botones interactivos no son fiables en todos los motores: lista numerada. */
     async sendButtons(to, body, buttons) {
       const opciones = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
       const texto = opciones ? `${body}\n\n${opciones}\n\nResponde con el número.` : body;
-      return sendText(to, texto);
+      const enviado = await sendText(to, texto);
+      return { ...enviado, body: texto };
     },
 
     /**

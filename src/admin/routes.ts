@@ -106,7 +106,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   await registerAutomationRoutes(app, { repos, sender });
   await registerChatRoutes(app, { repos, sender, config, settings });
-  await registerLeadsRoutes(app, { repos });
+  await registerLeadsRoutes(app, { repos, panelStoky: config.STOKY_PANEL_URL });
 
   // --- salud del numero: lo primero que hay que mirar cada dia ----------
   app.get('/admin/health', async () => {

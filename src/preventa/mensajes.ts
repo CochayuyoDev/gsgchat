@@ -105,6 +105,21 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
     texto: 'No tengo exactamente eso, pero sí esto:',
     variables: VARIABLES_COMUNES,
   },
+  precioAgotado: {
+    cuando: 'Cuando lo que pide existe en el catálogo pero no queda stock.',
+    texto: 'Eso lo tenemos, pero ahora mismo estamos sin stock:',
+    variables: VARIABLES_COMUNES,
+  },
+  precioSimilares: {
+    cuando: 'Va delante de las alternativas, cuando las hay. Si no hay, no se manda nada.',
+    texto: 'Sí tengo disponible, por si te sirve:',
+    variables: VARIABLES_COMUNES,
+  },
+  precioSinAlternativas: {
+    cuando: 'Cuando está agotado y no hay nada parecido que ofrecer.',
+    texto: 'En cuanto vuelva a haber te aviso. ¿Te ayudo con algo más?',
+    variables: VARIABLES_COMUNES,
+  },
   precioSinResultado: {
     cuando: 'Cuando pregunta por algo que no está en el catálogo.',
     texto:

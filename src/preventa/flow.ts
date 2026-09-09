@@ -94,7 +94,8 @@ const normaliza = (texto: string): string =>
     .trim()
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ');
 
 /** Palabras que delatan una intencion aunque no se pulse el boton. */
 const INTENCIONES: Array<{ id: string; palabras: string[] }> = [
@@ -200,11 +201,50 @@ export const MAX_INTENTOS = 2;
  * estricto con clientes reales es peor que guardar algo raro que el operador
  * corrige en la ficha.
  */
+/**
+ * Cortesias y muletillas: se entienden perfectamente, pero no contestan nada.
+ *
+ * Sin esta lista, un "gracias" a "¿de que distrito recogemos?" queda guardado
+ * como el distrito. Es peor que un "???" porque nadie lo revisa: la ficha
+ * parece rellenada.
+ */
+const CORTESIA = new Set([
+  'hola', 'holi', 'buenas', 'buenos dias', 'buenas tardes', 'buenas noches',
+  'gracias', 'muchas gracias', 'ok', 'oka', 'okey', 'okay', 'listo', 'ya',
+  'perfecto', 'bien', 'de acuerdo', 'entiendo', 'ah', 'aja', 'mmm', 'si',
+  'claro', 'por favor', 'disculpa', 'perdon', 'buen dia',
+]);
+
+/**
+ * Si lo que escribio es una pregunta.
+ *
+ * A una pregunta no se le guarda como respuesta: quien pregunta esta pidiendo
+ * algo, no contestando. Se detecta por el signo y por las palabras con las que
+ * empieza una pregunta en español, que es lo que sobrevive a que nadie escriba
+ * el signo de apertura.
+ */
+export function esPregunta(texto: string): boolean {
+  const t = normaliza(texto);
+  if (t.includes('?')) return true;
+  return /^(que|cual|cuales|cuando|donde|como|cuanto|cuanta|quien|por que|porque|se puede|puedo|tienen|tienes|hay)\b/.test(t);
+}
+
 export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boolean {
   const limpio = texto.trim();
   if (limpio.length < 2) return false;
   // Solo signos o emojis: no hay nada que guardar ahi.
   if (!/[\p{L}\p{N}]/u.test(limpio)) return false;
+
+  const normalizado = normaliza(limpio);
+
+  // Una cortesia no contesta nada. "Ya" y "listo" incluidos: el cliente esta
+  // acusando recibo, no diciendo su distrito.
+  if (CORTESIA.has(normalizado)) return false;
+
+  // Una pregunta tampoco. La excepcion es "que vas a enviar": ahi el cliente
+  // puede describir su envio con una pregunta ("un paquete, se puede?") y
+  // rechazarlo seria pedantear.
+  if (campo !== 'contenido' && esPregunta(limpio)) return false;
 
   switch (campo) {
     case 'recojo':

@@ -10,6 +10,18 @@ import type { TemplateComponent } from './types.js';
 
 export interface SendResult {
   wamid: string;
+  /**
+   * El texto que de verdad le llego al cliente.
+   *
+   * Existe porque cada proveedor arma el mensaje a su manera: la Cloud API
+   * manda un boton nativo y el cliente local manda ese mismo texto con las
+   * instrucciones del clip pegadas debajo. Sin esto, el chat del operador
+   * mostraba una cosa y al cliente le llegaba otra, que es la peor forma de
+   * atender: se contesta a un mensaje que nadie mando.
+   *
+   * Ausente = lo que se mando es lo que se pidio mandar.
+   */
+  body?: string;
 }
 
 export class WhatsAppApiError extends Error {

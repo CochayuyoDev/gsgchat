@@ -62,6 +62,9 @@ const config = loadConfig({
   // El catalogo de Stoky: precios y stock salen de ahi, no de una copia.
   STOKY_URL: process.env.STOKY_URL?.trim() || '',
   STOKY_TOKEN: process.env.STOKY_TOKEN?.trim() || '',
+  // El panel al que se manda a registrar la venta, que no es la misma URL
+  // que la API en cuanto Stoky corre detras de un proxy.
+  STOKY_PANEL_URL: process.env.STOKY_PANEL_URL?.trim() || '',
 } as NodeJS.ProcessEnv);
 
 const { pool } = await openPglite(DATA_DIR);

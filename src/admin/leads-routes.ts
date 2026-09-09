@@ -17,6 +17,8 @@ import { ESTADOS, type LeadConContacto, type LeadEstado } from '../db/leads.js';
 
 export interface LeadsRoutesDeps {
   repos: Repos;
+  /** Panel de Stoky, para derivar la venta. Vacio = no se ofrece. */
+  panelStoky?: string;
 }
 
 const listQuery = z.object({
@@ -94,7 +96,7 @@ export async function registerLeadsRoutes(
   app: FastifyInstance,
   deps: LeadsRoutesDeps,
 ): Promise<void> {
-  const { repos } = deps;
+  const { repos, panelStoky } = deps;
 
   app.get('/admin/leads', async (request) => {
     const query = listQuery.parse(request.query ?? {});
@@ -144,6 +146,64 @@ export async function registerLeadsRoutes(
       .type('text/csv; charset=utf-8')
       .header('content-disposition', 'attachment; filename="contactos.csv"')
       .send(`﻿${[cabecera, ...filas].join('\r\n')}\r\n`);
+  });
+
+  /**
+   * El enlace que abre la venta en Stoky con la ficha ya puesta.
+   *
+   * Se arma aqui y no en la pantalla para que el formato de la URL viva en un
+   * solo sitio: si Stoky cambia el nombre de un parametro, se cambia aqui.
+   *
+   * Lo que no viaja es el producto ni el precio. Ninguna conversacion decide
+   * eso: "una caja de arroz" no es un SKU. Lo pone una persona mirando el
+   * catalogo, y por eso el enlace RELLENA la venta pero no la registra.
+   */
+  app.get('/admin/leads/:contactId/derivar', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+
+    if (!panelStoky) {
+      return reply.code(409).send({
+        error: 'No hay panel de Stoky configurado (STOKY_PANEL_URL).',
+      });
+    }
+
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+
+    const lead = await repos.leads.ensure(contactId, contact.name);
+
+    // Lo que no cabe en un campo de la venta va a la observacion, que es lo
+    // que lee quien despacha: que envia, para cuando y que servicio eligio.
+    const notas = [
+      lead.contenido?.trim() ? `Envio: ${lead.contenido.trim()}` : null,
+      lead.servicio?.trim() ? `Servicio: ${lead.servicio.trim()}` : null,
+      lead.cuando?.trim() ? `Cuando: ${lead.cuando.trim()}` : null,
+      lead.recojoDistrito?.trim() ? `Recojo: ${lead.recojoDistrito.trim()}` : null,
+      lead.notas?.trim() || null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    const params = new URLSearchParams({ preventa: '1', phone: contact.phone });
+    const opcionales: Array<[string, string | null]> = [
+      ['name', lead.nombre ?? contact.name],
+      // El distrito de ENTREGA es el destino de la venta; el de recojo va en
+      // la observacion, porque en la ficha del cliente solo cabe uno.
+      ['district', lead.entregaDistrito],
+      ['address', lead.entregaDireccion],
+      ['reference', lead.entregaReferencia],
+      ['document', lead.documentoNumero === 'no proporcionado' ? null : lead.documentoNumero],
+      ['notas', notas || null],
+    ];
+
+    for (const [clave, valor] of opcionales) {
+      if (valor?.trim()) params.set(clave, valor.trim());
+    }
+
+    return {
+      url: `${panelStoky.replace(/\/+$/, '')}/admin/sales?${params.toString()}`,
+      lead,
+    };
   });
 
   app.get('/admin/leads/:contactId', async (request, reply) => {

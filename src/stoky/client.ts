@@ -27,6 +27,15 @@ export interface ProductoStoky {
   stock: number;
 }
 
+export interface ConsultaCatalogo {
+  /** Lo que pidió y está disponible. */
+  disponibles: ProductoStoky[];
+  /** Lo que pidió pero se agotó. Lleva precio: preguntó cuánto cuesta. */
+  agotados: ProductoStoky[];
+  /** Otras cosas CON stock que se le parecen. Vacío si no hay ninguna. */
+  similares: ProductoStoky[];
+}
+
 export interface StokyClientOptions {
   baseUrl: string;
   token: string;
@@ -109,6 +118,16 @@ export interface StokyClient {
   productos(): Promise<ProductoStoky[]>;
   /** Los que casan con lo que escribió el cliente, mejor primero. */
   buscar(texto: string, limite?: number): Promise<ProductoStoky[]>;
+  /**
+   * Lo que hay, lo que se agotó y qué ofrecer en su lugar.
+   *
+   * Separa las tres cosas porque al cliente se le dicen distinto: lo que hay
+   * se ofrece, lo agotado se avisa con su precio —saber cuánto cuesta le sirve
+   * igual— y lo parecido solo se menciona si de verdad existe. Recomendar por
+   * recomendar, cuando no hay nada que se le parezca, es peor que decir que no
+   * hay: el cliente pierde el tiempo mirando algo que no quería.
+   */
+  consultar(texto: string): Promise<ConsultaCatalogo>;
   /**
    * Trae el catálogo antes de que nadie pregunte.
    *
@@ -268,6 +287,41 @@ export function createStokyClient(opts: StokyClientOptions): StokyClient {
           detail: error instanceof Error ? error.message : String(error),
         };
       }
+    },
+
+    async consultar(texto) {
+      const todos = await this.productos().catch(() => [] as ProductoStoky[]);
+
+      const casan = todos
+        .map((producto) => ({ producto, puntos: puntuar(producto, texto) }))
+        .filter((x) => x.puntos > 0)
+        .sort((a, b) => b.puntos - a.puntos)
+        .map((x) => x.producto);
+
+      const disponibles = casan.filter((p) => p.stock > 0).slice(0, 3);
+      const agotados = casan.filter((p) => p.stock <= 0);
+
+      // Con algo disponible no hace falta ofrecer alternativas: ya se le está
+      // dando lo que pidió.
+      if (disponibles.length || !agotados.length) {
+        return { disponibles, agotados: disponibles.length ? [] : agotados.slice(0, 3), similares: [] };
+      }
+
+      // Nada de lo que pidió tiene stock. Lo parecido se busca ampliando la
+      // consulta con el nombre del producto agotado: quien pidió "arroz extra
+      // 5kg" y no lo hay, quiere ver los otros arroces.
+      const referencia = `${texto} ${agotados[0]?.product ?? ''} ${agotados[0]?.name ?? ''}`;
+      const yaNombrados = new Set(agotados.slice(0, 3).map((p) => p.sku));
+
+      const similares = todos
+        .filter((p) => p.stock > 0 && !yaNombrados.has(p.sku))
+        .map((producto) => ({ producto, puntos: puntuar(producto, referencia) }))
+        .filter((x) => x.puntos > 0)
+        .sort((a, b) => b.puntos - a.puntos)
+        .slice(0, 3)
+        .map((x) => x.producto);
+
+      return { disponibles: [], agotados: agotados.slice(0, 3), similares };
     },
 
     async buscar(texto, limite = 3) {

@@ -97,7 +97,8 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
         }
       }
 
-      return sendText(to, texto);
+      const enviado = await sendText(to, texto);
+      return { ...enviado, body: texto };
     },
 
     /**
@@ -124,7 +125,9 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
       }
 
       const opciones = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
-      return sendText(to, opciones ? `${body}\n\n${opciones}\n\nResponde con el número.` : body);
+      const texto = opciones ? `${body}\n\n${opciones}\n\nResponde con el número.` : body;
+      const enviado = await sendText(to, texto);
+      return { ...enviado, body: texto };
     },
 
     /** Sin plantillas: el cuerpo guardado, con las variables ya sustituidas. */

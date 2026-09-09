@@ -223,15 +223,16 @@ async function contestarPrecio(
   // arroz" acaba guardado como su distrito de recojo.
   if (lead.preguntaPendiente === 'contenido') return false;
 
-  let encontrados: ProductoStoky[] = [];
+  let consulta: { disponibles: ProductoStoky[]; agotados: ProductoStoky[]; similares: ProductoStoky[] };
   try {
-    encontrados = await catalogo.buscar(texto, 3);
+    consulta = await catalogo.consultar(texto);
   } catch {
     // Stoky caido no puede dejar sin atender a quien escribe: sigue el flujo.
     return false;
   }
 
-  if (!encontrados.length) return false;
+  const { disponibles, agotados, similares } = consulta;
+  if (!disponibles.length && !agotados.length) return false;
 
   const vigentes = mensajesVigentes(overrides ?? {});
   const sustituciones = {
@@ -241,22 +242,37 @@ async function contestarPrecio(
     horario: config.businessHours,
   };
 
-  const lineas = encontrados.map((p) => {
-    const precio = p.price == null ? 'consultar' : `S/ ${p.price.toFixed(2)}`;
-    // El stock se dice solo cuando NO hay: prometer algo agotado hace perder
-    // el viaje, y anunciar "quedan 11" invita a regatear.
-    const agotado = p.stock > 0 ? '' : ' (sin stock ahora)';
-    return `• ${p.name} — ${precio}${agotado}`;
-  });
+  // El precio se dice SIEMPRE, tambien de lo agotado: el cliente pregunto
+  // cuanto cuesta y saberlo le sirve igual para decidir si espera. Lo que no
+  // se dice nunca es cuantas unidades quedan: invita a regatear y a dudar.
+  const linea = (p: ProductoStoky) =>
+    `• ${p.name} — ${p.price == null ? 'consultar' : `S/ ${p.price.toFixed(2)}`}`;
 
   // Contestar "Casaca de cuero" a quien preguntó por una casaca impermeable
   // con el mismo aplomo que si fuera esa es el fallo caro: el cliente cree que
   // le cotizaron lo que pidió. Si no coincide del todo, se dice.
-  const exacto = encontrados.some((p) => coincideDelTodo(p, texto));
-  const encabezado = render(
-    (exacto ? vigentes.precioEncontrado : vigentes.precioAproximado) ?? '',
-    sustituciones,
-  );
+  const mostrados = disponibles.length ? disponibles : agotados;
+  const exacto = mostrados.some((p) => coincideDelTodo(p, texto));
+
+  const partes: string[] = [];
+
+  if (disponibles.length) {
+    partes.push(render((exacto ? vigentes.precioEncontrado : vigentes.precioAproximado) ?? '', sustituciones));
+    partes.push(disponibles.map(linea).join('\n'));
+  } else {
+    // Agotado: se dice con su precio, y se ofrece algo parecido SOLO si
+    // existe. Recomendar cuando no hay nada que se le parezca hace perder el
+    // tiempo al cliente mirando algo que no queria.
+    partes.push(render(vigentes.precioAgotado ?? '', sustituciones));
+    partes.push(agotados.map(linea).join('\n'));
+
+    if (similares.length) {
+      partes.push(render(vigentes.precioSimilares ?? '', sustituciones));
+      partes.push(similares.map(linea).join('\n'));
+    } else {
+      partes.push(render(vigentes.precioSinAlternativas ?? '', sustituciones));
+    }
+  }
 
   // Si estaba a mitad de una pregunta, se repite al pie: contestar el precio
   // y dejar la conversacion colgada obliga al cliente a adivinar por donde
@@ -272,12 +288,14 @@ async function contestarPrecio(
       })
     : '';
 
+  if (pendiente) partes.push(pendiente);
+
   await sender.send({
     phone: contact.phone,
     kind: 'freeform',
     category: 'UTILITY',
     manual: false,
-    text: `${encabezado}\n\n${lineas.join('\n')}${pendiente ? `\n\n${pendiente}` : ''}`,
+    text: partes.filter(Boolean).join('\n\n'),
   });
 
   return true;

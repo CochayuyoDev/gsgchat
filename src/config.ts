@@ -133,6 +133,15 @@ const schema = z.object({
    * El token sale de `php scripts/conexion-whatsapp.php <tienda>` en Stoky.
    */
   STOKY_URL: z.string().default(''),
+  /**
+   * La direccion del panel de Stoky, para mandar a registrar la venta.
+   *
+   * Es distinta de STOKY_URL: aquella es la API que se consulta desde el
+   * servidor, y esta la que abre el operador en su navegador. En una maquina
+   * son la misma, pero en cuanto Stoky corra detras de un proxy dejan de
+   * serlo, y mandar al operador a la URL interna le da una pantalla en blanco.
+   */
+  STOKY_PANEL_URL: z.string().default(''),
   STOKY_TOKEN: z.string().default(''),
 
   DEV_SIMULATE_INBOUND: z

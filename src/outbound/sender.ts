@@ -139,7 +139,8 @@ export function createSender(deps: SenderDeps): Sender {
           direction: 'out',
           wamid: result.wamid,
           kind: job.kind === 'freeform' ? 'text' : job.kind,
-          body: describeOutgoing(job, template),
+          // Lo que el cliente REALMENTE recibio, si el proveedor lo dice.
+          body: result.body ?? describeOutgoing(job, template),
           payload: job.location ? { location: job.location } : job.interactive ? { interactive: job.interactive } : null,
           status: 'sent',
           deliveryId,
@@ -195,6 +196,8 @@ function describeOutgoing(
         const lista = opciones.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
         return `${body}\n\n${lista}`;
       }
+      // Sin `body` del proveedor -la Cloud API manda un boton nativo, que no
+      // es texto- se anota que se pidio, para que el hilo no parezca cortado.
       return job.interactive?.locationRequest ? `${body}\n\n(se pidio la ubicacion)` : body;
     }
     default:
