@@ -30,19 +30,28 @@ const CSS = `
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  .app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
-  .side { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    /* Aqui no hay nada que desplazar: lo que se desplaza es el hilo. */
+    overflow: hidden;
+  }
+  /* 100dvh y no 100vh: en el movil la barra del navegador se recoge y con vh
+     la pantalla queda cortada por abajo justo donde esta el cuadro de texto. */
+  .app { display: grid; grid-template-columns: 340px 1fr; height: 100dvh; overflow: hidden; }
+  .side {
+    background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  }
   .side header, .thread header {
     background: var(--header); padding: 10px 14px; display: flex; align-items: center; gap: 10px;
-    border-bottom: 1px solid var(--line); min-height: 58px;
+    border-bottom: 1px solid var(--line); min-height: 58px; flex: none;
   }
   .side header h1 { font-size: 17px; margin: 0; flex: 1; }
   .search { padding: 8px 12px; border-bottom: 1px solid var(--line); }
   .search input { width: 100%; padding: 8px 12px; border: 0; border-radius: 8px;
     background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
-  .chats { flex: 1; overflow-y: auto; }
+  .chats { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .chat {
     display: flex; gap: 13px; padding: 10px 14px; cursor: pointer;
     border-bottom: 1px solid var(--line); transition: background .12s;
@@ -64,11 +73,14 @@ const CSS = `
   .chat .last { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
   .badge { background: var(--badge); color: #06251a; border-radius: 999px; font-size: 11.5px;
     font-weight: 700; padding: 1px 7px; margin-left: 6px; }
-  .thread { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+  /* min-height: 0 es lo que deja que el hilo se encoja y sea .messages quien
+     haga scroll, en vez de estirar la pagina entera. */
+  .thread { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
   .thread header .name { font-weight: 600; }
   .thread header .sub { font-size: 12.5px; color: var(--muted); }
   .messages {
-    flex: 1; overflow-y: auto; padding: 14px 6%; display: flex; flex-direction: column; gap: 2px;
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding: 14px 6%; display: flex; flex-direction: column; gap: 2px;
     background-color: var(--wallpaper);
     background-image:
       radial-gradient(circle at 20% 30%, var(--wallpaper-dot) 1px, transparent 1px),
@@ -135,7 +147,7 @@ const CSS = `
     letter-spacing: .3px; font-weight: 500;
   }
   .composer { background: var(--header); padding: 9px 16px; border-top: 1px solid var(--line);
-    display: flex; gap: 10px; align-items: flex-end; }
+    display: flex; gap: 10px; align-items: flex-end; flex: none; }
   .composer textarea {
     flex: 1; resize: none; border: 0; border-radius: 22px; padding: 11px 16px;
     background: var(--panel); color: var(--text); font: inherit; font-size: 14.5px;
@@ -147,7 +159,7 @@ const CSS = `
   .composer button.ghost { background: transparent; color: var(--muted); font-size: 19px; }
   .composer button:disabled { opacity: .45; cursor: default; }
   .locked { background: var(--header); border-top: 1px solid var(--line); padding: 14px;
-    color: var(--muted); font-size: 13.5px; text-align: center; }
+    color: var(--muted); font-size: 13.5px; text-align: center; flex: none; }
   .locked b { color: var(--text); }
   .locked .actions { margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
   .locked select, .locked button, .tools button, .tools input {
@@ -155,7 +167,10 @@ const CSS = `
     border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer;
   }
   .locked button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .tools { display: flex; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; background: var(--header); }
+  /* La fila de herramientas ocupa sitio en una pantalla ya justa: se pliega y
+     solo se abre cuando hace falta mandar un pin. */
+  .tools { display: flex; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; background: var(--header); flex: none; }
+  .tools.plegado { display: none; }
   .tools input { cursor: text; flex: 1; min-width: 180px; }
   .empty { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 40px; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
@@ -175,6 +190,7 @@ const CSS = `
     .app:not(.open-thread) .thread { display: none; }
     .app:not(.open-thread) .side { display: flex; }
     .messages { padding: 14px 12px; }
+    .msg { max-width: 85%; }
   }
 `;
 
@@ -226,12 +242,13 @@ export function chatPage(configured: boolean, adminToken = ''): string {
       </div>
     </div>
     <div class="messages hidden" id="messages"></div>
-    <div class="tools hidden" id="tools">
+    <div class="tools hidden plegado" id="tools">
       <input id="loc" placeholder="Pega un link de mapa o coordenadas para mandar el pin">
       <button id="send-loc">Mandar pin</button>
       <button id="ask-loc">Pedir su ubicacion</button>
     </div>
     <div class="composer hidden" id="composer">
+      <button class="ghost" id="mas" title="Mandar o pedir ubicacion">📎</button>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje"></textarea>
       <button id="send" title="Enviar">➤</button>
     </div>
@@ -534,6 +551,13 @@ function colorDe(phone) {
   for (var i = 0; i < (phone || '').length; i++) suma += phone.charCodeAt(i);
   return 'c' + (suma % 8);
 }
+
+/* El clip abre y cierra la fila del pin. */
+document.getElementById('mas').onclick = function () {
+  var tools = document.getElementById('tools');
+  tools.classList.toggle('plegado');
+  if (!tools.classList.contains('plegado')) document.getElementById('loc').focus();
+};
 
 function renderComposer(data) {
   var composer = document.getElementById('composer');
