@@ -24,6 +24,7 @@ import { syncTemplates } from '../templates/registry.js';
 import { pushTemplates } from '../templates/push.js';
 import { registerAutomationRoutes } from './automation-routes.js';
 import { registerChatRoutes } from './chat-routes.js';
+import { registerLeadsRoutes } from './leads-routes.js';
 
 export interface AdminDeps {
   repos: Repos;
@@ -105,6 +106,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   await registerAutomationRoutes(app, { repos, sender });
   await registerChatRoutes(app, { repos, sender, config, settings });
+  await registerLeadsRoutes(app, { repos });
 
   // --- salud del numero: lo primero que hay que mirar cada dia ----------
   app.get('/admin/health', async () => {

@@ -157,6 +157,22 @@ export interface AutomationPrefs {
    * conteste siempre una persona.
    */
   preventaActiva: boolean;
+  /**
+   * Servicios o couriers entre los que elige el cliente.
+   *
+   * La lista la pone cada tienda: GSG tendra los suyos y otra tienda otros.
+   * Vacia significa que ese paso NO se pregunta, que es lo correcto para quien
+   * solo ofrece un servicio: preguntar por algo que no hay que elegir es una
+   * pregunta de mas en una conversacion que ya tiene seis.
+   */
+  serviciosPreventa: string[];
+  /**
+   * Los textos del asistente, reescritos por la tienda.
+   *
+   * Solo lo que cambio: lo que no este aqui usa el valor de fabrica, asi que
+   * anadir un mensaje nuevo al sistema no obliga a nadie a reconfigurarlo.
+   */
+  mensajesPreventa: Record<string, string>;
 }
 
 /**
@@ -170,6 +186,8 @@ export interface AutomationPrefs {
 export const DEFAULT_PREFS: AutomationPrefs = {
   askLocationFallback: false,
   preventaActiva: true,
+  serviciosPreventa: [],
+  mensajesPreventa: {},
 };
 
 // ------------------------------------------------------------- interfaz

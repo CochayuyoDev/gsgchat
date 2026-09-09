@@ -86,7 +86,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
      * apagado: ver WHATSAPP_NATIVE_BUTTONS en config.
      */
     async sendLocationRequest(to, body) {
-      const texto = `${body}\n\nMandamela con el clip 📎 → Ubicacion → Enviar tu ubicacion actual.`;
+      const texto = `${body}\n\nMándamela con el clip 📎 → Ubicación → Enviar tu ubicación actual.`;
 
       if (opts.nativeButtons) {
         try {
@@ -124,7 +124,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
       }
 
       const opciones = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
-      return sendText(to, opciones ? `${body}\n\n${opciones}\n\nResponde con el numero.` : body);
+      return sendText(to, opciones ? `${body}\n\n${opciones}\n\nResponde con el número.` : body);
     },
 
     /** Sin plantillas: el cuerpo guardado, con las variables ya sustituidas. */

@@ -39,6 +39,9 @@ export interface Lead {
   entregaLat: number | null;
   entregaLng: number | null;
 
+  /** Servicio o courier elegido, de la lista que configura la tienda. */
+  servicio: string | null;
+
   contenido: string | null;
   pesoKg: number | null;
   fragil: boolean;
@@ -55,6 +58,8 @@ export interface Lead {
   ultimasOpciones: string[] | null;
   /** Que se le pregunto y esta esperando respuesta. Null = nada pendiente. */
   preguntaPendiente: string | null;
+  /** Veces seguidas que no se entendio la respuesta a esa pregunta. */
+  intentosFallidos: number;
 
   crmId: string | null;
   enviadoAt: Date | null;
@@ -80,6 +85,7 @@ export type LeadPatch = Partial<
     | 'entregaReferencia'
     | 'entregaLat'
     | 'entregaLng'
+    | 'servicio'
     | 'contenido'
     | 'pesoKg'
     | 'fragil'
@@ -91,6 +97,7 @@ export type LeadPatch = Partial<
     | 'notas'
     | 'ultimasOpciones'
     | 'preguntaPendiente'
+    | 'intentosFallidos'
   >
 >;
 
@@ -128,6 +135,7 @@ interface Row {
   entrega_referencia: string | null;
   entrega_lat: number | null;
   entrega_lng: number | null;
+  servicio: string | null;
   contenido: string | null;
   peso_kg: string | number | null;
   fragil: boolean;
@@ -139,6 +147,7 @@ interface Row {
   notas: string | null;
   ultimas_opciones: string[] | null;
   pregunta_pendiente: string | null;
+  intentos_fallidos: number;
   crm_id: string | null;
   enviado_at: Date | null;
   ultimo_error: string | null;
@@ -163,6 +172,7 @@ const toLead = (r: Row): Lead => ({
   entregaReferencia: r.entrega_referencia,
   entregaLat: r.entrega_lat,
   entregaLng: r.entrega_lng,
+  servicio: r.servicio,
   contenido: r.contenido,
   // numeric llega como cadena para no perder precision; la ficha lo quiere
   // como numero para poder sumarlo y compararlo.
@@ -176,6 +186,7 @@ const toLead = (r: Row): Lead => ({
   notas: r.notas,
   ultimasOpciones: r.ultimas_opciones,
   preguntaPendiente: r.pregunta_pendiente,
+  intentosFallidos: r.intentos_fallidos ?? 0,
   crmId: r.crm_id,
   enviadoAt: r.enviado_at,
   ultimoError: r.ultimo_error,
@@ -197,6 +208,7 @@ const COLUMNAS: Record<keyof LeadPatch, string> = {
   entregaReferencia: 'entrega_referencia',
   entregaLat: 'entrega_lat',
   entregaLng: 'entrega_lng',
+  servicio: 'servicio',
   contenido: 'contenido',
   pesoKg: 'peso_kg',
   fragil: 'fragil',
@@ -208,6 +220,7 @@ const COLUMNAS: Record<keyof LeadPatch, string> = {
   notas: 'notas',
   ultimasOpciones: 'ultimas_opciones',
   preguntaPendiente: 'pregunta_pendiente',
+  intentosFallidos: 'intentos_fallidos',
 };
 
 export function createLeadsRepo(pool: Pool): LeadsRepo {

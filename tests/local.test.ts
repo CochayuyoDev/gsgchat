@@ -268,7 +268,7 @@ describe('enviar por el cliente local', () => {
 
     const texto = (enviados[0]?.content as { text: string }).text;
     expect(texto).toContain('Mandanos donde estas');
-    expect(texto).toContain('Ubicacion');
+    expect(texto).toContain('Ubicación');
   });
 
   it('los botones se degradan a una lista numerada', async () => {
@@ -405,7 +405,7 @@ describe('botones en el chat del cliente', () => {
     // comprueba es justo eso, que el respaldo sigue explicando el camino.
     const texto = (enviados[0]?.content as { text: string }).text;
     expect(texto).toContain('Comparte tu ubicacion');
-    expect(texto).toContain('Ubicacion');
+    expect(texto).toContain('Ubicación');
   });
 });
 

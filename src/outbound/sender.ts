@@ -185,8 +185,18 @@ function describeOutgoing(
       return job.location
         ? `Ubicacion: ${job.location.name ? `${job.location.name} — ` : ''}${job.location.latitude}, ${job.location.longitude}`
         : 'Ubicacion';
-    case 'interactive':
-      return job.interactive?.body ?? '';
+    case 'interactive': {
+      // Con las opciones incluidas: en el chat tiene que leerse lo mismo que
+      // le llego al cliente, no el cuerpo a secas. Si no, el operador no
+      // entiende que significa el "2" que le acaban de contestar.
+      const body = job.interactive?.body ?? '';
+      const opciones = job.interactive?.buttons ?? [];
+      if (opciones.length) {
+        const lista = opciones.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
+        return `${body}\n\n${lista}`;
+      }
+      return job.interactive?.locationRequest ? `${body}\n\n(se pidio la ubicacion)` : body;
+    }
     default:
       return job.text ?? '';
   }

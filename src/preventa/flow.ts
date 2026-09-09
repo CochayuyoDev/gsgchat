@@ -18,6 +18,7 @@
  */
 
 import type { Lead, LeadPatch } from '../db/leads.js';
+import { mensajesVigentes, render, type Mensajes } from './mensajes.js';
 
 export interface Respuesta {
   texto: string;
@@ -34,6 +35,14 @@ export interface Entrada {
   botonId?: string;
   /** Ubicacion compartida, ya validada contra la cobertura. */
   ubicacion?: { lat: number; lng: number };
+  /**
+   * Llego algo que no es texto ni ubicacion: un audio, una foto, un sticker.
+   *
+   * Importa distinguirlo de un texto vacio: a un audio hay que contestarle
+   * -el cliente ESTA contestando, solo que en un formato que no se puede
+   * leer-, y a un mensaje vacio no.
+   */
+  adjunto?: boolean;
   /** Su primer mensaje de siempre: solo entonces se presenta la tienda. */
   esPrimerMensaje: boolean;
 }
@@ -47,6 +56,21 @@ export interface Contexto {
   saludo: string;
   /** Horario de atencion, para la pregunta mas repetida que hay. */
   horario: string;
+  /**
+   * Servicios o couriers entre los que elige el cliente.
+   *
+   * Vacio = no se pregunta. Lo configura cada tienda; preguntar por algo que
+   * no hay que elegir es una pregunta de mas en una conversacion que ya tiene
+   * seis.
+   */
+  servicios?: string[];
+  /**
+   * Los textos que edita la tienda desde /panel.
+   *
+   * Lo que no venga aqui cae al valor de fabrica de `mensajes.ts`, asi que una
+   * tienda que no toca nada sigue teniendo una conversacion completa.
+   */
+  mensajes?: Mensajes;
 }
 
 export interface Resultado {
@@ -64,12 +88,6 @@ export const BOTON = {
   siNombre: 'pv_confirmar',
   corregir: 'pv_corregir',
 } as const;
-
-const MENU = [
-  { id: BOTON.cotizar, title: 'Cotizar envio' },
-  { id: BOTON.info, title: 'Horarios y zona' },
-  { id: BOTON.asesor, title: 'Hablar con asesor' },
-];
 
 const normaliza = (texto: string): string =>
   texto
@@ -128,41 +146,101 @@ function esNegacion(texto: string): boolean {
  * que mas cuesta pedir y no tiene sentido pedir si resulta que no hay
  * cobertura.
  */
-export type Campo = 'recojo' | 'entrega' | 'contenido' | 'cuando' | 'nombre' | 'documento' | null;
+export type Campo =
+  | 'recojo'
+  | 'entrega'
+  | 'contenido'
+  | 'servicio'
+  | 'cuando'
+  | 'nombre'
+  | 'documento'
+  | null;
 
-export function siguienteCampo(lead: Lead): Campo {
+export function siguienteCampo(lead: Lead, servicios: string[] = []): Campo {
   if (!lead.recojoDistrito?.trim()) return 'recojo';
   if (!lead.entregaDistrito?.trim()) return 'entrega';
   if (!lead.contenido?.trim()) return 'contenido';
+  // Solo si la tienda ofrece mas de uno: con uno solo no hay nada que elegir.
+  if (servicios.length > 1 && !lead.servicio?.trim()) return 'servicio';
   if (!lead.cuando?.trim()) return 'cuando';
   if (!lead.nombre?.trim()) return 'nombre';
   if (!lead.documentoNumero?.trim()) return 'documento';
   return null;
 }
 
+/** El texto de ese mensaje, ya con las variables puestas. */
+function mensaje(ctx: Contexto, clave: string): string {
+  const vigentes = mensajesVigentes(ctx.mensajes ?? {});
+  return render(vigentes[clave] ?? '', {
+    saludo: ctx.saludo,
+    negocio: ctx.negocio,
+    cobertura: ctx.cobertura,
+    horario: ctx.horario,
+  });
+}
+
+/** Las tres opciones del menu, con las etiquetas que puso la tienda. */
+function menuDe(ctx: Contexto) {
+  return [
+    { id: BOTON.cotizar, title: mensaje(ctx, 'botonCotizar') },
+    { id: BOTON.info, title: mensaje(ctx, 'botonInfo') },
+    { id: BOTON.asesor, title: mensaje(ctx, 'botonAsesor') },
+  ];
+}
+
+/** Cuantas veces se repite una pregunta antes de pasar a una persona. */
+export const MAX_INTENTOS = 2;
+
+/**
+ * Si lo que escribio sirve como respuesta a esa pregunta.
+ *
+ * Se valida poco y a proposito: el objetivo es descartar lo que claramente no
+ * es una respuesta -una sola letra, puro signo de puntuacion, un numero donde
+ * va un nombre- y no adivinar si "Sta Anita" es un distrito. Pasarse de
+ * estricto con clientes reales es peor que guardar algo raro que el operador
+ * corrige en la ficha.
+ */
+export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boolean {
+  const limpio = texto.trim();
+  if (limpio.length < 2) return false;
+  // Solo signos o emojis: no hay nada que guardar ahi.
+  if (!/[\p{L}\p{N}]/u.test(limpio)) return false;
+
+  switch (campo) {
+    case 'recojo':
+    case 'entrega':
+      // Un distrito lleva letras. "12345" no es un distrito.
+      return /\p{L}{3,}/u.test(limpio);
+    case 'nombre':
+      return /\p{L}{2,}/u.test(limpio);
+    case 'documento':
+      // DNI, RUC, carne de extranjeria o pasaporte; o una negativa explicita.
+      return esNegacion(limpio) || /[0-9]{6,}/.test(limpio.replace(/[\s.-]/g, ''));
+    default:
+      return true;
+  }
+}
+
 const PREGUNTAS: Record<Exclude<Campo, null>, (ctx: Contexto) => Respuesta> = {
-  recojo: () => ({
-    texto: '¿De que distrito recogemos el envio? Puedes escribirlo o mandarme la ubicacion.',
-    pedirUbicacion: true,
+  recojo: (ctx) => ({ texto: mensaje(ctx, 'pedirRecojo'), pedirUbicacion: true }),
+  entrega: (ctx) => ({ texto: mensaje(ctx, 'pedirEntrega') }),
+  contenido: (ctx) => ({ texto: mensaje(ctx, 'pedirContenido') }),
+  servicio: (ctx) => ({
+    texto: mensaje(ctx, 'pedirServicio'),
+    // Tres es el limite de lo que se lee de un vistazo en un chat; si la
+    // tienda pone mas, el cliente los ve todos pero numerados igual.
+    botones: (ctx.servicios ?? []).map((nombre, i) => ({ id: `pv_serv_${i}`, title: nombre })),
   }),
-  entrega: () => ({
-    texto: '¿Y a que distrito lo llevamos?',
-  }),
-  contenido: () => ({
-    texto: '¿Que vas a enviar? Cuentame que es y su tamaño aproximado.',
-  }),
-  cuando: () => ({
-    texto: '¿Para cuando lo necesitas?',
+  cuando: (ctx) => ({
+    texto: mensaje(ctx, 'pedirCuando'),
     botones: [
-      { id: 'pv_hoy', title: 'Hoy' },
-      { id: 'pv_manana', title: 'Manana' },
-      { id: 'pv_otro', title: 'Otro dia' },
+      { id: 'pv_hoy', title: mensaje(ctx, 'botonHoy') },
+      { id: 'pv_manana', title: mensaje(ctx, 'botonManana') },
+      { id: 'pv_otro', title: mensaje(ctx, 'botonOtroDia') },
     ],
   }),
-  nombre: () => ({ texto: '¿A nombre de quien registramos el envio?' }),
-  documento: () => ({
-    texto: 'Por ultimo, tu DNI o RUC para el comprobante. Si prefieres darlo despues, responde NO.',
-  }),
+  nombre: (ctx) => ({ texto: mensaje(ctx, 'pedirNombre') }),
+  documento: (ctx) => ({ texto: mensaje(ctx, 'pedirDocumento') }),
 };
 
 /** El resumen que cierra la preventa y se pasa al asesor. */
@@ -175,8 +253,9 @@ export function resumen(lead: Lead): string {
     '',
     linea('Recojo', lead.recojoDistrito),
     linea('Entrega', lead.entregaDistrito),
-    linea('Envio', lead.contenido),
-    linea('Cuando', lead.cuando),
+    linea('Envío', lead.contenido),
+    linea('Servicio', lead.servicio),
+    linea('Cuándo', lead.cuando),
     linea('A nombre de', lead.nombre),
     linea('Documento', lead.documentoNumero),
   ]
@@ -232,21 +311,24 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
     return {
       patch,
       respuesta: {
-        texto:
-          campo === 'recojo'
-            ? 'Recibi la ubicacion de recojo. ¿De que distrito es?'
-            : 'Recibi la ubicacion de entrega. ¿De que distrito es?',
+        texto: mensaje(ctx, campo === 'recojo' ? 'ubicacionRecojo' : 'ubicacionEntrega'),
       },
     };
+  }
+
+  // --- audio, foto o sticker cuando se esperaba una respuesta -----------
+  //
+  // El cliente ESTA contestando, solo que en un formato que no se puede leer.
+  // Callarse aqui es lo que hace que crea que nadie le lee.
+  if (entrada.adjunto && lead.preguntaPendiente) {
+    return conIntento(lead, ctx, mensaje(ctx, 'soloTexto'));
   }
 
   // --- pedir asesor corta la conversacion en cualquier punto -------------
   if (intencion === BOTON.asesor) {
     return {
       patch: { estado: 'calificado' },
-      respuesta: {
-        texto: 'Listo, en un momento te atiende una persona del equipo. Gracias por escribir.',
-      },
+      respuesta: { texto: mensaje(ctx, 'asesor') },
     };
   }
 
@@ -255,10 +337,10 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
     return {
       patch: {},
       respuesta: {
-        texto: `Atendemos ${ctx.cobertura}. Horario: ${ctx.horario}.`,
+        texto: mensaje(ctx, 'info'),
         botones: [
-          { id: BOTON.cotizar, title: 'Cotizar envio' },
-          { id: BOTON.asesor, title: 'Hablar con asesor' },
+          { id: BOTON.cotizar, title: mensaje(ctx, 'botonCotizar') },
+          { id: BOTON.asesor, title: mensaje(ctx, 'botonAsesor') },
         ],
       },
     };
@@ -272,12 +354,7 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
   if (entrada.esPrimerMensaje && lead.estado === 'nuevo' && !intencion) {
     return {
       patch: { estado: 'en_conversacion' },
-      respuesta: {
-        texto:
-          `${ctx.saludo}. Soy el asistente de ${ctx.negocio}. ` +
-          `Hacemos envios en ${ctx.cobertura}. ¿En que te ayudo?`,
-        botones: MENU,
-      },
+      respuesta: { texto: mensaje(ctx, 'bienvenida'), botones: menuDe(ctx) },
     };
   }
 
@@ -286,15 +363,13 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
     return preguntar(lead, ctx, { estado: 'en_conversacion' });
   }
 
-  const campo = siguienteCampo(lead);
+  const campo = siguienteCampo(lead, ctx.servicios);
 
   // Nada que preguntar y la ficha completa: se cierra y pasa a una persona.
   if (!campo) {
     return {
       patch: { estado: 'calificado' },
-      respuesta: {
-        texto: `${resumen(lead)}\n\nCon esto ya te preparamos la cotizacion. En un momento te escribe una persona del equipo.`,
-      },
+      respuesta: { texto: `${resumen(lead)}\n\n${mensaje(ctx, 'cierre')}` },
     };
   }
 
@@ -303,7 +378,7 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
   if (lead.estado === 'nuevo') {
     return {
       patch: { estado: 'en_conversacion' },
-      respuesta: { texto: '¿En que te ayudo?', botones: MENU },
+      respuesta: { texto: mensaje(ctx, 'menu'), botones: menuDe(ctx) },
     };
   }
 
@@ -320,27 +395,63 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
     return preguntar(lead, ctx, { estado: 'en_conversacion' });
   }
 
-  const patch = guardarRespuesta(pendiente, texto, entrada);
-  return cerrarOSeguir({ ...lead, ...patch } as Lead, patch, ctx);
+  // Si el "1" que escribio corresponde a una de las opciones que se le
+  // ofrecieron, vale como si hubiera pulsado ese boton. Sin esto la ficha
+  // acaba diciendo 'Cuando: 1', que no significa nada para quien la lea.
+  const elegida = intencion && lead.ultimasOpciones?.includes(intencion) ? intencion : undefined;
+  // Lo que no sirve como respuesta no se guarda: una ficha con "?" en el
+  // distrito es peor que una ficha con el hueco vacio, porque parece rellenada.
+  if (!elegida && !respuestaValida(pendiente, texto)) {
+    return conIntento(lead, ctx, mensaje(ctx, 'noEntendi'));
+  }
+
+  const patch = guardarRespuesta(pendiente, texto, { ...entrada, botonId: entrada.botonId ?? elegida }, ctx.servicios);
+  return cerrarOSeguir({ ...lead, ...patch } as Lead, { ...patch, intentosFallidos: 0 }, ctx);
+}
+
+/**
+ * Un intento fallido: se avisa y se repite la pregunta.
+ *
+ * A la tercera se deja de insistir y pasa a una persona. Repetir la misma
+ * pregunta indefinidamente es lo que hace que el cliente cierre el chat, y un
+ * cliente perdido cuesta mas que una ficha a medias.
+ */
+function conIntento(lead: Lead, ctx: Contexto, aviso: string): Resultado {
+  const intentos = (lead.intentosFallidos ?? 0) + 1;
+
+  if (intentos > MAX_INTENTOS) {
+    return {
+      patch: { estado: 'calificado', preguntaPendiente: null, intentosFallidos: 0 },
+      respuesta: { texto: mensaje(ctx, 'rendicion') },
+    };
+  }
+
+  const campo = siguienteCampo(lead, ctx.servicios);
+  const pregunta = campo ? PREGUNTAS[campo](ctx) : { texto: mensaje(ctx, 'menu'), botones: menuDe(ctx) };
+
+  return {
+    patch: { intentosFallidos: intentos, ...(campo ? { preguntaPendiente: campo } : {}) },
+    // Aviso y pregunta en el MISMO mensaje: dos seguidos serian dos mensajes
+    // por un solo entrante, que es justo lo que no puede pasar.
+    respuesta: { ...pregunta, texto: `${aviso}\n\n${pregunta.texto}` },
+  };
 }
 
 /** Pregunta el siguiente hueco y deja constancia de que se pregunto. */
 function preguntar(lead: Lead, ctx: Contexto, extra: LeadPatch = {}): Resultado {
-  const campo = siguienteCampo(lead);
+  const campo = siguienteCampo(lead, ctx.servicios);
   if (!campo) return cerrarOSeguir(lead, extra, ctx);
   return { patch: { ...extra, preguntaPendiente: campo }, respuesta: PREGUNTAS[campo](ctx) };
 }
 
 /** O quedan huecos y se pregunta el siguiente, o esta completa y se cierra. */
 function cerrarOSeguir(lead: Lead, patch: LeadPatch, ctx: Contexto): Resultado {
-  const despues = siguienteCampo(lead);
+  const despues = siguienteCampo(lead, ctx.servicios);
 
   if (!despues) {
     return {
       patch: { ...patch, estado: 'calificado', preguntaPendiente: null },
-      respuesta: {
-        texto: `${resumen(lead)}\n\nCon esto ya te preparamos la cotizacion. En un momento te escribe una persona del equipo.`,
-      },
+      respuesta: { texto: `${resumen(lead)}\n\n${mensaje(ctx, 'cierre')}` },
     };
   }
 
@@ -359,7 +470,12 @@ function conMemoria(resultado: Resultado): Resultado {
 }
 
 /** Donde va lo que acaba de escribir el cliente. */
-function guardarRespuesta(campo: Exclude<Campo, null>, texto: string, entrada: Entrada): LeadPatch {
+function guardarRespuesta(
+  campo: Exclude<Campo, null>,
+  texto: string,
+  entrada: Entrada,
+  servicios: string[] = [],
+): LeadPatch {
   switch (campo) {
     case 'recojo':
       return { recojoDistrito: texto, estado: 'en_conversacion' };
@@ -371,10 +487,16 @@ function guardarRespuesta(campo: Exclude<Campo, null>, texto: string, entrada: E
       // Los botones de "cuando" traen su propio texto; si pulso uno, vale ese.
       const porBoton: Record<string, string> = {
         pv_hoy: 'Hoy',
-        pv_manana: 'Manana',
+        pv_manana: 'Mañana',
         pv_otro: texto,
       };
       return { cuando: entrada.botonId ? (porBoton[entrada.botonId] ?? texto) : texto };
+    }
+    case 'servicio': {
+      // Si eligio por numero, vale el nombre del servicio, no el "2".
+      const indice = entrada.botonId?.match(/^pv_serv_(\d+)$/);
+      const elegido = indice ? servicios[Number(indice[1])] : undefined;
+      return { servicio: elegido ?? texto };
     }
     case 'nombre':
       return { nombre: texto };

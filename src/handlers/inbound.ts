@@ -123,12 +123,18 @@ export async function turnoDePreventa(
 ): Promise<void> {
   const { repos, sender, config } = deps;
 
-  const lead = await repos.leads.ensure(contact.id, contact.name);
+  const [lead, prefs] = await Promise.all([
+    repos.leads.ensure(contact.id, contact.name),
+    repos.automation.getPrefs(),
+  ]);
+
   const { patch, respuesta } = responder(lead, entrada, {
     negocio: config.businessName,
     cobertura: config.coverageName || 'tu zona',
     saludo: saludoPorHora(new Date(), config.timezone),
     horario: config.businessHours,
+    servicios: prefs.serviciosPreventa,
+    mensajes: prefs.mensajesPreventa,
   });
 
   if (Object.keys(patch).length) await repos.leads.update(contact.id, patch);
@@ -231,15 +237,15 @@ export async function handleInboundMessage(
     switch (reason) {
       case 'outside_bbox':
         return config.coverageName
-          ? `Esa ubicacion queda fuera de nuestra cobertura. Atendemos ${config.coverageName}.`
+          ? `Esa ubicación queda fuera de nuestra cobertura. Atendemos ${config.coverageName}.`
           : 'Esa ubicacion queda fuera de la zona que atendemos.';
       case 'null_island':
       case 'out_of_range':
-        return 'Esas coordenadas no son validas. Intenta enviarla de nuevo, por favor.';
+        return 'Esas coordenadas no son válidas. Inténtala enviar de nuevo, por favor.';
       case 'short_link_unresolved':
-        return 'No pude abrir ese link de mapa. Mandame el pin de ubicacion, por favor.';
+        return 'No pude abrir ese link de mapa. Mándame el pin de ubicación, por favor.';
       default:
-        return 'No pude leer esa ubicacion. Intenta enviarla de nuevo, por favor.';
+        return 'No pude leer esa ubicación. Intenta enviarla de nuevo, por favor.';
     }
   };
 
@@ -258,7 +264,13 @@ export async function handleInboundMessage(
   if (message.type === 'location' && message.location) {
     const result = fromWhatsAppLocation(message.location, { bbox: config.bbox });
     if (!result.ok) {
-      await reply(explicarFallo(result.reason));
+      // Explicar y seguir: dejar la conversacion muerta en un "no puedo
+      // atenderte ahi" hace que el cliente se vaya sin saber que puede
+      // escribir el distrito a mano, o que hay una persona detras.
+      const seguir = (await repos.automation.getPrefs()).preventaActiva
+        ? ' Si crees que me equivoco, escríbeme el distrito, o responde ASESOR y te atiende una persona.'
+        : '';
+      await reply(explicarFallo(result.reason) + seguir);
       return;
     }
     const id = await repos.locations.save(contact.id, result, JSON.stringify(message.location));
@@ -276,7 +288,7 @@ export async function handleInboundMessage(
       return;
     }
 
-    await reply(`Ubicacion recibida: ${describe(result)}\n${result.mapsUrl}`);
+    await reply(`Ubicación recibida: ${describe(result)}\n${result.mapsUrl}`);
     return;
   }
 
@@ -286,17 +298,26 @@ export async function handleInboundMessage(
     if (buttonId.startsWith(CONFIRM_PREFIX)) {
       const locationId = Number.parseInt(buttonId.slice(CONFIRM_PREFIX.length), 10);
       if (Number.isFinite(locationId)) await repos.locations.confirm(locationId);
-      await reply('Listo, confirmada la ubicacion.');
+      await reply('Listo, confirmada la ubicación.');
       return;
     }
     if (buttonId === REJECT_ID) {
-      await askForLocation('Sin problema. Comparte tu ubicacion con el boton de abajo.');
+      await askForLocation('Sin problema. Compárteme tu ubicación, por favor.');
       return;
     }
   }
 
   const text = message.text?.body ?? message.button?.text ?? '';
-  if (!text.trim()) return;
+
+  if (!text.trim()) {
+    // Un audio o una foto no son texto, pero SI son una respuesta: el cliente
+    // esta contestando y callarse le hace creer que nadie le lee.
+    const esAdjunto = ['image', 'audio', 'video', 'document', 'sticker'].includes(message.type);
+    if (esAdjunto && (await repos.automation.getPrefs()).preventaActiva) {
+      await turnoDePreventa(contact, { texto: '', esPrimerMensaje: isFirstMessage, adjunto: true }, deps);
+    }
+    return;
+  }
 
   // --- baja y alta ------------------------------------------------------
   if (matchesKeyword(text, config.optOutKeywords)) {
@@ -304,7 +325,7 @@ export async function handleInboundMessage(
     // Se responde dentro de la ventana, asi que el gate de opt-out no aplica
     // a esta confirmacion: es la ultima cortesia antes de dejar de escribir.
     await wa
-      .sendText(phone, 'Listo, no volveras a recibir mensajes nuestros. Responde ALTA si cambias de idea.')
+      .sendText(phone, 'Listo, no volverás a recibir mensajes nuestros. Responde ALTA si cambias de idea.')
       .catch(() => undefined);
     return;
   }
@@ -338,7 +359,7 @@ export async function handleInboundMessage(
 
     if (prefs.askLocationFallback) {
       await askForLocation(
-        'No encontre coordenadas en ese mensaje. Comparte tu ubicacion con el boton de abajo.',
+        'No encontré coordenadas en ese mensaje. Compárteme tu ubicación, por favor.',
       );
     }
     return;
@@ -354,9 +375,9 @@ export async function handleInboundMessage(
       kind: 'interactive',
       category: 'UTILITY',
       interactive: {
-        body: `Entendi esta ubicacion: ${describe(result)}\n${result.mapsUrl}\n\n¿Es correcta?`,
+        body: `Entendí esta ubicación: ${describe(result)}\n${result.mapsUrl}\n\n¿Es correcta?`,
         buttons: [
-          { id: `${CONFIRM_PREFIX}${locationId}`, title: 'Si, es esa' },
+          { id: `${CONFIRM_PREFIX}${locationId}`, title: 'Sí, es esa' },
           { id: REJECT_ID, title: 'No, corregir' },
         ],
       },
@@ -365,5 +386,5 @@ export async function handleInboundMessage(
   }
 
   await repos.locations.confirm(locationId);
-  await reply(`Ubicacion registrada: ${describe(result)}\n${result.mapsUrl}`);
+  await reply(`Ubicación registrada: ${describe(result)}\n${result.mapsUrl}`);
 }

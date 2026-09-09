@@ -13,7 +13,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { responder, siguienteCampo, intencionDe, BOTON, type Contexto } from '../src/preventa/flow.js';
+import {
+  BOTON,
+  intencionDe,
+  responder,
+  respuestaValida,
+  siguienteCampo,
+  type Contexto,
+} from '../src/preventa/flow.js';
 import type { Lead, LeadPatch } from '../src/db/leads.js';
 import { nuevaFicha } from './fakes-leads.js';
 
@@ -38,7 +45,7 @@ function conversacion(inicial: Partial<Lead> = {}) {
       return dichos;
     },
     /** Un turno. Devuelve lo que contesto el bot, o null si se callo. */
-    dice(texto: string, extra: { ubicacion?: { lat: number; lng: number } } = {}) {
+    dice(texto: string, extra: { ubicacion?: { lat: number; lng: number }; adjunto?: boolean } = {}) {
       const { patch, respuesta } = responder(
         lead,
         { texto, esPrimerMensaje: primer, ...extra },
@@ -68,9 +75,9 @@ describe('escenario: el cliente escribe "hola" y llega hasta el final', () => {
     expect(c.dice('1')?.texto).toContain('distrito');
 
     // 3. El cuestionario, en orden y sin repetirse.
-    expect(c.dice('Santa Anita')?.texto).toContain('a que distrito');
-    expect(c.dice('Miraflores')?.texto).toContain('Que vas a enviar');
-    expect(c.dice('Una caja de documentos')?.texto).toContain('Para cuando');
+    expect(c.dice('Santa Anita')?.texto).toContain('a qué distrito');
+    expect(c.dice('Miraflores')?.texto).toContain('Qué vas a enviar');
+    expect(c.dice('Una caja de documentos')?.texto).toContain('Para cuándo');
     expect(c.dice('Hoy')?.texto).toContain('nombre');
     expect(c.dice('Roberto Ramirez')?.texto).toContain('DNI');
 
@@ -125,7 +132,7 @@ describe('escenario: el cliente va directo al grano', () => {
     expect(info?.texto).toContain('todo Lima y Callao');
 
     // Y al volver, sigue por donde iba: no vuelve a preguntar el recojo.
-    expect(c.dice('Surco')?.texto).toContain('Que vas a enviar');
+    expect(c.dice('Surco')?.texto).toContain('Qué vas a enviar');
     expect(c.ficha.recojoDistrito).toBe('Santa Anita');
     expect(c.ficha.entregaDistrito).toBe('Surco');
   });
@@ -158,7 +165,7 @@ describe('escenario: el cliente ya dijo cosas antes', () => {
     });
 
     // Salta las tres primeras y va directo a "cuando".
-    expect(c.dice('sigo aqui')?.texto).toContain('Para cuando');
+    expect(c.dice('sigo aqui')?.texto).toContain('Para cuándo');
   });
 
   it('una ficha ya completa se cierra en el primer turno', () => {
@@ -271,5 +278,177 @@ describe('el bot se calla cuando toca', () => {
     // El primer turno pregunta el recojo; un vacio despues no repregunta.
     c.dice('empiezo');
     expect(c.dice('   ')).toBeNull();
+  });
+});
+
+
+/**
+ * Lo que pasa cuando el cliente no colabora.
+ *
+ * Es la mitad que decide si un bot sirve: una conversacion feliz la aguanta
+ * cualquiera. Lo que se prueba aqui es que no se guarde basura en la ficha y
+ * que el bot sepa retirarse en vez de insistir hasta que el cliente se va.
+ */
+describe('respuestas que no se entienden', () => {
+  it('una sola letra no vale como distrito', () => {
+    expect(respuestaValida('recojo', 'a')).toBe(false);
+    expect(respuestaValida('recojo', 'Ate')).toBe(true);
+  });
+
+  it('un numero no vale como distrito ni como nombre', () => {
+    expect(respuestaValida('recojo', '12345')).toBe(false);
+    expect(respuestaValida('nombre', '2')).toBe(false);
+  });
+
+  it('solo emojis o signos no valen para nada', () => {
+    for (const campo of ['recojo', 'entrega', 'contenido', 'nombre'] as const) {
+      expect(respuestaValida(campo, '???')).toBe(false);
+      expect(respuestaValida(campo, '👍')).toBe(false);
+    }
+  });
+
+  it('el documento pide digitos, o un NO explicito', () => {
+    expect(respuestaValida('documento', '45678912')).toBe(true);
+    expect(respuestaValida('documento', '20-100-123-456')).toBe(true);
+    expect(respuestaValida('documento', 'no')).toBe(true);
+    expect(respuestaValida('documento', 'luego te digo')).toBe(false);
+  });
+
+  it('lo que no se entiende no se guarda: mejor hueco que basura', () => {
+    const c = conversacion({ estado: 'en_conversacion' });
+    c.dice('cotizar');
+
+    const aviso = c.dice('???');
+    expect(aviso?.texto).toContain('no te entendí');
+    // Y repite la pregunta en el MISMO mensaje, no en otro aparte.
+    expect(aviso?.texto).toContain('distrito');
+    expect(c.ficha.recojoDistrito).toBeNull();
+  });
+
+  it('a la tercera deja de insistir y pasa a una persona', () => {
+    const c = conversacion({ estado: 'en_conversacion' });
+    c.dice('cotizar');
+
+    expect(c.dice('???')?.texto).toContain('no te entendí');
+    expect(c.dice('!!!')?.texto).toContain('no te entendí');
+
+    const rendicion = c.dice('...');
+    expect(rendicion?.texto).toContain('una persona del equipo');
+    expect(c.ficha.estado).toBe('calificado');
+  });
+
+  it('una respuesta buena reinicia la cuenta de intentos', () => {
+    const c = conversacion({ estado: 'en_conversacion' });
+    c.dice('cotizar');
+    c.dice('???');
+    expect(c.ficha.intentosFallidos).toBe(1);
+
+    c.dice('Santa Anita');
+    expect(c.ficha.intentosFallidos).toBe(0);
+    expect(c.ficha.recojoDistrito).toBe('Santa Anita');
+  });
+});
+
+describe('cuando responde con un audio o una foto', () => {
+  it('se le contesta: esta contestando, aunque no se pueda leer', () => {
+    const c = conversacion({ estado: 'en_conversacion' });
+    c.dice('cotizar');
+
+    const respuesta = c.dice('', { adjunto: true });
+    expect(respuesta?.texto).toContain('solo puedo leer texto');
+    expect(respuesta?.texto).toContain('distrito');
+  });
+
+  it('un adjunto sin pregunta pendiente no dispara el aviso', () => {
+    const c = conversacion({ estado: 'en_conversacion' });
+    const respuesta = c.dice('', { adjunto: true });
+    expect(respuesta?.texto ?? '').not.toContain('solo puedo leer texto');
+  });
+
+  it('insistir con audios acaba pasando a una persona', () => {
+    const c = conversacion({ estado: 'en_conversacion' });
+    c.dice('cotizar');
+    c.dice('', { adjunto: true });
+    c.dice('', { adjunto: true });
+    expect(c.dice('', { adjunto: true })?.texto).toContain('una persona del equipo');
+  });
+});
+
+describe('los textos los edita la tienda', () => {
+  it('un mensaje reescrito manda sobre el de fabrica', () => {
+    const { respuesta } = responder(
+      nuevaFicha('c1'),
+      { texto: 'hola', esPrimerMensaje: true },
+      { ...CTX, mensajes: { bienvenida: 'Hola, somos {negocio} y llegamos a {cobertura}.' } },
+    );
+
+    expect(respuesta?.texto).toBe('Hola, somos GSG Courier y llegamos a todo Lima y Callao.');
+  });
+
+  it('las etiquetas de las opciones tambien', () => {
+    const { respuesta } = responder(
+      nuevaFicha('c1'),
+      { texto: 'hola', esPrimerMensaje: true },
+      { ...CTX, mensajes: { botonCotizar: 'Pedir precio' } },
+    );
+
+    expect(respuesta?.botones?.[0]?.title).toBe('Pedir precio');
+  });
+
+  it('un texto vacio vuelve al de fabrica, no manda un mensaje en blanco', () => {
+    const { respuesta } = responder(
+      nuevaFicha('c1'),
+      { texto: 'hola', esPrimerMensaje: true },
+      { ...CTX, mensajes: { bienvenida: '   ' } },
+    );
+
+    expect(respuesta?.texto).toContain('GSG Courier');
+  });
+
+  it('una variable que no existe se deja a la vista, para que se note el error', () => {
+    const { respuesta } = responder(
+      nuevaFicha('c1'),
+      { texto: 'hola', esPrimerMensaje: true },
+      { ...CTX, mensajes: { bienvenida: 'Precio desde {precio}' } },
+    );
+
+    expect(respuesta?.texto).toBe('Precio desde {precio}');
+  });
+});
+
+describe('elegir servicio o courier', () => {
+  const servicios = ['Express', 'Mismo dia', 'Programado'];
+
+  it('con varios servicios se pregunta cual', () => {
+    const lead = nuevaFicha('c1', {
+      recojoDistrito: 'Ate',
+      entregaDistrito: 'Surco',
+      contenido: 'Sobre',
+    });
+    expect(siguienteCampo(lead, servicios)).toBe('servicio');
+  });
+
+  it('con uno solo no se pregunta: no hay nada que elegir', () => {
+    const lead = nuevaFicha('c1', {
+      recojoDistrito: 'Ate',
+      entregaDistrito: 'Surco',
+      contenido: 'Sobre',
+    });
+    expect(siguienteCampo(lead, ['Express'])).toBe('cuando');
+    expect(siguienteCampo(lead, [])).toBe('cuando');
+  });
+
+  it('el numero elegido se guarda como el nombre del servicio', () => {
+    const lead = nuevaFicha('c1', {
+      estado: 'en_conversacion',
+      recojoDistrito: 'Ate',
+      entregaDistrito: 'Surco',
+      contenido: 'Sobre',
+      preguntaPendiente: 'servicio',
+      ultimasOpciones: ['pv_serv_0', 'pv_serv_1', 'pv_serv_2'],
+    });
+
+    const { patch } = responder(lead, { texto: '3', esPrimerMensaje: false }, { ...CTX, servicios });
+    expect((patch as LeadPatch).servicio).toBe('Programado');
   });
 });

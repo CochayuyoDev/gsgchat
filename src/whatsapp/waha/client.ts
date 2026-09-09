@@ -178,14 +178,14 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
      * funcion de la Cloud API. Se pide por texto explicando donde esta.
      */
     async sendLocationRequest(to, body) {
-      const texto = `${body}\n\nMandamela con el clip 📎 → Ubicacion → Enviar tu ubicacion actual.`;
+      const texto = `${body}\n\nMándamela con el clip 📎 → Ubicación → Enviar tu ubicación actual.`;
       return sendText(to, texto);
     },
 
     /** Los botones interactivos no son fiables en todos los motores: lista numerada. */
     async sendButtons(to, body, buttons) {
       const opciones = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
-      const texto = opciones ? `${body}\n\n${opciones}\n\nResponde con el numero.` : body;
+      const texto = opciones ? `${body}\n\n${opciones}\n\nResponde con el número.` : body;
       return sendText(to, texto);
     },
 

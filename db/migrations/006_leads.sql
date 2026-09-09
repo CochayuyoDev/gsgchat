@@ -76,3 +76,17 @@ alter table leads add column if not exists ultimas_opciones jsonb;
 -- elegir del menu y ese "1" acaba guardado como su distrito de recojo. Hay que
 -- distinguir "estoy esperando el distrito" de "todavia no lo he preguntado".
 alter table leads add column if not exists pregunta_pendiente text;
+
+-- Que servicio o courier eligio el cliente.
+--
+-- La lista de opciones la pone cada tienda desde /panel: aqui solo se guarda
+-- lo que eligio. Texto libre y no una referencia a otra tabla porque la lista
+-- cambia (se anaden couriers, se retiran) y una ficha vieja tiene que seguir
+-- diciendo lo que se acordo entonces.
+alter table leads add column if not exists servicio text;
+
+-- Cuantas veces seguidas no se entendio la respuesta a la pregunta en curso.
+--
+-- Repetir la misma pregunta indefinidamente es lo que hace que la gente cierre
+-- el chat. A la tercera se deja de insistir y se pasa a una persona.
+alter table leads add column if not exists intentos_fallidos integer not null default 0;

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import { cancelEnrollment, enrollContact, runDueMessages } from '../automation/engine.js';
+import { MENSAJES, OPCIONES, mensajesVigentes } from '../preventa/mensajes.js';
 
 export interface AutomationDeps {
   repos: Repos;
@@ -231,11 +232,79 @@ export async function registerAutomationRoutes(
   /** Procesa ahora lo vencido, sin esperar al ticker. */
   app.post('/admin/automation/run', async () => runDueMessages(engine));
 
+  // --- los mensajes del asistente ---------------------------------------
+
+  /**
+   * Todos los mensajes que puede mandar el bot, con lo que dicen ahora.
+   *
+   * Es la pantalla que contesta a "¿que le llega exactamente al cliente?" sin
+   * tener que provocar cada situacion para verlo.
+   */
+  app.get('/admin/preventa/mensajes', async () => {
+    const prefs = await repos.automation.getPrefs();
+    const vigentes = mensajesVigentes(prefs.mensajesPreventa);
+
+    return {
+      mensajes: Object.entries(MENSAJES).map(([clave, def]) => ({
+        clave,
+        cuando: def.cuando,
+        texto: vigentes[clave],
+        porDefecto: def.texto,
+        editado: vigentes[clave] !== def.texto,
+        variables: def.variables,
+      })),
+      opciones: Object.entries(OPCIONES).map(([clave, porDefecto]) => ({
+        clave,
+        texto: vigentes[clave],
+        porDefecto,
+        editado: vigentes[clave] !== porDefecto,
+      })),
+      servicios: prefs.serviciosPreventa,
+      activo: prefs.preventaActiva,
+    };
+  });
+
+  /** Guarda los textos cambiados. Vacio = vuelve al de fabrica. */
+  app.put('/admin/preventa/mensajes', async (request) => {
+    const body = z
+      .object({ mensajes: z.record(z.string().max(2000)).default({}) })
+      .parse(request.body ?? {});
+
+    const conocidas = new Set([...Object.keys(MENSAJES), ...Object.keys(OPCIONES)]);
+    const guardar: Record<string, string> = {};
+    for (const [clave, texto] of Object.entries(body.mensajes)) {
+      // Una clave que no existe seria un texto que nadie manda nunca: se
+      // ignora en vez de guardarse y acumular basura en la configuracion.
+      if (!conocidas.has(clave)) continue;
+      const limpio = texto.trim();
+      if (limpio) guardar[clave] = limpio;
+    }
+
+    const prefs = await repos.automation.setPrefs({ mensajesPreventa: guardar });
+    return { ok: true, mensajes: mensajesVigentes(prefs.mensajesPreventa) };
+  });
+
   // --- preferencias -----------------------------------------------------
   app.get('/admin/automation/prefs', async () => repos.automation.getPrefs());
 
   app.post('/admin/automation/prefs', async (request) => {
-    const body = z.object({ askLocationFallback: z.boolean().optional() }).parse(request.body ?? {});
+    const body = z
+      .object({
+        askLocationFallback: z.boolean().optional(),
+        preventaActiva: z.boolean().optional(),
+        // Los servicios o couriers entre los que elige el cliente. Se limpian
+        // los vacios: una opcion en blanco en la lista sale como un hueco
+        // numerado en el chat y no significa nada.
+        serviciosPreventa: z
+          .array(z.string().trim().max(60))
+          .max(10)
+          .optional()
+          .transform((v) => v?.filter(Boolean)),
+        // Los textos del asistente. Un texto vacio no se guarda: significa
+        // "vuelve al valor de fabrica", no "manda un mensaje en blanco".
+        mensajesPreventa: z.record(z.string().max(2000)).optional(),
+      })
+      .parse(request.body ?? {});
     return repos.automation.setPrefs(body);
   });
 }

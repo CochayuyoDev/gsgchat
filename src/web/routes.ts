@@ -23,6 +23,7 @@ import { panelPage } from './pages.js';
 import { connectPage } from './connect-page.js';
 import { chatPage } from './chat-page.js';
 import { registerConnectRoutes } from './connect-routes.js';
+import { registerDevRoutes } from './dev-routes.js';
 import { registerLocalRoutes } from './local-routes.js';
 import { registerWahaRoutes } from './waha-routes.js';
 
@@ -92,6 +93,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   await registerConnectRoutes(app, { config, settings, wa });
   await registerWahaRoutes(app, { config, settings });
   await registerLocalRoutes(app, { config, repos, sender, wa, settings });
+  await registerDevRoutes(app, { config, repos, sender, wa, settings });
 
   app.get('/panel', async (_request, reply) => {
     const page = html(panelPage(settings.isConfigured(), tokenParaLaPagina()));

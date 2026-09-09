@@ -19,11 +19,13 @@ const CSS = `
     --bg: #eae6df; --panel: #fff; --line: #e3e5e9; --text: #111b21;
     --muted: #667781; --accent: #128c7e; --mine: #d9fdd3; --theirs: #fff;
     --header: #f0f2f5; --badge: #25d366;
+    --wallpaper: #efe7de; --wallpaper-dot: rgba(0,0,0,.035);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0b141a; --panel: #111b21; --line: #222d34; --text: #e9edef;
       --muted: #8696a0; --mine: #005c4b; --theirs: #202c33; --header: #202c33;
+      --wallpaper: #0b141a; --wallpaper-dot: rgba(255,255,255,.03);
     }
   }
   * { box-sizing: border-box; }
@@ -41,11 +43,20 @@ const CSS = `
   .search input { width: 100%; padding: 8px 12px; border: 0; border-radius: 8px;
     background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
   .chats { flex: 1; overflow-y: auto; }
-  .chat { display: flex; gap: 12px; padding: 11px 14px; cursor: pointer; border-bottom: 1px solid var(--line); }
+  .chat {
+    display: flex; gap: 13px; padding: 10px 14px; cursor: pointer;
+    border-bottom: 1px solid var(--line); transition: background .12s;
+  }
   .chat:hover { background: var(--header); }
-  .chat.active { background: var(--header); }
-  .avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: #fff; flex: none;
-    display: grid; place-items: center; font-weight: 700; font-size: 16px; }
+  .chat.active { background: var(--header); box-shadow: inset 4px 0 0 var(--accent); }
+  .chat.active .name { color: var(--accent); }
+  .avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--accent); color: #fff; flex: none;
+    display: grid; place-items: center; font-weight: 600; font-size: 17px; }
+  /* Un color por contacto: con todos del mismo verde la lista es un muro. */
+  .avatar.c0 { background: #6bcbef; } .avatar.c1 { background: #e542a3; }
+  .avatar.c2 { background: #f2a63c; } .avatar.c3 { background: #7a7dd8; }
+  .avatar.c4 { background: #26a69a; } .avatar.c5 { background: #ef6b6b; }
+  .avatar.c6 { background: #8bc34a; } .avatar.c7 { background: #a1887f; }
   .chat .body { flex: 1; min-width: 0; }
   .chat .top { display: flex; align-items: baseline; gap: 8px; }
   .chat .name { font-weight: 600; font-size: 15px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -56,12 +67,51 @@ const CSS = `
   .thread { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
   .thread header .name { font-weight: 600; }
   .thread header .sub { font-size: 12.5px; color: var(--muted); }
-  .messages { flex: 1; overflow-y: auto; padding: 18px 8%; display: flex; flex-direction: column; gap: 3px; }
-  .msg { max-width: min(70%, 560px); padding: 6px 9px 5px; border-radius: 8px; position: relative;
-    box-shadow: 0 1px 0.5px rgba(0,0,0,.13); white-space: pre-wrap; word-wrap: break-word; font-size: 14.5px; }
-  .msg.out { align-self: flex-end; background: var(--mine); border-top-right-radius: 2px; }
-  .msg.in { align-self: flex-start; background: var(--theirs); border-top-left-radius: 2px; }
-  .msg .meta { float: right; margin: 6px 0 0 8px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .messages {
+    flex: 1; overflow-y: auto; padding: 14px 6%; display: flex; flex-direction: column; gap: 2px;
+    background-color: var(--wallpaper);
+    background-image:
+      radial-gradient(circle at 20% 30%, var(--wallpaper-dot) 1px, transparent 1px),
+      radial-gradient(circle at 70% 65%, var(--wallpaper-dot) 1px, transparent 1px);
+    background-size: 42px 42px, 58px 58px;
+  }
+  /* La barra de scroll del hilo, discreta como la del cliente de escritorio. */
+  .messages::-webkit-scrollbar, .chats::-webkit-scrollbar { width: 7px; }
+  .messages::-webkit-scrollbar-thumb, .chats::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,.18); border-radius: 4px;
+  }
+  .messages::-webkit-scrollbar-track, .chats::-webkit-scrollbar-track { background: transparent; }
+  .msg {
+    max-width: min(65%, 520px); padding: 6px 9px 8px; border-radius: 7.5px; position: relative;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,.13); white-space: pre-wrap; word-wrap: break-word;
+    font-size: 14.2px; line-height: 1.4;
+  }
+  .msg.out { align-self: flex-end; background: var(--mine); }
+  .msg.in { align-self: flex-start; background: var(--theirs); }
+
+  /* Mensajes seguidos del mismo lado: se juntan y solo el primero lleva pico,
+     que es como los agrupa WhatsApp y lo que hace legible una rafaga. */
+  .msg + .msg.out, .msg + .msg.in { margin-top: 1px; }
+  .msg.primero { margin-top: 10px; }
+  .msg.primero.out { border-top-right-radius: 0; }
+  .msg.primero.in { border-top-left-radius: 0; }
+  .msg.primero::before {
+    content: ''; position: absolute; top: 0; width: 8px; height: 13px;
+  }
+  .msg.primero.out::before {
+    right: -8px;
+    background: var(--mine);
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+  }
+  .msg.primero.in::before {
+    left: -8px;
+    background: var(--theirs);
+    clip-path: polygon(0 0, 100% 0, 100% 100%);
+  }
+  .msg .meta {
+    float: right; margin: 8px -2px -4px 10px; font-size: 11px; color: var(--muted);
+    white-space: nowrap; position: relative; top: 3px;
+  }
   .msg .tick { color: var(--muted); }
   .msg .tick.read { color: #53bdeb; }
   .msg a { color: var(--accent); }
@@ -78,12 +128,20 @@ const CSS = `
   .visor { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex;
            align-items: center; justify-content: center; z-index: 50; cursor: zoom-out; }
   .visor img, .visor video { max-width: 92vw; max-height: 92vh; border-radius: 6px; }
-  .day { align-self: center; background: var(--header); color: var(--muted); font-size: 12px;
-    padding: 4px 12px; border-radius: 8px; margin: 12px 0 6px; }
-  .composer { background: var(--header); padding: 10px 14px; border-top: 1px solid var(--line);
+  .day {
+    align-self: center; background: var(--panel); color: var(--muted); font-size: 12.5px;
+    padding: 5px 12px; border-radius: 8px; margin: 14px 0 8px; position: sticky; top: 4px;
+    z-index: 2; box-shadow: 0 1px 1px rgba(0,0,0,.1); text-transform: uppercase;
+    letter-spacing: .3px; font-weight: 500;
+  }
+  .composer { background: var(--header); padding: 9px 16px; border-top: 1px solid var(--line);
     display: flex; gap: 10px; align-items: flex-end; }
-  .composer textarea { flex: 1; resize: none; border: 0; border-radius: 10px; padding: 10px 14px;
-    background: var(--panel); color: var(--text); font: inherit; font-size: 14.5px; max-height: 120px; }
+  .composer textarea {
+    flex: 1; resize: none; border: 0; border-radius: 22px; padding: 11px 16px;
+    background: var(--panel); color: var(--text); font: inherit; font-size: 14.5px;
+    max-height: 120px; outline: none;
+  }
+  .composer textarea:focus { box-shadow: 0 0 0 1px var(--line); }
   .composer button { border: 0; border-radius: 50%; width: 44px; height: 44px; background: var(--accent);
     color: #fff; cursor: pointer; font-size: 17px; flex: none; }
   .composer button.ghost { background: transparent; color: var(--muted); font-size: 19px; }
@@ -288,7 +346,7 @@ async function loadChats(keepScroll) {
       var prefijo = last && last.direction === 'out' ? tick(last.status) + ' ' : '';
       var texto = last ? (last.body || '') : 'Sin mensajes todavia';
       return '<div class="chat' + (current && current.id === c.contactId ? ' active' : '') + '" data-id="' + esc(c.contactId) + '">' +
-        '<div class="avatar">' + esc(inicial(c.name, c.phone)) + '</div>' +
+        '<div class="avatar ' + colorDe(c.phone) + '">' + esc(inicial(c.name, c.phone)) + '</div>' +
         '<div class="body"><div class="top">' +
           '<span class="name">' + esc(c.name || c.phone) + '</span>' +
           '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
@@ -351,11 +409,15 @@ function renderMessages(messages, scrollToEnd) {
     lastCount = 0;
     return;
   }
-  var html = '', dia = '';
-  messages.forEach(function (m) {
+  var html = '', dia = '', diaPrevio = '';
+  messages.forEach(function (m, i) {
     var d = dayLabel(m.createdAt);
     if (d !== dia) { dia = d; html += '<div class="day">' + esc(d) + '</div>'; }
-    html += '<div class="msg ' + (m.direction === 'out' ? 'out' : 'in') + '">' +
+    // El primero de cada bloque lleva pico; los siguientes se pegan a el.
+    var primero = i === 0 || messages[i - 1].direction !== m.direction || d !== diaPrevio;
+    diaPrevio = d;
+    html += '<div class="msg ' + (m.direction === 'out' ? 'out' : 'in') +
+      (primero ? ' primero' : '') + '">' +
       adjuntoHtml(m) +
       withLinks(m.body || '') +
       '<span class="meta">' + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
@@ -459,6 +521,19 @@ document.addEventListener('keydown', function (e) {
   var visor = document.querySelector('.visor');
   if (visor) visor.remove();
 });
+
+/**
+ * El color del avatar, derivado del telefono.
+ *
+ * Que sea derivado y no aleatorio importa: el mismo contacto tiene que salir
+ * del mismo color en cada recarga, o la lista deja de reconocerse de un
+ * vistazo.
+ */
+function colorDe(phone) {
+  var suma = 0;
+  for (var i = 0; i < (phone || '').length; i++) suma += phone.charCodeAt(i);
+  return 'c' + (suma % 8);
+}
 
 function renderComposer(data) {
   var composer = document.getElementById('composer');

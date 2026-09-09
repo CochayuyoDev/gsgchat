@@ -116,6 +116,18 @@ const schema = z.object({
    * Se deja encendible por si con una cuenta de WhatsApp Business, u otra
    * version del cliente, si se pintan.
    */
+  /**
+   * Habilita /admin/dev/inbound, que finge un mensaje entrante.
+   *
+   * Solo para probar la conversacion de punta a punta. Apagado por defecto:
+   * un endpoint que finge mensajes de cualquier numero no tiene por que
+   * existir en produccion, aunque este detras del token de admin.
+   */
+  DEV_SIMULATE_INBOUND: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+
   WHATSAPP_NATIVE_BUTTONS: z
     .enum(['true', 'false', '1', '0'])
     .default('false')

@@ -56,6 +56,8 @@ const config = loadConfig({
   BUSINESS_HOURS: process.env.BUSINESS_HOURS?.trim() || 'lunes a sabado de 9:00 a 19:00',
   COVERAGE_NAME: process.env.COVERAGE_NAME?.trim() || '',
   TIMEZONE: process.env.TIMEZONE?.trim() || 'America/Lima',
+  // El arranque corto es para probar: se permite simular entrantes.
+  DEV_SIMULATE_INBOUND: 'true',
 } as NodeJS.ProcessEnv);
 
 const { pool } = await openPglite(DATA_DIR);

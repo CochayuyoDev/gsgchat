@@ -122,7 +122,7 @@ describe('enviar por WAHA', () => {
     const texto = (calls[0]!.body as { text: string }).text;
     expect(texto).toContain('Necesitamos tu ubicacion');
     // Sin la instruccion, el cliente no sabe que hacer con el mensaje.
-    expect(texto).toContain('Ubicacion');
+    expect(texto).toContain('Ubicación');
   });
 
   it('los botones se degradan a una lista numerada', async () => {
