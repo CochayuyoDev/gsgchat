@@ -21,6 +21,17 @@ npm run dev                   # aplica migraciones y arranca
 Abre `http://localhost:3000`. El token de administracion sale en la consola al
 arrancar; la web lo pide una vez.
 
+**El camino corto, sin montar nada:**
+
+```bash
+npm run quick                 # servidor real + WhatsApp real, datos en memoria
+```
+
+Abre `/setup`, elige "Escanear el QR y ya", escanea desde el telefono y estas
+dentro. Ni Postgres, ni Redis, ni Docker, ni cuenta de Meta. La vinculacion se
+guarda en `.wa-auth` y se reutiliza al reiniciar; los datos no, que para eso
+esta el arranque de verdad.
+
 Sin credenciales de Meta se puede ver todo funcionando con datos de ejemplo:
 
 ```bash
@@ -86,6 +97,33 @@ Dos cosas mas que la pantalla resuelve sola:
 En local Meta necesita una URL publica:
 `npx cloudflared tunnel --url http://localhost:3000`, y esa URL en el campo
 correspondiente (o en `PUBLIC_BASE_URL`).
+
+---
+
+## El camino corto: cliente local (no oficial)
+
+Ni contenedor ni app de Meta: el cliente corre **dentro de este mismo proceso**.
+Se pulsa conectar, sale el QR en la pantalla, se escanea y ya. Funciona con
+cualquier WhatsApp, tambien el verde.
+
+Por dentro es [Baileys](https://github.com/WhiskeySockets/Baileys), que habla el
+protocolo de WhatsApp Web por WebSocket sin abrir ningun navegador. Se elige con
+`WHATSAPP_PROVIDER=local` (o desde la pantalla) y **no pide ninguna credencial**:
+la vinculacion vive en `.wa-auth` y sobrevive a los reinicios.
+
+**El precio es el mismo que el de WAHA:** esto emula WhatsApp Web, esta fuera de
+los terminos de Meta, los baneos son permanentes y sin apelacion. Usa un numero
+secundario.
+
+Tambien se puede vincular **sin camara**: escribes tu numero y sale un codigo de
+ocho caracteres que se teclea en el movil (WhatsApp, Dispositivos vinculados,
+Vincular con el numero de telefono).
+
+Las degradaciones son las de WAHA, por el mismo motivo (no hay Meta detras):
+plantilla mandada como texto ya sustituido, boton de ubicacion pedido por texto,
+botones como lista numerada y calidad del numero `NA`, con lo que ese gate se
+queda ciego. Los entrantes no llegan por webhook sino por el socket, y entran
+por el mismo `processChange` con la misma deduplicacion por id.
 
 ---
 
@@ -234,6 +272,7 @@ WhatsApp Cloud API
 |---|---|
 | `src/geo/` | extraccion de lat/lng, sin dependencias externas |
 | `src/whatsapp/` | firma del webhook, cliente de la Graph API, router de eventos |
+| `src/whatsapp/local/` | proveedor local: socket de Baileys, QR, codigo de vinculacion y traductor |
 | `src/whatsapp/waha/` | proveedor no oficial: cliente, sesion con QR y traductor del webhook |
 | `src/handlers/` | conversacion: ubicacion, confirmacion, alta, baja y reglas |
 | `src/automation/` | reglas, secuencias, programados y su ticker |
@@ -408,6 +447,8 @@ Todas bajo `Authorization: Bearer $ADMIN_TOKEN`.
 | POST | `/admin/automation/run` | procesar ahora lo vencido |
 | GET/POST | `/admin/automation/prefs` | preferencias del bot |
 | GET/POST/DELETE | `/admin/tracking` | sesiones de rastreo |
+| POST | `/admin/local/connect` · `/status` · `/logout` | sesion local: QR y estado |
+| POST | `/admin/local/request-code` | codigo de vinculacion por numero, sin QR |
 | GET | `/admin/waha/detect` | busca el contenedor de WAHA en los puertos de siempre |
 | POST | `/admin/waha/connect` · `/status` · `/logout` | sesion de WAHA, QR y estado |
 | POST | `/admin/waha/request-code` | codigo de vinculacion por numero, sin QR |
@@ -444,7 +485,7 @@ la pagina de rastreo.
 
 ## Tests
 
-352 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
+380 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
 en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
 verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
 WebAssembly, asi que tampoco hacen falta Docker ni un servidor.

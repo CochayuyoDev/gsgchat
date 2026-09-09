@@ -26,7 +26,7 @@ const schema = z.object({
   // `waha` es un contenedor de WAHA, que se conecta con codigo QR y funciona
   // con cualquier WhatsApp, a cambio de emular WhatsApp Web (fuera de los
   // terminos de Meta, con riesgo real de baneo del numero).
-  WHATSAPP_PROVIDER: z.enum(['cloud', 'waha']).default('cloud'),
+  WHATSAPP_PROVIDER: z.enum(['cloud', 'waha', 'local']).default('cloud'),
   WAHA_URL: z.string().default(''),
   WAHA_API_KEY: z.string().default(''),
   WAHA_SESSION: z.string().default('default'),

@@ -142,6 +142,8 @@ const CAMPOS_POR_MODO = {
   manual: ['token', 'appId', 'appSecret'],
   // WAHA no tiene app de Meta: solo hay que decirle donde corre el contenedor.
   waha: ['wahaUrl'],
+  // El camino corto no pide nada: la vinculacion ES el QR.
+  local: [],
 } as const;
 
 const AYUDA_CAMPO: Record<string, { titulo: string; pista: string; ph: string }> = {
@@ -221,6 +223,14 @@ export function connectPage(labels: Record<string, string>): string {
 <section class="card" id="paso1">
   <h2><span class="num">1</span> ¿Quieres seguir usando WhatsApp en el movil?</h2>
   <p class="muted">De esto depende todo lo demas. No se puede cambiar despues sin rehacer la conexion.</p>
+
+  <div class="choice" data-mode="local">
+    <b>Escanear el QR y ya <span class="tag">lo mas rapido</span></b>
+    <span>Sin cuenta de Meta, sin contenedor y sin instalar nada: sale el codigo aqui mismo, lo
+    escaneas con el telefono (o lo tecleas) y quedas conectado. Funciona con cualquier WhatsApp,
+    tambien el verde. <b>No es oficial</b>: emula WhatsApp Web, esta fuera de los terminos de Meta
+    y el numero se puede banear. Para probar, usa un numero secundario.</span>
+  </div>
 
   <div class="choice" data-mode="coexistence">
     <b>Si, uso WhatsApp Business en mi telefono <span class="tag">con codigo QR</span></b>
@@ -466,7 +476,7 @@ function elegirModo(nuevo, guardar) {
   pintarPaso2();
   pintarPaso3();
 
-  var quiere = modo === 'waha' ? 'waha' : 'cloud';
+  var quiere = modo === 'waha' ? 'waha' : modo === 'local' ? 'local' : 'cloud';
   if (guardar && guardado.provider !== quiere) {
     api('/admin/settings', { method: 'POST', body: { provider: quiere } })
       .then(load)
@@ -579,14 +589,19 @@ function pintarPaso3() {
   var esMeta = modo === 'coexistence' || modo === 'dedicated';
   fb.classList.toggle('hidden', !esMeta);
   manual.classList.toggle('hidden', modo !== 'manual');
-  waha.classList.toggle('hidden', modo !== 'waha');
-  if (modo !== 'waha') pararSondeo();
+  waha.classList.toggle('hidden', !conQr());
+  if (!conQr()) pararSondeo();
 
-  if (modo === 'waha') {
-    lead.textContent = 'Se crea la sesion en tu contenedor de WAHA y aparece aqui el codigo QR. ' +
-      'Lo escaneas desde el telefono, igual que WhatsApp Web, y el telefono tiene que seguir con ' +
-      'conexion a internet para que la sesion no se caiga.';
-    if (listo) sondearWaha();
+  if (conQr()) {
+    waha.textContent = modo === 'local' ? 'Conectar y mostrar el QR' : 'Crear la sesion y mostrar el QR';
+    lead.textContent = modo === 'local'
+      ? 'Sale el codigo QR aqui mismo. Lo escaneas desde el telefono (WhatsApp, Dispositivos ' +
+        'vinculados) y ya estas dentro. El telefono tiene que seguir con conexion a internet para ' +
+        'que la sesion no se caiga.'
+      : 'Se crea la sesion en tu contenedor de WAHA y aparece aqui el codigo QR. ' +
+        'Lo escaneas desde el telefono, igual que WhatsApp Web, y el telefono tiene que seguir con ' +
+        'conexion a internet para que la sesion no se caiga.';
+    if (listo) sondearQr();
   } else if (modo === 'coexistence') {
     document.getElementById('fb-label').textContent = 'Conectar y ver el codigo QR';
     lead.textContent = 'Se abre la ventana de Meta. Entras con tu cuenta de Facebook, eliges tu ' +
@@ -608,7 +623,16 @@ function pintarPaso3() {
   if (listo && esMeta && opciones.quick) cargarSdk();
 }
 
-/* --- paso 3, variante WAHA: el codigo QR -------------------------------- */
+/* --- paso 3, variantes con QR: local y WAHA ----------------------------- */
+
+/**
+ * Los dos caminos con QR hablan el mismo idioma (mismos estados, mismo QR en
+ * base64), asi que la pantalla es una sola y lo unico que cambia es a quien
+ * le pregunta.
+ */
+function conQr() { return modo === 'local' || modo === 'waha'; }
+function prefijo() { return modo === 'local' ? '/admin/local' : '/admin/waha'; }
+
 var sondeo = null;
 
 function pararSondeo() {
@@ -619,16 +643,16 @@ function pararSondeo() {
  * WAHA tarda unos segundos en generar el QR y el QR caduca solo, asi que la
  * pantalla pregunta el estado cada 3 s y repinta. Se para en cuanto conecta.
  */
-function sondearWaha() {
+function sondearQr() {
   pararSondeo();
-  void estadoWaha();
-  sondeo = setInterval(function () { void estadoWaha(); }, 3000);
+  void estadoQr();
+  sondeo = setInterval(function () { void estadoQr(); }, 3000);
 }
 
-async function estadoWaha() {
+async function estadoQr() {
   var caja = document.getElementById('qr-box');
   try {
-    var r = await api('/admin/waha/status');
+    var r = await api(prefijo() + '/status');
 
     if (!r.configured) { caja.classList.add('hidden'); return; }
     if (!r.ok) { show('fb-state', r.detail || 'WAHA no responde', 'bad'); return; }
@@ -661,11 +685,11 @@ document.getElementById('waha-connect').onclick = async function () {
   boton.disabled = true;
   show('fb-state', 'Creando la sesion en WAHA...', 'warn');
   try {
-    await api('/admin/waha/connect', { method: 'POST', body: {
+    await api(prefijo() + '/connect', { method: 'POST', body: modo === 'local' ? {} : {
       wahaUrl: val('f-wahaUrl') || undefined,
       publicUrl: val('c-url') || undefined
     }});
-    sondearWaha();
+    sondearQr();
   } catch (error) {
     show('fb-state', error.message, 'bad');
   } finally {
@@ -686,7 +710,7 @@ document.getElementById('pair-ask').onclick = async function () {
 
   boton.disabled = true;
   try {
-    var r = await api('/admin/waha/request-code', { method: 'POST', body: { phone: telefono } });
+    var r = await api(prefijo() + '/request-code', { method: 'POST', body: { phone: telefono } });
     var caja = document.getElementById('pair-code');
     // WAHA lo manda de corrido; partirlo por la mitad es como lo enseña la app.
     caja.textContent = r.code.length === 8 ? r.code.slice(0, 4) + ' ' + r.code.slice(4) : r.code;
@@ -702,9 +726,9 @@ document.getElementById('pair-ask').onclick = async function () {
 
 document.getElementById('waha-logout').onclick = async function () {
   try {
-    await api('/admin/waha/logout', { method: 'POST', body: {} });
+    await api(prefijo() + '/logout', { method: 'POST', body: {} });
     show('fb-state', 'Telefono desvinculado', 'warn');
-    sondearWaha();
+    sondearQr();
   } catch (error) { show('fb-state', error.message, 'bad'); }
 };
 
@@ -900,7 +924,7 @@ async function load() {
     // maquina y solo tiene que poder llegar a este servidor. Avisar de lo
     // contrario mandaria al usuario a montar algo que no necesita.
     var aviso = document.getElementById('aviso-url');
-    if (modo !== 'waha' && !opciones.reachable && !/^https:\/\//.test(val('c-url'))) {
+    if (!conQr() && !opciones.reachable && !/^https:\/\//.test(val('c-url'))) {
       aviso.innerHTML = '<b>Meta no puede entrar en una direccion local.</b> Levanta un tunel con ' +
         '<code>npx cloudflared tunnel --url http://localhost:' + esc(location.port || '3000') + '</code> ' +
         'y pega aqui la direccion que te de.';
@@ -911,6 +935,7 @@ async function load() {
 
     // Sin eleccion previa, manda lo que ya este guardado en el servidor.
     if (!modo && guardado.provider === 'waha') modo = 'waha';
+    if (!modo && guardado.provider === 'local') modo = 'local';
 
     if (modo) elegirModo(modo, false);
     else { pintarPaso2(); pintarPaso3(); }

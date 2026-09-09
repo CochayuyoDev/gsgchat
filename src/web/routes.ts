@@ -23,6 +23,7 @@ import { panelPage } from './pages.js';
 import { connectPage } from './connect-page.js';
 import { chatPage } from './chat-page.js';
 import { registerConnectRoutes } from './connect-routes.js';
+import { registerLocalRoutes } from './local-routes.js';
 import { registerWahaRoutes } from './waha-routes.js';
 
 export interface WebDeps {
@@ -49,7 +50,7 @@ const credentialsSchema = z.object({
   appSecret: z.string().optional(),
   verifyToken: z.string().optional(),
   mapsApiKey: z.string().optional(),
-  provider: z.enum(['cloud', 'waha']).optional(),
+  provider: z.enum(['cloud', 'waha', 'local']).optional(),
   wahaUrl: z.string().optional(),
   wahaApiKey: z.string().optional(),
   wahaSession: z.string().optional(),
@@ -86,6 +87,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   await registerConnectRoutes(app, { config, settings, wa });
   await registerWahaRoutes(app, { config, settings });
+  await registerLocalRoutes(app, { config, repos, sender, wa, settings });
 
   app.get('/panel', async (_request, reply) => {
     const page = html(panelPage(settings.isConfigured()));

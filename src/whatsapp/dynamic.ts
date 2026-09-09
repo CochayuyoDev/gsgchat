@@ -9,6 +9,7 @@
 
 import { providerOf, type SettingsService } from '../settings/service.js';
 import { createWhatsAppClient, WhatsAppApiError, type WhatsAppClient } from './client.js';
+import { createLocalClient } from './local/client.js';
 import { createWahaClient } from './waha/client.js';
 
 export class NotConfiguredError extends Error {
@@ -38,6 +39,10 @@ export function createDynamicWhatsAppClient(
     if (missing.length) throw new NotConfiguredError(missing);
 
     const credentials = settings.current();
+
+    if (providerOf(credentials) === 'local') {
+      return createLocalClient({ resolveTemplateBody: deps.resolveTemplateBody });
+    }
 
     if (providerOf(credentials) === 'waha') {
       return createWahaClient({

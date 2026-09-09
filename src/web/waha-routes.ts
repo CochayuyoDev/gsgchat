@@ -68,6 +68,20 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
       return reply.code(400).send({ error: 'Falta la direccion del contenedor de WAHA.' });
     }
 
+    // Comprobar que ahi vive un WAHA ANTES de guardar nada ni crear la sesion.
+    // El fallo tipico es apuntar a este mismo servidor: entonces el POST a
+    // /api/sessions se estrella contra nuestro propio router y el usuario ve
+    // un "Route POST:/api/sessions not found" que no explica nada.
+    if (!(await detectWaha([wahaUrl]))) {
+      return reply.code(400).send({
+        error:
+          `En ${wahaUrl} no hay ningun WAHA escuchando. ` +
+          'Arranca el contenedor con "docker run -d -p 3001:3000 devlikeapro/waha" ' +
+          'y usa http://localhost:3001. Ojo: el 3000 suele ser este mismo servidor.',
+        step: 'buscar el contenedor',
+      });
+    }
+
     // La clave del HMAC se la inventa el sistema, igual que el verify token de
     // Meta: es una cadena que solo tienen que compartir WAHA y nosotros.
     const verifyToken = current.verifyToken || randomBytes(18).toString('base64url');

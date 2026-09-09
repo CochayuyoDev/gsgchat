@@ -15,7 +15,7 @@ import type { Config } from '../config.js';
 import { decrypt, encrypt, keyFromBase64 } from './crypto.js';
 
 /** Por donde sale y entra WhatsApp. Ver `WHATSAPP_PROVIDER` en config. */
-export type Provider = 'cloud' | 'waha';
+export type Provider = 'cloud' | 'waha' | 'local';
 
 export interface WhatsAppCredentials {
   token: string;
@@ -52,7 +52,7 @@ export const FIELD_LABELS: Record<CredentialField, string> = {
   appSecret: 'Clave secreta de la app',
   verifyToken: 'Token de verificacion del webhook',
   mapsApiKey: 'Clave de Google Maps (opcional)',
-  provider: 'Proveedor (cloud o waha)',
+  provider: 'Proveedor (cloud, waha o local)',
   wahaUrl: 'Direccion del contenedor de WAHA',
   wahaApiKey: 'Clave de la API de WAHA (opcional)',
   wahaSession: 'Nombre de la sesion de WAHA',
@@ -61,7 +61,9 @@ export const FIELD_LABELS: Record<CredentialField, string> = {
 
 /** El proveedor guardado, validado; cualquier otra cosa cae a `cloud`. */
 export function providerOf(credentials: WhatsAppCredentials): Provider {
-  return credentials.provider === 'waha' ? 'waha' : 'cloud';
+  if (credentials.provider === 'waha') return 'waha';
+  if (credentials.provider === 'local') return 'local';
+  return 'cloud';
 }
 
 const KEY_PREFIX = 'whatsapp.';
@@ -94,6 +96,8 @@ export interface SettingsService {
 const REQUIRED_BY_PROVIDER: Record<Provider, CredentialField[]> = {
   cloud: ['token', 'phoneNumberId', 'businessAccountId', 'appSecret', 'verifyToken'],
   waha: ['wahaUrl', 'verifyToken'],
+  // El modo local no pide NADA: la vinculacion es el QR y vive en disco.
+  local: [],
 };
 
 export async function createSettingsService(

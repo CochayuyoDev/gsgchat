@@ -9,3 +9,6 @@ dist/
 # Clave de cifrado, token de admin y firma de los enlaces de rastreo.
 # Se genera sola en el primer arranque.
 .secrets.json
+
+# Vinculacion del cliente local de WhatsApp: son credenciales.
+.wa-auth/
