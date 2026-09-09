@@ -98,6 +98,7 @@ export function coincideDelTodo(producto: ProductoStoky, consulta: string): bool
   return palabras.every((p) => formasDe(p).some((f) => texto.includes(f)));
 }
 
+/* eslint-disable no-use-before-define */
 /**
  * Palabras que aparecen en la pregunta y no describen el producto.
  *
@@ -156,11 +157,12 @@ const normaliza = (texto: string): string =>
  * negro" no escribe el nombre exacto del catálogo. Cero significa que no
  * aparece ninguna de sus palabras y no se ofrece.
  */
+/** Debajo de esto, una palabra solo cuenta si aparece entera. */
+const MINIMO_PARA_BUSCAR_DENTRO = 5;
+
 export function puntuar(producto: ProductoStoky, consulta: string): number {
   const texto = normaliza(`${producto.name} ${producto.product ?? ''} ${producto.sku}`);
-  const palabras = normaliza(consulta)
-    .split(/\s+/)
-    .filter((p) => p.length >= 3);
+  const palabras = palabrasDe(consulta).filter((p) => !RUIDO.has(p));
 
   if (!palabras.length) return 0;
 
@@ -169,8 +171,18 @@ export function puntuar(producto: ProductoStoky, consulta: string): number {
   let puntos = 0;
   for (const palabra of palabras) {
     const formas = formasDe(palabra);
-    if (formas.some((f) => sueltas.has(f))) puntos += 12;
-    else if (formas.some((f) => texto.includes(f))) puntos += 8;
+
+    if (formas.some((f) => sueltas.has(f))) {
+      puntos += 12;
+      continue;
+    }
+
+    // Una palabra corta DENTRO de otra es casi siempre casualidad: "las"
+    // aparece en "clasico", y con eso preguntar por unas zapatillas devolvia
+    // un pantalon. Solo las largas valen como fragmento.
+    if (palabra.length >= MINIMO_PARA_BUSCAR_DENTRO && formas.some((f) => texto.includes(f))) {
+      puntos += 8;
+    }
   }
   if (!puntos) return 0;
 
@@ -295,33 +307,39 @@ export function createStokyClient(opts: StokyClientOptions): StokyClient {
       const casan = todos
         .map((producto) => ({ producto, puntos: puntuar(producto, texto) }))
         .filter((x) => x.puntos > 0)
-        .sort((a, b) => b.puntos - a.puntos)
-        .map((x) => x.producto);
+        .sort((a, b) => b.puntos - a.puntos);
 
-      const disponibles = casan.filter((p) => p.stock > 0).slice(0, 3);
-      const agotados = casan.filter((p) => p.stock <= 0);
+      if (!casan.length) return { disponibles: [], agotados: [], similares: [] };
 
-      // Con algo disponible no hace falta ofrecer alternativas: ya se le está
-      // dando lo que pidió.
-      if (disponibles.length || !agotados.length) {
-        return { disponibles, agotados: disponibles.length ? [] : agotados.slice(0, 3), similares: [] };
+      const conStock = casan.filter((x) => x.producto.stock > 0);
+      const sinStock = casan.filter((x) => x.producto.stock <= 0);
+
+      // Lo que decide es la PUNTUACION, no el stock. Si lo que mejor casa con
+      // lo que pidio esta agotado, hay que decirselo: contestar con otra cosa
+      // que casa peor -aunque la haya- es no responder a lo que pregunto.
+      const mejorConStock = conStock[0]?.puntos ?? 0;
+      const mejorSinStock = sinStock[0]?.puntos ?? 0;
+
+      if (mejorConStock >= mejorSinStock) {
+        return {
+          disponibles: conStock.slice(0, 3).map((x) => x.producto),
+          agotados: [],
+          similares: [],
+        };
       }
 
-      // Nada de lo que pidió tiene stock. Lo parecido se busca ampliando la
-      // consulta con el nombre del producto agotado: quien pidió "arroz extra
-      // 5kg" y no lo hay, quiere ver los otros arroces.
-      const referencia = `${texto} ${agotados[0]?.product ?? ''} ${agotados[0]?.name ?? ''}`;
-      const yaNombrados = new Set(agotados.slice(0, 3).map((p) => p.sku));
-
-      const similares = todos
-        .filter((p) => p.stock > 0 && !yaNombrados.has(p.sku))
-        .map((producto) => ({ producto, puntos: puntuar(producto, referencia) }))
-        .filter((x) => x.puntos > 0)
-        .sort((a, b) => b.puntos - a.puntos)
+      // Lo que pidio esta agotado. Lo parecido son los que SI hay, empezando
+      // por el que mas se le parece; si no hay ninguno, no se ofrece nada.
+      const agotados = sinStock
+        .filter((x) => x.puntos === mejorSinStock)
         .slice(0, 3)
         .map((x) => x.producto);
 
-      return { disponibles: [], agotados: agotados.slice(0, 3), similares };
+      return {
+        disponibles: [],
+        agotados,
+        similares: conStock.slice(0, 3).map((x) => x.producto),
+      };
     },
 
     async buscar(texto, limite = 3) {
