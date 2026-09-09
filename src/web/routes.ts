@@ -23,12 +23,15 @@ import { panelPage } from './pages.js';
 import { connectPage } from './connect-page.js';
 import { chatPage } from './chat-page.js';
 import { registerConnectRoutes } from './connect-routes.js';
+import type { StokyClient } from '../stoky/client.js';
 import { registerDevRoutes } from './dev-routes.js';
 import { registerLocalRoutes } from './local-routes.js';
 import { registerWahaRoutes } from './waha-routes.js';
 
 export interface WebDeps {
   config: Config;
+  /** El catalogo de Stoky, si esta conectado. */
+  catalogo?: StokyClient;
   settings: SettingsService;
   wa: WhatsAppClient;
   sender: Sender;
@@ -62,7 +65,7 @@ const credentialsSchema = z.object({
 const TEST_TEMPLATE = { name: 'hello_world', language: 'en_US' };
 
 export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Promise<void> {
-  const { config, settings, wa, sender, repos } = deps;
+  const { config, settings, wa, sender, repos, catalogo } = deps;
   const publicBase = config.PUBLIC_BASE_URL.replace(/\/+$/, '');
   // Cada proveedor tiene su endpoint: la pantalla debe enseñar el del activo,
   // porque es la direccion que hay que pegar en Meta o darle a WAHA.
@@ -92,8 +95,8 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   await registerConnectRoutes(app, { config, settings, wa });
   await registerWahaRoutes(app, { config, settings });
-  await registerLocalRoutes(app, { config, repos, sender, wa, settings });
-  await registerDevRoutes(app, { config, repos, sender, wa, settings });
+  await registerLocalRoutes(app, { config, repos, sender, wa, settings, catalogo });
+  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo });
 
   app.get('/panel', async (_request, reply) => {
     const page = html(panelPage(settings.isConfigured(), tokenParaLaPagina()));

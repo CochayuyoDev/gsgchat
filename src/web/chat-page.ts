@@ -683,8 +683,49 @@ setInterval(function () {
   if (deseado) openChat(deseado, true);
 }, 5000);
 
+/**
+ * Abrir un chat desde fuera: /chat?phone=51999888777&text=Hola...
+ *
+ * Es la puerta por la que entra Stoky. Su boton de "hablar por WhatsApp" en
+ * seguimiento y cobranza ya arma el mensaje con el saldo exacto y el numero de
+ * pedido; lo unico que cambia es que en vez de abrir wa.me abre esto, y la
+ * conversacion queda dentro del sistema en vez de en el WhatsApp personal de
+ * quien pulso el boton.
+ *
+ * El contacto se crea si no existe: quien viene de una venta puede no haber
+ * escrito nunca todavia.
+ */
+async function abrirDesdeUrl() {
+  var params = new URLSearchParams(location.search);
+  var tel = (params.get('phone') || '').replace(/\D+/g, '');
+  if (!tel) return;
+
+  try {
+    var r = await api('/admin/chat/start', { method: 'POST', body: { phone: tel } });
+    await loadChats();
+    await openChat(r.contact.id);
+
+    var texto = params.get('text');
+    if (texto) {
+      // Se deja escrito, NO se manda: quien pulso el boton tiene que poder
+      // leerlo y cambiarlo antes de que le llegue al cliente.
+      var caja = document.getElementById('text');
+      caja.value = texto;
+      caja.focus();
+      caja.setSelectionRange(texto.length, texto.length);
+      caja.dispatchEvent(new Event('input'));
+    }
+
+    // La URL se limpia para que recargar no vuelva a abrir lo mismo ni deje
+    // el mensaje del cliente colgado en el historial del navegador.
+    history.replaceState(null, '', '/chat');
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 loadTemplates();
-loadChats();
+loadChats().then(abrirDesdeUrl);
 `}
 </script>
 </body></html>`;

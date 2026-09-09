@@ -23,6 +23,7 @@ import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { providerOf, createSettingsService } from '../src/settings/service.js';
 import { createDynamicWhatsAppClient } from '../src/whatsapp/dynamic.js';
 import { defaultAuthDir } from '../src/whatsapp/local/session.js';
+import { createStokyClient } from '../src/stoky/client.js';
 import { secretsDirectory } from '../src/runtime.js';
 import { CATALOG } from '../src/templates/catalog.js';
 import { countVariables } from '../src/templates/render.js';
@@ -58,6 +59,9 @@ const config = loadConfig({
   TIMEZONE: process.env.TIMEZONE?.trim() || 'America/Lima',
   // El arranque corto es para probar: se permite simular entrantes.
   DEV_SIMULATE_INBOUND: 'true',
+  // El catalogo de Stoky: precios y stock salen de ahi, no de una copia.
+  STOKY_URL: process.env.STOKY_URL?.trim() || '',
+  STOKY_TOKEN: process.env.STOKY_TOKEN?.trim() || '',
 } as NodeJS.ProcessEnv);
 
 const { pool } = await openPglite(DATA_DIR);
@@ -86,6 +90,12 @@ const sender = createSender({
 
 const queue = createMemoryOutboundQueue({ sender });
 
+// Sin las dos variables no hay catalogo, y el asistente hace todo lo demas.
+const catalogo =
+  config.STOKY_URL && config.STOKY_TOKEN
+    ? createStokyClient({ baseUrl: config.STOKY_URL, token: config.STOKY_TOKEN })
+    : undefined;
+
 // El catalogo local hace de catalogo aprobado: sin Meta no hay a quien pedir
 // permiso, pero los gates siguen exigiendo que la plantilla exista y este
 // aprobada antes de dejar salir nada. Se refresca en cada arranque por si el
@@ -107,7 +117,19 @@ for (const template of CATALOG) {
 // va llenando la ficha. Una regla `first_message` encima seria un segundo
 // mensaje por el mismo entrante, que es justo lo que no puede pasar.
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, catalogo, logger: false });
+
+if (catalogo) {
+  // Se trae el catalogo ANTES de atender a nadie: el primer cliente del dia no
+  // tiene por que esperar a que cargue, y si Stoky esta caido se sabe aqui y
+  // no en mitad de una conversacion.
+  const [estado, precarga] = await Promise.all([catalogo.ping(), catalogo.precargar()]);
+  console.log(
+    estado.ok
+      ? `  Stoky conectado: ${estado.tenant} / ${estado.warehouse} (${precarga.total} productos)`
+      : `  Stoky NO responde: ${estado.detail}`,
+  );
+}
 await app.listen({ port: PORT, host: '127.0.0.1' });
 
 console.log(`

@@ -15,6 +15,7 @@ import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { createSeenCache, processChange, type WebhookDeps } from '../whatsapp/webhook.js';
+import type { StokyClient } from '../stoky/client.js';
 import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
 import {
   defaultAuthDir,
@@ -26,6 +27,7 @@ import {
 
 export interface LocalRoutesDeps {
   config: Config;
+  catalogo?: StokyClient;
   repos: Repos;
   sender: Sender;
   wa: WhatsAppClient;
@@ -59,13 +61,13 @@ export async function registerLocalRoutes(
   app: FastifyInstance,
   deps: LocalRoutesDeps,
 ): Promise<void> {
-  const { config, repos, sender, wa, settings } = deps;
+  const { config, repos, sender, wa, settings, catalogo } = deps;
   const authDir = defaultAuthDir();
   const mediaDir = mediaDirectory();
 
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, seen: createSeenCache() };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, seen: createSeenCache() };
 
   async function arrancar() {
     return startLocal({

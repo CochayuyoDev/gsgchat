@@ -123,6 +123,18 @@ const schema = z.object({
    * un endpoint que finge mensajes de cualquier numero no tiene por que
    * existir en produccion, aunque este detras del token de admin.
    */
+  /**
+   * Donde corre Stoky, y con que token se le pregunta.
+   *
+   * El catalogo -precios y stock- vive alli, no aqui: copiarlo significaria
+   * cotizar con precios viejos el dia que alguien los suba. Vacio = el
+   * asistente sigue funcionando y simplemente no cotiza.
+   *
+   * El token sale de `php scripts/conexion-whatsapp.php <tienda>` en Stoky.
+   */
+  STOKY_URL: z.string().default(''),
+  STOKY_TOKEN: z.string().default(''),
+
   DEV_SIMULATE_INBOUND: z
     .enum(['true', 'false', '1', '0'])
     .default('false')

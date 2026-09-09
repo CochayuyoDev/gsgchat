@@ -19,11 +19,13 @@ import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
+import type { StokyClient } from '../stoky/client.js';
 import { processChange, type WebhookDeps } from '../whatsapp/webhook.js';
 import type { ChangeValue } from '../whatsapp/types.js';
 
 export interface DevRoutesDeps {
   config: Config;
+  catalogo?: StokyClient;
   repos: Repos;
   sender: Sender;
   wa: WhatsAppClient;
@@ -39,10 +41,10 @@ const simularSchema = z.object({
 });
 
 export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDeps): Promise<void> {
-  const { config, repos, sender, wa, settings } = deps;
+  const { config, repos, sender, wa, settings, catalogo } = deps;
   if (!config.DEV_SIMULATE_INBOUND) return;
 
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo };
 
   /**
    * Mete un entrante como si lo hubiera mandado ese numero.

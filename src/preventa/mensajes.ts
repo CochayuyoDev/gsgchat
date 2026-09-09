@@ -95,6 +95,27 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
       'Con esto ya te preparamos la cotización. En un momento te escribe una persona del equipo.',
     variables: VARIABLES_COMUNES,
   },
+  precioEncontrado: {
+    cuando: 'Cuando pregunta por un producto y se encuentra en el catálogo.',
+    texto: 'Esto es lo que tenemos:',
+    variables: VARIABLES_COMUNES,
+  },
+  precioAproximado: {
+    cuando: 'Cuando lo que pidió no está, pero hay algo parecido. Evita dar por bueno un producto que no es.',
+    texto: 'No tengo exactamente eso, pero sí esto:',
+    variables: VARIABLES_COMUNES,
+  },
+  precioSinResultado: {
+    cuando: 'Cuando pregunta por algo que no está en el catálogo.',
+    texto:
+      'No encontré ese producto en nuestro catálogo. ¿Me lo describes de otra forma? También puedo pasarte con una persona del equipo.',
+    variables: VARIABLES_COMUNES,
+  },
+  precioSinCatalogo: {
+    cuando: 'Cuando pregunta precios y el catálogo no está conectado.',
+    texto: 'Te paso con una persona del equipo para darte el precio exacto.',
+    variables: VARIABLES_COMUNES,
+  },
   noEntendi: {
     cuando: 'Cuando la respuesta no encaja con lo que se preguntó. Se repite la pregunta.',
     texto: 'Perdona, no te entendí bien.',

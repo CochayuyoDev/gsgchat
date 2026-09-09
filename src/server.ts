@@ -18,12 +18,15 @@ import { registerTrackingRoutes } from './tracking/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
 import { registerWebRoutes } from './web/routes.js';
 import type { SettingsService } from './settings/service.js';
+import type { StokyClient } from './stoky/client.js';
 import { TrackingHub } from './tracking/realtime.js';
 import { TemplateRenderError } from './templates/render.js';
 
 export interface ServerDeps {
   config: Config;
   repos: Repos;
+  /** El catalogo de Stoky, si esta conectado. Ver InboundDeps. */
+  catalogo?: StokyClient;
   settings: SettingsService;
   wa: WhatsAppClient;
   sender: Sender;
@@ -32,7 +35,7 @@ export interface ServerDeps {
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const { config, repos, wa, sender, queue, settings } = deps;
+  const { config, repos, wa, sender, queue, settings, catalogo } = deps;
 
   const app = Fastify({
     logger: deps.logger ?? true,
@@ -96,7 +99,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // El orden importa: registerAdminRoutes instala el hook que exige el token
   // en todo /admin, y debe estar antes de que se sirva cualquier ruta /admin.
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
   await registerWahaWebhookRoutes(app, {
@@ -105,6 +108,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     sender,
     wa,
     settings,
+    catalogo,
     hmacKey: () => settings.current().verifyToken,
   });
   await registerTrackingRoutes(app, { repos, config, hub, settings });
@@ -118,7 +122,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     hub,
     adminToken: config.ADMIN_TOKEN,
   });
-  await registerWebRoutes(app, { config, settings, wa, sender, repos });
+  await registerWebRoutes(app, { config, settings, wa, sender, repos, catalogo });
 
   return app;
 }

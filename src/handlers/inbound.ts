@@ -26,6 +26,8 @@ import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { ExtractionSuccess, FailureReason } from '../types.js';
 import { responder, type Entrada as EntradaPreventa } from '../preventa/flow.js';
 import { saludoPorHora } from '../automation/engine.js';
+import { mensajesVigentes, render } from '../preventa/mensajes.js';
+import { coincideDelTodo, type StokyClient, type ProductoStoky } from '../stoky/client.js';
 import type { MessageKind } from '../db/messages.js';
 import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
 
@@ -34,6 +36,14 @@ export interface InboundDeps {
   sender: Sender;
   wa: WhatsAppClient;
   config: Config;
+  /**
+   * El catalogo de Stoky, si esta conectado.
+   *
+   * Opcional a proposito: sin el, el asistente hace todo lo demas y
+   * simplemente no cotiza precios. Una integracion caida no puede dejar sin
+   * atender a quien escribe.
+   */
+  catalogo?: StokyClient;
 }
 
 export const CONFIRM_PREFIX = 'loc_ok:';
@@ -128,6 +138,10 @@ export async function turnoDePreventa(
     repos.automation.getPrefs(),
   ]);
 
+  // Una consulta de precio se contesta con el catalogo y NO sigue al flujo:
+  // dos respuestas por un mensaje es justo lo que no puede pasar.
+  if (await contestarPrecio(contact, entrada, lead, prefs.mensajesPreventa, deps)) return;
+
   const { patch, respuesta } = responder(lead, entrada, {
     negocio: config.businessName,
     cobertura: config.coverageName || 'tu zona',
@@ -166,6 +180,79 @@ export async function turnoDePreventa(
     category: 'UTILITY',
     text: respuesta.texto,
   });
+}
+
+/**
+ * Contesta una consulta de precio con el catalogo de Stoky.
+ *
+ * Devuelve true si contesto, para que el flujo no anada una segunda respuesta.
+ *
+ * Lo que decide si la pregunta es de producto es el propio catalogo: "cuanto
+ * cuesta el zapato negro" encuentra algo y se contesta con precios; "cuanto
+ * cuesta mandar un paquete" no encuentra nada y sigue al flujo, que lo trata
+ * como una peticion de cotizacion. Adivinar la intencion con palabras sueltas
+ * confundiria las dos.
+ */
+async function contestarPrecio(
+  contact: Contact,
+  entrada: EntradaPreventa,
+  lead: { estado: string; preguntaPendiente: string | null },
+  overrides: Record<string, string> | undefined,
+  deps: InboundDeps,
+): Promise<boolean> {
+  const { sender, config, catalogo } = deps;
+  const texto = entrada.texto.trim();
+
+  if (!texto || !catalogo) return false;
+  // En manos de una persona el bot no se mete, ni para dar un precio.
+  if (lead.estado === 'calificado' || lead.estado === 'enviado') return false;
+  // A mitad de una pregunta, lo que escribe es la respuesta, no una consulta.
+  if (lead.preguntaPendiente) return false;
+
+  let encontrados: ProductoStoky[] = [];
+  try {
+    encontrados = await catalogo.buscar(texto, 3);
+  } catch {
+    // Stoky caido no puede dejar sin atender a quien escribe: sigue el flujo.
+    return false;
+  }
+
+  if (!encontrados.length) return false;
+
+  const vigentes = mensajesVigentes(overrides ?? {});
+  const sustituciones = {
+    saludo: saludoPorHora(new Date(), config.timezone),
+    negocio: config.businessName,
+    cobertura: config.coverageName || 'tu zona',
+    horario: config.businessHours,
+  };
+
+  const lineas = encontrados.map((p) => {
+    const precio = p.price == null ? 'consultar' : `S/ ${p.price.toFixed(2)}`;
+    // El stock se dice solo cuando NO hay: prometer algo agotado hace perder
+    // el viaje, y anunciar "quedan 11" invita a regatear.
+    const agotado = p.stock > 0 ? '' : ' (sin stock ahora)';
+    return `• ${p.name} — ${precio}${agotado}`;
+  });
+
+  // Contestar "Casaca de cuero" a quien preguntó por una casaca impermeable
+  // con el mismo aplomo que si fuera esa es el fallo caro: el cliente cree que
+  // le cotizaron lo que pidió. Si no coincide del todo, se dice.
+  const exacto = encontrados.some((p) => coincideDelTodo(p, texto));
+  const encabezado = render(
+    (exacto ? vigentes.precioEncontrado : vigentes.precioAproximado) ?? '',
+    sustituciones,
+  );
+
+  await sender.send({
+    phone: contact.phone,
+    kind: 'freeform',
+    category: 'UTILITY',
+    manual: false,
+    text: `${encabezado}\n\n${lineas.join('\n')}`,
+  });
+
+  return true;
 }
 
 /** Aplica una regla: responde si tiene texto e inscribe si apunta a una secuencia. */
