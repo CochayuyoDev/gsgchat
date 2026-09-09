@@ -10,7 +10,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   coincideDelTodo,
   createStokyClient,
+  etiquetaVariante,
   formasDe,
+  pareceConsultaDeProducto,
   palabrasDe,
   puntuar,
   type ProductoStoky,
@@ -274,5 +276,94 @@ describe('el cliente escribe en plural y el catalogo en singular', () => {
   it('no se recorta tanto que empiece a casar con cualquier cosa', () => {
     // "mes" no puede convertirse en "m": casaria con media tienda.
     expect(formasDe('mes')).not.toContain('m');
+  });
+});
+
+/**
+ * Variantes: el mismo producto en otro color o en otra talla.
+ *
+ * Es lo que suele cerrar la venta cuando lo que pidió el cliente se agotó:
+ * ofrecerle la talla 38 del mismo zapato resuelve; ofrecerle un pantalón, no.
+ */
+describe('variantes de un producto', () => {
+  const zapato = (variante: string, stock: number, precio = 189.9): ProductoStoky => ({
+    sku: `ALIP-001-${variante.replace(/[^A-Z0-9]/g, '')}`,
+    name: `Zapato de vestir clásico — ${variante}`,
+    product: 'Zapato de vestir clásico',
+    price: precio,
+    stock,
+  });
+
+  const CON_VARIANTES = [
+    zapato('NEGRO / 38', 5),
+    zapato('NEGRO / 40', 0),
+    zapato('MARRON / 40', 3),
+    { sku: 'ALIP-009', name: 'Mocasín de cuero', product: 'Mocasín de cuero', price: 169.9, stock: 4 },
+  ];
+
+  function conVariantes() {
+    const impl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: CON_VARIANTES })),
+    ) as unknown as typeof fetch;
+    return createStokyClient({ baseUrl: 'http://x', token: 'stk', fetchImpl: impl });
+  }
+
+  it('la etiqueta de la variante sale del nombre, sin el producto delante', () => {
+    expect(etiquetaVariante(zapato('NEGRO / 40', 1))).toBe('NEGRO / 40');
+  });
+
+  it('un producto sin variantes no tiene etiqueta', () => {
+    expect(
+      etiquetaVariante({ sku: 'X', name: 'Arroz extra 5kg', product: 'Arroz extra 5kg', price: 28, stock: 5 }),
+    ).toBeNull();
+  });
+
+  it('la talla pedida manda: la 40 agotada no se sustituye por la 38 en silencio', async () => {
+    const r = await conVariantes().consultar('zapato de vestir negro talla 40');
+
+    expect(r.disponibles).toHaveLength(0);
+    expect(r.agotados[0]?.name).toContain('NEGRO / 40');
+    // Y se ofrecen las otras presentaciones del MISMO zapato.
+    expect(r.otrasVariantes.map((p) => p.name).join(' ')).toContain('NEGRO / 38');
+    expect(r.similares).toHaveLength(0);
+  });
+
+  it('sin talla, se ofrecen las que hay', async () => {
+    const r = await conVariantes().consultar('zapato de vestir');
+    expect(r.agotados).toHaveLength(0);
+    expect(r.disponibles.length).toBeGreaterThan(0);
+    expect(r.disponibles.every((p) => p.stock > 0)).toBe(true);
+  });
+
+  it('una talla no casa dentro de otro numero', () => {
+    const cable = { sku: 'TEC-1', name: 'Cable 400cm', product: 'Cable 400cm', price: 25, stock: 3 };
+    // El "40" de la talla 40 no puede casar con el "400" del cable.
+    expect(puntuar(cable, 'talla 40')).toBe(0);
+  });
+
+  it('las tallas no se pluralizan', () => {
+    expect(formasDe('40')).toEqual(['40']);
+    expect(formasDe('m')).toEqual(['m']);
+  });
+});
+
+describe('saber si preguntaron por un producto', () => {
+  it('una pregunta de producto lo es', () => {
+    expect(pareceConsultaDeProducto('tienen laptops?')).toBe(true);
+    expect(pareceConsultaDeProducto('cuanto cuesta el polo')).toBe(true);
+    expect(pareceConsultaDeProducto('busco unas zapatillas')).toBe(true);
+  });
+
+  it('una de envio NO lo es', () => {
+    // Lleva "cuanto cuesta" y no encuentra nada en el catalogo: sin esta
+    // distincion se le contestaria que ese producto no esta disponible.
+    expect(pareceConsultaDeProducto('cuanto cuesta mandar un paquete')).toBe(false);
+    expect(pareceConsultaDeProducto('quiero cotizar un envio')).toBe(false);
+  });
+
+  it('un saludo tampoco', () => {
+    expect(pareceConsultaDeProducto('hola')).toBe(false);
+    expect(pareceConsultaDeProducto('gracias')).toBe(false);
+    expect(pareceConsultaDeProducto('')).toBe(false);
   });
 });

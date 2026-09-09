@@ -229,6 +229,36 @@ export function esPregunta(texto: string): boolean {
   return /^(que|cual|cuales|cuando|donde|como|cuanto|cuanta|quien|por que|porque|se puede|puedo|tienen|tienes|hay)\b/.test(t);
 }
 
+/**
+ * Tramos de teclado seguidos. Nadie escribe "asdf" queriendo decir algo.
+ */
+const TECLADO = ['qwert', 'werty', 'asdf', 'sdfg', 'dfgh', 'zxcv', 'xcvb', 'hjkl', 'poiu', 'lkjh'];
+
+/**
+ * Si lo que escribió parece tecleado al azar.
+ *
+ * Dos señales, las dos baratas y sin falsos positivos en español:
+ *
+ *  - un tramo de teclado seguido ("asdfgh", "qwerty");
+ *  - cuatro consonantes seguidas dentro de una misma palabra, que en español
+ *    no ocurre (lo más largo son grupos de tres, y a caballo de dos sílabas).
+ *
+ * Se comprueba porque un "asdfgh" guardado como distrito de entrega es peor
+ * que un hueco vacío: nadie lo revisa, y el reparto sale hacia un sitio que
+ * no existe.
+ */
+export function pareceTecleoAlAzar(texto: string): boolean {
+  const limpio = normaliza(texto).replace(/[^a-z\s]/g, '');
+  if (!limpio) return false;
+
+  for (const palabra of limpio.split(' ').filter((p) => p.length >= 4)) {
+    if (TECLADO.some((tramo) => palabra.includes(tramo))) return true;
+    if (/[bcdfghjklmnpqrstvwxyz]{4,}/.test(palabra)) return true;
+  }
+
+  return false;
+}
+
 export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boolean {
   const limpio = texto.trim();
   if (limpio.length < 2) return false;
@@ -245,6 +275,10 @@ export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boo
   // puede describir su envio con una pregunta ("un paquete, se puede?") y
   // rechazarlo seria pedantear.
   if (campo !== 'contenido' && esPregunta(limpio)) return false;
+
+  // Y lo tecleado al azar no vale para nada, ni siquiera para describir un
+  // envio: "asdfgh" no es una caja de documentos.
+  if (pareceTecleoAlAzar(limpio)) return false;
 
   switch (campo) {
     case 'recojo':

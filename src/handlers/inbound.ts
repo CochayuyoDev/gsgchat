@@ -25,6 +25,7 @@ import type { InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { ExtractionSuccess, FailureReason } from '../types.js';
 import {
+  intencionDe,
   responder,
   textoDePregunta,
   type Contexto as ContextoPreventa,
@@ -32,7 +33,13 @@ import {
 } from '../preventa/flow.js';
 import { saludoPorHora } from '../automation/engine.js';
 import { mensajesVigentes, render } from '../preventa/mensajes.js';
-import { coincideDelTodo, type StokyClient, type ProductoStoky } from '../stoky/client.js';
+import {
+  coincideDelTodo,
+  etiquetaVariante,
+  pareceConsultaDeProducto,
+  type ProductoStoky,
+  type StokyClient,
+} from '../stoky/client.js';
 import type { MessageKind } from '../db/messages.js';
 import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
 
@@ -201,7 +208,7 @@ export async function turnoDePreventa(
 async function contestarPrecio(
   contact: Contact,
   entrada: EntradaPreventa,
-  lead: { estado: string; preguntaPendiente: string | null },
+  lead: { estado: string; preguntaPendiente: string | null; ultimasOpciones: string[] | null },
   prefs: { mensajesPreventa?: Record<string, string>; serviciosPreventa?: string[] },
   deps: InboundDeps,
 ): Promise<boolean> {
@@ -223,18 +230,53 @@ async function contestarPrecio(
   // arroz" acaba guardado como su distrito de recojo.
   if (lead.preguntaPendiente === 'contenido') return false;
 
-  let consulta: { disponibles: ProductoStoky[]; agotados: ProductoStoky[]; similares: ProductoStoky[] };
+  // Y lo que el flujo ya reconoce manda sobre el catalogo. "Quiero cotizar"
+  // lleva "quiero", pero no esta preguntando por ningun producto: sin esta
+  // guarda, pedir una cotizacion contestaba "ese producto no esta disponible".
+  if (intencionDe(entrada, lead.ultimasOpciones)) return false;
+
+  const vigentes = mensajesVigentes(overrides ?? {});
+  const decir = async (clave: string): Promise<boolean> => {
+    await sender.send({
+      phone: contact.phone,
+      kind: 'freeform',
+      category: 'UTILITY',
+      manual: false,
+      text: render(vigentes[clave] ?? '', {
+        saludo: saludoPorHora(new Date(), config.timezone),
+        negocio: config.businessName,
+        cobertura: config.coverageName || 'tu zona',
+        horario: config.businessHours,
+      }),
+    });
+    return true;
+  };
+
+  // Si TIENE SENTIDO contestarle que no lo hay. "hola" no pregunta por nada;
+  // "cuanto cuesta mandar un paquete" pregunta por un envio, no por un
+  // producto. Sin esta distincion, cualquier mensaje suelto recibiria un "ese
+  // producto no esta disponible" y el bot pareceria sordo.
+  const preguntaPorProducto = pareceConsultaDeProducto(texto);
+
+  let consulta: {
+    disponibles: ProductoStoky[];
+    agotados: ProductoStoky[];
+    similares: ProductoStoky[];
+    otrasVariantes: ProductoStoky[];
+  };
   try {
     consulta = await catalogo.consultar(texto);
   } catch {
-    // Stoky caido no puede dejar sin atender a quien escribe: sigue el flujo.
-    return false;
+    // Stoky caido: callarse deja al cliente esperando una respuesta que no va
+    // a llegar, asi que se le pasa a una persona.
+    return preguntaPorProducto ? decir('precioSinCatalogo') : false;
   }
 
-  const { disponibles, agotados, similares } = consulta;
-  if (!disponibles.length && !agotados.length) return false;
+  const { disponibles, agotados, similares, otrasVariantes } = consulta;
+  if (!disponibles.length && !agotados.length) {
+    return preguntaPorProducto ? decir('precioSinResultado') : false;
+  }
 
-  const vigentes = mensajesVigentes(overrides ?? {});
   const sustituciones = {
     saludo: saludoPorHora(new Date(), config.timezone),
     negocio: config.businessName,
@@ -245,8 +287,53 @@ async function contestarPrecio(
   // El precio se dice SIEMPRE, tambien de lo agotado: el cliente pregunto
   // cuanto cuesta y saberlo le sirve igual para decidir si espera. Lo que no
   // se dice nunca es cuantas unidades quedan: invita a regatear y a dudar.
-  const linea = (p: ProductoStoky) =>
-    `• ${p.name} — ${p.price == null ? 'consultar' : `S/ ${p.price.toFixed(2)}`}`;
+  const precioDe = (p: ProductoStoky) =>
+    p.price == null ? 'consultar' : `S/ ${p.price.toFixed(2)}`;
+
+  /**
+   * Un grupo de productos, agrupando las variantes bajo su producto.
+   *
+   * Cuatro lineas repitiendo "Zapato de vestir clasico" y cambiando solo el
+   * color se leen fatal en un chat. Se dice el producto una vez, con su
+   * precio, y debajo en que presentaciones lo hay; si todas cuestan lo mismo
+   * el precio va una sola vez, y si no, cada una lleva el suyo.
+   */
+  const bloque = (productos: ProductoStoky[], hay = true): string => {
+    // Lo agotado se nombra entero, sin agrupar: decir "Hay en: NEGRO / 40"
+    // debajo de "estamos sin stock" es exactamente lo contrario de lo que
+    // pasa. Ahi el cliente necesita leer QUE es lo que no hay.
+    if (!hay) {
+      return productos.map((p) => `• ${p.name} — ${precioDe(p)}`).join('\n');
+    }
+
+    const familias = new Map<string, ProductoStoky[]>();
+    for (const p of productos) {
+      const clave = p.product?.trim() || p.name;
+      familias.set(clave, [...(familias.get(clave) ?? []), p]);
+    }
+
+    return [...familias.entries()]
+      .map(([base, items]) => {
+        const variantes = items.map((p) => etiquetaVariante(p)).filter((v): v is string => !!v);
+
+        if (!variantes.length) {
+          // Sin variantes: el producto, su precio, y ya.
+          return items.map((p) => `• ${p.name} — ${precioDe(p)}`).join('\n');
+        }
+
+        const precios = new Set(items.map((p) => precioDe(p)));
+        if (precios.size === 1) {
+          return `• ${base} — ${[...precios][0]}\n  Hay en: ${variantes.join(', ')}`;
+        }
+
+        // Precios distintos por variante: cada una con el suyo, o el cliente
+        // se queda con el primero que leyo y luego no cuadra.
+        return `• ${base}\n${items
+          .map((p) => `  ${etiquetaVariante(p) ?? p.name}: ${precioDe(p)}`)
+          .join('\n')}`;
+      })
+      .join('\n');
+  };
 
   // Contestar "Casaca de cuero" a quien preguntó por una casaca impermeable
   // con el mismo aplomo que si fuera esa es el fallo caro: el cliente cree que
@@ -258,17 +345,22 @@ async function contestarPrecio(
 
   if (disponibles.length) {
     partes.push(render((exacto ? vigentes.precioEncontrado : vigentes.precioAproximado) ?? '', sustituciones));
-    partes.push(disponibles.map(linea).join('\n'));
+    partes.push(bloque(disponibles));
   } else {
     // Agotado: se dice con su precio, y se ofrece algo parecido SOLO si
     // existe. Recomendar cuando no hay nada que se le parezca hace perder el
     // tiempo al cliente mirando algo que no queria.
     partes.push(render(vigentes.precioAgotado ?? '', sustituciones));
-    partes.push(agotados.map(linea).join('\n'));
+    partes.push(bloque(agotados, false));
 
-    if (similares.length) {
+    if (otrasVariantes.length) {
+      // Otra talla o otro color del MISMO producto: es lo que suele cerrar la
+      // venta, y por eso va antes que cualquier otra recomendacion.
+      partes.push(render(vigentes.precioOtrasVariantes ?? '', sustituciones));
+      partes.push(bloque(otrasVariantes));
+    } else if (similares.length) {
       partes.push(render(vigentes.precioSimilares ?? '', sustituciones));
-      partes.push(similares.map(linea).join('\n'));
+      partes.push(bloque(similares));
     } else {
       partes.push(render(vigentes.precioSinAlternativas ?? '', sustituciones));
     }

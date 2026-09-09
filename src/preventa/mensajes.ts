@@ -31,7 +31,7 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
   },
   menu: {
     cuando: 'Cuando escribe algo que no se entiende y hay que reorientarlo.',
-    texto: '¿En qué te ayudo?',
+    texto: 'No reconocí ese mensaje. ¿En qué te ayudo?',
     variables: VARIABLES_COMUNES,
   },
   info: {
@@ -110,6 +110,11 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
     texto: 'Eso lo tenemos, pero ahora mismo estamos sin stock:',
     variables: VARIABLES_COMUNES,
   },
+  precioOtrasVariantes: {
+    cuando: 'Cuando la presentación que pidió está agotada pero quedan otras del mismo producto.',
+    texto: 'De ese mismo sí me queda:',
+    variables: VARIABLES_COMUNES,
+  },
   precioSimilares: {
     cuando: 'Va delante de las alternativas, cuando las hay. Si no hay, no se manda nada.',
     texto: 'Sí tengo disponible, por si te sirve:',
@@ -121,9 +126,9 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
     variables: VARIABLES_COMUNES,
   },
   precioSinResultado: {
-    cuando: 'Cuando pregunta por algo que no está en el catálogo.',
+    cuando: 'Cuando pregunta por un producto que la tienda no tiene.',
     texto:
-      'No encontré ese producto en nuestro catálogo. ¿Me lo describes de otra forma? También puedo pasarte con una persona del equipo.',
+      'Ese producto no se encuentra disponible en nuestra tienda. Si quieres, dime de otra forma lo que buscas o responde ASESOR y te atiende una persona.',
     variables: VARIABLES_COMUNES,
   },
   precioSinCatalogo: {
@@ -133,7 +138,7 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
   },
   noEntendi: {
     cuando: 'Cuando la respuesta no encaja con lo que se preguntó. Se repite la pregunta.',
-    texto: 'Perdona, no te entendí bien.',
+    texto: 'No reconocí ese mensaje, por favor inténtalo de nuevo.',
     variables: VARIABLES_COMUNES,
   },
   soloTexto: {

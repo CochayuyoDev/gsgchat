@@ -34,6 +34,41 @@ export interface ConsultaCatalogo {
   agotados: ProductoStoky[];
   /** Otras cosas CON stock que se le parecen. Vacío si no hay ninguna. */
   similares: ProductoStoky[];
+  /**
+   * Las otras presentaciones del MISMO producto que sí hay.
+   *
+   * Es distinto de `similares`: aquí no se le ofrece otra cosa, se le ofrece
+   * lo mismo en otro color o en otra talla, que es lo que suele resolver la
+   * venta. Vacío cuando el producto no tiene variantes, o cuando ninguna
+   * queda.
+   */
+  otrasVariantes: ProductoStoky[];
+}
+
+/**
+ * La parte del nombre que distingue una variante: "NEGRO / 40".
+ *
+ * Stoky manda el nombre completo ("Zapato de vestir — NEGRO / 40") y aparte el
+ * del producto base. Lo que sobra es la variante; si no sobra nada, ese
+ * producto no tiene variantes y no hay ninguna que mencionar.
+ */
+export function etiquetaVariante(producto: ProductoStoky): string | null {
+  const base = producto.product?.trim();
+  const nombre = producto.name.trim();
+  if (!base || nombre === base || !nombre.startsWith(base)) return null;
+
+  // El separador que usa Stoky es una raya larga; se acepta cualquiera para
+  // no depender de un carácter concreto.
+  const resto = nombre.slice(base.length).replace(/^[\s—–-]+/, '').trim();
+  return resto || null;
+}
+
+/** Si de ese producto hay más de una presentación en el catálogo. */
+export function tieneVariantes(producto: ProductoStoky, catalogo: ProductoStoky[]): boolean {
+  if (etiquetaVariante(producto)) return true;
+  const base = producto.product?.trim();
+  if (!base) return false;
+  return catalogo.filter((p) => p.product?.trim() === base).length > 1;
 }
 
 export interface StokyClientOptions {
@@ -65,6 +100,8 @@ export class StokyError extends Error {
  * "m" y hacer que case con todo).
  */
 export function formasDe(palabra: string): string[] {
+  if (esTalla(palabra)) return [palabra];
+
   const formas = new Set([palabra]);
   for (const sufijo of ['es', 's']) {
     if (palabra.endsWith(sufijo)) {
@@ -84,10 +121,57 @@ export function formasDe(palabra: string): string[] {
  * Las de menos de tres letras casan con todo y no dicen nada de lo que quiere
  * el cliente ("de", "el", "un").
  */
+/**
+ * Palabras con las que se pregunta por un producto.
+ *
+ * Sirven para distinguir "¿tienen zapatillas?" —que merece un "no lo
+ * tenemos"— de "hola" o "gracias", que no. Sin esta distinción, cualquier
+ * mensaje suelto recibiría un "ese producto no está disponible" y el bot
+ * parecería sordo.
+ */
+const PIDE_PRODUCTO = [
+  'tienen', 'tienes', 'hay', 'venden', 'vendes', 'quiero', 'busco', 'necesito',
+  'cuanto', 'cuesta', 'cuestan', 'precio', 'vale', 'valen', 'disponible',
+  'stock', 'me interesa', 'quisiera',
+];
+
+/**
+ * Palabras del envío. Aquí NO se pregunta por un producto.
+ *
+ * "¿Cuánto cuesta mandar un paquete?" lleva "cuánto cuesta" y no encuentra
+ * nada en el catálogo; sin esta lista se le contestaría que ese producto no
+ * está disponible, cuando lo que quiere es cotizar un envío.
+ */
+const ES_DE_ENVIO = [
+  'envio', 'enviar', 'mandar', 'manda', 'paquete', 'encomienda', 'delivery',
+  'courier', 'recojo', 'recoger', 'entrega', 'entregar', 'flete', 'llevar',
+];
+
+/**
+ * Si el mensaje pregunta por un producto del catálogo.
+ *
+ * No mira si existe: eso lo dice la búsqueda. Mira si TIENE SENTIDO
+ * contestarle que no lo hay.
+ */
+export function pareceConsultaDeProducto(texto: string): boolean {
+  const t = normaliza(texto);
+  if (!t) return false;
+  if (ES_DE_ENVIO.some((p) => t.includes(p))) return false;
+  return PIDE_PRODUCTO.some((p) => t.includes(p));
+}
+
+/** Una talla: 38, 40, S, M, L, XL... */
+export function esTalla(palabra: string): boolean {
+  return /^\d{1,3}$/.test(palabra) || /^(xs|s|m|l|xl|xxl|xxxl)$/.test(palabra);
+}
+
 export function palabrasDe(consulta: string): string[] {
   return normaliza(consulta)
     .split(' ')
-    .filter((p) => p.length >= 3);
+    // Las tallas entran aunque sean cortas: "40" y "M" son EXACTAMENTE lo que
+    // distingue una variante de otra, y descartarlas por cortas hacia que
+    // "quiero el negro talla 40" no encontrara la talla 40.
+    .filter((p) => p.length >= 3 || esTalla(p));
 }
 
 /** Si el producto contiene TODAS las palabras que pidió el cliente. */
@@ -173,14 +257,21 @@ export function puntuar(producto: ProductoStoky, consulta: string): number {
     const formas = formasDe(palabra);
 
     if (formas.some((f) => sueltas.has(f))) {
-      puntos += 12;
+      // La talla acertada vale mas que el nombre: quien pide la 40 quiere la
+      // 40, y darle la 38 al mismo precio no es contestarle.
+      puntos += esTalla(palabra) ? 20 : 12;
       continue;
     }
 
     // Una palabra corta DENTRO de otra es casi siempre casualidad: "las"
     // aparece en "clasico", y con eso preguntar por unas zapatillas devolvia
-    // un pantalon. Solo las largas valen como fragmento.
-    if (palabra.length >= MINIMO_PARA_BUSCAR_DENTRO && formas.some((f) => texto.includes(f))) {
+    // un pantalon. Solo las largas valen como fragmento, y una talla jamas:
+    // el "40" de la 40 no puede casar con el "40" de 400.
+    if (
+      !esTalla(palabra) &&
+      palabra.length >= MINIMO_PARA_BUSCAR_DENTRO &&
+      formas.some((f) => texto.includes(f))
+    ) {
       puntos += 8;
     }
   }
@@ -309,7 +400,8 @@ export function createStokyClient(opts: StokyClientOptions): StokyClient {
         .filter((x) => x.puntos > 0)
         .sort((a, b) => b.puntos - a.puntos);
 
-      if (!casan.length) return { disponibles: [], agotados: [], similares: [] };
+      const vacio = { disponibles: [], agotados: [], similares: [], otrasVariantes: [] };
+      if (!casan.length) return vacio;
 
       const conStock = casan.filter((x) => x.producto.stock > 0);
       const sinStock = casan.filter((x) => x.producto.stock <= 0);
@@ -321,25 +413,38 @@ export function createStokyClient(opts: StokyClientOptions): StokyClient {
       const mejorSinStock = sinStock[0]?.puntos ?? 0;
 
       if (mejorConStock >= mejorSinStock) {
-        return {
-          disponibles: conStock.slice(0, 3).map((x) => x.producto),
-          agotados: [],
-          similares: [],
-        };
+        const disponibles = conStock.slice(0, 4).map((x) => x.producto);
+        return { disponibles, agotados: [], similares: [], otrasVariantes: [] };
       }
 
-      // Lo que pidio esta agotado. Lo parecido son los que SI hay, empezando
-      // por el que mas se le parece; si no hay ninguno, no se ofrece nada.
+      // Lo que pidio esta agotado.
       const agotados = sinStock
         .filter((x) => x.puntos === mejorSinStock)
         .slice(0, 3)
         .map((x) => x.producto);
 
-      return {
-        disponibles: [],
-        agotados,
-        similares: conStock.slice(0, 3).map((x) => x.producto),
-      };
+      // Primero se mira si hay OTRA PRESENTACION del mismo producto: quien
+      // pide el polo en talla L y no lo hay, casi siempre se lleva la M. Eso
+      // resuelve la venta; ofrecerle un pantalon, no.
+      const base = agotados[0]?.product?.trim();
+      const yaNombrados = new Set(agotados.map((p) => p.sku));
+
+      const otrasVariantes = base
+        ? todos
+            .filter((p) => p.stock > 0 && p.product?.trim() === base && !yaNombrados.has(p.sku))
+            .slice(0, 4)
+        : [];
+
+      // Y si no queda ninguna de ese producto, lo parecido de todo el
+      // catalogo; si tampoco hay, no se ofrece nada.
+      const similares = otrasVariantes.length
+        ? []
+        : conStock
+            .filter((x) => !yaNombrados.has(x.producto.sku))
+            .slice(0, 3)
+            .map((x) => x.producto);
+
+      return { disponibles: [], agotados, similares, otrasVariantes };
     },
 
     async buscar(texto, limite = 3) {

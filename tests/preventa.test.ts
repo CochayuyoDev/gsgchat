@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BOTON,
   intencionDe,
+  pareceTecleoAlAzar,
   responder,
   respuestaValida,
   siguienteCampo,
@@ -320,7 +321,7 @@ describe('respuestas que no se entienden', () => {
     c.dice('cotizar');
 
     const aviso = c.dice('???');
-    expect(aviso?.texto).toContain('no te entendí');
+    expect(aviso?.texto).toContain('No reconocí');
     // Y repite la pregunta en el MISMO mensaje, no en otro aparte.
     expect(aviso?.texto).toContain('distrito');
     expect(c.ficha.recojoDistrito).toBeNull();
@@ -330,8 +331,8 @@ describe('respuestas que no se entienden', () => {
     const c = conversacion({ estado: 'en_conversacion' });
     c.dice('cotizar');
 
-    expect(c.dice('???')?.texto).toContain('no te entendí');
-    expect(c.dice('!!!')?.texto).toContain('no te entendí');
+    expect(c.dice('???')?.texto).toContain('No reconocí');
+    expect(c.dice('!!!')?.texto).toContain('No reconocí');
 
     const rendicion = c.dice('...');
     expect(rendicion?.texto).toContain('una persona del equipo');
@@ -472,5 +473,38 @@ describe('repetir la pregunta que estaba en el aire', () => {
 
   it('un campo que no existe no revienta: devuelve vacio', () => {
     expect(textoDePregunta('inventado', CTX)).toBe('');
+  });
+});
+
+describe('tecleo al azar', () => {
+  it('un tramo de teclado no es una respuesta', () => {
+    expect(pareceTecleoAlAzar('asdfgh qwerty')).toBe(true);
+    expect(pareceTecleoAlAzar('zxcvbn')).toBe(true);
+  });
+
+  it('cuatro consonantes seguidas tampoco: en español no pasa', () => {
+    expect(pareceTecleoAlAzar('jklmnp')).toBe(true);
+  });
+
+  it('los distritos de verdad pasan', () => {
+    for (const distrito of [
+      'Surco', 'Miraflores', 'San Borja', 'Villa El Salvador', 'Jesús María',
+      'Callao', 'Santa Anita', 'Chorrillos', 'Independencia', 'Puente Piedra',
+    ]) {
+      expect(pareceTecleoAlAzar(distrito)).toBe(false);
+    }
+  });
+
+  it('y los nombres tambien', () => {
+    for (const nombre of ['Roberto Ramirez', 'Ana Torres', 'Luis Fernández', 'Ali Gomez']) {
+      expect(pareceTecleoAlAzar(nombre)).toBe(false);
+    }
+  });
+
+  it('no se guarda como respuesta a nada', () => {
+    const c = conversacion({ estado: 'en_conversacion' });
+    c.dice('cotizar');
+    c.dice('asdfgh qwerty');
+    expect(c.ficha.recojoDistrito).toBeNull();
   });
 });
