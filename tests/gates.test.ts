@@ -202,3 +202,77 @@ describe('warm-up', () => {
     expect(ms).toBe(60 * 60 * 1000);
   });
 });
+
+/**
+ * Escribir a mano desde /chat no es una campana.
+ *
+ * Las guardas existen para que un envio automatico a una lista no queme el
+ * numero. Con un cliente no oficial, donde no hay reglas de Meta que cumplir,
+ * pedirle opt-in al operador para poder contestar convierte la pantalla en un
+ * tramite: ahi el chat tiene que comportarse como el WhatsApp Web de siempre.
+ */
+describe('envio manual desde el chat', () => {
+  it('sin opt-in se puede escribir a mano', () => {
+    const sinOptIn = contact({ optInAt: null, optInSource: null });
+    expect(evaluateGates(intent({ contact: sinOptIn, kind: 'freeform', template: null }), snapshot())).toMatchObject({
+      allow: false,
+      code: 'no_opt_in',
+    });
+    expect(
+      evaluateGates(
+        intent({ contact: sinOptIn, kind: 'freeform', template: null, manual: true }),
+        snapshot(),
+      ),
+    ).toEqual({ allow: true });
+  });
+
+  it('la ventana de 24 h no frena lo escrito a mano', () => {
+    const frio = contact({ lastInboundAt: new Date('2026-03-01T00:00:00Z') });
+    expect(evaluateGates(intent({ contact: frio, kind: 'freeform', template: null }), snapshot())).toMatchObject({
+      code: 'window_closed',
+    });
+    expect(
+      evaluateGates(intent({ contact: frio, kind: 'freeform', template: null, manual: true }), snapshot()),
+    ).toEqual({ allow: true });
+  });
+
+  it('el cupo diario tampoco: lo que teclea una persona no quema un numero', () => {
+    const lleno = snapshot({ sentToday: 1000, dailyCap: 1000 });
+    expect(evaluateGates(intent(), lleno)).toMatchObject({ code: 'daily_cap' });
+    expect(evaluateGates(intent({ manual: true }), lleno)).toEqual({ allow: true });
+  });
+
+  it('el tope de marketing por contacto se salta igual', () => {
+    const saturado = snapshot({ marketingLast7d: 5, maxMarketingPerContact7d: 2 });
+    expect(evaluateGates(intent({ category: 'MARKETING' }), saturado)).toMatchObject({
+      code: 'frequency_cap',
+    });
+    expect(evaluateGates(intent({ category: 'MARKETING', manual: true }), saturado)).toEqual({
+      allow: true,
+    });
+  });
+
+  it('la BAJA sigue siendo intocable: la pidio una persona', () => {
+    const baja = contact({ optOutAt: new Date('2026-03-01T00:00:00Z') });
+    expect(evaluateGates(intent({ contact: baja, manual: true }), snapshot())).toMatchObject({
+      allow: false,
+      code: 'opt_out',
+    });
+  });
+
+  it('el freno de emergencia tampoco se salta a mano', () => {
+    const pausado = snapshot({
+      numberState: { ...snapshot().numberState, paused: true, pausedReason: 'pausa manual' },
+    });
+    expect(evaluateGates(intent({ manual: true }), pausado)).toMatchObject({
+      allow: false,
+      code: 'number_paused',
+    });
+  });
+
+  it('una plantilla sin aprobar sigue sin salir, aunque sea a mano', () => {
+    expect(
+      evaluateGates(intent({ manual: true, template: approvedTemplate({ status: 'PAUSED' }) }), snapshot()),
+    ).toMatchObject({ allow: false, code: 'template_not_approved' });
+  });
+});

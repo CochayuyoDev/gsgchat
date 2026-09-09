@@ -9,6 +9,13 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLocalClient } from '../src/whatsapp/local/client.js';
+import { readInbound } from '../src/handlers/inbound.js';
+import {
+  extensionDe,
+  idDeMedia,
+  leerMedia,
+  tipoDeAdjunto,
+} from '../src/whatsapp/local/media.js';
 import { WhatsAppApiError } from '../src/whatsapp/client.js';
 import {
   fromJid,
@@ -84,6 +91,39 @@ describe('traducir lo que llega por el socket', () => {
   it('sin id o sin remitente se descarta', () => {
     expect(toChangeValue({ key: { remoteJid: '1@s.whatsapp.net' }, message: { conversation: 'x' } })).toBeNull();
     expect(toChangeValue({ key: { id: 'A' }, message: { conversation: 'x' } })).toBeNull();
+  });
+
+  it('un remitente en LID se resuelve por remoteJidAlt', () => {
+    // WhatsApp migro a LID: el remoteJid llega como identificador opaco y el
+    // telefono viaja aparte. Filtrar por "@s.whatsapp.net" descartaba TODOS
+    // los entrantes, y en silencio.
+    const value = toChangeValue({
+      key: { id: 'ABC', remoteJid: '99887766@lid', remoteJidAlt: '5215512345678@s.whatsapp.net' },
+      messageTimestamp: 1700000000,
+      message: { conversation: 'hola' },
+    });
+    expect(value?.messages?.[0]?.from).toBe('5215512345678');
+  });
+
+  it('un LID sin telefono no se inventa un contacto', () => {
+    expect(
+      toChangeValue({ key: { id: 'A', remoteJid: '99887766@lid' }, message: { conversation: 'x' } }),
+    ).toBeNull();
+  });
+
+  it('un grupo se descarta aunque traiga remoteJidAlt', () => {
+    expect(
+      toChangeValue({
+        key: { id: 'A', remoteJid: '123@g.us', remoteJidAlt: '5215512345678@s.whatsapp.net' },
+        message: { conversation: 'x' },
+      }),
+    ).toBeNull();
+  });
+
+  it('los estados y los canales tampoco entran', () => {
+    for (const jid of ['status@broadcast', '123@newsletter']) {
+      expect(toChangeValue({ key: { id: 'A', remoteJid: jid }, message: { conversation: 'x' } })).toBeNull();
+    }
   });
 
   it('un mensaje vacio no inventa nada', () => {
@@ -196,6 +236,9 @@ describe('la sesion local', () => {
       ],
     });
 
+    // El handler es async desde que resuelve el LID contra el mapa de Baileys.
+    await new Promise((r) => setTimeout(r, 10));
+
     expect(recibidos).toHaveLength(1);
   });
 });
@@ -305,5 +348,146 @@ describe('vincular con el numero', () => {
   it('sin sesion abierta se dice claro en vez de reventar por dentro', async () => {
     const { requestLocalPairingCode } = await import('../src/whatsapp/local/session.js');
     await expect(requestLocalPairingCode('5215512345678')).rejects.toThrow(/no esta abierta/);
+  });
+});
+
+/**
+ * Botones: lo que ve el cliente y lo que vuelve cuando los pulsa.
+ */
+describe('botones en el chat del cliente', () => {
+  it('un boton pulsado vuelve como button_reply, no como texto suelto', () => {
+    const value = toChangeValue({
+      key: { id: 'A', remoteJid: '5215512345678@s.whatsapp.net' },
+      messageTimestamp: 1700000000,
+      message: {
+        interactiveResponseMessage: {
+          body: { text: 'Si, es correcta' },
+          nativeFlowResponseMessage: {
+            paramsJson: JSON.stringify({ id: 'confirm_yes', display_text: 'Si, es correcta' }),
+          },
+        },
+      },
+    });
+
+    expect(value?.messages?.[0]?.type).toBe('interactive');
+    expect(value?.messages?.[0]?.interactive?.button_reply).toEqual({
+      id: 'confirm_yes',
+      title: 'Si, es correcta',
+    });
+  });
+
+  it('el envoltorio clasico de botones tambien se entiende', () => {
+    const value = toChangeValue({
+      key: { id: 'A', remoteJid: '5215512345678@s.whatsapp.net' },
+      message: {
+        buttonsResponseMessage: { selectedButtonId: 'no', selectedDisplayText: 'No' },
+      },
+    });
+    expect(value?.messages?.[0]?.interactive?.button_reply).toEqual({ id: 'no', title: 'No' });
+  });
+
+  it('un paramsJson corrupto no tumba el mensaje', () => {
+    const value = toChangeValue({
+      key: { id: 'A', remoteJid: '5215512345678@s.whatsapp.net' },
+      message: {
+        interactiveResponseMessage: { nativeFlowResponseMessage: { paramsJson: '{roto' } },
+      },
+    });
+    // No es un boton reconocible, pero tampoco revienta: cae al tipo generico.
+    expect(value?.messages?.[0]?.type).toBe('interactiveresponse');
+  });
+
+  it('pedir la ubicacion manda el boton nativo y no texto', async () => {
+    const { enviados } = await conectado();
+    await createLocalClient().sendLocationRequest('5215512345678', 'Comparte tu ubicacion');
+
+    // El socket de pega no sabe retransmitir, asi que cae al texto: lo que se
+    // comprueba es justo eso, que el respaldo sigue explicando el camino.
+    const texto = (enviados[0]?.content as { text: string }).text;
+    expect(texto).toContain('Comparte tu ubicacion');
+    expect(texto).toContain('Ubicacion');
+  });
+});
+
+/**
+ * Adjuntos: sin esto, una foto o un audio aparecen como "(foto)" y no hay
+ * forma de verlos sin ir al telefono.
+ */
+describe('fotos, audios y documentos', () => {
+  const mensajeCon = (contenido: Record<string, unknown>) => ({
+    key: { id: 'WAMID-1', remoteJid: '5215512345678@s.whatsapp.net' },
+    messageTimestamp: 1700000000,
+    message: contenido,
+  });
+
+  it('reconoce que tipo de adjunto lleva un mensaje', () => {
+    expect(tipoDeAdjunto({ imageMessage: {} })).toBe('image');
+    expect(tipoDeAdjunto({ audioMessage: {} })).toBe('audio');
+    expect(tipoDeAdjunto({ documentMessage: {} })).toBe('document');
+    expect(tipoDeAdjunto({ conversation: 'hola' })).toBeNull();
+  });
+
+  it('el id sale del wamid: bajar dos veces no deja copias sueltas', () => {
+    expect(idDeMedia('WAMID-1', '.jpg')).toBe(idDeMedia('WAMID-1', '.jpg'));
+    expect(idDeMedia('WAMID-1', '.jpg')).not.toBe(idDeMedia('WAMID-2', '.jpg'));
+    expect(idDeMedia('WAMID-1', '.jpg')).toMatch(/^[0-9a-f]{24}\.jpg$/);
+  });
+
+  it('la extension sale del mime, con respaldo por tipo', () => {
+    expect(extensionDe('image/jpeg', 'image')).toBe('.jpg');
+    expect(extensionDe('audio/ogg; codecs=opus', 'audio')).toBe('.ogg');
+    expect(extensionDe('cualquier/cosa', 'video')).toBe('.mp4');
+  });
+
+  it('el mensaje traducido lleva la referencia al fichero', () => {
+    const value = toChangeValue(mensajeCon({ imageMessage: { mimetype: 'image/jpeg' } }), null, {
+      id: 'abc123.jpg',
+      kind: 'image',
+      mimeType: 'image/jpeg',
+      caption: 'mira',
+      bytes: 1024,
+    });
+
+    expect(value?.messages?.[0]?.type).toBe('image');
+    expect(value?.messages?.[0]?.media?.id).toBe('abc123.jpg');
+  });
+
+  it('sin el fichero bajado el mensaje llega igual, solo que sin adjunto', () => {
+    const value = toChangeValue(mensajeCon({ imageMessage: { mimetype: 'image/jpeg' } }), null, null);
+    expect(value?.messages?.[0]?.type).toBe('image');
+    expect(value?.messages?.[0]?.media).toBeUndefined();
+  });
+
+  it('un id que no tiene la forma esperada no lee nada del disco', async () => {
+    for (const malo of ['../../.env', 'a/b.jpg', 'ZZZ.jpg', '']) {
+      expect(await leerMedia(process.cwd(), malo)).toBeNull();
+    }
+  });
+
+  it('el pie de foto es el cuerpo del mensaje en el chat', () => {
+    const leido = readInbound({
+      id: 'A',
+      from: '5215512345678',
+      timestamp: '1700000000',
+      type: 'image',
+      media: { id: 'abc123.jpg', mimeType: 'image/jpeg', caption: 'la fachada' },
+    });
+
+    expect(leido.kind).toBe('image');
+    expect(leido.body).toBe('la fachada');
+    expect(leido.payload).toEqual({
+      media: { id: 'abc123.jpg', mimeType: 'image/jpeg', caption: 'la fachada' },
+    });
+  });
+
+  it('un documento sin pie usa su nombre de fichero', () => {
+    const leido = readInbound({
+      id: 'A',
+      from: '5215512345678',
+      timestamp: '1700000000',
+      type: 'document',
+      media: { id: 'abc.pdf', mimeType: 'application/pdf', filename: 'contrato.pdf' },
+    });
+    expect(leido.body).toBe('contrato.pdf');
   });
 });

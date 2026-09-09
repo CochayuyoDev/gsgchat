@@ -65,6 +65,19 @@ const CSS = `
   .msg .tick { color: var(--muted); }
   .msg .tick.read { color: #53bdeb; }
   .msg a { color: var(--accent); }
+  /* Los adjuntos mandan sobre el ancho de la burbuja, pero sin desbordarla. */
+  .msg .adjunto { display: block; margin: 2px 0 4px; max-width: 100%; }
+  .msg img.adjunto, .msg video.adjunto { border-radius: 6px; cursor: pointer; max-height: 340px; }
+  .msg audio.adjunto { width: 260px; }
+  .msg .fichero { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+                  background: rgba(0,0,0,.05); border-radius: 6px; text-decoration: none;
+                  color: inherit; }
+  .msg .fichero b { font-weight: 600; }
+  .msg .cargando { color: var(--muted); font-size: 12px; }
+  /* Ver una foto a tamaño completo sin salir de la pantalla. */
+  .visor { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex;
+           align-items: center; justify-content: center; z-index: 50; cursor: zoom-out; }
+  .visor img, .visor video { max-width: 92vw; max-height: 92vh; border-radius: 6px; }
   .day { align-self: center; background: var(--header); color: var(--muted); font-size: 12px;
     padding: 4px 12px; border-radius: 8px; margin: 12px 0 6px; }
   .composer { background: var(--header); padding: 10px 14px; border-top: 1px solid var(--line);
@@ -107,7 +120,9 @@ const CSS = `
   }
 `;
 
-export function chatPage(configured: boolean): string {
+import { seedTokenJs } from './pages.js';
+
+export function chatPage(configured: boolean, adminToken = ''): string {
   const aviso = configured
     ? ''
     : `<div class="locked" style="border-top:0;border-bottom:1px solid var(--line)">
@@ -167,7 +182,7 @@ export function chatPage(configured: boolean): string {
 </div>
 
 <script>
-${String.raw`
+${seedTokenJs(adminToken)}${String.raw`
 function token() {
   var t = sessionStorage.getItem('adminToken');
   if (!t) { t = prompt('Token de administracion (aparece en la consola al arrancar):'); if (t) sessionStorage.setItem('adminToken', t.trim()); }
@@ -341,14 +356,109 @@ function renderMessages(messages, scrollToEnd) {
     var d = dayLabel(m.createdAt);
     if (d !== dia) { dia = d; html += '<div class="day">' + esc(d) + '</div>'; }
     html += '<div class="msg ' + (m.direction === 'out' ? 'out' : 'in') + '">' +
+      adjuntoHtml(m) +
       withLinks(m.body || '') +
       '<span class="meta">' + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
       '</div>';
   });
   if (box.innerHTML !== html) box.innerHTML = html;
+  void cargarMedios(box);
   if (scrollToEnd || cerca || messages.length !== lastCount) box.scrollTop = box.scrollHeight;
   lastCount = messages.length;
 }
+
+/**
+ * El hueco del adjunto.
+ *
+ * Se pinta vacio y con su id: el fichero se pide despues, porque va detras del
+ * token de administracion y una etiqueta <img> no manda cabeceras.
+ */
+function adjuntoHtml(m) {
+  var media = m.payload && m.payload.media;
+  if (!media || !media.id) return '';
+
+  var kind = media.kind || m.kind;
+  var attrs = ' class="adjunto" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
+
+  if (kind === 'image' || kind === 'sticker') return '<img' + attrs + ' alt="">';
+  if (kind === 'video') return '<video' + attrs + ' controls playsinline></video>';
+  if (kind === 'audio') return '<audio' + attrs + ' controls preload="none"></audio>';
+
+  var nombre = media.filename || 'documento';
+  return '<a' + attrs + ' class="adjunto fichero" download="' + esc(nombre) + '">' +
+    '<span>📄</span><b>' + esc(nombre) + '</b>' +
+    (media.bytes ? '<span class="cargando">' + esc(pesoLegible(media.bytes)) + '</span>' : '') +
+    '</a>';
+}
+
+function pesoLegible(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/* Un adjunto ya bajado no cambia nunca -su id sale del wamid-, asi que se
+   guarda la URL y no se vuelve a pedir en cada repintado del hilo. */
+var mediaCache = {};
+
+/**
+ * Rellena los huecos de adjunto que haya en pantalla.
+ *
+ * Se pide con fetch y no con <img src>, porque asi el token viaja en la
+ * cabecera y no en la URL, que acabaria en el historial y en los logs.
+ */
+async function cargarMedios(box) {
+  var pendientes = box.querySelectorAll('[data-media]:not([data-listo])');
+  for (var i = 0; i < pendientes.length; i++) {
+    var el = pendientes[i];
+    var id = el.getAttribute('data-media');
+    el.setAttribute('data-listo', '1');
+
+    try {
+      if (!mediaCache[id]) {
+        var res = await fetch('/admin/local/media/' + encodeURIComponent(id), {
+          headers: { authorization: 'Bearer ' + token() }
+        });
+        if (!res.ok) throw new Error('no se pudo cargar');
+        mediaCache[id] = URL.createObjectURL(await res.blob());
+      }
+      if (el.tagName === 'A') el.setAttribute('href', mediaCache[id]);
+      else el.setAttribute('src', mediaCache[id]);
+    } catch (error) {
+      el.removeAttribute('data-listo');
+      if (el.tagName !== 'A') el.replaceWith(cargaFallida());
+    }
+  }
+}
+
+function cargaFallida() {
+  var aviso = document.createElement('div');
+  aviso.className = 'cargando';
+  aviso.textContent = 'No se pudo cargar el adjunto.';
+  return aviso;
+}
+
+/* Clic en una foto o un video: se ve a tamaño completo. */
+document.addEventListener('click', function (e) {
+  var el = e.target;
+  if (!el || !el.getAttribute || !el.getAttribute('data-media')) return;
+  if (el.tagName !== 'IMG' && el.tagName !== 'VIDEO') return;
+
+  var visor = document.createElement('div');
+  visor.className = 'visor';
+  var copia = el.cloneNode(true);
+  copia.removeAttribute('data-media');
+  if (copia.tagName === 'VIDEO') copia.setAttribute('controls', '');
+  visor.appendChild(copia);
+  visor.onclick = function () { visor.remove(); };
+  document.body.appendChild(visor);
+});
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var visor = document.querySelector('.visor');
+  if (visor) visor.remove();
+});
 
 function renderComposer(data) {
   var composer = document.getElementById('composer');

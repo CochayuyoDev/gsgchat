@@ -18,6 +18,17 @@ export interface SendIntent {
   category: TemplateCategory;
   template?: Template | null;
   now: Date;
+  /**
+   * Una persona escribiendo a otra desde /chat, no una campana.
+   *
+   * Las guardas de abajo existen para que un envio automatico a una lista no
+   * queme el numero. Escribirle a alguien a mano no es eso: es lo que hace
+   * cualquiera con WhatsApp Web, y pedirle opt-in previo al operador para
+   * poder contestar convierte la pantalla en un tramite. Asi que en manual se
+   * saltan las guardas de consentimiento y volumen; NO la baja, que es una
+   * peticion explicita de una persona, ni el freno de emergencia.
+   */
+  manual?: boolean;
 }
 
 export interface GateSnapshot {
@@ -84,11 +95,12 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
     };
   }
 
+  const manual = intent.manual === true;
   const businessInitiated = isBusinessInitiated(intent);
 
   // 3. Sin opt-in no sale nada que inicie la empresa. Responder dentro de la
   //    ventana si vale: ahi fue el cliente quien escribio primero.
-  if (businessInitiated && !contact.optInAt) {
+  if (!manual && businessInitiated && !contact.optInAt) {
     return {
       allow: false,
       code: 'no_opt_in',
@@ -97,7 +109,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   }
 
   // 4. Fuera de la ventana solo se puede mandar plantilla.
-  if (intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
+  if (!manual && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
     return {
       allow: false,
       code: 'window_closed',
@@ -150,7 +162,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
 
   // 6. Frecuencia por contacto. Meta ademas limita por su cuenta cuantos
   //    mensajes de marketing recibe una persona; pasarse solo suma bloqueos.
-  if (category === 'MARKETING' && snapshot.marketingLast7d >= snapshot.maxMarketingPerContact7d) {
+  if (!manual && category === 'MARKETING' && snapshot.marketingLast7d >= snapshot.maxMarketingPerContact7d) {
     return {
       allow: false,
       code: 'frequency_cap',
@@ -159,7 +171,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   }
 
   // 7. Techo diario del numero (warm-up).
-  if (businessInitiated && snapshot.sentToday >= snapshot.dailyCap) {
+  if (!manual && businessInitiated && snapshot.sentToday >= snapshot.dailyCap) {
     return {
       allow: false,
       code: 'daily_cap',

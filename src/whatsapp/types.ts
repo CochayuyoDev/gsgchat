@@ -21,6 +21,22 @@ export interface InboundMessage {
   };
   button?: { text: string; payload: string };
   context?: { id?: string };
+  /**
+   * Adjunto ya bajado a disco.
+   *
+   * La Cloud API no lo trae -ahi el fichero se pide aparte con su id-, pero el
+   * proveedor local si puede, porque el socket ya tiene las llaves. Con esto
+   * el chat pinta la foto en vez de un "(foto)" que no lleva a ningun sitio.
+   */
+  media?: {
+    id: string;
+    mimeType: string;
+    filename?: string;
+    seconds?: number;
+    voice?: boolean;
+    caption?: string;
+    bytes?: number;
+  };
 }
 
 export interface StatusUpdate {

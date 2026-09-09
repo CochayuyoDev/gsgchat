@@ -23,7 +23,7 @@ import type { AutoReply } from '../db/automation.js';
 import type { Sender } from '../outbound/sender.js';
 import type { InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
-import type { ExtractionSuccess } from '../types.js';
+import type { ExtractionSuccess, FailureReason } from '../types.js';
 import type { MessageKind } from '../db/messages.js';
 import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
 
@@ -93,6 +93,17 @@ export function readInbound(message: InboundMessage): { kind: MessageKind; body:
     document: '(documento)',
     sticker: '(sticker)',
   };
+
+  // Con el fichero ya bajado, el cuerpo es el pie de foto (o el nombre del
+  // documento) y la referencia va al payload para que el chat lo pinte.
+  if (message.media) {
+    return {
+      kind,
+      body: message.media.caption?.trim() || message.media.filename || etiquetas[kind] || '(adjunto)',
+      payload: { media: message.media },
+    };
+  }
+
   return { kind, body: etiquetas[kind] ?? `(mensaje de tipo ${message.type})`, payload: null };
 }
 
@@ -152,6 +163,29 @@ export async function handleInboundMessage(
   // que estaban esperando precisamente eso.
   await onInboundReply(repos, contact);
 
+  /**
+   * Por que no se pudo usar una ubicacion, en cristiano.
+   *
+   * Todos los fallos daban el mismo "no pude leer esa ubicacion", y el mas
+   * comun de todos -la caja geografica- no tiene nada que ver con leerla: la
+   * ubicacion se leyo perfectamente, lo que pasa es que cae fuera de la zona
+   * configurada. Con el mensaje generico, el operador ve a un cliente
+   * mandando su pin una y otra vez sin saber que el problema es GEO_BBOX.
+   */
+  const explicarFallo = (reason: FailureReason): string => {
+    switch (reason) {
+      case 'outside_bbox':
+        return 'Esa ubicacion queda fuera de la zona que atendemos.';
+      case 'null_island':
+      case 'out_of_range':
+        return 'Esas coordenadas no son validas. Intenta enviarla de nuevo, por favor.';
+      case 'short_link_unresolved':
+        return 'No pude abrir ese link de mapa. Mandame el pin de ubicacion, por favor.';
+      default:
+        return 'No pude leer esa ubicacion. Intenta enviarla de nuevo, por favor.';
+    }
+  };
+
   const reply = (text: string) =>
     sender.send({ phone, kind: 'freeform', category: 'UTILITY', text });
 
@@ -167,7 +201,7 @@ export async function handleInboundMessage(
   if (message.type === 'location' && message.location) {
     const result = fromWhatsAppLocation(message.location, { bbox: config.bbox });
     if (!result.ok) {
-      await reply('No pude leer esa ubicacion. Intenta enviarla de nuevo, por favor.');
+      await reply(explicarFallo(result.reason));
       return;
     }
     const id = await repos.locations.save(contact.id, result, JSON.stringify(message.location));

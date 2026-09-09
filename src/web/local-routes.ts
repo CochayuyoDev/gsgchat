@@ -15,6 +15,7 @@ import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { createSeenCache, processChange, type WebhookDeps } from '../whatsapp/webhook.js';
+import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
 import {
   defaultAuthDir,
   getLocalState,
@@ -31,6 +32,25 @@ export interface LocalRoutesDeps {
   settings: SettingsService;
 }
 
+/** El navegador necesita saber que es para decidir si lo pinta o lo baja. */
+function tipoMime(id: string): string {
+  const porExtension: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.mp4': 'video/mp4',
+    '.3gp': 'video/3gpp',
+    '.ogg': 'audio/ogg',
+    '.mp3': 'audio/mpeg',
+    '.m4a': 'audio/mp4',
+    '.aac': 'audio/aac',
+    '.pdf': 'application/pdf',
+  };
+  const ext = id.slice(id.lastIndexOf('.'));
+  return porExtension[ext] ?? 'application/octet-stream';
+}
+
 const codeSchema = z.object({
   phone: z.string().trim().min(6, 'hace falta el numero con codigo de pais'),
 });
@@ -41,6 +61,7 @@ export async function registerLocalRoutes(
 ): Promise<void> {
   const { config, repos, sender, wa, settings } = deps;
   const authDir = defaultAuthDir();
+  const mediaDir = mediaDirectory();
 
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
@@ -49,12 +70,18 @@ export async function registerLocalRoutes(
   async function arrancar() {
     return startLocal({
       authDir,
-      log: (mensaje) => app.log.info(mensaje),
+      mediaDir,
+      // console y no app.log a proposito: los arranques cortos corren con el
+      // logger apagado, y con el se perdian justo las lineas que explican por
+      // que un mensaje no aparece.
+      log: (mensaje) => console.log(`[wa] ${mensaje}`),
       onChange: async (value) => {
         try {
           await processChange('messages', value, webhookDeps);
         } catch (error) {
-          app.log.error({ err: error }, 'fallo procesando un mensaje local');
+          // Sin esto un entrante que revienta aguas abajo es indistinguible de
+          // un entrante que no llego: el sintoma es el mismo, "no me llegan".
+          console.error('[wa] fallo procesando un entrante:', error);
         }
       },
     });
@@ -99,6 +126,26 @@ export async function registerLocalRoutes(
         .code(400)
         .send({ error: error instanceof Error ? error.message : 'no se pudo pedir el codigo' });
     }
+  });
+
+  /**
+   * Sirve una foto, un audio o un documento que llego por el chat.
+   *
+   * Va detras del token como todo /admin, y el id se valida contra la forma
+   * que genera el propio sistema, asi que no hay forma de pedir un fichero de
+   * fuera de la carpeta.
+   */
+  app.get('/admin/local/media/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const datos = await leerMedia(mediaDir, id);
+    if (!datos) return reply.code(404).send({ error: 'ese adjunto no existe' });
+
+    return reply
+      .type(tipoMime(id))
+      // El contenido de un id nunca cambia -sale del wamid-, asi que se puede
+      // cachear para siempre y no volver a pedirlo en cada scroll del chat.
+      .header('cache-control', 'private, max-age=31536000, immutable')
+      .send(datos);
   });
 
   /** Desvincula y borra las credenciales: obliga a escanear otra vez. */

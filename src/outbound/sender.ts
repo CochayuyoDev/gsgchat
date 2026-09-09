@@ -25,6 +25,8 @@ export interface SendJob {
   kind: MessageKind;
   category: TemplateCategory;
   campaignId?: string | null;
+  /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
+  manual?: boolean;
 
   templateName?: string;
   templateLanguage?: string;
@@ -97,7 +99,7 @@ export function createSender(deps: SenderDeps): Sender {
       });
 
       const decision = evaluateGates(
-        { contact, kind: job.kind, category: job.category, template, now: at },
+        { contact, kind: job.kind, category: job.category, template, now: at, manual: job.manual },
         {
           numberState,
           marketingLast7d,

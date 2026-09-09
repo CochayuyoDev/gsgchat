@@ -22,6 +22,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import QRCode from 'qrcode';
 import type { ChangeValue } from '../types.js';
+import { guardarMedia, mediaDirectory, tipoDeAdjunto, type MediaInfo } from './media.js';
 
 export type LocalStatus = 'STOPPED' | 'STARTING' | 'SCAN_QR_CODE' | 'WORKING' | 'FAILED';
 
@@ -46,6 +47,19 @@ export interface LocalSocket {
   end(error?: Error): void;
   ev: { on(evento: string, handler: (arg: never) => void): void };
   user?: { id?: string; name?: string };
+  /**
+   * El mapa LID -> telefono que mantiene Baileys.
+   *
+   * Desde la migracion a LID, un entrante puede traer SOLO el identificador
+   * opaco: ni `remoteJidAlt` ni nada con el numero. El unico sitio donde esta
+   * la equivalencia es este almacen, que Baileys va llenando segun conoce a
+   * cada contacto.
+   */
+  signalRepository?: {
+    lidMapping?: { getPNForLID(lid: string): Promise<string | null> };
+  };
+  /** Para los mensajes con botones, que hay que armar a mano. */
+  relayMessage?(jid: string, content: unknown, options: { messageId?: string }): Promise<unknown>;
 }
 
 export interface StartLocalOptions {
@@ -53,6 +67,8 @@ export interface StartLocalOptions {
   authDir: string;
   /** A donde van los mensajes entrantes ya traducidos. */
   onChange?: (value: ChangeValue) => Promise<void> | void;
+  /** Donde se guardan las fotos, audios y documentos que llegan. */
+  mediaDir?: string;
   /** Inyectable para las pruebas: por defecto, Baileys de verdad. */
   createSocket?: (deps: { authDir: string }) => Promise<{
     sock: LocalSocket;
@@ -212,18 +228,58 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
       });
     }) as unknown) as (arg: never) => void);
 
-    sock.ev.on('messages.upsert', (((evento: { messages?: unknown[] }) => {
+    sock.ev.on('messages.upsert', (((evento: { messages?: unknown[]; type?: string }) => {
       if (!opts.onChange) return;
-      for (const mensaje of evento.messages ?? []) {
-        const value = toChangeValue(mensaje);
-        if (value) void opts.onChange(value);
-      }
+      void (async () => {
+        for (const mensaje of evento.messages ?? []) {
+          const key = (mensaje as { key?: { id?: string; remoteJid?: string; fromMe?: boolean } })
+            .key;
+          if (key?.fromMe) continue;
+
+          const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log);
+          const value = toChangeValue(mensaje, await resolverTelefono(sock, key), media);
+          if (!value) {
+            log(
+              `entrante descartado (${evento.type ?? 'sin tipo'}): ${key?.remoteJid ?? 'sin jid'}`,
+            );
+            continue;
+          }
+
+          const m = value.messages?.[0];
+          log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}`);
+          await opts.onChange?.(value);
+        }
+      })().catch((error: unknown) => log(`fallo leyendo un entrante: ${String(error)}`));
     }) as unknown) as (arg: never) => void);
 
     // Si el socket ya venia vinculado no llega ningun QR: se le da un margen
     // corto para que diga "open" y, si no, se contesta con lo que haya.
     setTimeout(listo, 8000);
   });
+}
+
+/**
+ * El telefono de quien escribe, resolviendo el LID si hace falta.
+ *
+ * Se pregunta al almacen de Baileys solo cuando el mensaje no trae ningun
+ * `@s.whatsapp.net`, que es el caso que dejaba los entrantes invisibles.
+ */
+async function resolverTelefono(
+  sock: LocalSocket,
+  key: { remoteJid?: string; remoteJidAlt?: string } | undefined,
+): Promise<string | null> {
+  if (telefonoDe(key)) return null; // ya se sabe; no hace falta preguntar
+  const jid = key?.remoteJid;
+  if (!jid || !jid.endsWith('@lid') || !esConversacionDirecta(jid)) return null;
+
+  try {
+    const pn = await sock.signalRepository?.lidMapping?.getPNForLID(jid);
+    return pn ? fromJid(pn) : null;
+  } catch {
+    // Que el mapa no sepa de ese LID todavia no es un error: se descarta el
+    // mensaje con su linea de log, como cualquier otro que no se pueda situar.
+    return null;
+  }
 }
 
 /** Vincular con numero en vez de con la camara. */
@@ -278,41 +334,171 @@ export function defaultAuthDir(base = process.cwd()): string {
 }
 
 /**
+ * Baja el adjunto del mensaje, si lo tiene.
+ *
+ * Nunca lanza: si la descarga falla -el enlace de WhatsApp caduca, o se corta
+ * la red- el mensaje tiene que llegar al chat igual, aunque sea sin el
+ * fichero. Perder la foto es molesto; perder el mensaje entero es un fallo.
+ */
+async function bajarAdjunto(
+  mensaje: unknown,
+  wamid: string,
+  opts: StartLocalOptions,
+  log: (mensaje: string) => void,
+): Promise<MediaInfo | null> {
+  const contenido = (mensaje as { message?: Record<string, unknown> }).message ?? {};
+  if (!tipoDeAdjunto(contenido) || !wamid) return null;
+
+  try {
+    const baileys = await import('@whiskeysockets/baileys');
+    return await guardarMedia(mensaje, wamid, {
+      dir: opts.mediaDir ?? mediaDirectory(),
+      descargar: async (m) =>
+        (await baileys.downloadMediaMessage(m as never, 'buffer', {})) as Buffer,
+    });
+  } catch (error) {
+    log(`no se pudo bajar el adjunto: ${String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * El boton que pulso el cliente, en la forma que usa Meta.
+ *
+ * WhatsApp tiene tres envoltorios distintos para lo mismo segun como se mando
+ * el mensaje original, y los tres acaban aqui.
+ */
+function respuestaDeBoton(
+  contenido: Record<string, unknown>,
+): { id: string; title: string } | null {
+  const interactivo = contenido.interactiveResponseMessage as
+    | { nativeFlowResponseMessage?: { paramsJson?: string }; body?: { text?: string } }
+    | undefined;
+  if (interactivo) {
+    try {
+      const params = JSON.parse(interactivo.nativeFlowResponseMessage?.paramsJson ?? '{}') as {
+        id?: string;
+        display_text?: string;
+      };
+      const title = params.display_text ?? interactivo.body?.text ?? '';
+      if (params.id || title) return { id: params.id ?? title, title };
+    } catch {
+      // paramsJson corrupto: se trata como si no fuera un boton.
+    }
+  }
+
+  const clasico = contenido.buttonsResponseMessage as
+    | { selectedButtonId?: string; selectedDisplayText?: string }
+    | undefined;
+  if (clasico?.selectedButtonId) {
+    return { id: clasico.selectedButtonId, title: clasico.selectedDisplayText ?? '' };
+  }
+
+  const plantilla = contenido.templateButtonReplyMessage as
+    | { selectedId?: string; selectedDisplayText?: string }
+    | undefined;
+  if (plantilla?.selectedId) {
+    return { id: plantilla.selectedId, title: plantilla.selectedDisplayText ?? '' };
+  }
+
+  const lista = contenido.listResponseMessage as
+    | { singleSelectReply?: { selectedRowId?: string }; title?: string }
+    | undefined;
+  if (lista?.singleSelectReply?.selectedRowId) {
+    return { id: lista.singleSelectReply.selectedRowId, title: lista.title ?? '' };
+  }
+
+  return null;
+}
+
+/**
+ * El telefono del remitente, o null si el mensaje no es una conversacion
+ * uno a uno que se pueda contestar.
+ *
+ * WhatsApp esta migrando a LID: desde 2025 muchos mensajes llegan con
+ * `remoteJid` en la forma `1234@lid`, que es un identificador opaco y NO un
+ * telefono. El numero de verdad viaja aparte, en `remoteJidAlt`. Quedarse
+ * solo con `@s.whatsapp.net` -que es lo que parece correcto- hace que no
+ * entre ni un mensaje, y sin ruido: se descartan todos en silencio.
+ */
+export function esConversacionDirecta(jid: string | undefined): boolean {
+  return Boolean(jid) && !/@(g.us|broadcast|newsletter)$/.test(jid as string);
+}
+
+export function telefonoDe(key: { remoteJid?: string; remoteJidAlt?: string } | undefined): string | null {
+  const candidatos = [key?.remoteJid, key?.remoteJidAlt].filter(
+    (j): j is string => typeof j === 'string' && j.length > 0,
+  );
+
+  // Grupos, estados y canales no son uno a uno: fuera antes de nada.
+  if (candidatos.some((j) => /@(g.us|broadcast|newsletter)$/.test(j))) return null;
+
+  const conNumero = candidatos.find((j) => j.endsWith('@s.whatsapp.net'));
+  if (conNumero) return fromJid(conNumero);
+
+  // Solo LID: no hay telefono con el que abrir la conversacion. Se descarta,
+  // pero es un caso que conviene ver en el log si alguna vez pasa.
+  return null;
+}
+
+/**
  * Un mensaje de Baileys en la forma que ya entiende `processChange`.
  *
  * Devuelve null para lo que el sistema no trata (propios, grupos, reacciones):
  * traducirlos seria inventar.
  */
-export function toChangeValue(mensaje: unknown): ChangeValue | null {
+export function toChangeValue(
+  mensaje: unknown,
+  telefonoResuelto?: string | null,
+  media?: MediaInfo | null,
+): ChangeValue | null {
   const m = mensaje as {
-    key?: { id?: string; remoteJid?: string; fromMe?: boolean };
+    key?: { id?: string; remoteJid?: string; remoteJidAlt?: string; fromMe?: boolean };
     message?: Record<string, unknown>;
     messageTimestamp?: number | string;
     pushName?: string;
   };
 
   const id = m.key?.id;
-  const jid = m.key?.remoteJid;
-  if (!id || !jid || m.key?.fromMe) return null;
-  // Los grupos y los estados no son conversaciones uno a uno: fuera.
-  if (!jid.endsWith('@s.whatsapp.net')) return null;
+  if (!id || m.key?.fromMe) return null;
+
+  const from = telefonoDe(m.key) ?? (telefonoResuelto || null);
+  if (!from) return null;
 
   const contenido = m.message ?? {};
-  const from = fromJid(jid);
   const timestamp = String(m.messageTimestamp ?? Math.floor(Date.now() / 1000));
-
-  const conversation = contenido.conversation as string | undefined;
-  const extended = (contenido.extendedTextMessage as { text?: string } | undefined)?.text;
-  const texto = conversation ?? extended;
-
-  const ubicacion = contenido.locationMessage as
-    | { degreesLatitude?: number; degreesLongitude?: number; name?: string; address?: string }
-    | undefined;
 
   const base = {
     messaging_product: 'whatsapp',
     contacts: [{ wa_id: from, profile: { name: m.pushName ?? '' } }],
   };
+
+  const conversation = contenido.conversation as string | undefined;
+  const extended = (contenido.extendedTextMessage as { text?: string } | undefined)?.text;
+  const texto = conversation ?? extended;
+
+  // Un boton pulsado llega como respuesta interactiva, no como texto. Se
+  // traduce a la forma de Meta para que el flujo de confirmacion del bot -que
+  // espera `button_reply`- funcione igual venga de donde venga.
+  const boton = respuestaDeBoton(contenido);
+  if (boton) {
+    return {
+      ...base,
+      messages: [
+        {
+          id,
+          from,
+          timestamp,
+          type: 'interactive',
+          interactive: { type: 'button_reply', button_reply: boton },
+        },
+      ],
+    };
+  }
+
+  const ubicacion = contenido.locationMessage as
+    | { degreesLatitude?: number; degreesLongitude?: number; name?: string; address?: string }
+    | undefined;
 
   if (ubicacion?.degreesLatitude != null && ubicacion.degreesLongitude != null) {
     return {
@@ -338,8 +524,12 @@ export function toChangeValue(mensaje: unknown): ChangeValue | null {
     return { ...base, messages: [{ id, from, timestamp, type: 'text', text: { body: texto } }] };
   }
 
-  // Fotos, audios y documentos llegan para que los vea una persona en /chat,
-  // aunque el bot no sepa que hacer con ellos.
+  // Fotos, audios y documentos: con el fichero ya bajado se pintan en /chat;
+  // sin el, al menos se ve que llego algo.
+  if (media) {
+    return { ...base, messages: [{ id, from, timestamp, type: media.kind, media }] };
+  }
+
   const tipo = Object.keys(contenido).find((k) => k.endsWith('Message'));
   if (tipo) {
     return {

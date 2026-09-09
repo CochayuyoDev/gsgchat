@@ -184,7 +184,9 @@ const AYUDA_CAMPO: Record<string, { titulo: string; pista: string; ph: string }>
   },
 };
 
-export function connectPage(labels: Record<string, string>): string {
+import { seedTokenJs } from './pages.js';
+
+export function connectPage(labels: Record<string, string>, adminToken = ''): string {
   const avanzados = SETUP_FIELDS.map(
     (field) => `
   <label for="${field}">${labels[field] ?? field}</label>
@@ -389,7 +391,7 @@ export function connectPage(labels: Record<string, string>): string {
 </div>
 </div>
 <script>
-${String.raw`
+${seedTokenJs(adminToken)}${String.raw`
 /* --- acceso ----------------------------------------------------------- */
 function token() { return sessionStorage.getItem('adminToken') || ''; }
 

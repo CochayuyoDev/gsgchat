@@ -89,6 +89,26 @@ const CSS = `
   code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 5px; }
 `;
 
+/**
+ * Deja el token puesto para que la pantalla no lo pida.
+ *
+ * Se emite solo con ADMIN_TOKEN_AUTOFILL, es decir cuando el servidor escucha
+ * unicamente en local: ahi quien puede abrir la pagina ya esta en la maquina.
+ * Vacio en cualquier otro caso, y entonces la pantalla pide el token como
+ * siempre.
+ */
+export function seedTokenJs(adminToken: string): string {
+  if (!adminToken) return '';
+  return (
+    'try{sessionStorage.setItem(' +
+    JSON.stringify('adminToken') +
+    ',' +
+    JSON.stringify(adminToken) +
+    ');}catch(e){}' +
+    String.fromCharCode(10)
+  );
+}
+
 const AUTH_JS = String.raw`
   function token() {
     var t = sessionStorage.getItem('adminToken');
@@ -419,7 +439,7 @@ const TABS: Array<[string, string]> = [
   ['extraer', 'Extraer'],
 ];
 
-export function panelPage(configured: boolean): string {
+export function panelPage(configured: boolean, adminToken = ''): string {
   const warning = configured
     ? ''
     : `<div class="card" style="border-color:#d97706">

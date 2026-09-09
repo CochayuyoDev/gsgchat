@@ -104,7 +104,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   });
 
   await registerAutomationRoutes(app, { repos, sender });
-  await registerChatRoutes(app, { repos, sender, config });
+  await registerChatRoutes(app, { repos, sender, config, settings });
 
   // --- salud del numero: lo primero que hay que mirar cada dia ----------
   app.get('/admin/health', async () => {

@@ -1,16 +1,21 @@
 /**
  * `WhatsAppClient` sobre la sesion local de Baileys.
  *
- * Las degradaciones son las mismas que las de WAHA y por el mismo motivo: no
- * hay Meta detras, asi que no hay plantillas aprobadas, ni boton nativo de
- * ubicacion, ni calidad del numero. Lo que cambia es el transporte: en vez de
- * un contenedor por HTTP, un socket en este mismo proceso.
+ * Las degradaciones son casi las de WAHA y por el mismo motivo: no hay Meta
+ * detras, asi que no hay plantillas aprobadas ni calidad del numero. Lo que
+ * cambia es el transporte: en vez de un contenedor por HTTP, un socket en este
+ * mismo proceso.
+ *
+ * La excepcion son los botones. Aqui si se pueden armar a mano (ver
+ * `interactive.ts`), incluido el nativo de compartir ubicacion, con el texto
+ * de siempre como respaldo para el cliente que no sepa pintarlos.
  */
 
 import { randomUUID } from 'node:crypto';
 import { CATALOG } from '../../templates/catalog.js';
 import { WhatsAppApiError, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
 import { renderComponentsIntoBody } from '../waha/client.js';
+import { botonRespuesta, botonUbicacion, enviarConBotones } from './interactive.js';
 import { getLocalSocket, getLocalState, toJid } from './session.js';
 
 export interface LocalClientOptions {
@@ -69,13 +74,43 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
       return resultOf(sent);
     },
 
-    /** El boton nativo de ubicacion es de la Cloud API: se pide por texto. */
+    /**
+     * Boton nativo de compartir ubicacion, con el camino manual de respaldo.
+     *
+     * El cuerpo explica el clip de todas formas: si el WhatsApp del cliente no
+     * pinta el boton, lo que ve es exactamente lo que veia antes.
+     */
     async sendLocationRequest(to, body) {
-      return sendText(to, `${body}\n\nMandamela con el clip 📎 → Ubicacion → Enviar tu ubicacion actual.`);
+      const sock = socketOrThrow();
+      const texto = `${body}\n\nO mandamela con el clip 📎 → Ubicacion → Enviar tu ubicacion actual.`;
+
+      try {
+        const wamid = await enviarConBotones(sock, toJid(to), texto, [botonUbicacion()]);
+        return { wamid };
+      } catch {
+        return sendText(to, texto);
+      }
     },
 
-    /** Los botones interactivos no son fiables fuera de la API: lista numerada. */
+    /** Botones de respuesta rapida; si no se pueden, lista numerada. */
     async sendButtons(to, body, buttons) {
+      const sock = socketOrThrow();
+
+      if (buttons.length) {
+        try {
+          const wamid = await enviarConBotones(
+            sock,
+            toJid(to),
+            body,
+            // WhatsApp no pinta mas de tres botones de respuesta rapida.
+            buttons.slice(0, 3).map((b) => botonRespuesta(b.id, b.title)),
+          );
+          return { wamid };
+        } catch {
+          // Sigue por el camino de siempre.
+        }
+      }
+
       const opciones = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
       return sendText(to, opciones ? `${body}\n\n${opciones}\n\nResponde con el numero.` : body);
     },

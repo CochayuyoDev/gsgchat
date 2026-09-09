@@ -72,16 +72,20 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   const html = (body: string) => ({ body, type: 'text/html; charset=utf-8' });
 
+  // Con ADMIN_TOKEN_AUTOFILL las pantallas traen el token puesto y no lo piden.
+  // Ver el porque en config.ts; en un servidor accesible desde fuera va vacio.
+  const tokenParaLaPagina = () => (config.ADMIN_TOKEN_AUTOFILL ? config.ADMIN_TOKEN : '');
+
   // Conectado, lo primero que se quiere ver son los chats.
   app.get('/', async (_request, reply) => reply.redirect(settings.isConfigured() ? '/chat' : '/setup'));
 
   app.get('/setup', async (_request, reply) => {
-    const page = html(connectPage(FIELD_LABELS));
+    const page = html(connectPage(FIELD_LABELS, tokenParaLaPagina()));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
   app.get('/chat', async (_request, reply) => {
-    const page = html(chatPage(settings.isConfigured()));
+    const page = html(chatPage(settings.isConfigured(), tokenParaLaPagina()));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
@@ -90,7 +94,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   await registerLocalRoutes(app, { config, repos, sender, wa, settings });
 
   app.get('/panel', async (_request, reply) => {
-    const page = html(panelPage(settings.isConfigured()));
+    const page = html(panelPage(settings.isConfigured(), tokenParaLaPagina()));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 

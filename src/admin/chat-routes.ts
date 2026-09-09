@@ -11,12 +11,14 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
+import { providerOf, type SettingsService } from '../settings/service.js';
 import { extractLocation } from '../geo/extract.js';
 
 export interface ChatDeps {
   repos: Repos;
   sender: Sender;
   config: Config;
+  settings: SettingsService;
 }
 
 const sendSchema = z.object({
@@ -34,7 +36,28 @@ const sendSchema = z.object({
 });
 
 export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): Promise<void> {
-  const { repos, sender, config } = deps;
+  const { repos, sender, config, settings } = deps;
+
+  /**
+   * Si la ventana de 24 h impide escribir texto libre.
+   *
+   * Es una regla de Meta, no nuestra: la Cloud API rechaza el mensaje. Con un
+   * cliente no oficial no existe tal cosa, y aplicarla igual seria inventarse
+   * una limitacion que el propio WhatsApp Web no tiene.
+   */
+  const ventanaObliga = () => providerOf(settings.current()) === 'cloud';
+
+  /**
+   * Si un envio escrito a mano puede saltarse las guardas de consentimiento y
+   * volumen.
+   *
+   * Solo fuera de la Cloud API. Con Meta detras no es una decision nuestra:
+   * la API rechaza el texto libre fuera de la ventana y exige el opt-in, asi
+   * que saltarselo aqui solo serviria para mandar peticiones condenadas y
+   * apuntar como enviado algo que no salio. Con un cliente no oficial no hay
+   * tal regla, y el chat se comporta como el WhatsApp Web de siempre.
+   */
+  const aMano = () => !ventanaObliga();
 
   app.get('/admin/chat/conversations', async (request) => {
     const query = z
@@ -75,10 +98,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       contact,
       windowOpen,
       // Lo que el operador puede escribir ahora mismo, y por que.
-      canWrite: windowOpen && !contact.optOutAt,
+      canWrite: (windowOpen || !ventanaObliga()) && !contact.optOutAt,
       blockedReason: contact.optOutAt
         ? 'el contacto se dio de baja'
-        : windowOpen
+        : windowOpen || !ventanaObliga()
           ? null
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
       messages,
@@ -115,6 +138,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         phone,
         kind: 'interactive',
         category: 'UTILITY',
+        manual: aMano(),
         interactive: {
           body: body.text?.trim() || 'Comparte tu ubicacion con el boton de abajo, por favor.',
           locationRequest: true,
@@ -131,6 +155,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         phone,
         kind: 'location',
         category: 'UTILITY',
+        manual: aMano(),
         location: { latitude: result.lat, longitude: result.lng },
       });
       return { ...outcome, location: result };
@@ -143,6 +168,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         phone,
         kind: 'template',
         category: template.category,
+        manual: aMano(),
         templateName: template.name,
         templateLanguage: template.language,
         variables: body.variables,
@@ -151,7 +177,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     if (!body.text?.trim()) return reply.code(400).send({ error: 'el mensaje va vacio' });
 
-    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text });
+    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano() });
   });
 
   /** Abrir un chat con alguien que todavia no existe en la libreta. */

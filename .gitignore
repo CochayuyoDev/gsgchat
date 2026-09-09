@@ -12,3 +12,7 @@ dist/
 
 # Vinculacion del cliente local de WhatsApp: son credenciales.
 .wa-auth/
+# Base embebida del arranque corto.
+.wa-data/
+# Fotos, audios y documentos que llegan por el chat.
+.wa-media/

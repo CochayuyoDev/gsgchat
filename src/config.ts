@@ -27,6 +27,20 @@ const schema = z.object({
   // con cualquier WhatsApp, a cambio de emular WhatsApp Web (fuera de los
   // terminos de Meta, con riesgo real de baneo del numero).
   WHATSAPP_PROVIDER: z.enum(['cloud', 'waha', 'local']).default('cloud'),
+
+  /**
+   * Mete el token de administracion en las paginas para no tener que pegarlo.
+   *
+   * Solo tiene sentido cuando el servidor escucha unicamente en 127.0.0.1: ahi
+   * cualquiera que pueda abrir la pagina ya esta dentro de la maquina, asi que
+   * pedirle el token no protege de nada y se cobra un tramite en cada pestaña.
+   * En cuanto el servidor sea accesible desde fuera, esto tiene que estar en
+   * false: seria repartir la llave con la puerta.
+   */
+  ADMIN_TOKEN_AUTOFILL: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
   WAHA_URL: z.string().default(''),
   WAHA_API_KEY: z.string().default(''),
   WAHA_SESSION: z.string().default('default'),
