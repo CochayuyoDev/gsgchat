@@ -103,8 +103,19 @@ con el volumen a numeros que no te tienen agendado. Usa un numero secundario.
 docker run -it -p 3001:3000 devlikeapro/waha   # el contenedor, en otro puerto
 ```
 
-Luego en `/setup`, opcion "Conectar con WAHA": pegas `http://localhost:3001`,
-sale el QR en la propia pantalla y lo escaneas desde el telefono.
+Luego en `/setup`, opcion "Conectar con WAHA". La direccion no hay ni que
+pegarla: la pantalla busca el contenedor en `localhost:3000` y `localhost:3001`
+y rellena el campo sola. Se comprueba que `GET /api/sessions` devuelva una
+lista, no solo que el puerto responda, porque en el 3000 suele estar este mismo
+servidor. Le das a conectar y sale el QR ahi mismo.
+
+**Sin camara: vincular con el numero.** Debajo del QR se puede escribir el
+telefono y pedir un codigo de ocho caracteres, que se teclea en el movil
+(WhatsApp, Dispositivos vinculados, Vincular con el numero de telefono). Es el
+mismo emparejamiento, escrito en vez de fotografiado; sirve cuando el telefono
+no puede enfocar la pantalla o se monta en remoto. Lo soportan los motores
+NOWEB y WEBJS: con otro, WAHA responde un error y la pantalla se queda con el
+QR, que siempre funciona.
 
 Se elige con `WHATSAPP_PROVIDER=waha` (o desde la pantalla) y entra por el mismo
 sitio que todo lo demas: implementa la misma interfaz `WhatsAppClient`, asi que
@@ -397,6 +408,9 @@ Todas bajo `Authorization: Bearer $ADMIN_TOKEN`.
 | POST | `/admin/automation/run` | procesar ahora lo vencido |
 | GET/POST | `/admin/automation/prefs` | preferencias del bot |
 | GET/POST/DELETE | `/admin/tracking` | sesiones de rastreo |
+| GET | `/admin/waha/detect` | busca el contenedor de WAHA en los puertos de siempre |
+| POST | `/admin/waha/connect` · `/status` · `/logout` | sesion de WAHA, QR y estado |
+| POST | `/admin/waha/request-code` | codigo de vinculacion por numero, sin QR |
 | POST | `/admin/messages/text` · `/location` · `/ask-location` | envios sueltos |
 | POST | `/admin/geo/extract` | extrae lat/lng sin enviar nada |
 | GET | `/admin/chat/conversations` | lista de chats con su ultimo mensaje y no leidos |
@@ -430,7 +444,7 @@ la pagina de rastreo.
 
 ## Tests
 
-339 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
+352 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
 en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
 verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
 WebAssembly, asi que tampoco hacen falta Docker ni un servidor.

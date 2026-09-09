@@ -217,3 +217,78 @@ export async function logoutSession(conn: WahaConnection): Promise<void> {
   );
   await json<unknown>(response, 'cerrar la sesion');
 }
+
+/**
+ * Vincular con **numero + codigo**, sin camara: el "pairing code".
+ *
+ * WAHA devuelve un codigo de ocho caracteres que se teclea en el telefono
+ * (WhatsApp, Dispositivos vinculados, Vincular con el numero de telefono). Es
+ * el mismo emparejamiento que el QR, solo que escrito: sirve cuando el
+ * telefono no puede enfocar la pantalla, o cuando se monta en remoto.
+ *
+ * Solo tiene sentido con la sesion en SCAN_QR_CODE, que es cuando WhatsApp
+ * esta esperando a que alguien se vincule. Los motores NOWEB y WEBJS lo
+ * soportan; si el contenedor corre otro, WAHA responde un error y se propaga
+ * tal cual para que la pantalla pueda ofrecer el QR.
+ */
+export async function requestPairingCode(
+  conn: WahaConnection,
+  phone: string,
+): Promise<string | null> {
+  const name = conn.session || DEFAULT_SESSION;
+
+  // WhatsApp quiere el numero en internacional y solo digitos: ni el mas, ni
+  // espacios, ni guiones. Lo que teclee el usuario da igual.
+  const phoneNumber = phone.replace(/\D+/g, '');
+  if (!phoneNumber) throw new WahaError('falta el numero de telefono', 'pedir el codigo');
+
+  const response = await request(
+    conn,
+    `/api/${encodeURIComponent(name)}/auth/request-code`,
+    'pedir el codigo',
+    { method: 'POST', body: JSON.stringify({ phoneNumber }) },
+  );
+
+  const payload = await json<{ code?: string; pairingCode?: string }>(response, 'pedir el codigo');
+  return payload.code ?? payload.pairingCode ?? null;
+}
+
+/** Donde suele estar el contenedor cuando no lo han movido. */
+export const CANDIDATOS_WAHA = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+];
+
+/**
+ * Busca el contenedor de WAHA en los sitios de siempre.
+ *
+ * Existe para que la pantalla no pida una URL que casi siempre es la misma:
+ * si lo encuentra, el usuario no teclea nada.
+ *
+ * No vale con que el puerto responda —este mismo servidor suele estar en el
+ * 3000—, asi que se comprueba que `GET /api/sessions` devuelva una lista, que
+ * es lo unico que distingue a WAHA de cualquier otra cosa escuchando ahi.
+ */
+export async function detectWaha(
+  candidatos: string[] = CANDIDATOS_WAHA,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 1200,
+): Promise<string | null> {
+  for (const base of candidatos) {
+    const url = base.replace(/\/+$/, '');
+    try {
+      const response = await fetchImpl(`${url}/api/sessions`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) continue;
+      const payload: unknown = await response.json();
+      if (Array.isArray(payload)) return url;
+    } catch {
+      // Puerto cerrado, otra cosa escuchando o respuesta que no es JSON: no es
+      // WAHA. Se prueba el siguiente sin ruido.
+    }
+  }
+  return null;
+}

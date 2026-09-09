@@ -12,7 +12,16 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { SettingsService } from '../settings/service.js';
 import { isPubliclyReachable } from '../whatsapp/onboarding.js';
-import { ensureSession, getQrCode, getSession, logoutSession, WahaError } from '../whatsapp/waha/session.js';
+import {
+  CANDIDATOS_WAHA,
+  detectWaha,
+  ensureSession,
+  getQrCode,
+  getSession,
+  logoutSession,
+  requestPairingCode,
+  WahaError,
+} from '../whatsapp/waha/session.js';
 import { fromChatId } from '../whatsapp/waha/client.js';
 
 export interface WahaRoutesDeps {
@@ -27,6 +36,10 @@ const connectSchema = z.object({
   wahaEngine: z.string().trim().optional(),
   /** URL publica de ESTE sistema, a la que WAHA mandara los mensajes. */
   publicUrl: z.string().trim().url().optional(),
+});
+
+const codeSchema = z.object({
+  phone: z.string().trim().min(6, 'hace falta el numero con codigo de pais'),
 });
 
 function connectionFrom(settings: SettingsService) {
@@ -136,6 +149,43 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
         detail: error instanceof WahaError ? error.message : String(error),
       };
     }
+  });
+
+  /**
+   * Vincular con el numero en vez de con la camara.
+   *
+   * Devuelve el codigo de ocho caracteres que hay que teclear en el telefono.
+   * Si el motor del contenedor no lo soporta, el error de WAHA sale tal cual y
+   * la pantalla se queda con el QR, que siempre funciona.
+   */
+  app.post('/admin/waha/request-code', async (request, reply) => {
+    const body = codeSchema.parse(request.body ?? {});
+    if (!settings.current().wahaUrl) {
+      return reply.code(400).send({ error: 'No hay ningun contenedor de WAHA configurado.' });
+    }
+
+    try {
+      const code = await requestPairingCode(connectionFrom(settings), body.phone);
+      if (!code) {
+        return reply.code(400).send({ error: 'WAHA no devolvio ningun codigo. Prueba con el QR.' });
+      }
+      return { ok: true, code };
+    } catch (error) {
+      const detail = error instanceof WahaError ? error.message : String(error);
+      return reply.code(400).send({ error: detail });
+    }
+  });
+
+  /**
+   * Busca el contenedor por su cuenta.
+   *
+   * La pantalla lo llama al elegir el modo WAHA: si lo encuentra, rellena la
+   * direccion sola y al usuario solo le queda darle a conectar.
+   */
+  app.get('/admin/waha/detect', async () => {
+    const guardada = settings.current().wahaUrl;
+    const found = await detectWaha(guardada ? [guardada, ...CANDIDATOS_WAHA] : CANDIDATOS_WAHA);
+    return { found, saved: guardada || null };
   });
 
   /** Desvincula el telefono: obliga a escanear otro QR. */

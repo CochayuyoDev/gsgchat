@@ -101,6 +101,11 @@ const CSS = `
   .qr-marco { display: inline-block; background: #fff; padding: 14px; border-radius: 12px;
     margin-top: 16px; border: 1px solid var(--line); }
   .qr-marco img { display: block; width: 256px; height: 256px; image-rendering: pixelated; }
+  /* El codigo de vinculacion se teclea mirando la pantalla: grande y separado
+     en dos mitades, que es como lo pide la app del telefono. */
+  .codigo { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 30px;
+            letter-spacing: 6px; font-weight: 700; margin: 12px 0 4px; }
+  .pair { margin-top: 18px; border-top: 1px solid var(--linea); padding-top: 14px; }
   .copy { display: flex; gap: 8px; margin-top: 6px; }
   .copy input { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
   .nota { background: var(--bg); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0;
@@ -304,6 +309,19 @@ export function connectPage(labels: Record<string, string>): string {
     <div class="qr-marco"><img id="qr-img" alt="Codigo QR de WhatsApp Web"></div>
     <p class="muted" id="qr-pasos">En el telefono: WhatsApp &rarr; Ajustes &rarr; Dispositivos
     vinculados &rarr; Vincular un dispositivo. Apunta a este codigo.</p>
+    <div class="pair">
+      <p class="muted">Si no puedes apuntar con la camara, <b>vincula con tu numero</b>: WhatsApp te
+      pide un codigo de ocho caracteres en vez del QR.</p>
+      <div class="actions">
+        <input id="pair-phone" inputmode="numeric" placeholder="5215512345678" style="max-width:200px">
+        <button class="ghost" id="pair-ask" type="button">Pedir codigo</button>
+      </div>
+      <div id="pair-code" class="codigo hidden"></div>
+      <p class="muted hidden" id="pair-pasos">En el telefono: WhatsApp &rarr; Ajustes &rarr;
+      Dispositivos vinculados &rarr; Vincular un dispositivo &rarr; <b>Vincular con el numero de
+      telefono</b>. Teclea ese codigo.</p>
+    </div>
+
     <div class="actions">
       <button class="ghost" id="waha-logout" type="button">Desvincular el telefono</button>
     </div>
@@ -495,6 +513,32 @@ function pintarPaso2() {
       (a.pista ? '<span class="hint">' + esc(a.pista) + '</span>' : '') + '</label>' +
       '<input id="f-' + f + '" autocomplete="off" spellcheck="false" placeholder="' + esc(a.ph) + '">';
   }).join('');
+
+  if (modo === 'waha' && document.getElementById('f-wahaUrl')) buscarWaha();
+}
+
+/**
+ * Rellena sola la direccion del contenedor.
+ *
+ * Casi siempre corre en la misma maquina y en uno de dos puertos, asi que
+ * preguntar por una URL que el sistema puede averiguar es pedirle al usuario
+ * que haga de configurador. Si no lo encuentra, el campo se queda vacio y se
+ * teclea a mano como antes.
+ */
+async function buscarWaha() {
+  var campo = document.getElementById('f-wahaUrl');
+  if (!campo || campo.value) return;
+  try {
+    var r = await api('/admin/waha/detect');
+    if (!r.found) return;
+    campo.value = r.found;
+    var pista = document.createElement('span');
+    pista.className = 'hint';
+    pista.textContent = 'Contenedor encontrado en ' + r.found + '. Si es el tuyo, no toques nada.';
+    campo.insertAdjacentElement('afterend', pista);
+  } catch (error) {
+    // Buscar es una comodidad: que falle no puede romper el paso.
+  }
 }
 
 document.getElementById('paso2-editar').onclick = function () {
@@ -622,6 +666,33 @@ document.getElementById('waha-connect').onclick = async function () {
       publicUrl: val('c-url') || undefined
     }});
     sondearWaha();
+  } catch (error) {
+    show('fb-state', error.message, 'bad');
+  } finally {
+    boton.disabled = false;
+  }
+};
+
+/**
+ * Pide el codigo de ocho caracteres para vincular sin camara.
+ *
+ * El sondeo sigue corriendo: en cuanto el usuario teclee el codigo en el
+ * telefono, el estado pasa a WORKING y la pantalla se entera sola.
+ */
+document.getElementById('pair-ask').onclick = async function () {
+  var boton = this;
+  var telefono = val('pair-phone');
+  if (!telefono) { show('fb-state', 'Escribe tu numero con codigo de pais', 'warn'); return; }
+
+  boton.disabled = true;
+  try {
+    var r = await api('/admin/waha/request-code', { method: 'POST', body: { phone: telefono } });
+    var caja = document.getElementById('pair-code');
+    // WAHA lo manda de corrido; partirlo por la mitad es como lo enseña la app.
+    caja.textContent = r.code.length === 8 ? r.code.slice(0, 4) + ' ' + r.code.slice(4) : r.code;
+    caja.classList.remove('hidden');
+    document.getElementById('pair-pasos').classList.remove('hidden');
+    show('fb-state', 'Teclea el codigo en el telefono', 'warn');
   } catch (error) {
     show('fb-state', error.message, 'bad');
   } finally {

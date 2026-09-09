@@ -17,7 +17,14 @@ import {
   toChatId,
 } from '../src/whatsapp/waha/client.js';
 import { ackToStatus, toChangeValue } from '../src/whatsapp/waha/webhook.js';
-import { ensureSession, getSession, webhookYaApunta } from '../src/whatsapp/waha/session.js';
+import {
+  CANDIDATOS_WAHA,
+  detectWaha,
+  ensureSession,
+  getSession,
+  requestPairingCode,
+  webhookYaApunta,
+} from '../src/whatsapp/waha/session.js';
 import { signWahaPayload, verifyWahaSignature } from '../src/whatsapp/signature.js';
 import { WhatsAppApiError } from '../src/whatsapp/client.js';
 import { CATALOG } from '../src/templates/catalog.js';
@@ -513,6 +520,81 @@ describe('el webhook de WAHA dentro del servidor', () => {
     expect(repos._locations[0]).toMatchObject({ lat: 19.4326, lng: -99.1332 });
     await app.close();
   });
+
+  it('la pantalla puede pedir el codigo de vinculacion por la API', async () => {
+    const { impl, calls } = fakeFetch([[/\/auth\/request-code$/, { code: 'ABCD1234' }]]);
+    vi.stubGlobal('fetch', impl);
+    const { app } = await montar();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/waha/request-code',
+      headers: { authorization: `Bearer ${ADMIN}` },
+      payload: { phone: '+52 1 55 1234 5678' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, code: 'ABCD1234' });
+    expect(calls[0]!.body).toEqual({ phoneNumber: '5215512345678' });
+
+    vi.unstubAllGlobals();
+    await app.close();
+  });
+
+  it('si WAHA no da codigo, la respuesta manda al QR en vez de fallar en blanco', async () => {
+    const { impl } = fakeFetch([[/\/auth\/request-code$/, {}]]);
+    vi.stubGlobal('fetch', impl);
+    const { app } = await montar();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/waha/request-code',
+      headers: { authorization: `Bearer ${ADMIN}` },
+      payload: { phone: '5215512345678' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatch(/QR/);
+
+    vi.unstubAllGlobals();
+    await app.close();
+  });
+
+  it('pedir el codigo tambien esta detras del token de admin', async () => {
+    const { app } = await montar();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/waha/request-code',
+      payload: { phone: '5215512345678' },
+    });
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('la busqueda del contenedor prueba primero la direccion ya guardada', async () => {
+    const vistas: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => {
+        vistas.push(String(url));
+        return new Response(JSON.stringify([]), { status: 200 });
+      }),
+    );
+    const { app } = await montar();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/waha/detect',
+      headers: { authorization: `Bearer ${ADMIN}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().found).toBe(BASE);
+    expect(vistas[0]).toBe(`${BASE}/api/sessions`);
+
+    vi.unstubAllGlobals();
+    await app.close();
+  });
 });
 
 describe('reconectar no debe tumbar una sesion que ya funciona', () => {
@@ -629,5 +711,93 @@ describe('el wamid nunca puede repetirse', () => {
   it('el id envuelto en _serialized tambien se entiende', async () => {
     const { wa } = cliente([[/sendText/, { id: { _serialized: 'true_x@c.us_SER' } }]]);
     expect((await wa.sendText('521551', 'a')).wamid).toBe('true_x@c.us_SER');
+  });
+});
+
+describe('vincular con el numero en vez de con el QR', () => {
+  it('el codigo se pide con el numero en digitos, sin el mas ni espacios', async () => {
+    const { impl, calls } = fakeFetch([[/\/auth\/request-code$/, { code: 'ABCD1234' }]]);
+
+    const code = await requestPairingCode({ baseUrl: BASE, session: 'default', fetchImpl: impl }, '+52 1 55 1234 5678');
+
+    expect(code).toBe('ABCD1234');
+    expect(calls[0]!.url).toBe(`${BASE}/api/default/auth/request-code`);
+    expect(calls[0]!.method).toBe('POST');
+    expect(calls[0]!.body).toEqual({ phoneNumber: '5215512345678' });
+  });
+
+  it('algunas versiones lo llaman pairingCode', async () => {
+    const { impl } = fakeFetch([[/\/auth\/request-code$/, { pairingCode: 'ZZZZ9999' }]]);
+    const code = await requestPairingCode({ baseUrl: BASE, fetchImpl: impl }, '5215512345678');
+    expect(code).toBe('ZZZZ9999');
+  });
+
+  it('un numero que no trae digitos se corta aqui, sin llamar a WAHA', async () => {
+    const { impl, calls } = fakeFetch([[/\/auth\/request-code$/, { code: 'X' }]]);
+    await expect(requestPairingCode({ baseUrl: BASE, fetchImpl: impl }, '+- ')).rejects.toThrow(
+      /falta el numero/,
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it('un motor que no lo soporta propaga el motivo, para poder ofrecer el QR', async () => {
+    const { impl } = fakeFetch([[/\/auth\/request-code$/, { message: 'not supported by engine' }, 422]]);
+    await expect(requestPairingCode({ baseUrl: BASE, fetchImpl: impl }, '5215512345678')).rejects.toThrow(
+      /not supported by engine/,
+    );
+  });
+});
+
+describe('encontrar el contenedor solo', () => {
+  it('se queda con el primero que conteste una lista de sesiones', async () => {
+    const impl = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.startsWith('http://localhost:3001')) return new Response(JSON.stringify([]), { status: 200 });
+      return new Response('', { status: 404 });
+    }) as unknown as typeof fetch;
+
+    expect(await detectWaha(['http://localhost:3000', 'http://localhost:3001'], impl)).toBe(
+      'http://localhost:3001',
+    );
+  });
+
+  it('otra cosa escuchando en ese puerto no cuela: se exige la lista', async () => {
+    // Este mismo servidor suele estar en el 3000 y responde JSON a muchas
+    // rutas; lo que no devuelve nunca es un array en /api/sessions.
+    const impl = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, hola: 'no soy waha' }), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    expect(await detectWaha(['http://localhost:3000'], impl)).toBeNull();
+  });
+
+  it('sin contenedor a la vista devuelve null en vez de reventar', async () => {
+    const impl = vi.fn(async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
+
+    expect(await detectWaha(['http://localhost:3000'], impl)).toBeNull();
+  });
+
+  it('la direccion guardada se prueba antes que las de siempre', async () => {
+    const vistas: string[] = [];
+    const impl = vi.fn(async (url: string | URL | Request) => {
+      vistas.push(String(url));
+      return new Response(JSON.stringify([]), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await detectWaha(['http://waha.miempresa.local', ...CANDIDATOS_WAHA], impl);
+    expect(vistas[0]).toBe('http://waha.miempresa.local/api/sessions');
+  });
+
+  it('la barra final no se duplica en la ruta', async () => {
+    const vistas: string[] = [];
+    const impl = vi.fn(async (url: string | URL | Request) => {
+      vistas.push(String(url));
+      return new Response(JSON.stringify([]), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    expect(await detectWaha(['http://localhost:3001/'], impl)).toBe('http://localhost:3001');
+    expect(vistas[0]).toBe('http://localhost:3001/api/sessions');
   });
 });
