@@ -20,6 +20,7 @@
 import type { Lead, LeadPatch } from '../db/leads.js';
 import { mensajesVigentes, render, type Mensajes } from './mensajes.js';
 import { reconocerDistrito } from './distritos.js';
+import { pareceTextoReal } from './palabras.js';
 
 export interface Respuesta {
   texto: string;
@@ -292,6 +293,11 @@ export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boo
     .split(' ')
     .filter((p) => p.length >= 3 && !CORTESIA.has(p));
   if (!conSustancia.length) return false;
+
+  // Y que esas palabras PUEDAN existir. No es un diccionario -rechazaria
+  // "iPhone 15" y media tienda- sino la forma de la palabra, que es lo que
+  // separa "documentos" de "asdasd" sin conocer ninguna de las dos.
+  if (!pareceTextoReal(conSustancia.join(' '))) return false;
 
   // Una pregunta tampoco. La excepcion es "que vas a enviar": ahi el cliente
   // puede describir su envio con una pregunta ("un paquete, se puede?") y
