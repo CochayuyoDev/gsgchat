@@ -7,6 +7,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 import { LIMA_BBOX, MEXICO_BBOX } from './geo/validate.js';
+import { DISTRITOS_LIMA_CALLAO } from './preventa/distritos.js';
 import type { BoundingBox } from './types.js';
 
 const csv = (value: string) =>
@@ -165,6 +166,8 @@ export interface Config extends RawConfig {
   coverageName: string;
   /** Zona horaria del negocio: decide el saludo y las fechas. */
   timezone: string;
+  /** Distritos aceptados como destino. Vacio = texto libre. */
+  distritos: string[];
   /** Nombre con el que se presenta la tienda. */
   businessName: string;
   /** Horario de atencion, para contestarlo sin que lo pregunten dos veces. */
@@ -185,6 +188,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     optInKeywords: csv(raw.OPT_IN_KEYWORDS),
     bbox: raw.GEO_BBOX === 'lima' ? LIMA_BBOX : raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
     timezone: raw.TIMEZONE,
+    // Con cobertura de Lima, los distritos se validan contra los que existen.
+    // Fuera de ahi no hay lista que valga y el campo acepta texto libre.
+    distritos: raw.GEO_BBOX === 'lima' ? DISTRITOS_LIMA_CALLAO : [],
     businessName: raw.BUSINESS_NAME,
     businessHours: raw.BUSINESS_HOURS,
     coverageName:

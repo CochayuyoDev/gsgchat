@@ -161,6 +161,7 @@ export async function turnoDePreventa(
     horario: config.businessHours,
     servicios: prefs.serviciosPreventa,
     mensajes: prefs.mensajesPreventa,
+    distritos: config.distritos,
   });
 
   if (Object.keys(patch).length) await repos.leads.update(contact.id, patch);

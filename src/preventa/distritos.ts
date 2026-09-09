@@ -1,0 +1,157 @@
+/**
+ * Los distritos que existen, para no guardar cualquier cosa como destino.
+ *
+ * Un caso real: alguien contestó "No viejo" a "¿de qué distrito recogemos?" y
+ * quedó guardado como el distrito de recojo. La ficha llegó al repartidor
+ * diciendo que recogiera en "No viejo". Nada de lo que se valida en general
+ * —longitud, signos, tecleo al azar— lo detecta: son dos palabras normales.
+ *
+ * La única forma de cazarlo es saber qué distritos hay. En Lima y Callao son
+ * cincuenta, y es una lista que no cambia: la aritmética es a favor.
+ *
+ * Para una tienda que opere en otra parte, la lista se deja vacía y el campo
+ * vuelve a aceptar texto libre. Es preferible a inventarse una validación
+ * genérica que rechace nombres legítimos.
+ */
+
+/** Los 43 distritos de Lima Metropolitana. */
+export const DISTRITOS_LIMA = [
+  'Ancón', 'Ate', 'Barranco', 'Breña', 'Carabayllo', 'Chaclacayo', 'Chorrillos',
+  'Cieneguilla', 'Comas', 'El Agustino', 'Independencia', 'Jesús María', 'La Molina',
+  'La Victoria', 'Lima', 'Lince', 'Los Olivos', 'Lurigancho', 'Lurín',
+  'Magdalena del Mar', 'Miraflores', 'Pachacámac', 'Pucusana', 'Pueblo Libre',
+  'Puente Piedra', 'Punta Hermosa', 'Punta Negra', 'Rímac', 'San Bartolo',
+  'San Borja', 'San Isidro', 'San Juan de Lurigancho', 'San Juan de Miraflores',
+  'San Luis', 'San Martín de Porres', 'San Miguel', 'Santa Anita',
+  'Santa María del Mar', 'Santa Rosa', 'Santiago de Surco', 'Surquillo',
+  'Villa El Salvador', 'Villa María del Triunfo',
+];
+
+/** Los 7 de la Provincia Constitucional del Callao. */
+export const DISTRITOS_CALLAO = [
+  'Bellavista', 'Callao', 'Carmen de la Legua Reynoso', 'La Perla', 'La Punta',
+  'Mi Perú', 'Ventanilla',
+];
+
+/**
+ * Como los llama la gente.
+ *
+ * Nadie escribe "Santiago de Surco" ni "San Martín de Porres": escriben
+ * "Surco" y "SMP". Sin estos alias, el asistente rechazaría la respuesta
+ * correcta de la mitad de los clientes.
+ */
+export const ALIAS: Record<string, string> = {
+  surco: 'Santiago de Surco',
+  smp: 'San Martín de Porres',
+  'san martin': 'San Martín de Porres',
+  sjl: 'San Juan de Lurigancho',
+  'san juan lurigancho': 'San Juan de Lurigancho',
+  sjm: 'San Juan de Miraflores',
+  'san juan miraflores': 'San Juan de Miraflores',
+  vmt: 'Villa María del Triunfo',
+  ves: 'Villa El Salvador',
+  villa: 'Villa El Salvador',
+  magdalena: 'Magdalena del Mar',
+  'pueblo libre': 'Pueblo Libre',
+  cercado: 'Lima',
+  'cercado de lima': 'Lima',
+  centro: 'Lima',
+  'jesus maria': 'Jesús María',
+  chosica: 'Lurigancho',
+  'santa clara': 'Ate',
+  vitarte: 'Ate',
+  carmen: 'Carmen de la Legua Reynoso',
+  'mi peru': 'Mi Perú',
+};
+
+export const DISTRITOS_LIMA_CALLAO = [...DISTRITOS_LIMA, ...DISTRITOS_CALLAO];
+
+const normaliza = (texto: string): string =>
+  texto
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** Palabras que sobran al decir un distrito: "vivo en Surco", "distrito Ate". */
+const RELLENO = new Set([
+  'el', 'la', 'los', 'las', 'de', 'del', 'en', 'es', 'soy', 'vivo', 'estoy',
+  'distrito', 'zona', 'por', 'aca', 'aqui', 'desde', 'hasta', 'un', 'una',
+]);
+
+const sinRelleno = (texto: string): string =>
+  normaliza(texto)
+    .split(' ')
+    .filter((p) => !RELLENO.has(p))
+    .join(' ');
+
+/** Distancia de edición, para tolerar una errata sin abrir la puerta a todo. */
+export function distancia(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length || !b.length) return Math.max(a.length, b.length);
+
+  let previa = Array.from({ length: b.length + 1 }, (_, i) => i);
+
+  for (let i = 1; i <= a.length; i++) {
+    const actual = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const coste = a[i - 1] === b[j - 1] ? 0 : 1;
+      actual[j] = Math.min(actual[j - 1]! + 1, previa[j]! + 1, previa[j - 1]! + coste);
+    }
+    previa = actual;
+  }
+
+  return previa[b.length]!;
+}
+
+/**
+ * El distrito que quiso decir, o null si no se parece a ninguno.
+ *
+ * Devuelve el nombre CANÓNICO: quien escribe "surco" o "sanborja" queda
+ * guardado como "Santiago de Surco" y "San Borja", que es lo que hace que la
+ * ficha se pueda filtrar y contar después.
+ *
+ * Con `catalogo` vacío no se valida nada y se devuelve lo que escribió: es lo
+ * que corresponde a una tienda que no opera en Lima.
+ */
+export function reconocerDistrito(
+  texto: string,
+  catalogo: string[] = DISTRITOS_LIMA_CALLAO,
+): string | null {
+  const limpio = texto.trim();
+  if (!limpio) return null;
+  if (!catalogo.length) return limpio;
+
+  const buscado = sinRelleno(limpio);
+  if (!buscado) return null;
+
+  // Alias primero: "surco" es Santiago de Surco y no hay que adivinarlo.
+  if (ALIAS[buscado] && catalogo.includes(ALIAS[buscado]!)) return ALIAS[buscado]!;
+
+  const candidatos = catalogo.map((d) => ({ nombre: d, clave: sinRelleno(d) }));
+
+  const exacto = candidatos.find((c) => c.clave === buscado);
+  if (exacto) return exacto.nombre;
+
+  // Contenido: "vivo en san borja ahora mismo" trae el distrito dentro.
+  const dentro = candidatos.find(
+    (c) => c.clave.length >= 4 && (buscado.includes(c.clave) || c.clave.includes(buscado)),
+  );
+  if (dentro) return dentro.nombre;
+
+  // Y una errata: "mirafores", "surqillo". Se tolera una por cada cinco
+  // letras, con techo de dos: mas que eso ya no es una errata, es otra palabra.
+  const margen = Math.min(2, Math.floor(buscado.length / 5));
+  if (margen < 1) return null;
+
+  let mejor: { nombre: string; d: number } | null = null;
+  for (const c of candidatos) {
+    const d = distancia(buscado, c.clave);
+    if (d <= margen && (!mejor || d < mejor.d)) mejor = { nombre: c.nombre, d };
+  }
+
+  return mejor?.nombre ?? null;
+}

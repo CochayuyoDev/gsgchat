@@ -136,6 +136,11 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
     texto: 'Te paso con una persona del equipo para darte el precio exacto.',
     variables: VARIABLES_COMUNES,
   },
+  distritoNoReconocido: {
+    cuando: 'Cuando lo que dijo no es un distrito que atendamos.',
+    texto: 'No reconozco ese distrito. Escríbeme solo el nombre, por ejemplo: Miraflores, Surco o San Isidro.',
+    variables: VARIABLES_COMUNES,
+  },
   noEntendi: {
     cuando: 'Cuando la respuesta no encaja con lo que se preguntó. Se repite la pregunta.',
     texto: 'No reconocí ese mensaje, por favor inténtalo de nuevo.',

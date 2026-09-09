@@ -136,7 +136,9 @@ describe('escenario: el cliente va directo al grano', () => {
     // Y al volver, sigue por donde iba: no vuelve a preguntar el recojo.
     expect(c.dice('Surco')?.texto).toContain('Qué vas a enviar');
     expect(c.ficha.recojoDistrito).toBe('Santa Anita');
-    expect(c.ficha.entregaDistrito).toBe('Surco');
+    // Se guarda el nombre canonico: quien escribe "Surco" queda como
+    // "Santiago de Surco", que es como se llama y como se puede contar.
+    expect(c.ficha.entregaDistrito).toBe('Santiago de Surco');
   });
 });
 

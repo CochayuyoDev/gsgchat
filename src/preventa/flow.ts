@@ -19,6 +19,7 @@
 
 import type { Lead, LeadPatch } from '../db/leads.js';
 import { mensajesVigentes, render, type Mensajes } from './mensajes.js';
+import { reconocerDistrito } from './distritos.js';
 
 export interface Respuesta {
   texto: string;
@@ -64,6 +65,15 @@ export interface Contexto {
    * seis.
    */
   servicios?: string[];
+  /**
+   * Los distritos que se aceptan como destino.
+   *
+   * Vacio = texto libre, que es lo que corresponde a una tienda que no opera
+   * en Lima. Con lista, lo que no se parezca a ninguno se rechaza: es la
+   * unica forma de cazar un "No viejo" contestado a "¿de que distrito?", que
+   * son dos palabras normales y ninguna validacion generica detecta.
+   */
+  distritos?: string[];
   /**
    * Los textos que edita la tienda desde /panel.
    *
@@ -267,9 +277,21 @@ export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boo
 
   const normalizado = normaliza(limpio);
 
+  // "No" al documento significa "luego te lo doy", y es una respuesta
+  // legitima: se acepta antes que cualquier otra regla, o las de longitud la
+  // tumban por corta.
+  if (campo === 'documento' && esNegacion(normalizado)) return true;
+
   // Una cortesia no contesta nada. "Ya" y "listo" incluidos: el cliente esta
   // acusando recibo, no diciendo su distrito.
   if (CORTESIA.has(normalizado)) return false;
+
+  // Y hace falta AL MENOS una palabra de verdad. "Ya xd" son dos palabras y
+  // ninguna dice nada: quedaba guardado como el contenido del envio.
+  const conSustancia = normalizado
+    .split(' ')
+    .filter((p) => p.length >= 3 && !CORTESIA.has(p));
+  if (!conSustancia.length) return false;
 
   // Una pregunta tampoco. La excepcion es "que vas a enviar": ahi el cliente
   // puede describir su envio con una pregunta ("un paquete, se puede?") y
@@ -283,7 +305,9 @@ export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boo
   switch (campo) {
     case 'recojo':
     case 'entrega':
-      // Un distrito lleva letras. "12345" no es un distrito.
+      // Un distrito lleva letras. "12345" no es un distrito. Que ADEMAS sea
+      // un distrito de verdad lo comprueba `decidir`, que es quien tiene la
+      // lista; aqui no llega.
       return /\p{L}{3,}/u.test(limpio);
     case 'nombre':
       return /\p{L}{2,}/u.test(limpio);
@@ -491,7 +515,23 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
     return conIntento(lead, ctx, mensaje(ctx, 'noEntendi'));
   }
 
-  const patch = guardarRespuesta(pendiente, texto, { ...entrada, botonId: entrada.botonId ?? elegida }, ctx.servicios);
+  // El distrito se comprueba contra la lista de la tienda: "No viejo" son dos
+  // palabras normales y ninguna validacion generica lo caza, pero no es un
+  // distrito. Se guarda ademas el nombre canonico, para que la ficha se pueda
+  // filtrar y contar despues.
+  let reconocido: string | null = null;
+  if (pendiente === 'recojo' || pendiente === 'entrega') {
+    reconocido = reconocerDistrito(texto, ctx.distritos);
+    if (!reconocido) return conIntento(lead, ctx, mensaje(ctx, 'distritoNoReconocido'));
+  }
+
+  const patch = guardarRespuesta(
+    pendiente,
+    texto,
+    { ...entrada, botonId: entrada.botonId ?? elegida },
+    ctx.servicios,
+    { reconocido },
+  );
   return cerrarOSeguir({ ...lead, ...patch } as Lead, { ...patch, intentosFallidos: 0 }, ctx);
 }
 
@@ -561,12 +601,13 @@ function guardarRespuesta(
   texto: string,
   entrada: Entrada,
   servicios: string[] = [],
+  distritos: { reconocido?: string | null } = {},
 ): LeadPatch {
   switch (campo) {
     case 'recojo':
-      return { recojoDistrito: texto, estado: 'en_conversacion' };
+      return { recojoDistrito: distritos.reconocido ?? texto, estado: 'en_conversacion' };
     case 'entrega':
-      return { entregaDistrito: texto, estado: 'en_conversacion' };
+      return { entregaDistrito: distritos.reconocido ?? texto, estado: 'en_conversacion' };
     case 'contenido':
       return { contenido: texto, estado: 'en_conversacion' };
     case 'cuando': {
