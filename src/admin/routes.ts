@@ -364,6 +364,34 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     return { ...outcome, location: result };
   });
 
+  /**
+   * Un mensaje con botones de respuesta rapida.
+   *
+   * Es lo que usa la preventa para no obligar al cliente a escribir: pulsa y
+   * la respuesta vuelve como si la hubiera tecleado. Donde WhatsApp no los
+   * pinte, el cliente ve una lista numerada y responde con el numero.
+   */
+  app.post('/admin/messages/buttons', async (request) => {
+    const body = z
+      .object({
+        phone: phoneSchema,
+        body: z.string().min(1).max(1024),
+        // WhatsApp no pinta mas de tres; pedir mas es pedir que se corten.
+        buttons: z
+          .array(z.object({ id: z.string().min(1).max(256), title: z.string().min(1).max(20) }))
+          .min(1)
+          .max(3),
+      })
+      .parse(request.body);
+
+    return sender.send({
+      phone: body.phone,
+      kind: 'interactive',
+      category: 'UTILITY',
+      interactive: { body: body.body, buttons: body.buttons },
+    });
+  });
+
   app.post('/admin/messages/ask-location', async (request) => {
     const body = z
       .object({ phone: phoneSchema, text: z.string().optional() })

@@ -28,6 +28,8 @@ export interface DynamicClientDeps {
    * con el nombre. Se inyecta para no meter la base de datos aqui dentro.
    */
   resolveTemplateBody?: (name: string, language: string) => Promise<string | undefined>;
+  /** Ver WHATSAPP_NATIVE_BUTTONS: apagado, una cuenta personal los entrega rotos. */
+  nativeButtons?: boolean;
 }
 
 export function createDynamicWhatsAppClient(
@@ -41,7 +43,10 @@ export function createDynamicWhatsAppClient(
     const credentials = settings.current();
 
     if (providerOf(credentials) === 'local') {
-      return createLocalClient({ resolveTemplateBody: deps.resolveTemplateBody });
+      return createLocalClient({
+        resolveTemplateBody: deps.resolveTemplateBody,
+        nativeButtons: deps.nativeButtons,
+      });
     }
 
     if (providerOf(credentials) === 'waha') {

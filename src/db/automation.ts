@@ -148,6 +148,15 @@ export interface ScheduleInput {
 export interface AutomationPrefs {
   /** Sin coordenadas ni regla que aplique, pedir la ubicacion con el boton nativo. */
   askLocationFallback: boolean;
+  /**
+   * El asistente de preventa: presenta la tienda, ofrece el menu y va llenando
+   * la ficha (de donde, a donde, que envia, cuando, a nombre de quien).
+   *
+   * Encendido: es lo que hace que el bot sirva para algo en vez de solo
+   * recibir mensajes. Se apaga desde /panel cuando la tienda prefiere que
+   * conteste siempre una persona.
+   */
+  preventaActiva: boolean;
 }
 
 /**
@@ -158,7 +167,10 @@ export interface AutomationPrefs {
  * contesta un robot pidiendole el pin. Es ruido y confunde. Quien de verdad
  * quiera pedir la ubicacion siempre, lo enciende desde /panel.
  */
-export const DEFAULT_PREFS: AutomationPrefs = { askLocationFallback: false };
+export const DEFAULT_PREFS: AutomationPrefs = {
+  askLocationFallback: false,
+  preventaActiva: true,
+};
 
 // ------------------------------------------------------------- interfaz
 

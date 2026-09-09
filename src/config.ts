@@ -89,6 +89,12 @@ const schema = z.object({
    */
   COVERAGE_NAME: z.string().default(''),
 
+  /** Como se presenta la tienda al cliente. */
+  BUSINESS_NAME: z.string().default('nuestra tienda'),
+
+  /** Horario de atencion, tal cual se le dice al cliente. */
+  BUSINESS_HOURS: z.string().default('lunes a sabado de 9:00 a 19:00'),
+
   /**
    * Zona horaria del negocio, para los saludos y las fechas.
    *
@@ -96,6 +102,24 @@ const schema = z.object({
    * para el cliente. Sin esto, un "buenos dias" sale de madrugada.
    */
   TIMEZONE: z.string().default('America/Lima'),
+
+  /**
+   * Intentar botones nativos (native flow) con el cliente local.
+   *
+   * Apagado, y con motivo: probado contra una cuenta personal de WhatsApp, el
+   * mensaje interactivo llega como "No se pudo cargar este mensaje. Abre el
+   * mensaje en tu telefono para verlo" en WhatsApp Web, y en el telefono no
+   * aparece nada. Es peor que no tener botones: WhatsApp acepta el envio, asi
+   * que se da por bueno y la degradacion a texto nunca llega a saltar; el
+   * cliente recibe un mensaje roto y el operador ve un doble check.
+   *
+   * Se deja encendible por si con una cuenta de WhatsApp Business, u otra
+   * version del cliente, si se pintan.
+   */
+  WHATSAPP_NATIVE_BUTTONS: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
 });
 
 export type RawConfig = z.infer<typeof schema>;
@@ -108,6 +132,10 @@ export interface Config extends RawConfig {
   coverageName: string;
   /** Zona horaria del negocio: decide el saludo y las fechas. */
   timezone: string;
+  /** Nombre con el que se presenta la tienda. */
+  businessName: string;
+  /** Horario de atencion, para contestarlo sin que lo pregunten dos veces. */
+  businessHours: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -124,6 +152,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     optInKeywords: csv(raw.OPT_IN_KEYWORDS),
     bbox: raw.GEO_BBOX === 'lima' ? LIMA_BBOX : raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
     timezone: raw.TIMEZONE,
+    businessName: raw.BUSINESS_NAME,
+    businessHours: raw.BUSINESS_HOURS,
     coverageName:
       raw.COVERAGE_NAME.trim() ||
       (raw.GEO_BBOX === 'lima' ? 'todo Lima y Callao' : raw.GEO_BBOX === 'mexico' ? 'Mexico' : ''),

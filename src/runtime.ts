@@ -55,6 +55,7 @@ export async function createRuntime(opts: { migrate?: boolean } = {}): Promise<R
     // como texto. Con la Cloud API esto no se llama nunca.
     resolveTemplateBody: async (name, language) =>
       (await repos.templates.get(name, language))?.body ?? undefined,
+    nativeButtons: config.WHATSAPP_NATIVE_BUTTONS,
   });
 
   return {

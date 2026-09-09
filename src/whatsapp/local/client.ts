@@ -21,6 +21,11 @@ import { getLocalSocket, getLocalState, toJid } from './session.js';
 export interface LocalClientOptions {
   /** Cuerpo guardado de una plantilla: aqui se manda como texto sustituido. */
   resolveTemplateBody?: (name: string, language: string) => Promise<string | undefined>;
+  /**
+   * Intentar botones nativos. Ver WHATSAPP_NATIVE_BUTTONS en config: apagado
+   * por defecto porque una cuenta personal los entrega rotos.
+   */
+  nativeButtons?: boolean;
 }
 
 /** El socket, o un error que el sender entiende como transitorio. */
@@ -75,39 +80,46 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
     },
 
     /**
-     * Boton nativo de compartir ubicacion, con el camino manual de respaldo.
+     * Se pide la ubicacion por texto, explicando donde esta el boton.
      *
-     * El cuerpo explica el clip de todas formas: si el WhatsApp del cliente no
-     * pinta el boton, lo que ve es exactamente lo que veia antes.
+     * El boton nativo solo se intenta con `nativeButtons` encendido, que viene
+     * apagado: ver WHATSAPP_NATIVE_BUTTONS en config.
      */
     async sendLocationRequest(to, body) {
-      const sock = socketOrThrow();
-      const texto = `${body}\n\nO mandamela con el clip 📎 → Ubicacion → Enviar tu ubicacion actual.`;
+      const texto = `${body}\n\nMandamela con el clip 📎 → Ubicacion → Enviar tu ubicacion actual.`;
 
-      try {
-        const wamid = await enviarConBotones(sock, toJid(to), texto, [botonUbicacion()]);
-        return { wamid };
-      } catch {
-        return sendText(to, texto);
+      if (opts.nativeButtons) {
+        try {
+          const wamid = await enviarConBotones(socketOrThrow(), toJid(to), texto, [botonUbicacion()]);
+          return { wamid };
+        } catch (error) {
+          console.log('[wa] boton de ubicacion no salio, va como texto:', String(error).slice(0, 200));
+        }
       }
+
+      return sendText(to, texto);
     },
 
-    /** Botones de respuesta rapida; si no se pueden, lista numerada. */
+    /**
+     * Opciones para el cliente, como lista numerada.
+     *
+     * Responder con un numero funciona en cualquier version de WhatsApp y no
+     * depende de que el cliente sepa pintar nada. Los botones nativos solo se
+     * intentan con `nativeButtons`: ver WHATSAPP_NATIVE_BUTTONS.
+     */
     async sendButtons(to, body, buttons) {
-      const sock = socketOrThrow();
-
-      if (buttons.length) {
+      if (opts.nativeButtons && buttons.length) {
         try {
           const wamid = await enviarConBotones(
-            sock,
+            socketOrThrow(),
             toJid(to),
             body,
             // WhatsApp no pinta mas de tres botones de respuesta rapida.
             buttons.slice(0, 3).map((b) => botonRespuesta(b.id, b.title)),
           );
           return { wamid };
-        } catch {
-          // Sigue por el camino de siempre.
+        } catch (error) {
+          console.log('[wa] botones no salieron, va como lista:', String(error).slice(0, 200));
         }
       }
 

@@ -40,6 +40,17 @@ export interface GateSnapshot {
   /** Cupo de hoy segun el warm-up. */
   dailyCap: number;
   maxMarketingPerContact7d: number;
+  /**
+   * Si la ventana de servicio de 24 h aplica.
+   *
+   * Es una regla de Meta, no una politica nuestra: la Cloud API rechaza el
+   * texto libre pasadas 24 h del ultimo mensaje del cliente. Fuera de ella
+   * -cliente local, WAHA- esa regla no existe, y aplicarla igual seria
+   * inventarse una limitacion que el propio WhatsApp no tiene.
+   *
+   * Por defecto true: quien no lo diga, se comporta como Meta.
+   */
+  serviceWindowApplies?: boolean;
 }
 
 export type GateDecision =
@@ -109,7 +120,8 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   }
 
   // 4. Fuera de la ventana solo se puede mandar plantilla.
-  if (!manual && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
+  const ventanaAplica = snapshot.serviceWindowApplies !== false;
+  if (!manual && ventanaAplica && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
     return {
       allow: false,
       code: 'window_closed',

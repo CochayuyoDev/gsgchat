@@ -146,7 +146,7 @@ describe('la conversacion se guarda sola', () => {
   it('el entrante y la respuesta quedan en el hilo, en orden', async () => {
     // Con el fallback encendido el bot contesta pidiendo la ubicacion, que es
     // la respuesta que este test quiere ver en el hilo.
-    await repos.automation.setPrefs({ askLocationFallback: true });
+    await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: false });
     await processChange('messages', inbound({ text: { body: 'hola, quiero cotizar' } }), deps);
 
     const contact = (await repos.contacts.getByPhone('5215500001111'))!;

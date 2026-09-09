@@ -60,6 +60,8 @@ export interface SenderDeps {
   phoneNumberId: string | (() => string);
   warmup: WarmupPolicy;
   maxMarketingPerContact7d: number;
+  /** Si la ventana de 24 h de Meta aplica. Ver `GateSnapshot`. */
+  serviceWindowApplies?: boolean | (() => boolean);
   now?: () => Date;
 }
 
@@ -72,6 +74,10 @@ export function createSender(deps: SenderDeps): Sender {
   const now = deps.now ?? (() => new Date());
   const phoneId = () =>
     typeof deps.phoneNumberId === 'function' ? deps.phoneNumberId() : deps.phoneNumberId;
+  const ventanaAplica = () =>
+    typeof deps.serviceWindowApplies === 'function'
+      ? deps.serviceWindowApplies()
+      : deps.serviceWindowApplies !== false;
 
   return {
     async send(job) {
@@ -106,6 +112,7 @@ export function createSender(deps: SenderDeps): Sender {
           sentToday,
           dailyCap: dailyCapFor(numberState.warmupStartedOn, at, warmup),
           maxMarketingPerContact7d,
+          serviceWindowApplies: ventanaAplica(),
         },
       );
 

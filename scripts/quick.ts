@@ -20,7 +20,7 @@ import { createMemoryOutboundQueue } from '../src/outbound/memory-queue.js';
 import { createRepos, createSettingsRepo } from '../src/db/repos.js';
 import { openPglite } from '../src/db/pglite.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
-import { createSettingsService } from '../src/settings/service.js';
+import { providerOf, createSettingsService } from '../src/settings/service.js';
 import { createDynamicWhatsAppClient } from '../src/whatsapp/dynamic.js';
 import { defaultAuthDir } from '../src/whatsapp/local/session.js';
 import { secretsDirectory } from '../src/runtime.js';
@@ -51,6 +51,11 @@ const config = loadConfig({
   // caja equivocada rechaza ubicaciones perfectamente validas, que es peor que
   // no comprobar nada. Valores: lima (Lima y Callao), mexico, none.
   GEO_BBOX: process.env.GEO_BBOX?.trim() || 'none',
+  // Como se presenta la tienda y que contesta a "¿a que hora atienden?".
+  BUSINESS_NAME: process.env.BUSINESS_NAME?.trim() || 'nuestra tienda',
+  BUSINESS_HOURS: process.env.BUSINESS_HOURS?.trim() || 'lunes a sabado de 9:00 a 19:00',
+  COVERAGE_NAME: process.env.COVERAGE_NAME?.trim() || '',
+  TIMEZONE: process.env.TIMEZONE?.trim() || 'America/Lima',
 } as NodeJS.ProcessEnv);
 
 const { pool } = await openPglite(DATA_DIR);
@@ -60,6 +65,7 @@ const settings = await createSettingsService(createSettingsRepo(pool), config, s
 const wa = createDynamicWhatsAppClient(settings, {
   resolveTemplateBody: async (name, language) =>
     (await repos.templates.get(name, language))?.body ?? undefined,
+  nativeButtons: config.WHATSAPP_NATIVE_BUTTONS,
 });
 
 const sender = createSender({
@@ -72,6 +78,8 @@ const sender = createSender({
     hardCap: config.DAILY_SEND_CAP,
   },
   maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
+  // La ventana de 24 h la impone Meta; fuera de la Cloud API no existe.
+  serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
 });
 
 const queue = createMemoryOutboundQueue({ sender });
@@ -93,21 +101,9 @@ for (const template of CATALOG) {
   });
 }
 
-// Un saludo de bienvenida para empezar con algo puesto.
-//
-// El disparador `first_message` es el que garantiza lo que hay que garantizar:
-// sale UNA vez por persona, la primera que escribe, y nunca mas. Solo se crea
-// si no hay ninguna regla todavia, para no pisar lo que configure la tienda
-// desde /panel.
-if (!(await repos.automation.listRules()).length) {
-  await repos.automation.createRule({
-    name: 'Bienvenida',
-    trigger: 'first_message',
-    reply: 'Hola, {saludo}. Gracias por escribir a GSG Courier. Cuentanos que necesitas enviar y de que distrito a que distrito, y te cotizamos.',
-    enabled: true,
-    priority: 100,
-  });
-}
+// La bienvenida la da el asistente de preventa, que ademas ofrece el menu y
+// va llenando la ficha. Una regla `first_message` encima seria un segundo
+// mensaje por el mismo entrante, que es justo lo que no puede pasar.
 
 const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false });
 await app.listen({ port: PORT, host: '127.0.0.1' });

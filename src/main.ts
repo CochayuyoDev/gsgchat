@@ -9,6 +9,7 @@
  */
 
 import { createRuntime } from './runtime.js';
+import { providerOf } from './settings/service.js';
 import { createSender, type SendJob, type SendOutcome } from './outbound/sender.js';
 import { createOutboundQueue, createOutboundWorker, redisReachable } from './outbound/queue.js';
 import { createMemoryOutboundQueue } from './outbound/memory-queue.js';
@@ -29,6 +30,8 @@ const sender = createSender({
     hardCap: config.DAILY_SEND_CAP,
   },
   maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
+  // La ventana de 24 h la impone Meta; fuera de la Cloud API no existe.
+  serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
 });
 
 // Sin Redis se usa la cola en memoria en vez de no arrancar. Se avisa fuerte:

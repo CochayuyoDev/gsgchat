@@ -20,6 +20,7 @@ import type { Config } from '../src/config.js';
 import { createSettingsService, type SettingsRepo, type SettingsService } from '../src/settings/service.js';
 import { createFakeAutomation, type FakeAutomation } from './fakes-automation.js';
 import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
+import { createFakeLeads } from './fakes-leads.js';
 
 export interface FakeRepos extends Repos {
   automation: FakeAutomation;
@@ -68,6 +69,10 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     _links: links,
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
+    leads: createFakeLeads((id) => {
+      const contacto = contactById(id);
+      return contacto ? { phone: contacto.phone, name: contacto.name } : undefined;
+    }),
 
     contacts: {
       async getByPhone(phone) {

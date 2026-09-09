@@ -51,6 +51,11 @@ export interface Lead {
   estado: LeadEstado;
   notas: string | null;
 
+  /** Ids de las opciones ofrecidas en el ultimo mensaje, para leer un "2". */
+  ultimasOpciones: string[] | null;
+  /** Que se le pregunto y esta esperando respuesta. Null = nada pendiente. */
+  preguntaPendiente: string | null;
+
   crmId: string | null;
   enviadoAt: Date | null;
   ultimoError: string | null;
@@ -84,6 +89,8 @@ export type LeadPatch = Partial<
     | 'razonSocial'
     | 'estado'
     | 'notas'
+    | 'ultimasOpciones'
+    | 'preguntaPendiente'
   >
 >;
 
@@ -130,6 +137,8 @@ interface Row {
   razon_social: string | null;
   estado: LeadEstado;
   notas: string | null;
+  ultimas_opciones: string[] | null;
+  pregunta_pendiente: string | null;
   crm_id: string | null;
   enviado_at: Date | null;
   ultimo_error: string | null;
@@ -165,6 +174,8 @@ const toLead = (r: Row): Lead => ({
   razonSocial: r.razon_social,
   estado: r.estado,
   notas: r.notas,
+  ultimasOpciones: r.ultimas_opciones,
+  preguntaPendiente: r.pregunta_pendiente,
   crmId: r.crm_id,
   enviadoAt: r.enviado_at,
   ultimoError: r.ultimo_error,
@@ -195,6 +206,8 @@ const COLUMNAS: Record<keyof LeadPatch, string> = {
   razonSocial: 'razon_social',
   estado: 'estado',
   notas: 'notas',
+  ultimasOpciones: 'ultimas_opciones',
+  preguntaPendiente: 'pregunta_pendiente',
 };
 
 export function createLeadsRepo(pool: Pool): LeadsRepo {

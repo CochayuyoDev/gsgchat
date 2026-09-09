@@ -453,11 +453,12 @@ describe('automatizacion sobre Postgres', () => {
 
   it('las preferencias se guardan en la tabla settings y sobreviven a una relectura', async () => {
     // Apagado de fabrica: contestar a todo mensaje sin coordenadas es ruido.
-    expect(await repos.automation.getPrefs()).toEqual({ askLocationFallback: false });
-    expect(await repos.automation.setPrefs({ askLocationFallback: true })).toEqual({
+    // Apagado de fabrica: contestar a todo mensaje sin coordenadas es ruido.
+    expect(await repos.automation.getPrefs()).toMatchObject({ askLocationFallback: false });
+    expect(await repos.automation.setPrefs({ askLocationFallback: true })).toMatchObject({
       askLocationFallback: true,
     });
-    expect(await repos.automation.getPrefs()).toEqual({ askLocationFallback: true });
+    expect(await repos.automation.getPrefs()).toMatchObject({ askLocationFallback: true });
   });
 });
 

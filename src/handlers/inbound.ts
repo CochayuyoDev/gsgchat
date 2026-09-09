@@ -24,6 +24,8 @@ import type { Sender } from '../outbound/sender.js';
 import type { InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { ExtractionSuccess, FailureReason } from '../types.js';
+import { responder, type Entrada as EntradaPreventa } from '../preventa/flow.js';
+import { saludoPorHora } from '../automation/engine.js';
 import type { MessageKind } from '../db/messages.js';
 import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
 
@@ -105,6 +107,59 @@ export function readInbound(message: InboundMessage): { kind: MessageKind; body:
   }
 
   return { kind, body: etiquetas[kind] ?? `(mensaje de tipo ${message.type})`, payload: null };
+}
+
+/**
+ * Un turno de la conversacion de preventa.
+ *
+ * El flujo decide (funcion pura, `src/preventa/flow.ts`); aqui solo se guarda
+ * lo que dijo y se manda lo que contesto. Como mucho un mensaje de salida:
+ * esa es la regla que evita que el cliente reciba tres cosas seguidas.
+ */
+export async function turnoDePreventa(
+  contact: Contact,
+  entrada: EntradaPreventa,
+  deps: InboundDeps,
+): Promise<void> {
+  const { repos, sender, config } = deps;
+
+  const lead = await repos.leads.ensure(contact.id, contact.name);
+  const { patch, respuesta } = responder(lead, entrada, {
+    negocio: config.businessName,
+    cobertura: config.coverageName || 'tu zona',
+    saludo: saludoPorHora(new Date(), config.timezone),
+    horario: config.businessHours,
+  });
+
+  if (Object.keys(patch).length) await repos.leads.update(contact.id, patch);
+  if (!respuesta) return;
+
+  if (respuesta.pedirUbicacion) {
+    await sender.send({
+      phone: contact.phone,
+      kind: 'interactive',
+      category: 'UTILITY',
+      interactive: { body: respuesta.texto, locationRequest: true },
+    });
+    return;
+  }
+
+  if (respuesta.botones?.length) {
+    await sender.send({
+      phone: contact.phone,
+      kind: 'interactive',
+      category: 'UTILITY',
+      interactive: { body: respuesta.texto, buttons: respuesta.botones },
+    });
+    return;
+  }
+
+  await sender.send({
+    phone: contact.phone,
+    kind: 'freeform',
+    category: 'UTILITY',
+    text: respuesta.texto,
+  });
 }
 
 /** Aplica una regla: responde si tiene texto e inscribe si apunta a una secuencia. */
@@ -208,6 +263,19 @@ export async function handleInboundMessage(
     }
     const id = await repos.locations.save(contact.id, result, JSON.stringify(message.location));
     await repos.locations.confirm(id);
+
+    // Con la preventa activa, la ubicacion es la respuesta a "¿de donde?" y el
+    // flujo sigue desde ahi. Contestar ademas un "ubicacion recibida" seria el
+    // segundo mensaje por el mismo entrante, que es lo que hay que evitar.
+    if ((await repos.automation.getPrefs()).preventaActiva) {
+      await turnoDePreventa(
+        contact,
+        { texto: '', esPrimerMensaje: isFirstMessage, ubicacion: { lat: result.lat, lng: result.lng } },
+        deps,
+      );
+      return;
+    }
+
     await reply(`Ubicacion recibida: ${describe(result)}\n${result.mapsUrl}`);
     return;
   }
@@ -258,9 +326,17 @@ export async function handleInboundMessage(
   if (rule) await applyRule(rule, contact, deps);
 
   if (!result.ok) {
-    // La regla ya contesto; si no habia regla, se pide la ubicacion con el
-    // boton nativo (salvo que el operador lo haya apagado).
-    if (!rule && prefs.askLocationFallback) {
+    // Una regla de la tienda manda sobre el flujo: es lo que la tienda escribio
+    // a mano para ese caso concreto, y encadenar las dos respuestas es
+    // exactamente el "dos mensajes por uno" que hay que evitar.
+    if (rule) return;
+
+    if (prefs.preventaActiva) {
+      await turnoDePreventa(contact, { texto: text, esPrimerMensaje: isFirstMessage }, deps);
+      return;
+    }
+
+    if (prefs.askLocationFallback) {
       await askForLocation(
         'No encontre coordenadas en ese mensaje. Comparte tu ubicacion con el boton de abajo.',
       );

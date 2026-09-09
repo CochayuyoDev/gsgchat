@@ -443,6 +443,6 @@ describe('automatizacion desde la API', () => {
       payload: { askLocationFallback: false },
     });
     const prefs = await app.inject({ url: '/admin/automation/prefs', headers: auth });
-    expect(prefs.json()).toEqual({ askLocationFallback: false });
+    expect(prefs.json()).toMatchObject({ askLocationFallback: false });
   });
 });

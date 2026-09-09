@@ -276,3 +276,56 @@ describe('envio manual desde el chat', () => {
     ).toMatchObject({ allow: false, code: 'template_not_approved' });
   });
 });
+
+/**
+ * La ventana de 24 h es de Meta, no nuestra.
+ *
+ * La Cloud API rechaza el texto libre pasadas 24 h del ultimo mensaje del
+ * cliente. Con un cliente no oficial esa regla no existe, y aplicarla igual
+ * seria inventarse una limitacion que el propio WhatsApp no tiene.
+ */
+describe('la ventana de servicio segun el proveedor', () => {
+  const frio = contact({ lastInboundAt: new Date('2026-03-01T00:00:00Z') });
+
+  it('con la Cloud API, fuera de la ventana solo se puede plantilla', () => {
+    expect(
+      evaluateGates(intent({ contact: frio, kind: 'freeform', template: null }), snapshot()),
+    ).toMatchObject({ allow: false, code: 'window_closed' });
+  });
+
+  it('sin Cloud API detras, la ventana no frena nada', () => {
+    expect(
+      evaluateGates(
+        intent({ contact: frio, kind: 'freeform', template: null }),
+        snapshot({ serviceWindowApplies: false }),
+      ),
+    ).toEqual({ allow: true });
+  });
+
+  it('quien no diga nada se comporta como Meta', () => {
+    // El valor por defecto tiene que ser el restrictivo: olvidarse de ponerlo
+    // no puede acabar mandando texto libre que la Cloud API va a rechazar.
+    expect(
+      evaluateGates(intent({ contact: frio, kind: 'freeform', template: null }), snapshot()),
+    ).toMatchObject({ code: 'window_closed' });
+  });
+
+  it('sin ventana, el opt-in sigue haciendo falta para escribir primero', () => {
+    const sinOptIn = contact({ optInAt: null, optInSource: null, lastInboundAt: null });
+    expect(
+      evaluateGates(
+        intent({ contact: sinOptIn, kind: 'freeform', template: null }),
+        snapshot({ serviceWindowApplies: false }),
+      ),
+    ).toMatchObject({ allow: false, code: 'no_opt_in' });
+  });
+
+  it('sin ventana, una baja sigue bloqueando', () => {
+    expect(
+      evaluateGates(
+        intent({ contact: contact({ optOutAt: new Date() }) }),
+        snapshot({ serviceWindowApplies: false }),
+      ),
+    ).toMatchObject({ allow: false, code: 'opt_out' });
+  });
+});

@@ -332,7 +332,7 @@ describe('reglas sobre mensajes entrantes', () => {
 
   it('sin regla y con el fallback encendido, si la pide', async () => {
     const { deps, repos, wa } = await build();
-    await repos.automation.setPrefs({ askLocationFallback: true });
+    await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: false });
     await processChange('messages', inbound({ text: { body: 'hola' } }), deps);
     expect(wa.sent.some((m) => m.kind === 'location_request')).toBe(true);
   });
