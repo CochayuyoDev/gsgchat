@@ -117,3 +117,49 @@ export function pareceTextoReal(texto: string): boolean {
   if (!palabras.length) return false;
   return palabras.some((p) => palabraPlausible(p));
 }
+
+/**
+ * Las palabras con las que se saluda, y nada mas.
+ *
+ * El nucleo son las que no pueden ser otra cosa; el resto es lo que las
+ * acompaña. Se separan porque un "que tal" suelto puede ser media pregunta,
+ * mientras que "hola" no es nunca otra cosa.
+ */
+const NUCLEO_SALUDO = new Set([
+  'hola', 'ola', 'alo', 'buenas', 'buenos', 'buen', 'hey', 'hi', 'hello',
+  'saludos', 'holi', 'wenas',
+]);
+
+const ACOMPANA_SALUDO = new Set([
+  'dia', 'dias', 'tarde', 'tardes', 'noche', 'noches', 'que', 'tal', 'muy',
+  'como', 'esta', 'estas', 'senor', 'senora', 'senorita', 'amigo', 'amiga',
+  'disculpe', 'estimado', 'estimada', 'por', 'favor', 'porfavor', 'gracias',
+  'todos', 'ahi', 'alli', 'usted', 'ud',
+]);
+
+/** "holaaa" y "buenaas" son el mismo saludo con enfasis. */
+const sinAlargar = (palabra: string): string => {
+  let corto = '';
+  for (const letra of palabra) if (letra !== corto[corto.length - 1]) corto += letra;
+  return corto;
+};
+
+/**
+ * Si el mensaje es solo un saludo.
+ *
+ * Hace falta distinguirlo porque un saludo NO es un mensaje incomprensible:
+ * contestar "no reconocí ese mensaje" a un "hola buenas" es la clase de
+ * respuesta que hace que el cliente deje de escribir. Y a mitad del
+ * cuestionario tampoco es una respuesta: sin esto, quien saluda cuando se le
+ * pregunta el nombre acaba registrado como "Hola".
+ */
+export function esSaludo(texto: string): boolean {
+  const palabras = normaliza(texto).split(' ').filter(Boolean).map(sinAlargar);
+
+  // Mas de cinco palabras ya no es un saludo: es un saludo Y algo mas, y ese
+  // algo mas es lo que hay que atender.
+  if (!palabras.length || palabras.length > 5) return false;
+  if (!palabras.some((p) => NUCLEO_SALUDO.has(p))) return false;
+
+  return palabras.every((p) => NUCLEO_SALUDO.has(p) || ACOMPANA_SALUDO.has(p));
+}

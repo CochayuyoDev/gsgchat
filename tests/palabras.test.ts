@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { palabraPlausible, pareceTextoReal } from '../src/preventa/palabras.js';
+import { esSaludo, palabraPlausible, pareceTextoReal } from '../src/preventa/palabras.js';
 
 describe('lo que NO son palabras', () => {
   it('el tecleo al azar', () => {
@@ -85,5 +85,21 @@ describe('lo que SÍ tiene que pasar', () => {
     expect(palabraPlausible('nino')).toBe(true);
     expect(pareceTextoReal('muñecos de peluche')).toBe(true);
     expect(pareceTextoReal('artículos de limpieza')).toBe(true);
+  });
+});
+
+describe('un saludo no es un mensaje incomprensible', () => {
+  it('reconoce las formas de saludar', () => {
+    for (const s of ['hola', 'Hola buenas', 'buenos días', 'BUENAS TARDES', 'holaaa', 'buenas noches señor', 'hola, ¿qué tal?']) {
+      expect(esSaludo(s), s).toBe(true);
+    }
+  });
+
+  it('no confunde un saludo con lo que viene detrás', () => {
+    // "hola quiero cotizar" es una petición, no un saludo: atenderla como
+    // saludo le devolvería el menú a quien ya dijo lo que quería.
+    for (const s of ['hola quiero cotizar', 'buenas, cuánto cuesta a surco', 'Miraflores', '72554686', 'asdasd', '']) {
+      expect(esSaludo(s), s).toBe(false);
+    }
   });
 });

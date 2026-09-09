@@ -142,9 +142,11 @@ const PIDE_PRODUCTO = [
  * nada en el catálogo; sin esta lista se le contestaría que ese producto no
  * está disponible, cuando lo que quiere es cotizar un envío.
  */
+// Por raiz: "manden", "enviarme" y "lleveselo" son la misma peticion, y una
+// lista de palabras enteras se queda corta en cuanto el cliente conjuga.
 const ES_DE_ENVIO = [
-  'envio', 'enviar', 'mandar', 'manda', 'paquete', 'encomienda', 'delivery',
-  'courier', 'recojo', 'recoger', 'entrega', 'entregar', 'flete', 'llevar',
+  'envi', 'mand', 'llev', 'recoj', 'recog', 'entreg', 'despach', 'traslad',
+  'paquete', 'encomienda', 'delivery', 'courier', 'flete', 'reparto',
 ];
 
 /**
@@ -153,6 +155,47 @@ const ES_DE_ENVIO = [
  * No mira si existe: eso lo dice la búsqueda. Mira si TIENE SENTIDO
  * contestarle que no lo hay.
  */
+/**
+ * Colores con los que la gente pide una variante.
+ *
+ * No pretende ser la carta de colores completa: son los que aparecen en un
+ * "lo tienes en negro?" y sirven para saber que el mensaje habla del producto
+ * anterior y no empieza uno nuevo.
+ */
+const COLORES = new Set([
+  'negro', 'negra', 'blanco', 'blanca', 'beige', 'marron', 'azul', 'rojo',
+  'roja', 'verde', 'gris', 'plomo', 'crema', 'camel', 'dorado', 'plateado',
+  'rosado', 'rosa', 'celeste', 'amarillo', 'morado', 'vino', 'mostaza',
+  'naranja', 'turquesa', 'nude', 'caramelo', 'tan',
+]);
+
+/** Palabras que solo acompañan a la variante: "en talla 41", "el negro". */
+const ACOMPANA_VARIANTE = new Set([
+  'talla', 'tallas', 'color', 'colores', 'numero', 'nro', 'medida', 'en', 'el',
+  'la', 'los', 'las', 'un', 'una', 'de', 'y', 'o', 'me', 'lo', 'hay', 'tienen',
+  'tienes', 'queda', 'quedan', 'tendran', 'sera', 'seria', 'porfavor', 'porfa',
+]);
+
+/**
+ * Si el mensaje es solo una variante: "talla 41", "en negro", "41".
+ *
+ * Sirve para leerlo como lo que es -una pregunta sobre el producto del que se
+ * acaba de hablar- y no como un mensaje suelto. Sin esto, el cliente que
+ * afina su pregunta despues de ver el precio acababa metido en el
+ * cuestionario de envio, con "talla 41" contestado con "de que distrito
+ * recogemos".
+ */
+export function pareceVarianteSuelta(texto: string): boolean {
+  const palabras = normaliza(texto).split(' ').filter(Boolean);
+  if (!palabras.length || palabras.length > 5) return false;
+
+  // Al menos una tiene que SER la variante: "en el" no es una pregunta.
+  const nucleo = palabras.filter((p) => esTalla(p) || COLORES.has(p));
+  if (!nucleo.length) return false;
+
+  return palabras.every((p) => esTalla(p) || COLORES.has(p) || ACOMPANA_VARIANTE.has(p));
+}
+
 export function pareceConsultaDeProducto(texto: string): boolean {
   const t = normaliza(texto);
   if (!t) return false;

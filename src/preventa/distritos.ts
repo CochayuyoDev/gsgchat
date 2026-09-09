@@ -66,7 +66,7 @@ export const ALIAS: Record<string, string> = {
 
 export const DISTRITOS_LIMA_CALLAO = [...DISTRITOS_LIMA, ...DISTRITOS_CALLAO];
 
-const normaliza = (texto: string): string =>
+export const normalizaFrase = (texto: string): string =>
   texto
     .trim()
     .toLowerCase()
@@ -75,6 +75,8 @@ const normaliza = (texto: string): string =>
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+const normaliza = normalizaFrase;
 
 /** Palabras que sobran al decir un distrito: "vivo en Surco", "distrito Ate". */
 const RELLENO = new Set([
@@ -87,6 +89,10 @@ const sinRelleno = (texto: string): string =>
     .split(' ')
     .filter((p) => !RELLENO.has(p))
     .join(' ');
+
+/** Lo que en un nombre podría leerse como patrón: "Mi Perú" no, pero por si acaso. */
+const escapaRegex = (texto: string): string =>
+  texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Distancia de edición, para tolerar una errata sin abrir la puerta a todo. */
 export function distancia(a: string, b: string): number {
@@ -105,6 +111,54 @@ export function distancia(a: string, b: string): number {
   }
 
   return previa[b.length]!;
+}
+
+/**
+ * Los distritos que aparecen en una frase, en el orden en que aparecen.
+ *
+ * Se busca por posición y no con un patrón: en "una caja de documentos de
+ * Surco a Miraflores" el primer "de" es el de la caja, y cualquier patrón de
+ * "de X a Y" se lleva media frase por delante.
+ */
+export function distritosEnTexto(
+  texto: string,
+  catalogo: string[] = DISTRITOS_LIMA_CALLAO,
+): Array<{ nombre: string; posicion: number }> {
+  if (!catalogo.length) return [];
+
+  const limpio = normaliza(texto);
+  const tomado = new Array<boolean>(limpio.length).fill(false);
+  const encontrados = new Map<string, number>();
+
+  // Los nombres largos antes que los cortos, y lo que ya se llevó uno no lo
+  // vuelve a leer otro: en "san juan de lurigancho" está "Lurigancho" dentro,
+  // y contarlo dos veces convierte una ruta de dos distritos en una de tres.
+  const candidatos: Array<[string, string]> = [
+    ...Object.entries(ALIAS).map(([alias, nombre]) => [alias, nombre] as [string, string]),
+    ...catalogo.map((d) => [normaliza(d), d] as [string, string]),
+  ].sort((a, b) => b[0].length - a[0].length);
+
+  for (const [clave, nombre] of candidatos) {
+    if (!catalogo.includes(nombre)) continue;
+
+    // Palabra entera: "lima" no puede casar dentro de "limatambo".
+    const patron = new RegExp(`\\b${escapaRegex(clave)}\\b`, 'g');
+
+    let encontrado: RegExpExecArray | null;
+    while ((encontrado = patron.exec(limpio)) !== null) {
+      const fin = encontrado.index + encontrado[0].length;
+      let libre = true;
+      for (let i = encontrado.index; i < fin; i++) if (tomado[i]) libre = false;
+      if (!libre) continue;
+
+      for (let i = encontrado.index; i < fin; i++) tomado[i] = true;
+      if (!encontrados.has(nombre)) encontrados.set(nombre, encontrado.index);
+    }
+  }
+
+  return [...encontrados.entries()]
+    .map(([nombre, posicion]) => ({ nombre, posicion }))
+    .sort((a, b) => a.posicion - b.posicion);
 }
 
 /**

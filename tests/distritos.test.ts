@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DISTRITOS_LIMA_CALLAO,
   distancia,
+  distritosEnTexto,
   reconocerDistrito,
 } from '../src/preventa/distritos.js';
 
@@ -112,5 +113,51 @@ describe('la distancia de edición', () => {
   it('no tolera tanto como para confundir dos distritos', () => {
     // "Lince" y "Lima" no pueden acabar siendo el mismo.
     expect(distancia('lince', 'lima')).toBeGreaterThan(2);
+  });
+});
+
+describe('los distritos que trae una frase', () => {
+  const nombres = (t: string) => distritosEnTexto(t).map((d) => d.nombre);
+
+  it('los encuentra en el orden en que se dijeron', () => {
+    expect(nombres('de barranco para lince')).toEqual(['Barranco', 'Lince']);
+    expect(nombres('de lince para barranco')).toEqual(['Lince', 'Barranco']);
+  });
+
+  it('no cuenta dos veces el que está dentro de otro', () => {
+    // "Lurigancho" vive dentro de "San Juan de Lurigancho": contarlo aparte
+    // convierte una ruta de dos distritos en una de tres y la descarta.
+    expect(nombres('de san juan de lurigancho hasta callao')).toEqual([
+      'San Juan de Lurigancho',
+      'Callao',
+    ]);
+  });
+
+  it('atraviesa el ruido de una frase de verdad', () => {
+    expect(nombres('quiero mandar una caja de documentos de Surco a Miraflores hoy')).toEqual([
+      'Santiago de Surco',
+      'Miraflores',
+    ]);
+  });
+
+  it('entiende los alias y las mayúsculas', () => {
+    expect(nombres('DE VILLA EL SALVADOR A SMP')).toEqual([
+      'Villa El Salvador',
+      'San Martín de Porres',
+    ]);
+  });
+
+  it('no ve distritos donde no los hay', () => {
+    expect(nombres('quiero saber precios')).toEqual([]);
+    expect(nombres('no viejo')).toEqual([]);
+  });
+
+  it('respeta la palabra entera', () => {
+    // "Lima" está dentro de "limatambo" y no debe salir de ahí.
+    expect(nombres('vivo por limatambo')).toEqual([]);
+  });
+
+  it('se queda callado si la tienda no opera por distritos', () => {
+    expect(distritosEnTexto('de barranco a lince', [])).toEqual([]);
   });
 });

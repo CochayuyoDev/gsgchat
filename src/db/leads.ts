@@ -56,6 +56,13 @@ export interface Lead {
 
   /** Ids de las opciones ofrecidas en el ultimo mensaje, para leer un "2". */
   ultimasOpciones: string[] | null;
+  /**
+   * El producto del que se acaba de hablar, para leer un "talla 41" suelto.
+   *
+   * Sin esto, la pregunta de seguimiento -que es como se compra de verdad-
+   * se leia como un mensaje sin sentido.
+   */
+  ultimoProducto: string | null;
   /** Que se le pregunto y esta esperando respuesta. Null = nada pendiente. */
   preguntaPendiente: string | null;
   /** Veces seguidas que no se entendio la respuesta a esa pregunta. */
@@ -96,6 +103,7 @@ export type LeadPatch = Partial<
     | 'estado'
     | 'notas'
     | 'ultimasOpciones'
+    | 'ultimoProducto'
     | 'preguntaPendiente'
     | 'intentosFallidos'
   >
@@ -146,6 +154,7 @@ interface Row {
   estado: LeadEstado;
   notas: string | null;
   ultimas_opciones: string[] | null;
+  ultimo_producto: string | null;
   pregunta_pendiente: string | null;
   intentos_fallidos: number;
   crm_id: string | null;
@@ -185,6 +194,7 @@ const toLead = (r: Row): Lead => ({
   estado: r.estado,
   notas: r.notas,
   ultimasOpciones: r.ultimas_opciones,
+  ultimoProducto: r.ultimo_producto,
   preguntaPendiente: r.pregunta_pendiente,
   intentosFallidos: r.intentos_fallidos ?? 0,
   crmId: r.crm_id,
@@ -219,6 +229,7 @@ const COLUMNAS: Record<keyof LeadPatch, string> = {
   estado: 'estado',
   notas: 'notas',
   ultimasOpciones: 'ultimas_opciones',
+  ultimoProducto: 'ultimo_producto',
   preguntaPendiente: 'pregunta_pendiente',
   intentosFallidos: 'intentos_fallidos',
 };

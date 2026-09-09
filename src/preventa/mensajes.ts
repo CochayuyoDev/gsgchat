@@ -29,6 +29,11 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
       '{saludo}. Soy el asistente de {negocio}. Hacemos envíos en {cobertura}. ¿En qué te ayudo?',
     variables: VARIABLES_COMUNES,
   },
+  saludoDeVuelta: {
+    cuando: 'Cuando vuelve a saludar alguien a quien ya se le presentó la tienda.',
+    texto: '{saludo}. ¿En qué te ayudo?',
+    variables: VARIABLES_COMUNES,
+  },
   menu: {
     cuando: 'Cuando escribe algo que no se entiende y hay que reorientarlo.',
     texto: 'No reconocí ese mensaje. ¿En qué te ayudo?',
@@ -104,6 +109,11 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
     cuando: 'Cuando lo que pidió no está, pero hay algo parecido. Evita dar por bueno un producto que no es.',
     texto: 'No tengo exactamente eso, pero sí esto:',
     variables: VARIABLES_COMUNES,
+  },
+  precioVarianteNoHay: {
+    cuando: 'Cuando pregunta por una talla o un color concreto del producto del que se venía hablando y no lo hay.',
+    texto: 'En {variante} no lo tengo. Del mismo producto sí hay:',
+    variables: [...VARIABLES_COMUNES, '{variante}'],
   },
   precioAgotado: {
     cuando: 'Cuando lo que pide existe en el catálogo pero no queda stock.',
@@ -194,6 +204,14 @@ export interface Sustituciones {
   negocio: string;
   cobertura: string;
   horario: string;
+  /**
+   * Lo que pidio el cliente, tal como lo escribio.
+   *
+   * Solo la usa el mensaje de la variante que no hay, para poder decirle
+   * "en talla 41 no lo tengo" en vez de un "no tengo exactamente eso" que
+   * le deja sin saber si la 41 esta o no en la lista de abajo.
+   */
+  variante?: string;
 }
 
 /**
@@ -209,6 +227,7 @@ export function render(texto: string, valores: Sustituciones): string {
     .replace(/\{negocio\}/gi, valores.negocio)
     .replace(/\{cobertura\}/gi, valores.cobertura)
     .replace(/\{horario\}/gi, valores.horario)
+    .replace(/{variante}/gi, valores.variante ?? '')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
 }

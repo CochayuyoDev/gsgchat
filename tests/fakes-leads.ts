@@ -37,6 +37,7 @@ export function nuevaFicha(contactId: string, overrides: Partial<Lead> = {}): Le
     estado: 'nuevo',
     notas: null,
     ultimasOpciones: null,
+    ultimoProducto: null,
     preguntaPendiente: null,
     intentosFallidos: 0,
     crmId: null,

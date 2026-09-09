@@ -20,7 +20,8 @@
 import type { Lead, LeadPatch } from '../db/leads.js';
 import { mensajesVigentes, render, type Mensajes } from './mensajes.js';
 import { reconocerDistrito } from './distritos.js';
-import { pareceTextoReal } from './palabras.js';
+import { esSaludo, pareceTextoReal } from './palabras.js';
+import { extraerDeMensaje } from './extraer.js';
 
 export interface Respuesta {
   texto: string;
@@ -110,7 +111,17 @@ const normaliza = (texto: string): string =>
 
 /** Palabras que delatan una intencion aunque no se pulse el boton. */
 const INTENCIONES: Array<{ id: string; palabras: string[] }> = [
-  { id: BOTON.cotizar, palabras: ['cotiz', 'precio', 'cuanto', 'cuesta', 'tarifa', 'enviar', 'envio', 'delivery'] },
+  {
+    id: BOTON.cotizar,
+    palabras: [
+      'cotiz', 'precio', 'cuanto', 'cuesta', 'tarifa', 'delivery',
+      // Raices y no palabras enteras: "manden" no contiene "mandar" ni
+      // "manda", y "quiero que me lo manden a Miraflores" -que es como habla
+      // la gente- acababa contestado con "ese producto no esta disponible".
+      'mand', 'envi', 'llev', 'recoj', 'recog', 'despach', 'traslad',
+      'encomienda', 'movilidad', 'reparto', 'repartir',
+    ],
+  },
   { id: BOTON.info, palabras: ['horario', 'atienden', 'abren', 'cierran', 'zona', 'cobertura', 'llegan', 'donde'] },
   { id: BOTON.asesor, palabras: ['asesor', 'persona', 'humano', 'hablar con', 'agente', 'ayuda'] },
 ];
@@ -393,6 +404,12 @@ export function responder(lead: Lead, entrada: Entrada, ctx: Contexto): Resultad
 function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
   const intencion = intencionDe(entrada, lead.ultimasOpciones);
 
+  // Lo que el cliente ya dijo en su mensaje se guarda antes de preguntar
+  // nada: "de Surco a Miraflores hoy" trae origen, destino y fecha, y
+  // pedirle que empiece por el principio es hacerle repetir lo que ya dijo.
+  const deducido = extraerDeMensaje(entrada.texto, lead, ctx.distritos);
+  const conocido = Object.keys(deducido).length ? ({ ...lead, ...deducido } as Lead) : lead;
+
   // Ya esta en manos de un asesor: el bot se calla. Meterse aqui es lo que
   // hace que el cliente reciba dos respuestas distintas a la misma pregunta.
   if (lead.estado === 'calificado' || lead.estado === 'enviado') {
@@ -476,10 +493,10 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
 
   // --- cotizar: empieza (o sigue) el cuestionario -----------------------
   if (intencion === BOTON.cotizar) {
-    return preguntar(lead, ctx, { estado: 'en_conversacion' });
+    return preguntar(conocido, ctx, { ...deducido, estado: 'en_conversacion' });
   }
 
-  const campo = siguienteCampo(lead, ctx.servicios);
+  const campo = siguienteCampo(conocido, ctx.servicios);
 
   // Nada que preguntar y la ficha completa: se cierra y pasa a una persona.
   if (!campo) {
@@ -487,6 +504,23 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
       patch: { estado: 'calificado' },
       respuesta: { texto: `${resumen(lead)}\n\n${mensaje(ctx, 'cierre')}` },
     };
+  }
+
+  // --- saluda otra vez ---------------------------------------------------
+  //
+  // Un "hola buenas" no es un mensaje incomprensible. Sin esto, la segunda vez
+  // que alguien saluda se lleva un "no reconocí ese mensaje", que es la clase
+  // de respuesta por la que un cliente deja de escribir.
+  if (!intencion && !lead.preguntaPendiente && esSaludo(entrada.texto)) {
+    return {
+      patch: { estado: 'en_conversacion' },
+      respuesta: { texto: mensaje(ctx, 'saludoDeVuelta'), botones: menuDe(ctx) },
+    };
+  }
+  // Si el mensaje traia datos, la conversacion ya empezo: seguir preguntando
+  // por donde toca es mejor que ofrecerle un menu que ya no necesita.
+  if (Object.keys(deducido).length) {
+    return preguntar(conocido, ctx, { ...deducido, estado: 'en_conversacion' });
   }
 
   // Fuera del cuestionario -alguien que escribe suelto sin haber pedido nada-
@@ -515,6 +549,13 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
   // ofrecieron, vale como si hubiera pulsado ese boton. Sin esto la ficha
   // acaba diciendo 'Cuando: 1', que no significa nada para quien la lea.
   const elegida = intencion && lead.ultimasOpciones?.includes(intencion) ? intencion : undefined;
+  // Un saludo a mitad del cuestionario no es una respuesta ni un fallo: se le
+  // vuelve a hacer la pregunta y no se le gasta un intento. Sin esto, quien
+  // saluda cuando se le pregunta el nombre queda registrado como "Hola".
+  if (!elegida && esSaludo(texto)) {
+    return preguntar(lead, ctx, {});
+  }
+
   // Lo que no sirve como respuesta no se guarda: una ficha con "?" en el
   // distrito es peor que una ficha con el hueco vacio, porque parece rellenada.
   if (!elegida && !respuestaValida(pendiente, texto)) {

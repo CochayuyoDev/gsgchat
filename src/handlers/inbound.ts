@@ -37,6 +37,7 @@ import {
   coincideDelTodo,
   etiquetaVariante,
   pareceConsultaDeProducto,
+  pareceVarianteSuelta,
   type ProductoStoky,
   type StokyClient,
 } from '../stoky/client.js';
@@ -209,7 +210,12 @@ export async function turnoDePreventa(
 async function contestarPrecio(
   contact: Contact,
   entrada: EntradaPreventa,
-  lead: { estado: string; preguntaPendiente: string | null; ultimasOpciones: string[] | null },
+  lead: {
+    estado: string;
+    preguntaPendiente: string | null;
+    ultimasOpciones: string[] | null;
+    ultimoProducto: string | null;
+  },
   prefs: { mensajesPreventa?: Record<string, string>; serviciosPreventa?: string[] },
   deps: InboundDeps,
 ): Promise<boolean> {
@@ -257,7 +263,13 @@ async function contestarPrecio(
   // "cuanto cuesta mandar un paquete" pregunta por un envio, no por un
   // producto. Sin esta distincion, cualquier mensaje suelto recibiria un "ese
   // producto no esta disponible" y el bot pareceria sordo.
-  const preguntaPorProducto = pareceConsultaDeProducto(texto);
+  // "talla 41" a secas pregunta por el producto del que se acaba de hablar.
+  // Sin esta memoria, el cliente que afina su pregunta despues de ver el
+  // precio se llevaba un "de que distrito recogemos el envio".
+  const seguimiento = !!lead.ultimoProducto && pareceVarianteSuelta(texto);
+  const consultado = seguimiento ? `${lead.ultimoProducto} ${texto}` : texto;
+
+  const preguntaPorProducto = seguimiento || pareceConsultaDeProducto(texto);
 
   let consulta: {
     disponibles: ProductoStoky[];
@@ -266,7 +278,7 @@ async function contestarPrecio(
     otrasVariantes: ProductoStoky[];
   };
   try {
-    consulta = await catalogo.consultar(texto);
+    consulta = await catalogo.consultar(consultado);
   } catch {
     // Stoky caido: callarse deja al cliente esperando una respuesta que no va
     // a llegar, asi que se le pasa a una persona.
@@ -283,6 +295,9 @@ async function contestarPrecio(
     negocio: config.businessName,
     cobertura: config.coverageName || 'tu zona',
     horario: config.businessHours,
+    // Lo que pidio, para poder decirle "en talla 41 no lo tengo" con sus
+    // propias palabras en vez de un "no tengo exactamente eso".
+    variante: texto,
   };
 
   // El precio se dice SIEMPRE, tambien de lo agotado: el cliente pregunto
@@ -340,12 +355,21 @@ async function contestarPrecio(
   // con el mismo aplomo que si fuera esa es el fallo caro: el cliente cree que
   // le cotizaron lo que pidió. Si no coincide del todo, se dice.
   const mostrados = disponibles.length ? disponibles : agotados;
-  const exacto = mostrados.some((p) => coincideDelTodo(p, texto));
+  const exacto = mostrados.some((p) => coincideDelTodo(p, consultado));
 
   const partes: string[] = [];
 
   if (disponibles.length) {
-    partes.push(render((exacto ? vigentes.precioEncontrado : vigentes.precioAproximado) ?? '', sustituciones));
+    // Al que pregunto "talla 41" hay que decirle que en talla 41 no hay, no
+    // un "no tengo exactamente eso" que le deja sin saber si la 41 entra o
+    // no en la lista que viene debajo.
+    const encabezado = exacto
+      ? vigentes.precioEncontrado
+      : seguimiento
+        ? vigentes.precioVarianteNoHay
+        : vigentes.precioAproximado;
+
+    partes.push(render(encabezado ?? '', sustituciones));
     partes.push(bloque(disponibles));
   } else {
     // Agotado: se dice con su precio, y se ofrece algo parecido SOLO si
@@ -390,6 +414,14 @@ async function contestarPrecio(
     manual: false,
     text: partes.filter(Boolean).join('\n\n'),
   });
+
+  // De que producto se hablo, para poder leer el "talla 41" que venga
+  // despues. Se guarda el nombre base y no la variante: la pregunta de
+  // seguimiento suele ser justo para cambiar de variante.
+  const hablado = (mostrados[0]?.product || mostrados[0]?.name || '').trim();
+  if (hablado && hablado !== lead.ultimoProducto) {
+    await deps.repos.leads.update(contact.id, { ultimoProducto: hablado });
+  }
 
   return true;
 }
