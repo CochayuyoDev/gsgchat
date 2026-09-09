@@ -7,8 +7,9 @@
  * real) y se falla con un mensaje util si todavia no hay credenciales.
  */
 
-import type { SettingsService } from '../settings/service.js';
+import { providerOf, type SettingsService } from '../settings/service.js';
 import { createWhatsAppClient, WhatsAppApiError, type WhatsAppClient } from './client.js';
+import { createWahaClient } from './waha/client.js';
 
 export class NotConfiguredError extends Error {
   constructor(missing: string[]) {
@@ -19,12 +20,34 @@ export class NotConfiguredError extends Error {
   }
 }
 
-export function createDynamicWhatsAppClient(settings: SettingsService): WhatsAppClient {
+export interface DynamicClientDeps {
+  /**
+   * Cuerpo de una plantilla guardada. Solo lo usa WAHA, que no tiene
+   * plantillas y las manda como texto ya sustituido; la Cloud API se apana
+   * con el nombre. Se inyecta para no meter la base de datos aqui dentro.
+   */
+  resolveTemplateBody?: (name: string, language: string) => Promise<string | undefined>;
+}
+
+export function createDynamicWhatsAppClient(
+  settings: SettingsService,
+  deps: DynamicClientDeps = {},
+): WhatsAppClient {
   function inner(): WhatsAppClient {
     const missing = settings.missing();
     if (missing.length) throw new NotConfiguredError(missing);
 
     const credentials = settings.current();
+
+    if (providerOf(credentials) === 'waha') {
+      return createWahaClient({
+        baseUrl: credentials.wahaUrl,
+        apiKey: credentials.wahaApiKey || undefined,
+        session: credentials.wahaSession || undefined,
+        resolveTemplateBody: deps.resolveTemplateBody,
+      });
+    }
+
     return createWhatsAppClient({
       token: credentials.token,
       phoneNumberId: credentials.phoneNumberId,

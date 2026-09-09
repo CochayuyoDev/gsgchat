@@ -47,3 +47,31 @@ export function verifyChallenge(
   }
   return null;
 }
+
+/**
+ * Firma de los webhooks de WAHA.
+ *
+ * WAHA firma distinto que Meta: sha512 en hexadecimal pelado, en la cabecera
+ * `X-Webhook-Hmac`, sin el prefijo `sha512=`. Se comprueba igual de estricto
+ * porque el endpoint tiene las mismas consecuencias: quien pueda falsificarlo
+ * puede inventarse mensajes entrantes y dar de alta contactos.
+ */
+export function signWahaPayload(rawBody: Buffer | string, key: string): string {
+  const hmac = createHmac('sha512', key);
+  hmac.update(rawBody);
+  return hmac.digest('hex');
+}
+
+export function verifyWahaSignature(
+  rawBody: Buffer | string,
+  header: string | undefined,
+  key: string,
+): boolean {
+  if (!header) return false;
+
+  const expected = Buffer.from(signWahaPayload(rawBody, key));
+  const received = Buffer.from(header.trim().toLowerCase());
+
+  if (expected.length !== received.length) return false;
+  return timingSafeEqual(expected, received);
+}

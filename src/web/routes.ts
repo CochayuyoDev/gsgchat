@@ -10,7 +10,12 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
-import { FIELD_LABELS, type CredentialField, type SettingsService } from '../settings/service.js';
+import {
+  FIELD_LABELS,
+  providerOf,
+  type CredentialField,
+  type SettingsService,
+} from '../settings/service.js';
 import { syncTemplates } from '../templates/registry.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { checkConnection } from '../whatsapp/dynamic.js';
@@ -18,6 +23,7 @@ import { panelPage } from './pages.js';
 import { connectPage } from './connect-page.js';
 import { chatPage } from './chat-page.js';
 import { registerConnectRoutes } from './connect-routes.js';
+import { registerWahaRoutes } from './waha-routes.js';
 
 export interface WebDeps {
   config: Config;
@@ -27,14 +33,27 @@ export interface WebDeps {
   repos: Repos;
 }
 
+/**
+ * Campos que /admin/settings acepta.
+ *
+ * Zod descarta en silencio lo que no este aqui, asi que un campo que falte no
+ * da error: simplemente no se guarda nunca. Le pasaba a `signupConfigId`, y
+ * por eso el boton de conexion rapida no llegaba a activarse desde la web.
+ */
 const credentialsSchema = z.object({
   token: z.string().optional(),
   phoneNumberId: z.string().optional(),
   businessAccountId: z.string().optional(),
   appId: z.string().optional(),
+  signupConfigId: z.string().optional(),
   appSecret: z.string().optional(),
   verifyToken: z.string().optional(),
   mapsApiKey: z.string().optional(),
+  provider: z.enum(['cloud', 'waha']).optional(),
+  wahaUrl: z.string().optional(),
+  wahaApiKey: z.string().optional(),
+  wahaSession: z.string().optional(),
+  wahaEngine: z.string().optional(),
 });
 
 /** Plantilla que Meta crea en toda cuenta nueva: sirve para la primera prueba. */
@@ -42,7 +61,13 @@ const TEST_TEMPLATE = { name: 'hello_world', language: 'en_US' };
 
 export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Promise<void> {
   const { config, settings, wa, sender, repos } = deps;
-  const webhookUrl = `${config.PUBLIC_BASE_URL.replace(/\/+$/, '')}/webhooks/whatsapp`;
+  const publicBase = config.PUBLIC_BASE_URL.replace(/\/+$/, '');
+  // Cada proveedor tiene su endpoint: la pantalla debe enseñar el del activo,
+  // porque es la direccion que hay que pegar en Meta o darle a WAHA.
+  const webhookUrlFor = () =>
+    providerOf(settings.current()) === 'waha'
+      ? `${publicBase}/webhooks/waha`
+      : `${publicBase}/webhooks/whatsapp`;
 
   const html = (body: string) => ({ body, type: 'text/html; charset=utf-8' });
 
@@ -60,6 +85,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   });
 
   await registerConnectRoutes(app, { config, settings, wa });
+  await registerWahaRoutes(app, { config, settings });
 
   app.get('/panel', async (_request, reply) => {
     const page = html(panelPage(settings.isConfigured()));
@@ -71,7 +97,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     masked: settings.masked(),
     missing: settings.missing(),
     labels: FIELD_LABELS,
-    webhookUrl,
+    webhookUrl: webhookUrlFor(),
     verifyToken: settings.current().verifyToken,
     configured: settings.isConfigured(),
   }));
@@ -83,6 +109,19 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     await settings.reload();
 
     const current = settings.current();
+
+    // `checkConnection` habla con la Graph API: con WAHA no hay nada que
+    // preguntar ahi, y hacerlo reportaria un fallo que no existe.
+    if (providerOf(current) === 'waha') {
+      const missing = settings.missing();
+      return {
+        ok: missing.length === 0,
+        detail: missing.length ? `faltan datos: ${missing.join(', ')}` : 'guardado',
+        missing,
+        saved: true,
+      };
+    }
+
     const check = await checkConnection({
       token: current.token,
       phoneNumberId: current.phoneNumberId,
@@ -123,7 +162,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
       ok: false,
       detail: missing.length ? `faltan datos: ${missing.join(', ')}` : 'credenciales validas',
       missing,
-      webhookUrl,
+      webhookUrl: webhookUrlFor(),
       verifyTokenSet: Boolean(current.verifyToken),
       appSecretSet: Boolean(current.appSecret),
       subscribed: null,

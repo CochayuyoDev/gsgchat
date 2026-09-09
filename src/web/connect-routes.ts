@@ -24,7 +24,12 @@ import {
   OnboardingError,
   type DiscoveredAccount,
 } from '../whatsapp/onboarding.js';
-import { exchangeCode, signupAvailability, SignupError } from '../whatsapp/embedded-signup.js';
+import {
+  exchangeCode,
+  signupAvailability,
+  signupExtras,
+  SignupError,
+} from '../whatsapp/embedded-signup.js';
 
 export interface ConnectDeps {
   config: Config;
@@ -230,6 +235,14 @@ export async function registerConnectRoutes(app: FastifyInstance, deps: ConnectD
       connected: settings.isConfigured(),
       publicUrl: config.PUBLIC_BASE_URL,
       reachable: isPubliclyReachable(config.PUBLIC_BASE_URL),
+      graphVersion: current.graphVersion,
+      // Los `extras` de cada modo se calculan aqui y no en la pagina: el valor
+      // que espera Meta ha cambiado ya una vez y no debe vivir en un string
+      // suelto dentro del HTML.
+      modes: {
+        coexistence: signupExtras('coexistence'),
+        dedicated: signupExtras('dedicated'),
+      },
     };
   });
 

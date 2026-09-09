@@ -13,6 +13,7 @@ import { NotConfiguredError } from './whatsapp/dynamic.js';
 import type { Sender } from './outbound/sender.js';
 import type { OutboundQueue } from './outbound/queue.js';
 import { registerWebhookRoutes } from './whatsapp/webhook.js';
+import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
 import { registerTrackingRoutes } from './tracking/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
 import { registerWebRoutes } from './web/routes.js';
@@ -96,6 +97,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // El orden importa: registerAdminRoutes instala el hook que exige el token
   // en todo /admin, y debe estar antes de que se sirva cualquier ruta /admin.
   await registerWebhookRoutes(app, { repos, config, sender, wa, settings });
+  // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
+  // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
+  await registerWahaWebhookRoutes(app, {
+    repos,
+    config,
+    sender,
+    wa,
+    settings,
+    hmacKey: () => settings.current().verifyToken,
+  });
   await registerTrackingRoutes(app, { repos, config, hub, settings });
   await registerAdminRoutes(app, {
     repos,

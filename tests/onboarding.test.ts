@@ -14,6 +14,7 @@ import {
   registerWebhook,
   OnboardingError,
 } from '../src/whatsapp/onboarding.js';
+import { signupAvailability, signupExtras } from '../src/whatsapp/embedded-signup.js';
 
 const CREDENCIALES = { token: 'EAAG-token', appId: '123456', appSecret: 'secreto' };
 
@@ -206,5 +207,30 @@ describe('OnboardingError', () => {
   it('lleva el paso para que la pantalla diga donde mirar', () => {
     const error = new OnboardingError('algo', 'listar los numeros', 100);
     expect(error).toMatchObject({ step: 'listar los numeros', code: 100 });
+  });
+});
+
+describe('modos de la ventana de Meta', () => {
+  it('la coexistencia pide el featureType que espera Meta', () => {
+    // El valor importa: `coexistence`, que circula en tutoriales viejos, abre
+    // el flujo equivocado y el usuario nunca ve el QR.
+    expect(signupExtras('coexistence').featureType).toBe('whatsapp_business_app_onboarding');
+  });
+
+  it('el numero dedicado no manda featureType', () => {
+    expect(signupExtras('dedicated').featureType).toBe('');
+  });
+
+  it('ambos modos mandan la version de sesion que enseña el numero elegido', () => {
+    expect(signupExtras('coexistence').sessionInfoVersion).toBe('3');
+    expect(signupExtras('dedicated').sessionInfoVersion).toBe('3');
+  });
+
+  it('sin id de configuracion no se puede abrir la ventana', () => {
+    const sin = signupAvailability({ appId: '123', signupConfigId: '' });
+    expect(sin.ready).toBe(false);
+    expect(sin.missing.join(' ')).toContain('configuracion');
+
+    expect(signupAvailability({ appId: '123', signupConfigId: '456' }).ready).toBe(true);
   });
 });

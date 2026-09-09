@@ -9,8 +9,9 @@
  */
 
 import { createRuntime } from './runtime.js';
-import { createSender } from './outbound/sender.js';
-import { createOutboundQueue, createOutboundWorker } from './outbound/queue.js';
+import { createSender, type SendJob, type SendOutcome } from './outbound/sender.js';
+import { createOutboundQueue, createOutboundWorker, redisReachable } from './outbound/queue.js';
+import { createMemoryOutboundQueue } from './outbound/memory-queue.js';
 import { buildServer } from './server.js';
 import { startScheduler } from './automation/engine.js';
 
@@ -30,21 +31,27 @@ const sender = createSender({
   maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
 });
 
-const queue = createOutboundQueue(config.REDIS_URL);
+// Sin Redis se usa la cola en memoria en vez de no arrancar. Se avisa fuerte:
+// es una degradacion real (no sobrevive al reinicio), no un modo equivalente.
+const conRedis = await redisReachable(config.REDIS_URL);
+
+const onResult = (job: SendJob, outcome: SendOutcome): void => {
+  if (outcome.ok) return;
+  // Los bloqueos por gate no son errores del sistema: son la senal de que
+  // la lista o el estado del numero no permiten ese envio.
+  const detail = outcome.blocked ? `${outcome.code}: ${outcome.reason}` : outcome.error;
+  app.log.warn({ phone: job.phone, detail }, 'envio no realizado');
+};
+
+const queue = conRedis
+  ? createOutboundQueue(config.REDIS_URL)
+  : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
+
 const app = await buildServer({ config, repos, settings, wa, sender, queue });
 
-const worker = createOutboundWorker({
-  redisUrl: config.REDIS_URL,
-  sender,
-  queue,
-  onResult: (job, outcome) => {
-    if (outcome.ok) return;
-    // Los bloqueos por gate no son errores del sistema: son la senal de que
-    // la lista o el estado del numero no permiten ese envio.
-    const detail = outcome.blocked ? `${outcome.code}: ${outcome.reason}` : outcome.error;
-    app.log.warn({ phone: job.phone, detail }, 'envio no realizado');
-  },
-});
+const worker = conRedis
+  ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })
+  : null;
 
 // Seguimientos y mensajes programados: se procesan cada 10 s.
 const stopScheduler = startScheduler({
@@ -63,12 +70,20 @@ ${runtime.migrated.length ? `\n  Migraciones aplicadas: ${runtime.migrated.join(
 
   Token de administracion: ${config.ADMIN_TOKEN}
   (guardado en .secrets.json; pegalo cuando la web te lo pida)
-`);
+${
+  conRedis
+    ? ''
+    : `
+  ⚠ Sin Redis en ${config.REDIS_URL}: la cola va en memoria.
+    Funciona, pero lo encolado y no enviado se pierde si reinicias.
+    Para produccion levanta Redis y reinicia.
+`
+}`);
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'cerrando');
   stopScheduler();
-  await worker.close();
+  await worker?.close();
   await queue.close();
   await app.close();
   await runtime.close();

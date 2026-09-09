@@ -14,6 +14,9 @@
 import type { Config } from '../config.js';
 import { decrypt, encrypt, keyFromBase64 } from './crypto.js';
 
+/** Por donde sale y entra WhatsApp. Ver `WHATSAPP_PROVIDER` en config. */
+export type Provider = 'cloud' | 'waha';
+
 export interface WhatsAppCredentials {
   token: string;
   phoneNumberId: string;
@@ -26,12 +29,19 @@ export interface WhatsAppCredentials {
   verifyToken: string;
   graphVersion: string;
   mapsApiKey: string;
+
+  /** `cloud` (API oficial de Meta) o `waha` (contenedor con QR). */
+  provider: string;
+  wahaUrl: string;
+  wahaApiKey: string;
+  wahaSession: string;
+  wahaEngine: string;
 }
 
 export type CredentialField = Exclude<keyof WhatsAppCredentials, 'graphVersion'>;
 
 /** Campos que nunca se devuelven al navegador en claro. */
-export const SECRET_FIELDS: CredentialField[] = ['token', 'appSecret'];
+export const SECRET_FIELDS: CredentialField[] = ['token', 'appSecret', 'wahaApiKey'];
 
 export const FIELD_LABELS: Record<CredentialField, string> = {
   token: 'Token permanente',
@@ -42,7 +52,17 @@ export const FIELD_LABELS: Record<CredentialField, string> = {
   appSecret: 'Clave secreta de la app',
   verifyToken: 'Token de verificacion del webhook',
   mapsApiKey: 'Clave de Google Maps (opcional)',
+  provider: 'Proveedor (cloud o waha)',
+  wahaUrl: 'Direccion del contenedor de WAHA',
+  wahaApiKey: 'Clave de la API de WAHA (opcional)',
+  wahaSession: 'Nombre de la sesion de WAHA',
+  wahaEngine: 'Motor de WAHA (opcional)',
 };
+
+/** El proveedor guardado, validado; cualquier otra cosa cae a `cloud`. */
+export function providerOf(credentials: WhatsAppCredentials): Provider {
+  return credentials.provider === 'waha' ? 'waha' : 'cloud';
+}
 
 const KEY_PREFIX = 'whatsapp.';
 
@@ -64,13 +84,17 @@ export interface SettingsService {
   masked(): Record<CredentialField, string>;
 }
 
-const REQUIRED: CredentialField[] = [
-  'token',
-  'phoneNumberId',
-  'businessAccountId',
-  'appSecret',
-  'verifyToken',
-];
+/**
+ * Que hace falta para poder enviar, segun por donde se envie.
+ *
+ * Con WAHA no hay token ni app de Meta: basta la direccion del contenedor y
+ * la clave con la que firma su webhook (que el sistema se inventa solo, igual
+ * que el verify token de Meta, y por eso reutiliza ese mismo campo).
+ */
+const REQUIRED_BY_PROVIDER: Record<Provider, CredentialField[]> = {
+  cloud: ['token', 'phoneNumberId', 'businessAccountId', 'appSecret', 'verifyToken'],
+  waha: ['wahaUrl', 'verifyToken'],
+};
 
 export async function createSettingsService(
   repo: SettingsRepo,
@@ -89,6 +113,11 @@ export async function createSettingsService(
     verifyToken: config.WHATSAPP_VERIFY_TOKEN,
     graphVersion: config.GRAPH_API_VERSION,
     mapsApiKey: config.GOOGLE_MAPS_API_KEY,
+    provider: config.WHATSAPP_PROVIDER,
+    wahaUrl: config.WAHA_URL,
+    wahaApiKey: config.WAHA_API_KEY,
+    wahaSession: config.WAHA_SESSION,
+    wahaEngine: config.WAHA_ENGINE,
   });
 
   let cache: WhatsAppCredentials = fromEnv();
@@ -130,8 +159,9 @@ export async function createSettingsService(
       await load();
     },
 
-    missing: () => REQUIRED.filter((field) => !cache[field]),
-    isConfigured: () => REQUIRED.every((field) => Boolean(cache[field])),
+    missing: () => REQUIRED_BY_PROVIDER[providerOf(cache)].filter((field) => !cache[field]),
+    isConfigured: () =>
+      REQUIRED_BY_PROVIDER[providerOf(cache)].every((field) => Boolean(cache[field])),
 
     masked() {
       const out = {} as Record<CredentialField, string>;

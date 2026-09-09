@@ -39,16 +39,26 @@ npm run templates:lint
 
 ## Como se conecta tu cuenta
 
-Todo desde `/setup`. Hay dos caminos y los dos terminan igual.
+Todo desde `/setup`, un asistente de cuatro pasos. El unico que hay que pensar
+es el primero, y no pregunta por tecnologia sino por algo que el usuario si sabe
+contestar: **si quiere seguir usando WhatsApp en el movil**.
 
-**El rapido: "Conectar con Facebook".** Un boton abre la ventana de Meta, entras
-con tu cuenta, eliges tu numero y vuelves conectado. Es el registro incorporado
-(Embedded Signup) y es lo mas parecido al codigo QR de WhatsApp Web que permite
-la via oficial. Hay que activarlo una vez en la app de Meta (WhatsApp,
-Configuracion, Registro incorporado) y pegar aqui su ID de configuracion.
+**Si (coexistencia): se conecta con un codigo QR.** El numero se queda en la app
+de WhatsApp Business del telefono *y ademas* habla por la API. La ventana de
+Meta enseña un QR, se escanea desde esa app, el historial se sincroniza y se
+puede seguir contestando a mano desde el movil. Es lo que casi todo el mundo
+quiere cuando pide "el QR". Por dentro es Embedded Signup con
+`featureType: whatsapp_business_app_onboarding`.
 
-**El manual: tres datos.** El token permanente, el ID de la app y su clave
-secreta. Con eso el sistema:
+**No (numero dedicado): "Conectar con Facebook".** Registro incorporado clasico.
+El numero pasa a ser solo de la API y deja de funcionar en la app del telefono.
+
+Los dos necesitan activar el registro incorporado una vez en la app de Meta
+(WhatsApp, Configuracion, Registro incorporado) y pegar su ID de configuracion;
+la pantalla lo pide en el paso 2 y no vuelve a preguntarlo.
+
+**El tercer camino, manual: pega el token.** El token permanente, el ID de la app
+y su clave secreta. Con eso el sistema:
 
 1. averigua a que cuentas de negocio llega el token (`debug_token`) y que
    numeros tiene cada una;
@@ -60,20 +70,64 @@ secreta. Con eso el sistema:
 
 Antes eran seis campos y un viaje al panel de Meta a pegar la URL del webhook.
 
-**No hay codigo QR y no lo va a haber.** El QR es como se conecta un *telefono*
-a WhatsApp Web; usarlo desde un servidor obliga a emular ese cliente (Baileys,
-whatsapp-web.js), esta fuera de los terminos y termina con el numero baneado sin
-aviso. La pantalla lo explica ahi mismo en vez de dejar al usuario buscandolo.
+**Por la via oficial, el QR solo existe para WhatsApp Business.** Para el
+WhatsApp verde de consumidor no hay forma oficial: el paso previo es migrarlo a
+WhatsApp Business, que es gratis y conserva numero e historial.
+
+Quien no quiera pasar por Meta tiene el **cuarto camino, WAHA**, mas abajo.
 
 Dos cosas mas que la pantalla resuelve sola:
 
-- **Numero nuevo:** se activa con su PIN de seis digitos desde ahi.
+- **Numero nuevo:** se activa con su PIN de seis digitos desde ahi. En
+  coexistencia no hace falta: el numero ya estaba dado de alta en la app.
 - **Mensaje de prueba:** manda `hello_world` a tu propio telefono para
   comprobarlo de punta a punta.
 
 En local Meta necesita una URL publica:
 `npx cloudflared tunnel --url http://localhost:3000`, y esa URL en el campo
 correspondiente (o en `PUBLIC_BASE_URL`).
+
+---
+
+## El cuarto camino: WAHA (no oficial)
+
+[WAHA](https://waha.devlike.pro) es un contenedor que expone WhatsApp como API
+REST y se conecta escaneando el **QR de WhatsApp Web**. Funciona con cualquier
+WhatsApp, tambien el verde, y no necesita ninguna app de Meta.
+
+**El precio:** WAHA emula el cliente de WhatsApp Web. Eso esta fuera de los
+terminos de Meta, los baneos son permanentes y sin apelacion, y el riesgo sube
+con el volumen a numeros que no te tienen agendado. Usa un numero secundario.
+
+```bash
+docker run -it -p 3001:3000 devlikeapro/waha   # el contenedor, en otro puerto
+```
+
+Luego en `/setup`, opcion "Conectar con WAHA": pegas `http://localhost:3001`,
+sale el QR en la propia pantalla y lo escaneas desde el telefono.
+
+Se elige con `WHATSAPP_PROVIDER=waha` (o desde la pantalla) y entra por el mismo
+sitio que todo lo demas: implementa la misma interfaz `WhatsAppClient`, asi que
+los gates, la cola, las secuencias, el chat y el geo core no se enteran del
+cambio. Lo que WAHA no tiene se degrada a proposito y esta cubierto por tests:
+
+| Cloud API | Con WAHA |
+|---|---|
+| Plantilla aprobada | el cuerpo guardado, mandado como texto ya sustituido |
+| Boton nativo de ubicacion | se pide por texto, con la instruccion del clip |
+| Botones interactivos | lista numerada |
+| Calidad y tier del numero | **no existen**: el gate de calidad se queda ciego |
+| Activar numero con PIN | no aplica, lo sustituye el QR |
+| Revision de plantillas por Meta | no hay: el catalogo local es la verdad |
+
+Los demas gates (opt-in, ventana de 24 h, cupo diario, warm-up) siguen
+aplicando. Con un cliente no oficial importan mas, no menos: son lo unico que
+queda entre tu numero y el baneo.
+
+El webhook de WAHA entra por `/webhooks/waha` y firma con `X-Webhook-Hmac`
+(sha512), no con el `X-Hub-Signature-256` de Meta. La clave se la inventa el
+sistema al conectar, igual que el verify token. Aqui no hace falta tunel: WAHA
+suele correr en la misma maquina y solo tiene que poder llegar a este servidor.
 
 ---
 
@@ -169,6 +223,7 @@ WhatsApp Cloud API
 |---|---|
 | `src/geo/` | extraccion de lat/lng, sin dependencias externas |
 | `src/whatsapp/` | firma del webhook, cliente de la Graph API, router de eventos |
+| `src/whatsapp/waha/` | proveedor no oficial: cliente, sesion con QR y traductor del webhook |
 | `src/handlers/` | conversacion: ubicacion, confirmacion, alta, baja y reglas |
 | `src/automation/` | reglas, secuencias, programados y su ticker |
 | `src/templates/` | catalogo, linter, registro local y sincronizacion con Meta |
@@ -375,7 +430,7 @@ la pagina de rastreo.
 
 ## Tests
 
-277 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
+339 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
 en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
 verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
 WebAssembly, asi que tampoco hacen falta Docker ni un servidor.

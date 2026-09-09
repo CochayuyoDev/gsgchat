@@ -50,7 +50,12 @@ export async function createRuntime(opts: { migrate?: boolean } = {}): Promise<R
   const pool = createPool(config.DATABASE_URL);
   const repos = createRepos(pool);
   const settings = await createSettingsService(createSettingsRepo(pool), config, secrets.settingsKey);
-  const wa = createDynamicWhatsAppClient(settings);
+  const wa = createDynamicWhatsAppClient(settings, {
+    // WAHA no tiene plantillas: necesita el cuerpo guardado para mandarlo
+    // como texto. Con la Cloud API esto no se llama nunca.
+    resolveTemplateBody: async (name, language) =>
+      (await repos.templates.get(name, language))?.body ?? undefined,
+  });
 
   return {
     config,

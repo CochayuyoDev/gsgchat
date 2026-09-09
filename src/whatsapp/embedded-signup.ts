@@ -2,12 +2,15 @@
  * Conexion en una ventana, sin pegar tokens: el "registro incorporado"
  * (Embedded Signup) de Meta.
  *
- * Es lo mas parecido al codigo QR de WhatsApp Web que permite la via oficial.
- * NO existe un QR para la Cloud API: el QR es como se conecta un TELEFONO a
- * WhatsApp Web, y para usarlo desde un servidor hay que emular ese cliente
- * (Baileys, whatsapp-web.js), que esta fuera de los terminos y termina con el
- * numero baneado. Aqui el usuario pulsa un boton, se abre la ventana de Meta,
- * entra con su cuenta, elige (o crea) su numero y vuelve conectado.
+ * Hay dos modos, y la diferencia entre ellos es la que le importa al usuario:
+ * si su numero sigue funcionando en el movil o no. Ver `SignupMode`.
+ *
+ * En el modo de coexistencia la propia ventana de Meta enseña un codigo QR que
+ * se escanea desde la app de WhatsApp Business. Es literalmente el QR que la
+ * gente pide, y es oficial. Lo que sigue sin existir es un QR para conectar un
+ * WhatsApp de consumidor (el verde): para eso habria que emular el cliente de
+ * WhatsApp Web (Baileys, whatsapp-web.js), que esta fuera de los terminos y
+ * termina con el numero baneado.
  *
  * Lo que devuelve la ventana es un `code` de un solo uso. Este modulo lo
  * cambia por un token de negocio permanente:
@@ -95,4 +98,41 @@ export function signupAvailability(credentials: { appId: string; signupConfigId:
     !credentials.signupConfigId && 'el id de la configuracion de registro incorporado',
   ].filter(Boolean) as string[];
   return { ready: missing.length === 0, missing };
+}
+
+/**
+ * Los dos modos de la ventana de Meta.
+ *
+ * - `coexistence`: el numero se queda en la app de WhatsApp Business del movil
+ *   Y ademas habla por la API. El alta se hace escaneando un QR desde esa app,
+ *   Meta sincroniza el historial y se puede seguir contestando a mano desde el
+ *   telefono. Es lo que busca casi todo el que pide "el QR".
+ * - `dedicated`: el numero pasa a ser solo de la API y deja de funcionar en la
+ *   app del movil. Es el registro incorporado clasico, para un numero nuevo
+ *   dedicado al sistema.
+ *
+ * El valor que espera Meta para la coexistencia es
+ * `whatsapp_business_app_onboarding`. El `coexistence` que aparece en tutoriales
+ * viejos ya no vale y hace que la ventana abra el flujo equivocado.
+ */
+export type SignupMode = 'coexistence' | 'dedicated';
+
+export const SIGNUP_FEATURE_TYPE: Record<SignupMode, string> = {
+  coexistence: 'whatsapp_business_app_onboarding',
+  dedicated: '',
+};
+
+export interface SignupExtras {
+  setup: Record<string, never>;
+  featureType: string;
+  sessionInfoVersion: string;
+}
+
+/** Lo que se le pasa a `FB.login` en `extras`. */
+export function signupExtras(mode: SignupMode): SignupExtras {
+  return {
+    setup: {},
+    featureType: SIGNUP_FEATURE_TYPE[mode] ?? '',
+    sessionInfoVersion: '3',
+  };
 }

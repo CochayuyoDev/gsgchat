@@ -22,6 +22,17 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
 
+  // Por donde sale y entra WhatsApp. `cloud` es la API oficial de Meta;
+  // `waha` es un contenedor de WAHA, que se conecta con codigo QR y funciona
+  // con cualquier WhatsApp, a cambio de emular WhatsApp Web (fuera de los
+  // terminos de Meta, con riesgo real de baneo del numero).
+  WHATSAPP_PROVIDER: z.enum(['cloud', 'waha']).default('cloud'),
+  WAHA_URL: z.string().default(''),
+  WAHA_API_KEY: z.string().default(''),
+  WAHA_SESSION: z.string().default('default'),
+  /** WEBJS | NOWEB | GOWS | WPP. Vacio = el que traiga el contenedor. */
+  WAHA_ENGINE: z.string().default(''),
+
   // Las credenciales de Meta son opcionales a proposito: el sistema arranca
   // sin ellas y las pide por pantalla en /setup. Lo que se guarde ahi tiene
   // precedencia sobre estas variables.

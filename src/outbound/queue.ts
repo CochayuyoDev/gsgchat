@@ -106,3 +106,35 @@ export function createOutboundWorker(opts: OutboundWorkerOptions): Worker<SendJo
 
   return worker;
 }
+
+/**
+ * Si hay un Redis vivo en esa URL.
+ *
+ * Se comprueba al arrancar para poder caer a la cola en memoria en vez de
+ * reventar. BullMQ no falla al construirse: reintenta en segundo plano para
+ * siempre, asi que sin esta comprobacion el sintoma seria un sistema que
+ * arranca, acepta mensajes y no envia ninguno, sin decir por que.
+ */
+export async function redisReachable(redisUrl: string, timeoutMs = 1500): Promise<boolean> {
+  const redis = new Redis(redisUrl, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    retryStrategy: () => null,
+    connectTimeout: timeoutMs,
+  });
+
+  // Sin este manejador ioredis escupe un "Unhandled error event: ECONNREFUSED"
+  // en la consola antes de que lleguemos al catch. Aqui no hay Redis es una
+  // respuesta valida, no un incidente: el aviso lo damos nosotros, formateado.
+  redis.on('error', () => {});
+
+  try {
+    await redis.connect();
+    await redis.ping();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    redis.disconnect();
+  }
+}
