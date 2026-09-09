@@ -24,7 +24,12 @@ import type { Sender } from '../outbound/sender.js';
 import type { InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { ExtractionSuccess, FailureReason } from '../types.js';
-import { responder, type Entrada as EntradaPreventa } from '../preventa/flow.js';
+import {
+  responder,
+  textoDePregunta,
+  type Contexto as ContextoPreventa,
+  type Entrada as EntradaPreventa,
+} from '../preventa/flow.js';
 import { saludoPorHora } from '../automation/engine.js';
 import { mensajesVigentes, render } from '../preventa/mensajes.js';
 import { coincideDelTodo, type StokyClient, type ProductoStoky } from '../stoky/client.js';
@@ -140,7 +145,7 @@ export async function turnoDePreventa(
 
   // Una consulta de precio se contesta con el catalogo y NO sigue al flujo:
   // dos respuestas por un mensaje es justo lo que no puede pasar.
-  if (await contestarPrecio(contact, entrada, lead, prefs.mensajesPreventa, deps)) return;
+  if (await contestarPrecio(contact, entrada, lead, prefs, deps)) return;
 
   const { patch, respuesta } = responder(lead, entrada, {
     negocio: config.businessName,
@@ -197,17 +202,26 @@ async function contestarPrecio(
   contact: Contact,
   entrada: EntradaPreventa,
   lead: { estado: string; preguntaPendiente: string | null },
-  overrides: Record<string, string> | undefined,
+  prefs: { mensajesPreventa?: Record<string, string>; serviciosPreventa?: string[] },
   deps: InboundDeps,
 ): Promise<boolean> {
   const { sender, config, catalogo } = deps;
+  const overrides = prefs.mensajesPreventa;
   const texto = entrada.texto.trim();
 
   if (!texto || !catalogo) return false;
   // En manos de una persona el bot no se mete, ni para dar un precio.
   if (lead.estado === 'calificado' || lead.estado === 'enviado') return false;
-  // A mitad de una pregunta, lo que escribe es la respuesta, no una consulta.
-  if (lead.preguntaPendiente) return false;
+
+  // A "¿que vas a enviar?" un nombre de producto ES la respuesta, no una
+  // consulta de precio: ahi el catalogo tiene que callarse. En las demas
+  // preguntas -de que distrito, a nombre de quien- un producto no es una
+  // respuesta posible, asi que preguntar el precio a mitad vale.
+  //
+  // Sin esta distincion pasa una de dos, y las dos son malas: o el cliente no
+  // puede preguntar un precio en cuanto empieza a cotizar, o "cuanto cuesta el
+  // arroz" acaba guardado como su distrito de recojo.
+  if (lead.preguntaPendiente === 'contenido') return false;
 
   let encontrados: ProductoStoky[] = [];
   try {
@@ -244,15 +258,40 @@ async function contestarPrecio(
     sustituciones,
   );
 
+  // Si estaba a mitad de una pregunta, se repite al pie: contestar el precio
+  // y dejar la conversacion colgada obliga al cliente a adivinar por donde
+  // iban. Y va en el MISMO mensaje, que dos seguidos son dos mensajes por uno.
+  const pendiente = lead.preguntaPendiente
+    ? preguntaPendienteTexto(lead.preguntaPendiente, {
+        negocio: config.businessName,
+        cobertura: config.coverageName || 'tu zona',
+        saludo: sustituciones.saludo,
+        horario: config.businessHours,
+        servicios: prefs.serviciosPreventa,
+        mensajes: overrides,
+      })
+    : '';
+
   await sender.send({
     phone: contact.phone,
     kind: 'freeform',
     category: 'UTILITY',
     manual: false,
-    text: `${encabezado}\n\n${lineas.join('\n')}`,
+    text: `${encabezado}\n\n${lineas.join('\n')}${pendiente ? `\n\n${pendiente}` : ''}`,
   });
 
   return true;
+}
+
+/**
+ * El texto de la pregunta que estaba esperando respuesta.
+ *
+ * Se saca del propio flujo para no tener los mismos textos escritos en dos
+ * sitios: si la tienda reescribe "¿de que distrito recogemos?", tiene que
+ * cambiar tambien aqui.
+ */
+function preguntaPendienteTexto(campo: string, ctx: ContextoPreventa): string {
+  return textoDePregunta(campo, ctx);
 }
 
 /** Aplica una regla: responde si tiene texto e inscribe si apunta a una secuencia. */

@@ -243,6 +243,18 @@ const PREGUNTAS: Record<Exclude<Campo, null>, (ctx: Contexto) => Respuesta> = {
   documento: (ctx) => ({ texto: mensaje(ctx, 'pedirDocumento') }),
 };
 
+/**
+ * El texto de una pregunta concreta, sin pasar por la conversacion.
+ *
+ * Lo usa quien necesita repetir la pregunta que estaba en el aire -contestar
+ * un precio a mitad y dejar al cliente colgado obliga a adivinar por donde
+ * iban- sin volver a escribir los textos en otro sitio.
+ */
+export function textoDePregunta(campo: string, ctx: Contexto): string {
+  const pregunta = PREGUNTAS[campo as Exclude<Campo, null>];
+  return pregunta ? pregunta(ctx).texto : '';
+}
+
 /** El resumen que cierra la preventa y se pasa al asesor. */
 export function resumen(lead: Lead): string {
   const linea = (etiqueta: string, valor: string | null) =>

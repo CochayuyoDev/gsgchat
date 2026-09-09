@@ -19,6 +19,7 @@ import {
   responder,
   respuestaValida,
   siguienteCampo,
+  textoDePregunta,
   type Contexto,
 } from '../src/preventa/flow.js';
 import type { Lead, LeadPatch } from '../src/db/leads.js';
@@ -450,5 +451,26 @@ describe('elegir servicio o courier', () => {
 
     const { patch } = responder(lead, { texto: '3', esPrimerMensaje: false }, { ...CTX, servicios });
     expect((patch as LeadPatch).servicio).toBe('Programado');
+  });
+});
+
+describe('repetir la pregunta que estaba en el aire', () => {
+  it('textoDePregunta da el texto sin pasar por la conversacion', () => {
+    // Lo usa el catalogo cuando contesta un precio a mitad del cuestionario:
+    // dar el precio y dejar al cliente colgado le obliga a adivinar por donde
+    // iban.
+    expect(textoDePregunta('recojo', CTX)).toContain('distrito');
+    expect(textoDePregunta('nombre', CTX)).toContain('nombre');
+    expect(textoDePregunta('documento', CTX)).toContain('DNI');
+  });
+
+  it('respeta el texto que reescribio la tienda', () => {
+    expect(textoDePregunta('recojo', { ...CTX, mensajes: { pedirRecojo: '¿Desde donde?' } })).toBe(
+      '¿Desde donde?',
+    );
+  });
+
+  it('un campo que no existe no revienta: devuelve vacio', () => {
+    expect(textoDePregunta('inventado', CTX)).toBe('');
   });
 });
