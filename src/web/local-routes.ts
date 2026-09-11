@@ -9,7 +9,11 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Config } from '../config.js';
+import { providerOf } from '../settings/service.js';
+import type { Monitor } from '../salud/monitor.js';
 import type { Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
@@ -32,6 +36,18 @@ export interface LocalRoutesDeps {
   sender: Sender;
   wa: WhatsAppClient;
   settings: SettingsService;
+  /** El monitor de salud: cuenta las desconexiones y para todo con un 403. */
+  salud?: Monitor;
+  /**
+   * Volver a abrir la sesion al arrancar si ya hay una vinculacion guardada.
+   *
+   * Sin esto, tras cada reinicio alguien tenia que entrar a /setup y pulsar
+   * conectar; mientras tanto el motor de rutas y las secuencias intentaban
+   * enviar contra un socket cerrado. Solo lo encienden los arranques reales
+   * (dev y quick): en las pruebas el directorio de trabajo es el del proyecto
+   * y ahi vive la vinculacion de verdad, que no se puede tocar.
+   */
+  autoConectar?: boolean;
 }
 
 /** El navegador necesita saber que es para decidir si lo pinta o lo baja. */
@@ -61,13 +77,24 @@ export async function registerLocalRoutes(
   app: FastifyInstance,
   deps: LocalRoutesDeps,
 ): Promise<void> {
-  const { config, repos, sender, wa, settings, catalogo } = deps;
+  const { config, repos, sender, wa, settings, catalogo, salud } = deps;
   const authDir = defaultAuthDir();
   const mediaDir = mediaDirectory();
 
+  // Si el proveedor es el local y hay vinculacion guardada, se reconecta
+  // sola en cuanto el servidor este escuchando (por eso el onReady).
+  if (deps.autoConectar) {
+    app.addHook('onReady', async () => {
+      if (providerOf(settings.current()) !== 'local') return;
+      if (!existsSync(join(authDir, 'creds.json'))) return;
+      console.log('[wa] vinculacion guardada: reconectando la sesion local...');
+      void arrancar().catch((error) => console.error('[wa] no se pudo reconectar la sesion local:', error));
+    });
+  }
+
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, seen: createSeenCache() };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, seen: createSeenCache() };
 
   async function arrancar() {
     return startLocal({
@@ -77,6 +104,10 @@ export async function registerLocalRoutes(
       // logger apagado, y con el se perdian justo las lineas que explican por
       // que un mensaje no aparece.
       log: (mensaje) => console.log(`[wa] ${mensaje}`),
+      // Cada corte con su codigo: tres en una hora frenan; un 403 para todo.
+      onDisconnect: (code, detail) => {
+        void salud?.registrarDesconexion(code, detail).catch(() => undefined);
+      },
       onChange: async (value) => {
         try {
           await processChange('messages', value, webhookDeps);

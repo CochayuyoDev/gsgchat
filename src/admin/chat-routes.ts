@@ -31,7 +31,7 @@ const sendSchema = z.object({
   askLocation: z.boolean().optional(),
   /** Fuera de la ventana de 24 h solo sale una plantilla aprobada. */
   templateName: z.string().optional(),
-  templateLanguage: z.string().default('es_MX'),
+  templateLanguage: z.string().default('es'),
   variables: z.array(z.string()).default([]),
 });
 
@@ -162,8 +162,23 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     }
 
     if (body.templateName) {
-      const template = await repos.templates.get(body.templateName, body.templateLanguage);
-      if (!template) return reply.code(400).send({ error: 'la plantilla no existe en el registro local' });
+      /**
+       * Se busca por nombre e idioma y, si no aparece, por nombre a secas.
+       *
+       * El catalogo del sistema esta en "es", pero una cuenta que venia de
+       * antes puede tener la misma plantilla aprobada como "es_MX". Sin este
+       * respaldo, el envio fallaba con un "no existe" que era mentira: existia,
+       * con otra etiqueta de idioma.
+       */
+      const template =
+        (await repos.templates.get(body.templateName, body.templateLanguage)) ??
+        (await repos.templates.list()).find((t) => t.name === body.templateName) ??
+        null;
+      if (!template) {
+        return reply.code(400).send({
+          error: `La plantilla "${body.templateName}" no está dada de alta todavía. Sincronízala en el panel.`,
+        });
+      }
       return sender.send({
         phone,
         kind: 'template',

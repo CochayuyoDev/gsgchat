@@ -39,6 +39,22 @@ const CSS = `
   /* 100dvh y no 100vh: en el movil la barra del navegador se recoge y con vh
      la pantalla queda cortada por abajo justo donde esta el cuadro de texto. */
   .app { display: grid; grid-template-columns: 340px 1fr; height: 100dvh; overflow: hidden; }
+  /* Con la banda de demostracion puesta, el alto disponible es el resto. */
+  .demo ~ .app { height: calc(100dvh - var(--demo-alto, 46px)); }
+  .demo {
+    background: #d97706; color: #fff; padding: 9px 14px; font-size: 13.5px;
+    text-align: center; line-height: 1.35;
+  }
+  .demo a { color: #fff; text-decoration: underline; }
+  /* WhatsApp desconectado: lo que se escriba no sale. Se avisa arriba del
+     todo, porque descubrirlo al pulsar enviar es descubrirlo tarde. */
+  .aviso-conexion {
+    background: #dc2626; color: #fff; padding: 9px 14px; font-size: 13.5px;
+    text-align: center; line-height: 1.35;
+  }
+  .aviso-conexion a { color: #fff; text-decoration: underline; }
+  .demo ~ .aviso-conexion ~ .app, .aviso-conexion ~ .app { height: calc(100dvh - 46px); }
+${DIALOGO_CSS}
   .side {
     background: var(--panel); border-right: 1px solid var(--line);
     display: flex; flex-direction: column; min-width: 0; min-height: 0;
@@ -180,6 +196,36 @@ const CSS = `
   .link { color: var(--accent); text-decoration: none; font-size: 13px; }
   .icon { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; padding: 4px 6px; }
   .hidden { display: none !important; }
+
+  /* Respaldos: la misma columna de la izquierda, otro contenido. */
+  .rb { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .rb:hover { background: var(--header); }
+  .rb .top { display: flex; align-items: baseline; gap: 8px; }
+  .rb .name { font-weight: 600; font-size: 14.5px; flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .rb .when { font-size: 11.5px; color: var(--muted); flex: none; }
+  .rb .det { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .resumen { padding: 9px 14px; font-size: 12.5px; color: var(--muted);
+    background: var(--header); border-bottom: 1px solid var(--line); }
+
+  /* Confirmacion en la propia pantalla: un confirm() del navegador bloquea
+     la pestana entera y deja el chat sin refrescar. */
+  .confirmar { background: var(--header); border-top: 1px solid var(--line); padding: 14px 16px; }
+  .confirmar p { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+  .confirmar b { color: var(--text); }
+  .confirmar .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .confirmar button, .lectura button {
+    font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer;
+  }
+  .confirmar button.primary, .lectura button.primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+  .confirmar button.peligro { background: #dc2626; color: #fff; border-color: #dc2626; }
+  /* Barra del respaldo abierto: se lee, no se escribe. */
+  .lectura { background: var(--header); border-top: 1px solid var(--line);
+    padding: 10px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .lectura .que { flex: 1; min-width: 160px; font-size: 12.5px; color: var(--muted); }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; z-index: 50;
     background: #111b21; color: #fff; padding: 10px 18px; border-radius: 10px; font-size: 13.5px;
     box-shadow: 0 8px 30px rgba(0,0,0,.3); max-width: 80vw; }
@@ -195,8 +241,34 @@ const CSS = `
 `;
 
 import { seedTokenJs } from './pages.js';
+import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
 
-export function chatPage(configured: boolean, adminToken = ''): string {
+export function chatPage(
+  configured: boolean,
+  adminToken = '',
+  proveedor = 'cloud',
+  demo = false,
+): string {
+  /**
+   * En la demostracion los envios se apuntan como enviados y no salen a
+   * ninguna parte. Sin decirlo, es imposible distinguirla de un sistema que
+   * no entrega los mensajes.
+   */
+  const bandaDemo = demo
+    ? `<div class="demo">Modo demostración: los mensajes NO salen a WhatsApp.
+         Para hablar de verdad, arranca el sistema y conecta tu cuenta en <a href="/setup">/setup</a>.</div>`
+    : '';
+
+  /**
+   * Solo con WAHA se puede traer el historial: es el unico proveedor que lo
+   * guarda y lo deja pedir. Con la Cloud API de Meta no existe esa consulta,
+   * asi que el boton no se pinta en vez de fallar al pulsarlo.
+   */
+  const importar =
+    proveedor === 'waha'
+      ? '<button class="icon" id="importar" title="Traer las conversaciones que ya tiene este WhatsApp">⭳</button>'
+      : '';
+
   const aviso = configured
     ? ''
     : `<div class="locked" style="border-top:0;border-bottom:1px solid var(--line)">
@@ -209,19 +281,27 @@ export function chatPage(configured: boolean, adminToken = ''): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chat - wa-locator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>💬</text></svg>">
 <style>${CSS}</style>
 </head><body>
+${bandaDemo}
+<div class="aviso-conexion hidden" id="aviso-conexion"></div>
 <div class="app" id="app">
   <div class="side">
     <header>
       <h1>Chats</h1>
       <span id="unread" class="badge hidden"></span>
-      <button class="icon" id="new" title="Escribir a un numero nuevo">✚</button>
+      <button class="icon" id="new" title="Escribir a un número nuevo">✚</button>
+      ${importar}
+      <button class="icon" id="ver-respaldos" title="Conversaciones respaldadas">🗄</button>
+      <a class="link" href="/rutas" title="Pedir ubicaciones para reparto">Ubicaciones</a>
       <a class="link" href="/panel" title="Panel de operacion">Panel</a>
     </header>
     ${aviso}
     <div class="search"><input id="q" placeholder="Buscar por nombre o numero" autocomplete="off"></div>
     <div class="chats" id="chats"></div>
+    <div class="resumen hidden" id="rb-resumen"></div>
+    <div class="chats hidden" id="respaldos"></div>
   </div>
 
   <div class="thread">
@@ -233,6 +313,7 @@ export function chatPage(configured: boolean, adminToken = ''): string {
         <div class="sub" id="t-sub"></div>
       </div>
       <a class="link" id="t-panel" href="/panel#contactos">Ficha</a>
+      <button class="icon" id="cerrar-chat" title="Guardar este chat y vaciarlo">🗄</button>
     </header>
     <div class="empty" id="placeholder">
       <div>
@@ -252,28 +333,35 @@ export function chatPage(configured: boolean, adminToken = ''): string {
       <textarea id="text" rows="1" placeholder="Escribe un mensaje"></textarea>
       <button id="send" title="Enviar">➤</button>
     </div>
+    <div class="confirmar hidden" id="confirmar-cierre"></div>
+    <div class="lectura hidden" id="lectura"></div>
     <div class="locked hidden" id="locked"></div>
   </div>
 </div>
 
 <script>
-${seedTokenJs(adminToken)}${String.raw`
+${seedTokenJs(adminToken)}${DIALOGO_JS}${String.raw`
+/* La clave se pide con el cuadro propio (ver dialogo.ts), no con el prompt
+   del navegador: aquel congela la pagina, y esta se refresca sola. */
 function token() {
-  var t = sessionStorage.getItem('adminToken');
-  if (!t) { t = prompt('Token de administracion (aparece en la consola al arrancar):'); if (t) sessionStorage.setItem('adminToken', t.trim()); }
-  return t || '';
+  return sessionStorage.getItem('adminToken') || '';
 }
 async function api(path, options) {
   options = options || {};
+  var clave = await pedirToken();
   var res = await fetch(path, {
     method: options.method || 'GET',
     cache: 'no-store',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token() },
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + clave },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   if (res.status === 401) { sessionStorage.removeItem('adminToken'); throw new Error('Token de administracion incorrecto: recarga la pagina'); }
   var data = await res.json().catch(function () { return {}; });
-  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  if (res.status === 401) {
+    sessionStorage.removeItem('adminToken');
+    throw new Error('La clave de administracion no es correcta: vuelve a escribirla.');
+  }
+  if (!res.ok) throw new Error(data.error || errorHttp(res.status));
   return data;
 }
 function esc(v) {
@@ -343,6 +431,11 @@ var pintado = 0;       /* numero de la ultima que llego a pintarse */
 var conversations = [];
 var templates = [];
 var lastCount = 0;
+/* 'chat' = conversacion viva; 'respaldo' = hilo guardado, solo lectura.
+   El refresco automatico mira esto: repintar el chat vivo encima de un
+   respaldo abierto lo cerraria solo cada cinco segundos. */
+var modo = 'chat';
+var enRespaldos = false;
 
 async function loadChats(keepScroll) {
   try {
@@ -400,6 +493,9 @@ async function openChat(contactId, silent) {
     pintado = mia;
     var nuevo = !current || current.id !== contactId;
     current = data.contact;
+    modo = 'chat';
+    ver('lectura', false);
+    ver('confirmar-cierre', false);
     document.getElementById('app').classList.add('open-thread');
     ver('thread-head', true);
     ver('placeholder', false);
@@ -496,7 +592,7 @@ async function cargarMedios(box) {
     try {
       if (!mediaCache[id]) {
         var res = await fetch('/admin/local/media/' + encodeURIComponent(id), {
-          headers: { authorization: 'Bearer ' + token() }
+          headers: { authorization: 'Bearer ' + (await pedirToken()) }
         });
         if (!res.ok) throw new Error('no se pudo cargar');
         mediaCache[id] = URL.createObjectURL(await res.blob());
@@ -650,7 +746,7 @@ document.getElementById('back').onclick = function () {
   document.getElementById('app').classList.remove('open-thread');
 };
 document.getElementById('new').onclick = async function () {
-  var tel = prompt('Numero con codigo de pais, sin + ni espacios:');
+  var tel = await pedirCelular();
   if (!tel) return;
   try {
     var r = await api('/admin/chat/start', { method: 'POST', body: { phone: tel } });
@@ -669,7 +765,10 @@ document.getElementById('chats').addEventListener('click', function (event) {
 var buscando;
 document.getElementById('q').addEventListener('input', function () {
   clearTimeout(buscando);
-  buscando = setTimeout(function () { loadChats(); }, 250);
+  buscando = setTimeout(function () {
+    if (enRespaldos) cargarRespaldos();
+    else loadChats();
+  }, 250);
 });
 
 async function loadTemplates() {
@@ -678,8 +777,36 @@ async function loadTemplates() {
 
 /* Refresco: la lista siempre, el hilo abierto sin marcarlo como leido de
    nuevo para no pisar el contador mientras se lee. */
+/* Estado de la conexion con WhatsApp.
+   Solo tiene sentido con los proveedores que se vinculan por QR (el cliente
+   local y WAHA): con la Cloud API de Meta no hay sesion que se caiga. */
+var PROVEEDOR = '${proveedor}';
+
+async function revisarConexion() {
+  if (PROVEEDOR !== 'local' && PROVEEDOR !== 'waha') return;
+  var caja = document.getElementById('aviso-conexion');
+  try {
+    var estado = await api('/admin/' + PROVEEDOR + '/status');
+    if (estado.connected) {
+      caja.classList.add('hidden');
+      return;
+    }
+    caja.innerHTML = 'WhatsApp no está conectado' +
+      (estado.detail ? ' (' + esc(estado.detail) + ')' : '') +
+      ': lo que escribas aquí no va a salir. ' +
+      '<a href="/setup">Conectar ahora</a>';
+    caja.classList.remove('hidden');
+  } catch (error) {
+    /* Si no se puede preguntar, no se inventa un estado: se deja como esta. */
+  }
+}
+
+revisarConexion();
+setInterval(revisarConexion, 15000);
+
 setInterval(function () {
-  loadChats(true);
+  if (modo !== 'chat') return;
+  if (!enRespaldos) loadChats(true);
   if (deseado) openChat(deseado, true);
 }, 5000);
 
@@ -721,6 +848,220 @@ async function abrirDesdeUrl() {
     history.replaceState(null, '', '/chat');
   } catch (error) {
     toast(error.message);
+  }
+}
+
+/* ------------------------------------------------------------ respaldos
+
+   Cerrar un chat guarda el hilo entero en un fichero y lo vacia de la base.
+   Es lo que hace que el historial sobreviva a perder el numero, y de paso lo
+   que evita que la base crezca sin fin. El servidor no borra nada hasta haber
+   escrito el respaldo y haberlo vuelto a leer entero. */
+
+function motivoTexto(reason) {
+  if (reason === 'lead') return 'al cerrar la ficha';
+  if (reason === 'inactividad') return 'por inactividad';
+  return 'cerrado a mano';
+}
+
+document.getElementById('cerrar-chat').onclick = function () { pedirCierre(); };
+
+function pedirCierre() {
+  if (!current || modo !== 'chat') return;
+  var caja = document.getElementById('confirmar-cierre');
+  caja.innerHTML =
+    '<p>Se guarda <b>todo el historial</b> de ' + esc(current.name || current.phone) +
+    ' en un respaldo y el chat queda vacío aquí. Lo guardado se puede leer, descargar ' +
+    'y devolver al chat cuando quieras, aunque se pierda el número.</p>' +
+    '<div class="actions">' +
+      '<button class="primary" id="ok-cierre">Guardar y vaciar</button>' +
+      '<button id="no-cierre">Cancelar</button>' +
+    '</div>';
+  ver('confirmar-cierre', true);
+  document.getElementById('no-cierre').onclick = function () { ver('confirmar-cierre', false); };
+  document.getElementById('ok-cierre').onclick = cerrarChat;
+}
+
+async function cerrarChat() {
+  var boton = document.getElementById('ok-cierre');
+  boton.disabled = true;
+  boton.textContent = 'Guardando...';
+  try {
+    var r = await api('/admin/chat/' + current.id + '/archive', { method: 'POST' });
+    ver('confirmar-cierre', false);
+    toast('Guardados ' + r.archive.messageCount + ' mensajes. El chat quedó vacío.');
+    await openChat(current.id, true);
+    loadChats(true);
+  } catch (error) {
+    toast(error.message);
+    boton.disabled = false;
+    boton.textContent = 'Guardar y vaciar';
+  }
+}
+
+/* Traer lo que ya se hablo antes de conectar el sistema (solo WAHA). */
+var botonImportar = document.getElementById('importar');
+if (botonImportar) {
+  botonImportar.onclick = async function () {
+    botonImportar.disabled = true;
+    toast('Trayendo las conversaciones de WhatsApp, puede tardar un poco...');
+    try {
+      var r = await api('/admin/waha/importar', { method: 'POST', body: {} });
+      toast('Listo: ' + r.chats + ' conversaciones y ' + r.mensajes + ' mensajes.' +
+        (r.omitidos ? ' Se omitieron ' + r.omitidos + ' grupos.' : ''));
+      loadChats();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      botonImportar.disabled = false;
+    }
+  };
+}
+
+document.getElementById('ver-respaldos').onclick = function () {
+  if (enRespaldos) volverAChats();
+  else abrirRespaldos();
+};
+
+function abrirRespaldos() {
+  enRespaldos = true;
+  ver('chats', false);
+  ver('respaldos', true);
+  ver('rb-resumen', true);
+  document.getElementById('q').value = '';
+  document.getElementById('q').placeholder = 'Buscar en los respaldos';
+  cargarRespaldos();
+}
+
+function volverAChats() {
+  enRespaldos = false;
+  ver('chats', true);
+  ver('respaldos', false);
+  ver('rb-resumen', false);
+  document.getElementById('q').value = '';
+  document.getElementById('q').placeholder = 'Buscar por nombre o numero';
+  loadChats();
+}
+
+async function cargarRespaldos() {
+  try {
+    var q = document.getElementById('q').value.trim();
+    var data = await api('/admin/archives?limit=100&q=' + encodeURIComponent(q));
+    var s = data.stats;
+
+    document.getElementById('rb-resumen').innerHTML =
+      '<b>' + s.total + '</b> respaldos \u00b7 ' + s.messages + ' mensajes \u00b7 ' + pesoLegible(s.bytes) +
+      (data.inactividadDias
+        ? ' \u00b7 los chats sin movimiento se cierran solos a los ' + data.inactividadDias + ' dias'
+        : '') +
+      ' \u2014 <a class="link" href="#" id="volver-chats">volver a los chats</a>';
+    document.getElementById('volver-chats').onclick = function (e) {
+      e.preventDefault();
+      volverAChats();
+    };
+
+    var html = data.items.map(function (a) {
+      return '<div class="rb" data-rb="' + a.id + '">' +
+        '<div class="top">' +
+          '<span class="name">' + esc(a.name || a.phone) + '</span>' +
+          '<span class="when">' + esc(shortWhen(a.createdAt)) + '</span>' +
+        '</div>' +
+        '<div class="det">' + a.messageCount + ' mensajes \u00b7 ' + esc(motivoTexto(a.reason)) +
+          ' \u00b7 ' + pesoLegible(a.bytes) + '</div>' +
+        '</div>';
+    }).join('');
+
+    var box = document.getElementById('respaldos');
+    pintarLista(box, html || '<div class="empty">Todavía no hay respaldos.<br>' +
+      'Cierra un chat con el botón de la cabecera y aparecerá aquí.</div>', 0);
+  } catch (error) { toast(error.message); }
+}
+
+document.getElementById('respaldos').addEventListener('click', function (event) {
+  var fila = event.target.closest('[data-rb]');
+  if (fila) abrirRespaldo(Number(fila.getAttribute('data-rb')));
+});
+
+async function abrirRespaldo(id) {
+  try {
+    var data = await api('/admin/archives/' + id);
+    var a = data.archive;
+
+    modo = 'respaldo';
+    /* Se suelta el chat que hubiera abierto: si no, el refresco lo repinta. */
+    deseado = null;
+
+    document.getElementById('app').classList.add('open-thread');
+    ver('thread-head', true);
+    ver('placeholder', false);
+    ver('messages', true);
+    ver('composer', false);
+    ver('tools', false);
+    ver('locked', false);
+    ver('confirmar-cierre', false);
+
+    document.getElementById('t-avatar').textContent = inicial(a.name, a.phone);
+    document.getElementById('t-name').textContent = a.name || a.phone;
+    document.getElementById('t-sub').innerHTML = esc(a.phone) +
+      ' \u00b7 <span class="pill warn">respaldo \u00b7 solo lectura</span>';
+
+    lastCount = 0;
+    renderMessages(data.messages, true);
+
+    var caja = document.getElementById('lectura');
+    caja.innerHTML =
+      '<span class="que">' + a.messageCount + ' mensajes guardados el ' +
+        esc(dayLabel(a.createdAt)) + ' (' + esc(motivoTexto(a.reason)) + ')</span>' +
+      '<button class="primary" id="rb-restaurar">Devolver al chat</button>' +
+      '<button id="rb-descargar">Descargar</button>' +
+      '<button id="rb-cerrar">Cerrar</button>';
+    ver('lectura', true);
+
+    document.getElementById('rb-cerrar').onclick = function () {
+      ver('lectura', false);
+      ver('messages', false);
+      ver('thread-head', false);
+      ver('placeholder', true);
+      document.getElementById('app').classList.remove('open-thread');
+      modo = 'chat';
+    };
+    document.getElementById('rb-descargar').onclick = function () { descargarRespaldo(a); };
+    document.getElementById('rb-restaurar').onclick = function () { restaurar(a); };
+  } catch (error) { toast(error.message); }
+}
+
+/* La descarga va por fetch y no por un <a href>: el token viaja en la
+   cabecera, no en la URL, igual que con los adjuntos. */
+async function descargarRespaldo(a) {
+  try {
+    var res = await fetch('/admin/archives/' + a.id + '/download', {
+      headers: { authorization: 'Bearer ' + (await pedirToken()) }
+    });
+    if (!res.ok) throw new Error('No se pudo descargar el respaldo.');
+    var url = URL.createObjectURL(await res.blob());
+    var enlace = document.createElement('a');
+    enlace.href = url;
+    enlace.download = 'chat-' + a.phone + '-' + a.createdAt.slice(0, 10) + '.ndjson.gz';
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  } catch (error) { toast(error.message); }
+}
+
+async function restaurar(a) {
+  var boton = document.getElementById('rb-restaurar');
+  boton.disabled = true;
+  boton.textContent = 'Devolviendo...';
+  try {
+    var r = await api('/admin/archives/' + a.id + '/restore', { method: 'POST' });
+    toast('Devueltos ' + r.restaurados + ' mensajes al chat.');
+    volverAChats();
+    await openChat(a.contactId);
+  } catch (error) {
+    toast(error.message);
+    boton.disabled = false;
+    boton.textContent = 'Devolver al chat';
   }
 }
 

@@ -22,10 +22,12 @@ import { checkConnection } from '../whatsapp/dynamic.js';
 import { panelPage } from './pages.js';
 import { connectPage } from './connect-page.js';
 import { chatPage } from './chat-page.js';
+import { rutasPage } from './rutas-page.js';
 import { registerConnectRoutes } from './connect-routes.js';
 import type { StokyClient } from '../stoky/client.js';
 import { registerDevRoutes } from './dev-routes.js';
 import { registerLocalRoutes } from './local-routes.js';
+import type { Monitor } from '../salud/monitor.js';
 import { registerWahaRoutes } from './waha-routes.js';
 
 export interface WebDeps {
@@ -36,6 +38,10 @@ export interface WebDeps {
   wa: WhatsAppClient;
   sender: Sender;
   repos: Repos;
+  /** El monitor de salud, para que la sesion local le cuente sus cortes. */
+  salud?: Monitor;
+  /** Reabrir la sesion local al arrancar si hay vinculacion guardada. Solo arranques reales. */
+  autoConectarLocal?: boolean;
 }
 
 /**
@@ -89,14 +95,30 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   });
 
   app.get('/chat', async (_request, reply) => {
-    const page = html(chatPage(settings.isConfigured(), tokenParaLaPagina()));
+    const page = html(
+      chatPage(settings.isConfigured(), tokenParaLaPagina(), providerOf(settings.current()), config.DEMO_MODE),
+    );
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
   await registerConnectRoutes(app, { config, settings, wa });
-  await registerWahaRoutes(app, { config, settings });
-  await registerLocalRoutes(app, { config, repos, sender, wa, settings, catalogo });
+  await registerWahaRoutes(app, { config, settings, repos });
+  await registerLocalRoutes(app, {
+    config,
+    repos,
+    sender,
+    wa,
+    settings,
+    catalogo,
+    salud: deps.salud,
+    autoConectar: deps.autoConectarLocal,
+  });
   await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo });
+
+  app.get('/rutas', async (_request, reply) => {
+    const page = html(rutasPage(settings.isConfigured(), tokenParaLaPagina(), config.DEMO_MODE));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
 
   app.get('/panel', async (_request, reply) => {
     const page = html(panelPage(settings.isConfigured(), tokenParaLaPagina()));

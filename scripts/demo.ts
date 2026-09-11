@@ -19,6 +19,9 @@ import { CATALOG } from '../src/templates/catalog.js';
 import { countVariables } from '../src/templates/render.js';
 import { extractLocationSync } from '../src/geo/extract.js';
 import { enrollContact, startScheduler } from '../src/automation/engine.js';
+import { politicaDesdeConfig } from '../src/salud/politica.js';
+import { crearMonitor, startMonitorSalud } from '../src/salud/monitor.js';
+import { startGoteo } from '../src/campanas/goteo.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -35,24 +38,38 @@ const config = loadConfig({
   // Sin clave, la pagina cae a OpenStreetMap y se ve igual de bien.
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? '',
   ADMIN_TOKEN: 'demo-admin-token-1234',
+  // La demo escucha solo en 127.0.0.1: pedir el token en cada pestaña no
+  // protege de nada y se cobra un tramite. Mismo criterio que `npm run quick`.
+  ADMIN_TOKEN_AUTOFILL: 'true',
+  // Que las pantallas avisen de que aqui no sale ningun mensaje de verdad.
+  DEMO_MODE: 'true',
   TRACKING_SECRET: 'demo'.repeat(12),
-  GEO_BBOX: 'mexico',
+  GEO_BBOX: 'lima',
+  // Los respaldos de la demo van a un directorio aparte y no se limpia nada
+  // solo: es una demo, no tiene sentido que borre conversaciones de ejemplo.
+  ARCHIVE_DIR: process.env.ARCHIVE_DIR ?? '.wa-demo-respaldos',
+  ARCHIVE_INACTIVE_DAYS: '0',
 } as NodeJS.ProcessEnv);
 
 const repos = createFakeRepos();
 const wa = createFakeWhatsApp();
 const settings = await createFakeSettings(config);
 
+const politica = () => politicaDesdeConfig(config, 'cloud');
+const salud = crearMonitor({
+  repos,
+  politica,
+  phoneNumberId: () => settings.current().phoneNumberId,
+});
+
 const sender = createSender({
   repos,
   wa,
   phoneNumberId: () => settings.current().phoneNumberId,
-  warmup: {
-    startPerDay: config.WARMUP_START_PER_DAY,
-    growth: config.WARMUP_GROWTH,
-    hardCap: config.DAILY_SEND_CAP,
-  },
+  warmup: politica().warmup,
   maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
+  salud,
+  politica,
 });
 
 /** Cola de pega: envia en el acto en vez de pasar por Redis. */
@@ -95,17 +112,17 @@ wa.remoteTemplates = CATALOG.map((t) => ({
   components: [{ type: 'BODY', text: t.body }],
 }));
 
-await repos.contacts.upsertFromInbound('5215512345678', 'Ana Demo');
-await repos.contacts.setOptIn('5215512345678', 'demo');
-await repos.contacts.touchInbound('5215512345678', new Date());
-await repos.contacts.upsertFromInbound('5215587654321', 'Luis Reparto');
-await repos.contacts.setOptIn('5215587654321', 'formulario web');
-await repos.contacts.upsertFromInbound('5215511112222', 'Sin consentimiento');
-await repos.contacts.upsertFromInbound('5215533334444', 'Carla Baja');
-await repos.contacts.setOptIn('5215533334444', 'demo');
-await repos.contacts.setOptOut('5215533334444');
+await repos.contacts.upsertFromInbound('51987654321', 'Ana Demo');
+await repos.contacts.setOptIn('51987654321', 'demo');
+await repos.contacts.touchInbound('51987654321', new Date());
+await repos.contacts.upsertFromInbound('51912345678', 'Luis Reparto');
+await repos.contacts.setOptIn('51912345678', 'formulario web');
+await repos.contacts.upsertFromInbound('51955555555', 'Sin consentimiento');
+await repos.contacts.upsertFromInbound('51966666666', 'Carla Baja');
+await repos.contacts.setOptIn('51966666666', 'demo');
+await repos.contacts.setOptOut('51966666666');
 
-const contact = (await repos.contacts.getByPhone('5215512345678'))!;
+const contact = (await repos.contacts.getByPhone('51987654321'))!;
 for (const input of [
   'https://www.google.com/maps/place/Bellas+Artes/data=!8m2!3d19.4352!4d-99.1412',
   'https://www.google.com/maps/@19.4326,-99.1332,15z',
@@ -126,7 +143,7 @@ const campaignId = await repos.campaigns.create({
   category: 'UTILITY',
 });
 await repos.campaigns.setStatus(campaignId, 'running');
-for (const phone of ['5215512345678', '5215511112222']) {
+for (const phone of ['51987654321', '51955555555']) {
   await sender.send({
     phone,
     kind: 'template',
@@ -160,7 +177,7 @@ for (const [minutos, direccion, texto] of [
   });
 }
 
-const luisChat = (await repos.contacts.getByPhone('5215587654321'))!;
+const luisChat = (await repos.contacts.getByPhone('51912345678'))!;
 await repos.contacts.touchInbound(luisChat.phone, hace(1500));
 await repos.messages.add({
   contactId: luisChat.id,
@@ -214,11 +231,107 @@ await repos.automation.createRule({
   reply: 'Con gusto, {nombre}. Un asesor te contacta en breve.',
   sequenceId: followUp.id,
 });
-const luis = (await repos.contacts.getByPhone('5215587654321'))!;
+const luis = (await repos.contacts.getByPhone('51912345678'))!;
 await enrollContact({ repos, sender }, followUp, luis, 'demo');
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false });
+// --- un lote de ubicaciones con los casos que se ven de verdad ---------
+//
+// La pantalla /rutas no se entiende con datos vacios: lo que hay que ver de
+// un vistazo es que casos existen y donde acaba cada uno.
+const lote = await repos.rutas.crearLote({ nombre: 'Reparto de hoy (demo)' });
+const solicitudes = await repos.rutas.agregarSolicitudes(lote.id, [
+  { telefonoCrudo: '987654321', phone: '51987654321', nombre: 'Ana Ruiz', referencia: 'P-1024', distrito: 'Miraflores' },
+  { telefonoCrudo: '912345678', phone: '51912345678', nombre: 'Luis Paz', referencia: 'P-1025', distrito: 'Surco' },
+  { telefonoCrudo: '955555555', phone: '51955555555', nombre: 'Marta Gil', referencia: 'P-1026', distrito: 'San Borja' },
+  { telefonoCrudo: '966666666', phone: '51966666666', nombre: 'Jose Vera', referencia: 'P-1027', distrito: 'Lince' },
+  { telefonoCrudo: '977777777', phone: '51977777777', nombre: 'Rosa Diaz', referencia: 'P-1028', distrito: 'Breña' },
+  {
+    telefonoCrudo: '98765432',
+    phone: null,
+    nombre: 'Pedro Soto',
+    referencia: 'P-1029',
+    estado: 'incidencia',
+    incidencia: 'numero_corto',
+    incidenciaDetalle: '"98765432" tiene 8 dígitos y un celular necesita 9; falta 1',
+    requiereHumano: true,
+  },
+  { telefonoCrudo: '944444444', phone: '51944444444', nombre: 'Carla Nunez', referencia: 'P-1030', distrito: 'Jesús María' },
+]);
+
+const [ana, luisR, marta, jose, rosa, , carla] = solicitudes;
+
+// Ana mando su pin: caso resuelto, ya en la cola de GSG.
+await repos.rutas.actualizarSolicitud(ana!.id, {
+  estado: 'resuelto',
+  intentos: 1,
+  ultimoEnvioAt: new Date(Date.now() - 40 * 60_000),
+  primeraRespuestaAt: new Date(Date.now() - 35 * 60_000),
+  resueltoAt: new Date(Date.now() - 35 * 60_000),
+  lat: -12.1211,
+  lng: -77.0301,
+  mapsUrl: 'https://www.google.com/maps?q=-12.1211,-77.0301',
+  ubicacionFuente: 'pin de whatsapp',
+});
+await repos.rutas.registrarEvento(ana!.id, 'envio', 'primera solicitud de ubicación');
+await repos.rutas.registrarEvento(ana!.id, 'ubicacion', 'ubicación recibida (pin de whatsapp)');
+await repos.rutas.encolarReporte({
+  solicitudId: ana!.id,
+  loteId: lote.id,
+  tipo: 'ubicacion',
+  payload: { referencia: 'P-1024', telefono: '51987654321', lat: -12.1211, lng: -77.0301 },
+});
+
+// Luis contesto, pero con texto: se aparta para que lo mire una persona.
+await repos.rutas.actualizarSolicitud(luisR!.id, {
+  estado: 'respondio',
+  intentos: 2,
+  ultimoEnvioAt: new Date(Date.now() - 20 * 60_000),
+  primeraRespuestaAt: new Date(Date.now() - 18 * 60_000),
+  incidencia: 'respondio_sin_ubicacion',
+  incidenciaDetalle: 'estoy en el jirón Puno 340, altura del mercado',
+  requiereHumano: true,
+});
+await repos.rutas.registrarEvento(luisR!.id, 'envio', 'primera solicitud de ubicación');
+await repos.rutas.registrarEvento(luisR!.id, 'respuesta', 'contestó: "estoy en el jirón Puno 340, altura del mercado"');
+
+// Marta: se le escribio y no ha contestado.
+await repos.rutas.actualizarSolicitud(marta!.id, {
+  estado: 'enviado',
+  intentos: 1,
+  ultimoEnvioAt: new Date(Date.now() - 12 * 60_000),
+  proximoIntentoAt: new Date(Date.now() + 18 * 60_000),
+});
+await repos.rutas.registrarEvento(marta!.id, 'envio', 'primera solicitud de ubicación');
+
+// Jose: el numero existe pero no tiene WhatsApp.
+await repos.rutas.actualizarSolicitud(jose!.id, {
+  estado: 'incidencia',
+  incidencia: 'sin_whatsapp',
+  incidenciaDetalle: 'el número 51966666666 no tiene una cuenta de WhatsApp',
+  requiereHumano: true,
+});
+await repos.rutas.registrarEvento(jose!.id, 'incidencia', 'El número no tiene WhatsApp');
+
+// Rosa: tres mensajes sin respuesta, la llama el repartidor.
+await repos.rutas.actualizarSolicitud(rosa!.id, {
+  estado: 'derivado',
+  intentos: 3,
+  ultimoEnvioAt: new Date(Date.now() - 90 * 60_000),
+  incidencia: 'sin_respuesta',
+  incidenciaDetalle: 'no contestó a 3 mensajes',
+  requiereHumano: true,
+});
+await repos.rutas.registrarEvento(rosa!.id, 'derivacion', 'pasa al repartidor para llamada telefónica');
+
+// Carla sigue en la cola, sin escribir todavia.
+void carla;
+
+await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica });
 startScheduler({ repos, sender }, 3_000);
+startMonitorSalud(salud, undefined, 15_000);
+startGoteo({ repos, sender, salud, politica }, 3_000);
 await app.listen({ port: PORT, host: '127.0.0.1' });
 
 console.log(`
@@ -227,6 +340,7 @@ console.log(`
   Chat         ${BASE}/chat
   Configuracion ${BASE}/setup
   Panel        ${BASE}/panel
+  Ubicaciones  ${BASE}/rutas
   Salud        ${BASE}/health
   Ver en vivo  ${urls.viewUrl}
   Compartir    ${urls.publishUrl}

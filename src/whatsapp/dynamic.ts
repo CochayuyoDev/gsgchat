@@ -30,6 +30,8 @@ export interface DynamicClientDeps {
   resolveTemplateBody?: (name: string, language: string) => Promise<string | undefined>;
   /** Ver WHATSAPP_NATIVE_BUTTONS: apagado, una cuenta personal los entrega rotos. */
   nativeButtons?: boolean;
+  /** Simular escritura con los clientes no oficiales. Ver src/salud/humano.ts. */
+  humanizar?: boolean | (() => boolean);
 }
 
 export function createDynamicWhatsAppClient(
@@ -46,6 +48,7 @@ export function createDynamicWhatsAppClient(
       return createLocalClient({
         resolveTemplateBody: deps.resolveTemplateBody,
         nativeButtons: deps.nativeButtons,
+        humanizar: deps.humanizar,
       });
     }
 
@@ -55,6 +58,7 @@ export function createDynamicWhatsAppClient(
         apiKey: credentials.wahaApiKey || undefined,
         session: credentials.wahaSession || undefined,
         resolveTemplateBody: deps.resolveTemplateBody,
+        humanizar: deps.humanizar,
       });
     }
 
@@ -76,6 +80,9 @@ export function createDynamicWhatsAppClient(
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),
+    // El de Meta no lo implementa: ahi se devuelve null, que significa "no se
+    // puede saber", y quien pregunta decide seguir sin la comprobacion.
+    tieneWhatsApp: async (phone) => (await inner().tieneWhatsApp?.(phone)) ?? null,
     getPhoneNumber: async () => inner().getPhoneNumber(),
     subscribeApp: async () => inner().subscribeApp(),
     listSubscribedApps: async () => inner().listSubscribedApps(),

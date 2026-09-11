@@ -1,0 +1,508 @@
+/**
+ * El que trabaja el lote: a quien le toca, que se le manda y que pasa despues.
+ *
+ * Tres reglas gobiernan esto, y las tres estan para lo mismo -que el numero
+ * siga vivo manana-:
+ *
+ *  1. De uno en uno y despacio. Entre mensaje y mensaje pasan entre quince y
+ *     treinta segundos, elegidos al azar dentro de ese rango. Doscientos
+ *     mensajes identicos en un minuto es el patron exacto que WhatsApp busca
+ *     para bloquear una cuenta.
+ *  2. En horario. Fuera de la franja del negocio no sale nada: un mensaje
+ *     comercial a las tres de la manana se responde con "reportar".
+ *  3. Con final. Tres intentos y el caso pasa a una persona. Insistir mas no
+ *     consigue ubicaciones, consigue bloqueos.
+ *
+ * Lo que este fichero NO hace es leer las respuestas: de eso se encarga
+ * `inbound.ts`, porque una respuesta llega cuando llega y no cuando al motor
+ * le toca mirar.
+ */
+
+import type { Config } from '../config.js';
+import type { Repos } from '../db/repos.js';
+import type { Solicitud } from '../db/rutas.js';
+import type { Sender } from '../outbound/sender.js';
+import type { Monitor } from '../salud/monitor.js';
+import type { Politica } from '../salud/politica.js';
+import { decidirRitmo } from '../salud/ritmo.js';
+import { elegirPlantilla } from '../salud/variantes.js';
+import type { WhatsAppClient } from '../whatsapp/client.js';
+import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
+import { payloadIncidencia, payloadResumen, type PuertoGsg } from './gsg.js';
+import {
+  DESCRIPCION_PASO,
+  PLANTILLAS,
+  textoDerivacion,
+  textoLibre,
+  type ContextoMensaje,
+  type PasoUbicacion,
+} from './mensajes.js';
+
+export interface OpcionesMotor {
+  /** Pausa entre envios, en segundos: se sortea entre los dos. */
+  pausaMinSegundos: number;
+  pausaMaxSegundos: number;
+  /** Cuanto se espera una respuesta antes de volver a escribir. */
+  esperaRespuestaMinutos: number;
+  /** Mensajes por cliente antes de pasarlo a una persona. */
+  maxIntentos: number;
+  /** Franja horaria en la que se puede escribir, hora del negocio. */
+  horaInicio: number;
+  horaFin: number;
+  timezone: string;
+  /** Como se presenta el negocio al cliente. */
+  negocio: string;
+}
+
+export const OPCIONES_POR_DEFECTO: OpcionesMotor = {
+  pausaMinSegundos: 15,
+  pausaMaxSegundos: 30,
+  esperaRespuestaMinutos: 30,
+  maxIntentos: 3,
+  horaInicio: 9,
+  horaFin: 19,
+  timezone: 'America/Lima',
+  negocio: 'nuestra tienda',
+};
+
+/** Las opciones del motor, sacadas de la configuracion del proceso. */
+export function opcionesDesdeConfig(config: Config): OpcionesMotor {
+  return {
+    pausaMinSegundos: config.RUTAS_PAUSA_MIN_SEG,
+    // Si alguien pone el maximo por debajo del minimo, el minimo manda: es
+    // mejor ir lento de mas que sortear una pausa negativa.
+    pausaMaxSegundos: Math.max(config.RUTAS_PAUSA_MIN_SEG, config.RUTAS_PAUSA_MAX_SEG),
+    esperaRespuestaMinutos: config.RUTAS_ESPERA_MIN,
+    maxIntentos: config.RUTAS_MAX_INTENTOS,
+    horaInicio: config.RUTAS_HORA_INICIO,
+    horaFin: config.RUTAS_HORA_FIN,
+    timezone: config.timezone,
+    negocio: config.businessName,
+  };
+}
+
+export interface MotorDeps {
+  repos: Repos;
+  sender: Sender;
+  wa?: WhatsAppClient;
+  gsg: PuertoGsg;
+  opciones: OpcionesMotor;
+  /**
+   * Si hay que mandar plantilla en vez de texto libre.
+   *
+   * Con la Cloud API fuera de la ventana de 24 h no hay alternativa. Con un
+   * cliente no oficial no existe tal regla y se manda el texto con boton, que
+   * al cliente le resulta mucho mas facil.
+   */
+  usarPlantilla: () => boolean;
+  ahora?: () => Date;
+  /** Inyectable para que las pruebas no dependan del azar. */
+  azar?: () => number;
+  log?: (mensaje: string, detalle?: Record<string, unknown>) => void;
+  /**
+   * El monitor de salud y la politica de ritmo. Con ellos el motor:
+   *  - pregunta al marcapasos antes de intentar nada (cupos, horario, tier,
+   *    factor de riesgo), en vez de descubrirlo en el rechazo del sender;
+   *  - alterna entre las plantillas aprobadas de cada paso y deja fuera las
+   *    que Meta tenga pausadas;
+   *  - estira su propia pausa segun el factor: en amarillo, el doble.
+   * Opcionales para que las pruebas del motor sigan siendo pequenas.
+   */
+  salud?: Monitor;
+  politica?: () => Politica;
+}
+
+export interface ResultadoTick {
+  /** Que se hizo: nada, un envio, una derivacion. */
+  accion: 'nada' | 'envio' | 'derivacion' | 'incidencia';
+  solicitudId?: number;
+  paso?: PasoUbicacion;
+  /** Por que no se hizo nada. */
+  motivo?: string;
+  /** Lotes que se dieron por terminados en esta pasada. */
+  lotesCerrados?: string[];
+}
+
+/** La hora del negocio, no la del servidor. */
+export function horaLocal(fecha: Date, timezone: string): number {
+  try {
+    const formato = new Intl.DateTimeFormat('es-PE', {
+      timeZone: timezone,
+      hour: 'numeric',
+      hour12: false,
+    });
+    return Number(formato.format(fecha)) % 24;
+  } catch {
+    // Zona horaria mal escrita: mejor la del servidor que reventar el motor.
+    return fecha.getHours();
+  }
+}
+
+export function enHorario(fecha: Date, opciones: OpcionesMotor): boolean {
+  const hora = horaLocal(fecha, opciones.timezone);
+  return hora >= opciones.horaInicio && hora < opciones.horaFin;
+}
+
+/** El paso que le toca a una solicitud, o null si ya no le toca ninguno. */
+export function pasoDe(solicitud: Solicitud, opciones: OpcionesMotor): PasoUbicacion | 'derivar' | null {
+  if (solicitud.intentos >= opciones.maxIntentos) return 'derivar';
+  if (solicitud.estado === 'pendiente') return 'solicitud';
+  if (solicitud.estado === 'respondio') return 'insistencia';
+  if (solicitud.estado === 'enviado') return 'recordatorio';
+  return null;
+}
+
+export interface Motor {
+  tick(): Promise<ResultadoTick>;
+  /** Cuando podra salir el proximo mensaje, para ensenarlo en pantalla. */
+  proximoEnvioEn(): number;
+}
+
+export function crearMotor(deps: MotorDeps): Motor {
+  const ahora = deps.ahora ?? (() => new Date());
+  const azar = deps.azar ?? Math.random;
+  const { repos, sender, gsg, opciones } = deps;
+
+  /** Cuando se mando el ultimo mensaje, para respetar la pausa. */
+  let ultimoEnvio = 0;
+  /** La pausa sorteada para el siguiente: cambia en cada envio. */
+  let pausaActual = opciones.pausaMinSegundos * 1000;
+
+  function sortearPausa(): number {
+    const min = Math.max(1, opciones.pausaMinSegundos);
+    const max = Math.max(min, opciones.pausaMaxSegundos);
+    return Math.round((min + azar() * (max - min)) * 1000);
+  }
+
+  /** La pausa vigente, estirada por el factor de riesgo (0.5 = el doble). */
+  function pausaEfectiva(): number {
+    const factor = deps.salud?.factor() ?? 1;
+    return pausaActual / Math.max(factor, 0.05);
+  }
+
+  /**
+   * La plantilla que toca para este paso: entre las variantes aprobadas y
+   * no pausadas, la de mejor calidad y menos usada en 24 h. Si no hay
+   * ninguna valida, la principal, para que el rechazo del sender diga por que.
+   */
+  async function plantillaPara(paso: PasoUbicacion, momento: Date): Promise<{ name: string; language: string }> {
+    const def = PLANTILLAS[paso];
+    const todas = await repos.templates.list();
+    const candidatas = todas.filter((t) => def.variantes.includes(t.name) && t.language === def.language);
+    if (!candidatas.length) return { name: def.name, language: def.language };
+
+    const desde = new Date(momento.getTime() - 24 * 60 * 60 * 1000);
+    const uso24h: Record<string, number> = {};
+    for (const t of candidatas) uso24h[t.name] = await repos.deliveries.contarPlantillaDesde(t.name, desde);
+
+    const politica = deps.politica?.();
+    const eleccion = elegirPlantilla(candidatas, {
+      ahora: momento,
+      uso24h,
+      plantillaNuevaDias: politica?.plantillaNuevaDias ?? 0,
+      plantillaNuevaPorDia: politica?.plantillaNuevaPorDia ?? 0,
+    });
+    if (eleccion.plantilla) return { name: eleccion.plantilla.name, language: eleccion.plantilla.language };
+    return { name: def.name, language: def.language };
+  }
+
+  const contexto = (solicitud: Solicitud): ContextoMensaje => ({
+    nombre: solicitud.nombre,
+    negocio: opciones.negocio,
+    referencia: solicitud.referencia,
+  });
+
+  /** Marca la incidencia, la apunta en la bitacora y la encola para GSG. */
+  async function anotarIncidencia(
+    solicitud: Solicitud,
+    codigo: CodigoIncidencia,
+    detalle: string,
+    estado: 'incidencia' | 'supervision' | 'derivado' = 'incidencia',
+  ): Promise<void> {
+    const ficha = INCIDENCIAS[codigo];
+    const actualizada = await repos.rutas.actualizarSolicitud(solicitud.id, {
+      estado,
+      incidencia: codigo,
+      incidenciaDetalle: detalle,
+      requiereHumano: ficha.requiereHumano,
+      proximoIntentoAt: null,
+    });
+
+    await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `${ficha.titulo}: ${detalle}`, {
+      codigo,
+      estado,
+    });
+
+    if (ficha.reportable) {
+      const lote = await repos.rutas.lote(solicitud.loteId);
+      if (lote) {
+        await repos.rutas.encolarReporte({
+          solicitudId: solicitud.id,
+          loteId: lote.id,
+          tipo: 'incidencia',
+          payload: payloadIncidencia(actualizada, lote),
+        });
+      }
+    }
+
+    deps.log?.('incidencia en una solicitud de ubicacion', {
+      solicitud: solicitud.id,
+      telefono: solicitud.phone,
+      codigo,
+      detalle,
+    });
+  }
+
+  /** Pasa el caso a una persona: se acabaron los intentos del bot. */
+  async function derivar(solicitud: Solicitud): Promise<ResultadoTick> {
+    const respondio = Boolean(solicitud.primeraRespuestaAt);
+    const codigo: CodigoIncidencia = respondio ? 'respondio_sin_ubicacion' : 'sin_respuesta';
+    const detalle = respondio
+      ? `contestó pero no envió ubicación después de ${solicitud.intentos} mensajes`
+      : `no contestó a ${solicitud.intentos} mensajes`;
+
+    await anotarIncidencia(solicitud, codigo, detalle, 'derivado');
+    await repos.rutas.registrarEvento(
+      solicitud.id,
+      'derivacion',
+      'pasa al repartidor para llamada telefónica',
+    );
+
+    // Avisar al cliente solo si se puede escribir gratis: gastar una plantilla
+    // en despedirse no aporta y cuesta cuota.
+    if (!deps.usarPlantilla() && solicitud.phone) {
+      await sender
+        .send({
+          phone: solicitud.phone,
+          kind: 'freeform',
+          category: 'UTILITY',
+          text: textoDerivacion(contexto(solicitud)),
+        })
+        .catch(() => undefined);
+    }
+
+    return { accion: 'derivacion', solicitudId: solicitud.id };
+  }
+
+  /** Manda el mensaje del paso y deja la solicitud como corresponda. */
+  async function enviarPaso(solicitud: Solicitud, paso: PasoUbicacion): Promise<ResultadoTick> {
+    const phone = solicitud.phone!;
+    const ctx = contexto(solicitud);
+
+    // Antes del primer mensaje, preguntar si ese numero tiene WhatsApp. Solo
+    // lo saben los clientes no oficiales; con Meta devuelve null y se sigue.
+    if (solicitud.intentos === 0 && deps.wa?.tieneWhatsApp) {
+      const tiene = await deps.wa.tieneWhatsApp(phone).catch(() => null);
+      if (tiene === false) {
+        await anotarIncidencia(
+          solicitud,
+          'sin_whatsapp',
+          `el número ${phone} no tiene una cuenta de WhatsApp`,
+        );
+        // Que lo sepa el resto del sistema: una campana o una secuencia no
+        // tienen por que volver a descubrirlo a base de intentos fallidos.
+        await repos.contacts
+          .suprimir(phone, new Date(ahora().getTime() + 30 * 24 * 60 * 60 * 1000), 'el numero no tiene WhatsApp (consulta al proveedor)', 'todo')
+          .catch(() => undefined);
+        return { accion: 'incidencia', solicitudId: solicitud.id };
+      }
+    }
+
+    const plantilla = PLANTILLAS[paso];
+    const elegida = deps.usarPlantilla() ? await plantillaPara(paso, ahora()) : null;
+    const salida = deps.usarPlantilla()
+      ? await sender.send({
+          phone,
+          kind: 'template',
+          category: 'UTILITY',
+          templateName: elegida!.name,
+          templateLanguage: elegida!.language,
+          variables: plantilla.variables(ctx),
+        })
+      : await sender.send({
+          phone,
+          kind: 'interactive',
+          category: 'UTILITY',
+          // La redaccion que le toca a este cliente en este intento.
+          interactive: { body: textoLibre(paso, ctx, `${phone}:${solicitud.intentos}`), locationRequest: true },
+        });
+
+    const momento = ahora();
+
+    if (salida.ok) {
+      ultimoEnvio = momento.getTime();
+      pausaActual = sortearPausa();
+
+      await repos.rutas.actualizarSolicitud(solicitud.id, {
+        estado: solicitud.estado === 'respondio' ? 'respondio' : 'enviado',
+        intentos: solicitud.intentos + 1,
+        ultimoEnvioAt: momento,
+        proximoIntentoAt: new Date(momento.getTime() + opciones.esperaRespuestaMinutos * 60_000),
+        // Un envio que sale bien deja atras cualquier incidencia de envio
+        // anterior: si antes fallo y ahora salio, ya no hay nada que reportar.
+        incidencia: null,
+        incidenciaDetalle: null,
+      });
+      await repos.rutas.registrarEvento(solicitud.id, 'envio', DESCRIPCION_PASO[paso], {
+        paso,
+        wamid: salida.wamid,
+        via: deps.usarPlantilla() ? `plantilla ${elegida!.name}` : 'texto con boton de ubicacion',
+      });
+
+      return { accion: 'envio', solicitudId: solicitud.id, paso };
+    }
+
+    if (salida.blocked) {
+      // El monitor aparto a este contacto porque Meta dijo que no tiene
+      // WhatsApp: es una incidencia con nombre, no una espera de un mes.
+      if (salida.code === 'contact_suppressed' && /131026|no tiene whatsapp/i.test(salida.reason)) {
+        await anotarIncidencia(solicitud, 'sin_whatsapp', salida.reason.slice(0, 300));
+        return { accion: 'incidencia', solicitudId: solicitud.id };
+      }
+      // Una guarda propia (cupo, calentamiento, opt-out). No cuenta como
+      // intento: el cliente no ha recibido nada.
+      const espera = salida.retryAfterMs ?? 15 * 60_000;
+      await repos.rutas.actualizarSolicitud(solicitud.id, {
+        proximoIntentoAt: new Date(momento.getTime() + espera),
+        incidencia: 'envio_bloqueado',
+        incidenciaDetalle: `${salida.code}: ${salida.reason}`,
+      });
+      await repos.rutas.registrarEvento(
+        solicitud.id,
+        'incidencia',
+        `envío detenido por una guarda propia: ${salida.reason}`,
+        { code: salida.code },
+      );
+      return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.reason };
+    }
+
+    // Error de WhatsApp. El codigo decide si es un numero imposible o un
+    // tropiezo pasajero.
+    const codigo = incidenciaDeErrorDeEnvio(salida.error, salida.code);
+    if (codigo === 'sin_whatsapp' || codigo === 'numero_invalido') {
+      await anotarIncidencia(solicitud, codigo, salida.error.slice(0, 300));
+      return { accion: 'incidencia', solicitudId: solicitud.id };
+    }
+
+    const intentos = solicitud.intentos + 1;
+    await repos.rutas.actualizarSolicitud(solicitud.id, {
+      intentos,
+      ultimoEnvioAt: momento,
+      proximoIntentoAt: new Date(momento.getTime() + opciones.esperaRespuestaMinutos * 60_000),
+      incidencia: 'error_envio',
+      incidenciaDetalle: salida.error.slice(0, 300),
+    });
+    await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `WhatsApp rechazó el envío: ${salida.error}`);
+    ultimoEnvio = momento.getTime();
+    pausaActual = sortearPausa();
+
+    return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
+  }
+
+  /** Cierra los lotes que ya no tienen nada vivo y encola su resumen. */
+  async function cerrarLotesTerminados(): Promise<string[]> {
+    const cerrados: string[] = [];
+    for (const lote of await repos.rutas.lotesActivos()) {
+      const cifras = await repos.rutas.cifrasPorEstado(lote.id);
+      const vivos =
+        (cifras.pendiente ?? 0) + (cifras.enviado ?? 0) + (cifras.respondio ?? 0);
+      if (vivos > 0) continue;
+
+      await repos.rutas.cambiarEstadoLote(lote.id, 'terminado');
+      await repos.rutas.encolarReporte({
+        loteId: lote.id,
+        tipo: 'resumen',
+        payload: payloadResumen(lote, cifras, await repos.rutas.cifrasPorIncidencia(lote.id)),
+      });
+      cerrados.push(lote.id);
+      deps.log?.('lote terminado', { lote: lote.nombre, cifras });
+    }
+    return cerrados;
+  }
+
+  return {
+    proximoEnvioEn: () => Math.max(0, ultimoEnvio + pausaEfectiva() - Date.now()),
+
+    async tick() {
+      const momento = ahora();
+
+      if (!enHorario(momento, opciones)) {
+        return {
+          accion: 'nada',
+          motivo: `fuera del horario de envio (${opciones.horaInicio}:00 a ${opciones.horaFin}:00)`,
+        };
+      }
+
+      // El ritmo. Es lo que separa "un negocio escribiendo a sus clientes" de
+      // "un robot", y lo unico que de verdad evita el bloqueo del numero.
+      if (ultimoEnvio && momento.getTime() - ultimoEnvio < pausaEfectiva()) {
+        return { accion: 'nada', motivo: 'esperando la pausa entre mensajes' };
+      }
+
+      // El monitor de salud manda sobre el ritmo propio: parado es parado.
+      if (deps.salud && deps.salud.factor() <= 0) {
+        return { accion: 'nada', motivo: 'el monitor de salud tiene el numero parado' };
+      }
+
+      const [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+      if (!siguiente) {
+        const lotesCerrados = await cerrarLotesTerminados();
+        return { accion: 'nada', motivo: 'no hay nada pendiente', lotesCerrados };
+      }
+
+      const paso = pasoDe(siguiente, opciones);
+      if (paso === null) return { accion: 'nada', motivo: 'la solicitud ya no espera mensajes' };
+      if (paso === 'derivar') return derivar(siguiente);
+
+      // Sin telefono valido no se manda nada: eso ya se marco al cargar el
+      // lote, pero mas vale no fiarse.
+      if (!siguiente.phone) {
+        await anotarIncidencia(siguiente, 'numero_invalido', 'la solicitud no tiene teléfono al que escribir');
+        return { accion: 'incidencia', solicitudId: siguiente.id };
+      }
+
+      // El marcapasos global (cupos por minuto y hora, tier de Meta, contactos
+      // nuevos) se consulta ANTES de tocar la solicitud: un "todavia no" no es
+      // una incidencia y no tiene por que quedar en su bitacora.
+      if (deps.salud && deps.politica) {
+        const contacto = await repos.contacts.upsertFromInbound(siguiente.phone);
+        const decision = decidirRitmo(await deps.salud.fotoRitmo(contacto, momento), deps.politica());
+        if (!decision.ok) {
+          return { accion: 'nada', motivo: `${decision.codigo}: ${decision.motivo}` };
+        }
+      }
+
+      return enviarPaso(siguiente, paso);
+    },
+  };
+}
+
+/**
+ * Ticker del motor. Devuelve la funcion para pararlo.
+ *
+ * Corre cada pocos segundos aunque la pausa entre mensajes sea mayor: asi el
+ * primer envio despues de una espera sale en cuanto toca y no al final del
+ * siguiente intervalo largo.
+ */
+export function startMotorRutas(deps: MotorDeps, intervalMs = 5_000): () => void {
+  const motor = crearMotor(deps);
+  let corriendo = false;
+
+  const tick = async () => {
+    if (corriendo) return;
+    corriendo = true;
+    try {
+      await motor.tick();
+    } catch (error) {
+      deps.log?.('fallo el motor de rutas', {
+        detalle: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      corriendo = false;
+    }
+  };
+
+  const timer = setInterval(() => void tick(), intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}

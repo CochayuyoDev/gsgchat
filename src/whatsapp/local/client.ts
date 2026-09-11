@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { CATALOG } from '../../templates/catalog.js';
+import { escribirComoHumano } from '../../salud/humano.js';
 import { WhatsAppApiError, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
 import { renderComponentsIntoBody } from '../waha/client.js';
 import { botonRespuesta, botonUbicacion, enviarConBotones } from './interactive.js';
@@ -26,6 +27,13 @@ export interface LocalClientOptions {
    * por defecto porque una cuenta personal los entrega rotos.
    */
   nativeButtons?: boolean;
+  /**
+   * Escribir "como una persona": avisar de que se escribe, esperar lo que
+   * tardaria en teclearse y entonces mandar. Ver src/salud/humano.ts.
+   */
+  humanizar?: boolean | (() => boolean);
+  /** Inyectable para que las pruebas no esperen de verdad. */
+  dormir?: (ms: number) => Promise<void>;
 }
 
 /** El socket, o un error que el sender entiende como transitorio. */
@@ -57,9 +65,52 @@ function resultOf(sent: { key?: { id?: string } } | undefined): SendResult {
 }
 
 export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient {
+  /**
+   * Si el numero tiene WhatsApp, preguntandoselo al servidor.
+   *
+   * Baileys lo resuelve con la misma consulta que hace el telefono cuando
+   * agregas un contacto. Un fallo aqui no puede parar un envio: se devuelve
+   * `null` -no se sabe- y el sistema sigue como si no existiera la
+   * comprobacion.
+   */
+  async function tieneWhatsApp(phone: string): Promise<boolean | null> {
+    const sock = getLocalSocket();
+    if (!sock?.onWhatsApp) return null;
+    try {
+      const respuesta = await sock.onWhatsApp(toJid(phone));
+      const encontrado = respuesta?.[0];
+      return encontrado ? Boolean(encontrado.exists) : false;
+    } catch {
+      return null;
+    }
+  }
+
+  const humanizar = () => (typeof opts.humanizar === 'function' ? opts.humanizar() : opts.humanizar === true);
+
+  /** El envio, precedido de la simulacion de escritura si esta encendida. */
+  async function conTeclado<T>(to: string, texto: string, enviar: () => Promise<T>): Promise<T> {
+    if (!humanizar()) return enviar();
+    const sock = getLocalSocket();
+    const jid = toJid(to);
+    return escribirComoHumano(
+      {
+        escribiendo: async () => {
+          await sock?.presenceSubscribe?.(jid).catch(() => undefined);
+          await sock?.sendPresenceUpdate?.('composing', jid);
+        },
+        parado: async () => {
+          await sock?.sendPresenceUpdate?.('paused', jid);
+        },
+      },
+      texto,
+      enviar,
+      { dormir: opts.dormir },
+    );
+  }
+
   async function sendText(to: string, body: string): Promise<SendResult> {
     const sock = socketOrThrow();
-    const sent = await sock.sendMessage(toJid(to), { text: body });
+    const sent = await conTeclado(to, body, () => sock.sendMessage(toJid(to), { text: body }));
     return resultOf(sent);
   }
 
@@ -68,14 +119,16 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
 
     async sendLocation(to, location) {
       const sock = socketOrThrow();
-      const sent = await sock.sendMessage(toJid(to), {
-        location: {
-          degreesLatitude: location.latitude,
-          degreesLongitude: location.longitude,
-          name: location.name,
-          address: location.address,
-        },
-      });
+      const sent = await conTeclado(to, 'ubicacion', () =>
+        sock.sendMessage(toJid(to), {
+          location: {
+            degreesLatitude: location.latitude,
+            degreesLongitude: location.longitude,
+            name: location.name,
+            address: location.address,
+          },
+        }),
+      );
       return resultOf(sent);
     },
 
@@ -90,7 +143,9 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
 
       if (opts.nativeButtons) {
         try {
-          const wamid = await enviarConBotones(socketOrThrow(), toJid(to), texto, [botonUbicacion()]);
+          const wamid = await conTeclado(to, texto, () =>
+            enviarConBotones(socketOrThrow(), toJid(to), texto, [botonUbicacion()]),
+          );
           return { wamid };
         } catch (error) {
           console.log('[wa] boton de ubicacion no salio, va como texto:', String(error).slice(0, 200));
@@ -111,12 +166,14 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
     async sendButtons(to, body, buttons) {
       if (opts.nativeButtons && buttons.length) {
         try {
-          const wamid = await enviarConBotones(
-            socketOrThrow(),
-            toJid(to),
-            body,
-            // WhatsApp no pinta mas de tres botones de respuesta rapida.
-            buttons.slice(0, 3).map((b) => botonRespuesta(b.id, b.title)),
+          const wamid = await conTeclado(to, body, () =>
+            enviarConBotones(
+              socketOrThrow(),
+              toJid(to),
+              body,
+              // WhatsApp no pinta mas de tres botones de respuesta rapida.
+              buttons.slice(0, 3).map((b) => botonRespuesta(b.id, b.title)),
+            ),
           );
           return { wamid };
         } catch (error) {
@@ -141,6 +198,8 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
       }
       return sendText(to, renderComponentsIntoBody(body, components));
     },
+
+    tieneWhatsApp,
 
     async markAsRead(messageId) {
       const sock = getLocalSocket();

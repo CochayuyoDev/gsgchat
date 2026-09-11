@@ -83,7 +83,7 @@ describe('errores utiles para el panel', () => {
       payload: { phone: '12', text: '' },
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toContain('datos invalidos');
+    expect(response.json().error).toContain('Revisa los datos');
   });
 });
 

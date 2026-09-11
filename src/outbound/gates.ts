@@ -9,6 +9,8 @@
  */
 
 import type { Contact, NumberState, Template, TemplateCategory } from '../db/repos.js';
+import type { DecisionRitmo } from '../salud/ritmo.js';
+import { contactoSuprimido } from '../salud/supresion.js';
 
 export type MessageKind = 'template' | 'freeform' | 'location' | 'interactive';
 
@@ -51,6 +53,21 @@ export interface GateSnapshot {
    * Por defecto true: quien no lo diga, se comporta como Meta.
    */
   serviceWindowApplies?: boolean;
+
+  // --- salud del numero (ver src/salud). Todo opcional: sin dato, no aplica. ---
+
+  /** El monitor tiene el marketing en pausa (naranja/rojo o numero en amarillo). */
+  sinMarketing?: boolean;
+  /** Envios seguidos sin respuesta a partir de los cuales no sale mas marketing. */
+  fatigaEnvios?: number;
+  /** Mensajes iniciados por la empresa a este contacto hoy, y su techo. */
+  sentToContactToday?: number;
+  maxPorContactoDia?: number;
+  /** Ultimo envio a este contacto y la separacion minima entre dos automaticos. */
+  lastSentToContactAt?: Date | null;
+  separacionContactoMs?: number;
+  /** Lo que dice el marcapasos para este envio (solo iniciados por la empresa). */
+  ritmo?: DecisionRitmo;
 }
 
 export type GateDecision =
@@ -66,8 +83,16 @@ export type GateCode =
   | 'template_missing'
   | 'template_not_approved'
   | 'template_quality'
+  | 'template_paused'
   | 'frequency_cap'
-  | 'daily_cap';
+  | 'daily_cap'
+  // salud del numero
+  | 'contact_suppressed'
+  | 'risk_marketing_paused'
+  | 'fatigue'
+  | 'contact_daily_cap'
+  | 'contact_spacing'
+  | 'rhythm';
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -109,6 +134,21 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   const manual = intent.manual === true;
   const businessInitiated = isBusinessInitiated(intent);
 
+  // 2b. Contacto apartado por el monitor: no tiene WhatsApp, ya recibio
+  //     demasiado marketing, o pidio no recibirlo. En manual se deja pasar:
+  //     si el operador insiste a mano es porque sabe algo que el sistema no.
+  if (!manual && contactoSuprimido(contact, category, now)) {
+    const hasta = contact.suprimidoHasta!;
+    return {
+      allow: false,
+      code: 'contact_suppressed',
+      reason: `contacto apartado hasta ${hasta.toISOString().slice(0, 16).replace('T', ' ')}: ${
+        contact.suprimidoMotivo ?? 'sin motivo anotado'
+      }`,
+      retryAfterMs: Math.max(60_000, hasta.getTime() - now.getTime()),
+    };
+  }
+
   // 3. Sin opt-in no sale nada que inicie la empresa. Responder dentro de la
   //    ventana si vale: ahi fue el cliente quien escribio primero.
   if (!manual && businessInitiated && !contact.optInAt) {
@@ -138,6 +178,16 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
         allow: false,
         code: 'template_not_approved',
         reason: `la plantilla esta en estado ${template.status}`,
+      };
+    }
+    // Meta la pauso (3 h, 6 h): se respeta la pausa aunque el estado local
+    // ya diga APPROVED, porque del final de la pausa Meta no avisa.
+    if (template.pausadaHasta && template.pausadaHasta.getTime() > now.getTime()) {
+      return {
+        allow: false,
+        code: 'template_paused',
+        reason: `Meta tiene la plantilla pausada hasta ${template.pausadaHasta.toISOString().slice(0, 16).replace('T', ' ')}`,
+        retryAfterMs: template.pausadaHasta.getTime() - now.getTime(),
       };
     }
     // Una plantilla en amarillo esta a un paso de que Meta la pause sola.
@@ -172,6 +222,18 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
     }
   }
 
+  // 5b. El monitor de salud tiene el marketing parado (riesgo naranja o
+  //     rojo). Lo transaccional sigue: un aviso de pedido no es lo que trae
+  //     reportes.
+  if (!manual && businessInitiated && category === 'MARKETING' && snapshot.sinMarketing) {
+    return {
+      allow: false,
+      code: 'risk_marketing_paused',
+      reason: 'el monitor de salud tiene el marketing en pausa',
+      retryAfterMs: 60 * 60 * 1000,
+    };
+  }
+
   // 6. Frecuencia por contacto. Meta ademas limita por su cuenta cuantos
   //    mensajes de marketing recibe una persona; pasarse solo suma bloqueos.
   if (!manual && category === 'MARKETING' && snapshot.marketingLast7d >= snapshot.maxMarketingPerContact7d) {
@@ -182,6 +244,53 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
     };
   }
 
+  // 6b. Fatiga: N mensajes de negocio seguidos sin que conteste nada. Al
+  //     siguiente de marketing es cuando la gente bloquea. Se corta en firme
+  //     y se levanta solo cuando el contacto escriba (touchInbound lo resetea).
+  if (
+    !manual &&
+    businessInitiated &&
+    category === 'MARKETING' &&
+    snapshot.fatigaEnvios !== undefined &&
+    snapshot.fatigaEnvios > 0 &&
+    (contact.sinRespuestaSeguidas ?? 0) >= snapshot.fatigaEnvios
+  ) {
+    return {
+      allow: false,
+      code: 'fatigue',
+      reason: `lleva ${contact.sinRespuestaSeguidas} mensajes seguidos sin contestar: descansa de marketing hasta que escriba`,
+    };
+  }
+
+  // 6c. Techo por contacto y dia, y separacion entre dos automaticos al
+  //     mismo contacto. Es lo que evita el 131056 de Meta (pair rate limit)
+  //     y, en un cliente no oficial, la queja de "me escribe cada rato".
+  if (!manual && businessInitiated) {
+    if (
+      snapshot.maxPorContactoDia !== undefined &&
+      snapshot.sentToContactToday !== undefined &&
+      snapshot.sentToContactToday >= snapshot.maxPorContactoDia
+    ) {
+      return {
+        allow: false,
+        code: 'contact_daily_cap',
+        reason: `ya recibio ${snapshot.sentToContactToday} mensajes de negocio hoy (techo ${snapshot.maxPorContactoDia})`,
+        retryAfterMs: 6 * 60 * 60 * 1000,
+      };
+    }
+    if (snapshot.separacionContactoMs && snapshot.lastSentToContactAt) {
+      const transcurrido = now.getTime() - snapshot.lastSentToContactAt.getTime();
+      if (transcurrido < snapshot.separacionContactoMs) {
+        return {
+          allow: false,
+          code: 'contact_spacing',
+          reason: `hace ${Math.round(transcurrido / 60_000)} min que se le escribio: se espera la separacion minima`,
+          retryAfterMs: snapshot.separacionContactoMs - transcurrido,
+        };
+      }
+    }
+  }
+
   // 7. Techo diario del numero (warm-up).
   if (!manual && businessInitiated && snapshot.sentToday >= snapshot.dailyCap) {
     return {
@@ -189,6 +298,18 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
       code: 'daily_cap',
       reason: `cupo diario alcanzado (${snapshot.sentToday}/${snapshot.dailyCap})`,
       retryAfterMs: 60 * 60 * 1000,
+    };
+  }
+
+  // 8. El marcapasos: horario, tier de Meta, cupos por minuto y hora,
+  //    contactos nuevos y la pausa entre envios. Va el ultimo porque es el
+  //    unico rechazo que no dice nada del contacto: solo "todavia no".
+  if (!manual && businessInitiated && snapshot.ritmo && !snapshot.ritmo.ok) {
+    return {
+      allow: false,
+      code: 'rhythm',
+      reason: `${snapshot.ritmo.codigo}: ${snapshot.ritmo.motivo}`,
+      retryAfterMs: snapshot.ritmo.esperaMs,
     };
   }
 

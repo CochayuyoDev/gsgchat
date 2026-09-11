@@ -23,10 +23,15 @@ import {
   WahaError,
 } from '../whatsapp/waha/session.js';
 import { fromChatId } from '../whatsapp/waha/client.js';
+import { importarConversaciones, POR_DEFECTO } from '../whatsapp/waha/importar.js';
+import { providerOf } from '../settings/service.js';
+import type { Repos } from '../db/repos.js';
 
 export interface WahaRoutesDeps {
   config: Config;
   settings: SettingsService;
+  /** Hace falta para traerse el historial que ya vive en WAHA. */
+  repos: Repos;
 }
 
 const connectSchema = z.object({
@@ -52,7 +57,45 @@ function connectionFrom(settings: SettingsService) {
 }
 
 export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesDeps): Promise<void> {
-  const { config, settings } = deps;
+  const { config, settings, repos } = deps;
+
+  /**
+   * Trae al sistema las conversaciones que ya existen en WAHA.
+   *
+   * El webhook solo entrega lo que pasa desde que se conecta: sin esto, el
+   * operador abre el chat y no ve nada de lo que sus bots hablaron antes.
+   */
+  app.post('/admin/waha/importar', async (request, reply) => {
+    if (providerOf(settings.current()) !== 'waha') {
+      return reply.code(409).send({
+        error: 'Esto solo funciona con WAHA: es el único proveedor que guarda el historial y permite pedirlo.',
+      });
+    }
+
+    const conexion = connectionFrom(settings);
+    if (!conexion.baseUrl) {
+      return reply.code(409).send({ error: 'Falta la dirección de WAHA: conéctala en /setup.' });
+    }
+
+    const body = z
+      .object({
+        limiteChats: z.coerce.number().int().positive().max(500).default(POR_DEFECTO.limiteChats),
+        mensajesPorChat: z.coerce.number().int().positive().max(1000).default(POR_DEFECTO.mensajesPorChat),
+      })
+      .parse(request.body ?? {});
+
+    try {
+      return await importarConversaciones(
+        { repos, log: (mensaje, detalle) => app.log.info(detalle ?? {}, mensaje) },
+        conexion,
+        body,
+      );
+    } catch (error) {
+      return reply.code(502).send({
+        error: `No se pudo leer el historial de WAHA: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
 
   /**
    * Guarda los datos del contenedor, crea la sesion y la deja lista para

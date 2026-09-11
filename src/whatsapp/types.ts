@@ -59,12 +59,34 @@ export interface ChangeValue {
   message_template_name?: string;
   message_template_language?: string;
   reason?: string;
+  /** Al pausar: title FIRST_PAUSE | SECOND_PAUSE | THIRD_PAUSE, description. */
+  other_info?: { title?: string; description?: string };
+  disable_info?: { disable_date?: string };
   // message_template_quality_update
   previous_quality_score?: string;
   new_quality_score?: string;
+  // template_category_update
+  previous_category?: string;
+  new_category?: string;
   // phone_number_quality_update
   display_phone_number?: string;
   current_limit?: string;
+  // account_update
+  phone_number?: string;
+  ban_info?: { waba_ban_state?: string; waba_ban_date?: string };
+  restriction_info?: Array<{ restriction_type?: string; expiration?: string }>;
+  violation_info?: { violation_type?: string };
+  // business_capability_update
+  max_daily_conversation_per_phone?: number;
+  max_phone_numbers_per_business?: number;
+  // user_preferences
+  user_preferences?: Array<{
+    wa_id?: string;
+    detail?: string;
+    category?: string;
+    value?: string;
+    timestamp?: string;
+  }>;
 }
 
 export interface WebhookChange {

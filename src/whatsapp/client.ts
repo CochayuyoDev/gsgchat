@@ -87,6 +87,19 @@ export interface WhatsAppClient {
     components?: TemplateComponent[],
   ): Promise<SendResult>;
   markAsRead(messageId: string): Promise<void>;
+  /**
+   * Si ese numero tiene una cuenta de WhatsApp.
+   *
+   * Solo lo saben los clientes no oficiales, que hablan con el mismo servicio
+   * que la aplicacion del telefono. La Cloud API de Meta no lo ofrece: ahi se
+   * descubre enviando, y el envio vuelve con el error 131026. Por eso es
+   * opcional y devuelve `null` cuando no se puede saber, que no es lo mismo
+   * que `false`.
+   *
+   * Importa mas de lo que parece: mandar contra numeros que no existen es una
+   * de las cosas que Meta mira para bajarle la calidad al numero.
+   */
+  tieneWhatsApp?(phone: string): Promise<boolean | null>;
   /** Estado del numero segun Meta: calidad y tier de envio. */
   getPhoneNumber(): Promise<PhoneNumberInfo>;
   /**

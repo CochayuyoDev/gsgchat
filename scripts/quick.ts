@@ -27,6 +27,9 @@ import { createStokyClient } from '../src/stoky/client.js';
 import { secretsDirectory } from '../src/runtime.js';
 import { CATALOG } from '../src/templates/catalog.js';
 import { countVariables } from '../src/templates/render.js';
+import { politicaDesdeConfig } from '../src/salud/politica.js';
+import { crearMonitor } from '../src/salud/monitor.js';
+import { arrancarServicios, resumenPolitica } from '../src/servicios.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -71,25 +74,47 @@ const { pool } = await openPglite(DATA_DIR);
 const repos = createRepos(pool);
 const settings = await createSettingsService(createSettingsRepo(pool), config, secrets.settingsKey);
 
+// La politica de ritmo: aqui casi siempre `no_oficial` (Baileys), que es el
+// perfil lento, con escritura simulada y warm-up desde 20 al dia.
+const politica = () =>
+  politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial');
+
 const wa = createDynamicWhatsAppClient(settings, {
   resolveTemplateBody: async (name, language) =>
     (await repos.templates.get(name, language))?.body ?? undefined,
   nativeButtons: config.WHATSAPP_NATIVE_BUTTONS,
+  humanizar: () => politica().humanizar,
+});
+
+const phoneNumberId = () => settings.current().phoneNumberId || 'local';
+
+let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
+const salud = crearMonitor({
+  repos,
+  politica,
+  phoneNumberId,
+  avisar: (texto) => (avisarSupervisor ? avisarSupervisor(texto) : Promise.resolve()),
+  cola: { pause: () => queue.pause(), resume: () => queue.resume() },
+  log: (mensaje, detalle) => console.log(`[salud] ${mensaje}`, detalle ?? ''),
 });
 
 const sender = createSender({
   repos,
   wa,
-  phoneNumberId: () => settings.current().phoneNumberId || 'local',
-  warmup: {
-    startPerDay: config.WARMUP_START_PER_DAY,
-    growth: config.WARMUP_GROWTH,
-    hardCap: config.DAILY_SEND_CAP,
-  },
+  phoneNumberId,
+  warmup: politica().warmup,
   maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
   // La ventana de 24 h la impone Meta; fuera de la Cloud API no existe.
   serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
+  salud,
+  politica,
 });
+
+avisarSupervisor = async (texto) => {
+  const destino = politica().avisarA;
+  if (!destino) return;
+  await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', text: texto, manual: true });
+};
 
 const queue = createMemoryOutboundQueue({ sender });
 
@@ -120,7 +145,51 @@ for (const template of CATALOG) {
 // va llenando la ficha. Una regla `first_message` encima seria un segundo
 // mensaje por el mismo entrante, que es justo lo que no puede pasar.
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, catalogo, logger: false });
+const app = await buildServer({
+  config,
+  repos,
+  settings,
+  wa,
+  sender,
+  queue,
+  catalogo,
+  logger: false,
+  salud,
+  politica,
+  // Con la vinculacion guardada, la sesion se reabre sola: no hay que volver
+  // a /setup despues de cada reinicio.
+  autoConectarLocal: true,
+});
+
+// Todo lo que trabaja solo: monitor de salud, secuencias, goteo de campanas,
+// motor de rutas, avisos y GSG. Antes el arranque corto no levantaba nada de
+// esto y un lote de rutas se quedaba cargado sin que saliera un mensaje.
+const consola = {
+  info: (detalle: unknown, mensaje?: string) => console.log(`[wa] ${mensaje ?? ''}`, resumir(detalle)),
+  warn: (detalle: unknown, mensaje?: string) => console.warn(`[wa] ${mensaje ?? ''}`, resumir(detalle)),
+};
+function resumir(detalle: unknown): string {
+  if (!detalle || (typeof detalle === 'object' && !Object.keys(detalle as object).length)) return '';
+  try {
+    return JSON.stringify(detalle);
+  } catch {
+    return String(detalle);
+  }
+}
+const pararServicios = arrancarServicios({
+  config,
+  repos,
+  settings,
+  wa,
+  sender,
+  salud,
+  politica,
+  log: consola as never,
+});
+process.on('SIGINT', () => {
+  pararServicios();
+  process.exit(0);
+});
 
 if (catalogo) {
   // Se trae el catalogo ANTES de atender a nadie: el primer cliente del dia no
@@ -144,7 +213,10 @@ console.log(`
   4. Escanea con el telefono (o pide el codigo con tu numero)
 
   Chat          ${BASE}/chat
-  Panel         ${BASE}/panel
+  Panel         ${BASE}/panel   (pestana Salud: riesgo, ritmo y por que frena)
+  Ubicaciones   ${BASE}/rutas
+
+  Ritmo: ${resumenPolitica(politica())}.
 
   Vinculacion   ${defaultAuthDir()}
   Datos         ${DATA_DIR}

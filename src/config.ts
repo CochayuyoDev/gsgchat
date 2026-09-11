@@ -71,15 +71,81 @@ const schema = z.object({
   TRACKING_SECRET: z.string().min(32, 'TRACKING_SECRET necesita 32 caracteres o mas'),
   TRACKING_TTL_MINUTES: z.coerce.number().int().positive().default(120),
 
-  WARMUP_START_PER_DAY: z.coerce.number().int().positive().default(50),
-  WARMUP_GROWTH: z.coerce.number().positive().default(1.5),
-  DAILY_SEND_CAP: z.coerce.number().int().positive().default(1000),
+  // Warm-up del numero. Sin valor, manda el perfil de ritmo (ver
+  // src/salud/politica.ts): la API oficial arranca en 50/dia y el cliente no
+  // oficial en 20/dia, que es donde de verdad hay que ir con cuidado.
+  WARMUP_START_PER_DAY: z.coerce.number().int().positive().optional(),
+  WARMUP_GROWTH: z.coerce.number().positive().optional(),
+  DAILY_SEND_CAP: z.coerce.number().int().positive().optional(),
+  /** Dias sin enviar nada tras los que el warm-up vuelve a empezar. */
+  WARMUP_REINICIO_DIAS: z.coerce.number().int().nonnegative().optional(),
   MAX_MARKETING_PER_CONTACT_7D: z.coerce.number().int().nonnegative().default(2),
+
+  // --- ritmo y salud del numero (ver src/salud) --------------------------
+  //
+  // Todo esto tiene un valor por defecto segun el perfil (cloud / no oficial)
+  // y solo hace falta tocarlo para afinar. Lo que NO se puede hacer es
+  // apagarlo: no hay variable que quite las guardas.
+
+  /** auto = segun el proveedor; cloud | no_oficial para forzarlo. */
+  RITMO_PERFIL: z.enum(['auto', 'cloud', 'no_oficial']).default('auto'),
+  /** Envios iniciados por la empresa por minuto y por hora. */
+  RITMO_MAX_POR_MINUTO: z.coerce.number().int().positive().optional(),
+  RITMO_MAX_POR_HORA: z.coerce.number().int().positive().optional(),
+  /** Pausa entre dos envios iniciados por la empresa, en segundos; se sortea. */
+  RITMO_PAUSA_MIN_SEG: z.coerce.number().nonnegative().optional(),
+  RITMO_PAUSA_MAX_SEG: z.coerce.number().nonnegative().optional(),
+  /** Contactos a los que se escribe por primera vez, por dia. 0 = sin limite. */
+  RITMO_NUEVOS_CONTACTOS_DIA: z.coerce.number().int().nonnegative().optional(),
+  /** Mensajes iniciados por la empresa al mismo contacto por dia. */
+  RITMO_MAX_POR_CONTACTO_DIA: z.coerce.number().int().positive().optional(),
+  /** Minutos minimos entre dos mensajes automaticos al mismo contacto. */
+  RITMO_SEPARACION_CONTACTO_MIN: z.coerce.number().nonnegative().optional(),
+  /** Fraccion del tier de Meta que se usa como techo propio (0.9 = 90 %). */
+  RITMO_FRACCION_TIER: z.coerce.number().positive().max(1).optional(),
+
+  /**
+   * Horario en el que sale lo iniciado por la empresa (campanas, secuencias,
+   * rutas). Responder a un cliente dentro de su ventana no tiene horario.
+   */
+  HORARIO_ENVIO_INICIO: z.coerce.number().int().min(0).max(23).optional(),
+  HORARIO_ENVIO_FIN: z.coerce.number().int().min(1).max(24).optional(),
+  /** Dias permitidos, 0 = domingo. Por defecto lunes a sabado. */
+  HORARIO_ENVIO_DIAS: z.string().default(''),
+
+  /** Simular escritura (typing) y pausas humanas con el cliente no oficial. */
+  HUMANIZAR: z
+    .enum(['true', 'false', '1', '0'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true' || v === '1')),
+
+  /** El monitor puede pausar el numero solo cuando el riesgo llega a rojo. */
+  SALUD_AUTO_PAUSA: z
+    .enum(['true', 'false', '1', '0'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true' || v === '1')),
+  SALUD_PAUSA_ROJA_MIN: z.coerce.number().int().positive().optional(),
+  SALUD_RAMPA_MIN: z.coerce.number().int().positive().optional(),
+  SALUD_MAX_FALLOS_PCT: z.coerce.number().nonnegative().max(100).optional(),
+  SALUD_MAX_SIN_WHATSAPP_PCT: z.coerce.number().nonnegative().max(100).optional(),
+  SALUD_MAX_BAJAS_PCT: z.coerce.number().nonnegative().max(100).optional(),
+  SALUD_MIN_ENTREGA_PCT: z.coerce.number().nonnegative().max(100).optional(),
+  SALUD_MAX_QUEJAS_PCT: z.coerce.number().nonnegative().max(100).optional(),
+  SALUD_MIN_ENVIOS_JUZGAR: z.coerce.number().int().positive().optional(),
+  /** Envios seguidos sin respuesta a partir de los cuales el contacto descansa de marketing. */
+  SALUD_FATIGA_ENVIOS: z.coerce.number().int().positive().optional(),
+  SALUD_FATIGA_DESCANSO_DIAS: z.coerce.number().int().positive().optional(),
+  /** Plantilla recien aprobada: pacing propio durante sus primeros dias. */
+  PLANTILLA_NUEVA_DIAS: z.coerce.number().int().nonnegative().optional(),
+  PLANTILLA_NUEVA_POR_DIA: z.coerce.number().int().nonnegative().optional(),
+  /** A quien avisar por WhatsApp cuando el numero cambia de nivel. Vacio = RUTAS_SUPERVISOR. */
+  SALUD_AVISAR_A: z.string().default(''),
 
   OPT_OUT_KEYWORDS: z.string().default('baja,stop,cancelar,unsubscribe'),
   OPT_IN_KEYWORDS: z.string().default('alta,acepto'),
 
-  GEO_BBOX: z.enum(['lima', 'mexico', 'none']).default('none'),
+  // El sistema se opera desde Peru: la caja por defecto es Lima y Callao.
+  GEO_BBOX: z.enum(['lima', 'mexico', 'none']).default('lima'),
 
   /**
    * Como se llama la zona que se atiende, para decirselo al cliente.
@@ -145,6 +211,94 @@ const schema = z.object({
   STOKY_PANEL_URL: z.string().default(''),
   STOKY_TOKEN: z.string().default(''),
 
+  /**
+   * Donde se guardan los respaldos de conversacion.
+   *
+   * Fuera de la base a proposito: cerrar un chat existe para que la base deje
+   * de crecer, y ademas un fichero se copia a otro disco. Si Meta borra el
+   * numero, lo hablado sigue estando aqui.
+   */
+  ARCHIVE_DIR: z.string().default('respaldos'),
+
+  /**
+   * Dias sin mensajes tras los que una conversacion se cierra sola.
+   *
+   * 0 = nunca; solo se cierra a mano o al cerrar la ficha. El valor por
+   * defecto son 60 dias: dos meses sin hablar es una conversacion terminada
+   * en cualquier negocio de atencion.
+   */
+  ARCHIVE_INACTIVE_DAYS: z.coerce.number().int().nonnegative().default(60),
+
+  /** Respaldar y limpiar en cuanto la ficha pasa a enviada o descartada. */
+  ARCHIVE_ON_LEAD_CLOSE: z
+    .enum(['true', 'false', '1', '0'])
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
+
+  // --- rutas: solicitud de ubicacion por lotes -------------------------
+
+  /**
+   * Pausa entre un mensaje y el siguiente, en segundos.
+   *
+   * Se sortea entre los dos valores en cada envio. No es una precaucion
+   * teorica: doscientos mensajes seguidos con el mismo texto es el patron que
+   * WhatsApp usa para bloquear una cuenta, y un numero bloqueado se lleva por
+   * delante el trabajo del dia entero.
+   */
+  RUTAS_PAUSA_MIN_SEG: z.coerce.number().int().positive().default(15),
+  RUTAS_PAUSA_MAX_SEG: z.coerce.number().int().positive().default(30),
+
+  /** Cuanto se espera una respuesta antes de volver a escribir. */
+  RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(30),
+
+  /** Mensajes por cliente antes de pasarlo al repartidor. */
+  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(10).default(3),
+
+  /** Franja horaria en la que el motor puede escribir (hora del negocio). */
+  RUTAS_HORA_INICIO: z.coerce.number().int().min(0).max(23).default(9),
+  RUTAS_HORA_FIN: z.coerce.number().int().min(1).max(24).default(19),
+
+  /** Plan de numeracion con el que se revisan los telefonos del lote. */
+  RUTAS_PAIS: z.enum(['peru', 'mexico', 'generico']).default('peru'),
+
+  /**
+   * A quien se avisa por WhatsApp cuando hay casos parados.
+   *
+   * El coordinador del reparto, o quien vaya a resolverlos. Vacio = no se
+   * avisa a nadie y todo queda en la pantalla; con numero, llega un mensaje
+   * al movil, que es donde se entera de verdad quien esta en la calle.
+   */
+  RUTAS_SUPERVISOR: z.string().default(''),
+  /** Casos parados a partir de los cuales se avisa. */
+  RUTAS_ALERTA_MIN_CASOS: z.coerce.number().int().positive().default(1),
+  /** Cada cuantos minutos, como mucho, se avisa al coordinador. */
+  RUTAS_ALERTA_CADA_MIN: z.coerce.number().int().positive().default(60),
+  /** Cada cuantos minutos se le manda a GSG el avance del lote. */
+  RUTAS_RESUMEN_CADA_MIN: z.coerce.number().int().positive().default(30),
+
+  /**
+   * La API del sistema de GSG. Vacia = todavia no esta conectada.
+   *
+   * Sin ella el sistema funciona igual y todo lo reportable se acumula en la
+   * cola (`rutas_reportes`). El dia que exista, se rellena esto y se vacia la
+   * cola entera, incluido lo de atras. Ver src/rutas/gsg.ts.
+   */
+  GSG_URL: z.string().default(''),
+  GSG_TOKEN: z.string().default(''),
+
+  /**
+   * Modo demostracion: los mensajes NO salen a WhatsApp.
+   *
+   * Lo enciende `npm run demo`, que corre con un cliente de mentira y datos en
+   * memoria. Existe para que las pantallas lo digan bien grande: un envio en
+   * la demo se apunta como "enviado" igual que uno de verdad, y sin el aviso
+   * es imposible distinguir una demostracion de un sistema que no entrega.
+   */
+  DEMO_MODE: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+
   DEV_SIMULATE_INBOUND: z
     .enum(['true', 'false', '1', '0'])
     .default('false')
@@ -172,6 +326,8 @@ export interface Config extends RawConfig {
   businessName: string;
   /** Horario de atencion, para contestarlo sin que lo pregunten dos veces. */
   businessHours: string;
+  /** Dias de la semana en los que sale lo iniciado por la empresa (0 = domingo). */
+  horarioEnvioDias: number[];
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -193,6 +349,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     distritos: raw.GEO_BBOX === 'lima' ? DISTRITOS_LIMA_CALLAO : [],
     businessName: raw.BUSINESS_NAME,
     businessHours: raw.BUSINESS_HOURS,
+    horarioEnvioDias: raw.HORARIO_ENVIO_DIAS.split(',')
+      .map((d) => Number(d.trim()))
+      .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
     coverageName:
       raw.COVERAGE_NAME.trim() ||
       (raw.GEO_BBOX === 'lima' ? 'todo Lima y Callao' : raw.GEO_BBOX === 'mexico' ? 'Mexico' : ''),

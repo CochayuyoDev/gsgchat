@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { WhatsAppApiError, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
 import type { TemplateComponent } from '../types.js';
 import { CATALOG } from '../../templates/catalog.js';
+import { escribirComoHumano } from '../../salud/humano.js';
 
 export const DEFAULT_SESSION = 'default';
 
@@ -46,6 +47,13 @@ export interface WahaClientOptions {
    * interfaz (que la Cloud API usa tal cual) se inyecta aqui el que la busca.
    */
   resolveTemplateBody?: (name: string, language: string) => Promise<string | undefined>;
+  /**
+   * Escribir "como una persona": `startTyping`, esperar lo que tardaria en
+   * teclearse, `stopTyping`, y entonces mandar. Ver src/salud/humano.ts.
+   */
+  humanizar?: boolean | (() => boolean);
+  /** Inyectable para que las pruebas no esperen de verdad. */
+  dormir?: (ms: number) => Promise<void>;
 }
 
 /** `5215512345678` -> `5215512345678@c.us`. Los grupos ya vienen con @g.us. */
@@ -149,13 +157,32 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
    * cliente (`const { sendButtons } = wa`), que es exactamente lo que hace el
    * envoltorio dinamico con los metodos.
    */
+  const humanizar = () => (typeof opts.humanizar === 'function' ? opts.humanizar() : opts.humanizar === true);
+
+  /** El envio, precedido de la simulacion de escritura si esta encendida. */
+  async function conTeclado<T>(to: string, texto: string, enviar: () => Promise<T>): Promise<T> {
+    if (!humanizar()) return enviar();
+    const chatId = toChatId(to);
+    return escribirComoHumano(
+      {
+        escribiendo: () => call('/api/startTyping', { session, chatId }).then(() => undefined),
+        parado: () => call('/api/stopTyping', { session, chatId }).then(() => undefined),
+      },
+      texto,
+      enviar,
+      { dormir: opts.dormir },
+    );
+  }
+
   async function sendText(to: string, body: string, previewUrl?: boolean): Promise<SendResult> {
-    const payload = await call<{ id?: unknown }>('/api/sendText', {
-      session,
-      chatId: toChatId(to),
-      text: body,
-      linkPreview: previewUrl ?? false,
-    });
+    const payload = await conTeclado(to, body, () =>
+      call<{ id?: unknown }>('/api/sendText', {
+        session,
+        chatId: toChatId(to),
+        text: body,
+        linkPreview: previewUrl ?? false,
+      }),
+    );
     return resultOf(payload);
   }
 
@@ -205,6 +232,27 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
         );
       }
       return sendText(to, renderComponentsIntoBody(body, components));
+    },
+
+    /**
+     * WAHA si sabe decir si un numero tiene WhatsApp: es la misma consulta
+     * que hace el telefono al agregar un contacto. Si el endpoint no esta en
+     * esa version del contenedor, se devuelve null (no se sabe) en vez de
+     * fallar: la respuesta es una ayuda, no un requisito.
+     */
+    async tieneWhatsApp(phone: string): Promise<boolean | null> {
+      const numero = phone.replace(/\D+/g, '');
+      try {
+        const respuesta = await call<{ numberExists?: boolean; exists?: boolean }>(
+          `/api/contacts/check-exists?phone=${encodeURIComponent(numero)}&session=${encodeURIComponent(session)}`,
+          undefined,
+          'GET',
+        );
+        const existe = respuesta?.numberExists ?? respuesta?.exists;
+        return typeof existe === 'boolean' ? existe : null;
+      } catch {
+        return null;
+      }
     },
 
     async markAsRead(messageId) {

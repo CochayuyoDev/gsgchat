@@ -19,6 +19,10 @@ export function createFakeMessages(
   const repo: FakeMessages = {
     _all: all,
 
+    async contarEntrantesDesde(since: Date) {
+      return all.filter((m) => m.direction === 'in' && m.createdAt >= since).length;
+    },
+
     async add(message: NewMessage) {
       if (message.wamid) {
         const existing = all.find((m) => m.wamid === message.wamid);
@@ -116,6 +120,49 @@ export function createFakeMessages(
         ).length;
       }
       return total;
+    },
+
+    async pageForArchive(contactId, afterId, limit) {
+      return all
+        .filter((m) => m.contactId === contactId && m.id > afterId)
+        .sort((a, b) => a.id - b.id)
+        .slice(0, limit);
+    },
+
+    async deleteByContact(contactId, upToId) {
+      let borrados = 0;
+      for (let i = all.length - 1; i >= 0; i--) {
+        const m = all[i]!;
+        if (m.contactId === contactId && m.id <= upToId) {
+          all.splice(i, 1);
+          borrados++;
+        }
+      }
+      return borrados;
+    },
+
+    async summaryByContact(contactId) {
+      const mine = all.filter((m) => m.contactId === contactId).sort((a, b) => a.id - b.id);
+      const fechas = mine.map((m) => m.createdAt.getTime());
+      return {
+        count: mine.length,
+        firstAt: fechas.length ? new Date(Math.min(...fechas)) : null,
+        lastAt: fechas.length ? new Date(Math.max(...fechas)) : null,
+        lastId: mine.at(-1)?.id ?? 0,
+      };
+    },
+
+    async staleContacts(before, limit) {
+      const ultimo = new Map<string, Date>();
+      for (const m of all) {
+        const previo = ultimo.get(m.contactId);
+        if (!previo || m.createdAt > previo) ultimo.set(m.contactId, m.createdAt);
+      }
+      return [...ultimo.entries()]
+        .filter(([, at]) => at < before)
+        .sort((a, b) => a[1].getTime() - b[1].getTime())
+        .slice(0, limit)
+        .map(([contactId, lastAt]) => ({ contactId, lastAt }));
     },
   };
 

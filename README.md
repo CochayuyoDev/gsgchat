@@ -24,7 +24,7 @@ arrancar; la web lo pide una vez.
 **El camino corto, sin montar nada:**
 
 ```bash
-npm run quick                 # servidor real + WhatsApp real, datos en memoria
+npm run quick                 # servidor real + WhatsApp real, base embebida
 ```
 
 Abre `/setup`, elige "Escanear el QR y ya", escanea desde el telefono y estas
@@ -125,6 +125,20 @@ botones como lista numerada y calidad del numero `NA`, con lo que ese gate se
 queda ciego. Los entrantes no llegan por webhook sino por el socket, y entran
 por el mismo `processChange` con la misma deduplicacion por id.
 
+Como aqui no hay tier ni calidad que consultar, el sistema se cuida de otra
+forma: el perfil de ritmo `no_oficial` (4 por minuto, 80 por hora, pausas de
+15 a 45 s, 80 contactos nuevos al dia, warm-up desde 20), **escritura
+simulada** antes de cada mensaje (WhatsApp ve "escribiendo..." el tiempo que
+tardaria una persona en teclear ese texto), tres redacciones por mensaje para
+que no salgan doscientos iguales, y el monitor de salud mirando lo que si se
+puede ver: mensajes que no llegan, desconexiones seguidas, gente que no
+contesta. Un `403` del socket es un baneo: se para todo y no se reintenta.
+Ver "Que evita realmente que bloqueen el numero".
+
+`npm run quick` levanta ademas todo lo que trabaja solo (secuencias, motor de
+rutas, goteo de campanas, avisos, monitor): antes solo lo hacia `npm run dev`,
+y un lote de rutas cargado en el arranque corto no salia nunca.
+
 ---
 
 ## El cuarto camino: WAHA (no oficial)
@@ -193,9 +207,198 @@ Lo que la separa de un chat cualquiera:
   dice.
 - **Guarda todo lo que llega**, incluido lo que el bot no sabe atender: una foto,
   un audio o un documento aparecen en el hilo para que lo vea una persona.
+- **Trae lo que se hablo antes** (solo con WAHA, boton ⭳): el webhook solo
+  entrega lo que pasa desde que se conecta, asi que las conversaciones que ya
+  tenian los bots se importan del propio WhatsApp. Se puede pulsar las veces
+  que haga falta: cada mensaje se guarda con su id y no se duplica.
+- **Cierra y respalda** una conversacion terminada (boton 🗄): ver mas abajo.
 - **Manda ubicaciones**: pegas un link de mapa y sale el pin, o pides la
   ubicacion del cliente con el boton nativo.
 - Todo pasa por las mismas guardas que el resto del sistema.
+
+---
+
+## Ubicaciones para reparto (el trabajo de GSG)
+
+`/rutas` es la pantalla del reparto: se pega la lista del dia, se le da a
+empezar y el sistema le pide la ubicacion a cada cliente, uno por uno.
+
+**El circuito completo:**
+
+1. **Entra el lote.** Una tabla pegada, un CSV de Excel o —cuando GSG tenga
+   API— un POST con las filas en JSON a `/admin/rutas/lotes`. Las columnas se
+   reconocen por su nombre en cualquier orden (`telefono`, `nombre`, `pedido`,
+   `direccion`, `distrito`), y una lista de numeros a secas tambien entra.
+2. **Se revisa antes de escribir a nadie.** Cada telefono pasa por el plan de
+   numeracion (Peru por defecto). Los de ocho digitos, los fijos, los que
+   traen letras y los repetidos se apartan con su codigo de incidencia y su
+   explicacion. **No se les manda nada**: cada envio contra un numero que no
+   existe le baja la reputacion al numero propio.
+3. **Se pide la ubicacion.** Un mensaje cada 15-30 segundos (sorteado dentro
+   de ese rango), solo dentro del horario del negocio. Con la Cloud API sale
+   la plantilla aprobada; con un cliente no oficial, texto con el boton nativo
+   de ubicacion, que al cliente le cuesta un toque.
+4. **Se lee lo que contesta.** El pin cierra el caso. Un enlace de mapa,
+   tambien. "No soy yo" corta los envios a ese numero para siempre. Cualquier
+   otra respuesta aparta al cliente para que lo mire una persona —puede ser
+   una direccion perfectamente util— y el bot vuelve a pedirselo reconociendo
+   que contesto, que no es el mismo mensaje de antes.
+5. **Tres intentos y se acabo.** El caso pasa al repartidor para que llame.
+   Insistir mas no consigue ubicaciones, consigue bloqueos.
+6. **Todo queda documentado.** Cada envio, cada respuesta y cada incidencia se
+   apunta con su hora en la bitacora de esa solicitud.
+
+**Las incidencias tienen nombre propio**, que es lo que hace que se puedan
+arreglar: `numero_corto`, `numero_largo`, `numero_invalido`, `numero_fijo`,
+`sin_whatsapp`, `numero_equivocado`, `sin_respuesta`, `respondio_sin_ubicacion`,
+`ubicacion_fuera_de_zona`, `rechaza_contacto`, `envio_bloqueado`,
+`error_envio`. Cada una lleva su explicacion y su "que hacer" en
+`src/rutas/incidencias.ts`, y viajan asi a GSG.
+
+**Si el numero tiene WhatsApp** se comprueba antes del primer mensaje cuando el
+proveedor lo permite (cliente local y WAHA). La Cloud API no ofrece esa
+consulta: ahi se descubre al enviar, y el error 131026 de Meta se traduce a
+`sin_whatsapp` en vez de quedarse en un "fallo desconocido".
+
+**La pantalla** tiene una tarjeta por pregunta de la operacion, y cada tarjeta
+filtra la tabla: con ubicacion, escritos sin respuesta, contestaron sin
+ubicacion, sin escribir todavia, sin WhatsApp, numero mal escrito, para el
+repartidor. Arriba, un aviso con cuantos casos esperan a una persona. Al abrir
+un cliente se ve su historial y se puede corregir el telefono (vuelve a la cola
+solo), cargar la ubicacion a mano si se consiguio por telefono, pasarlo al
+repartidor o abrir su chat.
+
+### Los avisos
+
+Un tablero que nadie mira no avisa de nada, asi que hay dos avisos que salen
+solos mientras el lote esta en marcha:
+
+- **A GSG, cada 30 minutos** (`RUTAS_RESUMEN_CADA_MIN`): el avance del lote
+  -cuantos con ubicacion, cuantos contestaron, cuantos no, cuantos esperan a
+  una persona- por la misma cola que todo lo demas. No hay que esperar a que
+  el lote termine para saber como va.
+- **Al coordinador, por WhatsApp** (`RUTAS_SUPERVISOR`): "Reparto del jueves:
+  12 de 40 con ubicacion. 5 sin contestar todavia. 3 casos necesitan que
+  alguien los vea (2 numero incompleto, 1 el numero no tiene WhatsApp)". Como
+  mucho uno por hora y por lote (`RUTAS_ALERTA_CADA_MIN`), y solo si de verdad
+  hay casos parados (`RUTAS_ALERTA_MIN_CASOS`). Sin numero configurado, no se
+  molesta a nadie y todo queda en la pantalla.
+
+En la pantalla, la barra de progreso dice cuantas ubicaciones van y el punto
+de color dice que esta haciendo el motor ahora mismo: enviando, esperando al
+horario o parado.
+
+### Conectar el sistema de GSG
+
+Hoy **no hay API que llamar**, y el modulo esta construido contando con eso.
+Cada ubicacion conseguida, cada incidencia y el resumen de cada lote se arman
+con su forma definitiva y se guardan en la cola (`rutas_reportes`). Se pueden
+mirar y descargar en NDJSON desde la pantalla.
+
+El dia que exista la API, esto es **todo** lo que hay que hacer:
+
+```bash
+GSG_URL=https://api.gsg.example/v1
+GSG_TOKEN=el-token-que-den
+```
+
+Se reinicia y la cola entera sale sola —incluido lo acumulado de semanas
+anteriores— contra tres endpoints: `POST /ubicaciones`, `POST /incidencias` y
+`POST /resumenes`. El contrato de lo que se manda esta en `PAYLOADS`, en
+`src/rutas/gsg.ts`. No hay que tocar el motor, ni la pantalla, ni volver a
+pedirle nada a ningun cliente.
+
+Mientras tanto, el resultado del lote se baja en CSV (`Descargar CSV`) con
+telefono, pedido, estado, coordenadas, incidencia y detalle.
+
+### Las plantillas de ubicacion
+
+Seis, todas UTILITY y ya en el catalogo (`npm run templates:lint` las da por
+buenas): dos por paso, que dicen lo mismo con otras palabras.
+
+| Paso | Plantillas | Cuando sale |
+|---|---|---|
+| solicitud | `solicitud_ubicacion`, `solicitud_ubicacion_b` | primer mensaje |
+| recordatorio | `recordatorio_ubicacion`, `recordatorio_ubicacion_b` | no contesto en 30 minutos |
+| insistencia | `ubicacion_pendiente`, `ubicacion_pendiente_b` | contesto, pero no mando la ubicacion |
+
+Dos por paso por una razon concreta: Meta **pausa** una plantilla en cuanto
+recibe quejas (3 h la primera vez, 6 h la segunda, la tercera la deshabilita
+para siempre). Con una sola plantilla, esa pausa es el reparto entero parado.
+El motor alterna entre las aprobadas de cada paso —la de mejor calidad y
+menos usada en 24 h— y deja fuera las pausadas hasta que Meta las suelte
+(`src/salud/variantes.ts`). Con el cliente no oficial no hay plantillas: cada
+paso tiene tres redacciones y a cada cliente le toca una segun su telefono e
+intento, para que no salgan doscientos mensajes identicos seguidos.
+
+Se dan de alta con `npm run templates:push` y las aprueba Meta (suele tardar
+minutos, a veces horas). **Meta no tiene una plantilla de "pedir ubicacion"**:
+lo que se aprueba es el texto, y el boton nativo de ubicacion solo existe
+dentro de la ventana de 24 h o con cliente no oficial. Por eso el texto de la
+plantilla explica el camino del clip, que funciona siempre.
+
+### Ajustes
+
+```bash
+RUTAS_PAUSA_MIN_SEG=15     # pausa entre mensajes, se sortea entre los dos
+RUTAS_PAUSA_MAX_SEG=30
+RUTAS_ESPERA_MIN=30        # cuanto se espera una respuesta antes de insistir
+RUTAS_MAX_INTENTOS=3       # mensajes por cliente antes de pasarlo a una persona
+RUTAS_HORA_INICIO=9        # franja horaria de envio, hora del negocio
+RUTAS_HORA_FIN=19
+RUTAS_PAIS=peru            # peru | mexico | generico
+```
+
+La pausa de rutas es la propia del reparto; por encima manda el marcapasos
+del numero (cupos por minuto y hora, tier de Meta, factor de riesgo): si el
+monitor tiene el numero en amarillo, los 15-30 s pasan a ser 30-60. Ver
+"Que evita realmente que bloqueen el numero".
+
+```bash
+RUTAS_SUPERVISOR=          # a quien se avisa por WhatsApp; vacio = a nadie
+RUTAS_ALERTA_MIN_CASOS=1   # casos parados a partir de los cuales se avisa
+RUTAS_ALERTA_CADA_MIN=60   # como mucho, un aviso por hora y por lote
+RUTAS_RESUMEN_CADA_MIN=30  # cada cuanto se le manda el avance a GSG
+```
+
+### Consentimiento
+
+Al cargar el lote, cada cliente con telefono valido queda con su opt-in
+registrado y con el origen escrito: `reparto: pedido P-1024 (Reparto del
+jueves)`. No es un tramite: es lo que permite escribirle, y la prueba de por
+que se le escribio. **Quien se dio de baja antes no entra**: esa baja manda
+sobre el pedido, la solicitud se marca para coordinarla por telefono y no se
+le manda nada.
+
+---
+
+## Respaldo de conversaciones
+
+El historial de WhatsApp vive en el telefono, y el telefono se pierde: si Meta
+borra el numero, si alguien reinstala, si la cuenta cae. Lo hablado con cada
+cliente es la prueba de lo que se acordo.
+
+Cerrar un chat (boton 🗄 en la cabecera del hilo) escribe la conversacion
+entera en un fichero `.ndjson.gz` y la vacia de la base. El orden es el que
+importa: **primero se escribe el respaldo, se vuelve a leer entero para
+comprobar que se abre, y solo entonces se borra**. Si algo falla, lo que queda
+es un respaldo de mas, nunca un hilo borrado sin copia.
+
+- Lo que se borra es el hilo, no el contacto: el numero, el opt-in y la ficha
+  de preventa siguen donde estaban.
+- Los respaldos se leen, se descargan y se devuelven al chat desde el mismo
+  boton 🗄 de la barra lateral.
+- Se cierran solos los chats sin movimiento (`ARCHIVE_INACTIVE_DAYS`, 60 dias
+  por defecto; 0 lo desactiva) y al cerrar la ficha de preventa como enviada o
+  descartada (`ARCHIVE_ON_LEAD_CLOSE`).
+- `GET /admin/archives-revision` comprueba que los ficheros siguen en disco y
+  con el mismo sha256.
+
+```bash
+ARCHIVE_DIR=respaldos      # donde van los ficheros
+ARCHIVE_INACTIVE_DAYS=60   # 0 = no cerrar nada solo
+ARCHIVE_ON_LEAD_CLOSE=true
+```
 
 ---
 
@@ -278,9 +481,14 @@ WhatsApp Cloud API
 | `src/automation/` | reglas, secuencias, programados y su ticker |
 | `src/templates/` | catalogo, linter, registro local y sincronizacion con Meta |
 | `src/outbound/` | gates, warm-up, sender y cola |
+| `src/salud/` | politica de ritmo, marcapasos, riesgo, monitor, supresion por contacto, variantes y escritura simulada |
+| `src/campanas/` | campanas por goteo con canario |
+| `src/servicios.ts` | los procesos de fondo (monitor, secuencias, goteo, rutas, avisos, GSG), que arrancan igual en `dev` y en `quick` |
 | `src/tracking/` | tokens, hub de posiciones y paginas de rastreo |
+| `src/rutas/` | solicitud de ubicacion por lotes: revision de numeros, motor, incidencias y puerta a GSG |
+| `src/archive/` | respaldo de conversaciones cerradas: fichero, verificacion y barrido |
 | `src/admin/` | API de operacion y del chat |
-| `src/web/` | `/chat`, `/setup` y `/panel` |
+| `src/web/` | `/chat`, `/rutas`, `/setup` y `/panel` |
 | `src/runtime.ts` | arranque comun del servidor y de los CLIs |
 
 ---
@@ -319,9 +527,17 @@ Acortadores (`maps.app.goo.gl`, `goo.gl`) se resuelven siguiendo redirects.
 
 ## Que evita realmente que bloqueen el numero
 
-Meta no mide el volumen: mide **cuanta gente te bloquea y te reporta**. Una
-plantilla aprobada mandada a una lista comprada tumba el numero igual. Por eso
-las guardas van cableadas en `outbound/gates.ts` y no hay forma de saltarselas:
+Meta no mide el volumen: mide **cuanta gente te bloquea y te reporta** en los
+ultimos 7 dias, con mas peso a lo reciente. Una plantilla aprobada mandada a
+una lista comprada tumba el numero igual. Y con un cliente no oficial
+(Baileys, WAHA) el criterio es parecido -patron de robot, numeros que no te
+tienen agendado, nadie contesta- pero sin aviso previo: el baneo llega y ya.
+
+Por eso hay tres capas, y ninguna se puede apagar.
+
+### 1. Las guardas: lo que no sale nunca
+
+Van cableadas en `outbound/gates.ts` y no hay forma de saltarselas:
 
 | Guarda | Regla |
 |---|---|
@@ -329,28 +545,115 @@ las guardas van cableadas en `outbound/gates.ts` y no hay forma de saltarselas:
 | `no_opt_in` | sin `opt_in_at` no sale nada iniciado por la empresa |
 | `window_closed` | fuera de las 24 h solo se puede mandar plantilla |
 | `template_not_approved` | solo plantillas APPROVED en el registro local |
+| `template_paused` | Meta la pauso (3 h / 6 h): se respeta la pausa aunque el webhook del final no llegue nunca |
 | `template_quality` | plantilla en rojo (o amarillo si es marketing) se frena |
 | `number_quality` | numero en rojo corta todo; en amarillo corta marketing |
+| `contact_suppressed` | contacto apartado: sin WhatsApp (131026, un mes), saturado de marketing (131049, un dia), pidio no recibirlo (131050) |
+| `risk_marketing_paused` | el monitor tiene el marketing parado (naranja/rojo) |
 | `frequency_cap` | maximo N mensajes de marketing por contacto cada 7 dias |
-| `daily_cap` | warm-up: arranca en 50/dia y crece x1.5, con techo duro |
+| `fatigue` | N mensajes de negocio seguidos sin respuesta: nada de marketing hasta que escriba |
+| `contact_daily_cap` · `contact_spacing` | como mucho 3 al mismo contacto por dia, y 10 min entre dos (el `131056` de Meta, evitado antes de que pase) |
+| `daily_cap` | warm-up: arranca en 50/dia (20 en no oficial) y crece cada dia, con techo duro |
+| `rhythm` | el marcapasos dijo "todavia no": horario, tier, cupos, contactos nuevos o la pausa entre envios |
 
-Tres webhooks alimentan esto: `message_template_status_update`,
-`message_template_quality_update` y `phone_number_quality_update`. Del ultimo se
-traduce el evento real (`FLAGGED`, `UNFLAGGED`, `DOWNGRADE`, `UPGRADE`), que es
-lo que Meta manda de verdad: no viene un color. `FLAGGED` pausa la cola;
-`UNFLAGGED` la reanuda **solo si fue el sistema quien pauso**, nunca una pausa
-manual. El boton "Sincronizar con Meta" del panel pregunta la calidad y el tier
-directamente, que es la unica forma de enterarse de un estado anterior a la
-suscripcion del webhook.
+Un rechazo con espera (cupo, horario, separacion) se reprograma; uno
+definitivo (baja, sin opt-in, fatiga) se descarta. Todo intento -salga o no-
+deja fila en `deliveries`, y un fallo del proveedor queda como `failed` con su
+codigo: eso es lo que mira la segunda capa.
 
-Un rechazo con espera (cupo, amarillo) se reprograma; uno definitivo (baja, sin
-opt-in) se descarta. Todo intento —salga o no— deja fila en `deliveries`: los
-bloqueos son la senal mas util para saber que una lista esta sucia antes de
-quemar el numero con ella.
+Escribir a mano desde `/chat` se salta el ritmo, el horario y los cupos -es
+una persona escribiendo a otra-, pero no la baja ni el freno de emergencia.
+
+### 2. El marcapasos: un solo ritmo para todo el numero
+
+Antes cada modulo llevaba el suyo (rutas 15-30 s; campanas diez por segundo;
+secuencias lo que venciera). WhatsApp mira el numero entero, asi que el ritmo
+es uno (`src/salud/ritmo.ts`) y todo lo iniciado por la empresa pasa por el.
+Responder a un cliente dentro de su ventana no: eso es una conversacion.
+
+Mira, en orden: horario y dia del negocio; el **tier de Meta** (destinatarios
+unicos en 24 h moviles, que es exactamente lo que Meta cuenta; se para al
+90 %); cupos por minuto y por hora; contactos nuevos por dia (no oficial); y
+una pausa sorteada entre envios con forma de campana, no plana. Todos los
+cupos se escalan por el **factor de riesgo**: en amarillo la mitad, en naranja
+un quinto, en rojo nada.
+
+Dos perfiles, elegidos por el proveedor (`RITMO_PERFIL=auto`):
+
+| | `cloud` (API oficial) | `no_oficial` (Baileys / WAHA) |
+|---|---|---|
+| por minuto / por hora | 20 / 400 | 4 / 80 |
+| pausa entre envios | 2-6 s | 15-45 s |
+| warm-up | 50/dia x1.5, tope 1000 | 20/dia x1.6, tope 400 |
+| contactos nuevos por dia | sin limite (el tier manda) | 80 |
+| escritura simulada | no aplica | si: `composing`, espera lo que tardaria en teclearse, `paused`, envio |
+| tier de Meta | se respeta al 90 % | no existe |
+
+Todo se ajusta por variable (`RITMO_*`, `HORARIO_ENVIO_*`, `SALUD_*`; ver
+`.env.example`) y se ve en el panel, pestana **Salud**.
+
+### 3. El monitor: el que mira y reacciona
+
+`src/salud/monitor.ts` corre cada minuto. Junta las senales, las convierte en
+puntos (`src/salud/riesgo.ts`) y actua:
+
+| Senal | Puntos |
+|---|---|
+| Meta pone el numero en rojo (`FLAGGED`), `131048`, cuenta restringida (`131031`, `368`), `403` del socket | 100: rojo |
+| Meta en amarillo | 40 |
+| mas del 20 % de fallos en los ultimos 50 envios (40 % → 70) | 40 |
+| mas del 15 % de "no tiene WhatsApp" (`131026`): lista sucia | 30 |
+| bajas en 24 h por encima del 2 % (5 % → 60) | 30 |
+| menos del 60 % entregado de lo enviado hace mas de una hora | 40 |
+| gente contestando "no soy yo" / "no me escriban" | 20 |
+| rechazos por velocidad (`130429`) en 10 min, `131056` repetido, tres desconexiones en una hora | 15-20 |
+| no oficial: mas de 15 salientes por cada entrante en 24 h (parece un robot) | 15 |
+
+0-29 verde (ritmo normal) · 30-59 amarillo (mitad) · 60-84 naranja (un quinto
+y sin marketing) · 85+ rojo: **el numero se pausa solo**, con hora de vuelta
+(4 h; 24 h con `131048`; sin hora si es un baneo o una cuenta restringida, que
+no se arreglan esperando). Cuando vence, reanuda **despacio**: rampa del 10 %
+al 100 % en dos horas, y las ventanas de senales empiezan de cero para no
+volver a disparar por lo mismo. Cada cambio de nivel avisa por WhatsApp al
+coordinador (`RUTAS_SUPERVISOR` / `SALUD_AVISAR_A`), una vez por nivel y por
+media hora, y queda en `salud_eventos` con su motivo.
+
+Ademas, en caliente, cada error de envio aplica su regla (`src/salud/supresion.ts`):
+`131026` aparta al contacto un mes; `131049` un dia, solo de marketing;
+`131050` para siempre, solo de marketing; `131056` dos horas; `130429` frena;
+`131048` / `131031` / `403` paran todo. Un contacto apartado no vuelve a
+intentarse: cada intento contra un numero que no recibe le baja la reputacion
+al numero propio.
+
+Y un numero que estuvo dias sin enviar nada (7 oficial, 4 no oficial) vuelve a
+empezar el warm-up de abajo.
+
+Los webhooks que alimentan esto, ademas de los tres de siempre
+(`message_template_status_update` con sus pausas `FIRST_PAUSE` / `SECOND_PAUSE`,
+`message_template_quality_update`, `phone_number_quality_update` con `FLAGGED`
+/ `UNFLAGGED`): los `statuses` con `failed` y su codigo (el `131049` llega
+asi, nunca en la respuesta del POST), `account_update` (restriccion o baneo de
+la cuenta: pausa; `REINSTATE`: suelta), `user_preferences` (la persona pulso
+"dejar de recibir marketing"), `business_capability_update` (el limite exacto
+del tier) y `template_category_update`. Con la API oficial, el estado de las
+plantillas se sincroniza ademas cada media hora, porque del final de una pausa
+Meta no avisa.
+
+### Campanas por goteo, con canario
+
+Una campana ya no se vuelca en la cola. Los destinatarios se guardan
+ordenados por compromiso (quien escribio hace poco primero: Meta mira como
+cae una plantilla en sus primeras horas), sale primero un **canario** (el
+10 %, entre 5 y 20), se espera una hora y se mira que paso: fallos, `131049`,
+numeros sin WhatsApp, bajas, entrega. Si algo huele mal, el resto se queda
+parado y la campana dice por que; si no, sigue al ritmo del marcapasos (y,
+si se quiere, con un tope propio por hora). Se pausa, reanuda y para desde
+la pestana Campanas. `src/campanas/goteo.ts`.
 
 **Lo que este proyecto no hace:** rotacion de numeros para evadir limites,
-proxies, envio sin opt-in o clientes no oficiales (Baileys, whatsapp-web.js).
-Ademas de estar fuera de los terminos, es lo que provoca el baneo permanente.
+proxies ni envio sin opt-in. Ademas de estar fuera de los terminos, es lo que
+provoca el baneo permanente. Los clientes no oficiales existen como camino
+corto, con su perfil lento y su aviso: el riesgo es real.
 
 ---
 
@@ -410,9 +713,10 @@ Nada de esto necesita editar ficheros ni usar la terminal.
 
 | Ruta | Que es |
 |---|---|
-| `/chat` | conversaciones, como WhatsApp: leer, responder, mandar pin, pedir ubicacion |
+| `/chat` | conversaciones, como WhatsApp: leer, responder, mandar pin, pedir ubicacion, cerrar y respaldar |
+| `/rutas` | ubicaciones para reparto: cargar el lote del dia, verlo avanzar y resolver lo que necesita una persona |
 | `/setup` | conectar la cuenta (boton de Facebook o tres datos), activar el numero y mandarse una prueba |
-| `/panel` | diez pestanas: estado, enviar, contactos, ubicaciones, en vivo, campanas, automatizacion, plantillas, historial y extraer |
+| `/panel` | once pestanas: estado, **salud**, enviar, contactos, ubicaciones, en vivo, campanas, automatizacion, plantillas, historial y extraer |
 | `/t/<token>` | pagina de rastreo (Google Maps si hay clave; si no, OpenStreetMap) |
 
 El token de administracion se genera solo en el primer arranque, se guarda en
@@ -435,8 +739,13 @@ Todas bajo `Authorization: Bearer $ADMIN_TOKEN`.
 | POST | `/admin/contacts/opt-in` · `/opt-out` | consentimiento individual |
 | GET | `/admin/locations` | ubicaciones recibidas |
 | GET | `/admin/deliveries` | historial de envios con el motivo de cada bloqueo |
-| POST | `/admin/campaigns` · GET `/admin/campaigns` | lanzar y listar con conteos |
-| GET | `/admin/campaigns/:id/stats` | conteo por estado de entrega |
+| POST | `/admin/campaigns` · GET `/admin/campaigns` | lanzar (por goteo, con canario y ritmo por hora) y listar con conteos |
+| GET | `/admin/campaigns/:id` · `/stats` | detalle con destinatarios y cifras del canario / conteo por estado |
+| POST | `/admin/campaigns/:id/estado` | pausar, reanudar o parar |
+| POST | `/admin/campaigns/goteo` | una pasada del goteo ahora |
+| GET | `/admin/salud` | nivel, factor, motivos, ventanas, ritmo vigente, plantillas y ultimas senales |
+| POST | `/admin/salud/evaluar` · `/reanudar` | recalcular ahora / levantar la pausa automatica (con rampa) |
+| POST | `/admin/salud/contactos/levantar` | quitar la supresion de un contacto a mano |
 | GET | `/admin/templates` · `/templates/catalog` | registro local y catalogo con lint |
 | POST | `/admin/templates/sync` · `/templates/push` | sincronizar y dar de alta |
 | GET/POST/DELETE | `/admin/automation/rules` | reglas de respuesta |
@@ -452,12 +761,31 @@ Todas bajo `Authorization: Bearer $ADMIN_TOKEN`.
 | GET | `/admin/waha/detect` | busca el contenedor de WAHA en los puertos de siempre |
 | POST | `/admin/waha/connect` · `/status` · `/logout` | sesion de WAHA, QR y estado |
 | POST | `/admin/waha/request-code` | codigo de vinculacion por numero, sin QR |
+| POST | `/admin/waha/importar` | trae al sistema las conversaciones que ya existen en WAHA |
 | POST | `/admin/messages/text` · `/location` · `/ask-location` | envios sueltos |
 | POST | `/admin/geo/extract` | extrae lat/lng sin enviar nada |
 | GET | `/admin/chat/conversations` | lista de chats con su ultimo mensaje y no leidos |
 | GET | `/admin/chat/:contactId` | el hilo, con si se puede escribir y por que |
 | POST | `/admin/chat/send` | texto, pin de ubicacion, boton de ubicacion o plantilla |
 | POST | `/admin/chat/start` | abrir chat con un numero nuevo |
+| POST | `/admin/chat/:contactId/archive` | cerrar el chat: respaldarlo entero y vaciarlo |
+| GET | `/admin/archives` | respaldos guardados, con cuanto ocupan |
+| GET | `/admin/archives/:id` · `/download` | leer el hilo guardado / bajarse el fichero |
+| POST | `/admin/archives/:id/restore` | devolver el hilo al chat |
+| POST | `/admin/archives/barrer` | cerrar ahora las conversaciones inactivas |
+| GET | `/admin/archives-revision` | comprobar que los ficheros siguen intactos |
+| GET | `/admin/rutas` | estado del modulo: lotes, cifras, alertas y cola de GSG |
+| POST | `/admin/rutas/previsualizar` | que se entiende de la tabla, sin guardar nada |
+| POST | `/admin/rutas/lotes` | crear el lote (tabla pegada o filas en JSON: por aqui entra GSG) |
+| GET | `/admin/rutas/lotes/:id` · `/lotes/:id.csv` | estado del lote / resultado en CSV |
+| POST | `/admin/rutas/lotes/:id/estado` | empezar, pausar o dar por terminado |
+| GET | `/admin/rutas/solicitudes` · `/vistas` | la bandeja con sus filtros y las cifras de cada vista |
+| GET | `/admin/rutas/solicitudes/:id` | un caso con su bitacora completa |
+| PATCH | `/admin/rutas/solicitudes/:id` | corregir el telefono (vuelve solo a la cola) y demas datos |
+| POST | `/admin/rutas/solicitudes/:id/resolver` | cargar la ubicacion conseguida por telefono |
+| POST | `/admin/rutas/solicitudes/:id/derivar` · `/reintentar` | pasar al repartidor / devolver a la cola |
+| GET | `/admin/rutas/cola` · `/cola.ndjson` | lo pendiente de reportar a GSG |
+| POST | `/admin/rutas/cola/despachar` | vaciar la cola contra la API de GSG |
 | POST | `/admin/connect` | conexion completa a partir de token, app y clave |
 | POST | `/admin/connect/signup` | vuelta de la ventana de Meta (registro incorporado) |
 | GET/POST | `/admin/settings` | credenciales: leer enmascaradas / guardar y probar |
@@ -480,12 +808,17 @@ Publicas: `GET /webhooks/whatsapp` (verificacion), `POST /webhooks/whatsapp`,
 6. Crear las reglas y secuencias que hagan falta en Automatizacion.
 7. Primera campana pequena. Mirar el estado del numero antes de subir volumen.
 
+Para el reparto: `npm run templates:push` da de alta tambien las tres
+plantillas de ubicacion; con ellas aprobadas se pega la lista en `/rutas` y se
+pulsa **Empezar a pedir**. Sin `GSG_URL` funciona igual y los reportes se
+acumulan hasta que esa API exista.
+
 Restringir la key de Google Maps por referrer HTTP: viaja al navegador dentro de
 la pagina de rastreo.
 
 ## Tests
 
-380 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
+755 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
 en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
 verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
 WebAssembly, asi que tampoco hacen falta Docker ni un servidor.
@@ -494,3 +827,8 @@ WebAssembly, asi que tampoco hacen falta Docker ni un servidor.
 npm test
 npm run typecheck
 ```
+
+Los de salud (`tests/salud.test.ts`, `monitor.test.ts`, `goteo.test.ts`,
+`humano.test.ts`, `salud-sql.test.ts`) corren con un reloj propio: los dobles
+en memoria escriben sus fechas con ese reloj (`setFakeClock`) para que una
+ventana de "ultimas 24 h" signifique lo mismo dentro y fuera de la prueba.

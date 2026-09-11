@@ -1,0 +1,141 @@
+/**
+ * Los procesos de fondo que hacen que el sistema trabaje solo.
+ *
+ * Existe porque habia dos arranques -`npm run dev` y `npm run quick`- y solo
+ * el primero levantaba los tickers. Con el arranque corto (el que usa
+ * Baileys) las secuencias, el motor de rutas y los avisos no corrian: se
+ * podia cargar un lote y no salia nada. Ahora los dos arranques llaman aqui.
+ *
+ * Que se levanta, y cada cuanto:
+ *
+ *  - el monitor de salud (cada minuto): riesgo, factor, pausa y rampa;
+ *  - el ticker de secuencias y programados (cada 10 s);
+ *  - el goteo de campanas (cada 10 s, cinco como mucho por pasada);
+ *  - el motor de rutas (cada 5 s, pero con su pausa de 15-30 s entre envios);
+ *  - los avisos de rutas (resumen a GSG y WhatsApp al coordinador);
+ *  - el despacho de reportes a GSG (cada minuto; sin API no hace nada);
+ *  - el barrido de conversaciones inactivas;
+ *  - con la API oficial, la sincronizacion de plantillas cada media hora.
+ */
+
+import type { FastifyBaseLogger } from 'fastify';
+import type { Config } from './config.js';
+import type { Repos } from './db/repos.js';
+import type { Sender } from './outbound/sender.js';
+import type { WhatsAppClient } from './whatsapp/client.js';
+import type { SettingsService } from './settings/service.js';
+import { providerOf } from './settings/service.js';
+import type { Monitor } from './salud/monitor.js';
+import { startMonitorSalud } from './salud/monitor.js';
+import type { Politica } from './salud/politica.js';
+import { startScheduler } from './automation/engine.js';
+import { startGoteo } from './campanas/goteo.js';
+import { startArchiveSweeper } from './archive/service.js';
+import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
+import { crearPuertoGsg, despacharReportes } from './rutas/gsg.js';
+import { startAlertas } from './rutas/alertas.js';
+import { syncTemplates } from './templates/registry.js';
+
+export interface ServiciosDeps {
+  config: Config;
+  repos: Repos;
+  settings: SettingsService;
+  wa: WhatsAppClient;
+  sender: Sender;
+  salud: Monitor;
+  politica: () => Politica;
+  log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
+}
+
+/** Arranca todo y devuelve la funcion que lo para. */
+export function arrancarServicios(deps: ServiciosDeps): () => void {
+  const { config, repos, settings, wa, sender, salud, politica, log } = deps;
+  const warn = (mensaje: string, detalle?: Record<string, unknown>) => log.warn(detalle ?? {}, mensaje);
+  const info = (mensaje: string, detalle?: Record<string, unknown>) => log.info(detalle ?? {}, mensaje);
+
+  // El monitor de salud evalua cada minuto (y una vez ahora).
+  const stopMonitor = startMonitorSalud(salud, warn);
+
+  // Seguimientos y mensajes programados: se procesan cada 10 s.
+  const stopScheduler = startScheduler({ repos, sender, log: warn });
+
+  // Campanas por goteo: cada 10 s salen como mucho cinco, y solo si el
+  // marcapasos lo permite. Ver src/campanas/goteo.ts.
+  const stopGoteo = startGoteo({ repos, sender, salud, politica, log: warn });
+
+  // Con la API oficial, el estado de las plantillas se refresca cada media
+  // hora: del final de una pausa Meta no avisa por webhook, y una plantilla
+  // que sigue marcada como pausada cuando ya no lo esta es trabajo parado.
+  const sincronizadorPlantillas = setInterval(() => {
+    if (providerOf(settings.current()) !== 'cloud' || !settings.isConfigured()) return;
+    void syncTemplates(wa, repos).catch((error) =>
+      warn('fallo la sincronizacion de plantillas', { detalle: error instanceof Error ? error.message : String(error) }),
+    );
+  }, 30 * 60_000);
+  sincronizadorPlantillas.unref?.();
+
+  // Conversaciones sin movimiento: se respaldan y se limpian solas.
+  const stopSweeper = startArchiveSweeper(
+    { repos, dir: config.ARCHIVE_DIR, log: info },
+    config.ARCHIVE_INACTIVE_DAYS,
+  );
+
+  // Solicitud de ubicacion por lotes: un mensaje cada 15-30 s, en horario y
+  // con tres intentos como maximo. Ver src/rutas/motor.ts.
+  const gsg = crearPuertoGsg(config);
+  const stopMotorRutas = startMotorRutas({
+    repos,
+    sender,
+    wa,
+    gsg,
+    opciones: opcionesDesdeConfig(config),
+    usarPlantilla: () => providerOf(settings.current()) === 'cloud',
+    salud,
+    politica,
+    log: info,
+  });
+
+  // Avisos: el avance del lote hacia GSG, y un WhatsApp al coordinador cuando
+  // hay casos que solo puede resolver una persona.
+  const stopAlertas = startAlertas({
+    repos,
+    sender,
+    gsg,
+    opciones: {
+      resumenCadaMin: config.RUTAS_RESUMEN_CADA_MIN,
+      supervisor: config.RUTAS_SUPERVISOR,
+      minimoCasos: config.RUTAS_ALERTA_MIN_CASOS,
+      avisoCadaMin: config.RUTAS_ALERTA_CADA_MIN,
+    },
+    log: info,
+  });
+
+  // La cola hacia GSG. Sin API configurada no hace nada y los reportes se
+  // quedan esperando; en cuanto haya URL, sale todo lo acumulado.
+  const despachador = setInterval(() => {
+    void despacharReportes({ rutas: repos.rutas }, gsg, 50).catch((error) =>
+      warn('fallo el despacho de reportes a GSG', { detalle: error instanceof Error ? error.message : String(error) }),
+    );
+  }, 60_000);
+  despachador.unref?.();
+
+  return () => {
+    stopMonitor();
+    stopScheduler();
+    stopGoteo();
+    clearInterval(sincronizadorPlantillas);
+    stopSweeper();
+    stopMotorRutas();
+    stopAlertas();
+    clearInterval(despachador);
+  };
+}
+
+/** Lo que se imprime al arrancar sobre el ritmo vigente. */
+export function resumenPolitica(politica: Politica): string {
+  return (
+    `perfil ${politica.perfil}: ${politica.maxPorMinuto}/min, ${politica.maxPorHora}/h, ` +
+    `${politica.horaInicio}:00-${politica.horaFin}:00, warm-up desde ${politica.warmup.startPerDay}/dia` +
+    (politica.humanizar ? ', escritura simulada' : '')
+  );
+}

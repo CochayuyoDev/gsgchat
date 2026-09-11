@@ -11,6 +11,8 @@ import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
 import { createMessagesRepo, type MessagesRepo } from './messages.js';
 import { createLeadsRepo, type LeadsRepo } from './leads.js';
+import { createArchivesRepo, type ArchivesRepo } from './archives.js';
+import { createRutasRepo, type RutasRepo } from './rutas.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -22,6 +24,22 @@ export interface Contact {
   optInSource: string | null;
   optOutAt: Date | null;
   lastInboundAt: Date | null;
+  /**
+   * Hasta cuando no se le escribe, y por que. Ver src/salud/supresion.ts.
+   *
+   * `null` = sin supresion. `suprimidoAmbito` distingue "nada de nada" (el
+   * numero no tiene WhatsApp) de "nada de marketing" (Meta dice que ya
+   * recibio demasiado: 131049, o pidio no recibirlo: 131050).
+   */
+  suprimidoHasta?: Date | null;
+  suprimidoMotivo?: string | null;
+  suprimidoAmbito?: 'todo' | 'marketing' | null;
+  /** Envios iniciados por la empresa seguidos sin que conteste nada. */
+  sinRespuestaSeguidas?: number;
+  ultimoEnvioAt?: Date | null;
+  /** Primer mensaje iniciado por la empresa: define si es un contacto nuevo hoy. */
+  primerEnvioAt?: Date | null;
+  enviosIniciados?: number;
 }
 
 /** Contacto tal como lo lista el panel: con su ultima ubicacion conocida. */
@@ -58,7 +76,22 @@ export interface Template {
   quality: TemplateQuality | null;
   variables: number;
   body: string | null;
+  /**
+   * Hasta cuando la tiene pausada Meta. El webhook avisa de la pausa (3 h la
+   * primera vez, 6 h la segunda) pero no de que termino: se calcula aqui.
+   */
+  pausadaHasta?: Date | null;
+  /** Cuantas veces la pausaron: a la tercera Meta la deshabilita para siempre. */
+  pausas?: number;
+  motivo?: string | null;
+  /** Desde cuando esta aprobada: una plantilla nueva sale con ritmo (pacing). */
+  aprobadaAt?: Date | null;
 }
+
+export type NivelRiesgo = 'verde' | 'amarillo' | 'naranja' | 'rojo';
+
+/** CONNECTED | FLAGGED | RESTRICTED | BANNED | DISCONNECTED | UNKNOWN. */
+export type EstadoNumero = string;
 
 export interface NumberState {
   phoneNumberId: string;
@@ -68,6 +101,31 @@ export interface NumberState {
   warmupStartedOn: Date;
   /** Tier de envio que reporta Meta (TIER_250, TIER_1K, ...). */
   tier: string | null;
+  /** Estado que reporta Meta (o el proveedor): CONNECTED, FLAGGED, RESTRICTED, BANNED... */
+  estado?: EstadoNumero;
+  /** Riesgo calculado por el monitor de salud. Ver src/salud/riesgo.ts. */
+  riesgo?: number;
+  nivel?: NivelRiesgo;
+  /** Multiplicador de velocidad del marcapasos: 1 normal, 0.5 mitad, 0 parado. */
+  factor?: number;
+  motivos?: string[] | null;
+  /** Pausa automatica: hasta cuando. */
+  pausadaHasta?: Date | null;
+  /** Cuando empezo la rampa de vuelta tras una pausa. */
+  rampaDesde?: Date | null;
+  /** Limite numerico de destinatarios unicos por 24 h, si Meta lo dijo como numero. */
+  limite24h?: number | null;
+  ultimaEvaluacion?: Date | null;
+}
+
+export interface RiesgoPatch {
+  riesgo: number;
+  nivel: NivelRiesgo;
+  factor: number;
+  motivos: string[];
+  pausadaHasta: Date | null;
+  rampaDesde: Date | null;
+  ultimaEvaluacion: Date;
 }
 
 export type DeliveryStatus =
@@ -129,12 +187,76 @@ export interface Campaign {
   templateName: string;
   templateLanguage: string;
   category: TemplateCategory;
+  /** draft | running | canary | paused | finished | empty | stopped */
   status: string;
   createdAt: Date;
+  /** Goteo: cuantos por hora como mucho. null = el ritmo general. */
+  ritmoPorHora?: number | null;
+  /** Cuantos salen primero para mirar como cae la plantilla. 0 = sin canario. */
+  canario?: number;
+  canarioEsperaMin?: number;
+  canarioEnviadoAt?: Date | null;
+  motivoPausa?: string | null;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+}
+
+export type EstadoDestinatario = 'pendiente' | 'enviado' | 'bloqueado' | 'fallido' | 'cancelado';
+
+export interface CampaignRecipient {
+  id: number;
+  campaignId: string;
+  phone: string;
+  variables: string[];
+  estado: EstadoDestinatario;
+  orden: number;
+  canario: boolean;
+  deliveryId: number | null;
+  detalle: string | null;
+  posponerHasta: Date | null;
+  intentos: number;
+  enviadoAt: Date | null;
+}
+
+/** Cifras de un envio para las ventanas de riesgo. */
+export interface ResumenEntregas {
+  enviados: number;
+  entregados: number;
+  leidos: number;
+  fallidos: number;
+  /** Fallos por codigo de error (131026, 131049, ...). */
+  porCodigo: Record<string, number>;
+  /** Destinatarios distintos entre los iniciados por la empresa. */
+  destinatariosUnicos: number;
+}
+
+export interface SaludEvento {
+  id: number;
+  phoneNumberId: string;
+  at: Date;
+  tipo: string;
+  codigo: string | null;
+  detalle: string | null;
+  contactId: string | null;
+  campaignId: string | null;
+  payload: Record<string, unknown> | null;
+}
+
+export interface NuevoSaludEvento {
+  phoneNumberId?: string;
+  at?: Date;
+  tipo: string;
+  codigo?: string | null;
+  detalle?: string | null;
+  contactId?: string | null;
+  campaignId?: string | null;
+  payload?: Record<string, unknown> | null;
 }
 
 export interface CampaignWithStats extends Campaign {
   stats: Record<string, number>;
+  /** Destinatarios por estado (pendiente, enviado, bloqueado, fallido, cancelado). */
+  destinatarios: Record<string, number>;
 }
 
 export interface TrackingLink {
@@ -175,6 +297,18 @@ export interface ContactsRepo {
   list(query: ContactListQuery): Promise<{ items: ContactListItem[]; total: number }>;
   /** Alta masiva con opt-in: crea los que faltan y registra el consentimiento. */
   bulkOptIn(entries: ContactImportEntry[], source: string): Promise<number>;
+
+  // --- salud del numero (ver src/salud) ---
+
+  /** Deja de escribirle hasta esa fecha. `ambito` todo | marketing. */
+  suprimir(phone: string, hasta: Date, motivo: string, ambito: 'todo' | 'marketing'): Promise<void>;
+  levantarSupresion(phone: string): Promise<void>;
+  /** Un envio iniciado por la empresa salio hacia este contacto. */
+  anotarEnvioIniciado(contactId: string, at: Date): Promise<void>;
+  /** Cuantos contactos recibieron su PRIMER mensaje de negocio desde esa fecha. */
+  contarNuevosEscritosDesde(since: Date): Promise<number>;
+  contarSuprimidos(now: Date): Promise<number>;
+  contarBajasDesde(since: Date): Promise<number>;
 }
 
 export interface LocationsRepo {
@@ -192,20 +326,45 @@ export interface DeliveriesRepo {
     templateName?: string | null;
     category: TemplateCategory;
     variables?: unknown;
+    /** Fuera de ventana o con plantilla: lo que cuenta para el limite de Meta. */
+    businessInitiated?: boolean;
   }): Promise<number>;
   markSent(id: number, wamid: string): Promise<void>;
   markBlocked(id: number, reason: string): Promise<void>;
+  /** Marca fallido un envio que salio hacia Meta y Meta rechazo, con su codigo. */
+  markFailed(id: number, code: string | null, title: string): Promise<void>;
   updateByWamid(wamid: string, status: DeliveryStatus, error?: { code?: string; title?: string }): Promise<void>;
   countMarketingSince(contactId: string, since: Date): Promise<number>;
   campaignStats(campaignId: string): Promise<Record<string, number>>;
   listRecent(query: DeliveryListQuery): Promise<DeliveryListItem[]>;
+
+  // --- salud del numero (ver src/salud) ---
+
+  /** Cifras de lo que salio (o fallo en Meta) desde esa fecha. */
+  resumenDesde(since: Date): Promise<ResumenEntregas>;
+  /** Cifras de los ultimos N envios que salieron o fallaron en Meta (opcionalmente solo desde una fecha). */
+  resumenUltimos(n: number, desde?: Date | null): Promise<ResumenEntregas>;
+  /** Ultimo envio que salio hacia ese contacto. */
+  ultimoEnvioA(contactId: string): Promise<Date | null>;
+  /** Envios iniciados por la empresa hacia ese contacto desde esa fecha. */
+  contarIniciadosAContactoDesde(contactId: string, since: Date): Promise<number>;
+  /** Cuando salio el ultimo envio iniciado por la empresa. */
+  ultimoIniciadoAt(): Promise<Date | null>;
+  /** Envios de una campana que salieron desde esa fecha (para su ritmo por hora). */
+  contarCampanaDesde(campaignId: string, since: Date): Promise<number>;
+  /** Envios iniciados por la empresa que salieron desde esa fecha. */
+  contarIniciadosDesde(since: Date): Promise<number>;
+  /** Envios de una plantilla que salieron desde esa fecha. */
+  contarPlantillaDesde(templateName: string, since: Date): Promise<number>;
 }
 
 export interface TemplatesRepo {
   get(name: string, language: string): Promise<Template | null>;
   upsert(template: Template): Promise<void>;
-  setStatus(name: string, language: string, status: TemplateStatus): Promise<void>;
+  setStatus(name: string, language: string, status: TemplateStatus, motivo?: string | null): Promise<void>;
   setQuality(name: string, language: string, quality: TemplateQuality): Promise<void>;
+  /** Meta la pauso: hasta cuando, y cuantas van. */
+  marcarPausa(name: string, language: string, hasta: Date | null, pausas: number, motivo: string | null): Promise<void>;
   list(): Promise<Template[]>;
 }
 
@@ -214,6 +373,12 @@ export interface NumberStateRepo {
   setQuality(phoneNumberId: string, quality: NumberState['quality']): Promise<void>;
   setPaused(phoneNumberId: string, paused: boolean, reason?: string): Promise<void>;
   setTier(phoneNumberId: string, tier: string | null): Promise<void>;
+  /** Estado que reporta Meta o el proveedor: CONNECTED, FLAGGED, RESTRICTED, BANNED... */
+  setEstado(phoneNumberId: string, estado: EstadoNumero): Promise<void>;
+  setRiesgo(phoneNumberId: string, patch: RiesgoPatch): Promise<void>;
+  setLimite24h(phoneNumberId: string, limite: number | null): Promise<void>;
+  /** Vuelve a empezar el warm-up (numero inactivo demasiados dias). */
+  reiniciarWarmup(phoneNumberId: string, day: Date): Promise<void>;
 }
 
 export interface CountersRepo {
@@ -238,10 +403,51 @@ export interface CampaignsRepo {
     templateName: string;
     templateLanguage: string;
     category: TemplateCategory;
+    ritmoPorHora?: number | null;
+    canario?: number;
+    canarioEsperaMin?: number;
   }): Promise<string>;
-  setStatus(id: string, status: string): Promise<void>;
+  setStatus(id: string, status: string, motivo?: string | null): Promise<void>;
   get(id: string): Promise<Campaign | null>;
   list(): Promise<CampaignWithStats[]>;
+
+  // --- goteo (ver src/campanas/goteo.ts) ---
+
+  /** Guarda los destinatarios en orden; los `canario` salen antes que nadie. */
+  agregarDestinatarios(
+    campaignId: string,
+    entries: Array<{ phone: string; variables: string[]; orden: number; canario: boolean }>,
+  ): Promise<number>;
+  /** Los siguientes que toca mandar ahora (no pospuestos), en orden. Con `soloCanario`, solo los del primer grupo. */
+  siguientesPendientes(campaignId: string, limit: number, soloCanario?: boolean, ahora?: Date): Promise<CampaignRecipient[]>;
+  /** Lo deja pendiente pero no antes de esa hora. */
+  posponerDestinatario(id: number, hasta: Date, detalle: string | null): Promise<void>;
+  /** Pendientes que quedan, pospuestos incluidos. */
+  contarPendientes(campaignId: string): Promise<number>;
+  marcarDestinatario(
+    id: number,
+    estado: EstadoDestinatario,
+    detalle: string | null,
+    deliveryId: number | null,
+    at?: Date,
+  ): Promise<void>;
+  cifrasDestinatarios(campaignId: string): Promise<Record<string, number>>;
+  cancelarPendientes(campaignId: string, motivo: string): Promise<number>;
+  /** Campanas que el goteo tiene que mirar: running, canary y paused. */
+  listarActivas(): Promise<Campaign[]>;
+  setCanarioEnviado(id: string, at: Date): Promise<void>;
+  /** Cifras de las entregas SOLO del grupo canario. */
+  resumenCanario(campaignId: string): Promise<ResumenEntregas>;
+}
+
+export interface SaludRepo {
+  registrar(evento: NuevoSaludEvento): Promise<number>;
+  /** Cuantos eventos desde esa fecha, por tipo y opcionalmente por codigo. */
+  contar(since: Date, tipo?: string, codigo?: string): Promise<number>;
+  /** Conteo por `tipo:codigo` desde esa fecha. */
+  resumen(since: Date): Promise<Record<string, number>>;
+  ultimos(limit: number): Promise<SaludEvento[]>;
+  purgar(before: Date): Promise<number>;
 }
 
 export interface Repos {
@@ -256,6 +462,12 @@ export interface Repos {
   automation: AutomationRepo;
   messages: MessagesRepo;
   leads: LeadsRepo;
+  /** Indice de conversaciones respaldadas. Ver src/archive. */
+  archives: ArchivesRepo;
+  /** Lotes de solicitud de ubicacion. Ver src/rutas. */
+  rutas: RutasRepo;
+  /** Senales de riesgo del numero. Ver src/salud. */
+  salud: SaludRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -273,6 +485,13 @@ interface ContactRow {
   opt_in_source: string | null;
   opt_out_at: Date | null;
   last_inbound_at: Date | null;
+  suprimido_hasta?: Date | null;
+  suprimido_motivo?: string | null;
+  suprimido_ambito?: string | null;
+  sin_respuesta_seguidas?: number;
+  ultimo_envio_at?: Date | null;
+  primer_envio_at?: Date | null;
+  envios_iniciados?: number;
 }
 
 const toContact = (row: ContactRow): Contact => ({
@@ -283,6 +502,13 @@ const toContact = (row: ContactRow): Contact => ({
   optInSource: row.opt_in_source,
   optOutAt: row.opt_out_at,
   lastInboundAt: row.last_inbound_at,
+  suprimidoHasta: row.suprimido_hasta ?? null,
+  suprimidoMotivo: row.suprimido_motivo ?? null,
+  suprimidoAmbito: row.suprimido_ambito === 'marketing' ? 'marketing' : row.suprimido_ambito === 'todo' ? 'todo' : null,
+  sinRespuestaSeguidas: row.sin_respuesta_seguidas ?? 0,
+  ultimoEnvioAt: row.ultimo_envio_at ?? null,
+  primerEnvioAt: row.primer_envio_at ?? null,
+  enviosIniciados: row.envios_iniciados ?? 0,
 });
 
 interface NumberStateRow {
@@ -292,6 +518,15 @@ interface NumberStateRow {
   paused_reason: string | null;
   warmup_started_on: Date;
   tier: string | null;
+  estado?: string;
+  riesgo?: number;
+  nivel?: string;
+  factor?: number;
+  motivos?: string[] | null;
+  pausada_hasta?: Date | null;
+  rampa_desde?: Date | null;
+  limite_24h?: number | null;
+  ultima_evaluacion?: Date | null;
 }
 
 const toNumberState = (row: NumberStateRow): NumberState => ({
@@ -301,6 +536,15 @@ const toNumberState = (row: NumberStateRow): NumberState => ({
   pausedReason: row.paused_reason,
   warmupStartedOn: row.warmup_started_on,
   tier: row.tier,
+  estado: row.estado ?? 'CONNECTED',
+  riesgo: row.riesgo ?? 0,
+  nivel: (row.nivel as NivelRiesgo | undefined) ?? 'verde',
+  factor: row.factor ?? 1,
+  motivos: Array.isArray(row.motivos) ? row.motivos : null,
+  pausadaHasta: row.pausada_hasta ?? null,
+  rampaDesde: row.rampa_desde ?? null,
+  limite24h: row.limite_24h ?? null,
+  ultimaEvaluacion: row.ultima_evaluacion ?? null,
 });
 
 interface LinkRow {
@@ -327,6 +571,13 @@ interface CampaignRow {
   category: TemplateCategory;
   status: string;
   created_at: Date;
+  ritmo_por_hora?: number | null;
+  canario?: number;
+  canario_espera_min?: number;
+  canario_enviado_at?: Date | null;
+  motivo_pausa?: string | null;
+  started_at?: Date | null;
+  finished_at?: Date | null;
 }
 
 const toCampaign = (row: CampaignRow): Campaign => ({
@@ -337,6 +588,92 @@ const toCampaign = (row: CampaignRow): Campaign => ({
   category: row.category,
   status: row.status,
   createdAt: row.created_at,
+  ritmoPorHora: row.ritmo_por_hora ?? null,
+  canario: row.canario ?? 0,
+  canarioEsperaMin: row.canario_espera_min ?? 60,
+  canarioEnviadoAt: row.canario_enviado_at ?? null,
+  motivoPausa: row.motivo_pausa ?? null,
+  startedAt: row.started_at ?? null,
+  finishedAt: row.finished_at ?? null,
+});
+
+interface RecipientRow {
+  id: number;
+  campaign_id: string;
+  phone: string;
+  variables: string[] | null;
+  estado: EstadoDestinatario;
+  orden: number;
+  canario: boolean;
+  delivery_id: number | null;
+  detalle: string | null;
+  posponer_hasta: Date | null;
+  intentos: number;
+  enviado_at: Date | null;
+}
+
+const toRecipient = (row: RecipientRow): CampaignRecipient => ({
+  id: row.id,
+  campaignId: row.campaign_id,
+  phone: row.phone,
+  variables: Array.isArray(row.variables) ? row.variables : [],
+  estado: row.estado,
+  orden: row.orden,
+  canario: row.canario,
+  deliveryId: row.delivery_id,
+  detalle: row.detalle,
+  posponerHasta: row.posponer_hasta,
+  intentos: row.intentos ?? 0,
+  enviadoAt: row.enviado_at,
+});
+
+interface ResumenRow {
+  enviados: number;
+  entregados: number;
+  leidos: number;
+  fallidos: number;
+  unicos: number;
+}
+
+/** El SELECT que resume entregas; se comparte entre las ventanas. */
+const RESUMEN_SELECT = `
+  count(*) filter (where status in ('sent','delivered','read','failed'))::int as enviados,
+  count(*) filter (where status in ('delivered','read'))::int as entregados,
+  count(*) filter (where status = 'read')::int as leidos,
+  count(*) filter (where status = 'failed')::int as fallidos,
+  count(distinct contact_id) filter (where business_initiated and status in ('sent','delivered','read'))::int as unicos`;
+
+const toResumen = (row: ResumenRow | undefined, porCodigo: Array<{ code: string; count: number }>): ResumenEntregas => ({
+  enviados: row?.enviados ?? 0,
+  entregados: row?.entregados ?? 0,
+  leidos: row?.leidos ?? 0,
+  fallidos: row?.fallidos ?? 0,
+  porCodigo: Object.fromEntries(porCodigo.map((r) => [r.code, r.count])),
+  destinatariosUnicos: row?.unicos ?? 0,
+});
+
+interface SaludRow {
+  id: number;
+  phone_number_id: string;
+  at: Date;
+  tipo: string;
+  codigo: string | null;
+  detalle: string | null;
+  contact_id: string | null;
+  campaign_id: string | null;
+  payload: Record<string, unknown> | null;
+}
+
+const toSaludEvento = (row: SaludRow): SaludEvento => ({
+  id: row.id,
+  phoneNumberId: row.phone_number_id,
+  at: row.at,
+  tipo: row.tipo,
+  codigo: row.codigo,
+  detalle: row.detalle,
+  contactId: row.contact_id,
+  campaignId: row.campaign_id,
+  payload: row.payload,
 });
 
 export function createRepos(pool: Pool): Repos {
@@ -372,7 +709,12 @@ export function createRepos(pool: Pool): Repos {
       await pool.query('update contacts set opt_out_at = now() where phone = $1', [phone]);
     },
     async touchInbound(phone, at) {
-      await pool.query('update contacts set last_inbound_at = $2 where phone = $1', [phone, at]);
+      // Contestar corta la racha de "sin respuesta": la fatiga se mide en
+      // envios seguidos que el cliente ignoro, no en envios totales.
+      await pool.query(
+        'update contacts set last_inbound_at = $2, sin_respuesta_seguidas = 0 where phone = $1',
+        [phone, at],
+      );
     },
     async listOptedIn(limit, offset) {
       const { rows } = await pool.query<ContactRow>(
@@ -467,6 +809,55 @@ export function createRepos(pool: Pool): Repos {
       );
       return rowCount ?? phones.length;
     },
+
+    async suprimir(phone, hasta, motivo, ambito) {
+      await pool.query(
+        `update contacts
+            set suprimido_hasta = $2, suprimido_motivo = $3, suprimido_ambito = $4
+          where phone = $1`,
+        [phone, hasta, motivo.slice(0, 300), ambito],
+      );
+    },
+    async levantarSupresion(phone) {
+      await pool.query(
+        `update contacts
+            set suprimido_hasta = null, suprimido_motivo = null, suprimido_ambito = null
+          where phone = $1`,
+        [phone],
+      );
+    },
+    async anotarEnvioIniciado(contactId, at) {
+      await pool.query(
+        `update contacts
+            set ultimo_envio_at = $2,
+                primer_envio_at = coalesce(primer_envio_at, $2),
+                envios_iniciados = envios_iniciados + 1,
+                sin_respuesta_seguidas = sin_respuesta_seguidas + 1
+          where id = $1`,
+        [contactId, at],
+      );
+    },
+    async contarNuevosEscritosDesde(since) {
+      const { rows } = await pool.query<{ total: number }>(
+        'select count(*)::int as total from contacts where primer_envio_at >= $1',
+        [since],
+      );
+      return rows[0]?.total ?? 0;
+    },
+    async contarSuprimidos(now) {
+      const { rows } = await pool.query<{ total: number }>(
+        'select count(*)::int as total from contacts where suprimido_hasta > $1',
+        [now],
+      );
+      return rows[0]?.total ?? 0;
+    },
+    async contarBajasDesde(since) {
+      const { rows } = await pool.query<{ total: number }>(
+        'select count(*)::int as total from contacts where opt_out_at >= $1',
+        [since],
+      );
+      return rows[0]?.total ?? 0;
+    },
   };
 
   const locations: LocationsRepo = {
@@ -552,8 +943,8 @@ export function createRepos(pool: Pool): Repos {
     async create(input) {
       const { rows } = await pool.query<{ id: number }>(
         `insert into deliveries
-           (contact_id, campaign_id, kind, template_name, category, variables)
-         values ($1,$2,$3,$4,$5,$6)
+           (contact_id, campaign_id, kind, template_name, category, variables, business_initiated)
+         values ($1,$2,$3,$4,$5,$6,$7)
          returning id`,
         [
           input.contactId,
@@ -562,6 +953,7 @@ export function createRepos(pool: Pool): Repos {
           input.templateName ?? null,
           input.category,
           input.variables ? JSON.stringify(input.variables) : null,
+          input.businessInitiated ?? false,
         ],
       );
       return rows[0]!.id;
@@ -578,6 +970,18 @@ export function createRepos(pool: Pool): Repos {
             set status = 'blocked_by_gate', error_title = $2, failed_at = now()
           where id = $1`,
         [id, reason],
+      );
+    },
+    async markFailed(id, code, title) {
+      // `sent_at` se rellena tambien: el envio SALIO hacia Meta y Meta lo
+      // rechazo. Es lo que separa un fallo real (cuenta para el riesgo) de
+      // un bloqueo de guarda propia (no salio nada).
+      await pool.query(
+        `update deliveries
+            set status = 'failed', error_code = $2, error_title = $3,
+                sent_at = coalesce(sent_at, now()), failed_at = now()
+          where id = $1`,
+        [id, code, title.slice(0, 500)],
       );
     },
     async updateByWamid(wamid, status, error) {
@@ -615,6 +1019,85 @@ export function createRepos(pool: Pool): Repos {
         [campaignId],
       );
       return Object.fromEntries(rows.map((r) => [r.status, r.count]));
+    },
+    async resumenDesde(since) {
+      const { rows } = await pool.query<ResumenRow>(
+        `select ${RESUMEN_SELECT} from deliveries where sent_at >= $1`,
+        [since],
+      );
+      const codes = await pool.query<{ code: string; count: number }>(
+        `select error_code as code, count(*)::int as count
+           from deliveries
+          where sent_at >= $1 and status = 'failed' and error_code is not null
+          group by error_code`,
+        [since],
+      );
+      return toResumen(rows[0], codes.rows);
+    },
+    async resumenUltimos(n, desde) {
+      const params: unknown[] = [n, desde ?? new Date(0)];
+      const { rows } = await pool.query<ResumenRow>(
+        `select ${RESUMEN_SELECT}
+           from (select * from deliveries where sent_at is not null and sent_at >= $2
+                  order by sent_at desc, id desc limit $1) d`,
+        params,
+      );
+      const codes = await pool.query<{ code: string; count: number }>(
+        `select error_code as code, count(*)::int as count
+           from (select * from deliveries where sent_at is not null and sent_at >= $2
+                  order by sent_at desc, id desc limit $1) d
+          where status = 'failed' and error_code is not null
+          group by error_code`,
+        params,
+      );
+      return toResumen(rows[0], codes.rows);
+    },
+    async contarCampanaDesde(campaignId, since) {
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total from deliveries
+          where campaign_id = $1 and sent_at >= $2 and status in ('sent','delivered','read','failed')`,
+        [campaignId, since],
+      );
+      return rows[0]?.total ?? 0;
+    },
+    async ultimoIniciadoAt() {
+      const { rows } = await pool.query<{ at: Date | null }>(
+        'select max(sent_at) as at from deliveries where business_initiated and sent_at is not null',
+      );
+      return rows[0]?.at ?? null;
+    },
+    async contarIniciadosAContactoDesde(contactId, since) {
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total from deliveries
+          where contact_id = $1 and business_initiated and sent_at >= $2
+            and status in ('sent','delivered','read','failed')`,
+        [contactId, since],
+      );
+      return rows[0]?.total ?? 0;
+    },
+    async ultimoEnvioA(contactId) {
+      const { rows } = await pool.query<{ at: Date | null }>(
+        `select max(sent_at) as at from deliveries
+          where contact_id = $1 and sent_at is not null and status in ('sent','delivered','read')`,
+        [contactId],
+      );
+      return rows[0]?.at ?? null;
+    },
+    async contarIniciadosDesde(since) {
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total from deliveries
+          where business_initiated and sent_at >= $1 and status in ('sent','delivered','read','failed')`,
+        [since],
+      );
+      return rows[0]?.total ?? 0;
+    },
+    async contarPlantillaDesde(templateName, since) {
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total from deliveries
+          where template_name = $1 and sent_at >= $2 and status in ('sent','delivered','read')`,
+        [templateName, since],
+      );
+      return rows[0]?.total ?? 0;
     },
     async listRecent(query) {
       const conditions: string[] = [];
@@ -686,13 +1169,42 @@ export function createRepos(pool: Pool): Repos {
     },
   };
 
+  interface TemplateRow {
+    name: string;
+    language: string;
+    category: TemplateCategory;
+    status: TemplateStatus;
+    quality: TemplateQuality | null;
+    variables: number;
+    body: string | null;
+    pausada_hasta: Date | null;
+    pausas: number;
+    motivo: string | null;
+    aprobada_at: Date | null;
+  }
+  const TEMPLATE_COLS =
+    'name, language, category, status, quality, variables, body, pausada_hasta, pausas, motivo, aprobada_at';
+  const toTemplate = (r: TemplateRow): Template => ({
+    name: r.name,
+    language: r.language,
+    category: r.category,
+    status: r.status,
+    quality: r.quality,
+    variables: r.variables,
+    body: r.body,
+    pausadaHasta: r.pausada_hasta,
+    pausas: r.pausas ?? 0,
+    motivo: r.motivo,
+    aprobadaAt: r.aprobada_at,
+  });
+
   const templates: TemplatesRepo = {
     async get(name, language) {
-      const { rows } = await pool.query<Template>(
-        'select name, language, category, status, quality, variables, body from templates where name = $1 and language = $2',
+      const { rows } = await pool.query<TemplateRow>(
+        `select ${TEMPLATE_COLS} from templates where name = $1 and language = $2`,
         [name, language],
       );
-      return rows[0] ?? null;
+      return rows[0] ? toTemplate(rows[0]) : null;
     },
     async upsert(t) {
       await pool.query(
@@ -704,16 +1216,39 @@ export function createRepos(pool: Pool): Repos {
            quality = coalesce(excluded.quality, templates.quality),
            variables = excluded.variables,
            body = excluded.body,
+           -- Desde cuando esta aprobada: se fija la primera vez que se ve
+           -- APPROVED y no se toca mas. Una plantilla nueva sale con ritmo.
+           aprobada_at = case
+             when excluded.status = 'APPROVED' then coalesce(templates.aprobada_at, now())
+             else templates.aprobada_at end,
            synced_at = now()`,
         [t.name, t.language, t.category, t.status, t.quality, t.variables, t.body],
       );
+      if (t.status === 'APPROVED') {
+        await pool.query(
+          'update templates set aprobada_at = coalesce(aprobada_at, now()) where name = $1 and language = $2',
+          [t.name, t.language],
+        );
+      }
     },
-    async setStatus(name, language, status) {
-      await pool.query('update templates set status = $3 where name = $1 and language = $2', [
-        name,
-        language,
-        status,
-      ]);
+    async setStatus(name, language, status, motivo) {
+      await pool.query(
+        `update templates
+            set status = $3,
+                motivo = coalesce($4, motivo),
+                aprobada_at = case when $3 = 'APPROVED' then coalesce(aprobada_at, now()) else aprobada_at end,
+                -- Aprobada o reinstaurada: ya no esta pausada.
+                pausada_hasta = case when $3 = 'APPROVED' then null else pausada_hasta end
+          where name = $1 and language = $2`,
+        [name, language, status, motivo ?? null],
+      );
+    },
+    async marcarPausa(name, language, hasta, pausas, motivo) {
+      await pool.query(
+        `update templates set pausada_hasta = $3, pausas = $4, motivo = $5
+          where name = $1 and language = $2`,
+        [name, language, hasta, pausas, motivo],
+      );
     },
     async setQuality(name, language, quality) {
       await pool.query('update templates set quality = $3 where name = $1 and language = $2', [
@@ -723,10 +1258,8 @@ export function createRepos(pool: Pool): Repos {
       ]);
     },
     async list() {
-      const { rows } = await pool.query<Template>(
-        'select name, language, category, status, quality, variables, body from templates order by name',
-      );
-      return rows;
+      const { rows } = await pool.query<TemplateRow>(`select ${TEMPLATE_COLS} from templates order by name`);
+      return rows.map(toTemplate);
     },
   };
 
@@ -760,6 +1293,47 @@ export function createRepos(pool: Pool): Repos {
         `insert into number_state (phone_number_id, tier) values ($1,$2)
          on conflict (phone_number_id) do update set tier = $2, updated_at = now()`,
         [phoneNumberId, tier],
+      );
+    },
+    async setEstado(phoneNumberId, estado) {
+      await pool.query(
+        `insert into number_state (phone_number_id, estado) values ($1,$2)
+         on conflict (phone_number_id) do update set estado = $2, updated_at = now()`,
+        [phoneNumberId, estado],
+      );
+    },
+    async setRiesgo(phoneNumberId, patch) {
+      await pool.query(
+        `insert into number_state
+           (phone_number_id, riesgo, nivel, factor, motivos, pausada_hasta, rampa_desde, ultima_evaluacion)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)
+         on conflict (phone_number_id) do update set
+           riesgo = $2, nivel = $3, factor = $4, motivos = $5,
+           pausada_hasta = $6, rampa_desde = $7, ultima_evaluacion = $8, updated_at = now()`,
+        [
+          phoneNumberId,
+          patch.riesgo,
+          patch.nivel,
+          patch.factor,
+          JSON.stringify(patch.motivos),
+          patch.pausadaHasta,
+          patch.rampaDesde,
+          patch.ultimaEvaluacion,
+        ],
+      );
+    },
+    async setLimite24h(phoneNumberId, limite) {
+      await pool.query(
+        `insert into number_state (phone_number_id, limite_24h) values ($1,$2)
+         on conflict (phone_number_id) do update set limite_24h = $2, updated_at = now()`,
+        [phoneNumberId, limite],
+      );
+    },
+    async reiniciarWarmup(phoneNumberId, day) {
+      await pool.query(
+        `insert into number_state (phone_number_id, warmup_started_on) values ($1,$2)
+         on conflict (phone_number_id) do update set warmup_started_on = $2, updated_at = now()`,
+        [phoneNumberId, day],
       );
     },
   };
@@ -862,29 +1436,209 @@ export function createRepos(pool: Pool): Repos {
   const campaigns: CampaignsRepo = {
     async create(input) {
       const { rows } = await pool.query<{ id: string }>(
-        `insert into campaigns (name, template_name, template_language, category)
-         values ($1,$2,$3,$4) returning id`,
-        [input.name, input.templateName, input.templateLanguage, input.category],
+        `insert into campaigns
+           (name, template_name, template_language, category, ritmo_por_hora, canario, canario_espera_min)
+         values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+        [
+          input.name,
+          input.templateName,
+          input.templateLanguage,
+          input.category,
+          input.ritmoPorHora ?? null,
+          input.canario ?? 0,
+          input.canarioEsperaMin ?? 60,
+        ],
       );
       return rows[0]!.id;
     },
-    async setStatus(id, status) {
-      await pool.query('update campaigns set status = $2 where id = $1', [id, status]);
+    async setStatus(id, status, motivo) {
+      await pool.query(
+        `update campaigns
+            set status = $2,
+                motivo_pausa = $3,
+                started_at = case when $2 in ('running','canary') then coalesce(started_at, now()) else started_at end,
+                finished_at = case when $2 in ('finished','stopped','empty') then coalesce(finished_at, now()) else null end
+          where id = $1`,
+        [id, status, motivo ?? null],
+      );
     },
     async get(id) {
       const { rows } = await pool.query<CampaignRow>('select * from campaigns where id = $1', [id]);
       return rows[0] ? toCampaign(rows[0]) : null;
     },
     async list() {
-      const { rows } = await pool.query<CampaignRow & { stats: Record<string, number> | null }>(
+      const { rows } = await pool.query<
+        CampaignRow & { stats: Record<string, number> | null; destinatarios: Record<string, number> | null }
+      >(
         `select k.*,
                 (select jsonb_object_agg(s.status, s.count)
                    from (select status, count(*)::int as count
-                           from deliveries where campaign_id = k.id group by status) s) as stats
+                           from deliveries where campaign_id = k.id group by status) s) as stats,
+                (select jsonb_object_agg(r.estado, r.count)
+                   from (select estado, count(*)::int as count
+                           from campaign_recipients where campaign_id = k.id group by estado) r) as destinatarios
            from campaigns k
           order by k.created_at desc`,
       );
-      return rows.map((row) => ({ ...toCampaign(row), stats: row.stats ?? {} }));
+      return rows.map((row) => ({
+        ...toCampaign(row),
+        stats: row.stats ?? {},
+        destinatarios: row.destinatarios ?? {},
+      }));
+    },
+
+    async agregarDestinatarios(campaignId, entries) {
+      if (!entries.length) return 0;
+      const phones = entries.map((e) => e.phone);
+      const variables = entries.map((e) => JSON.stringify(e.variables ?? []));
+      const ordenes = entries.map((e) => e.orden);
+      const canarios = entries.map((e) => e.canario);
+      const { rowCount } = await pool.query(
+        `insert into campaign_recipients (campaign_id, phone, variables, orden, canario)
+         select $1, p, v::jsonb, o, c
+           from unnest($2::text[], $3::text[], $4::int[], $5::boolean[]) as t(p, v, o, c)
+         on conflict (campaign_id, phone) do nothing`,
+        [campaignId, phones, variables, ordenes, canarios],
+      );
+      return rowCount ?? 0;
+    },
+    async siguientesPendientes(campaignId, limit, soloCanario = false, ahora = new Date()) {
+      const { rows } = await pool.query<RecipientRow>(
+        `select * from campaign_recipients
+          where campaign_id = $1 and estado = 'pendiente' ${soloCanario ? 'and canario' : ''}
+            and (posponer_hasta is null or posponer_hasta <= $3)
+          order by canario desc, orden, id
+          limit $2`,
+        [campaignId, limit, ahora],
+      );
+      return rows.map(toRecipient);
+    },
+    async posponerDestinatario(id, hasta, detalle) {
+      await pool.query(
+        `update campaign_recipients
+            set posponer_hasta = $2, detalle = $3, intentos = intentos + 1
+          where id = $1`,
+        [id, hasta, detalle],
+      );
+    },
+    async contarPendientes(campaignId) {
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total from campaign_recipients where campaign_id = $1 and estado = 'pendiente'`,
+        [campaignId],
+      );
+      return rows[0]?.total ?? 0;
+    },
+    async marcarDestinatario(id, estado, detalle, deliveryId, at) {
+      await pool.query(
+        `update campaign_recipients
+            set estado = $2, detalle = $3, delivery_id = $4,
+                enviado_at = case when $2 = 'enviado' then coalesce($5, now()) else enviado_at end
+          where id = $1`,
+        [id, estado, detalle, deliveryId, at ?? null],
+      );
+    },
+    async cifrasDestinatarios(campaignId) {
+      const { rows } = await pool.query<{ estado: string; count: number }>(
+        `select estado, count(*)::int as count from campaign_recipients
+          where campaign_id = $1 group by estado`,
+        [campaignId],
+      );
+      return Object.fromEntries(rows.map((r) => [r.estado, r.count]));
+    },
+    async cancelarPendientes(campaignId, motivo) {
+      const { rowCount } = await pool.query(
+        `update campaign_recipients set estado = 'cancelado', detalle = $2
+          where campaign_id = $1 and estado = 'pendiente'`,
+        [campaignId, motivo],
+      );
+      return rowCount ?? 0;
+    },
+    async listarActivas() {
+      const { rows } = await pool.query<CampaignRow>(
+        `select * from campaigns where status in ('running','canary','paused') order by created_at`,
+      );
+      return rows.map(toCampaign);
+    },
+    async setCanarioEnviado(id, at) {
+      await pool.query('update campaigns set canario_enviado_at = $2 where id = $1', [id, at]);
+    },
+    async resumenCanario(campaignId) {
+      const { rows } = await pool.query<ResumenRow>(
+        `select ${RESUMEN_SELECT}
+           from deliveries d
+          where d.campaign_id = $1
+            and d.id in (select delivery_id from campaign_recipients
+                          where campaign_id = $1 and canario and delivery_id is not null)`,
+        [campaignId],
+      );
+      const codes = await pool.query<{ code: string; count: number }>(
+        `select error_code as code, count(*)::int as count
+           from deliveries d
+          where d.campaign_id = $1 and d.status = 'failed' and d.error_code is not null
+            and d.id in (select delivery_id from campaign_recipients
+                          where campaign_id = $1 and canario and delivery_id is not null)
+          group by error_code`,
+        [campaignId],
+      );
+      return toResumen(rows[0], codes.rows);
+    },
+  };
+
+  const salud: SaludRepo = {
+    async registrar(evento) {
+      const { rows } = await pool.query<{ id: number }>(
+        `insert into salud_eventos
+           (phone_number_id, at, tipo, codigo, detalle, contact_id, campaign_id, payload)
+         values ($1, coalesce($2, now()), $3, $4, $5, $6, $7, $8)
+         returning id`,
+        [
+          evento.phoneNumberId ?? '',
+          evento.at ?? null,
+          evento.tipo,
+          evento.codigo ?? null,
+          evento.detalle?.slice(0, 500) ?? null,
+          evento.contactId ?? null,
+          evento.campaignId ?? null,
+          evento.payload ? JSON.stringify(evento.payload) : null,
+        ],
+      );
+      return rows[0]!.id;
+    },
+    async contar(since, tipo, codigo) {
+      const params: unknown[] = [since];
+      let where = 'at >= $1';
+      if (tipo) {
+        params.push(tipo);
+        where += ` and tipo = $${params.length}`;
+      }
+      if (codigo) {
+        params.push(codigo);
+        where += ` and codigo = $${params.length}`;
+      }
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total from salud_eventos where ${where}`,
+        params,
+      );
+      return rows[0]?.total ?? 0;
+    },
+    async resumen(since) {
+      const { rows } = await pool.query<{ clave: string; count: number }>(
+        `select tipo || ':' || coalesce(codigo, '') as clave, count(*)::int as count
+           from salud_eventos where at >= $1 group by 1`,
+        [since],
+      );
+      return Object.fromEntries(rows.map((r) => [r.clave, r.count]));
+    },
+    async ultimos(limit) {
+      const { rows } = await pool.query<SaludRow>(
+        'select * from salud_eventos order by at desc, id desc limit $1',
+        [limit],
+      );
+      return rows.map(toSaludEvento);
+    },
+    async purgar(before) {
+      const { rowCount } = await pool.query('delete from salud_eventos where at < $1', [before]);
+      return rowCount ?? 0;
     },
   };
 
@@ -900,6 +1654,9 @@ export function createRepos(pool: Pool): Repos {
     automation: createAutomationRepo(pool),
     messages: createMessagesRepo(pool),
     leads: createLeadsRepo(pool),
+    archives: createArchivesRepo(pool),
+    rutas: createRutasRepo(pool),
+    salud,
   };
 }
 

@@ -185,6 +185,7 @@ const AYUDA_CAMPO: Record<string, { titulo: string; pista: string; ph: string }>
 };
 
 import { seedTokenJs } from './pages.js';
+import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
 
 export function connectPage(labels: Record<string, string>, adminToken = ''): string {
   const avanzados = SETUP_FIELDS.map(
@@ -198,7 +199,8 @@ export function connectPage(labels: Record<string, string>, adminToken = ''): st
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Conectar WhatsApp - wa-locator</title>
-<style>${CSS}</style>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🔌</text></svg>">
+<style>${CSS}${DIALOGO_CSS}</style>
 </head><body>
 <div class="wrap">
 
@@ -391,8 +393,10 @@ export function connectPage(labels: Record<string, string>, adminToken = ''): st
 </div>
 </div>
 <script>
-${seedTokenJs(adminToken)}${String.raw`
+${seedTokenJs(adminToken)}${DIALOGO_JS}${String.raw`
 /* --- acceso ----------------------------------------------------------- */
+/* Si no hay clave guardada se pide con el cuadro propio, igual que en el
+   resto de pantallas. */
 function token() { return sessionStorage.getItem('adminToken') || ''; }
 
 async function api(path, options) {
@@ -409,7 +413,7 @@ async function api(path, options) {
     throw new Error('Token de administracion incorrecto');
   }
   var data = await res.json().catch(function () { return {}; });
-  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  if (!res.ok) throw new Error(data.error || errorHttp(res.status));
   return data;
 }
 

@@ -18,6 +18,7 @@
 
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
+import type { Monitor } from '../salud/monitor.js';
 import type { Contact, Repos } from '../db/repos.js';
 import type { AutoReply } from '../db/automation.js';
 import type { Sender } from '../outbound/sender.js';
@@ -44,6 +45,10 @@ import {
 import type { MessageKind } from '../db/messages.js';
 import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
 
+import { atenderRespuestaDeRuta, type RespuestaRuta } from '../rutas/inbound.js';
+import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
+import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
+
 export interface InboundDeps {
   repos: Repos;
   sender: Sender;
@@ -57,6 +62,18 @@ export interface InboundDeps {
    * atender a quien escribe.
    */
   catalogo?: StokyClient;
+  /**
+   * La puerta al sistema de GSG, para el modulo de rutas.
+   *
+   * Opcional: sin ella el sistema atiende igual y los reportes se quedan en
+   * la cola, que es como funciona mientras GSG no publique su API.
+   */
+  gsg?: PuertoGsg;
+  /**
+   * El monitor de salud del numero. Opcional: sin el, las senales que salen
+   * de la conversacion (quejas, "no soy yo") simplemente no se apuntan.
+   */
+  salud?: Monitor;
 }
 
 export const CONFIRM_PREFIX = 'loc_ok:';
@@ -494,6 +511,38 @@ export async function handleInboundMessage(
   await onInboundReply(repos, contact);
 
   /**
+   * Lo que el cliente contesta cuando se le pidio la ubicacion para un
+   * reparto.
+   *
+   * Va por delante de todo lo demas -preventa, reglas- porque es lo que ese
+   * cliente esta respondiendo: tiene un mensaje nuestro de hace un rato
+   * pidiendole exactamente esto. Si no tiene ninguna solicitud abierta,
+   * devuelve `atendida: false` y el mensaje sigue su camino de siempre.
+   */
+  const rutasDeps = { repos, gsg: deps.gsg ?? crearPuertoEnEspera(), salud: deps.salud };
+  const contestarRuta = async (respuesta: RespuestaRuta): Promise<boolean> => {
+    if (!respuesta.atendida) return false;
+    if (respuesta.resultado === 'resuelta') {
+      await reply(
+        textoGracias({
+          negocio: config.businessName,
+          referencia: respuesta.solicitud?.referencia,
+        }),
+      );
+      return true;
+    }
+    if (respuesta.resultado === 'fuera_de_zona') {
+      await reply(textoFueraDeZona(config.coverageName));
+      return true;
+    }
+    if (respuesta.responder) await reply(respuesta.responder);
+    // Sin texto que contestar: el siguiente mensaje lo manda el motor con su
+    // ritmo. Contestar aqui seria escribir tan rapido como llegan las
+    // respuestas, que es justo lo que dispara los bloqueos.
+    return true;
+  };
+
+  /**
    * Por que no se pudo usar una ubicacion, en cristiano.
    *
    * Todos los fallos daban el mismo "no pude leer esa ubicacion", y el mas
@@ -533,6 +582,20 @@ export async function handleInboundMessage(
   if (message.type === 'location' && message.location) {
     const result = fromWhatsAppLocation(message.location, { bbox: config.bbox });
     if (!result.ok) {
+      // Fuera de cobertura con una solicitud abierta: la ubicacion llego, lo
+      // que falla es la zona. Es una incidencia para GSG, no un "no te
+      // entendi".
+      if (result.reason === 'outside_bbox') {
+        const enRuta = await atenderRespuestaDeRuta(rutasDeps, contact, {
+          ubicacion: {
+            lat: message.location.latitude,
+            lng: message.location.longitude,
+            fuente: 'pin de whatsapp',
+          },
+          fueraDeZona: true,
+        });
+        if (await contestarRuta(enRuta)) return;
+      }
       // Explicar y seguir: dejar la conversacion muerta en un "no puedo
       // atenderte ahi" hace que el cliente se vaya sin saber que puede
       // escribir el distrito a mano, o que hay una persona detras.
@@ -544,6 +607,17 @@ export async function handleInboundMessage(
     }
     const id = await repos.locations.save(contact.id, result, JSON.stringify(message.location));
     await repos.locations.confirm(id);
+
+    const enRuta = await atenderRespuestaDeRuta(rutasDeps, contact, {
+      ubicacion: {
+        lat: result.lat,
+        lng: result.lng,
+        mapsUrl: result.mapsUrl,
+        precisionM: result.precisionMeters,
+        fuente: 'pin de whatsapp',
+      },
+    });
+    if (await contestarRuta(enRuta)) return;
 
     // Con la preventa activa, la ubicacion es la respuesta a "¿de donde?" y el
     // flujo sigue desde ahi. Contestar ademas un "ubicacion recibida" seria el
@@ -591,6 +665,9 @@ export async function handleInboundMessage(
   // --- baja y alta ------------------------------------------------------
   if (matchesKeyword(text, config.optOutKeywords)) {
     await repos.contacts.setOptOut(phone);
+    // Si estaba en un lote, deja de estarlo: la entrega se coordina por
+    // telefono y GSG tiene que enterarse.
+    await atenderRespuestaDeRuta(rutasDeps, contact, { baja: true });
     // Se responde dentro de la ventana, asi que el gate de opt-out no aplica
     // a esta confirmacion: es la ultima cortesia antes de dejar de escribir.
     await wa
@@ -611,6 +688,32 @@ export async function handleInboundMessage(
     repos.automation.getPrefs(),
     extractLocation(text, { bbox: config.bbox }),
   ]);
+
+  // Con una solicitud de ubicacion abierta, esto es su respuesta: un enlace
+  // de mapa la resuelve, y cualquier otra cosa la aparta para que la mire una
+  // persona. En los dos casos el mensaje no sigue al flujo de preventa.
+  const enRutaTexto = await atenderRespuestaDeRuta(rutasDeps, contact, {
+    texto: text,
+    ubicacion: result.ok
+      ? {
+          lat: result.lat,
+          lng: result.lng,
+          mapsUrl: result.mapsUrl,
+          precisionM: result.precisionMeters,
+          fuente: `enlace de mapa (${result.source})`,
+        }
+      : undefined,
+  });
+  if (enRutaTexto.atendida) {
+    // La ubicacion se guarda tambien en el historial de ubicaciones, que es
+    // de donde salen la pagina de rastreo y el listado del panel.
+    if (result.ok) {
+      const guardada = await repos.locations.save(contact.id, result, text);
+      await repos.locations.confirm(guardada);
+    }
+    await contestarRuta(enRutaTexto);
+    return;
+  }
 
   const rule = matchRule(rules, text, { isFirstMessage, hasCoordinates: result.ok });
   if (rule) await applyRule(rule, contact, deps);

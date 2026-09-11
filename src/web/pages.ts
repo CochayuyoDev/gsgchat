@@ -12,6 +12,8 @@
  * el cliente, no nosotros.
  */
 
+import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
+
 const CSS = `
   :root {
     color-scheme: light dark;
@@ -87,6 +89,17 @@ const CSS = `
   .step-text { grid-column: 1 / -1; }
   @media (max-width: 720px) { .step { grid-template-columns: 1fr 1fr; } }
   code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 5px; }
+  .semaforo { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); margin-top: 12px; }
+  .semaforo .luz { width: 22px; height: 22px; border-radius: 50%; flex: none; box-shadow: 0 0 0 4px rgba(0,0,0,.05); }
+  .semaforo .luz.verde { background: var(--ok); } .semaforo .luz.amarillo { background: #eab308; }
+  .semaforo .luz.naranja { background: var(--warn); } .semaforo .luz.rojo { background: var(--bad); }
+  .semaforo b { font-size: 17px; }
+  .motivos { margin: 8px 0 0; padding-left: 18px; font-size: 13.5px; }
+  .motivos li { margin-bottom: 4px; }
+  .barra { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; margin-top: 6px; }
+  .barra i { display: block; height: 100%; background: var(--accent); }
+  .barra i.warn { background: var(--warn); } .barra i.bad { background: var(--bad); }
+  .stat small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 `;
 
 /**
@@ -110,22 +123,22 @@ export function seedTokenJs(adminToken: string): string {
 }
 
 const AUTH_JS = String.raw`
+  /* La clave se pide con el cuadro propio (dialogo.ts), no con prompt(). */
   function token() {
-    var t = sessionStorage.getItem('adminToken');
-    if (!t) { t = prompt('Token de administracion (aparece en la consola al arrancar):'); if (t) sessionStorage.setItem('adminToken', t.trim()); }
-    return t || '';
+    return sessionStorage.getItem('adminToken') || '';
   }
   async function api(path, options) {
     options = options || {};
+    var clave = await pedirToken();
     var res = await fetch(path, {
       method: options.method || 'GET',
       cache: 'no-store',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token() },
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + clave },
       body: options.body ? JSON.stringify(options.body) : undefined
     });
     if (res.status === 401) { sessionStorage.removeItem('adminToken'); throw new Error('Token de administracion incorrecto: recarga la pagina y vuelve a pegarlo'); }
     var data = await res.json().catch(function () { return {}; });
-    if (!res.ok) throw new Error(data.error || data.message || ('HTTP ' + res.status));
+    if (!res.ok) throw new Error(data.error || data.message || errorHttp(res.status));
     return data;
   }
   function esc(value) {
@@ -193,10 +206,12 @@ function shell(title: string, body: string, script: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-<style>${CSS}</style>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📊</text></svg>">
+<style>${CSS}${DIALOGO_CSS}</style>
 </head><body>
 <div class="wrap">${body}</div>
 <script>
+${DIALOGO_JS}
 ${AUTH_JS}
 ${script}
 </script>
@@ -428,6 +443,7 @@ load();
 
 const TABS: Array<[string, string]> = [
   ['estado', 'Estado'],
+  ['salud', 'Salud'],
   ['enviar', 'Enviar'],
   ['contactos', 'Contactos'],
   ['ubicaciones', 'Ubicaciones'],
@@ -455,7 +471,7 @@ export function panelPage(configured: boolean, adminToken = ''): string {
 
   const body = `
 <header><h1>Panel</h1><span id="state" class="pill hidden"></span>
-  <span class="right"><a href="/chat">Chat</a> &nbsp; <a href="/setup" class="muted">Conexion</a> &nbsp; <button class="ghost sm" id="logout">Cambiar token</button></span></header>
+  <span class="right"><a href="/chat">Chat</a> &nbsp; <a href="/rutas">Ubicaciones</a> &nbsp; <a href="/setup" class="muted">Conexion</a> &nbsp; <button class="ghost sm" id="logout">Cambiar token</button></span></header>
 <p class="muted">Enviar mensajes, compartir ubicacion, automatizar seguimientos y lanzar campanas sin tocar la terminal.</p>
 ${warning}
 
@@ -474,6 +490,41 @@ ${warning}
     <button class="ghost" id="resume">Reanudar</button>
     <span id="num-state" class="pill hidden"></span>
   </div>
+</section>
+
+<section id="tab-salud" class="card hidden">
+  <h2>Salud del numero</h2>
+  <p class="muted">Lo que mira el monitor cada minuto: errores de Meta por codigo, mensajes que no llegan, bajas, quejas y desconexiones.
+  Con eso decide a que velocidad se envia, cuando frena solo y cuando para. Si algo no sale, la razon esta aqui.</p>
+  <div id="sl-semaforo" class="semaforo"><span class="luz verde"></span><div><b id="sl-nivel">cargando...</b><p class="muted" id="sl-sub"></p></div></div>
+  <ul id="sl-motivos" class="motivos"></ul>
+  <div class="grid" id="sl-stats" style="margin-top:14px"></div>
+  <div class="actions">
+    <button class="ghost" id="sl-refresh">Actualizar</button>
+    <button class="ghost" id="sl-evaluar">Recalcular ahora</button>
+    <button id="sl-reanudar">Reanudar (con rampa)</button>
+    <span id="sl-state" class="pill hidden"></span>
+  </div>
+
+  <h3>Ritmo vigente</h3>
+  <p class="muted" id="sl-politica"></p>
+  <div class="grid" id="sl-ritmo"></div>
+
+  <h3>Ventanas</h3>
+  <div id="sl-ventanas" class="tablewrap"></div>
+
+  <h3>Plantillas</h3>
+  <div id="sl-plantillas" class="tablewrap"></div>
+
+  <h3>Contactos apartados</h3>
+  <p class="muted">A quien Meta dijo que no tiene WhatsApp (un mes), que ya recibio demasiado marketing (un dia) o que pidio no recibirlo. Se levanta solo al vencer, o a mano aqui.</p>
+  <div class="toolbar">
+    <div><label>Telefono</label><input id="sl-levantar-phone" placeholder="51987654321"></div>
+    <div><button class="ghost" id="sl-levantar">Levantar la supresion</button></div>
+  </div>
+
+  <h3>Ultimas senales</h3>
+  <div id="sl-eventos" class="tablewrap"></div>
 </section>
 
 <section id="tab-enviar" class="card hidden">
@@ -575,12 +626,18 @@ ${warning}
   <input id="c-name" placeholder="Recordatorio marzo">
   <label>Destinatarios (uno por linea: telefono,variable1,variable2). Vacio = todos los que tienen opt-in.</label>
   <textarea id="c-list" placeholder="5215512345678,Ana,A-1024,https://ej.mx/t/9"></textarea>
+  <div class="toolbar">
+    <div><label>Canario (cuantos salen primero)</label><input id="c-canario" placeholder="automatico: 10 %, entre 5 y 20"></div>
+    <div><label>Espera del canario (min)</label><input id="c-canario-espera" value="60"></div>
+    <div><label>Como mucho por hora</label><input id="c-ritmo" placeholder="vacio = ritmo general"></div>
+  </div>
+  <p class="muted">La campana no se vuelca: sale por goteo al ritmo del marcapasos. Primero el canario; si en la espera aparecen fallos, bajas o numeros sin WhatsApp, el resto se queda parado y la campana lo dice.</p>
   <div class="actions"><button id="c-send">Lanzar</button><span id="c-state" class="pill hidden"></span></div>
   <pre id="c-out" class="hidden"></pre>
 
   <h3>Campanas lanzadas</h3>
   <div id="c-table" class="tablewrap"></div>
-  <div class="actions"><button class="ghost sm" id="c-refresh">Actualizar</button></div>
+  <div class="actions"><button class="ghost sm" id="c-refresh">Actualizar</button><button class="ghost sm" id="c-goteo">Dar una pasada ahora</button><span id="c-state2" class="pill hidden"></span></div>
 </section>
 
 <section id="tab-automatizacion" class="card hidden">
@@ -709,7 +766,7 @@ ${warning}
   const script = String.raw`
 var TAB_IDS = ${JSON.stringify(TABS.map(([id]) => id))};
 var LOADERS = {
-  estado: loadHealth, contactos: loadContacts, ubicaciones: loadLocations, vivo: loadSessions,
+  estado: loadHealth, salud: loadSalud, contactos: loadContacts, ubicaciones: loadLocations, vivo: loadSessions,
   campanas: function () { loadTemplates(); loadCampaigns(); },
   automatizacion: loadAutomation, plantillas: loadTemplates, historial: loadDeliveries
 };
@@ -741,15 +798,15 @@ function busy(id, fn) {
 function qualityKind(q) { return q === 'GREEN' ? 'ok' : q === 'YELLOW' ? 'warn' : 'bad'; }
 function statusKind(s) {
   if (s === 'sent' || s === 'delivered' || s === 'read' || s === 'APPROVED' || s === 'active' || s === 'completed' || s === 'finished') return 'ok';
-  if (s === 'queued' || s === 'pending' || s === 'PENDING' || s === 'running' || s === 'processing') return 'warn';
-  if (s === 'failed' || s === 'blocked_by_gate' || s === 'blocked' || s === 'REJECTED' || s === 'DISABLED' || s === 'PAUSED') return 'bad';
+  if (s === 'queued' || s === 'pending' || s === 'PENDING' || s === 'running' || s === 'processing' || s === 'canary' || s === 'paused') return 'warn';
+  if (s === 'failed' || s === 'blocked_by_gate' || s === 'blocked' || s === 'REJECTED' || s === 'DISABLED' || s === 'PAUSED' || s === 'stopped') return 'bad';
   return 'muted';
 }
 function statusLabel(s) {
   return ({ queued: 'en cola', sent: 'enviado', delivered: 'entregado', read: 'leido', failed: 'fallido',
     blocked_by_gate: 'bloqueado', pending: 'pendiente', processing: 'procesando', blocked: 'bloqueado',
     cancelled: 'cancelado', active: 'activa', completed: 'completada', running: 'en curso', finished: 'terminada',
-    draft: 'borrador', empty: 'sin destinatarios' })[s] || s;
+    draft: 'borrador', empty: 'sin destinatarios', canary: 'canario', paused: 'pausada', stopped: 'parada' })[s] || s;
 }
 function contactCell(phone, name) {
   return '<b>' + esc(phone) + '</b>' + (name ? '<span class="muted">' + esc(name) + '</span>' : '');
@@ -765,7 +822,8 @@ async function loadHealth() {
       '<div class="stat"><span class="muted">Estado</span><b>' + (n.paused ? 'PAUSADO' : 'activo') + '</b><span class="muted">' + esc(n.pausedReason || '') + '</span></div>' +
       '<div class="stat"><span class="muted">Enviados hoy</span><b>' + h.sentToday + ' / ' + h.dailyCap + '</b><span class="muted">cupo de warm-up</span></div>' +
       '<div class="stat"><span class="muted">En cola</span><b>' + ((h.queue.waiting || 0) + (h.queue.delayed || 0)) + '</b><span class="muted">' + (h.queue.failed || 0) + ' fallidos</span></div>' +
-      '<div class="stat"><span class="muted">WhatsApp</span><b class="' + (h.configured ? 'ok' : 'warn') + '">' + (h.configured ? 'conectado' : 'sin conectar') + '</b><span class="muted">' + esc((h.missing || []).join(', ')) + '</span></div>';
+      '<div class="stat"><span class="muted">WhatsApp</span><b class="' + (h.configured ? 'ok' : 'warn') + '">' + (h.configured ? 'conectado' : 'sin conectar') + '</b><span class="muted">' + esc((h.missing || []).join(', ')) + '</span></div>' +
+      (h.salud ? '<div class="stat"><span class="muted">Salud</span><b class="' + nivelKind(h.salud.nivel) + '">' + esc(h.salud.nivel) + '</b><span class="muted">velocidad al ' + Math.round((h.salud.factor || 0) * 100) + ' % - <a href="#salud">ver por que</a></span></div>' : '');
     show('state', n.paused ? 'Envios pausados' : 'Operativo', n.paused ? 'warn' : 'ok');
   } catch (error) { show('state', error.message, 'bad'); }
 }
@@ -785,6 +843,85 @@ document.getElementById('resume').onclick = async function () {
   try { await api('/admin/pause', { method: 'POST', body: { paused: false } }); loadHealth(); }
   catch (error) { show('num-state', error.message, 'bad'); }
 };
+
+// ----------------------------------------------------------------- salud
+function nivelKind(n) { return n === 'verde' ? 'ok' : n === 'amarillo' ? 'warn' : 'bad'; }
+function pct(a, b) { return b ? Math.round((a / b) * 100) + ' %' : '-'; }
+function minutos(ms) { if (ms == null) return '-'; var m = Math.round(ms / 60000); return m < 1 ? 'menos de 1 min' : m < 120 ? m + ' min' : Math.round(m / 60) + ' h'; }
+function hastaCuando(iso) { if (!iso) return ''; var d = new Date(iso); return d.toLocaleString('es-PE', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }); }
+async function loadSalud() {
+  try {
+    var s = await api('/admin/salud');
+    var luz = document.querySelector('#sl-semaforo .luz');
+    luz.className = 'luz ' + s.nivel;
+    var titulo = { verde: 'Verde: ritmo normal', amarillo: 'Amarillo: a la mitad de velocidad', naranja: 'Naranja: a un quinto y sin marketing', rojo: 'Rojo: envios en pausa' }[s.nivel] || s.nivel;
+    document.getElementById('sl-nivel').textContent = titulo + ' (' + s.puntos + ' puntos)';
+    var sub = 'Velocidad efectiva al ' + Math.round(s.factor * 100) + ' %.';
+    if (s.pausadaHasta) sub += ' Pausado solo hasta las ' + hastaCuando(s.pausadaHasta) + '; despues vuelve despacio.';
+    else if (s.numero && s.numero.paused) sub += ' Pausado: ' + (s.numero.pausedReason || 'a mano') + '.';
+    if (s.rampaDesde) sub += ' En rampa de vuelta hasta las ' + hastaCuando(s.rampaHasta) + '.';
+    if (s.ultimaEvaluacion) sub += ' Evaluado a las ' + hastaCuando(s.ultimaEvaluacion) + '.';
+    document.getElementById('sl-sub').textContent = sub;
+    document.getElementById('sl-motivos').innerHTML = (s.motivos || []).length
+      ? s.motivos.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('')
+      : '<li class="muted">Sin senales de riesgo.</li>';
+
+    var n = s.numero || {};
+    var r = s.ritmo || {};
+    document.getElementById('sl-stats').innerHTML =
+      '<div class="stat"><span class="muted">Meta dice</span><b class="' + qualityKind(n.quality) + '">' + esc(n.quality || '-') + '</b><small>' + esc(n.estado || '') + (n.tier ? ' - ' + esc(n.tier) : '') + '</small></div>' +
+      '<div class="stat"><span class="muted">Hoy</span><b>' + r.hoy + ' / ' + r.cupoHoy + '</b><small>cupo de warm-up</small><div class="barra"><i class="' + (r.hoy >= r.cupoHoy ? 'bad' : '') + '" style="width:' + Math.min(100, Math.round((r.hoy / Math.max(1, r.cupoHoy)) * 100)) + '%"></i></div></div>' +
+      '<div class="stat"><span class="muted">Ultima hora</span><b>' + r.ultimaHora + ' / ' + Math.max(1, Math.floor((s.politica.maxPorHora || 0) * s.factor)) + '</b><small>' + r.ultimoMinuto + ' en el ultimo minuto</small></div>' +
+      '<div class="stat"><span class="muted">Destinatarios 24 h</span><b>' + r.destinatariosUnicos24h + (r.limiteTier ? ' / ' + (isFinite(r.limiteTier) ? r.limiteTier : 'sin limite') : '') + '</b><small>' + (r.limiteTier ? 'tier de Meta, se para al ' + Math.round(s.politica.fraccionTier * 100) + ' %' : s.politica.perfil === 'cloud' ? 'Meta no ha dicho el tier: sincroniza en Estado' : 'sin tier (cliente no oficial)') + '</small></div>' +
+      '<div class="stat"><span class="muted">Contactos nuevos hoy</span><b>' + r.nuevosContactosHoy + (s.politica.nuevosContactosPorDia ? ' / ' + s.politica.nuevosContactosPorDia : '') + '</b><small>' + (s.politica.nuevosContactosPorDia ? 'cupo del perfil' : 'sin cupo en este perfil') + '</small></div>' +
+      '<div class="stat"><span class="muted">Proximo envio</span><b>' + (r.enHorario ? (r.proximoEnvioMs > 0 ? Math.ceil(r.proximoEnvioMs / 1000) + ' s' : 'ya') : 'fuera de horario') + '</b><small>' + s.politica.horaInicio + ':00 a ' + s.politica.horaFin + ':00</small></div>' +
+      '<div class="stat"><span class="muted">Apartados</span><b>' + s.contactosSuprimidos + '</b><small>contactos con supresion vigente</small></div>';
+
+    var p = s.politica;
+    document.getElementById('sl-politica').textContent =
+      'Perfil ' + p.perfil + ': hasta ' + p.maxPorMinuto + ' por minuto y ' + p.maxPorHora + ' por hora, pausa de ' + Math.round(p.pausaMinMs / 1000) + ' a ' + Math.round(p.pausaMaxMs / 1000) + ' s entre envios, ' +
+      'como mucho ' + p.maxPorContactoDia + ' al mismo contacto por dia y ' + Math.round(p.separacionContactoMs / 60000) + ' min entre dos. Warm-up desde ' + p.warmup.startPerDay + '/dia (x' + p.warmup.growth + ' cada dia, tope ' + p.warmup.hardCap + '). ' +
+      'Marketing descansa tras ' + p.fatigaEnvios + ' mensajes sin respuesta. En rojo se pausa ' + Math.round(p.pausaRojaMin / 60) + ' h y se vuelve en rampa de ' + Math.round(p.rampaMin / 60) + ' h.' + (p.humanizar ? ' Escritura simulada.' : '') +
+      (p.avisarA ? ' Avisos a ' + p.avisarA + '.' : ' Sin numero al que avisar (RUTAS_SUPERVISOR).');
+    document.getElementById('sl-ritmo').innerHTML =
+      '<div class="stat"><span class="muted">Fallos tolerados</span><b>' + p.umbrales.maxFallosPct + ' %</b><small>de los ultimos 50</small></div>' +
+      '<div class="stat"><span class="muted">Sin WhatsApp</span><b>' + p.umbrales.maxSinWhatsappPct + ' %</b><small>lista sucia a partir de ahi</small></div>' +
+      '<div class="stat"><span class="muted">Bajas</span><b>' + p.umbrales.maxBajasPct + ' %</b><small>en 24 h</small></div>' +
+      '<div class="stat"><span class="muted">Entrega minima</span><b>' + p.umbrales.minEntregaPct + ' %</b><small>de lo enviado hace mas de 1 h</small></div>';
+
+    var v = s.ventanas || {};
+    var u = v.ultimos50 || {}, d = v.dia || {}, h = v.hora || {};
+    var codigos = function (pc) { var k = Object.keys(pc || {}); return k.length ? k.map(function (c) { return c + ' x' + pc[c]; }).join(', ') : '-'; };
+    table('sl-ventanas', ['Ventana', 'Enviados', 'Entregados', 'Fallidos', 'Codigos', 'Bajas', 'Entrantes', 'Quejas', 'Desconexiones'], [
+      ['Ultimos 50', String(u.enviados || 0), '-', String(u.fallidos || 0), codigos(u.porCodigo), '-', '-', '-', '-'],
+      ['24 h', String(d.enviados || 0), (d.entregados || 0) + ' (' + pct(d.entregadosMaduros, d.enviadosMaduros) + ' de lo maduro)', '-', codigos(d.porCodigo), String(d.bajas || 0), String(d.entrantes || 0), String(d.quejas || 0), '-'],
+      ['1 h', '-', '-', String(h.fallidos || 0), codigos(h.porCodigo), '-', '-', '-', String(h.desconexiones || 0)]
+    ], 'Sin datos');
+
+    table('sl-plantillas', ['Plantilla', 'Estado', 'Calidad', 'Pausada hasta', 'Pausas'], (s.plantillas || []).map(function (t) {
+      var pausada = t.pausadaHasta && new Date(t.pausadaHasta) > new Date();
+      return [esc(t.name), pill(statusKind(t.status), t.status), t.quality ? pill(qualityKind(t.quality), t.quality) : '<span class="muted">-</span>',
+        pausada ? pill('warn', hastaCuando(t.pausadaHasta)) : '<span class="muted">-</span>', String(t.pausas || 0) + (t.pausas >= 2 ? ' (la proxima la deshabilita)' : '')];
+    }), 'Sin plantillas en el registro');
+
+    table('sl-eventos', ['Cuando', 'Tipo', 'Codigo', 'Detalle'], (s.eventos || []).map(function (e) {
+      return [esc(fmt(e.at)), esc(e.tipo), e.codigo ? '<code>' + esc(e.codigo) + '</code>' : '-', '<span class="muted">' + esc(e.detalle || '') + '</span>'];
+    }), 'Todavia no hay senales: eso es buena senal');
+  } catch (error) { show('sl-state', error.message, 'bad'); }
+}
+document.getElementById('sl-refresh').onclick = loadSalud;
+document.getElementById('sl-evaluar').onclick = busy('sl-evaluar', async function () {
+  try { var r = await api('/admin/salud/evaluar', { method: 'POST' }); show('sl-state', 'Recalculado: ' + r.riesgo.nivel, nivelKind(r.riesgo.nivel)); loadSalud(); loadHealth(); }
+  catch (error) { show('sl-state', error.message, 'bad'); }
+});
+document.getElementById('sl-reanudar').onclick = busy('sl-reanudar', async function () {
+  try { await api('/admin/salud/reanudar', { method: 'POST', body: { motivo: 'desde el panel' } }); show('sl-state', 'Reanudado: vuelve despacio (rampa)', 'ok'); loadSalud(); loadHealth(); }
+  catch (error) { show('sl-state', error.message, 'bad'); }
+});
+document.getElementById('sl-levantar').onclick = busy('sl-levantar', async function () {
+  try { await api('/admin/salud/contactos/levantar', { method: 'POST', body: { phone: val('sl-levantar-phone') } }); show('sl-state', 'Supresion levantada', 'ok'); loadSalud(); }
+  catch (error) { show('sl-state', error.message, 'bad'); }
+});
 
 // ---------------------------------------------------------------- enviar
 document.getElementById('m-send').onclick = async function () {
@@ -842,7 +979,14 @@ async function loadContacts() {
     });
     document.querySelectorAll('[data-optin]').forEach(function (b) {
       b.onclick = async function () {
-        var source = prompt('Origen del consentimiento (formulario, compra, llamada...):', 'panel');
+        var source = await pedirDato({
+          titulo: 'Origen del consentimiento',
+          texto: 'Queda guardado con el contacto: es la prueba de que aceptó recibir mensajes.',
+          etiqueta: '¿De dónde salió el consentimiento?',
+          valor: 'panel',
+          marcador: 'formulario web, compra en tienda, llamada...',
+          boton: 'Guardar consentimiento'
+        });
         if (!source) return;
         try { await api('/admin/contacts/opt-in', { method: 'POST', body: { phone: b.getAttribute('data-optin'), source: source } }); loadContacts(); }
         catch (error) { show('ct-state-msg', error.message, 'bad'); }
@@ -947,7 +1091,9 @@ async function loadTemplates() {
     templateOptions(document.getElementById('sc-template'), true);
     document.querySelectorAll('.step select[data-template]').forEach(function (s) { templateOptions(s, true); });
     table('t-table', ['Nombre', 'Idioma', 'Categoria', 'Estado', 'Calidad', 'Variables', 'Cuerpo'], templatesCache.map(function (t) {
-      return [esc(t.name), esc(t.language), esc(t.category), pill(statusKind(t.status), t.status),
+      var pausada = t.pausadaHasta && new Date(t.pausadaHasta) > new Date();
+      return [esc(t.name), esc(t.language), esc(t.category),
+        pill(statusKind(t.status), t.status) + (pausada ? '<span class="muted">pausada por Meta hasta ' + esc(hastaCuando(t.pausadaHasta)) + '</span>' : '') + (t.pausas ? '<span class="muted">' + t.pausas + ' pausa' + (t.pausas > 1 ? 's' : '') + '</span>' : ''),
         t.quality ? pill(qualityKind(t.quality), t.quality) : '<span class="muted">-</span>', String(t.variables),
         '<span class="muted">' + esc((t.body || '').slice(0, 90)) + '</span>'];
     }), 'Registro vacio: sincroniza desde Meta o da de alta el catalogo');
@@ -992,30 +1138,58 @@ document.getElementById('c-send').onclick = busy('c-send', async function () {
       var cells = line.split(',').map(function (c) { return c.trim(); });
       return { phone: cells[0], variables: cells.slice(1) };
     });
-    var data = await api('/admin/campaigns', { method: 'POST', body: {
+    var body = {
       name: val('c-name') || 'Campana',
       templateName: parts[0], templateLanguage: parts[1], category: parts[2],
-      recipients: recipients.length ? recipients : undefined
-    }});
-    show('c-state', 'Encolados ' + data.enqueued, data.enqueued ? 'ok' : 'warn');
+      recipients: recipients.length ? recipients : undefined,
+      canarioEsperaMin: Number(val('c-canario-espera')) || 60
+    };
+    if (val('c-canario') !== '') body.canario = Number(val('c-canario'));
+    if (val('c-ritmo') !== '') body.ritmoPorHora = Number(val('c-ritmo'));
+    var data = await api('/admin/campaigns', { method: 'POST', body: body });
+    show('c-state', data.enqueued + ' destinatarios' + (data.canario ? ', canario de ' + data.canario : '') + ': saliendo por goteo', data.enqueued ? 'ok' : 'warn');
     out('c-out', data);
     loadCampaigns();
   } catch (error) { show('c-state', error.message, 'bad'); }
 });
+document.getElementById('c-goteo').onclick = busy('c-goteo', async function () {
+  try {
+    var r = await api('/admin/campaigns/goteo', { method: 'POST' });
+    show('c-state2', 'Pasada: ' + r.enviados + ' enviados' + (r.detenido ? ' - parada: ' + r.detenido : ''), r.detenido ? 'warn' : 'ok');
+    loadCampaigns();
+  } catch (error) { show('c-state2', error.message, 'bad'); }
+});
+async function campanaEstado(id, accion) {
+  try {
+    await api('/admin/campaigns/' + id + '/estado', { method: 'POST', body: { accion: accion } });
+    loadCampaigns();
+  } catch (error) { show('c-state2', error.message, 'bad'); }
+}
 async function loadCampaigns() {
   try {
     var list = await api('/admin/campaigns');
-    table('c-table', ['Campana', 'Plantilla', 'Estado', 'En cola', 'Enviados', 'Entregados', 'Leidos', 'Bloqueados', 'Fallidos', ''], list.map(function (c) {
+    table('c-table', ['Campana', 'Plantilla', 'Estado', 'Pendientes', 'Enviados', 'Entregados', 'Leidos', 'Bloqueados', 'Fallidos', ''], list.map(function (c) {
       var s = c.stats || {};
+      var d = c.destinatarios || {};
+      var estado = pill(statusKind(c.status), statusLabel(c.status));
+      if (c.status === 'canary') estado += '<span class="muted">canario de ' + (c.canario || 0) + (c.canarioEnviadoAt ? ', esperando ' + (c.canarioEsperaMin || 60) + ' min' : '') + '</span>';
+      if (c.motivoPausa) estado += '<span class="muted">' + esc(c.motivoPausa) + '</span>';
+      var acciones = '<button class="ghost sm" data-deliveries="' + esc(c.id) + '">Ver envios</button> ';
+      if (c.status === 'running' || c.status === 'canary') acciones += '<button class="ghost sm" data-campana="' + esc(c.id) + '" data-accion="pausar">Pausar</button> ';
+      if (c.status === 'paused') acciones += '<button class="sm" data-campana="' + esc(c.id) + '" data-accion="reanudar">Reanudar</button> ';
+      if (c.status === 'running' || c.status === 'canary' || c.status === 'paused') acciones += '<button class="danger sm" data-campana="' + esc(c.id) + '" data-accion="parar">Parar</button>';
       return [
-        '<b>' + esc(c.name) + '</b><span class="muted">' + esc(fmt(c.createdAt)) + '</span>',
+        '<b>' + esc(c.name) + '</b><span class="muted">' + esc(fmt(c.createdAt)) + (c.ritmoPorHora ? ' - ' + c.ritmoPorHora + '/h' : '') + '</span>',
         esc(c.templateName) + '<span class="muted">' + esc(c.category) + '</span>',
-        pill(statusKind(c.status), statusLabel(c.status)),
-        String(s.queued || 0), String(s.sent || 0), String(s.delivered || 0), String(s.read || 0),
-        String(s.blocked_by_gate || 0), String(s.failed || 0),
-        '<button class="ghost sm" data-deliveries="' + esc(c.id) + '">Ver envios</button>'
+        estado,
+        String(d.pendiente || 0), String(s.sent || 0) + (s.sent !== (d.enviado || 0) && d.enviado ? '<span class="muted">' + d.enviado + ' dest.</span>' : ''), String(s.delivered || 0), String(s.read || 0),
+        String((s.blocked_by_gate || 0)) + (d.bloqueado ? '<span class="muted">' + d.bloqueado + ' en firme</span>' : ''), String((s.failed || 0)) + (d.cancelado ? '<span class="muted">' + d.cancelado + ' cancelados</span>' : ''),
+        acciones
       ];
     }), 'Todavia no se lanzo ninguna campana');
+    document.querySelectorAll('[data-campana]').forEach(function (b) {
+      b.onclick = function () { campanaEstado(b.getAttribute('data-campana'), b.getAttribute('data-accion')); };
+    });
     document.querySelectorAll('[data-deliveries]').forEach(function (b) {
       b.onclick = function () {
         setVal('h-campaign', b.getAttribute('data-deliveries'));
@@ -1089,7 +1263,13 @@ async function loadAutomation() {
     }), 'Sin secuencias');
     document.querySelectorAll('[data-seq-del]').forEach(function (b) {
       b.onclick = async function () {
-        if (!confirm('Borrar la secuencia y sus inscripciones?')) return;
+        var seguro = await confirmarDialogo({
+          titulo: '¿Borrar la secuencia?',
+          texto: 'Se borra la secuencia y las inscripciones que tenga en curso. No se puede deshacer.',
+          boton: 'Sí, borrar',
+          peligro: true
+        });
+        if (!seguro) return;
         try { await api('/admin/automation/sequences/' + b.getAttribute('data-seq-del'), { method: 'DELETE' }); loadAutomation(); }
         catch (error) { show('s-state', error.message, 'bad'); }
       };

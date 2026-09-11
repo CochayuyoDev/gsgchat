@@ -19,7 +19,18 @@ export interface LeadsRoutesDeps {
   repos: Repos;
   /** Panel de Stoky, para derivar la venta. Vacio = no se ofrece. */
   panelStoky?: string;
+  /**
+   * Se llama cuando la ficha llega a su estado final (enviada o descartada).
+   *
+   * Lo usa el respaldo de conversaciones: ahi es donde el chat deja de estar
+   * en curso y puede guardarse y limpiarse. Entra por parametro para que esta
+   * pantalla no sepa nada de ficheros ni de archivado.
+   */
+  alCerrarFicha?: (contactId: string) => Promise<void>;
 }
+
+/** Estados en los que la conversacion se da por terminada. */
+const ESTADOS_FINALES: LeadEstado[] = ['enviado', 'descartado'];
 
 const listQuery = z.object({
   estado: z.enum(ESTADOS as [LeadEstado, ...LeadEstado[]]).optional(),
@@ -96,7 +107,7 @@ export async function registerLeadsRoutes(
   app: FastifyInstance,
   deps: LeadsRoutesDeps,
 ): Promise<void> {
-  const { repos, panelStoky } = deps;
+  const { repos, panelStoky, alCerrarFicha } = deps;
 
   app.get('/admin/leads', async (request) => {
     const query = listQuery.parse(request.query ?? {});
@@ -225,8 +236,17 @@ export async function registerLeadsRoutes(
     const contact = await repos.contacts.getById(contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
 
+    const previo = await repos.leads.ensure(contactId, contact.name);
     // Tocar la ficha a mano cancela la pregunta que estuviera esperando: si el
     // operador acaba de escribir el distrito, el bot no puede seguir pidiendolo.
-    return repos.leads.update(contactId, { ...patch, preguntaPendiente: null });
+    const lead = await repos.leads.update(contactId, { ...patch, preguntaPendiente: null });
+
+    // Solo al ENTRAR en el estado final. Sin comparar con el estado previo,
+    // guardar dos veces una ficha ya enviada dispararia dos respaldos.
+    const cierra =
+      ESTADOS_FINALES.includes(lead.estado) && !ESTADOS_FINALES.includes(previo.estado);
+    if (cierra && alCerrarFicha) await alCerrarFicha(contactId);
+
+    return lead;
   });
 }

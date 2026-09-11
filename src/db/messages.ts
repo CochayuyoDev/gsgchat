@@ -75,6 +75,44 @@ export interface MessagesRepo {
   markRead(contactId: string, at: Date): Promise<void>;
   /** Total de mensajes entrantes sin leer, para el globo del menu. */
   unreadTotal(): Promise<number>;
+  /** Entrantes desde esa fecha: la otra mitad del ratio salientes/entrantes. */
+  contarEntrantesDesde(since: Date): Promise<number>;
+
+  // --- respaldo y limpieza (ver src/archive) ---
+
+  /**
+   * El hilo entero, del mas viejo al mas nuevo, en paginas.
+   *
+   * `listMessages` no sirve para respaldar: pagina hacia atras y esta pensada
+   * para la pantalla. Esta va hacia delante para poder recorrer un hilo de
+   * miles de mensajes sin cargarlo todo en memoria.
+   */
+  pageForArchive(contactId: string, afterId: number, limit: number): Promise<Message[]>;
+  /**
+   * Borra los mensajes del contacto hasta `upToId` incluido.
+   *
+   * El tope importa: entre que se lee el hilo y se borra puede entrar un
+   * mensaje nuevo, y ese no esta en el respaldo. Sin el tope se perderia.
+   */
+  deleteByContact(contactId: string, upToId: number): Promise<number>;
+  /**
+   * Lo que hace falta saber del hilo antes de respaldarlo: cuantos mensajes
+   * tiene, entre que fechas y cual es el ultimo id.
+   *
+   * Ese ultimo id es el tope del borrado: lo que entre despues de leerlo no
+   * esta en el respaldo y por eso no se borra.
+   */
+  summaryByContact(contactId: string): Promise<{
+    count: number;
+    firstAt: Date | null;
+    lastAt: Date | null;
+    lastId: number;
+  }>;
+  /**
+   * Contactos cuyo ultimo mensaje es anterior a `before`, para el barrido
+   * por inactividad. Solo los que tienen mensajes: los vacios no se archivan.
+   */
+  staleContacts(before: Date, limit: number): Promise<Array<{ contactId: string; lastAt: Date }>>;
 }
 
 interface Row {
@@ -236,6 +274,66 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
             and m.created_at > coalesce(c.chat_read_at, to_timestamp(0))`,
       );
       return rows[0]?.total ?? 0;
+    },
+    async contarEntrantesDesde(since) {
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total from messages where direction = 'in' and created_at >= $1`,
+        [since],
+      );
+      return rows[0]?.total ?? 0;
+    },
+
+    async pageForArchive(contactId, afterId, limit) {
+      const { rows } = await pool.query<Row>(
+        `select * from messages
+          where contact_id = $1 and id > $2
+          order by id asc
+          limit $3`,
+        [contactId, afterId, limit],
+      );
+      return rows.map(toMessage);
+    },
+
+    async deleteByContact(contactId, upToId) {
+      const { rowCount } = await pool.query(
+        'delete from messages where contact_id = $1 and id <= $2',
+        [contactId, upToId],
+      );
+      return rowCount ?? 0;
+    },
+
+    async summaryByContact(contactId) {
+      const { rows } = await pool.query<{
+        total: number;
+        first_at: Date | null;
+        last_at: Date | null;
+        last_id: number | null;
+      }>(
+        `select count(*)::int as total, min(created_at) as first_at,
+                max(created_at) as last_at, max(id) as last_id
+           from messages where contact_id = $1`,
+        [contactId],
+      );
+      const r = rows[0];
+      return {
+        count: r?.total ?? 0,
+        firstAt: r?.first_at ?? null,
+        lastAt: r?.last_at ?? null,
+        lastId: Number(r?.last_id ?? 0),
+      };
+    },
+
+    async staleContacts(before, limit) {
+      const { rows } = await pool.query<{ contact_id: string; last_at: Date }>(
+        `select contact_id, max(created_at) as last_at
+           from messages
+          group by contact_id
+         having max(created_at) < $1
+          order by max(created_at) asc
+          limit $2`,
+        [before, limit],
+      );
+      return rows.map((r) => ({ contactId: r.contact_id, lastAt: r.last_at }));
     },
   };
 }

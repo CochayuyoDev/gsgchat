@@ -60,6 +60,14 @@ export interface LocalSocket {
   };
   /** Para los mensajes con botones, que hay que armar a mano. */
   relayMessage?(jid: string, content: unknown, options: { messageId?: string }): Promise<unknown>;
+  /** Pregunta al servidor si esos numeros tienen cuenta de WhatsApp. */
+  onWhatsApp?(...jids: string[]): Promise<Array<{ jid: string; exists: boolean }> | undefined>;
+  /**
+   * Presencia: "composing" mientras se escribe, "paused" al parar. Es lo que
+   * hace que el mensaje no aparezca de la nada. Ver src/salud/humano.ts.
+   */
+  sendPresenceUpdate?(type: 'composing' | 'paused' | 'available' | 'unavailable', jid?: string): Promise<void>;
+  presenceSubscribe?(jid: string): Promise<void>;
 }
 
 export interface StartLocalOptions {
@@ -75,6 +83,38 @@ export interface StartLocalOptions {
     saveCreds: () => Promise<void>;
   }>;
   log?: (mensaje: string) => void;
+  /**
+   * Cada corte de conexion, con el codigo de Baileys (401 desvinculado, 403
+   * prohibido = baneo, 428 cerrada, 440 reemplazada, 515 reinicio...). El
+   * monitor de salud cuenta las desconexiones y para todo con un 403.
+   */
+  onDisconnect?: (code: number | undefined, detail: string) => void;
+}
+
+/** Que significa cada codigo de cierre de Baileys, en cristiano. */
+export function explicarCierre(code: number | undefined): string {
+  switch (code) {
+    case 401:
+      return 'La sesion se cerro desde el telefono. Vuelve a escanear.';
+    case 403:
+      return 'WhatsApp rechazo la sesion (403). Suele ser un baneo del numero: no se reintenta solo.';
+    case 408:
+      return 'Tiempo de espera agotado; se reintenta.';
+    case 411:
+      return 'Conflicto multidispositivo; hay que volver a vincular.';
+    case 428:
+      return 'La conexion se cerro; se reintenta.';
+    case 440:
+      return 'Otra sesion con las mismas credenciales tomo el sitio.';
+    case 500:
+      return 'Sesion corrupta; hay que volver a vincular.';
+    case 503:
+      return 'Servicio no disponible; se reintenta.';
+    case 515:
+      return 'WhatsApp pidio reiniciar la conexion; se reintenta.';
+    default:
+      return 'Se corto la conexion.';
+  }
 }
 
 const estado: LocalState = {
@@ -202,12 +242,21 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
 
         if (update.connection === 'close') {
           const code = update.lastDisconnect?.error?.output?.statusCode;
+          const explicacion = explicarCierre(code);
+          try {
+            opts.onDisconnect?.(code, update.lastDisconnect?.error?.message ?? explicacion);
+          } catch {
+            // El aviso no puede tumbar la reconexion.
+          }
           // 401 es "te desvincularon desde el telefono": no sirve reintentar,
-          // hay que escanear otra vez. Cualquier otro corte es de red.
-          if (code === 401) {
+          // hay que escanear otra vez. 403 es que WhatsApp no quiere esta
+          // sesion -casi siempre un baneo-, y reintentar en bucle es lo peor
+          // que se puede hacer. Cualquier otro corte es de red.
+          if (code === 401 || code === 403) {
             estado.status = 'STOPPED';
-            estado.detail = 'La sesion se cerro desde el telefono. Vuelve a escanear.';
+            estado.detail = explicacion;
             socket = null;
+            log(`WhatsApp desconectado (${code}): ${explicacion}`);
           } else {
             estado.status = 'FAILED';
             estado.detail = update.lastDisconnect?.error?.message ?? 'Se corto la conexion.';
@@ -226,6 +275,19 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
         estado.detail = 'Fallo abriendo la sesion.';
         listo();
       });
+    }) as unknown) as (arg: never) => void);
+
+    // Los acuses de los mensajes propios: entregado, leido, fallido. Sin
+    // esto el doble check del chat no se movia y, peor, el monitor de salud
+    // veia que nada de lo enviado constaba entregado y frenaba el numero por
+    // una senal que no existia.
+    sock.ev.on('messages.update', (((updates: unknown[]) => {
+      if (!opts.onChange) return;
+      const statuses = acksToStatuses(updates);
+      if (!statuses.length) return;
+      void Promise.resolve(opts.onChange({ statuses })).catch((error: unknown) =>
+        log(`fallo leyendo un acuse: ${String(error)}`),
+      );
     }) as unknown) as (arg: never) => void);
 
     sock.ev.on('messages.upsert', (((evento: { messages?: unknown[]; type?: string }) => {
@@ -439,6 +501,50 @@ export function telefonoDe(key: { remoteJid?: string; remoteJidAlt?: string } | 
   // Solo LID: no hay telefono con el que abrir la conversacion. Se descarta,
   // pero es un caso que conviene ver en el log si alguna vez pasa.
   return null;
+}
+
+/**
+ * El estado de Baileys (WAMessageStatus) al de la Cloud API.
+ *
+ *   0 ERROR, 1 PENDING, 2 SERVER_ACK, 3 DELIVERY_ACK, 4 READ, 5 PLAYED.
+ *
+ * PENDING no dice nada nuevo y se ignora; PLAYED (un audio escuchado) es
+ * leido a todos los efectos.
+ */
+export function ackToStatus(status: unknown): 'sent' | 'delivered' | 'read' | 'failed' | null {
+  const n = typeof status === 'number' ? status : typeof status === 'string' ? Number(status) : Number.NaN;
+  if (!Number.isFinite(n)) return null;
+  if (n === 0) return 'failed';
+  if (n === 2) return 'sent';
+  if (n === 3) return 'delivered';
+  if (n === 4 || n === 5) return 'read';
+  return null;
+}
+
+type StatusTraducido = { id: string; status: 'sent' | 'delivered' | 'read' | 'failed'; timestamp: string; recipient_id: string };
+
+/**
+ * Traduce un lote de `messages.update` a los `statuses` del webhook de Meta.
+ *
+ * Solo los mensajes propios (`fromMe`) con un estado que signifique algo: el
+ * id de Baileys es el mismo que se guardo como wamid al enviar.
+ */
+export function acksToStatuses(updates: unknown[]): StatusTraducido[] {
+  const salida: StatusTraducido[] = [];
+  for (const u of updates ?? []) {
+    const item = u as { key?: { id?: string; remoteJid?: string; fromMe?: boolean }; update?: { status?: unknown } };
+    const id = item.key?.id;
+    if (!id || item.key?.fromMe === false) continue;
+    const status = ackToStatus(item.update?.status);
+    if (!status) continue;
+    salida.push({
+      id,
+      status,
+      timestamp: String(Math.floor(Date.now() / 1000)),
+      recipient_id: fromJid(item.key?.remoteJid ?? ''),
+    });
+  }
+  return salida;
 }
 
 /**

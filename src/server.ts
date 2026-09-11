@@ -21,6 +21,10 @@ import type { SettingsService } from './settings/service.js';
 import type { StokyClient } from './stoky/client.js';
 import { TrackingHub } from './tracking/realtime.js';
 import { TemplateRenderError } from './templates/render.js';
+import { crearPuertoGsg } from './rutas/gsg.js';
+import { instalarMensajesEnEspanol } from './util/mensajes-zod.js';
+import type { Monitor } from './salud/monitor.js';
+import type { Politica } from './salud/politica.js';
 
 export interface ServerDeps {
   config: Config;
@@ -32,10 +36,19 @@ export interface ServerDeps {
   sender: Sender;
   queue: OutboundQueue;
   logger?: boolean;
+  /** El monitor de salud y la politica de ritmo. Ver src/salud. */
+  salud?: Monitor;
+  politica?: () => Politica;
+  /** Reabrir la sesion local (Baileys) al arrancar si hay vinculacion guardada. */
+  autoConectarLocal?: boolean;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const { config, repos, wa, sender, queue, settings, catalogo } = deps;
+  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica } = deps;
+
+  // Los errores de validacion salen en espanol: son los que acaban en la
+  // pantalla del operador, no en un log para programadores.
+  instalarMensajesEnEspanol();
 
   const app = Fastify({
     logger: deps.logger ?? true,
@@ -62,8 +75,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.setErrorHandler((raw: unknown, request, reply) => {
     const error = raw instanceof Error ? raw : new Error(String(raw));
     if (error instanceof ZodError) {
-      const detail = error.issues.map((i) => `${i.path.join('.') || 'cuerpo'}: ${i.message}`).join('; ');
-      return reply.code(400).send({ error: `datos invalidos: ${detail}` });
+      const detail = error.issues.map((i) => `${i.path.join('.') || 'el cuerpo'}: ${i.message}`).join('; ');
+      return reply.code(400).send({ error: `Revisa los datos - ${detail}` });
     }
     if (error instanceof NotConfiguredError) {
       return reply.code(409).send({ error: error.message });
@@ -94,12 +107,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(websocket);
 
   const hub = new TrackingHub({ tracking: repos.tracking });
+  // La puerta a GSG: sin credenciales no manda nada y los reportes se quedan
+  // en la cola, que es como funciona hasta que GSG publique su API.
+  const gsg = crearPuertoGsg(config);
 
   app.get('/health', async () => ({ ok: true, configured: settings.isConfigured() }));
 
   // El orden importa: registerAdminRoutes instala el hook que exige el token
   // en todo /admin, y debe estar antes de que se sirva cualquier ruta /admin.
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
   await registerWahaWebhookRoutes(app, {
@@ -109,6 +125,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     wa,
     settings,
     catalogo,
+    gsg,
+    salud,
     hmacKey: () => settings.current().verifyToken,
   });
   await registerTrackingRoutes(app, { repos, config, hub, settings });
@@ -121,8 +139,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     wa,
     hub,
     adminToken: config.ADMIN_TOKEN,
+    salud,
+    politica,
   });
-  await registerWebRoutes(app, { config, settings, wa, sender, repos, catalogo });
+  await registerWebRoutes(app, {
+    config,
+    settings,
+    wa,
+    sender,
+    repos,
+    catalogo,
+    salud,
+    autoConectarLocal: deps.autoConectarLocal,
+  });
 
   return app;
 }

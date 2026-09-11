@@ -1,13 +1,28 @@
 /** Dobles en memoria: permiten probar gates, sender y webhook sin Postgres. */
 
+/**
+ * Reloj de los dobles. Por defecto el real; las pruebas que mueven el tiempo
+ * (monitor de salud, goteo) lo fijan con `setFakeClock` para que las fechas
+ * que escriben los dobles (sent_at, opt_in_at...) vivan en el mismo tiempo
+ * que el resto de la prueba.
+ */
+let fakeClock: (() => Date) | null = null;
+export function setFakeClock(clock: (() => Date) | null): void {
+  fakeClock = clock;
+}
+export const fakeNow = (): Date => (fakeClock ? fakeClock() : new Date());
+
 import type {
   Campaign,
+  CampaignRecipient,
   Contact,
   ContactListItem,
   DeliveryListItem,
   DeliveryStatus,
   LocationListItem,
   Repos,
+  ResumenEntregas,
+  SaludEvento,
   Template,
   TemplateCategory,
   NumberState,
@@ -21,10 +36,14 @@ import { createSettingsService, type SettingsRepo, type SettingsService } from '
 import { createFakeAutomation, type FakeAutomation } from './fakes-automation.js';
 import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
 import { createFakeLeads } from './fakes-leads.js';
+import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
+import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
 
 export interface FakeRepos extends Repos {
   automation: FakeAutomation;
   messages: FakeMessages;
+  archives: FakeArchives;
+  rutas: FakeRutas;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -32,6 +51,8 @@ export interface FakeRepos extends Repos {
   _points: Map<string, TrackPoint[]>;
   _campaigns: Map<string, Campaign>;
   _links: Map<string, TrackingLink>;
+  _recipients: CampaignRecipient[];
+  _salud: SaludEvento[];
 }
 
 let seq = 1;
@@ -45,6 +66,8 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
   const links = new Map<string, TrackingLink & { createdAt: Date }>();
   const campaigns = new Map<string, Campaign>();
   const counters = new Map<string, number>();
+  const recipients: CampaignRecipient[] = [];
+  const saludEventos: SaludEvento[] = [];
 
   let numberState: NumberState = {
     phoneNumberId: 'PNID',
@@ -53,7 +76,39 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     pausedReason: null,
     warmupStartedOn: new Date('2020-01-01T00:00:00Z'),
     tier: null,
+    estado: 'CONNECTED',
+    riesgo: 0,
+    nivel: 'verde',
+    factor: 1,
+    motivos: null,
+    pausadaHasta: null,
+    rampaDesde: null,
+    limite24h: null,
+    ultimaEvaluacion: null,
     ...overrides,
+  };
+
+  /** Mismo resumen que el SQL, sobre las filas en memoria. */
+  const resumir = (rows: Array<Record<string, unknown>>): ResumenEntregas => {
+    const salidos = rows.filter((d) => ['sent', 'delivered', 'read', 'failed'].includes(String(d.status)));
+    const porCodigo: Record<string, number> = {};
+    for (const d of salidos) {
+      if (d.status === 'failed' && d.errorCode) {
+        porCodigo[String(d.errorCode)] = (porCodigo[String(d.errorCode)] ?? 0) + 1;
+      }
+    }
+    return {
+      enviados: salidos.length,
+      entregados: salidos.filter((d) => d.status === 'delivered' || d.status === 'read').length,
+      leidos: salidos.filter((d) => d.status === 'read').length,
+      fallidos: salidos.filter((d) => d.status === 'failed').length,
+      porCodigo,
+      destinatariosUnicos: new Set(
+        salidos
+          .filter((d) => d.businessInitiated && d.status !== 'failed')
+          .map((d) => String(d.contactId)),
+      ).size,
+    };
   };
 
   const dayKey = (day: Date) => day.toISOString().slice(0, 10);
@@ -67,8 +122,12 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     _points: points,
     _campaigns: campaigns,
     _links: links,
+    _recipients: recipients,
+    _salud: saludEventos,
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
+    archives: createFakeArchives(),
+    rutas: createFakeRutas(),
     leads: createFakeLeads((id) => {
       const contacto = contactById(id);
       return contacto ? { phone: contacto.phone, name: contacto.name } : undefined;
@@ -95,24 +154,32 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           optInSource: null,
           optOutAt: null,
           lastInboundAt: null,
-          createdAt: new Date(),
+          suprimidoHasta: null,
+          suprimidoMotivo: null,
+          suprimidoAmbito: null,
+          sinRespuestaSeguidas: 0,
+          ultimoEnvioAt: null,
+          primerEnvioAt: null,
+          enviosIniciados: 0,
+          createdAt: fakeNow(),
         };
         contactsByPhone.set(phone, contact);
         return contact;
       },
       async setOptIn(phone, source) {
         const c = await repos.contacts.upsertFromInbound(phone);
-        c.optInAt = new Date();
+        c.optInAt = fakeNow();
         c.optInSource = source;
         c.optOutAt = null;
       },
       async setOptOut(phone) {
         const c = await repos.contacts.upsertFromInbound(phone);
-        c.optOutAt = new Date();
+        c.optOutAt = fakeNow();
       },
       async touchInbound(phone, at) {
         const c = await repos.contacts.upsertFromInbound(phone);
         c.lastInboundAt = at;
+        c.sinRespuestaSeguidas = 0;
       },
       async listOptedIn(limit, offset) {
         return [...contactsByPhone.values()]
@@ -156,19 +223,50 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           const phone = normalizePhone(entry.phone);
           if (phone.length < 6) continue;
           const c = await repos.contacts.upsertFromInbound(phone, entry.name?.trim() || undefined);
-          c.optInAt = new Date();
+          c.optInAt = fakeNow();
           c.optInSource = source;
           c.optOutAt = null;
           count++;
         }
         return count;
       },
+      async suprimir(phone, hasta, motivo, ambito) {
+        const c = contactsByPhone.get(phone);
+        if (!c) return;
+        c.suprimidoHasta = hasta;
+        c.suprimidoMotivo = motivo;
+        c.suprimidoAmbito = ambito;
+      },
+      async levantarSupresion(phone) {
+        const c = contactsByPhone.get(phone);
+        if (!c) return;
+        c.suprimidoHasta = null;
+        c.suprimidoMotivo = null;
+        c.suprimidoAmbito = null;
+      },
+      async anotarEnvioIniciado(contactId, at) {
+        const c = contactById(contactId);
+        if (!c) return;
+        c.ultimoEnvioAt = at;
+        c.primerEnvioAt = c.primerEnvioAt ?? at;
+        c.enviosIniciados = (c.enviosIniciados ?? 0) + 1;
+        c.sinRespuestaSeguidas = (c.sinRespuestaSeguidas ?? 0) + 1;
+      },
+      async contarNuevosEscritosDesde(since) {
+        return [...contactsByPhone.values()].filter((c) => c.primerEnvioAt && c.primerEnvioAt >= since).length;
+      },
+      async contarSuprimidos(now) {
+        return [...contactsByPhone.values()].filter((c) => c.suprimidoHasta && c.suprimidoHasta > now).length;
+      },
+      async contarBajasDesde(since) {
+        return [...contactsByPhone.values()].filter((c) => c.optOutAt && c.optOutAt >= since).length;
+      },
     },
 
     locations: {
       async save(contactId, result, rawInput) {
         const id = seq++;
-        locations.push({ id, contactId, ...result, rawInput, confirmed: false, createdAt: new Date() });
+        locations.push({ id, contactId, ...result, rawInput, confirmed: false, createdAt: fakeNow() });
         return id;
       },
       async confirm(locationId) {
@@ -208,16 +306,28 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     deliveries: {
       async create(input) {
         const id = seq++;
-        deliveries.push({ id, status: 'queued', queuedAt: new Date(), ...input });
+        deliveries.push({ id, status: 'queued', queuedAt: fakeNow(), ...input });
         return id;
       },
       async markSent(id, wamid) {
         const row = deliveries.find((d) => d.id === id);
-        if (row) Object.assign(row, { status: 'sent', wamid, sentAt: new Date() });
+        if (row) Object.assign(row, { status: 'sent', wamid, sentAt: fakeNow() });
       },
       async markBlocked(id, reason) {
         const row = deliveries.find((d) => d.id === id);
-        if (row) Object.assign(row, { status: 'blocked_by_gate', reason, errorTitle: reason, failedAt: new Date() });
+        if (row) Object.assign(row, { status: 'blocked_by_gate', reason, errorTitle: reason, failedAt: fakeNow() });
+      },
+      async markFailed(id, code, title) {
+        const row = deliveries.find((d) => d.id === id);
+        if (row) {
+          Object.assign(row, {
+            status: 'failed',
+            errorCode: code,
+            errorTitle: title,
+            sentAt: (row.sentAt as Date | undefined) ?? fakeNow(),
+            failedAt: fakeNow(),
+          });
+        }
       },
       async updateByWamid(wamid, status, error) {
         const row = deliveries.find((d) => d.wamid === wamid);
@@ -239,6 +349,49 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           stats[key] = (stats[key] ?? 0) + 1;
         }
         return stats;
+      },
+      async resumenDesde(since) {
+        return resumir(deliveries.filter((d) => d.sentAt && (d.sentAt as Date) >= since));
+      },
+      async resumenUltimos(n, desde) {
+        const salidos = deliveries.filter((d) => d.sentAt && (!desde || (d.sentAt as Date) >= desde));
+        return resumir(salidos.slice(-n));
+      },
+      async contarCampanaDesde(campaignId, since) {
+        return deliveries.filter(
+          (d) => d.campaignId === campaignId && d.sentAt && (d.sentAt as Date) >= since &&
+            ['sent', 'delivered', 'read', 'failed'].includes(String(d.status)),
+        ).length;
+      },
+      async ultimoIniciadoAt() {
+        const rows = deliveries.filter((d) => d.businessInitiated && d.sentAt);
+        if (!rows.length) return null;
+        return rows.reduce<Date>((max, d) => ((d.sentAt as Date) > max ? (d.sentAt as Date) : max), rows[0]!.sentAt as Date);
+      },
+      async contarIniciadosAContactoDesde(contactId, since) {
+        return deliveries.filter(
+          (d) => d.contactId === contactId && d.businessInitiated && d.sentAt && (d.sentAt as Date) >= since &&
+            ['sent', 'delivered', 'read', 'failed'].includes(String(d.status)),
+        ).length;
+      },
+      async ultimoEnvioA(contactId) {
+        const rows = deliveries.filter(
+          (d) => d.contactId === contactId && d.sentAt && ['sent', 'delivered', 'read'].includes(String(d.status)),
+        );
+        if (!rows.length) return null;
+        return rows.reduce<Date>((max, d) => ((d.sentAt as Date) > max ? (d.sentAt as Date) : max), rows[0]!.sentAt as Date);
+      },
+      async contarIniciadosDesde(since) {
+        return deliveries.filter(
+          (d) => d.businessInitiated && d.sentAt && (d.sentAt as Date) >= since &&
+            ['sent', 'delivered', 'read', 'failed'].includes(String(d.status)),
+        ).length;
+      },
+      async contarPlantillaDesde(templateName, since) {
+        return deliveries.filter(
+          (d) => d.templateName === templateName && d.sentAt && (d.sentAt as Date) >= since &&
+            ['sent', 'delivered', 'read'].includes(String(d.status)),
+        ).length;
       },
       async listRecent(query) {
         const items: DeliveryListItem[] = [];
@@ -281,13 +434,26 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       async upsert(t) {
         templates.set(`${t.name}/${t.language}`, t);
       },
-      async setStatus(name, language, status) {
+      async setStatus(name, language, status, motivo) {
         const t = templates.get(`${name}/${language}`);
-        if (t) t.status = status;
+        if (!t) return;
+        t.status = status;
+        if (motivo) t.motivo = motivo;
+        if (status === 'APPROVED') {
+          t.pausadaHasta = null;
+          t.aprobadaAt = t.aprobadaAt ?? fakeNow();
+        }
       },
       async setQuality(name, language, quality) {
         const t = templates.get(`${name}/${language}`);
         if (t) t.quality = quality;
+      },
+      async marcarPausa(name, language, hasta, pausas, motivo) {
+        const t = templates.get(`${name}/${language}`);
+        if (!t) return;
+        t.pausadaHasta = hasta;
+        t.pausas = pausas;
+        t.motivo = motivo;
       },
       async list() {
         return [...templates.values()];
@@ -306,6 +472,18 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       },
       async setTier(_id, tier) {
         numberState = { ...numberState, tier };
+      },
+      async setEstado(_id, estado) {
+        numberState = { ...numberState, estado };
+      },
+      async setRiesgo(_id, patch) {
+        numberState = { ...numberState, ...patch };
+      },
+      async setLimite24h(_id, limite) {
+        numberState = { ...numberState, limite24h: limite };
+      },
+      async reiniciarWarmup(_id, day) {
+        numberState = { ...numberState, warmupStartedOn: day };
       },
     },
 
@@ -327,7 +505,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
 
     tracking: {
       async createLink(contactId, label, expiresAt) {
-        const link = { id: `l${seq++}`, contactId, label, expiresAt, revokedAt: null, createdAt: new Date() };
+        const link = { id: `l${seq++}`, contactId, label, expiresAt, revokedAt: null, createdAt: fakeNow() };
         links.set(link.id, link);
         return link;
       },
@@ -336,11 +514,11 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       },
       async revoke(id) {
         const link = links.get(id);
-        if (link) link.revokedAt = new Date();
+        if (link) link.revokedAt = fakeNow();
       },
       async addPoint(linkId, point) {
         const list = points.get(linkId) ?? [];
-        list.push({ ...point, recordedAt: point.recordedAt ?? new Date() });
+        list.push({ ...point, recordedAt: point.recordedAt ?? fakeNow() });
         points.set(linkId, list);
       },
       async listPoints(linkId, limit = 500) {
@@ -359,7 +537,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
               phone: contact?.phone ?? null,
               name: contact?.name ?? null,
               pointCount: list.length,
-              lastPoint: last ? { lat: last.lat, lng: last.lng, at: last.recordedAt ?? new Date() } : null,
+              lastPoint: last ? { lat: last.lat, lng: last.lng, at: last.recordedAt ?? fakeNow() } : null,
             };
           });
       },
@@ -368,12 +546,113 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     campaigns: {
       async create(input) {
         const id = `camp${seq++}`;
-        campaigns.set(id, { id, ...input, status: 'draft', createdAt: new Date() });
+        campaigns.set(id, {
+          id,
+          name: input.name,
+          templateName: input.templateName,
+          templateLanguage: input.templateLanguage,
+          category: input.category,
+          status: 'draft',
+          createdAt: fakeNow(),
+          ritmoPorHora: input.ritmoPorHora ?? null,
+          canario: input.canario ?? 0,
+          canarioEsperaMin: input.canarioEsperaMin ?? 60,
+          canarioEnviadoAt: null,
+          motivoPausa: null,
+          startedAt: null,
+          finishedAt: null,
+        });
         return id;
       },
-      async setStatus(id, status) {
+      async setStatus(id, status, motivo) {
         const c = campaigns.get(id);
-        if (c) c.status = status;
+        if (!c) return;
+        c.status = status;
+        c.motivoPausa = motivo ?? null;
+        if ((status === 'running' || status === 'canary') && !c.startedAt) c.startedAt = fakeNow();
+        if (status === 'finished' || status === 'stopped' || status === 'empty') c.finishedAt = c.finishedAt ?? fakeNow();
+      },
+      async agregarDestinatarios(campaignId, entries) {
+        let added = 0;
+        for (const e of entries) {
+          if (recipients.some((r) => r.campaignId === campaignId && r.phone === e.phone)) continue;
+          recipients.push({
+            id: seq++,
+            campaignId,
+            phone: e.phone,
+            variables: e.variables ?? [],
+            estado: 'pendiente',
+            orden: e.orden,
+            canario: e.canario,
+            deliveryId: null,
+            detalle: null,
+            posponerHasta: null,
+            intentos: 0,
+            enviadoAt: null,
+          });
+          added++;
+        }
+        return added;
+      },
+      async siguientesPendientes(campaignId, limit, soloCanario = false, ahora = fakeNow()) {
+        return recipients
+          .filter(
+            (r) =>
+              r.campaignId === campaignId &&
+              r.estado === 'pendiente' &&
+              (!soloCanario || r.canario) &&
+              (!r.posponerHasta || r.posponerHasta <= ahora),
+          )
+          .sort((a, b) => Number(b.canario) - Number(a.canario) || a.orden - b.orden || a.id - b.id)
+          .slice(0, limit);
+      },
+      async posponerDestinatario(id, hasta, detalle) {
+        const r = recipients.find((x) => x.id === id);
+        if (!r) return;
+        r.posponerHasta = hasta;
+        r.detalle = detalle;
+        r.intentos++;
+      },
+      async contarPendientes(campaignId) {
+        return recipients.filter((r) => r.campaignId === campaignId && r.estado === 'pendiente').length;
+      },
+      async marcarDestinatario(id, estado, detalle, deliveryId, at) {
+        const r = recipients.find((x) => x.id === id);
+        if (!r) return;
+        r.estado = estado;
+        r.detalle = detalle;
+        r.deliveryId = deliveryId;
+        if (estado === 'enviado') r.enviadoAt = at ?? fakeNow();
+      },
+      async cifrasDestinatarios(campaignId) {
+        const cifras: Record<string, number> = {};
+        for (const r of recipients.filter((x) => x.campaignId === campaignId)) {
+          cifras[r.estado] = (cifras[r.estado] ?? 0) + 1;
+        }
+        return cifras;
+      },
+      async cancelarPendientes(campaignId, motivo) {
+        let n = 0;
+        for (const r of recipients) {
+          if (r.campaignId !== campaignId || r.estado !== 'pendiente') continue;
+          r.estado = 'cancelado';
+          r.detalle = motivo;
+          n++;
+        }
+        return n;
+      },
+      async listarActivas() {
+        return [...campaigns.values()].filter((c) => ['running', 'canary', 'paused'].includes(c.status));
+      },
+      async setCanarioEnviado(id, at) {
+        const c = campaigns.get(id);
+        if (c) c.canarioEnviadoAt = at;
+      },
+      async resumenCanario(campaignId) {
+        const ids = new Set(
+          recipients.filter((r) => r.campaignId === campaignId && r.canario && r.deliveryId).map((r) => r.deliveryId),
+        );
+        return resumir(deliveries.filter((d) => ids.has(d.id as number)));
       },
       async get(id) {
         return campaigns.get(id) ?? null;
@@ -383,8 +662,53 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
         );
         return Promise.all(
-          all.map(async (c) => ({ ...c, stats: await repos.deliveries.campaignStats(c.id) })),
+          all.map(async (c) => ({
+            ...c,
+            stats: await repos.deliveries.campaignStats(c.id),
+            destinatarios: await repos.campaigns.cifrasDestinatarios(c.id),
+          })),
         );
+      },
+    },
+
+    salud: {
+      async registrar(evento) {
+        const id = seq++;
+        saludEventos.push({
+          id,
+          phoneNumberId: evento.phoneNumberId ?? '',
+          at: evento.at ?? fakeNow(),
+          tipo: evento.tipo,
+          codigo: evento.codigo ?? null,
+          detalle: evento.detalle ?? null,
+          contactId: evento.contactId ?? null,
+          campaignId: evento.campaignId ?? null,
+          payload: evento.payload ?? null,
+        });
+        return id;
+      },
+      async contar(since, tipo, codigo) {
+        return saludEventos.filter(
+          (e) => e.at >= since && (!tipo || e.tipo === tipo) && (!codigo || e.codigo === codigo),
+        ).length;
+      },
+      async resumen(since) {
+        const out: Record<string, number> = {};
+        for (const e of saludEventos.filter((x) => x.at >= since)) {
+          const key = `${e.tipo}:${e.codigo ?? ''}`;
+          out[key] = (out[key] ?? 0) + 1;
+        }
+        return out;
+      },
+      async ultimos(limit) {
+        return [...saludEventos].sort((a, b) => b.at.getTime() - a.at.getTime() || b.id - a.id).slice(0, limit);
+      },
+      async purgar(before) {
+        const antes = saludEventos.length;
+        for (let i = saludEventos.length - 1; i >= 0; i--) {
+          if (saludEventos[i]!.at < before) saludEventos.splice(i, 1);
+        }
+        return antes - saludEventos.length;
       },
     },
   };

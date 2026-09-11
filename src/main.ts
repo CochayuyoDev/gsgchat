@@ -14,25 +14,57 @@ import { createSender, type SendJob, type SendOutcome } from './outbound/sender.
 import { createOutboundQueue, createOutboundWorker, redisReachable } from './outbound/queue.js';
 import { createMemoryOutboundQueue } from './outbound/memory-queue.js';
 import { buildServer } from './server.js';
-import { startScheduler } from './automation/engine.js';
+import { politicaDesdeConfig } from './salud/politica.js';
+import { crearMonitor } from './salud/monitor.js';
+import { arrancarServicios, resumenPolitica } from './servicios.js';
 
 const runtime = await createRuntime({ migrate: true });
 const { config, repos, settings, wa } = runtime;
+
+// La politica de ritmo depende del proveedor: la oficial de Meta tiene tier y
+// calidad; un cliente no oficial no, y ahi se va bastante mas despacio. Se
+// calcula por llamada porque el proveedor puede cambiar desde /setup.
+const politica = () =>
+  politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial');
+
+// El monitor de salud: mira errores, entregas, bajas y desconexiones cada
+// minuto, frena o pausa solo, y le da al sender el marcapasos. El aviso al
+// supervisor se conecta despues de crear el sender (el monitor avisa por el
+// sender, y el sender consulta al monitor).
+let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
+// Sin Meta no hay id de numero: 'local' es la clave fija de esa fila.
+const phoneNumberId = () => settings.current().phoneNumberId || 'local';
+
+const salud = crearMonitor({
+  repos,
+  politica,
+  phoneNumberId,
+  avisar: (texto) => (avisarSupervisor ? avisarSupervisor(texto) : Promise.resolve()),
+  // La cola se crea mas abajo; solo se toca cuando el monitor pausa o
+  // reanuda, y para entonces ya existe.
+  cola: { pause: () => queue.pause(), resume: () => queue.resume() },
+});
 
 const sender = createSender({
   repos,
   wa,
   // Funcion, no valor: el numero puede cambiar desde /setup sin reiniciar.
-  phoneNumberId: () => settings.current().phoneNumberId,
-  warmup: {
-    startPerDay: config.WARMUP_START_PER_DAY,
-    growth: config.WARMUP_GROWTH,
-    hardCap: config.DAILY_SEND_CAP,
-  },
+  phoneNumberId,
+  warmup: politica().warmup,
   maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
   // La ventana de 24 h la impone Meta; fuera de la Cloud API no existe.
   serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
+  salud,
+  politica,
 });
+
+avisarSupervisor = async (texto) => {
+  const destino = politica().avisarA;
+  if (!destino) return;
+  // Manual a proposito: es un aviso de operacion a una persona conocida, no
+  // una campana, y tiene que salir aunque el numero este frenado.
+  await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', text: texto, manual: true });
+};
 
 // Sin Redis se usa la cola en memoria en vez de no arrancar. Se avisa fuerte:
 // es una degradacion real (no sobrevive al reinicio), no un modo equivalente.
@@ -50,18 +82,14 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })
   : null;
 
-// Seguimientos y mensajes programados: se procesan cada 10 s.
-const stopScheduler = startScheduler({
-  repos,
-  sender,
-  log: (message, detail) => app.log.warn(detail ?? {}, message),
-});
+// Todo lo que trabaja solo: monitor, secuencias, goteo, rutas, avisos, GSG.
+const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, log: app.log });
 
 await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
@@ -73,6 +101,9 @@ ${runtime.migrated.length ? `\n  Migraciones aplicadas: ${runtime.migrated.join(
 
   Token de administracion: ${config.ADMIN_TOKEN}
   (guardado en .secrets.json; pegalo cuando la web te lo pida)
+
+  Ritmo: ${resumenPolitica(politica())}.
+  Salud del numero: http://localhost:${config.PORT}/panel (pestana Salud).
 ${
   conRedis
     ? ''
@@ -85,7 +116,7 @@ ${
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'cerrando');
-  stopScheduler();
+  pararServicios();
   await worker?.close();
   await queue.close();
   await app.close();

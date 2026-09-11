@@ -16,3 +16,7 @@ dist/
 .wa-data/
 # Fotos, audios y documentos que llegan por el chat.
 .wa-media/
+
+# Respaldos de conversacion (ver ARCHIVE_DIR)
+respaldos/
+.wa-demo-respaldos/
