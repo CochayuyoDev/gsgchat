@@ -6,9 +6,8 @@ import { createSender } from '../src/outbound/sender.js';
 import { buildTrackingUrls } from '../src/tracking/tokens.js';
 import { signPayload } from '../src/whatsapp/signature.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
-import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos } from './fakes.js';
+import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, CLAVE_API_PRUEBA as ADMIN } from './fakes.js';
 
-const ADMIN = 'admin-token-de-prueba-1234';
 const APP_SECRET = 'app-secret-de-prueba';
 
 const ENV = {
@@ -20,7 +19,6 @@ const ENV = {
   WHATSAPP_APP_SECRET: APP_SECRET,
   WHATSAPP_VERIFY_TOKEN: 'verify-me',
   GOOGLE_MAPS_API_KEY: 'maps-key',
-  ADMIN_TOKEN: ADMIN,
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'mexico',
 } as NodeJS.ProcessEnv;

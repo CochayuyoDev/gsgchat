@@ -32,7 +32,7 @@ import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
-import { createFakeRepos, createFakeSettings, createFakeWhatsApp } from './fakes.js';
+import { createFakeRepos, createFakeSettings, createFakeWhatsApp, CLAVE_API_PRUEBA as ADMIN } from './fakes.js';
 
 const noopQueue: OutboundQueue = {
   async enqueue() {},
@@ -160,7 +160,7 @@ describe('plantillas sin plantillas', () => {
       resolveTemplateBody: async () => 'Hola {{1}}, tu pedido #{{2}} salio.',
     });
 
-    await wa.sendTemplate('5215512345678', 'confirmacion_pedido', 'es_MX', [
+    await wa.sendTemplate('5215512345678', 'confirmacion_pedido', 'es', [
       { type: 'body', parameters: [{ type: 'text', text: 'Ana' }, { type: 'text', text: '42' }] },
     ]);
 
@@ -172,7 +172,7 @@ describe('plantillas sin plantillas', () => {
       resolveTemplateBody: async () => undefined,
     });
 
-    await expect(wa.sendTemplate('521551', 'no_existe', 'es_MX')).rejects.toThrow(/no esta en la base de datos/);
+    await expect(wa.sendTemplate('521551', 'no_existe', 'es')).rejects.toThrow(/no esta en la base de datos/);
   });
 
   it('el catalogo local hace de catalogo aprobado: no hay a quien pedirle permiso', async () => {
@@ -187,7 +187,7 @@ describe('plantillas sin plantillas', () => {
   it('dar de alta una plantilla no aplica y se dice claro', async () => {
     const { wa } = cliente([]);
     await expect(wa.createTemplate({
-      name: 'x', language: 'es_MX', category: 'UTILITY', body: 'x', examples: [],
+      name: 'x', language: 'es', category: 'UTILITY', body: 'x', examples: [],
     })).rejects.toThrow(/no tiene plantillas/);
   });
 
@@ -386,8 +386,7 @@ describe('ciclo de vida de la sesion', () => {
  * proveedor no obliga a tocar nada aguas abajo.
  */
 describe('el webhook de WAHA dentro del servidor', () => {
-  const ADMIN = 'admin-token-de-prueba-1234';
-  const HMAC = 'clave-hmac-de-waha';
+    const HMAC = 'clave-hmac-de-waha';
 
   async function montar() {
     const config = loadConfig({
@@ -396,7 +395,6 @@ describe('el webhook de WAHA dentro del servidor', () => {
       WHATSAPP_PROVIDER: 'waha',
       WAHA_URL: BASE,
       WHATSAPP_VERIFY_TOKEN: HMAC,
-      ADMIN_TOKEN: ADMIN,
       TRACKING_SECRET: 'x'.repeat(40),
       GEO_BBOX: 'mexico',
     } as NodeJS.ProcessEnv);

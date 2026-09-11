@@ -24,7 +24,31 @@ export interface ContextoMensaje {
   nombre?: string | null;
   negocio: string;
   referencia?: string | null;
+  /** Lo que se sabe del pedido: el cliente tiene que reconocer de que hablamos. */
+  direccion?: string | null;
+  distrito?: string | null;
+  /**
+   * Si el mensaje va a llevar un boton nativo de ubicacion.
+   *
+   * Con la Cloud API dentro de la ventana de 24 h, si. Con el cliente no
+   * oficial, no: los botones nativos llegan rotos a una cuenta personal, y
+   * decirle al cliente "pulse el boton de abajo" cuando no hay ninguno es
+   * la forma mas rapida de que no mande nada. Ahi se explica el clip.
+   */
+  conBoton?: boolean;
 }
+
+/** Como se le pide que la mande, segun haya boton o no. */
+export const comoEnviar = (ctx: ContextoMensaje): string =>
+  ctx.conBoton
+    ? 'con el botón de aquí abajo'
+    : 'desde el clip 📎 → Ubicación → Enviar tu ubicación actual';
+
+/** El pedido con su distrito y direccion, para que el cliente lo reconozca. */
+export const detallePedido = (ctx: ContextoMensaje): string => {
+  const partes = [ctx.distrito, ctx.direccion].map((p) => (p ?? '').trim()).filter(Boolean);
+  return partes.length ? ` (${partes.join(', ')})` : '';
+};
 
 /** Como se llama a alguien de quien no se sabe el nombre. */
 const tratamiento = (nombre?: string | null): string => {
@@ -90,39 +114,37 @@ export const PLANTILLAS: Record<PasoUbicacion, PlantillaPaso> = {
 export const VARIANTES_TEXTO: Record<PasoUbicacion, Array<(ctx: ContextoMensaje) => string>> = {
   solicitud: [
     (ctx) =>
-      `Hola ${tratamiento(ctx.nombre)}, le escribimos de ${ctx.negocio} por ${pedido(ctx.referencia)}. ` +
+      `Hola ${tratamiento(ctx.nombre)}, le escribimos de ${ctx.negocio} por ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
       'Para llegar exacto a su dirección necesitamos su ubicación. ' +
-      'Puede enviarla con el botón de aquí abajo.',
+      `Puede enviarla ${comoEnviar(ctx)}.`,
     (ctx) =>
-      `Buen día ${tratamiento(ctx.nombre)}, somos ${ctx.negocio} y tenemos ${pedido(ctx.referencia)} listo para entregar. ` +
-      '¿Nos comparte su ubicación con el botón de abajo? Así el repartidor llega sin dar vueltas.',
+      `Buen día ${tratamiento(ctx.nombre)}, somos ${ctx.negocio} y tenemos ${pedido(ctx.referencia)}${detallePedido(ctx)} listo para entregar. ` +
+      `¿Nos comparte su ubicación ${comoEnviar(ctx)}? Así el repartidor llega sin dar vueltas.`,
     (ctx) =>
-      `${tratamiento(ctx.nombre)}, le saluda ${ctx.negocio}. Vamos a entregarle ${pedido(ctx.referencia)} y ` +
-      'necesitamos el punto exacto: toque el botón de abajo y envíe su ubicación, por favor.',
+      `${tratamiento(ctx.nombre)}, le saluda ${ctx.negocio}. Vamos a entregarle ${pedido(ctx.referencia)}${detallePedido(ctx)} y ` +
+      `necesitamos el punto exacto: envíe su ubicación ${comoEnviar(ctx)}, por favor.`,
   ],
   recordatorio: [
     (ctx) =>
-      `Hola ${tratamiento(ctx.nombre)}, seguimos pendientes de su ubicación para entregar ${pedido(ctx.referencia)}. ` +
-      'Con el botón de abajo la envía en un toque. Si prefiere, responda este ' +
-      'mensaje y le llamamos.',
+      `Hola ${tratamiento(ctx.nombre)}, seguimos pendientes de su ubicación para entregar ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
+      `Puede enviarla ${comoEnviar(ctx)}. Si prefiere, responda este mensaje y le llamamos.`,
     (ctx) =>
-      `${tratamiento(ctx.nombre)}, todavía no recibimos su ubicación para ${pedido(ctx.referencia)}. ` +
-      'Cuando pueda, envíela con el botón de abajo. Si le viene mejor por teléfono, responda y le llamamos.',
+      `${tratamiento(ctx.nombre)}, todavía no recibimos su ubicación para ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
+      `Cuando pueda, envíela ${comoEnviar(ctx)}. Si le viene mejor por teléfono, responda y le llamamos.`,
     (ctx) =>
-      `Le escribimos otra vez por ${pedido(ctx.referencia)}, ${tratamiento(ctx.nombre)}: nos falta su ubicación ` +
-      'para poder salir a entregar. Está en el botón de abajo. También podemos llamarle si responde este mensaje.',
+      `Le escribimos otra vez por ${pedido(ctx.referencia)}${detallePedido(ctx)}, ${tratamiento(ctx.nombre)}: nos falta su ubicación ` +
+      `para poder salir a entregar. Puede mandarla ${comoEnviar(ctx)}. También podemos llamarle si responde este mensaje.`,
   ],
   insistencia: [
     (ctx) =>
-      `Gracias por responder, ${tratamiento(ctx.nombre)}. Para ${pedido(ctx.referencia)} nos falta el punto exacto: ` +
-      'use el botón de abajo para compartir su ubicación. Si le resulta más ' +
-      'cómodo, respóndanos y le llamamos.',
+      `Gracias por responder, ${tratamiento(ctx.nombre)}. Para ${pedido(ctx.referencia)}${detallePedido(ctx)} nos falta el punto exacto: ` +
+      `comparta su ubicación ${comoEnviar(ctx)}. Si le resulta más cómodo, respóndanos y le llamamos.`,
     (ctx) =>
-      `Recibimos su mensaje, ${tratamiento(ctx.nombre)}, gracias. Lo que nos falta para entregar ${pedido(ctx.referencia)} ` +
-      'es el punto en el mapa: toque el botón de abajo y envíe su ubicación. O respóndanos y le llamamos.',
+      `Recibimos su mensaje, ${tratamiento(ctx.nombre)}, gracias. Lo que nos falta para entregar ${pedido(ctx.referencia)}${detallePedido(ctx)} ` +
+      `es el punto en el mapa: envíe su ubicación ${comoEnviar(ctx)}. O respóndanos y le llamamos.`,
     (ctx) =>
-      `${tratamiento(ctx.nombre)}, gracias por escribirnos. Para ${pedido(ctx.referencia)} necesitamos su ubicación exacta, ` +
-      'no solo la dirección: el botón de abajo la envía en un toque. Si prefiere, le llamamos.',
+      `${tratamiento(ctx.nombre)}, gracias por escribirnos. Para ${pedido(ctx.referencia)}${detallePedido(ctx)} necesitamos su ubicación exacta, ` +
+      `no solo la dirección: puede mandarla ${comoEnviar(ctx)}. Si prefiere, le llamamos.`,
   ],
 };
 

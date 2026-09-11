@@ -34,7 +34,7 @@ export function createFakeAutomation(contactById: (id: string) => Contact | unde
       delayMinutes: s.delayMinutes ?? 0,
       kind: s.kind ?? 'template',
       templateName: s.templateName ?? null,
-      templateLanguage: s.templateLanguage ?? 'es_MX',
+      templateLanguage: s.templateLanguage ?? 'es',
       category: s.category ?? 'UTILITY',
       variables: s.variables ?? [],
       text: s.text ?? null,

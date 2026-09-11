@@ -281,6 +281,45 @@ export function pareceTecleoAlAzar(texto: string): boolean {
   return false;
 }
 
+/**
+ * Si el texto dice CUANDO, de alguna forma que se pueda programar.
+ *
+ * "Da ternura" o "si mno" no son un momento. Un momento es hoy, manana, un
+ * dia de la semana, una fecha, una hora, una parte del dia, "ahora" o "cuanto
+ * antes". Cualquier otra cosa se rechaza y se vuelve a preguntar, porque una
+ * ficha con "Cuando: Da ternura" sale a reparto sin que nadie la mire.
+ */
+export function pareceMomento(texto: string): boolean {
+  const t = normaliza(texto);
+  if (!t) return false;
+  const patrones = [
+    /\b(hoy|manana|pasado manana|ahora|ahorita|ya mismo|cuanto antes|lo antes posible|urgente)\b/,
+    /\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/,
+    /\b(esta|la proxima|la siguiente|proxima|siguiente) (semana|tarde|manana|noche)\b/,
+    /\b(en la|por la|a la|de) (manana|tarde|noche|madrugada|mediodia)\b/,
+    /\b(fin de semana|finde|feriado)\b/,
+    /\b\d{1,2}[\/-]\d{1,2}([\/-]\d{2,4})?\b/,
+    /\b\d{1,2} de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|septiembre|octubre|noviembre|diciembre)\b/,
+    /\b(a las?|desde las?|hasta las?|tipo|como a las?) \d{1,2}(:\d{2})?\b/,
+    /\b\d{1,2}(:\d{2})? ?(am|pm|hrs|h)\b/,
+    /\b(en|dentro de) \d+ (minutos?|horas?|dias?)\b/,
+  ];
+  return patrones.some((re) => re.test(t));
+}
+
+/**
+ * Si el texto puede ser un documento de identidad.
+ *
+ * En Peru un DNI tiene 8 digitos, un carne de extranjeria 9 y un RUC 11; un
+ * pasaporte mezcla letras y numeros. "1234567" (siete) no es ninguno de
+ * ellos, y un documento mal apuntado es una entrega que no se puede hacer.
+ */
+export function pareceDocumento(texto: string): boolean {
+  const compacto = texto.replace(/[\s.-]/g, '').toUpperCase();
+  if (/^\d{8,11}$/.test(compacto)) return true;
+  return /^[A-Z0-9]{6,12}$/.test(compacto) && /[A-Z]/.test(compacto) && /\d/.test(compacto);
+}
+
 export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boolean {
   const limpio = texto.trim();
   if (limpio.length < 2) return false;
@@ -313,7 +352,8 @@ export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boo
   // Una pregunta tampoco. La excepcion es "que vas a enviar": ahi el cliente
   // puede describir su envio con una pregunta ("un paquete, se puede?") y
   // rechazarlo seria pedantear.
-  if (campo !== 'contenido' && esPregunta(limpio)) return false;
+  // Y "cuanto antes" empieza como una pregunta pero es un momento.
+  if (campo !== 'contenido' && !(campo === 'cuando' && pareceMomento(limpio)) && esPregunta(limpio)) return false;
 
   // Y lo tecleado al azar no vale para nada, ni siquiera para describir un
   // envio: "asdfgh" no es una caja de documentos.
@@ -330,7 +370,10 @@ export function respuestaValida(campo: Exclude<Campo, null>, texto: string): boo
       return /\p{L}{2,}/u.test(limpio);
     case 'documento':
       // DNI, RUC, carne de extranjeria o pasaporte; o una negativa explicita.
-      return esNegacion(limpio) || /[0-9]{6,}/.test(limpio.replace(/[\s.-]/g, ''));
+      return esNegacion(limpio) || pareceDocumento(limpio);
+    case 'cuando':
+      // Un momento que se pueda programar, no una frase cualquiera.
+      return pareceMomento(limpio);
     default:
       return true;
   }

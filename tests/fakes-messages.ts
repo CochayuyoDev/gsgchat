@@ -19,8 +19,36 @@ export function createFakeMessages(
   const repo: FakeMessages = {
     _all: all,
 
+    async existsByWamid(wamid: string) {
+      return all.some((m) => m.wamid === wamid);
+    },
+
     async contarEntrantesDesde(since: Date) {
       return all.filter((m) => m.direction === 'in' && m.createdAt >= since).length;
+    },
+
+    async actividadPorDia(since: Date) {
+      const porDia = new Map<string, { dia: string; entrantes: number; salientes: number }>();
+      for (const m of all) {
+        if (m.createdAt < since) continue;
+        const dia = m.createdAt.toISOString().slice(0, 10);
+        const fila = porDia.get(dia) ?? { dia, entrantes: 0, salientes: 0 };
+        if (m.direction === 'in') fila.entrantes += 1;
+        else fila.salientes += 1;
+        porDia.set(dia, fila);
+      }
+      return [...porDia.values()].sort((a, b) => a.dia.localeCompare(b.dia));
+    },
+
+    async contarEsperandoRespuesta() {
+      let total = 0;
+      for (const c of contacts()) {
+        const ultimo = all.filter((m) => m.contactId === c.id).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0];
+        if (!ultimo || ultimo.direction !== 'in') continue;
+        const leido = (c as { chatReadAt?: Date | null }).chatReadAt ?? null;
+        if (!leido || ultimo.createdAt > leido) total += 1;
+      }
+      return total;
     },
 
     async add(message: NewMessage) {
@@ -49,7 +77,9 @@ export function createFakeMessages(
 
     async setStatusByWamid(wamid, status) {
       const row = all.find((m) => m.wamid === wamid);
-      if (row) row.status = status;
+      if (!row) return;
+      const rango = (s: unknown) => ({ read: 3, delivered: 2, sent: 1 })[String(s)] ?? 0;
+      if (status === 'failed' || rango(status) > rango(row.status)) row.status = status;
     },
 
     async listConversations(query) {

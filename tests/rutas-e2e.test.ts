@@ -24,9 +24,9 @@ import {
   createFakeWhatsApp,
   type FakeRepos,
   type FakeWhatsApp,
+  CLAVE_API_PRUEBA as ADMIN,
 } from './fakes.js';
 
-const ADMIN = 'admin-token-de-prueba-1234';
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
@@ -36,7 +36,6 @@ const ENV = {
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
   WHATSAPP_APP_SECRET: 'app-secret-de-prueba',
   WHATSAPP_VERIFY_TOKEN: 'verify-me',
-  ADMIN_TOKEN: ADMIN,
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'lima',
   RUTAS_PAIS: 'peru',

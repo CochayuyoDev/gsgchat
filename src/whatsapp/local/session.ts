@@ -307,8 +307,15 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
             continue;
           }
 
+          // Lo que no llega en vivo (historial, cola de cuando el sistema
+          // estaba apagado) se guarda pero no se contesta. Ver `esMensajeViejo`.
           const m = value.messages?.[0];
-          log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}`);
+          if (m && esMensajeViejo(evento.type, m.timestamp)) {
+            m.viejo = true;
+            log(`entrante ${m.type} de ${m.from} (${evento.type ?? 'sin tipo'}, viejo): se guarda sin contestar`);
+          } else {
+            log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}`);
+          }
           await opts.onChange?.(value);
         }
       })().catch((error: unknown) => log(`fallo leyendo un entrante: ${String(error)}`));
@@ -501,6 +508,25 @@ export function telefonoDe(key: { remoteJid?: string; remoteJidAlt?: string } | 
   // Solo LID: no hay telefono con el que abrir la conversacion. Se descarta,
   // pero es un caso que conviene ver en el log si alguna vez pasa.
   return null;
+}
+
+/** Mas viejo que esto, un entrante no se contesta aunque venga como `notify`. */
+export const MAXIMA_EDAD_PARA_CONTESTAR_MS = 10 * 60_000;
+
+/**
+ * Si un entrante es del historial y no de ahora.
+ *
+ * Baileys entrega los mensajes en vivo con `type: 'notify'`; el historial y
+ * lo que sincroniza al reconectar llega como `append`. Y aun con `notify`,
+ * lo que se acumulo mientras el sistema estaba apagado puede tener horas: a
+ * eso tampoco se le contesta en cadena. Diez minutos es el margen para un
+ * reinicio normal.
+ */
+export function esMensajeViejo(tipoEvento: string | undefined, timestamp: string | number | undefined, ahora = Date.now()): boolean {
+  if (tipoEvento !== 'notify') return true;
+  const segundos = Number(timestamp);
+  if (!Number.isFinite(segundos) || segundos <= 0) return false;
+  return ahora - segundos * 1000 > MAXIMA_EDAD_PARA_CONTESTAR_MS;
 }
 
 /**

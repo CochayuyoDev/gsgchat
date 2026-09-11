@@ -7,6 +7,7 @@
 
 import type { Pool } from './pool.js';
 import type { CodigoIncidencia } from '../rutas/incidencias.js';
+import { createAjustesRepo, type AjustesRepo } from '../rutas/ajustes.js';
 
 export type EstadoLote = 'preparado' | 'enviando' | 'pausado' | 'terminado';
 
@@ -175,6 +176,8 @@ export interface ConsultaSolicitudes {
 }
 
 export interface RutasRepo {
+  /** Los ajustes del reparto que se cambian desde la pantalla. */
+  ajustes: AjustesRepo;
   crearLote(datos: { nombre: string; origen?: string; notas?: string | null; externoId?: string | null }): Promise<Lote>;
   lote(id: string): Promise<Lote | null>;
   listarLotes(limit: number, offset: number): Promise<LoteConCifras[]>;
@@ -194,7 +197,8 @@ export interface RutasRepo {
   tocaIntentar(ahora: Date, limite: number): Promise<Solicitud[]>;
   /** La solicitud viva de un contacto: con esto se lee su respuesta. */
   abiertaPorContacto(contactId: string): Promise<Solicitud | null>;
-  abiertaPorTelefono(phone: string): Promise<Solicitud | null>;
+  /** Con `excluirLoteId`, la abierta en OTRO lote: para no escribir dos veces por lo mismo. */
+  abiertaPorTelefono(phone: string, excluirLoteId?: string): Promise<Solicitud | null>;
   telefonosDelLote(loteId: string): Promise<string[]>;
 
   registrarEvento(
@@ -402,6 +406,8 @@ export function createRutasRepo(pool: Pool): RutasRepo {
   }
 
   return {
+    ajustes: createAjustesRepo(pool),
+
     // ------------------------------------------------------------ lotes
 
     async crearLote(datos) {
@@ -585,19 +591,20 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     async abiertaPorContacto(contactId) {
       const { rows } = await pool.query<SolicitudRow>(
         `select * from rutas_solicitudes
-          where contact_id = $1 and estado in ('pendiente','enviado','respondio','supervision')
+          where contact_id = $1 and estado in ('pendiente','enviado','respondio','supervision','derivado')
           order by id desc limit 1`,
         [contactId],
       );
       return rows[0] ? toSolicitud(rows[0]) : null;
     },
 
-    async abiertaPorTelefono(phone) {
+    async abiertaPorTelefono(phone, excluirLoteId) {
       const { rows } = await pool.query<SolicitudRow>(
         `select * from rutas_solicitudes
-          where phone = $1 and estado in ('pendiente','enviado','respondio','supervision')
+          where phone = $1 and estado in ('pendiente','enviado','respondio','supervision','derivado')
+            and ($2::uuid is null or lote_id <> $2::uuid)
           order by id desc limit 1`,
-        [phone],
+        [phone, excluirLoteId ?? null],
       );
       return rows[0] ? toSolicitud(rows[0]) : null;
     },

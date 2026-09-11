@@ -30,7 +30,7 @@ const stepSchema = z.object({
   delayMinutes: z.number().int().min(0).max(60 * 24 * 365),
   kind: z.enum(['template', 'text']),
   templateName: z.string().optional().nullable(),
-  templateLanguage: z.string().default('es_MX'),
+  templateLanguage: z.string().default('es'),
   category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).default('UTILITY'),
   variables: z.array(z.string()).default([]),
   text: z.string().max(4000).optional().nullable(),
@@ -55,7 +55,7 @@ const scheduleSchema = z.object({
   kind: z.enum(['template', 'freeform']),
   category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).default('UTILITY'),
   templateName: z.string().optional().nullable(),
-  templateLanguage: z.string().default('es_MX'),
+  templateLanguage: z.string().default('es'),
   variables: z.array(z.string()).default([]),
   text: z.string().max(4000).optional().nullable(),
 });

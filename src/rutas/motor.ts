@@ -25,8 +25,9 @@ import type { Sender } from '../outbound/sender.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
 import { decidirRitmo } from '../salud/ritmo.js';
-import { elegirPlantilla } from '../salud/variantes.js';
+import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
+import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
 import { payloadIncidencia, payloadResumen, type PuertoGsg } from './gsg.js';
 import {
@@ -87,6 +88,8 @@ export interface MotorDeps {
   wa?: WhatsAppClient;
   gsg: PuertoGsg;
   opciones: OpcionesMotor;
+  /** Como se llama el negocio ahora (se cambia desde la pantalla). */
+  nombreNegocio?: () => string;
   /**
    * Si hay que mandar plantilla en vez de texto libre.
    *
@@ -110,6 +113,13 @@ export interface MotorDeps {
    */
   salud?: Monitor;
   politica?: () => Politica;
+  /**
+   * Si el texto libre va a llevar un boton nativo de ubicacion. Con la Cloud
+   * API si; con el cliente no oficial solo si WHATSAPP_NATIVE_BUTTONS esta
+   * encendido (y viene apagado porque llegan rotos a una cuenta personal).
+   * Sin boton, el mensaje explica el camino del clip.
+   */
+  conBoton?: () => boolean;
 }
 
 export interface ResultadoTick {
@@ -161,7 +171,27 @@ export interface Motor {
 export function crearMotor(deps: MotorDeps): Motor {
   const ahora = deps.ahora ?? (() => new Date());
   const azar = deps.azar ?? Math.random;
-  const { repos, sender, gsg, opciones } = deps;
+  const { repos, sender, gsg } = deps;
+
+  /**
+   * Las opciones vigentes: las de la configuracion con los ajustes que se
+   * guardaron desde la pantalla por encima. Se refrescan en cada tick, asi
+   * que cambiar la espera o el horario no obliga a reiniciar.
+   */
+  let ajustes: AjustesRutas = ajustesPorDefecto(deps.opciones);
+  let opciones: OpcionesMotor = deps.opciones;
+
+  async function refrescarAjustes(): Promise<void> {
+    try {
+      ajustes = await repos.rutas.ajustes.get(ajustesPorDefecto(deps.opciones));
+      opciones = aplicarAjustes(deps.opciones, ajustes);
+      if (deps.nombreNegocio) opciones = { ...opciones, negocio: deps.nombreNegocio() };
+    } catch (error) {
+      // Sin ajustes legibles se sigue con los de la configuracion: el
+      // reparto no se para por una fila corrupta en settings.
+      deps.log?.('no se pudieron leer los ajustes de rutas', { detalle: String(error) });
+    }
+  }
 
   /** Cuando se mando el ultimo mensaje, para respetar la pausa. */
   let ultimoEnvio = 0;
@@ -172,6 +202,30 @@ export function crearMotor(deps: MotorDeps): Motor {
     const min = Math.max(1, opciones.pausaMinSegundos);
     const max = Math.max(min, opciones.pausaMaxSegundos);
     return Math.round((min + azar() * (max - min)) * 1000);
+  }
+
+  /**
+   * El texto de un paso cuando se escribe libre: las redacciones guardadas
+   * desde la pantalla si las hay, o las de siempre.
+   */
+  function textoDelPaso(paso: PasoUbicacion, ctx: ContextoMensaje, clave: string): string {
+    const propias = ajustes.textos[paso];
+    if (propias.length) return rellenarTexto(elegirVariante(propias, clave), ctx);
+    return textoLibre(paso, ctx, clave);
+  }
+
+  /**
+   * Las variables de una plantilla, en su orden.
+   *
+   * Las del catalogo tienen su orden propio. Para una plantilla propia el
+   * orden es fijo y esta escrito en la pantalla: {{1}} nombre, {{2}} pedido,
+   * {{3}} negocio; se pasan tantas como la plantilla tenga.
+   */
+  function variablesPara(nombre: string, paso: PasoUbicacion, ctx: ContextoMensaje, cuantas: number): string[] {
+    if (PLANTILLAS[paso].variantes.includes(nombre)) return PLANTILLAS[paso].variables(ctx);
+    const nombreCliente = (ctx.nombre ?? '').trim().split(/\s+/)[0] || 'buenas tardes';
+    const pedido = (ctx.referencia ?? '').trim() || 'su pedido';
+    return [nombreCliente, pedido, ctx.negocio].slice(0, Math.max(0, cuantas));
   }
 
   /** La pausa vigente, estirada por el factor de riesgo (0.5 = el doble). */
@@ -185,11 +239,13 @@ export function crearMotor(deps: MotorDeps): Motor {
    * no pausadas, la de mejor calidad y menos usada en 24 h. Si no hay
    * ninguna valida, la principal, para que el rechazo del sender diga por que.
    */
-  async function plantillaPara(paso: PasoUbicacion, momento: Date): Promise<{ name: string; language: string }> {
+  async function plantillaPara(paso: PasoUbicacion, momento: Date): Promise<{ name: string; language: string; variables: number }> {
     const def = PLANTILLAS[paso];
+    // Las que se eligieron desde la pantalla mandan sobre las del catalogo.
+    const nombres = ajustes.plantillas[paso].length ? ajustes.plantillas[paso] : def.variantes;
     const todas = await repos.templates.list();
-    const candidatas = todas.filter((t) => def.variantes.includes(t.name) && t.language === def.language);
-    if (!candidatas.length) return { name: def.name, language: def.language };
+    const candidatas = todas.filter((t) => nombres.includes(t.name));
+    if (!candidatas.length) return { name: nombres[0] ?? def.name, language: def.language, variables: def.variables({ negocio: '' }).length };
 
     const desde = new Date(momento.getTime() - 24 * 60 * 60 * 1000);
     const uso24h: Record<string, number> = {};
@@ -202,14 +258,21 @@ export function crearMotor(deps: MotorDeps): Motor {
       plantillaNuevaDias: politica?.plantillaNuevaDias ?? 0,
       plantillaNuevaPorDia: politica?.plantillaNuevaPorDia ?? 0,
     });
-    if (eleccion.plantilla) return { name: eleccion.plantilla.name, language: eleccion.plantilla.language };
-    return { name: def.name, language: def.language };
+    if (eleccion.plantilla) {
+      return { name: eleccion.plantilla.name, language: eleccion.plantilla.language, variables: eleccion.plantilla.variables };
+    }
+    const primera = candidatas[0]!;
+    return { name: primera.name, language: primera.language, variables: primera.variables };
   }
 
   const contexto = (solicitud: Solicitud): ContextoMensaje => ({
     nombre: solicitud.nombre,
     negocio: opciones.negocio,
     referencia: solicitud.referencia,
+    direccion: solicitud.direccion,
+    distrito: solicitud.distrito,
+    // Sin boton nativo, el texto explica el clip en vez de un boton que no existe.
+    conBoton: deps.conBoton?.() ?? false,
   });
 
   /** Marca la incidencia, la apunta en la bitacora y la encola para GSG. */
@@ -268,9 +331,10 @@ export function crearMotor(deps: MotorDeps): Motor {
       'pasa al repartidor para llamada telefónica',
     );
 
-    // Avisar al cliente solo si se puede escribir gratis: gastar una plantilla
-    // en despedirse no aporta y cuesta cuota.
-    if (!deps.usarPlantilla() && solicitud.phone) {
+    // Avisar al cliente solo si se puede escribir gratis y si alguna vez
+    // contesto: a quien ignoro tres mensajes, un cuarto solo le suma motivos
+    // para bloquear; y con plantilla, gastar una en despedirse no aporta.
+    if (!deps.usarPlantilla() && solicitud.phone && respondio) {
       await sender
         .send({
           phone: solicitud.phone,
@@ -308,8 +372,13 @@ export function crearMotor(deps: MotorDeps): Motor {
       }
     }
 
-    const plantilla = PLANTILLAS[paso];
     const elegida = deps.usarPlantilla() ? await plantillaPara(paso, ahora()) : null;
+    // La cadencia por cliente la fija el reparto (espera e intentos), no la
+    // politica general: ver `SendJob.limitesContacto`.
+    const limitesContacto = {
+      separacionMs: Math.min(opciones.esperaRespuestaMinutos * 60_000, 60_000),
+      maxPorDia: opciones.maxIntentos + 1,
+    };
     const salida = deps.usarPlantilla()
       ? await sender.send({
           phone,
@@ -317,14 +386,16 @@ export function crearMotor(deps: MotorDeps): Motor {
           category: 'UTILITY',
           templateName: elegida!.name,
           templateLanguage: elegida!.language,
-          variables: plantilla.variables(ctx),
+          variables: variablesPara(elegida!.name, paso, ctx, elegida!.variables),
+          limitesContacto,
         })
       : await sender.send({
           phone,
           kind: 'interactive',
           category: 'UTILITY',
           // La redaccion que le toca a este cliente en este intento.
-          interactive: { body: textoLibre(paso, ctx, `${phone}:${solicitud.intentos}`), locationRequest: true },
+          interactive: { body: textoDelPaso(paso, ctx, `${phone}:${solicitud.intentos}`), locationRequest: true },
+          limitesContacto,
         });
 
     const momento = ahora();
@@ -353,6 +424,15 @@ export function crearMotor(deps: MotorDeps): Motor {
     }
 
     if (salida.blocked) {
+      // Sin socket no se toca la solicitud: no es una incidencia del cliente
+      // ni del numero, es que WhatsApp esta cerrado. Se vuelve a intentar en
+      // dos minutos y el motor no vuelve a mirar hasta entonces.
+      if (salida.code === 'sin_conexion') {
+        await repos.rutas.actualizarSolicitud(solicitud.id, {
+          proximoIntentoAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)),
+        });
+        return { accion: 'nada', solicitudId: solicitud.id, motivo: salida.reason };
+      }
       // El monitor aparto a este contacto porque Meta dijo que no tiene
       // WhatsApp: es una incidencia con nombre, no una espera de un mes.
       if (salida.code === 'contact_suppressed' && /131026|no tiene whatsapp/i.test(salida.reason)) {
@@ -382,6 +462,20 @@ export function crearMotor(deps: MotorDeps): Motor {
     if (codigo === 'sin_whatsapp' || codigo === 'numero_invalido') {
       await anotarIncidencia(solicitud, codigo, salida.error.slice(0, 300));
       return { accion: 'incidencia', solicitudId: solicitud.id };
+    }
+
+    // Un tropiezo pasajero (5xx, rate limit, socket caido a mitad) no gasta
+    // un intento: el cliente no recibio nada. Se vuelve en unos minutos.
+    if (salida.retryable) {
+      await repos.rutas.actualizarSolicitud(solicitud.id, {
+        proximoIntentoAt: new Date(momento.getTime() + 3 * 60_000),
+        incidencia: 'error_envio',
+        incidenciaDetalle: salida.error.slice(0, 300),
+      });
+      await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `WhatsApp no pudo enviar (se reintenta): ${salida.error}`);
+      ultimoEnvio = momento.getTime();
+      pausaActual = sortearPausa();
+      return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
     }
 
     const intentos = solicitud.intentos + 1;
@@ -425,6 +519,7 @@ export function crearMotor(deps: MotorDeps): Motor {
 
     async tick() {
       const momento = ahora();
+      await refrescarAjustes();
 
       if (!enHorario(momento, opciones)) {
         return {

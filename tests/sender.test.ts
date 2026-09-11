@@ -30,7 +30,7 @@ describe('sender', () => {
       kind: 'template',
       category: 'UTILITY',
       templateName: 'confirmacion_pedido',
-      templateLanguage: 'es_MX',
+      templateLanguage: 'es',
       variables: ['Ana', 'A-1024', 'https://ej.mx/t/9'],
     });
 

@@ -11,7 +11,6 @@ import path from 'node:path';
 const BARE_ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
   DATABASE_URL: 'postgres://x/y',
-  ADMIN_TOKEN: 'admin-token-largo-1234',
   TRACKING_SECRET: 'x'.repeat(40),
 } as NodeJS.ProcessEnv;
 
@@ -47,8 +46,8 @@ describe('secretos locales', () => {
 
     expect(second).toEqual(first);
     expect(keyFromBase64(first.settingsKey)).toHaveLength(32);
-    expect(JSON.parse(readFileSync(path.join(dir, '.secrets.json'), 'utf8')).adminToken).toBe(
-      first.adminToken,
+    expect(JSON.parse(readFileSync(path.join(dir, '.secrets.json'), 'utf8')).trackingSecret).toBe(
+      first.trackingSecret,
     );
   });
 });

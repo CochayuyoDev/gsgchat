@@ -10,6 +10,7 @@
  * una API.
  */
 
+import { aCsvCon } from './csv.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Repos } from '../db/repos.js';
@@ -136,27 +137,28 @@ export async function registerLeadsRoutes(
    */
   app.get('/admin/contacts.csv', async (request, reply) => {
     const query = z
-      .object({ state: z.enum(['all', 'opted_in', 'opted_out', 'pending']).default('all') })
+      .object({ q: z.string().max(120).optional(), state: z.enum(['all', 'opted_in', 'opted_out', 'pending']).default('all') })
       .parse(request.query ?? {});
 
-    const { items } = await repos.contacts.list({ state: query.state, limit: 20_000, offset: 0 });
-    const cabecera = 'telefono;nombre;opt_in;origen_opt_in;baja;ultimo_mensaje;alta';
-    const filas = items.map((c) =>
+    const { items } = await repos.contacts.list({ q: query.q, state: query.state, limit: 20_000, offset: 0 });
+    const csv = aCsvCon(
       [
-        c.phone,
-        celda(c.name),
-        c.optInAt ? c.optInAt.toISOString() : '',
-        celda(c.optInSource),
-        c.optOutAt ? c.optOutAt.toISOString() : '',
-        c.lastInboundAt ? c.lastInboundAt.toISOString() : '',
-        c.createdAt.toISOString(),
-      ].join(';'),
+        ['telefono', (c) => c.phone],
+        ['nombre', (c) => c.name],
+        ['estado', (c) => (c.optOutAt ? 'baja' : c.optInAt ? 'opt-in' : 'sin consentimiento')],
+        ['opt_in', (c) => c.optInAt],
+        ['origen_opt_in', (c) => c.optInSource],
+        ['baja', (c) => c.optOutAt],
+        ['ultimo_mensaje', (c) => c.lastInboundAt],
+        ['ultima_ubicacion', (c) => (c.lastLocation ? `${c.lastLocation.lat},${c.lastLocation.lng}` : '')],
+        ['alta', (c) => c.createdAt],
+      ],
+      items,
     );
-
     return reply
       .type('text/csv; charset=utf-8')
       .header('content-disposition', 'attachment; filename="contactos.csv"')
-      .send(`﻿${[cabecera, ...filas].join('\r\n')}\r\n`);
+      .send(csv);
   });
 
   /**

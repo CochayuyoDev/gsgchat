@@ -86,7 +86,7 @@ async function enviarPlantilla(sender: Sender, phone: string) {
     kind: 'template',
     category: 'UTILITY',
     templateName: 'confirmacion_pedido',
-    templateLanguage: 'es_MX',
+    templateLanguage: 'es',
     variables: ['Ana', 'A-1', 'https://x'],
   });
 }
@@ -128,9 +128,9 @@ describe('monitor: errores de Meta en caliente', () => {
     await contactoConOptIn(repos, '5215500000002');
 
     wa.failNext = new WhatsAppApiError('not delivered to maintain healthy ecosystem', 400, 131049, undefined, false);
-    await sender.send({ phone: '5215500000002', kind: 'template', category: 'MARKETING', templateName: 'promo', templateLanguage: 'es_MX', variables: ['a', 'b', 'c'] });
+    await sender.send({ phone: '5215500000002', kind: 'template', category: 'MARKETING', templateName: 'promo', templateLanguage: 'es', variables: ['a', 'b', 'c'] });
 
-    const marketing = await sender.send({ phone: '5215500000002', kind: 'template', category: 'MARKETING', templateName: 'promo', templateLanguage: 'es_MX', variables: ['a', 'b', 'c'] });
+    const marketing = await sender.send({ phone: '5215500000002', kind: 'template', category: 'MARKETING', templateName: 'promo', templateLanguage: 'es', variables: ['a', 'b', 'c'] });
     expect(marketing.ok).toBe(false);
     if (!marketing.ok && marketing.blocked) expect(marketing.code).toBe('contact_suppressed');
 
@@ -290,7 +290,7 @@ describe('monitor: el marcapasos dentro del sender', () => {
       expect(segundo.reason).toMatch(/pausa_entre_envios/);
       expect(segundo.retryAfterMs).toBeGreaterThan(0);
     }
-    const manual = await sender.send({ phone: '5215500000011', kind: 'template', category: 'UTILITY', templateName: 'confirmacion_pedido', templateLanguage: 'es_MX', variables: ['a', 'b', 'c'], manual: true });
+    const manual = await sender.send({ phone: '5215500000011', kind: 'template', category: 'UTILITY', templateName: 'confirmacion_pedido', templateLanguage: 'es', variables: ['a', 'b', 'c'], manual: true });
     expect(manual.ok).toBe(true);
     expect(salud.marcapasos.enUltimaHora(clock.ahora())).toBe(1);
   });
@@ -303,7 +303,7 @@ describe('monitor: el marcapasos dentro del sender', () => {
     const r = await enviarPlantilla(sender, '5215500000012');
     expect(r.ok).toBe(false);
     if (!r.ok && r.blocked) expect(r.reason).toMatch(/fuera_de_horario/);
-    const manual = await sender.send({ phone: '5215500000012', kind: 'template', category: 'UTILITY', templateName: 'confirmacion_pedido', templateLanguage: 'es_MX', variables: ['a', 'b', 'c'], manual: true });
+    const manual = await sender.send({ phone: '5215500000012', kind: 'template', category: 'UTILITY', templateName: 'confirmacion_pedido', templateLanguage: 'es', variables: ['a', 'b', 'c'], manual: true });
     expect(manual.ok).toBe(true);
   });
 
@@ -367,12 +367,26 @@ describe('monitor: el marcapasos dentro del sender', () => {
     if (!tope.ok && tope.blocked) expect(tope.code).toBe('contact_daily_cap');
   });
 
+  it('quien manda puede fijar sus propios limites por contacto (el reparto: su espera y sus intentos)', async () => {
+    const { repos, sender } = build({ politica: { maxPorContactoDia: 2, separacionContactoMs: 10 * 60_000 } });
+    await repos.templates.upsert(approvedTemplate());
+    await contactoConOptIn(repos, '5215500000090');
+    const limitesContacto = { separacionMs: 0, maxPorDia: 5 };
+    for (let i = 0; i < 4; i++) {
+      const r = await sender.send({ phone: '5215500000090', kind: 'template', category: 'UTILITY', templateName: 'confirmacion_pedido', templateLanguage: 'es', variables: ['a', 'b', 'c'], limitesContacto });
+      expect(r.ok, `envio ${i + 1}`).toBe(true);
+    }
+    // Sin los limites propios, la politica general lo habria parado al segundo.
+    const general = await enviarPlantilla(sender, '5215500000090');
+    expect(general.ok).toBe(false);
+  });
+
   it('fatiga: tras N envios sin respuesta no sale mas marketing hasta que el contacto escriba', async () => {
     const { repos, sender, clock } = build({ politica: { fatigaEnvios: 2, maxPorContactoDia: 10, separacionContactoMs: 0 } });
     await repos.templates.upsert(approvedTemplate({ name: 'promo', category: 'MARKETING' }));
     await repos.templates.upsert(approvedTemplate());
     await contactoConOptIn(repos, '5215500000040');
-    const promo = () => sender.send({ phone: '5215500000040', kind: 'template', category: 'MARKETING', templateName: 'promo', templateLanguage: 'es_MX', variables: ['a', 'b', 'c'] });
+    const promo = () => sender.send({ phone: '5215500000040', kind: 'template', category: 'MARKETING', templateName: 'promo', templateLanguage: 'es', variables: ['a', 'b', 'c'] });
 
     expect((await promo()).ok).toBe(true);
     clock.avanzar(DIA);
@@ -399,7 +413,6 @@ describe('monitor: lo que trae el webhook', () => {
     WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
     WHATSAPP_APP_SECRET: 's',
     WHATSAPP_VERIFY_TOKEN: 'verify-me',
-    ADMIN_TOKEN: 'admin-token-largo-1234',
     TRACKING_SECRET: 'x'.repeat(40),
     GEO_BBOX: 'mexico',
   };
@@ -429,25 +442,25 @@ describe('monitor: lo que trae el webhook', () => {
       processChange('message_template_status_update', {
         event: 'PAUSED',
         message_template_name: 'promo',
-        message_template_language: 'es_MX',
+        message_template_language: 'es',
         reason: 'NONE',
         other_info: { title, description: 'negative feedback' },
       }, deps);
 
     await pausar('FIRST_PAUSE');
-    let t = (await repos.templates.get('promo', 'es_MX'))!;
+    let t = (await repos.templates.get('promo', 'es'))!;
     expect(t.status).toBe('APPROVED');
     expect(t.pausas).toBe(1);
     expect(t.pausadaHasta!.getTime() - Date.now()).toBeGreaterThan(2.9 * HORA);
     expect(t.pausadaHasta!.getTime() - Date.now()).toBeLessThanOrEqual(3 * HORA);
 
     await pausar('SECOND_PAUSE');
-    t = (await repos.templates.get('promo', 'es_MX'))!;
+    t = (await repos.templates.get('promo', 'es'))!;
     expect(t.pausas).toBe(2);
     expect(t.pausadaHasta!.getTime() - Date.now()).toBeGreaterThan(5.9 * HORA);
 
     await pausar('THIRD_PAUSE');
-    t = (await repos.templates.get('promo', 'es_MX'))!;
+    t = (await repos.templates.get('promo', 'es'))!;
     expect(t.status).toBe('DISABLED');
     expect(repos._salud.filter((e) => e.tipo === 'plantilla').length).toBe(3);
   });
@@ -460,7 +473,7 @@ describe('monitor: lo que trae el webhook', () => {
     await processChange('message_template_status_update', {
       event: 'PAUSED',
       message_template_name: 'confirmacion_pedido',
-      message_template_language: 'es_MX',
+      message_template_language: 'es',
       other_info: { title: 'FIRST_PAUSE' },
     }, deps);
     // El webhook calcula la pausa con el reloj real; la prueba se situa ahi.
@@ -470,7 +483,7 @@ describe('monitor: lo que trae el webhook', () => {
     if (!r.ok && r.blocked) expect(r.code).toBe('template_paused');
     // Pasadas las 3 h la plantilla vuelve sola. Se comprueba con el gate puro
     // para no depender de la hora del dia a la que corra la prueba.
-    const t = (await repos.templates.get('confirmacion_pedido', 'es_MX'))!;
+    const t = (await repos.templates.get('confirmacion_pedido', 'es'))!;
     expect(t.pausadaHasta!.getTime()).toBeLessThan(Date.now() + 3 * HORA + 1000);
     expect(t.status).toBe('APPROVED');
   });
@@ -530,11 +543,11 @@ describe('monitor: lo que trae el webhook', () => {
     await repos.templates.upsert(approvedTemplate());
     await processChange('template_category_update', {
       message_template_name: 'confirmacion_pedido',
-      message_template_language: 'es_MX',
+      message_template_language: 'es',
       previous_category: 'UTILITY',
       new_category: 'MARKETING',
     }, deps);
-    expect((await repos.templates.get('confirmacion_pedido', 'es_MX'))?.category).toBe('MARKETING');
+    expect((await repos.templates.get('confirmacion_pedido', 'es'))?.category).toBe('MARKETING');
   });
 });
 

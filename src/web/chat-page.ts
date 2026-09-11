@@ -29,18 +29,10 @@ const CSS = `
     }
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    /* Aqui no hay nada que desplazar: lo que se desplaza es el hilo. */
-    overflow: hidden;
-  }
-  /* 100dvh y no 100vh: en el movil la barra del navegador se recoge y con vh
-     la pantalla queda cortada por abajo justo donde esta el cuadro de texto. */
-  .app { display: grid; grid-template-columns: 340px 1fr; height: 100dvh; overflow: hidden; }
-  /* Con la banda de demostracion puesta, el alto disponible es el resto. */
-  .demo ~ .app { height: calc(100dvh - var(--demo-alto, 46px)); }
+  /* El alto lo da el armazon (s-content lleno): la banda de demo y el aviso
+     de conexion van encima y el chat se queda con el resto. */
+  .app { display: grid; grid-template-columns: 340px 1fr; flex: 1; min-height: 0; overflow: hidden;
+    background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   .demo {
     background: #d97706; color: #fff; padding: 9px 14px; font-size: 13.5px;
     text-align: center; line-height: 1.35;
@@ -53,8 +45,7 @@ const CSS = `
     text-align: center; line-height: 1.35;
   }
   .aviso-conexion a { color: #fff; text-decoration: underline; }
-  .demo ~ .aviso-conexion ~ .app, .aviso-conexion ~ .app { height: calc(100dvh - 46px); }
-${DIALOGO_CSS}
+  .demo, .aviso-conexion { flex: none; }
   .side {
     background: var(--panel); border-right: 1px solid var(--line);
     display: flex; flex-direction: column; min-width: 0; min-height: 0;
@@ -185,6 +176,19 @@ ${DIALOGO_CSS}
   .locked button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   /* La fila de herramientas ocupa sitio en una pantalla ya justa: se pliega y
      solo se abre cuando hace falta mandar un pin. */
+  .atajos { background: var(--panel); border-top: 1px solid var(--line); max-height: 260px; overflow: auto; flex: none; box-shadow: 0 -8px 24px rgba(0,0,0,.08); }
+  .atajos .op { display: flex; gap: 12px; align-items: baseline; padding: 9px 16px; cursor: pointer; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .atajos .op:last-child { border-bottom: 0; }
+  .atajos .op.sel, .atajos .op:hover { background: var(--header); }
+  .atajos .op b { font-family: ui-monospace, Consolas, monospace; color: var(--accent); flex: none; min-width: 90px; }
+  .atajos .op span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .atajos .pie { padding: 6px 16px; font-size: 12px; color: var(--muted); }
+  .ayuda-teclas { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 60; display: grid; place-items: center; padding: 20px; }
+  .ayuda-teclas .caja { background: var(--panel); color: var(--text); border-radius: 14px; padding: 20px 22px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+  .ayuda-teclas h3 { margin: 0 0 10px; font-size: 16px; }
+  .ayuda-teclas table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .ayuda-teclas td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .ayuda-teclas kbd { font: 600 12px ui-monospace, Consolas, monospace; background: var(--header); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
   .tools { display: flex; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; background: var(--header); flex: none; }
   .tools.plegado { display: none; }
   .tools input { cursor: text; flex: 1; min-width: 180px; }
@@ -240,15 +244,17 @@ ${DIALOGO_CSS}
   }
 `;
 
-import { seedTokenJs } from './pages.js';
-import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
+import { appShell } from './shell.js';
 
-export function chatPage(
-  configured: boolean,
-  adminToken = '',
-  proveedor = 'cloud',
-  demo = false,
-): string {
+export interface ChatOpts {
+  configured: boolean;
+  proveedor?: string;
+  demo?: boolean;
+  nombreNegocio: string;
+}
+
+export function chatPage(opts: ChatOpts): string {
+  const { configured, proveedor = 'cloud', demo = false } = opts;
   /**
    * En la demostracion los envios se apuntan como enviados y no salen a
    * ninguna parte. Sin decirlo, es imposible distinguirla de un sistema que
@@ -276,14 +282,7 @@ export function chatPage(
          <div class="actions"><a class="link" href="/setup">Conectar mi WhatsApp</a></div>
        </div>`;
 
-  return `<!doctype html>
-<html lang="es"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chat - wa-locator</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>💬</text></svg>">
-<style>${CSS}</style>
-</head><body>
+  const contenido = `
 ${bandaDemo}
 <div class="aviso-conexion hidden" id="aviso-conexion"></div>
 <div class="app" id="app">
@@ -294,8 +293,7 @@ ${bandaDemo}
       <button class="icon" id="new" title="Escribir a un número nuevo">✚</button>
       ${importar}
       <button class="icon" id="ver-respaldos" title="Conversaciones respaldadas">🗄</button>
-      <a class="link" href="/rutas" title="Pedir ubicaciones para reparto">Ubicaciones</a>
-      <a class="link" href="/panel" title="Panel de operacion">Panel</a>
+      <button class="icon" id="atajos-ayuda" title="Atajos de teclado">⌨</button>
     </header>
     ${aviso}
     <div class="search"><input id="q" placeholder="Buscar por nombre o numero" autocomplete="off"></div>
@@ -328,39 +326,32 @@ ${bandaDemo}
       <button id="send-loc">Mandar pin</button>
       <button id="ask-loc">Pedir su ubicacion</button>
     </div>
+    <div class="atajos hidden" id="atajos-popup"></div>
     <div class="composer hidden" id="composer">
       <button class="ghost" id="mas" title="Mandar o pedir ubicacion">📎</button>
-      <textarea id="text" rows="1" placeholder="Escribe un mensaje"></textarea>
+      <button class="ghost" id="rapidas" title="Respuestas rápidas (escribe / en el mensaje)">⚡</button>
+      <textarea id="text" rows="1" placeholder="Escribe un mensaje (/ para respuestas rápidas)"></textarea>
       <button id="send" title="Enviar">➤</button>
     </div>
     <div class="confirmar hidden" id="confirmar-cierre"></div>
     <div class="lectura hidden" id="lectura"></div>
     <div class="locked hidden" id="locked"></div>
   </div>
-</div>
+</div>`;
 
-<script>
-${seedTokenJs(adminToken)}${DIALOGO_JS}${String.raw`
-/* La clave se pide con el cuadro propio (ver dialogo.ts), no con el prompt
-   del navegador: aquel congela la pagina, y esta se refresca sola. */
-function token() {
-  return sessionStorage.getItem('adminToken') || '';
-}
+  const script = String.raw`
+/* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
 async function api(path, options) {
   options = options || {};
-  var clave = await pedirToken();
-  var res = await fetch(path, {
+    var res = await fetch(path, {
     method: options.method || 'GET',
     cache: 'no-store',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + clave },
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
-  if (res.status === 401) { sessionStorage.removeItem('adminToken'); throw new Error('Token de administracion incorrecto: recarga la pagina'); }
+  if (res.status === 401) { irAlLogin(); throw new Error('Tu sesión terminó: vuelve a entrar.'); }
   var data = await res.json().catch(function () { return {}; });
-  if (res.status === 401) {
-    sessionStorage.removeItem('adminToken');
-    throw new Error('La clave de administracion no es correcta: vuelve a escribirla.');
-  }
   if (!res.ok) throw new Error(data.error || errorHttp(res.status));
   return data;
 }
@@ -377,14 +368,14 @@ function withLinks(text) {
 }
 function hhmm(iso) {
   var d = new Date(iso);
-  return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 }
 function dayLabel(iso) {
   var d = new Date(iso), hoy = new Date();
   var ayer = new Date(); ayer.setDate(hoy.getDate() - 1);
   if (d.toDateString() === hoy.toDateString()) return 'HOY';
   if (d.toDateString() === ayer.toDateString()) return 'AYER';
-  return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' });
+  return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 function shortWhen(iso) {
   if (!iso) return '';
@@ -392,7 +383,7 @@ function shortWhen(iso) {
   if (d.toDateString() === hoy.toDateString()) return hhmm(iso);
   var ayer = new Date(); ayer.setDate(hoy.getDate() - 1);
   if (d.toDateString() === ayer.toDateString()) return 'ayer';
-  return d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 function inicial(nombre, tel) {
   var s = (nombre || '').trim();
@@ -420,6 +411,7 @@ function toast(text) {
   setTimeout(function () { el.remove(); }, 4200);
 }
 
+var ESTADO_REPARTO = { pendiente: 'por pedir ubicación', enviado: 'esperando su ubicación', respondio: 'contestó, sin ubicación aún', resuelto: 'ubicación recibida', supervision: 'necesita revisión', derivado: 'derivado al repartidor', incidencia: 'con incidencia', cancelado: 'cancelado' };
 var current = null;      /* contacto abierto */
 /* Cual quiere ver el usuario, y en que numero de peticion vamos.
    El refresco automatico corre cada pocos segundos: sin estos dos guardas,
@@ -493,6 +485,8 @@ async function openChat(contactId, silent) {
     pintado = mia;
     var nuevo = !current || current.id !== contactId;
     current = data.contact;
+    current.pedido = data.reparto ? data.reparto.referencia : null;
+    current.reparto = data.reparto || null;
     modo = 'chat';
     ver('lectura', false);
     ver('confirmar-cierre', false);
@@ -505,7 +499,8 @@ async function openChat(contactId, silent) {
     document.getElementById('t-sub').innerHTML = esc(current.phone) + ' · ' +
       (current.optOutAt ? '<span class="pill bad">dado de baja</span>'
         : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
-        : '<span class="pill warn">fuera de las 24 h</span>');
+        : '<span class="pill warn">fuera de las 24 h</span>') +
+      (data.reparto ? ' · <a class="link" href="/rutas" title="Ver en Ubicaciones para reparto">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '');
 
     renderMessages(data.messages, nuevo);
     renderComposer(data);
@@ -592,7 +587,7 @@ async function cargarMedios(box) {
     try {
       if (!mediaCache[id]) {
         var res = await fetch('/admin/local/media/' + encodeURIComponent(id), {
-          headers: { authorization: 'Bearer ' + (await pedirToken()) }
+          credentials: 'same-origin'
         });
         if (!res.ok) throw new Error('no se pudo cargar');
         mediaCache[id] = URL.createObjectURL(await res.blob());
@@ -720,11 +715,124 @@ var input = document.getElementById('text');
 input.addEventListener('input', function () {
   input.style.height = 'auto';
   input.style.height = Math.min(120, input.scrollHeight) + 'px';
+  atajosDesdeTexto();
 });
 input.addEventListener('keydown', function (e) {
+  if (atajosAbierto()) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); moverAtajo(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moverAtajo(-1); return; }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); elegirAtajo(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); cerrarAtajos(); return; }
+  }
   /* Enter manda; Shift+Enter hace salto de linea, como en WhatsApp Web. */
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); mandarTexto(); }
 });
+
+/* --- respuestas rapidas: "/" en el mensaje, o el rayo ---------------------- */
+var atajos = [];
+var atajoSel = 0;
+async function cargarAtajos() {
+  try { atajos = (await api('/admin/chat/atajos')).atajos || []; } catch (e) { atajos = []; }
+}
+function negocioNombre() {
+  var app = document.getElementById('s-app');
+  return app ? app.getAttribute('data-negocio') || '' : '';
+}
+function rellenarAtajo(texto) {
+  var nombre = current ? ((current.name || '').trim().split(/\s+/)[0] || '') : '';
+  var pedido = current && current.pedido ? current.pedido : '';
+  return texto.replace(/\{nombre\}/g, nombre).replace(/\{pedido\}/g, pedido || 'su pedido').replace(/\{negocio\}/g, negocioNombre()).replace(/\s+,/g, ',').replace(/  +/g, ' ');
+}
+function atajosAbierto() { return !document.getElementById('atajos-popup').classList.contains('hidden'); }
+function cerrarAtajos() { document.getElementById('atajos-popup').classList.add('hidden'); }
+function pintarAtajos(filtro) {
+  var box = document.getElementById('atajos-popup');
+  var lista = atajos.filter(function (a) { return !filtro || a.atajo.indexOf(filtro) === 0 || a.texto.toLowerCase().indexOf(filtro) >= 0; });
+  if (!lista.length) { box.innerHTML = '<div class="pie">Ningún atajo empieza por "/' + esc(filtro) + '". Se crean en Panel → Automatización.</div>'; box.classList.remove('hidden'); box._lista = []; return; }
+  if (atajoSel >= lista.length) atajoSel = 0;
+  box.innerHTML = lista.map(function (a, i) {
+    return '<div class="op' + (i === atajoSel ? ' sel' : '') + '" data-i="' + i + '"><b>/' + esc(a.atajo) + '</b><span>' + esc(rellenarAtajo(a.texto)) + '</span></div>';
+  }).join('') + '<div class="pie">↑↓ para moverte · Enter o Tab para poner el texto · Esc para cerrar</div>';
+  box._lista = lista;
+  box.querySelectorAll('.op').forEach(function (el) { el.onclick = function () { atajoSel = Number(el.getAttribute('data-i')); elegirAtajo(); }; });
+  box.classList.remove('hidden');
+}
+function atajosDesdeTexto() {
+  var v = input.value;
+  if (v.charAt(0) === '/' && v.indexOf(' ') < 0 && v.indexOf('\n') < 0) { atajoSel = atajosAbierto() ? atajoSel : 0; pintarAtajos(v.slice(1).toLowerCase()); }
+  else if (atajosAbierto()) cerrarAtajos();
+}
+function moverAtajo(d) {
+  var lista = document.getElementById('atajos-popup')._lista || [];
+  if (!lista.length) return;
+  atajoSel = (atajoSel + d + lista.length) % lista.length;
+  pintarAtajos(input.value.charAt(0) === '/' ? input.value.slice(1).toLowerCase() : '');
+}
+function elegirAtajo() {
+  var lista = document.getElementById('atajos-popup')._lista || [];
+  var a = lista[atajoSel];
+  cerrarAtajos();
+  if (!a) return;
+  input.value = rellenarAtajo(a.texto);
+  input.style.height = 'auto';
+  input.style.height = Math.min(120, input.scrollHeight) + 'px';
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+document.getElementById('rapidas').onclick = function () {
+  if (atajosAbierto()) return cerrarAtajos();
+  atajoSel = 0;
+  pintarAtajos('');
+  input.focus();
+};
+
+/* --- teclas: moverse entre chats y pedir ubicacion sin soltar el teclado --- */
+function chatVecino(d) {
+  if (!conversations.length) return;
+  var i = current ? conversations.findIndex(function (c) { return c.contactId === current.id; }) : -1;
+  var j = i < 0 ? 0 : (i + d + conversations.length) % conversations.length;
+  openChat(conversations[j].contactId);
+}
+function enCampo(el) { return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'); }
+document.addEventListener('keydown', function (e) {
+  if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); chatVecino(1); return; }
+  if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); chatVecino(-1); return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'U' || e.key === 'u')) { e.preventDefault(); if (current && document.getElementById('composer') && !document.getElementById('composer').classList.contains('hidden')) enviar({ askLocation: true }); return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); if (current) { document.getElementById('tools').classList.remove('plegado'); document.getElementById('loc').focus(); } return; }
+  if (e.key === '/' && !enCampo(document.activeElement)) {
+    e.preventDefault();
+    if (current && !document.getElementById('composer').classList.contains('hidden')) { input.focus(); input.value = '/'; atajosDesdeTexto(); }
+    else document.getElementById('q').focus();
+    return;
+  }
+  if (e.key === 'F1' || ((e.ctrlKey || e.metaKey) && e.key === '/')) { e.preventDefault(); ayudaTeclas(); return; }
+  if (e.key === 'Escape' && !atajosAbierto()) {
+    var ayuda = document.querySelector('.ayuda-teclas');
+    if (ayuda) { ayuda.remove(); return; }
+    if (enCampo(document.activeElement)) { document.activeElement.blur(); return; }
+    if (document.getElementById('app').classList.contains('open-thread')) document.getElementById('back').click();
+  }
+});
+function ayudaTeclas() {
+  if (document.querySelector('.ayuda-teclas')) return;
+  var caja = document.createElement('div');
+  caja.className = 'ayuda-teclas';
+  caja.innerHTML = '<div class="caja"><h3>Atajos del chat</h3><table>' +
+    '<tr><td><kbd>/</kbd> en el mensaje</td><td>Respuestas rápidas (se filtran al escribir; Enter o Tab pone el texto)</td></tr>' +
+    '<tr><td><kbd>⚡</kbd></td><td>Ver todas las respuestas rápidas</td></tr>' +
+    '<tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Enviar / salto de línea</td></tr>' +
+    '<tr><td><kbd>Alt</kbd>+<kbd>↓</kbd> <kbd>Alt</kbd>+<kbd>↑</kbd></td><td>Siguiente / anterior conversación</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></td><td>Pedirle su ubicación</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>Mandar un pin (abre el cuadro del mapa)</td></tr>' +
+    '<tr><td><kbd>/</kbd> fuera del mensaje</td><td>Ir al buscador de chats</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Buscar un módulo del sistema</td></tr>' +
+    '<tr><td><kbd>Esc</kbd></td><td>Cerrar esto, salir del campo o volver a la lista</td></tr>' +
+    '<tr><td><kbd>F1</kbd> o <kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Esta ayuda</td></tr>' +
+    '</table><p class="muted" style="margin:10px 0 0;font-size:12.5px">Las respuestas rápidas se editan en Panel → Automatización.</p></div>';
+  caja.onclick = function (ev) { if (ev.target === caja) caja.remove(); };
+  document.body.appendChild(caja);
+}
+document.getElementById('atajos-ayuda').onclick = ayudaTeclas;
 async function mandarTexto() {
   var texto = input.value.trim();
   if (!texto) return;
@@ -1035,7 +1143,7 @@ async function abrirRespaldo(id) {
 async function descargarRespaldo(a) {
   try {
     var res = await fetch('/admin/archives/' + a.id + '/download', {
-      headers: { authorization: 'Bearer ' + (await pedirToken()) }
+      credentials: 'same-origin'
     });
     if (!res.ok) throw new Error('No se pudo descargar el respaldo.');
     var url = URL.createObjectURL(await res.blob());
@@ -1065,9 +1173,20 @@ async function restaurar(a) {
   }
 }
 
+cargarAtajos();
 loadTemplates();
 loadChats().then(abrirDesdeUrl);
-`}
-</script>
-</body></html>`;
+`;
+
+  return appShell({
+    titulo: 'Chats',
+    subtitulo: 'Las conversaciones, como en WhatsApp',
+    contenido,
+    script,
+    css: CSS,
+    nombreNegocio: opts.nombreNegocio,
+    demo,
+    lleno: true,
+    icono: '💬',
+  });
 }

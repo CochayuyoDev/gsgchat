@@ -1,9 +1,9 @@
 /**
- * Interfaz web: pantalla de configuracion y panel de operacion.
+ * Interfaz web: el panel de operacion (/panel) y lo que comparten las paginas.
  *
- * Existe para que no haya que editar .env ni lanzar curl: las credenciales
- * se pegan en /setup y todo lo demas se opera desde /panel. El navegador
- * guarda el token de administracion en sessionStorage y lo manda como Bearer.
+ * Existe para que no haya que editar .env ni lanzar curl: la cuenta se conecta
+ * en /setup (connect-page.ts) y todo lo demas se opera desde /panel. El navegador
+ * entra con la cookie de sesion de /login (ver src/auth); sin ella, al login.
  *
  * El JS de estas paginas va en String.raw y usa concatenacion: ni backticks
  * ni "${" dentro, para no pelearse con el literal que lo envuelve. Todo dato
@@ -12,7 +12,7 @@
  * el cliente, no nosotros.
  */
 
-import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
+import { appShell } from './shell.js';
 
 const CSS = `
   :root {
@@ -25,12 +25,7 @@ const CSS = `
     :root { --bg: #16181d; --card: #1f2229; --line: #2f333c; --text: #f2f3f5; --muted: #9aa0aa; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 80px; }
-  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
-  header .right { margin-left: auto; }
-  h1 { font-size: 22px; margin: 0; }
+  .wrap { color: var(--text); font-size: 14.5px; line-height: 1.55; }
   h2 { font-size: 16px; margin: 0 0 4px; }
   h3 { font-size: 14px; margin: 18px 0 4px; }
   .muted { color: var(--muted); font-size: 13px; margin: 0; }
@@ -53,9 +48,66 @@ const CSS = `
   .actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
   .toolbar { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: end; margin-top: 8px; }
   .toolbar label { margin-top: 0; }
-  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 18px; }
-  .tabs button { background: transparent; color: var(--muted); border: 1px solid transparent; padding: 8px 14px; }
-  .tabs button.active { background: var(--card); color: var(--text); border-color: var(--line); }
+  .wrap > section.card:first-of-type, .wrap > .card { margin-top: 0; }
+  .wrap > section.card + section.card { margin-top: 16px; }
+  /* --- inicio --- */
+  .kpis { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+  .kpi .l { color: var(--muted); font-size: 12.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+  .kpi .n { font-size: 28px; font-weight: 800; letter-spacing: -.02em; margin-top: 4px; line-height: 1.1; }
+  .kpi .n.ok { color: var(--ok); } .kpi .n.warn { color: var(--warn); } .kpi .n.bad { color: var(--bad); }
+  .kpi .d { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .kpi a { text-decoration: none; }
+  .dos { display: grid; gap: 14px; grid-template-columns: 1.6fr 1fr; margin-top: 14px; align-items: start; }
+  .dos > .card { margin-top: 0; }
+  @media (max-width: 900px) { .dos { grid-template-columns: 1fr; } }
+  .grafica { margin-top: 12px; }
+  .grafica svg { width: 100%; height: 190px; display: block; }
+  .leyenda { display: flex; gap: 16px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .accesos { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 12px; }
+  .accesos a { display: block; padding: 12px 14px; border: 1px solid var(--line); border-radius: 11px; text-decoration: none; color: var(--text); background: var(--bg); font-weight: 600; font-size: 13.5px; }
+  .accesos a small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
+  .accesos a:hover { border-color: var(--accent); }
+  .lista { margin: 10px 0 0; padding: 0; list-style: none; }
+  .lista li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+  .lista li:first-child { border-top: 0; }
+  .lista li .barra { flex: 1; margin-top: 0; }
+  .lista li b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+  .pasos { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .pasos li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); font-size: 13.5px; }
+  .pasos li i { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 800; font-size: 12px; margin-top: 1px; background: rgba(107,114,128,.15); color: var(--muted); }
+  .pasos li.hecho i { background: rgba(22,163,74,.15); color: var(--ok); }
+  .pasos li.hecho { opacity: .75; }
+  .pasos li b { display: block; }
+  .pasos li a { text-decoration: none; }
+  .pasos li small { color: var(--muted); display: block; }
+  .res { display: grid; gap: 4px; margin-top: 14px; padding: 12px 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--bg); font-size: 13.5px; }
+  .res b { font-size: 14px; }
+  .res.ok { border-color: rgba(22,163,74,.4); } .res.ok b { color: var(--ok); }
+  .res.warn { border-color: rgba(217,119,6,.45); background: rgba(217,119,6,.06); } .res.warn b { color: var(--warn); }
+  .res.bad { border-color: rgba(220,38,38,.45); background: rgba(220,38,38,.06); } .res.bad b { color: var(--bad); }
+  .res a { font-weight: 600; text-decoration: none; margin-top: 2px; }
+  .res .muted { display: block; }
+  .tecnico { margin-top: 8px; }
+  .tecnico summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  .tecnico pre { margin-top: 6px; max-height: 220px; }
+  .at-fila { display: grid; grid-template-columns: 160px 1fr auto; gap: 8px; align-items: center; margin-top: 8px; }
+  .at-fila input, .at-fila textarea { margin: 0; }
+  .at-fila textarea { min-height: 44px; font-family: inherit; }
+  .at-fila .pre { font-family: ui-monospace, Consolas, monospace; }
+  @media (max-width: 700px) { .at-fila { grid-template-columns: 1fr; } }
+  .cf-vigente { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .cf-vigente span { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; }
+  .cf-vigente b { color: var(--accent); }
+  .dias { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .dias label { display: inline-flex; align-items: center; gap: 5px; margin: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-weight: 500; font-size: 13px; cursor: pointer; background: var(--bg); }
+  .dias input { width: auto; }
+  .dias label:has(input:checked) { border-color: var(--accent); color: var(--accent); background: rgba(18,140,126,.08); }
+  .cf-aviso { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(217,119,6,.08); border: 1px solid rgba(217,119,6,.35); font-size: 13.5px; }
+  .cf-nota { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .nueva-clave { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--warn); border-radius: 12px; background: rgba(217,119,6,.06); }
+  .nueva-clave code { display: block; font-size: 14px; padding: 10px 12px; margin: 8px 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; word-break: break-all; }
   .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
   .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
   .pill.warn { background: rgba(217,119,6,.14); color: var(--warn); }
@@ -102,41 +154,22 @@ const CSS = `
   .stat small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 `;
 
-/**
- * Deja el token puesto para que la pantalla no lo pida.
- *
- * Se emite solo con ADMIN_TOKEN_AUTOFILL, es decir cuando el servidor escucha
- * unicamente en local: ahi quien puede abrir la pagina ya esta en la maquina.
- * Vacio en cualquier otro caso, y entonces la pantalla pide el token como
- * siempre.
- */
-export function seedTokenJs(adminToken: string): string {
-  if (!adminToken) return '';
-  return (
-    'try{sessionStorage.setItem(' +
-    JSON.stringify('adminToken') +
-    ',' +
-    JSON.stringify(adminToken) +
-    ');}catch(e){}' +
-    String.fromCharCode(10)
-  );
-}
-
 const AUTH_JS = String.raw`
-  /* La clave se pide con el cuadro propio (dialogo.ts), no con prompt(). */
-  function token() {
-    return sessionStorage.getItem('adminToken') || '';
+  /* Se entra con la cookie de sesion (ver /login); sin ella, al login. */
+  function token() { return ''; }
+  function irAlLogin() {
+    location.href = '/login?next=' + encodeURIComponent(location.pathname + location.hash);
   }
   async function api(path, options) {
     options = options || {};
-    var clave = await pedirToken();
     var res = await fetch(path, {
       method: options.method || 'GET',
       cache: 'no-store',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + clave },
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
       body: options.body ? JSON.stringify(options.body) : undefined
     });
-    if (res.status === 401) { sessionStorage.removeItem('adminToken'); throw new Error('Token de administracion incorrecto: recarga la pagina y vuelve a pegarlo'); }
+    if (res.status === 401) { irAlLogin(); throw new Error('Tu sesión terminó: vuelve a entrar.'); }
     var data = await res.json().catch(function () { return {}; });
     if (!res.ok) throw new Error(data.error || data.message || errorHttp(res.status));
     return data;
@@ -156,7 +189,7 @@ const AUTH_JS = String.raw`
     if (!value) return '';
     var d = new Date(value);
     if (isNaN(d.getTime())) return String(value);
-    return d.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
+    return d.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' });
   }
   function ago(value) {
     if (!value) return '';
@@ -194,268 +227,39 @@ const AUTH_JS = String.raw`
       };
     });
   }
-  function bindLogout() {
-    var b = document.getElementById('logout');
-    if (b) b.onclick = function () { sessionStorage.removeItem('adminToken'); location.reload(); };
-  }
+  function bindLogout() { enlazarSalir(); }
 `;
 
-function shell(title: string, body: string, script: string): string {
-  return `<!doctype html>
-<html lang="es"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📊</text></svg>">
-<style>${CSS}${DIALOGO_CSS}</style>
-</head><body>
-<div class="wrap">${body}</div>
-<script>
-${DIALOGO_JS}
-${AUTH_JS}
-${script}
-</script>
-</body></html>`;
-}
-
-const SETUP_FIELDS = [
-  'token',
-  'phoneNumberId',
-  'businessAccountId',
-  'appSecret',
-  'verifyToken',
-  'mapsApiKey',
-] as const;
-
-/**
- * La pagina se sirve vacia: los valores guardados (aunque vayan
- * enmascarados) los pide el navegador a /admin/settings con el token de
- * administracion. Asi el HTML no expone nada a quien solo conoce la URL.
- */
-export function setupPage(labels: Record<string, string>): string {
-  const fields = SETUP_FIELDS.map(
-    (field) => `
-  <label for="${field}">${labels[field] ?? field}</label>
-  <input id="${field}" name="${field}" autocomplete="off" spellcheck="false">`,
-  ).join('');
-
-  const body = `
-<header><h1>Conectar WhatsApp</h1><span id="state" class="pill hidden"></span>
-  <span class="right"><button class="ghost sm" id="logout">Cambiar token</button></span></header>
-<p class="muted">Conecta tu numero de WhatsApp Business a traves de la API oficial de Meta. Las credenciales se guardan cifradas y no hace falta reiniciar nada.</p>
-
-<div class="card">
-  <h2>1. Consigue las credenciales en Meta</h2>
-  <ol class="muted">
-    <li>Crea tu empresa en <a href="https://business.facebook.com" target="_blank" rel="noreferrer">business.facebook.com</a>.</li>
-    <li>Crea una app de tipo <b>Empresa</b> en <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">developers.facebook.com</a> y anade el producto <b>WhatsApp</b>.</li>
-    <li>Registra tu numero en WhatsApp Manager. <b>Ojo:</b> ese numero no puede estar activo en la app normal de WhatsApp ni en WhatsApp Business; si lo esta, borra antes esa cuenta desde la app (Ajustes &rarr; Cuenta &rarr; Eliminar cuenta). Meta da un numero de prueba gratuito para empezar.</li>
-    <li>El token que sale en <i>API Setup</i> caduca en 24 h. Para el definitivo: Business Settings &rarr; Usuarios &rarr; <b>Usuario del sistema</b> &rarr; anadir la app y la WABA como activos &rarr; generar token con los permisos <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>.</li>
-    <li>La <b>clave secreta de la app</b> esta en App &rarr; Configuracion de la app &rarr; Basica.</li>
-  </ol>
-</div>
-
-<div class="card">
-  <h2>2. Pegalas aqui</h2>
-  <p class="muted">Los campos secretos se muestran enmascarados; dejalos vacios para conservar el valor guardado.</p>
-  ${fields}
-  <div class="actions">
-    <button id="save">Guardar y probar conexion</button>
-    <button class="ghost" id="test">Solo probar</button>
-    <span id="result" class="pill hidden"></span>
-  </div>
-  <pre id="detail" class="hidden"></pre>
-</div>
-
-<div class="card">
-  <h2>3. Configura el webhook en Meta</h2>
-  <p class="muted">App &rarr; WhatsApp &rarr; Configuracion &rarr; Webhooks &rarr; Editar. Suscribe los campos
-  <code>messages</code>, <code>message_template_status_update</code>,
-  <code>message_template_quality_update</code> y <code>phone_number_quality_update</code>.</p>
-
-  <label>URL de devolucion de llamada</label>
-  <div class="copy"><input id="hookUrl" readonly><button class="ghost" data-copy="hookUrl">Copiar</button></div>
-
-  <label>Token de verificacion</label>
-  <div class="copy"><input id="hookToken" readonly><button class="ghost" data-copy="hookToken">Copiar</button></div>
-
-  <p class="muted" style="margin-top:14px">Si trabajas en local, Meta necesita una URL publica. Levanta un tunel con
-  <code>npx cloudflared tunnel --url http://localhost:3000</code>, pon esa URL en <code>PUBLIC_BASE_URL</code> y usala aqui.</p>
-</div>
-
-<div class="card">
-  <h2>4. Activa la cuenta y prueba</h2>
-  <p class="muted">Tres cosas que suelen faltar cuando "no llegan los mensajes": la app no esta suscrita a la cuenta de negocio,
-  el numero no esta registrado en la Cloud API, o nunca se mando un primer mensaje.</p>
-  <div class="actions">
-    <button class="ghost" id="status">Comprobar estado</button>
-    <span id="st-state" class="pill hidden"></span>
-  </div>
-  <div id="st-grid" class="grid hidden" style="margin-top:14px"></div>
-
-  <h3>Suscribir la app a la cuenta de negocio</h3>
-  <p class="muted">Sin esto Meta no envia ningun webhook aunque la URL este bien.</p>
-  <div class="actions"><button id="subscribe">Suscribir app</button><span id="sub-state" class="pill hidden"></span></div>
-
-  <h3>Registrar el numero</h3>
-  <p class="muted">Solo la primera vez, o tras migrar el numero desde la app. Es el PIN de verificacion en dos pasos (6 digitos); si el numero no lo tenia, el que pongas aqui queda como PIN.</p>
-  <div class="toolbar">
-    <div><label for="pin">PIN</label><input id="pin" inputmode="numeric" maxlength="6" placeholder="123456"></div>
-    <div><button id="register">Registrar numero</button></div>
-  </div>
-  <span id="reg-state" class="pill hidden" style="margin-top:8px"></span>
-
-  <h3>Enviar un mensaje de prueba</h3>
-  <p class="muted">Manda la plantilla <code>hello_world</code> (la crea Meta en toda cuenta nueva) a tu propio telefono. Pasa por las mismas guardas que cualquier envio.</p>
-  <div class="toolbar">
-    <div><label for="testPhone">Tu telefono (con codigo de pais, sin +)</label><input id="testPhone" placeholder="5215512345678"></div>
-    <div><button id="sendTest">Enviar prueba</button></div>
-  </div>
-  <span id="test-state" class="pill hidden" style="margin-top:8px"></span>
-  <pre id="test-detail" class="hidden"></pre>
-</div>
-
-<p class="muted" style="margin-top:18px"><a href="/panel">Ir al panel de operacion &rarr;</a></p>`;
-
-  const script = String.raw`
-var FIELDS = ${JSON.stringify(SETUP_FIELDS)};
-var SECRETS = ['token', 'appSecret'];
-
-async function load() {
-  try {
-    var data = await api('/admin/settings');
-    FIELDS.forEach(function (f) {
-      var input = document.getElementById(f);
-      var value = data.masked[f] || '';
-      // Un secreto ya guardado se ensena como marcador de posicion: dejarlo
-      // vacio conserva el valor, escribir encima lo sustituye.
-      if (SECRETS.indexOf(f) >= 0) input.placeholder = value || '';
-      else input.value = value;
-    });
-    document.getElementById('hookUrl').value = data.webhookUrl;
-    document.getElementById('hookToken').value = data.verifyToken || '(define primero el token de verificacion)';
-    if (data.missing.length) show('state', 'Faltan ' + data.missing.length + ' datos', 'warn');
-    else show('state', 'Configurado', 'ok');
-  } catch (error) {
-    show('state', error.message, 'bad');
-  }
-}
-
-function values() {
-  var out = {};
-  FIELDS.forEach(function (f) {
-    var v = document.getElementById(f).value.trim();
-    if (v) out[f] = v;
-  });
-  return out;
-}
-
-async function run(save) {
-  var button = document.getElementById(save ? 'save' : 'test');
-  button.disabled = true;
-  try {
-    var data = await api(save ? '/admin/settings' : '/admin/settings/test', { method: 'POST', body: values() });
-    show('result', data.ok ? 'Conexion correcta' : 'Sin conexion', data.ok ? 'ok' : 'bad');
-    var detail = document.getElementById('detail');
-    detail.textContent = JSON.stringify(data, null, 2);
-    detail.classList.remove('hidden');
-    if (save) load();
-  } catch (error) {
-    show('result', error.message, 'bad');
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function status() {
-  var button = document.getElementById('status');
-  button.disabled = true;
-  try {
-    var s = await api('/admin/settings/status');
-    var grid = document.getElementById('st-grid');
-    var cells = [];
-    cells.push('<div class="stat"><span class="muted">Credenciales</span><b class="' + (s.ok ? 'ok' : 'bad') + '">' + (s.ok ? 'validas' : 'fallan') + '</b><span class="muted">' + esc(s.detail) + '</span></div>');
-    if (s.phone) {
-      var q = s.phone.qualityRating || 'NA';
-      cells.push('<div class="stat"><span class="muted">Numero</span><b>' + esc(s.phone.displayPhoneNumber) + '</b><span class="muted">' + esc(s.phone.verifiedName) + '</span></div>');
-      cells.push('<div class="stat"><span class="muted">Calidad</span><b class="' + (q === 'GREEN' ? 'ok' : q === 'RED' ? 'bad' : 'warn') + '">' + esc(q) + '</b><span class="muted">' + esc(s.phone.messagingLimitTier || 'sin tier') + '</span></div>');
-    } else if (s.phoneError) {
-      cells.push('<div class="stat"><span class="muted">Numero</span><b class="bad">error</b><span class="muted">' + esc(s.phoneError) + '</span></div>');
-    }
-    if (s.subscribed !== null) {
-      cells.push('<div class="stat"><span class="muted">App suscrita a la WABA</span><b class="' + (s.subscribed ? 'ok' : 'warn') + '">' + (s.subscribed ? 'si' : 'no') + '</b><span class="muted">' + esc((s.apps || []).map(function (a) { return a.name; }).join(', ')) + '</span></div>');
-    } else if (s.subscribedError) {
-      cells.push('<div class="stat"><span class="muted">App suscrita</span><b class="bad">error</b><span class="muted">' + esc(s.subscribedError) + '</span></div>');
-    }
-    cells.push('<div class="stat"><span class="muted">Webhook</span><b class="' + (s.appSecretSet && s.verifyTokenSet ? 'ok' : 'warn') + '">' + (s.appSecretSet && s.verifyTokenSet ? 'listo' : 'incompleto') + '</b><span class="muted">' + esc(s.webhookUrl) + '</span></div>');
-    grid.innerHTML = cells.join('');
-    grid.classList.remove('hidden');
-    show('st-state', s.ok ? 'Estado actualizado' : 'Revisa las credenciales', s.ok ? 'ok' : 'bad');
-  } catch (error) {
-    show('st-state', error.message, 'bad');
-  } finally {
-    button.disabled = false;
-  }
-}
-
-document.getElementById('save').onclick = function () { run(true); };
-document.getElementById('test').onclick = function () { run(false); };
-document.getElementById('status').onclick = status;
-
-document.getElementById('subscribe').onclick = async function () {
-  try {
-    var r = await api('/admin/settings/subscribe', { method: 'POST' });
-    show('sub-state', r.subscribed ? 'App suscrita' : 'Meta no confirmo la suscripcion', r.subscribed ? 'ok' : 'warn');
-    status();
-  } catch (error) { show('sub-state', error.message, 'bad'); }
-};
-
-document.getElementById('register').onclick = async function () {
-  try {
-    var r = await api('/admin/settings/register', { method: 'POST', body: { pin: val('pin') } });
-    show('reg-state', r.success ? 'Numero registrado' : 'Meta no confirmo el registro', r.success ? 'ok' : 'warn');
-  } catch (error) { show('reg-state', error.message, 'bad'); }
-};
-
-document.getElementById('sendTest').onclick = async function () {
-  var button = document.getElementById('sendTest');
-  button.disabled = true;
-  try {
-    var r = await api('/admin/settings/test-message', { method: 'POST', body: { phone: val('testPhone') } });
-    show('test-state', r.ok ? 'Enviado: revisa tu WhatsApp' : ('No salio: ' + (r.reason || r.error || '')), r.ok ? 'ok' : 'warn');
-    var detail = document.getElementById('test-detail');
-    detail.textContent = JSON.stringify(r, null, 2);
-    detail.classList.remove('hidden');
-  } catch (error) {
-    show('test-state', error.message, 'bad');
-  } finally {
-    button.disabled = false;
-  }
-};
-
-copyButtons();
-bindLogout();
-load();
-`;
-
-  return shell('Conectar WhatsApp - wa-locator', body, script);
-}
-
-const TABS: Array<[string, string]> = [
-  ['estado', 'Estado'],
-  ['salud', 'Salud'],
-  ['enviar', 'Enviar'],
-  ['contactos', 'Contactos'],
-  ['ubicaciones', 'Ubicaciones'],
-  ['vivo', 'En vivo'],
-  ['campanas', 'Campanas'],
-  ['automatizacion', 'Automatizacion'],
-  ['plantillas', 'Plantillas'],
-  ['historial', 'Historial'],
-  ['extraer', 'Extraer'],
+/** Cada seccion del panel: id (el ancla), titulo y subtitulo de la barra superior. */
+const SECCIONES: Array<[string, string, string]> = [
+  ['inicio', 'Inicio', 'Un vistazo a todo lo que pasa hoy'],
+  ['estado', 'Estado del número', 'Calidad, cupo del día, cola y pausa manual'],
+  ['salud', 'Riesgo y ritmo', 'Lo que mira el monitor y por qué frena'],
+  ['enviar', 'Enviar mensaje', 'Un texto, un pin o una plantilla a un número'],
+  ['contactos', 'Contactos', 'Consentimiento, búsqueda e importación'],
+  ['ubicaciones', 'Ubicaciones recibidas', 'Los pines que mandaron los clientes'],
+  ['vivo', 'Rastreo en vivo', 'Enlaces para compartir y ver una posición'],
+  ['grupos', 'Enviar a un grupo', 'Elegir clientes por cómo están y escribirles a todos'],
+  ['campanas', 'Campañas', 'Envíos masivos por goteo, con canario'],
+  ['automatizacion', 'Automatización', 'Reglas y secuencias'],
+  ['plantillas', 'Plantillas', 'Las de Meta y las propias'],
+  ['historial', 'Historial de envíos', 'Todo lo que salió, con su estado'],
+  ['extraer', 'Extraer coordenadas', 'De un link de mapa o un texto'],
+  ['configuracion', 'Configuración', 'Horario de envío, ritmo, modo prueba, avisos y nombre'],
+  ['usuarios', 'Usuarios', 'Cuentas del equipo, roles y contraseñas'],
+  ['integraciones', 'Integraciones', 'Claves de API para GSG y otros programas'],
+  ['actividad', 'Actividad', 'Quién hizo qué y cuándo'],
+  ['mi-cuenta', 'Mi cuenta', 'Tus datos y tu contraseña'],
 ];
 
-export function panelPage(configured: boolean, adminToken = ''): string {
+export interface PanelOpts {
+  configured: boolean;
+  nombreNegocio: string;
+  demo?: boolean;
+}
+
+export function panelPage(opts: PanelOpts): string {
+  const { configured } = opts;
   const warning = configured
     ? ''
     : `<div class="card" style="border-color:#d97706">
@@ -464,22 +268,50 @@ export function panelPage(configured: boolean, adminToken = ''): string {
          <a href="/setup">la pantalla de conexion</a>. Contactos, reglas, secuencias y el extractor de coordenadas si funcionan.</p>
        </div>`;
 
-  const tabs = TABS.map(
-    ([id, label], index) =>
-      `<button data-tab="${id}"${index === 0 ? ' class="active"' : ''}>${label}</button>`,
-  ).join('\n  ');
-
   const body = `
-<header><h1>Panel</h1><span id="state" class="pill hidden"></span>
-  <span class="right"><a href="/chat">Chat</a> &nbsp; <a href="/rutas">Ubicaciones</a> &nbsp; <a href="/setup" class="muted">Conexion</a> &nbsp; <button class="ghost sm" id="logout">Cambiar token</button></span></header>
-<p class="muted">Enviar mensajes, compartir ubicacion, automatizar seguimientos y lanzar campanas sin tocar la terminal.</p>
 ${warning}
 
-<div class="tabs">
-  ${tabs}
+<div id="tab-inicio" class="hidden">
+  <section class="card hidden" id="in-pasos-card" style="margin-bottom:14px">
+    <h2>Para empezar</h2>
+    <p class="muted">Lo que falta por dejar listo. Cada punto lleva a la pantalla donde se hace; cuando esté todo, esta tarjeta desaparece.</p>
+    <ul class="pasos" id="in-pasos"></ul>
+  </section>
+  <div class="kpis" id="in-kpis"><div class="kpi"><div class="l">Cargando</div><div class="n">…</div></div></div>
+  <div class="dos">
+    <section class="card">
+      <h2>Últimos 7 días</h2>
+      <p class="muted">Mensajes que salieron y que entraron, por día.</p>
+      <div class="grafica" id="in-grafica"></div>
+      <div class="leyenda"><span><i style="background:var(--accent)"></i>Salieron</span><span><i style="background:#94a3b8"></i>Entraron</span></div>
+    </section>
+    <section class="card">
+      <h2>El número</h2>
+      <div id="in-numero"><p class="muted">Cargando…</p></div>
+      <div class="actions"><a href="/panel#salud">Ver el detalle</a></div>
+    </section>
+  </div>
+  <div class="dos">
+    <section class="card">
+      <h2>Reparto</h2>
+      <p class="muted">Solicitudes de ubicación por estado y los últimos lotes.</p>
+      <div id="in-reparto"></div>
+    </section>
+    <section class="card">
+      <h2>Accesos rápidos</h2>
+      <div class="accesos">
+        <a href="/chat">Abrir los chats<small>Responder a los clientes</small></a>
+        <a href="/rutas">Cargar el reparto<small>Pegar la lista del día</small></a>
+        <a href="/panel#campanas">Nueva campaña<small>Por goteo, con canario</small></a>
+        <a href="/panel#enviar">Enviar un mensaje<small>A un número concreto</small></a>
+        <a href="/panel#plantillas">Plantillas<small>Crear o sincronizar</small></a>
+        <a href="/setup">Conexión<small>QR, WAHA o Meta</small></a>
+      </div>
+    </section>
+  </div>
 </div>
 
-<section id="tab-estado" class="card">
+<section id="tab-estado" class="card hidden">
   <h2>Estado del numero</h2>
   <p class="muted">Miralo antes de subir volumen. En amarillo se frena el marketing solo; en rojo se pausa todo.</p>
   <div class="grid" id="stats" style="margin-top:14px"></div>
@@ -529,28 +361,28 @@ ${warning}
 
 <section id="tab-enviar" class="card hidden">
   <h2>Mensaje de texto</h2>
-  <p class="muted">Solo sale si el contacto te escribio en las ultimas 24 h. Fuera de esa ventana hay que usar una plantilla (pestana Campanas o Automatizacion).</p>
+  <p class="muted">Solo sale si el contacto te escribio en las ultimas 24 h. Fuera de esa ventana hay que usar una plantilla (Campañas o Automatización, en el menú).</p>
   <label>Telefono (con codigo de pais, sin + ni espacios)</label>
-  <input id="m-phone" placeholder="5215512345678">
+  <input id="m-phone" placeholder="51987654321">
   <label>Texto</label>
   <textarea id="m-text" placeholder="Tu pedido va en camino."></textarea>
   <div class="actions"><button id="m-send">Enviar</button><span id="m-state" class="pill hidden"></span></div>
-  <pre id="m-out" class="hidden"></pre>
+  <div id="m-out" class="hidden"></div>
 
   <h2 style="margin-top:26px">Enviar una ubicacion</h2>
   <p class="muted">Pega un link de Google Maps o unas coordenadas: el sistema extrae la latitud y longitud y manda el pin.</p>
   <label>Telefono</label>
-  <input id="u-phone" placeholder="5215512345678">
+  <input id="u-phone" placeholder="51987654321">
   <label>Link de mapa o coordenadas</label>
-  <input id="u-input" placeholder="https://maps.app.goo.gl/... o 19.4326, -99.1332">
+  <input id="u-input" placeholder="https://maps.app.goo.gl/... o -12.0464, -77.0428">
   <label>Nombre del sitio (opcional)</label>
-  <input id="u-name" placeholder="Sucursal Centro">
+  <input id="u-name" placeholder="Tienda de Miraflores">
   <div class="actions">
     <button id="u-send">Enviar pin</button>
     <button class="ghost" id="u-ask">Pedirle su ubicacion</button>
     <span id="u-state" class="pill hidden"></span>
   </div>
-  <pre id="u-out" class="hidden"></pre>
+  <div id="u-out" class="hidden"></div>
 </section>
 
 <section id="tab-contactos" class="card hidden">
@@ -566,6 +398,7 @@ ${warning}
         <option value="opted_out">Dados de baja</option>
       </select></div>
     <div><button class="ghost" id="ct-search">Buscar</button></div>
+    <div><button class="ghost" id="ct-csv" title="Descarga los contactos del filtro actual (hasta 5000)">Descargar CSV</button></div>
   </div>
   <div id="ct-table" class="tablewrap"></div>
   <div class="pager"><button class="ghost sm" id="ct-prev">Anterior</button><span id="ct-page"></span><button class="ghost sm" id="ct-next">Siguiente</button></div>
@@ -575,7 +408,7 @@ ${warning}
   <label>Origen del consentimiento</label>
   <input id="ct-source" placeholder="formulario web, compra en tienda, evento...">
   <label>Contactos</label>
-  <textarea id="ct-import" placeholder="5215512345678,Ana Perez&#10;5215587654321,Luis"></textarea>
+  <textarea id="ct-import" placeholder="51987654321,Ana Perez&#10;51912345678,Luis"></textarea>
   <div class="actions"><button id="ct-do-import">Importar</button><span id="ct-state-msg" class="pill hidden"></span></div>
 </section>
 
@@ -583,7 +416,7 @@ ${warning}
   <h2>Ubicaciones recibidas</h2>
   <p class="muted">Todo lo que el bot extrajo de mensajes y links. Las de baja confianza quedan sin confirmar hasta que el cliente responde al boton.</p>
   <div class="toolbar">
-    <div><label for="lc-phone">Telefono (opcional)</label><input id="lc-phone" placeholder="5215512345678"></div>
+    <div><label for="lc-phone">Telefono (opcional)</label><input id="lc-phone" placeholder="51987654321"></div>
     <div><button class="ghost" id="lc-search">Actualizar</button></div>
   </div>
   <div id="lc-table" class="tablewrap"></div>
@@ -594,7 +427,7 @@ ${warning}
   <p class="muted">Genera dos enlaces: uno para quien se mueve y otro para quien mira. La Cloud API no puede
   mandar live location, asi que WhatsApp solo transporta el enlace y el mapa corre aqui.</p>
   <label>Telefono del cliente (opcional, para enviarle el enlace)</label>
-  <input id="v-phone" placeholder="5215512345678">
+  <input id="v-phone" placeholder="51987654321">
   <label>Etiqueta</label>
   <input id="v-label" placeholder="Pedido A-1024">
   <label>Duracion (minutos)</label>
@@ -616,6 +449,54 @@ ${warning}
   <div class="actions"><button class="ghost sm" id="v-refresh">Actualizar</button></div>
 </section>
 
+<section id="tab-grupos" class="card hidden">
+  <h2>Enviar a un grupo de clientes</h2>
+  <p class="muted">Elige a quiénes por cómo están (todavía sin ubicación, ficha incompleta, callados desde hace días…), mira quiénes son y mándales a todos un mensaje <b>personalizado</b> por goteo, mételos en una secuencia o descárgalos.
+  Nada sale a quien se dio de baja; el ritmo y el horario los pone el marcapasos del número.</p>
+
+  <h3>1. ¿A quiénes?</h3>
+  <div class="toolbar">
+    <div><label for="gr-consent">Consentimiento</label><select id="gr-consent"><option value="opt_in">Solo con opt-in</option><option value="todos">Todos (menos bajas)</option></select></div>
+    <div><label for="gr-reparto">Ubicación del reparto</label><select id="gr-reparto"></select></div>
+    <div><label for="gr-lote">Lote</label><select id="gr-lote"><option value="">Cualquiera</option></select></div>
+    <div><label for="gr-ficha">Ficha de pedido</label><select id="gr-ficha"></select></div>
+    <div><label for="gr-actividad">Actividad</label><select id="gr-actividad"></select></div>
+    <div><label for="gr-dias">Días (el N de arriba)</label><input id="gr-dias" type="number" value="7" min="1" max="365"></div>
+    <div><label for="gr-q">Buscar</label><input id="gr-q" placeholder="nombre o teléfono"></div>
+  </div>
+  <label for="gr-telefonos">Solo estos teléfonos (opcional: pega una lista, uno por línea, y se cruza con los filtros)</label>
+  <textarea id="gr-telefonos" rows="2" style="min-height:52px"></textarea>
+  <div class="actions"><button id="gr-ver">Ver quiénes son</button><span id="gr-state" class="pill hidden"></span></div>
+  <div id="gr-resumen" class="cf-vigente"></div>
+  <div id="gr-table" class="tablewrap hidden"></div>
+
+  <h3>2. ¿Qué les mandas?</h3>
+  <div class="toolbar">
+    <div><label for="gr-modo">Cómo</label><select id="gr-modo"><option value="plantilla">Una plantilla</option><option value="texto">Un texto con marcadores</option></select></div>
+    <div id="gr-plantilla-wrap"><label for="gr-plantilla">Plantilla</label><select id="gr-plantilla"></select></div>
+    <div><label for="gr-nombre">Nombre de la campaña (opcional)</label><input id="gr-nombre" placeholder="Recordatorio ubicación viernes"></div>
+    <div><label for="gr-canario">Canario (cuántos salen primero)</label><input id="gr-canario" type="number" min="0" placeholder="automático"></div>
+    <div><label for="gr-ritmo">Ritmo (por hora)</label><input id="gr-ritmo" type="number" min="1" placeholder="el general"></div>
+  </div>
+  <div id="gr-texto-wrap" class="hidden">
+    <label for="gr-texto">Texto</label>
+    <textarea id="gr-texto" placeholder="Hola {nombre}, tu pedido {pedido} sale hoy. ¿Nos compartes tu ubicación? Gracias, {negocio}."></textarea>
+    <p class="cf-nota">Marcadores que se rellenan por cliente: <code>{nombre}</code> <code>{pedido}</code> <code>{negocio}</code> <code>{direccion}</code> <code>{distrito}</code>. Con la API oficial de Meta esto no está disponible: hace falta una plantilla aprobada.</p>
+  </div>
+  <div class="actions"><button class="ghost" id="gr-previa">Ver cómo les quedaría</button><span id="gr-previa-state" class="pill hidden"></span></div>
+  <div id="gr-previa-out" class="hidden"></div>
+
+  <h3>3. Hacer</h3>
+  <div class="actions">
+    <button id="gr-enviar">Enviar por goteo</button>
+    <select id="gr-secuencia" style="width:auto;min-width:220px"><option value="">Inscribir en una secuencia…</option></select>
+    <button class="ghost" id="gr-inscribir">Inscribir</button>
+    <button class="ghost" id="gr-csv">Descargar CSV</button>
+    <span id="gr-state2" class="pill hidden"></span>
+  </div>
+  <div id="gr-out" class="hidden"></div>
+</section>
+
 <section id="tab-campanas" class="card hidden">
   <h2>Campana con plantilla</h2>
   <p class="muted">Solo salen los contactos con opt-in registrado. Cada bloqueo queda anotado para que veas
@@ -625,7 +506,7 @@ ${warning}
   <label>Nombre de la campana</label>
   <input id="c-name" placeholder="Recordatorio marzo">
   <label>Destinatarios (uno por linea: telefono,variable1,variable2). Vacio = todos los que tienen opt-in.</label>
-  <textarea id="c-list" placeholder="5215512345678,Ana,A-1024,https://ej.mx/t/9"></textarea>
+  <textarea id="c-list" placeholder="51987654321,Ana,A-1024,https://ej.pe/t/9"></textarea>
   <div class="toolbar">
     <div><label>Canario (cuantos salen primero)</label><input id="c-canario" placeholder="automatico: 10 %, entre 5 y 20"></div>
     <div><label>Espera del canario (min)</label><input id="c-canario-espera" value="60"></div>
@@ -641,7 +522,12 @@ ${warning}
 </section>
 
 <section id="tab-automatizacion" class="card hidden">
-  <h2>Respuestas automaticas</h2>
+  <h2>Respuestas rápidas del chat</h2>
+  <p class="muted">Atajos para escribir más rápido en <a href="/chat">Chats</a>: se escribe <code>/</code> y el nombre del atajo, y el texto aparece listo para enviar. Valen <code>{nombre}</code>, <code>{pedido}</code> y <code>{negocio}</code>.</p>
+  <div id="at-lista"></div>
+  <div class="actions"><button class="ghost sm" id="at-anadir">Añadir atajo</button><button class="sm" id="at-guardar">Guardar atajos</button><button class="ghost sm" id="at-fabrica">Volver a los de fábrica</button><span id="at-state" class="pill hidden"></span></div>
+
+  <h2 style="margin-top:26px">Respuestas automaticas</h2>
   <p class="muted">Se aplican a lo que escribe el cliente, despues de BAJA/ALTA y antes de buscar coordenadas. En los textos valen
   <code>{nombre}</code>, <code>{telefono}</code> y <code>{fecha}</code>.</p>
   <div id="r-table" class="tablewrap"></div>
@@ -688,7 +574,7 @@ ${warning}
     <div><label for="e-source">Origen</label><input id="e-source" placeholder="panel"></div>
   </div>
   <label>Telefonos (uno por linea)</label>
-  <textarea id="e-phones" placeholder="5215512345678"></textarea>
+  <textarea id="e-phones" placeholder="51987654321"></textarea>
   <div class="actions"><button id="e-enroll">Inscribir</button><span id="e-state" class="pill hidden"></span></div>
 
   <h3>Inscripciones</h3>
@@ -702,7 +588,7 @@ ${warning}
   <h2 style="margin-top:26px">Mensajes programados</h2>
   <p class="muted">Un envio suelto a una fecha y hora. Los pasos de las secuencias tambien aparecen aqui.</p>
   <div class="toolbar">
-    <div><label for="sc-phone">Telefono</label><input id="sc-phone" placeholder="5215512345678"></div>
+    <div><label for="sc-phone">Telefono</label><input id="sc-phone" placeholder="51987654321"></div>
     <div><label for="sc-when">Cuando</label><input id="sc-when" type="datetime-local"></div>
     <div><label for="sc-kind">Tipo</label><select id="sc-kind"><option value="template">Plantilla</option><option value="freeform">Texto (solo dentro de 24 h)</option></select></div>
     <div><label for="sc-template">Plantilla</label><select id="sc-template"></select></div>
@@ -725,8 +611,23 @@ ${warning}
   <div class="actions"><button id="t-sync">Sincronizar desde Meta</button><span id="t-state" class="pill hidden"></span></div>
   <div id="t-table" class="tablewrap"></div>
 
-  <h3>Catalogo propio</h3>
-  <p class="muted">Las plantillas definidas en el codigo (<code>src/templates/catalog.ts</code>) pasan por el linter antes de subir. Un rechazo de Meta cuenta en el historial de la cuenta.</p>
+  <h3>Crear una plantilla propia</h3>
+  <p class="muted">Se guarda en el registro y se puede elegir en Ubicaciones (Ajustes) o en una campana. Con la API de Meta queda pendiente hasta que la subas y la aprueben; con el cliente no oficial se manda tal cual, con las variables sustituidas.
+  El nombre va en minusculas con guion bajo; cada <code>{{n}}</code> del cuerpo se describe en orden (es lo que ve el revisor de Meta).</p>
+  <div class="toolbar">
+    <div><label>Nombre</label><input id="tp-name" placeholder="aviso_entrega_hoy"></div>
+    <div><label>Idioma</label><input id="tp-language" value="es"></div>
+    <div><label>Categoria</label><select id="tp-category"><option value="UTILITY">UTILITY</option><option value="MARKETING">MARKETING</option></select></div>
+  </div>
+  <label>Cuerpo</label>
+  <textarea id="tp-body" placeholder="Hola {{1}}, su pedido {{2}} sale hoy con {{3}}. Para entregarlo necesitamos su ubicacion: compartala desde el clip, opcion Ubicacion."></textarea>
+  <label>Que es cada variable, una por linea y en orden ({{1}}, {{2}}...)</label>
+  <textarea id="tp-vars" placeholder="nombre del cliente&#10;numero de pedido&#10;nombre del negocio" style="min-height:60px"></textarea>
+  <div class="actions"><button id="tp-save">Guardar plantilla</button><span id="tp-state" class="pill hidden"></span></div>
+  <pre id="tp-out" class="hidden"></pre>
+
+  <h3>Catalogo y plantillas propias</h3>
+  <p class="muted">Las del catalogo vienen del codigo (<code>src/templates/catalog.ts</code>); las propias se crean arriba. Todas pasan por el linter antes de subir: un rechazo de Meta cuenta en el historial de la cuenta.</p>
   <div id="t-catalog" class="tablewrap"></div>
   <div class="actions"><button id="t-push">Dar de alta en Meta las que esten limpias</button><span id="t-push-state" class="pill hidden"></span></div>
   <pre id="t-out" class="hidden"></pre>
@@ -746,47 +647,601 @@ ${warning}
         <option value="failed">Fallidos</option>
         <option value="blocked_by_gate">Bloqueados</option>
       </select></div>
-    <div><label for="h-phone">Telefono</label><input id="h-phone" placeholder="5215512345678"></div>
+    <div><label for="h-phone">Telefono</label><input id="h-phone" placeholder="51987654321"></div>
     <div><label for="h-campaign">Campana (id)</label><input id="h-campaign" placeholder=""></div>
     <div><button class="ghost" id="h-search">Buscar</button></div>
+    <div><button class="ghost" id="h-csv" title="Descarga lo que ves, con los mismos filtros (hasta 5000 filas)">Descargar CSV</button></div>
   </div>
   <div id="h-table" class="tablewrap"></div>
   <div class="pager"><button class="ghost sm" id="h-prev">Anterior</button><span id="h-page"></span><button class="ghost sm" id="h-next">Siguiente</button></div>
+</section>
+
+<section id="tab-configuracion" class="card hidden">
+  <h2>Configuración general</h2>
+  <p class="muted">Lo que se guarda aquí manda sobre la configuración del servidor y se aplica en el siguiente envío, sin reiniciar.
+  Un campo vacío significa "lo que diga el servidor" (el valor aparece en gris). Por encima de todo esto sigue el marcapasos del número: si el monitor frena, frena.</p>
+  <div class="cf-vigente" id="cf-vigente"></div>
+
+  <h3>Negocio</h3>
+  <div class="toolbar">
+    <div style="grid-column: span 2"><label for="cf-nombre">Nombre del negocio</label><input id="cf-nombre" placeholder=""><div class="cf-nota">Así se presenta en los mensajes ("{negocio}") y en las pantallas.</div></div>
+    <div><label>Zona horaria</label><input id="cf-tz" disabled><div class="cf-nota">La del servidor (TIMEZONE).</div></div>
+  </div>
+
+  <h3>Horario de envío</h3>
+  <p class="muted">Fuera de esta franja no sale nada iniciado por ti (campañas, reparto, secuencias). Responder a quien escribe no tiene horario.</p>
+  <div class="toolbar">
+    <div><label for="cf-hora-inicio">Desde (hora)</label><input id="cf-hora-inicio" type="number" min="0" max="23"></div>
+    <div><label for="cf-hora-fin">Hasta (hora)</label><input id="cf-hora-fin" type="number" min="1" max="24"></div>
+  </div>
+  <label>Días</label>
+  <div class="dias" id="cf-dias"></div>
+
+  <h3>Ritmo</h3>
+  <p class="muted">Cuánto y cada cuánto. Menos es más seguro para el número; el perfil del proveedor pone unos valores razonables por defecto.</p>
+  <div class="toolbar">
+    <div><label for="cf-r-min">Mensajes por minuto</label><input id="cf-r-min" type="number" min="1" max="60"></div>
+    <div><label for="cf-r-hora">Mensajes por hora</label><input id="cf-r-hora" type="number" min="1" max="2000"></div>
+    <div><label for="cf-r-pmin">Pausa mínima (s)</label><input id="cf-r-pmin" type="number" min="0" max="600"></div>
+    <div><label for="cf-r-pmax">Pausa máxima (s)</label><input id="cf-r-pmax" type="number" min="0" max="900"></div>
+    <div><label for="cf-r-nuevos">Contactos nuevos por día</label><input id="cf-r-nuevos" type="number" min="0" max="5000"></div>
+    <div><label for="cf-r-contacto">Mensajes por contacto y día</label><input id="cf-r-contacto" type="number" min="1" max="20"></div>
+    <div><label for="cf-r-sep">Separación al mismo contacto (min)</label><input id="cf-r-sep" type="number" min="0" max="1440"></div>
+  </div>
+
+  <h3>Modo prueba</h3>
+  <p class="muted">Con el modo prueba activo, el sistema <b>solo escribe y solo contesta</b> a los números de la lista. Para probar sin molestar a clientes.</p>
+  <div id="cf-fijado" class="cf-aviso hidden"></div>
+  <label class="inline" style="margin-top:8px"><input type="checkbox" id="cf-mp-activo"> Modo prueba activo</label>
+  <label for="cf-mp-numeros">Números permitidos (uno por línea, con código de país)</label>
+  <textarea id="cf-mp-numeros" placeholder="51902464984&#10;51912426667"></textarea>
+
+  <h3>Avisos</h3>
+  <div class="toolbar">
+    <div style="grid-column: span 2"><label for="cf-supervisor">WhatsApp del supervisor</label><input id="cf-supervisor" placeholder="51902464984"><div class="cf-nota">Recibe los cambios de nivel del número y los casos del reparto que necesitan una persona. Vacío = nadie.</div></div>
+  </div>
+
+  <h3>Comportamiento</h3>
+  <div class="toolbar">
+    <div><label for="cf-humanizar">Escritura simulada</label><select id="cf-humanizar"><option value="">Según el servidor</option><option value="true">Sí</option><option value="false">No</option></select></div>
+    <div><label for="cf-autopausa">Pausa automática en rojo</label><select id="cf-autopausa"><option value="">Según el servidor</option><option value="true">Sí</option><option value="false">No</option></select></div>
+  </div>
+
+  <div class="actions">
+    <button id="cf-guardar">Guardar</button>
+    <button class="ghost" id="cf-restablecer">Volver a lo del servidor</button>
+    <span id="cf-state" class="pill hidden"></span>
+  </div>
+</section>
+
+<section id="tab-usuarios" class="card hidden">
+  <h2>Usuarios</h2>
+  <p class="muted">Quien puede entrar al sistema. Un <b>administrador</b> gestiona usuarios y claves de API; un <b>operador</b> hace todo lo demas. Cada uno entra con su usuario y contrasena en <code>/login</code>.
+  Los programas (el sistema de GSG) no tienen usuario: entran con una clave de API, ver <a href="/panel#integraciones">Integraciones</a>.</p>
+  <div id="us-table" class="tablewrap"></div>
+
+  <h3>Crear usuario</h3>
+  <div class="toolbar">
+    <div><label>Nombre</label><input id="us-nombre" placeholder="Rosa"></div>
+    <div><label>Usuario</label><input id="us-usuario" placeholder="rosa"></div>
+    <div><label>Contrasena (8+)</label><input id="us-clave" type="password"></div>
+    <div><label>Rol</label><select id="us-rol"><option value="operador">operador</option><option value="admin">admin</option></select></div>
+  </div>
+  <div class="actions"><button id="us-crear">Crear</button><span id="us-state" class="pill hidden"></span></div>
+
+  <p class="muted" style="margin-top:14px">Tu propia contraseña se cambia en <a href="/panel#mi-cuenta">Mi cuenta</a>.</p>
+</section>
+
+<section id="tab-actividad" class="card hidden">
+  <h2>Actividad</h2>
+  <p class="muted">Cada accion que cambia algo deja una fila: quien entro, quien creo un usuario, quien pauso los envios, quien cargo un lote. Se apunta sola. Sin contraseñas ni claves.</p>
+  <div class="toolbar">
+    <div><label for="ac-accion">Accion</label><select id="ac-accion"><option value="">Todas</option></select></div>
+    <div><label for="ac-usuario">Quien</label><input id="ac-usuario" placeholder="nombre"></div>
+    <div><label>&nbsp;</label><button class="ghost" id="ac-buscar">Buscar</button></div>
+  </div>
+  <div id="ac-table" class="tablewrap"></div>
+  <div class="pager"><button class="ghost sm" id="ac-prev">Anterior</button><span id="ac-page"></span><button class="ghost sm" id="ac-next">Siguiente</button></div>
+</section>
+
+<section id="tab-mi-cuenta" class="card hidden">
+  <h2>Mi cuenta</h2>
+  <div class="grid" id="mc-datos" style="margin-top:10px"></div>
+  <h3>Cambiar mi contrasena</h3>
+  <p class="muted">Al cambiarla, tus otras sesiones abiertas se cierran; esta sigue.</p>
+  <div class="toolbar">
+    <div><label>Actual</label><input id="mc-actual" type="password" autocomplete="current-password"></div>
+    <div><label>Nueva (8+)</label><input id="mc-nueva" type="password" autocomplete="new-password"></div>
+    <div><label>Repite la nueva</label><input id="mc-nueva2" type="password" autocomplete="new-password"></div>
+    <div><label>&nbsp;</label><button id="mc-cambiar">Cambiar</button></div>
+  </div>
+  <span id="mc-state" class="pill hidden"></span>
+  <h3>Sesion</h3>
+  <p class="muted">La sesion dura siete dias sin entrar. Para cerrarla en este navegador, pulsa Salir abajo del menu.</p>
+  <div class="actions"><button class="ghost" id="mc-salir">Cerrar sesion</button></div>
+</section>
+
+<section id="tab-integraciones" class="card hidden">
+  <h2>Claves de API</h2>
+  <p class="muted">Con una clave, un programa (el sistema de GSG, un script) entra en la API sin usuario ni contrasena.
+  La clave se ve entera <b>una sola vez</b>, al crearla; despues solo su comienzo. Revocarla la apaga al instante.
+  Una clave no puede crear usuarios ni otras claves.</p>
+  <div id="ck-table" class="tablewrap"></div>
+
+  <h3>Nueva clave</h3>
+  <div class="toolbar">
+    <div><label>Para quien es</label><input id="ck-nombre" placeholder="Sistema de GSG"></div>
+    <div><label>&nbsp;</label><button id="ck-crear">Crear clave</button></div>
+  </div>
+  <span id="ck-state" class="pill hidden"></span>
+  <div id="ck-nueva" class="nueva-clave hidden">
+    <b>Copia la clave ahora: no se volvera a mostrar.</b>
+    <code id="ck-valor"></code>
+    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="ck-copiar">Copiar</button><button class="ghost sm" id="ck-cerrar">Ya la guarde</button></div>
+  </div>
+
+  <h3>Como se usa</h3>
+  <p class="muted">Cabecera <code>Authorization: Bearer &lt;clave&gt;</code> en cualquier ruta <code>/admin/*</code>. Por ejemplo:</p>
+  <pre id="ck-ejemplo"></pre>
+  <p class="muted">Para el reparto: <code>POST /admin/rutas/lotes</code> carga la lista del dia, <code>GET /admin/rutas/solicitudes</code> devuelve el avance,
+  <code>GET /admin/rutas/cola</code> los reportes pendientes para GSG. El detalle esta en el README, seccion "Conectar el sistema de GSG".</p>
 </section>
 
 <section id="tab-extraer" class="card hidden">
   <h2>Extraer latitud y longitud</h2>
   <p class="muted">Pega cualquier enlace de mapa (Google, Waze, Apple, OSM, plus code, DMS o un acortador).</p>
   <label>Enlace o texto</label>
-  <textarea id="g-input" placeholder="https://www.google.com/maps/place/.../@19.4326,-99.1332,17z/data=!3m1!4b1"></textarea>
+  <textarea id="g-input" placeholder="https://www.google.com/maps/place/.../@-12.0464,-77.0428,17z/data=!3m1!4b1"></textarea>
   <div class="actions"><button id="g-run">Extraer</button><span id="g-state" class="pill hidden"></span></div>
   <pre id="g-out" class="hidden"></pre>
 </section>`;
 
   const script = String.raw`
-var TAB_IDS = ${JSON.stringify(TABS.map(([id]) => id))};
+var SECCIONES = ${JSON.stringify(SECCIONES)};
+var TAB_IDS = SECCIONES.map(function (s) { return s[0]; });
 var LOADERS = {
-  estado: loadHealth, salud: loadSalud, contactos: loadContacts, ubicaciones: loadLocations, vivo: loadSessions,
+  inicio: loadInicio, estado: loadHealth, salud: loadSalud, contactos: loadContacts, ubicaciones: loadLocations, vivo: loadSessions,
   campanas: function () { loadTemplates(); loadCampaigns(); },
-  automatizacion: loadAutomation, plantillas: loadTemplates, historial: loadDeliveries
+  grupos: loadGrupos,
+  automatizacion: loadAutomation, plantillas: loadTemplates, historial: loadDeliveries, usuarios: loadUsuarios, integraciones: loadClaves,
+  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad
 };
+/* Lo que se refresca cada vez que se entra, no solo la primera. */
+var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true };
 var loaded = {};
+var seccionActiva = '';
 
 function activate(id) {
   if (TAB_IDS.indexOf(id) < 0) id = TAB_IDS[0];
-  document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.toggle('active', x.getAttribute('data-tab') === id); });
+  seccionActiva = id;
   TAB_IDS.forEach(function (t) { document.getElementById('tab-' + t).classList.toggle('hidden', t !== id); });
   if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
-  if (LOADERS[id] && !loaded[id]) { loaded[id] = true; LOADERS[id](); }
+  var s = SECCIONES.filter(function (x) { return x[0] === id; })[0];
+  if (s && window.shellTitulo) shellTitulo(s[1], s[2]);
+  if (window.shellMarcarActivo) shellMarcarActivo();
+  document.getElementById('s-content').scrollTop = 0;
+  if (LOADERS[id] && (!loaded[id] || SIEMPRE[id])) { loaded[id] = true; LOADERS[id](); }
 }
-document.querySelectorAll('.tabs button').forEach(function (b) {
-  b.onclick = function () { activate(b.getAttribute('data-tab')); };
-});
 window.addEventListener('hashchange', function () { activate(location.hash.slice(1)); });
+
+// --------------------------------------------------------------- inicio
+var DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+function kpi(etiqueta, valor, detalle, clase, href) {
+  var n = '<div class="n' + (clase ? ' ' + clase : '') + '">' + esc(valor) + '</div>';
+  var cuerpo = '<div class="l">' + esc(etiqueta) + '</div>' + n + (detalle ? '<div class="d">' + detalle + '</div>' : '');
+  return '<div class="kpi">' + (href ? '<a href="' + esc(href) + '">' + cuerpo + '</a>' : cuerpo) + '</div>';
+}
+function graficaSemana(semana) {
+  var max = 1;
+  semana.forEach(function (d) { max = Math.max(max, d.salientes, d.entrantes); });
+  var W = 700, H = 190, arriba = 12, abajo = 26, izq = 30, der = 8;
+  var alto = H - arriba - abajo, ancho = (W - izq - der) / semana.length;
+  var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Mensajes por dia">';
+  for (var g = 0; g <= 4; g++) {
+    var y = arriba + alto - (alto * g / 4);
+    out += '<line x1="' + izq + '" x2="' + (W - der) + '" y1="' + y + '" y2="' + y + '" stroke="currentColor" stroke-opacity=".12" />';
+    out += '<text x="' + (izq - 6) + '" y="' + (y + 4) + '" font-size="10" text-anchor="end" fill="currentColor" fill-opacity=".55">' + Math.round(max * g / 4) + '</text>';
+  }
+  semana.forEach(function (d, i) {
+    var x0 = izq + i * ancho, bw = Math.max(6, ancho * 0.28);
+    var hs = alto * d.salientes / max, he = alto * d.entrantes / max;
+    out += '<rect x="' + (x0 + ancho / 2 - bw - 2) + '" y="' + (arriba + alto - hs) + '" width="' + bw + '" height="' + hs + '" rx="3" fill="#128c7e"><title>' + d.dia + ': salieron ' + d.salientes + '</title></rect>';
+    out += '<rect x="' + (x0 + ancho / 2 + 2) + '" y="' + (arriba + alto - he) + '" width="' + bw + '" height="' + he + '" rx="3" fill="#94a3b8"><title>' + d.dia + ': entraron ' + d.entrantes + '</title></rect>';
+    var f = new Date(d.dia + 'T12:00:00');
+    out += '<text x="' + (x0 + ancho / 2) + '" y="' + (H - 8) + '" font-size="11" text-anchor="middle" fill="currentColor" fill-opacity=".7">' + DIAS[f.getDay()] + ' ' + f.getDate() + '</text>';
+  });
+  return out + '</svg>';
+}
+function pintarPasos(p) {
+  if (!p) return;
+  var oficial = p.proveedor === 'cloud';
+  var pasos = [
+    { hecho: p.conectado, titulo: 'Conectar el WhatsApp', que: oficial ? 'La API de Meta ya responde.' : 'Escanea el QR desde el teléfono.', href: '/setup' },
+    { hecho: p.usuarios > 1, titulo: 'Crear las cuentas del equipo', que: 'Una por persona, con su rol.', href: '/panel#usuarios', soloAdmin: true },
+    { hecho: p.plantillas > 0, titulo: oficial ? 'Dar de alta las plantillas' : 'Crear plantillas propias (opcional)', que: oficial ? 'Meta tiene que aprobarlas.' : 'Con el QR no hacen falta; ordenan los textos.', href: '/panel#plantillas' },
+    { hecho: p.contactos > 0, titulo: 'Cargar contactos con su consentimiento', que: 'Sin opt-in no sale nada iniciado por ti.', href: '/panel#contactos' },
+    { hecho: p.lotes > 0, titulo: 'Cargar el primer reparto', que: 'Pega la lista del día y pulsa Empezar a pedir.', href: '/rutas' }
+  ];
+  var esAdmin = !window.__yo || window.__yo.rol === 'admin';
+  pasos = pasos.filter(function (x) { return !x.soloAdmin || esAdmin; });
+  var pendientes = pasos.filter(function (x) { return !x.hecho; });
+  var card = document.getElementById('in-pasos-card');
+  card.classList.toggle('hidden', pendientes.length === 0);
+  if (!pendientes.length) return;
+  document.getElementById('in-pasos').innerHTML = pasos.map(function (x, i) {
+    return '<li class="' + (x.hecho ? 'hecho' : '') + '"><i>' + (x.hecho ? '✓' : (i + 1)) + '</i><div><b>' + (x.hecho ? esc(x.titulo) : '<a href="' + esc(x.href) + '">' + esc(x.titulo) + '</a>') + '</b><small>' + esc(x.que) + '</small></div></li>';
+  }).join('');
+}
+var NIVEL_TXT = { verde: 'Todo en orden', amarillo: 'Con cuidado: el marketing va más lento', naranja: 'Frenado: solo lo imprescindible', rojo: 'Pausado: nada sale hasta que mejore' };
+async function loadInicio() {
+  try {
+    var r = await api('/admin/resumen');
+    var h = r.hoy, n = r.numero, c = r.chats, rp = r.reparto;
+    var pct = h.cupo ? Math.min(100, Math.round(100 * h.usados / h.cupo)) : 0;
+    document.getElementById('in-kpis').innerHTML =
+      kpi('Enviados hoy', h.enviados, 'entregados ' + h.entregados + ' · leídos ' + h.leidos, '', '/panel#historial') +
+      kpi('Recibidos hoy', h.entrantes, c.sinLeer + ' sin leer', '', '/chat') +
+      kpi('Fallidos hoy', h.fallidos, h.fallidos ? 'mira el historial' : 'ninguno', h.fallidos ? 'bad' : 'ok', '/panel#historial') +
+      kpi('Cupo de hoy', h.usados + ' / ' + h.cupo, '<div class="barra"><i class="' + (pct > 90 ? 'bad' : pct > 70 ? 'warn' : '') + '" style="width:' + pct + '%"></i></div><span title="Solo lo iniciado por la empresa (plantillas, campañas, reparto) gasta cupo; responder a quien escribe no.">iniciados por ti · warm-up</span>', pct > 90 ? 'warn' : '', '/panel#estado') +
+      kpi('Esperan respuesta', c.esperandoRespuesta, 'conversaciones con el cliente al final', c.esperandoRespuesta ? 'warn' : 'ok', '/chat') +
+      kpi('Necesitan una persona', rp.requierenPersona, 'solicitudes del reparto', rp.requierenPersona ? 'warn' : 'ok', '/rutas');
+    document.getElementById('in-grafica').innerHTML = graficaSemana(r.semana);
+    pintarPasos(r.primerosPasos);
+
+    var luz = n.nivel || 'verde';
+    var numero = '<div class="semaforo" style="margin-top:8px"><span class="luz ' + esc(luz) + '"></span><div><b>' + esc(luz.charAt(0).toUpperCase() + luz.slice(1)) + '</b><p class="muted">' + esc(NIVEL_TXT[luz] || '') + '</p></div></div>';
+    numero += '<div class="grid" style="margin-top:12px">' +
+      '<div class="stat"><span class="muted">Conexión</span><b class="' + (n.conectado ? 'ok' : 'bad') + '">' + (n.conectado ? 'conectado' : n.configurado ? 'sin conexión' : 'sin configurar') + '</b></div>' +
+      '<div class="stat"><span class="muted">Calidad (Meta)</span><b class="' + qualityKind(n.calidad) + '">' + esc(n.calidad || '-') + '</b></div>' +
+      '<div class="stat"><span class="muted">Envíos</span><b class="' + (n.pausado ? 'bad' : 'ok') + '">' + (n.pausado ? 'pausados' : 'activos') + '</b>' + (n.motivoPausa ? '<small>' + esc(n.motivoPausa) + '</small>' : '') + '</div>' +
+      '<div class="stat"><span class="muted">Ritmo</span><b>' + Math.round((n.factor || 1) * 100) + '%</b><small>del normal</small></div>' +
+      '</div>';
+    if (n.motivos && n.motivos.length) numero += '<ul class="motivos">' + n.motivos.slice(0, 4).map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul>';
+    document.getElementById('in-numero').innerHTML = numero;
+
+    var cifras = rp.cifras || {};
+    var orden = ['pendiente', 'enviado', 'respondio', 'resuelto', 'supervision', 'derivado', 'incidencia', 'cancelado'];
+    var pills = orden.filter(function (k) { return cifras[k]; }).map(function (k) {
+      var kind = k === 'resuelto' || k === 'respondio' ? 'ok' : k === 'supervision' || k === 'derivado' || k === 'incidencia' ? 'warn' : 'muted';
+      return pill(kind, k + ' ' + cifras[k]);
+    }).join(' ');
+    var lotes = (rp.lotesRecientes || []).map(function (l) {
+      var hechas = (l.cifras.resuelto || 0) + (l.cifras.cancelado || 0) + (l.cifras.incidencia || 0) + (l.cifras.derivado || 0);
+      var p = l.total ? Math.round(100 * hechas / l.total) : 0;
+      return '<li><b title="' + esc(l.nombre) + '">' + esc(l.nombre) + '</b>' + pill(statusKind(l.estado), statusLabel(l.estado)) + '<div class="barra"><i style="width:' + p + '%"></i></div><span class="muted">' + hechas + '/' + l.total + '</span></li>';
+    }).join('');
+    document.getElementById('in-reparto').innerHTML = (pills || '<p class="muted">Todavía no hay solicitudes.</p>') +
+      (lotes ? '<ul class="lista">' + lotes + '</ul>' : '') +
+      '<div class="actions"><a href="/rutas">Ir al reparto</a>' + (rp.lotesEnMarcha ? ' <span class="pill warn">' + rp.lotesEnMarcha + ' en marcha</span>' : '') + '</div>';
+  } catch (error) { show('state', error.message, 'bad'); }
+}
+setInterval(function () { if (seccionActiva === 'inicio' && !document.hidden) loadInicio(); }, 30000);
+
+// --------------------------------------------------------------- configuracion
+var DIAS_NOMBRE = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+var DIAS_ORDEN = [1, 2, 3, 4, 5, 6, 0];
+function numOVacio(id) { var v = val(id); return v === '' ? null : Number(v); }
+function ponerNum(id, guardado, efectivo) {
+  var el = document.getElementById(id);
+  el.value = guardado === null || guardado === undefined ? '' : guardado;
+  el.placeholder = efectivo === null || efectivo === undefined ? '' : String(efectivo);
+}
+function pintarVigente(e) {
+  var dias = (e.horario.dias || []).slice().sort(function (a, b) { return DIAS_ORDEN.indexOf(a) - DIAS_ORDEN.indexOf(b); }).map(function (d) { return DIAS_NOMBRE[d]; }).join(' ');
+  var partes = [
+    'Negocio: <b>' + esc(e.nombreNegocio) + '</b>',
+    'Horario: <b>' + e.horario.inicio + ':00 – ' + e.horario.fin + ':00</b> ' + esc(dias),
+    'Ritmo: <b>' + e.ritmo.maxPorMinuto + '/min · ' + e.ritmo.maxPorHora + '/h</b>, pausas ' + e.ritmo.pausaMinSeg + '–' + e.ritmo.pausaMaxSeg + ' s',
+    'Contactos nuevos/día: <b>' + (e.ritmo.nuevosContactosPorDia || 'sin límite') + '</b>',
+    e.soloNumeros.length ? 'Modo prueba: <b>' + e.soloNumeros.length + ' número(s)</b>' : 'Modo prueba: <b>apagado</b>',
+    e.supervisor ? 'Avisos a <b>' + esc(e.supervisor) + '</b>' : 'Avisos: <b>nadie</b>',
+    'Perfil <b>' + esc(e.ritmo.perfil) + '</b>'
+  ];
+  document.getElementById('cf-vigente').innerHTML = partes.map(function (t) { return '<span>' + t + '</span>'; }).join('');
+}
+async function loadConfiguracion() {
+  try {
+    var r = await api('/admin/ajustes');
+    var g = r.guardado, e = r.efectivo, sv = r.servidor;
+    pintarVigente(e);
+    /* el nombre nuevo se ve en el menu sin recargar */
+    document.querySelectorAll('.s-logo-text').forEach(function (el) { el.textContent = e.nombreNegocio; });
+    document.getElementById('s-app').setAttribute('data-negocio', e.nombreNegocio);
+    var nombre = document.getElementById('cf-nombre'); nombre.value = g.nombreNegocio || ''; nombre.placeholder = sv.nombreNegocio;
+    document.getElementById('cf-tz').value = e.horario.timezone;
+    ponerNum('cf-hora-inicio', g.horario.inicio, e.horario.inicio);
+    ponerNum('cf-hora-fin', g.horario.fin, e.horario.fin);
+    document.getElementById('cf-dias').innerHTML = DIAS_ORDEN.map(function (d) {
+      return '<label><input type="checkbox" data-dia="' + d + '"' + (e.horario.dias.indexOf(d) >= 0 ? ' checked' : '') + '> ' + DIAS_NOMBRE[d] + '</label>';
+    }).join('');
+    ponerNum('cf-r-min', g.ritmo.maxPorMinuto, e.ritmo.maxPorMinuto);
+    ponerNum('cf-r-hora', g.ritmo.maxPorHora, e.ritmo.maxPorHora);
+    ponerNum('cf-r-pmin', g.ritmo.pausaMinSeg, e.ritmo.pausaMinSeg);
+    ponerNum('cf-r-pmax', g.ritmo.pausaMaxSeg, e.ritmo.pausaMaxSeg);
+    ponerNum('cf-r-nuevos', g.ritmo.nuevosContactosPorDia, e.ritmo.nuevosContactosPorDia);
+    ponerNum('cf-r-contacto', g.ritmo.maxPorContactoDia, e.ritmo.maxPorContactoDia);
+    ponerNum('cf-r-sep', g.ritmo.separacionContactoMin, e.ritmo.separacionContactoMin);
+    document.getElementById('cf-mp-activo').checked = g.modoPrueba.activo;
+    document.getElementById('cf-mp-numeros').value = g.modoPrueba.numeros.join('\n');
+    var fijado = document.getElementById('cf-fijado');
+    fijado.classList.toggle('hidden', !r.modoPruebaFijado);
+    if (r.modoPruebaFijado) fijado.textContent = 'El servidor arrancó con SOLO_NUMEROS=' + sv.soloNumeros.join(', ') + '. Desde aquí solo puedes recortar esa lista, no ampliarla ni apagar el modo prueba: eso se cambia en el .env y se reinicia.';
+    var sup = document.getElementById('cf-supervisor'); sup.value = g.avisos.supervisor || ''; sup.placeholder = sv.supervisor || 'nadie';
+    document.getElementById('cf-humanizar').value = g.humanizar === null ? '' : String(g.humanizar);
+    document.getElementById('cf-autopausa').value = g.autoPausa === null ? '' : String(g.autoPausa);
+    var soyAdmin = !window.__yo || (window.__yo.rol === 'admin' && !window.__yo.porToken);
+    document.getElementById('cf-guardar').disabled = !soyAdmin;
+    document.getElementById('cf-restablecer').disabled = !soyAdmin;
+    if (!soyAdmin) show('cf-state', 'Solo un administrador puede cambiar esto', 'muted');
+  } catch (error) { show('cf-state', error.message, 'bad'); }
+}
+function triestado(id) { var v = val(id); return v === '' ? null : v === 'true'; }
+document.getElementById('cf-guardar').onclick = busy('cf-guardar', async function () {
+  try {
+    var dias = Array.prototype.slice.call(document.querySelectorAll('#cf-dias input')).filter(function (c) { return c.checked; }).map(function (c) { return Number(c.getAttribute('data-dia')); });
+    if (!dias.length) throw new Error('Marca al menos un día de envío.');
+    var patch = {
+      nombreNegocio: val('cf-nombre') || null,
+      horario: { inicio: numOVacio('cf-hora-inicio'), fin: numOVacio('cf-hora-fin'), dias: dias },
+      ritmo: {
+        maxPorMinuto: numOVacio('cf-r-min'), maxPorHora: numOVacio('cf-r-hora'),
+        pausaMinSeg: numOVacio('cf-r-pmin'), pausaMaxSeg: numOVacio('cf-r-pmax'),
+        nuevosContactosPorDia: numOVacio('cf-r-nuevos'), maxPorContactoDia: numOVacio('cf-r-contacto'),
+        separacionContactoMin: numOVacio('cf-r-sep')
+      },
+      modoPrueba: { activo: document.getElementById('cf-mp-activo').checked, numeros: lines(document.getElementById('cf-mp-numeros').value) },
+      avisos: { supervisor: val('cf-supervisor') || null },
+      humanizar: triestado('cf-humanizar'),
+      autoPausa: triestado('cf-autopausa')
+    };
+    if (patch.horario.inicio !== null && patch.horario.fin !== null && patch.horario.fin <= patch.horario.inicio) throw new Error('La hora final tiene que ser mayor que la inicial.');
+    if (patch.modoPrueba.activo && !patch.modoPrueba.numeros.length) throw new Error('Con el modo prueba activo hace falta al menos un número.');
+    await api('/admin/ajustes', { method: 'POST', body: patch });
+    show('cf-state', 'Guardado: se aplica en el siguiente envío', 'ok');
+    loadConfiguracion();
+  } catch (error) { show('cf-state', error.message, 'bad'); }
+});
+document.getElementById('cf-restablecer').onclick = busy('cf-restablecer', async function () {
+  var ok = await confirmarDialogo({ titulo: 'Volver a lo del servidor', texto: 'Se borra todo lo guardado en esta pantalla y vuelve a mandar la configuración del servidor (.env).', boton: 'Restablecer', peligro: true });
+  if (!ok) return;
+  try { await api('/admin/ajustes', { method: 'DELETE' }); show('cf-state', 'Restablecido', 'ok'); loadConfiguracion(); }
+  catch (error) { show('cf-state', error.message, 'bad'); }
+});
+
+// --------------------------------------------------------------- grupos
+var grOpciones = null, grTelefonos = [], grTotal = 0;
+function grCriterio() {
+  return {
+    consentimiento: val('gr-consent') || 'opt_in',
+    reparto: val('gr-reparto') || 'cualquiera',
+    loteId: val('gr-lote') || undefined,
+    ficha: val('gr-ficha') || 'cualquiera',
+    actividad: val('gr-actividad') || 'cualquiera',
+    dias: Number(val('gr-dias')) || 7,
+    q: val('gr-q') || undefined,
+    telefonos: lines(document.getElementById('gr-telefonos').value)
+  };
+}
+function llenarSelect(id, etiquetas) {
+  var sel = document.getElementById(id);
+  sel.innerHTML = Object.keys(etiquetas).map(function (k) { return '<option value="' + esc(k) + '">' + esc(etiquetas[k]) + '</option>'; }).join('');
+}
+async function loadGrupos() {
+  try {
+    grOpciones = await api('/admin/grupos/opciones');
+    llenarSelect('gr-reparto', grOpciones.reparto);
+    llenarSelect('gr-ficha', grOpciones.ficha);
+    llenarSelect('gr-actividad', grOpciones.actividad);
+    document.getElementById('gr-lote').innerHTML = '<option value="">Cualquiera</option>' + grOpciones.lotes.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.nombre) + ' (' + l.total + ', ' + esc(l.estado) + ')</option>'; }).join('');
+    document.getElementById('gr-plantilla').innerHTML = grOpciones.plantillas.length
+      ? grOpciones.plantillas.map(function (t) { return '<option value="' + esc(t.name + '|' + t.language) + '">' + esc(t.name) + (t.propia ? ' (propia)' : '') + ' · ' + t.variables + ' var.</option>'; }).join('')
+      : '<option value="">No hay plantillas aprobadas</option>';
+    document.getElementById('gr-secuencia').innerHTML = '<option value="">Inscribir en una secuencia…</option>' + grOpciones.secuencias.map(function (q) { return '<option value="' + esc(q.id) + '">' + esc(q.name) + ' (' + q.pasos + ' pasos)</option>'; }).join('');
+    var modo = document.getElementById('gr-modo');
+    modo.querySelector('option[value="texto"]').disabled = !grOpciones.textoLibre;
+    if (!grOpciones.textoLibre) modo.value = 'plantilla';
+    grModo();
+  } catch (error) { show('gr-state', error.message, 'bad'); }
+}
+function grModo() {
+  var texto = val('gr-modo') === 'texto';
+  document.getElementById('gr-texto-wrap').classList.toggle('hidden', !texto);
+  document.getElementById('gr-plantilla-wrap').classList.toggle('hidden', texto);
+}
+document.getElementById('gr-modo').onchange = grModo;
+function repartoTexto(r) {
+  if (!r) return pill('muted', 'sin solicitud');
+  var kind = r.estado === 'resuelto' ? 'ok' : r.estado === 'incidencia' || r.estado === 'derivado' || r.estado === 'supervision' ? 'warn' : 'muted';
+  return pill(kind, r.estado) + (r.pedido ? ' <span class="muted">' + esc(r.pedido) + '</span>' : '') + (r.incidencia ? ' <span class="muted">' + esc(r.incidencia) + '</span>' : '');
+}
+function fichaTexto(f) {
+  if (!f) return pill('muted', 'sin ficha');
+  if (f.estado === 'enviado') return pill('ok', 'enviada a ventas');
+  return f.completa ? pill('ok', 'completa') : pill('warn', 'faltan: ' + f.faltan.join(', '));
+}
+document.getElementById('gr-ver').onclick = busy('gr-ver', async function () {
+  try {
+    var r = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() });
+    grTelefonos = r.telefonos; grTotal = r.total;
+    var c = r.cifras;
+    var chips = ['<span><b>' + r.total + '</b> clientes</span>', '<span>con opt-in <b>' + c.conOptIn + '</b></span>', '<span>escribieron en 24 h <b>' + c.ventanaAbierta + '</b></span>']
+      .concat(Object.keys(c.reparto).map(function (k) { return '<span>' + esc(k) + ' <b>' + c.reparto[k] + '</b></span>'; }))
+      .concat(Object.keys(c.ficha).map(function (k) { return '<span>ficha ' + esc(k) + ' <b>' + c.ficha[k] + '</b></span>'; }));
+    document.getElementById('gr-resumen').innerHTML = chips.join('');
+    document.getElementById('gr-table').classList.remove('hidden');
+    table('gr-table', ['Cliente', 'Reparto', 'Ficha', 'Último mensaje', 'Opt-in'], r.clientes.map(function (x) {
+      return [contactCell(x.phone, x.nombre), repartoTexto(x.reparto), fichaTexto(x.ficha), esc(x.ultimoMensajeAt ? ago(x.ultimoMensajeAt) : 'nunca') + (x.ventanaAbierta ? ' ' + pill('ok', '24 h') : ''), pill(x.optIn ? 'ok' : 'muted', x.optIn ? 'sí' : 'no')];
+    }), 'Con esos filtros no hay ningún cliente.');
+    show('gr-state', r.total + ' cliente(s)' + (r.total > r.clientes.length ? ' (se muestran ' + r.clientes.length + ')' : ''), r.total ? 'ok' : 'warn');
+  } catch (error) { show('gr-state', error.message, 'bad'); }
+});
+function grEnvio(soloVistaPrevia) {
+  var body = { criterio: grCriterio(), soloVistaPrevia: soloVistaPrevia };
+  if (val('gr-modo') === 'texto') body.texto = document.getElementById('gr-texto').value.trim();
+  else { var p = val('gr-plantilla').split('|'); body.plantilla = { name: p[0], language: p[1] || 'es' }; }
+  if (val('gr-nombre')) body.nombre = val('gr-nombre');
+  if (val('gr-canario') !== '') body.canario = Number(val('gr-canario'));
+  if (val('gr-ritmo') !== '') body.ritmoPorHora = Number(val('gr-ritmo'));
+  return body;
+}
+document.getElementById('gr-previa').onclick = busy('gr-previa', async function () {
+  try {
+    var r = await api('/admin/grupos/enviar', { method: 'POST', body: grEnvio(true) });
+    var out = document.getElementById('gr-previa-out');
+    out.innerHTML = '<p class="muted" style="margin-top:10px">Así les llegaría a los primeros de ' + r.total + ':</p>' + r.muestra.map(function (m) {
+      return '<div class="res" style="margin-top:8px"><b>' + esc(m.nombre || m.phone) + ' <span class="muted" style="display:inline">' + esc(m.phone) + '</span></b><span style="white-space:pre-wrap">' + esc(m.texto) + '</span></div>';
+    }).join('');
+    out.classList.remove('hidden');
+    show('gr-previa-state', 'Vista previa de ' + r.muestra.length, 'ok');
+  } catch (error) { show('gr-previa-state', error.message, 'bad'); }
+});
+document.getElementById('gr-enviar').onclick = busy('gr-enviar', async function () {
+  try {
+    var previa = await api('/admin/grupos/enviar', { method: 'POST', body: grEnvio(true) });
+    var ok = await confirmarDialogo({ titulo: 'Enviar a ' + previa.total + ' cliente(s)', texto: 'Saldrá por goteo, al ritmo del número y solo en horario. Primero el canario; si cae bien, el resto. Se puede pausar desde Campañas.', boton: 'Enviar' });
+    if (!ok) return;
+    var r = await api('/admin/grupos/enviar', { method: 'POST', body: grEnvio(false) });
+    var out = document.getElementById('gr-out');
+    out.innerHTML = '<div class="res ok"><b>Campaña creada: ' + r.enqueued + ' destinatario(s)' + (r.canario ? ', canario de ' + r.canario : '') + '</b><span>Van saliendo por goteo. Míralo en <a href="/panel#campanas">Campañas</a> y cada envío en el <a href="/panel#historial">Historial</a>.</span></div>';
+    out.classList.remove('hidden');
+    show('gr-state2', 'En marcha', 'ok');
+  } catch (error) { show('gr-state2', error.message, 'bad'); }
+});
+document.getElementById('gr-inscribir').onclick = busy('gr-inscribir', async function () {
+  try {
+    var id = val('gr-secuencia');
+    if (!id) throw new Error('Elige una secuencia.');
+    if (!grTelefonos.length) { var r0 = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() }); grTelefonos = r0.telefonos; grTotal = r0.total; }
+    if (!grTelefonos.length) throw new Error('Con esos filtros no hay ningún cliente.');
+    var ok = await confirmarDialogo({ titulo: 'Inscribir a ' + grTelefonos.length + ' cliente(s)', texto: 'Cada uno empezará la secuencia desde el primer paso. Quien ya esté dentro no se duplica.', boton: 'Inscribir' });
+    if (!ok) return;
+    var r = await api('/admin/automation/sequences/' + encodeURIComponent(id) + '/enroll', { method: 'POST', body: { phones: grTelefonos, source: 'grupo' } });
+    show('gr-state2', r.enrolled + ' inscrito(s), ' + r.already + ' ya estaban', 'ok');
+  } catch (error) { show('gr-state2', error.message, 'bad'); }
+});
+document.getElementById('gr-csv').onclick = busy('gr-csv', async function () {
+  try {
+    var res = await fetch('/admin/grupos/exportar', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(grCriterio()) });
+    if (!res.ok) throw new Error('No se pudo exportar.');
+    var blob = await res.blob();
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'grupo-clientes.csv'; document.body.appendChild(a); a.click(); a.remove();
+  } catch (error) { show('gr-state2', error.message, 'bad'); }
+});
+
+// --------------------------------------------------------------- actividad
+var acOffset = 0, acLimit = 50, acEtiquetas = {};
+function detalleTexto(d) {
+  if (!d) return '';
+  return Object.keys(d).filter(function (k) { return d[k] !== null && d[k] !== undefined && d[k] !== '{...}'; }).map(function (k) { return k + ': ' + d[k]; }).join(' · ');
+}
+async function loadActividad() {
+  try {
+    var q = '?limit=' + acLimit + '&offset=' + acOffset + (val('ac-accion') ? '&accion=' + encodeURIComponent(val('ac-accion')) : '') + (val('ac-usuario') ? '&usuario=' + encodeURIComponent(val('ac-usuario')) : '');
+    var r = await api('/admin/actividad' + q);
+    acEtiquetas = r.etiquetas || {};
+    var sel = document.getElementById('ac-accion');
+    var actual = sel.value;
+    sel.innerHTML = '<option value="">Todas</option>' + (r.acciones || []).map(function (a) { return '<option value="' + esc(a) + '">' + esc(acEtiquetas[a] || a) + '</option>'; }).join('');
+    sel.value = actual;
+    table('ac-table', ['Cuando', 'Quien', 'Que', 'Detalle', 'IP'], r.items.map(function (e) {
+      var kind = /fallido|borrar|revocar|baja/.test(e.accion) ? 'bad' : /pausa|restablecer|derivar/.test(e.accion) ? 'warn' : 'muted';
+      return ['<span style="white-space:nowrap">' + esc(fmt(e.at)) + '</span><span class="muted">' + esc(ago(e.at)) + '</span>', esc(e.usuario), pill(kind, acEtiquetas[e.accion] || e.accion), '<span class="muted" style="display:inline">' + esc(detalleTexto(e.detalle)) + '</span>', esc(e.ip || '')];
+    }), 'Todavía no hay actividad registrada.');
+    var desde = r.total ? acOffset + 1 : 0;
+    document.getElementById('ac-page').textContent = desde + '–' + Math.min(acOffset + acLimit, r.total) + ' de ' + r.total;
+    document.getElementById('ac-prev').disabled = acOffset === 0;
+    document.getElementById('ac-next').disabled = acOffset + acLimit >= r.total;
+  } catch (error) {
+    document.getElementById('ac-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
+  }
+}
+document.getElementById('ac-buscar').onclick = function () { acOffset = 0; loadActividad(); };
+document.getElementById('ac-accion').onchange = function () { acOffset = 0; loadActividad(); };
+document.getElementById('ac-prev').onclick = function () { acOffset = Math.max(0, acOffset - acLimit); loadActividad(); };
+document.getElementById('ac-next').onclick = function () { acOffset += acLimit; loadActividad(); };
+
+// --------------------------------------------------------------- integraciones
+async function loadClaves() {
+  document.getElementById('ck-ejemplo').textContent = 'curl -H "authorization: Bearer wak_..." ' + location.origin + '/admin/health';
+  try {
+    var list = await api('/admin/claves-api');
+    table('ck-table', ['Para', 'Clave', 'Creada', 'Último uso', 'Estado', ''], list.map(function (k) {
+      return [esc(k.nombre), '<code>' + esc(k.prefijo) + '</code>', esc(fmt(k.createdAt)), esc(fmt(k.ultimoUsoAt) || 'nunca'),
+        pill(k.revocadaAt ? 'bad' : 'ok', k.revocadaAt ? 'revocada' : 'activa'),
+        k.revocadaAt ? '' : '<button class="danger sm" data-ck-revocar="' + esc(k.id) + '">Revocar</button>'];
+    }), 'Todavía no hay claves. Crea una para el sistema de GSG.');
+    document.querySelectorAll('[data-ck-revocar]').forEach(function (b) {
+      b.onclick = async function () {
+        var ok = await confirmarDialogo({ titulo: 'Revocar la clave', texto: 'El programa que la use dejará de entrar en el acto. No se puede deshacer.', boton: 'Revocar', peligro: true });
+        if (!ok) return;
+        try { await api('/admin/claves-api/' + b.getAttribute('data-ck-revocar'), { method: 'DELETE' }); loadClaves(); }
+        catch (error) { show('ck-state', error.message, 'bad'); }
+      };
+    });
+  } catch (error) {
+    document.getElementById('ck-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
+    document.getElementById('ck-crear').disabled = true;
+  }
+}
+document.getElementById('ck-crear').onclick = busy('ck-crear', async function () {
+  try {
+    var r = await api('/admin/claves-api', { method: 'POST', body: { nombre: val('ck-nombre') } });
+    document.getElementById('ck-valor').textContent = r.clave;
+    document.getElementById('ck-nueva').classList.remove('hidden');
+    setVal('ck-nombre', '');
+    show('ck-state', 'Clave creada', 'ok');
+    loadClaves();
+  } catch (error) { show('ck-state', error.message, 'bad'); }
+});
+document.getElementById('ck-copiar').onclick = function () {
+  var v = document.getElementById('ck-valor').textContent;
+  navigator.clipboard.writeText(v).then(function () { show('ck-state', 'Copiada', 'ok'); });
+};
+document.getElementById('ck-cerrar').onclick = function () {
+  document.getElementById('ck-valor').textContent = '';
+  document.getElementById('ck-nueva').classList.add('hidden');
+};
 
 function out(id, data) {
   var el = document.getElementById(id);
   el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  el.classList.remove('hidden');
+}
+/* Por que no salio un mensaje, dicho para una persona, y a donde ir a arreglarlo. */
+var PORQUE = {
+  allowlist: ['Modo prueba activo: solo se escribe a los números de la lista.', 'Cambiar la lista o apagar el modo prueba', '/panel#configuracion'],
+  sin_conexion: ['WhatsApp no está conectado. En cuanto vuelva la sesión se reintenta solo.', 'Ver la conexión', '/setup'],
+  opt_out: ['El contacto se dio de baja: no se le vuelve a escribir. Solo si él escribe primero.', 'Ver el contacto', '/panel#contactos'],
+  no_opt_in: ['El contacto no tiene consentimiento registrado: nada iniciado por ti puede salir.', 'Registrar el consentimiento', '/panel#contactos'],
+  number_paused: ['Los envíos están pausados a mano.', 'Reanudar en Estado', '/panel#estado'],
+  number_quality: ['La calidad del número en Meta está baja: se frena para protegerlo.', 'Ver la salud del número', '/panel#salud'],
+  window_closed: ['Hace más de 24 h que el cliente no escribe: por la API de Meta solo puede salir una plantilla.', 'Enviar una plantilla', '/panel#campanas'],
+  template_missing: ['Esa plantilla no está en el registro.', 'Ver las plantillas', '/panel#plantillas'],
+  template_not_approved: ['Meta todavía no aprobó esa plantilla.', 'Ver las plantillas', '/panel#plantillas'],
+  template_quality: ['La calidad de esa plantilla está baja: mejor otra.', 'Ver las plantillas', '/panel#plantillas'],
+  template_paused: ['Meta tiene esa plantilla pausada unas horas.', 'Ver las plantillas', '/panel#plantillas'],
+  frequency_cap: ['Ese contacto ya recibió bastante marketing esta semana.', 'Ver riesgo y ritmo', '/panel#salud'],
+  daily_cap: ['Se alcanzó el cupo de hoy: mañana sigue solo.', 'Ver el cupo', '/panel#estado'],
+  contact_suppressed: ['El contacto está apartado un tiempo (número sin WhatsApp o Meta pidió no insistir).', 'Levantar la supresión', '/panel#salud'],
+  risk_marketing_paused: ['El monitor de salud tiene el marketing en pausa por el riesgo del número.', 'Ver por qué', '/panel#salud'],
+  fatigue: ['Lleva varios mensajes seguidos sin contestar: descansa del marketing hasta que escriba.', 'Ver riesgo y ritmo', '/panel#salud'],
+  contact_daily_cap: ['Ya recibió hoy el máximo de mensajes por contacto.', 'Cambiar el máximo', '/panel#configuracion'],
+  contact_spacing: ['Hace poco que se le escribió: se respeta la separación mínima y se reintenta solo.', 'Cambiar la separación', '/panel#configuracion'],
+  rhythm: ['El marcapasos del número lo frena ahora mismo (horario, cupo por hora o pausa): se reintenta solo.', 'Ver el ritmo', '/panel#configuracion']
+};
+function resultado(id, data, que) {
+  var el = document.getElementById(id);
+  var html = '';
+  if (data && data.ok) {
+    html = '<div class="res ok"><b>' + esc(que || 'Enviado') + '</b>' + (data.wamid ? '<span class="muted">id de WhatsApp ' + esc(data.wamid) + '</span>' : '') + (data.deliveryId ? '<span class="muted">registro nº ' + esc(data.deliveryId) + ' en el historial</span>' : '') + '</div>';
+  } else if (data && data.blocked) {
+    var p = PORQUE[data.code] || [data.reason || 'No salió.', 'Ver el historial', '/panel#historial'];
+    html = '<div class="res warn"><b>No salió</b><span>' + esc(p[0]) + '</span>' + (data.reason && !PORQUE[data.code] ? '' : '<span class="muted">' + esc(data.reason || '') + '</span>') + (data.retryAfterMs ? '<span class="muted">Se reintenta en unos ' + Math.max(1, Math.round(data.retryAfterMs / 60000)) + ' min.</span>' : '') + '<a href="' + esc(p[2]) + '">' + esc(p[1]) + ' →</a></div>';
+  } else {
+    html = '<div class="res bad"><b>Falló</b><span>' + esc((data && (data.error || data.reason)) || 'Error desconocido.') + '</span><a href="/panel#historial">Ver el historial →</a></div>';
+  }
+  html += '<details class="tecnico"><summary>Detalles técnicos</summary><pre>' + esc(JSON.stringify(data, null, 2)) + '</pre></details>';
+  el.innerHTML = html;
   el.classList.remove('hidden');
 }
 function busy(id, fn) {
@@ -927,22 +1382,22 @@ document.getElementById('sl-levantar').onclick = busy('sl-levantar', async funct
 document.getElementById('m-send').onclick = async function () {
   try {
     var data = await api('/admin/messages/text', { method: 'POST', body: { phone: val('m-phone'), text: document.getElementById('m-text').value } });
-    show('m-state', data.ok ? 'Enviado' : ('Bloqueado: ' + (data.reason || data.error || '')), data.ok ? 'ok' : 'warn');
-    out('m-out', data);
+    show('m-state', data.ok ? 'Enviado' : 'No salió', data.ok ? 'ok' : 'warn');
+    resultado('m-out', data, 'Mensaje enviado');
   } catch (error) { show('m-state', error.message, 'bad'); }
 };
 document.getElementById('u-send').onclick = async function () {
   try {
     var data = await api('/admin/messages/location', { method: 'POST', body: { phone: val('u-phone'), input: val('u-input'), name: val('u-name') || undefined } });
-    show('u-state', data.ok ? 'Enviado' : ('Bloqueado: ' + (data.reason || data.error || '')), data.ok ? 'ok' : 'warn');
-    out('u-out', data);
+    show('u-state', data.ok ? 'Enviado' : 'No salió', data.ok ? 'ok' : 'warn');
+    resultado('u-out', data, 'Pin enviado');
   } catch (error) { show('u-state', error.message, 'bad'); }
 };
 document.getElementById('u-ask').onclick = async function () {
   try {
     var data = await api('/admin/messages/ask-location', { method: 'POST', body: { phone: val('u-phone') } });
-    show('u-state', data.ok ? 'Solicitud enviada' : ('Bloqueado: ' + (data.reason || data.error || '')), data.ok ? 'ok' : 'warn');
-    out('u-out', data);
+    show('u-state', data.ok ? 'Solicitud enviada' : 'No salió', data.ok ? 'ok' : 'warn');
+    resultado('u-out', data, 'Solicitud de ubicación enviada');
   } catch (error) { show('u-state', error.message, 'bad'); }
 };
 
@@ -953,6 +1408,9 @@ function contactState(c) {
   if (c.optInAt) return pill('ok', 'opt-in');
   return pill('muted', 'sin consentimiento');
 }
+document.getElementById('ct-csv').onclick = function () {
+  location.href = '/admin/contacts.csv?state=' + encodeURIComponent(val('ct-state') || 'all') + '&q=' + encodeURIComponent(val('ct-q'));
+};
 async function loadContacts() {
   try {
     var q = '/admin/contacts?limit=' + CT_LIMIT + '&offset=' + ctOffset + '&state=' + encodeURIComponent(val('ct-state') || 'all') + '&q=' + encodeURIComponent(val('ct-q'));
@@ -1103,17 +1561,51 @@ async function loadTemplates() {
 async function loadCatalog() {
   try {
     var list = await api('/admin/templates/catalog');
-    table('t-catalog', ['Nombre', 'Categoria', 'Variables', 'Lint', 'En Meta', 'Cuerpo'], list.map(function (t) {
+    table('t-catalog', ['Nombre', 'Categoria', 'Variables', 'Lint', 'En Meta', 'Cuerpo', ''], list.map(function (t) {
       var errors = t.issues.filter(function (i) { return i.severity === 'error'; }).length;
       var warns = t.issues.length - errors;
       var lint = errors ? pill('bad', errors + ' error' + (errors > 1 ? 'es' : '')) : warns ? pill('warn', warns + ' aviso' + (warns > 1 ? 's' : '')) : pill('ok', 'limpia');
       var detail = t.issues.map(function (i) { return '<span class="muted">' + esc(i.severity === 'error' ? 'ERROR' : 'aviso') + ' ' + esc(i.message) + '</span>'; }).join('');
-      return [esc(t.name), esc(t.category), esc(t.variables.join(', ')), lint + detail,
+      var acciones = t.propia
+        ? '<button class="ghost sm" data-tp-edit="' + esc(t.name) + '" data-tp-lang="' + esc(t.language) + '">Editar</button> <button class="danger sm" data-tp-del="' + esc(t.name) + '" data-tp-lang="' + esc(t.language) + '">Borrar</button>'
+        : '<span class="muted">catalogo</span>';
+      return [esc(t.name) + (t.propia ? '<span class="muted">propia</span>' : ''), esc(t.category), esc(t.variables.join(', ')), lint + detail,
         t.registry ? pill(statusKind(t.registry.status), t.registry.status) : '<span class="muted">no subida</span>',
-        '<span class="muted">' + esc(t.body) + '</span>'];
+        '<span class="muted">' + esc(t.body) + '</span>', acciones];
     }), 'Catalogo vacio');
+    document.querySelectorAll('[data-tp-del]').forEach(function (b) {
+      b.onclick = async function () {
+        try {
+          await api('/admin/templates/' + encodeURIComponent(b.getAttribute('data-tp-del')) + '/' + encodeURIComponent(b.getAttribute('data-tp-lang')), { method: 'DELETE' });
+          show('tp-state', 'Borrada', 'ok'); loadTemplates();
+        } catch (error) { show('tp-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-tp-edit]').forEach(function (b) {
+      b.onclick = function () {
+        var t = list.find(function (x) { return x.name === b.getAttribute('data-tp-edit') && x.language === b.getAttribute('data-tp-lang'); });
+        if (!t) return;
+        setVal('tp-name', t.name); setVal('tp-language', t.language); setVal('tp-category', t.category);
+        document.getElementById('tp-body').value = t.body;
+        document.getElementById('tp-vars').value = t.variables.join('\n');
+        document.getElementById('tp-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+    });
   } catch (error) { show('t-push-state', error.message, 'bad'); }
 }
+document.getElementById('tp-save').onclick = busy('tp-save', async function () {
+  try {
+    var r = await api('/admin/templates', { method: 'POST', body: {
+      name: val('tp-name'), language: val('tp-language') || 'es', category: val('tp-category'),
+      body: document.getElementById('tp-body').value,
+      variables: lines(document.getElementById('tp-vars').value)
+    }});
+    show('tp-state', r.subirAMeta ? 'Guardada: pendiente de subir a Meta (boton "Dar de alta")' : 'Guardada y lista para usar', 'ok');
+    var avisos = (r.issues || []).map(function (i) { return (i.severity === 'error' ? 'ERROR ' : 'aviso ') + i.message; });
+    if (avisos.length) out('tp-out', avisos.join('\n')); else document.getElementById('tp-out').classList.add('hidden');
+    loadTemplates();
+  } catch (error) { show('tp-state', error.message, 'bad'); }
+});
 document.getElementById('t-sync').onclick = busy('t-sync', async function () {
   try {
     var r = await api('/admin/templates/sync', { method: 'POST' });
@@ -1217,7 +1709,39 @@ function stepSummary(s) {
   var when = d === 0 ? 'al momento' : d % 1440 === 0 ? '+' + (d / 1440) + ' d' : d % 60 === 0 ? '+' + (d / 60) + ' h' : '+' + d + ' min';
   return when + ': ' + (s.kind === 'template' ? 'plantilla ' + s.templateName : 'texto');
 }
+var atajosCache = [];
+function pintarAtajos() {
+  document.getElementById('at-lista').innerHTML = atajosCache.map(function (a, i) {
+    return '<div class="at-fila"><input class="pre" data-at-atajo="' + i + '" value="' + esc(a.atajo) + '" placeholder="atajo"><textarea data-at-texto="' + i + '" placeholder="Texto que se manda">' + esc(a.texto) + '</textarea><button class="danger sm" data-at-borrar="' + i + '">Quitar</button></div>';
+  }).join('') || '<div class="empty">Sin atajos. Añade uno.</div>';
+  document.querySelectorAll('[data-at-borrar]').forEach(function (b) { b.onclick = function () { leerAtajos(); atajosCache.splice(Number(b.getAttribute('data-at-borrar')), 1); pintarAtajos(); }; });
+}
+function leerAtajos() {
+  atajosCache = Array.prototype.slice.call(document.querySelectorAll('[data-at-atajo]')).map(function (inp) {
+    var i = inp.getAttribute('data-at-atajo');
+    return { atajo: inp.value.trim().replace(/^\//, ''), texto: document.querySelector('[data-at-texto="' + i + '"]').value.trim() };
+  });
+}
+async function loadAtajos() {
+  try { var r = await api('/admin/chat/atajos'); atajosCache = r.atajos; pintarAtajos(); }
+  catch (error) { show('at-state', error.message, 'bad'); }
+}
+document.getElementById('at-anadir').onclick = function () { leerAtajos(); atajosCache.push({ atajo: '', texto: '' }); pintarAtajos(); };
+document.getElementById('at-guardar').onclick = busy('at-guardar', async function () {
+  try {
+    leerAtajos();
+    var limpios = atajosCache.filter(function (a) { return a.atajo && a.texto; });
+    await api('/admin/chat/atajos', { method: 'POST', body: { atajos: limpios } });
+    show('at-state', limpios.length + ' atajo(s) guardados', 'ok');
+    loadAtajos();
+  } catch (error) { show('at-state', error.message, 'bad'); }
+});
+document.getElementById('at-fabrica').onclick = busy('at-fabrica', async function () {
+  try { await api('/admin/chat/atajos', { method: 'POST', body: { atajos: null } }); show('at-state', 'Atajos de fábrica', 'ok'); loadAtajos(); }
+  catch (error) { show('at-state', error.message, 'bad'); }
+});
 async function loadAutomation() {
+  loadAtajos();
   try {
     var results = await Promise.all([api('/admin/automation/sequences'), api('/admin/automation/rules'), api('/admin/automation/prefs')]);
     sequencesCache = results[0];
@@ -1335,7 +1859,7 @@ document.getElementById('s-create').onclick = busy('s-create', async function ()
         delayMinutes: Math.round(Number(row.querySelector('[data-delay]').value || 0) * Number(row.querySelector('[data-unit]').value)),
         kind: kind,
         templateName: kind === 'template' ? parts[0] : null,
-        templateLanguage: kind === 'template' ? (parts[1] || 'es_MX') : 'es_MX',
+        templateLanguage: kind === 'template' ? (parts[1] || 'es') : 'es',
         category: kind === 'template' ? (parts[2] || 'UTILITY') : 'UTILITY',
         variables: vars,
         text: kind === 'text' ? row.querySelector('[data-text]').value.trim() : null
@@ -1398,7 +1922,7 @@ document.getElementById('sc-create').onclick = busy('sc-create', async function 
     if (!when) throw new Error('elige fecha y hora');
     await api('/admin/automation/scheduled', { method: 'POST', body: {
       phone: val('sc-phone'), dueAt: new Date(when).toISOString(), kind: kind,
-      templateName: kind === 'template' ? parts[0] : null, templateLanguage: parts[1] || 'es_MX',
+      templateName: kind === 'template' ? parts[0] : null, templateLanguage: parts[1] || 'es',
       category: kind === 'template' ? (parts[2] || 'UTILITY') : 'UTILITY',
       variables: val('sc-vars').split(',').map(function (v) { return v.trim(); }).filter(Boolean),
       text: kind === 'freeform' ? document.getElementById('sc-text').value.trim() : null
@@ -1442,6 +1966,13 @@ document.getElementById('sc-status').onchange = loadScheduled;
 
 // ------------------------------------------------------------- historial
 var hOffset = 0, H_LIMIT = 50;
+document.getElementById('h-csv').onclick = function () {
+  var q = [];
+  if (val('h-status')) q.push('status=' + encodeURIComponent(val('h-status')));
+  if (val('h-phone')) q.push('phone=' + encodeURIComponent(val('h-phone')));
+  if (val('h-campaign')) q.push('campaignId=' + encodeURIComponent(val('h-campaign')));
+  location.href = '/admin/deliveries.csv' + (q.length ? '?' + q.join('&') : '');
+};
 async function loadDeliveries() {
   try {
     var q = '/admin/deliveries?limit=' + H_LIMIT + '&offset=' + hOffset;
@@ -1470,6 +2001,75 @@ document.getElementById('h-search').onclick = function () { hOffset = 0; loadDel
 document.getElementById('h-prev').onclick = function () { hOffset = Math.max(0, hOffset - H_LIMIT); loadDeliveries(); };
 document.getElementById('h-next').onclick = function () { hOffset += H_LIMIT; loadDeliveries(); };
 
+// -------------------------------------------------------------- usuarios
+var yo = null;
+async function loadUsuarios() {
+  try {
+    yo = yo || await api('/admin/yo');
+    if (yo && yo.rol !== 'admin') {
+      document.getElementById('us-table').innerHTML = '<div class="empty">Solo un administrador puede ver y crear usuarios. Aqui puedes cambiar tu contrasena.</div>';
+      document.getElementById('us-crear').disabled = true;
+      return;
+    }
+    var list = await api('/admin/usuarios');
+    table('us-table', ['Usuario', 'Nombre', 'Rol', 'Estado', 'Ultimo acceso', ''], list.map(function (u) {
+      var acciones = '<button class="ghost sm" data-us-clave="' + esc(u.id) + '">Nueva contrasena</button> ' +
+        '<button class="ghost sm" data-us-rol="' + esc(u.id) + '" data-rol="' + (u.rol === 'admin' ? 'operador' : 'admin') + '">Hacer ' + (u.rol === 'admin' ? 'operador' : 'admin') + '</button> ' +
+        '<button class="' + (u.activo ? 'danger' : 'ghost') + ' sm" data-us-activo="' + esc(u.id) + '" data-activo="' + (u.activo ? 'false' : 'true') + '">' + (u.activo ? 'Desactivar' : 'Activar') + '</button>';
+      return [esc(u.usuario), esc(u.nombre), pill(u.rol === 'admin' ? 'ok' : 'muted', u.rol), pill(u.activo ? 'ok' : 'bad', u.activo ? 'activo' : 'desactivado'), esc(fmt(u.ultimoLoginAt) || 'nunca'), acciones];
+    }), 'Sin usuarios');
+    document.querySelectorAll('[data-us-clave]').forEach(function (b) {
+      b.onclick = async function () {
+        var nueva = await pedirDato({ titulo: 'Nueva contrasena', texto: 'Al menos 8 caracteres. Sus sesiones abiertas se cierran.', etiqueta: 'Contrasena', boton: 'Cambiar', validar: function (v) { return v && v.length >= 8 ? null : 'Al menos 8 caracteres.'; } });
+        if (!nueva) return;
+        try { await api('/admin/usuarios/' + b.getAttribute('data-us-clave'), { method: 'POST', body: { clave: nueva } }); show('us-state', 'Contrasena cambiada', 'ok'); }
+        catch (error) { show('us-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-us-rol]').forEach(function (b) {
+      b.onclick = async function () {
+        try { await api('/admin/usuarios/' + b.getAttribute('data-us-rol'), { method: 'POST', body: { rol: b.getAttribute('data-rol') } }); loadUsuarios(); }
+        catch (error) { show('us-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-us-activo]').forEach(function (b) {
+      b.onclick = async function () {
+        try { await api('/admin/usuarios/' + b.getAttribute('data-us-activo'), { method: 'POST', body: { activo: b.getAttribute('data-activo') === 'true' } }); loadUsuarios(); }
+        catch (error) { show('us-state', error.message, 'bad'); }
+      };
+    });
+  } catch (error) { show('us-state', error.message, 'bad'); }
+}
+document.getElementById('us-crear').onclick = busy('us-crear', async function () {
+  try {
+    await api('/admin/usuarios', { method: 'POST', body: { nombre: val('us-nombre'), usuario: val('us-usuario'), clave: document.getElementById('us-clave').value, rol: val('us-rol') } });
+    show('us-state', 'Usuario creado', 'ok');
+    setVal('us-nombre', ''); setVal('us-usuario', ''); document.getElementById('us-clave').value = '';
+    loadUsuarios();
+  } catch (error) { show('us-state', error.message, 'bad'); }
+});
+async function loadMiCuenta() {
+  try {
+    var u = await api('/admin/yo');
+    yo = u;
+    document.getElementById('mc-datos').innerHTML =
+      '<div class="stat"><span class="muted">Nombre</span><b>' + esc(u.nombre) + '</b></div>' +
+      '<div class="stat"><span class="muted">Usuario</span><b>' + esc(u.usuario) + '</b></div>' +
+      '<div class="stat"><span class="muted">Rol</span><b>' + (u.rol === 'admin' ? 'Administrador' : 'Operador') + '</b><small>' + (u.rol === 'admin' ? 'gestiona cuentas, claves y configuración' : 'usa todo el sistema; no gestiona cuentas') + '</small></div>';
+  } catch (error) { show('mc-state', error.message, 'bad'); }
+}
+document.getElementById('mc-cambiar').onclick = busy('mc-cambiar', async function () {
+  try {
+    var nueva = document.getElementById('mc-nueva').value;
+    if (nueva !== document.getElementById('mc-nueva2').value) throw new Error('Las contraseñas nuevas no coinciden.');
+    await api('/admin/mi-clave', { method: 'POST', body: { actual: document.getElementById('mc-actual').value, nueva: nueva } });
+    show('mc-state', 'Contraseña cambiada', 'ok');
+    document.getElementById('mc-actual').value = ''; document.getElementById('mc-nueva').value = ''; document.getElementById('mc-nueva2').value = '';
+  } catch (error) { show('mc-state', error.message, 'bad'); }
+});
+document.getElementById('mc-salir').onclick = function () { salir(); };
+api('/admin/yo').then(function (u) { yo = u; var q = document.getElementById('quien'); if (q && u) q.textContent = u.nombre; }).catch(function () {});
+
 // --------------------------------------------------------------- extraer
 document.getElementById('g-run').onclick = async function () {
   try {
@@ -1481,10 +2081,17 @@ document.getElementById('g-run').onclick = async function () {
 
 copyButtons();
 bindLogout();
-loadHealth();
-loaded.estado = true;
-activate(location.hash.slice(1) || 'estado');
+activate(location.hash.slice(1) || 'inicio');
 `;
 
-  return shell('Panel - wa-locator', body, script);
+  return appShell({
+    titulo: 'Inicio',
+    subtitulo: 'Un vistazo a todo lo que pasa hoy',
+    contenido: `<div class="wrap">${body}</div>`,
+    script: AUTH_JS + script,
+    css: CSS,
+    nombreNegocio: opts.nombreNegocio,
+    demo: opts.demo,
+    icono: '📊',
+  });
 }

@@ -13,6 +13,10 @@ import { createMessagesRepo, type MessagesRepo } from './messages.js';
 import { createLeadsRepo, type LeadsRepo } from './leads.js';
 import { createArchivesRepo, type ArchivesRepo } from './archives.js';
 import { createRutasRepo, type RutasRepo } from './rutas.js';
+import { createUsuariosRepo, type UsuariosRepo } from '../auth/usuarios.js';
+import { createClavesApiRepo, type ClavesApiRepo } from '../auth/claves-api.js';
+import { createAjustesGeneralesRepo, type AjustesGeneralesRepo } from '../ajustes/generales.js';
+import { createActividadRepo, type ActividadRepo } from '../auth/actividad.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -86,6 +90,11 @@ export interface Template {
   motivo?: string | null;
   /** Desde cuando esta aprobada: una plantilla nueva sale con ritmo (pacing). */
   aprobadaAt?: Date | null;
+  /** Creada desde el panel: se puede editar y borrar desde ahi. */
+  propia?: boolean;
+  /** Que significa cada {{n}}; son los ejemplos que ve el revisor de Meta. */
+  variablesDoc?: string[] | null;
+  footer?: string | null;
 }
 
 export type NivelRiesgo = 'verde' | 'amarillo' | 'naranja' | 'rojo';
@@ -366,6 +375,8 @@ export interface TemplatesRepo {
   /** Meta la pauso: hasta cuando, y cuantas van. */
   marcarPausa(name: string, language: string, hasta: Date | null, pausas: number, motivo: string | null): Promise<void>;
   list(): Promise<Template[]>;
+  /** Solo las propias (creadas desde el panel) se pueden borrar. */
+  remove(name: string, language: string): Promise<boolean>;
 }
 
 export interface NumberStateRepo {
@@ -468,6 +479,14 @@ export interface Repos {
   rutas: RutasRepo;
   /** Senales de riesgo del numero. Ver src/salud. */
   salud: SaludRepo;
+  /** Cuentas con las que se entra al panel. Ver src/auth. */
+  usuarios: UsuariosRepo;
+  /** Claves con las que entran los programas (GSG, scripts). Ver src/auth. */
+  claves: ClavesApiRepo;
+  /** Ajustes generales editables desde la pantalla. Ver src/ajustes. */
+  ajustesGenerales: AjustesGeneralesRepo;
+  /** Bitacora: quien hizo que. Ver src/auth/actividad.ts. */
+  actividad: ActividadRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -626,6 +645,10 @@ const toRecipient = (row: RecipientRow): CampaignRecipient => ({
   intentos: row.intentos ?? 0,
   enviadoAt: row.enviado_at,
 });
+
+/** Orden de los acuses: nada se mueve hacia atras. */
+const RANGO_ESTADO = (expr: string): string =>
+  `(case ${expr} when 'read' then 3 when 'delivered' then 2 when 'sent' then 1 else 0 end)`;
 
 interface ResumenRow {
   enviados: number;
@@ -993,9 +1016,20 @@ export function createRepos(pool: Pool): Repos {
             : status === 'failed'
               ? 'failed_at'
               : 'sent_at';
+      // Los acuses no van hacia atras ni mueven fechas ya puestas: al
+      // reconectar, WhatsApp Web vuelve a mandar el "sent" de mensajes de
+      // hace horas, y con un `sent_at = now()` a secas esos envios parecian
+      // recientes (la separacion por contacto los veia como "hace 1 min").
+      // Un `failed` si manda siempre: es informacion nueva.
       await pool.query(
         `update deliveries
-            set status = $2, ${column} = now(), error_code = $3, error_title = $4
+            set status = case
+                  when $2 = 'failed' then 'failed'
+                  when ${RANGO_ESTADO('status')} >= ${RANGO_ESTADO('$2')} then status
+                  else $2 end,
+                ${column} = coalesce(${column}, now()),
+                error_code = coalesce($3, error_code),
+                error_title = coalesce($4, error_title)
           where wamid = $1`,
         [wamid, status, error?.code ?? null, error?.title ?? null],
       );
@@ -1181,9 +1215,12 @@ export function createRepos(pool: Pool): Repos {
     pausas: number;
     motivo: string | null;
     aprobada_at: Date | null;
+    propia: boolean;
+    variables_doc: string[] | null;
+    footer: string | null;
   }
   const TEMPLATE_COLS =
-    'name, language, category, status, quality, variables, body, pausada_hasta, pausas, motivo, aprobada_at';
+    'name, language, category, status, quality, variables, body, pausada_hasta, pausas, motivo, aprobada_at, propia, variables_doc, footer';
   const toTemplate = (r: TemplateRow): Template => ({
     name: r.name,
     language: r.language,
@@ -1196,6 +1233,9 @@ export function createRepos(pool: Pool): Repos {
     pausas: r.pausas ?? 0,
     motivo: r.motivo,
     aprobadaAt: r.aprobada_at,
+    propia: r.propia ?? false,
+    variablesDoc: Array.isArray(r.variables_doc) ? r.variables_doc : null,
+    footer: r.footer,
   });
 
   const templates: TemplatesRepo = {
@@ -1208,21 +1248,39 @@ export function createRepos(pool: Pool): Repos {
     },
     async upsert(t) {
       await pool.query(
-        `insert into templates (name, language, category, status, quality, variables, body, synced_at)
-         values ($1,$2,$3,$4,$5,$6,$7, now())
+        `insert into templates
+           (name, language, category, status, quality, variables, body, propia, variables_doc, footer, synced_at, updated_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), now())
          on conflict (name, language) do update set
            category = excluded.category,
            status = excluded.status,
            quality = coalesce(excluded.quality, templates.quality),
            variables = excluded.variables,
            body = excluded.body,
+           -- Propia se queda propia: una sincronizacion con Meta no la
+           -- convierte en "del catalogo".
+           propia = templates.propia or excluded.propia,
+           variables_doc = coalesce(excluded.variables_doc, templates.variables_doc),
+           footer = coalesce(excluded.footer, templates.footer),
            -- Desde cuando esta aprobada: se fija la primera vez que se ve
            -- APPROVED y no se toca mas. Una plantilla nueva sale con ritmo.
            aprobada_at = case
              when excluded.status = 'APPROVED' then coalesce(templates.aprobada_at, now())
              else templates.aprobada_at end,
-           synced_at = now()`,
-        [t.name, t.language, t.category, t.status, t.quality, t.variables, t.body],
+           synced_at = now(),
+           updated_at = now()`,
+        [
+          t.name,
+          t.language,
+          t.category,
+          t.status,
+          t.quality,
+          t.variables,
+          t.body,
+          t.propia ?? false,
+          t.variablesDoc ? JSON.stringify(t.variablesDoc) : null,
+          t.footer ?? null,
+        ],
       );
       if (t.status === 'APPROVED') {
         await pool.query(
@@ -1260,6 +1318,10 @@ export function createRepos(pool: Pool): Repos {
     async list() {
       const { rows } = await pool.query<TemplateRow>(`select ${TEMPLATE_COLS} from templates order by name`);
       return rows.map(toTemplate);
+    },
+    async remove(name, language) {
+      const { rowCount } = await pool.query('delete from templates where name = $1 and language = $2 and propia', [name, language]);
+      return (rowCount ?? 0) > 0;
     },
   };
 
@@ -1657,6 +1719,10 @@ export function createRepos(pool: Pool): Repos {
     archives: createArchivesRepo(pool),
     rutas: createRutasRepo(pool),
     salud,
+    usuarios: createUsuariosRepo(pool),
+    claves: createClavesApiRepo(pool),
+    ajustesGenerales: createAjustesGeneralesRepo(pool),
+    actividad: createActividadRepo(pool),
   };
 }
 

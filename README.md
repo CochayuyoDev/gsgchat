@@ -18,8 +18,9 @@ npm install
 npm run dev                   # aplica migraciones y arranca
 ```
 
-Abre `http://localhost:3000`. El token de administracion sale en la consola al
-arrancar; la web lo pide una vez.
+Abre `http://localhost:3000` y entra en `/login`: la primera vez te pide crear
+tu cuenta (sera la administradora); despues, usuario y contrasena. No hay
+ningun token que pegar.
 
 **El camino corto, sin montar nada:**
 
@@ -244,15 +245,22 @@ empezar y el sistema le pide la ubicacion a cada cliente, uno por uno.
    una direccion perfectamente util— y el bot vuelve a pedirselo reconociendo
    que contesto, que no es el mismo mensaje de antes.
 5. **Tres intentos y se acabo.** El caso pasa al repartidor para que llame.
-   Insistir mas no consigue ubicaciones, consigue bloqueos.
+   Insistir mas no consigue ubicaciones, consigue bloqueos. Si el cliente
+   manda la ubicacion despues de derivado, se resuelve igual y la bitacora
+   dice que ya no hace falta llamar; si escribe antes de que se le pidiera
+   nada, se apunta y el primer mensaje sale cuando le toque. Un socket caido
+   o un error pasajero de WhatsApp no gastan intento: se reintenta en unos
+   minutos. La cadencia por cliente la fija el reparto (espera e intentos),
+   no la separacion general del marcapasos.
 6. **Todo queda documentado.** Cada envio, cada respuesta y cada incidencia se
    apunta con su hora en la bitacora de esa solicitud.
 
 **Las incidencias tienen nombre propio**, que es lo que hace que se puedan
 arreglar: `numero_corto`, `numero_largo`, `numero_invalido`, `numero_fijo`,
 `sin_whatsapp`, `numero_equivocado`, `sin_respuesta`, `respondio_sin_ubicacion`,
-`ubicacion_fuera_de_zona`, `rechaza_contacto`, `envio_bloqueado`,
-`error_envio`. Cada una lleva su explicacion y su "que hacer" en
+`ubicacion_fuera_de_zona`, `rechaza_contacto`, `ya_en_curso` (el mismo numero
+en un lote anterior que no termino: no se le escribe dos veces),
+`envio_bloqueado`, `error_envio`. Cada una lleva su explicacion y su "que hacer" en
 `src/rutas/incidencias.ts`, y viajan asi a GSG.
 
 **Si el numero tiene WhatsApp** se comprueba antes del primer mensaje cuando el
@@ -338,6 +346,22 @@ dentro de la ventana de 24 h o con cliente no oficial. Por eso el texto de la
 plantilla explica el camino del clip, que funciona siempre.
 
 ### Ajustes
+
+Todo esto se cambia tambien **desde la pantalla** (`/rutas`, boton Ajustes),
+sin reiniciar: pausas, espera antes de insistir, mensajes por cliente,
+horario y -lo que importa- **que se le dice al cliente en cada paso**: con
+que plantillas de Meta (el motor alterna entre las marcadas y deja fuera las
+pausadas) y con que redacciones cuando se escribe libre (una por linea,
+admiten `{nombre}`, `{pedido}` y `{negocio}`; el sistema las alterna). Lo
+guardado manda sobre las variables de abajo; "Volver a la configuracion" lo
+borra.
+
+Las plantillas propias se crean en el panel (Plantillas): nombre, cuerpo con
+`{{1}}`, `{{2}}`..., y que es cada variable. Pasan por el linter, con la API
+oficial quedan pendientes hasta subirlas y que Meta las apruebe, y con el
+cliente no oficial se usan en el acto. En una plantilla propia el orden de
+las variables es fijo: `{{1}}` nombre del cliente, `{{2}}` pedido, `{{3}}`
+negocio.
 
 ```bash
 RUTAS_PAUSA_MIN_SEG=15     # pausa entre mensajes, se sortea entre los dos
@@ -498,16 +522,16 @@ WhatsApp Cloud API
 | Fuente | Ejemplo |
 |---|---|
 | `whatsapp_native` | mensaje de ubicacion del webhook |
-| `data_3d4d` | `/data=!8m2!3d19.43!4d-99.13` |
-| `path_coords` | `/maps/place/19.43,-99.13` |
+| `data_3d4d` | `/data=!8m2!3d-12.04!4d-77.04` |
+| `path_coords` | `/maps/place/-12.04,-77.04` |
 | `query_param` | `?q=` `?query=` `?destination=` `?daddr=` |
 | `ll_param` | `?ll=` `?center=` `?mlat=&mlon=` (Waze, Apple, OSM) |
-| `geo_uri` | `geo:19.43,-99.13` |
-| `osm_hash` | `#map=17/19.43/-99.13` |
+| `geo_uri` | `geo:-12.04,-77.04` |
+| `osm_hash` | `#map=17/-12.04/-77.04` |
 | `dms` | `19°25'57.4"N 99°07'59.5"W` |
 | `plus_code` | `8FVC2222+22` (solo codigos completos) |
-| `at_viewport` | `@19.43,-99.13,17z` — **baja confianza** |
-| `bare_text` | `19.4326, -99.1332` pegado en el chat |
+| `at_viewport` | `@-12.04,-77.04,17z` — **baja confianza** |
+| `bare_text` | `-12.0464, -77.0428` pegado en el chat |
 
 Acortadores (`maps.app.goo.gl`, `goo.gl`) se resuelven siguiendo redirects.
 
@@ -590,7 +614,7 @@ Dos perfiles, elegidos por el proveedor (`RITMO_PERFIL=auto`):
 | tier de Meta | se respeta al 90 % | no existe |
 
 Todo se ajusta por variable (`RITMO_*`, `HORARIO_ENVIO_*`, `SALUD_*`; ver
-`.env.example`) y se ve en el panel, pestana **Salud**.
+`.env.example`) y se ve en el panel, seccion **Riesgo y ritmo** (`/panel#salud`).
 
 ### 3. El monitor: el que mira y reacciona
 
@@ -639,6 +663,24 @@ del tier) y `template_category_update`. Con la API oficial, el estado de las
 plantillas se sincroniza ademas cada media hora, porque del final de una pausa
 Meta no avisa.
 
+### Modo prueba: `SOLO_NUMEROS`
+
+Para probar contra un WhatsApp de verdad sin escribirle a un cliente por
+error: con `SOLO_NUMEROS=51902464984,51912426667` **nada** sale a otro
+numero, venga de una campana, una secuencia, el motor de rutas, el chat a
+mano o el asistente. Cada intento queda anotado como `allowlist`. Vacio es
+produccion.
+
+### Lo que WhatsApp Web reentrega al reconectar
+
+Al abrir la sesion, WhatsApp Web vuelve a entregar los ultimos mensajes de
+cada chat (`messages.upsert` de tipo `append`) y lo que se acumulo mientras
+el sistema estaba apagado. Antes eso se trataba como mensajes nuevos y el
+asistente contestaba a media libreta de golpe. Ahora lo que no llega en
+vivo -o llega con mas de diez minutos- se **guarda en el hilo sin
+contestar**, y un mensaje ya atendido (mismo id) no se atiende dos veces
+aunque se reciba otra vez. Ver `esMensajeViejo` en `src/whatsapp/local/session.ts`.
+
 ### Campanas por goteo, con canario
 
 Una campana ya no se vuelca en la cola. Los destinatarios se guardan
@@ -671,6 +713,9 @@ npm run templates:sync    # trae estado y calidad desde Meta
 
 Los tres usan las credenciales vigentes, incluidas las que pegaste en `/setup`.
 
+Las plantillas propias se crean desde el panel y se listan junto al
+catalogo, con el mismo linter y el mismo boton de alta en Meta.
+
 El linter (`src/templates/lint.ts`) implementa las reglas de aprobacion como
 codigo: opt-out obligatorio en marketing, deteccion de marketing disfrazado de
 utility, lexico que dispara los filtros de spam, mayusculas sostenidas, y las
@@ -691,9 +736,9 @@ link pueda falsear la posicion.
 
 ```bash
 curl -X POST localhost:3000/admin/tracking \
-  -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H "authorization: Bearer wak_..." \
   -H 'content-type: application/json' \
-  -d '{"phone":"5215512345678","label":"Pedido A-1024","notify":true}'
+  -d '{"phone":"51987654321","label":"Pedido A-1024","notify":true}'
 ```
 
 Devuelve `publishUrl` (para el repartidor) y `viewUrl` (para el cliente). Los
@@ -702,36 +747,164 @@ ultimo guardado, aunque al mapa se reparten todos. El panel lista las sesiones
 vigentes, cuanta gente las mira y permite revocarlas.
 
 Rastrear a una persona requiere su consentimiento explicito y registrado (en
-Mexico, LFPDPPP). El token con caducidad y revocacion cubre parte de eso por
+Peru, Ley 29733 de proteccion de datos personales). El token con caducidad y revocacion cubre parte de eso por
 diseno.
 
 ---
 
 ## La web
 
-Nada de esto necesita editar ficheros ni usar la terminal.
+Nada de esto necesita editar ficheros ni usar la terminal. Todas las pantallas
+comparten el mismo armazon (`src/web/shell.ts`): menu lateral agrupado por lo
+que hace cada cosa, buscador de modulos con `Ctrl K`, barra superior con el
+titulo de la pantalla y quien esta dentro, y plegable a solo iconos. En el
+movil el menu se esconde y sale con el boton de arriba.
 
 | Ruta | Que es |
 |---|---|
+| `/` | portada publica: que hace el sistema y el boton de entrar |
+| `/login` | entrar con usuario y contrasena (la primera vez, crear la primera cuenta) |
+| `/panel#inicio` | **inicio**: cifras de hoy, la semana, el semaforo del numero, el reparto y lo que espera a una persona |
 | `/chat` | conversaciones, como WhatsApp: leer, responder, mandar pin, pedir ubicacion, cerrar y respaldar |
-| `/rutas` | ubicaciones para reparto: cargar el lote del dia, verlo avanzar y resolver lo que necesita una persona |
-| `/setup` | conectar la cuenta (boton de Facebook o tres datos), activar el numero y mandarse una prueba |
-| `/panel` | once pestanas: estado, **salud**, enviar, contactos, ubicaciones, en vivo, campanas, automatizacion, plantillas, historial y extraer |
+| `/rutas` | ubicaciones para reparto: cargar el lote del dia, verlo avanzar y resolver lo que necesita una persona (`#ajustes` abre los ajustes) |
+| `/panel#...` | las demas secciones: estado, salud, enviar, contactos, ubicaciones, en vivo, campanas, automatizacion, plantillas, historial, extraer, **configuracion**, usuarios, **integraciones**, **actividad** y **mi cuenta** |
+| `/setup` | conectar la cuenta (QR, WAHA o la API de Meta), activar el numero y mandarse una prueba |
+| `/manual` | manual de uso: como empezar, el reparto paso a paso, los colores del semaforo y todos los modulos |
+| `/soporte` | que mirar si algo falla y un diagnostico en vivo para copiar al reportar |
 | `/t/<token>` | pagina de rastreo (Google Maps si hay clave; si no, OpenStreetMap) |
 
-El token de administracion se genera solo en el primer arranque, se guarda en
-`.secrets.json` y se imprime en consola. La web lo pide una vez y lo deja en
-`sessionStorage`.
+El menu:
+
+```
+Inicio · Manual de uso · Soporte · [Buscar modulo… Ctrl K]
+CONVERSACIONES     Chats · Enviar mensaje · Historial de envios
+REPARTO            Ubicaciones para reparto · Ajustes del reparto
+CAMPAÑAS           Enviar a un grupo · Campañas · Automatización · Plantillas
+CONTACTOS          Contactos · Ubicaciones recibidas · Rastreo en vivo · Extraer coordenadas
+SALUD DEL NÚMERO   Estado · Riesgo y ritmo
+ADMINISTRACIÓN     Configuración · Usuarios · Integraciones · Actividad · Conexión de WhatsApp
+```
+
+Arriba a la derecha, en todas las pantallas: la **campana** (lo que espera a
+una persona: chats sin responder, casos del reparto, el numero en naranja o
+rojo, envios pausados, WhatsApp desconectado; se refresca cada medio minuto y
+el numero sale tambien en el titulo de la pestaña), el boton de **ayuda** (abre
+el manual en la parte de esa pantalla) y tu nombre (abre **Mi cuenta**).
+
+### Configuracion general (`/panel#configuracion`)
+
+Lo que antes solo se cambiaba en el `.env` y reiniciando, ahora se cambia desde
+la pantalla y se aplica en el siguiente envio: nombre del negocio, **horario de
+envio** (horas y dias), **ritmo** (mensajes por minuto y por hora, pausas,
+contactos nuevos por dia, mensajes por contacto), **modo prueba** (a que
+numeros se escribe y se contesta), **avisos** (el WhatsApp del supervisor) y
+escritura simulada / pausa automatica. Un campo vacio significa "lo que diga el
+servidor" y el valor efectivo se ve en gris. "Volver a lo del servidor" borra
+todo lo guardado. Solo un administrador lo cambia; un operador lo ve.
+
+Una excepcion a proposito: si el servidor arranco con `SOLO_NUMEROS`, desde la
+pantalla solo se puede **recortar** esa lista, nunca ampliarla ni apagar el
+modo prueba. Es el freno de mano de quien despliega.
+
+### Enviar a un grupo (`/panel#grupos`)
+
+Elegir clientes por como estan y escribirles a todos, personalizado, sin ir
+uno por uno. Los filtros cruzan lo que el sistema ya sabe: consentimiento,
+**ubicacion del reparto** (todavia sin ubicacion, contesto sin ubicacion,
+derivado, ya con ubicacion, con incidencia, nunca se le pidio), un lote,
+**ficha de pedido** (sin ficha, incompleta, completa, enviada a ventas),
+**actividad** (escribio en los ultimos N dias, callado, ventana de 24 h
+abierta, nunca escribio), busqueda y una lista pegada. "Ver quienes son" da
+el total, cifras y la tabla. Lo que se manda es una plantilla (Meta o propia)
+o, sin la API oficial, un texto con `{nombre}` `{pedido}` `{negocio}`
+`{direccion}` `{distrito}` que se convierte en plantilla propia al vuelo; la
+vista previa enseña el mensaje de cada cliente con sus datos. Sale como
+campaña por goteo (canario, ritmo, horario); tambien se puede inscribir al
+grupo en una secuencia o exportarlo. Codigo en `src/segmentos/`.
+
+### Atajos del chat
+
+Respuestas rapidas con `/` en el mensaje (se filtran al escribir, Enter o Tab
+las pone con `{nombre}`, `{pedido}` y `{negocio}` rellenos; se editan en
+Automatizacion → Respuestas rapidas), `⚡` para verlas todas, `Alt+↓/↑` para
+cambiar de conversacion, `Ctrl+Shift+U` pide la ubicacion, `Ctrl+Shift+L` abre
+el pin, `/` fuera del mensaje va al buscador, `F1` la lista. La cabecera del
+chat dice el pedido del reparto y en que punto va.
+
+### Actividad (`/panel#actividad`)
+
+La bitacora: cada accion que cambia algo deja una fila con quien, que, cuando,
+el detalle (sin contraseñas ni claves) y la IP. Se apunta sola desde un hook
+del servidor (`src/auth/actividad.ts`), asi que no depende de acordarse en cada
+ruta: entrar (y los intentos fallidos), crear o cambiar usuarios, crear o
+revocar claves, guardar configuracion, pausar envios, cargar lotes, cambiar
+plantillas, lanzar campañas... Solo la leen los administradores.
+
+### Exportar
+
+**Historial de envios** y **Contactos** tienen "Descargar CSV" con los mismos
+filtros de la pantalla (`/admin/deliveries.csv`, `/admin/contacts.csv`); el
+reparto ya tenia el suyo por lote. Separador `;` y BOM: abren en Excel en
+español sin tocar nada.
+
+### Entrar: usuarios y sesiones
+
+No hay ningun token de administracion. Se entra por `/login` con usuario y
+contrasena, y la sesion queda en una cookie firmada (`wa_sesion`, siete dias,
+`HttpOnly`). Sin sesion, las pantallas mandan al login y `/admin/*` responde
+401.
+
+- **La primera cuenta.** Mientras la tabla `usuarios` este vacia, `/login`
+  ofrece crear la primera cuenta, que nace administradora. En cuanto existe,
+  esa puerta se cierra y solo queda entrar.
+- **Dos roles.** `admin` hace todo, incluido crear y gestionar usuarios
+  (seccion **Usuarios** del panel: crear, cambiar contrasena, cambiar rol,
+  desactivar). `operador` usa el sistema entero pero no toca usuarios. Nadie
+  puede desactivarse ni quitarse el rol de admin a si mismo.
+- **Contrasenas.** Ocho caracteres o mas, guardadas con scrypt y sal; nunca en
+  claro. Cada uno se cambia la suya desde la seccion Usuarios. Cambiar la
+  contrasena o desactivar la cuenta cierra las sesiones abiertas de ese usuario.
+- **Fuerza bruta.** Cinco fallos seguidos desde una IP y cinco minutos de
+  espera.
+- **Si no queda ningun administrador que pueda entrar**, se arregla desde el
+  servidor: `delete from usuarios where usuario = 'x'` deja la tabla como
+  estaba y, si queda vacia, `/login` vuelve a ofrecer crear la primera cuenta.
+  O se pone una contrasena nueva con `hashClave` (`src/auth/usuarios.ts`).
+
+### Claves de API: como entran los programas
+
+Un programa (el sistema de GSG, un script, un `curl`) no tiene usuario ni
+contrasena: manda `Authorization: Bearer wak_...` con una **clave de API** que
+un administrador creo en `/panel#integraciones`, con nombre. La clave completa
+se ve **una sola vez**, al crearla; en la base solo queda su sha256, asi que ni
+un volcado de la tabla sirve para entrar. Revocarla es inmediato. Una clave no
+puede crear usuarios ni otras claves: eso lo hacen solo las personas con rol
+admin.
+
+```bash
+curl -H "authorization: Bearer wak_..." localhost:3000/admin/health
+```
 
 ---
 
 ## API de operacion
 
-Todas bajo `Authorization: Bearer $ADMIN_TOKEN`.
+Todas bajo `Authorization: Bearer wak_...` (una clave de API creada en
+`/panel#integraciones`) o con la cookie de sesion del navegador.
 
 | Metodo | Ruta | |
 |---|---|---|
 | GET | `/admin/health` | calidad, tier, cupo, enviados hoy, estado de la cola |
+| GET | `/admin/resumen` | el inicio del panel: cifras de hoy, la semana, el numero, el reparto, primeros pasos |
+| GET | `/admin/avisos` | lo que espera a una persona (la campana) |
+| GET/POST/DELETE | `/admin/ajustes` | configuracion general: leer, guardar (admin), volver a lo del servidor (admin) |
+| GET | `/admin/actividad` | la bitacora (admin), con `accion`, `usuario`, `limit`, `offset` |
+| GET | `/admin/deliveries.csv`, `/admin/contacts.csv` | exportaciones para Excel |
+| GET | `/admin/grupos/opciones` | filtros, lotes, plantillas aprobadas y secuencias para armar un grupo |
+| POST | `/admin/grupos/previsualizar` | `{criterio}` → total, cifras, muestra y telefonos |
+| POST | `/admin/grupos/enviar` | `{criterio, plantilla | texto, nombre?, canario?, ritmoPorHora?, soloVistaPrevia?}` → campaña por goteo |
+| POST | `/admin/grupos/exportar` | el grupo en CSV |
+| GET/POST | `/admin/chat/atajos` | respuestas rapidas del chat (POST solo admin; `atajos: null` vuelve a las de fabrica) |
 | POST | `/admin/number/sync` | pregunta a Meta la calidad y el tier reales |
 | POST | `/admin/pause` | freno de emergencia (pausa numero y cola) |
 | GET | `/admin/contacts` | lista con busqueda, filtro y ultima ubicacion |
@@ -786,6 +959,8 @@ Todas bajo `Authorization: Bearer $ADMIN_TOKEN`.
 | POST | `/admin/rutas/solicitudes/:id/derivar` · `/reintentar` | pasar al repartidor / devolver a la cola |
 | GET | `/admin/rutas/cola` · `/cola.ndjson` | lo pendiente de reportar a GSG |
 | POST | `/admin/rutas/cola/despachar` | vaciar la cola contra la API de GSG |
+| GET/POST/DELETE | `/admin/rutas/ajustes` | los ajustes del reparto desde la pantalla: pausas, espera, intentos, horario, plantillas y textos por paso |
+| POST/DELETE | `/admin/templates` · `/admin/templates/:name/:language` | crear o editar una plantilla propia (con lint) / borrarla |
 | POST | `/admin/connect` | conexion completa a partir de token, app y clave |
 | POST | `/admin/connect/signup` | vuelta de la ventana de Meta (registro incorporado) |
 | GET/POST | `/admin/settings` | credenciales: leer enmascaradas / guardar y probar |
@@ -801,12 +976,14 @@ Publicas: `GET /webhooks/whatsapp` (verificacion), `POST /webhooks/whatsapp`,
 
 1. `docker compose up -d`. Arranca aunque no haya credenciales y aplica las
    migraciones solo.
-2. Conecta la cuenta en `/setup`: el boton de Facebook, o pegando los tres datos.
-3. `npm run templates:push` (o el boton del panel) y esperar aprobacion.
-4. `npm run templates:sync`.
-5. Cargar contactos **con su opt-in y su origen** desde la pestana Contactos.
-6. Crear las reglas y secuencias que hagan falta en Automatizacion.
-7. Primera campana pequena. Mirar el estado del numero antes de subir volumen.
+2. Abre `/login` y crea la primera cuenta (la administradora). Las demas
+   cuentas se crean desde la seccion Usuarios del panel.
+3. Conecta la cuenta en `/setup`: el boton de Facebook, o pegando los tres datos.
+4. `npm run templates:push` (o el boton del panel) y esperar aprobacion.
+5. `npm run templates:sync`.
+6. Cargar contactos **con su opt-in y su origen** desde la pestana Contactos.
+7. Crear las reglas y secuencias que hagan falta en Automatizacion.
+8. Primera campana pequena. Mirar el estado del numero antes de subir volumen.
 
 Para el reparto: `npm run templates:push` da de alta tambien las tres
 plantillas de ubicacion; con ellas aprobadas se pega la lista en `/rutas` y se
@@ -818,7 +995,7 @@ la pagina de rastreo.
 
 ## Tests
 
-755 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
+787 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
 en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
 verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
 WebAssembly, asi que tampoco hacen falta Docker ni un servidor.

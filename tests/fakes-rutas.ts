@@ -5,6 +5,7 @@
  * verdad tiene sus propias pruebas sobre PGlite en `rutas.test.ts`.
  */
 
+import type { AjustesRutas } from '../src/rutas/ajustes.js';
 import type {
   ConsultaSolicitudes,
   EstadoLote,
@@ -57,11 +58,33 @@ export function createFakeRutas(): FakeRutas {
     });
   };
 
+  // Ajustes en memoria: lo guardado por encima de lo que se pase por defecto.
+  let ajustesGuardados: Record<string, unknown> = {};
+  const fusionar = (base: AjustesRutas, g: Record<string, unknown>): AjustesRutas => ({
+    ...base,
+    ...(g as Partial<AjustesRutas>),
+    plantillas: { ...base.plantillas, ...((g.plantillas as AjustesRutas['plantillas'] | undefined) ?? {}) },
+    textos: { ...base.textos, ...((g.textos as AjustesRutas['textos'] | undefined) ?? {}) },
+  });
+
   const repo: FakeRutas = {
     _lotes: lotes,
     _solicitudes: solicitudes,
     _eventos: eventos,
     _reportes: reportes,
+    ajustes: {
+      async get(porDefecto) {
+        return fusionar(porDefecto, ajustesGuardados);
+      },
+      async set(patch, porDefecto) {
+        const nuevo = fusionar(fusionar(porDefecto, ajustesGuardados), patch as Record<string, unknown>);
+        ajustesGuardados = nuevo as unknown as Record<string, unknown>;
+        return nuevo;
+      },
+      async reset() {
+        ajustesGuardados = {};
+      },
+    },
 
     async crearLote(datos) {
       const ahora = new Date();
@@ -216,7 +239,7 @@ export function createFakeRutas(): FakeRutas {
     },
 
     async abiertaPorContacto(contactId) {
-      const abiertos = [...VIVOS, 'supervision'];
+      const abiertos = [...VIVOS, 'supervision', 'derivado'];
       return (
         solicitudes
           .slice()
@@ -225,13 +248,13 @@ export function createFakeRutas(): FakeRutas {
       );
     },
 
-    async abiertaPorTelefono(phone) {
-      const abiertos = [...VIVOS, 'supervision'];
+    async abiertaPorTelefono(phone, excluirLoteId) {
+      const abiertos = [...VIVOS, 'supervision', 'derivado'];
       return (
         solicitudes
           .slice()
           .reverse()
-          .find((s) => s.phone === phone && abiertos.includes(s.estado)) ?? null
+          .find((s) => s.phone === phone && abiertos.includes(s.estado) && (!excluirLoteId || s.loteId !== excluirLoteId)) ?? null
       );
     },
 

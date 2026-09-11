@@ -30,6 +30,7 @@ import { countVariables } from '../src/templates/render.js';
 import { politicaDesdeConfig } from '../src/salud/politica.js';
 import { crearMonitor } from '../src/salud/monitor.js';
 import { arrancarServicios, resumenPolitica } from '../src/servicios.js';
+import { crearServicioAjustes } from '../src/ajustes/generales.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -40,15 +41,16 @@ const DATA_DIR = process.env.QUICK_DATA_DIR ?? path.join(process.cwd(), '.wa-dat
 const secrets = bootstrapSecrets(secretsDirectory());
 
 const config = loadConfig({
+  // Primero el entorno (y el .env, que config.ts carga con dotenv): asi las
+  // variables de ritmo, salud y rutas (RITMO_*, SALUD_*, RUTAS_*, HORARIO_*)
+  // tambien mandan en el arranque corto. Antes solo se leian las de abajo, y
+  // afinar el ritmo obligaba a usar el arranque completo.
+  ...process.env,
   PORT: String(PORT),
   PUBLIC_BASE_URL: BASE,
   DATABASE_URL: `pglite://${DATA_DIR}`,
   // Ni Meta ni contenedor: el cliente corre dentro de este proceso.
   WHATSAPP_PROVIDER: 'local',
-  ADMIN_TOKEN: secrets.adminToken,
-  // Escucha solo en 127.0.0.1, asi que pedir el token en cada pestaña es un
-  // tramite sin nada que proteger: la pagina viene con el puesto.
-  ADMIN_TOKEN_AUTOFILL: 'true',
   TRACKING_SECRET: secrets.trackingSecret,
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? '',
   // La zona que se atiende. Vacio o sin definir significa "no acotar": una
@@ -76,8 +78,10 @@ const settings = await createSettingsService(createSettingsRepo(pool), config, s
 
 // La politica de ritmo: aqui casi siempre `no_oficial` (Baileys), que es el
 // perfil lento, con escritura simulada y warm-up desde 20 al dia.
+// Encima del .env van los ajustes que se cambian desde /panel#configuracion.
+const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
 const politica = () =>
-  politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial');
+  ajustes.politica(politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial'));
 
 const wa = createDynamicWhatsAppClient(settings, {
   resolveTemplateBody: async (name, language) =>
@@ -108,7 +112,14 @@ const sender = createSender({
   serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
   salud,
   politica,
+  soloNumeros: () => ajustes.soloNumeros(),
 });
+
+if (ajustes.soloNumeros().length) {
+  console.log(`
+  MODO PRUEBA: solo se escribe a ${ajustes.soloNumeros().join(', ')} (se cambia en /panel#configuracion).
+`);
+}
 
 avisarSupervisor = async (texto) => {
   const destino = politica().avisarA;
@@ -156,6 +167,7 @@ const app = await buildServer({
   logger: false,
   salud,
   politica,
+  ajustes,
   // Con la vinculacion guardada, la sesion se reabre sola: no hay que volver
   // a /setup despues de cada reinicio.
   autoConectarLocal: true,
@@ -184,6 +196,7 @@ const pararServicios = arrancarServicios({
   sender,
   salud,
   politica,
+  ajustes,
   log: consola as never,
 });
 process.on('SIGINT', () => {
@@ -207,13 +220,14 @@ await app.listen({ port: PORT, host: '127.0.0.1' });
 console.log(`
   wa-locator - arranque corto (Postgres embebido, WhatsApp de verdad)
 
-  1. Abre       ${BASE}/setup
-  2. Pega el token cuando lo pida:  ${secrets.adminToken}
-  3. Elige "Escanear el QR y ya" y dale a conectar
-  4. Escanea con el telefono (o pide el codigo con tu numero)
+  1. Abre       ${BASE}/login   (la primera vez, crea tu cuenta ahi mismo)
+  2. Ve a        ${BASE}/setup   y elige "Escanear el QR y ya"
+  3. Escanea con el telefono (o pide el codigo con tu numero)
+
+  Integraciones (GSG, scripts): claves de API en ${BASE}/panel#integraciones
 
   Chat          ${BASE}/chat
-  Panel         ${BASE}/panel   (pestana Salud: riesgo, ritmo y por que frena)
+  Panel         ${BASE}/panel   (Inicio: cifras del dia; #salud: riesgo, ritmo y por que frena)
   Ubicaciones   ${BASE}/rutas
 
   Ritmo: ${resumenPolitica(politica())}.

@@ -35,7 +35,6 @@ export function decrypt(payload: string, key: Buffer): string {
 
 export interface LocalSecrets {
   settingsKey: string;
-  adminToken: string;
   trackingSecret: string;
 }
 
@@ -51,14 +50,14 @@ export function bootstrapSecrets(directory: string): LocalSecrets {
 
   if (existsSync(file)) {
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<LocalSecrets>;
-    if (parsed.settingsKey && parsed.adminToken && parsed.trackingSecret) {
-      return parsed as LocalSecrets;
+    if (parsed.settingsKey && parsed.trackingSecret) {
+      // Ficheros de antes traian tambien adminToken; ya no se usa y se ignora.
+      return { settingsKey: parsed.settingsKey, trackingSecret: parsed.trackingSecret };
     }
   }
 
   const secrets: LocalSecrets = {
     settingsKey: randomBytes(32).toString('base64'),
-    adminToken: randomBytes(24).toString('base64url'),
     trackingSecret: randomBytes(32).toString('base64url'),
   };
 

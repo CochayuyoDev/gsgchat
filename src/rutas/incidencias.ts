@@ -22,6 +22,7 @@ export type CodigoIncidencia =
   | 'respondio_sin_ubicacion'
   | 'ubicacion_fuera_de_zona'
   | 'rechaza_contacto'
+  | 'ya_en_curso'
   | 'envio_bloqueado'
   | 'error_envio';
 
@@ -121,6 +122,15 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     queHacer: 'Confirmar con el cliente la dirección, o pasar el pedido a quien cubra esa zona.',
     requiereHumano: true,
     reintentable: false,
+    reportable: true,
+  },
+  ya_en_curso: {
+    codigo: 'ya_en_curso',
+    titulo: 'Ya se le está pidiendo la ubicación en otro lote',
+    explicacion: 'Este número tiene una solicitud abierta en un lote anterior que todavía no terminó. Escribirle dos veces por lo mismo es lo que hace que la gente bloquee.',
+    queHacer: 'Resolver la solicitud anterior (o darla por terminada) y, si este pedido es otro, reintentar esta desde su ficha.',
+    requiereHumano: true,
+    reintentable: true,
     reportable: true,
   },
   rechaza_contacto: {

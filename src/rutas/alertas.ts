@@ -29,8 +29,8 @@ import { payloadResumen, type PuertoGsg } from './gsg.js';
 export interface OpcionesAlertas {
   /** Cada cuanto se le manda a GSG el avance del lote, en minutos. */
   resumenCadaMin: number;
-  /** Telefono del coordinador. Vacio = no se avisa a nadie por WhatsApp. */
-  supervisor: string;
+  /** Telefono del coordinador. Vacio = no se avisa a nadie por WhatsApp. Funcion: se lee en cada aviso. */
+  supervisor: string | (() => string);
   /** Cuantos casos parados hacen falta para molestar a una persona. */
   minimoCasos: number;
   /** Cada cuanto, como mucho, se le escribe al coordinador. */
@@ -150,14 +150,15 @@ export async function revisarAlertas(
     }
 
     // --- al coordinador: lo que no puede resolver el bot -------------------
-    if (!deps.opciones.supervisor) continue;
+    const supervisor = typeof deps.opciones.supervisor === 'function' ? deps.opciones.supervisor() : deps.opciones.supervisor;
+    if (!supervisor) continue;
     if (avance.necesitanPersona < deps.opciones.minimoCasos) continue;
 
     const previoAviso = memoria.ultimoAviso.get(lote.id) ?? 0;
     if (ahora.getTime() - previoAviso < deps.opciones.avisoCadaMin * 60_000) continue;
 
     const resultado = await deps.sender.send({
-      phone: deps.opciones.supervisor,
+      phone: supervisor,
       kind: 'freeform',
       category: 'UTILITY',
       // Es un aviso interno al propio equipo, no un mensaje a un cliente: no

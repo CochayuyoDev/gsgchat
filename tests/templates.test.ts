@@ -59,7 +59,7 @@ describe('catalogo', () => {
 function draft(overrides: Partial<CatalogTemplate>): CatalogTemplate {
   return {
     name: 'prueba',
-    language: 'es_MX',
+    language: 'es',
     category: 'UTILITY',
     body: 'Hola {{1}}, tu cita es el {{2}}. Gracias.',
     variables: ['nombre', 'fecha'],

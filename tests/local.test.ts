@@ -286,7 +286,7 @@ describe('enviar por el cliente local', () => {
   it('la plantilla se manda como texto con las variables sustituidas', async () => {
     const { enviados } = await conectado();
     const wa = createLocalClient({ resolveTemplateBody: async () => 'Hola {{1}}, tu pedido {{2}} salio.' });
-    await wa.sendTemplate('5215512345678', 'seguimiento_entrega', 'es_MX', [
+    await wa.sendTemplate('5215512345678', 'seguimiento_entrega', 'es', [
       { type: 'body', parameters: [{ type: 'text', text: 'Ana' }, { type: 'text', text: '#42' }] },
     ]);
 
@@ -296,7 +296,7 @@ describe('enviar por el cliente local', () => {
   it('sin cuerpo guardado se explica, en vez de mandar el nombre de la plantilla', async () => {
     await conectado();
     const wa = createLocalClient({ resolveTemplateBody: async () => undefined });
-    await expect(wa.sendTemplate('5215512345678', 'x', 'es_MX')).rejects.toThrow(/no esta en la base de datos/);
+    await expect(wa.sendTemplate('5215512345678', 'x', 'es')).rejects.toThrow(/no esta en la base de datos/);
   });
 
   it('la calidad es NA: el gate de calidad se queda ciego a proposito', async () => {

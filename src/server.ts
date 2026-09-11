@@ -16,6 +16,7 @@ import { registerWebhookRoutes } from './whatsapp/webhook.js';
 import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
 import { registerTrackingRoutes } from './tracking/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
+import { registerAuth } from './auth/routes.js';
 import { registerWebRoutes } from './web/routes.js';
 import type { SettingsService } from './settings/service.js';
 import type { StokyClient } from './stoky/client.js';
@@ -25,6 +26,8 @@ import { crearPuertoGsg } from './rutas/gsg.js';
 import { instalarMensajesEnEspanol } from './util/mensajes-zod.js';
 import type { Monitor } from './salud/monitor.js';
 import type { Politica } from './salud/politica.js';
+import type { ServicioAjustes } from './ajustes/generales.js';
+import { instalarBitacora } from './auth/actividad.js';
 
 export interface ServerDeps {
   config: Config;
@@ -39,12 +42,14 @@ export interface ServerDeps {
   /** El monitor de salud y la politica de ritmo. Ver src/salud. */
   salud?: Monitor;
   politica?: () => Politica;
+  /** Los ajustes generales editables desde la pantalla. Ver src/ajustes. */
+  ajustes?: ServicioAjustes;
   /** Reabrir la sesion local (Baileys) al arrancar si hay vinculacion guardada. */
   autoConectarLocal?: boolean;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica } = deps;
+  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes } = deps;
 
   // Los errores de validacion salen en espanol: son los que acaban en la
   // pantalla del operador, no en un log para programadores.
@@ -113,9 +118,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   app.get('/health', async () => ({ ok: true, configured: settings.isConfigured() }));
 
-  // El orden importa: registerAdminRoutes instala el hook que exige el token
-  // en todo /admin, y debe estar antes de que se sirva cualquier ruta /admin.
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud });
+  // El orden importa: registerAuth instala el hook que resuelve quien pide
+  // (cookie de sesion o clave de API) y exige sesion en /admin y en las
+  // pantallas privadas; va antes de cualquier ruta que lo necesite.
+  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
+  // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
+  instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
   await registerWahaWebhookRoutes(app, {
@@ -127,6 +136,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     catalogo,
     gsg,
     salud,
+    ajustes,
     hmacKey: () => settings.current().verifyToken,
   });
   await registerTrackingRoutes(app, { repos, config, hub, settings });
@@ -138,9 +148,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     settings,
     wa,
     hub,
-    adminToken: config.ADMIN_TOKEN,
     salud,
     politica,
+    ajustes,
   });
   await registerWebRoutes(app, {
     config,
@@ -150,6 +160,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     repos,
     catalogo,
     salud,
+    ajustes,
     autoConectarLocal: deps.autoConectarLocal,
   });
 

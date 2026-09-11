@@ -38,6 +38,11 @@ import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
 import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
+import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
+import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
+import { hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
+import { AJUSTES_GENERALES_VACIOS, fusionarAjustes, type AjustesGenerales, type AjustesGeneralesRepo } from '../src/ajustes/generales.js';
+import type { ActividadRepo, EntradaActividad } from '../src/auth/actividad.js';
 
 export interface FakeRepos extends Repos {
   automation: FakeAutomation;
@@ -53,7 +58,17 @@ export interface FakeRepos extends Repos {
   _links: Map<string, TrackingLink>;
   _recipients: CampaignRecipient[];
   _salud: SaludEvento[];
+  _usuarios: UsuarioConClave[];
+  _claves: Array<ClaveApi & { hash: string }>;
+  _ajustesGenerales: { valor: AjustesGenerales };
+  _actividad: EntradaActividad[];
 }
+
+/**
+ * La clave de API con la que las pruebas entran como "un programa" (lo que
+ * hara el sistema de GSG). createFakeRepos la deja creada.
+ */
+export const CLAVE_API_PRUEBA = 'wak_pruebasDeIntegracion0123456789abcdefXYZ';
 
 let seq = 1;
 
@@ -68,6 +83,132 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
   const counters = new Map<string, number>();
   const recipients: CampaignRecipient[] = [];
   const saludEventos: SaludEvento[] = [];
+  const usuariosMem: UsuarioConClave[] = [];
+  const sinClave = (u: UsuarioConClave): Usuario => {
+    const { clave: _clave, ...resto } = u;
+    return resto;
+  };
+  const usuarios: UsuariosRepo = {
+    async contar() {
+      return usuariosMem.length;
+    },
+    async porUsuario(usuario) {
+      return usuariosMem.find((u) => u.usuario === usuario.trim().toLowerCase()) ?? null;
+    },
+    async porId(id) {
+      const u = usuariosMem.find((x) => x.id === id);
+      return u ? sinClave(u) : null;
+    },
+    async crear(input) {
+      const u: UsuarioConClave = {
+        id: `u${seq++}`,
+        usuario: input.usuario.trim().toLowerCase(),
+        nombre: input.nombre.trim(),
+        clave: input.clave,
+        rol: input.rol,
+        activo: true,
+        sesionVersion: 1,
+        ultimoLoginAt: null,
+        createdAt: fakeNow(),
+      };
+      usuariosMem.push(u);
+      return sinClave(u);
+    },
+    async listar() {
+      return usuariosMem.map(sinClave);
+    },
+    async cambiarClave(id, clave) {
+      const u = usuariosMem.find((x) => x.id === id);
+      if (u) {
+        u.clave = clave;
+        u.sesionVersion++;
+      }
+    },
+    async setActivo(id, activo) {
+      const u = usuariosMem.find((x) => x.id === id);
+      if (u) {
+        u.activo = activo;
+        if (!activo) u.sesionVersion++;
+      }
+    },
+    async setRol(id, rol) {
+      const u = usuariosMem.find((x) => x.id === id);
+      if (u) u.rol = rol;
+    },
+    async tocarLogin(id, at) {
+      const u = usuariosMem.find((x) => x.id === id);
+      if (u) u.ultimoLoginAt = at;
+    },
+  };
+
+  const actividadMem: EntradaActividad[] = [];
+  const actividad: ActividadRepo = {
+    async anotar(e) {
+      actividadMem.push({ id: actividadMem.length + 1, at: e.at ?? new Date(), usuarioId: e.usuarioId, usuario: e.usuario, accion: e.accion, detalle: e.detalle, ip: e.ip });
+    },
+    async listar(query) {
+      let items = [...actividadMem].reverse();
+      if (query.accion) items = items.filter((x) => x.accion === query.accion);
+      if (query.usuario) items = items.filter((x) => x.usuario.toLowerCase().includes(query.usuario!.toLowerCase()));
+      return { total: items.length, items: items.slice(query.offset, query.offset + query.limit) };
+    },
+    async acciones() {
+      return [...new Set(actividadMem.map((x) => x.accion))].sort();
+    },
+  };
+  const ajustesGeneralesMem = { valor: AJUSTES_GENERALES_VACIOS };
+  const ajustesGenerales: AjustesGeneralesRepo = {
+    async get() {
+      return ajustesGeneralesMem.valor;
+    },
+    async set(patch) {
+      ajustesGeneralesMem.valor = fusionarAjustes(ajustesGeneralesMem.valor, patch);
+      return ajustesGeneralesMem.valor;
+    },
+    async reset() {
+      ajustesGeneralesMem.valor = AJUSTES_GENERALES_VACIOS;
+    },
+  };
+  const clavesMem: Array<ClaveApi & { hash: string }> = [
+    {
+      id: 'clave-prueba',
+      nombre: 'Pruebas',
+      prefijo: prefijoDeClave(CLAVE_API_PRUEBA),
+      hash: hashClaveApi(CLAVE_API_PRUEBA),
+      creadaPor: null,
+      createdAt: new Date('2024-01-01T00:00:00Z'),
+      ultimoUsoAt: null,
+      revocadaAt: null,
+    },
+  ];
+  const sinHash = (c: ClaveApi & { hash: string }): ClaveApi => {
+    const { hash: _hash, ...resto } = c;
+    return resto;
+  };
+  const claves: ClavesApiRepo = {
+    async crear(input) {
+      const c = { id: `clave-${seq++}`, nombre: input.nombre, prefijo: input.prefijo, hash: input.hash, creadaPor: input.creadaPor, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null };
+      clavesMem.push(c);
+      return sinHash(c);
+    },
+    async listar() {
+      return [...clavesMem].reverse().map(sinHash);
+    },
+    async porHash(hash) {
+      const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt);
+      return c ? sinHash(c) : null;
+    },
+    async revocar(id) {
+      const c = clavesMem.find((x) => x.id === id && !x.revocadaAt);
+      if (!c) return false;
+      c.revocadaAt = new Date();
+      return true;
+    },
+    async tocarUso(id, at) {
+      const c = clavesMem.find((x) => x.id === id);
+      if (c) c.ultimoUsoAt = at;
+    },
+  };
 
   let numberState: NumberState = {
     phoneNumberId: 'PNID',
@@ -124,6 +265,14 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     _links: links,
     _recipients: recipients,
     _salud: saludEventos,
+    _usuarios: usuariosMem,
+    usuarios,
+    _claves: clavesMem,
+    claves,
+    _ajustesGenerales: ajustesGeneralesMem,
+    ajustesGenerales,
+    _actividad: actividadMem,
+    actividad,
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
     archives: createFakeArchives(),
@@ -331,7 +480,16 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       },
       async updateByWamid(wamid, status, error) {
         const row = deliveries.find((d) => d.wamid === wamid);
-        if (row) Object.assign(row, { status, error, errorCode: error?.code ?? null, errorTitle: error?.title ?? null });
+        if (!row) return;
+        const rango = (s: unknown) => ({ read: 3, delivered: 2, sent: 1 })[String(s)] ?? 0;
+        const nuevo = status === 'failed' || rango(status) > rango(row.status) ? status : row.status;
+        Object.assign(row, {
+          status: nuevo,
+          error,
+          errorCode: error?.code ?? row.errorCode ?? null,
+          errorTitle: error?.title ?? row.errorTitle ?? null,
+          sentAt: row.sentAt ?? fakeNow(),
+        });
       },
       async countMarketingSince(contactId, since) {
         return deliveries.filter(
@@ -432,7 +590,12 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         return templates.get(`${name}/${language}`) ?? null;
       },
       async upsert(t) {
-        templates.set(`${t.name}/${t.language}`, t);
+        const previa = templates.get(`${t.name}/${t.language}`);
+        templates.set(`${t.name}/${t.language}`, {
+          ...t,
+          propia: Boolean(previa?.propia || t.propia),
+          aprobadaAt: t.status === 'APPROVED' ? (previa?.aprobadaAt ?? t.aprobadaAt ?? fakeNow()) : (previa?.aprobadaAt ?? t.aprobadaAt ?? null),
+        });
       },
       async setStatus(name, language, status, motivo) {
         const t = templates.get(`${name}/${language}`);
@@ -454,6 +617,12 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         t.pausadaHasta = hasta;
         t.pausas = pausas;
         t.motivo = motivo;
+      },
+      async remove(name, language) {
+        const t = templates.get(`${name}/${language}`);
+        if (!t?.propia) return false;
+        templates.delete(`${name}/${language}`);
+        return true;
       },
       async list() {
         return [...templates.values()];
@@ -799,7 +968,7 @@ export function createFakeWhatsApp(): FakeWhatsApp {
 export function approvedTemplate(overrides: Partial<Template> = {}): Template {
   return {
     name: 'confirmacion_pedido',
-    language: 'es_MX',
+    language: 'es',
     category: 'UTILITY',
     status: 'APPROVED',
     quality: 'GREEN',

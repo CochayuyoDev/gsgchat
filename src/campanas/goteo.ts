@@ -54,6 +54,7 @@ export interface ResultadoGoteo {
 
 /** Rechazos que afectan al numero entero: no tiene sentido probar con el siguiente. */
 const GLOBALES = new Set<GateCode>([
+  'sin_conexion',
   'number_paused',
   'number_quality',
   'daily_cap',

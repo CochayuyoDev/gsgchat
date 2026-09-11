@@ -19,6 +19,8 @@
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
 import type { Monitor } from '../salud/monitor.js';
+import type { ServicioAjustes } from '../ajustes/generales.js';
+import { numeroPermitido } from '../salud/lista-blanca.js';
 import type { Contact, Repos } from '../db/repos.js';
 import type { AutoReply } from '../db/automation.js';
 import type { Sender } from '../outbound/sender.js';
@@ -74,6 +76,8 @@ export interface InboundDeps {
    * de la conversacion (quejas, "no soy yo") simplemente no se apuntan.
    */
   salud?: Monitor;
+  /** Los ajustes generales (modo prueba, nombre del negocio) cambiados desde la pantalla. */
+  ajustes?: ServicioAjustes;
 }
 
 export const CONFIRM_PREFIX = 'loc_ok:';
@@ -173,7 +177,7 @@ export async function turnoDePreventa(
   if (await contestarPrecio(contact, entrada, lead, prefs, deps)) return;
 
   const { patch, respuesta } = responder(lead, entrada, {
-    negocio: config.businessName,
+    negocio: nombreNegocio(deps),
     cobertura: config.coverageName || 'tu zona',
     saludo: saludoPorHora(new Date(), config.timezone),
     horario: config.businessHours,
@@ -268,7 +272,7 @@ async function contestarPrecio(
       manual: false,
       text: render(vigentes[clave] ?? '', {
         saludo: saludoPorHora(new Date(), config.timezone),
-        negocio: config.businessName,
+        negocio: nombreNegocio(deps),
         cobertura: config.coverageName || 'tu zona',
         horario: config.businessHours,
       }),
@@ -309,7 +313,7 @@ async function contestarPrecio(
 
   const sustituciones = {
     saludo: saludoPorHora(new Date(), config.timezone),
-    negocio: config.businessName,
+    negocio: nombreNegocio(deps),
     cobertura: config.coverageName || 'tu zona',
     horario: config.businessHours,
     // Lo que pidio, para poder decirle "en talla 41 no lo tengo" con sus
@@ -413,7 +417,7 @@ async function contestarPrecio(
   // iban. Y va en el MISMO mensaje, que dos seguidos son dos mensajes por uno.
   const pendiente = lead.preguntaPendiente
     ? preguntaPendienteTexto(lead.preguntaPendiente, {
-        negocio: config.businessName,
+        negocio: nombreNegocio(deps),
         cobertura: config.coverageName || 'tu zona',
         saludo: sustituciones.saludo,
         horario: config.businessHours,
@@ -484,15 +488,34 @@ export async function handleInboundMessage(
   const contact = await repos.contacts.upsertFromInbound(phone, profileName);
   // Antes de anotar el entrante: asi se sabe si es el primer mensaje.
   const isFirstMessage = !contact.lastInboundAt;
+  const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
+  const leido = readInbound(message);
+
+  // Lo que ya se atendio (WhatsApp Web lo reentrega tras un reinicio) y lo
+  // que llega del historial se guarda en el hilo y nada mas: contestar a un
+  // mensaje de hace horas, y a veinte de golpe, es escribirle a media
+  // libreta sin que nadie lo pidiera.
+  const yaVisto = message.id ? await repos.messages.existsByWamid(message.id) : false;
+  if (message.viejo || yaVisto) {
+    await repos.messages.add({
+      contactId: contact.id,
+      direction: 'in',
+      wamid: message.id,
+      kind: leido.kind,
+      body: leido.body,
+      payload: leido.payload,
+      createdAt: receivedAt,
+    });
+    return;
+  }
+
   // El entrante abre la ventana de servicio de 24 h: sin esto el sender
   // creeria que toda respuesta necesita plantilla.
-  const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
   await repos.contacts.touchInbound(phone, receivedAt);
   contact.lastInboundAt = receivedAt;
 
   // La conversacion se guarda ANTES de decidir que hacer con el mensaje: si
   // el bot no sabe atenderlo, el operador tiene que verlo igual en el chat.
-  const leido = readInbound(message);
   await repos.messages.add({
     contactId: contact.id,
     direction: 'in',
@@ -502,6 +525,11 @@ export async function handleInboundMessage(
     payload: leido.payload,
     createdAt: receivedAt,
   });
+
+  // Modo prueba (SOLO_NUMEROS): a quien no este en la lista no se le contesta
+  // nada, ni siquiera desde el asistente. El sender lo bloquea igual, pero
+  // aqui se corta antes para no dejar rastro de "intentos" en la ficha.
+  if (!numeroPermitido({ soloNumeros: deps.ajustes ? deps.ajustes.soloNumeros() : config.soloNumeros }, phone)) return;
 
   // Acuse de lectura: mejora la percepcion y no cuesta cuota.
   await wa.markAsRead(message.id).catch(() => undefined);
@@ -525,7 +553,7 @@ export async function handleInboundMessage(
     if (respuesta.resultado === 'resuelta') {
       await reply(
         textoGracias({
-          negocio: config.businessName,
+          negocio: nombreNegocio(deps),
           referencia: respuesta.solicitud?.referencia,
         }),
       );
@@ -670,9 +698,11 @@ export async function handleInboundMessage(
     await atenderRespuestaDeRuta(rutasDeps, contact, { baja: true });
     // Se responde dentro de la ventana, asi que el gate de opt-out no aplica
     // a esta confirmacion: es la ultima cortesia antes de dejar de escribir.
-    await wa
-      .sendText(phone, 'Listo, no volverás a recibir mensajes nuestros. Responde ALTA si cambias de idea.')
-      .catch(() => undefined);
+    if (numeroPermitido({ soloNumeros: deps.ajustes ? deps.ajustes.soloNumeros() : config.soloNumeros }, phone)) {
+      await wa
+        .sendText(phone, 'Listo, no volverás a recibir mensajes nuestros. Responde ALTA si cambias de idea.')
+        .catch(() => undefined);
+    }
     return;
   }
 
@@ -759,4 +789,9 @@ export async function handleInboundMessage(
 
   await repos.locations.confirm(locationId);
   await reply(`Ubicación registrada: ${describe(result)}\n${result.mapsUrl}`);
+}
+
+/** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */
+function nombreNegocio(deps: Pick<InboundDeps, 'config' | 'ajustes'>): string {
+  return deps.ajustes?.nombreNegocio() ?? deps.config.businessName;
 }

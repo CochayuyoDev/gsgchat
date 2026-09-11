@@ -17,6 +17,7 @@ import { buildServer } from './server.js';
 import { politicaDesdeConfig } from './salud/politica.js';
 import { crearMonitor } from './salud/monitor.js';
 import { arrancarServicios, resumenPolitica } from './servicios.js';
+import { crearServicioAjustes } from './ajustes/generales.js';
 
 const runtime = await createRuntime({ migrate: true });
 const { config, repos, settings, wa } = runtime;
@@ -24,8 +25,11 @@ const { config, repos, settings, wa } = runtime;
 // La politica de ritmo depende del proveedor: la oficial de Meta tiene tier y
 // calidad; un cliente no oficial no, y ahi se va bastante mas despacio. Se
 // calcula por llamada porque el proveedor puede cambiar desde /setup.
+// Los ajustes generales (horario, ritmo, modo prueba, avisos, nombre) que se
+// cambian desde la pantalla van encima de lo que diga el .env.
+const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
 const politica = () =>
-  politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial');
+  ajustes.politica(politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial'));
 
 // El monitor de salud: mira errores, entregas, bajas y desconexiones cada
 // minuto, frena o pausa solo, y le da al sender el marcapasos. El aviso al
@@ -56,7 +60,14 @@ const sender = createSender({
   serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
   salud,
   politica,
+  soloNumeros: () => ajustes.soloNumeros(),
 });
+
+if (ajustes.soloNumeros().length) {
+  console.log(`
+  MODO PRUEBA: solo se escribe a ${ajustes.soloNumeros().join(', ')} (se cambia en /panel#configuracion).
+`);
+}
 
 avisarSupervisor = async (texto) => {
   const destino = politica().avisarA;
@@ -82,14 +93,14 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })
   : null;
 
 // Todo lo que trabaja solo: monitor, secuencias, goteo, rutas, avisos, GSG.
-const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, log: app.log });
+const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, ajustes, log: app.log });
 
 await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
@@ -97,13 +108,13 @@ const missing = settings.missing();
 console.log(`
   wa-locator en http://localhost:${config.PORT}
 ${runtime.migrated.length ? `\n  Migraciones aplicadas: ${runtime.migrated.join(', ')}\n` : ''}
+  Entrar: http://localhost:${config.PORT}/login  (la primera vez, crea tu cuenta ahi mismo)
   ${missing.length ? `Configuracion pendiente  http://localhost:${config.PORT}/setup  (faltan: ${missing.join(', ')})` : `Panel  http://localhost:${config.PORT}/panel`}
 
-  Token de administracion: ${config.ADMIN_TOKEN}
-  (guardado en .secrets.json; pegalo cuando la web te lo pida)
+  Integraciones (GSG, scripts): claves de API en http://localhost:${config.PORT}/panel#integraciones
 
   Ritmo: ${resumenPolitica(politica())}.
-  Salud del numero: http://localhost:${config.PORT}/panel (pestana Salud).
+  Salud del numero: http://localhost:${config.PORT}/panel#salud
 ${
   conRedis
     ? ''

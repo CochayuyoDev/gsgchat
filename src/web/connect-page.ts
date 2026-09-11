@@ -34,13 +34,8 @@ const CSS = `
     :root { --bg: #16181d; --card: #1f2229; --line: #2f333c; --text: #f2f3f5; --muted: #9aa0aa; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  .wrap { max-width: 660px; margin: 0 auto; padding: 32px 20px 80px; }
-  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
-  header .right { margin-left: auto; font-size: 13.5px; }
-  h1 { font-size: 25px; margin: 0; }
-  h2 { font-size: 17px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  .wrap { color: var(--text); font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 700px; }
+  .wrap h2 { font-size: 17px; margin: 0; display: flex; align-items: center; gap: 10px; }
   .lead { color: var(--muted); font-size: 14.5px; margin: 0 0 4px; }
   .muted { color: var(--muted); font-size: 13.5px; margin: 0; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
@@ -184,43 +179,26 @@ const AYUDA_CAMPO: Record<string, { titulo: string; pista: string; ph: string }>
   },
 };
 
-import { seedTokenJs } from './pages.js';
-import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
+import { appShell } from './shell.js';
 
-export function connectPage(labels: Record<string, string>, adminToken = ''): string {
+export interface ConnectOpts {
+  labels: Record<string, string>;
+  nombreNegocio: string;
+  demo?: boolean;
+}
+
+export function connectPage(opts: ConnectOpts): string {
+  const { labels } = opts;
   const avanzados = SETUP_FIELDS.map(
     (field) => `
   <label for="${field}">${labels[field] ?? field}</label>
   <input id="${field}" name="${field}" autocomplete="off" spellcheck="false">`,
   ).join('');
 
-  return `<!doctype html>
-<html lang="es"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Conectar WhatsApp - wa-locator</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🔌</text></svg>">
-<style>${CSS}${DIALOGO_CSS}</style>
-</head><body>
+  const contenido = `
 <div class="wrap">
-
-<header>
-  <h1>Conectar tu WhatsApp</h1>
-  <span id="state" class="pill hidden"></span>
-  <span class="right"><a href="/chat">Chat</a> · <a href="/panel">Panel</a></span>
-</header>
 <p class="lead">Cuatro pasos. El primero es el unico que tienes que pensar.</p>
 
-<div class="card hidden" id="gate">
-  <h2>Antes de nada</h2>
-  <p class="muted">Pega el token de administracion. Aparece en la consola al arrancar el sistema
-  y se pide una sola vez.</p>
-  <input id="gate-token" autocomplete="off" spellcheck="false" placeholder="Token de administracion">
-  <div class="actions">
-    <button id="gate-ok">Entrar</button>
-    <span id="gate-state" class="pill hidden"></span>
-  </div>
-</div>
 
 <div id="app" class="hidden">
 
@@ -327,7 +305,7 @@ export function connectPage(labels: Record<string, string>, adminToken = ''): st
       <p class="muted">Si no puedes apuntar con la camara, <b>vincula con tu numero</b>: WhatsApp te
       pide un codigo de ocho caracteres en vez del QR.</p>
       <div class="actions">
-        <input id="pair-phone" inputmode="numeric" placeholder="5215512345678" style="max-width:200px">
+        <input id="pair-phone" inputmode="numeric" placeholder="51987654321" style="max-width:200px">
         <button class="ghost" id="pair-ask" type="button">Pedir codigo</button>
       </div>
       <div id="pair-code" class="codigo hidden"></div>
@@ -364,7 +342,7 @@ export function connectPage(labels: Record<string, string>, adminToken = ''): st
   <h2><span class="num">4</span> Comprobar que funciona</h2>
   <p class="muted">Mandate un mensaje a ti mismo. Si te llega, esta todo bien.</p>
   <label for="testPhone">Tu telefono, con codigo de pais y sin el signo mas</label>
-  <input id="testPhone" placeholder="5215512345678">
+  <input id="testPhone" placeholder="51987654321">
   <div class="actions">
     <button id="sendTest">Enviar prueba</button>
     <a href="/chat"><button class="ghost" type="button">Ir al chat</button></a>
@@ -391,49 +369,28 @@ export function connectPage(labels: Record<string, string>, adminToken = ''): st
 </details>
 
 </div>
-</div>
-<script>
-${seedTokenJs(adminToken)}${DIALOGO_JS}${String.raw`
-/* --- acceso ----------------------------------------------------------- */
-/* Si no hay clave guardada se pide con el cuadro propio, igual que en el
-   resto de pantallas. */
-function token() { return sessionStorage.getItem('adminToken') || ''; }
+</div>`;
 
+  const script = String.raw`
+/* --- acceso ----------------------------------------------------------- */
+/* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
 async function api(path, options) {
   options = options || {};
   var res = await fetch(path, {
     method: options.method || 'GET',
     cache: 'no-store',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token() },
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   if (res.status === 401) {
-    sessionStorage.removeItem('adminToken');
-    abrirPuerta('Ese token no es el correcto');
-    throw new Error('Token de administracion incorrecto');
+    irAlLogin();
+    throw new Error('Tu sesión terminó: vuelve a entrar.');
   }
   var data = await res.json().catch(function () { return {}; });
   if (!res.ok) throw new Error(data.error || errorHttp(res.status));
   return data;
 }
-
-function abrirPuerta(mensaje) {
-  document.getElementById('app').classList.add('hidden');
-  document.getElementById('gate').classList.remove('hidden');
-  if (mensaje) show('gate-state', mensaje, 'bad');
-  document.getElementById('gate-token').focus();
-}
-document.getElementById('gate-ok').onclick = function () {
-  var v = document.getElementById('gate-token').value.trim();
-  if (!v) return show('gate-state', 'Pega el token', 'warn');
-  sessionStorage.setItem('adminToken', v);
-  document.getElementById('gate').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-  load();
-};
-document.getElementById('gate-token').addEventListener('keydown', function (e) {
-  if (e.key === 'Enter') document.getElementById('gate-ok').click();
-});
 
 /* --- utilidades ------------------------------------------------------- */
 function esc(v) {
@@ -946,13 +903,22 @@ async function load() {
     if (modo) elegirModo(modo, false);
     else { pintarPaso2(); pintarPaso3(); }
   } catch (error) {
-    if (token()) show('state', error.message, 'bad');
+    show('state', error.message, 'bad');
   }
 }
 
-if (token()) { document.getElementById('app').classList.remove('hidden'); load(); }
-else abrirPuerta();
-`}
-</script>
-</body></html>`;
+document.getElementById('app').classList.remove('hidden');
+load();
+`;
+
+  return appShell({
+    titulo: 'Conexión de WhatsApp',
+    subtitulo: 'QR, WAHA o la API oficial de Meta',
+    contenido,
+    script,
+    css: CSS,
+    nombreNegocio: opts.nombreNegocio,
+    demo: opts.demo,
+    icono: '🔌',
+  });
 }

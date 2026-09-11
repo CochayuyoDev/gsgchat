@@ -22,6 +22,7 @@ import { enrollContact, startScheduler } from '../src/automation/engine.js';
 import { politicaDesdeConfig } from '../src/salud/politica.js';
 import { crearMonitor, startMonitorSalud } from '../src/salud/monitor.js';
 import { startGoteo } from '../src/campanas/goteo.js';
+import { crearServicioAjustes } from '../src/ajustes/generales.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -37,10 +38,6 @@ const config = loadConfig({
   WHATSAPP_VERIFY_TOKEN: 'demo-verify',
   // Sin clave, la pagina cae a OpenStreetMap y se ve igual de bien.
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? '',
-  ADMIN_TOKEN: 'demo-admin-token-1234',
-  // La demo escucha solo en 127.0.0.1: pedir el token en cada pestaña no
-  // protege de nada y se cobra un tramite. Mismo criterio que `npm run quick`.
-  ADMIN_TOKEN_AUTOFILL: 'true',
   // Que las pantallas avisen de que aqui no sale ningun mensaje de verdad.
   DEMO_MODE: 'true',
   TRACKING_SECRET: 'demo'.repeat(12),
@@ -55,7 +52,8 @@ const repos = createFakeRepos();
 const wa = createFakeWhatsApp();
 const settings = await createFakeSettings(config);
 
-const politica = () => politicaDesdeConfig(config, 'cloud');
+const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
+const politica = () => ajustes.politica(politicaDesdeConfig(config, 'cloud'));
 const salud = crearMonitor({
   repos,
   politica,
@@ -124,9 +122,9 @@ await repos.contacts.setOptOut('51966666666');
 
 const contact = (await repos.contacts.getByPhone('51987654321'))!;
 for (const input of [
-  'https://www.google.com/maps/place/Bellas+Artes/data=!8m2!3d19.4352!4d-99.1412',
-  'https://www.google.com/maps/@19.4326,-99.1332,15z',
-  '19.4284, -99.1676',
+  'https://www.google.com/maps/place/Parque+Kennedy/data=!8m2!3d-12.1211!4d-77.0297',
+  'https://www.google.com/maps/@-12.0464,-77.0428,15z',
+  '-12.0931, -77.0465',
 ]) {
   const result = extractLocationSync(input, { bbox: config.bbox });
   if (result.ok) {
@@ -139,7 +137,7 @@ for (const input of [
 const campaignId = await repos.campaigns.create({
   name: 'Recordatorio de ejemplo',
   templateName: 'recordatorio_cita',
-  templateLanguage: 'es_MX',
+  templateLanguage: 'es',
   category: 'UTILITY',
 });
 await repos.campaigns.setStatus(campaignId, 'running');
@@ -150,7 +148,7 @@ for (const phone of ['51987654321', '51955555555']) {
     category: 'UTILITY',
     campaignId,
     templateName: 'recordatorio_cita',
-    templateLanguage: 'es_MX',
+    templateLanguage: 'es',
     variables: ['Ana', 'lunes 3', '10:00'],
   });
 }
@@ -163,8 +161,8 @@ for (const [minutos, direccion, texto] of [
   [188, 'out', 'Hola Ana, gracias por escribir. En que te ayudamos?'],
   [180, 'in', 'Queria saber si llegan a Coyoacan'],
   [176, 'out', 'Si, llegamos a toda la ciudad. Compartenos tu ubicacion y te confirmo el costo.'],
-  [40, 'in', 'Ubicacion: 19.4284, -99.1676'],
-  [38, 'out', 'Ubicacion registrada: 19.428400, -99.167600\nhttps://www.google.com/maps/search/?api=1&query=19.4284,-99.1676'],
+  [40, 'in', 'Ubicacion: -12.0931, -77.0465'],
+  [38, 'out', 'Ubicacion registrada: -12.093100, -77.046500\nhttps://www.google.com/maps/search/?api=1&query=-12.0931,-77.0465'],
   [35, 'in', 'Perfecto, cuanto tardan?'],
 ] as Array<[number, 'in' | 'out', string]>) {
   await repos.messages.add({
@@ -197,7 +195,7 @@ await repos.messages.add({
 
 const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
 const link = await repos.tracking.createLink(contact.id, 'Pedido A-1024', expiresAt);
-await repos.tracking.addPoint(link.id, { lat: 19.4326, lng: -99.1332, accuracy: 12 });
+await repos.tracking.addPoint(link.id, { lat: -12.0464, lng: -77.0428, accuracy: 12 });
 const urls = buildTrackingUrls(link.id, expiresAt, config.TRACKING_SECRET, BASE);
 
 // Automatizacion de ejemplo: una bienvenida, una regla por palabra y una
@@ -211,7 +209,7 @@ const followUp = await repos.automation.createSequence({
       delayMinutes: 24 * 60,
       kind: 'template',
       templateName: 'seguimiento_entrega',
-      templateLanguage: 'es_MX',
+      templateLanguage: 'es',
       category: 'UTILITY',
       variables: ['{nombre}', '{fecha}'],
     },
@@ -328,7 +326,7 @@ void carla;
 
 await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes });
 startScheduler({ repos, sender }, 3_000);
 startMonitorSalud(salud, undefined, 15_000);
 startGoteo({ repos, sender, salud, politica }, 3_000);
@@ -346,7 +344,7 @@ console.log(`
   Compartir    ${urls.publishUrl}
   Caducado     ${BASE}/t/token-invalido
 
-  Admin (Bearer ${config.ADMIN_TOKEN}):
-    curl -H "authorization: Bearer ${config.ADMIN_TOKEN}" ${BASE}/admin/health
-    curl -H "authorization: Bearer ${config.ADMIN_TOKEN}" ${BASE}/admin/templates
+  Entrar en el navegador: ${BASE}/login (crea la primera cuenta ahi mismo)
+  API para programas: crea una clave en ${BASE}/panel#integraciones y luego
+    curl -H "authorization: Bearer wak_..." ${BASE}/admin/health
 `);

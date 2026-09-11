@@ -34,6 +34,13 @@ export interface Message {
   createdAt: Date;
 }
 
+export interface ActividadDia {
+  /** YYYY-MM-DD */
+  dia: string;
+  entrantes: number;
+  salientes: number;
+}
+
 export interface NewMessage {
   contactId: string;
   direction: Direction;
@@ -77,6 +84,18 @@ export interface MessagesRepo {
   unreadTotal(): Promise<number>;
   /** Entrantes desde esa fecha: la otra mitad del ratio salientes/entrantes. */
   contarEntrantesDesde(since: Date): Promise<number>;
+  /**
+   * Mensajes por dia desde esa fecha, entrantes y salientes, para la grafica
+   * del inicio. Los dias sin nada no aparecen: la pantalla los rellena.
+   */
+  actividadPorDia(since: Date): Promise<ActividadDia[]>;
+  /** Conversaciones cuyo ultimo mensaje es del cliente y nadie ha leido. */
+  contarEsperandoRespuesta(): Promise<number>;
+  /**
+   * Si ese mensaje ya esta guardado. Tras un reinicio, WhatsApp Web vuelve a
+   * entregar lo reciente: lo que ya se atendio no se atiende dos veces.
+   */
+  existsByWamid(wamid: string): Promise<boolean>;
 
   // --- respaldo y limpieza (ver src/archive) ---
 
@@ -168,7 +187,18 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
     },
 
     async setStatusByWamid(wamid, status) {
-      await pool.query('update messages set status = $2 where wamid = $1', [wamid, status]);
+      // El doble check no retrocede: un "sent" reenviado tras un "read" no
+      // puede quitarle el azul al mensaje. Un "failed" si se impone.
+      await pool.query(
+        `update messages
+            set status = case
+                  when $2 = 'failed' then 'failed'
+                  when (case status when 'read' then 3 when 'delivered' then 2 when 'sent' then 1 else 0 end)
+                    >= (case $2 when 'read' then 3 when 'delivered' then 2 when 'sent' then 1 else 0 end) then status
+                  else $2 end
+          where wamid = $1`,
+        [wamid, status],
+      );
     },
 
     async listConversations(query) {
@@ -275,10 +305,47 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       );
       return rows[0]?.total ?? 0;
     },
+    async existsByWamid(wamid) {
+      const { rows } = await pool.query<{ uno: number }>('select 1 as uno from messages where wamid = $1 limit 1', [wamid]);
+      return rows.length > 0;
+    },
+
     async contarEntrantesDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
         `select count(*)::int as total from messages where direction = 'in' and created_at >= $1`,
         [since],
+      );
+      return rows[0]?.total ?? 0;
+    },
+
+    async actividadPorDia(since) {
+      const { rows } = await pool.query<{ dia: string; entrantes: number; salientes: number }>(
+        `select to_char(created_at, 'YYYY-MM-DD') as dia,
+                count(*) filter (where direction = 'in')::int as entrantes,
+                count(*) filter (where direction = 'out')::int as salientes
+           from messages
+          where created_at >= $1
+          group by 1
+          order by 1`,
+        [since],
+      );
+      return rows.map((r) => ({ dia: r.dia, entrantes: r.entrantes, salientes: r.salientes }));
+    },
+
+    async contarEsperandoRespuesta() {
+      // El ultimo mensaje del hilo es del cliente y es posterior a la ultima
+      // lectura: alguien tiene que contestar (o al menos mirarlo).
+      const { rows } = await pool.query<{ total: number }>(
+        `select count(*)::int as total
+           from contacts c
+           join lateral (
+             select direction, created_at from messages m
+              where m.contact_id = c.id
+              order by created_at desc, id desc
+              limit 1
+           ) u on true
+          where u.direction = 'in'
+            and u.created_at > coalesce(c.chat_read_at, to_timestamp(0))`,
       );
       return rows[0]?.total ?? 0;
     },

@@ -13,9 +13,8 @@ import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
-import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos } from './fakes.js';
+import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, CLAVE_API_PRUEBA as ADMIN } from './fakes.js';
 
-const ADMIN = 'admin-token-de-prueba-1234';
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
@@ -25,7 +24,6 @@ const ENV = {
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
   WHATSAPP_APP_SECRET: 'app-secret-de-prueba',
   WHATSAPP_VERIFY_TOKEN: 'verify-me',
-  ADMIN_TOKEN: ADMIN,
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'lima',
   RUTAS_PAIS: 'peru',
@@ -147,6 +145,32 @@ describe('cargar el lote', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().lote).toMatchObject({ origen: 'api', externoId: 'GSG-LOTE-9' });
+  });
+
+  it('el mismo numero en un segundo lote no se escribe dos veces: queda como "ya en curso"', async () => {
+    const primero = await app.inject({
+      method: 'POST',
+      url: '/admin/rutas/lotes',
+      headers: auth,
+      payload: { nombre: 'Lunes', arrancar: true, filas: [{ telefono: '987654321', nombre: 'Ana', referencia: 'P-1' }] },
+    });
+    expect(primero.statusCode).toBe(200);
+    const segundo = await app.inject({
+      method: 'POST',
+      url: '/admin/rutas/lotes',
+      headers: auth,
+      payload: { nombre: 'Martes', arrancar: true, filas: [{ telefono: '987654321', nombre: 'Ana', referencia: 'P-2' }, { telefono: '912345678', nombre: 'Luis', referencia: 'P-3' }] },
+    });
+    expect(segundo.statusCode).toBe(200);
+    const loteB = segundo.json().lote.id as string;
+    const bandeja = await app.inject({ method: 'GET', url: `/admin/rutas/solicitudes?loteId=${loteB}&limit=10`, headers: auth });
+    const items = bandeja.json().items as Array<{ phone: string; estado: string; incidencia: string | null; incidenciaDetalle: string | null }>;
+    const repetida = items.find((s) => s.phone === '51987654321')!;
+    expect(repetida.estado).toBe('incidencia');
+    expect(repetida.incidencia).toBe('ya_en_curso');
+    expect(repetida.incidenciaDetalle).toMatch(/P-1/);
+    // El otro cliente del segundo lote sigue su camino normal.
+    expect(items.find((s) => s.phone === '51912345678')?.estado).toBe('pendiente');
   });
 
   it('una tabla sin telefonos se rechaza con el motivo', async () => {

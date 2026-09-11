@@ -7,6 +7,7 @@
  * el mismo vocabulario de estados para que la pantalla sirva para los dos.
  */
 
+import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { existsSync } from 'node:fs';
@@ -48,6 +49,8 @@ export interface LocalRoutesDeps {
    * y ahi vive la vinculacion de verdad, que no se puede tocar.
    */
   autoConectar?: boolean;
+  /** Los ajustes generales (modo prueba, nombre) cambiados desde la pantalla. */
+  ajustes?: ServicioAjustes;
 }
 
 /** El navegador necesita saber que es para decidir si lo pinta o lo baja. */
@@ -94,7 +97,7 @@ export async function registerLocalRoutes(
 
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, seen: createSeenCache() };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, seen: createSeenCache() };
 
   async function arrancar() {
     return startLocal({

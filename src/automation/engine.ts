@@ -220,7 +220,7 @@ async function dispatch(deps: EngineDeps, message: ScheduledMessage, contact: Co
       kind: 'template',
       category: message.category,
       templateName: message.templateName ?? '',
-      templateLanguage: message.templateLanguage ?? 'es_MX',
+      templateLanguage: message.templateLanguage ?? 'es',
       variables: message.variables.map((v) => renderPlaceholders(v, contact, now)),
     });
   }

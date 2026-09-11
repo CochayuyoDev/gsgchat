@@ -380,7 +380,7 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
           step.delayMinutes,
           step.kind,
           step.templateName ?? null,
-          step.templateLanguage ?? 'es_MX',
+          step.templateLanguage ?? 'es',
           step.category ?? 'UTILITY',
           JSON.stringify(step.variables ?? []),
           step.text ?? null,

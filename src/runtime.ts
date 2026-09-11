@@ -41,7 +41,6 @@ export function secretsDirectory(env: NodeJS.ProcessEnv = process.env): string {
 
 export async function createRuntime(opts: { migrate?: boolean } = {}): Promise<Runtime> {
   const secrets = bootstrapSecrets(secretsDirectory());
-  process.env.ADMIN_TOKEN ??= secrets.adminToken;
   process.env.TRACKING_SECRET ??= secrets.trackingSecret;
 
   const config = loadConfig();

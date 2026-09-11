@@ -21,11 +21,11 @@ import {
   createFakeWhatsApp,
   type FakeRepos,
   type FakeWhatsApp,
+  CLAVE_API_PRUEBA as ADMIN,
 } from './fakes.js';
 import type { ChangeValue, InboundMessage } from '../src/whatsapp/types.js';
 import type { Sender } from '../src/outbound/sender.js';
 
-const ADMIN = 'admin-token-de-prueba-1234';
 const auth = { authorization: `Bearer ${ADMIN}` };
 
 const ENV = {
@@ -37,7 +37,6 @@ const ENV = {
   WHATSAPP_APP_ID: '123456',
   WHATSAPP_APP_SECRET: 'app-secret-de-prueba',
   WHATSAPP_VERIFY_TOKEN: 'verify-me',
-  ADMIN_TOKEN: ADMIN,
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'mexico',
 } as NodeJS.ProcessEnv;
@@ -378,16 +377,22 @@ describe('escribir desde el chat', () => {
 });
 
 describe('la pagina del chat', () => {
-  it('se sirve y no filtra el token de administracion', async () => {
-    const respuesta = await app.inject({ url: '/chat' });
+  // Las pantallas exigen sesion: el token de API vale para inyectarlas en
+  // las pruebas, y nunca aparece en el HTML.
+  it('sin sesion manda a /login; con acceso se sirve y no filtra el token de administracion', async () => {
+    const sinSesion = await app.inject({ url: '/chat' });
+    expect(sinSesion.statusCode).toBe(302);
+    expect(sinSesion.headers.location).toBe('/login?next=%2Fchat');
+    const respuesta = await app.inject({ url: '/chat', headers: auth });
     expect(respuesta.statusCode).toBe(200);
     expect(respuesta.body).toContain('Chats');
     expect(respuesta.body).not.toContain(ADMIN);
   });
 
-  it('la raiz lleva al chat cuando ya esta conectado', async () => {
+  it('la raiz es la portada, con la entrada al sistema', async () => {
     const respuesta = await app.inject({ url: '/' });
-    expect(respuesta.headers.location).toBe('/chat');
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.body).toContain('/login');
   });
 
   /**
@@ -397,7 +402,7 @@ describe('la pagina del chat', () => {
    * quedaba congelada aunque el mensaje ya se hubiera enviado.
    */
   it('el aviso inicial esta fuera del hilo, para que no lo borre el repintado', async () => {
-    const html = (await app.inject({ url: '/chat' })).body;
+    const html = (await app.inject({ url: '/chat', headers: auth })).body;
 
     const hilo = html.slice(html.indexOf('id="messages"'));
     const cierre = hilo.indexOf('</div>');
@@ -411,7 +416,7 @@ describe('la pagina del chat', () => {
   it('el hilo descarta las respuestas que llegan tarde', async () => {
     // Sin esto, el refresco automatico repintaba encima del mensaje recien
     // enviado con una foto pedida antes.
-    const html = (await app.inject({ url: '/chat' })).body;
+    const html = (await app.inject({ url: '/chat', headers: auth })).body;
     expect(html).toContain('if (mia < pintado) return;');
     expect(html).toContain("if (deseado && deseado !== contactId) return;");
   });
@@ -419,7 +424,7 @@ describe('la pagina del chat', () => {
   it('la lista escucha el clic en el contenedor, no en cada fila', async () => {
     // Las filas se vuelven a pintar solas: un handler por fila se pierde
     // justo cuando el usuario pulsa.
-    const html = (await app.inject({ url: '/chat' })).body;
+    const html = (await app.inject({ url: '/chat', headers: auth })).body;
     expect(html).toContain("document.getElementById('chats').addEventListener('click'");
   });
 });

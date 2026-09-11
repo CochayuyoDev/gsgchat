@@ -88,6 +88,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     const messages = await repos.messages.listMessages(contact.id, query.limit, query.before);
     if (query.read) await repos.messages.markRead(contact.id, new Date());
+    // La solicitud de reparto abierta, si la hay: el pedido y en que punto va,
+    // para que quien atiende lo vea sin cambiar de pantalla (y para {pedido}).
+    const abierta = await repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null);
+    const reparto = abierta ? { id: abierta.id, referencia: abierta.referencia, estado: abierta.estado, direccion: abierta.direccion, distrito: abierta.distrito, intentos: abierta.intentos } : null;
 
     const now = Date.now();
     const windowOpen = Boolean(
@@ -96,6 +100,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     return {
       contact,
+      reparto,
       windowOpen,
       // Lo que el operador puede escribir ahora mismo, y por que.
       canWrite: (windowOpen || !ventanaObliga()) && !contact.optOutAt,

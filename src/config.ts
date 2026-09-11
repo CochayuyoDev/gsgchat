@@ -29,19 +29,6 @@ const schema = z.object({
   // terminos de Meta, con riesgo real de baneo del numero).
   WHATSAPP_PROVIDER: z.enum(['cloud', 'waha', 'local']).default('cloud'),
 
-  /**
-   * Mete el token de administracion en las paginas para no tener que pegarlo.
-   *
-   * Solo tiene sentido cuando el servidor escucha unicamente en 127.0.0.1: ahi
-   * cualquiera que pueda abrir la pagina ya esta dentro de la maquina, asi que
-   * pedirle el token no protege de nada y se cobra un tramite en cada pestaña.
-   * En cuanto el servidor sea accesible desde fuera, esto tiene que estar en
-   * false: seria repartir la llave con la puerta.
-   */
-  ADMIN_TOKEN_AUTOFILL: z
-    .enum(['true', 'false', '1', '0'])
-    .default('false')
-    .transform((v) => v === 'true' || v === '1'),
   WAHA_URL: z.string().default(''),
   WAHA_API_KEY: z.string().default(''),
   WAHA_SESSION: z.string().default('default'),
@@ -64,9 +51,6 @@ const schema = z.object({
 
   // Vacia = la pagina de rastreo cae a Leaflet + OpenStreetMap, sin clave.
   GOOGLE_MAPS_API_KEY: z.string().default(''),
-
-  /** Bearer token de la API /admin. */
-  ADMIN_TOKEN: z.string().min(16, 'ADMIN_TOKEN necesita 16 caracteres o mas'),
 
   TRACKING_SECRET: z.string().min(32, 'TRACKING_SECRET necesita 32 caracteres o mas'),
   TRACKING_TTL_MINUTES: z.coerce.number().int().positive().default(120),
@@ -140,6 +124,16 @@ const schema = z.object({
   PLANTILLA_NUEVA_POR_DIA: z.coerce.number().int().nonnegative().optional(),
   /** A quien avisar por WhatsApp cuando el numero cambia de nivel. Vacio = RUTAS_SUPERVISOR. */
   SALUD_AVISAR_A: z.string().default(''),
+
+  /**
+   * Modo prueba: solo se escribe a estos numeros, separados por coma.
+   *
+   * Vacio = a todos (produccion). Con lista, CUALQUIER envio a un numero que
+   * no este -campana, secuencia, rutas, chat a mano, respuesta del
+   * asistente- se bloquea y queda anotado como `allowlist`. Es la red para
+   * probar contra WhatsApp de verdad sin escribirle a un cliente por error.
+   */
+  SOLO_NUMEROS: z.string().default(''),
 
   OPT_OUT_KEYWORDS: z.string().default('baja,stop,cancelar,unsubscribe'),
   OPT_IN_KEYWORDS: z.string().default('alta,acepto'),
@@ -328,6 +322,8 @@ export interface Config extends RawConfig {
   businessHours: string;
   /** Dias de la semana en los que sale lo iniciado por la empresa (0 = domingo). */
   horarioEnvioDias: number[];
+  /** Modo prueba: numeros a los que se puede escribir. Vacio = todos. */
+  soloNumeros: string[];
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -346,12 +342,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     timezone: raw.TIMEZONE,
     // Con cobertura de Lima, los distritos se validan contra los que existen.
     // Fuera de ahi no hay lista que valga y el campo acepta texto libre.
-    distritos: raw.GEO_BBOX === 'lima' ? DISTRITOS_LIMA_CALLAO : [],
+    // Con cobertura de Lima, o simplemente operando en Peru (RUTAS_PAIS), los
+    // distritos se validan contra los que existen. Sin lista, cualquier
+    // frase se guardaba como distrito: "Q rico aprietas bb" salio en una
+    // ficha de verdad.
+    distritos: raw.GEO_BBOX === 'lima' || raw.RUTAS_PAIS === 'peru' ? DISTRITOS_LIMA_CALLAO : [],
     businessName: raw.BUSINESS_NAME,
     businessHours: raw.BUSINESS_HOURS,
+    // Vacio = lo que diga el perfil (lunes a sabado). Sin el filter(Boolean),
+    // ''.split(',') es [''] y Number('') es 0: el sistema solo enviaba los
+    // domingos y todo lo demas salia como "fuera de horario".
     horarioEnvioDias: raw.HORARIO_ENVIO_DIAS.split(',')
-      .map((d) => Number(d.trim()))
+      .map((d) => d.trim())
+      .filter(Boolean)
+      .map(Number)
       .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
+    soloNumeros: raw.SOLO_NUMEROS.split(',')
+      .map((n) => n.replace(/\D+/g, ''))
+      .filter((n) => n.length >= 6),
     coverageName:
       raw.COVERAGE_NAME.trim() ||
       (raw.GEO_BBOX === 'lima' ? 'todo Lima y Callao' : raw.GEO_BBOX === 'mexico' ? 'Mexico' : ''),

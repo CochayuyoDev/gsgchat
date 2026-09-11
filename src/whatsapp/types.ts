@@ -22,6 +22,13 @@ export interface InboundMessage {
   button?: { text: string; payload: string };
   context?: { id?: string };
   /**
+   * Llego del historial o de la cola de cuando el sistema estaba apagado, no
+   * en vivo. Se guarda en la conversacion y NO se contesta: al reconectar,
+   * WhatsApp Web reentrega los ultimos mensajes de cada chat, y contestarlos
+   * como si fueran nuevos es escribirle a media libreta de golpe.
+   */
+  viejo?: boolean;
+  /**
    * Adjunto ya bajado a disco.
    *
    * La Cloud API no lo trae -ahi el fichero se pide aparte con su id-, pero el

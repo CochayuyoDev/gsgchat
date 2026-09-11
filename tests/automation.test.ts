@@ -15,7 +15,6 @@ const ENV = {
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
   WHATSAPP_APP_SECRET: 's',
   WHATSAPP_VERIFY_TOKEN: 'verify-me',
-  ADMIN_TOKEN: 'admin-token-largo-1234',
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'mexico',
 } as NodeJS.ProcessEnv;

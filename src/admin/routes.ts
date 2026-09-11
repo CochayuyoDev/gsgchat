@@ -18,8 +18,9 @@ import type { Sender } from '../outbound/sender.js';
 import { extractLocation } from '../geo/extract.js';
 import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
-import { CATALOG } from '../templates/catalog.js';
-import { lintTemplate } from '../templates/lint.js';
+import { CATALOG, type CatalogTemplate } from '../templates/catalog.js';
+import { hasErrors, lintTemplate } from '../templates/lint.js';
+import { countVariables } from '../templates/render.js';
 import { syncTemplates } from '../templates/registry.js';
 import { pushTemplates } from '../templates/push.js';
 import { registerAutomationRoutes } from './automation-routes.js';
@@ -32,8 +33,12 @@ import { crearPuertoGsg } from '../rutas/gsg.js';
 import { opcionesDesdeConfig } from '../rutas/motor.js';
 import type { Monitor } from '../salud/monitor.js';
 import { politicaDesdeConfig, type Politica } from '../salud/politica.js';
+import { ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes } from '../ajustes/generales.js';
+import { aCsvCon } from './csv.js';
 import { providerOf } from '../settings/service.js';
-import { canarioPorDefecto, correrGoteo, ordenarPorCompromiso } from '../campanas/goteo.js';
+import { correrGoteo } from '../campanas/goteo.js';
+import { crearCampana } from '../campanas/crear.js';
+import { registerGruposRoutes } from './grupos-routes.js';
 
 export interface AdminDeps {
   repos: Repos;
@@ -43,7 +48,8 @@ export interface AdminDeps {
   sender: Sender;
   wa: WhatsAppClient;
   hub: TrackingHub;
-  adminToken: string;
+  /** Los ajustes generales editables desde la pantalla. Ver src/ajustes. */
+  ajustes?: ServicioAjustes;
   /** El monitor de salud y la politica de ritmo. Ver src/salud. */
   salud?: Monitor;
   politica?: () => Politica;
@@ -58,7 +64,7 @@ const phoneSchema = z
 const campaignSchema = z.object({
   name: z.string().min(1),
   templateName: z.string().min(1),
-  templateLanguage: z.string().default('es_MX'),
+  templateLanguage: z.string().default('es'),
   category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).default('MARKETING'),
   /** Destinatarios explicitos; si se omite, va a todos los que tienen opt-in. */
   recipients: z
@@ -94,7 +100,7 @@ const importSchema = z.object({
   text: z.string().max(2_000_000).optional(),
 });
 
-/** "5215512345678, Ana Perez" -> { phone, name }. Ignora lineas vacias y cabeceras. */
+/** "51987654321, Ana Perez" -> { phone, name }. Ignora lineas vacias y cabeceras. */
 export function parseContactLines(text: string): Array<{ phone: string; name?: string }> {
   const out: Array<{ phone: string; name?: string }> = [];
   for (const rawLine of text.split(/\r?\n/)) {
@@ -110,18 +116,12 @@ export function parseContactLines(text: string): Array<{ phone: string; name?: s
 }
 
 export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps): Promise<void> {
-  const { repos, config, queue, sender, adminToken, settings, wa, hub } = deps;
+  const { repos, config, queue, sender, settings, wa, hub } = deps;
   // Sin Meta (cliente local o WAHA) no hay id de numero: se usa una clave fija
   // para que el estado, la pausa y el monitor hablen de la misma fila.
   const phoneNumberId = () => settings.current().phoneNumberId || 'local';
 
-  app.addHook('onRequest', async (request, reply) => {
-    if (!request.url.startsWith('/admin')) return;
-    const header = request.headers.authorization;
-    if (header !== `Bearer ${adminToken}`) {
-      return reply.code(401).send({ error: 'no autorizado' });
-    }
-  });
+  // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
   await registerAutomationRoutes(app, { repos, sender });
   await registerChatRoutes(app, { repos, sender, config, settings });
@@ -153,12 +153,185 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     dir: config.ARCHIVE_DIR,
     dias: config.ARCHIVE_INACTIVE_DAYS,
   });
+  await registerGruposRoutes(app, { repos, config, settings, ajustes: deps.ajustes });
   await registerRutasRoutes(app, {
     repos,
     config,
     gsg: crearPuertoGsg(config),
     opciones: opcionesDesdeConfig(config),
     salud: deps.salud,
+    supervisor: () => deps.ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,
+  });
+
+  // --- ajustes generales: lo que se cambia desde la pantalla ----------------
+
+  /** Lo guardado, lo del servidor debajo, y lo efectivo (lo que manda ahora). */
+  app.get('/admin/ajustes', async (_request, reply) => {
+    if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
+    const p = politicaVigente();
+    return {
+      guardado: deps.ajustes.actual(),
+      servidor: deps.ajustes.servidor(),
+      modoPruebaFijado: deps.ajustes.modoPruebaFijado(),
+      efectivo: {
+        nombreNegocio: deps.ajustes.nombreNegocio(),
+        soloNumeros: deps.ajustes.soloNumeros(),
+        supervisor: p.avisarA,
+        horario: { inicio: p.horaInicio, fin: p.horaFin, dias: p.diasPermitidos, timezone: p.timezone },
+        ritmo: {
+          perfil: p.perfil,
+          maxPorMinuto: p.maxPorMinuto,
+          maxPorHora: p.maxPorHora,
+          pausaMinSeg: Math.round(p.pausaMinMs / 1000),
+          pausaMaxSeg: Math.round(p.pausaMaxMs / 1000),
+          nuevosContactosPorDia: p.nuevosContactosPorDia,
+          maxPorContactoDia: p.maxPorContactoDia,
+          separacionContactoMin: Math.round(p.separacionContactoMs / 60_000),
+        },
+        humanizar: p.humanizar,
+        autoPausa: p.autoPausa,
+      },
+    };
+  });
+
+  app.post('/admin/ajustes', async (request, reply) => {
+    if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
+      return reply.code(403).send({ error: 'solo un administrador cambia los ajustes generales' });
+    }
+    const patch = ajustesGeneralesPatchSchema.parse(request.body ?? {});
+    const guardado = await deps.ajustes.guardar(patch);
+    return { ok: true, guardado };
+  });
+
+  app.delete('/admin/ajustes', async (request, reply) => {
+    if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
+      return reply.code(403).send({ error: 'solo un administrador cambia los ajustes generales' });
+    }
+    return { ok: true, guardado: await deps.ajustes.restablecer() };
+  });
+
+  // --- respuestas rapidas del chat ("/atajo") --------------------------------
+
+  app.get('/admin/chat/atajos', async () => ({ atajos: deps.ajustes?.atajos() ?? ATAJOS_POR_DEFECTO, deFabrica: !deps.ajustes || deps.ajustes.actual().atajos === null }));
+
+  app.post('/admin/chat/atajos', async (request, reply) => {
+    if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'solo un administrador cambia las respuestas rapidas' });
+    const body = z.object({ atajos: z.array(z.object({ atajo: z.string(), texto: z.string() })).max(50).nullable() }).parse(request.body ?? {});
+    const guardado = await deps.ajustes.guardar({ atajos: body.atajos });
+    return { ok: true, atajos: guardado.atajos ?? ATAJOS_POR_DEFECTO, deFabrica: guardado.atajos === null };
+  });
+
+  // --- avisos: lo que espera a una persona, para la campana de arriba -----
+
+  /** Ligero a proposito: se consulta cada medio minuto desde todas las pantallas. */
+  app.get('/admin/avisos', async () => {
+    const [esperando, requierenPersona, estado] = await Promise.all([
+      repos.messages.contarEsperandoRespuesta(),
+      repos.rutas.contarSolicitudes({ requiereHumano: true }),
+      repos.numberState.get(phoneNumberId()),
+    ]);
+    const avisos: Array<{ tipo: string; nivel: 'info' | 'warn' | 'bad'; texto: string; href: string; n?: number }> = [];
+    const configurado = settings.isConfigured();
+    const conectado = configurado && (wa.conectado?.() ?? true);
+    if (!configurado) avisos.push({ tipo: 'sin_configurar', nivel: 'bad', texto: 'WhatsApp sin conectar: no sale ni entra nada', href: '/setup' });
+    else if (!conectado) avisos.push({ tipo: 'desconectado', nivel: 'bad', texto: 'WhatsApp desconectado: vuelve a vincular el telefono', href: '/setup' });
+    if (estado.paused) avisos.push({ tipo: 'pausado', nivel: 'warn', texto: `Envios pausados${estado.pausedReason ? ': ' + estado.pausedReason : ''}`, href: '/panel#estado' });
+    const nivel = estado.nivel ?? 'verde';
+    if (nivel === 'rojo') avisos.push({ tipo: 'riesgo', nivel: 'bad', texto: 'El numero esta en rojo: todo pausado hasta que mejore', href: '/panel#salud' });
+    else if (nivel === 'naranja') avisos.push({ tipo: 'riesgo', nivel: 'warn', texto: 'El numero esta en naranja: solo sale lo imprescindible', href: '/panel#salud' });
+    else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El numero esta en amarillo: el marketing va mas lento', href: '/panel#salud' });
+    if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} conversacion${esperando === 1 ? '' : 'es'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
+    if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: '/rutas', n: requierenPersona });
+    return { total: avisos.length, avisos, generadoEn: new Date() };
+  });
+
+  // --- el inicio del panel: un vistazo a todo -----------------------------
+
+  /**
+   * Lo que se ve nada mas entrar: cifras de hoy, la semana, el semaforo del
+   * numero, lo que espera a una persona. Cada pieza sale de un repo que ya
+   * existe; aqui solo se juntan para que la pantalla haga una peticion.
+   */
+  app.get('/admin/resumen', async () => {
+    const ahora = new Date();
+    const inicioHoy = new Date(ahora);
+    inicioHoy.setHours(0, 0, 0, 0);
+    const hace7 = new Date(inicioHoy.getTime() - 6 * 24 * 60 * 60 * 1000);
+
+    const [hoy, entrantesHoy, actividad, esperando, sinLeer, estado, cifrasReparto, requierenPersona, lotes, campanas, contactos, usuarios, plantillas] =
+      await Promise.all([
+        repos.deliveries.resumenDesde(inicioHoy),
+        repos.messages.contarEntrantesDesde(inicioHoy),
+        repos.messages.actividadPorDia(hace7),
+        repos.messages.contarEsperandoRespuesta(),
+        repos.messages.unreadTotal(),
+        repos.numberState.get(phoneNumberId()),
+        repos.rutas.cifrasPorEstado(),
+        repos.rutas.contarSolicitudes({ requiereHumano: true }),
+        repos.rutas.listarLotes(20, 0),
+        repos.campaigns.list(),
+        repos.contacts.list({ limit: 1, offset: 0 }),
+        repos.usuarios.contar(),
+        repos.templates.list(),
+      ]);
+
+    // Siete dias seguidos, con ceros donde no hubo nada.
+    const semana: Array<{ dia: string; entrantes: number; salientes: number }> = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(hace7.getTime() + i * 24 * 60 * 60 * 1000);
+      const clave = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const fila = actividad.find((a) => a.dia === clave);
+      semana.push({ dia: clave, entrantes: fila?.entrantes ?? 0, salientes: fila?.salientes ?? 0 });
+    }
+
+    const politica = politicaVigente();
+    return {
+      generadoEn: ahora,
+      hoy: {
+        enviados: hoy.enviados,
+        entregados: hoy.entregados,
+        leidos: hoy.leidos,
+        fallidos: hoy.fallidos,
+        entrantes: entrantesHoy,
+        cupo: dailyCapFor(estado.warmupStartedOn, ahora, politica.warmup),
+        usados: await repos.counters.totalForDay(phoneNumberId(), ahora),
+      },
+      semana,
+      numero: {
+        conectado: settings.isConfigured() && (wa.conectado?.() ?? true),
+        configurado: settings.isConfigured(),
+        calidad: estado.quality,
+        pausado: estado.paused,
+        motivoPausa: estado.pausedReason,
+        nivel: estado.nivel ?? 'verde',
+        motivos: estado.motivos ?? [],
+        factor: deps.salud?.factor() ?? 1,
+      },
+      chats: { sinLeer, esperandoRespuesta: esperando },
+      reparto: {
+        cifras: cifrasReparto,
+        requierenPersona,
+        lotesEnMarcha: lotes.filter((l) => l.estado === 'enviando').length,
+        lotesRecientes: lotes.slice(0, 5).map((l) => ({ id: l.id, nombre: l.nombre, estado: l.estado, total: l.total, cifras: l.cifras, createdAt: l.createdAt })),
+      },
+      campanas: {
+        activas: campanas.filter((c) => c.status === 'running' || c.status === 'canary').length,
+        pausadas: campanas.filter((c) => c.status === 'paused').length,
+      },
+      contactos: contactos.total,
+      // Para la lista de "primeros pasos" del inicio: que esta hecho y que no.
+      primerosPasos: {
+        proveedor: providerOf(settings.current()),
+        conectado: settings.isConfigured() && (wa.conectado?.() ?? true),
+        usuarios,
+        plantillas: plantillas.length,
+        contactos: contactos.total,
+        lotes: lotes.length,
+      },
+    };
   });
 
   // --- salud del numero: lo primero que hay que mirar cada dia ----------
@@ -242,14 +415,104 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   app.get('/admin/templates', async () => repos.templates.list());
 
   /** El catalogo local con su lint y, si ya esta en Meta, su estado. */
+  /** Una plantilla del registro como la ve el linter y el push a Meta. */
+  const comoCatalogo = (t: Awaited<ReturnType<typeof repos.templates.list>>[number]): CatalogTemplate => ({
+    name: t.name,
+    language: t.language,
+    category: t.category,
+    body: t.body ?? '',
+    variables: t.variablesDoc?.length ? t.variablesDoc : Array.from({ length: t.variables }, (_, i) => `variable ${i + 1}`),
+    footer: t.footer ?? undefined,
+  });
+
   app.get('/admin/templates/catalog', async () => {
     const local = await repos.templates.list();
-    return CATALOG.map((template) => ({
+    const delCatalogo = CATALOG.map((template) => ({
       ...template,
+      propia: false,
       issues: lintTemplate(template),
       registry:
         local.find((t) => t.name === template.name && t.language === template.language) ?? null,
     }));
+    // Las propias, creadas desde el panel, se listan igual: con su lint y su estado.
+    const propias = local
+      .filter((t) => t.propia)
+      .map((t) => ({ ...comoCatalogo(t), propia: true, issues: lintTemplate(comoCatalogo(t)), registry: t }));
+    return [...delCatalogo, ...propias];
+  });
+
+  /**
+   * Crear o editar una plantilla propia desde el panel.
+   *
+   * Con la API oficial queda PENDING hasta que se suba y Meta la apruebe;
+   * con un cliente no oficial no hay a quien pedir permiso y queda APPROVED
+   * en el acto (se manda como texto con las variables sustituidas). Nunca
+   * se guarda con errores de lint: una plantilla rechazada es tiempo perdido.
+   */
+  const propiaSchema = z.object({
+    name: z
+      .string()
+      .trim()
+      .min(3)
+      .max(120)
+      .regex(/^[a-z0-9_]+$/, 'solo minusculas, numeros y guion bajo (asi lo exige Meta)'),
+    language: z.string().trim().min(2).max(10).default('es'),
+    category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).default('UTILITY'),
+    body: z.string().trim().min(10).max(1024),
+    /** Que significa cada {{n}}, en orden. */
+    variables: z.array(z.string().trim().min(1).max(80)).max(10).default([]),
+    footer: z.string().trim().max(60).optional(),
+  });
+
+  app.post('/admin/templates', async (request, reply) => {
+    const body = propiaSchema.parse(request.body ?? {});
+    const cuantas = countVariables(body.body);
+    if (body.variables.length !== cuantas) {
+      return reply.code(400).send({
+        error: `El cuerpo tiene ${cuantas} variable(s) y se describieron ${body.variables.length}: describe cada {{n}} en orden.`,
+      });
+    }
+    if (CATALOG.some((t) => t.name === body.name && t.language === body.language)) {
+      return reply.code(400).send({ error: 'Ese nombre es de una plantilla del catalogo: elige otro.' });
+    }
+    const existente = await repos.templates.get(body.name, body.language);
+    if (existente && !existente.propia) {
+      return reply.code(400).send({ error: 'Esa plantilla vino de Meta, no se edita desde aqui.' });
+    }
+    const catalogo: CatalogTemplate = {
+      name: body.name,
+      language: body.language,
+      category: body.category,
+      body: body.body,
+      variables: body.variables,
+      footer: body.footer,
+    };
+    const issues = lintTemplate(catalogo);
+    if (hasErrors(issues)) {
+      return reply.code(400).send({ error: 'La plantilla tiene errores que Meta rechazaria.', issues });
+    }
+    const esCloud = providerOf(settings.current()) === 'cloud';
+    await repos.templates.upsert({
+      name: body.name,
+      language: body.language,
+      category: body.category,
+      // Editar una plantilla ya aprobada por Meta la deja pendiente otra vez:
+      // lo aprobado fue el texto anterior.
+      status: esCloud ? 'PENDING' : 'APPROVED',
+      quality: existente?.quality ?? null,
+      variables: cuantas,
+      body: body.body,
+      propia: true,
+      variablesDoc: body.variables,
+      footer: body.footer ?? null,
+    });
+    return { ok: true, template: await repos.templates.get(body.name, body.language), issues, subirAMeta: esCloud };
+  });
+
+  app.delete<{ Params: { name: string; language: string } }>('/admin/templates/:name/:language', async (request, reply) => {
+    const borrada = await repos.templates.remove(request.params.name, request.params.language);
+    if (!borrada) return reply.code(400).send({ error: 'Solo se borran las plantillas propias, y esa no lo es (o no existe).' });
+    return { ok: true };
   });
 
   app.post('/admin/templates/sync', async () => {
@@ -259,9 +522,10 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   app.post('/admin/templates/push', async (request, reply) => {
     const body = z.object({ names: z.array(z.string()).optional() }).parse(request.body ?? {});
-    const selected = body.names?.length
-      ? CATALOG.filter((t) => body.names!.includes(t.name))
-      : CATALOG;
+    // Las propias se suben igual que las del catalogo.
+    const propias = (await repos.templates.list()).filter((t) => t.propia).map(comoCatalogo);
+    const todas = [...CATALOG, ...propias];
+    const selected = body.names?.length ? todas.filter((t) => body.names!.includes(t.name)) : todas;
     if (!selected.length) {
       return reply.code(400).send({ error: 'ninguna de esas plantillas esta en el catalogo' });
     }
@@ -272,62 +536,19 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // --- campanas: por goteo y con canario. Ver src/campanas/goteo.ts -----
   app.post('/admin/campaigns', async (request, reply) => {
     const body = campaignSchema.parse(request.body);
-
-    const template = await repos.templates.get(body.templateName, body.templateLanguage);
-    if (!template) {
-      return reply.code(400).send({ error: 'la plantilla no existe en el registro local' });
-    }
-    if (template.status !== 'APPROVED') {
-      return reply.code(400).send({ error: `la plantilla esta en estado ${template.status}` });
-    }
-
-    // Sin destinatarios explicitos se usa la lista con opt-in vigente. En
-    // ningun caso se envia a quien no lo tenga: el gate lo bloquearia igual,
-    // pero encolarlo solo ensucia las metricas.
-    const variablesPorPhone = new Map<string, string[]>();
-    const contactos: Array<{ phone: string; lastInboundAt: Date | null; optInAt: Date | null }> = [];
-    if (body.recipients?.length) {
-      for (const r of body.recipients) {
-        if (variablesPorPhone.has(r.phone)) continue;
-        variablesPorPhone.set(r.phone, r.variables);
-        const c = await repos.contacts.getByPhone(r.phone);
-        contactos.push({ phone: r.phone, lastInboundAt: c?.lastInboundAt ?? null, optInAt: c?.optInAt ?? null });
-      }
-    } else {
-      for (let offset = 0; ; offset += 500) {
-        const page = await repos.contacts.listOptedIn(500, offset);
-        if (!page.length) break;
-        for (const c of page) {
-          variablesPorPhone.set(c.phone, []);
-          contactos.push({ phone: c.phone, lastInboundAt: c.lastInboundAt, optInAt: c.optInAt });
-        }
-      }
-    }
-
-    const canario = body.canario ?? canarioPorDefecto(contactos.length);
-    const campaignId = await repos.campaigns.create({
+    const resultado = await crearCampana(repos, {
       name: body.name,
       templateName: body.templateName,
       templateLanguage: body.templateLanguage,
       category: body.category as TemplateCategory,
+      recipients: body.recipients,
       ritmoPorHora: body.ritmoPorHora ?? null,
-      canario,
+      canario: body.canario,
       canarioEsperaMin: body.canarioEsperaMin,
     });
-
-    const ordenados = ordenarPorCompromiso(contactos);
-    const enqueued = await repos.campaigns.agregarDestinatarios(
-      campaignId,
-      ordenados.map((c, i) => ({
-        phone: c.phone,
-        variables: variablesPorPhone.get(c.phone) ?? [],
-        orden: i,
-        canario: i < canario,
-      })),
-    );
-
-    await repos.campaigns.setStatus(campaignId, !enqueued ? 'empty' : canario > 0 ? 'canary' : 'running');
-    return { campaignId, enqueued, canario, ritmoPorHora: body.ritmoPorHora ?? null };
+    if (!resultado.ok) return reply.code(400).send({ error: resultado.error });
+    const { ok: _ok, ...resto } = resultado;
+    return resto;
   });
 
   /** Lista con conteo por estado de entrega y de destinatarios. */
@@ -399,6 +620,34 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     });
   });
 
+  /** El historial entero (con los mismos filtros) para Excel. */
+  app.get('/admin/deliveries.csv', async (request, reply) => {
+    const query = z
+      .object({
+        status: z.enum(['queued', 'sent', 'delivered', 'read', 'failed', 'blocked_by_gate']).optional(),
+        campaignId: z.string().optional(),
+        phone: z.string().optional(),
+      })
+      .parse(request.query ?? {});
+    const items = await repos.deliveries.listRecent({ ...query, phone: query.phone ? normalizePhone(query.phone) : undefined, limit: 5000, offset: 0 });
+    const csv = aCsvCon(
+      [
+        ['fecha', (d) => d.sentAt ?? d.queuedAt],
+        ['telefono', (d) => d.phone],
+        ['nombre', (d) => d.name],
+        ['tipo', (d) => d.kind],
+        ['plantilla', (d) => d.templateName],
+        ['categoria', (d) => d.category],
+        ['estado', (d) => d.status],
+        ['error', (d) => (d.errorCode ? `${d.errorCode} ${d.errorTitle ?? ''}`.trim() : '')],
+        ['campana', (d) => d.campaignName],
+        ['entregado', (d) => d.deliveredAt],
+      ],
+      items,
+    );
+    return reply.type('text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="historial-envios.csv"').send(csv);
+  });
+
   // --- ubicaciones recibidas --------------------------------------------
   app.get('/admin/locations', async (request) => {
     const query = pageSchema.extend({ phone: z.string().optional() }).parse(request.query ?? {});
@@ -426,7 +675,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         phone: contact.phone,
         kind: 'freeform',
         category: 'UTILITY',
-        text: `Sigue la entrega en vivo aqui:\n${session.viewUrl}\n\nEl enlace caduca el ${session.expiresAt.toLocaleString('es-MX')}.`,
+        text: `Sigue la entrega en vivo aqui:\n${session.viewUrl}\n\nEl enlace caduca el ${session.expiresAt.toLocaleString('es-PE')}.`,
       });
     }
 

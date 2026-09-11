@@ -206,6 +206,8 @@ export async function atenderRespuestaDeRuta(
       return { atendida: true, resultado: 'fuera_de_zona', solicitud: actualizada };
     }
 
+    // Se mira antes de actualizar: el doble en memoria muta el mismo objeto.
+    const estabaDerivado = solicitud.estado === 'derivado';
     const actualizada = await repos.rutas.actualizarSolicitud(solicitud.id, {
       estado: 'resuelto',
       lat: entrada.ubicacion.lat,
@@ -223,7 +225,9 @@ export async function atenderRespuestaDeRuta(
     await repos.rutas.registrarEvento(
       solicitud.id,
       'ubicacion',
-      `ubicación recibida (${entrada.ubicacion.fuente ?? 'whatsapp'})`,
+      `ubicación recibida (${entrada.ubicacion.fuente ?? 'whatsapp'})${
+        estabaDerivado ? ' después de pasar al repartidor: ya no hace falta llamar' : ''
+      }`,
       { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng },
     );
     await reportar(deps, actualizada, 'ubicacion');
@@ -239,6 +243,32 @@ export async function atenderRespuestaDeRuta(
 
   // --- contesto otra cosa -----------------------------------------------
   const texto = (entrada.texto ?? '').trim();
+
+  // Todavia no se le habia escrito: lo que diga no es una respuesta a la
+  // solicitud (escribio por otra cosa). Se apunta y el primer mensaje sale
+  // igual cuando le toque; sin esto, el primer mensaje que recibia era
+  // "gracias por responder, nos falta el punto", que no tiene sentido.
+  if (solicitud.estado === 'pendiente') {
+    await repos.rutas.registrarEvento(
+      solicitud.id,
+      'respuesta',
+      texto ? `escribió antes de que le pidiéramos la ubicación: "${texto.slice(0, 200)}"` : 'escribió (adjunto) antes de que le pidiéramos la ubicación',
+    );
+    return { atendida: false };
+  }
+
+  // Ya paso al repartidor: lo que conteste se apunta para quien lo llame,
+  // pero el bot no vuelve a insistir. (Una ubicacion si lo resuelve: eso va
+  // arriba y llega aunque el caso este derivado.)
+  if (solicitud.estado === 'derivado') {
+    await repos.rutas.registrarEvento(
+      solicitud.id,
+      'respuesta',
+      texto ? `contestó después de pasar al repartidor: "${texto.slice(0, 200)}"` : 'contestó (adjunto) después de pasar al repartidor',
+    );
+    await repos.rutas.actualizarSolicitud(solicitud.id, { requiereHumano: true });
+    return { atendida: true, resultado: 'sin_ubicacion', solicitud };
+  }
 
   if (texto && pareceNumeroEquivocado(texto)) {
     const actualizada = await marcarIncidencia(

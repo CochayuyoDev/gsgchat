@@ -206,7 +206,7 @@ function stop() {
 }
 
 function initMap() {
-  MapAdapter.init('map', 19.4326, -99.1332, 16);
+  MapAdapter.init('map', -12.0464, -77.0428, 16);
   if (!navigator.geolocation) { onError({ message: 'el navegador no lo soporta' }); return; }
   connect();
   watchId = navigator.geolocation.watchPosition(onPosition, onError, {
@@ -281,7 +281,7 @@ function connect() {
 }
 
 function initMap() {
-  MapAdapter.init('map', 19.4326, -99.1332, 12);
+  MapAdapter.init('map', -12.0464, -77.0428, 12);
   document.getElementById('title').textContent = LABEL || 'Siguiendo ubicacion';
   connect();
   setInterval(tick, 5000);

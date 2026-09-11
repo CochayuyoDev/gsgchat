@@ -24,6 +24,8 @@ import { extractLocation } from '../geo/extract.js';
 import { leerLote, prepararFilas, type FilaLote } from '../rutas/lote.js';
 import { PLANES, revisarTelefono } from '../rutas/telefono.js';
 import { enHorario, type OpcionesMotor } from '../rutas/motor.js';
+import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, PASOS } from '../rutas/ajustes.js';
+import { PLANTILLAS } from '../rutas/mensajes.js';
 import type { Monitor } from '../salud/monitor.js';
 
 export interface RutasRoutesDeps {
@@ -33,6 +35,8 @@ export interface RutasRoutesDeps {
   opciones: OpcionesMotor;
   /** El monitor de salud: la pantalla dice si el numero esta frenado y por que. */
   salud?: Monitor;
+  /** A quien se avisa ahora mismo (se cambia desde la pantalla). */
+  supervisor?: () => string;
 }
 
 const filaSchema = z.object({
@@ -147,6 +151,8 @@ export async function registerRutasRoutes(
     ]);
 
     const pendientesDePersona = await repos.rutas.contarSolicitudes({ requiereHumano: true });
+    // Lo que manda de verdad: la configuracion con los ajustes guardados encima.
+    const vigente = aplicarAjustes(opciones, await repos.rutas.ajustes.get(ajustesPorDefecto(opciones)));
 
     return {
       lotes,
@@ -154,14 +160,14 @@ export async function registerRutasRoutes(
       incidencias,
       gsg: { conectado: gsg.conectado(), descripcion: gsg.descripcion(), cola },
       motor: {
-        pausa: [opciones.pausaMinSegundos, opciones.pausaMaxSegundos],
-        espera: opciones.esperaRespuestaMinutos,
-        maxIntentos: opciones.maxIntentos,
-        horario: [opciones.horaInicio, opciones.horaFin],
-        timezone: opciones.timezone,
+        pausa: [vigente.pausaMinSegundos, vigente.pausaMaxSegundos],
+        espera: vigente.esperaRespuestaMinutos,
+        maxIntentos: vigente.maxIntentos,
+        horario: [vigente.horaInicio, vigente.horaFin],
+        timezone: vigente.timezone,
         // Si ahora mismo puede salir un mensaje. Sin esto, un lote "en
         // marcha" a las once de la noche parece averiado.
-        enHorario: enHorario(new Date(), opciones),
+        enHorario: enHorario(new Date(), vigente),
         trabajando: lotes.some((l) => l.estado === 'enviando'),
         // Lo que dice el monitor de salud: si esta frenado, cuanto y por que.
         salud: deps.salud ? await deps.salud.resumen() : null,
@@ -169,7 +175,7 @@ export async function registerRutasRoutes(
       alertas: {
         requierenPersona: pendientesDePersona,
         // A quien se avisa por WhatsApp, si es que se avisa a alguien.
-        coordinador: Boolean(config.RUTAS_SUPERVISOR),
+        coordinador: Boolean(deps.supervisor ? deps.supervisor() : config.RUTAS_SUPERVISOR),
         resumenCadaMin: config.RUTAS_RESUMEN_CADA_MIN,
       },
       // El catalogo de incidencias viaja con el resumen: asi la pantalla
@@ -179,6 +185,57 @@ export async function registerRutasRoutes(
   });
 
   /** Lee la tabla y dice que entendio, sin guardar nada. */
+  // --- ajustes: lo que se cambia desde la pantalla ------------------------
+
+  /** Los ajustes vigentes, los de la configuracion y las plantillas entre las que elegir. */
+  app.get('/admin/rutas/ajustes', async () => {
+    const porDefecto = ajustesPorDefecto(opciones);
+    const ajustes = await repos.rutas.ajustes.get(porDefecto);
+    const plantillas = (await repos.templates.list())
+      .filter((t) => t.category === 'UTILITY' || t.propia)
+      .map((t) => ({
+        name: t.name,
+        language: t.language,
+        category: t.category,
+        status: t.status,
+        variables: t.variables,
+        propia: t.propia ?? false,
+        body: t.body,
+        pausadaHasta: t.pausadaHasta ?? null,
+      }));
+    return {
+      ajustes,
+      porDefecto,
+      catalogo: Object.fromEntries(PASOS.map((p) => [p, PLANTILLAS[p].variantes])),
+      plantillas,
+      // Como se rellenan las plantillas propias: en orden, y solo las que tenga.
+      variablesPropias: ['{{1}} nombre del cliente', '{{2}} pedido o guia', '{{3}} nombre del negocio'],
+      placeholders: ['{nombre}', '{pedido}', '{negocio}', '{direccion}', '{distrito}', '{como} (= "con el botón de aquí abajo" o "desde el clip 📎 → Ubicación...", según haya botón)'],
+    };
+  });
+
+  app.post('/admin/rutas/ajustes', async (request, reply) => {
+    const body = ajustesSchema.partial().parse(request.body ?? {});
+    // Una plantilla elegida tiene que existir en el registro: si no, el
+    // motor se pasaria el dia mandando contra un nombre que Meta no conoce.
+    if (body.plantillas) {
+      const registro = new Set((await repos.templates.list()).map((t) => t.name));
+      for (const paso of PASOS) {
+        const falta = (body.plantillas[paso] ?? []).find((n) => !registro.has(n));
+        if (falta) return reply.code(400).send({ error: `La plantilla "${falta}" no esta en el registro.` });
+      }
+    }
+    const porDefecto = ajustesPorDefecto(opciones);
+    const ajustes = await repos.rutas.ajustes.set(body, porDefecto);
+    return { ok: true, ajustes, vigente: aplicarAjustes(opciones, ajustes) };
+  });
+
+  /** Volver a lo que diga la configuracion. */
+  app.delete('/admin/rutas/ajustes', async () => {
+    await repos.rutas.ajustes.reset();
+    return { ok: true, ajustes: ajustesPorDefecto(opciones) };
+  });
+
   app.post('/admin/rutas/previsualizar', async (request) => {
     const body = z.object({ texto: z.string().max(2_000_000) }).parse(request.body ?? {});
     const lectura = leerLote(body.texto);
@@ -265,6 +322,21 @@ export async function registerRutasRoutes(
           'incidencia',
           'está dado de baja: la entrega se coordina por teléfono',
         );
+        continue;
+      }
+
+      // Si ya se le esta pidiendo la ubicacion en otro lote que no termino,
+      // no se abre una segunda conversacion por lo mismo: se aparta para
+      // que una persona decida (reintentar desde la ficha la vuelve a la cola).
+      const abierta = await repos.rutas.abiertaPorTelefono(solicitud.phone, lote.id);
+      if (abierta && ['pendiente', 'enviado', 'respondio', 'supervision'].includes(abierta.estado)) {
+        await repos.rutas.actualizarSolicitud(solicitud.id, {
+          estado: 'incidencia',
+          incidencia: 'ya_en_curso',
+          incidenciaDetalle: `ya tiene una solicitud abierta (${abierta.referencia ? `pedido ${abierta.referencia}` : 'sin pedido'}) en otro lote`,
+          requiereHumano: true,
+        });
+        await repos.rutas.registrarEvento(solicitud.id, 'incidencia', 'ya se le está pidiendo la ubicación en otro lote: no se le escribe dos veces');
         continue;
       }
 

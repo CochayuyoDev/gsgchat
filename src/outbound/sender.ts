@@ -32,6 +32,15 @@ export interface SendJob {
   campaignId?: string | null;
   /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
   manual?: boolean;
+  /**
+   * Limites por contacto propios de quien manda, por encima de la politica.
+   *
+   * El motor de rutas lleva su propia cadencia (la espera entre mensajes y
+   * los intentos por cliente los fija quien opera, desde la pantalla): si
+   * ademas se le aplicara la separacion general de 10 min y el techo de 3 al
+   * dia, "cada 5 minutos, 4 mensajes" seria imposible sin que nadie lo dijera.
+   */
+  limitesContacto?: { separacionMs?: number; maxPorDia?: number };
 
   templateName?: string;
   templateLanguage?: string;
@@ -84,6 +93,8 @@ export interface SenderDeps {
    */
   salud?: Monitor;
   politica?: () => Politica;
+  /** Modo prueba (SOLO_NUMEROS): a quien no este aqui no se le escribe. Vacio = a todos. */
+  soloNumeros?: string[] | (() => string[]);
 }
 
 export interface Sender {
@@ -100,14 +111,48 @@ export function createSender(deps: SenderDeps): Sender {
       ? deps.serviceWindowApplies()
       : deps.serviceWindowApplies !== false;
 
+  const permitidos = () => (typeof deps.soloNumeros === 'function' ? deps.soloNumeros() : deps.soloNumeros) ?? [];
+
   return {
     async send(job) {
       const at = now();
       const contact = await repos.contacts.upsertFromInbound(job.phone);
 
+      // Sin socket no hay nada que intentar: se devuelve "espera" sin dejar
+      // una entrega fallida que el monitor contaria como rechazo de WhatsApp
+      // y que el motor de rutas contaria como intento gastado.
+      if (wa.conectado?.() === false) {
+        return {
+          ok: false,
+          blocked: true,
+          code: 'sin_conexion',
+          reason: 'WhatsApp no esta conectado: se reintenta en cuanto vuelva la sesion',
+          retryAfterMs: 2 * 60_000,
+          deliveryId: -1,
+        };
+      }
+
+      // La lista blanca va por delante de todo, manual incluido: en modo
+      // prueba no sale nada a nadie que no este en ella, y queda anotado.
+      const lista = permitidos();
+      if (lista.length && !lista.includes(contact.phone)) {
+        const deliveryId = await repos.deliveries.create({
+          contactId: contact.id,
+          campaignId: job.campaignId ?? null,
+          kind: job.kind,
+          templateName: job.templateName ?? null,
+          category: job.category,
+          variables: job.variables,
+          businessInitiated: false,
+        });
+        const reason = `modo prueba: a ${contact.phone} no se le escribe porque no esta en la lista de numeros permitidos`;
+        await repos.deliveries.markBlocked(deliveryId, `allowlist: ${reason}`);
+        return { ok: false, blocked: true, code: 'allowlist', reason, deliveryId };
+      }
+
       const template =
         job.kind === 'template' && job.templateName
-          ? await repos.templates.get(job.templateName, job.templateLanguage ?? 'es_MX')
+          ? await repos.templates.get(job.templateName, job.templateLanguage ?? 'es')
           : null;
 
       // Iniciado por la empresa: con plantilla o fuera de la ventana. Es lo
@@ -157,9 +202,9 @@ export function createSender(deps: SenderDeps): Sender {
           sinMarketing: deps.salud?.sinMarketing(),
           fatigaEnvios: politica?.fatigaEnvios,
           sentToContactToday,
-          maxPorContactoDia: politica?.maxPorContactoDia,
+          maxPorContactoDia: job.limitesContacto?.maxPorDia ?? politica?.maxPorContactoDia,
           lastSentToContactAt,
-          separacionContactoMs: politica?.separacionContactoMs,
+          separacionContactoMs: job.limitesContacto?.separacionMs ?? politica?.separacionContactoMs,
           ritmo,
         },
       );

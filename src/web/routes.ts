@@ -23,11 +23,14 @@ import { panelPage } from './pages.js';
 import { connectPage } from './connect-page.js';
 import { chatPage } from './chat-page.js';
 import { rutasPage } from './rutas-page.js';
+import { manualPage, soportePage } from './ayuda-pages.js';
+import { createRequire } from 'node:module';
 import { registerConnectRoutes } from './connect-routes.js';
 import type { StokyClient } from '../stoky/client.js';
 import { registerDevRoutes } from './dev-routes.js';
 import { registerLocalRoutes } from './local-routes.js';
 import type { Monitor } from '../salud/monitor.js';
+import type { ServicioAjustes } from '../ajustes/generales.js';
 import { registerWahaRoutes } from './waha-routes.js';
 
 export interface WebDeps {
@@ -42,6 +45,8 @@ export interface WebDeps {
   salud?: Monitor;
   /** Reabrir la sesion local al arrancar si hay vinculacion guardada. Solo arranques reales. */
   autoConectarLocal?: boolean;
+  /** Los ajustes generales editables desde la pantalla. */
+  ajustes?: ServicioAjustes;
 }
 
 /**
@@ -81,22 +86,28 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
       : `${publicBase}/webhooks/whatsapp`;
 
   const html = (body: string) => ({ body, type: 'text/html; charset=utf-8' });
+  const negocio = () => deps.ajustes?.nombreNegocio() ?? config.businessName;
 
-  // Con ADMIN_TOKEN_AUTOFILL las pantallas traen el token puesto y no lo piden.
-  // Ver el porque en config.ts; en un servidor accesible desde fuera va vacio.
-  const tokenParaLaPagina = () => (config.ADMIN_TOKEN_AUTOFILL ? config.ADMIN_TOKEN : '');
-
-  // Conectado, lo primero que se quiere ver son los chats.
-  app.get('/', async (_request, reply) => reply.redirect(settings.isConfigured() ? '/chat' : '/setup'));
+  // El icono de la pestaña, para todas las paginas: sin el, cada visita deja
+  // un 404 en la consola del navegador.
+  app.get('/favicon.ico', async (_request, reply) => {
+    return reply
+      .type('image/svg+xml')
+      .header('cache-control', 'public, max-age=86400')
+      .send(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#128c7e"/>` +
+          `<text x="16" y="22" text-anchor="middle" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="#fff">W</text></svg>`,
+      );
+  });
 
   app.get('/setup', async (_request, reply) => {
-    const page = html(connectPage(FIELD_LABELS, tokenParaLaPagina()));
+    const page = html(connectPage({ labels: FIELD_LABELS, nombreNegocio: negocio(), demo: config.DEMO_MODE }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
   app.get('/chat', async (_request, reply) => {
     const page = html(
-      chatPage(settings.isConfigured(), tokenParaLaPagina(), providerOf(settings.current()), config.DEMO_MODE),
+      chatPage({ configured: settings.isConfigured(), proveedor: providerOf(settings.current()), demo: config.DEMO_MODE, nombreNegocio: negocio() }),
     );
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
@@ -111,17 +122,29 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     settings,
     catalogo,
     salud: deps.salud,
+    ajustes: deps.ajustes,
     autoConectar: deps.autoConectarLocal,
   });
   await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo });
 
   app.get('/rutas', async (_request, reply) => {
-    const page = html(rutasPage(settings.isConfigured(), tokenParaLaPagina(), config.DEMO_MODE));
+    const page = html(rutasPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
   app.get('/panel', async (_request, reply) => {
-    const page = html(panelPage(settings.isConfigured(), tokenParaLaPagina()));
+    const page = html(panelPage({ configured: settings.isConfigured(), nombreNegocio: negocio(), demo: config.DEMO_MODE }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  // Las dos entradas de arriba del menu: que hace cada cosa, y que mirar si falla.
+  app.get('/manual', async (_request, reply) => {
+    const page = html(manualPage({ nombreNegocio: negocio(), demo: config.DEMO_MODE }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  app.get('/soporte', async (_request, reply) => {
+    const page = html(soportePage({ nombreNegocio: negocio(), demo: config.DEMO_MODE, version: versionDelPaquete() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
@@ -284,4 +307,15 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     });
     return { ...outcome, template: template.name, syncError };
   });
+}
+
+/** La version del package.json, para el diagnostico de soporte. */
+function versionDelPaquete(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require('../../package.json') as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
 }

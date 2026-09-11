@@ -18,8 +18,7 @@
  * El JS va en String.raw y con var, como el resto de paginas.
  */
 
-import { seedTokenJs } from './pages.js';
-import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
+import { appShell } from './shell.js';
 
 const CSS = `
   :root {
@@ -35,19 +34,8 @@ const CSS = `
     }
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  }
-  a { color: var(--accent); }
-  header {
-    background: var(--panel); border-bottom: 1px solid var(--line);
-    padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    position: sticky; top: 0; z-index: 5;
-  }
-  header h1 { font-size: 18px; margin: 0; flex: 1; }
-  header .link { font-size: 13.5px; text-decoration: none; }
-  .wrap { padding: 18px 20px 60px; max-width: 1500px; margin: 0 auto; }
+  .wrap { color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 1500px; }
+  .wrap a { color: var(--accent); }
   .demo {
     background: #d97706; color: #fff; padding: 9px 14px; font-size: 13.5px;
     text-align: center; line-height: 1.35;
@@ -173,10 +161,16 @@ const CSS = `
   .resumen-carga { font-size: 13.5px; }
   .resumen-carga b { font-size: 16px; }
   .resumen-carga .linea { padding: 4px 0; border-bottom: 1px dashed var(--line); }
-${DIALOGO_CSS}
 `;
 
-export function rutasPage(configured: boolean, adminToken = '', demo = false): string {
+export interface RutasOpts {
+  configured: boolean;
+  demo?: boolean;
+  nombreNegocio: string;
+}
+
+export function rutasPage(opts: RutasOpts): string {
+  const { configured, demo = false } = opts;
   /** Ver el mismo aviso en `chat-page.ts`: aqui no sale ningun mensaje. */
   const bandaDemo = demo
     ? `<div class="demo">Modo demostración: no se envía nada a ningún cliente.
@@ -188,22 +182,7 @@ export function rutasPage(configured: boolean, adminToken = '', demo = false): s
     : `<div class="aviso">Todavía no conectaste tu WhatsApp: puedes cargar la lista y revisarla, pero no saldrá ningún mensaje.
          <a class="link" href="/setup">Conectar ahora</a></div>`;
 
-  return `<!doctype html>
-<html lang="es"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ubicaciones - wa-locator</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📍</text></svg>">
-<style>${CSS}</style>
-</head><body>
-
-${bandaDemo}
-<header>
-  <h1>Ubicaciones para reparto</h1>
-  <a class="link" href="/chat">Chat</a>
-  <a class="link" href="/panel">Panel</a>
-</header>
-
+  const contenido = `
 <div class="wrap">
   ${aviso}
   <div id="alerta" class="aviso hidden"></div>
@@ -215,7 +194,35 @@ ${bandaDemo}
     <button class="sm" id="pausar">Pausar</button>
     <span class="sep"></span>
     <span class="dato" id="ritmo"></span>
+    <button class="sm" id="abrir-ajustes">Ajustes</button>
     <button class="sm" id="nuevo">Cargar lista nueva</button>
+  </div>
+
+  <!-- Ajustes del reparto: pausas, espera, intentos, horario y que se dice en cada paso -->
+  <div class="caja hidden" id="ajustes" style="margin-bottom:14px">
+    <h2>Ajustes del reparto <span class="sep"></span>
+      <button class="sm" id="cerrar-ajustes">Cerrar</button>
+    </h2>
+    <div class="cuerpo">
+      <p class="muted" style="margin-top:0">
+        Lo que se guarde aquí manda sobre la configuración del servidor y se aplica en el siguiente envío,
+        sin reiniciar. Por encima de todo esto está el marcapasos del número (Salud del número → Riesgo y ritmo, en el menú).
+      </p>
+      <div class="fila" style="flex-wrap:wrap;gap:10px">
+        <div class="campo" style="flex:1;min-width:140px"><label for="aj-pausa-min">Pausa mínima (s)</label><input id="aj-pausa-min" type="number" min="1"></div>
+        <div class="campo" style="flex:1;min-width:140px"><label for="aj-pausa-max">Pausa máxima (s)</label><input id="aj-pausa-max" type="number" min="1"></div>
+        <div class="campo" style="flex:1;min-width:140px"><label for="aj-espera">Espera antes de insistir (min)</label><input id="aj-espera" type="number" min="1"></div>
+        <div class="campo" style="flex:1;min-width:140px"><label for="aj-intentos">Mensajes por cliente</label><input id="aj-intentos" type="number" min="1" max="10"></div>
+        <div class="campo" style="flex:1;min-width:120px"><label for="aj-hora-inicio">Desde (hora)</label><input id="aj-hora-inicio" type="number" min="0" max="23"></div>
+        <div class="campo" style="flex:1;min-width:120px"><label for="aj-hora-fin">Hasta (hora)</label><input id="aj-hora-fin" type="number" min="1" max="24"></div>
+      </div>
+      <div id="aj-pasos"></div>
+      <div class="fila" style="margin-top:10px">
+        <button class="primary" id="aj-guardar">Guardar ajustes</button>
+        <button id="aj-reset">Volver a la configuración</button>
+        <span class="dato" id="aj-estado"></span>
+      </div>
+    </div>
   </div>
 
   <!-- Cargar un lote: se abre aqui mismo, sin dialogos que bloqueen -->
@@ -292,27 +299,21 @@ ${bandaDemo}
     </div>
   </div>
 </div>
+`;
 
-<script>
-${seedTokenJs(adminToken)}${DIALOGO_JS}${String.raw`
-/* La clave se pide con el cuadro propio; ver dialogo.ts. */
-function token() {
-  return sessionStorage.getItem('adminToken') || '';
-}
+  const script = String.raw`
+/* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
 async function api(path, options) {
   options = options || {};
-  var clave = await pedirToken();
-  var res = await fetch(path, {
+    var res = await fetch(path, {
     method: options.method || 'GET',
     cache: 'no-store',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + clave },
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   var data = await res.json().catch(function () { return {}; });
-  if (res.status === 401) {
-    sessionStorage.removeItem('adminToken');
-    throw new Error('La clave de administracion no es correcta: vuelve a escribirla.');
-  }
+  if (res.status === 401) { irAlLogin(); throw new Error('Tu sesión terminó: vuelve a entrar.'); }
   if (!res.ok) throw new Error(data.error || errorHttp(res.status));
   return data;
 }
@@ -727,6 +728,107 @@ document.getElementById('nuevo').onclick = function () {
 };
 document.getElementById('cerrar-carga').onclick = function () { ver('carga', false); };
 
+// ---- ajustes del reparto ----------------------------------------------
+var PASOS_AJ = [
+  ['solicitud', 'Primer mensaje (solicitud)'],
+  ['recordatorio', 'Recordatorio (no contestó)'],
+  ['insistencia', 'Insistencia (contestó sin ubicación)']
+];
+var ajustesCache = null;
+function pintarAjustes(d) {
+  ajustesCache = d;
+  var a = d.ajustes;
+  document.getElementById('aj-pausa-min').value = a.pausaMinSegundos;
+  document.getElementById('aj-pausa-max').value = a.pausaMaxSegundos;
+  document.getElementById('aj-espera').value = a.esperaRespuestaMinutos;
+  document.getElementById('aj-intentos').value = a.maxIntentos;
+  document.getElementById('aj-hora-inicio').value = a.horaInicio;
+  document.getElementById('aj-hora-fin').value = a.horaFin;
+  var html = '';
+  PASOS_AJ.forEach(function (p) {
+    var paso = p[0];
+    var elegidas = a.plantillas[paso] || [];
+    var catalogo = d.catalogo[paso] || [];
+    // Una linea por nombre: la misma plantilla en dos idiomas (es, es_MX) es
+    // una sola opcion, y el idioma se ensena al lado.
+    var porNombre = {};
+    d.plantillas.forEach(function (t) {
+      if (!porNombre[t.name]) porNombre[t.name] = { name: t.name, status: t.status, propia: t.propia, variables: t.variables, idiomas: [] };
+      porNombre[t.name].idiomas.push(t.language);
+    });
+    var opciones = Object.keys(porNombre).sort().map(function (n) {
+      var t = porNombre[n];
+      var marcada = elegidas.length ? elegidas.indexOf(t.name) >= 0 : catalogo.indexOf(t.name) >= 0;
+      var etiqueta = t.name + ' (' + t.status + (t.propia ? ', propia' : '') + ', ' + t.variables + ' var' + (t.idiomas.length > 1 ? ', ' + t.idiomas.join('/') : '') + ')';
+      return '<label class="dato" style="display:flex;gap:6px;align-items:center;margin:2px 0"><input type="checkbox" data-paso="' + paso + '" value="' + esc(t.name) + '"' + (marcada ? ' checked' : '') + ' style="width:auto"> ' + esc(etiqueta) + '</label>';
+    }).join('');
+    html += '<div class="caja" style="margin-top:10px"><h2>' + esc(p[1]) + '</h2><div class="cuerpo">' +
+      '<p class="muted" style="margin-top:0"><b>Con la API de Meta</b>: plantillas aprobadas entre las que el motor alterna (deja fuera las pausadas). ' +
+      'En las propias, ' + esc(d.variablesPropias.join(', ')) + '.</p>' +
+      '<div style="columns:2;column-gap:16px">' + opciones + '</div>' +
+      '<p class="muted"><b>Texto libre</b> (cliente no oficial o dentro de la ventana de 24 h): una redacción por línea; el sistema las alterna. ' +
+      'Admiten ' + esc(d.placeholders.join(', ')) + '. Vacío = las redacciones de siempre.</p>' +
+      '<textarea data-textos="' + paso + '" rows="3" placeholder="Hola {nombre}, le escribimos de {negocio} por {pedido}. Necesitamos su ubicación: puede enviarla con el botón de abajo.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
+      '</div></div>';
+  });
+  document.getElementById('aj-pasos').innerHTML = html;
+}
+async function cargarAjustes() {
+  try { pintarAjustes(await api('/admin/rutas/ajustes')); }
+  catch (e) { document.getElementById('aj-estado').textContent = e.message; }
+}
+/* La caja de ajustes y el ancla #ajustes van de la mano: asi el menu marca
+   "Ajustes del reparto" mientras esta abierta y vuelve a "Ubicaciones" al cerrarla. */
+function sincronizarAjustes(abierta) {
+  if (abierta && location.hash !== '#ajustes') history.replaceState(null, '', '#ajustes');
+  if (!abierta && location.hash === '#ajustes') history.replaceState(null, '', location.pathname);
+  if (window.shellMarcarActivo) shellMarcarActivo();
+  if (window.shellTitulo) shellTitulo(abierta ? 'Ajustes del reparto' : 'Ubicaciones para reparto', abierta ? 'Horario, espera, intentos, textos y plantillas' : 'Pedir la ubicación a cada cliente del día');
+}
+document.getElementById('abrir-ajustes').onclick = async function () {
+  ver('ajustes', true);
+  ver('carga', false);
+  sincronizarAjustes(true);
+  await cargarAjustes();
+};
+document.getElementById('cerrar-ajustes').onclick = function () { ver('ajustes', false); sincronizarAjustes(false); };
+document.getElementById('aj-guardar').onclick = async function () {
+  var estado = document.getElementById('aj-estado');
+  try {
+    var plantillas = {}, textos = {};
+    PASOS_AJ.forEach(function (p) {
+      var paso = p[0];
+      var marcadas = Array.prototype.slice.call(document.querySelectorAll('input[data-paso="' + paso + '"]:checked')).map(function (i) { return i.value; });
+      // Si lo marcado es exactamente el catalogo, se guarda vacio: "las de siempre".
+      var catalogo = (ajustesCache && ajustesCache.catalogo[paso]) || [];
+      var esCatalogo = marcadas.length === catalogo.length && marcadas.every(function (n) { return catalogo.indexOf(n) >= 0; });
+      plantillas[paso] = esCatalogo ? [] : marcadas;
+      textos[paso] = document.querySelector('textarea[data-textos="' + paso + '"]').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    });
+    var r = await api('/admin/rutas/ajustes', { method: 'POST', body: {
+      pausaMinSegundos: Number(document.getElementById('aj-pausa-min').value),
+      pausaMaxSegundos: Number(document.getElementById('aj-pausa-max').value),
+      esperaRespuestaMinutos: Number(document.getElementById('aj-espera').value),
+      maxIntentos: Number(document.getElementById('aj-intentos').value),
+      horaInicio: Number(document.getElementById('aj-hora-inicio').value),
+      horaFin: Number(document.getElementById('aj-hora-fin').value),
+      plantillas: plantillas,
+      textos: textos
+    }});
+    estado.textContent = 'Guardado. Se aplica en el siguiente envío.';
+    toast('Ajustes guardados: ' + r.vigente.pausaMinSegundos + '-' + r.vigente.pausaMaxSegundos + ' s, espera ' + r.vigente.esperaRespuestaMinutos + ' min, ' + r.vigente.maxIntentos + ' intentos, ' + r.vigente.horaInicio + ':00-' + r.vigente.horaFin + ':00.');
+    refrescar();
+  } catch (e) { estado.textContent = e.message; }
+};
+document.getElementById('aj-reset').onclick = async function () {
+  try {
+    await api('/admin/rutas/ajustes', { method: 'DELETE' });
+    await cargarAjustes();
+    document.getElementById('aj-estado').textContent = 'Vuelto a la configuración del servidor.';
+    refrescar();
+  } catch (e) { document.getElementById('aj-estado').textContent = e.message; }
+};
+
 document.getElementById('revisar').onclick = async function () {
   var texto = document.getElementById('pegado').value;
   if (!texto.trim()) { toast('Pega la lista primero.'); return; }
@@ -816,7 +918,7 @@ document.getElementById('csv').onclick = function () {
 /* La descarga va por fetch para que el token viaje en la cabecera. */
 async function descargar(url, nombre) {
   try {
-    var res = await fetch(url, { headers: { authorization: 'Bearer ' + (await pedirToken()) } });
+    var res = await fetch(url, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('No se pudo descargar el archivo.');
     var blob = await res.blob();
     var enlace = document.createElement('a');
@@ -882,8 +984,24 @@ setInterval(function () {
   refrescar();
 }, 10000);
 
+/* Llegar con #ajustes (desde el menu) abre la caja; quitar el ancla la cierra. */
+function abrirSegunAncla() {
+  if (location.hash === '#ajustes') document.getElementById('abrir-ajustes').click();
+  else { ver('ajustes', false); sincronizarAjustes(false); }
+}
+window.addEventListener('hashchange', abrirSegunAncla);
+abrirSegunAncla();
 refrescar();
-`}
-</script>
-</body></html>`;
+`;
+
+  return appShell({
+    titulo: 'Ubicaciones para reparto',
+    subtitulo: 'Pedir la ubicación a cada cliente del día',
+    contenido,
+    script,
+    css: CSS,
+    nombreNegocio: opts.nombreNegocio,
+    demo,
+    icono: '📍',
+  });
 }

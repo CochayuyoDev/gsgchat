@@ -192,7 +192,7 @@ describe('entregas y campanas sobre Postgres', () => {
     const campaignId = await repos.campaigns.create({
       name: 'Marzo',
       templateName: 'recordatorio_cita',
-      templateLanguage: 'es_MX',
+      templateLanguage: 'es',
       category: 'UTILITY',
     });
 
@@ -553,7 +553,6 @@ describe('credenciales sobre Postgres', () => {
     const config = loadConfig({
       PUBLIC_BASE_URL: 'http://localhost:3000',
       DATABASE_URL: 'postgres://x/y',
-      ADMIN_TOKEN: 'admin-token-largo-1234',
       TRACKING_SECRET: 'x'.repeat(40),
     } as NodeJS.ProcessEnv);
 

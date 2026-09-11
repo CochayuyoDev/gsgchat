@@ -46,7 +46,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.exec(
-    'delete from salud_eventos; delete from campaign_recipients; delete from deliveries; delete from campaigns; delete from messages; delete from contacts; delete from templates; delete from number_state;',
+    'delete from salud_eventos; delete from campaign_recipients; delete from deliveries; delete from campaigns; delete from messages; delete from contacts; delete from templates; delete from number_state; delete from settings;',
   );
 });
 
@@ -120,6 +120,36 @@ describe('ventanas de entregas', () => {
     expect(await repos.deliveries.contarPlantillaDesde('a', new Date(Date.now() - 3 * HORA))).toBe(1);
     const ultimoIniciado = await repos.deliveries.ultimoIniciadoAt();
     expect(Math.abs(ultimoIniciado!.getTime() - Date.now())).toBeLessThan(5000);
+  });
+});
+
+describe('acuses que no retroceden', () => {
+  it('un "sent" tardio no pisa un "read" ni mueve sent_at; un "failed" si manda', async () => {
+    const c = await repos.contacts.upsertFromInbound('51900000080');
+    const id = await repos.deliveries.create({ contactId: c.id, kind: 'freeform', category: 'UTILITY', businessInitiated: true });
+    await repos.deliveries.markSent(id, 'wamid.80');
+    const hace2h = new Date(Date.now() - 2 * HORA);
+    await pool.query('update deliveries set sent_at = $2 where id = $1', [id, hace2h]);
+    await repos.messages.add({ contactId: c.id, direction: 'out', wamid: 'wamid.80', kind: 'text', body: 'x', status: 'sent' });
+
+    await repos.deliveries.updateByWamid('wamid.80', 'read');
+    await repos.messages.setStatusByWamid('wamid.80', 'read');
+    // El acuse "sent" reenviado al reconectar:
+    await repos.deliveries.updateByWamid('wamid.80', 'sent');
+    await repos.messages.setStatusByWamid('wamid.80', 'sent');
+
+    const [fila] = await repos.deliveries.listRecent({ phone: '51900000080', limit: 1, offset: 0 });
+    expect(fila?.status).toBe('read');
+    expect(Math.abs(fila!.sentAt!.getTime() - hace2h.getTime())).toBeLessThan(1000);
+    const ultimo = await repos.deliveries.ultimoEnvioA(c.id);
+    expect(Math.abs(ultimo!.getTime() - hace2h.getTime())).toBeLessThan(1000);
+    const hilo = await repos.messages.listMessages(c.id, 5);
+    expect(hilo[0]?.status).toBe('read');
+
+    await repos.deliveries.updateByWamid('wamid.80', 'failed', { code: '131026', title: 'x' });
+    const [tras] = await repos.deliveries.listRecent({ phone: '51900000080', limit: 1, offset: 0 });
+    expect(tras?.status).toBe('failed');
+    expect(tras?.errorCode).toBe('131026');
   });
 });
 
@@ -261,6 +291,43 @@ describe('campanas por goteo', () => {
     expect(c.motivoPausa).toBe('parada a mano');
     expect(c.finishedAt).not.toBeNull();
     expect(await repos.campaigns.listarActivas()).toEqual([]);
+  });
+});
+
+describe('ajustes del reparto y plantillas propias', () => {
+  it('los ajustes se guardan encima de los valores por defecto y se pueden borrar', async () => {
+    const porDefecto = {
+      pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 3, horaInicio: 9, horaFin: 19,
+      plantillas: { solicitud: [], recordatorio: [], insistencia: [] },
+      textos: { solicitud: [], recordatorio: [], insistencia: [] },
+    };
+    expect(await repos.rutas.ajustes.get(porDefecto)).toEqual(porDefecto);
+    const guardado = await repos.rutas.ajustes.set({ esperaRespuestaMinutos: 45, textos: { solicitud: ['Hola {nombre}'], recordatorio: [], insistencia: [] } }, porDefecto);
+    expect(guardado.esperaRespuestaMinutos).toBe(45);
+    expect(guardado.textos.solicitud).toEqual(['Hola {nombre}']);
+    // Un segundo patch no pisa lo que no toca.
+    const otra = await repos.rutas.ajustes.set({ maxIntentos: 2 }, porDefecto);
+    expect(otra).toMatchObject({ esperaRespuestaMinutos: 45, maxIntentos: 2 });
+    expect(otra.textos.solicitud).toEqual(['Hola {nombre}']);
+    await repos.rutas.ajustes.reset();
+    expect(await repos.rutas.ajustes.get(porDefecto)).toEqual(porDefecto);
+  });
+
+  it('una plantilla propia guarda sus variables documentadas y solo ella se puede borrar', async () => {
+    await repos.templates.upsert({ name: 'propia_1', language: 'es', category: 'UTILITY', status: 'PENDING', quality: null, variables: 2, body: 'Hola {{1}}, {{2}}.', propia: true, variablesDoc: ['nombre', 'pedido'], footer: null });
+    await repos.templates.upsert({ name: 'de_meta', language: 'es', category: 'UTILITY', status: 'APPROVED', quality: null, variables: 0, body: 'x' });
+    let t = (await repos.templates.get('propia_1', 'es'))!;
+    expect(t.propia).toBe(true);
+    expect(t.variablesDoc).toEqual(['nombre', 'pedido']);
+    // Una sincronizacion con Meta (upsert sin `propia`) no le quita lo propio ni la documentacion.
+    await repos.templates.upsert({ name: 'propia_1', language: 'es', category: 'UTILITY', status: 'APPROVED', quality: 'GREEN', variables: 2, body: 'Hola {{1}}, {{2}}.' });
+    t = (await repos.templates.get('propia_1', 'es'))!;
+    expect(t.propia).toBe(true);
+    expect(t.variablesDoc).toEqual(['nombre', 'pedido']);
+    expect(t.status).toBe('APPROVED');
+    expect(await repos.templates.remove('de_meta', 'es')).toBe(false);
+    expect(await repos.templates.remove('propia_1', 'es')).toBe(true);
+    expect(await repos.templates.get('propia_1', 'es')).toBeNull();
   });
 });
 

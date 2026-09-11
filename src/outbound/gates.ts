@@ -75,6 +75,8 @@ export type GateDecision =
   | { allow: false; reason: string; code: GateCode; retryAfterMs?: number };
 
 export type GateCode =
+  | 'allowlist'
+  | 'sin_conexion'
   | 'opt_out'
   | 'no_opt_in'
   | 'number_paused'

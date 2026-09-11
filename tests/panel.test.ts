@@ -16,9 +16,9 @@ import {
   createFakeWhatsApp,
   type FakeRepos,
   type FakeWhatsApp,
+  CLAVE_API_PRUEBA as ADMIN,
 } from './fakes.js';
 
-const ADMIN = 'admin-token-de-prueba-1234';
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
@@ -29,7 +29,6 @@ const ENV = {
   WHATSAPP_APP_SECRET: 'app-secret-de-prueba',
   WHATSAPP_VERIFY_TOKEN: 'verify-me',
   GOOGLE_MAPS_API_KEY: 'maps-key',
-  ADMIN_TOKEN: ADMIN,
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'mexico',
 } as NodeJS.ProcessEnv;
@@ -120,6 +119,17 @@ describe('contactos', () => {
     expect(out.json().items.every((c: { optOutAt: string | null }) => c.optOutAt)).toBe(true);
   });
 
+  it('exporta los contactos del filtro a CSV para Excel (BOM, punto y coma)', async () => {
+    const res = await app.inject({ url: '/admin/contacts.csv?state=opted_out', headers: auth });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    expect(res.headers['content-disposition']).toContain('contactos.csv');
+    const lineas = res.body.replace(/^\ufeff/, '').trim().split('\r\n');
+    expect(lineas[0]).toBe('telefono;nombre;estado;opt_in;origen_opt_in;baja;ultimo_mensaje;ultima_ubicacion;alta');
+    expect(lineas.slice(1).some((l) => l.startsWith('5215510000003;Carla;baja;'))).toBe(true);
+    expect(res.body.startsWith('\ufeff')).toBe(true);
+  });
+
   it('normaliza el telefono al dar de alta', async () => {
     const optIn = await app.inject({
       method: 'POST',
@@ -172,10 +182,21 @@ describe('ubicaciones, historial y campanas', () => {
     expect(response.json()[0].errorTitle).toContain('no_opt_in');
   });
 
+  it('el historial se descarga en CSV con los mismos filtros', async () => {
+    const res = await app.inject({ url: '/admin/deliveries.csv?phone=5215510000006', headers: auth });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-disposition']).toContain('historial-envios.csv');
+    const lineas = res.body.replace(/^\ufeff/, '').trim().split('\r\n');
+    expect(lineas[0]).toBe('fecha;telefono;nombre;tipo;plantilla;categoria;estado;error;campana;entregado');
+    expect(lineas).toHaveLength(2);
+    expect(lineas[1]).toContain(';5215510000006;');
+    expect(lineas[1]).toContain(';blocked_by_gate;');
+  });
+
   it('las campanas se listan con sus conteos', async () => {
     await repos.templates.upsert({
       name: 'recordatorio_cita',
-      language: 'es_MX',
+      language: 'es',
       category: 'UTILITY',
       status: 'APPROVED',
       quality: 'GREEN',

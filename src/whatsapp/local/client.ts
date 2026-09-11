@@ -139,7 +139,11 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
      * apagado: ver WHATSAPP_NATIVE_BUTTONS en config.
      */
     async sendLocationRequest(to, body) {
-      const texto = `${body}\n\nMándamela con el clip 📎 → Ubicación → Enviar tu ubicación actual.`;
+      // Si el texto ya explica el clip (los de rutas lo hacen cuando no hay
+      // boton), no se repite la instruccion debajo.
+      const texto = /\bclip\b/i.test(body)
+        ? body
+        : `${body}\n\nMándamela con el clip 📎 → Ubicación → Enviar tu ubicación actual.`;
 
       if (opts.nativeButtons) {
         try {
@@ -200,6 +204,8 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
     },
 
     tieneWhatsApp,
+
+    conectado: () => getLocalSocket() !== null,
 
     async markAsRead(messageId) {
       const sock = getLocalSocket();

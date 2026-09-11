@@ -313,9 +313,19 @@ describe('politica: perfiles y variables', () => {
   const base = {
     PUBLIC_BASE_URL: 'https://ejemplo.test',
     DATABASE_URL: 'postgres://x/y',
-    ADMIN_TOKEN: 'admin-token-largo-1234',
     TRACKING_SECRET: 'x'.repeat(40),
   };
+
+  it('sin HORARIO_ENVIO_DIAS manda el perfil: lunes a sabado, no "solo domingos"', () => {
+    const config = loadConfig(base as NodeJS.ProcessEnv);
+    expect(config.horarioEnvioDias).toEqual([]);
+    const p = politicaDesdeConfig(config, 'no_oficial');
+    expect(p.diasPermitidos).toEqual([1, 2, 3, 4, 5, 6]);
+    // Un viernes a las 10:00 de Lima se envia.
+    expect(enHorario(new Date('2026-09-11T15:00:00Z'), p)).toBe(true);
+    const todos = loadConfig({ ...base, HORARIO_ENVIO_DIAS: '0,1,2,3,4,5,6' } as NodeJS.ProcessEnv);
+    expect(politicaDesdeConfig(todos, 'cloud').diasPermitidos).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
 
   it('el perfil sale del proveedor salvo que se fuerce', () => {
     const config = loadConfig(base as NodeJS.ProcessEnv);

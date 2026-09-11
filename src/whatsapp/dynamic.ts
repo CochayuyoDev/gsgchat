@@ -80,6 +80,15 @@ export function createDynamicWhatsAppClient(
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),
+    // Sincrono a proposito: es una consulta de estado, no una llamada de red.
+    // Sin credenciales o sin proveedor con sesion propia, no se sabe (undefined).
+    conectado: () => {
+      try {
+        return inner().conectado?.();
+      } catch {
+        return undefined;
+      }
+    },
     // El de Meta no lo implementa: ahi se devuelve null, que significa "no se
     // puede saber", y quien pregunta decide seguir sin la comprobacion.
     tieneWhatsApp: async (phone) => (await inner().tieneWhatsApp?.(phone)) ?? null,

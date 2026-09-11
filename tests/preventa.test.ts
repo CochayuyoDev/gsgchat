@@ -311,11 +311,25 @@ describe('respuestas que no se entienden', () => {
     }
   });
 
-  it('el documento pide digitos, o un NO explicito', () => {
+  it('el documento pide un DNI, CE, RUC o pasaporte de verdad, o un NO explicito', () => {
     expect(respuestaValida('documento', '45678912')).toBe(true);
     expect(respuestaValida('documento', '20-100-123-456')).toBe(true);
     expect(respuestaValida('documento', 'no')).toBe(true);
     expect(respuestaValida('documento', 'luego te digo')).toBe(false);
+    // Siete digitos no son ningun documento peruano.
+    expect(respuestaValida('documento', '1234567')).toBe(false);
+    // Un pasaporte mezcla letras y numeros.
+    expect(respuestaValida('documento', 'AB123456')).toBe(true);
+    expect(respuestaValida('documento', 'ABCDEFGH')).toBe(false);
+  });
+
+  it('el "cuando" tiene que ser un momento, no una frase cualquiera', () => {
+    for (const bien of ['hoy', 'Mañana', 'el lunes', 'esta tarde', '15/09', '15 de setiembre', 'a las 5', '5pm', 'en 2 horas', 'cuanto antes']) {
+      expect(respuestaValida('cuando', bien), bien).toBe(true);
+    }
+    for (const mal of ['Da ternura', 'si mno', 'esa cosita', 'jaja', 'q rico']) {
+      expect(respuestaValida('cuando', mal), mal).toBe(false);
+    }
   });
 
   it('lo que no se entiende no se guarda: mejor hueco que basura', () => {

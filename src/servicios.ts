@@ -28,6 +28,7 @@ import { providerOf } from './settings/service.js';
 import type { Monitor } from './salud/monitor.js';
 import { startMonitorSalud } from './salud/monitor.js';
 import type { Politica } from './salud/politica.js';
+import type { ServicioAjustes } from './ajustes/generales.js';
 import { startScheduler } from './automation/engine.js';
 import { startGoteo } from './campanas/goteo.js';
 import { startArchiveSweeper } from './archive/service.js';
@@ -44,12 +45,14 @@ export interface ServiciosDeps {
   sender: Sender;
   salud: Monitor;
   politica: () => Politica;
+  /** Los ajustes generales editables desde la pantalla. */
+  ajustes?: ServicioAjustes;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
 }
 
 /** Arranca todo y devuelve la funcion que lo para. */
 export function arrancarServicios(deps: ServiciosDeps): () => void {
-  const { config, repos, settings, wa, sender, salud, politica, log } = deps;
+  const { config, repos, settings, wa, sender, salud, politica, ajustes, log } = deps;
   const warn = (mensaje: string, detalle?: Record<string, unknown>) => log.warn(detalle ?? {}, mensaje);
   const info = (mensaje: string, detalle?: Record<string, unknown>) => log.info(detalle ?? {}, mensaje);
 
@@ -89,7 +92,11 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     wa,
     gsg,
     opciones: opcionesDesdeConfig(config),
+    nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
     usarPlantilla: () => providerOf(settings.current()) === 'cloud',
+    // Boton nativo de ubicacion: la Cloud API lo tiene; el cliente no oficial
+    // solo si se pidio expresamente (llegan rotos a una cuenta personal).
+    conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
     salud,
     politica,
     log: info,
@@ -103,7 +110,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     gsg,
     opciones: {
       resumenCadaMin: config.RUTAS_RESUMEN_CADA_MIN,
-      supervisor: config.RUTAS_SUPERVISOR,
+      supervisor: () => ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,
       minimoCasos: config.RUTAS_ALERTA_MIN_CASOS,
       avisoCadaMin: config.RUTAS_ALERTA_CADA_MIN,
     },

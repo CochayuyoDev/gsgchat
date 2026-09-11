@@ -317,6 +317,30 @@ describe('el motor', () => {
     expect(reportes.some((r) => r.tipo === 'incidencia')).toBe(true);
   });
 
+  it('el motor manda su propia cadencia por cliente y solo se despide de quien contesto', async () => {
+    await loteListo(repos, ['51987654321']);
+    await repos.rutas.actualizarSolicitud(repos.rutas._solicitudes[0]!.id, { estado: 'enviado', intentos: 3 });
+    const { sender, enviados } = senderFalso();
+    const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones: { ...opciones, esperaRespuestaMinutos: 5, maxIntentos: 3 }, usarPlantilla: () => false, ahora: () => HORA_BUENA });
+    // Tres intentos sin respuesta: se deriva sin despedida (nadie contesto).
+    const salida = await motor.tick();
+    expect(salida.accion).toBe('derivacion');
+    expect(enviados).toHaveLength(0);
+
+    // Un cliente que si contesto recibe la despedida, y con los limites del reparto.
+    await loteListo(repos, ['51987654322']);
+    const sol = repos.rutas._solicitudes.find((s) => s.phone === '51987654322')!;
+    await repos.rutas.actualizarSolicitud(sol.id, { estado: 'respondio', intentos: 3, primeraRespuestaAt: HORA_BUENA });
+    await motor.tick();
+    expect(enviados.at(-1)?.text).toMatch(/repartidor/);
+
+    // Y un envio normal del motor lleva la espera como separacion y intentos+1 como techo.
+    await loteListo(repos, ['51987654323']);
+    const motor2 = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones: { ...opciones, esperaRespuestaMinutos: 5, maxIntentos: 4 }, usarPlantilla: () => false, ahora: () => new Date(HORA_BUENA.getTime() + 60 * 60_000) });
+    await motor2.tick();
+    expect(enviados.at(-1)?.limitesContacto).toEqual({ separacionMs: 60_000, maxPorDia: 5 });
+  });
+
   it('un numero sin WhatsApp se marca y no se le insiste', async () => {
     await loteListo(repos, ['51987654321']);
     const { sender, enviados } = senderFalso();
@@ -366,6 +390,31 @@ describe('el motor', () => {
     expect(solicitud.intentos).toBe(0);
     expect(solicitud.estado).toBe('pendiente');
     expect(solicitud.incidencia).toBe('envio_bloqueado');
+  });
+
+  it('un error pasajero de WhatsApp no gasta un intento; se reintenta en unos minutos', async () => {
+    await loteListo(repos, ['51987654321']);
+    const { sender } = senderFalso(() => ({ ok: false, blocked: false, error: 'Connection Closed', retryable: true, deliveryId: 1 }));
+    const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => HORA_BUENA, azar: () => 0 });
+    const salida = await motor.tick();
+    expect(salida.accion).toBe('incidencia');
+    const solicitud = repos.rutas._solicitudes[0]!;
+    expect(solicitud.intentos).toBe(0);
+    expect(solicitud.estado).toBe('pendiente');
+    expect(solicitud.incidencia).toBe('error_envio');
+    expect(solicitud.proximoIntentoAt!.getTime() - HORA_BUENA.getTime()).toBe(3 * 60_000);
+  });
+
+  it('sin socket no se toca la solicitud: ni intento, ni incidencia', async () => {
+    await loteListo(repos, ['51987654321']);
+    const { sender } = senderFalso(() => ({ ok: false, blocked: true, code: 'sin_conexion', reason: 'WhatsApp no esta conectado', retryAfterMs: 120_000, deliveryId: -1 }));
+    const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => HORA_BUENA, azar: () => 0 });
+    const salida = await motor.tick();
+    expect(salida.accion).toBe('nada');
+    const solicitud = repos.rutas._solicitudes[0]!;
+    expect(solicitud.intentos).toBe(0);
+    expect(solicitud.incidencia).toBeNull();
+    expect(solicitud.proximoIntentoAt!.getTime() - HORA_BUENA.getTime()).toBe(120_000);
   });
 
   it('cierra el lote y encola su resumen cuando no queda nada vivo', async () => {
@@ -470,6 +519,36 @@ describe('lo que contesta el cliente', () => {
     expect(solicitud.primeraRespuestaAt).toBeInstanceOf(Date);
     // El texto se guarda: puede ser una direccion perfectamente util.
     expect(solicitud.incidenciaDetalle).toContain('jiron Puno');
+  });
+
+  it('si escribe antes de que le pidamos nada, se apunta y no se le trata como respuesta', async () => {
+    await repos.rutas.actualizarSolicitud(repos.rutas._solicitudes[0]!.id, { estado: 'pendiente', intentos: 0 });
+    const salida = await atenderRespuestaDeRuta(deps(), contacto, { texto: 'hola, una consulta' });
+    expect(salida.atendida).toBe(false);
+    const solicitud = repos.rutas._solicitudes[0]!;
+    expect(solicitud.estado).toBe('pendiente');
+    expect(solicitud.incidencia).toBeNull();
+    expect(repos.rutas._eventos.at(-1)?.detalle).toMatch(/antes de que le pidiéramos/);
+    // Una ubicacion enviada antes de tiempo si resuelve.
+    const conPin = await atenderRespuestaDeRuta(deps(), contacto, { ubicacion: { lat: -12.1, lng: -77.03 } });
+    expect(conPin.resultado).toBe('resuelta');
+  });
+
+  it('tras pasar al repartidor, un texto se apunta sin volver a insistir y una ubicacion lo resuelve', async () => {
+    await repos.rutas.actualizarSolicitud(repos.rutas._solicitudes[0]!.id, { estado: 'derivado', intentos: 3, requiereHumano: true });
+    const texto = await atenderRespuestaDeRuta(deps(), contacto, { texto: 'ya estoy en casa' });
+    expect(texto.atendida).toBe(true);
+    let solicitud = repos.rutas._solicitudes[0]!;
+    expect(solicitud.estado).toBe('derivado');
+    expect(solicitud.proximoIntentoAt).toBeNull();
+    expect(repos.rutas._eventos.at(-1)?.detalle).toMatch(/después de pasar al repartidor/);
+
+    const pin = await atenderRespuestaDeRuta(deps(), contacto, { ubicacion: { lat: -12.1, lng: -77.03 } });
+    expect(pin.resultado).toBe('resuelta');
+    solicitud = repos.rutas._solicitudes[0]!;
+    expect(solicitud.estado).toBe('resuelto');
+    expect(repos.rutas._reportes.some((r) => r.tipo === 'ubicacion')).toBe(true);
+    expect(repos.rutas._eventos.find((e) => e.tipo === 'ubicacion')?.detalle).toMatch(/ya no hace falta llamar/);
   });
 
   it('"no soy yo" corta los envios a ese numero', async () => {

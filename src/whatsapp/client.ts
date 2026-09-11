@@ -100,6 +100,15 @@ export interface WhatsAppClient {
    * de las cosas que Meta mira para bajarle la calidad al numero.
    */
   tieneWhatsApp?(phone: string): Promise<boolean | null>;
+  /**
+   * Si ahora mismo se puede enviar (el socket esta abierto).
+   *
+   * Solo lo saben los clientes con sesion propia (el local). Sin esto, cada
+   * intento contra un socket cerrado dejaba una entrega "fallida" que el
+   * monitor de salud contaba como rechazo de WhatsApp, y el motor de rutas
+   * gastaba un intento del cliente en un mensaje que nunca salio.
+   */
+  conectado?(): boolean | undefined;
   /** Estado del numero segun Meta: calidad y tier de envio. */
   getPhoneNumber(): Promise<PhoneNumberInfo>;
   /**

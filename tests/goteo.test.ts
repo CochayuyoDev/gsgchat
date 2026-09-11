@@ -44,7 +44,7 @@ async function campana(repos: ReturnType<typeof createFakeRepos>, n: number, can
   const id = await repos.campaigns.create({
     name: 'Promo',
     templateName: 'promo',
-    templateLanguage: 'es_MX',
+    templateLanguage: 'es',
     category: 'MARKETING',
     canario,
     canarioEsperaMin: extra.esperaMin ?? 60,

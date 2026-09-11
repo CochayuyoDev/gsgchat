@@ -184,33 +184,18 @@ function confirmarDialogo(opciones) {
   });
 }
 
-/**
- * El token de administracion, pidiendolo con el cuadro propio.
- *
- * Es asincrono porque el cuadro no bloquea: quien llame tiene que esperarlo.
- */
-async function pedirToken() {
-  var guardado = sessionStorage.getItem('adminToken');
-  if (guardado) return guardado;
-
-  var valor = await pedirDato({
-    titulo: 'Contraseña de administración',
-    texto:
-      'Es la clave que protege este panel. Aparece en la ventana donde arrancaste el ' +
-      'sistema, y también está guardada en el archivo .secrets.json de la carpeta del proyecto.',
-    etiqueta: 'Pega aquí la clave',
-    marcador: 'pega aqui la clave (32 caracteres)',
-    boton: 'Entrar',
-    validar: function (v) {
-      if (!v) return 'Pega la clave para continuar.';
-      if (v.length < 16) return 'Esa clave es demasiado corta: cópiala entera.';
-      return null;
-    }
-  });
-
-  if (!valor) return '';
-  sessionStorage.setItem('adminToken', valor);
-  return valor;
+/** Sin sesion: a la pantalla de entrar, y de vuelta aqui despues. */
+function irAlLogin() {
+  location.href = '/login?next=' + encodeURIComponent(location.pathname + location.hash);
+}
+/** Cierra la sesion en el servidor y vuelve a la pantalla de entrar. */
+async function salir() {
+  try { await fetch('/logout', { method: 'POST', credentials: 'same-origin' }); } catch (e) {}
+  location.href = '/login';
+}
+function enlazarSalir() {
+  var b = document.getElementById('logout');
+  if (b) b.onclick = function () { salir(); };
 }
 
 /**

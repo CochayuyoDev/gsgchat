@@ -17,7 +17,6 @@ const ENV = {
   WHATSAPP_APP_SECRET: SECRET,
   WHATSAPP_VERIFY_TOKEN: 'verify-me',
   GOOGLE_MAPS_API_KEY: 'maps-key',
-  ADMIN_TOKEN: 'admin-token-largo-1234',
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'mexico',
 };
@@ -188,12 +187,12 @@ describe('eventos de estado y calidad', () => {
       {
         event: 'REJECTED',
         message_template_name: 'confirmacion_pedido',
-        message_template_language: 'es_MX',
+        message_template_language: 'es',
       },
       deps,
     );
 
-    expect((await repos.templates.get('confirmacion_pedido', 'es_MX'))?.status).toBe('REJECTED');
+    expect((await repos.templates.get('confirmacion_pedido', 'es'))?.status).toBe('REJECTED');
   });
 
   it('la calidad de una plantilla se propaga al registro', async () => {
@@ -204,13 +203,13 @@ describe('eventos de estado y calidad', () => {
       'message_template_quality_update',
       {
         message_template_name: 'confirmacion_pedido',
-        message_template_language: 'es_MX',
+        message_template_language: 'es',
         new_quality_score: 'YELLOW',
       },
       deps,
     );
 
-    expect((await repos.templates.get('confirmacion_pedido', 'es_MX'))?.quality).toBe('YELLOW');
+    expect((await repos.templates.get('confirmacion_pedido', 'es'))?.quality).toBe('YELLOW');
   });
 
   it('calidad del numero en ROJO pausa el envio', async () => {
@@ -269,12 +268,16 @@ describe('deduplicacion de entrantes', () => {
     expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
   });
 
-  it('sin cache no se deduplica (los tests unitarios no la necesitan)', async () => {
+  it('sin cache, el hilo guardado sigue deduplicando por id: dos ids distintos son dos mensajes', async () => {
     const { deps, repos, wa } = await build();
     await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: false });
+    // El mismo id dos veces (reentrega tras un reinicio) se atiende una vez...
     const payload = inbound({ text: { body: 'hola' } });
     await processChange('messages', payload, deps);
     await processChange('messages', payload, deps);
+    expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
+    // ...y otro id es otro mensaje.
+    await processChange('messages', inbound({ id: 'wamid.in.2', text: { body: 'hola' } }), deps);
     expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(2);
   });
 });
