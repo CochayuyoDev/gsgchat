@@ -77,6 +77,11 @@ export function createDynamicWhatsAppClient(
     sendText: async (...args) => inner().sendText(...args),
     sendLocation: async (...args) => inner().sendLocation(...args),
     sendLocationRequest: async (...args) => inner().sendLocationRequest(...args),
+    sendSticker: async (to, sticker) => {
+      const cliente = inner();
+      if (!cliente.sendSticker) throw new Error('este proveedor no manda stickers');
+      return cliente.sendSticker(to, sticker);
+    },
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),

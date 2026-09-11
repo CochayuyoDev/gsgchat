@@ -117,16 +117,30 @@ export function manualPage(opts: { nombreNegocio: string; demo?: boolean }): str
 <section class="card">
   <h2>Atajos del chat</h2>
   <div class="semaf">
-    <div><b>/</b>En el mensaje: respuestas rápidas. Se filtran al escribir; Enter o Tab pone el texto con el nombre del cliente ya puesto.</div>
+    <div><b>Botones sobre el cuadro</b>Una pastilla por respuesta rápida, más "Pedir ubicación" y "Mandar pin". Un clic <b>manda al instante</b> el texto con el nombre del cliente; Shift+clic lo deja en el cuadro para retocarlo. "Editar" lleva a Automatización.</div>
+    <div><b>/</b>En el mensaje: las mismas respuestas rápidas, filtradas al escribir; Enter o Tab pone el texto.</div>
     <div><b>⚡</b>Ver todas las respuestas rápidas. Se editan en Automatización.</div>
+    <div><b>🙂</b>Mandar un sticker de la biblioteca (se suben en Stickers). Una respuesta rápida puede llevar uno pegado.</div>
     <div><b>Alt + ↓ / ↑</b>Siguiente / anterior conversación.</div>
     <div><b>Ctrl + Shift + U</b>Pedirle su ubicación.</div>
     <div><b>Ctrl + Shift + L</b>Mandar un pin (abre el cuadro del mapa).</div>
+    <div><b>Filtros de la lista</b>Todos · Sin leer · Esperan respuesta · Escribieron hoy, encima de las conversaciones.</div>
     <div><b>/ fuera del mensaje</b>Ir al buscador de chats.</div>
     <div><b>Esc</b>Cerrar, salir del campo o volver a la lista.</div>
     <div><b>F1</b>La lista completa, dentro del chat.</div>
   </div>
   <p class="muted" style="margin-top:10px">En la cabecera de cada chat se ve el pedido del reparto y en qué punto va ("esperando su ubicación", "derivado al repartidor"…).</p>
+</section>
+
+<section class="card">
+  <h2>Stickers</h2>
+  <p class="muted">Un toque humano después de un mensaje, sin que nadie tenga que acordarse.</p>
+  <ol>
+    <li>En <a href="/panel#stickers">Stickers</a> sube tus imágenes (PNG, JPG, GIF o WebP): se convierten solas al formato de WhatsApp. Ponles nombre y para qué son.</li>
+    <li>Elige cuál sale solo <b>tras el saludo</b> del asistente a un cliente nuevo, <b>tras el "gracias"</b> (mandó su ubicación o completó su ficha) y <b>en la despedida</b> (cuando pasa al repartidor). Si quieres, también tras el primer mensaje del reparto.</li>
+    <li>En el chat, el botón 🙂 manda cualquiera al momento; y en Automatización cada respuesta rápida puede llevar un sticker pegado.</li>
+  </ol>
+  <p class="muted">Si el número está frenado o la ventana de 24 h está cerrada (API de Meta), el sticker simplemente no sale: nunca bloquea el mensaje al que acompaña.</p>
 </section>
 
 <section class="card">

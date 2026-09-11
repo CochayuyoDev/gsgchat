@@ -25,7 +25,7 @@ import { leerLote, prepararFilas, type FilaLote } from '../rutas/lote.js';
 import { PLANES, revisarTelefono } from '../rutas/telefono.js';
 import { enHorario, type OpcionesMotor } from '../rutas/motor.js';
 import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, PASOS } from '../rutas/ajustes.js';
-import { PLANTILLAS } from '../rutas/mensajes.js';
+import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js';
 import type { Monitor } from '../salud/monitor.js';
 
 export interface RutasRoutesDeps {
@@ -37,6 +37,12 @@ export interface RutasRoutesDeps {
   salud?: Monitor;
   /** A quien se avisa ahora mismo (se cambia desde la pantalla). */
   supervisor?: () => string;
+  /** Si el reparto manda plantillas de Meta (API oficial) o texto libre (QR/WAHA). */
+  usaPlantillas?: () => boolean;
+  /** Si el mensaje puede llevar el boton nativo de ubicacion. */
+  conBoton?: () => boolean;
+  /** Como se llama el negocio ahora mismo. */
+  nombreNegocio?: () => string;
 }
 
 const filaSchema = z.object({
@@ -203,9 +209,20 @@ export async function registerRutasRoutes(
         body: t.body,
         pausadaHasta: t.pausadaHasta ?? null,
       }));
+    // Un cliente de ejemplo, para enseñar como queda cada mensaje tal cual saldria.
+    const usaPlantillas = deps.usaPlantillas?.() ?? false;
+    const conBoton = deps.conBoton?.() ?? usaPlantillas;
+    const negocio = deps.nombreNegocio?.() ?? opciones.negocio;
+    const ejemplo = { nombre: 'Ana Ruiz', pedido: 'P-1024', negocio, direccion: 'Av. Larco 123', distrito: 'Miraflores', como: conBoton ? 'con el botón de aquí abajo' : 'desde el clip 📎 → Ubicación → Enviar tu ubicación actual' };
+    const ctx = { nombre: ejemplo.nombre, referencia: ejemplo.pedido, negocio, direccion: ejemplo.direccion, distrito: ejemplo.distrito, conBoton };
+    const textosDeSiempre = Object.fromEntries(PASOS.map((p) => [p, textoLibre(p as PasoUbicacion, ctx)]));
     return {
       ajustes,
       porDefecto,
+      usaPlantillas,
+      conBoton,
+      ejemplo,
+      textosDeSiempre,
       catalogo: Object.fromEntries(PASOS.map((p) => [p, PLANTILLAS[p].variantes])),
       plantillas,
       // Como se rellenan las plantillas propias: en orden, y solo las que tenga.

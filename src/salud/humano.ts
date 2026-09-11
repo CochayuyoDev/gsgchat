@@ -12,6 +12,7 @@
  * que mira es otra cosa.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 export interface OpcionesEscritura {
   /** Palabras por minuto, con desviacion. */
   wpm?: number;
@@ -29,6 +30,24 @@ const POR_DEFECTO: Required<OpcionesEscritura> = {
   maxMs: 9_000,
   azar: Math.random,
 };
+
+/**
+ * Un envio hecho a mano desde el chat (un boton, un texto tecleado por una
+ * persona) no tiene que fingir que teclea: la persona ya lo hizo. El sender
+ * envuelve esos envios en `aMano()` y la escritura simulada se queda en un
+ * parpadeo. Va por AsyncLocalStorage para no tener que pasar una bandera
+ * por todas las capas hasta el socket.
+ */
+const contextoEnvio = new AsyncLocalStorage<{ aMano: boolean }>();
+const ESPERA_A_MANO_MS = 700;
+
+export function aMano<T>(fn: () => Promise<T>): Promise<T> {
+  return contextoEnvio.run({ aMano: true }, fn);
+}
+
+export function enviandoAMano(): boolean {
+  return contextoEnvio.getStore()?.aMano === true;
+}
 
 /** Aproximacion a una normal (0,1) con Box-Muller. */
 export function normal(azar: () => number = Math.random): number {
@@ -91,7 +110,10 @@ export async function escribirComoHumano<T>(
 ): Promise<T> {
   const esperar = opts.dormir ?? dormir;
   await teclado.escribiendo().catch(() => undefined);
-  await esperar(duracionEscritura(texto, opts));
+  // Lo que escribe una persona desde el chat no espera lo que tardaria en
+  // teclearlo: ya lo tecleo (o pulso un boton). Solo un parpadeo de
+  // "escribiendo..." para que no salga en seco.
+  await esperar(enviandoAMano() ? Math.min(ESPERA_A_MANO_MS, duracionEscritura(texto, opts)) : duracionEscritura(texto, opts));
   await teclado.parado().catch(() => undefined);
   return enviar();
 }

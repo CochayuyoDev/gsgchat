@@ -75,6 +75,11 @@ export interface WhatsAppClient {
   ): Promise<SendResult>;
   /** Boton nativo que abre el selector de ubicacion del cliente. */
   sendLocationRequest(to: string, body: string): Promise<SendResult>;
+  /**
+   * Un sticker (WebP 512x512). El cliente local lo manda como sticker de
+   * verdad; la Cloud API lo baja de `url`; WAHA lo manda como fichero.
+   */
+  sendSticker?(to: string, sticker: { datos: Buffer; mimeType: string; url: string }): Promise<SendResult>;
   sendButtons(
     to: string,
     body: string,
@@ -224,6 +229,12 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
           action: { name: 'send_location' },
         },
       });
+    },
+
+    // Meta se lo baja de nuestra URL publica (/stickers/<archivo>); no hace
+    // falta subirlo antes como media.
+    sendSticker(to, sticker) {
+      return send({ to, type: 'sticker', sticker: { link: sticker.url } });
     },
 
     sendButtons(to, body, buttons) {

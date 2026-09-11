@@ -17,6 +17,7 @@ import { createUsuariosRepo, type UsuariosRepo } from '../auth/usuarios.js';
 import { createClavesApiRepo, type ClavesApiRepo } from '../auth/claves-api.js';
 import { createAjustesGeneralesRepo, type AjustesGeneralesRepo } from '../ajustes/generales.js';
 import { createActividadRepo, type ActividadRepo } from '../auth/actividad.js';
+import { createStickersRepo, type StickersRepo } from '../stickers/stickers.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -487,6 +488,8 @@ export interface Repos {
   ajustesGenerales: AjustesGeneralesRepo;
   /** Bitacora: quien hizo que. Ver src/auth/actividad.ts. */
   actividad: ActividadRepo;
+  /** La biblioteca de stickers. Ver src/stickers. */
+  stickers: StickersRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1723,6 +1726,7 @@ export function createRepos(pool: Pool): Repos {
     claves: createClavesApiRepo(pool),
     ajustesGenerales: createAjustesGeneralesRepo(pool),
     actividad: createActividadRepo(pool),
+    stickers: createStickersRepo(pool),
   };
 }
 

@@ -129,6 +129,21 @@ const CSS = `
   .pill.info { background: rgba(37,99,235,.14); color: var(--info); }
   .pill.gris { background: var(--chip); color: var(--muted); }
 
+  .aj .aj-titulo { font-size: 14px; margin: 16px 0 4px; }
+  .aj .aj-frase { margin: 0; line-height: 2; font-size: 14.5px; }
+  .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; font-size: 14px; margin: 0 2px; }
+  .aj .paso { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 10px; background: var(--bg); }
+  .aj .paso h4 { margin: 0 0 6px; font-size: 14px; }
+  .aj .paso .cuando { color: var(--muted); font-size: 12.5px; margin: 0 0 8px; }
+  .aj .previa { background: #d9fdd3; color: #111b21; border-radius: 10px; padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+  .aj .previa small { display: block; color: #667781; font-size: 11px; margin-top: 4px; text-align: right; }
+  .aj .paso textarea { width: 100%; margin-top: 8px; min-height: 64px; }
+  .aj .marcadores { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
+  .aj .marcadores code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; font-size: 12px; cursor: pointer; }
+  .aj .plantillas { margin-top: 8px; font-size: 13px; }
+  .aj .plantillas label { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+  .aj .plantillas input { width: auto; }
+  @media (prefers-color-scheme: dark) { .aj .previa { background: #005c4b; color: #e9edef; } .aj .previa small { color: #a9bbb5; } }
   .campo { margin-bottom: 10px; }
   .campo label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
   .campo input { width: 100%; }
@@ -203,23 +218,33 @@ export function rutasPage(opts: RutasOpts): string {
     <h2>Ajustes del reparto <span class="sep"></span>
       <button class="sm" id="cerrar-ajustes">Cerrar</button>
     </h2>
-    <div class="cuerpo">
+    <div class="cuerpo aj">
       <p class="muted" style="margin-top:0">
-        Lo que se guarde aquí manda sobre la configuración del servidor y se aplica en el siguiente envío,
-        sin reiniciar. Por encima de todo esto está el marcapasos del número (Salud del número → Riesgo y ritmo, en el menú).
+        Todo lo de aquí se aplica en el siguiente mensaje, sin reiniciar. Las horas son de Lima.
+        Por encima de esto manda siempre la salud del número: si el monitor frena, frena.
       </p>
-      <div class="fila" style="flex-wrap:wrap;gap:10px">
-        <div class="campo" style="flex:1;min-width:140px"><label for="aj-pausa-min">Pausa mínima (s)</label><input id="aj-pausa-min" type="number" min="1"></div>
-        <div class="campo" style="flex:1;min-width:140px"><label for="aj-pausa-max">Pausa máxima (s)</label><input id="aj-pausa-max" type="number" min="1"></div>
-        <div class="campo" style="flex:1;min-width:140px"><label for="aj-espera">Espera antes de insistir (min)</label><input id="aj-espera" type="number" min="1"></div>
-        <div class="campo" style="flex:1;min-width:140px"><label for="aj-intentos">Mensajes por cliente</label><input id="aj-intentos" type="number" min="1" max="10"></div>
-        <div class="campo" style="flex:1;min-width:120px"><label for="aj-hora-inicio">Desde (hora)</label><input id="aj-hora-inicio" type="number" min="0" max="23"></div>
-        <div class="campo" style="flex:1;min-width:120px"><label for="aj-hora-fin">Hasta (hora)</label><input id="aj-hora-fin" type="number" min="1" max="24"></div>
-      </div>
+
+      <h3 class="aj-titulo">¿A qué horas se escribe?</h3>
+      <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num">:00.
+        Fuera de ese horario, los mensajes esperan al día siguiente.</p>
+
+      <h3 class="aj-titulo">¿Cómo se insiste si no contesta?</h3>
+      <p class="aj-frase">Si el cliente no responde, se le vuelve a escribir a los <input id="aj-espera" type="number" min="1" class="aj-num">
+        minutos. Como máximo <input id="aj-intentos" type="number" min="1" max="10" class="aj-num"> mensajes por cliente;
+        si sigue sin mandar su ubicación, pasa al repartidor para que lo llame.</p>
+
+      <h3 class="aj-titulo">¿A qué ritmo?</h3>
+      <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num">
+        y <input id="aj-pausa-max" type="number" min="1" class="aj-num"> segundos, para parecer una persona y cuidar el número.</p>
+
+      <h3 class="aj-titulo">¿Qué se le dice?</h3>
+      <p class="muted" style="margin-top:0">Tres momentos: el primer mensaje, el recordatorio si no contestó, y la insistencia si contestó pero sin ubicación.
+        Debajo de cada uno ves cómo le llegaría a un cliente de ejemplo. Si no escribes nada, se usan los textos de siempre.</p>
       <div id="aj-pasos"></div>
-      <div class="fila" style="margin-top:10px">
-        <button class="primary" id="aj-guardar">Guardar ajustes</button>
-        <button id="aj-reset">Volver a la configuración</button>
+
+      <div class="fila" style="margin-top:14px">
+        <button class="primary" id="aj-guardar">Guardar</button>
+        <button id="aj-reset">Volver a lo de siempre</button>
         <span class="dato" id="aj-estado"></span>
       </div>
     </div>
@@ -730,10 +755,24 @@ document.getElementById('cerrar-carga').onclick = function () { ver('carga', fal
 
 // ---- ajustes del reparto ----------------------------------------------
 var PASOS_AJ = [
-  ['solicitud', 'Primer mensaje (solicitud)'],
-  ['recordatorio', 'Recordatorio (no contestó)'],
-  ['insistencia', 'Insistencia (contestó sin ubicación)']
+  ['solicitud', '1. Primer mensaje', 'Cuando se le pide la ubicación por primera vez.'],
+  ['recordatorio', '2. Recordatorio', 'Si pasan los minutos de espera y no contestó nada.'],
+  ['insistencia', '3. Insistencia', 'Si contestó, pero sin mandar la ubicación.']
 ];
+var ESTADO_PLANTILLA = { APPROVED: 'aprobada', PENDING: 'pendiente de Meta', REJECTED: 'rechazada', PAUSED: 'pausada', DISABLED: 'deshabilitada' };
+/* Como le quedaria al cliente de ejemplo un texto escrito aqui. */
+function previaDe(texto, ej) {
+  return texto.replace(/\{nombre\}/g, ej.nombre.split(' ')[0]).replace(/\{pedido\}/g, ej.pedido).replace(/\{negocio\}/g, ej.negocio)
+    .replace(/\{direccion\}/g, ej.direccion).replace(/\{distrito\}/g, ej.distrito).replace(/\{como\}/g, ej.como);
+}
+function pintarPrevia(paso) {
+  var d = ajustesCache; if (!d) return;
+  var ta = document.querySelector('textarea[data-textos="' + paso + '"]');
+  var lineas = ta ? ta.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean) : [];
+  var texto = lineas.length ? previaDe(lineas[0], d.ejemplo) : d.textosDeSiempre[paso];
+  var caja = document.getElementById('aj-previa-' + paso);
+  if (caja) caja.innerHTML = esc(texto) + '<small>' + (lineas.length ? (lineas.length > 1 ? 'tu primer texto (se alternan ' + lineas.length + ')' : 'tu texto') : 'texto de siempre') + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
+}
 var ajustesCache = null;
 function pintarAjustes(d) {
   ajustesCache = d;
@@ -749,29 +788,41 @@ function pintarAjustes(d) {
     var paso = p[0];
     var elegidas = a.plantillas[paso] || [];
     var catalogo = d.catalogo[paso] || [];
-    // Una linea por nombre: la misma plantilla en dos idiomas (es, es_MX) es
-    // una sola opcion, y el idioma se ensena al lado.
-    var porNombre = {};
-    d.plantillas.forEach(function (t) {
-      if (!porNombre[t.name]) porNombre[t.name] = { name: t.name, status: t.status, propia: t.propia, variables: t.variables, idiomas: [] };
-      porNombre[t.name].idiomas.push(t.language);
-    });
-    var opciones = Object.keys(porNombre).sort().map(function (n) {
-      var t = porNombre[n];
-      var marcada = elegidas.length ? elegidas.indexOf(t.name) >= 0 : catalogo.indexOf(t.name) >= 0;
-      var etiqueta = t.name + ' (' + t.status + (t.propia ? ', propia' : '') + ', ' + t.variables + ' var' + (t.idiomas.length > 1 ? ', ' + t.idiomas.join('/') : '') + ')';
-      return '<label class="dato" style="display:flex;gap:6px;align-items:center;margin:2px 0"><input type="checkbox" data-paso="' + paso + '" value="' + esc(t.name) + '"' + (marcada ? ' checked' : '') + ' style="width:auto"> ' + esc(etiqueta) + '</label>';
-    }).join('');
-    html += '<div class="caja" style="margin-top:10px"><h2>' + esc(p[1]) + '</h2><div class="cuerpo">' +
-      '<p class="muted" style="margin-top:0"><b>Con la API de Meta</b>: plantillas aprobadas entre las que el motor alterna (deja fuera las pausadas). ' +
-      'En las propias, ' + esc(d.variablesPropias.join(', ')) + '.</p>' +
-      '<div style="columns:2;column-gap:16px">' + opciones + '</div>' +
-      '<p class="muted"><b>Texto libre</b> (cliente no oficial o dentro de la ventana de 24 h): una redacción por línea; el sistema las alterna. ' +
-      'Admiten ' + esc(d.placeholders.join(', ')) + '. Vacío = las redacciones de siempre.</p>' +
-      '<textarea data-textos="' + paso + '" rows="3" placeholder="Hola {nombre}, le escribimos de {negocio} por {pedido}. Necesitamos su ubicación: puede enviarla con el botón de abajo.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
-      '</div></div>';
+    var plantillasHtml = '';
+    if (d.usaPlantillas) {
+      var porNombre = {};
+      d.plantillas.forEach(function (t) {
+        if (!porNombre[t.name]) porNombre[t.name] = { name: t.name, status: t.status, propia: t.propia, variables: t.variables };
+      });
+      var opciones = Object.keys(porNombre).sort().map(function (n) {
+        var t = porNombre[n];
+        var marcada = elegidas.length ? elegidas.indexOf(t.name) >= 0 : catalogo.indexOf(t.name) >= 0;
+        return '<label><input type="checkbox" data-paso="' + paso + '" value="' + esc(t.name) + '"' + (marcada ? ' checked' : '') + '> ' + esc(t.name) + ' <span class="muted">(' + esc(ESTADO_PLANTILLA[t.status] || t.status) + (t.propia ? ', propia' : '') + ')</span></label>';
+      }).join('');
+      plantillasHtml = '<div class="plantillas"><b>Plantillas de Meta para este paso</b> <span class="muted">(fuera de las 24 h solo puede salir una plantilla aprobada; si marcas varias, se van alternando)</span>' + opciones + '</div>';
+    }
+    html += '<div class="paso"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
+      '<div class="previa" id="aj-previa-' + paso + '"></div>' +
+      '<textarea data-textos="' + paso + '" rows="3" placeholder="Escribe aquí si quieres decirlo a tu manera. Una redacción por línea: se van alternando.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
+      '<p class="marcadores">Puedes usar: <code data-marcador="{nombre}" title="El nombre del cliente">{nombre}</code> <code data-marcador="{pedido}" title="El número de pedido o guía">{pedido}</code> <code data-marcador="{negocio}" title="El nombre de tu negocio">{negocio}</code> <code data-marcador="{direccion}" title="La dirección del pedido">{direccion}</code> <code data-marcador="{distrito}" title="El distrito">{distrito}</code> <code data-marcador="{como}" title="Cómo mandar la ubicación: con el botón o desde el clip, según toque">{como}</code> — clic para insertar.</p>' +
+      plantillasHtml + '</div>';
   });
   document.getElementById('aj-pasos').innerHTML = html;
+  PASOS_AJ.forEach(function (p) {
+    var paso = p[0];
+    pintarPrevia(paso);
+    var ta = document.querySelector('textarea[data-textos="' + paso + '"]');
+    ta.addEventListener('input', function () { pintarPrevia(paso); });
+  });
+  document.querySelectorAll('#aj-pasos [data-marcador]').forEach(function (c) {
+    c.onclick = function () {
+      var ta = c.closest('.paso').querySelector('textarea');
+      var ini = ta.selectionStart || ta.value.length, fin = ta.selectionEnd || ini;
+      ta.value = ta.value.slice(0, ini) + c.getAttribute('data-marcador') + ta.value.slice(fin);
+      ta.focus();
+      ta.dispatchEvent(new Event('input'));
+    };
+  });
 }
 async function cargarAjustes() {
   try { pintarAjustes(await api('/admin/rutas/ajustes')); }
@@ -815,8 +866,8 @@ document.getElementById('aj-guardar').onclick = async function () {
       plantillas: plantillas,
       textos: textos
     }});
-    estado.textContent = 'Guardado. Se aplica en el siguiente envío.';
-    toast('Ajustes guardados: ' + r.vigente.pausaMinSegundos + '-' + r.vigente.pausaMaxSegundos + ' s, espera ' + r.vigente.esperaRespuestaMinutos + ' min, ' + r.vigente.maxIntentos + ' intentos, ' + r.vigente.horaInicio + ':00-' + r.vigente.horaFin + ':00.');
+    estado.textContent = 'Guardado. Se aplica en el siguiente mensaje.';
+    toast('Guardado: se escribe de ' + r.vigente.horaInicio + ':00 a ' + r.vigente.horaFin + ':00, se insiste a los ' + r.vigente.esperaRespuestaMinutos + ' min, máximo ' + r.vigente.maxIntentos + ' mensajes, ' + r.vigente.pausaMinSegundos + '-' + r.vigente.pausaMaxSegundos + ' s entre clientes.');
     refrescar();
   } catch (e) { estado.textContent = e.message; }
 };
@@ -824,7 +875,7 @@ document.getElementById('aj-reset').onclick = async function () {
   try {
     await api('/admin/rutas/ajustes', { method: 'DELETE' });
     await cargarAjustes();
-    document.getElementById('aj-estado').textContent = 'Vuelto a la configuración del servidor.';
+    document.getElementById('aj-estado').textContent = 'Listo: vuelven los valores y textos de siempre.';
     refrescar();
   } catch (e) { document.getElementById('aj-estado').textContent = e.message; }
 };

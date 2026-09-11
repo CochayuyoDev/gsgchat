@@ -20,6 +20,7 @@ import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
+import type { ServicioStickers } from '../stickers/stickers.js';
 import { numeroPermitido } from '../salud/lista-blanca.js';
 import type { Contact, Repos } from '../db/repos.js';
 import type { AutoReply } from '../db/automation.js';
@@ -78,6 +79,8 @@ export interface InboundDeps {
   salud?: Monitor;
   /** Los ajustes generales (modo prueba, nombre del negocio) cambiados desde la pantalla. */
   ajustes?: ServicioAjustes;
+  /** Los stickers automaticos. Ver src/stickers. */
+  stickers?: ServicioStickers;
 }
 
 export const CONFIRM_PREFIX = 'loc_ok:';
@@ -189,32 +192,45 @@ export async function turnoDePreventa(
   if (Object.keys(patch).length) await repos.leads.update(contact.id, patch);
   if (!respuesta) return;
 
+  // El sticker que acompaña: al saludo la primera vez, y al cerrar la ficha.
+  const adorno = async (salida: { ok: boolean }) => {
+    if (!salida.ok || !deps.stickers) return;
+    if (entrada.esPrimerMensaje) await deps.stickers.automatico('inicio', contact.phone);
+    else if (patch.estado === 'calificado') await deps.stickers.automatico('gracias', contact.phone);
+  };
+
   if (respuesta.pedirUbicacion) {
-    await sender.send({
-      phone: contact.phone,
-      kind: 'interactive',
-      category: 'UTILITY',
-      interactive: { body: respuesta.texto, locationRequest: true },
-    });
+    await adorno(
+      await sender.send({
+        phone: contact.phone,
+        kind: 'interactive',
+        category: 'UTILITY',
+        interactive: { body: respuesta.texto, locationRequest: true },
+      }),
+    );
     return;
   }
 
   if (respuesta.botones?.length) {
-    await sender.send({
-      phone: contact.phone,
-      kind: 'interactive',
-      category: 'UTILITY',
-      interactive: { body: respuesta.texto, buttons: respuesta.botones },
-    });
+    await adorno(
+      await sender.send({
+        phone: contact.phone,
+        kind: 'interactive',
+        category: 'UTILITY',
+        interactive: { body: respuesta.texto, buttons: respuesta.botones },
+      }),
+    );
     return;
   }
 
-  await sender.send({
-    phone: contact.phone,
-    kind: 'freeform',
-    category: 'UTILITY',
-    text: respuesta.texto,
-  });
+  await adorno(
+    await sender.send({
+      phone: contact.phone,
+      kind: 'freeform',
+      category: 'UTILITY',
+      text: respuesta.texto,
+    }),
+  );
 }
 
 /**
@@ -557,6 +573,7 @@ export async function handleInboundMessage(
           referencia: respuesta.solicitud?.referencia,
         }),
       );
+      if (deps.stickers) await deps.stickers.automatico('gracias', phone);
       return true;
     }
     if (respuesta.resultado === 'fuera_de_zona') {

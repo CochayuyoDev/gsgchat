@@ -23,6 +23,10 @@ import { politicaDesdeConfig } from '../src/salud/politica.js';
 import { crearMonitor, startMonitorSalud } from '../src/salud/monitor.js';
 import { startGoteo } from '../src/campanas/goteo.js';
 import { crearServicioAjustes } from '../src/ajustes/generales.js';
+import { crearServicioStickers } from '../src/stickers/stickers.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -159,8 +163,8 @@ const hace = (minutos: number) => new Date(Date.now() - minutos * 60_000);
 for (const [minutos, direccion, texto] of [
   [190, 'in', 'Hola, buenas tardes'],
   [188, 'out', 'Hola Ana, gracias por escribir. En que te ayudamos?'],
-  [180, 'in', 'Queria saber si llegan a Coyoacan'],
-  [176, 'out', 'Si, llegamos a toda la ciudad. Compartenos tu ubicacion y te confirmo el costo.'],
+  [180, 'in', 'Queria saber si llegan a San Juan de Lurigancho'],
+  [176, 'out', 'Si, llegamos a toda Lima. Compartenos tu ubicacion y te confirmo el costo.'],
   [40, 'in', 'Ubicacion: -12.0931, -77.0465'],
   [38, 'out', 'Ubicacion registrada: -12.093100, -77.046500\nhttps://www.google.com/maps/search/?api=1&query=-12.0931,-77.0465'],
   [35, 'in', 'Perfecto, cuanto tardan?'],
@@ -326,7 +330,9 @@ void carla;
 
 await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes });
+// Los stickers de la demo van a una carpeta temporal: nada queda en el proyecto.
+const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mkdtempSync(join(tmpdir(), 'wa-demo-stickers-')), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers });
 startScheduler({ repos, sender }, 3_000);
 startMonitorSalud(salud, undefined, 15_000);
 startGoteo({ repos, sender, salud, politica }, 3_000);

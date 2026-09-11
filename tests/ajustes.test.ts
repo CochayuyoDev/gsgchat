@@ -217,6 +217,12 @@ describe('ajustes y plantillas propias: la API', () => {
     expect(body.ajustes.maxIntentos).toBe(3);
     expect(body.catalogo.solicitud).toEqual(['solicitud_ubicacion', 'solicitud_ubicacion_b']);
     expect(body.plantillas.map((t: { name: string }) => t.name)).toContain('solicitud_ubicacion');
+    // Para la pantalla: un cliente de ejemplo y como le llegaria cada paso, en cristiano.
+    expect(body.ejemplo).toMatchObject({ nombre: 'Ana Ruiz', pedido: 'P-1024', distrito: 'Miraflores' });
+    expect(body.textosDeSiempre.solicitud).toContain('Ana');
+    expect(body.textosDeSiempre.solicitud).toContain('P-1024');
+    expect(body.textosDeSiempre.recordatorio).toContain('ubicación');
+    expect(typeof body.usaPlantillas).toBe('boolean');
   });
 
   it('POST guarda, valida y se refleja en el estado del modulo; DELETE vuelve a la configuracion', async () => {

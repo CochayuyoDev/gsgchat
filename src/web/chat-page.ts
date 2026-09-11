@@ -56,6 +56,9 @@ const CSS = `
   }
   .side header h1 { font-size: 17px; margin: 0; flex: 1; }
   .search { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .filtros { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .filtros .f { flex: none; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+  .filtros .f.activo { background: var(--accent); border-color: var(--accent); color: #fff; }
   .search input { width: 100%; padding: 8px 12px; border: 0; border-radius: 8px;
     background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
   .chats { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -105,6 +108,7 @@ const CSS = `
     box-shadow: 0 1px 0.5px rgba(0,0,0,.13); white-space: pre-wrap; word-wrap: break-word;
     font-size: 14.2px; line-height: 1.4;
   }
+  .msg.pendiente { opacity: .7; }
   .msg.out { align-self: flex-end; background: var(--mine); }
   .msg.in { align-self: flex-start; background: var(--theirs); }
 
@@ -183,12 +187,24 @@ const CSS = `
   .atajos .op b { font-family: ui-monospace, Consolas, monospace; color: var(--accent); flex: none; min-width: 90px; }
   .atajos .op span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .atajos .pie { padding: 6px 16px; font-size: 12px; color: var(--muted); }
+  .stickers-popup { background: var(--panel); border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 10px; flex-wrap: wrap; max-height: 220px; overflow: auto; flex: none; box-shadow: 0 -8px 24px rgba(0,0,0,.08); }
+  .stickers-popup img { width: 84px; height: 84px; object-fit: contain; border-radius: 10px; cursor: pointer; border: 1px solid transparent; background: var(--header); }
+  .stickers-popup img:hover { border-color: var(--accent); }
+  .stickers-popup .pie { width: 100%; font-size: 12px; color: var(--muted); }
+  .msg img.sticker { width: 150px; height: 150px; object-fit: contain; display: block; background: transparent; }
+  .msg.solo-sticker { background: transparent; box-shadow: none; padding: 2px; }
   .ayuda-teclas { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 60; display: grid; place-items: center; padding: 20px; }
   .ayuda-teclas .caja { background: var(--panel); color: var(--text); border-radius: 14px; padding: 20px 22px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
   .ayuda-teclas h3 { margin: 0 0 10px; font-size: 16px; }
   .ayuda-teclas table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .ayuda-teclas td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
   .ayuda-teclas kbd { font: 600 12px ui-monospace, Consolas, monospace; background: var(--header); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
+  .rapidas-barra { display: flex; gap: 8px; padding: 8px 14px 0; background: var(--header); flex: none; overflow-x: auto; scrollbar-width: thin; }
+  .rapidas-barra .chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+  .rapidas-barra .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .rapidas-barra .chip.accion { background: rgba(18,140,126,.10); border-color: rgba(18,140,126,.35); color: var(--accent); font-weight: 600; }
+  .rapidas-barra .chip.editar { color: var(--muted); border-style: dashed; }
+  .rapidas-barra.ocupada .chip { opacity: .5; pointer-events: none; }
   .tools { display: flex; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; background: var(--header); flex: none; }
   .tools.plegado { display: none; }
   .tools input { cursor: text; flex: 1; min-width: 180px; }
@@ -297,6 +313,12 @@ ${bandaDemo}
     </header>
     ${aviso}
     <div class="search"><input id="q" placeholder="Buscar por nombre o numero" autocomplete="off"></div>
+    <div class="filtros" id="filtros">
+      <button class="f activo" type="button" data-filtro="todos">Todos</button>
+      <button class="f" type="button" data-filtro="sin_leer">Sin leer</button>
+      <button class="f" type="button" data-filtro="esperan">Esperan respuesta</button>
+      <button class="f" type="button" data-filtro="ventana">Escribieron hoy</button>
+    </div>
     <div class="chats" id="chats"></div>
     <div class="resumen hidden" id="rb-resumen"></div>
     <div class="chats hidden" id="respaldos"></div>
@@ -327,9 +349,12 @@ ${bandaDemo}
       <button id="ask-loc">Pedir su ubicacion</button>
     </div>
     <div class="atajos hidden" id="atajos-popup"></div>
+    <div class="stickers-popup hidden" id="stickers-popup"></div>
+    <div class="rapidas-barra hidden" id="rapidas-barra"></div>
     <div class="composer hidden" id="composer">
       <button class="ghost" id="mas" title="Mandar o pedir ubicacion">📎</button>
       <button class="ghost" id="rapidas" title="Respuestas rápidas (escribe / en el mensaje)">⚡</button>
+      <button class="ghost" id="stickers-boton" title="Mandar un sticker">🙂</button>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje (/ para respuestas rápidas)"></textarea>
       <button id="send" title="Enviar">➤</button>
     </div>
@@ -429,6 +454,22 @@ var lastCount = 0;
 var modo = 'chat';
 var enRespaldos = false;
 
+/* Filtros de la lista: todo, sin leer, con el cliente esperando respuesta,
+   o que escribieron en las ultimas 24 h (se les puede escribir libre). */
+var filtroLista = 'todos';
+function pasaFiltro(c) {
+  if (filtroLista === 'sin_leer') return c.unread > 0;
+  if (filtroLista === 'esperan') return c.lastMessage && c.lastMessage.direction === 'in';
+  if (filtroLista === 'ventana') return c.windowOpen;
+  return true;
+}
+document.querySelectorAll('#filtros .f').forEach(function (b) {
+  b.onclick = function () {
+    filtroLista = b.getAttribute('data-filtro');
+    document.querySelectorAll('#filtros .f').forEach(function (x) { x.classList.toggle('activo', x === b); });
+    loadChats();
+  };
+});
 async function loadChats(keepScroll) {
   try {
     var data = await api('/admin/chat/conversations?limit=100&q=' + encodeURIComponent(document.getElementById('q').value.trim()));
@@ -443,7 +484,12 @@ async function loadChats(keepScroll) {
       pintarLista(box, '<div class="empty">Todavia no hay conversaciones.<br>En cuanto alguien te escriba, aparece aqui.</div>', top);
       return;
     }
-    var html = conversations.map(function (c) {
+    var visibles = conversations.filter(pasaFiltro);
+    if (!visibles.length) {
+      pintarLista(box, '<div class="empty">Ninguna conversación con ese filtro.</div>', top);
+      return;
+    }
+    var html = visibles.map(function (c) {
       var last = c.lastMessage;
       var prefijo = last && last.direction === 'out' ? tick(last.status) + ' ' : '';
       var texto = last ? (last.body || '') : 'Sin mensajes todavia';
@@ -524,8 +570,9 @@ function renderMessages(messages, scrollToEnd) {
     // El primero de cada bloque lleva pico; los siguientes se pegan a el.
     var primero = i === 0 || messages[i - 1].direction !== m.direction || d !== diaPrevio;
     diaPrevio = d;
+    var soloSticker = m.kind === 'sticker' && !(m.body || '').trim();
     html += '<div class="msg ' + (m.direction === 'out' ? 'out' : 'in') +
-      (primero ? ' primero' : '') + '">' +
+      (primero ? ' primero' : '') + (soloSticker ? ' solo-sticker' : '') + '">' +
       adjuntoHtml(m) +
       withLinks(m.body || '') +
       '<span class="meta">' + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
@@ -548,7 +595,8 @@ function adjuntoHtml(m) {
   if (!media || !media.id) return '';
 
   var kind = media.kind || m.kind;
-  var attrs = ' class="adjunto" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
+  if (kind === 'sticker' && media.url) return '<img class="adjunto sticker" src="' + esc(media.url) + '" alt="">';
+  var attrs = ' class="adjunto' + (kind === 'sticker' ? ' sticker' : '') + '" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
 
   if (kind === 'image' || kind === 'sticker') return '<img' + attrs + ' alt="">';
   if (kind === 'video') return '<video' + attrs + ' controls playsinline></video>';
@@ -657,15 +705,19 @@ function renderComposer(data) {
 
   if (!composer || !tools || !locked) return;
 
+  var barra = document.getElementById('rapidas-barra');
   if (data.canWrite) {
     composer.classList.remove('hidden');
     tools.classList.remove('hidden');
     locked.classList.add('hidden');
+    barra.classList.remove('hidden');
+    pintarBarraRapidas();
     return;
   }
 
   composer.classList.add('hidden');
   tools.classList.add('hidden');
+  barra.classList.add('hidden');
   locked.classList.remove('hidden');
 
   if (data.contact.optOutAt) {
@@ -698,17 +750,44 @@ async function enviarPlantilla() {
   await enviar({ templateName: partes[0], templateLanguage: partes[1], variables: vars });
 }
 
+/* El mensaje se pinta al instante como "enviando" y se confirma cuando el
+   servidor responde: asi el boton se siente inmediato aunque WhatsApp tarde. */
+function pintarPendiente(texto) {
+  var box = document.getElementById('messages');
+  if (!box || box.classList.contains('hidden')) return null;
+  var vacio = box.querySelector('.empty');
+  if (vacio) vacio.remove();
+  var el = document.createElement('div');
+  el.className = 'msg out primero pendiente';
+  el.innerHTML = withLinks(texto) + '<span class="meta">enviando… <span class="tick">🕓</span></span>';
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+  return el;
+}
+var enviando = 0;
 async function enviar(payload) {
   if (!current) return;
+  var pendiente = null;
+  if (payload.text) pendiente = pintarPendiente(payload.text);
+  else if (payload.askLocation) pendiente = pintarPendiente('📍 Solicitud de ubicación');
+  else if (payload.location) pendiente = pintarPendiente('🗺 Pin: ' + payload.location);
+  if (enviando && (payload.askLocation || payload.text)) { toast('Espera: todavía está saliendo el anterior.'); if (pendiente) pendiente.remove(); return; }
+  var boton = document.getElementById('send');
+  var barra = document.getElementById('rapidas-barra');
+  enviando++;
+  if (boton) boton.disabled = true;
+  if (barra) barra.classList.add('ocupada');
   try {
     payload.contactId = current.id;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
     if (r.ok === false) {
+      if (pendiente) pendiente.remove();
       toast('No salio: ' + (r.reason || r.error || 'bloqueado por las guardas'));
     }
     await openChat(current.id, true);
     loadChats(true);
-  } catch (error) { toast(error.message); }
+  } catch (error) { if (pendiente) pendiente.remove(); toast(error.message); }
+  finally { enviando--; if (!enviando) { if (boton) boton.disabled = false; if (barra) barra.classList.remove('ocupada'); } }
 }
 
 var input = document.getElementById('text');
@@ -733,6 +812,7 @@ var atajos = [];
 var atajoSel = 0;
 async function cargarAtajos() {
   try { atajos = (await api('/admin/chat/atajos')).atajos || []; } catch (e) { atajos = []; }
+  pintarBarraRapidas();
 }
 function negocioNombre() {
   var app = document.getElementById('s-app');
@@ -779,11 +859,83 @@ function elegirAtajo() {
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
 }
+/* La barra de botones: las acciones fijas y una pastilla por respuesta rapida.
+   Un clic manda el texto tal cual (con el nombre del cliente puesto); con
+   Shift se deja en el cuadro para retocarlo antes. Mientras sale uno, la
+   barra se bloquea: un segundo clic no manda dos veces. */
+function etiquetaDe(atajo) {
+  var t = atajo.replace(/[_-]+/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function ponerAtajo(a, directo) {
+  var texto = rellenarAtajo(a.texto);
+  if (directo) {
+    enviar({ text: texto }).then(function () { if (a.sticker) return mandarSticker(a.sticker); });
+    return;
+  }
+  input.value = texto;
+  input.style.height = 'auto';
+  input.style.height = Math.min(120, input.scrollHeight) + 'px';
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+function pintarBarraRapidas() {
+  var barra = document.getElementById('rapidas-barra');
+  if (!barra) return;
+  var html = '<button class="chip accion" type="button" data-accion="ubicacion" title="Le manda la solicitud de ubicación (Ctrl+Shift+U)">📍 Pedir ubicación</button>' +
+    '<button class="chip accion" type="button" data-accion="pin" title="Mandarle un pin del mapa (Ctrl+Shift+L)">🗺 Mandar pin</button>' +
+    atajos.map(function (a, i) {
+      return '<button class="chip" type="button" data-rapida="' + i + '" title="Manda: ' + esc(rellenarAtajo(a.texto)) + ' (Shift+clic para retocarlo antes)">' + esc(etiquetaDe(a.atajo)) + '</button>';
+    }).join('') +
+    '<a class="chip editar" href="/panel#automatizacion" title="Añadir, cambiar o quitar respuestas rápidas">✎ Editar</a>';
+  if (barra.innerHTML !== html) barra.innerHTML = html;
+  barra.querySelectorAll('[data-rapida]').forEach(function (b) {
+    b.onclick = function (ev) { var a = atajos[Number(b.getAttribute('data-rapida'))]; if (a) ponerAtajo(a, !ev.shiftKey); };
+  });
+  var pedir = barra.querySelector('[data-accion="ubicacion"]');
+  if (pedir) pedir.onclick = function () { if (!enviando) enviar({ askLocation: true }); };
+  var pin = barra.querySelector('[data-accion="pin"]');
+  if (pin) pin.onclick = function () { document.getElementById('tools').classList.remove('plegado'); document.getElementById('loc').focus(); };
+}
 document.getElementById('rapidas').onclick = function () {
   if (atajosAbierto()) return cerrarAtajos();
   atajoSel = 0;
   pintarAtajos('');
   input.focus();
+};
+
+/* --- stickers: el boton 🙂 abre la biblioteca; un clic lo manda ------------ */
+var stickers = [];
+async function cargarStickers() {
+  try { stickers = (await api('/admin/stickers')).stickers || []; } catch (e) { stickers = []; }
+}
+function stickersAbierto() { return !document.getElementById('stickers-popup').classList.contains('hidden'); }
+function cerrarStickers() { document.getElementById('stickers-popup').classList.add('hidden'); }
+async function mandarSticker(id) {
+  if (!current) return;
+  if (enviando) { toast('Espera: todavía está saliendo el anterior.'); return; }
+  cerrarStickers();
+  var pendiente = pintarPendiente('🙂 sticker');
+  var barra = document.getElementById('rapidas-barra');
+  enviando++;
+  if (barra) barra.classList.add('ocupada');
+  try {
+    var r = await api('/admin/stickers/' + encodeURIComponent(id) + '/enviar', { method: 'POST', body: { phone: current.phone } });
+    if (r.ok === false) { if (pendiente) pendiente.remove(); toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas')); }
+    await openChat(current.id, true);
+  } catch (error) { if (pendiente) pendiente.remove(); toast(error.message); }
+  finally { enviando--; if (!enviando && barra) barra.classList.remove('ocupada'); }
+}
+document.getElementById('stickers-boton').onclick = async function () {
+  if (stickersAbierto()) return cerrarStickers();
+  if (!stickers.length) await cargarStickers();
+  var box = document.getElementById('stickers-popup');
+  box.innerHTML = stickers.length
+    ? stickers.map(function (s) { return '<img src="/stickers/' + esc(s.archivo) + '" title="' + esc(s.nombre) + '" data-sticker="' + esc(s.id) + '" alt="">'; }).join('') + '<div class="pie">Un clic lo manda. Se suben en Panel → Stickers.</div>'
+    : '<div class="pie">Todavía no hay stickers. Súbelos en <a class="link" href="/panel#stickers">Panel → Stickers</a>.</div>';
+  box.querySelectorAll('[data-sticker]').forEach(function (img) { img.onclick = function () { mandarSticker(img.getAttribute('data-sticker')); }; });
+  cerrarAtajos();
+  box.classList.remove('hidden');
 };
 
 /* --- teclas: moverse entre chats y pedir ubicacion sin soltar el teclado --- */
@@ -819,7 +971,9 @@ function ayudaTeclas() {
   caja.className = 'ayuda-teclas';
   caja.innerHTML = '<div class="caja"><h3>Atajos del chat</h3><table>' +
     '<tr><td><kbd>/</kbd> en el mensaje</td><td>Respuestas rápidas (se filtran al escribir; Enter o Tab pone el texto)</td></tr>' +
+    '<tr><td>Botones sobre el cuadro</td><td>Un clic manda la respuesta rápida al instante (con el nombre puesto); <kbd>Shift</kbd>+clic la deja en el cuadro para retocarla</td></tr>' +
     '<tr><td><kbd>⚡</kbd></td><td>Ver todas las respuestas rápidas</td></tr>' +
+    '<tr><td><kbd>🙂</kbd></td><td>Mandar un sticker de la biblioteca</td></tr>' +
     '<tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Enviar / salto de línea</td></tr>' +
     '<tr><td><kbd>Alt</kbd>+<kbd>↓</kbd> <kbd>Alt</kbd>+<kbd>↑</kbd></td><td>Siguiente / anterior conversación</td></tr>' +
     '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></td><td>Pedirle su ubicación</td></tr>' +
@@ -836,6 +990,7 @@ document.getElementById('atajos-ayuda').onclick = ayudaTeclas;
 async function mandarTexto() {
   var texto = input.value.trim();
   if (!texto) return;
+  if (enviando) { toast('Espera: todavía está saliendo el anterior.'); return; }
   input.value = '';
   input.style.height = 'auto';
   await enviar({ text: texto });
@@ -1174,6 +1329,7 @@ async function restaurar(a) {
 }
 
 cargarAtajos();
+cargarStickers();
 loadTemplates();
 loadChats().then(abrirDesdeUrl);
 `;

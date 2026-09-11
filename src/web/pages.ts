@@ -92,11 +92,16 @@ const CSS = `
   .tecnico { margin-top: 8px; }
   .tecnico summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
   .tecnico pre { margin-top: 6px; max-height: 220px; }
-  .at-fila { display: grid; grid-template-columns: 160px 1fr auto; gap: 8px; align-items: center; margin-top: 8px; }
+  .at-fila { display: grid; grid-template-columns: 150px 1fr 170px; gap: 8px; align-items: start; margin-top: 8px; }
   .at-fila input, .at-fila textarea { margin: 0; }
   .at-fila textarea { min-height: 44px; font-family: inherit; }
   .at-fila .pre { font-family: ui-monospace, Consolas, monospace; }
   @media (max-width: 700px) { .at-fila { grid-template-columns: 1fr; } }
+  .sk-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); margin-top: 10px; }
+  .sk-item { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--bg); text-align: center; }
+  .sk-item img { width: 110px; height: 110px; object-fit: contain; display: block; margin: 0 auto 6px; background: repeating-conic-gradient(rgba(0,0,0,.05) 0 25%, transparent 0 50%) 0 0/16px 16px; border-radius: 8px; }
+  .sk-item b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sk-item small { color: var(--muted); display: block; font-size: 11.5px; margin-bottom: 6px; }
   .cf-vigente { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .cf-vigente span { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; }
   .cf-vigente b { color: var(--accent); }
@@ -244,6 +249,7 @@ const SECCIONES: Array<[string, string, string]> = [
   ['automatizacion', 'Automatización', 'Reglas y secuencias'],
   ['plantillas', 'Plantillas', 'Las de Meta y las propias'],
   ['historial', 'Historial de envíos', 'Todo lo que salió, con su estado'],
+  ['stickers', 'Stickers', 'Tras el saludo, el gracias o la despedida, y a mano desde el chat'],
   ['extraer', 'Extraer coordenadas', 'De un link de mapa o un texto'],
   ['configuracion', 'Configuración', 'Horario de envío, ritmo, modo prueba, avisos y nombre'],
   ['usuarios', 'Usuarios', 'Cuentas del equipo, roles y contraseñas'],
@@ -761,6 +767,34 @@ ${warning}
   <div class="actions"><button class="ghost" id="mc-salir">Cerrar sesion</button></div>
 </section>
 
+<section id="tab-stickers" class="card hidden">
+  <h2>Stickers</h2>
+  <p class="muted">Un toque humano después de un mensaje. Sube tus stickers (PNG, JPG, GIF o WebP: se convierten solos al formato de WhatsApp) y elige cuál sale
+  <b>solo</b> tras el saludo, tras el "gracias" o en la despedida. Desde el chat se manda cualquiera con el botón 🙂, y una respuesta rápida puede llevar uno pegado.
+  Con la API oficial de Meta solo salen dentro de las 24 h desde que el cliente escribió.</p>
+
+  <h3>Subir un sticker</h3>
+  <div class="toolbar">
+    <div><label for="sk-archivo">Imagen</label><input id="sk-archivo" type="file" accept="image/png,image/jpeg,image/gif,image/webp"></div>
+    <div><label for="sk-nombre">Nombre</label><input id="sk-nombre" placeholder="Hola con carita"></div>
+    <div><label for="sk-uso">Para qué es</label><select id="sk-uso"></select></div>
+    <div><label>&nbsp;</label><button id="sk-subir">Subir</button></div>
+  </div>
+  <span id="sk-state" class="pill hidden"></span>
+
+  <h3>Biblioteca</h3>
+  <div id="sk-grid" class="sk-grid"></div>
+
+  <h3>Cuándo salen solos</h3>
+  <div class="toolbar">
+    <div><label for="sk-auto-inicio">Tras el saludo del asistente (primer mensaje a un cliente)</label><select id="sk-auto-inicio"></select></div>
+    <div><label for="sk-auto-gracias">Tras el "gracias" (mandó su ubicación / ficha completa)</label><select id="sk-auto-gracias"></select></div>
+    <div><label for="sk-auto-despedida">En la despedida (pasa al repartidor)</label><select id="sk-auto-despedida"></select></div>
+  </div>
+  <label class="inline" style="margin-top:8px"><input type="checkbox" id="sk-auto-reparto"> También tras el primer mensaje del reparto (la solicitud de ubicación)</label>
+  <div class="actions"><button id="sk-guardar-auto">Guardar</button><span id="sk-auto-state" class="pill hidden"></span></div>
+</section>
+
 <section id="tab-integraciones" class="card hidden">
   <h2>Claves de API</h2>
   <p class="muted">Con una clave, un programa (el sistema de GSG, un script) entra en la API sin usuario ni contrasena.
@@ -804,7 +838,7 @@ var LOADERS = {
   campanas: function () { loadTemplates(); loadCampaigns(); },
   grupos: loadGrupos,
   automatizacion: loadAutomation, plantillas: loadTemplates, historial: loadDeliveries, usuarios: loadUsuarios, integraciones: loadClaves,
-  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad
+  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad, stickers: loadStickers
 };
 /* Lo que se refresca cada vez que se entra, no solo la primera. */
 var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true };
@@ -1064,7 +1098,10 @@ document.getElementById('gr-ver').onclick = busy('gr-ver', async function () {
     var r = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() });
     grTelefonos = r.telefonos; grTotal = r.total;
     var c = r.cifras;
-    var chips = ['<span><b>' + r.total + '</b> clientes</span>', '<span>con opt-in <b>' + c.conOptIn + '</b></span>', '<span>escribieron en 24 h <b>' + c.ventanaAbierta + '</b></span>']
+    var sinOptIn = r.total - c.conOptIn;
+    var chips = ['<span><b>' + r.total + '</b> clientes</span>', '<span>con opt-in <b>' + c.conOptIn + '</b></span>']
+      .concat(sinOptIn ? ['<span style="border-color:var(--warn);color:var(--warn)">sin consentimiento <b>' + sinOptIn + '</b>: a esos no les saldrá nada iniciado por ti</span>'] : [])
+      .concat(['<span>escribieron en 24 h <b>' + c.ventanaAbierta + '</b></span>'])
       .concat(Object.keys(c.reparto).map(function (k) { return '<span>' + esc(k) + ' <b>' + c.reparto[k] + '</b></span>'; }))
       .concat(Object.keys(c.ficha).map(function (k) { return '<span>ficha ' + esc(k) + ' <b>' + c.ficha[k] + '</b></span>'; }));
     document.getElementById('gr-resumen').innerHTML = chips.join('');
@@ -1098,11 +1135,13 @@ document.getElementById('gr-previa').onclick = busy('gr-previa', async function 
 document.getElementById('gr-enviar').onclick = busy('gr-enviar', async function () {
   try {
     var previa = await api('/admin/grupos/enviar', { method: 'POST', body: grEnvio(true) });
-    var ok = await confirmarDialogo({ titulo: 'Enviar a ' + previa.total + ' cliente(s)', texto: 'Saldrá por goteo, al ritmo del número y solo en horario. Primero el canario; si cae bien, el resto. Se puede pausar desde Campañas.', boton: 'Enviar' });
+    var previaGrupo = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() });
+    var sinConsentimiento = previaGrupo.total - previaGrupo.cifras.conOptIn;
+    var ok = await confirmarDialogo({ titulo: 'Enviar a ' + previa.total + ' cliente(s)', texto: 'Saldrá por goteo, al ritmo del número y solo en horario. Primero el canario; si cae bien, el resto. Se puede pausar desde Campañas.' + (sinConsentimiento ? ' OJO: ' + sinConsentimiento + ' no tiene(n) consentimiento registrado y quedarán bloqueados (regístralo en Contactos).' : ''), boton: 'Enviar' });
     if (!ok) return;
     var r = await api('/admin/grupos/enviar', { method: 'POST', body: grEnvio(false) });
     var out = document.getElementById('gr-out');
-    out.innerHTML = '<div class="res ok"><b>Campaña creada: ' + r.enqueued + ' destinatario(s)' + (r.canario ? ', canario de ' + r.canario : '') + '</b><span>Van saliendo por goteo. Míralo en <a href="/panel#campanas">Campañas</a> y cada envío en el <a href="/panel#historial">Historial</a>.</span></div>';
+    out.innerHTML = '<div class="res ok"><b>Campaña creada: ' + r.enqueued + ' destinatario(s)' + (r.canario ? ', canario de ' + r.canario : '') + '</b><span>Van saliendo por goteo, al ritmo del número: unos pocos por minuto, en horario, y nunca dos mensajes seguidos al mismo cliente en menos de la separación mínima (Configuración → Ritmo). Si a alguien se le escribió hace poco, el suyo espera su turno.</span><span>Síguelo en <a href="/panel#campanas">Campañas</a> y cada envío en el <a href="/panel#historial">Historial</a>.</span></div>';
     out.classList.remove('hidden');
     show('gr-state2', 'En marcha', 'ok');
   } catch (error) { show('gr-state2', error.message, 'bad'); }
@@ -1159,6 +1198,66 @@ document.getElementById('ac-buscar').onclick = function () { acOffset = 0; loadA
 document.getElementById('ac-accion').onchange = function () { acOffset = 0; loadActividad(); };
 document.getElementById('ac-prev').onclick = function () { acOffset = Math.max(0, acOffset - acLimit); loadActividad(); };
 document.getElementById('ac-next').onclick = function () { acOffset += acLimit; loadActividad(); };
+
+// --------------------------------------------------------------- stickers
+var stickersCache = [];
+function leerFichero(file) {
+  return new Promise(function (resolve, reject) {
+    var r = new FileReader();
+    r.onload = function () { resolve(String(r.result)); };
+    r.onerror = function () { reject(new Error('No se pudo leer el fichero.')); };
+    r.readAsDataURL(file);
+  });
+}
+function opcionesStickers(sel, elegido) {
+  sel.innerHTML = '<option value="">(ninguno)</option>' + stickersCache.map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === elegido ? ' selected' : '') + '>' + esc(s.nombre) + ' (' + esc(s.uso) + ')</option>'; }).join('');
+}
+async function loadStickers() {
+  try {
+    var r = await api('/admin/stickers');
+    stickersCache = r.stickers;
+    document.getElementById('sk-uso').innerHTML = r.usos.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc(u.etiqueta) + '</option>'; }).join('');
+    document.getElementById('sk-grid').innerHTML = stickersCache.length
+      ? stickersCache.map(function (s) {
+          return '<div class="sk-item"><img src="/stickers/' + esc(s.archivo) + '" alt=""><b title="' + esc(s.nombre) + '">' + esc(s.nombre) + '</b><small>' + esc(s.uso) + ' · ' + Math.round(s.bytes / 1024) + ' KB</small><button class="danger sm" data-sk-borrar="' + esc(s.id) + '">Quitar</button></div>';
+        }).join('')
+      : '<div class="empty">Todavía no hay stickers. Sube el primero arriba.</div>';
+    document.querySelectorAll('[data-sk-borrar]').forEach(function (b) {
+      b.onclick = async function () {
+        var ok = await confirmarDialogo({ titulo: 'Quitar el sticker', texto: 'Si estaba puesto como automático, deja de salir.', boton: 'Quitar', peligro: true });
+        if (!ok) return;
+        try { await api('/admin/stickers/' + b.getAttribute('data-sk-borrar'), { method: 'DELETE' }); loadStickers(); }
+        catch (error) { show('sk-state', error.message, 'bad'); }
+      };
+    });
+    var c = r.configuracion || {};
+    opcionesStickers(document.getElementById('sk-auto-inicio'), c.inicio);
+    opcionesStickers(document.getElementById('sk-auto-gracias'), c.gracias);
+    opcionesStickers(document.getElementById('sk-auto-despedida'), c.despedida);
+    document.getElementById('sk-auto-reparto').checked = Boolean(c.inicioEnReparto);
+  } catch (error) { show('sk-state', error.message, 'bad'); }
+}
+document.getElementById('sk-subir').onclick = busy('sk-subir', async function () {
+  try {
+    var f = document.getElementById('sk-archivo').files[0];
+    if (!f) throw new Error('Elige una imagen.');
+    if (f.size > 4 * 1024 * 1024) throw new Error('La imagen pesa más de 4 MB.');
+    var datos = await leerFichero(f);
+    await api('/admin/stickers', { method: 'POST', body: { nombre: val('sk-nombre') || f.name.replace(/\.[^.]+$/, ''), uso: val('sk-uso'), datos: datos } });
+    show('sk-state', 'Sticker listo', 'ok');
+    document.getElementById('sk-archivo').value = ''; setVal('sk-nombre', '');
+    loadStickers();
+  } catch (error) { show('sk-state', error.message, 'bad'); }
+});
+document.getElementById('sk-guardar-auto').onclick = busy('sk-guardar-auto', async function () {
+  try {
+    await api('/admin/stickers/configuracion', { method: 'POST', body: {
+      inicio: val('sk-auto-inicio') || null, gracias: val('sk-auto-gracias') || null, despedida: val('sk-auto-despedida') || null,
+      inicioEnReparto: document.getElementById('sk-auto-reparto').checked
+    } });
+    show('sk-auto-state', 'Guardado', 'ok');
+  } catch (error) { show('sk-auto-state', error.message, 'bad'); }
+});
 
 // --------------------------------------------------------------- integraciones
 async function loadClaves() {
@@ -1711,19 +1810,23 @@ function stepSummary(s) {
 }
 var atajosCache = [];
 function pintarAtajos() {
+  var opcionesSk = function (elegido) {
+    return '<option value="">sin sticker</option>' + (atajosStickers || []).map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === elegido ? ' selected' : '') + '>' + esc(s.nombre) + '</option>'; }).join('');
+  };
   document.getElementById('at-lista').innerHTML = atajosCache.map(function (a, i) {
-    return '<div class="at-fila"><input class="pre" data-at-atajo="' + i + '" value="' + esc(a.atajo) + '" placeholder="atajo"><textarea data-at-texto="' + i + '" placeholder="Texto que se manda">' + esc(a.texto) + '</textarea><button class="danger sm" data-at-borrar="' + i + '">Quitar</button></div>';
+    return '<div class="at-fila"><input class="pre" data-at-atajo="' + i + '" value="' + esc(a.atajo) + '" placeholder="atajo"><textarea data-at-texto="' + i + '" placeholder="Texto que se manda">' + esc(a.texto) + '</textarea><div><select data-at-sticker="' + i + '" title="Sticker que sale después del texto">' + opcionesSk(a.sticker || '') + '</select><button class="danger sm" data-at-borrar="' + i + '" style="margin-top:6px;width:100%">Quitar</button></div></div>';
   }).join('') || '<div class="empty">Sin atajos. Añade uno.</div>';
   document.querySelectorAll('[data-at-borrar]').forEach(function (b) { b.onclick = function () { leerAtajos(); atajosCache.splice(Number(b.getAttribute('data-at-borrar')), 1); pintarAtajos(); }; });
 }
 function leerAtajos() {
   atajosCache = Array.prototype.slice.call(document.querySelectorAll('[data-at-atajo]')).map(function (inp) {
     var i = inp.getAttribute('data-at-atajo');
-    return { atajo: inp.value.trim().replace(/^\//, ''), texto: document.querySelector('[data-at-texto="' + i + '"]').value.trim() };
+    return { atajo: inp.value.trim().replace(/^\//, ''), texto: document.querySelector('[data-at-texto="' + i + '"]').value.trim(), sticker: (document.querySelector('[data-at-sticker="' + i + '"]') || {}).value || null };
   });
 }
+var atajosStickers = [];
 async function loadAtajos() {
-  try { var r = await api('/admin/chat/atajos'); atajosCache = r.atajos; pintarAtajos(); }
+  try { var r = await api('/admin/chat/atajos'); atajosCache = r.atajos; try { atajosStickers = (await api('/admin/stickers')).stickers; } catch (e) { atajosStickers = []; } pintarAtajos(); }
   catch (error) { show('at-state', error.message, 'bad'); }
 }
 document.getElementById('at-anadir').onclick = function () { leerAtajos(); atajosCache.push({ atajo: '', texto: '' }); pintarAtajos(); };

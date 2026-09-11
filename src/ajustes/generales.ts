@@ -57,15 +57,30 @@ export const ajustesGeneralesSchema = z.object({
   }),
   humanizar: z.boolean().nullable(),
   autoPausa: z.boolean().nullable(),
-  /** Respuestas rapidas del chat: "/atajo" -> texto. null = las de fabrica. */
+  /** Respuestas rapidas del chat: "/atajo" -> texto (y un sticker pegado, opcional). null = las de fabrica. */
   atajos: z
-    .array(z.object({ atajo: z.string().trim().min(1).max(30).transform((v) => v.replace(/^\//, '').toLowerCase()), texto: z.string().trim().min(1).max(1000) }))
+    .array(
+      z.object({
+        atajo: z.string().trim().min(1).max(30).transform((v) => v.replace(/^\//, '').toLowerCase()),
+        texto: z.string().trim().min(1).max(1000),
+        sticker: z.string().max(40).nullable().optional(),
+      }),
+    )
     .max(50)
+    .nullable(),
+  /** Que sticker sale solo en cada momento. Ver src/stickers. */
+  stickers: z
+    .object({
+      inicio: z.string().max(40).nullable().default(null),
+      inicioEnReparto: z.boolean().default(false),
+      gracias: z.string().max(40).nullable().default(null),
+      despedida: z.string().max(40).nullable().default(null),
+    })
     .nullable(),
 });
 
 /** Las respuestas rapidas que trae el sistema; se cambian desde Automatizacion. */
-export const ATAJOS_POR_DEFECTO: Array<{ atajo: string; texto: string }> = [
+export const ATAJOS_POR_DEFECTO: Array<{ atajo: string; texto: string; sticker?: string | null }> = [
   { atajo: 'ubi', texto: 'Hola {nombre}, ¿me compartes tu ubicación por favor? Con el clip 📎 → Ubicación. Así el repartidor llega sin llamarte.' },
   { atajo: 'camino', texto: 'Hola {nombre}, tu pedido {pedido} ya está en camino. En un rato te llega.' },
   { atajo: 'gracias', texto: 'Gracias por su tiempo, {nombre}. ¡Que tenga un buen día!' },
@@ -93,6 +108,7 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   humanizar: null,
   autoPausa: null,
   atajos: null,
+  stickers: null,
 };
 
 /** Un parche: cualquier rama, y dentro de cada rama cualquier campo. */
@@ -105,6 +121,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   humanizar: ajustesGeneralesSchema.shape.humanizar.optional(),
   autoPausa: ajustesGeneralesSchema.shape.autoPausa.optional(),
   atajos: ajustesGeneralesSchema.shape.atajos.optional(),
+  stickers: ajustesGeneralesSchema.shape.stickers.optional(),
 });
 
 export type AjustesGeneralesPatch = z.infer<typeof ajustesGeneralesPatchSchema>;
@@ -119,6 +136,7 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     humanizar: patch.humanizar !== undefined ? patch.humanizar : base.humanizar,
     autoPausa: patch.autoPausa !== undefined ? patch.autoPausa : base.autoPausa,
     atajos: patch.atajos !== undefined ? patch.atajos : base.atajos,
+    stickers: patch.stickers !== undefined ? patch.stickers : base.stickers,
   };
 }
 
@@ -182,7 +200,7 @@ export interface ServicioAjustes {
   /** true si SOLO_NUMEROS vino del servidor: la pantalla no puede soltarlo. */
   modoPruebaFijado(): boolean;
   /** Las respuestas rapidas del chat: las guardadas o las de fabrica. */
-  atajos(): Array<{ atajo: string; texto: string }>;
+  atajos(): Array<{ atajo: string; texto: string; sticker?: string | null }>;
 }
 
 export async function crearServicioAjustes(deps: {

@@ -12,7 +12,7 @@ import type { Contact, NumberState, Template, TemplateCategory } from '../db/rep
 import type { DecisionRitmo } from '../salud/ritmo.js';
 import { contactoSuprimido } from '../salud/supresion.js';
 
-export type MessageKind = 'template' | 'freeform' | 'location' | 'interactive';
+export type MessageKind = 'template' | 'freeform' | 'location' | 'interactive' | 'sticker';
 
 export interface SendIntent {
   contact: Contact;

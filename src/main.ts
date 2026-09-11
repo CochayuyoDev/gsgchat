@@ -18,6 +18,8 @@ import { politicaDesdeConfig } from './salud/politica.js';
 import { crearMonitor } from './salud/monitor.js';
 import { arrancarServicios, resumenPolitica } from './servicios.js';
 import { crearServicioAjustes } from './ajustes/generales.js';
+import { crearServicioStickers } from './stickers/stickers.js';
+import { mediaDirectory } from './whatsapp/local/media.js';
 
 const runtime = await createRuntime({ migrate: true });
 const { config, repos, settings, wa } = runtime;
@@ -63,6 +65,10 @@ const sender = createSender({
   soloNumeros: () => ajustes.soloNumeros(),
 });
 
+// La biblioteca de stickers y los automaticos (tras el saludo, el gracias y
+// la despedida). Los ficheros van a la carpeta de medios.
+const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mediaDirectory(), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
+
 if (ajustes.soloNumeros().length) {
   console.log(`
   MODO PRUEBA: solo se escribe a ${ajustes.soloNumeros().join(', ')} (se cambia en /panel#configuracion).
@@ -93,14 +99,14 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })
   : null;
 
 // Todo lo que trabaja solo: monitor, secuencias, goteo, rutas, avisos, GSG.
-const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, ajustes, log: app.log });
+const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, ajustes, stickers, log: app.log });
 
 await app.listen({ port: config.PORT, host: '0.0.0.0' });
 

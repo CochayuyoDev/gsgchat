@@ -18,6 +18,7 @@
  * le toca mirar.
  */
 
+import type { ServicioStickers } from '../stickers/stickers.js';
 import type { Config } from '../config.js';
 import type { Repos } from '../db/repos.js';
 import type { Solicitud } from '../db/rutas.js';
@@ -90,6 +91,8 @@ export interface MotorDeps {
   opciones: OpcionesMotor;
   /** Como se llama el negocio ahora (se cambia desde la pantalla). */
   nombreNegocio?: () => string;
+  /** Los stickers automaticos (tras el primer mensaje, tras la despedida). Ver src/stickers. */
+  stickers?: ServicioStickers;
   /**
    * Si hay que mandar plantilla en vez de texto libre.
    *
@@ -335,7 +338,7 @@ export function crearMotor(deps: MotorDeps): Motor {
     // contesto: a quien ignoro tres mensajes, un cuarto solo le suma motivos
     // para bloquear; y con plantilla, gastar una en despedirse no aporta.
     if (!deps.usarPlantilla() && solicitud.phone && respondio) {
-      await sender
+      const despedida = await sender
         .send({
           phone: solicitud.phone,
           kind: 'freeform',
@@ -343,6 +346,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           text: textoDerivacion(contexto(solicitud)),
         })
         .catch(() => undefined);
+      if (despedida?.ok && deps.stickers) await deps.stickers.automatico('despedida', solicitud.phone);
     }
 
     return { accion: 'derivacion', solicitudId: solicitud.id };
@@ -419,6 +423,7 @@ export function crearMotor(deps: MotorDeps): Motor {
         wamid: salida.wamid,
         via: deps.usarPlantilla() ? `plantilla ${elegida!.name}` : 'texto con boton de ubicacion',
       });
+      if (paso === 'solicitud' && deps.stickers) await deps.stickers.automatico('inicio', phone, { reparto: true });
 
       return { accion: 'envio', solicitudId: solicitud.id, paso };
     }

@@ -58,6 +58,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * tal regla, y el chat se comporta como el WhatsApp Web de siempre.
    */
   const aMano = () => !ventanaObliga();
+  // Con la API de Meta hay boton nativo; con el QR no (llegan rotos a una
+  // cuenta personal), asi que el texto explica el clip en vez de un boton
+  // que no existe.
+  const textoPedirUbicacion = () =>
+    providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS
+      ? 'Comparte tu ubicación con el botón de aquí abajo, por favor.'
+      : '¿Nos compartes tu ubicación, por favor? Desde el clip 📎 → Ubicación → Enviar tu ubicación actual.';
 
   app.get('/admin/chat/conversations', async (request) => {
     const query = z
@@ -145,7 +152,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         category: 'UTILITY',
         manual: aMano(),
         interactive: {
-          body: body.text?.trim() || 'Comparte tu ubicacion con el boton de abajo, por favor.',
+          body: body.text?.trim() || textoPedirUbicacion(),
           locationRequest: true,
         },
       });

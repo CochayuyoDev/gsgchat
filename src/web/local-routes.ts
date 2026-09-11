@@ -8,6 +8,7 @@
  */
 
 import type { ServicioAjustes } from '../ajustes/generales.js';
+import type { ServicioStickers } from '../stickers/stickers.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { existsSync } from 'node:fs';
@@ -51,6 +52,7 @@ export interface LocalRoutesDeps {
   autoConectar?: boolean;
   /** Los ajustes generales (modo prueba, nombre) cambiados desde la pantalla. */
   ajustes?: ServicioAjustes;
+  stickers?: ServicioStickers;
 }
 
 /** El navegador necesita saber que es para decidir si lo pinta o lo baja. */
@@ -97,7 +99,7 @@ export async function registerLocalRoutes(
 
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, seen: createSeenCache() };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, seen: createSeenCache() };
 
   async function arrancar() {
     return startLocal({

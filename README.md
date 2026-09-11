@@ -777,7 +777,7 @@ El menu:
 
 ```
 Inicio · Manual de uso · Soporte · [Buscar modulo… Ctrl K]
-CONVERSACIONES     Chats · Enviar mensaje · Historial de envios
+CONVERSACIONES     Chats · Enviar mensaje · Historial de envios · Stickers
 REPARTO            Ubicaciones para reparto · Ajustes del reparto
 CAMPAÑAS           Enviar a un grupo · Campañas · Automatización · Plantillas
 CONTACTOS          Contactos · Ubicaciones recibidas · Rastreo en vivo · Extraer coordenadas
@@ -824,12 +824,35 @@ grupo en una secuencia o exportarlo. Codigo en `src/segmentos/`.
 
 ### Atajos del chat
 
-Respuestas rapidas con `/` en el mensaje (se filtran al escribir, Enter o Tab
+Una barra de **botones** sobre el cuadro de escribir: "Pedir ubicacion",
+"Mandar pin" y una pastilla por respuesta rapida (clic la manda al instante con
+el nombre del cliente; Shift+clic la deja en el cuadro para retocarla). Lo que
+se escribe a mano desde el chat no espera la escritura simulada: sale con un
+parpadeo de "escribiendo..." y ya. Tambien con `/` en el mensaje (se filtran al escribir, Enter o Tab
 las pone con `{nombre}`, `{pedido}` y `{negocio}` rellenos; se editan en
 Automatizacion → Respuestas rapidas), `⚡` para verlas todas, `Alt+↓/↑` para
 cambiar de conversacion, `Ctrl+Shift+U` pide la ubicacion, `Ctrl+Shift+L` abre
 el pin, `/` fuera del mensaje va al buscador, `F1` la lista. La cabecera del
 chat dice el pedido del reparto y en que punto va.
+
+La lista de chats tiene filtros: **Todos · Sin leer · Esperan respuesta ·
+Escribieron hoy**. La cabecera de cada chat dice el pedido del reparto y en que
+punto va.
+
+### Stickers (`/panel#stickers`)
+
+Un toque humano despues de un mensaje. Se suben PNG, JPG, GIF o WebP y el
+sistema los convierte a lo que WhatsApp pide (WebP 512x512 con fondo
+transparente, con `sharp`); los ficheros van a `.wa-media/stickers/` y se
+sirven en publico en `/stickers/<archivo>` (la API de Meta se lo baja de ahi).
+Se elige cual sale **solo** en cada momento: tras el saludo del asistente a un
+cliente nuevo (y, si se marca, tras el primer mensaje del reparto), tras el
+"gracias" (mando su ubicacion o completo la ficha) y en la despedida (pasa al
+repartidor). Desde el chat se manda cualquiera con el boton 🙂, y una respuesta
+rapida puede llevar uno pegado (Automatizacion → Respuestas rapidas). Un
+sticker nunca frena nada: si las guardas lo bloquean, no sale y ya. Con el QR
+(Baileys) sale como sticker de verdad; con la API de Meta, dentro de las 24 h;
+con WAHA, como imagen. Codigo en `src/stickers/`.
 
 ### Actividad (`/panel#actividad`)
 
@@ -905,6 +928,10 @@ Todas bajo `Authorization: Bearer wak_...` (una clave de API creada en
 | POST | `/admin/grupos/enviar` | `{criterio, plantilla | texto, nombre?, canario?, ritmoPorHora?, soloVistaPrevia?}` → campaña por goteo |
 | POST | `/admin/grupos/exportar` | el grupo en CSV |
 | GET/POST | `/admin/chat/atajos` | respuestas rapidas del chat (POST solo admin; `atajos: null` vuelve a las de fabrica) |
+| GET/POST/DELETE | `/admin/stickers`, `/admin/stickers/:id` | la biblioteca de stickers (POST: `{nombre, uso, datos}` con la imagen en base64) |
+| POST | `/admin/stickers/configuracion` | que sticker sale solo en cada momento (admin) |
+| POST | `/admin/stickers/:id/enviar` | `{phone}` → manda ese sticker |
+| GET | `/stickers/:archivo` | el fichero WebP, publico |
 | POST | `/admin/number/sync` | pregunta a Meta la calidad y el tier reales |
 | POST | `/admin/pause` | freno de emergencia (pausa numero y cola) |
 | GET | `/admin/contacts` | lista con busqueda, filtro y ultima ubicacion |

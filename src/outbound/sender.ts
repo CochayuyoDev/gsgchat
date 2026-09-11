@@ -14,6 +14,7 @@ import { renderTemplate, TemplateRenderError } from '../templates/render.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
 import { decidirRitmo, type DecisionRitmo } from '../salud/ritmo.js';
+import { aMano } from '../salud/humano.js';
 import { codigoDeError } from '../salud/supresion.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { dailyCapFor, type WarmupPolicy } from './throttle.js';
@@ -53,6 +54,8 @@ export interface SendJob {
     buttons?: Array<{ id: string; title: string }>;
     locationRequest?: boolean;
   };
+  /** Un sticker de la biblioteca (ver src/stickers): el fichero ya leido. */
+  sticker?: { id: string; archivo: string; datos: Buffer; mimeType: string; url: string };
 }
 
 export type SendOutcome =
@@ -222,7 +225,7 @@ export function createSender(deps: SenderDeps): Sender {
       }
 
       try {
-        const result = await dispatch(wa, job, template);
+        const result = job.manual ? await aMano(() => dispatch(wa, job, template)) : await dispatch(wa, job, template);
         await repos.deliveries.markSent(deliveryId, result.wamid);
 
         // El chat lee de `messages`: sin esta fila el operador manda algo y no
@@ -234,7 +237,13 @@ export function createSender(deps: SenderDeps): Sender {
           kind: job.kind === 'freeform' ? 'text' : job.kind,
           // Lo que el cliente REALMENTE recibio, si el proveedor lo dice.
           body: result.body ?? describeOutgoing(job, template),
-          payload: job.location ? { location: job.location } : job.interactive ? { interactive: job.interactive } : null,
+          payload: job.location
+            ? { location: job.location }
+            : job.interactive
+              ? { interactive: job.interactive }
+              : job.sticker
+                ? { media: { id: job.sticker.archivo, kind: 'sticker', mimeType: job.sticker.mimeType, url: `/stickers/${job.sticker.archivo}` } }
+                : null,
           status: 'sent',
           deliveryId,
           createdAt: at,
@@ -300,6 +309,8 @@ function describeOutgoing(
       } catch {
         return template.body ?? (job.templateName ?? 'plantilla');
       }
+    case 'sticker':
+      return '';
     case 'location':
       return job.location
         ? `Ubicacion: ${job.location.name ? `${job.location.name} — ` : ''}${job.location.latitude}, ${job.location.longitude}`
@@ -344,6 +355,11 @@ async function dispatch(
         return wa.sendLocationRequest(job.phone, job.interactive.body);
       }
       return wa.sendButtons(job.phone, job.interactive.body, job.interactive.buttons ?? []);
+    }
+    case 'sticker': {
+      if (!job.sticker) throw new Error('falta el campo sticker');
+      if (!wa.sendSticker) throw new Error('este proveedor no manda stickers');
+      return wa.sendSticker(job.phone, { datos: job.sticker.datos, mimeType: job.sticker.mimeType, url: job.sticker.url });
     }
     case 'freeform':
     default: {

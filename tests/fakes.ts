@@ -43,6 +43,7 @@ import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
 import { hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { AJUSTES_GENERALES_VACIOS, fusionarAjustes, type AjustesGenerales, type AjustesGeneralesRepo } from '../src/ajustes/generales.js';
 import type { ActividadRepo, EntradaActividad } from '../src/auth/actividad.js';
+import type { Sticker, StickersRepo } from '../src/stickers/stickers.js';
 
 export interface FakeRepos extends Repos {
   automation: FakeAutomation;
@@ -62,6 +63,7 @@ export interface FakeRepos extends Repos {
   _claves: Array<ClaveApi & { hash: string }>;
   _ajustesGenerales: { valor: AjustesGenerales };
   _actividad: EntradaActividad[];
+  _stickers: Sticker[];
 }
 
 /**
@@ -141,6 +143,28 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     },
   };
 
+  const stickersMem: Sticker[] = [];
+  const stickers: StickersRepo = {
+    async listar() {
+      return [...stickersMem];
+    },
+    async get(id) {
+      return stickersMem.find((s) => s.id === id) ?? null;
+    },
+    async crear(s) {
+      const i = stickersMem.findIndex((x) => x.id === s.id);
+      const nuevo: Sticker = { ...s, createdAt: new Date() };
+      if (i >= 0) stickersMem[i] = nuevo;
+      else stickersMem.push(nuevo);
+      return nuevo;
+    },
+    async borrar(id) {
+      const i = stickersMem.findIndex((x) => x.id === id);
+      if (i < 0) return false;
+      stickersMem.splice(i, 1);
+      return true;
+    },
+  };
   const actividadMem: EntradaActividad[] = [];
   const actividad: ActividadRepo = {
     async anotar(e) {
@@ -273,6 +297,8 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     ajustesGenerales,
     _actividad: actividadMem,
     actividad,
+    _stickers: stickersMem,
+    stickers,
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
     archives: createFakeArchives(),
@@ -922,6 +948,7 @@ export function createFakeWhatsApp(): FakeWhatsApp {
     sendText: (to, body) => record({ kind: 'text', to, body }),
     sendLocation: (to, location) => record({ kind: 'location', to, location }),
     sendLocationRequest: (to, body) => record({ kind: 'location_request', to, body }),
+    sendSticker: (to, sticker) => record({ kind: 'sticker', to, bytes: sticker.datos.length, url: sticker.url }),
     sendButtons: (to, body, buttons) => record({ kind: 'buttons', to, body, buttons }),
     sendTemplate: (to, name, language, components) =>
       record({ kind: 'template', to, name, language, components }),

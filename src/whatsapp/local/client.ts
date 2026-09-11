@@ -117,6 +117,13 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
   return {
     sendText,
 
+    /** Un sticker de verdad: Baileys lo empaqueta como stickerMessage. */
+    async sendSticker(to, sticker) {
+      const sock = socketOrThrow();
+      const sent = await conTeclado(to, '', () => sock.sendMessage(toJid(to), { sticker: sticker.datos, mimetype: sticker.mimeType }));
+      return resultOf(sent);
+    },
+
     async sendLocation(to, location) {
       const sock = socketOrThrow();
       const sent = await conTeclado(to, 'ubicacion', () =>

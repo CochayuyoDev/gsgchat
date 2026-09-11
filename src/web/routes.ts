@@ -31,6 +31,7 @@ import { registerDevRoutes } from './dev-routes.js';
 import { registerLocalRoutes } from './local-routes.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
+import type { ServicioStickers } from '../stickers/stickers.js';
 import { registerWahaRoutes } from './waha-routes.js';
 
 export interface WebDeps {
@@ -47,6 +48,8 @@ export interface WebDeps {
   autoConectarLocal?: boolean;
   /** Los ajustes generales editables desde la pantalla. */
   ajustes?: ServicioAjustes;
+  /** Los stickers automaticos, para el asistente. */
+  stickers?: ServicioStickers;
 }
 
 /**
@@ -123,6 +126,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     catalogo,
     salud: deps.salud,
     ajustes: deps.ajustes,
+    stickers: deps.stickers,
     autoConectar: deps.autoConectarLocal,
   });
   await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo });

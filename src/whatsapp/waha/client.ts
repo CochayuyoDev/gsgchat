@@ -189,6 +189,16 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
   return {
     sendText,
 
+    /** WAHA no tiene envio de sticker en todos los motores: va como imagen WebP. */
+    async sendSticker(to, sticker) {
+      const payload = await call<{ id?: unknown }>('/api/sendImage', {
+        session,
+        chatId: toChatId(to),
+        file: { mimetype: sticker.mimeType, filename: 'sticker.webp', data: sticker.datos.toString('base64') },
+      });
+      return resultOf(payload);
+    },
+
     async sendLocation(to, location) {
       const payload = await call<{ id?: unknown }>('/api/sendLocation', {
         session,

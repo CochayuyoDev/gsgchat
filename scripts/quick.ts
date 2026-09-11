@@ -31,6 +31,8 @@ import { politicaDesdeConfig } from '../src/salud/politica.js';
 import { crearMonitor } from '../src/salud/monitor.js';
 import { arrancarServicios, resumenPolitica } from '../src/servicios.js';
 import { crearServicioAjustes } from '../src/ajustes/generales.js';
+import { crearServicioStickers } from '../src/stickers/stickers.js';
+import { mediaDirectory } from '../src/whatsapp/local/media.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -115,6 +117,10 @@ const sender = createSender({
   soloNumeros: () => ajustes.soloNumeros(),
 });
 
+// La biblioteca de stickers y los automaticos (tras el saludo, el gracias y
+// la despedida). Los ficheros van a la carpeta de medios.
+const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mediaDirectory(), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
+
 if (ajustes.soloNumeros().length) {
   console.log(`
   MODO PRUEBA: solo se escribe a ${ajustes.soloNumeros().join(', ')} (se cambia en /panel#configuracion).
@@ -168,6 +174,7 @@ const app = await buildServer({
   salud,
   politica,
   ajustes,
+  stickers,
   // Con la vinculacion guardada, la sesion se reabre sola: no hay que volver
   // a /setup despues de cada reinicio.
   autoConectarLocal: true,
@@ -197,6 +204,7 @@ const pararServicios = arrancarServicios({
   salud,
   politica,
   ajustes,
+  stickers,
   log: consola as never,
 });
 process.on('SIGINT', () => {

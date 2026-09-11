@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createLocalClient } from '../src/whatsapp/local/client.js';
 import { createWahaClient } from '../src/whatsapp/waha/client.js';
+import { aMano } from '../src/salud/humano.js';
 import {
   ackToStatus,
   acksToStatuses,
@@ -82,6 +83,21 @@ describe('escritura simulada con Baileys', () => {
     expect(esperas.length).toBe(1);
     expect(esperas[0]).toBeGreaterThanOrEqual(1200);
     expect(esperas[0]).toBeLessThanOrEqual(9000);
+  });
+
+  it('lo que manda una persona desde el chat no espera lo que tardaria en teclearlo: un parpadeo y sale', async () => {
+    const { pasos } = await conectado();
+    const esperas: number[] = [];
+    const wa = createLocalClient({ humanizar: true, dormir: async (ms) => { esperas.push(ms); } });
+    const texto = 'Gracias por su tiempo, Ana. Que tenga un buen dia y cualquier cosa nos escribe por aqui mismo.';
+    await aMano(() => wa.sendText('51987654321', texto));
+    expect(pasos.at(-1)).toBe('send:51987654321@s.whatsapp.net:{"text":"' + texto + '"}');
+    expect(pasos).toContain('presence:composing:51987654321@s.whatsapp.net');
+    expect(esperas).toEqual([700]);
+    // Fuera del contexto "a mano", el mismo texto vuelve a esperar lo normal.
+    esperas.length = 0;
+    await wa.sendText('51987654321', texto);
+    expect(esperas[0]).toBeGreaterThan(700);
   });
 
   it('apagado, manda directo y sin presencia', async () => {

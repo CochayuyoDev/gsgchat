@@ -34,6 +34,7 @@ import { opcionesDesdeConfig } from '../rutas/motor.js';
 import type { Monitor } from '../salud/monitor.js';
 import { politicaDesdeConfig, type Politica } from '../salud/politica.js';
 import { ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes } from '../ajustes/generales.js';
+import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
 import { providerOf } from '../settings/service.js';
 import { correrGoteo } from '../campanas/goteo.js';
@@ -50,6 +51,8 @@ export interface AdminDeps {
   hub: TrackingHub;
   /** Los ajustes generales editables desde la pantalla. Ver src/ajustes. */
   ajustes?: ServicioAjustes;
+  /** Los stickers, para las respuestas rapidas con sticker. */
+  stickers?: ServicioStickers;
   /** El monitor de salud y la politica de ritmo. Ver src/salud. */
   salud?: Monitor;
   politica?: () => Politica;
@@ -161,6 +164,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     opciones: opcionesDesdeConfig(config),
     salud: deps.salud,
     supervisor: () => deps.ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,
+    usaPlantillas: () => providerOf(settings.current()) === 'cloud',
+    conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+    nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
   });
 
   // --- ajustes generales: lo que se cambia desde la pantalla ----------------
@@ -219,7 +225,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   app.post('/admin/chat/atajos', async (request, reply) => {
     if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
     if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'solo un administrador cambia las respuestas rapidas' });
-    const body = z.object({ atajos: z.array(z.object({ atajo: z.string(), texto: z.string() })).max(50).nullable() }).parse(request.body ?? {});
+    const body = z.object({ atajos: z.array(z.object({ atajo: z.string(), texto: z.string(), sticker: z.string().nullable().optional() })).max(50).nullable() }).parse(request.body ?? {});
     const guardado = await deps.ajustes.guardar({ atajos: body.atajos });
     return { ok: true, atajos: guardado.atajos ?? ATAJOS_POR_DEFECTO, deFabrica: guardado.atajos === null };
   });
@@ -782,7 +788,11 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       kind: 'interactive',
       category: 'UTILITY',
       interactive: {
-        body: body.text ?? 'Comparte tu ubicacion con el boton de abajo, por favor.',
+        body:
+          body.text ??
+          (providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS
+            ? 'Comparte tu ubicación con el botón de aquí abajo, por favor.'
+            : '¿Nos compartes tu ubicación, por favor? Desde el clip 📎 → Ubicación → Enviar tu ubicación actual.'),
         locationRequest: true,
       },
     });
