@@ -9,10 +9,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import { archivoValido, CONFIG_STICKERS_VACIA, ETIQUETA_USO, USOS, type ServicioStickers } from '../stickers/stickers.js';
+import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
 
 export interface StickersRoutesDeps {
   stickers: ServicioStickers;
   ajustes?: ServicioAjustes;
+  /** Donde viven los adjuntos del chat. Por defecto, la carpeta de siempre. */
+  mediaDir?: string;
 }
 
 export async function registerStickersRoutes(app: FastifyInstance, deps: StickersRoutesDeps): Promise<void> {
@@ -42,6 +45,37 @@ export async function registerStickersRoutes(app: FastifyInstance, deps: Sticker
     const body = subidaSchema.parse(request.body ?? {});
     try {
       const s = await stickers.subir({ nombre: body.nombre, uso: body.uso, datosBase64: body.datos });
+      return { ok: true, sticker: s };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  const desdeChatSchema = z.object({
+    /** El id del adjunto tal como lo guardo el chat (`idDeMedia`). */
+    mediaId: z.string().trim().min(1).max(40),
+    nombre: z.string().trim().min(1).max(60).optional(),
+    uso: z.enum(['inicio', 'gracias', 'despedida', 'otro']).default('otro'),
+  });
+
+  /**
+   * Guarda en la biblioteca un sticker que mando un cliente.
+   *
+   * El fichero ya esta en el servidor -llego con el mensaje-, asi que no hace
+   * falta que nadie lo descargue y lo vuelva a subir a mano: es el gesto que
+   * la gente espera al ver un sticker que le gusta.
+   */
+  app.post('/admin/stickers/desde-chat', async (request, reply) => {
+    const body = desdeChatSchema.parse(request.body ?? {});
+    const datos = await leerMedia(deps.mediaDir ?? mediaDirectory(), body.mediaId);
+    if (!datos) return reply.code(404).send({ error: 'Ese adjunto ya no esta en el servidor.' });
+
+    try {
+      const s = await stickers.subir({
+        nombre: body.nombre ?? 'Sticker del chat',
+        uso: body.uso,
+        datosBase64: datos.toString('base64'),
+      });
       return { ok: true, sticker: s };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });

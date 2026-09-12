@@ -192,7 +192,22 @@ const CSS = `
   .stickers-popup img:hover { border-color: var(--accent); }
   .stickers-popup .pie { width: 100%; font-size: 12px; color: var(--muted); }
   .msg img.sticker { width: 150px; height: 150px; object-fit: contain; display: block; background: transparent; }
+  /* Los dos botones de guardado llevan su palabra: eran dos iconos 🗄 iguales,
+     uno al lado del otro, y nadie encontraba ni el de guardar ni el listado.
+     Un icono solo se entiende cuando ya sabes que esta ahi. */
+  .icon.etiqueta { width: auto; padding: 0 10px; gap: 6px; font-size: 12px; white-space: nowrap; }
   .msg.solo-sticker { background: transparent; box-shadow: none; padding: 2px; }
+  /* El sticker y su boton de guardar: el boton solo asoma al pasar por encima,
+     para que no ensucie el hilo cuando nadie lo esta buscando. */
+  .msg .sticker-wrap { position: relative; display: inline-block; }
+  .msg .sticker-wrap .guardar-sticker {
+    position: absolute; right: 4px; bottom: 4px; opacity: 0; transition: opacity .12s;
+    border: 0; border-radius: 999px; padding: 3px 9px; font-size: 11px; cursor: pointer;
+    background: rgba(17, 24, 39, .78); color: #fff;
+  }
+  .msg .sticker-wrap:hover .guardar-sticker,
+  .msg .sticker-wrap .guardar-sticker:focus { opacity: 1; }
+  .msg .sticker-wrap .guardar-sticker[disabled] { opacity: 1; cursor: default; background: rgba(5, 150, 105, .9); }
   .ayuda-teclas { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 60; display: grid; place-items: center; padding: 20px; }
   .ayuda-teclas .caja { background: var(--panel); color: var(--text); border-radius: 14px; padding: 20px 22px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
   .ayuda-teclas h3 { margin: 0 0 10px; font-size: 16px; }
@@ -308,7 +323,7 @@ ${bandaDemo}
       <span id="unread" class="badge hidden"></span>
       <button class="icon" id="new" title="Escribir a un número nuevo">✚</button>
       ${importar}
-      <button class="icon" id="ver-respaldos" title="Conversaciones respaldadas">🗄</button>
+      <button class="icon etiqueta" id="ver-respaldos" title="Los chats que ya guardaste">📁 Guardados</button>
       <button class="icon" id="atajos-ayuda" title="Atajos de teclado">⌨</button>
     </header>
     ${aviso}
@@ -333,7 +348,7 @@ ${bandaDemo}
         <div class="sub" id="t-sub"></div>
       </div>
       <a class="link" id="t-panel" href="/panel#contactos">Ficha</a>
-      <button class="icon" id="cerrar-chat" title="Guardar este chat y vaciarlo">🗄</button>
+      <button class="icon etiqueta" id="cerrar-chat" title="Guarda todo el historial de este chat y lo deja vacío">🗄 Guardar chat</button>
     </header>
     <div class="empty" id="placeholder">
       <div>
@@ -612,7 +627,18 @@ function adjuntoHtml(m) {
   if (kind === 'sticker' && media.url) return '<img class="adjunto sticker" src="' + esc(media.url) + '" alt="">';
   var attrs = ' class="adjunto' + (kind === 'sticker' ? ' sticker' : '') + '" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
 
-  if (kind === 'image' || kind === 'sticker') return '<img' + attrs + ' alt="">';
+  if (kind === 'image') return '<img' + attrs + ' alt="">';
+  if (kind === 'sticker') {
+    // El sticker que mando el cliente lleva su boton de guardar: el fichero ya
+    // esta en el servidor, asi que quedarselo es un clic y no una descarga
+    // seguida de una subida a mano.
+    return '<span class="sticker-wrap"><img' + attrs + ' alt="">' +
+      (m.direction === 'in'
+        ? '<button class="guardar-sticker" data-guardar-sticker="' + esc(media.id) +
+          '" title="Guardar en mis stickers">Guardar</button>'
+        : '') +
+      '</span>';
+  }
   if (kind === 'video') return '<video' + attrs + ' controls playsinline></video>';
   if (kind === 'audio') return '<audio' + attrs + ' controls preload="none"></audio>';
 
@@ -690,6 +716,38 @@ function cargaFallida() {
   return aviso;
 }
 
+
+/* Guardar en la biblioteca un sticker que mando el cliente. */
+document.addEventListener('click', async function (event) {
+  var boton = event.target && event.target.closest
+    ? event.target.closest('[data-guardar-sticker]')
+    : null;
+  if (!boton) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  var mediaId = boton.getAttribute('data-guardar-sticker');
+  var nombre = prompt('¿Con qué nombre lo guardo?', 'Sticker de ' + (current && current.name ? current.name : 'un cliente'));
+  if (nombre === null) return;
+  nombre = nombre.trim();
+  if (!nombre) return;
+
+  boton.disabled = true;
+  var antes = boton.textContent;
+  boton.textContent = 'Guardando…';
+  try {
+    await api('/admin/stickers/desde-chat', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId: mediaId, nombre: nombre })
+    });
+    boton.textContent = 'Guardado';
+    toast('Sticker guardado. Ya lo puedes mandar desde el botón de stickers.');
+  } catch (error) {
+    boton.disabled = false;
+    boton.textContent = antes;
+    toast(error && error.message ? error.message : 'No se pudo guardar el sticker.');
+  }
+});
 /* Clic en una foto o un video: se ve a tamaño completo. */
 document.addEventListener('click', function (e) {
   var el = e.target;
@@ -1168,7 +1226,7 @@ function pedirCierre() {
   var caja = document.getElementById('confirmar-cierre');
   caja.innerHTML =
     '<p>Se guarda <b>todo el historial</b> de ' + esc(current.name || current.phone) +
-    ' en un respaldo y el chat queda vacío aquí. Lo guardado se puede leer, descargar ' +
+    ' en «Guardados» y el chat queda vacío aquí. Lo guardado se puede leer, descargar ' +
     'y devolver al chat cuando quieras, aunque se pierda el número.</p>' +
     '<div class="actions">' +
       '<button class="primary" id="ok-cierre">Guardar y vaciar</button>' +
@@ -1226,7 +1284,7 @@ function abrirRespaldos() {
   ver('respaldos', true);
   ver('rb-resumen', true);
   document.getElementById('q').value = '';
-  document.getElementById('q').placeholder = 'Buscar en los respaldos';
+  document.getElementById('q').placeholder = 'Buscar en los chats guardados';
   cargarRespaldos();
 }
 
@@ -1247,7 +1305,7 @@ async function cargarRespaldos() {
     var s = data.stats;
 
     document.getElementById('rb-resumen').innerHTML =
-      '<b>' + s.total + '</b> respaldos \u00b7 ' + s.messages + ' mensajes \u00b7 ' + pesoLegible(s.bytes) +
+      '<b>' + s.total + '</b> chats guardados · ' + s.messages + ' mensajes · ' + pesoLegible(s.bytes) +
       (data.inactividadDias
         ? ' \u00b7 los chats sin movimiento se cierran solos a los ' + data.inactividadDias + ' dias'
         : '') +
@@ -1269,7 +1327,7 @@ async function cargarRespaldos() {
     }).join('');
 
     var box = document.getElementById('respaldos');
-    pintarLista(box, html || '<div class="empty">Todavía no hay respaldos.<br>' +
+    pintarLista(box, html || '<div class="empty">Todavía no has guardado ningún chat.<br>' +
       'Cierra un chat con el botón de la cabecera y aparecerá aquí.</div>', 0);
   } catch (error) { toast(error.message); }
 }
@@ -1300,7 +1358,7 @@ async function abrirRespaldo(id) {
     document.getElementById('t-avatar').textContent = inicial(a.name, a.phone);
     document.getElementById('t-name').textContent = a.name || a.phone;
     document.getElementById('t-sub').innerHTML = esc(a.phone) +
-      ' \u00b7 <span class="pill warn">respaldo \u00b7 solo lectura</span>';
+      ' · <span class="pill warn">chat guardado · solo lectura</span>';
 
     lastCount = 0;
     renderMessages(data.messages, true);
@@ -1334,7 +1392,7 @@ async function descargarRespaldo(a) {
     var res = await fetch('/admin/archives/' + a.id + '/download', {
       credentials: 'same-origin'
     });
-    if (!res.ok) throw new Error('No se pudo descargar el respaldo.');
+    if (!res.ok) throw new Error('No se pudo descargar el chat guardado.');
     var url = URL.createObjectURL(await res.blob());
     var enlace = document.createElement('a');
     enlace.href = url;

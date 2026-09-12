@@ -48,12 +48,14 @@ export interface ServerDeps {
   ajustes?: ServicioAjustes;
   /** La biblioteca de stickers y los automaticos. Ver src/stickers. */
   stickers?: ServicioStickers;
+  /** Donde viven los adjuntos que llegaron por el chat. Ver src/whatsapp/local/media.ts. */
+  mediaDir?: string;
   /** Reabrir la sesion local (Baileys) al arrancar si hay vinculacion guardada. */
   autoConectarLocal?: boolean;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers } = deps;
+  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir } = deps;
 
   // Los errores de validacion salen en espanol: son los que acaban en la
   // pantalla del operador, no en un log para programadores.
@@ -128,7 +130,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
-  if (stickers) await registerStickersRoutes(app, { stickers, ajustes });
+  if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
   await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.

@@ -99,7 +99,7 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, mediaDir: mediaDirectory(), autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })

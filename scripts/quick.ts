@@ -175,6 +175,9 @@ const app = await buildServer({
   politica,
   ajustes,
   stickers,
+  // Para poder guardar en la biblioteca un sticker que llego por el chat: su
+  // fichero vive aqui.
+  mediaDir: mediaDirectory(),
   // Con la vinculacion guardada, la sesion se reabre sola: no hay que volver
   // a /setup despues de cada reinicio.
   autoConectarLocal: true,
