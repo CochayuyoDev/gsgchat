@@ -155,6 +155,30 @@ export function intencionDe(entrada: Entrada, ofrecidas?: string[] | null): stri
   return null;
 }
 
+
+/**
+ * Cual de las tres respuestas de informacion toca.
+ *
+ * Quien pregunta por el horario quiere leer la hora, no la cobertura; quien
+ * pregunta hasta donde llegan quiere leer la zona. Si pulso el boton (no hay
+ * texto que leer) o pregunto por las dos cosas a la vez, va la respuesta
+ * combinada de siempre.
+ */
+export function claveDeInfo(entrada: Entrada): 'info' | 'infoHorario' | 'infoZona' {
+  const texto = normaliza(entrada.texto ?? '');
+  if (!texto) return 'info';
+
+  const horario = ['horario', 'hora', 'atienden', 'atiende', 'abren', 'abre', 'cierran', 'cierra'];
+  const zona = ['zona', 'cobertura', 'cubren', 'llegan', 'llega', 'distrito', 'donde'];
+
+  const preguntaHorario = horario.some((p) => texto.includes(p));
+  const preguntaZona = zona.some((p) => texto.includes(p));
+
+  // Las dos, o ninguna reconocible: la combinada responde a ambas.
+  if (preguntaHorario === preguntaZona) return 'info';
+
+  return preguntaHorario ? 'infoHorario' : 'infoZona';
+}
 /** Un "si" o un "no" sueltos, para las confirmaciones. */
 function esNegacion(texto: string): boolean {
   const t = normaliza(texto);
@@ -509,11 +533,17 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
   }
 
   // --- informacion, sin sacar a nadie de donde estaba --------------------
+  //
+  // Responder lo que se PREGUNTO, y primero. Una sola respuesta servia para
+  // "¿que horario tienen?" y para "¿hasta donde llegan?", asi que a quien
+  // preguntaba por el horario se le contestaba empezando por la cobertura y
+  // con la hora de propina; con el menu pegado debajo, se lee como un folleto
+  // que no escucho la pregunta —lo dijo el dueño mirando una conversacion—.
   if (intencion === BOTON.info) {
     return {
       patch: {},
       respuesta: {
-        texto: mensaje(ctx, 'info'),
+        texto: mensaje(ctx, claveDeInfo(entrada)),
         botones: [
           { id: BOTON.cotizar, title: mensaje(ctx, 'botonCotizar') },
           { id: BOTON.asesor, title: mensaje(ctx, 'botonAsesor') },

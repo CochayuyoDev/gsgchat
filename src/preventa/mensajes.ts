@@ -40,8 +40,18 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
     variables: VARIABLES_COMUNES,
   },
   info: {
-    cuando: 'Cuando pregunta por horarios, zona o cobertura.',
+    cuando: 'Cuando pide información general, sin decir si es por el horario o por la zona.',
     texto: 'Atendemos {cobertura}. Horario: {horario}.',
+    variables: VARIABLES_COMUNES,
+  },
+  infoHorario: {
+    cuando: 'Cuando pregunta por el horario: a qué hora abren, hasta cuándo atienden.',
+    texto: 'Atendemos {horario}. Cubrimos {cobertura}.',
+    variables: VARIABLES_COMUNES,
+  },
+  infoZona: {
+    cuando: 'Cuando pregunta por la zona: hasta dónde llegan, qué distritos cubren.',
+    texto: 'Llegamos a {cobertura}. Nuestro horario es {horario}.',
     variables: VARIABLES_COMUNES,
   },
   asesor: {
