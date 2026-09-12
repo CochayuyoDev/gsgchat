@@ -58,6 +58,14 @@ export interface LocalSocket {
   signalRepository?: {
     lidMapping?: { getPNForLID(lid: string): Promise<string | null> };
   };
+  /**
+   * Le pide al telefono del remitente que vuelva a subir un adjunto.
+   *
+   * Es el rescate cuando el enlace directo del fichero ya caduco. Ver
+   * `bajarAdjunto`: sin esto, un sticker reenviado de una conversacion vieja
+   * llegaba al chat como un "(sticker)" sin imagen.
+   */
+  updateMediaMessage?(mensaje: unknown): Promise<unknown>;
   /** Para los mensajes con botones, que hay que armar a mano. */
   relayMessage?(jid: string, content: unknown, options: { messageId?: string }): Promise<unknown>;
   /** Pregunta al servidor si esos numeros tienen cuenta de WhatsApp. */
@@ -298,7 +306,7 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
             .key;
           if (key?.fromMe) continue;
 
-          const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log);
+          const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock);
           const value = toChangeValue(mensaje, await resolverTelefono(sock, key), media);
           if (!value) {
             log(
@@ -403,27 +411,39 @@ export function defaultAuthDir(base = process.cwd()): string {
 }
 
 /**
- * Baja el adjunto del mensaje, si lo tiene.
+ * Baja el adjunto de un mensaje entrante.
  *
- * Nunca lanza: si la descarga falla -el enlace de WhatsApp caduca, o se corta
- * la red- el mensaje tiene que llegar al chat igual, aunque sea sin el
- * fichero. Perder la foto es molesto; perder el mensaje entero es un fallo.
+ * `reuploadRequest` no es un adorno: WhatsApp guarda el fichero en sus
+ * servidores un tiempo y cuando ese enlace caduca la descarga directa falla.
+ * Pasa sobre todo con los STICKERS, que la gente reenvia de conversaciones
+ * viejas, y con lo que llega mientras el sistema esta apagado. Con esa opcion
+ * Baileys le pide al telefono del remitente que lo vuelva a subir y lo baja
+ * del enlace nuevo; sin ella, el mensaje se guardaba sin fichero y el chat
+ * enseñaba un "(sticker)" pelado que parece un fallo de la pantalla.
+ *
+ * Si aun asi falla, se anota y se devuelve null: perder la foto es molesto,
+ * perder el mensaje entero es un fallo.
  */
 async function bajarAdjunto(
   mensaje: unknown,
   wamid: string,
   opts: StartLocalOptions,
   log: (mensaje: string) => void,
+  sock?: { updateMediaMessage?: (mensaje: unknown) => Promise<unknown> },
 ): Promise<MediaInfo | null> {
   const contenido = (mensaje as { message?: Record<string, unknown> }).message ?? {};
   if (!tipoDeAdjunto(contenido) || !wamid) return null;
 
   try {
     const baileys = await import('@whiskeysockets/baileys');
+    const reintento = sock?.updateMediaMessage
+      ? { reuploadRequest: (m: unknown) => sock.updateMediaMessage!(m) }
+      : {};
+
     return await guardarMedia(mensaje, wamid, {
       dir: opts.mediaDir ?? mediaDirectory(),
       descargar: async (m) =>
-        (await baileys.downloadMediaMessage(m as never, 'buffer', {})) as Buffer,
+        (await baileys.downloadMediaMessage(m as never, 'buffer', {}, reintento as never)) as Buffer,
     });
   } catch (error) {
     log(`no se pudo bajar el adjunto: ${String(error)}`);

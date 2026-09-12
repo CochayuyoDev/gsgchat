@@ -574,7 +574,7 @@ function renderMessages(messages, scrollToEnd) {
     html += '<div class="msg ' + (m.direction === 'out' ? 'out' : 'in') +
       (primero ? ' primero' : '') + (soloSticker ? ' solo-sticker' : '') + '">' +
       adjuntoHtml(m) +
-      withLinks(m.body || '') +
+      withLinks(cuerpoVisible(m)) +
       '<span class="meta">' + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
       '</div>';
   });
@@ -585,6 +585,20 @@ function renderMessages(messages, scrollToEnd) {
 }
 
 /**
+
+/*
+ * El texto del mensaje, sin la etiqueta de relleno.
+ *
+ * Cuando un adjunto llega sin pie de foto, el cuerpo que se guarda es
+ * "(foto)" o "(sticker)": sirve para la lista de conversaciones, donde no hay
+ * sitio para pintar nada. En el hilo sobra —o esta la imagen, o esta el aviso
+ * de que no se pudo bajar— y verlo escrito debajo del sticker parece un error.
+ */
+function cuerpoVisible(m) {
+  var cuerpo = (m.body || '').trim();
+  var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
+  return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
+}
  * El hueco del adjunto.
  *
  * Se pinta vacio y con su id: el fichero se pide despues, porque va detras del
@@ -592,7 +606,7 @@ function renderMessages(messages, scrollToEnd) {
  */
 function adjuntoHtml(m) {
   var media = m.payload && m.payload.media;
-  if (!media || !media.id) return '';
+  if (!media || !media.id) return sinFicheroHtml(m.kind);
 
   var kind = media.kind || m.kind;
   if (kind === 'sticker' && media.url) return '<img class="adjunto sticker" src="' + esc(media.url) + '" alt="">';
@@ -609,6 +623,26 @@ function adjuntoHtml(m) {
     '</a>';
 }
 
+
+/*
+ * El adjunto que nunca llego a bajarse.
+ *
+ * El mensaje se guarda igual -perderlo entero seria peor-, pero sin fichero
+ * el hilo enseñaba un "(sticker)" suelto que se lee como un fallo de la
+ * pantalla. Se dice que era un sticker y que no se pudo descargar, que es la
+ * verdad y ademas se entiende.
+ */
+function sinFicheroHtml(kind) {
+  var nombres = {
+    sticker: 'un sticker',
+    image: 'una foto',
+    video: 'un video',
+    audio: 'un audio',
+    document: 'un documento'
+  };
+  if (!nombres[kind]) return '';
+  return '<div class="cargando">Mandaron ' + nombres[kind] + ' y no se pudo descargar.</div>';
+}
 function pesoLegible(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
