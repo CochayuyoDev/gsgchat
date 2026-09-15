@@ -35,6 +35,18 @@ export const ESTADOS_SOLICITUD: EstadoSolicitud[] = [
 /** Estados en los que el motor todavia tiene algo que hacer. */
 export const ESTADOS_VIVOS: EstadoSolicitud[] = ['pendiente', 'enviado', 'respondio'];
 
+/**
+ * Estados de quien todavia no ha dado su ubicacion.
+ *
+ * Es la pregunta que hace GSG cada manana ("cuantos faltan") y no coincide
+ * con ningun estado suelto: faltan los que esperan, los que contestaron
+ * otra cosa, los que pasaron al repartidor y los numeros rotos. Solo
+ * `resuelto` la tiene; `cancelado` ya no la va a dar y no cuenta.
+ */
+export const ESTADOS_SIN_UBICACION: EstadoSolicitud[] = ESTADOS_SOLICITUD.filter(
+  (estado) => estado !== 'resuelto' && estado !== 'cancelado',
+);
+
 export interface Lote {
   id: string;
   nombre: string;
@@ -166,6 +178,8 @@ export interface Reporte {
 export interface ConsultaSolicitudes {
   loteId?: string;
   estado?: EstadoSolicitud;
+  /** Varios a la vez: "sin ubicacion todavia" son seis estados distintos. */
+  estados?: EstadoSolicitud[];
   incidencia?: CodigoIncidencia;
   /** Varias a la vez: "numero mal escrito" son cuatro codigos distintos. */
   incidencias?: CodigoIncidencia[];
@@ -199,6 +213,12 @@ export interface RutasRepo {
   abiertaPorContacto(contactId: string): Promise<Solicitud | null>;
   /** Con `excluirLoteId`, la abierta en OTRO lote: para no escribir dos veces por lo mismo. */
   abiertaPorTelefono(phone: string, excluirLoteId?: string): Promise<Solicitud | null>;
+  /**
+   * La ultima solicitud YA RESUELTA de ese telefono en un lote que sigue en
+   * marcha: para cuando el cliente manda un segundo pin corrigiendo el
+   * primero. Con el lote terminado ya no hay nada que corregir.
+   */
+  resueltaRecientePorTelefono(phone: string): Promise<Solicitud | null>;
   telefonosDelLote(loteId: string): Promise<string[]>;
 
   registrarEvento(
@@ -377,6 +397,10 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     if (query.estado) {
       params.push(query.estado);
       partes.push(`estado = $${params.length}`);
+    }
+    if (query.estados?.length) {
+      params.push(query.estados);
+      partes.push(`estado = any($${params.length})`);
     }
     if (query.incidencia) {
       params.push(query.incidencia);
@@ -605,6 +629,17 @@ export function createRutasRepo(pool: Pool): RutasRepo {
             and ($2::uuid is null or lote_id <> $2::uuid)
           order by id desc limit 1`,
         [phone, excluirLoteId ?? null],
+      );
+      return rows[0] ? toSolicitud(rows[0]) : null;
+    },
+
+    async resueltaRecientePorTelefono(phone) {
+      const { rows } = await pool.query<SolicitudRow>(
+        `select s.* from rutas_solicitudes s
+          join rutas_lotes l on l.id = s.lote_id
+          where s.phone = $1 and s.estado = 'resuelto' and l.estado <> 'terminado'
+          order by s.id desc limit 1`,
+        [phone],
       );
       return rows[0] ? toSolicitud(rows[0]) : null;
     },

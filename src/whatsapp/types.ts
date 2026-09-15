@@ -21,6 +21,14 @@ export interface InboundMessage {
   };
   button?: { text: string; payload: string };
   context?: { id?: string };
+  /** Una reaccion (el corazon, el pulgar) a un mensaje nuestro. No es texto: no se contesta. */
+  reaction?: { emoji: string };
+  /**
+   * Un "ver una vez" que llego SIN el fichero. WhatsApp no manda la llave del
+   * adjunto a los dispositivos vinculados: solo se abre en el telefono. Se
+   * guarda para que el operador sepa que llego y donde mirarlo.
+   */
+  viewOnce?: { kind: 'image' | 'video' | 'audio' | 'document' | 'unknown' };
   /**
    * Llego del historial o de la cola de cuando el sistema estaba apagado, no
    * en vivo. Se guarda en la conversacion y NO se contesta: al reconectar,
@@ -43,6 +51,8 @@ export interface InboundMessage {
     voice?: boolean;
     caption?: string;
     bytes?: number;
+    /** Llego como "ver una vez": en el telefono desaparece al abrirla; aqui queda. */
+    verUnaVez?: boolean;
   };
 }
 

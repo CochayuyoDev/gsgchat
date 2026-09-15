@@ -129,7 +129,10 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     stickers: deps.stickers,
     autoConectar: deps.autoConectarLocal,
   });
-  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo });
+  // El simulador de entrantes pasa por las mismas piezas que un mensaje real
+  // (monitor de salud, ajustes, stickers): si no, lo que se prueba con el no
+  // es lo que pasa en la calle.
+  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers });
 
   app.get('/rutas', async (_request, reply) => {
     const page = html(rutasPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));

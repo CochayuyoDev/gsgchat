@@ -142,6 +142,8 @@ const CSS = `
   .msg .adjunto { display: block; margin: 2px 0 4px; max-width: 100%; }
   .msg img.adjunto, .msg video.adjunto { border-radius: 6px; cursor: pointer; max-height: 340px; }
   .msg audio.adjunto { width: 260px; }
+  .msg .una-vez { display: inline-block; font-size: 11.5px; color: var(--muted); margin: 2px 0 3px;
+    padding: 2px 8px; border-radius: 999px; background: rgba(217,119,6,.14); }
   .msg .fichero { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
                   background: rgba(0,0,0,.05); border-radius: 6px; text-decoration: none;
                   color: inherit; }
@@ -598,12 +600,18 @@ function adjuntoHtml(m) {
   if (kind === 'sticker' && media.url) return '<img class="adjunto sticker" src="' + esc(media.url) + '" alt="">';
   var attrs = ' class="adjunto' + (kind === 'sticker' ? ' sticker' : '') + '" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
 
-  if (kind === 'image' || kind === 'sticker') return '<img' + attrs + ' alt="">';
-  if (kind === 'video') return '<video' + attrs + ' controls playsinline></video>';
-  if (kind === 'audio') return '<audio' + attrs + ' controls preload="none"></audio>';
+  /* Lo que en el telefono se abre una sola vez y desaparece, aqui se queda:
+     se dice para que el operador sepa que en el movil ya no lo va a encontrar. */
+  var unaVez = media.verUnaVez
+    ? '<span class="una-vez" title="El cliente la mandó como “ver una vez”: en el teléfono desaparece al abrirla, aquí queda guardada">👁 Ver una vez · guardada aquí</span>'
+    : '';
+
+  if (kind === 'image' || kind === 'sticker') return unaVez + '<img' + attrs + ' alt="">';
+  if (kind === 'video') return unaVez + '<video' + attrs + ' controls playsinline></video>';
+  if (kind === 'audio') return unaVez + '<audio' + attrs + ' controls preload="none"></audio>';
 
   var nombre = media.filename || 'documento';
-  return '<a' + attrs + ' class="adjunto fichero" download="' + esc(nombre) + '">' +
+  return unaVez + '<a' + attrs + ' class="adjunto fichero" download="' + esc(nombre) + '">' +
     '<span>📄</span><b>' + esc(nombre) + '</b>' +
     (media.bytes ? '<span class="cargando">' + esc(pesoLegible(media.bytes)) + '</span>' : '') +
     '</a>';

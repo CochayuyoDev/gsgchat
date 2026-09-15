@@ -42,6 +42,29 @@ const sinTildes = (texto: string): string =>
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '');
 
+/**
+ * Palabras que delatan una columna cuando el nombre no es exactamente uno
+ * de los alias: "N° Pedido", "Teléfono 1", "Nro. de guía", "Dirección de
+ * entrega (completa)"... Se mira palabra a palabra sobre el nombre limpio
+ * (sin tildes, sin signos), y en este orden: primero lo que identifica al
+ * pedido, porque "numero de pedido" lleva "numero" y no es el telefono.
+ */
+const PISTAS: Array<[keyof FilaLote, string[]]> = [
+  ['referencia', ['pedido', 'guia', 'orden', 'referencia', 'codigo', 'tracking', 'ticket', 'boleta', 'factura']],
+  ['telefono', ['telefono', 'celular', 'movil', 'whatsapp', 'phone', 'cel', 'tel', 'numero', 'fono']],
+  ['nombre', ['nombre', 'cliente', 'destinatario', 'razon']],
+  ['direccion', ['direccion', 'domicilio', 'destino']],
+  ['distrito', ['distrito', 'zona', 'localidad', 'ciudad', 'urbanizacion']],
+  ['notas', ['nota', 'notas', 'observacion', 'observaciones', 'comentario', 'comentarios', 'detalle']],
+];
+
+/** El nombre de una columna reducido a palabras: "N° Pedido" -> ["n", "pedido"]. */
+const palabrasDe = (celda: string): string[] =>
+  sinTildes(celda)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter(Boolean);
+
 /** El separador que mas columnas produce en la cabecera: ; , o tabulador. */
 function separadorDe(linea: string): string {
   const candidatos = [';', ',', '\t', '|'];
@@ -109,7 +132,10 @@ export function leerLote(texto: string): LecturaLote {
     // El BOM que mete Excel se cuela en el nombre de la primera columna.
     .replace(/^﻿/, '')
     .split(/\r?\n/)
-    .map((l) => l.trim())
+    // Solo espacios por delante y lo que sobre por detras: un tabulador al
+    // principio es una primera celda vacia (el telefono que falta), y
+    // quitarlo corria todas las columnas una posicion.
+    .map((l) => l.replace(/^ +/, '').replace(/\s+$/, ''))
     .filter(Boolean);
 
   const salida: LecturaLote = { filas: [], descartadas: [], columnas: {}, conCabecera: false };
@@ -127,6 +153,19 @@ export function leerLote(texto: string): LecturaLote {
   for (const campo of Object.keys(ALIAS) as Array<keyof FilaLote>) {
     const i = primeraNormalizada.findIndex((celda) => ALIAS[campo]!.includes(celda));
     if (i >= 0) indice[campo] = i;
+  }
+
+  // Segunda pasada, por pistas, para las columnas que no se llamaban
+  // exactamente como en la lista de alias. Una columna ya asignada no se
+  // vuelve a repartir.
+  const ocupadas = new Set(Object.values(indice));
+  for (const [campo, pistas] of PISTAS) {
+    if (indice[campo] !== undefined) continue;
+    const i = primera.findIndex((celda, pos) => !ocupadas.has(pos) && palabrasDe(celda).some((p) => pistas.includes(p)));
+    if (i >= 0) {
+      indice[campo] = i;
+      ocupadas.add(i);
+    }
   }
 
   const conCabecera = indice.telefono !== undefined && !primera.some(pareceTelefono);
@@ -161,6 +200,20 @@ export function leerLote(texto: string): LecturaLote {
 
     const telefono = leer('telefono');
     if (!telefono) {
+      // Una fila con pedido o nombre pero sin telefono es un caso que GSG
+      // tiene que ver ("el pedido X vino sin telefono"), no una linea que
+      // se tira: entra con su incidencia. Una linea sin nada, si se tira.
+      if (leer('nombre') || leer('referencia')) {
+        salida.filas.push({
+          telefono: '',
+          nombre: leer('nombre'),
+          referencia: leer('referencia'),
+          direccion: leer('direccion'),
+          distrito: leer('distrito'),
+          notas: leer('notas'),
+        });
+        return;
+      }
       salida.descartadas.push({
         linea: i + desplazamiento,
         texto: linea.slice(0, 120),

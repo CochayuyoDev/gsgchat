@@ -137,7 +137,8 @@ export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string }): 
  */
 export const PAYLOADS = {
   ubicacion:
-    'referencia, telefono, nombre, lat, lng, mapsUrl, precisionMetros, fuente, recibidoEn, lote',
+    'referencia, telefono, nombre, lat, lng, mapsUrl, precisionMetros, fuente, recibidoEn, lote' +
+    ' (+ corregida: true cuando el cliente mando un segundo pin: sustituye al anterior de la misma referencia)',
   incidencia:
     'referencia, telefono, nombre, codigo, titulo, detalle, queHacer, intentos, ultimoEnvio, requiereHumano, lote',
   resumen: 'lote, nombre, total, porEstado, porIncidencia, generadoEn',

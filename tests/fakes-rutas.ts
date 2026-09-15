@@ -47,6 +47,7 @@ export function createFakeRutas(): FakeRutas {
     return solicitudes.filter((s) => {
       if (query.loteId && s.loteId !== query.loteId) return false;
       if (query.estado && s.estado !== query.estado) return false;
+      if (query.estados?.length && !query.estados.includes(s.estado)) return false;
       if (query.incidencia && s.incidencia !== query.incidencia) return false;
       if (query.incidencias?.length && !query.incidencias.includes(s.incidencia as never)) return false;
       if (query.requiereHumano !== undefined && s.requiereHumano !== query.requiereHumano) return false;
@@ -130,8 +131,17 @@ export function createFakeRutas(): FakeRutas {
     async borrarLote(id) {
       const i = lotes.findIndex((l) => l.id === id);
       if (i >= 0) lotes.splice(i, 1);
+      // Como el SQL (on delete cascade): se van sus solicitudes, sus eventos
+      // y lo que tuviera en la cola hacia GSG.
+      const suyas = new Set(solicitudes.filter((s) => s.loteId === id).map((s) => s.id));
       for (let j = solicitudes.length - 1; j >= 0; j--) {
         if (solicitudes[j]!.loteId === id) solicitudes.splice(j, 1);
+      }
+      for (let j = eventos.length - 1; j >= 0; j--) {
+        if (suyas.has(eventos[j]!.solicitudId)) eventos.splice(j, 1);
+      }
+      for (let j = reportes.length - 1; j >= 0; j--) {
+        if (reportes[j]!.loteId === id) reportes.splice(j, 1);
       }
     },
 
@@ -255,6 +265,16 @@ export function createFakeRutas(): FakeRutas {
           .slice()
           .reverse()
           .find((s) => s.phone === phone && abiertos.includes(s.estado) && (!excluirLoteId || s.loteId !== excluirLoteId)) ?? null
+      );
+    },
+
+    async resueltaRecientePorTelefono(phone) {
+      const enMarcha = new Set(lotes.filter((l) => l.estado !== 'terminado').map((l) => l.id));
+      return (
+        solicitudes
+          .slice()
+          .reverse()
+          .find((s) => s.phone === phone && s.estado === 'resuelto' && enMarcha.has(s.loteId)) ?? null
       );
     },
 

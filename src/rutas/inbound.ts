@@ -151,6 +151,45 @@ async function marcarIncidencia(
   return actualizada;
 }
 
+/** El segundo pin sustituye al primero y se vuelve a reportar, marcado como corregido. */
+async function corregirUbicacion(
+  deps: RutaInboundDeps,
+  resuelta: Solicitud,
+  ubicacion: NonNullable<EntradaRuta['ubicacion']>,
+  momento: Date,
+): Promise<RespuestaRuta> {
+  const anterior = resuelta.lat !== null && resuelta.lng !== null ? `${resuelta.lat.toFixed(5)}, ${resuelta.lng.toFixed(5)}` : 'sin coordenadas';
+  const actualizada = await deps.repos.rutas.actualizarSolicitud(resuelta.id, {
+    lat: ubicacion.lat,
+    lng: ubicacion.lng,
+    mapsUrl: ubicacion.mapsUrl ?? null,
+    precisionM: ubicacion.precisionM ?? null,
+    ubicacionFuente: ubicacion.fuente ?? 'whatsapp',
+    resueltoAt: momento,
+  });
+  await deps.repos.rutas.registrarEvento(
+    resuelta.id,
+    'ubicacion',
+    `ubicación corregida por el cliente (${ubicacion.fuente ?? 'whatsapp'}): sustituye a ${anterior}`,
+    { lat: ubicacion.lat, lng: ubicacion.lng, corregida: true },
+  );
+  const lote = await deps.repos.rutas.lote(resuelta.loteId);
+  if (lote) {
+    await deps.repos.rutas.encolarReporte({
+      solicitudId: resuelta.id,
+      loteId: lote.id,
+      tipo: 'ubicacion',
+      payload: { ...payloadUbicacion(actualizada, lote), corregida: true },
+    });
+  }
+  deps.log?.('ubicacion corregida por el cliente', {
+    solicitud: resuelta.id,
+    telefono: resuelta.phone,
+    referencia: resuelta.referencia,
+  });
+  return { atendida: true, resultado: 'resuelta', solicitud: actualizada };
+}
+
 /**
  * Atiende la respuesta del cliente en el contexto de su solicitud.
  *
@@ -170,7 +209,17 @@ export async function atenderRespuestaDeRuta(
   let solicitud =
     (await repos.rutas.abiertaPorContacto(contact.id)) ??
     (await repos.rutas.abiertaPorTelefono(contact.phone));
-  if (!solicitud) return { atendida: false };
+  if (!solicitud) {
+    // Sin solicitud abierta pero con un pin nuevo: puede ser el cliente que
+    // ya la dio y se corrige ("mejor a este otro punto"). Mientras el lote
+    // siga en marcha, la ultima ubicacion es la buena y GSG tiene que
+    // enterarse; si no, el repartidor iria al punto viejo.
+    if (entrada.ubicacion && !entrada.fueraDeZona) {
+      const resuelta = await repos.rutas.resueltaRecientePorTelefono(contact.phone);
+      if (resuelta) return corregirUbicacion(deps, resuelta, entrada.ubicacion, momento);
+    }
+    return { atendida: false };
+  }
 
   if (!solicitud.contactId) {
     solicitud = await repos.rutas.actualizarSolicitud(solicitud.id, { contactId: contact.id });

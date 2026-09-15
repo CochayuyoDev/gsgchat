@@ -378,6 +378,7 @@ var nombresVista = {};
 /* Las tarjetas, en el orden en que se miran por la manana. */
 var TARJETAS = [
   { vista: 'resueltos', clase: 'ok' },
+  { vista: 'sin_ubicacion', clase: 'warn' },
   { vista: 'esperando', clase: '' },
   { vista: 'respondieron', clase: 'warn' },
   { vista: 'pendientes', clase: '' },

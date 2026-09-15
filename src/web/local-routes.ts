@@ -11,8 +11,6 @@ import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import type { Config } from '../config.js';
 import { providerOf } from '../settings/service.js';
 import type { Monitor } from '../salud/monitor.js';
@@ -26,6 +24,7 @@ import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
 import {
   defaultAuthDir,
   getLocalState,
+  hayVinculacion,
   logoutLocal,
   requestLocalPairingCode,
   startLocal,
@@ -91,7 +90,7 @@ export async function registerLocalRoutes(
   if (deps.autoConectar) {
     app.addHook('onReady', async () => {
       if (providerOf(settings.current()) !== 'local') return;
-      if (!existsSync(join(authDir, 'creds.json'))) return;
+      if (!hayVinculacion(authDir)) return;
       console.log('[wa] vinculacion guardada: reconectando la sesion local...');
       void arrancar().catch((error) => console.error('[wa] no se pudo reconectar la sesion local:', error));
     });
@@ -135,7 +134,12 @@ export async function registerLocalRoutes(
   app.post('/admin/local/connect', async () => {
     await settings.save({ provider: 'local' });
     await settings.reload();
-    const estado = await arrancar();
+    let estado = await arrancar();
+    // La vinculacion guardada ya no valia (el telefono la habia cerrado): la
+    // sesion la acaba de borrar y se ha quedado parada. Se vuelve a abrir en
+    // el acto para que salga el QR, en vez de devolver un "parado" que
+    // obligaba a pulsar dos veces sin saber por que.
+    if (estado.status === 'STOPPED' && !hayVinculacion(authDir)) estado = await arrancar();
     return { ok: true, ...estado };
   });
 
@@ -156,7 +160,11 @@ export async function registerLocalRoutes(
     try {
       // Pedir el codigo exige la sesion ya abierta: si el usuario llega aqui
       // sin haber pulsado conectar, se abre sola en vez de darle un error.
-      if (getLocalState().status === 'STOPPED') await arrancar();
+      if (getLocalState().status === 'STOPPED') {
+        const estado = await arrancar();
+        // Misma vuelta que en /connect: vinculacion muerta recien borrada.
+        if (estado.status === 'STOPPED' && !hayVinculacion(authDir)) await arrancar();
+      }
       const code = await requestLocalPairingCode(body.phone);
       return { ok: true, code };
     } catch (error) {

@@ -20,6 +20,9 @@ import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { StokyClient } from '../stoky/client.js';
+import type { Monitor } from '../salud/monitor.js';
+import type { ServicioAjustes } from '../ajustes/generales.js';
+import type { ServicioStickers } from '../stickers/stickers.js';
 import { processChange, type WebhookDeps } from '../whatsapp/webhook.js';
 import type { ChangeValue } from '../whatsapp/types.js';
 
@@ -30,6 +33,9 @@ export interface DevRoutesDeps {
   sender: Sender;
   wa: WhatsAppClient;
   settings: SettingsService;
+  salud?: Monitor;
+  ajustes?: ServicioAjustes;
+  stickers?: ServicioStickers;
 }
 
 const simularSchema = z.object({
@@ -37,14 +43,25 @@ const simularSchema = z.object({
   text: z.string().max(4000).optional(),
   /** Ubicacion compartida, como la manda WhatsApp. */
   location: z.object({ latitude: z.number(), longitude: z.number() }).optional(),
+  /** Un adjunto sin texto: la foto de la fachada, el audio con la direccion. */
+  adjunto: z.enum(['image', 'audio', 'video', 'document', 'sticker']).optional(),
   name: z.string().max(200).optional(),
 });
 
+/** Lo justo para que el adjunto simulado tenga un tipo creible. */
+const MIME_DE_PRUEBA: Record<string, string> = {
+  image: 'image/jpeg',
+  audio: 'audio/ogg; codecs=opus',
+  video: 'video/mp4',
+  document: 'application/pdf',
+  sticker: 'image/webp',
+};
+
 export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDeps): Promise<void> {
-  const { config, repos, sender, wa, settings, catalogo } = deps;
+  const { config, repos, sender, wa, settings, catalogo, salud, ajustes, stickers } = deps;
   if (!config.DEV_SIMULATE_INBOUND) return;
 
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes, stickers };
 
   /**
    * Mete un entrante como si lo hubiera mandado ese numero.
@@ -69,13 +86,21 @@ export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDep
               type: 'location',
               location: { latitude: body.location.latitude, longitude: body.location.longitude },
             }
-          : {
-              id,
-              from: phone,
-              timestamp: String(Math.floor(Date.now() / 1000)),
-              type: 'text',
-              text: { body: body.text ?? '' },
-            },
+          : body.adjunto
+            ? {
+                id,
+                from: phone,
+                timestamp: String(Math.floor(Date.now() / 1000)),
+                type: body.adjunto,
+                [body.adjunto]: { id: `media-${id}`, mime_type: MIME_DE_PRUEBA[body.adjunto] },
+              }
+            : {
+                id,
+                from: phone,
+                timestamp: String(Math.floor(Date.now() / 1000)),
+                type: 'text',
+                text: { body: body.text ?? '' },
+              },
       ],
     };
 
