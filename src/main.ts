@@ -20,9 +20,18 @@ import { arrancarServicios, resumenPolitica } from './servicios.js';
 import { crearServicioAjustes } from './ajustes/generales.js';
 import { crearServicioStickers } from './stickers/stickers.js';
 import { mediaDirectory } from './whatsapp/local/media.js';
+import { crearBus } from './eventos/bus.js';
+import { observarRepos } from './eventos/observar.js';
+import { crearServicioIA } from './ia/servicio.js';
 
 const runtime = await createRuntime({ migrate: true });
-const { config, repos, settings, wa } = runtime;
+const { config, settings, wa } = runtime;
+
+// El bus de eventos: lo que pasa (llega un mensaje, se entrega, mandan la
+// ubicacion) se anuncia una vez y los webhooks salientes lo reparten. Los
+// repositorios se envuelven para que todo camino que escriba avise solo.
+const bus = crearBus((m, d) => console.warn(m, d));
+const repos = observarRepos(runtime.repos, bus);
 
 // La politica de ritmo depende del proveedor: la oficial de Meta tiene tier y
 // calidad; un cliente no oficial no, y ahi se va bastante mas despacio. Se
@@ -69,6 +78,20 @@ const sender = createSender({
 // la despedida). Los ficheros van a la carpeta de medios.
 const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mediaDirectory(), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
 
+// El asistente de IA de la tienda: contesta con lo que la tienda escribio
+// en "Mi asistente IA" y deriva a una persona cuando no puede. Ver src/ia.
+const ia = await crearServicioIA({
+  settingsRepo: runtime.settingsRepo,
+  settingsKeyBase64: runtime.secrets.settingsKey,
+  repos,
+  sender,
+  config,
+  nombreNegocio: () => ajustes.nombreNegocio(),
+  supervisor: () => politica().avisarA,
+  conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+  log: (m, d) => console.warn(m, d ?? ''),
+});
+
 if (ajustes.soloNumeros().length) {
   console.log(`
   MODO PRUEBA: solo se escribe a ${ajustes.soloNumeros().join(', ')} (se cambia en /panel#configuracion).
@@ -99,14 +122,14 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, mediaDir: mediaDirectory(), autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, mediaDir: mediaDirectory(), autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })
   : null;
 
 // Todo lo que trabaja solo: monitor, secuencias, goteo, rutas, avisos, GSG.
-const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, ajustes, stickers, log: app.log });
+const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, log: app.log });
 
 await app.listen({ port: config.PORT, host: '0.0.0.0' });
 
@@ -117,7 +140,8 @@ ${runtime.migrated.length ? `\n  Migraciones aplicadas: ${runtime.migrated.join(
   Entrar: http://localhost:${config.PORT}/login  (la primera vez, crea tu cuenta ahi mismo)
   ${missing.length ? `Configuracion pendiente  http://localhost:${config.PORT}/setup  (faltan: ${missing.join(', ')})` : `Panel  http://localhost:${config.PORT}/panel`}
 
-  Integraciones (GSG, scripts): claves de API en http://localhost:${config.PORT}/panel#integraciones
+  Integraciones (Stoky, GSG, scripts): claves de API y webhooks en http://localhost:${config.PORT}/panel#integraciones
+  API publica: http://localhost:${config.PORT}/api/v1/openapi.json
 
   Ritmo: ${resumenPolitica(politica())}.
   Salud del numero: http://localhost:${config.PORT}/panel#salud

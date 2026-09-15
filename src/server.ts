@@ -30,6 +30,13 @@ import type { ServicioAjustes } from './ajustes/generales.js';
 import { instalarBitacora } from './auth/actividad.js';
 import type { ServicioStickers } from './stickers/stickers.js';
 import { registerStickersRoutes } from './admin/stickers-routes.js';
+import { registerApiV1 } from './api/v1/routes.js';
+import type { Bus } from './eventos/bus.js';
+import { registerEmbedRoutes } from './embed/routes.js';
+import { registerConectoresRoutes } from './conectores/routes.js';
+import { registerWebVisitantesRoutes } from './web-visitantes/routes.js';
+import type { ServicioIA } from './ia/servicio.js';
+import { registerIaRoutes } from './ia/routes.js';
 
 export interface ServerDeps {
   config: Config;
@@ -50,12 +57,18 @@ export interface ServerDeps {
   stickers?: ServicioStickers;
   /** Donde viven los adjuntos que llegaron por el chat. Ver src/whatsapp/local/media.ts. */
   mediaDir?: string;
+  /** Como se prueban los webhooks desde la API (fetch de pruebas, timeout). Ver src/webhooks. */
+  webhooks?: { fetchImpl?: typeof fetch; timeoutMs?: number; version?: string };
+  /** El bus de eventos: alimenta el flujo en vivo de la API y el chat embebido. Ver src/eventos. */
+  bus?: Bus;
+  /** El asistente de IA de la tienda. Ver src/ia. */
+  ia?: ServicioIA;
   /** Reabrir la sesion local (Baileys) al arrancar si hay vinculacion guardada. */
   autoConectarLocal?: boolean;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir } = deps;
+  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir, ia } = deps;
 
   // Los errores de validacion salen en espanol: son los que acaban en la
   // pantalla del operador, no en un log para programadores.
@@ -112,7 +125,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // segundos y el navegador reutilizaba la primera respuesta: la pantalla se
   // quedaba congelada aunque el mensaje ya estuviera enviado.
   app.addHook('onSend', async (request, reply) => {
-    if (request.url.startsWith('/admin')) reply.header('cache-control', 'no-store');
+    if (request.url.startsWith('/admin') || request.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
   });
 
   await app.register(websocket);
@@ -122,7 +135,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // en la cola, que es como funciona hasta que GSG publique su API.
   const gsg = crearPuertoGsg(config);
 
-  app.get('/health', async () => ({ ok: true, configured: settings.isConfigured() }));
+  // `connected` distingue "tiene proveedor" de "el telefono esta vinculado":
+  // con el cliente local, configurado no significa conectado hasta escanear el QR.
+  app.get('/health', async () => ({ ok: true, configured: settings.isConfigured(), connected: settings.isConfigured() && (wa.conectado?.() ?? true) }));
 
   // El orden importa: registerAuth instala el hook que resuelve quien pide
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las
@@ -131,7 +146,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia });
+  if (ia) await registerIaRoutes(app, { ia });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
   await registerWahaWebhookRoutes(app, {
@@ -145,6 +161,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     salud,
     ajustes,
     stickers,
+    ia,
     // Contestar a cada trozo de una rafaga le manda al cliente tres mensajes
     // seguidos sin que el haya escrito nada en medio (ver rafaga.ts).
     rafagaMs: config.RAFAGA_MS,
@@ -163,7 +180,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     politica,
     ajustes,
     stickers,
+    ia,
   });
+  // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
+  // nombres estables y un permiso por ruta. Ver src/api/v1.
+  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus });
+  // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.
+  await registerEmbedRoutes(app, { config, ajustes });
+  // El chat para los visitantes de la web del negocio (widget.js). Ver src/web-visitantes.
+  await registerWebVisitantesRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, bus: deps.bus, rafagaMs: config.RAFAGA_MS });
+  // Conectores de tiendas (WooCommerce, Shopify): su webhook entra por /conectores/:id. Ver src/conectores.
+  await registerConectoresRoutes(app, { repos, sender, settings, config, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
   await registerWebRoutes(app, {
     config,
     settings,
@@ -174,6 +201,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     salud,
     ajustes,
     stickers,
+    ia,
     autoConectarLocal: deps.autoConectarLocal,
   });
 

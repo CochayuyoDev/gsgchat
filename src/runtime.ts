@@ -11,6 +11,7 @@ import { mkdirSync } from 'node:fs';
 import { loadConfig, type Config } from './config.js';
 import { createPool, type Pool } from './db/pool.js';
 import { createRepos, createSettingsRepo, type Repos } from './db/repos.js';
+import type { SettingsRepo } from './settings/service.js';
 import { migrate } from './db/migrate.js';
 import { bootstrapSecrets, type LocalSecrets } from './settings/crypto.js';
 import { createSettingsService, type SettingsService } from './settings/service.js';
@@ -23,6 +24,8 @@ export interface Runtime {
   pool: Pool;
   repos: Repos;
   settings: SettingsService;
+  /** La tabla settings tal cual: la usa tambien el asistente de IA para su configuracion. */
+  settingsRepo: SettingsRepo;
   wa: WhatsAppClient;
   /** Migraciones aplicadas en este arranque (vacio si no habia pendientes). */
   migrated: string[];
@@ -48,7 +51,8 @@ export async function createRuntime(opts: { migrate?: boolean } = {}): Promise<R
 
   const pool = createPool(config.DATABASE_URL);
   const repos = createRepos(pool);
-  const settings = await createSettingsService(createSettingsRepo(pool), config, secrets.settingsKey);
+  const settingsRepo = createSettingsRepo(pool);
+  const settings = await createSettingsService(settingsRepo, config, secrets.settingsKey);
   const wa = createDynamicWhatsAppClient(settings, {
     // WAHA no tiene plantillas: necesita el cuerpo guardado para mandarlo
     // como texto. Con la Cloud API esto no se llama nunca.
@@ -63,6 +67,7 @@ export async function createRuntime(opts: { migrate?: boolean } = {}): Promise<R
     pool,
     repos,
     settings,
+    settingsRepo,
     wa,
     migrated,
     close: () => pool.end(),

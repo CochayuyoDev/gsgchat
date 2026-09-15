@@ -68,6 +68,18 @@ export const ajustesGeneralesSchema = z.object({
     )
     .max(50)
     .nullable(),
+  /**
+   * Desde que webs se puede embeber el chat (iframe). Vacio = ninguna.
+   * Van como origen: "https://stoky.app". Ver src/embed.
+   */
+  embebido: z
+    .object({
+      dominios: z
+        .array(z.string().trim().min(1).max(200))
+        .max(50)
+        .transform((lista) => [...new Set(lista.map((d) => d.replace(/\/+$/, '').toLowerCase()).filter(Boolean))]),
+    })
+    .nullable(),
   /** Que sticker sale solo en cada momento. Ver src/stickers. */
   stickers: z
     .object({
@@ -109,6 +121,7 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   autoPausa: null,
   atajos: null,
   stickers: null,
+  embebido: null,
 };
 
 /** Un parche: cualquier rama, y dentro de cada rama cualquier campo. */
@@ -122,6 +135,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   autoPausa: ajustesGeneralesSchema.shape.autoPausa.optional(),
   atajos: ajustesGeneralesSchema.shape.atajos.optional(),
   stickers: ajustesGeneralesSchema.shape.stickers.optional(),
+  embebido: ajustesGeneralesSchema.shape.embebido.optional(),
 });
 
 export type AjustesGeneralesPatch = z.infer<typeof ajustesGeneralesPatchSchema>;
@@ -137,6 +151,7 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     autoPausa: patch.autoPausa !== undefined ? patch.autoPausa : base.autoPausa,
     atajos: patch.atajos !== undefined ? patch.atajos : base.atajos,
     stickers: patch.stickers !== undefined ? patch.stickers : base.stickers,
+    embebido: patch.embebido !== undefined ? patch.embebido : base.embebido,
   };
 }
 
@@ -201,6 +216,8 @@ export interface ServicioAjustes {
   modoPruebaFijado(): boolean;
   /** Las respuestas rapidas del chat: las guardadas o las de fabrica. */
   atajos(): Array<{ atajo: string; texto: string; sticker?: string | null }>;
+  /** Los origenes que pueden embeber el chat. Vacio = nadie. */
+  dominiosEmbebido(): string[];
 }
 
 export async function crearServicioAjustes(deps: {
@@ -298,5 +315,6 @@ export async function crearServicioAjustes(deps: {
     servidor: () => servidor,
     modoPruebaFijado: () => config.soloNumeros.length > 0,
     atajos: () => fresco().atajos ?? ATAJOS_POR_DEFECTO,
+    dominiosEmbebido: () => fresco().embebido?.dominios ?? [],
   };
 }

@@ -18,6 +18,8 @@ import { createClavesApiRepo, type ClavesApiRepo } from '../auth/claves-api.js';
 import { createAjustesGeneralesRepo, type AjustesGeneralesRepo } from '../ajustes/generales.js';
 import { createActividadRepo, type ActividadRepo } from '../auth/actividad.js';
 import { createStickersRepo, type StickersRepo } from '../stickers/stickers.js';
+import { createWebhooksRepo, type WebhooksRepo } from '../webhooks/repo.js';
+import { createConectoresRepo, type ConectoresRepo } from '../conectores/repo.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -513,6 +515,10 @@ export interface Repos {
   actividad: ActividadRepo;
   /** La biblioteca de stickers. Ver src/stickers. */
   stickers: StickersRepo;
+  /** Webhooks salientes: a quien se le cuenta lo que pasa. Ver src/webhooks. */
+  webhooks: WebhooksRepo;
+  /** Conectores de tiendas (WooCommerce, Shopify). Ver src/conectores. */
+  conectores: ConectoresRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1765,6 +1771,8 @@ export function createRepos(pool: Pool): Repos {
     ajustesGenerales: createAjustesGeneralesRepo(pool),
     actividad: createActividadRepo(pool),
     stickers: createStickersRepo(pool),
+    webhooks: createWebhooksRepo(pool),
+    conectores: createConectoresRepo(pool),
   };
 }
 

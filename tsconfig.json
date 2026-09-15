@@ -22,7 +22,8 @@
   "include": [
     "src/**/*.ts",
     "tests/**/*.ts",
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "saas/**/*.ts"
   ],
   "exclude": [
     "dist",

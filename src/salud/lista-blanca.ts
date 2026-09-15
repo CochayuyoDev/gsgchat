@@ -10,8 +10,12 @@
  */
 
 import type { Config } from '../config.js';
+import { esContactoWeb } from '../web-visitantes/canal.js';
 
 export function numeroPermitido(config: Pick<Config, 'soloNumeros'>, phone: string): boolean {
   if (!config.soloNumeros.length) return true;
+  // Un visitante de la web no es un numero de WhatsApp: el modo prueba
+  // protege el numero propio, y a el no se le escribe por WhatsApp.
+  if (esContactoWeb(phone)) return true;
   return config.soloNumeros.includes(phone.replace(/\D+/g, ''));
 }

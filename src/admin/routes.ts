@@ -11,6 +11,7 @@ import type { Config } from '../config.js';
 import { normalizePhone, type Repos, type TemplateCategory } from '../db/repos.js';
 import type { OutboundQueue } from '../outbound/queue.js';
 import { dailyCapFor } from '../outbound/throttle.js';
+import type { ServicioIA } from '../ia/servicio.js';
 import { createTrackingSession } from '../tracking/routes.js';
 import { buildTrackingUrls } from '../tracking/tokens.js';
 import type { TrackingHub } from '../tracking/realtime.js';
@@ -56,6 +57,8 @@ export interface AdminDeps {
   /** El monitor de salud y la politica de ritmo. Ver src/salud. */
   salud?: Monitor;
   politica?: () => Politica;
+  /** El asistente de IA, para saber si esta listo (primeros pasos). */
+  ia?: ServicioIA;
 }
 
 const phoneSchema = z
@@ -251,6 +254,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El numero esta en amarillo: el marketing va mas lento', href: '/panel#salud' });
     if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} conversacion${esperando === 1 ? '' : 'es'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
     if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: '/rutas', n: requierenPersona });
+    // Un webhook que se apago solo es un sistema que dejo de enterarse de lo que pasa.
+    const apagados = (await repos.webhooks.listar().catch(() => [])).filter((w) => !w.activo && w.motivoPausa);
+    if (apagados.length) avisos.push({ tipo: 'webhooks', nivel: 'warn', texto: `${apagados.length} webhook${apagados.length === 1 ? '' : 's'} apagado${apagados.length === 1 ? '' : 's'} por fallos: ${apagados.map((w) => w.descripcion || w.url).join(', ')}`, href: '/panel#integraciones', n: apagados.length });
     return { total: avisos.length, avisos, generadoEn: new Date() };
   });
 
@@ -336,6 +342,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         plantillas: plantillas.length,
         contactos: contactos.total,
         lotes: lotes.length,
+        // El asistente de IA: null si este arranque no lo tiene.
+        ia: deps.ia ? deps.ia.activa() : null,
+        iaDisponible: Boolean(deps.ia),
       },
     };
   });

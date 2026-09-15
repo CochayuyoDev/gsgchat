@@ -18,6 +18,7 @@ import { aMano } from '../salud/humano.js';
 import { codigoDeError } from '../salud/supresion.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { dailyCapFor, type WarmupPolicy } from './throttle.js';
+import { esContactoWeb, nuevoIdMensajeWeb } from '../web-visitantes/canal.js';
 import {
   evaluateGates,
   isWithinServiceWindow,
@@ -120,6 +121,43 @@ export function createSender(deps: SenderDeps): Sender {
     async send(job) {
       const at = now();
       const contact = await repos.contacts.upsertFromInbound(job.phone);
+
+      // Un visitante de la web: no va por WhatsApp, va a su navegador por el
+      // flujo de eventos (ver src/web-visitantes). Sin gates de WhatsApp
+      // (no hay numero que proteger); solo se respeta que se haya ido.
+      if (esContactoWeb(contact.phone)) {
+        const deliveryId = await repos.deliveries.create({
+          contactId: contact.id,
+          campaignId: job.campaignId ?? null,
+          kind: job.kind,
+          templateName: job.templateName ?? null,
+          category: job.category,
+          variables: job.variables,
+          businessInitiated: false,
+        });
+        if (contact.optOutAt) {
+          const reason = 'el visitante pidio no recibir mas mensajes';
+          await repos.deliveries.markBlocked(deliveryId, `opt_out: ${reason}`);
+          return { ok: false, blocked: true, code: 'opt_out', reason, deliveryId };
+        }
+        const template = job.kind === 'template' && job.templateName ? await repos.templates.get(job.templateName, job.templateLanguage ?? 'es') : null;
+        const wamid = nuevoIdMensajeWeb('out');
+        await repos.deliveries.markSent(deliveryId, wamid);
+        // La fila del hilo es lo que el visitante recibe: el flujo de eventos
+        // la anuncia (mensaje.enviado) y su navegador la pinta.
+        await repos.messages.add({
+          contactId: contact.id,
+          direction: 'out',
+          wamid,
+          kind: job.kind === 'freeform' ? 'text' : job.kind,
+          body: describeOutgoing(job, template),
+          payload: job.location ? { location: job.location } : job.interactive ? { interactive: job.interactive } : null,
+          status: 'sent',
+          deliveryId,
+          createdAt: at,
+        });
+        return { ok: true, wamid, deliveryId };
+      }
 
       // Sin socket no hay nada que intentar: se devuelve "espera" sin dejar
       // una entrega fallida que el monitor contaria como rechazo de WhatsApp

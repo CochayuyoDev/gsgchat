@@ -19,6 +19,12 @@ import type { CodigoIncidencia } from './incidencias.js';
 export interface PlanNumeracion {
   /** Prefijo internacional, sin +. */
   pais: string;
+  /**
+   * Un digito que a veces viene pegado detras del prefijo de pais y sobra
+   * (Mexico: el "1" de 521...). Se quita solo si asi el numero queda con
+   * el largo nacional.
+   */
+  quitarTrasPais?: string;
   /** Cuantos digitos tiene el numero nacional (sin prefijo de pais). */
   largoNacional: number;
   /** Con que empieza un movil. Vacio = no se puede distinguir. */
@@ -41,6 +47,10 @@ export const MEXICO: PlanNumeracion = {
   largoNacional: 10,
   inicioMovil: [],
   inicioFijo: [],
+  // WhatsApp identifica a los celulares mexicanos como 521 + 10 digitos (el
+  // "1" de movil de antes). Se quita para quedarse con 52 + 10, que es como
+  // se marca hoy y como acepta la API.
+  quitarTrasPais: '1',
 };
 
 /** Sin plan: se acepta cualquier cosa que parezca un numero internacional. */
@@ -114,6 +124,9 @@ export function revisarTelefono(entrada: string, plan: PlanNumeracion = PERU): R
 
   if (nacional.startsWith(plan.pais) && nacional.length > plan.largoNacional) {
     nacional = nacional.slice(plan.pais.length);
+    if (plan.quitarTrasPais && nacional.startsWith(plan.quitarTrasPais) && nacional.length === plan.largoNacional + 1) {
+      nacional = nacional.slice(plan.quitarTrasPais.length);
+    }
   }
   // Un 0 delante es el prefijo de larga distancia nacional: "0987654321".
   if (nacional.length === plan.largoNacional + 1 && nacional.startsWith('0')) {

@@ -22,6 +22,7 @@ import type { Config } from '../config.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
+import type { ServicioIA } from '../ia/servicio.js';
 import { numeroPermitido } from '../salud/lista-blanca.js';
 import type { Contact, Repos } from '../db/repos.js';
 import type { AutoReply } from '../db/automation.js';
@@ -82,6 +83,14 @@ export interface InboundDeps {
   ajustes?: ServicioAjustes;
   /** Los stickers automaticos. Ver src/stickers. */
   stickers?: ServicioStickers;
+  /**
+   * El asistente de IA de la tienda. Ver src/ia.
+   *
+   * Cuando esta activo contesta el texto libre en lugar del flujo de
+   * preventa y de las reglas genericas; lo que es de ubicacion, baja/alta y
+   * el reparto sigue igual, porque eso no es conversacion.
+   */
+  ia?: ServicioIA;
   /**
    * Cuanto se espera a que el cliente termine de escribir, en ms.
    *
@@ -755,6 +764,13 @@ export async function handleInboundMessage(
         return;
       }
     }
+    // Con la IA activa, un adjunto se reconoce y se pide el texto: el modelo
+    // no ve fotos ni oye audios, y callarse deja al cliente hablando solo.
+    if (esAdjunto && message.type !== 'sticker' && deps.ia?.activa()) {
+      const que = message.type === 'audio' ? 'tu audio' : message.type === 'image' ? 'tu foto' : message.type === 'video' ? 'tu video' : 'tu archivo';
+      await reply(`Recibí ${que}. ¿Me cuentas por escrito qué necesitas? Así te ayudo más rápido.`);
+      return;
+    }
     if (esAdjunto && (await repos.automation.getPrefs()).preventaActiva) {
       await turnoDePreventa(contact, { texto: '', esPrimerMensaje: isFirstMessage, adjunto: true }, deps);
     }
@@ -824,6 +840,13 @@ export async function handleInboundMessage(
     // a mano para ese caso concreto, y encadenar las dos respuestas es
     // exactamente el "dos mensajes por uno" que hay que evitar.
     if (rule) return;
+
+    // El asistente de IA de la tienda: con lo que sabe del negocio (y el
+    // catalogo, si esta), contesta; si no puede, deriva a una persona.
+    if (deps.ia?.activa()) {
+      await deps.ia.turno(contact, text);
+      return;
+    }
 
     if (prefs.preventaActiva) {
       await turnoDePreventa(contact, { texto: text, esPrimerMensaje: isFirstMessage }, deps);

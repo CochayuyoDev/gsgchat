@@ -512,6 +512,14 @@ WhatsApp Cloud API
 | `src/rutas/` | solicitud de ubicacion por lotes: revision de numeros, motor, incidencias y puerta a GSG |
 | `src/archive/` | respaldo de conversaciones cerradas: fichero, verificacion y barrido |
 | `src/admin/` | API de operacion y del chat |
+| `src/api/v1/` | la API publica para otros sistemas: rutas con permiso y contrato OpenAPI |
+| `src/eventos/` | el bus de eventos y el envoltorio de repositorios que los emite |
+| `src/webhooks/` | webhooks salientes: suscripciones, firma, cola de entregas y reintentos |
+| `src/embed/` | el chat embebido en otras webs: token, pagina, `embed.js` y cabeceras |
+| `src/conectores/` | conectores de tiendas (WooCommerce, Shopify): firma, lectura del pedido, reglas y registro |
+| `saas/` | una instancia por tienda: alta, baja, estado, Caddy y el panel maestro |
+| `src/ia/` | el asistente de IA de la tienda: proveedores (Puter, OpenAI-compatible), conocimiento del sistema, escenarios, turno y derivacion |
+| `src/web-visitantes/` | el chat para los visitantes de la web del negocio: sesion, mensajes, SSE y `widget.js` |
 | `src/web/` | `/chat`, `/rutas`, `/setup` y `/panel` |
 | `src/runtime.ts` | arranque comun del servidor y de los CLIs |
 
@@ -777,12 +785,13 @@ El menu:
 
 ```
 Inicio · Manual de uso · Soporte · [Buscar modulo… Ctrl K]
-CONVERSACIONES     Chats · Enviar mensaje · Historial de envios · Stickers
-REPARTO            Ubicaciones para reparto · Ajustes del reparto
-CAMPAÑAS           Enviar a un grupo · Campañas · Automatización · Plantillas
-CONTACTOS          Contactos · Ubicaciones recibidas · Rastreo en vivo · Extraer coordenadas
-SALUD DEL NÚMERO   Estado · Riesgo y ritmo
-ADMINISTRACIÓN     Configuración · Usuarios · Integraciones · Actividad · Conexión de WhatsApp
+ATENCIÓN           Chats · Mi asistente IA · Contactos · [Enviar mensaje · Historial de envios · Stickers]
+REPARTO            [Ubicaciones para reparto · Ajustes del reparto]
+CAMPAÑAS           [Enviar a un grupo · Campañas · Respuestas automáticas · Mensajes aprobados (plantillas)]
+UBICACIONES        [Ubicaciones recibidas · Rastreo en vivo · Extraer coordenadas]
+¿VA TODO BIEN?     [Estado del número · Riesgo y ritmo]
+MI NEGOCIO         Conexión de WhatsApp · Conectar mi web y tienda · Configuración · [Usuarios · Actividad]
+                   (entre corchetes: solo con "Ver todo", el modo avanzado)
 ```
 
 Arriba a la derecha, en todas las pantallas: la **campana** (lo que espera a
@@ -910,6 +919,371 @@ curl -H "authorization: Bearer wak_..." localhost:3000/admin/health
 
 ---
 
+## Mi asistente IA
+
+Lo que vende el sistema a una tienda: **que su WhatsApp conteste solo** con
+lo que la tienda sabe, y que pase la conversacion a una persona cuando no
+pueda. Todo desde `/panel#ia`, sin tocar nada mas:
+
+1. **Cuentale de tu negocio.** Un cuadro de texto, escrito como se lo
+   contarias a un empleado nuevo: que vendes, precios, envios, cambios,
+   pagos, horario. Y, si quieres, como debe hablar (tutear, ser breve...).
+2. **Con que IA.** Por defecto [Puter](https://puter.com), como en Stoky:
+   sin llaves ni tarjeta. Se pulsa **"Conectar con Puter"**, se entra con
+   Google, Microsoft, Apple o correo (gratis), y la sesion queda guardada
+   **cifrada** en el servidor, que es quien contesta por WhatsApp aunque
+   nadie tenga el panel abierto. Con Puter **solo se usan modelos
+   completamente gratuitos**: en su catalogo en vivo
+   (`api.puter.com/puterai/chat/models/details`, 1009 modelos) unicamente los
+   dos Gemma 4 de Google tienen costo cero por token; GPT, Claude o Gemini
+   "sin llave" descuentan de la asignacion de la cuenta de quien los usa. El
+   catalogo se vuelve a mirar cada hora y, si el modelo guardado deja de ser
+   gratis, se usa `google/gemma-4-31b-it` (`src/ia/modelos-gratis.ts`). Tambien se puede pegar
+   un token a mano (puter.com → Dashboard → *Create token*), o usar cualquier
+   API compatible con OpenAI (OpenAI, Groq, DeepSeek, Ollama en local).
+
+   Lo que Stoky aprendio con Gemma viene puesto: se le pide que no razone en
+   voz alta (`reasoning: {enabled: false}`, con reintento si el proveedor no
+   lo acepta), se limpian los `<thought>…</thought>` que a veces devuelve, y
+   los errores de Puter (sesion cerrada, sin saldo, modelo retirado) se
+   explican en cristiano.
+3. **Cuando pasar con una persona.** Si el cliente escribe "asesor",
+   "reclamo" o lo que la tienda decida, o si el modelo no puede ayudar, el
+   asistente se despide, **se calla en ese chat** (la misma pausa del bot
+   que tiene el operador en `/chat`) y avisa por WhatsApp al supervisor.
+4. **Pruebalo ahi mismo**: un chat de prueba en la pantalla, sin mandar nada
+   por WhatsApp.
+
+**Sabe como funciona el sistema por el que habla.** Ademas de lo que la
+tienda escribe, el asistente lleva puesto lo que el sistema hace y no hace
+(`src/ia/conocimiento-sistema.ts`): que puede pedir la ubicacion con el
+boton de WhatsApp, que BAJA corta los mensajes, que el reparto pide el pin,
+que los avisos de pedido de la tienda online salen solos, y que no puede
+cobrar ni confirmar pagos (para eso pasa con una persona). Y puede
+**ejecutar acciones** del sistema con dos marcas al final de su mensaje:
+`[PEDIR_UBICACION]` manda el boton nativo de ubicacion (o el camino del clip
+si el proveedor no lo tiene) y `[DERIVAR]` pasa con una persona. Derivar
+manda sobre pedir ubicacion.
+
+
+**Entrenado por escenarios.** El prompt lleva ejemplos de como responder
+(saludo, precio que no sabe, envio, descuento, pedir la ubicacion, pago,
+reclamo, "eres un bot", insulto, "ignora tus instrucciones") y el asistente
+los imita. Y en la misma pantalla esta el **examen**: mas de sesenta
+clientes de prueba por grupos (entrada, catalogo, stock, negociacion,
+cierre, pago, envio, postventa, canal, mala intencion), escritos como en la
+vida real. Se corren con el modelo real y cada respuesta se califica sola:
+que no diga un precio que no esta en lo que sabe, que no prometa
+descuentos ni cosas gratis, que no confirme pagos, que derive cuando toca
+(reclamo, devolucion, cambio de direccion) y no cuando no toca, que pida la
+ubicacion en un delivery, que no revele el modelo, que no se vaya de largo.
+`src/ia/escenarios.ts`; `POST /admin/ia/escenarios`.
+**El ayudante del panel.** En el manual (`/manual`, "Preguntale al
+sistema") el dueño o un operador pregunta en su idioma ("¿como conecto
+Shopify?", "¿por que no salio un mensaje?") y la misma IA responde con el
+manual completo del sistema, diciendo en que pantalla se hace cada cosa.
+Ruta `POST /admin/ia/ayuda`; usa la sesion de Puter del asistente.
+
+Con el asistente encendido, el texto libre de los clientes lo contesta el
+(en lugar del flujo de preventa y de la regla generica); lo que no es
+conversacion sigue igual: BAJA/ALTA, ubicaciones, el reparto, las reglas
+por palabra clave que la tienda escribio. Una foto o un audio se reconocen
+("recibi tu foto, ¿me cuentas por escrito?") sin llamar al modelo. Si Stoky
+esta conectado, el asistente ve precio y stock reales de lo que el cliente
+pregunta. Si el modelo falla, el cliente recibe un "en un momento te atiende
+una persona" y se avisa: nunca se queda sin respuesta ni ve un error.
+
+En el SaaS cada tienda tiene su conocimiento y su token: es por instancia.
+Codigo en `src/ia/`.
+
+## Modo sencillo
+
+El menu arranca en **modo sencillo**: Inicio, Chats, Mi asistente IA,
+Contactos, Conexion de WhatsApp, Conectar mi web y tienda, Configuracion.
+Es lo que una tienda necesita para atender su WhatsApp con la IA. "Ver todo"
+(abajo del menu) ensena lo demas: reparto, campañas, plantillas, rastreo,
+ritmo y salud del numero, usuarios, actividad. Se recuerda en el navegador.
+
+La tarjeta "Para empezar" del inicio son tres pasos: conectar el WhatsApp,
+enseñarle al asistente y poner el chat en la web (o conectar la tienda).
+Los pasos del modo avanzado (equipo, plantillas, contactos, reparto) solo
+aparecen con "Ver todo".
+
+---
+
+## Integrar otro sistema (Stoky, GSG, lo que venga)
+
+Cualquier sistema, en cualquier lenguaje, puede **enviar** por WhatsApp desde
+aqui y **enterarse** de lo que llega, sin ver el panel ni el resto del
+sistema. Son tres piezas, y las tres se manejan desde `/panel#integraciones`:
+
+1. **Una clave de API con permisos.** Al crearla se marca que puede hacer
+   (`mensajes:enviar`, `conversaciones:leer`, `contactos:escribir`...). Con
+   permisos marcados, la clave entra **solo** por la API publica `/api/v1`;
+   sin marcar nada, lo puede todo, como las claves de antes (que siguen igual).
+2. **La API publica, `/api/v1`.** Pocos caminos, nombres que no cambian con
+   la pantalla y un contrato en OpenAPI: `GET /api/v1/openapi.json`. Con el,
+   PHP, Python o Java generan su cliente sin leer este codigo.
+3. **Webhooks salientes.** El otro sistema registra su URL y a partir de ahi
+   recibe un POST firmado por cada evento que pidio.
+
+Nada de esto se salta las guardas: `POST /api/v1/mensajes` pasa por los
+mismos gates que el chat, y un envio frenado responde `202` con
+`estado: "bloqueado"` y el motivo, nunca `200`.
+
+### La API publica
+
+Todas con `Authorization: Bearer wak_...`. Cada ruta exige el permiso que se
+indica; sin el, `403` diciendo cual falta.
+
+| Metodo | Ruta | Permiso | |
+|---|---|---|---|
+| GET | `/api/v1` · `/openapi.json` · `/eventos` | ninguno | que hay, el contrato y la lista de eventos |
+| GET | `/api/v1/estado` | `estado:leer` | proveedor, conexion, semaforo, cupo de hoy, cola |
+| POST | `/api/v1/mensajes` | `mensajes:enviar` | `{telefono, texto \| plantilla \| ubicacion \| pedirUbicacion, consentimiento?}` |
+| GET | `/api/v1/conversaciones` · `/conversaciones/:telefono` | `conversaciones:leer` | la lista y el hilo, con `puedeEscribir` y por que no |
+| GET/POST | `/api/v1/contactos` · `/contactos/:telefono` · `/contactos/:telefono/baja` | `contactos:leer` / `contactos:escribir` | alta con `consentimiento.origen`, consulta y baja |
+| GET | `/api/v1/plantillas` | `plantillas:leer` | solo las aprobadas |
+| GET/POST/PATCH/DELETE | `/api/v1/webhooks` · `/webhooks/:id` | `webhooks:gestionar` | registrar (devuelve el secreto una vez), cambiar, pausar, borrar |
+| GET/POST | `/api/v1/webhooks/:id/entregas` · `/probar` · `/reencolar` · `/secreto` | `webhooks:gestionar` | ver que se entrego, mandar un `prueba.ping` ahora, reintentar lo fallido, rotar el secreto |
+| POST | `/api/v1/embed/token` | `embed:emitir` | un token corto para el chat embebido (ver mas abajo) |
+| GET | `/api/v1/eventos/stream` | `conversaciones:leer` | lo que pasa, en vivo (SSE) |
+| POST | `/api/v1/conversaciones/:telefono/leido` | `conversaciones:leer` | marcar como leido |
+| GET/POST/PATCH/DELETE | `/api/v1/conectores` · `/conectores/:id` · `/opciones` · `/:id/entradas` · `/:id/probar` · `/:id/secreto` | `conectores:gestionar` | conectores de tiendas (ver mas abajo) |
+
+```bash
+# Stoky confirma un pedido (y deja registrado el consentimiento en la misma llamada)
+curl -X POST http://localhost:3000/api/v1/mensajes \
+  -H "authorization: Bearer wak_..." -H "content-type: application/json" \
+  -d '{"telefono":"51987654321","nombre":"Maria","consentimiento":{"origen":"pedido P-1024 en la tienda web"},
+       "plantilla":{"nombre":"confirmacion_pedido","variables":["P-1024"]}}'
+# → 200 {"ok":true,"estado":"enviado","mensajeId":"wamid...","entregaId":88}
+# → 202 {"ok":false,"estado":"bloqueado","codigo":"window_closed","motivo":"..."}   si una guarda lo freno
+```
+
+El reparto (GSG) sigue entrando por `/admin/rutas/*` con una clave sin
+permisos acotados, como hasta ahora.
+
+### Los webhooks
+
+Se registra la URL (desde el panel o con `POST /api/v1/webhooks`) y se
+eligen los eventos; sin elegir, llegan todos:
+
+| Evento | Cuando |
+|---|---|
+| `mensaje.recibido` | el cliente escribio: texto, ubicacion, foto, audio... con `ventanaAbierta` |
+| `mensaje.enviado` | salio un mensaje hacia el cliente, lo mandara quien lo mandara |
+| `mensaje.estado` | `sent`, `delivered`, `read` o `failed` de un mensaje enviado |
+| `ubicacion.recibida` | se consiguio la ubicacion de un cliente (pin o link de mapa) |
+| `contacto.alta` · `contacto.baja` | consentimiento registrado / pidio no recibir mas |
+| `reparto.solicitud.actualizada` | una solicitud del reparto cambio de estado o de incidencia |
+| `salud.nivel` | el semaforo del numero cambio |
+
+Cada entrega es un `POST` con este cuerpo y tres cabeceras:
+
+```
+POST https://stoky.app/webhooks/whatsapp
+X-Firma: t=1726400000,v1=3f2a…      X-Evento: mensaje.recibido      X-Entrega: 8812
+{
+  "id": "8812", "evento": "mensaje.recibido", "fecha": "2026-09-15T14:02:11.000Z", "intento": 1,
+  "datos": {
+    "contacto": { "id": "…", "telefono": "51987654321", "nombre": "Maria" },
+    "mensaje": { "id": "wamid.HBg…", "tipo": "text", "texto": "tienen la 40 en negro?", "datos": null, "fecha": "…" },
+    "ventanaAbierta": true
+  }
+}
+```
+
+**La firma** es un HMAC sha256 del cuerpo exacto con el secreto del webhook,
+con la marca de tiempo dentro (`t.cuerpo`) para que una entrega capturada
+no se pueda reenviar horas despues. Se comprueba asi:
+
+```php
+// PHP (Stoky)
+[$t, $v1] = sscanf($_SERVER['HTTP_X_FIRMA'], 't=%d,v1=%s');
+$cuerpo = file_get_contents('php://input');
+$esperada = hash_hmac('sha256', $t . '.' . $cuerpo, $secreto);
+if (!hash_equals($esperada, $v1) || abs(time() - $t) > 300) { http_response_code(401); exit; }
+http_response_code(200);          // contestar enseguida; procesar despues, en cola
+```
+
+```ts
+// Node
+import { verificarFirma } from 'wa-locator/src/webhooks/firma.js';
+verificarFirma(secreto, cuerpoCrudo, req.headers['x-firma']); // true | false
+```
+
+**Que pasa si el otro lado no contesta.** Un `2xx` cierra la entrega. Un
+`5xx`, un timeout (15 s) o una caida la reintentan con espera creciente:
+1 min, 5, 30, 2 h, 12 h; a la sexta se da por perdida. Un `4xx` (salvo 408
+y 429) es un "no" que insistir no cambia y se marca fallida en el acto.
+Tras **un dia entero sin una sola entrega buena** el webhook se apaga solo,
+con su motivo escrito, y sale en la campana del panel. Se reactiva desde ahi
+mismo y lo fallido se puede devolver a la cola con "Reintentar fallidas".
+
+Todo queda en `webhook_entregas`: que se mando, cuantas veces, que contesto
+el otro lado. Se ve en el panel (boton "Entregas") o por la API.
+
+### El chat embebido en otra web
+
+Para atender WhatsApp **sin salir de Stoky** (o de cualquier web): la
+pantalla de chat, dentro de un iframe, hablando solo con `/api/v1` y con un
+token corto que decide que ve.
+
+1. En `/panel#integraciones`, "Chat embebido": se escriben las webs que
+   pueden enmarcarlo (`https://stoky.app`). Sin ninguna, nadie puede: la
+   pagina sale con `Content-Security-Policy: frame-ancestors 'self'`.
+2. El **servidor** de la otra web pide un token con una clave que tenga
+   `embed:emitir` (la clave nunca llega al navegador; el token si, y caduca
+   a la hora, 12 h como mucho):
+
+   ```
+   POST /api/v1/embed/token   {"operador":"ana","telefono":"51987654321"}
+   → {"token":"emb_...","caduca":"...","url":"https://wa.negocio.com/embed/chat"}
+   ```
+
+   Con `telefono`, el token abre **solo ese hilo** (lo que quiere una ficha
+   de cliente); sin el, la bandeja completa (lo que quiere un panel de
+   atencion). Los permisos del token se acotan a los del chat y a los de la
+   propia clave.
+3. En su pagina:
+
+   ```html
+   <div id="chat-wa" style="height:600px"></div>
+   <script src="https://wa.negocio.com/embed.js"></script>
+   <script>
+     var chat = WA.montar('#chat-wa', {
+       token: 'emb_...',
+       telefono: '51987654321',                 // opcional
+       onNoLeidos: function (n) { /* poner el numerito */ },
+       onMensaje: function (m) { /* llego o salio */ },
+       onTokenCaducado: function () { /* pedir otro y chat.actualizarToken(nuevo) */ }
+     });
+     chat.abrir('51911111111');                 // cambiar de hilo desde fuera
+   </script>
+   ```
+
+`embed.js` crea el iframe, le pasa el token por `postMessage` (no por la
+URL: no queda en logs) y reexpone lo que el iframe cuenta. No hace falta
+CORS: el iframe habla con su propio origen. La pantalla se mantiene al dia
+por el flujo de eventos (`GET /api/v1/eventos/stream`, Server-Sent Events,
+filtrado al telefono del token) y, si eso falla, refrescando cada 10 s.
+Codigo en `src/embed/`.
+
+En WordPress esto es un bloque "HTML personalizado"; en Shopify, una
+seccion "Custom Liquid". En produccion hace falta HTTPS: sin el, Safari y
+Chrome pueden bloquear el iframe.
+
+### Varias tiendas: el SaaS
+
+Para dar el sistema a muchos negocios, cada uno con **su propio WhatsApp y
+sus propios datos**, no se comparte nada: una instancia por tienda, con su
+contenedor, su base y su subdominio, y Caddy delante sacando el HTTPS.
+
+```bash
+cp saas/.env.example saas/.env          # DOMINIO_BASE=wa.tuservicio.com, POSTGRES_PASSWORD, MAESTRO_CLAVE
+npm run saas:base                       # imagen + Caddy + Postgres
+npm run saas:alta -- tienda1 --nombre "Zapateria Lima"
+# → https://tienda1.wa.tuservicio.com/login
+```
+
+`npm run saas:maestro` levanta tu panel (`maestro.wa.tuservicio.com`) para
+dar de alta y de baja desde la pantalla y ver que instancias responden.
+Cada proyecto se conecta a *su* tienda igual que a una instalacion suelta,
+contra su subdominio. Todo el detalle en `saas/README.md`.
+
+### El chat flotante en cualquier web
+
+Ademas de `WA.montar` (el chat dentro de un contenedor de la pagina),
+`WA.flotante` pone una burbuja abajo a la derecha que abre el chat encima
+de la web, sin tocar su diseno. Sirve para WordPress, Shopify o cualquier
+HTML: una linea y ya.
+
+```html
+<script src="https://tienda1.wa.tuservicio.com/embed.js"></script>
+<script>WA.flotante({ token: 'emb_...', texto: 'Atender WhatsApp', lado: 'derecha', color: '#25d366' });</script>
+```
+
+### El chat para los visitantes de la web
+
+Distinto del embebido (que es para el equipo): esto es la burbuja que ven
+los **clientes** en la pagina del negocio. Escriben sin cuenta ni WhatsApp,
+su mensaje entra al sistema como cualquier otro (lo contesta el asistente
+de IA o las reglas, lo ve el equipo en Chats, el operador les responde
+desde ahi) y la respuesta les llega en vivo a su navegador.
+
+```html
+<script src="https://tienda1.wa.tuservicio.com/web/widget.js"></script>
+<script>
+  WAChat.montar({ texto: '¿Te ayudamos?', color: '#25d366', bienvenida: 'Hola 👋', pedirNombre: true, whatsapp: '51987654321' });
+</script>
+```
+
+- Solo desde las webs escritas en "Conectar mi web y tienda → Chat
+  embebido" (CORS por origen): otra web recibe 403.
+- El visitante es un contacto mas (`web-…`), con consentimiento implicito
+  ("chat web en <pagina>"). Sin gates de WhatsApp: no hay numero que
+  proteger. `BAJA` lo respeta igual.
+- Su sesion es un token firmado de 30 dias en su navegador: si vuelve,
+  sigue su conversacion. Tope de 20 mensajes por minuto por sesion.
+- `GET /web/demo`: una tienda de mentira con el widget puesto, para verlo
+  funcionando y copiar el trozo.
+
+Rutas: `POST /web/sesion`, `POST /web/mensajes`, `GET /web/historial`,
+`GET /web/eventos` (SSE), `GET /web/widget.js`, `GET /web/demo`. Codigo en
+`src/web-visitantes/`.
+
+### Conectores de tiendas: WooCommerce y Shopify sin tocar su codigo
+
+Esas tiendas ya avisan solas de cada pedido por webhook. Un **conector** es
+la URL que se les pega y las reglas de que WhatsApp sale con cada evento.
+Todo desde `/panel#integraciones`, "Conectores de tiendas":
+
+1. Crear el conector (tipo, nombre). Sale la URL `https://wa.negocio.com/conectores/<id>`
+   y el secreto: en WooCommerce se genera aqui y se pega alla (WooCommerce →
+   Ajustes → Avanzado → Webhooks, tema "Pedido creado" y otro "Pedido
+   actualizado"); en Shopify el secreto lo da su panel (Configuracion →
+   Notificaciones → Webhooks) y se pega aqui al crear el conector.
+2. Las reglas: por cada evento, si esta activo, que plantilla (con la API de
+   Meta) o que texto (QR/WAHA) sale, con `{nombre}`, `{numero}`, `{total}`,
+   `{moneda}`, `{estado}`, `{tienda}`, `{seguimiento}` e `{items}`.
+3. "Mandar prueba": simula un pedido y manda el mensaje a un telefono real,
+   para verlo antes de pegar nada.
+
+| Evento | WooCommerce | Shopify |
+|---|---|---|
+| `pedido.creado` | `order.created` | `orders/create` |
+| `pedido.pagado` | `order.updated` con estado `processing` | `orders/paid` |
+| `pedido.enviado` | (no lo distingue) | `orders/fulfilled` |
+| `pedido.completado` | `order.updated` con `completed` | — |
+| `pedido.cancelado` | `cancelled`, `refunded`, `failed` | `orders/cancelled` |
+| `pedido.actualizado` | cualquier otro cambio | `orders/updated` |
+
+Cada webhook se comprueba con su firma (`X-WC-Webhook-Signature` /
+`X-Shopify-Hmac-Sha256`, HMAC sha256 del cuerpo en base64) antes de mirar
+nada. El telefono del pedido pasa por el plan de numeracion del pais
+(`RUTAS_PAIS`): un `987 654 321` peruano sale como `51987654321`. El
+cliente queda con su consentimiento escrito (`pedido 1024 en Tienda Woo`) y
+el mensaje sale por el sender de siempre, con sus guardas. **Todo lo que
+llega queda apuntado** con su resultado (`enviado`, `bloqueado`,
+`sin_regla`, `sin_telefono`, `ignorado`, `error`): boton "Pedidos" del
+conector, o `GET /api/v1/conectores/:id/entradas`. Se contesta `200` en
+cuanto la firma cuadra, salga o no el mensaje: las tiendas desactivan los
+webhooks que fallan. Codigo en `src/conectores/`.
+
+Para lo que no sea WooCommerce ni Shopify (un CRM, una hoja de calculo, un
+ERP sin API): la API publica y los webhooks salientes son exactamente lo que
+consumen Zapier o Make, y con eso se conecta a miles de apps sin programar.
+
+Los eventos nacen envolviendo los repositorios (`src/eventos/observar.ts`):
+asi los emiten igual la Cloud API, el cliente local y WAHA, y la importacion
+de historial, porque todos escriben en la misma tabla. El bus
+(`src/eventos/bus.ts`) es el unico sitio donde se anuncia; los webhooks
+(`src/webhooks/`) son el primer suscriptor, y el chat embebido sera el
+siguiente.
+
+---
+
 ## API de operacion
 
 Todas bajo `Authorization: Bearer wak_...` (una clave de API creada en
@@ -995,7 +1369,9 @@ Todas bajo `Authorization: Bearer wak_...` (una clave de API creada en
 | POST | `/admin/settings/subscribe` · `/register` · `/test-message` | activar la cuenta |
 
 Publicas: `GET /webhooks/whatsapp` (verificacion), `POST /webhooks/whatsapp`,
-`GET /t/:token`, `WS /ws/track/:token`, `GET /health`.
+`GET /t/:token`, `WS /ws/track/:token`, `GET /health`, `GET /embed.js`, `GET /embed/chat`
+(la pagina embebible; sin token no ensena nada) y `POST /conectores/:id` (el
+webhook que pegan WooCommerce y Shopify, con su firma).
 
 ---
 
@@ -1022,7 +1398,7 @@ la pagina de rastreo.
 
 ## Tests
 
-787 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
+1055 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
 en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
 verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
 WebAssembly, asi que tampoco hacen falta Docker ni un servidor.

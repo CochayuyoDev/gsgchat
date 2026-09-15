@@ -20,3 +20,7 @@ dist/
 # Respaldos de conversacion (ver ARCHIVE_DIR)
 respaldos/
 .wa-demo-respaldos/
+saas/.env
+saas/instancias/
+saas/caddy/instancias/
+saas/Caddyfile

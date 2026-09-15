@@ -14,7 +14,12 @@ import { buildServer } from '../src/server.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { buildTrackingUrls } from '../src/tracking/tokens.js';
-import { createFakeRepos, createFakeSettings, createFakeWhatsApp, approvedTemplate } from '../tests/fakes.js';
+import { createFakeRepos, createFakeWhatsApp, approvedTemplate, createMemorySettingsRepo, TEST_SETTINGS_KEY } from '../tests/fakes.js';
+import { createSettingsService } from '../src/settings/service.js';
+import { crearServicioIA } from '../src/ia/servicio.js';
+import { crearBus } from '../src/eventos/bus.js';
+import { observarRepos } from '../src/eventos/observar.js';
+import { encolarEventos, startDespachadorWebhooks } from '../src/webhooks/despachador.js';
 import { CATALOG } from '../src/templates/catalog.js';
 import { countVariables } from '../src/templates/render.js';
 import { extractLocationSync } from '../src/geo/extract.js';
@@ -52,9 +57,13 @@ const config = loadConfig({
   ARCHIVE_INACTIVE_DAYS: '0',
 } as NodeJS.ProcessEnv);
 
-const repos = createFakeRepos();
+// El bus de eventos, como en el arranque real: el chat embebido y los
+// webhooks salientes se pueden probar tambien en la demo.
+const bus = crearBus();
+const repos = observarRepos(createFakeRepos(), bus) as ReturnType<typeof createFakeRepos>;
 const wa = createFakeWhatsApp();
-const settings = await createFakeSettings(config);
+const settingsRepo = createMemorySettingsRepo();
+const settings = await createSettingsService(settingsRepo, config, TEST_SETTINGS_KEY);
 
 const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
 const politica = () => ajustes.politica(politicaDesdeConfig(config, 'cloud'));
@@ -332,7 +341,11 @@ await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
 
 // Los stickers de la demo van a una carpeta temporal: nada queda en el proyecto.
 const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mkdtempSync(join(tmpdir(), 'wa-demo-stickers-')), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers });
+const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia });
+const desconectarWebhooks = encolarEventos(bus, repos.webhooks);
+const pararWebhooks = startDespachadorWebhooks({ repo: repos.webhooks }, 3_000);
+process.on('exit', () => { desconectarWebhooks(); pararWebhooks(); });
 startScheduler({ repos, sender }, 3_000);
 startMonitorSalud(salud, undefined, 15_000);
 startGoteo({ repos, sender, salud, politica }, 3_000);

@@ -267,8 +267,11 @@ export function createLeadsRepo(pool: Pool): LeadsRepo {
       for (const campo of campos) {
         const columna = COLUMNAS[campo];
         if (!columna) continue;
-        valores.push(patch[campo] ?? null);
-        asignaciones.push(`${columna} = $${valores.length}`);
+        const valor = patch[campo] ?? null;
+        // Una lista va a una columna jsonb: pg serializa los arrays como
+        // arrays de Postgres ({"a","b"}), que no es JSON, y la base lo rechaza.
+        valores.push(Array.isArray(valor) ? JSON.stringify(valor) : valor);
+        asignaciones.push(`${columna} = $${valores.length}${campo === 'ultimasOpciones' ? '::jsonb' : ''}`);
       }
 
       if (!asignaciones.length) return (await get(contactId))!;

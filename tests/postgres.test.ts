@@ -580,3 +580,115 @@ describe('credenciales sobre Postgres', () => {
     expect(reloaded.current().phoneNumberId).toBe('123');
   });
 });
+
+describe('integraciones sobre Postgres', () => {
+  it('la migracion 017 deja permisos en las claves y crea las tablas de webhooks', async () => {
+    const { rows } = await db.query<{ table_name: string }>(
+      `select table_name from information_schema.tables where table_schema = 'public' and table_name in ('webhooks', 'webhook_entregas')`,
+    );
+    expect(rows.map((r) => r.table_name).sort()).toEqual(['webhook_entregas', 'webhooks']);
+
+    // Una clave de antes (sin permisos) sigue pudiendo todo.
+    await db.exec(`insert into claves_api (nombre, prefijo, hash) values ('vieja', 'wak_vieja…', 'hash-vieja')`);
+    expect((await repos.claves.porHash('hash-vieja'))?.permisos).toEqual(['*']);
+    const acotada = await repos.claves.crear({ nombre: 'Stoky', prefijo: 'wak_stoky…', hash: 'hash-stoky', creadaPor: null, permisos: ['mensajes:enviar', 'conversaciones:leer'] });
+    expect(acotada.permisos).toEqual(['mensajes:enviar', 'conversaciones:leer']);
+    expect((await repos.claves.listar()).find((c) => c.id === acotada.id)?.permisos).toEqual(['mensajes:enviar', 'conversaciones:leer']);
+  });
+
+  it('webhooks: alta, suscripcion por evento, cola de entregas, reintento, fallo y apagado', async () => {
+    const w = repos.webhooks;
+    const todo = await w.crear({ url: 'https://a.test/wh', descripcion: 'todo', secreto: 'whsec_a', eventos: ['*'], creadoPor: null });
+    const solo = await w.crear({ url: 'https://b.test/wh', descripcion: 'solo mensajes', secreto: 'whsec_b', eventos: ['mensaje.recibido'], creadoPor: null });
+    expect(todo).toMatchObject({ activo: true, motivoPausa: null, fallosSeguidos: 0, ultimoOkAt: null });
+    expect(JSON.stringify(await w.listar())).not.toContain('whsec_');
+
+    const paraMensajes = (await w.activosPara('mensaje.recibido')).map((x) => x.id).sort();
+    expect(paraMensajes).toEqual([todo.id, solo.id].sort());
+    const paraBajas = (await w.activosPara('contacto.baja')).map((x) => x.id);
+    expect(paraBajas).toEqual([todo.id]);
+    expect((await w.conSecreto(solo.id))?.secreto).toBe('whsec_b');
+
+    const t0 = new Date('2026-09-15T10:00:00Z');
+    const e1 = await w.encolar(todo.id, 'mensaje.recibido', { texto: 'hola' }, t0);
+    const e2 = await w.encolar(todo.id, 'contacto.baja', { telefono: '1' }, new Date(t0.getTime() + 1000));
+    // Lo que toca ahora, en orden, y con el payload como objeto.
+    const pendientes = await w.pendientes(new Date(t0.getTime() + 5000), 10);
+    expect(pendientes.map((e) => e.id)).toEqual([e1, e2]);
+    expect(pendientes[0]!.payload).toEqual({ texto: 'hola' });
+    expect(await w.pendientes(t0, 10)).toHaveLength(1);
+
+    // Reintento: se queda pendiente para mas tarde, con lo que contesto.
+    const luego = new Date(t0.getTime() + 60_000);
+    await w.marcarEntrega(e1, { estado: 'pendiente', codigo: 503, respuesta: 'caido', error: 'HTTP 503', proximoIntentoAt: luego });
+    expect(await w.pendientes(new Date(t0.getTime() + 5000), 10)).toHaveLength(1);
+    expect((await w.entregas(todo.id, 10)).find((e) => e.id === e1)).toMatchObject({ estado: 'pendiente', intentos: 1, respuestaCodigo: 503, error: 'HTTP 503' });
+
+    // Exito y fallo definitivo, y el resumen del webhook.
+    await w.marcarEntrega(e1, { estado: 'enviada', codigo: 200, respuesta: 'ok', at: luego });
+    expect(await w.anotarResultado(todo.id, true, luego)).toEqual({ fallosSeguidos: 0, ultimoOkAt: luego });
+    await w.marcarEntrega(e2, { estado: 'fallida', codigo: 404, respuesta: null, error: 'HTTP 404' });
+    expect((await w.anotarResultado(todo.id, false, luego)).fallosSeguidos).toBe(1);
+    expect((await w.obtener(todo.id))).toMatchObject({ fallosSeguidos: 1, ultimoOkAt: luego, ultimoFalloAt: luego });
+    expect(await w.contarPendientes()).toBe(0);
+
+    // Reencolar lo fallido, y apagar/encender.
+    expect(await w.reencolarFallidas(todo.id, luego)).toBe(1);
+    expect(await w.contarPendientes()).toBe(1);
+    await w.pausar(todo.id, 'sin una entrega buena en 24 h');
+    expect(await w.pendientes(new Date(luego.getTime() + 1), 10)).toHaveLength(0);
+    expect(await w.activosPara('contacto.baja')).toHaveLength(0);
+    expect(await w.actualizar(todo.id, { activo: true })).toMatchObject({ activo: true, motivoPausa: null, fallosSeguidos: 0 });
+    expect(await w.actualizar(todo.id, { url: 'https://a.test/v2', eventos: ['salud.nivel'] })).toMatchObject({ url: 'https://a.test/v2', eventos: ['salud.nivel'] });
+
+    expect(await w.rotarSecreto(solo.id, 'whsec_c')).toBe(true);
+    expect((await w.conSecreto(solo.id))?.secreto).toBe('whsec_c');
+
+    // Borrar se lleva las entregas.
+    expect(await w.borrar(todo.id)).toBe(true);
+    expect(await w.borrar(todo.id)).toBe(false);
+    expect(await w.entregas(todo.id, 10)).toHaveLength(0);
+    expect(await w.contarPendientes()).toBe(0);
+  });
+});
+
+describe('conectores de tiendas sobre Postgres', () => {
+  it('alta, reglas en jsonb, secreto, entradas y borrado en cascada', async () => {
+    const c = repos.conectores;
+    const regla = { evento: 'pedido.creado' as const, activo: true, plantilla: { nombre: 'confirmacion_pedido', idioma: 'es' }, variables: ['{nombre}', '{numero}'], texto: null };
+    const woo = await c.crear({ tipo: 'woocommerce', nombre: 'Tienda Woo', secreto: 'wcs_abc', reglas: [regla], creadoPor: null });
+    expect(woo).toMatchObject({ tipo: 'woocommerce', activo: true, reglas: [regla], eventosRecibidos: 0, ultimoEventoAt: null });
+    expect(JSON.stringify(await c.listar())).not.toContain('wcs_abc');
+    expect((await c.conSecreto(woo.id))?.secreto).toBe('wcs_abc');
+
+    const cambiado = await c.actualizar(woo.id, { nombre: 'Woo 2', reglas: [{ ...regla, texto: 'Gracias {nombre}' }], activo: false });
+    expect(cambiado).toMatchObject({ nombre: 'Woo 2', activo: false });
+    expect(cambiado?.reglas[0]?.texto).toBe('Gracias {nombre}');
+    // Un parche sin reglas no las toca.
+    expect((await c.actualizar(woo.id, { activo: true }))?.reglas[0]?.texto).toBe('Gracias {nombre}');
+    expect(await c.cambiarSecreto(woo.id, 'shpss_x')).toBe(true);
+    expect((await c.conSecreto(woo.id))?.secreto).toBe('shpss_x');
+
+    const t = new Date('2026-09-15T12:00:00Z');
+    await c.anotarEntrada({ conectorId: woo.id, evento: 'pedido.creado', eventoOrigen: 'order.created', pedido: '1024', telefono: '51987654321', resultado: 'enviado', detalle: 'mensaje wamid.1', at: t });
+    await c.anotarEntrada({ conectorId: woo.id, evento: 'pedido.pagado', eventoOrigen: 'order.updated', pedido: '1024', telefono: '51987654321', resultado: 'sin_regla', detalle: null });
+    const entradas = await c.entradas(woo.id, 10);
+    expect(entradas.map((e) => e.resultado)).toEqual(['sin_regla', 'enviado']);
+    expect(entradas[1]).toMatchObject({ pedido: '1024', eventoOrigen: 'order.created', createdAt: t });
+    expect(await c.obtener(woo.id)).toMatchObject({ eventosRecibidos: 2 });
+
+    expect(await c.borrar(woo.id)).toBe(true);
+    expect(await c.borrar(woo.id)).toBe(false);
+    expect(await c.entradas(woo.id, 10)).toHaveLength(0);
+  });
+});
+
+describe('fichas de preventa sobre Postgres', () => {
+  it('una lista en ultimasOpciones entra como JSON', async () => {
+    const c = await repos.contacts.upsertFromInbound('51955555555', 'Ficha');
+    const lead = await repos.leads.update(c.id, { ultimasOpciones: ['pv_cotizar', 'pv_datos'], nombre: 'Ficha' });
+    expect(lead.ultimasOpciones).toEqual(['pv_cotizar', 'pv_datos']);
+    const otra = await repos.leads.update(c.id, { ultimasOpciones: null });
+    expect(otra.ultimasOpciones).toBeNull();
+  });
+});

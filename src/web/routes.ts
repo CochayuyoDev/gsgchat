@@ -32,6 +32,7 @@ import { registerLocalRoutes } from './local-routes.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
+import type { ServicioIA } from '../ia/servicio.js';
 import { registerWahaRoutes } from './waha-routes.js';
 
 export interface WebDeps {
@@ -50,6 +51,8 @@ export interface WebDeps {
   ajustes?: ServicioAjustes;
   /** Los stickers automaticos, para el asistente. */
   stickers?: ServicioStickers;
+  /** El asistente de IA de la tienda. */
+  ia?: ServicioIA;
 }
 
 /**
@@ -127,12 +130,13 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     salud: deps.salud,
     ajustes: deps.ajustes,
     stickers: deps.stickers,
+    ia: deps.ia,
     autoConectar: deps.autoConectarLocal,
   });
   // El simulador de entrantes pasa por las mismas piezas que un mensaje real
   // (monitor de salud, ajustes, stickers): si no, lo que se prueba con el no
   // es lo que pasa en la calle.
-  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers });
+  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia });
 
   app.get('/rutas', async (_request, reply) => {
     const page = html(rutasPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));

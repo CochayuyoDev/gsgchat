@@ -24,6 +24,8 @@ import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookie
 import type { ClavesApiRepo } from './claves-api.js';
 import { ETIQUETAS, type ActividadRepo } from './actividad.js';
 import { generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
+import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
+import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
 
@@ -34,6 +36,20 @@ export interface UsuarioSesion {
   rol: Rol;
   /** true si entro con una clave de API (un programa), no con una cuenta. */
   porToken: boolean;
+  /** Lo que puede hacer en /api/v1. Una persona lo puede todo; una clave, lo suyo. Ver permisos.ts. */
+  permisos: string[];
+  /**
+   * Si entro con un token del chat embebido (ver src/embed): a que hilo se
+   * limita. `telefono: null` = a todos los chats, como un operador.
+   */
+  embebido?: { telefono: string | null };
+}
+
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** El permiso que exige una ruta de /api/v1. Sin el, basta con entrar. */
+    permiso?: Permiso;
+  }
 }
 
 declare module 'fastify' {
@@ -80,8 +96,34 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   app.decorateRequest('usuario', null);
 
+  const secretoEmbed = secretoDeEmbebido(config);
+
   async function resolver(request: FastifyRequest): Promise<UsuarioSesion | null> {
     const header = request.headers.authorization;
+    // El chat embebido: un token corto que firmo este servidor. Solo abre
+    // /api/v1, y solo con lo que el token dice (ver src/embed/token.ts).
+    // Los EventSource no mandan cabeceras: para el flujo de eventos se
+    // acepta tambien en la query, y solo ese tipo de token.
+    const query = request.query as { token?: string } | undefined;
+    const candidatoEmbed =
+      typeof header === 'string' && header.startsWith('Bearer ') && pareceTokenEmbebido(header.slice(7).trim())
+        ? header.slice(7).trim()
+        : request.url.startsWith('/api/v1/eventos/stream') && typeof query?.token === 'string' && pareceTokenEmbebido(query.token)
+          ? query.token
+          : null;
+    if (candidatoEmbed) {
+      const carga = leerTokenEmbebido(secretoEmbed, candidatoEmbed, ahora().getTime());
+      if (!carga) return null;
+      return {
+        id: `embebido:${carga.operador}`,
+        usuario: 'embebido',
+        nombre: carga.operador,
+        rol: 'operador',
+        porToken: true,
+        permisos: carga.permisos,
+        embebido: { telefono: carga.telefono },
+      };
+    }
     if (typeof header === 'string' && header.startsWith('Bearer ')) {
       const token = header.slice(7).trim();
       if (!pareceClaveApi(token)) return null;
@@ -92,14 +134,14 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
         usoAnotado.set(clave.id, t);
         await claves.tocarUso(clave.id, ahora());
       }
-      return { id: `clave:${clave.id}`, usuario: 'api', nombre: clave.nombre, rol: 'admin', porToken: true };
+      return { id: `clave:${clave.id}`, usuario: 'api', nombre: clave.nombre, rol: 'admin', porToken: true, permisos: clave.permisos };
     }
     const cookies = leerCookies(request.headers.cookie);
     const carga = leerSesion(secreto, cookies[COOKIE_SESION], ahora().getTime());
     if (!carga) return null;
     const u = await usuarios.porId(carga.u);
     if (!u || !u.activo || u.sesionVersion !== carga.v) return null;
-    return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false };
+    return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false, permisos: ['*'] };
   }
 
   app.addHook('onRequest', async (request, reply) => {
@@ -107,9 +149,24 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
     if (request.url.startsWith('/admin')) {
       if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: entra en /login o manda una clave de API' });
+      // La API interna es para el panel y para las claves de siempre. Una
+      // clave acotada tiene su puerta en /api/v1 y no entra por aqui.
+      if (request.usuario.porToken && !tienePermiso(request.usuario.permisos, '*')) {
+        return reply.code(403).send({ error: 'esta clave tiene permisos acotados: usa la API publica en /api/v1' });
+      }
       if (SOLO_ADMIN_PERSONA.some((ruta) => request.url.startsWith(ruta))) {
         if (request.usuario.porToken) return reply.code(403).send({ error: 'una clave de API no gestiona cuentas ni claves' });
         if (request.usuario.rol !== 'admin') return reply.code(403).send({ error: 'solo un administrador gestiona cuentas y claves' });
+      }
+      return;
+    }
+
+    // La API publica: cada ruta dice que permiso exige (ver src/api/v1).
+    if (request.url.startsWith('/api/')) {
+      if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: manda `Authorization: Bearer <clave de API>`' });
+      const permiso = request.routeOptions?.config?.permiso;
+      if (permiso && !tienePermiso(request.usuario.permisos, permiso)) {
+        return reply.code(403).send({ error: `esta clave no tiene el permiso "${permiso}"` });
       }
       return;
     }
@@ -181,7 +238,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     await usuarios.tocarLogin(u.id, ahora());
     abrirSesion(reply, u);
     // Para la bitacora: quien acaba de entrar, con su nombre.
-    request.usuario = { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false };
+    request.usuario = { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false, permisos: ['*'] };
     return { ok: true, usuario: { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol }, next: siguienteSeguro(body.next) };
   });
 
@@ -205,7 +262,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     const u = await usuarios.crear({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: 'admin' });
     await usuarios.tocarLogin(u.id, ahora());
     abrirSesion(reply, u);
-    request.usuario = { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false };
+    request.usuario = { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false, permisos: ['*'] };
     return { ok: true, usuario: { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol }, next: '/panel' };
   });
 
@@ -278,15 +335,18 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   /** Crea una clave y la devuelve entera: es la unica vez que se ve. */
   app.post('/admin/claves-api', async (request, reply) => {
-    const body = z.object({ nombre: z.string().max(120) }).parse(request.body ?? {});
+    const body = z.object({ nombre: z.string().max(120), permisos: z.array(z.string()).optional() }).parse(request.body ?? {});
     const mal = nombreDeClaveAceptable(body.nombre);
     if (mal) return reply.code(400).send({ error: mal });
+    const permisos = permisosAceptables(body.permisos);
+    if ('error' in permisos) return reply.code(400).send({ error: permisos.error });
     const clave = generarClaveApi();
     const registro = await claves.crear({
       nombre: body.nombre,
       prefijo: prefijoDeClave(clave),
       hash: hashClaveApi(clave),
       creadaPor: request.usuario?.id ?? null,
+      permisos: permisos.permisos,
     });
     return { ok: true, clave, registro };
   });

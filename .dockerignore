@@ -6,3 +6,6 @@ dist
 !.env.example
 .secrets.json
 *.log
+saas/instancias
+saas/caddy
+saas/.env

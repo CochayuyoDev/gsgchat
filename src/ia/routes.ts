@@ -1,0 +1,76 @@
+/**
+ * La pantalla "Mi asistente IA" habla con esto.
+ *
+ *  GET  /admin/ia          la configuracion (sin el token; solo si hay uno)
+ *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado, `token: ""` lo quita
+ *  POST /admin/ia/probar   una conversacion de prueba desde el navegador, sin WhatsApp
+ */
+
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { ErrorIA, MODELOS_SUGERIDOS } from './proveedores.js';
+import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
+import { ESCENARIOS, GRUPOS } from './escenarios.js';
+import { configIASchema, type ServicioIA } from './servicio.js';
+
+export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA }): Promise<void> {
+  const { ia } = deps;
+
+  app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS }));
+
+  app.post('/admin/ia', async (request, reply) => {
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
+      return reply.code(403).send({ error: 'solo un administrador configura el asistente' });
+    }
+    const body = configIASchema.partial().extend({ token: z.string().max(500).nullable().optional() }).parse(request.body ?? {});
+    const estado = await ia.guardar(body);
+    if (estado.activa && !estado.tieneToken) {
+      return reply.code(400).send({ error: 'Para activar el asistente hace falta el token de Puter (o la clave de la API elegida).', estado });
+    }
+    return { ok: true, estado };
+  });
+
+  /** El banco de escenarios, para la pantalla: grupos y casos. */
+  app.get('/admin/ia/escenarios', async () => ({ grupos: GRUPOS, escenarios: ESCENARIOS.map((e) => ({ clave: e.clave, grupo: e.grupo, mensajes: e.mensajes, espera: e.espera })) }));
+
+  /** El examen con el modelo real. Un grupo por llamada: tarda un turno por caso. */
+  app.post('/admin/ia/escenarios', async (request, reply) => {
+    const body = z.object({ grupo: z.string().max(30).optional(), claves: z.array(z.string()).max(100).optional(), limite: z.coerce.number().int().positive().max(200).optional() }).parse(request.body ?? {});
+    if (!ia.estado().tieneToken) return reply.code(400).send({ error: 'Conecta Puter (o la clave de la API) antes de correr los escenarios.' });
+    const grupo = body.grupo && body.grupo in GRUPOS ? (body.grupo as keyof typeof GRUPOS) : undefined;
+    return ia.simularEscenarios({ grupo, claves: body.claves, limite: body.limite });
+  });
+
+  /** El ayudante del panel: para cualquier cuenta, con el manual del sistema. */
+  app.post('/admin/ia/ayuda', async (request, reply) => {
+    const body = z
+      .object({
+        texto: z.string().trim().min(1).max(2000),
+        historial: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(4000) })).max(20).default([]),
+      })
+      .parse(request.body ?? {});
+    if (!ia.estado().tieneToken) return reply.code(400).send({ error: 'El ayudante usa la misma IA que el asistente: conecta Puter en Mi asistente IA (/panel#ia).' });
+    try {
+      return await ia.ayuda(body.historial, body.texto);
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(502).send({ error: `La IA no respondió: ${error.message}${error.detalle ? ` (${error.detalle})` : ''}` });
+      throw error;
+    }
+  });
+
+  app.post('/admin/ia/probar', async (request, reply) => {
+    const body = z
+      .object({
+        texto: z.string().trim().min(1).max(2000),
+        historial: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(4000) })).max(40).default([]),
+      })
+      .parse(request.body ?? {});
+    if (!ia.estado().tieneToken) return reply.code(400).send({ error: 'Guarda primero el token de Puter (o la clave de la API).' });
+    try {
+      return await ia.probar(body.historial, body.texto);
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(502).send({ error: `El modelo no respondió: ${error.message}${error.detalle ? ` (${error.detalle})` : ''}` });
+      throw error;
+    }
+  });
+}

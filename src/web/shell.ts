@@ -26,6 +26,12 @@ export interface ItemMenu {
   descripcion: string;
   /** Solo lo ven los administradores (el servidor lo exige igual). */
   soloAdmin?: boolean;
+  /**
+   * Solo en el modo avanzado. Por defecto el menu es sencillo: lo que una
+   * tienda necesita para atender su WhatsApp con la IA; lo demas (reparto,
+   * campanas, ritmo, rastreo) se ensena con "Ver todo".
+   */
+  avanzado?: boolean;
 }
 
 export interface GrupoMenu {
@@ -43,60 +49,61 @@ export const MENU_ARRIBA: ItemMenu[] = [
 
 export const MENU_GRUPOS: GrupoMenu[] = [
   {
-    id: 'conversaciones',
-    etiqueta: 'Conversaciones',
+    id: 'atencion',
+    etiqueta: 'Atención',
     items: [
       { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicacion.' },
-      { id: 'enviar', etiqueta: 'Enviar mensaje', href: '/panel#enviar', icono: 'enviar', descripcion: 'Un texto, un pin o una plantilla a un numero concreto.' },
-      { id: 'historial', etiqueta: 'Historial de envios', href: '/panel#historial', icono: 'historial', descripcion: 'Todo lo que salio, con su estado y su error si lo hubo.' },
-      { id: 'stickers', etiqueta: 'Stickers', href: '/panel#stickers', icono: 'sticker', descripcion: 'Los stickers que se mandan tras el saludo, el gracias o la despedida, y a mano desde el chat.' },
+      { id: 'ia', etiqueta: 'Mi asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Lo que sabe de tu negocio y como contesta solo. Cuando no puede, te pasa la conversacion.' },
+      { id: 'contactos', etiqueta: 'Contactos', href: '/panel#contactos', icono: 'contactos', descripcion: 'Importar, buscar y ver el consentimiento de cada numero.' },
+      { id: 'enviar', etiqueta: 'Enviar mensaje', href: '/panel#enviar', icono: 'enviar', descripcion: 'Un texto, un pin o una plantilla a un numero concreto.', avanzado: true },
+      { id: 'historial', etiqueta: 'Historial de envios', href: '/panel#historial', icono: 'historial', descripcion: 'Todo lo que salio, con su estado y su error si lo hubo.', avanzado: true },
+      { id: 'stickers', etiqueta: 'Stickers', href: '/panel#stickers', icono: 'sticker', descripcion: 'Los stickers que se mandan tras el saludo, el gracias o la despedida, y a mano desde el chat.', avanzado: true },
     ],
   },
   {
     id: 'reparto',
     etiqueta: 'Reparto',
     items: [
-      { id: 'rutas', etiqueta: 'Ubicaciones para reparto', href: '/rutas', icono: 'pin', descripcion: 'Cargar la lista del dia, pedir la ubicacion a cada cliente y resolver lo que necesita una persona.' },
-      { id: 'rutas-ajustes', etiqueta: 'Ajustes del reparto', href: '/rutas#ajustes', icono: 'ajustes', descripcion: 'Horario, espera entre mensajes, intentos, textos y plantillas del reparto.' },
+      { id: 'rutas', etiqueta: 'Ubicaciones para reparto', href: '/rutas', icono: 'pin', descripcion: 'Cargar la lista del dia, pedir la ubicacion a cada cliente y resolver lo que necesita una persona.', avanzado: true },
+      { id: 'rutas-ajustes', etiqueta: 'Ajustes del reparto', href: '/rutas#ajustes', icono: 'ajustes', descripcion: 'Horario, espera entre mensajes, intentos, textos y plantillas del reparto.', avanzado: true },
     ],
   },
   {
     id: 'campanas',
     etiqueta: 'Campañas',
     items: [
-      { id: 'grupos', etiqueta: 'Enviar a un grupo', href: '/panel#grupos', icono: 'contactos', descripcion: 'Elegir clientes por como estan (sin ubicacion, ficha incompleta, callados...) y mandarles a todos un mensaje personalizado.' },
-      { id: 'campanas', etiqueta: 'Campañas', href: '/panel#campanas', icono: 'megafono', descripcion: 'Envios masivos por goteo, con canario y al ritmo que el numero tolera.' },
-      { id: 'automatizacion', etiqueta: 'Automatización', href: '/panel#automatizacion', icono: 'rayo', descripcion: 'Reglas y secuencias: que se manda solo y cuando.' },
-      { id: 'plantillas', etiqueta: 'Plantillas', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Las plantillas de Meta y las propias: crear, sincronizar y ver su estado.' },
+      { id: 'grupos', etiqueta: 'Enviar a un grupo', href: '/panel#grupos', icono: 'contactos', descripcion: 'Elegir clientes por como estan (sin ubicacion, ficha incompleta, callados...) y mandarles a todos un mensaje personalizado.', avanzado: true },
+      { id: 'campanas', etiqueta: 'Campañas', href: '/panel#campanas', icono: 'megafono', descripcion: 'Envios masivos por goteo, con canario y al ritmo que el numero tolera.', avanzado: true },
+      { id: 'automatizacion', etiqueta: 'Respuestas automáticas', href: '/panel#automatizacion', icono: 'rayo', descripcion: 'Reglas por palabra clave y secuencias: que se manda solo y cuando (sin IA).', avanzado: true },
+      { id: 'plantillas', etiqueta: 'Mensajes aprobados (plantillas)', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Las plantillas de Meta y las propias: crear, sincronizar y ver su estado.', avanzado: true },
     ],
   },
   {
-    id: 'contactos',
-    etiqueta: 'Contactos',
+    id: 'ubicaciones',
+    etiqueta: 'Ubicaciones',
     items: [
-      { id: 'contactos', etiqueta: 'Contactos', href: '/panel#contactos', icono: 'contactos', descripcion: 'Importar, buscar y ver el consentimiento de cada numero.' },
-      { id: 'ubicaciones', etiqueta: 'Ubicaciones recibidas', href: '/panel#ubicaciones', icono: 'mapa', descripcion: 'Los pines que mandaron los clientes.' },
-      { id: 'vivo', etiqueta: 'Rastreo en vivo', href: '/panel#vivo', icono: 'radar', descripcion: 'Enlaces para compartir y ver una posicion en tiempo real.' },
-      { id: 'extraer', etiqueta: 'Extraer coordenadas', href: '/panel#extraer', icono: 'mira', descripcion: 'Pega un link de mapa o un texto y saca las coordenadas.' },
+      { id: 'ubicaciones', etiqueta: 'Ubicaciones recibidas', href: '/panel#ubicaciones', icono: 'mapa', descripcion: 'Los pines que mandaron los clientes.', avanzado: true },
+      { id: 'vivo', etiqueta: 'Rastreo en vivo', href: '/panel#vivo', icono: 'radar', descripcion: 'Enlaces para compartir y ver una posicion en tiempo real.', avanzado: true },
+      { id: 'extraer', etiqueta: 'Extraer coordenadas', href: '/panel#extraer', icono: 'mira', descripcion: 'Pega un link de mapa o un texto y saca las coordenadas.', avanzado: true },
     ],
   },
   {
     id: 'salud',
-    etiqueta: 'Salud del número',
+    etiqueta: '¿Va todo bien?',
     items: [
-      { id: 'estado', etiqueta: 'Estado', href: '/panel#estado', icono: 'actividad', descripcion: 'Calidad, cupo del dia, cola y pausa manual.' },
-      { id: 'salud', etiqueta: 'Riesgo y ritmo', href: '/panel#salud', icono: 'salud', descripcion: 'Lo que mira el monitor: errores, bloqueos, bajas; por que frena y cuando.' },
+      { id: 'estado', etiqueta: 'Estado del número', href: '/panel#estado', icono: 'actividad', descripcion: 'Calidad, cupo del dia, cola y pausa manual.', avanzado: true },
+      { id: 'salud', etiqueta: 'Riesgo y ritmo', href: '/panel#salud', icono: 'salud', descripcion: 'Lo que mira el monitor: errores, bloqueos, bajas; por que frena y cuando.', avanzado: true },
     ],
   },
   {
     id: 'administracion',
-    etiqueta: 'Administración',
+    etiqueta: 'Mi negocio',
     items: [
-      { id: 'configuracion', etiqueta: 'Configuración', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Horario de envio, ritmo, modo prueba, avisos y nombre del negocio.', soloAdmin: true },
-      { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contrasenas.', soloAdmin: true },
-      { id: 'integraciones', etiqueta: 'Integraciones', href: '/panel#integraciones', icono: 'llave', descripcion: 'Claves de API para el sistema de GSG y otros programas.', soloAdmin: true },
-      { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Bitacora: quien hizo que y cuando.', soloAdmin: true },
       { id: 'setup', etiqueta: 'Conexión de WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'Conectar el numero: QR, WAHA o la API oficial de Meta.' },
+      { id: 'integraciones', etiqueta: 'Conectar mi web y tienda', href: '/panel#integraciones', icono: 'llave', descripcion: 'El chat dentro de tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas.', soloAdmin: true },
+      { id: 'configuracion', etiqueta: 'Configuración', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio, horario, avisos, modo prueba y ritmo.', soloAdmin: true },
+      { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contrasenas.', soloAdmin: true, avanzado: true },
+      { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Bitacora: quien hizo que y cuando.', soloAdmin: true, avanzado: true },
     ],
   },
 ];
@@ -186,6 +193,10 @@ const CSS = `
   .s-grupo.cerrado .s-grupo-cab .s-ico { transform: none; }
   .s-sin { display: none; padding: 14px 10px; color: var(--s-muted); font-size: 13px; text-align: center; }
   .s-nav.vacio .s-sin { display: block; }
+  .s-modo { display: block; width: calc(100% - 16px); margin: 10px 8px 4px; padding: 7px 10px; border: 1px dashed var(--s-line); border-radius: 8px; background: transparent; color: var(--s-muted); font: inherit; font-size: 12px; cursor: pointer; }
+  .s-modo:hover { color: var(--s-text); border-style: solid; }
+  .s-app.sencillo .s-item[data-avanzado], .s-app.sencillo .s-grupo-avanzado { display: none; }
+  .s-app.plegado .s-modo { display: none; }
   .s-user { border-top: 1px solid var(--s-line); padding: 12px 12px; display: flex; align-items: center; gap: 10px; }
   .s-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--s-accent-soft); color: var(--s-accent); display: grid; place-items: center; font-weight: 800; font-size: 13px; flex: none; }
   .s-user-txt { flex: 1; min-width: 0; line-height: 1.25; }
@@ -275,6 +286,21 @@ const JS = String.raw`
     guardar('s-plegado', app.classList.contains('plegado') ? '1' : '0');
   };
   document.getElementById('s-menu').onclick = function () { app.classList.toggle('abierto'); };
+
+  /* modo sencillo (por defecto) o ver todo: se recuerda en este navegador */
+  var botonModo = document.getElementById('s-modo');
+  function aplicarModo(avanzado) {
+    app.classList.toggle('sencillo', !avanzado);
+    window.__modoAvanzado = avanzado;
+    botonModo.textContent = avanzado ? 'Modo sencillo' : 'Ver todo';
+    if (window.__alCambiarModo) window.__alCambiarModo(avanzado);
+  }
+  aplicarModo(leer('s-modo') === 'avanzado');
+  botonModo.onclick = function () {
+    var avanzado = !app.classList.contains('sencillo');
+    guardar('s-modo', avanzado ? 'sencillo' : 'avanzado');
+    aplicarModo(!avanzado);
+  };
   document.getElementById('s-backdrop').onclick = function () { app.classList.remove('abierto'); };
 
   /* grupos: todos abiertos; el que se cierre a mano queda cerrado hasta que se vuelva a abrir */
@@ -471,14 +497,14 @@ export interface ShellOpts {
 function itemHtml(item: ItemMenu, sub: boolean): string {
   const buscar = escapeHtml(`${item.etiqueta} ${item.descripcion}`.toLowerCase());
   const badge = item.id === 'chats' ? '<span class="s-badge" id="s-badge-chats"></span>' : '';
-  return `<a class="s-item${sub ? ' sub' : ''}" data-ir="${item.href}" data-buscar="${buscar}"${item.soloAdmin ? ' data-solo-admin="1"' : ''} title="${escapeHtml(item.descripcion)}">${icono(item.icono)}<span class="s-txt">${escapeHtml(item.etiqueta)}</span>${badge}</a>`;
+  return `<a class="s-item${sub ? ' sub' : ''}" data-ir="${item.href}" data-buscar="${buscar}"${item.soloAdmin ? ' data-solo-admin="1"' : ''}${item.avanzado ? ' data-avanzado="1"' : ''} title="${escapeHtml(item.descripcion)}">${icono(item.icono)}<span class="s-txt">${escapeHtml(item.etiqueta)}</span>${badge}</a>`;
 }
 
 export function appShell(opts: ShellOpts): string {
   const negocio = escapeHtml(opts.nombreNegocio || 'WhatsApp');
   const arriba = MENU_ARRIBA.map((i) => itemHtml(i, false)).join('\n      ');
   const grupos = MENU_GRUPOS.map(
-    (g) => `<div class="s-grupo" data-grupo="${g.id}">
+    (g) => `<div class="s-grupo${g.items.every((i) => i.avanzado) ? ' s-grupo-avanzado' : ''}" data-grupo="${g.id}">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(g.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
           ${g.items.map((i) => itemHtml(i, true)).join('\n          ')}
@@ -508,6 +534,7 @@ export function appShell(opts: ShellOpts): string {
       <div class="s-buscar">${icono('buscar')}<input id="s-q" placeholder="Buscar módulo…" autocomplete="off"><kbd>Ctrl K</kbd></div>
       ${grupos}
       <div class="s-sin">No hay ningún módulo con ese nombre.</div>
+      <button class="s-modo" id="s-modo" type="button" title="Enseñar u ocultar las funciones avanzadas (reparto, campañas, ritmo, rastreo)">Ver todo</button>
     </nav>
     <div class="s-user">
       <div class="s-avatar">?</div>

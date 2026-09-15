@@ -19,10 +19,12 @@ export interface ClaveApi {
   createdAt: Date;
   ultimoUsoAt: Date | null;
   revocadaAt: Date | null;
+  /** Que puede hacer. ['*'] = todo, incluida la API interna. Ver permisos.ts. */
+  permisos: string[];
 }
 
 export interface ClavesApiRepo {
-  crear(input: { nombre: string; prefijo: string; hash: string; creadaPor: string | null }): Promise<ClaveApi>;
+  crear(input: { nombre: string; prefijo: string; hash: string; creadaPor: string | null; permisos?: string[] }): Promise<ClaveApi>;
   listar(): Promise<ClaveApi[]>;
   /** Solo claves vigentes: una revocada no vuelve. */
   porHash(hash: string): Promise<ClaveApi | null>;
@@ -69,6 +71,7 @@ interface Row {
   created_at: Date;
   ultimo_uso_at: Date | null;
   revocada_at: Date | null;
+  permisos: string[] | null;
 }
 
 const deFila = (r: Row): ClaveApi => ({
@@ -79,29 +82,28 @@ const deFila = (r: Row): ClaveApi => ({
   createdAt: r.created_at,
   ultimoUsoAt: r.ultimo_uso_at,
   revocadaAt: r.revocada_at,
+  permisos: r.permisos?.length ? r.permisos : ['*'],
 });
+
+const COLUMNAS = 'id, nombre, prefijo, creada_por, created_at, ultimo_uso_at, revocada_at, permisos';
 
 export function createClavesApiRepo(pool: Pool): ClavesApiRepo {
   return {
     async crear(input) {
       const { rows } = await pool.query<Row>(
-        `insert into claves_api (nombre, prefijo, hash, creada_por) values ($1,$2,$3,$4)
-         returning id, nombre, prefijo, creada_por, created_at, ultimo_uso_at, revocada_at`,
-        [input.nombre.trim(), input.prefijo, input.hash, input.creadaPor],
+        `insert into claves_api (nombre, prefijo, hash, creada_por, permisos) values ($1,$2,$3,$4,$5)
+         returning ${COLUMNAS}`,
+        [input.nombre.trim(), input.prefijo, input.hash, input.creadaPor, input.permisos?.length ? input.permisos : ['*']],
       );
       return deFila(rows[0]!);
     },
     async listar() {
-      const { rows } = await pool.query<Row>(
-        `select id, nombre, prefijo, creada_por, created_at, ultimo_uso_at, revocada_at
-         from claves_api order by created_at desc`,
-      );
+      const { rows } = await pool.query<Row>(`select ${COLUMNAS} from claves_api order by created_at desc`);
       return rows.map(deFila);
     },
     async porHash(hash) {
       const { rows } = await pool.query<Row>(
-        `select id, nombre, prefijo, creada_por, created_at, ultimo_uso_at, revocada_at
-         from claves_api where hash = $1 and revocada_at is null`,
+        `select ${COLUMNAS} from claves_api where hash = $1 and revocada_at is null`,
         [hash],
       );
       return rows[0] ? deFila(rows[0]) : null;

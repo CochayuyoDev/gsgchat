@@ -11,6 +11,14 @@ import { appShell, todosLosModulos, icono } from './shell.js';
 import { escapeHtml } from './login-page.js';
 
 const CSS = `
+  .ay-chat { border: 1px solid var(--line, #e3e5e9); border-radius: 12px; background: var(--bg, #f4f5f7); min-height: 90px; max-height: 340px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .ay-chat .b { max-width: 85%; padding: 7px 11px; border-radius: 10px; background: var(--card, #fff); white-space: pre-wrap; }
+  .ay-chat .b.yo { align-self: flex-end; background: #d9fdd3; color: #111b21; }
+  .ay-fila { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ay-fila input { flex: 1; min-width: 200px; padding: 9px 12px; border: 1px solid var(--line, #e3e5e9); border-radius: 8px; background: var(--card, #fff); color: inherit; font: inherit; }
+  .ay-fila button { border: 0; border-radius: 8px; padding: 9px 14px; background: #128c7e; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  .ay-fila button.ghost { background: transparent; color: #128c7e; border: 1px solid #128c7e; }
+  .ay-fila button:disabled { opacity: .5; }
   :root { --card: #fff; --line: #e6e8ec; --text: #16181d; --muted: #6b7280; --accent: #128c7e; --bg: #f4f6f8; --ok: #16a34a; --warn: #d97706; --bad: #dc2626; }
   @media (prefers-color-scheme: dark) { :root { --card: #1f2229; --line: #2f333c; --text: #f2f3f5; --muted: #9aa0aa; --bg: #16181d; } }
   .wrap { max-width: 960px; color: var(--text); }
@@ -69,6 +77,18 @@ export function manualPage(opts: { nombreNegocio: string; demo?: boolean }): str
 
   const contenido = `
 <div class="wrap">
+<section class="card" id="preguntar">
+  <h2>Pregúntale al sistema</h2>
+  <p class="muted">Escribe tu duda como se la dirías a alguien del soporte: "¿cómo conecto mi tienda Shopify?", "¿por qué no salió un mensaje?", "¿qué hace el modo prueba?". Responde con el manual completo y te dice en qué pantalla se hace.</p>
+  <div id="ay-chat" class="ay-chat"><div class="muted" style="padding:10px">Aquí van las respuestas.</div></div>
+  <div class="ay-fila">
+    <input id="ay-texto" placeholder="¿Cómo pongo el chat en mi web?">
+    <button id="ay-enviar" type="button">Preguntar</button>
+    <button id="ay-limpiar" type="button" class="ghost">Borrar</button>
+  </div>
+  <p id="ay-nota" class="muted" style="margin-top:6px"></p>
+</section>
+
 <section class="card">
   <h2>Cómo empezar</h2>
   <p class="muted">Cinco pasos, en este orden. Después, el trabajo del día está en Chats y en Reparto.</p>
@@ -170,10 +190,47 @@ export function manualPage(opts: { nombreNegocio: string; demo?: boolean }): str
 </section>
 </div>`;
 
+  const script = String.raw`
+var AY_HISTORIAL = [];
+function ayEsc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function ayPintar() {
+  var caja = document.getElementById('ay-chat');
+  caja.innerHTML = AY_HISTORIAL.length ? AY_HISTORIAL.map(function (m) {
+    return '<div class="b' + (m.role === 'user' ? ' yo' : '') + '">' + ayEsc(m.content).replace(/\n/g, '<br>') + '</div>';
+  }).join('') : '<div class="muted" style="padding:10px">Aquí van las respuestas.</div>';
+  caja.scrollTop = caja.scrollHeight;
+}
+async function ayPreguntar() {
+  var input = document.getElementById('ay-texto');
+  var texto = input.value.trim();
+  if (!texto) return;
+  var boton = document.getElementById('ay-enviar');
+  boton.disabled = true;
+  AY_HISTORIAL.push({ role: 'user', content: texto });
+  input.value = '';
+  ayPintar();
+  try {
+    var res = await fetch('/admin/ia/ayuda', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ texto: texto, historial: AY_HISTORIAL.slice(0, -1).slice(-10) }) });
+    var d = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(d.error || ('Error ' + res.status));
+    AY_HISTORIAL.push({ role: 'assistant', content: d.texto || '(sin respuesta)' });
+  } catch (e) {
+    AY_HISTORIAL.push({ role: 'assistant', content: '⚠ ' + e.message });
+    if (/Puter|conecta/i.test(e.message)) document.getElementById('ay-nota').innerHTML = 'El ayudante usa la misma IA que el asistente: conéctala en <a href="/panel#ia">Mi asistente IA</a>.';
+  }
+  boton.disabled = false;
+  ayPintar();
+}
+document.getElementById('ay-enviar').onclick = ayPreguntar;
+document.getElementById('ay-texto').onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ayPreguntar(); } };
+document.getElementById('ay-limpiar').onclick = function () { AY_HISTORIAL = []; ayPintar(); };
+`;
+
   return appShell({
     titulo: 'Manual de uso',
     subtitulo: 'Qué hace cada módulo y cómo se usa',
     contenido,
+    script,
     css: CSS,
     nombreNegocio: opts.nombreNegocio,
     demo: opts.demo,

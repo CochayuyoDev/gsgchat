@@ -673,3 +673,12 @@ describe('errores de envio traducidos', () => {
     expect(incidenciaDeErrorDeEnvio('algo raro paso')).toBe('error_envio');
   });
 });
+
+describe('plan de Mexico: el 521 de WhatsApp', () => {
+  it('quita el 1 de movil que WhatsApp pone tras el 52', async () => {
+    const { revisarTelefono, MEXICO } = await import('../src/rutas/telefono.js');
+    expect(revisarTelefono('5215512345678', MEXICO)).toMatchObject({ ok: true, phone: '525512345678' });
+    expect(revisarTelefono('+52 55 1234 5678', MEXICO)).toMatchObject({ ok: true, phone: '525512345678' });
+    expect(revisarTelefono('5512345678', MEXICO)).toMatchObject({ ok: true, phone: '525512345678' });
+  });
+});

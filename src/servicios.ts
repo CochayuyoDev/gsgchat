@@ -14,6 +14,8 @@
  *  - el motor de rutas (cada 5 s, pero con su pausa de 15-30 s entre envios);
  *  - los avisos de rutas (resumen a GSG y WhatsApp al coordinador);
  *  - el despacho de reportes a GSG (cada minuto; sin API no hace nada);
+ *  - los webhooks salientes: cada evento del bus se encola por suscriptor y
+ *    se entrega cada 10 s, con reintentos (ver src/webhooks);
  *  - el barrido de conversaciones inactivas;
  *  - con la API oficial, la sincronizacion de plantillas cada media hora.
  */
@@ -37,6 +39,8 @@ import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
 import { crearPuertoGsg, despacharReportes } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
 import { syncTemplates } from './templates/registry.js';
+import type { Bus } from './eventos/bus.js';
+import { encolarEventos, startDespachadorWebhooks } from './webhooks/despachador.js';
 
 export interface ServiciosDeps {
   config: Config;
@@ -50,12 +54,14 @@ export interface ServiciosDeps {
   ajustes?: ServicioAjustes;
   /** Los stickers automaticos del reparto. */
   stickers?: ServicioStickers;
+  /** El bus de eventos. Sin el, no hay webhooks salientes (arranques de prueba). */
+  bus?: Bus;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
 }
 
 /** Arranca todo y devuelve la funcion que lo para. */
 export function arrancarServicios(deps: ServiciosDeps): () => void {
-  const { config, repos, settings, wa, sender, salud, politica, ajustes, stickers, log } = deps;
+  const { config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, log } = deps;
   const warn = (mensaje: string, detalle?: Record<string, unknown>) => log.warn(detalle ?? {}, mensaje);
   const info = (mensaje: string, detalle?: Record<string, unknown>) => log.info(detalle ?? {}, mensaje);
 
@@ -130,7 +136,13 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   }, 60_000);
   despachador.unref?.();
 
+  // Webhooks salientes: lo que pasa aqui, contado a los sistemas suscritos.
+  const desconectarBus = bus ? encolarEventos(bus, repos.webhooks, warn) : () => undefined;
+  const stopWebhooks = bus ? startDespachadorWebhooks({ repo: repos.webhooks, log: warn }) : () => undefined;
+
   return () => {
+    desconectarBus();
+    stopWebhooks();
     stopMonitor();
     stopScheduler();
     stopGoteo();

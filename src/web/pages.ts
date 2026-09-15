@@ -113,6 +113,14 @@ const CSS = `
   .cf-nota { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
   .nueva-clave { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--warn); border-radius: 12px; background: rgba(217,119,6,.06); }
   .nueva-clave code { display: block; font-size: 14px; padding: 10px 12px; margin: 8px 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; word-break: break-all; }
+  .ia-chat { border: 1px solid var(--line); border-radius: 12px; background: var(--bg); min-height: 120px; max-height: 360px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .ia-chat .b { max-width: 80%; padding: 7px 11px; border-radius: 10px; background: var(--card); white-space: pre-wrap; }
+  .ia-chat .b.yo { align-self: flex-end; background: #d9fdd3; color: #111b21; }
+  .ia-chat .b.derivo { border: 1px dashed var(--warn); }
+  .permisos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; margin: 6px 0 10px; }
+  .permisos label { display: flex; gap: 8px; align-items: flex-start; font-weight: normal; cursor: pointer; }
+  .permisos label input { margin-top: 3px; }
+  .permisos label small { color: var(--muted); display: block; }
   .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
   .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
   .pill.warn { background: rgba(217,119,6,.14); color: var(--warn); }
@@ -238,6 +246,7 @@ const AUTH_JS = String.raw`
 /** Cada seccion del panel: id (el ancla), titulo y subtitulo de la barra superior. */
 const SECCIONES: Array<[string, string, string]> = [
   ['inicio', 'Inicio', 'Un vistazo a todo lo que pasa hoy'],
+  ['ia', 'Mi asistente IA', 'Lo que sabe de tu negocio y como contesta solo'],
   ['estado', 'Estado del número', 'Calidad, cupo del día, cola y pausa manual'],
   ['salud', 'Riesgo y ritmo', 'Lo que mira el monitor y por qué frena'],
   ['enviar', 'Enviar mensaje', 'Un texto, un pin o una plantilla a un número'],
@@ -253,7 +262,7 @@ const SECCIONES: Array<[string, string, string]> = [
   ['extraer', 'Extraer coordenadas', 'De un link de mapa o un texto'],
   ['configuracion', 'Configuración', 'Horario de envío, ritmo, modo prueba, avisos y nombre'],
   ['usuarios', 'Usuarios', 'Cuentas del equipo, roles y contraseñas'],
-  ['integraciones', 'Integraciones', 'Claves de API para GSG y otros programas'],
+  ['integraciones', 'Conectar mi web y mi tienda', 'El chat en tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas'],
   ['actividad', 'Actividad', 'Quién hizo qué y cuándo'],
   ['mi-cuenta', 'Mi cuenta', 'Tus datos y tu contraseña'],
 ];
@@ -795,6 +804,77 @@ ${warning}
   <div class="actions"><button id="sk-guardar-auto">Guardar</button><span id="sk-auto-state" class="pill hidden"></span></div>
 </section>
 
+<section id="tab-ia" class="card hidden">
+  <h2>Mi asistente IA</h2>
+  <p class="muted">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
+  Funciona con la IA de <a href="https://puter.com" target="_blank" rel="noopener">Puter</a> (un solo token para GPT, Claude, Gemini y mas) o con cualquier API compatible con OpenAI.</p>
+
+  <div class="dos">
+    <div>
+      <h3>1. Cuentale de tu negocio</h3>
+      <label>Como se llama el asistente</label>
+      <input id="ia-nombre" placeholder="Lucia">
+      <label>Lo que sabe (escribe como se lo contarias a un empleado nuevo)</label>
+      <textarea id="ia-conocimiento" rows="12" placeholder="Somos una zapateria en Miraflores. Vendemos zapatos de vestir y zapatillas, tallas 35 a 45.&#10;Precios: zapatos de vestir desde S/ 120, zapatillas desde S/ 90.&#10;Envio a todo Lima en 24 h, gratis desde S/ 150. Provincias 2-3 dias.&#10;Cambios dentro de 7 dias con boleta.&#10;Pagos: Yape, Plin, transferencia y tarjeta al recibir.&#10;Horario: lunes a sabado de 9 a 19."></textarea>
+      <label>Como debe hablar (opcional)</label>
+      <textarea id="ia-instrucciones" rows="3" placeholder="Tutea, se breve, usa un emoji como mucho. Si preguntan por stock exacto, di que lo confirmamos en un momento."></textarea>
+    </div>
+    <div>
+      <h3>2. Con que IA</h3>
+      <label>Proveedor</label>
+      <select id="ia-proveedor"><option value="puter">Puter (recomendado: un token para todos los modelos)</option><option value="openai">API compatible con OpenAI (OpenAI, Groq, DeepSeek, Ollama...)</option></select>
+      <div id="ia-puter-caja">
+        <p class="muted" style="margin:4px 0 8px">Sin llaves ni tarjeta: pulsa el boton, entra con Google, Microsoft, Apple o correo (gratis) y listo. Los modelos Gemma 4 no cuestan nada.</p>
+        <div class="actions"><button id="ia-puter-conectar" type="button">Conectar con Puter</button><span id="ia-puter-estado" class="muted"></span></div>
+        <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">O pegar un token a mano</summary>
+          <label>Token de Puter <small class="muted">(puter.com → Dashboard → Create token)</small></label>
+          <input id="ia-token" type="password" placeholder="Pegar aqui; se guarda cifrado y no se vuelve a mostrar" autocomplete="off">
+        </details>
+      </div>
+      <div id="ia-openai-clave" class="hidden">
+        <label>Clave de la API</label>
+        <input id="ia-token-openai" type="password" placeholder="sk-…; se guarda cifrada y no se vuelve a mostrar" autocomplete="off">
+      </div>
+      <p id="ia-token-estado" class="muted"></p>
+      <div id="ia-openai" class="hidden"><label>URL base de la API</label><input id="ia-baseurl" placeholder="https://api.openai.com/v1 · https://api.groq.com/openai/v1 · http://localhost:11434/v1"></div>
+      <label>Modelo</label>
+      <select id="ia-modelo-gratis"></select>
+      <p id="ia-modelo-nota" class="muted" style="margin-top:4px">Solo modelos <b>completamente gratuitos</b> de Puter (costo cero por token). Se comprueba contra su catalogo cada hora.</p>
+      <input id="ia-modelo" list="ia-modelos" placeholder="gpt-4o-mini" class="hidden"><datalist id="ia-modelos"></datalist>
+      <h3 style="margin-top:18px">3. Cuando pasar con una persona</h3>
+      <label>Si el cliente escribe alguna de estas palabras (separadas por comas)</label>
+      <input id="ia-derivar" placeholder="asesor, humano, persona, hablar con alguien, reclamo">
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="ia-avisar"> Avisarme por WhatsApp (al numero del supervisor de Configuracion) cuando pase con una persona</label>
+      <label style="margin-top:10px">Cuantos mensajes anteriores recuerda</label>
+      <input id="ia-memoria" type="number" min="0" max="40" value="12" style="width:100px">
+    </div>
+  </div>
+  <div class="actions" style="margin-top:14px">
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ia-activa"> <b>Asistente encendido</b></label>
+    <button id="ia-guardar">Guardar</button>
+    <span id="ia-state" class="pill hidden"></span>
+  </div>
+
+  <h3 style="margin-top:24px">Pruebalo aqui</h3>
+  <p class="muted">Escribe como si fueras un cliente. No sale nada por WhatsApp; usa lo que guardaste arriba.</p>
+  <div id="ia-chat" class="ia-chat"><div class="muted" style="padding:10px">Guarda primero y escribe abajo.</div></div>
+  <div class="toolbar" style="margin-top:8px">
+    <div style="flex:1"><input id="ia-probar-texto" placeholder="Hola, ¿tienen zapatillas talla 42?"></div>
+    <div><button class="ghost" id="ia-probar">Enviar</button></div>
+    <div><button class="ghost sm" id="ia-probar-limpiar">Empezar de nuevo</button></div>
+  </div>
+
+  <h3 style="margin-top:24px">Examen: clientes de prueba</h3>
+  <p class="muted">Decenas de clientes distintos (el que regatea, el que ya pagó, el enojado, el que intenta engañar al asistente...) escritos como en la vida real. El asistente responde con lo que sabe de tu negocio y cada respuesta se revisa sola: que no invente precios, que no prometa descuentos, que pase con una persona cuando toca, que no se vaya de largo. Corre un grupo cada vez (tarda unos segundos por cliente).</p>
+  <div class="toolbar">
+    <div><label>Grupo</label><select id="ia-esc-grupo"></select></div>
+    <div><label>&nbsp;</label><button class="ghost" id="ia-esc-correr">Correr el examen</button></div>
+    <span id="ia-esc-state" class="pill hidden"></span>
+  </div>
+  <div id="ia-esc-resumen" class="muted" style="margin:8px 0"></div>
+  <div id="ia-esc-table" class="tablewrap"></div>
+</section>
+
 <section id="tab-integraciones" class="card hidden">
   <h2>Claves de API</h2>
   <p class="muted">Con una clave, un programa (el sistema de GSG, un script) entra en la API sin usuario ni contrasena.
@@ -804,9 +884,12 @@ ${warning}
 
   <h3>Nueva clave</h3>
   <div class="toolbar">
-    <div><label>Para quien es</label><input id="ck-nombre" placeholder="Sistema de GSG"></div>
+    <div><label>Para quien es</label><input id="ck-nombre" placeholder="Stoky"></div>
     <div><label>&nbsp;</label><button id="ck-crear">Crear clave</button></div>
   </div>
+  <label>Que puede hacer</label>
+  <p class="muted">Sin marcar nada, la clave lo puede todo (incluida la API interna del panel). Con permisos marcados, solo entra por la API publica <code>/api/v1</code> y solo a lo marcado.</p>
+  <div id="ck-permisos" class="permisos"></div>
   <span id="ck-state" class="pill hidden"></span>
   <div id="ck-nueva" class="nueva-clave hidden">
     <b>Copia la clave ahora: no se volvera a mostrar.</b>
@@ -815,10 +898,84 @@ ${warning}
   </div>
 
   <h3>Como se usa</h3>
-  <p class="muted">Cabecera <code>Authorization: Bearer &lt;clave&gt;</code> en cualquier ruta <code>/admin/*</code>. Por ejemplo:</p>
+  <p class="muted">Cabecera <code>Authorization: Bearer &lt;clave&gt;</code>. La API publica esta en <code>/api/v1</code> y su contrato en <a href="/api/v1/openapi.json" target="_blank"><code>/api/v1/openapi.json</code></a>. Por ejemplo:</p>
   <pre id="ck-ejemplo"></pre>
-  <p class="muted">Para el reparto: <code>POST /admin/rutas/lotes</code> carga la lista del dia, <code>GET /admin/rutas/solicitudes</code> devuelve el avance,
-  <code>GET /admin/rutas/cola</code> los reportes pendientes para GSG. El detalle esta en el README, seccion "Conectar el sistema de GSG".</p>
+  <p class="muted">Una clave sin permisos acotados entra ademas en <code>/admin/*</code>. Para el reparto: <code>POST /admin/rutas/lotes</code> carga la lista del dia, <code>GET /admin/rutas/solicitudes</code> devuelve el avance,
+  <code>GET /admin/rutas/cola</code> los reportes pendientes para GSG. El detalle esta en el README, secciones "Integrar otro sistema" y "Conectar el sistema de GSG".</p>
+
+  <h2 style="margin-top:28px">Webhooks salientes</h2>
+  <p class="muted">Para que otro sistema <b>se entere</b> de lo que pasa aqui: cuando llega un mensaje, se entrega, un cliente manda su ubicacion o se da de baja, se le manda un POST firmado a su URL.
+  Si su servidor esta caido se reintenta (1 min, 5, 30, 2 h, 12 h); tras un dia entero sin una entrega buena, el webhook se apaga solo y avisa en la campana.</p>
+  <div id="wh-table" class="tablewrap"></div>
+
+  <h3>Nuevo webhook</h3>
+  <div class="toolbar">
+    <div style="flex:2"><label>URL que recibe el POST</label><input id="wh-url" placeholder="https://stoky.app/webhooks/whatsapp"></div>
+    <div><label>Para quien es</label><input id="wh-descripcion" placeholder="Stoky"></div>
+    <div><label>&nbsp;</label><button id="wh-crear">Registrar webhook</button></div>
+  </div>
+  <label>Que eventos quiere recibir</label>
+  <p class="muted">Sin marcar nada, recibe todos.</p>
+  <div id="wh-eventos" class="permisos"></div>
+  <span id="wh-state" class="pill hidden"></span>
+  <div id="wh-nuevo" class="nueva-clave hidden">
+    <b>Copia el secreto ahora: no se volvera a mostrar.</b> Con el, el otro sistema comprueba la firma <code>X-Firma</code> de cada entrega.
+    <code id="wh-secreto"></code>
+    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="wh-copiar">Copiar</button><button class="ghost sm" id="wh-cerrar">Ya lo guarde</button></div>
+  </div>
+  <div id="wh-entregas" class="hidden">
+    <h3>Ultimas entregas de <span id="wh-entregas-de"></span></h3>
+    <div id="wh-entregas-table" class="tablewrap"></div>
+  </div>
+
+  <h2 style="margin-top:28px">Conectores de tiendas (WooCommerce, Shopify)</h2>
+  <p class="muted">Para tiendas que ya existen y no van a tocar su codigo: la tienda avisa sola de cada pedido (creado, pagado, enviado...) y de aqui sale el WhatsApp que diga la regla.
+  Se crea el conector, se pega su URL en la tienda con el secreto, y se elige que mensaje sale con cada evento.</p>
+  <div id="cn-table" class="tablewrap"></div>
+
+  <h3>Nuevo conector</h3>
+  <div class="toolbar">
+    <div><label>Tienda</label><select id="cn-tipo"><option value="woocommerce">WooCommerce (WordPress)</option><option value="shopify">Shopify</option></select></div>
+    <div><label>Nombre</label><input id="cn-nombre" placeholder="Tienda online"></div>
+    <div id="cn-secreto-caja" class="hidden"><label>Secreto que ensena Shopify</label><input id="cn-secreto" placeholder="Configuracion → Notificaciones → Webhooks"></div>
+    <div><label>&nbsp;</label><button id="cn-crear">Crear conector</button></div>
+  </div>
+  <span id="cn-state" class="pill hidden"></span>
+  <div id="cn-nuevo" class="nueva-clave hidden">
+    <b>Pega esto en la tienda.</b>
+    <div id="cn-instrucciones" class="muted" style="margin-top:6px"></div>
+    <label style="margin-top:8px">URL del webhook</label><code id="cn-url"></code>
+    <div id="cn-secreto-bloque"><label>Secreto (se ve una sola vez)</label><code id="cn-secreto-valor"></code></div>
+    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="cn-cerrar">Ya lo pegue</button></div>
+  </div>
+
+  <div id="cn-reglas" class="hidden">
+    <h3>Que mensaje sale con cada evento de <span id="cn-reglas-de"></span></h3>
+    <p class="muted">Variables: <code>{nombre}</code> <code>{numero}</code> <code>{total}</code> <code>{moneda}</code> <code>{estado}</code> <code>{tienda}</code> <code>{seguimiento}</code> <code>{items}</code>.
+    Con la API de Meta sale la plantilla (fuera de 24 h el texto no puede salir); con el QR o WAHA, el texto.</p>
+    <div id="cn-reglas-table" class="tablewrap"></div>
+    <div class="toolbar" style="margin-top:10px">
+      <div><label>Probar con un telefono</label><input id="cn-probar-tel" placeholder="51987654321"></div>
+      <div><label>Evento</label><select id="cn-probar-evento"></select></div>
+      <div><label>&nbsp;</label><button class="ghost" id="cn-probar">Mandar prueba</button></div>
+      <div><label>&nbsp;</label><button id="cn-guardar-reglas">Guardar reglas</button></div>
+    </div>
+    <span id="cn-reglas-state" class="pill hidden"></span>
+  </div>
+  <div id="cn-entradas" class="hidden">
+    <h3>Ultimos pedidos que llegaron de <span id="cn-entradas-de"></span></h3>
+    <div id="cn-entradas-table" class="tablewrap"></div>
+  </div>
+
+  <h2 style="margin-top:28px">Chat embebido en otra web</h2>
+  <p class="muted">La pantalla de chat, dentro de la web de otro sistema (Stoky, una tienda, un CRM): se atiende WhatsApp sin salir de ahi.
+  La otra web pega <code>embed.js</code> y le pasa un <b>token</b> que su servidor pide con una clave que tenga el permiso <code>embed:emitir</code>. La clave nunca llega al navegador; el token si, y caduca.</p>
+  <label>Webs que pueden embeber el chat (una por linea, con https://)</label>
+  <textarea id="em-dominios" rows="3" placeholder="https://stoky.app&#10;https://tienda.ejemplo.com"></textarea>
+  <p class="muted">Sin ninguna, ningun sitio ajeno puede enmarcar el chat aunque tenga un token. Solo un administrador lo cambia.</p>
+  <div class="actions"><button id="em-guardar">Guardar</button><span id="em-state" class="pill hidden"></span></div>
+  <h3>Como se pega</h3>
+  <pre id="em-ejemplo"></pre>
 </section>
 
 <section id="tab-extraer" class="card hidden">
@@ -838,8 +995,10 @@ var LOADERS = {
   campanas: function () { loadTemplates(); loadCampaigns(); },
   grupos: loadGrupos,
   automatizacion: loadAutomation, plantillas: loadTemplates, historial: loadDeliveries, usuarios: loadUsuarios, integraciones: loadClaves,
-  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad, stickers: loadStickers
+  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad, stickers: loadStickers, ia: loadIa
 };
+/* Al cambiar entre modo sencillo y ver todo, la lista de primeros pasos cambia. */
+window.__alCambiarModo = function () { if (typeof loadInicio === 'function' && (location.hash === '#inicio' || !location.hash)) loadInicio(); };
 /* Lo que se refresca cada vez que se entra, no solo la primera. */
 var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true };
 var loaded = {};
@@ -889,15 +1048,23 @@ function graficaSemana(semana) {
 function pintarPasos(p) {
   if (!p) return;
   var oficial = p.proveedor === 'cloud';
+  var avanzado = window.__modoAvanzado === true;
+  // Lo que una tienda necesita para arrancar son tres cosas; el resto es del
+  // modo avanzado (reparto, campañas, equipo).
   var pasos = [
-    { hecho: p.conectado, titulo: 'Conectar el WhatsApp', que: oficial ? 'La API de Meta ya responde.' : 'Escanea el QR desde el teléfono.', href: '/setup' },
-    { hecho: p.usuarios > 1, titulo: 'Crear las cuentas del equipo', que: 'Una por persona, con su rol.', href: '/panel#usuarios', soloAdmin: true },
-    { hecho: p.plantillas > 0, titulo: oficial ? 'Dar de alta las plantillas' : 'Crear plantillas propias (opcional)', que: oficial ? 'Meta tiene que aprobarlas.' : 'Con el QR no hacen falta; ordenan los textos.', href: '/panel#plantillas' },
-    { hecho: p.contactos > 0, titulo: 'Cargar contactos con su consentimiento', que: 'Sin opt-in no sale nada iniciado por ti.', href: '/panel#contactos' },
-    { hecho: p.lotes > 0, titulo: 'Cargar el primer reparto', que: 'Pega la lista del día y pulsa Empezar a pedir.', href: '/rutas' }
+    { hecho: p.conectado, titulo: 'Conectar tu WhatsApp', que: oficial ? 'La API de Meta ya responde.' : 'Escanea el QR desde el teléfono, como en WhatsApp Web.', href: '/setup' },
+    { hecho: p.ia === true, titulo: 'Enseñarle a tu asistente IA', que: 'Cuéntale qué vendes y enciéndelo: contestará solo.', href: '/panel#ia', ocultar: p.iaDisponible === false },
+    { hecho: false, titulo: 'Poner el chat en tu web o conectar tu tienda', que: 'Una línea en tu web, o pega la URL en WooCommerce/Shopify.', href: '/panel#integraciones', soloAdmin: true, opcional: true },
+    { hecho: p.usuarios > 1, titulo: 'Crear las cuentas del equipo', que: 'Una por persona, con su rol.', href: '/panel#usuarios', soloAdmin: true, avanzado: true },
+    { hecho: p.plantillas > 0, titulo: oficial ? 'Dar de alta las plantillas' : 'Crear plantillas propias (opcional)', que: oficial ? 'Meta tiene que aprobarlas.' : 'Con el QR no hacen falta; ordenan los textos.', href: '/panel#plantillas', avanzado: true },
+    { hecho: p.contactos > 0, titulo: 'Cargar contactos con su consentimiento', que: 'Sin opt-in no sale nada iniciado por ti.', href: '/panel#contactos', avanzado: true },
+    { hecho: p.lotes > 0, titulo: 'Cargar el primer reparto', que: 'Pega la lista del día y pulsa Empezar a pedir.', href: '/rutas', avanzado: true }
   ];
   var esAdmin = !window.__yo || window.__yo.rol === 'admin';
-  pasos = pasos.filter(function (x) { return !x.soloAdmin || esAdmin; });
+  pasos = pasos.filter(function (x) { return (!x.soloAdmin || esAdmin) && !x.ocultar && (!x.avanzado || avanzado); });
+  // Los opcionales no bloquean: la tarjeta desaparece cuando lo obligatorio esta.
+  var obligatorios = pasos.filter(function (x) { return !x.opcional; });
+  if (obligatorios.every(function (x) { return x.hecho; })) pasos = [];
   var pendientes = pasos.filter(function (x) { return !x.hecho; });
   var card = document.getElementById('in-pasos-card');
   card.classList.toggle('hidden', pendientes.length === 0);
@@ -1260,15 +1427,44 @@ document.getElementById('sk-guardar-auto').onclick = busy('sk-guardar-auto', asy
 });
 
 // --------------------------------------------------------------- integraciones
+/* Los permisos que existen (nombre y explicacion) y los eventos de los webhooks: los dice el servidor. */
+var PERMISOS_API = null;
+async function cargarContratoApi() {
+  if (PERMISOS_API) return PERMISOS_API;
+  var raiz = await api('/api/v1');
+  var eventos = await api('/api/v1/eventos');
+  PERMISOS_API = { permisos: raiz.permisos || {}, eventos: eventos.eventos || [] };
+  return PERMISOS_API;
+}
+function casillas(id, items, nombreCampo) {
+  document.getElementById(id).innerHTML = items.map(function (it) {
+    return '<label><input type="checkbox" name="' + nombreCampo + '" value="' + esc(it.valor) + '"><span><b>' + esc(it.valor) + '</b><small>' + esc(it.texto) + '</small></span></label>';
+  }).join('');
+}
+function marcadas(id) {
+  return Array.prototype.map.call(document.querySelectorAll('#' + id + ' input:checked'), function (i) { return i.value; });
+}
 async function loadClaves() {
-  document.getElementById('ck-ejemplo').textContent = 'curl -H "authorization: Bearer wak_..." ' + location.origin + '/admin/health';
+  document.getElementById('ck-ejemplo').textContent =
+    'curl -H "authorization: Bearer wak_..." ' + location.origin + '/api/v1/estado\n' +
+    'curl -H "authorization: Bearer wak_..." -H "content-type: application/json" \\\n' +
+    '     -d \'{"telefono":"51987654321","texto":"Tu pedido ya salio","consentimiento":{"origen":"pedido P-1024"}}\' ' + location.origin + '/api/v1/mensajes';
+  try {
+    var contrato = await cargarContratoApi();
+    casillas('ck-permisos', Object.keys(contrato.permisos).filter(function (p) { return p !== '*'; }).map(function (p) { return { valor: p, texto: contrato.permisos[p] }; }), 'permiso');
+    casillas('wh-eventos', contrato.eventos.map(function (e) { return { valor: e.nombre, texto: e.descripcion }; }), 'evento');
+  } catch (error) { show('ck-state', error.message, 'bad'); }
+  loadWebhooks();
+  loadEmbebido();
+  loadConectores();
   try {
     var list = await api('/admin/claves-api');
-    table('ck-table', ['Para', 'Clave', 'Creada', 'Último uso', 'Estado', ''], list.map(function (k) {
-      return [esc(k.nombre), '<code>' + esc(k.prefijo) + '</code>', esc(fmt(k.createdAt)), esc(fmt(k.ultimoUsoAt) || 'nunca'),
+    table('ck-table', ['Para', 'Clave', 'Permisos', 'Creada', 'Último uso', 'Estado', ''], list.map(function (k) {
+      var permisos = (k.permisos || ['*']).indexOf('*') >= 0 ? pill('warn', 'todo') : (k.permisos || []).map(function (p) { return '<code>' + esc(p) + '</code>'; }).join(' ');
+      return [esc(k.nombre), '<code>' + esc(k.prefijo) + '</code>', permisos, esc(fmt(k.createdAt)), esc(fmt(k.ultimoUsoAt) || 'nunca'),
         pill(k.revocadaAt ? 'bad' : 'ok', k.revocadaAt ? 'revocada' : 'activa'),
         k.revocadaAt ? '' : '<button class="danger sm" data-ck-revocar="' + esc(k.id) + '">Revocar</button>'];
-    }), 'Todavía no hay claves. Crea una para el sistema de GSG.');
+    }), 'Todavía no hay claves. Crea una para Stoky o para el sistema de GSG.');
     document.querySelectorAll('[data-ck-revocar]').forEach(function (b) {
       b.onclick = async function () {
         var ok = await confirmarDialogo({ titulo: 'Revocar la clave', texto: 'El programa que la use dejará de entrar en el acto. No se puede deshacer.', boton: 'Revocar', peligro: true });
@@ -1284,13 +1480,423 @@ async function loadClaves() {
 }
 document.getElementById('ck-crear').onclick = busy('ck-crear', async function () {
   try {
-    var r = await api('/admin/claves-api', { method: 'POST', body: { nombre: val('ck-nombre') } });
+    var r = await api('/admin/claves-api', { method: 'POST', body: { nombre: val('ck-nombre'), permisos: marcadas('ck-permisos') } });
     document.getElementById('ck-valor').textContent = r.clave;
     document.getElementById('ck-nueva').classList.remove('hidden');
     setVal('ck-nombre', '');
+    document.querySelectorAll('#ck-permisos input').forEach(function (i) { i.checked = false; });
     show('ck-state', 'Clave creada', 'ok');
     loadClaves();
   } catch (error) { show('ck-state', error.message, 'bad'); }
+});
+
+// --- webhooks salientes ---
+async function loadWebhooks() {
+  try {
+    var r = await api('/api/v1/webhooks');
+    table('wh-table', ['Para', 'URL', 'Eventos', 'Última entrega', 'Estado', ''], r.webhooks.map(function (w) {
+      var eventos = w.eventos.indexOf('*') >= 0 ? pill('ok', 'todos') : w.eventos.map(function (e) { return '<code>' + esc(e) + '</code>'; }).join(' ');
+      var ultima = w.ultimoOkAt ? 'bien ' + esc(fmt(w.ultimoOkAt)) : 'ninguna buena';
+      if (w.fallosSeguidos) ultima += '<br><small class="muted">' + w.fallosSeguidos + ' fallo' + (w.fallosSeguidos === 1 ? '' : 's') + ' seguido' + (w.fallosSeguidos === 1 ? '' : 's') + (w.ultimoFalloAt ? ', el último ' + esc(fmt(w.ultimoFalloAt)) : '') + '</small>';
+      var estado = w.activo ? pill('ok', 'activo') : pill(w.motivoPausa ? 'bad' : 'warn', w.motivoPausa ? 'apagado por fallos' : 'pausado');
+      if (w.motivoPausa) estado += '<br><small class="muted">' + esc(w.motivoPausa) + '</small>';
+      var botones =
+        '<button class="ghost sm" data-wh-probar="' + esc(w.id) + '">Probar</button> ' +
+        '<button class="ghost sm" data-wh-entregas="' + esc(w.id) + '" data-wh-nombre="' + esc(w.descripcion || w.url) + '">Entregas</button> ' +
+        '<button class="ghost sm" data-wh-activo="' + esc(w.id) + '" data-wh-valor="' + (w.activo ? '0' : '1') + '">' + (w.activo ? 'Pausar' : 'Activar') + '</button> ' +
+        (w.activo ? '' : '<button class="ghost sm" data-wh-reencolar="' + esc(w.id) + '">Reintentar fallidas</button> ') +
+        '<button class="danger sm" data-wh-borrar="' + esc(w.id) + '">Borrar</button>';
+      return [esc(w.descripcion || '—'), '<code>' + esc(w.url) + '</code>', eventos, ultima, estado, botones];
+    }), 'Todavía no hay webhooks. Registra la URL del sistema que quiera enterarse de lo que pasa aquí.');
+
+    document.querySelectorAll('[data-wh-probar]').forEach(function (b) {
+      b.onclick = busy(b, async function () {
+        try {
+          var p = await api('/api/v1/webhooks/' + b.getAttribute('data-wh-probar') + '/probar', { method: 'POST' });
+          show('wh-state', p.ok ? 'La URL contestó ' + p.codigo + ': el webhook funciona.' : 'La URL no contestó bien: ' + (p.error || p.codigo) + (p.respuesta ? ' — ' + p.respuesta : ''), p.ok ? 'ok' : 'bad');
+        } catch (error) { show('wh-state', error.message, 'bad'); }
+      });
+    });
+    document.querySelectorAll('[data-wh-entregas]').forEach(function (b) {
+      b.onclick = async function () {
+        try {
+          var e = await api('/api/v1/webhooks/' + b.getAttribute('data-wh-entregas') + '/entregas?limite=50');
+          document.getElementById('wh-entregas-de').textContent = b.getAttribute('data-wh-nombre');
+          document.getElementById('wh-entregas').classList.remove('hidden');
+          table('wh-entregas-table', ['Cuándo', 'Evento', 'Estado', 'Intentos', 'Respuesta', 'Próximo intento'], e.entregas.map(function (x) {
+            var estado = x.estado === 'enviada' ? pill('ok', 'entregada') : x.estado === 'fallida' ? pill('bad', 'fallida') : pill('warn', 'pendiente');
+            var respuesta = (x.respuestaCodigo ? 'HTTP ' + x.respuestaCodigo + ' ' : '') + (x.error && x.estado !== 'enviada' ? esc(x.error) : '') + (x.respuesta ? '<br><small class="muted">' + esc(String(x.respuesta).slice(0, 120)) + '</small>' : '');
+            return [esc(fmt(x.createdAt)), '<code>' + esc(x.evento) + '</code>', estado, String(x.intentos), respuesta || '—', x.estado === 'pendiente' ? esc(fmt(x.proximoIntentoAt)) : '—'];
+          }), 'Todavía no se ha entregado nada a este webhook.');
+          document.getElementById('wh-entregas').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (error) { show('wh-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-wh-activo]').forEach(function (b) {
+      b.onclick = async function () {
+        try {
+          await api('/api/v1/webhooks/' + b.getAttribute('data-wh-activo'), { method: 'PATCH', body: { activo: b.getAttribute('data-wh-valor') === '1' } });
+          loadWebhooks();
+        } catch (error) { show('wh-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-wh-reencolar]').forEach(function (b) {
+      b.onclick = async function () {
+        try {
+          var x = await api('/api/v1/webhooks/' + b.getAttribute('data-wh-reencolar') + '/reencolar', { method: 'POST' });
+          show('wh-state', x.reencoladas + ' entrega' + (x.reencoladas === 1 ? '' : 's') + ' de vuelta en la cola. Actívalo para que salgan.', 'ok');
+          loadWebhooks();
+        } catch (error) { show('wh-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-wh-borrar]').forEach(function (b) {
+      b.onclick = async function () {
+        var ok = await confirmarDialogo({ titulo: 'Borrar el webhook', texto: 'Ese sistema dejará de recibir avisos y se borra el historial de entregas. No se puede deshacer.', boton: 'Borrar', peligro: true });
+        if (!ok) return;
+        try { await api('/api/v1/webhooks/' + b.getAttribute('data-wh-borrar'), { method: 'DELETE' }); loadWebhooks(); }
+        catch (error) { show('wh-state', error.message, 'bad'); }
+      };
+    });
+  } catch (error) {
+    document.getElementById('wh-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
+  }
+}
+document.getElementById('wh-crear').onclick = busy('wh-crear', async function () {
+  try {
+    var r = await api('/api/v1/webhooks', { method: 'POST', body: { url: val('wh-url'), descripcion: val('wh-descripcion'), eventos: marcadas('wh-eventos') } });
+    document.getElementById('wh-secreto').textContent = r.secreto;
+    document.getElementById('wh-nuevo').classList.remove('hidden');
+    setVal('wh-url', ''); setVal('wh-descripcion', '');
+    document.querySelectorAll('#wh-eventos input').forEach(function (i) { i.checked = false; });
+    show('wh-state', 'Webhook registrado. Pulsa "Probar" para comprobar que la URL contesta.', 'ok');
+    loadWebhooks();
+  } catch (error) { show('wh-state', error.message, 'bad'); }
+});
+document.getElementById('wh-copiar').onclick = function () {
+  navigator.clipboard.writeText(document.getElementById('wh-secreto').textContent).then(function () { show('wh-state', 'Copiado', 'ok'); });
+};
+document.getElementById('wh-cerrar').onclick = function () {
+  document.getElementById('wh-secreto').textContent = '';
+  document.getElementById('wh-nuevo').classList.add('hidden');
+};
+
+// --- conectores de tiendas ---
+var CN_OPCIONES = null;
+var CN_ABIERTO = null;
+var INSTRUCCIONES_TIENDA = {
+  woocommerce: 'En WordPress: WooCommerce → Ajustes → Avanzado → Webhooks → Añadir. Estado "Activo", tema "Pedido creado" (y otro webhook con "Pedido actualizado" si quieres avisar de pagos y entregas), URL de entrega la de abajo, secreto el de abajo, versión de API v3.',
+  shopify: 'En Shopify: Configuración → Notificaciones → Webhooks → Crear webhook. Evento "Creación de pedidos" (y otros: pago, preparación, cancelación), formato JSON, URL la de abajo. El secreto lo enseña Shopify al pie de esa pantalla: es el que pegaste al crear el conector.'
+};
+document.getElementById('cn-tipo').onchange = function () {
+  document.getElementById('cn-secreto-caja').classList.toggle('hidden', val('cn-tipo') !== 'shopify');
+};
+async function loadConectores() {
+  try {
+    if (!CN_OPCIONES) {
+      CN_OPCIONES = await api('/api/v1/conectores/opciones');
+      document.getElementById('cn-probar-evento').innerHTML = CN_OPCIONES.eventos.map(function (e) { return '<option value="' + esc(e.nombre) + '">' + esc(e.nombre) + '</option>'; }).join('');
+    }
+    var r = await api('/api/v1/conectores');
+    table('cn-table', ['Tienda', 'Nombre', 'URL', 'Reglas', 'Recibidos', 'Estado', ''], r.conectores.map(function (c) {
+      var activas = c.reglas.filter(function (x) { return x.activo; }).map(function (x) { return '<code>' + esc(x.evento) + '</code>'; }).join(' ') || '<span class="muted">ninguna: no sale nada</span>';
+      var botones =
+        '<button class="ghost sm" data-cn-reglas="' + esc(c.id) + '">Reglas</button> ' +
+        '<button class="ghost sm" data-cn-entradas="' + esc(c.id) + '">Pedidos</button> ' +
+        '<button class="ghost sm" data-cn-activo="' + esc(c.id) + '" data-cn-valor="' + (c.activo ? '0' : '1') + '">' + (c.activo ? 'Pausar' : 'Activar') + '</button> ' +
+        '<button class="danger sm" data-cn-borrar="' + esc(c.id) + '">Borrar</button>';
+      return [esc(c.tipo), esc(c.nombre), '<code>' + esc(c.url) + '</code>', activas, String(c.eventosRecibidos) + (c.ultimoEventoAt ? '<br><small class="muted">' + esc(fmt(c.ultimoEventoAt)) + '</small>' : ''), pill(c.activo ? 'ok' : 'warn', c.activo ? 'activo' : 'pausado'), botones];
+    }), 'Todavía no hay conectores. Crea uno para tu tienda WooCommerce o Shopify.');
+    document.querySelectorAll('[data-cn-reglas]').forEach(function (b) { b.onclick = function () { abrirReglas(b.getAttribute('data-cn-reglas'), r.conectores); }; });
+    document.querySelectorAll('[data-cn-entradas]').forEach(function (b) { b.onclick = function () { verEntradas(b.getAttribute('data-cn-entradas'), r.conectores); }; });
+    document.querySelectorAll('[data-cn-activo]').forEach(function (b) {
+      b.onclick = async function () {
+        try { await api('/api/v1/conectores/' + b.getAttribute('data-cn-activo'), { method: 'PATCH', body: { activo: b.getAttribute('data-cn-valor') === '1' } }); loadConectores(); }
+        catch (error) { show('cn-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-cn-borrar]').forEach(function (b) {
+      b.onclick = async function () {
+        var ok = await confirmarDialogo({ titulo: 'Borrar el conector', texto: 'La tienda seguirá mandando sus webhooks a una URL que ya no existe. Bórralo también allí.', boton: 'Borrar', peligro: true });
+        if (!ok) return;
+        try { await api('/api/v1/conectores/' + b.getAttribute('data-cn-borrar'), { method: 'DELETE' }); document.getElementById('cn-reglas').classList.add('hidden'); loadConectores(); }
+        catch (error) { show('cn-state', error.message, 'bad'); }
+      };
+    });
+  } catch (error) {
+    document.getElementById('cn-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
+  }
+}
+document.getElementById('cn-crear').onclick = busy('cn-crear', async function () {
+  try {
+    var tipo = val('cn-tipo');
+    var body = { tipo: tipo, nombre: val('cn-nombre') };
+    if (tipo === 'shopify') {
+      if (!val('cn-secreto')) return show('cn-state', 'Pega el secreto que enseña Shopify en la pantalla de webhooks.', 'bad');
+      body.secreto = val('cn-secreto');
+    }
+    var r = await api('/api/v1/conectores', { method: 'POST', body: body });
+    document.getElementById('cn-instrucciones').textContent = INSTRUCCIONES_TIENDA[tipo];
+    document.getElementById('cn-url').textContent = r.conector.url;
+    document.getElementById('cn-secreto-valor').textContent = r.secreto;
+    document.getElementById('cn-secreto-bloque').classList.toggle('hidden', tipo === 'shopify');
+    document.getElementById('cn-nuevo').classList.remove('hidden');
+    setVal('cn-nombre', ''); setVal('cn-secreto', '');
+    show('cn-state', 'Conector creado. Ahora define las reglas (botón "Reglas").', 'ok');
+    loadConectores();
+  } catch (error) { show('cn-state', error.message, 'bad'); }
+});
+document.getElementById('cn-cerrar').onclick = function () {
+  document.getElementById('cn-secreto-valor').textContent = '';
+  document.getElementById('cn-nuevo').classList.add('hidden');
+};
+function abrirReglas(id, conectores) {
+  var c = conectores.filter(function (x) { return x.id === id; })[0];
+  if (!c) return;
+  CN_ABIERTO = c;
+  document.getElementById('cn-reglas-de').textContent = c.nombre;
+  document.getElementById('cn-reglas').classList.remove('hidden');
+  var opcionesPlantilla = '<option value="">— sin plantilla —</option>' + CN_OPCIONES.plantillas.map(function (p) { return '<option value="' + esc(p.nombre) + '">' + esc(p.nombre) + ' (' + p.variables + ' var.)</option>'; }).join('');
+  var filas = CN_OPCIONES.eventos.map(function (e) {
+    var r = c.reglas.filter(function (x) { return x.evento === e.nombre; })[0] || { activo: false, plantilla: null, variables: [], texto: '' };
+    return [
+      '<label title="' + esc(e.descripcion) + '"><input type="checkbox" data-cn-activo-regla="' + esc(e.nombre) + '"' + (r.activo ? ' checked' : '') + '> <code>' + esc(e.nombre) + '</code><br><small class="muted">' + esc(e.descripcion) + '</small></label>',
+      '<select data-cn-plantilla="' + esc(e.nombre) + '">' + opcionesPlantilla + '</select>',
+      '<input data-cn-variables="' + esc(e.nombre) + '" placeholder="{nombre}, {numero}" value="' + esc((r.variables || []).join(', ')) + '">',
+      '<textarea data-cn-texto="' + esc(e.nombre) + '" rows="2" placeholder="Hola {nombre}, tu pedido {numero} ya está confirmado.">' + esc(r.texto || '') + '</textarea>'
+    ];
+  });
+  table('cn-reglas-table', ['Evento', 'Plantilla (API de Meta)', 'Variables de la plantilla', 'Texto (QR / WAHA, o dentro de 24 h)'], filas, '');
+  c.reglas.forEach(function (r) {
+    var sel = document.querySelector('[data-cn-plantilla="' + r.evento + '"]');
+    if (sel && r.plantilla) sel.value = r.plantilla.nombre;
+  });
+  document.getElementById('cn-reglas').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function leerReglas() {
+  return CN_OPCIONES.eventos.map(function (e) {
+    var n = e.nombre;
+    var plantilla = document.querySelector('[data-cn-plantilla="' + n + '"]').value;
+    var variables = document.querySelector('[data-cn-variables="' + n + '"]').value.split(',').map(function (v) { return v.trim(); }).filter(Boolean);
+    var texto = document.querySelector('[data-cn-texto="' + n + '"]').value.trim();
+    return { evento: n, activo: document.querySelector('[data-cn-activo-regla="' + n + '"]').checked, plantilla: plantilla ? { nombre: plantilla, idioma: 'es' } : null, variables: variables, texto: texto || null };
+  }).filter(function (r) { return r.activo || r.plantilla || r.texto; });
+}
+document.getElementById('cn-guardar-reglas').onclick = busy('cn-guardar-reglas', async function () {
+  if (!CN_ABIERTO) return;
+  try {
+    var reglas = leerReglas();
+    var vacias = reglas.filter(function (r) { return r.activo && !r.plantilla && !r.texto; });
+    if (vacias.length) return show('cn-reglas-state', 'Cada evento activo necesita una plantilla o un texto: ' + vacias.map(function (r) { return r.evento; }).join(', '), 'bad');
+    var r = await api('/api/v1/conectores/' + CN_ABIERTO.id, { method: 'PATCH', body: { reglas: reglas } });
+    CN_ABIERTO = r.conector;
+    show('cn-reglas-state', 'Reglas guardadas.', 'ok');
+    loadConectores();
+  } catch (error) { show('cn-reglas-state', error.message, 'bad'); }
+});
+document.getElementById('cn-probar').onclick = busy('cn-probar', async function () {
+  if (!CN_ABIERTO) return;
+  try {
+    var r = await api('/api/v1/conectores/' + CN_ABIERTO.id + '/probar', { method: 'POST', body: { telefono: val('cn-probar-tel'), evento: val('cn-probar-evento') } });
+    show('cn-reglas-state', r.ok ? 'Enviado a ' + r.telefono + '. Mira el chat.' : 'No salió (' + r.resultado + '): ' + (r.detalle || ''), r.ok ? 'ok' : 'bad');
+  } catch (error) { show('cn-reglas-state', error.message, 'bad'); }
+});
+async function verEntradas(id, conectores) {
+  var c = conectores.filter(function (x) { return x.id === id; })[0];
+  try {
+    var r = await api('/api/v1/conectores/' + id + '/entradas?limite=50');
+    document.getElementById('cn-entradas-de').textContent = c ? c.nombre : '';
+    document.getElementById('cn-entradas').classList.remove('hidden');
+    table('cn-entradas-table', ['Cuándo', 'Evento', 'Pedido', 'Teléfono', 'Resultado', 'Detalle'], r.entradas.map(function (e) {
+      var kind = e.resultado === 'enviado' ? 'ok' : e.resultado === 'bloqueado' || e.resultado === 'error' ? 'bad' : 'warn';
+      return [esc(fmt(e.createdAt)), '<code>' + esc(e.evento) + '</code>' + (e.eventoOrigen ? '<br><small class="muted">' + esc(e.eventoOrigen) + '</small>' : ''), esc(e.pedido || '—'), esc(e.telefono || '—'), pill(kind, e.resultado), esc(e.detalle || '')];
+    }), 'Todavía no ha llegado ningún pedido de esta tienda.');
+    document.getElementById('cn-entradas').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (error) { show('cn-state', error.message, 'bad'); }
+}
+
+
+// --------------------------------------------------------------- asistente IA
+var IA_HISTORIAL = [];
+function iaPintarProveedor() {
+  var p = val('ia-proveedor');
+  document.getElementById('ia-openai').classList.toggle('hidden', p !== 'openai');
+  document.getElementById('ia-openai-clave').classList.toggle('hidden', p !== 'openai');
+  document.getElementById('ia-puter-caja').classList.toggle('hidden', p === 'openai');
+  document.getElementById('ia-modelo-gratis').classList.toggle('hidden', p === 'openai');
+  document.getElementById('ia-modelo-nota').classList.toggle('hidden', p === 'openai');
+  document.getElementById('ia-modelo').classList.toggle('hidden', p !== 'openai');
+  var lista = (window.__iaModelos && window.__iaModelos[p]) || [];
+  document.getElementById('ia-modelos').innerHTML = lista.map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
+}
+/* Puter.js se carga solo en esta pantalla y solo la primera vez que hace falta. */
+var IA_PUTER_CARGA = null;
+function iaCargarPuter() {
+  if (window.puter) return Promise.resolve();
+  if (IA_PUTER_CARGA) return IA_PUTER_CARGA;
+  IA_PUTER_CARGA = new Promise(function (resolve, reject) {
+    var sc = document.createElement('script');
+    sc.src = 'https://js.puter.com/v2/';
+    sc.onload = function () { resolve(); };
+    sc.onerror = function () { IA_PUTER_CARGA = null; reject(new Error('No se pudo cargar Puter.js. Revisa la conexión a internet o si un bloqueador lo está frenando.')); };
+    document.head.appendChild(sc);
+  });
+  return IA_PUTER_CARGA;
+}
+/* Los errores de Puter llegan en inglés y con tres formas; se traducen los que se van a ver. */
+function iaErrorPuter(e) {
+  var code = (e && (e.code || (typeof e.error === 'string' ? e.error : (e.error && e.error.code)))) || '';
+  var msg = (e && (e.message || e.msg || (e.error && e.error.message))) || '';
+  if (code === 'popup_blocked') return 'El navegador bloqueó la ventana de Puter. Permite las ventanas emergentes de este sitio (el icono a la derecha de la barra de direcciones) y vuelve a pulsar.';
+  if (code === 'auth_canceled' || code === 'auth_window_closed' || /cancelled the authentication/i.test(msg)) return 'Se cerró la ventana sin entrar. Pulsa «Conectar con Puter» y entra con Google, Microsoft, Apple o correo (gratis, sin tarjeta).';
+  if (typeof e === 'string') return e;
+  return msg || 'No se pudo conectar con Puter.';
+}
+/* Tiene que llamarse DIRECTO desde el clic: si se abre después de esperar, Chrome bloquea la ventana. */
+document.getElementById('ia-puter-conectar').onclick = async function () {
+  var estado = document.getElementById('ia-puter-estado');
+  var boton = document.getElementById('ia-puter-conectar');
+  boton.disabled = true;
+  estado.textContent = 'Abriendo Puter…';
+  try {
+    await iaCargarPuter();
+    if (!window.puter || !puter.auth) throw new Error('No se pudo cargar Puter.js.');
+    if (!puter.authToken) await puter.auth.signIn();
+    if (!puter.authToken) throw new Error('No se obtuvo la sesión de Puter.');
+    var quien = 'tu cuenta';
+    try { var u = await puter.auth.getUser(); quien = (u && (u.username || u.email)) || quien; } catch (e) {}
+    // El token de la sesión va al servidor (cifrado): es el que usa para
+    // contestar por WhatsApp cuando nadie tiene el panel abierto.
+    await api('/admin/ia', { method: 'POST', body: { token: puter.authToken, proveedor: 'puter' } });
+    estado.textContent = 'Conectado como ' + quien + '. Ya puedes guardar y probar.';
+    setVal('ia-proveedor', 'puter'); iaPintarProveedor();
+    document.getElementById('ia-token-estado').textContent = 'Sesión de Puter guardada en el servidor.';
+  } catch (e) {
+    estado.textContent = iaErrorPuter(e);
+  }
+  boton.disabled = false;
+};
+document.getElementById('ia-proveedor').onchange = iaPintarProveedor;
+async function loadIa() {
+  try {
+    var e = await api('/admin/ia');
+    window.__iaModelos = e.modelosSugeridos;
+    var gratis = e.modelosGratis || [];
+    var selGratis = document.getElementById('ia-modelo-gratis');
+    selGratis.innerHTML = gratis.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + ' — ' + esc((e.descripcionGratis && e.descripcionGratis[m]) || 'gratuito') + '</option>'; }).join('');
+    selGratis.value = gratis.indexOf(e.modelo) >= 0 ? e.modelo : e.modeloEfectivo;
+    document.getElementById('ia-modelo-nota').innerHTML = 'Solo modelos <b>completamente gratuitos</b> de Puter (costo cero por token). ' + (e.modelosGratisOrigen === 'catalogo' ? 'Comprobado contra su catalogo en vivo.' : 'Lista fija (no se pudo consultar el catalogo).') + (e.proveedor === 'puter' && e.modelo !== e.modeloEfectivo ? ' <b>El modelo guardado ya no es gratuito: se usa ' + esc(e.modeloEfectivo) + '.</b>' : '');
+    setVal('ia-nombre', e.nombreAsistente); setVal('ia-conocimiento', e.conocimiento); setVal('ia-instrucciones', e.instrucciones);
+    setVal('ia-proveedor', e.proveedor); setVal('ia-baseurl', e.baseUrl); setVal('ia-modelo', e.modelo); setVal('ia-derivar', e.derivarSi); setVal('ia-memoria', e.memoria);
+    document.getElementById('ia-avisar').checked = e.avisarDerivacion;
+    document.getElementById('ia-activa').checked = e.activa;
+    document.getElementById('ia-token-estado').textContent = e.tieneToken ? 'Hay una sesión o clave guardada. Deja el campo vacío para conservarla; escribe otra para cambiarla.' : 'Todavía no hay sesión ni clave: sin eso el asistente no puede contestar.';
+    setVal('ia-token', ''); setVal('ia-token-openai', '');
+    document.getElementById('ia-puter-estado').textContent = e.tieneToken && e.proveedor === 'puter' ? 'Hay una sesión de Puter guardada.' : '';
+    iaPintarProveedor();
+    iaCargarEscenarios();
+    var esAdmin = !window.__yo || window.__yo.rol === 'admin';
+    document.getElementById('ia-guardar').disabled = !esAdmin;
+    if (!esAdmin) show('ia-state', 'Solo un administrador cambia el asistente; tú puedes probarlo abajo.', 'warn');
+  } catch (error) { show('ia-state', error.message, 'bad'); }
+}
+document.getElementById('ia-guardar').onclick = busy('ia-guardar', async function () {
+  try {
+    var body = {
+      activa: document.getElementById('ia-activa').checked,
+      proveedor: val('ia-proveedor'), modelo: val('ia-proveedor') === 'openai' ? (val('ia-modelo') || 'gpt-4o-mini') : val('ia-modelo-gratis'), baseUrl: val('ia-baseurl'),
+      nombreAsistente: val('ia-nombre') || 'Asistente', conocimiento: document.getElementById('ia-conocimiento').value, instrucciones: document.getElementById('ia-instrucciones').value,
+      derivarSi: val('ia-derivar'), avisarDerivacion: document.getElementById('ia-avisar').checked, memoria: Number(val('ia-memoria') || 12)
+    };
+    var tokenManual = val('ia-proveedor') === 'openai' ? val('ia-token-openai') : val('ia-token');
+    if (tokenManual) body.token = tokenManual;
+    var r = await api('/admin/ia', { method: 'POST', body: body });
+    show('ia-state', r.estado.activa ? 'Guardado. El asistente está encendido y contestará a quien escriba.' : 'Guardado. El asistente está apagado.', 'ok');
+    loadIa();
+    if (typeof loadInicio === 'function') loaded.inicio = false;
+  } catch (error) { show('ia-state', error.message, 'bad'); }
+});
+function iaPintarChat() {
+  var caja = document.getElementById('ia-chat');
+  caja.innerHTML = IA_HISTORIAL.length ? IA_HISTORIAL.map(function (m) {
+    return '<div class="b' + (m.role === 'user' ? ' yo' : '') + (m.derivo ? ' derivo' : '') + '">' + esc(m.content) + (m.derivo ? '<br><small class="muted">→ aquí pasaría la conversación a una persona</small>' : '') + '</div>';
+  }).join('') : '<div class="muted" style="padding:10px">Escribe abajo como si fueras un cliente.</div>';
+  caja.scrollTop = caja.scrollHeight;
+}
+document.getElementById('ia-probar').onclick = busy('ia-probar', async function () {
+  var texto = val('ia-probar-texto');
+  if (!texto) return;
+  IA_HISTORIAL.push({ role: 'user', content: texto });
+  setVal('ia-probar-texto', '');
+  iaPintarChat();
+  try {
+    var r = await api('/admin/ia/probar', { method: 'POST', body: { texto: texto, historial: IA_HISTORIAL.slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; }) } });
+    IA_HISTORIAL.push({ role: 'assistant', content: r.texto || '(sin texto)', derivo: r.derivar });
+  } catch (error) {
+    IA_HISTORIAL.push({ role: 'assistant', content: '⚠ ' + error.message });
+  }
+  iaPintarChat();
+});
+document.getElementById('ia-probar-texto').onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('ia-probar').click(); } };
+document.getElementById('ia-probar-limpiar').onclick = function () { IA_HISTORIAL = []; iaPintarChat(); };
+
+// --- el examen de escenarios ---
+async function iaCargarEscenarios() {
+  try {
+    var e = await api('/admin/ia/escenarios');
+    var sel = document.getElementById('ia-esc-grupo');
+    var cuenta = {};
+    e.escenarios.forEach(function (x) { cuenta[x.grupo] = (cuenta[x.grupo] || 0) + 1; });
+    sel.innerHTML = Object.keys(e.grupos).map(function (g) { return '<option value="' + esc(g) + '">' + esc(e.grupos[g]) + ' (' + (cuenta[g] || 0) + ')</option>'; }).join('');
+  } catch (error) { /* sin IA en este arranque */ }
+}
+document.getElementById('ia-esc-correr').onclick = busy('ia-esc-correr', async function () {
+  var grupo = val('ia-esc-grupo');
+  show('ia-esc-state', 'Corriendo… cada cliente tarda unos segundos.', 'warn');
+  document.getElementById('ia-esc-resumen').textContent = '';
+  try {
+    var r = await api('/admin/ia/escenarios', { method: 'POST', body: { grupo: grupo } });
+    var s = r.resumen;
+    document.getElementById('ia-esc-resumen').innerHTML = '<b>' + s.limpias + ' de ' + s.total + '</b> sin observaciones' + (s.conAlertas ? ' · ' + s.conAlertas + ' con observaciones' : '') + (s.conError ? ' · ' + s.conError + ' sin respuesta (error del modelo)' : '');
+    table('ia-esc-table', ['Cliente escribe', 'Responde', 'Observaciones'], r.resultados.map(function (x) {
+      var obs = x.error ? pill('bad', 'error') + ' <small class="muted">' + esc(x.error) + '</small>' : x.alertas.length ? x.alertas.map(function (a) { return pill('warn', a); }).join(' ') : pill('ok', 'bien');
+      var acc = (x.derivo ? ' <small class="muted">→ pasa con una persona</small>' : '') + (x.pidioUbicacion ? ' <small class="muted">→ pide la ubicación</small>' : '');
+      return [x.mensajes.map(esc).join('<br><i class="muted">luego:</i> '), esc(x.respuesta || '(sin texto)') + acc, obs];
+    }), 'Sin resultados.');
+    show('ia-esc-state', 'Listo.', 'ok');
+  } catch (error) { show('ia-esc-state', error.message, 'bad'); }
+});
+
+// --- chat embebido ---
+async function loadEmbebido() {
+  document.getElementById('em-ejemplo').textContent =
+    '<!-- 1. En el servidor de la otra web, con su clave (permiso embed:emitir): -->\n' +
+    'POST ' + location.origin + '/api/v1/embed/token   {"operador":"ana","telefono":"51987654321"}   → {"token":"emb_..."}\n\n' +
+    '<!-- 2. En su pagina: -->\n' +
+    '<div id="chat-wa" style="height:600px"></div>\n' +
+    '<script src="' + location.origin + '/embed.js"><\/script>\n' +
+    '<script>\n' +
+    '  var chat = WA.montar("#chat-wa", {\n' +
+    '    token: "emb_...",                 // el del paso 1\n' +
+    '    telefono: "51987654321",          // opcional: solo ese hilo; sin el, la bandeja completa\n' +
+    '    onNoLeidos: function (n) {},      // cuantos chats esperan respuesta\n' +
+    '    onMensaje: function (m) {},       // llego o salio un mensaje\n' +
+    '    onTokenCaducado: function () { /* pedir otro y chat.actualizarToken(nuevo) */ }\n' +
+    '  });\n' +
+    '<\/script>';
+  try {
+    var a = await api('/admin/ajustes');
+    var dominios = (a.guardado && a.guardado.embebido && a.guardado.embebido.dominios) || [];
+    setVal('em-dominios', dominios.join('\n'));
+  } catch (error) { show('em-state', error.message, 'bad'); }
+}
+document.getElementById('em-guardar').onclick = busy('em-guardar', async function () {
+  try {
+    var dominios = val('em-dominios').split(/\r?\n/).map(function (d) { return d.trim(); }).filter(Boolean);
+    var malos = dominios.filter(function (d) { return !/^https?:\/\/[^\s/]+$/i.test(d); });
+    if (malos.length) return show('em-state', 'Solo el origen, sin ruta: https://stoky.app (revisa: ' + malos.join(', ') + ')', 'bad');
+    await api('/admin/ajustes', { method: 'POST', body: { embebido: { dominios: dominios } } });
+    show('em-state', dominios.length ? 'Guardado: ' + dominios.length + ' web' + (dominios.length === 1 ? '' : 's') + ' pueden embeber el chat.' : 'Guardado: ninguna web ajena puede embeber el chat.', 'ok');
+  } catch (error) { show('em-state', error.message, 'bad'); }
 });
 document.getElementById('ck-copiar').onclick = function () {
   var v = document.getElementById('ck-valor').textContent;
@@ -1345,7 +1951,7 @@ function resultado(id, data, que) {
 }
 function busy(id, fn) {
   return async function () {
-    var b = document.getElementById(id); b.disabled = true;
+    var b = typeof id === 'string' ? document.getElementById(id) : id; b.disabled = true;
     try { await fn(); } finally { b.disabled = false; }
   };
 }

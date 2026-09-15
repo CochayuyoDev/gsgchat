@@ -87,10 +87,23 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/waha\//, 'conexion.waha'],
   ['POST', /^\/admin\/archives/, 'respaldo'],
   ['POST', /^\/admin\/leads/, 'ficha'],
+  // La API publica: lo que hace otro sistema con su clave tambien queda apuntado.
+  ['POST', /^\/api\/v1\/mensajes$/, 'api.mensaje'],
+  ['POST', /^\/api\/v1\/contactos$/, 'api.contacto'],
+  ['POST', /^\/api\/v1\/contactos\/:telefono\/baja$/, 'contacto.baja'],
+  ['POST', /^\/api\/v1\/webhooks$/, 'webhook.crear'],
+  ['PATCH', /^\/api\/v1\/webhooks\/:id$/, 'webhook.cambiar'],
+  ['DELETE', /^\/api\/v1\/webhooks\/:id$/, 'webhook.borrar'],
+  ['POST', /^\/api\/v1\/webhooks\/:id\/secreto$/, 'webhook.secreto'],
+  ['POST', /^\/api\/v1\/webhooks\/:id\/reencolar$/, 'webhook.reencolar'],
+  ['POST', /^\/api\/v1\/conectores$/, 'conector.crear'],
+  ['PATCH', /^\/api\/v1\/conectores\/:id$/, 'conector.cambiar'],
+  ['DELETE', /^\/api\/v1\/conectores\/:id$/, 'conector.borrar'],
+  ['POST', /^\/api\/v1\/conectores\/:id\/secreto$/, 'conector.secreto'],
 ];
 
 /** Lo que no merece una fila: mucho trafico y nada que auditar. */
-const IGNORAR: RegExp[] = [/^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/];
+const IGNORAR: RegExp[] = [/^\/api\/v1\/webhooks\/:id\/probar$/, /^\/api\/v1\/conectores\/:id\/probar$/, /^\/api\/v1\/embed\/token$/, /^\/api\/v1\/conversaciones\/:telefono\/leido$/, /^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/];
 
 export const ETIQUETAS: Record<string, string> = {
   'cuenta.primera': 'Creo la primera cuenta',
@@ -147,6 +160,17 @@ export const ETIQUETAS: Record<string, string> = {
   'conexion.waha': 'Toco la sesion de WAHA',
   respaldo: 'Respaldo conversaciones',
   ficha: 'Cambio una ficha de preventa',
+  'api.mensaje': 'Envio un mensaje por la API publica',
+  'api.contacto': 'Creo o actualizo un contacto por la API publica',
+  'webhook.crear': 'Registro un webhook',
+  'webhook.cambiar': 'Cambio un webhook',
+  'webhook.borrar': 'Borro un webhook',
+  'webhook.secreto': 'Roto el secreto de un webhook',
+  'webhook.reencolar': 'Reencolo las entregas fallidas de un webhook',
+  'conector.crear': 'Creo un conector de tienda',
+  'conector.cambiar': 'Cambio un conector de tienda',
+  'conector.borrar': 'Borro un conector de tienda',
+  'conector.secreto': 'Cambio el secreto de un conector',
   otro: 'Otra accion',
 };
 
@@ -171,7 +195,7 @@ export function detalleSeguro(body: unknown, params?: Record<string, string>): R
 export function accionDe(method: string, ruta: string): string | null {
   if (IGNORAR.some((r) => r.test(ruta))) return null;
   for (const [m, r, accion] of ACCIONES) if (m === method && r.test(ruta)) return accion;
-  return ruta.startsWith('/admin/') ? 'otro' : null;
+  return ruta.startsWith('/admin/') || ruta.startsWith('/api/') ? 'otro' : null;
 }
 
 /** Instala el hook que anota sola cada accion. */

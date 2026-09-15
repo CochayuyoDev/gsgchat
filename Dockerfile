@@ -12,6 +12,7 @@ COPY tsconfig.json ./
 COPY src ./src
 COPY tests ./tests
 COPY scripts ./scripts
+COPY saas ./saas
 RUN npm run build
 
 FROM node:22-alpine

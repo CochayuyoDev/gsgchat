@@ -33,6 +33,9 @@ import { arrancarServicios, resumenPolitica } from '../src/servicios.js';
 import { crearServicioAjustes } from '../src/ajustes/generales.js';
 import { crearServicioStickers } from '../src/stickers/stickers.js';
 import { mediaDirectory } from '../src/whatsapp/local/media.js';
+import { crearBus } from '../src/eventos/bus.js';
+import { observarRepos } from '../src/eventos/observar.js';
+import { crearServicioIA } from '../src/ia/servicio.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -78,8 +81,12 @@ const config = loadConfig({
 } as NodeJS.ProcessEnv);
 
 const { pool } = await openPglite(DATA_DIR);
-const repos = createRepos(pool);
-const settings = await createSettingsService(createSettingsRepo(pool), config, secrets.settingsKey);
+// Los repositorios observados: cada escritura avisa al bus, y los webhooks
+// salientes reparten el aviso (igual que en el arranque completo).
+const bus = crearBus((m, d) => console.warn(m, d));
+const repos = observarRepos(createRepos(pool), bus);
+const settingsRepo = createSettingsRepo(pool);
+const settings = await createSettingsService(settingsRepo, config, secrets.settingsKey);
 
 // La politica de ritmo: aqui casi siempre `no_oficial` (Baileys), que es el
 // perfil lento, con escritura simulada y warm-up desde 20 al dia.
@@ -144,6 +151,20 @@ const catalogo =
     ? createStokyClient({ baseUrl: config.STOKY_URL, token: config.STOKY_TOKEN })
     : undefined;
 
+// El asistente de IA de la tienda (ver src/ia): con el catalogo de Stoky si esta.
+const ia = await crearServicioIA({
+  settingsRepo,
+  settingsKeyBase64: secrets.settingsKey,
+  repos,
+  sender,
+  config,
+  nombreNegocio: () => ajustes.nombreNegocio(),
+  supervisor: () => politica().avisarA,
+  catalogo,
+  conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+  log: (m, d) => console.warn(m, d ?? ''),
+});
+
 // El catalogo local hace de catalogo aprobado: sin Meta no hay a quien pedir
 // permiso, pero los gates siguen exigiendo que la plantilla exista y este
 // aprobada antes de dejar salir nada. Se refresca en cada arranque por si el
@@ -178,6 +199,8 @@ const app = await buildServer({
   politica,
   ajustes,
   stickers,
+  bus,
+  ia,
   // Para poder guardar en la biblioteca un sticker que llego por el chat: su
   // fichero vive aqui.
   mediaDir: mediaDirectory(),
@@ -211,6 +234,7 @@ const pararServicios = arrancarServicios({
   politica,
   ajustes,
   stickers,
+  bus,
   log: consola as never,
 });
 process.on('SIGINT', () => {

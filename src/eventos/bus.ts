@@ -1,0 +1,142 @@
+/**
+ * Lo que pasa en el sistema, dicho para que otros se enteren.
+ *
+ * Hasta aqui cada modulo hacia lo suyo y nadie mas lo sabia: llegaba un
+ * mensaje, se guardaba, el bot contestaba, y el sistema de al lado (Stoky,
+ * GSG) seguia sin enterarse. Este bus es el sitio unico donde se anuncia:
+ * quien quiera escuchar -los webhooks salientes, manana el chat embebido-
+ * se suscribe aqui y no tiene que meterse en los handlers.
+ *
+ * Los eventos se emiten desde `observar.ts`, que envuelve los repositorios:
+ * asi cubren a los tres proveedores (Cloud API, Baileys, WAHA) y a la
+ * importacion de historial, porque todos acaban escribiendo en la misma
+ * tabla.
+ */
+
+import { EventEmitter } from 'node:events';
+
+/** Un contacto tal como viaja hacia fuera: lo justo para reconocerlo. */
+export interface ContactoEvento {
+  id: string;
+  telefono: string;
+  nombre: string | null;
+}
+
+export interface Eventos {
+  /** Escribio el cliente (texto, ubicacion, foto...). */
+  'mensaje.recibido': {
+    contacto: ContactoEvento;
+    mensaje: { id: string | null; tipo: string; texto: string | null; datos: Record<string, unknown> | null; fecha: string };
+    /** Si se puede contestar con texto libre por la API de Meta. */
+    ventanaAbierta: boolean;
+  };
+  /** Salio un mensaje hacia el cliente (a mano, por el bot, por campana). */
+  'mensaje.enviado': {
+    contacto: ContactoEvento;
+    mensaje: { id: string | null; tipo: string; texto: string | null; fecha: string };
+  };
+  /** Meta (o el proveedor) dice como va: sent, delivered, read, failed. */
+  'mensaje.estado': { mensajeId: string; estado: string; fecha: string };
+  /** Se consiguio una ubicacion (pin nativo o link de mapa). */
+  'ubicacion.recibida': {
+    contacto: ContactoEvento;
+    ubicacion: { lat: number; lng: number; fuente: string; confianza: string; necesitaConfirmacion: boolean };
+    fecha: string;
+  };
+  /** Registro consentimiento (por palabra clave, por API, por la pantalla). */
+  'contacto.alta': { contacto: { telefono: string }; origen: string; fecha: string };
+  /** Se dio de baja: no se le vuelve a escribir. */
+  'contacto.baja': { contacto: { telefono: string }; fecha: string };
+  /** Una solicitud de ubicacion del reparto cambio de estado. */
+  'reparto.solicitud.actualizada': {
+    solicitud: { id: number; loteId: string; telefono: string; referencia: string | null; estado: string; incidencia: string | null };
+    ubicacion: { lat: number; lng: number } | null;
+    fecha: string;
+  };
+  /** El monitor cambio el semaforo del numero. */
+  'salud.nivel': { de: string | null; a: string; puntos: number; motivos: string[]; fecha: string };
+}
+
+export type NombreEvento = keyof Eventos;
+
+export const NOMBRES_EVENTOS: NombreEvento[] = [
+  'mensaje.recibido',
+  'mensaje.enviado',
+  'mensaje.estado',
+  'ubicacion.recibida',
+  'contacto.alta',
+  'contacto.baja',
+  'reparto.solicitud.actualizada',
+  'salud.nivel',
+];
+
+/** Que significa cada uno, para el panel y la documentacion. */
+export const DESCRIPCION_EVENTOS: Record<NombreEvento, string> = {
+  'mensaje.recibido': 'El cliente escribio (texto, ubicacion, foto, audio...).',
+  'mensaje.enviado': 'Salio un mensaje hacia el cliente, lo mandara quien lo mandara.',
+  'mensaje.estado': 'Un mensaje enviado cambio de estado: sent, delivered, read o failed.',
+  'ubicacion.recibida': 'Se consiguio la ubicacion de un cliente (pin o link de mapa).',
+  'contacto.alta': 'Un contacto dio su consentimiento para recibir mensajes.',
+  'contacto.baja': 'Un contacto pidio no recibir mas mensajes.',
+  'reparto.solicitud.actualizada': 'Una solicitud de ubicacion del reparto cambio de estado o de incidencia.',
+  'salud.nivel': 'El semaforo del numero cambio (verde, amarillo, naranja, rojo).',
+};
+
+export function esNombreEvento(valor: string): valor is NombreEvento {
+  return (NOMBRES_EVENTOS as string[]).includes(valor);
+}
+
+export type Oyente<E extends NombreEvento> = (payload: Eventos[E]) => void | Promise<void>;
+
+export interface Bus {
+  emitir<E extends NombreEvento>(evento: E, payload: Eventos[E]): void;
+  /** Devuelve la funcion que se desuscribe. */
+  escuchar<E extends NombreEvento>(evento: E, oyente: Oyente<E>): () => void;
+  /** Un oyente para todo, con el nombre del evento delante. */
+  escucharTodo(oyente: (evento: NombreEvento, payload: Eventos[NombreEvento]) => void | Promise<void>): () => void;
+}
+
+/**
+ * Un bus en memoria.
+ *
+ * Un oyente que falla no puede tumbar al que emitio: emitir un evento es
+ * "que se sepa", no "que se haga". El error se apunta y se sigue.
+ */
+export function crearBus(log?: (mensaje: string, detalle: Record<string, unknown>) => void): Bus {
+  const emisor = new EventEmitter();
+  emisor.setMaxListeners(50);
+  const TODO = '*';
+
+  type Oyente = (...args: unknown[]) => void | Promise<void>;
+  const seguro =
+    (evento: string, oyente: Oyente) =>
+    (...args: unknown[]) => {
+      try {
+        const r = oyente(...args);
+        if (r && typeof (r as Promise<void>).catch === 'function') {
+          (r as Promise<void>).catch((error) =>
+            log?.('fallo un oyente de eventos', { evento, detalle: error instanceof Error ? error.message : String(error) }),
+          );
+        }
+      } catch (error) {
+        log?.('fallo un oyente de eventos', { evento, detalle: error instanceof Error ? error.message : String(error) });
+      }
+    };
+
+  return {
+    emitir(evento, payload) {
+      emisor.emit(evento, payload);
+      emisor.emit(TODO, evento, payload);
+    },
+    escuchar(evento, oyente) {
+      const envuelto = seguro(evento, oyente as unknown as Oyente);
+      emisor.on(evento, envuelto);
+      return () => emisor.off(evento, envuelto);
+    },
+    escucharTodo(oyente) {
+      const envuelto = seguro(TODO, oyente as unknown as Oyente);
+      emisor.on(TODO, envuelto);
+      return () => emisor.off(TODO, envuelto);
+    },
+  };
+}

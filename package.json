@@ -20,10 +20,17 @@
     "templates:lint": "tsx src/templates/push-cli.ts --lint",
     "templates:push": "tsx src/templates/push-cli.ts --push",
     "demo": "tsx scripts/demo.ts",
-    "quick": "tsx scripts/quick.ts"
+    "quick": "tsx scripts/quick.ts",
+    "saas:base": "tsx saas/base.ts",
+    "saas:alta": "tsx saas/alta.ts",
+    "saas:baja": "tsx saas/baja.ts",
+    "saas:estado": "tsx saas/estado.ts",
+    "saas:maestro": "tsx saas/maestro/server.ts",
+    "saas:prueba": "tsx saas/prueba.ts"
   },
   "dependencies": {
     "@fastify/websocket": "^11.0.1",
+    "@heyputer/puter.js": "^2.6.3",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "bullmq": "^5.34.5",
     "dotenv": "^16.4.7",

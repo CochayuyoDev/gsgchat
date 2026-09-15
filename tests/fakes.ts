@@ -35,6 +35,8 @@ import type { Config } from '../src/config.js';
 import { createSettingsService, type SettingsRepo, type SettingsService } from '../src/settings/service.js';
 import { createFakeAutomation, type FakeAutomation } from './fakes-automation.js';
 import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
+import { createFakeWebhooks, type FakeWebhooks } from './fakes-webhooks.js';
+import { createFakeConectores, type FakeConectores } from './fakes-conectores.js';
 import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
@@ -50,6 +52,8 @@ export interface FakeRepos extends Repos {
   messages: FakeMessages;
   archives: FakeArchives;
   rutas: FakeRutas;
+  webhooks: FakeWebhooks;
+  conectores: FakeConectores;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -203,6 +207,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       createdAt: new Date('2024-01-01T00:00:00Z'),
       ultimoUsoAt: null,
       revocadaAt: null,
+      permisos: ['*'],
     },
   ];
   const sinHash = (c: ClaveApi & { hash: string }): ClaveApi => {
@@ -211,7 +216,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
   };
   const claves: ClavesApiRepo = {
     async crear(input) {
-      const c = { id: `clave-${seq++}`, nombre: input.nombre, prefijo: input.prefijo, hash: input.hash, creadaPor: input.creadaPor, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null };
+      const c = { id: `clave-${seq++}`, nombre: input.nombre, prefijo: input.prefijo, hash: input.hash, creadaPor: input.creadaPor, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null, permisos: input.permisos?.length ? input.permisos : ['*'] };
       clavesMem.push(c);
       return sinHash(c);
     },
@@ -299,6 +304,8 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     actividad,
     _stickers: stickersMem,
     stickers,
+    webhooks: createFakeWebhooks(),
+    conectores: createFakeConectores(),
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
     archives: createFakeArchives(),

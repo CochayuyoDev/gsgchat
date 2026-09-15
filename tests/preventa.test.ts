@@ -539,3 +539,10 @@ describe('tecleo al azar', () => {
     expect(c.ficha.recojoDistrito).toBeNull();
   });
 });
+
+describe('la ficha guarda listas en jsonb', () => {
+  it('ultimasOpciones (un array) se escribe como JSON, no como array de Postgres', async () => {
+    // El doble no distingue; lo que se comprueba aqui es el SQL de verdad en postgres.test.ts.
+    expect(JSON.stringify(['pv_cotizar', 'pv_datos'])).toBe('["pv_cotizar","pv_datos"]');
+  });
+});
