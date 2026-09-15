@@ -151,7 +151,7 @@ describe('los cortes del socket', () => {
   });
 
   it('explica cada codigo en cristiano', () => {
-    expect(explicarCierre(401)).toMatch(/escanear/);
+    expect(explicarCierre(401)).toMatch(/escanea el QR nuevo/);
     expect(explicarCierre(403)).toMatch(/baneo/);
     expect(explicarCierre(440)).toMatch(/otra sesion/i);
     expect(explicarCierre(515)).toMatch(/reiniciar/);

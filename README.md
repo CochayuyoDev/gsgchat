@@ -977,9 +977,9 @@ Todas bajo `Authorization: Bearer wak_...` (una clave de API creada en
 | GET | `/admin/rutas` | estado del modulo: lotes, cifras, alertas y cola de GSG |
 | POST | `/admin/rutas/previsualizar` | que se entiende de la tabla, sin guardar nada |
 | POST | `/admin/rutas/lotes` | crear el lote (tabla pegada o filas en JSON: por aqui entra GSG) |
-| GET | `/admin/rutas/lotes/:id` · `/lotes/:id.csv` | estado del lote / resultado en CSV |
+| GET | `/admin/rutas/lotes/:id` · `/lotes/:id.csv` | estado del lote (con `conUbicacion` y `sinUbicacion` ya sumados) / resultado en CSV |
 | POST | `/admin/rutas/lotes/:id/estado` | empezar, pausar o dar por terminado |
-| GET | `/admin/rutas/solicitudes` · `/vistas` | la bandeja con sus filtros y las cifras de cada vista |
+| GET | `/admin/rutas/solicitudes` · `/vistas` | la bandeja con sus filtros y las cifras de cada vista; `?vista=sin_ubicacion&loteId=…` lista los numeros que todavia no la dieron |
 | GET | `/admin/rutas/solicitudes/:id` | un caso con su bitacora completa |
 | PATCH | `/admin/rutas/solicitudes/:id` | corregir el telefono (vuelve solo a la cola) y demas datos |
 | POST | `/admin/rutas/solicitudes/:id/resolver` | cargar la ubicacion conseguida por telefono |

@@ -144,6 +144,20 @@ export function readInbound(message: InboundMessage): { kind: MessageKind; body:
   if (message.text?.body) {
     return { kind: 'text', body: message.text.body, payload: null };
   }
+  if (message.type === 'reaction' && message.reaction) {
+    return { kind: 'unknown', body: `${message.reaction.emoji} (reacción a un mensaje)`, payload: { reaction: message.reaction } };
+  }
+  if (message.type === 'view_once' && message.viewOnce) {
+    const nombres: Record<string, string> = { image: 'Foto', video: 'Video', audio: 'Audio', document: 'Archivo' };
+    const que = nombres[message.viewOnce.kind] ?? 'Foto o video';
+    return {
+      kind: 'unknown',
+      body:
+        `👁 ${que} de "ver una vez": WhatsApp solo deja abrirla en el teléfono, no en el sistema. ` +
+        'Si la necesitas aquí, pídele al cliente que la mande como foto normal.',
+      payload: { viewOnce: message.viewOnce },
+    };
+  }
   const known: MessageKind[] = ['image', 'audio', 'video', 'document', 'sticker'];
   const kind = (known as string[]).includes(message.type) ? (message.type as MessageKind) : 'unknown';
   const etiquetas: Record<string, string> = {
@@ -157,9 +171,12 @@ export function readInbound(message: InboundMessage): { kind: MessageKind; body:
   // Con el fichero ya bajado, el cuerpo es el pie de foto (o el nombre del
   // documento) y la referencia va al payload para que el chat lo pinte.
   if (message.media) {
+    const cuerpo = message.media.caption?.trim() || message.media.filename || etiquetas[kind] || '(adjunto)';
     return {
       kind,
-      body: message.media.caption?.trim() || message.media.filename || etiquetas[kind] || '(adjunto)',
+      // Que se lea tambien en la lista de chats y en los respaldos, donde
+      // no se pinta la foto.
+      body: message.media.verUnaVez ? `${cuerpo} · ver una vez` : cuerpo,
       payload: { media: message.media },
     };
   }
@@ -725,7 +742,19 @@ export async function handleInboundMessage(
   if (!text.trim()) {
     // Un audio o una foto no son texto, pero SI son una respuesta: el cliente
     // esta contestando y callarse le hace creer que nadie le lee.
-    const esAdjunto = ['image', 'audio', 'video', 'document', 'sticker'].includes(message.type);
+    const esAdjunto = ['image', 'audio', 'video', 'document', 'sticker', 'view_once'].includes(message.type);
+    // Con una solicitud de ubicacion abierta, la foto de la fachada o el
+    // audio con la direccion son LA respuesta del cliente: se aparta para
+    // que una persona lo mire. Tratarlo como silencio -que es lo que pasaba-
+    // hacia que el bot le insistiera a alguien que ya habia contestado. Un
+    // sticker no: eso es charla, no una direccion.
+    if (esAdjunto && message.type !== 'sticker') {
+      const enRuta = await atenderRespuestaDeRuta(rutasDeps, contact, { texto: '' });
+      if (enRuta.atendida) {
+        await contestarRuta(enRuta);
+        return;
+      }
+    }
     if (esAdjunto && (await repos.automation.getPrefs()).preventaActiva) {
       await turnoDePreventa(contact, { texto: '', esPrimerMensaje: isFirstMessage, adjunto: true }, deps);
     }

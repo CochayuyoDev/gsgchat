@@ -27,6 +27,53 @@ const CON_FICHERO: Record<string, MediaKind> = {
 
 export type MediaKind = 'image' | 'audio' | 'video' | 'document' | 'sticker';
 
+/**
+ * Los envoltorios con los que WhatsApp manda lo mismo de otra forma: "ver
+ * una vez" (tres versiones segun la app), mensajes temporales, un documento
+ * con pie de foto, un mensaje editado. Dentro va el mensaje de siempre.
+ */
+const ENVOLTORIOS = [
+  'viewOnceMessage',
+  'viewOnceMessageV2',
+  'viewOnceMessageV2Extension',
+  'ephemeralMessage',
+  'documentWithCaptionMessage',
+  'editedMessage',
+] as const;
+
+const VER_UNA_VEZ = new Set<string>(['viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension']);
+
+export interface ContenidoDesenvuelto {
+  contenido: Record<string, unknown>;
+  /**
+   * Llego como "ver una vez". En el telefono desaparece al abrirla; aqui se
+   * baja y se guarda como cualquier otra, que es lo que hace falta para que
+   * el operador la vea cuando le toque y no solo en el instante que llega.
+   */
+  verUnaVez: boolean;
+}
+
+/** Quita los envoltorios hasta llegar al mensaje de verdad. */
+export function desenvolver(contenido: Record<string, unknown> | null | undefined): ContenidoDesenvuelto {
+  let actual: Record<string, unknown> = contenido ?? {};
+  let verUnaVez = false;
+  // Con tope: un mensaje mal formado no puede dejar esto girando.
+  for (let vuelta = 0; vuelta < 5; vuelta++) {
+    const clave = ENVOLTORIOS.find((k) => actual[k]);
+    if (!clave) break;
+    const dentro = (actual[clave] as { message?: Record<string, unknown> } | undefined)?.message;
+    if (!dentro) break;
+    if (VER_UNA_VEZ.has(clave)) verUnaVez = true;
+    actual = dentro;
+  }
+  // La app tambien lo marca en la propia foto o video, aunque venga sin envoltorio.
+  for (const clave of Object.keys(CON_FICHERO)) {
+    const detalle = actual[clave] as { viewOnce?: boolean } | undefined;
+    if (detalle?.viewOnce) verUnaVez = true;
+  }
+  return { contenido: actual, verUnaVez };
+}
+
 export interface MediaInfo {
   /** Nombre del fichero en disco; tambien la ruta publica. */
   id: string;
@@ -40,12 +87,15 @@ export interface MediaInfo {
   voice?: boolean;
   caption?: string;
   bytes: number;
+  /** Llego como "ver una vez": en el telefono ya no se puede abrir; aqui si. */
+  verUnaVez?: boolean;
 }
 
-/** El tipo de adjunto de un mensaje, o null si no lleva ninguno. */
+/** El tipo de adjunto de un mensaje, o null si no lleva ninguno. Mira dentro de los envoltorios. */
 export function tipoDeAdjunto(contenido: Record<string, unknown>): MediaKind | null {
+  const { contenido: real } = desenvolver(contenido);
   for (const [clave, kind] of Object.entries(CON_FICHERO)) {
-    if (contenido[clave]) return kind;
+    if (real[clave]) return kind;
   }
   return null;
 }
@@ -108,7 +158,7 @@ export async function guardarMedia(
   deps: GuardarMediaDeps,
 ): Promise<MediaInfo | null> {
   const m = mensaje as { message?: Record<string, unknown> };
-  const contenido = m.message ?? {};
+  const { contenido, verUnaVez } = desenvolver(m.message);
   const kind = tipoDeAdjunto(contenido);
   if (!kind) return null;
 
@@ -136,6 +186,7 @@ export async function guardarMedia(
     voice: detalle.ptt,
     caption: detalle.caption,
     bytes: datos.length,
+    ...(verUnaVez ? { verUnaVez: true } : {}),
   };
 }
 

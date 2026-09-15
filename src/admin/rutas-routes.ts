@@ -11,7 +11,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { Repos } from '../db/repos.js';
-import { ESTADOS_SOLICITUD, type ConsultaSolicitudes, type EstadoSolicitud, type Solicitud } from '../db/rutas.js';
+import {
+  ESTADOS_SIN_UBICACION,
+  ESTADOS_SOLICITUD,
+  type ConsultaSolicitudes,
+  type EstadoSolicitud,
+  type Solicitud,
+} from '../db/rutas.js';
 import { CODIGOS, INCIDENCIAS, type CodigoIncidencia } from '../rutas/incidencias.js';
 import {
   despacharReportes,
@@ -76,6 +82,9 @@ const nuevoLoteSchema = z.object({
 const VISTAS: Record<string, Partial<ConsultaSolicitudes>> = {
   todos: {},
   resueltos: { estado: 'resuelto' },
+  // La contraria de "con ubicacion": lo que GSG pregunta cada manana. No es
+  // un estado, son todos los que faltan, sea cual sea el motivo.
+  sin_ubicacion: { estados: ESTADOS_SIN_UBICACION },
   esperando: { estado: 'enviado' },
   respondieron: { estado: 'respondio' },
   pendientes: { estado: 'pendiente' },
@@ -89,6 +98,7 @@ const VISTAS: Record<string, Partial<ConsultaSolicitudes>> = {
 export const NOMBRES_VISTA: Record<keyof typeof VISTAS | string, string> = {
   todos: 'Todos',
   resueltos: 'Con ubicación',
+  sin_ubicacion: 'Sin ubicación todavía',
   esperando: 'Escritos, sin respuesta',
   respondieron: 'Contestaron sin ubicación',
   pendientes: 'Sin escribir todavía',
@@ -402,10 +412,17 @@ export async function registerRutasRoutes(
   app.get<{ Params: { id: string } }>('/admin/rutas/lotes/:id', async (request, reply) => {
     const lote = await repos.rutas.lote(request.params.id);
     if (!lote) return reply.code(404).send({ error: 'Ese lote ya no existe.' });
+    const cifras = await repos.rutas.cifrasPorEstado(lote.id);
+    const total = Object.values(cifras).reduce((suma, n) => suma + n, 0);
     return {
       lote,
-      cifras: await repos.rutas.cifrasPorEstado(lote.id),
+      cifras,
       incidencias: await repos.rutas.cifrasPorIncidencia(lote.id),
+      // Las dos cifras que se preguntan de un lote, ya sumadas: quien mira
+      // esto no tiene por que saber que "sin ubicacion" son seis estados.
+      total,
+      conUbicacion: cifras.resuelto ?? 0,
+      sinUbicacion: await repos.rutas.contarSolicitudes({ loteId: lote.id, estados: ESTADOS_SIN_UBICACION }),
     };
   });
 

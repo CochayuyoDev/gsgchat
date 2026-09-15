@@ -11,7 +11,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLocalClient } from '../src/whatsapp/local/client.js';
 import { readInbound } from '../src/handlers/inbound.js';
 import {
+  desenvolver,
   extensionDe,
+  guardarMedia,
   idDeMedia,
   leerMedia,
   tipoDeAdjunto,
@@ -20,11 +22,17 @@ import { WhatsAppApiError } from '../src/whatsapp/client.js';
 import {
   fromJid,
   getLocalState,
+  hayVinculacion,
+  porQueSeDescarta,
   resetLocalForTests,
   startLocal,
   toChangeValue,
   toJid,
+  vinculacionMuerta,
 } from '../src/whatsapp/local/session.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { LocalSocket } from '../src/whatsapp/local/session.js';
 
 beforeEach(() => {
@@ -212,7 +220,64 @@ describe('la sesion local', () => {
     emitir('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
 
     expect(getLocalState().status).toBe('STOPPED');
-    expect(getLocalState().detail).toMatch(/escanear/i);
+    expect(getLocalState().detail).toMatch(/escanea/i);
+  });
+
+  /**
+   * El caso que dejaba la pantalla en "STOPPED" para siempre: el telefono
+   * cierra la sesion, las credenciales viejas se quedan en disco, y cada
+   * "conectar" las reutiliza -> 401 otra vez -> parado, sin QR jamas.
+   */
+  it('con un 401 se borra la vinculacion vieja: el siguiente arranque saca un QR', async () => {
+    const authDir = mkdtempSync(join(tmpdir(), 'wa-auth-401-'));
+    writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51900000000:1@s.whatsapp.net"}}');
+    expect(hayVinculacion(authDir)).toBe(true);
+
+    // Primer arranque: con credenciales guardadas, Baileys intenta entrar y
+    // el telefono lo rechaza.
+    const primero = fakeSocket();
+    let guardados = 0;
+    const promesa = startLocal({
+      authDir,
+      createSocket: async () => ({ sock: primero.sock, saveCreds: async () => { guardados++; } }),
+    });
+    await primero.listo();
+    primero.emitir('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+    const estado = await promesa;
+
+    expect(estado.status).toBe('STOPPED');
+    expect(estado.detail).toMatch(/Conectar/);
+    expect(hayVinculacion(authDir)).toBe(false);
+
+    // Un acuse tardio del socket muerto no vuelve a escribir las credenciales.
+    primero.emitir('creds.update', {});
+    await new Promise((r) => setTimeout(r, 10));
+    expect(guardados).toBe(0);
+
+    // Segundo arranque: sin credenciales, sale el QR.
+    const segundo = fakeSocket();
+    const otra = startLocal({
+      authDir,
+      createSocket: async () => ({ sock: segundo.sock, saveCreds: async () => {} }),
+    });
+    await segundo.listo();
+    segundo.emitir('connection.update', { qr: '2@nuevo' });
+    expect((await otra).status).toBe('SCAN_QR_CODE');
+  });
+
+  it('un baneo (403) para la sesion pero no borra la vinculacion', async () => {
+    const authDir = mkdtempSync(join(tmpdir(), 'wa-auth-403-'));
+    writeFileSync(join(authDir, 'creds.json'), '{}');
+    const { sock, emitir, listo } = fakeSocket();
+    const promesa = startLocal({ authDir, createSocket: async () => ({ sock, saveCreds: async () => {} }) });
+    await listo();
+    emitir('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 403 } } } });
+    await promesa;
+
+    expect(getLocalState().status).toBe('STOPPED');
+    expect(hayVinculacion(authDir)).toBe(true);
+    expect(vinculacionMuerta(403)).toBe(false);
+    expect([401, 411, 500].every(vinculacionMuerta)).toBe(true);
   });
 
   it('los entrantes se entregan ya traducidos', async () => {
@@ -425,6 +490,121 @@ describe('fotos, audios y documentos', () => {
     expect(tipoDeAdjunto({ audioMessage: {} })).toBe('audio');
     expect(tipoDeAdjunto({ documentMessage: {} })).toBe('document');
     expect(tipoDeAdjunto({ conversation: 'hola' })).toBeNull();
+  });
+
+  /**
+   * "Ver una vez": la app envuelve la foto en viewOnceMessageV2 (o V2Extension
+   * para audio, o el viewOnceMessage viejo). Sin mirar dentro, llegaba como
+   * "mensaje de tipo viewoncemessagev2" y no habia foto que ver.
+   */
+  it('mira dentro de los envoltorios de "ver una vez" y de los mensajes temporales', () => {
+    expect(tipoDeAdjunto({ viewOnceMessageV2: { message: { imageMessage: { viewOnce: true } } } })).toBe('image');
+    expect(tipoDeAdjunto({ viewOnceMessageV2Extension: { message: { audioMessage: {} } } })).toBe('audio');
+    expect(tipoDeAdjunto({ viewOnceMessage: { message: { videoMessage: {} } } })).toBe('video');
+    expect(tipoDeAdjunto({ ephemeralMessage: { message: { imageMessage: {} } } })).toBe('image');
+    expect(tipoDeAdjunto({ documentWithCaptionMessage: { message: { documentMessage: {} } } })).toBe('document');
+
+    expect(desenvolver({ viewOnceMessageV2: { message: { imageMessage: {} } } })).toMatchObject({ verUnaVez: true });
+    expect(desenvolver({ ephemeralMessage: { message: { conversation: 'hola' } } })).toMatchObject({
+      verUnaVez: false,
+      contenido: { conversation: 'hola' },
+    });
+    // La marca tambien puede venir en la propia foto, sin envoltorio.
+    expect(desenvolver({ imageMessage: { viewOnce: true } }).verUnaVez).toBe(true);
+    // Un envoltorio vacio no deja esto girando.
+    expect(desenvolver({ viewOnceMessageV2: {} }).contenido).toEqual({ viewOnceMessageV2: {} });
+  });
+
+  it('una foto de "ver una vez" se baja, se guarda y queda marcada', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wa-media-unavez-'));
+    const mensaje = mensajeCon({
+      viewOnceMessageV2: { message: { imageMessage: { mimetype: 'image/jpeg', caption: 'mi casa', viewOnce: true } } },
+    });
+    const media = await guardarMedia(mensaje, 'WAMID-1', { dir, descargar: async () => Buffer.from('jpegjpeg') });
+
+    expect(media).toMatchObject({ kind: 'image', mimeType: 'image/jpeg', caption: 'mi casa', verUnaVez: true, bytes: 8 });
+    expect(await leerMedia(dir, media!.id)).toEqual(Buffer.from('jpegjpeg'));
+
+    // Y el mensaje traducido dice que es una foto, con su fichero.
+    const value = toChangeValue(mensaje, null, media);
+    expect(value?.messages?.[0]).toMatchObject({ type: 'image' });
+    expect(value?.messages?.[0]?.media).toMatchObject({ verUnaVez: true });
+  });
+
+  /**
+   * Lo que de verdad llega a un dispositivo vinculado: el sobre de "ver una
+   * vez" sin la llave del fichero (a veces vacio del todo). WhatsApp Web
+   * tampoco lo abre. Antes se descartaba como si no hubiera llegado nada.
+   */
+  it('un "ver una vez" sin fichero no se pierde: se guarda diciendo que solo se abre en el telefono', () => {
+    const vacio = toChangeValue(mensajeCon({ viewOnceMessageV2: { message: {} } }), null, null);
+    expect(vacio?.messages?.[0]).toMatchObject({ type: 'view_once', viewOnce: { kind: 'unknown' } });
+
+    const sinLlave = toChangeValue(
+      mensajeCon({ viewOnceMessageV2: { message: { imageMessage: { mimetype: 'image/jpeg', viewOnce: true } } } }),
+      null,
+      null, // la descarga fallo: no hay mediaKey
+    );
+    expect(sinLlave?.messages?.[0]).toMatchObject({ type: 'view_once', viewOnce: { kind: 'image' } });
+
+    const leido = readInbound(sinLlave!.messages![0]!);
+    expect(leido.kind).toBe('unknown');
+    expect(leido.body).toMatch(/Foto de "ver una vez"/);
+    expect(leido.body).toMatch(/en el teléfono/);
+    expect(readInbound(vacio!.messages![0]!).body).toMatch(/Foto o video de "ver una vez"/);
+  });
+
+  it('el log dice por que se descarta un entrante', () => {
+    expect(porQueSeDescarta({ key: { id: 'A', remoteJid: '123@g.us' }, message: {} }, null)).toMatch(/grupo/);
+    expect(porQueSeDescarta({ key: { id: 'A', remoteJid: '999@lid' }, message: { conversation: 'x' } }, null)).toMatch(/LID/);
+    expect(porQueSeDescarta({ key: { id: 'A', remoteJid: '51987654321@s.whatsapp.net' }, messageStubType: 2 }, null)).toMatch(/descifrar/);
+    expect(
+      porQueSeDescarta({ key: { id: 'A', remoteJid: '51987654321@s.whatsapp.net' }, message: { viewOnceMessageV2: { message: {} } } }, null),
+    ).toBe('contenido no reconocido: viewOnceMessageV2>{}');
+    expect(
+      porQueSeDescarta({ key: { id: 'A', remoteJid: '51987654321@s.whatsapp.net' }, message: { rarezaMessage: { a: 1 } } }, null),
+    ).toBe('contenido no reconocido: rarezaMessage');
+  });
+
+  it('una foto normal no lleva la marca', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wa-media-normal-'));
+    const media = await guardarMedia(mensajeCon({ imageMessage: { mimetype: 'image/jpeg' } }), 'WAMID-2', {
+      dir,
+      descargar: async () => Buffer.from('x'),
+    });
+    expect(media?.verUnaVez).toBeUndefined();
+  });
+
+  it('el trafico del protocolo no es un mensaje: no se ensena ni se contesta', () => {
+    expect(toChangeValue(mensajeCon({ protocolMessage: { type: 0 } }), null, null)).toBeNull();
+    expect(toChangeValue(mensajeCon({ senderKeyDistributionMessage: {} }), null, null)).toBeNull();
+    expect(toChangeValue(mensajeCon({ placeholderMessage: {} }), null, null)).toBeNull();
+  });
+
+  it('una reaccion se ensena como tal, sin pasar por texto', () => {
+    const value = toChangeValue(mensajeCon({ reactionMessage: { text: '👍', key: { id: 'X' } } }), null, null);
+    expect(value?.messages?.[0]).toMatchObject({ type: 'reaction', reaction: { emoji: '👍' } });
+    expect(value?.messages?.[0]?.text).toBeUndefined();
+    const leido = readInbound(value!.messages![0]!);
+    expect(leido.kind).toBe('unknown');
+    expect(leido.body).toBe('👍 (reacción a un mensaje)');
+    // Quitar la reaccion no deja rastro.
+    expect(toChangeValue(mensajeCon({ reactionMessage: { text: '', key: { id: 'X' } } }), null, null)).toBeNull();
+  });
+
+  it('un texto dentro de un mensaje temporal es un texto', () => {
+    const value = toChangeValue(mensajeCon({ ephemeralMessage: { message: { conversation: 'llego en 5' } } }), null, null);
+    expect(value?.messages?.[0]).toMatchObject({ type: 'text', text: { body: 'llego en 5' } });
+  });
+
+  it('en el chat, la foto de ver una vez se lee como tal', () => {
+    const leido = readInbound({
+      id: 'W', from: '51987654321', timestamp: '1700000000', type: 'image',
+      media: { id: 'abc.jpg', mimeType: 'image/jpeg', caption: 'la reja verde', verUnaVez: true },
+    } as never);
+    expect(leido.kind).toBe('image');
+    expect(leido.body).toBe('la reja verde · ver una vez');
+    expect(leido.payload).toMatchObject({ media: { verUnaVez: true } });
   });
 
   it('el id sale del wamid: bajar dos veces no deja copias sueltas', () => {

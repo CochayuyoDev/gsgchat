@@ -637,7 +637,21 @@ async function estadoQr() {
     }
 
     caja.classList.add('hidden');
-    show('fb-state', 'Estado: ' + (r.status || 'desconocido'), 'warn');
+    // Nada de "STOPPED" a secas: se dice que pasa y que hay que hacer.
+    if (r.status === 'STARTING') {
+      show('fb-state', 'Abriendo la sesion... en unos segundos sale el codigo', 'warn');
+    } else if (r.status === 'STOPPED') {
+      // Parada es parada: no va a cambiar sola. Se deja de preguntar y se
+      // explica que el boton de conectar saca un QR nuevo.
+      pararSondeo();
+      var texto = r.detail || 'Sin conectar.';
+      if (texto.indexOf('Conectar') < 0) texto += ' Pulsa "Conectar y mostrar el QR".';
+      show('fb-state', texto, 'warn');
+    } else if (r.status === 'FAILED') {
+      show('fb-state', (r.detail || 'Se corto la conexion.') + ' Reintentando...', 'bad');
+    } else {
+      show('fb-state', r.detail || 'Esperando a WhatsApp...', 'warn');
+    }
   } catch (error) {
     show('fb-state', error.message, 'bad');
   }
@@ -646,7 +660,7 @@ async function estadoQr() {
 document.getElementById('waha-connect').onclick = async function () {
   var boton = this;
   boton.disabled = true;
-  show('fb-state', 'Creando la sesion en WAHA...', 'warn');
+  show('fb-state', modo === 'local' ? 'Abriendo la sesion... si la anterior ya no vale, se borra y sale un QR nuevo' : 'Creando la sesion en WAHA...', 'warn');
   try {
     await api(prefijo() + '/connect', { method: 'POST', body: modo === 'local' ? {} : {
       wahaUrl: val('f-wahaUrl') || undefined,

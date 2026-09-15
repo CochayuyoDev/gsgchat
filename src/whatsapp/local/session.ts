@@ -17,12 +17,12 @@
  * consultar: lo unico que queda es el opt-in y el cupo diario.
  */
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import QRCode from 'qrcode';
 import type { ChangeValue } from '../types.js';
-import { guardarMedia, mediaDirectory, tipoDeAdjunto, type MediaInfo } from './media.js';
+import { desenvolver, guardarMedia, mediaDirectory, tipoDeAdjunto, type MediaInfo } from './media.js';
 
 export type LocalStatus = 'STOPPED' | 'STARTING' | 'SCAN_QR_CODE' | 'WORKING' | 'FAILED';
 
@@ -99,23 +99,37 @@ export interface StartLocalOptions {
   onDisconnect?: (code: number | undefined, detail: string) => void;
 }
 
+/**
+ * Cierres tras los que la vinculacion guardada ya no sirve: 401 (el telefono
+ * cerro la sesion), 411 (conflicto multidispositivo) y 500 (sesion corrupta).
+ * Reintentar con esas credenciales solo repite el mismo rechazo.
+ */
+export function vinculacionMuerta(code: number | undefined): boolean {
+  return code === 401 || code === 411 || code === 500;
+}
+
+/** Si hay una vinculacion guardada con la que intentar reconectar. */
+export function hayVinculacion(authDir: string): boolean {
+  return existsSync(join(authDir, 'creds.json'));
+}
+
 /** Que significa cada codigo de cierre de Baileys, en cristiano. */
 export function explicarCierre(code: number | undefined): string {
   switch (code) {
     case 401:
-      return 'La sesion se cerro desde el telefono. Vuelve a escanear.';
+      return 'La sesion se cerro desde el telefono. Pulsa "Conectar" y escanea el QR nuevo.';
     case 403:
       return 'WhatsApp rechazo la sesion (403). Suele ser un baneo del numero: no se reintenta solo.';
     case 408:
       return 'Tiempo de espera agotado; se reintenta.';
     case 411:
-      return 'Conflicto multidispositivo; hay que volver a vincular.';
+      return 'Conflicto multidispositivo. Pulsa "Conectar" y escanea el QR nuevo.';
     case 428:
       return 'La conexion se cerro; se reintenta.';
     case 440:
       return 'Otra sesion con las mismas credenciales tomo el sitio.';
     case 500:
-      return 'Sesion corrupta; hay que volver a vincular.';
+      return 'La sesion guardada estaba corrupta. Pulsa "Conectar" y escanea el QR nuevo.';
     case 503:
       return 'Servicio no disponible; se reintenta.';
     case 515:
@@ -218,6 +232,10 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
     };
 
     sock.ev.on('creds.update', ((() => {
+      // Un socket ya cerrado no guarda nada: si se acaba de borrar la
+      // vinculacion por un 401, lo ultimo que hace falta es que un acuse
+      // tardio la vuelva a escribir con las mismas credenciales muertas.
+      if (socket !== sock) return;
       void saveCreds();
     }) as unknown) as (arg: never) => void);
 
@@ -260,11 +278,24 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
           // hay que escanear otra vez. 403 es que WhatsApp no quiere esta
           // sesion -casi siempre un baneo-, y reintentar en bucle es lo peor
           // que se puede hacer. Cualquier otro corte es de red.
-          if (code === 401 || code === 403) {
+          if (code === 401 || code === 403 || code === 411 || code === 500) {
             estado.status = 'STOPPED';
             estado.detail = explicacion;
             socket = null;
             log(`WhatsApp desconectado (${code}): ${explicacion}`);
+            // Con la vinculacion muerta (el telefono la cerro, o esta
+            // corrupta) las credenciales guardadas ya no valen para nada y,
+            // peor, mientras existan cada "conectar" las reutiliza: WhatsApp
+            // las rechaza otra vez, la sesion vuelve a "parada" y el QR no
+            // sale nunca. Se borran para que el siguiente arranque empiece
+            // de cero, con su codigo. Un 403 no las toca: ahi el problema no
+            // es la vinculacion, es el numero.
+            if (vinculacionMuerta(code)) {
+              await rm(opts.authDir, { recursive: true, force: true }).catch((error: unknown) =>
+                log(`no se pudo borrar la vinculacion vieja: ${String(error)}`),
+              );
+              log('vinculacion borrada: al conectar saldra un QR nuevo');
+            }
           } else {
             estado.status = 'FAILED';
             estado.detail = update.lastDisconnect?.error?.message ?? 'Se corto la conexion.';
@@ -307,10 +338,11 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
           if (key?.fromMe) continue;
 
           const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock);
-          const value = toChangeValue(mensaje, await resolverTelefono(sock, key), media);
+          const telefono = await resolverTelefono(sock, key);
+          const value = toChangeValue(mensaje, telefono, media);
           if (!value) {
             log(
-              `entrante descartado (${evento.type ?? 'sin tipo'}): ${key?.remoteJid ?? 'sin jid'}`,
+              `entrante descartado (${evento.type ?? 'sin tipo'}): ${key?.remoteJid ?? 'sin jid'} — ${porQueSeDescarta(mensaje, telefono)}`,
             );
             continue;
           }
@@ -333,6 +365,36 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
     // corto para que diga "open" y, si no, se contesta con lo que haya.
     setTimeout(listo, 8000);
   });
+}
+
+/**
+ * Por que un entrante no se pudo convertir en mensaje, para el log.
+ *
+ * Un "descartado" a secas no dice si fue un grupo (normal), un remitente sin
+ * telefono (un LID que no se pudo resolver) o un mensaje que no se pudo
+ * descifrar (WhatsApp lo reenvia), y sin eso no hay forma de saber que hacer.
+ */
+export function porQueSeDescarta(mensaje: unknown, telefonoResuelto: string | null): string {
+  const m = mensaje as {
+    key?: { id?: string; remoteJid?: string; remoteJidAlt?: string; fromMe?: boolean };
+    message?: Record<string, unknown>;
+    messageStubType?: number;
+  };
+  const jid = m.key?.remoteJid ?? '';
+  if (/@(g\.us|broadcast|newsletter)$/.test(jid)) return 'grupo, estado o canal: no es uno a uno';
+  if (!telefonoDe(m.key) && !telefonoResuelto) return 'remitente sin telefono: LID sin equivalencia todavia';
+  if (!m.message) {
+    return `sin contenido: no se pudo descifrar (stub ${m.messageStubType ?? '?'}); WhatsApp pedira el reenvio`;
+  }
+  const claves = (obj: Record<string, unknown>, nivel = 0): string =>
+    Object.keys(obj)
+      .map((k) => {
+        const v = obj[k];
+        const dentro = v && typeof v === 'object' && nivel < 2 ? (v as { message?: Record<string, unknown> }).message : undefined;
+        return dentro ? `${k}>${claves(dentro, nivel + 1) || '{}'}` : k;
+      })
+      .join(',');
+  return `contenido no reconocido: ${claves(m.message) || '{}'}`;
 }
 
 /**
@@ -617,13 +679,31 @@ export function toChangeValue(
   const from = telefonoDe(m.key) ?? (telefonoResuelto || null);
   if (!from) return null;
 
-  const contenido = m.message ?? {};
+  // "Ver una vez", temporales, documento con pie: el mensaje de verdad va
+  // dentro de un envoltorio. Se mira dentro; si no, un texto temporal o una
+  // foto de ver una vez llegaban como "mensaje de tipo viewoncemessagev2".
+  const { contenido, verUnaVez } = desenvolver(m.message);
   const timestamp = String(m.messageTimestamp ?? Math.floor(Date.now() / 1000));
 
   const base = {
     messaging_product: 'whatsapp',
     contacts: [{ wa_id: from, profile: { name: m.pushName ?? '' } }],
   };
+
+  // Trafico del protocolo (llaves, acuses, el "placeholder" de un mensaje
+  // que no se pudo descifrar todavia): no hay nada que leer, y en el chat
+  // salia como "(mensaje de tipo placeholder)" con su globo de no leido.
+  if (contenido.protocolMessage || contenido.senderKeyDistributionMessage || contenido.placeholderMessage) {
+    return null;
+  }
+
+  // Una reaccion (el pulgar, el corazon) se ensena, pero no es texto: el bot
+  // no tiene que contestar a un emoji sobre un mensaje suyo.
+  const reaccion = contenido.reactionMessage as { text?: string } | undefined;
+  if (reaccion) {
+    if (!reaccion.text) return null; // quitar la reaccion: nada que ensenar
+    return { ...base, messages: [{ id, from, timestamp, type: 'reaction', reaction: { emoji: reaccion.text } }] };
+  }
 
   const conversation = contenido.conversation as string | undefined;
   const extended = (contenido.extendedTextMessage as { text?: string } | undefined)?.text;
@@ -680,6 +760,16 @@ export function toChangeValue(
   // sin el, al menos se ve que llego algo.
   if (media) {
     return { ...base, messages: [{ id, from, timestamp, type: media.kind, media }] };
+  }
+
+  // Un "ver una vez" sin fichero. WhatsApp no le da la llave del adjunto a
+  // los dispositivos vinculados (WhatsApp Web tampoco lo puede abrir): llega
+  // el sobre, a veces vacio del todo. Se guarda diciendo lo que es y donde
+  // se puede ver, en vez de descartarlo como si no hubiera llegado nada.
+  if (verUnaVez) {
+    const adjunto = tipoDeAdjunto(contenido);
+    const kind = adjunto && adjunto !== 'sticker' ? adjunto : 'unknown';
+    return { ...base, messages: [{ id, from, timestamp, type: 'view_once', viewOnce: { kind } }] };
   }
 
   const tipo = Object.keys(contenido).find((k) => k.endsWith('Message'));

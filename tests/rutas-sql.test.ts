@@ -14,6 +14,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
+import { ESTADOS_SIN_UBICACION } from '../src/db/rutas.js';
 
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
 
@@ -142,6 +143,54 @@ describe('lotes y solicitudes', () => {
     });
     expect(soloHumano).toHaveLength(1);
     expect(await repos.rutas.contarSolicitudes({ incidencia: 'numero_equivocado' })).toBe(1);
+  });
+
+  it('cuenta a los que faltan por dar la ubicacion, sea cual sea el motivo', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Reparto' });
+    const [conPin, esperando, derivado, cancelado, roto] = await repos.rutas.agregarSolicitudes(lote.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111', referencia: 'P-1' },
+      { telefonoCrudo: '922222222', phone: '51922222222', referencia: 'P-2' },
+      { telefonoCrudo: '933333333', phone: '51933333333', referencia: 'P-3' },
+      { telefonoCrudo: '944444444', phone: '51944444444', referencia: 'P-4' },
+      { telefonoCrudo: '9555', phone: null, referencia: 'P-5', estado: 'incidencia', incidencia: 'numero_corto' },
+    ]);
+    await repos.rutas.actualizarSolicitud(conPin!.id, { estado: 'resuelto', lat: -12.1, lng: -77.0 });
+    await repos.rutas.actualizarSolicitud(esperando!.id, { estado: 'enviado', intentos: 1 });
+    await repos.rutas.actualizarSolicitud(derivado!.id, { estado: 'derivado', requiereHumano: true });
+    await repos.rutas.actualizarSolicitud(cancelado!.id, { estado: 'cancelado' });
+
+    const faltan = await repos.rutas.listarSolicitudes({
+      loteId: lote.id,
+      estados: ESTADOS_SIN_UBICACION,
+      limit: 10,
+      offset: 0,
+    });
+    expect(faltan.map((s) => s.referencia).sort()).toEqual(['P-2', 'P-3', 'P-5']);
+    expect(await repos.rutas.contarSolicitudes({ loteId: lote.id, estados: ESTADOS_SIN_UBICACION })).toBe(3);
+    // El roto sigue ahi aunque no tenga telefono: tambien falta.
+    expect(faltan.some((s) => s.id === roto!.id)).toBe(true);
+    // Y la lista vacia no filtra nada.
+    expect(await repos.rutas.contarSolicitudes({ loteId: lote.id, estados: [] })).toBe(5);
+  });
+
+  it('la resuelta reciente de un telefono solo cuenta si su lote sigue en marcha', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Hoy' });
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    const [ana, luis] = await repos.rutas.agregarSolicitudes(lote.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111', referencia: 'P-1' },
+      { telefonoCrudo: '922222222', phone: '51922222222', referencia: 'P-2' },
+    ]);
+    await repos.rutas.actualizarSolicitud(ana!.id, { estado: 'resuelto', lat: -12.1, lng: -77.0 });
+    await repos.rutas.actualizarSolicitud(luis!.id, { estado: 'enviado', intentos: 1 });
+
+    expect((await repos.rutas.resueltaRecientePorTelefono('51911111111'))?.id).toBe(ana!.id);
+    // El que no ha resuelto no sale; el que no existe tampoco.
+    expect(await repos.rutas.resueltaRecientePorTelefono('51922222222')).toBeNull();
+    expect(await repos.rutas.resueltaRecientePorTelefono('51933333333')).toBeNull();
+
+    // Terminado el lote, ya no hay nada que corregir.
+    await repos.rutas.cambiarEstadoLote(lote.id, 'terminado');
+    expect(await repos.rutas.resueltaRecientePorTelefono('51911111111')).toBeNull();
   });
 
   it('busca por telefono, nombre o referencia', async () => {

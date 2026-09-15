@@ -106,11 +106,36 @@ describe('leer el lote', () => {
     expect(lectura.descartadas[0]?.motivo).toMatch(/ninguna columna con teléfonos/);
   });
 
-  it('apunta las filas que no traen telefono en vez de tragarselas', () => {
-    const lectura = leerLote('telefono;nombre\n;Sin numero\n987654321;Ana');
+  it('una fila con nombre o pedido pero sin telefono entra como incidencia, no se traga', () => {
+    const lectura = leerLote('telefono;nombre;pedido\n;Sin numero;P-9\n987654321;Ana;P-1');
+    expect(lectura.filas).toHaveLength(2);
+    expect(lectura.descartadas).toHaveLength(0);
+    const preparacion = prepararFilas(lectura.filas);
+    const sinNumero = preparacion.solicitudes.find((s) => s.referencia === 'P-9');
+    expect(sinNumero).toMatchObject({ phone: null, estado: 'incidencia', incidencia: 'numero_invalido', nombre: 'Sin numero' });
+    expect(sinNumero?.incidenciaDetalle).toMatch(/vac[ií]o/);
+  });
+
+  it('una linea sin nada de nada si se descarta, con su motivo', () => {
+    const lectura = leerLote('telefono;nombre\n;\n987654321;Ana');
     expect(lectura.filas).toHaveLength(1);
     expect(lectura.descartadas).toHaveLength(1);
     expect(lectura.descartadas[0]?.motivo).toMatch(/teléfono/);
+  });
+
+  it('entiende las cabeceras como vienen de verdad: "N° Pedido", "Teléfono 1", "Dirección de entrega"', () => {
+    const lectura = leerLote(
+      ['N° Pedido\tCliente\tTeléfono 1\tDirección de entrega (completa)\tObservaciones', 'GSG-1\tAna Ruiz\t987654321\tAv. Larco 123\ttocar timbre'].join('\n'),
+    );
+    expect(lectura.conCabecera).toBe(true);
+    expect(lectura.columnas).toMatchObject({ referencia: 'N° Pedido', telefono: 'Teléfono 1', direccion: 'Dirección de entrega (completa)', notas: 'Observaciones' });
+    expect(lectura.filas[0]).toMatchObject({ telefono: '987654321', referencia: 'GSG-1', nombre: 'Ana Ruiz', direccion: 'Av. Larco 123', notas: 'tocar timbre' });
+  });
+
+  it('"numero de pedido" es el pedido, no el telefono', () => {
+    const lectura = leerLote('Numero de pedido;Celular;Nombres\nP-1;987654321;Ana');
+    expect(lectura.columnas).toMatchObject({ referencia: 'Numero de pedido', telefono: 'Celular', nombre: 'Nombres' });
+    expect(lectura.filas[0]).toMatchObject({ telefono: '987654321', referencia: 'P-1' });
   });
 });
 
