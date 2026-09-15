@@ -66,6 +66,9 @@ const config = loadConfig({
   TIMEZONE: process.env.TIMEZONE?.trim() || 'America/Lima',
   // El arranque corto es para probar: se permite simular entrantes.
   DEV_SIMULATE_INBOUND: 'true',
+  // Se espera 4 s a que el cliente termine de escribir: quien manda tres
+  // trozos seguidos recibe UNA respuesta, no tres.
+  RAFAGA_MS: process.env.RAFAGA_MS ?? '4000',
   // El catalogo de Stoky: precios y stock salen de ahi, no de una copia.
   STOKY_URL: process.env.STOKY_URL?.trim() || '',
   STOKY_TOKEN: process.env.STOKY_TOKEN?.trim() || '',

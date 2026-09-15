@@ -98,7 +98,14 @@ export function palabraPlausible(palabra: string): boolean {
 
   // Un tramo de teclado con poca vocal: "asdasd" tiene "asd" dentro y dos
   // vocales de seis. "casa" no tiene tramo, y "aeiou" no tiene poca vocal.
-  if (proporcion < 0.45 && TRAMOS.some((t) => palabra.includes(t))) return false;
+  //
+  // Y el tramo tiene que ser BUENA PARTE de la palabra. Sin esa condicion,
+  // "roberto" se rechazaba -lleva "ert" dentro y tres vocales de siete- y el
+  // cliente que daba su nombre se llevaba un "no reconocí ese mensaje"; a
+  // partir de ahi la conversacion entera se corria un paso y el DNI acababa
+  // guardado como nombre.
+  const tramo = TRAMOS.find((t) => palabra.includes(t));
+  if (tramo && proporcion < 0.45 && tramo.length / palabra.length >= 0.5) return false;
 
   if (esTrozoRepetido(palabra, proporcion)) return false;
 
@@ -162,4 +169,32 @@ export function esSaludo(texto: string): boolean {
   if (!palabras.some((p) => NUCLEO_SALUDO.has(p))) return false;
 
   return palabras.every((p) => NUCLEO_SALUDO.has(p) || ACOMPANA_SALUDO.has(p));
+}
+
+/**
+ * "Gracias", "ok", "listo", "hasta luego".
+ *
+ * No es una respuesta ni un mensaje incomprensible: es el cliente cerrando
+ * el turno. Contestarle "no reconocí ese mensaje" -y encima repetirle la
+ * pregunta- es la forma mas rapida de que se arrepienta de haber escrito.
+ */
+const NUCLEO_CIERRE = new Set([
+  'gracias', 'grax', 'graciass', 'ok', 'oka', 'okey', 'okay', 'listo', 'vale',
+  'chevere', 'bacan', 'perfecto', 'genial', 'excelente', 'chau', 'adios',
+  'bye', 'nos vemos', 'saludos', 'amable',
+]);
+
+const ACOMPANA_CIERRE = new Set([
+  'muchas', 'mucho', 'muy', 'de', 'nada', 'ya', 'bueno', 'igual',
+  'igualmente', 'entonces', 'pues', 'hasta', 'luego', 'manana', 'mil',
+  'por', 'todo', 'la', 'el', 'info', 'informacion', 'dato', 'datos', 'si',
+]);
+
+export function esAgradecimiento(texto: string): boolean {
+  const palabras = normaliza(texto).split(' ').filter(Boolean).map(sinAlargar);
+
+  if (!palabras.length || palabras.length > 5) return false;
+  if (!palabras.some((p) => NUCLEO_CIERRE.has(p))) return false;
+
+  return palabras.every((p) => NUCLEO_CIERRE.has(p) || ACOMPANA_CIERRE.has(p));
 }

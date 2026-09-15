@@ -1,9 +1,16 @@
 /**
- * /login: usuario y contrasena. Y, la primera vez, crear la primera cuenta.
+ * /login: iniciar sesion o registrarse, con las dos a la vista.
  *
- * Una sola pagina con dos caras: si todavia no hay usuarios ensena el
- * formulario de "primera cuenta" (el servidor solo lo acepta mientras la
- * tabla este vacia); si ya los hay, el de entrar. Sin token que pegar.
+ * Antes la pagina ensenaba UNA sola cara segun el estado de la base: sin
+ * usuarios, el formulario de registro; con usuarios, el de entrar. Quien
+ * pulsaba "Entrar" en la portada aterrizaba de golpe en un registro que no
+ * habia pedido, sin nada en pantalla que dijera que ahi tambien se entra.
+ *
+ * Ahora se ofrecen las dos y el estado de la base decide cual viene marcada:
+ * con la tabla vacia, Registro; con usuarios, Inicio de sesion. El registro
+ * sigue siendo solo para la primera cuenta —el servidor lo rechaza en cuanto
+ * hay una—, asi que en ese caso la pestana lo dice en vez de ensenar un
+ * formulario que no va a funcionar.
  */
 
 const CSS = `
@@ -34,41 +41,51 @@ const CSS = `
   .error { color: var(--bad); font-size: 13px; margin-top: 10px; min-height: 18px; }
   a { color: var(--accent); }
   .pie { margin-top: 16px; font-size: 12.5px; color: var(--muted); text-align: center; }
+  .pestanas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 4px; margin-bottom: 18px; }
+  .pestanas button { width: auto; margin: 0; padding: 9px 8px; font-size: 14px; border-radius: 8px; background: transparent; color: var(--muted); }
+  .pestanas button[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 `;
 
 export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNegocio: string }): string {
   const next = JSON.stringify(opts.next || '/panel');
-  const formulario = opts.primeraCuenta
+
+  const entrar = `
+      <h1>Inicio de sesión</h1>
+      <p class="muted">Con tu usuario y contraseña.</p>
+      <form id="f-entrar">
+        <label for="e-usuario">Usuario</label>
+        <input id="e-usuario" name="usuario" required autocomplete="username">
+        <label for="e-clave">Contraseña</label>
+        <input id="e-clave" name="clave" type="password" required autocomplete="current-password">
+        <button>Iniciar sesión</button>
+        <div class="error" id="e-error"></div>
+      </form>`;
+
+  // Con usuarios en la tabla el registro esta cerrado: el servidor devuelve un
+  // 409. Se dice en la pestana en vez de ensenar un formulario que va a fallar.
+  const registro = opts.primeraCuenta
     ? `
-      <h1>Crea la primera cuenta</h1>
-      <p class="muted">Todavía no hay usuarios. Esta cuenta será la administradora: podrá crear las demás desde el panel.</p>
-      <form id="f" autocomplete="off">
-        <label for="nombre">Tu nombre</label>
-        <input id="nombre" name="nombre" placeholder="Ali" required autofocus>
-        <label for="usuario">Usuario</label>
-        <input id="usuario" name="usuario" placeholder="ali" required autocomplete="username">
-        <label for="clave">Contraseña (8 caracteres o más)</label>
-        <input id="clave" name="clave" type="password" required autocomplete="new-password">
-        <label for="clave2">Repite la contraseña</label>
-        <input id="clave2" name="clave2" type="password" required autocomplete="new-password">
-        <button id="entrar">Crear cuenta y entrar</button>
-        <div class="error" id="error"></div>
+      <h1>Registro</h1>
+      <p class="muted">Todavía no hay usuarios: esta primera cuenta es la administradora, y desde el panel crea las demás.</p>
+      <form id="f-registro" autocomplete="off">
+        <label for="r-nombre">Tu nombre</label>
+        <input id="r-nombre" name="nombre" placeholder="Ali" required>
+        <label for="r-usuario">Usuario</label>
+        <input id="r-usuario" name="usuario" placeholder="ali" required autocomplete="username">
+        <label for="r-clave">Contraseña (8 caracteres o más)</label>
+        <input id="r-clave" name="clave" type="password" required autocomplete="new-password">
+        <label for="r-clave2">Repite la contraseña</label>
+        <input id="r-clave2" name="clave2" type="password" required autocomplete="new-password">
+        <button>Registrarme</button>
+        <div class="error" id="r-error"></div>
       </form>`
     : `
-      <h1>Entrar</h1>
-      <p class="muted">Con tu usuario y contraseña. Si no tienes cuenta, pídesela a quien administra el sistema.</p>
-      <form id="f">
-        <label for="usuario">Usuario</label>
-        <input id="usuario" name="usuario" required autofocus autocomplete="username">
-        <label for="clave">Contraseña</label>
-        <input id="clave" name="clave" type="password" required autocomplete="current-password">
-        <button id="entrar">Entrar</button>
-        <div class="error" id="error"></div>
-      </form>`;
+      <h1>Registro</h1>
+      <p class="muted">El registro abierto es solo para la primera cuenta, y ya existe. Pídele la tuya a quien administra el sistema: la crea en el panel, en Usuarios.</p>`;
 
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Entrar - ${escapeHtml(opts.nombreNegocio)}</title><style>${CSS}</style></head>
+<title>Inicio de sesión - ${escapeHtml(opts.nombreNegocio)}</title><style>${CSS}</style></head>
 <body>
 <aside class="lado">
   <a class="marca" href="/"><div class="logo">W</div>${escapeHtml(opts.nombreNegocio)}</a>
@@ -86,7 +103,12 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
 <div class="centro">
 <div class="caja">
   <div class="marca"><div class="logo">W</div><div><b>${escapeHtml(opts.nombreNegocio)}</b><div class="pie" style="margin:0;text-align:left;font-weight:400">WhatsApp para reparto y ventas</div></div></div>
-  ${formulario}
+  <div class="pestanas" role="tablist">
+    <button type="button" id="tab-entrar" role="tab">Inicio de sesión</button>
+    <button type="button" id="tab-registro" role="tab">Registro</button>
+  </div>
+  <div id="panel-entrar">${entrar}</div>
+  <div id="panel-registro">${registro}</div>
   <div class="pie"><a href="/">Volver al inicio</a></div>
 </div>
 </div>
@@ -94,31 +116,65 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
 (function () {
   var primera = ${opts.primeraCuenta ? 'true' : 'false'};
   var next = ${next};
-  var f = document.getElementById('f');
-  var boton = document.getElementById('entrar');
-  var error = document.getElementById('error');
-  f.onsubmit = async function (ev) {
-    ev.preventDefault();
-    error.textContent = '';
-    var cuerpo = { usuario: f.usuario.value.trim(), clave: f.clave.value };
-    if (primera) {
-      cuerpo.nombre = f.nombre.value.trim();
-      if (f.clave.value !== f.clave2.value) { error.textContent = 'Las contraseñas no coinciden.'; return; }
-    }
-    boton.disabled = true;
-    try {
-      var res = await fetch(primera ? '/login/primera-cuenta' : '/login', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin',
-        body: JSON.stringify(cuerpo)
-      });
-      var data = await res.json().catch(function () { return {}; });
-      if (!res.ok) { error.textContent = data.error || 'No se pudo entrar.'; boton.disabled = false; return; }
-      location.href = data.next || next;
-    } catch (e) {
-      error.textContent = 'No se pudo conectar con el servidor.';
-      boton.disabled = false;
-    }
+
+  // Sin usuarios no se puede entrar, asi que la pestana marcada es Registro;
+  // en cuanto hay uno, la de siempre.
+  var vistas = {
+    entrar: { tab: document.getElementById('tab-entrar'), panel: document.getElementById('panel-entrar') },
+    registro: { tab: document.getElementById('tab-registro'), panel: document.getElementById('panel-registro') }
   };
+
+  function mostrar(cual) {
+    for (var clave in vistas) {
+      var v = vistas[clave];
+      var activa = clave === cual;
+      v.panel.hidden = !activa;
+      v.tab.setAttribute('aria-selected', activa ? 'true' : 'false');
+    }
+    var foco = vistas[cual].panel.querySelector('input');
+    if (foco) foco.focus();
+  }
+
+  vistas.entrar.tab.onclick = function () { mostrar('entrar'); };
+  vistas.registro.tab.onclick = function () { mostrar('registro'); };
+  mostrar(primera ? 'registro' : 'entrar');
+
+  function enviar(form, url, error, arma) {
+    if (!form) return;
+    var boton = form.querySelector('button');
+    form.onsubmit = async function (ev) {
+      ev.preventDefault();
+      error.textContent = '';
+      var cuerpo = arma(error);
+      if (!cuerpo) return;
+      boton.disabled = true;
+      try {
+        var res = await fetch(url, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify(cuerpo)
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { error.textContent = data.error || 'No se pudo entrar.'; boton.disabled = false; return; }
+        location.href = data.next || next;
+      } catch (e) {
+        error.textContent = 'No se pudo conectar con el servidor.';
+        boton.disabled = false;
+      }
+    };
+  }
+
+  var fe = document.getElementById('f-entrar');
+  enviar(fe, '/login', document.getElementById('e-error'), function () {
+    return { usuario: fe.usuario.value.trim(), clave: fe.clave.value };
+  });
+
+  var fr = document.getElementById('f-registro');
+  if (fr) {
+    enviar(fr, '/login/primera-cuenta', document.getElementById('r-error'), function (error) {
+      if (fr.clave.value !== fr.clave2.value) { error.textContent = 'Las contraseñas no coinciden.'; return null; }
+      return { nombre: fr.nombre.value.trim(), usuario: fr.usuario.value.trim(), clave: fr.clave.value };
+    });
+  }
 })();
 </script>
 </body></html>`;

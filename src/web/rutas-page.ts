@@ -62,6 +62,14 @@ const CSS = `
     font: inherit; color: var(--text); background: var(--panel);
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px;
   }
+  .sin-ubicacion { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; max-height: 260px; overflow: auto; }
+  .sin-ubicacion .cab { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--card); }
+  .sin-ubicacion label.uno { display: flex; gap: 10px; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .sin-ubicacion label.uno:last-child { border-bottom: 0; }
+  .sin-ubicacion input[type=checkbox] { width: auto; flex: none; }
+  .sin-ubicacion .quien { flex: 1; min-width: 0; }
+  .sin-ubicacion .quien b { display: block; font-size: 13.5px; }
+  .sin-ubicacion .quien span { color: var(--muted); font-size: 12px; }
   textarea { width: 100%; min-height: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
   button { cursor: pointer; }
   button:hover { border-color: var(--accent); }
@@ -264,6 +272,16 @@ export function rutasPage(opts: RutasOpts): string {
       <div class="campo">
         <label for="nombre-lote">Nombre del lote</label>
         <input id="nombre-lote" placeholder="Reparto del martes">
+      </div>
+
+      <!-- Los que ya te escribieron y nunca mandaron el pin: no hay que
+           pegarlos de ninguna parte, ya estan en el sistema. -->
+      <div class="campo">
+        <div class="fila" style="align-items:center">
+          <button class="sm" id="traer-sin-ubicacion">Traer a los que no mandaron su ubicación</button>
+          <span class="dato" id="sin-ubicacion-cuenta"></span>
+        </div>
+        <div id="sin-ubicacion" class="sin-ubicacion hidden"></div>
       </div>
       <textarea id="pegado" placeholder="teléfono;nombre;pedido&#10;987654321;Ana Ruiz;P-1024&#10;912345678;Luis Paz;P-1025"></textarea>
       <div class="fila" style="margin-top:10px">
@@ -909,11 +927,16 @@ document.getElementById('crear').onclick = async function () {
   var boton = this;
   boton.disabled = true;
   try {
+    // Lo elegido de la lista manda sobre lo pegado: si alguien marco
+    // contactos, es lo que quiere mandar.
+    var elegidos = elegidosSinUbicacion();
+
     var r = await api('/admin/rutas/lotes', {
       method: 'POST',
       body: {
         nombre: document.getElementById('nombre-lote').value.trim() || undefined,
-        texto: document.getElementById('pegado').value,
+        filas: elegidos.length ? elegidos : undefined,
+        texto: elegidos.length ? undefined : document.getElementById('pegado').value,
         arrancar: document.getElementById('arrancar-ya').checked
       }
     });
@@ -921,6 +944,9 @@ document.getElementById('crear').onclick = async function () {
     document.getElementById('pegado').value = '';
     document.getElementById('nombre-lote').value = '';
     document.getElementById('resumen-carga').innerHTML = '';
+    sinUbicacion = [];
+    ver('sin-ubicacion', false);
+    document.getElementById('sin-ubicacion-cuenta').textContent = '';
     ver('carga', false);
     loteActual = r.lote.id;
     await refrescar();
@@ -932,6 +958,79 @@ document.getElementById('crear').onclick = async function () {
   }
 };
 
+/* --- los que nunca mandaron su ubicacion ------------------------------- */
+
+/**
+ * La lista de a quien hay que insistirle.
+ *
+ * No se pega de ninguna parte: son los contactos que ya escribieron alguna
+ * vez y de los que nunca llego un pin. En cuanto uno manda su ubicacion deja
+ * de salir aqui solo —la consulta mira si tiene ubicacion guardada—, asi que
+ * no hay nada que marcar ni que sacar a mano.
+ */
+var sinUbicacion = [];
+
+function pintarSinUbicacion() {
+  var caja = document.getElementById('sin-ubicacion');
+  var cuenta = document.getElementById('sin-ubicacion-cuenta');
+
+  if (!sinUbicacion.length) {
+    caja.innerHTML = '<div class="cab">Ninguno: a todos les llego la ubicacion.</div>';
+    cuenta.textContent = '';
+    return;
+  }
+
+  caja.innerHTML = '<div class="cab">' +
+    '<label style="display:flex;gap:8px;align-items:center;flex:1"><input type="checkbox" id="sin-todos"> <b>Todos (' + sinUbicacion.length + ')</b></label>' +
+    '<span class="dato" id="sin-elegidos"></span>' +
+    '</div>' +
+    sinUbicacion.map(function (c) {
+      return '<label class="uno"><input type="checkbox" class="sin-uno" value="' + esc(c.phone) + '" data-nombre="' + esc(c.name || '') + '">' +
+        '<span class="quien"><b>' + esc(c.name || c.phone) + '</b><span>' + esc(c.phone) +
+        (c.ultimo ? ' · escribió ' + esc(c.ultimo) : '') + '</span></span></label>';
+    }).join('');
+
+  caja.querySelector('#sin-todos').onchange = function () {
+    var marcar = this.checked;
+    caja.querySelectorAll('.sin-uno').forEach(function (x) { x.checked = marcar; });
+    contarElegidos();
+  };
+  caja.querySelectorAll('.sin-uno').forEach(function (x) { x.onchange = contarElegidos; });
+  contarElegidos();
+}
+
+function elegidosSinUbicacion() {
+  return [].slice.call(document.querySelectorAll('.sin-uno:checked')).map(function (x) {
+    return { telefono: x.value, nombre: x.dataset.nombre || undefined };
+  });
+}
+
+function contarElegidos() {
+  var n = elegidosSinUbicacion().length;
+  var etiqueta = document.getElementById('sin-elegidos');
+  if (etiqueta) etiqueta.textContent = n ? n + ' elegidos' : '';
+  // Con alguien elegido se puede crear el lote aunque no se haya pegado nada.
+  if (n) document.getElementById('crear').disabled = false;
+}
+
+document.getElementById('traer-sin-ubicacion').onclick = async function () {
+  var boton = this;
+  boton.disabled = true;
+  try {
+    var r = await api('/admin/contacts?sinUbicacion=1&limit=500');
+    sinUbicacion = (r.items || []).map(function (c) {
+      return {
+        phone: c.phone,
+        name: c.name,
+        ultimo: c.lastInboundAt ? new Date(c.lastInboundAt).toLocaleDateString('es-PE') : ''
+      };
+    });
+    document.getElementById('sin-ubicacion-cuenta').textContent = r.total + ' en total';
+    ver('sin-ubicacion', true);
+    pintarSinUbicacion();
+  } catch (error) { toast(error.message); }
+  finally { boton.disabled = false; }
+};
 /* --- controles -------------------------------------------------------- */
 
 document.getElementById('lote').onchange = function () {

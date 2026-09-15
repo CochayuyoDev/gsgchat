@@ -810,6 +810,13 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       .extend({
         q: z.string().max(120).optional(),
         state: z.enum(['all', 'opted_in', 'opted_out', 'pending']).default('all'),
+        /**
+         * ?sinUbicacion=1 : solo los que nunca mandaron el pin.
+         *
+         * Es la lista a la que hay que insistirle. En cuanto uno manda su
+         * ubicacion desaparece de aqui solo.
+         */
+        sinUbicacion: z.coerce.boolean().optional(),
       })
       .parse(request.query ?? {});
     return repos.contacts.list(query);

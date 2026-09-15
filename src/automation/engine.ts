@@ -58,7 +58,7 @@ export function saludoPorHora(now: Date = new Date(), timezone = 'America/Lima')
   // Intl devuelve 24 para la medianoche en algunas versiones de Node.
   if (hora === 24) hora = 0;
 
-  if (hora < 12) return 'Buenos dias';
+  if (hora < 12) return 'Buenos días';
   if (hora < 19) return 'Buenas tardes';
   return 'Buenas noches';
 }

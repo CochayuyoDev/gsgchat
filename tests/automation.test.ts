@@ -375,8 +375,8 @@ describe('saludo segun la hora', () => {
 
   it('de madrugada y por la mañana, buenos dias', () => {
     // 14:00 UTC son las 09:00 en Lima (UTC-5).
-    expect(saludoPorHora(enLima('2026-03-10T14:00:00Z'), 'America/Lima')).toBe('Buenos dias');
-    expect(saludoPorHora(enLima('2026-03-10T06:00:00Z'), 'America/Lima')).toBe('Buenos dias');
+    expect(saludoPorHora(enLima('2026-03-10T14:00:00Z'), 'America/Lima')).toBe('Buenos días');
+    expect(saludoPorHora(enLima('2026-03-10T06:00:00Z'), 'America/Lima')).toBe('Buenos días');
   });
 
   it('a partir del mediodia, buenas tardes', () => {
@@ -399,7 +399,7 @@ describe('saludo segun la hora', () => {
   });
 
   it('una zona horaria invalida no tumba el saludo', () => {
-    expect(['Buenos dias', 'Buenas tardes', 'Buenas noches']).toContain(
+    expect(['Buenos días', 'Buenas tardes', 'Buenas noches']).toContain(
       saludoPorHora(new Date(), 'Zona/Inventada'),
     );
   });
@@ -422,6 +422,6 @@ describe('saludo segun la hora', () => {
       'America/Lima',
     );
 
-    expect(texto).toBe('Hola Roberto, Buenos dias. Gracias por escribir.');
+    expect(texto).toBe('Hola Roberto, Buenos días. Gracias por escribir.');
   });
 });

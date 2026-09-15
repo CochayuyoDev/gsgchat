@@ -29,7 +29,7 @@ import { nuevaFicha } from './fakes-leads.js';
 const CTX: Contexto = {
   negocio: 'GSG Courier',
   cobertura: 'todo Lima y Callao',
-  saludo: 'Buenos dias',
+  saludo: 'Buenos días',
   horario: 'lunes a sabado de 9:00 a 19:00',
 };
 
@@ -68,7 +68,7 @@ describe('escenario: el cliente escribe "hola" y llega hasta el final', () => {
     // 1. Se presenta la tienda. Una sola cosa, con el menu.
     const bienvenida = c.dice('hola');
     expect(bienvenida?.texto).toContain('GSG Courier');
-    expect(bienvenida?.texto).toContain('Buenos dias');
+    expect(bienvenida?.texto).toContain('Buenos días');
     expect(bienvenida?.texto).toContain('todo Lima y Callao');
     expect(bienvenida?.botones).toHaveLength(3);
 
@@ -83,21 +83,28 @@ describe('escenario: el cliente escribe "hola" y llega hasta el final', () => {
     expect(c.dice('Hoy')?.texto).toContain('nombre');
     expect(c.dice('Roberto Ramirez')?.texto).toContain('DNI');
 
-    // 4. El cierre: resumen y a manos de una persona.
-    const cierre = c.dice('45678912');
-    expect(cierre?.texto).toContain('Recojo: Santa Anita');
-    expect(cierre?.texto).toContain('Entrega: Miraflores');
-    expect(cierre?.texto).toContain('Roberto Ramirez');
+    // 4. El resumen, y la pregunta de si esta bien. La ficha NO se cierra
+    //    todavia: un distrito mal entendido sale gratis de corregir aqui.
+    const repaso = c.dice('45678912');
+    expect(repaso?.texto).toContain('Recojo: Santa Anita');
+    expect(repaso?.texto).toContain('Entrega: Miraflores');
+    expect(repaso?.texto).toContain('Roberto Ramirez');
+    expect(repaso?.texto).toContain('¿Está todo correcto?');
+    expect(repaso?.botones).toHaveLength(2);
+    expect(c.ficha.estado).toBe('en_conversacion');
+
+    // 5. Dice que si, y ahi si pasa a una persona.
+    expect(c.dice('1')?.texto).toContain('En un momento te escribe una persona');
     expect(c.ficha.estado).toBe('calificado');
 
-    // 5. Y a partir de ahi el bot se calla: manda la persona.
+    // 6. Y a partir de ahi el bot se calla: manda la persona.
     expect(c.dice('gracias')).toBeNull();
     expect(c.dice('sigo ahi?')).toBeNull();
   });
 
   it('cada mensaje del cliente produjo exactamente una respuesta', () => {
     const c = conversacion();
-    const mensajes = ['hola', '1', 'Santa Anita', 'Miraflores', 'Documentos', 'Hoy', 'Roberto', '45678912'];
+    const mensajes = ['hola', '1', 'Santa Anita', 'Miraflores', 'Documentos', 'Hoy', 'Roberto', '45678912', '1'];
     for (const m of mensajes) c.dice(m);
     expect(c.todo).toHaveLength(mensajes.length);
   });
@@ -183,9 +190,17 @@ describe('escenario: el cliente ya dijo cosas antes', () => {
       documentoNumero: '12345678',
     });
 
-    const cierre = c.dice('hola?');
-    expect(cierre?.texto).toContain('Esto es lo que tengo');
-    expect(c.ficha.estado).toBe('calificado');
+    const repaso = c.dice('hola?');
+    expect(repaso?.texto).toContain('Esto es lo que tengo');
+    expect(repaso?.texto).toContain('¿Está todo correcto?');
+
+    // Y si dice que NO, se borra y vuelve a empezar por la primera pregunta.
+    const otraVez = c.dice('2');
+    expect(otraVez?.texto).toContain('empezamos de nuevo');
+    expect(otraVez?.texto).toContain('distrito');
+    expect(c.ficha.recojoDistrito).toBeNull();
+    expect(c.ficha.nombre).toBeNull();
+    expect(c.ficha.estado).toBe('en_conversacion');
   });
 });
 

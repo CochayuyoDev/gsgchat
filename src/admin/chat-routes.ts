@@ -130,6 +130,27 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   });
 
   /**
+   * Parar o soltar el bot en ESTE chat.
+   *
+   * Es la forma de decir "de esta conversacion me encargo yo": los mensajes
+   * del cliente siguen entrando y guardandose, y se le puede escribir a mano
+   * como siempre; lo unico que se calla es la respuesta automatica.
+   *
+   * No caduca. Un bot que vuelve a hablar solo al dia siguiente, en medio de
+   * un reclamo que alguien estaba atendiendo, es peor que no haberlo parado.
+   */
+  app.post('/admin/chat/:contactId/bot', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+    const body = z.object({ pausado: z.boolean() }).parse(request.body ?? {});
+
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+
+    await repos.contacts.pausarBot(contact.id, body.pausado, new Date());
+    return { ok: true, pausado: body.pausado };
+  });
+
+  /**
    * Envio desde el chat. Acepta texto, un link de mapa, el boton de ubicacion
    * o una plantilla; todo pasa por el sender, asi que las guardas siguen
    * puestas y el bloqueo se devuelve explicado.

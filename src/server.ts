@@ -145,6 +145,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     salud,
     ajustes,
     stickers,
+    // Contestar a cada trozo de una rafaga le manda al cliente tres mensajes
+    // seguidos sin que el haya escrito nada en medio (ver rafaga.ts).
+    rafagaMs: config.RAFAGA_MS,
     hmacKey: () => settings.current().verifyToken,
   });
   await registerTrackingRoutes(app, { repos, config, hub, settings });

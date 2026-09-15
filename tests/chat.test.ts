@@ -428,3 +428,85 @@ describe('la pagina del chat', () => {
     expect(html).toContain("document.getElementById('chats').addEventListener('click'");
   });
 });
+
+describe('parar el bot en un chat', () => {
+  /** Deja el chat creado y devuelve el contacto, con el bot contestando. */
+  async function chatConBot() {
+    await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: true });
+    await processChange('messages', inbound({ text: { body: 'hola' } }), deps);
+
+    const contact = (await repos.contacts.getByPhone('5215500001111'))!;
+    const hilo = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    // De entrada contesta: es lo que se va a callar.
+    expect(hilo.messages.at(-1).direction).toBe('out');
+    return contact;
+  }
+
+  it('con el bot pausado el mensaje entra pero nadie contesta', async () => {
+    const contact = await chatConBot();
+
+    const pausa = await app.inject({
+      method: 'POST',
+      url: `/admin/chat/${contact.id}/bot`,
+      headers: auth,
+      payload: { pausado: true },
+    });
+    expect(pausa.statusCode).toBe(200);
+
+    const salidasAntes = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth }))
+      .json()
+      .messages.filter((m: { direction: string }) => m.direction === 'out').length;
+
+    await processChange('messages', inbound({ text: { body: 'sigo aqui, quiero cotizar' } }), deps);
+
+    const hilo = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    // El mensaje del cliente SI se guarda: pararlo no es dejar de escuchar.
+    expect(hilo.messages.some((m: { body: string }) => m.body === 'sigo aqui, quiero cotizar')).toBe(true);
+    // Y no hay ni una respuesta mas que antes de pausarlo.
+    const salidas = hilo.messages.filter((m: { direction: string }) => m.direction === 'out').length;
+    expect(salidas).toBe(salidasAntes);
+    // Y el chat dice en que estado esta, para que nadie lo deje solo creyendo
+    // que lo atiende el sistema.
+    expect(hilo.contact.botPausadoAt).toBeTruthy();
+  });
+
+  it('al soltarlo vuelve a contestar', async () => {
+    const contact = await chatConBot();
+
+    const url = `/admin/chat/${contact.id}/bot`;
+    await app.inject({ method: 'POST', url, headers: auth, payload: { pausado: true } });
+    await app.inject({ method: 'POST', url, headers: auth, payload: { pausado: false } });
+
+    await processChange('messages', inbound({ text: { body: 'hola de nuevo' } }), deps);
+
+    const hilo = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    expect(hilo.contact.botPausadoAt).toBeFalsy();
+    expect(hilo.messages.at(-1).direction).toBe('out');
+  });
+
+  it('un contacto que no existe da 404', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/00000000-0000-0000-0000-000000000000/bot',
+      headers: auth,
+      payload: { pausado: true },
+    });
+    expect(r.statusCode).toBe(404);
+  });
+});
+
+describe('la página del chat se puede ejecutar', () => {
+  it('el javascript que se manda al navegador no tiene errores de sintaxis', async () => {
+    // Toda la pagina vive dentro de una plantilla de texto, asi que TypeScript
+    // no mira lo que hay dentro: un `/**` que se pierde al editar deja el chat
+    // en blanco y la suite en verde. Esto lo caza.
+    const html = (await app.inject({ url: '/chat', headers: auth })).body;
+
+    const desde = html.lastIndexOf('<script>');
+    const hasta = html.lastIndexOf('</script>');
+    expect(desde).toBeGreaterThan(-1);
+
+    const js = html.slice(desde + '<script>'.length, hasta);
+    expect(() => new Function(js)).not.toThrow();
+  });
+});

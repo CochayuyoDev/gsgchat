@@ -20,7 +20,7 @@
 import type { Lead, LeadPatch } from '../db/leads.js';
 import { mensajesVigentes, render, type Mensajes } from './mensajes.js';
 import { reconocerDistrito } from './distritos.js';
-import { esSaludo, pareceTextoReal } from './palabras.js';
+import { esAgradecimiento, esSaludo, pareceTextoReal } from './palabras.js';
 import { extraerDeMensaje } from './extraer.js';
 
 export interface Respuesta {
@@ -101,6 +101,14 @@ export const BOTON = {
   corregir: 'pv_corregir',
 } as const;
 
+/**
+ * Lo que se espera cuando ya se pregunto "¿esta todo correcto?".
+ *
+ * No es un campo de la ficha y por eso no vive en `Campo`: es el ultimo
+ * paso, y se atiende antes que cualquier otra cosa del cuestionario.
+ */
+export const CONFIRMACION = 'confirmar';
+
 const normaliza = (texto: string): string =>
   texto
     .trim()
@@ -122,7 +130,14 @@ const INTENCIONES: Array<{ id: string; palabras: string[] }> = [
       'encomienda', 'movilidad', 'reparto', 'repartir',
     ],
   },
-  { id: BOTON.info, palabras: ['horario', 'atienden', 'abren', 'cierran', 'zona', 'cobertura', 'llegan', 'donde'] },
+  {
+    id: BOTON.info,
+    palabras: [
+      'horario', 'atienden', 'abren', 'cierran', 'zona', 'cobertura', 'llegan',
+      'donde', 'provincia', 'provincias', 'cubren', 'cubre', 'llega hasta',
+      'trabajan', 'domingo', 'feriado',
+    ],
+  },
   { id: BOTON.asesor, palabras: ['asesor', 'persona', 'humano', 'hablar con', 'agente', 'ayuda'] },
 ];
 
@@ -148,6 +163,15 @@ export function intencionDe(entrada: Entrada, ofrecidas?: string[] | null): stri
     const elegida = ofrecidas[Number(numero[1]) - 1];
     if (elegida) return elegida;
   }
+
+  const casa = (id: string) =>
+    INTENCIONES.find((i) => i.id === id)?.palabras.some((p) => texto.includes(p)) ?? false;
+
+  // Una PREGUNTA sobre cobertura u horario se contesta, no se convierte en
+  // cuestionario. "¿Y hacen envíos a provincia?" lleva "envi" dentro, asi
+  // que por el orden de la lista caia en cotizar y el cliente recibia un
+  // "¿de qué distrito recogemos?" a una pregunta de si le llegan o no.
+  if (esPregunta(entrada.texto) && casa(BOTON.info)) return BOTON.info;
 
   for (const { id, palabras } of INTENCIONES) {
     if (palabras.some((p) => texto.includes(p))) return id;
@@ -569,14 +593,57 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
     return preguntar(conocido, ctx, { ...deducido, estado: 'en_conversacion' });
   }
 
+  // --- esta esperando el "si, esta bien" ---------------------------------
+  //
+  // Va antes que todo lo demas: es el ultimo paso, y hasta que no conteste
+  // no hay nada mas que preguntarle.
+  if (lead.preguntaPendiente === CONFIRMACION) {
+    if (intencion === BOTON.siNombre) {
+      return {
+        patch: { estado: 'calificado', preguntaPendiente: null, ultimasOpciones: null, intentosFallidos: 0 },
+        respuesta: { texto: mensaje(ctx, 'cierre') },
+      };
+    }
+
+    if (intencion === BOTON.corregir) {
+      // Se borra la ficha y se vuelve a la primera pregunta. Lo que no se
+      // borra es la conversacion: el operador puede leer lo que dijo antes.
+      const limpia = { ...lead, ...FICHA_EN_BLANCO } as Lead;
+      const primera = siguienteCampo(limpia, ctx.servicios);
+      if (!primera) return pedirConfirmacion(limpia, ctx, FICHA_EN_BLANCO);
+
+      return conMemoria({
+        patch: { ...FICHA_EN_BLANCO, estado: 'en_conversacion', preguntaPendiente: primera, intentosFallidos: 0 },
+        respuesta: {
+          ...PREGUNTAS[primera](ctx),
+          texto: `${mensaje(ctx, 'volverAEmpezar')}
+
+${PREGUNTAS[primera](ctx).texto}`,
+        },
+      });
+    }
+
+    // Cualquier otra cosa: se le vuelve a preguntar, sin cerrar nada.
+    if (esAgradecimiento(entrada.texto)) {
+      return { patch: {}, respuesta: { texto: mensaje(ctx, 'deNada') } };
+    }
+    return pedirConfirmacion(lead, ctx);
+  }
+
   const campo = siguienteCampo(conocido, ctx.servicios);
 
-  // Nada que preguntar y la ficha completa: se cierra y pasa a una persona.
-  if (!campo) {
-    return {
-      patch: { estado: 'calificado' },
-      respuesta: { texto: `${resumen(lead)}\n\n${mensaje(ctx, 'cierre')}` },
-    };
+  // Ficha completa: se le enseña y se le pregunta si esta bien ANTES de
+  // pasarla a una persona. Un dato mal entendido -un distrito, un DNI- sale
+  // gratis de corregir aqui y caro de corregir cuando el repartidor ya salio.
+  if (!campo) return pedirConfirmacion(conocido, ctx, deducido);
+
+  // --- da las gracias o se despide ---------------------------------------
+  //
+  // Se le contesta y se le deja en paz: ni se le repite la pregunta ni se le
+  // gasta un intento. Un "ok gracias" contestado con "no reconocí ese
+  // mensaje" deshace toda la conversacion anterior.
+  if (!intencion && esAgradecimiento(entrada.texto)) {
+    return { patch: {}, respuesta: { texto: mensaje(ctx, 'deNada') } };
   }
 
   // --- saluda otra vez ---------------------------------------------------
@@ -615,6 +682,13 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
   // como distrito de recojo, y toda la conversacion se corre un paso.
   const pendiente = lead.preguntaPendiente as Exclude<Campo, null> | null;
   if (!pendiente || pendiente !== campo) {
+    // Un mensaje que no dice nada NO abre el cuestionario. Quien escribe
+    // "jajajaja" no ha pedido cotizar, y contestarle "¿de qué distrito
+    // recogemos?" es ponerle un formulario delante por haber escrito una
+    // risa. Se le vuelve a ofrecer el menú, y a la tercera pasa a una
+    // persona, como cualquier otra respuesta que no se entiende.
+    if (!pareceTextoReal(texto)) return conIntentoSinPregunta(lead, ctx);
+
     return preguntar(lead, ctx, { estado: 'en_conversacion' });
   }
 
@@ -662,6 +736,30 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
  * pregunta indefinidamente es lo que hace que el cliente cierre el chat, y un
  * cliente perdido cuesta mas que una ficha a medias.
  */
+/**
+ * No se entendio, y no habia ninguna pregunta esperando respuesta.
+ *
+ * Se le devuelve el MENU, no la primera pregunta del cuestionario:
+ * `conIntento` re-pregunta el campo que toque, y con la ficha vacia eso es
+ * pedirle el distrito de recojo a alguien que solo escribio "xd". Los
+ * intentos se cuentan igual, asi que a la tercera pasa a una persona.
+ */
+function conIntentoSinPregunta(lead: Lead, ctx: Contexto): Resultado {
+  const intentos = (lead.intentosFallidos ?? 0) + 1;
+
+  if (intentos > MAX_INTENTOS) {
+    return {
+      patch: { estado: 'calificado', preguntaPendiente: null, intentosFallidos: 0 },
+      respuesta: { texto: mensaje(ctx, 'rendicion') },
+    };
+  }
+
+  return conMemoria({
+    patch: { intentosFallidos: intentos, preguntaPendiente: null, estado: 'en_conversacion' },
+    respuesta: { texto: mensaje(ctx, 'menu'), botones: menuDe(ctx) },
+  });
+}
+
 function conIntento(lead: Lead, ctx: Contexto, aviso: string): Resultado {
   const intentos = (lead.intentosFallidos ?? 0) + 1;
 
@@ -695,10 +793,9 @@ function cerrarOSeguir(lead: Lead, patch: LeadPatch, ctx: Contexto): Resultado {
   const despues = siguienteCampo(lead, ctx.servicios);
 
   if (!despues) {
-    return {
-      patch: { ...patch, estado: 'calificado', preguntaPendiente: null },
-      respuesta: { texto: `${resumen(lead)}\n\n${mensaje(ctx, 'cierre')}` },
-    };
+    // Con lo que ACABA de contestar dentro: el resumen que lee tiene que ser
+    // el que se va a enviar, no el de antes de su ultima respuesta.
+    return pedirConfirmacion({ ...lead, ...patch } as Lead, ctx, patch);
   }
 
   return { patch: { ...patch, preguntaPendiente: despues }, respuesta: PREGUNTAS[despues](ctx) };
@@ -710,6 +807,51 @@ function cerrarOSeguir(lead: Lead, patch: LeadPatch, ctx: Contexto): Resultado {
  * Va en un solo sitio, a la salida, para que no se pueda mandar una lista
  * numerada sin recordar que significaba cada numero.
  */
+/**
+ * El resumen, y la pregunta de si esta bien.
+ *
+ * La ficha no se cierra sola: el cliente la lee y dice que si. Un distrito
+ * mal entendido o un DNI con un digito de menos sale gratis de corregir aqui,
+ * y caro cuando el repartidor ya salio hacia el sitio equivocado.
+ *
+ * Se queda esperando en `preguntaPendiente = CONFIRMACION`, que NO es un campo
+ * de la ficha: es el ultimo paso, y por eso se atiende antes que nada en el
+ * turno siguiente.
+ */
+function pedirConfirmacion(lead: Lead, ctx: Contexto, patch: LeadPatch = {}): Resultado {
+  return conMemoria({
+    patch: { ...patch, estado: 'en_conversacion', preguntaPendiente: CONFIRMACION, intentosFallidos: 0 },
+    respuesta: {
+      texto: `${resumen(lead)}
+
+${mensaje(ctx, 'confirmar')}`,
+      botones: [
+        { id: BOTON.siNombre, title: mensaje(ctx, 'botonConfirmar') },
+        { id: BOTON.corregir, title: mensaje(ctx, 'botonCorregir') },
+      ],
+    },
+  });
+}
+
+/** Los datos de la ficha, vacios: lo que se borra al volver a empezar. */
+const FICHA_EN_BLANCO: LeadPatch = {
+  recojoDistrito: null,
+  recojoDireccion: null,
+  recojoReferencia: null,
+  recojoLat: null,
+  recojoLng: null,
+  entregaDistrito: null,
+  entregaDireccion: null,
+  entregaReferencia: null,
+  entregaLat: null,
+  entregaLng: null,
+  contenido: null,
+  servicio: null,
+  cuando: null,
+  nombre: null,
+  documentoNumero: null,
+  documentoTipo: null,
+};
 function conMemoria(resultado: Resultado): Resultado {
   const ids = resultado.respuesta?.botones?.map((b) => b.id) ?? null;
   return { ...resultado, patch: { ...resultado.patch, ultimasOpciones: ids } };

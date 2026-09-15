@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { esSaludo, palabraPlausible, pareceTextoReal } from '../src/preventa/palabras.js';
+import { esAgradecimiento, esSaludo, palabraPlausible, pareceTextoReal } from '../src/preventa/palabras.js';
 
 describe('lo que NO son palabras', () => {
   it('el tecleo al azar', () => {
@@ -100,6 +100,40 @@ describe('un saludo no es un mensaje incomprensible', () => {
     // saludo le devolvería el menú a quien ya dijo lo que quería.
     for (const s of ['hola quiero cotizar', 'buenas, cuánto cuesta a surco', 'Miraflores', '72554686', 'asdasd', '']) {
       expect(esSaludo(s), s).toBe(false);
+    }
+  });
+});
+
+describe('dar las gracias no es un mensaje incomprensible', () => {
+  it('reconoce el cierre de turno', () => {
+    for (const s of ['gracias', 'ok gracias', 'muchas gracias', 'listo', 'perfecto, gracias', 'chau', 'muy amable']) {
+      expect(esAgradecimiento(s), s).toBe(true);
+    }
+  });
+
+  it('no se lleva por delante lo que viene con un gracias', () => {
+    // "gracias, pero quiero cotizar" pide algo: cerrarle el turno seria
+    // dejarle con la petición sin atender.
+    for (const s of ['gracias pero quiero cotizar a miraflores', 'ok, cuanto cuesta el arroz', 'Miraflores', 'asdasd', '']) {
+      expect(esAgradecimiento(s), s).toBe(false);
+    }
+  });
+});
+
+describe('un nombre de pila no es tecleo al azar', () => {
+  it('acepta los nombres que llevan un tramo de teclado dentro', () => {
+    // "Roberto" lleva "ert" y tres vocales de siete: se rechazaba, y el
+    // cliente que daba su nombre se llevaba un "no reconocí ese mensaje".
+    // A partir de ahí la conversación se corría un paso y el DNI acababa
+    // guardado como nombre.
+    for (const n of ['Roberto', 'Alberto', 'Ernesto', 'Gilberto', 'Humberto', 'Norberto']) {
+      expect(pareceTextoReal(n), n).toBe(true);
+    }
+  });
+
+  it('y sigue rechazando lo que sí es un teclado', () => {
+    for (const n of ['asdasd', 'qweqwe', 'asdf', 'qwerty', 'zxcvbn', 'hjkl']) {
+      expect(pareceTextoReal(n), n).toBe(false);
     }
   });
 });

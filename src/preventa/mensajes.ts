@@ -34,6 +34,11 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
     texto: '{saludo}. ¿En qué te ayudo?',
     variables: VARIABLES_COMUNES,
   },
+  deNada: {
+    cuando: 'Cuando el cliente da las gracias o se despide.',
+    texto: '¡Con gusto! Si necesitas algo más, aquí estamos.',
+    variables: VARIABLES_COMUNES,
+  },
   menu: {
     cuando: 'Cuando escribe algo que no se entiende y hay que reorientarlo.',
     texto: 'No reconocí ese mensaje. ¿En qué te ayudo?',
@@ -102,6 +107,26 @@ export const MENSAJES: Record<string, DefinicionMensaje> = {
   ubicacionEntrega: {
     cuando: 'Cuando comparte su ubicación y falta saber el distrito de entrega.',
     texto: 'Recibí la ubicación de entrega. ¿De qué distrito es?',
+    variables: VARIABLES_COMUNES,
+  },
+  confirmar: {
+    cuando: 'Con la ficha completa, antes de cerrarla: el cliente dice si los datos están bien.',
+    texto: '¿Está todo correcto?',
+    variables: VARIABLES_COMUNES,
+  },
+  botonConfirmar: {
+    cuando: 'La opción de confirmar los datos del resumen.',
+    texto: 'Sí, son correctos',
+    variables: [],
+  },
+  botonCorregir: {
+    cuando: 'La opción de volver a empezar la ficha.',
+    texto: 'No, volver a empezar',
+    variables: [],
+  },
+  volverAEmpezar: {
+    cuando: 'Cuando el cliente dice que los datos no están bien y hay que rehacerlos.',
+    texto: 'Sin problema, empezamos de nuevo.',
     variables: VARIABLES_COMUNES,
   },
   cierre: {

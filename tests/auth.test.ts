@@ -110,14 +110,18 @@ describe('contrasenas y cookies', () => {
 describe('entrar al sistema', () => {
   let cookie = '';
 
-  it('la portada es publica y lleva a /login; sin usuarios, /login ofrece crear la primera cuenta', async () => {
+  it('la portada es publica y lleva a /login; sin usuarios, /login ofrece registrarse', async () => {
     const portada = await app.inject({ method: 'GET', url: '/' });
     expect(portada.statusCode).toBe(200);
     expect(portada.body).toContain('href="/login"');
     expect(portada.body).toContain('La Tienda');
     const login = await app.inject({ method: 'GET', url: '/login' });
     expect(login.statusCode).toBe(200);
-    expect(login.body).toContain('primera cuenta');
+    // Las dos pestañas se ofrecen siempre; lo que cambia es si el registro
+    // trae formulario. Se comprueba el formulario y no el texto: el rotulo
+    // se reescribe cada dos por tres y la prueba no puede caerse por eso.
+    expect(login.body).toContain('id="f-registro"');
+    expect(login.body).toContain('Inicio de sesión');
   });
 
   it('sin sesion, las pantallas redirigen a /login y /admin responde 401', async () => {
@@ -163,9 +167,11 @@ describe('entrar al sistema', () => {
     expect(panel.statusCode).toBe(200);
     const yo = await app.inject({ method: 'GET', url: '/admin/yo', headers: { cookie } });
     expect(yo.json()).toMatchObject({ usuario: 'ali', nombre: 'Ali', rol: 'admin', porToken: false });
-    // Y /login ya no ofrece crear cuenta, sino entrar.
+    // Y /login ya no ofrece registrarse: la pestaña sigue ahi, pero sin
+    // formulario, porque el servidor ya solo devuelve 409.
     const login = await app.inject({ method: 'GET', url: '/login' });
-    expect(login.body).not.toContain('primera cuenta');
+    expect(login.body).not.toContain('id="f-registro"');
+    expect(login.body).toContain('id="f-entrar"');
   });
 
   it('login con contrasena mala falla; cinco fallos seguidos bloquean unos minutos', async () => {

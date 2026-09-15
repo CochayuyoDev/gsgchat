@@ -16,6 +16,7 @@
  * secuencias de seguimiento con `stopOnReply` se cancelan.
  */
 
+import { esperarRafaga } from './rafaga.js';
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
 import type { Monitor } from '../salud/monitor.js';
@@ -81,6 +82,16 @@ export interface InboundDeps {
   ajustes?: ServicioAjustes;
   /** Los stickers automaticos. Ver src/stickers. */
   stickers?: ServicioStickers;
+  /**
+   * Cuanto se espera a que el cliente termine de escribir, en ms.
+   *
+   * Quien escribe por WhatsApp lo hace en trozos, y contestar a cada trozo
+   * le manda dos o tres mensajes seguidos sin que el haya dicho nada en
+   * medio. Ver src/handlers/rafaga.ts.
+   *
+   * Sin valor no se espera nada: es lo que quieren las pruebas.
+   */
+  rafagaMs?: number;
 }
 
 export const CONFIRM_PREFIX = 'loc_ok:';
@@ -541,6 +552,20 @@ export async function handleInboundMessage(
     payload: leido.payload,
     createdAt: receivedAt,
   });
+
+  // Si sigue escribiendo, se espera: una rafaga se contesta UNA vez, a lo
+  // ultimo que dijo. Va despues de guardar el mensaje -el hilo los tiene
+  // todos- y antes de cualquier automatismo.
+  if (!(await esperarRafaga(contact.id, deps.rafagaMs ?? 0))) return;
+
+  // El operador paro el bot en ESTE chat: se atiende a mano.
+  //
+  // Va aqui, despues de guardar el mensaje y antes de cualquier automatismo,
+  // porque "parar el bot" son TODAS las respuestas automaticas: el asistente
+  // de preventa, las reglas por palabra clave, el fallback de ubicacion, el
+  // motor de rutas y los stickers. Callar solo una deja al operador creyendo
+  // que tiene la conversacion para el mientras el sistema sigue hablando.
+  if (contact.botPausadoAt) return;
 
   // Modo prueba (SOLO_NUMEROS): a quien no este en la lista no se le contesta
   // nada, ni siquiera desde el asistente. El sender lo bloquea igual, pero

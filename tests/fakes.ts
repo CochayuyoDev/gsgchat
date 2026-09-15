@@ -366,6 +366,9 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         const all = [...contactsByPhone.values()]
           .filter((c) => {
             if (q && !c.phone.includes(q) && !(c.name ?? '').toLowerCase().includes(q)) return false;
+            // Los que nunca mandaron el pin: el doble tiene que filtrar igual
+            // que la consulta de verdad, o la prueba no prueba nada.
+            if (query.sinUbicacion && locations.some((l) => l.contactId === c.id)) return false;
             switch (query.state ?? 'all') {
               case 'opted_in':
                 return Boolean(c.optInAt && !c.optOutAt);
@@ -411,6 +414,11 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         c.suprimidoHasta = hasta;
         c.suprimidoMotivo = motivo;
         c.suprimidoAmbito = ambito;
+      },
+      async pausarBot(contactId, pausado, at) {
+        const c = [...contactsByPhone.values()].find((x) => x.id === contactId);
+        if (!c) return;
+        c.botPausadoAt = pausado ? at : null;
       },
       async levantarSupresion(phone) {
         const c = contactsByPhone.get(phone);

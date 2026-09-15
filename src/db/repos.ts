@@ -39,6 +39,13 @@ export interface Contact {
   suprimidoHasta?: Date | null;
   suprimidoMotivo?: string | null;
   suprimidoAmbito?: 'todo' | 'marketing' | null;
+  /**
+   * Cuando se paro el bot en ESTE chat. `null` = contesta como siempre.
+   *
+   * Es cosa del operador, no del sistema: una conversacion que se tuerce
+   * se atiende a mano, y el bot no puede meterse por encima.
+   */
+  botPausadoAt?: Date | null;
   /** Envios iniciados por la empresa seguidos sin que conteste nada. */
   sinRespuestaSeguidas?: number;
   ultimoEnvioAt?: Date | null;
@@ -60,6 +67,14 @@ export interface ContactListQuery {
   q?: string;
   /** all | opted_in | opted_out | pending (sin opt-in ni baja). */
   state?: ContactState;
+  /**
+   * Solo los que nunca mandaron su ubicacion.
+   *
+   * Es la lista a la que hay que insistirle: se pide el pin y, en cuanto
+   * llega, el contacto desaparece de aqui solo. No hace falta marcarlo ni
+   * sacarlo a mano de ninguna parte.
+   */
+  sinUbicacion?: boolean;
   limit: number;
   offset: number;
 }
@@ -313,6 +328,14 @@ export interface ContactsRepo {
   /** Deja de escribirle hasta esa fecha. `ambito` todo | marketing. */
   suprimir(phone: string, hasta: Date, motivo: string, ambito: 'todo' | 'marketing'): Promise<void>;
   levantarSupresion(phone: string): Promise<void>;
+  /**
+   * Para o suelta el bot en un chat.
+   *
+   * No es una supresion: al contacto se le puede seguir escribiendo a mano
+   * y entran sus mensajes como siempre. Lo unico que se calla es la
+   * respuesta automatica.
+   */
+  pausarBot(contactId: string, pausado: boolean, at: Date): Promise<void>;
   /** Un envio iniciado por la empresa salio hacia este contacto. */
   anotarEnvioIniciado(contactId: string, at: Date): Promise<void>;
   /** Cuantos contactos recibieron su PRIMER mensaje de negocio desde esa fecha. */
@@ -510,6 +533,7 @@ interface ContactRow {
   suprimido_hasta?: Date | null;
   suprimido_motivo?: string | null;
   suprimido_ambito?: string | null;
+  bot_pausado_at?: Date | null;
   sin_respuesta_seguidas?: number;
   ultimo_envio_at?: Date | null;
   primer_envio_at?: Date | null;
@@ -526,6 +550,7 @@ const toContact = (row: ContactRow): Contact => ({
   lastInboundAt: row.last_inbound_at,
   suprimidoHasta: row.suprimido_hasta ?? null,
   suprimidoMotivo: row.suprimido_motivo ?? null,
+  botPausadoAt: row.bot_pausado_at ?? null,
   suprimidoAmbito: row.suprimido_ambito === 'marketing' ? 'marketing' : row.suprimido_ambito === 'todo' ? 'todo' : null,
   sinRespuestaSeguidas: row.sin_respuesta_seguidas ?? 0,
   ultimoEnvioAt: row.ultimo_envio_at ?? null,
@@ -772,6 +797,13 @@ export function createRepos(pool: Pool): Repos {
         default:
           break;
       }
+      // Los que nunca mandaron ubicacion. `not exists` y no un left join:
+      // la lista se pide para escribirles, y un join que duplica filas
+      // acabaria mandandole dos mensajes al mismo.
+      if (query.sinUbicacion) {
+        conditions.push('not exists (select 1 from locations l2 where l2.contact_id = c.id)');
+      }
+
       const where = conditions.length ? `where ${conditions.join(' and ')}` : '';
 
       const total = await pool.query<{ total: number }>(
@@ -843,6 +875,12 @@ export function createRepos(pool: Pool): Repos {
           where phone = $1`,
         [phone, hasta, motivo.slice(0, 300), ambito],
       );
+    },
+    async pausarBot(contactId, pausado, at) {
+      await pool.query('update contacts set bot_pausado_at = $2 where id = $1', [
+        contactId,
+        pausado ? at : null,
+      ]);
     },
     async levantarSupresion(phone) {
       await pool.query(

@@ -60,6 +60,8 @@ export const ALIAS: Record<string, string> = {
   chosica: 'Lurigancho',
   'santa clara': 'Ate',
   vitarte: 'Ate',
+  'ate vitarte': 'Ate',
+  'santa anita': 'Santa Anita',
   carmen: 'Carmen de la Legua Reynoso',
   'mi peru': 'Mi Perú',
 };
@@ -161,6 +163,12 @@ export function distritosEnTexto(
     .sort((a, b) => a.posicion - b.posicion);
 }
 
+/** Si `trozo` aparece en `texto` como palabra entera, no dentro de otra. */
+function contienePalabra(texto: string, trozo: string): boolean {
+  const escapado = escapaRegex(trozo);
+  return new RegExp(`(^|\\s)${escapado}(\\s|$)`).test(texto);
+}
+
 /**
  * El distrito que quiso decir, o null si no se parece a ninguno.
  *
@@ -185,26 +193,56 @@ export function reconocerDistrito(
   // Alias primero: "surco" es Santiago de Surco y no hay que adivinarlo.
   if (ALIAS[buscado] && catalogo.includes(ALIAS[buscado]!)) return ALIAS[buscado]!;
 
-  const candidatos = catalogo.map((d) => ({ nombre: d, clave: sinRelleno(d) }));
+  // Los alias entran tambien en la busqueda por parecido: quien escribe
+  // "magdalna" quiere decir Magdalena, y comparandolo solo con el nombre
+  // oficial -"magdalena del mar"- la distancia se dispara y se rechaza.
+  const candidatos = [
+    ...catalogo.map((d) => ({ nombre: d, clave: sinRelleno(d) })),
+    ...Object.entries(ALIAS)
+      .filter(([, nombre]) => catalogo.includes(nombre))
+      .map(([alias, nombre]) => ({ nombre, clave: sinRelleno(alias) })),
+  ];
 
   const exacto = candidatos.find((c) => c.clave === buscado);
   if (exacto) return exacto.nombre;
 
   // Contenido: "vivo en san borja ahora mismo" trae el distrito dentro.
-  const dentro = candidatos.find(
-    (c) => c.clave.length >= 4 && (buscado.includes(c.clave) || c.clave.includes(buscado)),
-  );
+  //
+  // Por PALABRA ENTERA y con cuatro letras minimo por los dos lados. Suelto,
+  // esto contestaba San Isidro a un "si" y El Agustino a un "no" -porque
+  // "isidro" lleva un "si" dentro y "agustino" un "no"-, y el repartidor se
+  // encontraba un distrito donde el cliente solo habia dicho que si.
+  const dentro =
+    buscado.length >= 4
+      ? candidatos.find(
+          (c) =>
+            c.clave.length >= 4 &&
+            (contienePalabra(buscado, c.clave) || contienePalabra(c.clave, buscado)),
+        )
+      : undefined;
   if (dentro) return dentro.nombre;
 
-  // Y una errata: "mirafores", "surqillo". Se tolera una por cada cinco
-  // letras, con techo de dos: mas que eso ya no es una errata, es otra palabra.
-  const margen = Math.min(2, Math.floor(buscado.length / 5));
+  // Y una errata: "mirafores", "surkillo". Se tolera una por cada cuatro
+  // letras, con techo de dos: mas que eso ya no es una errata, es otra
+  // palabra. Con una cada cinco, "surkillo" -que se escribe asi media
+  // Lima- se quedaba fuera por un solo caracter.
+  const margen = Math.min(2, Math.floor(buscado.length / 4));
   if (margen < 1) return null;
 
   let mejor: { nombre: string; d: number } | null = null;
   for (const c of candidatos) {
     const d = distancia(buscado, c.clave);
-    if (d <= margen && (!mejor || d < mejor.d)) mejor = { nombre: c.nombre, d };
+    if (d > margen) continue;
+
+    // La primera letra tiene que coincidir, salvo en palabras largas con
+    // UN solo fallo. Sin esta condicion, "aqui nomas" -que no es una
+    // respuesta- se guardaba como Comas: quitado el relleno queda "nomas",
+    // y de "comas" lo separa una letra. Es el mismo fallo que "No viejo",
+    // y en la ficha del repartidor se lee igual de bien.
+    const mismaInicial = buscado[0] === c.clave[0];
+    if (!mismaInicial && !(buscado.length >= 6 && d === 1)) continue;
+
+    if (!mejor || d < mejor.d) mejor = { nombre: c.nombre, d };
   }
 
   return mejor?.nombre ?? null;

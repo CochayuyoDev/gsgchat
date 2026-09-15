@@ -348,6 +348,7 @@ ${bandaDemo}
         <div class="sub" id="t-sub"></div>
       </div>
       <a class="link" id="t-panel" href="/panel#contactos">Ficha</a>
+      <button class="icon etiqueta" id="pausar-bot" title="Callar las respuestas automáticas en este chat y atenderlo tú"></button>
       <button class="icon etiqueta" id="cerrar-chat" title="Guarda todo el historial de este chat y lo deja vacío">🗄 Guardar chat</button>
     </header>
     <div class="empty" id="placeholder">
@@ -439,6 +440,39 @@ function tick(status) {
 }
 /* Mostrar y ocultar sin reventar si el nodo ya no existe: el hilo se
    repinta entero y un getElementById de algo borrado devuelve null. */
+/**
+ * El interruptor del bot en este chat.
+ *
+ * Dice en que estado ESTA, no lo que hace el boton: un rotulo que dice
+ * "pausado" cuando el bot esta contestando es la forma mas rapida de que
+ * alguien deje una conversacion sola creyendo que la atiende el sistema.
+ */
+function pintarBoton(pausado) {
+  var b = document.getElementById('pausar-bot');
+  if (!b) return;
+  b.dataset.pausado = pausado ? "1" : "";
+  b.textContent = pausado ? '🤖 Bot pausado' : '🤖 Bot activo';
+  b.title = pausado
+    ? 'Las respuestas automáticas están calladas en este chat. Pulsa para que el bot vuelva a contestar.'
+    : 'El bot contesta solo en este chat. Pulsa para callarlo y atenderlo tú.';
+}
+
+async function alternarBot() {
+  if (!current) return;
+  var b = document.getElementById('pausar-bot');
+  var pausar = !b.dataset.pausado;
+  b.disabled = true;
+  try {
+    await api('/admin/chat/' + current.id + '/bot', { method: 'POST', body: { pausado: pausar } });
+    current.botPausadoAt = pausar ? new Date().toISOString() : null;
+    pintarBoton(pausar);
+  } catch (e) {
+    toast('No se pudo cambiar: ' + (e.message || e));
+  } finally {
+    b.disabled = false;
+  }
+}
+
 function ver(id, visible) {
   var el = document.getElementById(id);
   if (el) el.classList.toggle('hidden', !visible);
@@ -563,6 +597,8 @@ async function openChat(contactId, silent) {
         : '<span class="pill warn">fuera de las 24 h</span>') +
       (data.reparto ? ' · <a class="link" href="/rutas" title="Ver en Ubicaciones para reparto">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '');
 
+    pintarBoton(current.botPausadoAt);
+
     renderMessages(data.messages, nuevo);
     renderComposer(data);
     if (!silent) loadChats(true);
@@ -614,6 +650,7 @@ function cuerpoVisible(m) {
   var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
   return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
 }
+/**
  * El hueco del adjunto.
  *
  * Se pinta vacio y con su id: el fichero se pide despues, porque va detras del
@@ -1220,6 +1257,8 @@ function motivoTexto(reason) {
 }
 
 document.getElementById('cerrar-chat').onclick = function () { pedirCierre(); };
+var botonBot = document.getElementById('pausar-bot');
+if (botonBot) botonBot.onclick = function () { alternarBot(); };
 
 function pedirCierre() {
   if (!current || modo !== 'chat') return;

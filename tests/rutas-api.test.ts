@@ -370,3 +370,57 @@ describe('el token de admin protege el modulo', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe('la lista de quien no mandó su ubicación', () => {
+  it('el javascript de la página de rutas no tiene errores de sintaxis', async () => {
+    // La pantalla entera vive dentro de una plantilla de texto: TypeScript no
+    // mira lo que hay dentro, así que un paréntesis de menos deja la página
+    // muerta con la suite en verde.
+    const html = (await app.inject({ url: '/rutas', headers: auth })).body;
+    const desde = html.lastIndexOf('<script>');
+    const hasta = html.lastIndexOf('</script>');
+    expect(desde).toBeGreaterThan(-1);
+    expect(() => new Function(html.slice(desde + '<script>'.length, hasta))).not.toThrow();
+  });
+});
+
+describe('contactos sin ubicación', () => {
+  it('lista solo a quien nunca mandó el pin, y sale de la lista al mandarlo', async () => {
+    await repos.contacts.upsertFromInbound('51900000001', 'Sin pin');
+    await repos.contacts.upsertFromInbound('51900000002', 'Con pin');
+
+    const conPin = (await repos.contacts.getByPhone('51900000002'))!;
+    const id = await repos.locations.save(
+      conPin.id,
+      { lat: -12.05, lng: -76.96, mapsUrl: 'https://maps.google.com/?q=-12.05,-76.96' } as never,
+      'link',
+    );
+    await repos.locations.confirm(id);
+
+    const lista = await app.inject({ url: '/admin/contacts?sinUbicacion=1&limit=100', headers: auth });
+    expect(lista.statusCode).toBe(200);
+
+    const telefonos = lista.json().items.map((c: { phone: string }) => c.phone);
+    expect(telefonos).toContain('51900000001');
+    // Y el que ya mandó su ubicación no está: no hay que sacarlo a mano.
+    expect(telefonos).not.toContain('51900000002');
+  });
+
+  it('con esos teléfonos se crea el lote sin pegar nada', async () => {
+    await repos.contacts.upsertFromInbound('51900000003', 'Ana');
+
+    const r = await app.inject({
+      method: 'POST',
+      url: '/admin/rutas/lotes',
+      headers: auth,
+      payload: {
+        nombre: 'Los que faltan',
+        filas: [{ telefono: '51900000003', nombre: 'Ana' }],
+        arrancar: false,
+      },
+    });
+
+    expect(r.statusCode).toBe(200);
+    expect(r.json().listas).toBe(1);
+  });
+});
