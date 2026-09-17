@@ -93,7 +93,8 @@ beforeAll(async () => {
     repos,
     sender,
     gsg: crearPuertoEnEspera(),
-    opciones: { ...OPCIONES_POR_DEFECTO, negocio: 'Tienda de prueba' },
+    // Espera corta a proposito: con las 3 h reales, tres intentos seguidos se salen del horario.
+    opciones: { ...OPCIONES_POR_DEFECTO, esperaRespuestaMinutos: 30, negocio: 'Tienda de prueba' },
     usarPlantilla: () => false,
     ahora: () => ahora,
     // Pausa mínima siempre: la prueba controla el reloj.
@@ -219,7 +220,7 @@ describe('un día de reparto, de punta a punta', () => {
   it('5. a quien no contesta se le insiste y después pasa al repartidor', async () => {
     // Marta (P-3) no ha contestado. Vence la espera dos veces más.
     for (let vuelta = 0; vuelta < 2; vuelta++) {
-      avanzar(OPCIONES_POR_DEFECTO.esperaRespuestaMinutos + 1);
+      avanzar(30 + 1);
       let salida = await motor.tick();
       // Puede tocarle antes a Luis (que contestó): se avanza hasta que salga.
       while (salida.accion === 'nada' && salida.motivo?.includes('pausa')) {
@@ -228,10 +229,10 @@ describe('un día de reparto, de punta a punta', () => {
       }
     }
 
-    avanzar(OPCIONES_POR_DEFECTO.esperaRespuestaMinutos + 1);
+    avanzar(30 + 1);
     let salida = await motor.tick();
     while (salida.accion !== 'derivacion' && salida.accion !== 'nada') {
-      avanzar(OPCIONES_POR_DEFECTO.esperaRespuestaMinutos + 1);
+      avanzar(30 + 1);
       salida = await motor.tick();
     }
 

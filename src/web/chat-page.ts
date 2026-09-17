@@ -144,6 +144,26 @@ const CSS = `
   .msg audio.adjunto { width: 260px; }
   .msg .una-vez { display: inline-block; font-size: 11.5px; color: var(--muted); margin: 2px 0 3px;
     padding: 2px 8px; border-radius: 999px; background: rgba(217,119,6,.14); }
+  /* El "ver una vez" que no se pudo abrir: se explica y se ofrece pedirlo. */
+  .msg .solo-telefono { display: block; margin-top: 6px; }
+  .msg .solo-telefono button { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+    background: #fff; cursor: pointer; }
+  .msg .solo-telefono button:hover { background: #f1f4f6; }
+  /* Lo que el remitente "elimino para todos": aqui se conserva, y se dice. */
+  .msg .borrado { display: block; font-size: 11px; color: #b45309; margin-top: 3px; }
+  /* En un grupo, quien lo dijo va encima del globo, con su color. */
+  .msg .autor { display: block; font-size: 12.5px; font-weight: 600; margin: -1px 0 2px; }
+  .msg .autor .tel { font-weight: 400; color: var(--muted); font-size: 11.5px; margin-left: 6px; }
+  .autor.c0 { color: #1e88c9; } .autor.c1 { color: #c2185b; } .autor.c2 { color: #d17f0b; } .autor.c3 { color: #5c5fbf; }
+  .autor.c4 { color: #1b8f84; } .autor.c5 { color: #d84a4a; } .autor.c6 { color: #5f9a1e; } .autor.c7 { color: #8d6e63; }
+  .avatar.grupo { background: #5d6b78; font-size: 20px; }
+  .historial { text-align: center; padding: 6px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .mas-antiguos { text-align: center; padding: 6px 0 2px; }
+  .mas-antiguos button { font-size: 12px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; cursor: pointer; color: var(--muted); }
+  .mas-antiguos button:disabled { opacity: .6; }
+  .historial button { font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  .historial button:hover { background: #f1f4f6; }
+  .historial button:disabled { opacity: .6; cursor: default; }
   .msg .fichero { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
                   background: rgba(0,0,0,.05); border-radius: 6px; text-decoration: none;
                   color: inherit; }
@@ -223,6 +243,20 @@ const CSS = `
   .rapidas-barra .chip.editar { color: var(--muted); border-style: dashed; }
   .rapidas-barra.ocupada .chip { opacity: .5; pointer-events: none; }
   .tools { display: flex; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; background: var(--header); flex: none; }
+  /* La previa de lo que se va a mandar: pegado, arrastrado o elegido. */
+  .previa { display: flex; gap: 12px; align-items: center; padding: 10px 14px; background: var(--header);
+            border-top: 1px solid var(--line); flex: none; }
+  .previa img, .previa video { max-height: 110px; max-width: 180px; border-radius: 6px; background: #fff; }
+  .previa .icono { width: 64px; height: 64px; border-radius: 8px; background: #fff; display: grid; place-items: center; font-size: 28px; }
+  .previa .datos { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .previa .nombre { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .previa input { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  .previa .acciones { display: flex; gap: 6px; }
+  .previa .acciones button { padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  .previa .acciones button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .thread.arrastrando::after { content: 'Suelta aquí para mandarlo'; position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(0,168,132,.12); border: 3px dashed var(--accent); font-weight: 600; color: var(--accent); z-index: 5; pointer-events: none; }
+  .thread { position: relative; }
   .tools.plegado { display: none; }
   .tools input { cursor: text; flex: 1; min-width: 180px; }
   .empty { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 40px; }
@@ -278,6 +312,7 @@ const CSS = `
 `;
 
 import { appShell } from './shell.js';
+import { TEXTO_VER_UNA_VEZ } from '../handlers/textos.js';
 
 export interface ChatOpts {
   configured: boolean;
@@ -306,7 +341,9 @@ export function chatPage(opts: ChatOpts): string {
   const importar =
     proveedor === 'waha'
       ? '<button class="icon" id="importar" title="Traer las conversaciones que ya tiene este WhatsApp">⭳</button>'
-      : '';
+      : proveedor === 'local'
+        ? '<button class="icon etiqueta" id="historial-todos" title="Le pide al teléfono los mensajes anteriores de todos los chats (50 por chat)">⤒ Traer historial</button>'
+        : '';
 
   const aviso = configured
     ? ''
@@ -335,6 +372,7 @@ ${bandaDemo}
       <button class="f" type="button" data-filtro="sin_leer">Sin leer</button>
       <button class="f" type="button" data-filtro="esperan">Esperan respuesta</button>
       <button class="f" type="button" data-filtro="ventana">Escribieron hoy</button>
+      <button class="f" type="button" data-filtro="grupos">Grupos</button>
     </div>
     <div class="chats" id="chats"></div>
     <div class="resumen hidden" id="rb-resumen"></div>
@@ -360,20 +398,24 @@ ${bandaDemo}
         Los mensajes que te escriban apareceran aqui solos.</p>
       </div>
     </div>
+    <div class="historial hidden" id="historial-bar"><button type="button" id="traer-historial" title="Le pide al teléfono los 50 mensajes anteriores de este chat">⤒ Traer mensajes anteriores del teléfono</button> <button type="button" id="sincronizar-chat" title="Le pide al teléfono lo último de este chat: lo que WhatsApp no entregó aquí (por ejemplo un “ver una vez”) aparece si el teléfono lo manda">⟳ Traer lo que falta del teléfono</button></div>
     <div class="messages hidden" id="messages"></div>
     <div class="tools hidden plegado" id="tools">
+      <button id="elegir-archivo" title="Foto, video, audio o documento (también puedes pegarlo con Ctrl+V o arrastrarlo aquí)">📷 Foto o archivo</button>
       <input id="loc" placeholder="Pega un link de mapa o coordenadas para mandar el pin">
       <button id="send-loc">Mandar pin</button>
       <button id="ask-loc">Pedir su ubicacion</button>
     </div>
+    <input type="file" id="archivo" class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip">
+    <div class="previa hidden" id="adjunto-previa"></div>
     <div class="atajos hidden" id="atajos-popup"></div>
     <div class="stickers-popup hidden" id="stickers-popup"></div>
     <div class="rapidas-barra hidden" id="rapidas-barra"></div>
     <div class="composer hidden" id="composer">
-      <button class="ghost" id="mas" title="Mandar o pedir ubicacion">📎</button>
+      <button class="ghost" id="mas" title="Foto, archivo o ubicación">📎</button>
       <button class="ghost" id="rapidas" title="Respuestas rápidas (escribe / en el mensaje)">⚡</button>
       <button class="ghost" id="stickers-boton" title="Mandar un sticker">🙂</button>
-      <textarea id="text" rows="1" placeholder="Escribe un mensaje (/ para respuestas rápidas)"></textarea>
+      <textarea id="text" rows="1" placeholder="Escribe un mensaje (/ para respuestas rápidas · Ctrl+V pega una foto)"></textarea>
       <button id="send" title="Enviar">➤</button>
     </div>
     <div class="confirmar hidden" id="confirmar-cierre"></div>
@@ -382,7 +424,7 @@ ${bandaDemo}
   </div>
 </div>`;
 
-  const script = String.raw`
+  const script = `var TEXTO_VER_UNA_VEZ = ${JSON.stringify(TEXTO_VER_UNA_VEZ)}; var PROVEEDOR = ${JSON.stringify(proveedor)};\n` + String.raw`
 /* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
 async function api(path, options) {
   options = options || {};
@@ -432,6 +474,12 @@ function inicial(nombre, tel) {
   var s = (nombre || '').trim();
   if (s) return s[0].toUpperCase();
   return (tel || '?').slice(-2, -1) || '#';
+}
+/* Un grupo sin nombre todavia se ensena como "Grupo", no como su jid. */
+function nombreDe(c) {
+  if (c.name) return c.name;
+  if (c.tipo === 'grupo') return 'Grupo de WhatsApp';
+  return c.phone;
 }
 function tick(status) {
   if (status === 'read') return '<span class="tick read">✓✓</span>';
@@ -499,6 +547,49 @@ var pintado = 0;       /* numero de la ultima que llego a pintarse */
 var conversations = [];
 var templates = [];
 var lastCount = 0;
+/* El hilo abierto: lo que llego del servidor mas las paginas anteriores que
+   se fueron cargando al subir. El refresco de cada 5 s trae solo lo ultimo y
+   se funde aqui, para no perder lo antiguo ya cargado. */
+var hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false };
+
+function fundirHilo(contactId, nuevos, masAntiguos) {
+  if (hilo.contactId !== contactId) hilo = { contactId: contactId, mensajes: [], masAntiguos: false, cargando: false };
+  var porId = {};
+  hilo.mensajes.forEach(function (m) { porId[m.id] = m; });
+  nuevos.forEach(function (m) { porId[m.id] = m; });
+  hilo.mensajes = Object.keys(porId).map(function (k) { return porId[k]; }).sort(function (a, b) {
+    var ta = new Date(a.createdAt).getTime(), tb = new Date(b.createdAt).getTime();
+    return ta - tb || a.id - b.id;
+  });
+  if (masAntiguos !== undefined) hilo.masAntiguos = masAntiguos;
+  return hilo.mensajes;
+}
+
+/* Trae la pagina anterior a lo mas viejo que hay en pantalla, sin mover la vista. */
+async function cargarMasAntiguos() {
+  if (!current || modo !== 'chat' || hilo.cargando || !hilo.masAntiguos || hilo.contactId !== current.id) return;
+  var primero = hilo.mensajes[0];
+  if (!primero) return;
+  hilo.cargando = true;
+  var box = document.getElementById('messages');
+  var altoAntes = box.scrollHeight, topAntes = box.scrollTop;
+  var boton = box.querySelector('.mas-antiguos button');
+  if (boton) { boton.disabled = true; boton.textContent = 'Cargando...'; }
+  try {
+    var data = await api('/admin/chat/' + current.id + '?limit=80&before=' + primero.id);
+    if (!current || hilo.contactId !== current.id) return;
+    var mensajes = fundirHilo(current.id, data.messages, data.hasMore);
+    renderMessages(mensajes, false, true);
+    box.scrollTop = box.scrollHeight - altoAntes + topAntes;
+  } catch (error) { toast(error.message); }
+  finally { hilo.cargando = false; }
+}
+document.getElementById('messages').addEventListener('scroll', function () {
+  if (this.scrollTop < 80) cargarMasAntiguos();
+});
+document.getElementById('messages').addEventListener('click', function (e) {
+  if (e.target.closest('[data-mas-antiguos]')) cargarMasAntiguos();
+});
 /* 'chat' = conversacion viva; 'respaldo' = hilo guardado, solo lectura.
    El refresco automatico mira esto: repintar el chat vivo encima de un
    respaldo abierto lo cerraria solo cada cinco segundos. */
@@ -509,6 +600,7 @@ var enRespaldos = false;
    o que escribieron en las ultimas 24 h (se les puede escribir libre). */
 var filtroLista = 'todos';
 function pasaFiltro(c) {
+  if (filtroLista === 'grupos') return c.tipo === 'grupo';
   if (filtroLista === 'sin_leer') return c.unread > 0;
   if (filtroLista === 'esperan') return c.lastMessage && c.lastMessage.direction === 'in';
   if (filtroLista === 'ventana') return c.windowOpen;
@@ -544,10 +636,12 @@ async function loadChats(keepScroll) {
       var last = c.lastMessage;
       var prefijo = last && last.direction === 'out' ? tick(last.status) + ' ' : '';
       var texto = last ? (last.body || '') : 'Sin mensajes todavia';
+      var grupo = c.tipo === 'grupo';
       return '<div class="chat' + (current && current.id === c.contactId ? ' active' : '') + '" data-id="' + esc(c.contactId) + '">' +
-        '<div class="avatar ' + colorDe(c.phone) + '">' + esc(inicial(c.name, c.phone)) + '</div>' +
+        (grupo ? '<div class="avatar grupo" title="Grupo de WhatsApp">👥</div>'
+               : '<div class="avatar ' + colorDe(c.phone) + '">' + esc(inicial(c.name, c.phone)) + '</div>') +
         '<div class="body"><div class="top">' +
-          '<span class="name">' + esc(c.name || c.phone) + '</span>' +
+          '<span class="name">' + esc(nombreDe(c)) + '</span>' +
           '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
         '</div><div class="last">' + prefijo + esc(texto.slice(0, 70)) +
           (c.unread ? '<span class="badge">' + c.unread + '</span>' : '') +
@@ -581,6 +675,10 @@ async function openChat(contactId, silent) {
     if (mia < pintado) return;
     pintado = mia;
     var nuevo = !current || current.id !== contactId;
+    // Al abrir un hilo se parte de lo que dice el servidor; en un refresco
+    // se conserva lo que ya se cargo al subir (y si quedaban mas antiguos).
+    var otroHilo = hilo.contactId !== contactId;
+    var mensajesHilo = fundirHilo(contactId, data.messages, otroHilo ? data.hasMore : undefined);
     current = data.contact;
     current.pedido = data.reparto ? data.reparto.referencia : null;
     current.reparto = data.reparto || null;
@@ -591,32 +689,54 @@ async function openChat(contactId, silent) {
     ver('thread-head', true);
     ver('placeholder', false);
     ver('messages', true);
-    document.getElementById('t-avatar').textContent = inicial(current.name, current.phone);
-    document.getElementById('t-name').textContent = current.name || current.phone;
-    document.getElementById('t-sub').innerHTML = esc(current.phone) + ' · ' +
-      (current.optOutAt ? '<span class="pill bad">dado de baja</span>'
-        : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
-        : '<span class="pill warn">fuera de las 24 h</span>') +
-      (data.reparto ? ' · <a class="link" href="/rutas" title="Ver en Ubicaciones para reparto">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '');
+    var esGrupo = current.tipo === 'grupo';
+    var avatar = document.getElementById('t-avatar');
+    avatar.textContent = esGrupo ? '👥' : inicial(current.name, current.phone);
+    avatar.classList.toggle('grupo', esGrupo);
+    document.getElementById('t-name').textContent = nombreDe(current);
+    if (esGrupo) {
+      document.getElementById('t-sub').innerHTML = '<span class="pill ok">grupo de WhatsApp</span> · ' +
+        'aquí no contesta ningún automatismo: lo que escribas lo mandas tú' +
+        (data.canWrite ? '' : ' · <span class="pill warn">' + esc(data.blockedReason || 'no se puede escribir') + '</span>');
+    } else {
+      document.getElementById('t-sub').innerHTML = esc(current.phone) + ' · ' +
+        (current.optOutAt ? '<span class="pill bad">dado de baja</span>'
+          : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
+          : '<span class="pill warn">fuera de las 24 h</span>') +
+        (data.reparto ? ' · <a class="link" href="/rutas" title="Ver en Ubicaciones para reparto">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '');
+    }
+    /* La ficha y el boton del bot son de un cliente; en un grupo no hay ni
+       ficha ni bot que callar. */
+    ver('t-panel', !esGrupo);
+    ver('pausar-bot', !esGrupo);
+    ver('historial-bar', false);
 
     pintarBoton(current.botPausadoAt);
 
-    renderMessages(data.messages, nuevo);
+    renderMessages(mensajesHilo, nuevo);
     renderComposer(data);
+    // Traer lo anterior solo tiene sentido con el QR (el telefono es quien lo
+    // tiene) y con al menos un mensaje que sirva de referencia.
+    ver('historial-bar', PROVEEDOR === 'local');
     if (!silent) loadChats(true);
   } catch (error) { toast(error.message); }
 }
 
-function renderMessages(messages, scrollToEnd) {
+function renderMessages(messages, scrollToEnd, mantenerVista) {
   var box = document.getElementById('messages');
   var cerca = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   if (!messages.length) {
-    var vacio = '<div class="empty">Sin mensajes con este contacto todavia.<br>Escribele tu, si su ventana esta abierta.</div>';
+    var vacio = current && current.tipo === 'grupo'
+      ? '<div class="empty">Todavía no hay mensajes de este grupo.<br>Lo que escriban ahí aparecerá aquí, y tú puedes escribir desde abajo.</div>'
+      : '<div class="empty">Sin mensajes con este contacto todavia.<br>Escribele tu, si su ventana esta abierta.</div>';
     if (box.innerHTML !== vacio) box.innerHTML = vacio;
     lastCount = 0;
     return;
   }
   var html = '', dia = '', diaPrevio = '';
+  if (hilo.masAntiguos) {
+    html += '<div class="mas-antiguos"><button type="button" data-mas-antiguos="1" title="También se cargan solos al subir">↑ Ver mensajes anteriores</button></div>';
+  }
   messages.forEach(function (m, i) {
     var d = dayLabel(m.createdAt);
     if (d !== dia) { dia = d; html += '<div class="day">' + esc(d) + '</div>'; }
@@ -624,20 +744,46 @@ function renderMessages(messages, scrollToEnd) {
     var primero = i === 0 || messages[i - 1].direction !== m.direction || d !== diaPrevio;
     diaPrevio = d;
     var soloSticker = m.kind === 'sticker' && !(m.body || '').trim();
+    // En un grupo, quien lo dijo: en el primero del bloque o cuando cambia
+    // de persona, que es como lo hace WhatsApp.
+    var autor = m.direction === 'in' && m.payload && m.payload.autor ? m.payload.autor : null;
+    var autorPrevio = i > 0 && messages[i - 1].payload && messages[i - 1].payload.autor ? messages[i - 1].payload.autor : null;
+    var cambiaAutor = autor && (!autorPrevio || autorPrevio.telefono !== autor.telefono || autorPrevio.nombre !== autor.nombre);
+    if (autor && (primero || cambiaAutor)) primero = true;
     html += '<div class="msg ' + (m.direction === 'out' ? 'out' : 'in') +
       (primero ? ' primero' : '') + (soloSticker ? ' solo-sticker' : '') + '">' +
+      (autor && primero ? autorHtml(autor) : '') +
       adjuntoHtml(m) +
       withLinks(cuerpoVisible(m)) +
+      verUnaVezHtml(m) +
+      (m.payload && m.payload.borradoPorRemitente ? '<span class="borrado" title="' + esc(hhmm(m.payload.borradoPorRemitente)) + '">🗑 Lo eliminó para todos · aquí se conserva</span>' : '') +
       '<span class="meta">' + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
       '</div>';
   });
   if (box.innerHTML !== html) box.innerHTML = html;
   void cargarMedios(box);
-  if (scrollToEnd || cerca || messages.length !== lastCount) box.scrollTop = box.scrollHeight;
+  if (!mantenerVista && (scrollToEnd || cerca || messages.length !== lastCount)) box.scrollTop = box.scrollHeight;
   lastCount = messages.length;
 }
 
 /**
+
+function autorHtml(autor) {
+  var nombre = autor.nombre || autor.telefono || 'Alguien del grupo';
+  return '<span class="autor ' + colorDe(autor.telefono || nombre) + '">' + esc(nombre) +
+    (autor.telefono && autor.nombre ? '<span class="tel">' + esc(autor.telefono) + '</span>' : '') + '</span>';
+}
+
+/*
+ * El "ver una vez" que WhatsApp no entrego: el cuerpo ya lo explica; aqui va
+ * el boton para pedirle al cliente que lo mande normal, si no se le pidio ya
+ * solo (Configuracion). En un grupo no se pide: seria escribirle a todos.
+ */
+function verUnaVezHtml(m) {
+  if (m.direction !== 'in' || !m.payload || !m.payload.viewOnce) return '';
+  if (current && current.tipo === 'grupo') return '';
+  return '<span class="solo-telefono"><button type="button" data-pedir-normal="1">Pedirle que la mande normal</button></span>';
+}
 
 /*
  * El texto del mensaje, sin la etiqueta de relleno.
@@ -763,6 +909,86 @@ function cargaFallida() {
 
 
 /* Guardar en la biblioteca un sticker que mando el cliente. */
+var historialTodos = document.getElementById('historial-todos');
+var historialTexto = historialTodos ? historialTodos.textContent : '';
+var sondeoHistorial = null;
+function pintarProgresoHistorial(p) {
+  if (!historialTodos) return;
+  if (p.enMarcha) {
+    historialTodos.disabled = true;
+    historialTodos.textContent = '⤒ Trayendo ' + p.hechos + '/' + p.chats + ' · ' + p.mensajes + ' mensajes' + (p.chatActual ? ' · ' + p.chatActual.slice(0, 18) : '');
+    historialTodos.title = p.detalle || '';
+  } else {
+    historialTodos.disabled = false;
+    historialTodos.textContent = historialTexto;
+    historialTodos.title = 'Le pide al teléfono TODO lo anterior de cada chat, hasta que no quede más';
+  }
+}
+async function sondearHistorial() {
+  try {
+    var p = await api('/admin/local/historial-todos');
+    pintarProgresoHistorial(p);
+    if (p.enMarcha) {
+      if (!sondeoHistorial) sondeoHistorial = setInterval(sondearHistorial, 3000);
+    } else if (sondeoHistorial) {
+      clearInterval(sondeoHistorial); sondeoHistorial = null;
+      toast((p.detalle || 'Historial traído.') + (p.sinReferencia
+        ? ' Quedan ' + p.sinReferencia + ' chats sin ningún mensaje aquí: el teléfono solo los manda al vincular. Para traerlos todos: Conexión de WhatsApp → Desconectar la cuenta → Conectar y mostrar el QR → escanear; al terminar, el historial completo se trae solo.'
+        : ''));
+      loadChats(true);
+      if (current && modo === 'chat') openChat(current.id, true);
+    }
+  } catch (error) { /* sin sesion local: nada que sondear */ }
+}
+if (historialTodos) {
+  historialTodos.onclick = async function () {
+    historialTodos.disabled = true;
+    try {
+      var r = await api('/admin/local/historial-todos', { method: 'POST' });
+      toast(r.yaEnMarcha ? 'Ya se está trayendo el historial.' :
+        'Trayendo TODO el historial de ' + r.chats + ' chats: va chat por chat y tarda unos minutos. El botón muestra cuánto va.' +
+        (r.sinReferencia ? ' ' + r.sinReferencia + ' chats sin ningún mensaje aquí se saltan (el teléfono necesita uno de referencia).' : ''));
+      pintarProgresoHistorial(r);
+      sondearHistorial();
+    } catch (error) { toast(error.message); historialTodos.disabled = false; }
+  };
+  // Si ya estaba en marcha (otra pestaña, o se recargo la pagina), se sigue.
+  sondearHistorial();
+}
+document.getElementById('sincronizar-chat').onclick = async function () {
+  if (!current) return;
+  var boton = this;
+  boton.disabled = true;
+  try {
+    var r = await api('/admin/local/sincronizar/' + encodeURIComponent(current.id), { method: 'POST' });
+    toast('Pedido al teléfono lo último de este chat. Lo que faltaba aparece en unos segundos, si el teléfono lo manda.');
+    var id = current.id;
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
+  } catch (error) { toast(error.message); }
+  finally { boton.disabled = false; }
+};
+document.getElementById('traer-historial').onclick = async function () {
+  if (!current) return;
+  var boton = this;
+  boton.disabled = true;
+  try {
+    var r = await api('/admin/local/historial/' + encodeURIComponent(current.id), { method: 'POST' });
+    toast(r.sinReferencia
+      ? 'Pedido al teléfono. Si tiene mensajes de este chat, aparecen en unos segundos; si no aparece nada, escribe algo o espera a que escriban y vuelve a pulsar.'
+      : 'Pedido al teléfono. Los mensajes anteriores a ' + (r.desde ? dayLabel(r.desde) : 'los de aquí') + ' aparecen arriba en unos segundos.');
+    var id = current.id;
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
+  } catch (error) { toast(error.message); }
+  finally { boton.disabled = false; }
+};
+document.addEventListener('click', function (event) {
+  var pedir = event.target.closest('[data-pedir-normal]');
+  if (!pedir || !current) return;
+  event.preventDefault();
+  if (!enviando) enviar({ text: TEXTO_VER_UNA_VEZ });
+});
 document.addEventListener('click', async function (event) {
   var boton = event.target && event.target.closest
     ? event.target.closest('[data-guardar-sticker]')
@@ -829,6 +1055,111 @@ function colorDe(phone) {
 }
 
 /* El clip abre y cierra la fila del pin. */
+/* --- fotos y archivos: pegar (Ctrl+V), arrastrar o elegir con el clip ------- */
+var MAX_ADJUNTO = 16 * 1024 * 1024;
+var adjuntoPendiente = null;
+
+function nombreDeTipo(mime) {
+  if (/^image\//.test(mime)) return 'foto';
+  if (/^video\//.test(mime)) return 'video';
+  if (/^audio\//.test(mime)) return 'audio';
+  return 'archivo';
+}
+
+/* Deja el fichero en la previa, con su pie, listo para mandar. */
+function elegirAdjunto(file) {
+  if (!file || !current) return;
+  if (modo !== 'chat') { toast('Abre una conversación viva para mandar archivos.'); return; }
+  if (file.size > MAX_ADJUNTO) { toast('WhatsApp no acepta ficheros de más de 16 MB. Usa uno más ligero.'); return; }
+  var mime = file.type || 'application/octet-stream';
+  var nombre = file.name || ('pegado.' + (mime.split('/')[1] || 'bin'));
+  var lector = new FileReader();
+  lector.onload = function () {
+    adjuntoPendiente = { datos: lector.result, mimeType: mime, filename: nombre, tipo: nombreDeTipo(mime), bytes: file.size };
+    pintarPrevia();
+  };
+  lector.onerror = function () { toast('No se pudo leer el fichero.'); };
+  lector.readAsDataURL(file);
+}
+
+function pintarPrevia() {
+  var box = document.getElementById('adjunto-previa');
+  var a = adjuntoPendiente;
+  if (!a) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  var vista = a.tipo === 'foto' ? '<img src="' + a.datos + '" alt="">'
+    : a.tipo === 'video' ? '<video src="' + a.datos + '" muted></video>'
+    : '<div class="icono">' + (a.tipo === 'audio' ? '🎵' : '📄') + '</div>';
+  box.innerHTML = vista +
+    '<div class="datos">' +
+      '<div class="nombre">' + esc(a.filename) + ' · ' + esc(pesoLegible(a.bytes)) + '</div>' +
+      (a.tipo === 'audio' ? '' : '<input id="adjunto-pie" placeholder="Escribe un pie de foto (opcional) y Enter para mandar" autocomplete="off">') +
+      '<div class="acciones"><button class="primary" id="adjunto-enviar">Enviar ' + esc(a.tipo) + '</button><button id="adjunto-cancelar">Cancelar</button></div>' +
+    '</div>';
+  box.classList.remove('hidden');
+  document.getElementById('adjunto-enviar').onclick = enviarAdjunto;
+  document.getElementById('adjunto-cancelar').onclick = function () { adjuntoPendiente = null; pintarPrevia(); input.focus(); };
+  var pie = document.getElementById('adjunto-pie');
+  if (pie) {
+    pie.focus();
+    pie.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); enviarAdjunto(); }
+      if (e.key === 'Escape') { e.preventDefault(); adjuntoPendiente = null; pintarPrevia(); input.focus(); }
+    });
+  }
+}
+
+async function enviarAdjunto() {
+  var a = adjuntoPendiente;
+  if (!a || !current) return;
+  if (enviando) { toast('Espera: todavía está saliendo el anterior.'); return; }
+  var pieEl = document.getElementById('adjunto-pie');
+  var caption = pieEl ? pieEl.value.trim() : '';
+  adjuntoPendiente = null;
+  pintarPrevia();
+  var pendiente = pintarPendiente((a.tipo === 'foto' ? '📷 ' : a.tipo === 'video' ? '🎬 ' : a.tipo === 'audio' ? '🎵 ' : '📄 ') + (caption || a.filename));
+  var boton = document.getElementById('send');
+  enviando++;
+  if (boton) boton.disabled = true;
+  try {
+    var r = await api('/admin/chat/adjunto', { method: 'POST', body: { contactId: current.id, datos: a.datos, mimeType: a.mimeType, filename: a.filename, caption: caption || undefined } });
+    if (r.ok === false) { if (pendiente) pendiente.remove(); toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas')); }
+    await openChat(current.id, true);
+    loadChats(true);
+  } catch (error) { if (pendiente) pendiente.remove(); toast(error.message); }
+  finally { enviando--; if (!enviando && boton) boton.disabled = false; }
+}
+
+/* Ctrl+V con una imagen en el portapapeles: va directo a la previa. */
+document.addEventListener('paste', function (e) {
+  if (!current || modo !== 'chat') return;
+  var items = (e.clipboardData && e.clipboardData.items) || [];
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].kind === 'file') {
+      var f = items[i].getAsFile();
+      if (f) { e.preventDefault(); elegirAdjunto(f); return; }
+    }
+  }
+});
+
+/* Arrastrar un fichero encima de la conversacion. */
+var thread = document.querySelector('.thread');
+var arrastres = 0;
+thread.addEventListener('dragenter', function (e) { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') >= 0) { arrastres++; thread.classList.add('arrastrando'); } });
+thread.addEventListener('dragleave', function () { arrastres = Math.max(0, arrastres - 1); if (!arrastres) thread.classList.remove('arrastrando'); });
+thread.addEventListener('dragover', function (e) { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') >= 0) e.preventDefault(); });
+thread.addEventListener('drop', function (e) {
+  arrastres = 0; thread.classList.remove('arrastrando');
+  if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+  e.preventDefault();
+  elegirAdjunto(e.dataTransfer.files[0]);
+});
+
+document.getElementById('elegir-archivo').onclick = function () { document.getElementById('archivo').click(); };
+document.getElementById('archivo').addEventListener('change', function () {
+  if (this.files && this.files[0]) elegirAdjunto(this.files[0]);
+  this.value = '';
+});
+
 document.getElementById('mas').onclick = function () {
   var tools = document.getElementById('tools');
   tools.classList.toggle('plegado');
@@ -843,6 +1174,8 @@ function renderComposer(data) {
   if (!composer || !tools || !locked) return;
 
   var barra = document.getElementById('rapidas-barra');
+  var enGrupo = data.contact && data.contact.tipo === 'grupo';
+  ver('ask-loc', !enGrupo);
   if (data.canWrite) {
     composer.classList.remove('hidden');
     tools.classList.remove('hidden');
@@ -856,6 +1189,11 @@ function renderComposer(data) {
   tools.classList.add('hidden');
   barra.classList.add('hidden');
   locked.classList.remove('hidden');
+
+  if (enGrupo) {
+    locked.innerHTML = '<b>' + esc(data.blockedReason || 'En este grupo no se puede escribir.') + '</b><br>Los grupos se leen y se contestan con el WhatsApp vinculado por QR en <a class="link" href="/setup">Conectar</a>.';
+    return;
+  }
 
   if (data.contact.optOutAt) {
     locked.innerHTML = '<b>Este contacto se dio de baja.</b><br>No se le puede escribir: una baja ignorada se convierte en bloqueo, y el bloqueo si castiga la calidad del numero.';
@@ -1019,7 +1357,8 @@ function ponerAtajo(a, directo) {
 function pintarBarraRapidas() {
   var barra = document.getElementById('rapidas-barra');
   if (!barra) return;
-  var html = '<button class="chip accion" type="button" data-accion="ubicacion" title="Le manda la solicitud de ubicación (Ctrl+Shift+U)">📍 Pedir ubicación</button>' +
+  var enGrupo = current && current.tipo === 'grupo';
+  var html = (enGrupo ? '' : '<button class="chip accion" type="button" data-accion="ubicacion" title="Le manda la solicitud de ubicación (Ctrl+Shift+U)">📍 Pedir ubicación</button>') +
     '<button class="chip accion" type="button" data-accion="pin" title="Mandarle un pin del mapa (Ctrl+Shift+L)">🗺 Mandar pin</button>' +
     atajos.map(function (a, i) {
       return '<button class="chip" type="button" data-rapida="' + i + '" title="Manda: ' + esc(rellenarAtajo(a.texto)) + ' (Shift+clic para retocarlo antes)">' + esc(etiquetaDe(a.atajo)) + '</button>';
@@ -1390,6 +1729,7 @@ async function abrirRespaldo(id) {
     var a = data.archive;
 
     modo = 'respaldo';
+    ver('historial-bar', false);
     /* Se suelta el chat que hubiera abierto: si no, el refresco lo repinta. */
     deseado = null;
 

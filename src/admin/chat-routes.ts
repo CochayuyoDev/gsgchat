@@ -13,12 +13,39 @@ import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
 import { extractLocation } from '../geo/extract.js';
+import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { extensionDe, idDeMedia, mediaDirectory } from '../whatsapp/local/media.js';
 
 export interface ChatDeps {
   repos: Repos;
   sender: Sender;
   config: Config;
   settings: SettingsService;
+  /** Donde se guardan los ficheros que se mandan desde el chat (y los que llegan). */
+  mediaDir?: string;
+}
+
+/** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
+export const MAX_BYTES_ADJUNTO = 16 * 1024 * 1024;
+
+const adjuntoSchema = z.object({
+  contactId: z.string().min(1),
+  /** El fichero en base64 (con o sin el prefijo data:...;base64,). */
+  datos: z.string().min(1),
+  mimeType: z.string().trim().min(3).max(120),
+  filename: z.string().trim().max(200).optional(),
+  caption: z.string().trim().max(1024).optional(),
+});
+
+/** Que es el fichero para WhatsApp, por su tipo. Un GIF va como documento: como foto llega quieto. */
+export function tipoDeAdjuntoSaliente(mimeType: string): 'image' | 'video' | 'audio' | 'document' {
+  const limpio = mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (['image/jpeg', 'image/png', 'image/webp'].includes(limpio)) return 'image';
+  if (limpio.startsWith('video/')) return 'video';
+  if (limpio.startsWith('audio/')) return 'audio';
+  return 'document';
 }
 
 const sendSchema = z.object({
@@ -58,6 +85,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * tal regla, y el chat se comporta como el WhatsApp Web de siempre.
    */
   const aMano = () => !ventanaObliga();
+
+  /**
+   * Un grupo solo existe con el WhatsApp conectado por QR (Baileys): la
+   * Cloud API de Meta no tiene grupos y WAHA no los trae por este camino.
+   */
+  const gruposDisponibles = () => providerOf(settings.current()) === 'local';
+  const SIN_GRUPOS = 'Los grupos solo se pueden atender con el WhatsApp conectado por QR.';
   // Con la API de Meta hay boton nativo; con el QR no (llegan rotos a una
   // cuenta personal), asi que el texto explica el clip en vez de un boton
   // que no existe.
@@ -104,6 +138,20 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const windowOpen = Boolean(
       contact.lastInboundAt && now - contact.lastInboundAt.getTime() < 24 * 60 * 60 * 1000,
     );
+
+    // En un grupo no hay ventana de 24 h ni consentimiento: se escribe como
+    // en el telefono, siempre que el proveedor tenga grupos.
+    if (contact.tipo === 'grupo') {
+      return {
+        contact,
+        reparto: null,
+        windowOpen: true,
+        canWrite: gruposDisponibles(),
+        blockedReason: gruposDisponibles() ? null : SIN_GRUPOS,
+        messages,
+        hasMore: messages.length === query.limit,
+      };
+    }
 
     return {
       contact,
@@ -159,12 +207,23 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const body = sendSchema.parse(request.body);
 
     let phone = body.phone ? normalizePhone(body.phone) : undefined;
+    let esGrupo = false;
     if (!phone && body.contactId) {
       const contact = await repos.contacts.getById(body.contactId);
       if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
       phone = contact.phone;
+      esGrupo = contact.tipo === 'grupo';
     }
     if (!phone) return reply.code(400).send({ error: 'falta el telefono' });
+
+    if (esGrupo) {
+      if (!gruposDisponibles()) return reply.code(400).send({ error: SIN_GRUPOS });
+      // Pedir la ubicacion o mandar una plantilla es cosa de un cliente, no
+      // de un grupo: ahi solo tiene sentido escribir, un sticker o un pin.
+      if (body.askLocation || body.templateName) {
+        return reply.code(400).send({ error: 'En un grupo solo se puede escribir un mensaje, un sticker o mandar un pin.' });
+      }
+    }
 
     if (body.askLocation) {
       return sender.send({
@@ -226,6 +285,42 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if (!body.text?.trim()) return reply.code(400).send({ error: 'el mensaje va vacio' });
 
     return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano() });
+  });
+
+  /**
+   * Una foto, un video, un audio o un documento escrito a mano desde el chat.
+   *
+   * Llega en base64 (pegado, arrastrado o elegido con el clip), se guarda en
+   * la misma carpeta que los adjuntos que entran -con el mismo tipo de id,
+   * para que el hilo lo pinte igual- y sale por el sender, con sus guardas.
+   * El limite del cuerpo va aparte del general: 4 MB no dan para un video.
+   */
+  app.post('/admin/chat/adjunto', { bodyLimit: Math.ceil(MAX_BYTES_ADJUNTO * 1.4) + 64 * 1024 }, async (request, reply) => {
+    const body = adjuntoSchema.parse(request.body ?? {});
+    const contact = await repos.contacts.getById(body.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    if (contact.tipo === 'grupo' && !gruposDisponibles()) return reply.code(400).send({ error: SIN_GRUPOS });
+
+    const datos = Buffer.from(body.datos.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!datos.length) return reply.code(400).send({ error: 'El fichero llegó vacío.' });
+    if (datos.length > MAX_BYTES_ADJUNTO) return reply.code(400).send({ error: 'WhatsApp no acepta ficheros de más de 16 MB. Usa uno más ligero.' });
+
+    const kind = tipoDeAdjuntoSaliente(body.mimeType);
+    const mimeType = body.mimeType.split(';')[0]!.trim().toLowerCase();
+    const extension = extensionDe(mimeType, kind === 'document' ? 'document' : kind) === '.bin' && body.filename?.includes('.')
+      ? `.${body.filename.split('.').pop()!.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'}`
+      : extensionDe(mimeType, kind === 'document' ? 'document' : kind);
+    const id = idDeMedia(`chat:${randomUUID()}`, extension);
+    const dir = deps.mediaDir ?? mediaDirectory();
+    await writeFile(path.join(dir, id), datos);
+
+    return sender.send({
+      phone: contact.phone,
+      kind: 'media',
+      category: 'UTILITY',
+      manual: aMano(),
+      media: { id, kind, datos, mimeType, filename: body.filename || undefined, caption: body.caption || undefined },
+    });
   });
 
   /** Abrir un chat con alguien que todavia no existe en la libreta. */

@@ -6,7 +6,7 @@
  * con dobles en memoria (`tests/fakes.ts`) sin levantar la base.
  */
 
-import type { Pool } from './pool.js';
+import { toleranteAlUuid, type Pool } from './pool.js';
 import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
 import { createMessagesRepo, type MessagesRepo } from './messages.js';
@@ -20,13 +20,22 @@ import { createActividadRepo, type ActividadRepo } from '../auth/actividad.js';
 import { createStickersRepo, type StickersRepo } from '../stickers/stickers.js';
 import { createWebhooksRepo, type WebhooksRepo } from '../webhooks/repo.js';
 import { createConectoresRepo, type ConectoresRepo } from '../conectores/repo.js';
+import { createEnvioAutomaticoRepo, type EnvioAutomaticoRepo } from '../envio-automatico/repo.js';
 
 // ---------------------------------------------------------------- modelos
 
 export interface Contact {
   id: string;
+  /** Digitos del telefono; en un grupo, su jid (`...@g.us`). */
   phone: string;
   name: string | null;
+  /**
+   * 'persona' es un cliente; 'grupo' es un grupo de WhatsApp en el que esta
+   * el numero. Un grupo se lee y se contesta a mano desde el chat, y queda
+   * fuera de todo lo demas: libreta, grupos de envio, reparto, asistente.
+   * Ausente = persona.
+   */
+  tipo?: 'persona' | 'grupo';
   optInAt: Date | null;
   optInSource: string | null;
   optOutAt: Date | null;
@@ -317,6 +326,8 @@ export interface ContactsRepo {
   getByPhone(phone: string): Promise<Contact | null>;
   getById(id: string): Promise<Contact | null>;
   upsertFromInbound(phone: string, name?: string): Promise<Contact>;
+  /** Un grupo de WhatsApp, por su jid. El nombre solo se pisa si viene. */
+  upsertGrupo(jid: string, nombre?: string | null): Promise<Contact>;
   setOptIn(phone: string, source: string): Promise<void>;
   setOptOut(phone: string): Promise<void>;
   touchInbound(phone: string, at: Date): Promise<void>;
@@ -459,8 +470,8 @@ export interface CampaignsRepo {
   siguientesPendientes(campaignId: string, limit: number, soloCanario?: boolean, ahora?: Date): Promise<CampaignRecipient[]>;
   /** Lo deja pendiente pero no antes de esa hora. */
   posponerDestinatario(id: number, hasta: Date, detalle: string | null): Promise<void>;
-  /** Pendientes que quedan, pospuestos incluidos. */
-  contarPendientes(campaignId: string): Promise<number>;
+  /** Pendientes que quedan, pospuestos incluidos; `soloCanario` cuenta solo el grupo canario. */
+  contarPendientes(campaignId: string, soloCanario?: boolean): Promise<number>;
   marcarDestinatario(
     id: number,
     estado: EstadoDestinatario,
@@ -519,6 +530,8 @@ export interface Repos {
   webhooks: WebhooksRepo;
   /** Conectores de tiendas (WooCommerce, Shopify). Ver src/conectores. */
   conectores: ConectoresRepo;
+  /** La lista de numeros a los que el sistema escribe solo. Ver src/envio-automatico. */
+  envioAutomatico: EnvioAutomaticoRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -532,6 +545,7 @@ interface ContactRow {
   id: string;
   phone: string;
   name: string | null;
+  tipo?: string | null;
   opt_in_at: Date | null;
   opt_in_source: string | null;
   opt_out_at: Date | null;
@@ -550,6 +564,7 @@ const toContact = (row: ContactRow): Contact => ({
   id: row.id,
   phone: row.phone,
   name: row.name,
+  tipo: row.tipo === 'grupo' ? 'grupo' : 'persona',
   optInAt: row.opt_in_at,
   optInSource: row.opt_in_source,
   optOutAt: row.opt_out_at,
@@ -733,7 +748,10 @@ const toSaludEvento = (row: SaludRow): SaludEvento => ({
   payload: row.payload,
 });
 
-export function createRepos(pool: Pool): Repos {
+export function createRepos(poolCrudo: Pool): Repos {
+  // Campanas, webhooks y conectores tienen id uuid: uno mal pegado en la
+  // URL ("None", "undefined") es un 404, no un 500 (ver toleranteAlUuid).
+  const pool = toleranteAlUuid(poolCrudo);
   const contacts: ContactsRepo = {
     async getByPhone(phone) {
       const { rows } = await pool.query<ContactRow>('select * from contacts where phone = $1', [phone]);
@@ -750,6 +768,16 @@ export function createRepos(pool: Pool): Repos {
          on conflict (phone) do update set name = coalesce(excluded.name, contacts.name)
          returning *`,
         [phone, name ?? null],
+      );
+      return toContact(rows[0]!);
+    },
+    async upsertGrupo(jid, nombre) {
+      const { rows } = await pool.query<ContactRow>(
+        `insert into contacts (phone, name, tipo)
+         values ($1, $2, 'grupo')
+         on conflict (phone) do update set name = coalesce(excluded.name, contacts.name), tipo = 'grupo'
+         returning *`,
+        [jid, nombre?.trim() || null],
       );
       return toContact(rows[0]!);
     },
@@ -776,7 +804,7 @@ export function createRepos(pool: Pool): Repos {
     async listOptedIn(limit, offset) {
       const { rows } = await pool.query<ContactRow>(
         `select * from contacts
-          where opt_in_at is not null and opt_out_at is null
+          where opt_in_at is not null and opt_out_at is null and tipo <> 'grupo'
           order by created_at
           limit $1 offset $2`,
         [limit, offset],
@@ -784,7 +812,9 @@ export function createRepos(pool: Pool): Repos {
       return rows.map(toContact);
     },
     async list(query) {
-      const conditions: string[] = [];
+      // La libreta son personas: un grupo no se importa, no da su
+      // consentimiento ni entra en un lote de reparto.
+      const conditions: string[] = ["c.tipo <> 'grupo'"];
       const params: unknown[] = [];
       if (query.q?.trim()) {
         params.push(`%${query.q.trim()}%`);
@@ -1630,9 +1660,10 @@ export function createRepos(pool: Pool): Repos {
         [id, hasta, detalle],
       );
     },
-    async contarPendientes(campaignId) {
+    async contarPendientes(campaignId, soloCanario = false) {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from campaign_recipients where campaign_id = $1 and estado = 'pendiente'`,
+        `select count(*)::int as total from campaign_recipients
+          where campaign_id = $1 and estado = 'pendiente' ${soloCanario ? 'and canario' : ''}`,
         [campaignId],
       );
       return rows[0]?.total ?? 0;
@@ -1773,6 +1804,7 @@ export function createRepos(pool: Pool): Repos {
     stickers: createStickersRepo(pool),
     webhooks: createWebhooksRepo(pool),
     conectores: createConectoresRepo(pool),
+    envioAutomatico: createEnvioAutomaticoRepo(pool),
   };
 }
 

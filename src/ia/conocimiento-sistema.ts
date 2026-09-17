@@ -32,6 +32,7 @@ export const SISTEMA_PARA_CLIENTES = `Cómo funciona el sistema por el que habla
 - NO puedes: cobrar, confirmar un pago, ver el estado de un pedido que no esté en lo que sabes, enviar fotos ni catálogos en imagen, ni hacer llamadas. Para eso pasas con una persona.
 - Si el cliente escribe BAJA, el sistema deja de escribirle; si escribe ALTA vuelve a recibir mensajes. Si te preguntan cómo dejar de recibir mensajes, diles que respondan BAJA.
 - Cuando el negocio hace reparto, el sistema le pide al cliente su ubicación por WhatsApp antes de salir; si el cliente pregunta por eso, explícale que basta con tocar el botón o compartir su ubicación desde el clip.
+- Cuando TÚ pides la ubicación con la marca, el sistema apunta al cliente en su lista de envío automático y le insistirá solo, cada pocas horas, si no la manda: no hace falta que insistas tú ni que vuelvas a pedirla en cada turno.
 - Si el negocio tiene tienda online conectada, los avisos de pedido (creado, pagado, enviado) le llegan solos al cliente por este mismo WhatsApp; no los inventes tú.
 - Mensajes cortos, uno por turno. No repitas el saludo si ya saludaste en la conversación.`;
 
@@ -68,8 +69,17 @@ CONECTAR MI WEB Y TIENDA (/panel#integraciones)
 CONTACTOS (/panel#contactos)
 Cada número con su consentimiento (opt-in) y su origen. Sin opt-in no sale nada iniciado por el negocio (campañas, reparto, plantillas); responder a quien escribe sí. Importación masiva, búsqueda, exportar CSV. Una baja (el cliente escribió BAJA) manda sobre todo.
 
+ENVÍO AUTOMÁTICO (/envio-automatico)
+La lista de números a los que el sistema escribe SOLO. El sistema no le escribe por su cuenta a nadie que no esté en ella (o en un lote del reparto). A cada número le manda un mensaje cada 3 horas (ajustable ahí mismo: cada cuántas horas, máximo por número, horario; vale también para el reparto), como una persona, solo en horario; así nunca se llega al cupo del día. Qué se manda: pedirle su ubicación (textos del reparto) o un mensaje propio con {nombre}, {negocio}, {pedido}. Sale solo de la lista cuando manda la ubicación (o contesta, si era "hasta que conteste"), al completar los envíos, si se da de baja, si no tiene WhatsApp, o al agotar los intentos (se avisa al supervisor). Entran números: a mano en la pantalla, por el asistente de WhatsApp cuando pide la ubicación en un chat, por la IA operadora si se lo piden, o por la API. Los clientes del reparto se ven en la misma lista; quitar uno lo pasa a una persona. "Últimos movimientos" dice quién entró, quién salió y por qué.
+
+LA IA OPERADORA (botón "IA" arriba en todas las pantallas; también en /manual y por la API /api/v1/ia/ordenes con permiso ia:ordenar)
+Recibe órdenes con palabras y las ejecuta con las acciones de su catálogo, por los mismos caminos que las pantallas y con la cuenta de quien ordena (queda en Actividad como "(por la IA)"). Puede: lista de envío automático (ver, poner, quitar, pausar, reanudar, ritmo), contactos (buscar, dar de alta, baja), mensajes (escribir a uno, pedir ubicación), chats (ver conversaciones, leer un chat, "de este me encargo yo"), reparto (estado, sin ubicación, cargar lote, arrancar/pausar, pasar a persona, reintentar), grupos y campañas (previsualizar, enviar, ver, pausar/reanudar/parar), número (estado, pausar envíos), historial de envíos, ubicaciones, configuración (ver/cambiar, solo admin), plantillas, enseñarle al asistente, resumen del sistema, actividad, integraciones, catálogo de Stoky. Pide confirmación para lo delicado (envíos a muchos, cargar lote, configuración, ritmo, parar el número) y para cualquier cambio decidido después de leer datos. No tiene claves de API, usuarios ni contraseñas, ni la conexión. "Solo simular" dice qué haría sin hacerlo.
+
+SEGURIDAD DEL ASISTENTE
+Los intentos de sacarlo de su papel, sacarle sus instrucciones, pedir tokens o accesos, hacerse pasar por el sistema o el dueño, pedir datos de otras personas o que escriba a otros números no llegan al modelo: se contestan con una frase fija; tres seguidos pasan el chat a una persona. Lo que va a salir se revisa (instrucciones, secretos, teléfonos ajenos no salen). Tope de turnos por cliente y hora. El asistente solo puede pedir la ubicación y pasar con una persona. Examen: grupo "Ataques al asistente" en Mi asistente IA.
+
 REPARTO (/rutas, modo avanzado)
-Se pega la lista del día (teléfono, nombre, pedido, dirección) y el sistema le pide la ubicación a cada cliente uno por uno, con pausas, en horario, tres intentos; "no soy yo" corta; lo que no se resuelve pasa a una persona con su incidencia (número corto, sin WhatsApp, respondió sin ubicación...). Avisos al coordinador y resumen a GSG. Ajustes del reparto: pausas, espera, intentos, horario, textos.
+Se pega la lista del día (teléfono, nombre, pedido, dirección) y el sistema le pide la ubicación a cada cliente uno por uno, con pausas, en horario, cada 3 horas (el mismo ritmo de Envío automático), tres intentos; "no soy yo" corta; lo que no se resuelve pasa a una persona con su incidencia (número corto, sin WhatsApp, respondió sin ubicación...). Avisos al coordinador y resumen a GSG. Ajustes del reparto: pausas, espera, intentos, horario, textos.
 
 CAMPAÑAS Y AUTOMATIZACIÓN (modo avanzado)
 Enviar a un grupo (elegir clientes por cómo están), Campañas por goteo con canario (primero un 10 %, se mira cómo cae, luego el resto al ritmo del número), Respuestas automáticas (reglas por palabra clave y secuencias de seguimiento, sin IA), Mensajes aprobados (plantillas de Meta y propias, con revisor de reglas de aprobación).
@@ -96,7 +106,9 @@ PREGUNTAS FRECUENTES
 - "No me llega el QR / no conecta": Conexión de WhatsApp, escanear de nuevo; con el cliente local a veces hay que volver a vincular tras un reinicio. Soporte (/soporte) tiene un diagnóstico para copiar.
 - "No salió un mensaje": Historial de envíos → columna motivo. Los más comunes: el contacto no tiene consentimiento (no_opt_in), se dio de baja (opt_out), ventana de 24 h cerrada con la API de Meta (window_closed), cupo del día (daily_cap), el número está en amarillo/naranja/rojo (Estado del número).
 - "El asistente no contesta": Mi asistente IA → ¿está encendido? ¿hay sesión de Puter? ¿el bot está pausado en ese chat (botón en Chats)? ¿el número está en modo prueba y ese cliente no está en la lista?
-- "Quiero que la IA sepa X": escribirlo en "Lo que sabe" de Mi asistente IA y guardar; se aplica al siguiente mensaje.
+- "Quiero que la IA sepa X": escribirlo en "Lo que sabe" de Mi asistente IA y guardar; se aplica al siguiente mensaje. O decírselo a la IA operadora: "que el asistente sepa que…".
+- "Quiero que le escriba solo a estos números / que le insista hasta que mande su ubicación": Envío automático (/envio-automatico), o pedírselo a la IA operadora con palabras.
+- "¿Por qué ya no está Juan en la lista?": Envío automático → Últimos movimientos (dice el motivo: mandó su ubicación, contestó, agotó los intentos, se dio de baja, lo quitó alguien).
 - "Cómo pongo el chat en mi web": Conectar mi web y tienda → Chat embebido: escribir el dominio de la web, y en la web pegar embed.js con un token.
 - "Cómo conecto WooCommerce/Shopify": Conectar mi web y tienda → Conectores → crear, pegar URL y secreto en la tienda, definir reglas, Mandar prueba.`;
 }

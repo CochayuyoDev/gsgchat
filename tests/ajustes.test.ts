@@ -44,7 +44,7 @@ describe('ajustes: puros', () => {
 
   it('sin nada guardado, los ajustes son los de la configuracion', () => {
     const a = ajustesPorDefecto(opciones);
-    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 3, horaInicio: 9, horaFin: 19 });
+    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 180, maxIntentos: 3, horaInicio: 9, horaFin: 19 });
     expect(a.plantillas.solicitud).toEqual([]);
     expect(aplicarAjustes(opciones, a)).toEqual(opciones);
   });
@@ -243,7 +243,7 @@ describe('ajustes y plantillas propias: la API', () => {
     const reset = await app.inject({ method: 'DELETE', url: '/admin/rutas/ajustes', headers: auth });
     expect(reset.statusCode).toBe(200);
     const despues = await app.inject({ method: 'GET', url: '/admin/rutas', headers: auth });
-    expect(despues.json().motor).toMatchObject({ espera: 30, horario: [9, 19] });
+    expect(despues.json().motor).toMatchObject({ espera: 180, horario: [9, 19] });
   });
 
   it('una plantilla propia se crea con lint, aparece en el catalogo y se borra; las del catalogo no', async () => {

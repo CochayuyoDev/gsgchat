@@ -20,6 +20,7 @@ export const PERMISOS = {
   'webhooks:gestionar': 'Crear, cambiar y borrar webhooks salientes',
   'embed:emitir': 'Pedir tokens para el chat embebido (lo hace el servidor del otro sistema)',
   'conectores:gestionar': 'Crear y configurar conectores de tiendas (WooCommerce, Shopify)',
+  'ia:ordenar': 'Darle ordenes con palabras a la IA operadora (POST /api/v1/ia/ordenes); ejecuta solo lo que los demas permisos de la clave dejan',
   '*': 'Todo, incluida la API interna /admin (como las claves de antes)',
 } as const;
 

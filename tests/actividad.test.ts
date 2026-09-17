@@ -54,6 +54,15 @@ describe('que se apunta y como', () => {
     expect(accionDe('POST', '/admin/rutas/previsualizar')).toBeNull();
     expect(accionDe('POST', '/admin/chat/:contactId/read')).toBeNull();
     expect(accionDe('POST', '/admin/lo-que-sea')).toBe('otro');
+    // Pausar/parar una campana, el bot por chat y los borrados del asistente
+    // salian como "Otra accion" (visto el 2026-09-17).
+    expect(accionDe('POST', '/admin/campaigns/:id/estado')).toBe('campana.estado');
+    expect(accionDe('POST', '/admin/chat/:contactId/bot')).toBe('chat.bot');
+    expect(accionDe('DELETE', '/admin/automation/rules/:id')).toBe('automatizacion.regla.borrar');
+    expect(accionDe('PUT', '/admin/leads/:contactId')).toBe('ficha');
+    expect(accionDe('POST', '/admin/ia/ayuda')).toBeNull();
+    expect(accionDe('POST', '/admin/ia')).toBe('ia.configurar');
+    for (const accion of ['campana.estado', 'chat.bot', 'chat.adjunto', 'solicitud.cambiar', 'respaldo.borrar', 'rastreo.cerrar', 'dev.simular']) expect(ETIQUETAS[accion]).toBeTruthy();
     expect(accionDe('POST', '/webhooks/whatsapp')).toBeNull();
     for (const accion of ['entrar', 'lote.crear', 'ajustes.guardar', 'otro']) expect(ETIQUETAS[accion]).toBeTruthy();
   });
@@ -66,6 +75,8 @@ describe('que se apunta y como', () => {
     expect(d).not.toHaveProperty('appSecret');
     expect((d!.nombre as string).length).toBe(120);
     expect(detalleSeguro(undefined)).toBeNull();
+    // Cambiar la contraseña manda { actual, nueva }: ninguna puede quedar en la bitacora.
+    expect(detalleSeguro({ actual: 'vieja-123', nueva: 'nueva-456', contrasena: 'x', pin: '1234' })).toBeNull();
   });
 });
 

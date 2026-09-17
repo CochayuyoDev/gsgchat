@@ -58,6 +58,8 @@ export interface Conversation {
   contactId: string;
   phone: string;
   name: string | null;
+  /** 'grupo' = un grupo de WhatsApp: `phone` es su jid y no se le automatiza nada. */
+  tipo: 'persona' | 'grupo';
   optInAt: Date | null;
   optOutAt: Date | null;
   lastInboundAt: Date | null;
@@ -96,6 +98,21 @@ export interface MessagesRepo {
    * entregar lo reciente: lo que ya se atendio no se atiende dos veces.
    */
   existsByWamid(wamid: string): Promise<boolean>;
+  /** Si ese mensaje ya tiene su fichero (foto, audio...) guardado. */
+  tieneAdjunto(wamid: string): Promise<boolean>;
+  /**
+   * El remitente lo "elimino para todos": se marca (payload.borradoPorRemitente)
+   * y se conserva tal cual. Devuelve si existia.
+   */
+  marcarBorradoPorRemitente(wamid: string, at: Date): Promise<boolean>;
+  /**
+   * Completa un mensaje que se guardo sin contenido con lo que llego despues.
+   *
+   * Es el caso del "ver una vez": primero entra el sobre vacio y, si el
+   * telefono lo reenvia, la foto. Solo completa, nunca degrada: si la fila
+   * ya tiene fichero no se toca. Devuelve si cambio algo.
+   */
+  completarPorWamid(wamid: string, datos: { kind: MessageKind; body: string | null; payload: Record<string, unknown> | null }): Promise<boolean>;
 
   // --- respaldo y limpieza (ver src/archive) ---
 
@@ -107,6 +124,14 @@ export interface MessagesRepo {
    * miles de mensajes sin cargarlo todo en memoria.
    */
   pageForArchive(contactId: string, afterId: number, limit: number): Promise<Message[]>;
+  /**
+   * El mensaje mas antiguo del hilo POR FECHA, con id de WhatsApp.
+   *
+   * No es el de menor `id`: el historial que manda el telefono entra
+   * despues (ids mas altos) con fechas mas viejas. Es el ancla para pedirle
+   * al telefono "lo anterior a esto".
+   */
+  masAntiguo(contactId: string): Promise<Message | null>;
   /**
    * Borra los mensajes del contacto hasta `upToId` incluido.
    *
@@ -213,6 +238,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         contact_id: string;
         phone: string;
         name: string | null;
+        tipo: string | null;
         opt_in_at: Date | null;
         opt_out_at: Date | null;
         last_inbound_at: Date | null;
@@ -224,7 +250,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         message_id: number | null;
         unread: number;
       }>(
-        `select c.id as contact_id, c.phone, c.name, c.opt_in_at, c.opt_out_at, c.last_inbound_at,
+        `select c.id as contact_id, c.phone, c.name, c.tipo, c.opt_in_at, c.opt_out_at, c.last_inbound_at,
                 m.direction, m.kind, m.body, m.status, m.created_at as message_at, m.id as message_id,
                 coalesce(u.unread, 0) as unread
            from contacts c
@@ -255,6 +281,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         contactId: r.contact_id,
         phone: r.phone,
         name: r.name,
+        tipo: r.tipo === 'grupo' ? 'grupo' : 'persona',
         optInAt: r.opt_in_at,
         optOutAt: r.opt_out_at,
         lastInboundAt: r.last_inbound_at,
@@ -309,6 +336,32 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       const { rows } = await pool.query<{ uno: number }>('select 1 as uno from messages where wamid = $1 limit 1', [wamid]);
       return rows.length > 0;
     },
+    async tieneAdjunto(wamid) {
+      const { rows } = await pool.query<{ uno: number }>(
+        `select 1 as uno from messages where wamid = $1 and payload ? 'media' limit 1`,
+        [wamid],
+      );
+      return rows.length > 0;
+    },
+    async marcarBorradoPorRemitente(wamid, at) {
+      const { rowCount } = await pool.query(
+        `update messages
+            set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object('borradoPorRemitente', $2::text)
+          where wamid = $1`,
+        [wamid, at.toISOString()],
+      );
+      return (rowCount ?? 0) > 0;
+    },
+    async completarPorWamid(wamid, datos) {
+      const { rowCount } = await pool.query(
+        `update messages
+            set kind = $2, body = $3, payload = $4
+          where wamid = $1
+            and (payload is null or not (payload ? 'media'))`,
+        [wamid, datos.kind, datos.body, datos.payload ? JSON.stringify(datos.payload) : null],
+      );
+      return (rowCount ?? 0) > 0;
+    },
 
     async contarEntrantesDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
@@ -359,6 +412,18 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         [contactId, afterId, limit],
       );
       return rows.map(toMessage);
+    },
+
+    async masAntiguo(contactId) {
+      const { rows } = await pool.query<Row>(
+        `select * from messages
+          where contact_id = $1 and wamid is not null
+            and wamid not like 'local:%' and wamid not like 'web:%'
+          order by created_at asc, id asc
+          limit 1`,
+        [contactId],
+      );
+      return rows[0] ? toMessage(rows[0]) : null;
     },
 
     async deleteByContact(contactId, upToId) {

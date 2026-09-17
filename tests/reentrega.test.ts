@@ -188,6 +188,19 @@ describe('modo prueba: SOLO_NUMEROS', () => {
     expect(repos._deliveries.at(-1)).toMatchObject({ status: 'blocked_by_gate' });
   });
 
+  it('lo que una persona escribe a mano en un grupo sale aunque el modo prueba este activo', async () => {
+    const { repos, sender, wa } = await build({ SOLO_NUMEROS: '51902464984, 51912426667' });
+    const grupo = await repos.contacts.upsertGrupo('120363429041095888@g.us', 'Reparto');
+    // A mano: es una persona escribiendo en el grupo, no el sistema.
+    const aMano = await sender.send({ phone: grupo.phone, kind: 'freeform', category: 'UTILITY', text: 'salimos 8am', manual: true });
+    expect(aMano.ok).toBe(true);
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'text', to: '120363429041095888@g.us', body: 'salimos 8am' });
+    // Automatico (sin `manual`): sigue frenado, como todo lo que no esta en la lista.
+    const solo = await sender.send({ phone: grupo.phone, kind: 'freeform', category: 'UTILITY', text: 'hola' });
+    expect(solo.ok).toBe(false);
+    if (!solo.ok && solo.blocked) expect(solo.code).toBe('allowlist');
+  });
+
   it('el asistente no contesta a quien no este en la lista, ni confirma la baja', async () => {
     const { deps, wa } = await build({ SOLO_NUMEROS: '51912426667' });
     await processChange('messages', entrante({ from: '5215599999999' }), deps);

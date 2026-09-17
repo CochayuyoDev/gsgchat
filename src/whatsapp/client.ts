@@ -80,6 +80,13 @@ export interface WhatsAppClient {
    * verdad; la Cloud API lo baja de `url`; WAHA lo manda como fichero.
    */
   sendSticker?(to: string, sticker: { datos: Buffer; mimeType: string; url: string }): Promise<SendResult>;
+  /**
+   * Una foto, un video, un audio o un documento, con el fichero ya leido.
+   *
+   * El cliente local lo manda tal cual por el socket; la Cloud API lo sube
+   * primero a Meta y lo manda por id; WAHA lo manda en base64.
+   */
+  sendMedia?(to: string, media: MediaSaliente): Promise<SendResult>;
   sendButtons(
     to: string,
     body: string,
@@ -151,6 +158,16 @@ export interface WhatsAppClient {
   >;
 }
 
+/** Lo que hace falta para mandar un fichero por cualquiera de los tres clientes. */
+export interface MediaSaliente {
+  kind: 'image' | 'video' | 'audio' | 'document';
+  datos: Buffer;
+  mimeType: string;
+  /** Nombre original: se ensena en los documentos. */
+  filename?: string;
+  caption?: string;
+}
+
 export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClient {
   const {
     token,
@@ -189,6 +206,29 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     }
 
     return payload as T;
+  }
+
+  /**
+   * Sube un fichero a Meta y devuelve su id. La Cloud API no acepta el
+   * binario en el mensaje: primero se sube, luego se manda por id.
+   */
+  async function upload(media: MediaSaliente): Promise<string> {
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', media.mimeType);
+    form.append('file', new Blob([media.datos], { type: media.mimeType }), media.filename ?? `archivo.${media.mimeType.split('/')[1] ?? 'bin'}`);
+    const response = await fetchImpl(`${baseUrl}/${graphVersion}/${phoneNumberId}/media`, {
+      method: 'POST',
+      // Sin content-type a mano: fetch pone el multipart con su frontera.
+      headers: { authorization: `Bearer ${token}` },
+      body: form,
+    });
+    const text = await response.text();
+    const payload = text ? (JSON.parse(text) as { id?: string; error?: { code?: number; message?: string } }) : {};
+    if (!response.ok || !payload.id) {
+      throw new WhatsAppApiError(payload.error?.message ?? `no se pudo subir el fichero (HTTP ${response.status})`, response.status, payload.error?.code, undefined, response.status >= 500);
+    }
+    return payload.id;
   }
 
   async function send(body: Record<string, unknown>): Promise<SendResult> {
@@ -235,6 +275,14 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     // falta subirlo antes como media.
     sendSticker(to, sticker) {
       return send({ to, type: 'sticker', sticker: { link: sticker.url } });
+    },
+
+    async sendMedia(to, media) {
+      const id = await upload(media);
+      const cuerpo: Record<string, unknown> = { id };
+      if (media.caption && media.kind !== 'audio') cuerpo.caption = media.caption;
+      if (media.kind === 'document' && media.filename) cuerpo.filename = media.filename;
+      return send({ to, type: media.kind, [media.kind]: cuerpo });
     },
 
     sendButtons(to, body, buttons) {

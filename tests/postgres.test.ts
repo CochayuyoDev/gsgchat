@@ -546,6 +546,75 @@ describe('conversaciones sobre Postgres', () => {
     const anteriores = await repos.messages.listMessages(contact.id, 2, ultimos[0]!.id);
     expect(anteriores.every((m) => m.id < ultimos[0]!.id)).toBe(true);
   });
+
+  it('un "ver una vez" que llego vacio se completa con la foto cuando el telefono la reenvia, y solo una vez', async () => {
+    const contact = (await repos.contacts.getByPhone('5215510000001'))!;
+    await repos.messages.add({ contactId: contact.id, direction: 'in', wamid: 'vo1', kind: 'unknown', body: '👁 Foto de "ver una vez"', payload: { viewOnce: { kind: 'unknown' } } });
+    expect(await repos.messages.tieneAdjunto('vo1')).toBe(false);
+
+    const foto = { kind: 'image' as const, body: 'foto · ver una vez', payload: { media: { id: 'a.jpg', kind: 'image', verUnaVez: true } } };
+    expect(await repos.messages.completarPorWamid('vo1', foto)).toBe(true);
+    expect(await repos.messages.tieneAdjunto('vo1')).toBe(true);
+    const fila = (await repos.messages.listMessages(contact.id, 200)).find((m) => m.wamid === 'vo1')!;
+    expect(fila).toMatchObject({ kind: 'image', body: 'foto · ver una vez', payload: { media: { id: 'a.jpg' } } });
+
+    // Ya con fichero no se degrada: ni por otro completar ni por la reentrega del sobre vacio.
+    expect(await repos.messages.completarPorWamid('vo1', { kind: 'unknown', body: 'sobre', payload: null })).toBe(false);
+    await repos.messages.add({ contactId: contact.id, direction: 'in', wamid: 'vo1', kind: 'unknown', body: 'sobre', payload: { viewOnce: { kind: 'unknown' } } });
+    expect((await repos.messages.listMessages(contact.id, 200)).find((m) => m.wamid === 'vo1')!.kind).toBe('image');
+    expect(await repos.messages.completarPorWamid('no-existe', foto)).toBe(false);
+  });
+});
+
+describe('el ancla del historial sobre Postgres', () => {
+  it('el mas antiguo es por fecha, no por orden de llegada, y con id de WhatsApp', async () => {
+    const contact = await repos.contacts.upsertFromInbound('5215510007777', 'Ancla');
+    // Llega primero lo de hoy; el historial del telefono entra despues con fechas viejas.
+    await repos.messages.add({ contactId: contact.id, direction: 'in', wamid: 'hoy-1', kind: 'text', body: 'hoy', createdAt: new Date('2026-09-16T21:00:00Z') });
+    await repos.messages.add({ contactId: contact.id, direction: 'out', wamid: 'viejo-1', kind: 'text', body: 'de antes', createdAt: new Date('2026-09-05T10:00:00Z') });
+    await repos.messages.add({ contactId: contact.id, direction: 'in', wamid: 'web:abc', kind: 'text', body: 'web', createdAt: new Date('2026-09-01T10:00:00Z') });
+    await repos.messages.add({ contactId: contact.id, direction: 'in', wamid: null, kind: 'text', body: 'sin id', createdAt: new Date('2026-08-01T10:00:00Z') });
+    const ancla = await repos.messages.masAntiguo(contact.id);
+    expect(ancla).toMatchObject({ wamid: 'viejo-1', direction: 'out' });
+    expect(await repos.messages.masAntiguo('00000000-0000-0000-0000-000000000000')).toBeNull();
+  });
+});
+
+describe('grupos de WhatsApp sobre Postgres', () => {
+  const JID = '120363412332267099@g.us';
+
+  it('la migracion 019 deja a los contactos de antes como personas', async () => {
+    const { rows } = await pool.query<{ tipo: string }>(`select tipo from contacts where phone = '5215510000001'`);
+    expect(rows[0]!.tipo).toBe('persona');
+    expect((await repos.contacts.getByPhone('5215510000001'))!.tipo).toBe('persona');
+  });
+
+  it('un grupo se guarda por su jid, con su nombre, y el nombre no se pisa con vacio', async () => {
+    const g = await repos.contacts.upsertGrupo(JID, 'Reparto Lima Norte');
+    expect(g).toMatchObject({ phone: JID, name: 'Reparto Lima Norte', tipo: 'grupo' });
+    const otraVez = await repos.contacts.upsertGrupo(JID, '');
+    expect(otraVez.id).toBe(g.id);
+    expect(otraVez.name).toBe('Reparto Lima Norte');
+    expect((await repos.contacts.upsertGrupo(JID, 'Reparto Lima Sur')).name).toBe('Reparto Lima Sur');
+    // Un entrante del grupo lo encuentra por el jid, sin crear otro.
+    const porEntrante = await repos.contacts.upsertFromInbound(JID);
+    expect(porEntrante.id).toBe(g.id);
+    expect(porEntrante.tipo).toBe('grupo');
+  });
+
+  it('esta en la lista de chats como grupo y fuera de la libreta y de los suscritos', async () => {
+    const g = (await repos.contacts.getByPhone(JID))!;
+    await repos.messages.add({ contactId: g.id, direction: 'in', wamid: 'g1', kind: 'text', body: 'hola grupo', payload: { autor: { telefono: '5215510000009', nombre: 'Pepe' } } });
+    const chats = await repos.messages.listConversations({ limit: 50, offset: 0 });
+    expect(chats.find((c) => c.contactId === g.id)).toMatchObject({ tipo: 'grupo', name: 'Reparto Lima Sur', lastMessage: { body: 'hola grupo' } });
+    expect(chats.find((c) => c.phone === '5215510000001')!.tipo).toBe('persona');
+
+    const libreta = await repos.contacts.list({ limit: 200, offset: 0 });
+    expect(libreta.items.some((c) => c.phone === JID)).toBe(false);
+    expect(libreta.total).toBe(libreta.items.length);
+    await repos.contacts.setOptIn(JID, 'prueba');
+    expect((await repos.contacts.listOptedIn(200, 0)).some((c) => c.phone === JID)).toBe(false);
+  });
 });
 
 describe('credenciales sobre Postgres', () => {
@@ -649,6 +718,23 @@ describe('integraciones sobre Postgres', () => {
     expect(await w.borrar(todo.id)).toBe(false);
     expect(await w.entregas(todo.id, 10)).toHaveLength(0);
     expect(await w.contarPendientes()).toBe(0);
+  });
+  it('un id que no es uuid es "no existe", no un 500 (webhooks y conectores)', async () => {
+    // Postgres contesta 22P02 al comparar la columna uuid con "no-es-uuid";
+    // antes subia hasta la API como "error interno" (visto el 2026-09-17).
+    expect(await repos.webhooks.obtener('no-es-uuid')).toBeNull();
+    expect(await repos.webhooks.conSecreto('undefined')).toBeNull();
+    expect(await repos.webhooks.entregas('no-es-uuid', 10)).toEqual([]);
+    expect(await repos.webhooks.actualizar('no-es-uuid', { url: 'https://a.test/x' })).toBeNull();
+    expect(await repos.webhooks.borrar('no-es-uuid')).toBe(false);
+    expect(await repos.webhooks.reencolarFallidas('no-es-uuid', new Date())).toBe(0);
+    expect(await repos.conectores.obtener('no-es-uuid')).toBeNull();
+    expect(await repos.conectores.borrar('no-es-uuid')).toBe(false);
+    // Las campanas tambien van por uuid: /admin/campaigns/None daba 500.
+    expect(await repos.campaigns.get('None')).toBeNull();
+    expect(await repos.deliveries.campaignStats('None')).toEqual({});
+    expect(await repos.campaigns.cifrasDestinatarios('undefined')).toEqual({});
+    expect(await repos.campaigns.cancelarPendientes('None', 'x')).toBe(0);
   });
 });
 

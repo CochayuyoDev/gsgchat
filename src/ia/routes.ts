@@ -4,6 +4,11 @@
  *  GET  /admin/ia          la configuracion (sin el token; solo si hay uno)
  *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado, `token: ""` lo quita
  *  POST /admin/ia/probar   una conversacion de prueba desde el navegador, sin WhatsApp
+ *
+ * La IA operadora (ver ordenes.ts), para cualquier cuenta del panel:
+ *  POST /admin/ia/ordenes            una orden con palabras; ejecuta y devuelve lo hecho y lo pendiente
+ *  POST /admin/ia/ordenes/confirmar  las acciones pendientes que la persona confirmo
+ *  GET  /admin/ia/ordenes/catalogo   que se le puede pedir
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -12,6 +17,7 @@ import { ErrorIA, MODELOS_SUGERIDOS } from './proveedores.js';
 import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
 import { ESCENARIOS, GRUPOS } from './escenarios.js';
 import { configIASchema, type ServicioIA } from './servicio.js';
+import { confirmacionSchema } from './ordenes.js';
 
 export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA }): Promise<void> {
   const { ia } = deps;
@@ -57,6 +63,38 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
       throw error;
     }
   });
+
+  const ordenSchema = z.object({
+    texto: z.string().trim().min(1).max(4000),
+    historial: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(6000) })).max(24).default([]),
+    simular: z.boolean().default(false),
+  });
+
+  /** La IA operadora: una orden con palabras, con la identidad de quien la da. */
+  app.post('/admin/ia/ordenes', async (request, reply) => {
+    const body = ordenSchema.parse(request.body ?? {});
+    if (!request.usuario) return reply.code(401).send({ error: 'Entra para dar órdenes.' });
+    if (!ia.estado().tieneToken) return reply.code(400).send({ error: 'La IA operadora usa la misma IA que el asistente: conecta Puter en Mi asistente IA (/panel#ia).' });
+    try {
+      return await ia.ordenar(body, request.usuario);
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(error.detalle === 'operador' && /Demasiadas/.test(error.message) ? 429 : 502).send({ error: error.detalle === 'operador' ? error.message : `La IA no respondió: ${error.message}${error.detalle ? ` (${error.detalle})` : ''}` });
+      throw error;
+    }
+  });
+
+  app.post('/admin/ia/ordenes/confirmar', async (request, reply) => {
+    const body = confirmacionSchema.parse(request.body ?? {});
+    if (!request.usuario) return reply.code(401).send({ error: 'Entra para confirmar.' });
+    try {
+      return { hechas: await ia.ejecutarConfirmadas(body.acciones, request.usuario) };
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(502).send({ error: error.message });
+      throw error;
+    }
+  });
+
+  app.get('/admin/ia/ordenes/catalogo', async () => ({ acciones: ia.catalogoOperador() }));
 
   app.post('/admin/ia/probar', async (request, reply) => {
     const body = z

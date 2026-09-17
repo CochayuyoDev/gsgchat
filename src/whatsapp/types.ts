@@ -24,11 +24,33 @@ export interface InboundMessage {
   /** Una reaccion (el corazon, el pulgar) a un mensaje nuestro. No es texto: no se contesta. */
   reaction?: { emoji: string };
   /**
-   * Un "ver una vez" que llego SIN el fichero. WhatsApp no manda la llave del
-   * adjunto a los dispositivos vinculados: solo se abre en el telefono. Se
-   * guarda para que el operador sepa que llego y donde mirarlo.
+   * "Eliminar para todos": el id del mensaje que el remitente quiso borrar.
+   * El sistema lo conserva y lo marca; no lo borra.
+   */
+  revoca?: string;
+  /**
+   * Un "ver una vez" que llego SIN el fichero.
+   *
+   * WhatsApp no le entrega el adjunto a los dispositivos vinculados: manda un
+   * sobre vacio (`<unavailable type="view_once">`), igual que a WhatsApp Web,
+   * que dice "solo puedes abrirla en tu telefono". Se guarda para que el
+   * operador sepa que llego, y aparte se le pide al telefono que la reenvie
+   * (ver `reenvio`): si la suelta, el mensaje se completa con la foto.
    */
   viewOnce?: { kind: 'image' | 'video' | 'audio' | 'document' | 'unknown' };
+  /**
+   * Es la segunda entrega del mismo mensaje, ahora con el fichero: el
+   * telefono contesto al reenvio que se le pidio. Reemplaza lo guardado con
+   * ese wamid (el sobre vacio) y no se contesta otra vez.
+   */
+  reenvio?: boolean;
+  /**
+   * Llego por un grupo de WhatsApp. `jid` es el grupo (`...@g.us`), `autor`
+   * el telefono de quien escribio dentro (null si solo se conoce su LID) y
+   * `autorNombre` como se presenta. Los grupos se leen y se contestan a
+   * mano: ningun automatismo actua en ellos.
+   */
+  grupo?: { jid: string; nombre?: string | null; autor: string | null; autorNombre?: string };
   /**
    * Llego del historial o de la cola de cuando el sistema estaba apagado, no
    * en vivo. Se guarda en la conversacion y NO se contesta: al reconectar,

@@ -12,6 +12,7 @@ import { normalizePhone, type Repos, type TemplateCategory } from '../db/repos.j
 import type { OutboundQueue } from '../outbound/queue.js';
 import { dailyCapFor } from '../outbound/throttle.js';
 import type { ServicioIA } from '../ia/servicio.js';
+import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import { createTrackingSession } from '../tracking/routes.js';
 import { buildTrackingUrls } from '../tracking/tokens.js';
 import type { TrackingHub } from '../tracking/realtime.js';
@@ -59,6 +60,10 @@ export interface AdminDeps {
   politica?: () => Politica;
   /** El asistente de IA, para saber si esta listo (primeros pasos). */
   ia?: ServicioIA;
+  /** La lista de envio automatico: el reparto se queda con los numeros que ya estaban en ella. */
+  lista?: ServicioEnvioAutomatico;
+  /** Donde se guardan los adjuntos; por defecto, .wa-media. */
+  mediaDir?: string;
 }
 
 const phoneSchema = z
@@ -130,7 +135,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
   await registerAutomationRoutes(app, { repos, sender });
-  await registerChatRoutes(app, { repos, sender, config, settings });
+  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir });
   await registerLeadsRoutes(app, {
     repos,
     panelStoky: config.STOKY_PANEL_URL,
@@ -170,6 +175,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     usaPlantillas: () => providerOf(settings.current()) === 'cloud',
     conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
     nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
+    lista: deps.lista,
   });
 
   // --- ajustes generales: lo que se cambia desde la pantalla ----------------

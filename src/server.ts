@@ -4,6 +4,7 @@
  */
 
 import Fastify, { type FastifyInstance } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
 import type { Config } from './config.js';
@@ -16,7 +17,7 @@ import { registerWebhookRoutes } from './whatsapp/webhook.js';
 import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
 import { registerTrackingRoutes } from './tracking/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
-import { registerAuth } from './auth/routes.js';
+import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, registerAuth } from './auth/routes.js';
 import { registerWebRoutes } from './web/routes.js';
 import type { SettingsService } from './settings/service.js';
 import type { StokyClient } from './stoky/client.js';
@@ -37,6 +38,8 @@ import { registerConectoresRoutes } from './conectores/routes.js';
 import { registerWebVisitantesRoutes } from './web-visitantes/routes.js';
 import type { ServicioIA } from './ia/servicio.js';
 import { registerIaRoutes } from './ia/routes.js';
+import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
+import { registerEnvioAutomaticoRoutes } from './envio-automatico/routes.js';
 
 export interface ServerDeps {
   config: Config;
@@ -65,10 +68,12 @@ export interface ServerDeps {
   ia?: ServicioIA;
   /** Reabrir la sesion local (Baileys) al arrancar si hay vinculacion guardada. */
   autoConectarLocal?: boolean;
+  /** La lista de numeros a los que el sistema escribe solo. Ver src/envio-automatico. */
+  lista?: ServicioEnvioAutomatico;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir, ia } = deps;
+  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir, ia, lista } = deps;
 
   // Los errores de validacion salen en espanol: son los que acaban en la
   // pantalla del operador, no en un log para programadores.
@@ -142,12 +147,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // El orden importa: registerAuth instala el hook que resuelve quien pide
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las
   // pantallas privadas; va antes de cualquier ruta que lo necesite.
-  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
+  const secretoInterno = randomBytes(24).toString('hex');
+  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName, secretoInterno });
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista });
   if (ia) await registerIaRoutes(app, { ia });
+  if (lista) await registerEnvioAutomaticoRoutes(app, { repos, lista });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
   await registerWahaWebhookRoutes(app, {
@@ -162,6 +169,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ajustes,
     stickers,
     ia,
+    lista,
     // Contestar a cada trozo de una rafaga le manda al cliente tres mensajes
     // seguidos sin que el haya escrito nada en medio (ver rafaga.ts).
     rafagaMs: config.RAFAGA_MS,
@@ -181,14 +189,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ajustes,
     stickers,
     ia,
+    lista,
+    mediaDir,
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
-  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus });
+  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia });
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.
   await registerEmbedRoutes(app, { config, ajustes });
   // El chat para los visitantes de la web del negocio (widget.js). Ver src/web-visitantes.
-  await registerWebVisitantesRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, bus: deps.bus, rafagaMs: config.RAFAGA_MS });
+  await registerWebVisitantesRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, bus: deps.bus, rafagaMs: config.RAFAGA_MS });
   // Conectores de tiendas (WooCommerce, Shopify): su webhook entra por /conectores/:id. Ver src/conectores.
   await registerConectoresRoutes(app, { repos, sender, settings, config, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
   await registerWebRoutes(app, {
@@ -202,8 +212,31 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ajustes,
     stickers,
     ia,
+    lista,
     autoConectarLocal: deps.autoConectarLocal,
   });
+
+  // La IA operadora ejecuta las ordenes por las mismas rutas que las
+  // pantallas, con la identidad de quien ordena (y en la bitacora se ve
+  // "(por la IA)"). Ver src/ia/ordenes.ts.
+  if (ia) {
+    ia.conectarOperador((usuario) => async (llamada) => {
+      const identidad = { ...usuario, nombre: `${usuario.nombre || usuario.usuario} (por la IA)` };
+      const res = await app.inject({
+        method: llamada.method,
+        url: llamada.url,
+        headers: { [CABECERA_INTERNA]: secretoInterno, [CABECERA_USUARIO_INTERNO]: JSON.stringify(identidad), 'content-type': 'application/json' },
+        payload: llamada.body === undefined ? undefined : JSON.stringify(llamada.body),
+      });
+      let json: unknown;
+      try {
+        json = res.body ? JSON.parse(res.body) : {};
+      } catch {
+        json = { error: res.body.slice(0, 300) };
+      }
+      return { status: res.statusCode, json };
+    });
+  }
 
   return app;
 }

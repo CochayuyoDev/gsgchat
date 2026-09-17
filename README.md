@@ -1412,3 +1412,35 @@ Los de salud (`tests/salud.test.ts`, `monitor.test.ts`, `goteo.test.ts`,
 `humano.test.ts`, `salud-sql.test.ts`) corren con un reloj propio: los dobles
 en memoria escriben sus fechas con ese reloj (`setFakeClock`) para que una
 ventana de "ultimas 24 h" signifique lo mismo dentro y fuera de la prueba.
+
+## Envío automático: a quién le escribe el sistema solo
+
+La regla: el sistema no le escribe por su cuenta a nadie que no esté en la
+lista de **Envío automático** (`/envio-automatico`) o en un lote del reparto.
+A cada número le manda un mensaje cada 3 horas (ajustable; vale también para
+el reparto), como una persona y solo en horario, hasta conseguir su ubicación
+o una respuesta; entonces lo saca solo. Entran números a mano, por el
+asistente de WhatsApp (cuando pide la ubicación en un chat), por la IA
+operadora o por la API. Código en `src/envio-automatico/` (repo, servicio,
+motor, rutas) y pantalla en `src/web/envio-automatico-page.ts`.
+
+## La IA operadora
+
+El botón **IA** del armazón (todas las pantallas) y `POST /api/v1/ia/ordenes`
+(permiso `ia:ordenar`) reciben órdenes con palabras. El modelo elige acciones
+del catálogo (`src/ia/acciones.ts`) y el sistema las ejecuta por los mismos
+endpoints del panel, con la identidad de quien ordena (`app.inject` con un
+secreto interno por proceso; en la bitácora sale "(por la IA)"). Consultas y
+cambios directos se hacen; lo delicado y cualquier cambio decidido tras leer
+datos queda pendiente de confirmar. Ver `src/ia/ordenes.ts`.
+
+## Seguridad de la IA
+
+`src/ia/seguridad.ts`: filtro determinista antes del modelo (extracción del
+prompt, cambio de papel, secretos, suplantación del sistema, datos ajenos,
+acciones sobre otros), revisión de la salida (huellas del prompt, tokens,
+rutas internas, teléfonos ajenos), tope de turnos por contacto y secretos
+tapados en lo que lee la IA operadora. El banco de ataques generado
+(`src/ia/seguridad-escenarios.ts`, miles de variantes) corre entero en
+`tests/ia-seguridad.test.ts`; una muestra es el grupo "seguridad" del examen
+de Mi asistente IA.

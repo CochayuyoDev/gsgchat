@@ -319,7 +319,17 @@ function crearGsgFalso(): GsgFalsoInterno {
 
 export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<Escenario> {
   const conGsg = opciones.gsgConectado ?? true;
+  // El horario y las pausas van TAMBIEN a la config del servidor: las rutas
+  // de /admin/rutas/ajustes rellenan lo que no se manda con lo de la config,
+  // y si eso fuera el 9-19 de fabrica, guardar solo `maxIntentos` dejaria al
+  // motor (que aqui corre 0-24) "fuera del horario" antes de las 9 y despues
+  // de las 19 de Lima. Con la misma fuente, la prueba no depende de la hora.
+  const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
+    RUTAS_HORA_INICIO: String(horaInicio),
+    RUTAS_HORA_FIN: String(horaFin),
+    RUTAS_PAUSA_MIN_SEG: String(PAUSA_SEGUNDOS),
+    RUTAS_PAUSA_MAX_SEG: String(PAUSA_SEGUNDOS),
     PUBLIC_BASE_URL: 'http://localhost:3000',
     DATABASE_URL: 'postgres://x/y',
     WHATSAPP_TOKEN: 't',
@@ -340,7 +350,6 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
   const inicio = opciones.arranque ?? new Date();
   let ahora = inicio;
   const reloj = () => ahora;
-  const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
 
   // La API de GSG de mentira se cuelga de `fetch` ANTES de armar el servidor:
   // el puerto real captura el fetch global al crearse.

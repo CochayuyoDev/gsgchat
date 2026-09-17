@@ -82,6 +82,11 @@ export function createDynamicWhatsAppClient(
       if (!cliente.sendSticker) throw new Error('este proveedor no manda stickers');
       return cliente.sendSticker(to, sticker);
     },
+    sendMedia: async (to, media) => {
+      const cliente = inner();
+      if (!cliente.sendMedia) throw new Error('este proveedor no manda fotos ni archivos');
+      return cliente.sendMedia(to, media);
+    },
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),

@@ -189,6 +189,19 @@ export interface ConsultaSolicitudes {
   offset: number;
 }
 
+/** Una solicitud viva con el lote al que pertenece (para la lista de envio automatico). */
+export interface SolicitudConLote extends Solicitud {
+  lote: Pick<Lote, 'id' | 'nombre' | 'estado'>;
+}
+
+/** Un evento del reparto con el cliente al que se refiere. */
+export interface EventoReciente extends EventoSolicitud {
+  phone: string | null;
+  nombre: string | null;
+  referencia: string | null;
+  loteNombre: string;
+}
+
 export interface RutasRepo {
   /** Los ajustes del reparto que se cambian desde la pantalla. */
   ajustes: AjustesRepo;
@@ -228,6 +241,15 @@ export interface RutasRepo {
     payload?: Record<string, unknown> | null,
   ): Promise<void>;
   eventos(solicitudId: number, limite?: number): Promise<EventoSolicitud[]>;
+  /**
+   * Las solicitudes a las que el reparto todavia les esta escribiendo (o
+   * les va a escribir), con su lote: pendientes, enviadas y respondidas de
+   * los lotes que no terminaron. Es lo que la lista de envio automatico
+   * ensena como "puestos por el reparto".
+   */
+  vivasEnLotesAbiertos(limite: number): Promise<SolicitudConLote[]>;
+  /** Los ultimos eventos de todo el reparto, con el cliente de cada uno. */
+  eventosRecientes(limite: number): Promise<EventoReciente[]>;
 
   encolarReporte(reporte: {
     solicitudId?: number | null;
@@ -686,6 +708,55 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     },
 
     // ---------------------------------------------------------- reportes
+
+    async vivasEnLotesAbiertos(limite) {
+      const { rows } = await pool.query<SolicitudRow & { lote_nombre: string; lote_estado: EstadoLote }>(
+        `select s.*, l.nombre as lote_nombre, l.estado as lote_estado
+           from rutas_solicitudes s
+           join rutas_lotes l on l.id = s.lote_id
+          where l.estado <> 'terminado'
+            and s.estado in ('pendiente','enviado','respondio')
+          order by coalesce(s.proximo_intento_at, s.created_at) asc, s.id asc
+          limit $1`,
+        [limite],
+      );
+      return rows.map((r) => ({ ...toSolicitud(r), lote: { id: r.lote_id, nombre: r.lote_nombre, estado: r.lote_estado } }));
+    },
+
+    async eventosRecientes(limite) {
+      const { rows } = await pool.query<{
+        id: number;
+        solicitud_id: number;
+        tipo: TipoEvento;
+        detalle: string | null;
+        payload: Record<string, unknown> | null;
+        created_at: Date;
+        phone: string | null;
+        nombre: string | null;
+        referencia: string | null;
+        lote_nombre: string;
+      }>(
+        `select e.*, s.phone, s.nombre, s.referencia, l.nombre as lote_nombre
+           from rutas_eventos e
+           join rutas_solicitudes s on s.id = e.solicitud_id
+           join rutas_lotes l on l.id = s.lote_id
+          order by e.id desc
+          limit $1`,
+        [limite],
+      );
+      return rows.map((r) => ({
+        id: Number(r.id),
+        solicitudId: Number(r.solicitud_id),
+        tipo: r.tipo,
+        detalle: r.detalle,
+        payload: r.payload,
+        createdAt: r.created_at,
+        phone: r.phone,
+        nombre: r.nombre,
+        referencia: r.referencia,
+        loteNombre: r.lote_nombre,
+      }));
+    },
 
     async encolarReporte(reporte) {
       const { rows } = await pool.query<ReporteRow>(

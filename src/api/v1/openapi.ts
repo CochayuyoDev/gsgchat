@@ -62,6 +62,40 @@ export function openApi(baseUrl: string): Json {
       '/openapi.json': { get: { summary: 'Este documento', responses: { 200: json({ type: 'object' }) } } },
       '/eventos': { get: { summary: 'Los eventos que se pueden suscribir y como se firma cada entrega', responses: { 200: json({ type: 'object' }) } } },
 
+      '/ia/ordenes': {
+        post: {
+          tags: ['ia'],
+          summary: 'Darle una orden con palabras a la IA operadora',
+          description: [
+            'Otro sistema (Stoky, un script) escribe lo que quiere en lenguaje natural ("pon al 987654321 en la lista',
+            'de envío automático para pedirle su ubicación", "¿cómo va el reparto?") y la IA lo ejecuta con las',
+            'acciones de su catálogo, SIEMPRE con los permisos de esta clave. Devuelve `texto` (la respuesta),',
+            '`hechas` (lo ejecutado, con su resultado) y `pendientes` (lo delicado, que hay que confirmar con',
+            '/ia/ordenes/confirmar después de que una persona lo vea). Con `simular: true` no cambia nada.',
+          ].join(' '),
+          ...permiso('ia:ordenar'),
+          requestBody: { required: true, content: { 'application/json': { schema: ref('Orden') } } },
+          responses: { 200: json(ref('RespuestaOrden')), 401: error('Sin clave'), 403: error('Sin permiso'), 409: error('La IA no esta conectada'), 429: error('Demasiadas ordenes seguidas'), 502: error('La IA no respondio'), 503: error('La IA no esta activa en este arranque') },
+        },
+      },
+      '/ia/ordenes/confirmar': {
+        post: {
+          tags: ['ia'],
+          summary: 'Ejecutar las acciones que quedaron pendientes de confirmar',
+          ...permiso('ia:ordenar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { acciones: { type: 'array', items: { type: 'object', description: 'Cada objeto `parametros` de una pendiente, con su `accion`' } } }, required: ['acciones'] } } } },
+          responses: { 200: json({ type: 'object', properties: { hechas: { type: 'array', items: ref('AccionHecha') } } }), 401: error('Sin clave'), 403: error('Sin permiso'), 503: error('La IA no esta activa') },
+        },
+      },
+      '/ia/ordenes/catalogo': {
+        get: {
+          tags: ['ia'],
+          summary: 'Que se le puede pedir a la IA operadora (nombre, tipo, descripcion, ejemplo)',
+          ...permiso('ia:ordenar'),
+          responses: { 200: json({ type: 'object', properties: { acciones: { type: 'array', items: { type: 'object' } } } }), 401: error('Sin clave'), 403: error('Sin permiso') },
+        },
+      },
+
       '/estado': {
         get: {
           tags: ['estado'],
@@ -299,6 +333,28 @@ export function openApi(baseUrl: string): Json {
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },
         Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
+        Orden: {
+          type: 'object',
+          properties: {
+            texto: { type: 'string', description: 'La orden, con palabras' },
+            historial: { type: 'array', description: 'Turnos anteriores de esta conversacion (user/assistant), si la hay', items: { type: 'object', properties: { role: { type: 'string', enum: ['user', 'assistant'] }, content: { type: 'string' } } } },
+            simular: { type: 'boolean', description: 'true = no ejecuta ningun cambio; dice que haria' },
+          },
+          required: ['texto'],
+        },
+        AccionHecha: {
+          type: 'object',
+          properties: { accion: { type: 'string' }, parametros: { type: 'object' }, tipo: { type: 'string', enum: ['consulta', 'cambio'] }, ok: { type: 'boolean' }, resumen: { type: 'string' }, ir: { type: 'string', description: 'La pantalla del panel donde se ve' } },
+        },
+        RespuestaOrden: {
+          type: 'object',
+          properties: {
+            texto: { type: 'string', description: 'Lo que la IA contesta a la persona' },
+            hechas: { type: 'array', items: ref('AccionHecha') },
+            pendientes: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, accion: { type: 'string' }, parametros: { type: 'object' }, descripcion: { type: 'string' }, motivo: { type: 'string' } } } },
+            simulado: { type: 'boolean' },
+          },
+        },
         Estado: {
           type: 'object',
           properties: {

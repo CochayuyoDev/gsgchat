@@ -23,6 +23,25 @@ export function createFakeMessages(
       return all.some((m) => m.wamid === wamid);
     },
 
+    async tieneAdjunto(wamid: string) {
+      return all.some((m) => m.wamid === wamid && Boolean(m.payload && 'media' in m.payload));
+    },
+
+    async marcarBorradoPorRemitente(wamid, at) {
+      const fila = all.find((m) => m.wamid === wamid);
+      if (!fila) return false;
+      fila.payload = { ...(fila.payload ?? {}), borradoPorRemitente: at.toISOString() };
+      return true;
+    },
+    async completarPorWamid(wamid, datos) {
+      const fila = all.find((m) => m.wamid === wamid);
+      if (!fila || (fila.payload && 'media' in fila.payload)) return false;
+      fila.kind = datos.kind;
+      fila.body = datos.body;
+      fila.payload = datos.payload;
+      return true;
+    },
+
     async contarEntrantesDesde(since: Date) {
       return all.filter((m) => m.direction === 'in' && m.createdAt >= since).length;
     },
@@ -99,6 +118,7 @@ export function createFakeMessages(
             contactId: c.id,
             phone: c.phone,
             name: c.name,
+            tipo: c.tipo ?? 'persona',
             optInAt: c.optInAt,
             optOutAt: c.optOutAt,
             lastInboundAt: c.lastInboundAt,
@@ -150,6 +170,14 @@ export function createFakeMessages(
         ).length;
       }
       return total;
+    },
+
+    async masAntiguo(contactId) {
+      return (
+        all
+          .filter((m) => m.contactId === contactId && m.wamid && !m.wamid.startsWith('local:') && !m.wamid.startsWith('web:'))
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id)[0] ?? null
+      );
     },
 
     async pageForArchive(contactId, afterId, limit) {

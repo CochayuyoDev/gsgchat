@@ -57,6 +57,12 @@ export const ajustesGeneralesSchema = z.object({
   }),
   humanizar: z.boolean().nullable(),
   autoPausa: z.boolean().nullable(),
+  /**
+   * Cuando un cliente manda una foto de "ver una vez" (que WhatsApp no
+   * entrega a los dispositivos vinculados) y el telefono no la suelta: si se
+   * le pide que la mande normal. null = si.
+   */
+  pedirVerUnaVezNormal: z.boolean().nullable(),
   /** Respuestas rapidas del chat: "/atajo" -> texto (y un sticker pegado, opcional). null = las de fabrica. */
   atajos: z
     .array(
@@ -119,6 +125,7 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   avisos: { supervisor: null },
   humanizar: null,
   autoPausa: null,
+  pedirVerUnaVezNormal: null,
   atajos: null,
   stickers: null,
   embebido: null,
@@ -133,6 +140,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   avisos: ajustesGeneralesSchema.shape.avisos.partial().optional(),
   humanizar: ajustesGeneralesSchema.shape.humanizar.optional(),
   autoPausa: ajustesGeneralesSchema.shape.autoPausa.optional(),
+  pedirVerUnaVezNormal: ajustesGeneralesSchema.shape.pedirVerUnaVezNormal.optional(),
   atajos: ajustesGeneralesSchema.shape.atajos.optional(),
   stickers: ajustesGeneralesSchema.shape.stickers.optional(),
   embebido: ajustesGeneralesSchema.shape.embebido.optional(),
@@ -149,6 +157,7 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     avisos: { ...base.avisos, ...(patch.avisos ?? {}) },
     humanizar: patch.humanizar !== undefined ? patch.humanizar : base.humanizar,
     autoPausa: patch.autoPausa !== undefined ? patch.autoPausa : base.autoPausa,
+    pedirVerUnaVezNormal: patch.pedirVerUnaVezNormal !== undefined ? patch.pedirVerUnaVezNormal : base.pedirVerUnaVezNormal,
     atajos: patch.atajos !== undefined ? patch.atajos : base.atajos,
     stickers: patch.stickers !== undefined ? patch.stickers : base.stickers,
     embebido: patch.embebido !== undefined ? patch.embebido : base.embebido,
@@ -218,6 +227,8 @@ export interface ServicioAjustes {
   atajos(): Array<{ atajo: string; texto: string; sticker?: string | null }>;
   /** Los origenes que pueden embeber el chat. Vacio = nadie. */
   dominiosEmbebido(): string[];
+  /** Si a un "ver una vez" que no se pudo abrir se contesta pidiendo la foto normal. */
+  pedirVerUnaVezNormal(): boolean;
 }
 
 export async function crearServicioAjustes(deps: {
@@ -316,5 +327,6 @@ export async function crearServicioAjustes(deps: {
     modoPruebaFijado: () => config.soloNumeros.length > 0,
     atajos: () => fresco().atajos ?? ATAJOS_POR_DEFECTO,
     dominiosEmbebido: () => fresco().embebido?.dominios ?? [],
+    pedirVerUnaVezNormal: () => fresco().pedirVerUnaVezNormal ?? true,
   };
 }

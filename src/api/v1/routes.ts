@@ -31,6 +31,9 @@ import { PERMISOS } from '../../auth/permisos.js';
 import { generarSecretoWebhook } from '../../webhooks/firma.js';
 import { entregarUna, type DespachadorDeps } from '../../webhooks/despachador.js';
 import { openApi } from './openapi.js';
+import { confirmacionSchema } from '../../ia/ordenes.js';
+import type { ServicioIA } from '../../ia/servicio.js';
+import { ErrorIA } from '../../ia/proveedores.js';
 
 export interface ApiV1Deps {
   repos: Repos;
@@ -44,6 +47,8 @@ export interface ApiV1Deps {
   webhooks?: Pick<DespachadorDeps, 'fetchImpl' | 'timeoutMs' | 'version'>;
   /** El bus de eventos, para el flujo en vivo (SSE). Sin el, la ruta responde 503. */
   bus?: Bus;
+  /** La IA operadora, para que otro sistema le de ordenes con palabras. Sin ella, 503. */
+  ia?: ServicioIA;
   ahora?: () => Date;
 }
 
@@ -459,6 +464,48 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     .url()
     .max(2000)
     .refine((u) => /^https?:\/\//i.test(u), { message: 'la URL tiene que empezar por http:// o https://' });
+
+  // --- la IA operadora para otros sistemas ---------------------------------
+  //
+  // Stoky (o cualquier programa con clave) le manda una orden con palabras y
+  // recibe lo hecho y lo pendiente. Ejecuta con los permisos de la clave:
+  // una clave acotada solo llega a lo que /api/v1 le deja; con '*' opera el
+  // panel entero. Lo pendiente de confirmar se confirma con una segunda
+  // llamada (la persona lo vio en la pantalla del otro sistema).
+  const ordenApiSchema = z.object({
+    texto: z.string().trim().min(1).max(4000),
+    historial: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(6000) })).max(24).default([]),
+    simular: z.boolean().default(false),
+  });
+
+  app.post('/api/v1/ia/ordenes', { config: { permiso: 'ia:ordenar' } }, async (request, reply) => {
+    if (!deps.ia) return reply.code(503).send({ error: 'la IA operadora no esta activa en este arranque' });
+    if (!deps.ia.estado().tieneToken) return reply.code(409).send({ error: 'la IA no esta conectada: un administrador tiene que conectar Puter en Mi asistente IA' });
+    const body = ordenApiSchema.parse(request.body ?? {});
+    try {
+      const r = await deps.ia.ordenar(body, request.usuario!);
+      return { texto: r.texto, hechas: r.hechas, pendientes: r.pendientes, simulado: r.simulado };
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(error.detalle === 'operador' ? 429 : 502).send({ error: error.message });
+      throw error;
+    }
+  });
+
+  app.post('/api/v1/ia/ordenes/confirmar', { config: { permiso: 'ia:ordenar' } }, async (request, reply) => {
+    if (!deps.ia) return reply.code(503).send({ error: 'la IA operadora no esta activa en este arranque' });
+    const body = confirmacionSchema.parse(request.body ?? {});
+    try {
+      return { hechas: await deps.ia.ejecutarConfirmadas(body.acciones, request.usuario!) };
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(502).send({ error: error.message });
+      throw error;
+    }
+  });
+
+  app.get('/api/v1/ia/ordenes/catalogo', { config: { permiso: 'ia:ordenar' } }, async (_request, reply) => {
+    if (!deps.ia) return reply.code(503).send({ error: 'la IA operadora no esta activa en este arranque' });
+    return { acciones: deps.ia.catalogoOperador() };
+  });
 
   app.get('/api/v1/webhooks', { config: { permiso: 'webhooks:gestionar' } }, async () => ({ webhooks: await repos.webhooks.listar() }));
 

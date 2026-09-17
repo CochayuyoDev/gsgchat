@@ -720,6 +720,7 @@ ${warning}
   <div class="toolbar">
     <div><label for="cf-humanizar">Escritura simulada</label><select id="cf-humanizar"><option value="">Según el servidor</option><option value="true">Sí</option><option value="false">No</option></select></div>
     <div><label for="cf-autopausa">Pausa automática en rojo</label><select id="cf-autopausa"><option value="">Según el servidor</option><option value="true">Sí</option><option value="false">No</option></select></div>
+    <div style="grid-column: span 2"><label for="cf-verunavez">Foto o video de "ver una vez"</label><select id="cf-verunavez"><option value="true">Pedirle al cliente que lo mande normal</option><option value="false">No decir nada</option></select><div class="cf-nota">WhatsApp entrega los "ver una vez" solo al teléfono, no a este sistema. Se le pide al teléfono que lo reenvíe y, si no lo suelta en unos segundos, se le escribe al cliente para que lo mande como foto normal.</div></div>
   </div>
 
   <div class="actions">
@@ -873,6 +874,10 @@ ${warning}
   </div>
   <div id="ia-esc-resumen" class="muted" style="margin:8px 0"></div>
   <div id="ia-esc-table" class="tablewrap"></div>
+
+  <h3 style="margin-top:24px">Seguridad: que no lo confundan ni le saquen el sistema</h3>
+  <p class="muted">Hay defensas fijas alrededor del modelo, que no dependen de que "se porte bien": los intentos claros de sacarlo de su papel, de sacarle sus instrucciones, de pedir tokens o accesos, de hacerse pasar por el dueño o por el sistema, de pedir datos de otras personas o de que escriba a otros números <b>no llegan al modelo</b> (se contestan con una frase fija; tres seguidos pasan el chat a una persona). Lo que va a salir se revisa antes de salir (instrucciones, secretos, teléfonos ajenos no salen). Hay un tope de turnos por cliente y hora. Y el asistente solo puede pedir la ubicación y pasar con una persona: no tiene con qué hacer nada más. El grupo <b>Ataques al asistente</b> del examen es una muestra; el banco entero (miles de variantes) corre en las pruebas del sistema. <a href="/manual#m-seguridad-ia">Más en el manual</a>.</p>
+  <p class="muted">Para darle órdenes al sistema con palabras (poner números en la lista de envío automático, escribir a un cliente, ver cómo va el reparto…) está la <b>IA operadora</b>: el botón <b>IA</b> de arriba, en todas las pantallas. Usa esta misma conexión.</p>
 </section>
 
 <section id="tab-integraciones" class="card hidden">
@@ -1170,6 +1175,7 @@ async function loadConfiguracion() {
     var sup = document.getElementById('cf-supervisor'); sup.value = g.avisos.supervisor || ''; sup.placeholder = sv.supervisor || 'nadie';
     document.getElementById('cf-humanizar').value = g.humanizar === null ? '' : String(g.humanizar);
     document.getElementById('cf-autopausa').value = g.autoPausa === null ? '' : String(g.autoPausa);
+    document.getElementById('cf-verunavez').value = g.pedirVerUnaVezNormal === false ? 'false' : 'true';
     var soyAdmin = !window.__yo || (window.__yo.rol === 'admin' && !window.__yo.porToken);
     document.getElementById('cf-guardar').disabled = !soyAdmin;
     document.getElementById('cf-restablecer').disabled = !soyAdmin;
@@ -1193,7 +1199,8 @@ document.getElementById('cf-guardar').onclick = busy('cf-guardar', async functio
       modoPrueba: { activo: document.getElementById('cf-mp-activo').checked, numeros: lines(document.getElementById('cf-mp-numeros').value) },
       avisos: { supervisor: val('cf-supervisor') || null },
       humanizar: triestado('cf-humanizar'),
-      autoPausa: triestado('cf-autopausa')
+      autoPausa: triestado('cf-autopausa'),
+      pedirVerUnaVezNormal: val('cf-verunavez') !== 'false'
     };
     if (patch.horario.inicio !== null && patch.horario.fin !== null && patch.horario.fin <= patch.horario.inicio) throw new Error('La hora final tiene que ser mayor que la inicial.');
     if (patch.modoPrueba.activo && !patch.modoPrueba.numeros.length) throw new Error('Con el modo prueba activo hace falta al menos un número.');

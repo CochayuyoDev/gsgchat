@@ -2,7 +2,7 @@
  * Conectores de tiendas: la configuracion y el registro de lo que llega.
  */
 
-import type { Pool } from '../db/pool.js';
+import { toleranteAlUuid, type Pool } from '../db/pool.js';
 import type { EventoTienda, TipoTienda } from './tiendas.js';
 
 export interface ReglaConector {
@@ -112,7 +112,9 @@ const entradaDeFila = (r: EntradaRow): EntradaConector => ({
   createdAt: r.created_at,
 });
 
-export function createConectoresRepo(pool: Pool): ConectoresRepo {
+export function createConectoresRepo(poolCrudo: Pool): ConectoresRepo {
+  // Los ids son uuid: uno mal pegado es un 404, no un 500 (ver toleranteAlUuid).
+  const pool = toleranteAlUuid(poolCrudo);
   return {
     async crear(input) {
       const { rows } = await pool.query<Row>(

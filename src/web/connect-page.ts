@@ -294,7 +294,17 @@ export function connectPage(opts: ConnectOpts): string {
     </button>
     <button class="hidden" id="connect">Conectar</button>
     <button class="hidden" id="waha-connect">Conectar y mostrar el QR</button>
+    <button class="ghost hidden" id="desconectar" type="button" title="Cierra la sesión de WhatsApp en este sistema. Para volver, se escanea el QR otra vez.">Desconectar la cuenta</button>
     <span id="fb-state" class="pill hidden"></span>
+  </div>
+  <div id="desconectar-confirmar" class="hidden" style="margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)">
+    <p style="margin:0 0 10px"><b>¿Desconectar la cuenta de WhatsApp?</b><br>
+    Se cierra la sesión de este sistema y el teléfono deja de verlo entre sus dispositivos vinculados. No se pierde nada de lo guardado aquí (chats, contactos, historial).
+    Para volver a conectar, pulsa "Conectar y mostrar el QR" y escanea: al vincular, el teléfono manda lo reciente de <b>todos</b> los chats y el sistema trae solo lo anterior.</p>
+    <div class="actions">
+      <button id="desconectar-si" type="button">Sí, desconectar</button>
+      <button class="ghost" id="desconectar-no" type="button">Cancelar</button>
+    </div>
   </div>
 
   <div id="qr-box" class="hidden">
@@ -630,6 +640,7 @@ async function estadoQr() {
     if (r.connected) {
       pararSondeo();
       caja.classList.add('hidden');
+      document.getElementById('desconectar').classList.remove('hidden');
       show('fb-state', 'Conectado' + (r.phone ? ': ' + r.phone : ''), 'ok');
       done('paso3', true);
       load();
@@ -637,6 +648,8 @@ async function estadoQr() {
     }
 
     caja.classList.add('hidden');
+    document.getElementById('desconectar').classList.add('hidden');
+    document.getElementById('desconectar-confirmar').classList.add('hidden');
     // Nada de "STOPPED" a secas: se dice que pasa y que hay que hacer.
     if (r.status === 'STARTING') {
       show('fb-state', 'Abriendo la sesion... en unos segundos sale el codigo', 'warn');
@@ -699,6 +712,27 @@ document.getElementById('pair-ask').onclick = async function () {
   } finally {
     boton.disabled = false;
   }
+};
+
+document.getElementById('desconectar').onclick = function () {
+  document.getElementById('desconectar-confirmar').classList.remove('hidden');
+};
+document.getElementById('desconectar-no').onclick = function () {
+  document.getElementById('desconectar-confirmar').classList.add('hidden');
+};
+document.getElementById('desconectar-si').onclick = async function () {
+  var boton = this;
+  boton.disabled = true;
+  boton.textContent = 'Desconectando...';
+  try {
+    await api(prefijo() + '/logout', { method: 'POST', body: {} });
+    document.getElementById('desconectar-confirmar').classList.add('hidden');
+    document.getElementById('desconectar').classList.add('hidden');
+    show('fb-state', 'Cuenta desconectada. Para volver a conectar, pulsa "Conectar y mostrar el QR" y escanea.', 'warn');
+    pararSondeo();
+    load();
+  } catch (error) { show('fb-state', error.message, 'bad'); }
+  finally { boton.disabled = false; boton.textContent = 'Sí, desconectar'; }
 };
 
 document.getElementById('waha-logout').onclick = async function () {

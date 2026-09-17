@@ -37,12 +37,13 @@ import { createFakeAutomation, type FakeAutomation } from './fakes-automation.js
 import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
 import { createFakeWebhooks, type FakeWebhooks } from './fakes-webhooks.js';
 import { createFakeConectores, type FakeConectores } from './fakes-conectores.js';
+import { createFakeEnvioAutomatico, type FakeEnvioAutomatico } from './fakes-envio-automatico.js';
 import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
 import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
 import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
-import { hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
+import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { AJUSTES_GENERALES_VACIOS, fusionarAjustes, type AjustesGenerales, type AjustesGeneralesRepo } from '../src/ajustes/generales.js';
 import type { ActividadRepo, EntradaActividad } from '../src/auth/actividad.js';
 import type { Sticker, StickersRepo } from '../src/stickers/stickers.js';
@@ -53,6 +54,7 @@ export interface FakeRepos extends Repos {
   archives: FakeArchives;
   rutas: FakeRutas;
   webhooks: FakeWebhooks;
+  envioAutomatico: FakeEnvioAutomatico;
   conectores: FakeConectores;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
@@ -75,6 +77,13 @@ export interface FakeRepos extends Repos {
  * hara el sistema de GSG). createFakeRepos la deja creada.
  */
 export const CLAVE_API_PRUEBA = 'wak_pruebasDeIntegracion0123456789abcdefXYZ';
+
+/** Una clave de API nueva con esos permisos, lista para mandar en `Authorization`. */
+export async function crearClaveDePrueba(repos: Pick<FakeRepos, 'claves'>, permisos: string[], nombre = 'acotada'): Promise<string> {
+  const clave = generarClaveApi();
+  await repos.claves.crear({ nombre, prefijo: prefijoDeClave(clave), hash: hashClaveApi(clave), creadaPor: null, permisos });
+  return clave;
+}
 
 let seq = 1;
 
@@ -306,6 +315,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     stickers,
     webhooks: createFakeWebhooks(),
     conectores: createFakeConectores(),
+    envioAutomatico: createFakeEnvioAutomatico(),
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
     archives: createFakeArchives(),
@@ -332,6 +342,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
           id: `c${seq++}`,
           phone,
           name: name ?? null,
+          tipo: 'persona',
           optInAt: null,
           optInSource: null,
           optOutAt: null,
@@ -347,6 +358,11 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         };
         contactsByPhone.set(phone, contact);
         return contact;
+      },
+      async upsertGrupo(jid, nombre) {
+        const c = await repos.contacts.upsertFromInbound(jid, nombre?.trim() || undefined);
+        c.tipo = 'grupo';
+        return c;
       },
       async setOptIn(phone, source) {
         const c = await repos.contacts.upsertFromInbound(phone);
@@ -365,13 +381,14 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       },
       async listOptedIn(limit, offset) {
         return [...contactsByPhone.values()]
-          .filter((c) => c.optInAt && !c.optOutAt)
+          .filter((c) => c.optInAt && !c.optOutAt && c.tipo !== 'grupo')
           .slice(offset, offset + limit);
       },
       async list(query) {
         const q = query.q?.trim().toLowerCase();
         const all = [...contactsByPhone.values()]
           .filter((c) => {
+            if (c.tipo === 'grupo') return false;
             if (q && !c.phone.includes(q) && !(c.name ?? '').toLowerCase().includes(q)) return false;
             // Los que nunca mandaron el pin: el doble tiene que filtrar igual
             // que la consulta de verdad, o la prueba no prueba nada.
@@ -823,8 +840,8 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         r.detalle = detalle;
         r.intentos++;
       },
-      async contarPendientes(campaignId) {
-        return recipients.filter((r) => r.campaignId === campaignId && r.estado === 'pendiente').length;
+      async contarPendientes(campaignId, soloCanario = false) {
+        return recipients.filter((r) => r.campaignId === campaignId && r.estado === 'pendiente' && (!soloCanario || r.canario)).length;
       },
       async marcarDestinatario(id, estado, detalle, deliveryId, at) {
         const r = recipients.find((x) => x.id === id);
@@ -964,6 +981,7 @@ export function createFakeWhatsApp(): FakeWhatsApp {
     sendLocation: (to, location) => record({ kind: 'location', to, location }),
     sendLocationRequest: (to, body) => record({ kind: 'location_request', to, body }),
     sendSticker: (to, sticker) => record({ kind: 'sticker', to, bytes: sticker.datos.length, url: sticker.url }),
+    sendMedia: (to, media) => record({ kind: 'media', to, tipo: media.kind, bytes: media.datos.length, mimeType: media.mimeType, filename: media.filename, caption: media.caption }),
     sendButtons: (to, body, buttons) => record({ kind: 'buttons', to, body, buttons }),
     sendTemplate: (to, name, language, components) =>
       record({ kind: 'template', to, name, language, components }),

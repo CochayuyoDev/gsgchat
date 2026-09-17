@@ -223,7 +223,10 @@ export async function correrGoteo(deps: GoteoDeps, porTick = 5): Promise<Resulta
     if (!siguientes.length) {
       if (soloCanario) {
         // Canario entero fuera (o pospuesto): empieza a contar la espera.
-        const quedan = (await repos.campaigns.siguientesPendientes(campana.id, 1, true, new Date(8.64e15))).length;
+        // Se cuenta con la consulta propia: una fecha "infinita" de JS
+        // (8.64e15) no entra en un timestamp de Postgres y tumbaba el tick
+        // entero, con todas las campanas dentro.
+        const quedan = await repos.campaigns.contarPendientes(campana.id, true);
         if (!quedan && !campana.canarioEnviadoAt) await repos.campaigns.setCanarioEnviado(campana.id, momento);
         continue;
       }

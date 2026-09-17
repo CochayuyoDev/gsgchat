@@ -54,6 +54,7 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/templates\/push$/, 'plantilla.subir'],
   ['POST', /^\/admin\/campaigns$/, 'campana.crear'],
   ['POST', /^\/admin\/campaigns\/goteo$/, 'campana.goteo'],
+  ['POST', /^\/admin\/campaigns\/:id\/estado$/, 'campana.estado'],
   ['POST', /^\/admin\/grupos\/enviar$/, 'grupo.enviar'],
   ['POST', /^\/admin\/stickers$/, 'sticker.subir'],
   ['DELETE', /^\/admin\/stickers\/:id$/, 'sticker.borrar'],
@@ -65,11 +66,19 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/messages\//, 'mensaje.enviar'],
   ['POST', /^\/admin\/chat\/send$/, 'chat.enviar'],
   ['POST', /^\/admin\/chat\/start$/, 'chat.abrir'],
+  ['POST', /^\/admin\/chat\/adjunto$/, 'chat.adjunto'],
+  ['POST', /^\/admin\/chat\/:contactId\/bot$/, 'chat.bot'],
   ['POST', /^\/admin\/contacts\/import$/, 'contactos.importar'],
   ['POST', /^\/admin\/contacts\/opt-in$/, 'contacto.optin'],
   ['POST', /^\/admin\/contacts\/opt-out$/, 'contacto.baja'],
   ['POST', /^\/admin\/automation\/rules/, 'automatizacion.regla'],
+  ['PUT', /^\/admin\/automation\/rules/, 'automatizacion.regla'],
+  ['DELETE', /^\/admin\/automation\/rules/, 'automatizacion.regla.borrar'],
   ['POST', /^\/admin\/automation\/sequences/, 'automatizacion.secuencia'],
+  ['PUT', /^\/admin\/automation\/sequences/, 'automatizacion.secuencia'],
+  ['DELETE', /^\/admin\/automation\/sequences/, 'automatizacion.secuencia.borrar'],
+  ['POST', /^\/admin\/automation\/enrollments\/:id\/cancel$/, 'automatizacion.cancelar'],
+  ['PUT', /^\/admin\/preventa\/mensajes$/, 'preventa.mensajes'],
   ['POST', /^\/admin\/automation\/scheduled/, 'automatizacion.programar'],
   ['POST', /^\/admin\/automation\/prefs$/, 'automatizacion.preferencias'],
   ['POST', /^\/admin\/rutas\/ajustes$/, 'reparto.ajustes'],
@@ -80,15 +89,31 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/rutas\/solicitudes\/:id\/resolver$/, 'solicitud.resolver'],
   ['POST', /^\/admin\/rutas\/solicitudes\/:id\/derivar$/, 'solicitud.derivar'],
   ['POST', /^\/admin\/rutas\/solicitudes\/:id\/reintentar$/, 'solicitud.reintentar'],
+  ['PATCH', /^\/admin\/rutas\/solicitudes\/:id$/, 'solicitud.cambiar'],
   ['POST', /^\/admin\/rutas\/cola\/despachar$/, 'gsg.despachar'],
   ['POST', /^\/admin\/settings/, 'conexion.cambiar'],
   ['POST', /^\/admin\/connect/, 'conexion.conectar'],
   ['POST', /^\/admin\/local\//, 'conexion.local'],
   ['POST', /^\/admin\/waha\//, 'conexion.waha'],
   ['POST', /^\/admin\/archives/, 'respaldo'],
+  ['DELETE', /^\/admin\/archives\/:id$/, 'respaldo.borrar'],
   ['POST', /^\/admin\/leads/, 'ficha'],
+  ['PUT', /^\/admin\/leads/, 'ficha'],
+  ['DELETE', /^\/admin\/tracking\/:id$/, 'rastreo.cerrar'],
+  ['POST', /^\/admin\/ia$/, 'ia.configurar'],
+  ['POST', /^\/admin\/ia\/ordenes$/, 'ia.orden'],
+  ['POST', /^\/admin\/ia\/ordenes\/confirmar$/, 'ia.confirmar'],
+  ['POST', /^\/admin\/envio-automatico$/, 'lista.poner'],
+  ['DELETE', /^\/admin\/envio-automatico\/:clave$/, 'lista.quitar'],
+  ['POST', /^\/admin\/envio-automatico\/:clave\/pausar$/, 'lista.pausar'],
+  ['POST', /^\/admin\/envio-automatico\/:clave\/reanudar$/, 'lista.reanudar'],
+  ['POST', /^\/admin\/envio-automatico\/:clave\/editar$/, 'lista.editar'],
+  ['POST', /^\/admin\/envio-automatico\/ajustes$/, 'lista.ajustes'],
+  ['POST', /^\/admin\/dev\//, 'dev.simular'],
   // La API publica: lo que hace otro sistema con su clave tambien queda apuntado.
   ['POST', /^\/api\/v1\/mensajes$/, 'api.mensaje'],
+  ['POST', /^\/api\/v1\/ia\/ordenes$/, 'ia.orden'],
+  ['POST', /^\/api\/v1\/ia\/ordenes\/confirmar$/, 'ia.confirmar'],
   ['POST', /^\/api\/v1\/contactos$/, 'api.contacto'],
   ['POST', /^\/api\/v1\/contactos\/:telefono\/baja$/, 'contacto.baja'],
   ['POST', /^\/api\/v1\/webhooks$/, 'webhook.crear'],
@@ -103,7 +128,7 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
 ];
 
 /** Lo que no merece una fila: mucho trafico y nada que auditar. */
-const IGNORAR: RegExp[] = [/^\/api\/v1\/webhooks\/:id\/probar$/, /^\/api\/v1\/conectores\/:id\/probar$/, /^\/api\/v1\/embed\/token$/, /^\/api\/v1\/conversaciones\/:telefono\/leido$/, /^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/];
+const IGNORAR: RegExp[] = [/^\/api\/v1\/webhooks\/:id\/probar$/, /^\/api\/v1\/conectores\/:id\/probar$/, /^\/api\/v1\/embed\/token$/, /^\/api\/v1\/conversaciones\/:telefono\/leido$/, /^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/, /^\/admin\/ia\/(ayuda|probar|escenarios)$/];
 
 export const ETIQUETAS: Record<string, string> = {
   'cuenta.primera': 'Creo la primera cuenta',
@@ -127,6 +152,7 @@ export const ETIQUETAS: Record<string, string> = {
   'plantilla.subir': 'Subio plantillas a Meta',
   'campana.crear': 'Creo una campaña',
   'campana.goteo': 'Lanzo una campaña por goteo',
+  'campana.estado': 'Pauso, reanudo o paro una campaña',
   'grupo.enviar': 'Envio un mensaje a un grupo de clientes',
   'sticker.subir': 'Subio un sticker',
   'sticker.borrar': 'Quito un sticker',
@@ -138,6 +164,8 @@ export const ETIQUETAS: Record<string, string> = {
   'mensaje.enviar': 'Envio un mensaje desde el panel',
   'chat.enviar': 'Escribio en un chat',
   'chat.abrir': 'Abrio un chat nuevo',
+  'chat.adjunto': 'Mando un adjunto desde el chat',
+  'chat.bot': 'Paro o reanudo el bot en un chat',
   'contactos.importar': 'Importo contactos',
   'contacto.optin': 'Registro un consentimiento',
   'contacto.baja': 'Dio de baja un contacto',
@@ -145,6 +173,10 @@ export const ETIQUETAS: Record<string, string> = {
   'automatizacion.secuencia': 'Cambio una secuencia',
   'automatizacion.programar': 'Programo un mensaje',
   'automatizacion.preferencias': 'Cambio preferencias del asistente',
+  'automatizacion.regla.borrar': 'Borro una regla automatica',
+  'automatizacion.secuencia.borrar': 'Borro una secuencia',
+  'automatizacion.cancelar': 'Saco a un contacto de una secuencia',
+  'preventa.mensajes': 'Cambio los mensajes de preventa',
   'reparto.ajustes': 'Guardo los ajustes del reparto',
   'reparto.ajustes.restablecer': 'Restablecio los ajustes del reparto',
   'lote.crear': 'Cargo un lote de reparto',
@@ -153,12 +185,25 @@ export const ETIQUETAS: Record<string, string> = {
   'solicitud.resolver': 'Resolvio una solicitud a mano',
   'solicitud.derivar': 'Derivo una solicitud al repartidor',
   'solicitud.reintentar': 'Reintento una solicitud',
+  'solicitud.cambiar': 'Cambio una solicitud a mano',
   'gsg.despachar': 'Despacho la cola hacia GSG',
   'conexion.cambiar': 'Cambio la conexion de WhatsApp',
   'conexion.conectar': 'Conecto WhatsApp',
   'conexion.local': 'Toco la sesion local (QR)',
   'conexion.waha': 'Toco la sesion de WAHA',
   respaldo: 'Respaldo conversaciones',
+  'respaldo.borrar': 'Borro un respaldo',
+  'rastreo.cerrar': 'Cerro un rastreo en vivo',
+  'ia.orden': 'Dio una orden a la IA operadora',
+  'ia.confirmar': 'Confirmo acciones de la IA operadora',
+  'lista.poner': 'Puso numeros en la lista de envio automatico',
+  'lista.quitar': 'Quito un numero de la lista de envio automatico',
+  'lista.pausar': 'Pauso un numero de la lista de envio automatico',
+  'lista.reanudar': 'Reanudo un numero de la lista de envio automatico',
+  'lista.editar': 'Cambio un numero de la lista de envio automatico',
+  'lista.ajustes': 'Cambio el ritmo del envio automatico',
+  'ia.configurar': 'Cambio la configuracion del asistente IA',
+  'dev.simular': 'Simulo un mensaje entrante (pruebas)',
   ficha: 'Cambio una ficha de preventa',
   'api.mensaje': 'Envio un mensaje por la API publica',
   'api.contacto': 'Creo o actualizo un contacto por la API publica',
@@ -174,7 +219,9 @@ export const ETIQUETAS: Record<string, string> = {
   otro: 'Otra accion',
 };
 
-const CAMPOS_SECRETOS = /clave|password|token|secret|appsecret|authorization|cookie/i;
+// `actual` y `nueva` son los campos de /admin/mi-clave: sin ellos aqui, la
+// bitacora guardaba las dos contraseñas en claro (visto el 2026-09-17).
+const CAMPOS_SECRETOS = /clave|password|contrase|token|secret|appsecret|authorization|cookie|^actual$|^nueva$|^pin$/i;
 
 /** Copia superficial del cuerpo sin secretos ni textos largos. */
 export function detalleSeguro(body: unknown, params?: Record<string, string>): Record<string, unknown> | null {

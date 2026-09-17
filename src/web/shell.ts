@@ -55,6 +55,7 @@ export const MENU_GRUPOS: GrupoMenu[] = [
       { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicacion.' },
       { id: 'ia', etiqueta: 'Mi asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Lo que sabe de tu negocio y como contesta solo. Cuando no puede, te pasa la conversacion.' },
       { id: 'contactos', etiqueta: 'Contactos', href: '/panel#contactos', icono: 'contactos', descripcion: 'Importar, buscar y ver el consentimiento de cada numero.' },
+      { id: 'envio-automatico', etiqueta: 'Envío automático', href: '/envio-automatico', icono: 'reloj', descripcion: 'Los numeros a los que el sistema escribe solo: un mensaje cada pocas horas, como una persona, hasta conseguir su ubicacion o una respuesta. Se ponen y se quitan a mano o pidiendoselo a la IA.' },
       { id: 'enviar', etiqueta: 'Enviar mensaje', href: '/panel#enviar', icono: 'enviar', descripcion: 'Un texto, un pin o una plantilla a un numero concreto.', avanzado: true },
       { id: 'historial', etiqueta: 'Historial de envios', href: '/panel#historial', icono: 'historial', descripcion: 'Todo lo que salio, con su estado y su error si lo hubo.', avanzado: true },
       { id: 'stickers', etiqueta: 'Stickers', href: '/panel#stickers', icono: 'sticker', descripcion: 'Los stickers que se mandan tras el saludo, el gracias o la despedida, y a mano desde el chat.', avanzado: true },
@@ -137,6 +138,8 @@ const ICONOS = {
   salir: '<path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="m15 8 5 4-5 4M20 12H9"/>',
   sticker: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8l-6 6H6a2 2 0 0 1-2-2z"/><path d="M14 20v-4a2 2 0 0 1 2-2h4"/><path d="M9 10h.01M14 10h.01"/><path d="M9 13.5c1 .8 2.2 1 3 1s2-.2 3-1"/>',
   campana: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  reloj: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+  robot: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M8 4h8"/><circle cx="9" cy="13" r="1.2"/><circle cx="15" cy="13" r="1.2"/><path d="M9 16.5h6"/>',
   ayuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
 } as const;
 
@@ -254,6 +257,49 @@ const CSS = `
   .s-content.lleno { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
   .s-content > .wrap { max-width: 1180px; margin: 0 auto; padding: 0; }
   .s-backdrop { display: none; }
+
+  /* --- la IA operadora: un cajon a la derecha, en todas las pantallas ---- */
+  .s-ia-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-weight: 700; font-size: 13.5px; color: var(--s-accent); border-color: var(--s-accent-soft); background: var(--s-accent-soft); }
+  .s-ia-boton:hover { color: #fff; background: var(--s-accent); }
+  .s-ia { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: none; flex-direction: column; }
+  .s-ia.abierto { display: flex; }
+  .s-ia-cab { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--s-line); }
+  .s-ia-cab b { font-size: 15px; }
+  .s-ia-cab .s-ia-sub { color: var(--s-muted); font-size: 12px; display: block; }
+  .s-ia-cab .sep { flex: 1; }
+  .s-ia-cerrar, .s-ia-limpiar { border: 0; background: transparent; color: var(--s-muted); cursor: pointer; font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; box-shadow: none; }
+  .s-ia-cerrar:hover, .s-ia-limpiar:hover { background: var(--s-hover); color: var(--s-text); }
+  .s-ia-hilo { flex: 1; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+  .s-ia-b { max-width: 92%; padding: 9px 12px; border-radius: 12px; background: var(--s-hover); white-space: pre-wrap; line-height: 1.45; }
+  .s-ia-b.yo { align-self: flex-end; background: var(--s-accent-soft); }
+  .s-ia-b.mal { border: 1px solid rgba(220,38,38,.35); }
+  .s-ia-hechas { display: flex; flex-direction: column; gap: 6px; }
+  .s-ia-hecha { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 7px 10px; border: 1px solid var(--s-line); border-radius: 10px; background: var(--s-top); }
+  .s-ia-hecha .ic { flex: none; }
+  .s-ia-hecha .q { flex: 1; min-width: 0; }
+  .s-ia-hecha .q small { display: block; color: var(--s-muted); }
+  .s-ia-hecha a { color: var(--s-accent); font-size: 12.5px; white-space: nowrap; }
+  .s-ia-pend { border-color: #d97706; background: rgba(217,119,6,.08); }
+  .s-ia-pend .botones { display: flex; gap: 6px; margin-top: 6px; }
+  .s-ia-pend button { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-text); cursor: pointer; box-shadow: none; }
+  .s-ia-pend button.si { background: var(--s-accent); border-color: var(--s-accent); color: #fff; }
+  .s-ia-pie { border-top: 1px solid var(--s-line); padding: 10px 14px 12px; }
+  .s-ia-entrada { display: flex; gap: 8px; align-items: flex-end; }
+  .s-ia-entrada textarea { flex: 1; min-height: 42px; max-height: 140px; resize: none; font: inherit; font-size: 14px; padding: 9px 11px; border: 1px solid var(--s-line); border-radius: 10px; background: var(--s-bg); color: var(--s-text); }
+  .s-ia-enviar { height: 42px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--s-accent); background: var(--s-accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer; box-shadow: none; }
+  .s-ia-enviar:disabled { opacity: .55; cursor: default; }
+  .s-ia-opc { display: flex; gap: 12px; align-items: center; margin-top: 8px; font-size: 12.5px; color: var(--s-muted); flex-wrap: wrap; }
+  .s-ia-opc label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+  .s-ia-opc a { color: var(--s-accent); cursor: pointer; }
+  .s-ia-cat { display: none; font-size: 12.5px; max-height: 40vh; overflow: auto; padding: 0 14px 10px; }
+  .s-ia.con-catalogo .s-ia-cat { display: block; }
+  .s-ia-cat div { padding: 5px 0; border-bottom: 1px solid var(--s-line); }
+  .s-ia-cat b { display: block; }
+  .s-ia-cat i { color: var(--s-muted); }
+  .s-ia-vacio { color: var(--s-muted); font-size: 13.5px; line-height: 1.5; }
+  .s-ia-vacio ul { margin: 6px 0 0; padding-left: 18px; }
+  .s-ia-vacio li { cursor: pointer; color: var(--s-accent); }
+  @media (max-width: 960px) { .s-ia-boton span { display: none; } .s-ia-boton { padding: 0; width: 36px; } }
 
   @media (max-width: 960px) {
     .s-side { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%); transition: transform .18s ease; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
@@ -471,6 +517,107 @@ const JS = String.raw`
   apuntarAyuda();
   window.addEventListener('hashchange', apuntarAyuda);
 
+  /* --- la IA operadora ------------------------------------------------- */
+  var iaCaja = document.getElementById('s-ia');
+  var iaHilo = document.getElementById('s-ia-hilo');
+  var iaTexto = document.getElementById('s-ia-texto');
+  var iaEnviar = document.getElementById('s-ia-enviar');
+  var iaHistorial = [];
+  try { iaHistorial = JSON.parse(sessionStorage.getItem('wa_ia_hilo') || '[]'); } catch (e) { iaHistorial = []; }
+  function iaGuardar() { try { sessionStorage.setItem('wa_ia_hilo', JSON.stringify(iaHistorial.slice(-30))); } catch (e) {} }
+  var EJEMPLOS_IA = ['¿cómo va el reparto de hoy?', 'pon a Juan, el 987 654 321, para pedirle su ubicación', 'quita a María de la lista de envío automático', '¿quién nos escribió hoy?', 'escríbele a Rosa que su pedido sale mañana', '¿por qué no salen mensajes?'];
+  function iaPintar() {
+    if (!iaHistorial.length) {
+      iaHilo.innerHTML = '<div class="s-ia-vacio">Dile con palabras qué hacer o qué mirar. Ejecuta con tu misma cuenta y tus mismos permisos; lo delicado te lo deja para confirmar.<ul>' + EJEMPLOS_IA.map(function (e) { return '<li data-ej="' + escapar(e) + '">' + escapar(e) + '</li>'; }).join('') + '</ul></div>';
+      return;
+    }
+    iaHilo.innerHTML = iaHistorial.map(function (m, i) {
+      if (m.role === 'user') return '<div class="s-ia-b yo">' + escapar(m.content) + '</div>';
+      var html = '<div class="s-ia-b' + (m.error ? ' mal' : '') + '">' + escapar(m.content) + '</div>';
+      var hechas = (m.hechas || []).map(function (h) {
+        return '<div class="s-ia-hecha"><span class="ic">' + (h.ok ? (h.tipo === 'consulta' ? '🔎' : '✅') : '⚠') + '</span><span class="q">' + escapar(h.resumen) + '<small>' + escapar(h.accion) + '</small></span>' + (h.ir ? '<a href="' + escapar(h.ir) + '">ver →</a>' : '') + '</div>';
+      });
+      var pend = (m.pendientes || []).map(function (p, j) {
+        return '<div class="s-ia-hecha s-ia-pend" data-msg="' + i + '" data-pend="' + j + '"><span class="ic">⏸</span><span class="q">' + escapar(p.descripcion) + '<small>' + escapar(p.motivo) + '</small><div class="botones"><button class="si" type="button" data-confirmar="1">Sí, hazlo</button><button type="button" data-descartar="1">No</button></div></span></div>';
+      });
+      if (hechas.length || pend.length) html += '<div class="s-ia-hechas">' + hechas.join('') + pend.join('') + '</div>';
+      return html;
+    }).join('');
+    iaHilo.scrollTop = iaHilo.scrollHeight;
+  }
+  function iaAbrir(textoInicial) {
+    iaCaja.classList.add('abierto');
+    iaPintar();
+    if (textoInicial) iaTexto.value = textoInicial;
+    setTimeout(function () { iaTexto.focus(); var n = iaTexto.value.length; try { iaTexto.setSelectionRange(n, n); } catch (e) {} }, 30);
+  }
+  window.abrirOperadorIA = iaAbrir;
+  document.getElementById('s-ia-boton').onclick = function () { if (iaCaja.classList.contains('abierto')) iaCaja.classList.remove('abierto'); else iaAbrir(); };
+  document.getElementById('s-ia-cerrar').onclick = function () { iaCaja.classList.remove('abierto'); };
+  document.getElementById('s-ia-limpiar').onclick = function () { iaHistorial = []; iaGuardar(); iaPintar(); };
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && iaCaja.classList.contains('abierto') && document.activeElement !== iaTexto) iaCaja.classList.remove('abierto'); });
+  iaHilo.addEventListener('click', function (ev) {
+    var ej = ev.target.closest('[data-ej]');
+    if (ej) { iaTexto.value = ej.getAttribute('data-ej'); iaTexto.focus(); return; }
+    var b = ev.target.closest('button');
+    if (!b) return;
+    var caja = b.closest('.s-ia-pend');
+    if (!caja) return;
+    var msg = iaHistorial[Number(caja.getAttribute('data-msg'))];
+    var pend = msg && msg.pendientes ? msg.pendientes[Number(caja.getAttribute('data-pend'))] : null;
+    if (!pend) return;
+    if (b.hasAttribute('data-descartar')) { msg.pendientes = msg.pendientes.filter(function (p) { return p !== pend; }); iaGuardar(); iaPintar(); return; }
+    b.disabled = true;
+    var accion = Object.assign({ accion: pend.accion }, pend.parametros);
+    fetch('/admin/ia/ordenes/confirmar', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ acciones: [accion] }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        msg.pendientes = msg.pendientes.filter(function (p) { return p !== pend; });
+        msg.hechas = (msg.hechas || []).concat(x.ok ? x.d.hechas : [{ accion: pend.accion, ok: false, resumen: x.d.error || 'No se pudo.', tipo: 'cambio' }]);
+        iaGuardar(); iaPintar();
+        if (x.ok && x.d.hechas.some(function (h) { return h.ok; })) document.dispatchEvent(new CustomEvent('ia:cambio'));
+      })
+      .catch(function (e) { msg.hechas = (msg.hechas || []).concat([{ accion: pend.accion, ok: false, resumen: e.message, tipo: 'cambio' }]); iaGuardar(); iaPintar(); });
+  });
+  function iaOrdenar() {
+    var texto = iaTexto.value.trim();
+    if (!texto || iaEnviar.disabled) return;
+    iaEnviar.disabled = true;
+    iaTexto.value = '';
+    var historial = iaHistorial.filter(function (m) { return !m.error; }).map(function (m) { return { role: m.role, content: m.content }; }).slice(-10);
+    iaHistorial.push({ role: 'user', content: texto });
+    iaHistorial.push({ role: 'assistant', content: 'Un momento…', pensando: true });
+    iaPintar();
+    fetch('/admin/ia/ordenes', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ texto: texto, historial: historial, simular: document.getElementById('s-ia-simular').checked }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, d: d }; }); })
+      .then(function (x) {
+        iaHistorial.pop();
+        if (!x.ok) {
+          var msg = x.d.error || ('No se pudo (' + x.status + ').');
+          if (/Puter|conecta/i.test(msg)) msg += ' → Mi asistente IA (/panel#ia).';
+          iaHistorial.push({ role: 'assistant', content: msg, error: true });
+        } else {
+          iaHistorial.push({ role: 'assistant', content: x.d.texto || '(sin respuesta)', hechas: x.d.hechas || [], pendientes: x.d.pendientes || [], simulado: x.d.simulado });
+          if ((x.d.hechas || []).some(function (h) { return h.ok && h.tipo === 'cambio'; })) document.dispatchEvent(new CustomEvent('ia:cambio'));
+        }
+        iaGuardar(); iaPintar(); iaEnviar.disabled = false; iaTexto.focus();
+      })
+      .catch(function (e) { iaHistorial.pop(); iaHistorial.push({ role: 'assistant', content: 'No se pudo hablar con el servidor: ' + e.message, error: true }); iaGuardar(); iaPintar(); iaEnviar.disabled = false; });
+  }
+  iaEnviar.onclick = iaOrdenar;
+  iaTexto.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); iaOrdenar(); } });
+  iaTexto.addEventListener('input', function () { iaTexto.style.height = 'auto'; iaTexto.style.height = Math.min(140, iaTexto.scrollHeight) + 'px'; });
+  var catCargado = false;
+  document.getElementById('s-ia-ver-cat').onclick = function () {
+    iaCaja.classList.toggle('con-catalogo');
+    if (catCargado || !iaCaja.classList.contains('con-catalogo')) return;
+    catCargado = true;
+    fetch('/admin/ia/ordenes/catalogo', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d) return;
+      document.getElementById('s-ia-cat').innerHTML = d.acciones.map(function (a) { return '<div><b>' + escapar(a.descripcion) + (a.peligrosa ? ' <i>(pide confirmación)</i>' : '') + (a.soloAdmin ? ' <i>(solo administrador)</i>' : '') + '</b><i>Ej.: «' + escapar(a.ejemplo) + '»</i></div>'; }).join('');
+    }).catch(function () {});
+  };
+
   window.shellTitulo = function (titulo, sub) {
     document.getElementById('s-h1').textContent = titulo;
     document.getElementById('s-sub').textContent = sub || '';
@@ -552,6 +699,7 @@ export function appShell(opts: ShellOpts): string {
           <button class="s-boton" id="s-avisos-boton" type="button" title="Avisos">${icono('campana')}<span class="s-num" id="s-avisos-num"></span></button>
           <div class="s-avisos-caja" id="s-avisos-caja"><h4>Avisos</h4><div id="s-avisos-lista"><div class="s-aviso-nada">Cargando…</div></div></div>
         </div>
+        <button class="s-boton s-ia-boton" id="s-ia-boton" type="button" title="Pídeselo a la IA: órdenes con palabras">${icono('robot')}<span>IA</span></button>
         <a class="s-boton" id="s-ayuda" href="/manual" title="Ayuda de esta pantalla">${icono('ayuda')}</a>
         <a class="s-chip" href="/panel#mi-cuenta" title="Mi cuenta"><div class="s-avatar">?</div><b id="s-chip-nombre"></b></a>
       </div>
@@ -560,6 +708,15 @@ export function appShell(opts: ShellOpts): string {
 ${opts.contenido}
     </div>
   </div>
+  <aside class="s-ia" id="s-ia" aria-label="IA operadora">
+    <div class="s-ia-cab">${icono('robot')}<div><b>Pídeselo a la IA</b><span class="s-ia-sub">Órdenes con palabras; todo queda en la bitácora</span></div><span class="sep"></span><button class="s-ia-limpiar" id="s-ia-limpiar" type="button" title="Empezar de cero">Limpiar</button><button class="s-ia-cerrar" id="s-ia-cerrar" type="button" title="Cerrar">✕</button></div>
+    <div class="s-ia-hilo" id="s-ia-hilo"></div>
+    <div class="s-ia-cat" id="s-ia-cat"></div>
+    <div class="s-ia-pie">
+      <div class="s-ia-entrada"><textarea id="s-ia-texto" rows="1" placeholder="Ej.: pon a Juan, el 987 654 321, para pedirle su ubicación"></textarea><button class="s-ia-enviar" id="s-ia-enviar" type="button">Enviar</button></div>
+      <div class="s-ia-opc"><label><input type="checkbox" id="s-ia-simular"> Solo decir qué haría (no ejecutar)</label><a id="s-ia-ver-cat">¿Qué le puedo pedir?</a></div>
+    </div>
+  </aside>
 </div>
 <script>
 ${DIALOGO_JS}

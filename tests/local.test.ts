@@ -23,6 +23,7 @@ import {
   fromJid,
   getLocalState,
   hayVinculacion,
+  logoutLocal,
   porQueSeDescarta,
   resetLocalForTests,
   startLocal,
@@ -30,7 +31,7 @@ import {
   toJid,
   vinculacionMuerta,
 } from '../src/whatsapp/local/session.js';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LocalSocket } from '../src/whatsapp/local/session.js';
@@ -90,10 +91,9 @@ describe('traducir lo que llega por el socket', () => {
     expect(toChangeValue({ ...base, key: { ...base.key, fromMe: true }, message: { conversation: 'x' } })).toBeNull();
   });
 
-  it('los grupos se ignoran: esto es uno a uno', () => {
-    expect(
-      toChangeValue({ ...base, key: { id: 'A', remoteJid: '123@g.us' }, message: { conversation: 'x' } }),
-    ).toBeNull();
+  it('los grupos entran, con el jid del grupo como remitente (ver ver-una-vez-y-grupos.test.ts)', () => {
+    const value = toChangeValue({ ...base, key: { id: 'A', remoteJid: '123@g.us' }, message: { conversation: 'x' } });
+    expect(value?.messages?.[0]).toMatchObject({ from: '123@g.us', type: 'text', grupo: { jid: '123@g.us', autor: null } });
   });
 
   it('sin id o sin remitente se descarta', () => {
@@ -119,13 +119,12 @@ describe('traducir lo que llega por el socket', () => {
     ).toBeNull();
   });
 
-  it('un grupo se descarta aunque traiga remoteJidAlt', () => {
-    expect(
-      toChangeValue({
-        key: { id: 'A', remoteJid: '123@g.us', remoteJidAlt: '5215512345678@s.whatsapp.net' },
-        message: { conversation: 'x' },
-      }),
-    ).toBeNull();
+  it('en un grupo, el remoteJidAlt no convierte al grupo en una persona', () => {
+    const value = toChangeValue({
+      key: { id: 'A', remoteJid: '123@g.us', remoteJidAlt: '5215512345678@s.whatsapp.net' },
+      message: { conversation: 'x' },
+    });
+    expect(value?.messages?.[0]?.from).toBe('123@g.us');
   });
 
   it('los estados y los canales tampoco entran', () => {
@@ -263,6 +262,63 @@ describe('la sesion local', () => {
     await segundo.listo();
     segundo.emitir('connection.update', { qr: '2@nuevo' });
     expect((await otra).status).toBe('SCAN_QR_CODE');
+  });
+
+  it('desconectar y volver a escanear: el cierre tardio del socket viejo no borra la vinculacion nueva ni tumba nada', async () => {
+    // Lo que paso el 16 de septiembre: "Desconectar la cuenta" cerro el socket,
+    // el usuario pulso "Conectar", escaneo, y el "close" (401) del socket
+    // VIEJO llego tarde: borro la carpeta y el guardado de las credenciales
+    // nuevas revento el servidor con un ENOENT.
+    const authDir = mkdtempSync(join(tmpdir(), 'wa-auth-relink-'));
+    writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51900000000:1@s.whatsapp.net"}}');
+
+    const viejo = fakeSocket();
+    let logoutLlamado = 0;
+    viejo.sock.logout = async () => {
+      logoutLlamado++;
+    };
+    const arranque = startLocal({ authDir, createSocket: async () => ({ sock: viejo.sock, saveCreds: async () => {} }) });
+    await viejo.listo();
+    viejo.emitir('connection.update', { connection: 'open' });
+    await arranque;
+
+    await logoutLocal(authDir);
+    expect(logoutLlamado).toBe(1);
+    expect(hayVinculacion(authDir)).toBe(false);
+    expect(getLocalState().status).toBe('STOPPED');
+
+    // Conectar de nuevo: socket nuevo, QR, escaneo, credenciales nuevas.
+    const nuevo = fakeSocket();
+    const guardadas: string[] = [];
+    const otra = startLocal({
+      authDir,
+      createSocket: async () => ({
+        sock: nuevo.sock,
+        saveCreds: async () => {
+          writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51900000000:2@s.whatsapp.net"}}');
+          guardadas.push('ok');
+        },
+      }),
+    });
+    await nuevo.listo();
+    nuevo.emitir('connection.update', { qr: '2@nuevo' });
+    await otra;
+
+    // El cierre tardio del socket viejo, con su 401 de "intentional logout".
+    viejo.emitir('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getLocalState().status).toBe('SCAN_QR_CODE');
+
+    // El escaneo guarda las credenciales aunque la carpeta hubiera desaparecido.
+    rmSync(authDir, { recursive: true, force: true });
+    nuevo.emitir('creds.update', {});
+    await new Promise((r) => setTimeout(r, 30));
+    expect(guardadas).toEqual(['ok']);
+    expect(hayVinculacion(authDir)).toBe(true);
+
+    nuevo.emitir('connection.update', { connection: 'open' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(getLocalState().status).toBe('WORKING');
   });
 
   it('un baneo (403) para la sesion pero no borra la vinculacion', async () => {
@@ -555,7 +611,7 @@ describe('fotos, audios y documentos', () => {
   });
 
   it('el log dice por que se descarta un entrante', () => {
-    expect(porQueSeDescarta({ key: { id: 'A', remoteJid: '123@g.us' }, message: {} }, null)).toMatch(/grupo/);
+    expect(porQueSeDescarta({ key: { id: 'A', remoteJid: 'status@broadcast' }, message: {} }, null)).toMatch(/estado o canal/);
     expect(porQueSeDescarta({ key: { id: 'A', remoteJid: '999@lid' }, message: { conversation: 'x' } }, null)).toMatch(/LID/);
     expect(porQueSeDescarta({ key: { id: 'A', remoteJid: '51987654321@s.whatsapp.net' }, messageStubType: 2 }, null)).toMatch(/descifrar/);
     expect(

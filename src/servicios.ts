@@ -12,6 +12,8 @@
  *  - el ticker de secuencias y programados (cada 10 s);
  *  - el goteo de campanas (cada 10 s, cinco como mucho por pasada);
  *  - el motor de rutas (cada 5 s, pero con su pausa de 15-30 s entre envios);
+ *  - el motor de la lista de envio automatico (igual: cada 5 s, con la misma
+ *    pausa y un mensaje por numero cada pocas horas);
  *  - los avisos de rutas (resumen a GSG y WhatsApp al coordinador);
  *  - el despacho de reportes a GSG (cada minuto; sin API no hace nada);
  *  - los webhooks salientes: cada evento del bus se encola por suscriptor y
@@ -38,6 +40,8 @@ import { startArchiveSweeper } from './archive/service.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
 import { crearPuertoGsg, despacharReportes } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
+import { startMotorLista } from './envio-automatico/motor.js';
+import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
 import { syncTemplates } from './templates/registry.js';
 import type { Bus } from './eventos/bus.js';
 import { encolarEventos, startDespachadorWebhooks } from './webhooks/despachador.js';
@@ -56,12 +60,14 @@ export interface ServiciosDeps {
   stickers?: ServicioStickers;
   /** El bus de eventos. Sin el, no hay webhooks salientes (arranques de prueba). */
   bus?: Bus;
+  /** La lista de envio automatico. Sin ella, su motor no arranca. */
+  lista?: ServicioEnvioAutomatico;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
 }
 
 /** Arranca todo y devuelve la funcion que lo para. */
 export function arrancarServicios(deps: ServiciosDeps): () => void {
-  const { config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, log } = deps;
+  const { config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, lista, log } = deps;
   const warn = (mensaje: string, detalle?: Record<string, unknown>) => log.warn(detalle ?? {}, mensaje);
   const info = (mensaje: string, detalle?: Record<string, unknown>) => log.info(detalle ?? {}, mensaje);
 
@@ -112,6 +118,24 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     log: info,
   });
 
+  // La lista de envio automatico: un mensaje a cada numero cada pocas horas,
+  // con la misma pausa y el mismo marcapasos que el reparto. Ver src/envio-automatico.
+  const stopMotorLista = lista
+    ? startMotorLista({
+        repos,
+        lista,
+        sender,
+        opciones: opcionesDesdeConfig(config),
+        nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
+        usarPlantilla: () => providerOf(settings.current()) === 'cloud',
+        conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+        supervisor: () => ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,
+        salud,
+        politica,
+        log: info,
+      })
+    : () => undefined;
+
   // Avisos: el avance del lote hacia GSG, y un WhatsApp al coordinador cuando
   // hay casos que solo puede resolver una persona.
   const stopAlertas = startAlertas({
@@ -149,6 +173,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     clearInterval(sincronizadorPlantillas);
     stopSweeper();
     stopMotorRutas();
+    stopMotorLista();
     stopAlertas();
     clearInterval(despachador);
   };

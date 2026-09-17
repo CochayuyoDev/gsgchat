@@ -25,7 +25,15 @@ export function widgetScript(origen: string): string {
   function leer() { try { return localStorage.getItem(CLAVE); } catch (e) { return null; } }
   function guardar(v) { try { if (v) localStorage.setItem(CLAVE, v); else localStorage.removeItem(CLAVE); } catch (e) {} }
   async function api(path, body) {
-    var r = await fetch(ORIGEN + path, { method: body ? 'POST' : 'GET', headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+    var r;
+    try {
+      r = await fetch(ORIGEN + path, { method: body ? 'POST' : 'GET', headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+    } catch (e) {
+      // Sin respuesta del servidor: casi siempre la web no esta en "webs que
+      // pueden embeber" (el navegador corta por CORS) o no hay internet. El
+      // "Failed to fetch" del navegador no le dice nada a nadie.
+      throw new Error('No se pudo conectar con el chat. Si esta web es tuya, agregala en Conectar mi web y tienda; si eres cliente, intentalo de nuevo en un momento.');
+    }
     var d = await r.json().catch(function () { return {}; });
     if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
     return d;

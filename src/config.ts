@@ -254,8 +254,13 @@ const schema = z.object({
   RUTAS_PAUSA_MIN_SEG: z.coerce.number().int().positive().default(15),
   RUTAS_PAUSA_MAX_SEG: z.coerce.number().int().positive().default(30),
 
-  /** Cuanto se espera una respuesta antes de volver a escribir. */
-  RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(30),
+  /**
+   * Cuanto se espera una respuesta antes de volver a escribir, en minutos.
+   * Tres horas: es lo que hace que el sistema escriba como una persona y no
+   * como un robot, y lo que evita llegar al cupo del dia (ver
+   * src/envio-automatico).
+   */
+  RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(180),
 
   /** Mensajes por cliente antes de pasarlo al repartidor. */
   RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(10).default(3),

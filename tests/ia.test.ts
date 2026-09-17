@@ -445,7 +445,7 @@ describe('la IA conoce el sistema por el que habla', () => {
     const { manualPage } = await import('../src/web/ayuda-pages.js');
     const html = manualPage({ nombreNegocio: 'Z' });
     expect(html).toContain('id="preguntar"');
-    expect(html).toContain('/admin/ia/ayuda');
+    expect(html).toContain('/admin/ia/ordenes');
   });
 });
 

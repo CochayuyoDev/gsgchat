@@ -24,3 +24,8 @@ saas/.env
 saas/instancias/
 saas/caddy/instancias/
 saas/Caddyfile
+
+# Salidas de tsc y vitest que se vuelcan a fichero en esta PC.
+tsc-out.txt
+vt-out.txt
+vt-diag.txt

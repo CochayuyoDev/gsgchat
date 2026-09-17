@@ -122,7 +122,9 @@ export async function registerStickersRoutes(app: FastifyInstance, deps: Sticker
   /** Mandar uno a mano, desde el chat. */
   app.post<{ Params: { id: string } }>('/admin/stickers/:id/enviar', async (request, reply) => {
     const body = z.object({ phone: z.string().min(6) }).parse(request.body ?? {});
-    const r = await stickers.enviar(body.phone.replace(/\D+/g, ''), request.params.id, { manual: true });
+    // Un grupo viene con su jid (`...@g.us`): se respeta tal cual.
+    const destino = body.phone.includes('@') ? body.phone : body.phone.replace(/\D+/g, '');
+    const r = await stickers.enviar(destino, request.params.id, { manual: true });
     if ('error' in r) return reply.code(400).send({ error: r.error });
     return r;
   });

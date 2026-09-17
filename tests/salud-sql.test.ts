@@ -12,6 +12,8 @@ import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
+import { correrGoteo } from '../src/campanas/goteo.js';
+import type { Sender } from '../src/outbound/sender.js';
 
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
 
@@ -291,6 +293,36 @@ describe('campanas por goteo', () => {
     expect(c.motivoPausa).toBe('parada a mano');
     expect(c.finishedAt).not.toBeNull();
     expect(await repos.campaigns.listarActivas()).toEqual([]);
+  });
+
+  it('el canario entero pospuesto o bloqueado no tumba el tick del goteo', async () => {
+    // Antes se preguntaba "quedan canarios" con una fecha infinita de JS
+    // (8.64e15), que Postgres rechaza: el tick reventaba en cada vuelta y
+    // ninguna campana avanzaba mientras existiera una asi.
+    const id = await repos.campaigns.create({ name: 'Promo', templateName: 'promo', templateLanguage: 'es', category: 'MARKETING', canario: 1, canarioEsperaMin: 30, ritmoPorHora: null });
+    await repos.campaigns.agregarDestinatarios(id, [
+      { phone: '51900000060', variables: [], orden: 0, canario: true },
+      { phone: '51900000061', variables: [], orden: 1, canario: false },
+    ]);
+    await repos.campaigns.setStatus(id, 'canary');
+    const [canario] = await repos.campaigns.siguientesPendientes(id, 1, true);
+    await repos.campaigns.posponerDestinatario(canario!.id, new Date(Date.now() + HORA), 'separacion');
+    expect(await repos.campaigns.contarPendientes(id, true)).toBe(1);
+    expect(await repos.campaigns.contarPendientes(id)).toBe(2);
+
+    const sender = { send: async () => { throw new Error('no deberia mandar nada'); } } as unknown as Sender;
+    // Pospuesto: todavia cuenta como canario por salir, la espera no arranca.
+    let r = await correrGoteo({ repos, sender });
+    expect(r.campanas).toBe(1);
+    expect((await repos.campaigns.get(id))!.canarioEnviadoAt).toBeNull();
+
+    // Bloqueado (modo prueba, baja...): el canario ya no tiene nada que
+    // mandar y empieza a contar la espera.
+    await repos.campaigns.marcarDestinatario(canario!.id, 'bloqueado', 'modo_prueba: fuera de la lista', null);
+    expect(await repos.campaigns.contarPendientes(id, true)).toBe(0);
+    r = await correrGoteo({ repos, sender });
+    expect(r.campanas).toBe(1);
+    expect((await repos.campaigns.get(id))!.canarioEnviadoAt).not.toBeNull();
   });
 });
 

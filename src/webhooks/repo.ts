@@ -7,7 +7,7 @@
  * constancia de lo que contesto.
  */
 
-import type { Pool } from '../db/pool.js';
+import { toleranteAlUuid, type Pool } from '../db/pool.js';
 import type { NombreEvento } from '../eventos/bus.js';
 
 export interface Webhook {
@@ -143,7 +143,9 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   enviadaAt: r.enviada_at,
 });
 
-export function createWebhooksRepo(pool: Pool): WebhooksRepo {
+export function createWebhooksRepo(poolCrudo: Pool): WebhooksRepo {
+  // Los ids son uuid: uno mal pegado es un 404, no un 500 (ver toleranteAlUuid).
+  const pool = toleranteAlUuid(poolCrudo);
   return {
     async crear(input) {
       const { rows } = await pool.query<WebhookRow>(

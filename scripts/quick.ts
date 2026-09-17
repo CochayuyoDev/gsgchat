@@ -14,6 +14,17 @@
 
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
+
+// Una promesa suelta que falle no puede apagar el sistema entero: se apunta
+// y se sigue. El 16 de septiembre de 2026 un ENOENT al guardar la
+// vinculacion (la carpeta la habia borrado un cierre tardio) tumbo el
+// servidor mientras el usuario escaneaba el QR.
+process.on('unhandledRejection', (razon) => {
+  console.error('[sistema] fallo sin atender (se sigue):', razon);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[sistema] error inesperado (se sigue):', error);
+});
 import { buildServer } from '../src/server.js';
 import { createSender } from '../src/outbound/sender.js';
 import { createMemoryOutboundQueue } from '../src/outbound/memory-queue.js';
@@ -36,6 +47,9 @@ import { mediaDirectory } from '../src/whatsapp/local/media.js';
 import { crearBus } from '../src/eventos/bus.js';
 import { observarRepos } from '../src/eventos/observar.js';
 import { crearServicioIA } from '../src/ia/servicio.js';
+import { crearServicioEnvioAutomatico } from '../src/envio-automatico/servicio.js';
+import { opcionesDesdeConfig } from '../src/rutas/motor.js';
+import { PLANES } from '../src/rutas/telefono.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -151,6 +165,15 @@ const catalogo =
     ? createStokyClient({ baseUrl: config.STOKY_URL, token: config.STOKY_TOKEN })
     : undefined;
 
+// La lista de numeros a los que el sistema escribe solo (ver src/envio-automatico).
+const lista = crearServicioEnvioAutomatico({
+  repos,
+  opcionesReparto: opcionesDesdeConfig(config),
+  plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!,
+  salud,
+  log: (m, d) => console.log(`[wa] ${m}`, d ?? ''),
+});
+
 // El asistente de IA de la tienda (ver src/ia): con el catalogo de Stoky si esta.
 const ia = await crearServicioIA({
   settingsRepo,
@@ -162,6 +185,7 @@ const ia = await crearServicioIA({
   supervisor: () => politica().avisarA,
   catalogo,
   conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+  lista,
   log: (m, d) => console.warn(m, d ?? ''),
 });
 
@@ -201,6 +225,7 @@ const app = await buildServer({
   stickers,
   bus,
   ia,
+  lista,
   // Para poder guardar en la biblioteca un sticker que llego por el chat: su
   // fichero vive aqui.
   mediaDir: mediaDirectory(),
@@ -235,6 +260,7 @@ const pararServicios = arrancarServicios({
   ajustes,
   stickers,
   bus,
+  lista,
   log: consola as never,
 });
 process.on('SIGINT', () => {
@@ -267,6 +293,7 @@ console.log(`
   Chat          ${BASE}/chat
   Panel         ${BASE}/panel   (Inicio: cifras del dia; #salud: riesgo, ritmo y por que frena)
   Ubicaciones   ${BASE}/rutas
+  Envio autom.  ${BASE}/envio-automatico
 
   Ritmo: ${resumenPolitica(politica())}.
 

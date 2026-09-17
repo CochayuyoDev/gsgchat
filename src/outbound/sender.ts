@@ -57,6 +57,19 @@ export interface SendJob {
   };
   /** Un sticker de la biblioteca (ver src/stickers): el fichero ya leido. */
   sticker?: { id: string; archivo: string; datos: Buffer; mimeType: string; url: string };
+  /**
+   * Una foto, un video, un audio o un documento escrito a mano desde el chat.
+   * `id` es el nombre con el que ya quedo guardado en .wa-media, para que el
+   * hilo lo pinte igual que uno recibido.
+   */
+  media?: {
+    id: string;
+    kind: 'image' | 'video' | 'audio' | 'document';
+    datos: Buffer;
+    mimeType: string;
+    filename?: string;
+    caption?: string;
+  };
 }
 
 export type SendOutcome =
@@ -149,9 +162,16 @@ export function createSender(deps: SenderDeps): Sender {
           contactId: contact.id,
           direction: 'out',
           wamid,
-          kind: job.kind === 'freeform' ? 'text' : job.kind,
+          kind: job.kind === 'freeform' ? 'text' : job.kind === 'media' ? (job.media?.kind ?? 'document') : job.kind,
           body: describeOutgoing(job, template),
-          payload: job.location ? { location: job.location } : job.interactive ? { interactive: job.interactive } : null,
+          // El visitante de la web ve el fichero por el mismo id que el chat.
+          payload: job.location
+            ? { location: job.location }
+            : job.interactive
+              ? { interactive: job.interactive }
+              : job.media
+                ? { media: { id: job.media.id, kind: job.media.kind, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, bytes: job.media.datos.length } }
+                : null,
           status: 'sent',
           deliveryId,
           createdAt: at,
@@ -175,8 +195,14 @@ export function createSender(deps: SenderDeps): Sender {
 
       // La lista blanca va por delante de todo, manual incluido: en modo
       // prueba no sale nada a nadie que no este en ella, y queda anotado.
+      //
+      // La unica excepcion es lo que una persona escribe a mano en un GRUPO:
+      // el modo prueba existe para que el sistema no le hable solo a los
+      // clientes, y en un grupo el sistema no habla solo nunca. Un grupo
+      // tampoco cabe en una lista de numeros.
       const lista = permitidos();
-      if (lista.length && !lista.includes(contact.phone)) {
+      const grupoAMano = contact.tipo === 'grupo' && job.manual === true;
+      if (lista.length && !lista.includes(contact.phone) && !grupoAMano) {
         const deliveryId = await repos.deliveries.create({
           contactId: contact.id,
           campaignId: job.campaignId ?? null,
@@ -272,7 +298,9 @@ export function createSender(deps: SenderDeps): Sender {
           contactId: contact.id,
           direction: 'out',
           wamid: result.wamid,
-          kind: job.kind === 'freeform' ? 'text' : job.kind,
+          // Un fichero se guarda con su tipo real (foto, video...): es lo que
+          // el chat sabe pintar.
+          kind: job.kind === 'freeform' ? 'text' : job.kind === 'media' ? (job.media?.kind ?? 'document') : job.kind,
           // Lo que el cliente REALMENTE recibio, si el proveedor lo dice.
           body: result.body ?? describeOutgoing(job, template),
           payload: job.location
@@ -281,7 +309,9 @@ export function createSender(deps: SenderDeps): Sender {
               ? { interactive: job.interactive }
               : job.sticker
                 ? { media: { id: job.sticker.archivo, kind: 'sticker', mimeType: job.sticker.mimeType, url: `/stickers/${job.sticker.archivo}` } }
-                : null,
+                : job.media
+                  ? { media: { id: job.media.id, kind: job.media.kind, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, bytes: job.media.datos.length } }
+                  : null,
           status: 'sent',
           deliveryId,
           createdAt: at,
@@ -349,6 +379,10 @@ function describeOutgoing(
       }
     case 'sticker':
       return '';
+    case 'media':
+      // Como un adjunto recibido: el pie, o el nombre del documento, o la
+      // etiqueta para la lista de chats.
+      return job.media?.caption?.trim() || job.media?.filename || { image: '(foto)', video: '(video)', audio: '(audio)', document: '(documento)' }[job.media?.kind ?? 'document'];
     case 'location':
       return job.location
         ? `Ubicacion: ${job.location.name ? `${job.location.name} — ` : ''}${job.location.latitude}, ${job.location.longitude}`
@@ -398,6 +432,11 @@ async function dispatch(
       if (!job.sticker) throw new Error('falta el campo sticker');
       if (!wa.sendSticker) throw new Error('este proveedor no manda stickers');
       return wa.sendSticker(job.phone, { datos: job.sticker.datos, mimeType: job.sticker.mimeType, url: job.sticker.url });
+    }
+    case 'media': {
+      if (!job.media) throw new Error('falta el campo media');
+      if (!wa.sendMedia) throw new Error('este proveedor no manda fotos ni archivos');
+      return wa.sendMedia(job.phone, { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption });
     }
     case 'freeform':
     default: {

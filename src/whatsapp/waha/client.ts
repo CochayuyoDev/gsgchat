@@ -199,6 +199,19 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
       return resultOf(payload);
     },
 
+    async sendMedia(to, media) {
+      // WAHA tiene un endpoint por tipo; todos aceptan el fichero en base64.
+      const endpoint =
+        media.kind === 'image' ? '/api/sendImage' : media.kind === 'video' ? '/api/sendVideo' : media.kind === 'audio' ? '/api/sendVoice' : '/api/sendFile';
+      const payload = await call<{ id?: unknown }>(endpoint, {
+        session,
+        chatId: toChatId(to),
+        caption: media.caption,
+        file: { mimetype: media.mimeType, filename: media.filename ?? 'archivo', data: media.datos.toString('base64') },
+      });
+      return resultOf(payload);
+    },
+
     async sendLocation(to, location) {
       const payload = await call<{ id?: unknown }>('/api/sendLocation', {
         session,

@@ -324,6 +324,13 @@ describe('webhooks por la API', () => {
 
     expect((await app.inject({ method: 'DELETE', url: `/api/v1/webhooks/${webhook.id}`, headers: con(SOLO_WEBHOOKS) })).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: `/api/v1/webhooks/${webhook.id}`, headers: con(SOLO_WEBHOOKS) })).statusCode).toBe(404);
+
+    // Un id que no es uuid (pegado a medias) es un 404 normal, no un 500:
+    // en Postgres la comparacion reventaba antes de llegar al repo (2026-09-17).
+    for (const url of ['/api/v1/webhooks/no-es-uuid', '/api/v1/webhooks/no-es-uuid/entregas', '/api/v1/webhooks/undefined']) {
+      const r = await app.inject({ method: 'GET', url, headers: con(SOLO_WEBHOOKS) });
+      expect(r.statusCode, url).toBe(404);
+    }
   });
 
   it('rechaza URLs raras y eventos que no existen', async () => {

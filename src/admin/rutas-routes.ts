@@ -30,6 +30,7 @@ import { extractLocation } from '../geo/extract.js';
 import { leerLote, prepararFilas, type FilaLote } from '../rutas/lote.js';
 import { PLANES, revisarTelefono } from '../rutas/telefono.js';
 import { enHorario, type OpcionesMotor } from '../rutas/motor.js';
+import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, PASOS } from '../rutas/ajustes.js';
 import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js';
 import type { Monitor } from '../salud/monitor.js';
@@ -49,6 +50,8 @@ export interface RutasRoutesDeps {
   conBoton?: () => boolean;
   /** Como se llama el negocio ahora mismo. */
   nombreNegocio?: () => string;
+  /** La lista de envio automatico: un numero que entra en un lote sale de ella (el reparto se lo queda). */
+  lista?: ServicioEnvioAutomatico;
 }
 
 const filaSchema = z.object({
@@ -374,6 +377,9 @@ export async function registerRutasRoutes(
       const detalle = solicitud.referencia ? `pedido ${solicitud.referencia}` : 'pedido sin numero';
       await repos.contacts.setOptIn(solicitud.phone, `reparto: ${detalle} (${lote.nombre})`);
       await repos.rutas.actualizarSolicitud(solicitud.id, { contactId: contacto.id });
+      // Si ya estaba en la lista de envio automatico, el reparto se lo queda:
+      // no se le pide la ubicacion por dos caminos a la vez.
+      if (deps.lista) await deps.lista.alCargarLote(solicitud.phone, { id: lote.id, nombre: lote.nombre }).catch(() => undefined);
     }
 
     // Las incidencias detectadas al leer el fichero se reportan ya: que un

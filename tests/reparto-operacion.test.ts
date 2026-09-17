@@ -543,7 +543,7 @@ describe('los ajustes cambiados desde la pantalla', () => {
   it('borrar los ajustes vuelve a lo de la configuración', async () => {
     await e.api.delete('/admin/rutas/ajustes');
     const { body } = await e.api.get<{ ajustes: { maxIntentos: number; esperaRespuestaMinutos: number } }>('/admin/rutas/ajustes');
-    expect(body.ajustes).toMatchObject({ maxIntentos: 3, esperaRespuestaMinutos: 30 });
+    expect(body.ajustes).toMatchObject({ maxIntentos: 3, esperaRespuestaMinutos: 180 });
   });
 });
 

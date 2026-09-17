@@ -7,6 +7,9 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
@@ -54,6 +57,10 @@ const queue: OutboundQueue = {
   async close() {},
 };
 
+// Los adjuntos que se mandan desde el chat se escriben a disco: en una
+// carpeta temporal, no en la .wa-media de verdad.
+const mediaDir = mkdtempSync(join(tmpdir(), 'wa-chat-media-'));
+
 let app: FastifyInstance;
 let repos: FakeRepos;
 let wa: FakeWhatsApp;
@@ -73,7 +80,7 @@ async function build() {
   });
   const settings = await createFakeSettings(config);
   deps = { repos, wa, sender, config, settings };
-  return buildServer({ config, repos, settings, wa, sender, queue, logger: false });
+  return buildServer({ config, repos, settings, wa, sender, queue, logger: false, mediaDir });
 }
 
 function inbound(overrides: Partial<InboundMessage>, phone = '5215500001111'): ChangeValue {
@@ -362,6 +369,70 @@ describe('escribir desde el chat', () => {
 
     expect(respuesta.statusCode).toBe(200);
     expect(respuesta.json().contact).toMatchObject({ phone: '5215506060606', name: 'Nuevo' });
+  });
+
+  it('una foto pegada sale como foto, con su pie, y queda en el hilo como una recibida', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    // Un PNG minimo (1x1), como lo entrega el portapapeles.
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+
+    const respuesta = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/adjunto',
+      headers: auth,
+      payload: { contactId: contact.id, datos: 'data:image/png;base64,' + png.toString('base64'), mimeType: 'image/png', filename: 'pegado.png', caption: 'la fachada' },
+    });
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json().ok).toBe(true);
+
+    // Salio por el cliente como foto, con los bytes y el pie.
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'image', bytes: png.length, mimeType: 'image/png', caption: 'la fachada' });
+
+    // En el hilo es una foto con su fichero, igual que una recibida.
+    const messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    const ultimo = messages.at(-1);
+    expect(ultimo).toMatchObject({ direction: 'out', kind: 'image', body: 'la fachada', payload: { media: { kind: 'image', mimeType: 'image/png', caption: 'la fachada', bytes: png.length } } });
+    expect(ultimo.payload.media.id).toMatch(/^[0-9a-f]{24}\.png$/);
+    // Y el fichero esta en disco, servible por /admin/local/media/:id.
+    expect(existsSync(join(mediaDir, ultimo.payload.media.id))).toBe(true);
+    expect(readFileSync(join(mediaDir, ultimo.payload.media.id)).equals(png)).toBe(true);
+  });
+
+  it('un documento lleva su nombre; un GIF va como documento para que se mueva', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const pdf = Buffer.from('%PDF-1.4 prueba');
+    const r1 = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: pdf.toString('base64'), mimeType: 'application/pdf', filename: 'boleta.pdf' } });
+    expect(r1.json().ok).toBe(true);
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'document', filename: 'boleta.pdf' });
+    let messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    expect(messages.at(-1)).toMatchObject({ kind: 'document', body: 'boleta.pdf', payload: { media: { filename: 'boleta.pdf' } } });
+    expect(messages.at(-1).payload.media.id).toMatch(/\.pdf$/);
+
+    const r2 = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: Buffer.from('GIF89a').toString('base64'), mimeType: 'image/gif', filename: 'risa.gif' } });
+    expect(r2.json().ok).toBe(true);
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'document' });
+    messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    expect(messages.at(-1).payload.media.id).toMatch(/\.gif$/);
+  });
+
+  it('un fichero vacio o de mas de 16 MB se rechaza con un motivo', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const vacio = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: 'data:image/png;base64,', mimeType: 'image/png' } });
+    expect(vacio.statusCode).toBe(400);
+    expect(vacio.json().error).toMatch(/vacío/);
+    const enorme = Buffer.alloc(16 * 1024 * 1024 + 1).toString('base64');
+    const grande = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: enorme, mimeType: 'video/mp4', filename: 'v.mp4' } });
+    expect(grande.statusCode).toBe(400);
+    expect(grande.json().error).toMatch(/16 MB/);
+    expect(wa.sent.filter((m) => m.kind === 'media')).toHaveLength(0);
+  });
+
+  it('a un contacto que no existe no se le manda nada', async () => {
+    const r = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: 'no-existe', datos: 'aGVsbG8=', mimeType: 'image/png' } });
+    expect(r.statusCode).toBe(404);
   });
 
   it('un mensaje vacio se rechaza con un motivo', async () => {

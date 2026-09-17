@@ -156,7 +156,10 @@ export async function processChange(
 
       const profileName = value.contacts?.[0]?.profile?.name;
       for (const message of value.messages ?? []) {
-        if (seen && message.id) {
+        // La segunda entrega de un mensaje (el telefono reenvio un "ver una
+        // vez") lleva el mismo id a proposito: no es un duplicado, es el
+        // fichero que faltaba.
+        if (seen && message.id && !message.reenvio) {
           if (seen.get(message.id)) continue;
           seen.set(message.id, true);
         }

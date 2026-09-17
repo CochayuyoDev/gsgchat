@@ -23,6 +23,21 @@ import { mediaDirectory } from './whatsapp/local/media.js';
 import { crearBus } from './eventos/bus.js';
 import { observarRepos } from './eventos/observar.js';
 import { crearServicioIA } from './ia/servicio.js';
+import { crearServicioEnvioAutomatico } from './envio-automatico/servicio.js';
+import { opcionesDesdeConfig } from './rutas/motor.js';
+import { PLANES } from './rutas/telefono.js';
+
+// Una promesa suelta que falle no puede apagar el sistema entero: se apunta
+// y se sigue. El 16 de septiembre de 2026 un ENOENT al guardar la
+// vinculacion (la carpeta la habia borrado un cierre tardio) tumbo el
+// servidor mientras el usuario escaneaba el QR.
+process.on('unhandledRejection', (razon) => {
+  console.error('[sistema] fallo sin atender (se sigue):', razon);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[sistema] error inesperado (se sigue):', error);
+});
+
 
 const runtime = await createRuntime({ migrate: true });
 const { config, settings, wa } = runtime;
@@ -78,6 +93,15 @@ const sender = createSender({
 // la despedida). Los ficheros van a la carpeta de medios.
 const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mediaDirectory(), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
 
+// La lista de numeros a los que el sistema escribe solo. Ver src/envio-automatico.
+const lista = crearServicioEnvioAutomatico({
+  repos,
+  opcionesReparto: opcionesDesdeConfig(config),
+  plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!,
+  salud,
+  log: (m, d) => console.log(m, d ?? ''),
+});
+
 // El asistente de IA de la tienda: contesta con lo que la tienda escribio
 // en "Mi asistente IA" y deriva a una persona cuando no puede. Ver src/ia.
 const ia = await crearServicioIA({
@@ -89,6 +113,7 @@ const ia = await crearServicioIA({
   nombreNegocio: () => ajustes.nombreNegocio(),
   supervisor: () => politica().avisarA,
   conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+  lista,
   log: (m, d) => console.warn(m, d ?? ''),
 });
 
@@ -122,14 +147,14 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, mediaDir: mediaDirectory(), autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, lista, mediaDir: mediaDirectory(), autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })
   : null;
 
 // Todo lo que trabaja solo: monitor, secuencias, goteo, rutas, avisos, GSG.
-const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, log: app.log });
+const pararServicios = arrancarServicios({ config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, lista, log: app.log });
 
 await app.listen({ port: config.PORT, host: '0.0.0.0' });
 

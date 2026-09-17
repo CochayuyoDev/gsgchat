@@ -59,7 +59,7 @@ export interface OpcionesMotor {
 export const OPCIONES_POR_DEFECTO: OpcionesMotor = {
   pausaMinSegundos: 15,
   pausaMaxSegundos: 30,
-  esperaRespuestaMinutos: 30,
+  esperaRespuestaMinutos: 180,
   maxIntentos: 3,
   horaInicio: 9,
   horaFin: 19,

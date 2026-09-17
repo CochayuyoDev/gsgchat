@@ -17,12 +17,14 @@
  */
 
 import { esperarRafaga } from './rafaga.js';
+import { TEXTO_VER_UNA_VEZ } from './textos.js';
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import type { ServicioIA } from '../ia/servicio.js';
+import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import { numeroPermitido } from '../salud/lista-blanca.js';
 import type { Contact, Repos } from '../db/repos.js';
 import type { AutoReply } from '../db/automation.js';
@@ -92,6 +94,14 @@ export interface InboundDeps {
    */
   ia?: ServicioIA;
   /**
+   * La lista de envio automatico. Ver src/envio-automatico.
+   *
+   * Un mensaje del cliente puede ser justo lo que la lista esperaba de el
+   * (su ubicacion, una respuesta): entonces sale de la lista y no se le
+   * insiste mas.
+   */
+  lista?: ServicioEnvioAutomatico;
+  /**
    * Cuanto se espera a que el cliente termine de escribir, en ms.
    *
    * Quien escribe por WhatsApp lo hace en trozos, y contestar a cada trozo
@@ -101,7 +111,17 @@ export interface InboundDeps {
    * Sin valor no se espera nada: es lo que quieren las pruebas.
    */
   rafagaMs?: number;
+  /**
+   * Cuanto se espera a que el telefono reenvie un "ver una vez" antes de
+   * darlo por imposible y pedirle al cliente que lo mande normal, en ms.
+   * Baileys tarda 2 s en pedirlo y le da 8 s al telefono para contestar.
+   */
+  verUnaVezEsperaMs?: number;
+  /** Inyectable para que las pruebas no esperen de verdad. */
+  dormir?: (ms: number) => Promise<void>;
 }
+
+const dormirDeVerdad = (ms: number) => new Promise<void>((listo) => setTimeout(listo, ms));
 
 export const CONFIRM_PREFIX = 'loc_ok:';
 export const REJECT_ID = 'loc_no';
@@ -131,6 +151,17 @@ function describe(result: ExtractionSuccess): string {
  * cliente mando algo, aunque el sistema no pueda responderlo solo.
  */
 export function readInbound(message: InboundMessage): { kind: MessageKind; body: string; payload: Record<string, unknown> | null } {
+  const leido = leerContenido(message);
+  // En un grupo importa quien lo dijo: va en el payload para que el chat lo
+  // pinte encima del globo, y el cuerpo queda limpio para la lista y la IA.
+  if (message.grupo) {
+    const autor = { telefono: message.grupo.autor, nombre: message.grupo.autorNombre?.trim() || null };
+    return { ...leido, payload: { ...(leido.payload ?? {}), autor } };
+  }
+  return leido;
+}
+
+function leerContenido(message: InboundMessage): { kind: MessageKind; body: string; payload: Record<string, unknown> | null } {
   if (message.type === 'location' && message.location) {
     const { latitude, longitude, name } = message.location;
     return {
@@ -162,8 +193,8 @@ export function readInbound(message: InboundMessage): { kind: MessageKind; body:
     return {
       kind: 'unknown',
       body:
-        `👁 ${que} de "ver una vez": WhatsApp solo deja abrirla en el teléfono, no en el sistema. ` +
-        'Si la necesitas aquí, pídele al cliente que la mande como foto normal.',
+        `👁 ${que} de "ver una vez": WhatsApp solo la entrega al teléfono, no a los dispositivos vinculados como este. ` +
+        'Ábrela en el teléfono o pídele al cliente que la mande como foto normal.',
       payload: { viewOnce: message.viewOnce },
     };
   }
@@ -537,12 +568,58 @@ export async function handleInboundMessage(
 ): Promise<void> {
   const { repos, sender, wa, config } = deps;
   const phone = message.from;
+  const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
+
+  // Un grupo de WhatsApp: se guarda y se ensena, y nada mas. Ni el asistente,
+  // ni las reglas, ni el reparto, ni el acuse de lectura: un automatismo que
+  // contesta en un grupo le escribe a todos los que estan dentro.
+  if (message.grupo) {
+    if (message.type === 'revoke' && message.revoca) {
+      await repos.messages.marcarBorradoPorRemitente(message.revoca, receivedAt);
+      return;
+    }
+    const grupo = await repos.contacts.upsertGrupo(message.grupo.jid, message.grupo.nombre ?? profileName ?? null);
+    const leidoGrupo = readInbound(message);
+    if (message.reenvio) {
+      await repos.messages.completarPorWamid(message.id, leidoGrupo);
+      if (await repos.messages.existsByWamid(message.id)) return;
+    }
+    await repos.messages.add({
+      contactId: grupo.id,
+      direction: 'in',
+      wamid: message.id,
+      kind: leidoGrupo.kind,
+      body: leidoGrupo.body,
+      payload: leidoGrupo.payload,
+      createdAt: receivedAt,
+    });
+    if (!message.viejo) await repos.contacts.touchInbound(grupo.phone, receivedAt);
+    return;
+  }
+
+  // "Eliminar para todos": no se borra nada, se marca el original y se acaba.
+  // No es un mensaje del cliente: no abre ventana, no se contesta.
+  if (message.type === 'revoke' && message.revoca) {
+    await repos.messages.marcarBorradoPorRemitente(message.revoca, receivedAt);
+    return;
+  }
 
   const contact = await repos.contacts.upsertFromInbound(phone, profileName);
   // Antes de anotar el entrante: asi se sabe si es el primer mensaje.
   const isFirstMessage = !contact.lastInboundAt;
-  const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
   const leido = readInbound(message);
+
+  // La segunda entrega de un mensaje que llego vacio (el telefono reenvio un
+  // "ver una vez"): se completa la fila que ya existe con la foto y se acaba.
+  // El primer paso ya decidio que contestar; este solo trae el fichero.
+  if (message.reenvio) {
+    const completado = await repos.messages.completarPorWamid(message.id, leido);
+    if (completado || (await repos.messages.existsByWamid(message.id))) return;
+    // Nunca llego el sobre (se perdio, o el sistema arranco despues): se
+    // guarda como un adjunto normal, sin contestar nada.
+    await repos.messages.add({ contactId: contact.id, direction: 'in', wamid: message.id, kind: leido.kind, body: leido.body, payload: leido.payload, createdAt: receivedAt });
+    return;
+  }
 
   // Lo que ya se atendio (WhatsApp Web lo reentrega tras un reinicio) y lo
   // que llega del historial se guarda en el hilo y nada mas: contestar a un
@@ -578,6 +655,14 @@ export async function handleInboundMessage(
     payload: leido.payload,
     createdAt: receivedAt,
   });
+
+  // La lista de envio automatico se entera de que contesto: si era lo que
+  // se buscaba (su ubicacion, una respuesta), sale de la lista aqui mismo.
+  // Va antes de la rafaga y de la pausa del bot a proposito: contestar es
+  // contestar, aunque el sistema despues se calle.
+  if (deps.lista) {
+    await deps.lista.alRecibir(contact, { ubicacion: message.type === 'location' && Boolean(message.location) }).catch(() => undefined);
+  }
 
   // Si sigue escribiendo, se espera: una rafaga se contesta UNA vez, a lo
   // ultimo que dijo. Va despues de guardar el mensaje -el hilo los tiene
@@ -682,6 +767,7 @@ export async function handleInboundMessage(
       // que falla es la zona. Es una incidencia para GSG, no un "no te
       // entendi".
       if (result.reason === 'outside_bbox') {
+        if (deps.lista) await deps.lista.alRecibir(contact, { ubicacion: true, fueraDeZona: true }).catch(() => undefined);
         const enRuta = await atenderRespuestaDeRuta(rutasDeps, contact, {
           ubicacion: {
             lat: message.location.latitude,
@@ -749,6 +835,20 @@ export async function handleInboundMessage(
   const text = message.text?.body ?? message.button?.text ?? '';
 
   if (!text.trim()) {
+    // Un "ver una vez" llego vacio y se le pidio al telefono que lo reenvie
+    // (ver session.ts). Se le da su margen: si la foto llega, el mensaje ya
+    // esta completo y no hay nada que pedirle al cliente.
+    if (message.type === 'view_once') {
+      await (deps.dormir ?? dormirDeVerdad)(deps.verUnaVezEsperaMs ?? 12_000);
+      if (await repos.messages.tieneAdjunto(message.id)) return;
+      // El telefono no lo solto: se le pide al cliente que lo mande normal,
+      // que es lo unico que lo trae hasta aqui. Va ANTES del reparto a
+      // proposito: una foto que nadie puede ver no sirve como respuesta al
+      // reparto; la que reenvie normal si entrara por ese camino. Se puede
+      // apagar desde Configuracion.
+      if (deps.ajustes?.pedirVerUnaVezNormal() ?? true) await reply(TEXTO_VER_UNA_VEZ);
+      return;
+    }
     // Un audio o una foto no son texto, pero SI son una respuesta: el cliente
     // esta contestando y callarse le hace creer que nadie le lee.
     const esAdjunto = ['image', 'audio', 'video', 'document', 'sticker', 'view_once'].includes(message.type);
@@ -821,6 +921,9 @@ export async function handleInboundMessage(
         }
       : undefined,
   });
+  // Un enlace de mapa dentro del texto es su ubicacion: la lista lo cuenta igual que un pin.
+  if (result.ok && deps.lista) await deps.lista.alRecibir(contact, { ubicacion: true }).catch(() => undefined);
+
   if (enRutaTexto.atendida) {
     // La ubicacion se guarda tambien en el historial de ubicaciones, que es
     // de donde salen la pagina de rastreo y el listado del panel.

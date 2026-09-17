@@ -117,6 +117,25 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
   return {
     sendText,
 
+    /**
+     * Una foto, un video, un audio o un documento, como lo manda el telefono.
+     * El pie va en `caption`; un documento lleva su nombre para que el
+     * cliente lo vea como el fichero que es.
+     */
+    async sendMedia(to, media) {
+      const sock = socketOrThrow();
+      const contenido: Record<string, unknown> =
+        media.kind === 'image'
+          ? { image: media.datos, mimetype: media.mimeType, caption: media.caption }
+          : media.kind === 'video'
+            ? { video: media.datos, mimetype: media.mimeType, caption: media.caption }
+            : media.kind === 'audio'
+              ? { audio: media.datos, mimetype: media.mimeType }
+              : { document: media.datos, mimetype: media.mimeType, fileName: media.filename ?? 'documento', caption: media.caption };
+      const sent = await conTeclado(to, media.caption ?? '', () => sock.sendMessage(toJid(to), contenido));
+      return resultOf(sent);
+    },
+
     /** Un sticker de verdad: Baileys lo empaqueta como stickerMessage. */
     async sendSticker(to, sticker) {
       const sock = socketOrThrow();

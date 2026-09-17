@@ -17,6 +17,10 @@ import { buildTrackingUrls } from '../src/tracking/tokens.js';
 import { createFakeRepos, createFakeWhatsApp, approvedTemplate, createMemorySettingsRepo, TEST_SETTINGS_KEY } from '../tests/fakes.js';
 import { createSettingsService } from '../src/settings/service.js';
 import { crearServicioIA } from '../src/ia/servicio.js';
+import { crearServicioEnvioAutomatico } from '../src/envio-automatico/servicio.js';
+import { startMotorLista } from '../src/envio-automatico/motor.js';
+import { opcionesDesdeConfig } from '../src/rutas/motor.js';
+import { PLANES } from '../src/rutas/telefono.js';
 import { crearBus } from '../src/eventos/bus.js';
 import { observarRepos } from '../src/eventos/observar.js';
 import { encolarEventos, startDespachadorWebhooks } from '../src/webhooks/despachador.js';
@@ -341,8 +345,10 @@ await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
 
 // Los stickers de la demo van a una carpeta temporal: nada queda en el proyecto.
 const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mkdtempSync(join(tmpdir(), 'wa-demo-stickers-')), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
-const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA });
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia });
+const lista = crearServicioEnvioAutomatico({ repos, opcionesReparto: opcionesDesdeConfig(config), plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, salud });
+const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista });
+startMotorLista({ repos, lista, sender, opciones: opcionesDesdeConfig(config), nombreNegocio: () => ajustes.nombreNegocio(), usarPlantilla: () => false, salud, politica });
 const desconectarWebhooks = encolarEventos(bus, repos.webhooks);
 const pararWebhooks = startDespachadorWebhooks({ repo: repos.webhooks }, 3_000);
 process.on('exit', () => { desconectarWebhooks(); pararWebhooks(); });

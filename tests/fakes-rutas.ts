@@ -302,6 +302,28 @@ export function createFakeRutas(): FakeRutas {
       return eventos.filter((e) => e.solicitudId === solicitudId).slice(0, limite);
     },
 
+    async vivasEnLotesAbiertos(limite) {
+      return solicitudes
+        .filter((s) => VIVOS.includes(s.estado))
+        .map((s) => ({ s, lote: lotes.find((l) => l.id === s.loteId) }))
+        .filter((x) => x.lote && x.lote.estado !== 'terminado')
+        .sort((a, b) => (a.s.proximoIntentoAt ?? a.s.createdAt).getTime() - (b.s.proximoIntentoAt ?? b.s.createdAt).getTime() || a.s.id - b.s.id)
+        .slice(0, limite)
+        .map((x) => ({ ...x.s, lote: { id: x.lote!.id, nombre: x.lote!.nombre, estado: x.lote!.estado } }));
+    },
+
+    async eventosRecientes(limite) {
+      return [...eventos]
+        .sort((a, b) => b.id - a.id)
+        .slice(0, limite)
+        .flatMap((e) => {
+          const s = solicitudes.find((x) => x.id === e.solicitudId);
+          const l = s ? lotes.find((x) => x.id === s.loteId) : undefined;
+          if (!s || !l) return [];
+          return [{ ...e, phone: s.phone, nombre: s.nombre, referencia: s.referencia, loteNombre: l.nombre }];
+        });
+    },
+
     async encolarReporte(reporte: {
       solicitudId?: number | null;
       loteId?: string | null;

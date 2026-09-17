@@ -21,7 +21,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import QRCode from 'qrcode';
-import type { ChangeValue } from '../types.js';
+import type { ChangeValue, InboundMessage } from '../types.js';
 import { desenvolver, guardarMedia, mediaDirectory, tipoDeAdjunto, type MediaInfo } from './media.js';
 
 export type LocalStatus = 'STOPPED' | 'STARTING' | 'SCAN_QR_CODE' | 'WORKING' | 'FAILED';
@@ -46,7 +46,14 @@ export interface LocalSocket {
   logout(): Promise<void>;
   end(error?: Error): void;
   ev: { on(evento: string, handler: (arg: never) => void): void };
-  user?: { id?: string; name?: string };
+  user?: { id?: string; name?: string; lid?: string };
+  /**
+   * El socket crudo, por debajo de los eventos. Emite `CB:message` con cada
+   * nodo de mensaje ANTES de que Baileys decida que hacer con el; es la
+   * unica forma de ver los "ver una vez" que Baileys descarta sin avisar
+   * (`view_once_unavailable_fanout`).
+   */
+  ws?: { on(evento: string, handler: (nodo: unknown) => void): void };
   /**
    * El mapa LID -> telefono que mantiene Baileys.
    *
@@ -76,6 +83,37 @@ export interface LocalSocket {
    */
   sendPresenceUpdate?(type: 'composing' | 'paused' | 'available' | 'unavailable', jid?: string): Promise<void>;
   presenceSubscribe?(jid: string): Promise<void>;
+  /**
+   * Le pide al telefono que reenvie un mensaje que llego sin contenido.
+   *
+   * Es lo que hace WhatsApp Web con los mensajes que no pudo descifrar. Aqui
+   * se usa con los "ver una vez", que llegan como un sobre vacio: si el
+   * telefono lo suelta, Baileys lo vuelve a emitir por `messages.upsert`
+   * con `requestId` y entonces si trae la foto.
+   */
+  requestPlaceholderResend?(key: unknown, datos?: unknown): Promise<string | undefined>;
+  /**
+   * Le pide al telefono mensajes anteriores de un chat (`count`, desde el
+   * mas viejo que se conoce). Llegan por `messaging-history.set`.
+   */
+  fetchMessageHistory?(count: number, oldestMsgKey: { remoteJid: string; fromMe: boolean; id: string }, oldestMsgTimestampMs: number): Promise<string>;
+  /** Los grupos en los que esta el numero: jid -> nombre y participantes. */
+  groupFetchAllParticipating?(): Promise<Record<string, GrupoMetadata>>;
+  groupMetadata?(jid: string): Promise<GrupoMetadata>;
+}
+
+/** Lo que interesa de un grupo de WhatsApp. */
+export interface GrupoMetadata {
+  id?: string;
+  subject?: string;
+  participants?: unknown[];
+}
+
+/** Un grupo tal como se le entrega al resto del sistema. */
+export interface GrupoResumen {
+  jid: string;
+  nombre: string;
+  participantes: number;
 }
 
 export interface StartLocalOptions {
@@ -97,6 +135,32 @@ export interface StartLocalOptions {
    * monitor de salud cuenta las desconexiones y para todo con un 403.
    */
   onDisconnect?: (code: number | undefined, detail: string) => void;
+  /**
+   * Los grupos del numero, al conectar y cada vez que WhatsApp avisa de uno
+   * nuevo o de un cambio de nombre. Es lo que hace que un grupo aparezca en
+   * el chat antes de que nadie escriba en el.
+   */
+  onGrupos?: (grupos: GrupoResumen[]) => Promise<void> | void;
+  /**
+   * Un mensaje PROPIO: lo que se mando desde el telefono (o desde otro
+   * dispositivo), en vivo o del historial. Se guarda en el hilo como
+   * saliente para que el chat sea el mismo que el del telefono. Los envios
+   * de este sistema tambien vuelven por aqui, con el mismo id: la fila ya
+   * existe y no pasa nada.
+   */
+  onPropio?: (propio: MensajePropio) => Promise<void> | void;
+  /**
+   * El telefono termino de mandar las conversaciones recientes de TODOS los
+   * chats (pasa una vez, al vincular). Es el momento en que cada chat tiene
+   * ya un mensaje de referencia y se le puede pedir al telefono lo anterior.
+   */
+  onSincronizacionInicial?: () => Promise<void> | void;
+}
+
+export interface MensajePropio {
+  /** Traducido como si fuera entrante: `from` es el chat (persona o grupo). */
+  mensaje: InboundMessage;
+  status: 'sent' | 'delivered' | 'read' | 'failed' | null;
 }
 
 /**
@@ -151,6 +215,53 @@ const estado: LocalState = {
 let socket: LocalSocket | null = null;
 let arrancando: Promise<LocalState> | null = null;
 let opciones: StartLocalOptions | null = null;
+
+/**
+ * Nombre de cada grupo, por jid. Un mensaje de grupo no trae el nombre del
+ * grupo (solo el `pushName` de quien escribe), y sin esto el chat lo
+ * ensenaria como "120363412332267099@g.us".
+ */
+const nombresDeGrupo = new Map<string, string>();
+
+export function nombreDeGrupo(jid: string | undefined): string | null {
+  if (!jid) return null;
+  return nombresDeGrupo.get(jid) ?? null;
+}
+
+/** Solo para las pruebas y para la carga inicial. */
+export function recordarGrupo(jid: string, nombre: string): void {
+  if (jid && nombre) nombresDeGrupo.set(jid, nombre);
+}
+
+export function esGrupo(jid: string | undefined): boolean {
+  return typeof jid === 'string' && jid.endsWith('@g.us');
+}
+
+function resumirGrupo(jid: string, meta: GrupoMetadata | undefined): GrupoResumen {
+  const nombre = meta?.subject?.trim() || nombreDeGrupo(jid) || jid.replace(/@g\.us$/, '');
+  return { jid, nombre, participantes: Array.isArray(meta?.participants) ? meta!.participants!.length : 0 };
+}
+
+/**
+ * Trae los grupos del numero y se los entrega al sistema.
+ *
+ * Se hace al conectar y en segundo plano: que WhatsApp tarde en contestar, o
+ * que falle, no puede retrasar ni tumbar la conexion.
+ */
+async function cargarGrupos(sock: LocalSocket, opts: StartLocalOptions, log: (m: string) => void): Promise<void> {
+  if (!sock.groupFetchAllParticipating) return;
+  try {
+    const todos = await sock.groupFetchAllParticipating();
+    const lista = Object.entries(todos ?? {})
+      .filter(([jid]) => esGrupo(jid))
+      .map(([jid, meta]) => resumirGrupo(jid, meta));
+    for (const g of lista) recordarGrupo(g.jid, g.nombre);
+    log(`grupos del numero: ${lista.length}`);
+    if (lista.length) await opts.onGrupos?.(lista);
+  } catch (error) {
+    log(`no se pudieron traer los grupos: ${String(error)}`);
+  }
+}
 
 export function getLocalState(): LocalState {
   return { ...estado };
@@ -236,7 +347,15 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
       // vinculacion por un 401, lo ultimo que hace falta es que un acuse
       // tardio la vuelva a escribir con las mismas credenciales muertas.
       if (socket !== sock) return;
-      void saveCreds();
+      // La carpeta puede haber desaparecido (un logout la borra): se vuelve a
+      // crear. Y un fallo al escribir se apunta, no revienta el servidor:
+      // era una promesa suelta y un ENOENT tumbo todo el sistema.
+      try {
+        mkdirSync(opts.authDir, { recursive: true });
+      } catch {
+        // Si ni siquiera se puede crear, lo dira el fallo de abajo.
+      }
+      saveCreds().catch((error: unknown) => log(`no se pudo guardar la vinculacion: ${String(error)}`));
     }) as unknown) as (arg: never) => void);
 
     sock.ev.on('connection.update', (((update: {
@@ -264,11 +383,20 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
           estado.detail = 'Conectado.';
           log(`WhatsApp conectado: ${estado.phone}`);
           listo();
+          void cargarGrupos(sock, opts, log);
         }
 
         if (update.connection === 'close') {
           const code = update.lastDisconnect?.error?.output?.statusCode;
           const explicacion = explicarCierre(code);
+          // Un socket viejo que se cierra tarde (el de un logout, mientras ya
+          // hay otro escaneando el QR) no puede borrar la vinculacion nueva
+          // ni cambiar el estado: eso es justo lo que tumbo el servidor.
+          if (socket !== sock) {
+            log(`cierre tardio de una sesion anterior (${code ?? 'sin codigo'}): se ignora`);
+            listo();
+            return;
+          }
           try {
             opts.onDisconnect?.(code, update.lastDisconnect?.error?.message ?? explicacion);
           } catch {
@@ -316,6 +444,27 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
       });
     }) as unknown) as (arg: never) => void);
 
+    // Un grupo nuevo (te agregaron, lo creaste) o un cambio de nombre: se
+    // apunta para que el chat lo ensene con su nombre y no con el jid.
+    const grupoCambiado = (lista: unknown[]) => {
+      const resumen: GrupoResumen[] = [];
+      for (const item of lista ?? []) {
+        const g = item as GrupoMetadata & { id?: string };
+        if (!g?.id || !esGrupo(g.id)) continue;
+        // En `groups.update` solo viene lo que cambio: sin `subject` no hay
+        // nada que apuntar.
+        if (!g.subject?.trim()) continue;
+        const r = resumirGrupo(g.id, g);
+        recordarGrupo(r.jid, r.nombre);
+        resumen.push(r);
+      }
+      if (resumen.length) {
+        void Promise.resolve(opts.onGrupos?.(resumen)).catch((error: unknown) => log(`fallo apuntando un grupo: ${String(error)}`));
+      }
+    };
+    sock.ev.on('groups.upsert', ((lista: unknown[]) => grupoCambiado(lista)) as unknown as (arg: never) => void);
+    sock.ev.on('groups.update', ((lista: unknown[]) => grupoCambiado(lista)) as unknown as (arg: never) => void);
+
     // Los acuses de los mensajes propios: entregado, leido, fallido. Sin
     // esto el doble check del chat no se movia y, peor, el monitor de salud
     // veia que nada de lo enviado constaba entregado y frenaba el numero por
@@ -329,37 +478,124 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
       );
     }) as unknown) as (arg: never) => void);
 
-    sock.ev.on('messages.upsert', (((evento: { messages?: unknown[]; type?: string }) => {
+    /** Un entrante, venga del evento de Baileys o del sobre crudo. */
+    const procesarEntrante = async (
+      mensaje: unknown,
+      tipoEvento: string | undefined,
+      reenvio: boolean,
+      origen: 'upsert' | 'sobre' | 'historial',
+    ): Promise<void> => {
+      const key = (mensaje as { key?: { id?: string; remoteJid?: string; fromMe?: boolean; isViewOnce?: boolean } }).key;
+      if (key?.fromMe) {
+        await procesarPropio(mensaje, origen === 'historial' ? 'historial' : 'upsert');
+        return;
+      }
+      // El sobre de un "ver una vez" ya se atendio desde el gancho crudo (ver
+      // `escucharSobres`): Baileys lo vuelve a emitir cuando trae la marca.
+      if (origen === 'upsert' && key?.isViewOnce && key.id && sobresAtendidos.has(key.id) && !reenvio) return;
+
+      const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock, { resubida: origen !== 'historial' });
+      const telefono = await resolverTelefono(sock, key);
+      // Un grupo del que no se sabia el nombre todavia: se pregunta una
+      // vez y se recuerda.
+      if (esGrupo(key?.remoteJid) && !nombreDeGrupo(key?.remoteJid)) await aprenderNombreDeGrupo(sock, key!.remoteJid!, opts, log);
+      const value = toChangeValue(mensaje, telefono, media, {
+        nombreGrupo: nombreDeGrupo(key?.remoteJid),
+        // Baileys pone `requestId` cuando el mensaje es la respuesta del
+        // telefono a un reenvio que se le pidio: es la segunda entrega.
+        reenvio,
+      });
+      if (!value) {
+        log(`entrante descartado (${tipoEvento ?? 'sin tipo'}): ${key?.remoteJid ?? 'sin jid'} — ${porQueSeDescarta(mensaje, telefono)}`);
+        return;
+      }
+
+      // Lo que no llega en vivo (historial, cola de cuando el sistema
+      // estaba apagado) se guarda pero no se contesta. Ver `esMensajeViejo`.
+      const m = value.messages?.[0];
+      if (m && esMensajeViejo(tipoEvento, m.timestamp)) {
+        m.viejo = true;
+        log(`entrante ${m.type} de ${m.from} (${tipoEvento ?? 'sin tipo'}, viejo): se guarda sin contestar`);
+      } else {
+        log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}${m?.reenvio ? ' (reenviado por el telefono, ya con el fichero)' : ''}`);
+      }
+      // El sobre vacio de un "ver una vez": se le pide al telefono que lo
+      // reenvie ANTES de entregar el mensaje, para que la espera del
+      // manejador (que mira si llego el fichero) tenga algo que esperar.
+      if (m?.type === 'view_once' && !m.reenvio) pedirReenvio(sock, mensaje, log);
+      await opts.onChange?.(value);
+    };
+
+    /**
+     * Un mensaje propio (mandado desde el telefono): se traduce como si
+     * fuera entrante -es la misma forma- y se entrega como saliente.
+     */
+    const procesarPropio = async (mensaje: unknown, origen: 'upsert' | 'historial' = 'upsert'): Promise<void> => {
+      if (!opts.onPropio) return;
+      const m = mensaje as { key?: { id?: string; remoteJid?: string; isViewOnce?: boolean }; status?: unknown };
+      const jid = m.key?.remoteJid ?? '';
+      if (!m.key?.id || !jid || /@(broadcast|newsletter)$/.test(jid) || m.key.isViewOnce) return;
+      const media = await bajarAdjunto(mensaje, m.key.id, opts, log, sock, { resubida: origen !== 'historial' });
+      const telefono = await resolverTelefono(sock, m.key);
+      if (esGrupo(jid) && !nombreDeGrupo(jid)) await aprenderNombreDeGrupo(sock, jid, opts, log);
+      const value = toChangeValue({ ...(mensaje as object), key: { ...m.key, fromMe: false } }, telefono, media, { nombreGrupo: nombreDeGrupo(jid) });
+      const traducido = value?.messages?.[0];
+      if (!traducido) return;
+      // Borrar para todos un mensaje propio: se marca igual que el de un cliente.
+      if (traducido.type === 'revoke' && value) {
+        await opts.onChange?.(value);
+        return;
+      }
+      // Lo que no se ensena de uno mismo: reacciones, botones, avisos.
+      if (!PROPIOS_QUE_SE_GUARDAN.has(traducido.type)) return;
+      await opts.onPropio({ mensaje: traducido, status: ackToStatus(m.status) });
+    };
+
+    // El historial: al vincular, WhatsApp manda las conversaciones recientes
+    // (y bajo demanda, las anteriores de un chat). Entra por aqui, no por
+    // `messages.upsert`; sin esto el chat empezaba vacio.
+    sock.ev.on('messaging-history.set', (((historial: { messages?: unknown[]; syncType?: unknown; progress?: unknown }) => {
+      if (!opts.onChange) return;
+      const lista = historial.messages ?? [];
+      log(`historial del telefono: ${lista.length} mensajes (tipo ${String(historial.syncType ?? '?')}${historial.progress != null ? `, ${String(historial.progress)}%` : ''})`);
+      trozosEnProceso += 1;
+      // HistorySyncType: 0 INITIAL_BOOTSTRAP, 3 RECENT (por trozos, con
+      // `progress`), 6 ON_DEMAND. El ultimo trozo del RECENT marca el final
+      // de la sincronizacion inicial, pero los trozos se guardan en paralelo:
+      // se avisa cuando TODOS terminaron, no cuando llega el ultimo.
+      if (Number(historial.syncType) === 3 && Number(historial.progress) >= 100) finDeSincronizacionPendiente = true;
+      void (async () => {
+        for (const mensaje of lista) {
+          try {
+            await procesarEntrante(mensaje, 'append', false, 'historial');
+          } catch (error) {
+            log(`fallo guardando un mensaje del historial: ${String(error)}`);
+          }
+        }
+        // Se avisa DESPUES de guardar: quien espera va a mirar la base.
+        const avisar = esperasHistorial;
+        esperasHistorial = [];
+        for (const f of avisar) f(lista.length);
+        trozosEnProceso -= 1;
+        if (finDeSincronizacionPendiente && trozosEnProceso === 0) {
+          finDeSincronizacionPendiente = false;
+          log('sincronizacion inicial completa: todos los chats tienen ya su referencia');
+          await Promise.resolve(opts.onSincronizacionInicial?.()).catch((error: unknown) => log(`fallo tras la sincronizacion inicial: ${String(error)}`));
+        }
+      })();
+    }) as unknown) as (arg: never) => void);
+
+    sock.ev.on('messages.upsert', (((evento: { messages?: unknown[]; type?: string; requestId?: string }) => {
       if (!opts.onChange) return;
       void (async () => {
         for (const mensaje of evento.messages ?? []) {
-          const key = (mensaje as { key?: { id?: string; remoteJid?: string; fromMe?: boolean } })
-            .key;
-          if (key?.fromMe) continue;
-
-          const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock);
-          const telefono = await resolverTelefono(sock, key);
-          const value = toChangeValue(mensaje, telefono, media);
-          if (!value) {
-            log(
-              `entrante descartado (${evento.type ?? 'sin tipo'}): ${key?.remoteJid ?? 'sin jid'} — ${porQueSeDescarta(mensaje, telefono)}`,
-            );
-            continue;
-          }
-
-          // Lo que no llega en vivo (historial, cola de cuando el sistema
-          // estaba apagado) se guarda pero no se contesta. Ver `esMensajeViejo`.
-          const m = value.messages?.[0];
-          if (m && esMensajeViejo(evento.type, m.timestamp)) {
-            m.viejo = true;
-            log(`entrante ${m.type} de ${m.from} (${evento.type ?? 'sin tipo'}, viejo): se guarda sin contestar`);
-          } else {
-            log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}`);
-          }
-          await opts.onChange?.(value);
+          await procesarEntrante(mensaje, evento.type, Boolean(evento.requestId), 'upsert');
         }
       })().catch((error: unknown) => log(`fallo leyendo un entrante: ${String(error)}`));
     }) as unknown) as (arg: never) => void);
+
+    // Los sobres de "ver una vez" que Baileys tira antes de avisar.
+    escucharSobres(sock, (mensaje, tipoEvento) => procesarEntrante(mensaje, tipoEvento, false, 'sobre'), log);
 
     // Si el socket ya venia vinculado no llega ningun QR: se le da un margen
     // corto para que diga "open" y, si no, se contesta con lo que haya.
@@ -381,10 +617,15 @@ export function porQueSeDescarta(mensaje: unknown, telefonoResuelto: string | nu
     messageStubType?: number;
   };
   const jid = m.key?.remoteJid ?? '';
-  if (/@(g\.us|broadcast|newsletter)$/.test(jid)) return 'grupo, estado o canal: no es uno a uno';
-  if (!telefonoDe(m.key) && !telefonoResuelto) return 'remitente sin telefono: LID sin equivalencia todavia';
+  if (/@(broadcast|newsletter)$/.test(jid)) return 'estado o canal: no es una conversacion';
+  if (!esGrupo(jid) && !telefonoDe(m.key) && !telefonoResuelto) return 'remitente sin telefono: LID sin equivalencia todavia';
   if (!m.message) {
-    return `sin contenido: no se pudo descifrar (stub ${m.messageStubType ?? '?'}); WhatsApp pedira el reenvio`;
+    const stub = m.messageStubType;
+    // WebMessageInfo.StubType: 20-33 son avisos de grupo (alguien entro,
+    // salio, cambio el nombre...). No son mensajes: no hay nada que leer.
+    if (typeof stub === 'number' && stub >= 20 && stub <= 33) return `aviso del grupo (alguien entro o salio, cambio de nombre...; stub ${stub}): no es un mensaje`;
+    if (stub === 2) return 'sin contenido: no se pudo descifrar (stub 2); WhatsApp pedira el reenvio';
+    return `sin contenido (stub ${stub ?? '?'})`;
   }
   const claves = (obj: Record<string, unknown>, nivel = 0): string =>
     Object.keys(obj)
@@ -402,11 +643,26 @@ export function porQueSeDescarta(mensaje: unknown, telefonoResuelto: string | nu
  *
  * Se pregunta al almacen de Baileys solo cuando el mensaje no trae ningun
  * `@s.whatsapp.net`, que es el caso que dejaba los entrantes invisibles.
+ *
+ * En un grupo, "quien escribe" es el participante (`participant`), no el
+ * grupo: es su telefono el que se resuelve.
  */
 async function resolverTelefono(
   sock: LocalSocket,
-  key: { remoteJid?: string; remoteJidAlt?: string } | undefined,
+  key: { remoteJid?: string; remoteJidAlt?: string; participant?: string; participantAlt?: string } | undefined,
 ): Promise<string | null> {
+  if (esGrupo(key?.remoteJid)) {
+    if (autorDeGrupo(key)) return null; // ya se sabe
+    const lid = [key?.participant, key?.participantAlt].find((j) => typeof j === 'string' && j.endsWith('@lid'));
+    if (!lid) return null;
+    try {
+      const pn = await sock.signalRepository?.lidMapping?.getPNForLID(lid);
+      return pn ? fromJid(pn) : null;
+    } catch {
+      return null; // se ensena con su nombre y sin telefono
+    }
+  }
+
   if (telefonoDe(key)) return null; // ya se sabe; no hace falta preguntar
   const jid = key?.remoteJid;
   if (!jid || !jid.endsWith('@lid') || !esConversacionDirecta(jid)) return null;
@@ -417,8 +673,172 @@ async function resolverTelefono(
   } catch {
     // Que el mapa no sepa de ese LID todavia no es un error: se descarta el
     // mensaje con su linea de log, como cualquier otro que no se pueda situar.
-    return null;
+      return null;
   }
+}
+
+/** El nombre de un grupo que se ve por primera vez: se pregunta y se apunta. */
+async function aprenderNombreDeGrupo(sock: LocalSocket, jid: string, opts: StartLocalOptions, log: (m: string) => void): Promise<void> {
+  if (!sock.groupMetadata) return;
+  try {
+    const meta = await sock.groupMetadata(jid);
+    const r = resumirGrupo(jid, meta);
+    recordarGrupo(r.jid, r.nombre);
+    await opts.onGrupos?.([r]);
+  } catch (error) {
+    log(`no se pudo leer el nombre del grupo ${jid}: ${String(error)}`);
+  }
+}
+
+/** Ids de los sobres de "ver una vez" ya atendidos por el gancho crudo. */
+const sobresAtendidos = new Set<string>();
+
+/** Trozos del historial que todavia se estan guardando, y si ya llego el ultimo. */
+let trozosEnProceso = 0;
+let finDeSincronizacionPendiente = false;
+
+/** Quien espera el proximo lote de historial del telefono (ver `proximoHistorial`). */
+let esperasHistorial: Array<(n: number) => void> = [];
+
+/**
+ * Se resuelve con el tamano del proximo lote de historial que mande el
+ * telefono, o null si no llega en `timeoutMs`. Es lo que permite pedir
+ * "lo anterior" una y otra vez sin pisar la peticion anterior.
+ */
+export function proximoHistorial(timeoutMs = 20_000): Promise<number | null> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      esperasHistorial = esperasHistorial.filter((f) => f !== listo);
+      resolve(null);
+    }, timeoutMs);
+    const listo = (n: number) => {
+      clearTimeout(t);
+      resolve(n);
+    };
+    esperasHistorial.push(listo);
+  });
+}
+
+/** Lo que de un mensaje propio merece una fila en el hilo. */
+const PROPIOS_QUE_SE_GUARDAN = new Set(['text', 'image', 'audio', 'video', 'document', 'sticker', 'location']);
+
+/**
+ * Le pide al telefono los mensajes anteriores de un chat.
+ *
+ * Hace falta un mensaje ancla (el mas viejo que se tiene): el telefono manda
+ * los `cantidad` anteriores a el por `messaging-history.set`. Devuelve el id
+ * de la peticion; lo que llegue entra solo por el mismo camino que el resto.
+ */
+export async function pedirHistorial(
+  jid: string,
+  ancla: { id: string; fromMe: boolean; timestampMs: number },
+  cantidad = 50,
+): Promise<string> {
+  const sock = getLocalSocket();
+  if (!sock) throw new Error('WhatsApp no esta conectado.');
+  if (!sock.fetchMessageHistory) throw new Error('Esta version del cliente no sabe pedir el historial.');
+  return sock.fetchMessageHistory(cantidad, { remoteJid: jid, fromMe: ancla.fromMe, id: ancla.id }, ancla.timestampMs);
+}
+
+/**
+ * Engancha el socket crudo para ver los "ver una vez" que Baileys descarta.
+ *
+ * WhatsApp manda a los dispositivos vinculados un `<message>` con un hijo
+ * `<unavailable type="view_once">` (o `view_once_unavailable_fanout`) y sin
+ * nada cifrado. Con el primero Baileys emite un mensaje vacio marcado
+ * `isViewOnce`; con el segundo lo da por "excluido" y NO avisa a nadie: en
+ * el log solo quedaba un debug, y en la pantalla, nada. Aqui se leen los dos
+ * del nodo y se atienden igual: aviso en el chat y peticion de reenvio.
+ */
+export function escucharSobres(
+  sock: LocalSocket,
+  entregar: (mensaje: unknown, tipoEvento: string) => Promise<void>,
+  log: (m: string) => void,
+): void {
+  if (!sock.ws?.on) return;
+  // Traza de lo que entra por el socket, nodo a nodo (sin contenido): es lo
+  // que permite ver con que forma llega algo que "no aparece". Se enciende
+  // con WA_TRAZA=1 para no llenar el log en el dia a dia.
+  if (process.env.WA_TRAZA === '1') {
+    sock.ws.on('frame', (nodo) => {
+      const n = nodo as { tag?: string; attrs?: Record<string, string>; content?: unknown };
+      if (!n?.tag || n.tag === 'ack' || n.tag === 'ib' || n.tag === 'presence' || n.tag === 'chatstate') return;
+      const hijos = Array.isArray(n.content) ? (n.content as Array<{ tag?: string; attrs?: Record<string, string> }>) : [];
+      const etiquetas = hijos.map((h) => `${h?.tag ?? '?'}${h?.attrs?.type ? `(${h.attrs.type})` : ''}`).join(',');
+      log(`traza <${n.tag}> from=${n.attrs?.from ?? '-'} type=${n.attrs?.type ?? '-'} id=${n.attrs?.id ?? '-'} hijos=${etiquetas || '-'}`);
+    });
+  }
+  sock.ws.on('CB:message', (nodo) => {
+    // Lo que llega sin nada cifrado es raro (sobres, avisos): se deja rastro
+    // de que era, porque es justo lo que "no aparece por ningun lado".
+    const n = nodo as { attrs?: Record<string, string>; content?: unknown };
+    const hijos = Array.isArray(n?.content) ? (n.content as Array<{ tag?: string; attrs?: Record<string, string> }>) : [];
+    if (hijos.length && !hijos.some((h) => h?.tag === 'enc' || h?.tag === 'plaintext')) {
+      const etiquetas = hijos.map((h) => `${h?.tag ?? '?'}${h?.attrs?.type ? `(${h.attrs.type})` : ''}`).join(',');
+      log(`nodo sin contenido cifrado de ${n.attrs?.from ?? '?'} (${n.attrs?.type ?? 'sin tipo'}): ${etiquetas}`);
+    }
+    const sobre = sobreDeVerUnaVez(nodo);
+    if (!sobre) return;
+    // Se apunta ANTES de nada asincrono: Baileys emite el mismo sobre por
+    // `messages.upsert` (cuando trae la marca) y hay que ganarle la carrera.
+    const id = (nodo as { attrs?: Record<string, string> }).attrs?.id ?? '';
+    if (!id || sobresAtendidos.has(id)) return;
+    sobresAtendidos.add(id);
+    if (sobresAtendidos.size > 500) sobresAtendidos.delete(sobresAtendidos.values().next().value as string);
+    void (async () => {
+      const baileys = await import('@whiskeysockets/baileys');
+      const { fullMessage } = baileys.decodeMessageNode(nodo as never, sock.user?.id ?? '', sock.user?.lid ?? '');
+      if (fullMessage.key.fromMe || !fullMessage.key.id) return;
+      log(`"ver una vez" (${sobre.tipo}) de ${fullMessage.key.remoteJid}: WhatsApp no entrego el fichero; se pide al telefono`);
+      await entregar(
+        {
+          key: { ...fullMessage.key, isViewOnce: true },
+          messageTimestamp: fullMessage.messageTimestamp,
+          pushName: fullMessage.pushName,
+        },
+        sobre.offline ? 'append' : 'notify',
+      );
+    })().catch((error: unknown) => log(`fallo leyendo un sobre de "ver una vez": ${String(error)}`));
+  });
+}
+
+/** Si el nodo es un "ver una vez" sin contenido, y de que tipo. */
+export function sobreDeVerUnaVez(nodo: unknown): { tipo: string; offline: boolean } | null {
+  const n = nodo as { tag?: string; attrs?: Record<string, string>; content?: unknown };
+  if (n?.tag !== 'message' || !Array.isArray(n.content)) return null;
+  const hijos = n.content as Array<{ tag?: string; attrs?: Record<string, string> }>;
+  const unavailable = hijos.find((h) => h?.tag === 'unavailable');
+  const tipo = unavailable?.attrs?.type ?? '';
+  if (!tipo.startsWith('view_once')) return null;
+  // Si ademas viene algo cifrado, Baileys lo descifra y lo entrega: no es
+  // un sobre vacio.
+  if (hijos.some((h) => h?.tag === 'enc' || h?.tag === 'plaintext')) return null;
+  return { tipo, offline: Boolean(n.attrs?.offline) };
+}
+
+/**
+ * Le pide al telefono que reenvie un "ver una vez" que llego vacio.
+ *
+ * WhatsApp no manda ese adjunto a los dispositivos vinculados; lo unico que
+ * se puede hacer es pedirselo al telefono, que es quien lo tiene. Si lo
+ * suelta, llega por `messages.upsert` con `requestId` y el chat lo completa;
+ * si no, el mensaje se queda como "solo se abre en el telefono", que es la
+ * verdad. Un fallo aqui no es un fallo del mensaje: se apunta y ya.
+ */
+function pedirReenvio(sock: LocalSocket, mensaje: unknown, log: (m: string) => void): void {
+  if (!sock.requestPlaceholderResend) return;
+  const m = mensaje as {
+    key?: { id?: string; remoteJid?: string; fromMe?: boolean; participant?: string };
+    messageTimestamp?: number | string;
+    pushName?: string;
+  };
+  if (!m.key?.id || !m.key.remoteJid) return;
+  const limpia = { remoteJid: m.key.remoteJid, fromMe: false, id: m.key.id, participant: m.key.participant };
+  const datos = { key: m.key, messageTimestamp: m.messageTimestamp, pushName: m.pushName };
+  sock
+    .requestPlaceholderResend(limpia, datos)
+    .then((r) => log(`"ver una vez" de ${m.key?.remoteJid}: se le pidio al telefono que lo reenvie${r ? ` (${r})` : ''}`))
+    .catch((error: unknown) => log(`no se pudo pedir el reenvio del "ver una vez": ${String(error)}`));
 }
 
 /** Vincular con numero en vez de con la camara. */
@@ -435,14 +855,21 @@ export async function requestLocalPairingCode(phone: string): Promise<string> {
 
 /** Cierra la sesion y borra la vinculacion: obliga a escanear otro QR. */
 export async function logoutLocal(authDir: string): Promise<void> {
+  const viejo = socket;
+  // Se suelta primero: asi el "close" que provoca el logout ya no es el del
+  // socket vigente y no borra nada por su cuenta (ver connection.update).
+  socket = null;
   try {
-    await socket?.logout();
+    await viejo?.logout();
   } catch {
     // Si el telefono ya la cerro, logout falla y da igual: lo que importa es
     // borrar las credenciales de aqui.
   }
-  socket?.end();
-  socket = null;
+  try {
+    viejo?.end();
+  } catch {
+    // Un socket ya cerrado puede quejarse al cerrarlo otra vez.
+  }
   await rm(authDir, { recursive: true, force: true });
   estado.status = 'STOPPED';
   estado.qr = null;
@@ -457,6 +884,8 @@ export function resetLocalForTests(): void {
   socket = null;
   arrancando = null;
   opciones = null;
+  nombresDeGrupo.clear();
+  sobresAtendidos.clear();
   Object.assign(estado, {
     status: 'STOPPED',
     qr: null,
@@ -486,31 +915,67 @@ export function defaultAuthDir(base = process.cwd()): string {
  * Si aun asi falla, se anota y se devuelve null: perder la foto es molesto,
  * perder el mensaje entero es un fallo.
  */
+/**
+ * Tope por adjunto. Sin el, un pedido de resubida que el telefono nunca
+ * contesta dejaba la descarga esperando para siempre y, detras de ella, todo
+ * el historial sin guardar (paso el 16 de septiembre de 2026: 13.000
+ * mensajes trabados detras de un sticker).
+ */
+const TOPE_DESCARGA_MS = 25_000;
+
 async function bajarAdjunto(
   mensaje: unknown,
   wamid: string,
   opts: StartLocalOptions,
   log: (mensaje: string) => void,
   sock?: { updateMediaMessage?: (mensaje: unknown) => Promise<unknown> },
+  ajuste: { resubida?: boolean } = {},
 ): Promise<MediaInfo | null> {
   const contenido = (mensaje as { message?: Record<string, unknown> }).message ?? {};
   if (!tipoDeAdjunto(contenido) || !wamid) return null;
 
   try {
     const baileys = await import('@whiskeysockets/baileys');
-    const reintento = sock?.updateMediaMessage
+    // Pedirle al telefono que resuba el fichero solo tiene sentido en vivo:
+    // en el historial son miles y el telefono no contesta a la mayoria.
+    const reintento = sock?.updateMediaMessage && ajuste.resubida !== false
       ? { reuploadRequest: (m: unknown) => sock.updateMediaMessage!(m) }
       : {};
 
     return await guardarMedia(mensaje, wamid, {
       dir: opts.mediaDir ?? mediaDirectory(),
-      descargar: async (m) =>
-        (await baileys.downloadMediaMessage(m as never, 'buffer', {}, reintento as never)) as Buffer,
+      descargar: (m) =>
+        conTope(
+          baileys.downloadMediaMessage(m as never, 'buffer', {}, reintento as never) as Promise<Buffer>,
+          TOPE_DESCARGA_MS,
+          'la descarga tardo demasiado',
+        ),
     });
   } catch (error) {
-    log(`no se pudo bajar el adjunto: ${String(error)}`);
+    const { contenido: real, verUnaVez } = desenvolver(contenido);
+    const clave = Object.keys(real).find((k) => k.endsWith('Message') && k !== 'messageContextInfo') ?? '?';
+    const detalle = (real[clave] ?? {}) as Record<string, unknown>;
+    const trae = ['url', 'directPath', 'mediaKey', 'fileSha256', 'viewOnce'].filter((k) => detalle[k] != null && detalle[k] !== '').join(',') || 'nada';
+    log(`no se pudo bajar el adjunto (${clave}${verUnaVez ? ', ver una vez' : ''}; trae: ${trae}): ${String(error)}`);
     return null;
   }
+}
+
+/** Una promesa con tope: pasado el tiempo, falla en vez de esperar para siempre. */
+export function conTope<T>(promesa: Promise<T>, ms: number, motivo: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(motivo)), ms);
+    promesa.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
 }
 
 /**
@@ -592,6 +1057,26 @@ export function telefonoDe(key: { remoteJid?: string; remoteJidAlt?: string } | 
   return null;
 }
 
+/**
+ * El telefono de quien escribio dentro de un grupo, si viene con numero.
+ *
+ * Baileys pone al participante en `participant` (que desde la migracion a
+ * LID suele ser opaco) y su numero en `participantAlt`. Sin ninguno de los
+ * dos con `@s.whatsapp.net` se devuelve null y el mensaje se ensena solo con
+ * el nombre.
+ */
+export function autorDeGrupo(key: { participant?: string; participantAlt?: string } | undefined): string | null {
+  const conNumero = [key?.participant, key?.participantAlt].find(
+    (j): j is string => typeof j === 'string' && j.endsWith('@s.whatsapp.net'),
+  );
+  return conNumero ? fromJid(conNumero) : null;
+}
+
+/** Si, quitando llaves y metadatos, queda algo que leer. */
+function hayContenidoAparteDeLlaves(contenido: Record<string, unknown>): boolean {
+  return Object.keys(contenido).some((k) => k !== 'senderKeyDistributionMessage' && k !== 'messageContextInfo');
+}
+
 /** Mas viejo que esto, un entrante no se contesta aunque venga como `notify`. */
 export const MAXIMA_EDAD_PARA_CONTESTAR_MS = 10 * 60_000;
 
@@ -655,19 +1140,36 @@ export function acksToStatuses(updates: unknown[]): StatusTraducido[] {
   return salida;
 }
 
+export interface ExtrasDeTraduccion {
+  /** El nombre del grupo, si el mensaje viene de uno y ya se conoce. */
+  nombreGrupo?: string | null;
+  /** Es la respuesta del telefono a un reenvio pedido: segunda entrega. */
+  reenvio?: boolean;
+}
+
 /**
  * Un mensaje de Baileys en la forma que ya entiende `processChange`.
  *
- * Devuelve null para lo que el sistema no trata (propios, grupos, reacciones):
- * traducirlos seria inventar.
+ * Devuelve null para lo que el sistema no trata (propios, estados, canales):
+ * traducirlos seria inventar. Los grupos si entran: `from` es el jid del
+ * grupo y cada mensaje lleva `grupo` con quien lo escribio.
  */
 export function toChangeValue(
   mensaje: unknown,
   telefonoResuelto?: string | null,
   media?: MediaInfo | null,
+  extras: ExtrasDeTraduccion = {},
 ): ChangeValue | null {
   const m = mensaje as {
-    key?: { id?: string; remoteJid?: string; remoteJidAlt?: string; fromMe?: boolean };
+    key?: {
+      id?: string;
+      remoteJid?: string;
+      remoteJidAlt?: string;
+      fromMe?: boolean;
+      participant?: string;
+      participantAlt?: string;
+      isViewOnce?: boolean;
+    };
     message?: Record<string, unknown>;
     messageTimestamp?: number | string;
     pushName?: string;
@@ -676,8 +1178,12 @@ export function toChangeValue(
   const id = m.key?.id;
   if (!id || m.key?.fromMe) return null;
 
-  const from = telefonoDe(m.key) ?? (telefonoResuelto || null);
+  const grupo = esGrupo(m.key?.remoteJid) ? m.key!.remoteJid! : null;
+  const from = grupo ?? telefonoDe(m.key) ?? (telefonoResuelto || null);
   if (!from) return null;
+  // "0" es WhatsApp mismo (avisos del sistema, verificaciones): no es un
+  // cliente y no puede aparecer como contacto "0" en el chat.
+  if (from === '0') return null;
 
   // "Ver una vez", temporales, documento con pie: el mensaje de verdad va
   // dentro de un envoltorio. Se mira dentro; si no, un texto temporal o una
@@ -687,98 +1193,120 @@ export function toChangeValue(
 
   const base = {
     messaging_product: 'whatsapp',
-    contacts: [{ wa_id: from, profile: { name: m.pushName ?? '' } }],
+    contacts: [{ wa_id: from, profile: { name: grupo ? (extras.nombreGrupo ?? '') : (m.pushName ?? '') } }],
   };
 
-  // Trafico del protocolo (llaves, acuses, el "placeholder" de un mensaje
-  // que no se pudo descifrar todavia): no hay nada que leer, y en el chat
-  // salia como "(mensaje de tipo placeholder)" con su globo de no leido.
-  if (contenido.protocolMessage || contenido.senderKeyDistributionMessage || contenido.placeholderMessage) {
-    return null;
+  const traducido = traducirContenido(id, from);
+  if (!traducido) return null;
+  const mensajeFinal = { ...traducido, ...(extras.reenvio ? { reenvio: true } : {}) };
+  if (grupo) {
+    mensajeFinal.grupo = {
+      jid: grupo,
+      nombre: extras.nombreGrupo ?? null,
+      autor: autorDeGrupo(m.key) ?? (telefonoResuelto || null),
+      autorNombre: m.pushName ?? '',
+    };
   }
+  return { ...base, messages: [mensajeFinal] };
 
-  // Una reaccion (el pulgar, el corazon) se ensena, pero no es texto: el bot
-  // no tiene que contestar a un emoji sobre un mensaje suyo.
-  const reaccion = contenido.reactionMessage as { text?: string } | undefined;
-  if (reaccion) {
-    if (!reaccion.text) return null; // quitar la reaccion: nada que ensenar
-    return { ...base, messages: [{ id, from, timestamp, type: 'reaction', reaction: { emoji: reaccion.text } }] };
-  }
+  // Lo que hay dentro, ya como mensaje del webhook. Va en una funcion para
+  // que el envoltorio de grupo y de reenvio se ponga en un solo sitio.
+  function traducirContenido(id: string, from: string): InboundMessage | null {
+    // Un "ver una vez" que WhatsApp entrego como sobre vacio: Baileys lo marca
+    // en la clave (`isViewOnce`) y no trae contenido. Es el caso normal desde
+    // que WhatsApp dejo de mandar estos adjuntos a los dispositivos vinculados.
+    if (m.key?.isViewOnce && !Object.keys(contenido).length) {
+      return { id, from, timestamp, type: 'view_once', viewOnce: { kind: 'unknown' } };
+    }
 
-  const conversation = contenido.conversation as string | undefined;
-  const extended = (contenido.extendedTextMessage as { text?: string } | undefined)?.text;
-  const texto = conversation ?? extended;
+    // Trafico del protocolo (llaves, acuses, el "placeholder" de un mensaje
+    // que no se pudo descifrar todavia): no hay nada que leer, y en el chat
+    // salia como "(mensaje de tipo placeholder)" con su globo de no leido.
+    // Ojo: en un grupo, el primer mensaje de alguien trae su llave
+    // (`senderKeyDistributionMessage`) JUNTO al texto o la foto; la llave
+    // sobra, el mensaje no.
+    // "Eliminar para todos": el remitente pide borrar un mensaje. Aqui NO se
+    // borra nada: se marca el original para que se sepa que lo quiso quitar
+    // y se pueda seguir leyendo. Lo demas del protocolo no es un mensaje.
+    const protocolo = contenido.protocolMessage as { type?: number | string; key?: { id?: string } } | undefined;
+    if (protocolo && (protocolo.type === 0 || protocolo.type === 'REVOKE') && protocolo.key?.id) {
+      return { id, from, timestamp, type: 'revoke', revoca: protocolo.key.id };
+    }
+    if (contenido.protocolMessage || contenido.placeholderMessage) return null;
+    if (contenido.senderKeyDistributionMessage && !hayContenidoAparteDeLlaves(contenido)) return null;
 
-  // Un boton pulsado llega como respuesta interactiva, no como texto. Se
-  // traduce a la forma de Meta para que el flujo de confirmacion del bot -que
-  // espera `button_reply`- funcione igual venga de donde venga.
-  const boton = respuestaDeBoton(contenido);
-  if (boton) {
-    return {
-      ...base,
-      messages: [
-        {
-          id,
-          from,
-          timestamp,
-          type: 'interactive',
-          interactive: { type: 'button_reply', button_reply: boton },
+    // Una reaccion (el pulgar, el corazon) se ensena, pero no es texto: el bot
+    // no tiene que contestar a un emoji sobre un mensaje suyo.
+    const reaccion = contenido.reactionMessage as { text?: string } | undefined;
+    if (reaccion) {
+      if (!reaccion.text) return null; // quitar la reaccion: nada que ensenar
+      return { id, from, timestamp, type: 'reaction', reaction: { emoji: reaccion.text } };
+    }
+
+    const conversation = contenido.conversation as string | undefined;
+    const extended = (contenido.extendedTextMessage as { text?: string } | undefined)?.text;
+    const texto = conversation ?? extended;
+
+    // Un boton pulsado llega como respuesta interactiva, no como texto. Se
+    // traduce a la forma de Meta para que el flujo de confirmacion del bot -que
+    // espera `button_reply`- funcione igual venga de donde venga.
+    const boton = respuestaDeBoton(contenido);
+    if (boton) {
+      return {
+        id,
+        from,
+        timestamp,
+        type: 'interactive',
+        interactive: { type: 'button_reply', button_reply: boton },
+      };
+    }
+
+    const ubicacion = contenido.locationMessage as
+      | { degreesLatitude?: number; degreesLongitude?: number; name?: string; address?: string }
+      | undefined;
+
+    if (ubicacion?.degreesLatitude != null && ubicacion.degreesLongitude != null) {
+      return {
+        id,
+        from,
+        timestamp,
+        type: 'location',
+        location: {
+          latitude: ubicacion.degreesLatitude,
+          longitude: ubicacion.degreesLongitude,
+          name: ubicacion.name,
+          address: ubicacion.address,
         },
-      ],
-    };
-  }
+      };
+    }
 
-  const ubicacion = contenido.locationMessage as
-    | { degreesLatitude?: number; degreesLongitude?: number; name?: string; address?: string }
-    | undefined;
+    if (typeof texto === 'string') {
+      return { id, from, timestamp, type: 'text', text: { body: texto } };
+    }
 
-  if (ubicacion?.degreesLatitude != null && ubicacion.degreesLongitude != null) {
-    return {
-      ...base,
-      messages: [
-        {
-          id,
-          from,
-          timestamp,
-          type: 'location',
-          location: {
-            latitude: ubicacion.degreesLatitude,
-            longitude: ubicacion.degreesLongitude,
-            name: ubicacion.name,
-            address: ubicacion.address,
-          },
-        },
-      ],
-    };
-  }
+    // Fotos, audios y documentos: con el fichero ya bajado se pintan en /chat;
+    // sin el, al menos se ve que llego algo.
+    if (media) {
+      return { id, from, timestamp, type: media.kind, media };
+    }
 
-  if (typeof texto === 'string') {
-    return { ...base, messages: [{ id, from, timestamp, type: 'text', text: { body: texto } }] };
-  }
+    // Un "ver una vez" sin fichero. WhatsApp no le da la llave del adjunto a
+    // los dispositivos vinculados (WhatsApp Web tampoco lo puede abrir): llega
+    // el sobre, a veces vacio del todo. Se guarda diciendo lo que es y donde
+    // se puede ver, en vez de descartarlo como si no hubiera llegado nada.
+    if (verUnaVez) {
+      const adjunto = tipoDeAdjunto(contenido);
+      const kind = adjunto && adjunto !== 'sticker' ? adjunto : 'unknown';
+      return { id, from, timestamp, type: 'view_once', viewOnce: { kind } };
+    }
 
-  // Fotos, audios y documentos: con el fichero ya bajado se pintan en /chat;
-  // sin el, al menos se ve que llego algo.
-  if (media) {
-    return { ...base, messages: [{ id, from, timestamp, type: media.kind, media }] };
-  }
-
-  // Un "ver una vez" sin fichero. WhatsApp no le da la llave del adjunto a
-  // los dispositivos vinculados (WhatsApp Web tampoco lo puede abrir): llega
-  // el sobre, a veces vacio del todo. Se guarda diciendo lo que es y donde
-  // se puede ver, en vez de descartarlo como si no hubiera llegado nada.
-  if (verUnaVez) {
-    const adjunto = tipoDeAdjunto(contenido);
-    const kind = adjunto && adjunto !== 'sticker' ? adjunto : 'unknown';
-    return { ...base, messages: [{ id, from, timestamp, type: 'view_once', viewOnce: { kind } }] };
-  }
-
-  const tipo = Object.keys(contenido).find((k) => k.endsWith('Message'));
-  if (tipo) {
-    return {
-      ...base,
-      messages: [{ id, from, timestamp, type: tipo.replace('Message', '').toLowerCase() }],
-    };
-  }
+    // La llave de grupo nunca es "el tipo" del mensaje: si va sola ya se
+    // descarto arriba, y si acompana a otra cosa, el tipo es esa otra cosa.
+    const tipo = Object.keys(contenido).find((k) => k.endsWith('Message') && k !== 'senderKeyDistributionMessage');
+    if (tipo) {
+      return { id, from, timestamp, type: tipo.replace('Message', '').toLowerCase() };
+    }
 
   return null;
+  }
 }

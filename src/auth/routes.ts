@@ -15,7 +15,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { UsuariosRepo, Rol } from './usuarios.js';
@@ -66,7 +66,17 @@ export interface AuthDeps {
   ahora?: () => Date;
   /** Como se llama el negocio ahora mismo (se puede cambiar desde la pantalla). */
   nombreNegocio?: () => string;
+  /**
+   * El secreto con el que el propio proceso se llama a si mismo (la IA
+   * operadora ejecuta por `app.inject` con la identidad de quien ordena).
+   * Es aleatorio por arranque y nunca sale del proceso: nadie de fuera lo
+   * puede mandar. Ver src/ia/ordenes.ts y buildServer.
+   */
+  secretoInterno?: string;
 }
+
+export const CABECERA_INTERNA = 'x-wa-interno';
+export const CABECERA_USUARIO_INTERNO = 'x-wa-usuario';
 
 /** El secreto de las cookies: derivado del de rastreo, para no pedir otro. */
 export function secretoDeSesion(config: Config): string {
@@ -99,6 +109,21 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
   const secretoEmbed = secretoDeEmbebido(config);
 
   async function resolver(request: FastifyRequest): Promise<UsuarioSesion | null> {
+    // El bucle interno: solo con el secreto de este proceso. Trae la
+    // identidad de la persona (o clave) que dio la orden, con su rol y sus
+    // permisos tal cual: la IA no puede mas que ella.
+    const interno = request.headers[CABECERA_INTERNA];
+    if (typeof interno === 'string' && deps.secretoInterno && interno.length === deps.secretoInterno.length && timingSafeEqual(Buffer.from(interno), Buffer.from(deps.secretoInterno))) {
+      const crudo = request.headers[CABECERA_USUARIO_INTERNO];
+      if (typeof crudo !== 'string') return null;
+      try {
+        const u = JSON.parse(crudo) as UsuarioSesion;
+        if (!u || typeof u.id !== 'string' || (u.rol !== 'admin' && u.rol !== 'operador')) return null;
+        return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: Boolean(u.porToken), permisos: Array.isArray(u.permisos) ? u.permisos : [], embebido: u.embebido };
+      } catch {
+        return null;
+      }
+    }
     const header = request.headers.authorization;
     // El chat embebido: un token corto que firmo este servidor. Solo abre
     // /api/v1, y solo con lo que el token dice (ver src/embed/token.ts).
