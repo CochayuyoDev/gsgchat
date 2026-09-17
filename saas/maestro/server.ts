@@ -7,12 +7,17 @@
  * responden y cuales tienen WhatsApp conectado, y da de alta o de baja
  * desde la pantalla. Corre en el host (necesita Docker a mano), detras de
  * usuario y contrasena (MAESTRO_USUARIO / MAESTRO_CLAVE en saas/.env).
+ *
+ * Tambien lleva los planes: que plan tiene cada tienda, hasta cuando esta
+ * pagado y los pagos apuntados (ver saas/planes.ts). Las instancias le
+ * preguntan por su plan en GET /api/plan/:slug con su token, sin usuario.
  */
 
 import Fastify from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { altaInstancia, bajaInstancia, estadoInstancias, leerConfigSaas, prepararBase, slugValido, type EstadoInstancia } from '../instancias.js';
+import { altaInstancia, bajaInstancia, dirInstancia, estadoInstancias, iniciarPlan, leerConfigSaas, listarInstancias, prepararBase, slugValido, type EstadoInstancia } from '../instancias.js';
+import { cambiarPlan, estadoPlan, guardarPlan, ingresosMensuales, leerPlan, MONEDA_PLANES, PLANES, registrarPago, type NombrePlan } from '../planes.js';
 
 const cfg = leerConfigSaas();
 if (!cfg.maestroClave) {
@@ -29,6 +34,8 @@ const igual = (a: string, b: string) => {
 };
 
 app.addHook('onRequest', async (request, reply) => {
+  // Las instancias preguntan por su plan con su propio token, no con el usuario.
+  if (request.url.startsWith('/api/plan/')) return;
   const h = request.headers.authorization ?? '';
   if (h.startsWith('Basic ')) {
     const [u, ...c] = Buffer.from(h.slice(6), 'base64').toString('utf8').split(':');
@@ -45,7 +52,81 @@ const log = (l: string) => {
   if (registro.length > 200) registro.shift();
 };
 
-app.get('/api/instancias', async () => ({ instancias: await estadoInstancias(), ocupado, registro: registro.slice(-30) }));
+app.get('/api/instancias', async () => {
+  const instancias = await estadoInstancias();
+  const planes = listarInstancias().map((i) => leerPlan(dirInstancia(i.slug))).filter((p): p is NonNullable<typeof p> => Boolean(p));
+  return { instancias, ocupado, registro: registro.slice(-30), planes: PLANES, moneda: MONEDA_PLANES, ingresosMes: ingresosMensuales(planes) };
+});
+
+/** Lo que pregunta cada instancia: su plan de hoy. Con su token (PLAN_TOKEN en su .env). */
+app.get<{ Params: { slug: string } }>('/api/plan/:slug', async (request, reply) => {
+  const mal = slugValido(request.params.slug);
+  if (mal) return reply.code(400).send({ error: mal });
+  const p = leerPlan(dirInstancia(request.params.slug));
+  if (!p) return reply.code(404).send({ error: 'Esa tienda no tiene plan.' });
+  const h = request.headers.authorization ?? '';
+  if (!h.startsWith('Bearer ') || !igual(h.slice(7), p.token)) return reply.code(401).send({ error: 'Token del plan incorrecto.' });
+  return estadoPlan(p);
+});
+
+/** Apuntar un pago: cambia al plan pagado y corre el vencimiento. */
+app.post<{ Params: { slug: string } }>('/api/instancias/:slug/pagos', async (request, reply) => {
+  const mal = slugValido(request.params.slug);
+  if (mal) return reply.code(400).send({ error: mal });
+  const body = z.object({ plan: z.enum(['basico', 'pro']), meses: z.coerce.number().int().min(1).max(24).default(1), monto: z.coerce.number().min(0).optional(), nota: z.string().max(200).default('') }).parse(request.body ?? {});
+  const dir = dirInstancia(request.params.slug);
+  const p = leerPlan(dir);
+  if (!p) return reply.code(404).send({ error: 'Esa tienda no tiene plan.' });
+  try {
+    const nuevo = registrarPago(p, body);
+    guardarPlan(dir, nuevo);
+    log(`${request.params.slug}: pago de ${body.meses} mes(es) de ${PLANES[body.plan].nombre}; vence ${nuevo.vencimiento.slice(0, 10)}`);
+    return { ok: true, plan: estadoPlan(nuevo), pagos: nuevo.pagos };
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+/** El plan de una tienda a mano: otro plan, otra fecha, un contacto para renovar. */
+app.patch<{ Params: { slug: string } }>('/api/instancias/:slug/plan', async (request, reply) => {
+  const mal = slugValido(request.params.slug);
+  if (mal) return reply.code(400).send({ error: mal });
+  const body = z.object({ plan: z.enum(['prueba', 'basico', 'pro']).optional(), vencimiento: z.string().optional(), contacto: z.string().max(200).optional() }).parse(request.body ?? {});
+  const dir = dirInstancia(request.params.slug);
+  const p = leerPlan(dir);
+  if (!p) return reply.code(404).send({ error: 'Esa tienda no tiene plan.' });
+  try {
+    const nuevo = cambiarPlan(p, body as { plan?: NombrePlan; vencimiento?: string; contacto?: string });
+    guardarPlan(dir, nuevo);
+    log(`${request.params.slug}: plan ${nuevo.plan}, vence ${nuevo.vencimiento.slice(0, 10)}`);
+    return { ok: true, plan: estadoPlan(nuevo), pagos: nuevo.pagos };
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+/** Una tienda anterior a los planes: darle la prueba y que su contenedor lo sepa. */
+app.post<{ Params: { slug: string } }>('/api/instancias/:slug/plan/iniciar', async (request, reply) => {
+  const mal = slugValido(request.params.slug);
+  if (mal) return reply.code(400).send({ error: mal });
+  if (ocupado) return reply.code(409).send({ error: `Espera: ${ocupado}` });
+  ocupado = `plan de ${request.params.slug}`;
+  try {
+    const p = await iniciarPlan(request.params.slug, { cfg, log });
+    return { ok: true, plan: estadoPlan(p) };
+  } catch (error) {
+    return reply.code(500).send({ error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    ocupado = null;
+  }
+});
+
+/** Los pagos apuntados a una tienda. */
+app.get<{ Params: { slug: string } }>('/api/instancias/:slug/pagos', async (request, reply) => {
+  const p = leerPlan(dirInstancia(request.params.slug));
+  if (!p) return reply.code(404).send({ error: 'Esa tienda no tiene plan.' });
+  return { plan: estadoPlan(p), pagos: p.pagos, contacto: p.contacto ?? '' };
+});
 
 app.post('/api/instancias', async (request, reply) => {
   const body = z
@@ -117,7 +198,7 @@ function pagina(): string {
   a { color:var(--accent); }
 </style></head><body><main>
 <h1>Maestro</h1>
-<p class="muted">Una instancia por tienda: su contenedor, su base, su WhatsApp. Dominio base: <b>${cfg.dominioBase}</b>.</p>
+<p class="muted">Una instancia por tienda: su contenedor, su base, su WhatsApp, su plan. Dominio base: <b>${cfg.dominioBase}</b>. <span id="ingresos"></span></p>
 <div class="card">
   <div id="tabla"></div>
 </div>
@@ -132,6 +213,21 @@ function pagina(): string {
   <p id="msg" class="muted"></p>
   <pre id="registro"></pre>
 </div>
+<div class="card" id="pago" style="display:none" data-slug="">
+  <h3 style="margin-top:0">Apuntar un pago</h3>
+  <p class="muted">El cobro lo haces tu (Yape, transferencia, factura); aqui solo se apunta y se corre la fecha. Planes: ${Object.entries(PLANES).map(([k, p]) => `<b>${p.nombre}</b> ${p.precioMes ? `${MONEDA_PLANES} ${p.precioMes}/mes` : `gratis ${p.diasPrueba} dias`} (${k})`).join(' · ')}.</p>
+  <div class="fila">
+    <label>Plan <select id="pago-plan"><option value="basico">Básico</option><option value="pro">Pro</option></select></label>
+    <label>Meses <input id="pago-meses" type="number" min="1" max="24" value="1" style="width:70px"></label>
+    <label>Monto cobrado (vacio = precio de lista) <input id="pago-monto" type="number" min="0" step="0.01" placeholder="49"></label>
+    <label>Nota <input id="pago-nota" placeholder="Yape 15/09, op. 1234"></label>
+    <button id="pago-guardar">Apuntar</button>
+    <button id="pago-prorroga" class="ghost">Cambiar vencimiento sin cobrar</button>
+  </div>
+  <p><label style="display:block;font-size:12px" class="muted">Que ve la tienda para renovar (un WhatsApp, un correo) <input id="pago-contacto" style="width:100%;margin-top:4px" placeholder="Escríbenos al +51 999 999 999"></label></p>
+  <p id="pago-msg" class="muted"></p>
+  <div id="pago-hist"></div>
+</div>
 <script>
 var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
 async function api(path, opts) {
@@ -145,14 +241,19 @@ async function cargar() {
   try {
     var r = await api('/api/instancias');
     var filas = r.instancias.map(function (i) {
+      var pl = i.plan;
+      var plan = !pl ? '<span class="muted">sin plan</span><br><button class="ghost" data-plan-iniciar="' + esc(i.slug) + '">Dar prueba de 14 días</button>' : '<span class="pill ' + (pl.vencido ? 'bad' : pl.diasRestantes <= 7 ? 'warn' : 'ok') + '">' + esc(pl.nombre) + (pl.vencido ? ' · vencido' : ' · ' + pl.diasRestantes + ' d') + '</span><br><small class="muted">hasta ' + esc(new Date(pl.vencimiento).toLocaleDateString()) + '</small><br><button class="ghost" data-pago="' + esc(i.slug) + '">Apuntar pago</button>';
       var estado = i.viva ? (i.configurado ? '<span class="pill ok">WhatsApp vinculado</span>' : '<span class="pill warn">sin WhatsApp vinculado: falta /setup</span>') : '<span class="pill bad">no responde' + (i.detalle ? ': ' + esc(i.detalle) : '') + '</span>';
       return '<tr><td><b>' + esc(i.slug) + '</b><br><small class="muted">' + esc(i.nombre) + ' · ' + esc(i.proveedor) + '</small></td>' +
         '<td><a href="' + esc(i.url) + '/panel" target="_blank">' + esc(i.dominio) + '</a></td>' +
-        '<td>' + estado + '</td><td><small class="muted">' + esc(new Date(i.creadaEn).toLocaleDateString()) + '</small></td>' +
+        '<td>' + estado + '</td><td>' + plan + '</td><td><small class="muted">' + esc(new Date(i.creadaEn).toLocaleDateString()) + '</small></td>' +
         '<td><button class="ghost" data-baja="' + esc(i.slug) + '">Baja</button> <button class="danger" data-borrar="' + esc(i.slug) + '">Borrar todo</button></td></tr>';
     }).join('');
-    document.getElementById('tabla').innerHTML = filas ? '<table><thead><tr><th>Tienda</th><th>URL</th><th>Estado</th><th>Alta</th><th></th></tr></thead><tbody>' + filas + '</tbody></table>' : '<p class="muted">Todavia no hay tiendas.</p>';
+    document.getElementById('tabla').innerHTML = filas ? '<table><thead><tr><th>Tienda</th><th>URL</th><th>Estado</th><th>Plan</th><th>Alta</th><th></th></tr></thead><tbody>' + filas + '</tbody></table>' : '<p class="muted">Todavia no hay tiendas.</p>';
     document.getElementById('registro').textContent = (r.registro || []).join('\\n');
+    document.getElementById('ingresos').textContent = 'Cobro mensual con los planes vigentes: ' + r.moneda + ' ' + r.ingresosMes + '.';
+    document.querySelectorAll('[data-pago]').forEach(function (b) { b.onclick = function () { abrirPago(b.getAttribute('data-pago')); }; });
+    document.querySelectorAll('[data-plan-iniciar]').forEach(function (b) { b.onclick = async function () { var s = b.getAttribute('data-plan-iniciar'); document.getElementById('msg').textContent = 'Dando plan a ' + s + '… (recrea su contenedor)'; try { await api('/api/instancias/' + s + '/plan/iniciar', { method: 'POST' }); document.getElementById('msg').textContent = s + ': ya tiene su prueba de 14 días.'; } catch (e) { document.getElementById('msg').textContent = e.message; } cargar(); }; });
     document.getElementById('alta').disabled = Boolean(r.ocupado);
     if (r.ocupado) document.getElementById('msg').textContent = 'En curso: ' + r.ocupado + '…';
     document.querySelectorAll('[data-baja]').forEach(function (b) { b.onclick = function () { baja(b.getAttribute('data-baja'), false); }; });
@@ -166,6 +267,42 @@ async function baja(slug, borrar) {
   catch (e) { document.getElementById('msg').textContent = e.message; }
   cargar();
 }
+async function abrirPago(slug) {
+  var caja = document.getElementById('pago');
+  caja.style.display = 'block';
+  caja.querySelector('h3').textContent = 'Apuntar un pago de ' + slug;
+  caja.setAttribute('data-slug', slug);
+  document.getElementById('pago-msg').textContent = '';
+  try {
+    var r = await api('/api/instancias/' + slug + '/pagos');
+    document.getElementById('pago-hist').innerHTML = r.pagos.length
+      ? '<table><thead><tr><th>Fecha</th><th>Plan</th><th>Meses</th><th>Monto</th><th>Nota</th></tr></thead><tbody>' + r.pagos.slice().reverse().map(function (p) { return '<tr><td>' + esc(new Date(p.fecha).toLocaleDateString()) + '</td><td>' + esc(p.plan) + '</td><td>' + p.meses + '</td><td>' + esc(p.moneda) + ' ' + p.monto + '</td><td>' + esc(p.nota) + '</td></tr>'; }).join('') + '</tbody></table>'
+      : '<p class="muted">Sin pagos apuntados todavia. Ahora: ' + esc(r.plan.nombre) + ', hasta ' + esc(new Date(r.plan.vencimiento).toLocaleDateString()) + '.</p>';
+    document.getElementById('pago-contacto').value = r.contacto || '';
+  } catch (e) { document.getElementById('pago-msg').textContent = e.message; }
+  caja.scrollIntoView({ behavior: 'smooth' });
+}
+document.getElementById('pago-guardar').onclick = async function () {
+  var slug = document.getElementById('pago').getAttribute('data-slug');
+  var monto = document.getElementById('pago-monto').value;
+  try {
+    var r = await api('/api/instancias/' + slug + '/pagos', { method: 'POST', body: { plan: document.getElementById('pago-plan').value, meses: Number(document.getElementById('pago-meses').value), monto: monto === '' ? undefined : Number(monto), nota: document.getElementById('pago-nota').value } });
+    document.getElementById('pago-msg').textContent = 'Apuntado: ' + r.plan.nombre + ' hasta ' + new Date(r.plan.vencimiento).toLocaleDateString() + '. La tienda lo ve en unos minutos.';
+    document.getElementById('pago-nota').value = ''; document.getElementById('pago-monto').value = '';
+    abrirPago(slug); cargar();
+  } catch (e) { document.getElementById('pago-msg').textContent = e.message; }
+};
+document.getElementById('pago-prorroga').onclick = async function () {
+  var slug = document.getElementById('pago').getAttribute('data-slug');
+  var fecha = prompt('Nueva fecha de vencimiento (AAAA-MM-DD), sin cobrar:');
+  if (!fecha) return;
+  try { await api('/api/instancias/' + slug + '/plan', { method: 'PATCH', body: { vencimiento: fecha, contacto: document.getElementById('pago-contacto').value } }); document.getElementById('pago-msg').textContent = 'Vencimiento cambiado a ' + fecha + '.'; abrirPago(slug); cargar(); }
+  catch (e) { document.getElementById('pago-msg').textContent = e.message; }
+};
+document.getElementById('pago-contacto').onchange = async function () {
+  var slug = document.getElementById('pago').getAttribute('data-slug');
+  try { await api('/api/instancias/' + slug + '/plan', { method: 'PATCH', body: { contacto: document.getElementById('pago-contacto').value } }); } catch (e) { document.getElementById('pago-msg').textContent = e.message; }
+};
 document.getElementById('alta').onclick = async function () {
   var slug = document.getElementById('slug').value.trim().toLowerCase();
   document.getElementById('msg').textContent = 'Creando ' + slug + '… (la primera vez construye la imagen: unos minutos)';

@@ -20,9 +20,13 @@ import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
 import { decrypt, encrypt, keyFromBase64 } from '../settings/crypto.js';
 import type { StokyClient } from '../stoky/client.js';
+import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../catalogo/tienda.js';
 import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, type MensajeIA, type ProveedorIA } from './proveedores.js';
 import { MODELO_GRATIS_POR_DEFECTO, modeloGratisEfectivo, modelosGratisEnVivo } from './modelos-gratis.js';
-import { ACCIONES_IA, manualDelSistema, SISTEMA_PARA_CLIENTES } from './conocimiento-sistema.js';
+import { ACCIONES_IA, COMO_TOMAR_PEDIDO, manualDelSistema, SISTEMA_PARA_CLIENTES } from './conocimiento-sistema.js';
+import { extraerPedido, registrarPedido, type PedidoDelModelo } from '../pedidos/servicio.js';
+import type { Bus } from '../eventos/bus.js';
+import type { ServicioPlan } from '../plan/servicio.js';
 import { calificar, EJEMPLOS_DE_RESPUESTA, ESCENARIOS, resumenDeCalificaciones, type Calificacion, type Grupo } from './escenarios.js';
 
 export const configIASchema = z.object({
@@ -46,6 +50,13 @@ export const configIASchema = z.object({
   avisarDerivacion: z.boolean().default(true),
   /** Cuantos mensajes anteriores se le dan al modelo. */
   memoria: z.number().int().min(0).max(40).default(12),
+  /**
+   * La API de productos de la tienda (ver src/catalogo/tienda.ts). Con ella el
+   * asistente habla de productos reales, con precio y stock de ahora mismo, y
+   * puede tomar pedidos. Vacio = solo lo que la tienda escribio (o Stoky).
+   */
+  catalogoUrl: z.string().trim().max(500).default(''),
+  catalogoFormato: z.enum(['auto', 'elysian', 'simple', 'woocommerce']).default('auto'),
 });
 
 export type ConfigIA = z.infer<typeof configIASchema>;
@@ -70,6 +81,10 @@ export interface TurnoIA {
 
 export interface ServicioIA {
   estado(): EstadoIA;
+  /** Si la URL del catalogo responde y cuantos productos trae. */
+  probarCatalogo(): Promise<{ ok: boolean; total: number; detalle?: string; ejemplo?: string | null }>;
+  /** El catalogo vigente (tienda por URL o Stoky), si hay. */
+  catalogo(): CatalogoTienda | StokyClient | undefined;
   /** Vuelve a mirar el catalogo de Puter (cada hora solo) y devuelve el estado. */
   refrescarModelos(): Promise<EstadoIA>;
   activa(): boolean;
@@ -95,6 +110,8 @@ export interface RespuestaIA {
   derivar: boolean;
   /** El modelo pidio mandarle al cliente el boton de ubicacion. */
   pedirUbicacion: boolean;
+  /** El modelo cerro un pedido: lo que dijo, todavia sin comprobar contra el catalogo. */
+  pedido?: PedidoDelModelo | null;
 }
 
 export interface DepsIA {
@@ -112,6 +129,10 @@ export interface DepsIA {
    * WHATSAPP_NATIVE_BUTTONS). Sin el, se pide por texto con el camino del clip.
    */
   conBoton?: () => boolean;
+  /** El bus, para anunciar los pedidos tomados. */
+  bus?: Bus;
+  /** El plan de la tienda: si esta vencido o con el tope de turnos, la IA calla. */
+  plan?: ServicioPlan;
   /** Para pruebas: el proveedor ya hecho. */
   proveedor?: ProveedorIA;
   fetchImpl?: typeof fetch;
@@ -136,7 +157,7 @@ export function textoDeFallo(): string {
 }
 
 /** El prompt de sistema: quien es, que sabe, como habla, cuando deriva. */
-export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null }): string {
+export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null; tomaPedidos?: boolean }): string {
   const partes = [
     `Eres ${cfg.nombreAsistente}, el asistente de WhatsApp de "${ctx.negocio}". Atiendes a clientes por WhatsApp.`,
     `Hoy es ${ctx.ahora.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' })}, ${ctx.ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}. Horario de atención: ${ctx.horario}.`,
@@ -148,12 +169,13 @@ export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario:
     '- No pidas datos sensibles (tarjetas, contraseñas). No prometas descuentos ni plazos que no estén escritos abajo.',
     '',
     SISTEMA_PARA_CLIENTES,
+    ...(ctx.tomaPedidos ? ['', COMO_TOMAR_PEDIDO] : []),
     '',
     EJEMPLOS_DE_RESPUESTA,
   ];
   if (cfg.instrucciones.trim()) partes.push('', 'Cómo debes hablar y qué tener en cuenta:', cfg.instrucciones.trim());
   partes.push('', 'Lo que sabes del negocio:', cfg.conocimiento.trim() || '(La tienda no ha escrito nada todavía: sé amable y pasa con una persona cualquier pregunta concreta.)');
-  if (ctx.catalogo) partes.push('', 'Productos encontrados en el catálogo para esta consulta (precio y stock reales ahora mismo):', ctx.catalogo);
+  if (ctx.catalogo) partes.push('', 'Productos encontrados en el catálogo de la tienda para esta consulta (precio y stock reales ahora mismo; [código] es el SKU). Usa estos precios tal cual, di si está agotado, y si hay enlace mándalo para que lo vea:', ctx.catalogo);
   return partes.join('\n');
 }
 
@@ -171,11 +193,12 @@ export function pideUnaPersona(texto: string, palabras: string[]): boolean {
 
 /** Separa la marca de derivacion del texto que se manda al cliente. */
 export function leerRespuesta(cruda: string): RespuestaIA {
-  const derivar = cruda.includes(MARCA_DERIVAR);
+  const { texto: sinPedido, pedido } = extraerPedido(cruda);
+  const derivar = sinPedido.includes(MARCA_DERIVAR);
   // Derivar manda: si va a atender una persona, el boton lo manda ella.
-  const pedirUbicacion = !derivar && cruda.includes(MARCA_PEDIR_UBICACION);
-  const texto = cruda.replaceAll(MARCA_DERIVAR, '').replaceAll(MARCA_PEDIR_UBICACION, '').replace(/\s+$/g, '').trim();
-  return { texto, derivar, pedirUbicacion };
+  const pedirUbicacion = !derivar && sinPedido.includes(MARCA_PEDIR_UBICACION);
+  const texto = sinPedido.replaceAll(MARCA_DERIVAR, '').replaceAll(MARCA_PEDIR_UBICACION, '').replace(/\s+$/g, '').trim();
+  return { texto, derivar, pedirUbicacion, pedido: pedido ?? null };
 }
 
 /** El texto con el que se pide la ubicacion, segun haya boton nativo o no. */
@@ -193,6 +216,19 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   let cfg: ConfigIA = CONFIG_IA_VACIA;
   let token = '';
   let proveedor: ProveedorIA | null = deps.proveedor ?? null;
+  // El catalogo de la tienda por URL, si lo hay; si no, el de Stoky (env).
+  let catalogoTienda: CatalogoTienda | null = null;
+  let catalogoUrlCargada = '';
+  const catalogo = (): CatalogoTienda | StokyClient | undefined => {
+    if (cfg.catalogoUrl) {
+      if (!catalogoTienda || catalogoUrlCargada !== `${cfg.catalogoUrl}|${cfg.catalogoFormato}`) {
+        catalogoTienda = crearCatalogoTienda({ url: cfg.catalogoUrl, formato: cfg.catalogoFormato, fetchImpl: deps.fetchImpl });
+        catalogoUrlCargada = `${cfg.catalogoUrl}|${cfg.catalogoFormato}`;
+      }
+      return catalogoTienda;
+    }
+    return deps.catalogo;
+  };
   let gratis: { modelos: string[]; origen: 'catalogo' | 'fijo' } = deps.modelosGratis ? { modelos: deps.modelosGratis, origen: 'fijo' } : { modelos: [MODELO_GRATIS_POR_DEFECTO], origen: 'fijo' };
 
   async function refrescarModelos(): Promise<void> {
@@ -237,13 +273,17 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       return { texto: textoDeDespedida(deps.nombreNegocio()), derivar: true, pedirUbicacion: false };
     }
 
-    // El catalogo de Stoky, si esta: precios y stock reales, no lo que la
-    // tienda escribio hace un mes.
-    let catalogo: string | null = null;
-    if (deps.catalogo) {
-      const encontrados = await deps.catalogo.buscar(texto, 5).catch(() => []);
-      if (encontrados.length) {
-        catalogo = encontrados.map((p) => `- ${p.name}${p.price != null ? `: ${p.price}` : ''}${p.stock > 0 ? ` (stock ${p.stock})` : ' (agotado)'}`).join('\n');
+    // El catalogo real (el de la tienda por URL, o el de Stoky): precios y
+    // stock de ahora mismo, no lo que la tienda escribio hace un mes.
+    let catalogoTexto: string | null = null;
+    const cat = catalogo();
+    if (cat) {
+      if ('contextoPara' in cat) catalogoTexto = await cat.contextoPara(texto, 6).catch(() => null);
+      else {
+        const encontrados = await cat.buscar(texto, 5).catch(() => []);
+        if (encontrados.length) {
+          catalogoTexto = encontrados.map((p) => `- ${p.name} [${p.sku}]${p.price != null ? `: ${p.price}` : ''}${p.stock > 0 ? ` (stock ${p.stock})` : ' (agotado)'}`).join('\n');
+        }
       }
     }
 
@@ -258,7 +298,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     if (historial.length && historial[historial.length - 1]!.role === 'user' && historial[historial.length - 1]!.content === texto) historial.pop();
 
     const mensajes: MensajeIA[] = [
-      { role: 'system', content: construirSistema(cfg, { negocio: deps.nombreNegocio(), horario: config.BUSINESS_HOURS, ahora: new Date(), catalogo }) },
+      { role: 'system', content: construirSistema(cfg, { negocio: deps.nombreNegocio(), horario: config.BUSINESS_HOURS, ahora: new Date(), catalogo: catalogoTexto, tomaPedidos: Boolean(cat) }) },
       ...historial,
       { role: 'user', content: texto },
     ];
@@ -268,6 +308,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   async function turno(contact: Contact, entrante: string): Promise<TurnoIA> {
     if (!cfg.activa) return { resultado: 'inactiva', texto: null };
+    const sinPlan = deps.plan?.motivo('ia');
+    if (sinPlan) return { resultado: 'inactiva', texto: null, detalle: sinPlan };
     const phone = contact.phone;
     const enviar = (t: string) => sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: t });
 
@@ -283,8 +325,17 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       return { resultado: 'error', texto: textoDeFallo(), detalle };
     }
 
+    await deps.plan?.anotarTurnoIA();
     const texto = respuesta.texto || (respuesta.derivar ? textoDeDespedida(deps.nombreNegocio()) : '');
     if (texto) await enviar(texto);
+    if (respuesta.pedido) {
+      // El pedido se comprueba contra el catalogo real y se guarda; al cliente
+      // le llega el resumen con el total del sistema, y a la tienda el evento.
+      const r = await registrarPedido(contact, respuesta.pedido, { repos, bus: deps.bus, catalogo, moneda: 'PEN' }, 'ia');
+      await enviar(r.resumen);
+      if (r.ok) await avisar(contact, `tomo un pedido (#${r.pedido!.id}, ${r.pedido!.moneda} ${r.pedido!.total.toFixed(2)})`);
+      return { resultado: 'respondio', texto: `${texto}\n${r.resumen}`, detalle: r.ok ? `pedido ${r.pedido!.id}` : `pedido no registrado: ${r.noEncontrados.join(', ')}` };
+    }
     if (respuesta.pedirUbicacion) {
       // La accion del sistema que el modelo pidio: el boton nativo (o el
       // camino del clip si el proveedor no lo tiene).
@@ -303,15 +354,18 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     return { resultado: 'respondio', texto };
   }
 
+  async function avisar(contact: Contact, que: string): Promise<void> {
+    const destino = deps.supervisor?.();
+    if (!cfg.avisarDerivacion || !destino) return;
+    const quien = contact.name ? `${contact.name} (${contact.phone})` : contact.phone;
+    await sender
+      .send({ phone: destino, kind: 'freeform', category: 'UTILITY', manual: true, text: `${quien}: ${que}. Abre el chat: ${config.PUBLIC_BASE_URL.replace(/\/+$/, '')}/chat` })
+      .catch(() => undefined);
+  }
+
   async function derivar(contact: Contact, motivo: string): Promise<void> {
     await repos.contacts.pausarBot(contact.id, true, new Date());
-    const destino = deps.supervisor?.();
-    if (cfg.avisarDerivacion && destino) {
-      const quien = contact.name ? `${contact.name} (${contact.phone})` : contact.phone;
-      await sender
-        .send({ phone: destino, kind: 'freeform', category: 'UTILITY', manual: true, text: `${quien} necesita que alguien le conteste por WhatsApp: ${motivo}. Abre el chat: ${config.PUBLIC_BASE_URL.replace(/\/+$/, '')}/chat` })
-        .catch(() => undefined);
-    }
+    await avisar(contact, `necesita que alguien le conteste por WhatsApp: ${motivo}`);
   }
 
   await refrescarModelos().catch(() => undefined);
@@ -320,6 +374,14 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     estado,
     activa: () => cfg.activa && Boolean(token),
     recargar,
+    catalogo,
+    async probarCatalogo() {
+      const cat = catalogo();
+      if (!cat) return { ok: false, total: 0, detalle: 'no hay catalogo configurado' };
+      const r = await cat.precargar();
+      const primero = 'productosTienda' in cat ? (await cat.productosTienda().catch(() => []))[0] : (await cat.productos().catch(() => []))[0];
+      return { ...r, ejemplo: primero ? `${primero.name}: ${primero.price ?? 'sin precio'} (stock ${primero.stock})` : null };
+    },
     async refrescarModelos() {
       await refrescarModelos().catch(() => undefined);
       return estado();
@@ -345,6 +407,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       const casos = ESCENARIOS.filter((e) => (!opts.grupo || e.grupo === opts.grupo) && (!opts.claves?.length || opts.claves.includes(e.clave))).slice(0, opts.limite ?? ESCENARIOS.length);
       const contact: Contact = { id: 'escenario', phone: '000', name: 'Cliente de prueba', optInAt: null, optInSource: null, optOutAt: null, lastInboundAt: null };
       const resultados: Calificacion[] = [];
+      // Con catalogo real, los precios que diga el modelo pueden venir de ahi.
+      const cat = catalogo();
+      const catalogoDelCaso = cat && 'productosTienda' in cat ? (await cat.productosTienda().catch(() => [])).map(lineaDeProducto).join('\n') : '';
       for (const caso of casos) {
         // Los mensajes previos del caso van como historial; se juzga la ultima respuesta.
         const historial: MensajeIA[] = [];
@@ -366,7 +431,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
           respuesta: ultima.texto,
           derivo: ultima.derivar,
           pidioUbicacion: ultima.pedirUbicacion,
-          alertas: error ? [] : calificar(ultima, caso.espera, { conocimiento: `${cfg.conocimiento}\n${cfg.instrucciones}` }),
+          alertas: error ? [] : calificar(ultima, caso.espera, { conocimiento: `${cfg.conocimiento}\n${cfg.instrucciones}\n${catalogoDelCaso}` }),
           error,
         });
       }

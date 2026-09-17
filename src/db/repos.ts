@@ -20,6 +20,7 @@ import { createActividadRepo, type ActividadRepo } from '../auth/actividad.js';
 import { createStickersRepo, type StickersRepo } from '../stickers/stickers.js';
 import { createWebhooksRepo, type WebhooksRepo } from '../webhooks/repo.js';
 import { createConectoresRepo, type ConectoresRepo } from '../conectores/repo.js';
+import { createPedidosRepo, type PedidosRepo } from '../pedidos/repo.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -519,6 +520,8 @@ export interface Repos {
   webhooks: WebhooksRepo;
   /** Conectores de tiendas (WooCommerce, Shopify). Ver src/conectores. */
   conectores: ConectoresRepo;
+  /** Pedidos tomados en el chat. Ver src/pedidos. */
+  pedidos: PedidosRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1773,6 +1776,7 @@ export function createRepos(pool: Pool): Repos {
     stickers: createStickersRepo(pool),
     webhooks: createWebhooksRepo(pool),
     conectores: createConectoresRepo(pool),
+    pedidos: createPedidosRepo(pool),
   };
 }
 

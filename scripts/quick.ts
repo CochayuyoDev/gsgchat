@@ -162,6 +162,7 @@ const ia = await crearServicioIA({
   supervisor: () => politica().avisarA,
   catalogo,
   conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+  bus,
   log: (m, d) => console.warn(m, d ?? ''),
 });
 

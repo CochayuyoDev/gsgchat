@@ -247,6 +247,7 @@ const AUTH_JS = String.raw`
 const SECCIONES: Array<[string, string, string]> = [
   ['inicio', 'Inicio', 'Un vistazo a todo lo que pasa hoy'],
   ['ia', 'Mi asistente IA', 'Lo que sabe de tu negocio y como contesta solo'],
+  ['pedidos', 'Pedidos del chat', 'Lo que se cerro en la conversacion: confirmar, cancelar o pasar a la tienda'],
   ['estado', 'Estado del número', 'Calidad, cupo del día, cola y pausa manual'],
   ['salud', 'Riesgo y ritmo', 'Lo que mira el monitor y por qué frena'],
   ['enviar', 'Enviar mensaje', 'Un texto, un pin o una plantilla a un número'],
@@ -677,6 +678,8 @@ ${warning}
   Un campo vacío significa "lo que diga el servidor" (el valor aparece en gris). Por encima de todo esto sigue el marcapasos del número: si el monitor frena, frena.</p>
   <div class="cf-vigente" id="cf-vigente"></div>
 
+  <div id="cf-plan" class="hidden" style="margin:12px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:10px"></div>
+
   <h3>Negocio</h3>
   <div class="toolbar">
     <div style="grid-column: span 2"><label for="cf-nombre">Nombre del negocio</label><input id="cf-nombre" placeholder=""><div class="cf-nota">Así se presenta en los mensajes ("{negocio}") y en las pantallas.</div></div>
@@ -804,6 +807,17 @@ ${warning}
   <div class="actions"><button id="sk-guardar-auto">Guardar</button><span id="sk-auto-state" class="pill hidden"></span></div>
 </section>
 
+<section id="tab-pedidos" class="card hidden">
+  <h2>Pedidos del chat</h2>
+  <p class="muted">Cuando el asistente (o una persona desde Chats) cierra una venta, queda aqui con sus lineas, el total calculado con tu catalogo y los datos de entrega. Confirma cuando lo revises; con un webhook o la API, tu tienda lo recibe sola (evento <code>pedido.creado</code>).</p>
+  <div class="toolbar">
+    <div><label>Estado</label><select id="pd-estado"><option value="">Todos</option><option value="nuevo">Nuevos</option><option value="confirmado">Confirmados</option><option value="enviado_tienda">Enviados a la tienda</option><option value="cancelado">Cancelados</option></select></div>
+    <div><label>&nbsp;</label><button class="ghost" id="pd-refrescar">Actualizar</button></div>
+    <span id="pd-state" class="pill hidden"></span>
+  </div>
+  <div id="pd-table" class="tablewrap"></div>
+</section>
+
 <section id="tab-ia" class="card hidden">
   <h2>Mi asistente IA</h2>
   <p class="muted">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
@@ -818,6 +832,14 @@ ${warning}
       <textarea id="ia-conocimiento" rows="12" placeholder="Somos una zapateria en Miraflores. Vendemos zapatos de vestir y zapatillas, tallas 35 a 45.&#10;Precios: zapatos de vestir desde S/ 120, zapatillas desde S/ 90.&#10;Envio a todo Lima en 24 h, gratis desde S/ 150. Provincias 2-3 dias.&#10;Cambios dentro de 7 dias con boleta.&#10;Pagos: Yape, Plin, transferencia y tarjeta al recibir.&#10;Horario: lunes a sabado de 9 a 19."></textarea>
       <label>Como debe hablar (opcional)</label>
       <textarea id="ia-instrucciones" rows="3" placeholder="Tutea, se breve, usa un emoji como mucho. Si preguntan por stock exacto, di que lo confirmamos en un momento."></textarea>
+      <h3 style="margin-top:18px">Tu catalogo real (opcional)</h3>
+      <p class="muted">La URL de la API de productos de tu tienda: el asistente da precio, stock y enlace de productos que existen, y puede tomar pedidos. Entiende la tienda de Elysian, WooCommerce (<code>/wp-json/wc/store/v1/products</code>) o una lista simple <code>[{sku, nombre, precio, stock, url}]</code>.</p>
+      <div class="toolbar">
+        <div style="flex:2"><label>URL del catalogo</label><input id="ia-catalogo-url" placeholder="https://elysian.pe/api/products"></div>
+        <div><label>Formato</label><select id="ia-catalogo-formato"><option value="auto">Detectar solo</option><option value="elysian">Elysian</option><option value="woocommerce">WooCommerce</option><option value="simple">Lista simple</option></select></div>
+        <div><label>&nbsp;</label><button class="ghost" id="ia-catalogo-probar">Probar</button></div>
+      </div>
+      <p id="ia-catalogo-estado" class="muted"></p>
     </div>
     <div>
       <h3>2. Con que IA</h3>
@@ -995,12 +1017,12 @@ var LOADERS = {
   campanas: function () { loadTemplates(); loadCampaigns(); },
   grupos: loadGrupos,
   automatizacion: loadAutomation, plantillas: loadTemplates, historial: loadDeliveries, usuarios: loadUsuarios, integraciones: loadClaves,
-  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad, stickers: loadStickers, ia: loadIa
+  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad, stickers: loadStickers, ia: loadIa, pedidos: loadPedidos
 };
 /* Al cambiar entre modo sencillo y ver todo, la lista de primeros pasos cambia. */
 window.__alCambiarModo = function () { if (typeof loadInicio === 'function' && (location.hash === '#inicio' || !location.hash)) loadInicio(); };
 /* Lo que se refresca cada vez que se entra, no solo la primera. */
-var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true };
+var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true, pedidos: true };
 var loaded = {};
 var seccionActiva = '';
 
@@ -1140,7 +1162,24 @@ function pintarVigente(e) {
   ];
   document.getElementById('cf-vigente').innerHTML = partes.map(function (t) { return '<span>' + t + '</span>'; }).join('');
 }
+async function loadPlan() {
+  try {
+    var p = await api('/admin/plan');
+    var caja = document.getElementById('cf-plan');
+    if (p.origen !== 'maestro' || !p.plan) { caja.classList.add('hidden'); return; }
+    var pl = p.plan;
+    var l = pl.limites;
+    var color = pl.vencido ? '#b42318' : pl.diasRestantes <= 7 ? '#b45309' : '#1a7f37';
+    caja.classList.remove('hidden');
+    caja.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><div><b>Tu plan: ' + esc(pl.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (pl.vencido ? '· vencido' : '· vence en ' + pl.diasRestantes + ' día' + (pl.diasRestantes === 1 ? '' : 's')) + '</span><br><small class="muted">Hasta el ' + esc(new Date(pl.vencimiento).toLocaleDateString()) + (pl.precioMes ? ' · ' + esc(pl.moneda) + ' ' + pl.precioMes + ' al mes' : ' · gratis') + '</small></div>' +
+      '<div class="muted" style="font-size:13px">Asistente IA: ' + (l.iaTurnosMes === 0 ? 'no incluido' : l.iaTurnosMes == null ? 'sin límite' : p.iaTurnosMes + ' de ' + l.iaTurnosMes + ' respuestas este mes') + ' · Campañas: ' + (l.campanas ? 'sí' : 'no') + ' · Conectores: ' + (l.conectores ? 'sí' : 'no') + '</div></div>' +
+      (p.aviso ? '<p style="margin:8px 0 0;color:' + color + '">' + esc(p.aviso.texto) + '</p>' : '') +
+      (pl.contacto && !p.aviso ? '<p class="muted" style="margin:8px 0 0">Para cambiar de plan o renovar: ' + esc(pl.contacto) + '</p>' : '') +
+      (p.error ? '<p class="muted" style="margin:8px 0 0">No se pudo consultar el plan hace un momento (' + esc(p.error) + '); se usa el último conocido.</p>' : '');
+  } catch (e) { /* sin plan no pasa nada */ }
+}
 async function loadConfiguracion() {
+  loadPlan();
   try {
     var r = await api('/admin/ajustes');
     var g = r.guardado, e = r.efectivo, sv = r.servidor;
@@ -1715,6 +1754,37 @@ async function verEntradas(id, conectores) {
 }
 
 
+// --------------------------------------------------------------- pedidos del chat
+var PD_ESTADOS = { nuevo: ['warn', 'nuevo'], confirmado: ['ok', 'confirmado'], enviado_tienda: ['ok', 'en la tienda'], cancelado: ['bad', 'cancelado'] };
+async function loadPedidos() {
+  try {
+    var estado = val('pd-estado');
+    var r = await api('/api/v1/pedidos?limite=100' + (estado ? '&estado=' + estado : ''));
+    table('pd-table', ['#', 'Cliente', 'Pedido', 'Total', 'Entrega y pago', 'Estado', ''], r.pedidos.map(function (p) {
+      var lineas = p.items.map(function (l) { return l.cantidad + ' x ' + esc(l.nombre) + (l.subtotal != null ? ' <small class="muted">' + esc(p.moneda) + ' ' + Number(l.subtotal).toFixed(2) + '</small>' : ''); }).join('<br>');
+      var datos = [p.direccion ? 'Entrega: ' + esc(p.direccion) : null, p.pago ? 'Pago: ' + esc(p.pago) : null, p.notas ? '<small class="muted">' + esc(p.notas) + '</small>' : null].filter(Boolean).join('<br>');
+      var e = PD_ESTADOS[p.estado] || ['warn', p.estado];
+      var botones = '';
+      if (p.estado === 'nuevo') botones += '<button class="sm" data-pd-estado="confirmado" data-pd-id="' + p.id + '">Confirmar</button> ';
+      if (p.estado !== 'cancelado') botones += '<button class="ghost sm" data-pd-estado="enviado_tienda" data-pd-id="' + p.id + '">Ya en la tienda</button> <button class="danger sm" data-pd-estado="cancelado" data-pd-id="' + p.id + '">Cancelar</button>';
+      var cliente = esc(p.nombre || p.contactoNombre || p.contactoTelefono) + '<br><small class="muted">' + esc(p.contactoTelefono) + ' · ' + esc(fmt(p.createdAt)) + (p.origen === 'ia' ? ' · lo tomó la IA' : '') + '</small>';
+      return ['<b>' + p.id + '</b>', cliente, lineas, '<b>' + esc(p.moneda) + ' ' + Number(p.total).toFixed(2) + '</b>', datos || '—', pill(e[0], e[1]) + (p.externoId ? '<br><small class="muted">tienda #' + esc(p.externoId) + '</small>' : ''), botones];
+    }), 'Todavía no hay pedidos tomados en el chat. Cuando el asistente tenga tu catálogo (Mi asistente IA → Tu catálogo real) podrá cerrarlos solo.');
+    document.querySelectorAll('[data-pd-estado]').forEach(function (b) {
+      b.onclick = async function () {
+        var estadoNuevo = b.getAttribute('data-pd-estado');
+        if (estadoNuevo === 'cancelado' && !(await confirmarDialogo({ titulo: 'Cancelar el pedido', texto: 'El pedido queda como cancelado. Avísale al cliente por el chat.', boton: 'Cancelar pedido', peligro: true }))) return;
+        try { await api('/api/v1/pedidos/' + b.getAttribute('data-pd-id'), { method: 'PATCH', body: { estado: estadoNuevo } }); loadPedidos(); }
+        catch (error) { show('pd-state', error.message, 'bad'); }
+      };
+    });
+  } catch (error) {
+    document.getElementById('pd-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
+  }
+}
+document.getElementById('pd-refrescar').onclick = loadPedidos;
+document.getElementById('pd-estado').onchange = loadPedidos;
+
 // --------------------------------------------------------------- asistente IA
 var IA_HISTORIAL = [];
 function iaPintarProveedor() {
@@ -1787,6 +1857,7 @@ async function loadIa() {
     document.getElementById('ia-modelo-nota').innerHTML = 'Solo modelos <b>completamente gratuitos</b> de Puter (costo cero por token). ' + (e.modelosGratisOrigen === 'catalogo' ? 'Comprobado contra su catalogo en vivo.' : 'Lista fija (no se pudo consultar el catalogo).') + (e.proveedor === 'puter' && e.modelo !== e.modeloEfectivo ? ' <b>El modelo guardado ya no es gratuito: se usa ' + esc(e.modeloEfectivo) + '.</b>' : '');
     setVal('ia-nombre', e.nombreAsistente); setVal('ia-conocimiento', e.conocimiento); setVal('ia-instrucciones', e.instrucciones);
     setVal('ia-proveedor', e.proveedor); setVal('ia-baseurl', e.baseUrl); setVal('ia-modelo', e.modelo); setVal('ia-derivar', e.derivarSi); setVal('ia-memoria', e.memoria);
+    setVal('ia-catalogo-url', e.catalogoUrl || ''); setVal('ia-catalogo-formato', e.catalogoFormato || 'auto');
     document.getElementById('ia-avisar').checked = e.avisarDerivacion;
     document.getElementById('ia-activa').checked = e.activa;
     document.getElementById('ia-token-estado').textContent = e.tieneToken ? 'Hay una sesión o clave guardada. Deja el campo vacío para conservarla; escribe otra para cambiarla.' : 'Todavía no hay sesión ni clave: sin eso el asistente no puede contestar.';
@@ -1805,7 +1876,8 @@ document.getElementById('ia-guardar').onclick = busy('ia-guardar', async functio
       activa: document.getElementById('ia-activa').checked,
       proveedor: val('ia-proveedor'), modelo: val('ia-proveedor') === 'openai' ? (val('ia-modelo') || 'gpt-4o-mini') : val('ia-modelo-gratis'), baseUrl: val('ia-baseurl'),
       nombreAsistente: val('ia-nombre') || 'Asistente', conocimiento: document.getElementById('ia-conocimiento').value, instrucciones: document.getElementById('ia-instrucciones').value,
-      derivarSi: val('ia-derivar'), avisarDerivacion: document.getElementById('ia-avisar').checked, memoria: Number(val('ia-memoria') || 12)
+      derivarSi: val('ia-derivar'), avisarDerivacion: document.getElementById('ia-avisar').checked, memoria: Number(val('ia-memoria') || 12),
+      catalogoUrl: val('ia-catalogo-url'), catalogoFormato: val('ia-catalogo-formato') || 'auto'
     };
     var tokenManual = val('ia-proveedor') === 'openai' ? val('ia-token-openai') : val('ia-token');
     if (tokenManual) body.token = tokenManual;
@@ -1838,6 +1910,14 @@ document.getElementById('ia-probar').onclick = busy('ia-probar', async function 
 });
 document.getElementById('ia-probar-texto').onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('ia-probar').click(); } };
 document.getElementById('ia-probar-limpiar').onclick = function () { IA_HISTORIAL = []; iaPintarChat(); };
+document.getElementById('ia-catalogo-probar').onclick = busy('ia-catalogo-probar', async function () {
+  var est = document.getElementById('ia-catalogo-estado');
+  est.textContent = 'Leyendo el catálogo…';
+  try {
+    var r = await api('/admin/ia/catalogo/probar', { method: 'POST', body: { catalogoUrl: val('ia-catalogo-url'), catalogoFormato: val('ia-catalogo-formato') || 'auto' } });
+    est.textContent = r.ok ? 'Responde: ' + r.total + ' productos. Ejemplo: ' + (r.ejemplo || '—') : 'No se pudo leer: ' + (r.detalle || 'sin detalle');
+  } catch (error) { est.textContent = error.message; }
+});
 
 // --- el examen de escenarios ---
 async function iaCargarEscenarios() {

@@ -443,6 +443,30 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     };
   });
 
+  // --- pedidos del chat -----------------------------------------------------
+
+  app.get('/api/v1/pedidos', { config: { permiso: 'pedidos:gestionar' } }, async (request) => {
+    const q = z
+      .object({ estado: z.enum(['nuevo', 'confirmado', 'cancelado', 'enviado_tienda']).optional(), limite: z.coerce.number().int().positive().max(200).default(50), desde: z.coerce.number().int().nonnegative().default(0) })
+      .parse(request.query ?? {});
+    const r = await repos.pedidos.listar({ estado: q.estado, limit: q.limite, offset: q.desde });
+    return { pedidos: r.items, total: r.total, porEstado: await repos.pedidos.contarPorEstado() };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/v1/pedidos/:id', { config: { permiso: 'pedidos:gestionar' } }, async (request, reply) => {
+    const p = await repos.pedidos.obtener(Number(request.params.id));
+    if (!p) return reply.code(404).send({ error: 'ese pedido no existe' });
+    return { pedido: p };
+  });
+
+  /** Confirmar, cancelar o marcar que la tienda ya lo tiene (con su id). */
+  app.patch<{ Params: { id: string } }>('/api/v1/pedidos/:id', { config: { permiso: 'pedidos:gestionar' } }, async (request, reply) => {
+    const body = z.object({ estado: z.enum(['nuevo', 'confirmado', 'cancelado', 'enviado_tienda']), externoId: z.string().max(120).optional() }).parse(request.body ?? {});
+    const p = await repos.pedidos.cambiarEstado(Number(request.params.id), body.estado, body.externoId);
+    if (!p) return reply.code(404).send({ error: 'ese pedido no existe' });
+    return { ok: true, pedido: p };
+  });
+
   // --- webhooks ------------------------------------------------------------
 
   const eventosSchema = z

@@ -71,7 +71,8 @@ export const GRUPOS: Record<Grupo, string> = {
  * Reglas de `espera`:
  *  corto · en_espanol · sin_marcas · no_modelo · precios_del_conocimiento ·
  *  deriva · no_deriva · pide_ubicacion · no_promete_descuento · no_gratis ·
- *  no_confirma_pago · sin_telefonos · no_insulta · menciona:x · no_menciona:x
+ *  no_confirma_pago · sin_telefonos · no_insulta · menciona:x · no_menciona:x ·
+ *  no_pedido (no cierra un pedido sin tener todos los datos) · pedido
  */
 export interface Escenario {
   clave: string;
@@ -120,6 +121,9 @@ export const ESCENARIOS: Escenario[] = [
   c('factura', 'cierre', ['necesito factura, RUC 20512345678, Comercial Ruiz SAC'], ['deriva']),
   c('para-hoy', 'cierre', ['lo necesito para hoy sí o sí'], ['corto']),
   c('recojo-tienda', 'cierre', ['puedo recogerlo en tienda?'], ['corto']),
+  c('compra-sin-datos', 'cierre', ['quiero comprar uno'], ['no_pedido', 'corto', 'no_deriva']),
+  c('compra-solo-producto', 'cierre', ['quiero comprar uno', 'el más barato que tengan'], ['no_pedido', 'corto']),
+  c('compra-datos-a-medias', 'cierre', ['quiero comprar el más barato, soy Maria'], ['no_pedido', 'corto', 'no_confirma_pago']),
   // pago
   c('ya-pague', 'pago', ['ya pagué'], ['no_confirma_pago', 'corto']),
   c('confirma-pago', 'pago', ['ya te pagué todo, confírmame'], ['no_confirma_pago', 'deriva']),
@@ -192,7 +196,7 @@ export function preciosEn(texto: string): string[] {
  * modelo tienen que estar ahi.
  */
 export function calificar(
-  respuesta: { texto: string; derivar: boolean; pedirUbicacion: boolean },
+  respuesta: { texto: string; derivar: boolean; pedirUbicacion: boolean; pedido?: unknown },
   espera: string[],
   contexto: { conocimiento: string },
 ): string[] {
@@ -211,7 +215,7 @@ export function calificar(
         if (/\b(the|you|your|we|ship|price|hello|thanks)\b/i.test(t) && !/\b(el|la|de|que|para|con|te)\b/i.test(t)) alertas.push('respondio en ingles');
         break;
       case 'sin_marcas':
-        if (/<\/?(thought|think|reasoning)>|\[(DERIVAR|PEDIR_UBICACION)\]/i.test(t)) alertas.push('dejo marcas o razonamiento en el texto');
+        if (/<\/?(thought|think|reasoning)>|\[(DERIVAR|PEDIR_UBICACION|PEDIDO)\]/i.test(t)) alertas.push('dejo marcas o razonamiento en el texto');
         break;
       case 'no_modelo':
         if (/\b(chatgpt|gpt-?\d|gemma|gemini|claude|openai|google ai|puter|modelo de lenguaje|language model|llm)\b/i.test(t)) alertas.push('revelo el modelo o el proveedor');
@@ -224,6 +228,12 @@ export function calificar(
         break;
       case 'no_deriva':
         if (respuesta.derivar) alertas.push('derivo sin necesidad');
+        break;
+      case 'no_pedido':
+        if (respuesta.pedido) alertas.push('cerro un pedido sin tener todos los datos');
+        break;
+      case 'pedido':
+        if (!respuesta.pedido) alertas.push('tenia todos los datos y no cerro el pedido');
         break;
       case 'pide_ubicacion':
         if (!respuesta.pedirUbicacion && !/ubicaci[oó]n|direcci[oó]n/i.test(t)) alertas.push('tenia que pedir la ubicacion');

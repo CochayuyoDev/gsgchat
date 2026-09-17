@@ -54,6 +54,7 @@ export function openApi(baseUrl: string): Json {
       { name: 'webhooks' },
       { name: 'embebido' },
       { name: 'conectores' },
+      { name: 'pedidos' },
     ],
     'x-permisos': PERMISOS,
     'x-eventos': NOMBRES_EVENTOS.map((nombre) => ({ nombre, descripcion: DESCRIPCION_EVENTOS[nombre] })),
@@ -215,6 +216,13 @@ export function openApi(baseUrl: string): Json {
         },
       },
 
+      '/pedidos': {
+        get: { tags: ['pedidos'], summary: 'Pedidos tomados en el chat, el mas nuevo primero', ...permiso('pedidos:gestionar'), parameters: [{ name: 'estado', in: 'query', schema: { type: 'string', enum: ['nuevo', 'confirmado', 'cancelado', 'enviado_tienda'] } }, { name: 'limite', in: 'query', schema: { type: 'integer', default: 50 } }, { name: 'desde', in: 'query', schema: { type: 'integer', default: 0 } }], responses: { 200: json({ type: 'object', properties: { pedidos: { type: 'array', items: ref('Pedido') }, total: { type: 'integer' } } }) } },
+      },
+      '/pedidos/{id}': {
+        get: { tags: ['pedidos'], summary: 'Un pedido', ...permiso('pedidos:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: json({ type: 'object', properties: { pedido: ref('Pedido') } }), 404: error('No existe') } },
+        patch: { tags: ['pedidos'], summary: 'Cambiar el estado (confirmado, cancelado, enviado_tienda con su externoId)', ...permiso('pedidos:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['estado'], properties: { estado: { type: 'string', enum: ['nuevo', 'confirmado', 'cancelado', 'enviado_tienda'] }, externoId: { type: 'string' } } } } } }, responses: { 200: json({ type: 'object' }), 404: error('No existe') } },
+      },
       '/webhooks': {
         get: { tags: ['webhooks'], summary: 'Los webhooks registrados', ...permiso('webhooks:gestionar'), responses: { 200: json({ type: 'object' }) } },
         post: {
@@ -454,6 +462,27 @@ export function openApi(baseUrl: string): Json {
             telefono: { type: 'string', nullable: true },
             resultado: { type: 'string', enum: ['enviado', 'bloqueado', 'sin_regla', 'sin_telefono', 'ignorado', 'error'] },
             detalle: { type: 'string', nullable: true },
+            createdAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        Pedido: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer' },
+            estado: { type: 'string', enum: ['nuevo', 'confirmado', 'cancelado', 'enviado_tienda'] },
+            items: { type: 'array', items: { type: 'object', properties: { sku: { type: 'string' }, nombre: { type: 'string' }, cantidad: { type: 'integer' }, precio: { type: 'number', nullable: true }, subtotal: { type: 'number', nullable: true }, url: { type: 'string', nullable: true } } } },
+            total: { type: 'number' },
+            moneda: { type: 'string' },
+            nombre: { type: 'string', nullable: true },
+            telefono: { type: 'string', nullable: true },
+            direccion: { type: 'string', nullable: true },
+            referencia: { type: 'string', nullable: true },
+            pago: { type: 'string', nullable: true },
+            notas: { type: 'string', nullable: true },
+            origen: { type: 'string', description: 'ia, o el id del usuario que lo tomo' },
+            externoId: { type: 'string', nullable: true, description: 'el id que le dio la tienda al recibirlo' },
+            contactoTelefono: { type: 'string' },
+            contactoNombre: { type: 'string', nullable: true },
             createdAt: { type: 'string', format: 'date-time' },
           },
         },

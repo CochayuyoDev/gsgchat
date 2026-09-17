@@ -36,6 +36,7 @@ import { registerEmbedRoutes } from './embed/routes.js';
 import { registerConectoresRoutes } from './conectores/routes.js';
 import { registerWebVisitantesRoutes } from './web-visitantes/routes.js';
 import type { ServicioIA } from './ia/servicio.js';
+import type { ServicioPlan } from './plan/servicio.js';
 import { registerIaRoutes } from './ia/routes.js';
 
 export interface ServerDeps {
@@ -63,6 +64,8 @@ export interface ServerDeps {
   bus?: Bus;
   /** El asistente de IA de la tienda. Ver src/ia. */
   ia?: ServicioIA;
+  /** El plan de la tienda en el SaaS. Ver src/plan. */
+  plan?: ServicioPlan;
   /** Reabrir la sesion local (Baileys) al arrancar si hay vinculacion guardada. */
   autoConectarLocal?: boolean;
 }
@@ -181,6 +184,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ajustes,
     stickers,
     ia,
+    plan: deps.plan,
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.

@@ -30,6 +30,21 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     return { ok: true, estado };
   });
 
+  /** Si la URL del catalogo responde: cuantos productos y un ejemplo. */
+  app.post('/admin/ia/catalogo/probar', async (request) => {
+    const body = z.object({ catalogoUrl: z.string().trim().max(500).optional(), catalogoFormato: z.enum(['auto', 'elysian', 'simple', 'woocommerce']).optional() }).parse(request.body ?? {});
+    // Se prueba lo que hay en pantalla, sin guardarlo todavia.
+    if (body.catalogoUrl !== undefined) {
+      const { crearCatalogoTienda } = await import('../catalogo/tienda.js');
+      if (!body.catalogoUrl) return { ok: false, total: 0, detalle: 'sin URL' };
+      const cat = crearCatalogoTienda({ url: body.catalogoUrl, formato: body.catalogoFormato ?? 'auto' });
+      const r = await cat.precargar();
+      const primero = (await cat.productosTienda().catch(() => []))[0];
+      return { ...r, ejemplo: primero ? `${primero.name}: ${primero.price ?? 'sin precio'} (stock ${primero.stock})${primero.url ? ' · ' + primero.url : ''}` : null };
+    }
+    return ia.probarCatalogo();
+  });
+
   /** El banco de escenarios, para la pantalla: grupos y casos. */
   app.get('/admin/ia/escenarios', async () => ({ grupos: GRUPOS, escenarios: ESCENARIOS.map((e) => ({ clave: e.clave, grupo: e.grupo, mensajes: e.mensajes, espera: e.espera })) }));
 

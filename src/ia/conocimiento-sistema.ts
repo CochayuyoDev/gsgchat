@@ -23,7 +23,13 @@ import { todosLosModulos } from '../web/shell.js';
 export const ACCIONES_IA = {
   DERIVAR: '[DERIVAR]',
   PEDIR_UBICACION: '[PEDIR_UBICACION]',
+  PEDIDO: '[PEDIDO]',
 } as const;
+
+/** Como se toma un pedido en el chat; va en el prompt solo cuando hay catalogo. */
+export const COMO_TOMAR_PEDIDO = `Puedes TOMAR PEDIDOS. Cuando el cliente quiera comprar, consigue en la conversación (sin interrogar: una o dos cosas por mensaje) qué producto y variante (del catálogo), cuántos, su nombre, la dirección de entrega (o recojo en tienda) y cómo pagará (solo los medios que el negocio acepta). Cuando lo tengas TODO, responde con un resumen corto pidiendo que lo confirme y termina el mensaje con la marca ${ACCIONES_IA.PEDIDO} seguida de un JSON en una sola línea con esta forma exacta:
+${ACCIONES_IA.PEDIDO}{"items":[{"sku":"EL-SKU-DEL-CATALOGO","nombre":"nombre del producto","cantidad":1}],"nombre":"nombre del cliente","direccion":"dirección de entrega o 'recojo en tienda'","pago":"yape","notas":""}
+Reglas del pedido: usa el SKU tal como aparece entre corchetes en el catálogo; no inventes productos ni precios (el total lo calcula el sistema con el catálogo); no confirmes pagos; después de la marca no escribas nada más. Si falta algún dato, sigue preguntando y NO pongas la marca.`;
 
 export const SISTEMA_PARA_CLIENTES = `Cómo funciona el sistema por el que hablas (para que no prometas lo que no puede hacer):
 - Hablas dentro de WhatsApp. El cliente te ve como el WhatsApp del negocio; no menciones que eres "una IA de un sistema" salvo que te lo pregunten: entonces di que eres el asistente automático del negocio y que puede pedir hablar con una persona.
@@ -57,7 +63,10 @@ CHATS (/chat)
 Lista de conversaciones a la izquierda, hilo a la derecha. Se escribe y se manda; se puede mandar un pin, pedir la ubicación con el botón, mandar stickers y respuestas rápidas (/atajo). Con la API de Meta, pasadas 24 h desde el último mensaje del cliente solo se puede mandar una plantilla aprobada y la pantalla lo dice. Botón para parar el bot en ESE chat ("de este me encargo yo"): desde ahí ni el asistente ni las reglas contestan hasta que se suelte. Botón para cerrar y respaldar una conversación (queda en un fichero, se puede restaurar).
 
 MI ASISTENTE IA (/panel#ia)
-Contesta solo el texto libre de los clientes con lo que la tienda escribió (productos, precios, envíos, cambios, pagos, horario) y cómo debe hablar. Si el cliente pide una persona (asesor, reclamo...) o el modelo no sabe, se despide, se calla en ese chat y avisa por WhatsApp al supervisor (número en Configuración → Avisos). Puede pedirle la ubicación al cliente con el botón. Si Stoky está conectado ve precio y stock reales. Fotos y audios: pide que lo escriban. BAJA/ALTA, ubicaciones y reparto siguen funcionando aparte. Si el modelo falla, el cliente recibe "en un momento te atiende una persona" y se avisa. Solo un administrador lo configura; un operador puede probarlo.
+Contesta solo el texto libre de los clientes con lo que la tienda escribió (productos, precios, envíos, cambios, pagos, horario) y cómo debe hablar. Si el cliente pide una persona (asesor, reclamo...) o el modelo no sabe, se despide, se calla en ese chat y avisa por WhatsApp al supervisor (número en Configuración → Avisos). Puede pedirle la ubicación al cliente con el botón. Si Stoky está conectado ve precio y stock reales. Con "Catálogo de la tienda" (la URL de productos de la web: la API de la tienda, WooCommerce o una lista JSON simple) ve nombre, precio, stock y enlace de cada producto real y puede mandar el enlace; hay botón "Probar" que dice cuántos productos lee. Con catálogo, además TOMA PEDIDOS: pide producto, cantidad, nombre, dirección y medio de pago, resume y lo registra; el total lo calcula el sistema con los precios del catálogo, nunca el modelo. Fotos y audios: pide que lo escriban. BAJA/ALTA, ubicaciones y reparto siguen funcionando aparte. Si el modelo falla, el cliente recibe "en un momento te atiende una persona" y se avisa. Solo un administrador lo configura; un operador puede probarlo.
+
+PEDIDOS DEL CHAT (/panel#pedidos)
+Los pedidos que el asistente tomó en la conversación: cliente, líneas con precio del catálogo, total, dirección, medio de pago y estado (nuevo → confirmado / enviado a la tienda / cancelado). Una persona los revisa y confirma; la campana avisa de los nuevos. La tienda se entera por el webhook "pedido.creado" (o los lee por la API /api/v1/pedidos con el permiso pedidos:gestionar) y puede marcarlos "enviado a la tienda" con su número de pedido. El sistema NO cobra ni confirma pagos.
 
 CONECTAR MI WEB Y TIENDA (/panel#integraciones)
 - Claves de API: para que otro programa (Stoky, un script) use la API pública /api/v1 con los permisos marcados. Se ve una sola vez.

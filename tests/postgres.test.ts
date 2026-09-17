@@ -692,3 +692,31 @@ describe('fichas de preventa sobre Postgres', () => {
     expect(otra.ultimasOpciones).toBeNull();
   });
 });
+
+describe('pedidos del chat sobre Postgres', () => {
+  it('alta con items en jsonb, lista con el contacto, cambio de estado y conteo', async () => {
+    const c = await repos.contacts.upsertFromInbound('51966666666', 'Compradora');
+    const items = [{ sku: 'EFR-S108D-2AV', nombre: 'Casio Edifice azul', cantidad: 2, precio: 749, subtotal: 1498, url: 'https://elysian.pe/producto/efr-s108d-2av' }];
+    const p = await repos.pedidos.crear({ contactId: c.id, items, total: 1498, moneda: 'PEN', nombre: 'Maria', telefono: c.phone, direccion: 'Av. Larco 123', pago: 'yape', origen: 'ia' });
+    expect(p).toMatchObject({ estado: 'nuevo', items, total: 1498, moneda: 'PEN', nombre: 'Maria', externoId: null });
+    expect(p.createdAt).toBeInstanceOf(Date);
+
+    const visto = await repos.pedidos.obtener(p.id);
+    expect(visto).toMatchObject({ id: p.id, contactoTelefono: '51966666666', contactoNombre: 'Compradora', items });
+    expect(await repos.pedidos.obtener(999999)).toBeNull();
+
+    const lista = await repos.pedidos.listar({ limit: 10, offset: 0 });
+    expect(lista.total).toBeGreaterThanOrEqual(1);
+    expect(lista.items[0]).toMatchObject({ id: p.id, contactoTelefono: '51966666666' });
+    expect((await repos.pedidos.listar({ estado: 'cancelado', limit: 10, offset: 0 })).items.find((x) => x.id === p.id)).toBeUndefined();
+    expect((await repos.pedidos.porContacto(c.id, 5)).map((x) => x.id)).toEqual([p.id]);
+
+    const cambiado = await repos.pedidos.cambiarEstado(p.id, 'enviado_tienda', 'EL-1001');
+    expect(cambiado).toMatchObject({ estado: 'enviado_tienda', externoId: 'EL-1001' });
+    expect(cambiado!.updatedAt.getTime()).toBeGreaterThanOrEqual(p.updatedAt.getTime());
+    // Sin externoId nuevo se conserva el anterior.
+    expect((await repos.pedidos.cambiarEstado(p.id, 'confirmado'))?.externoId).toBe('EL-1001');
+    expect(await repos.pedidos.cambiarEstado(999999, 'cancelado')).toBeNull();
+    expect((await repos.pedidos.contarPorEstado()).confirmado).toBeGreaterThanOrEqual(1);
+  });
+});

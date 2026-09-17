@@ -23,6 +23,7 @@ import { mediaDirectory } from './whatsapp/local/media.js';
 import { crearBus } from './eventos/bus.js';
 import { observarRepos } from './eventos/observar.js';
 import { crearServicioIA } from './ia/servicio.js';
+import { crearServicioPlan } from './plan/servicio.js';
 
 const runtime = await createRuntime({ migrate: true });
 const { config, settings, wa } = runtime;
@@ -78,6 +79,10 @@ const sender = createSender({
 // la despedida). Los ficheros van a la carpeta de medios.
 const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mediaDirectory(), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
 
+// El plan de esta tienda en el SaaS (vencimiento, topes). Sin PLAN_URL, libre. Ver src/plan.
+const plan = await crearServicioPlan({ settingsRepo: runtime.settingsRepo, url: config.PLAN_URL, token: config.PLAN_TOKEN, log: (m, d) => console.warn(m, d ?? '') });
+const pararPlan = plan.arrancar();
+
 // El asistente de IA de la tienda: contesta con lo que la tienda escribio
 // en "Mi asistente IA" y deriva a una persona cuando no puede. Ver src/ia.
 const ia = await crearServicioIA({
@@ -89,6 +94,8 @@ const ia = await crearServicioIA({
   nombreNegocio: () => ajustes.nombreNegocio(),
   supervisor: () => politica().avisarA,
   conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+  bus,
+  plan,
   log: (m, d) => console.warn(m, d ?? ''),
 });
 
@@ -122,7 +129,7 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, mediaDir: mediaDirectory(), autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, plan, mediaDir: mediaDirectory(), autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })
