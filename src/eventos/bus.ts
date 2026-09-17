@@ -55,6 +55,12 @@ export interface Eventos {
   };
   /** El monitor cambio el semaforo del numero. */
   'salud.nivel': { de: string | null; a: string; puntos: number; motivos: string[]; fecha: string };
+  /** Se tomo un pedido en el chat (el asistente o una persona). */
+  'pedido.creado': {
+    pedido: { id: number; estado: string; items: Array<{ sku: string; nombre: string; cantidad: number; precio: number | null; subtotal: number | null; url?: string | null }>; total: number; moneda: string; nombre: string | null; telefono: string | null; direccion: string | null; referencia: string | null; pago: string | null; notas: string | null; origen: string };
+    contacto: ContactoEvento;
+    fecha: string;
+  };
 }
 
 export type NombreEvento = keyof Eventos;
@@ -68,6 +74,7 @@ export const NOMBRES_EVENTOS: NombreEvento[] = [
   'contacto.baja',
   'reparto.solicitud.actualizada',
   'salud.nivel',
+  'pedido.creado',
 ];
 
 /** Que significa cada uno, para el panel y la documentacion. */
@@ -80,6 +87,7 @@ export const DESCRIPCION_EVENTOS: Record<NombreEvento, string> = {
   'contacto.baja': 'Un contacto pidio no recibir mas mensajes.',
   'reparto.solicitud.actualizada': 'Una solicitud de ubicacion del reparto cambio de estado o de incidencia.',
   'salud.nivel': 'El semaforo del numero cambio (verde, amarillo, naranja, rojo).',
+  'pedido.creado': 'Se tomo un pedido en el chat, con sus lineas, total y datos de entrega.',
 };
 
 export function esNombreEvento(valor: string): valor is NombreEvento {

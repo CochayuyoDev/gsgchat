@@ -65,6 +65,8 @@ vinculacion de WhatsApp, adjuntos, respaldos) sobreviven.
   `docker compose -f .../compose.yml up -d` para aplicarlo.
 - `compose.yml`: la app y su Redis, colgados de la red `wa-saas`.
 - `instancia.json`: lo basico para el maestro.
+- `plan.json`: su plan, hasta cuando esta pagado, los pagos apuntados y el
+  token con el que la instancia pregunta por su plan (ver *Planes y cobro*).
 
 `saas/caddy/instancias/<slug>.caddy`: su subdominio. Se recarga solo.
 
@@ -80,6 +82,42 @@ Igual que con una instalacion suelta, pero contra su subdominio:
 
 Una clave de la tienda 1 no abre nada de la tienda 2: son servidores
 distintos.
+
+## Planes y cobro
+
+Los planes viven en `saas/planes.ts` (precios y limites se cambian ahi):
+
+| Plan | Precio | IA | Campañas | Conectores | Usuarios |
+|---|---|---|---|---|---|
+| Prueba | gratis, 14 dias | 300 respuestas/mes | si | si | 2 |
+| Basico | S/ 49/mes | 2.000 respuestas/mes | no | si | 3 |
+| Pro | S/ 149/mes | sin limite | si | si | sin limite |
+
+Como funciona:
+
+1. Cada tienda nace en **Prueba** con 14 dias. Su `.env` lleva `PLAN_URL`
+   (el maestro, `http://host.docker.internal:3900/api/plan/<slug>`) y
+   `PLAN_TOKEN`. Con eso la instancia pregunta por su plan al arrancar y
+   cada 15 minutos; guarda la respuesta, asi que un reinicio o un maestro
+   caido no la dejan a ciegas ni la paran.
+2. **Cobras tu**, como quieras. En el maestro, en la tienda → *Apuntar
+   pago*: plan, meses, monto cobrado (o el de lista) y una nota. El
+   vencimiento corre desde lo que quede (si aun no vencio) o desde hoy.
+   Tambien se puede cambiar el vencimiento a mano (una cortesia) y escribir
+   que ve la tienda para renovar ("Escríbenos al ...").
+3. Una semana antes de vencer, la tienda ve una franja naranja en todas sus
+   pantallas. **Vencido**: franja roja, el asistente IA calla y no se crean
+   campañas; los chats, el reparto y todo lo demas siguen, para que la tienda
+   no pierda clientes mientras renueva. En su *Configuración* ve su plan,
+   cuanto lleva de IA este mes y hasta cuando esta pagado.
+4. El tope de respuestas de IA se cuenta por mes en la propia instancia; al
+   llegar, la IA se para hasta el mes siguiente y el panel lo dice.
+
+El maestro ensena el cobro mensual con los planes vigentes. La API (con el
+usuario del maestro): `POST /api/instancias/:slug/pagos {plan, meses,
+monto?, nota?}`, `PATCH /api/instancias/:slug/plan {plan?, vencimiento?,
+contacto?}`, `GET /api/instancias/:slug/pagos`. Una instalacion suelta (sin
+`PLAN_URL`) no tiene plan: todo permitido.
 
 ## Recursos
 

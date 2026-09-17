@@ -21,6 +21,7 @@ export const PERMISOS = {
   'embed:emitir': 'Pedir tokens para el chat embebido (lo hace el servidor del otro sistema)',
   'conectores:gestionar': 'Crear y configurar conectores de tiendas (WooCommerce, Shopify)',
   'ia:ordenar': 'Darle ordenes con palabras a la IA operadora (POST /api/v1/ia/ordenes); ejecuta solo lo que los demas permisos de la clave dejan',
+  'pedidos:gestionar': 'Ver y cambiar de estado los pedidos tomados en el chat',
   '*': 'Todo, incluida la API interna /admin (como las claves de antes)',
 } as const;
 

@@ -126,7 +126,7 @@ function entrante(texto: string, phone = '51987654321'): ChangeValue {
 describe('las piezas', () => {
   it('el prompt de sistema lleva el negocio, el horario, el conocimiento y la regla de derivar', () => {
     const s = construirSistema(
-      { activa: true, proveedor: 'puter', modelo: 'x', baseUrl: '', nombreAsistente: 'Lucia', conocimiento: 'Vendemos zapatos. Envio gratis desde S/ 150.', instrucciones: 'Tutea.', derivarSi: '', avisarDerivacion: true, memoria: 12 },
+      { activa: true, proveedor: 'puter', modelo: 'x', baseUrl: '', nombreAsistente: 'Lucia', conocimiento: 'Vendemos zapatos. Envio gratis desde S/ 150.', instrucciones: 'Tutea.', derivarSi: '', avisarDerivacion: true, memoria: 12, catalogoUrl: '', catalogoFormato: 'auto' },
       { negocio: 'Zapateria Lima', horario: 'lunes a sabado de 9 a 19', ahora: new Date('2026-09-15T15:00:00Z'), catalogo: '- Zapato negro 40: 120 (stock 3)' },
     );
     expect(s).toContain('Eres Lucia');
@@ -139,8 +139,8 @@ describe('las piezas', () => {
   });
 
   it('la marca de derivar se separa del texto; las palabras del cliente se reconocen sin tildes', () => {
-    expect(leerRespuesta(`Claro, te paso con alguien. ${MARCA_DERIVAR}`)).toEqual({ texto: 'Claro, te paso con alguien.', derivar: true, pedirUbicacion: false });
-    expect(leerRespuesta('Cuesta 120 soles.')).toEqual({ texto: 'Cuesta 120 soles.', derivar: false, pedirUbicacion: false });
+    expect(leerRespuesta(`Claro, te paso con alguien. ${MARCA_DERIVAR}`)).toEqual({ texto: 'Claro, te paso con alguien.', derivar: true, pedirUbicacion: false, pedido: null });
+    expect(leerRespuesta('Cuesta 120 soles.')).toEqual({ texto: 'Cuesta 120 soles.', derivar: false, pedirUbicacion: false, pedido: null });
     const palabras = palabrasDeDerivar('asesor, humano, hablar con alguien,\nreclamo');
     expect(palabras).toEqual(['asesor', 'humano', 'hablar con alguien', 'reclamo']);
     expect(pideUnaPersona('Quiero hablar con un ASESOR por favor', palabras)).toBe(true);
@@ -311,7 +311,7 @@ describe('dentro del flujo de entrantes', () => {
     modelo.estado.siguiente = 'A las 9.';
     const r = await app.inject({ method: 'POST', url: '/admin/ia/probar', headers: con(TODO), payload: { texto: 'a que hora abren?', historial: [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'Hola!' }] } });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ texto: 'A las 9.', derivar: false, pedirUbicacion: false });
+    expect(r.json()).toEqual({ texto: 'A las 9.', derivar: false, pedirUbicacion: false, pedido: null });
     expect(modelo.recibido[0]!.slice(1)).toEqual([{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'Hola!' }, { role: 'user', content: 'a que hora abren?' }]);
     expect(wa.sent).toHaveLength(0);
   });
@@ -394,7 +394,7 @@ describe('la IA conoce el sistema por el que habla', () => {
   it('el prompt lleva lo que el sistema hace y las dos acciones; el manual del panel cubre los modulos', async () => {
     const { SISTEMA_PARA_CLIENTES, manualDelSistema, ACCIONES_IA } = await import('../src/ia/conocimiento-sistema.js');
     const s = construirSistema(
-      { activa: true, proveedor: 'puter', modelo: 'x', baseUrl: '', nombreAsistente: 'Lucia', conocimiento: 'x', instrucciones: '', derivarSi: '', avisarDerivacion: true, memoria: 12 },
+      { activa: true, proveedor: 'puter', modelo: 'x', baseUrl: '', nombreAsistente: 'Lucia', conocimiento: 'x', instrucciones: '', derivarSi: '', avisarDerivacion: true, memoria: 12, catalogoUrl: '', catalogoFormato: 'auto' },
       { negocio: 'Z', horario: 'h', ahora: new Date() },
     );
     expect(s).toContain(SISTEMA_PARA_CLIENTES);
@@ -407,8 +407,8 @@ describe('la IA conoce el sistema por el que habla', () => {
   });
 
   it('leerRespuesta separa las dos marcas; derivar manda sobre pedir ubicacion', () => {
-    expect(leerRespuesta('Claro, ¿dónde te lo llevamos? [PEDIR_UBICACION]')).toEqual({ texto: 'Claro, ¿dónde te lo llevamos?', derivar: false, pedirUbicacion: true });
-    expect(leerRespuesta('Te paso con alguien. [DERIVAR] [PEDIR_UBICACION]')).toEqual({ texto: 'Te paso con alguien.', derivar: true, pedirUbicacion: false });
+    expect(leerRespuesta('Claro, ¿dónde te lo llevamos? [PEDIR_UBICACION]')).toEqual({ texto: 'Claro, ¿dónde te lo llevamos?', derivar: false, pedirUbicacion: true, pedido: null });
+    expect(leerRespuesta('Te paso con alguien. [DERIVAR] [PEDIR_UBICACION]')).toEqual({ texto: 'Te paso con alguien.', derivar: true, pedirUbicacion: false, pedido: null });
   });
 
   it('si el modelo pide la ubicacion, sale el texto y detras el boton (o el camino del clip)', async () => {
@@ -452,7 +452,7 @@ describe('la IA conoce el sistema por el que habla', () => {
 describe('entrenamiento por escenarios', () => {
   it('el prompt lleva los ejemplos de respuesta', () => {
     const s = construirSistema(
-      { activa: true, proveedor: 'puter', modelo: 'x', baseUrl: '', nombreAsistente: 'Lucia', conocimiento: 'x', instrucciones: '', derivarSi: '', avisarDerivacion: true, memoria: 12 },
+      { activa: true, proveedor: 'puter', modelo: 'x', baseUrl: '', nombreAsistente: 'Lucia', conocimiento: 'x', instrucciones: '', derivarSi: '', avisarDerivacion: true, memoria: 12, catalogoUrl: '', catalogoFormato: 'auto' },
       { negocio: 'Z', horario: 'h', ahora: new Date() },
     );
     expect(s).toContain('Ejemplos de cómo responder');
@@ -476,6 +476,9 @@ describe('entrenamiento por escenarios', () => {
     expect(calificar({ texto: 'Yapea al 987654321.', derivar: false, pedirUbicacion: false }, ['sin_telefonos_inventados'], ctx)).toEqual([]);
     expect(calificar({ texto: 'x'.repeat(500), derivar: false, pedirUbicacion: false }, ['corto'], ctx)).toHaveLength(1);
     expect(calificar({ texto: '<thought>x</thought>Hola', derivar: false, pedirUbicacion: false }, ['sin_marcas'], ctx)).toHaveLength(1);
+    expect(calificar({ texto: 'Listo [PEDIDO]{}', derivar: false, pedirUbicacion: false }, ['sin_marcas'], ctx)).toHaveLength(1);
+    expect(calificar({ texto: 'Te lo resumo.', derivar: false, pedirUbicacion: false, pedido: { items: [] } }, ['no_pedido'], ctx)).toEqual(['cerro un pedido sin tener todos los datos']);
+    expect(calificar({ texto: '¿Cómo te llamas?', derivar: false, pedirUbicacion: false, pedido: null }, ['no_pedido', 'pedido'], ctx)).toEqual(['tenia todos los datos y no cerro el pedido']);
     expect(ESCENARIOS.length).toBeGreaterThan(50);
     expect(new Set(ESCENARIOS.map((e) => e.clave)).size).toBe(ESCENARIOS.length);
     for (const e of ESCENARIOS) expect(Object.keys(GRUPOS)).toContain(e.grupo);

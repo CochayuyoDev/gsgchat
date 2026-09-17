@@ -38,6 +38,7 @@ import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
 import { createFakeWebhooks, type FakeWebhooks } from './fakes-webhooks.js';
 import { createFakeConectores, type FakeConectores } from './fakes-conectores.js';
 import { createFakeEnvioAutomatico, type FakeEnvioAutomatico } from './fakes-envio-automatico.js';
+import { createFakePedidos, type FakePedidos } from './fakes-pedidos.js';
 import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
@@ -56,6 +57,7 @@ export interface FakeRepos extends Repos {
   webhooks: FakeWebhooks;
   envioAutomatico: FakeEnvioAutomatico;
   conectores: FakeConectores;
+  pedidos: FakePedidos;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -316,6 +318,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     webhooks: createFakeWebhooks(),
     conectores: createFakeConectores(),
     envioAutomatico: createFakeEnvioAutomatico(),
+    pedidos: createFakePedidos(() => [...contactsByPhone.values()]),
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
     archives: createFakeArchives(),

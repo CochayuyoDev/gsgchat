@@ -20,6 +20,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { estadoPlan, guardarPlan, leerPlan, planInicial, type EstadoPlan, type PlanInstancia } from './planes.js';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -104,6 +105,8 @@ export const contenedorDe = (slug: string) => `wa-${slug}`;
 export const baseDe = (slug: string) => `wa_${slug.replace(/-/g, '_')}`;
 export const dominioDe = (slug: string, cfg: ConfigSaas) => `${slug}.${cfg.dominioBase}`;
 export const urlDe = (slug: string, cfg: ConfigSaas) => `${esLocal(cfg.dominioBase) ? 'http' : 'https'}://${dominioDe(slug, cfg)}`;
+/** Donde pregunta la instancia por su plan: el maestro corre en el host. */
+export const urlPlanDe = (slug: string, cfg: ConfigSaas) => `http://host.docker.internal:${cfg.maestroPuerto}/api/plan/${slug}`;
 
 // ------------------------------------------------------------ los ficheros
 
@@ -115,6 +118,8 @@ export interface OpcionesAlta {
   pais?: ConfigSaas['pais'];
   /** Variables extra para el .env de esa instancia (GOOGLE_MAPS_API_KEY, STOKY_URL...). */
   extra?: Record<string, string>;
+  /** El plan con el que nace (por defecto la prueba de 14 dias). */
+  plan?: PlanInstancia;
 }
 
 export interface Instancia {
@@ -138,6 +143,7 @@ export function generarEnv(slug: string, cfg: ConfigSaas, opts: OpcionesAlta = {
     RUTAS_PAIS: opts.pais ?? cfg.pais,
     TIMEZONE: cfg.zonaHoraria,
     GEO_BBOX: cfg.geoBbox,
+    ...(opts.plan ? { PLAN_URL: urlPlanDe(slug, cfg), PLAN_TOKEN: opts.plan.token } : {}),
     ...(opts.extra ?? {}),
   };
   return (
@@ -166,6 +172,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     networks: [${RED}]
     restart: unless-stopped
   redis:
@@ -305,7 +313,9 @@ export async function altaInstancia(slug: string, opts: OpcionesAlta = {}, deps:
 
   // 2. Sus ficheros.
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, '.env'), generarEnv(slug, cfg, opts));
+  const plan = opts.plan ?? planInicial(deps.ahora?.() ?? new Date());
+  guardarPlan(dir, plan);
+  writeFileSync(path.join(dir, '.env'), generarEnv(slug, cfg, { ...opts, plan }));
   writeFileSync(path.join(dir, 'compose.yml'), generarCompose(slug));
   const instancia: Instancia = {
     slug,
@@ -328,6 +338,35 @@ export async function altaInstancia(slug: string, opts: OpcionesAlta = {}, deps:
   await recargarCaddy(ejecutar);
 
   return instancia;
+}
+
+/**
+ * Da plan a una instancia anterior a los planes: escribe su plan.json, le
+ * pone PLAN_URL y PLAN_TOKEN en el .env y recrea el contenedor para que lo
+ * lea. Si ya tenia plan, no toca nada.
+ */
+export async function iniciarPlan(slug: string, deps: DepsSaas = {}): Promise<PlanInstancia> {
+  const mal = slugValido(slug);
+  if (mal) throw new Error(mal);
+  const cfg = deps.cfg ?? leerConfigSaas();
+  const base = deps.base ?? SAAS_DIR;
+  const ejecutar = deps.ejecutar ?? ejecutarReal;
+  const dir = dirInstancia(slug, base);
+  if (!existsSync(path.join(dir, 'instancia.json'))) throw new Error(`La instancia "${slug}" no existe.`);
+  const ya = leerPlan(dir);
+  if (ya) return ya;
+  const plan = planInicial(deps.ahora?.() ?? new Date());
+  guardarPlan(dir, plan);
+  const envPath = path.join(dir, '.env');
+  const env = readFileSync(envPath, 'utf8')
+    .split(/\r?\n/)
+    .filter((l) => !/^PLAN_(URL|TOKEN)=/.test(l))
+    .join('\n')
+    .replace(/\n*$/, '\n');
+  writeFileSync(envPath, `${env}PLAN_URL=${urlPlanDe(slug, cfg)}\nPLAN_TOKEN=${plan.token}\n`);
+  deps.log?.(`${slug}: plan de prueba creado; recreando el contenedor para que lo lea...`);
+  await ejecutar('docker', ['compose', '-f', path.join(dir, 'compose.yml'), 'up', '-d', '--wait'], { cwd: dir });
+  return plan;
 }
 
 export async function bajaInstancia(slug: string, opciones: { borrarDatos?: boolean } = {}, deps: DepsSaas = {}): Promise<void> {
@@ -369,19 +408,23 @@ export interface EstadoInstancia extends Instancia {
   viva: boolean;
   configurado: boolean | null;
   detalle: string | null;
+  /** Su plan de hoy (null si la instancia es anterior a los planes). */
+  plan: EstadoPlan | null;
 }
 
 /** Pregunta a cada instancia por su /health, a traves de Caddy. */
-export async function estadoInstancias(deps: { base?: string; fetchImpl?: typeof fetch; timeoutMs?: number } = {}): Promise<EstadoInstancia[]> {
+export async function estadoInstancias(deps: { base?: string; fetchImpl?: typeof fetch; timeoutMs?: number; ahora?: () => Date } = {}): Promise<EstadoInstancia[]> {
   const doFetch = deps.fetchImpl ?? fetch;
   return Promise.all(
     listarInstancias(deps.base).map(async (i) => {
+      const p = leerPlan(dirInstancia(i.slug, deps.base));
+      const plan = p ? estadoPlan(p, deps.ahora?.() ?? new Date()) : null;
       try {
         const r = await doFetch(`${i.url}/health`, { signal: AbortSignal.timeout(deps.timeoutMs ?? 5000) });
         const j = (await r.json().catch(() => ({}))) as { ok?: boolean; configured?: boolean; connected?: boolean };
-        return { ...i, viva: r.ok && j.ok === true, configurado: (j.connected ?? j.configured) ?? null, detalle: r.ok ? null : `HTTP ${r.status}` };
+        return { ...i, viva: r.ok && j.ok === true, configurado: (j.connected ?? j.configured) ?? null, detalle: r.ok ? null : `HTTP ${r.status}`, plan };
       } catch (error) {
-        return { ...i, viva: false, configurado: null, detalle: error instanceof Error ? error.message : String(error) };
+        return { ...i, viva: false, configurado: null, detalle: error instanceof Error ? error.message : String(error), plan };
       }
     }),
   );

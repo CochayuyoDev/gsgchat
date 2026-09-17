@@ -346,7 +346,7 @@ await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
 // Los stickers de la demo van a una carpeta temporal: nada queda en el proyecto.
 const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mkdtempSync(join(tmpdir(), 'wa-demo-stickers-')), sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
 const lista = crearServicioEnvioAutomatico({ repos, opcionesReparto: opcionesDesdeConfig(config), plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, salud });
-const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista });
+const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista, bus });
 const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista });
 startMotorLista({ repos, lista, sender, opciones: opcionesDesdeConfig(config), nombreNegocio: () => ajustes.nombreNegocio(), usarPlantilla: () => false, salud, politica });
 const desconectarWebhooks = encolarEventos(bus, repos.webhooks);

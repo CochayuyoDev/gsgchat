@@ -13,6 +13,7 @@ import type { OutboundQueue } from '../outbound/queue.js';
 import { dailyCapFor } from '../outbound/throttle.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
+import type { ServicioPlan } from '../plan/servicio.js';
 import { createTrackingSession } from '../tracking/routes.js';
 import { buildTrackingUrls } from '../tracking/tokens.js';
 import type { TrackingHub } from '../tracking/realtime.js';
@@ -64,6 +65,7 @@ export interface AdminDeps {
   lista?: ServicioEnvioAutomatico;
   /** Donde se guardan los adjuntos; por defecto, .wa-media. */
   mediaDir?: string;
+  plan?: ServicioPlan;
 }
 
 const phoneSchema = z
@@ -249,6 +251,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       repos.numberState.get(phoneNumberId()),
     ]);
     const avisos: Array<{ tipo: string; nivel: 'info' | 'warn' | 'bad'; texto: string; href: string; n?: number }> = [];
+    // El plan va el primero: si esta vencido, explica por que lo demas esta parado.
+    const avisoPlan = deps.plan?.estado().aviso ?? null;
+    if (avisoPlan) avisos.push({ tipo: 'plan', nivel: avisoPlan.nivel, texto: avisoPlan.texto, href: '/panel#configuracion' });
     const configurado = settings.isConfigured();
     const conectado = configurado && (wa.conectado?.() ?? true);
     if (!configurado) avisos.push({ tipo: 'sin_configurar', nivel: 'bad', texto: 'WhatsApp sin conectar: no sale ni entra nada', href: '/setup' });
@@ -260,11 +265,17 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El numero esta en amarillo: el marketing va mas lento', href: '/panel#salud' });
     if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} conversacion${esperando === 1 ? '' : 'es'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
     if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: '/rutas', n: requierenPersona });
+    const pedidosNuevos = (await repos.pedidos.contarPorEstado().catch(() => ({}) as Record<string, number>)).nuevo ?? 0;
+    if (pedidosNuevos > 0) avisos.push({ tipo: 'pedidos', nivel: 'warn', texto: `${pedidosNuevos} pedido${pedidosNuevos === 1 ? '' : 's'} del chat espera${pedidosNuevos === 1 ? '' : 'n'} confirmación`, href: '/panel#pedidos', n: pedidosNuevos });
     // Un webhook que se apago solo es un sistema que dejo de enterarse de lo que pasa.
     const apagados = (await repos.webhooks.listar().catch(() => [])).filter((w) => !w.activo && w.motivoPausa);
     if (apagados.length) avisos.push({ tipo: 'webhooks', nivel: 'warn', texto: `${apagados.length} webhook${apagados.length === 1 ? '' : 's'} apagado${apagados.length === 1 ? '' : 's'} por fallos: ${apagados.map((w) => w.descripcion || w.url).join(', ')}`, href: '/panel#integraciones', n: apagados.length });
-    return { total: avisos.length, avisos, generadoEn: new Date() };
+    return { total: avisos.length, avisos, generadoEn: new Date(), plan: avisoPlan };
   });
+
+  /** El plan de esta tienda, para la pantalla de configuracion. */
+  app.get('/admin/plan', async () => deps.plan?.estado() ?? { origen: 'libre', plan: null, iaTurnosMes: 0, mes: '', consultadoEn: null, error: null, aviso: null });
+  app.post('/admin/plan/refrescar', async () => (deps.plan ? deps.plan.refrescar() : { origen: 'libre', plan: null, iaTurnosMes: 0, mes: '', consultadoEn: null, error: null, aviso: null }));
 
   // --- el inicio del panel: un vistazo a todo -----------------------------
 
@@ -557,6 +568,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // --- campanas: por goteo y con canario. Ver src/campanas/goteo.ts -----
   app.post('/admin/campaigns', async (request, reply) => {
     const body = campaignSchema.parse(request.body);
+    const sinPlan = deps.plan?.motivo('campanas');
+    if (sinPlan) return reply.code(402).send({ error: sinPlan });
     const resultado = await crearCampana(repos, {
       name: body.name,
       templateName: body.templateName,

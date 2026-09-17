@@ -319,6 +319,13 @@ const schema = z.object({
     .enum(['true', 'false', '1', '0'])
     .default('false')
     .transform((v) => v === 'true' || v === '1'),
+
+  /**
+   * En el SaaS: donde pregunta esta tienda por su plan (el maestro) y su
+   * token. Sin PLAN_URL no hay plan y todo esta permitido. Ver src/plan.
+   */
+  PLAN_URL: z.string().default(''),
+  PLAN_TOKEN: z.string().default(''),
 });
 
 export type RawConfig = z.infer<typeof schema>;

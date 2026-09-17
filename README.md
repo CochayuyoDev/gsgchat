@@ -996,6 +996,50 @@ una persona" y se avisa: nunca se queda sin respuesta ni ve un error.
 En el SaaS cada tienda tiene su conocimiento y su token: es por instancia.
 Codigo en `src/ia/`.
 
+### El catalogo real de la tienda
+
+En "Mi asistente IA" → *Catalogo de la tienda* se pega la URL de productos
+de la web y el asistente deja de hablar de memoria: ve nombre, precio (y
+el de oferta), stock y enlace de cada producto **de ahora mismo**, y manda
+el enlace cuando toca. Formatos que entiende solos (`src/catalogo/tienda.ts`):
+
+- **elysian**: la API de la tienda Elysian (`/api/products`, paginada, una
+  linea por variante con su SKU).
+- **woocommerce**: la Store API publica de WooCommerce
+  (`/wp-json/wc/store/v1/products`).
+- **simple**: cualquier lista JSON con `sku`, `nombre`/`name`,
+  `precio`/`price`, `stock`, `url` (lo que un script de la tienda pueda
+  publicar en cinco minutos).
+
+Se cachea cinco minutos; si la tienda deja de responder se sigue con lo
+ultimo bueno. "Probar" dice cuantos productos lee y ensena uno. Con Stoky
+conectado y sin URL, se usa Stoky. Al modelo solo se le dan los productos
+que casan con lo que pregunto el cliente (seis como mucho), asi que un
+catalogo de mil productos no cuesta tokens de mas.
+
+### Pedidos desde el chat
+
+Con catalogo, el asistente **toma pedidos**: consigue en la conversacion
+que producto y variante, cuantos, nombre, direccion (o recojo) y medio de
+pago; cuando lo tiene todo, resume y cierra con una marca interna
+(`[PEDIDO]{...}`) que el sistema comprueba contra el catalogo: los
+precios y el total los pone el sistema, nunca el modelo. Lo que no existe
+en el catalogo no entra. El cliente recibe el resumen con el total; la
+tienda:
+
+- lo ve en **Pedidos del chat** (`/panel#pedidos`): lineas, total,
+  direccion, pago, estado (nuevo → confirmado / enviado a la tienda /
+  cancelado); la campana avisa de los nuevos;
+- se entera por el webhook `pedido.creado` (con el pedido completo y el
+  contacto) y puede leerlos o cambiarles el estado por la API:
+  `GET /api/v1/pedidos`, `GET /api/v1/pedidos/:id`,
+  `PATCH /api/v1/pedidos/:id { estado, externoId }` con el permiso
+  `pedidos:gestionar` (el `externoId` es el numero de pedido de la tienda).
+
+El sistema no cobra ni confirma pagos: eso lo hace una persona o la tienda.
+El bot no se pausa al tomar el pedido: el cliente puede seguir preguntando.
+Codigo en `src/pedidos/`; tabla `pedidos_chat`.
+
 ## Modo sencillo
 
 El menu arranca en **modo sencillo**: Inicio, Chats, Mi asistente IA,
@@ -1188,7 +1232,11 @@ npm run saas:alta -- tienda1 --nombre "Zapateria Lima"
 ```
 
 `npm run saas:maestro` levanta tu panel (`maestro.wa.tuservicio.com`) para
-dar de alta y de baja desde la pantalla y ver que instancias responden.
+dar de alta y de baja desde la pantalla, ver que instancias responden y
+llevar los **planes**: cada tienda nace con 14 dias de prueba; tu cobras
+como quieras (Yape, transferencia, factura) y apuntas el pago en el
+maestro, que corre el vencimiento. Vencido, la IA y las campañas de esa
+tienda se paran (los chats siguen) y su panel lo dice arriba de todo.
 Cada proyecto se conecta a *su* tienda igual que a una instalacion suelta,
 contra su subdominio. Todo el detalle en `saas/README.md`.
 

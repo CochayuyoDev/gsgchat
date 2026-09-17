@@ -54,6 +54,7 @@ export const MENU_GRUPOS: GrupoMenu[] = [
     items: [
       { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicacion.' },
       { id: 'ia', etiqueta: 'Mi asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Lo que sabe de tu negocio y como contesta solo. Cuando no puede, te pasa la conversacion.' },
+      { id: 'pedidos', etiqueta: 'Pedidos del chat', href: '/panel#pedidos', icono: 'plantilla', descripcion: 'Lo que el asistente (o una persona) cerro en la conversacion: confirmar, cancelar o pasarlo a la tienda.' },
       { id: 'contactos', etiqueta: 'Contactos', href: '/panel#contactos', icono: 'contactos', descripcion: 'Importar, buscar y ver el consentimiento de cada numero.' },
       { id: 'envio-automatico', etiqueta: 'Envío automático', href: '/envio-automatico', icono: 'reloj', descripcion: 'Los numeros a los que el sistema escribe solo: un mensaje cada pocas horas, como una persona, hasta conseguir su ubicacion o una respuesta. Se ponen y se quitan a mano o pidiendoselo a la IA.' },
       { id: 'enviar', etiqueta: 'Enviar mensaje', href: '/panel#enviar', icono: 'enviar', descripcion: 'Un texto, un pin o una plantilla a un numero concreto.', avanzado: true },
@@ -239,6 +240,9 @@ const CSS = `
   .s-boton:hover { background: var(--s-hover); color: var(--s-text); }
   .s-boton .s-num { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; }
   .s-boton .s-num:empty { display: none; }
+  .s-plan { flex: none; padding: 9px 22px; font-size: 13.5px; font-weight: 600; color: #fff; background: #b45309; }
+  .s-plan.bad { background: #b42318; }
+  .s-plan a { color: #fff; text-decoration: underline; margin-left: 8px; }
   .s-avisos { position: relative; }
   .s-avisos-caja { display: none; position: absolute; right: 0; top: 44px; width: 340px; max-width: calc(100vw - 32px); background: var(--s-top); border: 1px solid var(--s-line); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.18); z-index: 70; overflow: hidden; }
   .s-avisos.abierto .s-avisos-caja { display: block; }
@@ -503,6 +507,8 @@ const JS = String.raw`
         ? d.avisos.map(function (a) { return '<a class="s-aviso ' + a.nivel + '" href="' + escapar(a.href) + '"><i></i><span>' + escapar(a.texto) + '</span></a>'; }).join('')
         : '<div class="s-aviso-nada">Nada pendiente. Todo al día.</div>';
       document.title = (d.total ? '(' + d.total + ') ' : '') + document.title.replace(/^\(\d+\) /, '');
+      var franja = document.getElementById('s-plan');
+      if (d.plan) { franja.className = 's-plan ' + d.plan.nivel; franja.innerHTML = escapar(d.plan.texto) + '<a href="/panel#configuracion">Ver mi plan</a>'; } else { franja.className = 's-plan hidden'; }
     }).catch(function () {});
   }
   cargarAvisos();
@@ -690,6 +696,7 @@ export function appShell(opts: ShellOpts): string {
     </div>
   </aside>
   <div class="s-main">
+    <div id="s-plan" class="s-plan hidden"></div>
     <header class="s-top">
       <button class="s-menu" id="s-menu" type="button" title="Menú">${icono('menu')}</button>
       <div class="s-titulo"><div class="s-miga" id="s-miga"></div><h1 id="s-h1">${escapeHtml(opts.titulo)}</h1><p id="s-sub">${escapeHtml(opts.subtitulo ?? '')}</p></div>

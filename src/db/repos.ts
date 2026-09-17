@@ -21,6 +21,7 @@ import { createStickersRepo, type StickersRepo } from '../stickers/stickers.js';
 import { createWebhooksRepo, type WebhooksRepo } from '../webhooks/repo.js';
 import { createConectoresRepo, type ConectoresRepo } from '../conectores/repo.js';
 import { createEnvioAutomaticoRepo, type EnvioAutomaticoRepo } from '../envio-automatico/repo.js';
+import { createPedidosRepo, type PedidosRepo } from '../pedidos/repo.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -532,6 +533,8 @@ export interface Repos {
   conectores: ConectoresRepo;
   /** La lista de numeros a los que el sistema escribe solo. Ver src/envio-automatico. */
   envioAutomatico: EnvioAutomaticoRepo;
+  /** Pedidos tomados en el chat. Ver src/pedidos. */
+  pedidos: PedidosRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1805,6 +1808,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     webhooks: createWebhooksRepo(pool),
     conectores: createConectoresRepo(pool),
     envioAutomatico: createEnvioAutomaticoRepo(pool),
+    pedidos: createPedidosRepo(pool),
   };
 }
 

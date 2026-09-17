@@ -38,6 +38,7 @@ process.on('uncaughtException', (error) => {
   console.error('[sistema] error inesperado (se sigue):', error);
 });
 
+import { crearServicioPlan } from './plan/servicio.js';
 
 const runtime = await createRuntime({ migrate: true });
 const { config, settings, wa } = runtime;
@@ -101,6 +102,9 @@ const lista = crearServicioEnvioAutomatico({
   salud,
   log: (m, d) => console.log(m, d ?? ''),
 });
+// El plan de esta tienda en el SaaS (vencimiento, topes). Sin PLAN_URL, libre. Ver src/plan.
+const plan = await crearServicioPlan({ settingsRepo: runtime.settingsRepo, url: config.PLAN_URL, token: config.PLAN_TOKEN, log: (m, d) => console.warn(m, d ?? '') });
+const pararPlan = plan.arrancar();
 
 // El asistente de IA de la tienda: contesta con lo que la tienda escribio
 // en "Mi asistente IA" y deriva a una persona cuando no puede. Ver src/ia.
@@ -114,6 +118,8 @@ const ia = await crearServicioIA({
   supervisor: () => politica().avisarA,
   conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
   lista,
+  bus,
+  plan,
   log: (m, d) => console.warn(m, d ?? ''),
 });
 
@@ -147,7 +153,7 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, lista, mediaDir: mediaDirectory(), autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, lista, plan, mediaDir: mediaDirectory(), autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })

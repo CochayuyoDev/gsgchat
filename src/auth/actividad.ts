@@ -125,6 +125,7 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['PATCH', /^\/api\/v1\/conectores\/:id$/, 'conector.cambiar'],
   ['DELETE', /^\/api\/v1\/conectores\/:id$/, 'conector.borrar'],
   ['POST', /^\/api\/v1\/conectores\/:id\/secreto$/, 'conector.secreto'],
+  ['PATCH', /^\/api\/v1\/pedidos\/:id$/, 'pedido.estado'],
 ];
 
 /** Lo que no merece una fila: mucho trafico y nada que auditar. */
@@ -216,6 +217,7 @@ export const ETIQUETAS: Record<string, string> = {
   'conector.cambiar': 'Cambio un conector de tienda',
   'conector.borrar': 'Borro un conector de tienda',
   'conector.secreto': 'Cambio el secreto de un conector',
+  'pedido.estado': 'Cambio el estado de un pedido del chat',
   otro: 'Otra accion',
 };
 

@@ -467,3 +467,19 @@ describe('automatizacion desde la API', () => {
     expect(prefs.json()).toMatchObject({ askLocationFallback: false });
   });
 });
+
+describe('los scripts de las pantallas', () => {
+  it('cada <script> del panel, el chat y el manual compila (un error de sintaxis deja la pantalla muerta)', async () => {
+    const vm = await import('node:vm');
+    for (const url of ['/panel', '/chat', '/rutas', '/manual', '/setup', '/soporte']) {
+      const r = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${ADMIN}` } });
+      expect(r.statusCode, url).toBe(200);
+      let n = 0;
+      for (const m of r.body.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
+        n++;
+        expect(() => new vm.Script(m[1]!, { filename: `${url}#${n}` }), `${url} script ${n}`).not.toThrow();
+      }
+      expect(n, url).toBeGreaterThan(0);
+    }
+  });
+});

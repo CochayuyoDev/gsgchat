@@ -7,7 +7,7 @@
  * y que la baja deje (o borre) exactamente lo que debe.
  */
 
-import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -217,5 +217,82 @@ describe('alta y baja', () => {
     const estado = await estadoInstancias({ base, fetchImpl });
     expect(estado.find((e) => e.slug === 'viva')).toMatchObject({ viva: true, configurado: false });
     expect(estado.find((e) => e.slug === 'caida')).toMatchObject({ viva: false, detalle: 'ECONNREFUSED' });
+  });
+});
+
+describe('planes y cobro', () => {
+  it('una tienda nace con la prueba de 14 dias; el .env lleva donde preguntar y su token; el estado lo ensena', async () => {
+    const { leerPlan, estadoPlan } = await import('../saas/planes.js');
+    const ahora = () => new Date('2026-09-15T10:00:00Z');
+    await altaInstancia('tienda1', {}, { cfg: CFG, base, ejecutar, ahora });
+    const dir = path.join(base, 'instancias', 'tienda1');
+    const p = leerPlan(dir)!;
+    expect(p).toMatchObject({ plan: 'prueba', vencimiento: '2026-09-29T10:00:00.000Z', pagos: [] });
+    expect(p.token).toMatch(/^plt_[A-Za-z0-9_-]{20,}$/);
+    const env = readFileSync(path.join(dir, '.env'), 'utf8');
+    expect(env).toContain('PLAN_URL=http://host.docker.internal:3900/api/plan/tienda1');
+    expect(env).toContain(`PLAN_TOKEN=${p.token}`);
+    expect(readFileSync(path.join(dir, 'compose.yml'), 'utf8')).toContain('host.docker.internal:host-gateway');
+
+    expect(estadoPlan(p, ahora())).toMatchObject({ plan: 'prueba', nombre: 'Prueba', diasRestantes: 14, vencido: false, aviso: null, limites: { iaTurnosMes: 300, campanas: true } });
+    expect(estadoPlan(p, new Date('2026-09-24T10:00:00Z')).aviso).toMatch(/termina en 5 días/);
+    expect(estadoPlan(p, new Date('2026-10-01T10:00:00Z'))).toMatchObject({ vencido: true, diasRestantes: -2 });
+    expect(estadoPlan(p, new Date('2026-10-01T10:00:00Z')).aviso).toMatch(/prueba gratis terminó/);
+
+    const estado = await estadoInstancias({ base, fetchImpl: (async () => { throw new Error('x'); }) as unknown as typeof fetch, ahora });
+    expect(estado[0]?.plan).toMatchObject({ plan: 'prueba', diasRestantes: 14 });
+  });
+
+  it('un pago cambia al plan pagado y corre el vencimiento desde lo que quede; vencido, desde hoy', async () => {
+    const { planInicial, registrarPago, cambiarPlan, ingresosMensuales, PLANES } = await import('../saas/planes.js');
+    const hoy = new Date('2026-09-15T10:00:00Z');
+    const prueba = planInicial(hoy, 'prueba', 'plt_x');
+    // De la prueba a basico: los meses cuentan desde hoy, no desde el fin de la prueba.
+    const basico = registrarPago(prueba, { plan: 'basico', meses: 1, nota: 'Yape op. 1' }, hoy);
+    expect(basico).toMatchObject({ plan: 'basico', vencimiento: '2026-10-15T10:00:00.000Z', token: 'plt_x' });
+    expect(basico.pagos).toEqual([{ fecha: hoy.toISOString(), plan: 'basico', meses: 1, monto: 49, moneda: 'PEN', nota: 'Yape op. 1' }]);
+    // Renovar antes de vencer suma desde el vencimiento.
+    const renovado = registrarPago(basico, { plan: 'basico', meses: 2, monto: 90 }, new Date('2026-10-01T10:00:00Z'));
+    expect(renovado.vencimiento).toBe('2026-12-15T10:00:00.000Z');
+    expect(renovado.pagos[1]?.monto).toBe(90);
+    // Renovar ya vencido cuenta desde hoy, y subir a pro cambia el plan.
+    const tarde = registrarPago(renovado, { plan: 'pro', meses: 1 }, new Date('2027-01-10T10:00:00Z'));
+    expect(tarde).toMatchObject({ plan: 'pro', vencimiento: '2027-02-10T10:00:00.000Z' });
+    expect(() => registrarPago(prueba, { plan: 'prueba', meses: 1 })).toThrow(/plan de pago/);
+    expect(() => registrarPago(prueba, { plan: 'pro', meses: 0 })).toThrow(/meses/);
+
+    const prorroga = cambiarPlan(basico, { vencimiento: '2026-11-01', contacto: 'Escríbenos al 999' });
+    expect(prorroga).toMatchObject({ plan: 'basico', vencimiento: '2026-11-01T23:59:59.000Z', contacto: 'Escríbenos al 999' });
+    expect(() => cambiarPlan(basico, { vencimiento: 'ayer' })).toThrow(/fecha/);
+
+    expect(ingresosMensuales([prueba, basico, tarde], new Date('2026-10-01T10:00:00Z'))).toBe(PLANES.basico.precioMes + PLANES.pro.precioMes);
+    expect(ingresosMensuales([basico], new Date('2026-12-01T10:00:00Z'))).toBe(0);
+  });
+});
+
+describe('dar plan a una tienda anterior a los planes', () => {
+  it('escribe el plan.json, pone PLAN_URL y PLAN_TOKEN en el .env y recrea el contenedor; con plan, no toca nada', async () => {
+    const { iniciarPlan, generarEnv } = await import('../saas/instancias.js');
+    const { leerPlan } = await import('../saas/planes.js');
+    // Una instancia vieja: sin plan.json y sin PLAN_* en el .env.
+    const dir = path.join(base, 'instancias', 'vieja');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, '.env'), generarEnv('vieja', CFG, {}));
+    writeFileSync(path.join(dir, 'compose.yml'), 'name: wa-vieja\n');
+    writeFileSync(path.join(dir, 'instancia.json'), JSON.stringify({ slug: 'vieja', nombre: 'Vieja', dominio: 'x', url: 'https://vieja.wa.tuservicio.com', proveedor: 'local', creadaEn: '2026-01-01T00:00:00.000Z' }));
+    expect(readFileSync(path.join(dir, '.env'), 'utf8')).not.toContain('PLAN_URL');
+
+    const p = await iniciarPlan('vieja', { cfg: CFG, base, ejecutar, ahora: () => new Date('2026-09-15T10:00:00Z') });
+    expect(p).toMatchObject({ plan: 'prueba', vencimiento: '2026-09-29T10:00:00.000Z' });
+    expect(leerPlan(dir)).toEqual(p);
+    const env = readFileSync(path.join(dir, '.env'), 'utf8');
+    expect(env).toContain('PLAN_URL=http://host.docker.internal:3900/api/plan/vieja');
+    expect(env).toContain(`PLAN_TOKEN=${p.token}`);
+    expect(env).toContain('DATABASE_URL=');
+    expect(llamadas).toEqual([['docker', 'compose', '-f', path.join(dir, 'compose.yml'), 'up', '-d', '--wait']]);
+
+    expect(await iniciarPlan('vieja', { cfg: CFG, base, ejecutar })).toEqual(p);
+    expect(llamadas).toHaveLength(1);
+    await expect(iniciarPlan('nadie', { cfg: CFG, base, ejecutar })).rejects.toThrow(/no existe/);
   });
 });
