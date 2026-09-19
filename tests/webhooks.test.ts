@@ -99,16 +99,16 @@ describe('el bus y los repositorios observados', () => {
     expect(visto.filter((v) => v.evento === 'mensaje.recibido')).toHaveLength(1);
   });
 
-  it('el historial del telefono (mensajes viejos) se guarda pero no se anuncia', async () => {
+  it('el historial del telefono se guarda pero no se anuncia; lo de la cola de cuando estaba apagado, si', async () => {
     const { repos, visto } = escucharTodo();
     const c = await repos.contacts.upsertFromInbound('51987654321');
     const hace1h = new Date(Date.now() - 60 * 60 * 1000);
-    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'wamid.viejo', kind: 'text', body: 'de ayer', createdAt: hace1h });
-    await repos.messages.add({ contactId: c.id, direction: 'out', wamid: 'wamid.viejo2', kind: 'text', body: 'de ayer yo', status: 'sent', createdAt: hace1h });
-    expect(await repos.messages.existsByWamid('wamid.viejo')).toBe(true);
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'wamid.hist', kind: 'text', body: 'de ayer', createdAt: hace1h, payload: { historial: true } });
+    await repos.messages.add({ contactId: c.id, direction: 'out', wamid: 'wamid.hist2', kind: 'text', body: 'de ayer yo', status: 'sent', createdAt: hace1h, payload: { historial: true } });
+    expect(await repos.messages.existsByWamid('wamid.hist')).toBe(true);
     expect(visto.map((v) => v.evento)).toEqual([]);
-    // Uno de hace un momento si se anuncia.
-    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'wamid.ahora', kind: 'text', body: 'hola', createdAt: new Date(Date.now() - 30_000) });
+    // Un mensaje viejo SIN la marca (llego mientras el sistema estaba apagado) si se anuncia.
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'wamid.cola', kind: 'text', body: 'hola', createdAt: hace1h });
     expect(visto.map((v) => v.evento)).toEqual(['mensaje.recibido']);
   });
 

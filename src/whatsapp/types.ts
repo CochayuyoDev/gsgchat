@@ -78,6 +78,12 @@ export interface InboundMessage {
    * como si fueran nuevos es escribirle a media libreta de golpe.
    */
   viejo?: boolean;
+  /**
+   * Vino del volcado de historial del telefono (`messaging-history.set` al
+   * vincular), no en vivo ni de la cola de cuando el sistema estaba apagado.
+   * Se guarda para ver el chat, pero no se anuncia a nadie.
+   */
+  historial?: boolean;
   /** Vino desde un anuncio (ver `AnuncioEntrada`): el cliente local lo rellena. */
   anuncio?: AnuncioEntrada;
   /** Lo mismo, tal como lo manda la Cloud API de Meta (`referral`). */

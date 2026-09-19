@@ -185,7 +185,10 @@ export async function registerLocalRoutes(
             kind: leido.kind,
             body: leido.body,
             // El autor no va en lo propio: lo mande yo.
-            payload: leido.payload && 'autor' in leido.payload ? (({ autor: _autor, ...resto }) => (Object.keys(resto).length ? resto : null))(leido.payload) : leido.payload,
+            payload: (() => {
+              const base = leido.payload && 'autor' in leido.payload ? (({ autor: _autor, ...resto }) => (Object.keys(resto).length ? resto : null))(leido.payload) : leido.payload;
+              return mensaje.historial ? { ...(base ?? {}), historial: true } : base;
+            })(),
             status,
             createdAt: new Date(Number(mensaje.timestamp) * 1000 || Date.now()),
           });

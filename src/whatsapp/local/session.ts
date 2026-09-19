@@ -513,6 +513,7 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
       // Lo que no llega en vivo (historial, cola de cuando el sistema
       // estaba apagado) se guarda pero no se contesta. Ver `esMensajeViejo`.
       const m = value.messages?.[0];
+      if (m && origen === 'historial') m.historial = true;
       if (m && esMensajeViejo(tipoEvento, m.timestamp)) {
         m.viejo = true;
         log(`entrante ${m.type} de ${m.from} (${tipoEvento ?? 'sin tipo'}, viejo): se guarda sin contestar`);
@@ -541,6 +542,7 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
       const value = toChangeValue({ ...(mensaje as object), key: { ...m.key, fromMe: false } }, telefono, media, { nombreGrupo: nombreDeGrupo(jid) });
       const traducido = value?.messages?.[0];
       if (!traducido) return;
+      if (origen === 'historial') traducido.historial = true;
       // Borrar para todos un mensaje propio: se marca igual que el de un cliente.
       if (traducido.type === 'revoke' && value) {
         await opts.onChange?.(value);
