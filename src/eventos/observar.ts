@@ -17,6 +17,16 @@ import type { Bus, ContactoEvento, Eventos } from './bus.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
 
+/**
+ * Mas viejo que esto, un mensaje no es "algo que acaba de pasar" sino
+ * historial: lo que el telefono vuelca al vincularse (miles de mensajes de
+ * meses), o la cola de cuando el sistema estaba apagado. Se guarda y se ve
+ * en el chat, pero no se anuncia: un webhook con siete mil eventos de 2025
+ * tapona durante horas lo que si importa, el mensaje que llega ahora.
+ */
+export const HISTORIAL_MS = 10 * 60 * 1000;
+const esHistorial = (createdAt: Date | null | undefined, ahora: Date) => Boolean(createdAt && ahora.getTime() - createdAt.getTime() > HISTORIAL_MS);
+
 /** Quien mando un saliente, con los tres valores del contrato (ver sender.ts `conOrigen`). */
 const autorDe = (origen: unknown): 'persona' | 'ia' | 'sistema' => (origen === 'persona' || origen === 'ia' ? origen : 'sistema');
 
@@ -37,6 +47,8 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
       const repetido = message.wamid ? await repos.messages.existsByWamid(message.wamid) : false;
       const id = await repos.messages.add(message);
       if (repetido) return id;
+
+      if (esHistorial(message.createdAt, new Date())) return id;
 
       const c = await repos.contacts.getById(message.contactId);
       if (!c) return id;

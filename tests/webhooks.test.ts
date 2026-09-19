@@ -99,6 +99,19 @@ describe('el bus y los repositorios observados', () => {
     expect(visto.filter((v) => v.evento === 'mensaje.recibido')).toHaveLength(1);
   });
 
+  it('el historial del telefono (mensajes viejos) se guarda pero no se anuncia', async () => {
+    const { repos, visto } = escucharTodo();
+    const c = await repos.contacts.upsertFromInbound('51987654321');
+    const hace1h = new Date(Date.now() - 60 * 60 * 1000);
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'wamid.viejo', kind: 'text', body: 'de ayer', createdAt: hace1h });
+    await repos.messages.add({ contactId: c.id, direction: 'out', wamid: 'wamid.viejo2', kind: 'text', body: 'de ayer yo', status: 'sent', createdAt: hace1h });
+    expect(await repos.messages.existsByWamid('wamid.viejo')).toBe(true);
+    expect(visto.map((v) => v.evento)).toEqual([]);
+    // Uno de hace un momento si se anuncia.
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'wamid.ahora', kind: 'text', body: 'hola', createdAt: new Date(Date.now() - 30_000) });
+    expect(visto.map((v) => v.evento)).toEqual(['mensaje.recibido']);
+  });
+
   it('un saliente anuncia mensaje.enviado, y su estado mensaje.estado', async () => {
     const { repos, visto } = escucharTodo();
     const c = await repos.contacts.upsertFromInbound('51987654321');
