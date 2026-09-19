@@ -59,15 +59,47 @@ contestar: **si quiere seguir usando WhatsApp en el movil**.
 de WhatsApp Business del telefono *y ademas* habla por la API. La ventana de
 Meta enseña un QR, se escanea desde esa app, el historial se sincroniza y se
 puede seguir contestando a mano desde el movil. Es lo que casi todo el mundo
-quiere cuando pide "el QR". Por dentro es Embedded Signup con
-`featureType: whatsapp_business_app_onboarding`.
+quiere cuando pide "el QR". Por dentro es Embedded Signup en coexistencia:
+la ventana termina con `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` y el numero
+no pasa por el PIN (ya estaba registrado en la app).
 
 **No (numero dedicado): "Conectar con Facebook".** Registro incorporado clasico.
 El numero pasa a ser solo de la API y deja de funcionar en la app del telefono.
 
-Los dos necesitan activar el registro incorporado una vez en la app de Meta
-(WhatsApp, Configuracion, Registro incorporado) y pegar su ID de configuracion;
-la pantalla lo pide en el paso 2 y no vuelve a preguntarlo.
+Los dos necesitan una configuracion de **registro incorporado v4** en la app
+de Meta (Facebook Login for Business → Configurations → crear, variante
+"Embedded Signup", con el producto Cloud API y, para la coexistencia,
+"WhatsApp Business App onboarding") y pegar su ID; la pantalla lo pide en el
+paso 2 y no vuelve a preguntarlo. En v4 el flujo lo deciden los productos de
+esa configuracion, no `extras` (`featureType` y `sessionInfoVersion`
+desaparecen; `src/whatsapp/embedded-signup.ts` manda solo `setup: {}`). Meta
+apaga las configuraciones v2 y v3 el **15/10/2026**: una creada antes deja de
+abrir la ventana ese dia. La pagina entiende todos los finales de la ventana
+(`FINISH`, `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`, `FINISH_ONLY_WABA` sin
+numero, `CANCEL` con el paso, `ERROR` con el motivo).
+
+**Lo que Meta cambia con fecha se ve en la pantalla** (Conexion de WhatsApp,
+paso 3, y Estado del numero; `src/whatsapp/avisos-meta.ts`), solo con la API
+oficial: el metodo de pago antes del **30/09/2026** (desde el 1/10/2026 Meta
+cobra tambien los mensajes de servicio, S/ 0,0998 en Peru tras los 1 000
+gratis al mes por numero, y sin metodo de pago dejan de salir), el registro
+v4 antes del 15/10/2026 y Graph v21 hasta el **21/01/2027**. Los dos primeros
+no se pueden comprobar por API: se marcan "Ya lo hice" y quedan con fecha en
+los ajustes generales (`meta.metodoPagoEl`, `meta.registroV4El`). El sistema
+habla con Graph **v25.0** (`GRAPH_API_VERSION`); desde la v24 el limite de
+mensajeria es del **portafolio** de Meta, compartido por todos sus numeros:
+el numero se pide con `whatsapp_business_manager_messaging_limit` (y se
+vuelve a `messaging_limit_tier` si la version fijada no lo conoce), el
+webhook `business_capability_update` trae
+`max_daily_conversations_per_business`, y `getPhoneNumber()` dice ademas si
+el numero sigue en el celular (`is_on_biz_app`).
+
+**Dentro de la ventana de 24 h, el reparto manda texto con boton y no
+plantilla**, aunque el proveedor sea Meta: desde el 1/10/2026 una plantilla
+de utilidad dentro de la ventana se cobra sin franquicia, y el texto libre
+con boton de ubicacion es un mensaje de servicio (entra en los 1 000 gratis)
+que ademas le da al cliente el boton de un toque. Fuera de la ventana,
+plantilla como siempre (`src/rutas/motor.ts`).
 
 **El tercer camino, manual: pega el token.** El token permanente, el ID de la app
 y su clave secreta. Con eso el sistema:

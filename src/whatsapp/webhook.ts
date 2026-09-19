@@ -304,13 +304,16 @@ export async function processChange(
       return;
     }
 
-    // El limite numerico de conversaciones por telefono y dia: es el dato
-    // exacto del tier, mejor que deducirlo del nombre TIER_xxx.
+    // El limite numerico de conversaciones por dia: es el dato exacto del
+    // tier, mejor que deducirlo del nombre TIER_xxx. Desde Graph v24 viene
+    // como `max_daily_conversations_per_business` (es del portafolio de
+    // Meta, compartido por todos sus numeros); antes, por telefono.
     case 'business_capability_update': {
-      const limite = limiteNumerico(value.max_daily_conversation_per_phone);
+      const porPortafolio = limiteNumerico(value.max_daily_conversations_per_business);
+      const limite = porPortafolio ?? limiteNumerico(value.max_daily_conversation_per_phone);
       if (limite !== null) {
         await repos.numberState.setLimite24h(phoneNumberId, limite);
-        await deps.salud?.registrarEvento('cuenta', 'LIMITE', `max_daily_conversation_per_phone = ${limite}`).catch(() => undefined);
+        await deps.salud?.registrarEvento('cuenta', 'LIMITE', `${porPortafolio !== null ? 'max_daily_conversations_per_business (portafolio)' : 'max_daily_conversation_per_phone'} = ${limite}`).catch(() => undefined);
       }
       return;
     }

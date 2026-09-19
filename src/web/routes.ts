@@ -129,7 +129,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
-  await registerConnectRoutes(app, { config, settings, wa });
+  await registerConnectRoutes(app, { config, settings, wa, ajustes: deps.ajustes });
   await registerWahaRoutes(app, { config, settings, repos });
   await registerLocalRoutes(app, {
     config,

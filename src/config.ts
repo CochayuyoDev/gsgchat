@@ -38,7 +38,8 @@ const schema = z.object({
   // Las credenciales de Meta son opcionales a proposito: el sistema arranca
   // sin ellas y las pide por pantalla en /setup. Lo que se guarde ahi tiene
   // precedencia sobre estas variables.
-  GRAPH_API_VERSION: z.string().default('v21.0'),
+  /** La v21 caduca el 21/01/2027; desde la v24 el limite de mensajeria es por portafolio. */
+  GRAPH_API_VERSION: z.string().default('v25.0'),
   WHATSAPP_TOKEN: z.string().default(''),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(''),
   WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().default(''),

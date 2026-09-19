@@ -99,6 +99,12 @@ export interface MotorDeps {
    * Con la Cloud API fuera de la ventana de 24 h no hay alternativa. Con un
    * cliente no oficial no existe tal regla y se manda el texto con boton, que
    * al cliente le resulta mucho mas facil.
+   *
+   * Dentro de la ventana (el cliente escribio hace menos de 24 h) tampoco se
+   * usa plantilla aunque el proveedor sea Meta: desde el 1/10/2026 una
+   * plantilla de utilidad dentro de la ventana se cobra sin franquicia, y el
+   * texto libre con boton (mensaje de servicio) entra en los 1 000 gratis del
+   * mes y ademas le da al cliente el boton de un toque.
    */
   usarPlantilla: () => boolean;
   ahora?: () => Date;
@@ -376,14 +382,19 @@ export function crearMotor(deps: MotorDeps): Motor {
       }
     }
 
-    const elegida = deps.usarPlantilla() ? await plantillaPara(paso, ahora()) : null;
+    // Con la ventana de 24 h abierta, texto con boton aunque el proveedor
+    // pida plantilla: es servicio (con franquicia) y no utilidad (sin ella).
+    const contacto = await repos.contacts.getByPhone(phone).catch(() => null);
+    const ventanaAbierta = Boolean(contacto?.lastInboundAt && ahora().getTime() - contacto.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
+    const conPlantilla = deps.usarPlantilla() && !ventanaAbierta;
+    const elegida = conPlantilla ? await plantillaPara(paso, ahora()) : null;
     // La cadencia por cliente la fija el reparto (espera e intentos), no la
     // politica general: ver `SendJob.limitesContacto`.
     const limitesContacto = {
       separacionMs: Math.min(opciones.esperaRespuestaMinutos * 60_000, 60_000),
       maxPorDia: opciones.maxIntentos + 1,
     };
-    const salida = deps.usarPlantilla()
+    const salida = conPlantilla
       ? await sender.send({
           phone,
           kind: 'template',
@@ -421,7 +432,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       await repos.rutas.registrarEvento(solicitud.id, 'envio', DESCRIPCION_PASO[paso], {
         paso,
         wamid: salida.wamid,
-        via: deps.usarPlantilla() ? `plantilla ${elegida!.name}` : 'texto con boton de ubicacion',
+        via: conPlantilla ? `plantilla ${elegida!.name}` : ventanaAbierta && deps.usarPlantilla() ? 'texto con boton de ubicacion (ventana abierta: servicio, no plantilla)' : 'texto con boton de ubicacion',
       });
       if (paso === 'solicitud' && deps.stickers) await deps.stickers.automatico('inicio', phone, { reparto: true });
 

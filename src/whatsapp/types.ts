@@ -142,7 +142,10 @@ export interface ChangeValue {
   restriction_info?: Array<{ restriction_type?: string; expiration?: string }>;
   violation_info?: { violation_type?: string };
   // business_capability_update
+  /** Hasta Graph v23: por telefono. */
   max_daily_conversation_per_phone?: number;
+  /** Desde Graph v24: por portafolio de Meta (compartido por todos sus numeros). */
+  max_daily_conversations_per_business?: number;
   max_phone_numbers_per_business?: number;
   // user_preferences
   user_preferences?: Array<{

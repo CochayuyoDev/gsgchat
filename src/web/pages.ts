@@ -347,6 +347,7 @@ ${warning}
   <h2>Estado del numero</h2>
   <p class="muted">Miralo antes de subir volumen. En amarillo se frena el marketing solo; en rojo se pausa todo.</p>
   <div class="grid" id="stats" style="margin-top:14px"></div>
+  <div id="estado-avisos-meta" class="hidden" style="margin:12px 0"></div>
   <div class="actions">
     <button class="ghost" id="refresh">Actualizar</button>
     <button class="ghost" id="numsync">Sincronizar con Meta</button>
@@ -2506,6 +2507,17 @@ async function loadHealth() {
       '<div class="stat"><span class="muted">WhatsApp</span><b class="' + (h.configured ? 'ok' : 'warn') + '">' + (h.configured ? 'conectado' : 'sin conectar') + '</b><span class="muted">' + esc((h.missing || []).join(', ')) + '</span></div>' +
       (h.salud ? '<div class="stat"><span class="muted">Salud</span><b class="' + nivelKind(h.salud.nivel) + '">' + esc(h.salud.nivel) + '</b><span class="muted">velocidad al ' + Math.round((h.salud.factor || 0) * 100) + ' % - <a href="#salud">ver por que</a></span></div>' : '');
     show('state', n.paused ? 'Envios pausados' : 'Operativo', n.paused ? 'warn' : 'ok');
+    // Lo que Meta cambia con fecha (solo con la API oficial): se marca como hecho en Conexion de WhatsApp.
+    var avisos = (h.avisosMeta || []).filter(function (a) { return a.estado !== 'ok'; });
+    var cajaAvisos = document.getElementById('estado-avisos-meta');
+    if (avisos.length) {
+      var COLOR = { vencido: 'bad', urgente: 'warn', pendiente: '', hecho: 'ok' };
+      cajaAvisos.innerHTML = avisos.map(function (a) {
+        var cuando = a.estado === 'hecho' ? 'hecho el ' + fmt(a.hechoEl).split(',')[0] : a.diasRestantes < 0 ? 'venció hace ' + (-a.diasRestantes) + ' días' : a.diasRestantes === 0 ? 'vence hoy' : 'quedan ' + a.diasRestantes + ' días';
+        return '<div style="padding:8px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">' + pill(COLOR[a.estado] || 'warn', cuando) + ' <b>' + esc(a.titulo) + '</b>' + (a.estado === 'hecho' ? '' : '<br><span class="muted">' + esc(a.detalle) + ' <a href="/setup">Marcar como hecho en Conexión de WhatsApp</a>.</span>') + '</div>';
+      }).join('');
+      cajaAvisos.classList.remove('hidden');
+    } else { cajaAvisos.classList.add('hidden'); cajaAvisos.innerHTML = ''; }
   } catch (error) { show('state', error.message, 'bad'); }
 }
 document.getElementById('refresh').onclick = loadHealth;

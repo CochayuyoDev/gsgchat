@@ -28,13 +28,21 @@ import {
   exchangeCode,
   signupAvailability,
   signupExtras,
+  SIGNUP_FINISH_EVENTS,
+  SIGNUP_VERSION,
   SignupError,
 } from '../whatsapp/embedded-signup.js';
+import { avisosDeMeta } from '../whatsapp/avisos-meta.js';
+import { providerOf } from '../settings/service.js';
+import type { ServicioAjustes } from '../ajustes/generales.js';
 
 export interface ConnectDeps {
   config: Config;
   settings: SettingsService;
   wa: WhatsAppClient;
+  /** Los ajustes generales: ahi quedan los avisos de Meta marcados como hechos. */
+  ajustes?: ServicioAjustes;
+  ahora?: () => Date;
 }
 
 const connectSchema = z.object({
@@ -45,6 +53,8 @@ const connectSchema = z.object({
   phoneNumberId: z.string().trim().optional(),
   /** URL publica; si se omite se usa PUBLIC_BASE_URL. */
   publicUrl: z.string().trim().url().optional(),
+  /** La ventana de Meta termino en coexistencia (el numero sigue en la app): sin registro con PIN. */
+  coexistencia: z.boolean().optional(),
 });
 
 export interface ConnectStep {
@@ -193,7 +203,7 @@ export async function registerConnectRoutes(app: FastifyInstance, deps: ConnectD
       steps.push({
         step: 'Numero',
         ok: true,
-        detail: `${phone.displayPhoneNumber} (${phone.verifiedName}) — calidad ${phone.qualityRating}${phone.messagingLimitTier ? `, ${phone.messagingLimitTier}` : ''}`,
+        detail: `${phone.displayPhoneNumber} (${phone.verifiedName}) — calidad ${phone.qualityRating}${phone.messagingLimitTier ? `, ${phone.messagingLimitTier}` : ''}${phone.enLaApp ? ' — en el celular y en la API (coexistencia)' : ''}`,
       });
     } catch (error) {
       steps.push({
@@ -206,7 +216,9 @@ export async function registerConnectRoutes(app: FastifyInstance, deps: ConnectD
     return {
       ok: steps.every((s) => s.ok),
       connected: settings.isConfigured(),
-      needsRegistration: chosen.needsRegistration,
+      // Un numero que sigue en la app del celular ya esta registrado: Meta
+      // dice que se salte el PIN.
+      needsRegistration: chosen.needsRegistration && !chosen.enLaApp && !body.coexistencia,
       number: {
         phoneNumberId: chosen.phoneNumberId,
         displayPhoneNumber: chosen.displayPhoneNumber,
@@ -237,12 +249,21 @@ export async function registerConnectRoutes(app: FastifyInstance, deps: ConnectD
       reachable: isPubliclyReachable(config.PUBLIC_BASE_URL),
       graphVersion: current.graphVersion,
       // Los `extras` de cada modo se calculan aqui y no en la pagina: el valor
-      // que espera Meta ha cambiado ya una vez y no debe vivir en un string
-      // suelto dentro del HTML.
+      // que espera Meta ha cambiado ya dos veces y no debe vivir en un string
+      // suelto dentro del HTML. En v4 son iguales en los dos modos.
       modes: {
         coexistence: signupExtras('coexistence'),
         dedicated: signupExtras('dedicated'),
       },
+      signupVersion: SIGNUP_VERSION,
+      signupFinishEvents: SIGNUP_FINISH_EVENTS,
+      // Lo que Meta cambia con fecha (metodo de pago, registro v4, Graph).
+      avisosMeta: avisosDeMeta({
+        ahora: deps.ahora?.() ?? new Date(),
+        proveedor: providerOf(current),
+        graphVersion: current.graphVersion,
+        hechos: deps.ajustes?.actual().meta ?? {},
+      }),
     };
   });
 
@@ -258,6 +279,8 @@ export async function registerConnectRoutes(app: FastifyInstance, deps: ConnectD
         phoneNumberId: z.string().trim().optional(),
         appId: z.string().trim().optional(),
         appSecret: z.string().trim().optional(),
+        /** La ventana termino con FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING: el numero sigue en la app. */
+        coexistencia: z.boolean().optional(),
         publicUrl: z.string().trim().url().optional(),
       })
       .parse(request.body ?? {});
@@ -302,6 +325,7 @@ export async function registerConnectRoutes(app: FastifyInstance, deps: ConnectD
       payload: {
         ...(body.phoneNumberId ? { phoneNumberId: body.phoneNumberId } : {}),
         ...(body.publicUrl ? { publicUrl: body.publicUrl } : {}),
+        ...(body.coexistencia ? { coexistencia: true } : {}),
       },
     });
 

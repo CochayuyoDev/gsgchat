@@ -43,8 +43,19 @@ export interface PhoneNumberInfo {
   verifiedName: string;
   /** GREEN | YELLOW | RED | NA (sin datos todavia). */
   qualityRating: string;
-  /** TIER_250, TIER_1K, TIER_10K, TIER_100K, TIER_UNLIMITED o vacio. */
+  /**
+   * TIER_250, TIER_1K, TIER_10K, TIER_100K, TIER_UNLIMITED o vacio.
+   *
+   * Desde 2026 el limite es del PORTAFOLIO de Meta (compartido por todos sus
+   * numeros) y el campo es `whatsapp_business_manager_messaging_limit`; el
+   * viejo `messaging_limit_tier` sigue leyendose si la version de Graph no
+   * conoce el nuevo.
+   */
   messagingLimitTier: string;
+  /** El numero sigue en la app de WhatsApp Business del celular (coexistencia). null = no se sabe. */
+  enLaApp?: boolean | null;
+  /** CLOUD_API, ON_PREMISE, NOT_APPLICABLE... segun Meta. */
+  plataforma?: string;
 }
 
 export interface WhatsAppClientOptions {
@@ -175,7 +186,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     token,
     phoneNumberId,
     businessAccountId,
-    graphVersion = 'v21.0',
+    graphVersion = 'v25.0',
     fetchImpl = fetch,
     baseUrl = 'https://graph.facebook.com',
   } = opts;
@@ -328,18 +339,32 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     },
 
     async getPhoneNumber() {
-      const url = `${baseUrl}/${graphVersion}/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,messaging_limit_tier`;
-      const payload = await call<{
+      type Numero = {
         display_phone_number?: string;
         verified_name?: string;
         quality_rating?: string;
         messaging_limit_tier?: string;
-      }>(url, { method: 'GET' });
+        whatsapp_business_manager_messaging_limit?: string;
+        is_on_biz_app?: boolean;
+        platform_type?: string;
+      };
+      const pedir = (campos: string) => call<Numero>(`${baseUrl}/${graphVersion}/${phoneNumberId}?fields=${campos}`, { method: 'GET' });
+      let payload: Numero;
+      try {
+        payload = await pedir('display_phone_number,verified_name,quality_rating,whatsapp_business_manager_messaging_limit,is_on_biz_app,platform_type');
+      } catch (error) {
+        // Una version de Graph anterior a la 24 no conoce el campo nuevo y
+        // contesta 400 "nonexisting field": se pide como antes.
+        if (!(error instanceof WhatsAppApiError && error.httpStatus === 400 && /field|nonexisting|invalid/i.test(error.message))) throw error;
+        payload = await pedir('display_phone_number,verified_name,quality_rating,messaging_limit_tier');
+      }
       return {
         displayPhoneNumber: payload.display_phone_number ?? '',
         verifiedName: payload.verified_name ?? '',
         qualityRating: (payload.quality_rating ?? 'NA').toUpperCase(),
-        messagingLimitTier: payload.messaging_limit_tier ?? '',
+        messagingLimitTier: payload.whatsapp_business_manager_messaging_limit ?? payload.messaging_limit_tier ?? '',
+        enLaApp: typeof payload.is_on_biz_app === 'boolean' ? payload.is_on_biz_app : null,
+        plataforma: payload.platform_type ?? '',
       };
     },
 

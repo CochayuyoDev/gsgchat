@@ -95,6 +95,18 @@ export const ajustesGeneralesSchema = z.object({
       despedida: z.string().max(40).nullable().default(null),
     })
     .nullable(),
+  /**
+   * Los avisos con fecha de Meta que no se pueden comprobar por API y se
+   * marcan a mano como hechos (con fecha). Ver src/whatsapp/avisos-meta.ts.
+   */
+  meta: z
+    .object({
+      /** Cuando se cargo el metodo de pago en Meta (cobro de servicio desde 1/10/2026). */
+      metodoPagoEl: z.string().max(40).nullable().optional(),
+      /** Cuando se paso la configuracion del registro incorporado a v4. */
+      registroV4El: z.string().max(40).nullable().optional(),
+    })
+    .nullable(),
 });
 
 /** Las respuestas rapidas que trae el sistema; se cambian desde Automatizacion. */
@@ -129,6 +141,7 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   atajos: null,
   stickers: null,
   embebido: null,
+  meta: null,
 };
 
 /** Un parche: cualquier rama, y dentro de cada rama cualquier campo. */
@@ -144,6 +157,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   atajos: ajustesGeneralesSchema.shape.atajos.optional(),
   stickers: ajustesGeneralesSchema.shape.stickers.optional(),
   embebido: ajustesGeneralesSchema.shape.embebido.optional(),
+  meta: ajustesGeneralesSchema.shape.meta.optional(),
 });
 
 export type AjustesGeneralesPatch = z.infer<typeof ajustesGeneralesPatchSchema>;
@@ -161,6 +175,9 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     atajos: patch.atajos !== undefined ? patch.atajos : base.atajos,
     stickers: patch.stickers !== undefined ? patch.stickers : base.stickers,
     embebido: patch.embebido !== undefined ? patch.embebido : base.embebido,
+    // Los "hechos" de Meta se acumulan: marcar uno no borra el otro (solo
+    // pisa lo que el parche trae de verdad).
+    meta: patch.meta !== undefined ? (patch.meta === null ? null : { ...(base.meta ?? {}), ...Object.fromEntries(Object.entries(patch.meta).filter(([, v]) => v !== undefined)) }) : base.meta,
   };
 }
 

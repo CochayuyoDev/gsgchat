@@ -158,8 +158,8 @@ const AYUDA_CAMPO: Record<string, { titulo: string; pista: string; ph: string }>
     ph: 'a1b2c3...',
   },
   signupConfigId: {
-    titulo: 'ID de la configuracion de registro incorporado',
-    pista: 'En Meta: WhatsApp -> Configuracion -> Registro incorporado.',
+    titulo: 'ID de la configuracion de registro incorporado (v4)',
+    pista: 'En tu app de Meta: Facebook Login for Business -> Configurations -> Crear, variante "Embedded Signup", con el producto Cloud API (y "WhatsApp Business App onboarding" si el numero sigue en el celular). Las configuraciones viejas (v2/v3) dejan de abrir el 15/10/2026.',
     ph: '9876543210987654',
   },
   wahaUrl: {
@@ -275,8 +275,10 @@ export function connectPage(opts: ConnectOpts): string {
       <li>Entra a <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">developers.facebook.com/apps</a>
           y crea una app de tipo <b>Empresa</b>. Anadele el producto <b>WhatsApp</b>.</li>
       <li>El <b>ID de la app</b> y la <b>clave secreta</b> estan en Configuracion de la app &rarr; Basica.</li>
-      <li>El <b>ID de la configuracion</b>: WhatsApp &rarr; Configuracion &rarr; Registro incorporado.
-          Ahi se crea y se copia.</li>
+      <li>El <b>ID de la configuracion</b> (registro incorporado <b>v4</b>): Facebook Login for Business &rarr;
+          Configurations &rarr; Crear, variante <b>Embedded Signup</b>, y marca los productos: <b>Cloud API</b>
+          y, si quieres que el numero siga en el celular, <b>WhatsApp Business App onboarding</b>. Copia su ID.
+          Una configuracion creada antes (v2 o v3) deja de abrir la ventana el 15/10/2026: crea una nueva.</li>
       <li>Solo para el camino manual, el <b>token permanente</b>: Configuracion del negocio &rarr;
           Usuarios &rarr; Usuario del sistema, con los permisos
           <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>.</li>
@@ -336,6 +338,8 @@ export function connectPage(opts: ConnectOpts): string {
   </div>
 
   <div id="steps" class="hidden" style="margin-top:18px"></div>
+
+  <div id="avisos-meta" class="hidden" style="margin-top:18px"></div>
 
   <div class="hidden" id="pin-box" style="margin-top:18px">
     <div class="nota"><b>Este numero todavia no esta activado.</b> Se activa con un PIN de seis
@@ -746,7 +750,7 @@ document.getElementById('waha-logout').onclick = async function () {
 function cargarSdk() {
   if (modo === 'manual' || window.FB || !opciones.appId) return;
   window.fbAsyncInit = function () {
-    FB.init({ appId: opciones.appId, cookie: true, xfbml: false, version: opciones.graphVersion || 'v21.0' });
+    FB.init({ appId: opciones.appId, cookie: true, xfbml: false, version: opciones.graphVersion || 'v25.0' });
   };
   var s = document.createElement('script');
   s.src = 'https://connect.facebook.net/es_LA/sdk.js';
@@ -756,17 +760,34 @@ function cargarSdk() {
   document.head.appendChild(s);
 }
 
-/* La ventana manda por postMessage el id de la cuenta y el del numero. */
-var elegido = { wabaId: null, phoneNumberId: null };
+/* La ventana manda por postMessage el id de la cuenta y el del numero.
+   Registro incorporado v4: termina con FINISH (numero dedicado),
+   FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING (el numero sigue en el celular:
+   sin PIN) o FINISH_ONLY_WABA (no eligio numero); CANCEL dice en que
+   pantalla se salio y ERROR trae el motivo. */
+var elegido = { wabaId: null, phoneNumberId: null, coexistencia: false, sinNumero: false };
+var PASOS_META = { PHONE_NUMBER_SETUP: 'la pantalla del numero', BUSINESS_ACCOUNT_SELECTION: 'la eleccion de la cuenta', WABA_SELECTION: 'la eleccion de la cuenta de WhatsApp', PHONE_NUMBER_VERIFICATION: 'la verificacion del numero' };
 window.addEventListener('message', function (event) {
   var host;
   try { host = new URL(event.origin).hostname; } catch (error) { return; }
   if (!/facebook\.com$/.test(host)) return;
   try {
     var data = JSON.parse(event.data);
-    if (data.type === 'WA_EMBEDDED_SIGNUP' && data.event === 'FINISH') {
-      elegido.wabaId = data.data.waba_id;
-      elegido.phoneNumberId = data.data.phone_number_id;
+    if (data.type !== 'WA_EMBEDDED_SIGNUP') return;
+    var d = data.data || {};
+    if (data.event === 'FINISH' || data.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING') {
+      elegido.wabaId = d.waba_id || null;
+      elegido.phoneNumberId = d.phone_number_id || null;
+      elegido.coexistencia = data.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
+      elegido.sinNumero = false;
+    } else if (data.event === 'FINISH_ONLY_WABA') {
+      elegido.wabaId = d.waba_id || null;
+      elegido.phoneNumberId = null;
+      elegido.sinNumero = true;
+    } else if (data.event === 'CANCEL') {
+      show('fb-state', 'Cerraste la ventana de Meta en ' + (PASOS_META[d.current_step] || 'el paso ' + (d.current_step || '?')) + '. Vuelve a pulsar el boton para terminar.', 'warn');
+    } else if (data.event === 'ERROR') {
+      show('fb-state', 'Meta dio un error en su ventana: ' + (d.error_message || d.error_code || 'sin detalle') + '. Intentalo de nuevo; si sigue, revisa la configuracion (v4) en tu app de Meta.', 'bad');
     }
   } catch (error) { /* la ventana manda tambien mensajes que no son JSON */ }
 });
@@ -779,12 +800,14 @@ document.getElementById('fb-login').onclick = function () {
   FB.login(function (response) {
     var code = response && response.authResponse && response.authResponse.code;
     if (!code) return show('fb-state', 'Cerraste la ventana sin terminar', 'warn');
+    if (elegido.sinNumero) return show('fb-state', 'La ventana termino sin elegir un numero (solo la cuenta). Vuelve a pulsar el boton y elige o crea el numero.', 'warn');
     terminarRapido(code);
   }, {
     config_id: opciones.signupConfigId,
     response_type: 'code',
     override_default_response_type: true,
-    extras: extras || { setup: {}, featureType: '', sessionInfoVersion: '3' }
+    // v4: solo setup; el flujo lo decide la configuracion en Meta.
+    extras: extras || { setup: {} }
   });
 };
 
@@ -795,6 +818,7 @@ async function terminarRapido(code) {
       code: code,
       wabaId: elegido.wabaId,
       phoneNumberId: elegido.phoneNumberId,
+      coexistencia: elegido.coexistencia || modo === 'coexistence' || undefined,
       publicUrl: val('c-url') || undefined
     }});
     trasConectar(r, 'fb-state');
@@ -907,6 +931,39 @@ document.querySelectorAll('[data-copy]').forEach(function (b) {
   };
 });
 
+/* --- los avisos con fecha de Meta (solo con la API oficial) ---------------- */
+function pintarAvisosMeta(avisos) {
+  var caja = document.getElementById('avisos-meta');
+  var esMeta = modo === 'coexistence' || modo === 'dedicated' || modo === 'manual' || guardado.provider === 'cloud';
+  if (!avisos.length || !esMeta) { caja.classList.add('hidden'); caja.innerHTML = ''; return; }
+  var COLOR = { vencido: 'var(--bad)', urgente: 'var(--warn, #b45309)', pendiente: 'var(--muted)', hecho: 'var(--ok)', ok: 'var(--ok)' };
+  var ICONO = { vencido: '⛔', urgente: '⏰', pendiente: '📅', hecho: '✓', ok: '✓' };
+  caja.innerHTML = '<h2 style="font-size:15px">Lo que Meta cambia con fecha</h2>' + avisos.map(function (a) {
+    var cuando = a.estado === 'hecho' ? 'hecho el ' + new Date(a.hechoEl).toLocaleDateString('es-PE')
+      : a.estado === 'ok' ? 'al dia'
+      : a.diasRestantes < 0 ? 'vencio hace ' + (-a.diasRestantes) + ' dias'
+      : a.diasRestantes === 0 ? 'vence hoy' : 'quedan ' + a.diasRestantes + ' dias (hasta el ' + new Date(a.limite + 'T12:00:00').toLocaleDateString('es-PE') + ')';
+    return '<div class="nota" style="border-left:4px solid ' + COLOR[a.estado] + ';margin-top:8px">' +
+      '<b>' + ICONO[a.estado] + ' ' + esc(a.titulo) + '</b> <span class="muted">· ' + esc(cuando) + '</span>' +
+      (a.estado === 'hecho' || a.estado === 'ok' ? '' : '<br><span class="muted">' + esc(a.detalle) + '</span>') +
+      (a.marcable && a.estado !== 'hecho' ? '<div class="actions" style="margin-top:6px"><button class="ghost" type="button" data-aviso-hecho="' + esc(a.id) + '">Ya lo hice</button></div>' : '') +
+      '</div>';
+  }).join('');
+  caja.classList.remove('hidden');
+  caja.querySelectorAll('[data-aviso-hecho]').forEach(function (b) {
+    b.onclick = async function () {
+      var id = b.getAttribute('data-aviso-hecho');
+      var meta = {};
+      meta[id === 'metodoPago' ? 'metodoPagoEl' : 'registroV4El'] = new Date().toISOString();
+      try {
+        await api('/admin/ajustes', { method: 'POST', body: { meta: meta } });
+        opciones = await api('/admin/connect/options');
+        pintarAvisosMeta(opciones.avisosMeta || []);
+      } catch (error) { show('fb-state', error.message, 'bad'); }
+    };
+  });
+}
+
 /* --- carga -------------------------------------------------------------- */
 async function load() {
   try {
@@ -930,6 +987,7 @@ async function load() {
     done('paso4', conectado);
 
     opciones = await api('/admin/connect/options');
+    pintarAvisosMeta(opciones.avisosMeta || []);
 
     // Con WAHA el tunel no hace falta: el contenedor suele correr en la misma
     // maquina y solo tiene que poder llegar a este servidor. Avisar de lo

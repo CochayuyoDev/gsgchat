@@ -40,6 +40,7 @@ import { ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes }
 import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
 import { providerOf } from '../settings/service.js';
+import { avisosDeMeta } from '../whatsapp/avisos-meta.js';
 import { correrGoteo } from '../campanas/goteo.js';
 import { crearCampana } from '../campanas/crear.js';
 import { registerGruposRoutes } from './grupos-routes.js';
@@ -402,6 +403,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       salud: deps.salud
         ? { nivel: state.nivel ?? 'verde', factor: deps.salud.factor(), motivos: state.motivos ?? [] }
         : null,
+      // Lo que Meta cambia con fecha (solo con la API oficial). Ver src/whatsapp/avisos-meta.ts.
+      avisosMeta: avisosDeMeta({ ahora: now, proveedor: providerOf(settings.current()), graphVersion: settings.current().graphVersion, hechos: deps.ajustes?.actual().meta ?? {} }),
     };
   });
 

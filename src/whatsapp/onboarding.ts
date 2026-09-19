@@ -73,6 +73,8 @@ export interface DiscoveredNumber {
   qualityRating: string;
   /** true si el numero todavia no esta registrado en la Cloud API. */
   needsRegistration: boolean;
+  /** El numero sigue en la app de WhatsApp Business del celular (coexistencia): ya esta registrado. */
+  enLaApp: boolean;
 }
 
 export interface DiscoveredAccount {
@@ -91,7 +93,7 @@ export interface DiscoveredAccount {
 export async function discoverAccounts(
   credentials: OnboardingCredentials,
 ): Promise<DiscoveredAccount[]> {
-  const { token, appId, appSecret, graphVersion = 'v21.0', fetchImpl = fetch } = credentials;
+  const { token, appId, appSecret, graphVersion = 'v25.0', fetchImpl = fetch } = credentials;
   const appToken = `${appId}|${appSecret}`;
 
   const debug = await call<{
@@ -148,9 +150,10 @@ export async function discoverAccounts(
         quality_rating?: string;
         status?: string;
         platform_type?: string;
+        is_on_biz_app?: boolean;
       }>;
     }>(
-      `${GRAPH}/${graphVersion}/${wabaId}/phone_numbers?fields=display_phone_number,verified_name,quality_rating,status,platform_type`,
+      `${GRAPH}/${graphVersion}/${wabaId}/phone_numbers?fields=display_phone_number,verified_name,quality_rating,status,platform_type,is_on_biz_app`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
       'listar los numeros',
       fetchImpl,
@@ -165,8 +168,11 @@ export async function discoverAccounts(
         verifiedName: n.verified_name ?? '',
         qualityRating: (n.quality_rating ?? 'NA').toUpperCase(),
         // CONNECTED es el numero ya registrado en la Cloud API; el resto
-        // (PENDING, MIGRATED, FLAGGED...) necesita el paso del PIN.
-        needsRegistration: (n.status ?? '').toUpperCase() !== 'CONNECTED',
+        // (PENDING, MIGRATED, FLAGGED...) necesita el paso del PIN. Un numero
+        // que sigue en la app del celular (coexistencia) ya esta registrado:
+        // Meta dice que se salte ese paso.
+        needsRegistration: (n.status ?? '').toUpperCase() !== 'CONNECTED' && !n.is_on_biz_app,
+        enLaApp: Boolean(n.is_on_biz_app),
       })),
     });
   }
@@ -186,7 +192,7 @@ export async function registerWebhook(
     appSecret,
     callbackUrl,
     verifyToken,
-    graphVersion = 'v21.0',
+    graphVersion = 'v25.0',
     fetchImpl = fetch,
   } = credentials;
 

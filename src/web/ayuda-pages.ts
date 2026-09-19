@@ -137,6 +137,17 @@ export function manualPage(opts: { nombreNegocio: string; demo?: boolean }): str
   </ul>
 </section>
 
+<section class="card" id="m-meta-2026">
+  <h2>Lo que Meta cambia con fecha (solo API oficial)</h2>
+  <p class="muted">Si conectaste por la API oficial de Meta (no por QR), hay tres cosas con fecha. Las ves en <a href="/setup">Conexión de WhatsApp</a> (paso 3) y en Estado del número, con los días que quedan; las dos primeras se marcan «Ya lo hice» porque Meta no deja comprobarlas por API.</p>
+  <ol>
+    <li><b>Método de pago, antes del 30/09/2026.</b> Desde el 1/10/2026 Meta cobra también lo que se contesta dentro de la ventana de 24 h (una persona o el asistente): S/ 0,0998 por mensaje en Perú, con los primeros 1 000 del mes gratis por número. Sin método de pago cargado (Meta Business Suite → Facturación), al gastar los 1 000 gratis los mensajes dejan de salir.</li>
+    <li><b>Registro incorporado v4, antes del 15/10/2026.</b> La configuración que abre la ventana «Conectar con Facebook» tiene que ser nueva: en tu app de Meta, Facebook Login for Business → Configurations → crear, variante «Embedded Signup», con Cloud API y, si el número sigue en el celular, «WhatsApp Business App onboarding». Pega su ID en Datos de tu app de Meta. Las configuraciones viejas dejan de abrir ese día.</li>
+    <li><b>Graph API.</b> El sistema ya habla con la versión al día (v25); solo avisa si tu <code>.env</code> fija una vieja (la v21 caduca el 21/01/2027).</li>
+  </ol>
+  <p class="muted">Además, con la API oficial el reparto manda <b>texto con botón</b> (mensaje de servicio, dentro de los 1 000 gratis) cuando el cliente escribió hace menos de 24 h, y la plantilla solo fuera de esa ventana. Y el límite de mensajería que ves en Estado del número es ahora el del <b>portafolio</b> de Meta (compartido por todos tus números).</p>
+</section>
+
 <section class="card" id="m-voz">
   <h2>Voz: contestar con audios y entender los del cliente</h2>
   <p class="muted">En <b>Mi asistente IA → Voz</b>. Hace falta una cuenta de <a href="https://elevenlabs.io" target="_blank" rel="noopener">ElevenLabs</a> (tiene plan gratis): pegas su clave (se guarda cifrada y no se vuelve a mostrar), eliges una voz de tu cuenta (el botón «Escuchar» te la reproduce aquí mismo), la calidad, y <b>cuándo</b> contesta el asistente con audio: nunca por su cuenta, solo cuando el cliente mandó un audio (lo recomendado: quien habla, espera que le hablen) o siempre. «Comprobar» te dice si la clave vale y cuántos caracteres te quedan este mes.</p>

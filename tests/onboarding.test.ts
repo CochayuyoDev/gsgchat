@@ -14,7 +14,7 @@ import {
   registerWebhook,
   OnboardingError,
 } from '../src/whatsapp/onboarding.js';
-import { signupAvailability, signupExtras } from '../src/whatsapp/embedded-signup.js';
+import { signupAvailability, signupExtras, SIGNUP_FINISH_EVENTS, SIGNUP_VERSION } from '../src/whatsapp/embedded-signup.js';
 
 const CREDENCIALES = { token: 'EAAG-token', appId: '123456', appSecret: 'secreto' };
 
@@ -210,20 +210,20 @@ describe('OnboardingError', () => {
   });
 });
 
-describe('modos de la ventana de Meta', () => {
-  it('la coexistencia pide el featureType que espera Meta', () => {
-    // El valor importa: `coexistence`, que circula en tutoriales viejos, abre
-    // el flujo equivocado y el usuario nunca ve el QR.
-    expect(signupExtras('coexistence').featureType).toBe('whatsapp_business_app_onboarding');
+describe('modos de la ventana de Meta (registro incorporado v4)', () => {
+  it('en v4 los extras llevan solo setup: ni featureType ni sessionInfoVersion (Meta apaga v2/v3 el 15/10/2026)', () => {
+    // El flujo lo decide la configuracion creada en la app de Meta (sus
+    // productos), no un valor suelto: mandar los viejos los ignora o abre el
+    // flujo equivocado.
+    expect(signupExtras('coexistence')).toEqual({ setup: {} });
+    expect(signupExtras('dedicated')).toEqual({ setup: {} });
+    expect(SIGNUP_VERSION).toBe(4);
   });
 
-  it('el numero dedicado no manda featureType', () => {
-    expect(signupExtras('dedicated').featureType).toBe('');
-  });
-
-  it('ambos modos mandan la version de sesion que enseña el numero elegido', () => {
-    expect(signupExtras('coexistence').sessionInfoVersion).toBe('3');
-    expect(signupExtras('dedicated').sessionInfoVersion).toBe('3');
+  it('cada modo sabe con que evento termina la ventana', () => {
+    expect(SIGNUP_FINISH_EVENTS.dedicated).toBe('FINISH');
+    expect(SIGNUP_FINISH_EVENTS.coexistence).toBe('FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING');
+    expect(SIGNUP_FINISH_EVENTS.soloCuenta).toBe('FINISH_ONLY_WABA');
   });
 
   it('sin id de configuracion no se puede abrir la ventana', () => {

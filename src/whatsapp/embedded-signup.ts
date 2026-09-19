@@ -50,7 +50,7 @@ export class SignupError extends Error {
  * a diario.
  */
 export async function exchangeCode(input: ExchangeInput): Promise<{ token: string }> {
-  const { appId, appSecret, code, graphVersion = 'v21.0', fetchImpl = fetch } = input;
+  const { appId, appSecret, code, graphVersion = 'v25.0', fetchImpl = fetch } = input;
 
   const url =
     `${GRAPH}/${graphVersion}/oauth/access_token` +
@@ -111,28 +111,35 @@ export function signupAvailability(credentials: { appId: string; signupConfigId:
  *   app del movil. Es el registro incorporado clasico, para un numero nuevo
  *   dedicado al sistema.
  *
- * El valor que espera Meta para la coexistencia es
- * `whatsapp_business_app_onboarding`. El `coexistence` que aparece en tutoriales
- * viejos ya no vale y hace que la ventana abra el flujo equivocado.
+ * Registro incorporado v4 (Meta apaga v2 y v3 el 15/10/2026): la ventana ya
+ * no se gobierna con `extras` (`featureType`, `sessionInfoVersion`), sino con
+ * la CONFIGURACION creada en la app de Meta (Facebook Login for Business →
+ * Configurations, variante "Embedded Signup"): los productos elegidos ahi
+ * (Cloud API; "WhatsApp Business App onboarding" para la coexistencia) son
+ * los que deciden el flujo. Por eso `extras` lleva solo `setup: {}` en los
+ * dos modos, y el modo sirve para lo que se le explica al usuario y para
+ * saltar el registro con PIN cuando el numero ya vive en la app.
  */
 export type SignupMode = 'coexistence' | 'dedicated';
 
-export const SIGNUP_FEATURE_TYPE: Record<SignupMode, string> = {
-  coexistence: 'whatsapp_business_app_onboarding',
-  dedicated: '',
-};
+/** La version del registro incorporado que manda el sistema. */
+export const SIGNUP_VERSION = 4;
+
+/** El evento con el que la ventana de Meta dice que termino, segun el modo. */
+export const SIGNUP_FINISH_EVENTS = {
+  /** Numero dedicado a la API: trae phone_number_id, waba_id y business_id. */
+  dedicated: 'FINISH',
+  /** El numero sigue en la app del celular: trae waba_id (y el numero); no lleva registro con PIN. */
+  coexistence: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+  /** Termino sin elegir numero: hay que volver a entrar. */
+  soloCuenta: 'FINISH_ONLY_WABA',
+} as const;
 
 export interface SignupExtras {
   setup: Record<string, never>;
-  featureType: string;
-  sessionInfoVersion: string;
 }
 
-/** Lo que se le pasa a `FB.login` en `extras`. */
-export function signupExtras(mode: SignupMode): SignupExtras {
-  return {
-    setup: {},
-    featureType: SIGNUP_FEATURE_TYPE[mode] ?? '',
-    sessionInfoVersion: '3',
-  };
+/** Lo que se le pasa a `FB.login` en `extras`: en v4, solo `setup`. */
+export function signupExtras(_mode: SignupMode): SignupExtras {
+  return { setup: {} };
 }
