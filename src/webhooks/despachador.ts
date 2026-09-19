@@ -21,8 +21,12 @@ import type { Bus, NombreEvento } from '../eventos/bus.js';
 import { firmar } from './firma.js';
 import type { Entrega, WebhookConSecreto, WebhooksRepo } from './repo.js';
 
-/** Cuanto se espera antes de cada reintento, por numero de intento ya hecho. */
-export const ESPERAS_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000, 12 * 3600_000];
+/**
+ * Cuanto se espera antes de cada reintento, por numero de intento ya hecho.
+ * El primero es corto: un receptor lento (un Stoky con `artisan serve`
+ * procesando el mensaje anterior) no puede dejar el chat un minuto atras.
+ */
+export const ESPERAS_MS = [15_000, 60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000, 12 * 3600_000];
 export const MAX_INTENTOS = ESPERAS_MS.length + 1;
 
 /** Sin una entrega buena en este tiempo (y con fallos), el webhook se apaga. */
@@ -72,7 +76,10 @@ export async function entregarUna(
   const ahora = deps.ahora?.() ?? new Date();
   const cuerpo = cuerpoDeEntrega(entrega);
   const control = new AbortController();
-  const corte = setTimeout(() => control.abort(), deps.timeoutMs ?? 15_000);
+  // 40 s: un receptor que procesa el mensaje antes de contestar (Stoky baja
+  // el adjunto, encola la IA) tarda mas de 15 s en una maquina lenta, y darlo
+  // por caido solo retrasaba el chat.
+  const corte = setTimeout(() => control.abort(), deps.timeoutMs ?? 40_000);
   try {
     const respuesta = await doFetch(webhook.url, {
       method: 'POST',
