@@ -81,6 +81,9 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
             autorNombre: typeof payload.autorNombre === 'string' ? payload.autorNombre : null,
             voz: payload.media?.voz === true,
             fecha,
+            // El adjunto (datos.media: id, kind, mimeType...) tambien en lo que sale,
+            // para que el otro sistema baje la foto o el sticker mandado desde el telefono.
+            datos: message.payload ?? null,
           },
         });
       }
