@@ -53,6 +53,21 @@ const progresoHistorial: ProgresoHistorial = { enMarcha: false, empezoEn: null, 
 /** Tope por chat: 40 lotes de 50 = 2000 mensajes por vuelta. */
 const LOTES_POR_CHAT = 40;
 
+/**
+ * El `payload` con el que se guarda un mensaje escrito desde el telefono.
+ *
+ * Lo mando una PERSONA (el dueno o quien tenga el celular), no el sistema:
+ * va con `origen: 'persona'` y el nombre «Teléfono», igual que lo manual
+ * del panel. Sin esto llegaba al webhook como `autor: sistema` y Stoky lo
+ * pintaba como un aviso automatico en vez de una respuesta del equipo (y
+ * su IA podia contestar encima). El `autor` de un grupo (quien escribio en
+ * el grupo) no es este autor: se quita. Lo que vino del historial se marca.
+ */
+export function payloadDeMensajePropio(payloadLeido: Record<string, unknown> | null | undefined, historial: boolean): Record<string, unknown> {
+  const base = payloadLeido && 'autor' in payloadLeido ? (({ autor: _autor, ...resto }) => resto)(payloadLeido) : (payloadLeido ?? {});
+  return { ...base, origen: 'persona', autorNombre: 'Teléfono', ...(historial ? { historial: true } : {}) };
+}
+
 export interface LocalRoutesDeps {
   config: Config;
   catalogo?: StokyClient;
@@ -184,11 +199,7 @@ export async function registerLocalRoutes(
             wamid: mensaje.id,
             kind: leido.kind,
             body: leido.body,
-            // El autor no va en lo propio: lo mande yo.
-            payload: (() => {
-              const base = leido.payload && 'autor' in leido.payload ? (({ autor: _autor, ...resto }) => (Object.keys(resto).length ? resto : null))(leido.payload) : leido.payload;
-              return mensaje.historial ? { ...(base ?? {}), historial: true } : base;
-            })(),
+            payload: payloadDeMensajePropio(leido.payload, Boolean(mensaje.historial)),
             status,
             createdAt: new Date(Number(mensaje.timestamp) * 1000 || Date.now()),
           });
