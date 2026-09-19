@@ -150,12 +150,12 @@ describe('entrar al sistema', () => {
     expect(claves.statusCode).toBe(403);
   });
 
-  it('la primera cuenta se crea una sola vez, es admin y deja la sesion abierta', async () => {
+  it('la primera cuenta se crea una sola vez, es superadministrador (entra como admin) y deja la sesion abierta', async () => {
     const corta = await app.inject({ method: 'POST', url: '/login/primera-cuenta', payload: { nombre: 'Ali', usuario: 'ali', clave: '123' } });
     expect(corta.statusCode).toBe(400);
     const res = await app.inject({ method: 'POST', url: '/login/primera-cuenta', payload: { nombre: 'Ali', usuario: 'Ali', clave: 'clave-segura-1' } });
     expect(res.statusCode).toBe(200);
-    expect(res.json().usuario).toMatchObject({ usuario: 'ali', rol: 'admin' });
+    expect(res.json().usuario).toMatchObject({ usuario: 'ali', rol: 'superadmin' });
     cookie = cookieDe(res);
     expect(cookie.startsWith(`${COOKIE_SESION}=`)).toBe(true);
 

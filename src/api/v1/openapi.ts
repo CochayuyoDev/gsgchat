@@ -96,6 +96,71 @@ export function openApi(baseUrl: string): Json {
           responses: { 200: json({ type: 'object', properties: { acciones: { type: 'array', items: { type: 'object' } } } }), 401: error('Sin clave'), 403: error('Sin permiso') },
         },
       },
+      '/ia/lecciones': {
+        post: {
+          tags: ['ia'],
+          summary: 'Ensenarle al asistente de WhatsApp: una leccion o miles de golpe',
+          description: [
+            'Una leccion es un `ejemplo` (cuando el cliente diga `pregunta`, contesta `respuesta`), un `dato` (un hecho del',
+            'negocio) o una `regla` (como comportarse). Se mandan una a una o en `lecciones` (hasta 5000 por llamada).',
+            'Las repetidas no entran dos veces. Con `revisar: true` quedan pendientes hasta que alguien las apruebe en',
+            'la pantalla Entrenar a la IA. En cada turno el asistente usa las que vienen al caso.',
+          ].join(' '),
+          ...permiso('ia:entrenar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [ref('Leccion'), { type: 'object', properties: { lecciones: { type: 'array', items: ref('Leccion') }, revisar: { type: 'boolean' } }, required: ['lecciones'] }] } } } },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, nuevas: { type: 'integer' }, repetidas: { type: 'integer' }, ids: { type: 'array', items: { type: 'integer' } } } }), 400: error('Leccion invalida'), 401: error('Sin clave'), 403: error('Sin permiso') },
+        },
+        get: {
+          tags: ['ia'],
+          summary: 'Las lecciones del asistente, con filtros (estado, tipo, tema, origen, q) y paginadas',
+          ...permiso('ia:entrenar'),
+          parameters: [
+            { name: 'estado', in: 'query', schema: { type: 'string', enum: ['activa', 'pendiente', 'descartada'] } },
+            { name: 'tipo', in: 'query', schema: { type: 'string', enum: ['ejemplo', 'dato', 'regla'] } },
+            { name: 'tema', in: 'query', schema: { type: 'string' } },
+            { name: 'q', in: 'query', schema: { type: 'string' } },
+            { name: 'pagina', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limite', in: 'query', schema: { type: 'integer', default: 50, maximum: 200 } },
+          ],
+          responses: { 200: json({ type: 'object', properties: { items: { type: 'array', items: { type: 'object' } }, total: { type: 'integer' }, pagina: { type: 'integer' }, paginas: { type: 'integer' } } }), 401: error('Sin clave'), 403: error('Sin permiso') },
+        },
+      },
+
+      '/conexion/canjear': {
+        post: {
+          tags: ['conexion'],
+          summary: 'Canjear un codigo de conexion por una clave de API (sin clave previa)',
+          description: [
+            'Un administrador crea en el panel un codigo corto (WA-XXXX-XXXX) con fecha limite, usos y permisos. El otro sistema',
+            'lo manda aqui, sin Authorization, y recibe su clave `wak_` con esos permisos y la direccion de este sistema. Cada',
+            'codigo vale los usos que se le dieron (normalmente uno) y hasta su fecha; despues responde 404. Hay tope de',
+            'intentos por direccion (429). El codigo se acepta como lo escriba la gente: minusculas, sin guiones, con espacios.',
+          ].join(' '),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { codigo: { type: 'string', example: 'WA-K7M3-9QXZ' }, sistema: { type: 'string', description: 'Quien canjea, para la lista (opcional)', example: 'Stoky CRM' } }, required: ['codigo'] } } } },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, clave: { type: 'string', example: 'wak_...' }, direccion: { type: 'string' }, para: { type: 'string' }, permisos: { type: 'array', items: { type: 'string' } }, usosRestantes: { type: 'integer' } } }), 404: error('El codigo no vale: no existe, ya se uso, caduco o fue anulado'), 409: error('Se acaba de usar'), 429: error('Demasiados intentos') },
+        },
+      },
+      '/stoky/conexion': {
+        get: {
+          tags: ['stoky'],
+          summary: 'Como esta la conexion de este sistema hacia Stoky (catalogo y panel), sin el token',
+          ...permiso('stoky:conectar'),
+          responses: { 200: json({ type: 'object', properties: { configurada: { type: 'boolean' }, url: { type: 'string' }, panelUrl: { type: 'string' }, origen: { type: 'string', enum: ['pantalla', 'stoky', 'env', 'ninguna'] }, tienda: { type: 'string', nullable: true }, almacen: { type: 'string', nullable: true }, ultimaPrueba: { type: 'object', nullable: true } } }), 401: error('Sin clave'), 403: error('Sin permiso') },
+        },
+        post: {
+          tags: ['stoky'],
+          summary: 'Stoky se presenta: su direccion, su token de conexion de tienda y su panel',
+          description: [
+            'Es lo que hace que vincular Stoky con este WhatsApp sea un solo boton del lado de Stoky: con la clave `wak_` que',
+            'la tienda pego en Stoky, Stoky manda aqui la direccion de su API, un token `stk_` de una conexion de tienda',
+            '(para que el asistente consulte precios y stock y tome pedidos) y la direccion de su panel (para registrar la',
+            'venta). Se guarda cifrado y se prueba en el acto; la respuesta dice si Stoky respondio y cuantos productos hay.',
+          ].join(' '),
+          ...permiso('stoky:conectar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', example: 'http://localhost:8102' }, token: { type: 'string', example: 'stk_...' }, panelUrl: { type: 'string', example: 'https://stoky.miempresa.com' } }, required: ['url', 'token'] } } } },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, configurada: { type: 'boolean' }, prueba: { type: 'object', properties: { ok: { type: 'boolean' }, tienda: { type: 'string' }, almacen: { type: 'string' }, productos: { type: 'integer' }, detalle: { type: 'string' } } } } }), 400: error('Direccion o token invalidos'), 401: error('Sin clave'), 403: error('Sin permiso') },
+        },
+      },
 
       '/estado': {
         get: {
@@ -109,10 +174,13 @@ export function openApi(baseUrl: string): Json {
       '/mensajes': {
         post: {
           tags: ['mensajes'],
-          summary: 'Enviar un mensaje (texto, plantilla, pin o pedir la ubicacion)',
+          summary: 'Enviar un mensaje (texto, nota de voz, fichero por URL, plantilla, pin o pedir la ubicacion)',
           description:
-            'Uno de: `texto`, `plantilla`, `ubicacion`, `pedirUbicacion`. Con la API de Meta, fuera de la ventana de 24 h ' +
-            'solo sale una plantilla aprobada. Si el contacto no existe se crea; con `consentimiento.origen` queda ademas con su opt-in.',
+            'Uno de: `texto`, `media`, `plantilla`, `ubicacion`, `pedirUbicacion`. Con la API de Meta, fuera de la ventana de 24 h ' +
+            'solo sale una plantilla aprobada. Si el contacto no existe se crea; con `consentimiento.origen` queda ademas con su opt-in. ' +
+            'Con `voz: true`, `texto` sale como nota de voz con la voz del asistente (se configura en el panel, Mi asistente IA → Voz): si no se puede ' +
+            '(sin clave, texto largo, ElevenLabs caido) sale por escrito y la respuesta trae `voz: {pedida, enviada, motivo}`. ' +
+            '`autor` dice quien lo manda para el hilo y el webhook: persona (un asesor), ia (una IA de tu sistema) o sistema (por defecto).',
           ...permiso('mensajes:enviar'),
           requestBody: { required: true, content: { 'application/json': { schema: ref('NuevoMensaje') } } },
           responses: {
@@ -341,6 +409,17 @@ export function openApi(baseUrl: string): Json {
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },
         Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
+        Leccion: {
+          type: 'object',
+          properties: {
+            tipo: { type: 'string', enum: ['ejemplo', 'dato', 'regla'], default: 'ejemplo' },
+            pregunta: { type: 'string', description: 'Lo que dice el cliente (obligatorio en un ejemplo)' },
+            respuesta: { type: 'string', description: 'Lo que hay que contestar; en un dato o una regla, el texto' },
+            tema: { type: 'string', description: 'envios, pagos, precios... (opcional)' },
+            mala: { type: 'string', description: 'En una correccion: lo que se dijo mal (opcional)' },
+          },
+          required: ['respuesta'],
+        },
         Orden: {
           type: 'object',
           properties: {
@@ -388,9 +467,33 @@ export function openApi(baseUrl: string): Json {
             ubicacion: { oneOf: [{ type: 'object', required: ['lat', 'lng'], properties: { lat: { type: 'number' }, lng: { type: 'number' }, nombre: { type: 'string' }, direccion: { type: 'string' } } }, { type: 'string', description: 'un link de mapa' }] },
             pedirUbicacion: { type: 'boolean', description: 'boton nativo (o texto con instrucciones) para que mande su ubicacion' },
             consentimiento: { type: 'object', required: ['origen'], properties: { origen: { type: 'string', example: 'pedido P-1024 en la tienda web' } } },
+            media: {
+              type: 'object',
+              required: ['url'],
+              description: 'Una foto, un video, un audio o un documento: se baja de `url` (hasta 16 MB) y se manda',
+              properties: {
+                url: { type: 'string', example: 'https://mitienda.com/fotos/zapato.png' },
+                tipo: { type: 'string', enum: ['imagen', 'video', 'audio', 'documento'], description: 'sin el, se deduce del tipo del fichero' },
+                caption: { type: 'string', maxLength: 1024 },
+                nombre: { type: 'string', description: 'el nombre con el que se ensena un documento' },
+                voz: { type: 'boolean', description: 'un audio como nota de voz (con la onda y el play)' },
+              },
+            },
+            voz: { type: 'boolean', description: 'mandar `texto` como nota de voz con la voz del asistente' },
+            autor: { type: 'string', enum: ['persona', 'ia', 'sistema'], default: 'sistema', description: 'quien lo manda, para el hilo y el webhook' },
+            autorNombre: { type: 'string', maxLength: 80, description: 'el nombre de pila de quien lo manda (un asesor); sale en el hilo y en el webhook' },
           },
         },
-        EnvioOk: { type: 'object', properties: { ok: { type: 'boolean', enum: [true] }, estado: { type: 'string', enum: ['enviado'] }, mensajeId: { type: 'string' }, entregaId: { type: 'integer' } } },
+        EnvioOk: {
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean', enum: [true] },
+            estado: { type: 'string', enum: ['enviado'] },
+            mensajeId: { type: 'string' },
+            entregaId: { type: 'integer' },
+            voz: { type: 'object', nullable: true, description: 'solo si se pidio `voz: true`', properties: { pedida: { type: 'boolean' }, enviada: { type: 'boolean' }, motivo: { type: 'string', nullable: true } } },
+          },
+        },
         EnvioBloqueado: {
           type: 'object',
           properties: {
@@ -440,7 +543,12 @@ export function openApi(baseUrl: string): Json {
             mensajeId: { type: 'string', nullable: true, description: 'el id de WhatsApp (wamid)' },
             direccion: { type: 'string', enum: ['entrante', 'saliente'] },
             tipo: { type: 'string', description: 'text, location, image, audio, document, sticker, template, interactive...' },
-            texto: { type: 'string', nullable: true },
+            texto: { type: 'string', nullable: true, description: 'en un audio entrante transcrito, lo que dijo; en una nota de voz saliente, lo que dice' },
+            autor: { type: 'string', nullable: true, enum: ['persona', 'ia', 'sistema', null], description: 'solo salientes: quien lo mando' },
+            autorNombre: { type: 'string', nullable: true, description: 'solo salientes: el nombre de pila de quien lo mando, si se dijo' },
+            transcripcion: { type: 'string', nullable: true, description: 'solo audios entrantes con la voz configurada: lo que dijo' },
+            anuncio: { type: 'object', nullable: true, description: 'solo entrantes que vienen de un anuncio de Facebook/Instagram (click to WhatsApp)', properties: { id: { type: 'string', nullable: true }, titulo: { type: 'string', nullable: true }, texto: { type: 'string', nullable: true }, url: { type: 'string', nullable: true }, imagen: { type: 'string', nullable: true }, clid: { type: 'string', nullable: true, description: 'el id del clic (ctwa_clid)' }, origen: { type: 'string', nullable: true, description: 'ad, post...' } } },
+            voz: { type: 'boolean', description: 'salio o llego como nota de voz generada' },
             datos: { type: 'object', nullable: true },
             estado: { type: 'string', nullable: true, description: 'sent, delivered, read, failed' },
             fecha: { type: 'string', format: 'date-time' },

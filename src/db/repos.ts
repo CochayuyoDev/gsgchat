@@ -22,6 +22,9 @@ import { createWebhooksRepo, type WebhooksRepo } from '../webhooks/repo.js';
 import { createConectoresRepo, type ConectoresRepo } from '../conectores/repo.js';
 import { createEnvioAutomaticoRepo, type EnvioAutomaticoRepo } from '../envio-automatico/repo.js';
 import { createPedidosRepo, type PedidosRepo } from '../pedidos/repo.js';
+import { createEntrenamientoRepo, type EntrenamientoRepo } from '../entrenamiento/repo.js';
+import { createCodigosConexionRepo, type CodigosConexionRepo } from '../auth/codigos-conexion.js';
+import { createTiendasRepo, type TiendasRepo } from '../tiendas/repo.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -535,6 +538,12 @@ export interface Repos {
   envioAutomatico: EnvioAutomaticoRepo;
   /** Pedidos tomados en el chat. Ver src/pedidos. */
   pedidos: PedidosRepo;
+  /** Lo que se le enseno al asistente de IA y sus examenes. Ver src/entrenamiento. */
+  entrenamiento: EntrenamientoRepo;
+  /** Codigos cortos con fecha limite para que otro sistema se conecte. Ver src/auth/codigos-conexion.ts. */
+  codigosConexion: CodigosConexionRepo;
+  /** Las tiendas que controla el superadministrador. Ver src/tiendas. */
+  tiendas: TiendasRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1809,6 +1818,9 @@ export function createRepos(poolCrudo: Pool): Repos {
     conectores: createConectoresRepo(pool),
     envioAutomatico: createEnvioAutomaticoRepo(pool),
     pedidos: createPedidosRepo(pool),
+    entrenamiento: createEntrenamientoRepo(pool),
+    codigosConexion: createCodigosConexionRepo(pool),
+    tiendas: createTiendasRepo(pool),
   };
 }
 

@@ -11,7 +11,20 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { Pool } from '../db/pool.js';
 
-export type Rol = 'admin' | 'operador';
+/**
+ * superadmin: quien puso el sistema. Lo de un admin y ademas la membresia,
+ * los codigos de conexion y las cuentas de otros superadministradores.
+ * admin: configura el negocio, gestiona cuentas (no las super) y claves.
+ * operador: atiende; no gestiona cuentas.
+ */
+export type Rol = 'superadmin' | 'admin' | 'operador';
+
+/** Lo que puede hacer en el panel: un superadmin pasa por todas las puertas de admin. */
+export type Capacidad = 'admin' | 'operador';
+
+export const capacidadDe = (rol: Rol): Capacidad => (rol === 'operador' ? 'operador' : 'admin');
+
+export const NOMBRE_ROL: Record<Rol, string> = { superadmin: 'Superadministrador', admin: 'Administrador', operador: 'Operador' };
 
 export interface Usuario {
   id: string;

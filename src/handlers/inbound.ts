@@ -24,12 +24,13 @@ import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import type { ServicioIA } from '../ia/servicio.js';
+import type { ServicioVoz } from '../voz/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import { numeroPermitido } from '../salud/lista-blanca.js';
 import type { Contact, Repos } from '../db/repos.js';
 import type { AutoReply } from '../db/automation.js';
 import type { Sender } from '../outbound/sender.js';
-import type { InboundMessage } from '../whatsapp/types.js';
+import type { AnuncioEntrada, InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { ExtractionSuccess, FailureReason } from '../types.js';
 import {
@@ -55,6 +56,7 @@ import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '..
 import { atenderRespuestaDeRuta, type RespuestaRuta } from '../rutas/inbound.js';
 import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
 import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
+import { hayCatalogo } from '../stoky/conexion.js';
 
 export interface InboundDeps {
   repos: Repos;
@@ -101,6 +103,12 @@ export interface InboundDeps {
    * insiste mas.
    */
   lista?: ServicioEnvioAutomatico;
+  /**
+   * La voz (ver src/voz): una nota de voz del cliente se transcribe al
+   * llegar y se atiende como texto; sin ella, a un audio se le pide el
+   * texto, como siempre.
+   */
+  voz?: ServicioVoz;
   /**
    * Cuanto se espera a que el cliente termine de escribir, en ms.
    *
@@ -182,7 +190,8 @@ function leerContenido(message: InboundMessage): { kind: MessageKind; body: stri
     return { kind: 'interactive', body: message.button.text, payload: { button: message.button } };
   }
   if (message.text?.body) {
-    return { kind: 'text', body: message.text.body, payload: null };
+    const anuncio = anuncioDelMensaje(message);
+    return { kind: 'text', body: message.text.body, payload: anuncio ? { anuncio } : null };
   }
   if (message.type === 'reaction' && message.reaction) {
     return { kind: 'unknown', body: `${message.reaction.emoji} (reacción a un mensaje)`, payload: { reaction: message.reaction } };
@@ -211,17 +220,41 @@ function leerContenido(message: InboundMessage): { kind: MessageKind; body: stri
   // Con el fichero ya bajado, el cuerpo es el pie de foto (o el nombre del
   // documento) y la referencia va al payload para que el chat lo pinte.
   if (message.media) {
-    const cuerpo = message.media.caption?.trim() || message.media.filename || etiquetas[kind] || '(adjunto)';
+    // Un audio transcrito se lee: el cuerpo es lo que dijo, y queda aparte
+    // en el payload para que el chat, la API y el webhook lo distingan.
+    const transcripcion = message.media.transcripcion?.trim();
+    const cuerpo = transcripcion || message.media.caption?.trim() || message.media.filename || etiquetas[kind] || '(adjunto)';
+    const anuncio = anuncioDelMensaje(message);
     return {
       kind,
       // Que se lea tambien en la lista de chats y en los respaldos, donde
       // no se pinta la foto.
       body: message.media.verUnaVez ? `${cuerpo} · ver una vez` : cuerpo,
-      payload: { media: message.media },
+      payload: { media: message.media, ...(transcripcion ? { transcripcion } : {}), ...(anuncio ? { anuncio } : {}) },
     };
   }
 
   return { kind, body: etiquetas[kind] ?? `(mensaje de tipo ${message.type})`, payload: null };
+}
+
+/**
+ * El anuncio del que viene el mensaje, con la misma forma venga de donde
+ * venga: el cliente local ya lo trae como `anuncio`; Meta lo manda como
+ * `referral` y aqui se traduce.
+ */
+export function anuncioDelMensaje(message: InboundMessage): AnuncioEntrada | null {
+  if (message.anuncio) return message.anuncio;
+  const r = message.referral;
+  if (!r) return null;
+  return {
+    id: r.source_id || null,
+    titulo: r.headline || null,
+    texto: r.body || null,
+    url: r.source_url || null,
+    imagen: r.image_url || r.thumbnail_url || null,
+    clid: r.ctwa_clid || null,
+    origen: r.source_type ? r.source_type.toLowerCase() : 'ad',
+  };
 }
 
 /**
@@ -328,7 +361,7 @@ async function contestarPrecio(
   const overrides = prefs.mensajesPreventa;
   const texto = entrada.texto.trim();
 
-  if (!texto || !catalogo) return false;
+  if (!texto || !hayCatalogo(catalogo)) return false;
   // En manos de una persona el bot no se mete, ni para dar un precio.
   if (lead.estado === 'calificado' || lead.estado === 'enviado') return false;
 
@@ -607,7 +640,7 @@ export async function handleInboundMessage(
   const contact = await repos.contacts.upsertFromInbound(phone, profileName);
   // Antes de anotar el entrante: asi se sabe si es el primer mensaje.
   const isFirstMessage = !contact.lastInboundAt;
-  const leido = readInbound(message);
+  let leido = readInbound(message);
 
   // La segunda entrega de un mensaje que llego vacio (el telefono reenvio un
   // "ver una vez"): se completa la fila que ya existe con la foto y se acaba.
@@ -637,6 +670,18 @@ export async function handleInboundMessage(
       createdAt: receivedAt,
     });
     return;
+  }
+
+  // Una nota de voz se transcribe ANTES de guardarla: asi el hilo, la API y
+  // el webhook llevan lo que dijo, y el asistente la atiende como texto. Lo
+  // viejo y lo reentregado (arriba) no se transcribe: no se gasta cuota en
+  // audios que nadie va a contestar.
+  if (message.type === 'audio' && message.media?.id && !message.media.transcripcion && deps.voz?.puedeTranscribir()) {
+    const transcripcion = await deps.voz.transcribirGuardado(message.media.id, message.media.mimeType).catch(() => null);
+    if (transcripcion) {
+      message.media.transcripcion = transcripcion;
+      leido = readInbound(message);
+    }
   }
 
   // El entrante abre la ventana de servicio de 24 h: sin esto el sender
@@ -832,7 +877,9 @@ export async function handleInboundMessage(
     }
   }
 
-  const text = message.text?.body ?? message.button?.text ?? '';
+  // Una nota de voz transcrita ES texto: sigue el mismo camino que si lo
+  // hubiera escrito (baja/alta, reparto, reglas, asistente).
+  const text = message.text?.body ?? message.button?.text ?? message.media?.transcripcion ?? '';
 
   if (!text.trim()) {
     // Un "ver una vez" llego vacio y se le pidio al telefono que lo reenvie
@@ -947,7 +994,7 @@ export async function handleInboundMessage(
     // El asistente de IA de la tienda: con lo que sabe del negocio (y el
     // catalogo, si esta), contesta; si no puede, deriva a una persona.
     if (deps.ia?.activa()) {
-      await deps.ia.turno(contact, text);
+      await deps.ia.turno(contact, text, { esAudio: message.type === 'audio' });
       return;
     }
 

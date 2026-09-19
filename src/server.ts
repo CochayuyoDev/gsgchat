@@ -41,6 +41,16 @@ import type { ServicioPlan } from './plan/servicio.js';
 import { registerIaRoutes } from './ia/routes.js';
 import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
 import { registerEnvioAutomaticoRoutes } from './envio-automatico/routes.js';
+import type { ServicioEntrenamiento } from './entrenamiento/servicio.js';
+import { registerEntrenamientoRoutes } from './entrenamiento/routes.js';
+import type { ServicioConexionStoky } from './stoky/conexion.js';
+import { registerStokyRoutes } from './stoky/routes.js';
+import { registerSuperRoutes } from './auth/super-routes.js';
+import { registerTiendasRoutes } from './tiendas/routes.js';
+import { crearServicioTiendas, type ServicioTiendas } from './tiendas/servicio.js';
+import { crearAlojamiento, type Alojamiento } from './tiendas/alojamiento.js';
+import type { ServicioVoz } from './voz/servicio.js';
+import { registerVozRoutes } from './voz/routes.js';
 
 export interface ServerDeps {
   config: Config;
@@ -73,10 +83,20 @@ export interface ServerDeps {
   autoConectarLocal?: boolean;
   /** La lista de numeros a los que el sistema escribe solo. Ver src/envio-automatico. */
   lista?: ServicioEnvioAutomatico;
+  /** Lo que se le enseno al asistente a gran escala. Ver src/entrenamiento. */
+  entrenamiento?: ServicioEntrenamiento;
+  /** La conexion con Stoky, configurable desde la pantalla. Ver src/stoky/conexion.ts. */
+  conexionStoky?: ServicioConexionStoky;
+  /** Las tiendas del superadministrador (para pruebas con reloj propio; si no, se crea aqui). */
+  tiendas?: ServicioTiendas;
+  /** Levantar instalaciones de tiendas en este servidor (Docker). Para pruebas; si no, se detecta por saas/.env. */
+  alojamiento?: Alojamiento;
+  /** La voz del asistente (ElevenLabs): notas de voz y transcripcion. Ver src/voz. */
+  voz?: ServicioVoz;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir, ia, lista } = deps;
+  const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir, ia, lista, entrenamiento, voz } = deps;
 
   // Los errores de validacion salen en espanol: son los que acaban en la
   // pantalla del operador, no en un log para programadores.
@@ -151,13 +171,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las
   // pantallas privadas; va antes de cualquier ruta que lo necesite.
   const secretoInterno = randomBytes(24).toString('hex');
-  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName, secretoInterno });
+  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName, secretoInterno, plan: deps.plan });
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz });
   if (ia) await registerIaRoutes(app, { ia });
+  // La voz del asistente (Mi asistente IA → Voz). Ver src/voz.
+  if (voz) await registerVozRoutes(app, { voz });
   if (lista) await registerEnvioAutomaticoRoutes(app, { repos, lista });
+  if (entrenamiento) await registerEntrenamientoRoutes(app, { entrenamiento });
+  if (deps.conexionStoky) await registerStokyRoutes(app, { conexion: deps.conexionStoky, repos, config });
+  // Membresia y codigos de conexion (superadministrador). Ver src/auth/super-routes.ts.
+  await registerSuperRoutes(app, { plan: deps.plan, codigos: repos.codigosConexion, claves: repos.claves, config });
+  // Las tiendas que controla el superadministrador, y lo que ellas preguntan. Ver src/tiendas.
+  await registerTiendasRoutes(app, {
+    tiendas: deps.tiendas ?? crearServicioTiendas({ repo: repos.tiendas, baseUrl: config.PUBLIC_BASE_URL, urlPlanInterna: config.TIENDAS_URL_PLAN_BASE, alojamiento: deps.alojamiento ?? crearAlojamiento({ log: (m) => app.log.info(m) }) }),
+    plan: deps.plan,
+  });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
   await registerWahaWebhookRoutes(app, {
@@ -173,6 +204,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     stickers,
     ia,
     lista,
+    voz,
     // Contestar a cada trozo de una rafaga le manda al cliente tres mensajes
     // seguidos sin que el haya escrito nada en medio (ver rafaga.ts).
     rafagaMs: config.RAFAGA_MS,
@@ -195,14 +227,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     lista,
     mediaDir,
     plan: deps.plan,
+    conexionStoky: deps.conexionStoky,
+    entrenamiento,
+    voz,
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
-  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia });
+  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.
   await registerEmbedRoutes(app, { config, ajustes });
   // El chat para los visitantes de la web del negocio (widget.js). Ver src/web-visitantes.
-  await registerWebVisitantesRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, bus: deps.bus, rafagaMs: config.RAFAGA_MS });
+  await registerWebVisitantesRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, bus: deps.bus, rafagaMs: config.RAFAGA_MS });
   // Conectores de tiendas (WooCommerce, Shopify): su webhook entra por /conectores/:id. Ver src/conectores.
   await registerConectoresRoutes(app, { repos, sender, settings, config, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
   await registerWebRoutes(app, {
@@ -217,6 +252,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     stickers,
     ia,
     lista,
+    entrenamiento,
+    voz,
     autoConectarLocal: deps.autoConectarLocal,
   });
 

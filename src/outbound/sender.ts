@@ -35,6 +35,14 @@ export interface SendJob {
   /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
   manual?: boolean;
   /**
+   * Quien lo manda, para el hilo (payload.origen): 'ia' el asistente,
+   * 'sistema' lo automatico (reglas, reparto, campanas). Lo manual va como
+   * 'persona'. El entrenamiento aprende solo de lo que contesto una persona.
+   */
+  origen?: string;
+  /** El nombre de pila de quien lo manda (un asesor), para el hilo y el webhook. */
+  autorNombre?: string;
+  /**
    * Limites por contacto propios de quien manda, por encima de la politica.
    *
    * El motor de rutas lleva su propia cadencia (la espera entre mensajes y
@@ -69,7 +77,25 @@ export interface SendJob {
     mimeType: string;
     filename?: string;
     caption?: string;
+    /**
+     * Un audio que es nota de voz (grabada, o generada por la voz del
+     * asistente): el cliente lo ve con la onda y el play, no como fichero.
+     * En el hilo, `caption` es lo que se dijo.
+     */
+    voz?: boolean;
   };
+}
+
+/**
+ * El hilo guarda quien mando cada saliente: una persona (a mano desde el
+ * chat), el asistente ('ia') o lo automatico ('sistema'). Es lo que permite
+ * que el entrenamiento aprenda de las respuestas humanas y no de las suyas.
+ */
+function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Record<string, unknown> {
+  // Lo que diga quien manda vale; sin decirlo, a mano es una persona y lo demas, el sistema.
+  const origen = job.origen ?? (job.manual ? 'persona' : 'sistema');
+  const nombre = job.autorNombre?.trim();
+  return { ...(payload ?? {}), origen, ...(nombre ? { autorNombre: nombre } : {}) };
 }
 
 export type SendOutcome =
@@ -165,13 +191,16 @@ export function createSender(deps: SenderDeps): Sender {
           kind: job.kind === 'freeform' ? 'text' : job.kind === 'media' ? (job.media?.kind ?? 'document') : job.kind,
           body: describeOutgoing(job, template),
           // El visitante de la web ve el fichero por el mismo id que el chat.
-          payload: job.location
-            ? { location: job.location }
-            : job.interactive
-              ? { interactive: job.interactive }
-              : job.media
-                ? { media: { id: job.media.id, kind: job.media.kind, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, bytes: job.media.datos.length } }
-                : null,
+          payload: conOrigen(
+            job,
+            job.location
+              ? { location: job.location }
+              : job.interactive
+                ? { interactive: job.interactive }
+                : job.media
+                  ? { media: { id: job.media.id, kind: job.media.kind, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, bytes: job.media.datos.length, ...(job.media.voz ? { voz: true } : {}) } }
+                  : null,
+          ),
           status: 'sent',
           deliveryId,
           createdAt: at,
@@ -303,15 +332,18 @@ export function createSender(deps: SenderDeps): Sender {
           kind: job.kind === 'freeform' ? 'text' : job.kind === 'media' ? (job.media?.kind ?? 'document') : job.kind,
           // Lo que el cliente REALMENTE recibio, si el proveedor lo dice.
           body: result.body ?? describeOutgoing(job, template),
-          payload: job.location
-            ? { location: job.location }
-            : job.interactive
-              ? { interactive: job.interactive }
-              : job.sticker
-                ? { media: { id: job.sticker.archivo, kind: 'sticker', mimeType: job.sticker.mimeType, url: `/stickers/${job.sticker.archivo}` } }
-                : job.media
-                  ? { media: { id: job.media.id, kind: job.media.kind, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, bytes: job.media.datos.length } }
-                  : null,
+          payload: conOrigen(
+            job,
+            job.location
+              ? { location: job.location }
+              : job.interactive
+                ? { interactive: job.interactive }
+                : job.sticker
+                  ? { media: { id: job.sticker.archivo, kind: 'sticker', mimeType: job.sticker.mimeType, url: `/stickers/${job.sticker.archivo}` } }
+                  : job.media
+                    ? { media: { id: job.media.id, kind: job.media.kind, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, bytes: job.media.datos.length, ...(job.media.voz ? { voz: true } : {}) } }
+                    : null,
+          ),
           status: 'sent',
           deliveryId,
           createdAt: at,
@@ -436,7 +468,7 @@ async function dispatch(
     case 'media': {
       if (!job.media) throw new Error('falta el campo media');
       if (!wa.sendMedia) throw new Error('este proveedor no manda fotos ni archivos');
-      return wa.sendMedia(job.phone, { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption });
+      return wa.sendMedia(job.phone, { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, voz: job.media.voz });
     }
     case 'freeform':
     default: {

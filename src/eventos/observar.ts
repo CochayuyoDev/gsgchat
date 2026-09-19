@@ -13,9 +13,12 @@
  */
 
 import type { Repos } from '../db/repos.js';
-import type { Bus, ContactoEvento } from './bus.js';
+import type { Bus, ContactoEvento, Eventos } from './bus.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
+
+/** Quien mando un saliente, con los tres valores del contrato (ver sender.ts `conOrigen`). */
+const autorDe = (origen: unknown): 'persona' | 'ia' | 'sistema' => (origen === 'persona' || origen === 'ia' ? origen : 'sistema');
 
 export function observarRepos(repos: Repos, bus: Bus): Repos {
   const contacto = async (id: string): Promise<ContactoEvento | null> => {
@@ -40,16 +43,33 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
       const quien: ContactoEvento = { id: c.id, telefono: c.phone, nombre: c.name };
       const fecha = iso(message.createdAt);
 
+      const payload = (message.payload ?? {}) as { transcripcion?: unknown; anuncio?: unknown; origen?: unknown; autorNombre?: unknown; media?: { voz?: unknown } };
       if (message.direction === 'in') {
         bus.emitir('mensaje.recibido', {
           contacto: quien,
-          mensaje: { id: message.wamid ?? null, tipo: message.kind, texto: message.body ?? null, datos: message.payload ?? null, fecha },
+          mensaje: {
+            id: message.wamid ?? null,
+            tipo: message.kind,
+            texto: message.body ?? null,
+            transcripcion: typeof payload.transcripcion === 'string' ? payload.transcripcion : null,
+            anuncio: payload.anuncio && typeof payload.anuncio === 'object' ? (payload.anuncio as Eventos['mensaje.recibido']['mensaje']['anuncio']) : null,
+            datos: message.payload ?? null,
+            fecha,
+          },
           ventanaAbierta: ventanaAbierta(c.lastInboundAt, message.createdAt ?? new Date()),
         });
       } else {
         bus.emitir('mensaje.enviado', {
           contacto: quien,
-          mensaje: { id: message.wamid ?? null, tipo: message.kind, texto: message.body ?? null, fecha },
+          mensaje: {
+            id: message.wamid ?? null,
+            tipo: message.kind,
+            texto: message.body ?? null,
+            autor: autorDe(payload.origen),
+            autorNombre: typeof payload.autorNombre === 'string' ? payload.autorNombre : null,
+            voz: payload.media?.voz === true,
+            fecha,
+          },
         });
       }
       return id;

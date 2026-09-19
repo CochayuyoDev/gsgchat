@@ -162,7 +162,7 @@ describe('la cola: encolar por suscriptor', () => {
     encolarEventos(bus, repo);
 
     bus.emitir('contacto.baja', { contacto: { telefono: '1' }, fecha: 'f' });
-    bus.emitir('mensaje.recibido', { contacto: { id: 'c', telefono: '1', nombre: null }, mensaje: { id: 'w', tipo: 'text', texto: 'x', datos: null, fecha: 'f' }, ventanaAbierta: true });
+    bus.emitir('mensaje.recibido', { contacto: { id: 'c', telefono: '1', nombre: null }, mensaje: { id: 'w', tipo: 'text', texto: 'x', transcripcion: null, anuncio: null, datos: null, fecha: 'f' }, ventanaAbierta: true });
     await new Promise((r) => setTimeout(r, 0));
 
     const porWebhook = (id: string) => repo._entregas.filter((e) => e.webhookId === id).map((e) => e.evento);

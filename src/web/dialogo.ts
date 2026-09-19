@@ -53,6 +53,16 @@ export const DIALOGO_CSS = `
   .dlg button.principal { background: var(--accent, #128c7e); border-color: var(--accent, #128c7e); color: #fff; }
   .dlg button.principal:hover { filter: brightness(1.08); }
   .dlg button.peligro { background: #dc2626; border-color: #dc2626; color: #fff; }
+  /* El cuadro de ensenar: dos campos largos y el tema. */
+  .dlg.leccion { width: min(560px, 100%); }
+  .dlg textarea {
+    width: 100%; font: inherit; font-size: 14.5px; padding: 10px 12px; min-height: 64px; resize: vertical;
+    border: 1px solid var(--line, #e3e5e9); border-radius: 9px; background: var(--bg, #fff); color: var(--text, #111b21);
+  }
+  .dlg textarea:focus { outline: 2px solid var(--accent, #128c7e); outline-offset: -1px; border-color: transparent; }
+  .dlg .campo + .campo { margin-top: 12px; }
+  .dlg .malo { background: rgba(220,38,38,.08); border: 1px solid rgba(220,38,38,.25); border-radius: 9px; padding: 9px 12px; font-size: 13.5px; margin-bottom: 12px; white-space: pre-wrap; }
+  .dlg .malo b { color: #dc2626; display: block; font-size: 12px; margin-bottom: 3px; }
 `;
 
 export const DIALOGO_JS = String.raw`
@@ -140,6 +150,70 @@ function pedirDato(opciones) {
     document.body.appendChild(fondo);
     campo.focus();
     campo.select();
+  });
+}
+
+/**
+ * Ensenarle algo al asistente desde cualquier pantalla: cuando el cliente
+ * diga X, responder Y. Devuelve {pregunta, respuesta, tema} o null.
+ *
+ * opciones: titulo, texto, pregunta, respuesta, tema, mala (lo que el
+ * asistente dijo mal, si es una correccion), boton.
+ */
+function pedirLeccion(opciones) {
+  opciones = opciones || {};
+  return new Promise(function (resolver) {
+    var fondo = document.createElement('div');
+    fondo.className = 'dlg-fondo';
+    fondo.innerHTML =
+      '<div class="dlg leccion" role="dialog" aria-modal="true">' +
+        '<h3></h3>' +
+        (opciones.texto ? '<p></p>' : '') +
+        (opciones.mala ? '<div class="malo"><b>Lo que respondió el asistente (y no debe repetir)</b><span></span></div>' : '') +
+        '<div class="campo"><label for="dlg-pregunta">Cuando el cliente diga…</label><textarea id="dlg-pregunta" rows="2"></textarea></div>' +
+        '<div class="campo"><label for="dlg-respuesta">…responder</label><textarea id="dlg-respuesta" rows="4"></textarea></div>' +
+        '<div class="campo"><label for="dlg-tema">Tema (opcional: envíos, pagos, precios…)</label><input id="dlg-tema" autocomplete="off"></div>' +
+        '<div class="mal" id="dlg-mal"></div>' +
+        '<div class="botones">' +
+          '<button type="button" id="dlg-no">Cancelar</button>' +
+          '<button type="button" class="principal" id="dlg-si"></button>' +
+        '</div>' +
+      '</div>';
+    fondo.querySelector('h3').textContent = opciones.titulo || 'Enséñale al asistente';
+    if (opciones.texto) fondo.querySelector('p').textContent = opciones.texto;
+    if (opciones.mala) fondo.querySelector('.malo span').textContent = opciones.mala;
+    fondo.querySelector('#dlg-si').textContent = opciones.boton || 'Enseñar';
+    var pregunta = fondo.querySelector('#dlg-pregunta');
+    var respuesta = fondo.querySelector('#dlg-respuesta');
+    var tema = fondo.querySelector('#dlg-tema');
+    pregunta.value = opciones.pregunta || '';
+    respuesta.value = opciones.respuesta || '';
+    tema.value = opciones.tema || '';
+    var mal = fondo.querySelector('#dlg-mal');
+
+    function cerrar(valor) {
+      document.removeEventListener('keydown', teclas);
+      fondo.remove();
+      resolver(valor);
+    }
+    function aceptar() {
+      var p = pregunta.value.trim();
+      var r = respuesta.value.trim();
+      if (!p) { mal.textContent = 'Escribe lo que dice el cliente.'; pregunta.focus(); return; }
+      if (r.length < 2) { mal.textContent = 'Escribe lo que hay que responder.'; respuesta.focus(); return; }
+      cerrar({ pregunta: p, respuesta: r, tema: tema.value.trim(), mala: opciones.mala || null });
+    }
+    function teclas(evento) {
+      if (evento.key === 'Escape') cerrar(null);
+      if (evento.key === 'Enter' && (evento.ctrlKey || evento.metaKey)) aceptar();
+    }
+    fondo.querySelector('#dlg-si').onclick = aceptar;
+    fondo.querySelector('#dlg-no').onclick = function () { cerrar(null); };
+    fondo.onclick = function (evento) { if (evento.target === fondo) cerrar(null); };
+    pregunta.oninput = respuesta.oninput = function () { mal.textContent = ''; };
+    document.addEventListener('keydown', teclas);
+    document.body.appendChild(fondo);
+    (opciones.respuesta ? pregunta : (opciones.pregunta ? respuesta : pregunta)).focus();
   });
 }
 

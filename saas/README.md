@@ -40,7 +40,7 @@ webhooks, sus conectores y su chat embebido, todos suyos.
 | `npm run saas:baja -- <slug>` | para el contenedor; **conserva** base y volumenes |
 | `npm run saas:baja -- <slug> --borrar-datos` | y borra base, volumenes y ficheros |
 | `npm run saas:estado` | que instancias hay y si responden |
-| `npm run saas:maestro` | el panel maestro (usuario y contrasena de `saas/.env`) |
+| `npm run saas:maestro` | el panel maestro antiguo (usuario y contrasena de `saas/.env`). **Hoy lo mismo esta dentro del panel del sistema, en Mi negocio → Tiendas (superadministrador)**: alta con plan, pagos, suspender, token, y si este panel corre en este servidor, "Crear tambien su instalacion" levanta el contenedor y el subdominio sin consola |
 | `npm run saas:prueba [-- --limpiar]` | la prueba de punta a punta: crea tres tiendas de prueba y comprueba todo (cuentas, claves, webhooks firmados, conectores, chat web, embebido y aislamiento) |
 
 El `slug` es el subdominio: minusculas, numeros y guiones, de 2 a 30.

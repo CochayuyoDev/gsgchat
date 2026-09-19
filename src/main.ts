@@ -23,6 +23,9 @@ import { mediaDirectory } from './whatsapp/local/media.js';
 import { crearBus } from './eventos/bus.js';
 import { observarRepos } from './eventos/observar.js';
 import { crearServicioIA } from './ia/servicio.js';
+import { crearServicioEntrenamiento, iaParaEntrenar } from './entrenamiento/servicio.js';
+import { crearServicioVoz } from './voz/servicio.js';
+import { crearConexionStoky } from './stoky/conexion.js';
 import { crearServicioEnvioAutomatico } from './envio-automatico/servicio.js';
 import { opcionesDesdeConfig } from './rutas/motor.js';
 import { PLANES } from './rutas/telefono.js';
@@ -108,6 +111,17 @@ const pararPlan = plan.arrancar();
 
 // El asistente de IA de la tienda: contesta con lo que la tienda escribio
 // en "Mi asistente IA" y deriva a una persona cuando no puede. Ver src/ia.
+// La conexion con Stoky (catalogo, panel), configurable desde la pantalla. Ver src/stoky/conexion.ts.
+const conexionStoky = await crearConexionStoky({ settingsRepo: runtime.settingsRepo, settingsKeyBase64: runtime.secrets.settingsKey, config, log: (m, d) => console.warn(`[stoky] ${m}`, d ?? '') });
+const catalogo = conexionStoky.cliente();
+
+// Lo que se le enseno al asistente a gran escala. Ver src/entrenamiento.
+const entrenamiento = await crearServicioEntrenamiento({ repo: repos.entrenamiento, nombreNegocio: () => ajustes.nombreNegocio(), log: (m, d) => console.warn(`[entrenamiento] ${m}`, d ?? '') });
+await entrenamiento.cargar();
+
+// La voz del asistente (ElevenLabs): notas de voz y transcripcion. Ver src/voz.
+const voz = await crearServicioVoz({ settingsRepo: runtime.settingsRepo, settingsKeyBase64: runtime.secrets.settingsKey, sender, mediaDir: mediaDirectory(), log: (m, d) => console.warn(`[voz] ${m}`, d ?? '') });
+
 const ia = await crearServicioIA({
   settingsRepo: runtime.settingsRepo,
   settingsKeyBase64: runtime.secrets.settingsKey,
@@ -120,8 +134,12 @@ const ia = await crearServicioIA({
   lista,
   bus,
   plan,
+  entrenamiento,
+  catalogo,
+  voz,
   log: (m, d) => console.warn(m, d ?? ''),
 });
+entrenamiento.conectarIA(iaParaEntrenar(ia));
 
 if (ajustes.soloNumeros().length) {
   console.log(`
@@ -153,7 +171,7 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, lista, plan, mediaDir: mediaDirectory(), autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, entrenamiento, conexionStoky, catalogo, lista, plan, voz, mediaDir: mediaDirectory(), autoConectarLocal: true });
 
 const worker = conRedis
   ? createOutboundWorker({ redisUrl: config.REDIS_URL, sender, queue, onResult })

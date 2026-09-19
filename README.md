@@ -887,12 +887,55 @@ contrasena, y la sesion queda en una cookie firmada (`wa_sesion`, siete dias,
 401.
 
 - **La primera cuenta.** Mientras la tabla `usuarios` este vacia, `/login`
-  ofrece crear la primera cuenta, que nace administradora. En cuanto existe,
-  esa puerta se cierra y solo queda entrar.
-- **Dos roles.** `admin` hace todo, incluido crear y gestionar usuarios
-  (seccion **Usuarios** del panel: crear, cambiar contrasena, cambiar rol,
-  desactivar). `operador` usa el sistema entero pero no toca usuarios. Nadie
-  puede desactivarse ni quitarse el rol de admin a si mismo.
+  ofrece crear la primera cuenta, que nace **superadministradora**: es de
+  quien pone el sistema. En cuanto existe, esa puerta se cierra y solo queda
+  entrar. (La migracion 023 asciende a la primera cuenta admin de las
+  instalaciones anteriores.)
+- **Tres roles.** `superadmin` lleva la membresia, los codigos de conexion y
+  las cuentas de otros superadministradores, ademas de todo lo de un admin;
+  en la sesion entra con capacidad `admin` y la marca `super` (asi todas las
+  puertas de admin le valen; `UsuarioSesion.rol` es la capacidad, no el rol
+  guardado). `admin` configura el negocio y gestiona usuarios (no puede crear
+  ni tocar superadministradores) y claves. `operador` usa el sistema entero
+  pero no toca usuarios. Nadie puede desactivarse ni bajarse a operador a si
+  mismo, y el ultimo superadministrador no se degrada ni se desactiva.
+- **Membresia** (`/panel#membresia`, `src/plan/servicio.ts`). Sin `PLAN_URL`
+  (sin maestro del SaaS) la lleva el superadministrador desde la pantalla:
+  plan (Prueba, Basico, Pro o Personalizado), pagada hasta, topes (IA al mes,
+  campañas, conectores, cuentas), precio, como renovar, aviso propio,
+  suspender, y apuntar pagos (corren el vencimiento). Se guarda en
+  `settings` (`plan.local`) y manda igual que la del maestro: vencida o
+  suspendida, la IA y las campañas se paran y el panel lo avisa; con tope de
+  cuentas no se crean mas usuarios. Un admin la ve (sin los pagos). Con
+  maestro, manda el maestro y aqui es de solo lectura.
+- **Tiendas** (`/panel#tiendas`, solo superadmin; `src/tiendas/`). El control
+  de los negocios a los que se les puso el sistema, metido en el panel (es lo
+  que antes hacia `saas/maestro` en ficheros): alta con plan y vencimiento,
+  pagos, suspender/reactivar, token nuevo, borrar, y un semaforo por tienda
+  (al dia / por vencer / vencida / suspendida, en linea si pregunto hace
+  menos de 20 min). Cada tienda pregunta `GET /api/plan/<slug>` con su token
+  `plt_` (el contrato de siempre, sin clave de API); en su instalacion se
+  pega la URL del plan y el token en Membresia → "Esta instalacion depende
+  de un maestro" (`POST /admin/membresia/maestro`; tambien vale `PLAN_URL`
+  y `PLAN_TOKEN` del `.env`). Con maestro, la instancia respeta el `vencido`
+  que le mandan (una suspension) aunque la fecha no haya llegado.
+  **Alojamiento** (`src/tiendas/alojamiento.ts`): si este panel corre en el
+  servidor del SaaS (hay `saas/.env` con `DOMINIO_BASE`, Docker y Caddy),
+  "Dar de alta" con la casilla "Crear tambien su instalacion" levanta la
+  base, el contenedor y el subdominio de la tienda (lo mismo que
+  `npm run saas:alta`) con `PLAN_URL` y `PLAN_TOKEN` ya puestos hacia este
+  panel (`TIENDAS_URL_PLAN_BASE` si dentro de Docker no se llega por la
+  URL publica): el cliente entra por su URL y crea su primera cuenta, sin
+  pegar nada. Si Docker falla, la tienda queda registrada y se dice; borrar
+  una tienda instalada ofrece dejar, parar o borrar su instalacion.
+- **Codigos de conexion** (`/panel#integraciones`,
+  `src/auth/codigos-conexion.ts`, `super-routes.ts`). Para conectar otro
+  sistema sin copiar claves: un codigo corto `WA-XXXX-XXXX` con fecha limite
+  (fecha, o 1 h / 1 / 7 / 30 / 90 dias), usos y permisos; el otro sistema lo
+  canjea en `POST /api/v1/conexion/canjear` (sin clave; tope de 20 intentos
+  por IP y hora) y recibe su clave `wak_`. La lista dice vigente / usado /
+  caducado / anulado y quien lo canjeo, cuando y desde donde. En el bloque
+  Stoky, "Crear un codigo de conexion" lo hace de un clic.
 - **Contrasenas.** Ocho caracteres o mas, guardadas con scrypt y sal; nunca en
   claro. Cada uno se cambia la suya desde la seccion Usuarios. Cambiar la
   contrasena o desactivar la cuenta cierra las sesiones abiertas de ese usuario.
@@ -1017,6 +1060,72 @@ conectado y sin URL, se usa Stoky. Al modelo solo se le dan los productos
 que casan con lo que pregunto el cliente (seis como mucho), asi que un
 catalogo de mil productos no cuesta tokens de mas.
 
+### Voz: contestar con audios y entender los del cliente
+
+En Mi asistente IA → Voz se pega la clave de ElevenLabs (tiene plan
+gratis; se guarda cifrada como el token de la IA), se elige la voz de la
+cuenta (se puede escuchar ahi mismo), la calidad (multilingue v2, flash,
+turbo) y CUANDO contesta el asistente con audio: nunca por su cuenta, solo
+cuando el cliente mando un audio (por defecto), o siempre. Con la clave
+puesta, las notas de voz del cliente se transcriben al llegar
+(`speech-to-text`, modelo scribe): el asistente las lee como texto, en el
+chat se ven escritas ("dijo: …") y salen por la API y el webhook como
+`transcripcion`. Antes, a un audio se le pedia el texto; sin clave sigue
+siendo asi.
+
+La nota de voz se pide en Opus/Ogg (lo que WhatsApp ensena con la onda y el
+play; el cliente local la manda como `ptt`); si el plan no tiene Opus se cae
+a MP3. En el hilo el audio del asistente lleva de pie lo que dice. La voz
+nunca calla al asistente: sin clave, con el texto mas largo que el tope
+(600 caracteres por defecto), con un enlace dentro, con la cuota agotada o
+ElevenLabs caido, el mensaje sale por escrito y el motivo queda en la
+pantalla. Lo que es del sistema (la despedida al derivar, el resumen de un
+pedido con cifras, las frases ante una manipulacion) va siempre por
+escrito. Desde Chats, «Mandar como audio» manda lo escrito como nota de voz
+de una persona. Otro sistema (Stoky) no configura nada: manda `voz: true`
+en `POST /api/v1/mensajes`. Codigo en `src/voz/` (`elevenlabs.ts` el
+cliente, `servicio.ts` la configuracion y el envio, `routes.ts` la pantalla).
+
+### Entrenar a la IA a gran escala (`/entrenamiento`)
+
+El asistente corre sobre modelos gratuitos de Puter: no se reentrena el
+modelo, **se le ensena con lecciones**. Una leccion es un *ejemplo* (cuando
+el cliente diga X, contesta Y), un *dato* del negocio o una *regla*. Pueden
+ser miles: en cada turno un buscador propio en memoria (BM25 + trigramas,
+`src/entrenamiento/indice.ts`; tolera faltas de ortografia y va sin IA)
+elige las que vienen al caso —seis ejemplos, ocho datos y todas las reglas
+como mucho— y solo esas van al prompt (`construirSistema`, bloque
+`lecciones`). Cuatro formas de ensenarle, todas desde la pantalla:
+
+1. **Una cosa a mano**: ejemplo, dato o regla, con tema.
+2. **Muchas de golpe** (`src/entrenamiento/importar.ts`): un `.xlsx` (lector
+   propio sin dependencias, `xlsx.ts`), CSV/TSV pegado, JSON, un **chat
+   exportado de WhatsApp** (se dice quien es el negocio), dialogos
+   `Cliente:/Tú:` o lineas `pregunta => respuesta`. Vista previa antes de
+   importar; las repetidas no entran dos veces (huella de pregunta+respuesta
+   normalizadas); "revisar antes de usarlas" las deja pendientes.
+3. **Aprender de las conversaciones** (`aprender.ts`): recorre todos los
+   chats y saca cada pregunta de un cliente con lo que contesto **una
+   persona** del negocio. Para eso cada saliente lleva `payload.origen`
+   (`persona` desde el chat, `ia` el asistente, `sistema` lo automatico; las
+   filas viejas sin origen cuentan como persona): lo del asistente, las
+   plantillas, el reparto y las campanas no ensenan nada. Se tapan
+   telefonos, DNI, correos y tarjetas. Despues "Pulir con la IA" limpia lo
+   personal, descarta lo que no sirve como ejemplo general y pone tema.
+4. **Desde el chat**: "Enseñar respuesta" sobre lo que dijo el cliente y
+   "Corregir" sobre lo que contesto el asistente (lo dicho mal queda como
+   "no respondas asi"). Tambien en la prueba de Mi asistente IA.
+
+**Examen**: a cada leccion se le hace su pregunta al asistente real y se
+comprueba que diga las mismas cifras (precios, plazos) y hable de lo mismo
+(`examen.ts`: cifras + cobertura de palabras con raiz), que no invente
+precios y que no pase con una persona sin motivo. Corre en el servidor con
+progreso y cancelar; queda el historico (`ia_examenes`, `ia_examen_casos`)
+y cada leccion marca si paso. La IA operadora entiende `ia.ensenar`,
+`ia.lecciones`, `ia.aprenderDeChats` e `ia.examinar`. API:
+`POST/GET /api/v1/ia/lecciones` con permiso `ia:entrenar` (hasta 5000 por
+llamada). Tablas en `db/migrations/022_entrenamiento.sql`.
+
 ### Pedidos desde el chat
 
 Con catalogo, el asistente **toma pedidos**: consigue en la conversacion
@@ -1057,8 +1166,34 @@ aparecen con "Ver todo".
 
 ## Integrar otro sistema (Stoky, GSG, lo que venga)
 
-Cualquier sistema, en cualquier lenguaje, puede **enviar** por WhatsApp desde
-aqui y **enterarse** de lo que llega, sin ver el panel ni el resto del
+### Stoky, en las dos direcciones y desde la pantalla
+
+Stoky y este sistema se hablan en dos sentidos, y los dos se ven y se
+configuran en `/panel#integraciones` → **Stoky**, cada uno con su semaforo:
+
+1. **Stoky → este WhatsApp.** Stoky manda mensajes, lee la bandeja, ensena el
+   QR y le da ordenes a la IA por `/api/v1` con una clave `wak_`. El boton
+   **Crear la clave para Stoky** la crea con todos los permisos (el cliente
+   de Stoky exige `*`: necesita `/admin/local/status` para el QR), revoca la
+   "Stoky" anterior y dice que pegar en Stoky (CRM → WhatsApp → Conectar →
+   *Mi sistema de WhatsApp*). El semaforo ve si Stoky ya uso la clave y si el
+   webhook hacia Stoky (`/webhooks/wa-locator/...`) esta activo y entrego.
+2. **Este WhatsApp → Stoky.** El asistente consulta precios y stock, toma
+   pedidos con ellos y manda a registrar la venta en el panel de Stoky. La
+   conexion vive en `settings` (`stoky.conexion` + `stoky.token` cifrado,
+   `src/stoky/conexion.ts`) y se pone desde la pantalla: direccion de la API
+   de Stoky, direccion del panel y un token `stk_` (Stoky → Integraciones →
+   Conexiones de tienda). **Probar** dice tienda, almacen y productos sin
+   guardar. Las variables `STOKY_URL`, `STOKY_TOKEN` y `STOKY_PANEL_URL` del
+   `.env` son solo el valor inicial. El resto del sistema recibe siempre el
+   mismo `StokyClient` (un proxy que apunta a la conexion vigente); quien
+   necesite saber si hay catalogo pregunta `hayCatalogo(c)`, no si existe.
+   Stoky puede mandar estos datos solo al vincularse:
+   `POST /api/v1/stoky/conexion` `{url, token, panelUrl}` con permiso
+   `stoky:conectar` (incluido en `*`); `GET` devuelve el estado sin token.
+
+Cualquier otro sistema, en cualquier lenguaje, puede **enviar** por WhatsApp
+desde aqui y **enterarse** de lo que llega, sin ver el panel ni el resto del
 sistema. Son tres piezas, y las tres se manejan desde `/panel#integraciones`:
 
 1. **Una clave de API con permisos.** Al crearla se marca que puede hacer
@@ -1084,7 +1219,7 @@ indica; sin el, `403` diciendo cual falta.
 |---|---|---|---|
 | GET | `/api/v1` · `/openapi.json` · `/eventos` | ninguno | que hay, el contrato y la lista de eventos |
 | GET | `/api/v1/estado` | `estado:leer` | proveedor, conexion, semaforo, cupo de hoy, cola |
-| POST | `/api/v1/mensajes` | `mensajes:enviar` | `{telefono, texto \| plantilla \| ubicacion \| pedirUbicacion, consentimiento?}` |
+| POST | `/api/v1/mensajes` | `mensajes:enviar` | `{telefono, texto \| media \| plantilla \| ubicacion \| pedirUbicacion, voz?, autor?, consentimiento?}`. `voz: true` manda `texto` como nota de voz con la voz del asistente (si no se puede, sale por escrito y la respuesta trae `voz: {pedida, enviada, motivo}`); `media: {url, tipo?, caption?, nombre?, voz?}` baja el fichero (16 MB) y lo manda; `autor` = `persona` \| `ia` \| `sistema` y `autorNombre` (el nombre de pila del asesor) quedan en el hilo y en el webhook |
 | GET | `/api/v1/conversaciones` · `/conversaciones/:telefono` | `conversaciones:leer` | la lista y el hilo, con `puedeEscribir` y por que no |
 | GET/POST | `/api/v1/contactos` · `/contactos/:telefono` · `/contactos/:telefono/baja` | `contactos:leer` / `contactos:escribir` | alta con `consentimiento.origen`, consulta y baja |
 | GET | `/api/v1/plantillas` | `plantillas:leer` | solo las aprobadas |
@@ -1115,8 +1250,8 @@ eligen los eventos; sin elegir, llegan todos:
 
 | Evento | Cuando |
 |---|---|
-| `mensaje.recibido` | el cliente escribio: texto, ubicacion, foto, audio... con `ventanaAbierta` |
-| `mensaje.enviado` | salio un mensaje hacia el cliente, lo mandara quien lo mandara |
+| `mensaje.recibido` | el cliente escribio: texto, ubicacion, foto, audio... con `ventanaAbierta`; un audio con la voz configurada trae `mensaje.transcripcion` (y `texto` lleva lo mismo); si escribio desde un anuncio de Facebook/Instagram, `mensaje.anuncio {id, titulo, texto, url, imagen, clid, origen}` (Meta lo manda como `referral`; por QR se lee del `externalAdReply` de Baileys) |
+| `mensaje.enviado` | salio un mensaje hacia el cliente, con `mensaje.autor` (`persona` a mano, `ia` el asistente, `sistema` lo automatico y la API), `mensaje.autorNombre` (quien escribio desde el panel o lo que dijo la API) y `mensaje.voz` si salio como nota de voz |
 | `mensaje.estado` | `sent`, `delivered`, `read` o `failed` de un mensaje enviado |
 | `ubicacion.recibida` | se consiguio la ubicacion de un cliente (pin o link de mapa) |
 | `contacto.alta` · `contacto.baja` | consentimiento registrado / pidio no recibir mas |

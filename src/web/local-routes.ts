@@ -16,6 +16,7 @@ import { providerOf } from '../settings/service.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
+import type { ServicioVoz } from '../voz/servicio.js';
 import type { Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
@@ -64,6 +65,8 @@ export interface LocalRoutesDeps {
   /** El asistente de IA, para que los entrantes del socket lo usen igual. */
   ia?: ServicioIA;
   lista?: ServicioEnvioAutomatico;
+  /** La voz: las notas de voz que entran por el socket se transcriben. */
+  voz?: ServicioVoz;
   /**
    * Volver a abrir la sesion al arrancar si ya hay una vinculacion guardada.
    *
@@ -123,7 +126,7 @@ export async function registerLocalRoutes(
 
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, seen: createSeenCache() };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, seen: createSeenCache() };
 
   async function arrancar() {
     return startLocal({

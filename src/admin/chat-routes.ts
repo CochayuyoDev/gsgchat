@@ -25,6 +25,8 @@ export interface ChatDeps {
   settings: SettingsService;
   /** Donde se guardan los ficheros que se mandan desde el chat (y los que llegan). */
   mediaDir?: string;
+  /** La voz del asistente (ver src/voz): con `voz: true`, el texto sale como nota de voz. */
+  voz?: import('../voz/servicio.js').ServicioVoz;
 }
 
 /** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
@@ -37,6 +39,8 @@ const adjuntoSchema = z.object({
   mimeType: z.string().trim().min(3).max(120),
   filename: z.string().trim().max(200).optional(),
   caption: z.string().trim().max(1024).optional(),
+  autor: z.enum(['persona', 'ia', 'sistema']).optional(),
+  autorNombre: z.string().trim().max(80).optional(),
 });
 
 /** Que es el fichero para WhatsApp, por su tipo. Un GIF va como documento: como foto llega quieto. */
@@ -56,6 +60,11 @@ const sendSchema = z.object({
   location: z.string().min(1).optional(),
   /** Boton nativo para pedirle la ubicacion al cliente. */
   askLocation: z.boolean().optional(),
+  /** Mandar el texto como nota de voz con la voz del asistente. Si no se puede, sale por escrito y se dice. */
+  voz: z.boolean().optional(),
+  /** Quien lo manda, si no es quien esta en sesion (el chat embebido de otro sistema lo dice). */
+  autor: z.enum(['persona', 'ia', 'sistema']).optional(),
+  autorNombre: z.string().trim().max(80).optional(),
   /** Fuera de la ventana de 24 h solo sale una plantilla aprobada. */
   templateName: z.string().optional(),
   templateLanguage: z.string().default('es'),
@@ -203,8 +212,19 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * o una plantilla; todo pasa por el sender, asi que las guardas siguen
    * puestas y el bloqueo se devuelve explicado.
    */
+  /**
+   * Quien manda desde el chat: la persona en sesion, con su nombre de pila,
+   * salvo que el cuerpo diga otra cosa (el chat embebido de otro sistema
+   * manda en nombre de su asesor). Va al hilo y al webhook (`autorNombre`).
+   */
+  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string }) => ({
+    origen: body.autor,
+    autorNombre: body.autorNombre?.trim() || (request.usuario?.nombre || request.usuario?.usuario || '').split(' ')[0] || undefined,
+  });
+
   app.post('/admin/chat/send', async (request, reply) => {
     const body = sendSchema.parse(request.body);
+    const firma = quien(request, body);
 
     let phone = body.phone ? normalizePhone(body.phone) : undefined;
     let esGrupo = false;
@@ -231,6 +251,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         kind: 'interactive',
         category: 'UTILITY',
         manual: aMano(),
+        ...firma,
         interactive: {
           body: body.text?.trim() || textoPedirUbicacion(),
           locationRequest: true,
@@ -248,6 +269,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         kind: 'location',
         category: 'UTILITY',
         manual: aMano(),
+        ...firma,
         location: { latitude: result.lat, longitude: result.lng },
       });
       return { ...outcome, location: result };
@@ -276,6 +298,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         kind: 'template',
         category: template.category,
         manual: aMano(),
+        ...firma,
         templateName: template.name,
         templateLanguage: template.language,
         variables: body.variables,
@@ -284,7 +307,14 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     if (!body.text?.trim()) return reply.code(400).send({ error: 'el mensaje va vacio' });
 
-    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano() });
+    if (body.voz) {
+      if (!deps.voz) return reply.code(409).send({ error: 'La voz no está configurada: Mi asistente IA → Voz.' });
+      const r = await deps.voz.enviar({ phone, texto: body.text, origen: firma.origen ?? 'persona', autorNombre: firma.autorNombre, manual: aMano() });
+      // Si salio por escrito, se dice: quien pulso "audio" tiene que saber que no fue audio.
+      return { ...r.outcome, voz: { enviada: r.enviadoComo === 'audio', motivo: r.motivo } };
+    }
+
+    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), ...firma });
   });
 
   /**
@@ -319,6 +349,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       kind: 'media',
       category: 'UTILITY',
       manual: aMano(),
+      ...quien(request, body),
       media: { id, kind, datos, mimeType, filename: body.filename || undefined, caption: body.caption || undefined },
     });
   });

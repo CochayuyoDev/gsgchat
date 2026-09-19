@@ -240,6 +240,13 @@ const RUIDO = new Set([
 ]);
 
 export interface StokyClient {
+  /**
+   * Si hay conexión configurada. El cliente que ve el sistema puede ser el
+   * proxy de `conexion.ts`, que existe siempre y apunta a lo vigente: quien
+   * necesite saber "¿hay catálogo?" pregunta esto (ver `hayCatalogo`), no si
+   * el objeto existe. Ausente = sí.
+   */
+  disponible?(): boolean;
   /** Si la conexión está viva y a qué tienda apunta. */
   ping(): Promise<{ ok: boolean; tenant?: string; warehouse?: string; detail?: string }>;
   /** El catálogo entero, cacheado. */

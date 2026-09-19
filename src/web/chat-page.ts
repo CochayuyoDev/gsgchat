@@ -230,6 +230,20 @@ const CSS = `
   .msg .sticker-wrap:hover .guardar-sticker,
   .msg .sticker-wrap .guardar-sticker:focus { opacity: 1; }
   .msg .sticker-wrap .guardar-sticker[disabled] { opacity: 1; cursor: default; background: rgba(5, 150, 105, .9); }
+  /* Ensenarle al asistente desde el globo: aparece al pasar el raton. */
+  .msg { position: relative; }
+  .msg .ensenar {
+    position: absolute; top: -9px; opacity: 0; transition: opacity .12s;
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer;
+    background: var(--panel); color: var(--muted); box-shadow: 0 2px 6px rgba(0,0,0,.12); white-space: nowrap;
+  }
+  .msg.in .ensenar { right: -6px; }
+  .msg.out .ensenar { left: -6px; }
+  .msg.out .ensenar.corregir { color: #b45309; }
+  .msg:hover .ensenar, .msg .ensenar:focus { opacity: 1; }
+  .msg .ensenar:hover { color: var(--accent); border-color: var(--accent); }
+  .msg .de-ia { display: inline-block; font-size: 10.5px; color: var(--muted); margin-right: 4px; }
+  .msg .transcrito { display: inline-block; font-size: 11px; color: var(--muted); margin: 4px 0 0; }
   .ayuda-teclas { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 60; display: grid; place-items: center; padding: 20px; }
   .ayuda-teclas .caja { background: var(--panel); color: var(--text); border-radius: 14px; padding: 20px 22px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
   .ayuda-teclas h3 { margin: 0 0 10px; font-size: 16px; }
@@ -722,7 +736,9 @@ async function openChat(contactId, silent) {
   } catch (error) { toast(error.message); }
 }
 
+var pintados = [];       /* lo que hay pintado en el hilo ahora mismo (para los botones por globo) */
 function renderMessages(messages, scrollToEnd, mantenerVista) {
+  pintados = messages;
   var box = document.getElementById('messages');
   var cerca = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   if (!messages.length) {
@@ -754,10 +770,14 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       (primero ? ' primero' : '') + (soloSticker ? ' solo-sticker' : '') + '">' +
       (autor && primero ? autorHtml(autor) : '') +
       adjuntoHtml(m) +
+      (m.payload && m.payload.anuncio ? '<span class="transcrito" title="Escribió desde un anuncio de Facebook/Instagram' + (m.payload.anuncio.url ? ': ' + esc(m.payload.anuncio.url) : '') + '">📣 desde el anuncio' + (m.payload.anuncio.titulo ? ' «' + esc(m.payload.anuncio.titulo) + '»' : '') + '</span><br>' : '') +
+      (m.payload && m.payload.transcripcion ? '<span class="transcrito" title="Lo que dijo en el audio, transcrito">🎤 dijo:</span> ' : '') +
+      (m.direction === 'out' && m.payload && m.payload.media && m.payload.media.voz ? '<span class="transcrito" title="Salió como nota de voz; esto es lo que dice">🔊 nota de voz:</span> ' : '') +
       withLinks(cuerpoVisible(m)) +
       verUnaVezHtml(m) +
       (m.payload && m.payload.borradoPorRemitente ? '<span class="borrado" title="' + esc(hhmm(m.payload.borradoPorRemitente)) + '">🗑 Lo eliminó para todos · aquí se conserva</span>' : '') +
-      '<span class="meta">' + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
+      '<span class="meta">' + (m.direction === 'out' && m.payload && m.payload.origen === 'ia' ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
+      ensenarHtml(m, i, messages) +
       '</div>';
   });
   if (box.innerHTML !== html) box.innerHTML = html;
@@ -767,6 +787,40 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
 }
 
 /**
+
+/*
+ * El boton de ensenarle al asistente, en cada globo de texto: en lo que dijo
+ * el cliente, "Enseñar respuesta" (con lo que se le contesto ya puesto); en
+ * lo que contesto el asistente, "Corregir" (lo que dijo queda como lo que
+ * no debe repetir). En un grupo no: ahi no atiende el asistente.
+ */
+function ensenarHtml(m, i, messages) {
+  if (current && current.tipo === 'grupo') return '';
+  // Un audio transcrito cuenta como texto: tambien se le puede ensenar la respuesta.
+  var esTexto = m.kind === 'text' || (m.kind === 'audio' && m.payload && m.payload.transcripcion);
+  if (!esTexto || !(m.body || '').trim()) return '';
+  if (m.direction === 'in') return '<button type="button" class="ensenar" data-ensenar="' + i + '" title="Enséñale al asistente qué responder a esto">Enseñar respuesta</button>';
+  if (m.payload && m.payload.origen === 'ia') return '<button type="button" class="ensenar corregir" data-corregir="' + i + '" title="Dile al asistente qué debió responder">Corregir</button>';
+  return '';
+}
+
+/* Lo que contesto una persona justo despues de ese mensaje, si lo hubo. */
+function respuestaSiguiente(messages, i) {
+  for (var k = i + 1; k < messages.length; k++) {
+    var m = messages[k];
+    if (m.direction === 'in') return '';
+    if (m.kind === 'text' && (m.body || '').trim() && !(m.payload && m.payload.origen === 'ia')) return m.body;
+  }
+  return '';
+}
+/* Lo ultimo que dijo el cliente antes de ese mensaje. */
+function preguntaAnterior(messages, i) {
+  for (var k = i - 1; k >= 0; k--) {
+    var m = messages[k];
+    if (m.direction === 'in' && m.kind === 'text' && (m.body || '').trim()) return m.body;
+  }
+  return '';
+}
 
 function autorHtml(autor) {
   var nombre = autor.nombre || autor.telefono || 'Alguien del grupo';
@@ -988,6 +1042,30 @@ document.addEventListener('click', function (event) {
   if (!pedir || !current) return;
   event.preventDefault();
   if (!enviando) enviar({ text: TEXTO_VER_UNA_VEZ });
+});
+/* Ensenarle al asistente desde el globo (ver ensenarHtml). */
+document.addEventListener('click', async function (event) {
+  var b = event.target.closest('[data-ensenar],[data-corregir]');
+  if (!b || !current) return;
+  event.preventDefault();
+  var mensajes = pintados;
+  var corrigiendo = b.hasAttribute('data-corregir');
+  var i = Number(b.getAttribute(corrigiendo ? 'data-corregir' : 'data-ensenar'));
+  var m = mensajes[i];
+  if (!m) return;
+  var v = corrigiendo
+    ? await pedirLeccion({ titulo: 'Corregir al asistente', texto: 'Escribe lo que debió responder. Desde ahora, ante una pregunta parecida, contestará así y no repetirá lo de abajo.', pregunta: preguntaAnterior(mensajes, i), respuesta: '', mala: m.body, boton: 'Corregir' })
+    : await pedirLeccion({ titulo: 'Enséñale al asistente', texto: 'Cuando otro cliente pregunte algo parecido, el asistente responderá así.', pregunta: m.body, respuesta: respuestaSiguiente(mensajes, i), boton: 'Enseñar' });
+  if (!v) return;
+  try {
+    var r = await api('/admin/entrenamiento/lecciones', { method: 'POST', body: {
+      tipo: 'ejemplo', pregunta: v.pregunta, respuesta: v.respuesta, tema: v.tema || null, mala: v.mala || null,
+      origen: corrigiendo ? 'correccion' : 'chat', origenDetalle: (current.name ? current.name + ' (' + current.phone + ')' : current.phone)
+    } });
+    toast(r.nueva ? (corrigiendo ? 'Corregido: el asistente ya lo sabe.' : 'El asistente ya lo sabe.') : 'Esa lección ya la tenía.');
+  } catch (error) {
+    toast(error && error.message ? error.message : 'No se pudo guardar.');
+  }
 });
 document.addEventListener('click', async function (event) {
   var boton = event.target && event.target.closest
@@ -1243,7 +1321,7 @@ var enviando = 0;
 async function enviar(payload) {
   if (!current) return;
   var pendiente = null;
-  if (payload.text) pendiente = pintarPendiente(payload.text);
+  if (payload.text) pendiente = pintarPendiente((payload.voz ? '🎤 ' : '') + payload.text);
   else if (payload.askLocation) pendiente = pintarPendiente('📍 Solicitud de ubicación');
   else if (payload.location) pendiente = pintarPendiente('🗺 Pin: ' + payload.location);
   if (enviando && (payload.askLocation || payload.text)) { toast('Espera: todavía está saliendo el anterior.'); if (pendiente) pendiente.remove(); return; }
@@ -1258,6 +1336,8 @@ async function enviar(payload) {
     if (r.ok === false) {
       if (pendiente) pendiente.remove();
       toast('No salio: ' + (r.reason || r.error || 'bloqueado por las guardas'));
+    } else if (payload.voz && r.voz && !r.voz.enviada) {
+      toast('Salió por escrito, no como audio: ' + (r.voz.motivo || 'la voz no está lista'));
     }
     await openChat(current.id, true);
     loadChats(true);
@@ -1360,6 +1440,7 @@ function pintarBarraRapidas() {
   var enGrupo = current && current.tipo === 'grupo';
   var html = (enGrupo ? '' : '<button class="chip accion" type="button" data-accion="ubicacion" title="Le manda la solicitud de ubicación (Ctrl+Shift+U)">📍 Pedir ubicación</button>') +
     '<button class="chip accion" type="button" data-accion="pin" title="Mandarle un pin del mapa (Ctrl+Shift+L)">🗺 Mandar pin</button>' +
+    (enGrupo ? '' : '<button class="chip accion" type="button" data-accion="voz" title="Manda lo que escribiste como nota de voz, con la voz del asistente (Mi asistente IA → Voz)">🎤 Mandar como audio</button>') +
     atajos.map(function (a, i) {
       return '<button class="chip" type="button" data-rapida="' + i + '" title="Manda: ' + esc(rellenarAtajo(a.texto)) + ' (Shift+clic para retocarlo antes)">' + esc(etiquetaDe(a.atajo)) + '</button>';
     }).join('') +
@@ -1372,6 +1453,14 @@ function pintarBarraRapidas() {
   if (pedir) pedir.onclick = function () { if (!enviando) enviar({ askLocation: true }); };
   var pin = barra.querySelector('[data-accion="pin"]');
   if (pin) pin.onclick = function () { document.getElementById('tools').classList.remove('plegado'); document.getElementById('loc').focus(); };
+  var voz = barra.querySelector('[data-accion="voz"]');
+  if (voz) voz.onclick = function () {
+    var texto = input.value.trim();
+    if (!texto) { toast('Escribe primero lo que quieres que diga el audio.'); input.focus(); return; }
+    if (enviando) return;
+    input.value = ''; input.style.height = 'auto';
+    enviar({ text: texto, voz: true });
+  };
 }
 document.getElementById('rapidas').onclick = function () {
   if (atajosAbierto()) return cerrarAtajos();

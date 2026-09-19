@@ -26,6 +26,8 @@ export interface ItemMenu {
   descripcion: string;
   /** Solo lo ven los administradores (el servidor lo exige igual). */
   soloAdmin?: boolean;
+  /** Solo lo ve un superadministrador (el servidor lo exige igual). */
+  soloSuper?: boolean;
   /**
    * Solo en el modo avanzado. Por defecto el menu es sencillo: lo que una
    * tienda necesita para atender su WhatsApp con la IA; lo demas (reparto,
@@ -54,6 +56,7 @@ export const MENU_GRUPOS: GrupoMenu[] = [
     items: [
       { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicacion.' },
       { id: 'ia', etiqueta: 'Mi asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Lo que sabe de tu negocio y como contesta solo. Cuando no puede, te pasa la conversacion.' },
+      { id: 'entrenamiento', etiqueta: 'Entrenar a la IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Ensenarle a gran escala: miles de ejemplos, datos y reglas; importar un Excel o un chat; aprender de tus conversaciones reales; examinarla en masa y corregirla.' },
       { id: 'pedidos', etiqueta: 'Pedidos del chat', href: '/panel#pedidos', icono: 'plantilla', descripcion: 'Lo que el asistente (o una persona) cerro en la conversacion: confirmar, cancelar o pasarlo a la tienda.' },
       { id: 'contactos', etiqueta: 'Contactos', href: '/panel#contactos', icono: 'contactos', descripcion: 'Importar, buscar y ver el consentimiento de cada numero.' },
       { id: 'envio-automatico', etiqueta: 'Envío automático', href: '/envio-automatico', icono: 'reloj', descripcion: 'Los numeros a los que el sistema escribe solo: un mensaje cada pocas horas, como una persona, hasta conseguir su ubicacion o una respuesta. Se ponen y se quitan a mano o pidiendoselo a la IA.' },
@@ -102,9 +105,11 @@ export const MENU_GRUPOS: GrupoMenu[] = [
     etiqueta: 'Mi negocio',
     items: [
       { id: 'setup', etiqueta: 'Conexión de WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'Conectar el numero: QR, WAHA o la API oficial de Meta.' },
-      { id: 'integraciones', etiqueta: 'Conectar mi web y tienda', href: '/panel#integraciones', icono: 'llave', descripcion: 'El chat dentro de tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas.', soloAdmin: true },
+      { id: 'integraciones', etiqueta: 'Conectar mi web y tienda', href: '/panel#integraciones', icono: 'llave', descripcion: 'Stoky (en las dos direcciones, con su estado), el chat dentro de tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas.', soloAdmin: true },
       { id: 'configuracion', etiqueta: 'Configuración', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio, horario, avisos, modo prueba y ritmo.', soloAdmin: true },
-      { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contrasenas.', soloAdmin: true, avanzado: true },
+      { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contrasenas. Un superadministrador crea administradores; un administrador crea operadores.', soloAdmin: true, avanzado: true },
+      { id: 'membresia', etiqueta: 'Membresía', href: '/panel#membresia', icono: 'campana', descripcion: 'El plan de esta instalacion: hasta cuando esta pagada, sus topes y los pagos apuntados. La cambia el superadministrador; un administrador la ve.', soloAdmin: true },
+      { id: 'tiendas', etiqueta: 'Tiendas', href: '/panel#tiendas', icono: 'inicio', descripcion: 'Las tiendas que controla el superadministrador: cada negocio con su instalacion, su plan, hasta cuando esta pagada, si esta en linea; dar de alta, apuntar pagos, suspender.', soloAdmin: true, soloSuper: true },
       { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Bitacora: quien hizo que y cuando.', soloAdmin: true, avanzado: true },
     ],
   },
@@ -474,9 +479,10 @@ const JS = String.raw`
     window.__yo = u;
     document.querySelectorAll('.s-avatar').forEach(function (a) { a.textContent = iniciales(u.nombre); });
     document.getElementById('s-nombre').textContent = u.nombre;
-    document.getElementById('s-rol').textContent = u.rol === 'admin' ? 'Administrador' : 'Operador';
+    document.getElementById('s-rol').textContent = u.super ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : 'Operador';
     var chip = document.getElementById('s-chip-nombre'); if (chip) chip.textContent = u.nombre;
     if (u.rol !== 'admin') document.querySelectorAll('.s-item[data-solo-admin]').forEach(function (a) { a.classList.add('hidden'); });
+    if (!u.super) document.querySelectorAll('.s-item[data-solo-super]').forEach(function (a) { a.classList.add('hidden'); });
     document.dispatchEvent(new CustomEvent('yo', { detail: u }));
   }).catch(function () {});
 
@@ -650,7 +656,7 @@ export interface ShellOpts {
 function itemHtml(item: ItemMenu, sub: boolean): string {
   const buscar = escapeHtml(`${item.etiqueta} ${item.descripcion}`.toLowerCase());
   const badge = item.id === 'chats' ? '<span class="s-badge" id="s-badge-chats"></span>' : '';
-  return `<a class="s-item${sub ? ' sub' : ''}" data-ir="${item.href}" data-buscar="${buscar}"${item.soloAdmin ? ' data-solo-admin="1"' : ''}${item.avanzado ? ' data-avanzado="1"' : ''} title="${escapeHtml(item.descripcion)}">${icono(item.icono)}<span class="s-txt">${escapeHtml(item.etiqueta)}</span>${badge}</a>`;
+  return `<a class="s-item${sub ? ' sub' : ''}" data-ir="${item.href}" data-buscar="${buscar}"${item.soloAdmin ? ' data-solo-admin="1"' : ''}${item.soloSuper ? ' data-solo-super="1"' : ''}${item.avanzado ? ' data-avanzado="1"' : ''} title="${escapeHtml(item.descripcion)}">${icono(item.icono)}<span class="s-txt">${escapeHtml(item.etiqueta)}</span>${badge}</a>`;
 }
 
 export function appShell(opts: ShellOpts): string {

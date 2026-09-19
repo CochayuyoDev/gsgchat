@@ -112,6 +112,20 @@ const CSS = `
   .cf-aviso { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(217,119,6,.08); border: 1px solid rgba(217,119,6,.35); font-size: 13.5px; }
   .cf-nota { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
   .nueva-clave { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--warn); border-radius: 12px; background: rgba(217,119,6,.06); }
+  /* La conexion con Stoky: dos direcciones, una caja cada una. */
+  .stk { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; align-items: start; margin-top: 10px; }
+  @media (max-width: 1000px) { .stk { grid-template-columns: 1fr; } }
+  .stk .caja-stk { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--chip, #f6f7f9); }
+  .stk h3 { margin: 0 0 6px; }
+  .stk .paso-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12.5px; margin-right: 6px; }
+  .stk .semaforo { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 13.5px; }
+  .stk .semaforo div { display: flex; gap: 8px; align-items: flex-start; }
+  .stk .semaforo i { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
+  .stk .semaforo i.ok { background: #16a34a; } .stk .semaforo i.warn { background: #d97706; } .stk .semaforo i.bad { background: #dc2626; }
+  .stk .semaforo small { display: block; color: var(--muted); }
+  .stk ol { margin: 6px 0 0; padding-left: 20px; font-size: 13.5px; }
+  .stk ol li { margin: 3px 0; }
+  .stk code.dir { display: inline-block; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
   .nueva-clave code { display: block; font-size: 14px; padding: 10px 12px; margin: 8px 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; word-break: break-all; }
   .ia-chat { border: 1px solid var(--line); border-radius: 12px; background: var(--bg); min-height: 120px; max-height: 360px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
   .ia-chat .b { max-width: 80%; padding: 7px 11px; border-radius: 10px; background: var(--card); white-space: pre-wrap; }
@@ -263,7 +277,9 @@ const SECCIONES: Array<[string, string, string]> = [
   ['extraer', 'Extraer coordenadas', 'De un link de mapa o un texto'],
   ['configuracion', 'Configuración', 'Horario de envío, ritmo, modo prueba, avisos y nombre'],
   ['usuarios', 'Usuarios', 'Cuentas del equipo, roles y contraseñas'],
-  ['integraciones', 'Conectar mi web y mi tienda', 'El chat en tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas'],
+  ['membresia', 'Membresía', 'El plan de esta instalación: hasta cuándo está pagada, sus topes y los pagos'],
+  ['tiendas', 'Tiendas', 'Los negocios que controlas: su plan, hasta cuándo está pagado, si están en línea'],
+  ['integraciones', 'Conectar mi web y mi tienda', 'Stoky, el chat en tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas'],
   ['actividad', 'Actividad', 'Quién hizo qué y cuándo'],
   ['mi-cuenta', 'Mi cuenta', 'Tus datos y tu contraseña'],
 ];
@@ -735,8 +751,8 @@ ${warning}
 
 <section id="tab-usuarios" class="card hidden">
   <h2>Usuarios</h2>
-  <p class="muted">Quien puede entrar al sistema. Un <b>administrador</b> gestiona usuarios y claves de API; un <b>operador</b> hace todo lo demas. Cada uno entra con su usuario y contrasena en <code>/login</code>.
-  Los programas (el sistema de GSG) no tienen usuario: entran con una clave de API, ver <a href="/panel#integraciones">Integraciones</a>.</p>
+  <p class="muted">Quien puede entrar al sistema. Un <b>superadministrador</b> es quien puso el sistema: lleva la <a href="/panel#membresia">membresía</a>, los códigos de conexión y las cuentas de los demás superadministradores. Un <b>administrador</b> configura el negocio y gestiona usuarios y claves de API. Un <b>operador</b> atiende y usa todo lo demás. Cada uno entra con su usuario y contraseña en <code>/login</code>.
+  Los programas (Stoky, el sistema de GSG) no tienen usuario: entran con una clave de API o un código de conexión, ver <a href="/panel#integraciones">Conectar mi web y tienda</a>.</p>
   <div id="us-table" class="tablewrap"></div>
 
   <h3>Crear usuario</h3>
@@ -744,7 +760,7 @@ ${warning}
     <div><label>Nombre</label><input id="us-nombre" placeholder="Rosa"></div>
     <div><label>Usuario</label><input id="us-usuario" placeholder="rosa"></div>
     <div><label>Contrasena (8+)</label><input id="us-clave" type="password"></div>
-    <div><label>Rol</label><select id="us-rol"><option value="operador">operador</option><option value="admin">admin</option></select></div>
+    <div><label>Rol</label><select id="us-rol"><option value="operador">Operador</option><option value="admin">Administrador</option><option value="superadmin" id="us-rol-super" class="hidden">Superadministrador</option></select></div>
   </div>
   <div class="actions"><button id="us-crear">Crear</button><span id="us-state" class="pill hidden"></span></div>
 
@@ -761,6 +777,93 @@ ${warning}
   </div>
   <div id="ac-table" class="tablewrap"></div>
   <div class="pager"><button class="ghost sm" id="ac-prev">Anterior</button><span id="ac-page"></span><button class="ghost sm" id="ac-next">Siguiente</button></div>
+</section>
+
+<section id="tab-membresia" class="card hidden">
+  <h2>Membresía</h2>
+  <p class="muted" id="mb-intro">El plan de esta instalación: hasta cuándo está pagada, qué incluye y los pagos apuntados. Cuando vence o se suspende, el asistente IA y las campañas se paran; los chats siguen funcionando.</p>
+  <div id="mb-estado" style="margin:12px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:10px"></div>
+  <div id="mb-editar" class="hidden">
+    <h3>Plan y vencimiento</h3>
+    <div class="toolbar">
+      <div><label for="mb-plan">Plan</label><select id="mb-plan"></select></div>
+      <div><label for="mb-nombre">Nombre que ve el negocio</label><input id="mb-nombre" placeholder="Básico"></div>
+      <div><label for="mb-vence">Pagada hasta</label><input id="mb-vence" type="date"></div>
+      <div><label for="mb-estado-sel">Estado</label><select id="mb-estado-sel"><option value="activa">Activa</option><option value="suspendida">Suspendida (como vencida)</option></select></div>
+    </div>
+    <h3>Lo que incluye</h3>
+    <div class="toolbar">
+      <div><label for="mb-ia">Respuestas de IA al mes <small class="muted">(vacío = sin tope, 0 = sin IA)</small></label><input id="mb-ia" type="number" min="0" placeholder="sin tope"></div>
+      <div><label for="mb-usuarios">Cuentas del panel <small class="muted">(vacío = sin tope)</small></label><input id="mb-usuarios" type="number" min="1" placeholder="sin tope"></div>
+      <div><label for="mb-campanas">Campañas por goteo</label><select id="mb-campanas"><option value="true">Incluidas</option><option value="false">No incluidas</option></select></div>
+      <div><label for="mb-conectores">Conectores de tiendas</label><select id="mb-conectores"><option value="true">Incluidos</option><option value="false">No incluidos</option></select></div>
+      <div><label for="mb-precio">Precio al mes</label><input id="mb-precio" type="number" min="0" step="0.01" placeholder="0"></div>
+      <div><label for="mb-moneda">Moneda</label><input id="mb-moneda" placeholder="PEN" maxlength="8"></div>
+    </div>
+    <h3>Lo que ve el negocio</h3>
+    <div class="toolbar">
+      <div style="flex:2"><label for="mb-contacto">Cómo renovar (se muestra junto al aviso)</label><input id="mb-contacto" placeholder="Escríbenos al 987 654 321 para renovar"></div>
+      <div style="flex:2"><label for="mb-aviso">Aviso propio (opcional; vacío = ninguno)</label><input id="mb-aviso" placeholder="Tu membresía se renueva el día 1"></div>
+    </div>
+    <div class="actions">
+      <button id="mb-guardar">Guardar membresía</button>
+      <button class="ghost" id="mb-quitar">Quitar la membresía (instancia libre)</button>
+      <span id="mb-state" class="pill hidden"></span>
+    </div>
+    <h3 style="margin-top:22px">Apuntar un pago</h3>
+    <p class="muted">Corre el vencimiento tantos meses desde la fecha en que está pagada (o desde hoy, si ya venció) y deja la membresía activa.</p>
+    <div class="toolbar">
+      <div><label for="mb-pago-meses">Meses</label><input id="mb-pago-meses" type="number" min="1" max="60" value="1"></div>
+      <div><label for="mb-pago-monto">Monto</label><input id="mb-pago-monto" type="number" min="0" step="0.01" placeholder="49"></div>
+      <div style="flex:2"><label for="mb-pago-nota">Nota (Yape, transferencia, factura…)</label><input id="mb-pago-nota" placeholder="Yape 18/09"></div>
+      <div><label>&nbsp;</label><button id="mb-pagar">Apuntar pago</button></div>
+    </div>
+    <div id="mb-pagos" class="tablewrap" style="margin-top:10px"></div>
+  </div>
+  <p class="muted hidden" id="mb-solo-lectura">Solo un superadministrador cambia la membresía. Si vence o hay que ampliarla, habla con quien te instaló el sistema.</p>
+  <div id="mb-maestro" class="hidden" style="margin-top:22px;border-top:1px solid var(--line);padding-top:14px">
+    <h3>Esta instalación depende de un maestro</h3>
+    <p class="muted">Si quien te vendió el sistema controla las tiendas desde su propio panel (Tiendas), pega aquí la dirección del plan y el token que te dio: esta instalación tomará su plan de allí y aquí no se edita nada.</p>
+    <div id="mb-maestro-estado" class="muted" style="margin-bottom:8px"></div>
+    <div class="toolbar">
+      <div style="flex:2"><label for="mb-maestro-url">Dirección del plan</label><input id="mb-maestro-url" placeholder="https://panel-del-maestro/api/plan/mi-tienda"></div>
+      <div style="flex:2"><label for="mb-maestro-token">Token de la tienda</label><input id="mb-maestro-token" type="password" autocomplete="off" placeholder="plt_…"></div>
+      <div><label>&nbsp;</label><button id="mb-maestro-conectar">Conectar</button></div>
+      <div><label>&nbsp;</label><button class="ghost hidden" id="mb-maestro-quitar">Desconectar</button></div>
+    </div>
+  </div>
+</section>
+
+<section id="tab-tiendas" class="card hidden">
+  <h2>Tiendas</h2>
+  <p class="muted">Cada negocio al que le pusiste el sistema tiene su propia instalación. Aquí las tienes todas: su plan, hasta cuándo está pagado, si está en línea; das de alta, apuntas pagos, suspendes o reactivas. Cada tienda toma su plan de aquí (su instalación pregunta cada cuarto de hora con su token).</p>
+  <div id="ti-alojamiento" class="muted" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px"></div>
+  <div id="ti-resumen" class="grid" style="margin-bottom:14px"></div>
+  <div id="ti-table" class="tablewrap"></div>
+  <div id="ti-nueva" class="nueva-clave hidden">
+    <b>Token de <span id="ti-nueva-nombre"></span>: cópialo ahora, no se volverá a mostrar.</b>
+    <code id="ti-token"></code>
+    <label>Dirección del plan</label><code id="ti-url-plan"></code>
+    <ol id="ti-pasos" style="margin:8px 0 0;padding-left:20px;font-size:13.5px"></ol>
+    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="ti-copiar">Copiar el token</button><button class="ghost sm" id="ti-cerrar">Ya lo pegué</button></div>
+  </div>
+
+  <h3>Dar de alta una tienda</h3>
+  <div class="toolbar">
+    <div><label for="ti-nombre">Nombre del negocio</label><input id="ti-nombre" placeholder="Zapatería Lima"></div>
+    <div><label for="ti-slug">Identificador <small class="muted">(vacío = del nombre)</small></label><input id="ti-slug" placeholder="zapateria-lima"></div>
+    <div style="flex:2"><label for="ti-url">Dirección de su sistema de WhatsApp (opcional)</label><input id="ti-url" placeholder="https://zapateria.wa.tuservicio.com"></div>
+    <div style="flex:2"><label for="ti-contacto">Contacto del negocio (opcional)</label><input id="ti-contacto" placeholder="Rosa · 987 654 321"></div>
+  </div>
+  <div class="toolbar">
+    <div><label for="ti-plan">Plan</label><select id="ti-plan"></select></div>
+    <div><label for="ti-vence">Pagada hasta</label><input id="ti-vence" type="date"></div>
+    <div><label for="ti-precio">Precio al mes</label><input id="ti-precio" type="number" min="0" step="0.01"></div>
+    <div><label for="ti-renovar">Cómo renovar (lo ve la tienda)</label><input id="ti-renovar" placeholder="Escríbenos al 987 654 321"></div>
+    <div><label>&nbsp;</label><button id="ti-crear">Dar de alta</button></div>
+  </div>
+  <label class="hidden" id="ti-instalar-caja" style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="ti-instalar" checked> <b>Crear también su instalación ahora</b> <span class="muted">(su subdominio en este servidor, ya conectado a este panel; tarda un minuto)</span></label>
+  <span id="ti-state" class="pill hidden"></span>
 </section>
 
 <section id="tab-mi-cuenta" class="card hidden">
@@ -823,6 +926,7 @@ ${warning}
   <h2>Mi asistente IA</h2>
   <p class="muted">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
   Funciona con la IA de <a href="https://puter.com" target="_blank" rel="noopener">Puter</a> (un solo token para GPT, Claude, Gemini y mas) o con cualquier API compatible con OpenAI.</p>
+  <p class="muted" style="background:var(--chip,#f6f7f9);border-radius:10px;padding:10px 12px;margin:0 0 14px">🎓 <b>¿Quieres enseñarle a gran escala?</b> En <a href="/entrenamiento"><b>Entrenar a la IA</b></a> le das miles de ejemplos, datos y reglas: importas un Excel o un chat exportado, dejas que aprenda de tus conversaciones reales, la corriges desde el chat y la examinas en masa. Lo de aquí abajo es el resumen general del negocio; lo de allí, el detalle.</p>
 
   <div class="dos">
     <div>
@@ -887,6 +991,47 @@ ${warning}
     <div><button class="ghost sm" id="ia-probar-limpiar">Empezar de nuevo</button></div>
   </div>
 
+  <h3 style="margin-top:24px" id="ia-voz-titulo">🎤 Voz: contestar con audios y entender los del cliente</h3>
+  <p class="muted">Con una cuenta de <a href="https://elevenlabs.io" target="_blank" rel="noopener">ElevenLabs</a> (tiene plan gratis), el asistente puede contestar con <b>notas de voz</b> con la voz que elijas, y <b>entender los audios</b> que manda el cliente (se transcriben: los lee el asistente, se ven escritos en el chat y salen por la API). Otros sistemas conectados (Stoky) solo piden «mándalo con voz»: la voz se elige aquí. Si algo falla (se acaba el plan, el mensaje es muy largo), el mensaje sale por escrito: la voz nunca deja a un cliente sin respuesta.</p>
+  <div id="voz-estado-caja" class="muted" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px"></div>
+  <div class="dos">
+    <div>
+      <label>Clave de ElevenLabs <small class="muted">(elevenlabs.io → tu perfil → API Keys)</small></label>
+      <div class="toolbar">
+        <div style="flex:1"><input id="voz-clave" type="password" placeholder="Pegar aquí; se guarda cifrada y no se vuelve a mostrar" autocomplete="off"></div>
+        <div><button class="ghost" id="voz-probar" type="button">Comprobar</button></div>
+      </div>
+      <p id="voz-clave-estado" class="muted" style="margin:4px 0 10px"></p>
+      <label>Voz</label>
+      <div class="toolbar">
+        <div style="flex:1"><select id="voz-voz"><option value="">Guarda la clave para ver tus voces</option></select></div>
+        <div><button class="ghost" id="voz-escuchar" type="button">Escuchar</button></div>
+      </div>
+      <p id="voz-voz-nota" class="muted" style="margin:4px 0 10px"></p>
+      <label>Calidad</label>
+      <select id="voz-modelo"></select>
+      <p id="voz-modelo-nota" class="muted" style="margin:4px 0 10px"></p>
+    </div>
+    <div>
+      <label>Cuándo contesta el asistente con audio</label>
+      <select id="voz-cuando">
+        <option value="si-manda-audio">Cuando el cliente manda un audio (recomendado)</option>
+        <option value="siempre">Siempre</option>
+        <option value="nunca">Nunca por su cuenta (solo si otro sistema lo pide)</option>
+      </select>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="voz-transcribir" checked> <b>Entender los audios del cliente</b> <span class="muted">(se transcriben al llegar)</span></label>
+      <label style="margin-top:12px">Largo máximo de un audio (caracteres)</label>
+      <input id="voz-max" type="number" min="50" max="5000" value="600" style="width:120px">
+      <p class="muted" style="margin:4px 0 0">Un mensaje más largo sale por escrito: un audio de tres minutos no lo escucha nadie. Los mensajes con enlaces también van por escrito.</p>
+    </div>
+  </div>
+  <div class="actions" style="margin-top:14px">
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="voz-activa"> <b>Voz encendida</b></label>
+    <button id="voz-guardar">Guardar la voz</button>
+    <span id="voz-state" class="pill hidden"></span>
+  </div>
+  <audio id="voz-player" class="hidden" controls></audio>
+
   <h3 style="margin-top:24px">Examen: clientes de prueba</h3>
   <p class="muted">Decenas de clientes distintos (el que regatea, el que ya pagó, el enojado, el que intenta engañar al asistente...) escritos como en la vida real. El asistente responde con lo que sabe de tu negocio y cada respuesta se revisa sola: que no invente precios, que no prometa descuentos, que pase con una persona cuando toca, que no se vaya de largo. Corre un grupo cada vez (tarda unos segundos por cliente).</p>
   <div class="toolbar">
@@ -903,7 +1048,58 @@ ${warning}
 </section>
 
 <section id="tab-integraciones" class="card hidden">
-  <h2>Claves de API</h2>
+  <h2>Stoky: tu inventario y tus ventas</h2>
+  <p class="muted">Stoky y este WhatsApp se conectan <b>en dos direcciones</b>, y las dos se configuran desde las pantallas, sin tocar código. Aquí se ve cómo está cada una y qué falta.</p>
+  <div class="stk">
+    <div class="caja-stk">
+      <h3><span class="paso-n">1</span>Stoky escribe y lee por este WhatsApp</h3>
+      <p class="muted">Desde su CRM, Stoky manda mensajes, ve la bandeja, enseña el QR para vincular el número y le da órdenes a la IA de aquí. Para eso necesita <b>la dirección de este sistema</b> y <b>una clave</b>, que se pegan en Stoky.</p>
+      <div class="semaforo" id="stk-hacia-aqui"><div><i></i><span>Cargando…</span></div></div>
+      <div class="actions"><button id="cc-crear-stoky">Crear un código de conexión</button><button class="ghost" id="stk-clave">O crear la clave a mano</button></div>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 0">El código es corto (WA-XXXX-XXXX), <b>caduca</b> en la fecha que elijas y vale una sola vez: se pega en Stoky y Stoky recibe su clave solo. La clave a mano es para sistemas que no saben canjear códigos.</p>
+      <div id="cc-nuevo" class="nueva-clave hidden">
+        <b>Código de conexión: <code id="cc-valor" style="display:inline;font-size:16px;padding:4px 10px"></code></b>
+        <ol id="cc-pasos" style="margin:8px 0 0;padding-left:20px;font-size:13.5px"></ol>
+        <div class="actions" style="margin-top:8px"><button class="ghost sm" id="cc-copiar">Copiar el código</button><button class="ghost sm" id="cc-cerrar">Listo</button></div>
+      </div>
+      <div id="stk-clave-nueva" class="nueva-clave hidden">
+        <b>Copia la clave ahora: no se volverá a mostrar.</b>
+        <code id="stk-clave-valor"></code>
+        <ol id="stk-clave-pasos"></ol>
+        <div class="actions" style="margin-top:8px"><button class="ghost sm" id="stk-clave-copiar">Copiar la clave</button><button class="ghost sm" id="stk-clave-cerrar">Ya la pegué en Stoky</button></div>
+      </div>
+    </div>
+    <div class="caja-stk">
+      <h3><span class="paso-n">2</span>Este WhatsApp consulta el catálogo de Stoky</h3>
+      <p class="muted">El asistente da <b>precios y stock reales</b>, toma pedidos con ellos y manda a registrar la venta en el panel de Stoky. Hace falta la dirección de Stoky y un <b>token de Stoky</b> (Stoky → Integraciones → Conexiones de tienda). Si vinculaste desde la pantalla de Stoky, esto ya llega relleno solo.</p>
+      <div class="semaforo" id="stk-hacia-stoky"><div><i></i><span>Cargando…</span></div></div>
+      <label>Dirección de Stoky (la API que consulta este servidor)</label>
+      <input id="stk-url" placeholder="http://localhost:8102">
+      <label>Dirección del panel de Stoky (la que abres en el navegador; vacío = la misma)</label>
+      <input id="stk-panel" placeholder="https://stoky.miempresa.com">
+      <label>Token de Stoky <small class="muted">(empieza por stk_; se guarda cifrado y no se vuelve a mostrar)</small></label>
+      <input id="stk-token" type="password" autocomplete="off" placeholder="Vacío = conservar el que ya hay">
+      <div class="actions" style="margin-top:10px"><button class="ghost" id="stk-probar">Probar</button><button id="stk-guardar">Guardar y conectar</button><button class="ghost sm" id="stk-quitar">Quitar la conexión</button><span id="stk-state" class="pill hidden"></span></div>
+    </div>
+  </div>
+
+  <h2 style="margin-top:28px">Códigos de conexión</h2>
+  <p class="muted">Para conectar otro sistema sin copiar claves largas: un código corto con <b>fecha límite</b> y un número de usos. El otro sistema lo canjea (<code>POST /api/v1/conexion/canjear</code> con <code>{"codigo": "WA-…"}</code>) y recibe su clave de API con los permisos que marques. Al caducar o usarse deja de valer; la clave que salió se revoca en Claves de API.</p>
+  <div id="cc-table" class="tablewrap"></div>
+  <h3>Nuevo código</h3>
+  <div class="toolbar">
+    <div><label>Para quién es</label><input id="cc-para" placeholder="Stoky"></div>
+    <div><label>Vale hasta</label><input id="cc-hasta" type="date"></div>
+    <div><label>o durante</label><select id="cc-dias"><option value="">— usar la fecha —</option><option value="0.0417">1 hora</option><option value="1">1 día</option><option value="7" selected>7 días</option><option value="30">30 días</option><option value="90">90 días</option></select></div>
+    <div><label>Usos</label><select id="cc-usos"><option value="1">1 (recomendado)</option><option value="2">2</option><option value="5">5</option><option value="10">10</option></select></div>
+    <div><label>&nbsp;</label><button id="cc-crear">Crear código</button></div>
+  </div>
+  <label>Qué podrá hacer la clave que salga</label>
+  <p class="muted">Sin marcar nada, todo (lo que necesita Stoky). Con permisos marcados, solo la API pública y solo lo marcado.</p>
+  <div id="cc-permisos" class="permisos"></div>
+  <span id="cc-state" class="pill hidden"></span>
+
+  <h2 style="margin-top:28px">Claves de API</h2>
   <p class="muted">Con una clave, un programa (el sistema de GSG, un script) entra en la API sin usuario ni contrasena.
   La clave se ve entera <b>una sola vez</b>, al crearla; despues solo su comienzo. Revocarla la apaga al instante.
   Una clave no puede crear usuarios ni otras claves.</p>
@@ -1022,12 +1218,13 @@ var LOADERS = {
   campanas: function () { loadTemplates(); loadCampaigns(); },
   grupos: loadGrupos,
   automatizacion: loadAutomation, plantillas: loadTemplates, historial: loadDeliveries, usuarios: loadUsuarios, integraciones: loadClaves,
-  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad, stickers: loadStickers, ia: loadIa, pedidos: loadPedidos
+  configuracion: loadConfiguracion, 'mi-cuenta': loadMiCuenta, actividad: loadActividad, stickers: loadStickers, ia: loadIa, pedidos: loadPedidos,
+  membresia: loadMembresia, tiendas: loadTiendas
 };
 /* Al cambiar entre modo sencillo y ver todo, la lista de primeros pasos cambia. */
 window.__alCambiarModo = function () { if (typeof loadInicio === 'function' && (location.hash === '#inicio' || !location.hash)) loadInicio(); };
 /* Lo que se refresca cada vez que se entra, no solo la primera. */
-var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true, pedidos: true };
+var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true, pedidos: true, membresia: true, usuarios: true, tiendas: true };
 var loaded = {};
 var seccionActiva = '';
 
@@ -1081,6 +1278,8 @@ function pintarPasos(p) {
   var pasos = [
     { hecho: p.conectado, titulo: 'Conectar tu WhatsApp', que: oficial ? 'La API de Meta ya responde.' : 'Escanea el QR desde el teléfono, como en WhatsApp Web.', href: '/setup' },
     { hecho: p.ia === true, titulo: 'Enseñarle a tu asistente IA', que: 'Cuéntale qué vendes y enciéndelo: contestará solo.', href: '/panel#ia', ocultar: p.iaDisponible === false },
+    { hecho: p.lecciones > 0, titulo: 'Entrenarla con tus propios ejemplos', que: 'Importa un Excel, corrígela desde el chat o deja que aprenda de tus conversaciones.', href: '/entrenamiento', ocultar: p.lecciones === null || p.lecciones === undefined || p.iaDisponible === false, opcional: true },
+    { hecho: Boolean(p.stoky && p.stoky.configurada && p.stoky.claveUsada), titulo: 'Conectar Stoky (si lo usas)', que: 'Crea la clave para Stoky y pega su token: precios, stock y ventas van y vienen solos.', href: '/panel#integraciones', soloAdmin: true, opcional: true, ocultar: !p.stoky },
     { hecho: false, titulo: 'Poner el chat en tu web o conectar tu tienda', que: 'Una línea en tu web, o pega la URL en WooCommerce/Shopify.', href: '/panel#integraciones', soloAdmin: true, opcional: true },
     { hecho: p.usuarios > 1, titulo: 'Crear las cuentas del equipo', que: 'Una por persona, con su rol.', href: '/panel#usuarios', soloAdmin: true, avanzado: true },
     { hecho: p.plantillas > 0, titulo: oficial ? 'Dar de alta las plantillas' : 'Crear plantillas propias (opcional)', que: oficial ? 'Meta tiene que aprobarlas.' : 'Con el QR no hacen falta; ordenan los textos.', href: '/panel#plantillas', avanzado: true },
@@ -1171,7 +1370,7 @@ async function loadPlan() {
   try {
     var p = await api('/admin/plan');
     var caja = document.getElementById('cf-plan');
-    if (p.origen !== 'maestro' || !p.plan) { caja.classList.add('hidden'); return; }
+    if (p.origen === 'libre' || !p.plan) { caja.classList.add('hidden'); return; }
     var pl = p.plan;
     var l = pl.limites;
     var color = pl.vencido ? '#b42318' : pl.diasRestantes <= 7 ? '#b45309' : '#1a7f37';
@@ -1498,11 +1697,14 @@ async function loadClaves() {
   try {
     var contrato = await cargarContratoApi();
     casillas('ck-permisos', Object.keys(contrato.permisos).filter(function (p) { return p !== '*'; }).map(function (p) { return { valor: p, texto: contrato.permisos[p] }; }), 'permiso');
+    casillas('cc-permisos', Object.keys(contrato.permisos).filter(function (p) { return p !== '*'; }).map(function (p) { return { valor: p, texto: contrato.permisos[p] }; }), 'permiso-cc');
     casillas('wh-eventos', contrato.eventos.map(function (e) { return { valor: e.nombre, texto: e.descripcion }; }), 'evento');
   } catch (error) { show('ck-state', error.message, 'bad'); }
   loadWebhooks();
   loadEmbebido();
   loadConectores();
+  loadStoky();
+  loadCodigos();
   try {
     var list = await api('/admin/claves-api');
     table('ck-table', ['Para', 'Clave', 'Permisos', 'Creada', 'Último uso', 'Estado', ''], list.map(function (k) {
@@ -1534,6 +1736,140 @@ document.getElementById('ck-crear').onclick = busy('ck-crear', async function ()
     show('ck-state', 'Clave creada', 'ok');
     loadClaves();
   } catch (error) { show('ck-state', error.message, 'bad'); }
+});
+
+// --- codigos de conexion ---
+var ESTADO_CODIGO = { activo: ['ok', 'vigente'], usado: ['muted', 'usado'], caducado: ['warn', 'caducado'], anulado: ['bad', 'anulado'] };
+async function loadCodigos() {
+  try {
+    var r = await api('/admin/codigos-conexion');
+    table('cc-table', ['Código', 'Para', 'Vale hasta', 'Usos', 'Estado', 'Canjeado', ''], r.codigos.map(function (c) {
+      var e = ESTADO_CODIGO[c.estadoReal] || ['muted', c.estadoReal];
+      var canje = c.canjeadoAt ? esc(fmt(c.canjeadoAt)) + ' por ' + esc(c.canjeadoPor || '') + (c.canjeadoDesde ? ' <small class="muted">(' + esc(c.canjeadoDesde) + ')</small>' : '') : '<span class="muted">todavía no</span>';
+      return ['<code>' + esc(c.codigo) + '</code>', esc(c.para), esc(fmt(c.caducaAt)), c.usos + ' de ' + c.usosMax, pill(e[0], e[1]), canje, c.estadoReal === 'activo' ? '<button class="danger sm" data-cc-anular="' + esc(c.id) + '">Anular</button>' : ''];
+    }), 'Ningún código todavía.');
+    document.querySelectorAll('[data-cc-anular]').forEach(function (b) {
+      b.onclick = async function () {
+        try { await api('/admin/codigos-conexion/' + b.getAttribute('data-cc-anular'), { method: 'DELETE' }); loadCodigos(); }
+        catch (error) { show('cc-state', error.message, 'bad'); }
+      };
+    });
+  } catch (error) { show('cc-state', error.message, 'bad'); }
+}
+async function crearCodigo(para, dias, hasta, usos, permisos) {
+  var body = { para: para, usosMax: usos || 1, permisos: permisos || [] };
+  if (hasta) body.caducaAt = hasta; else if (dias) body.dias = Number(dias);
+  var r = await api('/admin/codigos-conexion', { method: 'POST', body: body });
+  document.getElementById('cc-valor').textContent = r.codigo.codigo;
+  document.getElementById('cc-pasos').innerHTML = r.pasos.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
+  document.getElementById('cc-nuevo').classList.remove('hidden');
+  loadCodigos();
+  return r;
+}
+document.getElementById('cc-crear').onclick = busy('cc-crear', async function () {
+  try {
+    if (!val('cc-para')) return show('cc-state', 'Di para quién es el código.', 'bad');
+    await crearCodigo(val('cc-para'), val('cc-dias'), val('cc-hasta'), Number(val('cc-usos') || 1), marcadas('cc-permisos'));
+    show('cc-state', 'Código creado', 'ok');
+    setVal('cc-para', '');
+  } catch (error) { show('cc-state', error.message, 'bad'); }
+});
+document.getElementById('cc-crear-stoky').onclick = busy('cc-crear-stoky', async function () {
+  try {
+    var dias = await pedirDato({ titulo: 'Código de conexión para Stoky', texto: 'Cuántos días vale el código antes de caducar. Vale una sola vez: al canjearlo, Stoky recibe su clave con todos los permisos.', etiqueta: 'Días', valor: '7', boton: 'Crear código', validar: function (v) { return /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 365 ? null : 'Entre 1 y 365 días.'; } });
+    if (!dias) return;
+    await crearCodigo('Stoky', dias, '', 1, []);
+    show('stk-state', 'Código creado: pégalo en Stoky.', 'ok');
+    document.getElementById('cc-nuevo').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (error) { show('stk-state', error.message, 'bad'); }
+});
+document.getElementById('cc-copiar').onclick = function () {
+  navigator.clipboard.writeText(document.getElementById('cc-valor').textContent).then(function () { show('cc-state', 'Código copiado', 'ok'); });
+};
+document.getElementById('cc-cerrar').onclick = function () { document.getElementById('cc-nuevo').classList.add('hidden'); };
+
+// --- Stoky: las dos direcciones ---
+function luz(clase, texto, sub) {
+  return '<div><i class="' + clase + '"></i><span>' + texto + (sub ? '<small>' + sub + '</small>' : '') + '</span></div>';
+}
+async function loadStoky() {
+  var aqui = document.getElementById('stk-hacia-aqui');
+  var alla = document.getElementById('stk-hacia-stoky');
+  try {
+    var r = await api('/admin/integraciones/stoky');
+    var h = r.haciaAqui;
+    var html = '';
+    html += luz('', 'Dirección de este sistema para pegar en Stoky: <code class="dir">' + esc(r.miDireccion) + '</code>');
+    if (!h.claves.length) html += luz('bad', 'Todavía no hay una clave para Stoky.', 'Créala con el botón de abajo y pégala en Stoky.');
+    else if (h.claveUsada) html += luz('ok', 'Stoky tiene su clave y la está usando.', 'Último uso: ' + esc(fmt(h.ultimoUsoClaveAt)) + ' · clave ' + esc(h.claves[0].prefijo) + '…');
+    else html += luz('warn', 'La clave para Stoky existe pero Stoky aún no la ha usado.', 'Pégala en Stoky (CRM → WhatsApp → Conectar → Mi sistema de WhatsApp) y pulsa Conectar allí.');
+    if (!h.webhook) html += luz(h.claveUsada ? 'warn' : '', 'Stoky todavía no recibe los mensajes que llegan aquí.', 'Al pulsar Conectar en Stoky, él mismo da de alta el aviso. Si ya lo hiciste y esto sigue así, revisa que Stoky esté encendido.');
+    else if (h.recibeMensajes) html += luz('ok', 'Stoky recibe los mensajes que llegan a este WhatsApp.', 'Último aviso entregado ' + esc(fmt(h.webhook.ultimoOkAt)) + ' en ' + esc(h.webhook.url));
+    else if (!h.webhook.activo) html += luz('bad', 'El aviso hacia Stoky está apagado' + (h.webhook.motivoPausa ? ': ' + esc(h.webhook.motivoPausa) : '.'), 'Se apaga solo tras un día fallando. Comprueba que Stoky esté encendido y actívalo en Webhooks salientes, más abajo.');
+    else html += luz('warn', 'El aviso hacia Stoky está dado de alta, pero aún no se entregó ninguno.', esc(h.webhook.url) + (h.webhook.fallosSeguidos ? ' · ' + h.webhook.fallosSeguidos + ' fallos seguidos' : ''));
+    aqui.innerHTML = html;
+
+    var e = r.haciaStoky;
+    var html2 = '';
+    if (!e.configurada) html2 += luz('bad', 'Sin conexión con Stoky: el asistente no puede dar precios ni stock.', e.url ? 'Hay dirección (' + esc(e.url) + ') pero falta el token.' : 'Pon la dirección y el token de Stoky aquí abajo, o pulsa Conectar en la pantalla de Stoky.');
+    else {
+      var p = e.ultimaPrueba;
+      var de = e.origen === 'stoky' ? 'lo mandó Stoky al vincularse' : e.origen === 'env' ? 'viene del arranque (.env)' : 'se puso en esta pantalla';
+      if (!p) html2 += luz('warn', 'Conexión guardada (' + esc(e.url) + '), sin probar todavía.', de + ' · pulsa Probar');
+      else if (p.ok) html2 += luz('ok', 'Conectado con Stoky' + (p.tienda ? ': ' + esc(p.tienda) : '') + (p.almacen ? ' · almacén ' + esc(p.almacen) : '') + '.', (p.productos || 0) + ' productos en el catálogo · probado ' + esc(fmt(p.at)) + ' · ' + de);
+      else html2 += luz('bad', 'Stoky no responde: ' + esc(p.detalle || ''), esc(e.url) + ' · probado ' + esc(fmt(p.at)));
+      html2 += luz(e.panelUrl ? 'ok' : 'warn', e.panelUrl ? 'Las ventas se registran en el panel: <code class="dir">' + esc(e.panelUrl) + '</code>' : 'Falta la dirección del panel de Stoky: el botón «Registrar venta» del chat no sabrá a dónde ir.');
+    }
+    alla.innerHTML = html2;
+    if (!document.activeElement || document.activeElement.id !== 'stk-url') setVal('stk-url', e.url || '');
+    if (!document.activeElement || document.activeElement.id !== 'stk-panel') setVal('stk-panel', e.panelUrl && e.panelUrl !== e.url ? e.panelUrl : '');
+    document.getElementById('stk-token').placeholder = e.tieneToken ? 'Ya hay un token guardado; escribe uno solo para cambiarlo' : 'stk_…';
+    document.getElementById('stk-quitar').classList.toggle('hidden', !e.configurada || e.origen === 'env');
+  } catch (error) {
+    aqui.innerHTML = luz('bad', esc(error.message));
+    alla.innerHTML = '';
+  }
+}
+document.getElementById('stk-clave').onclick = busy('stk-clave', async function () {
+  if (!(await confirmarDialogo({ titulo: 'Crear la clave para Stoky', texto: 'Se crea una clave con todos los permisos (Stoky la necesita para el QR, el chat, los avisos y la IA). Si ya había una clave "Stoky", deja de valer y Stoky tendrá que usar la nueva.', boton: 'Crear la clave' }))) return;
+  try {
+    var r = await api('/admin/integraciones/stoky/clave', { method: 'POST', body: {} });
+    document.getElementById('stk-clave-valor').textContent = r.clave;
+    document.getElementById('stk-clave-pasos').innerHTML = r.pasos.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
+    document.getElementById('stk-clave-nueva').classList.remove('hidden');
+    loadStoky();
+    loadClaves();
+  } catch (error) { show('stk-state', error.message, 'bad'); }
+});
+document.getElementById('stk-clave-copiar').onclick = function () {
+  navigator.clipboard.writeText(document.getElementById('stk-clave-valor').textContent).then(function () { show('stk-state', 'Clave copiada', 'ok'); });
+};
+document.getElementById('stk-clave-cerrar').onclick = function () { document.getElementById('stk-clave-nueva').classList.add('hidden'); };
+document.getElementById('stk-probar').onclick = busy('stk-probar', async function () {
+  show('stk-state', 'Preguntando a Stoky…', 'warn');
+  try {
+    var body = val('stk-token') ? { url: val('stk-url'), token: val('stk-token') } : {};
+    var r = await api('/admin/integraciones/stoky/probar', { method: 'POST', body: body });
+    show('stk-state', r.ok ? 'Stoky responde' + (r.tienda ? ' (' + r.tienda + ')' : '') + ': ' + (r.productos || 0) + ' productos.' : (r.detalle || 'Stoky no respondió.'), r.ok ? 'ok' : 'bad');
+    loadStoky();
+  } catch (error) { show('stk-state', error.message, 'bad'); }
+});
+document.getElementById('stk-guardar').onclick = busy('stk-guardar', async function () {
+  try {
+    var r = await api('/admin/integraciones/stoky', { method: 'POST', body: { url: val('stk-url'), panelUrl: val('stk-panel') || undefined, token: val('stk-token') || undefined } });
+    show('stk-state', r.mensaje, r.prueba && r.prueba.ok ? 'ok' : 'warn');
+    setVal('stk-token', '');
+    loadStoky();
+  } catch (error) { show('stk-state', error.message, 'bad'); }
+});
+document.getElementById('stk-quitar').onclick = busy('stk-quitar', async function () {
+  if (!(await confirmarDialogo({ titulo: 'Quitar la conexión con Stoky', texto: 'El asistente dejará de dar precios y stock de Stoky y de registrar ventas allí. Stoky seguirá pudiendo escribir por aquí con su clave.', boton: 'Quitar', peligro: true }))) return;
+  try {
+    await api('/admin/integraciones/stoky', { method: 'DELETE' });
+    show('stk-state', 'Conexión quitada.', 'ok');
+    setVal('stk-url', ''); setVal('stk-panel', ''); setVal('stk-token', '');
+    loadStoky();
+  } catch (error) { show('stk-state', error.message, 'bad'); }
 });
 
 // --- webhooks salientes ---
@@ -1853,7 +2189,88 @@ document.getElementById('ia-puter-conectar').onclick = async function () {
   boton.disabled = false;
 };
 document.getElementById('ia-proveedor').onchange = iaPintarProveedor;
+var VOZ_VOCES = [];
+async function loadVoz() {
+  try {
+    var e = await api('/admin/voz');
+    var caja = document.getElementById('voz-estado-caja');
+    var cuenta = e.cuenta ? ' Plan ' + esc(e.cuenta.plan || 'free') + ': quedan ' + esc(Math.max(0, e.cuenta.caracteresLimite - e.cuenta.caracteresUsados).toLocaleString('es-PE')) + ' caracteres este mes.' : '';
+    caja.innerHTML = e.lista
+      ? '<b style="color:var(--ok)">Voz lista.</b> ' + (e.cuando === 'siempre' ? 'El asistente contesta siempre con audio.' : e.cuando === 'si-manda-audio' ? 'El asistente contesta con audio cuando el cliente manda un audio.' : 'El asistente solo manda audio cuando otro sistema lo pide.') + (e.transcribir ? ' Los audios del cliente se transcriben.' : '') + cuenta
+      : '<b>La voz no está lista:</b> ' + esc(e.motivo || '') + (e.tieneClave && e.transcribir ? ' Aun así, con la clave guardada los audios del cliente ya se transcriben.' : '') + cuenta;
+    if (e.ultimoError) caja.innerHTML += '<br><span style="color:var(--bad)">Último fallo (' + esc(fmt(e.ultimoError.at)) + '): ' + esc(e.ultimoError.detalle) + '</span>';
+    document.getElementById('voz-clave-estado').textContent = e.tieneClave ? 'Hay una clave guardada' + (e.claveTermina ? ' (termina en …' + e.claveTermina + ')' : '') + '. Deja el campo vacío para conservarla; pega otra para cambiarla.' : 'Todavía no hay clave: sin ella no hay audios ni transcripción.';
+    var selModelo = document.getElementById('voz-modelo');
+    selModelo.innerHTML = (e.modelos || []).map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.nombre) + '</option>'; }).join('');
+    selModelo.value = e.modelo;
+    selModelo.onchange = function () { var m = (e.modelos || []).filter(function (x) { return x.id === selModelo.value; })[0]; document.getElementById('voz-modelo-nota').textContent = m ? m.nota : ''; };
+    selModelo.onchange();
+    setVal('voz-cuando', e.cuando); setVal('voz-max', e.maxCaracteres);
+    document.getElementById('voz-transcribir').checked = e.transcribir;
+    document.getElementById('voz-activa').checked = e.activa;
+    setVal('voz-clave', '');
+    var sel = document.getElementById('voz-voz');
+    if (e.tieneClave) {
+      try {
+        var v = await api('/admin/voz/voces');
+        VOZ_VOCES = v.voces || [];
+        sel.innerHTML = '<option value="">Elige una voz</option>' + VOZ_VOCES.map(function (x) {
+          var et = x.etiquetas || {};
+          var detalle = [et.gender, et.accent, et.age, et.use_case || et.description].filter(Boolean).join(' · ');
+          return '<option value="' + esc(x.id) + '">' + esc(x.nombre) + (detalle ? ' — ' + esc(detalle) : '') + '</option>';
+        }).join('');
+        sel.value = e.vozId || '';
+        if (e.vozId && !sel.value) sel.innerHTML += '<option value="' + esc(e.vozId) + '" selected>' + esc(e.vozNombre || e.vozId) + ' (ya no está en tu cuenta)</option>';
+        document.getElementById('voz-voz-nota').textContent = VOZ_VOCES.length ? VOZ_VOCES.length + ' voces en tu cuenta. En elevenlabs.io → Voices puedes añadir más (hay cientos en español, o clona la tuya).' : 'Tu cuenta no tiene voces todavía: añade alguna en elevenlabs.io → Voices.';
+      } catch (error) {
+        sel.innerHTML = '<option value="' + esc(e.vozId) + '">' + esc(e.vozNombre || e.vozId || 'Sin voz') + '</option>';
+        document.getElementById('voz-voz-nota').textContent = 'No se pudieron traer las voces: ' + error.message;
+      }
+    }
+    var esAdmin = !window.__yo || window.__yo.rol === 'admin';
+    document.getElementById('voz-guardar').disabled = !esAdmin;
+  } catch (error) { show('voz-state', error.message, 'bad'); }
+}
+document.getElementById('voz-probar').onclick = busy('voz-probar', async function () {
+  var estado = document.getElementById('voz-clave-estado');
+  estado.textContent = 'Comprobando con ElevenLabs…';
+  try {
+    var r = await api('/admin/voz/probar', { method: 'POST', body: val('voz-clave') ? { clave: val('voz-clave') } : {} });
+    estado.textContent = r.detalle;
+    estado.style.color = r.ok ? 'var(--ok)' : 'var(--bad)';
+  } catch (error) { estado.textContent = error.message; estado.style.color = 'var(--bad)'; }
+});
+document.getElementById('voz-escuchar').onclick = busy('voz-escuchar', async function () {
+  var nota = document.getElementById('voz-voz-nota');
+  if (!val('voz-voz')) { nota.textContent = 'Elige una voz primero.'; return; }
+  nota.textContent = 'Generando la muestra…';
+  try {
+    var r = await api('/admin/voz/muestra', { method: 'POST', body: { vozId: val('voz-voz'), modelo: val('voz-modelo') } });
+    var player = document.getElementById('voz-player');
+    player.src = 'data:' + r.mimeType + ';base64,' + r.audioBase64;
+    player.classList.remove('hidden');
+    await player.play().catch(function () {});
+    nota.textContent = 'Así suena (' + (r.formato === 'opus' ? 'nota de voz' : 'MP3: tu plan no permite Opus, llegará como audio normal') + ', ' + Math.round(r.bytes / 1024) + ' KB).';
+  } catch (error) { nota.textContent = error.message; }
+});
+document.getElementById('voz-guardar').onclick = busy('voz-guardar', async function () {
+  try {
+    var sel = document.getElementById('voz-voz');
+    var body = {
+      activa: document.getElementById('voz-activa').checked,
+      vozId: val('voz-voz'), vozNombre: sel.selectedIndex >= 0 ? (sel.options[sel.selectedIndex].text || '').split(' — ')[0] : '',
+      modelo: val('voz-modelo'), cuando: val('voz-cuando'),
+      transcribir: document.getElementById('voz-transcribir').checked,
+      maxCaracteres: Number(val('voz-max') || 600)
+    };
+    if (val('voz-clave')) body.clave = val('voz-clave');
+    var r = await api('/admin/voz', { method: 'POST', body: body });
+    show('voz-state', r.mensaje, r.estado.lista ? 'ok' : 'warn');
+    loadVoz();
+  } catch (error) { show('voz-state', error.message, 'bad'); }
+});
 async function loadIa() {
+  loadVoz();
   try {
     var e = await api('/admin/ia');
     window.__iaModelos = e.modelosSugeridos;
@@ -1896,11 +2313,28 @@ document.getElementById('ia-guardar').onclick = busy('ia-guardar', async functio
 });
 function iaPintarChat() {
   var caja = document.getElementById('ia-chat');
-  caja.innerHTML = IA_HISTORIAL.length ? IA_HISTORIAL.map(function (m) {
-    return '<div class="b' + (m.role === 'user' ? ' yo' : '') + (m.derivo ? ' derivo' : '') + '">' + esc(m.content) + (m.derivo ? '<br><small class="muted">→ aquí pasaría la conversación a una persona</small>' : '') + '</div>';
+  caja.innerHTML = IA_HISTORIAL.length ? IA_HISTORIAL.map(function (m, i) {
+    var corregir = m.role !== 'user' && !m.error ? ' <a href="#" class="muted" data-ia-corregir="' + i + '" style="font-size:12px;white-space:nowrap">✎ Corregir</a>' : '';
+    return '<div class="b' + (m.role === 'user' ? ' yo' : '') + (m.derivo ? ' derivo' : '') + '">' + esc(m.content) + corregir + (m.derivo ? '<br><small class="muted">→ aquí pasaría la conversación a una persona</small>' : '') + '</div>';
   }).join('') : '<div class="muted" style="padding:10px">Escribe abajo como si fueras un cliente.</div>';
   caja.scrollTop = caja.scrollHeight;
 }
+/* Corregir una respuesta de la prueba: queda como leccion (ver /entrenamiento). */
+document.getElementById('ia-chat').addEventListener('click', async function (ev) {
+  var a = ev.target.closest('[data-ia-corregir]');
+  if (!a) return;
+  ev.preventDefault();
+  var i = Number(a.getAttribute('data-ia-corregir'));
+  var m = IA_HISTORIAL[i];
+  var pregunta = '';
+  for (var k = i - 1; k >= 0; k--) if (IA_HISTORIAL[k].role === 'user') { pregunta = IA_HISTORIAL[k].content; break; }
+  var v = await pedirLeccion({ titulo: 'Corregir al asistente', texto: 'Escribe lo que debió responder. Ante una pregunta parecida contestará así y no repetirá lo de abajo.', pregunta: pregunta, respuesta: '', mala: m.content, boton: 'Corregir' });
+  if (!v) return;
+  try {
+    var r = await api('/admin/entrenamiento/lecciones', { method: 'POST', body: { tipo: 'ejemplo', pregunta: v.pregunta, respuesta: v.respuesta, tema: v.tema || null, mala: v.mala || null, origen: 'correccion', origenDetalle: 'prueba en Mi asistente IA' } });
+    show('ia-state', r.nueva ? 'Corregido: el asistente ya lo sabe (se ve en Entrenar a la IA).' : 'Esa lección ya la tenía.', 'ok');
+  } catch (error) { show('ia-state', error.message, 'bad'); }
+});
 document.getElementById('ia-probar').onclick = busy('ia-probar', async function () {
   var texto = val('ia-probar-texto');
   if (!texto) return;
@@ -1911,7 +2345,7 @@ document.getElementById('ia-probar').onclick = busy('ia-probar', async function 
     var r = await api('/admin/ia/probar', { method: 'POST', body: { texto: texto, historial: IA_HISTORIAL.slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; }) } });
     IA_HISTORIAL.push({ role: 'assistant', content: r.texto || '(sin texto)', derivo: r.derivar });
   } catch (error) {
-    IA_HISTORIAL.push({ role: 'assistant', content: '⚠ ' + error.message });
+    IA_HISTORIAL.push({ role: 'assistant', content: '⚠ ' + error.message, error: true });
   }
   iaPintarChat();
 });
@@ -2807,12 +3241,20 @@ async function loadUsuarios() {
       document.getElementById('us-crear').disabled = true;
       return;
     }
+    var soySuper = Boolean(yo && yo.super);
+    document.getElementById('us-rol-super').classList.toggle('hidden', !soySuper);
+    var ROLES = { superadmin: ['ok', 'Superadministrador'], admin: ['ok', 'Administrador'], operador: ['muted', 'Operador'] };
     var list = await api('/admin/usuarios');
     table('us-table', ['Usuario', 'Nombre', 'Rol', 'Estado', 'Ultimo acceso', ''], list.map(function (u) {
-      var acciones = '<button class="ghost sm" data-us-clave="' + esc(u.id) + '">Nueva contrasena</button> ' +
-        '<button class="ghost sm" data-us-rol="' + esc(u.id) + '" data-rol="' + (u.rol === 'admin' ? 'operador' : 'admin') + '">Hacer ' + (u.rol === 'admin' ? 'operador' : 'admin') + '</button> ' +
+      // Una cuenta de superadministrador solo la toca otro superadministrador.
+      var intocable = u.rol === 'superadmin' && !soySuper;
+      var opcionesRol = (soySuper ? ['superadmin', 'admin', 'operador'] : ['admin', 'operador']).filter(function (r) { return r !== u.rol; });
+      var acciones = intocable ? '<span class="muted">solo un superadministrador</span>' :
+        '<button class="ghost sm" data-us-clave="' + esc(u.id) + '">Nueva contrasena</button> ' +
+        opcionesRol.map(function (r) { return '<button class="ghost sm" data-us-rol="' + esc(u.id) + '" data-rol="' + r + '">Hacer ' + ROLES[r][1].toLowerCase() + '</button> '; }).join('') +
         '<button class="' + (u.activo ? 'danger' : 'ghost') + ' sm" data-us-activo="' + esc(u.id) + '" data-activo="' + (u.activo ? 'false' : 'true') + '">' + (u.activo ? 'Desactivar' : 'Activar') + '</button>';
-      return [esc(u.usuario), esc(u.nombre), pill(u.rol === 'admin' ? 'ok' : 'muted', u.rol), pill(u.activo ? 'ok' : 'bad', u.activo ? 'activo' : 'desactivado'), esc(fmt(u.ultimoLoginAt) || 'nunca'), acciones];
+      var rol = ROLES[u.rol] || ['muted', u.rol];
+      return [esc(u.usuario), esc(u.nombre), pill(rol[0], rol[1]), pill(u.activo ? 'ok' : 'bad', u.activo ? 'activo' : 'desactivado'), esc(fmt(u.ultimoLoginAt) || 'nunca'), acciones];
     }), 'Sin usuarios');
     document.querySelectorAll('[data-us-clave]').forEach(function (b) {
       b.onclick = async function () {
@@ -2844,6 +3286,257 @@ document.getElementById('us-crear').onclick = busy('us-crear', async function ()
     loadUsuarios();
   } catch (error) { show('us-state', error.message, 'bad'); }
 });
+// -------------------------------------------------------------- membresia
+var mbPlanes = [];
+function mbPintarEstado(m) {
+  var caja = document.getElementById('mb-estado');
+  var p = m.plan;
+  if (!p) {
+    caja.innerHTML = '<b>Instancia libre:</b> <span class="muted">sin membresía, todo está permitido sin tope.' + (m.editable ? ' Elige un plan abajo si quieres ponerle vencimiento y topes.' : '') + '</span>';
+    return;
+  }
+  var l = p.limites;
+  var color = p.vencido ? '#b42318' : p.diasRestantes <= 7 ? '#b45309' : '#1a7f37';
+  var suspendida = m.local && m.local.estado === 'suspendida';
+  caja.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><div><b>Plan ' + esc(p.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (suspendida ? '· suspendida' : p.vencido ? '· vencida' : '· vence en ' + p.diasRestantes + ' día' + (p.diasRestantes === 1 ? '' : 's')) + '</span><br><small class="muted">Pagada hasta el ' + esc(new Date(p.vencimiento).toLocaleDateString('es-PE')) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + ' al mes' : ' · gratis') + ' · ' + (m.origen === 'maestro' ? 'la lleva el maestro del SaaS' : 'la lleva el superadministrador de esta instalación') + '</small></div>' +
+    '<div class="muted" style="font-size:13px">Asistente IA: ' + (l.iaTurnosMes === 0 ? 'no incluido' : l.iaTurnosMes == null ? 'sin límite' : m.iaTurnosMes + ' de ' + l.iaTurnosMes + ' respuestas este mes') + ' · Campañas: ' + (l.campanas ? 'sí' : 'no') + ' · Conectores: ' + (l.conectores ? 'sí' : 'no') + ' · Cuentas: ' + (l.usuarios == null ? 'sin límite' : l.usuarios) + '</div></div>' +
+    (m.aviso ? '<p style="margin:8px 0 0;color:' + color + '">' + esc(m.aviso.texto) + '</p>' : '') +
+    (p.contacto && !m.aviso ? '<p class="muted" style="margin:8px 0 0">Para renovar: ' + esc(p.contacto) + '</p>' : '');
+}
+function mbRellenar(m) {
+  var sel = document.getElementById('mb-plan');
+  sel.innerHTML = mbPlanes.map(function (p) { return '<option value="' + esc(p.clave) + '">' + esc(p.nombre) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + '/mes' : '') + '</option>'; }).join('');
+  var l = m.local;
+  var base = mbPlanes.filter(function (p) { return p.clave === (l ? l.plan : 'prueba'); })[0] || mbPlanes[0];
+  sel.value = l ? l.plan : base.clave;
+  setVal('mb-nombre', l ? l.nombre : base.nombre);
+  var vence = l ? new Date(l.vencimiento) : new Date(Date.now() + 14 * 86400000);
+  setVal('mb-vence', vence.toISOString().slice(0, 10));
+  setVal('mb-estado-sel', l ? l.estado : 'activa');
+  var lim = l ? l.limites : base.limites;
+  setVal('mb-ia', lim.iaTurnosMes == null ? '' : lim.iaTurnosMes);
+  setVal('mb-usuarios', lim.usuarios == null ? '' : lim.usuarios);
+  setVal('mb-campanas', lim.campanas ? 'true' : 'false');
+  setVal('mb-conectores', lim.conectores ? 'true' : 'false');
+  setVal('mb-precio', l ? l.precioMes : base.precioMes);
+  setVal('mb-moneda', l ? l.moneda : base.moneda);
+  setVal('mb-contacto', l && l.contacto ? l.contacto : '');
+  setVal('mb-aviso', l && l.aviso ? l.aviso : '');
+  document.getElementById('mb-quitar').classList.toggle('hidden', !l);
+  var pagos = (l && l.pagos) || [];
+  table('mb-pagos', ['Fecha', 'Meses', 'Monto', 'Nota', 'Lo apuntó'], pagos.slice().reverse().map(function (pg) {
+    return [esc(fmt(pg.fecha)), pg.meses, esc(pg.moneda) + ' ' + pg.monto, esc(pg.nota || ''), esc(pg.por || '')];
+  }), 'Sin pagos apuntados.');
+}
+document.getElementById('mb-plan').onchange = function () {
+  var p = mbPlanes.filter(function (x) { return x.clave === val('mb-plan'); })[0];
+  if (!p) return;
+  setVal('mb-nombre', p.nombre);
+  setVal('mb-ia', p.limites.iaTurnosMes == null ? '' : p.limites.iaTurnosMes);
+  setVal('mb-usuarios', p.limites.usuarios == null ? '' : p.limites.usuarios);
+  setVal('mb-campanas', p.limites.campanas ? 'true' : 'false');
+  setVal('mb-conectores', p.limites.conectores ? 'true' : 'false');
+  setVal('mb-precio', p.precioMes);
+  setVal('mb-moneda', p.moneda);
+};
+async function loadMembresia() {
+  try {
+    var m = await api('/admin/membresia');
+    mbPlanes = m.planes || [];
+    mbPintarEstado(m);
+    var puede = m.soySuper && m.editable;
+    document.getElementById('mb-editar').classList.toggle('hidden', !puede);
+    var sl = document.getElementById('mb-solo-lectura');
+    sl.classList.toggle('hidden', puede);
+    if (!puede) sl.textContent = m.editable ? 'Solo un superadministrador cambia la membresía. Si vence o hay que ampliarla, habla con quien te instaló el sistema.' : 'Esta instalación depende de un maestro: la membresía y los pagos se gestionan desde el panel de quien controla las tiendas.';
+    if (puede) mbRellenar(m);
+    mbPintarMaestro(m);
+  } catch (error) { show('mb-state', error.message, 'bad'); }
+}
+function mbCuerpo() {
+  var ia = val('mb-ia'), us = val('mb-usuarios');
+  return {
+    plan: val('mb-plan'), nombre: val('mb-nombre'), vencimiento: val('mb-vence'), estado: val('mb-estado-sel'),
+    limites: { iaTurnosMes: ia === '' ? null : Number(ia), usuarios: us === '' ? null : Number(us), campanas: val('mb-campanas') === 'true', conectores: val('mb-conectores') === 'true' },
+    precioMes: Number(val('mb-precio') || 0), moneda: val('mb-moneda') || 'PEN', contacto: val('mb-contacto') || null, aviso: val('mb-aviso') || null
+  };
+}
+document.getElementById('mb-guardar').onclick = busy('mb-guardar', async function () {
+  try {
+    var r = await api('/admin/membresia', { method: 'POST', body: mbCuerpo() });
+    show('mb-state', r.mensaje, 'ok');
+    mbPintarEstado(r); mbRellenar(r);
+    loadPlan();
+  } catch (error) { show('mb-state', error.message, 'bad'); }
+});
+document.getElementById('mb-pagar').onclick = busy('mb-pagar', async function () {
+  try {
+    var r = await api('/admin/membresia/pagos', { method: 'POST', body: { meses: Number(val('mb-pago-meses') || 1), monto: Number(val('mb-pago-monto') || 0), nota: val('mb-pago-nota') } });
+    show('mb-state', r.mensaje, 'ok');
+    setVal('mb-pago-monto', ''); setVal('mb-pago-nota', '');
+    mbPintarEstado(r); mbRellenar(r);
+    loadPlan();
+  } catch (error) { show('mb-state', error.message, 'bad'); }
+});
+document.getElementById('mb-quitar').onclick = busy('mb-quitar', async function () {
+  if (!(await confirmarDialogo({ titulo: 'Quitar la membresía', texto: 'La instalación queda libre: sin vencimiento ni topes. Los pagos apuntados se pierden.', boton: 'Quitar', peligro: true }))) return;
+  try {
+    var r = await api('/admin/membresia', { method: 'DELETE' });
+    show('mb-state', 'Membresía quitada: instancia libre.', 'ok');
+    mbPintarEstado(r); mbRellenar(r);
+    loadPlan();
+  } catch (error) { show('mb-state', error.message, 'bad'); }
+});
+
+// ---------------------------------------------------------------- tiendas
+var tiPlanes = [];
+function tiSemaforo(t) {
+  var c = t.semaforo === 'verde' ? 'ok' : t.semaforo === 'ambar' ? 'warn' : 'bad';
+  var txt = t.membresia.estado === 'suspendida' ? 'suspendida' : t.plan.vencido ? 'vencida' : t.plan.diasRestantes <= 7 ? 'vence en ' + t.plan.diasRestantes + ' d' : 'al día';
+  return pill(c, txt);
+}
+async function loadTiendas() {
+  try {
+    var r = await api('/admin/tiendas');
+    var s = r.resumen;
+    var al = r.alojamiento || {};
+    document.getElementById('ti-alojamiento').innerHTML = al.disponible
+      ? '<b style="color:var(--ok)">Alojamiento en este servidor: listo.</b> Cada tienda nueva puede salir con su propia dirección <code>nombre.' + esc(al.dominioBase) + '</code>, ya conectada a este panel: el cliente entra por su URL y listo.'
+      : '<b>Sin alojamiento en este servidor.</b> ' + esc(al.motivo || '') + ' La tienda se registra aquí y su instalación se hace aparte (en un servidor con el SaaS preparado, <code>npm run saas:alta</code>); luego se pega la dirección del plan y el token en su Membresía.';
+    document.getElementById('ti-instalar-caja').classList.toggle('hidden', !al.disponible);
+    document.getElementById('ti-resumen').innerHTML =
+      '<div class="stat"><span class="muted">Tiendas</span><b>' + s.total + '</b></div>' +
+      '<div class="stat"><span class="muted">Al día</span><b>' + (s.activas - s.porVencer) + '</b></div>' +
+      '<div class="stat"><span class="muted">Por vencer (7 días)</span><b>' + s.porVencer + '</b></div>' +
+      '<div class="stat"><span class="muted">Vencidas</span><b>' + s.vencidas + '</b></div>' +
+      '<div class="stat"><span class="muted">Suspendidas</span><b>' + s.suspendidas + '</b></div>' +
+      '<div class="stat"><span class="muted">En línea ahora</span><b>' + s.enLinea + '</b><small>preguntaron por su plan hace menos de 20 min</small></div>' +
+      '<div class="stat"><span class="muted">Ingresos al mes</span><b>' + esc(s.moneda) + ' ' + s.ingresosMes + '</b><small>tiendas pagadas y vigentes</small></div>';
+    table('ti-table', ['Tienda', 'Plan', 'Pagada hasta', 'Estado', 'En línea', 'Contacto', ''], r.tiendas.map(function (t) {
+      var enLinea = t.enLinea ? pill('ok', 'sí') : t.ultimaConsultaAt ? '<span class="muted">última vez ' + esc(fmt(t.ultimaConsultaAt)) + '</span>' : '<span class="muted">nunca se conectó</span>';
+      var acciones = '<button class="ghost sm" data-ti-pago="' + esc(t.id) + '">Apuntar pago</button> ' +
+        '<button class="ghost sm" data-ti-editar="' + esc(t.id) + '">Cambiar plan</button> ' +
+        '<button class="' + (t.membresia.estado === 'suspendida' ? 'ghost' : 'danger') + ' sm" data-ti-susp="' + esc(t.id) + '" data-valor="' + (t.membresia.estado === 'suspendida' ? 'false' : 'true') + '">' + (t.membresia.estado === 'suspendida' ? 'Reactivar' : 'Suspender') + '</button> ' +
+        '<button class="ghost sm" data-ti-token="' + esc(t.id) + '">Token nuevo</button> ' +
+        (t.url ? '<a class="ghost sm" href="' + esc(t.url) + '" target="_blank" rel="noopener" style="display:inline-block;padding:4px 8px">Abrir</a> ' : '') +
+        '<button class="ghost sm" data-ti-borrar="' + esc(t.id) + '">Borrar</button>';
+      return ['<b>' + esc(t.nombre) + '</b>' + (t.instalada ? ' ' + pill('ok', 'instalada aquí') : '') + '<br><small class="muted">' + esc(t.slug) + (t.url ? ' · ' + esc(t.url) : '') + '</small>',
+        esc(t.plan.nombre) + '<br><small class="muted">' + (t.membresia.precioMes ? esc(t.membresia.moneda) + ' ' + t.membresia.precioMes + '/mes' : 'gratis') + '</small>',
+        esc(new Date(t.membresia.vencimiento).toLocaleDateString('es-PE')),
+        tiSemaforo(t), enLinea, esc(t.contacto || ''), acciones];
+    }), 'Todavía no hay tiendas. Da de alta la primera abajo.');
+    if (!tiPlanes.length) {
+      var m = await api('/admin/membresia');
+      tiPlanes = m.planes || [];
+      var sel = document.getElementById('ti-plan');
+      sel.innerHTML = tiPlanes.map(function (p) { return '<option value="' + esc(p.clave) + '">' + esc(p.nombre) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + '/mes' : '') + '</option>'; }).join('');
+      sel.value = 'prueba';
+      setVal('ti-vence', new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10));
+      setVal('ti-precio', '0');
+      sel.onchange = function () { var p = tiPlanes.filter(function (x) { return x.clave === sel.value; })[0]; if (p) setVal('ti-precio', p.precioMes); };
+    }
+    document.querySelectorAll('[data-ti-pago]').forEach(function (b) {
+      b.onclick = async function () {
+        var meses = await pedirDato({ titulo: 'Apuntar un pago', texto: 'Cuántos meses se pagaron. Corre el vencimiento desde la fecha pagada (o desde hoy si ya venció) y reactiva la tienda.', etiqueta: 'Meses', valor: '1', boton: 'Siguiente', validar: function (v) { return /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 60 ? null : 'Entre 1 y 60 meses.'; } });
+        if (!meses) return;
+        var monto = await pedirDato({ titulo: 'Monto cobrado', etiqueta: 'Monto (0 si es cortesía)', valor: '0', boton: 'Apuntar', validar: function (v) { return /^\d+([.,]\d{1,2})?$/.test(v) ? null : 'Un número, por ejemplo 49 o 49.90'; } });
+        if (monto === null) return;
+        try { var r2 = await api('/admin/tiendas/' + b.getAttribute('data-ti-pago') + '/pagos', { method: 'POST', body: { meses: Number(meses), monto: Number(String(monto).replace(',', '.')) } }); show('ti-state', r2.mensaje, 'ok'); loadTiendas(); }
+        catch (error) { show('ti-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-ti-editar]').forEach(function (b) {
+      b.onclick = async function () {
+        var id = b.getAttribute('data-ti-editar');
+        var t = r.tiendas.filter(function (x) { return x.id === id; })[0];
+        var plan = await pedirDato({ titulo: 'Cambiar el plan de ' + t.nombre, texto: 'Escribe uno: ' + tiPlanes.map(function (p) { return p.clave; }).join(', ') + '.', etiqueta: 'Plan', valor: t.membresia.plan, boton: 'Siguiente', validar: function (v) { return tiPlanes.some(function (p) { return p.clave === v.trim(); }) ? null : 'No existe ese plan.'; } });
+        if (!plan) return;
+        var vence = await pedirDato({ titulo: 'Pagada hasta', etiqueta: 'Fecha (AAAA-MM-DD)', valor: t.membresia.vencimiento.slice(0, 10), boton: 'Guardar', validar: function (v) { return /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : 'Formato AAAA-MM-DD.'; } });
+        if (!vence) return;
+        try { await api('/admin/tiendas/' + id, { method: 'POST', body: { membresia: { plan: plan.trim(), vencimiento: vence + 'T23:59:59' } } }); show('ti-state', 'Plan cambiado.', 'ok'); loadTiendas(); }
+        catch (error) { show('ti-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-ti-susp]').forEach(function (b) {
+      b.onclick = async function () {
+        var suspender = b.getAttribute('data-valor') === 'true';
+        if (suspender && !(await confirmarDialogo({ titulo: 'Suspender la tienda', texto: 'Su asistente IA y sus campañas se paran en cuanto vuelva a preguntar por el plan (como mucho un cuarto de hora). Sus chats siguen. Se reactiva con un clic.', boton: 'Suspender', peligro: true }))) return;
+        try { var r3 = await api('/admin/tiendas/' + b.getAttribute('data-ti-susp') + '/suspender', { method: 'POST', body: { suspendida: suspender } }); show('ti-state', r3.mensaje, 'ok'); loadTiendas(); }
+        catch (error) { show('ti-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-ti-token]').forEach(function (b) {
+      b.onclick = async function () {
+        if (!(await confirmarDialogo({ titulo: 'Token nuevo', texto: 'El token anterior deja de valer: esa tienda dejará de recibir su plan hasta que pegues el nuevo en su Membresía.', boton: 'Crear token nuevo' }))) return;
+        try { var r4 = await api('/admin/tiendas/' + b.getAttribute('data-ti-token') + '/token', { method: 'POST', body: {} }); tiMostrarToken(r4.tienda, r4.token, ['Pégalo en la Membresía de esa tienda (Esta instalación depende de un maestro) junto a la dirección del plan.']); show('ti-state', r4.mensaje, 'ok'); loadTiendas(); }
+        catch (error) { show('ti-state', error.message, 'bad'); }
+      };
+    });
+    document.querySelectorAll('[data-ti-borrar]').forEach(function (b) {
+      b.onclick = async function () {
+        var id = b.getAttribute('data-ti-borrar');
+        var t = r.tiendas.filter(function (x) { return x.id === id; })[0];
+        var que = 'dejar';
+        if (t && t.instalada) {
+          var eleccion = await pedirDato({ titulo: 'Borrar ' + t.nombre, texto: 'Esta tienda tiene su instalación en este servidor. ¿Qué hago con ella? Escribe: dejar (sigue corriendo, solo sale de la lista), parar (se apaga, sus datos se conservan) o borrar (se apaga y se borran sus datos).', etiqueta: 'dejar · parar · borrar', valor: 'parar', boton: 'Borrar la tienda', validar: function (v) { return ['dejar', 'parar', 'borrar'].indexOf(v.trim().toLowerCase()) >= 0 ? null : 'Escribe dejar, parar o borrar.'; } });
+          if (!eleccion) return;
+          que = eleccion.trim().toLowerCase();
+        } else if (!(await confirmarDialogo({ titulo: 'Borrar la tienda', texto: 'Se borra de esta lista y su instalación dejará de recibir plan (quedará como instalación libre o con lo último que supo). No se toca nada en su servidor.', boton: 'Borrar', peligro: true }))) return;
+        try { var r5 = await api('/admin/tiendas/' + id + '?instalacion=' + que, { method: 'DELETE' }); show('ti-state', r5.mensaje || 'Borrada.', r5.instalacion && r5.instalacion.intentada && !r5.instalacion.ok ? 'warn' : 'ok'); loadTiendas(); }
+        catch (error) { show('ti-state', error.message, 'bad'); }
+      };
+    });
+  } catch (error) { show('ti-state', error.message, 'bad'); }
+}
+function tiMostrarToken(tienda, token, pasos) {
+  document.getElementById('ti-nueva-nombre').textContent = tienda.nombre;
+  document.getElementById('ti-token').textContent = token;
+  document.getElementById('ti-url-plan').textContent = tienda.urlPlan;
+  document.getElementById('ti-pasos').innerHTML = pasos.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
+  document.getElementById('ti-nueva').classList.remove('hidden');
+  document.getElementById('ti-nueva').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+document.getElementById('ti-crear').onclick = busy('ti-crear', async function () {
+  try {
+    var instalar = !document.getElementById('ti-instalar-caja').classList.contains('hidden') && document.getElementById('ti-instalar').checked;
+    if (instalar) show('ti-state', 'Dando de alta y levantando su instalación… tarda un minuto.', 'warn');
+    var r = await api('/admin/tiendas', { method: 'POST', body: { nombre: val('ti-nombre'), slug: val('ti-slug') || undefined, url: val('ti-url') || null, contacto: val('ti-contacto') || null, crearInstalacion: instalar, membresia: { plan: val('ti-plan'), vencimiento: val('ti-vence') + 'T23:59:59', precioMes: Number(val('ti-precio') || 0), contacto: val('ti-renovar') || null } } });
+    tiMostrarToken(r.tienda, r.token, r.pasos);
+    show('ti-state', r.mensaje || (r.instalacion && r.instalacion.ok ? 'Tienda dada de alta con su instalación en ' + r.instalacion.url : 'Tienda dada de alta.'), r.mensaje ? 'warn' : 'ok');
+    setVal('ti-nombre', ''); setVal('ti-slug', ''); setVal('ti-url', ''); setVal('ti-contacto', '');
+    loadTiendas();
+  } catch (error) { show('ti-state', error.message, 'bad'); }
+});
+document.getElementById('ti-copiar').onclick = function () { navigator.clipboard.writeText(document.getElementById('ti-token').textContent).then(function () { show('ti-state', 'Token copiado', 'ok'); }); };
+document.getElementById('ti-cerrar').onclick = function () { document.getElementById('ti-nueva').classList.add('hidden'); };
+
+// --- esta instalacion depende de un maestro ---
+function mbPintarMaestro(m) {
+  var caja = document.getElementById('mb-maestro');
+  caja.classList.toggle('hidden', !m.soySuper);
+  var est = document.getElementById('mb-maestro-estado');
+  if (m.maestro) {
+    est.innerHTML = '<b>Conectada a un maestro:</b> ' + esc(m.maestro.url) + (m.maestro.origen === 'env' ? ' <small>(viene del arranque)</small>' : '') + (m.error ? ' · <span style="color:#b42318">no responde ahora: ' + esc(m.error) + ' (se usa lo último que dijo)</span>' : m.consultadoEn ? ' · última consulta ' + esc(fmt(m.consultadoEn)) : '');
+    setVal('mb-maestro-url', m.maestro.url);
+  } else {
+    est.textContent = 'No depende de ningún maestro: la membresía se lleva aquí.';
+  }
+  document.getElementById('mb-maestro-quitar').classList.toggle('hidden', !(m.maestro && m.maestro.origen === 'pantalla'));
+}
+document.getElementById('mb-maestro-conectar').onclick = busy('mb-maestro-conectar', async function () {
+  try {
+    var r = await api('/admin/membresia/maestro', { method: 'POST', body: { url: val('mb-maestro-url'), token: val('mb-maestro-token') } });
+    show('mb-state', r.mensaje, 'ok');
+    setVal('mb-maestro-token', '');
+    loadMembresia(); loadPlan();
+  } catch (error) { show('mb-state', error.message, 'bad'); }
+});
+document.getElementById('mb-maestro-quitar').onclick = busy('mb-maestro-quitar', async function () {
+  if (!(await confirmarDialogo({ titulo: 'Desconectar del maestro', texto: 'Esta instalación dejará de tomar su plan de allí y volverá a llevar su membresía aquí (o a ser libre).', boton: 'Desconectar' }))) return;
+  try { await api('/admin/membresia/maestro', { method: 'DELETE' }); show('mb-state', 'Desconectada del maestro.', 'ok'); loadMembresia(); loadPlan(); }
+  catch (error) { show('mb-state', error.message, 'bad'); }
+});
+
 async function loadMiCuenta() {
   try {
     var u = await api('/admin/yo');
@@ -2851,7 +3544,7 @@ async function loadMiCuenta() {
     document.getElementById('mc-datos').innerHTML =
       '<div class="stat"><span class="muted">Nombre</span><b>' + esc(u.nombre) + '</b></div>' +
       '<div class="stat"><span class="muted">Usuario</span><b>' + esc(u.usuario) + '</b></div>' +
-      '<div class="stat"><span class="muted">Rol</span><b>' + (u.rol === 'admin' ? 'Administrador' : 'Operador') + '</b><small>' + (u.rol === 'admin' ? 'gestiona cuentas, claves y configuración' : 'usa todo el sistema; no gestiona cuentas') + '</small></div>';
+      '<div class="stat"><span class="muted">Rol</span><b>' + (u.super ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : 'Operador') + '</b><small>' + (u.super ? 'lleva la membresía, los códigos de conexión y las cuentas de superadministrador, además de todo lo de un administrador' : u.rol === 'admin' ? 'gestiona cuentas, claves y configuración' : 'usa todo el sistema; no gestiona cuentas') + '</small></div>';
   } catch (error) { show('mc-state', error.message, 'bad'); }
 }
 document.getElementById('mc-cambiar').onclick = busy('mc-cambiar', async function () {

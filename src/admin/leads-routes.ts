@@ -19,7 +19,8 @@ import { ESTADOS, type LeadConContacto, type LeadEstado } from '../db/leads.js';
 export interface LeadsRoutesDeps {
   repos: Repos;
   /** Panel de Stoky, para derivar la venta. Vacio = no se ofrece. */
-  panelStoky?: string;
+  /** El panel de Stoky; una funcion porque se puede cambiar desde la pantalla sin reiniciar. */
+  panelStoky?: string | (() => string);
   /**
    * Se llama cuando la ficha llega a su estado final (enviada o descartada).
    *
@@ -108,7 +109,8 @@ export async function registerLeadsRoutes(
   app: FastifyInstance,
   deps: LeadsRoutesDeps,
 ): Promise<void> {
-  const { repos, panelStoky, alCerrarFicha } = deps;
+  const { repos, alCerrarFicha } = deps;
+  const panelDeStoky = () => (typeof deps.panelStoky === 'function' ? deps.panelStoky() : deps.panelStoky) ?? '';
 
   app.get('/admin/leads', async (request) => {
     const query = listQuery.parse(request.query ?? {});
@@ -174,9 +176,11 @@ export async function registerLeadsRoutes(
   app.get('/admin/leads/:contactId/derivar', async (request, reply) => {
     const { contactId } = request.params as { contactId: string };
 
+    const panelStoky = panelDeStoky();
     if (!panelStoky) {
       return reply.code(409).send({
-        error: 'No hay panel de Stoky configurado (STOKY_PANEL_URL).',
+        error: 'Falta la dirección del panel de Stoky: ponla en Conectar mi web y tienda → Stoky.',
+        ir: '/panel#integraciones',
       });
     }
 

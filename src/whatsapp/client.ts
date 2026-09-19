@@ -166,6 +166,8 @@ export interface MediaSaliente {
   /** Nombre original: se ensena en los documentos. */
   filename?: string;
   caption?: string;
+  /** Audio como nota de voz (con la onda y el play), no como fichero. */
+  voz?: boolean;
 }
 
 export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClient {

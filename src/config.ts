@@ -326,6 +326,13 @@ const schema = z.object({
    */
   PLAN_URL: z.string().default(''),
   PLAN_TOKEN: z.string().default(''),
+  /**
+   * Cuando este panel controla tiendas (src/tiendas) y las levanta en este
+   * servidor: la direccion con la que esas instalaciones llegan a este panel
+   * para preguntar por su plan, si no es la publica (dentro de la red de
+   * Docker, por ejemplo http://host.docker.internal:3000). Vacio = la publica.
+   */
+  TIENDAS_URL_PLAN_BASE: z.string().default(''),
 });
 
 export type RawConfig = z.infer<typeof schema>;

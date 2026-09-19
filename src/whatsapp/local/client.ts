@@ -130,8 +130,11 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
           : media.kind === 'video'
             ? { video: media.datos, mimetype: media.mimeType, caption: media.caption }
             : media.kind === 'audio'
-              ? { audio: media.datos, mimetype: media.mimeType }
+              ? { audio: media.datos, mimetype: media.mimeType, ptt: Boolean(media.voz) }
               : { document: media.datos, mimetype: media.mimeType, fileName: media.filename ?? 'documento', caption: media.caption };
+      // Una nota de voz no lleva pie: el `caption` de un audio es lo que se
+      // dijo (para el hilo) y no se manda aparte; el "escribiendo..." de
+      // antes se simula sobre ese texto, como si se estuviera grabando.
       const sent = await conTeclado(to, media.caption ?? '', () => sock.sendMessage(toJid(to), contenido));
       return resultOf(sent);
     },

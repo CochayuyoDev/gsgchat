@@ -672,6 +672,83 @@ export const ACCIONES: Accion[] = [
     },
   }),
 
+  // --------------------------------------------------------- entrenamiento
+  def({
+    nombre: 'ia.ensenar',
+    tipo: 'cambio',
+    descripcion: 'Enseñarle una lección al asistente de WhatsApp: un ejemplo (cuando el cliente diga X, contesta Y), un dato o una regla. Queda en uso al momento.',
+    parametros: 'tipo (ejemplo | dato | regla; por defecto ejemplo), pregunta (lo que dice el cliente; obligatoria en un ejemplo), respuesta (lo que hay que contestar, o el dato, o la regla), tema (opcional: envios, pagos, precios...)',
+    ejemplo: { orden: 'enséñale que si preguntan por envíos a Trujillo diga que tardan 2 días y cuestan S/ 15', accion: { accion: 'ia.ensenar', tipo: 'ejemplo', pregunta: '¿Hacen envíos a Trujillo?', respuesta: 'Sí, enviamos a Trujillo: llega en 2 días y cuesta S/ 15.', tema: 'envios' } },
+    schema: z.object({ tipo: z.enum(['ejemplo', 'dato', 'regla']).default('ejemplo'), pregunta: z.string().trim().max(1000).optional(), respuesta: texto(4000), tema: z.string().trim().max(60).optional() }),
+    async ejecutar(p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/entrenamiento/lecciones', body: { tipo: p.tipo, pregunta: p.pregunta ?? null, respuesta: p.respuesta, tema: p.tema ?? null, origen: 'manual', origenDetalle: 'por la IA operadora' } });
+      if (!ok(r)) return errorDe(r, 'No se pudo guardar la lección.');
+      const j = r.json as { nueva?: boolean; leccion?: { id: number } };
+      return { ok: true, resumen: j.nueva ? `Aprendido (lección #${j.leccion?.id}): «${acortar(p.pregunta ? `${p.pregunta} → ${p.respuesta}` : p.respuesta, 140)}».` : 'Eso ya lo sabía: la lección ya existía.', ir: '/entrenamiento' };
+    },
+  }),
+  def({
+    nombre: 'ia.lecciones',
+    tipo: 'consulta',
+    descripcion: 'Qué sabe el asistente: cuántas lecciones tiene en uso (ejemplos, datos, reglas), cuántas esperan revisión, cómo fue el último examen; o buscar lecciones por texto o tema.',
+    parametros: 'q (texto a buscar, opcional), tema (opcional), estado (activa | pendiente | descartada, opcional), cuantas (por defecto 10)',
+    ejemplo: { orden: '¿qué sabe el asistente sobre envíos?', accion: { accion: 'ia.lecciones', q: 'envío' } },
+    schema: z.object({ q: z.string().trim().max(200).optional(), tema: z.string().trim().max(60).optional(), estado: z.enum(['activa', 'pendiente', 'descartada']).optional(), cuantas: z.coerce.number().int().min(1).max(50).default(10) }),
+    async ejecutar(p, ctx) {
+      const resumen = await ctx.llamar({ method: 'GET', url: '/admin/entrenamiento' });
+      if (!ok(resumen)) return errorDe(resumen, 'No se pudo leer el entrenamiento.');
+      const c = (resumen.json as { cifras: { porEstado: Record<string, number>; porTipo: Record<string, number>; fallanExamen: number }; examenes: Array<{ estado: string; aprobados: number; fallados: number; detalle?: { porcentaje?: number } }> }).cifras;
+      const ultimo = (resumen.json as { examenes: Array<{ estado: string; aprobados: number; fallados: number; detalle?: { porcentaje?: number } }> }).examenes.find((e) => e.estado !== 'corriendo');
+      const lineas = [`${c.porEstado.activa ?? 0} lecciones en uso (${c.porTipo.ejemplo ?? 0} ejemplos, ${c.porTipo.dato ?? 0} datos, ${c.porTipo.regla ?? 0} reglas)${c.porEstado.pendiente ? `, ${c.porEstado.pendiente} pendientes de revisar` : ''}.`];
+      if (ultimo) lineas.push(`Último examen: ${ultimo.detalle?.porcentaje ?? '?'} % (${ultimo.aprobados} bien, ${ultimo.fallados} mal)${c.fallanExamen ? `; ${c.fallanExamen} en uso fallaron.` : '.'}`);
+      let datos: unknown;
+      if (p.q || p.tema || p.estado) {
+        const q = new URLSearchParams();
+        if (p.q) q.set('q', p.q);
+        if (p.tema) q.set('tema', p.tema);
+        if (p.estado) q.set('estado', p.estado);
+        q.set('limite', String(p.cuantas));
+        const r = await ctx.llamar({ method: 'GET', url: `/admin/entrenamiento/lecciones?${q.toString()}` });
+        if (ok(r)) {
+          const j = r.json as { items: Array<{ id: number; tipo: string; pregunta: string | null; respuesta: string; tema: string | null; estado: string }>; total: number };
+          lineas.push(`${j.total} lección(es) coinciden.`);
+          datos = j.items.map((l) => ({ id: l.id, tipo: l.tipo, cliente: l.pregunta, respuesta: acortar(l.respuesta, 200), tema: l.tema, estado: l.estado }));
+        }
+      }
+      return { ok: true, resumen: lineas.join(' '), datos, ir: '/entrenamiento' };
+    },
+  }),
+  def({
+    nombre: 'ia.aprenderDeChats',
+    tipo: 'cambio',
+    soloAdmin: true,
+    descripcion: 'Que el asistente aprenda de las conversaciones reales: recorre todos los chats y guarda cada respuesta que dio una persona del negocio como lección pendiente de revisar (o en uso directo si se pide).',
+    parametros: 'desde (fecha AAAA-MM-DD, opcional), revisar (true por defecto: quedan pendientes; false: en uso desde ya)',
+    ejemplo: { orden: 'que aprenda de todos los chats de este año', accion: { accion: 'ia.aprenderDeChats', desde: '2026-01-01', revisar: true } },
+    schema: z.object({ desde: z.string().trim().max(30).optional(), revisar: z.boolean().default(true) }),
+    peligrosa: true,
+    async ejecutar(p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/entrenamiento/aprender', body: { desde: p.desde, revisar: p.revisar } });
+      if (!ok(r)) return errorDe(r, 'No se pudo arrancar el aprendizaje.');
+      return { ok: true, resumen: `Aprendiendo de los chats${p.desde ? ` desde ${p.desde}` : ''}; lo aprendido queda ${p.revisar ? 'pendiente de revisar' : 'en uso'}. El avance se ve en Entrenar a la IA.`, ir: '/entrenamiento' };
+    },
+  }),
+  def({
+    nombre: 'ia.examinar',
+    tipo: 'cambio',
+    soloAdmin: true,
+    descripcion: 'Examinar al asistente en masa: le hace la pregunta de cada lección y comprueba que responda como se le enseñó. Tarda (unos segundos por lección).',
+    parametros: 'tema (opcional), muestra (cuántas al azar; sin esto, todas), soloFallidas (true = solo las que fallaron la última vez)',
+    ejemplo: { orden: 'examínala con 100 lecciones al azar', accion: { accion: 'ia.examinar', muestra: 100 } },
+    schema: z.object({ tema: z.string().trim().max(60).optional(), muestra: z.coerce.number().int().min(1).max(5000).optional(), soloFallidas: z.boolean().default(false) }),
+    async ejecutar(p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/entrenamiento/examen', body: { tema: p.tema, muestra: p.muestra, soloFallidas: p.soloFallidas } });
+      if (!ok(r)) return errorDe(r, 'No se pudo lanzar el examen.');
+      const t = (r.json as { trabajo?: { total?: number } }).trabajo;
+      return { ok: true, resumen: `Examen en marcha con ${t?.total ?? '?'} lecciones. El resultado se ve en Entrenar a la IA (y en ia.lecciones cuando termine).`, ir: '/entrenamiento#examen' };
+    },
+  }),
+
   // --------------------------------------------------------------- sistema
   def({
     nombre: 'sistema.resumen',

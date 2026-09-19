@@ -34,7 +34,8 @@ import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { providerOf, createSettingsService } from '../src/settings/service.js';
 import { createDynamicWhatsAppClient } from '../src/whatsapp/dynamic.js';
 import { defaultAuthDir } from '../src/whatsapp/local/session.js';
-import { createStokyClient } from '../src/stoky/client.js';
+import { crearConexionStoky } from '../src/stoky/conexion.js';
+import { crearServicioPlan } from '../src/plan/servicio.js';
 import { secretsDirectory } from '../src/runtime.js';
 import { CATALOG } from '../src/templates/catalog.js';
 import { countVariables } from '../src/templates/render.js';
@@ -47,6 +48,8 @@ import { mediaDirectory } from '../src/whatsapp/local/media.js';
 import { crearBus } from '../src/eventos/bus.js';
 import { observarRepos } from '../src/eventos/observar.js';
 import { crearServicioIA } from '../src/ia/servicio.js';
+import { crearServicioEntrenamiento, iaParaEntrenar } from '../src/entrenamiento/servicio.js';
+import { crearServicioVoz } from '../src/voz/servicio.js';
 import { crearServicioEnvioAutomatico } from '../src/envio-automatico/servicio.js';
 import { opcionesDesdeConfig } from '../src/rutas/motor.js';
 import { PLANES } from '../src/rutas/telefono.js';
@@ -159,11 +162,16 @@ avisarSupervisor = async (texto) => {
 
 const queue = createMemoryOutboundQueue({ sender });
 
-// Sin las dos variables no hay catalogo, y el asistente hace todo lo demas.
-const catalogo =
-  config.STOKY_URL && config.STOKY_TOKEN
-    ? createStokyClient({ baseUrl: config.STOKY_URL, token: config.STOKY_TOKEN })
-    : undefined;
+// La membresia: sin PLAN_URL no hay maestro y la lleva el superadministrador
+// desde la pantalla Membresia (ver src/plan).
+const plan = await crearServicioPlan({ settingsRepo, url: config.PLAN_URL, token: config.PLAN_TOKEN, log: (m, d) => console.warn(m, d ?? '') });
+plan.arrancar();
+
+// La conexion con Stoky se configura desde la pantalla (Conectar mi web y
+// tienda → Stoky) o la manda Stoky al vincularse; el .env es el valor inicial.
+// El catalogo es siempre el mismo objeto: apunta a la conexion vigente.
+const conexionStoky = await crearConexionStoky({ settingsRepo, settingsKeyBase64: secrets.settingsKey, config, log: (m, d) => console.warn(`[stoky] ${m}`, d ?? '') });
+const catalogo = conexionStoky.cliente();
 
 // La lista de numeros a los que el sistema escribe solo (ver src/envio-automatico).
 const lista = crearServicioEnvioAutomatico({
@@ -175,6 +183,15 @@ const lista = crearServicioEnvioAutomatico({
 });
 
 // El asistente de IA de la tienda (ver src/ia): con el catalogo de Stoky si esta.
+// Lo que se le enseno al asistente a gran escala (lecciones, aprender de
+// los chats, examen). Se carga antes que la IA: cada turno elige de aqui.
+const entrenamiento = await crearServicioEntrenamiento({ repo: repos.entrenamiento, nombreNegocio: () => ajustes.nombreNegocio(), log: (m, d) => console.warn(`[entrenamiento] ${m}`, d ?? '') });
+await entrenamiento.cargar();
+
+// La voz del asistente (ElevenLabs): notas de voz y transcripcion de los
+// audios del cliente. Se configura en Mi asistente IA → Voz. Ver src/voz.
+const voz = await crearServicioVoz({ settingsRepo, settingsKeyBase64: secrets.settingsKey, sender, mediaDir: mediaDirectory(), log: (m, d) => console.warn(`[voz] ${m}`, d ?? '') });
+
 const ia = await crearServicioIA({
   settingsRepo,
   settingsKeyBase64: secrets.settingsKey,
@@ -187,8 +204,12 @@ const ia = await crearServicioIA({
   conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
   lista,
   bus,
+  entrenamiento,
+  plan,
+  voz,
   log: (m, d) => console.warn(m, d ?? ''),
 });
+entrenamiento.conectarIA(iaParaEntrenar(ia));
 
 // El catalogo local hace de catalogo aprobado: sin Meta no hay a quien pedir
 // permiso, pero los gates siguen exigiendo que la plantilla exista y este
@@ -226,7 +247,11 @@ const app = await buildServer({
   stickers,
   bus,
   ia,
+  entrenamiento,
+  conexionStoky,
+  plan,
   lista,
+  voz,
   // Para poder guardar en la biblioteca un sticker que llego por el chat: su
   // fichero vive aqui.
   mediaDir: mediaDirectory(),
@@ -269,7 +294,7 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-if (catalogo) {
+if (conexionStoky.estado().configurada) {
   // Se trae el catalogo ANTES de atender a nadie: el primer cliente del dia no
   // tiene por que esperar a que cargue, y si Stoky esta caido se sabe aqui y
   // no en mitad de una conversacion.

@@ -35,7 +35,10 @@ import type { ServicioStickers } from '../stickers/stickers.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import { registerWahaRoutes } from './waha-routes.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
+import type { ServicioVoz } from '../voz/servicio.js';
 import { envioAutomaticoPage } from './envio-automatico-page.js';
+import { entrenamientoPage } from './entrenamiento-page.js';
+import type { ServicioEntrenamiento } from '../entrenamiento/servicio.js';
 
 export interface WebDeps {
   config: Config;
@@ -57,6 +60,10 @@ export interface WebDeps {
   ia?: ServicioIA;
   /** La lista de envio automatico. */
   lista?: ServicioEnvioAutomatico;
+  /** El entrenamiento del asistente (la pantalla /entrenamiento). */
+  entrenamiento?: ServicioEntrenamiento;
+  /** La voz del asistente: los entrantes del socket local se transcriben con ella. */
+  voz?: ServicioVoz;
 }
 
 /**
@@ -136,12 +143,13 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     stickers: deps.stickers,
     ia: deps.ia,
     lista: deps.lista,
+    voz: deps.voz,
     autoConectar: deps.autoConectarLocal,
   });
   // El simulador de entrantes pasa por las mismas piezas que un mensaje real
   // (monitor de salud, ajustes, stickers): si no, lo que se prueba con el no
   // es lo que pasa en la calle.
-  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista });
+  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz });
 
   app.get('/rutas', async (_request, reply) => {
     const page = html(rutasPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
@@ -150,6 +158,11 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   app.get('/envio-automatico', async (_request, reply) => {
     const page = html(envioAutomaticoPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  app.get('/entrenamiento', async (_request, reply) => {
+    const page = html(entrenamientoPage({ disponible: Boolean(deps.entrenamiento), conIA: Boolean(deps.ia?.estado().tieneToken), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 

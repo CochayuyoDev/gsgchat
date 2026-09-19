@@ -14,6 +14,9 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { Config } from '../../config.js';
 import { normalizePhone, type Repos } from '../../db/repos.js';
 import type { Sender, SendOutcome } from '../../outbound/sender.js';
@@ -34,6 +37,9 @@ import { openApi } from './openapi.js';
 import { confirmacionSchema } from '../../ia/ordenes.js';
 import type { ServicioIA } from '../../ia/servicio.js';
 import { ErrorIA } from '../../ia/proveedores.js';
+import type { ServicioVoz } from '../../voz/servicio.js';
+import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
+import { MAX_BYTES_ADJUNTO, tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
 
 export interface ApiV1Deps {
   repos: Repos;
@@ -49,8 +55,39 @@ export interface ApiV1Deps {
   bus?: Bus;
   /** La IA operadora, para que otro sistema le de ordenes con palabras. Sin ella, 503. */
   ia?: ServicioIA;
+  /** La voz del asistente (ver src/voz): `voz: true` en POST /mensajes manda el texto como nota de voz. Sin ella, sale por escrito y se dice. */
+  voz?: ServicioVoz;
+  /** Donde se guardan los ficheros que llegan por URL (`media`), para que el chat los pinte. */
+  mediaDir?: string;
+  /** Con que se bajan los ficheros de `media.url`. Para pruebas. */
+  fetchImpl?: typeof fetch;
   ahora?: () => Date;
 }
+
+/** Los tipos de fichero con nombres en espanol (y en ingles, por si acaso). */
+const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
+  imagen: 'image',
+  foto: 'image',
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  documento: 'document',
+  archivo: 'document',
+  document: 'document',
+  file: 'document',
+};
+
+const mediaSchema = z.object({
+  /** De donde se baja el fichero (http o https). */
+  url: z.string().trim().url().max(2000),
+  /** imagen | video | audio | documento. Sin el, se deduce del tipo del fichero. */
+  tipo: z.string().trim().toLowerCase().max(20).optional(),
+  caption: z.string().max(1024).optional(),
+  /** El nombre con el que se ensena un documento. */
+  nombre: z.string().trim().max(200).optional(),
+  /** Un audio como nota de voz (con la onda y el play). */
+  voz: z.boolean().optional(),
+});
 
 const telefonoSchema = z.string().min(6).max(30).transform((v) => normalizePhone(v));
 
@@ -80,10 +117,41 @@ const mensajeSchema = z
     pedirUbicacion: z.boolean().optional(),
     /** Registrar el consentimiento en la misma llamada: de donde sale. */
     consentimiento: z.object({ origen: z.string().min(2).max(200) }).optional(),
+    /** Una foto, un video, un audio o un documento, por URL. */
+    media: mediaSchema.optional(),
+    /** Mandar `texto` como nota de voz con la voz del asistente (ver Mi asistente IA → Voz). Si no se puede, sale por escrito y la respuesta lo dice. */
+    voz: z.boolean().optional(),
+    /** Quien lo manda, para el hilo y el webhook: 'persona' (un asesor escribiendo desde el otro sistema), 'ia' (una IA de alli) o 'sistema' (lo automatico; por defecto). */
+    autor: z.enum(['persona', 'ia', 'sistema']).optional(),
+    /** El nombre de pila de quien lo manda (un asesor): sale en el hilo y en el webhook. */
+    autorNombre: z.string().trim().max(80).optional(),
   })
-  .refine((b) => b.texto || b.plantilla || b.ubicacion || b.pedirUbicacion, {
-    message: 'hace falta texto, plantilla, ubicacion o pedirUbicacion',
+  .refine((b) => b.texto || b.plantilla || b.ubicacion || b.pedirUbicacion || b.media, {
+    message: 'hace falta texto, plantilla, ubicacion, pedirUbicacion o media',
   });
+
+/** Baja el fichero de `media.url`: como mucho 16 MB, y en 30 s. */
+async function bajarMedia(url: string, fetchImpl: typeof fetch): Promise<{ ok: true; datos: Buffer; mimeType: string } | { ok: false; error: string }> {
+  if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'media.url tiene que empezar por http:// o https://' };
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), 30_000);
+  try {
+    const r = await fetchImpl(url, { signal: controlador.signal, redirect: 'follow' });
+    if (!r.ok) return { ok: false, error: `no se pudo bajar media.url: respondio ${r.status}` };
+    const largo = Number(r.headers.get('content-length') ?? 0);
+    if (largo > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
+    const datos = Buffer.from(await r.arrayBuffer());
+    if (!datos.length) return { ok: false, error: 'media.url devolvio un fichero vacio' };
+    if (datos.length > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
+    const mimeType = (r.headers.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim().toLowerCase();
+    return { ok: true, datos, mimeType };
+  } catch (error) {
+    const abortado = error instanceof Error && error.name === 'AbortError';
+    return { ok: false, error: abortado ? 'media.url tardo mas de 30 s en responder' : `no se pudo bajar media.url: ${error instanceof Error ? error.message : String(error)}` };
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
 
 /** Lo que devuelve un envio, con nombres que no cambian. */
 function respuestaDeEnvio(outcome: SendOutcome) {
@@ -206,6 +274,11 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     // El contacto nace aqui si no existia; el consentimiento solo si lo dicen.
     await repos.contacts.upsertFromInbound(phone, body.nombre);
     if (body.consentimiento) await repos.contacts.setOptIn(phone, body.consentimiento.origen);
+    // Quien lo manda, para el hilo (y el webhook): lo que diga el otro sistema; si no, es "sistema".
+    const origen = body.autor;
+    const autorNombre = body.autorNombre || undefined;
+    // Si pidieron nota de voz: como salio al final, y por que, si fue por escrito.
+    let voz: { pedida: boolean; enviada: boolean; motivo: string | null } | null = null;
 
     let outcome: SendOutcome;
     if (body.pedirUbicacion) {
@@ -213,9 +286,39 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
         phone,
         kind: 'interactive',
         manual,
+        origen,
+        autorNombre,
         category: 'UTILITY',
         interactive: { body: body.texto?.trim() || 'Comparte tu ubicación con el botón de aquí abajo, por favor.', locationRequest: true },
       });
+    } else if (body.media) {
+      const kindPedido = body.media.tipo ? TIPOS_MEDIA[body.media.tipo] : undefined;
+      if (body.media.tipo && !kindPedido) return reply.code(400).send({ error: 'media.tipo tiene que ser imagen, video, audio o documento' });
+      const bajado = await bajarMedia(body.media.url, deps.fetchImpl ?? fetch);
+      if (!bajado.ok) return reply.code(400).send({ error: bajado.error });
+      const kind = kindPedido ?? tipoDeAdjuntoSaliente(bajado.mimeType);
+      // Un tipo generico (octet-stream) con nombre: la extension del nombre manda.
+      const extension = extensionDe(bajado.mimeType, kind) === '.bin' && body.media.nombre?.includes('.') ? `.${body.media.nombre.split('.').pop()!.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'}` : extensionDe(bajado.mimeType, kind);
+      const id = idDeMedia(`api:${randomUUID()}`, extension);
+      await writeFile(path.join(deps.mediaDir ?? mediaDirectory(), id), bajado.datos);
+      outcome = await sender.send({
+        phone,
+        kind: 'media',
+        category: body.categoria,
+        manual,
+        origen,
+        autorNombre,
+        media: { id, kind, datos: bajado.datos, mimeType: bajado.mimeType, filename: body.media.nombre || undefined, caption: body.media.caption?.trim() || undefined, voz: kind === 'audio' && Boolean(body.media.voz) },
+      });
+    } else if (body.voz && body.texto) {
+      if (!deps.voz) {
+        outcome = await sender.send({ phone, kind: 'freeform', category: body.categoria, manual, origen, autorNombre, text: body.texto });
+        voz = { pedida: true, enviada: false, motivo: 'La voz no está configurada en este sistema (Mi asistente IA → Voz): salió por escrito.' };
+      } else {
+        const r = await deps.voz.enviar({ phone, texto: body.texto, origen, autorNombre, manual, categoria: body.categoria });
+        outcome = r.outcome;
+        voz = { pedida: true, enviada: r.enviadoComo === 'audio', motivo: r.motivo };
+      }
     } else if (body.ubicacion) {
       let location: { latitude: number; longitude: number; name?: string; address?: string };
       if (typeof body.ubicacion === 'string') {
@@ -225,7 +328,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
       } else {
         location = { latitude: body.ubicacion.lat, longitude: body.ubicacion.lng, name: body.ubicacion.nombre, address: body.ubicacion.direccion };
       }
-      outcome = await sender.send({ phone, kind: 'location', category: 'UTILITY', manual, location });
+      outcome = await sender.send({ phone, kind: 'location', category: 'UTILITY', manual, origen, autorNombre, location });
     } else if (body.plantilla) {
       const template =
         (await repos.templates.get(body.plantilla.nombre, body.plantilla.idioma)) ??
@@ -236,17 +339,19 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
         phone,
         kind: 'template',
         manual,
+        origen,
+        autorNombre,
         category: template.category,
         templateName: template.name,
         templateLanguage: template.language,
         variables: body.plantilla.variables,
       });
     } else {
-      outcome = await sender.send({ phone, kind: 'freeform', category: body.categoria, manual, text: body.texto! });
+      outcome = await sender.send({ phone, kind: 'freeform', category: body.categoria, manual, origen, autorNombre, text: body.texto! });
     }
 
     const r = respuestaDeEnvio(outcome);
-    return reply.code(r.codigo).send(r.cuerpo);
+    return reply.code(r.codigo).send(voz ? { ...r.cuerpo, voz } : r.cuerpo);
   });
 
   // --- conversaciones ------------------------------------------------------
@@ -298,16 +403,25 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
         : puedeEscribir
           ? null
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
-      mensajes: messages.map((m) => ({
-        id: m.id,
-        mensajeId: m.wamid,
-        direccion: m.direction === 'in' ? 'entrante' : 'saliente',
-        tipo: m.kind,
-        texto: m.body,
-        datos: m.payload,
-        estado: m.status,
-        fecha: m.createdAt,
-      })),
+      mensajes: messages.map((m) => {
+        const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; media?: { voz?: unknown } };
+        return {
+          id: m.id,
+          mensajeId: m.wamid,
+          direccion: m.direction === 'in' ? 'entrante' : 'saliente',
+          tipo: m.kind,
+          texto: m.body,
+          // Quien lo mando (solo salientes): persona | ia | sistema. Y lo que dijo en una nota de voz (solo entrantes transcritos).
+          autor: m.direction === 'out' ? (p.origen === 'persona' || p.origen === 'ia' ? p.origen : 'sistema') : null,
+          autorNombre: m.direction === 'out' && typeof p.autorNombre === 'string' ? p.autorNombre : null,
+          transcripcion: typeof p.transcripcion === 'string' ? p.transcripcion : null,
+          anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,
+          voz: p.media?.voz === true,
+          datos: m.payload,
+          estado: m.status,
+          fecha: m.createdAt,
+        };
+      }),
       hayMas: messages.length === q.limite,
     };
   });

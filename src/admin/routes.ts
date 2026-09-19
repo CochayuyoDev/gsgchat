@@ -45,6 +45,12 @@ import { crearCampana } from '../campanas/crear.js';
 import { registerGruposRoutes } from './grupos-routes.js';
 
 export interface AdminDeps {
+  /** La conexion con Stoky configurable desde la pantalla (para el enlace al panel). */
+  conexionStoky?: import('../stoky/conexion.js').ServicioConexionStoky;
+  /** El entrenamiento del asistente (para la lista de primeros pasos del inicio). */
+  entrenamiento?: import('../entrenamiento/servicio.js').ServicioEntrenamiento;
+  /** La voz del asistente: desde el chat, un texto puede salir como nota de voz. */
+  voz?: import('../voz/servicio.js').ServicioVoz;
   repos: Repos;
   config: Config;
   settings: SettingsService;
@@ -137,10 +143,11 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
   await registerAutomationRoutes(app, { repos, sender });
-  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir });
+  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz });
   await registerLeadsRoutes(app, {
     repos,
-    panelStoky: config.STOKY_PANEL_URL,
+    // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.
+    panelStoky: () => deps.conexionStoky?.estado().panelUrl || config.STOKY_PANEL_URL,
     // Cerrar la ficha cierra tambien la conversacion: se respalda y se limpia.
     alCerrarFicha: config.ARCHIVE_ON_LEAD_CLOSE
       ? async (contactId) => {
@@ -362,6 +369,15 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         // El asistente de IA: null si este arranque no lo tiene.
         ia: deps.ia ? deps.ia.activa() : null,
         iaDisponible: Boolean(deps.ia),
+        // Cuantas lecciones tiene en uso (null si este arranque no tiene entrenamiento).
+        lecciones: deps.entrenamiento ? deps.entrenamiento.cargadas() : null,
+        // Stoky en las dos direcciones: si este sistema consulta su catalogo y si Stoky ya usa su clave.
+        stoky: deps.conexionStoky
+          ? {
+              configurada: deps.conexionStoky.estado().configurada,
+              claveUsada: (await repos.claves.listar()).some((c) => !c.revocadaAt && /stoky/i.test(c.nombre) && Boolean(c.ultimoUsoAt)),
+            }
+          : null,
       },
     };
   });

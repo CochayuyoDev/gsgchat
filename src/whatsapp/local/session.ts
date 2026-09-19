@@ -21,7 +21,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import QRCode from 'qrcode';
-import type { ChangeValue, InboundMessage } from '../types.js';
+import type { AnuncioEntrada, ChangeValue, InboundMessage } from '../types.js';
 import { desenvolver, guardarMedia, mediaDirectory, tipoDeAdjunto, type MediaInfo } from './media.js';
 
 export type LocalStatus = 'STOPPED' | 'STARTING' | 'SCAN_QR_CODE' | 'WORKING' | 'FAILED';
@@ -1073,6 +1073,39 @@ export function autorDeGrupo(key: { participant?: string; participantAlt?: strin
 }
 
 /** Si, quitando llaves y metadatos, queda algo que leer. */
+/**
+ * El anuncio del que viene el mensaje, si viene de uno.
+ *
+ * Un "click to WhatsApp" de Facebook o Instagram llega con un
+ * `contextInfo.externalAdReply` (titulo, texto, imagen, direccion y el id
+ * del clic) dentro del texto o de la foto, y a veces solo con
+ * `conversionSource`. Sin esto, por QR los clientes de los anuncios entraban
+ * como si fueran organicos y el kit de bienvenida por anuncio no se disparaba.
+ * Un enlace pegado por el cliente NO trae `sourceId` ni `ctwaClid`: no cuenta.
+ */
+export function anuncioDe(contenido: Record<string, unknown>): AnuncioEntrada | null {
+  for (const valor of Object.values(contenido)) {
+    const ctx = (valor as { contextInfo?: Record<string, unknown> } | null)?.contextInfo;
+    if (!ctx) continue;
+    const ad = ctx.externalAdReply as
+      | { title?: string; body?: string; sourceType?: string; sourceId?: string; sourceUrl?: string; thumbnailUrl?: string; mediaUrl?: string; ctwaClid?: string; showAdAttribution?: boolean }
+      | undefined;
+    const conversion = typeof ctx.conversionSource === 'string' ? ctx.conversionSource : null;
+    const esAnuncio = Boolean(ad && (ad.ctwaClid || ad.sourceId || ad.showAdAttribution || /ad/i.test(ad.sourceType ?? ''))) || Boolean(conversion);
+    if (!esAnuncio) continue;
+    return {
+      id: ad?.sourceId || null,
+      titulo: ad?.title || null,
+      texto: ad?.body || null,
+      url: ad?.sourceUrl || null,
+      imagen: ad?.thumbnailUrl || ad?.mediaUrl || null,
+      clid: ad?.ctwaClid || null,
+      origen: ad?.sourceType ? ad.sourceType.toLowerCase() : conversion ? conversion.toLowerCase() : 'ad',
+    };
+  }
+  return null;
+}
+
 function hayContenidoAparteDeLlaves(contenido: Record<string, unknown>): boolean {
   return Object.keys(contenido).some((k) => k !== 'senderKeyDistributionMessage' && k !== 'messageContextInfo');
 }
@@ -1280,14 +1313,15 @@ export function toChangeValue(
       };
     }
 
+    const anuncio = anuncioDe(contenido);
     if (typeof texto === 'string') {
-      return { id, from, timestamp, type: 'text', text: { body: texto } };
+      return { id, from, timestamp, type: 'text', text: { body: texto }, ...(anuncio ? { anuncio } : {}) };
     }
 
     // Fotos, audios y documentos: con el fichero ya bajado se pintan en /chat;
     // sin el, al menos se ve que llego algo.
     if (media) {
-      return { id, from, timestamp, type: media.kind, media };
+      return { id, from, timestamp, type: media.kind, media, ...(anuncio ? { anuncio } : {}) };
     }
 
     // Un "ver una vez" sin fichero. WhatsApp no le da la llave del adjunto a

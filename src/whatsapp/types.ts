@@ -7,6 +7,26 @@ export interface WebhookLocation {
   address?: string;
 }
 
+/**
+ * El anuncio desde el que escribio el cliente ("click to WhatsApp" de
+ * Facebook o Instagram). Meta lo manda como `referral`; el cliente local lo
+ * saca del `externalAdReply` de Baileys. Es lo que permite el kit de
+ * bienvenida por anuncio y saber que campana trae clientes.
+ */
+export interface AnuncioEntrada {
+  /** El id del anuncio o del post (source_id). */
+  id: string | null;
+  titulo: string | null;
+  texto: string | null;
+  /** La direccion del anuncio. */
+  url: string | null;
+  imagen: string | null;
+  /** El identificador del clic (ctwa_clid), para atribuir la conversion. */
+  clid: string | null;
+  /** ad | post | otro. */
+  origen: string | null;
+}
+
 export interface InboundMessage {
   id: string;
   from: string;
@@ -58,6 +78,10 @@ export interface InboundMessage {
    * como si fueran nuevos es escribirle a media libreta de golpe.
    */
   viejo?: boolean;
+  /** Vino desde un anuncio (ver `AnuncioEntrada`): el cliente local lo rellena. */
+  anuncio?: AnuncioEntrada;
+  /** Lo mismo, tal como lo manda la Cloud API de Meta (`referral`). */
+  referral?: { source_url?: string; source_id?: string; source_type?: string; headline?: string; body?: string; image_url?: string; thumbnail_url?: string; video_url?: string; ctwa_clid?: string };
   /**
    * Adjunto ya bajado a disco.
    *
@@ -75,6 +99,8 @@ export interface InboundMessage {
     bytes?: number;
     /** Llego como "ver una vez": en el telefono desaparece al abrirla; aqui queda. */
     verUnaVez?: boolean;
+    /** Lo que dijo en el audio, si la voz esta configurada (ver src/voz). */
+    transcripcion?: string;
   };
 }
 

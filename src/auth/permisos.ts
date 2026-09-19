@@ -22,6 +22,8 @@ export const PERMISOS = {
   'conectores:gestionar': 'Crear y configurar conectores de tiendas (WooCommerce, Shopify)',
   'ia:ordenar': 'Darle ordenes con palabras a la IA operadora (POST /api/v1/ia/ordenes); ejecuta solo lo que los demas permisos de la clave dejan',
   'pedidos:gestionar': 'Ver y cambiar de estado los pedidos tomados en el chat',
+  'ia:entrenar': 'Ensenarle lecciones al asistente de WhatsApp y leerlas (POST/GET /api/v1/ia/lecciones)',
+  'stoky:conectar': 'Que Stoky se presente al vincularse: manda su direccion y su token para que este sistema consulte su catalogo (POST/GET /api/v1/stoky/conexion)',
   '*': 'Todo, incluida la API interna /admin (como las claves de antes)',
 } as const;
 

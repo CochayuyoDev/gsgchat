@@ -27,13 +27,17 @@ import { generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, 
 import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
+import { capacidadDe, type Capacidad } from './usuarios.js';
 import { landingPage } from '../web/landing-page.js';
 
 export interface UsuarioSesion {
   id: string;
   usuario: string;
   nombre: string;
-  rol: Rol;
+  /** Lo que puede hacer: 'admin' o 'operador'. Un superadministrador entra como admin y ademas lleva `super`. */
+  rol: Capacidad;
+  /** true = superadministrador: membresia, codigos de conexion y cuentas de otros superadministradores. */
+  super?: boolean;
   /** true si entro con una clave de API (un programa), no con una cuenta. */
   porToken: boolean;
   /** Lo que puede hacer en /api/v1. Una persona lo puede todo; una clave, lo suyo. Ver permisos.ts. */
@@ -73,6 +77,8 @@ export interface AuthDeps {
    * puede mandar. Ver src/ia/ordenes.ts y buildServer.
    */
   secretoInterno?: string;
+  /** La membresia: para el tope de cuentas. Ver src/plan. */
+  plan?: import('../plan/servicio.js').ServicioPlan;
 }
 
 export const CABECERA_INTERNA = 'x-wa-interno';
@@ -86,7 +92,10 @@ export function secretoDeSesion(config: Config): string {
 const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte'];
 
 /** Lo que solo toca una persona con rol admin: nunca una clave de API. */
-const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad'];
+const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
+
+/** Rutas de la API publica que no piden clave. */
+const API_SIN_CLAVE = ['/api/v1/conexion/canjear'];
 
 /** Cada cuanto se anota el "ultimo uso" de una clave: no una escritura por peticion. */
 const ANOTAR_USO_CADA_MS = 60_000;
@@ -119,7 +128,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       try {
         const u = JSON.parse(crudo) as UsuarioSesion;
         if (!u || typeof u.id !== 'string' || (u.rol !== 'admin' && u.rol !== 'operador')) return null;
-        return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: Boolean(u.porToken), permisos: Array.isArray(u.permisos) ? u.permisos : [], embebido: u.embebido };
+        return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, super: u.super === true, porToken: Boolean(u.porToken), permisos: Array.isArray(u.permisos) ? u.permisos : [], embebido: u.embebido };
       } catch {
         return null;
       }
@@ -166,7 +175,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     if (!carga) return null;
     const u = await usuarios.porId(carga.u);
     if (!u || !u.activo || u.sesionVersion !== carga.v) return null;
-    return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false, permisos: ['*'] };
+    return sesionDe(u);
   }
 
   app.addHook('onRequest', async (request, reply) => {
@@ -188,6 +197,9 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
     // La API publica: cada ruta dice que permiso exige (ver src/api/v1).
     if (request.url.startsWith('/api/')) {
+      // El canje de un codigo de conexion entra sin clave: el codigo es la
+      // autorizacion, y de ahi sale la clave (ver super-routes.ts).
+      if (API_SIN_CLAVE.includes(request.url.split('?')[0] ?? '') || request.url.startsWith('/api/plan/')) return;
       if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: manda `Authorization: Bearer <clave de API>`' });
       const permiso = request.routeOptions?.config?.permiso;
       if (permiso && !tienePermiso(request.usuario.permisos, permiso)) {
@@ -246,6 +258,9 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     reply.header('set-cookie', cookieDeSesion(firmarSesion(secreto, { u: u.id, v: u.sesionVersion }, ahora().getTime()), segura));
   };
 
+  /** La sesion de una persona: su capacidad en el panel y si es superadministrador. */
+  const sesionDe = (u: { id: string; usuario: string; nombre: string; rol: Rol }): UsuarioSesion => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, rol: capacidadDe(u.rol), super: u.rol === 'superadmin', porToken: false, permisos: ['*'] });
+
   const loginSchema = z.object({ usuario: z.string().trim().min(1).max(60), clave: z.string().min(1).max(200), next: z.string().optional() });
 
   app.post('/login', async (request, reply) => {
@@ -263,7 +278,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     await usuarios.tocarLogin(u.id, ahora());
     abrirSesion(reply, u);
     // Para la bitacora: quien acaba de entrar, con su nombre.
-    request.usuario = { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false, permisos: ['*'] };
+    request.usuario = sesionDe(u);
     return { ok: true, usuario: { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol }, next: siguienteSeguro(body.next) };
   });
 
@@ -273,7 +288,11 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     clave: z.string().min(1).max(200),
   });
 
-  /** Solo mientras no exista ningun usuario: la cuenta administradora. */
+  /**
+   * Solo mientras no exista ningun usuario: la primera cuenta es la del
+   * superadministrador, que es quien esta poniendo el sistema. Los
+   * administradores del negocio los crea el despues.
+   */
   app.post('/login/primera-cuenta', async (request, reply) => {
     if ((await usuarios.contar()) > 0) {
       return reply.code(409).send({ error: 'Ya hay usuarios: entra con tu cuenta o pide una al administrador.' });
@@ -284,10 +303,10 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     if (malUsuario) return reply.code(400).send({ error: malUsuario });
     const malClave = claveAceptable(body.clave);
     if (malClave) return reply.code(400).send({ error: malClave });
-    const u = await usuarios.crear({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: 'admin' });
+    const u = await usuarios.crear({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: 'superadmin' });
     await usuarios.tocarLogin(u.id, ahora());
     abrirSesion(reply, u);
-    request.usuario = { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, porToken: false, permisos: ['*'] };
+    request.usuario = sesionDe(u);
     return { ok: true, usuario: { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol }, next: '/panel' };
   });
 
@@ -306,24 +325,32 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     nombre: z.string().trim().min(1).max(80),
     usuario: z.string().trim().min(1).max(60),
     clave: z.string().min(1).max(200),
-    rol: z.enum(['admin', 'operador']).default('operador'),
+    rol: z.enum(['superadmin', 'admin', 'operador']).default('operador'),
   });
 
   app.post('/admin/usuarios', async (request, reply) => {
     const body = nuevoSchema.parse(request.body ?? {});
+    // Un superadministrador solo lo crea otro superadministrador.
+    if (body.rol === 'superadmin' && !request.usuario?.super) return reply.code(403).send({ error: 'Solo un superadministrador puede crear superadministradores.' });
     const usuarioNorm = body.usuario.toLowerCase();
     const malUsuario = usuarioAceptable(usuarioNorm);
     if (malUsuario) return reply.code(400).send({ error: malUsuario });
     const malClave = claveAceptable(body.clave);
     if (malClave) return reply.code(400).send({ error: malClave });
     if (await usuarios.porUsuario(usuarioNorm)) return reply.code(400).send({ error: 'Ese usuario ya existe.' });
+    // La membresia puede poner tope de cuentas (las activas cuentan).
+    const tope = deps.plan?.limiteUsuarios() ?? null;
+    if (tope !== null) {
+      const activas = (await usuarios.listar()).filter((x) => x.activo).length;
+      if (activas >= tope) return reply.code(400).send({ error: `La membresía permite ${tope} cuenta${tope === 1 ? '' : 's'} y ya hay ${activas}. Desactiva una o amplía la membresía.`, ir: '/panel#membresia' });
+    }
     const u = await usuarios.crear({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: body.rol });
     return { ok: true, usuario: u };
   });
 
   const cambioSchema = z.object({
     clave: z.string().max(200).optional(),
-    rol: z.enum(['admin', 'operador']).optional(),
+    rol: z.enum(['superadmin', 'admin', 'operador']).optional(),
     activo: z.boolean().optional(),
   });
 
@@ -332,6 +359,16 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     const u = await usuarios.porId(request.params.id);
     if (!u) return reply.code(404).send({ error: 'Ese usuario no existe.' });
     const esUnoMismo = request.usuario?.id === u.id;
+    // Las cuentas de superadministrador solo las toca un superadministrador
+    // (ni siquiera un admin puede cambiarles la contrasena o desactivarlas).
+    if ((u.rol === 'superadmin' || body.rol === 'superadmin') && !request.usuario?.super) {
+      return reply.code(403).send({ error: 'Solo un superadministrador puede cambiar cuentas de superadministrador.' });
+    }
+    // El ultimo superadministrador no se degrada ni se desactiva: alguien tiene que poder gestionar la membresia.
+    if (u.rol === 'superadmin' && ((body.rol !== undefined && body.rol !== 'superadmin') || body.activo === false)) {
+      const supers = (await usuarios.listar()).filter((x) => x.rol === 'superadmin' && x.activo).length;
+      if (supers <= 1) return reply.code(400).send({ error: 'Es el único superadministrador: crea otro antes de cambiarlo o desactivarlo.' });
+    }
 
     if (body.clave !== undefined) {
       const mal = claveAceptable(body.clave);
@@ -344,7 +381,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       }
     }
     if (body.rol !== undefined) {
-      if (esUnoMismo && body.rol !== 'admin') return reply.code(400).send({ error: 'No puedes quitarte a ti mismo el rol de administrador.' });
+      if (esUnoMismo && body.rol === 'operador') return reply.code(400).send({ error: 'No puedes quitarte a ti mismo el rol de administrador.' });
       await usuarios.setRol(u.id, body.rol);
     }
     if (body.activo !== undefined) {

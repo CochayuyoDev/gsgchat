@@ -25,6 +25,7 @@ import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
+import type { ServicioVoz } from '../voz/servicio.js';
 import { processChange, type WebhookDeps } from '../whatsapp/webhook.js';
 import type { ChangeValue } from '../whatsapp/types.js';
 
@@ -40,6 +41,7 @@ export interface DevRoutesDeps {
   stickers?: ServicioStickers;
   ia?: ServicioIA;
   lista?: ServicioEnvioAutomatico;
+  voz?: ServicioVoz;
 }
 
 const simularSchema = z.object({
@@ -65,7 +67,7 @@ export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDep
   const { config, repos, sender, wa, settings, catalogo, salud, ajustes, stickers } = deps;
   if (!config.DEV_SIMULATE_INBOUND) return;
 
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes, stickers, ia: deps.ia, lista: deps.lista };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes, stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz };
 
   /**
    * Mete un entrante como si lo hubiera mandado ese numero.

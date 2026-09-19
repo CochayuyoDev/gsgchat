@@ -39,6 +39,9 @@ import { createFakeWebhooks, type FakeWebhooks } from './fakes-webhooks.js';
 import { createFakeConectores, type FakeConectores } from './fakes-conectores.js';
 import { createFakeEnvioAutomatico, type FakeEnvioAutomatico } from './fakes-envio-automatico.js';
 import { createFakePedidos, type FakePedidos } from './fakes-pedidos.js';
+import { createFakeEntrenamiento, type FakeEntrenamiento } from './fakes-entrenamiento.js';
+import { createFakeCodigos, type FakeCodigos } from './fakes-codigos.js';
+import { createFakeTiendas, type FakeTiendas } from './fakes-tiendas.js';
 import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
@@ -58,6 +61,9 @@ export interface FakeRepos extends Repos {
   envioAutomatico: FakeEnvioAutomatico;
   conectores: FakeConectores;
   pedidos: FakePedidos;
+  entrenamiento: FakeEntrenamiento;
+  codigosConexion: FakeCodigos;
+  tiendas: FakeTiendas;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -321,6 +327,9 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     pedidos: createFakePedidos(() => [...contactsByPhone.values()]),
     automation: createFakeAutomation(contactById),
     messages: createFakeMessages(() => [...contactsByPhone.values()]),
+    entrenamiento: createFakeEntrenamiento(() => [...contactsByPhone.values()], () => repos.messages._all),
+    codigosConexion: createFakeCodigos(),
+    tiendas: createFakeTiendas(),
     archives: createFakeArchives(),
     rutas: createFakeRutas(),
     leads: createFakeLeads((id) => {
@@ -984,7 +993,7 @@ export function createFakeWhatsApp(): FakeWhatsApp {
     sendLocation: (to, location) => record({ kind: 'location', to, location }),
     sendLocationRequest: (to, body) => record({ kind: 'location_request', to, body }),
     sendSticker: (to, sticker) => record({ kind: 'sticker', to, bytes: sticker.datos.length, url: sticker.url }),
-    sendMedia: (to, media) => record({ kind: 'media', to, tipo: media.kind, bytes: media.datos.length, mimeType: media.mimeType, filename: media.filename, caption: media.caption }),
+    sendMedia: (to, media) => record({ kind: 'media', to, tipo: media.kind, bytes: media.datos.length, mimeType: media.mimeType, filename: media.filename, caption: media.caption, voz: media.voz ?? false }),
     sendButtons: (to, body, buttons) => record({ kind: 'buttons', to, body, buttons }),
     sendTemplate: (to, name, language, components) =>
       record({ kind: 'template', to, name, language, components }),

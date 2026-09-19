@@ -26,14 +26,25 @@ export interface Eventos {
   /** Escribio el cliente (texto, ubicacion, foto...). */
   'mensaje.recibido': {
     contacto: ContactoEvento;
-    mensaje: { id: string | null; tipo: string; texto: string | null; datos: Record<string, unknown> | null; fecha: string };
+    /** `transcripcion`: lo que dijo en una nota de voz, si la voz esta configurada (ver src/voz); `texto` lo lleva tambien. */
+    mensaje: {
+      id: string | null;
+      tipo: string;
+      texto: string | null;
+      transcripcion: string | null;
+      /** El anuncio (Facebook/Instagram) desde el que escribio, si vino de uno. */
+      anuncio: { id: string | null; titulo: string | null; texto: string | null; url: string | null; imagen: string | null; clid: string | null; origen: string | null } | null;
+      datos: Record<string, unknown> | null;
+      fecha: string;
+    };
     /** Si se puede contestar con texto libre por la API de Meta. */
     ventanaAbierta: boolean;
   };
   /** Salio un mensaje hacia el cliente (a mano, por el bot, por campana). */
   'mensaje.enviado': {
     contacto: ContactoEvento;
-    mensaje: { id: string | null; tipo: string; texto: string | null; fecha: string };
+    /** `autor`: quien lo mando: 'persona' (a mano), 'ia' (el asistente) o 'sistema' (reglas, reparto, campanas, la API). `voz`: salio como nota de voz. */
+    mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string };
   };
   /** Meta (o el proveedor) dice como va: sent, delivered, read, failed. */
   'mensaje.estado': { mensajeId: string; estado: string; fecha: string };

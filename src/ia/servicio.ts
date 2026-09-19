@@ -20,6 +20,7 @@ import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
 import { decrypt, encrypt, keyFromBase64 } from '../settings/crypto.js';
 import type { StokyClient } from '../stoky/client.js';
+import { hayCatalogo } from '../stoky/conexion.js';
 import type { Monitor } from '../salud/monitor.js';
 import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../catalogo/tienda.js';
 import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, type MensajeIA, type ProveedorIA } from './proveedores.js';
@@ -34,6 +35,8 @@ import { catalogoParaPantalla, type ContextoAccion, type Llamar } from './accion
 import { construirSistemaOperador, ejecutarConfirmadas, ordenar, type AccionHecha, type OrdenEntrada, type RespuestaOrden } from './ordenes.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { UsuarioSesion } from '../auth/routes.js';
+import type { LeccionesParaPrompt, ServicioEntrenamiento } from '../entrenamiento/servicio.js';
+import type { ServicioVoz } from '../voz/servicio.js';
 
 export const configIASchema = z.object({
   activa: z.boolean().default(false),
@@ -96,10 +99,12 @@ export interface ServicioIA {
   activa(): boolean;
   guardar(patch: Partial<ConfigIA> & { token?: string | null }): Promise<EstadoIA>;
   recargar(): Promise<void>;
-  /** Un mensaje del cliente: que contestar. No envia nada. */
-  responder(entrada: { contact: Contact; texto: string; historial?: MensajeIA[] }): Promise<RespuestaIA>;
-  /** El turno completo: contestar por WhatsApp y, si toca, derivar y avisar. */
-  turno(contact: Contact, texto: string): Promise<TurnoIA>;
+  /** Un mensaje del cliente: que contestar. No envia nada. `real` = un turno de verdad (se anota el uso de las lecciones). */
+  responder(entrada: { contact: Contact; texto: string; historial?: MensajeIA[]; real?: boolean }): Promise<RespuestaIA>;
+  /** El modelo a secas, para los trabajos del entrenamiento (pulir lecciones). */
+  completar(mensajes: MensajeIA[], opts?: { maxTokens?: number }): Promise<string>;
+  /** El turno completo: contestar por WhatsApp y, si toca, derivar y avisar. `esAudio` = el cliente mando una nota de voz (transcrita en `texto`). */
+  turno(contact: Contact, texto: string, opts?: { esAudio?: boolean }): Promise<TurnoIA>;
   /** Una prueba desde la pantalla, con un historial que trae el navegador. */
   probar(historial: MensajeIA[], texto: string): Promise<RespuestaIA>;
   /** El ayudante del panel: responde al dueño con el manual del sistema. */
@@ -168,8 +173,19 @@ export interface DepsIA {
   lista?: ServicioEnvioAutomatico;
   /** Turnos del modelo por cliente y hora antes de pasar a una persona (por defecto 30). */
   maxTurnosPorHora?: number;
+  /**
+   * Lo que se le enseno a gran escala (ver src/entrenamiento): en cada turno
+   * se eligen las lecciones que vienen al caso y van al prompt.
+   */
+  entrenamiento?: ServicioEntrenamiento;
   /** El monitor de salud: los intentos de manipulacion quedan como evento. */
   salud?: Monitor;
+  /**
+   * La voz del asistente (ver src/voz): segun lo configurado, la respuesta
+   * sale como nota de voz. Si no se puede (sin clave, texto largo,
+   * ElevenLabs caido), sale por escrito: la voz nunca es motivo para callar.
+   */
+  voz?: ServicioVoz;
   log?: (m: string, d?: Record<string, unknown>) => void;
 }
 
@@ -189,7 +205,7 @@ export function textoDeFallo(): string {
 }
 
 /** El prompt de sistema: quien es, que sabe, como habla, cuando deriva. */
-export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null; tomaPedidos?: boolean }): string {
+export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null; tomaPedidos?: boolean; lecciones?: string | null }): string {
   const partes = [
     `Eres ${cfg.nombreAsistente}, el asistente de WhatsApp de "${ctx.negocio}". Atiendes a clientes por WhatsApp.`,
     `Hoy es ${ctx.ahora.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' })}, ${ctx.ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}. Horario de atención: ${ctx.horario}.`,
@@ -209,7 +225,11 @@ export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario:
     EJEMPLOS_DE_RESPUESTA,
   ];
   if (cfg.instrucciones.trim()) partes.push('', 'Cómo debes hablar y qué tener en cuenta:', cfg.instrucciones.trim());
-  partes.push('', 'Lo que sabes del negocio:', cfg.conocimiento.trim() || '(La tienda no ha escrito nada todavía: sé amable y pasa con una persona cualquier pregunta concreta.)');
+  partes.push('', 'Lo que sabes del negocio:', cfg.conocimiento.trim() || (ctx.lecciones ? '(Lo que sabes está en las reglas, los datos y los ejemplos de abajo.)' : '(La tienda no ha escrito nada todavía: sé amable y pasa con una persona cualquier pregunta concreta.)'));
+  // Lo que se le enseno a gran escala: las reglas, los datos y los ejemplos
+  // que vienen al caso para este mensaje (ver src/entrenamiento). Cuentan
+  // como "lo que sabes": tienen la misma autoridad que el texto de arriba.
+  if (ctx.lecciones) partes.push('', ctx.lecciones);
   if (ctx.catalogo) partes.push('', 'Productos encontrados en el catálogo de la tienda para esta consulta (precio y stock reales ahora mismo; [código] es el SKU). Usa estos precios tal cual, di si está agotado, y si hay enlace mándalo para que lo vea:', ctx.catalogo);
   return partes.join('\n');
 }
@@ -266,7 +286,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       }
       return catalogoTienda;
     }
-    return deps.catalogo;
+    // El de Stoky puede ser el proxy de la conexión configurable: existe
+    // siempre, pero solo cuenta si hay conexión.
+    return hayCatalogo(deps.catalogo) ? deps.catalogo : undefined;
   };
   let gratis: { modelos: string[]; origen: 'catalogo' | 'fijo' } = deps.modelosGratis ? { modelos: deps.modelosGratis, origen: 'fijo' } : { modelos: [MODELO_GRATIS_POR_DEFECTO], origen: 'fijo' };
 
@@ -306,7 +328,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen });
 
-  async function responder(entrada: { contact: Contact; texto: string; historial?: MensajeIA[] }): Promise<RespuestaIA> {
+  async function responder(entrada: { contact: Contact; texto: string; historial?: MensajeIA[]; real?: boolean }): Promise<RespuestaIA> {
     const { contact, texto } = entrada;
     // La defensa de antes del modelo: un intento claro de sacar al
     // asistente de su papel no llega al modelo. Se contesta con una frase
@@ -344,8 +366,15 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     // El ultimo entrante ya esta en el hilo: se evita mandarlo dos veces.
     if (historial.length && historial[historial.length - 1]!.role === 'user' && historial[historial.length - 1]!.content === texto) historial.pop();
 
+    // Lo ensenado que viene al caso: se busca con el mensaje y, si es muy
+    // corto ("y a provincias?"), tambien con lo ultimo que dijo el cliente.
+    const anterior = [...historial].reverse().find((m) => m.role === 'user')?.content;
+    const lecciones: LeccionesParaPrompt | null = deps.entrenamiento?.relevantes(texto, anterior) ?? null;
+    const bloqueLecciones = lecciones ? deps.entrenamiento!.textoParaPrompt(lecciones) : '';
+    if (lecciones && entrada.real) deps.entrenamiento!.anotarUso(lecciones);
+
     const mensajes: MensajeIA[] = [
-      { role: 'system', content: construirSistema(cfg, { negocio: deps.nombreNegocio(), horario: config.BUSINESS_HOURS, ahora: new Date(), catalogo: catalogoTexto, tomaPedidos: Boolean(cat) }) },
+      { role: 'system', content: construirSistema(cfg, { negocio: deps.nombreNegocio(), horario: config.BUSINESS_HOURS, ahora: new Date(), catalogo: catalogoTexto, tomaPedidos: Boolean(cat), lecciones: bloqueLecciones || null }) },
       ...historial,
       { role: 'user', content: texto },
     ];
@@ -354,7 +383,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     // La defensa de despues del modelo: lo que va a salir, revisado. Si
     // trae el prompt, un secreto o un telefono ajeno, no sale; sale una
     // frase neutra y se pasa con una persona.
-    const limpia = limpiarSalida(leida.texto, { telefonoCliente: contact.phone, conocimiento: `${cfg.conocimiento}\n${cfg.instrucciones}`, nombreNegocio: deps.nombreNegocio() });
+    const conocidoPlano = lecciones ? deps.entrenamiento!.textoPlano(lecciones) : '';
+    const limpia = limpiarSalida(leida.texto, { telefonoCliente: contact.phone, conocimiento: `${cfg.conocimiento}\n${cfg.instrucciones}\n${conocidoPlano}`, nombreNegocio: deps.nombreNegocio() });
     if (limpia.bloqueada) {
       log('la respuesta del asistente no podia salir', { phone: contact.phone, motivo: limpia.motivo });
       return { texto: limpia.texto, derivar: true, pedirUbicacion: false, bloqueada: 'salida', detalle: limpia.motivo };
@@ -362,12 +392,24 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     return leida;
   }
 
-  async function turno(contact: Contact, entrante: string): Promise<TurnoIA> {
+  async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean } = {}): Promise<TurnoIA> {
     if (!cfg.activa) return { resultado: 'inactiva', texto: null };
     const sinPlan = deps.plan?.motivo('ia');
     if (sinPlan) return { resultado: 'inactiva', texto: null, detalle: sinPlan };
     const phone = contact.phone;
-    const enviar = (t: string) => sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: t });
+    // Lo que manda el asistente queda marcado (payload.origen = 'ia'): el
+    // entrenamiento aprende de lo que contesta una persona, nunca de esto.
+    const porEscrito = (t: string) => sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: t, origen: 'ia' });
+    // La respuesta principal puede salir como nota de voz (segun "cuando"
+    // en Mi asistente IA → Voz); lo demas (avisos, resumen de pedido con
+    // cifras, la despedida al derivar) va siempre por escrito.
+    const conVoz = Boolean(deps.voz?.contestarConAudio({ esAudio: Boolean(opts.esAudio) }));
+    const enviar = async (t: string) => {
+      if (!conVoz || !deps.voz) return porEscrito(t);
+      const r = await deps.voz.enviar({ phone, texto: t, origen: 'ia' });
+      if (r.enviadoComo === 'texto' && r.motivo) log('la respuesta del asistente salio por escrito', { phone, motivo: r.motivo });
+      return r.outcome;
+    };
 
     // Quien insiste cien veces no consigue cien turnos del modelo (ni gasta
     // la cuota gratis en eso): a partir del tope, una persona. Un intento de
@@ -375,18 +417,18 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     // cuenta (tres seguidos y a una persona).
     if (!detectarManipulacion(entrante) && !limitador.permitir(phone)) {
       log('demasiados turnos del asistente con un cliente en una hora', { phone });
-      await enviar(textoDeFallo());
+      await porEscrito(textoDeFallo());
       await derivar(contact, 'demasiados mensajes seguidos en una hora');
       return { resultado: 'derivo', texto: textoDeFallo(), detalle: 'limite de turnos' };
     }
 
     let respuesta: RespuestaIA;
     try {
-      respuesta = await responder({ contact, texto: entrante });
+      respuesta = await responder({ contact, texto: entrante, real: true });
     } catch (error) {
       const detalle = error instanceof ErrorIA ? `${error.message}${error.detalle ? ` (${error.detalle})` : ''}` : error instanceof Error ? error.message : String(error);
       log('fallo el asistente de IA', { phone, detalle });
-      await enviar(textoDeFallo());
+      await porEscrito(textoDeFallo());
       // Sin respuesta posible, que lo vea una persona: se para el bot y se avisa.
       await derivar(contact, `la IA fallo: ${detalle}`);
       return { resultado: 'error', texto: textoDeFallo(), detalle };
@@ -394,7 +436,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
     await deps.plan?.anotarTurnoIA();
     const texto = respuesta.texto || (respuesta.derivar ? textoDeDespedida(deps.nombreNegocio()) : '');
-    if (texto) await enviar(texto);
+    // Lo que se bloqueo (una manipulacion) y la despedida al derivar van por
+    // escrito: son frases fijas del sistema, no la voz del asistente.
+    if (texto) await (respuesta.bloqueada || respuesta.derivar ? porEscrito(texto) : enviar(texto));
 
     if (respuesta.bloqueada === 'manipulacion') {
       // Tres intentos seguidos de manipular al asistente: se acabo el bot en
@@ -415,7 +459,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       // El pedido se comprueba contra el catalogo real y se guarda; al cliente
       // le llega el resumen con el total del sistema, y a la tienda el evento.
       const r = await registrarPedido(contact, respuesta.pedido, { repos, bus: deps.bus, catalogo, moneda: 'PEN' }, 'ia');
-      await enviar(r.resumen);
+      await porEscrito(r.resumen);
       if (r.ok) await avisar(contact, `tomo un pedido (#${r.pedido!.id}, ${r.pedido!.moneda} ${r.pedido!.total.toFixed(2)})`);
       return { resultado: 'respondio', texto: `${texto}\n${r.resumen}`, detalle: r.ok ? `pedido ${r.pedido!.id}` : `pedido no registrado: ${r.noEncontrados.join(', ')}` };
     }
@@ -427,6 +471,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         phone,
         kind: 'interactive',
         category: 'UTILITY',
+        origen: 'ia',
         interactive: { body: textoPedirUbicacion(conBoton), locationRequest: true },
       });
       // Y queda apuntado en la lista de envio automatico: si no manda la
@@ -464,7 +509,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   /** Con que identidad y por donde ejecuta la IA operadora lo que se le pide. */
   function contextoDe(usuario: UsuarioSesion): ContextoAccion {
     const quien = usuario.porToken ? `la clave de API "${usuario.nombre || usuario.usuario}"` : usuario.nombre ? `${usuario.nombre} (${usuario.usuario})` : usuario.usuario;
-    return { llamar: fabricaLlamar!(usuario), quien, esAdmin: usuario.rol === 'admin', catalogo: deps.catalogo };
+    return { llamar: fabricaLlamar!(usuario), quien, esAdmin: usuario.rol === 'admin', catalogo: hayCatalogo(deps.catalogo) ? deps.catalogo : undefined };
   }
 
   /** El estado del sistema en pocas lineas, para el prompt de la IA operadora. */
@@ -480,6 +525,11 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       partes.push(lotes.length ? `Lotes del reparto en marcha: ${lotes.map((l) => `"${l.nombre}"`).join(', ')}.` : 'No hay ningún lote del reparto en marcha.');
     } catch {
       // Sin reparto legible se sigue: no es imprescindible para operar.
+    }
+    try {
+      if (deps.entrenamiento) partes.push(await deps.entrenamiento.descripcionParaIA());
+    } catch {
+      // Sin cifras del entrenamiento se sigue igual.
     }
     return partes.join('\n');
   }
@@ -513,6 +563,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     },
     responder,
     turno,
+    completar: (mensajes, opts) => elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts?.maxTokens }),
     async probar(historial, texto) {
       const contact: Contact = { id: 'prueba', phone: '000', name: 'Cliente de prueba', optInAt: null, optInSource: null, optOutAt: null, lastInboundAt: null };
       return responder({ contact, texto, historial });
@@ -545,7 +596,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
           respuesta: ultima.texto,
           derivo: ultima.derivar,
           pidioUbicacion: ultima.pedirUbicacion,
-          alertas: error ? [] : calificar(ultima, caso.espera, { conocimiento: `${cfg.conocimiento}\n${cfg.instrucciones}\n${catalogoDelCaso}` }),
+          alertas: error ? [] : calificar(ultima, caso.espera, { conocimiento: `${cfg.conocimiento}\n${cfg.instrucciones}\n${catalogoDelCaso}\n${deps.entrenamiento ? deps.entrenamiento.textoPlano(deps.entrenamiento.relevantes(caso.mensajes[caso.mensajes.length - 1] ?? '')) : ''}` }),
           error,
         });
       }
@@ -572,7 +623,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
           negocio: deps.nombreNegocio(),
           quien: contexto.quien,
           esAdmin: contexto.esAdmin,
-          conCatalogo: Boolean(deps.catalogo),
+          conCatalogo: hayCatalogo(deps.catalogo),
           ahora: new Date(),
           estado: await estadoCorto(),
           manual: manualDelSistema(),
