@@ -19,7 +19,7 @@ import { createSettingsService, type SettingsRepo } from '../src/settings/servic
 import { crearServicioIA, type ServicioIA } from '../src/ia/servicio.js';
 import type { MensajeIA, ProveedorIA } from '../src/ia/proveedores.js';
 import { crearServicioPlan, type ServicioPlan } from '../src/plan/servicio.js';
-import { estadoDe, generarCodigoConexion, normalizarCodigo } from '../src/auth/codigos-conexion.js';
+import { claveDeConexion, estadoDe, generarCodigoConexion, leerClaveDeConexion, normalizarCodigo } from '../src/auth/codigos-conexion.js';
 import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, type FakeRepos, type FakeWhatsApp } from './fakes.js';
 
 const ENV = {
@@ -238,6 +238,28 @@ describe('codigos de conexion', () => {
     const lista = (await app.inject({ method: 'GET', url: '/admin/codigos-conexion', headers: h })).json().codigos;
     expect(lista[0]).toMatchObject({ estadoReal: 'usado', usos: 1, canjeadoPor: 'Stoky CRM 8102' });
     expect(lista[0].claveId).toBeTruthy();
+  });
+
+  it('la clave de conexion (wac_) lleva la direccion dentro y se canjea tal cual, en una sola pieza', async () => {
+    expect(leerClaveDeConexion(claveDeConexion('http://localhost:3000/', 'WA-ABCD-2345'))).toEqual({ direccion: 'http://localhost:3000', codigo: 'WA-ABCD-2345' });
+    expect(leerClaveDeConexion('wak_loquesea')).toBeNull();
+    expect(leerClaveDeConexion('wac_' + Buffer.from('sin barra').toString('base64url'))).toBeNull();
+    expect(leerClaveDeConexion('wac_' + Buffer.from('ftp://x|WA-ABCD-2345').toString('base64url'))).toBeNull();
+
+    const h = await sesion('admin');
+    const r = await app.inject({ method: 'POST', url: '/admin/codigos-conexion', headers: h, payload: { para: 'Stoky' } });
+    expect(r.statusCode).toBe(200);
+    const clave = r.json().claveConexion as string;
+    expect(clave).toMatch(/^wac_/);
+    expect(leerClaveDeConexion(clave)).toEqual({ direccion: 'http://localhost:3000', codigo: r.json().codigo.codigo });
+    expect(r.json().pasos[0]).toContain('una sola cosa');
+
+    const canje = await app.inject({ method: 'POST', url: '/api/v1/conexion/canjear', headers: json, payload: { codigo: `  ${clave}  `, sistema: 'Stoky' } });
+    expect(canje.statusCode).toBe(200);
+    expect(canje.json()).toMatchObject({ ok: true, direccion: 'http://localhost:3000', para: 'Stoky' });
+    expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { authorization: `Bearer ${canje.json().clave}` } })).statusCode).toBe(200);
+    // Una clave que no descifra no revela nada: mismo 404 que un codigo inventado.
+    expect((await app.inject({ method: 'POST', url: '/api/v1/conexion/canjear', headers: json, payload: { codigo: 'wac_zzzz' } })).statusCode).toBe(404);
     // La clave que salio aparece en Claves de API con el nombre del codigo.
     const claves = (await app.inject({ method: 'GET', url: '/admin/claves-api', headers: h })).json() as Array<{ nombre: string }>;
     expect(claves.some((k) => k.nombre === 'Stoky')).toBe(true);

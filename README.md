@@ -966,8 +966,15 @@ contrasena, y la sesion queda en una cookie firmada (`wa_sesion`, siete dias,
   (fecha, o 1 h / 1 / 7 / 30 / 90 dias), usos y permisos; el otro sistema lo
   canjea en `POST /api/v1/conexion/canjear` (sin clave; tope de 20 intentos
   por IP y hora) y recibe su clave `wak_`. La lista dice vigente / usado /
-  caducado / anulado y quien lo canjeo, cuando y desde donde. En el bloque
-  Stoky, "Crear un codigo de conexion" lo hace de un clic.
+  caducado / anulado y quien lo canjeo, cuando y desde donde. Lo que se
+  copia es la **clave de conexion** `wac_...`: una sola cosa, que lleva
+  dentro la direccion de este sistema y el codigo (base64url de
+  `direccion|codigo`); Stoky la pega en Conexion de WhatsApp y con eso
+  canjea, recibe su `wak_`, registra el aviso, entrega su token y enseña el
+  QR. El canje acepta la `wac_` entera o el codigo corto. En el bloque
+  Stoky, "Crear la clave de conexion para Stoky" lo hace de un clic. Como
+  cada tienda del SaaS es una instancia aparte, la clave lleva la direccion
+  de *su* instancia y la `wak_` que sale solo abre esa tienda.
 - **Contrasenas.** Ocho caracteres o mas, guardadas con scrypt y sal; nunca en
   claro. Cada uno se cambia la suya desde la seccion Usuarios. Cambiar la
   contrasena o desactivar la cuenta cierra las sesiones abiertas de ese usuario.
