@@ -252,5 +252,7 @@ describe('bitacora y cola de reportes', () => {
 
     const [pendiente] = await repos.rutas.reportesPendientes(10);
     expect(pendiente).toMatchObject({ intentos: 1, ultimoError: 'GSG no responde' });
+    // Y cuenta como atascado: pendiente que ya se intento y GSG no acepto.
+    expect(await repos.rutas.cifrasReportes()).toMatchObject({ pendiente: 1, atascado: 1, fallido: 0 });
   });
 });

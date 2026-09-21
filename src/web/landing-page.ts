@@ -108,6 +108,8 @@ const ICO = {
   llave: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="m11 11 9-9M17 5l2 2M14 8l2 2"/></svg>',
 };
 
+import { INICIAL_SISTEMA, LEMA_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
+
 export function landingPage(opts: { nombreNegocio: string; conSesion: boolean }): string {
   const negocio = escapeHtml(opts.nombreNegocio);
   const entrar = opts.conSesion
@@ -119,12 +121,12 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
 
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${negocio} - WhatsApp para reparto y ventas</title>
+<title>${negocio} - ${NOMBRE_SISTEMA}: ${LEMA_SISTEMA}</title>
 <meta name="description" content="Ubicaciones para el reparto, un chat para todo el equipo y campañas al ritmo que WhatsApp tolera, con guardas para que el número siga vivo.">
 <style>${CSS}</style></head>
 <body>
 <header><div class="wrap">
-  <a class="marca" href="/"><span class="logo">W</span>${negocio}</a>
+  <a class="marca" href="/"><span class="logo">${INICIAL_SISTEMA}</span>${NOMBRE_SISTEMA}</a>
   <nav class="menu"><a href="#que-hace">Qué hace</a><a href="#como-funciona">Cómo funciona</a><a href="#numero">Salud del número</a></nav>
   <div class="der">${opts.conSesion ? '<a class="btn ghost" href="/chat">Chats</a>' : ''}${entrar}</div>
 </div></header>
@@ -132,7 +134,7 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
 <main class="wrap">
   <section class="hero">
     <div>
-      <span class="eyebrow">WhatsApp para reparto y ventas</span>
+      <span class="eyebrow">${NOMBRE_SISTEMA} · ${LEMA_SISTEMA}</span>
       <h1>Tu WhatsApp trabajando por ti, <span>sin quemar el número</span>.</h1>
       <p>Pide la ubicación a cada cliente del reparto, atiende y cotiza desde un solo chat, y manda campañas al ritmo que WhatsApp tolera. Con las guardas para que el número siga vivo mañana.</p>
       <div class="acciones">${cta}<small>Acceso solo para el equipo · usuario y contraseña</small></div>

@@ -50,6 +50,8 @@ export interface PgliteHandle {
   db: PGlite;
   /** Migraciones aplicadas en este arranque. */
   applied: string[];
+  /** Volcado comprimido (.tar.gz) de la carpeta de datos: la copia de seguridad. */
+  dump(): Promise<Blob | File>;
 }
 
 /**
@@ -67,5 +69,5 @@ export async function openPglite(dataDir: string): Promise<PgliteHandle> {
     await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
   }
 
-  return { pool: asPool(db), db, applied: files };
+  return { pool: asPool(db), db, applied: files, dump: () => db.dumpDataDir('gzip') };
 }

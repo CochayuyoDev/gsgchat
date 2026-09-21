@@ -26,6 +26,8 @@ export interface OpcionesChat {
   maxTokens?: number;
   /** Cuanto se espera como mucho, en ms. */
   timeoutMs?: number;
+  /** Si la API dice cuantos tokens gasto (OpenAI y compatibles lo traen en `usage`), se avisa aqui. */
+  alUso?: (uso: { tokensEntrada: number; tokensSalida: number }) => void;
 }
 
 export interface ProveedorIA {
@@ -169,10 +171,15 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
           body: JSON.stringify({ model: o.modelo, messages: mensajes, temperature: o.temperatura ?? 0.4, max_tokens: o.maxTokens ?? 1000 }),
           signal: control.signal,
         });
-        const cuerpo = (await r.json().catch(() => ({}))) as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string } };
+        const cuerpo = (await r.json().catch(() => ({}))) as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
         if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', cuerpo.error?.message);
         const texto = limpiarRespuesta(textoDeContenido(cuerpo.choices?.[0]?.message?.content));
         if (!texto) throw new ErrorIA('la API devolvio una respuesta vacia', 'openai');
+        if (o.alUso && cuerpo.usage) {
+          const entrada = Number(cuerpo.usage.prompt_tokens);
+          const salida = Number(cuerpo.usage.completion_tokens);
+          if (Number.isFinite(entrada) || Number.isFinite(salida)) o.alUso({ tokensEntrada: Number.isFinite(entrada) ? entrada : 0, tokensSalida: Number.isFinite(salida) ? salida : 0 });
+        }
         return texto;
       } catch (error) {
         if (error instanceof ErrorIA) throw error;
@@ -203,3 +210,79 @@ export const MODELOS_SUGERIDOS: Record<'puter' | 'openai', string[]> = {
   puter: ['google/gemma-4-31b-it', 'google/gemma-4-26b-a4b-it'],
   openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'llama-3.3-70b-versatile', 'deepseek-chat'],
 };
+
+/**
+ * Los servicios compatibles con la API de OpenAI que se ofrecen en la
+ * pantalla: se elige uno y la URL base y los modelos se rellenan solos; solo
+ * hay que pegar la clave. Es lo mismo que tiene Stoky (Groq, Google,
+ * OpenRouter, Together, Ollama, otro), para que quien ya lo configuro alli
+ * lo reconozca aqui.
+ */
+export type ServicioOpenAI = 'openai' | 'groq' | 'openrouter' | 'together' | 'deepseek' | 'google' | 'mistral' | 'ollama' | 'otro';
+
+export interface PresetServicio {
+  id: ServicioOpenAI;
+  nombre: string;
+  baseUrl: string;
+  modelos: string[];
+  /** Donde se saca la clave, en una linea. */
+  clave: string;
+  /** Si no hace falta clave (Ollama en local). */
+  sinClave?: boolean;
+  nota?: string;
+}
+
+export const SERVICIOS_OPENAI: PresetServicio[] = [
+  { id: 'openai', nombre: 'OpenAI (ChatGPT)', baseUrl: 'https://api.openai.com/v1', modelos: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'], clave: 'platform.openai.com → API keys (de pago, por uso)' },
+  { id: 'groq', nombre: 'Groq (gratis, muy rápido)', baseUrl: 'https://api.groq.com/openai/v1', modelos: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'], clave: 'console.groq.com → API Keys (plan gratis con límites por minuto)' },
+  { id: 'google', nombre: 'Google AI Studio (Gemini, gratis)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', modelos: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'], clave: 'aistudio.google.com → Get API key (plan gratis con límites)' },
+  { id: 'openrouter', nombre: 'OpenRouter (muchos modelos, algunos gratis)', baseUrl: 'https://openrouter.ai/api/v1', modelos: ['openai/gpt-4o-mini', 'google/gemma-3-27b-it:free', 'meta-llama/llama-3.3-70b-instruct:free'], clave: 'openrouter.ai → Keys' },
+  { id: 'together', nombre: 'Together AI', baseUrl: 'https://api.together.xyz/v1', modelos: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'Qwen/Qwen2.5-72B-Instruct-Turbo'], clave: 'api.together.xyz → API keys' },
+  { id: 'deepseek', nombre: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', modelos: ['deepseek-chat'], clave: 'platform.deepseek.com → API keys' },
+  { id: 'mistral', nombre: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', modelos: ['mistral-small-latest', 'mistral-large-latest'], clave: 'console.mistral.ai → API Keys' },
+  { id: 'ollama', nombre: 'Ollama (en esta PC, sin clave)', baseUrl: 'http://localhost:11434/v1', modelos: ['llama3.1', 'gemma3', 'qwen2.5'], clave: 'no hace falta: instala Ollama y descarga un modelo (ollama pull llama3.1)', sinClave: true },
+  { id: 'otro', nombre: 'Otro compatible con OpenAI', baseUrl: '', modelos: [], clave: 'la que te dé ese servicio' },
+];
+
+export function presetDe(id: string): PresetServicio | undefined {
+  return SERVICIOS_OPENAI.find((s) => s.id === id);
+}
+
+export interface PruebaProveedor {
+  ok: boolean;
+  /** Que contesto el modelo a "di hola" (recortado), o el fallo en cristiano. */
+  detalle: string;
+  ms: number;
+  modelo: string;
+  proveedor: string;
+}
+
+/** Le pide al proveedor una frase corta y mide cuanto tarda. Nunca lanza. */
+export async function probarProveedor(proveedor: ProveedorIA, modelo: string, timeoutMs = 20_000): Promise<PruebaProveedor> {
+  const inicio = Date.now();
+  try {
+    const texto = await proveedor.chat(
+      [
+        { role: 'system', content: 'Responde en español, en una sola frase corta.' },
+        { role: 'user', content: 'Di "hola, estoy listo" y nada más.' },
+      ],
+      { modelo, maxTokens: 30, timeoutMs, temperatura: 0 },
+    );
+    return { ok: true, detalle: `El modelo respondió: "${texto.slice(0, 80)}"`, ms: Date.now() - inicio, modelo, proveedor: proveedor.nombre };
+  } catch (error) {
+    const e = error instanceof ErrorIA ? error : null;
+    const detalle = e ? `${e.message}${e.detalle ? ` (${e.detalle})` : ''}` : error instanceof Error ? error.message : String(error);
+    return { ok: false, detalle: explicarFalloConexion(detalle), ms: Date.now() - inicio, modelo, proveedor: proveedor.nombre };
+  }
+}
+
+/** Los fallos tipicos de una API, dichos para quien no programa. */
+export function explicarFalloConexion(detalle: string): string {
+  if (/401|invalid api key|incorrect api key|unauthorized|authentication/i.test(detalle)) return 'La clave no vale para ese servicio: revisa que la pegaste entera y que es de ese proveedor.';
+  if (/403|forbidden|permission/i.test(detalle)) return 'El servicio rechazó la clave (sin permiso). Revisa el plan o el proyecto de la clave.';
+  if (/404|not found|does not exist|unknown model|model_not_found/i.test(detalle)) return `Ese modelo no existe en ese servicio (o la URL base está mal): ${detalle}`;
+  if (/429|rate limit|quota|insufficient_quota|exceeded/i.test(detalle)) return 'El servicio dice que se agotó el cupo o el límite por minuto. Espera un momento o revisa el plan.';
+  if (/ECONNREFUSED|fetch failed|ENOTFOUND|no se pudo contactar/i.test(detalle)) return 'No se pudo llegar al servicio: revisa la URL base y la conexión a internet (con Ollama, que esté arrancado).';
+  if (/no respondio a tiempo|timeout|abort/i.test(detalle)) return 'El servicio tardó demasiado en responder. Prueba otra vez o con un modelo más ligero.';
+  return detalle;
+}

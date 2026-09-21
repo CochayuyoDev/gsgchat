@@ -25,6 +25,7 @@ import { createPedidosRepo, type PedidosRepo } from '../pedidos/repo.js';
 import { createEntrenamientoRepo, type EntrenamientoRepo } from '../entrenamiento/repo.js';
 import { createCodigosConexionRepo, type CodigosConexionRepo } from '../auth/codigos-conexion.js';
 import { createTiendasRepo, type TiendasRepo } from '../tiendas/repo.js';
+import { createEntregasRepo, type EntregasRepo } from '../entregas/repo.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -544,6 +545,8 @@ export interface Repos {
   codigosConexion: CodigosConexionRepo;
   /** Las tiendas que controla el superadministrador. Ver src/tiendas. */
   tiendas: TiendasRepo;
+  /** Las entregas del dia y los motorizados. Ver src/entregas. */
+  entregas: EntregasRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1821,6 +1824,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     entrenamiento: createEntrenamientoRepo(pool),
     codigosConexion: createCodigosConexionRepo(pool),
     tiendas: createTiendasRepo(pool),
+    entregas: createEntregasRepo(pool),
   };
 }
 

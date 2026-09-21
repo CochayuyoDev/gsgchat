@@ -45,6 +45,11 @@ import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
 import { syncTemplates } from './templates/registry.js';
 import type { Bus } from './eventos/bus.js';
 import { encolarEventos, startDespachadorWebhooks } from './webhooks/despachador.js';
+import type { PuertoGsg } from './rutas/gsg.js';
+import type { ServicioEntregas } from './entregas/servicio.js';
+import { startMotorEntregas } from './entregas/motor.js';
+import type { ServicioFiabilidad } from './salud/fiabilidad.js';
+import { startResumenes, type ServicioResumenes } from './resumenes/servicio.js';
 
 export interface ServiciosDeps {
   config: Config;
@@ -62,12 +67,22 @@ export interface ServiciosDeps {
   bus?: Bus;
   /** La lista de envio automatico. Sin ella, su motor no arranca. */
   lista?: ServicioEnvioAutomatico;
+  /** La puerta a GSG (la configurable desde la pantalla). Sin ella, la del .env. */
+  gsg?: PuertoGsg;
+  /** Las entregas del dia. Sin ellas, su motor no arranca. */
+  entregas?: ServicioEntregas;
+  /** El asistente de IA: resume las conversaciones guardadas. */
+  ia?: import('./ia/servicio.js').ServicioIA;
+  /** "Que todo funcione": vigilante del WhatsApp, pruebas de la manana y copia diaria. Sin el, no arrancan. */
+  fiabilidad?: ServicioFiabilidad;
+  /** El resumen de la mañana y de la tarde al supervisor. Sin el, no se manda. */
+  resumenes?: ServicioResumenes;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
 }
 
 /** Arranca todo y devuelve la funcion que lo para. */
 export function arrancarServicios(deps: ServiciosDeps): () => void {
-  const { config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, lista, log } = deps;
+  const { config, repos, settings, wa, sender, salud, politica, ajustes, stickers, bus, lista, entregas, log } = deps;
   const warn = (mensaje: string, detalle?: Record<string, unknown>) => log.warn(detalle ?? {}, mensaje);
   const info = (mensaje: string, detalle?: Record<string, unknown>) => log.info(detalle ?? {}, mensaje);
 
@@ -94,13 +109,20 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
   // Conversaciones sin movimiento: se respaldan y se limpian solas.
   const stopSweeper = startArchiveSweeper(
-    { repos, dir: config.ARCHIVE_DIR, log: info },
-    config.ARCHIVE_INACTIVE_DAYS,
+    {
+      repos,
+      dir: config.ARCHIVE_DIR,
+      ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
+      pedidoDe: entregas ? (phone) => entregas.pedidoDe(phone) : undefined,
+      nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
+      log: info,
+    },
+    () => ajustes?.guardadosDias() ?? config.ARCHIVE_INACTIVE_DAYS,
   );
 
   // Solicitud de ubicacion por lotes: un mensaje cada 15-30 s, en horario y
   // con tres intentos como maximo. Ver src/rutas/motor.ts.
-  const gsg = crearPuertoGsg(config);
+  const gsg = deps.gsg ?? crearPuertoGsg(config);
   const stopMotorRutas = startMotorRutas({
     repos,
     sender,
@@ -136,6 +158,15 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
       })
     : () => undefined;
 
+  // Las entregas del dia: sincronizar con GSG, pedir confirmaciones, mandar
+  // los pines a los motorizados y avisar la hora de llegada. Ver src/entregas.
+  // El vigilante del WhatsApp (cada 30 s), la prueba de la manana y la copia de la noche. Ver src/salud/fiabilidad.ts.
+  const stopFiabilidad = deps.fiabilidad ? deps.fiabilidad.arrancar() : () => undefined;
+
+  const stopMotorEntregas = entregas
+    ? startMotorEntregas({ repos, entregas, opciones: opcionesDesdeConfig(config), salud, politica, log: info })
+    : () => undefined;
+
   // Avisos: el avance del lote hacia GSG, y un WhatsApp al coordinador cuando
   // hay casos que solo puede resolver una persona.
   const stopAlertas = startAlertas({
@@ -160,6 +191,9 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   }, 60_000);
   despachador.unref?.();
 
+  // El resumen del dia al supervisor: mira cada minuto si es la hora. Ver src/resumenes.
+  const stopResumenes = deps.resumenes ? startResumenes(deps.resumenes, { log: info }) : () => undefined;
+
   // Webhooks salientes: lo que pasa aqui, contado a los sistemas suscritos.
   const desconectarBus = bus ? encolarEventos(bus, repos.webhooks, warn) : () => undefined;
   const stopWebhooks = bus ? startDespachadorWebhooks({ repo: repos.webhooks, log: warn }) : () => undefined;
@@ -174,7 +208,10 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     stopSweeper();
     stopMotorRutas();
     stopMotorLista();
+    stopMotorEntregas();
     stopAlertas();
+    stopFiabilidad();
+    stopResumenes();
     clearInterval(despachador);
   };
 }

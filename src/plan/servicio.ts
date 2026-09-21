@@ -45,9 +45,62 @@ export interface PlanRemoto {
   vencido: boolean;
   aviso: string | null;
   contacto: string | null;
+  /** Solo lo manda el maestro: como se le paga (ver CobroPlan). */
+  cobro?: CobroPlan | null;
+  /** Solo lo manda el maestro: la ultima captura de pago que mando esta tienda. */
+  ultimoPago?: PagoCapturaVista | null;
 }
 
 export type Capacidad = 'ia' | 'campanas' | 'conectores';
+
+/**
+ * El parte de salud que cada instalacion manda al maestro cuando pregunta
+ * por su plan (cabecera `x-gsgchat-estado`). El maestro lo guarda y lo
+ * enseña en Tiendas: "WhatsApp caido desde las 10:12", no `wa: false`.
+ */
+export interface EstadoInstancia {
+  whatsapp: 'conectado' | 'caido' | 'sin_conectar';
+  mensajesHoy: number;
+  fallosIA: number;
+  entregasHoy: number;
+  version: string;
+}
+
+/** Como se le paga al dueño: lo configura en Tiendas y lo ve cada tienda en /pagar. */
+export interface CobroPlan {
+  /** "Yape o Plin al 987 654 321, a nombre de..." */
+  texto: string;
+  /** El numero de Yape/Plin, tal cual se escribio. */
+  numero: string;
+  /** El QR, como data URL (base64); vacio = sin QR. */
+  qr: string;
+}
+
+/** La ultima captura de pago que mando la tienda, tal como la ve en /pagar. */
+export interface PagoCapturaVista {
+  id: number;
+  meses: number;
+  monto: number | null;
+  moneda: string | null;
+  nota: string | null;
+  estado: 'pendiente' | 'aceptado' | 'rechazado';
+  motivo: string | null;
+  at: string;
+  resueltoAt: string | null;
+}
+
+/** Lo que enseña /pagar en la tienda. */
+export interface ParaPagar {
+  origen: EstadoPlanLocal['origen'];
+  plan: PlanRemoto | null;
+  /** Solo con maestro: como se le paga al dueño (si lo configuro). */
+  cobro: CobroPlan | null;
+  ultimoPago: PagoCapturaVista | null;
+  /** Se puede mandar la captura (hay maestro con token). */
+  puedeMandarCaptura: boolean;
+  /** Por que no, en palabras. */
+  motivo: string | null;
+}
 
 /** Un pago apuntado a mano por el superadministrador. */
 export interface PagoLocal {
@@ -122,6 +175,13 @@ export interface ServicioPlan {
   /** Esta instalacion pasa a depender de un maestro (la pantalla Tiendas de otro superadministrador). */
   conectarMaestro(entrada: { url: string; token: string }): Promise<EstadoPlanLocal>;
   desconectarMaestro(): Promise<EstadoPlanLocal>;
+  /** Lo que enseña la pantalla /pagar de esta instalacion. */
+  paraPagar(): ParaPagar;
+  /**
+   * "Ya pague": la captura de Yape/Plin va al maestro, que la enseña al dueño
+   * en Tiendas; un clic alli corre el vencimiento. Solo con maestro.
+   */
+  mandarCaptura(entrada: { imagen: string; meses: number; nota?: string; monto?: number }): Promise<{ ok: true; mensaje: string; pago: PagoCapturaVista } | { ok: false; error: string }>;
 }
 
 export interface EntradaMembresia {
@@ -152,7 +212,15 @@ export interface DepsPlan {
   ahora?: () => Date;
   cadaMs?: number;
   log?: (m: string, d?: Record<string, unknown>) => void;
+  /**
+   * El parte de salud de esta instalacion, para mandarselo al maestro en
+   * cada consulta (cabecera `x-gsgchat-estado`). Sin el, no se manda nada.
+   */
+  estado?: () => Promise<EstadoInstancia> | EstadoInstancia;
 }
+
+/** Cuantos caracteres puede ocupar el parte en la cabecera (por si algo se desmadra). */
+const MAX_CABECERA_ESTADO = 2000;
 
 const CLAVE_ESTADO = 'plan.estado';
 const CLAVE_USO = 'plan.uso';
@@ -163,8 +231,20 @@ const CLAVE_MAESTRO = 'plan.maestro';
  * Arma (o cambia) una membresia a partir de lo que se escribio en pantalla.
  * Lo que no venga se toma de la anterior, y si no hay, del plan elegido.
  */
+/**
+ * Una fecha de vencimiento escrita en pantalla ("2026-12-31") vale hasta el
+ * FINAL de ese dia en Lima. Sin esto, `new Date('2026-12-31')` es la
+ * medianoche UTC, que en Lima es el 30 a las siete de la tarde: la pantalla
+ * enseñaba un dia menos del que se escribio.
+ */
+export function finDelDia(fecha: string): Date {
+  const f = fecha.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(f)) return new Date(`${f}T23:59:59-05:00`);
+  return new Date(f);
+}
+
 export function armarMembresia(entrada: EntradaMembresia, anterior: MembresiaLocal | null, ahora: Date, quien: string | null): MembresiaLocal {
-  const vence = new Date(entrada.vencimiento);
+  const vence = finDelDia(entrada.vencimiento);
   if (Number.isNaN(vence.getTime())) throw new Error('La fecha de vencimiento no se entiende.');
   const base = PLANES_ELEGIBLES.find((p) => p.clave === entrada.plan) ?? PLANES_ELEGIBLES[PLANES_ELEGIBLES.length - 1]!;
   const limites: LimitesPlan = { ...base.limites, ...(entrada.limites ?? {}) };
@@ -340,10 +420,60 @@ export async function crearServicioPlan(deps: DepsPlan): Promise<ServicioPlan> {
     await deps.settingsRepo.put(CLAVE_LOCAL, JSON.stringify(m), false);
   }
 
+  /** El parte de salud en JSON para la cabecera; null si no hay quien lo de o falla. */
+  async function parteDeSalud(): Promise<string | null> {
+    if (!deps.estado) return null;
+    try {
+      const e = await deps.estado();
+      const texto = JSON.stringify(e);
+      return texto.length <= MAX_CABECERA_ESTADO ? texto : null;
+    } catch (e) {
+      log('no se pudo armar el parte de salud para el maestro', { error: e instanceof Error ? e.message : String(e) });
+      return null;
+    }
+  }
+
+  function paraPagar(): ParaPagar {
+    const p = planDeHoy();
+    const conM = conMaestroAhora();
+    return {
+      origen: conM ? 'maestro' : local ? 'local' : 'libre',
+      plan: p,
+      cobro: conM ? (plan?.cobro ?? null) : null,
+      ultimoPago: conM ? (plan?.ultimoPago ?? null) : null,
+      puedeMandarCaptura: conM && Boolean(maestro?.token),
+      motivo: conM ? null : local ? 'Esta instalación lleva su propia membresía: los pagos se apuntan en Mi negocio → Membresía.' : 'Esta instalación no tiene membresía: no hay nada que pagar.',
+    };
+  }
+
+  async function mandarCaptura(entrada: { imagen: string; meses: number; nota?: string; monto?: number }): Promise<{ ok: true; mensaje: string; pago: PagoCapturaVista } | { ok: false; error: string }> {
+    if (!maestro) return { ok: false, error: paraPagar().motivo ?? 'Esta instalación no depende de un maestro.' };
+    if (!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(entrada.imagen)) return { ok: false, error: 'La captura tiene que ser una imagen (PNG, JPG o WebP).' };
+    if (entrada.imagen.length > 3_000_000) return { ok: false, error: 'La captura pesa demasiado: recórtala o baja la calidad (máximo 2 MB).' };
+    if (!Number.isInteger(entrada.meses) || entrada.meses < 1 || entrada.meses > 60) return { ok: false, error: 'Los meses tienen que ser un número entero entre 1 y 60.' };
+    try {
+      const r = await doFetch(`${maestro.url.replace(/\/+$/, '')}/pago`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${maestro.token}`, accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ imagen: entrada.imagen, meses: entrada.meses, nota: entrada.nota ?? '', monto: entrada.monto ?? null }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; pago?: PagoCapturaVista };
+      if (!r.ok || !j.pago) return { ok: false, error: j.error ?? `Quien controla las tiendas no aceptó la captura (respondió ${r.status}). Inténtalo de nuevo o escríbele.` };
+      await refrescar();
+      return { ok: true, mensaje: 'Captura enviada: quien controla las tiendas la revisa y, en cuanto la apunte, la membresía corre sola. Aquí verás si la aceptó.', pago: j.pago };
+    } catch (e) {
+      return { ok: false, error: `No se pudo mandar la captura: ${e instanceof Error ? e.message : String(e)}. Revisa la conexión y vuelve a intentarlo.` };
+    }
+  }
+
   async function refrescar(): Promise<EstadoPlanLocal> {
     if (!maestro) return estado();
     try {
-      const r = await doFetch(maestro.url, { headers: { authorization: `Bearer ${maestro.token}`, accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+      const headers: Record<string, string> = { authorization: `Bearer ${maestro.token}`, accept: 'application/json' };
+      const parte = await parteDeSalud();
+      if (parte) headers['x-gsgchat-estado'] = parte;
+      const r = await doFetch(maestro.url, { headers, signal: AbortSignal.timeout(8000) });
       if (!r.ok) throw new Error(`el maestro respondió ${r.status}`);
       const j = (await r.json()) as PlanRemoto;
       if (!j || typeof j.plan !== 'string' || !j.limites || !j.vencimiento) throw new Error('el maestro respondió algo que no es un plan');
@@ -406,6 +536,8 @@ export async function crearServicioPlan(deps: DepsPlan): Promise<ServicioPlan> {
       await deps.settingsRepo.put(CLAVE_MAESTRO, JSON.stringify({ url, token }), false);
       return estado();
     },
+    paraPagar,
+    mandarCaptura,
     async desconectarMaestro() {
       if (maestro?.origen === 'env') throw new Error('El maestro viene del arranque (.env): se quita de ahí.');
       maestro = null;

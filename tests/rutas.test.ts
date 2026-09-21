@@ -658,6 +658,24 @@ describe('la cola hacia GSG', () => {
     expect(cifras.fallido).toBe(1);
     expect(cifras.pendiente).toBe(1);
   });
+
+  it('con GSG apagado los reportes quedan atascados (pendientes ya intentados), y la pantalla lo cuenta', async () => {
+    // Antes solo se avisaba con un rechazo definitivo (4xx) o con mas de 20 en
+    // cola: una API caida dejaba los reportes "pendientes" en silencio.
+    const repos = createFakeRepos();
+    await repos.rutas.encolarReporte({ tipo: 'ubicacion', payload: { a: 1 } });
+    await repos.rutas.encolarReporte({ tipo: 'entrega', payload: { b: 2 } });
+    expect(await repos.rutas.cifrasReportes()).toMatchObject({ pendiente: 2, atascado: 0 });
+
+    const fetchFalso = vi.fn(async () => {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:9');
+    });
+    const puerto = crearPuertoHttp({ url: 'http://127.0.0.1:9', token: '', fetchImpl: fetchFalso as never });
+    const salida = await despacharReportes(repos, puerto);
+
+    expect(salida).toMatchObject({ intentados: 2, enviados: 0, fallidos: 0 });
+    expect(await repos.rutas.cifrasReportes()).toMatchObject({ pendiente: 2, fallido: 0, atascado: 2 });
+  });
 });
 
 describe('errores de envio traducidos', () => {

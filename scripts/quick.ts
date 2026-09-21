@@ -35,7 +35,8 @@ import { providerOf, createSettingsService } from '../src/settings/service.js';
 import { createDynamicWhatsAppClient } from '../src/whatsapp/dynamic.js';
 import { defaultAuthDir } from '../src/whatsapp/local/session.js';
 import { crearConexionStoky } from '../src/stoky/conexion.js';
-import { crearServicioPlan } from '../src/plan/servicio.js';
+import { crearServicioPlan, type EstadoInstancia } from '../src/plan/servicio.js';
+import { versionDelPaquete } from '../src/util/version.js';
 import { secretsDirectory } from '../src/runtime.js';
 import { CATALOG } from '../src/templates/catalog.js';
 import { countVariables } from '../src/templates/render.js';
@@ -53,6 +54,16 @@ import { crearServicioVoz } from '../src/voz/servicio.js';
 import { crearServicioEnvioAutomatico } from '../src/envio-automatico/servicio.js';
 import { opcionesDesdeConfig } from '../src/rutas/motor.js';
 import { PLANES } from '../src/rutas/telefono.js';
+import { crearConexionGsg, TOKEN_SIMULADOR } from '../src/rutas/conexion-gsg.js';
+import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
+import { crearServicioEntregas } from '../src/entregas/servicio.js';
+import { crearServicioResumenes } from '../src/resumenes/servicio.js';
+import { cargarLote } from '../src/rutas/cargar.js';
+import { crearFiabilidad } from '../src/salud/fiabilidad.js';
+import { carpetaDeCopiasPorDefecto } from '../src/respaldo/servicio.js';
+import { getLocalState } from '../src/whatsapp/local/session.js';
+import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO } from '../src/auth/routes.js';
+import { randomBytes } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -97,7 +108,8 @@ const config = loadConfig({
   STOKY_PANEL_URL: process.env.STOKY_PANEL_URL?.trim() || '',
 } as NodeJS.ProcessEnv);
 
-const { pool } = await openPglite(DATA_DIR);
+const pglite = await openPglite(DATA_DIR);
+const { pool } = pglite;
 // Los repositorios observados: cada escritura avisa al bus, y los webhooks
 // salientes reparten el aviso (igual que en el arranque completo).
 const bus = crearBus((m, d) => console.warn(m, d));
@@ -164,7 +176,17 @@ const queue = createMemoryOutboundQueue({ sender });
 
 // La membresia: sin PLAN_URL no hay maestro y la lleva el superadministrador
 // desde la pantalla Membresia (ver src/plan).
-const plan = await crearServicioPlan({ settingsRepo, url: config.PLAN_URL, token: config.PLAN_TOKEN, log: (m, d) => console.warn(m, d ?? '') });
+// El parte de salud que esta instalacion le manda al maestro en cada consulta
+// del plan (Tiendas lo enseña en palabras). Se completa mas abajo, cuando
+// existen el monitor, la IA y las entregas.
+const parteDeSalud: { dar: null | (() => Promise<EstadoInstancia>) } = { dar: null };
+const plan = await crearServicioPlan({
+  settingsRepo,
+  url: config.PLAN_URL,
+  token: config.PLAN_TOKEN,
+  log: (m, d) => console.warn(m, d ?? ''),
+  estado: () => (parteDeSalud.dar ? parteDeSalud.dar() : { whatsapp: settings.isConfigured() ? 'conectado' : 'sin_conectar', mensajesHoy: 0, fallosIA: 0, entregasHoy: 0, version: versionDelPaquete() }),
+});
 plan.arrancar();
 
 // La conexion con Stoky se configura desde la pantalla (Conectar mi web y
@@ -192,6 +214,32 @@ await entrenamiento.cargar();
 // audios del cliente. Se configura en Mi asistente IA → Voz. Ver src/voz.
 const voz = await crearServicioVoz({ settingsRepo, settingsKeyBase64: secrets.settingsKey, sender, mediaDir: mediaDirectory(), log: (m, d) => console.warn(`[voz] ${m}`, d ?? '') });
 
+// La conexion con GSG se configura desde Entregas del dia (real o el
+// simulador de este servidor); el .env es el valor inicial. Ver src/rutas/conexion-gsg.ts.
+const conexionGsg = await crearConexionGsg({ settingsRepo, settingsKeyBase64: secrets.settingsKey, config, log: (m, d) => console.warn(`[gsg] ${m}`, d ?? '') });
+// El simulador del sistema de GSG: sus tres listas, en memoria, en /simulador/gsg.
+const simuladorGsg = crearGsgSimulado({ token: TOKEN_SIMULADOR });
+
+// Las entregas del dia: confirmacion, motorizados y hora de llegada. Ver src/entregas.
+const entregas = await crearServicioEntregas({
+  repos,
+  repo: repos.entregas,
+  sender,
+  settingsRepo,
+  gsg: conexionGsg.puerto(),
+  conexionGsg,
+  cargarLote: (body) => cargarLote({ repos, plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, timezone: config.timezone, lista }, body),
+  nombreNegocio: () => ajustes.nombreNegocio(),
+  supervisor: () => politica().avisarA,
+  ia: () => (ia.estado().tieneToken ? { completar: (mensajes, opts) => ia.completar(mensajes, opts) } : null),
+  usarPlantilla: () => providerOf(settings.current()) === 'cloud',
+  timezone: config.timezone,
+  plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!,
+  publicBaseUrl: config.PUBLIC_BASE_URL,
+  bus,
+  log: (m, d) => console.warn(`[entregas] ${m}`, d ?? ''),
+});
+
 const ia = await crearServicioIA({
   settingsRepo,
   settingsKeyBase64: secrets.settingsKey,
@@ -207,9 +255,32 @@ const ia = await crearServicioIA({
   entrenamiento,
   plan,
   voz,
+  entregas,
   log: (m, d) => console.warn(m, d ?? ''),
 });
 entrenamiento.conectarIA(iaParaEntrenar(ia));
+parteDeSalud.dar = async () => ({
+  whatsapp: !settings.isConfigured() ? 'sin_conectar' : (wa.conectado?.() ?? true) ? 'conectado' : 'caido',
+  mensajesHoy: (await salud.snapshot()).ritmo.hoy,
+  fallosIA: ia.uso().hoy.fallos,
+  entregasHoy: (await entregas.resumen()).cifras.total,
+  version: versionDelPaquete(),
+});
+
+// El resumen de la mañana y de la tarde al supervisor (Ajustes → Resumen del dia).
+const resumenes = await crearServicioResumenes({
+  settingsRepo,
+  sender,
+  ajustes: () => ajustes.resumenes(),
+  supervisor: () => politica().avisarA,
+  nombreNegocio: () => ajustes.nombreNegocio(),
+  entregas,
+  ia: () => (ia.estado().tieneToken ? { completar: (m, o) => ia.completar(m, o) } : null),
+  whatsappConectado: () => settings.isConfigured() && (wa.conectado?.() ?? true),
+  timezone: config.timezone,
+  publicBaseUrl: config.PUBLIC_BASE_URL,
+  log: (m, d) => console.warn(`[resumenes] ${m}`, d ?? ''),
+});
 
 // El catalogo local hace de catalogo aprobado: sin Meta no hay a quien pedir
 // permiso, pero los gates siguen exigiendo que la plantilla exista y este
@@ -227,6 +298,45 @@ for (const template of CATALOG) {
     quality: null,
   });
 }
+
+// "Que todo funcione": el vigilante del WhatsApp, la prueba de cada manana,
+// el cupo previsto y la copia de seguridad. Ver src/salud/fiabilidad.ts.
+const secretoInterno = randomBytes(24).toString('hex');
+let reconectarLocal: (() => Promise<unknown>) | undefined;
+const fiabilidad = await crearFiabilidad({
+  settingsRepo,
+  settingsKeyBase64: secrets.settingsKey,
+  salud,
+  timezone: config.timezone,
+  log: (m, d) => console.warn(`[fiabilidad] ${m}`, d ?? ''),
+  vigilante: {
+    conectado: () => wa.conectado?.(),
+    proveedor: () => (settings.isConfigured() ? providerOf(settings.current()) : null),
+    estadoLocal: () => getLocalState(),
+    reconectar: () => (reconectarLocal ? reconectarLocal() : Promise.resolve()),
+    avisarWhatsApp: async (texto) => {
+      const destino = politica().avisarA;
+      if (!destino) return { ok: false, detalle: 'no hay número del supervisor' };
+      const r = await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', text: texto, manual: true, origen: 'sistema' });
+      return { ok: r.ok, detalle: r.ok ? undefined : r.blocked ? r.reason : r.error };
+    },
+  },
+  humo: {
+    sender,
+    supervisor: () => politica().avisarA,
+    deliveries: repos.deliveries,
+    conexionGsg,
+    ia,
+    entregas,
+    carpetas: () => [DATA_DIR, path.resolve(config.ARCHIVE_DIR)],
+  },
+  cupo: { entregas, lista, reparto: () => lista.ajustesReparto() },
+  respaldo: {
+    baseDatos: () => ({ tipo: 'pglite', dump: () => pglite.dump(), dataDir: DATA_DIR }),
+    archiveDir: config.ARCHIVE_DIR,
+    carpetaPorDefecto: carpetaDeCopiasPorDefecto(),
+  },
+});
 
 // La bienvenida la da el asistente de preventa, que ademas ofrece el menu y
 // va llenando la ficha. Una regla `first_message` encima seria un segundo
@@ -252,6 +362,12 @@ const app = await buildServer({
   plan,
   lista,
   voz,
+  entregas,
+  conexionGsg,
+  simuladorGsg,
+  resumenes,
+  fiabilidad,
+  secretoInterno,
   // Para poder guardar en la biblioteca un sticker que llego por el chat: su
   // fichero vive aqui.
   mediaDir: mediaDirectory(),
@@ -259,6 +375,12 @@ const app = await buildServer({
   // a /setup despues de cada reinicio.
   autoConectarLocal: true,
 });
+reconectarLocal = () =>
+  app.inject({
+    method: 'POST',
+    url: '/admin/local/connect',
+    headers: { [CABECERA_INTERNA]: secretoInterno, [CABECERA_USUARIO_INTERNO]: JSON.stringify({ id: 'vigilante', usuario: 'vigilante', nombre: 'Vigilante del WhatsApp', rol: 'admin', permisos: [] }) },
+  });
 
 // Todo lo que trabaja solo: monitor de salud, secuencias, goteo de campanas,
 // motor de rutas, avisos y GSG. Antes el arranque corto no levantaba nada de
@@ -287,6 +409,11 @@ const pararServicios = arrancarServicios({
   stickers,
   bus,
   lista,
+  gsg: conexionGsg.puerto(),
+  entregas,
+  ia,
+  resumenes,
+  fiabilidad,
   log: consola as never,
 });
 process.on('SIGINT', () => {
@@ -308,7 +435,7 @@ if (conexionStoky.estado().configurada) {
 await app.listen({ port: PORT, host: '127.0.0.1' });
 
 console.log(`
-  wa-locator - arranque corto (Postgres embebido, WhatsApp de verdad)
+  GSGchat - arranque corto (Postgres embebido, WhatsApp de verdad)
 
   1. Abre       ${BASE}/login   (la primera vez, crea tu cuenta ahi mismo)
   2. Ve a        ${BASE}/setup   y elige "Escanear el QR y ya"
@@ -318,6 +445,7 @@ console.log(`
 
   Chat          ${BASE}/chat
   Panel         ${BASE}/panel   (Inicio: cifras del dia; #salud: riesgo, ritmo y por que frena)
+  Entregas      ${BASE}/entregas   (GSG: ${conexionGsg.estado().descripcion})
   Ubicaciones   ${BASE}/rutas
   Envio autom.  ${BASE}/envio-automatico
 

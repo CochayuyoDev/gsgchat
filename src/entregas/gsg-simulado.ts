@@ -1,0 +1,327 @@
+/**
+ * El sistema de GSG de mentira: para probar el flujo entero sin que GSG
+ * tenga API todavia.
+ *
+ * Se comporta como se espera que se comporte el de verdad, con el contrato
+ * de src/rutas/gsg.ts:
+ *
+ *  - Tiene la lista del dia con tres apartados: a quien **falta pedir la
+ *    ubicacion**, a quien **falta confirmar** y quien **ya termino**.
+ *    `GET /reparto/pendientes` la devuelve entera.
+ *  - Recibe lo que este sistema le manda: `POST /ubicaciones`,
+ *    `POST /confirmaciones`, `POST /entregas` (la hora de llegada),
+ *    `POST /incidencias` y `POST /resumenes`.
+ *  - Cuando un cliente tiene las dos cosas (ubicacion y confirmacion, o
+ *    solo la que le faltaba) lo pasa solo a **terminados**. Un cliente que
+ *    no confirma pasa a **cancelados**.
+ *
+ * Vive en memoria dentro de este mismo servidor, colgado de
+ * `/simulador/gsg`, y exige el mismo token que usaria una API real. Desde la
+ * pantalla se carga con los diez clientes ficticios y se reinicia. Las
+ * pruebas lo usan igual.
+ */
+
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { CLIENTES_DE_PRUEBA, type ClienteDePrueba } from './datos-de-prueba.js';
+
+export interface ClienteSimulado {
+  referencia: string;
+  telefono: string;
+  nombre: string;
+  direccion: string | null;
+  distrito: string | null;
+  notas: string | null;
+  necesitaUbicacion: boolean;
+  necesitaConfirmacion: boolean;
+  /** Lo que GSG ya sabe (si el cliente lo dio en un pedido anterior). */
+  lat: number | null;
+  lng: number | null;
+  /** GSG puede marcar el pedido como urgente: sale primero hacia el motorizado. */
+  urgente: boolean;
+  ubicacion: { lat: number; lng: number; mapsUrl: string | null; corregida: boolean; en: string } | null;
+  confirmacion: { confirmada: boolean; respuesta: string | null; como: string | null; motivo: string | null; en: string } | null;
+  entrega: { motorizado: unknown; minutosMotorizado: number | null; minutosAviso: number | null; llegaAproxEn: string | null; en: string; entregadoEn: string | null; entregadaComo: string | null; incidencia: string | null; segundaVisita: boolean; visitas: number } | null;
+  estado: 'pendiente' | 'terminado' | 'cancelado';
+  terminadoEn: string | null;
+}
+
+export interface EstadoSimulador {
+  dia: string;
+  clientes: ClienteSimulado[];
+  faltaUbicacion: number;
+  faltaConfirmacion: number;
+  terminados: number;
+  cancelados: number;
+  recibidos: { ubicaciones: number; confirmaciones: number; entregas: number; incidencias: number; resumenes: number };
+  llamadas: number;
+  ultimaLlamadaEn: string | null;
+}
+
+export interface GsgSimulado {
+  /** Lo que devuelve GET /reparto/pendientes. */
+  pendientes(): { dia: string; faltaUbicacion: Record<string, unknown>[]; faltaConfirmacion: Record<string, unknown>[]; terminados: Record<string, unknown>[]; cancelados: Record<string, unknown>[] };
+  estado(): EstadoSimulador;
+  /** Mete clientes en la lista del dia (los que ya estan, se dejan como estan). */
+  cargar(clientes: Array<Partial<ClienteDePrueba> & { referencia: string; telefono: string }>): number;
+  /** Los diez de siempre. */
+  cargarDePrueba(): number;
+  reiniciar(): void;
+  /** Lo recibido, tal cual llego (para las pruebas y la pantalla). */
+  recibido: Array<{ tipo: string; cuerpo: Record<string, unknown>; en: string }>;
+  /** Como contesta ahora mismo: se cambia a mitad de prueba. */
+  modo: 'ok' | 'caido' | 'rechaza';
+  /** Atiende una llamada HTTP (lo usa el plugin y el fetch de las pruebas). */
+  atender(method: string, ruta: string, token: string | null, cuerpo: unknown): { status: number; body: unknown };
+}
+
+export interface OpcionesSimulador {
+  token: string;
+  ahora?: () => Date;
+  /** El dia del reparto (AAAA-MM-DD). Por defecto, hoy en Lima. */
+  dia?: () => string;
+}
+
+const clienteSchema = z.object({
+  referencia: z.string().min(1).max(60),
+  telefono: z.string().min(6).max(20),
+  nombre: z.string().max(120).optional(),
+  direccion: z.string().max(300).optional(),
+  distrito: z.string().max(120).optional(),
+  notas: z.string().max(300).optional(),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
+  faltaUbicacion: z.boolean().optional(),
+  faltaConfirmacion: z.boolean().optional(),
+  urgente: z.boolean().optional(),
+});
+
+function diaEnLima(fecha: Date): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(fecha).slice(0, 10);
+  } catch {
+    return fecha.toISOString().slice(0, 10);
+  }
+}
+
+export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
+  const ahora = opts.ahora ?? (() => new Date());
+  const dia = opts.dia ?? (() => diaEnLima(ahora()));
+  const clientes = new Map<string, ClienteSimulado>();
+  const recibido: GsgSimulado['recibido'] = [];
+  const contadores = { ubicaciones: 0, confirmaciones: 0, entregas: 0, incidencias: 0, resumenes: 0 };
+  let llamadas = 0;
+  let ultimaLlamadaEn: string | null = null;
+
+  const publico = (c: ClienteSimulado): Record<string, unknown> => ({
+    id: `gsg-${c.referencia}`,
+    referencia: c.referencia,
+    telefono: c.telefono,
+    nombre: c.nombre,
+    direccion: c.direccion,
+    distrito: c.distrito,
+    notas: c.notas,
+    urgente: c.urgente,
+    // Si GSG ya tiene la ubicacion (de un pedido anterior o porque acaba de
+    // llegar), la manda: asi el otro lado no la vuelve a pedir.
+    ...(c.ubicacion ? { lat: c.ubicacion.lat, lng: c.ubicacion.lng } : c.lat != null && c.lng != null && !c.necesitaUbicacion ? { lat: c.lat, lng: c.lng } : {}),
+  });
+
+  /** Si ya tiene todo, pasa a terminados; si dijo que no, a cancelados. */
+  function revisar(c: ClienteSimulado): void {
+    if (c.estado !== 'pendiente') return;
+    // Sin respuesta, con cambio, por reprogramar o cerrado por el dia: sigue pendiente (una persona lo coordina).
+    if (c.confirmacion && !c.confirmacion.confirmada && !['sin_respuesta', 'cambio', 'dia_cerrado', 'sin_plantilla', 'error_envio', 'reprogramar'].includes(c.confirmacion.motivo ?? '')) {
+      c.estado = 'cancelado';
+      c.terminadoEn = ahora().toISOString();
+      return;
+    }
+    const ubicacionLista = !c.necesitaUbicacion || Boolean(c.ubicacion);
+    const confirmacionLista = !c.necesitaConfirmacion || Boolean(c.confirmacion?.confirmada);
+    if (ubicacionLista && confirmacionLista) {
+      c.estado = 'terminado';
+      c.terminadoEn = ahora().toISOString();
+    }
+  }
+
+  const porReferencia = (cuerpo: Record<string, unknown>): ClienteSimulado | null => {
+    const ref = String(cuerpo.referencia ?? '').trim();
+    if (ref && clientes.has(ref)) return clientes.get(ref)!;
+    // Sin referencia que cuadre, por telefono (el reparto manda los dos).
+    const tel = String(cuerpo.telefono ?? '').replace(/\D+/g, '');
+    if (!tel) return null;
+    for (const c of clientes.values()) {
+      const suyo = c.telefono.replace(/\D+/g, '');
+      if (suyo === tel || `51${suyo}` === tel || suyo === `51${tel}`) return c;
+    }
+    return null;
+  };
+
+  const sim: GsgSimulado = {
+    recibido,
+    modo: 'ok',
+
+    pendientes() {
+      const todos = [...clientes.values()];
+      return {
+        dia: dia(),
+        faltaUbicacion: todos.filter((c) => c.estado === 'pendiente' && c.necesitaUbicacion && !c.ubicacion).map(publico),
+        faltaConfirmacion: todos.filter((c) => c.estado === 'pendiente' && c.necesitaConfirmacion && !c.confirmacion?.confirmada).map(publico),
+        terminados: todos.filter((c) => c.estado === 'terminado').map((c) => ({ ...publico(c), terminadoEn: c.terminadoEn, llegaAproxEn: c.entrega?.llegaAproxEn ?? null })),
+        cancelados: todos.filter((c) => c.estado === 'cancelado').map((c) => ({ ...publico(c), motivo: c.confirmacion?.motivo ?? 'cancela' })),
+      };
+    },
+
+    estado() {
+      const todos = [...clientes.values()];
+      return {
+        dia: dia(),
+        clientes: todos,
+        faltaUbicacion: todos.filter((c) => c.estado === 'pendiente' && c.necesitaUbicacion && !c.ubicacion).length,
+        faltaConfirmacion: todos.filter((c) => c.estado === 'pendiente' && c.necesitaConfirmacion && !c.confirmacion?.confirmada).length,
+        terminados: todos.filter((c) => c.estado === 'terminado').length,
+        cancelados: todos.filter((c) => c.estado === 'cancelado').length,
+        recibidos: { ...contadores },
+        llamadas,
+        ultimaLlamadaEn,
+      };
+    },
+
+    cargar(lista) {
+      let nuevos = 0;
+      for (const bruto of lista) {
+        const c = clienteSchema.parse(bruto);
+        if (clientes.has(c.referencia)) continue;
+        clientes.set(c.referencia, {
+          referencia: c.referencia,
+          telefono: c.telefono,
+          nombre: c.nombre ?? '',
+          direccion: c.direccion ?? null,
+          distrito: c.distrito ?? null,
+          notas: c.notas ?? null,
+          necesitaUbicacion: c.faltaUbicacion ?? true,
+          necesitaConfirmacion: c.faltaConfirmacion ?? true,
+          lat: c.lat ?? null,
+          lng: c.lng ?? null,
+          urgente: c.urgente === true,
+          ubicacion: null,
+          confirmacion: null,
+          entrega: null,
+          estado: 'pendiente',
+          terminadoEn: null,
+        });
+        nuevos++;
+      }
+      return nuevos;
+    },
+
+    cargarDePrueba: () => sim.cargar(CLIENTES_DE_PRUEBA),
+
+    reiniciar() {
+      clientes.clear();
+      recibido.length = 0;
+      for (const k of Object.keys(contadores) as Array<keyof typeof contadores>) contadores[k] = 0;
+      llamadas = 0;
+      ultimaLlamadaEn = null;
+      sim.modo = 'ok';
+    },
+
+    atender(method, ruta, token, cuerpo) {
+      llamadas++;
+      ultimaLlamadaEn = ahora().toISOString();
+      if (token !== opts.token) return { status: 401, body: { error: 'token inválido' } };
+      if (sim.modo === 'caido') return { status: 502, body: '<html>502 Bad Gateway</html>' };
+      const camino = ruta.replace(/\?.*$/, '').replace(/\/+$/, '');
+
+      if (method === 'GET' && camino === '/reparto/pendientes') return { status: 200, body: sim.pendientes() };
+      if (method === 'GET' && camino === '/reparto/estado') return { status: 200, body: sim.estado() };
+      if (method === 'POST' && camino === '/reparto/cargar') {
+        const lista = z.array(clienteSchema).parse((cuerpo as { clientes?: unknown })?.clientes ?? cuerpo);
+        return { status: 200, body: { ok: true, nuevos: sim.cargar(lista) } };
+      }
+      if (method === 'DELETE' && camino === '/reparto') {
+        sim.reiniciar();
+        return { status: 200, body: { ok: true } };
+      }
+
+      if (method !== 'POST') return { status: 404, body: { error: `ruta desconocida ${camino}` } };
+      const c = (cuerpo && typeof cuerpo === 'object' ? cuerpo : {}) as Record<string, unknown>;
+      if (sim.modo === 'rechaza') return { status: 422, body: { error: 'payload no válido: falta el campo pedido' } };
+
+      const en = ahora().toISOString();
+      switch (camino) {
+        case '/ubicaciones': {
+          contadores.ubicaciones++;
+          recibido.push({ tipo: 'ubicacion', cuerpo: c, en });
+          const cli = porReferencia(c);
+          if (cli) {
+            cli.ubicacion = { lat: Number(c.lat), lng: Number(c.lng), mapsUrl: (c.mapsUrl as string) ?? null, corregida: c.corregida === true, en };
+            revisar(cli);
+          }
+          return { status: 200, body: { id: `GSG-UBI-${contadores.ubicaciones}`, encontrado: Boolean(cli) } };
+        }
+        case '/confirmaciones': {
+          contadores.confirmaciones++;
+          recibido.push({ tipo: 'confirmacion', cuerpo: c, en });
+          const cli = porReferencia(c);
+          if (cli) {
+            cli.confirmacion = { confirmada: c.confirmada === true, respuesta: (c.respuesta as string) ?? null, como: (c.como as string) ?? null, motivo: (c.motivo as string) ?? null, en };
+            revisar(cli);
+          }
+          return { status: 200, body: { id: `GSG-CONF-${contadores.confirmaciones}`, encontrado: Boolean(cli) } };
+        }
+        case '/entregas': {
+          contadores.entregas++;
+          recibido.push({ tipo: 'entrega', cuerpo: c, en });
+          const cli = porReferencia(c);
+          if (cli) {
+            // El "entregado" llega en un segundo reporte con los mismos campos: se
+            // conserva lo que ya se sabia y se anota cuando se entrego.
+            cli.entrega = {
+              motorizado: c.motorizado ?? cli.entrega?.motorizado ?? null,
+              minutosMotorizado: (c.minutosMotorizado as number) ?? cli.entrega?.minutosMotorizado ?? null,
+              minutosAviso: (c.minutosAviso as number) ?? cli.entrega?.minutosAviso ?? null,
+              llegaAproxEn: (c.llegaAproxEn as string) ?? cli.entrega?.llegaAproxEn ?? null,
+              en,
+              entregadoEn: (c.entregadoEn as string) ?? cli.entrega?.entregadoEn ?? null,
+              entregadaComo: (c.entregadaComo as string) ?? cli.entrega?.entregadaComo ?? null,
+              incidencia: (c.incidencia as string) ?? null,
+              segundaVisita: c.segundaVisita === true,
+              visitas: Number(c.visitas ?? 0),
+            };
+            revisar(cli);
+          }
+          return { status: 200, body: { id: `GSG-ENT-${contadores.entregas}`, encontrado: Boolean(cli) } };
+        }
+        case '/incidencias': {
+          contadores.incidencias++;
+          recibido.push({ tipo: 'incidencia', cuerpo: c, en });
+          return { status: 200, body: { id: `GSG-INC-${contadores.incidencias}` } };
+        }
+        case '/resumenes': {
+          contadores.resumenes++;
+          recibido.push({ tipo: 'resumen', cuerpo: c, en });
+          return { status: 200, body: { id: `GSG-RES-${contadores.resumenes}` } };
+        }
+        default:
+          return { status: 404, body: { error: `ruta desconocida ${camino}` } };
+      }
+    },
+  };
+
+  return sim;
+}
+
+/** Cuelga el simulador de este servidor en `prefijo` (p. ej. /simulador/gsg). */
+export async function registerGsgSimulado(app: FastifyInstance, deps: { simulador: GsgSimulado; prefijo: string }): Promise<void> {
+  const { simulador, prefijo } = deps;
+  const tokenDe = (auth: string | undefined): string | null => (auth?.startsWith('Bearer ') ? auth.slice(7) : null);
+  const atender = (method: string) => async (request: { url: string; headers: Record<string, unknown>; body: unknown }, reply: { code(n: number): { send(b: unknown): unknown } }) => {
+    const ruta = request.url.slice(prefijo.length);
+    const r = simulador.atender(method, ruta, tokenDe(request.headers.authorization as string | undefined), request.body);
+    return reply.code(r.status).send(r.body);
+  };
+  app.get(`${prefijo}/*`, atender('GET'));
+  app.post(`${prefijo}/*`, atender('POST'));
+  app.delete(`${prefijo}/*`, atender('DELETE'));
+}

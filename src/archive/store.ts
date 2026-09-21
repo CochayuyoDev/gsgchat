@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync } from 'node:fs';
-import { stat, unlink } from 'node:fs/promises';
+import { rm, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -165,6 +165,28 @@ export async function comprobar(
     : { ok: false, detalle: 'el contenido cambio desde que se respaldo' };
 }
 
+/**
+ * La carpeta hermana del respaldo donde van sus adjuntos (fotos, audios,
+ * documentos): el mismo nombre sin la extension. Relativa al directorio de
+ * respaldos, como `file`.
+ */
+export function carpetaDeAdjuntos(file: string): string {
+  return file.replace(/\.ndjson\.gz$/, '') + '-adjuntos';
+}
+
+/** El nombre de fichero de un adjunto, ya acotado: nada de rutas ni de ".." (viene de la base, pero por si acaso). */
+export function nombreDeAdjuntoSeguro(id: string): string | null {
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(id) && !id.includes('..') ? id : null;
+}
+
+/** Ruta absoluta de un adjunto del respaldo, o null si el id no es de fiar. */
+export function rutaDeAdjunto(dir: string, file: string, id: string): string | null {
+  const nombre = nombreDeAdjuntoSeguro(id);
+  return nombre ? rutaDe(dir, path.posix.join(carpetaDeAdjuntos(file), nombre)) : null;
+}
+
+/** Borra el fichero y su carpeta de adjuntos, si la habia. */
 export async function borrarArchivo(dir: string, file: string): Promise<void> {
   await unlink(rutaDe(dir, file)).catch(() => undefined);
+  await rm(rutaDe(dir, carpetaDeAdjuntos(file)), { recursive: true, force: true }).catch(() => undefined);
 }

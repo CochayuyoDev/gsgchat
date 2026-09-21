@@ -24,6 +24,8 @@ export const PERMISOS = {
   'pedidos:gestionar': 'Ver y cambiar de estado los pedidos tomados en el chat',
   'ia:entrenar': 'Ensenarle lecciones al asistente de WhatsApp y leerlas (POST/GET /api/v1/ia/lecciones)',
   'stoky:conectar': 'Que Stoky se presente al vincularse: manda su direccion y su token para que este sistema consulte su catalogo (POST/GET /api/v1/stoky/conexion)',
+  'entregas:leer': 'Ver las entregas del dia (ubicacion, confirmacion, motorizado, hora de llegada) y los motorizados (GET /api/v1/entregas, /api/v1/motorizados)',
+  'entregas:gestionar': 'Pedirle a GSG los pendientes ahora y dar de alta motorizados (POST /api/v1/entregas/sincronizar, /api/v1/motorizados)',
   '*': 'Todo, incluida la API interna /admin (como las claves de antes)',
 } as const;
 

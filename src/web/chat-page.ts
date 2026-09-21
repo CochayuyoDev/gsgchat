@@ -14,34 +14,27 @@
  */
 
 const CSS = `
-  :root {
-    color-scheme: light dark;
-    --bg: #eae6df; --panel: #fff; --line: #e3e5e9; --text: #111b21;
-    --muted: #667781; --accent: #128c7e; --mine: #d9fdd3; --theirs: #fff;
-    --header: #f0f2f5; --badge: #25d366;
-    --wallpaper: #efe7de; --wallpaper-dot: rgba(0,0,0,.035);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b141a; --panel: #111b21; --line: #222d34; --text: #e9edef;
-      --muted: #8696a0; --mine: #005c4b; --theirs: #202c33; --header: #202c33;
-      --wallpaper: #0b141a; --wallpaper-dot: rgba(255,255,255,.03);
-    }
+  /* El chat solo añade sus cuatro colores propios (globo mio, globo del
+     cliente, cabeceras y fondo del hilo) y los saca de los tokens del armazon,
+     asi cambia con la paleta y con el modo oscuro sin tocar nada aqui. */
+  .app, .toast, .visor, .ayuda-teclas {
+    --mine: var(--primario-suave); --theirs: var(--superficie); --header: var(--superficie-2);
+    --badge: var(--primario); --wallpaper: var(--bg); --wallpaper-dot: var(--borde);
   }
   * { box-sizing: border-box; }
   /* El alto lo da el armazon (s-content lleno): la banda de demo y el aviso
      de conexion van encima y el chat se queda con el resto. */
   .app { display: grid; grid-template-columns: 340px 1fr; flex: 1; min-height: 0; overflow: hidden;
-    background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    background: var(--bg); color: var(--text); font-family: var(--fuente); font-size: var(--fs-cuerpo); line-height: 1.45; }
   .demo {
-    background: #d97706; color: #fff; padding: 9px 14px; font-size: 13.5px;
+    background: var(--ambar); color: #fff; padding: 9px 14px; font-size: 13.5px;
     text-align: center; line-height: 1.35;
   }
   .demo a { color: #fff; text-decoration: underline; }
   /* WhatsApp desconectado: lo que se escriba no sale. Se avisa arriba del
      todo, porque descubrirlo al pulsar enviar es descubrirlo tarde. */
   .aviso-conexion {
-    background: #dc2626; color: #fff; padding: 9px 14px; font-size: 13.5px;
+    background: var(--rojo); color: #fff; padding: 9px 14px; font-size: 13.5px;
     text-align: center; line-height: 1.35;
   }
   .aviso-conexion a { color: #fff; text-decoration: underline; }
@@ -57,8 +50,8 @@ const CSS = `
   .side header h1 { font-size: 17px; margin: 0; flex: 1; }
   .search { padding: 8px 12px; border-bottom: 1px solid var(--line); }
   .filtros { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
-  .filtros .f { flex: none; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-  .filtros .f.activo { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .filtros .f { flex: none; min-height: 32px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+  .filtros .f.activo { background: var(--accent); border-color: var(--accent); color: var(--primario-texto); }
   .search input { width: 100%; padding: 8px 12px; border: 0; border-radius: 8px;
     background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
   .chats { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -81,7 +74,7 @@ const CSS = `
   .chat .name { font-weight: 600; font-size: 15px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat .when { font-size: 11.5px; color: var(--muted); flex: none; }
   .chat .last { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
-  .badge { background: var(--badge); color: #06251a; border-radius: 999px; font-size: 11.5px;
+  .badge { background: var(--badge); color: var(--primario-texto); border-radius: 999px; font-size: 11.5px;
     font-weight: 700; padding: 1px 7px; margin-left: 6px; }
   /* min-height: 0 es lo que deja que el hilo se encoja y sea .messages quien
      haga scroll, en vez de estirar la pagina entera. */
@@ -136,33 +129,46 @@ const CSS = `
     white-space: nowrap; position: relative; top: 3px;
   }
   .msg .tick { color: var(--muted); }
-  .msg .tick.read { color: #53bdeb; }
+  .msg .tick.read { color: var(--azul); }
+  /* "¿qué pasó?": discreto, al pasar el raton; en el movil siempre (no hay raton). */
+  .msg .que-paso { color: var(--muted); font-size: 10.5px; margin-right: 6px; cursor: pointer; opacity: 0; transition: opacity .12s; text-decoration: underline dotted; }
+  .msg:hover .que-paso, .msg .que-paso:focus { opacity: 1; }
+  @media (hover: none) { .msg .que-paso { opacity: .8; } }
+  .traza { list-style: none; margin: 0; padding: 0; }
+  .traza li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .traza li:last-child { border-bottom: 0; }
+  .traza li i { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
+  .traza li.ok i { background: var(--verde); } .traza li.warn i { background: var(--ambar); } .traza li.bad i { background: var(--rojo); }
+  .traza li span { flex: 1; }
+  .traza li small { display: block; color: var(--muted); font-size: 11.5px; }
+  .traza-cab { font-size: 13px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; padding: 8px 10px; background: var(--superficie-2); border-radius: var(--radio-sm); }
+  .traza-cab b { color: var(--text); }
   .msg a { color: var(--accent); }
   /* Los adjuntos mandan sobre el ancho de la burbuja, pero sin desbordarla. */
   .msg .adjunto { display: block; margin: 2px 0 4px; max-width: 100%; }
   .msg img.adjunto, .msg video.adjunto { border-radius: 6px; cursor: pointer; max-height: 340px; }
   .msg audio.adjunto { width: 260px; }
   .msg .una-vez { display: inline-block; font-size: 11.5px; color: var(--muted); margin: 2px 0 3px;
-    padding: 2px 8px; border-radius: 999px; background: rgba(217,119,6,.14); }
+    padding: 2px 8px; border-radius: 999px; background: var(--ambar-suave); color: var(--ambar); }
   /* El "ver una vez" que no se pudo abrir: se explica y se ofrece pedirlo. */
   .msg .solo-telefono { display: block; margin-top: 6px; }
   .msg .solo-telefono button { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
-    background: #fff; cursor: pointer; }
-  .msg .solo-telefono button:hover { background: #f1f4f6; }
+    background: var(--superficie); cursor: pointer; }
+  .msg .solo-telefono button:hover { background: var(--superficie-2); }
   /* Lo que el remitente "elimino para todos": aqui se conserva, y se dice. */
-  .msg .borrado { display: block; font-size: 11px; color: #b45309; margin-top: 3px; }
+  .msg .borrado { display: block; font-size: 11px; color: var(--ambar); margin-top: 3px; }
   /* En un grupo, quien lo dijo va encima del globo, con su color. */
   .msg .autor { display: block; font-size: 12.5px; font-weight: 600; margin: -1px 0 2px; }
   .msg .autor .tel { font-weight: 400; color: var(--muted); font-size: 11.5px; margin-left: 6px; }
   .autor.c0 { color: #1e88c9; } .autor.c1 { color: #c2185b; } .autor.c2 { color: #d17f0b; } .autor.c3 { color: #5c5fbf; }
   .autor.c4 { color: #1b8f84; } .autor.c5 { color: #d84a4a; } .autor.c6 { color: #5f9a1e; } .autor.c7 { color: #8d6e63; }
-  .avatar.grupo { background: #5d6b78; font-size: 20px; }
+  .avatar.grupo { background: var(--gris); font-size: 20px; }
   .historial { text-align: center; padding: 6px; background: var(--panel); border-bottom: 1px solid var(--line); }
   .mas-antiguos { text-align: center; padding: 6px 0 2px; }
-  .mas-antiguos button { font-size: 12px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; cursor: pointer; color: var(--muted); }
+  .mas-antiguos button { font-size: 12px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--superficie); cursor: pointer; color: var(--muted); }
   .mas-antiguos button:disabled { opacity: .6; }
-  .historial button { font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
-  .historial button:hover { background: #f1f4f6; }
+  .historial button { font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--superficie); cursor: pointer; }
+  .historial button:hover { background: var(--superficie-2); }
   .historial button:disabled { opacity: .6; cursor: default; }
   .msg .fichero { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
                   background: rgba(0,0,0,.05); border-radius: 6px; text-decoration: none;
@@ -188,7 +194,7 @@ const CSS = `
   }
   .composer textarea:focus { box-shadow: 0 0 0 1px var(--line); }
   .composer button { border: 0; border-radius: 50%; width: 44px; height: 44px; background: var(--accent);
-    color: #fff; cursor: pointer; font-size: 17px; flex: none; }
+    color: var(--primario-texto); cursor: pointer; font-size: 17px; flex: none; }
   .composer button.ghost { background: transparent; color: var(--muted); font-size: 19px; }
   .composer button:disabled { opacity: .45; cursor: default; }
   .locked { background: var(--header); border-top: 1px solid var(--line); padding: 14px;
@@ -199,7 +205,7 @@ const CSS = `
     font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 8px;
     border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer;
   }
-  .locked button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .locked button.primary { background: var(--accent); color: var(--primario-texto); border-color: var(--accent); }
   /* La fila de herramientas ocupa sitio en una pantalla ya justa: se pliega y
      solo se abre cuando hace falta mandar un pin. */
   .atajos { background: var(--panel); border-top: 1px solid var(--line); max-height: 260px; overflow: auto; flex: none; box-shadow: 0 -8px 24px rgba(0,0,0,.08); }
@@ -239,7 +245,7 @@ const CSS = `
   }
   .msg.in .ensenar { right: -6px; }
   .msg.out .ensenar { left: -6px; }
-  .msg.out .ensenar.corregir { color: #b45309; }
+  .msg.out .ensenar.corregir { color: var(--ambar); }
   .msg:hover .ensenar, .msg .ensenar:focus { opacity: 1; }
   .msg .ensenar:hover { color: var(--accent); border-color: var(--accent); }
   .msg .de-ia { display: inline-block; font-size: 10.5px; color: var(--muted); margin-right: 4px; }
@@ -253,33 +259,36 @@ const CSS = `
   .rapidas-barra { display: flex; gap: 8px; padding: 8px 14px 0; background: var(--header); flex: none; overflow-x: auto; scrollbar-width: thin; }
   .rapidas-barra .chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
   .rapidas-barra .chip:hover { border-color: var(--accent); color: var(--accent); }
-  .rapidas-barra .chip.accion { background: rgba(18,140,126,.10); border-color: rgba(18,140,126,.35); color: var(--accent); font-weight: 600; }
+  .rapidas-barra .chip.accion { background: var(--primario-suave); border-color: var(--primario); color: var(--accent); font-weight: 600; }
+  /* Las respuestas rapidas son botones con forma de pildora, no chips de estado: sin el punto del armazon. */
+  .rapidas-barra .chip::before { display: none; }
   .rapidas-barra .chip.editar { color: var(--muted); border-style: dashed; }
   .rapidas-barra.ocupada .chip { opacity: .5; pointer-events: none; }
   .tools { display: flex; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; background: var(--header); flex: none; }
   /* La previa de lo que se va a mandar: pegado, arrastrado o elegido. */
   .previa { display: flex; gap: 12px; align-items: center; padding: 10px 14px; background: var(--header);
             border-top: 1px solid var(--line); flex: none; }
-  .previa img, .previa video { max-height: 110px; max-width: 180px; border-radius: 6px; background: #fff; }
-  .previa .icono { width: 64px; height: 64px; border-radius: 8px; background: #fff; display: grid; place-items: center; font-size: 28px; }
+  .previa img, .previa video { max-height: 110px; max-width: 180px; border-radius: 6px; background: var(--superficie); }
+  .previa .icono { width: 64px; height: 64px; border-radius: 8px; background: var(--superficie); display: grid; place-items: center; font-size: 28px; }
   .previa .datos { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
   .previa .nombre { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .previa input { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
   .previa .acciones { display: flex; gap: 6px; }
-  .previa .acciones button { padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
-  .previa .acciones button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .previa .acciones button { padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--superficie); cursor: pointer; }
+  .previa .acciones button.primary { background: var(--accent); color: var(--primario-texto); border-color: var(--accent); }
   .thread.arrastrando::after { content: 'Suelta aquí para mandarlo'; position: absolute; inset: 0; display: grid; place-items: center;
-    background: rgba(0,168,132,.12); border: 3px dashed var(--accent); font-weight: 600; color: var(--accent); z-index: 5; pointer-events: none; }
+    background: var(--primario-suave); border: 3px dashed var(--accent); font-weight: 600; color: var(--accent); z-index: 5; pointer-events: none; }
   .thread { position: relative; }
   .tools.plegado { display: none; }
   .tools input { cursor: text; flex: 1; min-width: 180px; }
-  .empty { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 40px; }
+  .empty { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 40px; font-size: 15px; line-height: 1.6; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
-  .pill.ok { background: rgba(37,211,102,.18); color: #128c7e; }
-  .pill.bad { background: rgba(220,38,38,.16); color: #dc2626; }
-  .pill.warn { background: rgba(217,119,6,.16); color: #d97706; }
+  .pill.ok { background: var(--verde-suave); color: var(--verde); }
+  .pill.bad { background: var(--rojo-suave); color: var(--rojo); }
+  .pill.warn { background: var(--ambar-suave); color: var(--ambar); }
   .link { color: var(--accent); text-decoration: none; font-size: 13px; }
-  .icon { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; padding: 4px 6px; }
+  .icon { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; padding: 4px 6px; min-width: 36px; min-height: 36px; border-radius: var(--radio-sm); display: inline-flex; align-items: center; justify-content: center; }
+  .icon:hover { color: var(--accent); background: var(--superficie); }
   .hidden { display: none !important; }
 
   /* Respaldos: la misma columna de la izquierda, otro contenido. */
@@ -304,16 +313,16 @@ const CSS = `
     border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer;
   }
   .confirmar button.primary, .lectura button.primary {
-    background: var(--accent); color: #fff; border-color: var(--accent);
+    background: var(--accent); color: var(--primario-texto); border-color: var(--accent);
   }
-  .confirmar button.peligro { background: #dc2626; color: #fff; border-color: #dc2626; }
+  .confirmar button.peligro { background: var(--rojo); color: #fff; border-color: var(--rojo); }
   /* Barra del respaldo abierto: se lee, no se escribe. */
   .lectura { background: var(--header); border-top: 1px solid var(--line);
     padding: 10px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .lectura .que { flex: 1; min-width: 160px; font-size: 12.5px; color: var(--muted); }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; z-index: 50;
-    background: #111b21; color: #fff; padding: 10px 18px; border-radius: 10px; font-size: 13.5px;
-    box-shadow: 0 8px 30px rgba(0,0,0,.3); max-width: 80vw; }
+    background: var(--texto); color: var(--bg); padding: 10px 18px; border-radius: 10px; font-size: 13.5px;
+    box-shadow: var(--sombra-2); max-width: 80vw; }
   @media (max-width: 820px) {
     .app { grid-template-columns: 1fr; }
     .side { display: none; }
@@ -322,6 +331,15 @@ const CSS = `
     .app:not(.open-thread) .side { display: flex; }
     .messages { padding: 14px 12px; }
     .msg { max-width: 85%; }
+    .filtros { flex-wrap: wrap; overflow: visible; }
+    .msg .que-paso { opacity: .85; }
+    .thread header { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
+    .thread header::after { content: ''; flex-basis: 100%; height: 0; order: 5; }
+    .thread header .link, .thread header .icon.etiqueta { order: 10; }
+    .thread header .link { padding: 6px 8px; }
+    .thread header .sub { white-space: normal; }
+    .icon, .composer button, .filtros .f { min-height: 44px; }
+    .icon, .composer button { min-width: 44px; }
   }
 `;
 
@@ -344,7 +362,7 @@ export function chatPage(opts: ChatOpts): string {
    */
   const bandaDemo = demo
     ? `<div class="demo">Modo demostración: los mensajes NO salen a WhatsApp.
-         Para hablar de verdad, arranca el sistema y conecta tu cuenta en <a href="/setup">/setup</a>.</div>`
+         Para hablar de verdad, arranca el sistema y conecta tu cuenta en <a href="/setup">Conexión</a>.</div>`
     : '';
 
   /**
@@ -354,7 +372,7 @@ export function chatPage(opts: ChatOpts): string {
    */
   const importar =
     proveedor === 'waha'
-      ? '<button class="icon" id="importar" title="Traer las conversaciones que ya tiene este WhatsApp">⭳</button>'
+      ? '<button class="icon" id="importar" title="Traer las conversaciones que ya tiene este WhatsApp" aria-label="Traer las conversaciones que ya tiene este WhatsApp">⭳</button>'
       : proveedor === 'local'
         ? '<button class="icon etiqueta" id="historial-todos" title="Le pide al teléfono los mensajes anteriores de todos los chats (50 por chat)">⤒ Traer historial</button>'
         : '';
@@ -374,13 +392,13 @@ ${bandaDemo}
     <header>
       <h1>Chats</h1>
       <span id="unread" class="badge hidden"></span>
-      <button class="icon" id="new" title="Escribir a un número nuevo">✚</button>
+      <button class="icon" id="new" title="Escribir a un número nuevo" aria-label="Escribir a un número nuevo">✚</button>
       ${importar}
       <button class="icon etiqueta" id="ver-respaldos" title="Los chats que ya guardaste">📁 Guardados</button>
-      <button class="icon" id="atajos-ayuda" title="Atajos de teclado">⌨</button>
+      <button class="icon" id="atajos-ayuda" title="Atajos de teclado" aria-label="Atajos de teclado">⌨</button>
     </header>
     ${aviso}
-    <div class="search"><input id="q" placeholder="Buscar por nombre o numero" autocomplete="off"></div>
+    <div class="search"><input id="q" placeholder="Buscar por nombre o número" autocomplete="off" aria-label="Buscar un chat por nombre o número"></div>
     <div class="filtros" id="filtros">
       <button class="f activo" type="button" data-filtro="todos">Todos</button>
       <button class="f" type="button" data-filtro="sin_leer">Sin leer</button>
@@ -395,7 +413,7 @@ ${bandaDemo}
 
   <div class="thread">
     <header id="thread-head" class="hidden">
-      <button class="icon" id="back" title="Volver">‹</button>
+      <button class="icon" id="back" title="Volver" aria-label="Volver a la lista">‹</button>
       <div class="avatar" id="t-avatar"></div>
       <div style="flex:1;min-width:0">
         <div class="name" id="t-name"></div>
@@ -403,7 +421,7 @@ ${bandaDemo}
       </div>
       <a class="link" id="t-panel" href="/panel#contactos">Ficha</a>
       <button class="icon etiqueta" id="pausar-bot" title="Callar las respuestas automáticas en este chat y atenderlo tú"></button>
-      <button class="icon etiqueta" id="cerrar-chat" title="Guarda todo el historial de este chat y lo deja vacío">🗄 Guardar chat</button>
+      <button class="icon etiqueta" id="cerrar-chat" title="Guarda todo el historial de este chat en Conversaciones guardadas y deja el hilo vacío">🗄 Guardar y vaciar</button>
     </header>
     <div class="empty" id="placeholder">
       <div>
@@ -426,11 +444,11 @@ ${bandaDemo}
     <div class="stickers-popup hidden" id="stickers-popup"></div>
     <div class="rapidas-barra hidden" id="rapidas-barra"></div>
     <div class="composer hidden" id="composer">
-      <button class="ghost" id="mas" title="Foto, archivo o ubicación">📎</button>
-      <button class="ghost" id="rapidas" title="Respuestas rápidas (escribe / en el mensaje)">⚡</button>
-      <button class="ghost" id="stickers-boton" title="Mandar un sticker">🙂</button>
+      <button class="ghost" id="mas" title="Foto, archivo o ubicación" aria-label="Foto, archivo o ubicación">📎</button>
+      <button class="ghost" id="rapidas" title="Respuestas rápidas (escribe / en el mensaje)" aria-label="Respuestas rápidas">⚡</button>
+      <button class="ghost" id="stickers-boton" title="Mandar un sticker" aria-label="Mandar un sticker">🙂</button>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje (/ para respuestas rápidas · Ctrl+V pega una foto)"></textarea>
-      <button id="send" title="Enviar">➤</button>
+      <button id="send" title="Enviar" aria-label="Enviar">➤</button>
     </div>
     <div class="confirmar hidden" id="confirmar-cierre"></div>
     <div class="lectura hidden" id="lectura"></div>
@@ -649,7 +667,7 @@ async function loadChats(keepScroll) {
     var html = visibles.map(function (c) {
       var last = c.lastMessage;
       var prefijo = last && last.direction === 'out' ? tick(last.status) + ' ' : '';
-      var texto = last ? (last.body || '') : 'Sin mensajes todavia';
+      var texto = last ? (last.body || '') : 'Sin mensajes todavía';
       var grupo = c.tipo === 'grupo';
       return '<div class="chat' + (current && current.id === c.contactId ? ' active' : '') + '" data-id="' + esc(c.contactId) + '">' +
         (grupo ? '<div class="avatar grupo" title="Grupo de WhatsApp">👥</div>'
@@ -717,7 +735,15 @@ async function openChat(contactId, silent) {
         (current.optOutAt ? '<span class="pill bad">dado de baja</span>'
           : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
           : '<span class="pill warn">fuera de las 24 h</span>') +
-        (data.reparto ? ' · <a class="link" href="/rutas" title="Ver en Ubicaciones para reparto">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '');
+        (data.reparto ? ' · <a class="link" href="/hoy" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
+        '<span id="t-anteriores"></span>';
+      /* Sus conversaciones anteriores, ya guardadas: se ven sin restaurar nada. */
+      var idAnteriores = current.id;
+      api('/admin/archives?contactId=' + encodeURIComponent(current.id) + '&limit=1').then(function (r) {
+        if (!current || current.id !== idAnteriores) return;
+        var el = document.getElementById('t-anteriores');
+        if (el && r.total) el.innerHTML = ' · <a class="link" href="/guardados?tel=' + encodeURIComponent(current.phone) + '" title="Las conversaciones guardadas de este cliente">' + r.total + ' conversaci' + (r.total === 1 ? 'ón' : 'ones') + ' anterior' + (r.total === 1 ? '' : 'es') + '</a>';
+      }).catch(function () {});
     }
     /* La ficha y el boton del bot son de un cliente; en un grupo no hay ni
        ficha ni bot que callar. */
@@ -776,7 +802,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       withLinks(cuerpoVisible(m)) +
       verUnaVezHtml(m) +
       (m.payload && m.payload.borradoPorRemitente ? '<span class="borrado" title="' + esc(hhmm(m.payload.borradoPorRemitente)) + '">🗑 Lo eliminó para todos · aquí se conserva</span>' : '') +
-      '<span class="meta">' + (m.direction === 'out' && m.payload && m.payload.origen === 'ia' ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
+      '<span class="meta">' + (m.direction === 'out' && current && current.tipo !== 'grupo' ? '<a class="que-paso" data-que-paso="' + i + '" tabindex="0" title="Qué pasó con este mensaje: si salió, si llegó, si lo leyó, o por qué no">¿qué pasó?</a>' : '') + (m.direction === 'out' && m.payload && m.payload.origen === 'ia' ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
       ensenarHtml(m, i, messages) +
       '</div>';
   });
@@ -1042,6 +1068,39 @@ document.addEventListener('click', function (event) {
   if (!pedir || !current) return;
   event.preventDefault();
   if (!enviando) enviar({ text: TEXTO_VER_UNA_VEZ });
+});
+/* "¿Qué pasó con este mensaje?": la traza de punta a punta, en palabras. */
+function fechaCorta(v) {
+  if (!v) return '';
+  var d = new Date(v);
+  return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+function mostrarTraza(t) {
+  var fondo = document.createElement('div');
+  fondo.className = 'dlg-fondo';
+  var pasos = t.pasos.map(function (p) { return '<li class="' + esc(p.tono) + '"><i></i><span>' + esc(p.que) + (p.cuando ? '<small>' + esc(fechaCorta(p.cuando)) + '</small>' : '') + '</span></li>'; }).join('');
+  var otros = t.otrosIntentos.length ? '<p class="traza-cab" style="margin-top:12px"><b>Cerca de esa hora tampoco salió:</b></p><ul class="traza">' + t.otrosIntentos.map(function (o) { return '<li class="bad"><i></i><span>' + esc(o.que) + ': ' + esc(o.motivo) + '<small>' + esc(fechaCorta(o.cuando)) + '</small></span></li>'; }).join('') + '</ul>' : '';
+  fondo.innerHTML = '<div class="dlg" role="dialog" aria-modal="true" style="width:min(520px,100%)"><h3>Qué pasó con este mensaje</h3>' +
+    '<p class="traza-cab">' + esc(t.quien) + ' ' + esc(t.como) + ' Estado: <b>' + esc(t.estado) + '</b>.</p>' +
+    '<ul class="traza">' + pasos + '</ul>' + otros +
+    '<div class="botones"><button type="button" id="dlg-si" class="principal">Cerrar</button></div></div>';
+  function cerrar() { document.removeEventListener('keydown', teclas); fondo.remove(); }
+  function teclas(ev) { if (ev.key === 'Escape' || ev.key === 'Enter') cerrar(); }
+  fondo.querySelector('#dlg-si').onclick = cerrar;
+  fondo.onclick = function (ev) { if (ev.target === fondo) cerrar(); };
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(fondo);
+}
+document.addEventListener('click', async function (event) {
+  var a = event.target.closest('[data-que-paso]');
+  if (!a || !current) return;
+  event.preventDefault();
+  var m = pintados[Number(a.getAttribute('data-que-paso'))];
+  if (!m) return;
+  try {
+    var t = await api('/admin/mensajes/' + m.id + '/traza?contacto=' + encodeURIComponent(current.id));
+    mostrarTraza(t);
+  } catch (error) { toast(error && error.message ? error.message : 'No se pudo leer la traza.'); }
 });
 /* Ensenarle al asistente desde el globo (ver ensenarHtml). */
 document.addEventListener('click', async function (event) {
@@ -1769,7 +1828,7 @@ function volverAChats() {
   ver('respaldos', false);
   ver('rb-resumen', false);
   document.getElementById('q').value = '';
-  document.getElementById('q').placeholder = 'Buscar por nombre o numero';
+  document.getElementById('q').placeholder = 'Buscar por nombre o número';
   loadChats();
 }
 

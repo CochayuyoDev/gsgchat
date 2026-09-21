@@ -218,7 +218,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * manda en nombre de su asesor). Va al hilo y al webhook (`autorNombre`).
    */
   const quien = (request: { usuario?: { nombre?: string | null; usuario?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string }) => ({
-    origen: body.autor,
+    // Sin decir nada, quien escribe desde el chat es una persona: que el
+    // hilo no lo apunte como 'sistema' solo porque la ventana de Meta obligue.
+    origen: body.autor ?? 'persona',
     autorNombre: body.autorNombre?.trim() || (request.usuario?.nombre || request.usuario?.usuario || '').split(' ')[0] || undefined,
   });
 
@@ -309,7 +311,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     if (body.voz) {
       if (!deps.voz) return reply.code(409).send({ error: 'La voz no está configurada: Mi asistente IA → Voz.' });
-      const r = await deps.voz.enviar({ phone, texto: body.text, origen: firma.origen ?? 'persona', autorNombre: firma.autorNombre, manual: aMano() });
+      const r = await deps.voz.enviar({ phone, texto: body.text, origen: firma.origen, autorNombre: firma.autorNombre, manual: aMano() });
       // Si salio por escrito, se dice: quien pulso "audio" tiene que saber que no fue audio.
       return { ...r.outcome, voz: { enviada: r.enviadoComo === 'audio', motivo: r.motivo } };
     }

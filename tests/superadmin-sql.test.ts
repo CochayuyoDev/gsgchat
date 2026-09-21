@@ -43,7 +43,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.exec('delete from codigos_conexion; delete from tiendas; delete from usuarios;');
+  await db.exec('delete from codigos_conexion; delete from tiendas_pagos; delete from tiendas_avisos; delete from tiendas_config; delete from tiendas; delete from usuarios;');
 });
 
 describe('la migracion', () => {
@@ -102,5 +102,52 @@ describe('tiendas', () => {
     expect(await repos.tiendas.borrar(b.id)).toBe(true);
     expect(await repos.tiendas.borrar(b.id)).toBe(false);
     expect(await repos.tiendas.listar()).toHaveLength(1);
+  });
+});
+
+describe('las tiendas del dueño (migracion 031)', () => {
+  const membresia = { plan: 'basico', nombre: 'Básico', limites: { iaTurnosMes: 2000, campanas: true, conectores: true, usuarios: 3 }, precioMes: 49, moneda: 'PEN', vencimiento: '2026-10-18T23:59:59.000Z', estado: 'activa' as const, contacto: null, aviso: null, pagos: [], actualizadoEn: '2026-09-18T12:00:00.000Z', actualizadoPor: 'ali' };
+
+  it('guarda el parte de salud de la tienda y lo devuelve como objeto', async () => {
+    const t = await repos.tiendas.crear({ slug: 'zapateria', nombre: 'Zapatería', membresia, tokenHash: 'h', tokenPrefijo: 'plt_abc' });
+    expect(t.estado).toBeNull();
+    const at = new Date('2026-09-18T12:05:00Z');
+    await repos.tiendas.anotarEstado(t.id, { whatsapp: 'caido', mensajesHoy: 40, fallosIA: 2, entregasHoy: 9, version: '1.2.3' }, at);
+    const leida = await repos.tiendas.porId(t.id);
+    expect(leida!.estado).toEqual({ whatsapp: 'caido', mensajesHoy: 40, fallosIA: 2, entregasHoy: 9, version: '1.2.3' });
+    expect(leida!.estadoAt?.toISOString()).toBe('2026-09-18T12:05:00.000Z');
+    expect((await repos.tiendas.listar())[0]!.estado?.whatsapp).toBe('caido');
+  });
+
+  it('apunta los avisos por tienda y los borra con ella; la config es una fila por clave', async () => {
+    const t = await repos.tiendas.crear({ slug: 'tienda-a', nombre: 'Tienda A', membresia, tokenHash: 'h', tokenPrefijo: 'plt_a' });
+    expect(await repos.tiendas.avisos(t.id)).toEqual([]);
+    await repos.tiendas.anotarAviso(t.id, 'vence7:2026-10-18', new Date('2026-10-11T13:00:00Z'));
+    await repos.tiendas.anotarAviso(t.id, 'vence1:2026-10-18', new Date('2026-10-17T13:00:00Z'));
+    const avisos = await repos.tiendas.avisos(t.id);
+    expect(avisos.map((a) => a.tipo)).toEqual(['vence1:2026-10-18', 'vence7:2026-10-18']);
+    expect(await repos.tiendas.config('cobro')).toBeNull();
+    await repos.tiendas.guardarConfig('cobro', { activo: true, numero: '987 111 222', texto: 'Yape', qr: '' });
+    await repos.tiendas.guardarConfig('cobro', { activo: true, numero: '987 111 333', texto: 'Yape', qr: '' });
+    expect(await repos.tiendas.config<{ numero: string }>('cobro')).toMatchObject({ numero: '987 111 333' });
+    await repos.tiendas.borrar(t.id);
+    const { rows } = await pool.query<{ n: number }>('select count(*)::int as n from tiendas_avisos');
+    expect(rows[0]!.n).toBe(0);
+  });
+
+  it('las capturas de pago: se crean pendientes, se listan sin la imagen, se leen con ella y se resuelven', async () => {
+    const t = await repos.tiendas.crear({ slug: 'tienda-b', nombre: 'Tienda B', membresia, tokenHash: 'h', tokenPrefijo: 'plt_b' });
+    const p = await repos.tiendas.crearPago({ tiendaId: t.id, meses: 2, monto: 98, moneda: 'PEN', nota: 'Op. 1', imagen: 'data:image/png;base64,AAAA' }, new Date('2026-09-18T12:00:00Z'));
+    expect(p).toMatchObject({ meses: 2, monto: 98, estado: 'pendiente', imagen: 'data:image/png;base64,AAAA' });
+    const lista = await repos.tiendas.pagos({ estado: 'pendiente' });
+    expect(lista).toHaveLength(1);
+    expect(lista[0]!.imagen).toBeNull();
+    expect(lista[0]!.monto).toBe(98);
+    expect((await repos.tiendas.pago(p.id))!.imagen).toBe('data:image/png;base64,AAAA');
+    const r = await repos.tiendas.resolverPago(p.id, { estado: 'rechazado', motivo: 'No se ve', por: 'ali', at: new Date('2026-09-18T13:00:00Z') });
+    expect(r).toMatchObject({ estado: 'rechazado', motivo: 'No se ve', resueltoPor: 'ali' });
+    expect(await repos.tiendas.pagos({ tiendaId: t.id, estado: 'pendiente' })).toEqual([]);
+    expect((await repos.tiendas.pagos({ tiendaId: t.id }))[0]!.estado).toBe('rechazado');
+    expect(await repos.tiendas.pago(999)).toBeNull();
   });
 });

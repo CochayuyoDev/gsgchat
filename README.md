@@ -1,4 +1,7 @@
-# wa-locator
+# GSGchat
+
+> Antes se llamaba *wa-locator*; ese nombre sigue solo en la ruta de los webhooks para Stoky (`/webhooks/wa-locator/`) y en la imagen Docker.
+
 
 Conecta tu cuenta de WhatsApp Business (API oficial de Meta), habla con tus
 clientes desde una pantalla igual que WhatsApp y automatiza el resto: respuestas
@@ -428,6 +431,274 @@ le manda nada.
 
 ---
 
+## GSGchat para GSG: lo justo, y la IA
+
+Por defecto el sistema arranca en modo **«Solo lo de GSG»**: un menú de ocho
+pantallas sin jerga —**Hoy** (la portada: los pedidos del día, quién necesita a
+alguien, los otros clientes a los que se les escribe solo, el simulador de GSG),
+**Chats**, **Conversaciones guardadas**, **Asistente IA** (en tres pasos: con qué
+IA, qué sabe, encendido), **Motorizados**, **Mapa del día**, **Equipo**,
+**Conexión** (WhatsApp y GSG en una sola pantalla), **Que todo funcione** y
+**Ajustes**—; el dueño del sistema (superadministrador) ve además Tiendas,
+Membresía, Pagar (solo si la instalación depende de un maestro: `/admin/yo`
+devuelve `conMaestro`) y Actividad. Todo lo demás
+(campañas, grupos, respuestas automáticas, plantillas, rastreo, riesgo y ritmo,
+Stoky, conectores, chat embebido, reparto por lotes y envío automático como
+pantallas aparte) sigue existiendo y trabajando por dentro, pero escondido; se
+enseña entero con **Ajustes → Qué se enseña → Todo el sistema** (ajuste
+`modo` de los ajustes generales; `/admin/yo` lo devuelve y el armazón pinta el
+menú que toca). El manual y la IA operadora siguen el mismo modo.
+
+Para que nadie tenga que explicarlo: en Inicio, con el modo GSG, **«Para
+empezar»** son tres pasos con su estado real y su botón (conectar el WhatsApp,
+dar de alta a los motorizados, traer los pedidos: GSG, simulador o lista pegada)
+que se pliegan a «Todo listo» cuando están hechos (`pintarPasosGsg` en
+`src/web/pages.ts`, datos en `/admin/resumen.primerosPasos`); arriba, en todas
+las pantallas, **Buscar… (Ctrl K)** encuentra pedidos de hoy, clientes,
+conversaciones guardadas y pantallas (`GET /admin/buscar?q=`,
+`src/admin/buscar-routes.ts`) y **«¿Qué hago si…?»** abre un panel con 6-8
+preguntas propias de esa pantalla, cada una con «Ir →» y «Preguntar esto a la
+IA» (`src/web/ayuda-pantallas.ts`). En Chats, cada mensaje saliente tiene
+**«¿qué pasó?»**: su línea de tiempo (cola, salida, entregado, leído, o «no
+salió» con el motivo en palabras, quién lo mandó, plantilla; `GET
+/admin/mensajes/:id/traza`). Ajustes trae el **resumen del día por WhatsApp**
+al supervisor (08:30 «cómo arranca», 18:30 «cómo cerró»; cifras del sistema, la
+IA solo redacta y se descarta si toca un número; `src/resumenes/`, rutas
+`/admin/resumenes*`), y Asistente IA la tarjeta **«Uso de la IA»** (respuestas,
+lecturas, órdenes, tokens, fallos, tope de la membresía; `src/ia/uso.ts`, `GET
+/admin/ia/uso`; campana a los 3 fallos seguidos).
+
+**Conversaciones guardadas** (`/guardados`) es ahora un módulo: buscar por
+nombre o número y **dentro de lo que se dijo**, filtros por etiqueta, motivo,
+pedido y fechas; lector con el **resumen y las etiquetas que pone la IA** al
+guardar (reglas si no hay IA); notas de quien atiende; ligada a su pedido de GSG;
+descargar como texto, imprimir o guardar en PDF, bajar todas a Excel; devolver al
+chat; papelera de 30 días; comprobación de que los ficheros siguen intactos;
+retención (días sin movimiento) desde la pantalla; «Guardar las de los pedidos
+terminados hoy» de golpe; y en cada chat, el enlace a sus conversaciones
+anteriores. Migración 026 (`texto_busqueda`, `resumen`, `etiquetas`, `pedido`,
+`notas`, `cerrado_por`, `deleted_at`).
+
+Y encima de eso (migración 028): los **adjuntos** (fotos, audios, documentos)
+se guardan junto a la conversación, en `<respaldo>-adjuntos/`, y se abren desde
+el lector (`GET /admin/archives/:id/adjunto/:mediaId`); el **enlace de
+evidencia** (`POST /admin/archives/:id/enlace`, se abre sin sesión en
+`GET /guardados/ver/:token`, con fecha de caducidad y se puede anular) para
+enseñarle una conversación a alguien de fuera —a GSG ante un reclamo—;
+**estadísticas** (por semana, tiempo medio hasta la primera respuesta,
+porcentaje de reclamos); **«Enseñar a la IA con esta conversación»**
+(`POST /admin/archives/:id/aprender` o `/admin/archives/aprender` con varias):
+saca las preguntas y respuestas buenas y las deja como lecciones en Entrenar a
+la IA; **exportar sin datos personales** (`?anonimo=si`: nombres y teléfonos
+tapados); **borrar todo lo de un cliente** (`POST /admin/archives/borrar-cliente`
+con `confirmar: "BORRAR"`: lo guardado, sus adjuntos y su chat, para cuando un
+cliente pide que se borren sus datos); e **importar el `.txt` que exporta
+WhatsApp** desde el teléfono (`POST /admin/archives/importar`,
+`src/archive/importar-whatsapp.ts`) para tener aquí lo de antes del sistema.
+La IA operadora las consulta con palabras («¿quién se quejó de la demora la
+semana pasada?», «¿qué pasó en la última conversación de Ana?»):
+`guardados.buscar` y `guardados.resumen`. Pruebas en `tests/guardados.test.ts`.
+
+---
+
+## Entregas del día: ubicación, confirmación, motorizado y hora de llegada
+
+La pantalla **Entregas del día** (`/entregas`, menú Reparto) lleva cada pedido de
+hoy de principio a fin. Son tres cosas distintas, cada una por separado:
+
+1. **Ubicación.** GSG dice a quién falta pedírsela; esos clientes entran en un
+   lote del reparto (`Ubicaciones para reparto`), que la pide con su ritmo, sus
+   insistencias y sus incidencias, y se la reporta a GSG (`POST /ubicaciones`).
+2. **Confirmación.** GSG dice a quién falta que confirme. Si el cliente acaba de
+   mandar el pin, la pregunta va pegada al gracias (un solo mensaje); si GSG ya
+   tenía su ubicación, se le pregunta directamente. Se lee lo que contesta con
+   reglas (`sí`, `ok dale`, `ya no lo quiero`, `mañana mejor`, `👍`…) y, si no
+   está claro, con la IA; lo que sigue sin estar claro se vuelve a preguntar
+   con las opciones y a la tercera pasa a una persona. Un "no" cancela; "otro
+   día / otra dirección" pasa a una persona y avisa al supervisor. Todo se le
+   cuenta a GSG (`POST /confirmaciones`).
+3. **Motorizado.** Con ubicación y confirmación, el pin va al motorizado que
+   toca: primero el que está a **menos de 6 km** según su última posición de
+   hoy (`src/entregas/geo.ts`, haversine) y no tiene otro pin sin contestar;
+   si nadie está cerca, el de la zona del distrito; si no, el activo menos
+   cargado. Le llegan el enlace de Google Maps,
+   el pin nativo y "¿en cuántos minutos lo entregas?". Contesta `40`, `media
+   hora`, `1h15`, `a las 4:30`… (reglas, y la IA si hace falta); a esos minutos
+   se les suma el **margen (60 min, ajustable)** y al cliente se le avisa la hora
+   aproximada de llegada. GSG recibe la entrega (`POST /entregas`) y, como ya
+   tiene las dos cosas, pasa al cliente a **terminados**. Si el motorizado no
+   contesta, a los 10 min se le insiste y a la segunda el pedido pasa a otro;
+   "no puedo" también lo pasa a otro.
+4. **Entregado.** Cuando el motorizado escribe `entregado`, `listo`, `ya`, `ok`
+   (o manda la foto o el video del paquete) el pedido pasa a **entregada** con
+   su hora y cómo se supo (`entregada_at`, `entregada_como`, migración 027),
+   GSG lo recibe en `POST /entregas` con `entregadoEn`, al cliente se le da las
+   gracias (ajuste `avisarEntregado`) y la última posición del motorizado pasa
+   a ser ese pin. Si lleva varios pedidos avisados y no nombra ninguno, se toma
+   el último y se le pregunta «si era otro, dime cuál»; un `listo` con otro pin
+   sin contestar no cuenta como entregado. «No estaba nadie / no me abren» abre
+   la incidencia `no_entregado` (supervisor y GSG); «no contesta» no la abre,
+   porque puede seguir en la puerta. Desde Hoy también se marca a mano
+   (`POST /admin/entregas/:id/entregada`).
+5. **Cierre del día.** A la hora del ajuste `cierreDelDia` (el motor lo mira en
+   cada vuelta y lo hace una sola vez por día) o con el botón de Hoy
+   (`POST /admin/entregas/cerrar-dia`, `{ forzar }`): lo que quedó vivo de ayer
+   pasa a incidencia `dia_cerrado` (GSG recibe la confirmación con ese motivo y
+   al motorizado con un pin sin contestar se le avisa), lo avisado se cierra
+   como entregado «por cierre» (`entregadaComo: 'cierre'`, `entregadoEn: null`)
+   y el supervisor recibe un solo mensaje con el resumen.
+6. **«¿Dónde está mi pedido?»** Si el cliente lo pregunta, el sistema contesta
+   **sin IA** con uno de seis textos editables según por dónde va el pedido
+   (falta su ubicación, falta que confirme, ya lo tiene un motorizado, ya tiene
+   hora, ya figura entregado, no llegó); si dice que no le llegó pasados 30
+   minutos de la hora (o cuando ya figura entregado) se abre la incidencia
+   `no_llego` y se avisa al supervisor. Un «hola» sigue yendo al asistente.
+   Ajuste `responderDondeEsta`.
+7. **Segunda visita** (migración 029). «No estaba nadie / no abren» ya no pasa a
+   persona de entrada: al cliente se le pregunta con botones «¿te lo llevamos
+   de nuevo hoy?» (`preguntarSegundaVisita`, texto `segundaVisitaPreguntar`);
+   sí → `arrancarSegundaVisita` (vuelve a `lista` con `segundaVisita: true`,
+   mismo motorizado si sigue activo, texto `motorizadoSegundaVisita`); no /
+   «otro día» → incidencia `reprogramar` + supervisor + GSG (`motivo:
+   'reprogramar'`); «ya no lo quiero» cancela; sin respuesta en
+   `segundaVisita.esperaMin` (30) → persona (`revisarSegundasVisitas` en el
+   motor). Una sola por pedido; `POST /admin/entregas/:id/segunda-visita` y
+   botón en Hoy. GSG recibe `visitas`, `segundaVisita` y `prioridad` en la
+   entrega.
+8. **Ruta, «cerca», «sin moto», urgentes y botones.** `rutaDeMotorizado` (urgentes
+   primero, vecino más próximo desde su última posición; `GET
+   /admin/motorizados/:id/ruta`, `POST …/ruta/mandar`, o el motorizado escribe
+   «ruta»); «cerca / llegando» → `avisarCerca` al cliente una vez por pedido
+   (`clienteCerca`, ajuste `avisarCerca`); «se me malogró la moto / accidente /
+   no puedo seguir» → descanso y `traspasarPedidos` de todo lo suyo (`POST
+   /admin/motorizados/:id/traspasar`, botón «Traspasar sus pedidos»; el cliente
+   con hora recibe `clienteCambioMotorizado`); `prioridad` `urgente` (GSG lo
+   manda, `POST /admin/entregas/:id/prioridad`, chip y barra roja en Hoy,
+   `tocaMotorizado` los pone primero, «🔴 URGENTE» al motorizado); y la
+   pregunta de confirmar (y la de segunda visita) sale con **botones**
+   (`usarBotones`, `kind: 'interactive'`, cae a texto si el proveedor falla; la
+   respuesta `button_reply` con id `entrega:*` entra por `inbound.ts` y queda
+   `confirmacionComo: 'boton'`). En modo «Solo lo de GSG» la preventa del
+   courier está apagada (`preventaActiva()` en `inbound.ts`). Un aviso de
+   llegada frenado por el ritmo se reintenta (`reintentarAviso`); un motorizado
+   forzado con el envío frenado deja el pedido **reservado** para él. La
+   pregunta de segunda visita frenada por el ritmo se reintenta hasta vencer
+   el plazo (`reintentarPreguntaSegundaVisita`); los botones solo caen a texto
+   ante un rechazo definitivo (no ante un 429). `reasignar` valida que el
+   motorizado exista y esté activo; `crearAMano` genera la referencia
+   `M-HHMM-N` si no viene; `POST /admin/motorizados/lote` da de alta varios
+   motorizados desde texto pegado (`src/entregas/lote-motorizados.ts`). Los
+   errores de validación nombran los campos en palabras
+   (`NOMBRES_DE_CAMPO`/`explicarErrorZod` en `src/util/mensajes-zod.ts`).
+
+**GSG** se conecta desde la misma pantalla: la API real (dirección + token,
+cifrado) o el **simulador** que trae este servidor (`/simulador/gsg`), una
+copia de mentira del sistema de GSG con sus tres listas (falta ubicación,
+falta confirmar, terminados). Con "Cargar 10 clientes de prueba" y "Cargar 10
+motorizados de prueba" se recorre el flujo entero con números ficticios
+(987 000 001-010 y 999 000 001-010). Contrato: `GET /reparto/pendientes`
+devuelve `{ dia, faltaUbicacion: [{referencia, telefono, nombre, direccion,
+distrito, notas, lat?, lng?}], faltaConfirmacion: [...], terminados: [...] }`;
+los reportes van a `/ubicaciones`, `/confirmaciones`, `/entregas`,
+`/incidencias` y `/resumenes` (ver `src/rutas/gsg.ts`, `PAYLOADS`).
+
+Con la **API de Meta**, fuera de la ventana de 24 h hace falta una plantilla
+aprobada para cada caso (Ajustes → Plantillas); sin ella la entrega se aparta
+con una incidencia clara en vez de reintentar a ciegas. Con el cliente local
+(QR) no existe esa regla.
+
+Sin GSG, la lista del día se **pega en Hoy** («Pegar la lista del día»: una
+línea por cliente con teléfono, nombre, pedido, dirección y las columnas
+`ubicacion` / `confirmar` sí/no; `POST /admin/entregas/cargar-lista`, un solo
+lote del reparto para las que piden ubicación, y se puede mandar al simulador
+en vez de al sistema). En Hoy también: «Modo prueba con mi número» (un clic
+deja el sistema escribiéndole solo a ese número, con un cartel arriba y
+«Salir del modo prueba»), «Ver cómo queda» bajo cada texto
+(`POST /admin/entregas/previsualizar`), la línea «N reportes que GSG no
+aceptó» con Reintentar y Descargar (`/admin/rutas/cola.ndjson`), y
+`/hoy?filtro=incidencia` abre la tarjeta de lo que necesita a alguien. Cada
+cambio de estado sale por el bus (`entrega.confirmada`, `entrega.avisada`,
+`entrega.entregada`, `entrega.incidencia`), la campana (`/admin/avisos`) avisa
+de incidencias, cierre pendiente, GSG sin conectar, ningún motorizado activo y
+reportes fallidos, y en Inicio el primer bloque del modo GSG es «Entregas de
+hoy» (`/admin/resumen`). Motorizados enseña la última posición conocida de
+cada uno («hace N min, distrito») y cuántos entregó hoy.
+
+Desde la pantalla: confirmar a mano, poner un pin, pasar a otro motorizado,
+reintentar, cancelar, marcar entregada, cerrar el día, pedido a mano;
+motorizados (alta, zona, placa, descanso, baja); ajustes (margen, esperas,
+intentos, IA, avisar al entregar, responder «dónde está», hora del cierre,
+textos con variables). API
+pública: `GET /api/v1/entregas`, `GET /api/v1/motorizados` (`entregas:leer`),
+`POST /api/v1/entregas/sincronizar`, `POST /api/v1/motorizados`
+(`entregas:gestionar`). La IA operadora entiende `entregas.ver`,
+`entregas.sincronizar`, `entregas.confirmar`, `entregas.reasignar`,
+`entregas.reintentar`, `motorizados.ver`, `motorizados.alta`,
+`motorizados.estado`; y el asistente de WhatsApp sabe qué pedido tiene hoy
+el cliente que le escribe y a qué hora le llega.
+
+**Mapa del día** (`/mapa`, `src/web/mapa-page.ts`): Leaflet + OpenStreetMap sin
+clave; pines por estado (azul con ubicación, naranja en camino, verde
+entregada, rojo incidencia, aro rojo si es urgente), los motorizados en su
+última posición, filtros por estado y motorizado, tarjeta con «Abrir en Hoy»,
+refresco cada 30 s.
+
+**GSG por la API** (para sus programadores: `docs/CONTRATO-GSG.md`, con el JSON
+real de cada llamada y cómo probar desde fuera contra el simulador). Dos
+caminos que se combinan: (A) GSGchat pregunta `GET /reparto/pendientes` cada 5
+minutos y reporta con los cinco `POST`; (B) GSG **empuja** con `POST
+/api/v1/entregas` (uno, lista o `{pedidos}`, hasta 500, banderas
+`faltaUbicacion`/`faltaConfirmar`/`urgente`; responde `{creadas, repetidas,
+descartadas[{referencia, motivo}]}`), consulta `GET /api/v1/entregas/:referencia`,
+cancela `DELETE /api/v1/entregas/:referencia?motivo=` (409 si ya terminó) y
+recibe los webhooks `entrega.confirmada|avisada|entregada|incidencia` firmados
+(`src/api/v1/entregas-gsg.ts`, OpenAPI incluido). La clave sale de Conexión →
+GSG → «Crear la clave para GSG» (`entregas:gestionar`, `entregas:leer`,
+`webhooks:gestionar`). Un pedido que desaparece de las listas de GSG no se
+cancela solo.
+
+Pruebas: `tests/entregas.test.ts` (el día entero con el servidor real, WhatsApp
+falso, GSG simulado y reloj propio), `tests/entregas-interpretar.test.ts`
+(el banco de frases: confirmación, tiempos, entregado, «dónde está», «cerca»,
+«sin moto», «ruta»), `tests/entregas-ronda2.test.ts`, `tests/entregas-modo-gsg.test.ts`,
+`tests/entregas-entregado.test.ts`, `tests/entregas-cierre.test.ts` (reloj
+arrancando ayer), `tests/gsg-simulado.test.ts`, `tests/entregas-sql.test.ts`.
+
+---
+
+## Que todo funcione (`/fiabilidad`)
+
+Cuatro cajas con semáforo, cada una con sus ajustes dentro (clave de settings
+`fiabilidad.ajustes`, `src/salud/fiabilidad.ts`; rutas `/admin/fiabilidad/*` en
+`src/salud/routes-fiabilidad.ts`):
+
+1. **Vigilante del WhatsApp** (`src/salud/vigilante.ts`): mira `wa.conectado()`
+   y la sesión local cada 30 s; en `FAILED` pide la reconexión sola (hasta 5 por
+   hora); a los N minutos caído (3) manda **un** correo por Brevo
+   (`src/salud/correo.ts`, clave pegada en pantalla y cifrada) y al volver avisa
+   por WhatsApp al supervisor y por correo con cuánto estuvo caído; con 401
+   dice «hay que escanear el QR otra vez», con 403 «WhatsApp no quiere este
+   número»; con la API de Meta no hay sesión que vigilar.
+2. **Prueba de cada mañana** (`src/salud/humo.ts`, 07:00, solo dentro de las 3 h
+   siguientes): mensaje al supervisor y espera del `delivered`, GSG, IA,
+   entregas y disco; historial de 14; avisa una vez si algo falla («Probar
+   ahora» no avisa).
+3. **Cupo de hoy** (`src/salud/cupo-previsto.ts`, `GET /admin/fiabilidad/cupo`):
+   lo que necesitan los pedidos vivos (ubicación e insistencias, confirmación y
+   repreguntas, pin y pregunta al motorizado, aviso, gracias) más el envío
+   automático, frente a `salud.snapshot().ritmo.cupoHoy`; dice qué recortar.
+4. **Copia diaria** (`src/respaldo/`, 03:00): PGlite → `dumpDataDir` o Postgres →
+   `pg_dump -Fc`, más `ARCHIVE_DIR` en un tar propio (`src/respaldo/tar.ts`), a
+   la carpeta elegida (por defecto `OneDrive\GSGchat-copias` o
+   `Documentos\GSGchat-copias`), conserva 14, descarga y «Cómo restaurar»;
+   `.wa-auth` no se copia a propósito. En Docker, montar como volúmenes
+   `.wa-data`, `respaldos` y la carpeta de copias.
+
+Pruebas: `tests/fiabilidad-vigilante.test.ts`, `tests/fiabilidad-humo.test.ts`,
+`tests/respaldo.test.ts`, `tests/fiabilidad-rutas.test.ts`.
+
+---
+
 ## Respaldo de conversaciones
 
 El historial de WhatsApp vive en el telefono, y el telefono se pierde: si Meta
@@ -444,9 +715,10 @@ es un respaldo de mas, nunca un hilo borrado sin copia.
   de preventa siguen donde estaban.
 - Los respaldos se leen, se descargan y se devuelven al chat desde el mismo
   boton 🗄 de la barra lateral.
-- Se cierran solos los chats sin movimiento (`ARCHIVE_INACTIVE_DAYS`, 60 dias
-  por defecto; 0 lo desactiva) y al cerrar la ficha de preventa como enviada o
-  descartada (`ARCHIVE_ON_LEAD_CLOSE`).
+- Se cierran solos los chats sin movimiento (los dias se cambian desde
+  Conversaciones guardadas; `ARCHIVE_INACTIVE_DAYS` es solo el valor de
+  arranque, 60 dias; 0 lo desactiva) y al cerrar la ficha de preventa como
+  enviada o descartada (`ARCHIVE_ON_LEAD_CLOSE`).
 - `GET /admin/archives-revision` comprueba que los ficheros siguen en disco y
   con el mismo sha256.
 
@@ -455,6 +727,28 @@ ARCHIVE_DIR=respaldos      # donde van los ficheros
 ARCHIVE_INACTIVE_DAYS=60   # 0 = no cerrar nada solo
 ARCHIVE_ON_LEAD_CLOSE=true
 ```
+
+---
+
+## Tiendas (el dueño del sistema): salud, avisos y cobro
+
+La pantalla **Tiendas** (`/tiendas`, `src/web/tiendas-page.ts`, migración 031)
+sustituye a la sección vieja del panel. Cada instalación manda su **parte de
+salud** en cada consulta del plan (cabecera `x-gsgchat-estado`: WhatsApp
+conectado/caído, mensajes de hoy, fallos de IA, entregas de hoy, versión;
+`DepsPlan.estado` en `src/plan/servicio.ts`, cableado en `scripts/quick.ts` y
+`src/main.ts`), y la lista lo dice en palabras («WhatsApp caído (parte de hace
+12 min)», «sin noticias desde entonces» pasados 40 min). Historial por tienda
+(`GET /admin/tiendas/:id/historial`, de la bitácora), «Avisar por WhatsApp»
+(`POST /admin/tiendas/:id/avisar`), **avisos de vencimiento** solos a 7 días, 1
+día y el día que vence, a la tienda y al dueño, una vez por vencimiento
+(`src/tiendas/avisos.ts`, textos editables, «Revisar ahora»), y **«Cómo me
+pagan»** (Yape/Plin, instrucciones, QR; `tiendas_config`): la tienda ve en
+**`/pagar`** (`src/web/pagar-page.ts`) su plan y «Ya pagué: mandar mi captura»
+(`POST /admin/membresia/pago-captura` → `POST <maestro>/api/plan/:slug/pago`), el
+dueño la revisa en «Pagos por revisar» y con un clic «Apuntar el pago» (corre
+el vencimiento) o «Rechazar» con motivo que la tienda lee en `/pagar`. Pruebas
+en `tests/tiendas.test.ts`, `tests/plan.test.ts`, `tests/superadmin-sql.test.ts`.
 
 ---
 

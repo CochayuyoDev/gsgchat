@@ -32,6 +32,29 @@ const enteroONada = (max: number) => z.coerce.number().int().min(0).max(max).nul
 export const ajustesGeneralesSchema = z.object({
   /** Como se presenta el negocio en los mensajes y en las pantallas. */
   nombreNegocio: z.string().trim().min(1).max(80).nullable(),
+  /**
+   * Que enseña el sistema. `gsg` (lo de siempre): solo lo que GSG usa cada
+   * dia -Hoy, Chats, Conversaciones guardadas, Asistente IA, Motorizados,
+   * Equipo, Conexion, Ajustes-, con el resto escondido. `completo`: todos
+   * los modulos (campañas, grupos, rastreo, tiendas, integraciones...). El
+   * codigo de lo escondido sigue ahi y trabajando; solo cambia lo que se ve.
+   * null = gsg.
+   */
+  modo: z.enum(['gsg', 'completo']).nullable(),
+  /** Conversaciones guardadas: a cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). null = lo del servidor. */
+  guardados: z.object({ inactividadDias: z.coerce.number().int().min(0).max(3650).nullable() }).nullable(),
+  /**
+   * El resumen del dia por WhatsApp al supervisor: uno por la mañana (como
+   * arranca el dia) y otro por la tarde (como cerro). Ver src/resumenes.
+   * null = encendido, a las 08:30 y a las 18:30.
+   */
+  resumenes: z
+    .object({
+      activo: z.boolean().default(true),
+      horaManana: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'la hora va como HH:MM').default('08:30'),
+      horaTarde: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'la hora va como HH:MM').default('18:30'),
+    })
+    .nullable(),
   modoPrueba: z.object({
     activo: z.boolean(),
     numeros: z.array(telefono).max(50),
@@ -121,8 +144,14 @@ export const ATAJOS_POR_DEFECTO: Array<{ atajo: string; texto: string; sticker?:
 
 export type AjustesGenerales = z.infer<typeof ajustesGeneralesSchema>;
 
+/** El resumen del dia al supervisor, si nadie lo cambio: encendido, mañana y tarde. */
+export const RESUMENES_POR_DEFECTO: { activo: boolean; horaManana: string; horaTarde: string } = { activo: true, horaManana: '08:30', horaTarde: '18:30' };
+
 export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   nombreNegocio: null,
+  modo: null,
+  guardados: null,
+  resumenes: null,
   modoPrueba: { activo: false, numeros: [] },
   horario: { inicio: null, fin: null, dias: null },
   ritmo: {
@@ -147,6 +176,9 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
 /** Un parche: cualquier rama, y dentro de cada rama cualquier campo. */
 export const ajustesGeneralesPatchSchema = z.object({
   nombreNegocio: ajustesGeneralesSchema.shape.nombreNegocio.optional(),
+  modo: ajustesGeneralesSchema.shape.modo.optional(),
+  guardados: ajustesGeneralesSchema.shape.guardados.optional(),
+  resumenes: ajustesGeneralesSchema.shape.resumenes.optional(),
   modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().optional(),
   horario: ajustesGeneralesSchema.shape.horario.partial().optional(),
   ritmo: ajustesGeneralesSchema.shape.ritmo.partial().optional(),
@@ -165,6 +197,9 @@ export type AjustesGeneralesPatch = z.infer<typeof ajustesGeneralesPatchSchema>;
 export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGenerales> | AjustesGeneralesPatch): AjustesGenerales {
   return {
     nombreNegocio: patch.nombreNegocio !== undefined ? patch.nombreNegocio : base.nombreNegocio,
+    modo: patch.modo !== undefined ? patch.modo : base.modo,
+    guardados: patch.guardados !== undefined ? patch.guardados : base.guardados,
+    resumenes: patch.resumenes !== undefined ? patch.resumenes : base.resumenes,
     modoPrueba: { ...base.modoPrueba, ...(patch.modoPrueba ?? {}) },
     horario: { ...base.horario, ...(patch.horario ?? {}) },
     ritmo: { ...base.ritmo, ...(patch.ritmo ?? {}) },
@@ -235,6 +270,12 @@ export interface ServicioAjustes {
   /** Modo prueba efectivo: vacio = a todos. */
   soloNumeros(): string[];
   nombreNegocio(): string;
+  /** Que se enseña: solo lo de GSG o todos los modulos. */
+  modo(): 'gsg' | 'completo';
+  /** A cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). */
+  guardadosDias(): number;
+  /** El resumen del dia por WhatsApp: si esta encendido y a que horas (HH:MM). */
+  resumenes(): { activo: boolean; horaManana: string; horaTarde: string };
   supervisor(): string;
   /** Lo del servidor, para que la pantalla diga que hay debajo de cada null. */
   servidor(): AjustesDelServidor;
@@ -335,6 +376,15 @@ export async function crearServicioAjustes(deps: {
     },
     nombreNegocio() {
       return fresco().nombreNegocio ?? config.businessName;
+    },
+    modo() {
+      return fresco().modo ?? 'gsg';
+    },
+    guardadosDias() {
+      return fresco().guardados?.inactividadDias ?? config.ARCHIVE_INACTIVE_DAYS;
+    },
+    resumenes() {
+      return fresco().resumenes ?? RESUMENES_POR_DEFECTO;
     },
     supervisor() {
       const a = fresco();

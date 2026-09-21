@@ -233,6 +233,8 @@ function confirmarDialogo(opciones) {
       '</div>';
     fondo.querySelector('h3').textContent = opciones.titulo || 'Confirmar';
     fondo.querySelector('p').textContent = opciones.texto || '';
+    /* el "no" puede tener nombre propio ("Sigue activo") cuando no es cancelar */
+    if (opciones.cancelar) fondo.querySelector('#dlg-no').textContent = opciones.cancelar;
 
     var si = fondo.querySelector('#dlg-si');
     si.textContent = opciones.boton || 'Continuar';

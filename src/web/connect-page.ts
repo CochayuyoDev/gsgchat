@@ -24,90 +24,85 @@
  */
 
 const CSS = `
-  :root {
-    color-scheme: light dark;
-    --bg: #f5f6f8; --card: #fff; --line: #e3e5e9; --text: #16181d;
-    --muted: #6b7280; --accent: #128c7e; --fb: #1877f2;
-    --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #16181d; --card: #1f2229; --line: #2f333c; --text: #f2f3f5; --muted: #9aa0aa; }
-  }
+  /* Conexion usa la paleta y la escala del armazon: aqui solo lo propio de la pantalla. */
   * { box-sizing: border-box; }
-  .wrap { color: var(--text); font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 700px; }
-  .wrap h2 { font-size: 17px; margin: 0; display: flex; align-items: center; gap: 10px; }
-  .lead { color: var(--muted); font-size: 14.5px; margin: 0 0 4px; }
-  .muted { color: var(--muted); font-size: 13.5px; margin: 0; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-    padding: 20px 22px; margin-top: 14px; }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.55 var(--fuente); max-width: 760px; }
+  .wrap h2 { font-size: var(--fs-h2); margin: 0; display: flex; align-items: center; gap: 10px; letter-spacing: -.01em; }
+  .lead { color: var(--texto-suave); font-size: var(--fs-cuerpo); margin: 0 0 4px; }
+  .muted { color: var(--texto-suave); font-size: 13.5px; margin: 0; }
+  .card { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 20px 22px; margin-top: var(--esp-3); box-shadow: var(--sombra); }
+  @media (max-width: 640px) { .card { padding: 16px 14px; } }
 
   /* Numero del paso: hace de indice sin necesidad de una barra de progreso. */
-  .num { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
-    color: #fff; font-size: 14px; display: grid; place-items: center; font-weight: 700; }
-  .done .num { background: var(--ok); }
-  .card.locked { opacity: .45; pointer-events: none; }
-  .card.locked .num { background: var(--muted); }
+  .num { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--primario); color: var(--primario-texto); font-size: 14px; display: grid; place-items: center; font-weight: 700; }
+  .done .num { background: var(--verde); color: #fff; }
+  .card.locked { opacity: .5; pointer-events: none; }
+  .card.locked .num { background: var(--gris); }
   .card > .muted:first-of-type { margin-top: 8px; }
 
   label { display: block; font-size: 13px; font-weight: 600; margin: 16px 0 5px; }
-  label .hint { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
-  input, select { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: var(--text);
-    background: var(--bg); border: 1px solid var(--line); border-radius: 9px; }
-  button { padding: 12px 22px; font: inherit; font-weight: 600; border: 0; border-radius: 9px;
-    background: var(--accent); color: #fff; cursor: pointer; font-size: 15px; }
-  button.facebook { background: var(--fb); display: inline-flex; align-items: center; gap: 10px;
-    font-size: 15.5px; padding: 14px 26px; }
-  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line);
-    font-size: 14px; padding: 9px 16px; }
+  label .hint { display: block; font-weight: 400; color: var(--texto-suave); font-size: var(--fs-small); margin-top: 2px; }
+  input, select { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); min-height: 42px; }
+  input:focus-visible, select:focus-visible { border-color: var(--primario); outline: 2px solid var(--primario-suave); outline-offset: 0; }
+  button { padding: 10px 20px; font: inherit; font-weight: 600; border: 1px solid var(--primario); border-radius: var(--radio-sm); background: var(--primario); color: var(--primario-texto); cursor: pointer; font-size: 14.5px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; line-height: 1.2; }
+  button:hover { filter: brightness(1.06); }
+  button.facebook { background: #1877f2; border-color: #1877f2; color: #fff; font-size: 15px; padding: 12px 24px; }
+  button.ghost { background: var(--superficie); color: var(--texto); border: 1px solid var(--borde); font-size: 14px; padding: 8px 14px; min-height: 36px; }
+  button.ghost:hover { border-color: var(--primario); color: var(--primario); filter: none; }
   button:disabled { opacity: .5; cursor: default; }
-  .actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
   ol, ul { padding-left: 20px; margin: 10px 0 0; }
   li { margin-bottom: 9px; }
-  a { color: var(--accent); }
-  code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--bg);
-    padding: 1px 6px; border-radius: 5px; }
+  a { color: var(--primario); }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--superficie-2); padding: 1px 6px; border-radius: 5px; word-break: break-all; }
 
-  .step { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .step { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--borde); }
   .step:last-child { border-bottom: 0; }
   .step .mark { font-size: 15px; line-height: 1.4; }
-  .step .mark.ok { color: var(--ok); } .step .mark.bad { color: var(--bad); }
+  .step .mark.ok { color: var(--verde); } .step .mark.bad { color: var(--rojo); }
   .step b { display: block; font-size: 14px; }
-  .step span { font-size: 13px; color: var(--muted); }
-  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
-  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
-  .pill.warn { background: rgba(217,119,6,.14); color: var(--warn); }
-  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
+  .step span { font-size: 13px; color: var(--texto-suave); }
+  .pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+  .pill.ok { background: var(--verde-suave); color: var(--verde); }
+  .pill.warn { background: var(--ambar-suave); color: var(--ambar); }
+  .pill.bad { background: var(--rojo-suave); color: var(--rojo); }
   .hidden { display: none !important; }
   details { margin-top: 14px; }
-  details summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 6px 0; color: var(--muted); }
+  details summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 6px 0; color: var(--texto-suave); }
 
-  /* Las tres opciones del paso 1. */
-  .choice { display: block; border: 1.5px solid var(--line); border-radius: 11px; padding: 14px 16px;
-    margin-top: 10px; cursor: pointer; }
-  .choice:hover { border-color: var(--accent); }
-  .choice.sel { border-color: var(--accent); background: rgba(18,140,126,.06); }
-  .choice b { font-size: 14.5px; display: block; }
-  .choice span { font-size: 13px; color: var(--muted); display: block; margin-top: 3px; }
-  .choice .tag { display: inline-block; margin-left: 8px; font-size: 11.5px; font-weight: 700;
-    color: var(--accent); background: rgba(18,140,126,.14); padding: 2px 8px; border-radius: 999px; }
-  .choice .tag.riesgo { color: var(--warn); background: rgba(217,119,6,.16); }
+  /* Las opciones del paso 1. */
+  .choice { display: block; border: 1.5px solid var(--borde); border-radius: var(--radio); padding: 14px 16px; margin-top: 10px; cursor: pointer; background: var(--superficie); transition: border-color .12s, background .12s; }
+  .choice:hover { border-color: var(--primario); }
+  .choice.sel { border-color: var(--primario); background: var(--primario-suave); }
+  .choice > b { font-size: 14.5px; display: block; }
+  .choice span b { display: inline; }
+  .choice span { font-size: 13px; color: var(--texto-suave); display: block; margin-top: 3px; }
+  .choice .tag { display: inline-block; margin-left: 8px; font-size: 11.5px; font-weight: 700; color: var(--primario); background: var(--primario-suave); padding: 2px 8px; border-radius: 999px; vertical-align: middle; }
+  .choice.sel .tag { background: var(--superficie); }
+  .choice .tag.riesgo { color: var(--ambar); background: var(--ambar-suave); }
 
   /* El QR va sobre blanco siempre: en oscuro, un QR invertido no se escanea. */
-  .qr-marco { display: inline-block; background: #fff; padding: 14px; border-radius: 12px;
-    margin-top: 16px; border: 1px solid var(--line); }
-  .qr-marco img { display: block; width: 256px; height: 256px; image-rendering: pixelated; }
+  .qr-marco { display: inline-block; background: #fff; padding: 14px; border-radius: var(--radio); margin-top: 16px; border: 1px solid var(--borde); }
+  .qr-marco img { display: block; width: 256px; height: 256px; image-rendering: pixelated; max-width: 100%; }
   /* El codigo de vinculacion se teclea mirando la pantalla: grande y separado
      en dos mitades, que es como lo pide la app del telefono. */
-  .codigo { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 30px;
-            letter-spacing: 6px; font-weight: 700; margin: 12px 0 4px; }
-  .pair { margin-top: 18px; border-top: 1px solid var(--linea); padding-top: 14px; }
+  .codigo { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 30px; letter-spacing: 6px; font-weight: 700; margin: 12px 0 4px; }
+  .pair { margin-top: 18px; border-top: 1px solid var(--borde); padding-top: 14px; }
   .copy { display: flex; gap: 8px; margin-top: 6px; }
   .copy input { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
-  .nota { background: var(--bg); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0;
-    padding: 12px 14px; margin-top: 14px; font-size: 13.5px; color: var(--muted); }
-  .nota b { color: var(--text); }
+  .nota { background: var(--superficie-2); border-left: 3px solid var(--primario); border-radius: 0 var(--radio-sm) var(--radio-sm) 0; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; color: var(--texto-suave); }
+  .nota b { color: var(--texto); }
   .resumen { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13.5px; }
   .resumen .pill { flex: none; }
+  .tel { display: flex; align-items: stretch; }
+  .tel .prefijo { display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid var(--borde); border-right: 0; border-radius: var(--radio-sm) 0 0 var(--radio-sm); background: var(--superficie-2); color: var(--texto-suave); font-size: 14px; }
+  .tel input { border-radius: 0 var(--radio-sm) var(--radio-sm) 0; }
+  .dev, .mas-formas { margin-top: 12px; }
+  .dev .copy input { background: var(--superficie-2); }
+  .boton-enlace { display: inline-flex; align-items: center; min-height: 36px; padding: 8px 14px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: var(--texto); font-weight: 600; font-size: 14px; text-decoration: none; }
+  .boton-enlace:hover { border-color: var(--primario); color: var(--primario); }
+  .mas-formas summary { font-weight: 600; color: var(--texto-suave); }
+  .mas-formas .choice { margin-top: 10px; }
 `;
 
 const SETUP_FIELDS = [
@@ -179,12 +174,14 @@ const AYUDA_CAMPO: Record<string, { titulo: string; pista: string; ph: string }>
   },
 };
 
-import { appShell } from './shell.js';
+import { appShell, modoVigente } from './shell.js';
 
 export interface ConnectOpts {
   labels: Record<string, string>;
   nombreNegocio: string;
   demo?: boolean;
+  /** Si hay modulo de entregas: se ensena tambien la conexion con GSG. */
+  conGsg?: boolean;
 }
 
 export function connectPage(opts: ConnectOpts): string {
@@ -197,54 +194,91 @@ export function connectPage(opts: ConnectOpts): string {
 
   const contenido = `
 <div class="wrap">
-<p class="lead">Cuatro pasos. El primero es el unico que tienes que pensar.</p>
+<p class="lead">Cuatro pasos. El primero es el único que tienes que pensar.</p>
 
 
 <div id="app" class="hidden">
+${opts.conGsg ? `
+<section class="card" id="gsg">
+  <h2><span class="num">G</span> El sistema de GSG</h2>
+  <p class="muted">De ahí salen cada día los pedidos: a quién falta pedirle la ubicación y a quién falta que confirme. Puede ser su API de verdad o el simulador de este servidor (para probar con números ficticios).</p>
+  <div id="gsg-estado" class="muted">Cargando…</div>
+  <div class="actions" style="margin-top:8px">
+    <button class="ghost" id="gsg-probar" type="button">Probar</button>
+    <button class="ghost" id="gsg-simulador" type="button">Usar el simulador</button>
+    <button class="ghost" id="gsg-real" type="button">Conectar la API real</button>
+    <button class="ghost" id="gsg-quitar" type="button">Desconectar</button>
+    <span id="gsg-state" class="pill hidden"></span>
+  </div>
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+    <p class="muted" style="margin:0 0 8px"><b>GSG también puede avisarnos al momento</b>, sin esperar a que se le pregunte cada cinco minutos. Crea la clave y pásasela a sus programadores: con ella mandan cada pedido en cuanto entra y se enteran de lo que pasa (confirmó, hora avisada, entregado, incidencia).</p>
+    <div class="actions"><button class="ghost" id="gsg-clave" type="button">Crear la clave para GSG</button><span id="gsg-clave-state" class="pill hidden"></span></div>
+    <details class="dev" id="gsg-dev">
+      <summary>Para los programadores de GSG</summary>
+      <p class="muted" style="margin:8px 0 6px">Lo que necesitan: la dirección a la que mandan los pedidos, la clave (se crea arriba) y el contrato con el JSON de cada llamada.</p>
+      <div class="copy"><input id="gsg-api-url" readonly value="/api/v1/entregas" aria-label="Dirección de la API para GSG"><button class="ghost" id="gsg-api-copiar" type="button">Copiar la dirección</button></div>
+      <div class="actions" style="margin-top:8px">
+        <a class="ghost boton-enlace" id="gsg-contrato" href="/docs/contrato-gsg.md" download="CONTRATO-GSG.md">Descargar el contrato</a>
+        <a class="ghost boton-enlace" href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
+        <a class="ghost boton-enlace" href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI en el navegador</a>
+      </div>
+      <p class="muted" style="margin:8px 0 0">«Descargar el contrato» baja el documento explicado paso a paso, con ejemplos de cada llamada y cómo probar contra el simulador antes de tocar nada real: es lo que se le manda a los programadores de GSG.</p>
+    </details>
+    <div id="gsg-clave-nueva" class="hidden" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--accent);border-radius:10px">
+      <b>Clave para GSG: cópiala ahora, no se volverá a mostrar.</b>
+      <code id="gsg-clave-valor" style="display:block;word-break:break-all;margin:6px 0"></code>
+      <ol id="gsg-clave-pasos" style="margin:6px 0 0;padding-left:20px;font-size:13.5px"></ol>
+      <div class="actions" style="margin-top:8px"><button class="ghost sm" id="gsg-clave-copiar" type="button">Copiar la clave</button></div>
+    </div>
+  </div>
+</section>
+` : ''}
 
 <section class="card" id="paso1">
-  <h2><span class="num">1</span> ¿Quieres seguir usando WhatsApp en el movil?</h2>
-  <p class="muted">De esto depende todo lo demas. No se puede cambiar despues sin rehacer la conexion.</p>
+  <h2><span class="num">1</span> ¿Quieres seguir usando WhatsApp en el móvil?</h2>
+  <p class="muted">De esto depende todo lo demás. No se puede cambiar después sin rehacer la conexión.</p>
 
   <div class="choice" data-mode="local">
-    <b>Escanear el QR y ya <span class="tag">lo mas rapido</span></b>
-    <span>Sin cuenta de Meta, sin contenedor y sin instalar nada: sale el codigo aqui mismo, lo
-    escaneas con el telefono (o lo tecleas) y quedas conectado. Funciona con cualquier WhatsApp,
-    tambien el verde. <b>No es oficial</b>: emula WhatsApp Web, esta fuera de los terminos de Meta
-    y el numero se puede banear. Para probar, usa un numero secundario.</span>
+    <b>Escanear el QR y ya <span class="tag">lo más rápido</span></b>
+    <span>Sin cuenta de Meta, sin contenedor y sin instalar nada: sale el código aquí mismo, lo
+    escaneas con el teléfono (o lo tecleas) y quedas conectado. Funciona con cualquier WhatsApp,
+    también el verde. <b>No es oficial</b>: emula WhatsApp Web, está fuera de los términos de Meta
+    y el número se puede banear. Para probar, usa un número secundario.</span>
   </div>
 
   <div class="choice" data-mode="coexistence">
-    <b>Si, uso WhatsApp Business en mi telefono <span class="tag">con codigo QR</span></b>
-    <span>Meta te enseña un QR, lo escaneas con la app y listo. El numero sigue funcionando en el
-    movil para contestar a mano, el historial se sincroniza, y ademas el sistema puede mandar
-    campanas y seguimientos. Es lo que casi todo el mundo quiere.</span>
+    <b>Sí, uso WhatsApp Business en mi teléfono <span class="tag">con código QR</span></b>
+    <span>Meta te enseña un QR, lo escaneas con la app y listo. El número sigue funcionando en el
+    móvil para contestar a mano, el historial se sincroniza, y además el sistema puede mandar
+    campañas y seguimientos. Es lo que casi todo el mundo quiere.</span>
   </div>
 
+  ${modoVigente() === 'gsg' ? '<details class="mas-formas" id="mas-formas"><summary>Más formas de conectar (número nuevo, token de Meta, WAHA)</summary>' : ''}
   <div class="choice" data-mode="dedicated">
-    <b>No, quiero un numero nuevo solo para el sistema</b>
-    <span>Ese numero deja de funcionar en la app de WhatsApp del telefono: pasa a ser solo del
+    <b>No, quiero un número nuevo solo para el sistema</b>
+    <span>Ese número deja de funcionar en la app de WhatsApp del teléfono: pasa a ser solo del
     sistema. Meta regala uno de prueba para empezar sin arriesgar el tuyo.</span>
   </div>
 
   <div class="choice" data-mode="manual">
     <b>Ya tengo un token de Meta y prefiero pegarlo</b>
-    <span>Para quien ya monto el usuario del sistema en Meta. Sin ventana ni QR.</span>
+    <span>Para quien ya montó el usuario del sistema en Meta. Sin ventana ni QR.</span>
   </div>
 
   <div class="choice" data-mode="waha">
     <b>Conectar con WAHA <span class="tag riesgo">no oficial</span></b>
     <span>Escaneas el QR de WhatsApp Web desde un contenedor de WAHA que corre en tu servidor.
-    Funciona con cualquier WhatsApp, tambien el verde de siempre, y no hace falta ninguna app de
-    Meta. A cambio emula WhatsApp Web, que esta fuera de los terminos de WhatsApp: el numero
-    puede acabar baneado sin aviso y sin recuperacion. Usa un numero secundario.</span>
+    Funciona con cualquier WhatsApp, también el verde de siempre, y no hace falta ninguna app de
+    Meta. A cambio emula WhatsApp Web, que está fuera de los términos de WhatsApp: el número
+    puede acabar baneado sin aviso y sin recuperación. Usa un número secundario.</span>
   </div>
+  ${modoVigente() === 'gsg' ? '</details>' : ''}
 
   <div class="nota" id="aviso-consumidor">
-    <b>Ojo con cual es tu app.</b> Las tres primeras opciones son la via oficial de Meta y
+    <b>Ojo con cuál es tu app.</b> Las tres primeras opciones son la vía oficial de Meta y
     necesitan <b>WhatsApp Business</b> (el icono naranja), no el WhatsApp verde de siempre. Si
-    usas el verde, instala WhatsApp Business y migra: es gratis, conservas el numero y el
-    historial. Solo WAHA funciona con el verde, con el riesgo que dice ahi arriba.
+    usas el verde, instala WhatsApp Business y migra: es gratis, conservas el número y el
+    historial. Solo WAHA funciona con el verde, con el riesgo que dice ahí arriba.
   </div>
 </section>
 
@@ -259,8 +293,8 @@ export function connectPage(opts: ConnectOpts): string {
 
   <div id="paso2-campos"></div>
 
-  <label for="c-url">Direccion de este sistema en internet
-    <span class="hint">Meta necesita poder entrar aqui para avisarte de los mensajes nuevos.</span></label>
+  <label for="c-url">Dirección de este sistema en internet
+    <span class="hint">Meta necesita poder entrar aquí para avisarte de los mensajes nuevos.</span></label>
   <input id="c-url" autocomplete="off" spellcheck="false" placeholder="https://algo.trycloudflare.com">
   <div class="nota hidden" id="aviso-url"></div>
 
@@ -270,16 +304,16 @@ export function connectPage(opts: ConnectOpts): string {
   </div>
 
   <details>
-    <summary>¿De donde saco estos datos?</summary>
+    <summary>¿De dónde saco estos datos?</summary>
     <ol class="muted">
       <li>Entra a <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">developers.facebook.com/apps</a>
-          y crea una app de tipo <b>Empresa</b>. Anadele el producto <b>WhatsApp</b>.</li>
-      <li>El <b>ID de la app</b> y la <b>clave secreta</b> estan en Configuracion de la app &rarr; Basica.</li>
-      <li>El <b>ID de la configuracion</b> (registro incorporado <b>v4</b>): Facebook Login for Business &rarr;
+          y crea una app de tipo <b>Empresa</b>. Añádele el producto <b>WhatsApp</b>.</li>
+      <li>El <b>ID de la app</b> y la <b>clave secreta</b> están en Configuración de la app &rarr; Básica.</li>
+      <li>El <b>ID de la configuración</b> (registro incorporado <b>v4</b>): Facebook Login for Business &rarr;
           Configurations &rarr; Crear, variante <b>Embedded Signup</b>, y marca los productos: <b>Cloud API</b>
-          y, si quieres que el numero siga en el celular, <b>WhatsApp Business App onboarding</b>. Copia su ID.
-          Una configuracion creada antes (v2 o v3) deja de abrir la ventana el 15/10/2026: crea una nueva.</li>
-      <li>Solo para el camino manual, el <b>token permanente</b>: Configuracion del negocio &rarr;
+          y, si quieres que el número siga en el celular, <b>WhatsApp Business App onboarding</b>. Copia su ID.
+          Una configuración creada antes (v2 o v3) deja de abrir la ventana el 15/10/2026: crea una nueva.</li>
+      <li>Solo para el camino manual, el <b>token permanente</b>: Configuración del negocio &rarr;
           Usuarios &rarr; Usuario del sistema, con los permisos
           <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>.</li>
     </ol>
@@ -311,28 +345,28 @@ export function connectPage(opts: ConnectOpts): string {
 
   <div id="qr-box" class="hidden">
     <div class="qr-marco"><img id="qr-img" alt="Codigo QR de WhatsApp Web"></div>
-    <p class="muted" id="qr-pasos">En el telefono: WhatsApp &rarr; Ajustes &rarr; Dispositivos
-    vinculados &rarr; Vincular un dispositivo. Apunta a este codigo.</p>
+    <p class="muted" id="qr-pasos">En el teléfono: WhatsApp &rarr; Ajustes &rarr; Dispositivos
+    vinculados &rarr; Vincular un dispositivo. Apunta a este código.</p>
     <div class="pair">
-      <p class="muted">Si no puedes apuntar con la camara, <b>vincula con tu numero</b>: WhatsApp te
-      pide un codigo de ocho caracteres en vez del QR.</p>
+      <p class="muted">Si no puedes apuntar con la cámara, <b>vincula con tu número</b>: WhatsApp te
+      pide un código de ocho caracteres en vez del QR.</p>
       <div class="actions">
         <input id="pair-phone" inputmode="numeric" placeholder="51987654321" style="max-width:200px">
-        <button class="ghost" id="pair-ask" type="button">Pedir codigo</button>
+        <button class="ghost" id="pair-ask" type="button">Pedir código</button>
       </div>
       <div id="pair-code" class="codigo hidden"></div>
-      <p class="muted hidden" id="pair-pasos">En el telefono: WhatsApp &rarr; Ajustes &rarr;
-      Dispositivos vinculados &rarr; Vincular un dispositivo &rarr; <b>Vincular con el numero de
-      telefono</b>. Teclea ese codigo.</p>
+      <p class="muted hidden" id="pair-pasos">En el teléfono: WhatsApp &rarr; Ajustes &rarr;
+      Dispositivos vinculados &rarr; Vincular un dispositivo &rarr; <b>Vincular con el número de
+      teléfono</b>. Teclea ese código.</p>
     </div>
 
     <div class="actions">
-      <button class="ghost" id="waha-logout" type="button">Desvincular el telefono</button>
+      <button class="ghost" id="waha-logout" type="button">Desvincular el teléfono</button>
     </div>
   </div>
 
   <div id="choice" class="hidden" style="margin-top:18px">
-    <h2 style="font-size:15px">Elige el numero</h2>
+    <h2 style="font-size:15px">Elige el número</h2>
     <p class="muted">Tu cuenta tiene varios.</p>
     <div id="choice-list"></div>
   </div>
@@ -342,11 +376,11 @@ export function connectPage(opts: ConnectOpts): string {
   <div id="avisos-meta" class="hidden" style="margin-top:18px"></div>
 
   <div class="hidden" id="pin-box" style="margin-top:18px">
-    <div class="nota"><b>Este numero todavia no esta activado.</b> Se activa con un PIN de seis
+    <div class="nota"><b>Este número todavía no está activado.</b> Se activa con un PIN de seis
     digitos: el de la verificacion en dos pasos. Si no tenia ninguno, el que escribas queda como suyo.</div>
     <div class="actions">
       <input id="pin" inputmode="numeric" maxlength="6" placeholder="123456" style="max-width:150px">
-      <button class="ghost" id="register">Activar numero</button>
+      <button class="ghost" id="register">Activar número</button>
       <span id="reg-state" class="pill hidden"></span>
     </div>
   </div>
@@ -354,9 +388,9 @@ export function connectPage(opts: ConnectOpts): string {
 
 <section class="card locked" id="paso4">
   <h2><span class="num">4</span> Comprobar que funciona</h2>
-  <p class="muted">Mandate un mensaje a ti mismo. Si te llega, esta todo bien.</p>
-  <label for="testPhone">Tu telefono, con codigo de pais y sin el signo mas</label>
-  <input id="testPhone" placeholder="51987654321">
+  <p class="muted">Mándate un mensaje a ti mismo. Si te llega, está todo bien.</p>
+  <label for="testPhone">Tu WhatsApp <span class="hint">Los nueve dígitos del celular; el +51 va solo.</span></label>
+  <div class="tel"><span class="prefijo">+51</span><input id="testPhone" placeholder="987 654 321" inputmode="tel" autocomplete="tel-national" maxlength="14"></div>
   <div class="actions">
     <button id="sendTest">Enviar prueba</button>
     <a href="/chat"><button class="ghost" type="button">Ir al chat</button></a>
@@ -365,7 +399,7 @@ export function connectPage(opts: ConnectOpts): string {
 </section>
 
 <details>
-  <summary>Ver y editar todos los datos guardados</summary>
+  <summary>Solo si te lo pide soporte: ver y editar todos los datos guardados</summary>
   <div class="card">
     <p class="muted">Lo secreto se muestra tapado. Deja un campo vacio para no cambiarlo.</p>
     ${avanzados}
@@ -375,7 +409,7 @@ export function connectPage(opts: ConnectOpts): string {
       <span id="manual-state" class="pill hidden"></span>
     </div>
 
-    <label>Direccion del aviso de mensajes nuevos (webhook)</label>
+    <label>Dirección del aviso de mensajes nuevos (webhook)</label>
     <div class="copy"><input id="hookUrl" readonly><button class="ghost" data-copy="hookUrl">Copiar</button></div>
     <label>Palabra de verificacion</label>
     <div class="copy"><input id="hookToken" readonly><button class="ghost" data-copy="hookToken">Copiar</button></div>
@@ -448,6 +482,8 @@ function elegirModo(nuevo, guardar) {
   localStorage.setItem('waModo', modo);
   document.querySelectorAll('.choice[data-mode]').forEach(function (el) {
     el.classList.toggle('sel', el.getAttribute('data-mode') === modo);
+    /* si la forma elegida esta en "Mas formas de conectar", que se vea */
+    if (el.getAttribute('data-mode') === modo && el.closest('#mas-formas')) el.closest('#mas-formas').open = true;
   });
   done('paso1', true);
   pintarPaso2();
@@ -479,7 +515,7 @@ function pintarPaso2() {
     caja.innerHTML = '';
     resumen.classList.remove('hidden');
     document.getElementById('paso2-lead').textContent =
-      'Ya estan guardados. Solo falta la direccion publica si la cambias.';
+      'Ya están guardados. Solo falta la dirección pública si la cambias.';
     done('paso2', true);
     return;
   }
@@ -570,27 +606,27 @@ function pintarPaso3() {
   if (!conQr()) pararSondeo();
 
   if (conQr()) {
-    waha.textContent = modo === 'local' ? 'Conectar y mostrar el QR' : 'Crear la sesion y mostrar el QR';
+    waha.textContent = modo === 'local' ? 'Conectar y mostrar el QR' : 'Crear la sesión y mostrar el QR';
     lead.textContent = modo === 'local'
       ? 'Sale el codigo QR aqui mismo. Lo escaneas desde el telefono (WhatsApp, Dispositivos ' +
         'vinculados) y ya estas dentro. El telefono tiene que seguir con conexion a internet para ' +
-        'que la sesion no se caiga.'
-      : 'Se crea la sesion en tu contenedor de WAHA y aparece aqui el codigo QR. ' +
-        'Lo escaneas desde el telefono, igual que WhatsApp Web, y el telefono tiene que seguir con ' +
-        'conexion a internet para que la sesion no se caiga.';
+        'que la sesión no se caiga.'
+      : 'Se crea la sesión en tu contenedor de WAHA y aparece aquí el código QR. ' +
+        'Lo escaneas desde el teléfono, igual que WhatsApp Web, y el teléfono tiene que seguir con ' +
+        'conexión a internet para que la sesión no se caiga.';
     if (listo) sondearQr();
   } else if (modo === 'coexistence') {
-    document.getElementById('fb-label').textContent = 'Conectar y ver el codigo QR';
+    document.getElementById('fb-label').textContent = 'Conectar y ver el código QR';
     lead.textContent = 'Se abre la ventana de Meta. Entras con tu cuenta de Facebook, eliges tu ' +
-      'numero, y te enseña un codigo QR: escanealo con la app de WhatsApp Business del telefono. ' +
-      'Meta te manda ademas un codigo de confirmacion a ese mismo WhatsApp.';
+      'número, y te enseña un código QR: escanéalo con la app de WhatsApp Business del teléfono. ' +
+      'Meta te manda además un código de confirmación a ese mismo WhatsApp.';
   } else if (modo === 'dedicated') {
     document.getElementById('fb-label').textContent = 'Conectar con Facebook';
-    lead.textContent = 'Se abre la ventana de Meta. Entras con tu cuenta, eliges o creas el numero ' +
-      'y vuelves aqui conectado.';
+    lead.textContent = 'Se abre la ventana de Meta. Entras con tu cuenta, eliges o creas el número ' +
+      'y vuelves aquí conectado.';
   } else if (modo === 'manual') {
     lead.textContent = 'Con el token guardado, el sistema busca tu cuenta, registra el webhook en ' +
-      'Meta y comprueba que el numero responde.';
+      'Meta y comprueba que el número responde.';
   }
 
   if (listo && esMeta && !opciones.quick) {
@@ -637,7 +673,7 @@ async function estadoQr() {
     if (r.status === 'SCAN_QR_CODE' && r.qr) {
       document.getElementById('qr-img').src = 'data:image/png;base64,' + r.qr;
       caja.classList.remove('hidden');
-      show('fb-state', 'Escanea el codigo', 'warn');
+      show('fb-state', 'Escanea el código', 'warn');
       return;
     }
 
@@ -656,7 +692,7 @@ async function estadoQr() {
     document.getElementById('desconectar-confirmar').classList.add('hidden');
     // Nada de "STOPPED" a secas: se dice que pasa y que hay que hacer.
     if (r.status === 'STARTING') {
-      show('fb-state', 'Abriendo la sesion... en unos segundos sale el codigo', 'warn');
+      show('fb-state', 'Abriendo la sesión... en unos segundos sale el código', 'warn');
     } else if (r.status === 'STOPPED') {
       // Parada es parada: no va a cambiar sola. Se deja de preguntar y se
       // explica que el boton de conectar saca un QR nuevo.
@@ -665,7 +701,7 @@ async function estadoQr() {
       if (texto.indexOf('Conectar') < 0) texto += ' Pulsa "Conectar y mostrar el QR".';
       show('fb-state', texto, 'warn');
     } else if (r.status === 'FAILED') {
-      show('fb-state', (r.detail || 'Se corto la conexion.') + ' Reintentando...', 'bad');
+      show('fb-state', (r.detail || 'Se cortó la conexión.') + ' Reintentando...', 'bad');
     } else {
       show('fb-state', r.detail || 'Esperando a WhatsApp...', 'warn');
     }
@@ -677,7 +713,7 @@ async function estadoQr() {
 document.getElementById('waha-connect').onclick = async function () {
   var boton = this;
   boton.disabled = true;
-  show('fb-state', modo === 'local' ? 'Abriendo la sesion... si la anterior ya no vale, se borra y sale un QR nuevo' : 'Creando la sesion en WAHA...', 'warn');
+  show('fb-state', modo === 'local' ? 'Abriendo la sesión... si la anterior ya no vale, se borra y sale un QR nuevo' : 'Creando la sesión en WAHA...', 'warn');
   try {
     await api(prefijo() + '/connect', { method: 'POST', body: modo === 'local' ? {} : {
       wahaUrl: val('f-wahaUrl') || undefined,
@@ -700,7 +736,7 @@ document.getElementById('waha-connect').onclick = async function () {
 document.getElementById('pair-ask').onclick = async function () {
   var boton = this;
   var telefono = val('pair-phone');
-  if (!telefono) { show('fb-state', 'Escribe tu numero con codigo de pais', 'warn'); return; }
+  if (!telefono) { show('fb-state', 'Escribe tu número con código de país', 'warn'); return; }
 
   boton.disabled = true;
   try {
@@ -710,7 +746,7 @@ document.getElementById('pair-ask').onclick = async function () {
     caja.textContent = r.code.length === 8 ? r.code.slice(0, 4) + ' ' + r.code.slice(4) : r.code;
     caja.classList.remove('hidden');
     document.getElementById('pair-pasos').classList.remove('hidden');
-    show('fb-state', 'Teclea el codigo en el telefono', 'warn');
+    show('fb-state', 'Teclea el código en el teléfono', 'warn');
   } catch (error) {
     show('fb-state', error.message, 'bad');
   } finally {
@@ -766,7 +802,7 @@ function cargarSdk() {
    sin PIN) o FINISH_ONLY_WABA (no eligio numero); CANCEL dice en que
    pantalla se salio y ERROR trae el motivo. */
 var elegido = { wabaId: null, phoneNumberId: null, coexistencia: false, sinNumero: false };
-var PASOS_META = { PHONE_NUMBER_SETUP: 'la pantalla del numero', BUSINESS_ACCOUNT_SELECTION: 'la eleccion de la cuenta', WABA_SELECTION: 'la eleccion de la cuenta de WhatsApp', PHONE_NUMBER_VERIFICATION: 'la verificacion del numero' };
+var PASOS_META = { PHONE_NUMBER_SETUP: 'la pantalla del número', BUSINESS_ACCOUNT_SELECTION: 'la elección de la cuenta', WABA_SELECTION: 'la elección de la cuenta de WhatsApp', PHONE_NUMBER_VERIFICATION: 'la verificacion del número' };
 window.addEventListener('message', function (event) {
   var host;
   try { host = new URL(event.origin).hostname; } catch (error) { return; }
@@ -793,7 +829,7 @@ window.addEventListener('message', function (event) {
 });
 
 document.getElementById('fb-login').onclick = function () {
-  if (!window.FB) return show('fb-state', 'La ventana de Meta todavia esta cargando, intenta en un segundo', 'warn');
+  if (!window.FB) return show('fb-state', 'La ventana de Meta todavía está cargando, intenta en un segundo', 'warn');
   show('fb-state', 'Abriendo la ventana de Meta...', 'warn');
 
   var extras = (opciones.modes || {})[modo];
@@ -870,7 +906,7 @@ async function conectar(phoneNumberId) {
         };
       });
       document.getElementById('choice').classList.remove('hidden');
-      show('fb-state', 'Elige un numero', 'warn');
+      show('fb-state', 'Elige un número', 'warn');
       return;
     }
 
@@ -895,7 +931,10 @@ document.getElementById('sendTest').onclick = async function () {
   var boton = this;
   boton.disabled = true;
   try {
-    var r = await api('/admin/settings/test-message', { method: 'POST', body: { phone: val('testPhone') } });
+    var digitos = val('testPhone').replace(/\D/g, '');
+    if (digitos.length === 9) digitos = '51' + digitos;
+    if (digitos.length !== 11 || digitos.indexOf('51') !== 0) { show('test-state', 'Escribe los nueve dígitos de tu celular (sin el +51).', 'warn'); boton.disabled = false; return; }
+    var r = await api('/admin/settings/test-message', { method: 'POST', body: { phone: digitos } });
     show('test-state', r.ok ? 'Enviado: revisa tu WhatsApp' : ('No salio: ' + (r.reason || r.error || '')), r.ok ? 'ok' : 'warn');
   } catch (error) { show('test-state', error.message, 'bad'); }
   finally { boton.disabled = false; }
@@ -917,7 +956,7 @@ document.getElementById('save').onclick = async function () {
 document.getElementById('test').onclick = async function () {
   try {
     var data = await api('/admin/settings/test', { method: 'POST', body: values() });
-    show('manual-state', data.ok ? 'Conexion correcta' : data.detail, data.ok ? 'ok' : 'bad');
+    show('manual-state', data.ok ? 'Conexión correcta' : data.detail, data.ok ? 'ok' : 'bad');
   } catch (error) { show('manual-state', error.message, 'bad'); }
 };
 
@@ -940,8 +979,8 @@ function pintarAvisosMeta(avisos) {
   var ICONO = { vencido: '⛔', urgente: '⏰', pendiente: '📅', hecho: '✓', ok: '✓' };
   caja.innerHTML = '<h2 style="font-size:15px">Lo que Meta cambia con fecha</h2>' + avisos.map(function (a) {
     var cuando = a.estado === 'hecho' ? 'hecho el ' + new Date(a.hechoEl).toLocaleDateString('es-PE')
-      : a.estado === 'ok' ? 'al dia'
-      : a.diasRestantes < 0 ? 'vencio hace ' + (-a.diasRestantes) + ' dias'
+      : a.estado === 'ok' ? 'al día'
+      : a.diasRestantes < 0 ? 'venció hace ' + (-a.diasRestantes) + ' días'
       : a.diasRestantes === 0 ? 'vence hoy' : 'quedan ' + a.diasRestantes + ' dias (hasta el ' + new Date(a.limite + 'T12:00:00').toLocaleDateString('es-PE') + ')';
     return '<div class="nota" style="border-left:4px solid ' + COLOR[a.estado] + ';margin-top:8px">' +
       '<b>' + ICONO[a.estado] + ' ' + esc(a.titulo) + '</b> <span class="muted">· ' + esc(cuando) + '</span>' +
@@ -994,9 +1033,8 @@ async function load() {
     // contrario mandaria al usuario a montar algo que no necesita.
     var aviso = document.getElementById('aviso-url');
     if (!conQr() && !opciones.reachable && !/^https:\/\//.test(val('c-url'))) {
-      aviso.innerHTML = '<b>Meta no puede entrar en una direccion local.</b> Levanta un tunel con ' +
-        '<code>npx cloudflared tunnel --url http://localhost:' + esc(location.port || '3000') + '</code> ' +
-        'y pega aqui la direccion que te de.';
+      aviso.innerHTML = '<b>Esta dirección es local: Meta no puede entrar.</b> Pídele a quien instaló el sistema una dirección pública ' +
+        'y pégala aquí (o usa el QR, que no la necesita).';
       aviso.classList.remove('hidden');
     } else {
       aviso.classList.add('hidden');
@@ -1015,11 +1053,73 @@ async function load() {
 
 document.getElementById('app').classList.remove('hidden');
 load();
+
+/* ---------------------------------------------------------- GSG */
+async function cargarGsg() {
+  var caja = document.getElementById('gsg-estado');
+  if (!caja) return;
+  try {
+    var r = await api('/admin/entregas/gsg');
+    var g = r.gsg;
+    if (!g) { caja.textContent = 'La conexión con GSG se fija al arrancar el servidor.'; return; }
+    var color = g.modo === 'ninguna' ? 'var(--rojo)' : g.modo === 'simulador' ? 'var(--azul)' : 'var(--verde)';
+    caja.innerHTML = '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + color + ';margin-right:6px"></span>' + esc(g.descripcion) + (g.url && g.modo === 'real' ? ' <span class="muted">(' + esc(g.url) + ')</span>' : '') + (g.ultimaPrueba ? '<br><span class="muted">Última prueba: ' + esc(g.ultimaPrueba.detalle) + '</span>' : '');
+    document.getElementById('gsg-simulador').classList.toggle('hidden', g.modo === 'simulador' || !r.simulador);
+    document.getElementById('gsg-quitar').classList.toggle('hidden', g.modo === 'ninguna');
+  } catch (error) { caja.textContent = error.message; }
+}
+if (document.getElementById('gsg')) {
+  document.getElementById('gsg-probar').onclick = async function () {
+    try { var r = await api('/admin/entregas/gsg/probar', { method: 'POST', body: {} }); show('gsg-state', r.prueba.detalle, r.ok ? 'ok' : 'bad'); cargarGsg(); } catch (error) { show('gsg-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-simulador').onclick = async function () {
+    try { await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'simulador' } }); show('gsg-state', 'Ahora GSG es el simulador de este servidor. Cárgalo desde Hoy → Probar con números ficticios.', 'ok'); cargarGsg(); } catch (error) { show('gsg-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-real').onclick = async function () {
+    try {
+      var url = await pedirDato({ titulo: 'API real de GSG', texto: 'La dirección base de la API de GSG (la que tiene /reparto/pendientes, /ubicaciones, /confirmaciones y /entregas).', etiqueta: 'Dirección', marcador: 'https://api.gsg.pe/v1', boton: 'Siguiente' });
+      if (!url) return;
+      var token = await pedirDato({ titulo: 'API real de GSG', etiqueta: 'Token (se guarda cifrado)', marcador: 'el token que te dieron', boton: 'Conectar', validar: function () { return null; } });
+      if (token === null) return;
+      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, token: token || undefined } });
+      show('gsg-state', 'Conectado. Pulsa «Probar» para comprobarlo.', 'ok');
+      cargarGsg();
+    } catch (error) { show('gsg-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-api-url').value = location.origin + '/api/v1/entregas';
+  document.getElementById('gsg-api-copiar').onclick = function () {
+    navigator.clipboard.writeText(document.getElementById('gsg-api-url').value).then(function () { show('gsg-clave-state', 'Dirección copiada', 'ok'); });
+  };
+  document.getElementById('gsg-clave').onclick = async function () {
+    if (!(await confirmarDialogo({ titulo: 'Crear la clave para GSG', texto: 'Se crea una clave de API llamada "GSG" con permiso para mandar y ver las entregas del día y registrar webhooks. Si ya había una clave "GSG", sigue valiendo: revócala en Conectar mi web y tienda → Claves de API si quieres que solo valga la nueva.', boton: 'Crear la clave' }))) return;
+    try {
+      var r = await api('/admin/claves-api', { method: 'POST', body: { nombre: 'GSG', permisos: ['entregas:gestionar', 'entregas:leer', 'webhooks:gestionar'] } });
+      document.getElementById('gsg-clave-valor').textContent = r.clave;
+      document.getElementById('gsg-clave-pasos').innerHTML = [
+        'Dásela a los programadores de GSG junto con esta dirección: ' + location.origin + '/api/v1/entregas',
+        'Cada pedido nuevo lo mandan con POST y la cabecera Authorization: Bearer <la clave> (uno, una lista o {pedidos: [...]}).',
+        'Para enterarse de lo que pasa, registran un webhook con POST ' + location.origin + '/api/v1/webhooks (eventos entrega.confirmada, entrega.avisada, entrega.entregada, entrega.incidencia).',
+        'Pueden probar contra el simulador de este servidor antes de tocar nada real: está explicado en el contrato (abajo, en "Para los programadores de GSG").',
+      ].map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
+      document.getElementById('gsg-clave-nueva').classList.remove('hidden');
+      show('gsg-clave-state', 'Clave creada.', 'ok');
+    } catch (error) { show('gsg-clave-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-clave-copiar').onclick = function () {
+    navigator.clipboard.writeText(document.getElementById('gsg-clave-valor').textContent).then(function () { show('gsg-clave-state', 'Clave copiada', 'ok'); });
+  };
+  document.getElementById('gsg-quitar').onclick = async function () {
+    var ok = await confirmarDialogo({ titulo: 'Desconectar GSG', texto: 'Lo reportable se guarda en la cola y saldrá entero cuando se vuelva a conectar.', boton: 'Desconectar', peligro: true });
+    if (!ok) return;
+    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); show('gsg-state', 'Desconectado.', 'ok'); cargarGsg(); } catch (error) { show('gsg-state', error.message, 'bad'); }
+  };
+  cargarGsg();
+}
 `;
 
   return appShell({
-    titulo: 'Conexión de WhatsApp',
-    subtitulo: 'QR, WAHA o la API oficial de Meta',
+    titulo: opts.conGsg ? 'Conexión' : 'Conexión de WhatsApp',
+    subtitulo: opts.conGsg ? 'El WhatsApp (QR, WAHA o la API de Meta) y el sistema de GSG' : 'QR, WAHA o la API oficial de Meta',
     contenido,
     script,
     css: CSS,

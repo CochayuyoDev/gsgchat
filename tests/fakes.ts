@@ -42,6 +42,7 @@ import { createFakePedidos, type FakePedidos } from './fakes-pedidos.js';
 import { createFakeEntrenamiento, type FakeEntrenamiento } from './fakes-entrenamiento.js';
 import { createFakeCodigos, type FakeCodigos } from './fakes-codigos.js';
 import { createFakeTiendas, type FakeTiendas } from './fakes-tiendas.js';
+import { createFakeEntregas, type FakeEntregas } from './fakes-entregas.js';
 import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
@@ -64,6 +65,7 @@ export interface FakeRepos extends Repos {
   entrenamiento: FakeEntrenamiento;
   codigosConexion: FakeCodigos;
   tiendas: FakeTiendas;
+  entregas: FakeEntregas;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -330,6 +332,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     entrenamiento: createFakeEntrenamiento(() => [...contactsByPhone.values()], () => repos.messages._all),
     codigosConexion: createFakeCodigos(),
     tiendas: createFakeTiendas(),
+    entregas: createFakeEntregas(),
     archives: createFakeArchives(),
     rutas: createFakeRutas(),
     leads: createFakeLeads((id) => {

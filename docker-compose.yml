@@ -15,7 +15,7 @@ services:
       WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
-      GEO_BBOX: ${GEO_BBOX:-mexico}
+      GEO_BBOX: ${GEO_BBOX:-lima}
     volumes:
       # Token de administracion y clave de cifrado: se generan en el primer
       # arranque y deben sobrevivir a un recreate.

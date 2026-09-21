@@ -44,6 +44,7 @@ import { avisosDeMeta } from '../whatsapp/avisos-meta.js';
 import { correrGoteo } from '../campanas/goteo.js';
 import { crearCampana } from '../campanas/crear.js';
 import { registerGruposRoutes } from './grupos-routes.js';
+import { registerBuscarRoutes } from './buscar-routes.js';
 
 export interface AdminDeps {
   /** La conexion con Stoky configurable desde la pantalla (para el enlace al panel). */
@@ -52,6 +53,10 @@ export interface AdminDeps {
   entrenamiento?: import('../entrenamiento/servicio.js').ServicioEntrenamiento;
   /** La voz del asistente: desde el chat, un texto puede salir como nota de voz. */
   voz?: import('../voz/servicio.js').ServicioVoz;
+  /** La puerta a GSG (la configurable desde la pantalla). Sin ella, la del .env. */
+  gsg?: import('../rutas/gsg.js').PuertoGsg;
+  /** Las entregas del dia: ligan cada conversacion guardada a su pedido. Ver src/entregas. */
+  entregas?: import('../entregas/servicio.js').ServicioEntregas;
   repos: Repos;
   config: Config;
   settings: SettingsService;
@@ -73,6 +78,8 @@ export interface AdminDeps {
   /** Donde se guardan los adjuntos; por defecto, .wa-media. */
   mediaDir?: string;
   plan?: ServicioPlan;
+  /** "Que todo funcione": la campana avisa del cupo que no alcanza, la prueba de la manana fallida y la copia fallida. */
+  fiabilidad?: import('../salud/fiabilidad.js').ServicioFiabilidad;
 }
 
 const phoneSchema = z
@@ -172,13 +179,23 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   await registerArchiveRoutes(app, {
     repos,
     dir: config.ARCHIVE_DIR,
-    dias: config.ARCHIVE_INACTIVE_DAYS,
+    dias: () => deps.ajustes?.guardadosDias() ?? config.ARCHIVE_INACTIVE_DAYS,
+    ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
+    pedidoDe: deps.entregas ? (phone) => deps.entregas!.pedidoDe(phone) : undefined,
+    nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
+    telefonosTerminadosHoy: deps.entregas ? () => deps.entregas!.telefonosTerminadosHoy() : undefined,
+    mediaDir: deps.mediaDir,
+    secreto: config.TRACKING_SECRET,
+    entrenamiento: deps.entrenamiento,
+    publicBase: config.PUBLIC_BASE_URL,
   });
   await registerGruposRoutes(app, { repos, config, settings, ajustes: deps.ajustes });
+  // El buscador global (Ctrl K) y "que paso con este mensaje". Ver buscar-routes.ts.
+  await registerBuscarRoutes(app, { repos, entregas: deps.entregas });
   await registerRutasRoutes(app, {
     repos,
     config,
-    gsg: crearPuertoGsg(config),
+    gsg: deps.gsg ?? crearPuertoGsg(config),
     opciones: opcionesDesdeConfig(config),
     salud: deps.salud,
     supervisor: () => deps.ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,
@@ -272,7 +289,35 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     else if (nivel === 'naranja') avisos.push({ tipo: 'riesgo', nivel: 'warn', texto: 'El numero esta en naranja: solo sale lo imprescindible', href: '/panel#salud' });
     else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El numero esta en amarillo: el marketing va mas lento', href: '/panel#salud' });
     if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} conversacion${esperando === 1 ? '' : 'es'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
-    if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: '/rutas', n: requierenPersona });
+    // Las entregas del dia: lo que necesita a alguien, GSG sin conectar, ningun motorizado.
+    const modoGsg = (deps.ajustes?.modo() ?? 'gsg') === 'gsg';
+    if (deps.entregas) {
+      const r = await deps.entregas.resumen().catch(() => null);
+      if (r) {
+        const n = r.cifras.incidencia;
+        if (n > 0) avisos.push({ tipo: 'entregas', nivel: 'warn', texto: `${n} pedido${n === 1 ? '' : 's'} de hoy necesita${n === 1 ? '' : 'n'} a alguien`, href: '/hoy', n });
+        if (r.cierrePendiente > 0) avisos.push({ tipo: 'cierre', nivel: 'info', texto: `${r.cierrePendiente} pedido${r.cierrePendiente === 1 ? '' : 's'} de ayer sigue${r.cierrePendiente === 1 ? '' : 'n'} sin cerrar`, href: '/hoy', n: r.cierrePendiente });
+        if (r.gsg && !r.gsg.conectada) avisos.push({ tipo: 'gsg', nivel: 'info', texto: 'GSG no está conectado: los pedidos del día no entran solos', href: '/hoy' });
+        if (r.cifras.total > 0 && !r.motorizados.some((m) => m.estado === 'activo')) avisos.push({ tipo: 'motorizados', nivel: 'bad', texto: 'No hay ningún motorizado activo: los pedidos listos no pueden salir', href: '/motorizados' });
+        if (r.gsgCola && r.gsgCola.fallido > 0) avisos.push({ tipo: 'gsg_cola', nivel: 'warn', texto: `${r.gsgCola.fallido} reporte${r.gsgCola.fallido === 1 ? '' : 's'} que GSG no aceptó`, href: '/hoy', n: r.gsgCola.fallido });
+      }
+    }
+    if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: modoGsg ? '/hoy' : '/rutas', n: requierenPersona });
+    // La IA que falla tres veces seguidas es una clave vencida o un proveedor caido: el asistente se queda callado sin que se note.
+    if (deps.ia?.activa()) {
+      const usoIa = deps.ia.uso();
+      if (usoIa.fallosSeguidos >= 3) avisos.push({ tipo: 'ia_fallos', nivel: 'bad', texto: `El asistente IA falló ${usoIa.fallosSeguidos} veces seguidas${usoIa.ultimoFallo ? ` (${usoIa.ultimoFallo.detalle.slice(0, 80)})` : ''}: revisa la clave o el servicio`, href: '/panel#ia', n: usoIa.fallosSeguidos });
+    }
+    // Lo que vigila "Que todo funcione": se avisa aqui para que no haga falta abrir esa pantalla.
+    if (deps.fiabilidad) {
+      const f = await deps.fiabilidad.estado().catch(() => null);
+      if (f) {
+        if (f.vigilante.necesitaQr) avisos.push({ tipo: 'qr', nivel: 'bad', texto: 'El teléfono cerró la sesión de WhatsApp: hay que escanear el QR otra vez', href: '/setup' });
+        if (!f.cupo.alcanza) avisos.push({ tipo: 'cupo', nivel: 'warn', texto: `El número no alcanza para los pedidos de hoy: hacen falta ${f.cupo.necesitan} mensajes y pueden salir ${f.cupo.puedenSalir}`, href: '/fiabilidad', n: f.cupo.necesitan - f.cupo.puedenSalir });
+        if (f.humo.ultima && !f.humo.ultima.ok) avisos.push({ tipo: 'humo', nivel: 'warn', texto: `La prueba de la mañana falló: ${f.humo.ultima.pasos.filter((p) => !p.ok && !p.omitido).map((p) => p.nombre).join(', ') || 'revisa el detalle'}`, href: '/fiabilidad' });
+        if (f.copia.ultima && !f.copia.ultima.ok) avisos.push({ tipo: 'copia', nivel: 'warn', texto: 'La última copia de seguridad falló', href: '/fiabilidad' });
+      }
+    }
     const pedidosNuevos = (await repos.pedidos.contarPorEstado().catch(() => ({}) as Record<string, number>)).nuevo ?? 0;
     if (pedidosNuevos > 0) avisos.push({ tipo: 'pedidos', nivel: 'warn', texto: `${pedidosNuevos} pedido${pedidosNuevos === 1 ? '' : 's'} del chat espera${pedidosNuevos === 1 ? '' : 'n'} confirmación`, href: '/panel#pedidos', n: pedidosNuevos });
     // Un webhook que se apago solo es un sistema que dejo de enterarse de lo que pasa.
@@ -325,8 +370,28 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     }
 
     const politica = politicaVigente();
+    // Las entregas del dia (GSG): en modo gsg es lo primero que se ve.
+    const resumenEntregas = deps.entregas ? await deps.entregas.resumen().catch(() => null) : null;
+    const entregasHoy = resumenEntregas
+      ? {
+          dia: resumenEntregas.dia,
+          total: resumenEntregas.cifras.total,
+          faltaUbicacion: resumenEntregas.cifras.faltaUbicacion,
+          faltaConfirmacion: resumenEntregas.cifras.faltaConfirmacion,
+          enCamino: resumenEntregas.cifras.enCamino,
+          entregadas: resumenEntregas.cifras.entregada,
+          incidencia: resumenEntregas.cifras.incidencia,
+          canceladas: resumenEntregas.cifras.cancelada,
+          motorizadosActivos: resumenEntregas.motorizados.filter((m) => m.estado === 'activo').length,
+          gsgConectada: resumenEntregas.gsg?.conectada ?? false,
+          gsgDescripcion: resumenEntregas.gsg?.descripcion ?? 'sin conexión',
+          ultimoCierre: resumenEntregas.ultimoCierre,
+          cierrePendiente: resumenEntregas.cierrePendiente,
+        }
+      : null;
     return {
       generadoEn: ahora,
+      entregas: entregasHoy,
       hoy: {
         enviados: hoy.enviados,
         entregados: hoy.entregados,
@@ -372,6 +437,12 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         iaDisponible: Boolean(deps.ia),
         // Cuantas lecciones tiene en uso (null si este arranque no tiene entrenamiento).
         lecciones: deps.entrenamiento ? deps.entrenamiento.cargadas() : null,
+        // Lo que GSGchat necesita para arrancar (modo gsg): motorizados, y de donde salen los pedidos.
+        modo: deps.ajustes?.modo() ?? 'gsg',
+        motorizadosActivos: resumenEntregas ? resumenEntregas.motorizados.filter((m) => m.estado === 'activo').length : null,
+        gsg: resumenEntregas?.gsg ? (resumenEntregas.gsg.conectada ? (resumenEntregas.gsg.modo === 'simulador' ? 'simulador' : 'real') : 'ninguna') : null,
+        entregasHoy: resumenEntregas ? resumenEntregas.cifras.total : null,
+        supervisor: Boolean(deps.ajustes?.supervisor() || config.RUTAS_SUPERVISOR),
         // Stoky en las dos direcciones: si este sistema consulta su catalogo y si Stoky ya usa su clave.
         stoky: deps.conexionStoky
           ? {

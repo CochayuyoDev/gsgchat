@@ -28,12 +28,26 @@ export interface ResultadoEnvio {
   reintentable?: boolean;
 }
 
+export interface ResultadoConsulta<T = unknown> {
+  ok: boolean;
+  cuerpo?: T;
+  error?: string;
+  /** El codigo HTTP que devolvio GSG, si llego a contestar. */
+  status?: number;
+}
+
 export interface PuertoGsg {
   /** Si hay a donde mandar. Falso = todo queda en la cola. */
   conectado(): boolean;
   /** Como describirlo en pantalla. */
   descripcion(): string;
   enviar(tipo: TipoReporte, payload: Record<string, unknown>): Promise<ResultadoEnvio>;
+  /**
+   * Una consulta (GET) a la API de GSG: lo que el modulo de entregas usa
+   * para traerse a quien falta pedir la ubicacion y a quien falta que
+   * confirme. `ruta` va relativa a la base (p. ej. `/reparto/pendientes`).
+   */
+  consultar<T = unknown>(ruta: string): Promise<ResultadoConsulta<T>>;
 }
 
 export interface OpcionesGsg {
@@ -49,7 +63,12 @@ export const RUTAS_GSG: Record<TipoReporte, string> = {
   ubicacion: '/ubicaciones',
   incidencia: '/incidencias',
   resumen: '/resumenes',
+  confirmacion: '/confirmaciones',
+  entrega: '/entregas',
 };
+
+/** De donde se traen los pendientes del dia (quien falta ubicacion, quien falta confirmar). */
+export const RUTA_GSG_PENDIENTES = '/reparto/pendientes';
 
 /**
  * Puerto real. Manda un POST con el payload tal cual y espera un JSON con
@@ -106,6 +125,34 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         clearTimeout(corte);
       }
     },
+
+    async consultar(ruta) {
+      const control = new AbortController();
+      const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
+      try {
+        const respuesta = await doFetch(`${base}${ruta}`, {
+          method: 'GET',
+          headers: {
+            accept: 'application/json',
+            ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
+          },
+          signal: control.signal,
+        });
+        const texto = await respuesta.text();
+        if (!respuesta.ok) {
+          return { ok: false, status: respuesta.status, error: `GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}` };
+        }
+        try {
+          return { ok: true, status: respuesta.status, cuerpo: (texto ? JSON.parse(texto) : {}) as never };
+        } catch {
+          return { ok: false, status: respuesta.status, error: 'GSG contesto algo que no es JSON' };
+        }
+      } catch (error) {
+        return { ok: false, error: control.signal.aborted ? 'GSG no respondio a tiempo' : error instanceof Error ? error.message : String(error) };
+      } finally {
+        clearTimeout(corte);
+      }
+    },
   };
 }
 
@@ -116,6 +163,9 @@ export function crearPuertoEnEspera(): PuertoGsg {
     descripcion: () => 'falta GSG_URL: lo reportable se guarda y saldra entero al conectarla',
     async enviar() {
       return { ok: false, error: 'la API de GSG todavia no esta conectada', reintentable: true };
+    },
+    async consultar() {
+      return { ok: false, error: 'la API de GSG todavia no esta conectada' };
     },
   };
 }
@@ -142,7 +192,84 @@ export const PAYLOADS = {
   incidencia:
     'referencia, telefono, nombre, codigo, titulo, detalle, queHacer, intentos, ultimoEnvio, requiereHumano, lote',
   resumen: 'lote, nombre, total, porEstado, porIncidencia, generadoEn',
+  confirmacion:
+    'referencia, telefono, nombre, confirmada (true/false), respuesta (lo que escribio), como (boton|reglas|ia|persona), confirmadoEn' +
+    ' (+ motivo cuando no confirma: cancela | cambio | sin_respuesta | sin_plantilla | error_envio | baja | dia_cerrado | reprogramar)',
+  entrega:
+    'referencia, telefono, nombre, lat, lng, motorizado {telefono, nombre, placa}, minutosMotorizado, margenMinutos, minutosAviso, llegaAproxEn, avisadoEn,' +
+    ' entregadoEn (null hasta que el motorizado dice "entregado"), entregadaComo (reglas|ia|foto|persona|cierre), incidencia (no_entregado cuando no se pudo),' +
+    ' prioridad (normal|urgente), visitas (veces que el motorizado fue sin poder entregar), segundaVisita (true cuando el cliente pidio que volviera hoy)',
 } as const;
+
+/** GSG dice que el cliente confirmo (o no) su pedido de hoy. Ver src/entregas. */
+export function payloadConfirmacion(e: {
+  referencia: string;
+  phone: string;
+  nombre: string | null;
+  confirmada: boolean;
+  respuesta: string | null;
+  como: string | null;
+  motivo?: string | null;
+  en: Date;
+}): Record<string, unknown> {
+  return {
+    tipo: 'confirmacion',
+    referencia: e.referencia,
+    telefono: e.phone,
+    nombre: e.nombre,
+    confirmada: e.confirmada,
+    respuesta: e.respuesta,
+    como: e.como,
+    motivo: e.motivo ?? null,
+    confirmadoEn: e.en.toISOString(),
+  };
+}
+
+/** El motorizado ya tiene el pedido y el cliente sabe a que hora le llega. Ver src/entregas. */
+export function payloadEntrega(e: {
+  referencia: string;
+  phone: string;
+  nombre: string | null;
+  lat: number | null;
+  lng: number | null;
+  motorizado: { phone: string; nombre: string; placa: string | null } | null;
+  minutosMotorizado: number | null;
+  margenMinutos: number;
+  minutosAviso: number | null;
+  llegaAproxAt: Date | null;
+  avisadoAt: Date | null;
+  /** Cuando el motorizado dijo "entregado" (o null si aun no). */
+  entregadoAt?: Date | null;
+  entregadaComo?: string | null;
+  /** 'no_entregado' cuando el motorizado no pudo entregar. */
+  incidencia?: string | null;
+  prioridad?: string | null;
+  /** Veces que el motorizado fue a la puerta sin poder entregar. */
+  visitas?: number | null;
+  /** true cuando el cliente pidio que el motorizado volviera hoy. */
+  segundaVisita?: boolean | null;
+}): Record<string, unknown> {
+  return {
+    tipo: 'entrega',
+    referencia: e.referencia,
+    telefono: e.phone,
+    nombre: e.nombre,
+    lat: e.lat,
+    lng: e.lng,
+    motorizado: e.motorizado ? { telefono: e.motorizado.phone, nombre: e.motorizado.nombre, placa: e.motorizado.placa } : null,
+    minutosMotorizado: e.minutosMotorizado,
+    margenMinutos: e.margenMinutos,
+    minutosAviso: e.minutosAviso,
+    llegaAproxEn: e.llegaAproxAt?.toISOString() ?? null,
+    avisadoEn: e.avisadoAt?.toISOString() ?? null,
+    entregadoEn: e.entregadoAt?.toISOString() ?? null,
+    entregadaComo: e.entregadaComo ?? null,
+    incidencia: e.incidencia ?? null,
+    prioridad: e.prioridad ?? 'normal',
+    visitas: e.visitas ?? 0,
+    segundaVisita: e.segundaVisita ?? false,
+  };
+}
 
 export function payloadUbicacion(solicitud: Solicitud, lote: Lote): Record<string, unknown> {
   return {

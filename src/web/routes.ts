@@ -25,6 +25,9 @@ import { chatPage } from './chat-page.js';
 import { rutasPage } from './rutas-page.js';
 import { manualPage, soportePage } from './ayuda-pages.js';
 import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { registerConnectRoutes } from './connect-routes.js';
 import type { StokyClient } from '../stoky/client.js';
 import { registerDevRoutes } from './dev-routes.js';
@@ -36,8 +39,17 @@ import type { ServicioIA } from '../ia/servicio.js';
 import { registerWahaRoutes } from './waha-routes.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
+import type { ServicioEntregas } from '../entregas/servicio.js';
+import { entregasPage } from './entregas-page.js';
+import { motorizadosPage } from './motorizados-page.js';
+import { fiabilidadPage } from './fiabilidad-page.js';
+import { guardadosPage } from './guardados-page.js';
+import { fijarModoVigente } from './shell.js';
 import { envioAutomaticoPage } from './envio-automatico-page.js';
 import { entrenamientoPage } from './entrenamiento-page.js';
+import { tiendasPage } from './tiendas-page.js';
+import { mapaPage } from './mapa-page.js';
+import { pagarPage } from './pagar-page.js';
 import type { ServicioEntrenamiento } from '../entrenamiento/servicio.js';
 
 export interface WebDeps {
@@ -64,6 +76,10 @@ export interface WebDeps {
   entrenamiento?: ServicioEntrenamiento;
   /** La voz del asistente: los entrantes del socket local se transcriben con ella. */
   voz?: ServicioVoz;
+  /** Las entregas del dia (la pantalla /entregas y los entrantes del socket local). */
+  entregas?: ServicioEntregas;
+  /** "Que todo funcione" (la pantalla /fiabilidad): si esta montado en este arranque. */
+  fiabilidad?: boolean;
 }
 
 /**
@@ -104,6 +120,8 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   const html = (body: string) => ({ body, type: 'text/html; charset=utf-8' });
   const negocio = () => deps.ajustes?.nombreNegocio() ?? config.businessName;
+  // El modo del sistema (gsg | completo) lo leen todas las paginas al pintar el armazon.
+  fijarModoVigente(() => deps.ajustes?.modo() ?? 'gsg');
 
   // El icono de la pestaña, para todas las paginas: sin el, cada visita deja
   // un 404 en la consola del navegador.
@@ -113,12 +131,12 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
       .header('cache-control', 'public, max-age=86400')
       .send(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#128c7e"/>` +
-          `<text x="16" y="22" text-anchor="middle" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="#fff">W</text></svg>`,
+          `<text x="16" y="22" text-anchor="middle" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="#fff">G</text></svg>`,
       );
   });
 
   app.get('/setup', async (_request, reply) => {
-    const page = html(connectPage({ labels: FIELD_LABELS, nombreNegocio: negocio(), demo: config.DEMO_MODE }));
+    const page = html(connectPage({ labels: FIELD_LABELS, nombreNegocio: negocio(), demo: config.DEMO_MODE, conGsg: Boolean(deps.entregas) }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
@@ -144,12 +162,13 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     ia: deps.ia,
     lista: deps.lista,
     voz: deps.voz,
+    entregas: deps.entregas,
     autoConectar: deps.autoConectarLocal,
   });
   // El simulador de entrantes pasa por las mismas piezas que un mensaje real
   // (monitor de salud, ajustes, stickers): si no, lo que se prueba con el no
   // es lo que pasa en la calle.
-  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz });
+  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas });
 
   app.get('/rutas', async (_request, reply) => {
     const page = html(rutasPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
@@ -158,6 +177,45 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   app.get('/envio-automatico', async (_request, reply) => {
     const page = html(envioAutomaticoPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  // Hoy es la portada de GSGchat; /entregas es el mismo sitio con su nombre viejo.
+  for (const ruta of ['/hoy', '/entregas']) {
+    app.get(ruta, async (_request, reply) => {
+      const page = html(entregasPage({ disponible: Boolean(deps.entregas), configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+      return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+    });
+  }
+
+  app.get('/fiabilidad', async (_request, reply) => {
+    const page = html(fiabilidadPage({ disponible: Boolean(deps.fiabilidad), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  app.get('/motorizados', async (_request, reply) => {
+    const page = html(motorizadosPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  app.get('/guardados', async (_request, reply) => {
+    const page = html(guardadosPage({ demo: config.DEMO_MODE, nombreNegocio: negocio(), conIA: Boolean(deps.ia?.estado().tieneToken) }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  // El panel del dueño (solo superadministrador), el mapa del dia y la pantalla Pagar de esta instalacion. Constructor E.
+  app.get('/tiendas', async (_request, reply) => {
+    const page = html(tiendasPage({ demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  app.get('/mapa', async (_request, reply) => {
+    const page = html(mapaPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  app.get('/pagar', async (_request, reply) => {
+    const page = html(pagarPage({ demo: config.DEMO_MODE, nombreNegocio: negocio() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
@@ -175,6 +233,22 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   app.get('/manual', async (_request, reply) => {
     const page = html(manualPage({ nombreNegocio: negocio(), demo: config.DEMO_MODE }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  // El contrato para los programadores de GSG, tal cual esta en docs/ (con
+  // sesion: lo baja quien opera y se lo manda a GSG).
+  app.get('/docs/contrato-gsg.md', async (_request, reply) => {
+    const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+    try {
+      const texto = await readFile(path.join(raiz, 'docs', 'CONTRATO-GSG.md'), 'utf8');
+      return reply
+        .type('text/markdown; charset=utf-8')
+        .header('content-disposition', 'attachment; filename="CONTRATO-GSG.md"')
+        .header('cache-control', 'no-store')
+        .send(texto);
+    } catch {
+      return reply.code(404).send({ error: 'El contrato no esta en esta instalacion (falta docs/CONTRATO-GSG.md).' });
+    }
   });
 
   app.get('/soporte', async (_request, reply) => {

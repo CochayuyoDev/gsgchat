@@ -168,7 +168,8 @@ describe('la membresia local', () => {
     const r = await app.inject({ method: 'POST', url: '/admin/membresia', headers: sup, payload: { plan: 'basico', vencimiento: '2026-10-18', contacto: 'Escríbenos al 987654321', limites: { usuarios: 3 } } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ origen: 'local', plan: { plan: 'basico', nombre: 'Básico', vencido: false, limites: { iaTurnosMes: 2000, usuarios: 3, campanas: false } } });
-    expect(r.json().plan.diasRestantes).toBe(30);
+    // "Pagada hasta el 18/10" incluye el 18 entero (fin del dia en Lima): del 18/09 al 18/10 son 31 dias.
+    expect(r.json().plan.diasRestantes).toBe(31);
     // El admin la ve, pero sin los pagos; y /admin/plan (la caja de Configuracion) tambien la enseña.
     m = (await app.inject({ method: 'GET', url: '/admin/membresia', headers: adm })).json();
     expect(m).toMatchObject({ origen: 'local', soySuper: false, plan: { nombre: 'Básico' } });

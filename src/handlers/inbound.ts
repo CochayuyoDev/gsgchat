@@ -57,6 +57,7 @@ import { atenderRespuestaDeRuta, type RespuestaRuta } from '../rutas/inbound.js'
 import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
 import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
+import type { ServicioEntregas } from '../entregas/servicio.js';
 
 export interface InboundDeps {
   repos: Repos;
@@ -109,6 +110,13 @@ export interface InboundDeps {
    * texto, como siempre.
    */
   voz?: ServicioVoz;
+  /**
+   * Las entregas del dia (ver src/entregas): la confirmacion del pedido, las
+   * respuestas de los motorizados y el aviso de la hora de llegada. Un pin
+   * que resuelve el reparto tambien se le cuenta, y un "si" o un "40 min" se
+   * atienden aqui antes que en el asistente.
+   */
+  entregas?: ServicioEntregas;
   /**
    * Cuanto se espera a que el cliente termine de escribir, en ms.
    *
@@ -748,12 +756,15 @@ export async function handleInboundMessage(
   const contestarRuta = async (respuesta: RespuestaRuta): Promise<boolean> => {
     if (!respuesta.atendida) return false;
     if (respuesta.resultado === 'resuelta') {
-      await reply(
-        textoGracias({
-          negocio: nombreNegocio(deps),
-          referencia: respuesta.solicitud?.referencia,
-        }),
-      );
+      // Las entregas del dia se enteran: si ademas falta confirmar, la
+      // pregunta va pegada al gracias (un solo mensaje, no dos).
+      const s = respuesta.solicitud;
+      const enEntrega =
+        deps.entregas && s && s.lat !== null && s.lng !== null
+          ? await deps.entregas.alUbicacion(contact, { lat: s.lat, lng: s.lng, mapsUrl: s.mapsUrl, fuente: s.ubicacionFuente ?? 'whatsapp', yaReportada: true }).catch(() => ({ atendida: false as const }))
+          : { atendida: false as const };
+      if (enEntrega.atendida && enEntrega.responder) await responderEntrega(enEntrega);
+      else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }));
       if (deps.stickers) await deps.stickers.automatico('gracias', phone);
       return true;
     }
@@ -796,6 +807,28 @@ export async function handleInboundMessage(
   const reply = (text: string) =>
     sender.send({ phone, kind: 'freeform', category: 'UTILITY', text });
 
+  /**
+   * Una respuesta del modulo de entregas: con botones (SI / NO) si los trae
+   * y el WhatsApp puede pintarlos; si no, el texto. El proveedor local cae
+   * solo a texto cuando no puede con los botones.
+   */
+  const responderEntrega = (r: { responder?: string; botones?: Array<{ id: string; title: string }> }) =>
+    r.botones?.length
+      ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
+      : reply(r.responder ?? '');
+
+  /**
+   * La preventa del courier (cotizar envio, distritos, asesor) solo trabaja
+   * con "Todo el sistema". En modo "Solo lo de GSG" su pantalla esta
+   * escondida y nadie podria apagarla: un cliente sin entrega que escribe
+   * "mi pedido llego tardisimo" no puede recibir un menu de cotizaciones.
+   * Sin ajustes (las pruebas viejas), como siempre.
+   */
+  const preventaActiva = async (): Promise<boolean> => {
+    if ((deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') return false;
+    return (await repos.automation.getPrefs()).preventaActiva;
+  };
+
   const askForLocation = (body: string) =>
     sender.send({
       phone,
@@ -826,7 +859,7 @@ export async function handleInboundMessage(
       // Explicar y seguir: dejar la conversacion muerta en un "no puedo
       // atenderte ahi" hace que el cliente se vaya sin saber que puede
       // escribir el distrito a mano, o que hay una persona detras.
-      const seguir = (await repos.automation.getPrefs()).preventaActiva
+      const seguir = (await preventaActiva())
         ? ' Si crees que me equivoco, escríbeme el distrito, o responde ASESOR y te atiende una persona.'
         : '';
       await reply(explicarFallo(result.reason) + seguir);
@@ -846,10 +879,22 @@ export async function handleInboundMessage(
     });
     if (await contestarRuta(enRuta)) return;
 
+    // Sin solicitud del reparto de por medio, el pin puede ser de una
+    // entrega del dia (GSG ya tenia una ubicacion vieja y el cliente manda la
+    // buena, o la pidio una persona): se guarda y se sigue el flujo.
+    if (deps.entregas) {
+      const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: 'pin de whatsapp' }).catch(() => ({ atendida: false as const }));
+      if (enEntrega.atendida) {
+        if (enEntrega.responder) await responderEntrega(enEntrega);
+        else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }));
+        return;
+      }
+    }
+
     // Con la preventa activa, la ubicacion es la respuesta a "¿de donde?" y el
     // flujo sigue desde ahi. Contestar ademas un "ubicacion recibida" seria el
     // segundo mensaje por el mismo entrante, que es lo que hay que evitar.
-    if ((await repos.automation.getPrefs()).preventaActiva) {
+    if (await preventaActiva()) {
       await turnoDePreventa(
         contact,
         { texto: '', esPrimerMensaje: isFirstMessage, ubicacion: { lat: result.lat, lng: result.lng } },
@@ -874,6 +919,20 @@ export async function handleInboundMessage(
     if (buttonId === REJECT_ID) {
       await askForLocation('Sin problema. Compárteme tu ubicación, por favor.');
       return;
+    }
+    // Los botones de las entregas del dia ("Sí, recibo hoy" / "No"): lo que
+    // dice el boton es la respuesta del cliente, y entra por el mismo camino
+    // que si lo hubiera escrito, con el id del boton para que quede como tal.
+    if (buttonId.startsWith('entrega:') && deps.entregas) {
+      const titulo = message.interactive.button_reply.title || (buttonId.includes(':si') ? 'sí' : 'no');
+      const enEntrega = await deps.entregas.alTexto(contact, titulo, { boton: buttonId }).catch((error) => {
+        request_log(deps, 'fallo el modulo de entregas al leer un boton', error);
+        return { atendida: false as const };
+      });
+      if (enEntrega.atendida) {
+        if (enEntrega.responder) await responderEntrega(enEntrega);
+        return;
+      }
     }
   }
 
@@ -904,6 +963,19 @@ export async function handleInboundMessage(
     // que una persona lo mire. Tratarlo como silencio -que es lo que pasaba-
     // hacia que el bot le insistiera a alguien que ya habia contestado. Un
     // sticker no: eso es charla, no una direccion.
+    // Un motorizado con un pedido avisado que manda una foto: es la prueba
+    // de entrega. Va antes que el reparto y que la IA: ese numero es de la
+    // casa y esa foto tiene un significado claro.
+    if (esAdjunto && message.type !== 'sticker' && deps.entregas) {
+      const enEntrega = await deps.entregas.alAdjuntoDeMotorizado(contact, message.type, message.media?.caption ?? null).catch((error) => {
+        request_log(deps, 'fallo el modulo de entregas al leer un adjunto', error);
+        return { atendida: false as const };
+      });
+      if (enEntrega.atendida) {
+        if (enEntrega.responder) await reply(enEntrega.responder);
+        return;
+      }
+    }
     if (esAdjunto && message.type !== 'sticker') {
       const enRuta = await atenderRespuestaDeRuta(rutasDeps, contact, { texto: '' });
       if (enRuta.atendida) {
@@ -918,7 +990,7 @@ export async function handleInboundMessage(
       await reply(`Recibí ${que}. ¿Me cuentas por escrito qué necesitas? Así te ayudo más rápido.`);
       return;
     }
-    if (esAdjunto && (await repos.automation.getPrefs()).preventaActiva) {
+    if (esAdjunto && (await preventaActiva())) {
       await turnoDePreventa(contact, { texto: '', esPrimerMensaje: isFirstMessage, adjunto: true }, deps);
     }
     return;
@@ -953,6 +1025,21 @@ export async function handleInboundMessage(
     extractLocation(text, { bbox: config.bbox }),
   ]);
 
+  // Las entregas del dia: la respuesta a "¿confirmas tu pedido?" y lo que
+  // contesta un motorizado ("40 min"). Van antes que el reparto y que el
+  // asistente: es a lo que ese numero esta contestando. Un enlace de mapa
+  // no es una confirmacion: ese sigue por el camino de la ubicacion.
+  if (deps.entregas && !result.ok) {
+    const enEntrega = await deps.entregas.alTexto(contact, text).catch((error) => {
+      request_log(deps, 'fallo el modulo de entregas al leer un mensaje', error);
+      return { atendida: false as const };
+    });
+    if (enEntrega.atendida) {
+      if (enEntrega.responder) await responderEntrega(enEntrega);
+      return;
+    }
+  }
+
   // Con una solicitud de ubicacion abierta, esto es su respuesta: un enlace
   // de mapa la resuelve, y cualquier otra cosa la aparta para que la mire una
   // persona. En los dos casos el mensaje no sigue al flujo de preventa.
@@ -982,6 +1069,19 @@ export async function handleInboundMessage(
     return;
   }
 
+  // Un enlace de mapa sin solicitud del reparto: puede ser la ubicacion de
+  // una entrega del dia.
+  if (result.ok && deps.entregas) {
+    const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: `enlace de mapa (${result.source})` }).catch(() => ({ atendida: false as const }));
+    if (enEntrega.atendida) {
+      const guardada = await repos.locations.save(contact.id, result, text);
+      await repos.locations.confirm(guardada);
+      if (enEntrega.responder) await responderEntrega(enEntrega);
+      else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }));
+      return;
+    }
+  }
+
   const rule = matchRule(rules, text, { isFirstMessage, hasCoordinates: result.ok });
   if (rule) await applyRule(rule, contact, deps);
 
@@ -998,7 +1098,7 @@ export async function handleInboundMessage(
       return;
     }
 
-    if (prefs.preventaActiva) {
+    if (prefs.preventaActiva && (await preventaActiva())) {
       await turnoDePreventa(contact, { texto: text, esPrimerMensaje: isFirstMessage }, deps);
       return;
     }
@@ -1038,4 +1138,10 @@ export async function handleInboundMessage(
 /** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */
 function nombreNegocio(deps: Pick<InboundDeps, 'config' | 'ajustes'>): string {
   return deps.ajustes?.nombreNegocio() ?? deps.config.businessName;
+}
+
+/** Un fallo del modulo de entregas no puede dejar sin atender al cliente: se apunta y se sigue. */
+function request_log(deps: Pick<InboundDeps, 'config'>, mensaje: string, error: unknown): void {
+  void deps;
+  console.warn(`[entregas] ${mensaje}:`, error instanceof Error ? error.message : String(error));
 }

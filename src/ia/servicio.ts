@@ -23,7 +23,8 @@ import type { StokyClient } from '../stoky/client.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { Monitor } from '../salud/monitor.js';
 import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../catalogo/tienda.js';
-import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, type MensajeIA, type ProveedorIA } from './proveedores.js';
+import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, presetDe, probarProveedor, type MensajeIA, type ProveedorIA, type PruebaProveedor } from './proveedores.js';
+import type { ServicioEntregas } from '../entregas/servicio.js';
 import { MODELO_GRATIS_POR_DEFECTO, modeloGratisEfectivo, modelosGratisEnVivo } from './modelos-gratis.js';
 import { ACCIONES_IA, COMO_TOMAR_PEDIDO, manualDelSistema, SISTEMA_PARA_CLIENTES } from './conocimiento-sistema.js';
 import { extraerPedido, registrarPedido, type PedidoDelModelo } from '../pedidos/servicio.js';
@@ -37,10 +38,13 @@ import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { UsuarioSesion } from '../auth/routes.js';
 import type { LeccionesParaPrompt, ServicioEntrenamiento } from '../entrenamiento/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
+import { crearContadorUsoIA, type ContadorUsoIA, type ResumenUsoIA, type TipoUsoIA } from './uso.js';
 
 export const configIASchema = z.object({
   activa: z.boolean().default(false),
   proveedor: z.enum(['puter', 'openai']).default('puter'),
+  /** Con `openai`, cual de los servicios compatibles se eligio en la pantalla (rellena la URL base). */
+  servicio: z.enum(['openai', 'groq', 'openrouter', 'together', 'deepseek', 'google', 'mistral', 'ollama', 'otro']).default('openai'),
   /**
    * Con Puter solo se usan modelos gratuitos de verdad (ver modelos-gratis.ts):
    * si el guardado deja de serlo, se usa el gratuito por defecto.
@@ -96,8 +100,15 @@ export interface ServicioIA {
   catalogo(): CatalogoTienda | StokyClient | undefined;
   /** Vuelve a mirar el catalogo de Puter (cada hora solo) y devuelve el estado. */
   refrescarModelos(): Promise<EstadoIA>;
+  /**
+   * Le pide una frase al modelo y mide cuanto tarda. Con `candidata`, prueba
+   * lo que hay en pantalla sin guardarlo (clave incluida); sin ella, lo guardado.
+   */
+  probarConexion(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; token?: string; modelo?: string }): Promise<PruebaProveedor>;
   activa(): boolean;
   guardar(patch: Partial<ConfigIA> & { token?: string | null }): Promise<EstadoIA>;
+  /** Cuanto se uso la IA hoy y en los ultimos 30 dias: llamadas por tipo, tokens, fallos. Ver uso.ts. */
+  uso(): ResumenUsoIA;
   recargar(): Promise<void>;
   /** Un mensaje del cliente: que contestar. No envia nada. `real` = un turno de verdad (se anota el uso de las lecciones). */
   responder(entrada: { contact: Contact; texto: string; historial?: MensajeIA[]; real?: boolean }): Promise<RespuestaIA>;
@@ -186,6 +197,14 @@ export interface DepsIA {
    * ElevenLabs caido), sale por escrito: la voz nunca es motivo para callar.
    */
   voz?: ServicioVoz;
+  /**
+   * Las entregas del dia (ver src/entregas): el asistente sabe si ESTE
+   * cliente tiene un pedido hoy y en que paso va, y la IA operadora ve las
+   * cifras del dia.
+   */
+  entregas?: ServicioEntregas;
+  /** Para pruebas: el reloj con el que se cuenta el uso por dia. */
+  ahora?: () => Date;
   log?: (m: string, d?: Record<string, unknown>) => void;
 }
 
@@ -205,7 +224,7 @@ export function textoDeFallo(): string {
 }
 
 /** El prompt de sistema: quien es, que sabe, como habla, cuando deriva. */
-export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null; tomaPedidos?: boolean; lecciones?: string | null }): string {
+export function construirSistema(cfg: Omit<ConfigIA, 'servicio'> & { servicio?: ConfigIA['servicio'] }, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null; tomaPedidos?: boolean; lecciones?: string | null; cliente?: string | null }): string {
   const partes = [
     `Eres ${cfg.nombreAsistente}, el asistente de WhatsApp de "${ctx.negocio}". Atiendes a clientes por WhatsApp.`,
     `Hoy es ${ctx.ahora.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' })}, ${ctx.ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}. Horario de atención: ${ctx.horario}.`,
@@ -231,6 +250,9 @@ export function construirSistema(cfg: ConfigIA, ctx: { negocio: string; horario:
   // como "lo que sabes": tienen la misma autoridad que el texto de arriba.
   if (ctx.lecciones) partes.push('', ctx.lecciones);
   if (ctx.catalogo) partes.push('', 'Productos encontrados en el catálogo de la tienda para esta consulta (precio y stock reales ahora mismo; [código] es el SKU). Usa estos precios tal cual, di si está agotado, y si hay enlace mándalo para que lo vea:', ctx.catalogo);
+  // Lo que el sistema sabe de ESTE cliente hoy (su entrega): el asistente
+  // contesta "¿dónde está mi pedido?" con datos, no con evasivas.
+  if (ctx.cliente) partes.push('', 'Sobre este cliente hoy (datos del sistema, fiables):', ctx.cliente);
   return partes.join('\n');
 }
 
@@ -322,11 +344,29 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   const elProveedor = (): ProveedorIA => {
     if (proveedor) return proveedor;
-    proveedor = cfg.proveedor === 'openai' ? crearProveedorOpenAI({ baseUrl: cfg.baseUrl, clave: token, fetchImpl: deps.fetchImpl }) : crearProveedorPuter(token);
+    proveedor = cfg.proveedor === 'openai' ? crearProveedorOpenAI({ baseUrl: cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '', clave: token, fetchImpl: deps.fetchImpl }) : crearProveedorPuter(token);
     return proveedor;
   };
 
   const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen });
+
+  // Cada llamada al modelo queda contada por lo que era (respuesta a un
+  // cliente, lectura para el sistema, orden del panel, prueba), con sus
+  // tokens si la API los dice y con el fallo si lo hubo. Es lo que ensena
+  // "Uso de la IA" en la pantalla y lo que avisa cuando el proveedor cae.
+  const uso: ContadorUsoIA = await crearContadorUsoIA({ settingsRepo, timezone: config.timezone, ahora: deps.ahora, log });
+  async function chatContado(tipo: TipoUsoIA, mensajes: MensajeIA[], opts: { maxTokens?: number } = {}): Promise<string> {
+    const t0 = Date.now();
+    let tokens: { tokensEntrada: number; tokensSalida: number } | undefined;
+    try {
+      const r = await elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens, alUso: (u) => { tokens = u; } });
+      uso.anotar(tipo, { ms: Date.now() - t0, ...(tokens ?? {}) });
+      return r;
+    } catch (error) {
+      uso.anotarFallo(tipo, error instanceof ErrorIA ? `${error.message}${error.detalle ? ` (${error.detalle})` : ''}` : error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
 
   async function responder(entrada: { contact: Contact; texto: string; historial?: MensajeIA[]; real?: boolean }): Promise<RespuestaIA> {
     const { contact, texto } = entrada;
@@ -373,12 +413,13 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     const bloqueLecciones = lecciones ? deps.entrenamiento!.textoParaPrompt(lecciones) : '';
     if (lecciones && entrada.real) deps.entrenamiento!.anotarUso(lecciones);
 
+    const contextoCliente = deps.entregas && contact.phone ? await deps.entregas.contextoDeCliente(contact.phone).catch(() => null) : null;
     const mensajes: MensajeIA[] = [
-      { role: 'system', content: construirSistema(cfg, { negocio: deps.nombreNegocio(), horario: config.BUSINESS_HOURS, ahora: new Date(), catalogo: catalogoTexto, tomaPedidos: Boolean(cat), lecciones: bloqueLecciones || null }) },
+      { role: 'system', content: construirSistema(cfg, { negocio: deps.nombreNegocio(), horario: config.BUSINESS_HOURS, ahora: new Date(), catalogo: catalogoTexto, tomaPedidos: Boolean(cat), lecciones: bloqueLecciones || null, cliente: contextoCliente }) },
       ...historial,
       { role: 'user', content: texto },
     ];
-    const cruda = await elProveedor().chat(mensajes, { modelo: modeloEfectivo() });
+    const cruda = await chatContado(entrada.real ? 'respuestas' : 'pruebas', mensajes);
     const leida = leerRespuesta(cruda);
     // La defensa de despues del modelo: lo que va a salir, revisado. Si
     // trae el prompt, un secreto o un telefono ajeno, no sale; sale una
@@ -531,6 +572,11 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     } catch {
       // Sin cifras del entrenamiento se sigue igual.
     }
+    try {
+      if (deps.entregas) partes.push(await deps.entregas.descripcionParaIA());
+    } catch {
+      // Sin las entregas del dia se sigue igual.
+    }
     return partes.join('\n');
   }
 
@@ -550,6 +596,21 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       await refrescarModelos().catch(() => undefined);
       return estado();
     },
+    async probarConexion(candidata) {
+      const prov = candidata?.proveedor ?? cfg.proveedor;
+      const modelo = candidata?.modelo?.trim() || (prov === cfg.proveedor ? modeloEfectivo() : (candidata?.modelo ?? ''));
+      if (prov === 'puter') {
+        const t = candidata?.token?.trim() || token;
+        if (!t) return { ok: false, detalle: 'No hay sesión de Puter: pulsa "Conectar con Puter" primero.', ms: 0, modelo, proveedor: 'puter' };
+        return probarProveedor(deps.proveedor ?? crearProveedorPuter(t), modelo || MODELO_GRATIS_POR_DEFECTO);
+      }
+      const baseUrl = candidata?.baseUrl?.trim() || cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '';
+      const clave = candidata?.token?.trim() || (candidata?.token === undefined ? token : '');
+      const preset = presetDe(candidata ? '' : cfg.servicio);
+      if (!clave && !preset?.sinClave && !/localhost|127\.0\.0\.1/.test(baseUrl)) return { ok: false, detalle: 'Falta la clave de la API: pégala y vuelve a probar.', ms: 0, modelo, proveedor: 'openai' };
+      if (!modelo) return { ok: false, detalle: 'Falta el modelo: escribe uno (o elige un servicio de la lista, que trae sugerencias).', ms: 0, modelo, proveedor: 'openai' };
+      return probarProveedor(deps.proveedor ?? crearProveedorOpenAI({ baseUrl, clave, fetchImpl: deps.fetchImpl }), modelo);
+    },
     async guardar(patch) {
       const { token: nuevoToken, ...resto } = patch;
       const siguiente = configIASchema.parse({ ...cfg, ...resto });
@@ -563,7 +624,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     },
     responder,
     turno,
-    completar: (mensajes, opts) => elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts?.maxTokens }),
+    completar: (mensajes, opts) => chatContado('lecturas', mensajes, { maxTokens: opts?.maxTokens }),
+    uso: () => uso.resumen(),
     async probar(historial, texto) {
       const contact: Contact = { id: 'prueba', phone: '000', name: 'Cliente de prueba', optInAt: null, optInSource: null, optOutAt: null, lastInboundAt: null };
       return responder({ contact, texto, historial });
@@ -618,7 +680,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         log('orden sospechosa a la IA operadora', { usuario: usuario.usuario, tipo: manipulacion.tipo, patron: manipulacion.patron });
       }
       return ordenar(entrada, {
-        chat: (mensajes, opts) => elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens }),
+        chat: (mensajes, opts) => chatContado('ordenes', mensajes, { maxTokens: opts.maxTokens }),
         sistema: async () => construirSistemaOperador({
           negocio: deps.nombreNegocio(),
           quien: contexto.quien,
@@ -645,7 +707,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         '',
         manualDelSistema(),
       ].join('\n');
-      const cruda = await elProveedor().chat([{ role: 'system', content: sistema }, ...historial, { role: 'user', content: texto }], { modelo: modeloEfectivo(), maxTokens: 700 });
+      const cruda = await chatContado('ordenes', [{ role: 'system', content: sistema }, ...historial, { role: 'user', content: texto }], { maxTokens: 700 });
       return { texto: leerRespuesta(cruda).texto };
     },
   };

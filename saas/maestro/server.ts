@@ -41,7 +41,7 @@ app.addHook('onRequest', async (request, reply) => {
     const [u, ...c] = Buffer.from(h.slice(6), 'base64').toString('utf8').split(':');
     if (u !== undefined && igual(u, cfg.maestroUsuario) && igual(c.join(':'), cfg.maestroClave)) return;
   }
-  return reply.code(401).header('www-authenticate', 'Basic realm="wa-locator maestro"').send('Entra con el usuario y la contrasena del maestro.');
+  return reply.code(401).header('www-authenticate', 'Basic realm="GSGchat maestro"').send('Entra con el usuario y la contrasena del maestro.');
 });
 
 /** Un alta o una baja a la vez: dos `docker compose` a la vez se pisan. */
@@ -178,7 +178,7 @@ app.get('/', async (_request, reply) => reply.type('text/html; charset=utf-8').s
 function pagina(): string {
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Maestro · wa-locator</title>
+<title>Maestro · GSGchat</title>
 <style>
   :root { color-scheme: light dark; --bg:#f4f5f7; --card:#fff; --line:#e3e5e9; --text:#111b21; --muted:#667781; --accent:#128c7e; --ok:#1a7f37; --bad:#b42318; --warn:#b45309; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0f1317; --card:#171c22; --line:#2a313a; --text:#e6e9ee; --muted:#98a2b0; --accent:#2fbfa9; --ok:#4cc36d; --bad:#f0665a; --warn:#f5b04c; } }

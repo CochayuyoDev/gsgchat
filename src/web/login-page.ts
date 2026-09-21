@@ -13,11 +13,14 @@
  * formulario que no va a funcionar.
  */
 
+import { INICIAL_SISTEMA, LEMA_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
+import { TOKENS_CSS } from './tokens.js';
+
 const CSS = `
-  :root { color-scheme: light dark; --bg: #f5f6f8; --card: #fff; --line: #e3e5e9; --text: #16181d; --muted: #6b7280; --accent: #128c7e; --accent-2: #25d366; --bad: #dc2626; --dark: #0f1a17; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #16181d; --card: #1f2229; --line: #2f333c; --text: #f2f3f5; --muted: #9aa0aa; } }
+  ${TOKENS_CSS}
+  :root { --accent-2: #25d366; --dark: #0f1a17; }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { margin: 0; min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; background: var(--bg); color: var(--text); font: 15px/1.55 var(--fuente); }
   .lado { background: var(--dark); color: #e8f1ee; padding: 40px 48px; display: flex; flex-direction: column; justify-content: space-between; }
   .lado .marca { color: #fff; }
   .lado h2 { font-size: 34px; line-height: 1.12; letter-spacing: -.02em; margin: 0 0 14px; max-width: 460px; }
@@ -26,24 +29,29 @@ const CSS = `
   .lado ul { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 10px; max-width: 460px; }
   .lado li { display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; color: #d5e2dd; }
   .lado li i { flex: none; width: 20px; height: 20px; border-radius: 50%; background: rgba(37,211,102,.18); color: var(--accent-2); display: grid; place-items: center; font-style: normal; font-size: 12px; font-weight: 800; margin-top: 2px; }
-  .lado small { color: #7f958e; font-size: 12.5px; }
+  .lado small { color: #8fa39c; font-size: 12.5px; }
   .centro { display: flex; align-items: center; justify-content: center; padding: 28px 20px; }
-  .caja { width: 100%; max-width: 400px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 26px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
+  .caja { width: 100%; max-width: 400px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 26px; box-shadow: var(--sombra-2); }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -.01em; }
   .marca { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; text-decoration: none; color: var(--text); font-weight: 800; }
-  .marca .logo { width: 36px; height: 36px; border-radius: 10px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; }
+  .marca .logo { width: 36px; height: 36px; border-radius: 10px; background: var(--accent); color: var(--primario-texto); display: grid; place-items: center; font-weight: 700; }
   p.muted { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
-  @media (max-width: 860px) { body { grid-template-columns: 1fr; } .lado { display: none; } }
+  @media (max-width: 860px) { body { grid-template-columns: 1fr; } .lado { display: none; } .centro { align-items: flex-start; padding-top: 40px; } }
   label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; }
-  input { width: 100%; padding: 11px 12px; font: inherit; font-size: 15px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 9px; }
-  button { width: 100%; margin-top: 18px; padding: 12px; font: inherit; font-weight: 600; border: 0; border-radius: 9px; background: var(--accent); color: #fff; cursor: pointer; }
+  input { width: 100%; min-height: 44px; padding: 11px 12px; font: inherit; font-size: 15px; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: var(--radio-sm); }
+  input:focus { border-color: var(--primario); outline: 2px solid var(--primario-suave); outline-offset: 0; }
+  button { width: 100%; min-height: 46px; margin-top: 18px; padding: 12px; font: inherit; font-weight: 700; border: 0; border-radius: var(--radio-sm); background: var(--accent); color: var(--primario-texto); cursor: pointer; }
+  button:hover { filter: brightness(1.06); }
+  button:focus-visible { outline: 2px solid var(--primario); outline-offset: 2px; }
   button:disabled { opacity: .6; cursor: default; }
   .error { color: var(--bad); font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .error:not(:empty) { background: var(--rojo-suave); border-radius: var(--radio-sm); padding: 8px 10px; }
   a { color: var(--accent); }
   .pie { margin-top: 16px; font-size: 12.5px; color: var(--muted); text-align: center; }
-  .pestanas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 4px; margin-bottom: 18px; }
-  .pestanas button { width: auto; margin: 0; padding: 9px 8px; font-size: 14px; border-radius: 8px; background: transparent; color: var(--muted); }
-  .pestanas button[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .pestanas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--superficie-2); border: 1px solid var(--line); border-radius: 11px; padding: 4px; margin-bottom: 18px; }
+  .pestanas button { width: auto; min-height: 40px; margin: 0; padding: 9px 8px; font-size: 14px; font-weight: 600; border-radius: 8px; background: transparent; color: var(--muted); }
+  .pestanas button:hover { filter: none; color: var(--text); }
+  .pestanas button[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: var(--sombra); }
 `;
 
 export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNegocio: string }): string {
@@ -85,15 +93,15 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
 
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inicio de sesión - ${escapeHtml(opts.nombreNegocio)}</title><style>${CSS}</style></head>
+<title>Inicio de sesión - ${escapeHtml(opts.nombreNegocio)} · ${NOMBRE_SISTEMA}</title><style>${CSS}</style></head>
 <body>
 <aside class="lado">
-  <a class="marca" href="/"><div class="logo">W</div>${escapeHtml(opts.nombreNegocio)}</a>
+  <a class="marca" href="/"><div class="logo">${INICIAL_SISTEMA}</div>${NOMBRE_SISTEMA}</a>
   <div>
     <h2>Tu WhatsApp trabajando por ti, <span>sin quemar el número</span>.</h2>
     <p>Ubicaciones para el reparto, un chat para todo el equipo y campañas al ritmo que WhatsApp tolera.</p>
     <ul>
-      <li><i>✓</i>Reparto: pide la ubicación a cada cliente e insiste con criterio.</li>
+      <li><i>✓</i>Entregas: pide la ubicación, confirma el pedido, manda el pin al motorizado y avisa la hora de llegada.</li>
       <li><i>✓</i>Salud del número: un semáforo que frena solo antes del baneo.</li>
       <li><i>✓</i>Cuentas por persona y claves de API para los programas.</li>
     </ul>
@@ -102,10 +110,10 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
 </aside>
 <div class="centro">
 <div class="caja">
-  <div class="marca"><div class="logo">W</div><div><b>${escapeHtml(opts.nombreNegocio)}</b><div class="pie" style="margin:0;text-align:left;font-weight:400">WhatsApp para reparto y ventas</div></div></div>
+  <div class="marca"><div class="logo">${INICIAL_SISTEMA}</div><div><b>${escapeHtml(opts.nombreNegocio)}</b><div class="pie" style="margin:0;text-align:left;font-weight:400">${NOMBRE_SISTEMA} · ${LEMA_SISTEMA}</div></div></div>
   <div class="pestanas" role="tablist">
     <button type="button" id="tab-entrar" role="tab">Inicio de sesión</button>
-    <button type="button" id="tab-registro" role="tab">Registro</button>
+    <button type="button" id="tab-registro" role="tab">${opts.primeraCuenta ? 'Registro' : '¿Primera vez?'}</button>
   </div>
   <div id="panel-entrar">${entrar}</div>
   <div id="panel-registro">${registro}</div>

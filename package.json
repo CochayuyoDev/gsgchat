@@ -1,9 +1,9 @@
 {
-  "name": "wa-locator",
+  "name": "gsgchat",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "WhatsApp + Google Maps: extraccion de coordenadas, ubicacion en vivo y envio masivo con guardas anti-bloqueo",
+  "description": "GSGchat: WhatsApp para reparto y entregas (ubicacion, confirmacion, motorizados con hora de llegada) y ventas con IA, con guardas anti-bloqueo",
   "engines": {
     "node": ">=20"
   },

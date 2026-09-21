@@ -78,7 +78,7 @@ export async function entregarUna(
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'user-agent': `wa-locator/${deps.version ?? '1'} (webhooks)`,
+        'user-agent': `GSGchat/${deps.version ?? '1'} (webhooks)`,
         'x-firma': firmar(webhook.secreto, cuerpo, Math.floor(ahora.getTime() / 1000)),
         'x-evento': entrega.evento,
         'x-entrega': String(entrega.id),

@@ -63,6 +63,18 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/stickers\/:id\/enviar$/, 'sticker.enviar'],
   ['POST', /^\/admin\/chat\/atajos$/, 'chat.atajos'],
   ['POST', /^\/admin\/tracking$/, 'rastreo.crear'],
+  // Las tiendas del superadministrador (ver src/tiendas): su historial sale de aqui.
+  ['POST', /^\/admin\/tiendas$/, 'tienda.alta'],
+  ['POST', /^\/admin\/tiendas\/cobro$/, 'tienda.cobro'],
+  ['POST', /^\/admin\/tiendas\/avisos$/, 'tienda.avisos'],
+  ['POST', /^\/admin\/tiendas\/pagos\/:pagoId\/aceptar$/, 'tienda.pago.aceptar'],
+  ['POST', /^\/admin\/tiendas\/pagos\/:pagoId\/rechazar$/, 'tienda.pago.rechazar'],
+  ['POST', /^\/admin\/tiendas\/:id$/, 'tienda.cambiar'],
+  ['POST', /^\/admin\/tiendas\/:id\/pagos$/, 'tienda.pago'],
+  ['POST', /^\/admin\/tiendas\/:id\/suspender$/, 'tienda.suspender'],
+  ['POST', /^\/admin\/tiendas\/:id\/token$/, 'tienda.token'],
+  ['POST', /^\/admin\/tiendas\/:id\/avisar$/, 'tienda.avisar'],
+  ['DELETE', /^\/admin\/tiendas\/:id$/, 'tienda.borrar'],
   ['POST', /^\/admin\/messages\//, 'mensaje.enviar'],
   ['POST', /^\/admin\/chat\/send$/, 'chat.enviar'],
   ['POST', /^\/admin\/chat\/start$/, 'chat.abrir'],
@@ -129,7 +141,7 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
 ];
 
 /** Lo que no merece una fila: mucho trafico y nada que auditar. */
-const IGNORAR: RegExp[] = [/^\/api\/v1\/webhooks\/:id\/probar$/, /^\/api\/v1\/conectores\/:id\/probar$/, /^\/api\/v1\/embed\/token$/, /^\/api\/v1\/conversaciones\/:telefono\/leido$/, /^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/, /^\/admin\/ia\/(ayuda|probar|escenarios)$/];
+const IGNORAR: RegExp[] = [/^\/admin\/tiendas\/avisos\/(revisar|previsualizar)$/, /^\/api\/v1\/webhooks\/:id\/probar$/, /^\/api\/v1\/conectores\/:id\/probar$/, /^\/api\/v1\/embed\/token$/, /^\/api\/v1\/conversaciones\/:telefono\/leido$/, /^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/, /^\/admin\/ia\/(ayuda|probar|escenarios)$/];
 
 export const ETIQUETAS: Record<string, string> = {
   'cuenta.primera': 'Creo la primera cuenta',
@@ -218,6 +230,17 @@ export const ETIQUETAS: Record<string, string> = {
   'conector.borrar': 'Borro un conector de tienda',
   'conector.secreto': 'Cambio el secreto de un conector',
   'pedido.estado': 'Cambio el estado de un pedido del chat',
+  'tienda.alta': 'Dio de alta una tienda',
+  'tienda.cambiar': 'Cambio una tienda (nombre, plan o datos)',
+  'tienda.pago': 'Apunto un pago de una tienda',
+  'tienda.suspender': 'Suspendio o reactivo una tienda',
+  'tienda.token': 'Creo un token nuevo para una tienda',
+  'tienda.borrar': 'Borro una tienda',
+  'tienda.avisar': 'Le escribio por WhatsApp a una tienda',
+  'tienda.cobro': 'Cambio como se cobra a las tiendas',
+  'tienda.avisos': 'Cambio los avisos de vencimiento de las tiendas',
+  'tienda.pago.aceptar': 'Acepto una captura de pago de una tienda',
+  'tienda.pago.rechazar': 'Rechazo una captura de pago de una tienda',
   otro: 'Otra accion',
 };
 

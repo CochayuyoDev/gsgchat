@@ -113,6 +113,67 @@ describe('el servicio del plan', () => {
     expect(plan2.estado().aviso).toMatchObject({ nivel: 'bad' });
   });
 
+  it('con cada consulta va el parte de salud en la cabecera x-gsgchat-estado; sin `estado`, no va nada; si falla, tampoco tumba la consulta', async () => {
+    const cabeceras: Array<Record<string, string>> = [];
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      cabeceras.push({ ...((init?.headers as Record<string, string>) ?? {}) });
+      return new Response(JSON.stringify(planRemoto()), { status: 200 });
+    }) as unknown as typeof fetch;
+    let whatsapp: 'conectado' | 'caido' = 'caido';
+    const plan = await crearServicioPlan({ settingsRepo: createMemorySettingsRepo(), url: config.PLAN_URL, token: config.PLAN_TOKEN, fetchImpl, estado: async () => ({ whatsapp, mensajesHoy: 7, fallosIA: 1, entregasHoy: 2, version: '1.0.0' }) });
+    await plan.refrescar();
+    expect(JSON.parse(cabeceras[0]!['x-gsgchat-estado']!)).toEqual({ whatsapp: 'caido', mensajesHoy: 7, fallosIA: 1, entregasHoy: 2, version: '1.0.0' });
+    whatsapp = 'conectado';
+    await plan.refrescar();
+    expect(JSON.parse(cabeceras[1]!['x-gsgchat-estado']!).whatsapp).toBe('conectado');
+    // Sin `estado`, la cabecera no va.
+    const sinParte = await crearServicioPlan({ settingsRepo: createMemorySettingsRepo(), url: config.PLAN_URL, token: config.PLAN_TOKEN, fetchImpl });
+    await sinParte.refrescar();
+    expect(cabeceras[2]!['x-gsgchat-estado']).toBeUndefined();
+    // Si armar el parte falla, se consulta igual (sin cabecera).
+    const roto = await crearServicioPlan({ settingsRepo: createMemorySettingsRepo(), url: config.PLAN_URL, token: config.PLAN_TOKEN, fetchImpl, estado: () => { throw new Error('sin datos'); } });
+    const e = await roto.refrescar();
+    expect(e.error).toBeNull();
+    expect(e.plan).toMatchObject({ plan: 'prueba' });
+    expect(cabeceras[3]!['x-gsgchat-estado']).toBeUndefined();
+  });
+
+  it('la captura del pago va al maestro (POST .../pago con el token) y /pagar refleja lo que el maestro dice; sin maestro, se explica', async () => {
+    const llamadas: Array<{ url: string; method: string; body: Record<string, unknown> | null; auth: string }> = [];
+    let ultimoPago: Record<string, unknown> | null = null;
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      llamadas.push({ url: String(url), method, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null, auth: String((init?.headers as Record<string, string>)?.authorization ?? '') });
+      if (method === 'POST') {
+        ultimoPago = { id: 7, meses: 2, monto: 98, moneda: 'PEN', nota: 'Op. 1', estado: 'pendiente', motivo: null, at: '2026-09-15T10:00:00.000Z', resueltoAt: null };
+        return new Response(JSON.stringify({ ok: true, pago: ultimoPago }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ...planRemoto(), cobro: { texto: 'Yape a Ali', numero: '987 111 222', qr: '' }, ultimoPago }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const plan = await crearServicioPlan({ settingsRepo: createMemorySettingsRepo(), url: config.PLAN_URL, token: config.PLAN_TOKEN, fetchImpl, ahora: () => new Date('2026-09-15T10:00:00Z') });
+    await plan.refrescar();
+    expect(plan.paraPagar()).toMatchObject({ origen: 'maestro', puedeMandarCaptura: true, cobro: { numero: '987 111 222' }, ultimoPago: null, motivo: null });
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    expect(await plan.mandarCaptura({ imagen: 'hola', meses: 1 })).toMatchObject({ ok: false });
+    expect(await plan.mandarCaptura({ imagen: png, meses: 0 })).toMatchObject({ ok: false });
+    const r = await plan.mandarCaptura({ imagen: png, meses: 2, monto: 98, nota: 'Op. 1' });
+    expect(r).toMatchObject({ ok: true, pago: { id: 7, estado: 'pendiente' } });
+    const post = llamadas.find((l) => l.method === 'POST')!;
+    expect(post.url).toBe('http://maestro/api/plan/tienda/pago');
+    expect(post.auth).toBe('Bearer plt_secreto');
+    expect(post.body).toMatchObject({ imagen: png, meses: 2, monto: 98, nota: 'Op. 1' });
+    // Tras mandarla se refresca: /pagar ya enseña la captura pendiente.
+    expect(plan.paraPagar().ultimoPago).toMatchObject({ id: 7, estado: 'pendiente' });
+    // Sin maestro: nada que mandar, y se dice por que.
+    const libre = await crearServicioPlan({ settingsRepo: createMemorySettingsRepo(), url: '', token: '', fetchImpl });
+    expect(libre.paraPagar()).toMatchObject({ origen: 'libre', puedeMandarCaptura: false });
+    expect(libre.paraPagar().motivo).toContain('no tiene membresía');
+    expect(await libre.mandarCaptura({ imagen: png, meses: 1 })).toMatchObject({ ok: false });
+    await libre.guardarLocal({ plan: 'basico', vencimiento: '2026-12-31' }, 'ali');
+    expect(libre.paraPagar()).toMatchObject({ origen: 'local', puedeMandarCaptura: false });
+    expect(libre.paraPagar().motivo).toContain('Membresía');
+  });
+
   it('sin PLAN_URL la instancia es libre: nada se consulta ni se limita', async () => {
     const m = maestro(() => planRemoto());
     const plan = await crearServicioPlan({ settingsRepo: createMemorySettingsRepo(), url: '', token: '', fetchImpl: m.fetchImpl });

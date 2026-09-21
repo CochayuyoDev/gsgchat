@@ -101,6 +101,32 @@ function acortar(s: unknown, n = 160): string {
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
+/** Busca una entrega de hoy por pedido, nombre o telefono. */
+async function buscarEntrega(ctx: ContextoAccion, quien: string): Promise<{ id: number; referencia: string; phone: string; nombre: string | null } | null> {
+  const r = await ctx.llamar({ method: 'GET', url: '/admin/entregas' });
+  if (!ok(r)) return null;
+  const lista = ((r.json as { entregas?: Array<{ id: number; referencia: string; phone: string; nombre: string | null }> }).entregas ?? []);
+  const digitos = telefonoADigitos(quien);
+  const q = quien.trim().toLowerCase();
+  return (
+    lista.find((e) => e.referencia.toLowerCase() === q) ??
+    lista.find((e) => /^\d{6,}$/.test(digitos) && e.phone === digitos) ??
+    lista.find((e) => (e.nombre ?? '').toLowerCase() === q) ??
+    lista.find((e) => (e.nombre ?? '').toLowerCase().includes(q) || e.referencia.toLowerCase().includes(q)) ??
+    null
+  );
+}
+
+/** Busca un motorizado por nombre o telefono. */
+async function buscarMotorizado(ctx: ContextoAccion, quien: string): Promise<{ id: number; nombre: string; phone: string } | null> {
+  const r = await ctx.llamar({ method: 'GET', url: '/admin/motorizados' });
+  if (!ok(r)) return null;
+  const lista = ((r.json as { motorizados?: Array<{ id: number; nombre: string; phone: string }> }).motorizados ?? []);
+  const digitos = telefonoADigitos(quien);
+  const q = quien.trim().toLowerCase();
+  return lista.find((m) => /^\d{6,}$/.test(digitos) && m.phone === digitos) ?? lista.find((m) => m.nombre.toLowerCase() === q) ?? lista.find((m) => m.nombre.toLowerCase().includes(q)) ?? null;
+}
+
 /** Busca un contacto por telefono o nombre a traves del panel. */
 async function buscarContacto(ctx: ContextoAccion, quien: string): Promise<{ id: string; phone: string; name: string | null } | null> {
   const digitos = telefonoADigitos(quien);
@@ -463,6 +489,201 @@ export const ACCIONES: Accion[] = [
       const r = await ctx.llamar({ method: 'POST', url: `/admin/rutas/solicitudes/${s.id}/reintentar`, body: {} });
       if (!ok(r)) return errorDe(r, 'No se pudo devolver a la cola.');
       return { ok: true, resumen: `${s.nombre ?? s.phone} vuelve a la cola del reparto.`, ir: '/rutas' };
+    },
+  }),
+
+  // ------------------------------------------------------------ entregas
+  def({
+    nombre: 'entregas.ver',
+    tipo: 'consulta',
+    descripcion: 'Las entregas de hoy: cuántas faltan de ubicación, cuántas de confirmar, cuáles esperan motorizado, cuáles ya tienen hora de llegada, cuáles necesitan una persona. Con "q" filtra por nombre, pedido o teléfono.',
+    parametros: 'q (opcional), estado (opcional: esperando_ubicacion | esperando_confirmacion | lista | esperando_motorizado | avisada | terminada | cancelada | incidencia)',
+    ejemplo: { orden: '¿cómo van las entregas de hoy?', accion: { accion: 'entregas.ver' } },
+    schema: z.object({ q: z.string().trim().max(120).optional(), estado: z.string().trim().max(40).optional() }),
+    async ejecutar(p, ctx) {
+      const r = await ctx.llamar({ method: 'GET', url: '/admin/entregas' });
+      if (!ok(r)) return errorDe(r, 'No se pudieron leer las entregas.');
+      const j = r.json as { dia: string; cifras: Record<string, number>; entregas: Array<{ id: number; referencia: string; phone: string; nombre: string | null; estado: string; situacion: string; motorizado: { nombre: string } | null; llegaAproxAt: string | null }> };
+      const q = (p.q ?? '').toLowerCase();
+      const lista = j.entregas.filter((e) => (!p.estado || e.estado === p.estado) && (!q || (e.nombre ?? '').toLowerCase().includes(q) || e.referencia.toLowerCase().includes(q) || e.phone.includes(q.replace(/\D/g, '') || '§')));
+      const c = j.cifras;
+      const resumen = `Entregas de hoy (${j.dia}): ${c.total} en total · ${c.faltaUbicacion} sin ubicación · ${c.faltaConfirmacion} sin confirmar · ${c.lista} listas · ${c.esperando_motorizado} esperando motorizado · ${(c.avisada ?? 0) + (c.terminada ?? 0)} con hora de llegada · ${c.incidencia} necesitan una persona · ${c.cancelada} canceladas.`;
+      return { ok: true, resumen, datos: lista.slice(0, 30).map((e) => ({ id: e.id, pedido: e.referencia, cliente: e.nombre ?? e.phone, telefono: e.phone, estado: e.estado, situacion: e.situacion, motorizado: e.motorizado?.nombre ?? null, llega: e.llegaAproxAt })), ir: '/entregas' };
+    },
+  }),
+  def({
+    nombre: 'entregas.sincronizar',
+    tipo: 'cambio',
+    descripcion: 'Pedirle a GSG ahora mismo su lista del día (quién falta ubicación, quién falta confirmar, quién terminó) y meterla en el sistema.',
+    parametros: '(ninguno)',
+    ejemplo: { orden: 'trae los pendientes de GSG', accion: { accion: 'entregas.sincronizar' } },
+    schema: z.object({}),
+    async ejecutar(_p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/entregas/sincronizar', body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo sincronizar con GSG.');
+      const j = r.json as { ok: boolean; detalle: string };
+      return { ok: j.ok, resumen: j.detalle, ir: '/entregas' };
+    },
+  }),
+  def({
+    nombre: 'entregas.confirmar',
+    tipo: 'cambio',
+    descripcion: 'Dar por confirmada a mano la entrega de un cliente (te lo dijo por teléfono) o cancelarla.',
+    parametros: 'cliente (pedido, nombre o teléfono), confirmada (true/false), motivo (si se cancela)',
+    ejemplo: { orden: 'Ana Quispe confirmó por teléfono su pedido', accion: { accion: 'entregas.confirmar', cliente: 'Ana Quispe', confirmada: true } },
+    schema: z.object({ cliente: texto(120), confirmada: z.boolean().default(true), motivo: z.string().trim().max(300).optional() }),
+    async ejecutar(p, ctx) {
+      const e = await buscarEntrega(ctx, p.cliente);
+      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/entregas' };
+      const r = p.confirmada
+        ? await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/confirmar`, body: { confirmada: true } })
+        : await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/cancelar`, body: { motivo: p.motivo ?? `cancelada por la IA a petición de ${ctx.quien}` } });
+      if (!ok(r)) return errorDe(r, 'No se pudo cambiar la entrega.');
+      return { ok: true, resumen: p.confirmada ? `${e.referencia} de ${e.nombre ?? e.phone} queda confirmada; si tiene ubicación, se le manda a un motorizado.` : `${e.referencia} de ${e.nombre ?? e.phone} queda cancelada y GSG se entera.`, ir: '/entregas' };
+    },
+  }),
+  def({
+    nombre: 'entregas.reasignar',
+    tipo: 'cambio',
+    descripcion: 'Pasar la entrega de un cliente a otro motorizado (uno concreto o el que menos carga tenga).',
+    parametros: 'cliente (pedido, nombre o teléfono), motorizado (nombre, opcional)',
+    ejemplo: { orden: 'el pedido P-1003 que lo lleve Carlos', accion: { accion: 'entregas.reasignar', cliente: 'P-1003', motorizado: 'Carlos' } },
+    schema: z.object({ cliente: texto(120), motorizado: z.string().trim().max(120).optional() }),
+    async ejecutar(p, ctx) {
+      const e = await buscarEntrega(ctx, p.cliente);
+      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/entregas' };
+      let motorizadoId: number | null = null;
+      if (p.motorizado) {
+        const m = await buscarMotorizado(ctx, p.motorizado);
+        if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/entregas' };
+        motorizadoId = m.id;
+      }
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/reasignar`, body: { motorizadoId } });
+      if (!ok(r)) return errorDe(r, 'No se pudo reasignar.');
+      return { ok: true, resumen: `${e.referencia} de ${e.nombre ?? e.phone} ${motorizadoId ? `pasa a ${p.motorizado}` : 'vuelve a repartirse al motorizado menos cargado'}.`, ir: '/entregas' };
+    },
+  }),
+  def({
+    nombre: 'entregas.reintentar',
+    tipo: 'cambio',
+    descripcion: 'Volver a poner en marcha una entrega que estaba apartada para una persona (incidencia).',
+    parametros: 'cliente (pedido, nombre o teléfono)',
+    ejemplo: { orden: 'vuelve a intentar la entrega de Luis Huamán', accion: { accion: 'entregas.reintentar', cliente: 'Luis Huamán' } },
+    schema: z.object({ cliente: texto(120) }),
+    async ejecutar(p, ctx) {
+      const e = await buscarEntrega(ctx, p.cliente);
+      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/entregas' };
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/reintentar`, body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo reintentar.');
+      return { ok: true, resumen: `${e.referencia} de ${e.nombre ?? e.phone} vuelve a estar en marcha.`, ir: '/entregas' };
+    },
+  }),
+  def({
+    nombre: 'motorizados.ver',
+    tipo: 'consulta',
+    descripcion: 'Los motorizados: quiénes están activos, su zona y cuántas entregas llevan hoy.',
+    parametros: '(ninguno)',
+    ejemplo: { orden: '¿qué motorizados hay hoy?', accion: { accion: 'motorizados.ver' } },
+    schema: z.object({}),
+    async ejecutar(_p, ctx) {
+      const r = await ctx.llamar({ method: 'GET', url: '/admin/entregas' });
+      if (!ok(r)) return errorDe(r, 'No se pudieron leer los motorizados.');
+      const j = r.json as { motorizados: Array<{ id: number; nombre: string; phone: string; placa: string | null; zona: string | null; estado: string; entregasHoy: number; enManos: number }> };
+      const activos = j.motorizados.filter((m) => m.estado === 'activo');
+      return { ok: true, resumen: `${activos.length} motorizados activos de ${j.motorizados.length}: ${activos.map((m) => `${m.nombre} (${m.entregasHoy} hoy${m.enManos ? `, ${m.enManos} en mano` : ''})`).join(', ') || 'ninguno'}.`, datos: j.motorizados.map((m) => ({ id: m.id, nombre: m.nombre, telefono: m.phone, placa: m.placa, zona: m.zona, estado: m.estado, hoy: m.entregasHoy, enMano: m.enManos })), ir: '/entregas' };
+    },
+  }),
+  def({
+    nombre: 'motorizados.alta',
+    tipo: 'cambio',
+    descripcion: 'Dar de alta un motorizado con su WhatsApp (y su zona y placa si se dicen).',
+    parametros: 'nombre, telefono, zona (opcional), placa (opcional)',
+    ejemplo: { orden: 'da de alta al motorizado Carlos Rojas, 999000001, zona Miraflores y San Isidro', accion: { accion: 'motorizados.alta', nombre: 'Carlos Rojas', telefono: '999000001', zona: 'Miraflores, San Isidro' } },
+    schema: z.object({ nombre: texto(120), telefono, zona: z.string().trim().max(300).optional(), placa: z.string().trim().max(20).optional() }),
+    async ejecutar(p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/motorizados', body: { nombre: p.nombre, telefono: p.telefono, zona: p.zona, placa: p.placa } });
+      if (!ok(r)) return errorDe(r, 'No se pudo dar de alta.');
+      const j = r.json as { nuevo: boolean; motorizado: { nombre: string; phone: string } };
+      return { ok: true, resumen: j.nuevo ? `${j.motorizado.nombre} (${j.motorizado.phone}) dado de alta como motorizado.` : `${j.motorizado.nombre} ya estaba dado de alta.`, ir: '/entregas' };
+    },
+  }),
+  def({
+    nombre: 'motorizados.estado',
+    tipo: 'cambio',
+    descripcion: 'Poner a un motorizado activo, en descanso o de baja.',
+    parametros: 'motorizado (nombre o teléfono), estado: activo | descanso | baja',
+    ejemplo: { orden: 'Julio hoy descansa', accion: { accion: 'motorizados.estado', motorizado: 'Julio', estado: 'descanso' } },
+    schema: z.object({ motorizado: texto(120), estado: z.enum(['activo', 'descanso', 'baja']) }),
+    async ejecutar(p, ctx) {
+      const m = await buscarMotorizado(ctx, p.motorizado);
+      if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/entregas' };
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/motorizados/${m.id}`, body: { estado: p.estado } });
+      if (!ok(r)) return errorDe(r, 'No se pudo cambiar el estado.');
+      return { ok: true, resumen: `${m.nombre} queda ${p.estado === 'activo' ? 'activo' : p.estado === 'descanso' ? 'en descanso' : 'de baja'}.`, ir: '/entregas' };
+    },
+  }),
+
+  // ------------------------------------------------ conversaciones guardadas
+  def({
+    nombre: 'guardados.buscar',
+    tipo: 'consulta',
+    descripcion: 'Busca en las conversaciones guardadas (las ya cerradas): por lo que se dijo, por etiqueta (reclamo, entrega, cancelacion, cambio, pago, motorizado, consulta, venta, sin_respuesta, otro), por pedido, por cliente o teléfono, y por fechas. Devuelve el resumen de cada una.',
+    parametros: 'texto (opcional: palabras que se dijeron), etiqueta (opcional), pedido (opcional), q (opcional: nombre o teléfono), desde y hasta (opcionales, AAAA-MM-DD)',
+    ejemplo: { orden: '¿quién se quejó de la demora la semana pasada?', accion: { accion: 'guardados.buscar', texto: 'demora', etiqueta: 'reclamo', desde: '2026-09-14', hasta: '2026-09-20' } },
+    schema: z.object({
+      texto: z.string().trim().max(200).optional(),
+      etiqueta: z.string().trim().max(40).optional(),
+      pedido: z.string().trim().max(120).optional(),
+      q: z.string().trim().max(120).optional(),
+      desde: z.string().trim().max(10).optional(),
+      hasta: z.string().trim().max(10).optional(),
+    }),
+    async ejecutar(p, ctx) {
+      const qs = new URLSearchParams({ limit: '10' });
+      if (p.texto) qs.set('texto', p.texto);
+      if (p.etiqueta) qs.set('etiqueta', p.etiqueta.toLowerCase().replace(/\s+/g, '_'));
+      if (p.pedido) qs.set('pedido', p.pedido);
+      if (p.q) qs.set('q', /\d{6,}/.test(p.q) ? telefonoADigitos(p.q) : p.q);
+      if (p.desde) qs.set('desde', p.desde);
+      if (p.hasta) qs.set('hasta', p.hasta);
+      const r = await ctx.llamar({ method: 'GET', url: `/admin/archives?${qs.toString()}` });
+      if (!ok(r)) return errorDe(r, 'No se pudieron leer las conversaciones guardadas.');
+      const j = r.json as { total: number; items: Array<{ id: number; name: string | null; phone: string; pedido: string | null; createdAt: string; etiquetas: string[]; resumen: string | null; messageCount: number }> };
+      const que = [p.texto ? `con "${p.texto}"` : '', p.etiqueta ? `etiqueta ${p.etiqueta}` : '', p.pedido ? `pedido ${p.pedido}` : '', p.q ? `de ${p.q}` : '', p.desde || p.hasta ? `entre ${p.desde ?? 'el principio'} y ${p.hasta ?? 'hoy'}` : ''].filter(Boolean).join(', ');
+      if (!j.total) return { ok: true, resumen: `No hay ninguna conversación guardada ${que || 'con esos filtros'}.`, ir: '/guardados' };
+      const resumen = `${j.total} conversación(es) guardada(s) ${que}${j.total > j.items.length ? ` (se muestran ${j.items.length})` : ''}.`;
+      return {
+        ok: true,
+        resumen,
+        datos: j.items.map((a) => ({ id: a.id, cliente: a.name ?? a.phone, telefono: a.phone, pedido: a.pedido, fecha: a.createdAt.slice(0, 10), mensajes: a.messageCount, etiquetas: a.etiquetas, resumen: acortar(a.resumen, 220) })),
+        ir: '/guardados',
+      };
+    },
+  }),
+  def({
+    nombre: 'guardados.resumen',
+    tipo: 'consulta',
+    descripcion: 'El resumen, las etiquetas, las notas y las primeras líneas de una conversación guardada concreta (por su id, o la última de un cliente).',
+    parametros: 'id (opcional: el id de la conversación guardada) o cliente (nombre o teléfono)',
+    ejemplo: { orden: '¿qué pasó en la última conversación guardada de Ana Quispe?', accion: { accion: 'guardados.resumen', cliente: 'Ana Quispe' } },
+    schema: z.object({ id: z.coerce.number().int().positive().optional(), cliente: z.string().trim().max(120).optional() }).refine((v) => v.id || v.cliente, { message: 'Hace falta el id o el cliente.' }),
+    async ejecutar(p, ctx) {
+      let id = p.id ?? null;
+      if (!id && p.cliente) {
+        const q = /\d{6,}/.test(p.cliente) ? telefonoADigitos(p.cliente) : p.cliente;
+        const lista = await ctx.llamar({ method: 'GET', url: `/admin/archives?q=${encodeURIComponent(q)}&limit=1` });
+        if (!ok(lista)) return errorDe(lista, 'No se pudieron leer las conversaciones guardadas.');
+        const items = (lista.json as { items: Array<{ id: number }> }).items;
+        if (!items.length) return { ok: true, resumen: `No hay ninguna conversación guardada de ${p.cliente}.`, ir: '/guardados' };
+        id = items[0]!.id;
+      }
+      const r = await ctx.llamar({ method: 'GET', url: `/admin/archives/${id}` });
+      if (!ok(r)) return errorDe(r, 'No se pudo leer esa conversación guardada.');
+      const j = r.json as { archive: { id: number; name: string | null; phone: string; pedido: string | null; createdAt: string; etiquetas: string[]; resumen: string | null; notas: string | null; messageCount: number; cerradoPor: string | null }; messages: Array<{ direction: 'in' | 'out'; body: string | null; kind: string; createdAt: string }> };
+      const a = j.archive;
+      const lineas = j.messages.slice(0, 10).map((m) => `${m.direction === 'in' ? a.name ?? a.phone : 'Nosotros'}: ${m.body ?? `[${m.kind}]`}`.slice(0, 200));
+      const resumen = `Conversación guardada #${a.id} de ${a.name ?? a.phone}${a.pedido ? ` (pedido ${a.pedido})` : ''}, ${a.messageCount} mensajes, guardada el ${a.createdAt.slice(0, 10)}. ${a.resumen ?? 'Sin resumen todavía.'}`;
+      return { ok: true, resumen, datos: { id: a.id, cliente: a.name ?? a.phone, telefono: a.phone, pedido: a.pedido, etiquetas: a.etiquetas, resumen: a.resumen, notas: a.notas, cerradoPor: a.cerradoPor, primerasLineas: lineas }, ir: `/guardados?abrir=${a.id}` };
     },
   }),
 

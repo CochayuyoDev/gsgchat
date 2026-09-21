@@ -70,6 +70,8 @@ export interface AuthDeps {
   ahora?: () => Date;
   /** Como se llama el negocio ahora mismo (se puede cambiar desde la pantalla). */
   nombreNegocio?: () => string;
+  /** El modo del sistema (gsg | completo), para /admin/yo. */
+  modo?: () => 'gsg' | 'completo';
   /**
    * El secreto con el que el propio proceso se llama a si mismo (la IA
    * operadora ejecuta por `app.inject` con la identidad de quien ordena).
@@ -89,7 +91,7 @@ export function secretoDeSesion(config: Config): string {
   return createHmac('sha256', config.TRACKING_SECRET).update('sesion-de-usuario').digest('hex');
 }
 
-const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte'];
+const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/motorizados', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/mapa', '/pagar', '/fiabilidad', '/docs/contrato-gsg.md'];
 
 /** Lo que solo toca una persona con rol admin: nunca una clave de API. */
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
@@ -317,7 +319,9 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   // --- quien soy, y usuarios (solo admin) --------------------------------
 
-  app.get('/admin/yo', async (request) => request.usuario);
+  // Con el modo del sistema (gsg | completo): el armazon decide que menu enseñar.
+  // `conMaestro`: esta instalacion depende de un maestro (SaaS), asi que "Pagar" tiene a quien mandarle la captura.
+  app.get('/admin/yo', async (request) => (request.usuario ? { ...request.usuario, modo: deps.modo?.() ?? 'gsg', conMaestro: deps.plan?.estado().origen === 'maestro' } : request.usuario));
 
   app.get('/admin/usuarios', async () => usuarios.listar());
 

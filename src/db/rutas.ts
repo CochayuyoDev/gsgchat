@@ -158,8 +158,14 @@ export interface EventoSolicitud {
   createdAt: Date;
 }
 
-export type TipoReporte = 'ubicacion' | 'incidencia' | 'resumen';
+/**
+ * Lo que se le cuenta a GSG. Los dos ultimos son del modulo de entregas
+ * (src/entregas): que el cliente confirmo su pedido, y a que hora le llega.
+ */
+export type TipoReporte = 'ubicacion' | 'incidencia' | 'resumen' | 'confirmacion' | 'entrega';
 export type EstadoReporte = 'pendiente' | 'enviado' | 'fallido';
+
+export type CifrasReportes = Record<EstadoReporte, number> & { atascado: number };
 
 export interface Reporte {
   id: number;
@@ -263,7 +269,12 @@ export interface RutasRepo {
     estado: EstadoReporte,
     extra?: { externoId?: string | null; error?: string | null },
   ): Promise<void>;
-  cifrasReportes(): Promise<Record<EstadoReporte, number>>;
+  /**
+   * Cuantos hay en cada estado. `atascado` son los pendientes que ya se
+   * intentaron mandar y GSG no acepto (no respondio): siguen en cola, pero
+   * la pantalla tiene que avisar, no esperar a que sean veinte.
+   */
+  cifrasReportes(): Promise<CifrasReportes>;
 }
 
 // ------------------------------------------------------------- mapeo
@@ -795,11 +806,16 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     },
 
     async cifrasReportes() {
-      const { rows } = await pool.query<{ estado: EstadoReporte; total: number }>(
-        'select estado, count(*)::int as total from rutas_reportes group by estado',
+      const { rows } = await pool.query<{ estado: EstadoReporte; total: number; atascados: number }>(
+        `select estado, count(*)::int as total,
+                count(*) filter (where estado = 'pendiente' and intentos > 0)::int as atascados
+           from rutas_reportes group by estado`,
       );
-      const cifras: Record<EstadoReporte, number> = { pendiente: 0, enviado: 0, fallido: 0 };
-      for (const r of rows) cifras[r.estado] = Number(r.total);
+      const cifras: CifrasReportes = { pendiente: 0, enviado: 0, fallido: 0, atascado: 0 };
+      for (const r of rows) {
+        cifras[r.estado] = Number(r.total);
+        if (r.estado === 'pendiente') cifras.atascado = Number(r.atascados);
+      }
       return cifras;
     },
   };

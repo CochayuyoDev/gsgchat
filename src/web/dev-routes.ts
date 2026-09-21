@@ -26,6 +26,7 @@ import type { ServicioStickers } from '../stickers/stickers.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
+import type { ServicioEntregas } from '../entregas/servicio.js';
 import { processChange, type WebhookDeps } from '../whatsapp/webhook.js';
 import type { ChangeValue } from '../whatsapp/types.js';
 
@@ -42,6 +43,7 @@ export interface DevRoutesDeps {
   ia?: ServicioIA;
   lista?: ServicioEnvioAutomatico;
   voz?: ServicioVoz;
+  entregas?: ServicioEntregas;
 }
 
 const simularSchema = z.object({
@@ -51,6 +53,8 @@ const simularSchema = z.object({
   location: z.object({ latitude: z.number(), longitude: z.number() }).optional(),
   /** Un adjunto sin texto: la foto de la fachada, el audio con la direccion. */
   adjunto: z.enum(['image', 'audio', 'video', 'document', 'sticker']).optional(),
+  /** Un boton pulsado (los SI / NO de las entregas), tal como lo traduce cualquier proveedor. */
+  boton: z.object({ id: z.string().min(1).max(200), title: z.string().max(200).default('') }).optional(),
   name: z.string().max(200).optional(),
 });
 
@@ -67,7 +71,7 @@ export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDep
   const { config, repos, sender, wa, settings, catalogo, salud, ajustes, stickers } = deps;
   if (!config.DEV_SIMULATE_INBOUND) return;
 
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes, stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes, stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas };
 
   /**
    * Mete un entrante como si lo hubiera mandado ese numero.
@@ -100,7 +104,15 @@ export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDep
                 type: body.adjunto,
                 [body.adjunto]: { id: `media-${id}`, mime_type: MIME_DE_PRUEBA[body.adjunto] },
               }
-            : {
+            : body.boton
+              ? {
+                  id,
+                  from: phone,
+                  timestamp: String(Math.floor(Date.now() / 1000)),
+                  type: 'interactive',
+                  interactive: { type: 'button_reply', button_reply: { id: body.boton.id, title: body.boton.title } },
+                }
+              : {
                 id,
                 from: phone,
                 timestamp: String(Math.floor(Date.now() / 1000)),

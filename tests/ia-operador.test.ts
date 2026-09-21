@@ -74,7 +74,7 @@ describe('leer lo que escribe el modelo', () => {
 
   it('el catalogo tiene lo esencial y el prompt lo lleva entero, con las reglas que no se negocian', () => {
     const nombres = ACCIONES.map((a) => a.nombre);
-    for (const n of ['lista.ver', 'lista.agregar', 'lista.quitar', 'mensaje.enviar', 'reparto.estado', 'reparto.cargar', 'grupo.enviar', 'numero.estado', 'configuracion.cambiar', 'contactos.buscar', 'chat.ver']) expect(nombres).toContain(n);
+    for (const n of ['lista.ver', 'lista.agregar', 'lista.quitar', 'mensaje.enviar', 'reparto.estado', 'reparto.cargar', 'grupo.enviar', 'numero.estado', 'configuracion.cambiar', 'contactos.buscar', 'chat.ver', 'guardados.buscar', 'guardados.resumen']) expect(nombres).toContain(n);
     expect(nombres.some((n) => /clave|usuario|password|contrasena/i.test(n))).toBe(false);
     const cat = catalogoParaElModelo({ esAdmin: false, conCatalogo: false });
     expect(cat).not.toContain('configuracion.cambiar');
@@ -310,6 +310,47 @@ describe('ordenes desde el panel', () => {
     const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: 'hola' } });
     expect(r.statusCode).toBe(400);
     expect(r.json().error).toContain('/panel#ia');
+  });
+
+  it('busca en las conversaciones guardadas y cuenta lo que hay; el resumen de una concreta, por cliente', async () => {
+    const h = await sesion();
+    const ahora = new Date();
+    const a = await repos.archives.add({ contactId: 'c-ana', phone: '51987654321', name: 'Ana Quispe', file: 'x.ndjson.gz', bytes: 10, messageCount: 3, firstMessageAt: ahora, lastMessageAt: ahora, reason: 'manual', sha256: null, textoBusqueda: 'el pedido llegó tarde, mucha demora', pedido: 'P-1001' });
+    await repos.archives.update(a.id, { etiquetas: ['reclamo', 'entrega'], resumen: 'Ana se quejó de la demora del pedido.' });
+    await repos.archives.add({ contactId: 'c-luis', phone: '51911111111', name: 'Luis', file: 'y.ndjson.gz', bytes: 10, messageCount: 2, firstMessageAt: ahora, lastMessageAt: ahora, reason: 'manual', sha256: null, textoBusqueda: 'todo bien, gracias' });
+
+    modelo.cola.push('Busco.\n[ACCIONES]\n{"accion":"guardados.buscar","texto":"demora","etiqueta":"reclamo"}\n[/ACCIONES]', 'Ana Quispe se quejó de la demora.');
+    const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: '¿quién se quejó de la demora?' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().hechas[0]).toMatchObject({ accion: 'guardados.buscar', tipo: 'consulta', ok: true });
+    const resultados = modelo.recibido[1]![modelo.recibido[1]!.length - 1]!.content;
+    expect(resultados).toContain('1 conversación(es) guardada(s) con "demora", etiqueta reclamo');
+    expect(resultados).toContain('Ana Quispe');
+    expect(resultados).not.toContain('Luis');
+
+    // Sin nada que coincida lo dice, sin inventar.
+    modelo.cola.length = 0;
+    modelo.cola.push('Busco.\n[ACCIONES]\n{"accion":"guardados.buscar","pedido":"P-9999"}\n[/ACCIONES]', 'No hay ninguna.');
+    const nada = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: '¿hay algo del pedido P-9999?' } });
+    expect(nada.json().hechas[0].resumen).toMatch(/No hay ninguna conversación guardada/);
+  });
+
+  it('el resumen de una conversacion guardada concreta, por cliente, lee el hilo por la ruta del panel', async () => {
+    const h = await sesion();
+    const ahora = new Date();
+    const a = await repos.archives.add({ contactId: 'c-ana', phone: '51987654321', name: 'Ana Quispe', file: 'no-existe.ndjson.gz', bytes: 10, messageCount: 3, firstMessageAt: ahora, lastMessageAt: ahora, reason: 'manual', sha256: null });
+    await repos.archives.update(a.id, { etiquetas: ['reclamo'], resumen: 'Ana se quejó.' });
+    // El fichero no esta en disco: la ruta del panel falla y la IA lo cuenta sin inventar.
+    modelo.cola.push('Miro.\n[ACCIONES]\n{"accion":"guardados.resumen","cliente":"Ana Quispe"}\n[/ACCIONES]', 'No pude leerla.');
+    const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: '¿qué pasó con Ana Quispe?' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().hechas[0]).toMatchObject({ accion: 'guardados.resumen', tipo: 'consulta', ok: false });
+    // Y con un cliente que no tiene nada guardado, tambien lo dice.
+    modelo.cola.length = 0;
+    modelo.cola.push('Miro.\n[ACCIONES]\n{"accion":"guardados.resumen","cliente":"Nadie"}\n[/ACCIONES]', 'No hay nada.');
+    const nada = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: '¿y Nadie?' } });
+    expect(nada.json().hechas[0]).toMatchObject({ accion: 'guardados.resumen', ok: true });
+    expect(nada.json().hechas[0].resumen).toMatch(/No hay ninguna conversación guardada de Nadie/);
   });
 
   it('el catalogo para la pantalla', async () => {

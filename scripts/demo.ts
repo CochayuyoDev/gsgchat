@@ -37,6 +37,15 @@ import { crearServicioStickers } from '../src/stickers/stickers.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { crearConexionGsg, TOKEN_SIMULADOR } from '../src/rutas/conexion-gsg.js';
+import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
+import { crearServicioEntregas } from '../src/entregas/servicio.js';
+import { crearServicioResumenes, startResumenes } from '../src/resumenes/servicio.js';
+import { startMotorEntregas } from '../src/entregas/motor.js';
+import { cargarLote } from '../src/rutas/cargar.js';
+import { crearServicioPlan } from '../src/plan/servicio.js';
+import { crearServicioVoz } from '../src/voz/servicio.js';
+import { crearFiabilidad } from '../src/salud/fiabilidad.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -54,6 +63,9 @@ const config = loadConfig({
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? '',
   // Que las pantallas avisen de que aqui no sale ningun mensaje de verdad.
   DEMO_MODE: 'true',
+  // En la demo se pueden simular entrantes (un pin, un "si", un "40 min"):
+  // es como se prueba el flujo de entregas sin WhatsApp.
+  DEV_SIMULATE_INBOUND: 'true',
   TRACKING_SECRET: 'demo'.repeat(12),
   GEO_BBOX: 'lima',
   // Los respaldos de la demo van a un directorio aparte y no se limpia nada
@@ -349,10 +361,81 @@ const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: mkdtemp
 const lista = crearServicioEnvioAutomatico({ repos, opcionesReparto: opcionesDesdeConfig(config), plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, salud });
 const entrenamiento = await crearServicioEntrenamiento({ repo: repos.entrenamiento, nombreNegocio: () => ajustes.nombreNegocio() });
 await entrenamiento.cargar();
-const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista, bus, entrenamiento });
+// Las entregas del dia con el simulador de GSG ya elegido y cargado: la demo
+// ensena el flujo entero (ubicacion, confirmacion, motorizado, hora de llegada).
+const conexionGsg = await crearConexionGsg({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, config });
+await conexionGsg.usarSimulador();
+const simuladorGsg = crearGsgSimulado({ token: TOKEN_SIMULADOR });
+simuladorGsg.cargarDePrueba();
+const entregas = await crearServicioEntregas({
+  repos,
+  repo: repos.entregas,
+  sender,
+  settingsRepo,
+  gsg: conexionGsg.puerto(),
+  conexionGsg,
+  cargarLote: (body) => cargarLote({ repos, plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, timezone: config.timezone, lista }, body),
+  nombreNegocio: () => ajustes.nombreNegocio(),
+  supervisor: () => politica().avisarA,
+  ia: () => (ia.estado().tieneToken ? { completar: (mensajes, opts) => ia.completar(mensajes, opts) } : null),
+  // La demo simula la API de Meta: fuera de la ventana de 24 h van plantillas.
+  usarPlantilla: () => true,
+  timezone: config.timezone,
+  publicBaseUrl: config.PUBLIC_BASE_URL,
+  bus,
+});
+for (const [nombre, body] of [
+  ['entrega_confirmacion', 'Hola {{1}}, hoy le llevamos {{2}} de {{3}}. ¿Nos confirma que va a poder recibirlo? Responda SÍ o NO.'],
+  ['entrega_motorizado', 'Nuevo pedido para {{1}}: {{2}}. Pin: {{3}}. ¿En cuántos minutos lo entregas?'],
+  ['entrega_aviso', 'Hola {{1}}, {{2}} ya está en camino: llega alrededor de las {{3}}.'],
+] as const) {
+  await repos.templates.upsert(approvedTemplate({ name: nombre, body, variables: 3 }));
+}
+await entregas.guardarAjustes({ plantillas: { confirmacion: 'entrega_confirmacion', motorizado: 'entrega_motorizado', aviso: 'entrega_aviso' } });
+// La membresia (la lleva el superadministrador desde Membresia) y la voz del
+// asistente: la demo los monta para que esas pantallas se vean enteras.
+const plan = await crearServicioPlan({ settingsRepo, url: '', token: '' });
+plan.arrancar();
+const mediaDir = mkdtempSync(join(tmpdir(), 'wa-demo-media-'));
+const voz = await crearServicioVoz({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, sender, mediaDir });
+const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista, bus, entrenamiento, entregas, plan, voz });
 entrenamiento.conectarIA(iaParaEntrenar(ia));
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista, entrenamiento });
+// El resumen de la mañana y de la tarde al supervisor: en la demo se prueba con "Mandar ahora".
+const resumenes = await crearServicioResumenes({ settingsRepo, sender, ajustes: () => ajustes.resumenes(), supervisor: () => politica().avisarA, nombreNegocio: () => ajustes.nombreNegocio(), entregas, ia: () => (ia.estado().tieneToken ? { completar: (m, o) => ia.completar(m, o) } : null), whatsappConectado: () => true, timezone: config.timezone, publicBaseUrl: config.PUBLIC_BASE_URL });
+startResumenes(resumenes, { cadaMs: 30_000 });
+// "Que todo funcione" en la demo: el WhatsApp se da por conectado (se puede
+// simular una caida desde la pantalla), el correo de Brevo no sale de verdad
+// y la copia va a una carpeta temporal.
+let whatsappDemoConectado = true;
+const fiabilidad = await crearFiabilidad({
+  settingsRepo,
+  settingsKeyBase64: TEST_SETTINGS_KEY,
+  salud,
+  timezone: config.timezone,
+  demo: true,
+  fetchImpl: (async () => new Response(JSON.stringify({ messageId: 'demo' }), { status: 201, headers: { 'content-type': 'application/json' } })) as typeof fetch,
+  vigilante: {
+    conectado: () => whatsappDemoConectado,
+    proveedor: () => 'local',
+    reconectar: async () => {
+      whatsappDemoConectado = true;
+    },
+    avisarWhatsApp: async (texto) => {
+      const destino = politica().avisarA;
+      if (!destino) return { ok: false, detalle: 'no hay número del supervisor' };
+      const r = await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', text: texto, manual: true, origen: 'sistema' });
+      return { ok: r.ok };
+    },
+  },
+  humo: { sender, supervisor: () => politica().avisarA, deliveries: repos.deliveries, conexionGsg, ia, entregas, carpetas: () => [process.cwd()], esperaEntregaMs: 1500 },
+  cupo: { entregas, lista, reparto: () => lista.ajustesReparto() },
+  respaldo: { baseDatos: () => ({ tipo: 'memoria' }), archiveDir: config.ARCHIVE_DIR, carpetaPorDefecto: mkdtempSync(join(tmpdir(), 'wa-demo-copias-')) },
+});
+const pararFiabilidad = fiabilidad.arrancar();
+process.on('exit', () => pararFiabilidad());
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista, entrenamiento, entregas, conexionGsg, simuladorGsg, plan, voz, resumenes, fiabilidad, mediaDir });
 startMotorLista({ repos, lista, sender, opciones: opcionesDesdeConfig(config), nombreNegocio: () => ajustes.nombreNegocio(), usarPlantilla: () => false, salud, politica });
+startMotorEntregas({ repos, entregas, opciones: opcionesDesdeConfig(config), salud, politica, log: (m, d) => console.warn(`[entregas] ${m}`, d ?? '') }, 3_000);
 const desconectarWebhooks = encolarEventos(bus, repos.webhooks);
 const pararWebhooks = startDespachadorWebhooks({ repo: repos.webhooks }, 3_000);
 process.on('exit', () => { desconectarWebhooks(); pararWebhooks(); });
@@ -362,7 +445,7 @@ startGoteo({ repos, sender, salud, politica }, 3_000);
 await app.listen({ port: PORT, host: '127.0.0.1' });
 
 console.log(`
-  wa-locator - servidor de demostracion (datos en memoria)
+  GSGchat - servidor de demostracion (datos en memoria)
 
   Chat         ${BASE}/chat
   Configuracion ${BASE}/setup

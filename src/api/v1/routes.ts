@@ -12,6 +12,7 @@
  * bloqueado por un gate vuelve como 202 con su motivo, no como 200.
  */
 
+import { NOMBRE_SISTEMA } from '../../marca.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
@@ -224,7 +225,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   // --- contrato ------------------------------------------------------------
 
   app.get('/api/v1', async () => ({
-    nombre: 'wa-locator',
+    nombre: NOMBRE_SISTEMA,
     version: 'v1',
     documentacion: '/api/v1/openapi.json',
     eventos: '/api/v1/eventos',
@@ -717,7 +718,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     const ahora = new Date();
     const resultado = await entregarUna(
       webhook,
-      { id: 0, evento: 'prueba.ping', payload: { mensaje: 'hola desde wa-locator', fecha: ahora.toISOString() }, createdAt: ahora, intentos: 0 },
+      { id: 0, evento: 'prueba.ping', payload: { mensaje: `hola desde ${NOMBRE_SISTEMA}`, fecha: ahora.toISOString() }, createdAt: ahora, intentos: 0 },
       deps.webhooks ?? {},
     );
     return { ok: resultado.ok, codigo: resultado.codigo, respuesta: resultado.respuesta, error: resultado.error ?? null };

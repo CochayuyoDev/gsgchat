@@ -64,7 +64,7 @@ const CSS = `
   .tarjeta.warn .n { color: var(--warn); }
   .tarjeta.bad .n { color: var(--bad); }
 
-  .cols { display: grid; grid-template-columns: 1fr 400px; gap: 14px; align-items: start; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 14px; align-items: start; }
   @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
   .caja { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 14px; }
   .caja > h2 { font-size: 14.5px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }

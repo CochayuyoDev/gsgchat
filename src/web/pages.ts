@@ -15,36 +15,34 @@
 import { appShell } from './shell.js';
 
 const CSS = `
-  :root {
-    color-scheme: light dark;
-    --bg: #f5f6f8; --card: #fff; --line: #e3e5e9; --text: #16181d;
-    --muted: #6b7280; --accent: #128c7e; --accent-ink: #fff;
-    --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #16181d; --card: #1f2229; --line: #2f333c; --text: #f2f3f5; --muted: #9aa0aa; }
-  }
+  /* La paleta, la letra y los espacios vienen del armazon (shell.ts). */
   * { box-sizing: border-box; }
-  .wrap { color: var(--text); font-size: 14.5px; line-height: 1.55; }
-  h2 { font-size: 16px; margin: 0 0 4px; }
-  h3 { font-size: 14px; margin: 18px 0 4px; }
+  .wrap { color: var(--text); font-size: var(--fs-cuerpo); line-height: 1.55; }
+  h2 { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -.01em; margin: 0 0 4px; }
+  h3 { font-size: var(--fs-h3); font-weight: 700; margin: 18px 0 4px; }
   .muted { color: var(--muted); font-size: 13px; margin: 0; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-    padding: 18px 20px; margin-top: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radio);
+    padding: 18px 20px; margin-top: var(--esp-4); box-shadow: var(--sombra); }
   label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 5px; }
   label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; }
   label.inline input { width: auto; }
   input, textarea, select {
-    width: 100%; padding: 10px 12px; font: inherit; font-size: 14px; color: var(--text);
-    background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+    width: 100%; min-height: 40px; padding: 9px 12px; font: inherit; font-size: 14px; color: var(--text);
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radio-sm);
   }
+  input:focus, textarea:focus, select:focus { border-color: var(--primario); outline: 2px solid var(--primario-suave); outline-offset: 0; }
+  input[type=checkbox], input[type=radio] { min-height: 0; width: 16px; height: 16px; accent-color: var(--primario); }
   textarea { min-height: 92px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
-  button { padding: 10px 18px; font: inherit; font-weight: 600; border: 0; border-radius: 9px;
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 8px 16px; font: inherit; font-weight: 600; line-height: 1.2; border: 1px solid var(--accent); border-radius: var(--radio-sm);
     background: var(--accent); color: var(--accent-ink); cursor: pointer; }
-  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
-  button.danger { background: transparent; color: var(--bad); border: 1px solid var(--line); }
-  button.sm { padding: 5px 10px; font-size: 12.5px; border-radius: 7px; }
-  button:disabled { opacity: .5; cursor: default; }
+  button:hover { filter: brightness(1.06); }
+  button.ghost { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+  button.ghost:hover { filter: none; border-color: var(--primario); color: var(--primario); }
+  button.danger { background: var(--rojo-suave); color: var(--rojo); border: 1px solid transparent; }
+  button.danger:hover { filter: none; background: var(--rojo); color: #fff; }
+  button.sm { min-height: 30px; padding: 4px 10px; font-size: 12.5px; font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; filter: none; }
+  @media (max-width: 960px) { button { min-height: 40px; } button.sm { min-height: 36px; } }
   .actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
   .toolbar { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: end; margin-top: 8px; }
   .toolbar label { margin-top: 0; }
@@ -52,7 +50,11 @@ const CSS = `
   .wrap > section.card + section.card { margin-top: 16px; }
   /* --- inicio --- */
   .kpis { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+  .kpis .linea-hoy { grid-column: 1 / -1; margin: 0; padding: 12px 16px; font-size: 14px; line-height: 1.6; }
+  .kpis .linea-hoy a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  .kpis .linea-hoy a:hover { color: var(--accent); border-color: var(--accent); }
+  .kpis .linea-hoy .mal { color: var(--rojo); font-weight: 600; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: var(--radio); padding: 16px 18px; min-width: 0; box-shadow: var(--sombra); }
   .kpi .l { color: var(--muted); font-size: 12.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
   .kpi .n { font-size: 28px; font-weight: 800; letter-spacing: -.02em; margin-top: 4px; line-height: 1.1; }
   .kpi .n.ok { color: var(--ok); } .kpi .n.warn { color: var(--warn); } .kpi .n.bad { color: var(--bad); }
@@ -76,17 +78,32 @@ const CSS = `
   .lista li b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
   .pasos { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
   .pasos li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); font-size: 13.5px; }
-  .pasos li i { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 800; font-size: 12px; margin-top: 1px; background: rgba(107,114,128,.15); color: var(--muted); }
-  .pasos li.hecho i { background: rgba(22,163,74,.15); color: var(--ok); }
+  .pasos li i { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 800; font-size: 12px; margin-top: 1px; background: var(--gris-suave); color: var(--gris); }
+  .pasos li.hecho i { background: var(--verde-suave); color: var(--verde); }
   .pasos li.hecho { opacity: .75; }
   .pasos li b { display: block; }
   .pasos li a { text-decoration: none; }
   .pasos li small { color: var(--muted); display: block; }
+  .pasos li .ir { display: inline-block; margin-top: 6px; font-size: 12.5px; font-weight: 600; color: var(--accent); text-decoration: none; border: 1px solid var(--accent); border-radius: 8px; padding: 3px 10px; }
+  .pasos li.hecho .ir { border-color: var(--line); color: var(--muted); font-weight: 500; }
+  .listo-linea { display: block; font-size: 13.5px; line-height: 1.7; }
+  .listo-linea b { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--verde-suave); color: var(--ok); font-size: 13px; vertical-align: middle; margin-right: 8px; }
+  .listo-linea > span { vertical-align: middle; }
+  .listo-linea a { margin-left: 8px; }
+  .listo-linea a { color: var(--muted); font-size: 12.5px; cursor: pointer; text-decoration: underline; }
+  .uso-ia { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 8px 0 6px; }
+  .uso-ia div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); }
+  .uso-ia span { display: block; color: var(--muted); font-size: 12px; }
+  .uso-ia b { font-size: 18px; }
+  .uso-ia b.bad { color: var(--bad); }
+  .uso-barra { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 6px; }
+  .uso-barra i { display: block; height: 100%; background: var(--accent); }
+  .uso-barra i.warn { background: var(--warn); } .uso-barra i.bad { background: var(--bad); }
   .res { display: grid; gap: 4px; margin-top: 14px; padding: 12px 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--bg); font-size: 13.5px; }
   .res b { font-size: 14px; }
-  .res.ok { border-color: rgba(22,163,74,.4); } .res.ok b { color: var(--ok); }
-  .res.warn { border-color: rgba(217,119,6,.45); background: rgba(217,119,6,.06); } .res.warn b { color: var(--warn); }
-  .res.bad { border-color: rgba(220,38,38,.45); background: rgba(220,38,38,.06); } .res.bad b { color: var(--bad); }
+  .res.ok { border-color: var(--verde); background: var(--verde-suave); } .res.ok b { color: var(--verde); }
+  .res.warn { border-color: var(--ambar); background: var(--ambar-suave); } .res.warn b { color: var(--ambar); }
+  .res.bad { border-color: var(--rojo); background: var(--rojo-suave); } .res.bad b { color: var(--rojo); }
   .res a { font-weight: 600; text-decoration: none; margin-top: 2px; }
   .res .muted { display: block; }
   .tecnico { margin-top: 8px; }
@@ -108,20 +125,23 @@ const CSS = `
   .dias { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .dias label { display: inline-flex; align-items: center; gap: 5px; margin: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-weight: 500; font-size: 13px; cursor: pointer; background: var(--bg); }
   .dias input { width: auto; }
-  .dias label:has(input:checked) { border-color: var(--accent); color: var(--accent); background: rgba(18,140,126,.08); }
-  .cf-aviso { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(217,119,6,.08); border: 1px solid rgba(217,119,6,.35); font-size: 13.5px; }
+  .dias label:has(input:checked) { border-color: var(--accent); color: var(--accent); background: var(--primario-suave); }
+  .cf-aviso { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--ambar-suave); border: 1px solid var(--ambar); font-size: 13.5px; }
   .cf-nota { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
-  .nueva-clave { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--warn); border-radius: 12px; background: rgba(217,119,6,.06); }
+  .con-prefijo { display: flex; align-items: stretch; }
+  .con-prefijo span { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line); border-right: 0; border-radius: var(--radio-sm) 0 0 var(--radio-sm); background: var(--superficie-2); color: var(--muted); font-weight: 600; font-size: 13.5px; }
+  .con-prefijo input { border-radius: 0 var(--radio-sm) var(--radio-sm) 0; }
+  .nueva-clave { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--warn); border-radius: var(--radio); background: var(--ambar-suave); }
   /* La conexion con Stoky: dos direcciones, una caja cada una. */
   .stk { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; align-items: start; margin-top: 10px; }
   @media (max-width: 1000px) { .stk { grid-template-columns: 1fr; } }
-  .stk .caja-stk { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--chip, #f6f7f9); }
+  .stk .caja-stk { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--chip); }
   .stk h3 { margin: 0 0 6px; }
-  .stk .paso-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12.5px; margin-right: 6px; }
+  .stk .paso-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12.5px; margin-right: 6px; }
   .stk .semaforo { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 13.5px; }
   .stk .semaforo div { display: flex; gap: 8px; align-items: flex-start; }
   .stk .semaforo i { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
-  .stk .semaforo i.ok { background: #16a34a; } .stk .semaforo i.warn { background: #d97706; } .stk .semaforo i.bad { background: #dc2626; }
+  .stk .semaforo i.ok { background: var(--verde); } .stk .semaforo i.warn { background: var(--ambar); } .stk .semaforo i.bad { background: var(--rojo); }
   .stk .semaforo small { display: block; color: var(--muted); }
   .stk ol { margin: 6px 0 0; padding-left: 20px; font-size: 13.5px; }
   .stk ol li { margin: 3px 0; }
@@ -129,17 +149,18 @@ const CSS = `
   .nueva-clave code { display: block; font-size: 14px; padding: 10px 12px; margin: 8px 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; word-break: break-all; }
   .ia-chat { border: 1px solid var(--line); border-radius: 12px; background: var(--bg); min-height: 120px; max-height: 360px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
   .ia-chat .b { max-width: 80%; padding: 7px 11px; border-radius: 10px; background: var(--card); white-space: pre-wrap; }
-  .ia-chat .b.yo { align-self: flex-end; background: #d9fdd3; color: #111b21; }
+  .ia-chat .b.yo { align-self: flex-end; background: var(--primario-suave); color: var(--text); }
   .ia-chat .b.derivo { border: 1px dashed var(--warn); }
   .permisos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; margin: 6px 0 10px; }
   .permisos label { display: flex; gap: 8px; align-items: flex-start; font-weight: normal; cursor: pointer; }
   .permisos label input { margin-top: 3px; }
   .permisos label small { color: var(--muted); display: block; }
-  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
-  .pill.warn { background: rgba(217,119,6,.14); color: var(--warn); }
-  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
-  .pill.muted { background: rgba(107,114,128,.14); color: var(--muted); }
+  /* .pill = el mismo chip del armazon (ok/warn/bad/muted -> verde/ambar/rojo/gris) */
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.5; white-space: nowrap; background: var(--gris-suave); color: var(--gris); vertical-align: middle; }
+  .pill.ok { background: var(--verde-suave); color: var(--verde); }
+  .pill.warn { background: var(--ambar-suave); color: var(--ambar); }
+  .pill.bad { background: var(--rojo-suave); color: var(--rojo); }
+  .pill.muted { background: var(--gris-suave); color: var(--gris); }
   pre { background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
     padding: 12px; overflow: auto; font-size: 12.5px; margin: 12px 0 0; max-height: 320px; }
   .copy { display: flex; gap: 8px; margin-top: 6px; }
@@ -148,8 +169,8 @@ const CSS = `
   ol li { margin-bottom: 9px; }
   a { color: var(--accent); }
   .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-  .stat { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .stat b { display: block; font-size: 20px; }
+  .stat { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .stat b { display: block; font-size: 20px; overflow-wrap: anywhere; }
   .stat b.ok { color: var(--ok); } .stat b.warn { color: var(--warn); } .stat b.bad { color: var(--bad); }
   .hidden { display: none; }
   .tablewrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; }
@@ -159,7 +180,8 @@ const CSS = `
   tr:last-child td { border-bottom: 0; }
   td .muted { display: block; }
   td.nowrap, th.nowrap { white-space: nowrap; }
-  .empty { padding: 18px; color: var(--muted); text-align: center; }
+  .empty { padding: var(--esp-5) var(--esp-4); color: var(--muted); text-align: center; line-height: 1.5; }
+  .empty b { display: block; color: var(--text); font-size: var(--fs-h3); margin-bottom: 4px; }
   .pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
   .steps { display: grid; gap: 8px; margin-top: 8px; }
   .step { display: grid; gap: 8px; grid-template-columns: 90px 90px 110px 1fr 1fr auto; align-items: end;
@@ -170,7 +192,7 @@ const CSS = `
   code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 5px; }
   .semaforo { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); margin-top: 12px; }
   .semaforo .luz { width: 22px; height: 22px; border-radius: 50%; flex: none; box-shadow: 0 0 0 4px rgba(0,0,0,.05); }
-  .semaforo .luz.verde { background: var(--ok); } .semaforo .luz.amarillo { background: #eab308; }
+  .semaforo .luz.verde { background: var(--verde); } .semaforo .luz.amarillo { background: #eab308; }
   .semaforo .luz.naranja { background: var(--warn); } .semaforo .luz.rojo { background: var(--bad); }
   .semaforo b { font-size: 17px; }
   .motivos { margin: 8px 0 0; padding-left: 18px; font-size: 13.5px; }
@@ -216,7 +238,8 @@ const AUTH_JS = String.raw`
     if (!value) return '';
     var d = new Date(value);
     if (isNaN(d.getTime())) return String(value);
-    return d.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' });
+    /* Siempre «21/09/26 15:08»: la misma hora de 24 h que en Hoy y en los mensajes. */
+    return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
   }
   function ago(value) {
     if (!value) return '';
@@ -260,7 +283,7 @@ const AUTH_JS = String.raw`
 /** Cada seccion del panel: id (el ancla), titulo y subtitulo de la barra superior. */
 const SECCIONES: Array<[string, string, string]> = [
   ['inicio', 'Inicio', 'Un vistazo a todo lo que pasa hoy'],
-  ['ia', 'Mi asistente IA', 'Lo que sabe de tu negocio y como contesta solo'],
+  ['ia', 'Asistente IA', 'Con qué IA contesta, qué sabe de tu negocio y si está encendido'],
   ['pedidos', 'Pedidos del chat', 'Lo que se cerro en la conversacion: confirmar, cancelar o pasar a la tienda'],
   ['estado', 'Estado del número', 'Calidad, cupo del día, cola y pausa manual'],
   ['salud', 'Riesgo y ritmo', 'Lo que mira el monitor y por qué frena'],
@@ -294,7 +317,7 @@ export function panelPage(opts: PanelOpts): string {
   const { configured } = opts;
   const warning = configured
     ? ''
-    : `<div class="card" style="border-color:#d97706">
+    : `<div class="card" style="border-color:var(--ambar)">
          <h2>Falta conectar WhatsApp</h2>
          <p class="muted">Los envios estan desactivados hasta que pegues las credenciales en
          <a href="/setup">la pantalla de conexion</a>. Contactos, reglas, secuencias y el extractor de coordenadas si funcionan.</p>
@@ -305,9 +328,16 @@ ${warning}
 
 <div id="tab-inicio" class="hidden">
   <section class="card hidden" id="in-pasos-card" style="margin-bottom:14px">
-    <h2>Para empezar</h2>
-    <p class="muted">Lo que falta por dejar listo. Cada punto lleva a la pantalla donde se hace; cuando esté todo, esta tarjeta desaparece.</p>
+    <h2 id="in-pasos-titulo">Para empezar</h2>
+    <p class="muted" id="in-pasos-sub">Lo que falta por dejar listo. Cada punto lleva a la pantalla donde se hace; cuando esté todo, esta tarjeta se pliega a una línea.</p>
+    <div class="listo-linea hidden" id="in-pasos-listo"></div>
     <ul class="pasos" id="in-pasos"></ul>
+  </section>
+  <section class="card hidden" id="in-entregas-card" style="margin-bottom:14px">
+    <h2>Entregas de hoy</h2>
+    <p class="muted" id="in-entregas-sub">Los pedidos del día: qué les falta, cuántos van en camino y cuáles necesitan a alguien.</p>
+    <div class="kpis" id="in-entregas"></div>
+    <div class="actions" id="in-entregas-acciones"><a href="/hoy">Ver los pedidos de hoy</a></div>
   </section>
   <div class="kpis" id="in-kpis"><div class="kpi"><div class="l">Cargando</div><div class="n">…</div></div></div>
   <div class="dos">
@@ -315,7 +345,7 @@ ${warning}
       <h2>Últimos 7 días</h2>
       <p class="muted">Mensajes que salieron y que entraron, por día.</p>
       <div class="grafica" id="in-grafica"></div>
-      <div class="leyenda"><span><i style="background:var(--accent)"></i>Salieron</span><span><i style="background:#94a3b8"></i>Entraron</span></div>
+      <div class="leyenda"><span><i style="background:var(--accent)"></i>Salieron</span><span><i style="background:var(--gris-claro)"></i>Entraron</span></div>
     </section>
     <section class="card">
       <h2>El número</h2>
@@ -324,14 +354,14 @@ ${warning}
     </section>
   </div>
   <div class="dos">
-    <section class="card">
+    <section class="card" id="in-reparto-card">
       <h2>Reparto</h2>
       <p class="muted">Solicitudes de ubicación por estado y los últimos lotes.</p>
       <div id="in-reparto"></div>
     </section>
     <section class="card">
       <h2>Accesos rápidos</h2>
-      <div class="accesos">
+      <div class="accesos" id="in-accesos">
         <a href="/chat">Abrir los chats<small>Responder a los clientes</small></a>
         <a href="/rutas">Cargar el reparto<small>Pegar la lista del día</small></a>
         <a href="/panel#campanas">Nueva campaña<small>Por goteo, con canario</small></a>
@@ -690,17 +720,30 @@ ${warning}
 </section>
 
 <section id="tab-configuracion" class="card hidden">
-  <h2>Configuración general</h2>
-  <p class="muted">Lo que se guarda aquí manda sobre la configuración del servidor y se aplica en el siguiente envío, sin reiniciar.
-  Un campo vacío significa "lo que diga el servidor" (el valor aparece en gris). Por encima de todo esto sigue el marcapasos del número: si el monitor frena, frena.</p>
+  <h2>Ajustes</h2>
+  <p class="muted">Lo que se guarda aquí se aplica en el siguiente envío, sin reiniciar. Un campo vacío significa "lo de siempre" (el valor aparece en gris).</p>
   <div class="cf-vigente" id="cf-vigente"></div>
 
   <div id="cf-plan" class="hidden" style="margin:12px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:10px"></div>
 
+  <h3>Qué se enseña</h3>
+  <p class="muted">GSGchat viene con lo justo para el día a día de GSG. Todo lo demás (campañas, grupos, rastreo, tiendas conectadas, ritmo del número…) sigue ahí, escondido; se puede enseñar entero cuando haga falta.</p>
+  <div class="toolbar" style="align-items:flex-start">
+    <label class="inline" style="flex:1;min-width:260px;align-items:flex-start;gap:10px"><input type="radio" name="cf-modo" value="gsg" style="margin-top:4px"><span><b>Solo lo de GSG</b> (recomendado)<br><span class="muted" style="font-size:12.5px">Hoy, Chats, Conversaciones guardadas, Asistente IA, Motorizados, Equipo, Conexión y Ajustes.</span></span></label>
+    <label class="inline" style="flex:1;min-width:260px;align-items:flex-start;gap:10px"><input type="radio" name="cf-modo" value="completo" style="margin-top:4px"><span><b>Todo el sistema</b><br><span class="muted" style="font-size:12.5px">Además: campañas, grupos, respuestas automáticas, plantillas, rastreo, riesgo y ritmo, integraciones (Stoky, web, tiendas), reparto por lotes y envío automático como pantallas aparte.</span></span></label>
+  </div>
+  <div class="cf-nota" style="margin-top:4px">Se aplica a todas las cuentas al recargar la página.</div>
+
+  <h3>¿A quién avisamos?</h3>
+  <p class="muted">El número más importante del sistema: recibe las incidencias, el resumen de la mañana y de la tarde, la prueba diaria y los cambios de nivel del número.</p>
+  <div class="toolbar">
+    <div style="grid-column: span 2"><label for="cf-supervisor">WhatsApp del supervisor</label><div class="con-prefijo"><span>+51</span><input id="cf-supervisor" inputmode="tel" placeholder="987 654 321"></div><div class="cf-nota">Los 9 dígitos del celular; el 51 se pone solo. Vacío = nadie recibe avisos.</div></div>
+  </div>
+
   <h3>Negocio</h3>
   <div class="toolbar">
     <div style="grid-column: span 2"><label for="cf-nombre">Nombre del negocio</label><input id="cf-nombre" placeholder=""><div class="cf-nota">Así se presenta en los mensajes ("{negocio}") y en las pantallas.</div></div>
-    <div><label>Zona horaria</label><input id="cf-tz" disabled><div class="cf-nota">La del servidor (TIMEZONE).</div></div>
+    <div><label>Zona horaria</label><input id="cf-tz" disabled><div class="cf-nota">La hora con la que se escribe y se cierra el día. La fija quien instala el sistema.</div></div>
   </div>
 
   <h3>Horario de envío</h3>
@@ -728,18 +771,30 @@ ${warning}
   <p class="muted">Con el modo prueba activo, el sistema <b>solo escribe y solo contesta</b> a los números de la lista. Para probar sin molestar a clientes.</p>
   <div id="cf-fijado" class="cf-aviso hidden"></div>
   <label class="inline" style="margin-top:8px"><input type="checkbox" id="cf-mp-activo"> Modo prueba activo</label>
-  <label for="cf-mp-numeros">Números permitidos (uno por línea, con código de país)</label>
-  <textarea id="cf-mp-numeros" placeholder="51902464984&#10;51912426667"></textarea>
+  <label for="cf-mp-numeros">Números permitidos (uno por línea)</label>
+  <textarea id="cf-mp-numeros" placeholder="987 654 321&#10;912 426 667"></textarea>
+  <div class="cf-nota">Los 9 dígitos del celular bastan; el 51 se pone solo.</div>
 
-  <h3>Avisos</h3>
+
+  <h3>Resumen del día por WhatsApp</h3>
+  <p class="muted">Al supervisor le llega cómo arranca el día (pedidos, qué falta, motorizados, GSG) y cómo cerró (entregados, sin terminar, incidencias). Las cifras las pone el sistema; si el asistente IA está conectado, él redacta el texto alrededor de ellas.</p>
   <div class="toolbar">
-    <div style="grid-column: span 2"><label for="cf-supervisor">WhatsApp del supervisor</label><input id="cf-supervisor" placeholder="51902464984"><div class="cf-nota">Recibe los cambios de nivel del número y los casos del reparto que necesitan una persona. Vacío = nadie.</div></div>
+    <div><label class="inline" style="margin-top:22px"><input type="checkbox" id="cf-rs-activo"> Mandar el resumen</label></div>
+    <div><label for="cf-rs-manana">Por la mañana a las</label><input id="cf-rs-manana" type="time" value="08:30"></div>
+    <div><label for="cf-rs-tarde">Por la tarde a las</label><input id="cf-rs-tarde" type="time" value="18:30"></div>
   </div>
+  <div id="cf-rs-estado" class="cf-nota" style="margin-top:4px"></div>
+  <div class="actions" style="margin-top:8px">
+    <button class="ghost" id="cf-rs-ver-manana" type="button">Ver cómo queda el de la mañana</button>
+    <button class="ghost" id="cf-rs-ver-tarde" type="button">Ver cómo queda el de la tarde</button>
+    <button class="ghost" id="cf-rs-mandar" type="button">Mandar ahora</button>
+  </div>
+  <pre id="cf-rs-vista" class="hidden" style="white-space:pre-wrap;font:inherit;font-size:13px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px"></pre>
 
   <h3>Comportamiento</h3>
   <div class="toolbar">
-    <div><label for="cf-humanizar">Escritura simulada</label><select id="cf-humanizar"><option value="">Según el servidor</option><option value="true">Sí</option><option value="false">No</option></select></div>
-    <div><label for="cf-autopausa">Pausa automática en rojo</label><select id="cf-autopausa"><option value="">Según el servidor</option><option value="true">Sí</option><option value="false">No</option></select></div>
+    <div><label for="cf-humanizar">Escribe como una persona (pausas al teclear)</label><select id="cf-humanizar"><option value="">Como venga de fábrica (recomendado)</option><option value="true">Sí</option><option value="false">No</option></select></div>
+    <div><label for="cf-autopausa">Pausa automática en rojo</label><select id="cf-autopausa"><option value="">Como venga de fábrica (recomendado)</option><option value="true">Sí</option><option value="false">No</option></select></div>
     <div style="grid-column: span 2"><label for="cf-verunavez">Foto o video de "ver una vez"</label><select id="cf-verunavez"><option value="true">Pedirle al cliente que lo mande normal</option><option value="false">No decir nada</option></select><div class="cf-nota">WhatsApp entrega los "ver una vez" solo al teléfono, no a este sistema. Se le pide al teléfono que lo reenvíe y, si no lo suelta en unos segundos, se le escribe al cliente para que lo mande como foto normal.</div></div>
   </div>
 
@@ -760,9 +815,10 @@ ${warning}
   <div class="toolbar">
     <div><label>Nombre</label><input id="us-nombre" placeholder="Rosa"></div>
     <div><label>Usuario</label><input id="us-usuario" placeholder="rosa"></div>
-    <div><label>Contrasena (8+)</label><input id="us-clave" type="password"></div>
+    <div><label>Contraseña (mínimo 8)</label><input id="us-clave" type="password"></div>
     <div><label>Rol</label><select id="us-rol"><option value="operador">Operador</option><option value="admin">Administrador</option><option value="superadmin" id="us-rol-super" class="hidden">Superadministrador</option></select></div>
   </div>
+  <div class="cf-nota" style="margin-top:6px"><b>Operador:</b> atiende los chats y Hoy · <b>Administrador:</b> además Ajustes, Equipo y Conexión · <b>Superadministrador:</b> además Tiendas y Membresía.</div>
   <div class="actions"><button id="us-crear">Crear</button><span id="us-state" class="pill hidden"></span></div>
 
   <p class="muted" style="margin-top:14px">Tu propia contraseña se cambia en <a href="/panel#mi-cuenta">Mi cuenta</a>.</p>
@@ -799,7 +855,7 @@ ${warning}
       <div><label for="mb-campanas">Campañas por goteo</label><select id="mb-campanas"><option value="true">Incluidas</option><option value="false">No incluidas</option></select></div>
       <div><label for="mb-conectores">Conectores de tiendas</label><select id="mb-conectores"><option value="true">Incluidos</option><option value="false">No incluidos</option></select></div>
       <div><label for="mb-precio">Precio al mes</label><input id="mb-precio" type="number" min="0" step="0.01" placeholder="0"></div>
-      <div><label for="mb-moneda">Moneda</label><input id="mb-moneda" placeholder="PEN" maxlength="8"></div>
+      <div><label for="mb-moneda">Moneda</label><input id="mb-moneda" list="mb-monedas" placeholder="PEN" maxlength="8" title="PEN = soles, USD = dólares"><datalist id="mb-monedas"><option value="PEN">Soles</option><option value="USD">Dólares</option></datalist></div>
     </div>
     <h3>Lo que ve el negocio</h3>
     <div class="toolbar">
@@ -924,66 +980,93 @@ ${warning}
 </section>
 
 <section id="tab-ia" class="card hidden">
-  <h2>Mi asistente IA</h2>
+  <style>
+    .ia-pasos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 16px; }
+    @media (max-width: 900px) { .ia-pasos { grid-template-columns: 1fr; } }
+    .ia-paso { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+    .ia-paso b { display: block; margin-bottom: 2px; }
+    .ia-paso .estado { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
+    .ia-paso .estado.ok { background: var(--ok); } .ia-paso .estado.bad { background: var(--bad); }
+  </style>
+  <h2>Asistente IA</h2>
   <p class="muted">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
-  Funciona con la IA de <a href="https://puter.com" target="_blank" rel="noopener">Puter</a> (un solo token para GPT, Claude, Gemini y mas) o con cualquier API compatible con OpenAI.</p>
-  <p class="muted" style="background:var(--chip,#f6f7f9);border-radius:10px;padding:10px 12px;margin:0 0 14px">🎓 <b>¿Quieres enseñarle a gran escala?</b> En <a href="/entrenamiento"><b>Entrenar a la IA</b></a> le das miles de ejemplos, datos y reglas: importas un Excel o un chat exportado, dejas que aprenda de tus conversaciones reales, la corriges desde el chat y la examinas en masa. Lo de aquí abajo es el resumen general del negocio; lo de allí, el detalle.</p>
+  Funciona con la IA de <a href="https://puter.com" target="_blank" rel="noopener">Puter</a> (una sola cuenta para GPT, Claude, Gemini y más) o con cualquier servicio de IA con clave (OpenAI, Groq, Google…).</p>
+  <p class="muted" style="background:var(--chip);border-radius:10px;padding:10px 12px;margin:0 0 14px">🎓 <b>¿Quieres enseñarle a gran escala?</b> En <a href="/entrenamiento"><b>Entrenar a la IA</b></a> le das miles de ejemplos, datos y reglas: importas un Excel o un chat exportado, dejas que aprenda de tus conversaciones reales, la corriges desde el chat y la examinas en masa. Lo de aquí abajo es el resumen general del negocio; lo de allí, el detalle.</p>
 
+  <div class="ia-pasos" id="ia-pasos">
+    <div class="ia-paso"><b><span class="estado" id="ia-p1"></span>1. Con qué IA</b><span class="muted" id="ia-p1-t">Sin clave ni sesión todavía.</span></div>
+    <div class="ia-paso"><b><span class="estado" id="ia-p2"></span>2. Qué sabe</b><span class="muted" id="ia-p2-t">Todavía no le contaste nada del negocio.</span></div>
+    <div class="ia-paso"><b><span class="estado" id="ia-p3"></span>3. Encendido</b><span class="muted" id="ia-p3-t">Apagado: no contesta a nadie.</span></div>
+  </div>
+  <details id="ia-uso-caja" style="margin:0 0 16px">
+    <summary style="cursor:pointer;font-weight:600">Uso de la IA <span class="muted" id="ia-uso-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
+    <div class="uso-ia" id="ia-uso"></div>
+    <p class="muted" id="ia-uso-nota" style="margin:4px 0 0;font-size:12.5px"></p>
+  </details>
   <div class="dos">
     <div>
-      <h3>1. Cuentale de tu negocio</h3>
-      <label>Como se llama el asistente</label>
-      <input id="ia-nombre" placeholder="Lucia">
-      <label>Lo que sabe (escribe como se lo contarias a un empleado nuevo)</label>
-      <textarea id="ia-conocimiento" rows="12" placeholder="Somos una zapateria en Miraflores. Vendemos zapatos de vestir y zapatillas, tallas 35 a 45.&#10;Precios: zapatos de vestir desde S/ 120, zapatillas desde S/ 90.&#10;Envio a todo Lima en 24 h, gratis desde S/ 150. Provincias 2-3 dias.&#10;Cambios dentro de 7 dias con boleta.&#10;Pagos: Yape, Plin, transferencia y tarjeta al recibir.&#10;Horario: lunes a sabado de 9 a 19."></textarea>
-      <label>Como debe hablar (opcional)</label>
-      <textarea id="ia-instrucciones" rows="3" placeholder="Tutea, se breve, usa un emoji como mucho. Si preguntan por stock exacto, di que lo confirmamos en un momento."></textarea>
-      <h3 style="margin-top:18px">Tu catalogo real (opcional)</h3>
-      <p class="muted">La URL de la API de productos de tu tienda: el asistente da precio, stock y enlace de productos que existen, y puede tomar pedidos. Entiende la tienda de Elysian, WooCommerce (<code>/wp-json/wc/store/v1/products</code>) o una lista simple <code>[{sku, nombre, precio, stock, url}]</code>.</p>
-      <div class="toolbar">
-        <div style="flex:2"><label>URL del catalogo</label><input id="ia-catalogo-url" placeholder="https://elysian.pe/api/products"></div>
-        <div><label>Formato</label><select id="ia-catalogo-formato"><option value="auto">Detectar solo</option><option value="elysian">Elysian</option><option value="woocommerce">WooCommerce</option><option value="simple">Lista simple</option></select></div>
-        <div><label>&nbsp;</label><button class="ghost" id="ia-catalogo-probar">Probar</button></div>
-      </div>
-      <p id="ia-catalogo-estado" class="muted"></p>
-    </div>
-    <div>
-      <h3>2. Con que IA</h3>
+      <h3>1. Con qué IA contesta</h3>
+      <p class="muted" style="margin:0 0 6px">Elige un servicio, pega su clave y pulsa «Probar la conexión». Puter no necesita clave.</p>
       <label>Proveedor</label>
-      <select id="ia-proveedor"><option value="puter">Puter (recomendado: un token para todos los modelos)</option><option value="openai">API compatible con OpenAI (OpenAI, Groq, DeepSeek, Ollama...)</option></select>
+      <select id="ia-proveedor"><option value="puter">Puter (recomendado: un token para todos los modelos)</option><option value="openai">Una clave de API (OpenAI, Groq, Google, OpenRouter, DeepSeek, Ollama...)</option></select>
       <div id="ia-puter-caja">
-        <p class="muted" style="margin:4px 0 8px">Sin llaves ni tarjeta: pulsa el boton, entra con Google, Microsoft, Apple o correo (gratis) y listo. Los modelos Gemma 4 no cuestan nada.</p>
+        <p class="muted" style="margin:4px 0 8px">Sin claves ni tarjeta: pulsa el botón, entra con Google, Microsoft, Apple o correo (gratis) y listo. Los modelos Gemma 4 no cuestan nada.</p>
         <div class="actions"><button id="ia-puter-conectar" type="button">Conectar con Puter</button><span id="ia-puter-estado" class="muted"></span></div>
-        <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">O pegar un token a mano</summary>
-          <label>Token de Puter <small class="muted">(puter.com → Dashboard → Create token)</small></label>
+        <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">O pegar la clave a mano</summary>
+          <label>Clave de Puter <small class="muted">(en puter.com → Panel → Crear clave; ellos la llaman «token»)</small></label>
           <input id="ia-token" type="password" placeholder="Pegar aqui; se guarda cifrado y no se vuelve a mostrar" autocomplete="off">
         </details>
       </div>
       <div id="ia-openai-clave" class="hidden">
+        <label>Servicio</label>
+        <select id="ia-servicio"></select>
+        <p id="ia-servicio-nota" class="muted" style="margin:4px 0 8px"></p>
         <label>Clave de la API</label>
         <input id="ia-token-openai" type="password" placeholder="sk-…; se guarda cifrada y no se vuelve a mostrar" autocomplete="off">
       </div>
       <p id="ia-token-estado" class="muted"></p>
-      <div id="ia-openai" class="hidden"><label>URL base de la API</label><input id="ia-baseurl" placeholder="https://api.openai.com/v1 · https://api.groq.com/openai/v1 · http://localhost:11434/v1"></div>
+      <div id="ia-openai" class="hidden"><label>URL base de la API <small class="muted">(la rellena el servicio elegido; cámbiala solo si usas otro)</small></label><input id="ia-baseurl" placeholder="https://api.openai.com/v1 · https://api.groq.com/openai/v1 · http://localhost:11434/v1"></div>
       <label>Modelo</label>
       <select id="ia-modelo-gratis"></select>
-      <p id="ia-modelo-nota" class="muted" style="margin-top:4px">Solo modelos <b>completamente gratuitos</b> de Puter (costo cero por token). Se comprueba contra su catalogo cada hora.</p>
+      <p id="ia-modelo-nota" class="muted" style="margin-top:4px">Solo modelos <b>completamente gratuitos</b> de Puter (no cuestan nada). Se comprueba con su lista cada hora.</p>
       <input id="ia-modelo" list="ia-modelos" placeholder="gpt-4o-mini" class="hidden"><datalist id="ia-modelos"></datalist>
-      <h3 style="margin-top:18px">3. Cuando pasar con una persona</h3>
+      <div class="actions" style="margin-top:10px"><button class="ghost" id="ia-probar-conexion" type="button">Probar la conexión</button><span id="ia-conexion-estado" class="muted"></span></div>
+      <h3 style="margin-top:18px">Cuándo pasar con una persona</h3>
       <label>Si el cliente escribe alguna de estas palabras (separadas por comas)</label>
       <input id="ia-derivar" placeholder="asesor, humano, persona, hablar con alguien, reclamo">
       <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="ia-avisar"> Avisarme por WhatsApp (al numero del supervisor de Configuracion) cuando pase con una persona</label>
       <label style="margin-top:10px">Cuantos mensajes anteriores recuerda</label>
       <input id="ia-memoria" type="number" min="0" max="40" value="12" style="width:100px">
     </div>
+    <div>
+      <h3>2. Qué sabe de tu negocio</h3>
+      <p class="muted" style="margin:0 0 6px">Escríbelo como se lo contarías a un empleado nuevo. Para enseñarle a gran escala (Excel, chats), ve a <a href="/entrenamiento">Entrenar a la IA</a>.</p>
+      <label>Cómo se llama el asistente</label>
+      <input id="ia-nombre" placeholder="Lucia">
+      <label>Lo que sabe (escríbelo como se lo contarías a un empleado nuevo)</label>
+      <textarea id="ia-conocimiento" rows="12" placeholder="Somos una zapateria en Miraflores. Vendemos zapatos de vestir y zapatillas, tallas 35 a 45.&#10;Precios: zapatos de vestir desde S/ 120, zapatillas desde S/ 90.&#10;Envio a todo Lima en 24 h, gratis desde S/ 150. Provincias 2-3 dias.&#10;Cambios dentro de 7 dias con boleta.&#10;Pagos: Yape, Plin, transferencia y tarjeta al recibir.&#10;Horario: lunes a sabado de 9 a 19."></textarea>
+      <label>Cómo debe hablar (opcional)</label>
+      <textarea id="ia-instrucciones" rows="3" placeholder="Tutea, se breve, usa un emoji como mucho. Si preguntan por stock exacto, di que lo confirmamos en un momento."></textarea>
+      <div class="solo-completo">
+      <h3 style="margin-top:18px">Tu catálogo real (opcional)</h3>
+      <p class="muted">La dirección de los productos de tu tienda online: el asistente da precio, stock y enlace de productos que existen, y puede tomar pedidos. Entiende la tienda de Elysian, WooCommerce o una lista simple con código, nombre, precio, stock y enlace de cada producto.</p>
+      <div class="toolbar">
+        <div style="flex:2"><label>Dirección del catálogo</label><input id="ia-catalogo-url" placeholder="https://elysian.pe/api/products"></div>
+        <div><label>Formato</label><select id="ia-catalogo-formato"><option value="auto">Detectar solo</option><option value="elysian">Elysian</option><option value="woocommerce">WooCommerce</option><option value="simple">Lista simple</option></select></div>
+        <div><label>&nbsp;</label><button class="ghost" id="ia-catalogo-probar">Probar</button></div>
+      </div>
+      <p id="ia-catalogo-estado" class="muted"></p>
+      </div>
+    </div>
   </div>
-  <div class="actions" style="margin-top:14px">
-    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ia-activa"> <b>Asistente encendido</b></label>
+  <h3 style="margin-top:18px">3. Encender y guardar</h3>
+  <div class="actions">
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ia-activa"> <b>Asistente encendido</b> <span class="muted" style="font-weight:400">(contesta solo a quien escribe; lo del reparto y las entregas sigue igual)</span></label>
     <button id="ia-guardar">Guardar</button>
     <span id="ia-state" class="pill hidden"></span>
   </div>
 
-  <h3 style="margin-top:24px">Pruebalo aqui</h3>
+  <h3 style="margin-top:24px">Pruébalo aquí</h3>
   <p class="muted">Escribe como si fueras un cliente. No sale nada por WhatsApp; usa lo que guardaste arriba.</p>
   <div id="ia-chat" class="ia-chat"><div class="muted" style="padding:10px">Guarda primero y escribe abajo.</div></div>
   <div class="toolbar" style="margin-top:8px">
@@ -1263,15 +1346,62 @@ function graficaSemana(semana) {
   semana.forEach(function (d, i) {
     var x0 = izq + i * ancho, bw = Math.max(6, ancho * 0.28);
     var hs = alto * d.salientes / max, he = alto * d.entrantes / max;
-    out += '<rect x="' + (x0 + ancho / 2 - bw - 2) + '" y="' + (arriba + alto - hs) + '" width="' + bw + '" height="' + hs + '" rx="3" fill="#128c7e"><title>' + d.dia + ': salieron ' + d.salientes + '</title></rect>';
-    out += '<rect x="' + (x0 + ancho / 2 + 2) + '" y="' + (arriba + alto - he) + '" width="' + bw + '" height="' + he + '" rx="3" fill="#94a3b8"><title>' + d.dia + ': entraron ' + d.entrantes + '</title></rect>';
+    out += '<rect x="' + (x0 + ancho / 2 - bw - 2) + '" y="' + (arriba + alto - hs) + '" width="' + bw + '" height="' + hs + '" rx="3" style="fill:var(--primario)"><title>' + d.dia + ': salieron ' + d.salientes + '</title></rect>';
+    out += '<rect x="' + (x0 + ancho / 2 + 2) + '" y="' + (arriba + alto - he) + '" width="' + bw + '" height="' + he + '" rx="3" style="fill:var(--gris-claro)"><title>' + d.dia + ': entraron ' + d.entrantes + '</title></rect>';
     var f = new Date(d.dia + 'T12:00:00');
     out += '<text x="' + (x0 + ancho / 2) + '" y="' + (H - 8) + '" font-size="11" text-anchor="middle" fill="currentColor" fill-opacity=".7">' + DIAS[f.getDay()] + ' ' + f.getDate() + '</text>';
   });
   return out + '</svg>';
 }
+var pasosDesplegados = false;
+function pintarPasosGsg(p) {
+  var oficial = p.proveedor === 'cloud';
+  var moto = p.motorizadosActivos;
+  var pedidos = p.entregasHoy || 0;
+  var pasos = [
+    { hecho: p.conectado, titulo: 'Conectar el WhatsApp', que: p.conectado ? (oficial ? 'La API de Meta ya responde.' : 'El teléfono está vinculado.') : (oficial ? 'La API de Meta no responde todavía.' : 'Escanea el QR desde el teléfono, como en WhatsApp Web.'), href: '/setup', boton: p.conectado ? 'Ver la conexión' : 'Conectar' },
+    { hecho: moto > 0, titulo: 'Dar de alta a los motorizados', que: moto > 0 ? moto + ' activo' + (moto === 1 ? '' : 's') + '. Son quienes reciben los pines y dicen en cuánto entregan.' : 'Ninguno todavía: sin motorizados, los pedidos listos no pueden salir.', href: '/motorizados', boton: moto > 0 ? 'Ver motorizados' : 'Dar de alta' },
+    { hecho: p.supervisor === true, titulo: '¿A quién avisamos cuando algo necesita a alguien?', que: p.supervisor === true ? 'Ese WhatsApp recibe las incidencias, el resumen de la mañana y de la tarde y la prueba diaria.' : 'Sin un número, nadie se entera de las incidencias, ni llegan los resúmenes ni la prueba de la mañana.', href: '/panel#configuracion', boton: p.supervisor === true ? 'Cambiar el número' : 'Poner mi número', accion: 'supervisor', ocultar: p.supervisor === undefined },
+    { hecho: p.gsg === 'real' || p.gsg === 'simulador' || pedidos > 0, titulo: 'Traer los pedidos del día', que: p.gsg === 'real' ? 'GSG está conectado: los pedidos entran solos cada 5 minutos.' : p.gsg === 'simulador' ? 'Con el simulador de GSG (para probar). Cuando GSG tenga API, se conecta en Conexión.' : pedidos > 0 ? 'Hoy hay ' + pedidos + ' pedido' + (pedidos === 1 ? '' : 's') + ' cargados a mano.' : 'Conecta GSG en Conexión, o pega la lista del día en Hoy.', href: p.gsg === 'ninguna' ? '/setup' : '/hoy', boton: p.gsg === 'ninguna' ? 'Conectar GSG' : 'Ir a Hoy', alt: p.gsg === 'ninguna' ? { href: '/hoy', boton: 'Pegar la lista en Hoy' } : null },
+    { hecho: p.ia === true, titulo: 'Encender el asistente IA (opcional)', que: p.ia === true ? 'Contesta solo a los clientes y lee las respuestas dudosas.' : 'Lee las respuestas dudosas de clientes y motorizados, y contesta solo. Sin él, todo sigue funcionando por reglas.', href: '/panel#ia', boton: p.ia === true ? 'Ver el asistente' : 'Encender', opcional: true, ocultar: p.iaDisponible === false }
+  ].filter(function (x) { return !x.ocultar; });
+  var obligatorios = pasos.filter(function (x) { return !x.opcional; });
+  var todo = obligatorios.every(function (x) { return x.hecho; });
+  var card = document.getElementById('in-pasos-card');
+  card.classList.remove('hidden');
+  document.getElementById('in-pasos-titulo').textContent = todo ? 'Todo listo' : 'Para empezar';
+  var linea = document.getElementById('in-pasos-listo');
+  var sub = document.getElementById('in-pasos-sub');
+  var lista = document.getElementById('in-pasos');
+  if (todo && !pasosDesplegados) {
+    linea.classList.remove('hidden'); sub.classList.add('hidden'); lista.classList.add('hidden');
+    linea.innerHTML = '<b>✓</b><span>WhatsApp conectado · ' + moto + ' motorizado' + (moto === 1 ? '' : 's') + (p.supervisor === true ? ' · avisos al supervisor' : '') + ' · ' + esc(p.gsg === 'real' ? 'GSG conectado' : p.gsg === 'simulador' ? 'simulador de GSG' : 'pedidos cargados a mano') + (p.ia === true ? ' · asistente IA encendido' : '') + '</span><a id="in-pasos-ver">Ver los pasos</a>';
+    document.getElementById('in-pasos-ver').onclick = function () { pasosDesplegados = true; pintarPasosGsg(p); };
+    return;
+  }
+  linea.classList.add('hidden'); sub.classList.toggle('hidden', todo); lista.classList.remove('hidden');
+  lista.innerHTML = pasos.map(function (x, i) {
+    return '<li class="' + (x.hecho ? 'hecho' : '') + '"><i>' + (x.hecho ? '✓' : (i + 1)) + '</i><div><b>' + esc(x.titulo) + '</b><small>' + esc(x.que) + '</small><a class="ir" href="' + esc(x.href) + '"' + (x.accion ? ' data-accion="' + esc(x.accion) + '"' : '') + '>' + esc(x.boton) + '</a>' + (x.alt ? ' <a class="ir" href="' + esc(x.alt.href) + '">' + esc(x.alt.boton) + '</a>' : '') + '</div></li>';
+  }).join('') + (todo ? '<li style="border-style:dashed"><i>✓</i><div><b>Todo listo</b><small><a id="in-pasos-plegar" style="cursor:pointer">Plegar</a></small></div></li>' : '');
+  var plegar = document.getElementById('in-pasos-plegar');
+  if (plegar) plegar.onclick = function () { pasosDesplegados = false; pintarPasosGsg(p); };
+  var botonSup = lista.querySelector('[data-accion="supervisor"]');
+  if (botonSup) botonSup.onclick = function (ev) { ev.preventDefault(); pedirSupervisor(); };
+}
+/* El WhatsApp que recibe los avisos: un cuadro con el número (9 cifras, el 51 se pone solo). */
+async function pedirSupervisor() {
+  var numero = await pedirDato({ titulo: 'Tu WhatsApp para los avisos', texto: 'A este número llegan las incidencias, el resumen de la mañana y de la tarde y la prueba diaria. Suele ser el del coordinador.', etiqueta: 'Número de WhatsApp', prefijo: '+51', marcador: '987 654 321', boton: 'Guardar', validar: function (v) { return /^9\d{8}$/.test(String(v || '').replace(/\D/g, '')) ? null : 'Escribe los 9 dígitos del celular (empieza por 9).'; } });
+  if (!numero) return;
+  try {
+    await api('/admin/ajustes', { method: 'POST', body: { avisos: { supervisor: '51' + String(numero).replace(/\D/g, '') } } });
+    show('state', 'Listo: los avisos van a +51 ' + String(numero).replace(/\D/g, '').replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') + '.', 'ok');
+    loadInicio();
+  } catch (error) { show('state', error.message, 'bad'); }
+}
 function pintarPasos(p) {
   if (!p) return;
+  var modoGsg = p.modo === 'gsg' || window.__modoSistema === 'gsg';
+  if (modoGsg) { pintarPasosGsg(p); return; }
   var oficial = p.proveedor === 'cloud';
   var avanzado = window.__modoAvanzado === true;
   // Lo que una tienda necesita para arrancar son tres cosas; el resto es del
@@ -1295,9 +1425,37 @@ function pintarPasos(p) {
   var pendientes = pasos.filter(function (x) { return !x.hecho; });
   var card = document.getElementById('in-pasos-card');
   card.classList.toggle('hidden', pendientes.length === 0);
+  document.getElementById('in-pasos-titulo').textContent = 'Para empezar';
+  document.getElementById('in-pasos-listo').classList.add('hidden');
+  document.getElementById('in-pasos-sub').classList.remove('hidden');
+  document.getElementById('in-pasos').classList.remove('hidden');
   if (!pendientes.length) return;
   document.getElementById('in-pasos').innerHTML = pasos.map(function (x, i) {
     return '<li class="' + (x.hecho ? 'hecho' : '') + '"><i>' + (x.hecho ? '✓' : (i + 1)) + '</i><div><b>' + (x.hecho ? esc(x.titulo) : '<a href="' + esc(x.href) + '">' + esc(x.titulo) + '</a>') + '</b><small>' + esc(x.que) + '</small></div></li>';
+  }).join('');
+}
+/* Los accesos rápidos: en modo GSG solo lo que se ve en el menú; en el completo, lo de siempre. */
+var ACCESOS_GSG = [
+  ['/hoy', 'Ver los pedidos de hoy', 'Quién falta, quién va en camino'],
+  ['/chat', 'Abrir los chats', 'Responder a los clientes'],
+  ['/motorizados', 'Dar de alta un motorizado', 'Nombre, WhatsApp y zona'],
+  ['/hoy#caja-pegar', 'Pegar la lista del día', 'Si GSG no está conectado'],
+  ['/mapa', 'Ver el mapa del día', 'Pedidos y motorizados'],
+  ['/hoy#caja-sim', 'Probar sin clientes reales', 'Con los 10 números ficticios']
+];
+var ACCESOS_COMPLETO = [
+  ['/chat', 'Abrir los chats', 'Responder a los clientes'],
+  ['/rutas', 'Cargar el reparto', 'Pegar la lista del día'],
+  ['/panel#campanas', 'Nueva campaña', 'Por goteo, con canario'],
+  ['/panel#enviar', 'Enviar un mensaje', 'A un número concreto'],
+  ['/panel#plantillas', 'Plantillas', 'Crear o sincronizar'],
+  ['/setup', 'Conexión', 'QR, WAHA o Meta']
+];
+function pintarAccesos(modoGsg) {
+  var caja = document.getElementById('in-accesos');
+  if (!caja) return;
+  caja.innerHTML = (modoGsg ? ACCESOS_GSG : ACCESOS_COMPLETO).map(function (a) {
+    return '<a href="' + esc(a[0]) + '">' + esc(a[1]) + '<small>' + esc(a[2]) + '</small></a>';
   }).join('');
 }
 var NIVEL_TXT = { verde: 'Todo en orden', amarillo: 'Con cuidado: el marketing va más lento', naranja: 'Frenado: solo lo imprescindible', rojo: 'Pausado: nada sale hasta que mejore' };
@@ -1306,21 +1464,34 @@ async function loadInicio() {
     var r = await api('/admin/resumen');
     var h = r.hoy, n = r.numero, c = r.chats, rp = r.reparto;
     var pct = h.cupo ? Math.min(100, Math.round(100 * h.usados / h.cupo)) : 0;
+    var modoGsgInicio = window.__modoSistema === 'gsg' || (document.querySelector('.s-app') && document.querySelector('.s-app').classList.contains('modo-gsg'));
+    pintarAccesos(modoGsgInicio);
+    if (modoGsgInicio) {
+      var quedan = Math.max(0, (h.cupo || 0) - (h.usados || 0));
+      document.getElementById('in-kpis').innerHTML = '<div class="card linea-hoy"><b>Mensajes de hoy:</b> ' +
+        '<a href="/panel#historial">' + esc(h.enviados) + ' enviado' + (h.enviados === 1 ? '' : 's') + '</a> · ' +
+        '<a href="/chat">' + esc(h.entrantes) + ' recibido' + (h.entrantes === 1 ? '' : 's') + (c.sinLeer ? ' (' + esc(c.sinLeer) + ' sin leer)' : '') + '</a> · ' +
+        '<span class="' + (h.fallidos ? 'mal' : '') + '">' + esc(h.fallidos) + ' fallido' + (h.fallidos === 1 ? '' : 's') + '</span> · ' +
+        '<span title="Solo lo que inicia el sistema (pedir ubicación, confirmar, avisar) gasta cupo; responder a quien escribe no. Un número nuevo empieza con un cupo bajo que sube con los días.">quedan ' + esc(quedan) + ' de ' + esc(h.cupo) + ' del cupo' + (pct > 90 ? ' (casi agotado)' : '') + '</span>' +
+        (c.esperandoRespuesta ? ' · <a href="/chat">' + esc(c.esperandoRespuesta) + ' conversación' + (c.esperandoRespuesta === 1 ? '' : 'es') + ' esperan respuesta</a>' : '') +
+        '</div>';
+    } else
     document.getElementById('in-kpis').innerHTML =
       kpi('Enviados hoy', h.enviados, 'entregados ' + h.entregados + ' · leídos ' + h.leidos, '', '/panel#historial') +
       kpi('Recibidos hoy', h.entrantes, c.sinLeer + ' sin leer', '', '/chat') +
       kpi('Fallidos hoy', h.fallidos, h.fallidos ? 'mira el historial' : 'ninguno', h.fallidos ? 'bad' : 'ok', '/panel#historial') +
-      kpi('Cupo de hoy', h.usados + ' / ' + h.cupo, '<div class="barra"><i class="' + (pct > 90 ? 'bad' : pct > 70 ? 'warn' : '') + '" style="width:' + pct + '%"></i></div><span title="Solo lo iniciado por la empresa (plantillas, campañas, reparto) gasta cupo; responder a quien escribe no.">iniciados por ti · warm-up</span>', pct > 90 ? 'warn' : '', '/panel#estado') +
+      kpi('Cupo de hoy', h.usados + ' / ' + h.cupo, '<div class="barra"><i class="' + (pct > 90 ? 'bad' : pct > 70 ? 'warn' : '') + '" style="width:' + pct + '%"></i></div><span title="Solo lo iniciado por la empresa (plantillas, campañas, reparto) gasta cupo; responder a quien escribe no. Un número nuevo empieza con un cupo bajo que sube con los días.">iniciados por ti</span>', pct > 90 ? 'warn' : '', '/panel#estado') +
       kpi('Esperan respuesta', c.esperandoRespuesta, 'conversaciones con el cliente al final', c.esperandoRespuesta ? 'warn' : 'ok', '/chat') +
-      kpi('Necesitan una persona', rp.requierenPersona, 'solicitudes del reparto', rp.requierenPersona ? 'warn' : 'ok', '/rutas');
+      kpi('Necesitan una persona', rp.requierenPersona, 'solicitudes del reparto', rp.requierenPersona ? 'warn' : 'ok', window.__modoSistema === 'gsg' ? '/hoy' : '/rutas');
     document.getElementById('in-grafica').innerHTML = graficaSemana(r.semana);
     pintarPasos(r.primerosPasos);
+    pintarEntregasInicio(r.entregas, rp.requierenPersona || 0);
 
     var luz = n.nivel || 'verde';
     var numero = '<div class="semaforo" style="margin-top:8px"><span class="luz ' + esc(luz) + '"></span><div><b>' + esc(luz.charAt(0).toUpperCase() + luz.slice(1)) + '</b><p class="muted">' + esc(NIVEL_TXT[luz] || '') + '</p></div></div>';
     numero += '<div class="grid" style="margin-top:12px">' +
-      '<div class="stat"><span class="muted">Conexión</span><b class="' + (n.conectado ? 'ok' : 'bad') + '">' + (n.conectado ? 'conectado' : n.configurado ? 'sin conexión' : 'sin configurar') + '</b></div>' +
-      '<div class="stat"><span class="muted">Calidad (Meta)</span><b class="' + qualityKind(n.calidad) + '">' + esc(n.calidad || '-') + '</b></div>' +
+      '<div class="stat"><span class="muted">Conexión</span><b class="' + (n.conectado ? 'ok' : 'bad') + '">' + (n.conectado ? 'Conectado' : n.configurado ? 'Caído' : 'Sin conectar') + '</b></div>' +
+      '<div class="stat"><span class="muted">Calidad (Meta)</span><b class="' + qualityKind(n.calidad) + '">' + esc(calidadEnPalabras(n.calidad)) + '</b></div>' +
       '<div class="stat"><span class="muted">Envíos</span><b class="' + (n.pausado ? 'bad' : 'ok') + '">' + (n.pausado ? 'pausados' : 'activos') + '</b>' + (n.motivoPausa ? '<small>' + esc(n.motivoPausa) + '</small>' : '') + '</div>' +
       '<div class="stat"><span class="muted">Ritmo</span><b>' + Math.round((n.factor || 1) * 100) + '%</b><small>del normal</small></div>' +
       '</div>';
@@ -1343,12 +1514,43 @@ async function loadInicio() {
       '<div class="actions"><a href="/rutas">Ir al reparto</a>' + (rp.lotesEnMarcha ? ' <span class="pill warn">' + rp.lotesEnMarcha + ' en marcha</span>' : '') + '</div>';
   } catch (error) { show('state', error.message, 'bad'); }
 }
+/* Las entregas del dia (GSG): en modo gsg van primero y el reparto viejo se esconde. */
+function pintarEntregasInicio(en, personasReparto) {
+  var card = document.getElementById('in-entregas-card');
+  var reparto = document.getElementById('in-reparto-card');
+  var modoGsg = window.__modoSistema === 'gsg' || (document.querySelector('.s-app') && document.querySelector('.s-app').classList.contains('modo-gsg'));
+  if (!card) return;
+  if (!en) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  if (reparto) reparto.classList.toggle('hidden', Boolean(modoGsg));
+  var cerrado = en.ultimoCierre && en.ultimoCierre.dia === en.dia;
+  document.getElementById('in-entregas').innerHTML =
+    kpi('Pedidos de hoy', en.total, en.total ? (en.gsgConectada ? 'entran solos desde GSG' : 'GSG sin conectar: se pegan a mano') : (en.gsgConectada ? 'todavía no llegó ninguno' : 'conecta GSG o pega la lista'), en.total || en.gsgConectada ? '' : 'warn', '/hoy') +
+    kpi('Falta ubicación', en.faltaUbicacion, 'se les está pidiendo el pin', en.faltaUbicacion ? 'warn' : 'ok', '/hoy?filtro=faltaUbicacion') +
+    kpi('Falta confirmar', en.faltaConfirmacion, 'se espera su SÍ o NO', en.faltaConfirmacion ? 'warn' : 'ok', '/hoy?filtro=faltaConfirmacion') +
+    kpi('En camino', en.enCamino, 'con motorizado o hora avisada', '', '/hoy?filtro=avisada') +
+    kpi('Entregadas', en.entregadas, 'el motorizado dijo entregado', en.entregadas ? 'ok' : '', '/hoy?filtro=entregada') +
+    kpi('Necesitan a alguien', (en.incidencia || 0) + (personasReparto || 0), (en.incidencia || 0) + (personasReparto || 0) ? 'míralas en Hoy' : 'ninguna', (en.incidencia || 0) + (personasReparto || 0) ? 'bad' : 'ok', '/hoy?filtro=incidencia');
+  var sub = 'GSG: ' + en.gsgDescripcion + '. Motorizados activos: ' + en.motorizadosActivos + '.';
+  if (cerrado) sub += ' Ayer se cerró a las ' + new Date(en.ultimoCierre.cuando).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false }) + ': ' + en.ultimoCierre.sinTerminar.length + ' sin terminar, ' + en.ultimoCierre.dadasPorEntregadas.length + ' dadas por entregadas.';
+  else if (en.cierrePendiente) sub += ' Quedan ' + en.cierrePendiente + ' pedido' + (en.cierrePendiente === 1 ? '' : 's') + ' de ayer sin cerrar.';
+  document.getElementById('in-entregas-sub').textContent = sub;
+  document.getElementById('in-entregas-acciones').innerHTML = '<a href="/hoy">Ver los pedidos de hoy</a>' +
+    (!en.motorizadosActivos ? ' <a href="/motorizados" class="pill bad" style="margin-left:10px">' + (en.total ? 'No hay ningún motorizado activo: los pedidos listos no pueden salir' : 'Da de alta a tus motorizados') + '</a>' : '');
+  if (modoGsg) {
+    var kpis = document.getElementById('in-kpis');
+    if (kpis && card.nextElementSibling !== kpis) kpis.parentNode.insertBefore(card, kpis);
+  }
+}
 setInterval(function () { if (seccionActiva === 'inicio' && !document.hidden) loadInicio(); }, 30000);
 
 // --------------------------------------------------------------- configuracion
 var DIAS_NOMBRE = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 var DIAS_ORDEN = [1, 2, 3, 4, 5, 6, 0];
 function numOVacio(id) { var v = val(id); return v === '' ? null : Number(v); }
+/* Un celular peruano se escribe con sus 9 cifras; por dentro va con el 51 delante. */
+function conPrefijoPeru(v) { var d = String(v || '').replace(/\D/g, ''); return d.length === 9 && d.charAt(0) === '9' ? '51' + d : d; }
+function sinPrefijoPeru(v) { var d = String(v || '').replace(/\D/g, ''); return d.length === 11 && d.indexOf('519') === 0 ? d.slice(2).replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') : String(v || ''); }
 function ponerNum(id, guardado, efectivo) {
   var el = document.getElementById(id);
   el.value = guardado === null || guardado === undefined ? '' : guardado;
@@ -1363,7 +1565,7 @@ function pintarVigente(e) {
     'Contactos nuevos/día: <b>' + (e.ritmo.nuevosContactosPorDia || 'sin límite') + '</b>',
     e.soloNumeros.length ? 'Modo prueba: <b>' + e.soloNumeros.length + ' número(s)</b>' : 'Modo prueba: <b>apagado</b>',
     e.supervisor ? 'Avisos a <b>' + esc(e.supervisor) + '</b>' : 'Avisos: <b>nadie</b>',
-    'Perfil <b>' + esc(e.ritmo.perfil) + '</b>'
+    'Conexión <b>' + esc(e.ritmo.perfil === 'cloud' ? 'API de Meta' : e.ritmo.perfil === 'waha' ? 'WAHA' : e.ritmo.perfil === 'local' ? 'QR en este servidor' : e.ritmo.perfil) + '</b>'
   ];
   document.getElementById('cf-vigente').innerHTML = partes.map(function (t) { return '<span>' + t + '</span>'; }).join('');
 }
@@ -1374,7 +1576,7 @@ async function loadPlan() {
     if (p.origen === 'libre' || !p.plan) { caja.classList.add('hidden'); return; }
     var pl = p.plan;
     var l = pl.limites;
-    var color = pl.vencido ? '#b42318' : pl.diasRestantes <= 7 ? '#b45309' : '#1a7f37';
+    var color = pl.vencido ? 'var(--rojo)' : pl.diasRestantes <= 7 ? 'var(--ambar)' : 'var(--verde)';
     caja.classList.remove('hidden');
     caja.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><div><b>Tu plan: ' + esc(pl.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (pl.vencido ? '· vencido' : '· vence en ' + pl.diasRestantes + ' día' + (pl.diasRestantes === 1 ? '' : 's')) + '</span><br><small class="muted">Hasta el ' + esc(new Date(pl.vencimiento).toLocaleDateString()) + (pl.precioMes ? ' · ' + esc(pl.moneda) + ' ' + pl.precioMes + ' al mes' : ' · gratis') + '</small></div>' +
       '<div class="muted" style="font-size:13px">Asistente IA: ' + (l.iaTurnosMes === 0 ? 'no incluido' : l.iaTurnosMes == null ? 'sin límite' : p.iaTurnosMes + ' de ' + l.iaTurnosMes + ' respuestas este mes') + ' · Campañas: ' + (l.campanas ? 'sí' : 'no') + ' · Conectores: ' + (l.conectores ? 'sí' : 'no') + '</div></div>' +
@@ -1393,6 +1595,8 @@ async function loadConfiguracion() {
     document.querySelectorAll('.s-logo-text').forEach(function (el) { el.textContent = e.nombreNegocio; });
     document.getElementById('s-app').setAttribute('data-negocio', e.nombreNegocio);
     var nombre = document.getElementById('cf-nombre'); nombre.value = g.nombreNegocio || ''; nombre.placeholder = sv.nombreNegocio;
+    var modoActual = g.modo || 'gsg';
+    document.querySelectorAll('input[name=cf-modo]').forEach(function (r) { r.checked = r.value === modoActual; });
     document.getElementById('cf-tz').value = e.horario.timezone;
     ponerNum('cf-hora-inicio', g.horario.inicio, e.horario.inicio);
     ponerNum('cf-hora-fin', g.horario.fin, e.horario.fin);
@@ -1407,11 +1611,16 @@ async function loadConfiguracion() {
     ponerNum('cf-r-contacto', g.ritmo.maxPorContactoDia, e.ritmo.maxPorContactoDia);
     ponerNum('cf-r-sep', g.ritmo.separacionContactoMin, e.ritmo.separacionContactoMin);
     document.getElementById('cf-mp-activo').checked = g.modoPrueba.activo;
-    document.getElementById('cf-mp-numeros').value = g.modoPrueba.numeros.join('\n');
+    document.getElementById('cf-mp-numeros').value = g.modoPrueba.numeros.map(sinPrefijoPeru).join('\n');
     var fijado = document.getElementById('cf-fijado');
     fijado.classList.toggle('hidden', !r.modoPruebaFijado);
     if (r.modoPruebaFijado) fijado.textContent = 'El servidor arrancó con SOLO_NUMEROS=' + sv.soloNumeros.join(', ') + '. Desde aquí solo puedes recortar esa lista, no ampliarla ni apagar el modo prueba: eso se cambia en el .env y se reinicia.';
-    var sup = document.getElementById('cf-supervisor'); sup.value = g.avisos.supervisor || ''; sup.placeholder = sv.supervisor || 'nadie';
+    var sup = document.getElementById('cf-supervisor'); sup.value = sinPrefijoPeru(g.avisos.supervisor || ''); sup.placeholder = sv.supervisor ? sinPrefijoPeru(sv.supervisor) : '987 654 321';
+    var rs = g.resumenes || { activo: true, horaManana: '08:30', horaTarde: '18:30' };
+    document.getElementById('cf-rs-activo').checked = rs.activo !== false;
+    document.getElementById('cf-rs-manana').value = rs.horaManana || '08:30';
+    document.getElementById('cf-rs-tarde').value = rs.horaTarde || '18:30';
+    loadResumenesEstado();
     document.getElementById('cf-humanizar').value = g.humanizar === null ? '' : String(g.humanizar);
     document.getElementById('cf-autopausa').value = g.autoPausa === null ? '' : String(g.autoPausa);
     document.getElementById('cf-verunavez').value = g.pedirVerUnaVezNormal === false ? 'false' : 'true';
@@ -1422,12 +1631,54 @@ async function loadConfiguracion() {
   } catch (error) { show('cf-state', error.message, 'bad'); }
 }
 function triestado(id) { var v = val(id); return v === '' ? null : v === 'true'; }
+/* El resumen del dia: cuando salio cada uno y que toca. */
+function franjaNombre(f) { return f === 'manana' ? 'el de la mañana' : 'el de la tarde'; }
+async function loadResumenesEstado() {
+  var caja = document.getElementById('cf-rs-estado');
+  try {
+    var r = await api('/admin/resumenes');
+    var partes = [];
+    if (!r.supervisor) partes.push('<b style="color:var(--warn)">Falta el WhatsApp del supervisor (arriba, en Avisos): sin él no hay a quién mandarlo.</b>');
+    ['manana', 'tarde'].forEach(function (f) {
+      var u = r.ultimos[f];
+      if (!u) partes.push('Todavía no salió ' + franjaNombre(f) + '.');
+      else partes.push((u.ok ? 'Salió ' : 'No salió ') + franjaNombre(f) + ' el ' + new Date(u.cuando).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + (u.ok ? (u.conIA ? ' (redactado por la IA)' : ' (texto fijo)') : ': ' + esc(u.motivo || '')) + (u.quien && u.quien !== 'motor' ? ' · lo mandó ' + esc(u.quien) : '') + '.');
+    });
+    if (r.proximo) partes.push('Próximo: ' + franjaNombre(r.proximo.franja) + ' ' + (r.proximo.hoy ? 'hoy' : 'mañana') + ' a las ' + esc(r.proximo.hora) + '.');
+    else if (!r.ajustes.activo) partes.push('Está apagado.');
+    caja.innerHTML = partes.join(' ');
+  } catch (e) { caja.textContent = ''; }
+}
+async function verResumen(franja) {
+  var vista = document.getElementById('cf-rs-vista');
+  vista.classList.remove('hidden'); vista.textContent = 'Preparando…';
+  try {
+    var r = await api('/admin/resumenes/vista-previa', { method: 'POST', body: { franja: franja } });
+    vista.textContent = (r.conIA ? '(redactado por la IA, cifras del sistema)\n\n' : '') + r.texto;
+  } catch (e) { vista.textContent = e.message; }
+}
+document.getElementById('cf-rs-ver-manana').onclick = function () { verResumen('manana'); };
+document.getElementById('cf-rs-ver-tarde').onclick = function () { verResumen('tarde'); };
+document.getElementById('cf-rs-mandar').onclick = busy('cf-rs-mandar', async function () {
+  var h = new Date().getHours();
+  var franja = h < 14 ? 'manana' : 'tarde';
+  var ok = await confirmarDialogo({ titulo: 'Mandar el resumen ahora', texto: 'Se manda ' + franjaNombre(franja) + ' al WhatsApp del supervisor con las cifras de este momento.', boton: 'Mandar' });
+  if (!ok) return;
+  try {
+    var r = await api('/admin/resumenes/mandar', { method: 'POST', body: { franja: franja } });
+    var vista = document.getElementById('cf-rs-vista'); vista.classList.remove('hidden'); vista.textContent = r.texto;
+    show('cf-state', 'Resumen mandado al supervisor', 'ok');
+    loadResumenesEstado();
+  } catch (e) { show('cf-state', e.message, 'bad'); loadResumenesEstado(); }
+});
 document.getElementById('cf-guardar').onclick = busy('cf-guardar', async function () {
   try {
     var dias = Array.prototype.slice.call(document.querySelectorAll('#cf-dias input')).filter(function (c) { return c.checked; }).map(function (c) { return Number(c.getAttribute('data-dia')); });
     if (!dias.length) throw new Error('Marca al menos un día de envío.');
+    var modoElegido = (document.querySelector('input[name=cf-modo]:checked') || {}).value || 'gsg';
     var patch = {
       nombreNegocio: val('cf-nombre') || null,
+      modo: modoElegido,
       horario: { inicio: numOVacio('cf-hora-inicio'), fin: numOVacio('cf-hora-fin'), dias: dias },
       ritmo: {
         maxPorMinuto: numOVacio('cf-r-min'), maxPorHora: numOVacio('cf-r-hora'),
@@ -1435,8 +1686,9 @@ document.getElementById('cf-guardar').onclick = busy('cf-guardar', async functio
         nuevosContactosPorDia: numOVacio('cf-r-nuevos'), maxPorContactoDia: numOVacio('cf-r-contacto'),
         separacionContactoMin: numOVacio('cf-r-sep')
       },
-      modoPrueba: { activo: document.getElementById('cf-mp-activo').checked, numeros: lines(document.getElementById('cf-mp-numeros').value) },
-      avisos: { supervisor: val('cf-supervisor') || null },
+      modoPrueba: { activo: document.getElementById('cf-mp-activo').checked, numeros: lines(document.getElementById('cf-mp-numeros').value).map(conPrefijoPeru) },
+      avisos: { supervisor: conPrefijoPeru(val('cf-supervisor')) || null },
+      resumenes: { activo: document.getElementById('cf-rs-activo').checked, horaManana: val('cf-rs-manana') || '08:30', horaTarde: val('cf-rs-tarde') || '18:30' },
       humanizar: triestado('cf-humanizar'),
       autoPausa: triestado('cf-autopausa'),
       pedirVerUnaVezNormal: val('cf-verunavez') !== 'false'
@@ -1444,7 +1696,9 @@ document.getElementById('cf-guardar').onclick = busy('cf-guardar', async functio
     if (patch.horario.inicio !== null && patch.horario.fin !== null && patch.horario.fin <= patch.horario.inicio) throw new Error('La hora final tiene que ser mayor que la inicial.');
     if (patch.modoPrueba.activo && !patch.modoPrueba.numeros.length) throw new Error('Con el modo prueba activo hace falta al menos un número.');
     await api('/admin/ajustes', { method: 'POST', body: patch });
-    show('cf-state', 'Guardado: se aplica en el siguiente envío', 'ok');
+    var cambioModo = window.__modoSistema && window.__modoSistema !== modoElegido;
+    show('cf-state', cambioModo ? 'Guardado. El menú cambia al recargar…' : 'Guardado: se aplica en el siguiente envío', 'ok');
+    if (cambioModo) { setTimeout(function () { location.reload(); }, 900); return; }
     loadConfiguracion();
   } catch (error) { show('cf-state', error.message, 'bad'); }
 });
@@ -2140,8 +2394,56 @@ function iaPintarProveedor() {
   document.getElementById('ia-modelo-nota').classList.toggle('hidden', p === 'openai');
   document.getElementById('ia-modelo').classList.toggle('hidden', p !== 'openai');
   var lista = (window.__iaModelos && window.__iaModelos[p]) || [];
+  if (p === 'openai') {
+    var s = iaServicioActual();
+    if (s && s.modelos.length) lista = s.modelos;
+  }
   document.getElementById('ia-modelos').innerHTML = lista.map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
 }
+/* Los servicios compatibles con OpenAI: elegir uno rellena la URL y sugiere modelos. */
+var IA_SERVICIOS = [];
+function iaServicioActual() {
+  var id = val('ia-servicio');
+  for (var i = 0; i < IA_SERVICIOS.length; i++) if (IA_SERVICIOS[i].id === id) return IA_SERVICIOS[i];
+  return null;
+}
+function iaPintarServicio(rellenar) {
+  var s = iaServicioActual();
+  var nota = document.getElementById('ia-servicio-nota');
+  if (!s) { nota.textContent = ''; return; }
+  nota.textContent = (s.sinClave ? 'Sin clave. ' : 'La clave: ' + s.clave + '. ') + (s.modelos.length ? 'Modelos sugeridos: ' + s.modelos.join(', ') + '.' : '');
+  document.getElementById('ia-token-openai').placeholder = s.sinClave ? 'no hace falta' : 'pega aquí la clave; se guarda cifrada y no se vuelve a mostrar';
+  if (rellenar) {
+    if (s.baseUrl) setVal('ia-baseurl', s.baseUrl);
+    /* Al cambiar de servicio, el modelo que habia (de otro servicio, o de Puter) ya no vale: se sugiere el primero de este. */
+    if (s.modelos.length && s.modelos.indexOf(val('ia-modelo')) < 0) setVal('ia-modelo', s.modelos[0]);
+  }
+  iaPintarProveedor();
+}
+document.getElementById('ia-servicio').onchange = function () { iaPintarServicio(true); };
+document.getElementById('ia-probar-conexion').onclick = async function () {
+  var estado = document.getElementById('ia-conexion-estado');
+  var boton = this;
+  boton.disabled = true;
+  estado.textContent = 'Probando…';
+  try {
+    var p = val('ia-proveedor');
+    var body = { proveedor: p };
+    if (p === 'openai') {
+      body.baseUrl = val('ia-baseurl');
+      body.modelo = val('ia-modelo');
+      var clave = val('ia-token-openai');
+      if (clave) body.token = clave;
+    } else {
+      body.modelo = val('ia-modelo-gratis');
+      var tokenPuter = val('ia-token');
+      if (tokenPuter) body.token = tokenPuter;
+    }
+    var r = await api('/admin/ia/probar-conexion', { method: 'POST', body: body });
+    estado.innerHTML = r.ok ? '<b style="color:var(--ok)">Funciona</b> (' + Math.round(r.prueba.ms / 100) / 10 + ' s, ' + esc(r.prueba.modelo) + '). ' + esc(r.prueba.detalle) : '<b style="color:var(--bad)">No responde:</b> ' + esc(r.prueba.detalle);
+  } catch (e) { estado.textContent = e.message; }
+  boton.disabled = false;
+};
 /* Puter.js se carga solo en esta pantalla y solo la primera vez que hace falta. */
 var IA_PUTER_CARGA = null;
 function iaCargarPuter() {
@@ -2270,21 +2572,66 @@ document.getElementById('voz-guardar').onclick = busy('voz-guardar', async funct
     loadVoz();
   } catch (error) { show('voz-state', error.message, 'bad'); }
 });
+async function loadIaUso() {
+  try {
+    var u = await api('/admin/ia/uso');
+    var h = u.hoy, m = u.mes;
+    var caja = document.getElementById('ia-uso');
+    var tarjetas = [
+      ['Respuestas a clientes hoy', h.respuestas, 'este mes: ' + m.respuestas],
+      ['Lecturas para el sistema hoy', h.lecturas, 'entregas, guardadas, resúmenes · este mes: ' + m.lecturas],
+      ['Órdenes y ayuda hoy', h.ordenes, 'IA operadora · este mes: ' + m.ordenes],
+      ['Fallos hoy', h.fallos, m.fallos ? 'este mes: ' + m.fallos : 'ninguno este mes', h.fallos ? 'bad' : '']
+    ];
+    if (u.cuentaTokens) tarjetas.push(['Tokens este mes', (m.tokensEntrada + m.tokensSalida).toLocaleString('es-PE'), 'hoy: ' + (h.tokensEntrada + h.tokensSalida).toLocaleString('es-PE') + ' (' + h.tokensEntrada.toLocaleString('es-PE') + ' de entrada, ' + h.tokensSalida.toLocaleString('es-PE') + ' de salida)']);
+    if (u.msMedioHoy != null) tarjetas.push(['Tarda de media', (u.msMedioHoy / 1000).toFixed(1) + ' s', 'por respuesta, hoy']);
+    var html = tarjetas.map(function (t) { return '<div><span>' + esc(t[0]) + '</span><b class="' + (t[3] || '') + '">' + esc(String(t[1])) + '</b><span>' + esc(t[2]) + '</span></div>'; }).join('');
+    if (u.membresia) {
+      var mb = u.membresia;
+      if (mb.tope == null) html += '<div><span>Tope de tu membresía</span><b>sin límite</b><span>plan ' + esc(mb.plan) + '</span></div>';
+      else {
+        var pct = mb.tope ? Math.min(100, Math.round(100 * mb.gastadas / mb.tope)) : 100;
+        html += '<div><span>Tope de tu membresía</span><b class="' + (pct >= 100 ? 'bad' : '') + '">' + mb.gastadas + ' de ' + mb.tope + '</b><span>respuestas este mes · te quedan ' + mb.quedan + '</span><div class="uso-barra"><i class="' + (pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : '') + '" style="width:' + pct + '%"></i></div></div>';
+      }
+    }
+    caja.innerHTML = html;
+    var total = h.respuestas + h.lecturas + h.ordenes + h.pruebas;
+    document.getElementById('ia-uso-resumen').textContent = '· hoy ' + total + ' llamada' + (total === 1 ? '' : 's') + (h.fallos ? ', ' + h.fallos + ' fallo' + (h.fallos === 1 ? '' : 's') : '') + (u.membresia && u.membresia.tope != null ? ' · quedan ' + u.membresia.quedan + ' respuestas del plan' : '');
+    var nota = document.getElementById('ia-uso-nota');
+    if (u.fallosSeguidos >= 3) { nota.innerHTML = '<b style="color:var(--bad)">El asistente lleva ' + u.fallosSeguidos + ' fallos seguidos</b>: ' + esc(u.ultimoFallo ? u.ultimoFallo.detalle : '') + '. Revisa la clave o el servicio y pulsa «Probar la conexión».'; document.getElementById('ia-uso-caja').open = true; }
+    else if (u.ultimoFallo) nota.textContent = 'Último fallo: ' + fmt(u.ultimoFallo.cuando) + ' — ' + u.ultimoFallo.detalle;
+    else nota.textContent = u.cuentaTokens ? 'Los tokens los dice el servicio en cada respuesta; el costo depende de tu plan con ' + esc(u.servicio || 'ese servicio') + '.' : 'Con Puter no hay tokens que contar aquí: los modelos gratuitos no cuestan nada.';
+  } catch (e) { /* sin uso no pasa nada */ }
+}
 async function loadIa() {
+  loadIaUso();
   loadVoz();
   try {
     var e = await api('/admin/ia');
     window.__iaModelos = e.modelosSugeridos;
+    IA_SERVICIOS = e.servicios || [];
+    var selServicio = document.getElementById('ia-servicio');
+    selServicio.innerHTML = IA_SERVICIOS.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.nombre) + '</option>'; }).join('');
+    selServicio.value = e.servicio || 'openai';
     var gratis = e.modelosGratis || [];
     var selGratis = document.getElementById('ia-modelo-gratis');
-    selGratis.innerHTML = gratis.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + ' — ' + esc((e.descripcionGratis && e.descripcionGratis[m]) || 'gratuito') + '</option>'; }).join('');
+    selGratis.innerHTML = gratis.map(function (m) { var d = (e.descripcionGratis && e.descripcionGratis[m]) || ''; return '<option value="' + esc(m) + '" title="' + esc(m) + '">' + esc(d ? d : m) + '</option>'; }).join('');
     selGratis.value = gratis.indexOf(e.modelo) >= 0 ? e.modelo : e.modeloEfectivo;
-    document.getElementById('ia-modelo-nota').innerHTML = 'Solo modelos <b>completamente gratuitos</b> de Puter (costo cero por token). ' + (e.modelosGratisOrigen === 'catalogo' ? 'Comprobado contra su catalogo en vivo.' : 'Lista fija (no se pudo consultar el catalogo).') + (e.proveedor === 'puter' && e.modelo !== e.modeloEfectivo ? ' <b>El modelo guardado ya no es gratuito: se usa ' + esc(e.modeloEfectivo) + '.</b>' : '');
+    document.getElementById('ia-modelo-nota').innerHTML = 'Solo modelos <b>completamente gratuitos</b> de Puter (no cuestan nada). ' + (e.modelosGratisOrigen === 'catalogo' ? 'Comprobado con su lista en vivo.' : 'Lista fija (no se pudo consultar la suya).') + (e.proveedor === 'puter' && e.modelo !== e.modeloEfectivo ? ' <b>El modelo guardado ya no es gratuito: se usa ' + esc(e.modeloEfectivo) + '.</b>' : '');
     setVal('ia-nombre', e.nombreAsistente); setVal('ia-conocimiento', e.conocimiento); setVal('ia-instrucciones', e.instrucciones);
     setVal('ia-proveedor', e.proveedor); setVal('ia-baseurl', e.baseUrl); setVal('ia-modelo', e.modelo); setVal('ia-derivar', e.derivarSi); setVal('ia-memoria', e.memoria);
+    iaPintarServicio(false);
     setVal('ia-catalogo-url', e.catalogoUrl || ''); setVal('ia-catalogo-formato', e.catalogoFormato || 'auto');
     document.getElementById('ia-avisar').checked = e.avisarDerivacion;
     document.getElementById('ia-activa').checked = e.activa;
+    /* la tira de pasos: que falta, de un vistazo */
+    var p1 = document.getElementById('ia-p1'), p2 = document.getElementById('ia-p2'), p3 = document.getElementById('ia-p3');
+    p1.className = 'estado ' + (e.tieneToken ? 'ok' : 'bad');
+    document.getElementById('ia-p1-t').textContent = e.tieneToken ? (e.proveedor === 'puter' ? 'Puter conectado, modelo ' + e.modeloEfectivo + '.' : 'Clave guardada (' + (e.servicio || 'openai') + '), modelo ' + e.modelo + '.') : 'Sin clave ni sesión todavía.';
+    p2.className = 'estado ' + (e.conocimiento && e.conocimiento.trim() ? 'ok' : 'bad');
+    document.getElementById('ia-p2-t').textContent = e.conocimiento && e.conocimiento.trim() ? 'Sabe ' + e.conocimiento.trim().length + ' caracteres sobre el negocio.' : 'Todavía no le contaste nada del negocio.';
+    p3.className = 'estado ' + (e.activa && e.tieneToken ? 'ok' : 'bad');
+    document.getElementById('ia-p3-t').textContent = e.activa && e.tieneToken ? 'Encendido: contesta solo.' : e.activa ? 'Marcado como encendido, pero sin clave no puede contestar.' : 'Apagado: no contesta a nadie.';
     document.getElementById('ia-token-estado').textContent = e.tieneToken ? 'Hay una sesión o clave guardada. Deja el campo vacío para conservarla; escribe otra para cambiarla.' : 'Todavía no hay sesión ni clave: sin eso el asistente no puede contestar.';
     setVal('ia-token', ''); setVal('ia-token-openai', '');
     document.getElementById('ia-puter-estado').textContent = e.tieneToken && e.proveedor === 'puter' ? 'Hay una sesión de Puter guardada.' : '';
@@ -2299,7 +2646,7 @@ document.getElementById('ia-guardar').onclick = busy('ia-guardar', async functio
   try {
     var body = {
       activa: document.getElementById('ia-activa').checked,
-      proveedor: val('ia-proveedor'), modelo: val('ia-proveedor') === 'openai' ? (val('ia-modelo') || 'gpt-4o-mini') : val('ia-modelo-gratis'), baseUrl: val('ia-baseurl'),
+      proveedor: val('ia-proveedor'), servicio: val('ia-servicio') || 'openai', modelo: val('ia-proveedor') === 'openai' ? (val('ia-modelo') || 'gpt-4o-mini') : val('ia-modelo-gratis'), baseUrl: val('ia-baseurl'),
       nombreAsistente: val('ia-nombre') || 'Asistente', conocimiento: document.getElementById('ia-conocimiento').value, instrucciones: document.getElementById('ia-instrucciones').value,
       derivarSi: val('ia-derivar'), avisarDerivacion: document.getElementById('ia-avisar').checked, memoria: Number(val('ia-memoria') || 12),
       catalogoUrl: val('ia-catalogo-url'), catalogoFormato: val('ia-catalogo-formato') || 'auto'
@@ -2478,6 +2825,8 @@ function busy(id, fn) {
   };
 }
 function qualityKind(q) { return q === 'GREEN' ? 'ok' : q === 'YELLOW' ? 'warn' : 'bad'; }
+/* Meta contesta GREEN / YELLOW / RED: en pantalla va en palabras. */
+function calidadEnPalabras(q) { return q === 'GREEN' ? 'Verde' : q === 'YELLOW' ? 'Amarilla' : q === 'RED' ? 'Roja' : q === 'UNKNOWN' || !q ? '—' : String(q); }
 function statusKind(s) {
   if (s === 'sent' || s === 'delivered' || s === 'read' || s === 'APPROVED' || s === 'active' || s === 'completed' || s === 'finished') return 'ok';
   if (s === 'queued' || s === 'pending' || s === 'PENDING' || s === 'running' || s === 'processing' || s === 'canary' || s === 'paused') return 'warn';
@@ -2500,11 +2849,11 @@ async function loadHealth() {
     var h = await api('/admin/health');
     var n = h.number;
     document.getElementById('stats').innerHTML =
-      '<div class="stat"><span class="muted">Calidad</span><b class="' + qualityKind(n.quality) + '">' + esc(n.quality) + '</b><span class="muted">' + esc(n.tier || 'tier desconocido') + '</span></div>' +
+      '<div class="stat"><span class="muted">Calidad</span><b class="' + qualityKind(n.quality) + '">' + esc(calidadEnPalabras(n.quality)) + '</b><span class="muted">' + esc(n.tier || 'tier desconocido') + '</span></div>' +
       '<div class="stat"><span class="muted">Estado</span><b>' + (n.paused ? 'PAUSADO' : 'activo') + '</b><span class="muted">' + esc(n.pausedReason || '') + '</span></div>' +
       '<div class="stat"><span class="muted">Enviados hoy</span><b>' + h.sentToday + ' / ' + h.dailyCap + '</b><span class="muted">cupo de warm-up</span></div>' +
       '<div class="stat"><span class="muted">En cola</span><b>' + ((h.queue.waiting || 0) + (h.queue.delayed || 0)) + '</b><span class="muted">' + (h.queue.failed || 0) + ' fallidos</span></div>' +
-      '<div class="stat"><span class="muted">WhatsApp</span><b class="' + (h.configured ? 'ok' : 'warn') + '">' + (h.configured ? 'conectado' : 'sin conectar') + '</b><span class="muted">' + esc((h.missing || []).join(', ')) + '</span></div>' +
+      '<div class="stat"><span class="muted">WhatsApp</span><b class="' + (h.configured ? 'ok' : 'warn') + '">' + (h.configured ? 'Conectado' : 'Sin conectar') + '</b><span class="muted">' + esc((h.missing || []).join(', ')) + '</span></div>' +
       (h.salud ? '<div class="stat"><span class="muted">Salud</span><b class="' + nivelKind(h.salud.nivel) + '">' + esc(h.salud.nivel) + '</b><span class="muted">velocidad al ' + Math.round((h.salud.factor || 0) * 100) + ' % - <a href="#salud">ver por que</a></span></div>' : '');
     show('state', n.paused ? 'Envios pausados' : 'Operativo', n.paused ? 'warn' : 'ok');
     // Lo que Meta cambia con fecha (solo con la API oficial): se marca como hecho en Conexion de WhatsApp.
@@ -2541,7 +2890,7 @@ document.getElementById('resume').onclick = async function () {
 function nivelKind(n) { return n === 'verde' ? 'ok' : n === 'amarillo' ? 'warn' : 'bad'; }
 function pct(a, b) { return b ? Math.round((a / b) * 100) + ' %' : '-'; }
 function minutos(ms) { if (ms == null) return '-'; var m = Math.round(ms / 60000); return m < 1 ? 'menos de 1 min' : m < 120 ? m + ' min' : Math.round(m / 60) + ' h'; }
-function hastaCuando(iso) { if (!iso) return ''; var d = new Date(iso); return d.toLocaleString('es-PE', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }); }
+function hastaCuando(iso) { if (!iso) return ''; var d = new Date(iso); return d.toLocaleString('es-PE', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', hour12: false }); }
 async function loadSalud() {
   try {
     var s = await api('/admin/salud');
@@ -2562,7 +2911,7 @@ async function loadSalud() {
     var n = s.numero || {};
     var r = s.ritmo || {};
     document.getElementById('sl-stats').innerHTML =
-      '<div class="stat"><span class="muted">Meta dice</span><b class="' + qualityKind(n.quality) + '">' + esc(n.quality || '-') + '</b><small>' + esc(n.estado || '') + (n.tier ? ' - ' + esc(n.tier) : '') + '</small></div>' +
+      '<div class="stat"><span class="muted">Meta dice</span><b class="' + qualityKind(n.quality) + '">' + esc(calidadEnPalabras(n.quality)) + '</b><small>' + esc(n.estado || '') + (n.tier ? ' - ' + esc(n.tier) : '') + '</small></div>' +
       '<div class="stat"><span class="muted">Hoy</span><b>' + r.hoy + ' / ' + r.cupoHoy + '</b><small>cupo de warm-up</small><div class="barra"><i class="' + (r.hoy >= r.cupoHoy ? 'bad' : '') + '" style="width:' + Math.min(100, Math.round((r.hoy / Math.max(1, r.cupoHoy)) * 100)) + '%"></i></div></div>' +
       '<div class="stat"><span class="muted">Ultima hora</span><b>' + r.ultimaHora + ' / ' + Math.max(1, Math.floor((s.politica.maxPorHora || 0) * s.factor)) + '</b><small>' + r.ultimoMinuto + ' en el ultimo minuto</small></div>' +
       '<div class="stat"><span class="muted">Destinatarios 24 h</span><b>' + r.destinatariosUnicos24h + (r.limiteTier ? ' / ' + (isFinite(r.limiteTier) ? r.limiteTier : 'sin limite') : '') + '</b><small>' + (r.limiteTier ? 'tier de Meta, se para al ' + Math.round(s.politica.fraccionTier * 100) + ' %' : s.politica.perfil === 'cloud' ? 'Meta no ha dicho el tier: sincroniza en Estado' : 'sin tier (cliente no oficial)') + '</small></div>' +
@@ -3308,7 +3657,7 @@ function mbPintarEstado(m) {
     return;
   }
   var l = p.limites;
-  var color = p.vencido ? '#b42318' : p.diasRestantes <= 7 ? '#b45309' : '#1a7f37';
+  var color = p.vencido ? 'var(--rojo)' : p.diasRestantes <= 7 ? 'var(--ambar)' : 'var(--verde)';
   var suspendida = m.local && m.local.estado === 'suspendida';
   caja.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><div><b>Plan ' + esc(p.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (suspendida ? '· suspendida' : p.vencido ? '· vencida' : '· vence en ' + p.diasRestantes + ' día' + (p.diasRestantes === 1 ? '' : 's')) + '</span><br><small class="muted">Pagada hasta el ' + esc(new Date(p.vencimiento).toLocaleDateString('es-PE')) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + ' al mes' : ' · gratis') + ' · ' + (m.origen === 'maestro' ? 'la lleva el maestro del SaaS' : 'la lleva el superadministrador de esta instalación') + '</small></div>' +
     '<div class="muted" style="font-size:13px">Asistente IA: ' + (l.iaTurnosMes === 0 ? 'no incluido' : l.iaTurnosMes == null ? 'sin límite' : m.iaTurnosMes + ' de ' + l.iaTurnosMes + ' respuestas este mes') + ' · Campañas: ' + (l.campanas ? 'sí' : 'no') + ' · Conectores: ' + (l.conectores ? 'sí' : 'no') + ' · Cuentas: ' + (l.usuarios == null ? 'sin límite' : l.usuarios) + '</div></div>' +
@@ -3323,7 +3672,8 @@ function mbRellenar(m) {
   sel.value = l ? l.plan : base.clave;
   setVal('mb-nombre', l ? l.nombre : base.nombre);
   var vence = l ? new Date(l.vencimiento) : new Date(Date.now() + 14 * 86400000);
-  setVal('mb-vence', vence.toISOString().slice(0, 10));
+  /* El dia en Lima, no el de UTC: un vencimiento a las 23:59 de Lima es la madrugada siguiente en UTC. */
+  setVal('mb-vence', vence.toLocaleDateString('en-CA', { timeZone: 'America/Lima' }).slice(0, 10));
   setVal('mb-estado-sel', l ? l.estado : 'activa');
   var lim = l ? l.limites : base.limites;
   setVal('mb-ia', lim.iaTurnosMes == null ? '' : lim.iaTurnosMes);
@@ -3465,7 +3815,7 @@ async function loadTiendas() {
         if (!plan) return;
         var vence = await pedirDato({ titulo: 'Pagada hasta', etiqueta: 'Fecha (AAAA-MM-DD)', valor: t.membresia.vencimiento.slice(0, 10), boton: 'Guardar', validar: function (v) { return /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : 'Formato AAAA-MM-DD.'; } });
         if (!vence) return;
-        try { await api('/admin/tiendas/' + id, { method: 'POST', body: { membresia: { plan: plan.trim(), vencimiento: vence + 'T23:59:59' } } }); show('ti-state', 'Plan cambiado.', 'ok'); loadTiendas(); }
+        try { await api('/admin/tiendas/' + id, { method: 'POST', body: { membresia: { plan: plan.trim(), vencimiento: vence } } }); show('ti-state', 'Plan cambiado.', 'ok'); loadTiendas(); }
         catch (error) { show('ti-state', error.message, 'bad'); }
       };
     });
@@ -3512,7 +3862,7 @@ document.getElementById('ti-crear').onclick = busy('ti-crear', async function ()
   try {
     var instalar = !document.getElementById('ti-instalar-caja').classList.contains('hidden') && document.getElementById('ti-instalar').checked;
     if (instalar) show('ti-state', 'Dando de alta y levantando su instalación… tarda un minuto.', 'warn');
-    var r = await api('/admin/tiendas', { method: 'POST', body: { nombre: val('ti-nombre'), slug: val('ti-slug') || undefined, url: val('ti-url') || null, contacto: val('ti-contacto') || null, crearInstalacion: instalar, membresia: { plan: val('ti-plan'), vencimiento: val('ti-vence') + 'T23:59:59', precioMes: Number(val('ti-precio') || 0), contacto: val('ti-renovar') || null } } });
+    var r = await api('/admin/tiendas', { method: 'POST', body: { nombre: val('ti-nombre'), slug: val('ti-slug') || undefined, url: val('ti-url') || null, contacto: val('ti-contacto') || null, crearInstalacion: instalar, membresia: { plan: val('ti-plan'), vencimiento: val('ti-vence'), precioMes: Number(val('ti-precio') || 0), contacto: val('ti-renovar') || null } } });
     tiMostrarToken(r.tienda, r.token, r.pasos);
     show('ti-state', r.mensaje || (r.instalacion && r.instalacion.ok ? 'Tienda dada de alta con su instalación en ' + r.instalacion.url : 'Tienda dada de alta.'), r.mensaje ? 'warn' : 'ok');
     setVal('ti-nombre', ''); setVal('ti-slug', ''); setVal('ti-url', ''); setVal('ti-contacto', '');

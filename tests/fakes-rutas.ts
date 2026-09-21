@@ -20,6 +20,7 @@ import type {
   SolicitudPatch,
   TipoEvento,
   TipoReporte,
+  CifrasReportes,
 } from '../src/db/rutas.js';
 
 let seqLote = 1;
@@ -362,8 +363,11 @@ export function createFakeRutas(): FakeRutas {
     },
 
     async cifrasReportes() {
-      const cifras: Record<EstadoReporte, number> = { pendiente: 0, enviado: 0, fallido: 0 };
-      for (const r of reportes) cifras[r.estado]++;
+      const cifras: CifrasReportes = { pendiente: 0, enviado: 0, fallido: 0, atascado: 0 };
+      for (const r of reportes) {
+        cifras[r.estado]++;
+        if (r.estado === 'pendiente' && r.intentos > 0) cifras.atascado++;
+      }
       return cifras;
     },
   };

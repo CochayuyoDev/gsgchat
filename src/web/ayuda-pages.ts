@@ -11,21 +11,22 @@ import { appShell, todosLosModulos, icono } from './shell.js';
 import { escapeHtml } from './login-page.js';
 
 const CSS = `
-  .ay-chat { border: 1px solid var(--line, #e3e5e9); border-radius: 12px; background: var(--bg, #f4f5f7); min-height: 90px; max-height: 340px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-  .ay-chat .b { max-width: 85%; padding: 7px 11px; border-radius: 10px; background: var(--card, #fff); white-space: pre-wrap; }
-  .ay-chat .b.yo { align-self: flex-end; background: #d9fdd3; color: #111b21; }
+  /* La paleta viene del armazon (shell.ts / tokens.ts). */
+  .ay-chat { border: 1px solid var(--line); border-radius: var(--radio); background: var(--bg); min-height: 90px; max-height: 340px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .ay-chat .b { max-width: 85%; padding: 7px 11px; border-radius: 10px; background: var(--card); white-space: pre-wrap; }
+  .ay-chat .b.yo { align-self: flex-end; background: var(--primario-suave); color: var(--text); }
   .ay-fila { display: flex; gap: 8px; flex-wrap: wrap; }
-  .ay-fila input { flex: 1; min-width: 200px; padding: 9px 12px; border: 1px solid var(--line, #e3e5e9); border-radius: 8px; background: var(--card, #fff); color: inherit; font: inherit; }
-  .ay-fila button { border: 0; border-radius: 8px; padding: 9px 14px; background: #128c7e; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-  .ay-fila button.ghost { background: transparent; color: #128c7e; border: 1px solid #128c7e; }
+  .ay-fila input { flex: 1; min-width: 200px; min-height: 40px; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radio-sm); background: var(--card); color: inherit; font: inherit; }
+  .ay-fila input:focus { border-color: var(--primario); outline: 2px solid var(--primario-suave); outline-offset: 0; }
+  .ay-fila button { min-height: 40px; border: 1px solid var(--primario); border-radius: var(--radio-sm); padding: 9px 14px; background: var(--primario); color: var(--primario-texto); font: inherit; font-weight: 600; cursor: pointer; }
+  .ay-fila button.ghost { background: var(--card); color: var(--primario); border: 1px solid var(--line); }
+  .ay-fila button.ghost:hover { border-color: var(--primario); }
   .ay-fila button:disabled { opacity: .5; }
-  :root { --card: #fff; --line: #e6e8ec; --text: #16181d; --muted: #6b7280; --accent: #128c7e; --bg: #f4f6f8; --ok: #16a34a; --warn: #d97706; --bad: #dc2626; }
-  @media (prefers-color-scheme: dark) { :root { --card: #1f2229; --line: #2f333c; --text: #f2f3f5; --muted: #9aa0aa; --bg: #16181d; } }
   .wrap { max-width: 960px; color: var(--text); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin-top: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radio); padding: 20px 22px; margin-top: var(--esp-4); box-shadow: var(--sombra); }
   .card:first-child { margin-top: 0; }
-  h2 { font-size: 17px; margin: 0 0 6px; }
-  h3 { font-size: 14px; margin: 18px 0 6px; }
+  h2 { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -.01em; margin: 0 0 6px; }
+  h3 { font-size: var(--fs-h3); font-weight: 700; margin: 18px 0 6px; }
   p { margin: 0 0 8px; line-height: 1.55; }
   .muted { color: var(--muted); font-size: 13.5px; }
   a { color: var(--accent); }
@@ -34,7 +35,7 @@ const CSS = `
   .modulos { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 10px; }
   .modulo { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 11px; text-decoration: none; color: var(--text); background: var(--bg); }
   .modulo:hover { border-color: var(--accent); }
-  .modulo:target { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(18,140,126,.18); }
+  .modulo:target { border-color: var(--accent); box-shadow: 0 0 0 3px var(--primario-suave); }
   .modulo .s-ico { flex: none; color: var(--accent); margin-top: 2px; }
   .modulo b { display: block; font-size: 14px; }
   .modulo span { color: var(--muted); font-size: 13px; line-height: 1.4; }
@@ -43,7 +44,7 @@ const CSS = `
   .semaf div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; background: var(--bg); }
   .semaf b { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
   .luz { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-  .luz.verde { background: var(--ok); } .luz.amarillo { background: #eab308; } .luz.naranja { background: var(--warn); } .luz.rojo { background: var(--bad); }
+  .luz.verde { background: var(--verde); } .luz.amarillo { background: #eab308; } .luz.naranja { background: var(--ambar); } .luz.rojo { background: var(--rojo); }
   code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 5px; }
   pre { background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 12px; overflow: auto; font-size: 12.5px; margin: 8px 0 0; }
   .diag { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
@@ -51,9 +52,10 @@ const CSS = `
   .diag span { display: block; color: var(--muted); font-size: 12px; }
   .diag b { font-size: 15px; }
   .diag b.ok { color: var(--ok); } .diag b.warn { color: var(--warn); } .diag b.bad { color: var(--bad); }
-  button { padding: 9px 16px; font: inherit; font-weight: 600; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--text); cursor: pointer; }
-  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); } .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); } .pill.warn { background: rgba(217,119,6,.14); color: var(--warn); }
+  button { min-height: 38px; padding: 8px 16px; font: inherit; font-weight: 600; border: 1px solid var(--line); border-radius: var(--radio-sm); background: var(--card); color: var(--text); cursor: pointer; }
+  button:hover { border-color: var(--primario); color: var(--primario); }
+  .pill { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.5; background: var(--gris-suave); color: var(--gris); }
+  .pill.ok { background: var(--verde-suave); color: var(--verde); } .pill.bad { background: var(--rojo-suave); color: var(--rojo); } .pill.warn { background: var(--ambar-suave); color: var(--ambar); }
 `;
 
 /** El ancla del manual para un modulo: /panel#enviar -> enviar, /rutas#ajustes -> rutas-ajustes. */
@@ -454,7 +456,7 @@ async function diag() {
   }
   out += caja('Versión', VERSION, '');
   document.getElementById('diag').innerHTML = out;
-  document.getElementById('diag-hora').textContent = 'a las ' + new Date().toLocaleTimeString('es-PE');
+  document.getElementById('diag-hora').textContent = 'a las ' + new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
   ultimo = datos;
   document.getElementById('diag-texto').textContent = JSON.stringify(datos, null, 2);
 }

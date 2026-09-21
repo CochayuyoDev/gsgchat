@@ -13,16 +13,55 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ErrorIA, MODELOS_SUGERIDOS } from './proveedores.js';
+import { ErrorIA, MODELOS_SUGERIDOS, SERVICIOS_OPENAI } from './proveedores.js';
 import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
 import { ESCENARIOS, GRUPOS } from './escenarios.js';
 import { configIASchema, type ServicioIA } from './servicio.js';
 import { confirmacionSchema } from './ordenes.js';
 
-export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA }): Promise<void> {
+export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan }): Promise<void> {
   const { ia } = deps;
 
-  app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS }));
+  app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS, servicios: SERVICIOS_OPENAI }));
+
+  /**
+   * Cuanto se uso la IA: hoy y en los ultimos 30 dias, por tipo de llamada,
+   * con tokens si el proveedor los dice, fallos y el tope de la membresia.
+   * Es lo que ensena la tarjeta "Uso de la IA" de Mi asistente IA.
+   */
+  app.get('/admin/ia/uso', async () => {
+    const uso = ia.uso();
+    const plan = deps.plan?.estado() ?? null;
+    const tope = plan?.plan?.limites.iaTurnosMes ?? null;
+    return {
+      ...uso,
+      membresia: plan && plan.origen !== 'libre' && plan.plan ? { plan: plan.plan.nombre, tope, gastadas: plan.iaTurnosMes, quedan: tope == null ? null : Math.max(0, tope - plan.iaTurnosMes), mes: plan.mes } : null,
+      proveedor: ia.estado().proveedor,
+      servicio: ia.estado().servicio,
+      modelo: ia.estado().modeloEfectivo,
+      /** Con Puter no hay tokens que contar: la cuenta de Puter lleva la suya. */
+      cuentaTokens: ia.estado().proveedor === 'openai',
+    };
+  });
+
+  /**
+   * Probar la conexion con el modelo: con lo que hay en pantalla (sin
+   * guardarlo) o con lo guardado. Dice si contesta, cuanto tarda y, si no,
+   * por que en cristiano.
+   */
+  app.post('/admin/ia/probar-conexion', async (request) => {
+    const body = z
+      .object({
+        proveedor: z.enum(['puter', 'openai']).optional(),
+        baseUrl: z.string().trim().max(300).optional(),
+        token: z.string().max(500).optional(),
+        modelo: z.string().trim().max(80).optional(),
+      })
+      .parse(request.body ?? {});
+    const hayCandidata = body.proveedor !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined;
+    const prueba = await ia.probarConexion(hayCandidata ? body : undefined);
+    return { ok: prueba.ok, prueba };
+  });
 
   app.post('/admin/ia', async (request, reply) => {
     if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {

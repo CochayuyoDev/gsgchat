@@ -72,6 +72,34 @@ export interface Eventos {
     contacto: ContactoEvento;
     fecha: string;
   };
+  /** El cliente confirmo su pedido de hoy (por WhatsApp o a mano). */
+  'entrega.confirmada': EventoEntregaDelDia;
+  /** Al cliente se le aviso a que hora le llega (el motorizado dio su tiempo). */
+  'entrega.avisada': EventoEntregaDelDia;
+  /** El motorizado dijo "entregado" (o mando la foto, o lo marco una persona). */
+  'entrega.entregada': EventoEntregaDelDia;
+  /** La entrega necesita a una persona (sin confirmacion, sin motorizado, no estaba...). */
+  'entrega.incidencia': EventoEntregaDelDia;
+}
+
+/** Una entrega del dia tal como viaja hacia fuera (ver src/entregas). */
+export interface EventoEntregaDelDia {
+  entrega: {
+    id: number;
+    referencia: string;
+    telefono: string;
+    nombre: string | null;
+    estado: string;
+    lat: number | null;
+    lng: number | null;
+    motorizado: { nombre: string; telefono: string } | null;
+    minutosAviso: number | null;
+    llegaAproxEn: string | null;
+    entregadoEn: string | null;
+    incidencia: string | null;
+    incidenciaDetalle: string | null;
+  };
+  fecha: string;
 }
 
 export type NombreEvento = keyof Eventos;
@@ -86,6 +114,10 @@ export const NOMBRES_EVENTOS: NombreEvento[] = [
   'reparto.solicitud.actualizada',
   'salud.nivel',
   'pedido.creado',
+  'entrega.confirmada',
+  'entrega.avisada',
+  'entrega.entregada',
+  'entrega.incidencia',
 ];
 
 /** Que significa cada uno, para el panel y la documentacion. */
@@ -99,6 +131,10 @@ export const DESCRIPCION_EVENTOS: Record<NombreEvento, string> = {
   'reparto.solicitud.actualizada': 'Una solicitud de ubicacion del reparto cambio de estado o de incidencia.',
   'salud.nivel': 'El semaforo del numero cambio (verde, amarillo, naranja, rojo).',
   'pedido.creado': 'Se tomo un pedido en el chat, con sus lineas, total y datos de entrega.',
+  'entrega.confirmada': 'El cliente confirmo que recibe hoy su pedido (entregas del dia).',
+  'entrega.avisada': 'Al cliente se le aviso a que hora le llega su pedido (el motorizado dio su tiempo).',
+  'entrega.entregada': 'El motorizado dijo que entrego el pedido (o mando la foto, o lo marco una persona).',
+  'entrega.incidencia': 'Una entrega del dia necesita a una persona (sin confirmar, sin motorizado, no estaba...).',
 };
 
 export function esNombreEvento(valor: string): valor is NombreEvento {

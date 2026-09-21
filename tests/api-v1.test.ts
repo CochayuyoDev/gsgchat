@@ -16,6 +16,8 @@ import { hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { NOMBRES_PERMISOS, permisosAceptables, tienePermiso } from '../src/auth/permisos.js';
 import { verificarFirma } from '../src/webhooks/firma.js';
 import { approvedTemplate, createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, type FakeWhatsApp, CLAVE_API_PRUEBA as TODO } from './fakes.js';
+import { crearEscenarioEntregas } from './escenario-entregas.js';
+import { despacharEntregas, encolarEventos } from '../src/webhooks/despachador.js';
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
@@ -350,5 +352,116 @@ describe('webhooks por la API', () => {
     expect(entregas.json().entregas[0]).toMatchObject({ evento: 'contacto.baja', estado: 'fallida', respuestaCodigo: 404 });
     const re = await app.inject({ method: 'POST', url: `/api/v1/webhooks/${id}/reencolar`, headers: con(SOLO_WEBHOOKS) });
     expect(re.json()).toMatchObject({ ok: true, reencoladas: 1 });
+  });
+});
+
+// ---------------------------------------------------------------- GSG empuja (constructor E)
+
+describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
+  type Escenario = Awaited<ReturnType<typeof crearEscenarioEntregas>>;
+  let esc: Escenario;
+  /** Una clave que solo lee entregas: no puede empujar. */
+  const SOLO_LEER = 'wak_claveSoloLeerEntregas0123456789abcdefX';
+  const conClave = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+
+  beforeAll(async () => {
+    esc = await crearEscenarioEntregas({ supervisor: '51999888777' });
+    esc.repos._claves.push({ id: 'clave-leer', nombre: 'Solo leer', prefijo: prefijoDeClave(SOLO_LEER), hash: hashClaveApi(SOLO_LEER), creadaPor: null, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null, permisos: ['entregas:leer'] });
+  });
+  afterAll(async () => {
+    await esc.cerrar();
+  });
+
+  it('dos pedidos entran con sus banderas, el repetido no se duplica, el sin telefono se descarta con motivo, y sin permiso 403 en cristiano', async () => {
+    const r = await esc.api.post<{ ok: boolean; creadas: Array<Record<string, unknown>>; repetidas: string[]; descartadas: Array<{ referencia: string; motivo: string }>; detalle: string }>('/api/v1/entregas', {
+      pedidos: [
+        { referencia: 'P-5001', telefono: '987000101', nombre: 'Ana Quispe', direccion: 'Av. Larco 123', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
+        { referencia: 'P-5002', telefono: '51987000102', nombre: 'Luis Rojas', lat: -12.1211, lng: -77.0301, faltaConfirmar: true, urgente: true },
+        { referencia: 'P-5003', telefono: '12', nombre: 'Sin telefono' },
+      ],
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.creadas.map((c) => c.referencia).sort()).toEqual(['P-5001', 'P-5002']);
+    expect(r.body.descartadas).toHaveLength(1);
+    expect(r.body.descartadas[0]!.motivo).toContain('tel');
+    expect(r.body.detalle).toContain('2 pedidos nuevos');
+    // En la pantalla, con lo que le falta a cada uno.
+    const p1 = await esc.entrega('P-5001');
+    expect(p1).toMatchObject({ ubicacionEstado: 'pendiente', confirmacionEstado: 'pendiente', estado: 'esperando_ubicacion' });
+    const p2 = await esc.entrega('P-5002');
+    expect(p2).toMatchObject({ ubicacionEstado: 'recibida', confirmacionEstado: 'pendiente', lat: -12.1211, prioridad: 'urgente' });
+    const urgente = r.body.creadas.find((c) => c.referencia === 'P-5002')!;
+    expect(urgente.prioridad).toBe('urgente');
+    expect(urgente.ubicacion).toMatchObject({ estado: 'recibida', lat: -12.1211 });
+    // Repetido: no se duplica.
+    const otra = await esc.api.post<{ creadas: unknown[]; repetidas: string[] }>('/api/v1/entregas', { referencia: 'P-5001', telefono: '987000101' });
+    expect(otra.status).toBe(200);
+    expect(otra.body.creadas).toEqual([]);
+    expect(otra.body.repetidas).toEqual(['P-5001']);
+    expect((await esc.resumen()).entregas.filter((e) => e.referencia === 'P-5001')).toHaveLength(1);
+    // Cuerpo vacio: 400 con explicacion.
+    const vacio = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(TODO), payload: {} });
+    expect(vacio.statusCode).toBe(400);
+    expect(vacio.json().error).toContain('Manda un pedido');
+    // Sin permiso: 403.
+    const sin = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(SOLO_LEER), payload: { referencia: 'P-5009', telefono: '987000109' } });
+    expect(sin.statusCode).toBe(403);
+    expect(sin.json().error).toMatch(/permiso/i);
+    // Pero si puede leer.
+    const lee = await esc.app.inject({ method: 'GET', url: '/api/v1/entregas/P-5002', headers: conClave(SOLO_LEER) });
+    expect(lee.statusCode).toBe(200);
+    expect(lee.json().entrega).toMatchObject({ referencia: 'P-5002', nombre: 'Luis Rojas', prioridad: 'urgente' });
+    expect(lee.json().eventos.length).toBeGreaterThan(0);
+  });
+
+  it('GET por referencia cuenta como va, DELETE cancela con motivo y un pedido cancelado no se cancela dos veces', async () => {
+    const no = await esc.api.get<{ error: string }>('/api/v1/entregas/P-NADA');
+    expect(no.status).toBe(404);
+    expect(no.body.error).toContain('P-NADA');
+    const del = await esc.app.inject({ method: 'DELETE', url: '/api/v1/entregas/P-5001?motivo=el%20cliente%20anulo', headers: conClave(TODO) });
+    expect(del.statusCode).toBe(200);
+    expect(del.json().entrega).toMatchObject({ referencia: 'P-5001', estado: 'cancelada' });
+    expect(del.json().detalle).toContain('el cliente anulo');
+    expect(await esc.entrega('P-5001')).toMatchObject({ estado: 'cancelada' });
+    const otra = await esc.app.inject({ method: 'DELETE', url: '/api/v1/entregas/P-5001', headers: conClave(TODO) });
+    expect(otra.statusCode).toBe(409);
+    expect(otra.json().error).toContain('cancelado');
+  });
+
+  it('lo que pasa despues llega por webhook: entrega.confirmada a la URL suscrita, firmada', async () => {
+    const soltar = encolarEventos(esc.bus, esc.repos.webhooks);
+    const alta = await esc.api.post<{ webhook: { id: string }; secreto: string }>('/api/v1/webhooks', { url: 'https://gsg.test/avisos', eventos: ['entrega.confirmada', 'entrega.avisada', 'entrega.entregada', 'entrega.incidencia'] });
+    expect(alta.status).toBe(201);
+    const p2 = (await esc.entrega('P-5002'))!;
+    await esc.entregas.confirmarAMano(p2.id, true, 'prueba');
+    // Deja que el bus encole (es asincrono) y despacha.
+    await new Promise((r) => setTimeout(r, 30));
+    recibido.length = 0;
+    respuestaWebhook = { status: 200, body: 'ok' };
+    const despacho = await despacharEntregas({ repo: esc.repos.webhooks, fetchImpl: fetchFalso, timeoutMs: 100 });
+    expect(despacho.enviadas).toBeGreaterThanOrEqual(1);
+    const llegada = recibido.find((r) => r.url === 'https://gsg.test/avisos' && r.cuerpo.includes('entrega.confirmada'));
+    expect(llegada).toBeTruthy();
+    const cuerpo = JSON.parse(llegada!.cuerpo) as { evento: string; datos: Record<string, unknown> };
+    expect(cuerpo.evento).toBe('entrega.confirmada');
+    expect(JSON.stringify(cuerpo.datos)).toContain('P-5002');
+    expect(verificarFirma(alta.body.secreto, llegada!.cuerpo, llegada!.cabeceras['x-firma'])).toBe(true);
+    soltar();
+  });
+
+  it('el OpenAPI documenta /entregas, /entregas/{referencia} y /motorizados con su permiso, y cubre todas las rutas de este arranque', async () => {
+    const doc = (await esc.app.inject({ method: 'GET', url: '/api/v1/openapi.json', headers: conClave(TODO) })).json() as { paths: Record<string, Record<string, { 'x-permiso'?: string }>> };
+    expect(doc.paths['/entregas']!.post!['x-permiso']).toBe('entregas:gestionar');
+    expect(doc.paths['/entregas']!.get!['x-permiso']).toBe('entregas:leer');
+    expect(doc.paths['/entregas/{referencia}']!.get!['x-permiso']).toBe('entregas:leer');
+    expect(doc.paths['/entregas/{referencia}']!.delete!['x-permiso']).toBe('entregas:gestionar');
+    expect(doc.paths['/motorizados']!.post!['x-permiso']).toBe('entregas:gestionar');
+    const registradas = esc.app.rutasApiV1.map((r) => ({ ...r, ruta: r.ruta.replace('/api/v1', '').replace(/:(\w+)/g, '{$1}') || '/' }));
+    expect(registradas.some((r) => r.ruta === '/entregas' && r.metodo === 'POST')).toBe(true);
+    for (const { ruta, metodo, permiso } of registradas) {
+      const operacion = doc.paths[ruta]?.[metodo.toLowerCase()];
+      expect(operacion, `falta ${metodo} ${ruta} en el OpenAPI`).toBeTruthy();
+      expect(operacion!['x-permiso'] ?? null, `${metodo} ${ruta}`).toBe(permiso);
+    }
   });
 });

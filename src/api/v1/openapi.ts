@@ -30,7 +30,7 @@ export function openApi(baseUrl: string): Json {
   return {
     openapi: '3.0.3',
     info: {
-      title: 'wa-locator: API publica',
+      title: 'GSGchat: API publica',
       version: '1.0.0',
       description: [
         'La puerta para otros sistemas (Stoky, GSG, scripts). Se entra con una clave de API',
@@ -55,6 +55,7 @@ export function openApi(baseUrl: string): Json {
       { name: 'embebido' },
       { name: 'conectores' },
       { name: 'pedidos' },
+      { name: 'entregas' },
     ],
     'x-permisos': PERMISOS,
     'x-eventos': NOMBRES_EVENTOS.map((nombre) => ({ nombre, descripcion: DESCRIPCION_EVENTOS[nombre] })),
@@ -325,6 +326,37 @@ export function openApi(baseUrl: string): Json {
         get: { tags: ['pedidos'], summary: 'Un pedido', ...permiso('pedidos:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: json({ type: 'object', properties: { pedido: ref('Pedido') } }), 404: error('No existe') } },
         patch: { tags: ['pedidos'], summary: 'Cambiar el estado (confirmado, cancelado, enviado_tienda con su externoId)', ...permiso('pedidos:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['estado'], properties: { estado: { type: 'string', enum: ['nuevo', 'confirmado', 'cancelado', 'enviado_tienda'] }, externoId: { type: 'string' } } } } } }, responses: { 200: json({ type: 'object' }), 404: error('No existe') } },
       },
+      '/entregas': {
+        get: { tags: ['entregas'], summary: 'Las entregas del dia: como va cada pedido (ubicacion, confirmacion, motorizado, hora de llegada)', ...permiso('entregas:leer'), responses: { 200: json({ type: 'object', properties: { dia: { type: 'string' }, cifras: { type: 'object' }, entregas: { type: 'array', items: { type: 'object' } }, motorizados: { type: 'array', items: { type: 'object' } } } }) } },
+        post: {
+          tags: ['entregas'],
+          summary: 'GSG empuja: uno o varios pedidos de hoy (sin esperar a que se le pregunte)',
+          description: [
+            'Mismo contrato que `GET /reparto/pendientes`, pedido a pedido: `referencia` y `telefono` obligatorios; con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
+            '`faltaUbicacion` (por defecto true) y `faltaConfirmar` (por defecto true) dicen que le falta a cada uno; `urgente` lo pone primero hacia el motorizado.',
+            'Se acepta un pedido suelto, una lista `[...]` o `{ pedidos: [...] }` (hasta 500). Un pedido repetido hoy no se duplica (`repetidas`); uno sin telefono valido va en `descartadas` con su motivo.',
+            'Lo que pasa despues (confirmo, se le aviso la hora, se entrego, incidencia) llega por los webhooks `entrega.*`.',
+          ].join(' '),
+          ...permiso('entregas:gestionar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [ref('PedidoGsg'), { type: 'array', items: ref('PedidoGsg') }, { type: 'object', properties: { pedidos: { type: 'array', items: ref('PedidoGsg') } } }] } } } },
+          responses: {
+            201: json({ type: 'object', properties: { ok: { type: 'boolean' }, creadas: { type: 'array', items: ref('EntregaDia') }, repetidas: { type: 'array', items: { type: 'string' } }, descartadas: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, motivo: { type: 'string' } } } }, detalle: { type: 'string' } } }, 'Al menos un pedido nuevo'),
+            200: json({ type: 'object' }, 'Nada nuevo (todo repetido o descartado)'),
+            400: error('El cuerpo no se entiende'),
+          },
+        },
+      },
+      '/entregas/sincronizar': {
+        post: { tags: ['entregas'], summary: 'Pedirle a GSG los pendientes ahora (GET /reparto/pendientes), sin esperar los 5 minutos', ...permiso('entregas:gestionar'), responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, detalle: { type: 'string' }, nuevas: { type: 'integer' }, actualizadas: { type: 'integer' } } }) } },
+      },
+      '/entregas/{referencia}': {
+        get: { tags: ['entregas'], summary: 'Como va ese pedido hoy, con sus eventos', ...permiso('entregas:leer'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' }, description: 'La referencia del pedido (o su id en GSG)' }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), eventos: { type: 'array', items: { type: 'object', properties: { en: { type: 'string' }, tipo: { type: 'string' }, detalle: { type: 'string', nullable: true } } } } } }), 404: error('No hay ningun pedido de hoy con esa referencia') } },
+        delete: { tags: ['entregas'], summary: 'Cancelar ese pedido (GSG lo dio de baja)', ...permiso('entregas:gestionar'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' } }, { name: 'motivo', in: 'query', schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), detalle: { type: 'string' } } }), 404: error('No existe'), 409: error('Ya estaba entregado o cancelado') } },
+      },
+      '/motorizados': {
+        get: { tags: ['entregas'], summary: 'Los motorizados: quien esta activo, que lleva hoy y su ultima posicion', ...permiso('entregas:leer'), responses: { 200: json({ type: 'object', properties: { motorizados: { type: 'array', items: { type: 'object' } } } }) } },
+        post: { tags: ['entregas'], summary: 'Dar de alta un motorizado (telefono, nombre, placa, zona)', ...permiso('entregas:gestionar'), requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['telefono', 'nombre'], properties: { telefono: { type: 'string' }, nombre: { type: 'string' }, placa: { type: 'string' }, zona: { type: 'string' }, estado: { type: 'string', enum: ['activo', 'descanso', 'baja'] } } } } } }, responses: { 200: json({ type: 'object' }), 400: error('Telefono o nombre invalidos') } },
+      },
       '/webhooks': {
         get: { tags: ['webhooks'], summary: 'Los webhooks registrados', ...permiso('webhooks:gestionar'), responses: { 200: json({ type: 'object' }) } },
         post: {
@@ -409,6 +441,49 @@ export function openApi(baseUrl: string): Json {
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },
         Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
+        PedidoGsg: {
+          type: 'object',
+          required: ['referencia', 'telefono'],
+          properties: {
+            referencia: { type: 'string', description: 'El numero de pedido en GSG (P-1001)' },
+            telefono: { type: 'string', description: 'El WhatsApp del cliente: 987654321 o 51987654321' },
+            nombre: { type: 'string', nullable: true },
+            direccion: { type: 'string', nullable: true },
+            distrito: { type: 'string', nullable: true },
+            notas: { type: 'string', nullable: true },
+            lat: { type: 'number', nullable: true, description: 'Si GSG ya tiene la ubicacion: con lat y lng no se le pide al cliente' },
+            lng: { type: 'number', nullable: true },
+            id: { type: 'string', nullable: true, description: 'El id del pedido en GSG, si es distinto de la referencia' },
+            faltaUbicacion: { type: 'boolean', default: true },
+            faltaConfirmar: { type: 'boolean', default: true },
+            urgente: { type: 'boolean', default: false },
+          },
+        },
+        EntregaDia: {
+          type: 'object',
+          properties: {
+            referencia: { type: 'string' },
+            id: { type: 'string', nullable: true },
+            dia: { type: 'string' },
+            telefono: { type: 'string' },
+            nombre: { type: 'string', nullable: true },
+            direccion: { type: 'string', nullable: true },
+            distrito: { type: 'string', nullable: true },
+            estado: { type: 'string', enum: ['pendiente', 'esperando_ubicacion', 'esperando_confirmacion', 'lista', 'esperando_motorizado', 'avisada', 'entregada', 'terminada', 'cancelada', 'incidencia'] },
+            situacion: { type: 'string', description: 'Que le esta pasando ahora mismo, en palabras' },
+            prioridad: { type: 'string', enum: ['normal', 'urgente'] },
+            ubicacion: { type: 'object', properties: { estado: { type: 'string' }, lat: { type: 'number', nullable: true }, lng: { type: 'number', nullable: true }, mapa: { type: 'string', nullable: true }, recibidaEn: { type: 'string', nullable: true } } },
+            confirmacion: { type: 'object', properties: { estado: { type: 'string' }, intentos: { type: 'integer' }, respuesta: { type: 'string', nullable: true }, como: { type: 'string', nullable: true }, en: { type: 'string', nullable: true } } },
+            motorizado: { type: 'object', nullable: true, properties: { nombre: { type: 'string' }, telefono: { type: 'string' }, placa: { type: 'string', nullable: true } } },
+            minutosMotorizado: { type: 'integer', nullable: true },
+            minutosAviso: { type: 'integer', nullable: true, description: 'Lo que se le dijo al cliente: lo del motorizado mas el margen' },
+            llegaAproxEn: { type: 'string', nullable: true },
+            avisadaEn: { type: 'string', nullable: true },
+            entregadaEn: { type: 'string', nullable: true },
+            entregadaComo: { type: 'string', nullable: true },
+            incidencia: { type: 'object', nullable: true, properties: { codigo: { type: 'string' }, detalle: { type: 'string', nullable: true } } },
+          },
+        },
         Leccion: {
           type: 'object',
           properties: {
