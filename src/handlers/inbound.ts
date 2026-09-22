@@ -669,7 +669,7 @@ export async function handleInboundMessage(
       wamid: message.id,
       kind: leido.kind,
       body: leido.body,
-      payload: leido.payload,
+      payload: message.historial ? { ...(leido.payload ?? {}), historial: true } : leido.payload,
       createdAt: receivedAt,
     });
     return;

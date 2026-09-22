@@ -44,7 +44,7 @@ export interface Eventos {
   'mensaje.enviado': {
     contacto: ContactoEvento;
     /** `autor`: quien lo mando: 'persona' (a mano), 'ia' (el asistente) o 'sistema' (reglas, reparto, campanas, la API). `voz`: salio como nota de voz. */
-    mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string };
+    mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string; datos: Record<string, unknown> | null };
   };
   /** Meta (o el proveedor) dice como va: sent, delivered, read, failed. */
   'mensaje.estado': { mensajeId: string; estado: string; fecha: string };

@@ -28,7 +28,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { ClavesApiRepo } from './claves-api.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from './claves-api.js';
-import { estadoDe, generarCodigoConexion, normalizarCodigo, type CodigosConexionRepo } from './codigos-conexion.js';
+import { claveDeConexion, estadoDe, generarCodigoConexion, leerClaveDeConexion, normalizarCodigo, type CodigosConexionRepo } from './codigos-conexion.js';
 import { permisosAceptables } from './permisos.js';
 import type { ServicioPlan } from '../plan/servicio.js';
 import { PLANES_ELEGIBLES } from '../plan/servicio.js';
@@ -166,7 +166,9 @@ export async function registerSuperRoutes(app: FastifyInstance, deps: SuperRoute
         ok: true,
         codigo: conEstado(c),
         miDireccion: base,
-        pasos: [`En el otro sistema (${body.para}), donde pida conectarse con este WhatsApp, pega la dirección ${base} y el código ${c.codigo}.`, `El código vale hasta el ${caducaAt.toLocaleString('es-PE')} y ${body.usosMax === 1 ? 'una sola vez' : `${body.usosMax} veces`}: al usarlo, ese sistema recibe su clave de acceso y aquí aparece con quién y cuándo se usó.`, 'Si el otro sistema no sabe canjear códigos, dale la clave a mano (Claves de API, más abajo).'],
+        // Una sola cosa que pegar: lleva la direccion dentro.
+        claveConexion: claveDeConexion(base, c.codigo),
+        pasos: [`En ${body.para}, donde pida conectarse con este WhatsApp, pega esta clave de conexión (una sola cosa: ya lleva la dirección dentro). Si te pide dirección y código por separado, son ${base} y ${c.codigo}.`, `Vale hasta el ${caducaAt.toLocaleString('es-PE')} y ${body.usosMax === 1 ? 'una sola vez' : `${body.usosMax} veces`}: al usarla, ese sistema recibe su clave de acceso y aquí aparece con quién y cuándo se usó.`, 'Si el otro sistema no sabe canjear claves de conexión, dale una clave de API a mano (más abajo).'],
       };
     }
     return reply.code(500).send({ error: 'No se pudo generar un código nuevo; inténtalo otra vez.' });
@@ -189,8 +191,10 @@ export async function registerSuperRoutes(app: FastifyInstance, deps: SuperRoute
     if (cuenta && cuenta.hasta > t && cuenta.n >= (deps.maxCanjesPorHora ?? 20)) return reply.code(429).send({ error: 'Demasiados intentos desde esta dirección: espera una hora.' });
     canjes.set(ip, cuenta && cuenta.hasta > t ? { n: cuenta.n + 1, hasta: cuenta.hasta } : { n: 1, hasta: t + 60 * 60_000 });
 
-    const body = z.object({ codigo: z.string().trim().min(6).max(40), sistema: z.string().trim().max(120).optional() }).parse(request.body ?? {});
-    const c = await codigos.porCodigo(normalizarCodigo(body.codigo));
+    const body = z.object({ codigo: z.string().trim().min(6).max(600), sistema: z.string().trim().max(120).optional() }).parse(request.body ?? {});
+    // Vale el codigo corto o la clave de conexion completa (wac_...).
+    const codigoDado = leerClaveDeConexion(body.codigo)?.codigo ?? normalizarCodigo(body.codigo);
+    const c = await codigos.porCodigo(codigoDado);
     if (!c || estadoDe(c, ahora()) !== 'activo') return reply.code(404).send({ error: 'Ese código no vale: no existe, ya se usó, caducó o fue anulado. Pide uno nuevo en el panel del sistema de WhatsApp.' });
 
     const clave = generarClaveApi();

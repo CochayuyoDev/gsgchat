@@ -1183,14 +1183,16 @@ ${warning}
   <div class="stk">
     <div class="caja-stk">
       <h3><span class="paso-n">1</span>Stoky escribe y lee por este WhatsApp</h3>
-      <p class="muted">Desde su CRM, Stoky manda mensajes, ve la bandeja, enseña el QR para vincular el número y le da órdenes a la IA de aquí. Para eso necesita <b>la dirección de este sistema</b> y <b>una clave</b>, que se pegan en Stoky.</p>
+      <p class="muted">Desde su CRM, Stoky manda mensajes, ve la bandeja, enseña el QR para vincular el número y le da órdenes a la IA de aquí. Para eso solo hace falta <b>una clave de conexión</b>: se crea aquí y se pega en Stoky → Conexión de WhatsApp. Nada más.</p>
       <div class="semaforo" id="stk-hacia-aqui"><div><i></i><span>Cargando…</span></div></div>
-      <div class="actions"><button id="cc-crear-stoky">Crear un código de conexión</button><button class="ghost" id="stk-clave">O crear la clave a mano</button></div>
-      <p class="muted" style="font-size:12.5px;margin:6px 0 0">El código es corto (WA-XXXX-XXXX), <b>caduca</b> en la fecha que elijas y vale una sola vez: se pega en Stoky y Stoky recibe su clave solo. La clave a mano es para sistemas que no saben canjear códigos.</p>
+      <div class="actions"><button id="cc-crear-stoky">Crear la clave de conexión para Stoky</button><button class="ghost" id="stk-clave">O crear una clave de API a mano</button></div>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 0">La clave de conexión lleva dentro la dirección de este sistema, <b>caduca</b> en 7 días y vale una sola vez: Stoky la canjea y recibe su clave de acceso solo. La clave de API a mano es para sistemas que no saben canjearla.</p>
       <div id="cc-nuevo" class="nueva-clave hidden">
-        <b>Código de conexión: <code id="cc-valor" style="display:inline;font-size:16px;padding:4px 10px"></code></b>
+        <b>Clave de conexión (pégala en Stoky tal cual):</b>
+        <code id="cc-clave" style="display:block;margin:6px 0;font-size:13px;padding:8px 10px;word-break:break-all"></code>
+        <span class="muted" style="font-size:12.5px">Código corto, por si te lo piden aparte: <code id="cc-valor" style="display:inline;padding:2px 8px"></code></span>
         <ol id="cc-pasos" style="margin:8px 0 0;padding-left:20px;font-size:13.5px"></ol>
-        <div class="actions" style="margin-top:8px"><button class="ghost sm" id="cc-copiar">Copiar el código</button><button class="ghost sm" id="cc-cerrar">Listo</button></div>
+        <div class="actions" style="margin-top:8px"><button class="ghost sm" id="cc-copiar">Copiar la clave de conexión</button><button class="ghost sm" id="cc-cerrar">Listo</button></div>
       </div>
       <div id="stk-clave-nueva" class="nueva-clave hidden">
         <b>Copia la clave ahora: no se volverá a mostrar.</b>
@@ -2072,6 +2074,7 @@ async function crearCodigo(para, dias, hasta, usos, permisos) {
   if (hasta) body.caducaAt = hasta; else if (dias) body.dias = Number(dias);
   var r = await api('/admin/codigos-conexion', { method: 'POST', body: body });
   document.getElementById('cc-valor').textContent = r.codigo.codigo;
+  document.getElementById('cc-clave').textContent = r.claveConexion;
   document.getElementById('cc-pasos').innerHTML = r.pasos.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
   document.getElementById('cc-nuevo').classList.remove('hidden');
   loadCodigos();
@@ -2095,7 +2098,7 @@ document.getElementById('cc-crear-stoky').onclick = busy('cc-crear-stoky', async
   } catch (error) { show('stk-state', error.message, 'bad'); }
 });
 document.getElementById('cc-copiar').onclick = function () {
-  navigator.clipboard.writeText(document.getElementById('cc-valor').textContent).then(function () { show('cc-state', 'Código copiado', 'ok'); });
+  navigator.clipboard.writeText(document.getElementById('cc-clave').textContent || document.getElementById('cc-valor').textContent).then(function () { show('cc-state', 'Clave de conexión copiada', 'ok'); });
 };
 document.getElementById('cc-cerrar').onclick = function () { document.getElementById('cc-nuevo').classList.add('hidden'); };
 

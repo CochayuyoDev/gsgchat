@@ -101,6 +101,36 @@ export function normalizarCodigo(texto: string): string {
   return `WA-${sinPrefijo.slice(0, 4)}-${sinPrefijo.slice(4)}`;
 }
 
+/**
+ * La clave de conexion: UNA sola cosa que pegar en el otro sistema. Lleva
+ * dentro la direccion de este WhatsApp y el codigo, asi que Stoky no tiene
+ * que pedir "direccion" y "codigo" por separado: pega `wac_...`, canjea y
+ * recibe su clave de acceso. Es base64url de "direccion|codigo".
+ */
+export const PREFIJO_CLAVE_CONEXION = 'wac_';
+
+export function claveDeConexion(direccion: string, codigo: string): string {
+  return PREFIJO_CLAVE_CONEXION + Buffer.from(`${direccion.replace(/\/+$/, '')}|${codigo}`, 'utf8').toString('base64url');
+}
+
+/** Lo que trae una clave `wac_`; null si no lo es o esta rota. */
+export function leerClaveDeConexion(texto: string): { direccion: string; codigo: string } | null {
+  const t = texto.trim();
+  if (!t.startsWith(PREFIJO_CLAVE_CONEXION)) return null;
+  let claro: string;
+  try {
+    claro = Buffer.from(t.slice(PREFIJO_CLAVE_CONEXION.length), 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  const i = claro.lastIndexOf('|');
+  if (i <= 0) return null;
+  const direccion = claro.slice(0, i);
+  const codigo = normalizarCodigo(claro.slice(i + 1));
+  if (!/^https?:\/\/[^\s|]+$/i.test(direccion) || !/^WA-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(codigo)) return null;
+  return { direccion, codigo };
+}
+
 export function estadoDe(c: CodigoConexion, ahora: Date): EstadoCodigo {
   if (c.estado === 'anulado') return 'anulado';
   if (c.usos >= c.usosMax) return 'usado';

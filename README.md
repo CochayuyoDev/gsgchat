@@ -1356,8 +1356,15 @@ contrasena, y la sesion queda en una cookie firmada (`wa_sesion`, siete dias,
   (fecha, o 1 h / 1 / 7 / 30 / 90 dias), usos y permisos; el otro sistema lo
   canjea en `POST /api/v1/conexion/canjear` (sin clave; tope de 20 intentos
   por IP y hora) y recibe su clave `wak_`. La lista dice vigente / usado /
-  caducado / anulado y quien lo canjeo, cuando y desde donde. En el bloque
-  Stoky, "Crear un codigo de conexion" lo hace de un clic.
+  caducado / anulado y quien lo canjeo, cuando y desde donde. Lo que se
+  copia es la **clave de conexion** `wac_...`: una sola cosa, que lleva
+  dentro la direccion de este sistema y el codigo (base64url de
+  `direccion|codigo`); Stoky la pega en Conexion de WhatsApp y con eso
+  canjea, recibe su `wak_`, registra el aviso, entrega su token y enseña el
+  QR. El canje acepta la `wac_` entera o el codigo corto. En el bloque
+  Stoky, "Crear la clave de conexion para Stoky" lo hace de un clic. Como
+  cada tienda del SaaS es una instancia aparte, la clave lleva la direccion
+  de *su* instancia y la `wak_` que sale solo abre esa tienda.
 - **Contrasenas.** Ocho caracteres o mas, guardadas con scrypt y sal; nunca en
   claro. Cada uno se cambia la suya desde la seccion Usuarios. Cambiar la
   contrasena o desactivar la cuenta cierra las sesiones abiertas de ese usuario.
@@ -1716,7 +1723,7 @@ verificarFirma(secreto, cuerpoCrudo, req.headers['x-firma']); // true | false
 
 **Que pasa si el otro lado no contesta.** Un `2xx` cierra la entrega. Un
 `5xx`, un timeout (15 s) o una caida la reintentan con espera creciente:
-1 min, 5, 30, 2 h, 12 h; a la sexta se da por perdida. Un `4xx` (salvo 408
+15 s, 1 min, 5, 30, 2 h, 12 h; a la septima se da por perdida. Un `4xx` (salvo 408
 y 429) es un "no" que insistir no cambia y se marca fallida en el acto.
 Tras **un dia entero sin una sola entrega buena** el webhook se apaga solo,
 con su motivo escrito, y sale en la campana del panel. Se reactiva desde ahi

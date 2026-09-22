@@ -17,6 +17,16 @@ import type { Bus, ContactoEvento, Eventos } from './bus.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
 
+/**
+ * El volcado de historial del telefono (miles de mensajes de meses al
+ * vincular) se guarda y se ve en el chat, pero no se anuncia: un webhook con
+ * siete mil eventos de 2025 tapona durante horas lo que si importa. Lo que
+ * llego mientras el sistema estaba apagado NO es historial: eso si se
+ * anuncia, porque el otro sistema tiene que enterarse. La marca la pone el
+ * cliente local (`payload.historial`), no la fecha.
+ */
+const esHistorial = (payload: unknown) => Boolean(payload && typeof payload === 'object' && (payload as { historial?: unknown }).historial === true);
+
 /** Quien mando un saliente, con los tres valores del contrato (ver sender.ts `conOrigen`). */
 const autorDe = (origen: unknown): 'persona' | 'ia' | 'sistema' => (origen === 'persona' || origen === 'ia' ? origen : 'sistema');
 
@@ -37,6 +47,8 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
       const repetido = message.wamid ? await repos.messages.existsByWamid(message.wamid) : false;
       const id = await repos.messages.add(message);
       if (repetido) return id;
+
+      if (esHistorial(message.payload)) return id;
 
       const c = await repos.contacts.getById(message.contactId);
       if (!c) return id;
@@ -69,6 +81,9 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
             autorNombre: typeof payload.autorNombre === 'string' ? payload.autorNombre : null,
             voz: payload.media?.voz === true,
             fecha,
+            // El adjunto (datos.media: id, kind, mimeType...) tambien en lo que sale,
+            // para que el otro sistema baje la foto o el sticker mandado desde el telefono.
+            datos: message.payload ?? null,
           },
         });
       }
