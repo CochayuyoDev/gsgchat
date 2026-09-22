@@ -234,6 +234,22 @@ describe('el motor', () => {
     expect(enviados).toHaveLength(0);
   });
 
+  it('el horario de entregas (Hoy → Ajustes) amplía el del reparto: a las 20:30 con entregas hasta las 22:00 sigue escribiendo', async () => {
+    await loteListo(repos, ['51987654321']);
+    const { sender, enviados } = senderFalso();
+    const a2030 = new Date('2026-03-11T01:30:00Z'); // 20:30 en Lima (reparto 9-19)
+    const sin = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => a2030 });
+    expect((await sin.tick()).motivo).toMatch(/horario/);
+    expect(enviados).toHaveLength(0);
+    const con = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => a2030, horarioExtra: () => ({ desde: '14:00', hasta: '22:00' }) });
+    const salida = await con.tick();
+    expect(salida.motivo ?? '').not.toMatch(/horario/);
+    expect(enviados).toHaveLength(1);
+    // nunca recorta: un horario de entregas mas corto que el del reparto no quita horas
+    const corto = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => new Date('2026-03-11T15:00:00Z'), horarioExtra: () => ({ desde: '14:00', hasta: '16:00' }) });
+    expect((await corto.tick()).motivo ?? '').not.toMatch(/horario/);
+  });
+
   it('manda la primera solicitud y deja la siguiente programada', async () => {
     await loteListo(repos, ['51987654321']);
     const { sender, enviados } = senderFalso();

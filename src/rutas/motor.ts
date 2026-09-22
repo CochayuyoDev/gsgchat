@@ -91,6 +91,12 @@ export interface MotorDeps {
   opciones: OpcionesMotor;
   /** Como se llama el negocio ahora (se cambia desde la pantalla). */
   nombreNegocio?: () => string;
+  /**
+   * El horario de entregas (Hoy → Ajustes), "HH:MM": AMPLIA el horario del
+   * reparto, nunca lo recorta. Sin el, a las 20:00 el reparto dejaba de pedir
+   * pines aunque GSG entregue hasta las 22:00.
+   */
+  horarioExtra?: () => { desde: string; hasta: string } | null;
   /** Los stickers automaticos (tras el primer mensaje, tras la despedida). Ver src/stickers. */
   stickers?: ServicioStickers;
   /**
@@ -195,6 +201,14 @@ export function crearMotor(deps: MotorDeps): Motor {
       ajustes = await repos.rutas.ajustes.get(ajustesPorDefecto(deps.opciones));
       opciones = aplicarAjustes(deps.opciones, ajustes);
       if (deps.nombreNegocio) opciones = { ...opciones, negocio: deps.nombreNegocio() };
+      const extra = deps.horarioExtra?.();
+      if (extra) {
+        const desde = Number(extra.desde.slice(0, 2));
+        const hasta = Number(extra.hasta.slice(0, 2)) + (Number(extra.hasta.slice(3, 5)) > 0 ? 1 : 0);
+        if (Number.isFinite(desde) && Number.isFinite(hasta)) {
+          opciones = { ...opciones, horaInicio: Math.min(opciones.horaInicio, Math.max(0, desde)), horaFin: Math.max(opciones.horaFin, Math.min(24, hasta)) };
+        }
+      }
     } catch (error) {
       // Sin ajustes legibles se sigue con los de la configuracion: el
       // reparto no se para por una fila corrupta en settings.

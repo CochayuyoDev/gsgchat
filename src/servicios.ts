@@ -130,6 +130,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     gsg,
     opciones: opcionesDesdeConfig(config),
     nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
+    horarioExtra: () => (entregas ? { desde: entregas.ajustes().horarioEntregas.desde, hasta: entregas.ajustes().horarioEntregas.extendidoHasta } : null),
     stickers,
     usarPlantilla: () => providerOf(settings.current()) === 'cloud',
     // Boton nativo de ubicacion: la Cloud API lo tiene; el cliente no oficial
