@@ -68,6 +68,9 @@ export interface Motorizado {
   ultimaLat: number | null;
   ultimaLng: number | null;
   ultimaPosicionAt: Date | null;
+  /** Su pagina sin instalar nada (/m/<token>): el token vigente y hasta cuando vale. */
+  enlaceToken: string | null;
+  enlaceVenceAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,6 +94,8 @@ export interface PatchMotorizado {
   ultimaLat?: number | null;
   ultimaLng?: number | null;
   ultimaPosicionAt?: Date | null;
+  enlaceToken?: string | null;
+  enlaceVenceAt?: Date | null;
 }
 
 export interface Entrega {
@@ -152,6 +157,13 @@ export interface Entrega {
   segundaVisitaVenceAt: Date | null;
   /** Cuando se le aviso al cliente que el motorizado esta cerca (una sola vez por entrega). */
   cercaAvisadoAt: Date | null;
+  /** Cliente recurrente: cuando se le propuso su ultima direccion en vez de pedirle el pin, y cual era. */
+  ubicacionPropuestaAt: Date | null;
+  ubicacionPropuestaLat: number | null;
+  ubicacionPropuestaLng: number | null;
+  /** Cuando se le repregunto al motorizado un tiempo que no cuadra con la distancia (una sola vez), y lo que dijo. */
+  motorizadoTiempoDudosoAt: Date | null;
+  motorizadoTiempoDudosoMin: number | null;
 
   estado: EstadoEntrega;
   incidencia: string | null;
@@ -180,7 +192,7 @@ export interface NuevaEntrega {
 }
 
 export type PatchEntrega = Partial<
-  Omit<Entrega, 'id' | 'dia' | 'referencia' | 'phone' | 'createdAt' | 'updatedAt'>
+  Omit<Entrega, 'id' | 'dia' | 'referencia' | 'createdAt' | 'updatedAt'>
 >;
 
 export type TipoEventoEntrega =
@@ -216,6 +228,8 @@ export interface EntregasRepo {
   crearMotorizado(input: NuevoMotorizado): Promise<{ motorizado: Motorizado; nuevo: boolean }>;
   motorizado(id: number): Promise<Motorizado | null>;
   motorizadoPorTelefono(phone: string): Promise<Motorizado | null>;
+  /** El motorizado dueño de ese token de enlace (vigente o no: el servicio mira la fecha). */
+  motorizadoPorEnlace(token: string): Promise<Motorizado | null>;
   listarMotorizados(): Promise<Motorizado[]>;
   actualizarMotorizado(id: number, patch: PatchMotorizado): Promise<Motorizado | null>;
   quitarMotorizado(id: number): Promise<Motorizado | null>;
@@ -227,6 +241,14 @@ export interface EntregasRepo {
   porDiaYReferencia(dia: string, referencia: string): Promise<Entrega | null>;
   /** La entrega viva mas reciente de ese cliente. */
   vivaPorTelefono(phone: string): Promise<Entrega | null>;
+  /** TODAS las vivas de un telefono (un cliente puede tener dos pedidos el mismo dia), de la mas antigua a la mas nueva. */
+  vivasPorTelefono(phone: string): Promise<Entrega[]>;
+  /**
+   * La puntualidad real de cada motorizado desde `desde`: sobre las entregadas
+   * con hora avisada, cuantas fueron y el desvio medio en minutos entre la hora
+   * que se le dijo al cliente y la hora real (positivo = llego tarde).
+   */
+  puntualidadDeMotorizados(desde: Date): Promise<Array<{ motorizadoId: number; entregas: number; desvioMedioMin: number }>>;
   /** Las entregas del dia (o todas las vivas de cualquier dia si no se pasa dia). */
   listar(filtro: { dia?: string; estado?: EstadoEntrega; estados?: EstadoEntrega[]; q?: string; limit?: number }): Promise<Entrega[]>;
   actualizar(id: number, patch: PatchEntrega): Promise<Entrega | null>;
@@ -236,6 +258,10 @@ export interface EntregasRepo {
   tocaPedirConfirmacion(ahora: Date, limite: number): Promise<Entrega[]>;
   /** Las que estan listas para un motorizado, esperando uno que no contesta, o con el aviso de llegada por reintentar. */
   tocaMotorizado(ahora: Date, limite: number): Promise<Entrega[]>;
+  /** Los clientes recurrentes a los que toca proponerles su ultima direccion (aun no se les pregunto y no estan en el reparto). */
+  tocaProponerUbicacion(ahora: Date, limite: number): Promise<Entrega[]>;
+  /** Las que se les propuso la direccion hace mas de `antesDe` y siguen sin pin ni reparto: toca pedirsela como siempre. */
+  propuestasSinRespuesta(antesDe: Date, limite: number): Promise<Entrega[]>;
   /** Las que un motorizado tiene entre manos (enviadas y sin respuesta), la ultima primero. */
   enManosDeMotorizado(motorizadoId: number): Promise<Entrega[]>;
   /** Las que un motorizado ya tiene con hora avisada y aun no entregadas, la ultima primero. */
@@ -265,6 +291,8 @@ interface MotorizadoRow {
   ultima_lat: number | string | null;
   ultima_lng: number | string | null;
   ultima_posicion_at: Date | null;
+  enlace_token?: string | null;
+  enlace_vence_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -315,6 +343,11 @@ interface EntregaRow {
   segunda_visita_pedida_at: Date | null;
   segunda_visita_vence_at: Date | null;
   cerca_avisado_at: Date | null;
+  ubicacion_propuesta_at: Date | null;
+  ubicacion_propuesta_lat: number | string | null;
+  ubicacion_propuesta_lng: number | string | null;
+  motorizado_tiempo_dudoso_at: Date | null;
+  motorizado_tiempo_dudoso_min: number | string | null;
   estado: EstadoEntrega;
   incidencia: string | null;
   incidencia_detalle: string | null;
@@ -358,6 +391,8 @@ const motorizadoDeFila = (r: MotorizadoRow): Motorizado => ({
   ultimaLat: numOpc(r.ultima_lat ?? null),
   ultimaLng: numOpc(r.ultima_lng ?? null),
   ultimaPosicionAt: r.ultima_posicion_at ?? null,
+  enlaceToken: r.enlace_token ?? null,
+  enlaceVenceAt: r.enlace_vence_at ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -408,6 +443,11 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   segundaVisitaPedidaAt: r.segunda_visita_pedida_at ?? null,
   segundaVisitaVenceAt: r.segunda_visita_vence_at ?? null,
   cercaAvisadoAt: r.cerca_avisado_at ?? null,
+  ubicacionPropuestaAt: r.ubicacion_propuesta_at ?? null,
+  ubicacionPropuestaLat: r.ubicacion_propuesta_lat == null ? null : Number(r.ubicacion_propuesta_lat),
+  ubicacionPropuestaLng: r.ubicacion_propuesta_lng == null ? null : Number(r.ubicacion_propuesta_lng),
+  motorizadoTiempoDudosoAt: r.motorizado_tiempo_dudoso_at ?? null,
+  motorizadoTiempoDudosoMin: r.motorizado_tiempo_dudoso_min == null ? null : Number(r.motorizado_tiempo_dudoso_min),
   estado: r.estado,
   incidencia: r.incidencia,
   incidenciaDetalle: r.incidencia_detalle,
@@ -429,6 +469,7 @@ const eventoDeFila = (r: EventoRow): EventoEntrega => ({
 /** Las columnas de un patch de entrega, en el orden en que se escriben. */
 const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['externoId', 'externo_id'],
+  ['phone', 'phone'],
   ['nombre', 'nombre'],
   ['direccion', 'direccion'],
   ['distrito', 'distrito'],
@@ -469,6 +510,11 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['segundaVisitaPedidaAt', 'segunda_visita_pedida_at'],
   ['segundaVisitaVenceAt', 'segunda_visita_vence_at'],
   ['cercaAvisadoAt', 'cerca_avisado_at'],
+  ['ubicacionPropuestaAt', 'ubicacion_propuesta_at'],
+  ['ubicacionPropuestaLat', 'ubicacion_propuesta_lat'],
+  ['ubicacionPropuestaLng', 'ubicacion_propuesta_lng'],
+  ['motorizadoTiempoDudosoAt', 'motorizado_tiempo_dudoso_at'],
+  ['motorizadoTiempoDudosoMin', 'motorizado_tiempo_dudoso_min'],
   ['estado', 'estado'],
   ['incidencia', 'incidencia'],
   ['incidenciaDetalle', 'incidencia_detalle'],
@@ -487,6 +533,8 @@ const COLUMNAS_MOTORIZADO: Array<[keyof PatchMotorizado, string]> = [
   ['ultimaLat', 'ultima_lat'],
   ['ultimaLng', 'ultima_lng'],
   ['ultimaPosicionAt', 'ultima_posicion_at'],
+  ['enlaceToken', 'enlace_token'],
+  ['enlaceVenceAt', 'enlace_vence_at'],
 ];
 
 export function createEntregasRepo(pool: Pool): EntregasRepo {
@@ -511,6 +559,11 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     },
     async motorizadoPorTelefono(phone) {
       const { rows } = await pool.query<MotorizadoRow>('select * from motorizados where phone = $1', [phone]);
+      return rows[0] ? motorizadoDeFila(rows[0]) : null;
+    },
+    async motorizadoPorEnlace(token) {
+      if (!token) return null;
+      const { rows } = await pool.query<MotorizadoRow>('select * from motorizados where enlace_token = $1', [token]);
       return rows[0] ? motorizadoDeFila(rows[0]) : null;
     },
     async listarMotorizados() {
@@ -587,6 +640,27 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       );
       return rows[0] ? entregaDeFila(rows[0]) : null;
     },
+    async vivasPorTelefono(phone) {
+      const { rows } = await pool.query<EntregaRow>(
+        `select * from entregas
+          where phone = $1 and estado = any($2::text[])
+          order by dia asc, id asc`,
+        [phone, ESTADOS_ENTREGA_VIVOS],
+      );
+      return rows.map(entregaDeFila);
+    },
+    async puntualidadDeMotorizados(desde) {
+      const { rows } = await pool.query<{ motorizado_id: number; entregas: string | number; desvio: string | number | null }>(
+        `select motorizado_id, count(*) as entregas,
+                avg(extract(epoch from (entregada_at - llega_aprox_at)) / 60) as desvio
+           from entregas
+          where estado = 'entregada' and motorizado_id is not null and llega_aprox_at is not null and entregada_at is not null
+            and entregada_como <> 'cierre' and entregada_at >= $1
+          group by motorizado_id`,
+        [desde],
+      );
+      return rows.map((r) => ({ motorizadoId: Number(r.motorizado_id), entregas: Number(r.entregas), desvioMedioMin: Math.round(Number(r.desvio ?? 0)) }));
+    },
     async listar(filtro) {
       const condiciones: string[] = [];
       const valores: unknown[] = [];
@@ -656,6 +730,29 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           order by coalesce(confirmacion_proximo_at, created_at) asc, id asc
           limit $2`,
         [ahora, limite],
+      );
+      return rows.map(entregaDeFila);
+    },
+    async tocaProponerUbicacion(ahora, limite) {
+      const { rows } = await pool.query<EntregaRow>(
+        `select * from entregas
+          where estado in ('pendiente', 'esperando_ubicacion')
+            and ubicacion_estado = 'pendiente' and ubicacion_propuesta_lat is not null and ubicacion_propuesta_at is null and lote_id is null
+            and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
+          order by prioridad desc, id asc
+          limit $2`,
+        [ahora, limite],
+      );
+      return rows.map(entregaDeFila);
+    },
+    async propuestasSinRespuesta(antesDe, limite) {
+      const { rows } = await pool.query<EntregaRow>(
+        `select * from entregas
+          where estado in ('pendiente', 'esperando_ubicacion')
+            and ubicacion_estado = 'pendiente' and ubicacion_propuesta_at is not null and ubicacion_propuesta_at <= $1 and lote_id is null
+          order by id asc
+          limit $2`,
+        [antesDe, limite],
       );
       return rows.map(entregaDeFila);
     },

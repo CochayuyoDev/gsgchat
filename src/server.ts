@@ -17,9 +17,9 @@ import { registerWebhookRoutes } from './whatsapp/webhook.js';
 import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
 import { registerTrackingRoutes } from './tracking/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
-import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, registerAuth } from './auth/routes.js';
+import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, registerAuth, secretoDeSesion } from './auth/routes.js';
 import { registerWebRoutes } from './web/routes.js';
-import type { SettingsService } from './settings/service.js';
+import type { SettingsRepo, SettingsService } from './settings/service.js';
 import type { StokyClient } from './stoky/client.js';
 import { TrackingHub } from './tracking/realtime.js';
 import { TemplateRenderError } from './templates/render.js';
@@ -114,6 +114,8 @@ export interface ServerDeps {
   gsg?: PuertoGsg;
   /** El simulador del sistema de GSG, montado en /simulador/gsg. Ver src/entregas/gsg-simulado.ts. */
   simuladorGsg?: GsgSimulado;
+  /** El repo de settings, para lo que se guarda por clave (perfil de instalacion). */
+  settingsRepo?: SettingsRepo;
   /** "Que todo funcione": vigilante del WhatsApp, pruebas de la manana, cupo y copia. Ver src/salud/fiabilidad.ts. */
   fiabilidad?: ServicioFiabilidad;
   /** El secreto del bucle interno (app.inject con identidad); si no se pasa, se genera uno. Lo usa el vigilante para pedir la reconexion. */
@@ -220,13 +222,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Las tiendas que controla el superadministrador, y lo que ellas preguntan. Ver src/tiendas.
   // Con los avisos de vencimiento (cada hora, la primera a los dos minutos) y el WhatsApp al contacto de cada tienda. Ver src/tiendas/avisos.ts.
   const servicioTiendas = deps.tiendas ?? crearServicioTiendas({ repo: repos.tiendas, baseUrl: config.PUBLIC_BASE_URL, urlPlanInterna: config.TIENDAS_URL_PLAN_BASE, alojamiento: deps.alojamiento ?? crearAlojamiento({ log: (m) => app.log.info(m) }), actividad: repos.actividad, sender });
-  const avisosTiendas = crearAvisosTiendas({ tiendas: servicioTiendas, repo: repos.tiendas, sender, supervisor: () => ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR, log: (m, d) => app.log.warn(d ?? {}, m) });
+  const avisosTiendas = crearAvisosTiendas({ tiendas: servicioTiendas, repo: repos.tiendas, sender, supervisor: () => ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR, zonaHoraria: () => ajustes?.zonaHoraria?.() ?? config.timezone, log: (m, d) => app.log.warn(d ?? {}, m) });
   const pararAvisosTiendas = avisosTiendas.arrancar();
   app.addHook('onClose', async () => pararAvisosTiendas());
   await registerTiendasRoutes(app, {
     tiendas: servicioTiendas,
     avisos: avisosTiendas,
     plan: deps.plan,
+    usuarios: repos.usuarios,
+    sesion: { secreto: secretoDeSesion(config), segura: config.PUBLIC_BASE_URL.startsWith('https://') },
   });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
@@ -302,6 +306,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     entregas,
     autoConectarLocal: deps.autoConectarLocal,
     fiabilidad: Boolean(deps.fiabilidad),
+    simulador: deps.simuladorGsg,
+    settingsRepo: deps.settingsRepo,
   });
 
   // La IA operadora ejecuta las ordenes por las mismas rutas que las

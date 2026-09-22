@@ -22,9 +22,13 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY db ./db
+# El contrato para los programadores de GSG se descarga desde Conexion.
+COPY docs ./docs
 # .secrets.json (token de admin, clave de cifrado) se escribe aqui: montar
 # un volumen para que sobreviva a un recreate del contenedor.
-VOLUME ["/app/data"]
+# Lo que debe sobrevivir a un recreate: secretos, la vinculacion del QR, los
+# adjuntos, los respaldos de conversaciones y la carpeta de copias diarias.
+VOLUME ["/app/data", "/app/.wa-auth", "/app/.wa-media", "/app/respaldos", "/app/copias"]
 ENV SECRETS_DIR=/app/data
 EXPOSE 3000
 CMD ["node", "dist/src/main.js"]

@@ -85,7 +85,12 @@ const CSS = `
   .salud { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-small); min-width: 180px; }
   .salud .luz { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--gris); vertical-align: middle; }
   .salud .luz.ok { background: var(--verde); } .salud .luz.warn { background: var(--ambar); } .salud .luz.bad { background: var(--rojo); }
-  .acciones { display: flex; gap: 6px; flex-wrap: wrap; }
+  .acciones { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; }
+  /* Dos acciones principales como boton; el resto, enlaces discretos para que la fila se lea de un vistazo. */
+  .acciones .secundaria { border: 0; background: transparent; padding: 4px 2px; min-height: 30px; color: var(--primario); font-weight: 600; box-shadow: none; }
+  .acciones .secundaria.peligro { color: var(--rojo); background: transparent; border: 0; }
+  .acciones .secundaria:hover { text-decoration: underline; }
+  @media (max-width: 960px) { .acciones .secundaria { border: 1px solid var(--borde); background: var(--superficie); padding: 6px 12px; min-height: 44px; } .acciones .secundaria.peligro { border-color: var(--rojo); } }
   tr.fila-acciones td { padding: 2px 12px 12px; border-bottom: 1px solid var(--borde); }
   tr.fila-acciones + tr td, tr.historial td { border-top: 0; }
   tbody tr:not(.fila-acciones):not(.historial) td { border-bottom: 0; padding-bottom: 4px; }
@@ -100,6 +105,7 @@ const CSS = `
   .qr-vista { max-width: 180px; max-height: 180px; border-radius: var(--radio-sm); border: 1px solid var(--borde); display: block; margin-top: 6px; background: #fff; }
   .vista-previa { font-size: 13px; color: var(--texto-suave); white-space: pre-wrap; background: var(--superficie-2); border-radius: var(--radio-sm); padding: 8px 10px; margin-top: 6px; }
   .ver-como { font-size: var(--fs-small); }
+  .soporte-tienda { display: inline-block; margin-top: 4px; font-size: 13px; }
   .ayuda { margin: 0 0 6px; font-size: 13.5px; }
   .ayuda code, label code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--superficie-2); padding: 1px 5px; border-radius: 4px; }
   details.avanzado { margin-top: 10px; }
@@ -169,7 +175,9 @@ ${opts.demo ? '<div class="demo">Demostración: nada sale a WhatsApp de verdad.<
         <div id="alojamiento" class="muted" style="margin-bottom:10px;font-size:13.5px"></div>
         <div class="fila">
           <div><label for="ti-nombre">Nombre del negocio</label><input id="ti-nombre" placeholder="Zapatería Lima"></div>
-          <div style="flex:2"><label for="ti-contacto">Persona de contacto y su WhatsApp <span class="muted">(nombre · número; el número sirve para avisarle)</span></label><input id="ti-contacto" placeholder="Rosa · 987 654 321"></div>
+          <div><label for="ti-contacto-nombre">Persona de contacto</label><input id="ti-contacto-nombre" placeholder="Rosa Pérez"></div>
+          <div><label for="ti-contacto-tel">Su WhatsApp <span class="muted">(9 cifras; sirve para avisarle desde aquí)</span></label><input id="ti-contacto-tel" type="tel" inputmode="tel" placeholder="987 654 321"></div>
+          <input id="ti-contacto" type="hidden">
         </div>
         <div class="fila">
           <div><label for="ti-plan">Plan</label><select id="ti-plan"></select></div>
@@ -214,14 +222,22 @@ ${opts.demo ? '<div class="demo">Demostración: nada sale a WhatsApp de verdad.<
     <div class="caja">
       <h2>Avisos de vencimiento <span class="sep"></span><button class="sm" id="av-revisar" type="button">Revisar ahora</button></h2>
       <div class="cuerpo" id="av-cuerpo">
-        <p class="muted ayuda">A 7 días, a 1 día y el día que vence, un WhatsApp a la tienda (al número de su contacto) y otro a ti (el supervisor de Ajustes → Avisos). Cada aviso sale una sola vez por vencimiento. Variables: <span id="av-variables"></span>.</p>
+        <p class="muted ayuda">A 7 días, a 1 día y el día que vence, un WhatsApp a la tienda (al número de su contacto) y otro a ti (el supervisor de Ajustes → Avisos). Cada aviso sale una sola vez por vencimiento. Bajo cada texto, toca una variable para insertarla.<span class="hidden"> Variables: <span id="av-variables"></span>.</span></p>
         <label class="inline"><input type="checkbox" id="av-activo"> Avisar solo</label>
         <label class="inline"><input type="checkbox" id="av-tienda"> También a la tienda (si tiene WhatsApp en su contacto)</label>
         <label for="av-vence7">A 7 días</label><textarea id="av-vence7" data-tipo="vence7"></textarea><a href="#" class="ver-como" data-para="av-vence7" style="font-size:12.5px">Ver cómo queda</a><div class="vista-previa hidden" id="vp-av-vence7"></div>
         <label for="av-vence1">A 1 día</label><textarea id="av-vence1" data-tipo="vence1"></textarea><a href="#" class="ver-como" data-para="av-vence1" style="font-size:12.5px">Ver cómo queda</a><div class="vista-previa hidden" id="vp-av-vence1"></div>
         <label for="av-vencida">El día que vence</label><textarea id="av-vencida" data-tipo="vencida"></textarea><a href="#" class="ver-como" data-para="av-vencida" style="font-size:12.5px">Ver cómo queda</a><div class="vista-previa hidden" id="vp-av-vencida"></div>
-        <p class="ayuda" style="margin:8px 0 0">En los tres textos puedes usar <code>{tienda}</code> (su nombre), <code>{fecha}</code> (hasta cuándo está pagada), <code>{dias}</code> (los que faltan), <code>{plan}</code>, <code>{precio}</code>, <code>{moneda}</code> y <code>{contacto}</code> (cómo renovar).</p>
+        <details class="ayuda" style="margin:8px 0 0"><summary style="cursor:pointer">Qué significa cada variable</summary><p style="margin:6px 0 0"><code>{tienda}</code> su nombre · <code>{fecha}</code> hasta cuándo está pagada · <code>{dias}</code> los que faltan · <code>{plan}</code> · <code>{precio}</code> y <code>{moneda}</code> al mes · <code>{contacto}</code> cómo renovar · en el recibo, además <code>{meses}</code> y <code>{monto}</code> del pago · <code>{lineas}</code> una línea por tienda (solo en lo que recibes tú).</p></details>
         <label for="av-dueno">Lo que recibes tú <span class="muted">(<code>{lineas}</code> = una línea por tienda)</span></label><textarea id="av-dueno"></textarea>
+        <h3 style="margin:16px 0 4px;font-size:14px">Recibo de pago</h3>
+        <p class="muted ayuda">Al apuntar un pago (a mano o aceptando una captura), la tienda recibe por WhatsApp su recibo con hasta cuándo queda pagada.<span class="hidden"> Variables: <span id="av-variables-recibo"></span>.</span></p>
+        <label class="inline"><input type="checkbox" id="av-recibo-activo"> Mandar el recibo por WhatsApp</label>
+        <label for="av-recibo">El recibo</label><textarea id="av-recibo" data-tipo="recibo"></textarea><a href="#" class="ver-como" data-para="av-recibo" style="font-size:12.5px">Ver cómo queda</a><div class="vista-previa hidden" id="vp-av-recibo"></div>
+        <h3 style="margin:16px 0 4px;font-size:14px">Tiendas que no dan señales</h3>
+        <p class="muted ayuda">Cada instalación pregunta por su plan cada cuarto de hora. Si una lleva más de estas horas sin preguntar en horario de trabajo (9:00 a 20:00), te avisa por WhatsApp una vez al día: suele ser que su servidor está apagado o sin red.</p>
+        <div class="fila"><label for="av-latido-horas">Avisar cuando lleve más de (horas) <span class="muted">0 = no avisar</span></label><input id="av-latido-horas" type="number" min="0" max="48" style="max-width:120px"></div>
+        <label for="av-latido">Lo que recibes tú <span class="muted">(<code>{lineas}</code> = una línea por tienda)</span></label><textarea id="av-latido"></textarea>
         <div style="margin-top:10px"><button class="primary sm" id="av-guardar" type="button">Guardar avisos</button></div>
         <div id="av-ultima" class="muted" style="margin-top:10px;font-size:13px"></div>
       </div>
@@ -246,6 +262,20 @@ function toast(texto) { var el = document.createElement('div'); el.className = '
 function fecha(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric' }); }
 function fechaHora(iso) { if (!iso) return ''; var d = new Date(iso); return fecha(iso) + ' ' + d.toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }); }
 function val(id) { return (document.getElementById(id).value || '').trim(); }
+/* «Rosa · 987 654 321»: el formato con el que el servidor saca el WhatsApp del contacto. */
+function componerContacto(nombre, tel) {
+  var d = (tel || '').replace(/\D/g, '');
+  if (d.length === 11 && d.indexOf('51') === 0) d = d.slice(2);
+  var bonito = d.length === 9 ? d.slice(0, 3) + ' ' + d.slice(3, 6) + ' ' + d.slice(6) : d;
+  if (nombre && bonito) return nombre + ' · ' + bonito;
+  return nombre || bonito || '';
+}
+function partirContacto(contacto) {
+  var c = contacto || '';
+  var m = /(\+?\s*5?1?\s*9(?:\s*\d){8})\s*$/.exec(c);
+  if (!m) return { nombre: c.trim(), tel: '' };
+  return { nombre: c.slice(0, m.index).replace(/[·\-–,]\s*$/, '').trim(), tel: m[1].replace(/\D/g, '') };
+}
 function setVal(id, v) { document.getElementById(id).value = v === null || v === undefined ? '' : v; }
 var TONO = { ok: 'tono-verde', warn: 'tono-ambar', bad: 'tono-rojo', info: 'tono-azul' };
 function chip(clase, texto) { return '<span class="chip ' + clase + ' ' + (TONO[clase] || 'tono-gris') + '">' + esc(texto) + '</span>'; }
@@ -266,16 +296,21 @@ var planes = [];
 var historialAbierto = {};
 
 function membresiaChip(t) {
-  var c = t.semaforo === 'verde' ? 'ok' : t.semaforo === 'ambar' ? 'warn' : 'bad';
+  /* El color sigue a la palabra (misma regla que el catalogo de estados): suspendida gris, vencida rojo, a 7 dias ambar, al dia verde. */
   var txt = t.membresia.estado === 'suspendida' ? 'suspendida' : t.plan.vencido ? 'vencida' : t.plan.diasRestantes <= 7 ? 'vence en ' + t.plan.diasRestantes + ' d' : 'al día';
+  var c = t.membresia.estado === 'suspendida' ? 'gris' : t.plan.vencido ? 'bad' : t.plan.diasRestantes <= 7 ? 'warn' : 'ok';
   return chip(c, txt);
+}
+function horaLima(iso) {
+  try { return new Date(iso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }); } catch (e) { return String(iso).slice(11, 16); }
 }
 function saludHtml(t) {
   var s = t.salud;
   if (!s.parteAt) return '<div class="salud"><span class="muted">Sin parte todavía</span><span class="sub">su instalación aún no preguntó por su plan</span></div>';
   var luz = function (x) { return '<span><span class="luz ' + x.nivel + '"></span>' + esc(x.texto) + '</span>'; };
   var extra = (s.entregasHoy !== null ? s.entregasHoy + ' entregas hoy · ' : '') + 'parte ' + esc(s.hace) + (s.version ? ' · v' + esc(s.version) : '');
-  return '<div class="salud">' + luz(s.whatsapp) + luz(s.mensajes) + luz(s.ia) + '<span class="sub' + (s.parteViejo ? '" style="color:var(--warn)' : '') + '">' + extra + (s.parteViejo ? ' · sin noticias desde entonces' : '') + '</span></div>';
+  var soporte = s.soporte ? '<a class="soporte-tienda" href="' + esc(s.soporte.enlace) + '" target="_blank" rel="noopener" title="La tienda te dio acceso de soporte: entras como administrador hasta esa hora">🔑 Entrar a su panel (acceso de soporte hasta las ' + esc(horaLima(s.soporte.hasta)) + ')</a>' : '';
+  return '<div class="salud">' + luz(s.whatsapp) + luz(s.mensajes) + luz(s.ia) + '<span class="sub' + (s.parteViejo ? '" style="color:var(--warn)' : '') + '">' + extra + (s.parteViejo ? ' · sin noticias desde entonces' : '') + '</span>' + soporte + '</div>';
 }
 
 function pintarTarjetas(r) {
@@ -335,14 +370,14 @@ function pintarTiendas(r) {
     var enLinea = t.enLinea ? chip('ok', 'sí') : t.ultimaConsultaAt ? '<span class="muted">última vez ' + esc(fechaHora(t.ultimaConsultaAt)) + '</span>' : '<span class="muted">nunca se conectó</span>';
     var acciones = '<div class="acciones">' +
       '<button class="sm" data-pago="' + esc(t.id) + '" type="button">Apuntar pago</button>' +
-      '<button class="sm" data-editar="' + esc(t.id) + '" type="button">Cambiar plan</button>' +
-      '<button class="sm" data-datos="' + esc(t.id) + '" type="button">Cambiar datos</button>' +
-      '<button class="sm ' + (t.membresia.estado === 'suspendida' ? '' : 'peligro') + '" data-susp="' + esc(t.id) + '" data-valor="' + (t.membresia.estado === 'suspendida' ? 'false' : 'true') + '" type="button">' + (t.membresia.estado === 'suspendida' ? 'Reactivar' : 'Suspender') + '</button>' +
-      '<button class="sm" data-token="' + esc(t.id) + '" type="button">Token nuevo</button>' +
       '<button class="sm" data-avisar="' + esc(t.id) + '" type="button"' + (t.telefonoContacto ? '' : ' title="Ponle un WhatsApp en su contacto"') + '>Avisar por WhatsApp</button>' +
-      '<button class="sm" data-historial="' + esc(t.id) + '" type="button">' + (historialAbierto[t.id] ? 'Ocultar historial' : 'Historial') + '</button>' +
-      (t.url ? '<a class="sm" href="' + esc(t.url) + '" target="_blank" rel="noopener">Abrir</a>' : '') +
-      '<button class="sm peligro" data-borrar="' + esc(t.id) + '" type="button">Borrar</button></div>';
+      '<button class="sm secundaria" data-editar="' + esc(t.id) + '" type="button">Cambiar plan</button>' +
+      '<button class="sm secundaria" data-datos="' + esc(t.id) + '" type="button">Cambiar datos</button>' +
+      '<button class="sm secundaria" data-token="' + esc(t.id) + '" type="button">Token nuevo</button>' +
+      '<button class="sm secundaria" data-historial="' + esc(t.id) + '" type="button">' + (historialAbierto[t.id] ? 'Ocultar historial' : 'Historial') + '</button>' +
+      (t.url ? '<a class="sm secundaria" href="' + esc(t.url) + '" target="_blank" rel="noopener">Abrir su panel</a>' : '') +
+      '<button class="sm secundaria ' + (t.membresia.estado === 'suspendida' ? '' : 'peligro') + '" data-susp="' + esc(t.id) + '" data-valor="' + (t.membresia.estado === 'suspendida' ? 'false' : 'true') + '" type="button">' + (t.membresia.estado === 'suspendida' ? 'Reactivar' : 'Suspender') + '</button>' +
+      '<button class="sm secundaria peligro" data-borrar="' + esc(t.id) + '" type="button">Borrar</button></div>';
     html += '<tr><td><b>' + esc(t.nombre) + '</b>' + (t.instalada ? ' ' + chip('ok', 'instalada aquí') : '') + (t.pagosPendientes ? ' ' + chip('warn', t.pagosPendientes + ' pago' + (t.pagosPendientes === 1 ? '' : 's') + ' por revisar') : '') + '<div class="sub">' + esc(t.slug) + (t.url ? ' · ' + esc(t.url) : '') + (t.contacto ? '<br>' + esc(t.contacto) : '') + '</div></td>' +
       '<td data-etiqueta="Plan">' + esc(t.plan.nombre) + '<div class="sub">' + (t.membresia.precioMes ? esc(t.membresia.moneda) + ' ' + t.membresia.precioMes + '/mes' : 'gratis') + '</div></td>' +
       '<td data-etiqueta="Pagada hasta">' + esc(fecha(t.membresia.vencimiento)) + '</td>' +
@@ -381,8 +416,12 @@ function pintarTiendas(r) {
       var t = datos.tiendas.filter(function (x) { return x.id === id; })[0];
       var nombre = await pedirDato({ titulo: 'Nombre de la tienda', etiqueta: 'Nombre', valor: t.nombre, boton: 'Siguiente', validar: function (v) { return v.trim() ? null : 'Escribe el nombre.'; } });
       if (nombre === null) return;
-      var contacto = await pedirDato({ titulo: 'Contacto del negocio', texto: 'Con su WhatsApp, para poder avisarle desde aquí (por ejemplo: Rosa · 987 654 321).', etiqueta: 'Contacto', valor: t.contacto || '', boton: 'Siguiente' });
-      if (contacto === null) return;
+      var partes = partirContacto(t.contacto);
+      var contactoNombre = await pedirDato({ titulo: 'Persona de contacto', texto: 'Quién atiende por la tienda.', etiqueta: 'Nombre', valor: partes.nombre, boton: 'Siguiente', validar: function () { return null; } });
+      if (contactoNombre === null) return;
+      var contactoTel = await pedirDato({ titulo: 'Su WhatsApp', texto: 'Para poder avisarle desde aquí (vencimientos, pagos). Vacío si no lo sabes.', etiqueta: 'Celular (9 cifras)', marcador: '987 654 321', valor: partes.tel, boton: 'Siguiente', validar: function (v) { var d = v.replace(/\D/g, ''); return !d || /^9\d{8}$/.test(d) || /^519\d{8}$/.test(d) ? null : 'Tiene que ser un celular de 9 cifras (empieza por 9).'; } });
+      if (contactoTel === null) return;
+      var contacto = componerContacto(contactoNombre.trim(), contactoTel);
       var url = await pedirDato({ titulo: 'Dirección de su sistema', texto: 'Vacío si no la sabes.', etiqueta: 'Dirección (https://…)', valor: t.url || '', boton: 'Guardar', validar: function (v) { return !v.trim() || /^https?:\/\//i.test(v.trim()) ? null : 'Tiene que empezar por http:// o https://'; } });
       if (url === null) return;
       try { await api('/admin/tiendas/' + id, { method: 'POST', body: { nombre: nombre.trim(), contacto: contacto.trim() || null, url: url.trim() || null } }); toast('Datos guardados.'); await cargar(); } catch (e) { toast(e.message); }
@@ -405,7 +444,7 @@ function pintarTiendas(r) {
     b.onclick = async function () {
       var id = b.getAttribute('data-avisar');
       var t = datos.tiendas.filter(function (x) { return x.id === id; })[0];
-      if (!t.telefonoContacto) { toast('La tienda no tiene un WhatsApp en su contacto: ponlo con «Cambiar datos» (por ejemplo: Rosa · 987 654 321).'); return; }
+      if (!t.telefonoContacto) { toast('La tienda no tiene el WhatsApp de su contacto: ponlo con «Cambiar datos».'); return; }
       var texto = await pedirDato({ titulo: 'Escribirle a ' + t.nombre, texto: 'Sale por tu WhatsApp al +' + t.telefonoContacto + '.', etiqueta: 'Mensaje', marcador: 'Hola, te escribo de GSGchat…', boton: 'Enviar', validar: function (v) { return v.trim() ? null : 'Escribe el mensaje.'; } });
       if (!texto) return;
       try { var r5 = await api('/admin/tiendas/' + id + '/avisar', { method: 'POST', body: { texto: texto } }); toast(r5.mensaje); } catch (e) { toast(e.message); }
@@ -476,6 +515,13 @@ async function cargarAvisos() {
     document.getElementById('av-activo').checked = Boolean(t.activo);
     document.getElementById('av-tienda').checked = Boolean(t.aLaTienda);
     setVal('av-vence7', t.vence7); setVal('av-vence1', t.vence1); setVal('av-vencida', t.vencida); setVal('av-dueno', t.alDueno);
+    document.getElementById('av-recibo-activo').checked = t.reciboActivo !== false;
+    setVal('av-recibo', t.recibo || ''); setVal('av-latido', t.sinLatido || '');
+    document.getElementById('av-latido-horas').value = t.sinLatidoHoras === undefined ? 1 : t.sinLatidoHoras;
+    document.getElementById('av-variables-recibo').textContent = (r.variablesRecibo || []).join(' ');
+    var chips = function (id, vars) { if (window.chipsDeVariables) window.chipsDeVariables(document.getElementById(id), vars); };
+    chips('av-vence7', r.variables || []); chips('av-vence1', r.variables || []); chips('av-vencida', r.variables || []);
+    chips('av-recibo', r.variablesRecibo || []); chips('av-dueno', ['{lineas}']); chips('av-latido', ['{lineas}']);
     pintarUltimaRevision(r.ultimaRevision);
   } catch (e) { document.getElementById('av-ultima').textContent = e.message; }
 }
@@ -528,10 +574,13 @@ document.getElementById('ti-crear').onclick = async function () {
   try {
     var instalar = !document.getElementById('ti-instalar-caja').classList.contains('hidden') && document.getElementById('ti-instalar').checked;
     if (instalar) toast('Dando de alta y levantando su instalación… tarda un minuto.');
+    var telContacto = val('ti-contacto-tel').replace(/\D/g, '');
+    if (telContacto && !/^9\d{8}$/.test(telContacto) && !/^519\d{8}$/.test(telContacto)) { toast('El WhatsApp del contacto tiene que ser un celular de 9 cifras (empieza por 9).'); return; }
+    setVal('ti-contacto', componerContacto(val('ti-contacto-nombre'), telContacto));
     var r = await api('/admin/tiendas', { method: 'POST', body: { nombre: val('ti-nombre'), slug: val('ti-slug') || undefined, url: val('ti-url') || null, contacto: val('ti-contacto') || null, crearInstalacion: instalar, membresia: { plan: val('ti-plan') || 'prueba', vencimiento: val('ti-vence'), precioMes: Number(val('ti-precio') || 0), contacto: val('ti-renovar') || null } } });
     mostrarToken(r.tienda, r.token, r.pasos);
     toast(r.mensaje || (r.instalacion && r.instalacion.ok ? 'Tienda dada de alta con su instalación en ' + r.instalacion.url : 'Tienda dada de alta.'));
-    setVal('ti-nombre', ''); setVal('ti-slug', ''); setVal('ti-url', ''); setVal('ti-contacto', '');
+    setVal('ti-nombre', ''); setVal('ti-slug', ''); setVal('ti-url', ''); setVal('ti-contacto', ''); setVal('ti-contacto-nombre', ''); setVal('ti-contacto-tel', '');
     await cargar();
   } catch (e) { toast(e.message); }
   b.disabled = false;
@@ -554,7 +603,7 @@ document.getElementById('cb-quitar-qr').onclick = async function () {
 
 document.getElementById('av-guardar').onclick = async function () {
   try {
-    var r = await api('/admin/tiendas/avisos', { method: 'POST', body: { activo: document.getElementById('av-activo').checked, aLaTienda: document.getElementById('av-tienda').checked, vence7: val('av-vence7'), vence1: val('av-vence1'), vencida: val('av-vencida'), alDueno: val('av-dueno') } });
+    var r = await api('/admin/tiendas/avisos', { method: 'POST', body: { activo: document.getElementById('av-activo').checked, aLaTienda: document.getElementById('av-tienda').checked, vence7: val('av-vence7'), vence1: val('av-vence1'), vencida: val('av-vencida'), alDueno: val('av-dueno'), reciboActivo: document.getElementById('av-recibo-activo').checked, recibo: val('av-recibo'), sinLatidoHoras: Number(document.getElementById('av-latido-horas').value || 0), sinLatido: val('av-latido') } });
     toast(r.mensaje);
   } catch (e) { toast(e.message); }
 };

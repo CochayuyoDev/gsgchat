@@ -101,6 +101,33 @@ describe('el texto fijo y las cifras', () => {
     expect(t).toContain('Quien más entregó: Kevin Aguilar (12)');
   });
 
+  it('el de la tarde lleva el cuadre con GSG en palabras cuando hay conexión, y no por la mañana', async () => {
+    const t = textoFijo('tarde', { ...cifras, cuadreGsg: 'No cuadra: 1 cerrado(s) aquí que GSG no tiene como terminados (P-1010); 0 terminado(s) en GSG que aquí siguen abiertos.' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
+    expect(t).toContain('Cuadre con GSG: No cuadra: 1 cerrado(s)');
+    const m = textoFijo('manana', { ...cifras, cuadreGsg: 'lo que sea' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
+    expect(m).not.toContain('Cuadre con GSG');
+    // Por el servicio: el cuadre se pide solo por la tarde y solo con GSG conectado.
+    const pedidos: string[] = [];
+    const sender = { send: async () => ({ ok: true }) } as unknown as import('../src/outbound/sender.js').Sender;
+    const servicio = await crearServicioResumenes({
+      settingsRepo: createMemorySettingsRepo(),
+      sender,
+      ajustes: () => ({ activo: true, horaManana: '08:30', horaTarde: '18:30' }),
+      supervisor: () => '51912426667',
+      nombreNegocio: () => 'GSG Reparto',
+      entregas: { resumen: async () => resumenDePrueba() },
+      gsgExtras: () => ({ cuadrar: async (dia?: string) => { pedidos.push(dia ?? ''); return { resumen: 'Cuadra: 25 entregados aquí y 25 terminados en GSG.' }; } }),
+      timezone: 'America/Lima',
+      publicBaseUrl: URL,
+    });
+    const tarde = await servicio.redactar('tarde');
+    expect(tarde.texto).toContain('Cuadre con GSG: Cuadra: 25 entregados');
+    expect(pedidos).toHaveLength(1);
+    const manana = await servicio.redactar('manana');
+    expect(manana.texto).not.toContain('Cuadre con GSG');
+    expect(pedidos).toHaveLength(1);
+  });
+
   it('sin pedidos ni WhatsApp lo dice sin cifras inventadas', () => {
     const vacias = cifrasDe(null, { whatsappConectado: false, dia: '2026-09-21' });
     const t = textoFijo('manana', vacias, { negocio: 'GSG', timezone: 'America/Lima', url: URL });

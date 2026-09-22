@@ -53,6 +53,8 @@ const simularSchema = z.object({
   location: z.object({ latitude: z.number(), longitude: z.number() }).optional(),
   /** Un adjunto sin texto: la foto de la fachada, el audio con la direccion. */
   adjunto: z.enum(['image', 'audio', 'video', 'document', 'sticker']).optional(),
+  /** Lo que dijo en el audio, como si la voz ya lo hubiera transcrito (solo con adjunto: 'audio'). */
+  transcripcion: z.string().max(2000).optional(),
   /** Un boton pulsado (los SI / NO de las entregas), tal como lo traduce cualquier proveedor. */
   boton: z.object({ id: z.string().min(1).max(200), title: z.string().max(200).default('') }).optional(),
   name: z.string().max(200).optional(),
@@ -103,6 +105,7 @@ export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDep
                 timestamp: String(Math.floor(Date.now() / 1000)),
                 type: body.adjunto,
                 [body.adjunto]: { id: `media-${id}`, mime_type: MIME_DE_PRUEBA[body.adjunto] },
+                ...(body.adjunto === 'audio' && body.transcripcion ? { media: { id: `media-${id}`, mimeType: MIME_DE_PRUEBA.audio!, transcripcion: body.transcripcion } } : {}),
               }
             : body.boton
               ? {

@@ -368,6 +368,7 @@ await conexionGsg.usarSimulador();
 const simuladorGsg = crearGsgSimulado({ token: TOKEN_SIMULADOR });
 simuladorGsg.cargarDePrueba();
 const entregas = await crearServicioEntregas({
+  zonaHoraria: () => ajustes.zonaHoraria(),
   repos,
   repo: repos.entregas,
   sender,
@@ -375,6 +376,7 @@ const entregas = await crearServicioEntregas({
   gsg: conexionGsg.puerto(),
   conexionGsg,
   cargarLote: (body) => cargarLote({ repos, plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, timezone: config.timezone, lista }, body),
+  ampliarHorario: (fn) => ajustes.ampliarHorario(fn),
   nombreNegocio: () => ajustes.nombreNegocio(),
   supervisor: () => politica().avisarA,
   ia: () => (ia.estado().tieneToken ? { completar: (mensajes, opts) => ia.completar(mensajes, opts) } : null),
@@ -383,6 +385,7 @@ const entregas = await crearServicioEntregas({
   timezone: config.timezone,
   publicBaseUrl: config.PUBLIC_BASE_URL,
   bus,
+  geo: { bbox: config.bbox, cobertura: config.coverageName },
 });
 for (const [nombre, body] of [
   ['entrega_confirmacion', 'Hola {{1}}, hoy le llevamos {{2}} de {{3}}. ¿Nos confirma que va a poder recibirlo? Responda SÍ o NO.'],
@@ -394,14 +397,14 @@ for (const [nombre, body] of [
 await entregas.guardarAjustes({ plantillas: { confirmacion: 'entrega_confirmacion', motorizado: 'entrega_motorizado', aviso: 'entrega_aviso' } });
 // La membresia (la lleva el superadministrador desde Membresia) y la voz del
 // asistente: la demo los monta para que esas pantallas se vean enteras.
-const plan = await crearServicioPlan({ settingsRepo, url: '', token: '' });
+const plan = await crearServicioPlan({ settingsRepo, url: '', token: '', baseUrl: BASE });
 plan.arrancar();
 const mediaDir = mkdtempSync(join(tmpdir(), 'wa-demo-media-'));
 const voz = await crearServicioVoz({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, sender, mediaDir });
 const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista, bus, entrenamiento, entregas, plan, voz });
 entrenamiento.conectarIA(iaParaEntrenar(ia));
 // El resumen de la mañana y de la tarde al supervisor: en la demo se prueba con "Mandar ahora".
-const resumenes = await crearServicioResumenes({ settingsRepo, sender, ajustes: () => ajustes.resumenes(), supervisor: () => politica().avisarA, nombreNegocio: () => ajustes.nombreNegocio(), entregas, ia: () => (ia.estado().tieneToken ? { completar: (m, o) => ia.completar(m, o) } : null), whatsappConectado: () => true, timezone: config.timezone, publicBaseUrl: config.PUBLIC_BASE_URL });
+const resumenes = await crearServicioResumenes({ settingsRepo, sender, ajustes: () => ajustes.resumenes(), supervisor: () => politica().avisarA, nombreNegocio: () => ajustes.nombreNegocio(), entregas, ia: () => (ia.estado().tieneToken ? { completar: (m, o) => ia.completar(m, o) } : null), whatsappConectado: () => true, zonaHoraria: () => ajustes.zonaHoraria(), timezone: config.timezone, publicBaseUrl: config.PUBLIC_BASE_URL });
 startResumenes(resumenes, { cadaMs: 30_000 });
 // "Que todo funcione" en la demo: el WhatsApp se da por conectado (se puede
 // simular una caida desde la pantalla), el correo de Brevo no sale de verdad
@@ -411,7 +414,7 @@ const fiabilidad = await crearFiabilidad({
   settingsRepo,
   settingsKeyBase64: TEST_SETTINGS_KEY,
   salud,
-  timezone: config.timezone,
+  timezone: () => ajustes.zonaHoraria(),
   demo: true,
   fetchImpl: (async () => new Response(JSON.stringify({ messageId: 'demo' }), { status: 201, headers: { 'content-type': 'application/json' } })) as typeof fetch,
   vigilante: {
@@ -433,8 +436,8 @@ const fiabilidad = await crearFiabilidad({
 });
 const pararFiabilidad = fiabilidad.arrancar();
 process.on('exit', () => pararFiabilidad());
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista, entrenamiento, entregas, conexionGsg, simuladorGsg, plan, voz, resumenes, fiabilidad, mediaDir });
-startMotorLista({ repos, lista, sender, opciones: opcionesDesdeConfig(config), nombreNegocio: () => ajustes.nombreNegocio(), usarPlantilla: () => false, salud, politica });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista, entrenamiento, entregas, conexionGsg, simuladorGsg, plan, voz, resumenes, fiabilidad, mediaDir, settingsRepo });
+startMotorLista({ repos, lista, sender, opciones: opcionesDesdeConfig(config), nombreNegocio: () => ajustes.nombreNegocio(), usarPlantilla: () => false, salud, politica, horarioExtra: () => ({ desde: entregas.ajustes().horarioEntregas.desde, hasta: entregas.ajustes().horarioEntregas.extendidoHasta }) });
 startMotorEntregas({ repos, entregas, opciones: opcionesDesdeConfig(config), salud, politica, log: (m, d) => console.warn(`[entregas] ${m}`, d ?? '') }, 3_000);
 const desconectarWebhooks = encolarEventos(bus, repos.webhooks);
 const pararWebhooks = startDespachadorWebhooks({ repo: repos.webhooks }, 3_000);

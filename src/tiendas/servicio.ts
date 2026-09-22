@@ -50,6 +50,8 @@ export interface SaludTienda {
   hace: string | null;
   /** El parte tiene mas de 40 minutos: la tienda dejo de preguntar (o esta apagada). */
   parteViejo: boolean;
+  /** La tienda concedio acceso de soporte al dueño: hasta cuando y el enlace para entrar. */
+  soporte: { hasta: string; enlace: string } | null;
 }
 
 export interface TiendaVista extends Omit<Tienda, 'tokenHash'> {
@@ -147,6 +149,8 @@ export interface ServicioTiendas {
   avisar(id: string, texto: string): Promise<{ ok: true; telefono: string } | { ok: false; error: string }>;
   /** El WhatsApp del contacto, si lo hay. */
   telefonoDe(tienda: Pick<Tienda, 'contacto'>): string | null;
+  /** El reloj con el que trabaja (el real, o el de las pruebas). */
+  ahora(): Date;
 }
 
 export interface DepsTiendas {
@@ -226,7 +230,7 @@ export function haceCuanto(desde: Date, ahora: Date): string {
 export function saludDe(t: Pick<Tienda, 'estado' | 'estadoAt'>, ahora: Date): SaludTienda {
   if (!t.estado || !t.estadoAt) {
     const sin = { nivel: 'sin' as const, texto: 'Sin parte todavía' };
-    return { whatsapp: sin, mensajes: sin, ia: sin, entregasHoy: null, version: null, parteAt: null, hace: null, parteViejo: false };
+    return { whatsapp: sin, mensajes: sin, ia: sin, entregasHoy: null, version: null, parteAt: null, hace: null, parteViejo: false, soporte: null };
   }
   const e = t.estado;
   const hace = haceCuanto(t.estadoAt, ahora);
@@ -239,7 +243,8 @@ export function saludDe(t: Pick<Tienda, 'estado' | 'estadoAt'>, ahora: Date): Sa
         : { nivel: 'warn' as const, texto: 'WhatsApp sin vincular' };
   const mensajes = { nivel: (e.mensajesHoy > 0 ? 'ok' : 'sin') as NivelSalud, texto: e.mensajesHoy === 1 ? '1 mensaje hoy' : `${e.mensajesHoy} mensajes hoy` };
   const ia = e.fallosIA > 0 ? { nivel: 'warn' as const, texto: e.fallosIA === 1 ? '1 fallo de IA hoy' : `${e.fallosIA} fallos de IA hoy` } : { nivel: 'ok' as const, texto: 'IA sin fallos hoy' };
-  return { whatsapp, mensajes, ia, entregasHoy: Number.isFinite(e.entregasHoy) ? e.entregasHoy : null, version: e.version || null, parteAt: t.estadoAt.toISOString(), hace, parteViejo: viejo };
+  const soporte = e.soporte && e.soporte.hasta && e.soporte.enlace && new Date(e.soporte.hasta).getTime() > ahora.getTime() ? { hasta: e.soporte.hasta, enlace: e.soporte.enlace } : null;
+  return { whatsapp, mensajes, ia, entregasHoy: Number.isFinite(e.entregasHoy) ? e.entregasHoy : null, version: e.version || null, parteAt: t.estadoAt.toISOString(), hace, parteViejo: viejo, soporte };
 }
 
 /** Un numero de WhatsApp dentro de "Rosa · 987 654 321", si lo hay. */
@@ -536,6 +541,7 @@ export function crearServicioTiendas(deps: DepsTiendas): ServicioTiendas {
       if (!r.ok) return { ok: false, error: `No salió: ${r.blocked ? r.reason : r.error}. Revisa la Conexión de WhatsApp.` };
       return { ok: true, telefono };
     },
+    ahora: () => ahora(),
     telefonoDe: (t) => telefonoEnTexto(t.contacto),
   };
 }

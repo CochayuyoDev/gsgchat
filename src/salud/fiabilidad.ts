@@ -203,7 +203,8 @@ export interface DepsFiabilidad {
   settingsRepo: SettingsRepo;
   settingsKeyBase64: string;
   salud: Monitor;
-  timezone: string;
+  /** Zona horaria, o una funcion que la da (la elegida en Ajustes). */
+  timezone: string | (() => string);
   /** Si el sistema corre en modo demostracion (permite simular una caida desde la pantalla). */
   demo?: boolean;
   ahora?: () => Date;

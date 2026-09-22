@@ -79,6 +79,7 @@ const CSS = `
   .plan .q { font-size: var(--fs-small); color: var(--texto-suave); }
   .estado { border-radius: var(--radio-sm); padding: 10px 12px; font-size: 14px; margin-top: var(--esp-3); border: 1px solid transparent; }
   .estado.ok { background: var(--verde-suave); color: var(--verde); border-color: var(--verde); }
+  .estado:not(.ok):not(.warn):not(.bad) { background: var(--superficie-2); color: var(--texto-suave); border-color: var(--borde); }
   .estado.warn { background: var(--ambar-suave); color: var(--ambar); border-color: var(--ambar); }
   .estado.bad { background: var(--rojo-suave); color: var(--rojo); border-color: var(--rojo); }
   .qr { max-width: 240px; border-radius: var(--radio-sm); border: 1px solid var(--borde); display: block; margin: var(--esp-2) 0; background: #fff; }
@@ -123,6 +124,18 @@ ${opts.demo ? '<div class="demo">Demostración: nada sale a WhatsApp de verdad.<
     <label for="cp-imagen">Captura</label><input id="cp-imagen" type="file" accept="image/png,image/jpeg,image/webp">
     <img id="cp-vista" class="vista hidden" alt="tu captura">
     <div style="margin-top:12px"><button class="primary" id="cp-mandar" type="button">Mandar la captura</button></div>
+  </div>
+</div>
+
+<div class="caja hidden" id="caja-soporte">
+  <h2>Acceso de soporte</h2>
+  <div class="cuerpo">
+    <p class="como-ayuda">Si necesitas que quien controla las tiendas (el dueño del sistema) entre a este panel a ayudarte, dale acceso por un día. Entra como administrador, no ve tus contraseñas, y el acceso se quita solo al caducar (o cuando tú lo quites).</p>
+    <div id="soporte-estado" class="estado hidden"></div>
+    <div class="fila" style="margin-top:8px">
+      <button class="primary" id="soporte-dar" type="button">Dar acceso por 24 horas</button>
+      <button class="ghost hidden" id="soporte-quitar" type="button">Quitar el acceso</button>
+    </div>
   </div>
 </div>
 
@@ -197,6 +210,33 @@ function pintarUltimoPago(d) {
   else { caja.className = 'estado bad'; caja.textContent = 'Tu captura del ' + fechaHora(u.at) + ' fue rechazada' + (u.motivo ? ': ' + u.motivo : '') + '. Puedes mandar otra.'; }
 }
 
+async function cargarSoporte(d) {
+  var caja = document.getElementById('caja-soporte');
+  if (!d || d.origen !== 'maestro') { caja.classList.add('hidden'); return; }
+  caja.classList.remove('hidden');
+  try {
+    var r = await api('/admin/membresia/soporte');
+    var est = document.getElementById('soporte-estado');
+    var dar = document.getElementById('soporte-dar');
+    var quitar = document.getElementById('soporte-quitar');
+    if (r.soporte) {
+      est.className = 'estado ok';
+      est.textContent = 'Acceso hasta las ' + fechaHora(r.soporte.hasta) + ' · el dueño del sistema ya puede entrar a este panel desde su pantalla Tiendas.';
+      est.classList.remove('hidden'); dar.classList.add('hidden'); quitar.classList.remove('hidden');
+    } else {
+      est.className = 'estado';
+      est.textContent = 'Nadie tiene acceso ahora mismo.';
+      est.classList.remove('hidden'); dar.classList.remove('hidden'); quitar.classList.add('hidden');
+    }
+  } catch (e) { /* sin membresia: la caja ya esta escondida */ }
+}
+document.getElementById('soporte-dar').onclick = async function () {
+  try { var r = await api('/admin/membresia/soporte', { method: 'POST', body: { horas: 24 } }); toast(r.mensaje); cargarSoporte({ origen: 'maestro' }); } catch (e) { toast(e.message); }
+};
+document.getElementById('soporte-quitar').onclick = async function () {
+  try { var r = await api('/admin/membresia/soporte', { method: 'DELETE' }); toast(r.mensaje); cargarSoporte({ origen: 'maestro' }); } catch (e) { toast(e.message); }
+};
+
 async function cargar() {
   var d;
   try { d = await api('/admin/membresia/pagar'); }
@@ -207,10 +247,11 @@ async function cargar() {
   pintarPlan(d);
   pintarCobro(d);
   pintarUltimoPago(d);
+  cargarSoporte(d);
   var puede = d.puedeMandarCaptura;
   document.getElementById('caja-captura').classList.toggle('hidden', !puede);
   var sm = document.getElementById('sin-maestro');
-  if (!puede && d.motivo) {
+  if (!puede && d.motivo && d.plan) {
     sm.innerHTML = esc(d.motivo) + (d.origen === 'local' ? ' <a href="/panel#membresia">Ir a Membresía</a>' : '');
     sm.classList.remove('hidden');
   } else sm.classList.add('hidden');

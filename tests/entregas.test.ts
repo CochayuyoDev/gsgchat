@@ -16,13 +16,26 @@ import { crearClaveDePrueba } from './fakes.js';
 
 const SUPERVISOR = '51912426667';
 const pinDe = (i: number) => ({ lat: PIN_LIMA.lat + i * 0.001, lng: PIN_LIMA.lng - i * 0.001 });
+/**
+ * El reloj falso arranca a las 09:00 de Lima (14:00 UTC) del ultimo dia que
+ * ya empezo: las pruebas avanzan varias horas y, si arrancaran a la hora
+ * real de la tarde, cruzarian la medianoche, el cierre del dia apartaria lo
+ * vivo y la sincronizacion traeria los pedidos "de manana".
+ */
+function hoyALas9(): Date {
+  const d = new Date();
+  d.setUTCHours(14, 0, 0, 0);
+  if (d.getTime() > Date.now()) d.setUTCDate(d.getUTCDate() - 1);
+  return d;
+}
+
 const horaDe = (d: Date) => new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 
 describe('un día de entregas con GSG simulado', () => {
   let e: EscenarioEntregas;
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ supervisor: SUPERVISOR });
+    e = await crearEscenarioEntregas({ supervisor: SUPERVISOR, arranque: hoyALas9() });
   });
   afterAll(() => e.cerrar());
 

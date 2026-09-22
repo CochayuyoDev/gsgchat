@@ -19,7 +19,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { UsuariosRepo, Rol } from './usuarios.js';
-import { claveAceptable, hashClave, usuarioAceptable, verificarClave } from './usuarios.js';
+import { capacidadDe, claveAceptable, hashClave, usuarioAceptable, verificarClave, type Capacidad } from './usuarios.js';
 import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookies, leerSesion } from './sesion.js';
 import type { ClavesApiRepo } from './claves-api.js';
 import { ETIQUETAS, type ActividadRepo } from './actividad.js';
@@ -27,7 +27,6 @@ import { generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, 
 import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
-import { capacidadDe, type Capacidad } from './usuarios.js';
 import { landingPage } from '../web/landing-page.js';
 
 export interface UsuarioSesion {

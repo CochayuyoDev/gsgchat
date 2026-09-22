@@ -33,7 +33,7 @@ import { openPglite } from '../src/db/pglite.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { providerOf, createSettingsService } from '../src/settings/service.js';
 import { createDynamicWhatsAppClient } from '../src/whatsapp/dynamic.js';
-import { defaultAuthDir } from '../src/whatsapp/local/session.js';
+import { defaultAuthDir, getLocalState } from '../src/whatsapp/local/session.js';
 import { crearConexionStoky } from '../src/stoky/conexion.js';
 import { crearServicioPlan, type EstadoInstancia } from '../src/plan/servicio.js';
 import { versionDelPaquete } from '../src/util/version.js';
@@ -61,7 +61,6 @@ import { crearServicioResumenes } from '../src/resumenes/servicio.js';
 import { cargarLote } from '../src/rutas/cargar.js';
 import { crearFiabilidad } from '../src/salud/fiabilidad.js';
 import { carpetaDeCopiasPorDefecto } from '../src/respaldo/servicio.js';
-import { getLocalState } from '../src/whatsapp/local/session.js';
 import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO } from '../src/auth/routes.js';
 import { randomBytes } from 'node:crypto';
 
@@ -184,6 +183,7 @@ const plan = await crearServicioPlan({
   settingsRepo,
   url: config.PLAN_URL,
   token: config.PLAN_TOKEN,
+  baseUrl: config.PUBLIC_BASE_URL,
   log: (m, d) => console.warn(m, d ?? ''),
   estado: () => (parteDeSalud.dar ? parteDeSalud.dar() : { whatsapp: settings.isConfigured() ? 'conectado' : 'sin_conectar', mensajesHoy: 0, fallosIA: 0, entregasHoy: 0, version: versionDelPaquete() }),
 });
@@ -222,6 +222,7 @@ const simuladorGsg = crearGsgSimulado({ token: TOKEN_SIMULADOR });
 
 // Las entregas del dia: confirmacion, motorizados y hora de llegada. Ver src/entregas.
 const entregas = await crearServicioEntregas({
+  zonaHoraria: () => ajustes.zonaHoraria(),
   repos,
   repo: repos.entregas,
   sender,
@@ -229,6 +230,7 @@ const entregas = await crearServicioEntregas({
   gsg: conexionGsg.puerto(),
   conexionGsg,
   cargarLote: (body) => cargarLote({ repos, plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, timezone: config.timezone, lista }, body),
+  ampliarHorario: (fn) => ajustes.ampliarHorario(fn),
   nombreNegocio: () => ajustes.nombreNegocio(),
   supervisor: () => politica().avisarA,
   ia: () => (ia.estado().tieneToken ? { completar: (mensajes, opts) => ia.completar(mensajes, opts) } : null),
@@ -237,6 +239,7 @@ const entregas = await crearServicioEntregas({
   plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!,
   publicBaseUrl: config.PUBLIC_BASE_URL,
   bus,
+  geo: { bbox: config.bbox, cobertura: config.coverageName },
   log: (m, d) => console.warn(`[entregas] ${m}`, d ?? ''),
 });
 
@@ -277,7 +280,7 @@ const resumenes = await crearServicioResumenes({
   entregas,
   ia: () => (ia.estado().tieneToken ? { completar: (m, o) => ia.completar(m, o) } : null),
   whatsappConectado: () => settings.isConfigured() && (wa.conectado?.() ?? true),
-  timezone: config.timezone,
+  zonaHoraria: () => ajustes.zonaHoraria(), timezone: config.timezone,
   publicBaseUrl: config.PUBLIC_BASE_URL,
   log: (m, d) => console.warn(`[resumenes] ${m}`, d ?? ''),
 });
@@ -307,7 +310,7 @@ const fiabilidad = await crearFiabilidad({
   settingsRepo,
   settingsKeyBase64: secrets.settingsKey,
   salud,
-  timezone: config.timezone,
+  timezone: () => ajustes.zonaHoraria(),
   log: (m, d) => console.warn(`[fiabilidad] ${m}`, d ?? ''),
   vigilante: {
     conectado: () => wa.conectado?.(),
@@ -346,6 +349,7 @@ const app = await buildServer({
   config,
   repos,
   settings,
+  settingsRepo,
   wa,
   sender,
   queue,

@@ -581,7 +581,38 @@ hoy de principio a fin. Son tres cosas distintas, cada una por separado:
    `confirmacionComo: 'boton'`). En modo «Solo lo de GSG» la preventa del
    courier está apagada (`preventaActiva()` en `inbound.ts`). Un aviso de
    llegada frenado por el ritmo se reintenta (`reintentarAviso`); un motorizado
-   forzado con el envío frenado deja el pedido **reservado** para él. La
+   forzado con el envío frenado deja el pedido **reservado** para él.
+   Al registrar la ubicación nunca salen las coordenadas: el texto
+   `ubicacionRegistrada` (editable) lleva el enlace del mapa, que un
+   motorizado se contactará con el rango de llegada y llamará minutos antes,
+   el horario de entregas (`horarioEntregas`: `{desde}`, `{hasta}`,
+   `{hastaExtendido}`) y el número de soporte (`soporte`: `{soporte}`, uno
+   para WhatsApp y llamadas o dos distintos); el mismo texto contesta a un
+   cliente que manda su pin sin pedido en la lista de hoy (modo GSG), y el
+   de `confirmada` repite el horario y el soporte.
+9. **Refinado (vuelta 3).** Un mismo número con dos pedidos (migración 033,
+   `vivasPorTelefono`: el pin vale para todos, se confirma uno por uno con
+   `graciasYConfirmarVarios`/`confirmarOtroPedido`, un motorizado, un pin y
+   un aviso para los del mismo cliente, chip «+1 del mismo cliente»);
+   **cliente recurrente** (`clienteRecurrente {activo, diasMaximo, esperaMin}`,
+   textos `proponerUbicacion`/`ubicacionOtra`, botones «Sí, la misma / Es
+   otra», `revisarPropuestas` en el motor); **escudo del motorizado**
+   (`leerMotorizadoFueraDeFlujo`, texto `motorizadoFueraDeFlujo`); **tiempo
+   dudoso** (`tiempoDudoso`, repregunta `motorizadoTiempoDudoso` una vez) y
+   **puntualidad** por motorizado (`repo.puntualidadDeMotorizados`, 30 días);
+   **frases propias** (`entregas.frases` en settings, escritas desde el
+   tablero «Lo que la IA no entendió» del Asistente IA y leídas por los tres
+   lectores con prioridad y regla de la frase más larga); **«Probar el día
+   entero con datos ficticios»** (`src/entregas/guion-dia.ts`, `POST/GET/DELETE
+   /admin/entregas/simulador/probar-dia`, solo con simulador o demo). El
+   **horario de entregas amplía el horario del número y del reparto**
+   (`ajustes.ampliarHorario()` en `src/ajustes/generales.ts`, registrado por el
+   servicio de entregas; antes, a las 20:00 el marcapasos frenaba los pines y
+   el motor reintentaba cada 3 s) y el motor guarda un «no lo intentes hasta»
+   por pedido cuando el sender devuelve `retryAfterMs`
+   (`tests/entregas-horario.test.ts`, `tests/ajustes-generales.test.ts`). Sin
+   `PUBLIC_BASE_URL` u otra variable obligatoria, `node dist/src/main.js`
+   termina con código 1 y dice cuál falta en palabras. La
    pregunta de segunda visita frenada por el ritmo se reintenta hasta vencer
    el plazo (`reintentarPreguntaSegundaVisita`); los botones solo caen a texto
    ante un rechazo definitivo (no ante un 429). `reasignar` valida que el
@@ -652,7 +683,24 @@ minutos y reporta con los cinco `POST`; (B) GSG **empuja** con `POST
 descartadas[{referencia, motivo}]}`), consulta `GET /api/v1/entregas/:referencia`,
 cancela `DELETE /api/v1/entregas/:referencia?motivo=` (409 si ya terminó) y
 recibe los webhooks `entrega.confirmada|avisada|entregada|incidencia` firmados
-(`src/api/v1/entregas-gsg.ts`, OpenAPI incluido). La clave sale de Conexión →
+(`src/api/v1/entregas-gsg.ts`, OpenAPI incluido). En la lista de pendientes un
+pedido puede venir con `cancelado: true` y `motivoCancelacion` (GSG lo anuló)
+o con teléfono/dirección/distrito distintos (GSG lo cambió): el simulador lo
+admite con `POST /reparto/cancelar` y `POST /reparto/cambiar`, y en Conexión
+→ «Para los programadores de GSG» hay «Cancelar uno (prueba)» y «Cambiar la
+dirección de uno (prueba)»; una lista vacía o un fallo nunca cancela nada.
+Para sus programadores, en
+Conexión → «Para los programadores de GSG»: **token del simulador** (`gsgsim_…`,
+hash SHA-256, caduca a 30 días, anulable; `POST/DELETE
+/admin/gsg/tokens-simulador`) para probar desde fuera contra `/simulador/gsg`,
+y la **bitácora «Lo que GSG nos mandó»** (últimas 50 llamadas al simulador y a
+`/api/v1/entregas*`). Y para el día a día (`src/rutas/gsg-extras.ts`,
+`src/rutas/gsg-extras-routes.ts`): **descartes a la vista** (los pedidos que
+GSG mandó y no se pudieron leer, con motivo; `gsg.descartes`), **«Verificar
+el contrato»** (`POST /admin/gsg/verificar-contrato`, campo por campo) y
+**«Cuadrar el día con GSG»** (`GET /admin/gsg/cuadre?dia=`: terminados de GSG
+frente a lo entregado aquí; la campana avisa si no cuadra y el resumen de la
+tarde lo lleva). La clave sale de Conexión →
 GSG → «Crear la clave para GSG» (`entregas:gestionar`, `entregas:leer`,
 `webhooks:gestionar`). Un pedido que desaparece de las listas de GSG no se
 cancela solo.
@@ -678,7 +726,12 @@ Cuatro cajas con semáforo, cada una con sus ajustes dentro (clave de settings
    (`src/salud/correo.ts`, clave pegada en pantalla y cifrada) y al volver avisa
    por WhatsApp al supervisor y por correo con cuánto estuvo caído; con 401
    dice «hay que escanear el QR otra vez», con 403 «WhatsApp no quiere este
-   número»; con la API de Meta no hay sesión que vigilar.
+   número»; con la API de Meta no hay sesión que vigilar. Mientras está
+   caído nada se pierde: el sender devuelve `sin_conexion` con reintento y los
+   motores esperan sin acumular intentos; al volver sale todo en orden
+   (urgentes y con hora primero). La pantalla lo explica en «¿Qué pasa
+   mientras el WhatsApp está caído?» y en la demo hay «Simular caída de 5
+   minutos» (`simular(true, 5)` vuelve solo a lo real).
 2. **Prueba de cada mañana** (`src/salud/humo.ts`, 07:00, solo dentro de las 3 h
    siguientes): mensaje al supervisor y espera del `delivered`, GSG, IA,
    entregas y disco; historial de 14; avisa una vez si algo falla («Probar
@@ -696,6 +749,20 @@ Cuatro cajas con semáforo, cada una con sus ajustes dentro (clave de settings
 
 Pruebas: `tests/fiabilidad-vigilante.test.ts`, `tests/fiabilidad-humo.test.ts`,
 `tests/respaldo.test.ts`, `tests/fiabilidad-rutas.test.ts`.
+
+**Asistente IA, refinado**: «Lo que la IA no entendió» (`src/ia/no-entendido.ts`,
+`GET /admin/ia/no-entendido`, `POST /admin/ia/no-entendido/corregir`: cada
+caso con «Era un sí / un no / esos minutos / entregado…», guardado en
+`entregas.frases` y, si se marca, como lección), «El lector de respuestas»
+(`src/ia/examen-lector.ts`: banco de 44 frases, examen diario a las 07:30,
+umbral 90 %, aviso al supervisor; `GET/POST /admin/ia/examen-lector`) y **tú /
+usted** (`src/ia/tono.ts`, ajuste `tono: tu|usted|auto` en Ajustes → «Cómo
+tratamos al cliente»). Chats: **Ficha** del contacto (`GET
+/admin/chat/:contactId/ficha`: consentimiento, pedido de hoy, última ubicación
+con coordenadas y «Copiar», guardadas; atajos Ctrl+Shift+I y Ctrl+Shift+B).
+Guardados: «Cambiar los días» con opciones e importar con vista previa (`POST
+/admin/archives/importar/vista-previa`). Las respuestas rápidas del chat viven
+en Ajustes.
 
 ---
 
@@ -749,6 +816,35 @@ pagan»** (Yape/Plin, instrucciones, QR; `tiendas_config`): la tienda ve en
 dueño la revisa en «Pagos por revisar» y con un clic «Apuntar el pago» (corre
 el vencimiento) o «Rechazar» con motivo que la tienda lee en `/pagar`. Pruebas
 en `tests/tiendas.test.ts`, `tests/plan.test.ts`, `tests/superadmin-sql.test.ts`.
+
+Vuelta 4: **acceso de soporte** (la tienda, desde `/pagar` → «Acceso de
+soporte», da 24 h al dueño con `POST /admin/membresia/soporte`; el enlace
+`/soporte/<código>` viaja al maestro dentro del parte de salud, Tiendas lo
+enseña como «Entrar a su panel (acceso de soporte hasta las …)», y al abrirlo
+se entra como la cuenta `soporte` —administrador, nunca superadministrador—;
+caduca solo o se quita con `DELETE`, y entonces la cuenta se apaga; el código
+se guarda solo como hash: `plan.soporte`, `src/plan/servicio.ts`,
+`src/tiendas/routes.ts`); **recibo de pago** por WhatsApp a la tienda al
+apuntar un pago o aceptar una captura (texto editable con `{tienda} {plan}
+{meses} {monto} {moneda} {fecha} {contacto}`, se apaga desde Tiendas →
+Avisos; `avisos.recibo()`); **latido**: si una tienda lleva más de N horas
+(1) sin preguntar por su plan en horario de trabajo (9-20 Lima), un aviso al
+dueño una vez al día (`sinLatidoHoras`, `sinLatido`); y **chips de
+variables** bajo cada texto (tocar una la inserta). El maestro *en ficheros*
+(`saas/maestro/server.ts`) sigue existiendo solo como instalador: no recibe
+partes de salud, capturas ni accesos de soporte; el maestro de verdad es el
+panel Tiendas de una instancia.
+
+## Perfiles de instalación (`/setup`, arriba del todo)
+
+«¿Para qué vas a usar GSGchat?»: **Reparto para GSG** (el de siempre: menú
+«Solo lo de GSG», entregas completas), **Tienda con delivery** (menú
+completo, entregas, trata de tú) o **Solo atención por chat** (menú
+completo, sin automatismos de entregas, trata de usted). Un clic deja el
+modo, el tono, la preventa y los interruptores de las entregas con valores
+sensatos; no toca textos, clientes ni motorizados, y se puede cambiar cuando
+se quiera (`src/perfiles/servicio.ts`, `GET/POST /admin/perfil`, guardado en
+`perfil.instalacion`; pruebas en `tests/perfiles.test.ts`).
 
 ---
 
@@ -1886,8 +1982,59 @@ webhook que pegan WooCommerce y Shopify, con su firma).
 
 ## Puesta en marcha
 
+### El camino corto para GSG (un VPS, sin Postgres)
+
+Lo mínimo para que GSG lo use de verdad, en ese orden:
+
+1. En el servidor: Node 22, `git clone`, `npm ci`, `npm run build`.
+2. Un `.env` con lo justo (el resto tiene valor por defecto):
+
+   ```bash
+   PORT=3000
+   PUBLIC_BASE_URL=https://chat.gsg.pe      # la dirección pública, con https
+   DATABASE_URL=pglite://./.wa-data          # la base embebida; sin Postgres
+   ARCHIVE_DIR=respaldos                     # respaldos de conversaciones
+   GEO_BBOX=lima
+   ```
+
+   Con `DATABASE_URL=pglite://<carpeta>` el servidor abre la base embebida y
+   aplica las migraciones solo (igual que `npm run quick`); `REDIS_URL` puede
+   no existir: la cola va en memoria y lo dice al arrancar.
+3. `node dist/src/main.js` (con `pm2` o un `systemd` para que vuelva solo).
+4. HTTPS con Caddy delante (Meta y los enlaces públicos lo exigen):
+
+   ```
+   chat.gsg.pe {
+     reverse_proxy 127.0.0.1:3000
+   }
+   ```
+
+5. Abre `https://chat.gsg.pe/login` y crea la primera cuenta (superadministrador).
+6. **Conexión** (`/setup`): escanea el QR con el teléfono del negocio; abajo, en
+   *El sistema de GSG*, elige el simulador para probar o pega la API real; y
+   en *Para los programadores de GSG*, descarga el contrato y crea la clave (y,
+   si van a probar desde fuera, un token del simulador).
+7. **Motorizados**: da de alta a los de hoy (o pega la lista).
+8. **Ajustes → Avisos**: tu WhatsApp como supervisor (sin él no hay avisos,
+   resúmenes ni prueba de la mañana). **Que todo funcione**: el correo de
+   Brevo para los avisos de caída y la carpeta de las copias.
+9. Prueba con «Modo prueba con mi número» y «Pegar la lista del día» en Hoy
+   antes de escribirle a clientes de verdad.
+
+Lo que debe sobrevivir a un reinicio o a una reinstalación, todo dentro de la
+carpeta del proyecto: `.secrets.json`/`data` (secretos), `.wa-auth` (la
+vinculación del QR), `.wa-data` (la base, con PGlite), `.wa-media` (adjuntos),
+`respaldos` (conversaciones guardadas) y la carpeta de copias elegida en *Que
+todo funcione* (mejor si la sincroniza Drive u OneDrive, o está en otro disco).
+
+### Con Docker (Postgres y Redis incluidos)
+
 1. `docker compose up -d`. Arranca aunque no haya credenciales y aplica las
-   migraciones solo.
+   migraciones solo. El compose monta volúmenes para `data`, `.wa-auth`,
+   `.wa-media`, `respaldos` y `copias` (la carpeta de copias diarias: pon
+   `/app/copias` en *Que todo funcione*, o `COPIAS_DIR=/ruta/del/host`); las
+   variables `GSG_URL`/`GSG_TOKEN` son opcionales (se conectan desde la
+   pantalla). Para HTTPS, un Caddy delante como arriba.
 2. Abre `/login` y crea la primera cuenta (la administradora). Las demas
    cuentas se crean desde la seccion Usuarios del panel.
 3. Conecta la cuenta en `/setup`: el boton de Facebook, o pegando los tres datos.

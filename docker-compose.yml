@@ -16,10 +16,23 @@ services:
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
       GEO_BBOX: ${GEO_BBOX:-lima}
+      # El sistema de GSG: se puede dejar vacio y conectarlo desde Conexion.
+      GSG_URL: ${GSG_URL:-}
+      GSG_TOKEN: ${GSG_TOKEN:-}
+      ARCHIVE_DIR: /app/respaldos
     volumes:
       # Token de administracion y clave de cifrado: se generan en el primer
       # arranque y deben sobrevivir a un recreate.
       - appdata:/app/data
+      # La vinculacion del WhatsApp por QR: sin esto, cada recreate pide escanear.
+      - waauth:/app/.wa-auth
+      # Fotos, audios y documentos de los chats.
+      - wamedia:/app/.wa-media
+      # Los respaldos de conversaciones (Conversaciones guardadas).
+      - respaldos:/app/respaldos
+      # La copia diaria de la base y de los respaldos (Que todo funcione):
+      # apunta aqui la carpeta desde la pantalla, o monta una carpeta del host.
+      - ${COPIAS_DIR:-copias}:/app/copias
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,5 +71,9 @@ services:
 
 volumes:
   appdata:
+  waauth:
+  wamedia:
+  respaldos:
+  copias:
   pgdata:
   redisdata:

@@ -20,6 +20,7 @@
  * mañana y la pantalla explica por que no salio.
  */
 
+import { conexionGsgVigente } from '../rutas/conexion-gsg.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
 import type { MensajeIA } from '../ia/proveedores.js';
@@ -74,6 +75,8 @@ export interface CifrasResumen {
   vivas: string[];
   mejorMotorizado: { nombre: string; entregas: number } | null;
   whatsappConectado: boolean;
+  /** El cuadre de fin de dia con GSG, ya en palabras (solo por la tarde y con conexion). */
+  cuadreGsg?: string | null;
 }
 
 export interface EstadoResumenes {
@@ -110,7 +113,11 @@ export interface DepsResumenes {
   /** La IA para redactar; null si no esta conectada. */
   ia?: () => { completar(mensajes: MensajeIA[], opts?: { maxTokens?: number }): Promise<string> } | null;
   whatsappConectado?: () => boolean;
+  /** El cuadre con GSG (src/rutas/gsg-extras.ts); sin el, se usa la conexion vigente del proceso. */
+  gsgExtras?: () => { cuadrar(dia?: string): Promise<{ resumen: string }> } | null;
   timezone?: string;
+  /** La zona horaria vigente (Ajustes); si se da, manda sobre `timezone`. */
+  zonaHoraria?: () => string;
   publicBaseUrl?: string;
   ahora?: () => Date;
   log?: (m: string, d?: Record<string, unknown>) => void;
@@ -208,6 +215,7 @@ export function textoFijo(franja: Franja, c: CifrasResumen, ctx: { negocio: stri
       if (c.reportesFallidos) lineas.push(`• Reportes que GSG no aceptó: ${c.reportesFallidos} (en Hoy se reintentan).`);
       if (c.mejorMotorizado) lineas.push(`• Quien más entregó: ${c.mejorMotorizado.nombre} (${c.mejorMotorizado.entregas}).`);
     }
+    if (c.cuadreGsg) lineas.push(`• Cuadre con GSG: ${c.cuadreGsg}`);
     if (!c.whatsappConectado) lineas.push('⚠ WhatsApp no está conectado.');
   }
   lineas.push(`Lo ves en ${ctx.url.replace(/\/+$/, '')}/hoy`);
@@ -237,7 +245,7 @@ export function respetaLasCifras(redactado: string, fijo: string, url: string): 
 }
 
 export async function crearServicioResumenes(deps: DepsResumenes): Promise<ServicioResumenes> {
-  const timezone = deps.timezone ?? 'America/Lima';
+  const zona = () => deps.zonaHoraria?.() ?? deps.timezone ?? 'America/Lima';
   const ahora = deps.ahora ?? (() => new Date());
   const log = deps.log ?? (() => undefined);
   const url = deps.publicBaseUrl ?? '';
@@ -256,16 +264,23 @@ export async function crearServicioResumenes(deps: DepsResumenes): Promise<Servi
     await deps.settingsRepo.put(CLAVE_ESTADO_RESUMENES, JSON.stringify(ultimos), false).catch((e) => log('no se pudo guardar el estado de los resumenes', { detalle: e instanceof Error ? e.message : String(e) }));
   }
 
-  async function cifras(): Promise<CifrasResumen> {
-    const { dia } = diaYHora(ahora(), timezone);
+  async function cifras(franja?: Franja): Promise<CifrasResumen> {
+    const { dia } = diaYHora(ahora(), zona());
     const conectado = deps.whatsappConectado?.() ?? true;
     const r = deps.entregas ? await deps.entregas.resumen().catch(() => null) : null;
-    return cifrasDe(r, { whatsappConectado: conectado, dia });
+    const base = cifrasDe(r, { whatsappConectado: conectado, dia });
+    // Por la tarde, el cuadre con GSG (lo que aqui figura cerrado frente a
+    // lo que GSG tiene en terminados), en palabras y sin tocar las cifras.
+    if (franja === 'tarde' && base.gsgConectada) {
+      const extras = deps.gsgExtras?.() ?? conexionGsgVigente()?.extras ?? null;
+      if (extras) base.cuadreGsg = await extras.cuadrar(dia).then((q) => q.resumen).catch(() => null);
+    }
+    return base;
   }
 
   async function redactar(franja: Franja) {
-    const c = await cifras();
-    const fijo = textoFijo(franja, c, { negocio: deps.nombreNegocio(), timezone, url });
+    const c = await cifras(franja);
+    const fijo = textoFijo(franja, c, { negocio: deps.nombreNegocio(), timezone: zona(), url });
     const ia = deps.ia?.() ?? null;
     if (!ia) return { texto: fijo, conIA: false, cifras: c, textoFijo: fijo };
     try {
@@ -285,7 +300,7 @@ export async function crearServicioResumenes(deps: DepsResumenes): Promise<Servi
   }
 
   async function mandar(franja: Franja, opts: { quien?: string; forzar?: boolean } = {}) {
-    const { dia } = diaYHora(ahora(), timezone);
+    const { dia } = diaYHora(ahora(), zona());
     const destino = deps.supervisor().replace(/\D+/g, '');
     if (!destino) return { ok: false, motivo: 'No hay un número de supervisor: ponlo en Ajustes → Avisos.' };
     if (!opts.forzar && ultimos[franja]?.dia === dia && ultimos[franja]?.ok) return { ok: false, motivo: 'Hoy ya salió ese resumen.' };
@@ -308,7 +323,7 @@ export async function crearServicioResumenes(deps: DepsResumenes): Promise<Servi
 
   function estado(): EstadoResumenes {
     const a = deps.ajustes();
-    const { dia, minutos } = diaYHora(ahora(), timezone);
+    const { dia, minutos } = diaYHora(ahora(), zona());
     let proximo: EstadoResumenes['proximo'] = null;
     if (a.activo) {
       const candidatos: Array<{ franja: Franja; hora: string }> = [
@@ -325,7 +340,7 @@ export async function crearServicioResumenes(deps: DepsResumenes): Promise<Servi
     const a = deps.ajustes();
     if (!a.activo) return null;
     if (!deps.supervisor().replace(/\D+/g, '')) return null;
-    const { dia, minutos } = diaYHora(ahora(), timezone);
+    const { dia, minutos } = diaYHora(ahora(), zona());
     for (const franja of FRANJAS) {
       const hora = minutosDe(franja === 'manana' ? a.horaManana : a.horaTarde);
       if (minutos < hora || minutos >= hora + VENTANA_MIN) continue;

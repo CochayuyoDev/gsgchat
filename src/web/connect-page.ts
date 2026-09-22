@@ -88,7 +88,11 @@ const CSS = `
      en dos mitades, que es como lo pide la app del telefono. */
   .codigo { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 30px; letter-spacing: 6px; font-weight: 700; margin: 12px 0 4px; }
   .pair { margin-top: 18px; border-top: 1px solid var(--borde); padding-top: 14px; }
-  .copy { display: flex; gap: 8px; margin-top: 6px; }
+  .copy { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+  .copy input { flex: 1 1 200px; min-width: 0; }
+  #gsg-bitacora { overflow-x: auto; max-width: 100%; }
+  #gsg-bitacora table { min-width: 520px; }
+  #gsg-sim-valor, #gsg-clave-valor { overflow-wrap: anywhere; }
   .copy input { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
   .nota { background: var(--superficie-2); border-left: 3px solid var(--primario); border-radius: 0 var(--radio-sm) var(--radio-sm) 0; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; color: var(--texto-suave); }
   .nota b { color: var(--texto); }
@@ -97,6 +101,22 @@ const CSS = `
   .tel { display: flex; align-items: stretch; }
   .tel .prefijo { display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid var(--borde); border-right: 0; border-radius: var(--radio-sm) 0 0 var(--radio-sm); background: var(--superficie-2); color: var(--texto-suave); font-size: 14px; }
   .tel input { border-radius: 0 var(--radio-sm) var(--radio-sm) 0; }
+  .gsg-bloque { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .perfiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .perfiles label { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; background: var(--card); }
+  .perfiles label.elegido { border-color: var(--accent); box-shadow: 0 0 0 2px var(--primario-suave); }
+  .perfiles label b { display: block; margin-bottom: 4px; }
+  .perfiles label input { margin: 0 6px 6px 0; width: 18px; height: 18px; min-height: 0; vertical-align: middle; }
+  .perfiles ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+  .perfiles .actual { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--ok); }
+  /* Con un perfil ya en uso, el paso 0 no distrae: una linea con el nombre y «Cambiar». */
+  #perfil.plegado > p.muted, #perfil.plegado #perfil-lista, #perfil.plegado .actions { display: none; }
+  #perfil-resumen { display: none; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+  #perfil.plegado #perfil-resumen { display: flex; }
+  #perfil-resumen .ok { color: var(--ok); font-weight: 600; }
+  #perfil-resumen button { min-height: 36px; }
+  .gsg-bloque h3 { margin: 0 0 6px; font-size: 14px; }
+  .dev > summary .muted { font-weight: 400; font-size: 12.5px; margin-left: 4px; }
   .dev, .mas-formas { margin-top: 12px; }
   .dev .copy input { background: var(--superficie-2); }
   .boton-enlace { display: inline-flex; align-items: center; min-height: 36px; padding: 8px 14px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: var(--texto); font-weight: 600; font-size: 14px; text-decoration: none; }
@@ -194,10 +214,17 @@ export function connectPage(opts: ConnectOpts): string {
 
   const contenido = `
 <div class="wrap">
-<p class="lead">Cuatro pasos. El primero es el único que tienes que pensar.</p>
+<p class="lead">${opts.conGsg ? 'Dos cosas: el sistema de GSG (de ahí salen los pedidos) y tu WhatsApp (cuatro pasos; el primero es el único que tienes que pensar).' : 'Cuatro pasos. El primero es el único que tienes que pensar.'}</p>
 
 
 <div id="app" class="hidden">
+<section class="card" id="perfil">
+  <h2><span class="num">0</span> ¿Para qué vas a usar GSGchat?</h2>
+  <p class="muted">Elige el perfil que más se parece a tu negocio: deja de un clic el menú, qué contesta solo y los ajustes de las entregas con valores sensatos. Tus textos y tus datos no se tocan; se puede cambiar cuando quieras.</p>
+  <div id="perfil-resumen"><span class="ok" id="perfil-resumen-texto"></span><button class="ghost" type="button" id="perfil-cambiar">Cambiar</button></div>
+  <div id="perfil-lista" class="perfiles"></div>
+  <div class="actions" style="margin-top:10px"><button class="primary" id="perfil-aplicar" type="button">Aplicar este perfil</button><span id="perfil-state" class="pill hidden"></span></div>
+</section>
 ${opts.conGsg ? `
 <section class="card" id="gsg">
   <h2><span class="num">G</span> El sistema de GSG</h2>
@@ -210,11 +237,28 @@ ${opts.conGsg ? `
     <button class="ghost" id="gsg-quitar" type="button">Desconectar</button>
     <span id="gsg-state" class="pill hidden"></span>
   </div>
-  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-    <p class="muted" style="margin:0 0 8px"><b>GSG también puede avisarnos al momento</b>, sin esperar a que se le pregunte cada cinco minutos. Crea la clave y pásasela a sus programadores: con ella mandan cada pedido en cuanto entra y se enteran de lo que pasa (confirmó, hora avisada, entregado, incidencia).</p>
+  <div id="gsg-descartes" class="hidden" style="margin-top:12px;padding:10px 12px;border:1px solid var(--ambar);background:var(--ambar-suave);border-radius:10px">
+    <b id="gsg-descartes-titulo"></b>
+    <p class="muted" style="margin:4px 0 6px">GSG los mandó en su lista de hoy pero no se pudieron usar. Avísale a GSG para que los corrija; en cuanto los mande bien, entran solos en la siguiente consulta.</p>
+    <ul id="gsg-descartes-lista" style="margin:0;padding-left:20px;font-size:13.5px"></ul>
+  </div>
+  <div class="gsg-bloque">
+    <h3>Cada día</h3>
+    <div class="actions">
+      <button class="ghost" id="gsg-cuadrar" type="button">Cuadrar el día con GSG</button>
+      <button class="ghost" id="gsg-verificar" type="button">Verificar el contrato</button>
+      <span id="gsg-verificar-state" class="pill hidden"></span>
+    </div>
+    <p class="muted" style="margin:6px 0 0;font-size:13px">«Cuadrar» compara lo que GSG tiene como terminado con lo que aquí figura entregado o cancelado. «Verificar el contrato» le pide a GSG su lista del día y dice, campo por campo, qué falta o sobra; no crea ningún pedido.</p>
+    <div id="gsg-verificacion" class="hidden" style="margin-top:8px"></div>
+    <div id="gsg-cuadre" class="hidden" style="margin-top:8px"></div>
+  </div>
+  <div class="gsg-bloque">
+    <h3>Para que GSG conecte su sistema</h3>
+    <p class="muted" style="margin:0 0 8px">Con una clave, GSG nos manda cada pedido en cuanto entra (sin esperar a que se le pregunte cada cinco minutos) y se entera de lo que pasa: confirmó, hora avisada, entregado, incidencia. Crea la clave y pásasela a sus programadores junto con el contrato.</p>
     <div class="actions"><button class="ghost" id="gsg-clave" type="button">Crear la clave para GSG</button><span id="gsg-clave-state" class="pill hidden"></span></div>
     <details class="dev" id="gsg-dev">
-      <summary>Para los programadores de GSG</summary>
+      <summary>Para los programadores de GSG <span class="muted">dirección, contrato, simulador de pruebas y lo que nos mandaron</span></summary>
       <p class="muted" style="margin:8px 0 6px">Lo que necesitan: la dirección a la que mandan los pedidos, la clave (se crea arriba) y el contrato con el JSON de cada llamada.</p>
       <div class="copy"><input id="gsg-api-url" readonly value="/api/v1/entregas" aria-label="Dirección de la API para GSG"><button class="ghost" id="gsg-api-copiar" type="button">Copiar la dirección</button></div>
       <div class="actions" style="margin-top:8px">
@@ -223,6 +267,30 @@ ${opts.conGsg ? `
         <a class="ghost boton-enlace" href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI en el navegador</a>
       </div>
       <p class="muted" style="margin:8px 0 0">«Descargar el contrato» baja el documento explicado paso a paso, con ejemplos de cada llamada y cómo probar contra el simulador antes de tocar nada real: es lo que se le manda a los programadores de GSG.</p>
+      <div id="gsg-sim" class="hidden" style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+        <p class="muted" style="margin:0 0 6px"><b>Que prueben contra el simulador desde fuera.</b> Un token propio, con fecha de caducidad, para que los programadores de GSG llamen al simulador de este servidor (la copia de mentira del sistema de GSG) sin tocar nada real. Se ve una sola vez.</p>
+        <div class="copy"><input id="gsg-sim-url" readonly aria-label="Dirección del simulador"><button class="ghost" id="gsg-sim-url-copiar" type="button">Copiar la dirección</button></div>
+        <div class="actions" style="margin-top:8px"><button class="ghost" id="gsg-sim-token" type="button">Crear un token del simulador</button><span id="gsg-sim-state" class="pill hidden"></span></div>
+        <div id="gsg-sim-nuevo" class="hidden" style="margin-top:8px;padding:10px 12px;border:1px dashed var(--accent);border-radius:10px">
+          <b>Token del simulador: cópialo ahora, no se volverá a mostrar.</b>
+          <code id="gsg-sim-valor" style="display:block;word-break:break-all;margin:6px 0"></code>
+          <p class="muted" style="margin:4px 0 0;font-size:13px">Lo mandan como <code>Authorization: Bearer &lt;el token&gt;</code> a la dirección de arriba. Caduca solo; también se puede anular aquí.</p>
+          <div class="actions" style="margin-top:8px"><button class="ghost sm" id="gsg-sim-copiar" type="button">Copiar el token</button></div>
+        </div>
+        <ul id="gsg-sim-lista" style="margin:8px 0 0;padding-left:20px;font-size:13.5px"></ul>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+          <p class="muted" style="margin:0 0 6px"><b>Probar lo que GSG puede cambiar después de mandar un pedido.</b> Con un clic, el simulador hace lo que haría GSG: cancelar un pedido por su cuenta o cambiarle la dirección. En la siguiente sincronización (o con «Sincronizar ahora» en Hoy) este sistema lo refleja.</p>
+          <div class="actions">
+            <button class="ghost sm" id="gsg-sim-cancelar" type="button">Cancelar uno (prueba)</button>
+            <button class="ghost sm" id="gsg-sim-cambiar" type="button">Cambiar la dirección de uno (prueba)</button>
+            <span id="gsg-sim-prueba-state" class="pill hidden"></span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+        <p class="muted" style="margin:0 0 6px"><b>Lo que GSG nos mandó</b> (las últimas llamadas al simulador y a la API de pedidos, con lo que se les contestó). <a id="gsg-bitacora-refrescar" href="#" >Actualizar</a></p>
+        <div id="gsg-bitacora" class="muted" style="font-size:13px">Todavía nadie ha llamado.</div>
+      </div>
     </details>
     <div id="gsg-clave-nueva" class="hidden" style="margin-top:10px;padding:10px 12px;border:1px dashed var(--accent);border-radius:10px">
       <b>Clave para GSG: cópiala ahora, no se volverá a mostrar.</b>
@@ -1055,6 +1123,51 @@ document.getElementById('app').classList.remove('hidden');
 load();
 
 /* ---------------------------------------------------------- GSG */
+var perfilElegido = null;
+var perfilAbierto = false;
+function pintarPerfiles(r) {
+  var caja = document.getElementById('perfil-lista');
+  if (!caja) return;
+  var actual = r.actual ? r.actual.perfil : null;
+  perfilElegido = perfilElegido || actual || 'reparto';
+  caja.innerHTML = (r.perfiles || []).map(function (p) {
+    var es = p.id === perfilElegido;
+    return '<label class="' + (es ? 'elegido' : '') + '"><input type="radio" name="perfil" value="' + esc(p.id) + '"' + (es ? ' checked' : '') + '><b>' + esc(p.nombre) + '</b><span class="muted" style="font-size:13px">' + esc(p.descripcion) + '</span><ul>' + p.cambia.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' + (actual === p.id ? '<span class="actual">✓ En uso' + (r.actual && r.actual.en ? ' desde el ' + new Date(r.actual.en).toLocaleDateString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric' }) : '') + '</span>' : '') + '</label>';
+  }).join('');
+  caja.querySelectorAll('input[name=perfil]').forEach(function (i) {
+    i.onchange = function () { perfilElegido = i.value; pintarPerfiles(r); };
+  });
+  var boton = document.getElementById('perfil-aplicar');
+  if (boton) boton.textContent = actual === perfilElegido ? 'Volver a aplicar este perfil' : 'Aplicar este perfil';
+  var sec = document.getElementById('perfil');
+  var resumen = document.getElementById('perfil-resumen-texto');
+  if (sec && resumen) {
+    var nombreActual = '';
+    (r.perfiles || []).forEach(function (p) { if (p.id === actual) nombreActual = p.nombre; });
+    if (actual && nombreActual && !perfilAbierto) {
+      resumen.textContent = '✓ Perfil en uso: ' + nombreActual + (r.actual && r.actual.en ? ' (desde el ' + new Date(r.actual.en).toLocaleDateString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric' }) + ')' : '');
+      sec.classList.add('plegado');
+    } else {
+      sec.classList.remove('plegado');
+    }
+  }
+}
+async function cargarPerfil() {
+  try { var r = await api('/admin/perfil'); pintarPerfiles(r); } catch (e) { /* sin perfiles en este arranque */ }
+}
+var perfilCambiar = document.getElementById('perfil-cambiar');
+if (perfilCambiar) perfilCambiar.onclick = function () { perfilAbierto = true; var sec = document.getElementById('perfil'); if (sec) sec.classList.remove('plegado'); };
+document.getElementById('perfil-aplicar').onclick = async function () {
+  if (!perfilElegido) return;
+  var ok = await confirmarDialogo({ titulo: 'Aplicar el perfil', texto: 'Se cambian el menú, qué contesta solo y los interruptores de las entregas según el perfil elegido. Tus textos, tus clientes y tus motorizados no se tocan. Puedes volver a cambiarlo cuando quieras.', boton: 'Aplicar' });
+  if (!ok) return;
+  try {
+    var r = await api('/admin/perfil', { method: 'POST', body: { perfil: perfilElegido } });
+    show('perfil-state', r.detalle + ' La pantalla se recarga para enseñar el menú que toca.', 'ok');
+    setTimeout(function () { location.reload(); }, 1800);
+  } catch (e) { show('perfil-state', e.message, 'bad'); }
+};
+
 async function cargarGsg() {
   var caja = document.getElementById('gsg-estado');
   if (!caja) return;
@@ -1068,6 +1181,7 @@ async function cargarGsg() {
     document.getElementById('gsg-quitar').classList.toggle('hidden', g.modo === 'ninguna');
   } catch (error) { caja.textContent = error.message; }
 }
+cargarPerfil();
 if (document.getElementById('gsg')) {
   document.getElementById('gsg-probar').onclick = async function () {
     try { var r = await api('/admin/entregas/gsg/probar', { method: 'POST', body: {} }); show('gsg-state', r.prueba.detalle, r.ok ? 'ok' : 'bad'); cargarGsg(); } catch (error) { show('gsg-state', error.message, 'bad'); }
@@ -1113,7 +1227,110 @@ if (document.getElementById('gsg')) {
     if (!ok) return;
     try { await api('/admin/entregas/gsg', { method: 'DELETE' }); show('gsg-state', 'Desconectado.', 'ok'); cargarGsg(); } catch (error) { show('gsg-state', error.message, 'bad'); }
   };
+  var HALLAZGO = { ok: ['ok', 'bien'], falta: ['bad', 'falta'], formato: ['bad', 'formato'], sobra: ['warn', 'sobra'], aviso: ['warn', 'aviso'] };
+  function pintarHallazgos(v) {
+    var caja = document.getElementById('gsg-verificacion');
+    if (!v) { caja.classList.add('hidden'); return; }
+    var filas = (v.hallazgos || []).filter(function (h) { return h.tipo !== 'ok'; });
+    var html = '<div><span class="pill ' + (v.ok ? 'ok' : 'bad') + '">' + esc(v.resumen) + '</span> <span class="muted" style="font-size:12px">' + esc(hora(v.at)) + '</span></div>';
+    if (filas.length) {
+      html += '<ul style="margin:6px 0 0;padding-left:20px;font-size:13.5px">' + filas.map(function (h) {
+        var t = HALLAZGO[h.tipo] || ['warn', h.tipo];
+        return '<li><span class="pill ' + t[0] + '" style="margin-right:6px">' + esc(t[1]) + '</span><b>' + esc(h.donde) + '</b>: ' + esc(h.detalle) + '</li>';
+      }).join('') + '</ul>';
+    } else if (v.ok) {
+      html += '<p class="muted" style="margin:4px 0 0;font-size:13px">Todas las listas y todos los pedidos vienen como este sistema los espera.</p>';
+    }
+    caja.innerHTML = html; caja.classList.remove('hidden');
+  }
+  function pintarCuadre(c) {
+    var caja = document.getElementById('gsg-cuadre');
+    if (!c) { caja.classList.add('hidden'); return; }
+    var html = '<div><span class="pill ' + (c.ok ? 'ok' : 'warn') + '">' + esc(c.resumen) + '</span> <span class="muted" style="font-size:12px">' + esc(c.dia) + ' · ' + esc(hora(c.at)) + '</span></div>';
+    if (c.faltanEnGsg && c.faltanEnGsg.length) html += '<p style="margin:6px 0 0;font-size:13.5px"><b>Cerrados aquí que GSG no tiene como terminados:</b> ' + esc(c.faltanEnGsg.join(', ')) + '. Suele ser que el reporte a GSG no salió: mira «reportes que GSG no aceptó» en Hoy y pulsa Reintentar.</p>';
+    if (c.sobranEnGsg && c.sobranEnGsg.length) html += '<p style="margin:6px 0 0;font-size:13.5px"><b>Terminados en GSG que aquí siguen abiertos:</b> ' + esc(c.sobranEnGsg.join(', ')) + '. Revísalos en Hoy: si ya se entregaron, márcalos «Entregada».</p>';
+    caja.innerHTML = html; caja.classList.remove('hidden');
+  }
+  function hora(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function pintarExtras(r) {
+    var d = r.descartes || { lista: [] };
+    var caja = document.getElementById('gsg-descartes');
+    if (d.lista && d.lista.length) {
+      document.getElementById('gsg-descartes-titulo').textContent = d.lista.length + (d.lista.length === 1 ? ' pedido de hoy no se pudo leer' : ' pedidos de hoy no se pudieron leer');
+      document.getElementById('gsg-descartes-lista').innerHTML = d.lista.map(function (x) {
+        return '<li><b>' + esc(x.referencia) + '</b> (' + esc(x.lista === 'faltaUbicacion' ? 'lista de ubicación' : 'lista de confirmación') + '): ' + esc(x.motivo) + '</li>';
+      }).join('');
+      caja.classList.remove('hidden');
+    } else caja.classList.add('hidden');
+    pintarHallazgos(r.verificacion);
+    pintarCuadre(r.cuadre);
+    var sim = document.getElementById('gsg-sim');
+    sim.classList.toggle('hidden', !r.conSimulador);
+    if (r.conSimulador) {
+      document.getElementById('gsg-sim-url').value = location.origin + r.rutaSimulador;
+      var lista = document.getElementById('gsg-sim-lista');
+      var tokens = r.tokens || [];
+      lista.innerHTML = tokens.length ? tokens.map(function (t) {
+        var estado = t.estado === 'vigente' ? '<span class="pill ok">vigente</span>' : t.estado === 'caducado' ? '<span class="pill warn">caducado</span>' : '<span class="pill bad">anulado</span>';
+        var caduca = new Date(t.caducaAt);
+        return '<li>' + estado + ' <b>' + esc(t.nombre) + '</b> (…' + esc(t.pista) + ') · caduca el ' + esc(isNaN(caduca.getTime()) ? '' : caduca.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })) + ' · ' + t.usos + ' llamada' + (t.usos === 1 ? '' : 's') + (t.ultimoUsoAt ? ', la última a las ' + esc(hora(t.ultimoUsoAt)) : '') + (t.estado === 'vigente' ? ' <a href="#" data-anular="' + esc(t.id) + '">Anular</a>' : '') + '</li>';
+      }).join('') : '<li class="muted">Todavía no hay tokens: crea uno y pásaselo a los programadores de GSG.</li>';
+      lista.querySelectorAll('[data-anular]').forEach(function (a) {
+        a.onclick = async function (ev) {
+          ev.preventDefault();
+          if (!(await confirmarDialogo({ titulo: 'Anular el token', texto: 'Desde ahora ese token no vale: quien lo use recibirá "token caducado o anulado". Se puede crear otro.', boton: 'Anular', peligro: true }))) return;
+          try { await api('/admin/gsg/tokens-simulador/' + a.getAttribute('data-anular'), { method: 'DELETE' }); show('gsg-sim-state', 'Token anulado.', 'ok'); cargarExtras(); } catch (error) { show('gsg-sim-state', error.message, 'bad'); }
+        };
+      });
+    }
+    var b = document.getElementById('gsg-bitacora');
+    var llamadas = r.bitacora || [];
+    b.innerHTML = llamadas.length ? '<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr><th style="text-align:left;padding:4px 6px">Hora</th><th style="text-align:left;padding:4px 6px">Llamada</th><th style="text-align:left;padding:4px 6px">Con qué entró</th><th style="text-align:left;padding:4px 6px">Qué pasó</th></tr></thead><tbody>' + llamadas.map(function (l) {
+      var mal = l.status >= 400;
+      return '<tr><td style="padding:4px 6px;white-space:nowrap">' + esc(hora(l.en)) + '</td><td style="padding:4px 6px;font-family:ui-monospace,Consolas,monospace">' + esc(l.que) + '</td><td style="padding:4px 6px">' + esc(l.quien) + '</td><td style="padding:4px 6px"><span class="pill ' + (mal ? 'bad' : 'ok') + '">' + l.status + '</span> ' + esc(l.resultado) + '</td></tr>';
+    }).join('') + '</tbody></table>' : 'Todavía nadie ha llamado. Cuando GSG (o sus programadores, con el token del simulador) manden algo, aquí se verá qué llegó y qué se les contestó.';
+  }
+  async function cargarExtras() {
+    try { pintarExtras(await api('/admin/gsg')); } catch (error) { show('gsg-state', error.message, 'bad'); }
+  }
+  document.getElementById('gsg-verificar').onclick = async function () {
+    show('gsg-verificar-state', 'Preguntando a GSG…', 'warn');
+    try { var r = await api('/admin/gsg/verificar-contrato', { method: 'POST', body: {} }); pintarHallazgos(r.verificacion); show('gsg-verificar-state', r.ok ? 'El contrato se cumple.' : 'Hay cosas que corregir (abajo).', r.ok ? 'ok' : 'bad'); } catch (error) { show('gsg-verificar-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-cuadrar').onclick = async function () {
+    show('gsg-verificar-state', 'Cuadrando…', 'warn');
+    try { var r = await api('/admin/gsg/cuadre'); pintarCuadre(r.cuadre); show('gsg-verificar-state', r.cuadre.ok ? 'El día cuadra.' : 'Hay diferencias (abajo).', r.cuadre.ok ? 'ok' : 'warn'); } catch (error) { show('gsg-verificar-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-sim-url-copiar').onclick = function () {
+    navigator.clipboard.writeText(document.getElementById('gsg-sim-url').value).then(function () { show('gsg-sim-state', 'Dirección copiada', 'ok'); });
+  };
+  document.getElementById('gsg-sim-token').onclick = async function () {
+    try {
+      var nombre = await pedirDato({ titulo: 'Token del simulador', texto: 'Un nombre para reconocerlo en la lista (por ejemplo, el del programador o el equipo de GSG). Caduca a los 30 días; después se crea otro.', etiqueta: 'Para quién es', marcador: 'Programadores de GSG', boton: 'Crear el token', validar: function () { return null; } });
+      if (nombre === null) return;
+      var r = await api('/admin/gsg/tokens-simulador', { method: 'POST', body: { nombre: nombre || undefined, dias: 30 } });
+      document.getElementById('gsg-sim-valor').textContent = r.token;
+      document.getElementById('gsg-sim-nuevo').classList.remove('hidden');
+      show('gsg-sim-state', 'Token creado: caduca en 30 días.', 'ok');
+      cargarExtras();
+    } catch (error) { show('gsg-sim-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-sim-copiar').onclick = function () {
+    navigator.clipboard.writeText(document.getElementById('gsg-sim-valor').textContent).then(function () { show('gsg-sim-state', 'Token copiado', 'ok'); });
+  };
+  document.getElementById('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
+  document.getElementById('gsg-sim-cancelar').onclick = async function () {
+    try { var r = await api('/admin/gsg/simulador/cancelar-uno', { method: 'POST', body: {} }); show('gsg-sim-prueba-state', r.detalle, 'ok'); cargarExtras(); } catch (error) { show('gsg-sim-prueba-state', error.message, 'bad'); }
+  };
+  document.getElementById('gsg-sim-cambiar').onclick = async function () {
+    try { var r = await api('/admin/gsg/simulador/cambiar-uno', { method: 'POST', body: {} }); show('gsg-sim-prueba-state', r.detalle, 'ok'); cargarExtras(); } catch (error) { show('gsg-sim-prueba-state', error.message, 'bad'); }
+  };
   cargarGsg();
+  cargarExtras();
 }
 `;
 

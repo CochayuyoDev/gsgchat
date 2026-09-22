@@ -27,11 +27,24 @@ async function hastaAvisada(e: EscenarioEntregas, referencia: string, telefono: 
   return rider;
 }
 
+/**
+ * El reloj falso arranca a las 09:00 de Lima (14:00 UTC) del ultimo dia que
+ * ya empezo: las pruebas avanzan varias horas y, si arrancaran a la hora
+ * real de la tarde, cruzarian la medianoche, el cierre del dia apartaria lo
+ * vivo y la sincronizacion traeria los pedidos "de manana".
+ */
+function hoyALas9(): Date {
+  const d = new Date();
+  d.setUTCHours(14, 0, 0, 0);
+  if (d.getTime() > Date.now()) d.setUTCDate(d.getUTCDate() - 1);
+  return d;
+}
+
 describe('entregado, ¿dónde está mi pedido?, eventos, lista pegada y cercanía', () => {
   let e: EscenarioEntregas;
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ supervisor: SUPERVISOR });
+    e = await crearEscenarioEntregas({ supervisor: SUPERVISOR, arranque: hoyALas9() });
     await e.api.post('/admin/motorizados/de-prueba');
   });
   afterAll(() => e.cerrar());

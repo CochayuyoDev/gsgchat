@@ -559,9 +559,23 @@ async function revisar() {
   } catch (e) { t.querySelector('.n').textContent = '?'; toast(e.message); }
 }
 async function cambiarDias() {
-  var v = await pedirDato({ titulo: 'Guardar solas las conversaciones', texto: 'A cuántos días sin movimiento se guarda sola una conversación y se vacía del chat. 0 = nunca.', etiqueta: 'Días', valor: String(datos.inactividadDias || 0), boton: 'Guardar', validar: function (x) { return /^\d{1,4}$/.test(x) ? null : 'Escribe un número de días.'; } });
+  var actual = datos.inactividadDias || 0;
+  var marca = function (n) { return n === actual ? ' (ahora)' : ''; };
+  var v = await elegirOpcion({ titulo: 'Guardar solas las conversaciones', texto: 'Cuando un chat lleva estos días sin ningún mensaje, se guarda solo y se vacía del chat. Se puede devolver al chat cuando haga falta.', opciones: [
+    { valor: 7, etiqueta: 'A los 7 días' + marca(7), detalle: 'Chats muy limpios; lo de la semana pasada ya está guardado.' },
+    { valor: 15, etiqueta: 'A los 15 días' + marca(15), detalle: 'Un término medio.' },
+    { valor: 30, etiqueta: 'A los 30 días' + marca(30), detalle: 'Recomendado: un mes sin escribirse.', principal: actual === 30 || !actual },
+    { valor: 60, etiqueta: 'A los 60 días' + marca(60), detalle: 'Solo lo muy viejo.' },
+    { valor: 0, etiqueta: 'Nunca' + marca(0), detalle: 'Solo se guardan a mano, desde Chats.' },
+    { valor: 'otro', etiqueta: 'Otro número de días…', detalle: '' }
+  ], cancelar: 'Dejarlo como está' });
   if (v === null) return;
-  try { await api('/admin/ajustes', { method: 'POST', body: { guardados: { inactividadDias: Number(v) } } }); toast('Guardado.'); await cargar(); } catch (e) { toast(e.message); }
+  if (v === 'otro') {
+    var otro = await pedirDato({ titulo: 'Otro número de días', etiqueta: 'Días sin movimiento', valor: String(actual), boton: 'Guardar', validar: function (x) { return /^\d{1,4}$/.test(x) ? null : 'Escribe un número de días.'; } });
+    if (otro === null) return;
+    v = Number(otro);
+  }
+  try { await api('/admin/ajustes', { method: 'POST', body: { guardados: { inactividadDias: Number(v) } } }); toast(Number(v) ? 'Listo: a los ' + v + ' días sin mensajes, cada chat se guarda solo.' : 'Listo: ya no se guarda ninguno solo; solo a mano.'); await cargar(); } catch (e) { toast(e.message); }
 }
 async function barrer() {
   var si = await confirmarDialogo({ titulo: 'Guardar las inactivas ya', texto: 'Se guardan y se vacían del chat las conversaciones sin movimiento desde hace ' + (datos.inactividadDias || 60) + ' días.', boton: 'Guardar' });
@@ -583,11 +597,33 @@ async function aprenderMes() {
 }
 
 /* Importar un chat exportado del telefono. */
+var impVista = null;
+var impTemporizador = null;
+var impImportando = false;
+/* Antes de importar se lee el texto y se dice cuantos mensajes hay y de quien. */
+async function previsualizarImportacion() {
+  var texto = document.getElementById('imp-texto').value;
+  var estado = document.getElementById('imp-estado');
+  var boton = document.getElementById('imp-enviar');
+  if (impImportando) return;
+  impVista = null;
+  if (!texto.trim()) { boton.textContent = 'Importar la conversación'; boton.disabled = false; return; }
+  try {
+    var r = await api('/admin/archives/importar/vista-previa', { method: 'POST', body: { texto: texto, nombre: document.getElementById('imp-nombre').value.trim() || undefined } });
+    impVista = r;
+    if (!r.ok || !r.mensajes) { estado.textContent = 'No se encontraron mensajes con el formato de WhatsApp (fecha, hora - nombre: texto).' + (r.avisos && r.avisos.length ? ' ' + r.avisos.join(' ') : ''); boton.textContent = 'Importar la conversación'; boton.disabled = true; return; }
+    estado.textContent = 'Se leyeron ' + r.mensajes + ' mensajes: ' + r.delCliente + ' de ' + (r.cliente || 'el cliente') + ' y ' + r.delNegocio + ' de ' + (r.negocio || 'el negocio') + (r.desde ? ', del ' + fechaCorta(r.desde) + ' al ' + fechaCorta(r.hasta) : '') + '.' + (r.descartadas ? ' ' + r.descartadas + ' líneas no se entendieron.' : '') + (r.avisos && r.avisos.length ? ' ' + r.avisos.join(' ') : '');
+    boton.textContent = 'Importar ' + r.mensajes + ' mensaje' + (r.mensajes === 1 ? '' : 's');
+    boton.disabled = false;
+  } catch (e) { estado.textContent = e.message; boton.disabled = false; }
+}
+document.getElementById('imp-texto').oninput = function () { clearTimeout(impTemporizador); impTemporizador = setTimeout(previsualizarImportacion, 500); };
+document.getElementById('imp-nombre').onchange = previsualizarImportacion;
 document.getElementById('imp-fichero').onchange = function () {
   var f = this.files && this.files[0];
   if (!f) return;
   var lector = new FileReader();
-  lector.onload = function () { document.getElementById('imp-texto').value = String(lector.result || ''); document.getElementById('imp-estado').textContent = 'Leído ' + f.name + ' (' + peso(f.size) + ').'; };
+  lector.onload = function () { document.getElementById('imp-texto').value = String(lector.result || ''); document.getElementById('imp-estado').textContent = 'Leído ' + f.name + ' (' + peso(f.size) + '). Contando mensajes…'; previsualizarImportacion(); };
   lector.readAsText(f, 'utf-8');
 };
 document.getElementById('imp-enviar').onclick = async function () {
@@ -597,7 +633,7 @@ document.getElementById('imp-enviar').onclick = async function () {
   var estado = document.getElementById('imp-estado');
   if (!texto.trim()) { estado.textContent = 'Pega el texto del chat o elige el archivo .txt.'; return; }
   if (tel.replace(/\D/g, '').length < 6) { estado.textContent = 'Falta el teléfono del cliente.'; return; }
-  var b = this; b.disabled = true; estado.textContent = 'Importando…';
+  var b = this; b.disabled = true; impImportando = true; clearTimeout(impTemporizador); estado.textContent = 'Importando…';
   try {
     var r = await api('/admin/archives/importar', { method: 'POST', body: { texto: texto, telefono: tel, nombre: nombre || undefined } });
     estado.textContent = 'Importados ' + r.mensajes + ' mensajes' + (r.desde ? ' (del ' + fechaCorta(r.desde) + ' al ' + fechaCorta(r.hasta) + ')' : '') + '.' + ((r.lectura && r.lectura.avisos && r.lectura.avisos.length) ? ' ' + r.lectura.avisos.join(' ') : '');
@@ -606,7 +642,9 @@ document.getElementById('imp-enviar').onclick = async function () {
     await cargar();
     await abrir(r.archive.id);
   } catch (e) { estado.textContent = e.message; }
+  impImportando = false;
   b.disabled = false;
+  b.textContent = 'Importar la conversación';
 };
 
 var temporizador = null;

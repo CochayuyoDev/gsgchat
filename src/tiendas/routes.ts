@@ -40,14 +40,25 @@ import { z } from 'zod';
 import type { EstadoInstancia, ServicioPlan } from '../plan/servicio.js';
 import { fechaLima, type ServicioTiendas } from './servicio.js';
 import type { ServicioAvisosTiendas } from './avisos.js';
-import { VARIABLES_AVISOS } from './avisos.js';
+import { VARIABLES_AVISOS, VARIABLES_RECIBO } from './avisos.js';
+import type { UsuariosRepo } from '../auth/usuarios.js';
+import { hashClave } from '../auth/usuarios.js';
+import { cookieDeSesion, firmarSesion } from '../auth/sesion.js';
+import { randomBytes } from 'node:crypto';
 
 export interface TiendasRoutesDeps {
   tiendas: ServicioTiendas;
   plan?: ServicioPlan;
   /** Los avisos de vencimiento (textos, revisar ahora). Sin el, la pantalla lo dice. */
   avisos?: ServicioAvisosTiendas;
+  /** Para el acceso de soporte: la cuenta temporal con la que entra el dueño. */
+  usuarios?: UsuariosRepo;
+  /** El secreto de las cookies y si van solo por https (lo mismo que /login). */
+  sesion?: { secreto: string; segura: boolean };
 }
+
+/** La cuenta con la que el dueño del sistema entra a una tienda con acceso de soporte. */
+export const USUARIO_SOPORTE = 'soporte';
 
 function soloSuper(request: FastifyRequest, reply: FastifyReply, que: string): boolean {
   if (request.usuario?.super && !request.usuario.porToken) return true;
@@ -96,6 +107,7 @@ const estadoInstanciaSchema = z.object({
   fallosIA: z.coerce.number().int().min(0).max(10_000_000).default(0),
   entregasHoy: z.coerce.number().int().min(0).max(10_000_000).default(0),
   version: z.string().max(40).default(''),
+  soporte: z.object({ hasta: z.string().max(40), enlace: z.string().max(400) }).nullable().optional(),
 });
 
 /** El parte de salud que manda la tienda en la cabecera; null si no viene o no se entiende. */
@@ -179,7 +191,8 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
     const body = z.object({ tiendaId: z.string().optional(), meses: z.coerce.number().int().min(1).max(60).optional(), monto: z.coerce.number().min(0).max(10_000_000).optional() }).parse(request.body ?? {});
     const r = await tiendas.aceptarPago(Number(request.params.pagoId), quien(request), { meses: body.meses, monto: body.monto });
     if (!r.ok) return reply.code(400).send({ error: r.error });
-    return r;
+    const recibo = deps.avisos ? await deps.avisos.recibo(r.tienda.id, { meses: r.pago.meses, monto: r.pago.monto ?? 0, moneda: r.pago.moneda }) : null;
+    return { ...r, recibo, mensaje: recibo ? `${r.mensaje} ${recibo.ok ? 'Recibo enviado por WhatsApp a la tienda.' : `Sin recibo por WhatsApp: ${recibo.detalle}.`}` : r.mensaje };
   });
 
   app.post<{ Params: { pagoId: string } }>('/admin/tiendas/pagos/:pagoId/rechazar', async (request, reply) => {
@@ -194,14 +207,14 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
 
   app.get('/admin/tiendas/avisos', async (request, reply) => {
     if (!soloSuper(request, reply, 'ver los avisos de vencimiento')) return;
-    if (!deps.avisos) return { ok: true, disponible: false, textos: null, ultimaRevision: null, variables: VARIABLES_AVISOS };
-    return { ok: true, disponible: true, textos: await deps.avisos.textos(), ultimaRevision: deps.avisos.ultimaRevision(), variables: VARIABLES_AVISOS };
+    if (!deps.avisos) return { ok: true, disponible: false, textos: null, ultimaRevision: null, variables: VARIABLES_AVISOS, variablesRecibo: VARIABLES_RECIBO };
+    return { ok: true, disponible: true, textos: await deps.avisos.textos(), ultimaRevision: deps.avisos.ultimaRevision(), variables: VARIABLES_AVISOS, variablesRecibo: VARIABLES_RECIBO };
   });
 
   app.post('/admin/tiendas/avisos', async (request, reply) => {
     if (!soloSuper(request, reply, 'cambiar los avisos de vencimiento')) return;
     if (!deps.avisos) return reply.code(409).send({ error: 'Este arranque no lleva avisos de vencimiento.' });
-    const body = z.object({ activo: z.boolean().optional(), aLaTienda: z.boolean().optional(), vence7: z.string().max(1000).optional(), vence1: z.string().max(1000).optional(), vencida: z.string().max(1000).optional(), alDueno: z.string().max(1000).optional() }).parse(request.body ?? {});
+    const body = z.object({ activo: z.boolean().optional(), aLaTienda: z.boolean().optional(), vence7: z.string().max(1000).optional(), vence1: z.string().max(1000).optional(), vencida: z.string().max(1000).optional(), alDueno: z.string().max(1000).optional(), reciboActivo: z.boolean().optional(), recibo: z.string().max(1000).optional(), sinLatidoHoras: z.coerce.number().min(0).max(48).optional(), sinLatido: z.string().max(1000).optional() }).parse(request.body ?? {});
     return { ok: true, textos: await deps.avisos.guardarTextos(body), mensaje: 'Avisos guardados.' };
   });
 
@@ -216,7 +229,7 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
   app.post('/admin/tiendas/avisos/previsualizar', async (request, reply) => {
     if (!soloSuper(request, reply, 'ver los avisos')) return;
     if (!deps.avisos) return reply.code(409).send({ error: 'Este arranque no lleva avisos de vencimiento.' });
-    const body = z.object({ tipo: z.enum(['vence7', 'vence1', 'vencida']), texto: z.string().max(1000) }).parse(request.body ?? {});
+    const body = z.object({ tipo: z.enum(['vence7', 'vence1', 'vencida', 'recibo']), texto: z.string().max(1000) }).parse(request.body ?? {});
     return { ok: true, texto: await deps.avisos.previsualizar(body.tipo, body.texto) };
   });
 
@@ -238,7 +251,8 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
     return con400(reply, async () => {
       const t = await tiendas.anotarPago(request.params.id, body, quien(request));
       if (!t) return reply.code(404).send({ error: 'Esa tienda no existe.' });
-      return { ok: true, tienda: t, mensaje: `Pago apuntado: ${body.meses} mes${body.meses === 1 ? '' : 'es'}. ${t.nombre} queda pagada hasta el ${fechaLima(t.membresia.vencimiento)}.` };
+      const recibo = deps.avisos ? await deps.avisos.recibo(t.id, { meses: body.meses, monto: body.monto, moneda: body.moneda ?? null }) : null;
+      return { ok: true, tienda: t, recibo, mensaje: `Pago apuntado: ${body.meses} mes${body.meses === 1 ? '' : 'es'}. ${t.nombre} queda pagada hasta el ${fechaLima(t.membresia.vencimiento)}.${recibo ? (recibo.ok ? ' Recibo enviado por WhatsApp a la tienda.' : ` Sin recibo por WhatsApp: ${recibo.detalle}.`) : ''}` };
     });
   });
 
@@ -313,6 +327,64 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
     if (!soloSuper(request, reply, 'desconectar el maestro')) return;
     if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
     return con400(reply, async () => ({ ok: true, ...(await deps.plan!.desconectarMaestro()) }));
+  });
+
+  // ------------------------------------------- acceso de soporte (esta instalacion)
+
+  /** La cuenta "soporte" se enciende con el acceso y se apaga cuando se quita o caduca. */
+  async function apagarCuentaSoporte(): Promise<void> {
+    if (!deps.usuarios) return;
+    const u = await deps.usuarios.porUsuario(USUARIO_SOPORTE);
+    if (u && u.activo) await deps.usuarios.setActivo(u.id, false);
+  }
+  if (deps.plan) {
+    deps.plan.alCambiarSoporte(async (acceso) => {
+      if (!acceso) await apagarCuentaSoporte();
+    });
+  }
+
+  app.get('/admin/membresia/soporte', async (_request, reply) => {
+    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
+    return { ok: true, soporte: deps.plan.soporte(), conMaestro: deps.plan.estado().origen === 'maestro' };
+  });
+
+  app.post('/admin/membresia/soporte', async (request, reply) => {
+    if (!soloSuper(request, reply, 'dar acceso de soporte')) return;
+    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
+    if (!deps.usuarios || !deps.sesion) return reply.code(409).send({ error: 'Este arranque no puede abrir cuentas de soporte.' });
+    const body = z.object({ horas: z.coerce.number().int().min(1).max(72).default(24) }).parse(request.body ?? {});
+    const acceso = await deps.plan.concederSoporte(body.horas);
+    return { ok: true, soporte: acceso, mensaje: `Acceso concedido hasta las ${new Date(acceso.hasta).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false })}: el dueño del sistema podrá entrar a este panel como administrador. Se quita solo al caducar, o cuando lo quites tú.` };
+  });
+
+  app.delete('/admin/membresia/soporte', async (request, reply) => {
+    if (!soloSuper(request, reply, 'quitar el acceso de soporte')) return;
+    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
+    await deps.plan.revocarSoporte();
+    await apagarCuentaSoporte();
+    return { ok: true, mensaje: 'Acceso de soporte quitado: el dueño del sistema ya no puede entrar a este panel.' };
+  });
+
+  // El enlace que recibe el dueño: si vale, entra como la cuenta "soporte" (administrador) y va al panel.
+  app.get<{ Params: { codigo: string } }>('/soporte/:codigo', async (request, reply) => {
+    const paginaCaducado = () =>
+      reply
+        .code(410)
+        .type('text/html; charset=utf-8')
+        .send('<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acceso de soporte</title><body style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;padding:0 16px;color:#1f2933"><h1 style="font-size:22px">Este enlace de soporte ya no vale</h1><p>El acceso que concedió la tienda caducó o lo quitaron. Pídele a la tienda que vuelva a concederlo desde su pantalla <b>Pagar → Acceso de soporte</b> y usa el enlace nuevo.</p><p><a href="/login">Ir a la entrada normal</a></p></body></html>');
+    if (!deps.plan || !deps.usuarios || !deps.sesion) return paginaCaducado();
+    if (!deps.plan.canjearSoporte(request.params.codigo)) return paginaCaducado();
+    let u = await deps.usuarios.porUsuario(USUARIO_SOPORTE);
+    if (!u) {
+      const creado = await deps.usuarios.crear({ usuario: USUARIO_SOPORTE, nombre: 'Soporte (dueño del sistema)', clave: hashClave(randomBytes(24).toString('base64url')), rol: 'admin' });
+      u = await deps.usuarios.porUsuario(creado.usuario);
+    }
+    if (!u) return paginaCaducado();
+    if (u.rol === 'superadmin') return paginaCaducado();
+    if (!u.activo) await deps.usuarios.setActivo(u.id, true);
+    await deps.usuarios.tocarLogin(u.id, new Date());
+    reply.header('set-cookie', cookieDeSesion(firmarSesion(deps.sesion.secreto, { u: u.id, v: u.sesionVersion }, Date.now()), deps.sesion.segura));
+    return reply.redirect('/panel');
   });
 
   // ------------------------------------------- la pantalla Pagar de esta instalacion

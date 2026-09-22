@@ -138,9 +138,19 @@ ${opts.disponible ? '' : '<div class="explica"><b>Esta pantalla no está disponi
         <p class="frase" id="wa-frase">Cargando…</p>
         <div id="wa-detalle" class="muted" style="font-size:13.5px"></div>
         <div id="wa-correo-estado"></div>
+        <details id="wa-que-pasa">
+          <summary>¿Qué pasa mientras el WhatsApp está caído?</summary>
+          <ol class="muted" style="font-size:13.5px;margin:6px 0 8px;padding-left:22px;line-height:1.5">
+            <li><b>Nada se pierde.</b> Los pines a los motorizados, las preguntas a los clientes y los avisos se quedan esperando: el sistema no acumula intentos ni los da por fallidos.</li>
+            <li><b>Se intenta reconectar solo</b> (hasta 5 veces por hora). Si hace falta escanear el QR otra vez, lo dice aquí y en Conexión.</li>
+            <li><b>Se avisa por correo</b> a los minutos del ajuste (por WhatsApp no se puede: está caído).</li>
+            <li><b>Al volver, sale todo en orden</b>: primero lo urgente y lo que ya tenía hora de llegada, y se avisa al supervisor con cuánto estuvo caído.</li>
+          </ol>
+        </details>
         <div class="botones hidden" id="wa-sim-botones">
-          <span class="muted solo-demo">Solo en la demostración:</span>
+          <span class="chip tono-ambar sin-punto solo-demo">Solo en la demostración</span>
           <button class="sm" id="wa-sim-caida" type="button">Simular una caída</button>
+          <button class="sm" id="wa-sim-caida5" type="button">Simular caída de 5 minutos</button>
           <button class="sm" id="wa-sim-vuelta" type="button">Simular que vuelve</button>
           <button class="sm" id="wa-sim-real" type="button">Volver a lo real</button>
         </div>
@@ -212,8 +222,9 @@ ${opts.disponible ? '' : '<div class="explica"><b>Esta pantalla no está disponi
         <details>
           <summary>Carpeta y hora</summary>
           <p class="muted" style="font-size:13px" id="copia-base"></p>
-          <label>Carpeta donde se guardan las copias</label>
-          <input id="copia-carpeta" type="text" placeholder="Vacío = la de siempre">
+          <label for="copia-carpeta">Carpeta donde se guardan las copias <span class="muted">(una carpeta de este equipo o de una unidad compartida; mejor si la sincroniza OneDrive o Drive)</span></label>
+          <input id="copia-carpeta" type="text" placeholder="Vacío = la de siempre" aria-describedby="copia-carpeta-ejemplo">
+          <div class="muted" style="font-size:12.5px;margin-top:2px" id="copia-carpeta-ejemplo">Ejemplos: <code>C:\\Users\\Ali\\OneDrive\\GSGchat-copias</code> · <code>D:\\Copias\\GSGchat</code> · en un servidor Linux, <code>/var/backups/gsgchat</code>. Pulsa «Comprobar la carpeta» para ver si se puede escribir.</div>
           <div class="muted" style="font-size:12.5px;margin-top:4px" id="copia-carpeta-detalle"></div>
           <div class="fila">
             <div><label>Hora (cada noche)</label><input id="copia-hora" type="time"></div>
@@ -389,6 +400,7 @@ $('wa-probar-correo').onclick = ocupado($('wa-probar-correo'), 'Mandando…', as
   await cargar();
 });
 $('wa-sim-caida').onclick = ocupado($('wa-sim-caida'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: true } }); toast('Caída simulada: el vigilante la ve como real.'); await cargar(); });
+$('wa-sim-caida5').onclick = ocupado($('wa-sim-caida5'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: true, minutos: 5 } }); toast('Caída simulada durante 5 minutos: el vigilante intenta reconectar, avisa por correo si toca y a los 5 minutos vuelve solo a lo real.'); await cargar(); });
 $('wa-sim-vuelta').onclick = ocupado($('wa-sim-vuelta'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: false } }); await cargar(); });
 $('wa-sim-real').onclick = ocupado($('wa-sim-real'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: null } }); await cargar(); });
 
@@ -405,6 +417,7 @@ $('humo-guardar').onclick = ocupado($('humo-guardar'), 'Guardando…', async fun
 
 $('copia-ahora').onclick = ocupado($('copia-ahora'), 'Copiando…', async function () {
   var r = await api('/admin/fiabilidad/copia/ahora', { method: 'POST', body: {} });
+  if (r.enMarcha) { toast(r.detalle); setTimeout(function () { cargar(); }, 15000); await cargar(); return; }
   toast(r.resultado.ficheros.length ? 'Copia hecha: ' + r.resultado.ficheros.map(function (f) { return f.nombre; }).join(', ') : 'Copia hecha (no había nada que copiar todavía).');
   await cargar();
 });

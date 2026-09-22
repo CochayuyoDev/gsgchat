@@ -309,6 +309,51 @@ const EMOJIS_SI = /[👍👌✅🙌🤝💯]|:\)/u;
 const EMOJIS_NO = /[👎❌🚫✖]/u;
 
 /** La frase MAS LARGA que aparece: "ya no lo quiero" gana a "no". */
+/**
+ * Las frases propias del negocio: lo que el dueño corrigio en el tablero
+ * «Lo que la IA no entendió» (settings `entregas.frases`, ver
+ * src/ia/no-entendido.ts). Van ANTES que las listas fijas: si una frase
+ * propia casa, manda; entre varias, la mas larga.
+ */
+export interface FrasesPropias {
+  si?: string[];
+  no?: string[];
+  duda?: string[];
+  entregado?: string[];
+  noEntregado?: string[];
+  minutos?: Array<{ texto: string; minutos: number }>;
+}
+
+export const CLAVE_FRASES_PROPIAS = 'entregas.frases';
+
+/** Lee y normaliza lo guardado en `entregas.frases`; lo raro se ignora sin romper nada. */
+export function leerFrasesPropias(crudo: unknown): FrasesPropias {
+  const lista = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map((x) => normalizar(x)).filter(Boolean) : []);
+  let obj: Record<string, unknown> = {};
+  try {
+    obj = typeof crudo === 'string' ? (JSON.parse(crudo) as Record<string, unknown>) : ((crudo ?? {}) as Record<string, unknown>);
+  } catch {
+    return {};
+  }
+  if (!obj || typeof obj !== 'object') return {};
+  const minutos = Array.isArray(obj.minutos)
+    ? (obj.minutos as unknown[])
+        .map((m) => (m && typeof m === 'object' ? { texto: normalizar(String((m as { texto?: unknown }).texto ?? '')), minutos: Number((m as { minutos?: unknown }).minutos) } : null))
+        .filter((m): m is { texto: string; minutos: number } => Boolean(m && m.texto && Number.isFinite(m.minutos) && m.minutos > 0 && m.minutos <= 24 * 60))
+    : [];
+  return { si: lista(obj.si), no: lista(obj.no), duda: lista(obj.duda), entregado: lista(obj.entregado), noEntregado: lista(obj.noEntregado), minutos };
+}
+
+/** La frase propia mas larga que casa, con lo que significa. */
+function frasePropia<T extends string>(limpio: string, grupos: Array<[T, readonly string[] | undefined]>): { que: T; frase: string } | null {
+  let mejor: { que: T; frase: string } | null = null;
+  for (const [que, frases] of grupos) {
+    const f = frases?.length ? contieneFrase(limpio, frases) : null;
+    if (f && (!mejor || f.length > mejor.frase.length)) mejor = { que, frase: f };
+  }
+  return mejor;
+}
+
 function contieneFrase(texto: string, frases: readonly string[]): string | null {
   const acolchado = ` ${texto} `;
   let mejor: string | null = null;
@@ -333,13 +378,16 @@ const SI_FLOJOS = new Set(['si', 'sii', 'siii', 'sip', 'sis', 'yes', 'ya', 'ok',
  * no está claro: nunca se toma la primera palabra y ya. Un texto largo sin
  * ninguna de las frases se queda en `no_claro` para que lo mire la IA.
  */
-export function leerConfirmacionConReglas(texto: string): LecturaConfirmacion {
+export function leerConfirmacionConReglas(texto: string, propias?: FrasesPropias): LecturaConfirmacion {
   const limpio = normalizar(texto);
   if (!limpio) {
     if (EMOJIS_SI.test(texto)) return { decision: 'si', como: 'reglas', detalle: 'emoji' };
     if (EMOJIS_NO.test(texto)) return { decision: 'no', como: 'reglas', detalle: 'emoji' };
     return { decision: 'no_claro', como: 'reglas' };
   }
+  // Lo que el dueño corrigio a mano manda sobre las listas de fabrica.
+  const propia = propias ? frasePropia(limpio, [['si', propias.si], ['no', propias.no], ['no_claro', propias.duda]] as Array<['si' | 'no' | 'no_claro', string[] | undefined]>) : null;
+  if (propia) return { decision: propia.que, como: 'reglas', detalle: `frase propia: "${propia.frase}"`, frase: propia.frase };
 
   const palabras = limpio.split(' ').length;
   const esPregunta = /\?\s*$/.test(texto.trim());
@@ -487,15 +535,28 @@ function horaYMinuto(fecha: Date, timezone: string): { horaLocal: number; minuto
  * y una hora del reloj ("llego a las 4:30"). Un "no puedo" es un rechazo.
  */
 /** "P-1002 40" -> " 40": el numero de pedido no es un tiempo. */
+/**
+ * Quita las referencias de pedido antes de leer un tiempo, para que "V4-1 35"
+ * o "M-2211-1 20" no confundan al lector. Vale para todas las formas que
+ * usa el sistema: P-1010, V4-1, M-2211-1 (pedido a mano), L9001, GSG-2026-9.
+ */
 export function quitarReferencias(texto: string): string {
-  return texto.replace(/\b[a-z]{1,6}-\d{1,10}\b/gi, ' ').replace(/\b[a-z]{1,6}\d{3,10}\b/gi, ' ');
+  return texto
+    .replace(/\b[a-z]{1,6}\d{0,4}(?:-\d{1,10}){1,3}\b/gi, ' ')
+    .replace(/\b[a-z]{1,6}\d{3,10}\b/gi, ' ');
 }
 
-export function leerTiempoConReglas(texto: string, opts: { ahora?: Date; timezone?: string } = {}): LecturaTiempo {
+export function leerTiempoConReglas(texto: string, opts: { ahora?: Date; timezone?: string; propias?: FrasesPropias } = {}): LecturaTiempo {
   const limpio = normalizar(quitarReferencias(texto));
   const ahora = opts.ahora ?? new Date();
   const timezone = opts.timezone ?? 'America/Lima';
   if (!limpio) return { minutos: null, rechaza: false, como: 'reglas' };
+  // Lo que el dueño corrigio a mano ("ahorita" = 15 min) manda.
+  if (opts.propias?.minutos?.length) {
+    const f = contieneFrase(limpio, opts.propias.minutos.map((m) => m.texto));
+    const propia = f ? opts.propias.minutos.find((m) => m.texto === f) : null;
+    if (propia) return { minutos: propia.minutos, rechaza: false, como: 'reglas', detalle: `frase propia: "${propia.texto}"` };
+  }
 
   // Un rechazo claro manda, salvo que venga con un tiempo ("no, 40 min").
   const tieneNumero = /\d/.test(limpio) || Object.keys(NUMEROS_EN_PALABRAS).some((p) => new RegExp(`\\b${p}\\b`).test(limpio));
@@ -663,13 +724,15 @@ const EMOJIS_ENTREGADO = /[✅👍👌🙌💯📦]/u;
  * Y se compara por frase entera, no por palabra, para que "no entregado"
  * no se lea como "entregado".
  */
-export function leerEntregadoConReglas(texto: string): LecturaEntregado {
+export function leerEntregadoConReglas(texto: string, propias?: FrasesPropias): LecturaEntregado {
   const limpio = normalizar(texto);
   const nada: LecturaEntregado = { entregado: false, noEntregado: false, flojo: false, como: 'reglas' };
   if (!limpio) {
     if (EMOJIS_ENTREGADO.test(texto)) return { ...nada, flojo: true, detalle: 'emoji' };
     return nada;
   }
+  const propia = propias ? frasePropia(limpio, [['entregado', propias.entregado], ['noEntregado', propias.noEntregado]] as Array<['entregado' | 'noEntregado', string[] | undefined]>) : null;
+  if (propia) return { ...nada, entregado: propia.que === 'entregado', noEntregado: propia.que === 'noEntregado', detalle: `frase propia: "${propia.frase}"` };
   const no = contieneFrase(limpio, NO_ENTREGADO);
   if (no) return { ...nada, noEntregado: true, detalle: no };
   const si = contieneFrase(limpio, ENTREGADO);
@@ -777,6 +840,45 @@ const PIDE_RUTA = ['ruta', 'mi ruta', 'la ruta', 'ruta de hoy', 'mi ruta de hoy'
  * quedarse sin moto. Y una frase con "no" delante de "cerca" ("no estoy
  * cerca") no es cerca.
  */
+/**
+ * El escudo del motorizado: lo que por este chat no se atiende. Un enlace,
+ * pedir datos de clientes (numeros, direcciones de otros, listas), datos del
+ * sistema (claves, tokens) o intentar darle ordenes al asistente. Lo que si
+ * puede pedir (ruta, sus pedidos, minutos, "no puedo", "cerca", "entregado")
+ * nunca cae aqui.
+ */
+export interface LecturaFueraDeFlujo {
+  fuera: boolean;
+  motivo?: 'enlace' | 'datos_del_cliente' | 'datos_del_sistema' | 'manipulacion';
+}
+
+const PIDE_DATOS = /\b(dame|pasame|mandame|enviame|me das|me pasas|necesito|quiero|cual es|cuales son|dime|comparteme)\b[^.]{0,40}\b(numero|numeros|celular|celulares|telefono|telefonos|whatsapp|dni|direccion de otro|direcciones|datos|correo|lista de clientes|todos los clientes|otros clientes|otro cliente)\b/;
+const DATOS_DEL_SISTEMA = /\b(clave|contrasena|password|token|api|acceso al sistema|usuario del sistema|base de datos)\b/;
+const MANIPULACION = /\b(olvida (tus|las) instrucciones|ignora (tus|las) instrucciones|eres un(a)? (asistente|ia|bot|modelo)|actua como|modo desarrollador|system prompt|prompt)\b/;
+
+export function leerMotorizadoFueraDeFlujo(texto: string): LecturaFueraDeFlujo {
+  const crudo = (texto ?? '').trim();
+  if (!crudo) return { fuera: false };
+  if (/(https?:\/\/|www\.|wa\.me\/|bit\.ly\/|t\.me\/)/i.test(crudo)) return { fuera: true, motivo: 'enlace' };
+  const limpio = normalizar(crudo);
+  if (MANIPULACION.test(limpio)) return { fuera: true, motivo: 'manipulacion' };
+  if (DATOS_DEL_SISTEMA.test(limpio)) return { fuera: true, motivo: 'datos_del_sistema' };
+  if (PIDE_DATOS.test(limpio)) return { fuera: true, motivo: 'datos_del_cliente' };
+  return { fuera: false };
+}
+
+/**
+ * ¿El tiempo que dio el motorizado cuadra con la distancia? A menos de 1,2
+ * minutos por kilometro no se llega en moto por Lima; a mas de 90 minutos
+ * fijos + 6 por kilometro, tampoco es normal. Sin distancia no se juzga.
+ */
+export function tiempoDudoso(minutos: number, km: number | null): boolean {
+  if (km == null || !Number.isFinite(km) || km <= 0) return false;
+  const minimo = Math.max(3, km * 1.2);
+  const maximo = 90 + km * 6;
+  return minutos < minimo || minutos > maximo;
+}
+
 export function leerMotorizadoCorta(texto: string): LecturaMotorizadoCorta {
   const limpio = normalizar(texto);
   const nada: LecturaMotorizadoCorta = { cerca: false, sinMoto: false, pideRuta: false };
@@ -962,8 +1064,8 @@ const SISTEMA_TIEMPO = [
  * un pedido porque un modelo "creyó" que era un no es peor que preguntar
  * otra vez. Un "si" se acepta desde 0.6; por debajo, se pregunta.
  */
-export async function leerConfirmacion(texto: string, ia?: LectorIA | null, log?: (m: string, d?: Record<string, unknown>) => void): Promise<LecturaConfirmacion> {
-  const reglas = leerConfirmacionConReglas(texto);
+export async function leerConfirmacion(texto: string, ia?: LectorIA | null, log?: (m: string, d?: Record<string, unknown>) => void, propias?: FrasesPropias): Promise<LecturaConfirmacion> {
+  const reglas = leerConfirmacionConReglas(texto, propias);
   if (reglas.decision !== 'no_claro' || !ia) return reglas;
   try {
     const cruda = await ia.completar(
@@ -993,8 +1095,8 @@ export async function leerConfirmacion(texto: string, ia?: LectorIA | null, log?
  * (no pudo entregar) tambien. Lo demas se queda en nada, y quien llama
  * decide si preguntar.
  */
-export async function leerEntregado(texto: string, ia?: LectorIA | null, log?: (m: string, d?: Record<string, unknown>) => void): Promise<LecturaEntregado> {
-  const reglas = leerEntregadoConReglas(texto);
+export async function leerEntregado(texto: string, ia?: LectorIA | null, log?: (m: string, d?: Record<string, unknown>) => void, propias?: FrasesPropias): Promise<LecturaEntregado> {
+  const reglas = leerEntregadoConReglas(texto, propias);
   if (reglas.entregado || reglas.noEntregado || reglas.flojo || !ia) return reglas;
   try {
     const cruda = await ia.completar(
@@ -1020,7 +1122,7 @@ export async function leerEntregado(texto: string, ia?: LectorIA | null, log?: (
 /** Lee el tiempo del motorizado: reglas y, si no hay cifra, la IA. */
 export async function leerTiempo(
   texto: string,
-  opts: { ahora?: Date; timezone?: string; ia?: LectorIA | null; log?: (m: string, d?: Record<string, unknown>) => void } = {},
+  opts: { ahora?: Date; timezone?: string; ia?: LectorIA | null; log?: (m: string, d?: Record<string, unknown>) => void; propias?: FrasesPropias } = {},
 ): Promise<LecturaTiempo> {
   const reglas = leerTiempoConReglas(texto, opts);
   if (reglas.minutos !== null || reglas.rechaza || !opts.ia) return reglas;

@@ -33,10 +33,11 @@ import { registerArchiveRoutes } from './archive-routes.js';
 import { archivarConversacion } from '../archive/service.js';
 import { registerRutasRoutes } from './rutas-routes.js';
 import { crearPuertoGsg } from '../rutas/gsg.js';
+import { conexionGsgVigente } from '../rutas/conexion-gsg.js';
 import { opcionesDesdeConfig } from '../rutas/motor.js';
 import type { Monitor } from '../salud/monitor.js';
 import { politicaDesdeConfig, type Politica } from '../salud/politica.js';
-import { ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes } from '../ajustes/generales.js';
+import { ZONAS_HORARIAS, ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
 import { providerOf } from '../settings/service.js';
@@ -214,6 +215,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     return {
       guardado: deps.ajustes.actual(),
       servidor: deps.ajustes.servidor(),
+      zonasHorarias: ZONAS_HORARIAS,
       modoPruebaFijado: deps.ajustes.modoPruebaFijado(),
       efectivo: {
         nombreNegocio: deps.ajustes.nombreNegocio(),
@@ -301,6 +303,22 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         if (r.cifras.total > 0 && !r.motorizados.some((m) => m.estado === 'activo')) avisos.push({ tipo: 'motorizados', nivel: 'bad', texto: 'No hay ningún motorizado activo: los pedidos listos no pueden salir', href: '/motorizados' });
         if (r.gsgCola && r.gsgCola.fallido > 0) avisos.push({ tipo: 'gsg_cola', nivel: 'warn', texto: `${r.gsgCola.fallido} reporte${r.gsgCola.fallido === 1 ? '' : 's'} que GSG no aceptó`, href: '/hoy', n: r.gsgCola.fallido });
       }
+    }
+    // Lo que GSG mando y no se pudo leer, y el cuadre de fin de dia con GSG
+    // (src/rutas/gsg-extras.ts): un 422 silencioso es un pedido perdido.
+    try {
+      const extras = conexionGsgVigente()?.extras;
+      if (extras) {
+        const descartes = extras.descartesDeHoy().lista.length;
+        if (descartes > 0) avisos.push({ tipo: 'gsg_descartes', nivel: 'warn', texto: `${descartes} pedido${descartes === 1 ? '' : 's'} de GSG no se pudo${descartes === 1 ? '' : 'ieron'} leer`, href: '/setup#gsg', n: descartes });
+        const cuadre = extras.ultimoCuadre();
+        if (cuadre && !cuadre.ok) {
+          const diferencias = cuadre.faltanEnGsg.length + cuadre.sobranEnGsg.length;
+          avisos.push({ tipo: 'gsg_cuadre', nivel: 'warn', texto: diferencias ? `El día no cuadra con GSG: ${diferencias} diferencia${diferencias === 1 ? '' : 's'}` : 'El día no cuadra con GSG', href: '/setup#gsg', ...(diferencias ? { n: diferencias } : {}) });
+        }
+      }
+    } catch {
+      // sin conexion con GSG no hay nada que avisar
     }
     if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: modoGsg ? '/hoy' : '/rutas', n: requierenPersona });
     // La IA que falla tres veces seguidas es una clave vencida o un proveedor caido: el asistente se queda callado sin que se note.

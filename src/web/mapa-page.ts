@@ -56,7 +56,9 @@ const CSS = `
   @media (max-width: 640px) {
     .filtros .fila-motos { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
     .filtros .fila-motos .chip { flex: none; }
+    /* En el celular los chips de arriba ya dicen cada color: en el mapa solo quedan lo que no dicen (urgente, motorizado) y la hora. */
     .leyenda { font-size: 11px; gap: 2px 8px; bottom: 26px; }
+    .leyenda span.solo-escritorio { display: none; }
   }
   .leyenda span { display: inline-flex; align-items: center; gap: 5px; }
   .leyenda .punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
@@ -78,10 +80,10 @@ ${opts.disponible ? '' : '<div class="explica"><b>Las entregas del día no está
   <div class="sin-pines hidden" id="sin-pines">Todavía no hay ubicaciones hoy: en cuanto un cliente mande su pin, aparece aquí.</div>
   <div class="tarjeta hidden" id="tarjeta"></div>
 <div class="leyenda" aria-label="Qué significa cada color">
-  <span><i class="punto" style="background:var(--ambar)"></i> falta confirmar (ya mandó su pin)</span>
-  <span><i class="punto" style="background:var(--azul)"></i> en camino (lista, con motorizado o con hora)</span>
-  <span><i class="punto" style="background:var(--verde)"></i> entregada</span>
-  <span><i class="punto" style="background:var(--rojo)"></i> con incidencia</span>
+  <span class="solo-escritorio"><i class="punto" style="background:var(--ambar)"></i> falta confirmar (ya mandó su pin)</span>
+  <span class="solo-escritorio"><i class="punto" style="background:var(--azul)"></i> en camino (lista, con motorizado o con hora)</span>
+  <span class="solo-escritorio"><i class="punto" style="background:var(--verde)"></i> entregada</span>
+  <span class="solo-escritorio"><i class="punto" style="background:var(--rojo)"></i> con incidencia</span>
   <span><i class="punto" style="background:transparent;width:8px;height:8px;outline:2px solid var(--rojo);outline-offset:1px"></i> aro rojo: urgente</span>
   <span><i class="punto" style="background:var(--texto);border-radius:3px"></i> motorizado (última posición)</span>
   <span class="muted" id="ultima-carga"></span>

@@ -47,7 +47,8 @@ export interface DepsRespaldo {
   settingsRepo: SettingsRepo;
   ahora: () => Date;
   log: (m: string, d?: Record<string, unknown>) => void;
-  timezone: string;
+  /** Zona horaria, o una funcion que la da (la elegida en Ajustes). */
+  timezone: string | (() => string);
   /** Inyectable: como se lanza pg_dump. */
   ejecutar?: (cmd: string, args: string[]) => Promise<{ ok: boolean; error?: string }>;
   cadaMs?: number;
@@ -139,6 +140,7 @@ export function explicarErrorDeCarpeta(error: unknown, carpeta: string): string 
 }
 
 export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespaldo> {
+  const tz = (): string => (typeof deps.timezone === 'function' ? deps.timezone() : deps.timezone);
   const { ahora, log } = deps;
   const cadaMs = deps.cadaMs ?? 60_000;
   const ejecutar = deps.ejecutar ?? ejecutarPorDefecto;
@@ -259,12 +261,22 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     ficheros.push({ nombre, bytes: s.size, que: `Los respaldos de chats y sus adjuntos (${r.ficheros} ${r.ficheros === 1 ? 'fichero' : 'ficheros'}, ${bytesEnPalabras(r.bytes)} sin comprimir)` });
   }
 
-  async function hacerCopia(quien = 'cada noche'): Promise<ResultadoCopia> {
-    if (enMarcha && ultima) return ultima;
+  let enCurso: Promise<ResultadoCopia> | null = null;
+
+  /** Una copia a la vez: quien llega mientras hay una en marcha espera a esa misma (no arranca otra). */
+  function hacerCopia(quien = 'cada noche'): Promise<ResultadoCopia> {
+    if (enCurso) return enCurso;
+    enCurso = hacerCopiaDeVerdad(quien).finally(() => {
+      enCurso = null;
+    });
+    return enCurso;
+  }
+
+  async function hacerCopiaDeVerdad(quien: string): Promise<ResultadoCopia> {
     enMarcha = true;
     const t0 = Date.now();
     const dir = carpeta();
-    const dia = diaEn(ahora(), deps.timezone);
+    const dia = diaEn(ahora(), tz());
     const ficheros: FicheroCopia[] = [];
     const notas: string[] = ['La vinculación del teléfono (.wa-auth) no se copia: es la sesión de WhatsApp de este servidor; si se restaura en otro, se escanea el QR otra vez.'];
     let error: string | null = null;
@@ -289,9 +301,9 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     const a = deps.ajustes();
     if (!a.activa || enMarcha) return false;
     const t = ahora();
-    const dia = diaEn(t, deps.timezone);
+    const dia = diaEn(t, tz());
     if (ultimoDia === dia) return false;
-    if (minutosDelDia(t, deps.timezone) < minutosDe(a.hora)) return false;
+    if (minutosDelDia(t, tz()) < minutosDe(a.hora)) return false;
     ultimoDia = dia;
     await deps.settingsRepo.put(CLAVE_ULTIMO_DIA_COPIA, dia, false).catch(() => undefined);
     await hacerCopia('cada noche');
@@ -316,11 +328,11 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
       let alerta: string | null = null;
       if (!ultima && !copias.length) alerta = a.activa ? `Todavía no hay ninguna copia: la primera se hará hoy a las ${a.hora}, o pulsa "Hacer copia ahora".` : 'La copia diaria está apagada y no hay ninguna copia hecha.';
       else if (ultima && !ultima.ok) alerta = `La última copia falló: ${ultima.error}`;
-      else if (ultima && t.getTime() - new Date(ultima.at).getTime() > 2 * 24 * 60 * 60_000) alerta = `La última copia tiene más de dos días (${diaEn(new Date(ultima.at), deps.timezone)}): revisa que la hora y la carpeta sigan bien.`;
+      else if (ultima && t.getTime() - new Date(ultima.at).getTime() > 2 * 24 * 60 * 60_000) alerta = `La última copia tiene más de dos días (${diaEn(new Date(ultima.at), tz())}): revisa que la hora y la carpeta sigan bien.`;
       let proxima: string;
-      const dia = diaEn(t, deps.timezone);
+      const dia = diaEn(t, tz());
       if (!a.activa) proxima = 'apagada: no se copia nada solo';
-      else if (ultimoDia === dia || minutosDelDia(t, deps.timezone) >= minutosDe(a.hora)) proxima = `mañana a las ${a.hora}`;
+      else if (ultimoDia === dia || minutosDelDia(t, tz()) >= minutosDe(a.hora)) proxima = `mañana a las ${a.hora}`;
       else proxima = `hoy a las ${a.hora}`;
       return {
         ajustes: a,

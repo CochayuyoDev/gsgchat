@@ -42,7 +42,7 @@ export const PAUSA_SEGUNDOS = 5;
 /** Un punto en Miraflores: dentro de la cobertura de Lima. */
 export const PIN_LIMA = { lat: -12.1211, lng: -77.0301 };
 
-export type RespuestaCliente = { pin: { lat: number; lng: number } } | { enlace: string } | { texto: string } | { baja: true } | { adjunto: 'image' | 'audio' | 'video' | 'document' | 'sticker' } | { boton: { id: string; title: string } };
+export type RespuestaCliente = { pin: { lat: number; lng: number } } | { enlace: string } | { texto: string } | { baja: true } | { adjunto: 'image' | 'audio' | 'video' | 'document' | 'sticker' } | { audio: string } | { boton: { id: string; title: string } };
 
 export interface RespuestaApi<T = Record<string, unknown>> {
   status: number;
@@ -61,6 +61,8 @@ export interface IAFalsa extends LectorIA {
 export interface EscenarioEntregas {
   app: FastifyInstance;
   repos: FakeRepos;
+  /** Los ajustes guardados (settings) del escenario: para dejar frases propias, ajustes, etc. */
+  settingsRepo: ReturnType<typeof createMemorySettingsRepo>;
   wa: FakeWhatsApp;
   simulador: GsgSimulado;
   conexionGsg: ServicioConexionGsg;
@@ -119,7 +121,7 @@ function urlDe(entrada: Parameters<typeof fetch>[0]): string {
 
 export const conPais = (telefono: string): string => (telefono.startsWith('51') ? telefono : `51${telefono}`);
 
-export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia?: boolean; horario?: [number, number]; margenMinutos?: number; /** El reloj arranca aquí (por defecto, ahora). */ arranque?: Date } = {}): Promise<EscenarioEntregas> {
+export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia?: boolean; horario?: [number, number]; margenMinutos?: number; /** El reloj arranca aquí (por defecto, ahora). */ arranque?: Date; /** La zona horaria «de Ajustes» (se puede cambiar en la prueba). */ zonaHoraria?: () => string } = {}): Promise<EscenarioEntregas> {
   const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
     RUTAS_HORA_INICIO: String(horaInicio),
@@ -217,8 +219,10 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
     supervisor: () => opciones.supervisor ?? '',
     ia: () => (ia.disponible ? ia : null),
     timezone: config.timezone,
+    zonaHoraria: opciones.zonaHoraria,
     publicBaseUrl: config.PUBLIC_BASE_URL,
     bus,
+    geo: { bbox: config.bbox, cobertura: config.coverageName },
     ahora: reloj,
   });
   if (opciones.margenMinutos !== undefined) await entregas.guardarAjustes({ margenMinutos: opciones.margenMinutos });
@@ -262,6 +266,7 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
   const escenario: EscenarioEntregas = {
     app,
     repos,
+    settingsRepo,
     wa,
     simulador,
     conexionGsg,
@@ -313,6 +318,10 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
       else if ('enlace' in respuesta) carga.text = respuesta.enlace;
       else if ('texto' in respuesta) carga.text = respuesta.texto;
       else if ('adjunto' in respuesta) carga.adjunto = respuesta.adjunto;
+      else if ('audio' in respuesta) {
+        carga.adjunto = 'audio';
+        carga.transcripcion = respuesta.audio;
+      }
       else if ('boton' in respuesta) carga.boton = respuesta.boton;
       else carga.text = 'BAJA';
       return api.post('/admin/dev/inbound', carga);

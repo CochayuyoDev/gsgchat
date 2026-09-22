@@ -358,11 +358,24 @@ export interface Config extends RawConfig {
   soloNumeros: string[];
 }
 
+/** Que es cada variable obligatoria, para que el error del arranque diga que poner. */
+const QUE_ES: Record<string, string> = {
+  PUBLIC_BASE_URL: 'la dirección pública de este servidor, con https, por ejemplo https://gsgchat.midominio.com (es la que ven WhatsApp y GSG)',
+  DATABASE_URL: 'dónde guardar los datos: postgres://usuario:clave@host/base, o pglite://./.wa-data para la base embebida sin Postgres',
+  TRACKING_SECRET: 'una clave larga y secreta cualquiera (firma los enlaces): por ejemplo, 32 letras y números al azar',
+};
+
+function explicarVariable(nombre: string, mensaje: string): string {
+  const que = QUE_ES[nombre];
+  const falta = /required/i.test(mensaje) ? 'falta' : mensaje;
+  return que ? `${falta} — ${que}` : mensaje;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = schema.safeParse(env);
   if (!parsed.success) {
-    const detail = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
-    throw new Error(`Configuracion invalida:\n${detail}`);
+    const detail = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${explicarVariable(i.path.join('.'), i.message)}`).join('\n');
+    throw new Error(`Configuracion invalida (revisa el fichero .env o las variables del contenedor):\n${detail}`);
   }
 
   const raw = parsed.data;

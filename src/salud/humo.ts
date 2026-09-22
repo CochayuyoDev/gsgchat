@@ -72,7 +72,8 @@ export interface DepsHumo {
   settingsRepo: SettingsRepo;
   ahora: () => Date;
   log: (m: string, d?: Record<string, unknown>) => void;
-  timezone: string;
+  /** Zona horaria, o una funcion que la da (la elegida en Ajustes). */
+  timezone: string | (() => string);
   whatsappCaido: () => boolean;
   avisar: (texto: string) => Promise<{ ok: boolean; por: string; detalle: string }>;
   cadaMs?: number;
@@ -119,6 +120,7 @@ export function explicarBloqueo(code: string, reason: string): string {
 }
 
 export function crearHumo(deps: DepsHumo): Humo {
+  const tz = (): string => (typeof deps.timezone === 'function' ? deps.timezone() : deps.timezone);
   const { ahora, log } = deps;
   const cadaMs = deps.cadaMs ?? 60_000;
   const esperaEntregaMs = deps.esperaEntregaMs ?? 60_000;
@@ -268,9 +270,9 @@ export function crearHumo(deps: DepsHumo): Humo {
     const a = deps.ajustes();
     if (!a.activo || enMarcha) return false;
     const t = ahora();
-    const dia = diaEn(t, deps.timezone);
+    const dia = diaEn(t, tz());
     if (ultimoDia === dia) return false;
-    const minutos = minutosDelDia(t, deps.timezone);
+    const minutos = minutosDelDia(t, tz());
     if (minutos < minutosDe(a.hora) || minutos >= minutosDe(a.hora) + VENTANA_MIN) return false;
     ultimoDia = dia;
     await deps.settingsRepo.put(CLAVE_HUMO_ULTIMO_DIA, dia, false).catch(() => undefined);
@@ -284,10 +286,10 @@ export function crearHumo(deps: DepsHumo): Humo {
     estado() {
       const a = deps.ajustes();
       const t = ahora();
-      const dia = diaEn(t, deps.timezone);
+      const dia = diaEn(t, tz());
       let proxima: string;
       if (!a.activo) proxima = 'apagadas: no se comprueba nada solo';
-      else if (ultimoDia === dia || minutosDelDia(t, deps.timezone) >= minutosDe(a.hora)) proxima = `mañana a las ${a.hora}`;
+      else if (ultimoDia === dia || minutosDelDia(t, tz()) >= minutosDe(a.hora)) proxima = `mañana a las ${a.hora}`;
       else proxima = `hoy a las ${a.hora}`;
       return { ajustes: a, ultima: historial[0] ?? null, historial, enMarcha, proxima };
     },

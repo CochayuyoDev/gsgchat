@@ -29,6 +29,27 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerConnectRoutes } from './connect-routes.js';
+import { conexionGsgVigente, RUTA_SIMULADOR, type ServicioConexionGsg } from '../rutas/conexion-gsg.js';
+import { registerGsgExtrasRoutes } from '../rutas/gsg-extras-routes.js';
+import type { GsgSimulado } from '../entregas/gsg-simulado.js';
+import { crearServicioPerfiles } from '../perfiles/servicio.js';
+import type { SettingsRepo } from '../settings/service.js';
+
+/** Sin repo de settings (arranques viejos), el perfil se recuerda solo mientras corre el proceso. */
+function memoriaDePerfil(): SettingsRepo {
+  const m = new Map<string, string>();
+  return {
+    async getAll() {
+      return [...m.entries()].map(([key, value]) => ({ key, value, encrypted: false }));
+    },
+    async put(key: string, value: string) {
+      m.set(key, value);
+    },
+    async remove(key: string) {
+      m.delete(key);
+    },
+  } as SettingsRepo;
+}
 import type { StokyClient } from '../stoky/client.js';
 import { registerDevRoutes } from './dev-routes.js';
 import { registerLocalRoutes } from './local-routes.js';
@@ -50,6 +71,8 @@ import { entrenamientoPage } from './entrenamiento-page.js';
 import { tiendasPage } from './tiendas-page.js';
 import { mapaPage } from './mapa-page.js';
 import { pagarPage } from './pagar-page.js';
+import { ICONO_192_PNG_BASE64, ICONO_512_PNG_BASE64 } from './iconos.js';
+import { NOMBRE_SISTEMA } from '../marca.js';
 import type { ServicioEntrenamiento } from '../entrenamiento/servicio.js';
 
 export interface WebDeps {
@@ -80,6 +103,14 @@ export interface WebDeps {
   entregas?: ServicioEntregas;
   /** "Que todo funcione" (la pantalla /fiabilidad): si esta montado en este arranque. */
   fiabilidad?: boolean;
+  /** La conexion con GSG; si no viene, se usa la ultima creada en este proceso. */
+  conexionGsg?: ServicioConexionGsg;
+  /** Si el simulador de GSG esta montado en este arranque (para ofrecer tokens de prueba). */
+  simuladorGsg?: boolean;
+  /** El simulador mismo (si esta montado), para las pruebas desde Conexion. */
+  simulador?: GsgSimulado;
+  /** Para guardar por clave (perfil de instalacion). */
+  settingsRepo?: SettingsRepo;
 }
 
 /**
@@ -123,6 +154,36 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   // El modo del sistema (gsg | completo) lo leen todas las paginas al pintar el armazon.
   fijarModoVigente(() => deps.ajustes?.modo() ?? 'gsg');
 
+  // "Añadir a la pantalla de inicio" en el celular: el manifest y sus iconos.
+  // Sin service worker: la app vive en el servidor y nada se cachea a ciegas.
+  app.get('/manifest.webmanifest', async (_request, reply) => {
+    return reply
+      .type('application/manifest+json')
+      .header('cache-control', 'public, max-age=3600')
+      .send({
+        name: NOMBRE_SISTEMA,
+        short_name: NOMBRE_SISTEMA,
+        description: 'Las entregas de hoy, los chats y los motorizados, desde el celular.',
+        start_url: '/hoy',
+        scope: '/',
+        display: 'standalone',
+        background_color: '#f6f7f9',
+        theme_color: '#0f766e',
+        lang: 'es-PE',
+        icons: [
+          { src: '/icono-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icono-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+        ],
+      });
+  });
+  for (const [ruta, base64] of [
+    ['/icono-192.png', ICONO_192_PNG_BASE64],
+    ['/icono-512.png', ICONO_512_PNG_BASE64],
+  ] as const) {
+    const bytes = Buffer.from(base64, 'base64');
+    app.get(ruta, async (_request, reply) => reply.type('image/png').header('cache-control', 'public, max-age=86400').send(bytes));
+  }
+
   // El icono de la pestaña, para todas las paginas: sin el, cada visita deja
   // un 404 en la consola del navegador.
   app.get('/favicon.ico', async (_request, reply) => {
@@ -148,6 +209,32 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   });
 
   await registerConnectRoutes(app, { config, settings, wa, ajustes: deps.ajustes });
+  // Perfiles de instalacion: "para que se usa GSGchat" (Conexion, arriba). Ver src/perfiles.
+  const perfiles = await crearServicioPerfiles({
+    settingsRepo: deps.settingsRepo ?? memoriaDePerfil(),
+    ajustes: deps.ajustes,
+    entregas: deps.entregas,
+    automation: repos.automation,
+  });
+  app.get('/admin/perfil', async () => ({ ok: true, perfiles: perfiles.perfiles(), actual: perfiles.actual() }));
+  app.post('/admin/perfil', async (request, reply) => {
+    const u = request.usuario;
+    if (!u || u.rol !== 'admin' || u.porToken) return reply.code(403).send({ error: 'Solo un administrador cambia el perfil de la instalación.' });
+    const body = z.object({ perfil: z.enum(['reparto', 'tienda', 'chat']) }).parse(request.body ?? {});
+    const r = await perfiles.aplicar(body.perfil, u.nombre ?? u.usuario ?? null);
+    return { ok: true, ...r };
+  });
+  // Lo que rodea a GSG (descartes, contrato, tokens del simulador, bitacora, cuadre):
+  // con la conexion vigente de este proceso. Ver src/rutas/gsg-extras-routes.ts.
+  const conexionGsg = deps.conexionGsg ?? conexionGsgVigente();
+  if (conexionGsg && deps.entregas) {
+    await registerGsgExtrasRoutes(app, {
+      conexion: conexionGsg,
+      conSimulador: () => deps.simuladorGsg ?? (deps.simulador ? true : app.hasRoute({ method: 'GET', url: RUTA_SIMULADOR + '/*' })),
+      simulador: deps.simulador,
+      entregasDelDia: async (dia) => (await repos.entregas.listar({ dia, limit: 5000 })).map((e) => ({ referencia: e.referencia, estado: e.estado })),
+    });
+  }
   await registerWahaRoutes(app, { config, settings, repos });
   await registerLocalRoutes(app, {
     config,
@@ -238,9 +325,20 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   // El contrato para los programadores de GSG, tal cual esta en docs/ (con
   // sesion: lo baja quien opera y se lo manda a GSG).
   app.get('/docs/contrato-gsg.md', async (_request, reply) => {
-    const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+    // src/web → ../../docs; dist/src/web → ../../../docs; y si no, la carpeta del proceso.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const candidatos = [path.join(here, '..', '..', 'docs', 'CONTRATO-GSG.md'), path.join(here, '..', '..', '..', 'docs', 'CONTRATO-GSG.md'), path.resolve(process.cwd(), 'docs', 'CONTRATO-GSG.md')];
     try {
-      const texto = await readFile(path.join(raiz, 'docs', 'CONTRATO-GSG.md'), 'utf8');
+      let texto = '';
+      for (const c of candidatos) {
+        try {
+          texto = await readFile(c, 'utf8');
+          break;
+        } catch {
+          /* siguiente */
+        }
+      }
+      if (!texto) throw new Error('no esta');
       return reply
         .type('text/markdown; charset=utf-8')
         .header('content-disposition', 'attachment; filename="CONTRATO-GSG.md"')

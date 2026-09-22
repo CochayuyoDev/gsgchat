@@ -50,7 +50,8 @@ export interface DepsVigilante {
   settingsRepo: SettingsRepo;
   ahora: () => Date;
   log: (m: string, d?: Record<string, unknown>) => void;
-  timezone: string;
+  /** Zona horaria, o una funcion que la da (la elegida en Ajustes). */
+  timezone: string | (() => string);
   /** En la demo se puede simular una caida desde la pantalla. */
   permitirSimulacion?: boolean;
   /** Cada cuanto mira (30 s). */
@@ -93,12 +94,13 @@ export interface Vigilante {
   estado(): EstadoVigilante;
   /** Avisa por el canal que quede: WhatsApp si funciona, si no correo. */
   avisar(texto: string): Promise<{ ok: boolean; por: 'whatsapp' | 'correo' | 'nadie'; detalle: string }>;
-  /** Solo en la demo: fuerza "caido" (true), "conectado" (false) o vuelve a lo real (null). */
-  simular(caido: boolean | null): void;
+  /** Solo en la demo: fuerza "caido" (true), "conectado" (false) o vuelve a lo real (null); con minutos, vuelve solo a lo real pasado ese tiempo. */
+  simular(caido: boolean | null, minutos?: number): void;
   arrancar(): () => void;
 }
 
 export function crearVigilante(deps: DepsVigilante): Vigilante {
+  const tz = (): string => (typeof deps.timezone === 'function' ? deps.timezone() : deps.timezone);
   const { ahora, log } = deps;
   const cadaMs = deps.cadaMs ?? 30_000;
   const rutaConexion = deps.rutaConexion ?? '/setup';
@@ -113,6 +115,7 @@ export function crearVigilante(deps: DepsVigilante): Vigilante {
   let motivoParado: string | null = null;
   let ultimaCaida: UltimaCaida | null = null;
   let simulacion: boolean | null = null;
+  let temporizadorSimulacion: ReturnType<typeof setTimeout> | null = null;
   let ultimoSeguimiento: Seguimiento = 'desconocido';
   let ultimoConectado: boolean | null = null;
   let cargada = false;
@@ -169,7 +172,7 @@ export function crearVigilante(deps: DepsVigilante): Vigilante {
 
   async function avisarCaida(): Promise<void> {
     const a = deps.ajustes();
-    const desde = horaEn(caidoDesde!, deps.timezone);
+    const desde = horaEn(caidoDesde!, tz());
     const local = deps.estadoLocal?.() ?? null;
     const porQue = necesitaQr
       ? ` ${motivoParado}.`
@@ -191,7 +194,7 @@ export function crearVigilante(deps: DepsVigilante): Vigilante {
     await deps.settingsRepo.put(CLAVE_ULTIMA_CAIDA, JSON.stringify(ultimaCaida), false).catch(() => undefined);
     const a = deps.ajustes();
     if (aviso && a.avisarAlVolver) {
-      const texto = `WhatsApp volvió a las ${horaEn(hasta, deps.timezone)} (estuvo caído ${minutosEnPalabras(minutos)}). Lo que se quedó sin salir sale ahora solo.`;
+      const texto = `WhatsApp volvió a las ${horaEn(hasta, tz())} (estuvo caído ${minutosEnPalabras(minutos)}). Lo que se quedó sin salir sale ahora solo.`;
       // Por WhatsApp ya se puede; y por correo, para cerrar el hilo del aviso.
       await deps.avisarWhatsApp(texto).catch(() => ({ ok: false }));
       if (aviso.por === 'correo') await deps.correo.enviar(`WhatsApp volvió — GSGchat`, texto);
@@ -274,13 +277,13 @@ export function crearVigilante(deps: DepsVigilante): Vigilante {
         break;
     }
     if (ultimoConectado) {
-      return conectadoDesde ? `Conectado desde las ${horaEn(conectadoDesde, deps.timezone)}${ultimaCaida ? ` · la última caída fue ${haceCuanto(new Date(ultimaCaida.hasta), t)} y duró ${minutosEnPalabras(ultimaCaida.minutos)}` : ''}.` : 'Conectado.';
+      return conectadoDesde ? `Conectado desde las ${horaEn(conectadoDesde, tz())}${ultimaCaida ? ` · la última caída fue ${haceCuanto(new Date(ultimaCaida.hasta), t)} y duró ${minutosEnPalabras(ultimaCaida.minutos)}` : ''}.` : 'Conectado.';
     }
     if (!caidoDesde) return 'Comprobando…';
-    const partes = [`Caído desde las ${horaEn(caidoDesde, deps.timezone)} (${minutosEnPalabras(Math.round((t.getTime() - caidoDesde.getTime()) / 60_000))})`];
+    const partes = [`Caído desde las ${horaEn(caidoDesde, tz())} (${minutosEnPalabras(Math.round((t.getTime() - caidoDesde.getTime()) / 60_000))})`];
     if (necesitaQr && motivoParado) partes.push(motivoParado.toLowerCase());
     else if (reintentos.length) partes.push(`se pidió la conexión ${reintentos.length} ${reintentos.length === 1 ? 'vez' : 'veces'} en la última hora`);
-    if (aviso) partes.push(aviso.por === 'correo' ? `se avisó por correo a las ${horaEn(new Date(aviso.at), deps.timezone)}` : 'no se pudo avisar por correo');
+    if (aviso) partes.push(aviso.por === 'correo' ? `se avisó por correo a las ${horaEn(new Date(aviso.at), tz())}` : 'no se pudo avisar por correo');
     else partes.push(`se avisará por correo a los ${minutosEnPalabras(deps.ajustes().minutosAntesDeAvisar)}`);
     return `${partes.join(' · ')}.`;
   }
@@ -317,9 +320,21 @@ export function crearVigilante(deps: DepsVigilante): Vigilante {
       if (r.ok) return { ok: true, por: 'correo', detalle: r.detalle };
       return { ok: false, por: 'nadie', detalle: caido ? `El WhatsApp está caído y el correo tampoco salió: ${r.detalle}` : `Ni WhatsApp ni correo: ${r.detalle}` };
     },
-    simular(caido) {
+    simular(caido, minutos) {
       if (!deps.permitirSimulacion) return;
       simulacion = caido;
+      if (temporizadorSimulacion) {
+        clearTimeout(temporizadorSimulacion);
+        temporizadorSimulacion = null;
+      }
+      if (caido !== null && minutos && minutos > 0) {
+        temporizadorSimulacion = setTimeout(() => {
+          simulacion = null;
+          temporizadorSimulacion = null;
+          void tick().catch(() => undefined);
+        }, Math.min(60, minutos) * 60_000);
+        temporizadorSimulacion.unref?.();
+      }
     },
     arrancar() {
       const timer = setInterval(() => {

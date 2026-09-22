@@ -74,8 +74,8 @@ export async function registerFiabilidadRoutes(app: FastifyInstance, deps: Fiabi
   app.post('/admin/fiabilidad/vigilante/simular', async (request, reply) => {
     const estado = await fiabilidad.estado();
     if (!estado.demo) return reply.code(400).send({ error: 'Simular una caída solo se puede en la demostración.' });
-    const body = z.object({ caido: z.boolean().nullable() }).parse(request.body ?? {});
-    fiabilidad.vigilante.simular(body.caido);
+    const body = z.object({ caido: z.boolean().nullable(), minutos: z.number().int().min(1).max(60).optional() }).parse(request.body ?? {});
+    fiabilidad.vigilante.simular(body.caido, body.minutos);
     await fiabilidad.vigilante.tick();
     return { ok: true, vigilante: fiabilidad.vigilante.estado() };
   });
@@ -89,7 +89,12 @@ export async function registerFiabilidadRoutes(app: FastifyInstance, deps: Fiabi
 
   app.post('/admin/fiabilidad/copia/ahora', async (request, reply) => {
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador hace la copia.' });
-    const resultado = await fiabilidad.respaldo.hacerCopia(quienEs(request.usuario));
+    // Si la copia tarda (carpeta de red, muchos respaldos), la pantalla no se
+    // queda colgada: a los 25 s se contesta que sigue en marcha y el estado de
+    // arriba la recoge cuando termine.
+    const copia = fiabilidad.respaldo.hacerCopia(quienEs(request.usuario));
+    const resultado = await Promise.race([copia, new Promise<null>((r) => setTimeout(() => r(null), 25_000).unref?.())]);
+    if (resultado === null) return reply.code(202).send({ ok: true, enMarcha: true, detalle: 'La copia sigue haciéndose (tarda más de lo normal). El estado de arriba se actualizará solo cuando termine.' });
     if (!resultado.ok) return reply.code(400).send({ error: resultado.error, resultado });
     return { ok: true, resultado };
   });

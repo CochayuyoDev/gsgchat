@@ -49,6 +49,12 @@ export interface MotorListaDeps {
   ahora?: () => Date;
   azar?: () => number;
   log?: (mensaje: string, detalle?: Record<string, unknown>) => void;
+  /**
+   * Otra franja que amplia la del reparto: el horario de entregas de la
+   * pantalla (Hoy → Ajustes). Con GSG entregando hasta las 22:00, pedir la
+   * ubicacion solo de 9 a 19 dejaba a los de la tarde para el dia siguiente.
+   */
+  horarioExtra?: () => { desde: string; hasta: string } | null;
 }
 
 export interface ResultadoTickLista {
@@ -103,6 +109,14 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
       ajustes = await lista.ajustesReparto();
       opciones = aplicarAjustes(deps.opciones, ajustes);
       if (deps.nombreNegocio) opciones = { ...opciones, negocio: deps.nombreNegocio() };
+      const extra = deps.horarioExtra?.();
+      if (extra) {
+        const desde = Number(extra.desde.slice(0, 2));
+        const hasta = Number(extra.hasta.slice(0, 2)) + (Number(extra.hasta.slice(3, 5)) > 0 ? 1 : 0);
+        if (Number.isFinite(desde) && Number.isFinite(hasta)) {
+          opciones = { ...opciones, horaInicio: Math.min(opciones.horaInicio, Math.max(0, desde)), horaFin: Math.max(opciones.horaFin, Math.min(24, hasta)) };
+        }
+      }
     } catch (error) {
       log('no se pudieron leer los ajustes para la lista de envio automatico', { detalle: String(error) });
     }

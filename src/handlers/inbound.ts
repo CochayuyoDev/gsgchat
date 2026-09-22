@@ -32,7 +32,7 @@ import type { AutoReply } from '../db/automation.js';
 import type { Sender } from '../outbound/sender.js';
 import type { AnuncioEntrada, InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
-import type { ExtractionSuccess, FailureReason } from '../types.js';
+import type { FailureReason } from '../types.js';
 import {
   intencionDe,
   responder,
@@ -40,7 +40,6 @@ import {
   type Contexto as ContextoPreventa,
   type Entrada as EntradaPreventa,
 } from '../preventa/flow.js';
-import { saludoPorHora } from '../automation/engine.js';
 import { mensajesVigentes, render } from '../preventa/mensajes.js';
 import {
   coincideDelTodo,
@@ -51,7 +50,7 @@ import {
   type StokyClient,
 } from '../stoky/client.js';
 import type { MessageKind } from '../db/messages.js';
-import { enrollContact, matchRule, onInboundReply, renderPlaceholders } from '../automation/engine.js';
+import { enrollContact, matchRule, onInboundReply, renderPlaceholders, saludoPorHora } from '../automation/engine.js';
 
 import { atenderRespuestaDeRuta, type RespuestaRuta } from '../rutas/inbound.js';
 import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
@@ -153,10 +152,6 @@ const normalize = (text: string): string =>
 function matchesKeyword(text: string, keywords: string[]): boolean {
   const clean = normalize(text);
   return keywords.some((k) => clean === k || clean.startsWith(`${k} `));
-}
-
-function describe(result: ExtractionSuccess): string {
-  return `${result.lat.toFixed(6)}, ${result.lng.toFixed(6)}`;
 }
 
 /**
@@ -854,6 +849,15 @@ export async function handleInboundMessage(
           },
           fueraDeZona: true,
         });
+        // Las entregas del dia se enteran ya: el pedido pasa a una persona y al
+        // cliente se le explica con el texto editable (no se registra el pin).
+        if (deps.entregas) {
+          const enEntrega = await deps.entregas.alUbicacionFueraDeZona(contact, { lat: message.location.latitude, lng: message.location.longitude, fuente: 'pin de whatsapp' }).catch(() => ({ atendida: false as const }));
+          if (enEntrega.atendida) {
+            if (enEntrega.responder) await reply(enEntrega.responder);
+            return;
+          }
+        }
         if (await contestarRuta(enRuta)) return;
       }
       // Explicar y seguir: dejar la conversacion muerta en un "no puedo
@@ -903,7 +907,13 @@ export async function handleInboundMessage(
       return;
     }
 
-    await reply(`Ubicación recibida: ${describe(result)}\n${result.mapsUrl}`);
+    // Sin coordenadas a la vista: el enlace basta. En modo GSG, con el texto
+    // editable de las entregas (motorizado, horario, soporte).
+    if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
+      await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }));
+      return;
+    }
+    await reply(`Ubicación registrada.\n${result.mapsUrl}`);
     return;
   }
 
@@ -1029,6 +1039,19 @@ export async function handleInboundMessage(
   // contesta un motorizado ("40 min"). Van antes que el reparto y que el
   // asistente: es a lo que ese numero esta contestando. Un enlace de mapa
   // no es una confirmacion: ese sigue por el camino de la ubicacion.
+  // Un enlace de mapa que cae fuera de la zona: la entrega del dia lo aparta
+  // para una persona y al cliente se le explica; no se registra.
+  if (deps.entregas && !result.ok && result.reason === 'outside_bbox') {
+    const sinZona = await extractLocation(text, {}).catch(() => null);
+    if (sinZona?.ok) {
+      const enEntrega = await deps.entregas.alUbicacionFueraDeZona(contact, { lat: sinZona.lat, lng: sinZona.lng, fuente: `enlace de mapa (${sinZona.source})` }).catch(() => ({ atendida: false as const }));
+      if (enEntrega.atendida) {
+        if (enEntrega.responder) await reply(enEntrega.responder);
+        return;
+      }
+    }
+  }
+
   if (deps.entregas && !result.ok) {
     const enEntrega = await deps.entregas.alTexto(contact, text).catch((error) => {
       request_log(deps, 'fallo el modulo de entregas al leer un mensaje', error);
@@ -1121,7 +1144,7 @@ export async function handleInboundMessage(
       kind: 'interactive',
       category: 'UTILITY',
       interactive: {
-        body: `Entendí esta ubicación: ${describe(result)}\n${result.mapsUrl}\n\n¿Es correcta?`,
+        body: `Entendí esta ubicación:\n${result.mapsUrl}\n\n¿Es correcta?`,
         buttons: [
           { id: `${CONFIRM_PREFIX}${locationId}`, title: 'Sí, es esa' },
           { id: REJECT_ID, title: 'No, corregir' },
@@ -1132,7 +1155,14 @@ export async function handleInboundMessage(
   }
 
   await repos.locations.confirm(locationId);
-  await reply(`Ubicación registrada: ${describe(result)}\n${result.mapsUrl}`);
+  // Sin coordenadas a la vista: el enlace del mapa basta. En modo GSG, ademas,
+  // lo que sigue (motorizado, horario, soporte) con el texto editable de las
+  // entregas, aunque este cliente no tenga pedido de hoy en la lista.
+  if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
+    await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }));
+    return;
+  }
+  await reply(`Ubicación registrada.\n${result.mapsUrl}`);
 }
 
 /** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */

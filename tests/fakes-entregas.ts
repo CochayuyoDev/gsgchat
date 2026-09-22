@@ -34,7 +34,7 @@ export function createFakeEntregas(): FakeEntregas {
       const existente = motorizados.find((m) => m.phone === input.phone);
       if (existente) return { motorizado: copiaM(existente), nuevo: false };
       const ahora = new Date();
-      const m: Motorizado = { id: seqM++, phone: input.phone, nombre: input.nombre, placa: input.placa ?? null, zona: input.zona ?? null, estado: input.estado ?? 'activo', entregasHoy: 0, entregasHoyDia: null, ultimoEncargoAt: null, ultimaLat: null, ultimaLng: null, ultimaPosicionAt: null, createdAt: ahora, updatedAt: ahora };
+      const m: Motorizado = { id: seqM++, phone: input.phone, nombre: input.nombre, placa: input.placa ?? null, zona: input.zona ?? null, estado: input.estado ?? 'activo', entregasHoy: 0, entregasHoyDia: null, ultimoEncargoAt: null, ultimaLat: null, ultimaLng: null, ultimaPosicionAt: null, enlaceToken: null, enlaceVenceAt: null, createdAt: ahora, updatedAt: ahora };
       motorizados.push(m);
       return { motorizado: copiaM(m), nuevo: true };
     },
@@ -44,6 +44,11 @@ export function createFakeEntregas(): FakeEntregas {
     },
     async motorizadoPorTelefono(phone) {
       const m = motorizados.find((x) => x.phone === phone);
+      return m ? copiaM(m) : null;
+    },
+    async motorizadoPorEnlace(token) {
+      if (!token) return null;
+      const m = motorizados.find((x) => x.enlaceToken === token);
       return m ? copiaM(m) : null;
     },
     async listarMotorizados() {
@@ -115,6 +120,11 @@ export function createFakeEntregas(): FakeEntregas {
         segundaVisitaPedidaAt: null,
         segundaVisitaVenceAt: null,
         cercaAvisadoAt: null,
+        ubicacionPropuestaAt: null,
+        ubicacionPropuestaLat: null,
+        ubicacionPropuestaLng: null,
+        motorizadoTiempoDudosoAt: null,
+        motorizadoTiempoDudosoMin: null,
         estado: input.estado,
         incidencia: null,
         incidenciaDetalle: null,
@@ -137,6 +147,22 @@ export function createFakeEntregas(): FakeEntregas {
     async vivaPorTelefono(phone) {
       const vivas = entregas.filter((x) => x.phone === phone && ESTADOS_ENTREGA_VIVOS.includes(x.estado)).sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id);
       return vivas[0] ? copiaE(vivas[0]) : null;
+    },
+    async vivasPorTelefono(phone) {
+      return entregas
+        .filter((x) => x.phone === phone && ESTADOS_ENTREGA_VIVOS.includes(x.estado))
+        .sort((a, b) => a.dia.localeCompare(b.dia) || a.id - b.id)
+        .map(copiaE);
+    },
+    async puntualidadDeMotorizados(desde) {
+      const porMotorizado = new Map<number, number[]>();
+      for (const e of entregas) {
+        if (e.estado !== 'entregada' || !e.motorizadoId || !e.llegaAproxAt || !e.entregadaAt || e.entregadaComo === 'cierre' || e.entregadaAt < desde) continue;
+        const lista = porMotorizado.get(e.motorizadoId) ?? [];
+        lista.push((e.entregadaAt.getTime() - e.llegaAproxAt.getTime()) / 60_000);
+        porMotorizado.set(e.motorizadoId, lista);
+      }
+      return [...porMotorizado.entries()].map(([motorizadoId, desvios]) => ({ motorizadoId, entregas: desvios.length, desvioMedioMin: Math.round(desvios.reduce((a, b) => a + b, 0) / desvios.length) }));
     },
     async listar(filtro) {
       let lista = filtro.dia ? entregas.filter((e) => e.dia === filtro.dia) : entregas.filter((e) => ESTADOS_ENTREGA_VIVOS.includes(e.estado));
@@ -170,6 +196,20 @@ export function createFakeEntregas(): FakeEntregas {
       return entregas
         .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_confirmacion') && (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.ubicacionEstado !== 'pendiente' && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
         .sort((a, b) => (a.confirmacionProximoAt ?? a.createdAt).getTime() - (b.confirmacionProximoAt ?? b.createdAt).getTime() || a.id - b.id)
+        .slice(0, limite)
+        .map(copiaE);
+    },
+    async tocaProponerUbicacion(ahora, limite) {
+      return entregas
+        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_ubicacion') && e.ubicacionEstado === 'pendiente' && e.ubicacionPropuestaLat != null && !e.ubicacionPropuestaAt && !e.loteId && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
+        .sort((a, b) => (a.prioridad === 'urgente' ? 0 : 1) - (b.prioridad === 'urgente' ? 0 : 1) || a.id - b.id)
+        .slice(0, limite)
+        .map(copiaE);
+    },
+    async propuestasSinRespuesta(antesDe, limite) {
+      return entregas
+        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_ubicacion') && e.ubicacionEstado === 'pendiente' && e.ubicacionPropuestaAt && e.ubicacionPropuestaAt.getTime() <= antesDe.getTime() && !e.loteId)
+        .sort((a, b) => a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
     },

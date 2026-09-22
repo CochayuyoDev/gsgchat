@@ -58,7 +58,13 @@ const CSS = `
   td.vacio { color: var(--texto-suave); text-align: center; padding: 24px; }
   td.vacio-td { padding: 14px; }
   .chip.estado-mot { margin-left: 6px; }
-  .acciones { display: flex; gap: 4px; flex-wrap: wrap; }
+  .acciones { display: flex; flex-direction: column; gap: 6px; min-width: 250px; }
+  .acciones .principales { display: flex; gap: 6px; flex-wrap: wrap; }
+  .acciones .secundarias { display: flex; gap: 2px 10px; flex-wrap: wrap; }
+  .acciones .secundarias button { border: 0; background: none; padding: 4px 0; min-height: 0; color: var(--texto-suave); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--borde); font-size: 12.5px; }
+  .acciones .secundarias button:hover:not(:disabled) { color: var(--texto); text-decoration-color: currentColor; }
+  .acciones .secundarias button:disabled { opacity: .5; text-decoration: none; }
+  .acciones .secundarias button.peligro { color: var(--rojo); }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
   .pedido { padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: 13px; line-height: 1.45; }
   .pedido:last-child { border-bottom: 0; }
@@ -93,7 +99,10 @@ const CSS = `
     #motorizados > tr > td:nth-child(3)::before { content: 'Hoy'; }
     #motorizados > tr > td:nth-child(4)::before { content: 'Ahora mismo'; }
     #motorizados > tr > td:last-child { padding-top: 8px; }
-    .acciones button { min-height: 44px; flex: 1 1 auto; }
+    .acciones { min-width: 0; }
+    .acciones .principales button { min-height: 44px; flex: 1 1 auto; }
+    .acciones .secundarias { gap: 4px 8px; }
+    .acciones .secundarias button { min-height: 40px; padding: 8px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); text-decoration: none; background: var(--superficie); }
     .caja > h2 button.sm { min-height: 40px; }
     #motorizados > tr.fila-ruta { padding: 8px 12px; background: var(--superficie-2); margin-top: -6px; }
     #motorizados > tr.fila-ruta > td { padding: 0; border: 0; }
@@ -110,7 +119,7 @@ ${opts.disponible ? '' : '<div class="explica"><b>Los motorizados no están disp
 <details class="explica">
   <summary>¿Cómo se reparten los pedidos entre los motorizados?</summary>
   <p><b>Cada pedido listo (con ubicación y confirmación) va al motorizado activo que anda más cerca</b> (su última posición de hoy, a menos de 6 km del pin); si nadie está cerca, al de la zona del distrito; y si no, al que menos lleva hoy. Él recibe el pin por WhatsApp y contesta en cuántos minutos entrega; a eso se le suma el margen y se le avisa al cliente. Cuando escribe <b>"entregado"</b> (o manda la foto), el pedido queda entregado y su última posición pasa a ser ese pin.</p>
-  <p class="muted" style="margin:0">Un motorizado en <b>descanso</b> no recibe pedidos hoy. Si no contesta a los avisos o dice «no puedo», el pedido pasa solo a otro. Si escribe <b>«me quedo sin moto»</b> (o «accidente»), todos sus pedidos pasan a otros y él queda en descanso; con <b>«Traspasar sus pedidos»</b> lo haces tú. <b>«Ver su ruta de hoy»</b> ordena sus pedidos por cercanía (urgentes primero) y <b>«Mandarle su ruta»</b> se la escribe; él también puede pedirla escribiendo «ruta».</p>
+  <p class="muted" style="margin:0">Un motorizado en <b>descanso</b> no recibe pedidos hoy. Si no contesta a los avisos o dice «no puedo», el pedido pasa solo a otro. Si escribe <b>«me quedo sin moto»</b> (o «accidente»), todos sus pedidos pasan a otros y él queda en descanso; con <b>«Traspasar sus pedidos»</b> lo haces tú. <b>«Mandarle su enlace»</b> le manda su página de pedidos de hoy (sin instalar nada, con botones grandes para avisar «cerca», «entregado» o los minutos); vale 7 días y cada botón hace lo mismo que su mensaje por WhatsApp. <b>«Ver su ruta de hoy»</b> ordena sus pedidos por cercanía (urgentes primero) y <b>«Mandarle su ruta»</b> se la escribe; él también puede pedirla escribiendo «ruta».</p>
 </details>
 
 <div class="tarjetas" id="tarjetas"></div>
@@ -202,15 +211,17 @@ function pintar() {
       var quieto = m.estado === 'baja' ? '<span class="muted">de baja: no recibe pedidos</span>' : m.estado === 'descanso' ? '<span class="muted">en descanso: hoy no recibe pedidos</span>' : '<span class="muted">libre</span>';
       return '<tr><td><b>' + esc(m.nombre) + '</b>' + estado + '<div class="sub">' + esc(telefonoBonito(m.phone)) + (m.placa ? ' · ' + esc(m.placa) : '') + '</div></td>' +
         '<td class="sub">' + esc(m.zona || '—') + '</td>' +
-        '<td>' + m.entregasHoy + (entregadasDe(m.id).length ? '<div class="sub">' + entregadasDe(m.id).length + ' entregad' + (entregadasDe(m.id).length === 1 ? 'o' : 'os') + '</div>' : '') + '</td>' +
+        '<td>' + m.entregasHoy + (entregadasDe(m.id).length ? '<div class="sub">' + entregadasDe(m.id).length + ' entregad' + (entregadasDe(m.id).length === 1 ? 'o' : 'os') + '</div>' : '') + (m.puntualidad ? '<div class="sub" title="Comparando la hora que se le avisó al cliente con la hora real de cada entrega, últimos 30 días">⏱ ' + esc(m.puntualidad.texto) + '</div>' : '') + '</td>' +
         '<td>' + (ahora.length ? ahora.map(function (e) { return '<div class="sub"><b>' + esc(e.referencia) + '</b> ' + (e.motorizadoEstado === 'respondio' ? 'llega ' + hora(e.llegaAproxAt) : 'esperando su tiempo desde ' + hora(e.motorizadoEnviadoAt)) + '</div>'; }).join('') : quieto) + ultimaPosicion(m) + '</td>' +
-        '<td><div class="acciones"><button class="sm" data-editar="' + m.id + '" type="button">Editar</button>' +
+        '<td><div class="acciones"><div class="principales">' +
         '<button class="sm" data-ruta="' + m.id + '" type="button"' + (ahora.length ? '' : ' disabled title="No lleva pedidos todavía"') + '>' + (rutasAbiertas[m.id] ? 'Cerrar la ruta' : 'Ver su ruta de hoy') + '</button>' +
+        '<button class="sm" data-editar="' + m.id + '" type="button">Editar</button></div><div class="secundarias">' +
         '<button class="sm" data-mandar-ruta="' + m.id + '" type="button"' + (ahora.length ? '' : ' disabled title="No lleva pedidos todavía"') + '>Mandarle su ruta</button>' +
+        (m.estado !== 'baja' ? '<button class="sm" data-enlace="' + m.id + '" type="button" title="Le manda por WhatsApp un enlace a su página de pedidos de hoy, con botones grandes; vale 7 días">Mandarle su enlace</button>' : '') +
         '<button class="sm" data-traspasar="' + m.id + '" type="button"' + (ahora.length ? '' : ' disabled title="No lleva pedidos todavía"') + '>Traspasar sus pedidos</button>' +
         (m.estado === 'activo' ? '<button class="sm" data-estado="' + m.id + '" data-valor="descanso" type="button" title="Hoy no recibe pedidos nuevos; los que ya lleva siguen">Descanso</button>' : '<button class="sm" data-estado="' + m.id + '" data-valor="activo" type="button">Activar</button>') +
         (m.estado !== 'baja' ? '<button class="sm" data-estado="' + m.id + '" data-valor="baja" type="button" title="Deja de repartir hasta que lo actives; sigue en la lista">Ya no reparte (baja)</button>' : '') +
-        '<button class="sm peligro" data-quitar="' + m.id + '" type="button">Borrar de la lista</button></div></td></tr>' +
+        '<button class="sm peligro" data-quitar="' + m.id + '" type="button">Borrar de la lista</button></div></div></td></tr>' +
         (rutasAbiertas[m.id] ? '<tr class="fila-ruta"><td colspan="5" id="ruta-' + m.id + '">Cargando la ruta…</td></tr>' : '');
     }).join('');
     Object.keys(rutasAbiertas).forEach(function (id) { if (rutasAbiertas[id]) cargarRuta(id); });
@@ -309,6 +320,11 @@ document.getElementById('motorizados').addEventListener('click', async function 
     } else if ((id = b.getAttribute('data-ruta'))) {
       rutasAbiertas[id] = !rutasAbiertas[id];
       pintar();
+      return;
+    } else if ((id = b.getAttribute('data-enlace'))) {
+      var re = await api('/admin/motorizados/' + id + '/enlace', { method: 'POST', body: { mandar: true } });
+      toast(re.enviado ? 'Enlace enviado por WhatsApp (vale 7 días).' : 'Enlace creado, pero no se pudo mandar por WhatsApp' + (re.motivo ? ': ' + re.motivo : '') + '. Cópialo y pásaselo: ' + re.url);
+      try { if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(re.url); } catch (e) { /* sin portapapeles */ }
       return;
     } else if ((id = b.getAttribute('data-mandar-ruta'))) {
       var rr = await api('/admin/motorizados/' + id + '/ruta/mandar', { method: 'POST', body: {} });

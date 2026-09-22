@@ -50,6 +50,39 @@ function cookieDe(res: { headers: Record<string, unknown> }): string {
 }
 
 describe('servicio de ajustes', () => {
+  it('el horario de entregas amplía el del número (los pines salen hasta el horario extendido)', async () => {
+    const config = loadConfig(ENV_BASE);
+    const repos = createFakeRepos();
+    const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0 });
+    const base = politicaDesdeConfig(config, 'cloud');
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18 });
+    // Lo que registran las entregas del día: desde las 14:00 hasta las 22:30 → el número deja pasar hasta las 23:00.
+    let franja: { desde: string; hasta: string } | null = { desde: '14:00', hasta: '22:30' };
+    ajustes.ampliarHorario(() => franja);
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 23 });
+    // Un horario de entregas más corto que el del número no lo recorta.
+    franja = { desde: '10:00', hasta: '16:00' };
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18 });
+    // Sin franja (por ejemplo, sin el módulo de entregas) no cambia nada.
+    franja = null;
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18 });
+  });
+
+  it('la zona horaria elegida en Ajustes manda en la política de envío; una zona inventada se rechaza', async () => {
+    const config = loadConfig(ENV_BASE);
+    const repos = createFakeRepos();
+    const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0 });
+    const base = politicaDesdeConfig(config, 'cloud');
+    expect(ajustes.zonaHoraria()).toBe(config.timezone);
+    expect(ajustes.politica(base).timezone).toBe(config.timezone);
+    await ajustes.guardar({ zonaHoraria: 'America/Bogota' });
+    expect(ajustes.zonaHoraria()).toBe('America/Bogota');
+    expect(ajustes.politica(base).timezone).toBe('America/Bogota');
+    await expect(ajustes.guardar({ zonaHoraria: 'Marte/Olympus' })).rejects.toThrow(/zona horaria/i);
+    await ajustes.guardar({ zonaHoraria: null });
+    expect(ajustes.zonaHoraria()).toBe(config.timezone);
+  });
+
   it('sin nada guardado manda el .env; lo guardado pisa campo a campo y null vuelve al servidor', async () => {
     const config = loadConfig(ENV_BASE);
     const repos = createFakeRepos();

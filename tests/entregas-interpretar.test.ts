@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { horaEnPalabras, soporteEnPalabras, telefonoEnPalabras } from '../src/entregas/textos.js';
 import { extraerJson, leerConfirmacion, leerConfirmacionConReglas, leerEntregado, leerEntregadoConReglas, leerPreguntaPorPedido, leerTiempo, leerTiempoConReglas, normalizar, quitarReferencias, type LectorIA, leerMotorizadoCorta } from '../src/entregas/interpretar.js';
 import { distanciaEnPalabras, haversineKm } from '../src/entregas/geo.js';
 import { minutosEnPalabras, rellenar, textoDe, AJUSTES_ENTREGAS_POR_DEFECTO } from '../src/entregas/textos.js';
@@ -332,5 +333,54 @@ describe('distancias', () => {
     expect(haversineKm(miraflores, lima)).toBeLessThan(9);
     expect(distanciaEnPalabras(0.4)).toBe('a 400 m');
     expect(distanciaEnPalabras(2.34)).toBe('a 2,3 km');
+  });
+});
+
+describe('el «ubicación registrada»: horario y soporte en palabras', () => {
+  it('las horas del ajuste salen como se leen', () => {
+    expect(horaEnPalabras('14:00')).toBe('2:00 p. m.');
+    expect(horaEnPalabras('20:30')).toBe('8:30 p. m.');
+    expect(horaEnPalabras('09:15')).toBe('9:15 a. m.');
+    expect(horaEnPalabras('00:00')).toBe('12:00 a. m.');
+    expect(horaEnPalabras('raro')).toBe('raro');
+  });
+
+  it('los teléfonos de soporte salen como se marcan en Perú', () => {
+    expect(telefonoEnPalabras('987654321')).toBe('+51 987 654 321');
+    expect(telefonoEnPalabras('51987654321')).toBe('+51 987 654 321');
+    expect(telefonoEnPalabras('01 234 5678')).toBe('(01) 234 5678');
+    expect(telefonoEnPalabras('2345678')).toBe('(01) 234 5678');
+    expect(telefonoEnPalabras('044123456')).toBe('(044) 123 456');
+    expect(telefonoEnPalabras('')).toBe('');
+  });
+
+  it('el soporte: uno para todo, dos distintos, o este mismo WhatsApp', () => {
+    expect(soporteEnPalabras({ whatsapp: '987654321' })).toBe('+51 987 654 321 (WhatsApp y llamadas)');
+    expect(soporteEnPalabras({ whatsapp: '987654321', llamadas: '987654321' })).toBe('+51 987 654 321 (WhatsApp y llamadas)');
+    expect(soporteEnPalabras({ whatsapp: '987654321', llamadas: '012345678' })).toBe('+51 987 654 321 (WhatsApp) o (01) 234 5678 (llamadas)');
+    expect(soporteEnPalabras({ llamadas: '012345678' })).toBe('(01) 234 5678 (WhatsApp y llamadas)');
+    expect(soporteEnPalabras({})).toBe('este mismo WhatsApp');
+  });
+
+  it('el texto sale con el enlace, sin coordenadas, y sin punto doble tras "p. m."', () => {
+    const ctx = { nombre: 'Ana Quispe', negocio: 'GSG', mapa: 'https://maps.google.com/?q=-12.05,-77.04', lat: -12.05, lng: -77.04, desde: '2:00 p. m.', hasta: '8:00 p. m.', hastaExtendido: '10:00 p. m.', soporte: '+51 987 654 321 (WhatsApp y llamadas)' };
+    const texto = rellenar('Ubicación registrada.\n{mapa}\nHasta las {hastaExtendido}. Soporte: {soporte}.', ctx);
+    expect(texto).toContain('https://maps.google.com/?q=-12.05,-77.04');
+    expect(texto.replace(ctx.mapa, '')).not.toContain('-12.05');
+    expect(texto).toContain('Hasta las 10:00 p. m. Soporte');
+    expect(texto).not.toContain('..');
+  });
+});
+
+describe('las referencias con letra+dígito o con dos guiones no confunden al lector de tiempos', () => {
+  it('"V4-1 35", "M-2211-1 20" y "GSG-2026-9 15" se leen como minutos', () => {
+    expect(quitarReferencias('V4-1 35').trim()).toBe('35');
+    expect(quitarReferencias('M-2211-1 20').trim()).toBe('20');
+    expect(leerTiempoConReglas('V4-1 35').minutos).toBe(35);
+    expect(leerTiempoConReglas('M-2211-1 20').minutos).toBe(20);
+    expect(leerTiempoConReglas('GSG-2026-9 15').minutos).toBe(15);
+    expect(leerTiempoConReglas('P-1010 40').minutos).toBe(40);
+    // "1h15" sigue siendo un tiempo, no una referencia
+    expect(leerTiempoConReglas('1h15').minutos).toBe(75);
   });
 });

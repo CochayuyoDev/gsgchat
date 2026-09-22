@@ -23,7 +23,16 @@
  * las dos cosas, la instancia es libre y todo esta permitido.
  */
 
+import { createHash, randomBytes } from 'node:crypto';
 import type { SettingsRepo } from '../settings/service.js';
+
+/** Lo que se guarda del acceso de soporte: el codigo solo como hash; el enlace, para mandarselo al maestro. */
+interface SoporteGuardado {
+  hash: string;
+  hasta: string;
+  enlace: string;
+  concedidoEn: string;
+}
 import { MONEDA_PLANES, PLANES, type NombrePlan } from '../../saas/planes.js';
 
 export interface LimitesPlan {
@@ -64,6 +73,19 @@ export interface EstadoInstancia {
   fallosIA: number;
   entregasHoy: number;
   version: string;
+  /**
+   * Acceso de soporte concedido por la tienda: hasta cuando y el enlace con el
+   * que el dueño entra a su panel. Lo pone el servicio del plan, no quien
+   * arma el parte.
+   */
+  soporte?: { hasta: string; enlace: string } | null;
+}
+
+/** El acceso de soporte que la tienda concede al dueño del sistema (24 h). */
+export interface AccesoSoporte {
+  hasta: string;
+  enlace: string;
+  concedidoEn: string;
 }
 
 /** Como se le paga al dueño: lo configura en Tiendas y lo ve cada tienda en /pagar. */
@@ -182,6 +204,19 @@ export interface ServicioPlan {
    * en Tiendas; un clic alli corre el vencimiento. Solo con maestro.
    */
   mandarCaptura(entrada: { imagen: string; meses: number; nota?: string; monto?: number }): Promise<{ ok: true; mensaje: string; pago: PagoCapturaVista } | { ok: false; error: string }>;
+  /**
+   * Acceso de soporte: la tienda le abre la puerta al dueño del sistema por
+   * unas horas (24 por defecto). El enlace viaja al maestro en el parte de
+   * salud; caduca solo y se puede quitar antes.
+   */
+  concederSoporte(horas?: number): Promise<AccesoSoporte>;
+  revocarSoporte(): Promise<void>;
+  /** El acceso vigente, o null si no hay o ya caduco. */
+  soporte(): AccesoSoporte | null;
+  /** Si ese codigo del enlace vale ahora mismo. */
+  canjearSoporte(codigo: string): boolean;
+  /** Avisa cuando el acceso se quita o caduca (para cerrar la cuenta de soporte). */
+  alCambiarSoporte(fn: (acceso: AccesoSoporte | null) => void | Promise<void>): void;
 }
 
 export interface EntradaMembresia {
@@ -217,6 +252,8 @@ export interface DepsPlan {
    * cada consulta (cabecera `x-gsgchat-estado`). Sin el, no se manda nada.
    */
   estado?: () => Promise<EstadoInstancia> | EstadoInstancia;
+  /** La direccion publica de esta instalacion, para armar el enlace de soporte. */
+  baseUrl?: string;
 }
 
 /** Cuantos caracteres puede ocupar el parte en la cabecera (por si algo se desmadra). */
@@ -226,6 +263,7 @@ const CLAVE_ESTADO = 'plan.estado';
 const CLAVE_USO = 'plan.uso';
 const CLAVE_LOCAL = 'plan.local';
 const CLAVE_MAESTRO = 'plan.maestro';
+const CLAVE_SOPORTE = 'plan.soporte';
 
 /**
  * Arma (o cambia) una membresia a partir de lo que se escribio en pantalla.
@@ -317,6 +355,7 @@ export async function crearServicioPlan(deps: DepsPlan): Promise<ServicioPlan> {
   let consultadoEn: string | null = null;
   let error: string | null = null;
   let uso = { mes: mesDe(ahora()), turnos: 0 };
+  let soporteGuardado: SoporteGuardado | null = null;
 
   // Lo ultimo que se supo, para no arrancar a ciegas.
   for (const s of await deps.settingsRepo.getAll()) {
@@ -327,6 +366,13 @@ export async function crearServicioPlan(deps: DepsPlan): Promise<ServicioPlan> {
         consultadoEn = g.consultadoEn;
       } catch {
         /* se vuelve a pedir */
+      }
+    }
+    if (s.key === CLAVE_SOPORTE) {
+      try {
+        soporteGuardado = JSON.parse(s.value) as SoporteGuardado;
+      } catch {
+        soporteGuardado = null;
       }
     }
     if (s.key === CLAVE_USO) {
@@ -420,11 +466,55 @@ export async function crearServicioPlan(deps: DepsPlan): Promise<ServicioPlan> {
     await deps.settingsRepo.put(CLAVE_LOCAL, JSON.stringify(m), false);
   }
 
+  // ------------------------------------------------------- acceso de soporte
+  const oyentesSoporte: Array<(acceso: AccesoSoporte | null) => void | Promise<void>> = [];
+  const hashCodigo = (codigo: string) => createHash('sha256').update(codigo).digest('hex');
+  function soporte(): AccesoSoporte | null {
+    if (!soporteGuardado) return null;
+    if (new Date(soporteGuardado.hasta).getTime() <= ahora().getTime()) {
+      // Caduco: se olvida y se avisa una sola vez.
+      soporteGuardado = null;
+      void deps.settingsRepo.remove(CLAVE_SOPORTE).catch(() => undefined);
+      for (const fn of oyentesSoporte) void Promise.resolve(fn(null)).catch(() => undefined);
+      return null;
+    }
+    return { hasta: soporteGuardado.hasta, enlace: soporteGuardado.enlace, concedidoEn: soporteGuardado.concedidoEn };
+  }
+  async function concederSoporte(horas = 24): Promise<AccesoSoporte> {
+    const h = Math.min(72, Math.max(1, Math.round(horas)));
+    const codigo = `sop_${randomBytes(24).toString('base64url')}`;
+    const base = (deps.baseUrl ?? '').replace(/\/+$/, '');
+    const guardado: SoporteGuardado = {
+      hash: hashCodigo(codigo),
+      hasta: new Date(ahora().getTime() + h * 3600_000).toISOString(),
+      enlace: `${base}/soporte/${codigo}`,
+      concedidoEn: ahora().toISOString(),
+    };
+    soporteGuardado = guardado;
+    await deps.settingsRepo.put(CLAVE_SOPORTE, JSON.stringify(guardado), false);
+    const acceso = soporte()!;
+    for (const fn of oyentesSoporte) await Promise.resolve(fn(acceso)).catch(() => undefined);
+    // Que el maestro se entere ya, no dentro de un cuarto de hora.
+    if (maestro) await refrescar().catch(() => undefined);
+    return acceso;
+  }
+  async function revocarSoporte(): Promise<void> {
+    soporteGuardado = null;
+    await deps.settingsRepo.remove(CLAVE_SOPORTE).catch(() => undefined);
+    for (const fn of oyentesSoporte) await Promise.resolve(fn(null)).catch(() => undefined);
+    if (maestro) await refrescar().catch(() => undefined);
+  }
+  function canjearSoporte(codigo: string): boolean {
+    const s = soporte();
+    return Boolean(s && soporteGuardado && soporteGuardado.hash === hashCodigo(codigo.trim()));
+  }
+
   /** El parte de salud en JSON para la cabecera; null si no hay quien lo de o falla. */
   async function parteDeSalud(): Promise<string | null> {
     if (!deps.estado) return null;
     try {
-      const e = await deps.estado();
+      const acceso = soporte();
+      const e = { ...(await deps.estado()), ...(acceso ? { soporte: acceso } : {}) };
       const texto = JSON.stringify(e);
       return texto.length <= MAX_CABECERA_ESTADO ? texto : null;
     } catch (e) {
@@ -538,6 +628,13 @@ export async function crearServicioPlan(deps: DepsPlan): Promise<ServicioPlan> {
     },
     paraPagar,
     mandarCaptura,
+    concederSoporte,
+    revocarSoporte,
+    soporte,
+    canjearSoporte,
+    alCambiarSoporte(fn) {
+      oyentesSoporte.push(fn);
+    },
     async desconectarMaestro() {
       if (maestro?.origen === 'env') throw new Error('El maestro viene del arranque (.env): se quita de ahí.');
       maestro = null;

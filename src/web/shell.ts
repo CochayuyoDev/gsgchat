@@ -15,6 +15,7 @@
  */
 
 import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
+import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
 import { TOKENS_CSS } from './tokens.js';
 import { escapeHtml } from './login-page.js';
 import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
@@ -355,6 +356,13 @@ const CSS = `
   .s-user-txt { cursor: pointer; }
   .s-chip .s-avatar { width: 30px; height: 30px; font-size: 12px; }
   .s-content { flex: 1; min-height: 0; overflow: auto; padding: 22px 24px 60px; }
+  .s-nav-movil { display: none; }
+  /* Chips de variables bajo un texto editable: se tocan y se insertan donde esta el cursor (window.chipsDeVariables). */
+  .s-chips-var { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 2px; }
+  .s-chips-var-eti { font-size: 12px; color: var(--s-muted); margin-right: 2px; }
+  .s-chip-var { font: inherit; font-size: 12.5px; font-family: ui-monospace, Consolas, monospace; padding: 4px 9px; min-height: 30px; border-radius: 999px; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-accent); cursor: pointer; }
+  .s-chip-var:hover { background: var(--s-accent-soft); }
+  @media (max-width: 960px), (pointer: coarse) { .s-chip-var { min-height: 40px; } }
   .s-content.lleno { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
   .s-content > .wrap { max-width: 1180px; margin: 0 auto; padding: 0; }
   .s-backdrop { display: none; }
@@ -428,7 +436,8 @@ const CSS = `
   .s-pal-pie kbd { font: 600 10.5px/1 ui-monospace, Consolas, monospace; background: var(--s-kbd); border: 1px solid var(--s-line); border-radius: 4px; padding: 2px 4px; }
 
   /* --- la ayuda de cada pantalla: un cajon a la derecha, como la IA --- */
-  .s-ayuda-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-size: 13.5px; }
+  .s-ayuda-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-size: 13.5px; white-space: nowrap; flex: none; }
+  .s-top-der { flex: none; }
   .s-ayuda-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: none; flex-direction: column; }
   .s-ayuda-panel.abierto { display: flex; }
   .s-ayuda-cuerpo { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 14px; }
@@ -463,7 +472,16 @@ const CSS = `
     .s-top-der { gap: 6px; }
     .s-demo, .s-top .s-chip { display: none; }
     .s-top #state.pill { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-    .s-content { padding: 16px 16px 60px; }
+    .s-content { padding: 16px 16px 24px; }
+    /* El pie de navegacion del celular: las cuatro pantallas del dia a un pulgar y "Mas" abre el menu.
+       Va en el flujo (no flotando): la pantalla se encoge y nada queda tapado, tampoco el cajon de escribir del chat. */
+    .s-nav-movil { display: flex; flex: none; height: calc(58px + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); border-top: 1px solid var(--s-line); background: var(--s-top); }
+    .s-nav-movil a, .s-nav-movil button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 58px; padding: 6px 2px; font: inherit; font-size: 11px; line-height: 1.1; color: var(--s-muted); text-decoration: none; border: 0; background: transparent; cursor: pointer; position: relative; }
+    .s-nav-movil .s-ico { width: 22px; height: 22px; }
+    .s-nav-movil a.activo { color: var(--s-accent); font-weight: 700; }
+    .s-nav-movil a.activo::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--s-accent); }
+    .s-app.modo-gsg .s-nav-completo, .s-app.modo-completo .s-nav-gsg { display: none; }
+    .s-app.sin-nav-movil .s-nav-movil { display: none; }
     .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none; transition: opacity .18s; }
     .s-app.abierto .s-backdrop { opacity: 1; pointer-events: auto; }
     .s-chip b { display: none; }
@@ -483,6 +501,44 @@ const JS = String.raw`
     guardar('s-plegado', app.classList.contains('plegado') ? '1' : '0');
   };
   document.getElementById('s-menu').onclick = function () { app.classList.toggle('abierto'); };
+  /* Chips de variables: chipsDeVariables(textarea, ['{nombre}', '{pedido}'], { etiqueta: 'Tocar para insertar:' })
+     pinta una fila de botones bajo el textarea; al tocar uno, la variable entra donde esta el cursor
+     (con un espacio delante si hace falta) y se dispara "input" para que la pagina se entere.
+     Si ya habia una fila, la sustituye. Vale para cualquier pagina del armazon. */
+  window.chipsDeVariables = function (textarea, variables, opciones) {
+    if (!textarea || !variables || !variables.length) return null;
+    var sig = textarea.nextElementSibling;
+    if (sig && sig.classList && sig.classList.contains('s-chips-var')) sig.parentNode.removeChild(sig);
+    var fila = document.createElement('div'); fila.className = 's-chips-var';
+    var eti = document.createElement('span'); eti.className = 's-chips-var-eti'; eti.textContent = (opciones && opciones.etiqueta) || 'Tocar para insertar:'; fila.appendChild(eti);
+    variables.forEach(function (v) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 's-chip-var'; b.textContent = v; b.setAttribute('aria-label', 'Insertar ' + v + ' en el texto');
+      b.onclick = function () {
+        var ini = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : textarea.value.length;
+        var fin = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : ini;
+        var antes = textarea.value.slice(0, ini), despues = textarea.value.slice(fin);
+        var sep = antes && !/\s$/.test(antes) ? ' ' : '';
+        textarea.value = antes + sep + v + despues;
+        var pos = (antes + sep + v).length;
+        try { textarea.focus(); textarea.setSelectionRange(pos, pos); } catch (e) {}
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      fila.appendChild(b);
+    });
+    textarea.insertAdjacentElement('afterend', fila);
+    return fila;
+  };
+  var navMas = document.getElementById('s-nav-mas');
+  if (navMas) navMas.onclick = function () { app.classList.add('abierto'); };
+  function marcarNavMovil() {
+    var ruta = location.pathname;
+    document.querySelectorAll('#s-nav-movil a[data-ir]').forEach(function (a) {
+      var p = a.getAttribute('data-ir').split('#')[0];
+      var activo = p === ruta || (p === '/hoy' && ruta === '/entregas') || (p === '/entregas' && ruta === '/hoy');
+      a.classList.toggle('activo', activo);
+    });
+  }
+  marcarNavMovil();
 
   /* modo sencillo (por defecto) o ver todo: se recuerda en este navegador */
   var botonModo = document.getElementById('s-modo');
@@ -760,6 +816,7 @@ const JS = String.raw`
   function escapar(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   /* Un numero como lo leeria una persona: +51 987 000 001. */
   function telefonoBonito(p) { p = String(p || ''); if (!p) return ''; if (p.length === 11 && p.indexOf('51') === 0) return '+51 ' + p.slice(2, 5) + ' ' + p.slice(5, 8) + ' ' + p.slice(8); return '+' + p; }
+  window.telefonoBonito = telefonoBonito;
   function cargarAvisos() {
     fetch('/admin/avisos', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
       if (!d) return;
@@ -995,10 +1052,17 @@ export function appShell(opts: ShellOpts): string {
   return `<!doctype html>
 <html lang="es"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="${NOMBRE_SISTEMA}">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icono-192.png">
 <title>${escapeHtml(opts.titulo)} - ${negocio} · ${NOMBRE_SISTEMA}</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>${favicon}</text></svg>">
-<style>${CSS}${DIALOGO_CSS}${opts.css ?? ''}</style>
+<style>${CSS}${DIALOGO_CSS}${DIALOGO_ELEGIR_CSS}${opts.css ?? ''}</style>
 </head><body>
 <div class="s-app modo-${modo}" id="s-app" data-negocio="${negocio}" data-modo="${modo}">
   <div class="s-backdrop" id="s-backdrop"></div>
@@ -1046,6 +1110,15 @@ export function appShell(opts: ShellOpts): string {
     <div class="s-content${opts.lleno ? ' lleno' : ''}" id="s-content">
 ${opts.contenido}
     </div>
+    <nav class="s-nav-movil" id="s-nav-movil" aria-label="Ir a">
+      <a class="s-nav-gsg" href="/hoy" data-ir="/hoy">${icono('moto')}<span>Hoy</span></a>
+      <a class="s-nav-completo" href="/panel#inicio" data-ir="/panel#inicio">${icono('inicio')}<span>Inicio</span></a>
+      <a href="/chat" data-ir="/chat">${icono('chat')}<span>Chats</span></a>
+      <a class="s-nav-gsg" href="/motorizados" data-ir="/motorizados">${icono('contactos')}<span>Motorizados</span></a>
+      <a class="s-nav-completo" href="/entregas" data-ir="/entregas">${icono('moto')}<span>Entregas</span></a>
+      <a href="/mapa" data-ir="/mapa">${icono('mapa')}<span>Mapa</span></a>
+      <button type="button" id="s-nav-mas" aria-label="Abrir el menú con todas las pantallas">${icono('menu')}<span>Más</span></button>
+    </nav>
   </div>
   <div class="s-pal-fondo" id="s-pal-fondo">
     <div class="s-pal" role="dialog" aria-label="Buscar">
@@ -1072,6 +1145,7 @@ ${opts.contenido}
 </div>
 <script>
 ${DIALOGO_JS}
+${DIALOGO_ELEGIR_JS}
 ${JS}
 ${opts.script ?? ''}
 </script>

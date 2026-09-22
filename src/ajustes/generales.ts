@@ -41,6 +41,23 @@ export const ajustesGeneralesSchema = z.object({
    * null = gsg.
    */
   modo: z.enum(['gsg', 'completo']).nullable(),
+  /**
+   * Como se trata al cliente: de tu, de usted, o segun el cliente (de usted
+   * la primera vez; si el cliente tutea, de tu). Lo respeta el asistente de
+   * IA. null = segun el cliente.
+   */
+  tono: z.enum(['tu', 'usted', 'auto']).nullable(),
+  /**
+   * La zona horaria del negocio (la hora con la que se escribe, se cierra el
+   * dia y se mandan los resumenes). Una de la lista de ZONAS_HORARIAS; null =
+   * la del servidor (variable de arranque).
+   */
+  zonaHoraria: z
+    .string()
+    .trim()
+    .max(60)
+    .refine((z) => zonaHorariaValida(z), { message: 'Esa zona horaria no existe. Elige una de la lista.' })
+    .nullable(),
   /** Conversaciones guardadas: a cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). null = lo del servidor. */
   guardados: z.object({ inactividadDias: z.coerce.number().int().min(0).max(3650).nullable() }).nullable(),
   /**
@@ -150,6 +167,8 @@ export const RESUMENES_POR_DEFECTO: { activo: boolean; horaManana: string; horaT
 export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   nombreNegocio: null,
   modo: null,
+  tono: null,
+  zonaHoraria: null,
   guardados: null,
   resumenes: null,
   modoPrueba: { activo: false, numeros: [] },
@@ -177,6 +196,8 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
 export const ajustesGeneralesPatchSchema = z.object({
   nombreNegocio: ajustesGeneralesSchema.shape.nombreNegocio.optional(),
   modo: ajustesGeneralesSchema.shape.modo.optional(),
+  tono: ajustesGeneralesSchema.shape.tono.optional(),
+  zonaHoraria: ajustesGeneralesSchema.shape.zonaHoraria.optional(),
   guardados: ajustesGeneralesSchema.shape.guardados.optional(),
   resumenes: ajustesGeneralesSchema.shape.resumenes.optional(),
   modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().optional(),
@@ -198,6 +219,8 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
   return {
     nombreNegocio: patch.nombreNegocio !== undefined ? patch.nombreNegocio : base.nombreNegocio,
     modo: patch.modo !== undefined ? patch.modo : base.modo,
+    tono: patch.tono !== undefined ? patch.tono : base.tono,
+    zonaHoraria: patch.zonaHoraria !== undefined ? patch.zonaHoraria : base.zonaHoraria,
     guardados: patch.guardados !== undefined ? patch.guardados : base.guardados,
     resumenes: patch.resumenes !== undefined ? patch.resumenes : base.resumenes,
     modoPrueba: { ...base.modoPrueba, ...(patch.modoPrueba ?? {}) },
@@ -267,11 +290,21 @@ export interface ServicioAjustes {
   restablecer(): Promise<AjustesGenerales>;
   /** La politica de ritmo con los ajustes encima. */
   politica(base: Politica): Politica;
+  /**
+   * Otra franja que AMPLIA el horario de envio del numero: la registran
+   * las entregas del dia (Hoy → Ajustes → horario de entregas), para que
+   * el marcapasos no frene a las 20:00 un pin que GSG entrega hasta las 22:00.
+   */
+  ampliarHorario(fn: () => { desde: string; hasta: string } | null): void;
   /** Modo prueba efectivo: vacio = a todos. */
   soloNumeros(): string[];
   nombreNegocio(): string;
   /** Que se enseña: solo lo de GSG o todos los modulos. */
   modo(): 'gsg' | 'completo';
+  /** Tu, usted o segun el cliente (auto). */
+  tono(): 'tu' | 'usted' | 'auto';
+  /** La zona horaria vigente (la elegida en Ajustes o la del servidor). */
+  zonaHoraria(): string;
   /** A cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). */
   guardadosDias(): number;
   /** El resumen del dia por WhatsApp: si esta encendido y a que horas (HH:MM). */
@@ -301,6 +334,7 @@ export async function crearServicioAjustes(deps: {
   const releerCadaMs = deps.releerCadaMs ?? 60_000;
   let valor = await repo.get();
   let leidoEn = ahora();
+  const ampliaciones: Array<() => { desde: string; hasta: string } | null> = [];
 
   const fresco = (): AjustesGenerales => {
     if (releerCadaMs > 0 && ahora() - leidoEn > releerCadaMs) {
@@ -342,13 +376,25 @@ export async function crearServicioAjustes(deps: {
       leidoEn = ahora();
       return valor;
     },
+    ampliarHorario(fn) {
+      ampliaciones.push(fn);
+    },
     politica(base) {
       const a = fresco();
       const p: Politica = { ...base, warmup: { ...base.warmup }, umbrales: { ...base.umbrales } };
       if (a.horario.inicio !== null) p.horaInicio = a.horario.inicio;
       if (a.horario.fin !== null) p.horaFin = a.horario.fin;
       if (a.horario.dias && a.horario.dias.length) p.diasPermitidos = [...a.horario.dias];
+      if (a.zonaHoraria) p.timezone = a.zonaHoraria;
       if (p.horaFin <= p.horaInicio) p.horaFin = Math.min(24, p.horaInicio + 1);
+      for (const ampliar of ampliaciones) {
+        const extra = ampliar();
+        if (!extra) continue;
+        const desde = Number(extra.desde.slice(0, 2));
+        const hasta = Number(extra.hasta.slice(0, 2)) + (Number(extra.hasta.slice(3, 5)) > 0 ? 1 : 0);
+        if (Number.isFinite(desde)) p.horaInicio = Math.min(p.horaInicio, Math.max(0, desde));
+        if (Number.isFinite(hasta)) p.horaFin = Math.max(p.horaFin, Math.min(24, hasta));
+      }
       const r = a.ritmo;
       if (r.maxPorMinuto !== null && r.maxPorMinuto > 0) p.maxPorMinuto = r.maxPorMinuto;
       if (r.maxPorHora !== null && r.maxPorHora > 0) p.maxPorHora = r.maxPorHora;
@@ -380,6 +426,12 @@ export async function crearServicioAjustes(deps: {
     modo() {
       return fresco().modo ?? 'gsg';
     },
+    tono() {
+      return fresco().tono ?? 'auto';
+    },
+    zonaHoraria() {
+      return fresco().zonaHoraria ?? config.timezone;
+    },
     guardadosDias() {
       return fresco().guardados?.inactividadDias ?? config.ARCHIVE_INACTIVE_DAYS;
     },
@@ -396,4 +448,35 @@ export async function crearServicioAjustes(deps: {
     dominiosEmbebido: () => fresco().embebido?.dominios ?? [],
     pedirVerUnaVezNormal: () => fresco().pedirVerUnaVezNormal ?? true,
   };
+}
+
+/** Las zonas horarias que se ofrecen en Ajustes (nombre en palabras). */
+export const ZONAS_HORARIAS: Array<{ zona: string; nombre: string }> = [
+  { zona: 'America/Lima', nombre: 'Lima (Perú)' },
+  { zona: 'America/Bogota', nombre: 'Bogotá (Colombia)' },
+  { zona: 'America/Guayaquil', nombre: 'Quito y Guayaquil (Ecuador)' },
+  { zona: 'America/La_Paz', nombre: 'La Paz (Bolivia)' },
+  { zona: 'America/Santiago', nombre: 'Santiago (Chile)' },
+  { zona: 'America/Argentina/Buenos_Aires', nombre: 'Buenos Aires (Argentina)' },
+  { zona: 'America/Asuncion', nombre: 'Asunción (Paraguay)' },
+  { zona: 'America/Montevideo', nombre: 'Montevideo (Uruguay)' },
+  { zona: 'America/Caracas', nombre: 'Caracas (Venezuela)' },
+  { zona: 'America/Panama', nombre: 'Panamá' },
+  { zona: 'America/Mexico_City', nombre: 'Ciudad de México' },
+  { zona: 'America/Guatemala', nombre: 'Guatemala' },
+  { zona: 'America/Santo_Domingo', nombre: 'Santo Domingo (Rep. Dominicana)' },
+  { zona: 'America/New_York', nombre: 'Nueva York y Miami (EE. UU.)' },
+  { zona: 'America/Los_Angeles', nombre: 'Los Ángeles (EE. UU.)' },
+  { zona: 'Europe/Madrid', nombre: 'Madrid (España)' },
+  { zona: 'UTC', nombre: 'Hora universal (UTC)' },
+];
+
+/** Si la zona existe de verdad en el sistema (no solo en la lista). */
+export function zonaHorariaValida(zona: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zona });
+    return true;
+  } catch {
+    return false;
+  }
 }

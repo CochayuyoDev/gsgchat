@@ -133,6 +133,15 @@ const CSS = `
   .sim-lista .col b { display: block; margin-bottom: 4px; }
   .sim-lista .col div { padding: 2px 0; }
   .ajuste-fila { display: grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: center; margin: 6px 0; font-size: var(--fs-cuerpo); }
+  .grupos-aj { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .grupo-aj { border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); padding: 12px 14px; min-width: 0; }
+  .grupo-aj.ancho { margin-top: 12px; }
+  .grupo-aj h3 { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+  .grupo-aj .ayuda-grupo { margin: 0 0 8px; color: var(--texto-suave); font-size: 12.5px; line-height: 1.4; }
+  .grupo-aj > summary { cursor: pointer; font-size: 14px; font-weight: 700; padding: 2px 0; }
+  .grupo-aj > summary .muted { font-weight: 400; font-size: 12.5px; }
+  .textos-para { margin: 14px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); }
+  @media (max-width: 1100px) { .grupos-aj { grid-template-columns: 1fr; } }
   .ajuste-fila input { width: 100%; }
   .texto-editable { margin-top: 10px; }
   .texto-editable .vars { font-size: 12px; color: var(--texto-suave); }
@@ -168,6 +177,14 @@ const CSS = `
   .radios input { width: 16px; height: 16px; accent-color: var(--primario); }
   #pegar-previa { min-height: 20px; margin: 6px 0; }
   .sim-grupo { margin-top: 10px; }
+  .mismo { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--azul-suave); color: var(--azul); font-size: 11.5px; font-weight: 600; vertical-align: middle; }
+  .sim-pasos { margin: 8px 0 0; padding-left: 30px; font-size: 13px; max-height: 280px; overflow: auto; }
+  .sim-pasos li { margin: 3px 0; }
+  .sim-pasos li b { display: inline-block; width: 14px; }
+  .sim-pasos .paso-hecho b { color: var(--verde); }
+  .sim-pasos .paso-fallo b { color: var(--rojo); }
+  .sim-pasos .paso-haciendo b { color: var(--ambar); }
+  .sim-pasos .paso-saltado b { color: var(--texto-suave); }
   .sim-grupo b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); margin-bottom: 6px; }
   .sim-grupo .fila { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
@@ -314,6 +331,15 @@ ${aviso}
             <button class="sm peligro" id="sim-reiniciar" type="button">Reiniciar simulador</button>
           </div>
         </div>
+        <div class="sim-grupo"><b>Probar el día entero, solo</b>
+          <div class="fila">
+            <button class="sm primary" id="sim-dia" type="button">Probar el día entero con datos ficticios</button>
+            <button class="sm peligro hidden" id="sim-dia-parar" type="button">Detener</button>
+            <span class="muted" style="font-size:12.5px">Carga los clientes y los motorizados de prueba, trae la lista de GSG y simula las respuestas de todos, paso a paso, para verlo funcionar de punta a punta.</span>
+          </div>
+          <ol class="sim-pasos hidden" id="sim-dia-pasos"></ol>
+          <p class="muted hidden" id="sim-dia-resumen" style="font-size:13px;margin:6px 0 0"></p>
+        </div>
         <div class="sim-grupo"><b>Probar con mi número</b>
           <div class="fila">
             <button class="sm" id="modo-prueba" type="button">Modo prueba con mi número</button>
@@ -354,33 +380,55 @@ ${aviso}
     </div>
 
     <div class="caja plegable cerrada" id="caja-ajustes">
-      <h2>Ajustes de las entregas <span class="sep"></span><span class="muted" style="font-weight:400;font-size:12.5px">margen, esperas, intentos, IA, textos</span></h2>
+      <h2>Ajustes de las entregas <span class="sep"></span><span class="muted" style="font-weight:400;font-size:12.5px">tiempos, qué hace solo, textos</span></h2>
       <div class="cuerpo">
-        <div class="ajuste-fila"><span>Margen que se suma a lo que dice el motorizado (minutos)</span><input id="aj-margen" type="number" min="0" max="240"></div>
-        <div class="ajuste-fila"><span>Volver a pedir la confirmación cada (minutos)</span><input id="aj-conf-espera" type="number" min="5" max="1440"></div>
-        <div class="ajuste-fila"><span>Veces que se pide la confirmación</span><input id="aj-conf-max" type="number" min="1" max="6"></div>
-        <div class="ajuste-fila"><span>Esperar al motorizado (minutos) antes de insistir</span><input id="aj-mot-espera" type="number" min="1" max="180"></div>
-        <div class="ajuste-fila"><span>Avisos a un mismo motorizado antes de pasar a otro</span><input id="aj-mot-max" type="number" min="1" max="5"></div>
-        <div class="ajuste-fila"><span>Preguntar a GSG cada (minutos)</span><input id="aj-sync" type="number" min="1" max="1440"></div>
-        <label class="linea"><input type="checkbox" id="aj-leer-ia"> La IA lee las respuestas que las reglas no entienden <span class="muted">(necesita <a href="/panel#ia">Mi asistente IA</a> con una clave)</span></label>
-        <label class="linea"><input type="checkbox" id="aj-redactar-ia"> La IA redacta el aviso de llegada (la hora la pone el sistema)</label>
-        <label class="linea"><input type="checkbox" id="aj-pin"> Mandar el pin como ubicación de WhatsApp al motorizado (además del enlace)</label>
-        <label class="linea"><input type="checkbox" id="aj-avisar-entregado"> Dar las gracias al cliente cuando el motorizado dice "entregado"</label>
-        <label class="linea"><input type="checkbox" id="aj-donde-esta"> Contestar solo a "¿dónde está mi pedido?" según el estado (sin gastar IA)</label>
-        <label class="linea"><input type="checkbox" id="aj-botones"> Preguntar con botones SÍ / NO cuando el WhatsApp lo permite (si no puede, sale como texto)</label>
-        <label class="linea"><input type="checkbox" id="aj-cerca"> Avisar al cliente cuando el motorizado escribe "cerca" o "llegando"</label>
-        <label class="linea"><input type="checkbox" id="aj-sv-activa"> Segunda visita: si no había nadie, preguntarle al cliente si volvemos hoy</label>
-        <div class="ajuste-fila"><span>Esperar la respuesta del cliente a la segunda visita (minutos); después pasa a una persona</span><input id="aj-sv-espera" type="number" min="5" max="1440"></div>
-        <label class="linea"><input type="checkbox" id="aj-cierre-activo"> Cerrar el día solo: lo de ayer sin terminar pasa a "necesita una persona" y lo avisado se da por entregado</label>
-        <div class="ajuste-fila"><span>Hora del cierre</span><input id="aj-cierre-hora" type="time" step="3600"></div>
-        <div id="aj-plantillas-caja" class="hidden">
-          <p class="muted" style="margin:10px 0 4px;font-size:13px"><b>Plantillas (API de Meta).</b> Meta solo deja escribir libremente durante 24 h desde el último mensaje del cliente; pasado eso no deja mandar texto libre: hace falta una plantilla aprobada (<a href="/panel#plantillas">Mensajes aprobados</a>). Sin ella, la entrega se aparta y se avisa. Variables en orden: confirmación {{1}} nombre, {{2}} pedido, {{3}} negocio · motorizado {{1}} cliente, {{2}} pedido, {{3}} enlace del mapa · aviso {{1}} nombre, {{2}} pedido, {{3}} hora.</p>
+        <div class="grupos-aj">
+          <section class="grupo-aj"><h3>Tiempos</h3><p class="ayuda-grupo">Cuánto se espera y cuántas veces se insiste antes de pasar a una persona o a otro motorizado.</p>
+            <div class="ajuste-fila"><span>Margen que se suma a lo que dice el motorizado (minutos)</span><input id="aj-margen" type="number" min="0" max="240"></div>
+            <div class="ajuste-fila"><span>Volver a pedir la confirmación cada (minutos)</span><input id="aj-conf-espera" type="number" min="5" max="1440"></div>
+            <div class="ajuste-fila"><span>Veces que se pide la confirmación</span><input id="aj-conf-max" type="number" min="1" max="6"></div>
+            <div class="ajuste-fila"><span>Esperar al motorizado (minutos) antes de insistir</span><input id="aj-mot-espera" type="number" min="1" max="180"></div>
+            <div class="ajuste-fila"><span>Avisos a un mismo motorizado antes de pasar a otro</span><input id="aj-mot-max" type="number" min="1" max="5"></div>
+            <div class="ajuste-fila"><span>Preguntar a GSG cada (minutos)</span><input id="aj-sync" type="number" min="1" max="1440"></div>
+          </section>
+          <section class="grupo-aj"><h3>Qué hace solo el sistema</h3><p class="ayuda-grupo">Lo que se contesta y se manda sin que nadie toque nada.</p>
+            <label class="linea"><input type="checkbox" id="aj-leer-ia"> La IA lee las respuestas que las reglas no entienden <span class="muted">(necesita <a href="/panel#ia">Mi asistente IA</a> con una clave)</span></label>
+            <label class="linea"><input type="checkbox" id="aj-redactar-ia"> La IA redacta el aviso de llegada (la hora la pone el sistema)</label>
+            <label class="linea"><input type="checkbox" id="aj-botones"> Preguntar con botones SÍ / NO cuando el WhatsApp lo permite (si no puede, sale como texto)</label>
+            <label class="linea"><input type="checkbox" id="aj-pin"> Mandar el pin como ubicación de WhatsApp al motorizado (además del enlace)</label>
+            <label class="linea"><input type="checkbox" id="aj-avisar-entregado"> Dar las gracias al cliente cuando el motorizado dice "entregado"</label>
+            <label class="linea"><input type="checkbox" id="aj-donde-esta"> Contestar solo a "¿dónde está mi pedido?" según el estado (sin gastar IA)</label>
+            <label class="linea"><input type="checkbox" id="aj-cerca"> Avisar al cliente cuando el motorizado escribe "cerca" o "llegando"</label>
+          </section>
+          <section class="grupo-aj"><h3>Segunda visita</h3><p class="ayuda-grupo">Cuando el motorizado llega y no hay nadie.</p>
+            <label class="linea"><input type="checkbox" id="aj-sv-activa"> Segunda visita: si no había nadie, preguntarle al cliente si volvemos hoy</label>
+            <div class="ajuste-fila"><span>Esperar la respuesta del cliente a la segunda visita (minutos); después pasa a una persona</span><input id="aj-sv-espera" type="number" min="5" max="1440"></div>
+          </section>
+          <section class="grupo-aj"><h3>Cliente recurrente</h3><p class="ayuda-grupo">Si ya mandó su ubicación hace poco, se le propone en vez de pedirle el pin otra vez.</p>
+            <label class="linea"><input type="checkbox" id="aj-rec-activo"> Cliente recurrente: si ya mandó su ubicación hace poco, proponerle esa dirección en vez de pedirle el pin</label>
+            <div class="ajuste-fila"><span>Vale si su última ubicación tiene menos de (días)</span><input id="aj-rec-dias" type="number" min="1" max="365"></div>
+            <div class="ajuste-fila"><span>Si no contesta en (minutos), el reparto le pide el pin como siempre</span><input id="aj-rec-espera" type="number" min="5" max="1440"></div>
+          </section>
+          <section class="grupo-aj"><h3>Cierre del día</h3><p class="ayuda-grupo">Lo que quedó de ayer se aparta y lo avisado se da por entregado, para que Hoy arranque limpio.</p>
+            <label class="linea"><input type="checkbox" id="aj-cierre-activo"> Cerrar el día solo: lo de ayer sin terminar pasa a "necesita una persona" y lo avisado se da por entregado</label>
+            <div class="ajuste-fila"><span>Hora del cierre</span><input id="aj-cierre-hora" type="time" step="3600"></div>
+          </section>
+          <section class="grupo-aj"><h3>Horario y número de soporte</h3><p class="ayuda-grupo">Se los decimos al cliente al registrar su ubicación: en los textos salen como {desde}, {hasta}, {hastaExtendido} y {soporte}.</p>
+            <div class="ajuste-fila"><span>Las entregas son desde las</span><input id="aj-hor-desde" type="time" step="900"></div>
+            <div class="ajuste-fila"><span>hasta las</span><input id="aj-hor-hasta" type="time" step="900"></div>
+            <div class="ajuste-fila"><span>Horario extendido (algunos casos) hasta las</span><input id="aj-hor-ext" type="time" step="900"></div>
+            <div class="ajuste-fila"><span>Número de soporte (WhatsApp y llamadas) <span class="muted">9 cifras, ej. 987 654 321</span></span><input id="aj-sop-wa" type="tel" inputmode="tel" placeholder="987 654 321"></div>
+            <div class="ajuste-fila"><span>Otro número solo para llamadas <span class="muted">(opcional; vacío = el mismo)</span></span><input id="aj-sop-tel" type="tel" inputmode="tel" placeholder="01 234 5678"></div>
+          </section>
+        </div>
+        <div id="aj-plantillas-caja" class="grupo-aj ancho hidden"><h3>Plantillas de Meta</h3>
+          <p class="ayuda-grupo">Meta solo deja escribir libremente durante 24 h desde el último mensaje del cliente; pasado eso no deja mandar texto libre: hace falta una plantilla aprobada (<a href="/panel#plantillas">Mensajes aprobados</a>). Sin ella, la entrega se aparta y se avisa. Variables en orden: confirmación {{1}} nombre, {{2}} pedido, {{3}} negocio · motorizado {{1}} cliente, {{2}} pedido, {{3}} enlace del mapa · aviso {{1}} nombre, {{2}} pedido, {{3}} hora.</p>
           <datalist id="aj-plantillas-lista"></datalist>
           <div class="ajuste-fila" style="grid-template-columns:1fr 220px"><span>Pedir confirmación</span><input id="aj-pl-confirmacion" list="aj-plantillas-lista" placeholder="nombre de la plantilla"></div>
           <div class="ajuste-fila" style="grid-template-columns:1fr 220px"><span>Al motorizado (pin y pregunta)</span><input id="aj-pl-motorizado" list="aj-plantillas-lista" placeholder="nombre de la plantilla"></div>
           <div class="ajuste-fila" style="grid-template-columns:1fr 220px"><span>Aviso de llegada al cliente</span><input id="aj-pl-aviso" list="aj-plantillas-lista" placeholder="nombre de la plantilla"></div>
         </div>
-        <details><summary>Textos que se mandan (con variables)</summary><div id="aj-textos"></div></details>
+        <details class="grupo-aj ancho textos"><summary>Textos que se mandan <span class="muted">(cada uno con «Ver cómo queda»; vacío = el de siempre)</span></summary><div id="aj-textos"></div></details>
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="primary" id="aj-guardar" type="button">Guardar ajustes</button><span class="muted" id="aj-estado"></span></div>
       </div>
     </div>
@@ -590,7 +638,7 @@ function pintarFilas() {
       ? '<span class="chip tono-azul" data-estado="segunda_visita">Esperando al cliente</span>'
       : chipEstado('entrega', e.estado);
     var fila = '<tr' + (urgente ? ' class="fila-urgente"' : '') + '>' +
-      '<td><b>' + esc(e.nombre || 'Sin nombre') + '</b>' + (urgente ? '<span class="urg">URGENTE</span>' : '') + (e.segundaVisita ? '<span class="sv">2.ª visita</span>' : '') + '<div class="sub">' + esc(e.referencia) + ' · <span class="telefono">' + esc(telefonoBonito(e.phone)) + '</span>' + (e.distrito ? '<br>' + esc(e.distrito) : '') + '</div></td>' +
+      '<td><b>' + esc(e.nombre || 'Sin nombre') + '</b>' + (urgente ? '<span class="urg">URGENTE</span>' : '') + (e.segundaVisita ? '<span class="sv">2.ª visita</span>' : '') + (e.mismoCliente && e.mismoCliente.length ? '<span class="mismo" title="El mismo cliente tiene otro pedido hoy: su pin y su confirmación valen para los dos y van en el mismo viaje">+' + e.mismoCliente.length + ' del mismo cliente: ' + esc(e.mismoCliente.join(', ')) + '</span>' : '') + '<div class="sub">' + esc(e.referencia) + ' · <span class="telefono">' + esc(telefonoBonito(e.phone)) + '</span>' + (e.distrito ? '<br>' + esc(e.distrito) : '') + '</div></td>' +
       '<td>' + chipUbicacion(e) + '</td>' +
       '<td>' + chipConfirmacion(e) + '</td>' +
       '<td>' + chipMotorizado(e) + '</td>' +
@@ -778,7 +826,18 @@ function pintarAjustes() {
   var sv = a.segundaVisita || { activa: true, esperaMin: 30 };
   document.getElementById('aj-sv-activa').checked = sv.activa !== false;
   if (document.activeElement !== document.getElementById('aj-sv-espera')) document.getElementById('aj-sv-espera').value = sv.esperaMin;
+  var rec = a.clienteRecurrente || { activo: true, diasMaximo: 60, esperaMin: 60 };
+  document.getElementById('aj-rec-activo').checked = rec.activo !== false;
+  if (document.activeElement !== document.getElementById('aj-rec-dias')) document.getElementById('aj-rec-dias').value = rec.diasMaximo;
+  if (document.activeElement !== document.getElementById('aj-rec-espera')) document.getElementById('aj-rec-espera').value = rec.esperaMin;
   var cd = a.cierreDelDia || { activo: true, hora: 0 };
+  var he = a.horarioEntregas || {};
+  document.getElementById('aj-hor-desde').value = he.desde || '14:00';
+  document.getElementById('aj-hor-hasta').value = he.hasta || '20:00';
+  document.getElementById('aj-hor-ext').value = he.extendidoHasta || '22:00';
+  var sop = a.soporte || {};
+  document.getElementById('aj-sop-wa').value = sop.whatsapp || '';
+  document.getElementById('aj-sop-tel').value = sop.llamadas || '';
   document.getElementById('aj-cierre-activo').checked = cd.activo !== false;
   if (document.activeElement !== document.getElementById('aj-cierre-hora')) document.getElementById('aj-cierre-hora').value = String(cd.hora || 0).padStart(2, '0') + ':00';
   var pl = resumen.plantillas || { hacenFalta: false, aprobadas: [] };
@@ -787,9 +846,17 @@ function pintarAjustes() {
   ['confirmacion', 'motorizado', 'aviso'].forEach(function (k) { var el = document.getElementById('aj-pl-' + k); if (document.activeElement !== el) el.value = (a.plantillas && a.plantillas[k]) || ''; });
   var caja = document.getElementById('aj-textos');
   if (!caja.children.length) {
-    caja.innerHTML = Object.keys(resumen.textos.porDefecto).map(function (k) {
-      return '<div class="texto-editable"><label>' + esc(resumen.textos.descripcion[k]) + '</label><textarea data-texto="' + k + '" placeholder="' + esc(resumen.textos.porDefecto[k]) + '">' + esc(a.textos[k] || '') + '</textarea><div class="vars">' + resumen.textos.variables[k].map(function (v) { return '<code>' + esc(v) + '</code>'; }).join('') + ' <span>Vacío = el texto de siempre (el que se ve en gris).</span></div><div class="previa"><a data-previa="' + k + '">Ver cómo queda</a><span class="resultado hidden" id="previa-' + k + '"></span></div></div>';
-    }).join('');
+    var pintaTexto = function (k) {
+      return '<div class="texto-editable"><label>' + esc(resumen.textos.descripcion[k]) + '</label><textarea data-texto="' + k + '" placeholder="' + esc(resumen.textos.porDefecto[k]) + '">' + esc(a.textos[k] || '') + '</textarea><div class="previa"><a data-previa="' + k + '">Ver cómo queda</a><span class="resultado hidden" id="previa-' + k + '"></span></div></div>';
+    };
+    var claves = Object.keys(resumen.textos.porDefecto);
+    var alMotorizado = claves.filter(function (k) { return k.indexOf('motorizado') === 0; });
+    var alCliente = claves.filter(function (k) { return k.indexOf('motorizado') !== 0; });
+    caja.innerHTML = '<p class="muted" style="margin:0 0 6px;font-size:13px">Vacío = el texto de siempre (el que se ve en gris). Toca una variable para insertarla donde está el cursor; «Ver cómo queda» lo rellena con un pedido de hoy.</p><h4 class="textos-para">Al cliente</h4>' + alCliente.map(pintaTexto).join('') + '<h4 class="textos-para">Al motorizado</h4>' + alMotorizado.map(pintaTexto).join('');
+    claves.forEach(function (k) {
+      var ta = caja.querySelector('textarea[data-texto="' + k + '"]');
+      if (ta && window.chipsDeVariables) window.chipsDeVariables(ta, resumen.textos.variables[k] || []);
+    });
     caja.addEventListener('click', async function (ev) {
       var a = ev.target.closest('[data-previa]');
       if (!a) return;
@@ -1065,6 +1132,51 @@ document.getElementById('sim-cargar').onclick = async function () {
 document.getElementById('mot-cargar').onclick = async function () {
   try { var r = await api('/admin/motorizados/de-prueba', { method: 'POST', body: {} }); toast(r.nuevos + ' motorizados de prueba dados de alta.'); await cargar(); } catch (e) { toast(e.message); }
 };
+var guionTimer = null, guionVueltas = 0;
+function pintarGuion(g) {
+  var ol = document.getElementById('sim-dia-pasos');
+  var res = document.getElementById('sim-dia-resumen');
+  ol.classList.toggle('hidden', !g.pasos.length);
+  ol.innerHTML = g.pasos.map(function (p) {
+    var ico = p.estado === 'hecho' ? '✓' : p.estado === 'fallo' ? '✗' : p.estado === 'saltado' ? '–' : '…';
+    return '<li class="paso-' + p.estado + '"><b>' + ico + '</b> ' + esc(p.texto) + (p.detalle ? ' <span class="muted">· ' + esc(p.detalle) + '</span>' : '') + '</li>';
+  }).join('');
+  res.classList.toggle('hidden', !g.resumen);
+  res.textContent = g.resumen || '';
+  var corriendo = g.estado === 'corriendo';
+  document.getElementById('sim-dia').disabled = corriendo;
+  document.getElementById('sim-dia-parar').classList.toggle('hidden', !corriendo);
+  if (corriendo && ol.lastElementChild) ol.scrollTop = ol.scrollHeight;
+}
+async function seguirGuion() {
+  try {
+    var g = await api('/admin/entregas/simulador/probar-dia');
+    pintarGuion(g);
+    if (g.estado === 'corriendo') {
+      guionVueltas++;
+      if (guionVueltas % 3 === 0) { try { await cargar(); } catch (e) {} }
+      guionTimer = setTimeout(seguirGuion, 1000);
+    } else {
+      guionTimer = null;
+      await cargar();
+    }
+  } catch (e) { guionTimer = null; }
+}
+document.getElementById('sim-dia').onclick = async function () {
+  try {
+    await api('/admin/entregas/simulador/probar-dia', { method: 'POST', body: {} });
+    toast('Empieza el día de prueba: mira los pasos aquí abajo y la tabla de pedidos.');
+    document.getElementById('caja-sim').classList.remove('cerrada');
+    if (!guionTimer) seguirGuion();
+  } catch (e) { toast(e.message); }
+};
+document.getElementById('sim-dia-parar').onclick = async function () {
+  try { await api('/admin/entregas/simulador/probar-dia', { method: 'DELETE' }); toast('Se detiene al terminar el paso actual.'); } catch (e) { toast(e.message); }
+};
+/* Si el dia de prueba ya corre (o acaba de terminar) y se abre Hoy de nuevo, se sigue desde donde va. */
+api('/admin/entregas/simulador/probar-dia').then(function (g) {
+  if (g && g.pasos && g.pasos.length) { pintarGuion(g); if (g.estado === 'corriendo' && !guionTimer) seguirGuion(); }
+}).catch(function () {});
 document.getElementById('sim-modo').onchange = async function () {
   try { await api('/admin/entregas/simulador/modo', { method: 'POST', body: { modo: this.value } }); toast('El simulador ahora: ' + this.options[this.selectedIndex].text); } catch (e) { toast(e.message); }
 };
@@ -1114,6 +1226,8 @@ document.getElementById('aj-guardar').onclick = async function () {
     var textos = {};
     document.querySelectorAll('[data-texto]').forEach(function (t) { textos[t.getAttribute('data-texto')] = t.value; });
     await api('/admin/entregas/ajustes', { method: 'POST', body: {
+      horarioEntregas: { desde: document.getElementById('aj-hor-desde').value || '14:00', hasta: document.getElementById('aj-hor-hasta').value || '20:00', extendidoHasta: document.getElementById('aj-hor-ext').value || '22:00' },
+      soporte: { whatsapp: document.getElementById('aj-sop-wa').value.replace(/\D/g, ''), llamadas: document.getElementById('aj-sop-tel').value.replace(/\D/g, '') },
       margenMinutos: Number(document.getElementById('aj-margen').value),
       confirmacionEsperaMin: Number(document.getElementById('aj-conf-espera').value),
       confirmacionMaxIntentos: Number(document.getElementById('aj-conf-max').value),
@@ -1129,6 +1243,7 @@ document.getElementById('aj-guardar').onclick = async function () {
       usarBotones: document.getElementById('aj-botones').checked,
       avisarCerca: document.getElementById('aj-cerca').checked,
       segundaVisita: { activa: document.getElementById('aj-sv-activa').checked, esperaMin: Number(document.getElementById('aj-sv-espera').value) || 30 },
+      clienteRecurrente: { activo: document.getElementById('aj-rec-activo').checked, diasMaximo: Number(document.getElementById('aj-rec-dias').value) || 60, esperaMin: Number(document.getElementById('aj-rec-espera').value) || 60 },
       plantillas: { confirmacion: document.getElementById('aj-pl-confirmacion').value.trim(), motorizado: document.getElementById('aj-pl-motorizado').value.trim(), aviso: document.getElementById('aj-pl-aviso').value.trim() },
       textos: textos
     } });

@@ -37,12 +37,25 @@ async function conMotorizado(e: EscenarioEntregas, referencia: string, motorizad
   }
 }
 
+/**
+ * El reloj falso arranca a las 09:00 de Lima (14:00 UTC) del ultimo dia que
+ * ya empezo: las pruebas avanzan varias horas y, si arrancaran a la hora
+ * real de la tarde, cruzarian la medianoche, el cierre del dia apartaria lo
+ * vivo y la sincronizacion traeria los pedidos "de manana".
+ */
+function hoyALas9(): Date {
+  const d = new Date();
+  d.setUTCHours(14, 0, 0, 0);
+  if (d.getTime() > Date.now()) d.setUTCDate(d.getUTCDate() - 1);
+  return d;
+}
+
 describe('botones, segunda visita, cerca, sin moto, urgentes y ruta', () => {
   let e: EscenarioEntregas;
   let riders: Array<{ id: number; phone: string; nombre: string }>;
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ supervisor: SUPERVISOR });
+    e = await crearEscenarioEntregas({ supervisor: SUPERVISOR, arranque: hoyALas9() });
     await e.api.post('/admin/motorizados/de-prueba');
     riders = (await e.resumen()).motorizados.map((m) => ({ id: m.id, phone: m.phone, nombre: m.nombre }));
     expect(riders).toHaveLength(10);

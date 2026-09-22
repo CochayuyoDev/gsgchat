@@ -23,6 +23,7 @@ import { z } from 'zod';
 import type { SettingsRepo } from '../settings/service.js';
 import { decrypt, encrypt, keyFromBase64 } from '../settings/crypto.js';
 import { crearPuertoEnEspera, crearPuertoHttp, RUTA_GSG_PENDIENTES, type PuertoGsg, type ResultadoConsulta, type ResultadoEnvio } from './gsg.js';
+import { crearGsgExtras, type ServicioGsgExtras } from './gsg-extras.js';
 
 const CLAVE_CONEXION = 'gsg.conexion';
 const CLAVE_TOKEN = 'gsg.token';
@@ -76,14 +77,33 @@ export interface ServicioConexionGsg {
   /** Pide los pendientes a lo vigente (o a lo que se le pase, sin guardar) y dice qué contestó. */
   probar(candidata?: { url: string; token: string }): Promise<PruebaGsg>;
   recargar(): Promise<void>;
+  /**
+   * Quien quiera ver lo que GSG contesta en /reparto/pendientes (por ejemplo,
+   * para apuntar los pedidos que no se pueden usar). Se llama tras cada consulta
+   * buena; un fallo del observador no rompe la consulta.
+   */
+  observar(fn: (cuerpo: unknown) => void | Promise<void>): () => void;
+  /** Lo que rodea a la conexión: descartes, verificador del contrato, tokens del simulador, bitácora y cuadre. */
+  extras: ServicioGsgExtras;
+}
+
+let vigenteCreada: ServicioConexionGsg | null = null;
+
+/**
+ * La última conexión creada en este proceso. Sirve para colgar rutas desde
+ * sitios que no reciben la conexión por sus deps (ver src/rutas/gsg-extras-routes.ts).
+ */
+export function conexionGsgVigente(): ServicioConexionGsg | null {
+  return vigenteCreada;
 }
 
 export interface DepsConexionGsg {
   settingsRepo: SettingsRepo;
   settingsKeyBase64: string;
-  config: { GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string };
+  config: { GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string; timezone?: string };
   fetchImpl?: typeof fetch;
   log?: (m: string, d?: Record<string, unknown>) => void;
+  ahora?: () => Date;
 }
 
 export interface PendientesGsg {
@@ -155,8 +175,21 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       return 'GSG no está conectado: lo reportable se guarda y saldrá entero al conectarlo';
     },
     enviar: (tipo, payload): Promise<ResultadoEnvio> => actual().enviar(tipo, payload),
-    consultar: <T,>(ruta: string): Promise<ResultadoConsulta<T>> => actual().consultar<T>(ruta),
+    consultar: async <T,>(ruta: string): Promise<ResultadoConsulta<T>> => {
+      const r = await actual().consultar<T>(ruta);
+      if (r.ok && ruta === RUTA_GSG_PENDIENTES && observadores.size) {
+        for (const fn of observadores) {
+          try {
+            await fn(r.cuerpo);
+          } catch (error) {
+            log('un observador de los pendientes de GSG falló', { error: String(error) });
+          }
+        }
+      }
+      return r;
+    },
   };
+  const observadores = new Set<(cuerpo: unknown) => void | Promise<void>>();
 
   const estado = (): EstadoConexionGsg => {
     const e = efectiva();
@@ -207,11 +240,18 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     return ultimaPrueba;
   }
 
-  return {
+  const extras = await crearGsgExtras({ settingsRepo: deps.settingsRepo, puerto: () => proxy, ahora: deps.ahora, timezone: deps.config.timezone, log });
+
+  const servicio: ServicioConexionGsg = {
     estado,
     puerto: () => proxy,
     recargar,
     probar,
+    extras,
+    observar(fn) {
+      observadores.add(fn);
+      return () => observadores.delete(fn);
+    },
     async conectarReal(input) {
       const url = input.url.trim().replace(/\/+$/, '');
       if (!url) throw new Error('Falta la dirección de la API de GSG.');
@@ -242,4 +282,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       return estado();
     },
   };
+  vigenteCreada = servicio;
+  return servicio;
 }

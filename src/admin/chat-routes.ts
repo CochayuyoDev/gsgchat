@@ -123,6 +123,35 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     };
   });
 
+  /**
+   * La ficha del cliente para el panel lateral de Chats: quien es, si se le
+   * puede escribir, su pedido de hoy (si lo hay), su ultima ubicacion y
+   * cuantas conversaciones guardadas tiene. Solo lectura.
+   */
+  app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/ficha', async (request, reply) => {
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    const ubicacion = await repos.locations.latestFor(contact.id).catch(() => null);
+    let entrega: Record<string, unknown> | null = null;
+    try {
+      const viva = await repos.entregas.vivaPorTelefono(contact.phone);
+      const e = viva ?? (await repos.entregas.listar({ estados: ['entregada'], limit: 500 })).filter((x) => x.phone === contact.phone).pop() ?? null;
+      if (e) {
+        const m = e.motorizadoId ? await repos.entregas.motorizado(e.motorizadoId).catch(() => null) : null;
+        entrega = { id: e.id, referencia: e.referencia, estado: e.estado, direccion: e.direccion, distrito: e.distrito, ubicacionEstado: e.ubicacionEstado, confirmacionEstado: e.confirmacionEstado, motorizado: m ? { nombre: m.nombre, phone: m.phone } : null, llegaAproxAt: e.llegaAproxAt, entregadaAt: e.entregadaAt, incidencia: e.incidencia, prioridad: e.prioridad };
+      }
+    } catch {
+      entrega = null;
+    }
+    const guardadas = await repos.archives.count({ contactId: contact.id }).catch(() => 0);
+    return {
+      contacto: { id: contact.id, phone: contact.phone, name: contact.name, tipo: contact.tipo ?? 'persona', optInAt: contact.optInAt, optOutAt: contact.optOutAt, lastInboundAt: contact.lastInboundAt, botPausadoAt: contact.botPausadoAt ?? null },
+      ubicacion: ubicacion ? { lat: ubicacion.lat, lng: ubicacion.lng, mapa: `https://www.google.com/maps/search/?api=1&query=${ubicacion.lat},${ubicacion.lng}` } : null,
+      entrega,
+      guardadas,
+    };
+  });
+
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId', async (request, reply) => {
     const query = z
       .object({

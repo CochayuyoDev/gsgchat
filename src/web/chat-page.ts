@@ -80,6 +80,15 @@ const CSS = `
      haga scroll, en vez de estirar la pagina entera. */
   .thread { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
   .thread header .name { font-weight: 600; }
+  .thread header button.link { background: none; border: 0; font: inherit; color: var(--primario); cursor: pointer; padding: 6px 8px; min-height: 36px; }
+  .ficha { position: absolute; top: 58px; right: 8px; width: min(360px, calc(100% - 16px)); max-height: calc(100% - 70px); overflow: auto; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra-2); z-index: 5; }
+  .ficha-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
+  .ficha-cuerpo { padding: 10px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 10px; }
+  .ficha-cuerpo h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .02em; }
+  .ficha-cuerpo .fila { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .ficha-cuerpo .pin-coords { font-family: ui-monospace, Consolas, monospace; user-select: all; }
+  .ficha-cuerpo a.sm, .ficha-cuerpo button.sm { min-height: 34px; padding: 4px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: none; color: var(--texto); display: inline-flex; align-items: center; }
+  .thread { position: relative; }
   .thread header .sub { font-size: 12.5px; color: var(--muted); }
   .messages {
     flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -124,7 +133,13 @@ const CSS = `
     background: var(--theirs);
     clip-path: polygon(0 0, 100% 0, 100% 100%);
   }
-  .msg .meta {
+  .pin-cliente{display:flex;flex-direction:column;gap:4px;margin:2px 0 6px;padding:8px 10px;border:1px solid var(--borde);border-radius:var(--radio-sm);background:var(--superficie-2)}
+.pin-cliente .pin-titulo{font-weight:600;font-size:13px}
+.pin-cliente .pin-coords{font-family:ui-monospace,Consolas,monospace;font-size:13px;user-select:all}
+.pin-cliente .pin-acciones{display:flex;gap:10px;align-items:center;font-size:13px}
+.pin-cliente .pin-copiar{border:1px solid var(--borde);background:var(--superficie);border-radius:var(--radio-sm);padding:4px 10px;font:inherit;font-size:12.5px;cursor:pointer;min-height:32px}
+.pin-cliente .pin-nota{font-size:11.5px;color:var(--texto-suave)}
+.msg .meta {
     float: right; margin: 8px -2px -4px 10px; font-size: 11px; color: var(--muted);
     white-space: nowrap; position: relative; top: 3px;
   }
@@ -323,8 +338,13 @@ const CSS = `
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; z-index: 50;
     background: var(--texto); color: var(--bg); padding: 10px 18px; border-radius: 10px; font-size: 13.5px;
     box-shadow: var(--sombra-2); max-width: 80vw; }
+  .thread header .llamar { display: none; text-decoration: none; }
+  .ficha-acciones { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .ficha-acciones a { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: var(--radio-sm); text-decoration: none; font-weight: 600; border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); }
+  .ficha-acciones a.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); }
   @media (max-width: 820px) {
     .app { grid-template-columns: 1fr; }
+    .thread header .llamar { display: inline-flex; }
     .side { display: none; }
     .app.open-thread .side { display: none; }
     .app:not(.open-thread) .thread { display: none; }
@@ -419,10 +439,15 @@ ${bandaDemo}
         <div class="name" id="t-name"></div>
         <div class="sub" id="t-sub"></div>
       </div>
-      <a class="link" id="t-panel" href="/panel#contactos">Ficha</a>
+      <a class="icon llamar hidden" id="t-llamar" href="#" aria-label="Llamar al cliente" title="Llamar al cliente (abre el marcador del teléfono)">📞</a>
+      <button class="link" id="t-panel" type="button" title="Quién es, su pedido de hoy, su última ubicación y sus conversaciones guardadas">Ficha</button>
       <button class="icon etiqueta" id="pausar-bot" title="Callar las respuestas automáticas en este chat y atenderlo tú"></button>
       <button class="icon etiqueta" id="cerrar-chat" title="Guarda todo el historial de este chat en Conversaciones guardadas y deja el hilo vacío">🗄 Guardar y vaciar</button>
     </header>
+    <aside class="ficha hidden" id="ficha" aria-label="Ficha del cliente">
+      <div class="ficha-cab"><b>Ficha del cliente</b><button type="button" class="icon" id="ficha-cerrar" aria-label="Cerrar la ficha">✕</button></div>
+      <div class="ficha-cuerpo" id="ficha-cuerpo"><p class="muted">Cargando…</p></div>
+    </aside>
     <div class="empty" id="placeholder">
       <div>
         <div style="font-size:44px">💬</div>
@@ -718,6 +743,7 @@ async function openChat(contactId, silent) {
     ver('lectura', false);
     ver('confirmar-cierre', false);
     document.getElementById('app').classList.add('open-thread');
+    var sApp = document.getElementById('s-app'); if (sApp) sApp.classList.add('sin-nav-movil');
     ver('thread-head', true);
     ver('placeholder', false);
     ver('messages', true);
@@ -726,6 +752,8 @@ async function openChat(contactId, silent) {
     avatar.textContent = esGrupo ? '👥' : inicial(current.name, current.phone);
     avatar.classList.toggle('grupo', esGrupo);
     document.getElementById('t-name').textContent = nombreDe(current);
+    var llamar = document.getElementById('t-llamar');
+    if (llamar) { var puedeLlamar = !esGrupo && /^\d{8,}$/.test(String(current.phone || '')); llamar.classList.toggle('hidden', !puedeLlamar); llamar.href = puedeLlamar ? 'tel:+' + current.phone : '#'; }
     if (esGrupo) {
       document.getElementById('t-sub').innerHTML = '<span class="pill ok">grupo de WhatsApp</span> · ' +
         'aquí no contesta ningún automatismo: lo que escribas lo mandas tú' +
@@ -763,6 +791,49 @@ async function openChat(contactId, silent) {
 }
 
 var pintados = [];       /* lo que hay pintado en el hilo ahora mismo (para los botones por globo) */
+document.addEventListener('click', function (ev) {
+  var b = ev.target && ev.target.closest ? ev.target.closest('[data-copiar]') : null;
+  if (!b) return;
+  var texto = b.getAttribute('data-copiar') || '';
+  var listo = function () { b.textContent = 'Copiado'; setTimeout(function () { b.textContent = 'Copiar'; }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(texto).then(listo, function () { window.prompt('Copia las coordenadas:', texto); });
+  else window.prompt('Copia las coordenadas:', texto);
+});
+
+/* La ficha del cliente: panel lateral con lo que hay que saber antes de contestar. */
+function estadoEntregaEnPalabras(e) {
+  var por = { pendiente: 'Pendiente', esperando_ubicacion: 'Falta su ubicación', esperando_confirmacion: 'Falta que confirme', lista: 'Lista para salir', esperando_motorizado: 'Con un motorizado, sin hora', avisada: 'En camino', entregada: 'Entregada', terminada: 'Terminada', cancelada: 'Cancelada', incidencia: 'Necesita a alguien' };
+  return por[e.estado] || e.estado;
+}
+async function abrirFicha() {
+  if (!current) return;
+  var panel = document.getElementById('ficha'); var cuerpo = document.getElementById('ficha-cuerpo');
+  panel.classList.remove('hidden'); cuerpo.innerHTML = '<p class="muted">Cargando…</p>';
+  try {
+    var f = await api('/admin/chat/' + current.id + '/ficha');
+    var c = f.contacto;
+    var html = '<div><h4>Quién es</h4><div class="fila"><b>' + esc(c.name || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(c.phone)) + '</span></div>' +
+      '<div class="muted" style="margin-top:4px">' + (c.optOutAt ? 'Pidió no recibir mensajes (BAJA): solo se le contesta si escribe.' : c.optInAt ? 'Se le puede escribir (dio su consentimiento).' : 'Sin consentimiento todavía: se le contesta cuando escribe; no se le inicia conversación.') + (c.botPausadoAt ? ' Las respuestas automáticas están calladas en este chat.' : '') + (c.lastInboundAt ? ' Último mensaje suyo: ' + hhmm(c.lastInboundAt) + '.' : '') + '</div></div>';
+    if (f.entrega) {
+      var e = f.entrega;
+      html += '<div><h4>Su pedido de hoy</h4><div class="fila"><b>' + esc(e.referencia) + '</b><span class="chip">' + esc(estadoEntregaEnPalabras(e)) + '</span>' + (e.prioridad === 'urgente' ? '<span class="chip tono-rojo">Urgente</span>' : '') + '</div>' +
+        '<div class="muted" style="margin-top:4px">' + esc((e.direccion || '') + (e.distrito ? ', ' + e.distrito : '')) + (e.motorizado ? ' · lo lleva ' + esc(e.motorizado.nombre) : '') + (e.llegaAproxAt ? ' · llega alrededor de las ' + hhmm(e.llegaAproxAt) : '') + (e.entregadaAt ? ' · entregado a las ' + hhmm(e.entregadaAt) : '') + '</div>' +
+        '<div class="fila" style="margin-top:6px"><a class="sm" href="/hoy?buscar=' + encodeURIComponent(e.referencia) + '">Abrir en Hoy</a></div></div>';
+    } else html += '<div><h4>Su pedido de hoy</h4><div class="muted">No tiene ningún pedido en la lista de hoy.</div></div>';
+    if (!(current && current.tipo === 'grupo') && /^\d{8,}$/.test(String(c.phone || ''))) {
+      html += '<div class="ficha-acciones"><a class="principal" href="tel:+' + esc(String(c.phone)) + '">📞 Llamar</a>' + (f.ubicacion ? '<a href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">🗺 Abrir en el mapa</a>' : '') + '</div>';
+    }
+    if (f.ubicacion) {
+      var coords = Number(f.ubicacion.lat).toFixed(6) + ', ' + Number(f.ubicacion.lng).toFixed(6);
+      html += '<div><h4>Su última ubicación</h4><div class="fila"><span class="pin-coords">' + coords + '</span></div><div class="fila" style="margin-top:6px"><a class="sm" href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">Abrir en el mapa</a><button class="sm" type="button" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></div><div class="muted" style="margin-top:4px;font-size:12px">Las coordenadas las ves tú; al cliente solo le llega el enlace.</div></div>';
+    } else html += '<div><h4>Su última ubicación</h4><div class="muted">Todavía no ha mandado ninguna. Con «📍 Pedir ubicación» se le manda el botón.</div></div>';
+    html += '<div><h4>Conversaciones guardadas</h4><div class="fila">' + (f.guardadas ? '<a class="sm" href="/guardados?tel=' + encodeURIComponent(c.phone) + '">Ver las ' + f.guardadas + ' guardada' + (f.guardadas === 1 ? '' : 's') + '</a>' : '<span class="muted">Ninguna todavía.</span>') + '<a class="sm" href="/panel#contactos">Ficha completa</a></div></div>';
+    cuerpo.innerHTML = html;
+  } catch (e) { cuerpo.innerHTML = '<p class="muted">' + esc(e.message) + '</p>'; }
+}
+document.getElementById('t-panel').onclick = abrirFicha;
+document.getElementById('ficha-cerrar').onclick = function () { document.getElementById('ficha').classList.add('hidden'); };
+
 function renderMessages(messages, scrollToEnd, mantenerVista) {
   pintados = messages;
   var box = document.getElementById('messages');
@@ -799,6 +870,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       (m.payload && m.payload.anuncio ? '<span class="transcrito" title="Escribió desde un anuncio de Facebook/Instagram' + (m.payload.anuncio.url ? ': ' + esc(m.payload.anuncio.url) : '') + '">📣 desde el anuncio' + (m.payload.anuncio.titulo ? ' «' + esc(m.payload.anuncio.titulo) + '»' : '') + '</span><br>' : '') +
       (m.payload && m.payload.transcripcion ? '<span class="transcrito" title="Lo que dijo en el audio, transcrito">🎤 dijo:</span> ' : '') +
       (m.direction === 'out' && m.payload && m.payload.media && m.payload.media.voz ? '<span class="transcrito" title="Salió como nota de voz; esto es lo que dice">🔊 nota de voz:</span> ' : '') +
+      ubicacionHtml(m) +
       withLinks(cuerpoVisible(m)) +
       verUnaVezHtml(m) +
       (m.payload && m.payload.borradoPorRemitente ? '<span class="borrado" title="' + esc(hhmm(m.payload.borradoPorRemitente)) + '">🗑 Lo eliminó para todos · aquí se conserva</span>' : '') +
@@ -874,9 +946,28 @@ function verUnaVezHtml(m) {
  * de que no se pudo bajar— y verlo escrito debajo del sticker parece un error.
  */
 function cuerpoVisible(m) {
+  if (m.kind === 'location' && m.payload && m.payload.location) return '';
   var cuerpo = (m.body || '').trim();
   var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
   return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
+}
+/**
+ * El pin que mando el cliente: las coordenadas se ven aqui (para el equipo)
+ * con el enlace al mapa y un boton para copiarlas. Al cliente nunca se le
+ * mandan las coordenadas: solo el enlace.
+ */
+function ubicacionHtml(m) {
+  var loc = m.payload && m.payload.location;
+  if (m.kind !== 'location' || !loc) return '';
+  var lat = Number(loc.latitude), lng = Number(loc.longitude);
+  if (!isFinite(lat) || !isFinite(lng)) return '';
+  var coords = lat.toFixed(6) + ', ' + lng.toFixed(6);
+  var url = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
+  return '<div class="pin-cliente"><span class="pin-titulo">📍 Ubicación' + (loc.name ? ' · ' + esc(loc.name) : '') + '</span>' +
+    '<span class="pin-coords">' + coords + '</span>' +
+    '<span class="pin-acciones"><a href="' + esc(url) + '" target="_blank" rel="noopener">Abrir en el mapa</a>' +
+    '<button type="button" class="pin-copiar" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></span>' +
+    '<span class="pin-nota">Las coordenadas las ves tú; al cliente solo le llega el enlace.</span></div>';
 }
 /**
  * El hueco del adjunto.
@@ -1575,6 +1666,8 @@ document.addEventListener('keydown', function (e) {
   if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); chatVecino(-1); return; }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'U' || e.key === 'u')) { e.preventDefault(); if (current && document.getElementById('composer') && !document.getElementById('composer').classList.contains('hidden')) enviar({ askLocation: true }); return; }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); if (current) { document.getElementById('tools').classList.remove('plegado'); document.getElementById('loc').focus(); } return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'i')) { e.preventDefault(); if (current) { var fichaAbierta = !document.getElementById('ficha').classList.contains('hidden'); if (fichaAbierta) document.getElementById('ficha').classList.add('hidden'); else abrirFicha(); } return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'B' || e.key === 'b')) { e.preventDefault(); if (current) alternarBot(); return; }
   if (e.key === '/' && !enCampo(document.activeElement)) {
     e.preventDefault();
     if (current && !document.getElementById('composer').classList.contains('hidden')) { input.focus(); input.value = '/'; atajosDesdeTexto(); }
@@ -1602,11 +1695,13 @@ function ayudaTeclas() {
     '<tr><td><kbd>Alt</kbd>+<kbd>↓</kbd> <kbd>Alt</kbd>+<kbd>↑</kbd></td><td>Siguiente / anterior conversación</td></tr>' +
     '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></td><td>Pedirle su ubicación</td></tr>' +
     '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>Mandar un pin (abre el cuadro del mapa)</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Abrir o cerrar la ficha del cliente (su pedido de hoy, su última ubicación)</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td><td>«De este me encargo yo»: callar o soltar al asistente en este chat</td></tr>' +
     '<tr><td><kbd>/</kbd> fuera del mensaje</td><td>Ir al buscador de chats</td></tr>' +
     '<tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Buscar un módulo del sistema</td></tr>' +
     '<tr><td><kbd>Esc</kbd></td><td>Cerrar esto, salir del campo o volver a la lista</td></tr>' +
     '<tr><td><kbd>F1</kbd> o <kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Esta ayuda</td></tr>' +
-    '</table><p class="muted" style="margin:10px 0 0;font-size:12.5px">Las respuestas rápidas se editan en Panel → Automatización.</p></div>';
+    '</table><p class="muted" style="margin:10px 0 0;font-size:12.5px">Las respuestas rápidas se editan en Ajustes → Respuestas rápidas.</p></div>';
   caja.onclick = function (ev) { if (ev.target === caja) caja.remove(); };
   document.body.appendChild(caja);
 }
@@ -1631,6 +1726,7 @@ document.getElementById('ask-loc').onclick = function () { enviar({ askLocation:
 
 document.getElementById('back').onclick = function () {
   document.getElementById('app').classList.remove('open-thread');
+  var sAppCerrar = document.getElementById('s-app'); if (sAppCerrar) sAppCerrar.classList.remove('sin-nav-movil');
 };
 document.getElementById('new').onclick = async function () {
   var tel = await pedirCelular();
@@ -1882,6 +1978,7 @@ async function abrirRespaldo(id) {
     deseado = null;
 
     document.getElementById('app').classList.add('open-thread');
+    var sAppLect = document.getElementById('s-app'); if (sAppLect) sAppLect.classList.add('sin-nav-movil');
     ver('thread-head', true);
     ver('placeholder', false);
     ver('messages', true);
@@ -1913,6 +2010,7 @@ async function abrirRespaldo(id) {
       ver('thread-head', false);
       ver('placeholder', true);
       document.getElementById('app').classList.remove('open-thread');
+      var sAppVolver = document.getElementById('s-app'); if (sAppVolver) sAppVolver.classList.remove('sin-nav-movil');
       modo = 'chat';
     };
     document.getElementById('rb-descargar').onclick = function () { descargarRespaldo(a); };

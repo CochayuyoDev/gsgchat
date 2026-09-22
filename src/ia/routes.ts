@@ -16,11 +16,29 @@ import { z } from 'zod';
 import { ErrorIA, MODELOS_SUGERIDOS, SERVICIOS_OPENAI } from './proveedores.js';
 import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
 import { ESCENARIOS, GRUPOS } from './escenarios.js';
+import { BANCO_EXAMEN, UMBRAL_EXAMEN } from './examen-lector.js';
 import { configIASchema, type ServicioIA } from './servicio.js';
 import { confirmacionSchema } from './ordenes.js';
 
 export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan }): Promise<void> {
   const { ia } = deps;
+
+  // Lo que la IA (y las reglas) no entendieron, y el examen del lector de respuestas.
+  app.get('/admin/ia/no-entendido', async (request) => {
+    const q = z.object({ dias: z.coerce.number().int().min(1).max(60).default(7) }).parse(request.query ?? {});
+    return ia.noEntendido({ dias: q.dias });
+  });
+  app.post('/admin/ia/no-entendido/corregir', async (request, reply) => {
+    const body = z.object({ id: z.coerce.number().int().positive(), era: z.enum(['si', 'no', 'duda', 'minutos', 'entregado', 'no_entregado', 'ignorar']), minutos: z.coerce.number().min(1).max(600).nullable().optional(), leccion: z.boolean().optional() }).parse(request.body ?? {});
+    try {
+      return await ia.corregirNoEntendido(body, request.usuario?.usuario ?? null);
+    } catch (e) {
+      if (e instanceof ErrorIA) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
+  app.get('/admin/ia/examen-lector', async () => ({ examen: await ia.examenLector(), umbral: UMBRAL_EXAMEN, total: BANCO_EXAMEN.length }));
+  app.post('/admin/ia/examen-lector', async () => ({ examen: await ia.examinarLector(), umbral: UMBRAL_EXAMEN }));
 
   app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS, servicios: SERVICIOS_OPENAI }));
 

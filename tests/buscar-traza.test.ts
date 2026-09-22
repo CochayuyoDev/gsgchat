@@ -168,6 +168,26 @@ describe('que paso con este mensaje', () => {
 });
 
 describe('los primeros pasos del modo GSG', () => {
+  it('la campana avisa de lo que GSG mandó y no se pudo leer, y del día que no cuadra', async () => {
+    const { crearConexionGsg } = await import('../src/rutas/conexion-gsg.js');
+    const { createMemorySettingsRepo, TEST_SETTINGS_KEY } = await import('./fakes.js');
+    // La conexion creada aqui queda como la vigente del proceso: es la que mira la campana.
+    const conexion = await crearConexionGsg({ settingsRepo: createMemorySettingsRepo(), settingsKeyBase64: TEST_SETTINGS_KEY, config: { GSG_URL: '', GSG_TOKEN: '', PUBLIC_BASE_URL: 'http://localhost:3000', timezone: 'America/Lima' } });
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const descartados = await conexion.extras.observarPendientes({ dia: hoy, faltaUbicacion: [{ referencia: 'P-9', telefono: '12' }, { referencia: '', telefono: '51987000001' }], faltaConfirmacion: [], terminados: [] });
+    expect(descartados).toBeGreaterThan(0);
+    const r = await app.inject({ method: 'GET', url: '/admin/avisos', headers: auth });
+    expect(r.statusCode).toBe(200);
+    const avisos = r.json().avisos as Array<{ tipo: string; texto: string; href: string; n?: number }>;
+    const descarte = avisos.find((a) => a.tipo === 'gsg_descartes');
+    expect(descarte).toBeTruthy();
+    expect(descarte!.texto).toMatch(/de GSG no se pud/);
+    expect(descarte!.href).toBe('/setup#gsg');
+    expect(descarte!.n).toBe(descartados);
+    // Sin cuadre hecho, no hay aviso de cuadre.
+    expect(avisos.find((a) => a.tipo === 'gsg_cuadre')).toBeUndefined();
+  });
+
   it('/admin/resumen dice el modo y lo que GSGchat necesita para arrancar', async () => {
     const r = await app.inject({ method: 'GET', url: '/admin/resumen', headers: auth });
     expect(r.statusCode).toBe(200);

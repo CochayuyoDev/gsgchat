@@ -41,7 +41,7 @@ export interface MotorEntregasDeps {
 }
 
 export interface ResultadoTickEntregas {
-  accion: 'nada' | 'confirmacion' | 'motorizado' | 'insistencia_motorizado' | 'aviso' | 'incidencia' | 'sincronizacion' | 'cierre';
+  accion: 'nada' | 'confirmacion' | 'propuesta' | 'motorizado' | 'insistencia_motorizado' | 'aviso' | 'incidencia' | 'sincronizacion' | 'cierre';
   entregaId?: number;
   motivo?: string;
 }
@@ -107,16 +107,45 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
     pausaActual = sortearPausa();
   };
 
+  /**
+   * Un envio frenado (ritmo, horario del numero, WhatsApp caido) vuelve
+   * a intentarse cuando el sender dijo, no en la siguiente vuelta: si no,
+   * cada 3 s se apuntaba un intento frenado en el historial.
+   */
+  const frenadas = new Map<number, number>();
+  const frenada = (id: number) => (frenadas.get(id) ?? 0) > ahora().getTime();
+  const frenar = (id: number, ms: number | undefined) => frenadas.set(id, ahora().getTime() + Math.max(15_000, ms ?? 60_000));
+
+  /**
+   * La franja en la que este motor escribe: la del reparto (variables de
+   * arranque) AMPLIADA con el horario de entregas de la pantalla (desde /
+   * horario extendido hasta). Sin esto, a las 19:00 el sistema dejaba de
+   * mandar pines a los motorizados aunque GSG entregue hasta las 22:00.
+   */
+  const opcionesVigentes = (): OpcionesMotor => {
+    const h = entregas.ajustes().horarioEntregas;
+    const desde = Number((h?.desde ?? '').slice(0, 2));
+    const hasta = Number((h?.extendidoHasta ?? h?.hasta ?? '').slice(0, 2));
+    const minutosHasta = Number((h?.extendidoHasta ?? h?.hasta ?? '').slice(3, 5));
+    if (!Number.isFinite(desde) || !Number.isFinite(hasta)) return opciones;
+    return {
+      ...opciones,
+      horaInicio: Math.min(opciones.horaInicio, Math.max(0, desde)),
+      horaFin: Math.max(opciones.horaFin, Math.min(24, hasta + (minutosHasta > 0 ? 1 : 0))),
+    };
+  };
+
   /** Lo que se mira cada minuto: el reparto (ubicaciones que llegaron por ahi) y las segundas visitas sin respuesta. */
   async function revisar(): Promise<void> {
     await entregas.revisarReparto().catch((error) => log('no se pudo revisar el reparto', { detalle: String(error) }));
     await entregas.revisarSegundasVisitas().catch((error) => log('no se pudieron revisar las segundas visitas', { detalle: String(error) }));
+    await entregas.revisarPropuestas().catch((error) => log('no se pudieron revisar las direcciones propuestas', { detalle: String(error) }));
   }
 
   const motor: MotorEntregas = {
     proximoEnvioEn: () => Math.max(0, ultimoEnvio + pausaEfectiva() - Date.now()),
     parado: () => ultimoMotivo,
-    enHorario: () => enHorario(ahora(), opciones),
+    enHorario: () => enHorario(ahora(), opcionesVigentes()),
     sincronizarSiToca,
 
     async tick() {
@@ -142,7 +171,8 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
         log('no se pudo cerrar el día', { detalle: error instanceof Error ? error.message : String(error) });
       }
 
-      const dentroDeHorario = enHorario(momento, opciones);
+      const vigentes = opcionesVigentes();
+      const dentroDeHorario = enHorario(momento, vigentes);
 
       if (ultimoEnvio && momento.getTime() - ultimoEnvio < pausaEfectiva()) {
         ultimoMotivo = null;
@@ -156,9 +186,10 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
       // 1. Los motorizados: un pedido listo sale antes que una confirmacion
       //    nueva, porque ya tiene todo y el cliente espera su hora.
       for (const e of await listaMotorizado()) {
+        if (frenada(e.id)) continue;
         if (e.estado === 'lista') {
           if (!dentroDeHorario) {
-            ultimoMotivo = `fuera del horario de envío (${opciones.horaInicio}:00 a ${opciones.horaFin}:00)`;
+            ultimoMotivo = `fuera del horario de envío (${vigentes.horaInicio}:00 a ${vigentes.horaFin}:00)`;
             continue;
           }
           const r = await entregas.mandarAMotorizado(e);
@@ -169,6 +200,7 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
           }
           if (r.retryAfterMs) {
             ultimoMotivo = r.motivo ?? null;
+            frenar(e.id, r.retryAfterMs);
             continue;
           }
           return { accion: 'incidencia', entregaId: e.id, motivo: r.motivo };
@@ -184,6 +216,7 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
           }
           if (r.retryAfterMs) {
             ultimoMotivo = r.motivo ?? null;
+            frenar(e.id, r.retryAfterMs);
             continue;
           }
           return { accion: 'incidencia', entregaId: e.id, motivo: r.motivo };
@@ -199,10 +232,20 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
         return { accion: 'incidencia', entregaId: e.id, motivo: r.motivo };
       }
 
-      // 2. Las confirmaciones que toca pedir.
+      // 2. Las confirmaciones que toca pedir (y, antes, las direcciones que
+      //    se le proponen a un cliente recurrente: es su "pedir ubicacion").
       if (!dentroDeHorario) {
-        ultimoMotivo = `fuera del horario de envío (${opciones.horaInicio}:00 a ${opciones.horaFin}:00)`;
+        ultimoMotivo = `fuera del horario de envío (${vigentes.horaInicio}:00 a ${vigentes.horaFin}:00)`;
         return { accion: 'nada', motivo: ultimoMotivo };
+      }
+      for (const e of await repos.entregas.tocaProponerUbicacion(momento, 1)) {
+        const r = await entregas.proponerUbicacion(e);
+        if (r.ok) {
+          anotarEnvio();
+          ultimoMotivo = null;
+          return { accion: 'propuesta', entregaId: e.id };
+        }
+        if (r.retryAfterMs) ultimoMotivo = r.motivo ?? null;
       }
       const [siguiente] = await listaConfirmacion(momento);
       if (!siguiente) {

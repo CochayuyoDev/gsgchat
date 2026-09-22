@@ -10,6 +10,7 @@
 import { mkdirSync } from 'node:fs';
 import { loadConfig, type Config } from './config.js';
 import { createPool, type Pool } from './db/pool.js';
+import { openPglite, type PgliteHandle } from './db/pglite.js';
 import { createRepos, createSettingsRepo, type Repos } from './db/repos.js';
 import type { SettingsRepo } from './settings/service.js';
 import { migrate } from './db/migrate.js';
@@ -29,6 +30,8 @@ export interface Runtime {
   wa: WhatsAppClient;
   /** Migraciones aplicadas en este arranque (vacio si no habia pendientes). */
   migrated: string[];
+  /** La base embebida, si DATABASE_URL era pglite:// (para la copia diaria). */
+  pglite: PgliteHandle | null;
   close(): Promise<void>;
 }
 
@@ -47,9 +50,12 @@ export async function createRuntime(opts: { migrate?: boolean } = {}): Promise<R
   process.env.TRACKING_SECRET ??= secrets.trackingSecret;
 
   const config = loadConfig();
-  const migrated = opts.migrate ? await migrate(config.DATABASE_URL) : [];
+  // Sin Postgres: DATABASE_URL=pglite://./.wa-data abre la base embebida (aplica
+  // las migraciones al abrir), igual que `npm run quick`. Para un VPS chico.
+  const pglite = config.DATABASE_URL.startsWith('pglite://') ? await openPglite(config.DATABASE_URL.slice('pglite://'.length) || '.wa-data') : null;
+  const migrated = pglite ? pglite.applied : opts.migrate ? await migrate(config.DATABASE_URL) : [];
 
-  const pool = createPool(config.DATABASE_URL);
+  const pool = pglite ? pglite.pool : createPool(config.DATABASE_URL);
   const repos = createRepos(pool);
   const settingsRepo = createSettingsRepo(pool);
   const settings = await createSettingsService(settingsRepo, config, secrets.settingsKey);
@@ -70,6 +76,7 @@ export async function createRuntime(opts: { migrate?: boolean } = {}): Promise<R
     settingsRepo,
     wa,
     migrated,
-    close: () => pool.end(),
+    pglite,
+    close: () => (pglite ? pglite.db.close() : pool.end()),
   };
 }

@@ -15,13 +15,26 @@
  * sin concurrencia entre servidores.
  */
 
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import type { Pool } from './pool.js';
 
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'db', 'migrations');
+/**
+ * Donde estan los .sql: con tsx este fichero esta en src/db (../../db); compilado
+ * esta en dist/src/db (../../../db); y si no, la carpeta del proceso.
+ */
+const MIGRATIONS = (() => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidatos = [
+    path.join(here, '..', '..', 'db', 'migrations'),
+    path.join(here, '..', '..', '..', 'db', 'migrations'),
+    path.resolve(process.cwd(), 'db', 'migrations'),
+  ];
+  return candidatos.find((c) => existsSync(c)) ?? candidatos[0]!;
+})();
 
 /**
  * Adaptador de PGlite a la interfaz de `pg.Pool` que usan los repositorios.

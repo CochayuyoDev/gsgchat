@@ -55,7 +55,13 @@ process.on('uncaughtException', (error) => {
 import { crearServicioPlan, type EstadoInstancia } from './plan/servicio.js';
 import { versionDelPaquete } from './util/version.js';
 
-const runtime = await createRuntime({ migrate: true });
+// Sin configuracion valida no hay servidor: se dice que falta y se termina,
+// en vez de quedarse vivo sin escuchar (Docker lo reiniciaria en bucle sin
+// decir por que).
+const runtime = await createRuntime({ migrate: true }).catch((error: unknown) => {
+  console.error(`[sistema] no se puede arrancar: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+});
 const { config, settings, wa } = runtime;
 
 // El bus de eventos: lo que pasa (llega un mensaje, se entrega, mandan la
@@ -126,6 +132,7 @@ const plan = await crearServicioPlan({
   settingsRepo: runtime.settingsRepo,
   url: config.PLAN_URL,
   token: config.PLAN_TOKEN,
+  baseUrl: config.PUBLIC_BASE_URL,
   log: (m, d) => console.warn(m, d ?? ''),
   estado: () => (parteDeSalud.dar ? parteDeSalud.dar() : { whatsapp: settings.isConfigured() ? 'conectado' : 'sin_conectar', mensajesHoy: 0, fallosIA: 0, entregasHoy: 0, version: versionDelPaquete() }),
 });
@@ -150,6 +157,7 @@ const simuladorGsg = crearGsgSimulado({ token: TOKEN_SIMULADOR });
 
 // Las entregas del dia: confirmacion, motorizados y hora de llegada. Ver src/entregas.
 const entregas = await crearServicioEntregas({
+  zonaHoraria: () => ajustes.zonaHoraria(),
   repos,
   repo: repos.entregas,
   sender,
@@ -157,6 +165,7 @@ const entregas = await crearServicioEntregas({
   gsg: conexionGsg.puerto(),
   conexionGsg,
   cargarLote: (body) => cargarLote({ repos, plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!, timezone: config.timezone, lista }, body),
+  ampliarHorario: (fn) => ajustes.ampliarHorario(fn),
   nombreNegocio: () => ajustes.nombreNegocio(),
   supervisor: () => politica().avisarA,
   ia: () => (ia.estado().tieneToken ? { completar: (mensajes, opts) => ia.completar(mensajes, opts) } : null),
@@ -165,6 +174,7 @@ const entregas = await crearServicioEntregas({
   plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!,
   publicBaseUrl: config.PUBLIC_BASE_URL,
   bus,
+  geo: { bbox: config.bbox, cobertura: config.coverageName },
   log: (m, d) => console.warn(`[entregas] ${m}`, d ?? ''),
 });
 
@@ -205,7 +215,7 @@ const resumenes = await crearServicioResumenes({
   entregas,
   ia: () => (ia.estado().tieneToken ? { completar: (m, o) => ia.completar(m, o) } : null),
   whatsappConectado: () => settings.isConfigured() && (wa.conectado?.() ?? true),
-  timezone: config.timezone,
+  zonaHoraria: () => ajustes.zonaHoraria(), timezone: config.timezone,
   publicBaseUrl: config.PUBLIC_BASE_URL,
   log: (m, d) => console.warn(`[resumenes] ${m}`, d ?? ''),
 });
@@ -218,7 +228,7 @@ const fiabilidad = await crearFiabilidad({
   settingsRepo: runtime.settingsRepo,
   settingsKeyBase64: runtime.secrets.settingsKey,
   salud,
-  timezone: config.timezone,
+  timezone: () => ajustes.zonaHoraria(),
   log: (m, d) => console.warn(`[fiabilidad] ${m}`, d ?? ''),
   vigilante: {
     conectado: () => wa.conectado?.(),
@@ -244,7 +254,7 @@ const fiabilidad = await crearFiabilidad({
   cupo: { entregas, lista, reparto: () => lista.ajustesReparto() },
   respaldo: {
     // Con Postgres de verdad la base la vuelca pg_dump (si esta en el PATH); si no, solo los respaldos.
-    baseDatos: () => ({ tipo: 'postgres', url: config.DATABASE_URL }),
+    baseDatos: () => (runtime.pglite ? { tipo: 'pglite', dump: () => runtime.pglite!.dump(), dataDir: config.DATABASE_URL.slice('pglite://'.length) || '.wa-data' } : { tipo: 'postgres', url: config.DATABASE_URL }),
     archiveDir: config.ARCHIVE_DIR,
     carpetaPorDefecto: carpetaDeCopiasPorDefecto(),
   },
@@ -280,7 +290,7 @@ const queue = conRedis
   ? createOutboundQueue(config.REDIS_URL)
   : createMemoryOutboundQueue({ sender, onResult: (job, outcome) => onResult(job, outcome) });
 
-const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, entrenamiento, conexionStoky, catalogo, lista, plan, voz, entregas, conexionGsg, simuladorGsg, resumenes, fiabilidad, secretoInterno, mediaDir: mediaDirectory(), autoConectarLocal: true });
+const app = await buildServer({ config, repos, settings, wa, sender, queue, salud, politica, ajustes, stickers, bus, ia, entrenamiento, conexionStoky, catalogo, lista, plan, voz, entregas, conexionGsg, simuladorGsg, resumenes, fiabilidad, secretoInterno, mediaDir: mediaDirectory(), autoConectarLocal: true, settingsRepo: runtime.settingsRepo });
 reconectarLocal = () =>
   app.inject({
     method: 'POST',

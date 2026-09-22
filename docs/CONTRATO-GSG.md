@@ -65,6 +65,15 @@ Respuesta (200):
 | `lat`, `lng` | no | Si GSG ya tiene la ubicación, van aquí: entonces el cliente solo aparece en `faltaConfirmacion` y no se le pide el pin. |
 | `id` | no | El id del pedido en GSG si es distinto de la referencia. Vuelve en los reportes como `referencia` igualmente. |
 | `urgente` | no | `true` = va primero hacia el motorizado. |
+| `cancelado` | no | `true` = GSG canceló este pedido por su cuenta (el cliente llamó, se anuló la venta…). GSGchat lo cancela aquí, deja de escribirle al cliente y, si ya tenía hora de llegada, le avisa. Puede venir en `cancelados` o en la lista donde estaba. |
+| `motivoCancelacion` | no | Con `cancelado: true`, por qué (en palabras; se apunta en la bitácora del pedido). |
+
+**Cambios después de mandar un pedido.** Si un pedido que GSGchat ya tiene
+vuelve a venir con otro `telefono`, `direccion`, `distrito`, `nombre` o `notas`,
+GSGchat lo actualiza y lo apunta («GSG cambió la dirección»); si ya iba con un
+motorizado, se le manda el dato nuevo. **Salvaguarda:** una lista vacía, un
+pedido que simplemente desaparece o un fallo de GSG (500, sin red) **nunca**
+cancela nada; solo `cancelado: true`, pedido a pedido.
 
 - `faltaUbicacion`: a estos GSGchat les pide la ubicación por WhatsApp (con
   sus insistencias). En cuanto la manda, GSG recibe `POST /ubicaciones`.
@@ -338,6 +347,21 @@ y el resto (lista en `GET /api/v1/eventos`).
 
 ---
 
+### A.3 Probar cancelaciones y cambios contra el simulador
+
+El simulador de este servidor (§ C) admite dos llamadas que hacen lo que haría
+GSG con un pedido ya mandado, para probar el espejo de cambios desde fuera:
+
+```
+POST <GSGCHAT_URL>/simulador/gsg/reparto/cancelar   { "referencia": "P-1003", "motivo": "el cliente anuló" }
+POST <GSGCHAT_URL>/simulador/gsg/reparto/cambiar    { "referencia": "P-1004", "direccion": "Av. Nueva 100", "distrito": "San Isidro" }
+```
+
+`404` si el pedido no existe en el simulador, `409` si ya estaba cerrado. A
+partir de ahí, `GET /reparto/pendientes` lo devuelve en `cancelados` con
+`cancelado: true` y `motivoCancelacion`, o con los datos nuevos. En Conexión →
+«Para los programadores de GSG» hay dos botones que hacen lo mismo con un clic.
+
 ## C. Probar desde fuera, sin tocar nada real
 
 GSGchat trae un **simulador del sistema de GSG**: una copia de mentira con
@@ -346,23 +370,47 @@ algo que ya se comporta como GSGchat espera, y para ver en la pantalla Hoy
 cómo se mueve cada pedido.
 
 1. En GSGchat, **Conexión → El sistema de GSG → Usar el simulador**. La API
-   queda en `https://<gsgchat>/simulador/gsg` con el token
-   `simulador-gsg-local`.
-2. Cargar la lista del día de GSG (la misma forma que `pendientes`):
+   queda en `https://<gsgchat>/simulador/gsg`.
+2. **El token para probar desde fuera.** Quien opera GSGchat lo crea en
+   Conexión → *Para los programadores de GSG* → «Crear un token del
+   simulador»: empieza por `gsgsim_`, se ve una sola vez, caduca a los 30 días
+   y se puede anular. Se manda igual que en producción,
+   `Authorization: Bearer gsgsim_…`. (Si la prueba corre dentro del propio
+   servidor de GSGchat, vale también el token interno `simulador-gsg-local`.)
+   Con un token caducado o anulado el simulador responde `401` con
+   `{ "error": "El token del simulador caducó o fue anulado…" }`.
+3. Cargar la lista del día de GSG (la misma forma que `pendientes`):
 
    ```bash
    curl -X POST https://<gsgchat>/simulador/gsg/reparto/cargar \
-     -H "Authorization: Bearer simulador-gsg-local" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer gsgsim_…" -H "Content-Type: application/json" \
      -d '{ "clientes": [
        { "referencia": "P-1001", "telefono": "987000001", "nombre": "Ana Quispe", "faltaUbicacion": true, "faltaConfirmacion": true },
        { "referencia": "P-1007", "telefono": "987000007", "nombre": "Luis Rojas", "lat": -12.0464, "lng": -77.0308, "faltaUbicacion": false, "faltaConfirmacion": true }
      ] }'
    ```
 
-3. Ver la lista tal como GSGchat la lee: `GET /simulador/gsg/reparto/pendientes`;
+4. Ver la lista tal como GSGchat la lee: `GET /simulador/gsg/reparto/pendientes`;
    y todo lo que GSGchat le fue reportando (cada `POST` de A.2, con su cuerpo):
    `GET /simulador/gsg/reparto/estado`.
-4. `DELETE /simulador/gsg/reparto` vacía el simulador.
+5. `DELETE /simulador/gsg/reparto` vacía el simulador.
+6. **Lo que GSG nos mandó.** Cada llamada al simulador y a `/api/v1/entregas`
+   queda en Conexión → *Para los programadores de GSG* → «Lo que GSG nos
+   mandó»: hora, ruta, con qué token entró y qué se contestó (en palabras: por
+   ejemplo «rechazada: token inválido» o «creados 3, repetidos 1, descartados
+   0»). Sirve para depurar a dos manos sin pasarse logs.
+7. **Verificar el contrato A.** Cuando GSG ya exponga su `pendientes` de
+   verdad, en Conexión → «Verificar el contrato» GSGchat lo consulta y dice,
+   campo por campo, qué falta (`faltaUbicacion` ausente, pedido sin
+   `referencia`…), qué viene con formato raro (`dia` que no es AAAA-MM-DD,
+   `urgente` que no es true/false, teléfono inválido, `lat`/`lng` que no son
+   números) y qué sobra (campos que no se usan: no molestan). No crea nada.
+   Los pedidos que llegan mal en la sincronización de cada 5 minutos se
+   enseñan en esa misma pantalla («N pedidos de hoy no se pudieron leer», con
+   la referencia y el motivo) para que GSG los corrija.
+8. **Cuadre de fin de día.** «Cuadrar el día con GSG» compara lo que GSG tiene
+   en `terminados` con lo que en GSGchat figura entregado o cancelado, y lista
+   las diferencias en los dos sentidos.
 
 Con eso los programadores de GSG ven **exactamente** qué JSON les va a llegar
 en cada `POST` (los cuerpos quedan guardados en `/reparto/estado`), y pueden
@@ -384,5 +432,5 @@ contra la misma instalación: los pedidos aparecen en Hoy al instante.
 | GSG acepta | ubicaciones, confirmaciones, entregas, incidencias, resúmenes | `POST <GSG_URL>/ubicaciones` … `/resumenes` |
 | GSG empuja (opcional) | pedidos nuevos, consulta, cancelación | `POST/GET/DELETE https://<gsgchat>/api/v1/entregas[/{referencia}]` |
 | GSG se entera (opcional) | eventos `entrega.*` firmados | su propia URL, registrada en `POST /api/v1/webhooks` |
-| Para probar | el simulador | `https://<gsgchat>/simulador/gsg`, token `simulador-gsg-local` |
+| Para probar | el simulador | `https://<gsgchat>/simulador/gsg`, con un token `gsgsim_…` (Conexión → Para los programadores de GSG) |
 | Contrato formal | OpenAPI 3 | `https://<gsgchat>/api/v1/openapi.json` |

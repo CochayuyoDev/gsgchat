@@ -398,3 +398,85 @@ describe('ordenes desde otro sistema (API publica)', () => {
     expect(r.json().paths['/ia/ordenes/confirmar']).toBeTruthy();
   });
 });
+
+describe('las acciones nuevas de las últimas vueltas van por los mismos endpoints que las pantallas', () => {
+  type Reg = { method: string; url: string; body?: unknown };
+  const armar = (respuestas: Record<string, unknown>) => {
+    const llamadas: Reg[] = [];
+    const ctx = {
+      quien: 'ali',
+      esAdmin: true,
+      llamar: async (l: Reg) => {
+        llamadas.push(l);
+        const clave = `${l.method} ${l.url.split('?')[0]}`;
+        const r = respuestas[clave] ?? respuestas[l.url.split('?')[0]!];
+        if (r === undefined) return { status: 404, json: { error: `sin respuesta falsa para ${clave}` } };
+        return { status: 200, json: r };
+      },
+    };
+    return { ctx, llamadas };
+  };
+  const entregas = { entregas: [{ id: 7, referencia: 'P-1003', phone: '51987000003', nombre: 'Rosa Chávez' }] };
+  const motorizados = { motorizados: [{ id: 2, nombre: 'Carlos Mendoza', phone: '51999000002' }, { id: 5, nombre: 'Diego Ruiz', phone: '51999000005' }] };
+  const accion = (n: string) => {
+    const a = ACCIONES.find((x) => x.nombre === n);
+    if (!a) throw new Error(`no existe ${n}`);
+    return a;
+  };
+
+  it('urgente y segunda visita encuentran la entrega por pedido y llaman a su ruta', async () => {
+    const { ctx, llamadas } = armar({ 'GET /admin/entregas': entregas, 'POST /admin/entregas/7/prioridad': { ok: true }, 'POST /admin/entregas/7/segunda-visita': { ok: true } });
+    const u = await accion('entregas.urgente').ejecutar(accion('entregas.urgente').schema.parse({ cliente: 'p-1003' }), ctx);
+    expect(u.ok).toBe(true);
+    expect(u.resumen).toContain('URGENTE');
+    expect(llamadas.at(-1)).toMatchObject({ method: 'POST', url: '/admin/entregas/7/prioridad', body: { urgente: true } });
+    const sv = await accion('entregas.segundaVisita').ejecutar({ cliente: 'Rosa' }, ctx);
+    expect(sv.ok).toBe(true);
+    expect(llamadas.at(-1)).toMatchObject({ method: 'POST', url: '/admin/entregas/7/segunda-visita' });
+    const nada = await accion('entregas.urgente').ejecutar({ cliente: 'nadie', urgente: true }, ctx);
+    expect(nada.ok).toBe(false);
+    expect(nada.resumen).toContain('No encuentro');
+  });
+
+  it('la ruta del motorizado se cuenta en palabras y el traspaso pide confirmación', async () => {
+    const ruta = { ruta: { paradas: [{ orden: 1, entrega: { referencia: 'P-1003', nombre: 'Rosa Chávez', distrito: 'Lince' }, distancia: '2,1 km', situacion: 'esperando_tiempo' }], totalKm: 2.1, texto: 'Tu ruta de hoy…' } };
+    const { ctx, llamadas } = armar({ 'GET /admin/motorizados': motorizados, 'GET /admin/motorizados/2/ruta': ruta, 'POST /admin/motorizados/2/ruta/mandar': { ok: true, ruta: ruta.ruta }, 'POST /admin/motorizados/2/traspasar': { ok: true, traspasadas: [{ referencia: 'P-1003' }], destino: { nombre: 'Diego Ruiz' } } });
+    const r = await accion('motorizados.ruta').ejecutar({ motorizado: 'carlos' }, ctx);
+    expect(r.ok).toBe(true);
+    expect(r.resumen).toContain('1 parada(s)');
+    expect(r.resumen).toContain('P-1003 · Rosa Chávez (Lince)');
+    const m = await accion('motorizados.mandarRuta').ejecutar({ motorizado: 'Carlos' }, ctx);
+    expect(m.resumen).toContain('Ruta mandada a Carlos Mendoza');
+    expect(accion('motorizados.traspasar').peligrosa).toBe(true);
+    const tr = await accion('motorizados.traspasar').ejecutar(accion('motorizados.traspasar').schema.parse({ motorizado: 'Carlos', destino: 'Diego', descanso: true }), ctx);
+    expect(tr.resumen).toContain('pasan a Diego Ruiz');
+    expect(tr.resumen).toContain('queda en descanso');
+    expect(llamadas.at(-1)).toMatchObject({ method: 'POST', url: '/admin/motorizados/2/traspasar', body: { motorizadoId: 5, descanso: true } });
+  });
+
+  it('enlace de evidencia, prueba de la mañana, copia y GSG devuelven resúmenes en palabras', async () => {
+    const { ctx } = armar({
+      'GET /admin/archives': { items: [{ id: 9 }] },
+      'POST /admin/archives/9/enlace': { ok: true, url: 'http://x/guardados/ver/tok', caducaEn: '2026-09-28T00:00:00.000Z', dias: 7 },
+      'POST /admin/fiabilidad/humo/probar': { ok: true, resultado: { ok: false, pasos: [{ nombre: 'WhatsApp', ok: true, detalle: 'entregado en 2 s' }, { nombre: 'GSG', ok: false, detalle: 'no respondió' }, { nombre: 'IA', ok: false, omitido: true, detalle: 'apagada' }] } },
+      'POST /admin/fiabilidad/copia/ahora': { ok: true, resultado: { carpeta: 'D:\\copias', ficheros: [{ nombre: 'base.tar.gz' }], notas: [] } },
+      'POST /admin/gsg/verificar-contrato': { ok: false, verificacion: { resumen: 'Falta el campo telefono en faltaUbicacion.', hallazgos: [{ tipo: 'falta', donde: 'faltaUbicacion[0]', detalle: 'telefono' }] } },
+      'GET /admin/gsg/cuadre': { cuadre: { resumen: 'Cuadra: 5 coinciden.', ok: true, faltanEnGsg: [], sobranEnGsg: [], coinciden: 5 } },
+    });
+    const e = await accion('guardados.enlace').ejecutar(accion('guardados.enlace').schema.parse({ cliente: 'Ana Quispe' }), ctx);
+    expect(e.resumen).toContain('http://x/guardados/ver/tok');
+    expect(e.resumen).toContain('7 día(s)');
+    const h = await accion('fiabilidad.probar').ejecutar({}, ctx);
+    expect(h.resumen).toContain('1 fallo(s)');
+    expect(h.resumen).toContain('GSG: no respondió');
+    expect(h.resumen).not.toContain('IA');
+    const c = await accion('fiabilidad.copia').ejecutar({}, ctx);
+    expect(c.resumen).toContain('Copia hecha en D:\\copias (1 fichero(s))');
+    const v = await accion('gsg.verificar').ejecutar({}, ctx);
+    expect(v.resumen).toContain('Falta el campo telefono');
+    const q = await accion('gsg.cuadre').ejecutar({}, ctx);
+    expect(q.resumen).toBe('Cuadra: 5 coinciden.');
+    expect(q.datos).toMatchObject({ coinciden: 5, cuadra: true });
+    expect(catalogoParaElModelo({ esAdmin: true, conCatalogo: false })).toContain('gsg.cuadre');
+  });
+});

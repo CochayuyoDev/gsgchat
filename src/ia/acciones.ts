@@ -687,6 +687,206 @@ export const ACCIONES: Accion[] = [
     },
   }),
 
+  // ------------------------------------------ entregas: lo de las últimas vueltas
+  def({
+    nombre: 'entregas.segundaVisita',
+    tipo: 'cambio',
+    descripcion: 'Mandar al motorizado a pasar otra vez por una entrega en la que no había nadie (sin preguntarle al cliente).',
+    parametros: 'cliente (pedido, nombre o teléfono)',
+    ejemplo: { orden: 'que vuelvan a pasar por el pedido de Rosa', accion: { accion: 'entregas.segundaVisita', cliente: 'Rosa' } },
+    schema: z.object({ cliente: texto(120) }),
+    async ejecutar(p, ctx) {
+      const e = await buscarEntrega(ctx, p.cliente);
+      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/hoy' };
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/segunda-visita`, body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo arrancar la segunda visita.');
+      return { ok: true, resumen: `${e.referencia} de ${e.nombre ?? e.phone}: el motorizado vuelve a pasar hoy.`, ir: '/hoy' };
+    },
+  }),
+  def({
+    nombre: 'entregas.urgente',
+    tipo: 'cambio',
+    descripcion: 'Marcar (o quitar) un pedido como urgente: va primero hacia el motorizado y en su ruta.',
+    parametros: 'cliente (pedido, nombre o teléfono), urgente (true por defecto; false para quitarlo)',
+    ejemplo: { orden: 'el pedido P-1003 es urgente', accion: { accion: 'entregas.urgente', cliente: 'P-1003', urgente: true } },
+    schema: z.object({ cliente: texto(120), urgente: z.boolean().default(true) }),
+    async ejecutar(p, ctx) {
+      const e = await buscarEntrega(ctx, p.cliente);
+      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/hoy' };
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/prioridad`, body: { urgente: p.urgente } });
+      if (!ok(r)) return errorDe(r, 'No se pudo cambiar la prioridad.');
+      return { ok: true, resumen: p.urgente ? `${e.referencia} de ${e.nombre ?? e.phone} queda como URGENTE: va primero.` : `${e.referencia} de ${e.nombre ?? e.phone} deja de ser urgente.`, ir: '/hoy' };
+    },
+  }),
+  def({
+    nombre: 'entregas.probarDia',
+    tipo: 'cambio',
+    soloAdmin: true,
+    descripcion: 'En la demostración: probar el día entero con datos ficticios (clientes, motorizados, pines, confirmaciones, tiempos y entregas, paso a paso), o pararlo.',
+    parametros: 'parar (opcional: true para detener la prueba en marcha)',
+    ejemplo: { orden: 'prueba el día entero con datos ficticios', accion: { accion: 'entregas.probarDia' } },
+    schema: z.object({ parar: z.boolean().default(false) }),
+    async ejecutar(p, ctx) {
+      if (p.parar) {
+        const r = await ctx.llamar({ method: 'DELETE', url: '/admin/entregas/simulador/probar-dia' });
+        if (!ok(r)) return errorDe(r, 'No se pudo detener la prueba.');
+        return { ok: true, resumen: 'Prueba del día detenida.', ir: '/hoy' };
+      }
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/entregas/simulador/probar-dia', body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo arrancar la prueba del día.');
+      return { ok: true, resumen: 'Prueba del día en marcha: en Hoy se ven los pasos según van pasando (pines, confirmaciones, motorizados, entregas).', ir: '/hoy' };
+    },
+  }),
+  def({
+    nombre: 'motorizados.ruta',
+    tipo: 'consulta',
+    descripcion: 'La ruta de hoy de un motorizado: sus pedidos en orden de cercanía, los kilómetros y el mensaje tal cual se le manda.',
+    parametros: 'motorizado (nombre o teléfono)',
+    ejemplo: { orden: '¿qué ruta tiene Carlos hoy?', accion: { accion: 'motorizados.ruta', motorizado: 'Carlos' } },
+    schema: z.object({ motorizado: texto(120) }),
+    async ejecutar(p, ctx) {
+      const m = await buscarMotorizado(ctx, p.motorizado);
+      if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/motorizados' };
+      const r = await ctx.llamar({ method: 'GET', url: `/admin/motorizados/${m.id}/ruta` });
+      if (!ok(r)) return errorDe(r, 'No se pudo armar la ruta.');
+      const ruta = (r.json as { ruta: { paradas: Array<{ orden: number; entrega: { referencia: string; nombre: string | null; distrito: string | null }; distancia: string | null; situacion: string }>; totalKm: number; texto: string } }).ruta;
+      const paradas = ruta.paradas.map((x) => `${x.orden}) ${x.entrega.referencia}${x.entrega.nombre ? ` · ${x.entrega.nombre}` : ''}${x.entrega.distrito ? ` (${x.entrega.distrito})` : ''}${x.distancia ? `, ${x.distancia}` : ''}`);
+      const resumen = paradas.length ? `Ruta de ${m.nombre}: ${paradas.length} parada(s), unos ${Math.round(ruta.totalKm * 10) / 10} km. ${paradas.join(' → ')}.` : `${m.nombre} no lleva pedidos ahora mismo.`;
+      return { ok: true, resumen, datos: { motorizado: m.nombre, paradas: ruta.paradas.map((x) => ({ orden: x.orden, pedido: x.entrega.referencia, cliente: x.entrega.nombre, distrito: x.entrega.distrito, distancia: x.distancia, situacion: x.situacion })), totalKm: ruta.totalKm, mensaje: ruta.texto }, ir: '/motorizados' };
+    },
+  }),
+  def({
+    nombre: 'motorizados.mandarRuta',
+    tipo: 'cambio',
+    descripcion: 'Mandarle por WhatsApp a un motorizado su ruta de hoy (un solo mensaje con sus paradas en orden).',
+    parametros: 'motorizado (nombre o teléfono)',
+    ejemplo: { orden: 'mándale su ruta a Carlos', accion: { accion: 'motorizados.mandarRuta', motorizado: 'Carlos' } },
+    schema: z.object({ motorizado: texto(120) }),
+    async ejecutar(p, ctx) {
+      const m = await buscarMotorizado(ctx, p.motorizado);
+      if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/motorizados' };
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/motorizados/${m.id}/ruta/mandar`, body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo mandar la ruta.');
+      const ruta = (r.json as { ruta?: { paradas?: unknown[] } }).ruta;
+      return { ok: true, resumen: `Ruta mandada a ${m.nombre}${ruta?.paradas ? ` (${ruta.paradas.length} parada(s))` : ''}.`, ir: '/motorizados' };
+    },
+  }),
+  def({
+    nombre: 'motorizados.traspasar',
+    tipo: 'cambio',
+    peligrosa: true,
+    descripcion: 'Quitarle a un motorizado todo lo que lleva y repartirlo a otro (uno concreto o el que toque), dejándolo activo o en descanso.',
+    parametros: 'motorizado (nombre o teléfono), destino (nombre, opcional), descanso (true para dejarlo en descanso), motivo (opcional)',
+    ejemplo: { orden: 'Carlos se quedó sin moto: pásale sus pedidos a Diego', accion: { accion: 'motorizados.traspasar', motorizado: 'Carlos', destino: 'Diego', descanso: true, motivo: 'se quedó sin moto' } },
+    schema: z.object({ motorizado: texto(120), destino: z.string().trim().max(120).optional(), descanso: z.boolean().default(false), motivo: z.string().trim().max(200).optional() }),
+    async ejecutar(p, ctx) {
+      const m = await buscarMotorizado(ctx, p.motorizado);
+      if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/motorizados' };
+      let destino: number | null = null;
+      if (p.destino) {
+        const d = await buscarMotorizado(ctx, p.destino);
+        if (!d) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.destino}".`, ir: '/motorizados' };
+        destino = d.id;
+      }
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/motorizados/${m.id}/traspasar`, body: { motorizadoId: destino, descanso: p.descanso, ...(p.motivo ? { motivo: p.motivo } : {}) } });
+      if (!ok(r)) return errorDe(r, 'No se pudo traspasar.');
+      const j = r.json as { traspasadas?: Array<{ referencia: string }>; destino?: { nombre: string } | null };
+      const cuantos = j.traspasadas?.length ?? 0;
+      return { ok: true, resumen: cuantos ? `${cuantos} pedido(s) de ${m.nombre} (${j.traspasadas!.map((x) => x.referencia).join(', ')}) pasan a ${j.destino?.nombre ?? p.destino ?? 'otros motorizados'}${p.descanso ? '; queda en descanso' : ''}.` : `${m.nombre} no tenía pedidos entre manos${p.descanso ? '; queda en descanso' : ''}.`, ir: '/motorizados' };
+    },
+  }),
+
+  // ------------------------------------------ guardados: enlace de evidencia
+  def({
+    nombre: 'guardados.enlace',
+    tipo: 'cambio',
+    descripcion: 'Crear un enlace público con caducidad para enseñar una conversación guardada a alguien sin cuenta (por ejemplo, a GSG ante un reclamo).',
+    parametros: 'id (opcional) o cliente (nombre o teléfono); dias (1-30, 7 por defecto)',
+    ejemplo: { orden: 'dame un enlace de la conversación guardada de Ana Quispe para mandárselo a GSG', accion: { accion: 'guardados.enlace', cliente: 'Ana Quispe', dias: 7 } },
+    schema: z.object({ id: z.coerce.number().int().positive().optional(), cliente: z.string().trim().max(120).optional(), dias: z.coerce.number().int().min(1).max(30).default(7) }).refine((v) => v.id || v.cliente, { message: 'Hace falta el id o el cliente.' }),
+    async ejecutar(p, ctx) {
+      let id = p.id ?? null;
+      if (!id && p.cliente) {
+        const q = /\d{6,}/.test(p.cliente) ? telefonoADigitos(p.cliente) : p.cliente;
+        const lista = await ctx.llamar({ method: 'GET', url: `/admin/archives?q=${encodeURIComponent(q)}&limit=1` });
+        if (!ok(lista)) return errorDe(lista, 'No se pudieron leer las conversaciones guardadas.');
+        const items = (lista.json as { items: Array<{ id: number }> }).items;
+        if (!items.length) return { ok: true, resumen: `No hay ninguna conversación guardada de ${p.cliente}.`, ir: '/guardados' };
+        id = items[0]!.id;
+      }
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/archives/${id}/enlace`, body: { dias: p.dias } });
+      if (!ok(r)) return errorDe(r, 'No se pudo crear el enlace.');
+      const j = r.json as { url: string; caducaEn: string; dias: number };
+      return { ok: true, resumen: `Enlace listo (vale ${j.dias} día(s), hasta ${String(j.caducaEn).slice(0, 10)}): ${j.url}`, datos: { url: j.url, caducaEn: j.caducaEn }, ir: `/guardados?abrir=${id}` };
+    },
+  }),
+
+  // ------------------------------------------------- que todo funcione
+  def({
+    nombre: 'fiabilidad.probar',
+    tipo: 'cambio',
+    descripcion: 'Correr ahora la prueba de cada mañana (WhatsApp, GSG, IA, entregas, disco) y decir qué pasó, sin avisar a nadie.',
+    parametros: '(ninguno)',
+    ejemplo: { orden: '¿está todo funcionando? prueba ahora', accion: { accion: 'fiabilidad.probar' } },
+    schema: z.object({}),
+    async ejecutar(_p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/fiabilidad/humo/probar', body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo correr la prueba.');
+      const j = r.json as { resultado: { ok: boolean; pasos: Array<{ nombre: string; ok: boolean; omitido?: boolean; detalle: string }> } };
+      const malos = j.resultado.pasos.filter((x) => !x.ok && !x.omitido);
+      const resumen = malos.length ? `Prueba con ${malos.length} fallo(s): ${malos.map((x) => `${x.nombre}: ${x.detalle}`).join(' · ')}` : `Todo funciona: ${j.resultado.pasos.filter((x) => !x.omitido).map((x) => x.nombre).join(', ')} en orden.`;
+      return { ok: true, resumen, datos: j.resultado.pasos, ir: '/fiabilidad' };
+    },
+  }),
+  def({
+    nombre: 'fiabilidad.copia',
+    tipo: 'cambio',
+    soloAdmin: true,
+    descripcion: 'Hacer ahora la copia de seguridad de la base y de los respaldos de conversaciones.',
+    parametros: '(ninguno)',
+    ejemplo: { orden: 'haz una copia de seguridad ahora', accion: { accion: 'fiabilidad.copia' } },
+    schema: z.object({}),
+    async ejecutar(_p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/fiabilidad/copia/ahora', body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo hacer la copia.');
+      const j = r.json as { enMarcha?: boolean; detalle?: string; resultado?: { carpeta: string; ficheros: Array<{ nombre?: string }>; notas: string[] } };
+      if (j.enMarcha) return { ok: true, resumen: j.detalle ?? 'La copia sigue haciéndose.', ir: '/fiabilidad' };
+      const res = j.resultado;
+      return { ok: true, resumen: res ? `Copia hecha en ${res.carpeta} (${res.ficheros.length} fichero(s)).${res.notas.length ? ` ${res.notas.join(' ')}` : ''}` : 'Copia hecha.', ir: '/fiabilidad' };
+    },
+  }),
+
+  // ------------------------------------------------------------- GSG
+  def({
+    nombre: 'gsg.verificar',
+    tipo: 'consulta',
+    soloAdmin: true,
+    descripcion: 'Consultar la lista real de GSG y decir campo por campo qué falta o sobra respecto al contrato, sin crear nada.',
+    parametros: '(ninguno)',
+    ejemplo: { orden: '¿la API de GSG cumple el contrato?', accion: { accion: 'gsg.verificar' } },
+    schema: z.object({}),
+    async ejecutar(_p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/gsg/verificar-contrato', body: {} });
+      if (!ok(r)) return errorDe(r, 'No se pudo verificar el contrato con GSG.');
+      const j = r.json as { ok: boolean; verificacion: { resumen: string; hallazgos: Array<{ tipo: string; donde: string; detalle: string }> } };
+      return { ok: true, resumen: j.verificacion.resumen, datos: j.verificacion.hallazgos.slice(0, 20), ir: '/setup#gsg' };
+    },
+  }),
+  def({
+    nombre: 'gsg.cuadre',
+    tipo: 'consulta',
+    descripcion: 'Cuadrar un día con GSG: lo que GSG tiene en terminados frente a lo entregado aquí, en los dos sentidos.',
+    parametros: 'dia (opcional, AAAA-MM-DD; hoy por defecto)',
+    ejemplo: { orden: '¿cuadra el día con GSG?', accion: { accion: 'gsg.cuadre' } },
+    schema: z.object({ dia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
+    async ejecutar(p, ctx) {
+      const r = await ctx.llamar({ method: 'GET', url: `/admin/gsg/cuadre${p.dia ? `?dia=${p.dia}` : ''}` });
+      if (!ok(r)) return errorDe(r, 'No se pudo cuadrar con GSG.');
+      const c = (r.json as { cuadre: { resumen: string; ok: boolean; faltanEnGsg: string[]; sobranEnGsg: string[]; coinciden: number } }).cuadre;
+      return { ok: true, resumen: c.resumen, datos: { coinciden: c.coinciden, faltanEnGsg: c.faltanEnGsg, sobranEnGsg: c.sobranEnGsg, cuadra: c.ok }, ir: '/setup#gsg' };
+    },
+  }),
+
   // ------------------------------------------------------ grupos y campanas
   def({
     nombre: 'grupo.previsualizar',

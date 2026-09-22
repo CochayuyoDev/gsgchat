@@ -14,6 +14,12 @@
  *  - Cuando un cliente tiene las dos cosas (ubicacion y confirmacion, o
  *    solo la que le faltaba) lo pasa solo a **terminados**. Un cliente que
  *    no confirma pasa a **cancelados**.
+ *  - GSG tambien puede **cancelar** un pedido por su cuenta o **cambiarle**
+ *    el telefono, la direccion o el distrito despues de haberlo mandado
+ *    (`POST /reparto/cancelar`, `POST /reparto/cambiar`): en la lista sale
+ *    con `cancelado: true` y `motivoCancelacion`, o con los datos nuevos.
+ *    Una lista vacia o un fallo NO cancela nada: solo `cancelado: true`,
+ *    pedido a pedido.
  *
  * Vive en memoria dentro de este mismo servidor, colgado de
  * `/simulador/gsg`, y exige el mismo token que usaria una API real. Desde la
@@ -39,6 +45,11 @@ export interface ClienteSimulado {
   lng: number | null;
   /** GSG puede marcar el pedido como urgente: sale primero hacia el motorizado. */
   urgente: boolean;
+  /** GSG lo cancelo por su cuenta (no el cliente por WhatsApp). */
+  canceladoPorGsg: boolean;
+  motivoCancelacion: string | null;
+  /** GSG cambio telefono/direccion/distrito despues de mandarlo. */
+  cambiadoEn: string | null;
   ubicacion: { lat: number; lng: number; mapsUrl: string | null; corregida: boolean; en: string } | null;
   confirmacion: { confirmada: boolean; respuesta: string | null; como: string | null; motivo: string | null; en: string } | null;
   entrega: { motorizado: unknown; minutosMotorizado: number | null; minutosAviso: number | null; llegaAproxEn: string | null; en: string; entregadoEn: string | null; entregadaComo: string | null; incidencia: string | null; segundaVisita: boolean; visitas: number } | null;
@@ -66,6 +77,10 @@ export interface GsgSimulado {
   cargar(clientes: Array<Partial<ClienteDePrueba> & { referencia: string; telefono: string }>): number;
   /** Los diez de siempre. */
   cargarDePrueba(): number;
+  /** GSG cancela un pedido por su cuenta: sale en `cancelados` con `cancelado: true`. */
+  cancelar(referencia: string, motivo?: string): boolean;
+  /** GSG cambia datos de un pedido ya mandado (telefono, direccion, distrito, nombre, notas, urgente). */
+  cambiar(referencia: string, cambios: CambioPedidoSimulado): ClienteSimulado | null;
   reiniciar(): void;
   /** Lo recibido, tal cual llego (para las pruebas y la pantalla). */
   recibido: Array<{ tipo: string; cuerpo: Record<string, unknown>; en: string }>;
@@ -74,6 +89,25 @@ export interface GsgSimulado {
   /** Atiende una llamada HTTP (lo usa el plugin y el fetch de las pruebas). */
   atender(method: string, ruta: string, token: string | null, cuerpo: unknown): { status: number; body: unknown };
 }
+
+export interface CambioPedidoSimulado {
+  telefono?: string;
+  nombre?: string;
+  direccion?: string;
+  distrito?: string;
+  notas?: string;
+  urgente?: boolean;
+}
+
+const cambioSchema = z.object({
+  referencia: z.string().min(1).max(60),
+  telefono: z.string().min(6).max(20).optional(),
+  nombre: z.string().max(120).optional(),
+  direccion: z.string().max(300).optional(),
+  distrito: z.string().max(120).optional(),
+  notas: z.string().max(300).optional(),
+  urgente: z.boolean().optional(),
+});
 
 export interface OpcionesSimulador {
   token: string;
@@ -122,6 +156,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
     distrito: c.distrito,
     notas: c.notas,
     urgente: c.urgente,
+    ...(c.canceladoPorGsg ? { cancelado: true, motivoCancelacion: c.motivoCancelacion ?? 'cancelado por GSG' } : {}),
     // Si GSG ya tiene la ubicacion (de un pedido anterior o porque acaba de
     // llegar), la manda: asi el otro lado no la vuelve a pedir.
     ...(c.ubicacion ? { lat: c.ubicacion.lat, lng: c.ubicacion.lng } : c.lat != null && c.lng != null && !c.necesitaUbicacion ? { lat: c.lat, lng: c.lng } : {}),
@@ -168,7 +203,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
         faltaUbicacion: todos.filter((c) => c.estado === 'pendiente' && c.necesitaUbicacion && !c.ubicacion).map(publico),
         faltaConfirmacion: todos.filter((c) => c.estado === 'pendiente' && c.necesitaConfirmacion && !c.confirmacion?.confirmada).map(publico),
         terminados: todos.filter((c) => c.estado === 'terminado').map((c) => ({ ...publico(c), terminadoEn: c.terminadoEn, llegaAproxEn: c.entrega?.llegaAproxEn ?? null })),
-        cancelados: todos.filter((c) => c.estado === 'cancelado').map((c) => ({ ...publico(c), motivo: c.confirmacion?.motivo ?? 'cancela' })),
+        cancelados: todos.filter((c) => c.estado === 'cancelado').map((c) => ({ ...publico(c), motivo: c.canceladoPorGsg ? 'cancelado_por_gsg' : (c.confirmacion?.motivo ?? 'cancela') })),
       };
     },
 
@@ -204,6 +239,9 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
           lat: c.lat ?? null,
           lng: c.lng ?? null,
           urgente: c.urgente === true,
+          canceladoPorGsg: false,
+          motivoCancelacion: null,
+          cambiadoEn: null,
           ubicacion: null,
           confirmacion: null,
           entrega: null,
@@ -216,6 +254,29 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
     },
 
     cargarDePrueba: () => sim.cargar(CLIENTES_DE_PRUEBA),
+
+    cancelar(referencia, motivo) {
+      const c = clientes.get(referencia.trim());
+      if (!c || c.estado !== 'pendiente') return false;
+      c.canceladoPorGsg = true;
+      c.motivoCancelacion = (motivo ?? '').trim() || 'cancelado por GSG';
+      c.estado = 'cancelado';
+      c.terminadoEn = ahora().toISOString();
+      return true;
+    },
+
+    cambiar(referencia, cambios) {
+      const c = clientes.get(referencia.trim());
+      if (!c || c.estado !== 'pendiente') return null;
+      if (cambios.telefono !== undefined) c.telefono = cambios.telefono;
+      if (cambios.nombre !== undefined) c.nombre = cambios.nombre;
+      if (cambios.direccion !== undefined) c.direccion = cambios.direccion;
+      if (cambios.distrito !== undefined) c.distrito = cambios.distrito;
+      if (cambios.notas !== undefined) c.notas = cambios.notas;
+      if (cambios.urgente !== undefined) c.urgente = cambios.urgente;
+      c.cambiadoEn = ahora().toISOString();
+      return c;
+    },
 
     reiniciar() {
       clientes.clear();
@@ -242,6 +303,20 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       if (method === 'DELETE' && camino === '/reparto') {
         sim.reiniciar();
         return { status: 200, body: { ok: true } };
+      }
+      // Lo que GSG puede hacer con un pedido ya mandado (para probar el espejo de cambios).
+      if (method === 'POST' && camino === '/reparto/cancelar') {
+        const b = z.object({ referencia: z.string().min(1).max(60), motivo: z.string().max(300).optional() }).parse(cuerpo ?? {});
+        if (!clientes.has(b.referencia)) return { status: 404, body: { error: `no conozco el pedido ${b.referencia}` } };
+        const ok = sim.cancelar(b.referencia, b.motivo);
+        return ok ? { status: 200, body: { ok: true, referencia: b.referencia, cancelado: true } } : { status: 409, body: { error: `el pedido ${b.referencia} ya estaba cerrado` } };
+      }
+      if (method === 'POST' && camino === '/reparto/cambiar') {
+        const b = cambioSchema.parse(cuerpo ?? {});
+        if (!clientes.has(b.referencia)) return { status: 404, body: { error: `no conozco el pedido ${b.referencia}` } };
+        const { referencia, ...cambios } = b;
+        const c = sim.cambiar(referencia, cambios);
+        return c ? { status: 200, body: { ok: true, pedido: publico(c) } } : { status: 409, body: { error: `el pedido ${referencia} ya estaba cerrado` } };
       }
 
       if (method !== 'POST') return { status: 404, body: { error: `ruta desconocida ${camino}` } };

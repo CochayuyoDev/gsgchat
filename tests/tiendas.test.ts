@@ -449,4 +449,108 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     const pagarHtml = (await maestro.app.inject({ method: 'GET', url: '/pagar', headers: sup })).body;
     expect(pagarHtml).toContain('Ya pagué: mandar mi captura');
   });
+
+  it('acceso de soporte: la tienda lo concede desde /pagar, el maestro ve el enlace, el dueño entra como administrador y al quitarlo el enlace deja de valer', async () => {
+    const sup = await superDe(maestro);
+    const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Zapatería Lima', contacto: 'Rosa · 987 654 321', membresia: { plan: 'basico', vencimiento: '2026-10-18T23:59:59' } } });
+    const { token } = alta.json();
+    const supTienda = await superDe(tienda, 'rosa');
+    parte.valor = { whatsapp: 'conectado', mensajesHoy: 1, fallosIA: 0, entregasHoy: 0, version: '1.0.0' };
+    expect((await tienda.app.inject({ method: 'POST', url: '/admin/membresia/maestro', headers: supTienda, payload: { url: 'http://maestro.local/api/plan/zapateria-lima', token } })).statusCode).toBe(200);
+    // Sin acceso todavia.
+    expect((await tienda.app.inject({ method: 'GET', url: '/admin/membresia/soporte', headers: supTienda })).json().soporte).toBeNull();
+    // Un administrador que no es superadministrador no puede concederlo.
+    await tienda.app.inject({ method: 'POST', url: '/admin/usuarios', headers: supTienda, payload: { usuario: 'juan', nombre: 'Juan', clave: 'juan-2026-wa', rol: 'admin' } });
+    const admTienda = { cookie: galletaDe(await tienda.app.inject({ method: 'POST', url: '/login', payload: { usuario: 'juan', clave: 'juan-2026-wa' } })), ...json };
+    expect((await tienda.app.inject({ method: 'POST', url: '/admin/membresia/soporte', headers: admTienda, payload: {} })).statusCode).toBe(403);
+    // La tienda concede 24 h.
+    const dado = await tienda.app.inject({ method: 'POST', url: '/admin/membresia/soporte', headers: supTienda, payload: { horas: 24 } });
+    expect(dado.statusCode).toBe(200);
+    expect(dado.json().mensaje).toContain('Acceso concedido hasta');
+    const enlace: string = dado.json().soporte.enlace;
+    expect(enlace).toMatch(/\/soporte\/sop_/);
+    // El maestro lo ve en la salud de la tienda (viaja con el parte).
+    const lista = (await maestro.app.inject({ method: 'GET', url: '/admin/tiendas', headers: sup })).json();
+    expect(lista.tiendas[0].salud.soporte).toMatchObject({ enlace });
+    // El dueño entra con el enlace: sesion abierta como "soporte" (administrador, no superadministrador).
+    const ruta = new URL(enlace, 'http://zapateria.local').pathname;
+    const entra = await tienda.app.inject({ method: 'GET', url: ruta });
+    expect(entra.statusCode).toBe(302);
+    expect(entra.headers.location).toBe('/panel');
+    const galleta = { cookie: galletaDe(entra), ...json };
+    const yo = (await tienda.app.inject({ method: 'GET', url: '/admin/yo', headers: galleta })).json();
+    expect(yo).toMatchObject({ usuario: 'soporte', rol: 'admin' });
+    expect(yo.super).toBeFalsy();
+    // Un codigo inventado no entra.
+    expect((await tienda.app.inject({ method: 'GET', url: '/soporte/sop_inventado' })).statusCode).toBe(410);
+    // La tienda lo quita: el enlace deja de valer y la sesion de soporte se cierra.
+    expect((await tienda.app.inject({ method: 'DELETE', url: '/admin/membresia/soporte', headers: supTienda })).statusCode).toBe(200);
+    expect((await tienda.app.inject({ method: 'GET', url: ruta })).statusCode).toBe(410);
+    expect((await tienda.app.inject({ method: 'GET', url: '/admin/yo', headers: galleta })).statusCode).toBe(401);
+    // Y caduca solo: se concede otra vez y se adelanta el reloj 25 h.
+    const otra = await tienda.app.inject({ method: 'POST', url: '/admin/membresia/soporte', headers: supTienda, payload: { horas: 24 } });
+    const ruta2 = new URL(otra.json().soporte.enlace, 'http://zapateria.local').pathname;
+    reloj.ahora = new Date(reloj.ahora.getTime() + 25 * 3600_000);
+    expect((await tienda.app.inject({ method: 'GET', url: ruta2 })).statusCode).toBe(410);
+    expect((await tienda.app.inject({ method: 'GET', url: '/admin/membresia/soporte', headers: supTienda })).json().soporte).toBeNull();
+  });
+
+  it('recibo de pago: al apuntar un pago la tienda recibe por WhatsApp su recibo (editable, con vista previa) y se puede apagar', async () => {
+    const sup = await superDe(maestro);
+    const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda Recibo', contacto: 'Rosa · 987 654 322', membresia: { plan: 'basico', vencimiento: '2026-10-18T23:59:59', precioMes: 49 } } });
+    const { tienda: t } = alta.json();
+    const antes = maestro.wa.sent.length;
+    const pago = await maestro.app.inject({ method: 'POST', url: `/admin/tiendas/${t.id}/pagos`, headers: sup, payload: { meses: 2, monto: 98 } });
+    expect(pago.statusCode).toBe(200);
+    expect(pago.json().mensaje).toContain('Recibo enviado por WhatsApp');
+    const recibo = maestro.wa.sent.slice(antes).find((m) => String(m.to) === '51987654322');
+    expect(String(recibo?.body)).toContain('Tienda Recibo');
+    expect(String(recibo?.body)).toContain('98');
+    expect(String(recibo?.body)).toContain('2 mes(es)');
+    // Vista previa del recibo y apagarlo.
+    const vp = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos/previsualizar', headers: sup, payload: { tipo: 'recibo', texto: 'Pago de {monto} {moneda} para {tienda}: hasta el {fecha}.' } });
+    expect(vp.statusCode).toBe(200);
+    expect(vp.json().texto).toMatch(/Pago de \d+ PEN para .+: hasta el \d{2}\/\d{2}\/\d{4}\./);
+    await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos', headers: sup, payload: { reciboActivo: false } });
+    const antes2 = maestro.wa.sent.length;
+    const pago2 = await maestro.app.inject({ method: 'POST', url: `/admin/tiendas/${t.id}/pagos`, headers: sup, payload: { meses: 1, monto: 49 } });
+    expect(pago2.json().mensaje).toContain('está apagado');
+    expect(maestro.wa.sent.slice(antes2).filter((m) => String(m.to) === '51987654322')).toHaveLength(0);
+    await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos', headers: sup, payload: { reciboActivo: true } });
+  });
+
+  it('latido: una tienda que lleva más de una hora sin preguntar por su plan en horario de trabajo se avisa al dueño una vez al día', async () => {
+    const sup = await superDe(maestro);
+    const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda Callada', membresia: { plan: 'basico', vencimiento: '2026-12-18T23:59:59' } } });
+    const { token } = alta.json();
+    // 10:00 de Lima: la tienda pregunta una vez y luego se calla.
+    reloj.ahora = new Date('2026-09-18T15:00:00Z');
+    expect((await maestro.app.inject({ method: 'GET', url: '/api/plan/tienda-callada', headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(200);
+    // Media hora despues: todavia no.
+    reloj.ahora = new Date('2026-09-18T15:30:00Z');
+    let r = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos/revisar', headers: sup, payload: {} });
+    expect(r.json().revision.sinLatido.join(' ')).not.toContain('Tienda Callada');
+    // Hora y media despues, en horario: se avisa al dueño una vez.
+    reloj.ahora = new Date('2026-09-18T16:31:00Z');
+    const antes = maestro.wa.sent.length;
+    r = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos/revisar', headers: sup, payload: {} });
+    expect(r.json().revision.sinLatido).toHaveLength(1);
+    expect(r.json().revision.sinLatido[0]).toContain('Tienda Callada');
+    const alDueno = maestro.wa.sent.slice(antes).find((m) => String(m.to) === '51999000111' && String(m.body).includes('sin dar señales'));
+    expect(String(alDueno?.body)).toContain('Tienda Callada');
+    // Otra revision el mismo dia: no se repite.
+    reloj.ahora = new Date('2026-09-18T18:00:00Z');
+    r = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos/revisar', headers: sup, payload: {} });
+    expect(r.json().revision.sinLatido).toHaveLength(0);
+    // De noche no es noticia.
+    reloj.ahora = new Date('2026-09-19T03:00:00Z');
+    r = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos/revisar', headers: sup, payload: {} });
+    expect(r.json().revision.sinLatido).toHaveLength(0);
+    // Con el ajuste en 0, nunca.
+    await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos', headers: sup, payload: { sinLatidoHoras: 0 } });
+    reloj.ahora = new Date('2026-09-19T16:00:00Z');
+    r = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos/revisar', headers: sup, payload: {} });
+    expect(r.json().revision.sinLatido).toHaveLength(0);
+    await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos', headers: sup, payload: { sinLatidoHoras: 1 } });
+  });
 });

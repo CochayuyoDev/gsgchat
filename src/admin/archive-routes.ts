@@ -59,6 +59,7 @@ import {
   sacarDePapelera,
   type ArchiveDeps,
 } from '../archive/service.js';
+import { leerChatDeWhatsApp } from '../archive/importar-whatsapp.js';
 import { crearEnlace, verificarEnlace } from '../archive/enlace.js';
 import { borrarArchivo, leerCrudo } from '../archive/store.js';
 import { revisarTelefono } from '../rutas/telefono.js';
@@ -286,6 +287,15 @@ export async function registerArchiveRoutes(app: FastifyInstance, deps: ArchiveR
   });
 
   /** Un chat exportado del telefono (.txt pegado), como conversacion guardada. Hasta 5 MB. */
+  // Antes de importar: cuantos mensajes se leyeron y de quien, para que el
+  // boton diga «Importar N mensajes» y no haya sorpresas.
+  app.post('/admin/archives/importar/vista-previa', { bodyLimit: 6 * 1024 * 1024 }, async (request) => {
+    const body = z.object({ texto: z.string().min(1).max(5 * 1024 * 1024), nombre: z.string().max(200).optional() }).parse(request.body ?? {});
+    const lectura = leerChatDeWhatsApp(body.texto, { nombreCliente: body.nombre ?? null, nombreNegocio: deps.nombreNegocio?.() ?? null });
+    const delCliente = lectura.mensajes.filter((m) => m.direction === 'in').length;
+    return { ok: lectura.mensajes.length > 0, mensajes: lectura.mensajes.length, delCliente, delNegocio: lectura.mensajes.length - delCliente, cliente: lectura.cliente, negocio: lectura.negocio, autores: lectura.autores, desde: lectura.desde, hasta: lectura.hasta, descartadas: lectura.descartadas, avisos: lectura.avisos };
+  });
+
   app.post('/admin/archives/importar', { bodyLimit: 6 * 1024 * 1024 }, async (request, reply) => {
     const body = z.object({ texto: z.string().min(1).max(5 * 1024 * 1024), telefono: z.string().min(6).max(30), nombre: z.string().max(200).optional() }).parse(request.body ?? {});
     const r = await importarChatDeWhatsApp(service, { texto: body.texto, telefono: body.telefono, nombre: body.nombre ?? null, quien: quienEs(request.usuario) });

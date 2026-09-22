@@ -96,6 +96,58 @@ describe('el simulador de GSG', () => {
   });
 });
 
+describe('lo que GSG puede hacer con un pedido ya mandado (espejo de cambios)', () => {
+  const TOKEN = 'tok-espejo';
+  it('cancela un pedido por su cuenta: sale en cancelados con cancelado:true y su motivo, y deja de estar en las listas', () => {
+    const sim = crearGsgSimulado({ token: TOKEN });
+    sim.cargarDePrueba();
+    expect(sim.cancelar('P-1003', 'el cliente anuló la venta')).toBe(true);
+    const p = sim.pendientes();
+    expect(p.faltaUbicacion.some((c) => c.referencia === 'P-1003')).toBe(false);
+    expect(p.faltaConfirmacion.some((c) => c.referencia === 'P-1003')).toBe(false);
+    const c = p.cancelados.find((x) => x.referencia === 'P-1003');
+    expect(c).toMatchObject({ cancelado: true, motivoCancelacion: 'el cliente anuló la venta', motivo: 'cancelado_por_gsg' });
+    // Cancelar dos veces no hace nada; un desconocido tampoco.
+    expect(sim.cancelar('P-1003')).toBe(false);
+    expect(sim.cancelar('NO-EXISTE')).toBe(false);
+    // Los que el cliente cancelo por WhatsApp no llevan cancelado:true (los cancelo el cliente, no GSG).
+    sim.atender('POST', '/confirmaciones', TOKEN, { referencia: 'P-1002', confirmada: false, motivo: 'cancela' });
+    const c2 = sim.pendientes().cancelados.find((x) => x.referencia === 'P-1002');
+    expect(c2).toBeDefined();
+    expect(c2).not.toHaveProperty('cancelado');
+  });
+
+  it('cambia la direccion, el distrito o el telefono y la lista lo devuelve con los datos nuevos', () => {
+    const sim = crearGsgSimulado({ token: TOKEN });
+    sim.cargarDePrueba();
+    const antes = sim.pendientes().faltaUbicacion.find((c) => c.referencia === 'P-1001')!;
+    const r = sim.atender('POST', '/reparto/cambiar', TOKEN, { referencia: 'P-1001', direccion: 'Av. Nueva 100', distrito: 'San Isidro' });
+    expect(r.status).toBe(200);
+    const despues = sim.pendientes().faltaUbicacion.find((c) => c.referencia === 'P-1001')!;
+    expect(despues.direccion).toBe('Av. Nueva 100');
+    expect(despues.distrito).toBe('San Isidro');
+    expect(despues.telefono).toBe(antes.telefono);
+    expect(sim.atender('POST', '/reparto/cambiar', TOKEN, { referencia: 'NADIE', direccion: 'x' }).status).toBe(404);
+    expect(sim.atender('POST', '/reparto/cancelar', TOKEN, { referencia: 'NADIE' }).status).toBe(404);
+    // Un pedido cerrado no se cambia ni se vuelve a cancelar: 409, con el motivo en palabras.
+    expect(sim.atender('POST', '/reparto/cancelar', TOKEN, { referencia: 'P-1001', motivo: 'prueba' }).status).toBe(200);
+    const otra = sim.atender('POST', '/reparto/cambiar', TOKEN, { referencia: 'P-1001', direccion: 'y' });
+    expect(otra.status).toBe(409);
+    expect(String((otra.body as { error: string }).error)).toContain('ya estaba cerrado');
+  });
+
+  it('una lista vacia o un fallo no marcan nada como cancelado: solo cancelado:true pedido a pedido', () => {
+    const sim = crearGsgSimulado({ token: TOKEN });
+    sim.cargarDePrueba();
+    sim.modo = 'caido';
+    expect(sim.atender('GET', '/reparto/pendientes', TOKEN, null).status).toBe(502);
+    sim.modo = 'ok';
+    const p = sim.pendientes();
+    expect(p.cancelados).toHaveLength(0);
+    expect(p.faltaUbicacion.every((c) => !('cancelado' in c))).toBe(true);
+  });
+});
+
 describe('la conexion con GSG desde la pantalla', () => {
   const config = { GSG_URL: '', GSG_TOKEN: '', PUBLIC_BASE_URL: 'http://localhost:3000' };
 

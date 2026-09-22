@@ -155,6 +155,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
         salud,
         politica,
         log: info,
+        horarioExtra: () => (entregas ? { desde: entregas.ajustes().horarioEntregas.desde, hasta: entregas.ajustes().horarioEntregas.extendidoHasta } : null),
       })
     : () => undefined;
 
