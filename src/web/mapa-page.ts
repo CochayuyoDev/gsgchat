@@ -4,14 +4,23 @@
  * Leaflet + OpenStreetMap, sin clave (igual que la pagina de rastreo). Un
  * pin por cada entrega de hoy que ya tiene ubicacion, con el color de su
  * estado; los motorizados en su ultima posicion conocida (el pin de su
- * ultima entrega). Filtros por estado y por motorizado; clic en un pin →
- * tarjeta con el pedido y "Abrir en Hoy". Se refresca solo cada 30 s.
+ * ultima entrega). Filtros por estado y por motorizado; clic en un pin ->
+ * ficha con el pedido y "Abrir en Hoy". Se refresca solo cada 30 s.
+ *
+ * Decisiones de la pantalla:
+ *
+ *  - Los chips de arriba ya dicen que color es cada estado y cuantos hay: la
+ *    leyenda de dentro del mapa solo explica lo que ningun chip cuenta (el
+ *    aro rojo de urgente y la pildora del motorizado). Cada cosa, una vez.
+ *  - Lo que comparte con /rutas (api, esc, toast, horas) vive en
+ *    `reparto-comun.ts`: una sola copia para las dos pantallas.
  *
  * El JS va en String.raw, con var y sin backticks, como el resto. Leaflet
  * se carga desde JS (el armazon no deja meter <link> en el <head>).
  */
 
 import { appShell } from './shell.js';
+import { REPARTO_CSS, REPARTO_JS } from './reparto-comun.js';
 
 const LEAFLET_VERSION = '1.9.4';
 export const LEAFLET_BASE = `https://cdnjs.cloudflare.com/ajax/libs/leaflet/${LEAFLET_VERSION}`;
@@ -19,18 +28,20 @@ export const LEAFLET_BASE = `https://cdnjs.cloudflare.com/ajax/libs/leaflet/${LE
 /** El centro de Lima, para cuando no hay pines. */
 export const CENTRO_LIMA = { lat: -12.0464, lng: -77.0428 };
 
-const CSS = `
+const CSS = `${REPARTO_CSS}
   /* El mapa usa la paleta del armazon: los pines llevan los mismos tonos que los chips de Hoy. */
   * { box-sizing: border-box; }
   /* La pantalla entera es el mapa: filtros arriba y el mapa ocupa lo que queda, sin que nada asome por debajo. */
   .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); display: flex; flex-direction: column; height: 100%; min-height: 420px; }
   .wrap > * { flex: none; }
   .wrap a { color: var(--primario); }
-  .muted { color: var(--texto-suave); }
-  .hidden { display: none !important; }
-  .demo { background: var(--ambar); color: #fff; padding: 8px 14px; font-size: var(--fs-small); text-align: center; border-radius: var(--radio-sm); margin-bottom: var(--esp-2); font-weight: 600; }
-  button { font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 6px 10px; cursor: pointer; }
-  button:hover { border-color: var(--primario); }
+  .demo, .explica {
+    background: var(--ambar-suave); color: var(--ambar); border: 1px solid var(--ambar-suave);
+    border-radius: var(--radio-sm); padding: 10px 14px; margin-bottom: var(--esp-2);
+    font-size: var(--fs-small); text-align: center; font-weight: 600;
+  }
+  .explica { text-align: left; }
+
   /* los filtros: pildoras que se encienden y apagan; el punto lleva el color del pin */
   .filtros { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 10px; }
   .filtros .fila-estados, .filtros .fila-motos { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -38,35 +49,37 @@ const CSS = `
   .filtros .chip { flex: none; cursor: pointer; padding: 6px 12px; font-size: 13px; font-weight: 500; background: var(--superficie); color: var(--texto); border: 1px solid var(--borde); min-height: 34px; opacity: .72; }
   .filtros .chip::before { display: none; }
   .filtros .chip:hover { border-color: var(--primario); opacity: 1; }
-  .filtros .chip.activo { opacity: 1; border-color: var(--primario); background: var(--primario-suave); color: var(--primario); font-weight: 600; }
+  .filtros .chip[aria-pressed="true"] { opacity: 1; border-color: var(--primario); background: var(--primario-suave); color: var(--primario); font-weight: 600; }
   .filtros .chip .punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
   .filtros .chip .n { color: var(--texto-suave); font-size: 12px; font-weight: 600; }
+
   .mapa-caja { position: relative; border: 1px solid var(--borde); border-radius: var(--radio); overflow: hidden; background: var(--superficie-2); flex: 1 1 auto; min-height: 320px; box-shadow: var(--sombra); }
   #mapa { position: absolute; inset: 0; }
-  .sin-pines { position: absolute; left: 12px; right: 12px; top: 12px; z-index: 500; background: var(--superficie); border: 1px dashed var(--borde); border-radius: var(--radio); padding: 12px 16px; font-size: var(--fs-cuerpo); text-align: center; color: var(--texto-suave); box-shadow: var(--sombra-2); }
-  .tarjeta { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 500; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 14px 16px; max-width: 440px; margin: 0 auto; box-shadow: var(--sombra-2); font-size: var(--fs-cuerpo); }
-  .tarjeta h3 { margin: 0 0 6px; font-size: var(--fs-h3); padding-right: 28px; }
-  .tarjeta .cerrar { position: absolute; right: 6px; top: 6px; border: 0; background: transparent; font-size: 20px; color: var(--texto-suave); padding: 4px 10px; min-height: 36px; min-width: 36px; }
-  .tarjeta .cerrar:hover { color: var(--texto); }
-  .tarjeta .acciones { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .tarjeta .dato { margin-top: 3px; }
-  /* la leyenda va dentro del mapa, abajo a la izquierda, para que no haya que bajar a buscarla */
+  .aviso-mapa { position: absolute; left: 12px; right: 12px; top: 12px; z-index: 500; max-width: 520px; margin: 0 auto; box-shadow: var(--sombra-2); }
+  .aviso-mapa .acciones { margin-top: var(--esp-2); }
+
+  /* La ficha del pin tocado: abajo, al alcance del pulgar. */
+  .ficha { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 500; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 14px 16px; max-width: 440px; margin: 0 auto; box-shadow: var(--sombra-2); font-size: var(--fs-cuerpo); }
+  .ficha h3 { margin: 0 0 6px; font-size: var(--fs-h3); padding-right: 28px; }
+  .ficha .cerrar { position: absolute; right: 6px; top: 6px; border: 0; background: transparent; font-size: 20px; color: var(--texto-suave); padding: 4px 10px; min-height: 36px; min-width: 36px; cursor: pointer; }
+  .ficha .cerrar:hover { color: var(--texto); }
+  .ficha .acciones { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .ficha .dato { margin-top: 3px; }
+
+  /* la leyenda va dentro del mapa, abajo a la izquierda: solo lo que los chips de arriba no dicen */
   .leyenda { position: absolute; left: 12px; bottom: 12px; z-index: 500; max-width: calc(100% - 24px); display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: 12px; color: var(--texto); background: color-mix(in srgb, var(--superficie) 88%, transparent); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 6px 10px; align-items: center; box-shadow: var(--sombra); pointer-events: none; }
-  .leyenda .muted { color: var(--texto-suave); }
+  .leyenda span { display: inline-flex; align-items: center; gap: 5px; }
+  .leyenda .punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .leyenda .fallo { color: var(--rojo); font-weight: 600; }
   @media (max-width: 640px) {
     .filtros .fila-motos { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
     .filtros .fila-motos .chip { flex: none; }
-    /* En el celular los chips de arriba ya dicen cada color: en el mapa solo quedan lo que no dicen (urgente, motorizado) y la hora. */
     .leyenda { font-size: 11px; gap: 2px 8px; bottom: 26px; }
-    .leyenda span.solo-escritorio { display: none; }
   }
-  .leyenda span { display: inline-flex; align-items: center; gap: 5px; }
-  .leyenda .punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
-  .pin-moto { background: var(--texto); color: var(--bg); border-radius: 12px; padding: 2px 6px; font-size: 12px; line-height: 16px; white-space: nowrap; border: 2px solid var(--superficie); box-shadow: 0 2px 6px rgba(0,0,0,.35); text-align: center; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-  .pin-pedido { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+
+  .pin-moto { background: var(--texto); color: var(--bg); border-radius: 12px; padding: 2px 6px; font-size: 12px; line-height: 16px; white-space: nowrap; border: 2px solid var(--superficie); box-shadow: var(--sombra-2); text-align: center; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .pin-pedido { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid var(--superficie); box-shadow: var(--sombra-2); }
   .pin-pedido.urgente { outline: 3px solid var(--rojo); outline-offset: 1px; }
-  .explica { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px 16px; margin-bottom: 10px; font-size: var(--fs-cuerpo); }
-  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
 `;
 
 export function mapaPage(opts: { disponible: boolean; demo: boolean; nombreNegocio: string }): string {
@@ -77,58 +90,53 @@ ${opts.disponible ? '' : '<div class="explica"><b>Las entregas del día no está
 <div class="filtros" id="filtros"></div>
 <div class="mapa-caja">
   <div id="mapa"></div>
-  <div class="sin-pines hidden" id="sin-pines">Todavía no hay ubicaciones hoy: en cuanto un cliente mande su pin, aparece aquí.</div>
-  <div class="tarjeta hidden" id="tarjeta"></div>
-<div class="leyenda" aria-label="Qué significa cada color">
-  <span class="solo-escritorio"><i class="punto" style="background:var(--ambar)"></i> falta confirmar (ya mandó su pin)</span>
-  <span class="solo-escritorio"><i class="punto" style="background:var(--azul)"></i> en camino (lista, con motorizado o con hora)</span>
-  <span class="solo-escritorio"><i class="punto" style="background:var(--verde)"></i> entregada</span>
-  <span class="solo-escritorio"><i class="punto" style="background:var(--rojo)"></i> con incidencia</span>
-  <span><i class="punto" style="background:transparent;width:8px;height:8px;outline:2px solid var(--rojo);outline-offset:1px"></i> aro rojo: urgente</span>
-  <span><i class="punto" style="background:var(--texto);border-radius:3px"></i> motorizado (última posición)</span>
-  <span class="muted" id="ultima-carga"></span>
-</div>
+  <div class="vacio aviso-mapa hidden" id="sin-pines">
+    <h3>Todavía no hay ubicaciones hoy</h3>
+    <p>En cuanto un cliente mande su pin, aparece aquí. En «Hoy» ves a quién le falta.</p>
+    <div class="acciones"><a class="btn sm" href="/hoy">Ir a Hoy</a></div>
+  </div>
+  <div class="ficha hidden" id="ficha" tabindex="-1"></div>
+  <div class="leyenda" aria-label="Qué significa cada marca del mapa">
+    <span><i class="punto" style="background:transparent;width:8px;height:8px;outline:2px solid var(--rojo);outline-offset:1px"></i> aro rojo: urgente</span>
+    <span><i class="punto" style="background:var(--texto);border-radius:3px"></i> motorizado (última posición)</span>
+    <span class="muted" id="ultima-carga"></span>
+  </div>
 </div>
 </div>
 `;
 
   const script = String.raw`
-var LEAFLET = '${LEAFLET_BASE}';
-async function api(path) {
-  var res = await fetch(path, { cache: 'no-store', credentials: 'same-origin' });
-  var data = await res.json().catch(function () { return {}; });
-  if (res.status === 401) { irAlLogin(); throw new Error('Tu sesión terminó: vuelve a entrar.'); }
-  if (!res.ok) throw new Error(data.error || errorHttp(res.status));
-  return data;
-}
-function esc(v) { return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function toast(texto) { var el = document.createElement('div'); el.className = 'toast'; el.textContent = texto; document.body.appendChild(el); setTimeout(function () { el.remove(); }, 4500); }
-function hora(iso) { if (!iso) return ''; return new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false }); }
-function haceCuanto(iso) {
-  if (!iso) return '';
-  var min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (min < 1) return 'ahora mismo';
-  if (min < 60) return 'hace ' + min + ' min';
-  var h = Math.floor(min / 60);
-  return 'hace ' + h + ' h' + (min % 60 ? ' ' + (min % 60) + ' min' : '');
-}
+${REPARTO_JS}
 
-/* Que color lleva cada estado. Sin pin no hay nada que pintar. */
-/* Los mismos tonos que los chips de Hoy: ambar esperando al cliente, azul en marcha, verde hecho, rojo con incidencia. */
-var COLORES = { ambar: 'var(--ambar)', azul: 'var(--azul)', verde: 'var(--verde)', rojo: 'var(--rojo)' };
+var LEAFLET = '${LEAFLET_BASE}';
+
+/* Los mismos tonos que los chips de Hoy: ambar esperando al cliente, azul en
+   marcha, verde hecho, rojo con incidencia. */
+var GRUPOS = [
+  { clave: 'falta_confirmar', etiqueta: 'Falta confirmar', color: 'var(--ambar)', tono: 'ambar' },
+  { clave: 'en_camino', etiqueta: 'En camino', color: 'var(--azul)', tono: 'azul' },
+  { clave: 'entregada', etiqueta: 'Entregadas', color: 'var(--verde)', tono: 'verde' },
+  { clave: 'incidencia', etiqueta: 'Incidencia', color: 'var(--rojo)', tono: 'rojo' }
+];
+var GRUPO_POR_CLAVE = {};
+GRUPOS.forEach(function (g) { GRUPO_POR_CLAVE[g.clave] = g; });
+
+/* En que monton cae cada entrega. Las canceladas no se pintan: ya no hay nada que repartir. */
 function grupoDe(e) {
+  if (e.estado === 'cancelada') return null;
   if (e.estado === 'incidencia') return 'incidencia';
   if (e.estado === 'entregada' || e.estado === 'terminada') return 'entregada';
-  if (e.estado === 'cancelada') return null;
   if (e.estado === 'pendiente' || e.estado === 'esperando_ubicacion' || e.estado === 'esperando_confirmacion') return 'falta_confirmar';
   return 'en_camino';
 }
-var GRUPOS = [
-  { clave: 'falta_confirmar', etiqueta: 'Falta confirmar', color: COLORES.ambar, tono: 'ambar' },
-  { clave: 'en_camino', etiqueta: 'En camino', color: COLORES.azul, tono: 'azul' },
-  { clave: 'entregada', etiqueta: 'Entregadas', color: COLORES.verde, tono: 'verde' },
-  { clave: 'incidencia', etiqueta: 'Incidencia', color: COLORES.rojo, tono: 'rojo' },
-];
+
+/* Sin pin no hay nada que pintar. */
+function tienePin(e) {
+  return e && e.lat !== null && e.lat !== undefined && e.lng !== null && e.lng !== undefined;
+}
+function motoTienePin(m) {
+  return m.ultimaLat !== null && m.ultimaLat !== undefined && m.ultimaLng !== null && m.ultimaLng !== undefined;
+}
 
 var filtroEstado = {};
 GRUPOS.forEach(function (g) { filtroEstado[g.clave] = true; });
@@ -137,84 +145,131 @@ var mostrarMotorizados = true;
 var datos = null;
 var mapa = null;
 var capa = null;
-var seleccion = null;
+var seleccion = null;      /* referencia de la entrega con la ficha abierta */
+var yaEncuadrado = false;  /* el mapa se encuadra una vez, no cada 30 s */
 
 function cargarLeaflet() {
   return new Promise(function (resolver, rechazar) {
     if (window.L) return resolver();
     var css = document.createElement('link'); css.rel = 'stylesheet'; css.href = LEAFLET + '/leaflet.min.css'; document.head.appendChild(css);
-    var s = document.createElement('script'); s.src = LEAFLET + '/leaflet.min.js'; s.onload = function () { resolver(); }; s.onerror = function () { rechazar(new Error('No se pudo cargar el mapa (sin conexión a internet). Los pedidos siguen en Hoy.')); };
+    var s = document.createElement('script');
+    s.src = LEAFLET + '/leaflet.min.js';
+    s.onload = function () { resolver(); };
+    s.onerror = function () { rechazar(new Error('No se pudo cargar el mapa (sin conexión a internet). Los pedidos siguen en Hoy.')); };
     document.head.appendChild(s);
   });
 }
 
+/* Las entregas que se ven ahora mismo: con pin, de un grupo encendido y, si
+   se eligió un motorizado, solo las suyas. */
+function entregasVisibles() {
+  return (datos ? datos.entregas : []).filter(function (e) {
+    var g = grupoDe(e);
+    if (!g || !tienePin(e) || !filtroEstado[g]) return false;
+    if (filtroMotorizado !== null && !(e.motorizado && e.motorizado.id === filtroMotorizado)) return false;
+    return true;
+  });
+}
+
+function chipFiltro(atributo, valor, activo, interior) {
+  return '<button type="button" class="chip" ' + atributo + '="' + valor + '" aria-pressed="' + (activo ? 'true' : 'false') + '">' + interior + '</button>';
+}
+
 function pintarFiltros() {
-  var caja = document.getElementById('filtros');
-  var html = '';
+  var entregas = datos ? datos.entregas : [];
+  var motorizados = (datos && datos.motorizados) ? datos.motorizados : [];
+
   var cuenta = {};
-  (datos ? datos.entregas : []).forEach(function (e) { var g = grupoDe(e); if (g && e.lat !== null && e.lat !== undefined) cuenta[g] = (cuenta[g] || 0) + 1; });
-  GRUPOS.forEach(function (g) {
-    html += '<button type="button" class="chip' + (filtroEstado[g.clave] ? ' activo' : '') + '" data-estado="' + g.clave + '" aria-pressed="' + (filtroEstado[g.clave] ? 'true' : 'false') + '"><i class="punto" style="background:' + g.color + '"></i>' + esc(g.etiqueta) + ' <span class="n">' + (cuenta[g.clave] || 0) + '</span></button>';
+  entregas.forEach(function (e) {
+    var g = grupoDe(e);
+    if (g && tienePin(e)) cuenta[g] = (cuenta[g] || 0) + 1;
   });
-  html += '<button type="button" class="chip' + (mostrarMotorizados ? ' activo' : '') + '" data-motos="1" aria-pressed="' + (mostrarMotorizados ? 'true' : 'false') + '"><i class="punto" style="background:var(--texto);border-radius:3px"></i>Motorizados <span class="n">' + ((datos && datos.motorizados) ? datos.motorizados.filter(function (m) { return m.ultimaLat !== null && m.ultimaLat !== undefined; }).length : 0) + '</span></button>';
-  var motos = (datos && datos.motorizados) ? datos.motorizados.filter(function (m) { return m.estado === 'activo'; }) : [];
-  var htmlMotos = '';
-  motos.forEach(function (m) {
-    var n = (datos.entregas || []).filter(function (e) { return e.motorizado && e.motorizado.id === m.id && e.lat !== null && grupoDe(e); }).length;
-    htmlMotos += '<button type="button" class="chip' + (filtroMotorizado === m.id ? ' activo' : '') + '" data-moto="' + m.id + '" aria-pressed="' + (filtroMotorizado === m.id ? 'true' : 'false') + '">🛵 ' + esc(m.nombre) + ' <span class="n">' + n + '</span></button>';
-  });
+
+  var estados = GRUPOS.map(function (g) {
+    return chipFiltro('data-estado', g.clave, filtroEstado[g.clave],
+      '<i class="punto" style="background:' + g.color + '"></i>' + esc(g.etiqueta) + ' <span class="n">' + (cuenta[g.clave] || 0) + '</span>');
+  }).join('') +
+    chipFiltro('data-motos', '1', mostrarMotorizados,
+      '<i class="punto" style="background:var(--texto);border-radius:3px"></i>Motorizados <span class="n">' + motorizados.filter(motoTienePin).length + '</span>');
+
+  var activos = motorizados.filter(function (m) { return m.estado === 'activo'; });
+  /* Si el motorizado elegido deja de estar activo, su chip desaparece: sin
+     esto el filtro se quedaria puesto y el mapa vacio, sin forma de quitarlo. */
+  if (filtroMotorizado !== null && !activos.some(function (m) { return m.id === filtroMotorizado; })) filtroMotorizado = null;
+
+  var motos = activos.map(function (m) {
+    var n = entregas.filter(function (e) { return e.motorizado && e.motorizado.id === m.id && tienePin(e) && grupoDe(e); }).length;
+    return chipFiltro('data-moto', m.id, filtroMotorizado === m.id, '🛵 ' + esc(m.nombre || 'Sin nombre') + ' <span class="n">' + n + '</span>');
+  }).join('');
+
   /* dos filas: los estados (se envuelven) y, debajo, un motorizado por chip (en el celular se deslizan de lado) */
-  caja.innerHTML = '<div class="fila-estados">' + html + '</div>' + (htmlMotos ? '<div class="fila-motos" aria-label="Ver solo lo de un motorizado">' + htmlMotos + '</div>' : '');
-  caja.querySelectorAll('[data-estado]').forEach(function (c) { c.onclick = function () { var k = c.getAttribute('data-estado'); filtroEstado[k] = !filtroEstado[k]; pintar(); }; });
-  caja.querySelectorAll('[data-motos]').forEach(function (c) { c.onclick = function () { mostrarMotorizados = !mostrarMotorizados; pintar(); }; });
-  caja.querySelectorAll('[data-moto]').forEach(function (c) { c.onclick = function () { var id = Number(c.getAttribute('data-moto')); filtroMotorizado = filtroMotorizado === id ? null : id; pintar(); }; });
+  var caja = document.getElementById('filtros');
+  caja.innerHTML = '<div class="fila-estados">' + estados + '</div>' +
+    (motos ? '<div class="fila-motos" aria-label="Ver solo lo de un motorizado">' + motos + '</div>' : '');
+
+  caja.querySelectorAll('[data-estado]').forEach(function (c) {
+    c.onclick = function () { var k = c.getAttribute('data-estado'); filtroEstado[k] = !filtroEstado[k]; pintar(); };
+  });
+  caja.querySelectorAll('[data-motos]').forEach(function (c) {
+    c.onclick = function () { mostrarMotorizados = !mostrarMotorizados; pintar(); };
+  });
+  caja.querySelectorAll('[data-moto]').forEach(function (c) {
+    c.onclick = function () { var id = Number(c.getAttribute('data-moto')); filtroMotorizado = filtroMotorizado === id ? null : id; pintar(); };
+  });
 }
 
 function pinPedido(e, color) {
   return L.divIcon({ className: '', html: '<div class="pin-pedido' + (e.prioridad === 'urgente' ? ' urgente' : '') + '" style="background:' + color + '"></div>', iconSize: [20, 20], iconAnchor: [10, 10] });
 }
+
 function pinMoto(m) {
-  var etiqueta = esc(m.nombre.split(' ')[0]);
+  var etiqueta = esc(String(m.nombre || 'Moto').split(' ')[0]);
   var ancho = 34 + etiqueta.length * 8;
   return L.divIcon({ className: '', html: '<div class="pin-moto" style="width:' + ancho + 'px">🛵 ' + etiqueta + '</div>', iconSize: [ancho, 24], iconAnchor: [ancho / 2, 12] });
 }
 
-function abrirTarjeta(e) {
+function abrirFicha(e) {
   seleccion = e.referencia;
-  var t = document.getElementById('tarjeta');
-  var g = GRUPOS.filter(function (x) { return x.clave === grupoDe(e); })[0];
-  t.innerHTML = '<button class="cerrar" type="button" id="tarjeta-cerrar" aria-label="Cerrar">×</button>' +
+  var t = document.getElementById('ficha');
+  var g = GRUPO_POR_CLAVE[grupoDe(e)];
+  t.innerHTML = '<button class="cerrar" type="button" id="ficha-cerrar" aria-label="Cerrar">×</button>' +
     '<h3>' + esc(e.nombre || 'Sin nombre') + ' · ' + esc(e.referencia) + (e.prioridad === 'urgente' ? ' <span class="chip tono-rojo sin-punto">Urgente</span>' : '') + '</h3>' +
     '<div class="dato"><span class="chip tono-' + (g ? g.tono : 'gris') + '">' + esc(g ? g.etiqueta : e.estado) + '</span> <span class="muted">' + esc(e.situacion || '') + '</span></div>' +
     (e.direccion ? '<div class="dato muted">' + esc(e.direccion) + (e.distrito ? ' · ' + esc(e.distrito) : '') + '</div>' : '') +
     (e.motorizado ? '<div class="dato">Motorizado: <b>' + esc(e.motorizado.nombre) + '</b>' + (e.llegaAproxAt ? ' · llega alrededor de las ' + esc(hora(e.llegaAproxAt)) : '') + '</div>' : '') +
-    '<div class="acciones"><a class="btn sm primario" href="/hoy?buscar=' + encodeURIComponent(e.referencia) + '">Abrir en Hoy</a>' + (e.mapsUrl ? '<a class="btn sm" href="' + esc(e.mapsUrl) + '" target="_blank" rel="noopener">Google Maps</a>' : '') + '</div>';
+    '<div class="acciones"><a class="btn sm primario" href="/hoy?buscar=' + encodeURIComponent(e.referencia) + '">Abrir en Hoy</a>' +
+      (e.mapsUrl ? '<a class="btn sm" href="' + esc(e.mapsUrl) + '" target="_blank" rel="noopener">Google Maps</a>' : '') + '</div>';
   t.classList.remove('hidden');
-  document.getElementById('tarjeta-cerrar').onclick = function () { t.classList.add('hidden'); seleccion = null; };
+  document.getElementById('ficha-cerrar').onclick = cerrarFicha;
 }
+
+function cerrarFicha() {
+  seleccion = null;
+  document.getElementById('ficha').classList.add('hidden');
+}
+
+/* Con la ficha abierta, Escape la cierra: es lo que espera cualquiera. */
+document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Escape' && seleccion) cerrarFicha();
+});
 
 function pintar() {
   pintarFiltros();
   if (!mapa) return;
   if (capa) capa.clearLayers(); else capa = L.layerGroup().addTo(mapa);
+
   var puntos = [];
-  var entregas = (datos ? datos.entregas : []).filter(function (e) {
-    var g = grupoDe(e);
-    if (!g || e.lat === null || e.lat === undefined || e.lng === null || e.lng === undefined) return false;
-    if (!filtroEstado[g]) return false;
-    if (filtroMotorizado !== null && !(e.motorizado && e.motorizado.id === filtroMotorizado)) return false;
-    return true;
-  });
-  entregas.forEach(function (e) {
-    var g = GRUPOS.filter(function (x) { return x.clave === grupoDe(e); })[0];
+  entregasVisibles().forEach(function (e) {
+    var g = GRUPO_POR_CLAVE[grupoDe(e)];
     var m = L.marker([e.lat, e.lng], { icon: pinPedido(e, g.color), title: (e.nombre || '') + ' ' + e.referencia });
-    m.on('click', function () { abrirTarjeta(e); });
+    m.on('click', function () { abrirFicha(e); });
     capa.addLayer(m);
     puntos.push([e.lat, e.lng]);
   });
+
   if (mostrarMotorizados) {
     (datos ? datos.motorizados : []).forEach(function (mo) {
-      if (mo.ultimaLat === null || mo.ultimaLat === undefined || mo.ultimaLng === null || mo.ultimaLng === undefined) return;
+      if (!motoTienePin(mo)) return;
       if (filtroMotorizado !== null && mo.id !== filtroMotorizado) return;
       var mk = L.marker([mo.ultimaLat, mo.ultimaLng], { icon: pinMoto(mo), title: mo.nombre, zIndexOffset: 1000 });
       mk.bindTooltip(esc(mo.nombre) + ' · ' + esc(haceCuanto(mo.ultimaPosicionAt)) + (mo.enManos ? ' · lleva ' + mo.enManos : ''), { direction: 'top', offset: [0, -8] });
@@ -222,34 +277,72 @@ function pintar() {
       puntos.push([mo.ultimaLat, mo.ultimaLng]);
     });
   }
-  var conPin = (datos ? datos.entregas : []).some(function (e) { return e.lat !== null && e.lat !== undefined && grupoDe(e); });
+
+  var conPin = (datos ? datos.entregas : []).some(function (e) { return tienePin(e) && grupoDe(e); });
   document.getElementById('sin-pines').classList.toggle('hidden', conPin);
-  if (puntos.length && !seleccion && !pintar.encuadrado) {
+
+  if (puntos.length && !seleccion && !yaEncuadrado) {
     if (puntos.length === 1) mapa.setView(puntos[0], 14); else mapa.fitBounds(puntos, { padding: [30, 30], maxZoom: 15 });
-    pintar.encuadrado = true;
+    yaEncuadrado = true;
   }
-  document.getElementById('ultima-carga').textContent = 'actualizado a las ' + new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+/* La ficha abierta se pone al dia con los datos nuevos; si el pedido ya no
+   esta (se cerro el dia, lo cancelaron), se cierra en vez de mentir. */
+function refrescarFicha() {
+  if (!seleccion) return;
+  var iguales = (datos ? datos.entregas : []).filter(function (e) { return e.referencia === seleccion; });
+  if (iguales.length && tienePin(iguales[0])) abrirFicha(iguales[0]);
+  else cerrarFicha();
+}
+
+function marcarCarga(error) {
+  var caja = document.getElementById('ultima-carga');
+  caja.classList.toggle('fallo', Boolean(error));
+  caja.textContent = error
+    ? 'sin actualizar: ' + error
+    : 'actualizado a las ' + hora(new Date().toISOString());
 }
 
 async function cargar() {
   datos = await api('/admin/entregas');
   pintar();
+  refrescarFicha();
+  marcarCarga(null);
+}
+
+/* El aviso del centro del mapa sirve para las dos malas noticias: no hay
+   pines todavia, o el mapa no se pudo cargar. Solo cambia lo que dice. */
+function avisoDelMapa(titulo, explicacion) {
+  var caja = document.getElementById('sin-pines');
+  caja.innerHTML = '<h3>' + esc(titulo) + '</h3><p>' + esc(explicacion) + '</p>' +
+    '<div class="acciones"><button type="button" class="btn sm primario" id="reintentar-mapa">Reintentar</button></div>';
+  caja.classList.remove('hidden');
+  document.getElementById('reintentar-mapa').onclick = function () { location.reload(); };
 }
 
 (async function () {
   try {
     await cargar();
-  } catch (e) { toast(e.message); }
+  } catch (e) {
+    marcarCarga(e.message);
+    toast(e.message);
+  }
   try {
     await cargarLeaflet();
     mapa = L.map('mapa', { zoomControl: true, attributionControl: true }).setView([${CENTRO_LIMA.lat}, ${CENTRO_LIMA.lng}], 12);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; colaboradores de OpenStreetMap' }).addTo(mapa);
     pintar();
   } catch (e) {
-    document.getElementById('sin-pines').textContent = e.message;
-    document.getElementById('sin-pines').classList.remove('hidden');
+    avisoDelMapa('No se pudo cargar el mapa', e.message);
+    return;
   }
-  setInterval(function () { cargar().catch(function () {}); }, 30000);
+  /* Cada 30 s. Si falla, se dice en la esquina y se sigue intentando: antes
+     el error se tragaba y la pantalla ensenaba pines viejos como si nada. */
+  setInterval(function () {
+    if (document.hidden) return;
+    cargar().catch(function (e) { marcarCarga(e.message); });
+  }, 30000);
 })();
 `;
 

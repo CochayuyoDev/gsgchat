@@ -41,8 +41,15 @@ export interface InboundMessage {
   };
   button?: { text: string; payload: string };
   context?: { id?: string };
-  /** Una reaccion (el corazon, el pulgar) a un mensaje nuestro. No es texto: no se contesta. */
-  reaction?: { emoji: string };
+  /**
+   * Una reaccion (el corazon, el pulgar) a un mensaje. No es texto: no se
+   * contesta, se cuelga del mensaje reaccionado.
+   *
+   * `message_id` es ESE mensaje, con el nombre que le da Meta. Sin el, la
+   * reaccion no se puede pintar donde va y acaba como un globo suelto.
+   * `emoji` vacio significa que la quito.
+   */
+  reaction?: { emoji: string; message_id?: string };
   /**
    * "Eliminar para todos": el id del mensaje que el remitente quiso borrar.
    * El sistema lo conserva y lo marca; no lo borra.

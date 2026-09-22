@@ -450,6 +450,71 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     expect(pagarHtml).toContain('Ya pagué: mandar mi captura');
   });
 
+  it('/tiendas y /pagar dicen el estado de la membresía con las mismas palabras, y una suspendida no se lee como vencida', async () => {
+    const vm = await import('node:vm');
+    const sup = await superDe(maestro);
+
+    /* Corre solo el JS de una pantalla (va tras su marca) con un DOM de
+       mentira, y devuelve sus funciones para preguntarles. */
+    const funcionesDe = async (url: string, marca: string) => {
+      const body = (await maestro.app.inject({ method: 'GET', url, headers: sup })).body;
+      const js = body.split(marca)[1]!.split('</script>')[0]!;
+      const elFalso = (): Record<string, unknown> => ({
+        value: '', textContent: '', innerHTML: '', checked: false, disabled: false, title: '', placeholder: '',
+        style: {}, className: '', classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+        setAttribute() {}, getAttribute: () => '', querySelectorAll: () => [], querySelector: () => null,
+        scrollIntoView() {}, focus() {}, remove() {}, appendChild() {},
+      });
+      const ctx: Record<string, unknown> = {
+        document: { getElementById: elFalso, querySelector: () => null, querySelectorAll: () => [], createElement: elFalso, body: { appendChild() {}, contains: () => true } },
+        window: {}, setTimeout: () => 0, setInterval: () => 0,
+        navigator: { clipboard: { writeText: () => Promise.resolve() } },
+        FileReader: function () {}, fetch: () => Promise.reject(new Error('sin red')),
+        irAlLogin() {}, errorHttp: (n: number) => 'error ' + n,
+        confirmarDialogo: () => Promise.resolve(false), pedirDato: () => Promise.resolve(null),
+      };
+      ctx.globalThis = ctx;
+      vm.createContext(ctx);
+      vm.runInContext(js, ctx);
+      return ctx as { estadoMembresia?: Function; estadoPlan?: Function; urgencia?: Function; dinero?: Function };
+    };
+
+    const t = await funcionesDe('/tiendas', '/* === pantalla Tiendas === */');
+    const p = await funcionesDe('/pagar', '/* === pantalla Pagar === */');
+    const tienda = (estado: string, dias: number, vencido: boolean) => ({
+      membresia: { estado, vencimiento: '2026-10-18T23:59:59.000Z', moneda: 'S/', precioMes: 49 },
+      plan: { vencido, diasRestantes: dias, nombre: 'Básico' },
+      pagosPendientes: 0,
+      salud: { whatsapp: { nivel: 'ok' } },
+    });
+    const plan = (dias: number, vencido: boolean) => ({ diasRestantes: dias, vencido, aviso: null, contacto: null });
+
+    // Las dos caras del mismo asunto dicen lo mismo, con el mismo color.
+    for (const [dias, vencido, estado] of [[30, false, 'activa'], [1, false, 'activa'], [5, false, 'activa'], [-3, true, 'activa'], [15, true, 'suspendida']] as const) {
+      const a = t.estadoMembresia!(tienda(estado, dias, vencido));
+      const b = p.estadoPlan!(plan(dias, vencido));
+      expect(a.texto, `${dias} días, ${estado}`).toBe(b.texto);
+      expect(a.tono).toBe(b.tono);
+    }
+    expect(t.estadoMembresia!(tienda('activa', 30, false)).texto).toBe('Al día');
+    expect(t.estadoMembresia!(tienda('activa', 1, false)).texto).toBe('Vence mañana');
+    expect(t.estadoMembresia!(tienda('activa', -3, true)).texto).toBe('Vencida');
+    // El servidor marca `vencido` también al suspender: si aún quedan días, está suspendida, no vencida.
+    expect(t.estadoMembresia!(tienda('suspendida', 15, true)).texto).toBe('Suspendida');
+    expect(p.estadoPlan!(plan(15, true)).texto).toBe('Suspendida');
+
+    // Lo urgente sube: primero las capturas por revisar, luego vencidas, suspendidas y por vencer.
+    const conPago = { ...tienda('activa', 30, false), pagosPendientes: 2 };
+    expect(t.urgencia!(conPago)).toBeLessThan(t.urgencia!(tienda('activa', -1, true)));
+    expect(t.urgencia!(tienda('activa', -1, true))).toBeLessThan(t.urgencia!(tienda('suspendida', 10, true)));
+    expect(t.urgencia!(tienda('suspendida', 10, true))).toBeLessThan(t.urgencia!(tienda('activa', 3, false)));
+    expect(t.urgencia!(tienda('activa', 3, false))).toBeLessThan(t.urgencia!(tienda('activa', 30, false)));
+
+    // Los importes salen siempre con dos decimales en las dos pantallas.
+    expect(t.dinero!('S/', 49)).toBe('S/ 49.00');
+    expect(p.dinero!('S/', 1234.5)).toBe('S/ 1,234.50');
+  });
+
   it('acceso de soporte: la tienda lo concede desde /pagar, el maestro ve el enlace, el dueño entra como administrador y al quitarlo el enlace deja de valer', async () => {
     const sup = await superDe(maestro);
     const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Zapatería Lima', contacto: 'Rosa · 987 654 321', membresia: { plan: 'basico', vencimiento: '2026-10-18T23:59:59' } } });

@@ -78,8 +78,28 @@ const RETRYABLE_CODES = new Set([
   1, // error desconocido de la API
 ]);
 
+/**
+ * El mensaje que se esta citando al responder.
+ *
+ * Los tres proveedores lo piden de forma distinta: Meta con el id a secas
+ * (`context.message_id`), WAHA tambien (`reply_to`), y Baileys con la CLAVE
+ * entera del mensaje, que necesita saber si era nuestro y de que chat. Por eso
+ * aqui va todo lo que hace falta para armar cualquiera de las tres, y cada
+ * cliente coge lo suyo.
+ */
+export interface CitaSaliente {
+  /** El wamid del mensaje citado. */
+  id: string;
+  /** Si el citado lo mandamos nosotros: Baileys lo necesita para la clave. */
+  fromMe: boolean;
+  /** Un extracto del citado, para que Baileys arme la previa de la cita. */
+  texto?: string;
+  /** En un grupo, quien lo escribio (jid): sin esto la cita sale sin autor. */
+  participant?: string;
+}
+
 export interface WhatsAppClient {
-  sendText(to: string, body: string, previewUrl?: boolean): Promise<SendResult>;
+  sendText(to: string, body: string, previewUrl?: boolean, cita?: CitaSaliente): Promise<SendResult>;
   sendLocation(
     to: string,
     location: { latitude: number; longitude: number; name?: string; address?: string },
@@ -109,7 +129,39 @@ export interface WhatsAppClient {
     language: string,
     components?: TemplateComponent[],
   ): Promise<SendResult>;
-  markAsRead(messageId: string): Promise<void>;
+  /**
+   * Doble check azul en el telefono del cliente.
+   *
+   * `chat` es opcional porque la Cloud API se apana con el id, pero los
+   * clientes con sesion propia necesitan la clave entera del mensaje (de que
+   * chat es y si era nuestro): sin ella no marcan nada y callan el fallo.
+   */
+  markAsRead(messageId: string, chat?: { to: string; fromMe?: boolean; participant?: string }): Promise<void>;
+  /**
+   * Reacciona a un mensaje con un emoji. Cadena vacia = quitar la reaccion.
+   *
+   * Opcional porque no todos pueden: con WAHA depende del motor, y por eso la
+   * pantalla pregunta antes (ver `capacidadesDelChat` en el chat) en vez de
+   * ensenar un boton que falla.
+   */
+  sendReaction?(to: string, mensaje: CitaSaliente, emoji: string): Promise<SendResult>;
+  /**
+   * "Eliminar para todos". NO existe en la Cloud API de Meta: un mensaje
+   * enviado por ahi no se puede retirar, y fingir que si seria mentirle al
+   * operador. Solo lo implementa el cliente local.
+   */
+  borrarParaTodos?(to: string, mensaje: CitaSaliente): Promise<void>;
+  /**
+   * Cambiar el texto de un mensaje ya enviado. Tampoco existe en la Cloud
+   * API; en el cliente local es el `edit` de Baileys.
+   */
+  editarMensaje?(to: string, mensaje: CitaSaliente, texto: string): Promise<SendResult>;
+  /**
+   * Si el otro lado esta en linea o escribiendo, y cuando se le vio por
+   * ultima vez. Solo lo saben los clientes con sesion propia; `null` = no se
+   * sabe, que no es lo mismo que "esta desconectado".
+   */
+  presencia?(to: string): Promise<{ estado: 'escribiendo' | 'grabando' | 'en_linea' | 'desconectado'; desde: string } | null>;
   /**
    * Si ese numero tiene una cuenta de WhatsApp.
    *
@@ -179,6 +231,8 @@ export interface MediaSaliente {
   caption?: string;
   /** Audio como nota de voz (con la onda y el play), no como fichero. */
   voz?: boolean;
+  /** Si va como respuesta a otro mensaje. */
+  cita?: CitaSaliente;
 }
 
 export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClient {
@@ -254,9 +308,20 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     return { wamid };
   }
 
+  /** El bloque de cita de Meta: el id del mensaje al que se responde. */
+  const contexto = (cita?: CitaSaliente) => (cita ? { context: { message_id: cita.id } } : {});
+
   return {
-    sendText(to, body, previewUrl = true) {
-      return send({ to, type: 'text', text: { body, preview_url: previewUrl } });
+    sendText(to, body, previewUrl = true, cita) {
+      return send({ to, type: 'text', text: { body, preview_url: previewUrl }, ...contexto(cita) });
+    },
+
+    /**
+     * Reaccionar si se puede: es un tipo de mensaje mas de la Cloud API.
+     * Un emoji vacio la quita, tal como lo define Meta.
+     */
+    sendReaction(to, mensaje, emoji) {
+      return send({ to, type: 'reaction', reaction: { message_id: mensaje.id, emoji } });
     },
 
     sendLocation(to, location) {
@@ -295,7 +360,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
       const cuerpo: Record<string, unknown> = { id };
       if (media.caption && media.kind !== 'audio') cuerpo.caption = media.caption;
       if (media.kind === 'document' && media.filename) cuerpo.filename = media.filename;
-      return send({ to, type: media.kind, [media.kind]: cuerpo });
+      return send({ to, type: media.kind, [media.kind]: cuerpo, ...contexto(media.cita) });
     },
 
     sendButtons(to, body, buttons) {

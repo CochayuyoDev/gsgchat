@@ -2,188 +2,164 @@
  * Pantalla de ubicaciones para reparto.
  *
  * Es la pantalla de quien coordina el reparto por la manana: pega la lista
- * del dia, le da a empezar y mira dos cosas -cuantas ubicaciones van y que
- * casos necesitan a una persona-. Todo lo demas esta detras de esas dos.
+ * del dia, le da a empezar y mira dos cosas -cuanto va y que casos necesitan
+ * a una persona-. Todo lo demas esta detras de esas dos.
  *
  * Decisiones de la pantalla, por si alguien las cambia sin saber por que:
  *
- *  - Las tarjetas de arriba son filtros, no adornos. Cada una responde una
- *    pregunta de la operacion ("¿a quien no le llego el mensaje?") y al
- *    pulsarla la tabla se queda solo con eso.
+ *  - Un solo numero grande: "N de M con ubicacion". Es el unico dato que se
+ *    mira de lejos; el resto son filtros pequenos, no cifras que compitan.
+ *  - Los filtros de arriba son preguntas de la operacion ("¿a quien le falta
+ *    la ubicacion?"): al pulsar uno, la tabla se queda solo con eso. Los que
+ *    solo aparecen cuando hay problemas (numero mal, sin WhatsApp, para el
+ *    repartidor) se esconden si estan a cero: nada que hacer, nada que ver.
+ *  - Cada cosa se dice UNA vez: el chip dice el estado, la columna "Que pasa"
+ *    dice el detalle (por que, desde cuando), y ninguna repite a la otra.
  *  - No hay confirm() ni alert(): un dialogo del navegador congela la pagina
  *    entera, y esta se refresca sola cada diez segundos.
  *  - El detalle se abre al lado, no encima: quien corrige un telefono
  *    necesita seguir viendo la lista.
  *
+ * Los colores, las medidas y las clases comunes (.btn, .tarjeta, .chip,
+ * .vacio) las pone el armazon: aqui solo va lo propio del reparto.
+ *
  * El JS va en String.raw y con var, como el resto de paginas.
  */
 
 import { appShell } from './shell.js';
+import { REPARTO_CSS, REPARTO_JS } from './reparto-comun.js';
 
-const CSS = `
-  :root {
-    color-scheme: light dark;
-    --bg: #f0f2f5; --panel: #fff; --line: #e3e5e9; --text: #111b21;
-    --muted: #667781; --accent: #128c7e; --ok: #128c7e; --warn: #d97706;
-    --bad: #dc2626; --info: #2563eb; --chip: #f6f7f9;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b141a; --panel: #111b21; --line: #222d34; --text: #e9edef;
-      --muted: #8696a0; --chip: #1c262c;
-    }
-  }
+const CSS = `${REPARTO_CSS}
   * { box-sizing: border-box; }
-  .wrap { color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 1500px; }
-  .wrap a { color: var(--accent); }
-  .demo {
-    background: #d97706; color: #fff; padding: 9px 14px; font-size: 13.5px;
-    text-align: center; line-height: 1.35;
-  }
-  .demo a { color: #fff; text-decoration: underline; }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); }
+  .wrap a { color: var(--primario); }
 
-  .aviso {
-    background: rgba(217,119,6,.12); border: 1px solid rgba(217,119,6,.35);
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 14px;
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  /* Los dos avisos de arriba (demostración y WhatsApp sin conectar) hablan
+     igual: fondo ámbar suave y texto ámbar, que pasa AA en los dos modos. */
+  .demo, .aviso {
+    background: var(--ambar-suave); color: var(--ambar);
+    border: 1px solid var(--ambar-suave); border-radius: var(--radio-sm);
+    padding: 10px 14px; margin-bottom: var(--esp-3); font-size: var(--fs-small);
+    display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap;
   }
-  .aviso b { color: var(--warn); }
-  .aviso button { margin-left: auto; }
+  .demo { justify-content: center; text-align: center; }
+  .demo a, .aviso a { color: inherit; font-weight: 700; }
 
-  .barra {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 12px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    margin-bottom: 14px;
-  }
+  .barra { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; padding: var(--esp-3); margin-bottom: var(--esp-3); }
   .barra .sep { flex: 1; }
-  .barra .dato { font-size: 12.5px; color: var(--muted); }
+  .barra label { font-size: var(--fs-small); color: var(--texto-suave); }
 
-  select, input, textarea, button {
-    font: inherit; color: var(--text); background: var(--panel);
-    border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px;
+  .wrap select, .wrap input, .wrap textarea {
+    font: inherit; color: var(--texto); background: var(--superficie);
+    border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px;
   }
-  .sin-ubicacion { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; max-height: 260px; overflow: auto; }
-  .sin-ubicacion .cab { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--card); }
-  .sin-ubicacion label.uno { display: flex; gap: 10px; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
-  .sin-ubicacion label.uno:last-child { border-bottom: 0; }
-  .sin-ubicacion input[type=checkbox] { width: auto; flex: none; }
-  .sin-ubicacion .quien { flex: 1; min-width: 0; }
-  .sin-ubicacion .quien b { display: block; font-size: 13.5px; }
-  .sin-ubicacion .quien span { color: var(--muted); font-size: 12px; }
-  textarea { width: 100%; min-height: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
-  button { cursor: pointer; }
-  button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.primary:hover { filter: brightness(1.08); }
-  button.sm { padding: 5px 9px; font-size: 13px; }
-  button:disabled { opacity: .55; cursor: default; }
+  .wrap textarea { width: 100%; min-height: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 
-  /* Progreso del lote: cuánto queda, de un vistazo. */
-  .progreso { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-  /* OJO: nombre propio y no ".barra" a secas, que ya es la fila de controles
-     de arriba. Reutilizar ese nombre le ponia 10px de alto y la partia. */
-  .progreso-barra {
-    flex: 1; min-width: 200px; height: 10px; border-radius: 999px;
-    background: var(--chip); overflow: hidden;
-  }
-  .progreso-barra > span { display: block; height: 100%; background: var(--ok); transition: width .3s; }
-  .progreso .cifra { font-size: 13.5px; color: var(--muted); }
-  .progreso .cifra b { color: var(--text); font-size: 15px; }
-  /* El estado del motor, con su punto de color. */
-  .motor { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
-  .motor .punto { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
-  .motor.va .punto { background: var(--ok); animation: latido 1.6s ease-in-out infinite; }
-  .motor.espera .punto { background: var(--warn); }
-  .motor.parado .punto { background: var(--muted); }
+  /* Cuánto va y qué está haciendo el motor: la única cifra grande. */
+  .progreso { display: flex; align-items: center; gap: var(--esp-3); flex-wrap: wrap; margin-bottom: var(--esp-3); }
+  .cifra { border: 0; background: transparent; padding: 0; color: var(--texto-suave); font-size: var(--fs-small); text-align: left; cursor: pointer; }
+  .cifra b { color: var(--texto); font-size: 21px; font-weight: 700; }
+  .cifra:hover b { color: var(--primario); }
+  .progreso-barra { flex: 1; min-width: 180px; height: 8px; border-radius: 999px; background: var(--superficie-2); overflow: hidden; }
+  .progreso-barra > span { display: block; height: 100%; background: var(--verde); transition: width .3s; }
+  .motor { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-small); color: var(--texto-suave); }
+  .motor .punto { width: 9px; height: 9px; border-radius: 50%; background: var(--gris-claro); flex: none; }
+  .motor.va .punto { background: var(--verde); animation: latido 1.6s ease-in-out infinite; }
+  .motor.espera .punto { background: var(--ambar); }
   @keyframes latido { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+  .fallo { color: var(--rojo); font-size: var(--fs-small); }
 
-  .tarjetas { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-  .tarjeta {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 10px 14px; min-width: 132px; cursor: pointer; text-align: left;
+  /* Los filtros: preguntas de la operación, no adornos. */
+  .filtros { display: flex; gap: var(--esp-2); flex-wrap: wrap; margin-bottom: var(--esp-3); }
+  .filtro {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 13px;
+    border: 1px solid var(--borde); border-radius: 999px; background: var(--superficie);
+    color: var(--texto); font: inherit; font-size: 13.5px; cursor: pointer;
   }
-  .tarjeta:hover { border-color: var(--accent); }
-  .tarjeta.activa { border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
-  .tarjeta .n { font-size: 22px; font-weight: 700; line-height: 1.1; }
-  .tarjeta .q { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  .tarjeta.ok .n { color: var(--ok); }
-  .tarjeta.warn .n { color: var(--warn); }
-  .tarjeta.bad .n { color: var(--bad); }
+  .filtro:hover { border-color: var(--primario); }
+  .filtro .n { font-weight: 700; }
+  .filtro[aria-pressed="true"] { border-color: var(--primario); background: var(--primario-suave); color: var(--primario); font-weight: 600; }
+  .filtro.urge { border-color: var(--rojo); color: var(--rojo); }
+  .filtro.urge[aria-pressed="true"] { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
 
-  .cols { display: grid; grid-template-columns: 1fr 380px; gap: 14px; align-items: start; }
+  .cols { display: grid; grid-template-columns: 1fr 380px; gap: var(--esp-3); align-items: start; }
   @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
 
-  .caja { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .caja > h2 {
-    font-size: 14.5px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; gap: 8px;
+  /* Las cajas son la .tarjeta del armazón, pero con cabecera propia: el
+     relleno lo pone cada zona, no la tarjeta. */
+  .panel { padding: 0; overflow: hidden; }
+  .panel > h2 {
+    font-size: var(--fs-h3); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--borde);
+    display: flex; align-items: center; gap: var(--esp-2);
   }
-  .caja > h2 .sep { flex: 1; }
-  .caja .cuerpo { padding: 14px; }
+  .panel > h2 .sep { flex: 1; }
+  .panel .cuerpo { padding: var(--esp-4); }
+  .panel .vacio { border: 0; background: transparent; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-cuerpo); }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  th { font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .03em; color: var(--texto-suave); font-weight: 600; position: sticky; top: 0; background: var(--superficie); z-index: 1; }
   tbody tr { cursor: pointer; }
-  tbody tr:hover { background: var(--chip); }
-  tbody tr.activa { background: var(--chip); box-shadow: inset 3px 0 0 var(--accent); }
-  td .sub { color: var(--muted); font-size: 12.5px; }
+  tbody tr:hover { background: var(--superficie-2); }
+  tbody tr.activa { background: var(--primario-suave); box-shadow: inset 3px 0 0 var(--primario); }
+  td b { font-weight: 600; }
+  td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
   .tabla-scroll { max-height: 62vh; overflow: auto; }
 
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-  .pill.ok { background: rgba(18,140,126,.16); color: var(--ok); }
-  .pill.warn { background: rgba(217,119,6,.16); color: var(--warn); }
-  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
-  .pill.info { background: rgba(37,99,235,.14); color: var(--info); }
-  .pill.gris { background: var(--chip); color: var(--muted); }
-
-  .aj .aj-titulo { font-size: 14px; margin: 16px 0 4px; }
-  .aj .aj-frase { margin: 0; line-height: 2; font-size: 14.5px; }
-  .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; font-size: 14px; margin: 0 2px; }
-  .aj .paso { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 10px; background: var(--bg); }
-  .aj .paso h4 { margin: 0 0 6px; font-size: 14px; }
-  .aj .paso .cuando { color: var(--muted); font-size: 12.5px; margin: 0 0 8px; }
-  .aj .previa { background: #d9fdd3; color: #111b21; border-radius: 10px; padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
-  .aj .previa small { display: block; color: #667781; font-size: 11px; margin-top: 4px; text-align: right; }
-  .aj .paso textarea { width: 100%; margin-top: 8px; min-height: 64px; }
-  .aj .marcadores { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
-  .aj .marcadores code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; font-size: 12px; cursor: pointer; }
-  .aj .plantillas { margin-top: 8px; font-size: 13px; }
-  .aj .plantillas label { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
-  .aj .plantillas input { width: auto; }
-  @media (prefers-color-scheme: dark) { .aj .previa { background: #005c4b; color: #e9edef; } .aj .previa small { color: #a9bbb5; } }
-  .campo { margin-bottom: 10px; }
-  .campo label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .campo { margin-bottom: var(--esp-3); }
+  .campo label { display: block; font-size: var(--fs-small); color: var(--texto-suave); margin-bottom: 4px; }
   .campo input { width: 100%; }
-  .fila { display: flex; gap: 8px; flex-wrap: wrap; }
+  .fila { display: flex; gap: var(--esp-2); flex-wrap: wrap; align-items: center; }
   .fila > * { flex: 1; min-width: 120px; }
+  .fila > .fijo { flex: none; min-width: 0; }
 
   .bitacora { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-  .bitacora li { padding: 7px 0; border-bottom: 1px dashed var(--line); }
-  .bitacora .cuando { color: var(--muted); font-size: 11.5px; }
+  .bitacora li { padding: 7px 0; border-bottom: 1px dashed var(--borde); }
+  .bitacora .cuando { color: var(--texto-suave); font-size: var(--fs-small); }
 
-  .muted { color: var(--muted); }
-  .hidden { display: none !important; }
-  .vacio { padding: 30px 14px; text-align: center; color: var(--muted); font-size: 14px; }
-  .toast {
-    position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px; z-index: 60;
-    background: #111b21; color: #fff; padding: 10px 16px; border-radius: 10px;
-    font-size: 14px; max-width: 90vw; box-shadow: 0 6px 24px rgba(0,0,0,.3);
-  }
-  /* En el telefono, la cabecera de la tabla se apila en vez de apretarse:
-     el buscador y el boton de CSV quedaban cortados por la derecha. */
-  @media (max-width: 680px) {
-    .wrap { padding: 14px 12px 40px; }
-    .caja > h2 { flex-wrap: wrap; }
-    .caja > h2 input { max-width: none; flex: 1 1 100%; order: 3; }
-    .caja > h2 button { order: 4; }
-    .tarjeta { flex: 1 1 calc(50% - 10px); min-width: 0; }
-    .barra { gap: 8px; }
-  }
+  /* Los que ya escribieron y nunca mandaron el pin. */
+  .contactos { margin-top: var(--esp-2); border: 1px solid var(--borde); border-radius: var(--radio-sm); max-height: 260px; overflow: auto; }
+  .contactos .cab { display: flex; gap: var(--esp-2); align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--borde); position: sticky; top: 0; background: var(--superficie); font-size: var(--fs-small); }
+  .contactos label.uno { display: flex; gap: var(--esp-2); align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--borde); cursor: pointer; }
+  .contactos label.uno:last-child { border-bottom: 0; }
+  .contactos input[type=checkbox] { width: auto; flex: none; }
+  .contactos .quien { flex: 1; min-width: 0; }
+  .contactos .quien b { display: block; font-size: 13.5px; }
+  .contactos .quien span { color: var(--texto-suave); font-size: 12px; }
 
-  .resumen-carga { font-size: 13.5px; }
+  .resumen-carga { font-size: var(--fs-cuerpo); margin-top: var(--esp-3); }
   .resumen-carga b { font-size: 16px; }
-  .resumen-carga .linea { padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .resumen-carga .linea { padding: 4px 0; border-bottom: 1px dashed var(--borde); }
+
+  /* Ajustes: frases con huecos, no un formulario de casillas sueltas. */
+  .aj .aj-titulo { font-size: var(--fs-h3); margin: 18px 0 4px; }
+  .aj .aj-frase { margin: 0; line-height: 2.1; font-size: var(--fs-cuerpo); }
+  .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
+  .aj .paso { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-2); background: var(--superficie-2); }
+  .aj .paso h4 { margin: 0 0 6px; font-size: var(--fs-h3); }
+  .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
+  .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
+  .aj .previa small { display: block; color: var(--texto-suave); font-size: 11px; margin-top: 4px; text-align: right; }
+  .aj .paso textarea { margin-top: 8px; min-height: 64px; }
+  .aj .marcadores { font-size: var(--fs-small); color: var(--texto-suave); margin: 6px 0 0; }
+  .aj .marcadores code { background: var(--superficie); border: 1px solid var(--borde); border-radius: 5px; padding: 1px 5px; font-size: 12px; cursor: pointer; }
+  .aj .plantillas { margin-top: var(--esp-2); font-size: 13px; }
+  .aj .plantillas label { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+  .aj .plantillas input { width: auto; }
+
+  /* De pie y con una mano: la tabla deja de ser tabla y cada cliente es una
+     ficha que se lee de arriba abajo. */
+  @media (max-width: 680px) {
+    .panel > h2 { flex-wrap: wrap; }
+    .panel > h2 input { max-width: none; flex: 1 1 100%; order: 3; }
+    .panel > h2 .btn { order: 4; }
+    .tabla-scroll { max-height: none; }
+    thead { display: none; }
+    tbody tr { display: block; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
+    tbody tr.activa { box-shadow: inset 3px 0 0 var(--primario); }
+    tbody td { display: block; border: 0; padding: 1px 0; }
+    tbody td:empty { display: none; }
+  }
 `;
 
 export interface RutasOpts {
@@ -203,28 +179,27 @@ export function rutasPage(opts: RutasOpts): string {
   const aviso = configured
     ? ''
     : `<div class="aviso">Todavía no conectaste tu WhatsApp: puedes cargar la lista y revisarla, pero no saldrá ningún mensaje.
-         <a class="link" href="/setup">Conectar ahora</a></div>`;
+         <a href="/setup">Conectar ahora</a></div>`;
 
   const contenido = `
 <div class="wrap">
+  ${bandaDemo}
   ${aviso}
-  <div id="alerta" class="aviso hidden"></div>
 
-  <div class="barra">
-    <label for="lote" class="dato">Lote</label>
-    <select id="lote"></select>
-    <button class="primary sm" id="arrancar">Empezar a pedir</button>
-    <button class="sm" id="pausar">Pausar</button>
+  <div class="tarjeta barra">
+    <label for="lote">Lote</label>
+    <select id="lote" aria-label="Elegir el lote que se mira"></select>
+    <button type="button" class="btn primario sm" id="arrancar">Empezar a pedir</button>
+    <button type="button" class="btn sm" id="pausar">Pausar</button>
     <span class="sep"></span>
-    <span class="dato" id="ritmo"></span>
-    <button class="sm" id="abrir-ajustes">Ajustes</button>
-    <button class="sm" id="nuevo">Cargar lista nueva</button>
+    <button type="button" class="btn sm" id="abrir-ajustes">Ajustes</button>
+    <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
   </div>
 
-  <!-- Ajustes del reparto: pausas, espera, intentos, horario y que se dice en cada paso -->
-  <div class="caja hidden" id="ajustes" style="margin-bottom:14px">
+  <!-- Ajustes del reparto: horario, espera, intentos, ritmo y qué se dice en cada paso -->
+  <div class="tarjeta panel hidden" id="ajustes" style="margin-bottom:var(--esp-3)">
     <h2>Ajustes del reparto <span class="sep"></span>
-      <button class="sm" id="cerrar-ajustes">Cerrar</button>
+      <button type="button" class="btn sm" id="cerrar-ajustes">Cerrar</button>
     </h2>
     <div class="cuerpo aj">
       <p class="muted" style="margin-top:0">
@@ -233,41 +208,41 @@ export function rutasPage(opts: RutasOpts): string {
       </p>
 
       <h3 class="aj-titulo">¿A qué horas se escribe?</h3>
-      <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num">:00.
+      <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00.
         Fuera de ese horario, los mensajes esperan al día siguiente.</p>
 
       <h3 class="aj-titulo">¿Cómo se insiste si no contesta?</h3>
-      <p class="aj-frase">Si el cliente no responde, se le vuelve a escribir a los <input id="aj-espera" type="number" min="1" class="aj-num">
-        minutos. Como máximo <input id="aj-intentos" type="number" min="1" max="10" class="aj-num"> mensajes por cliente;
+      <p class="aj-frase">Si el cliente no responde, se le vuelve a escribir a los <input id="aj-espera" type="number" min="1" class="aj-num" aria-label="Minutos de espera">
+        minutos. Como máximo <input id="aj-intentos" type="number" min="1" max="10" class="aj-num" aria-label="Mensajes como máximo"> mensajes por cliente;
         si sigue sin mandar su ubicación, pasa al repartidor para que lo llame.</p>
 
       <h3 class="aj-titulo">¿A qué ritmo?</h3>
-      <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num">
-        y <input id="aj-pausa-max" type="number" min="1" class="aj-num"> segundos, para parecer una persona y cuidar el número.</p>
+      <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num" aria-label="Pausa mínima en segundos">
+        y <input id="aj-pausa-max" type="number" min="1" class="aj-num" aria-label="Pausa máxima en segundos"> segundos, para parecer una persona y cuidar el número.</p>
 
       <h3 class="aj-titulo">¿Qué se le dice?</h3>
       <p class="muted" style="margin-top:0">Tres momentos: el primer mensaje, el recordatorio si no contestó, y la insistencia si contestó pero sin ubicación.
         Debajo de cada uno ves cómo le llegaría a un cliente de ejemplo. Si no escribes nada, se usan los textos de siempre.</p>
       <div id="aj-pasos"></div>
 
-      <div class="fila" style="margin-top:14px">
-        <button class="primary" id="aj-guardar">Guardar</button>
-        <button id="aj-reset">Volver a lo de siempre</button>
-        <span class="dato" id="aj-estado"></span>
+      <div class="fila" style="margin-top:var(--esp-4)">
+        <button type="button" class="btn primario fijo" id="aj-guardar">Guardar</button>
+        <button type="button" class="btn fijo" id="aj-reset">Volver a lo de siempre</button>
+        <span class="muted" id="aj-estado" role="status"></span>
       </div>
     </div>
   </div>
 
   <!-- Cargar un lote: se abre aqui mismo, sin dialogos que bloqueen -->
-  <div class="caja hidden" id="carga" style="margin-bottom:14px">
+  <div class="tarjeta panel hidden" id="carga" style="margin-bottom:var(--esp-3)">
     <h2>Cargar la lista del día <span class="sep"></span>
-      <button class="sm" id="cerrar-carga">Cerrar</button>
+      <button type="button" class="btn sm" id="cerrar-carga">Cerrar</button>
     </h2>
     <div class="cuerpo">
       <p class="muted" style="margin-top:0">
         Pega la tabla tal como la tengas (Excel, CSV o una lista de números). Se entienden las
         columnas <b>teléfono</b>, <b>nombre</b>, <b>pedido</b>, <b>dirección</b> y <b>distrito</b>,
-        en cualquier orden. Antes de crear nada se te dice qué entendió.
+        en cualquier orden. En cuanto pegues se te dice qué entendió.
       </p>
       <div class="campo">
         <label for="nombre-lote">Nombre del lote</label>
@@ -277,54 +252,55 @@ export function rutasPage(opts: RutasOpts): string {
       <!-- Los que ya te escribieron y nunca mandaron el pin: no hay que
            pegarlos de ninguna parte, ya estan en el sistema. -->
       <div class="campo">
-        <div class="fila" style="align-items:center">
-          <button class="sm" id="traer-sin-ubicacion">Traer a los que no mandaron su ubicación</button>
-          <span class="dato" id="sin-ubicacion-cuenta"></span>
+        <div class="fila">
+          <button type="button" class="btn sm fijo" id="traer-sin-ubicacion">Traer a los que no mandaron su ubicación</button>
+          <span class="muted fijo" id="sin-ubicacion-cuenta"></span>
         </div>
-        <div id="sin-ubicacion" class="sin-ubicacion hidden"></div>
+        <div id="sin-ubicacion" class="contactos hidden"></div>
       </div>
+
+      <label class="muted" for="pegado">O pega aquí la lista</label>
       <textarea id="pegado" placeholder="teléfono;nombre;pedido&#10;987654321;Ana Ruiz;P-1024&#10;912345678;Luis Paz;P-1025"></textarea>
-      <div class="fila" style="margin-top:10px">
-        <button id="revisar">Revisar la lista</button>
-        <button class="primary" id="crear" disabled>Crear el lote</button>
-        <label class="dato" style="display:flex;align-items:center;gap:6px;flex:none">
+      <div id="resumen-carga" class="resumen-carga" role="status"></div>
+      <div class="fila" style="margin-top:var(--esp-3)">
+        <button type="button" class="btn primario fijo" id="crear" disabled>Crear el lote</button>
+        <label class="muted fijo" style="display:flex;align-items:center;gap:6px">
           <input type="checkbox" id="arrancar-ya" checked style="width:auto"> empezar a pedir en cuanto se cree
         </label>
       </div>
-      <div id="resumen-carga" class="resumen-carga" style="margin-top:12px"></div>
     </div>
   </div>
 
-  <div class="progreso" id="progreso"></div>
-  <div class="tarjetas" id="tarjetas"></div>
+  <div class="progreso" id="progreso" role="status"></div>
+  <div class="filtros" id="filtros"></div>
 
   <div class="cols">
-    <div class="caja">
+    <div class="tarjeta panel">
       <h2>
         <span id="titulo-lista">Clientes</span>
         <span class="sep"></span>
-        <input id="buscar" placeholder="Buscar cliente o pedido" style="max-width:230px">
-        <button class="sm" id="csv">Descargar CSV</button>
+        <input id="buscar" placeholder="Buscar cliente o pedido" aria-label="Buscar cliente o pedido" style="max-width:230px">
+        <button type="button" class="btn sm" id="csv">Descargar CSV</button>
       </h2>
       <div class="tabla-scroll">
         <table>
           <thead><tr>
-            <th>Cliente</th><th>Pedido</th><th>Estado</th><th>Intentos</th><th>Qué pasa</th>
+            <th>Cliente</th><th>Pedido</th><th>Estado</th><th>Qué pasa</th>
           </tr></thead>
           <tbody id="filas"></tbody>
         </table>
       </div>
-      <div class="vacio hidden" id="lista-vacia"></div>
+      <div id="lista-vacia"></div>
     </div>
 
     <div>
-      <div class="caja" id="detalle">
-        <h2>Detalle <span class="sep"></span><button class="sm hidden" id="cerrar-detalle">Cerrar</button></h2>
-        <div class="cuerpo" id="detalle-cuerpo">
-          <!-- Dos zonas a proposito: 'info' se repinta con cada refresco y
-               'acciones' NO se toca mientras siga abierto el mismo cliente.
-               Reconstruir un <input> mientras alguien escribe en el es la
-               forma mas facil de borrarle lo que estaba corrigiendo. -->
+      <div class="tarjeta panel" id="detalle">
+        <h2>Detalle <span class="sep"></span><button type="button" class="btn sm hidden" id="cerrar-detalle">Cerrar</button></h2>
+        <div class="cuerpo">
+          <!-- Tres zonas a proposito: 'info' e 'historial' se repintan con cada
+               refresco y 'acciones' NO se toca mientras siga abierto el mismo
+               cliente. Reconstruir un <input> mientras alguien escribe en el es
+               la forma mas facil de borrarle lo que estaba corrigiendo. -->
           <div id="detalle-info">
             <p class="muted" style="margin:0">Elige un cliente de la lista para ver su historial y arreglar lo que haga falta.</p>
           </div>
@@ -333,10 +309,10 @@ export function rutasPage(opts: RutasOpts): string {
         </div>
       </div>
 
-      <div class="caja" style="margin-top:14px">
+      <div class="tarjeta panel" style="margin-top:var(--esp-3)">
         <h2>Enviar a GSG</h2>
         <div class="cuerpo" id="gsg">
-          <p class="muted" style="margin:0">Cargando...</p>
+          <p class="muted" style="margin:0">Cargando…</p>
         </div>
       </div>
     </div>
@@ -345,124 +321,88 @@ export function rutasPage(opts: RutasOpts): string {
 `;
 
   const script = String.raw`
-/* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
-async function api(path, options) {
-  options = options || {};
-    var res = await fetch(path, {
-    method: options.method || 'GET',
-    cache: 'no-store',
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-  var data = await res.json().catch(function () { return {}; });
-  if (res.status === 401) { irAlLogin(); throw new Error('Tu sesión terminó: vuelve a entrar.'); }
-  if (!res.ok) throw new Error(data.error || errorHttp(res.status));
-  return data;
-}
-function esc(v) {
-  return String(v === null || v === undefined ? '' : v)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-function ver(id, visible) {
-  var el = document.getElementById(id);
-  if (el) el.classList.toggle('hidden', !visible);
-}
-function toast(texto) {
-  var el = document.createElement('div');
-  el.className = 'toast';
-  el.textContent = texto;
-  document.body.appendChild(el);
-  setTimeout(function () { el.remove(); }, 4500);
-}
-function cuando(iso) {
-  if (!iso) return '';
-  var d = new Date(iso);
-  var hoy = new Date();
-  var mismaFecha = d.toDateString() === hoy.toDateString();
-  var hora = d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
-  return mismaFecha ? hora : d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' }) + ' ' + hora;
-}
+${REPARTO_JS}
 
 /* --- estado de la pantalla ------------------------------------------- */
 var resumen = null;      /* lo que devuelve /admin/rutas */
 var loteActual = '';
 var vista = 'todos';
 var seleccionada = null; /* id de la solicitud abierta en el detalle */
+var detalleId = null;    /* que cliente esta pintado en la zona de acciones */
+var peticionDetalle = 0; /* numero de la ultima peticion de detalle lanzada */
 var catalogo = {};       /* incidencias: codigo -> ficha */
 var nombresVista = {};
+var cifrasVista = {};
+var ajustesCache = null;
+var sinUbicacion = [];   /* contactos traidos, para el lote nuevo */
+var listasPegadas = 0;   /* filas utiles que dijo la ultima revision de lo pegado */
 
-/* Las tarjetas, en el orden en que se miran por la manana. */
-var TARJETAS = [
-  { vista: 'resueltos', clase: 'ok' },
-  { vista: 'sin_ubicacion', clase: 'warn' },
-  { vista: 'esperando', clase: '' },
-  { vista: 'respondieron', clase: 'warn' },
-  { vista: 'pendientes', clase: '' },
-  { vista: 'sin_whatsapp', clase: 'bad' },
-  { vista: 'numero_malo', clase: 'bad' },
-  { vista: 'derivados', clase: 'warn' },
-  { vista: 'todos', clase: '' }
+/**
+ * Los filtros, en el orden en que se miran por la manana.
+ *
+ * Los nombres los pone el servidor (NOMBRES_VISTA): una sola forma de llamar
+ * a cada cosa en toda la aplicacion. Los marcados "soloSiHay" son problemas:
+ * si estan a cero no hay nada que hacer con ellos, asi que no ocupan sitio.
+ */
+var FILTROS = [
+  { vista: 'requieren_persona', clase: 'urge' },
+  { vista: 'sin_ubicacion' },
+  { vista: 'pendientes' },
+  { vista: 'esperando' },
+  { vista: 'respondieron' },
+  { vista: 'numero_malo', soloSiHay: true },
+  { vista: 'sin_whatsapp', soloSiHay: true },
+  { vista: 'derivados', soloSiHay: true },
+  { vista: 'todos' }
 ];
 
+/* El estado de un cliente, en una palabra y con el tono de siempre. */
 var ESTADOS = {
-  pendiente:   { texto: 'Sin escribir', clase: 'gris' },
-  enviado:     { texto: 'Esperando respuesta', clase: 'info' },
-  respondio:   { texto: 'Contestó sin ubicación', clase: 'warn' },
-  resuelto:    { texto: 'Ubicación recibida', clase: 'ok' },
-  supervision: { texto: 'Necesita revisión', clase: 'warn' },
-  derivado:    { texto: 'Para el repartidor', clase: 'warn' },
-  incidencia:  { texto: 'No se puede escribir', clase: 'bad' },
-  cancelado:   { texto: 'Cancelado', clase: 'gris' }
+  pendiente:   { texto: 'Sin escribir', tono: 'gris' },
+  enviado:     { texto: 'Esperando respuesta', tono: 'azul' },
+  respondio:   { texto: 'Contestó sin ubicación', tono: 'ambar' },
+  resuelto:    { texto: 'Ubicación recibida', tono: 'verde' },
+  supervision: { texto: 'Necesita revisión', tono: 'ambar' },
+  derivado:    { texto: 'Para el repartidor', tono: 'ambar' },
+  incidencia:  { texto: 'No se puede escribir', tono: 'rojo' },
+  cancelado:   { texto: 'Cancelado', tono: 'gris' }
 };
 
-function pillEstado(estado) {
-  var e = ESTADOS[estado] || { texto: estado, clase: 'gris' };
-  return '<span class="pill ' + e.clase + '">' + esc(e.texto) + '</span>';
+function chipEstado(estado) {
+  var e = ESTADOS[estado] || { texto: String(estado || '').replace(/_/g, ' '), tono: 'gris' };
+  return '<span class="chip tono-' + e.tono + '">' + esc(e.texto) + '</span>';
 }
 
-/* --- carga ------------------------------------------------------------ */
+/* --- el resumen de arriba --------------------------------------------- */
 
 async function cargarResumen() {
   resumen = await api('/admin/rutas');
   catalogo = resumen.catalogo || {};
 
-  var select = document.getElementById('lote');
-  var opciones = '<option value="">Todos los lotes</option>' + resumen.lotes.map(function (l) {
-    return '<option value="' + esc(l.id) + '">' + esc(l.nombre) + ' (' + l.total + ')' +
-      (l.estado === 'enviando' ? ' - en marcha' : l.estado === 'pausado' ? ' - pausado' : l.estado === 'terminado' ? ' - terminado' : '') +
-      '</option>';
-  }).join('');
-  if (select.innerHTML !== opciones) {
-    select.innerHTML = opciones;
-    select.value = loteActual;
-  }
-
-  var m = resumen.motor;
-  document.getElementById('ritmo').textContent =
-    'Un mensaje cada ' + m.pausa[0] + '-' + m.pausa[1] + ' s, de ' + m.horario[0] + ':00 a ' +
-    m.horario[1] + ':00, hasta ' + m.maxIntentos + ' intentos por cliente.';
-
+  pintarLotes(resumen.lotes);
   pintarProgreso(resumen);
+  pintarBotonesDeMarcha();
+  pintarGsg(resumen);
+}
 
-  var enMarcha = resumen.lotes.some(function (l) { return l.estado === 'enviando'; });
-  document.getElementById('arrancar').disabled = !loteActual && !resumen.lotes.length;
-  document.getElementById('pausar').disabled = !enMarcha;
+function loteDe(id) {
+  var encontrados = resumen ? resumen.lotes.filter(function (l) { return l.id === id; }) : [];
+  return encontrados[0] || null;
+}
 
-  var alerta = document.getElementById('alerta');
-  if (resumen.alertas.requierenPersona) {
-    alerta.innerHTML = '<b>' + resumen.alertas.requierenPersona + '</b> ' +
-      (resumen.alertas.requierenPersona === 1 ? 'caso necesita' : 'casos necesitan') +
-      ' que lo vea una persona: números mal escritos, clientes que contestaron otra cosa ' +
-      'o que hay que llamar. <button class="sm" id="ir-alerta">Verlos</button>';
-    alerta.classList.remove('hidden');
-    document.getElementById('ir-alerta').onclick = function () { cambiarVista('requieren_persona'); };
-  } else {
-    alerta.classList.add('hidden');
-  }
-
-  pintarGsg(resumen.gsg);
+function pintarLotes(lotes) {
+  var select = document.getElementById('lote');
+  /* Se repinta cada diez segundos con las cifras al dia: si estuviera
+     desplegado, reconstruirlo lo cerraria en la cara de quien lo mira. */
+  if (document.activeElement === select) return;
+  var etiquetas = { enviando: ' — en marcha', pausado: ' — pausado', terminado: ' — terminado' };
+  var opciones = '<option value="">Todos los lotes</option>' + lotes.map(function (l) {
+    return '<option value="' + esc(l.id) + '">' + esc(l.nombre) + ' (' + l.total + ')' + (etiquetas[l.estado] || '') + '</option>';
+  }).join('');
+  if (select.innerHTML !== opciones) select.innerHTML = opciones;
+  /* Si el lote elegido ya no existe (se borro), se vuelve a "todos". */
+  if (loteActual && !loteDe(loteActual)) loteActual = '';
+  select.value = loteActual;
 }
 
 /**
@@ -472,73 +412,87 @@ async function cargarResumen() {
  * no sale ningún mensaje y la pantalla no da ninguna pista de por qué.
  */
 function pintarProgreso(datos) {
-  var lote = loteActual
-    ? datos.lotes.filter(function (l) { return l.id === loteActual; })[0]
-    : null;
-
+  var lote = loteDe(loteActual);
   var cifras = lote ? lote.cifras : datos.cifras;
   var total = lote ? lote.total : Object.keys(cifras).reduce(function (suma, k) { return suma + cifras[k]; }, 0);
   var hechos = cifras.resuelto || 0;
   var porcentaje = total ? Math.round((hechos / total) * 100) : 0;
 
-  var m = datos.motor;
-  var estado, clase;
-  var salud = m.salud;
-  if (!m.trabajando) { estado = 'En pausa: ningún lote en marcha'; clase = 'parado'; }
-  else if (salud && salud.factor <= 0) {
-    // El monitor de salud manda sobre el motor: parado es parado, y hay que decir por qué.
-    estado = 'Parado por la salud del número (' + salud.nivel + ')' +
-      (salud.pausadaHasta ? ', vuelve a las ' + new Date(salud.pausadaHasta).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '') +
-      (salud.motivos && salud.motivos.length ? ': ' + salud.motivos[0] : '');
-    clase = 'espera';
-  }
-  else if (!m.enHorario) {
-    estado = 'Esperando al horario de envío (' + m.horario[0] + ':00 a ' + m.horario[1] + ':00)';
-    clase = 'espera';
-  } else {
-    var factor = salud ? salud.factor : 1;
-    estado = 'Enviando, uno cada ' + Math.round(m.pausa[0] / factor) + '-' + Math.round(m.pausa[1] / factor) + ' segundos' +
-      (factor < 1 ? ' (salud en ' + salud.nivel + ': al ' + Math.round(factor * 100) + ' %)' : '');
-    clase = 'va';
-  }
-
-  var avisos = datos.alertas.coordinador
-    ? 'Al coordinador se le avisa por WhatsApp de los casos parados.'
-    : 'Nadie recibe avisos por WhatsApp (RUTAS_SUPERVISOR está vacío).';
-
   document.getElementById('progreso').innerHTML =
-    '<span class="cifra"><b>' + hechos + '</b> de ' + total + ' con ubicación</span>' +
+    '<button type="button" class="cifra" data-vista="resueltos" title="Ver a quiénes ya les llegó la ubicación">' +
+      '<b>' + hechos + '</b> de ' + total + ' con ubicación</button>' +
     '<span class="progreso-barra"><span style="width:' + porcentaje + '%"></span></span>' +
-    '<span class="motor ' + clase + '"><span class="punto"></span>' + esc(estado) + '</span>' +
-    '<span class="cifra" title="' + esc(avisos) + '">' +
-      (datos.alertas.coordinador ? '🔔 avisos activos' : '🔕 sin avisos') +
-      ' · resumen a GSG cada ' + datos.alertas.resumenCadaMin + ' min</span>';
+    estadoDelMotor(datos.motor) +
+    (datos.alertas.coordinador ? '' : '<span class="muted">Nadie recibe avisos por WhatsApp de los casos parados.</span>') +
+    '<span class="fallo" id="fallo-refresco"></span>';
 }
 
-function pintarGsg(gsg) {
-  var caja = document.getElementById('gsg');
-  var pendientes = gsg.cola.pendiente || 0;
-  caja.innerHTML =
+/* Una sola frase que explica por qué salen o no salen mensajes ahora mismo. */
+function estadoDelMotor(m) {
+  var salud = m.salud;
+  var clase = 'parado';
+  var frase = 'En pausa: ningún lote en marcha';
+  if (m.trabajando && salud && salud.factor <= 0) {
+    // El monitor de salud manda sobre el motor: parado es parado, y hay que decir por qué.
+    clase = 'espera';
+    frase = 'Parado por la salud del número (' + salud.nivel + ')' +
+      (salud.pausadaHasta ? ', vuelve a las ' + hora(salud.pausadaHasta) : '') +
+      (salud.motivos && salud.motivos.length ? ': ' + salud.motivos[0] : '');
+  } else if (m.trabajando && !m.enHorario) {
+    clase = 'espera';
+    frase = 'Esperando al horario de envío (' + m.horario[0] + ':00 a ' + m.horario[1] + ':00)';
+  } else if (m.trabajando) {
+    var factor = salud ? salud.factor : 1;
+    clase = 'va';
+    frase = 'Enviando, uno cada ' + Math.round(m.pausa[0] / factor) + '-' + Math.round(m.pausa[1] / factor) + ' segundos' +
+      (factor < 1 ? ' (salud en ' + salud.nivel + ': al ' + Math.round(factor * 100) + ' %)' : '');
+  }
+  return '<span class="motor ' + clase + '"><span class="punto"></span>' + esc(frase) + '</span>';
+}
+
+/* Empezar y pausar dicen la verdad: solo se puede lo que se puede. */
+function pintarBotonesDeMarcha() {
+  var lote = loteDe(loteActual);
+  var arrancables = resumen.lotes.filter(function (l) { return l.estado !== 'enviando' && l.estado !== 'terminado'; });
+  var enMarcha = resumen.lotes.filter(function (l) { return l.estado === 'enviando'; });
+
+  var arrancar = document.getElementById('arrancar');
+  var pausar = document.getElementById('pausar');
+  arrancar.disabled = lote ? (lote.estado === 'enviando' || lote.estado === 'terminado') : !arrancables.length;
+  arrancar.title = arrancar.disabled ? 'No hay ningún lote que empezar' : '';
+  pausar.disabled = lote ? lote.estado !== 'enviando' : !enMarcha.length;
+  pausar.title = pausar.disabled ? 'No hay ningún lote en marcha' : '';
+  document.getElementById('csv').disabled = !loteActual;
+  document.getElementById('csv').title = loteActual ? '' : 'Elige un lote para descargar su resultado';
+}
+
+function pintarGsg(datos) {
+  var gsg = datos.gsg;
+  var html =
     '<p style="margin:0 0 8px">' +
-      (gsg.conectado
-        ? '<span class="pill ok">conectado</span>'
-        : '<span class="pill warn">sin conectar</span>') +
+      (gsg.conectado ? '<span class="chip tono-verde">conectado</span>' : '<span class="chip tono-ambar">sin conectar</span>') +
       ' <span class="muted">' + esc(gsg.descripcion) + '</span></p>' +
     '<p class="muted" style="margin:0 0 10px;font-size:13px">' +
       'Cada ubicación conseguida y cada incidencia se guarda lista para GSG. ' +
       (gsg.conectado
-        ? 'Se envían solas cada minuto.'
+        ? 'Se envían solas cada minuto, con un resumen del lote cada ' + datos.alertas.resumenCadaMin + ' min.'
         : 'Mientras no exista la API se acumulan aquí, y saldrán todas el día que se conecte.') +
     '</p>' +
     '<div class="fila">' +
-      '<div><b>' + pendientes + '</b><div class="muted" style="font-size:12.5px">en cola</div></div>' +
+      '<div><b>' + (gsg.cola.pendiente || 0) + '</b><div class="muted" style="font-size:12.5px">en cola</div></div>' +
       '<div><b>' + (gsg.cola.enviado || 0) + '</b><div class="muted" style="font-size:12.5px">enviados</div></div>' +
       '<div><b>' + (gsg.cola.fallido || 0) + '</b><div class="muted" style="font-size:12.5px">fallidos</div></div>' +
     '</div>' +
     '<div class="fila" style="margin-top:10px">' +
-      '<button class="sm" id="gsg-descargar">Descargar la cola</button>' +
-      '<button class="sm" id="gsg-enviar"' + (gsg.conectado ? '' : ' disabled') + '>Enviar ahora</button>' +
+      '<button type="button" class="btn sm" id="gsg-descargar">Descargar la cola</button>' +
+      '<button type="button" class="btn sm" id="gsg-enviar"' + (gsg.conectado ? '' : ' disabled') + '>Enviar ahora</button>' +
     '</div>';
+
+  var caja = document.getElementById('gsg');
+  /* Se repinta cada diez segundos: si no ha cambiado nada, no se toca (si no,
+     se pierde el foco de quien iba a pulsar "Enviar ahora"). */
+  if (caja.innerHTML === html) return;
+  caja.innerHTML = html;
 
   document.getElementById('gsg-descargar').onclick = function () {
     descargar('/admin/rutas/cola.ndjson', 'reportes-gsg.ndjson');
@@ -547,20 +501,25 @@ function pintarGsg(gsg) {
     try {
       var r = await api('/admin/rutas/cola/despachar', { method: 'POST' });
       toast('Enviados ' + r.enviados + ' de ' + r.intentados + '.');
-      cargarResumen();
+      await refrescar();
     } catch (error) { toast(error.message); }
   };
 }
 
-async function cargarTarjetas() {
+/* --- filtros y lista --------------------------------------------------- */
+
+async function cargarFiltros() {
   var data = await api('/admin/rutas/vistas' + (loteActual ? '?loteId=' + encodeURIComponent(loteActual) : ''));
   nombresVista = data.nombres;
-  var html = TARJETAS.map(function (t) {
-    var n = data.cifras[t.vista] || 0;
-    return '<button class="tarjeta ' + t.clase + (vista === t.vista ? ' activa' : '') + '" data-vista="' + t.vista + '">' +
-      '<div class="n">' + n + '</div><div class="q">' + esc(data.nombres[t.vista] || t.vista) + '</div></button>';
+  cifrasVista = data.cifras;
+  var html = FILTROS.map(function (f) {
+    var n = cifrasVista[f.vista] || 0;
+    var activo = vista === f.vista;
+    if (f.soloSiHay && !n && !activo) return '';
+    return '<button type="button" class="filtro ' + (f.clase || '') + '" data-vista="' + f.vista + '" aria-pressed="' + (activo ? 'true' : 'false') + '">' +
+      esc(nombresVista[f.vista] || f.vista) + ' <span class="n">' + n + '</span></button>';
   }).join('');
-  var caja = document.getElementById('tarjetas');
+  var caja = document.getElementById('filtros');
   if (caja.innerHTML !== html) caja.innerHTML = html;
 }
 
@@ -574,46 +533,71 @@ async function cargarLista() {
   document.getElementById('titulo-lista').textContent =
     (nombresVista[vista] || 'Clientes') + ' (' + data.total + ')';
 
-  var filas = data.items.map(function (s) {
-    return '<tr data-id="' + s.id + '"' + (seleccionada === s.id ? ' class="activa"' : '') + '>' +
+  var maxIntentos = resumen ? resumen.motor.maxIntentos : 0;
+  document.getElementById('filas').innerHTML = data.items.map(function (s) {
+    return '<tr data-id="' + s.id + '" tabindex="0"' + (seleccionada === s.id ? ' class="activa"' : '') + '>' +
       '<td><b>' + esc(s.nombre || 'Sin nombre') + '</b>' +
         '<div class="sub">' + esc(s.phone || s.telefonoCrudo) + '</div></td>' +
       '<td>' + esc(s.referencia || '') +
         (s.distrito ? '<div class="sub">' + esc(s.distrito) + '</div>' : '') + '</td>' +
-      '<td>' + pillEstado(s.estado) +
-        (s.requiereHumano ? ' <span class="pill warn">persona</span>' : '') + '</td>' +
-      '<td>' + s.intentos + '<div class="sub">' + esc(cuando(s.ultimoEnvioAt)) + '</div></td>' +
-      '<td>' + esc(queLePasa(s)) + '</td>' +
+      '<td>' + chipEstado(s.estado) +
+        (s.requiereHumano ? ' <span class="chip tono-rojo">persona</span>' : '') + '</td>' +
+      '<td>' + esc(queLePasa(s)) +
+        (intentosDe(s, maxIntentos) ? '<div class="sub">' + esc(intentosDe(s, maxIntentos)) + '</div>' : '') + '</td>' +
     '</tr>';
   }).join('');
 
-  var cuerpo = document.getElementById('filas');
-  if (cuerpo.innerHTML !== filas) cuerpo.innerHTML = filas;
-
-  var vacia = document.getElementById('lista-vacia');
-  vacia.textContent = data.items.length ? '' : (q
-    ? 'Nada coincide con "' + q + '".'
-    : 'No hay clientes en esta vista.');
-  vacia.classList.toggle('hidden', data.items.length > 0);
+  pintarListaVacia(data.items.length, q);
 }
 
-/* La columna que de verdad se lee: por que ese cliente esta ahi. */
+/* El hueco cuando no hay nada: siempre dice qué hacer a continuación. */
+function pintarListaVacia(cuantos, q) {
+  var caja = document.getElementById('lista-vacia');
+  if (cuantos) { caja.innerHTML = ''; return; }
+  if (q) {
+    caja.innerHTML = '<div class="vacio"><h3>Nada coincide con «' + esc(q) + '»</h3>' +
+      '<p>Prueba con el número, con parte del nombre o con el pedido.</p></div>';
+    return;
+  }
+  if (resumen && !resumen.lotes.length) {
+    caja.innerHTML = '<div class="vacio"><div class="ico">📍</div><h3>Todavía no hay ninguna lista</h3>' +
+      '<p>Pega la lista del día (o trae a los clientes que nunca mandaron su ubicación) y el sistema les pedirá el pin uno a uno.</p>' +
+      '<div class="acciones"><button type="button" class="btn primario" data-abrir-carga="1">Cargar la lista del día</button></div></div>';
+    return;
+  }
+  if (vista === 'todos') {
+    caja.innerHTML = '<div class="vacio"><h3>Esta lista está vacía</h3>' +
+      '<p>El lote elegido no tiene ningún cliente. Elige otro lote arriba o carga una lista nueva.</p></div>';
+    return;
+  }
+  caja.innerHTML = '<div class="vacio"><h3>Nadie en «' + esc(nombresVista[vista] || vista) + '»</h3>' +
+    '<p>Buena señal: aquí no queda nada por hacer. Mira otro filtro de arriba.</p></div>';
+}
+
+/**
+ * La columna que de verdad se lee: por que ese cliente esta ahi.
+ *
+ * No repite lo que ya dice el chip de estado ("esperando respuesta" no se
+ * escribe dos veces): cuenta el detalle, que es lo que el chip no cabe.
+ */
 function queLePasa(s) {
   if (s.estado === 'resuelto') return 'Recibida a las ' + cuando(s.resueltoAt);
   if (s.incidencia && catalogo[s.incidencia]) {
     return catalogo[s.incidencia].titulo + (s.incidenciaDetalle ? ': ' + s.incidenciaDetalle : '');
   }
-  if (s.estado === 'enviado') return 'Se le escribió, sin respuesta todavía';
-  if (s.estado === 'pendiente') return 'En la cola';
+  if (s.incidenciaDetalle) return s.incidenciaDetalle;
+  if (s.estado === 'pendiente') return s.intentos ? 'Vuelve a la cola' : 'En la cola, sin escribir todavía';
   return '';
 }
 
-/* --- detalle ---------------------------------------------------------- */
+/* Cuántas veces se le escribió y cuándo fue la última. */
+function intentosDe(s, maxIntentos) {
+  if (!s.intentos) return '';
+  return 'intento ' + s.intentos + (maxIntentos ? ' de ' + maxIntentos : '') +
+    (s.ultimoEnvioAt ? ' · ' + cuando(s.ultimoEnvioAt) : '');
+}
 
-/* Numero de la ultima peticion de detalle lanzada. Sin esto, una respuesta
-   pedida antes -pero que llega despues- repinta el panel encima de lo que el
-   operador acaba de escribir, y el telefono a medio corregir desaparece. */
-var peticionDetalle = 0;
+/* --- detalle ---------------------------------------------------------- */
 
 /* true si el foco esta en un campo del detalle: entonces no se repinta. */
 function escribiendoEnDetalle() {
@@ -623,19 +607,28 @@ function escribiendoEnDetalle() {
   return Boolean(caja && caja.contains(activo));
 }
 
+/**
+ * Abre (o pone al dia, si "silencioso") el detalle de un cliente.
+ *
+ * "peticionDetalle" numera las peticiones: sin eso, una respuesta pedida
+ * antes -pero que llega despues- repinta el panel encima de lo que el
+ * operador acaba de escribir, y el telefono a medio corregir desaparece.
+ */
 async function abrirDetalle(id, silencioso) {
   seleccionada = id;
   var mia = ++peticionDetalle;
 
-  /* Al cambiar de cliente, el panel se vacia ANTES de pedir los datos.
-     Si se dejaran los campos del cliente anterior, quien escribe rapido
-     empieza a corregir un telefono que desaparece medio segundo despues,
-     cuando llega la respuesta y el panel se pinta de nuevo. */
-  if (!silencioso && detalleId !== id) {
-    detalleId = null;
-    document.getElementById('detalle-acciones').innerHTML = '';
-    document.getElementById('detalle-historial').innerHTML = '';
-    document.getElementById('detalle-info').innerHTML = '<p class="muted" style="margin:0">Cargando...</p>';
+  if (!silencioso) {
+    marcarFilaActiva(id);
+    /* Al cambiar de cliente, el panel se vacia ANTES de pedir los datos: si se
+       dejaran los campos del anterior, quien escribe rapido empieza a corregir
+       un telefono que desaparece medio segundo despues. */
+    if (detalleId !== id) {
+      detalleId = null;
+      document.getElementById('detalle-acciones').innerHTML = '';
+      document.getElementById('detalle-historial').innerHTML = '';
+      document.getElementById('detalle-info').innerHTML = '<p class="muted" style="margin:0">Cargando…</p>';
+    }
   }
 
   try {
@@ -643,13 +636,20 @@ async function abrirDetalle(id, silencioso) {
     if (mia !== peticionDetalle || seleccionada !== id) return;
     if (silencioso && escribiendoEnDetalle()) return;
     pintarDetalle(data);
-    if (!silencioso) cargarLista();
-  } catch (error) { if (!silencioso) toast(error.message); }
+  } catch (error) {
+    if (silencioso) return;
+    cerrarDetalle();
+    toast(error.message);
+  }
 }
 
-/* Que cliente esta pintado en la zona de acciones. Mientras no cambie, esos
-   campos no se tocan: son los que el operador puede estar escribiendo. */
-var detalleId = null;
+/* La fila marcada se cambia aqui mismo: no hace falta volver a pedir la lista. */
+function marcarFilaActiva(id) {
+  var filas = document.getElementById('filas').querySelectorAll('tr[data-id]');
+  for (var i = 0; i < filas.length; i++) {
+    filas[i].classList.toggle('activa', Number(filas[i].getAttribute('data-id')) === id);
+  }
+}
 
 function pintarDetalle(data) {
   var s = data.solicitud;
@@ -664,19 +664,15 @@ function pintarDetalle(data) {
 
   var explicacion = ficha
     ? '<div class="aviso" style="margin:0 0 12px"><div><b>' + esc(ficha.titulo) + '</b><br>' +
-      '<span class="muted">' + esc(ficha.explicacion) + '</span><br>' +
+      esc(ficha.explicacion) + '<br>' +
       '<b>Qué hacer:</b> ' + esc(ficha.queHacer) + '</div></div>'
     : '';
 
-  var bitacora = (data.eventos || []).slice().reverse().map(function (e) {
-    return '<li><span class="cuando">' + esc(cuando(e.createdAt)) + '</span> \u00b7 ' + esc(e.detalle || e.tipo) + '</li>';
-  }).join('') || '<li class="muted">Todavía no hay movimientos.</li>';
-
   var info =
-    '<p style="margin:0 0 4px"><b>' + esc(s.nombre || 'Sin nombre') + '</b> ' + pillEstado(s.estado) + '</p>' +
+    '<p style="margin:0 0 4px"><b>' + esc(s.nombre || 'Sin nombre') + '</b> ' + chipEstado(s.estado) + '</p>' +
     '<p class="muted" style="margin:0 0 12px;font-size:13px">' +
       esc(s.phone || s.telefonoCrudo) +
-      (s.referencia ? ' \u00b7 pedido ' + esc(s.referencia) : '') +
+      (s.referencia ? ' · pedido ' + esc(s.referencia) : '') +
       (s.direccion ? '<br>' + esc(s.direccion) : '') +
       (s.distrito ? ' (' + esc(s.distrito) + ')' : '') +
     '</p>' +
@@ -686,38 +682,64 @@ function pintarDetalle(data) {
   var zonaInfo = document.getElementById('detalle-info');
   if (zonaInfo.innerHTML !== info) zonaInfo.innerHTML = info;
 
+  var bitacora = (data.eventos || []).slice().reverse().map(function (e) {
+    return '<li><span class="cuando">' + esc(cuando(e.createdAt)) + '</span> · ' + esc(e.detalle || e.tipo) + '</li>';
+  }).join('') || '<li class="muted">Todavía no hay movimientos.</li>';
   var historial =
     '<h3 style="font-size:13px;margin:14px 0 6px">Historial</h3>' +
     '<ul class="bitacora">' + bitacora + '</ul>';
   var zonaHistorial = document.getElementById('detalle-historial');
   if (zonaHistorial.innerHTML !== historial) zonaHistorial.innerHTML = historial;
 
-  // Las acciones solo se reconstruyen al cambiar de cliente.
+  // Las acciones solo se reconstruyen al cambiar de cliente: son campos que
+  // el operador puede estar escribiendo ahora mismo.
   if (detalleId === s.id) return;
   detalleId = s.id;
 
+  var sinTelefono = !s.phone;
   document.getElementById('detalle-acciones').innerHTML =
     '<div class="campo"><label for="d-telefono">Corregir el teléfono</label>' +
       '<div class="fila"><input id="d-telefono" value="' + esc(s.telefonoCrudo) + '">' +
-      '<button class="sm" id="d-guardar-tel" style="flex:none">Guardar y reintentar</button></div></div>' +
-    '<div class="campo"><label for="d-ubicacion">Cargar la ubicación a mano (enlace de mapa o "lat, lng")</label>' +
-      '<div class="fila"><input id="d-ubicacion" placeholder="https://maps.app.goo.gl/... o -12.09, -77.03">' +
-      '<button class="sm" id="d-guardar-ubi" style="flex:none">Guardar</button></div></div>' +
+      '<button type="button" class="btn sm fijo" id="d-guardar-tel">Guardar y reintentar</button></div></div>' +
+    '<div class="campo"><label for="d-ubicacion">Cargar la ubicación a mano (enlace de mapa o «lat, lng»)</label>' +
+      '<div class="fila"><input id="d-ubicacion" placeholder="https://maps.app.goo.gl/… o -12.09, -77.03">' +
+      '<button type="button" class="btn sm fijo" id="d-guardar-ubi">Guardar</button></div></div>' +
     '<div class="fila" style="margin:12px 0 4px">' +
-      '<button class="sm" id="d-derivar">Pasar al repartidor</button>' +
-      '<button class="sm" id="d-reintentar">Devolver a la cola</button>' +
-      '<a class="link" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '" style="align-self:center">Abrir el chat</a>' +
+      '<button type="button" class="btn sm fijo" id="d-derivar"' + (s.estado === 'derivado' ? ' disabled title="Ya está con el repartidor"' : '') + '>Pasar al repartidor</button>' +
+      '<button type="button" class="btn sm fijo" id="d-reintentar"' + (sinTelefono ? ' disabled title="Sin un teléfono al que escribir: corrígelo primero"' : '') + '>Devolver a la cola</button>' +
+      '<a class="fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>' +
     '</div>';
 
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
   document.getElementById('d-guardar-ubi').onclick = function () { guardarUbicacion(s.id); };
-  document.getElementById('d-derivar').onclick = function () { derivar(s.id); };
-  document.getElementById('d-reintentar').onclick = function () { reintentar(s.id); };
+  document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.'); };
+  document.getElementById('d-reintentar').onclick = function () { accionSobre(s.id, '/reintentar', 'Devuelto a la cola.'); };
+}
+
+function cerrarDetalle() {
+  seleccionada = null;
+  detalleId = null;
+  ver('cerrar-detalle', false);
+  marcarFilaActiva(null);
+  document.getElementById('detalle-info').innerHTML =
+    '<p class="muted" style="margin:0">Elige un cliente de la lista para ver su historial y arreglar lo que haga falta.</p>';
+  document.getElementById('detalle-acciones').innerHTML = '';
+  document.getElementById('detalle-historial').innerHTML = '';
+}
+
+/* Derivar y reintentar hacen lo mismo salvo la ruta y el aviso. */
+async function accionSobre(id, ruta, aviso) {
+  try {
+    await api('/admin/rutas/solicitudes/' + id + ruta, { method: 'POST', body: {} });
+    toast(aviso);
+    detalleId = null;
+    await refrescar();
+  } catch (error) { toast(error.message); }
 }
 
 async function guardarTelefono(id) {
   var valor = document.getElementById('d-telefono').value.trim();
-  if (!valor) return;
+  if (!valor) { toast('Escribe el teléfono corregido.'); return; }
   try {
     await api('/admin/rutas/solicitudes/' + id, { method: 'PATCH', body: { telefono: valor } });
     toast('Teléfono corregido: vuelve a la cola.');
@@ -725,204 +747,79 @@ async function guardarTelefono(id) {
     // valor nuevo, no con el que quedo escrito.
     detalleId = null;
     await refrescar();
-    abrirDetalle(id);
   } catch (error) { toast(error.message); }
 }
 
 async function guardarUbicacion(id) {
   var valor = document.getElementById('d-ubicacion').value.trim();
-  if (!valor) return;
-  var cuerpo = {};
+  if (!valor) { toast('Pega el enlace del mapa o las coordenadas.'); return; }
   var coords = valor.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
-  if (coords) { cuerpo.lat = Number(coords[1]); cuerpo.lng = Number(coords[2]); }
-  else cuerpo.enlace = valor;
-
+  var cuerpo = coords ? { lat: Number(coords[1]), lng: Number(coords[2]) } : { enlace: valor };
   try {
     await api('/admin/rutas/solicitudes/' + id + '/resolver', { method: 'POST', body: cuerpo });
     toast('Ubicación guardada y lista para GSG.');
     detalleId = null;
     await refrescar();
-    abrirDetalle(id);
-  } catch (error) { toast(error.message); }
-}
-
-async function derivar(id) {
-  try {
-    await api('/admin/rutas/solicitudes/' + id + '/derivar', { method: 'POST', body: {} });
-    toast('Pasado al repartidor.');
-    await refrescar();
-    abrirDetalle(id);
-  } catch (error) { toast(error.message); }
-}
-
-async function reintentar(id) {
-  try {
-    await api('/admin/rutas/solicitudes/' + id + '/reintentar', { method: 'POST', body: {} });
-    toast('Devuelto a la cola.');
-    await refrescar();
-    abrirDetalle(id);
   } catch (error) { toast(error.message); }
 }
 
 /* --- cargar un lote nuevo --------------------------------------------- */
 
-document.getElementById('nuevo').onclick = function () {
+function abrirCarga() {
   ver('carga', true);
+  ver('ajustes', false);
+  sincronizarAjustes(false);
   document.getElementById('pegado').focus();
-};
+}
+
+document.getElementById('nuevo').onclick = abrirCarga;
 document.getElementById('cerrar-carga').onclick = function () { ver('carga', false); };
 
-// ---- ajustes del reparto ----------------------------------------------
-var PASOS_AJ = [
-  ['solicitud', '1. Primer mensaje', 'Cuando se le pide la ubicación por primera vez.'],
-  ['recordatorio', '2. Recordatorio', 'Si pasan los minutos de espera y no contestó nada.'],
-  ['insistencia', '3. Insistencia', 'Si contestó, pero sin mandar la ubicación.']
-];
-var ESTADO_PLANTILLA = { APPROVED: 'aprobada', PENDING: 'pendiente de Meta', REJECTED: 'rechazada', PAUSED: 'pausada', DISABLED: 'deshabilitada' };
-/* Como le quedaria al cliente de ejemplo un texto escrito aqui. */
-function previaDe(texto, ej) {
-  return texto.replace(/\{nombre\}/g, ej.nombre.split(' ')[0]).replace(/\{pedido\}/g, ej.pedido).replace(/\{negocio\}/g, ej.negocio)
-    .replace(/\{direccion\}/g, ej.direccion).replace(/\{distrito\}/g, ej.distrito).replace(/\{como\}/g, ej.como);
-}
-function pintarPrevia(paso) {
-  var d = ajustesCache; if (!d) return;
-  var ta = document.querySelector('textarea[data-textos="' + paso + '"]');
-  var lineas = ta ? ta.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean) : [];
-  var texto = lineas.length ? previaDe(lineas[0], d.ejemplo) : d.textosDeSiempre[paso];
-  var caja = document.getElementById('aj-previa-' + paso);
-  if (caja) caja.innerHTML = esc(texto) + '<small>' + (lineas.length ? (lineas.length > 1 ? 'tu primer texto (se alternan ' + lineas.length + ')' : 'tu texto') : 'texto de siempre') + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
-}
-var ajustesCache = null;
-function pintarAjustes(d) {
-  ajustesCache = d;
-  var a = d.ajustes;
-  document.getElementById('aj-pausa-min').value = a.pausaMinSegundos;
-  document.getElementById('aj-pausa-max').value = a.pausaMaxSegundos;
-  document.getElementById('aj-espera').value = a.esperaRespuestaMinutos;
-  document.getElementById('aj-intentos').value = a.maxIntentos;
-  document.getElementById('aj-hora-inicio').value = a.horaInicio;
-  document.getElementById('aj-hora-fin').value = a.horaFin;
-  var html = '';
-  PASOS_AJ.forEach(function (p) {
-    var paso = p[0];
-    var elegidas = a.plantillas[paso] || [];
-    var catalogo = d.catalogo[paso] || [];
-    var plantillasHtml = '';
-    if (d.usaPlantillas) {
-      var porNombre = {};
-      d.plantillas.forEach(function (t) {
-        if (!porNombre[t.name]) porNombre[t.name] = { name: t.name, status: t.status, propia: t.propia, variables: t.variables };
-      });
-      var opciones = Object.keys(porNombre).sort().map(function (n) {
-        var t = porNombre[n];
-        var marcada = elegidas.length ? elegidas.indexOf(t.name) >= 0 : catalogo.indexOf(t.name) >= 0;
-        return '<label><input type="checkbox" data-paso="' + paso + '" value="' + esc(t.name) + '"' + (marcada ? ' checked' : '') + '> ' + esc(t.name) + ' <span class="muted">(' + esc(ESTADO_PLANTILLA[t.status] || t.status) + (t.propia ? ', propia' : '') + ')</span></label>';
-      }).join('');
-      plantillasHtml = '<div class="plantillas"><b>Plantillas de Meta para este paso</b> <span class="muted">(fuera de las 24 h solo puede salir una plantilla aprobada; si marcas varias, se van alternando)</span>' + opciones + '</div>';
-    }
-    html += '<div class="paso"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
-      '<div class="previa" id="aj-previa-' + paso + '"></div>' +
-      '<textarea data-textos="' + paso + '" rows="3" placeholder="Escribe aquí si quieres decirlo a tu manera. Una redacción por línea: se van alternando.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
-      '<p class="marcadores">Puedes usar: <code data-marcador="{nombre}" title="El nombre del cliente">{nombre}</code> <code data-marcador="{pedido}" title="El número de pedido o guía">{pedido}</code> <code data-marcador="{negocio}" title="El nombre de tu negocio">{negocio}</code> <code data-marcador="{direccion}" title="La dirección del pedido">{direccion}</code> <code data-marcador="{distrito}" title="El distrito">{distrito}</code> <code data-marcador="{como}" title="Cómo mandar la ubicación: con el botón o desde el clip, según toque">{como}</code> — clic para insertar.</p>' +
-      plantillasHtml + '</div>';
-  });
-  document.getElementById('aj-pasos').innerHTML = html;
-  PASOS_AJ.forEach(function (p) {
-    var paso = p[0];
-    pintarPrevia(paso);
-    var ta = document.querySelector('textarea[data-textos="' + paso + '"]');
-    ta.addEventListener('input', function () { pintarPrevia(paso); });
-  });
-  document.querySelectorAll('#aj-pasos [data-marcador]').forEach(function (c) {
-    c.onclick = function () {
-      var ta = c.closest('.paso').querySelector('textarea');
-      var ini = ta.selectionStart || ta.value.length, fin = ta.selectionEnd || ini;
-      ta.value = ta.value.slice(0, ini) + c.getAttribute('data-marcador') + ta.value.slice(fin);
-      ta.focus();
-      ta.dispatchEvent(new Event('input'));
-    };
-  });
-}
-async function cargarAjustes() {
-  try { pintarAjustes(await api('/admin/rutas/ajustes')); }
-  catch (e) { document.getElementById('aj-estado').textContent = e.message; }
-}
-/* La caja de ajustes y el ancla #ajustes van de la mano: asi el menu marca
-   "Ajustes del reparto" mientras esta abierta y vuelve a "Ubicaciones" al cerrarla. */
-function sincronizarAjustes(abierta) {
-  if (abierta && location.hash !== '#ajustes') history.replaceState(null, '', '#ajustes');
-  if (!abierta && location.hash === '#ajustes') history.replaceState(null, '', location.pathname);
-  if (window.shellMarcarActivo) shellMarcarActivo();
-  if (window.shellTitulo) shellTitulo(abierta ? 'Ajustes del reparto' : 'Ubicaciones para reparto', abierta ? 'Horario, espera, intentos, textos y plantillas' : 'Pedir la ubicación a cada cliente del día');
-}
-document.getElementById('abrir-ajustes').onclick = async function () {
-  ver('ajustes', true);
-  ver('carga', false);
-  sincronizarAjustes(true);
-  await cargarAjustes();
-};
-document.getElementById('cerrar-ajustes').onclick = function () { ver('ajustes', false); sincronizarAjustes(false); };
-document.getElementById('aj-guardar').onclick = async function () {
-  var estado = document.getElementById('aj-estado');
-  try {
-    var plantillas = {}, textos = {};
-    PASOS_AJ.forEach(function (p) {
-      var paso = p[0];
-      var marcadas = Array.prototype.slice.call(document.querySelectorAll('input[data-paso="' + paso + '"]:checked')).map(function (i) { return i.value; });
-      // Si lo marcado es exactamente el catalogo, se guarda vacio: "las de siempre".
-      var catalogo = (ajustesCache && ajustesCache.catalogo[paso]) || [];
-      var esCatalogo = marcadas.length === catalogo.length && marcadas.every(function (n) { return catalogo.indexOf(n) >= 0; });
-      plantillas[paso] = esCatalogo ? [] : marcadas;
-      textos[paso] = document.querySelector('textarea[data-textos="' + paso + '"]').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
-    });
-    var r = await api('/admin/rutas/ajustes', { method: 'POST', body: {
-      pausaMinSegundos: Number(document.getElementById('aj-pausa-min').value),
-      pausaMaxSegundos: Number(document.getElementById('aj-pausa-max').value),
-      esperaRespuestaMinutos: Number(document.getElementById('aj-espera').value),
-      maxIntentos: Number(document.getElementById('aj-intentos').value),
-      horaInicio: Number(document.getElementById('aj-hora-inicio').value),
-      horaFin: Number(document.getElementById('aj-hora-fin').value),
-      plantillas: plantillas,
-      textos: textos
-    }});
-    estado.textContent = 'Guardado. Se aplica en el siguiente mensaje.';
-    toast('Guardado: se escribe de ' + r.vigente.horaInicio + ':00 a ' + r.vigente.horaFin + ':00, se insiste a los ' + r.vigente.esperaRespuestaMinutos + ' min, máximo ' + r.vigente.maxIntentos + ' mensajes, ' + r.vigente.pausaMinSegundos + '-' + r.vigente.pausaMaxSegundos + ' s entre clientes.');
-    refrescar();
-  } catch (e) { estado.textContent = e.message; }
-};
-document.getElementById('aj-reset').onclick = async function () {
-  try {
-    await api('/admin/rutas/ajustes', { method: 'DELETE' });
-    await cargarAjustes();
-    document.getElementById('aj-estado').textContent = 'Listo: vuelven los valores y textos de siempre.';
-    refrescar();
-  } catch (e) { document.getElementById('aj-estado').textContent = e.message; }
-};
+/* Se revisa solo al pegar: era un paso de mas pulsar "revisar" antes de crear. */
+var revisando;
+document.getElementById('pegado').addEventListener('input', function () {
+  clearTimeout(revisando);
+  revisando = setTimeout(revisarPegado, 600);
+});
 
-document.getElementById('revisar').onclick = async function () {
+async function revisarPegado() {
   var texto = document.getElementById('pegado').value;
-  if (!texto.trim()) { toast('Pega la lista primero.'); return; }
+  var caja = document.getElementById('resumen-carga');
+  if (!texto.trim()) {
+    caja.innerHTML = '';
+    listasPegadas = 0;
+    actualizarCrear();
+    return;
+  }
   try {
     var r = await api('/admin/rutas/previsualizar', { method: 'POST', body: { texto: texto } });
-    var columnas = Object.keys(r.columnas).map(function (k) {
-      return k + ' = ' + r.columnas[k];
-    }).join(' · ');
-
+    var columnas = Object.keys(r.columnas).map(function (k) { return k + ' = ' + r.columnas[k]; }).join(' · ');
     var incidencias = Object.keys(r.incidencias).map(function (c) {
       return '<div class="linea">' + (catalogo[c] ? esc(catalogo[c].titulo) : esc(c)) + ': <b>' + r.incidencias[c] + '</b></div>';
     }).join('');
 
-    document.getElementById('resumen-carga').innerHTML =
+    caja.innerHTML =
       '<div class="linea"><b>' + r.listas + '</b> listos para pedirles la ubicación</div>' +
       (r.conIncidencia ? '<div class="linea"><b>' + r.conIncidencia + '</b> con el número mal: no se les escribirá</div>' : '') +
       (r.duplicadas ? '<div class="linea"><b>' + r.duplicadas + '</b> repetidos (se escribe una sola vez)</div>' : '') +
       (r.descartadas.length ? '<div class="linea"><b>' + r.descartadas.length + '</b> filas sin teléfono, descartadas</div>' : '') +
       incidencias +
       '<div class="linea muted">Columnas entendidas: ' + esc(columnas || 'ninguna') + '</div>';
+    listasPegadas = r.listas + r.conIncidencia;
+  } catch (error) {
+    caja.innerHTML = '<div class="linea fallo">' + esc(error.message) + '</div>';
+    listasPegadas = 0;
+  }
+  actualizarCrear();
+}
 
-    document.getElementById('crear').disabled = r.listas === 0 && r.conIncidencia === 0;
-  } catch (error) { toast(error.message); }
-};
+/* El botón de crear solo se enciende si hay a quién escribir. */
+function actualizarCrear() {
+  var elegidos = elegidosSinUbicacion().length;
+  var etiqueta = document.getElementById('sin-elegidos');
+  if (etiqueta) etiqueta.textContent = elegidos ? elegidos + ' elegidos' : '';
+  document.getElementById('crear').disabled = !elegidos && !listasPegadas;
+}
 
 document.getElementById('crear').onclick = async function () {
   var boton = this;
@@ -931,7 +828,6 @@ document.getElementById('crear').onclick = async function () {
     // Lo elegido de la lista manda sobre lo pegado: si alguien marco
     // contactos, es lo que quiere mandar.
     var elegidos = elegidosSinUbicacion();
-
     var r = await api('/admin/rutas/lotes', {
       method: 'POST',
       body: {
@@ -942,48 +838,50 @@ document.getElementById('crear').onclick = async function () {
       }
     });
     toast('Lote creado: ' + r.listas + ' clientes en cola' + (r.conIncidencia ? ', ' + r.conIncidencia + ' con el número mal' : '') + '.');
-    document.getElementById('pegado').value = '';
-    document.getElementById('nombre-lote').value = '';
-    document.getElementById('resumen-carga').innerHTML = '';
-    sinUbicacion = [];
-    ver('sin-ubicacion', false);
-    document.getElementById('sin-ubicacion-cuenta').textContent = '';
-    ver('carga', false);
+    limpiarCarga();
     loteActual = r.lote.id;
     await refrescar();
-    document.getElementById('lote').value = loteActual;
   } catch (error) {
     toast(error.message);
   } finally {
-    boton.disabled = false;
+    actualizarCrear();
   }
 };
+
+/* Se vacia TODO lo de la carga, tambien las casillas marcadas: si no, el
+   siguiente lote se llevaria a los contactos elegidos para el anterior. */
+function limpiarCarga() {
+  document.getElementById('pegado').value = '';
+  document.getElementById('nombre-lote').value = '';
+  document.getElementById('resumen-carga').innerHTML = '';
+  document.getElementById('sin-ubicacion').innerHTML = '';
+  document.getElementById('sin-ubicacion-cuenta').textContent = '';
+  ver('sin-ubicacion', false);
+  ver('carga', false);
+  sinUbicacion = [];
+  listasPegadas = 0;
+}
 
 /* --- los que nunca mandaron su ubicacion ------------------------------- */
 
 /**
- * La lista de a quien hay que insistirle.
- *
  * No se pega de ninguna parte: son los contactos que ya escribieron alguna
  * vez y de los que nunca llego un pin. En cuanto uno manda su ubicacion deja
- * de salir aqui solo —la consulta mira si tiene ubicacion guardada—, asi que
+ * de salir aqui solo -la consulta mira si tiene ubicacion guardada-, asi que
  * no hay nada que marcar ni que sacar a mano.
  */
-var sinUbicacion = [];
-
-function pintarSinUbicacion() {
+function pintarSinUbicacion(total) {
   var caja = document.getElementById('sin-ubicacion');
-  var cuenta = document.getElementById('sin-ubicacion-cuenta');
-
   if (!sinUbicacion.length) {
-    caja.innerHTML = '<div class="cab">Ninguno: a todos les llego la ubicacion.</div>';
-    cuenta.textContent = '';
+    caja.innerHTML = '<div class="cab">Ninguno: a todos les llegó la ubicación.</div>';
+    document.getElementById('sin-ubicacion-cuenta').textContent = '';
+    actualizarCrear();
     return;
   }
 
   caja.innerHTML = '<div class="cab">' +
     '<label style="display:flex;gap:8px;align-items:center;flex:1"><input type="checkbox" id="sin-todos"> <b>Todos (' + sinUbicacion.length + ')</b></label>' +
-    '<span class="dato" id="sin-elegidos"></span>' +
+    '<span id="sin-elegidos"></span>' +
     '</div>' +
     sinUbicacion.map(function (c) {
       return '<label class="uno"><input type="checkbox" class="sin-uno" value="' + esc(c.phone) + '" data-nombre="' + esc(c.name || '') + '">' +
@@ -994,24 +892,18 @@ function pintarSinUbicacion() {
   caja.querySelector('#sin-todos').onchange = function () {
     var marcar = this.checked;
     caja.querySelectorAll('.sin-uno').forEach(function (x) { x.checked = marcar; });
-    contarElegidos();
+    actualizarCrear();
   };
-  caja.querySelectorAll('.sin-uno').forEach(function (x) { x.onchange = contarElegidos; });
-  contarElegidos();
+  caja.querySelectorAll('.sin-uno').forEach(function (x) { x.onchange = actualizarCrear; });
+  document.getElementById('sin-ubicacion-cuenta').textContent =
+    total > sinUbicacion.length ? sinUbicacion.length + ' de ' + total + ' (los más recientes)' : total + ' en total';
+  actualizarCrear();
 }
 
 function elegidosSinUbicacion() {
   return [].slice.call(document.querySelectorAll('.sin-uno:checked')).map(function (x) {
     return { telefono: x.value, nombre: x.dataset.nombre || undefined };
   });
-}
-
-function contarElegidos() {
-  var n = elegidosSinUbicacion().length;
-  var etiqueta = document.getElementById('sin-elegidos');
-  if (etiqueta) etiqueta.textContent = n ? n + ' elegidos' : '';
-  // Con alguien elegido se puede crear el lote aunque no se haya pegado nada.
-  if (n) document.getElementById('crear').disabled = false;
 }
 
 document.getElementById('traer-sin-ubicacion').onclick = async function () {
@@ -1026,51 +918,219 @@ document.getElementById('traer-sin-ubicacion').onclick = async function () {
         ultimo: c.lastInboundAt ? new Date(c.lastInboundAt).toLocaleDateString('es-PE') : ''
       };
     });
-    document.getElementById('sin-ubicacion-cuenta').textContent = r.total + ' en total';
     ver('sin-ubicacion', true);
-    pintarSinUbicacion();
+    pintarSinUbicacion(r.total || sinUbicacion.length);
   } catch (error) { toast(error.message); }
   finally { boton.disabled = false; }
 };
+
+/* --- ajustes del reparto ----------------------------------------------- */
+
+var PASOS_AJ = [
+  ['solicitud', '1. Primer mensaje', 'Cuando se le pide la ubicación por primera vez.'],
+  ['recordatorio', '2. Recordatorio', 'Si pasan los minutos de espera y no contestó nada.'],
+  ['insistencia', '3. Insistencia', 'Si contestó, pero sin mandar la ubicación.']
+];
+var ESTADO_PLANTILLA = { APPROVED: 'aprobada', PENDING: 'pendiente de Meta', REJECTED: 'rechazada', PAUSED: 'pausada', DISABLED: 'deshabilitada' };
+
+/* Como le quedaria al cliente de ejemplo un texto escrito aqui. */
+function previaDe(texto, ej) {
+  return texto.replace(/\{nombre\}/g, ej.nombre.split(' ')[0]).replace(/\{pedido\}/g, ej.pedido).replace(/\{negocio\}/g, ej.negocio)
+    .replace(/\{direccion\}/g, ej.direccion).replace(/\{distrito\}/g, ej.distrito).replace(/\{como\}/g, ej.como);
+}
+
+function pintarPrevia(paso) {
+  var d = ajustesCache;
+  if (!d) return;
+  var ta = document.querySelector('textarea[data-textos="' + paso + '"]');
+  var lineas = ta ? ta.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean) : [];
+  var texto = lineas.length ? previaDe(lineas[0], d.ejemplo) : d.textosDeSiempre[paso];
+  var caja = document.getElementById('aj-previa-' + paso);
+  if (!caja) return;
+  var pie = lineas.length > 1 ? 'tu primer texto (se alternan ' + lineas.length + ')' : lineas.length ? 'tu texto' : 'texto de siempre';
+  caja.innerHTML = esc(texto) + '<small>' + pie + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
+}
+
+function pintarAjustes(d) {
+  ajustesCache = d;
+  var a = d.ajustes;
+  document.getElementById('aj-pausa-min').value = a.pausaMinSegundos;
+  document.getElementById('aj-pausa-max').value = a.pausaMaxSegundos;
+  document.getElementById('aj-espera').value = a.esperaRespuestaMinutos;
+  document.getElementById('aj-intentos').value = a.maxIntentos;
+  document.getElementById('aj-hora-inicio').value = a.horaInicio;
+  document.getElementById('aj-hora-fin').value = a.horaFin;
+
+  document.getElementById('aj-pasos').innerHTML = PASOS_AJ.map(function (p) {
+    var paso = p[0];
+    return '<div class="paso"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
+      '<div class="previa" id="aj-previa-' + paso + '"></div>' +
+      '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Una redacción por línea: se van alternando.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
+      '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
+      plantillasHtml(d, paso) + '</div>';
+  }).join('');
+
+  PASOS_AJ.forEach(function (p) {
+    var paso = p[0];
+    pintarPrevia(paso);
+    document.querySelector('textarea[data-textos="' + paso + '"]')
+      .addEventListener('input', function () { pintarPrevia(paso); });
+  });
+  document.querySelectorAll('#aj-pasos [data-marcador]').forEach(function (c) {
+    c.onclick = function () {
+      var ta = c.closest('.paso').querySelector('textarea');
+      var ini = ta.selectionStart || ta.value.length, fin = ta.selectionEnd || ini;
+      ta.value = ta.value.slice(0, ini) + c.getAttribute('data-marcador') + ta.value.slice(fin);
+      ta.focus();
+      ta.dispatchEvent(new Event('input'));
+    };
+  });
+}
+
+var MARCADORES = [
+  ['{nombre}', 'El nombre del cliente'],
+  ['{pedido}', 'El número de pedido o guía'],
+  ['{negocio}', 'El nombre de tu negocio'],
+  ['{direccion}', 'La dirección del pedido'],
+  ['{distrito}', 'El distrito'],
+  ['{como}', 'Cómo mandar la ubicación: con el botón o desde el clip, según toque']
+];
+function marcadoresHtml() {
+  return MARCADORES.map(function (m) {
+    return '<code data-marcador="' + m[0] + '" title="' + esc(m[1]) + '">' + m[0] + '</code>';
+  }).join(' ');
+}
+
+/* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */
+function plantillasHtml(d, paso) {
+  if (!d.usaPlantillas) return '';
+  var elegidas = d.ajustes.plantillas[paso] || [];
+  var delPaso = d.catalogo[paso] || [];
+  var porNombre = {};
+  d.plantillas.forEach(function (t) { if (!porNombre[t.name]) porNombre[t.name] = t; });
+  var opciones = Object.keys(porNombre).sort().map(function (n) {
+    var t = porNombre[n];
+    var marcada = elegidas.length ? elegidas.indexOf(t.name) >= 0 : delPaso.indexOf(t.name) >= 0;
+    return '<label><input type="checkbox" data-paso="' + paso + '" value="' + esc(t.name) + '"' + (marcada ? ' checked' : '') + '> ' +
+      esc(t.name) + ' <span class="muted">(' + esc(ESTADO_PLANTILLA[t.status] || t.status) + (t.propia ? ', propia' : '') + ')</span></label>';
+  }).join('');
+  return '<div class="plantillas"><b>Plantillas de Meta para este paso</b> ' +
+    '<span class="muted">(fuera de las 24 h solo puede salir una plantilla aprobada; si marcas varias, se van alternando)</span>' + opciones + '</div>';
+}
+
+async function cargarAjustes() {
+  try { pintarAjustes(await api('/admin/rutas/ajustes')); }
+  catch (e) { document.getElementById('aj-estado').textContent = e.message; }
+}
+
+/* La caja de ajustes y el ancla #ajustes van de la mano: asi el menu marca
+   "Ajustes del reparto" mientras esta abierta y vuelve a "Ubicaciones" al cerrarla. */
+function sincronizarAjustes(abierta) {
+  if (abierta && location.hash !== '#ajustes') history.replaceState(null, '', '#ajustes');
+  if (!abierta && location.hash === '#ajustes') history.replaceState(null, '', location.pathname);
+  if (window.shellMarcarActivo) shellMarcarActivo();
+  if (window.shellTitulo) {
+    shellTitulo(
+      abierta ? 'Ajustes del reparto' : 'Ubicaciones para reparto',
+      abierta ? 'Horario, espera, intentos, textos y plantillas' : 'Pedir la ubicación a cada cliente del día'
+    );
+  }
+}
+
+async function abrirAjustes() {
+  ver('ajustes', true);
+  ver('carga', false);
+  sincronizarAjustes(true);
+  await cargarAjustes();
+}
+
+document.getElementById('abrir-ajustes').onclick = abrirAjustes;
+document.getElementById('cerrar-ajustes').onclick = function () { ver('ajustes', false); sincronizarAjustes(false); };
+
+document.getElementById('aj-guardar').onclick = async function () {
+  var estado = document.getElementById('aj-estado');
+  try {
+    var plantillas = {}, textos = {};
+    PASOS_AJ.forEach(function (p) {
+      var paso = p[0];
+      var marcadas = Array.prototype.slice.call(document.querySelectorAll('input[data-paso="' + paso + '"]:checked')).map(function (i) { return i.value; });
+      // Si lo marcado es exactamente el catalogo, se guarda vacio: "las de siempre".
+      var delPaso = (ajustesCache && ajustesCache.catalogo[paso]) || [];
+      var esCatalogo = marcadas.length === delPaso.length && marcadas.every(function (n) { return delPaso.indexOf(n) >= 0; });
+      plantillas[paso] = esCatalogo ? [] : marcadas;
+      textos[paso] = document.querySelector('textarea[data-textos="' + paso + '"]').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    });
+    var r = await api('/admin/rutas/ajustes', { method: 'POST', body: {
+      pausaMinSegundos: Number(document.getElementById('aj-pausa-min').value),
+      pausaMaxSegundos: Number(document.getElementById('aj-pausa-max').value),
+      esperaRespuestaMinutos: Number(document.getElementById('aj-espera').value),
+      maxIntentos: Number(document.getElementById('aj-intentos').value),
+      horaInicio: Number(document.getElementById('aj-hora-inicio').value),
+      horaFin: Number(document.getElementById('aj-hora-fin').value),
+      plantillas: plantillas,
+      textos: textos
+    }});
+    var v = r.vigente;
+    estado.textContent = 'Guardado: de ' + v.horaInicio + ':00 a ' + v.horaFin + ':00, se insiste a los ' +
+      v.esperaRespuestaMinutos + ' min, máximo ' + v.maxIntentos + ' mensajes, ' +
+      v.pausaMinSegundos + '-' + v.pausaMaxSegundos + ' s entre clientes. Se aplica en el siguiente mensaje.';
+    await refrescar();
+  } catch (e) { estado.textContent = e.message; }
+};
+
+document.getElementById('aj-reset').onclick = async function () {
+  try {
+    await api('/admin/rutas/ajustes', { method: 'DELETE' });
+    await cargarAjustes();
+    document.getElementById('aj-estado').textContent = 'Listo: vuelven los valores y textos de siempre.';
+    await refrescar();
+  } catch (e) { document.getElementById('aj-estado').textContent = e.message; }
+};
+
 /* --- controles -------------------------------------------------------- */
 
 document.getElementById('lote').onchange = function () {
   loteActual = this.value;
-  seleccionada = null;
+  cerrarDetalle();
   refrescar();
 };
 
 document.getElementById('arrancar').onclick = async function () {
-  var id = loteActual || (resumen && resumen.lotes[0] && resumen.lotes[0].id);
-  if (!id) { toast('Carga una lista primero.'); return; }
+  var arrancables = resumen ? resumen.lotes.filter(function (l) { return l.estado !== 'enviando' && l.estado !== 'terminado'; }) : [];
+  var lote = loteDe(loteActual) || arrancables[0];
+  if (!lote) { toast('Carga una lista primero.'); return; }
   try {
-    await api('/admin/rutas/lotes/' + id + '/estado', { method: 'POST', body: { estado: 'enviando' } });
-    toast('En marcha. Sale un mensaje cada ' + resumen.motor.pausa[0] + '-' + resumen.motor.pausa[1] + ' segundos.');
-    refrescar();
+    await api('/admin/rutas/lotes/' + lote.id + '/estado', { method: 'POST', body: { estado: 'enviando' } });
+    toast('«' + lote.nombre + '» en marcha: sale un mensaje cada ' + resumen.motor.pausa[0] + '-' + resumen.motor.pausa[1] + ' segundos.');
+    await refrescar();
   } catch (error) { toast(error.message); }
 };
 
 document.getElementById('pausar').onclick = async function () {
-  var ids = loteActual ? [loteActual] : (resumen ? resumen.lotes.filter(function (l) { return l.estado === 'enviando'; }).map(function (l) { return l.id; }) : []);
+  if (!resumen) { toast('Todavía no se pudo leer el estado del reparto.'); return; }
+  var ids = loteActual
+    ? [loteActual]
+    : resumen.lotes.filter(function (l) { return l.estado === 'enviando'; }).map(function (l) { return l.id; });
   try {
     for (var i = 0; i < ids.length; i++) {
       await api('/admin/rutas/lotes/' + ids[i] + '/estado', { method: 'POST', body: { estado: 'pausado' } });
     }
     toast('Pausado. No sale ningún mensaje más hasta que le des a empezar.');
-    refrescar();
+    await refrescar();
   } catch (error) { toast(error.message); }
 };
 
 document.getElementById('csv').onclick = function () {
-  if (!loteActual) { toast('Elige un lote para descargar su resultado.'); return; }
+  if (!loteActual) return;
   descargar('/admin/rutas/lotes/' + loteActual + '.csv', 'ubicaciones.csv');
 };
 
-/* La descarga va por fetch para que el token viaje en la cabecera. */
+/* La descarga va por fetch para que la cookie de sesion viaje igual que el resto. */
 async function descargar(url, nombre) {
   try {
     var res = await fetch(url, { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('No se pudo descargar el archivo.');
+    if (res.status === 401) { irAlLogin(); return; }
+    if (!res.ok) throw new Error('No se pudo descargar el archivo: ' + errorHttp(res.status));
     var blob = await res.blob();
     var enlace = document.createElement('a');
     enlace.href = URL.createObjectURL(blob);
@@ -1082,62 +1142,89 @@ async function descargar(url, nombre) {
   } catch (error) { toast(error.message); }
 }
 
-document.getElementById('tarjetas').addEventListener('click', function (event) {
+document.getElementById('filtros').addEventListener('click', function (event) {
   var boton = event.target.closest('[data-vista]');
   if (boton) cambiarVista(boton.getAttribute('data-vista'));
+});
+/* El número grande del progreso también filtra: es la misma pregunta. */
+document.getElementById('progreso').addEventListener('click', function (event) {
+  var boton = event.target.closest('[data-vista]');
+  if (boton) cambiarVista(boton.getAttribute('data-vista'));
+});
+document.getElementById('lista-vacia').addEventListener('click', function (event) {
+  if (event.target.closest('[data-abrir-carga]')) abrirCarga();
 });
 
 function cambiarVista(nueva) {
   vista = nueva;
-  cargarTarjetas();
+  cargarFiltros();
   cargarLista();
 }
 
+/* La lista se abre con el ratón o con el teclado: es una tabla, no un menú. */
 document.getElementById('filas').addEventListener('click', function (event) {
   var fila = event.target.closest('tr[data-id]');
-  if (fila) abrirDetalle(Number(fila.getAttribute('data-id')));
+  if (fila) abrirDetalleDeFila(fila);
+});
+document.getElementById('filas').addEventListener('keydown', function (event) {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  var fila = event.target.closest('tr[data-id]');
+  if (!fila) return;
+  event.preventDefault();
+  abrirDetalleDeFila(fila);
 });
 
-document.getElementById('cerrar-detalle').onclick = function () {
-  seleccionada = null;
-  detalleId = null;
-  ver('cerrar-detalle', false);
-  document.getElementById('detalle-info').innerHTML =
-    '<p class="muted" style="margin:0">Elige un cliente de la lista para ver su historial y arreglar lo que haga falta.</p>';
-  document.getElementById('detalle-acciones').innerHTML = '';
-  document.getElementById('detalle-historial').innerHTML = '';
-  cargarLista();
-};
+function abrirDetalleDeFila(fila) {
+  abrirDetalle(Number(fila.getAttribute('data-id')));
+  // En el teléfono el detalle queda debajo de la lista: sin esto, al tocar
+  // una fila no pasa nada visible.
+  if (window.matchMedia('(max-width: 1100px)').matches) {
+    document.getElementById('detalle').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+document.getElementById('cerrar-detalle').onclick = cerrarDetalle;
 
 var buscando;
 document.getElementById('buscar').addEventListener('input', function () {
   clearTimeout(buscando);
-  buscando = setTimeout(cargarLista, 250);
+  buscando = setTimeout(function () { cargarLista().catch(function (e) { toast(e.message); }); }, 250);
 });
+
+/* --- refresco ---------------------------------------------------------- */
 
 async function refrescar() {
   try {
     await cargarResumen();
-    await cargarTarjetas();
+    await cargarFiltros();
     await cargarLista();
     // El detalle abierto tambien se pone al dia: el historial crece solo
     // mientras se mira. No pisa lo que se este escribiendo.
     if (seleccionada) await abrirDetalle(seleccionada, true);
-  } catch (error) { toast(error.message); }
+    marcarFalloRefresco('');
+  } catch (error) {
+    // Un fallo cada diez segundos no puede ser un aviso flotante cada diez
+    // segundos: se dice una vez, en su sitio, hasta que vuelva a funcionar.
+    marcarFalloRefresco(error.message);
+  }
 }
 
-/* Refresco automatico: no toca nada si estas escribiendo en un campo, que
-   es lo que hacia que se borrara el telefono a medio corregir. */
+function marcarFalloRefresco(mensaje) {
+  var caja = document.getElementById('fallo-refresco');
+  if (caja) caja.textContent = mensaje ? 'Sin actualizar: ' + mensaje : '';
+}
+
+/* Ni pisa lo que estas escribiendo ni gasta la conexion con la pestana al fondo. */
 setInterval(function () {
+  if (document.hidden) return;
   var activo = document.activeElement;
-  var escribiendo = activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA');
-  if (escribiendo) return;
+  if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA' || activo.tagName === 'SELECT')) return;
   refrescar();
 }, 10000);
 
 /* Llegar con #ajustes (desde el menu) abre la caja; quitar el ancla la cierra. */
 function abrirSegunAncla() {
-  if (location.hash === '#ajustes') document.getElementById('abrir-ajustes').click();
+  if (location.hash === '#ajustes') abrirAjustes();
   else { ver('ajustes', false); sincronizarAjustes(false); }
 }
 window.addEventListener('hashchange', abrirSegunAncla);

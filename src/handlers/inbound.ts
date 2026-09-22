@@ -163,13 +163,17 @@ function matchesKeyword(text: string, keywords: string[]): boolean {
  */
 export function readInbound(message: InboundMessage): { kind: MessageKind; body: string; payload: Record<string, unknown> | null } {
   const leido = leerContenido(message);
+  // A que mensaje esta respondiendo, si responde a alguno. Se guarda solo el
+  // id: el chat busca el original en el hilo y de ahi saca de quien era y que
+  // decia, que es siempre mas fiel que una copia congelada.
+  const cita = message.context?.id ? { cita: { id: message.context.id } } : null;
   // En un grupo importa quien lo dijo: va en el payload para que el chat lo
   // pinte encima del globo, y el cuerpo queda limpio para la lista y la IA.
-  if (message.grupo) {
-    const autor = { telefono: message.grupo.autor, nombre: message.grupo.autorNombre?.trim() || null };
-    return { ...leido, payload: { ...(leido.payload ?? {}), autor } };
-  }
-  return leido;
+  const autor = message.grupo
+    ? { autor: { telefono: message.grupo.autor, nombre: message.grupo.autorNombre?.trim() || null } }
+    : null;
+  if (!cita && !autor) return leido;
+  return { ...leido, payload: { ...(leido.payload ?? {}), ...(cita ?? {}), ...(autor ?? {}) } };
 }
 
 function leerContenido(message: InboundMessage): { kind: MessageKind; body: string; payload: Record<string, unknown> | null } {

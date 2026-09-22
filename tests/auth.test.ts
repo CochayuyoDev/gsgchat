@@ -121,7 +121,7 @@ describe('entrar al sistema', () => {
     // trae formulario. Se comprueba el formulario y no el texto: el rotulo
     // se reescribe cada dos por tres y la prueba no puede caerse por eso.
     expect(login.body).toContain('id="f-registro"');
-    expect(login.body).toContain('Inicio de sesión');
+    expect(login.body).toContain('id="f-entrar"');
   });
 
   it('sin sesion, las pantallas redirigen a /login y /admin responde 401', async () => {
@@ -258,6 +258,23 @@ describe('entrar al sistema', () => {
     const fuera = await app.inject({ method: 'GET', url: '/login?next=https://malo.example', headers: { cookie } });
     expect(fuera.statusCode).toBe(302);
     expect(fuera.headers.location).toBe('/panel');
+  });
+
+  it('el ?next= del login viaja escapado: una ruta con "</script>" no puede cerrar la etiqueta', async () => {
+    const res = await app.inject({ method: 'GET', url: `/login?next=${encodeURIComponent('/rutas</script><b>')}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('</script><b>');
+    expect(res.body).toContain('\\u003c/script>');
+  });
+
+  it('el manual trae el buscador y una sola ancla por seccion (la ayuda de cada pantalla enlaza /manual#m-…)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/manual', headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('id="buscar"');
+    for (const ancla of ['m-empezar', 'm-cuentas', 'm-chat', 'm-salud', 'm-entrenamiento']) {
+      // Dos ids iguales dejan el salto del navegador en el sitio equivocado.
+      expect(res.body.split(`id="${ancla}"`).length - 1, ancla).toBe(1);
+    }
   });
 
   it('el inicio del panel, el manual y soporte responden con sesion; el resumen trae lo que pinta la pantalla', async () => {

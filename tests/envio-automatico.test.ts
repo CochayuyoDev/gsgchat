@@ -361,4 +361,19 @@ describe('las rutas de la pantalla', () => {
     expect(html).toContain('abrirOperadorIA');
     expect(html).toContain('id="filas"');
   });
+
+  it('la pagina usa la paleta del armazon y sabe si falta conectar WhatsApp', async () => {
+    const { envioAutomaticoPage } = await import('../src/web/envio-automatico-page.js');
+    const sinConectar = envioAutomaticoPage({ configured: false, nombreNegocio: 'Z' });
+    // Sin WhatsApp no sale ningun mensaje: la pantalla lo sabe y no puede
+    // decir que el motor esta trabajando.
+    expect(sinConectar).toContain('data-configurado="0"');
+    expect(envioAutomaticoPage({ configured: true, nombreNegocio: 'Z' })).toContain('data-configurado="1"');
+    // Su CSS no puede redefinir la paleta: pisaba la del armazon en toda la
+    // pantalla (menu y dialogos incluidos) y rompia el modo oscuro.
+    const css = sinConectar.slice(sinConectar.indexOf('<style>'), sinConectar.indexOf('</style>'));
+    const propio = css.slice(css.indexOf('Solo lo propio de esta pantalla'));
+    expect(propio).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(propio).not.toContain(':root');
+  });
 });

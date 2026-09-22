@@ -8,97 +8,67 @@
  * alli un clic apunta el pago y la membresia corre sola. Si el dueño la
  * rechaza, el motivo se lee aqui.
  *
- * Sin maestro (membresia local o instancia libre) la pantalla lo dice y
- * manda a Membresia.
+ * Sin maestro (membresia local o instancia libre) la pantalla lo dice una
+ * sola vez y manda a Membresia.
+ *
+ * Es la otra cara de /tiendas: el estado de la membresia se dice con las
+ * mismas palabras y los mismos colores que ve el dueño (al dia, vence en N
+ * dias, vencida, suspendida), para que los dos hablen de lo mismo.
  *
  * El JS va en String.raw, con var y sin backticks, como el resto.
  */
 
 import { appShell } from './shell.js';
 
+/* Solo lo propio de esta pantalla: los botones, los chips y las tarjetas ya
+   vienen de las clases compartidas del armazon (.btn, .chip.tono-*, .tarjeta). */
 const CSS = `
-
   * { box-sizing: border-box; }
   .wrap { color: var(--texto); font-family: var(--fuente); font-size: var(--fs-cuerpo); line-height: 1.5; max-width: 760px; }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
-  .hidden { display: none !important; }
-  .demo { background: var(--ambar-suave); color: var(--ambar); border: 1px solid var(--ambar); padding: 8px 14px; font-size: var(--fs-small); font-weight: 600; text-align: center; margin-bottom: var(--esp-4); border-radius: var(--radio-sm); }
-  input, select, textarea, button { font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px; max-width: 100%; }
-  input, select, textarea { width: 100%; min-height: 38px; }
-  input[type=checkbox], input[type=radio] { width: auto; min-height: 0; accent-color: var(--primario); }
-  input[type=file] { padding: 7px 10px; font-size: 13.5px; }
-  input:focus, select:focus, textarea:focus { border-color: var(--primario); outline: none; box-shadow: 0 0 0 3px var(--primario-suave); }
-  textarea { min-height: 70px; resize: vertical; }
-  button { cursor: pointer; width: auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 14px; font-weight: 600; line-height: 1.2; }
-  button:hover { border-color: var(--primario); color: var(--primario); }
-  button.primary { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
-  button.primary:hover { filter: brightness(1.06); color: var(--primario-texto); }
-  button.sm { min-height: 30px; padding: 4px 10px; font-size: 13px; font-weight: 500; }
-  button.peligro { color: var(--rojo); border-color: var(--rojo-suave); background: var(--rojo-suave); }
-  button.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
-  button:disabled { opacity: .55; cursor: default; }
-  a.sm { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); font-size: 13px; font-weight: 500; text-decoration: none; color: var(--texto); background: var(--superficie); }
-  a.sm:hover { border-color: var(--primario); color: var(--primario); }
-  @media (max-width: 960px) { button, a.sm, button.sm { min-height: 44px; } }
-  label { display: block; font-size: var(--fs-small); font-weight: 500; color: var(--texto-suave); margin: 10px 0 4px; }
-  .explica { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-3) var(--esp-4); margin-bottom: var(--esp-4); font-size: 14px; box-shadow: var(--sombra); }
-  .explica p { margin: 0 0 6px; }
-  .explica p:last-child { margin-bottom: 0; }
-  .caja { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); overflow: hidden; margin-bottom: var(--esp-4); box-shadow: var(--sombra); min-width: 0; }
-  .caja > h2 { font-size: 15px; font-weight: 700; margin: 0; padding: var(--esp-3) var(--esp-4); border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
-  .caja > h2 .sep { flex: 1; }
-  .caja .cuerpo { padding: var(--esp-4); }
-  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
-  .chip.ok { background: var(--verde-suave); color: var(--verde); }
-  .chip.warn { background: var(--ambar-suave); color: var(--ambar); }
-  .chip.bad { background: var(--rojo-suave); color: var(--rojo); }
-  .chip.info { background: var(--azul-suave); color: var(--azul); }
-  .aviso-rojo, .aviso-amarillo, .aviso-verde { border-radius: var(--radio-sm); padding: 10px 12px; margin: 8px 0; font-size: 14px; border: 1px solid; }
-  .aviso-rojo { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
-  .aviso-amarillo { background: var(--ambar-suave); border-color: var(--ambar); color: var(--ambar); }
-  .aviso-verde { background: var(--verde-suave); border-color: var(--verde); color: var(--verde); }
-  .aviso-rojo a, .aviso-amarillo a, .aviso-verde a { color: inherit; font-weight: 600; }
-  .tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--esp-3); margin-bottom: var(--esp-4); }
-  .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-3) var(--esp-4); min-width: 0; box-shadow: var(--sombra); }
-  .tarjeta .n { font-size: 22px; font-weight: 700; line-height: 1.1; }
-  .tarjeta .q { font-size: var(--fs-small); color: var(--texto-suave); margin-top: 2px; }
-  .tarjeta.ok .n { color: var(--verde); } .tarjeta.warn .n { color: var(--ambar); } .tarjeta.bad .n { color: var(--rojo); } .tarjeta.info .n { color: var(--azul); }
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
-  tr:last-child td { border-bottom: 0; }
-  td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
-  .fila-datos { display: flex; gap: 10px; flex-wrap: wrap; }
-  .fila-datos > div { flex: 1; min-width: 160px; }
 
-  /* Una sola columna estrecha: es una pantalla para leer y mandar una captura, no un tablero. */
-  .s-content > .wrap.pagar { max-width: 760px; margin: 0; }
-  .plan { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--esp-3); }
-  .plan .n { font-size: 20px; font-weight: 700; line-height: 1.15; }
+  input { font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px; width: 100%; max-width: 100%; min-height: 38px; }
+  input[type=file] { padding: 7px 10px; font-size: 13.5px; }
+  input:focus { border-color: var(--primario); outline: none; box-shadow: 0 0 0 3px var(--primario-suave); }
+  label { display: block; font-size: var(--fs-small); font-weight: 500; color: var(--texto-suave); margin: 10px 0 4px; }
+
+  .caja { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); overflow: hidden; margin-bottom: var(--esp-4); box-shadow: var(--sombra); min-width: 0; }
+  .caja > h2 { font-size: var(--fs-h2); font-weight: 700; margin: 0; padding: var(--esp-3) var(--esp-4); border-bottom: 1px solid var(--borde); }
+  .caja .cuerpo { padding: var(--esp-4); }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
+  .acciones { display: flex; gap: var(--esp-2); flex-wrap: wrap; align-items: center; margin-top: var(--esp-3); }
+  .ayuda { font-size: 13.5px; color: var(--texto-suave); margin: 0 0 var(--esp-2); }
+
+  /* El estado de la membresia: una sola banda, imposible de confundir. */
+  .banda { border-radius: var(--radio-sm); padding: 10px 12px; font-size: 14px; border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto-suave); }
+  .banda b { display: block; font-size: var(--fs-h2); line-height: 1.25; }
+  .banda.tono-verde { background: var(--verde-suave); border-color: var(--verde); color: var(--verde); }
+  .banda.tono-ambar { background: var(--ambar-suave); border-color: var(--ambar); color: var(--ambar); }
+  .banda.tono-rojo { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
+  .banda.tono-gris { background: var(--gris-suave); border-color: var(--gris-claro); color: var(--gris); }
+  .banda + .banda, .banda + .plan, .plan + .banda { margin-top: var(--esp-3); }
+
+  .plan { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--esp-3); }
+  .plan .n { font-size: 20px; font-weight: 700; line-height: 1.15; word-break: break-word; }
   .plan .q { font-size: var(--fs-small); color: var(--texto-suave); }
-  .estado { border-radius: var(--radio-sm); padding: 10px 12px; font-size: 14px; margin-top: var(--esp-3); border: 1px solid transparent; }
-  .estado.ok { background: var(--verde-suave); color: var(--verde); border-color: var(--verde); }
-  .estado:not(.ok):not(.warn):not(.bad) { background: var(--superficie-2); color: var(--texto-suave); border-color: var(--borde); }
-  .estado.warn { background: var(--ambar-suave); color: var(--ambar); border-color: var(--ambar); }
-  .estado.bad { background: var(--rojo-suave); color: var(--rojo); border-color: var(--rojo); }
+
   .qr { max-width: 240px; border-radius: var(--radio-sm); border: 1px solid var(--borde); display: block; margin: var(--esp-2) 0; background: #fff; }
   .numero { font-size: 24px; font-weight: 700; letter-spacing: .02em; margin: 4px 0; }
-  .fila { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 10px; }
-  @media (max-width: 560px) { .fila { grid-template-columns: 1fr; } }
   .vista { max-width: 220px; border-radius: var(--radio-sm); border: 1px solid var(--borde); display: block; margin-top: var(--esp-2); }
-  .como-ayuda { font-size: 13.5px; color: var(--texto-suave); margin: 6px 0 0; }
+  .campos { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 10px; }
+  @media (max-width: 560px) { .campos { grid-template-columns: 1fr; } }
 `;
 
 export function pagarPage(opts: { demo: boolean; nombreNegocio: string }): string {
   const contenido = `
-<div class="wrap pagar">
-${opts.demo ? '<div class="demo">Demostración: nada sale a WhatsApp de verdad.</div>' : ''}
+<div class="wrap">
 <div class="caja">
   <h2>Mi membresía</h2>
   <div class="cuerpo">
-    <div id="plan" class="plan"><span class="muted">Cargando…</span></div>
-    <div id="aviso-plan" class="estado hidden"></div>
+    <div id="estado-plan" class="banda"><b>Cargando…</b></div>
+    <div id="plan" class="plan hidden"></div>
+    <div id="donde-pagar" class="banda hidden"></div>
   </div>
 </div>
 
@@ -114,36 +84,37 @@ ${opts.demo ? '<div class="demo">Demostración: nada sale a WhatsApp de verdad.<
 <div class="caja hidden" id="caja-captura">
   <h2>Ya pagué: mandar mi captura</h2>
   <div class="cuerpo">
-    <div id="ultimo-pago" class="estado hidden"></div>
-    <p class="como-ayuda">Sube la captura de tu Yape o Plin. Quien controla las tiendas la revisa y, en cuanto la apunta, tu membresía corre sola. Aquí verás si la aceptó.</p>
-    <div class="fila">
+    <div id="ultimo-pago" class="banda hidden"></div>
+    <p class="ayuda" style="margin-top:var(--esp-3)">Sube la captura de tu Yape o Plin. Quien controla las tiendas la revisa y, en cuanto la apunta, tu membresía corre sola. Aquí verás si la aceptó.</p>
+    <div class="campos">
       <div><label for="cp-meses">Meses pagados</label><input id="cp-meses" type="number" min="1" max="60" value="1"></div>
       <div><label for="cp-monto">Monto (opcional)</label><input id="cp-monto" type="number" min="0" step="0.01" placeholder="49"></div>
-      <div style="flex:2"><label for="cp-nota">Nota (opcional)</label><input id="cp-nota" placeholder="Número de operación, a nombre de…"></div>
+      <div><label for="cp-nota">Nota (opcional)</label><input id="cp-nota" placeholder="Número de operación, a nombre de…"></div>
     </div>
     <label for="cp-imagen">Captura</label><input id="cp-imagen" type="file" accept="image/png,image/jpeg,image/webp">
     <img id="cp-vista" class="vista hidden" alt="tu captura">
-    <div style="margin-top:12px"><button class="primary" id="cp-mandar" type="button">Mandar la captura</button></div>
+    <div class="acciones"><button class="btn primario" id="cp-mandar" type="button">Mandar la captura</button></div>
   </div>
 </div>
 
 <div class="caja hidden" id="caja-soporte">
   <h2>Acceso de soporte</h2>
   <div class="cuerpo">
-    <p class="como-ayuda">Si necesitas que quien controla las tiendas (el dueño del sistema) entre a este panel a ayudarte, dale acceso por un día. Entra como administrador, no ve tus contraseñas, y el acceso se quita solo al caducar (o cuando tú lo quites).</p>
-    <div id="soporte-estado" class="estado hidden"></div>
-    <div class="fila" style="margin-top:8px">
-      <button class="primary" id="soporte-dar" type="button">Dar acceso por 24 horas</button>
-      <button class="ghost hidden" id="soporte-quitar" type="button">Quitar el acceso</button>
+    <p class="ayuda">Si necesitas que quien controla las tiendas entre a este panel a ayudarte, dale acceso por un día. Entra como administrador, no ve tus contraseñas, y el acceso se quita solo al caducar (o cuando tú lo quites).</p>
+    <div id="soporte-estado" class="banda hidden"></div>
+    <div class="acciones">
+      <button class="btn primario" id="soporte-dar" type="button">Dar acceso por 24 horas</button>
+      <button class="btn peligro hidden" id="soporte-quitar" type="button">Quitar el acceso</button>
     </div>
   </div>
 </div>
-
-<div class="explica hidden" id="sin-maestro"></div>
 </div>
 `;
 
+  /* La marca de abajo separa el JS de esta pantalla del que trae el armazon:
+     asi la prueba puede correr solo este trozo con un DOM de mentira. */
   const script = String.raw`
+/* === pantalla Pagar === */
 async function api(path, options) {
   options = options || {};
   var res = await fetch(path, { method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: options.body ? JSON.stringify(options.body) : undefined });
@@ -153,9 +124,26 @@ async function api(path, options) {
   return data;
 }
 function esc(v) { return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function toast(texto) { var el = document.createElement('div'); el.className = 'toast'; el.textContent = texto; document.body.appendChild(el); setTimeout(function () { el.remove(); }, 5000); }
+function toast(texto) { var nodo = document.createElement('div'); nodo.className = 'toast'; nodo.setAttribute('role', 'status'); nodo.textContent = texto; document.body.appendChild(nodo); setTimeout(function () { nodo.remove(); }, 5000); }
+function el(id) { return document.getElementById(id); }
+function mostrar(id, visible) { el(id).classList.toggle('hidden', !visible); }
 function fecha(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric' }); }
-function fechaHora(iso) { if (!iso) return ''; var d = new Date(iso); return fecha(iso) + ' ' + d.toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }); }
+function hora(iso) { if (!iso) return ''; return new Date(iso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }); }
+function fechaHora(iso) { return iso ? fecha(iso) + ' ' + hora(iso) : ''; }
+function dinero(moneda, monto) {
+  var n = Number(monto);
+  if (!isFinite(n)) return '';
+  return ((moneda || '') + ' ' + n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })).trim();
+}
+function plural(n, uno, varios) { return n + ' ' + (n === 1 ? uno : varios); }
+/* Una sola banda de estado para toda la pantalla: tono + titular + explicación. */
+function banda(id, tono, titular, explicacion) {
+  var caja = el(id);
+  caja.className = 'banda' + (tono ? ' tono-' + tono : '');
+  caja.innerHTML = '<b>' + esc(titular) + '</b>' + (explicacion ? esc(explicacion) : '');
+  caja.classList.remove('hidden');
+}
+
 function leerImagen(input) {
   return new Promise(function (resolver, rechazar) {
     var f = input.files && input.files[0];
@@ -168,115 +156,153 @@ function leerImagen(input) {
   });
 }
 
+/**
+ * El estado de la membresía, con las mismas palabras que ve el dueño en su
+ * pantalla Tiendas.
+ *
+ * El servidor marca «vencido» también cuando la membresía está suspendida;
+ * si aún quedan días por delante es que la suspendieron, no que se venció, y
+ * decir "vencida" haría pagar de nuevo a quien ya pagó.
+ */
+function estadoPlan(p) {
+  if (p.vencido && p.diasRestantes > 0) return { tono: 'gris', texto: 'Suspendida', explica: p.aviso || 'La membresía está suspendida: el asistente IA y las campañas están en pausa. Los chats siguen funcionando. Habla con quien controla las tiendas.' };
+  if (p.vencido) return { tono: 'rojo', texto: 'Vencida', explica: p.aviso || 'La membresía está vencida: el asistente IA y las campañas están en pausa. Los chats siguen funcionando.' };
+  if (p.diasRestantes <= 7) return { tono: 'ambar', texto: p.diasRestantes === 1 ? 'Vence mañana' : 'Vence en ' + plural(p.diasRestantes, 'día', 'días'), explica: p.aviso || 'Paga antes de esa fecha y el asistente IA y las campañas no se paran.' };
+  return { tono: 'verde', texto: 'Al día', explica: p.contacto || 'No hay nada que hacer: tu membresía está pagada.' };
+}
+
 function pintarPlan(d) {
-  var caja = document.getElementById('plan');
-  var aviso = document.getElementById('aviso-plan');
-  if (!d.plan) {
-    caja.innerHTML = '<span class="muted">' + (d.origen === 'libre' ? 'Esta instalación no tiene membresía: no hay nada que pagar.' : 'Todavía no se supo del plan.') + '</span>';
-    aviso.classList.add('hidden');
+  var p = d.plan;
+  if (!p) {
+    /* Sin plan solo hay una cosa que decir, y se dice una vez. */
+    banda('estado-plan', '', 'Sin membresía', d.motivo || 'Todavía no se supo del plan de esta instalación.');
+    mostrar('plan', false);
     return;
   }
-  var p = d.plan;
-  caja.innerHTML =
+  var e = estadoPlan(p);
+  banda('estado-plan', e.tono, e.texto, e.explica);
+  /* Los días que faltan ya los dice la banda: aquí van los datos que no repite. */
+  el('plan').innerHTML =
     '<div><div class="n">' + esc(p.nombre) + '</div><div class="q">plan</div></div>' +
     '<div><div class="n">' + esc(fecha(p.vencimiento)) + '</div><div class="q">pagada hasta</div></div>' +
-    '<div><div class="n">' + (p.vencido ? '0' : p.diasRestantes) + '</div><div class="q">días restantes</div></div>' +
-    '<div><div class="n">' + esc(p.moneda) + ' ' + esc(p.precioMes) + '</div><div class="q">al mes</div></div>';
-  if (p.vencido) { aviso.className = 'estado bad'; aviso.textContent = p.aviso || 'La membresía está vencida: el asistente IA y las campañas están en pausa. Los chats siguen funcionando.'; }
-  else if (p.diasRestantes <= 7) { aviso.className = 'estado warn'; aviso.textContent = p.aviso || ('La membresía vence en ' + p.diasRestantes + ' día' + (p.diasRestantes === 1 ? '' : 's') + '.'); }
-  else { aviso.className = 'estado ok'; aviso.textContent = 'Al día. ' + (p.contacto ? p.contacto : ''); }
-  aviso.classList.remove('hidden');
+    '<div><div class="n">' + esc(dinero(p.moneda, p.precioMes)) + '</div><div class="q">al mes</div></div>';
+  mostrar('plan', true);
 }
 
 function pintarCobro(d) {
-  var caja = document.getElementById('caja-como');
   var c = d.cobro;
-  if (!c) { caja.classList.add('hidden'); return; }
-  caja.classList.remove('hidden');
-  document.getElementById('cobro-texto').textContent = c.texto || '';
-  document.getElementById('cobro-numero').textContent = c.numero || '';
-  var qr = document.getElementById('cobro-qr');
-  qr.classList.toggle('hidden', !c.qr);
-  if (c.qr) qr.src = c.qr;
+  mostrar('caja-como', Boolean(c));
+  if (!c) return;
+  el('cobro-texto').textContent = c.texto || '';
+  el('cobro-numero').textContent = c.numero || '';
+  mostrar('cobro-qr', Boolean(c.qr));
+  if (c.qr) el('cobro-qr').src = c.qr;
 }
 
 function pintarUltimoPago(d) {
-  var caja = document.getElementById('ultimo-pago');
   var u = d.ultimoPago;
-  if (!u) { caja.classList.add('hidden'); return; }
-  caja.classList.remove('hidden');
-  if (u.estado === 'pendiente') { caja.className = 'estado warn'; caja.textContent = 'Tu captura del ' + fechaHora(u.at) + ' (' + u.meses + ' mes' + (u.meses === 1 ? '' : 'es') + ') está esperando revisión. En cuanto la apunten, la membresía corre sola.'; }
-  else if (u.estado === 'aceptado') { caja.className = 'estado ok'; caja.textContent = 'Tu captura del ' + fechaHora(u.at) + ' fue aceptada' + (u.resueltoAt ? ' el ' + fechaHora(u.resueltoAt) : '') + ': ' + u.meses + ' mes' + (u.meses === 1 ? '' : 'es') + ' apuntado' + (u.meses === 1 ? '' : 's') + '.'; }
-  else { caja.className = 'estado bad'; caja.textContent = 'Tu captura del ' + fechaHora(u.at) + ' fue rechazada' + (u.motivo ? ': ' + u.motivo : '') + '. Puedes mandar otra.'; }
+  if (!u) { mostrar('ultimo-pago', false); return; }
+  var cuando = 'Captura del ' + fechaHora(u.at) + ' · ' + plural(u.meses, 'mes', 'meses') + (u.monto ? ' · ' + dinero(u.moneda, u.monto) : '');
+  if (u.estado === 'pendiente') banda('ultimo-pago', 'ambar', 'Esperando revisión', cuando + '. En cuanto la apunten, tu membresía corre sola.');
+  else if (u.estado === 'aceptado') banda('ultimo-pago', 'verde', 'Captura aceptada', cuando + (u.resueltoAt ? ' · aceptada el ' + fechaHora(u.resueltoAt) : '') + '.');
+  else banda('ultimo-pago', 'rojo', 'Captura rechazada', cuando + '. ' + (u.motivo ? 'Motivo: ' + u.motivo + '. ' : '') + 'Puedes mandar otra.');
 }
 
-async function cargarSoporte(d) {
-  var caja = document.getElementById('caja-soporte');
-  if (!d || d.origen !== 'maestro') { caja.classList.add('hidden'); return; }
-  caja.classList.remove('hidden');
-  try {
-    var r = await api('/admin/membresia/soporte');
-    var est = document.getElementById('soporte-estado');
-    var dar = document.getElementById('soporte-dar');
-    var quitar = document.getElementById('soporte-quitar');
-    if (r.soporte) {
-      est.className = 'estado ok';
-      est.textContent = 'Acceso hasta las ' + fechaHora(r.soporte.hasta) + ' · el dueño del sistema ya puede entrar a este panel desde su pantalla Tiendas.';
-      est.classList.remove('hidden'); dar.classList.add('hidden'); quitar.classList.remove('hidden');
-    } else {
-      est.className = 'estado';
-      est.textContent = 'Nadie tiene acceso ahora mismo.';
-      est.classList.remove('hidden'); dar.classList.remove('hidden'); quitar.classList.add('hidden');
-    }
-  } catch (e) { /* sin membresia: la caja ya esta escondida */ }
+async function pintarSoporte() {
+  var r;
+  try { r = await api('/admin/membresia/soporte'); }
+  catch (e) {
+    /* Si no se puede leer, la caja no se enseña a medias: un botón que no
+       hace nada es peor que no verlo. */
+    mostrar('caja-soporte', false);
+    return;
+  }
+  mostrar('caja-soporte', true);
+  if (r.soporte) {
+    banda('soporte-estado', 'verde', 'Acceso concedido hasta las ' + hora(r.soporte.hasta), 'Quien controla las tiendas ya puede entrar a este panel desde su pantalla Tiendas.');
+    mostrar('soporte-dar', false);
+    mostrar('soporte-quitar', true);
+  } else {
+    banda('soporte-estado', '', 'Nadie tiene acceso ahora mismo', '');
+    mostrar('soporte-dar', true);
+    mostrar('soporte-quitar', false);
+  }
 }
-document.getElementById('soporte-dar').onclick = async function () {
-  try { var r = await api('/admin/membresia/soporte', { method: 'POST', body: { horas: 24 } }); toast(r.mensaje); cargarSoporte({ origen: 'maestro' }); } catch (e) { toast(e.message); }
-};
-document.getElementById('soporte-quitar').onclick = async function () {
-  try { var r = await api('/admin/membresia/soporte', { method: 'DELETE' }); toast(r.mensaje); cargarSoporte({ origen: 'maestro' }); } catch (e) { toast(e.message); }
-};
 
-async function cargar() {
+async function cargar(opciones) {
+  var silencioso = opciones && opciones.silencioso;
   var d;
   try { d = await api('/admin/membresia/pagar'); }
   catch (e) {
-    if (e.status === 409) { document.getElementById('sin-maestro').textContent = 'Este arranque no lleva membresía.'; document.getElementById('sin-maestro').classList.remove('hidden'); document.getElementById('plan').innerHTML = ''; return; }
-    throw e;
+    if (e.status === 409) {
+      banda('estado-plan', '', 'Sin membresía', 'Este arranque no lleva membresía: no hay nada que pagar.');
+      mostrar('plan', false);
+      mostrar('caja-como', false); mostrar('caja-captura', false); mostrar('caja-soporte', false);
+      return;
+    }
+    /* El fallo se ve donde iba el plan, no solo en un aviso que se va solo. */
+    banda('estado-plan', 'rojo', 'No se pudo cargar', e.message);
+    mostrar('plan', false);
+    if (!silencioso) toast(e.message);
+    return;
   }
   pintarPlan(d);
   pintarCobro(d);
   pintarUltimoPago(d);
-  cargarSoporte(d);
-  var puede = d.puedeMandarCaptura;
-  document.getElementById('caja-captura').classList.toggle('hidden', !puede);
-  var sm = document.getElementById('sin-maestro');
-  if (!puede && d.motivo && d.plan) {
-    sm.innerHTML = esc(d.motivo) + (d.origen === 'local' ? ' <a href="/panel#membresia">Ir a Membresía</a>' : '');
-    sm.classList.remove('hidden');
-  } else sm.classList.add('hidden');
-  if (d.plan && d.plan.precioMes && !document.getElementById('cp-monto').value) document.getElementById('cp-monto').placeholder = String(d.plan.precioMes);
+  /* Con plan pero sin poder mandar la captura (membresía propia): hay que
+     decir dónde se paga. Sin plan, eso ya lo dijo la banda de arriba. */
+  if (d.plan && !d.puedeMandarCaptura && d.motivo) {
+    banda('donde-pagar', '', 'Dónde se paga', d.motivo);
+    if (d.origen === 'local') el('donde-pagar').innerHTML += ' <a href="/panel#membresia">Ir a Membresía</a>';
+  } else mostrar('donde-pagar', false);
+  mostrar('caja-captura', Boolean(d.puedeMandarCaptura));
+  /* La caja de captura es para las tiendas con maestro; el soporte también. */
+  if (d.origen === 'maestro') await pintarSoporte(); else mostrar('caja-soporte', false);
+  if (d.plan && d.plan.precioMes) el('cp-monto').placeholder = String(d.plan.precioMes);
 }
 
-document.getElementById('cp-imagen').onchange = async function () {
-  try { var img = await leerImagen(document.getElementById('cp-imagen')); var v = document.getElementById('cp-vista'); v.classList.toggle('hidden', !img); if (img) v.src = img; } catch (e) { toast(e.message); document.getElementById('cp-imagen').value = ''; }
+el('soporte-dar').onclick = async function () {
+  var b = el('soporte-dar');
+  b.disabled = true;
+  try { var r = await api('/admin/membresia/soporte', { method: 'POST', body: { horas: 24 } }); toast(r.mensaje); await pintarSoporte(); }
+  catch (e) { toast(e.message); } finally { b.disabled = false; }
 };
-document.getElementById('cp-mandar').onclick = async function () {
-  var b = document.getElementById('cp-mandar'); b.disabled = true;
-  try {
-    var img = await leerImagen(document.getElementById('cp-imagen'));
-    if (!img) throw new Error('Elige la captura de tu pago.');
-    var meses = Number(document.getElementById('cp-meses').value || 1);
-    var monto = document.getElementById('cp-monto').value;
-    var r = await api('/admin/membresia/pago-captura', { method: 'POST', body: { imagen: img, meses: meses, monto: monto === '' ? undefined : Number(monto), nota: document.getElementById('cp-nota').value } });
-    toast(r.mensaje);
-    document.getElementById('cp-imagen').value = ''; document.getElementById('cp-vista').classList.add('hidden');
-    await cargar();
-  } catch (e) { toast(e.message); }
-  b.disabled = false;
+el('soporte-quitar').onclick = async function () {
+  var b = el('soporte-quitar');
+  if (!(await confirmarDialogo({ titulo: 'Quitar el acceso', texto: 'Quien controla las tiendas dejará de poder entrar a este panel. Puedes volver a dárselo cuando quieras.', boton: 'Quitar', peligro: true }))) return;
+  b.disabled = true;
+  try { var r = await api('/admin/membresia/soporte', { method: 'DELETE' }); toast(r.mensaje); await pintarSoporte(); }
+  catch (e) { toast(e.message); } finally { b.disabled = false; }
 };
 
-cargar().catch(function (e) { toast(e.message); });
+el('cp-imagen').onchange = async function () {
+  try {
+    var img = await leerImagen(el('cp-imagen'));
+    mostrar('cp-vista', Boolean(img));
+    if (img) el('cp-vista').src = img;
+  } catch (e) { toast(e.message); el('cp-imagen').value = ''; mostrar('cp-vista', false); }
+};
+el('cp-mandar').onclick = async function () {
+  var b = el('cp-mandar');
+  b.disabled = true;
+  try {
+    var img = await leerImagen(el('cp-imagen'));
+    if (!img) throw new Error('Elige la captura de tu pago.');
+    var meses = Number(el('cp-meses').value || 1);
+    if (!(meses >= 1 && meses <= 60)) throw new Error('Los meses pagados tienen que ir de 1 a 60.');
+    var monto = el('cp-monto').value;
+    var r = await api('/admin/membresia/pago-captura', { method: 'POST', body: { imagen: img, meses: meses, monto: monto === '' ? undefined : Number(monto), nota: el('cp-nota').value } });
+    toast(r.mensaje);
+    el('cp-imagen').value = ''; el('cp-nota').value = '';
+    mostrar('cp-vista', false);
+    await cargar();
+  } catch (e) { toast(e.message); } finally { b.disabled = false; }
+};
+
+cargar();
+/* La tienda deja esta pantalla abierta esperando el visto bueno: el servidor
+   vuelve a preguntarle al maestro en cada carga, así que basta con repetirla. */
+setInterval(function () { if (!document.querySelector('.dlg-fondo')) cargar({ silencioso: true }); }, 60000);
 `;
 
   return appShell({

@@ -24,7 +24,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { WhatsAppApiError, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
+import { WhatsAppApiError, type CitaSaliente, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
 import type { TemplateComponent } from '../types.js';
 import { CATALOG } from '../../templates/catalog.js';
 import { escribirComoHumano } from '../../salud/humano.js';
@@ -174,13 +174,16 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
     );
   }
 
-  async function sendText(to: string, body: string, previewUrl?: boolean): Promise<SendResult> {
+  async function sendText(to: string, body: string, previewUrl?: boolean, cita?: CitaSaliente): Promise<SendResult> {
     const payload = await conTeclado(to, body, () =>
       call<{ id?: unknown }>('/api/sendText', {
         session,
         chatId: toChatId(to),
         text: body,
         linkPreview: previewUrl ?? false,
+        // Responder citando: WAHA lo llama `reply_to` y quiere el id del
+        // mensaje citado, igual que Meta. Solo va cuando hay cita.
+        ...(cita ? { reply_to: cita.id } : {}),
       }),
     );
     return resultOf(payload);
@@ -208,8 +211,22 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
         chatId: toChatId(to),
         caption: media.caption,
         file: { mimetype: media.mimeType, filename: media.filename ?? 'archivo', data: media.datos.toString('base64') },
+        ...(media.cita ? { reply_to: media.cita.id } : {}),
       });
       return resultOf(payload);
+    },
+
+    /**
+     * Reaccionar con un emoji. WAHA lo expone como `PUT /api/reaction`; una
+     * cadena vacia la quita, igual que en el telefono.
+     */
+    async sendReaction(to, mensaje, emoji) {
+      const payload = await call<{ id?: unknown }>(
+        '/api/reaction',
+        { session, messageId: mensaje.id, reaction: emoji },
+        'PUT',
+      );
+      return resultOf(payload ?? {});
     },
 
     async sendLocation(to, location) {

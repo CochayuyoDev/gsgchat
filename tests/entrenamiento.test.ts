@@ -29,6 +29,7 @@ import { paresDeConversacion } from '../src/entrenamiento/aprender.js';
 import { leerImportacion } from '../src/entrenamiento/importar.js';
 import { leerXlsx } from '../src/entrenamiento/xlsx.js';
 import { calificarLeccion } from '../src/entrenamiento/examen.js';
+import { entrenamientoPage } from '../src/web/entrenamiento-page.js';
 import { crearClaveDePrueba, createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, type FakeRepos, type FakeWhatsApp } from './fakes.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -650,9 +651,33 @@ describe('la pantalla', () => {
     expect(r.body).toContain('Enséñale una cosa');
     expect(r.body).toContain('/admin/entrenamiento/lecciones');
     expect(r.body).toContain('function pedirLeccion');
+    // Desde el chat se le ensena a la IA con la conversacion de verdad. Ya no
+    // hay un boton flotando sobre el globo: la accion vive en el menu del
+    // mensaje, que es donde estan todas las demas.
     const chat = await app.inject({ method: 'GET', url: '/chat', headers: h });
-    expect(chat.body).toContain('data-corregir');
+    expect(chat.body).toContain('Corregir al asistente');
+    expect(chat.body).toContain('ensenarDesdeMensaje(m, true)');
     const manual = await app.inject({ method: 'GET', url: '/manual', headers: h });
     expect(manual.body).toContain('m-entrenamiento');
+  });
+
+  it('pinta con el sistema de diseno, sin colores a pelo, y avisa si el arranque no trae entrenamiento', () => {
+    const pagina = entrenamientoPage({ disponible: true, conIA: true, nombreNegocio: 'Tienda' });
+    // El CSS de la pantalla: ni un color fijo (romperia el modo oscuro) y ni
+    // un `:root` que pise los tokens del armazon.
+    const css = pagina.slice(pagina.indexOf('Solo lo propio de esta pantalla'), pagina.indexOf('</style>'));
+    expect(css).not.toMatch(/#[0-9a-fA-F]{3,6}\b|rgba?\(/);
+    expect(css).not.toContain(':root');
+    // Usa las clases compartidas en vez de repetirlas.
+    expect(pagina).toContain('class="btn primario"');
+    expect(pagina).toContain('chip tono-');
+    // Los dos filtros de procedencia salen de la misma tabla: mismas opciones.
+    expect(pagina.match(/<option value="ia">Puestas por la IA<\/option>/g)).toHaveLength(2);
+
+    // Sin la parte que guarda las lecciones, la pantalla lo dice en vez de
+    // pintarse entera con todos los botones dando 404.
+    const sin = entrenamientoPage({ disponible: false, conIA: true, nombreNegocio: 'Tienda' });
+    expect(sin).toContain('El entrenamiento no está disponible');
+    expect(sin).not.toContain('/admin/entrenamiento/lecciones');
   });
 });

@@ -20,6 +20,9 @@ const CSS = `
   .wrap { color: var(--text); font-size: var(--fs-cuerpo); line-height: 1.55; }
   h2 { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -.01em; margin: 0 0 4px; }
   h3 { font-size: var(--fs-h3); font-weight: 700; margin: 18px 0 4px; }
+  /* Un segundo bloque dentro de la misma seccion respira mas que un h3. */
+  .wrap section.card h2 ~ h2, .wrap section.card > h3.bloque { margin-top: 28px; }
+  .vista-previa { white-space: pre-wrap; font: inherit; font-size: 13px; }
   .muted { color: var(--muted); font-size: 13px; margin: 0; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radio);
     padding: 18px 20px; margin-top: var(--esp-4); box-shadow: var(--sombra); }
@@ -148,6 +151,9 @@ const CSS = `
   .stk ol li { margin: 3px 0; }
   .stk code.dir { display: inline-block; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
   .nueva-clave code { display: block; font-size: 14px; padding: 10px 12px; margin: 8px 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; word-break: break-all; }
+  .nueva-clave code.corto { display: inline; padding: 2px 8px; }
+  .nueva-clave ol { margin: 8px 0 0; padding-left: 20px; font-size: 13.5px; }
+  .nueva-clave .actions { margin-top: 8px; }
   .ia-chat { border: 1px solid var(--line); border-radius: 12px; background: var(--bg); min-height: 120px; max-height: 360px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
   .ia-chat .b { max-width: 80%; padding: 7px 11px; border-radius: 10px; background: var(--card); white-space: pre-wrap; }
   .ia-chat .b.yo { align-self: flex-end; background: var(--primario-suave); color: var(--text); }
@@ -229,18 +235,27 @@ const AUTH_JS = String.raw`
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  function porId(id) { return document.getElementById(id); }
   function show(id, text, kind) {
-    var el = document.getElementById(id);
+    var el = porId(id);
+    /* Un aviso sin sitio donde ponerse no debe tumbar la pantalla entera. */
+    if (!el) return;
     el.textContent = text;
     el.className = 'pill ' + (kind || 'ok');
     el.classList.remove('hidden');
+  }
+  function fechaCorta(value) {
+    if (!value) return '';
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' });
   }
   function fmt(value) {
     if (!value) return '';
     var d = new Date(value);
     if (isNaN(d.getTime())) return String(value);
     /* Siempre «21/09/26 15:08»: la misma hora de 24 h que en Hoy y en los mensajes. */
-    return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return fechaCorta(value) + ' ' + d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
   }
   function ago(value) {
     if (!value) return '';
@@ -256,12 +271,107 @@ const AUTH_JS = String.raw`
     var url = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
     return '<a href="' + esc(url) + '" target="_blank" rel="noreferrer">' + Number(lat).toFixed(5) + ', ' + Number(lng).toFixed(5) + '</a>';
   }
+  /* El estado vacio. Acepta un texto suelto o {titulo, texto, href, boton}:
+     con href ensena el primer paso, que es lo unico util cuando no hay nada. */
+  function vacio(v) {
+    if (!v) v = 'Nada que mostrar';
+    if (typeof v === 'string') v = { texto: v };
+    return '<div class="empty">' + (v.titulo ? '<b>' + esc(v.titulo) + '</b>' : '') + esc(v.texto || '') +
+      (v.href ? '<div class="actions" style="justify-content:center;margin-top:10px"><a class="btn secundario" href="' + esc(v.href) + '">' + esc(v.boton || 'Empezar') + '</a></div>' : '') +
+      '</div>';
+  }
   function table(id, headers, rows, empty) {
-    var el = document.getElementById(id);
-    if (!rows.length) { el.innerHTML = '<div class="empty">' + esc(empty || 'Nada que mostrar') + '</div>'; return; }
+    var el = porId(id);
+    if (!el) return;
+    if (!rows.length) { el.innerHTML = vacio(empty); return; }
     el.innerHTML = '<table><thead><tr>' + headers.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
       '</tr></thead><tbody>' + rows.map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>'; }).join('') +
       '</tbody></table>';
+  }
+  /* Mientras llega la respuesta, donde va la tabla se dice que esta cargando:
+     antes se quedaba en blanco y parecia que no habia nada que ver. */
+  function cargando(id) {
+    var caja = porId(id);
+    if (caja && !caja.innerHTML.trim()) caja.innerHTML = '<div class="empty">Cargando…</div>';
+  }
+  /* Cuando la carga falla, el error se ve donde iba la tabla (una pildora
+     arriba del todo se pierde) y con un boton para volver a intentarlo. */
+  function tablaError(id, error, recargar) {
+    var caja = porId(id);
+    if (!caja) return;
+    caja.innerHTML = '<div class="empty"><b>No se pudo cargar</b>' + esc((error && error.message) || String(error)) +
+      (recargar ? '<div class="actions" style="justify-content:center;margin-top:10px"><button class="ghost sm" type="button">Reintentar</button></div>' : '') + '</div>';
+    if (recargar) caja.querySelector('button').onclick = recargar;
+  }
+  /* Una tarjeta de cifra. 'valor' y 'detalle' pueden llevar HTML ya escapado. */
+  function stat(etiqueta, valor, detalle, clase) {
+    return '<div class="stat"><span class="muted">' + esc(etiqueta) + '</span><b' + (clase ? ' class="' + clase + '"' : '') + '>' + valor + '</b>' +
+      (detalle ? '<small>' + detalle + '</small>' : '') + '</div>';
+  }
+  /* Las opciones de un <select> desde [{valor, texto}] (o un objeto {valor: texto}). */
+  function opciones(items, elegido) {
+    var lista = Array.isArray(items) ? items : Object.keys(items).map(function (k) { return { valor: k, texto: items[k] }; });
+    return lista.map(function (o) {
+      return '<option value="' + esc(o.valor) + '"' + (String(o.valor) === String(elegido) ? ' selected' : '') + (o.titulo ? ' title="' + esc(o.titulo) + '"' : '') + '>' + esc(o.texto) + '</option>';
+    }).join('');
+  }
+  function llenarSelect(id, items, elegido) {
+    var sel = porId(id);
+    if (sel) sel.innerHTML = opciones(items, elegido);
+  }
+  /* Los botones que salen dentro de una tabla: el atributo lleva el id de la
+     fila. Antes cada uno repetia el mismo try/catch y su propio bloqueo. */
+  function alPulsar(atributo, estadoId, accion) {
+    document.querySelectorAll('[' + atributo + ']').forEach(function (b) {
+      b.onclick = async function () {
+        b.disabled = true;
+        try { await accion(b.getAttribute(atributo), b); }
+        catch (error) { show(estadoId, error.message, 'bad'); }
+        finally { b.disabled = false; }
+      };
+    });
+  }
+  /* Copiar al portapapeles lo que hay en otro nodo (claves, tokens, secretos). */
+  function botonCopiar(botonId, origenId, estadoId, mensaje) {
+    var b = porId(botonId);
+    if (!b) return;
+    b.onclick = async function () {
+      try {
+        await navigator.clipboard.writeText(porId(origenId).textContent || '');
+        show(estadoId, mensaje || 'Copiado', 'ok');
+      } catch (error) { show(estadoId, 'El navegador no dejó copiar; selecciónalo a mano.', 'warn'); }
+    };
+  }
+  /* Cerrar la caja de "copia esto ahora": se oculta y se borra el secreto. */
+  function botonCerrar(botonId, cajaId, limpiarId) {
+    var b = porId(botonId);
+    if (!b) return;
+    b.onclick = function () {
+      if (limpiarId && porId(limpiarId)) porId(limpiarId).textContent = '';
+      porId(cajaId).classList.add('hidden');
+    };
+  }
+  /* La misma barra de paginas de Contactos, Historial y Actividad: mueve el
+     desplazamiento, pinta «1–50 de 320» y apaga los botones en los extremos. */
+  function paginador(pref, limite, recargar) {
+    var est = { offset: 0, limite: limite };
+    porId(pref + '-prev').onclick = function () { est.offset = Math.max(0, est.offset - limite); recargar(); };
+    porId(pref + '-next').onclick = function () { est.offset += limite; recargar(); };
+    est.desdeElPrincipio = function () { est.offset = 0; recargar(); };
+    est.pintar = function (enPagina, total) {
+      var hayTotal = typeof total === 'number';
+      var hasta = est.offset + enPagina;
+      porId(pref + '-page').textContent = enPagina ? (est.offset + 1) + '–' + hasta + (hayTotal ? ' de ' + total : '') : 'sin resultados';
+      porId(pref + '-prev').disabled = est.offset === 0;
+      porId(pref + '-next').disabled = hayTotal ? hasta >= total : enPagina < limite;
+    };
+    return est;
+  }
+  /* Descarga con los filtros que se ven: la CSV la arma el servidor. */
+  function descargarCsv(ruta, filtros) {
+    var q = Object.keys(filtros || {}).filter(function (k) { return filtros[k] !== '' && filtros[k] != null; })
+      .map(function (k) { return k + '=' + encodeURIComponent(filtros[k]); }).join('&');
+    location.href = ruta + (q ? '?' + q : '');
   }
   function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
   function setVal(id, v) { var el = document.getElementById(id); if (el) el.value = v == null ? '' : v; }
@@ -375,8 +485,7 @@ ${warning}
 </div>
 
 <section id="tab-estado" class="card hidden">
-  <h2>Estado del numero</h2>
-  <p class="muted">Miralo antes de subir volumen. En amarillo se frena el marketing solo; en rojo se pausa todo.</p>
+  <p class="muted">Míralo antes de subir el volumen: en amarillo se frena el marketing solo, en rojo se pausa todo.</p>
   <div class="grid" id="stats" style="margin-top:14px"></div>
   <div id="estado-avisos-meta" class="hidden" style="margin:12px 0"></div>
   <div class="actions">
@@ -389,9 +498,7 @@ ${warning}
 </section>
 
 <section id="tab-salud" class="card hidden">
-  <h2>Salud del numero</h2>
-  <p class="muted">Lo que mira el monitor cada minuto: errores de Meta por codigo, mensajes que no llegan, bajas, quejas y desconexiones.
-  Con eso decide a que velocidad se envia, cuando frena solo y cuando para. Si algo no sale, la razon esta aqui.</p>
+  <p class="muted">Cada minuto mira los errores de Meta por código, los mensajes que no llegan, las bajas, las quejas y las desconexiones. Con eso decide a qué velocidad se envía, cuándo frena solo y cuándo para.</p>
   <div id="sl-semaforo" class="semaforo"><span class="luz verde"></span><div><b id="sl-nivel">cargando...</b><p class="muted" id="sl-sub"></p></div></div>
   <ul id="sl-motivos" class="motivos"></ul>
   <div class="grid" id="sl-stats" style="margin-top:14px"></div>
@@ -433,7 +540,7 @@ ${warning}
   <div class="actions"><button id="m-send">Enviar</button><span id="m-state" class="pill hidden"></span></div>
   <div id="m-out" class="hidden"></div>
 
-  <h2 style="margin-top:26px">Enviar una ubicacion</h2>
+  <h2>Enviar una ubicación</h2>
   <p class="muted">Pega un link de Google Maps o unas coordenadas: el sistema extrae la latitud y longitud y manda el pin.</p>
   <label>Telefono</label>
   <input id="u-phone" placeholder="51987654321">
@@ -450,7 +557,6 @@ ${warning}
 </section>
 
 <section id="tab-contactos" class="card hidden">
-  <h2>Contactos</h2>
   <p class="muted">Solo reciben mensajes iniciados por la empresa los que tienen opt-in registrado. Una baja bloquea todo, sin excepciones.</p>
   <div class="toolbar">
     <div><label for="ct-q">Buscar</label><input id="ct-q" placeholder="telefono o nombre"></div>
@@ -477,7 +583,6 @@ ${warning}
 </section>
 
 <section id="tab-ubicaciones" class="card hidden">
-  <h2>Ubicaciones recibidas</h2>
   <p class="muted">Todo lo que el bot extrajo de mensajes y links. Las de baja confianza quedan sin confirmar hasta que el cliente responde al boton.</p>
   <div class="toolbar">
     <div><label for="lc-phone">Telefono (opcional)</label><input id="lc-phone" placeholder="51987654321"></div>
@@ -487,7 +592,6 @@ ${warning}
 </section>
 
 <section id="tab-vivo" class="card hidden">
-  <h2>Ubicacion en vivo</h2>
   <p class="muted">Genera dos enlaces: uno para quien se mueve y otro para quien mira. La Cloud API no puede
   mandar live location, asi que WhatsApp solo transporta el enlace y el mapa corre aqui.</p>
   <label>Telefono del cliente (opcional, para enviarle el enlace)</label>
@@ -514,7 +618,6 @@ ${warning}
 </section>
 
 <section id="tab-grupos" class="card hidden">
-  <h2>Enviar a un grupo de clientes</h2>
   <p class="muted">Elige a quiénes por cómo están (todavía sin ubicación, ficha incompleta, callados desde hace días…), mira quiénes son y mándales a todos un mensaje <b>personalizado</b> por goteo, mételos en una secuencia o descárgalos.
   Nada sale a quien se dio de baja; el ritmo y el horario los pone el marcapasos del número.</p>
 
@@ -562,9 +665,7 @@ ${warning}
 </section>
 
 <section id="tab-campanas" class="card hidden">
-  <h2>Campana con plantilla</h2>
-  <p class="muted">Solo salen los contactos con opt-in registrado. Cada bloqueo queda anotado para que veas
-  si la lista esta sucia antes de quemar el numero.</p>
+  <p class="muted">Con una plantilla aprobada, a una lista. Solo salen los contactos con opt-in registrado; cada bloqueo queda anotado para que veas si la lista está sucia antes de quemar el número.</p>
   <label>Plantilla</label>
   <select id="c-template"></select>
   <label>Nombre de la campana</label>
@@ -615,7 +716,7 @@ ${warning}
     <label class="inline"><input type="checkbox" id="p-askloc"> Si un mensaje no trae coordenadas ni coincide con ninguna regla, pedir la ubicacion con el boton nativo</label>
   </div>
 
-  <h2 style="margin-top:26px">Secuencias de seguimiento</h2>
+  <h2>Secuencias de seguimiento</h2>
   <p class="muted">Una lista de pasos con retardo. Fuera de la ventana de 24 h solo puede salir una plantilla aprobada; un paso de texto que caiga fuera se bloquea y cierra la secuencia. Si el contacto responde, se cancela lo que quedaba (configurable).</p>
   <div id="s-table" class="tablewrap"></div>
   <h3>Nueva secuencia</h3>
@@ -644,7 +745,7 @@ ${warning}
   </div>
   <div id="e-table" class="tablewrap"></div>
 
-  <h2 style="margin-top:26px">Mensajes programados</h2>
+  <h2>Mensajes programados</h2>
   <p class="muted">Un envio suelto a una fecha y hora. Los pasos de las secuencias tambien aparecen aqui.</p>
   <div class="toolbar">
     <div><label for="sc-phone">Telefono</label><input id="sc-phone" placeholder="51987654321"></div>
@@ -665,7 +766,6 @@ ${warning}
 </section>
 
 <section id="tab-plantillas" class="card hidden">
-  <h2>Plantillas</h2>
   <p class="muted">El registro local es lo que consultan las guardas antes de cada envio. Sincroniza para traer estado y calidad desde Meta.</p>
   <div class="actions"><button id="t-sync">Sincronizar desde Meta</button><span id="t-state" class="pill hidden"></span></div>
   <div id="t-table" class="tablewrap"></div>
@@ -693,8 +793,7 @@ ${warning}
 </section>
 
 <section id="tab-historial" class="card hidden">
-  <h2>Historial de envios</h2>
-  <p class="muted">Cada intento, salga o no. Los bloqueos son la senal mas util para saber si una lista esta sucia.</p>
+  <p class="muted">Cada intento, salga o no. Los bloqueos son la señal más útil para saber si una lista está sucia.</p>
   <div class="toolbar">
     <div><label for="h-status">Estado</label>
       <select id="h-status">
@@ -716,7 +815,6 @@ ${warning}
 </section>
 
 <section id="tab-configuracion" class="card hidden">
-  <h2>Ajustes</h2>
   <p class="muted">Lo que se guarda aquí se aplica en el siguiente envío, sin reiniciar. Un campo vacío significa "lo de siempre" (el valor aparece en gris).</p>
   <div class="cf-vigente" id="cf-vigente"></div>
 
@@ -755,7 +853,7 @@ ${warning}
     <button class="ghost" id="cf-rs-ver-tarde" type="button">Ver cómo queda el de la tarde</button>
     <button class="ghost" id="cf-rs-mandar" type="button">Mandar ahora</button>
   </div>
-  <pre id="cf-rs-vista" class="hidden" style="white-space:pre-wrap;font:inherit;font-size:13px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px"></pre>
+  <pre id="cf-rs-vista" class="vista-previa hidden"></pre>
 
   <h3>Horario de envío</h3>
   <p class="muted">Fuera de esta franja no sale nada iniciado por ti (campañas, reparto, secuencias). Responder a quien escribe no tiene horario.</p>
@@ -819,8 +917,7 @@ ${warning}
 </section>
 
 <section id="tab-usuarios" class="card hidden">
-  <h2>Usuarios</h2>
-  <p class="muted">Quien puede entrar al sistema. Un <b>superadministrador</b> es quien puso el sistema: lleva la <a href="/panel#membresia">membresía</a>, los códigos de conexión y las cuentas de los demás superadministradores. Un <b>administrador</b> configura el negocio y gestiona usuarios y claves de API. Un <b>operador</b> atiende y usa todo lo demás. Cada uno entra con su usuario y contraseña en <code>/login</code>.
+  <p class="muted">Quién puede entrar al sistema. Un <b>superadministrador</b> es quien puso el sistema: lleva la <a href="/panel#membresia">membresía</a>, los códigos de conexión y las cuentas de los demás superadministradores. Un <b>administrador</b> configura el negocio y gestiona usuarios y claves de API. Un <b>operador</b> atiende y usa todo lo demás. Cada uno entra con su usuario y contraseña en <code>/login</code>.
   Los programas (Stoky, el sistema de GSG) no tienen usuario: entran con una clave de API o un código de conexión, ver <a href="/panel#integraciones">Conectar mi web y tienda</a>.</p>
   <div id="us-table" class="tablewrap"></div>
 
@@ -838,8 +935,7 @@ ${warning}
 </section>
 
 <section id="tab-actividad" class="card hidden">
-  <h2>Actividad</h2>
-  <p class="muted">Cada accion que cambia algo deja una fila: quien entro, quien creo un usuario, quien pauso los envios, quien cargo un lote. Se apunta sola. Sin contraseñas ni claves.</p>
+  <p class="muted">Cada acción que cambia algo deja una fila: quién entró, quién creó un usuario, quién pausó los envíos, quién cargó un lote. Se apunta sola, sin contraseñas ni claves.</p>
   <div class="toolbar">
     <div><label for="ac-accion">Accion</label><select id="ac-accion"><option value="">Todas</option></select></div>
     <div><label for="ac-usuario">Quien</label><input id="ac-usuario" placeholder="nombre"></div>
@@ -850,7 +946,6 @@ ${warning}
 </section>
 
 <section id="tab-membresia" class="card hidden">
-  <h2>Membresía</h2>
   <p class="muted" id="mb-intro">El plan de esta instalación: hasta cuándo está pagada, qué incluye y los pagos apuntados. Cuando vence o se suspende, el asistente IA y las campañas se paran; los chats siguen funcionando.</p>
   <div id="mb-estado" style="margin:12px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:10px"></div>
   <div id="mb-editar" class="hidden">
@@ -880,7 +975,7 @@ ${warning}
       <button class="ghost" id="mb-quitar">Quitar la membresía (instancia libre)</button>
       <span id="mb-state" class="pill hidden"></span>
     </div>
-    <h3 style="margin-top:22px">Apuntar un pago</h3>
+    <h3 class="bloque">Apuntar un pago</h3>
     <p class="muted">Corre el vencimiento tantos meses desde la fecha en que está pagada (o desde hoy, si ya venció) y deja la membresía activa.</p>
     <div class="toolbar">
       <div><label for="mb-pago-meses">Meses</label><input id="mb-pago-meses" type="number" min="1" max="60" value="1"></div>
@@ -905,7 +1000,6 @@ ${warning}
 </section>
 
 <section id="tab-tiendas" class="card hidden">
-  <h2>Tiendas</h2>
   <p class="muted">Cada negocio al que le pusiste el sistema tiene su propia instalación. Aquí las tienes todas: su plan, hasta cuándo está pagado, si está en línea; das de alta, apuntas pagos, suspendes o reactivas. Cada tienda toma su plan de aquí (su instalación pregunta cada cuarto de hora con su token).</p>
   <div id="ti-alojamiento" class="muted" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px"></div>
   <div id="ti-resumen" class="grid" style="margin-bottom:14px"></div>
@@ -914,8 +1008,8 @@ ${warning}
     <b>Token de <span id="ti-nueva-nombre"></span>: cópialo ahora, no se volverá a mostrar.</b>
     <code id="ti-token"></code>
     <label>Dirección del plan</label><code id="ti-url-plan"></code>
-    <ol id="ti-pasos" style="margin:8px 0 0;padding-left:20px;font-size:13.5px"></ol>
-    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="ti-copiar">Copiar el token</button><button class="ghost sm" id="ti-cerrar">Ya lo pegué</button></div>
+    <ol id="ti-pasos"></ol>
+    <div class="actions"><button class="ghost sm" id="ti-copiar">Copiar el token</button><button class="ghost sm" id="ti-cerrar">Ya lo pegué</button></div>
   </div>
 
   <h3>Dar de alta una tienda</h3>
@@ -937,8 +1031,7 @@ ${warning}
 </section>
 
 <section id="tab-mi-cuenta" class="card hidden">
-  <h2>Mi cuenta</h2>
-  <div class="grid" id="mc-datos" style="margin-top:10px"></div>
+  <div class="grid" id="mc-datos"></div>
   <h3>Cambiar mi contrasena</h3>
   <p class="muted">Al cambiarla, tus otras sesiones abiertas se cierran; esta sigue.</p>
   <div class="toolbar">
@@ -954,7 +1047,6 @@ ${warning}
 </section>
 
 <section id="tab-stickers" class="card hidden">
-  <h2>Stickers</h2>
   <p class="muted">Un toque humano después de un mensaje. Sube tus stickers (PNG, JPG, GIF o WebP: se convierten solos al formato de WhatsApp) y elige cuál sale
   <b>solo</b> tras el saludo, tras el "gracias" o en la despedida. Desde el chat se manda cualquiera con el botón 🙂, y una respuesta rápida puede llevar uno pegado.
   Con la API oficial de Meta solo salen dentro de las 24 h desde que el cliente escribió.</p>
@@ -982,7 +1074,6 @@ ${warning}
 </section>
 
 <section id="tab-pedidos" class="card hidden">
-  <h2>Pedidos del chat</h2>
   <p class="muted">Cuando el asistente (o una persona desde Chats) cierra una venta, queda aqui con sus lineas, el total calculado con tu catalogo y los datos de entrega. Confirma cuando lo revises; con un webhook o la API, tu tienda lo recibe sola (evento <code>pedido.creado</code>).</p>
   <div class="toolbar">
     <div><label>Estado</label><select id="pd-estado"><option value="">Todos</option><option value="nuevo">Nuevos</option><option value="confirmado">Confirmados</option><option value="enviado_tienda">Enviados a la tienda</option><option value="cancelado">Cancelados</option></select></div>
@@ -1017,7 +1108,6 @@ ${warning}
     .ia-paso .estado { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
     .ia-paso .estado.ok { background: var(--ok); } .ia-paso .estado.bad { background: var(--bad); }
   </style>
-  <h2>Asistente IA</h2>
   <p class="muted">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
   Funciona con la IA de <a href="https://puter.com" target="_blank" rel="noopener">Puter</a> (una sola cuenta para GPT, Claude, Gemini y más) o con cualquier servicio de IA con clave (OpenAI, Groq, Google…).</p>
   <p class="muted" style="background:var(--chip);border-radius:10px;padding:10px 12px;margin:0 0 14px">🎓 <b>¿Quieres enseñarle a gran escala?</b> En <a href="/entrenamiento"><b>Entrenar a la IA</b></a> le das miles de ejemplos, datos y reglas: importas un Excel o un chat exportado, dejas que aprenda de tus conversaciones reales, la corriges desde el chat y la examinas en masa. Lo de aquí abajo es el resumen general del negocio; lo de allí, el detalle.</p>
@@ -1055,10 +1145,10 @@ ${warning}
       <p id="ia-modelo-nota" class="muted" style="margin-top:4px">Solo modelos <b>completamente gratuitos</b> de Puter (no cuestan nada). Se comprueba con su lista cada hora.</p>
       <input id="ia-modelo" list="ia-modelos" placeholder="gpt-4o-mini" class="hidden"><datalist id="ia-modelos"></datalist>
       <div class="actions" style="margin-top:10px"><button class="ghost" id="ia-probar-conexion" type="button">Probar la conexión</button><span id="ia-conexion-estado" class="muted"></span></div>
-      <h3 style="margin-top:18px">Cuándo pasar con una persona</h3>
+      <h3 class="bloque">Cuándo pasar con una persona</h3>
       <label>Si el cliente escribe alguna de estas palabras (separadas por comas)</label>
       <input id="ia-derivar" placeholder="asesor, humano, persona, hablar con alguien, reclamo">
-      <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="ia-avisar"> Avisarme por WhatsApp (al numero del supervisor de Configuracion) cuando pase con una persona</label>
+      <label class="inline" style="margin-top:10px"><input type="checkbox" id="ia-avisar"> Avisarme por WhatsApp (al numero del supervisor de Configuracion) cuando pase con una persona</label>
       <label style="margin-top:10px">Cuantos mensajes anteriores recuerda</label>
       <input id="ia-memoria" type="number" min="0" max="40" value="12" style="width:100px">
     </div>
@@ -1072,7 +1162,7 @@ ${warning}
       <label>Cómo debe hablar (opcional)</label>
       <textarea id="ia-instrucciones" rows="3" placeholder="Tutea, se breve, usa un emoji como mucho. Si preguntan por stock exacto, di que lo confirmamos en un momento."></textarea>
       <div class="solo-completo">
-      <h3 style="margin-top:18px">Tu catálogo real (opcional)</h3>
+      <h3 class="bloque">Tu catálogo real (opcional)</h3>
       <p class="muted">La dirección de los productos de tu tienda online: el asistente da precio, stock y enlace de productos que existen, y puede tomar pedidos. Entiende la tienda de Elysian, WooCommerce o una lista simple con código, nombre, precio, stock y enlace de cada producto.</p>
       <div class="toolbar">
         <div style="flex:2"><label>Dirección del catálogo</label><input id="ia-catalogo-url" placeholder="https://elysian.pe/api/products"></div>
@@ -1083,14 +1173,14 @@ ${warning}
       </div>
     </div>
   </div>
-  <h3 style="margin-top:18px">3. Encender y guardar</h3>
+  <h3 class="bloque">3. Encender y guardar</h3>
   <div class="actions">
-    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ia-activa"> <b>Asistente encendido</b> <span class="muted" style="font-weight:400">(contesta solo a quien escribe; lo del reparto y las entregas sigue igual)</span></label>
+    <label class="inline"><input type="checkbox" id="ia-activa"> <b>Asistente encendido</b> <span class="muted" style="font-weight:400">(contesta solo a quien escribe; lo del reparto y las entregas sigue igual)</span></label>
     <button id="ia-guardar">Guardar</button>
     <span id="ia-state" class="pill hidden"></span>
   </div>
 
-  <h3 style="margin-top:24px">Pruébalo aquí</h3>
+  <h3 class="bloque">Pruébalo aquí</h3>
   <p class="muted">Escribe como si fueras un cliente. No sale nada por WhatsApp; usa lo que guardaste arriba.</p>
   <div id="ia-chat" class="ia-chat"><div class="muted" style="padding:10px">Guarda primero y escribe abajo.</div></div>
   <div class="toolbar" style="margin-top:8px">
@@ -1099,7 +1189,7 @@ ${warning}
     <div><button class="ghost sm" id="ia-probar-limpiar">Empezar de nuevo</button></div>
   </div>
 
-  <h3 style="margin-top:24px">Cómo va la IA</h3>
+  <h3 class="bloque">Cómo va la IA</h3>
   <details class="ia-mas" id="ia-uso-caja">
     <summary style="cursor:pointer;font-weight:600">Uso de la IA <span class="muted" id="ia-uso-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
     <div class="uso-ia" id="ia-uso"></div>
@@ -1117,7 +1207,7 @@ ${warning}
     <div class="actions" style="margin-top:8px"><button class="ghost" id="ia-lector-examinar" type="button">Examinar ahora</button><span class="muted" id="ia-lector-estado"></span></div>
   </details>
 
-  <h3 style="margin-top:24px">Más cosas que puede hacer</h3>
+  <h3 class="bloque">Más cosas que puede hacer</h3>
   <details class="ia-mas" id="ia-voz-caja"><summary id="ia-voz-titulo">🎤 Voz <span class="muted">contestar con audios y entender los del cliente (opcional)</span></summary>
   <p class="muted">Con una cuenta de <a href="https://elevenlabs.io" target="_blank" rel="noopener">ElevenLabs</a> (tiene plan gratis), el asistente puede contestar con <b>notas de voz</b> con la voz que elijas, y <b>entender los audios</b> que manda el cliente (se transcriben: los lee el asistente, se ven escritos en el chat y salen por la API). Otros sistemas conectados (Stoky) solo piden «mándalo con voz»: la voz se elige aquí. Si algo falla (se acaba el plan, el mensaje es muy largo), el mensaje sale por escrito: la voz nunca deja a un cliente sin respuesta.</p>
   <div id="voz-estado-caja" class="muted" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px"></div>
@@ -1146,14 +1236,14 @@ ${warning}
         <option value="siempre">Siempre</option>
         <option value="nunca">Nunca por su cuenta (solo si otro sistema lo pide)</option>
       </select>
-      <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="voz-transcribir" checked> <b>Entender los audios del cliente</b> <span class="muted">(se transcriben al llegar)</span></label>
+      <label class="inline" style="margin-top:12px"><input type="checkbox" id="voz-transcribir" checked> <b>Entender los audios del cliente</b> <span class="muted">(se transcriben al llegar)</span></label>
       <label style="margin-top:12px">Largo máximo de un audio (caracteres)</label>
       <input id="voz-max" type="number" min="50" max="5000" value="600" style="width:120px">
       <p class="muted" style="margin:4px 0 0">Un mensaje más largo sale por escrito: un audio de tres minutos no lo escucha nadie. Los mensajes con enlaces también van por escrito.</p>
     </div>
   </div>
   <div class="actions" style="margin-top:14px">
-    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="voz-activa"> <b>Voz encendida</b></label>
+    <label class="inline"><input type="checkbox" id="voz-activa"> <b>Voz encendida</b></label>
     <button id="voz-guardar">Guardar la voz</button>
     <span id="voz-state" class="pill hidden"></span>
   </div>
@@ -1189,16 +1279,16 @@ ${warning}
       <p class="muted" style="font-size:12.5px;margin:6px 0 0">La clave de conexión lleva dentro la dirección de este sistema, <b>caduca</b> en 7 días y vale una sola vez: Stoky la canjea y recibe su clave de acceso solo. La clave de API a mano es para sistemas que no saben canjearla.</p>
       <div id="cc-nuevo" class="nueva-clave hidden">
         <b>Clave de conexión (pégala en Stoky tal cual):</b>
-        <code id="cc-clave" style="display:block;margin:6px 0;font-size:13px;padding:8px 10px;word-break:break-all"></code>
-        <span class="muted" style="font-size:12.5px">Código corto, por si te lo piden aparte: <code id="cc-valor" style="display:inline;padding:2px 8px"></code></span>
-        <ol id="cc-pasos" style="margin:8px 0 0;padding-left:20px;font-size:13.5px"></ol>
-        <div class="actions" style="margin-top:8px"><button class="ghost sm" id="cc-copiar">Copiar la clave de conexión</button><button class="ghost sm" id="cc-cerrar">Listo</button></div>
+        <code id="cc-clave"></code>
+        <span class="muted">Código corto, por si te lo piden aparte: <code id="cc-valor" class="corto"></code></span>
+        <ol id="cc-pasos"></ol>
+        <div class="actions"><button class="ghost sm" id="cc-copiar">Copiar la clave de conexión</button><button class="ghost sm" id="cc-cerrar">Listo</button></div>
       </div>
       <div id="stk-clave-nueva" class="nueva-clave hidden">
         <b>Copia la clave ahora: no se volverá a mostrar.</b>
         <code id="stk-clave-valor"></code>
         <ol id="stk-clave-pasos"></ol>
-        <div class="actions" style="margin-top:8px"><button class="ghost sm" id="stk-clave-copiar">Copiar la clave</button><button class="ghost sm" id="stk-clave-cerrar">Ya la pegué en Stoky</button></div>
+        <div class="actions"><button class="ghost sm" id="stk-clave-copiar">Copiar la clave</button><button class="ghost sm" id="stk-clave-cerrar">Ya la pegué en Stoky</button></div>
       </div>
     </div>
     <div class="caja-stk">
@@ -1215,7 +1305,7 @@ ${warning}
     </div>
   </div>
 
-  <h2 style="margin-top:28px">Códigos de conexión</h2>
+  <h2>Códigos de conexión</h2>
   <p class="muted">Para conectar otro sistema sin copiar claves largas: un código corto con <b>fecha límite</b> y un número de usos. El otro sistema lo canjea (<code>POST /api/v1/conexion/canjear</code> con <code>{"codigo": "WA-…"}</code>) y recibe su clave de API con los permisos que marques. Al caducar o usarse deja de valer; la clave que salió se revoca en Claves de API.</p>
   <div id="cc-table" class="tablewrap"></div>
   <h3>Nuevo código</h3>
@@ -1231,7 +1321,7 @@ ${warning}
   <div id="cc-permisos" class="permisos"></div>
   <span id="cc-state" class="pill hidden"></span>
 
-  <h2 style="margin-top:28px">Claves de API</h2>
+  <h2>Claves de API</h2>
   <p class="muted">Con una clave, un programa (el sistema de GSG, un script) entra en la API sin usuario ni contrasena.
   La clave se ve entera <b>una sola vez</b>, al crearla; despues solo su comienzo. Revocarla la apaga al instante.
   Una clave no puede crear usuarios ni otras claves.</p>
@@ -1249,7 +1339,7 @@ ${warning}
   <div id="ck-nueva" class="nueva-clave hidden">
     <b>Copia la clave ahora: no se volvera a mostrar.</b>
     <code id="ck-valor"></code>
-    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="ck-copiar">Copiar</button><button class="ghost sm" id="ck-cerrar">Ya la guarde</button></div>
+    <div class="actions"><button class="ghost sm" id="ck-copiar">Copiar</button><button class="ghost sm" id="ck-cerrar">Ya la guardé</button></div>
   </div>
 
   <h3>Como se usa</h3>
@@ -1258,7 +1348,7 @@ ${warning}
   <p class="muted">Una clave sin permisos acotados entra ademas en <code>/admin/*</code>. Para el reparto: <code>POST /admin/rutas/lotes</code> carga la lista del dia, <code>GET /admin/rutas/solicitudes</code> devuelve el avance,
   <code>GET /admin/rutas/cola</code> los reportes pendientes para GSG. El detalle esta en el README, secciones "Integrar otro sistema" y "Conectar el sistema de GSG".</p>
 
-  <h2 style="margin-top:28px">Webhooks salientes</h2>
+  <h2>Webhooks salientes</h2>
   <p class="muted">Para que otro sistema <b>se entere</b> de lo que pasa aqui: cuando llega un mensaje, se entrega, un cliente manda su ubicacion o se da de baja, se le manda un POST firmado a su URL.
   Si su servidor esta caido se reintenta (1 min, 5, 30, 2 h, 12 h); tras un dia entero sin una entrega buena, el webhook se apaga solo y avisa en la campana.</p>
   <div id="wh-table" class="tablewrap"></div>
@@ -1276,14 +1366,14 @@ ${warning}
   <div id="wh-nuevo" class="nueva-clave hidden">
     <b>Copia el secreto ahora: no se volvera a mostrar.</b> Con el, el otro sistema comprueba la firma <code>X-Firma</code> de cada entrega.
     <code id="wh-secreto"></code>
-    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="wh-copiar">Copiar</button><button class="ghost sm" id="wh-cerrar">Ya lo guarde</button></div>
+    <div class="actions"><button class="ghost sm" id="wh-copiar">Copiar</button><button class="ghost sm" id="wh-cerrar">Ya lo guardé</button></div>
   </div>
   <div id="wh-entregas" class="hidden">
     <h3>Ultimas entregas de <span id="wh-entregas-de"></span></h3>
     <div id="wh-entregas-table" class="tablewrap"></div>
   </div>
 
-  <h2 style="margin-top:28px">Conectores de tiendas (WooCommerce, Shopify)</h2>
+  <h2>Conectores de tiendas (WooCommerce, Shopify)</h2>
   <p class="muted">Para tiendas que ya existen y no van a tocar su codigo: la tienda avisa sola de cada pedido (creado, pagado, enviado...) y de aqui sale el WhatsApp que diga la regla.
   Se crea el conector, se pega su URL en la tienda con el secreto, y se elige que mensaje sale con cada evento.</p>
   <div id="cn-table" class="tablewrap"></div>
@@ -1301,7 +1391,7 @@ ${warning}
     <div id="cn-instrucciones" class="muted" style="margin-top:6px"></div>
     <label style="margin-top:8px">URL del webhook</label><code id="cn-url"></code>
     <div id="cn-secreto-bloque"><label>Secreto (se ve una sola vez)</label><code id="cn-secreto-valor"></code></div>
-    <div class="actions" style="margin-top:8px"><button class="ghost sm" id="cn-cerrar">Ya lo pegue</button></div>
+    <div class="actions"><button class="ghost sm" id="cn-cerrar">Ya lo pegué</button></div>
   </div>
 
   <div id="cn-reglas" class="hidden">
@@ -1322,7 +1412,7 @@ ${warning}
     <div id="cn-entradas-table" class="tablewrap"></div>
   </div>
 
-  <h2 style="margin-top:28px">Chat embebido en otra web</h2>
+  <h2>Chat embebido en otra web</h2>
   <p class="muted">La pantalla de chat, dentro de la web de otro sistema (Stoky, una tienda, un CRM): se atiende WhatsApp sin salir de ahi.
   La otra web pega <code>embed.js</code> y le pasa un <b>token</b> que su servidor pide con una clave que tenga el permiso <code>embed:emitir</code>. La clave nunca llega al navegador; el token si, y caduca.</p>
   <label>Webs que pueden embeber el chat (una por linea, con https://)</label>
@@ -1334,8 +1424,7 @@ ${warning}
 </section>
 
 <section id="tab-extraer" class="card hidden">
-  <h2>Extraer latitud y longitud</h2>
-  <p class="muted">Pega cualquier enlace de mapa (Google, Waze, Apple, OSM, plus code, DMS o un acortador).</p>
+  <p class="muted">Pega cualquier enlace de mapa (Google, Waze, Apple, OSM, plus code, DMS o un acortador) y saca la latitud y la longitud.</p>
   <label>Enlace o texto</label>
   <textarea id="g-input" placeholder="https://www.google.com/maps/place/.../@-12.0464,-77.0428,17z/data=!3m1!4b1"></textarea>
   <div class="actions"><button id="g-run">Extraer</button><span id="g-state" class="pill hidden"></span></div>
@@ -1368,7 +1457,8 @@ function activate(id) {
   var s = SECCIONES.filter(function (x) { return x[0] === id; })[0];
   if (s && window.shellTitulo) shellTitulo(s[1], s[2]);
   if (window.shellMarcarActivo) shellMarcarActivo();
-  document.getElementById('s-content').scrollTop = 0;
+  var contenido = porId('s-content');
+  if (contenido) contenido.scrollTop = 0;
   if (LOADERS[id] && (!loaded[id] || SIEMPRE[id])) { loaded[id] = true; LOADERS[id](); }
 }
 window.addEventListener('hashchange', function () { activate(location.hash.slice(1)); });
@@ -1381,6 +1471,8 @@ function kpi(etiqueta, valor, detalle, clase, href) {
   return '<div class="kpi">' + (href ? '<a href="' + esc(href) + '">' + cuerpo + '</a>' : cuerpo) + '</div>';
 }
 function graficaSemana(semana) {
+  /* Sin dias no hay grafica: dividir entre cero pintaba una caja rota. */
+  if (!semana || !semana.length) return '<p class="muted">Todavía no hay mensajes que dibujar.</p>';
   var max = 1;
   semana.forEach(function (d) { max = Math.max(max, d.salientes, d.entrantes); });
   var W = 700, H = 190, arriba = 12, abajo = 26, izq = 30, der = 8;
@@ -1512,7 +1604,8 @@ async function loadInicio() {
   try {
     var r = await api('/admin/resumen');
     var h = r.hoy, n = r.numero, c = r.chats, rp = r.reparto;
-    var pct = h.cupo ? Math.min(100, Math.round(100 * h.usados / h.cupo)) : 0;
+    /* 'pct' es una funcion global (salud): aqui la cifra lleva su propio nombre. */
+    var cupoUsadoPct = h.cupo ? Math.min(100, Math.round(100 * h.usados / h.cupo)) : 0;
     var modoGsgInicio = window.__modoSistema === 'gsg' || (document.querySelector('.s-app') && document.querySelector('.s-app').classList.contains('modo-gsg'));
     pintarAccesos(modoGsgInicio);
     if (modoGsgInicio) {
@@ -1521,7 +1614,7 @@ async function loadInicio() {
         '<a href="/panel#historial">' + esc(h.enviados) + ' enviado' + (h.enviados === 1 ? '' : 's') + '</a> · ' +
         '<a href="/chat">' + esc(h.entrantes) + ' recibido' + (h.entrantes === 1 ? '' : 's') + (c.sinLeer ? ' (' + esc(c.sinLeer) + ' sin leer)' : '') + '</a> · ' +
         '<span class="' + (h.fallidos ? 'mal' : '') + '">' + esc(h.fallidos) + ' fallido' + (h.fallidos === 1 ? '' : 's') + '</span> · ' +
-        '<span title="Solo lo que inicia el sistema (pedir ubicación, confirmar, avisar) gasta cupo; responder a quien escribe no. Un número nuevo empieza con un cupo bajo que sube con los días.">quedan ' + esc(quedan) + ' de ' + esc(h.cupo) + ' del cupo' + (pct > 90 ? ' (casi agotado)' : '') + '</span>' +
+        '<span title="Solo lo que inicia el sistema (pedir ubicación, confirmar, avisar) gasta cupo; responder a quien escribe no. Un número nuevo empieza con un cupo bajo que sube con los días.">quedan ' + esc(quedan) + ' de ' + esc(h.cupo) + ' del cupo' + (cupoUsadoPct > 90 ? ' (casi agotado)' : '') + '</span>' +
         (c.esperandoRespuesta ? ' · <a href="/chat">' + esc(c.esperandoRespuesta) + ' conversación' + (c.esperandoRespuesta === 1 ? '' : 'es') + ' esperan respuesta</a>' : '') +
         '</div>';
     } else
@@ -1529,7 +1622,7 @@ async function loadInicio() {
       kpi('Enviados hoy', h.enviados, 'entregados ' + h.entregados + ' · leídos ' + h.leidos, '', '/panel#historial') +
       kpi('Recibidos hoy', h.entrantes, c.sinLeer + ' sin leer', '', '/chat') +
       kpi('Fallidos hoy', h.fallidos, h.fallidos ? 'mira el historial' : 'ninguno', h.fallidos ? 'bad' : 'ok', '/panel#historial') +
-      kpi('Cupo de hoy', h.usados + ' / ' + h.cupo, '<div class="barra"><i class="' + (pct > 90 ? 'bad' : pct > 70 ? 'warn' : '') + '" style="width:' + pct + '%"></i></div><span title="Solo lo iniciado por la empresa (plantillas, campañas, reparto) gasta cupo; responder a quien escribe no. Un número nuevo empieza con un cupo bajo que sube con los días.">iniciados por ti</span>', pct > 90 ? 'warn' : '', '/panel#estado') +
+      kpi('Cupo de hoy', h.usados + ' / ' + h.cupo, '<div class="barra"><i class="' + (cupoUsadoPct > 90 ? 'bad' : cupoUsadoPct > 70 ? 'warn' : '') + '" style="width:' + cupoUsadoPct + '%"></i></div><span title="Solo lo iniciado por la empresa (plantillas, campañas, reparto) gasta cupo; responder a quien escribe no. Un número nuevo empieza con un cupo bajo que sube con los días.">iniciados por ti</span>', cupoUsadoPct > 90 ? 'warn' : '', '/panel#estado') +
       kpi('Esperan respuesta', c.esperandoRespuesta, 'conversaciones con el cliente al final', c.esperandoRespuesta ? 'warn' : 'ok', '/chat') +
       kpi('Necesitan una persona', rp.requierenPersona, 'solicitudes del reparto', rp.requierenPersona ? 'warn' : 'ok', window.__modoSistema === 'gsg' ? '/hoy' : '/rutas');
     document.getElementById('in-grafica').innerHTML = graficaSemana(r.semana);
@@ -1539,10 +1632,10 @@ async function loadInicio() {
     var luz = n.nivel || 'verde';
     var numero = '<div class="semaforo" style="margin-top:8px"><span class="luz ' + esc(luz) + '"></span><div><b>' + esc(luz.charAt(0).toUpperCase() + luz.slice(1)) + '</b><p class="muted">' + esc(NIVEL_TXT[luz] || '') + '</p></div></div>';
     numero += '<div class="grid" style="margin-top:12px">' +
-      '<div class="stat"><span class="muted">Conexión</span><b class="' + (n.conectado ? 'ok' : 'bad') + '">' + (n.conectado ? 'Conectado' : n.configurado ? 'Caído' : 'Sin conectar') + '</b></div>' +
-      '<div class="stat"><span class="muted">Calidad (Meta)</span><b class="' + qualityKind(n.calidad) + '">' + esc(calidadEnPalabras(n.calidad)) + '</b></div>' +
-      '<div class="stat"><span class="muted">Envíos</span><b class="' + (n.pausado ? 'bad' : 'ok') + '">' + (n.pausado ? 'pausados' : 'activos') + '</b>' + (n.motivoPausa ? '<small>' + esc(n.motivoPausa) + '</small>' : '') + '</div>' +
-      '<div class="stat"><span class="muted">Ritmo</span><b>' + Math.round((n.factor || 1) * 100) + '%</b><small>del normal</small></div>' +
+      stat('Conexión', n.conectado ? 'Conectado' : n.configurado ? 'Caído' : 'Sin conectar', '', n.conectado ? 'ok' : 'bad') +
+      stat('Calidad (Meta)', esc(calidadEnPalabras(n.calidad)), '', qualityKind(n.calidad)) +
+      stat('Envíos', n.pausado ? 'pausados' : 'activos', n.motivoPausa ? esc(n.motivoPausa) : '', n.pausado ? 'bad' : 'ok') +
+      stat('Ritmo', Math.round((n.factor || 1) * 100) + ' %', 'del normal') +
       '</div>';
     if (n.motivos && n.motivos.length) numero += '<ul class="motivos">' + n.motivos.slice(0, 4).map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul>';
     document.getElementById('in-numero').innerHTML = numero;
@@ -1618,21 +1711,33 @@ function pintarVigente(e) {
   ];
   document.getElementById('cf-vigente').innerHTML = partes.map(function (t) { return '<span>' + t + '</span>'; }).join('');
 }
+/* El color con el que se dice «cuanto queda»: el mismo en Ajustes y en Membresia. */
+function colorVencimiento(pl) { return pl.vencido ? 'var(--rojo)' : pl.diasRestantes <= 7 ? 'var(--ambar)' : 'var(--verde)'; }
+/* Lo que incluye el plan, en una linea. Lo pintan igual Ajustes y Membresia. */
+function loQueIncluye(limites, iaGastadas) {
+  return 'Asistente IA: ' + (limites.iaTurnosMes === 0 ? 'no incluido' : limites.iaTurnosMes == null ? 'sin límite' : iaGastadas + ' de ' + limites.iaTurnosMes + ' respuestas este mes') +
+    ' · Campañas: ' + (limites.campanas ? 'sí' : 'no') + ' · Conectores: ' + (limites.conectores ? 'sí' : 'no');
+}
+function fechaPlan(v) { return new Date(v).toLocaleDateString('es-PE'); }
+/* En Ajustes el plan es solo para mirar: una linea y un enlace a Membresia,
+   que es la seccion que de verdad lo lleva. Antes se repetia la ficha entera. */
 async function loadPlan() {
+  var caja = document.getElementById('cf-plan');
   try {
     var p = await api('/admin/plan');
-    var caja = document.getElementById('cf-plan');
     if (p.origen === 'libre' || !p.plan) { caja.classList.add('hidden'); return; }
     var pl = p.plan;
-    var l = pl.limites;
-    var color = pl.vencido ? 'var(--rojo)' : pl.diasRestantes <= 7 ? 'var(--ambar)' : 'var(--verde)';
+    var color = colorVencimiento(pl);
     caja.classList.remove('hidden');
-    caja.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><div><b>Tu plan: ' + esc(pl.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (pl.vencido ? '· vencido' : '· vence en ' + pl.diasRestantes + ' día' + (pl.diasRestantes === 1 ? '' : 's')) + '</span><br><small class="muted">Hasta el ' + esc(new Date(pl.vencimiento).toLocaleDateString()) + (pl.precioMes ? ' · ' + esc(pl.moneda) + ' ' + pl.precioMes + ' al mes' : ' · gratis') + '</small></div>' +
-      '<div class="muted" style="font-size:13px">Asistente IA: ' + (l.iaTurnosMes === 0 ? 'no incluido' : l.iaTurnosMes == null ? 'sin límite' : p.iaTurnosMes + ' de ' + l.iaTurnosMes + ' respuestas este mes') + ' · Campañas: ' + (l.campanas ? 'sí' : 'no') + ' · Conectores: ' + (l.conectores ? 'sí' : 'no') + '</div></div>' +
+    caja.innerHTML = '<b>Tu plan: ' + esc(pl.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (pl.vencido ? '· vencido' : '· vence en ' + pl.diasRestantes + ' día' + (pl.diasRestantes === 1 ? '' : 's')) + '</span> ' +
+      '<a href="/panel#membresia" style="margin-left:6px">Ver la membresía</a>' +
+      '<br><small class="muted">Hasta el ' + esc(fechaPlan(pl.vencimiento)) + (pl.precioMes ? ' · ' + esc(pl.moneda) + ' ' + pl.precioMes + ' al mes' : ' · gratis') + ' · ' + esc(loQueIncluye(pl.limites, p.iaTurnosMes)) + '</small>' +
       (p.aviso ? '<p style="margin:8px 0 0;color:' + color + '">' + esc(p.aviso.texto) + '</p>' : '') +
-      (pl.contacto && !p.aviso ? '<p class="muted" style="margin:8px 0 0">Para cambiar de plan o renovar: ' + esc(pl.contacto) + '</p>' : '') +
       (p.error ? '<p class="muted" style="margin:8px 0 0">No se pudo consultar el plan hace un momento (' + esc(p.error) + '); se usa el último conocido.</p>' : '');
-  } catch (e) { /* sin plan no pasa nada */ }
+  } catch (e) {
+    /* Sin plan que consultar, mejor nada que una ficha vieja que ya no vale. */
+    caja.classList.add('hidden');
+  }
 }
 async function loadConfiguracion() {
   loadAtajos();
@@ -1652,7 +1757,7 @@ async function loadConfiguracion() {
     var selTz = document.getElementById('cf-tz');
     var zonas = (r.zonasHorarias || []).slice();
     if (!zonas.some(function (z) { return z.zona === e.horario.timezone; })) zonas.unshift({ zona: e.horario.timezone, nombre: zonaEnPalabras(e.horario.timezone) });
-    selTz.innerHTML = zonas.map(function (z) { return '<option value="' + esc(z.zona) + '">' + esc(z.nombre) + '</option>'; }).join('');
+    selTz.innerHTML = opciones(zonas.map(function (z) { return { valor: z.zona, texto: z.nombre }; }));
     selTz.value = g.zonaHoraria || e.horario.timezone;
     ponerNum('cf-hora-inicio', g.horario.inicio, e.horario.inicio);
     ponerNum('cf-hora-fin', g.horario.fin, e.horario.fin);
@@ -1768,7 +1873,7 @@ document.getElementById('cf-restablecer').onclick = busy('cf-restablecer', async
 });
 
 // --------------------------------------------------------------- grupos
-var grOpciones = null, grTelefonos = [], grTotal = 0;
+var grOpciones = null, grTelefonos = [];
 function grCriterio() {
   return {
     consentimiento: val('gr-consent') || 'opt_in',
@@ -1781,21 +1886,19 @@ function grCriterio() {
     telefonos: lines(document.getElementById('gr-telefonos').value)
   };
 }
-function llenarSelect(id, etiquetas) {
-  var sel = document.getElementById(id);
-  sel.innerHTML = Object.keys(etiquetas).map(function (k) { return '<option value="' + esc(k) + '">' + esc(etiquetas[k]) + '</option>'; }).join('');
-}
 async function loadGrupos() {
   try {
     grOpciones = await api('/admin/grupos/opciones');
     llenarSelect('gr-reparto', grOpciones.reparto);
     llenarSelect('gr-ficha', grOpciones.ficha);
     llenarSelect('gr-actividad', grOpciones.actividad);
-    document.getElementById('gr-lote').innerHTML = '<option value="">Cualquiera</option>' + grOpciones.lotes.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.nombre) + ' (' + l.total + ', ' + esc(l.estado) + ')</option>'; }).join('');
+    document.getElementById('gr-lote').innerHTML = '<option value="">Cualquiera</option>' +
+      opciones(grOpciones.lotes.map(function (l) { return { valor: l.id, texto: l.nombre + ' (' + l.total + ', ' + l.estado + ')' }; }));
     document.getElementById('gr-plantilla').innerHTML = grOpciones.plantillas.length
-      ? grOpciones.plantillas.map(function (t) { return '<option value="' + esc(t.name + '|' + t.language) + '">' + esc(t.name) + (t.propia ? ' (propia)' : '') + ' · ' + t.variables + ' var.</option>'; }).join('')
+      ? opciones(grOpciones.plantillas.map(function (t) { return { valor: t.name + '|' + t.language, texto: t.name + (t.propia ? ' (propia)' : '') + ' · ' + t.variables + ' var.' }; }))
       : '<option value="">No hay plantillas aprobadas</option>';
-    document.getElementById('gr-secuencia').innerHTML = '<option value="">Inscribir en una secuencia…</option>' + grOpciones.secuencias.map(function (q) { return '<option value="' + esc(q.id) + '">' + esc(q.name) + ' (' + q.pasos + ' pasos)</option>'; }).join('');
+    document.getElementById('gr-secuencia').innerHTML = '<option value="">Inscribir en una secuencia…</option>' +
+      opciones(grOpciones.secuencias.map(function (q) { return { valor: q.id, texto: q.name + ' (' + q.pasos + ' pasos)' }; }));
     var modo = document.getElementById('gr-modo');
     modo.querySelector('option[value="texto"]').disabled = !grOpciones.textoLibre;
     if (!grOpciones.textoLibre) modo.value = 'plantilla';
@@ -1808,6 +1911,19 @@ function grModo() {
   document.getElementById('gr-plantilla-wrap').classList.toggle('hidden', texto);
 }
 document.getElementById('gr-modo').onchange = grModo;
+/* Al tocar un filtro, lo que se vio antes deja de valer: se limpia la tabla y
+   el resumen para que nadie crea que lo de la pantalla es la lista de ahora. */
+['gr-consent', 'gr-reparto', 'gr-lote', 'gr-ficha', 'gr-actividad', 'gr-dias', 'gr-q', 'gr-telefonos'].forEach(function (id) {
+  var campo = document.getElementById(id);
+  if (!campo) return;
+  campo.oninput = campo.onchange = function () {
+    grTelefonos = [];
+    document.getElementById('gr-table').classList.add('hidden');
+    document.getElementById('gr-resumen').innerHTML = '';
+    document.getElementById('gr-previa-out').classList.add('hidden');
+    document.getElementById('gr-state').classList.add('hidden');
+  };
+});
 function repartoTexto(r) {
   if (!r) return pill('muted', 'sin solicitud');
   var kind = r.estado === 'resuelto' ? 'ok' : r.estado === 'incidencia' || r.estado === 'derivado' || r.estado === 'supervision' ? 'warn' : 'muted';
@@ -1821,7 +1937,7 @@ function fichaTexto(f) {
 document.getElementById('gr-ver').onclick = busy('gr-ver', async function () {
   try {
     var r = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() });
-    grTelefonos = r.telefonos; grTotal = r.total;
+    grTelefonos = r.telefonos;
     var c = r.cifras;
     var sinOptIn = r.total - c.conOptIn;
     var chips = ['<span><b>' + r.total + '</b> clientes</span>', '<span>con opt-in <b>' + c.conOptIn + '</b></span>']
@@ -1859,9 +1975,10 @@ document.getElementById('gr-previa').onclick = busy('gr-previa', async function 
 });
 document.getElementById('gr-enviar').onclick = busy('gr-enviar', async function () {
   try {
-    var previa = await api('/admin/grupos/enviar', { method: 'POST', body: grEnvio(true) });
-    var previaGrupo = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() });
-    var sinConsentimiento = previaGrupo.total - previaGrupo.cifras.conOptIn;
+    /* Una sola consulta antes de preguntar: da el total y cuantos van sin opt-in. */
+    var previa = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() });
+    if (!previa.total) throw new Error('Con esos filtros no hay ningún cliente al que escribir.');
+    var sinConsentimiento = previa.total - previa.cifras.conOptIn;
     var ok = await confirmarDialogo({ titulo: 'Enviar a ' + previa.total + ' cliente(s)', texto: 'Saldrá por goteo, al ritmo del número y solo en horario. Primero el canario; si cae bien, el resto. Se puede pausar desde Campañas.' + (sinConsentimiento ? ' OJO: ' + sinConsentimiento + ' no tiene(n) consentimiento registrado y quedarán bloqueados (regístralo en Contactos).' : ''), boton: 'Enviar' });
     if (!ok) return;
     var r = await api('/admin/grupos/enviar', { method: 'POST', body: grEnvio(false) });
@@ -1875,7 +1992,10 @@ document.getElementById('gr-inscribir').onclick = busy('gr-inscribir', async fun
   try {
     var id = val('gr-secuencia');
     if (!id) throw new Error('Elige una secuencia.');
-    if (!grTelefonos.length) { var r0 = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() }); grTelefonos = r0.telefonos; grTotal = r0.total; }
+    /* Siempre con los filtros de ahora mismo: con la lista guardada se podia
+       inscribir a los de una consulta anterior sin enterarse. */
+    var r0 = await api('/admin/grupos/previsualizar', { method: 'POST', body: grCriterio() });
+    grTelefonos = r0.telefonos;
     if (!grTelefonos.length) throw new Error('Con esos filtros no hay ningún cliente.');
     var ok = await confirmarDialogo({ titulo: 'Inscribir a ' + grTelefonos.length + ' cliente(s)', texto: 'Cada uno empezará la secuencia desde el primer paso. Quien ya esté dentro no se duplica.', boton: 'Inscribir' });
     if (!ok) return;
@@ -1893,36 +2013,40 @@ document.getElementById('gr-csv').onclick = busy('gr-csv', async function () {
 });
 
 // --------------------------------------------------------------- actividad
-var acOffset = 0, acLimit = 50, acEtiquetas = {};
+var acEtiquetas = {};
+var acPag = paginador('ac', 50, function () { loadActividad(); });
 function detalleTexto(d) {
   if (!d) return '';
   return Object.keys(d).filter(function (k) { return d[k] !== null && d[k] !== undefined && d[k] !== '{...}'; }).map(function (k) { return k + ': ' + d[k]; }).join(' · ');
 }
 async function loadActividad() {
+  cargando('ac-table');
   try {
-    var q = '?limit=' + acLimit + '&offset=' + acOffset + (val('ac-accion') ? '&accion=' + encodeURIComponent(val('ac-accion')) : '') + (val('ac-usuario') ? '&usuario=' + encodeURIComponent(val('ac-usuario')) : '');
+    var q = '?limit=' + acPag.limite + '&offset=' + acPag.offset + (val('ac-accion') ? '&accion=' + encodeURIComponent(val('ac-accion')) : '') + (val('ac-usuario') ? '&usuario=' + encodeURIComponent(val('ac-usuario')) : '');
     var r = await api('/admin/actividad' + q);
     acEtiquetas = r.etiquetas || {};
     var sel = document.getElementById('ac-accion');
     var actual = sel.value;
-    sel.innerHTML = '<option value="">Todas</option>' + (r.acciones || []).map(function (a) { return '<option value="' + esc(a) + '">' + esc(acEtiquetas[a] || a) + '</option>'; }).join('');
+    sel.innerHTML = '<option value="">Todas</option>' + opciones((r.acciones || []).map(function (a) { return { valor: a, texto: acEtiquetas[a] || a }; }));
     sel.value = actual;
-    table('ac-table', ['Cuando', 'Quien', 'Que', 'Detalle', 'IP'], r.items.map(function (e) {
+    /* La IP va pegada a quien lo hizo: era una columna entera para un dato que
+       casi nadie mira y que estrechaba las demas en el movil. */
+    table('ac-table', ['Cuándo', 'Quién', 'Qué', 'Detalle'], r.items.map(function (e) {
       var kind = /fallido|borrar|revocar|baja/.test(e.accion) ? 'bad' : /pausa|restablecer|derivar/.test(e.accion) ? 'warn' : 'muted';
-      return ['<span style="white-space:nowrap">' + esc(fmt(e.at)) + '</span><span class="muted">' + esc(ago(e.at)) + '</span>', esc(e.usuario), pill(kind, acEtiquetas[e.accion] || e.accion), '<span class="muted" style="display:inline">' + esc(detalleTexto(e.detalle)) + '</span>', esc(e.ip || '')];
-    }), 'Todavía no hay actividad registrada.');
-    var desde = r.total ? acOffset + 1 : 0;
-    document.getElementById('ac-page').textContent = desde + '–' + Math.min(acOffset + acLimit, r.total) + ' de ' + r.total;
-    document.getElementById('ac-prev').disabled = acOffset === 0;
-    document.getElementById('ac-next').disabled = acOffset + acLimit >= r.total;
-  } catch (error) {
-    document.getElementById('ac-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
-  }
+      return [
+        '<span style="white-space:nowrap">' + esc(fmt(e.at)) + '</span><span class="muted">' + esc(ago(e.at)) + '</span>',
+        esc(e.usuario) + (e.ip ? '<span class="muted">' + esc(e.ip) + '</span>' : ''),
+        pill(kind, acEtiquetas[e.accion] || e.accion),
+        '<span class="muted" style="display:inline">' + esc(detalleTexto(e.detalle)) + '</span>'
+      ];
+    }), val('ac-accion') || val('ac-usuario')
+      ? { titulo: 'Nada con ese filtro', texto: 'Prueba con «Todas» las acciones o vacía el nombre.' }
+      : { titulo: 'Todavía no hay actividad', texto: 'Se apunta sola: entrar, crear un usuario, pausar los envíos, cargar un lote.' });
+    acPag.pintar(r.items.length, r.total);
+  } catch (error) { tablaError('ac-table', error, loadActividad); }
 }
-document.getElementById('ac-buscar').onclick = function () { acOffset = 0; loadActividad(); };
-document.getElementById('ac-accion').onchange = function () { acOffset = 0; loadActividad(); };
-document.getElementById('ac-prev').onclick = function () { acOffset = Math.max(0, acOffset - acLimit); loadActividad(); };
-document.getElementById('ac-next').onclick = function () { acOffset += acLimit; loadActividad(); };
+document.getElementById('ac-buscar').onclick = acPag.desdeElPrincipio;
+document.getElementById('ac-accion').onchange = acPag.desdeElPrincipio;
 
 // --------------------------------------------------------------- stickers
 var stickersCache = [];
@@ -1935,25 +2059,23 @@ function leerFichero(file) {
   });
 }
 function opcionesStickers(sel, elegido) {
-  sel.innerHTML = '<option value="">(ninguno)</option>' + stickersCache.map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === elegido ? ' selected' : '') + '>' + esc(s.nombre) + ' (' + esc(s.uso) + ')</option>'; }).join('');
+  sel.innerHTML = '<option value="">(ninguno)</option>' + opciones(stickersCache.map(function (s) { return { valor: s.id, texto: s.nombre + ' (' + s.uso + ')' }; }), elegido);
 }
 async function loadStickers() {
   try {
     var r = await api('/admin/stickers');
     stickersCache = r.stickers;
-    document.getElementById('sk-uso').innerHTML = r.usos.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc(u.etiqueta) + '</option>'; }).join('');
+    llenarSelect('sk-uso', r.usos.map(function (u) { return { valor: u.id, texto: u.etiqueta }; }));
     document.getElementById('sk-grid').innerHTML = stickersCache.length
       ? stickersCache.map(function (s) {
           return '<div class="sk-item"><img src="/stickers/' + esc(s.archivo) + '" alt=""><b title="' + esc(s.nombre) + '">' + esc(s.nombre) + '</b><small>' + esc(s.uso) + ' · ' + Math.round(s.bytes / 1024) + ' KB</small><button class="danger sm" data-sk-borrar="' + esc(s.id) + '">Quitar</button></div>';
         }).join('')
-      : '<div class="empty">Todavía no hay stickers. Sube el primero arriba.</div>';
-    document.querySelectorAll('[data-sk-borrar]').forEach(function (b) {
-      b.onclick = async function () {
-        var ok = await confirmarDialogo({ titulo: 'Quitar el sticker', texto: 'Si estaba puesto como automático, deja de salir.', boton: 'Quitar', peligro: true });
-        if (!ok) return;
-        try { await api('/admin/stickers/' + b.getAttribute('data-sk-borrar'), { method: 'DELETE' }); loadStickers(); }
-        catch (error) { show('sk-state', error.message, 'bad'); }
-      };
+      : vacio({ titulo: 'Todavía no hay stickers', texto: 'Sube el primero arriba: vale un PNG, un JPG, un GIF o un WebP; se convierte solo al formato de WhatsApp.' });
+    alPulsar('data-sk-borrar', 'sk-state', async function (id) {
+      var ok = await confirmarDialogo({ titulo: 'Quitar el sticker', texto: 'Si estaba puesto como automático, deja de salir.', boton: 'Quitar', peligro: true });
+      if (!ok) return;
+      await api('/admin/stickers/' + id, { method: 'DELETE' });
+      loadStickers();
     });
     var c = r.configuracion || {};
     opcionesStickers(document.getElementById('sk-auto-inicio'), c.inicio);
@@ -2009,8 +2131,9 @@ async function loadClaves() {
     '     -d \'{"telefono":"51987654321","texto":"Tu pedido ya salio","consentimiento":{"origen":"pedido P-1024"}}\' ' + location.origin + '/api/v1/mensajes';
   try {
     var contrato = await cargarContratoApi();
-    casillas('ck-permisos', Object.keys(contrato.permisos).filter(function (p) { return p !== '*'; }).map(function (p) { return { valor: p, texto: contrato.permisos[p] }; }), 'permiso');
-    casillas('cc-permisos', Object.keys(contrato.permisos).filter(function (p) { return p !== '*'; }).map(function (p) { return { valor: p, texto: contrato.permisos[p] }; }), 'permiso-cc');
+    var permisos = Object.keys(contrato.permisos).filter(function (x) { return x !== '*'; }).map(function (x) { return { valor: x, texto: contrato.permisos[x] }; });
+    casillas('ck-permisos', permisos, 'permiso');
+    casillas('cc-permisos', permisos, 'permiso-cc');
     casillas('wh-eventos', contrato.eventos.map(function (e) { return { valor: e.nombre, texto: e.descripcion }; }), 'evento');
   } catch (error) { show('ck-state', error.message, 'bad'); }
   loadWebhooks();
@@ -2025,22 +2148,21 @@ async function loadClaves() {
       return [esc(k.nombre), '<code>' + esc(k.prefijo) + '</code>', permisos, esc(fmt(k.createdAt)), esc(fmt(k.ultimoUsoAt) || 'nunca'),
         pill(k.revocadaAt ? 'bad' : 'ok', k.revocadaAt ? 'revocada' : 'activa'),
         k.revocadaAt ? '' : '<button class="danger sm" data-ck-revocar="' + esc(k.id) + '">Revocar</button>'];
-    }), 'Todavía no hay claves. Crea una para Stoky o para el sistema de GSG.');
-    document.querySelectorAll('[data-ck-revocar]').forEach(function (b) {
-      b.onclick = async function () {
-        var ok = await confirmarDialogo({ titulo: 'Revocar la clave', texto: 'El programa que la use dejará de entrar en el acto. No se puede deshacer.', boton: 'Revocar', peligro: true });
-        if (!ok) return;
-        try { await api('/admin/claves-api/' + b.getAttribute('data-ck-revocar'), { method: 'DELETE' }); loadClaves(); }
-        catch (error) { show('ck-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Todavía no hay claves', texto: 'Crea una abajo para Stoky o para el sistema de GSG: con ella entran en la API sin usuario ni contraseña.' });
+    alPulsar('data-ck-revocar', 'ck-state', async function (id) {
+      var ok = await confirmarDialogo({ titulo: 'Revocar la clave', texto: 'El programa que la use dejará de entrar en el acto. No se puede deshacer.', boton: 'Revocar', peligro: true });
+      if (!ok) return;
+      await api('/admin/claves-api/' + id, { method: 'DELETE' });
+      loadClaves();
     });
   } catch (error) {
-    document.getElementById('ck-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
+    tablaError('ck-table', error, loadClaves);
     document.getElementById('ck-crear').disabled = true;
   }
 }
 document.getElementById('ck-crear').onclick = busy('ck-crear', async function () {
   try {
+    if (!val('ck-nombre')) throw new Error('Escribe para quién es la clave: así se sabe cuál revocar cuando haga falta.');
     var r = await api('/admin/claves-api', { method: 'POST', body: { nombre: val('ck-nombre'), permisos: marcadas('ck-permisos') } });
     document.getElementById('ck-valor').textContent = r.clave;
     document.getElementById('ck-nueva').classList.remove('hidden');
@@ -2060,14 +2182,12 @@ async function loadCodigos() {
       var e = ESTADO_CODIGO[c.estadoReal] || ['muted', c.estadoReal];
       var canje = c.canjeadoAt ? esc(fmt(c.canjeadoAt)) + ' por ' + esc(c.canjeadoPor || '') + (c.canjeadoDesde ? ' <small class="muted">(' + esc(c.canjeadoDesde) + ')</small>' : '') : '<span class="muted">todavía no</span>';
       return ['<code>' + esc(c.codigo) + '</code>', esc(c.para), esc(fmt(c.caducaAt)), c.usos + ' de ' + c.usosMax, pill(e[0], e[1]), canje, c.estadoReal === 'activo' ? '<button class="danger sm" data-cc-anular="' + esc(c.id) + '">Anular</button>' : ''];
-    }), 'Ningún código todavía.');
-    document.querySelectorAll('[data-cc-anular]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/codigos-conexion/' + b.getAttribute('data-cc-anular'), { method: 'DELETE' }); loadCodigos(); }
-        catch (error) { show('cc-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Ningún código todavía', texto: 'Crea uno abajo: el otro sistema lo canjea y recibe su clave de API con los permisos que marques.' });
+    alPulsar('data-cc-anular', 'cc-state', async function (id) {
+      await api('/admin/codigos-conexion/' + id, { method: 'DELETE' });
+      loadCodigos();
     });
-  } catch (error) { show('cc-state', error.message, 'bad'); }
+  } catch (error) { tablaError('cc-table', error, loadCodigos); }
 }
 async function crearCodigo(para, dias, hasta, usos, permisos) {
   var body = { para: para, usosMax: usos || 1, permisos: permisos || [] };
@@ -2097,10 +2217,8 @@ document.getElementById('cc-crear-stoky').onclick = busy('cc-crear-stoky', async
     document.getElementById('cc-nuevo').scrollIntoView({ behavior: 'smooth', block: 'center' });
   } catch (error) { show('stk-state', error.message, 'bad'); }
 });
-document.getElementById('cc-copiar').onclick = function () {
-  navigator.clipboard.writeText(document.getElementById('cc-clave').textContent || document.getElementById('cc-valor').textContent).then(function () { show('cc-state', 'Clave de conexión copiada', 'ok'); });
-};
-document.getElementById('cc-cerrar').onclick = function () { document.getElementById('cc-nuevo').classList.add('hidden'); };
+botonCopiar('cc-copiar', 'cc-clave', 'cc-state', 'Clave de conexión copiada');
+botonCerrar('cc-cerrar', 'cc-nuevo', 'cc-clave');
 
 // --- Stoky: las dos direcciones ---
 function luz(clase, texto, sub) {
@@ -2155,10 +2273,8 @@ document.getElementById('stk-clave').onclick = busy('stk-clave', async function 
     loadClaves();
   } catch (error) { show('stk-state', error.message, 'bad'); }
 });
-document.getElementById('stk-clave-copiar').onclick = function () {
-  navigator.clipboard.writeText(document.getElementById('stk-clave-valor').textContent).then(function () { show('stk-state', 'Clave copiada', 'ok'); });
-};
-document.getElementById('stk-clave-cerrar').onclick = function () { document.getElementById('stk-clave-nueva').classList.add('hidden'); };
+botonCopiar('stk-clave-copiar', 'stk-clave-valor', 'stk-state', 'Clave copiada');
+botonCerrar('stk-clave-cerrar', 'stk-clave-nueva', 'stk-clave-valor');
 document.getElementById('stk-probar').onclick = busy('stk-probar', async function () {
   show('stk-state', 'Preguntando a Stoky…', 'warn');
   try {
@@ -2170,6 +2286,7 @@ document.getElementById('stk-probar').onclick = busy('stk-probar', async functio
 });
 document.getElementById('stk-guardar').onclick = busy('stk-guardar', async function () {
   try {
+    if (!val('stk-url')) throw new Error('Falta la dirección de Stoky (la API que consulta este servidor).');
     var r = await api('/admin/integraciones/stoky', { method: 'POST', body: { url: val('stk-url'), panelUrl: val('stk-panel') || undefined, token: val('stk-token') || undefined } });
     show('stk-state', r.mensaje, r.prueba && r.prueba.ok ? 'ok' : 'warn');
     setVal('stk-token', '');
@@ -2203,62 +2320,43 @@ async function loadWebhooks() {
         (w.activo ? '' : '<button class="ghost sm" data-wh-reencolar="' + esc(w.id) + '">Reintentar fallidas</button> ') +
         '<button class="danger sm" data-wh-borrar="' + esc(w.id) + '">Borrar</button>';
       return [esc(w.descripcion || '—'), '<code>' + esc(w.url) + '</code>', eventos, ultima, estado, botones];
-    }), 'Todavía no hay webhooks. Registra la URL del sistema que quiera enterarse de lo que pasa aquí.');
+    }), { titulo: 'Todavía no hay webhooks', texto: 'Registra abajo la URL del sistema que quiera enterarse de lo que pasa aquí: cada mensaje, entrega, ubicación o baja le llega como un POST firmado.' });
 
-    document.querySelectorAll('[data-wh-probar]').forEach(function (b) {
-      b.onclick = busy(b, async function () {
-        try {
-          var p = await api('/api/v1/webhooks/' + b.getAttribute('data-wh-probar') + '/probar', { method: 'POST' });
-          show('wh-state', p.ok ? 'La URL contestó ' + p.codigo + ': el webhook funciona.' : 'La URL no contestó bien: ' + (p.error || p.codigo) + (p.respuesta ? ' — ' + p.respuesta : ''), p.ok ? 'ok' : 'bad');
-        } catch (error) { show('wh-state', error.message, 'bad'); }
-      });
+    alPulsar('data-wh-probar', 'wh-state', async function (id) {
+      var p = await api('/api/v1/webhooks/' + id + '/probar', { method: 'POST' });
+      show('wh-state', p.ok ? 'La URL contestó ' + p.codigo + ': el webhook funciona.' : 'La URL no contestó bien: ' + (p.error || p.codigo) + (p.respuesta ? ' — ' + p.respuesta : ''), p.ok ? 'ok' : 'bad');
     });
-    document.querySelectorAll('[data-wh-entregas]').forEach(function (b) {
-      b.onclick = async function () {
-        try {
-          var e = await api('/api/v1/webhooks/' + b.getAttribute('data-wh-entregas') + '/entregas?limite=50');
-          document.getElementById('wh-entregas-de').textContent = b.getAttribute('data-wh-nombre');
-          document.getElementById('wh-entregas').classList.remove('hidden');
-          table('wh-entregas-table', ['Cuándo', 'Evento', 'Estado', 'Intentos', 'Respuesta', 'Próximo intento'], e.entregas.map(function (x) {
-            var estado = x.estado === 'enviada' ? pill('ok', 'entregada') : x.estado === 'fallida' ? pill('bad', 'fallida') : pill('warn', 'pendiente');
-            var respuesta = (x.respuestaCodigo ? 'HTTP ' + x.respuestaCodigo + ' ' : '') + (x.error && x.estado !== 'enviada' ? esc(x.error) : '') + (x.respuesta ? '<br><small class="muted">' + esc(String(x.respuesta).slice(0, 120)) + '</small>' : '');
-            return [esc(fmt(x.createdAt)), '<code>' + esc(x.evento) + '</code>', estado, String(x.intentos), respuesta || '—', x.estado === 'pendiente' ? esc(fmt(x.proximoIntentoAt)) : '—'];
-          }), 'Todavía no se ha entregado nada a este webhook.');
-          document.getElementById('wh-entregas').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        } catch (error) { show('wh-state', error.message, 'bad'); }
-      };
+    alPulsar('data-wh-entregas', 'wh-state', async function (id, b) {
+      var e = await api('/api/v1/webhooks/' + id + '/entregas?limite=50');
+      document.getElementById('wh-entregas-de').textContent = b.getAttribute('data-wh-nombre');
+      document.getElementById('wh-entregas').classList.remove('hidden');
+      table('wh-entregas-table', ['Cuándo', 'Evento', 'Estado', 'Intentos', 'Respuesta', 'Próximo intento'], e.entregas.map(function (x) {
+        var estado = x.estado === 'enviada' ? pill('ok', 'entregada') : x.estado === 'fallida' ? pill('bad', 'fallida') : pill('warn', 'pendiente');
+        var respuesta = (x.respuestaCodigo ? 'HTTP ' + x.respuestaCodigo + ' ' : '') + (x.error && x.estado !== 'enviada' ? esc(x.error) : '') + (x.respuesta ? '<br><small class="muted">' + esc(String(x.respuesta).slice(0, 120)) + '</small>' : '');
+        return [esc(fmt(x.createdAt)), '<code>' + esc(x.evento) + '</code>', estado, String(x.intentos), respuesta || '—', x.estado === 'pendiente' ? esc(fmt(x.proximoIntentoAt)) : '—'];
+      }), 'Todavía no se ha entregado nada a este webhook.');
+      document.getElementById('wh-entregas').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
-    document.querySelectorAll('[data-wh-activo]').forEach(function (b) {
-      b.onclick = async function () {
-        try {
-          await api('/api/v1/webhooks/' + b.getAttribute('data-wh-activo'), { method: 'PATCH', body: { activo: b.getAttribute('data-wh-valor') === '1' } });
-          loadWebhooks();
-        } catch (error) { show('wh-state', error.message, 'bad'); }
-      };
+    alPulsar('data-wh-activo', 'wh-state', async function (id, b) {
+      await api('/api/v1/webhooks/' + id, { method: 'PATCH', body: { activo: b.getAttribute('data-wh-valor') === '1' } });
+      loadWebhooks();
     });
-    document.querySelectorAll('[data-wh-reencolar]').forEach(function (b) {
-      b.onclick = async function () {
-        try {
-          var x = await api('/api/v1/webhooks/' + b.getAttribute('data-wh-reencolar') + '/reencolar', { method: 'POST' });
-          show('wh-state', x.reencoladas + ' entrega' + (x.reencoladas === 1 ? '' : 's') + ' de vuelta en la cola. Actívalo para que salgan.', 'ok');
-          loadWebhooks();
-        } catch (error) { show('wh-state', error.message, 'bad'); }
-      };
+    alPulsar('data-wh-reencolar', 'wh-state', async function (id) {
+      var x = await api('/api/v1/webhooks/' + id + '/reencolar', { method: 'POST' });
+      show('wh-state', x.reencoladas + ' entrega' + (x.reencoladas === 1 ? '' : 's') + ' de vuelta en la cola. Actívalo para que salgan.', 'ok');
+      loadWebhooks();
     });
-    document.querySelectorAll('[data-wh-borrar]').forEach(function (b) {
-      b.onclick = async function () {
-        var ok = await confirmarDialogo({ titulo: 'Borrar el webhook', texto: 'Ese sistema dejará de recibir avisos y se borra el historial de entregas. No se puede deshacer.', boton: 'Borrar', peligro: true });
-        if (!ok) return;
-        try { await api('/api/v1/webhooks/' + b.getAttribute('data-wh-borrar'), { method: 'DELETE' }); loadWebhooks(); }
-        catch (error) { show('wh-state', error.message, 'bad'); }
-      };
+    alPulsar('data-wh-borrar', 'wh-state', async function (id) {
+      var ok = await confirmarDialogo({ titulo: 'Borrar el webhook', texto: 'Ese sistema dejará de recibir avisos y se borra el historial de entregas. No se puede deshacer.', boton: 'Borrar', peligro: true });
+      if (!ok) return;
+      await api('/api/v1/webhooks/' + id, { method: 'DELETE' });
+      loadWebhooks();
     });
-  } catch (error) {
-    document.getElementById('wh-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
-  }
+  } catch (error) { tablaError('wh-table', error, loadWebhooks); }
 }
 document.getElementById('wh-crear').onclick = busy('wh-crear', async function () {
   try {
+    if (!/^https?:\/\/.+/i.test(val('wh-url'))) throw new Error('La URL que recibe el POST tiene que empezar por https:// (o http:// si es de tu red).');
     var r = await api('/api/v1/webhooks', { method: 'POST', body: { url: val('wh-url'), descripcion: val('wh-descripcion'), eventos: marcadas('wh-eventos') } });
     document.getElementById('wh-secreto').textContent = r.secreto;
     document.getElementById('wh-nuevo').classList.remove('hidden');
@@ -2268,13 +2366,8 @@ document.getElementById('wh-crear').onclick = busy('wh-crear', async function ()
     loadWebhooks();
   } catch (error) { show('wh-state', error.message, 'bad'); }
 });
-document.getElementById('wh-copiar').onclick = function () {
-  navigator.clipboard.writeText(document.getElementById('wh-secreto').textContent).then(function () { show('wh-state', 'Copiado', 'ok'); });
-};
-document.getElementById('wh-cerrar').onclick = function () {
-  document.getElementById('wh-secreto').textContent = '';
-  document.getElementById('wh-nuevo').classList.add('hidden');
-};
+botonCopiar('wh-copiar', 'wh-secreto', 'wh-state', 'Secreto copiado');
+botonCerrar('wh-cerrar', 'wh-nuevo', 'wh-secreto');
 
 // --- conectores de tiendas ---
 var CN_OPCIONES = null;
@@ -2290,7 +2383,7 @@ async function loadConectores() {
   try {
     if (!CN_OPCIONES) {
       CN_OPCIONES = await api('/api/v1/conectores/opciones');
-      document.getElementById('cn-probar-evento').innerHTML = CN_OPCIONES.eventos.map(function (e) { return '<option value="' + esc(e.nombre) + '">' + esc(e.nombre) + '</option>'; }).join('');
+      llenarSelect('cn-probar-evento', CN_OPCIONES.eventos.map(function (e) { return { valor: e.nombre, texto: e.nombre }; }));
     }
     var r = await api('/api/v1/conectores');
     table('cn-table', ['Tienda', 'Nombre', 'URL', 'Reglas', 'Recibidos', 'Estado', ''], r.conectores.map(function (c) {
@@ -2301,26 +2394,21 @@ async function loadConectores() {
         '<button class="ghost sm" data-cn-activo="' + esc(c.id) + '" data-cn-valor="' + (c.activo ? '0' : '1') + '">' + (c.activo ? 'Pausar' : 'Activar') + '</button> ' +
         '<button class="danger sm" data-cn-borrar="' + esc(c.id) + '">Borrar</button>';
       return [esc(c.tipo), esc(c.nombre), '<code>' + esc(c.url) + '</code>', activas, String(c.eventosRecibidos) + (c.ultimoEventoAt ? '<br><small class="muted">' + esc(fmt(c.ultimoEventoAt)) + '</small>' : ''), pill(c.activo ? 'ok' : 'warn', c.activo ? 'activo' : 'pausado'), botones];
-    }), 'Todavía no hay conectores. Crea uno para tu tienda WooCommerce o Shopify.');
-    document.querySelectorAll('[data-cn-reglas]').forEach(function (b) { b.onclick = function () { abrirReglas(b.getAttribute('data-cn-reglas'), r.conectores); }; });
-    document.querySelectorAll('[data-cn-entradas]').forEach(function (b) { b.onclick = function () { verEntradas(b.getAttribute('data-cn-entradas'), r.conectores); }; });
-    document.querySelectorAll('[data-cn-activo]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/api/v1/conectores/' + b.getAttribute('data-cn-activo'), { method: 'PATCH', body: { activo: b.getAttribute('data-cn-valor') === '1' } }); loadConectores(); }
-        catch (error) { show('cn-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Todavía no hay conectores', texto: 'Crea uno abajo para tu tienda WooCommerce o Shopify: ella avisa de cada pedido y de aquí sale el WhatsApp que diga la regla.' });
+    alPulsar('data-cn-reglas', 'cn-state', function (id) { abrirReglas(id, r.conectores); });
+    alPulsar('data-cn-entradas', 'cn-state', function (id) { return verEntradas(id, r.conectores); });
+    alPulsar('data-cn-activo', 'cn-state', async function (id, b) {
+      await api('/api/v1/conectores/' + id, { method: 'PATCH', body: { activo: b.getAttribute('data-cn-valor') === '1' } });
+      loadConectores();
     });
-    document.querySelectorAll('[data-cn-borrar]').forEach(function (b) {
-      b.onclick = async function () {
-        var ok = await confirmarDialogo({ titulo: 'Borrar el conector', texto: 'La tienda seguirá mandando sus webhooks a una URL que ya no existe. Bórralo también allí.', boton: 'Borrar', peligro: true });
-        if (!ok) return;
-        try { await api('/api/v1/conectores/' + b.getAttribute('data-cn-borrar'), { method: 'DELETE' }); document.getElementById('cn-reglas').classList.add('hidden'); loadConectores(); }
-        catch (error) { show('cn-state', error.message, 'bad'); }
-      };
+    alPulsar('data-cn-borrar', 'cn-state', async function (id) {
+      var ok = await confirmarDialogo({ titulo: 'Borrar el conector', texto: 'La tienda seguirá mandando sus webhooks a una URL que ya no existe. Bórralo también allí.', boton: 'Borrar', peligro: true });
+      if (!ok) return;
+      await api('/api/v1/conectores/' + id, { method: 'DELETE' });
+      document.getElementById('cn-reglas').classList.add('hidden');
+      loadConectores();
     });
-  } catch (error) {
-    document.getElementById('cn-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
-  }
+  } catch (error) { tablaError('cn-table', error, loadConectores); }
 }
 document.getElementById('cn-crear').onclick = busy('cn-crear', async function () {
   try {
@@ -2341,17 +2429,14 @@ document.getElementById('cn-crear').onclick = busy('cn-crear', async function ()
     loadConectores();
   } catch (error) { show('cn-state', error.message, 'bad'); }
 });
-document.getElementById('cn-cerrar').onclick = function () {
-  document.getElementById('cn-secreto-valor').textContent = '';
-  document.getElementById('cn-nuevo').classList.add('hidden');
-};
+botonCerrar('cn-cerrar', 'cn-nuevo', 'cn-secreto-valor');
 function abrirReglas(id, conectores) {
   var c = conectores.filter(function (x) { return x.id === id; })[0];
   if (!c) return;
   CN_ABIERTO = c;
   document.getElementById('cn-reglas-de').textContent = c.nombre;
   document.getElementById('cn-reglas').classList.remove('hidden');
-  var opcionesPlantilla = '<option value="">— sin plantilla —</option>' + CN_OPCIONES.plantillas.map(function (p) { return '<option value="' + esc(p.nombre) + '">' + esc(p.nombre) + ' (' + p.variables + ' var.)</option>'; }).join('');
+  var opcionesPlantilla = '<option value="">— sin plantilla —</option>' + opciones(CN_OPCIONES.plantillas.map(function (x) { return { valor: x.nombre, texto: x.nombre + ' (' + x.variables + ' var.)' }; }));
   var filas = CN_OPCIONES.eventos.map(function (e) {
     var r = c.reglas.filter(function (x) { return x.evento === e.nombre; })[0] || { activo: false, plantilla: null, variables: [], texto: '' };
     return [
@@ -2406,7 +2491,7 @@ async function verEntradas(id, conectores) {
     table('cn-entradas-table', ['Cuándo', 'Evento', 'Pedido', 'Teléfono', 'Resultado', 'Detalle'], r.entradas.map(function (e) {
       var kind = e.resultado === 'enviado' ? 'ok' : e.resultado === 'bloqueado' || e.resultado === 'error' ? 'bad' : 'warn';
       return [esc(fmt(e.createdAt)), '<code>' + esc(e.evento) + '</code>' + (e.eventoOrigen ? '<br><small class="muted">' + esc(e.eventoOrigen) + '</small>' : ''), esc(e.pedido || '—'), esc(e.telefono || '—'), pill(kind, e.resultado), esc(e.detalle || '')];
-    }), 'Todavía no ha llegado ningún pedido de esta tienda.');
+    }), 'Todavía no ha llegado ningún pedido de esta tienda. Comprueba que el webhook esté pegado allí.');
     document.getElementById('cn-entradas').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (error) { show('cn-state', error.message, 'bad'); }
 }
@@ -2415,6 +2500,7 @@ async function verEntradas(id, conectores) {
 // --------------------------------------------------------------- pedidos del chat
 var PD_ESTADOS = { nuevo: ['warn', 'nuevo'], confirmado: ['ok', 'confirmado'], enviado_tienda: ['ok', 'en la tienda'], cancelado: ['bad', 'cancelado'] };
 async function loadPedidos() {
+  cargando('pd-table');
   try {
     var estado = val('pd-estado');
     var r = await api('/api/v1/pedidos?limite=100' + (estado ? '&estado=' + estado : ''));
@@ -2427,18 +2513,15 @@ async function loadPedidos() {
       if (p.estado !== 'cancelado') botones += '<button class="ghost sm" data-pd-estado="enviado_tienda" data-pd-id="' + p.id + '">Ya en la tienda</button> <button class="danger sm" data-pd-estado="cancelado" data-pd-id="' + p.id + '">Cancelar</button>';
       var cliente = esc(p.nombre || p.contactoNombre || p.contactoTelefono) + '<br><small class="muted">' + esc(p.contactoTelefono) + ' · ' + esc(fmt(p.createdAt)) + (p.origen === 'ia' ? ' · lo tomó la IA' : '') + '</small>';
       return ['<b>' + p.id + '</b>', cliente, lineas, '<b>' + esc(p.moneda) + ' ' + Number(p.total).toFixed(2) + '</b>', datos || '—', pill(e[0], e[1]) + (p.externoId ? '<br><small class="muted">tienda #' + esc(p.externoId) + '</small>' : ''), botones];
-    }), 'Todavía no hay pedidos tomados en el chat. Cuando el asistente tenga tu catálogo (Mi asistente IA → Tu catálogo real) podrá cerrarlos solo.');
-    document.querySelectorAll('[data-pd-estado]').forEach(function (b) {
-      b.onclick = async function () {
-        var estadoNuevo = b.getAttribute('data-pd-estado');
-        if (estadoNuevo === 'cancelado' && !(await confirmarDialogo({ titulo: 'Cancelar el pedido', texto: 'El pedido queda como cancelado. Avísale al cliente por el chat.', boton: 'Cancelar pedido', peligro: true }))) return;
-        try { await api('/api/v1/pedidos/' + b.getAttribute('data-pd-id'), { method: 'PATCH', body: { estado: estadoNuevo } }); loadPedidos(); }
-        catch (error) { show('pd-state', error.message, 'bad'); }
-      };
+    }), val('pd-estado')
+      ? { titulo: 'Ningún pedido en ese estado', texto: 'Pon el filtro en «Todos» para verlos todos.' }
+      : { titulo: 'Todavía no hay pedidos del chat', texto: 'Cuando el asistente tenga tu catálogo podrá cerrar ventas solo, y cada una aparecerá aquí con sus líneas y su total.', href: '/panel#ia', boton: 'Poner el catálogo' });
+    alPulsar('data-pd-estado', 'pd-state', async function (estadoNuevo, b) {
+      if (estadoNuevo === 'cancelado' && !(await confirmarDialogo({ titulo: 'Cancelar el pedido', texto: 'El pedido queda como cancelado. Avísale al cliente por el chat.', boton: 'Cancelar pedido', peligro: true }))) return;
+      await api('/api/v1/pedidos/' + b.getAttribute('data-pd-id'), { method: 'PATCH', body: { estado: estadoNuevo } });
+      loadPedidos();
     });
-  } catch (error) {
-    document.getElementById('pd-table').innerHTML = '<div class="empty">' + esc(error.message) + '</div>';
-  }
+  } catch (error) { tablaError('pd-table', error, loadPedidos); }
 }
 document.getElementById('pd-refrescar').onclick = loadPedidos;
 document.getElementById('pd-estado').onchange = loadPedidos;
@@ -2539,7 +2622,8 @@ document.getElementById('ia-puter-conectar').onclick = async function () {
     if (!puter.authToken) await puter.auth.signIn();
     if (!puter.authToken) throw new Error('No se obtuvo la sesión de Puter.');
     var quien = 'tu cuenta';
-    try { var u = await puter.auth.getUser(); quien = (u && (u.username || u.email)) || quien; } catch (e) {}
+    /* Saber el nombre es un adorno: si Puter no lo da, la sesion vale igual. */
+    try { var u = await puter.auth.getUser(); quien = (u && (u.username || u.email)) || quien; } catch (e) { quien = 'tu cuenta'; }
     // El token de la sesión va al servidor (cifrado): es el que usa para
     // contestar por WhatsApp cuando nadie tiene el panel abierto.
     await api('/admin/ia', { method: 'POST', body: { token: puter.authToken, proveedor: 'puter' } });
@@ -2564,7 +2648,7 @@ async function loadVoz() {
     if (e.ultimoError) caja.innerHTML += '<br><span style="color:var(--bad)">Último fallo (' + esc(fmt(e.ultimoError.at)) + '): ' + esc(e.ultimoError.detalle) + '</span>';
     document.getElementById('voz-clave-estado').textContent = e.tieneClave ? 'Hay una clave guardada' + (e.claveTermina ? ' (termina en …' + e.claveTermina + ')' : '') + '. Deja el campo vacío para conservarla; pega otra para cambiarla.' : 'Todavía no hay clave: sin ella no hay audios ni transcripción.';
     var selModelo = document.getElementById('voz-modelo');
-    selModelo.innerHTML = (e.modelos || []).map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.nombre) + '</option>'; }).join('');
+    selModelo.innerHTML = opciones((e.modelos || []).map(function (m) { return { valor: m.id, texto: m.nombre }; }));
     selModelo.value = e.modelo;
     selModelo.onchange = function () { var m = (e.modelos || []).filter(function (x) { return x.id === selModelo.value; })[0]; document.getElementById('voz-modelo-nota').textContent = m ? m.nota : ''; };
     selModelo.onchange();
@@ -2661,7 +2745,10 @@ async function loadIaUso() {
     if (u.fallosSeguidos >= 3) { nota.innerHTML = '<b style="color:var(--bad)">El asistente lleva ' + u.fallosSeguidos + ' fallos seguidos</b>: ' + esc(u.ultimoFallo ? u.ultimoFallo.detalle : '') + '. Revisa la clave o el servicio y pulsa «Probar la conexión».'; document.getElementById('ia-uso-caja').open = true; }
     else if (u.ultimoFallo) nota.textContent = 'Último fallo: ' + fmt(u.ultimoFallo.cuando) + ' — ' + u.ultimoFallo.detalle;
     else nota.textContent = u.cuentaTokens ? 'Los tokens los dice el servicio en cada respuesta; el costo depende de tu plan con ' + esc(u.servicio || 'ese servicio') + '.' : 'Con Puter no hay tokens que contar aquí: los modelos gratuitos no cuestan nada.';
-  } catch (e) { /* sin uso no pasa nada */ }
+  } catch (e) {
+    /* Las cifras de uso son informativas: sin ellas el asistente funciona igual. */
+    document.getElementById('ia-uso-resumen').textContent = '· no se pudieron leer las cifras';
+  }
 }
 /* Lo que la IA no entendio: casos con un boton por cada "era…". */
 /* Un aviso breve arriba de la caja (pages.ts no tiene toast global). */
@@ -2729,7 +2816,14 @@ function pintarExamenLector(r) {
 }
 async function loadExamenLector() {
   if (!document.getElementById('ia-lector')) return;
-  try { var r = await api('/admin/ia/examen-lector'); document.getElementById('ia-lector-umbral').textContent = String(r.umbral || 90); pintarExamenLector(r); } catch (e) { /* sin examen no pasa nada */ }
+  try {
+    var r = await api('/admin/ia/examen-lector');
+    document.getElementById('ia-lector-umbral').textContent = String(r.umbral || 90);
+    pintarExamenLector(r);
+  } catch (e) {
+    /* El examen es opcional: si no hay, se dice y el boton sigue estando. */
+    document.getElementById('ia-lector-resumen').textContent = '· todavía no se ha examinado';
+  }
 }
 document.getElementById('ia-lector-examinar').onclick = busy('ia-lector-examinar', async function () {
   var estado = document.getElementById('ia-lector-estado');
@@ -2749,11 +2843,11 @@ async function loadIa() {
     window.__iaModelos = e.modelosSugeridos;
     IA_SERVICIOS = e.servicios || [];
     var selServicio = document.getElementById('ia-servicio');
-    selServicio.innerHTML = IA_SERVICIOS.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.nombre) + '</option>'; }).join('');
+    selServicio.innerHTML = opciones(IA_SERVICIOS.map(function (x) { return { valor: x.id, texto: x.nombre }; }));
     selServicio.value = e.servicio || 'openai';
     var gratis = e.modelosGratis || [];
     var selGratis = document.getElementById('ia-modelo-gratis');
-    selGratis.innerHTML = gratis.map(function (m) { var d = (e.descripcionGratis && e.descripcionGratis[m]) || ''; return '<option value="' + esc(m) + '" title="' + esc(m) + '">' + esc(d ? d : m) + '</option>'; }).join('');
+    selGratis.innerHTML = opciones(gratis.map(function (m) { return { valor: m, texto: (e.descripcionGratis && e.descripcionGratis[m]) || m, titulo: m }; }));
     selGratis.value = gratis.indexOf(e.modelo) >= 0 ? e.modelo : e.modeloEfectivo;
     document.getElementById('ia-modelo-nota').innerHTML = 'Solo modelos <b>completamente gratuitos</b> de Puter (no cuestan nada). ' + (e.modelosGratisOrigen === 'catalogo' ? 'Comprobado con su lista en vivo.' : 'Lista fija (no se pudo consultar la suya).') + (e.proveedor === 'puter' && e.modelo !== e.modeloEfectivo ? ' <b>El modelo guardado ya no es gratuito: se usa ' + esc(e.modeloEfectivo) + '.</b>' : '');
     setVal('ia-nombre', e.nombreAsistente); setVal('ia-conocimiento', e.conocimiento); setVal('ia-instrucciones', e.instrucciones);
@@ -2853,8 +2947,13 @@ async function iaCargarEscenarios() {
     var sel = document.getElementById('ia-esc-grupo');
     var cuenta = {};
     e.escenarios.forEach(function (x) { cuenta[x.grupo] = (cuenta[x.grupo] || 0) + 1; });
-    sel.innerHTML = Object.keys(e.grupos).map(function (g) { return '<option value="' + esc(g) + '">' + esc(e.grupos[g]) + ' (' + (cuenta[g] || 0) + ')</option>'; }).join('');
-  } catch (error) { /* sin IA en este arranque */ }
+    sel.innerHTML = opciones(Object.keys(e.grupos).map(function (g) { return { valor: g, texto: e.grupos[g] + ' (' + (cuenta[g] || 0) + ')' }; }));
+  } catch (error) {
+    /* Sin IA en este arranque no hay grupos que correr: mejor decirlo que
+       dejar un desplegable vacio y un boton que solo da error. */
+    document.getElementById('ia-esc-grupo').innerHTML = '<option value="">No hay escenarios disponibles</option>';
+    document.getElementById('ia-esc-correr').disabled = true;
+  }
 }
 document.getElementById('ia-esc-correr').onclick = busy('ia-esc-correr', async function () {
   var grupo = val('ia-esc-grupo');
@@ -2905,14 +3004,8 @@ document.getElementById('em-guardar').onclick = busy('em-guardar', async functio
     show('em-state', dominios.length ? 'Guardado: ' + dominios.length + ' web' + (dominios.length === 1 ? '' : 's') + ' pueden embeber el chat.' : 'Guardado: ninguna web ajena puede embeber el chat.', 'ok');
   } catch (error) { show('em-state', error.message, 'bad'); }
 });
-document.getElementById('ck-copiar').onclick = function () {
-  var v = document.getElementById('ck-valor').textContent;
-  navigator.clipboard.writeText(v).then(function () { show('ck-state', 'Copiada', 'ok'); });
-};
-document.getElementById('ck-cerrar').onclick = function () {
-  document.getElementById('ck-valor').textContent = '';
-  document.getElementById('ck-nueva').classList.add('hidden');
-};
+botonCopiar('ck-copiar', 'ck-valor', 'ck-state', 'Clave copiada');
+botonCerrar('ck-cerrar', 'ck-nueva', 'ck-valor');
 
 function out(id, data) {
   var el = document.getElementById(id);
@@ -2987,25 +3080,31 @@ async function loadHealth() {
     var h = await api('/admin/health');
     var n = h.number;
     document.getElementById('stats').innerHTML =
-      '<div class="stat"><span class="muted">Calidad</span><b class="' + qualityKind(n.quality) + '">' + esc(calidadEnPalabras(n.quality)) + '</b><span class="muted">' + esc(n.tier || 'tier desconocido') + '</span></div>' +
-      '<div class="stat"><span class="muted">Estado</span><b>' + (n.paused ? 'PAUSADO' : 'activo') + '</b><span class="muted">' + esc(n.pausedReason || '') + '</span></div>' +
-      '<div class="stat"><span class="muted">Enviados hoy</span><b>' + h.sentToday + ' / ' + h.dailyCap + '</b><span class="muted">cupo de warm-up</span></div>' +
-      '<div class="stat"><span class="muted">En cola</span><b>' + ((h.queue.waiting || 0) + (h.queue.delayed || 0)) + '</b><span class="muted">' + (h.queue.failed || 0) + ' fallidos</span></div>' +
-      '<div class="stat"><span class="muted">WhatsApp</span><b class="' + (h.configured ? 'ok' : 'warn') + '">' + (h.configured ? 'Conectado' : 'Sin conectar') + '</b><span class="muted">' + esc((h.missing || []).join(', ')) + '</span></div>' +
-      (h.salud ? '<div class="stat"><span class="muted">Salud</span><b class="' + nivelKind(h.salud.nivel) + '">' + esc(h.salud.nivel) + '</b><span class="muted">velocidad al ' + Math.round((h.salud.factor || 0) * 100) + ' % - <a href="#salud">ver por que</a></span></div>' : '');
-    show('state', n.paused ? 'Envios pausados' : 'Operativo', n.paused ? 'warn' : 'ok');
+      stat('Calidad', esc(calidadEnPalabras(n.quality)), esc(n.tier || 'tier desconocido'), qualityKind(n.quality)) +
+      stat('Envíos', n.paused ? 'Pausados' : 'Activos', esc(n.pausedReason || ''), n.paused ? 'bad' : 'ok') +
+      stat('Enviados hoy', h.sentToday + ' / ' + h.dailyCap, 'cupo de warm-up') +
+      stat('En cola', (h.queue.waiting || 0) + (h.queue.delayed || 0), (h.queue.failed || 0) + ' fallidos') +
+      stat('WhatsApp', h.configured ? 'Conectado' : 'Sin conectar', esc((h.missing || []).join(', ')), h.configured ? 'ok' : 'warn') +
+      (h.salud ? stat('Riesgo', esc(h.salud.nivel), 'velocidad al ' + Math.round((h.salud.factor || 0) * 100) + ' % · <a href="#salud">ver por qué</a>', nivelKind(h.salud.nivel)) : '');
+
+    /* El aviso va en esta seccion y no en la pildora del armazon: alli se
+       quedaba pegado un «Operativo» al pasar a cualquier otra pantalla. */
+    show('num-state', n.paused ? 'Envíos pausados' : 'Operativo', n.paused ? 'warn' : 'ok');
+    /* Solo se deja pulsar el boton que de verdad cambia algo. */
+    document.getElementById('pause').disabled = n.paused;
+    document.getElementById('resume').disabled = !n.paused;
     // Lo que Meta cambia con fecha (solo con la API oficial): se marca como hecho en Conexion de WhatsApp.
     var avisos = (h.avisosMeta || []).filter(function (a) { return a.estado !== 'ok'; });
     var cajaAvisos = document.getElementById('estado-avisos-meta');
     if (avisos.length) {
       var COLOR = { vencido: 'bad', urgente: 'warn', pendiente: '', hecho: 'ok' };
       cajaAvisos.innerHTML = avisos.map(function (a) {
-        var cuando = a.estado === 'hecho' ? 'hecho el ' + fmt(a.hechoEl).split(',')[0] : a.diasRestantes < 0 ? 'venció hace ' + (-a.diasRestantes) + ' días' : a.diasRestantes === 0 ? 'vence hoy' : 'quedan ' + a.diasRestantes + ' días';
+        var cuando = a.estado === 'hecho' ? 'hecho el ' + fechaCorta(a.hechoEl) : a.diasRestantes < 0 ? 'venció hace ' + (-a.diasRestantes) + ' días' : a.diasRestantes === 0 ? 'vence hoy' : 'quedan ' + a.diasRestantes + ' días';
         return '<div style="padding:8px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">' + pill(COLOR[a.estado] || 'warn', cuando) + ' <b>' + esc(a.titulo) + '</b>' + (a.estado === 'hecho' ? '' : '<br><span class="muted">' + esc(a.detalle) + ' <a href="/setup">Marcar como hecho en Conexión de WhatsApp</a>.</span>') + '</div>';
       }).join('');
       cajaAvisos.classList.remove('hidden');
     } else { cajaAvisos.classList.add('hidden'); cajaAvisos.innerHTML = ''; }
-  } catch (error) { show('state', error.message, 'bad'); }
+  } catch (error) { show('num-state', error.message, 'bad'); }
 }
 document.getElementById('refresh').onclick = loadHealth;
 document.getElementById('numsync').onclick = busy('numsync', async function () {
@@ -3049,13 +3148,13 @@ async function loadSalud() {
     var n = s.numero || {};
     var r = s.ritmo || {};
     document.getElementById('sl-stats').innerHTML =
-      '<div class="stat"><span class="muted">Meta dice</span><b class="' + qualityKind(n.quality) + '">' + esc(calidadEnPalabras(n.quality)) + '</b><small>' + esc(n.estado || '') + (n.tier ? ' - ' + esc(n.tier) : '') + '</small></div>' +
-      '<div class="stat"><span class="muted">Hoy</span><b>' + r.hoy + ' / ' + r.cupoHoy + '</b><small>cupo de warm-up</small><div class="barra"><i class="' + (r.hoy >= r.cupoHoy ? 'bad' : '') + '" style="width:' + Math.min(100, Math.round((r.hoy / Math.max(1, r.cupoHoy)) * 100)) + '%"></i></div></div>' +
-      '<div class="stat"><span class="muted">Ultima hora</span><b>' + r.ultimaHora + ' / ' + Math.max(1, Math.floor((s.politica.maxPorHora || 0) * s.factor)) + '</b><small>' + r.ultimoMinuto + ' en el ultimo minuto</small></div>' +
-      '<div class="stat"><span class="muted">Destinatarios 24 h</span><b>' + r.destinatariosUnicos24h + (r.limiteTier ? ' / ' + (isFinite(r.limiteTier) ? r.limiteTier : 'sin limite') : '') + '</b><small>' + (r.limiteTier ? 'tier de Meta, se para al ' + Math.round(s.politica.fraccionTier * 100) + ' %' : s.politica.perfil === 'cloud' ? 'Meta no ha dicho el tier: sincroniza en Estado' : 'sin tier (cliente no oficial)') + '</small></div>' +
-      '<div class="stat"><span class="muted">Contactos nuevos hoy</span><b>' + r.nuevosContactosHoy + (s.politica.nuevosContactosPorDia ? ' / ' + s.politica.nuevosContactosPorDia : '') + '</b><small>' + (s.politica.nuevosContactosPorDia ? 'cupo del perfil' : 'sin cupo en este perfil') + '</small></div>' +
-      '<div class="stat"><span class="muted">Proximo envio</span><b>' + (r.enHorario ? (r.proximoEnvioMs > 0 ? Math.ceil(r.proximoEnvioMs / 1000) + ' s' : 'ya') : 'fuera de horario') + '</b><small>' + s.politica.horaInicio + ':00 a ' + s.politica.horaFin + ':00</small></div>' +
-      '<div class="stat"><span class="muted">Apartados</span><b>' + s.contactosSuprimidos + '</b><small>contactos con supresion vigente</small></div>';
+      stat('Meta dice', esc(calidadEnPalabras(n.quality)), esc(n.estado || '') + (n.tier ? ' · ' + esc(n.tier) : ''), qualityKind(n.quality)) +
+      stat('Hoy', r.hoy + ' / ' + r.cupoHoy, 'cupo de warm-up<div class="barra"><i class="' + (r.hoy >= r.cupoHoy ? 'bad' : '') + '" style="width:' + Math.min(100, Math.round((r.hoy / Math.max(1, r.cupoHoy)) * 100)) + '%"></i></div>') +
+      stat('Última hora', r.ultimaHora + ' / ' + Math.max(1, Math.floor((s.politica.maxPorHora || 0) * s.factor)), r.ultimoMinuto + ' en el último minuto') +
+      stat('Destinatarios 24 h', r.destinatariosUnicos24h + (r.limiteTier ? ' / ' + (isFinite(r.limiteTier) ? r.limiteTier : 'sin límite') : ''), r.limiteTier ? 'tier de Meta, se para al ' + Math.round(s.politica.fraccionTier * 100) + ' %' : s.politica.perfil === 'cloud' ? 'Meta no ha dicho el tier: sincronízalo en Estado del número' : 'sin tier (cliente no oficial)') +
+      stat('Contactos nuevos hoy', r.nuevosContactosHoy + (s.politica.nuevosContactosPorDia ? ' / ' + s.politica.nuevosContactosPorDia : ''), s.politica.nuevosContactosPorDia ? 'cupo del perfil' : 'sin cupo en este perfil') +
+      stat('Próximo envío', r.enHorario ? (r.proximoEnvioMs > 0 ? Math.ceil(r.proximoEnvioMs / 1000) + ' s' : 'ya') : 'fuera de horario', s.politica.horaInicio + ':00 a ' + s.politica.horaFin + ':00') +
+      stat('Apartados', s.contactosSuprimidos, 'contactos con supresión vigente');
 
     var p = s.politica;
     document.getElementById('sl-politica').textContent =
@@ -3064,29 +3163,29 @@ async function loadSalud() {
       'Marketing descansa tras ' + p.fatigaEnvios + ' mensajes sin respuesta. En rojo se pausa ' + Math.round(p.pausaRojaMin / 60) + ' h y se vuelve en rampa de ' + Math.round(p.rampaMin / 60) + ' h.' + (p.humanizar ? ' Escritura simulada.' : '') +
       (p.avisarA ? ' Avisos a ' + p.avisarA + '.' : ' Sin numero al que avisar (RUTAS_SUPERVISOR).');
     document.getElementById('sl-ritmo').innerHTML =
-      '<div class="stat"><span class="muted">Fallos tolerados</span><b>' + p.umbrales.maxFallosPct + ' %</b><small>de los ultimos 50</small></div>' +
-      '<div class="stat"><span class="muted">Sin WhatsApp</span><b>' + p.umbrales.maxSinWhatsappPct + ' %</b><small>lista sucia a partir de ahi</small></div>' +
-      '<div class="stat"><span class="muted">Bajas</span><b>' + p.umbrales.maxBajasPct + ' %</b><small>en 24 h</small></div>' +
-      '<div class="stat"><span class="muted">Entrega minima</span><b>' + p.umbrales.minEntregaPct + ' %</b><small>de lo enviado hace mas de 1 h</small></div>';
+      stat('Fallos tolerados', p.umbrales.maxFallosPct + ' %', 'de los últimos 50') +
+      stat('Sin WhatsApp', p.umbrales.maxSinWhatsappPct + ' %', 'lista sucia a partir de ahí') +
+      stat('Bajas', p.umbrales.maxBajasPct + ' %', 'en 24 h') +
+      stat('Entrega mínima', p.umbrales.minEntregaPct + ' %', 'de lo enviado hace más de 1 h');
 
     var v = s.ventanas || {};
     var u = v.ultimos50 || {}, d = v.dia || {}, h = v.hora || {};
     var codigos = function (pc) { var k = Object.keys(pc || {}); return k.length ? k.map(function (c) { return c + ' x' + pc[c]; }).join(', ') : '-'; };
-    table('sl-ventanas', ['Ventana', 'Enviados', 'Entregados', 'Fallidos', 'Codigos', 'Bajas', 'Entrantes', 'Quejas', 'Desconexiones'], [
+    table('sl-ventanas', ['Ventana', 'Enviados', 'Entregados', 'Fallidos', 'Códigos', 'Bajas', 'Entrantes', 'Quejas', 'Desconexiones'], [
       ['Ultimos 50', String(u.enviados || 0), '-', String(u.fallidos || 0), codigos(u.porCodigo), '-', '-', '-', '-'],
       ['24 h', String(d.enviados || 0), (d.entregados || 0) + ' (' + pct(d.entregadosMaduros, d.enviadosMaduros) + ' de lo maduro)', '-', codigos(d.porCodigo), String(d.bajas || 0), String(d.entrantes || 0), String(d.quejas || 0), '-'],
       ['1 h', '-', '-', String(h.fallidos || 0), codigos(h.porCodigo), '-', '-', '-', String(h.desconexiones || 0)]
     ], 'Sin datos');
 
-    table('sl-plantillas', ['Plantilla', 'Estado', 'Calidad', 'Pausada hasta', 'Pausas'], (s.plantillas || []).map(function (t) {
+    table('sl-plantillas', ['Plantilla', 'Estado', 'Calidad', 'Pausada hasta', 'Pausas de Meta'], (s.plantillas || []).map(function (t) {
       var pausada = t.pausadaHasta && new Date(t.pausadaHasta) > new Date();
       return [esc(t.name), pill(statusKind(t.status), t.status), t.quality ? pill(qualityKind(t.quality), t.quality) : '<span class="muted">-</span>',
         pausada ? pill('warn', hastaCuando(t.pausadaHasta)) : '<span class="muted">-</span>', String(t.pausas || 0) + (t.pausas >= 2 ? ' (la proxima la deshabilita)' : '')];
-    }), 'Sin plantillas en el registro');
+    }), 'Sin plantillas en el registro: sincroniza desde Meta en Plantillas.');
 
-    table('sl-eventos', ['Cuando', 'Tipo', 'Codigo', 'Detalle'], (s.eventos || []).map(function (e) {
+    table('sl-eventos', ['Cuándo', 'Tipo', 'Código', 'Detalle'], (s.eventos || []).map(function (e) {
       return [esc(fmt(e.at)), esc(e.tipo), e.codigo ? '<code>' + esc(e.codigo) + '</code>' : '-', '<span class="muted">' + esc(e.detalle || '') + '</span>'];
-    }), 'Todavia no hay senales: eso es buena senal');
+    }), 'Todavía no hay señales, que es la mejor señal.');
   } catch (error) { show('sl-state', error.message, 'bad'); }
 }
 document.getElementById('sl-refresh').onclick = loadSalud;
@@ -3106,6 +3205,8 @@ document.getElementById('sl-levantar').onclick = busy('sl-levantar', async funct
 // ---------------------------------------------------------------- enviar
 document.getElementById('m-send').onclick = async function () {
   try {
+    if (!val('m-phone')) throw new Error('Falta el teléfono, con código de país y sin espacios (51987654321).');
+    if (!document.getElementById('m-text').value.trim()) throw new Error('Falta el texto del mensaje.');
     var data = await api('/admin/messages/text', { method: 'POST', body: { phone: val('m-phone'), text: document.getElementById('m-text').value } });
     show('m-state', data.ok ? 'Enviado' : 'No salió', data.ok ? 'ok' : 'warn');
     resultado('m-out', data, 'Mensaje enviado');
@@ -3113,6 +3214,8 @@ document.getElementById('m-send').onclick = async function () {
 };
 document.getElementById('u-send').onclick = async function () {
   try {
+    if (!val('u-phone')) throw new Error('Falta el teléfono al que mandar el pin.');
+    if (!val('u-input')) throw new Error('Pega el enlace del mapa o las coordenadas.');
     var data = await api('/admin/messages/location', { method: 'POST', body: { phone: val('u-phone'), input: val('u-input'), name: val('u-name') || undefined } });
     show('u-state', data.ok ? 'Enviado' : 'No salió', data.ok ? 'ok' : 'warn');
     resultado('u-out', data, 'Pin enviado');
@@ -3120,6 +3223,7 @@ document.getElementById('u-send').onclick = async function () {
 };
 document.getElementById('u-ask').onclick = async function () {
   try {
+    if (!val('u-phone')) throw new Error('Falta el teléfono al que pedirle la ubicación.');
     var data = await api('/admin/messages/ask-location', { method: 'POST', body: { phone: val('u-phone') } });
     show('u-state', data.ok ? 'Solicitud enviada' : 'No salió', data.ok ? 'ok' : 'warn');
     resultado('u-out', data, 'Solicitud de ubicación enviada');
@@ -3127,66 +3231,65 @@ document.getElementById('u-ask').onclick = async function () {
 };
 
 // ------------------------------------------------------------- contactos
-var ctOffset = 0, CT_LIMIT = 50;
 function contactState(c) {
   if (c.optOutAt) return pill('bad', 'baja');
   if (c.optInAt) return pill('ok', 'opt-in');
   return pill('muted', 'sin consentimiento');
 }
-document.getElementById('ct-csv').onclick = function () {
-  location.href = '/admin/contacts.csv?state=' + encodeURIComponent(val('ct-state') || 'all') + '&q=' + encodeURIComponent(val('ct-q'));
-};
+function ctFiltros() { return { state: val('ct-state') || 'all', q: val('ct-q') }; }
+var ctPag = paginador('ct', 50, function () { loadContacts(); });
+document.getElementById('ct-csv').onclick = function () { descargarCsv('/admin/contacts.csv', ctFiltros()); };
 async function loadContacts() {
+  cargando('ct-table');
   try {
-    var q = '/admin/contacts?limit=' + CT_LIMIT + '&offset=' + ctOffset + '&state=' + encodeURIComponent(val('ct-state') || 'all') + '&q=' + encodeURIComponent(val('ct-q'));
-    var data = await api(q);
-    table('ct-table', ['Contacto', 'Estado', 'Origen', 'Ultimo mensaje', 'Ultima ubicacion', ''], data.items.map(function (c) {
+    var f = ctFiltros();
+    var data = await api('/admin/contacts?limit=' + ctPag.limite + '&offset=' + ctPag.offset + '&state=' + encodeURIComponent(f.state) + '&q=' + encodeURIComponent(f.q));
+    table('ct-table', ['Contacto', 'Estado', 'Origen del opt-in', 'Último mensaje', 'Última ubicación', ''], data.items.map(function (c) {
       return [
         contactCell(c.phone, c.name),
         contactState(c),
         esc(c.optInSource || ''),
-        c.lastInboundAt ? esc(ago(c.lastInboundAt)) + '<span class="muted">' + esc(fmt(c.lastInboundAt)) + '</span>' : '<span class="muted">nunca</span>',
+        c.lastInboundAt ? esc(ago(c.lastInboundAt)) + '<span class="muted">' + esc(fmt(c.lastInboundAt)) + '</span>' : '<span class="muted">nunca escribió</span>',
         c.lastLocation ? mapsLink(c.lastLocation.lat, c.lastLocation.lng) + '<span class="muted">' + esc(ago(c.lastLocation.at)) + '</span>' : '',
         (c.optOutAt ? '' : '<button class="danger sm" data-optout="' + esc(c.phone) + '">Baja</button> ') +
         (c.optInAt && !c.optOutAt ? '' : '<button class="ghost sm" data-optin="' + esc(c.phone) + '">Alta</button>')
       ];
-    }), 'Sin contactos');
-    document.getElementById('ct-page').textContent = (data.total ? (ctOffset + 1) + '-' + Math.min(ctOffset + CT_LIMIT, data.total) + ' de ' + data.total : '0');
-    document.getElementById('ct-prev').disabled = ctOffset === 0;
-    document.getElementById('ct-next').disabled = ctOffset + CT_LIMIT >= data.total;
-    document.querySelectorAll('[data-optout]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/contacts/opt-out', { method: 'POST', body: { phone: b.getAttribute('data-optout') } }); loadContacts(); }
-        catch (error) { show('ct-state-msg', error.message, 'bad'); }
-      };
+    }), f.q || f.state !== 'all'
+      ? { titulo: 'Ningún contacto con ese filtro', texto: 'Prueba a vaciar la búsqueda o a poner el estado en «Todos».' }
+      : { titulo: 'Todavía no hay contactos', texto: 'Pega tu lista abajo, en «Importar contactos con opt-in»: una línea por contacto, teléfono y nombre.' });
+    ctPag.pintar(data.items.length, data.total);
+    alPulsar('data-optout', 'ct-state-msg', async function (phone) {
+      await api('/admin/contacts/opt-out', { method: 'POST', body: { phone: phone } });
+      loadContacts();
     });
-    document.querySelectorAll('[data-optin]').forEach(function (b) {
-      b.onclick = async function () {
-        var source = await pedirDato({
-          titulo: 'Origen del consentimiento',
-          texto: 'Queda guardado con el contacto: es la prueba de que aceptó recibir mensajes.',
-          etiqueta: '¿De dónde salió el consentimiento?',
-          valor: 'panel',
-          marcador: 'formulario web, compra en tienda, llamada...',
-          boton: 'Guardar consentimiento'
-        });
-        if (!source) return;
-        try { await api('/admin/contacts/opt-in', { method: 'POST', body: { phone: b.getAttribute('data-optin'), source: source } }); loadContacts(); }
-        catch (error) { show('ct-state-msg', error.message, 'bad'); }
-      };
+    alPulsar('data-optin', 'ct-state-msg', async function (phone) {
+      var source = await pedirDato({
+        titulo: 'Origen del consentimiento',
+        texto: 'Queda guardado con el contacto: es la prueba de que aceptó recibir mensajes.',
+        etiqueta: '¿De dónde salió el consentimiento?',
+        valor: 'panel',
+        marcador: 'formulario web, compra en tienda, llamada...',
+        boton: 'Guardar consentimiento'
+      });
+      if (!source) return;
+      await api('/admin/contacts/opt-in', { method: 'POST', body: { phone: phone, source: source } });
+      loadContacts();
     });
-  } catch (error) { show('ct-state-msg', error.message, 'bad'); }
+  } catch (error) { tablaError('ct-table', error, loadContacts); }
 }
-document.getElementById('ct-search').onclick = function () { ctOffset = 0; loadContacts(); };
-document.getElementById('ct-q').onkeydown = function (e) { if (e.key === 'Enter') { ctOffset = 0; loadContacts(); } };
-document.getElementById('ct-prev').onclick = function () { ctOffset = Math.max(0, ctOffset - CT_LIMIT); loadContacts(); };
-document.getElementById('ct-next').onclick = function () { ctOffset += CT_LIMIT; loadContacts(); };
+document.getElementById('ct-search').onclick = ctPag.desdeElPrincipio;
+document.getElementById('ct-state').onchange = ctPag.desdeElPrincipio;
+document.getElementById('ct-q').onkeydown = function (e) { if (e.key === 'Enter') ctPag.desdeElPrincipio(); };
 document.getElementById('ct-do-import').onclick = busy('ct-do-import', async function () {
   try {
-    var data = await api('/admin/contacts/import', { method: 'POST', body: { source: val('ct-source') || 'importacion desde el panel', text: document.getElementById('ct-import').value } });
-    show('ct-state-msg', 'Importados ' + data.imported + ' de ' + data.received, 'ok');
+    var texto = document.getElementById('ct-import').value;
+    if (!lines(texto).length) throw new Error('Pega al menos un contacto: una línea por cada uno, «telefono,nombre».');
+    var data = await api('/admin/contacts/import', { method: 'POST', body: { source: val('ct-source') || 'importacion desde el panel', text: texto } });
+    show('ct-state-msg', data.imported
+      ? 'Importados ' + data.imported + ' de ' + data.received + (data.imported < data.received ? ': el resto no traía un teléfono válido.' : '.')
+      : 'Ninguna línea traía un teléfono válido. El formato es «51987654321,Ana».', data.imported ? 'ok' : 'warn');
     document.getElementById('ct-import').value = '';
-    ctOffset = 0; loadContacts();
+    ctPag.desdeElPrincipio();
   } catch (error) { show('ct-state-msg', error.message, 'bad'); }
 });
 
@@ -3195,7 +3298,7 @@ async function loadLocations() {
   try {
     var phone = val('lc-phone');
     var list = await api('/admin/locations?limit=100' + (phone ? '&phone=' + encodeURIComponent(phone) : ''));
-    table('lc-table', ['Fecha', 'Contacto', 'Coordenadas', 'Origen', 'Confianza', 'Precision', 'Confirmada', 'Entrada'], list.map(function (l) {
+    table('lc-table', ['Fecha', 'Contacto', 'Coordenadas', 'Origen', 'Confianza', 'Precisión', 'Confirmada', 'Lo que llegó'], list.map(function (l) {
       return [
         esc(fmt(l.createdAt)),
         contactCell(l.phone, l.name),
@@ -3203,18 +3306,24 @@ async function loadLocations() {
         esc(l.source),
         pill(l.confidence === 'exact' || l.confidence === 'high' ? 'ok' : l.confidence === 'medium' ? 'warn' : 'bad', l.confidence),
         '~' + Math.round(l.precisionMeters) + ' m',
-        l.confirmed ? pill('ok', 'si') : pill('warn', 'pendiente'),
+        l.confirmed ? pill('ok', 'sí') : pill('warn', 'pendiente'),
         '<span class="muted" title="' + esc(l.rawInput || '') + '">' + esc((l.rawInput || '').slice(0, 60)) + ((l.rawInput || '').length > 60 ? '...' : '') + '</span>'
       ];
-    }), 'Todavia no llego ninguna ubicacion');
-  } catch (error) { show('state', error.message, 'bad'); }
+    }), val('lc-phone')
+      ? { titulo: 'Ese teléfono no mandó ninguna ubicación', texto: 'Vacía el campo para ver todas las recibidas.' }
+      : { titulo: 'Todavía no llegó ninguna ubicación', texto: 'Aquí caen los pines y los enlaces de mapa que mandan los clientes. Puedes pedirle uno a alguien desde Enviar mensaje.', href: '/panel#enviar', boton: 'Pedir una ubicación' });
+  } catch (error) { tablaError('lc-table', error, loadLocations); }
 }
 document.getElementById('lc-search').onclick = loadLocations;
+document.getElementById('lc-phone').onkeydown = function (e) { if (e.key === 'Enter') loadLocations(); };
 
 // ----------------------------------------------------------------- vivo
 document.getElementById('v-create').onclick = async function () {
   try {
     var phone = val('v-phone');
+    /* Marcar «enviárselo» sin teléfono era un estado imposible: se creaba la
+       sesión y el aviso no salía, sin que la pantalla dijera por qué. */
+    if (document.getElementById('v-notify').checked && !phone) throw new Error('Para enviarle el enlace por WhatsApp hace falta su teléfono.');
     var data = await api('/admin/tracking', { method: 'POST', body: {
       phone: phone || undefined,
       label: val('v-label') || undefined,
@@ -3224,8 +3333,8 @@ document.getElementById('v-create').onclick = async function () {
     setVal('v-pub', data.publishUrl);
     setVal('v-view', data.viewUrl);
     document.getElementById('v-links').classList.remove('hidden');
-    var notified = data.notified ? (data.notified.ok ? ' y enviada por WhatsApp' : ' (el aviso no salio: ' + (data.notified.reason || data.notified.error) + ')') : '';
-    show('v-state', 'Sesion creada' + notified, data.notified && !data.notified.ok ? 'warn' : 'ok');
+    var notified = data.notified ? (data.notified.ok ? ' y enviada por WhatsApp' : ' (el aviso no salió: ' + (data.notified.reason || data.notified.error) + ')') : '';
+    show('v-state', 'Sesión creada' + notified, data.notified && !data.notified.ok ? 'warn' : 'ok');
     copyButtons();
     loadSessions();
   } catch (error) { show('v-state', error.message, 'bad'); }
@@ -3233,7 +3342,7 @@ document.getElementById('v-create').onclick = async function () {
 async function loadSessions() {
   try {
     var list = await api('/admin/tracking');
-    table('v-table', ['Etiqueta', 'Contacto', 'Caduca', 'Puntos', 'Ultima posicion', 'Mirando', 'Enlaces', ''], list.map(function (s, i) {
+    table('v-table', ['Etiqueta', 'Contacto', 'Caduca', 'Puntos', 'Última posición', 'Mirando', 'Enlaces', ''], list.map(function (s, i) {
       return [
         esc(s.label || ''),
         s.phone ? contactCell(s.phone, s.name) : '<span class="muted">sin contacto</span>',
@@ -3246,21 +3355,23 @@ async function loadSessions() {
           '<button class="ghost sm" data-copy="vs-view-' + i + '">Copiar</button> <span class="muted">ver</span>',
         '<button class="danger sm" data-revoke="' + esc(s.id) + '">Revocar</button>'
       ];
-    }), 'No hay sesiones activas');
+    }), { titulo: 'No hay sesiones activas', texto: 'Crea una arriba: salen dos enlaces, uno para quien se mueve y otro para quien mira.' });
     copyButtons();
-    document.querySelectorAll('[data-revoke]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/tracking/' + b.getAttribute('data-revoke'), { method: 'DELETE' }); loadSessions(); }
-        catch (error) { show('v-state', error.message, 'bad'); }
-      };
+    alPulsar('data-revoke', 'v-state', async function (id) {
+      var ok = await confirmarDialogo({ titulo: 'Revocar la sesión', texto: 'Los dos enlaces dejan de valer al instante: ni quien comparte su posición ni quien la mira podrán entrar.', boton: 'Revocar', peligro: true });
+      if (!ok) return;
+      await api('/admin/tracking/' + id, { method: 'DELETE' });
+      loadSessions();
     });
-  } catch (error) { show('v-state', error.message, 'bad'); }
+  } catch (error) { tablaError('v-table', error, loadSessions); }
 }
 document.getElementById('v-refresh').onclick = loadSessions;
 
 // -------------------------------------------------------------- campanas
 var templatesCache = [];
 function templateOptions(select, onlyApproved) {
+  /* Un select vacio no dice nada: si no hay registro, lo dice y manda a crearlo. */
+  if (!templatesCache.length) { select.innerHTML = '<option value="">No hay plantillas: sincroniza o crea una en Plantillas</option>'; return; }
   select.innerHTML = templatesCache.map(function (t) {
     return '<option value="' + esc(t.name + '|' + t.language + '|' + t.category) + '"' +
       (onlyApproved && t.status !== 'APPROVED' ? ' disabled' : '') + '>' +
@@ -3273,13 +3384,13 @@ async function loadTemplates() {
     templateOptions(document.getElementById('c-template'), true);
     templateOptions(document.getElementById('sc-template'), true);
     document.querySelectorAll('.step select[data-template]').forEach(function (s) { templateOptions(s, true); });
-    table('t-table', ['Nombre', 'Idioma', 'Categoria', 'Estado', 'Calidad', 'Variables', 'Cuerpo'], templatesCache.map(function (t) {
+    table('t-table', ['Nombre', 'Categoría', 'Estado', 'Calidad', 'Variables', 'Cuerpo'], templatesCache.map(function (t) {
       var pausada = t.pausadaHasta && new Date(t.pausadaHasta) > new Date();
-      return [esc(t.name), esc(t.language), esc(t.category),
+      return [esc(t.name) + '<span class="muted">' + esc(t.language) + '</span>', esc(t.category),
         pill(statusKind(t.status), t.status) + (pausada ? '<span class="muted">pausada por Meta hasta ' + esc(hastaCuando(t.pausadaHasta)) + '</span>' : '') + (t.pausas ? '<span class="muted">' + t.pausas + ' pausa' + (t.pausas > 1 ? 's' : '') + '</span>' : ''),
         t.quality ? pill(qualityKind(t.quality), t.quality) : '<span class="muted">-</span>', String(t.variables),
         '<span class="muted">' + esc((t.body || '').slice(0, 90)) + '</span>'];
-    }), 'Registro vacio: sincroniza desde Meta o da de alta el catalogo');
+    }), { titulo: 'El registro está vacío', texto: 'Sincroniza desde Meta con el botón de arriba, o crea abajo una plantilla propia.' });
     loadCatalog();
   } catch (error) { show('t-state', error.message, 'bad'); }
 }
@@ -3297,29 +3408,28 @@ async function loadCatalog() {
       return [esc(t.name) + (t.propia ? '<span class="muted">propia</span>' : ''), esc(t.category), esc(t.variables.join(', ')), lint + detail,
         t.registry ? pill(statusKind(t.registry.status), t.registry.status) : '<span class="muted">no subida</span>',
         '<span class="muted">' + esc(t.body) + '</span>', acciones];
-    }), 'Catalogo vacio');
-    document.querySelectorAll('[data-tp-del]').forEach(function (b) {
-      b.onclick = async function () {
-        try {
-          await api('/admin/templates/' + encodeURIComponent(b.getAttribute('data-tp-del')) + '/' + encodeURIComponent(b.getAttribute('data-tp-lang')), { method: 'DELETE' });
-          show('tp-state', 'Borrada', 'ok'); loadTemplates();
-        } catch (error) { show('tp-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'El catálogo está vacío', texto: 'Las del catálogo vienen con el sistema; las propias se crean arriba.' });
+    alPulsar('data-tp-del', 'tp-state', async function (nombre, b) {
+      var ok = await confirmarDialogo({ titulo: 'Borrar la plantilla propia', texto: 'Deja de poder elegirse en campañas y secuencias. En Meta, si ya estaba dada de alta, sigue existiendo.', boton: 'Borrar', peligro: true });
+      if (!ok) return;
+      await api('/admin/templates/' + encodeURIComponent(nombre) + '/' + encodeURIComponent(b.getAttribute('data-tp-lang')), { method: 'DELETE' });
+      show('tp-state', 'Borrada', 'ok');
+      loadTemplates();
     });
-    document.querySelectorAll('[data-tp-edit]').forEach(function (b) {
-      b.onclick = function () {
-        var t = list.find(function (x) { return x.name === b.getAttribute('data-tp-edit') && x.language === b.getAttribute('data-tp-lang'); });
-        if (!t) return;
-        setVal('tp-name', t.name); setVal('tp-language', t.language); setVal('tp-category', t.category);
-        document.getElementById('tp-body').value = t.body;
-        document.getElementById('tp-vars').value = t.variables.join('\n');
-        document.getElementById('tp-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
-      };
+    alPulsar('data-tp-edit', 'tp-state', function (nombre, b) {
+      var t = list.filter(function (x) { return x.name === nombre && x.language === b.getAttribute('data-tp-lang'); })[0];
+      if (!t) return;
+      setVal('tp-name', t.name); setVal('tp-language', t.language); setVal('tp-category', t.category);
+      document.getElementById('tp-body').value = t.body;
+      document.getElementById('tp-vars').value = t.variables.join('\n');
+      document.getElementById('tp-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-  } catch (error) { show('t-push-state', error.message, 'bad'); }
+  } catch (error) { tablaError('t-catalog', error, loadCatalog); }
 }
 document.getElementById('tp-save').onclick = busy('tp-save', async function () {
   try {
+    if (!/^[a-z0-9_]+$/.test(val('tp-name'))) throw new Error('El nombre va en minúsculas, números y guion bajo: aviso_entrega_hoy.');
+    if (!document.getElementById('tp-body').value.trim()) throw new Error('Falta el cuerpo de la plantilla.');
     var r = await api('/admin/templates', { method: 'POST', body: {
       name: val('tp-name'), language: val('tp-language') || 'es', category: val('tp-category'),
       body: document.getElementById('tp-body').value,
@@ -3350,6 +3460,7 @@ document.getElementById('t-push').onclick = busy('t-push', async function () {
 
 document.getElementById('c-send').onclick = busy('c-send', async function () {
   try {
+    if (!val('c-template')) throw new Error('Elige una plantilla aprobada. Si la lista está vacía, sincroniza desde Meta en Plantillas.');
     var parts = val('c-template').split('|');
     var recipients = lines(document.getElementById('c-list').value).map(function (line) {
       var cells = line.split(',').map(function (c) { return c.trim(); });
@@ -3385,7 +3496,7 @@ async function campanaEstado(id, accion) {
 async function loadCampaigns() {
   try {
     var list = await api('/admin/campaigns');
-    table('c-table', ['Campana', 'Plantilla', 'Estado', 'Pendientes', 'Enviados', 'Entregados', 'Leidos', 'Bloqueados', 'Fallidos', ''], list.map(function (c) {
+    table('c-table', ['Campaña', 'Plantilla', 'Estado', 'Pendientes', 'Enviados', 'Entregados', 'Leídos', 'Bloqueados', 'Fallidos', ''], list.map(function (c) {
       var s = c.stats || {};
       var d = c.destinatarios || {};
       var estado = pill(statusKind(c.status), statusLabel(c.status));
@@ -3403,15 +3514,14 @@ async function loadCampaigns() {
         String((s.blocked_by_gate || 0)) + (d.bloqueado ? '<span class="muted">' + d.bloqueado + ' en firme</span>' : ''), String((s.failed || 0)) + (d.cancelado ? '<span class="muted">' + d.cancelado + ' cancelados</span>' : ''),
         acciones
       ];
-    }), 'Todavia no se lanzo ninguna campana');
-    document.querySelectorAll('[data-campana]').forEach(function (b) {
-      b.onclick = function () { campanaEstado(b.getAttribute('data-campana'), b.getAttribute('data-accion')); };
-    });
+    }), { titulo: 'Todavía no se lanzó ninguna campaña', texto: 'Arriba eliges plantilla y destinatarios; sale por goteo, primero el canario.' });
+    alPulsar('data-campana', 'c-state2', function (id, b) { return campanaEstado(id, b.getAttribute('data-accion')); });
     document.querySelectorAll('[data-deliveries]').forEach(function (b) {
       b.onclick = function () {
         setVal('h-campaign', b.getAttribute('data-deliveries'));
         setVal('h-status', ''); setVal('h-phone', '');
-        hOffset = 0; loaded.historial = true; activate('historial'); loadDeliveries();
+        /* 'loaded' evita que activate() vuelva a cargar sin los filtros puestos. */
+        loaded.historial = true; activate('historial'); hPag.desdeElPrincipio();
       };
     });
   } catch (error) { show('c-state', error.message, 'bad'); }
@@ -3442,11 +3552,11 @@ var atajosCache = [];
 })();
 function pintarAtajos() {
   var opcionesSk = function (elegido) {
-    return '<option value="">sin sticker</option>' + (atajosStickers || []).map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === elegido ? ' selected' : '') + '>' + esc(s.nombre) + '</option>'; }).join('');
+    return '<option value="">sin sticker</option>' + opciones((atajosStickers || []).map(function (x) { return { valor: x.id, texto: x.nombre }; }), elegido);
   };
   document.getElementById('at-lista').innerHTML = atajosCache.map(function (a, i) {
     return '<div class="at-fila"><input class="pre" data-at-atajo="' + i + '" value="' + esc(a.atajo) + '" placeholder="atajo"><textarea data-at-texto="' + i + '" placeholder="Texto que se manda">' + esc(a.texto) + '</textarea><div><select data-at-sticker="' + i + '" title="Sticker que sale después del texto">' + opcionesSk(a.sticker || '') + '</select><button class="danger sm" data-at-borrar="' + i + '" style="margin-top:6px;width:100%">Quitar</button></div></div>';
-  }).join('') || '<div class="empty">Sin atajos. Añade uno.</div>';
+  }).join('') || vacio({ titulo: 'Sin atajos', texto: 'Un atajo es un texto listo para enviar: en Chats escribes / y su nombre.' });
   document.querySelectorAll('[data-at-texto]').forEach(function (t) { if (window.chipsDeVariables) chipsDeVariables(t, ['{nombre}', '{pedido}', '{negocio}']); });
   document.querySelectorAll('[data-at-borrar]').forEach(function (b) { b.onclick = function () { leerAtajos(); atajosCache.splice(Number(b.getAttribute('data-at-borrar')), 1); pintarAtajos(); }; });
 }
@@ -3458,8 +3568,13 @@ function leerAtajos() {
 }
 var atajosStickers = [];
 async function loadAtajos() {
-  try { var r = await api('/admin/chat/atajos'); atajosCache = r.atajos; try { atajosStickers = (await api('/admin/stickers')).stickers; } catch (e) { atajosStickers = []; } pintarAtajos(); }
-  catch (error) { show('at-state', error.message, 'bad'); }
+  try {
+    var r = await api('/admin/chat/atajos');
+    atajosCache = r.atajos;
+    /* Los stickers son un extra del atajo: sin ellos el atajo sigue valiendo. */
+    try { atajosStickers = (await api('/admin/stickers')).stickers; } catch (e) { atajosStickers = []; }
+    pintarAtajos();
+  } catch (error) { show('at-state', error.message, 'bad'); }
 }
 document.getElementById('at-anadir').onclick = function () { leerAtajos(); atajosCache.push({ atajo: '', texto: '' }); pintarAtajos(); };
 document.getElementById('at-guardar').onclick = busy('at-guardar', async function () {
@@ -3483,7 +3598,7 @@ async function loadAutomation() {
     var rules = results[1];
     document.getElementById('p-askloc').checked = Boolean(results[2].askLocationFallback);
 
-    var opts = sequencesCache.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>'; }).join('');
+    var opts = opciones(sequencesCache.map(function (q) { return { valor: q.id, texto: q.name }; }));
     document.getElementById('r-sequence').innerHTML = '<option value="">(ninguna)</option>' + opts;
     document.getElementById('e-sequence').innerHTML = opts || '<option value="">(crea una secuencia primero)</option>';
 
@@ -3497,18 +3612,16 @@ async function loadAutomation() {
         '<button class="ghost sm" data-rule-toggle="' + esc(r.id) + '" data-enabled="' + (r.enabled ? '1' : '0') + '">' + (r.enabled ? 'Desactivar' : 'Activar') + '</button> ' +
         '<button class="danger sm" data-rule-del="' + esc(r.id) + '">Borrar</button>'
       ];
-    }), 'Sin reglas: el bot solo atiende ubicaciones, BAJA y ALTA');
-    document.querySelectorAll('[data-rule-toggle]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/automation/rules/' + b.getAttribute('data-rule-toggle'), { method: 'PUT', body: { enabled: b.getAttribute('data-enabled') !== '1' } }); loadAutomation(); }
-        catch (error) { show('r-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Todavía no hay reglas', texto: 'Sin ellas solo se atienden las ubicaciones, BAJA y ALTA. Crea la primera abajo: una palabra clave y lo que se contesta.' });
+    alPulsar('data-rule-toggle', 'r-state', async function (id, b) {
+      await api('/admin/automation/rules/' + id, { method: 'PUT', body: { enabled: b.getAttribute('data-enabled') !== '1' } });
+      loadAutomation();
     });
-    document.querySelectorAll('[data-rule-del]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/automation/rules/' + b.getAttribute('data-rule-del'), { method: 'DELETE' }); loadAutomation(); }
-        catch (error) { show('r-state', error.message, 'bad'); }
-      };
+    alPulsar('data-rule-del', 'r-state', async function (id) {
+      var ok = await confirmarDialogo({ titulo: '¿Borrar la regla?', texto: 'Deja de contestarse a esa palabra. No se puede deshacer.', boton: 'Borrar', peligro: true });
+      if (!ok) return;
+      await api('/admin/automation/rules/' + id, { method: 'DELETE' });
+      loadAutomation();
     });
 
     table('s-table', ['Secuencia', 'Pasos', 'Detener al responder', 'Activas', 'Total', ''], sequencesCache.map(function (s) {
@@ -3519,19 +3632,17 @@ async function loadAutomation() {
         String(s.activeEnrollments), String(s.totalEnrollments),
         '<button class="danger sm" data-seq-del="' + esc(s.id) + '">Borrar</button>'
       ];
-    }), 'Sin secuencias');
-    document.querySelectorAll('[data-seq-del]').forEach(function (b) {
-      b.onclick = async function () {
-        var seguro = await confirmarDialogo({
-          titulo: '¿Borrar la secuencia?',
-          texto: 'Se borra la secuencia y las inscripciones que tenga en curso. No se puede deshacer.',
-          boton: 'Sí, borrar',
-          peligro: true
-        });
-        if (!seguro) return;
-        try { await api('/admin/automation/sequences/' + b.getAttribute('data-seq-del'), { method: 'DELETE' }); loadAutomation(); }
-        catch (error) { show('s-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Todavía no hay secuencias', texto: 'Una secuencia es una lista de pasos con retardo: el primero al momento, el siguiente a las 24 h… Crea la primera abajo.' });
+    alPulsar('data-seq-del', 's-state', async function (id) {
+      var seguro = await confirmarDialogo({
+        titulo: '¿Borrar la secuencia?',
+        texto: 'Se borra la secuencia y las inscripciones que tenga en curso. No se puede deshacer.',
+        boton: 'Sí, borrar',
+        peligro: true
+      });
+      if (!seguro) return;
+      await api('/admin/automation/sequences/' + id, { method: 'DELETE' });
+      loadAutomation();
     });
 
     if (!document.querySelectorAll('.step').length) addStep();
@@ -3547,10 +3658,21 @@ document.getElementById('p-askloc').onchange = async function () {
 };
 
 document.getElementById('r-trigger').onchange = function () {
-  var kw = document.getElementById('r-trigger').value === 'keyword';
+  var kw = val('r-trigger') === 'keyword';
   document.getElementById('r-keyword').disabled = !kw;
   document.getElementById('r-match').disabled = !kw;
 };
+document.getElementById('sc-kind').onchange = function () {
+  var esTexto = val('sc-kind') === 'freeform';
+  document.getElementById('sc-template').disabled = esTexto;
+  document.getElementById('sc-vars').disabled = esTexto;
+  document.getElementById('sc-text').disabled = !esTexto;
+};
+/* Al pintar la pantalla los campos ya tienen que estar como toca, no solo
+   despues del primer cambio: si no, se puede escribir en un campo muerto. */
+document.getElementById('r-trigger').onchange();
+document.getElementById('sc-kind').onchange();
+document.getElementById('cn-tipo').onchange();
 document.getElementById('r-create').onclick = busy('r-create', async function () {
   try {
     await api('/admin/automation/rules', { method: 'POST', body: {
@@ -3613,8 +3735,10 @@ document.getElementById('s-create').onclick = busy('s-create', async function ()
 document.getElementById('e-enroll').onclick = busy('e-enroll', async function () {
   try {
     var id = val('e-sequence');
-    if (!id) throw new Error('crea una secuencia primero');
-    var r = await api('/admin/automation/sequences/' + id + '/enroll', { method: 'POST', body: { phones: lines(document.getElementById('e-phones').value), source: val('e-source') || 'panel' } });
+    if (!id) throw new Error('Crea una secuencia primero: sin ella no hay dónde inscribir.');
+    var telefonos = lines(document.getElementById('e-phones').value);
+    if (!telefonos.length) throw new Error('Pega al menos un teléfono, uno por línea.');
+    var r = await api('/admin/automation/sequences/' + id + '/enroll', { method: 'POST', body: { phones: telefonos, source: val('e-source') || 'panel' } });
     show('e-state', 'Inscritos ' + r.enrolled + (r.already ? ' (' + r.already + ' ya estaban)' : ''), 'ok');
     document.getElementById('e-phones').value = '';
     loadAutomation();
@@ -3624,7 +3748,7 @@ async function loadEnrollments() {
   try {
     var status = val('e-status');
     var list = await api('/admin/automation/enrollments?limit=100' + (status ? '&status=' + status : ''));
-    table('e-table', ['Contacto', 'Secuencia', 'Estado', 'Paso', 'Proximo envio', 'Origen', ''], list.map(function (e) {
+    table('e-table', ['Contacto', 'Secuencia', 'Estado', 'Paso', 'Próximo envío', 'Origen', ''], list.map(function (e) {
       return [
         contactCell(e.phone, e.name), esc(e.sequenceName), pill(statusKind(e.status), statusLabel(e.status)),
         e.currentStep + ' / ' + e.totalSteps,
@@ -3632,23 +3756,16 @@ async function loadEnrollments() {
         esc(e.source || ''),
         e.status === 'active' ? '<button class="danger sm" data-enr-cancel="' + esc(e.id) + '">Cancelar</button>' : ''
       ];
-    }), 'Sin inscripciones');
-    document.querySelectorAll('[data-enr-cancel]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/automation/enrollments/' + b.getAttribute('data-enr-cancel') + '/cancel', { method: 'POST' }); loadAutomation(); }
-        catch (error) { show('e-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Nadie inscrito en una secuencia', texto: 'Inscribe contactos aquí arriba, desde una regla o desde Enviar a un grupo.' });
+    alPulsar('data-enr-cancel', 'e-state', async function (id) {
+      await api('/admin/automation/enrollments/' + id + '/cancel', { method: 'POST' });
+      loadEnrollments();
     });
-  } catch (error) { show('e-state', error.message, 'bad'); }
+  } catch (error) { tablaError('e-table', error, loadEnrollments); }
 }
 document.getElementById('e-refresh').onclick = loadEnrollments;
 document.getElementById('e-status').onchange = loadEnrollments;
 
-document.getElementById('sc-kind').onchange = function () {
-  var isText = this.value === 'freeform';
-  document.getElementById('sc-template').disabled = isText;
-  document.getElementById('sc-vars').disabled = isText;
-};
 document.getElementById('sc-create').onclick = busy('sc-create', async function () {
   try {
     var kind = val('sc-kind');
@@ -3677,7 +3794,7 @@ async function loadScheduled() {
   try {
     var status = val('sc-status');
     var list = await api('/admin/automation/scheduled?limit=100' + (status ? '&status=' + status : ''));
-    table('sc-table', ['Cuando', 'Contacto', 'Que', 'Origen', 'Estado', 'Detalle', ''], list.map(function (m) {
+    table('sc-table', ['Cuándo', 'Contacto', 'Qué', 'Origen', 'Estado', 'Detalle', ''], list.map(function (m) {
       return [
         esc(fmt(m.dueAt)) + '<span class="muted">' + esc(ago(m.dueAt)) + '</span>',
         contactCell(m.phone, m.name),
@@ -3687,62 +3804,54 @@ async function loadScheduled() {
         '<span class="muted">' + esc(m.detail || '') + '</span>',
         m.status === 'pending' ? '<button class="danger sm" data-sc-cancel="' + m.id + '">Cancelar</button>' : ''
       ];
-    }), 'Nada programado');
-    document.querySelectorAll('[data-sc-cancel]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/automation/scheduled/' + b.getAttribute('data-sc-cancel') + '/cancel', { method: 'POST' }); loadScheduled(); }
-        catch (error) { show('sc-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Nada programado', texto: 'Aquí caen los envíos a fecha y hora y los pasos de las secuencias que están por salir.' });
+    alPulsar('data-sc-cancel', 'sc-state', async function (id) {
+      await api('/admin/automation/scheduled/' + id + '/cancel', { method: 'POST' });
+      loadScheduled();
     });
-  } catch (error) { show('sc-state', error.message, 'bad'); }
+  } catch (error) { tablaError('sc-table', error, loadScheduled); }
 }
 document.getElementById('sc-refresh').onclick = loadScheduled;
 document.getElementById('sc-status').onchange = loadScheduled;
 
 // ------------------------------------------------------------- historial
-var hOffset = 0, H_LIMIT = 50;
-document.getElementById('h-csv').onclick = function () {
-  var q = [];
-  if (val('h-status')) q.push('status=' + encodeURIComponent(val('h-status')));
-  if (val('h-phone')) q.push('phone=' + encodeURIComponent(val('h-phone')));
-  if (val('h-campaign')) q.push('campaignId=' + encodeURIComponent(val('h-campaign')));
-  location.href = '/admin/deliveries.csv' + (q.length ? '?' + q.join('&') : '');
-};
+function hFiltros() { return { status: val('h-status'), phone: val('h-phone'), campaignId: val('h-campaign') }; }
+var hPag = paginador('h', 50, function () { loadDeliveries(); });
+document.getElementById('h-csv').onclick = function () { descargarCsv('/admin/deliveries.csv', hFiltros()); };
 async function loadDeliveries() {
+  cargando('h-table');
   try {
-    var q = '/admin/deliveries?limit=' + H_LIMIT + '&offset=' + hOffset;
-    if (val('h-status')) q += '&status=' + encodeURIComponent(val('h-status'));
-    if (val('h-phone')) q += '&phone=' + encodeURIComponent(val('h-phone'));
-    if (val('h-campaign')) q += '&campaignId=' + encodeURIComponent(val('h-campaign'));
+    var f = hFiltros();
+    var q = '/admin/deliveries?limit=' + hPag.limite + '&offset=' + hPag.offset;
+    Object.keys(f).forEach(function (k) { if (f[k]) q += '&' + k + '=' + encodeURIComponent(f[k]); });
     var list = await api(q);
-    table('h-table', ['Fecha', 'Contacto', 'Tipo', 'Plantilla', 'Categoria', 'Estado', 'Detalle', 'Campana'], list.map(function (d) {
+    /* La categoria va bajo la plantilla: sola no dice nada y era una columna mas. */
+    table('h-table', ['Fecha', 'Contacto', 'Qué salió', 'Estado', 'Por qué no salió', 'Campaña'], list.map(function (d) {
       return [
         esc(fmt(d.queuedAt)),
         contactCell(d.phone, d.name),
-        esc(d.kind),
-        esc(d.templateName || ''),
-        esc(d.category),
+        esc(d.templateName || d.kind) + (d.templateName ? '<span class="muted">' + esc(d.kind) + ' · ' + esc(d.category) + '</span>' : ''),
         pill(statusKind(d.status), statusLabel(d.status)),
         '<span class="muted">' + esc(d.errorTitle || '') + (d.errorCode ? ' (' + esc(d.errorCode) + ')' : '') + '</span>',
         esc(d.campaignName || '')
       ];
-    }), 'Sin envios todavia');
-    document.getElementById('h-page').textContent = list.length ? (hOffset + 1) + '-' + (hOffset + list.length) : '0';
-    document.getElementById('h-prev').disabled = hOffset === 0;
-    document.getElementById('h-next').disabled = list.length < H_LIMIT;
-  } catch (error) { show('state', error.message, 'bad'); }
+    }), f.status || f.phone || f.campaignId
+      ? { titulo: 'Nada con esos filtros', texto: 'Vacía el teléfono o la campaña, o pon el estado en «Todos».' }
+      : { titulo: 'Todavía no salió ningún mensaje', texto: 'Aquí queda cada intento, salga o no, con el motivo si se bloqueó.', href: '/panel#enviar', boton: 'Enviar el primero' });
+    hPag.pintar(list.length);
+  } catch (error) { tablaError('h-table', error, loadDeliveries); }
 }
-document.getElementById('h-search').onclick = function () { hOffset = 0; loadDeliveries(); };
-document.getElementById('h-prev').onclick = function () { hOffset = Math.max(0, hOffset - H_LIMIT); loadDeliveries(); };
-document.getElementById('h-next').onclick = function () { hOffset += H_LIMIT; loadDeliveries(); };
+document.getElementById('h-search').onclick = hPag.desdeElPrincipio;
+document.getElementById('h-status').onchange = hPag.desdeElPrincipio;
 
 // -------------------------------------------------------------- usuarios
 var yo = null;
 async function loadUsuarios() {
+  cargando('us-table');
   try {
     yo = yo || await api('/admin/yo');
     if (yo && yo.rol !== 'admin') {
-      document.getElementById('us-table').innerHTML = '<div class="empty">Solo un administrador puede ver y crear usuarios. Aqui puedes cambiar tu contrasena.</div>';
+      document.getElementById('us-table').innerHTML = vacio({ titulo: 'Solo un administrador ve y crea usuarios', texto: 'Tu propia contraseña sí la puedes cambiar.', href: '/panel#mi-cuenta', boton: 'Ir a Mi cuenta' });
       document.getElementById('us-crear').disabled = true;
       return;
     }
@@ -3750,7 +3859,7 @@ async function loadUsuarios() {
     document.getElementById('us-rol-super').classList.toggle('hidden', !soySuper);
     var ROLES = { superadmin: ['ok', 'Superadministrador'], admin: ['ok', 'Administrador'], operador: ['muted', 'Operador'] };
     var list = await api('/admin/usuarios');
-    table('us-table', ['Usuario', 'Nombre', 'Rol', 'Estado', 'Ultimo acceso', ''], list.map(function (u) {
+    table('us-table', ['Usuario', 'Nombre', 'Rol', 'Estado', 'Último acceso', ''], list.map(function (u) {
       // Una cuenta de superadministrador solo la toca otro superadministrador.
       var intocable = u.rol === 'superadmin' && !soySuper;
       var opcionesRol = (soySuper ? ['superadmin', 'admin', 'operador'] : ['admin', 'operador']).filter(function (r) { return r !== u.rol; });
@@ -3760,32 +3869,30 @@ async function loadUsuarios() {
         '<button class="' + (u.activo ? 'danger' : 'ghost') + ' sm" data-us-activo="' + esc(u.id) + '" data-activo="' + (u.activo ? 'false' : 'true') + '">' + (u.activo ? 'Desactivar' : 'Activar') + '</button>';
       var rol = ROLES[u.rol] || ['muted', u.rol];
       return [esc(u.usuario), esc(u.nombre), pill(rol[0], rol[1]), pill(u.activo ? 'ok' : 'bad', u.activo ? 'activo' : 'desactivado'), esc(fmt(u.ultimoLoginAt) || 'nunca'), acciones];
-    }), 'Sin usuarios');
-    document.querySelectorAll('[data-us-clave]').forEach(function (b) {
-      b.onclick = async function () {
-        var nueva = await pedirDato({ titulo: 'Nueva contrasena', texto: 'Al menos 8 caracteres. Sus sesiones abiertas se cierran.', etiqueta: 'Contrasena', boton: 'Cambiar', validar: function (v) { return v && v.length >= 8 ? null : 'Al menos 8 caracteres.'; } });
-        if (!nueva) return;
-        try { await api('/admin/usuarios/' + b.getAttribute('data-us-clave'), { method: 'POST', body: { clave: nueva } }); show('us-state', 'Contrasena cambiada', 'ok'); }
-        catch (error) { show('us-state', error.message, 'bad'); }
-      };
+    }), { titulo: 'Solo estás tú', texto: 'Crea abajo una cuenta por persona, con su rol: así se sabe quién hizo qué en Actividad.' });
+    alPulsar('data-us-clave', 'us-state', async function (id) {
+      var nueva = await pedirDato({ titulo: 'Nueva contraseña', texto: 'Al menos 8 caracteres. Sus sesiones abiertas se cierran.', etiqueta: 'Contraseña', boton: 'Cambiar', validar: function (v) { return v && v.length >= 8 ? null : 'Al menos 8 caracteres.'; } });
+      if (!nueva) return;
+      await api('/admin/usuarios/' + id, { method: 'POST', body: { clave: nueva } });
+      show('us-state', 'Contraseña cambiada', 'ok');
     });
-    document.querySelectorAll('[data-us-rol]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/usuarios/' + b.getAttribute('data-us-rol'), { method: 'POST', body: { rol: b.getAttribute('data-rol') } }); loadUsuarios(); }
-        catch (error) { show('us-state', error.message, 'bad'); }
-      };
+    alPulsar('data-us-rol', 'us-state', async function (id, b) {
+      await api('/admin/usuarios/' + id, { method: 'POST', body: { rol: b.getAttribute('data-rol') } });
+      loadUsuarios();
     });
-    document.querySelectorAll('[data-us-activo]').forEach(function (b) {
-      b.onclick = async function () {
-        try { await api('/admin/usuarios/' + b.getAttribute('data-us-activo'), { method: 'POST', body: { activo: b.getAttribute('data-activo') === 'true' } }); loadUsuarios(); }
-        catch (error) { show('us-state', error.message, 'bad'); }
-      };
+    alPulsar('data-us-activo', 'us-state', async function (id, b) {
+      await api('/admin/usuarios/' + id, { method: 'POST', body: { activo: b.getAttribute('data-activo') === 'true' } });
+      loadUsuarios();
     });
-  } catch (error) { show('us-state', error.message, 'bad'); }
+  } catch (error) { tablaError('us-table', error, loadUsuarios); }
 }
 document.getElementById('us-crear').onclick = busy('us-crear', async function () {
   try {
-    await api('/admin/usuarios', { method: 'POST', body: { nombre: val('us-nombre'), usuario: val('us-usuario'), clave: document.getElementById('us-clave').value, rol: val('us-rol') } });
+    var clave = document.getElementById('us-clave').value;
+    if (!val('us-nombre')) throw new Error('Falta el nombre de la persona.');
+    if (!val('us-usuario')) throw new Error('Falta el usuario con el que va a entrar.');
+    if (clave.length < 8) throw new Error('La contraseña necesita al menos 8 caracteres.');
+    await api('/admin/usuarios', { method: 'POST', body: { nombre: val('us-nombre'), usuario: val('us-usuario'), clave: clave, rol: val('us-rol') } });
     show('us-state', 'Usuario creado', 'ok');
     setVal('us-nombre', ''); setVal('us-usuario', ''); document.getElementById('us-clave').value = '';
     loadUsuarios();
@@ -3793,6 +3900,10 @@ document.getElementById('us-crear').onclick = busy('us-crear', async function ()
 });
 // -------------------------------------------------------------- membresia
 var mbPlanes = [];
+/* La lista de planes se elige igual en Membresia y en Tiendas. */
+function opcionesDePlanes(planes) {
+  return opciones(planes.map(function (p) { return { valor: p.clave, texto: p.nombre + (p.precioMes ? ' · ' + p.moneda + ' ' + p.precioMes + '/mes' : '') }; }));
+}
 function mbPintarEstado(m) {
   var caja = document.getElementById('mb-estado');
   var p = m.plan;
@@ -3801,16 +3912,16 @@ function mbPintarEstado(m) {
     return;
   }
   var l = p.limites;
-  var color = p.vencido ? 'var(--rojo)' : p.diasRestantes <= 7 ? 'var(--ambar)' : 'var(--verde)';
+  var color = colorVencimiento(p);
   var suspendida = m.local && m.local.estado === 'suspendida';
-  caja.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><div><b>Plan ' + esc(p.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (suspendida ? '· suspendida' : p.vencido ? '· vencida' : '· vence en ' + p.diasRestantes + ' día' + (p.diasRestantes === 1 ? '' : 's')) + '</span><br><small class="muted">Pagada hasta el ' + esc(new Date(p.vencimiento).toLocaleDateString('es-PE')) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + ' al mes' : ' · gratis') + ' · ' + (m.origen === 'maestro' ? 'la lleva el maestro del SaaS' : 'la lleva el superadministrador de esta instalación') + '</small></div>' +
-    '<div class="muted" style="font-size:13px">Asistente IA: ' + (l.iaTurnosMes === 0 ? 'no incluido' : l.iaTurnosMes == null ? 'sin límite' : m.iaTurnosMes + ' de ' + l.iaTurnosMes + ' respuestas este mes') + ' · Campañas: ' + (l.campanas ? 'sí' : 'no') + ' · Conectores: ' + (l.conectores ? 'sí' : 'no') + ' · Cuentas: ' + (l.usuarios == null ? 'sin límite' : l.usuarios) + '</div></div>' +
+  caja.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><div><b>Plan ' + esc(p.nombre) + '</b> <span style="color:' + color + ';font-weight:600">' + (suspendida ? '· suspendida' : p.vencido ? '· vencida' : '· vence en ' + p.diasRestantes + ' día' + (p.diasRestantes === 1 ? '' : 's')) + '</span><br><small class="muted">Pagada hasta el ' + esc(fechaPlan(p.vencimiento)) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + ' al mes' : ' · gratis') + ' · ' + (m.origen === 'maestro' ? 'la lleva el maestro del SaaS' : 'la lleva el superadministrador de esta instalación') + '</small></div>' +
+    '<div class="muted" style="font-size:13px">' + esc(loQueIncluye(l, m.iaTurnosMes)) + ' · Cuentas: ' + (l.usuarios == null ? 'sin límite' : l.usuarios) + '</div></div>' +
     (m.aviso ? '<p style="margin:8px 0 0;color:' + color + '">' + esc(m.aviso.texto) + '</p>' : '') +
     (p.contacto && !m.aviso ? '<p class="muted" style="margin:8px 0 0">Para renovar: ' + esc(p.contacto) + '</p>' : '');
 }
 function mbRellenar(m) {
   var sel = document.getElementById('mb-plan');
-  sel.innerHTML = mbPlanes.map(function (p) { return '<option value="' + esc(p.clave) + '">' + esc(p.nombre) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + '/mes' : '') + '</option>'; }).join('');
+  sel.innerHTML = opcionesDePlanes(mbPlanes);
   var l = m.local;
   var base = mbPlanes.filter(function (p) { return p.clave === (l ? l.plan : 'prueba'); })[0] || mbPlanes[0];
   sel.value = l ? l.plan : base.clave;
@@ -3819,13 +3930,7 @@ function mbRellenar(m) {
   /* El dia en Lima, no el de UTC: un vencimiento a las 23:59 de Lima es la madrugada siguiente en UTC. */
   setVal('mb-vence', vence.toLocaleDateString('en-CA', { timeZone: 'America/Lima' }).slice(0, 10));
   setVal('mb-estado-sel', l ? l.estado : 'activa');
-  var lim = l ? l.limites : base.limites;
-  setVal('mb-ia', lim.iaTurnosMes == null ? '' : lim.iaTurnosMes);
-  setVal('mb-usuarios', lim.usuarios == null ? '' : lim.usuarios);
-  setVal('mb-campanas', lim.campanas ? 'true' : 'false');
-  setVal('mb-conectores', lim.conectores ? 'true' : 'false');
-  setVal('mb-precio', l ? l.precioMes : base.precioMes);
-  setVal('mb-moneda', l ? l.moneda : base.moneda);
+  mbPonerLimites(l ? l : base);
   setVal('mb-contacto', l && l.contacto ? l.contacto : '');
   setVal('mb-aviso', l && l.aviso ? l.aviso : '');
   document.getElementById('mb-quitar').classList.toggle('hidden', !l);
@@ -3834,16 +3939,20 @@ function mbRellenar(m) {
     return [esc(fmt(pg.fecha)), pg.meses, esc(pg.moneda) + ' ' + pg.monto, esc(pg.nota || ''), esc(pg.por || '')];
   }), 'Sin pagos apuntados.');
 }
-document.getElementById('mb-plan').onchange = function () {
-  var p = mbPlanes.filter(function (x) { return x.clave === val('mb-plan'); })[0];
-  if (!p) return;
-  setVal('mb-nombre', p.nombre);
+/* Los topes y el precio de un plan, en los campos. Lo usan el alta y el cambio. */
+function mbPonerLimites(p) {
   setVal('mb-ia', p.limites.iaTurnosMes == null ? '' : p.limites.iaTurnosMes);
   setVal('mb-usuarios', p.limites.usuarios == null ? '' : p.limites.usuarios);
   setVal('mb-campanas', p.limites.campanas ? 'true' : 'false');
   setVal('mb-conectores', p.limites.conectores ? 'true' : 'false');
   setVal('mb-precio', p.precioMes);
   setVal('mb-moneda', p.moneda);
+}
+document.getElementById('mb-plan').onchange = function () {
+  var p = mbPlanes.filter(function (x) { return x.clave === val('mb-plan'); })[0];
+  if (!p) return;
+  setVal('mb-nombre', p.nombre);
+  mbPonerLimites(p);
 };
 async function loadMembresia() {
   try {
@@ -3902,6 +4011,7 @@ function tiSemaforo(t) {
   return pill(c, txt);
 }
 async function loadTiendas() {
+  cargando('ti-table');
   try {
     var r = await api('/admin/tiendas');
     var s = r.resumen;
@@ -3911,13 +4021,13 @@ async function loadTiendas() {
       : '<b>Sin alojamiento en este servidor.</b> ' + esc(al.motivo || '') + ' La tienda se registra aquí y su instalación se hace aparte (en un servidor con el SaaS preparado, <code>npm run saas:alta</code>); luego se pega la dirección del plan y el token en su Membresía.';
     document.getElementById('ti-instalar-caja').classList.toggle('hidden', !al.disponible);
     document.getElementById('ti-resumen').innerHTML =
-      '<div class="stat"><span class="muted">Tiendas</span><b>' + s.total + '</b></div>' +
-      '<div class="stat"><span class="muted">Al día</span><b>' + (s.activas - s.porVencer) + '</b></div>' +
-      '<div class="stat"><span class="muted">Por vencer (7 días)</span><b>' + s.porVencer + '</b></div>' +
-      '<div class="stat"><span class="muted">Vencidas</span><b>' + s.vencidas + '</b></div>' +
-      '<div class="stat"><span class="muted">Suspendidas</span><b>' + s.suspendidas + '</b></div>' +
-      '<div class="stat"><span class="muted">En línea ahora</span><b>' + s.enLinea + '</b><small>preguntaron por su plan hace menos de 20 min</small></div>' +
-      '<div class="stat"><span class="muted">Ingresos al mes</span><b>' + esc(s.moneda) + ' ' + s.ingresosMes + '</b><small>tiendas pagadas y vigentes</small></div>';
+      stat('Tiendas', s.total) +
+      stat('Al día', s.activas - s.porVencer) +
+      stat('Por vencer (7 días)', s.porVencer, '', s.porVencer ? 'warn' : '') +
+      stat('Vencidas', s.vencidas, '', s.vencidas ? 'bad' : '') +
+      stat('Suspendidas', s.suspendidas) +
+      stat('En línea ahora', s.enLinea, 'preguntaron por su plan hace menos de 20 min') +
+      stat('Ingresos al mes', esc(s.moneda) + ' ' + s.ingresosMes, 'tiendas pagadas y vigentes');
     table('ti-table', ['Tienda', 'Plan', 'Pagada hasta', 'Estado', 'En línea', 'Contacto', ''], r.tiendas.map(function (t) {
       var enLinea = t.enLinea ? pill('ok', 'sí') : t.ultimaConsultaAt ? '<span class="muted">última vez ' + esc(fmt(t.ultimaConsultaAt)) + '</span>' : '<span class="muted">nunca se conectó</span>';
       var acciones = '<button class="ghost sm" data-ti-pago="' + esc(t.id) + '">Apuntar pago</button> ' +
@@ -3930,69 +4040,64 @@ async function loadTiendas() {
         esc(t.plan.nombre) + '<br><small class="muted">' + (t.membresia.precioMes ? esc(t.membresia.moneda) + ' ' + t.membresia.precioMes + '/mes' : 'gratis') + '</small>',
         esc(new Date(t.membresia.vencimiento).toLocaleDateString('es-PE')),
         tiSemaforo(t), enLinea, esc(t.contacto || ''), acciones];
-    }), 'Todavía no hay tiendas. Da de alta la primera abajo.');
+    }), { titulo: 'Todavía no hay tiendas', texto: 'Da de alta la primera abajo: se le crea su token y, si este servidor lo permite, también su instalación.' });
     if (!tiPlanes.length) {
       var m = await api('/admin/membresia');
       tiPlanes = m.planes || [];
       var sel = document.getElementById('ti-plan');
-      sel.innerHTML = tiPlanes.map(function (p) { return '<option value="' + esc(p.clave) + '">' + esc(p.nombre) + (p.precioMes ? ' · ' + esc(p.moneda) + ' ' + p.precioMes + '/mes' : '') + '</option>'; }).join('');
+      sel.innerHTML = opcionesDePlanes(tiPlanes);
       sel.value = 'prueba';
       setVal('ti-vence', new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10));
       setVal('ti-precio', '0');
       sel.onchange = function () { var p = tiPlanes.filter(function (x) { return x.clave === sel.value; })[0]; if (p) setVal('ti-precio', p.precioMes); };
     }
-    document.querySelectorAll('[data-ti-pago]').forEach(function (b) {
-      b.onclick = async function () {
-        var meses = await pedirDato({ titulo: 'Apuntar un pago', texto: 'Cuántos meses se pagaron. Corre el vencimiento desde la fecha pagada (o desde hoy si ya venció) y reactiva la tienda.', etiqueta: 'Meses', valor: '1', boton: 'Siguiente', validar: function (v) { return /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 60 ? null : 'Entre 1 y 60 meses.'; } });
-        if (!meses) return;
-        var monto = await pedirDato({ titulo: 'Monto cobrado', etiqueta: 'Monto (0 si es cortesía)', valor: '0', boton: 'Apuntar', validar: function (v) { return /^\d+([.,]\d{1,2})?$/.test(v) ? null : 'Un número, por ejemplo 49 o 49.90'; } });
-        if (monto === null) return;
-        try { var r2 = await api('/admin/tiendas/' + b.getAttribute('data-ti-pago') + '/pagos', { method: 'POST', body: { meses: Number(meses), monto: Number(String(monto).replace(',', '.')) } }); show('ti-state', r2.mensaje, 'ok'); loadTiendas(); }
-        catch (error) { show('ti-state', error.message, 'bad'); }
-      };
+    alPulsar('data-ti-pago', 'ti-state', async function (id) {
+      var meses = await pedirDato({ titulo: 'Apuntar un pago', texto: 'Cuántos meses se pagaron. Corre el vencimiento desde la fecha pagada (o desde hoy si ya venció) y reactiva la tienda.', etiqueta: 'Meses', valor: '1', boton: 'Siguiente', validar: function (v) { return /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 60 ? null : 'Entre 1 y 60 meses.'; } });
+      if (!meses) return;
+      var monto = await pedirDato({ titulo: 'Monto cobrado', etiqueta: 'Monto (0 si es cortesía)', valor: '0', boton: 'Apuntar', validar: function (v) { return /^\d+([.,]\d{1,2})?$/.test(v) ? null : 'Un número, por ejemplo 49 o 49.90'; } });
+      if (monto === null) return;
+      var pagado = await api('/admin/tiendas/' + id + '/pagos', { method: 'POST', body: { meses: Number(meses), monto: Number(String(monto).replace(',', '.')) } });
+      show('ti-state', pagado.mensaje, 'ok');
+      loadTiendas();
     });
-    document.querySelectorAll('[data-ti-editar]').forEach(function (b) {
-      b.onclick = async function () {
-        var id = b.getAttribute('data-ti-editar');
-        var t = r.tiendas.filter(function (x) { return x.id === id; })[0];
-        var plan = await pedirDato({ titulo: 'Cambiar el plan de ' + t.nombre, texto: 'Escribe uno: ' + tiPlanes.map(function (p) { return p.clave; }).join(', ') + '.', etiqueta: 'Plan', valor: t.membresia.plan, boton: 'Siguiente', validar: function (v) { return tiPlanes.some(function (p) { return p.clave === v.trim(); }) ? null : 'No existe ese plan.'; } });
-        if (!plan) return;
-        var vence = await pedirDato({ titulo: 'Pagada hasta', etiqueta: 'Fecha (AAAA-MM-DD)', valor: t.membresia.vencimiento.slice(0, 10), boton: 'Guardar', validar: function (v) { return /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : 'Formato AAAA-MM-DD.'; } });
-        if (!vence) return;
-        try { await api('/admin/tiendas/' + id, { method: 'POST', body: { membresia: { plan: plan.trim(), vencimiento: vence } } }); show('ti-state', 'Plan cambiado.', 'ok'); loadTiendas(); }
-        catch (error) { show('ti-state', error.message, 'bad'); }
-      };
+    alPulsar('data-ti-editar', 'ti-state', async function (id) {
+      var t = r.tiendas.filter(function (x) { return x.id === id; })[0];
+      if (!t) return;
+      var plan = await pedirDato({ titulo: 'Cambiar el plan de ' + t.nombre, texto: 'Escribe uno: ' + tiPlanes.map(function (x) { return x.clave; }).join(', ') + '.', etiqueta: 'Plan', valor: t.membresia.plan, boton: 'Siguiente', validar: function (v) { return tiPlanes.some(function (x) { return x.clave === v.trim(); }) ? null : 'No existe ese plan.'; } });
+      if (!plan) return;
+      var vence = await pedirDato({ titulo: 'Pagada hasta', etiqueta: 'Fecha (AAAA-MM-DD)', valor: t.membresia.vencimiento.slice(0, 10), boton: 'Guardar', validar: function (v) { return /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : 'Formato AAAA-MM-DD.'; } });
+      if (!vence) return;
+      await api('/admin/tiendas/' + id, { method: 'POST', body: { membresia: { plan: plan.trim(), vencimiento: vence } } });
+      show('ti-state', 'Plan cambiado.', 'ok');
+      loadTiendas();
     });
-    document.querySelectorAll('[data-ti-susp]').forEach(function (b) {
-      b.onclick = async function () {
-        var suspender = b.getAttribute('data-valor') === 'true';
-        if (suspender && !(await confirmarDialogo({ titulo: 'Suspender la tienda', texto: 'Su asistente IA y sus campañas se paran en cuanto vuelva a preguntar por el plan (como mucho un cuarto de hora). Sus chats siguen. Se reactiva con un clic.', boton: 'Suspender', peligro: true }))) return;
-        try { var r3 = await api('/admin/tiendas/' + b.getAttribute('data-ti-susp') + '/suspender', { method: 'POST', body: { suspendida: suspender } }); show('ti-state', r3.mensaje, 'ok'); loadTiendas(); }
-        catch (error) { show('ti-state', error.message, 'bad'); }
-      };
+    alPulsar('data-ti-susp', 'ti-state', async function (id, b) {
+      var suspender = b.getAttribute('data-valor') === 'true';
+      if (suspender && !(await confirmarDialogo({ titulo: 'Suspender la tienda', texto: 'Su asistente IA y sus campañas se paran en cuanto vuelva a preguntar por el plan (como mucho un cuarto de hora). Sus chats siguen. Se reactiva con un clic.', boton: 'Suspender', peligro: true }))) return;
+      var cambio = await api('/admin/tiendas/' + id + '/suspender', { method: 'POST', body: { suspendida: suspender } });
+      show('ti-state', cambio.mensaje, 'ok');
+      loadTiendas();
     });
-    document.querySelectorAll('[data-ti-token]').forEach(function (b) {
-      b.onclick = async function () {
-        if (!(await confirmarDialogo({ titulo: 'Token nuevo', texto: 'El token anterior deja de valer: esa tienda dejará de recibir su plan hasta que pegues el nuevo en su Membresía.', boton: 'Crear token nuevo' }))) return;
-        try { var r4 = await api('/admin/tiendas/' + b.getAttribute('data-ti-token') + '/token', { method: 'POST', body: {} }); tiMostrarToken(r4.tienda, r4.token, ['Pégalo en la Membresía de esa tienda (Esta instalación depende de un maestro) junto a la dirección del plan.']); show('ti-state', r4.mensaje, 'ok'); loadTiendas(); }
-        catch (error) { show('ti-state', error.message, 'bad'); }
-      };
+    alPulsar('data-ti-token', 'ti-state', async function (id) {
+      if (!(await confirmarDialogo({ titulo: 'Token nuevo', texto: 'El token anterior deja de valer: esa tienda dejará de recibir su plan hasta que pegues el nuevo en su Membresía.', boton: 'Crear token nuevo' }))) return;
+      var nuevo = await api('/admin/tiendas/' + id + '/token', { method: 'POST', body: {} });
+      tiMostrarToken(nuevo.tienda, nuevo.token, ['Pégalo en la Membresía de esa tienda (Esta instalación depende de un maestro) junto a la dirección del plan.']);
+      show('ti-state', nuevo.mensaje, 'ok');
+      loadTiendas();
     });
-    document.querySelectorAll('[data-ti-borrar]').forEach(function (b) {
-      b.onclick = async function () {
-        var id = b.getAttribute('data-ti-borrar');
-        var t = r.tiendas.filter(function (x) { return x.id === id; })[0];
-        var que = 'dejar';
-        if (t && t.instalada) {
-          var eleccion = await pedirDato({ titulo: 'Borrar ' + t.nombre, texto: 'Esta tienda tiene su instalación en este servidor. ¿Qué hago con ella? Escribe: dejar (sigue corriendo, solo sale de la lista), parar (se apaga, sus datos se conservan) o borrar (se apaga y se borran sus datos).', etiqueta: 'dejar · parar · borrar', valor: 'parar', boton: 'Borrar la tienda', validar: function (v) { return ['dejar', 'parar', 'borrar'].indexOf(v.trim().toLowerCase()) >= 0 ? null : 'Escribe dejar, parar o borrar.'; } });
-          if (!eleccion) return;
-          que = eleccion.trim().toLowerCase();
-        } else if (!(await confirmarDialogo({ titulo: 'Borrar la tienda', texto: 'Se borra de esta lista y su instalación dejará de recibir plan (quedará como instalación libre o con lo último que supo). No se toca nada en su servidor.', boton: 'Borrar', peligro: true }))) return;
-        try { var r5 = await api('/admin/tiendas/' + id + '?instalacion=' + que, { method: 'DELETE' }); show('ti-state', r5.mensaje || 'Borrada.', r5.instalacion && r5.instalacion.intentada && !r5.instalacion.ok ? 'warn' : 'ok'); loadTiendas(); }
-        catch (error) { show('ti-state', error.message, 'bad'); }
-      };
+    alPulsar('data-ti-borrar', 'ti-state', async function (id) {
+      var t = r.tiendas.filter(function (x) { return x.id === id; })[0];
+      var que = 'dejar';
+      if (t && t.instalada) {
+        var eleccion = await pedirDato({ titulo: 'Borrar ' + t.nombre, texto: 'Esta tienda tiene su instalación en este servidor. ¿Qué hago con ella? Escribe: dejar (sigue corriendo, solo sale de la lista), parar (se apaga, sus datos se conservan) o borrar (se apaga y se borran sus datos).', etiqueta: 'dejar · parar · borrar', valor: 'parar', boton: 'Borrar la tienda', validar: function (v) { return ['dejar', 'parar', 'borrar'].indexOf(v.trim().toLowerCase()) >= 0 ? null : 'Escribe dejar, parar o borrar.'; } });
+        if (!eleccion) return;
+        que = eleccion.trim().toLowerCase();
+      } else if (!(await confirmarDialogo({ titulo: 'Borrar la tienda', texto: 'Se borra de esta lista y su instalación dejará de recibir plan (quedará como instalación libre o con lo último que supo). No se toca nada en su servidor.', boton: 'Borrar', peligro: true }))) return;
+      var borrada = await api('/admin/tiendas/' + id + '?instalacion=' + que, { method: 'DELETE' });
+      show('ti-state', borrada.mensaje || 'Borrada.', borrada.instalacion && borrada.instalacion.intentada && !borrada.instalacion.ok ? 'warn' : 'ok');
+      loadTiendas();
     });
-  } catch (error) { show('ti-state', error.message, 'bad'); }
+  } catch (error) { tablaError('ti-table', error, loadTiendas); }
 }
 function tiMostrarToken(tienda, token, pasos) {
   document.getElementById('ti-nueva-nombre').textContent = tienda.nombre;
@@ -4004,6 +4109,8 @@ function tiMostrarToken(tienda, token, pasos) {
 }
 document.getElementById('ti-crear').onclick = busy('ti-crear', async function () {
   try {
+    if (!val('ti-nombre')) throw new Error('Falta el nombre del negocio.');
+    if (!val('ti-vence')) throw new Error('Falta hasta cuándo está pagada.');
     var instalar = !document.getElementById('ti-instalar-caja').classList.contains('hidden') && document.getElementById('ti-instalar').checked;
     if (instalar) show('ti-state', 'Dando de alta y levantando su instalación… tarda un minuto.', 'warn');
     var r = await api('/admin/tiendas', { method: 'POST', body: { nombre: val('ti-nombre'), slug: val('ti-slug') || undefined, url: val('ti-url') || null, contacto: val('ti-contacto') || null, crearInstalacion: instalar, membresia: { plan: val('ti-plan'), vencimiento: val('ti-vence'), precioMes: Number(val('ti-precio') || 0), contacto: val('ti-renovar') || null } } });
@@ -4013,8 +4120,8 @@ document.getElementById('ti-crear').onclick = busy('ti-crear', async function ()
     loadTiendas();
   } catch (error) { show('ti-state', error.message, 'bad'); }
 });
-document.getElementById('ti-copiar').onclick = function () { navigator.clipboard.writeText(document.getElementById('ti-token').textContent).then(function () { show('ti-state', 'Token copiado', 'ok'); }); };
-document.getElementById('ti-cerrar').onclick = function () { document.getElementById('ti-nueva').classList.add('hidden'); };
+botonCopiar('ti-copiar', 'ti-token', 'ti-state', 'Token copiado');
+botonCerrar('ti-cerrar', 'ti-nueva', 'ti-token');
 
 // --- esta instalacion depende de un maestro ---
 function mbPintarMaestro(m) {
@@ -4048,9 +4155,10 @@ async function loadMiCuenta() {
     var u = await api('/admin/yo');
     yo = u;
     document.getElementById('mc-datos').innerHTML =
-      '<div class="stat"><span class="muted">Nombre</span><b>' + esc(u.nombre) + '</b></div>' +
-      '<div class="stat"><span class="muted">Usuario</span><b>' + esc(u.usuario) + '</b></div>' +
-      '<div class="stat"><span class="muted">Rol</span><b>' + (u.super ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : 'Operador') + '</b><small>' + (u.super ? 'lleva la membresía, los códigos de conexión y las cuentas de superadministrador, además de todo lo de un administrador' : u.rol === 'admin' ? 'gestiona cuentas, claves y configuración' : 'usa todo el sistema; no gestiona cuentas') + '</small></div>';
+      stat('Nombre', esc(u.nombre)) +
+      stat('Usuario', esc(u.usuario)) +
+      stat('Rol', u.super ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : 'Operador',
+        u.super ? 'lleva la membresía, los códigos de conexión y las cuentas de superadministrador, además de todo lo de un administrador' : u.rol === 'admin' ? 'gestiona cuentas, claves y configuración' : 'usa todo el sistema; no gestiona cuentas');
   } catch (error) { show('mc-state', error.message, 'bad'); }
 }
 document.getElementById('mc-cambiar').onclick = busy('mc-cambiar', async function () {
@@ -4063,11 +4171,14 @@ document.getElementById('mc-cambiar').onclick = busy('mc-cambiar', async functio
   } catch (error) { show('mc-state', error.message, 'bad'); }
 });
 document.getElementById('mc-salir').onclick = function () { salir(); };
-api('/admin/yo').then(function (u) { yo = u; var q = document.getElementById('quien'); if (q && u) q.textContent = u.nombre; }).catch(function () {});
+/* Quien soy se pide una vez: lo usan Usuarios, Ajustes y el asistente para
+   saber que se deja tocar. Si falla, cada seccion ya avisa por su cuenta. */
+api('/admin/yo').then(function (u) { yo = u; }).catch(function () { yo = null; });
 
 // --------------------------------------------------------------- extraer
 document.getElementById('g-run').onclick = async function () {
   try {
+    if (!document.getElementById('g-input').value.trim()) throw new Error('Pega un enlace de mapa o un texto con coordenadas.');
     var data = await api('/admin/geo/extract', { method: 'POST', body: { input: document.getElementById('g-input').value } });
     show('g-state', data.ok ? data.source + ' / ' + data.confidence : data.reason, data.ok ? 'ok' : 'warn');
     out('g-out', data);

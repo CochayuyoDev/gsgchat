@@ -350,6 +350,48 @@ describe('conexion de la cuenta desde /setup', () => {
   });
 });
 
+describe('la pantalla de conexion (/setup)', () => {
+  let pagina = '';
+
+  beforeAll(async () => {
+    const r = await app.inject({ url: '/setup', headers: auth });
+    expect(r.statusCode).toBe(200);
+    pagina = r.body;
+  });
+
+  it('ensena los cuatro pasos con su progreso: sin el, nadie sabe cuanto falta', () => {
+    for (const id of ['paso1', 'paso2', 'paso3', 'paso4']) {
+      expect(pagina, id).toContain(`id="${id}"`);
+    }
+    expect(pagina).toContain('id="progreso"');
+    // El texto "Paso N de 4" lo pone el navegador, pero la plantilla tiene los cuatro peldanos.
+    expect(pagina.match(/data-paso="\d"/g)).toHaveLength(4);
+  });
+
+  it('la primera pregunta no es tecnica y ofrece los cinco caminos como radios', () => {
+    expect(pagina).toContain('¿Quieres seguir usando WhatsApp en el móvil?');
+    for (const modo of ['local', 'coexistence', 'dedicated', 'manual', 'waha']) {
+      expect(pagina, modo).toContain(`<input type="radio" name="modo" value="${modo}">`);
+    }
+  });
+
+  it('solo hay un boton para cerrar la sesion de WhatsApp: dos hacian lo mismo y confundian', () => {
+    expect(pagina.match(/id="desconectar"/g)).toHaveLength(1);
+    expect(pagina).not.toContain('id="waha-logout"');
+  });
+
+  it('usa las clases compartidas del armazon y no colores a pelo (romperian el modo oscuro)', () => {
+    expect(pagina).toContain('class="btn primario"');
+    expect(pagina).toContain('class="tarjeta paso"');
+    // El unico blanco permitido es el fondo del QR (un QR invertido no se escanea)
+    // y el azul de marca de Facebook, declarado como variable.
+    // Solo el CSS propio de esta pantalla: empieza en .wrap y acaba en su ultima regla.
+    const css = pagina.slice(pagina.indexOf('.wrap { --fb:'), pagina.indexOf('#gsg-sim-valor'));
+    const colores = css.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+    expect(colores.filter((c) => c.toLowerCase() !== '#fff' && c.toLowerCase() !== '#1877f2')).toEqual([]);
+  });
+});
+
 describe('automatizacion desde la API', () => {
   it('crea una secuencia, una regla que la usa e inscribe contactos', async () => {
     const sequence = await app.inject({
@@ -480,6 +522,27 @@ describe('los scripts de las pantallas', () => {
         expect(() => new vm.Script(m[1]!, { filename: `${url}#${n}` }), `${url} script ${n}`).not.toThrow();
       }
       expect(n, url).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('las secciones del panel', () => {
+  it('todo enlace a /panel#algo tiene su seccion, y ninguna repite arriba el titulo que ya pinta la barra', async () => {
+    const r = await app.inject({ url: '/panel', headers: auth });
+    expect(r.statusCode).toBe(200);
+
+    // El menu de shell.ts y los atajos de las tarjetas enlazan por ancla: si una
+    // seccion desaparece o se renombra, el enlace lleva a una pantalla en blanco.
+    const anclas = new Set([...r.body.matchAll(/\/panel#([a-z-]+)/g)].map((m) => m[1]!));
+    expect(anclas.size).toBeGreaterThan(10);
+    for (const ancla of anclas) {
+      expect(r.body, `falta la seccion #${ancla}`).toContain(`id="tab-${ancla}"`);
+    }
+
+    // El armazon ya escribe el titulo de la seccion en la barra de arriba:
+    // volver a ponerlo en un <h2> era la misma frase dos veces en pantalla.
+    for (const repetido of ['Contactos', 'Actividad', 'Plantillas', 'Usuarios', 'Tiendas', 'Stickers', 'Mi cuenta']) {
+      expect(r.body, `el titulo "${repetido}" sale dos veces`).not.toContain(`<h2>${repetido}</h2>`);
     }
   });
 });

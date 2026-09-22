@@ -14,7 +14,7 @@ import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
 import { extractLocation } from '../geo/extract.js';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { extensionDe, idDeMedia, mediaDirectory } from '../whatsapp/local/media.js';
 
@@ -32,6 +32,42 @@ export interface ChatDeps {
 /** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
 export const MAX_BYTES_ADJUNTO = 16 * 1024 * 1024;
 
+/**
+ * Lo que la pantalla puede ofrecer con el proveedor que hay puesto.
+ *
+ * La regla es simple y vale la pena repetirla: es mejor una accion que no
+ * esta que una que esta y falla. La pantalla se dibuja a partir de esto, asi
+ * que un boton solo aparece donde de verdad hace algo.
+ *
+ *  - eliminar para todos: la Cloud API de Meta NO lo permite; un mensaje
+ *    enviado por ahi no se puede retirar, punto. Con WAHA depende del motor
+ *    del contenedor, y "depende" no es suficiente para pintar un boton.
+ *  - editar: idem. Solo el cliente local (Baileys) lo tiene.
+ *  - presencia ("escribiendo...", "ult. vez"): solo el que tiene sesion
+ *    propia y puede suscribirse al contacto.
+ */
+export function capacidadesDelChat(proveedor: string): {
+  citar: boolean;
+  reaccionar: boolean;
+  eliminarParaTodos: boolean;
+  editar: boolean;
+  presencia: boolean;
+} {
+  const local = proveedor === 'local';
+  return {
+    citar: true,
+    reaccionar: true,
+    eliminarParaTodos: local,
+    editar: local,
+    presencia: local,
+  };
+}
+
+/** Un wamid inventado por nosotros (no vino de WhatsApp): no sirve para actuar sobre el mensaje. */
+export function esWamidPropio(wamid: string | null): boolean {
+  return !wamid || /^(local:|web:|waha:local:)/.test(wamid);
+}
+
 const adjuntoSchema = z.object({
   contactId: z.string().min(1),
   /** El fichero en base64 (con o sin el prefijo data:...;base64,). */
@@ -39,6 +75,9 @@ const adjuntoSchema = z.object({
   mimeType: z.string().trim().min(3).max(120),
   filename: z.string().trim().max(200).optional(),
   caption: z.string().trim().max(1024).optional(),
+  /** Un audio grabado aqui mismo: sale como nota de voz, con su onda y su play. */
+  voz: z.boolean().optional(),
+  citaId: z.coerce.number().int().positive().optional(),
   autor: z.enum(['persona', 'ia', 'sistema']).optional(),
   autorNombre: z.string().trim().max(80).optional(),
 });
@@ -65,6 +104,8 @@ const sendSchema = z.object({
   /** Quien lo manda, si no es quien esta en sesion (el chat embebido de otro sistema lo dice). */
   autor: z.enum(['persona', 'ia', 'sistema']).optional(),
   autorNombre: z.string().trim().max(80).optional(),
+  /** Responder citando un mensaje del hilo (su id de fila, no el wamid). */
+  citaId: z.coerce.number().int().positive().optional(),
   /** Fuera de la ventana de 24 h solo sale una plantilla aprobada. */
   templateName: z.string().optional(),
   templateLanguage: z.string().default('es'),
@@ -109,12 +150,42 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       ? 'Comparte tu ubicación con el botón de aquí abajo, por favor.'
       : '¿Nos compartes tu ubicación, por favor? Desde el clip 📎 → Ubicación → Enviar tu ubicación actual.';
 
+  /**
+   * El mensaje del hilo, listo para citarlo, reaccionarlo, borrarlo o editarlo.
+   *
+   * Se busca SIEMPRE dentro de la conversacion, no por id suelto: asi un id
+   * inventado no deja actuar sobre el mensaje de otro cliente. Y se comprueba
+   * que tenga identificador de WhatsApp de verdad: sobre un mensaje que solo
+   * existe aqui (los importados, los de la web) WhatsApp no sabe actuar.
+   */
+  const citaDelHilo = async (
+    contactId: string,
+    mensajeId: number,
+  ): Promise<{ id: string; fromMe: boolean; texto: string; participant?: string; autor?: string } | { error: string }> => {
+    const m = await repos.messages.porId(contactId, mensajeId);
+    if (!m) return { error: 'ese mensaje no está en esta conversación' };
+    if (esWamidPropio(m.wamid)) {
+      return { error: 'ese mensaje no tiene identificador de WhatsApp (llegó importado): no se puede responder ni actuar sobre él' };
+    }
+    // En un grupo, quien lo escribio: sin esto la cita sale sin autor.
+    const autor = (m.payload as { autor?: { telefono?: string | null; nombre?: string | null } } | null)?.autor;
+    return {
+      id: m.wamid!,
+      fromMe: m.direction === 'out',
+      texto: (m.body ?? '').slice(0, 300),
+      ...(autor?.telefono ? { participant: `${autor.telefono}@s.whatsapp.net` } : {}),
+      ...(autor?.nombre ? { autor: autor.nombre } : {}),
+    };
+  };
+
   app.get('/admin/chat/conversations', async (request) => {
     const query = z
       .object({
         q: z.string().max(120).optional(),
         limit: z.coerce.number().int().positive().max(200).default(50),
         offset: z.coerce.number().int().nonnegative().default(0),
+        /** Los chats apartados solo salen cuando se piden. */
+        incluirApartados: z.coerce.boolean().default(false),
       })
       .parse(request.query ?? {});
     return {
@@ -179,6 +250,11 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     // En un grupo no hay ventana de 24 h ni consentimiento: se escribe como
     // en el telefono, siempre que el proveedor tenga grupos.
+    // Lo que este proveedor sabe hacer, para que la pantalla no pinte botones
+    // que no funcionan. Se manda con el hilo porque cambia al cambiar de
+    // proveedor, y la pantalla no tiene por que saber cual hay puesto.
+    const puede = capacidadesDelChat(providerOf(settings.current()));
+
     if (contact.tipo === 'grupo') {
       return {
         contact,
@@ -188,6 +264,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         blockedReason: gruposDisponibles() ? null : SIN_GRUPOS,
         messages,
         hasMore: messages.length === query.limit,
+        puede,
       };
     }
 
@@ -204,6 +281,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
       messages,
       hasMore: messages.length === query.limit,
+      puede,
     };
   });
 
@@ -266,6 +344,15 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       esGrupo = contact.tipo === 'grupo';
     }
     if (!phone) return reply.code(400).send({ error: 'falta el telefono' });
+
+    // La cita: se resuelve aqui, contra el hilo, para que nadie pueda citar
+    // un mensaje de otra conversacion pasando un id a mano.
+    let cita;
+    if (body.citaId) {
+      if (!body.contactId) return reply.code(400).send({ error: 'para citar hace falta la conversación' });
+      cita = await citaDelHilo(body.contactId, body.citaId);
+      if ('error' in cita) return reply.code(400).send({ error: cita.error });
+    }
 
     if (esGrupo) {
       if (!gruposDisponibles()) return reply.code(400).send({ error: SIN_GRUPOS });
@@ -345,7 +432,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       return { ...r.outcome, voz: { enviada: r.enviadoComo === 'audio', motivo: r.motivo } };
     }
 
-    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), ...firma });
+    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), ...firma, ...(cita && !('error' in cita) ? { cita } : {}) });
   });
 
   /**
@@ -375,13 +462,23 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const dir = deps.mediaDir ?? mediaDirectory();
     await writeFile(path.join(dir, id), datos);
 
+    let cita;
+    if (body.citaId) {
+      cita = await citaDelHilo(contact.id, body.citaId);
+      if ('error' in cita) return reply.code(400).send({ error: cita.error });
+    }
+
     return sender.send({
       phone: contact.phone,
       kind: 'media',
       category: 'UTILITY',
       manual: aMano(),
       ...quien(request, body),
-      media: { id, kind, datos, mimeType, filename: body.filename || undefined, caption: body.caption || undefined },
+      ...(cita && !('error' in cita) ? { cita } : {}),
+      // Una nota de voz grabada aqui va como nota de voz de verdad (ptt), no
+      // como fichero de audio: es la diferencia entre la onda con el play y
+      // un adjunto que hay que descargar.
+      media: { id, kind, datos, mimeType, filename: body.filename || undefined, caption: body.caption || undefined, voz: body.voz === true && kind === 'audio' },
     });
   });
 
@@ -392,5 +489,293 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       .parse(request.body);
     const contact = await repos.contacts.upsertFromInbound(normalizePhone(body.phone), body.name);
     return { contact };
+  });
+
+  // --------------------------------------------- acciones sobre un mensaje
+
+  /**
+   * Reaccionar con un emoji, o quitar la propia reaccion (emoji vacio).
+   *
+   * Sale por el proveedor y ADEMAS se cuelga del mensaje aqui: si solo se
+   * mandara, la reaccion propia no se veria hasta que WhatsApp la devolviera,
+   * y con la Cloud API no la devuelve nunca.
+   */
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/reaccion', async (request, reply) => {
+    const body = z.object({ mensajeId: z.coerce.number().int().positive(), emoji: z.string().max(16) }).parse(request.body ?? {});
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    if (!capacidadesDelChat(providerOf(settings.current())).reaccionar || !sender.accion) {
+      return reply.code(400).send({ error: 'este WhatsApp no puede mandar reacciones' });
+    }
+
+    const mensaje = await citaDelHilo(contact.id, body.mensajeId);
+    if ('error' in mensaje) return reply.code(400).send({ error: mensaje.error });
+
+    const emoji = body.emoji.trim();
+    await sender.accion({ phone: contact.phone, mensaje, tipo: 'reaccion', emoji });
+    await repos.messages.reaccionar(mensaje.id, 'yo', emoji, new Date());
+    return { ok: true, emoji };
+  });
+
+  /**
+   * Quitar mensajes: "para mi" siempre, "para todos" solo donde el proveedor
+   * lo permite (ver `capacidadesDelChat`).
+   *
+   * Ni un caso ni el otro borran la fila: se marcan y el hilo deja de
+   * pintarlas. El respaldo y la traza siguen completos, que es lo que hace
+   * falta el dia que alguien pregunta que se dijo.
+   */
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/eliminar', async (request, reply) => {
+    const body = z
+      .object({ ids: z.array(z.coerce.number().int().positive()).min(1).max(50), paraTodos: z.boolean().default(false) })
+      .parse(request.body ?? {});
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+
+    const fallos: string[] = [];
+    if (body.paraTodos) {
+      if (!capacidadesDelChat(providerOf(settings.current())).eliminarParaTodos || !sender.accion) {
+        return reply.code(400).send({ error: 'este WhatsApp no puede eliminar un mensaje para todos: solo se puede quitar de aquí' });
+      }
+      for (const id of body.ids) {
+        const mensaje = await citaDelHilo(contact.id, id);
+        if ('error' in mensaje) { fallos.push(mensaje.error); continue; }
+        try {
+          await sender.accion({ phone: contact.phone, mensaje, tipo: 'eliminar' });
+          await repos.messages.marcarBorradoPorRemitente(mensaje.id, new Date());
+        } catch (error) {
+          fallos.push(error instanceof Error ? error.message : 'no se pudo eliminar');
+        }
+      }
+    }
+
+    const quitados = await repos.messages.ocultar(contact.id, body.ids, new Date());
+    return { ok: true, quitados, paraTodos: body.paraTodos, fallos };
+  });
+
+  /** Cambiar el texto de un mensaje ya enviado, donde el proveedor lo permita. */
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/editar', async (request, reply) => {
+    const body = z.object({ mensajeId: z.coerce.number().int().positive(), texto: z.string().trim().min(1).max(4000) }).parse(request.body ?? {});
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    if (!capacidadesDelChat(providerOf(settings.current())).editar || !sender.accion) {
+      return reply.code(400).send({ error: 'este WhatsApp no puede editar un mensaje ya enviado' });
+    }
+
+    const mensaje = await citaDelHilo(contact.id, body.mensajeId);
+    if ('error' in mensaje) return reply.code(400).send({ error: mensaje.error });
+    if (!mensaje.fromMe) return reply.code(400).send({ error: 'solo se pueden editar los mensajes que mandaste tú' });
+
+    await sender.accion({ phone: contact.phone, mensaje, tipo: 'editar', texto: body.texto });
+    await repos.messages.editarCuerpo(contact.id, body.mensajeId, body.texto, new Date());
+    return { ok: true };
+  });
+
+  /** La estrella: marcar o desmarcar mensajes para encontrarlos luego. */
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/destacar', async (request, reply) => {
+    const body = z
+      .object({ ids: z.array(z.coerce.number().int().positive()).min(1).max(100), destacado: z.boolean().default(true) })
+      .parse(request.body ?? {});
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    const cambiados = await repos.messages.destacar(contact.id, body.ids, body.destacado, new Date());
+    return { ok: true, cambiados };
+  });
+
+  /** Los mensajes destacados: de este chat o de todos. */
+  app.get('/admin/chat/destacados', async (request) => {
+    const query = z
+      .object({ contactId: z.string().optional(), limit: z.coerce.number().int().positive().max(200).default(60) })
+      .parse(request.query ?? {});
+    return { items: await repos.messages.destacados(query) };
+  });
+
+  /** Buscar dentro de una conversacion. Devuelve los mensajes que coinciden. */
+  app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/buscar', async (request, reply) => {
+    const query = z
+      .object({ q: z.string().trim().min(1).max(120), limit: z.coerce.number().int().positive().max(200).default(100) })
+      .parse(request.query ?? {});
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    return { items: await repos.messages.buscar({ contactId: contact.id, q: query.q, limit: query.limit }) };
+  });
+
+  /**
+   * Reenviar mensajes a otras conversaciones.
+   *
+   * Se reenvia el CONTENIDO, no el mensaje: WhatsApp no tiene "reenviar" en
+   * ninguna de las tres APIs, asi que se vuelve a mandar. Por eso el globo
+   * lleva la marca "Reenviado": para que quien lo lee sepa que no se escribio
+   * para el.
+   */
+  app.post('/admin/chat/reenviar', async (request, reply) => {
+    const body = z
+      .object({
+        origenId: z.string().min(1),
+        ids: z.array(z.coerce.number().int().positive()).min(1).max(20),
+        destinos: z.array(z.string().min(1)).min(1).max(20),
+      })
+      .parse(request.body ?? {});
+
+    const origen = await repos.contacts.getById(body.origenId);
+    if (!origen) return reply.code(404).send({ error: 'conversación de origen no encontrada' });
+    const mensajes = await repos.messages.porIds(origen.id, body.ids);
+    if (!mensajes.length) return reply.code(400).send({ error: 'no hay nada que reenviar' });
+
+    const firma = quien(request, {});
+    let enviados = 0;
+    const fallos: string[] = [];
+
+    for (const destinoId of body.destinos) {
+      const destino = await repos.contacts.getById(destinoId);
+      if (!destino) { fallos.push('una conversación ya no existe'); continue; }
+      if (destino.tipo === 'grupo' && !gruposDisponibles()) { fallos.push(SIN_GRUPOS); continue; }
+
+      for (const m of mensajes) {
+        const media = (m.payload as { media?: { id: string; kind?: string; mimeType?: string; filename?: string; url?: string } } | null)?.media;
+        try {
+          // Un adjunto se reenvia leyendo el fichero de donde ya esta; lo demas
+          // (texto, una ubicacion escrita, una plantilla ya renderizada) va como
+          // texto, que es lo que el cliente vio.
+          if (media?.id && media.kind !== 'sticker') {
+            const datos = await readFile(path.join(deps.mediaDir ?? mediaDirectory(), media.id));
+            const outcome = await sender.send({
+              phone: destino.phone,
+              kind: 'media',
+              category: 'UTILITY',
+              manual: aMano(),
+              reenviado: true,
+              ...firma,
+              media: {
+                id: media.id,
+                kind: (media.kind as 'image' | 'video' | 'audio' | 'document') ?? 'document',
+                datos,
+                mimeType: media.mimeType ?? 'application/octet-stream',
+                filename: media.filename,
+                caption: (m.body ?? '').trim() || undefined,
+              },
+            });
+            if (outcome.ok) enviados++;
+            else fallos.push('reason' in outcome ? outcome.reason : outcome.error);
+            continue;
+          }
+
+          const texto = (m.body ?? '').trim();
+          if (!texto) { fallos.push('un mensaje sin texto no se puede reenviar'); continue; }
+          const outcome = await sender.send({
+            phone: destino.phone,
+            kind: 'freeform',
+            category: 'UTILITY',
+            manual: aMano(),
+            reenviado: true,
+            ...firma,
+            text: texto,
+          });
+          if (outcome.ok) enviados++;
+          else fallos.push('reason' in outcome ? outcome.reason : outcome.error);
+        } catch (error) {
+          fallos.push(error instanceof Error ? error.message : 'no se pudo reenviar');
+        }
+      }
+    }
+
+    return { ok: enviados > 0, enviados, fallos };
+  });
+
+  /**
+   * Como se ve el chat en la lista: fijado, silenciado, apartado, o de vuelta
+   * a "sin leer". Lo que no venga en el cuerpo no se toca.
+   */
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/lista', async (request, reply) => {
+    const body = z
+      .object({
+        fijado: z.boolean().optional(),
+        silenciado: z.boolean().optional(),
+        apartado: z.boolean().optional(),
+        noLeido: z.boolean().optional(),
+      })
+      .parse(request.body ?? {});
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+
+    await repos.contacts.ajustesChat(contact.id, body, new Date());
+    if (body.noLeido === true) {
+      // "Sin leer" es mover el puntero de lectura ANTES del ultimo entrante:
+      // no hay marca por mensaje (ver `marcarNoLeido`).
+      await repos.contacts.marcarNoLeido(contact.id, null);
+    } else if (body.noLeido === false) {
+      await repos.messages.markRead(contact.id, new Date());
+    }
+    return { ok: true };
+  });
+
+  /**
+   * Si el otro lado esta escribiendo o en linea.
+   *
+   * Solo con el proveedor que puede saberlo. `null` es "no se sabe", y la
+   * pantalla lo respeta: no inventa un "en línea" que no existe.
+   */
+  app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/presencia', async (request, reply) => {
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    if (!capacidadesDelChat(providerOf(settings.current())).presencia || !sender.presencia) return { presencia: null };
+    return { presencia: await sender.presencia(contact.phone) };
+  });
+
+  /**
+   * La previa de un enlace: titulo, descripcion e imagen.
+   *
+   * Se pide desde el servidor porque el navegador no puede (el otro sitio no
+   * deja). Con candado: solo http/https, solo hacia fuera (nada de la red
+   * interna, que seria un agujero para leer servicios privados), un tope de
+   * tamano y un plazo corto. Lo que no se pueda leer, no se pinta.
+   */
+  const previas = new Map<string, { titulo: string | null; descripcion: string | null; imagen: string | null; sitio: string }>();
+  app.get('/admin/chat/previa', async (request, reply) => {
+    const query = z.object({ url: z.string().url().max(600) }).parse(request.query ?? {});
+    const cacheada = previas.get(query.url);
+    if (cacheada) return cacheada;
+
+    let destino: URL;
+    try {
+      destino = new URL(query.url);
+    } catch {
+      return reply.code(400).send({ error: 'ese enlace no se entiende' });
+    }
+    if (destino.protocol !== 'http:' && destino.protocol !== 'https:') {
+      return reply.code(400).send({ error: 'solo se pueden previsualizar enlaces web' });
+    }
+    // La red de casa no se toca desde aqui: un enlace pegado por un cliente
+    // no puede servir para leer un servicio interno.
+    if (/^(localhost$|127\.|10\.|192\.168\.|169\.254\.|0\.|\[?::1)/i.test(destino.hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(destino.hostname)) {
+      return reply.code(400).send({ error: 'ese enlace apunta a la red interna' });
+    }
+
+    try {
+      const corte = AbortSignal.timeout(4000);
+      const res = await fetch(destino, { signal: corte, redirect: 'follow', headers: { 'user-agent': 'WhatsApp/2.0' } });
+      if (!res.ok) return reply.code(404).send({ error: 'el enlace no respondió' });
+      const tipo = res.headers.get('content-type') ?? '';
+      if (!tipo.includes('text/html')) return reply.code(415).send({ error: 'el enlace no es una página' });
+      // 200 KB de cabecera bastan: las etiquetas og: van siempre arriba.
+      const html = (await res.text()).slice(0, 200_000);
+      const meta = (nombre: string) => {
+        const re = new RegExp(`<meta[^>]+(?:property|name)=["']${nombre}["'][^>]*content=["']([^"']+)["']`, 'i');
+        const alReves = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${nombre}["']`, 'i');
+        return (html.match(re)?.[1] ?? html.match(alReves)?.[1] ?? '').trim() || null;
+      };
+      const previa = {
+        titulo: meta('og:title') ?? (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() || null),
+        descripcion: meta('og:description') ?? meta('description'),
+        imagen: meta('og:image'),
+        sitio: destino.hostname.replace(/^www\./, ''),
+      };
+      previas.set(query.url, previa);
+      // La memoria no es infinita: con mil enlaces cacheados se suelta el mas viejo.
+      if (previas.size > 1000) previas.delete(previas.keys().next().value!);
+      return previa;
+    } catch (error) {
+      return reply.code(504).send({ error: 'no se pudo leer el enlace: ' + (error instanceof Error ? error.message : 'sin respuesta') });
+    }
   });
 }

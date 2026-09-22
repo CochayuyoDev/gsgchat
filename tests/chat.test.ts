@@ -566,6 +566,269 @@ describe('parar el bot en un chat', () => {
   });
 });
 
+
+/**
+ * Lo que se hace SOBRE un mensaje ya enviado: citarlo, reaccionar, quitarlo,
+ * destacarlo, buscarlo o reenviarlo.
+ *
+ * La regla que se prueba aqui no es cosmetica: la pantalla solo ensena lo que
+ * el proveedor sabe hacer. Con la Cloud API de Meta (la de estas pruebas) NO
+ * se puede eliminar para todos ni editar, y eso tiene que decirse aqui.
+ */
+describe('acciones sobre un mensaje', () => {
+  /** Deja un chat con un mensaje del cliente y devuelve contacto e hilo. */
+  async function chatConMensaje(texto = 'hola, quiero cotizar') {
+    await processChange('messages', inbound({ text: { body: texto } }), deps);
+    const contact = (await repos.contacts.getByPhone('5215500001111'))!;
+    const hilo = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    return { contact, hilo };
+  }
+
+  it('el hilo dice lo que este WhatsApp puede hacer, para no pintar botones que fallan', async () => {
+    const { hilo } = await chatConMensaje();
+    // Meta deja citar y reaccionar; eliminar para todos y editar no existen
+    // en su API, y la presencia tampoco.
+    expect(hilo.puede).toEqual({
+      citar: true,
+      reaccionar: true,
+      eliminarParaTodos: false,
+      editar: false,
+      presencia: false,
+    });
+  });
+
+  it('responder citando manda la cita al proveedor y la deja en el hilo', async () => {
+    const { contact, hilo } = await chatConMensaje();
+    const citado = hilo.messages.find((m: { direction: string }) => m.direction === 'in');
+
+    const r = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/send',
+      headers: auth,
+      payload: { contactId: contact.id, text: 'te paso el precio', citaId: citado.id },
+    });
+    expect(r.statusCode).toBe(200);
+
+    // Sale con la cita: el proveedor recibe el wamid del mensaje citado.
+    const salida = wa.sent.filter((x) => x.kind === 'text').at(-1)!;
+    expect(salida.cita).toMatchObject({ id: citado.wamid, fromMe: false });
+
+    // Y queda guardada, para que el globo la pinte tambien al recargar.
+    const despues = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    expect(despues.messages.at(-1).payload.cita).toMatchObject({ id: citado.wamid, deMi: false });
+  });
+
+  it('no se puede citar un mensaje de otra conversacion', async () => {
+    const { hilo } = await chatConMensaje();
+    const citado = hilo.messages[0];
+    await processChange('messages', inbound({ text: { body: 'yo tambien' } }, '5215599998888'), deps);
+    const otro = (await repos.contacts.getByPhone('5215599998888'))!;
+
+    const r = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/send',
+      headers: auth,
+      payload: { contactId: otro.id, text: 'hola', citaId: citado.id },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain('no está en esta conversación');
+  });
+
+  it('reaccionar sale al proveedor y se cuelga del mensaje, no como globo suelto', async () => {
+    const { contact, hilo } = await chatConMensaje();
+    const objetivo = hilo.messages.find((m: { direction: string }) => m.direction === 'in');
+    const cuantos = hilo.messages.length;
+
+    const r = await app.inject({
+      method: 'POST',
+      url: `/admin/chat/${contact.id}/reaccion`,
+      headers: auth,
+      payload: { mensajeId: objetivo.id, emoji: '👍' },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'reaction', messageId: objetivo.wamid, emoji: '👍' });
+
+    const despues = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    // Ni un mensaje mas: la reaccion NO es un mensaje.
+    expect(despues.messages.length).toBe(cuantos);
+    expect(despues.messages.find((m: { id: number }) => m.id === objetivo.id).payload.reacciones.yo).toMatchObject({ emoji: '👍' });
+  });
+
+  it('reaccionar con el emoji vacio quita la reaccion', async () => {
+    const { contact, hilo } = await chatConMensaje();
+    const objetivo = hilo.messages.find((m: { direction: string }) => m.direction === 'in');
+    const url = `/admin/chat/${contact.id}/reaccion`;
+    await app.inject({ method: 'POST', url, headers: auth, payload: { mensajeId: objetivo.id, emoji: '👍' } });
+    await app.inject({ method: 'POST', url, headers: auth, payload: { mensajeId: objetivo.id, emoji: '' } });
+
+    const despues = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    expect(despues.messages.find((m: { id: number }) => m.id === objetivo.id).payload.reacciones.yo).toBeUndefined();
+  });
+
+  it('una reaccion que ENTRA se pega a su mensaje en vez de crear una fila', async () => {
+    const { contact, hilo } = await chatConMensaje();
+    const mio = hilo.messages.find((m: { direction: string }) => m.direction === 'out');
+    const cuantos = hilo.messages.length;
+
+    await processChange(
+      'messages',
+      inbound({ type: 'reaction', reaction: { emoji: '❤️', message_id: mio.wamid } }),
+      deps,
+    );
+
+    const despues = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    expect(despues.messages.length).toBe(cuantos);
+    expect(despues.messages.find((m: { id: number }) => m.id === mio.id).payload.reacciones.cliente).toMatchObject({ emoji: '❤️' });
+  });
+
+  it('con Meta no se ofrece eliminar para todos, y decirlo no rompe nada', async () => {
+    const { contact, hilo } = await chatConMensaje();
+    const mio = hilo.messages.find((m: { direction: string }) => m.direction === 'out');
+
+    const r = await app.inject({
+      method: 'POST',
+      url: `/admin/chat/${contact.id}/eliminar`,
+      headers: auth,
+      payload: { ids: [mio.id], paraTodos: true },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain('no puede eliminar');
+  });
+
+  it('"quitar de aquí" saca el mensaje del hilo pero no borra la fila', async () => {
+    const { contact, hilo } = await chatConMensaje();
+    const objetivo = hilo.messages[0];
+
+    const r = await app.inject({
+      method: 'POST',
+      url: `/admin/chat/${contact.id}/eliminar`,
+      headers: auth,
+      payload: { ids: [objetivo.id], paraTodos: false },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().quitados).toBe(1);
+
+    const despues = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json();
+    expect(despues.messages.some((m: { id: number }) => m.id === objetivo.id)).toBe(false);
+    // Sigue en la tabla: el respaldo y la traza lo necesitan.
+    expect(repos.messages._all.some((m) => m.id === objetivo.id)).toBe(true);
+  });
+
+  it('con Meta tampoco se puede editar un mensaje enviado', async () => {
+    const { contact, hilo } = await chatConMensaje();
+    const mio = hilo.messages.find((m: { direction: string }) => m.direction === 'out');
+    const r = await app.inject({
+      method: 'POST',
+      url: `/admin/chat/${contact.id}/editar`,
+      headers: auth,
+      payload: { mensajeId: mio.id, texto: 'esto queria decir' },
+    });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('destacar un mensaje lo deja en la lista de destacados', async () => {
+    const { contact, hilo } = await chatConMensaje('la direccion es Av. Siempre Viva 742');
+    const objetivo = hilo.messages[0];
+
+    await app.inject({
+      method: 'POST',
+      url: `/admin/chat/${contact.id}/destacar`,
+      headers: auth,
+      payload: { ids: [objetivo.id], destacado: true },
+    });
+
+    const lista = (await app.inject({ url: '/admin/chat/destacados', headers: auth })).json();
+    expect(lista.items.map((m: { id: number }) => m.id)).toContain(objetivo.id);
+    expect(lista.items[0]).toHaveProperty('phone');
+
+    await app.inject({
+      method: 'POST',
+      url: `/admin/chat/${contact.id}/destacar`,
+      headers: auth,
+      payload: { ids: [objetivo.id], destacado: false },
+    });
+    const vacia = (await app.inject({ url: '/admin/chat/destacados', headers: auth })).json();
+    expect(vacia.items.length).toBe(0);
+  });
+
+  it('buscar dentro de la conversacion devuelve las coincidencias', async () => {
+    const { contact } = await chatConMensaje('mi direccion es Av. Siempre Viva 742');
+    await processChange('messages', inbound({ text: { body: 'otra cosa distinta' } }), deps);
+
+    const r = (await app.inject({ url: `/admin/chat/${contact.id}/buscar?q=siempre viva`, headers: auth })).json();
+    expect(r.items.length).toBe(1);
+    expect(r.items[0].body).toContain('Siempre Viva');
+  });
+
+  it('reenviar manda el contenido a otra conversacion, marcado como reenviado', async () => {
+    const { contact, hilo } = await chatConMensaje('la promo vence el viernes');
+    const origen = hilo.messages[0];
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215599998888'), deps);
+    const destino = (await repos.contacts.getByPhone('5215599998888'))!;
+
+    const r = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/reenviar',
+      headers: auth,
+      payload: { origenId: contact.id, ids: [origen.id], destinos: [destino.id] },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().enviados).toBe(1);
+
+    const hiloDestino = (await app.inject({ url: `/admin/chat/${destino.id}`, headers: auth })).json();
+    const reenviado = hiloDestino.messages.filter((m: { payload: { reenviado?: boolean } | null }) => m.payload?.reenviado);
+    expect(reenviado.length).toBe(1);
+    expect(reenviado[0].body).toBe('la promo vence el viernes');
+  });
+});
+
+describe('la conversacion en la lista: fijar, silenciar, apartar', () => {
+  async function dosChats() {
+    await processChange('messages', inbound({ text: { body: 'soy el primero' } }, '5215500001111'), deps);
+    await processChange('messages', inbound({ text: { body: 'soy el segundo' } }, '5215599998888'), deps);
+    return {
+      primero: (await repos.contacts.getByPhone('5215500001111'))!,
+      segundo: (await repos.contacts.getByPhone('5215599998888'))!,
+    };
+  }
+
+  it('lo fijado sube arriba del todo, por encima de lo mas reciente', async () => {
+    const { primero } = await dosChats();
+    const antes = (await app.inject({ url: '/admin/chat/conversations', headers: auth })).json();
+    expect(antes.items[0].contactId).not.toBe(primero.id);
+
+    await app.inject({ method: 'POST', url: `/admin/chat/${primero.id}/lista`, headers: auth, payload: { fijado: true } });
+
+    const despues = (await app.inject({ url: '/admin/chat/conversations', headers: auth })).json();
+    expect(despues.items[0].contactId).toBe(primero.id);
+    expect(despues.items[0].fijadoAt).toBeTruthy();
+  });
+
+  it('un chat apartado sale de la lista, pero se puede pedir', async () => {
+    const { primero } = await dosChats();
+    await app.inject({ method: 'POST', url: `/admin/chat/${primero.id}/lista`, headers: auth, payload: { apartado: true } });
+
+    const normal = (await app.inject({ url: '/admin/chat/conversations', headers: auth })).json();
+    expect(normal.items.some((c: { contactId: string }) => c.contactId === primero.id)).toBe(false);
+
+    const con = (await app.inject({ url: '/admin/chat/conversations?incluirApartados=true', headers: auth })).json();
+    expect(con.items.some((c: { contactId: string }) => c.contactId === primero.id)).toBe(true);
+  });
+
+  it('marcar como no leido devuelve el globo de sin leer', async () => {
+    const { primero } = await dosChats();
+    // Abrirlo lo marca como leido...
+    await app.inject({ url: `/admin/chat/${primero.id}?read=true`, headers: auth });
+    const leido = (await app.inject({ url: '/admin/chat/conversations', headers: auth })).json();
+    expect(leido.items.find((c: { contactId: string }) => c.contactId === primero.id).unread).toBe(0);
+
+    // ...y esto lo deshace, moviendo el puntero de lectura hacia atras.
+    await app.inject({ method: 'POST', url: `/admin/chat/${primero.id}/lista`, headers: auth, payload: { noLeido: true } });
+    const sinLeer = (await app.inject({ url: '/admin/chat/conversations', headers: auth })).json();
+    expect(sinLeer.items.find((c: { contactId: string }) => c.contactId === primero.id).unread).toBeGreaterThan(0);
+  });
+});
+
 describe('la página del chat se puede ejecutar', () => {
   it('el javascript que se manda al navegador no tiene errores de sintaxis', async () => {
     // Toda la pagina vive dentro de una plantilla de texto, asi que TypeScript

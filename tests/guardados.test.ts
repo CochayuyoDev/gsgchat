@@ -43,6 +43,7 @@ import {
 import { carpetaDeAdjuntos, rutaDe } from '../src/archive/store.js';
 import { crearEnlace, firmarEnlace, verificarEnlace } from '../src/archive/enlace.js';
 import { leerChatDeWhatsApp } from '../src/archive/importar-whatsapp.js';
+import { guardadosPage } from '../src/web/guardados-page.js';
 import type { Message } from '../src/db/messages.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
@@ -719,5 +720,38 @@ describe('las rutas de la pantalla', () => {
       await app.close();
       await rm(dirRutas, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * La pantalla se arma pegando cadenas: un parentesis de mas en el JS no lo
+ * ve nadie hasta que el navegador lo abre, y un boton que apunta a un id que
+ * ya no existe tampoco. Aqui se comprueban las dos cosas sin navegador.
+ */
+describe('la pantalla de conversaciones guardadas', () => {
+  const html = guardadosPage({ demo: false, nombreNegocio: 'Mi Tienda', conIA: false });
+
+  it('trae lo que la pantalla promete', () => {
+    expect(html).toContain('Conversaciones guardadas');
+    expect(html).toContain('Compartir como evidencia');
+    expect(html).toContain('Importar un chat exportado del teléfono');
+    // Leer una guardada tiene que ser tan comodo como leer el chat vivo: se busca dentro.
+    expect(html).toContain('Buscar dentro de esta conversación');
+  });
+
+  it('su JS es valido y todos los ids que busca existen en la pagina', () => {
+    const script = html.slice(html.lastIndexOf('<script>') + '<script>'.length, html.lastIndexOf('</script>'));
+    expect(() => new Function(script)).not.toThrow();
+    const pedidos = new Set([...script.matchAll(/\$\('([a-z0-9-]+)'\)/g)].map((m) => m[1]));
+    const puestos = new Set([...html.matchAll(/id="([a-z0-9-]+)"/g)].map((m) => m[1]));
+    expect(pedidos.size).toBeGreaterThan(20);
+    expect([...pedidos].filter((id) => !puestos.has(id))).toEqual([]);
+  });
+
+  it('no pinta colores a pelo: el modo oscuro se rompe con ellos', () => {
+    // El CSS de la pantalla va el ultimo del <style>: empieza en su primer comentario propio.
+    const css = html.slice(html.indexOf('El armazon no viste los formularios'), html.indexOf('</style>'));
+    expect(css).toContain('.hilo-buscar');
+    expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });

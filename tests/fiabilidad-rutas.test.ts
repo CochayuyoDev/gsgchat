@@ -121,6 +121,17 @@ describe('/fiabilidad y /admin/fiabilidad', () => {
     }
   });
 
+  it('los botones de simular una caída solo existen en la demostración, y sin servicio no se consulta el estado', async () => {
+    const { fiabilidadPage } = await import('../src/web/fiabilidad-page.js');
+    const conDemo = fiabilidadPage({ disponible: true, demo: true, nombreNegocio: 'Z' });
+    const sinDemo = fiabilidadPage({ disponible: true, demo: false, nombreNegocio: 'Z' });
+    expect(conDemo).toContain('id="wa-sim-caida5"');
+    // Fuera de la demostración el servidor contesta 400: el botón no se pinta.
+    expect(sinDemo).not.toContain('id="wa-sim-caida5"');
+    // Sin el servicio, la pantalla lo dice en vez de pedir el estado cada 30 s.
+    expect(fiabilidadPage({ disponible: false, demo: false, nombreNegocio: 'Z' })).toContain('data-disponible="0"');
+  });
+
   it('GET /admin/fiabilidad trae todo, con frases y sin códigos', async () => {
     const r = await app.inject({ method: 'GET', url: '/admin/fiabilidad', headers: { cookie: operador } });
     expect(r.statusCode).toBe(200);

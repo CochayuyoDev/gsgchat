@@ -141,14 +141,17 @@ describe('traducir lo que llega por el socket', () => {
 /** Socket de pega: registra los eventos y deja dispararlos a mano. */
 function fakeSocket() {
   const handlers = new Map<string, (arg: unknown) => void>();
-  const enviados: Array<{ jid: string; content: unknown }> = [];
+  const enviados: Array<{ jid: string; content: unknown; options?: unknown }> = [];
+  const leidos: unknown[][] = [];
 
   const sock: LocalSocket = {
-    async sendMessage(jid, content) {
-      enviados.push({ jid, content });
+    async sendMessage(jid, content, options) {
+      enviados.push({ jid, content, options });
       return { key: { id: 'wamid-local-1' } };
     },
-    async readMessages() {},
+    async readMessages(keys) {
+      leidos.push(keys);
+    },
     async requestPairingCode() {
       return 'ABCD1234';
     },
@@ -168,13 +171,14 @@ function fakeSocket() {
     sock,
     handlers,
     enviados,
+    leidos,
     listo,
     emitir: (e: string, arg: unknown) => handlers.get(e)?.(arg),
   };
 }
 
 async function conectado() {
-  const { sock, emitir, enviados, listo } = fakeSocket();
+  const { sock, emitir, enviados, leidos, listo } = fakeSocket();
   const promesa = startLocal({
     authDir: 'C:/no/existe/da/igual',
     createSocket: async () => ({ sock, saveCreds: async () => {} }),
@@ -182,7 +186,7 @@ async function conectado() {
   await listo();
   emitir('connection.update', { connection: 'open' });
   await promesa;
-  return { enviados, emitir };
+  return { enviados, leidos, emitir };
 }
 
 describe('la sesion local', () => {
@@ -372,6 +376,55 @@ describe('enviar por el cliente local', () => {
 
     expect(result.wamid).toBe('wamid-local-1');
     expect(enviados[0]).toMatchObject({ jid: '5215512345678@s.whatsapp.net', content: { text: 'hola' } });
+  });
+
+  /**
+   * Regresion. `readMessages` recibia solo el id y Baileys no marcaba NADA:
+   * necesita la clave entera (de que chat es y si era nuestro). El fallo se
+   * tragaba en silencio y el cliente nunca veia el doble check azul.
+   */
+  it('marcar como leido manda la clave entera, no solo el id', async () => {
+    const { leidos } = await conectado();
+    await createLocalClient().markAsRead('WAMID-1', { to: '5215512345678' });
+
+    expect(leidos[0]?.[0]).toMatchObject({
+      remoteJid: '5215512345678@s.whatsapp.net',
+      id: 'WAMID-1',
+      fromMe: false,
+    });
+  });
+
+  it('sin saber de que chat es, no se inventa un acuse', async () => {
+    const { leidos } = await conectado();
+    await createLocalClient().markAsRead('WAMID-1');
+    expect(leidos.length).toBe(0);
+  });
+
+  it('responder citando manda el mensaje citado en las opciones', async () => {
+    const { enviados } = await conectado();
+    await createLocalClient().sendText('5215512345678', 'te confirmo', undefined, {
+      id: 'ORIGINAL-1',
+      fromMe: false,
+      texto: '¿me lo confirmas?',
+    });
+
+    expect(enviados[0]?.options).toMatchObject({
+      quoted: { key: { remoteJid: '5215512345678@s.whatsapp.net', id: 'ORIGINAL-1', fromMe: false } },
+    });
+  });
+
+  it('reaccionar, eliminar para todos y editar existen aqui (no hay Meta de por medio)', async () => {
+    const { enviados } = await conectado();
+    const wa = createLocalClient();
+
+    await wa.sendReaction!('5215512345678', { id: 'M1', fromMe: true }, '👍');
+    expect(enviados[0]?.content).toMatchObject({ react: { text: '👍', key: { id: 'M1', fromMe: true } } });
+
+    await wa.borrarParaTodos!('5215512345678', { id: 'M1', fromMe: true });
+    expect(enviados[1]?.content).toMatchObject({ delete: { id: 'M1' } });
+
+    await wa.editarMensaje!('5215512345678', { id: 'M1', fromMe: true }, 'esto queria decir');
+    expect(enviados[2]?.content).toMatchObject({ text: 'esto queria decir', edit: { id: 'M1' } });
   });
 
   it('una ubicacion va con los grados que espera Baileys', async () => {
@@ -637,15 +690,36 @@ describe('fotos, audios y documentos', () => {
     expect(toChangeValue(mensajeCon({ placeholderMessage: {} }), null, null)).toBeNull();
   });
 
-  it('una reaccion se ensena como tal, sin pasar por texto', () => {
+  /**
+   * Una reaccion llega con la clave del mensaje al que se reacciono, y sin
+   * esa clave no sirve de nada: se pintaria como un globo suelto que nadie
+   * sabe a que contesta.
+   */
+  it('una reaccion viaja con el mensaje al que reacciona', () => {
     const value = toChangeValue(mensajeCon({ reactionMessage: { text: '👍', key: { id: 'X' } } }), null, null);
-    expect(value?.messages?.[0]).toMatchObject({ type: 'reaction', reaction: { emoji: '👍' } });
+    expect(value?.messages?.[0]).toMatchObject({ type: 'reaction', reaction: { emoji: '👍', message_id: 'X' } });
     expect(value?.messages?.[0]?.text).toBeUndefined();
-    const leido = readInbound(value!.messages![0]!);
-    expect(leido.kind).toBe('unknown');
-    expect(leido.body).toBe('👍 (reacción a un mensaje)');
-    // Quitar la reaccion no deja rastro.
-    expect(toChangeValue(mensajeCon({ reactionMessage: { text: '', key: { id: 'X' } } }), null, null)).toBeNull();
+  });
+
+  it('quitar la reaccion tambien llega: se manda vacia, no se descarta', () => {
+    // Antes se ignoraba, y el emoji se quedaba pegado para siempre aunque el
+    // cliente lo hubiera retirado en su telefono.
+    const value = toChangeValue(mensajeCon({ reactionMessage: { text: '', key: { id: 'X' } } }), null, null);
+    expect(value?.messages?.[0]).toMatchObject({ type: 'reaction', reaction: { emoji: '', message_id: 'X' } });
+  });
+
+  it('una reaccion sin saber sobre que mensaje es se descarta', () => {
+    expect(toChangeValue(mensajeCon({ reactionMessage: { text: '👍' } }), null, null)).toBeNull();
+  });
+
+  it('el mensaje al que responde el cliente se guarda como cita', () => {
+    const value = toChangeValue(
+      mensajeCon({ extendedTextMessage: { text: 'sí, ese mismo', contextInfo: { stanzaId: 'ORIGINAL-1' } } }),
+      null,
+      null,
+    );
+    expect(value?.messages?.[0]?.context).toEqual({ id: 'ORIGINAL-1' });
+    expect(readInbound(value!.messages![0]!).payload).toMatchObject({ cita: { id: 'ORIGINAL-1' } });
   });
 
   it('un texto dentro de un mensaje temporal es un texto', () => {

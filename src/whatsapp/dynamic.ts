@@ -90,6 +90,26 @@ export function createDynamicWhatsAppClient(
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),
+    // Los tres de abajo no los tienen todos los proveedores. El chat pregunta
+    // antes con `capacidadesDelChat` y esconde lo que no se puede, asi que
+    // llegar aqui sin soporte ya es un error de programacion: se dice claro.
+    sendReaction: async (to, mensaje, emoji) => {
+      const cliente = inner();
+      if (!cliente.sendReaction) throw new Error('este proveedor no manda reacciones');
+      return cliente.sendReaction(to, mensaje, emoji);
+    },
+    borrarParaTodos: async (to, mensaje) => {
+      const cliente = inner();
+      if (!cliente.borrarParaTodos) throw new Error('este proveedor no puede eliminar un mensaje para todos');
+      return cliente.borrarParaTodos(to, mensaje);
+    },
+    editarMensaje: async (to, mensaje, texto) => {
+      const cliente = inner();
+      if (!cliente.editarMensaje) throw new Error('este proveedor no puede editar un mensaje ya enviado');
+      return cliente.editarMensaje(to, mensaje, texto);
+    },
+    // Aqui no se falla: no saber si esta en linea no es un error, es no saberlo.
+    presencia: async (to) => (await inner().presencia?.(to)) ?? null,
     // Sincrono a proposito: es una consulta de estado, no una llamada de red.
     // Sin credenciales o sin proveedor con sesion propia, no se sabe (undefined).
     conectado: () => {

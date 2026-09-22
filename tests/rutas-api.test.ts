@@ -382,6 +382,23 @@ describe('la lista de quien no mandó su ubicación', () => {
     expect(desde).toBeGreaterThan(-1);
     expect(() => new Function(html.slice(desde + '<script>'.length, hasta))).not.toThrow();
   });
+
+  it('la pantalla no trae su propia paleta: los colores salen de los tokens', async () => {
+    // La página redefinía --bg, --panel, --accent... con colores a pelo y su
+    // propio modo oscuro: lo que se veía aquí no era lo que se veía en el
+    // resto del sistema. Los tonos los pone `tokens.ts` y nadie más.
+    const html = (await app.inject({ url: '/rutas', headers: auth })).body;
+    expect(html).not.toMatch(/--(panel|line|accent|chip|muted|text):\s*#/);
+    expect(html).not.toContain('#d9fdd3');
+  });
+
+  it('en modo demostración la pantalla lo dice, no solo el armazón', async () => {
+    // El aviso se armaba y no se pegaba en ninguna parte: en modo prueba la
+    // pantalla no decía que no sale nada a ningún cliente.
+    const { rutasPage } = await import('../src/web/rutas-page.js');
+    expect(rutasPage({ configured: true, demo: true, nombreNegocio: 'Tienda' })).toContain('Modo demostración');
+    expect(rutasPage({ configured: true, demo: false, nombreNegocio: 'Tienda' })).not.toContain('Modo demostración');
+  });
 });
 
 describe('contactos sin ubicación', () => {

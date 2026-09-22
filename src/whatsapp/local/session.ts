@@ -40,7 +40,17 @@ export interface LocalState {
 
 /** Lo minimo del socket de Baileys que usa este proyecto. */
 export interface LocalSocket {
-  sendMessage(jid: string, content: unknown): Promise<{ key?: { id?: string } } | undefined>;
+  /**
+   * El tercer parametro es el de Baileys: ahi va `quoted` para responder
+   * citando. Es opcional para que el socket de pega de los tests siga valiendo
+   * con dos parametros.
+   */
+  sendMessage(jid: string, content: unknown, options?: { quoted?: unknown }): Promise<{ key?: { id?: string } } | undefined>;
+  /**
+   * Marca como leido. Baileys quiere la CLAVE entera de cada mensaje
+   * (`remoteJid`, `id`, `fromMe` y, en un grupo, `participant`): con solo el
+   * id no marca nada y no avisa.
+   */
   readMessages(keys: unknown[]): Promise<void>;
   requestPairingCode(phone: string): Promise<string>;
   logout(): Promise<void>;
@@ -263,6 +273,47 @@ async function cargarGrupos(sock: LocalSocket, opts: StartLocalOptions, log: (m:
   }
 }
 
+/** Lo que se sabe del otro lado ahora mismo (ver el listener de `presence.update`). */
+export interface PresenciaChat {
+  estado: 'escribiendo' | 'grabando' | 'en_linea' | 'desconectado';
+  /** Cuando se supo, en ms. */
+  desde: number;
+  /** Ultima vez que se le vio, si el cliente lo comparte. null = no lo comparte. */
+  ultimaVez: number | null;
+}
+
+/** Presencia por jid. En memoria a proposito: caduca con la sesion. */
+const presencias = new Map<string, PresenciaChat>();
+
+/** "Escribiendo..." dura segundos; pasado esto ya no es verdad. */
+const PRESENCIA_VIVA_MS = 25_000;
+
+/**
+ * Se suscribe a la presencia de un chat. Sin esto WhatsApp no manda nada de
+ * ese contacto, por mucho que la sesion este abierta.
+ */
+export async function suscribirPresencia(jid: string): Promise<void> {
+  const sock = getLocalSocket();
+  if (!sock?.presenceSubscribe) return;
+  await sock.presenceSubscribe(jid).catch(() => undefined);
+}
+
+/**
+ * La presencia de un chat, o null si no se sabe.
+ *
+ * `null` no es "esta desconectado": es "no hay dato". La pantalla no inventa
+ * nada con un null, que es justo lo que hay que hacer con la privacidad ajena.
+ */
+export function presenciaDe(jid: string): PresenciaChat | null {
+  const p = presencias.get(jid);
+  if (!p) return null;
+  // "Escribiendo" caduca; "en linea" y la ultima vez siguen valiendo.
+  if ((p.estado === 'escribiendo' || p.estado === 'grabando') && Date.now() - p.desde > PRESENCIA_VIVA_MS) {
+    return { ...p, estado: 'en_linea' };
+  }
+  return p;
+}
+
 export function getLocalState(): LocalState {
   return { ...estado };
 }
@@ -442,6 +493,28 @@ async function abrir(opts: StartLocalOptions): Promise<LocalState> {
         estado.detail = 'Fallo abriendo la sesion.';
         listo();
       });
+    }) as unknown) as (arg: never) => void);
+
+    /**
+     * Presencia del otro lado: "escribiendo...", "en linea", "ult. vez".
+     *
+     * WhatsApp solo la manda de los chats a los que te has suscrito y mientras
+     * dure la sesion, asi que se guarda en memoria y caduca sola: un dato de
+     * presencia de hace media hora no dice nada y ensenarlo es mentir.
+     */
+    sock.ev.on('presence.update', (((evento: { id?: string; presences?: Record<string, { lastKnownPresence?: string; lastSeen?: number }> }) => {
+      const jid = evento?.id;
+      if (!jid || !evento.presences) return;
+      for (const datos of Object.values(evento.presences)) {
+        const bruto = datos?.lastKnownPresence;
+        if (!bruto) continue;
+        const estado: PresenciaChat['estado'] =
+          bruto === 'composing' ? 'escribiendo'
+          : bruto === 'recording' ? 'grabando'
+          : bruto === 'available' ? 'en_linea'
+          : 'desconectado';
+        presencias.set(jid, { estado, desde: Date.now(), ultimaVez: datos.lastSeen ? datos.lastSeen * 1000 : null });
+      }
     }) as unknown) as (arg: never) => void);
 
     // Un grupo nuevo (te agregaron, lo creaste) o un cambio de nombre: se
@@ -722,7 +795,7 @@ export function proximoHistorial(timeoutMs = 20_000): Promise<number | null> {
 }
 
 /** Lo que de un mensaje propio merece una fila en el hilo. */
-const PROPIOS_QUE_SE_GUARDAN = new Set(['text', 'image', 'audio', 'video', 'document', 'sticker', 'location']);
+const PROPIOS_QUE_SE_GUARDAN = new Set(['text', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'reaction']);
 
 /**
  * Le pide al telefono los mensajes anteriores de un chat.
@@ -1108,6 +1181,20 @@ export function anuncioDe(contenido: Record<string, unknown>): AnuncioEntrada | 
   return null;
 }
 
+/**
+ * El id del mensaje que se esta citando, si lo hay.
+ *
+ * Cualquier tipo de mensaje puede llevar cita, y cada uno la cuelga de su
+ * propio `contextInfo`: se mira en todos en vez de caso por caso.
+ */
+export function citaDe(contenido: Record<string, unknown>): string | null {
+  for (const valor of Object.values(contenido)) {
+    const ctx = (valor as { contextInfo?: { stanzaId?: string } } | null)?.contextInfo;
+    if (ctx?.stanzaId) return ctx.stanzaId;
+  }
+  return null;
+}
+
 function hayContenidoAparteDeLlaves(contenido: Record<string, unknown>): boolean {
   return Object.keys(contenido).some((k) => k !== 'senderKeyDistributionMessage' && k !== 'messageContextInfo');
 }
@@ -1233,7 +1320,11 @@ export function toChangeValue(
 
   const traducido = traducirContenido(id, from);
   if (!traducido) return null;
-  const mensajeFinal = { ...traducido, ...(extras.reenvio ? { reenvio: true } : {}) };
+  // A que mensaje esta respondiendo el cliente, si esta respondiendo a alguno.
+  // Baileys lo deja en `contextInfo.stanzaId`, dentro del contenido; Meta lo
+  // manda como `context.id`, y aqui se traduce a esa misma forma.
+  const citado = citaDe(contenido);
+  const mensajeFinal = { ...traducido, ...(citado ? { context: { id: citado } } : {}), ...(extras.reenvio ? { reenvio: true } : {}) };
   if (grupo) {
     mensajeFinal.grupo = {
       jid: grupo,
@@ -1272,10 +1363,14 @@ export function toChangeValue(
 
     // Una reaccion (el pulgar, el corazon) se ensena, pero no es texto: el bot
     // no tiene que contestar a un emoji sobre un mensaje suyo.
-    const reaccion = contenido.reactionMessage as { text?: string } | undefined;
+    const reaccion = contenido.reactionMessage as { text?: string; key?: { id?: string } } | undefined;
     if (reaccion) {
-      if (!reaccion.text) return null; // quitar la reaccion: nada que ensenar
-      return { id, from, timestamp, type: 'reaction', reaction: { emoji: reaccion.text } };
+      // Sin saber SOBRE QUE mensaje es, una reaccion no se puede pintar en su
+      // sitio y acabaria como un globo suelto: mejor ignorarla.
+      if (!reaccion.key?.id) return null;
+      // Texto vacio = la quito. Antes se descartaba, y el emoji se quedaba
+      // pegado para siempre aunque el cliente lo hubiera retirado.
+      return { id, from, timestamp, type: 'reaction', reaction: { emoji: reaccion.text ?? '', message_id: reaccion.key.id } };
     }
 
     const conversation = contenido.conversation as string | undefined;

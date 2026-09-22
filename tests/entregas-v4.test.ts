@@ -85,12 +85,17 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     expect(html.statusCode).toBe(200);
     expect(html.body).toContain('Mis pedidos de hoy');
     expect(html.body).not.toContain('${');
-    const datos = await e.api.get<{ ok: boolean; motorizado: { nombre: string }; ruta: { paradas: Array<{ entrega: { referencia: string; id: number } }> }; acciones: Record<number, string[]> }>(`/m/${token}/datos`);
+    const datos = await e.api.get<{ ok: boolean; motorizado: { nombre: string }; ruta: { paradas: Array<{ entrega: { referencia: string; id: number } }> }; sinPin: Array<{ id: number }>; acciones: Record<number, string[]> }>(`/m/${token}/datos`);
     expect(datos.status).toBe(200);
     expect(datos.body.motorizado.nombre).toBe(rider.nombre);
     const parada = datos.body.ruta.paradas.find((p) => p.entrega.referencia === 'V-2')!;
     expect(parada).toBeTruthy();
     expect(datos.body.acciones[parada.entrega.id]).toContain('minutos');
+    // La ruta ya incluye al final los pedidos que esperan el pin del cliente:
+    // `sinPin` es un subconjunto suyo, y por eso la pagina los pinta una sola
+    // vez (los quita de las paradas y los enseña abajo, sin botones).
+    const idsRuta = new Set(datos.body.ruta.paradas.map((p) => p.entrega.id));
+    expect((datos.body.sinPin ?? []).every((x) => idsRuta.has(x.id))).toBe(true);
 
     // Los minutos desde el boton: mismo camino que "V-2 40" por WhatsApp.
     const min = await e.api.post<{ ok: boolean; respuesta: string }>(`/m/${token}/accion`, { accion: 'minutos', referencia: 'V-2', minutos: 40 });

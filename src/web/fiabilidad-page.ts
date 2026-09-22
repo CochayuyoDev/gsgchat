@@ -1,239 +1,242 @@
 /**
  * Pantalla "Que todo funcione" (/fiabilidad): lo que el sistema vigila por
- * si mismo y lo que hace cuando algo falla.
+ * si mismo y, cuando algo falla, que hay que hacer.
  *
- * Cuatro cajas: el WhatsApp (si se cae, avisa por correo y reintenta), la
- * prueba de cada manana (WhatsApp, GSG, IA, entregas, disco), los mensajes
- * de hoy (cupo frente a lo que necesitan los pedidos) y la copia de
- * seguridad (la base y los respaldos, cada noche, a una carpeta).
+ * Arriba va el VEREDICTO: una sola frase que dice si todo esta bien y, si no,
+ * lista lo que necesita atencion con el boton que lleva al sitio. Debajo, las
+ * cuatro cajas con el detalle: el WhatsApp (si se cae, avisa por correo y
+ * reintenta), la prueba de cada manana (WhatsApp, GSG, IA, entregas, disco),
+ * el cupo de mensajes de hoy y la copia de seguridad de cada noche.
  *
- * Todo se configura aqui. Nada de codigos en pantalla: cada fallo dice que
- * pasa y a donde ir. El JS va en String.raw, con var y sin backticks.
+ * Una regla manda en toda la pantalla: el tono (verde / ambar / rojo) de cada
+ * caja lo decide UNA funcion, la misma que alimenta el veredicto de arriba.
+ * Asi el resumen y el detalle no se pueden contradecir, y un semaforo nunca
+ * sale verde con algo apagado o roto debajo.
+ *
+ * Se apoya en las clases del armazon (.btn, .tarjeta, .chip.tono-*): aqui solo
+ * va el CSS propio de la pantalla. El JS va en String.raw, con var y sin
+ * backticks.
  */
 
 import { appShell } from './shell.js';
 
 const CSS = `
-
+  /* Solo lo propio de esta pantalla: los botones, las tarjetas y los chips
+     los pone el armazon (.btn, .tarjeta, .chip.tono-*). */
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font-family: var(--fuente); font-size: var(--fs-cuerpo); line-height: 1.5; max-width: 1300px; }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1300px; }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
   .hidden { display: none !important; }
-  .demo { background: var(--ambar-suave); color: var(--ambar); border: 1px solid var(--ambar); padding: 8px 14px; font-size: var(--fs-small); font-weight: 600; text-align: center; margin-bottom: var(--esp-4); border-radius: var(--radio-sm); }
-  input, select, textarea, button { font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px; max-width: 100%; }
-  input, select, textarea { width: 100%; min-height: 38px; }
-  input[type=checkbox], input[type=radio] { width: auto; min-height: 0; accent-color: var(--primario); }
-  input[type=file] { padding: 7px 10px; font-size: 13.5px; }
-  input:focus, select:focus, textarea:focus { border-color: var(--primario); outline: none; box-shadow: 0 0 0 3px var(--primario-suave); }
-  textarea { min-height: 70px; resize: vertical; }
-  button { cursor: pointer; width: auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 14px; font-weight: 600; line-height: 1.2; }
-  button:hover { border-color: var(--primario); color: var(--primario); }
-  button.primary { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
-  button.primary:hover { filter: brightness(1.06); color: var(--primario-texto); }
-  button.sm { min-height: 30px; padding: 4px 10px; font-size: 13px; font-weight: 500; }
-  button.peligro { color: var(--rojo); border-color: var(--rojo-suave); background: var(--rojo-suave); }
-  button.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
-  button:disabled { opacity: .55; cursor: default; }
-  a.sm { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); font-size: 13px; font-weight: 500; text-decoration: none; color: var(--texto); background: var(--superficie); }
-  a.sm:hover { border-color: var(--primario); color: var(--primario); }
-  @media (max-width: 960px) { button, a.sm, button.sm { min-height: 44px; } }
+  .demo { display: flex; align-items: center; gap: var(--esp-2); font-size: var(--fs-small); color: var(--texto-suave); margin: 0 0 var(--esp-3); }
+
+  input, select { font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px; width: 100%; min-height: 38px; max-width: 100%; }
+  input[type=checkbox] { width: auto; min-height: 0; accent-color: var(--primario); }
+  input:focus, select:focus { border-color: var(--primario); outline: none; box-shadow: 0 0 0 3px var(--primario-suave); }
   label { display: block; font-size: var(--fs-small); font-weight: 500; color: var(--texto-suave); margin: 10px 0 4px; }
-  .explica { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-3) var(--esp-4); margin-bottom: var(--esp-4); font-size: 14px; box-shadow: var(--sombra); }
-  .explica p { margin: 0 0 6px; }
-  .explica p:last-child { margin-bottom: 0; }
-  .caja { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); overflow: hidden; margin-bottom: var(--esp-4); box-shadow: var(--sombra); min-width: 0; }
-  .caja > h2 { font-size: 15px; font-weight: 700; margin: 0; padding: var(--esp-3) var(--esp-4); border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
+  label.linea { display: flex; align-items: center; gap: var(--esp-2); font-size: var(--fs-cuerpo); color: var(--texto); font-weight: 400; }
+  .espaciador { display: block; height: 22px; }
+
+  /* Un aviso, tres tonos: el color va por variable para no repetir la regla. */
+  .aviso { --t: var(--gris); --ts: var(--gris-suave); background: var(--ts); border: 1px solid var(--t); color: var(--t); border-radius: var(--radio-sm); padding: 10px 12px; margin: var(--esp-2) 0 0; font-size: var(--fs-cuerpo); }
+  .aviso.rojo { --t: var(--rojo); --ts: var(--rojo-suave); }
+  .aviso.ambar { --t: var(--ambar); --ts: var(--ambar-suave); }
+  .aviso.verde { --t: var(--verde); --ts: var(--verde-suave); }
+  .aviso a { color: inherit; font-weight: 600; }
+  .aviso ul { margin: 6px 0 0; padding-left: 20px; }
+  .aviso li { margin: 3px 0; }
+  .aviso .botones { margin-top: 10px; }
+
+  /* El veredicto: lo primero que se lee y lo unico que hace falta si va todo bien. */
+  .veredicto { margin-bottom: var(--esp-4); border-left: 4px solid var(--gris); }
+  .veredicto.verde { border-left-color: var(--verde); }
+  .veredicto.ambar { border-left-color: var(--ambar); }
+  .veredicto.rojo { border-left-color: var(--rojo); }
+  .veredicto .cabecera { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
+  .veredicto h2 { font-size: var(--fs-h2); font-weight: 700; margin: 0; }
+  .veredicto p { margin: var(--esp-2) 0 0; font-size: var(--fs-small); }
+  .veredicto ul { list-style: none; margin: var(--esp-3) 0 0; padding: 0; }
+  .veredicto ul:empty { display: none; }
+  .veredicto li { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; padding: var(--esp-2) 0; border-top: 1px solid var(--borde); }
+  .veredicto li .que { flex: 1; min-width: 220px; }
+
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
+  @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
+  .caja { padding: 0; overflow: hidden; margin-bottom: var(--esp-4); min-width: 0; }
+  .caja > h2 { font-size: var(--fs-h3); font-weight: 700; margin: 0; padding: var(--esp-3) var(--esp-4); border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .caja > h2 .sep { flex: 1; }
   .caja .cuerpo { padding: var(--esp-4); }
-  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
-  .chip.ok { background: var(--verde-suave); color: var(--verde); }
-  .chip.warn { background: var(--ambar-suave); color: var(--ambar); }
-  .chip.bad { background: var(--rojo-suave); color: var(--rojo); }
-  .chip.info { background: var(--azul-suave); color: var(--azul); }
-  .aviso-rojo, .aviso-amarillo, .aviso-verde { border-radius: var(--radio-sm); padding: 10px 12px; margin: 8px 0; font-size: 14px; border: 1px solid; }
-  .aviso-rojo { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
-  .aviso-amarillo { background: var(--ambar-suave); border-color: var(--ambar); color: var(--ambar); }
-  .aviso-verde { background: var(--verde-suave); border-color: var(--verde); color: var(--verde); }
-  .aviso-rojo a, .aviso-amarillo a, .aviso-verde a { color: inherit; font-weight: 600; }
-  .tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--esp-3); margin-bottom: var(--esp-4); }
-  .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-3) var(--esp-4); min-width: 0; box-shadow: var(--sombra); }
-  .tarjeta .n { font-size: 22px; font-weight: 700; line-height: 1.1; }
-  .tarjeta .q { font-size: var(--fs-small); color: var(--texto-suave); margin-top: 2px; }
-  .tarjeta.ok .n { color: var(--verde); } .tarjeta.warn .n { color: var(--ambar); } .tarjeta.bad .n { color: var(--rojo); } .tarjeta.info .n { color: var(--azul); }
+  .titular { font-size: 15px; font-weight: 600; margin: 0; }
+  .detalle { font-size: 13.5px; margin: var(--esp-1) 0 0; }
+  .botones { display: flex; gap: var(--esp-2); flex-wrap: wrap; margin-top: var(--esp-3); }
+
+  /* La prueba de la manana: un renglon por cosa probada. */
+  .pasos { list-style: none; margin: var(--esp-3) 0 0; padding: 0; }
+  .pasos li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: 13.5px; }
+  .pasos li:last-child { border-bottom: 0; }
+  .pasos .marca { flex: none; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; background: var(--gris-suave); color: var(--texto-suave); }
+  .pasos .marca.ok { background: var(--verde-suave); color: var(--verde); }
+  .pasos .marca.bad { background: var(--rojo-suave); color: var(--rojo); }
+  .pasos .nombre { font-weight: 600; min-width: 110px; }
+  .pasos .detalle { color: var(--texto-suave); margin: 0; }
+  .dias { display: flex; gap: 4px; flex-wrap: wrap; margin-top: var(--esp-3); }
+  .dia { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; background: var(--gris-suave); color: var(--texto-suave); }
+  .dia.ok { background: var(--verde-suave); color: var(--verde); }
+  .dia.bad { background: var(--rojo-suave); color: var(--rojo); }
+
+  /* El cupo de hoy: lo gastado y lo que van a pedir los pedidos, sobre el total. */
+  .barra { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--gris-suave); margin: var(--esp-3) 0 var(--esp-1); }
+  .barra span { display: block; height: 100%; }
+  .barra .usados { background: var(--gris-claro); }
+  .barra .previsto { background: var(--verde); }
+  .barra.apretado .previsto { background: var(--ambar); }
+  .barra.rojo .previsto { background: var(--rojo); }
+
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
   th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
   tr:last-child td { border-bottom: 0; }
-  td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
-  .fila-datos { display: flex; gap: 10px; flex-wrap: wrap; }
-  .fila-datos > div { flex: 1; min-width: 160px; }
-
-  label.linea { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--texto); font-weight: 400; }
-  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
-  @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
-  .semaforo { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--gris); box-shadow: 0 0 0 3px var(--gris-suave); flex: none; }
-  .semaforo.ok { background: var(--verde); box-shadow: 0 0 0 3px var(--verde-suave); }
-  .semaforo.warn { background: var(--ambar); box-shadow: 0 0 0 3px var(--ambar-suave); }
-  .semaforo.bad { background: var(--rojo); box-shadow: 0 0 0 3px var(--rojo-suave); }
-  .frase { font-size: 15px; margin: 0 0 8px; }
-  .frase.bad { color: var(--rojo); font-weight: 600; }
-  .frase.ok { color: var(--verde); }
-  .pasos { list-style: none; margin: 8px 0; padding: 0; }
-  .pasos li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: 14px; }
-  .pasos li:last-child { border-bottom: 0; }
-  .pasos .marca { flex: none; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; background: var(--superficie-2); color: var(--texto-suave); }
-  .pasos .marca.ok { background: var(--verde-suave); color: var(--verde); }
-  .pasos .marca.bad { background: var(--rojo-suave); color: var(--rojo); }
-  .pasos .marca.omitido { color: var(--texto-suave); }
-  .pasos .nombre { font-weight: 600; min-width: 110px; }
-  .pasos .detalle { color: var(--texto-suave); }
-  .dias { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
-  .dia { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; background: var(--superficie-2); color: var(--texto-suave); }
-  .dia.ok { background: var(--verde-suave); color: var(--verde); }
-  .dia.bad { background: var(--rojo-suave); color: var(--rojo); }
-  .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 6px 0 12px; }
-  .cifra { background: var(--superficie-2); border-radius: var(--radio-sm); padding: 8px 12px; }
-  .cifra .n { font-size: 22px; font-weight: 700; line-height: 1.1; }
-  .cifra .q { font-size: var(--fs-small); color: var(--texto-suave); }
-  .cifra.bad .n { color: var(--rojo); }
-  .cifra.ok .n { color: var(--verde); }
   td.num, th.num { text-align: right; white-space: nowrap; }
-  details { border-top: 1px solid var(--borde); margin-top: 12px; padding-top: 6px; }
-  summary { cursor: pointer; font-weight: 600; font-size: 14px; min-height: 34px; display: flex; align-items: center; gap: 6px; list-style: none; }
+
+  .copias { list-style: none; padding: 0; margin: var(--esp-2) 0 0; }
+  .copias li { display: flex; gap: var(--esp-2); align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--borde); font-size: 13.5px; }
+  .copias li:last-child { border-bottom: 0; }
+  ol.pasos-restaurar { padding-left: 20px; font-size: 13.5px; }
+  ol.pasos-restaurar li { margin: 4px 0; }
+
+  details { border-top: 1px solid var(--borde); margin-top: var(--esp-3); padding-top: var(--esp-1); }
+  summary { cursor: pointer; font-weight: 600; font-size: var(--fs-cuerpo); min-height: 34px; display: flex; align-items: center; gap: 6px; list-style: none; }
   summary::-webkit-details-marker { display: none; }
   summary::before { content: '▸'; color: var(--texto-suave); font-size: 12px; }
   details[open] > summary::before { content: '▾'; }
+  details.avanzado { border-top: 0; margin-top: var(--esp-2); padding-top: 0; }
+  details.avanzado summary { font-weight: 500; color: var(--texto-suave); font-size: 13.5px; }
   .fila { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 560px) { .fila { grid-template-columns: 1fr; } }
-  .botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  ol.pasos-restaurar { padding-left: 20px; font-size: 14px; }
-  ol.pasos-restaurar li { margin: 4px 0; }
-  .copias { list-style: none; padding: 0; margin: 8px 0 0; }
-  .copias li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--borde); font-size: 13.5px; }
-  .copias li:last-child { border-bottom: 0; }
-  .recortar { margin: 6px 0 0; padding-left: 20px; font-size: 14px; }
-  .recortar li { margin: 3px 0; }
-  .solo-demo { font-size: var(--fs-small); align-self: center; }
-  details.avanzado { border-top: 0; margin-top: 8px; padding-top: 0; }
-  details.avanzado summary { font-weight: 500; color: var(--texto-suave); font-size: 13.5px; }
+
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: var(--fs-cuerpo); z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
 `;
 
 export function fiabilidadPage(opts: { disponible: boolean; demo: boolean; nombreNegocio: string }): string {
-  const contenido = `
-<div class="wrap">
-${opts.demo ? '<div class="demo">Demostración: nada sale a WhatsApp de verdad y la base está en memoria.</div>' : ''}
-${opts.disponible ? '' : '<div class="explica"><b>Esta pantalla no está disponible en este arranque.</b> Arranca el sistema con <code>npm run quick</code>.</div>'}
+  // Los botones de simular una caida solo existen en la demostracion: asi no
+  // hay nada en pantalla que, al pulsarlo, conteste "eso aqui no se puede".
+  const simulacion = opts.demo
+    ? `
+        <details id="wa-simular">
+          <summary>Probar una caída (solo en la demostración)</summary>
+          <div class="botones">
+            <button class="btn sm" id="wa-sim-caida" type="button">Simular una caída</button>
+            <button class="btn sm" id="wa-sim-caida5" type="button">Caída de 5 minutos</button>
+            <button class="btn sm" id="wa-sim-vuelta" type="button">Simular que vuelve</button>
+            <button class="btn sm" id="wa-sim-real" type="button">Volver a lo real</button>
+          </div>
+        </details>`
+    : '';
 
-<div class="explica">
-  <p><b>Aquí el sistema se vigila a sí mismo.</b> Si el WhatsApp se cae, lo intenta volver a conectar y avisa por correo (por WhatsApp no puede, está caído). Cada mañana comprueba que WhatsApp, GSG, la IA y las entregas responden. Cuenta por adelantado si el cupo de mensajes de hoy alcanza para los pedidos cargados. Y cada noche guarda una copia de la base y de las conversaciones en una carpeta que eliges tú.</p>
-  <p class="muted" style="margin:0">Todo lo que ves en rojo dice qué pasa y a dónde ir. Los ajustes de cada cosa están dentro de su caja.</p>
-</div>
+  const contenido = `
+<div class="wrap" id="wrap" data-disponible="${opts.disponible ? '1' : '0'}">
+${opts.demo ? '<p class="demo"><span class="chip tono-ambar sin-punto">Demostración</span> Nada sale a WhatsApp de verdad y la base está en memoria.</p>' : ''}
+
+<section class="tarjeta veredicto" id="veredicto" aria-live="polite">
+  <div class="cabecera"><span class="chip tono-gris" id="veredicto-chip">Comprobando</span><h2 id="veredicto-titulo">Mirando cómo está todo…</h2></div>
+  <p class="muted" id="veredicto-pie">El sistema se vigila a sí mismo cada pocos segundos. Si algo falla, aquí sale qué pasa y a dónde ir.</p>
+  <ul id="veredicto-acciones"></ul>
+</section>
+
+<p class="aviso ambar hidden" id="aviso-red" role="status"></p>
 
 <div class="cols">
   <div>
-    <div class="caja" id="caja-wa">
-      <h2><span class="semaforo" id="wa-semaforo"></span> WhatsApp <span class="sep"></span><button class="sm" id="wa-mirar" type="button">Mirar ahora</button></h2>
+    <section class="tarjeta caja" id="caja-wa">
+      <h2><span class="chip tono-gris" id="wa-chip">…</span> WhatsApp <span class="sep"></span><button class="btn sm" id="wa-mirar" type="button">Mirar ahora</button></h2>
       <div class="cuerpo">
-        <p class="frase" id="wa-frase">Cargando…</p>
-        <div id="wa-detalle" class="muted" style="font-size:13.5px"></div>
-        <div id="wa-correo-estado"></div>
-        <details id="wa-que-pasa">
-          <summary>¿Qué pasa mientras el WhatsApp está caído?</summary>
-          <ol class="muted" style="font-size:13.5px;margin:6px 0 8px;padding-left:22px;line-height:1.5">
-            <li><b>Nada se pierde.</b> Los pines a los motorizados, las preguntas a los clientes y los avisos se quedan esperando: el sistema no acumula intentos ni los da por fallidos.</li>
-            <li><b>Se intenta reconectar solo</b> (hasta 5 veces por hora). Si hace falta escanear el QR otra vez, lo dice aquí y en Conexión.</li>
-            <li><b>Se avisa por correo</b> a los minutos del ajuste (por WhatsApp no se puede: está caído).</li>
-            <li><b>Al volver, sale todo en orden</b>: primero lo urgente y lo que ya tenía hora de llegada, y se avisa al supervisor con cuánto estuvo caído.</li>
-          </ol>
-        </details>
-        <div class="botones hidden" id="wa-sim-botones">
-          <span class="chip tono-ambar sin-punto solo-demo">Solo en la demostración</span>
-          <button class="sm" id="wa-sim-caida" type="button">Simular una caída</button>
-          <button class="sm" id="wa-sim-caida5" type="button">Simular caída de 5 minutos</button>
-          <button class="sm" id="wa-sim-vuelta" type="button">Simular que vuelve</button>
-          <button class="sm" id="wa-sim-real" type="button">Volver a lo real</button>
-        </div>
+        <p class="titular" id="wa-titular">Cargando…</p>
+        <p class="muted detalle" id="wa-detalle"></p>
+        <div id="wa-avisos"></div>
         <details id="wa-ajustes">
-          <summary>Correo de aviso y ajustes</summary>
-          <p class="muted" style="font-size:13.5px;margin:8px 0"><b>Brevo</b> es un servicio gratuito que manda los correos por nosotros: crea una cuenta en <a href="https://www.brevo.com" target="_blank" rel="noopener">brevo.com</a>, verifica tu correo como remitente, entra en <b>SMTP &amp; API → API keys</b> y copia la clave aquí abajo. La clave se guarda cifrada. No hay un segundo número de WhatsApp de respaldo: el sistema lleva una sola sesión.</p>
+          <summary>Correo de aviso: el plan B si el WhatsApp se cae</summary>
+          <p class="muted detalle"><b>Brevo</b> es un servicio gratuito que manda los correos por nosotros: crea una cuenta en <a href="https://www.brevo.com" target="_blank" rel="noopener">brevo.com</a>, verifica tu correo como remitente, entra en <b>SMTP &amp; API → API keys</b> y copia la clave aquí abajo. La clave se guarda cifrada.</p>
           <div class="fila">
             <div><label for="wa-correo">Correo que recibe el aviso</label><input id="wa-correo" type="email" placeholder="tu@correo.com" autocomplete="off"></div>
             <div><label for="wa-minutos">Avisar cuando lleve caído (minutos)</label><input id="wa-minutos" type="number" min="1" max="120"></div>
           </div>
-          <label for="wa-brevo">Clave de API de Brevo <span id="wa-brevo-chip" class="chip"></span></label>
+          <label for="wa-brevo">Clave de API de Brevo <span id="wa-brevo-chip" class="chip tono-gris"></span></label>
           <input id="wa-brevo" type="password" placeholder="xkeysib-…" autocomplete="new-password">
           <details class="avanzado">
             <summary>Avanzado: remitente del correo</summary>
             <div class="fila">
-              <div><label for="wa-remitente">Correo remitente <span class="muted">(verificado en Brevo; vacío = el mismo correo que lo recibe)</span></label><input id="wa-remitente" type="email" placeholder="avisos@tunegocio.com" autocomplete="off"></div>
+              <div><label for="wa-remitente">Correo remitente <span class="muted">(verificado en Brevo; vacío = el mismo que lo recibe)</span></label><input id="wa-remitente" type="email" placeholder="avisos@tunegocio.com" autocomplete="off"></div>
               <div><label for="wa-nombre">Nombre del remitente</label><input id="wa-nombre" type="text" maxlength="80"></div>
             </div>
           </details>
-          <label class="linea" style="margin-top:10px"><input id="wa-al-volver" type="checkbox"> Avisar también cuando vuelve (con cuánto estuvo caído)</label>
+          <label class="linea"><input id="wa-al-volver" type="checkbox"> Avisar también cuando vuelve, con cuánto estuvo caído</label>
           <div class="botones">
-            <button class="primary" id="wa-guardar" type="button">Guardar</button>
-            <button id="wa-probar-correo" type="button">Probar el correo</button>
-            <button class="sm" id="wa-brevo-quitar" type="button">Quitar la clave</button>
+            <button class="btn primario" id="wa-guardar" type="button">Guardar</button>
+            <button class="btn" id="wa-probar-correo" type="button">Probar el correo</button>
+            <button class="btn sm peligro hidden" id="wa-brevo-quitar" type="button">Quitar la clave</button>
           </div>
-        </details>
+        </details>${simulacion}
       </div>
-    </div>
+    </section>
 
-    <div class="caja" id="caja-humo">
-      <h2><span class="semaforo" id="humo-semaforo"></span> Cada mañana se comprueba que todo funciona <span class="sep"></span><button class="sm primary" id="humo-probar" type="button">Probar ahora</button></h2>
+    <section class="tarjeta caja" id="caja-humo">
+      <h2><span class="chip tono-gris" id="humo-chip">…</span> La prueba de cada mañana <span class="sep"></span><button class="btn sm primario" id="humo-probar" type="button">Probar ahora</button></h2>
       <div class="cuerpo">
-        <p class="frase" id="humo-frase">Cargando…</p>
+        <p class="titular" id="humo-titular">Cargando…</p>
+        <p class="muted detalle" id="humo-detalle"></p>
+        <div id="humo-avisos"></div>
         <ul class="pasos" id="humo-pasos"></ul>
-        <div id="humo-aviso" class="muted" style="font-size:13px"></div>
-        <div class="dias" id="humo-dias"></div>
-        <details>
-          <summary>Cuándo</summary>
+        <div class="dias" id="humo-dias" role="group" aria-label="Cómo salieron las últimas pruebas, una casilla por día"></div>
+        <details id="humo-ajustes">
+          <summary>Cuándo se hace</summary>
           <div class="fila">
-            <div><label>Hora de la prueba</label><input id="humo-hora" type="time"></div>
-            <div><label>&nbsp;</label><label class="linea"><input id="humo-activo" type="checkbox"> Comprobar cada mañana</label></div>
+            <div><label for="humo-hora">Hora de la prueba</label><input id="humo-hora" type="time"></div>
+            <div><span class="espaciador" aria-hidden="true"></span><label class="linea"><input id="humo-activo" type="checkbox"> Comprobar cada mañana</label></div>
           </div>
-          <p class="muted" style="font-size:13px">Se manda un WhatsApp de prueba al supervisor (el de Ajustes → Avisos). Si algo falla, se le avisa a él; si lo que falla es el WhatsApp, por el correo de arriba.</p>
-          <div class="botones"><button class="primary" id="humo-guardar" type="button">Guardar</button></div>
+          <p class="muted detalle">Se manda un WhatsApp de prueba al supervisor (el de Ajustes → Avisos). Si algo falla, se le avisa a él; si lo que falla es el WhatsApp, por el correo de arriba.</p>
+          <div class="botones"><button class="btn primario" id="humo-guardar" type="button">Guardar</button></div>
         </details>
       </div>
-    </div>
+    </section>
   </div>
 
   <div>
-    <div class="caja" id="caja-cupo">
-      <h2><span class="semaforo" id="cupo-semaforo"></span> Mensajes de hoy <span class="sep"></span><a href="/hoy" class="sm" style="font-size:13px">Ver los pedidos</a></h2>
+    <section class="tarjeta caja" id="caja-cupo">
+      <h2><span class="chip tono-gris" id="cupo-chip">…</span> Cupo de hoy <span class="sep"></span><a class="btn sm" href="/hoy">Ver los pedidos</a></h2>
       <div class="cuerpo">
-        <p class="frase" id="cupo-frase">Cargando…</p>
-        <div class="cifras" id="cupo-cifras"></div>
-        <table id="cupo-tabla" class="hidden"><thead><tr><th>Para qué</th><th class="num">Mensajes</th></tr></thead><tbody id="cupo-detalle"></tbody></table>
+        <p class="titular" id="cupo-titular">Cargando…</p>
+        <div class="barra hidden" id="cupo-barra" role="img" aria-label=""><span class="usados" id="cupo-usados"></span><span class="previsto" id="cupo-previsto"></span></div>
+        <p class="muted detalle" id="cupo-linea"></p>
         <div id="cupo-recortar"></div>
-        <div class="botones"><a class="sm" href="/panel#salud">Subir el cupo de hoy (Riesgo y ritmo)</a><a class="sm" href="/hoy">Pausar o quitar clientes en Hoy</a></div>
-        <p class="muted" style="font-size:13px;margin:10px 0 0">El cupo del día lo pone el ritmo del número (crece semana a semana para que WhatsApp no lo bloquee). Lo que necesitan los pedidos es una estimación: cada ubicación, confirmación, motorizado y aviso cuenta.</p>
+        <details id="cupo-detalle-caja">
+          <summary>En qué se van esos mensajes</summary>
+          <table><thead><tr><th>Para qué</th><th class="num">Mensajes</th></tr></thead><tbody id="cupo-detalle"></tbody></table>
+          <p class="muted detalle">El cupo del día lo pone el ritmo del número: crece semana a semana para que WhatsApp no lo bloquee. Lo que necesitan los pedidos es una estimación: cada ubicación, confirmación, motorizado y aviso cuenta.</p>
+        </details>
       </div>
-    </div>
+    </section>
 
-    <div class="caja" id="caja-copia">
-      <h2><span class="semaforo" id="copia-semaforo"></span> Copia de seguridad <span class="sep"></span><button class="sm primary" id="copia-ahora" type="button">Hacer copia ahora</button></h2>
+    <section class="tarjeta caja" id="caja-copia">
+      <h2><span class="chip tono-gris" id="copia-chip">…</span> Copia de seguridad <span class="sep"></span><button class="btn sm primario" id="copia-ahora" type="button">Hacer copia ahora</button></h2>
       <div class="cuerpo">
-        <div id="copia-alerta"></div>
-        <p class="frase" id="copia-frase">Cargando…</p>
-        <div id="copia-ultima" style="font-size:13.5px"></div>
-        <details>
+        <p class="titular" id="copia-titular">Cargando…</p>
+        <p class="muted detalle" id="copia-linea"></p>
+        <div id="copia-avisos"></div>
+        <details id="copia-ajustes">
           <summary>Carpeta y hora</summary>
-          <p class="muted" style="font-size:13px" id="copia-base"></p>
-          <label for="copia-carpeta">Carpeta donde se guardan las copias <span class="muted">(una carpeta de este equipo o de una unidad compartida; mejor si la sincroniza OneDrive o Drive)</span></label>
+          <p class="muted detalle" id="copia-base"></p>
+          <label for="copia-carpeta">Carpeta donde se guardan las copias <span class="muted">(de este equipo o de una unidad compartida; mejor si la sincroniza OneDrive o Drive)</span></label>
           <input id="copia-carpeta" type="text" placeholder="Vacío = la de siempre" aria-describedby="copia-carpeta-ejemplo">
-          <div class="muted" style="font-size:12.5px;margin-top:2px" id="copia-carpeta-ejemplo">Ejemplos: <code>C:\\Users\\Ali\\OneDrive\\GSGchat-copias</code> · <code>D:\\Copias\\GSGchat</code> · en un servidor Linux, <code>/var/backups/gsgchat</code>. Pulsa «Comprobar la carpeta» para ver si se puede escribir.</div>
-          <div class="muted" style="font-size:12.5px;margin-top:4px" id="copia-carpeta-detalle"></div>
+          <p class="muted detalle" id="copia-carpeta-ejemplo">Ejemplos: <code>C:\\Users\\Ali\\OneDrive\\GSGchat-copias</code> · <code>D:\\Copias\\GSGchat</code> · en un servidor Linux, <code>/var/backups/gsgchat</code>.</p>
+          <p class="detalle" id="copia-carpeta-detalle"></p>
           <div class="fila">
-            <div><label>Hora (cada noche)</label><input id="copia-hora" type="time"></div>
-            <div><label>Copias que se conservan</label><input id="copia-conservar" type="number" min="2" max="90"></div>
+            <div><label for="copia-hora">Hora (cada noche)</label><input id="copia-hora" type="time"></div>
+            <div><label for="copia-conservar">Copias que se conservan</label><input id="copia-conservar" type="number" min="2" max="90"></div>
           </div>
-          <label class="linea" style="margin-top:10px"><input id="copia-activa" type="checkbox"> Hacer la copia cada noche</label>
+          <label class="linea"><input id="copia-activa" type="checkbox"> Hacer la copia cada noche</label>
           <div class="botones">
-            <button class="primary" id="copia-guardar" type="button">Guardar</button>
-            <button id="copia-comprobar" type="button">Comprobar la carpeta</button>
+            <button class="btn primario" id="copia-guardar" type="button">Guardar</button>
+            <button class="btn" id="copia-comprobar" type="button">Comprobar la carpeta</button>
           </div>
         </details>
         <details>
@@ -242,17 +245,19 @@ ${opts.disponible ? '' : '<div class="explica"><b>Esta pantalla no está disponi
         </details>
         <details>
           <summary>Cómo restaurar una copia</summary>
-          <p class="muted" style="font-size:13px;margin:8px 0">Solo con el servidor parado. Es para cuando el disco se rompe o hay que mudarse a otro servidor.</p>
+          <p class="muted detalle">Solo con el servidor parado. Es para cuando el disco se rompe o hay que mudarse a otro servidor.</p>
           <ol class="pasos-restaurar" id="copia-restaurar"></ol>
         </details>
       </div>
-    </div>
+    </section>
   </div>
 </div>
 </div>
 `;
 
   const script = String.raw`
+/* ------------------------------------------------------------- utiles --- */
+
 async function api(path, options) {
   options = options || {};
   var res = await fetch(path, { method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: options.body ? JSON.stringify(options.body) : undefined });
@@ -261,102 +266,193 @@ async function api(path, options) {
   if (!res.ok) { var e = new Error(data.error || errorHttp(res.status)); e.datos = data; throw e; }
   return data;
 }
+function $(id) { return document.getElementById(id); }
 function esc(v) { return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function toast(texto) { var el = document.createElement('div'); el.className = 'toast'; el.textContent = texto; el.style.bottom = (18 + document.querySelectorAll('.toast').length * 46) + 'px'; document.body.appendChild(el); setTimeout(function () { el.remove(); }, 5000); }
-function hora(iso) { if (!iso) return ''; return new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }); }
-function fecha(iso) { if (!iso) return ''; var d = new Date(iso); return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' }) + ' ' + hora(iso); }
+function hora(iso) { return iso ? new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : ''; }
+function fecha(iso) { return iso ? new Date(iso).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' }) + ' ' + hora(iso) : ''; }
 function bytes(n) { if (n < 1024) return n + ' B'; if (n < 1048576) return Math.round(n / 1024) + ' KB'; if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB'; return (n / 1073741824).toFixed(2) + ' GB'; }
-function $(id) { return document.getElementById(id); }
+
+/** Un boton que se desactiva mientras trabaja y cuenta el fallo si lo hay. */
 function ocupado(boton, texto, fn) {
   return async function () {
-    var antes = boton.textContent; boton.disabled = true; boton.textContent = texto;
+    var antes = boton.textContent;
+    boton.disabled = true;
+    boton.textContent = texto;
     try { await fn(); } catch (e) { toast(e.message); } finally { boton.disabled = false; boton.textContent = antes; }
   };
 }
 
-var estado = null;
+/* Lo que el usuario está escribiendo no se pisa con lo que llega del servidor. */
 var editando = {};
 document.querySelectorAll('input').forEach(function (i) {
   i.addEventListener('focus', function () { editando[i.id] = true; });
   i.addEventListener('blur', function () { delete editando[i.id]; });
 });
-function poner(id, valor) { if (editando[id]) return; var el = $(id); if (el.type === 'checkbox') el.checked = Boolean(valor); else el.value = valor === null || valor === undefined ? '' : valor; }
-
-function pintarWa(v, brevo, demo) {
-  var sem = $('wa-semaforo'); sem.className = 'semaforo';
-  var frase = $('wa-frase'); frase.className = 'frase';
-  if (v.seguimiento === 'sesion' && v.conectado === true) { sem.classList.add('ok'); frase.classList.add('ok'); }
-  else if (v.seguimiento === 'sesion' && v.conectado === false) { sem.classList.add(v.necesitaQr ? 'bad' : 'warn'); frase.classList.add('bad'); }
-  else if (v.seguimiento === 'meta') { sem.classList.add('ok'); }
-  else { sem.classList.add('warn'); }
-  frase.textContent = v.frase;
-  var partes = [];
-  if (v.seguimiento === 'sesion' && v.conectado === false) {
-    if (v.necesitaQr) partes.push('<div class="aviso-rojo">Reintentar no sirve: <a href="/setup">entra en Conexión</a> y escanea el QR con el teléfono del número.</div>');
-    else partes.push('<div class="aviso-amarillo">Se está intentando volver a conectar sola. Si no vuelve en unos minutos, <a href="/setup">entra en Conexión</a> y pulsa Conectar.</div>');
-    if (v.aviso) partes.push('<div>' + esc(v.aviso.detalle) + '</div>');
-  }
-  if (v.ultimaCaida && v.conectado === true) partes.push('<div>Última caída: de ' + hora(v.ultimaCaida.desde) + ' a ' + hora(v.ultimaCaida.hasta) + ' (' + v.ultimaCaida.minutos + ' min)' + (v.ultimaCaida.avisadoPor === 'correo' ? ', se avisó por correo' : '') + '.</div>');
-  $('wa-detalle').innerHTML = partes.join('');
-  var c = $('wa-correo-estado');
-  if (v.correo.listo) c.innerHTML = '<div class="aviso-verde">Correo de aviso listo' + (v.correo.ultimo ? ' · último: ' + esc(v.correo.ultimo.detalle) + ' (' + hora(v.correo.ultimo.at) + ')' : '') + '</div>';
-  else c.innerHTML = '<div class="aviso-amarillo">Si el WhatsApp se cae, ahora mismo no hay a quién avisar: ' + esc(v.correo.falta) + '</div>';
-  $('wa-sim-botones').classList.toggle('hidden', !demo);
-  $('wa-brevo-chip').className = 'chip ' + (brevo.configurada ? 'ok' : 'warn');
-  $('wa-brevo-chip').textContent = brevo.configurada ? 'guardada' : 'sin clave';
-  $('wa-brevo-quitar').classList.toggle('hidden', !brevo.configurada);
+function poner(id, valor) {
+  var el = $(id);
+  if (!el || editando[id]) return;
+  if (el.type === 'checkbox') el.checked = Boolean(valor);
+  else el.value = valor === null || valor === undefined ? '' : valor;
 }
 
+/* ------------------------------------------------------------- tonos ---- */
+/* Tres tonos, de mejor a peor. Cada caja devuelve el suyo y el veredicto se
+   queda con el peor: por eso no puede salir verde arriba con algo roto abajo. */
+
+var ORDEN = { verde: 0, ambar: 1, rojo: 2 };
+var PALABRA = { verde: 'Va bien', ambar: 'Atención', rojo: 'Falla' };
+function peor(a, b) { return ORDEN[b] > ORDEN[a] ? b : a; }
+function marcar(id, tono, texto) {
+  var el = $(id);
+  el.className = 'chip tono-' + tono;
+  el.textContent = texto === undefined ? PALABRA[tono] : texto;
+}
+/** El HTML del boton de una acción: un enlace fuera, o un salto a una caja. */
+function botonDe(accion) {
+  if (!accion) return '';
+  if (accion.href) return '<a class="btn sm" href="' + esc(accion.href) + '">' + esc(accion.texto) + '</a>';
+  return '<button class="btn sm" type="button" data-ir="' + esc(accion.ir) + '">' + esc(accion.texto) + '</button>';
+}
+function avisoDe(estado) {
+  if (estado.tono === 'verde') return '';
+  // El botón que salta a otra parte de la pantalla solo tiene sentido arriba,
+  // en el veredicto: dentro de su propia caja llevaría a donde ya estás.
+  var accion = estado.accion && estado.accion.href ? estado.accion : null;
+  return '<div class="aviso ' + estado.tono + '">' + esc(estado.consejo || estado.titular) + (accion ? '<div class="botones">' + botonDe(accion) + '</div>' : '') + '</div>';
+}
+
+/* ------------------------------------------------------------- cajas ---- */
+
+/** WhatsApp: conectado, caído o sin conectar; y si hay a quién avisar. */
+function pintarWa(v, brevo) {
+  var estado;
+  if (v.seguimiento === 'meta') estado = { tono: 'verde', titular: 'Los mensajes van por la API de Meta: no hay sesión que se pueda caer.' };
+  else if (v.conectado === true) estado = { tono: 'verde', titular: 'WhatsApp conectado.' };
+  else if (v.conectado === false && v.necesitaQr) estado = { tono: 'rojo', titular: 'WhatsApp caído y reintentar no sirve: hay que escanear el QR otra vez.', consejo: 'Entra en Conexión y escanea el QR con el teléfono del número. Mientras tanto nada se pierde: los mensajes esperan.', accion: { texto: 'Ir a Conexión', href: '/setup' } };
+  else if (v.conectado === false) estado = { tono: 'rojo', titular: 'WhatsApp caído: se está intentando reconectar solo.', consejo: 'Nada se pierde: los mensajes esperan. Si no vuelve en unos minutos, entra en Conexión y pulsa Conectar.', accion: { texto: 'Ir a Conexión', href: '/setup' } };
+  else estado = { tono: 'ambar', titular: 'Todavía no hay un WhatsApp conectado.', consejo: 'Conecta el número en Conexión: hasta entonces el sistema no puede escribir ni recibir nada.', accion: { texto: 'Ir a Conexión', href: '/setup' } };
+
+  // El correo es el unico aviso que funciona con el WhatsApp caido: sin el,
+  // una caida de madrugada no la cuenta nadie. No es un fallo, pero tampoco
+  // es "todo bien".
+  var correo = '';
+  if (!v.correo.listo) {
+    if (estado.tono === 'verde') estado = { tono: 'ambar', titular: 'WhatsApp conectado, pero si se cae no hay a quién avisar.', consejo: v.correo.falta, accion: { texto: 'Configurar el correo', ir: 'wa-ajustes' } };
+    else correo = '<div class="aviso ambar">Además, si esto no se arregla solo no hay a quién avisar: ' + esc(v.correo.falta) + '</div>';
+  } else if (v.correo.ultimo && !v.correo.ultimo.ok) {
+    correo = '<div class="aviso ambar">El último correo de aviso no salió: ' + esc(v.correo.ultimo.detalle) + ' (' + hora(v.correo.ultimo.at) + ')</div>';
+  }
+
+  estado.nombre = 'WhatsApp';
+  marcar('wa-chip', estado.tono);
+  $('wa-titular').textContent = estado.titular;
+  // La frase del servidor trae el detalle fino (desde cuándo, reintentos, la
+  // última caída): no se repite aquí ninguno de esos datos.
+  $('wa-detalle').textContent = v.frase;
+  $('wa-avisos').innerHTML = avisoDe(estado) + correo;
+  $('wa-brevo-chip').className = 'chip ' + (brevo.configurada ? 'tono-verde' : 'tono-ambar');
+  $('wa-brevo-chip').textContent = brevo.configurada ? 'guardada' : 'sin clave';
+  $('wa-brevo-quitar').classList.toggle('hidden', !brevo.configurada);
+  return estado;
+}
+
+/** La prueba de cada mañana: qué salió en la última y cuándo es la próxima. */
 function pintarHumo(h) {
-  var sem = $('humo-semaforo'); sem.className = 'semaforo';
   var u = h.ultima;
-  var frase = $('humo-frase'); frase.className = 'frase';
-  if (!u) { sem.classList.add('warn'); frase.textContent = 'Todavía no se ha hecho ninguna prueba. Próxima: ' + h.proxima + '.'; }
-  else if (u.ok) { sem.classList.add('ok'); frase.classList.add('ok'); frase.textContent = 'Todo respondió bien ' + (u.quien === 'cada mañana' ? 'esta mañana' : 'en la prueba de ' + u.quien) + ' (' + fecha(u.at) + '). Próxima: ' + h.proxima + '.'; }
-  else { sem.classList.add('bad'); frase.classList.add('bad'); frase.textContent = 'Algo falló en la última prueba (' + fecha(u.at) + '). Próxima: ' + h.proxima + '.'; }
+  var fallos = u ? u.pasos.filter(function (p) { return !p.ok && !p.omitido; }).map(function (p) { return p.nombre; }) : [];
+  var estado;
+  if (u && !u.ok) estado = { tono: 'rojo', titular: fallos.length ? 'En la última prueba falló ' + fallos.join(', ') + '.' : 'La última prueba no salió bien.', consejo: 'Mira abajo qué contestó cada cosa: ahí está el motivo exacto.' };
+  else if (!h.ajustes.activo) estado = { tono: 'ambar', titular: 'Las pruebas de cada mañana están apagadas.', consejo: 'Nadie está comprobando que WhatsApp, GSG, la IA y las entregas respondan: enciéndelas en «Cuándo se hace».', accion: { texto: 'Encenderlas', ir: 'humo-ajustes' } };
+  else if (!u) estado = { tono: 'ambar', titular: 'Todavía no se ha hecho ninguna prueba.', consejo: 'Pulsa «Probar ahora» para comprobarlo todo en el acto, sin avisar a nadie.' };
+  else estado = { tono: 'verde', titular: 'Todo respondió bien en la última prueba.' };
+
+  estado.nombre = 'Prueba de la mañana';
+  marcar('humo-chip', estado.tono);
+  $('humo-titular').textContent = estado.titular;
+  var detalle = u ? 'Última: ' + fecha(u.at) + (u.quien === 'cada mañana' ? ' (automática)' : ' (la pidió ' + u.quien + ')') + '. ' : '';
+  $('humo-detalle').textContent = detalle + 'Próxima: ' + h.proxima + '.';
+  // Solo se cuenta el aviso al supervisor cuando NO se pudo dar: que salga
+  // bien es lo normal y no hace falta decirlo.
+  var mudo = u && u.aviso && !u.aviso.ok ? '<div class="aviso ambar">Falló la prueba y además no se pudo avisar: ' + esc(u.aviso.detalle) + '</div>' : '';
+  $('humo-avisos').innerHTML = avisoDe(estado) + mudo;
   $('humo-pasos').innerHTML = u ? u.pasos.map(function (p) {
     var clase = p.omitido ? 'omitido' : p.ok ? 'ok' : 'bad';
     var marca = p.omitido ? '–' : p.ok ? '✓' : '✗';
     return '<li><span class="marca ' + clase + '">' + marca + '</span><span class="nombre">' + esc(p.nombre) + '</span><span class="detalle">' + esc(p.detalle) + '</span></li>';
   }).join('') : '';
-  $('humo-aviso').textContent = u && u.aviso ? (u.aviso.ok ? 'Se avisó: ' + u.aviso.detalle : 'No se pudo avisar: ' + u.aviso.detalle) : '';
   $('humo-dias').innerHTML = h.historial.slice().reverse().map(function (r) {
-    var d = new Date(r.at);
-    return '<span class="dia ' + (r.ok ? 'ok' : 'bad') + '" title="' + esc(fecha(r.at) + (r.ok ? ': todo bien' : ': falló ' + r.pasos.filter(function (p) { return !p.ok; }).map(function (p) { return p.nombre; }).join(', '))) + '">' + d.getDate() + '</span>';
+    var falla = r.pasos.filter(function (p) { return !p.ok && !p.omitido; }).map(function (p) { return p.nombre; }).join(', ');
+    return '<span class="dia ' + (r.ok ? 'ok' : 'bad') + '" title="' + esc(fecha(r.at) + (r.ok ? ': todo bien' : ': falló ' + falla)) + '">' + new Date(r.at).getDate() + '</span>';
   }).join('');
   poner('humo-hora', h.ajustes.hora);
   poner('humo-activo', h.ajustes.activo);
+  return estado;
 }
 
+/** El cupo de hoy: si alcanza para los pedidos cargados y, si no, qué recortar. */
 function pintarCupo(c) {
-  var sem = $('cupo-semaforo'); sem.className = 'semaforo ' + (!c.cupoHoy ? 'warn' : c.alcanza ? 'ok' : 'bad');
-  var frase = $('cupo-frase'); frase.className = 'frase ' + (!c.cupoHoy ? '' : c.alcanza ? 'ok' : 'bad');
-  frase.textContent = c.frase;
-  $('cupo-cifras').innerHTML =
-    '<div class="cifra ' + (c.alcanza ? 'ok' : 'bad') + '"><div class="n">' + c.puedenSalir + '</div><div class="q">pueden salir hoy</div></div>' +
-    '<div class="cifra"><div class="n">' + c.necesitan + '</div><div class="q">necesitan los pedidos</div></div>' +
-    '<div class="cifra"><div class="n">' + c.usadosHoy + '</div><div class="q">ya salieron hoy (de ' + c.cupoHoy + ')</div></div>';
-  $('cupo-tabla').classList.toggle('hidden', !c.detalle.length);
+  var estado;
+  // Sin cupo conocido no se puede decir ni que alcanza ni que no: decirlo es
+  // mas honesto que pintar un rojo que no significa nada.
+  if (!c.cupoHoy) estado = { tono: 'ambar', titular: c.frase, consejo: 'En cuanto el número mande su primer mensaje del día se sabrá cuánto le queda.' };
+  else if (!c.alcanza) estado = { tono: 'rojo', titular: c.frase, consejo: 'Si no se recorta algo, hoy se quedarán clientes sin su mensaje.' };
+  else estado = { tono: 'verde', titular: c.frase };
+
+  estado.nombre = 'Cupo de hoy';
+  marcar('cupo-chip', estado.tono);
+  $('cupo-titular').textContent = estado.titular;
+
+  var barra = $('cupo-barra');
+  barra.classList.toggle('hidden', !c.cupoHoy);
+  if (c.cupoHoy) {
+    var usados = Math.min(100, Math.round((c.usadosHoy / c.cupoHoy) * 100));
+    var previsto = Math.min(100 - usados, Math.round((c.necesitan / c.cupoHoy) * 100));
+    $('cupo-usados').style.width = usados + '%';
+    $('cupo-previsto').style.width = previsto + '%';
+    barra.className = 'barra' + (!c.alcanza ? ' rojo' : c.margen <= 5 ? ' apretado' : '');
+    barra.setAttribute('aria-label', 'De los ' + c.cupoHoy + ' mensajes de hoy, ' + c.usadosHoy + ' ya salieron y los pedidos cargados necesitan unos ' + c.necesitan + '.');
+  }
+  $('cupo-linea').textContent = c.cupoHoy ? 'Cupo del día: ' + c.cupoHoy + ' mensajes · ya salieron ' + c.usadosHoy + '.' : '';
+
+  $('cupo-detalle-caja').classList.toggle('hidden', !c.detalle.length);
   $('cupo-detalle').innerHTML = c.detalle.map(function (d) { return '<tr><td>' + esc(d.concepto) + '</td><td class="num">' + d.cantidad + '</td></tr>'; }).join('');
-  $('cupo-recortar').innerHTML = c.alcanza ? '' : '<div class="aviso-rojo">No alcanza. Qué recortar:<ul class="recortar">' + c.queRecortar.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ul></div>';
+  // Qué recortar solo tiene sentido cuando de verdad no alcanza: sin cupo
+  // conocido, "no alcanza" no querría decir nada.
+  var recortar = c.cupoHoy && !c.alcanza && c.queRecortar.length
+    ? 'Qué se puede recortar:<ul>' + c.queRecortar.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') +
+      '</ul><div class="botones"><a class="btn sm" href="/panel#salud">Subir el cupo de hoy</a><a class="btn sm" href="/hoy">Pausar clientes en Hoy</a></div>'
+    : '';
+  $('cupo-recortar').innerHTML = estado.tono === 'verde' ? '' : '<div class="aviso ' + estado.tono + '">' + esc(estado.consejo) + recortar + '</div>';
+  return estado;
 }
 
+/** La copia de cada noche: si está al día y dónde va. */
 function pintarCopia(k) {
-  var sem = $('copia-semaforo'); sem.className = 'semaforo ' + (k.alerta ? (k.ultima && !k.ultima.ok ? 'bad' : 'warn') : 'ok');
-  $('copia-alerta').innerHTML = k.alerta ? '<div class="' + (k.ultima && !k.ultima.ok ? 'aviso-rojo' : 'aviso-amarillo') + '">' + esc(k.alerta) + '</div>' : '';
-  var frase = $('copia-frase'); frase.className = 'frase';
-  frase.textContent = (k.ajustes.activa ? 'Cada noche a las ' + k.ajustes.hora : 'La copia automática está apagada') + ' · carpeta: ' + k.carpeta + (k.carpetaEsLaDeSiempre ? ' (la de siempre)' : '') + ' · próxima: ' + k.proxima + '.';
   var u = k.ultima;
-  $('copia-ultima').innerHTML = u
-    ? '<div><b>Última copia:</b> ' + fecha(u.at) + (u.quien === 'cada noche' ? ' (automática)' : ' (la hizo ' + esc(u.quien) + ')') + (u.ok ? '' : ' · <span class="chip bad">falló</span>') + '</div>' +
-      '<ul class="copias">' + u.ficheros.map(function (f) { return '<li><b>' + esc(f.nombre) + '</b> <span class="muted">' + bytes(f.bytes) + ' · ' + esc(f.que) + '</span></li>'; }).join('') + '</ul>' +
-      (u.notas.length ? '<div class="muted" style="margin-top:6px">' + u.notas.map(esc).join('<br>') + '</div>' : '')
+  var estado;
+  if (u && !u.ok) estado = { tono: 'rojo', titular: 'La última copia falló.', consejo: u.error || k.alerta || 'Comprueba la carpeta y vuelve a intentarlo.', accion: { texto: 'Ver la carpeta', ir: 'copia-ajustes' } };
+  else if (k.alerta) estado = { tono: 'ambar', titular: k.alerta };
+  else if (!k.ajustes.activa) estado = { tono: 'ambar', titular: 'La copia automática está apagada.', consejo: 'Hay copias hechas, pero ya no se hace ninguna sola: si el disco se rompe, se pierde todo lo de después de la última.', accion: { texto: 'Encenderla', ir: 'copia-ajustes' } };
+  else estado = { tono: 'verde', titular: 'La copia está al día.' };
+
+  estado.nombre = 'Copia de seguridad';
+  marcar('copia-chip', estado.tono);
+  $('copia-titular').textContent = estado.titular;
+  $('copia-linea').textContent =
+    (u ? 'Última: ' + fecha(u.at) + (u.quien === 'cada noche' ? ' (automática)' : ' (la hizo ' + u.quien + ')') + '. ' : '') +
+    'Próxima: ' + k.proxima + '. Carpeta: ' + k.carpeta + (k.carpetaEsLaDeSiempre ? ' (la de siempre)' : '') + '.';
+  var ficheros = u && u.ok && u.ficheros.length
+    ? '<ul class="copias">' + u.ficheros.map(function (f) { return '<li><b>' + esc(f.nombre) + '</b> <span class="muted">' + bytes(f.bytes) + ' · ' + esc(f.que) + '</span></li>'; }).join('') + '</ul>'
     : '';
+  var notas = u && u.notas && u.notas.length ? '<p class="muted detalle">' + u.notas.map(esc).join('<br>') + '</p>' : '';
+  $('copia-avisos').innerHTML = avisoDe(estado) + ficheros + notas;
+
   $('copia-base').textContent = k.base.detalle;
   poner('copia-carpeta', k.ajustes.carpeta);
   $('copia-carpeta').placeholder = 'Vacío = ' + k.carpeta;
   $('copia-carpeta-detalle').textContent = k.carpetaComprobada.detalle;
-  $('copia-carpeta-detalle').style.color = k.carpetaComprobada.ok ? '' : 'var(--bad)';
+  $('copia-carpeta-detalle').className = 'detalle ' + (k.carpetaComprobada.ok ? 'muted' : 'aviso rojo');
   poner('copia-hora', k.ajustes.hora);
   poner('copia-conservar', k.ajustes.conservar);
   poner('copia-activa', k.ajustes.activa);
@@ -364,20 +460,70 @@ function pintarCopia(k) {
     ? k.copias.map(function (c) { return '<li><a href="/admin/fiabilidad/copia/descargar/' + encodeURIComponent(c.nombre) + '">' + esc(c.nombre) + '</a><span class="muted">' + bytes(c.bytes) + '</span></li>'; }).join('')
     : '<li class="muted">Todavía no hay copias en la carpeta.</li>';
   $('copia-restaurar').innerHTML = k.restaurar.pasos.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
+  return estado;
 }
 
+/** El veredicto de arriba: el peor tono de las cuatro cajas y qué hacer. */
+function pintarVeredicto(estados) {
+  var malas = estados.filter(function (e) { return e.tono !== 'verde'; });
+  var tono = estados.reduce(function (t, e) { return peor(t, e.tono); }, 'verde');
+  $('veredicto').className = 'tarjeta veredicto ' + tono;
+  marcar('veredicto-chip', tono, tono === 'verde' ? 'Todo bien' : PALABRA[tono]);
+  $('veredicto-titulo').textContent = !malas.length
+    ? 'Todo funciona: no tienes que hacer nada.'
+    : malas.length === 1
+      ? 'Hay una cosa que necesita tu atención.'
+      : 'Hay ' + malas.length + ' cosas que necesitan tu atención.';
+  $('veredicto-acciones').innerHTML = malas.map(function (e) {
+    return '<li><span class="chip tono-' + e.tono + '">' + esc(e.nombre) + '</span><span class="que">' + esc(e.titular) + '</span>' + botonDe(e.accion) + '</li>';
+  }).join('');
+}
+
+/* ------------------------------------------------------------- cargar --- */
+
+var fallosSeguidos = 0;
+
 async function cargar() {
-  estado = await api('/admin/fiabilidad');
-  pintarWa(estado.vigilante, estado.brevo, estado.demo);
-  pintarHumo(estado.humo);
-  pintarCupo(estado.cupo);
-  pintarCopia(estado.copia);
+  var estado = await api('/admin/fiabilidad');
+  pintarVeredicto([
+    pintarWa(estado.vigilante, estado.brevo),
+    pintarHumo(estado.humo),
+    pintarCupo(estado.cupo),
+    pintarCopia(estado.copia),
+  ]);
   poner('wa-correo', estado.ajustes.vigilante.correoAviso);
   poner('wa-minutos', estado.ajustes.vigilante.minutosAntesDeAvisar);
   poner('wa-remitente', estado.ajustes.vigilante.remitente);
   poner('wa-nombre', estado.ajustes.vigilante.nombreRemitente);
   poner('wa-al-volver', estado.ajustes.vigilante.avisarAlVolver);
+  fallosSeguidos = 0;
+  $('aviso-red').classList.add('hidden');
 }
+
+/**
+ * Si no se puede leer el estado, se dice: lo que hay en pantalla es de antes.
+ * Callarse seria peor que no enseñar nada, porque todo seguiria en verde.
+ */
+function refrescar() {
+  return cargar().catch(function (e) {
+    fallosSeguidos += 1;
+    var el = $('aviso-red');
+    el.textContent = 'Lo que ves es de hace un momento: no se pudo leer el estado (' + e.message + '). Se vuelve a intentar cada 30 segundos.';
+    el.classList.remove('hidden');
+    if (fallosSeguidos === 1) toast(e.message);
+  });
+}
+
+/* ------------------------------------------------------------ acciones -- */
+
+$('veredicto-acciones').addEventListener('click', function (evento) {
+  var boton = evento.target.closest('button[data-ir]');
+  if (!boton) return;
+  var destino = $(boton.dataset.ir);
+  if (!destino) return;
+  if (destino.tagName === 'DETAILS') destino.open = true;
+  destino.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 
 $('wa-mirar').onclick = ocupado($('wa-mirar'), 'Mirando…', async function () { await api('/admin/fiabilidad/vigilante/mirar', { method: 'POST', body: {} }); await cargar(); });
 $('wa-guardar').onclick = ocupado($('wa-guardar'), 'Guardando…', async function () {
@@ -399,10 +545,6 @@ $('wa-probar-correo').onclick = ocupado($('wa-probar-correo'), 'Mandando…', as
   toast(r.resultado.detalle);
   await cargar();
 });
-$('wa-sim-caida').onclick = ocupado($('wa-sim-caida'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: true } }); toast('Caída simulada: el vigilante la ve como real.'); await cargar(); });
-$('wa-sim-caida5').onclick = ocupado($('wa-sim-caida5'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: true, minutos: 5 } }); toast('Caída simulada durante 5 minutos: el vigilante intenta reconectar, avisa por correo si toca y a los 5 minutos vuelve solo a lo real.'); await cargar(); });
-$('wa-sim-vuelta').onclick = ocupado($('wa-sim-vuelta'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: false } }); await cargar(); });
-$('wa-sim-real').onclick = ocupado($('wa-sim-real'), '…', async function () { await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: { caido: null } }); await cargar(); });
 
 $('humo-probar').onclick = ocupado($('humo-probar'), 'Probando…', async function () {
   var r = await api('/admin/fiabilidad/humo/probar', { method: 'POST', body: {} });
@@ -417,26 +559,71 @@ $('humo-guardar').onclick = ocupado($('humo-guardar'), 'Guardando…', async fun
 
 $('copia-ahora').onclick = ocupado($('copia-ahora'), 'Copiando…', async function () {
   var r = await api('/admin/fiabilidad/copia/ahora', { method: 'POST', body: {} });
-  if (r.enMarcha) { toast(r.detalle); setTimeout(function () { cargar(); }, 15000); await cargar(); return; }
+  // Una copia larga contesta "sigue en marcha": se vuelve a mirar en un rato.
+  if (r.enMarcha) { toast(r.detalle); setTimeout(refrescar, 15000); await cargar(); return; }
   toast(r.resultado.ficheros.length ? 'Copia hecha: ' + r.resultado.ficheros.map(function (f) { return f.nombre; }).join(', ') : 'Copia hecha (no había nada que copiar todavía).');
   await cargar();
 });
 $('copia-comprobar').onclick = ocupado($('copia-comprobar'), 'Comprobando…', async function () {
-  var r = await api('/admin/fiabilidad/copia/carpeta', { method: 'POST', body: { carpeta: $('copia-carpeta').value.trim() } });
-  $('copia-carpeta-detalle').textContent = r.detalle; $('copia-carpeta-detalle').style.color = '';
-  toast(r.detalle);
+  var salida = $('copia-carpeta-detalle');
+  try {
+    var r = await api('/admin/fiabilidad/copia/carpeta', { method: 'POST', body: { carpeta: $('copia-carpeta').value.trim() } });
+    salida.textContent = r.detalle;
+    salida.className = 'detalle muted';
+    toast(r.detalle);
+  } catch (e) {
+    // El servidor contesta 400 cuando no se puede escribir: el motivo va al
+    // lado del campo, no solo en un aviso que se va solo.
+    salida.textContent = e.message;
+    salida.className = 'detalle aviso rojo';
+    throw e;
+  }
 });
 $('copia-guardar').onclick = ocupado($('copia-guardar'), 'Guardando…', async function () {
   var carpeta = $('copia-carpeta').value.trim();
-  if (carpeta) { var c = await api('/admin/fiabilidad/copia/carpeta', { method: 'POST', body: { carpeta: carpeta } }); if (!c.ok) throw new Error(c.detalle); }
+  if (carpeta) {
+    var c = await api('/admin/fiabilidad/copia/carpeta', { method: 'POST', body: { carpeta: carpeta } });
+    if (!c.ok) throw new Error(c.detalle);
+  }
   await api('/admin/fiabilidad/ajustes', { method: 'POST', body: { copia: { carpeta: carpeta, hora: $('copia-hora').value || '03:00', conservar: Number($('copia-conservar').value || 14), activa: $('copia-activa').checked } } });
   toast('Guardado.');
   await cargar();
 });
 
-document.addEventListener('ia:cambio', function () { cargar().catch(function () {}); });
-setInterval(function () { if (document.querySelector('.dlg-fondo')) return; cargar().catch(function () {}); }, 30000);
-cargar().catch(function (e) { toast(e.message); });
+function simular(boton, cuerpo, aviso) {
+  boton.onclick = ocupado(boton, '…', async function () {
+    await api('/admin/fiabilidad/vigilante/simular', { method: 'POST', body: cuerpo });
+    if (aviso) toast(aviso);
+    await cargar();
+  });
+}
+if ($('wa-simular')) {
+  simular($('wa-sim-caida'), { caido: true }, 'Caída simulada: el vigilante la ve como real.');
+  simular($('wa-sim-caida5'), { caido: true, minutos: 5 }, 'Caída simulada 5 minutos: reintenta, avisa por correo si toca y vuelve solo a lo real.');
+  simular($('wa-sim-vuelta'), { caido: false }, '');
+  simular($('wa-sim-real'), { caido: null }, '');
+}
+
+/* ------------------------------------------------------------ arranque -- */
+
+if ($('wrap').dataset.disponible === '1') {
+  document.addEventListener('ia:cambio', function () { refrescar(); });
+  // Mientras hay un cuadro de diálogo abierto no se refresca: cambiar lo de
+  // debajo mientras alguien decide es como moverle la mesa.
+  setInterval(function () { if (!document.querySelector('.dlg-fondo')) refrescar(); }, 30000);
+  refrescar();
+} else {
+  // Sin el servicio de fiabilidad no hay nada que leer: se dice una vez y no
+  // se pregunta cada 30 segundos.
+  marcar('veredicto-chip', 'ambar', 'Sin datos');
+  $('veredicto-titulo').textContent = 'Esta pantalla no está disponible en este arranque.';
+  $('veredicto-pie').textContent = 'Arranca el sistema con «npm run quick» para que el vigilante, las pruebas y la copia se pongan en marcha.';
+  ['wa', 'humo', 'cupo', 'copia'].forEach(function (caja) {
+    marcar(caja + '-chip', 'gris', 'Sin datos');
+    $(caja + '-titular').textContent = 'No se está vigilando en este arranque.';
+  });
+  document.querySelectorAll('.caja button').forEach(function (b) { b.disabled = true; });
+}
 `;
 
   return appShell({

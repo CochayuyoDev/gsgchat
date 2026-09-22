@@ -8,7 +8,7 @@
  */
 
 import type { Repos, TemplateCategory } from '../db/repos.js';
-import type { WhatsAppClient } from '../whatsapp/client.js';
+import type { CitaSaliente, WhatsAppClient } from '../whatsapp/client.js';
 import { WhatsAppApiError } from '../whatsapp/client.js';
 import { renderTemplate, TemplateRenderError } from '../templates/render.js';
 import type { Monitor } from '../salud/monitor.js';
@@ -56,6 +56,17 @@ export interface SendJob {
   templateLanguage?: string;
   variables?: string[];
 
+  /**
+   * Responder citando otro mensaje.
+   *
+   * Cada proveedor la arma a su manera (ver `CitaSaliente`), pero el hilo la
+   * guarda igual para todos, en `payload.cita`: asi el globo pinta el bloque
+   * citado al recargar, aunque el proveedor no lo devuelva.
+   */
+  cita?: CitaSaliente & { autor?: string };
+  /** Se reenvio desde otro chat: el globo lo dice, como en WhatsApp. */
+  reenviado?: boolean;
+
   text?: string;
   location?: { latitude: number; longitude: number; name?: string; address?: string };
   interactive?: {
@@ -95,7 +106,34 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
   // Lo que diga quien manda vale; sin decirlo, a mano es una persona y lo demas, el sistema.
   const origen = job.origen ?? (job.manual ? 'persona' : 'sistema');
   const nombre = job.autorNombre?.trim();
-  return { ...(payload ?? {}), origen, ...(nombre ? { autorNombre: nombre } : {}) };
+  return {
+    ...(payload ?? {}),
+    origen,
+    ...(nombre ? { autorNombre: nombre } : {}),
+    // La cita se guarda con lo justo para pintarla: de quien era y que decia.
+    // El id tambien, para poder saltar al original si sigue en el hilo.
+    ...(job.cita ? { cita: { id: job.cita.id, deMi: job.cita.fromMe, texto: job.cita.texto ?? '', autor: job.cita.autor ?? null } } : {}),
+    ...(job.reenviado ? { reenviado: true } : {}),
+  };
+}
+
+/**
+ * Lo que se puede hacer SOBRE un mensaje ya enviado: reaccionar, quitarlo o
+ * cambiarlo.
+ *
+ * No pasa por los gates ni deja fila en `deliveries` a proposito: no es un
+ * mensaje nuevo que gaste cupo ni que abra una conversacion con Meta, es una
+ * marca sobre uno que ya salio. Contarlo como envio ensuciaria el warm-up y
+ * el marcapasos con pulgares arriba.
+ */
+export interface AccionMensaje {
+  phone: string;
+  mensaje: CitaSaliente;
+  tipo: 'reaccion' | 'eliminar' | 'editar';
+  /** Para 'reaccion'. Cadena vacia = quitarla. */
+  emoji?: string;
+  /** Para 'editar'. */
+  texto?: string;
 }
 
 export type SendOutcome =
@@ -142,6 +180,22 @@ export interface SenderDeps {
 
 export interface Sender {
   send(job: SendJob): Promise<SendOutcome>;
+  /**
+   * Reaccionar, eliminar para todos o editar un mensaje ya enviado.
+   *
+   * Opcional para no obligar a los dobles de prueba que solo mandan mensajes.
+   * Quien la llame comprueba antes que exista; la pantalla, ademas, esconde
+   * lo que el proveedor no sabe hacer.
+   */
+  accion?(accion: AccionMensaje): Promise<{ ok: true; wamid?: string }>;
+  /**
+   * Si el otro lado esta escribiendo o en linea. `null` = no se sabe.
+   *
+   * Va aqui, y no en una dependencia aparte, porque el sender es la unica
+   * puerta al cliente de WhatsApp que tienen las pantallas: meter una segunda
+   * seria abrir dos caminos hacia lo mismo.
+   */
+  presencia?(phone: string): Promise<{ estado: string; desde: string } | null>;
 }
 
 export function createSender(deps: SenderDeps): Sender {
@@ -157,6 +211,34 @@ export function createSender(deps: SenderDeps): Sender {
   const permitidos = () => (typeof deps.soloNumeros === 'function' ? deps.soloNumeros() : deps.soloNumeros) ?? [];
 
   return {
+    /**
+     * Las acciones sobre un mensaje van directas al proveedor.
+     *
+     * Si el proveedor no sabe hacerlo, el error lo dice con sus palabras (ver
+     * `dynamic.ts`) y la pantalla lo ensena: es preferible a callarse y dejar
+     * al operador creyendo que borro algo que sigue en el telefono del cliente.
+     */
+    async accion(accion) {
+      if (accion.tipo === 'reaccion') {
+        if (!wa.sendReaction) throw new Error('este proveedor no manda reacciones');
+        const r = await wa.sendReaction(accion.phone, accion.mensaje, accion.emoji ?? '');
+        return { ok: true, wamid: r.wamid };
+      }
+      if (accion.tipo === 'eliminar') {
+        if (!wa.borrarParaTodos) throw new Error('este proveedor no puede eliminar un mensaje para todos');
+        await wa.borrarParaTodos(accion.phone, accion.mensaje);
+        return { ok: true };
+      }
+      if (!wa.editarMensaje) throw new Error('este proveedor no puede editar un mensaje ya enviado');
+      const r = await wa.editarMensaje(accion.phone, accion.mensaje, accion.texto ?? '');
+      return { ok: true, wamid: r.wamid };
+    },
+
+    async presencia(phone) {
+      // Sin soporte del proveedor no se inventa nada: null es "no se sabe".
+      return (await wa.presencia?.(phone).catch(() => null)) ?? null;
+    },
+
     async send(job) {
       const at = now();
       const contact = await repos.contacts.upsertFromInbound(job.phone);
@@ -468,12 +550,14 @@ async function dispatch(
     case 'media': {
       if (!job.media) throw new Error('falta el campo media');
       if (!wa.sendMedia) throw new Error('este proveedor no manda fotos ni archivos');
-      return wa.sendMedia(job.phone, { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, voz: job.media.voz });
+      return wa.sendMedia(job.phone, { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, voz: job.media.voz, cita: job.cita });
     }
     case 'freeform':
     default: {
       if (!job.text) throw new Error('falta el campo text');
-      return wa.sendText(job.phone, job.text);
+      // El cuarto parametro es la cita: los tres clientes la arman a su
+      // manera y aqui solo se pasa. Sin cita, es el envio de siempre.
+      return wa.sendText(job.phone, job.text, undefined, job.cita);
     }
   }
 }

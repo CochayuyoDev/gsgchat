@@ -71,6 +71,15 @@ export function createFakeMessages(
     },
 
     async add(message: NewMessage) {
+      // Igual que el repo de verdad: una reaccion no es un mensaje, se cuelga
+      // del mensaje reaccionado (ver `createMessagesRepo`).
+      const reaction = (message.payload as { reaction?: { emoji?: string; message_id?: string } } | null)?.reaction;
+      if (reaction?.message_id) {
+        const autor = (message.payload as { autor?: { telefono?: string | null } } | null)?.autor;
+        const quien = autor?.telefono || (message.direction === 'in' ? 'cliente' : 'yo');
+        await repo.reaccionar(reaction.message_id, quien, String(reaction.emoji ?? ''), message.createdAt ?? new Date());
+        return 0;
+      }
       if (message.wamid) {
         const existing = all.find((m) => m.wamid === message.wamid);
         if (existing) {
@@ -135,9 +144,17 @@ export function createFakeMessages(
               (m) => m.direction === 'in' && (!readAt || m.createdAt.getTime() > readAt.getTime()),
             ).length,
             windowOpen: Boolean(c.lastInboundAt && now - c.lastInboundAt.getTime() < WINDOW_MS),
+            fijadoAt: c.chatFijadoAt ?? null,
+            silenciadoAt: c.chatSilenciadoAt ?? null,
+            apartadoAt: c.chatApartadoAt ?? null,
           } satisfies Conversation;
         })
+        .filter((c) => query.incluirApartados || !c.apartadoAt)
         .sort((a, b) => {
+          // Lo fijado manda sobre la hora, igual que en el SQL.
+          const fa = a.fijadoAt?.getTime() ?? 0;
+          const fb = b.fijadoAt?.getTime() ?? 0;
+          if (fa !== fb) return fb - fa;
           const ta = (a.lastMessage?.createdAt ?? a.lastInboundAt)?.getTime() ?? 0;
           const tb = (b.lastMessage?.createdAt ?? b.lastInboundAt)?.getTime() ?? 0;
           // Mismo desempate que el SQL: la hora de WhatsApp viene en segundos.
@@ -149,8 +166,82 @@ export function createFakeMessages(
     async listMessages(contactId, limit, beforeId) {
       return all
         .filter((m) => m.contactId === contactId && (!beforeId || m.id < beforeId))
+        .filter((m) => !(m.payload && 'eliminadoAqui' in m.payload))
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id)
         .slice(-limit);
+    },
+
+    // --- citar, reaccionar, destacar, buscar ---
+
+    async reaccionar(wamid, quien, emoji, at) {
+      const fila = all.find((m) => m.wamid === wamid);
+      if (!fila) return false;
+      const reacciones = { ...((fila.payload?.reacciones as Record<string, unknown>) ?? {}) };
+      if (emoji.trim()) reacciones[quien] = { emoji: emoji.trim(), at: at.toISOString() };
+      else delete reacciones[quien];
+      fila.payload = { ...(fila.payload ?? {}), reacciones };
+      return true;
+    },
+
+    async porId(contactId, id) {
+      return all.find((m) => m.contactId === contactId && m.id === id) ?? null;
+    },
+
+    async porIds(contactId, ids) {
+      return all
+        .filter((m) => m.contactId === contactId && ids.includes(m.id))
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
+    },
+
+    async destacar(contactId, ids, destacado, at) {
+      let n = 0;
+      for (const m of all) {
+        if (m.contactId !== contactId || !ids.includes(m.id)) continue;
+        const payload = { ...(m.payload ?? {}) } as Record<string, unknown>;
+        if (destacado) payload.destacado = at.toISOString();
+        else delete payload.destacado;
+        m.payload = payload;
+        n++;
+      }
+      return n;
+    },
+
+    async ocultar(contactId, ids, at) {
+      let n = 0;
+      for (const m of all) {
+        if (m.contactId !== contactId || !ids.includes(m.id)) continue;
+        m.payload = { ...(m.payload ?? {}), eliminadoAqui: at.toISOString() };
+        n++;
+      }
+      return n;
+    },
+
+    async editarCuerpo(contactId, id, texto, at) {
+      const fila = all.find((m) => m.contactId === contactId && m.id === id);
+      if (!fila) return false;
+      fila.body = texto;
+      fila.payload = { ...(fila.payload ?? {}), editadoAt: at.toISOString() };
+      return true;
+    },
+
+    async buscar(query) {
+      const q = query.q.trim().toLowerCase();
+      if (!q) return [];
+      return all
+        .filter((m) => m.contactId === query.contactId && (m.body ?? '').toLowerCase().includes(q))
+        .filter((m) => !(m.payload && 'eliminadoAqui' in m.payload))
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id)
+        .slice(-query.limit);
+    },
+
+    async destacados(query) {
+      const porId = new Map(contacts().map((c) => [c.id, c]));
+      return all
+        .filter((m) => m.payload && 'destacado' in m.payload && !('eliminadoAqui' in m.payload))
+        .filter((m) => !query.contactId || m.contactId === query.contactId)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)
+        .slice(0, query.limit)
+        .map((m) => ({ ...m, phone: porId.get(m.contactId)?.phone ?? '', name: porId.get(m.contactId)?.name ?? null }));
     },
 
     async markRead(contactId, at) {

@@ -62,6 +62,16 @@ export interface Contact {
    * se atiende a mano, y el bot no puede meterse por encima.
    */
   botPausadoAt?: Date | null;
+  /**
+   * Como quiere ver esta conversacion quien atiende (ver migracion 037).
+   *
+   * Fijada arriba, silenciada (cuenta pero no grita) o apartada de la lista.
+   * "Apartada" no es "guardada": guardar un chat lo respalda y lo vacia; esto
+   * solo lo quita de la vista y vuelve en cuanto el cliente escribe.
+   */
+  chatFijadoAt?: Date | null;
+  chatSilenciadoAt?: Date | null;
+  chatApartadoAt?: Date | null;
   /** Envios iniciados por la empresa seguidos sin que conteste nada. */
   sinRespuestaSeguidas?: number;
   ultimoEnvioAt?: Date | null;
@@ -354,6 +364,20 @@ export interface ContactsRepo {
    * respuesta automatica.
    */
   pausarBot(contactId: string, pausado: boolean, at: Date): Promise<void>;
+  /**
+   * Como se ve el chat en la lista: fijado, silenciado o apartado.
+   *
+   * Lo que no venga no se toca, para poder cambiar una sola cosa sin tener
+   * que mandar las tres y pisar lo que otro puso.
+   */
+  ajustesChat(contactId: string, ajustes: { fijado?: boolean; silenciado?: boolean; apartado?: boolean }, at: Date): Promise<void>;
+  /**
+   * Devuelve el chat a "sin leer" moviendo el puntero de lectura hacia atras.
+   *
+   * No hay marca por mensaje: `chat_read_at` es un puntero por conversacion
+   * (ver `messages.markRead`), asi que marcar como no leido es retrasarlo.
+   */
+  marcarNoLeido(contactId: string, at: Date | null): Promise<void>;
   /** Un envio iniciado por la empresa salio hacia este contacto. */
   anotarEnvioIniciado(contactId: string, at: Date): Promise<void>;
   /** Cuantos contactos recibieron su PRIMER mensaje de negocio desde esa fecha. */
@@ -569,6 +593,9 @@ interface ContactRow {
   suprimido_motivo?: string | null;
   suprimido_ambito?: string | null;
   bot_pausado_at?: Date | null;
+  chat_fijado_at?: Date | null;
+  chat_silenciado_at?: Date | null;
+  chat_apartado_at?: Date | null;
   sin_respuesta_seguidas?: number;
   ultimo_envio_at?: Date | null;
   primer_envio_at?: Date | null;
@@ -587,6 +614,9 @@ const toContact = (row: ContactRow): Contact => ({
   suprimidoHasta: row.suprimido_hasta ?? null,
   suprimidoMotivo: row.suprimido_motivo ?? null,
   botPausadoAt: row.bot_pausado_at ?? null,
+  chatFijadoAt: row.chat_fijado_at ?? null,
+  chatSilenciadoAt: row.chat_silenciado_at ?? null,
+  chatApartadoAt: row.chat_apartado_at ?? null,
   suprimidoAmbito: row.suprimido_ambito === 'marketing' ? 'marketing' : row.suprimido_ambito === 'todo' ? 'todo' : null,
   sinRespuestaSeguidas: row.sin_respuesta_seguidas ?? 0,
   ultimoEnvioAt: row.ultimo_envio_at ?? null,
@@ -932,6 +962,23 @@ export function createRepos(poolCrudo: Pool): Repos {
         contactId,
         pausado ? at : null,
       ]);
+    },
+    async ajustesChat(contactId, ajustes, at) {
+      const sets: string[] = [];
+      const params: unknown[] = [contactId];
+      const poner = (columna: string, valor: boolean | undefined) => {
+        if (valor === undefined) return;
+        params.push(valor ? at : null);
+        sets.push(`${columna} = $${params.length}`);
+      };
+      poner('chat_fijado_at', ajustes.fijado);
+      poner('chat_silenciado_at', ajustes.silenciado);
+      poner('chat_apartado_at', ajustes.apartado);
+      if (!sets.length) return;
+      await pool.query(`update contacts set ${sets.join(', ')} where id = $1`, params);
+    },
+    async marcarNoLeido(contactId, at) {
+      await pool.query('update contacts set chat_read_at = $2 where id = $1', [contactId, at]);
     },
     async levantarSupresion(phone) {
       await pool.query(

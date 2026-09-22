@@ -3,368 +3,27 @@
  *
  * Lista de conversaciones a la izquierda, hilo a la derecha, burbujas verdes
  * para lo que sale y blancas para lo que entra, con su hora y su doble check.
- * El panel con pestanas sigue existiendo para operar (campanas, plantillas,
- * automatizacion); esto es para hablar con la gente.
  *
  * Se refresca sola cada pocos segundos en vez de abrir un WebSocket: el
  * volumen de un chat de atencion no lo justifica y asi sobrevive a cualquier
- * proxy sin configuracion extra.
+ * proxy sin configuracion extra. El refresco tiene una regla que no se salta:
+ * NO pisa lo que el usuario esta haciendo -ni lo que escribe, ni el scroll,
+ * ni un menu abierto, ni una seleccion en marcha-.
+ *
+ * El fichero esta partido en tres para que quepa en la cabeza:
+ *   - `chat-css.ts`         como se ve
+ *   - `chat-menu.ts`        todo lo que se hace SOBRE un mensaje
+ *   - `chat-compositor.ts`  todo lo que hay de la raya para abajo
+ * Se concatenan en un solo script; nadie mas los importa.
  *
  * Nota: el JS va en String.raw y usa concatenacion, como el resto de paginas.
  */
 
-const CSS = `
-  /* El chat solo añade sus cuatro colores propios (globo mio, globo del
-     cliente, cabeceras y fondo del hilo) y los saca de los tokens del armazon,
-     asi cambia con la paleta y con el modo oscuro sin tocar nada aqui. */
-  .app, .toast, .visor, .ayuda-teclas {
-    --mine: var(--primario-suave); --theirs: var(--superficie); --header: var(--superficie-2);
-    --badge: var(--primario); --wallpaper: var(--bg); --wallpaper-dot: var(--borde);
-  }
-  * { box-sizing: border-box; }
-  /* El alto lo da el armazon (s-content lleno): la banda de demo y el aviso
-     de conexion van encima y el chat se queda con el resto. */
-  .app { display: grid; grid-template-columns: 340px 1fr; flex: 1; min-height: 0; overflow: hidden;
-    background: var(--bg); color: var(--text); font-family: var(--fuente); font-size: var(--fs-cuerpo); line-height: 1.45; }
-  .demo {
-    background: var(--ambar); color: #fff; padding: 9px 14px; font-size: 13.5px;
-    text-align: center; line-height: 1.35;
-  }
-  .demo a { color: #fff; text-decoration: underline; }
-  /* WhatsApp desconectado: lo que se escriba no sale. Se avisa arriba del
-     todo, porque descubrirlo al pulsar enviar es descubrirlo tarde. */
-  .aviso-conexion {
-    background: var(--rojo); color: #fff; padding: 9px 14px; font-size: 13.5px;
-    text-align: center; line-height: 1.35;
-  }
-  .aviso-conexion a { color: #fff; text-decoration: underline; }
-  .demo, .aviso-conexion { flex: none; }
-  .side {
-    background: var(--panel); border-right: 1px solid var(--line);
-    display: flex; flex-direction: column; min-width: 0; min-height: 0;
-  }
-  .side header, .thread header {
-    background: var(--header); padding: 10px 14px; display: flex; align-items: center; gap: 10px;
-    border-bottom: 1px solid var(--line); min-height: 58px; flex: none;
-  }
-  .side header h1 { font-size: 17px; margin: 0; flex: 1; }
-  .search { padding: 8px 12px; border-bottom: 1px solid var(--line); }
-  .filtros { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
-  .filtros .f { flex: none; min-height: 32px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-  .filtros .f.activo { background: var(--accent); border-color: var(--accent); color: var(--primario-texto); }
-  .search input { width: 100%; padding: 8px 12px; border: 0; border-radius: 8px;
-    background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
-  .chats { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-  .chat {
-    display: flex; gap: 13px; padding: 10px 14px; cursor: pointer;
-    border-bottom: 1px solid var(--line); transition: background .12s;
-  }
-  .chat:hover { background: var(--header); }
-  .chat.active { background: var(--header); box-shadow: inset 4px 0 0 var(--accent); }
-  .chat.active .name { color: var(--accent); }
-  .avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--accent); color: #fff; flex: none;
-    display: grid; place-items: center; font-weight: 600; font-size: 17px; }
-  /* Un color por contacto: con todos del mismo verde la lista es un muro. */
-  .avatar.c0 { background: #6bcbef; } .avatar.c1 { background: #e542a3; }
-  .avatar.c2 { background: #f2a63c; } .avatar.c3 { background: #7a7dd8; }
-  .avatar.c4 { background: #26a69a; } .avatar.c5 { background: #ef6b6b; }
-  .avatar.c6 { background: #8bc34a; } .avatar.c7 { background: #a1887f; }
-  .chat .body { flex: 1; min-width: 0; }
-  .chat .top { display: flex; align-items: baseline; gap: 8px; }
-  .chat .name { font-weight: 600; font-size: 15px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chat .when { font-size: 11.5px; color: var(--muted); flex: none; }
-  .chat .last { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
-  .badge { background: var(--badge); color: var(--primario-texto); border-radius: 999px; font-size: 11.5px;
-    font-weight: 700; padding: 1px 7px; margin-left: 6px; }
-  /* min-height: 0 es lo que deja que el hilo se encoja y sea .messages quien
-     haga scroll, en vez de estirar la pagina entera. */
-  .thread { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
-  .thread header .name { font-weight: 600; }
-  .thread header button.link { background: none; border: 0; font: inherit; color: var(--primario); cursor: pointer; padding: 6px 8px; min-height: 36px; }
-  .ficha { position: absolute; top: 58px; right: 8px; width: min(360px, calc(100% - 16px)); max-height: calc(100% - 70px); overflow: auto; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra-2); z-index: 5; }
-  .ficha-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
-  .ficha-cuerpo { padding: 10px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 10px; }
-  .ficha-cuerpo h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .02em; }
-  .ficha-cuerpo .fila { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
-  .ficha-cuerpo .pin-coords { font-family: ui-monospace, Consolas, monospace; user-select: all; }
-  .ficha-cuerpo a.sm, .ficha-cuerpo button.sm { min-height: 34px; padding: 4px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: none; color: var(--texto); display: inline-flex; align-items: center; }
-  .thread { position: relative; }
-  .thread header .sub { font-size: 12.5px; color: var(--muted); }
-  .messages {
-    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-    padding: 14px 6%; display: flex; flex-direction: column; gap: 2px;
-    background-color: var(--wallpaper);
-    background-image:
-      radial-gradient(circle at 20% 30%, var(--wallpaper-dot) 1px, transparent 1px),
-      radial-gradient(circle at 70% 65%, var(--wallpaper-dot) 1px, transparent 1px);
-    background-size: 42px 42px, 58px 58px;
-  }
-  /* La barra de scroll del hilo, discreta como la del cliente de escritorio. */
-  .messages::-webkit-scrollbar, .chats::-webkit-scrollbar { width: 7px; }
-  .messages::-webkit-scrollbar-thumb, .chats::-webkit-scrollbar-thumb {
-    background: rgba(0,0,0,.18); border-radius: 4px;
-  }
-  .messages::-webkit-scrollbar-track, .chats::-webkit-scrollbar-track { background: transparent; }
-  .msg {
-    max-width: min(65%, 520px); padding: 6px 9px 8px; border-radius: 7.5px; position: relative;
-    box-shadow: 0 1px 0.5px rgba(0,0,0,.13); white-space: pre-wrap; word-wrap: break-word;
-    font-size: 14.2px; line-height: 1.4;
-  }
-  .msg.pendiente { opacity: .7; }
-  .msg.out { align-self: flex-end; background: var(--mine); }
-  .msg.in { align-self: flex-start; background: var(--theirs); }
-
-  /* Mensajes seguidos del mismo lado: se juntan y solo el primero lleva pico,
-     que es como los agrupa WhatsApp y lo que hace legible una rafaga. */
-  .msg + .msg.out, .msg + .msg.in { margin-top: 1px; }
-  .msg.primero { margin-top: 10px; }
-  .msg.primero.out { border-top-right-radius: 0; }
-  .msg.primero.in { border-top-left-radius: 0; }
-  .msg.primero::before {
-    content: ''; position: absolute; top: 0; width: 8px; height: 13px;
-  }
-  .msg.primero.out::before {
-    right: -8px;
-    background: var(--mine);
-    clip-path: polygon(0 0, 100% 0, 0 100%);
-  }
-  .msg.primero.in::before {
-    left: -8px;
-    background: var(--theirs);
-    clip-path: polygon(0 0, 100% 0, 100% 100%);
-  }
-  .pin-cliente{display:flex;flex-direction:column;gap:4px;margin:2px 0 6px;padding:8px 10px;border:1px solid var(--borde);border-radius:var(--radio-sm);background:var(--superficie-2)}
-.pin-cliente .pin-titulo{font-weight:600;font-size:13px}
-.pin-cliente .pin-coords{font-family:ui-monospace,Consolas,monospace;font-size:13px;user-select:all}
-.pin-cliente .pin-acciones{display:flex;gap:10px;align-items:center;font-size:13px}
-.pin-cliente .pin-copiar{border:1px solid var(--borde);background:var(--superficie);border-radius:var(--radio-sm);padding:4px 10px;font:inherit;font-size:12.5px;cursor:pointer;min-height:32px}
-.pin-cliente .pin-nota{font-size:11.5px;color:var(--texto-suave)}
-.msg .meta {
-    float: right; margin: 8px -2px -4px 10px; font-size: 11px; color: var(--muted);
-    white-space: nowrap; position: relative; top: 3px;
-  }
-  .msg .tick { color: var(--muted); }
-  .msg .tick.read { color: var(--azul); }
-  /* "¿qué pasó?": discreto, al pasar el raton; en el movil siempre (no hay raton). */
-  .msg .que-paso { color: var(--muted); font-size: 10.5px; margin-right: 6px; cursor: pointer; opacity: 0; transition: opacity .12s; text-decoration: underline dotted; }
-  .msg:hover .que-paso, .msg .que-paso:focus { opacity: 1; }
-  @media (hover: none) { .msg .que-paso { opacity: .8; } }
-  .traza { list-style: none; margin: 0; padding: 0; }
-  .traza li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
-  .traza li:last-child { border-bottom: 0; }
-  .traza li i { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
-  .traza li.ok i { background: var(--verde); } .traza li.warn i { background: var(--ambar); } .traza li.bad i { background: var(--rojo); }
-  .traza li span { flex: 1; }
-  .traza li small { display: block; color: var(--muted); font-size: 11.5px; }
-  .traza-cab { font-size: 13px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; padding: 8px 10px; background: var(--superficie-2); border-radius: var(--radio-sm); }
-  .traza-cab b { color: var(--text); }
-  .msg a { color: var(--accent); }
-  /* Los adjuntos mandan sobre el ancho de la burbuja, pero sin desbordarla. */
-  .msg .adjunto { display: block; margin: 2px 0 4px; max-width: 100%; }
-  .msg img.adjunto, .msg video.adjunto { border-radius: 6px; cursor: pointer; max-height: 340px; }
-  .msg audio.adjunto { width: 260px; }
-  .msg .una-vez { display: inline-block; font-size: 11.5px; color: var(--muted); margin: 2px 0 3px;
-    padding: 2px 8px; border-radius: 999px; background: var(--ambar-suave); color: var(--ambar); }
-  /* El "ver una vez" que no se pudo abrir: se explica y se ofrece pedirlo. */
-  .msg .solo-telefono { display: block; margin-top: 6px; }
-  .msg .solo-telefono button { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
-    background: var(--superficie); cursor: pointer; }
-  .msg .solo-telefono button:hover { background: var(--superficie-2); }
-  /* Lo que el remitente "elimino para todos": aqui se conserva, y se dice. */
-  .msg .borrado { display: block; font-size: 11px; color: var(--ambar); margin-top: 3px; }
-  /* En un grupo, quien lo dijo va encima del globo, con su color. */
-  .msg .autor { display: block; font-size: 12.5px; font-weight: 600; margin: -1px 0 2px; }
-  .msg .autor .tel { font-weight: 400; color: var(--muted); font-size: 11.5px; margin-left: 6px; }
-  .autor.c0 { color: #1e88c9; } .autor.c1 { color: #c2185b; } .autor.c2 { color: #d17f0b; } .autor.c3 { color: #5c5fbf; }
-  .autor.c4 { color: #1b8f84; } .autor.c5 { color: #d84a4a; } .autor.c6 { color: #5f9a1e; } .autor.c7 { color: #8d6e63; }
-  .avatar.grupo { background: var(--gris); font-size: 20px; }
-  .historial { text-align: center; padding: 6px; background: var(--panel); border-bottom: 1px solid var(--line); }
-  .mas-antiguos { text-align: center; padding: 6px 0 2px; }
-  .mas-antiguos button { font-size: 12px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--superficie); cursor: pointer; color: var(--muted); }
-  .mas-antiguos button:disabled { opacity: .6; }
-  .historial button { font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--superficie); cursor: pointer; }
-  .historial button:hover { background: var(--superficie-2); }
-  .historial button:disabled { opacity: .6; cursor: default; }
-  .msg .fichero { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-                  background: rgba(0,0,0,.05); border-radius: 6px; text-decoration: none;
-                  color: inherit; }
-  .msg .fichero b { font-weight: 600; }
-  .msg .cargando { color: var(--muted); font-size: 12px; }
-  /* Ver una foto a tamaño completo sin salir de la pantalla. */
-  .visor { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex;
-           align-items: center; justify-content: center; z-index: 50; cursor: zoom-out; }
-  .visor img, .visor video { max-width: 92vw; max-height: 92vh; border-radius: 6px; }
-  .day {
-    align-self: center; background: var(--panel); color: var(--muted); font-size: 12.5px;
-    padding: 5px 12px; border-radius: 8px; margin: 14px 0 8px; position: sticky; top: 4px;
-    z-index: 2; box-shadow: 0 1px 1px rgba(0,0,0,.1); text-transform: uppercase;
-    letter-spacing: .3px; font-weight: 500;
-  }
-  .composer { background: var(--header); padding: 9px 16px; border-top: 1px solid var(--line);
-    display: flex; gap: 10px; align-items: flex-end; flex: none; }
-  .composer textarea {
-    flex: 1; resize: none; border: 0; border-radius: 22px; padding: 11px 16px;
-    background: var(--panel); color: var(--text); font: inherit; font-size: 14.5px;
-    max-height: 120px; outline: none;
-  }
-  .composer textarea:focus { box-shadow: 0 0 0 1px var(--line); }
-  .composer button { border: 0; border-radius: 50%; width: 44px; height: 44px; background: var(--accent);
-    color: var(--primario-texto); cursor: pointer; font-size: 17px; flex: none; }
-  .composer button.ghost { background: transparent; color: var(--muted); font-size: 19px; }
-  .composer button:disabled { opacity: .45; cursor: default; }
-  .locked { background: var(--header); border-top: 1px solid var(--line); padding: 14px;
-    color: var(--muted); font-size: 13.5px; text-align: center; flex: none; }
-  .locked b { color: var(--text); }
-  .locked .actions { margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-  .locked select, .locked button, .tools button, .tools input {
-    font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer;
-  }
-  .locked button.primary { background: var(--accent); color: var(--primario-texto); border-color: var(--accent); }
-  /* La fila de herramientas ocupa sitio en una pantalla ya justa: se pliega y
-     solo se abre cuando hace falta mandar un pin. */
-  .atajos { background: var(--panel); border-top: 1px solid var(--line); max-height: 260px; overflow: auto; flex: none; box-shadow: 0 -8px 24px rgba(0,0,0,.08); }
-  .atajos .op { display: flex; gap: 12px; align-items: baseline; padding: 9px 16px; cursor: pointer; border-bottom: 1px solid var(--line); font-size: 13.5px; }
-  .atajos .op:last-child { border-bottom: 0; }
-  .atajos .op.sel, .atajos .op:hover { background: var(--header); }
-  .atajos .op b { font-family: ui-monospace, Consolas, monospace; color: var(--accent); flex: none; min-width: 90px; }
-  .atajos .op span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .atajos .pie { padding: 6px 16px; font-size: 12px; color: var(--muted); }
-  .stickers-popup { background: var(--panel); border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 10px; flex-wrap: wrap; max-height: 220px; overflow: auto; flex: none; box-shadow: 0 -8px 24px rgba(0,0,0,.08); }
-  .stickers-popup img { width: 84px; height: 84px; object-fit: contain; border-radius: 10px; cursor: pointer; border: 1px solid transparent; background: var(--header); }
-  .stickers-popup img:hover { border-color: var(--accent); }
-  .stickers-popup .pie { width: 100%; font-size: 12px; color: var(--muted); }
-  .msg img.sticker { width: 150px; height: 150px; object-fit: contain; display: block; background: transparent; }
-  /* Los dos botones de guardado llevan su palabra: eran dos iconos 🗄 iguales,
-     uno al lado del otro, y nadie encontraba ni el de guardar ni el listado.
-     Un icono solo se entiende cuando ya sabes que esta ahi. */
-  .icon.etiqueta { width: auto; padding: 0 10px; gap: 6px; font-size: 12px; white-space: nowrap; }
-  .msg.solo-sticker { background: transparent; box-shadow: none; padding: 2px; }
-  /* El sticker y su boton de guardar: el boton solo asoma al pasar por encima,
-     para que no ensucie el hilo cuando nadie lo esta buscando. */
-  .msg .sticker-wrap { position: relative; display: inline-block; }
-  .msg .sticker-wrap .guardar-sticker {
-    position: absolute; right: 4px; bottom: 4px; opacity: 0; transition: opacity .12s;
-    border: 0; border-radius: 999px; padding: 3px 9px; font-size: 11px; cursor: pointer;
-    background: rgba(17, 24, 39, .78); color: #fff;
-  }
-  .msg .sticker-wrap:hover .guardar-sticker,
-  .msg .sticker-wrap .guardar-sticker:focus { opacity: 1; }
-  .msg .sticker-wrap .guardar-sticker[disabled] { opacity: 1; cursor: default; background: rgba(5, 150, 105, .9); }
-  /* Ensenarle al asistente desde el globo: aparece al pasar el raton. */
-  .msg { position: relative; }
-  .msg .ensenar {
-    position: absolute; top: -9px; opacity: 0; transition: opacity .12s;
-    border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer;
-    background: var(--panel); color: var(--muted); box-shadow: 0 2px 6px rgba(0,0,0,.12); white-space: nowrap;
-  }
-  .msg.in .ensenar { right: -6px; }
-  .msg.out .ensenar { left: -6px; }
-  .msg.out .ensenar.corregir { color: var(--ambar); }
-  .msg:hover .ensenar, .msg .ensenar:focus { opacity: 1; }
-  .msg .ensenar:hover { color: var(--accent); border-color: var(--accent); }
-  .msg .de-ia { display: inline-block; font-size: 10.5px; color: var(--muted); margin-right: 4px; }
-  .msg .transcrito { display: inline-block; font-size: 11px; color: var(--muted); margin: 4px 0 0; }
-  .ayuda-teclas { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 60; display: grid; place-items: center; padding: 20px; }
-  .ayuda-teclas .caja { background: var(--panel); color: var(--text); border-radius: 14px; padding: 20px 22px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
-  .ayuda-teclas h3 { margin: 0 0 10px; font-size: 16px; }
-  .ayuda-teclas table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  .ayuda-teclas td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
-  .ayuda-teclas kbd { font: 600 12px ui-monospace, Consolas, monospace; background: var(--header); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
-  .rapidas-barra { display: flex; gap: 8px; padding: 8px 14px 0; background: var(--header); flex: none; overflow-x: auto; scrollbar-width: thin; }
-  .rapidas-barra .chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
-  .rapidas-barra .chip:hover { border-color: var(--accent); color: var(--accent); }
-  .rapidas-barra .chip.accion { background: var(--primario-suave); border-color: var(--primario); color: var(--accent); font-weight: 600; }
-  /* Las respuestas rapidas son botones con forma de pildora, no chips de estado: sin el punto del armazon. */
-  .rapidas-barra .chip::before { display: none; }
-  .rapidas-barra .chip.editar { color: var(--muted); border-style: dashed; }
-  .rapidas-barra.ocupada .chip { opacity: .5; pointer-events: none; }
-  .tools { display: flex; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; background: var(--header); flex: none; }
-  /* La previa de lo que se va a mandar: pegado, arrastrado o elegido. */
-  .previa { display: flex; gap: 12px; align-items: center; padding: 10px 14px; background: var(--header);
-            border-top: 1px solid var(--line); flex: none; }
-  .previa img, .previa video { max-height: 110px; max-width: 180px; border-radius: 6px; background: var(--superficie); }
-  .previa .icono { width: 64px; height: 64px; border-radius: 8px; background: var(--superficie); display: grid; place-items: center; font-size: 28px; }
-  .previa .datos { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-  .previa .nombre { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .previa input { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
-  .previa .acciones { display: flex; gap: 6px; }
-  .previa .acciones button { padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--superficie); cursor: pointer; }
-  .previa .acciones button.primary { background: var(--accent); color: var(--primario-texto); border-color: var(--accent); }
-  .thread.arrastrando::after { content: 'Suelta aquí para mandarlo'; position: absolute; inset: 0; display: grid; place-items: center;
-    background: var(--primario-suave); border: 3px dashed var(--accent); font-weight: 600; color: var(--accent); z-index: 5; pointer-events: none; }
-  .thread { position: relative; }
-  .tools.plegado { display: none; }
-  .tools input { cursor: text; flex: 1; min-width: 180px; }
-  .empty { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 40px; font-size: 15px; line-height: 1.6; }
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
-  .pill.ok { background: var(--verde-suave); color: var(--verde); }
-  .pill.bad { background: var(--rojo-suave); color: var(--rojo); }
-  .pill.warn { background: var(--ambar-suave); color: var(--ambar); }
-  .link { color: var(--accent); text-decoration: none; font-size: 13px; }
-  .icon { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; padding: 4px 6px; min-width: 36px; min-height: 36px; border-radius: var(--radio-sm); display: inline-flex; align-items: center; justify-content: center; }
-  .icon:hover { color: var(--accent); background: var(--superficie); }
-  .hidden { display: none !important; }
-
-  /* Respaldos: la misma columna de la izquierda, otro contenido. */
-  .rb { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
-  .rb:hover { background: var(--header); }
-  .rb .top { display: flex; align-items: baseline; gap: 8px; }
-  .rb .name { font-weight: 600; font-size: 14.5px; flex: 1; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; }
-  .rb .when { font-size: 11.5px; color: var(--muted); flex: none; }
-  .rb .det { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  .resumen { padding: 9px 14px; font-size: 12.5px; color: var(--muted);
-    background: var(--header); border-bottom: 1px solid var(--line); }
-
-  /* Confirmacion en la propia pantalla: un confirm() del navegador bloquea
-     la pestana entera y deja el chat sin refrescar. */
-  .confirmar { background: var(--header); border-top: 1px solid var(--line); padding: 14px 16px; }
-  .confirmar p { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
-  .confirmar b { color: var(--text); }
-  .confirmar .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .confirmar button, .lectura button {
-    font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer;
-  }
-  .confirmar button.primary, .lectura button.primary {
-    background: var(--accent); color: var(--primario-texto); border-color: var(--accent);
-  }
-  .confirmar button.peligro { background: var(--rojo); color: #fff; border-color: var(--rojo); }
-  /* Barra del respaldo abierto: se lee, no se escribe. */
-  .lectura { background: var(--header); border-top: 1px solid var(--line);
-    padding: 10px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .lectura .que { flex: 1; min-width: 160px; font-size: 12.5px; color: var(--muted); }
-  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; z-index: 50;
-    background: var(--texto); color: var(--bg); padding: 10px 18px; border-radius: 10px; font-size: 13.5px;
-    box-shadow: var(--sombra-2); max-width: 80vw; }
-  .thread header .llamar { display: none; text-decoration: none; }
-  .ficha-acciones { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-  .ficha-acciones a { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: var(--radio-sm); text-decoration: none; font-weight: 600; border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); }
-  .ficha-acciones a.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); }
-  @media (max-width: 820px) {
-    .app { grid-template-columns: 1fr; }
-    .thread header .llamar { display: inline-flex; }
-    .side { display: none; }
-    .app.open-thread .side { display: none; }
-    .app:not(.open-thread) .thread { display: none; }
-    .app:not(.open-thread) .side { display: flex; }
-    .messages { padding: 14px 12px; }
-    .msg { max-width: 85%; }
-    .filtros { flex-wrap: wrap; overflow: visible; }
-    .msg .que-paso { opacity: .85; }
-    .thread header { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
-    .thread header::after { content: ''; flex-basis: 100%; height: 0; order: 5; }
-    .thread header .link, .thread header .icon.etiqueta { order: 10; }
-    .thread header .link { padding: 6px 8px; }
-    .thread header .sub { white-space: normal; }
-    .icon, .composer button, .filtros .f { min-height: 44px; }
-    .icon, .composer button { min-width: 44px; }
-  }
-`;
-
 import { appShell } from './shell.js';
 import { TEXTO_VER_UNA_VEZ } from '../handlers/textos.js';
+import { CHAT_CSS } from './chat-css.js';
+import { CHAT_JS_MENU } from './chat-menu.js';
+import { CHAT_JS_COMPOSITOR } from './chat-compositor.js';
 
 export interface ChatOpts {
   configured: boolean;
@@ -375,117 +34,136 @@ export interface ChatOpts {
 
 export function chatPage(opts: ChatOpts): string {
   const { configured, proveedor = 'cloud', demo = false } = opts;
+
   /**
-   * En la demostracion los envios se apuntan como enviados y no salen a
-   * ninguna parte. Sin decirlo, es imposible distinguirla de un sistema que
-   * no entrega los mensajes.
+   * Un solo aviso arriba, y el que mas importa.
+   *
+   * Antes podian salir tres a la vez (demostracion, WhatsApp desconectado y
+   * "todavia no conectaste") diciendo casi lo mismo con distintas palabras.
+   * En demostracion, el de conexion sobra: ya se ha dicho que nada sale.
    */
   const bandaDemo = demo
-    ? `<div class="demo">Modo demostración: los mensajes NO salen a WhatsApp.
-         Para hablar de verdad, arranca el sistema y conecta tu cuenta en <a href="/setup">Conexión</a>.</div>`
-    : '';
+    ? `<div class="aviso demo">Modo demostración: los mensajes NO salen a WhatsApp.
+         Para hablar de verdad, conecta tu cuenta en <a href="/setup">Conexión</a>.</div>`
+    : configured
+      ? ''
+      : `<div class="aviso roto">Todavía no conectaste tu WhatsApp: aquí ves las conversaciones, pero no sale ningún mensaje.
+           <a href="/setup">Conectar mi WhatsApp</a></div>`;
 
   /**
-   * Solo con WAHA se puede traer el historial: es el unico proveedor que lo
-   * guarda y lo deja pedir. Con la Cloud API de Meta no existe esa consulta,
-   * asi que el boton no se pinta en vez de fallar al pulsarlo.
+   * Traer el historial solo tiene sentido donde hay de donde traerlo: WAHA lo
+   * guarda y lo deja pedir, y con el QR lo tiene el telefono. Con la Cloud API
+   * de Meta no existe esa consulta, asi que la opcion no se pinta.
    */
-  const importar =
+  const opcionHistorial =
     proveedor === 'waha'
-      ? '<button class="icon" id="importar" title="Traer las conversaciones que ya tiene este WhatsApp" aria-label="Traer las conversaciones que ya tiene este WhatsApp">⭳</button>'
+      ? `{ icono: '⭳', texto: 'Traer las conversaciones de este WhatsApp', accion: importarDeWaha }`
       : proveedor === 'local'
-        ? '<button class="icon etiqueta" id="historial-todos" title="Le pide al teléfono los mensajes anteriores de todos los chats (50 por chat)">⤒ Traer historial</button>'
+        ? `{ icono: '⤒', texto: 'Traer el historial de todos los chats', accion: traerTodoElHistorial }`
         : '';
-
-  const aviso = configured
-    ? ''
-    : `<div class="locked" style="border-top:0;border-bottom:1px solid var(--line)">
-         Todavia no conectaste tu WhatsApp: aqui veras las conversaciones, pero no saldra ningun mensaje.
-         <div class="actions"><a class="link" href="/setup">Conectar mi WhatsApp</a></div>
-       </div>`;
 
   const contenido = `
 ${bandaDemo}
-<div class="aviso-conexion hidden" id="aviso-conexion"></div>
+<div class="aviso roto hidden" id="aviso-conexion"></div>
 <div class="app" id="app">
   <div class="side">
     <header>
       <h1>Chats</h1>
-      <span id="unread" class="badge hidden"></span>
-      <button class="icon" id="new" title="Escribir a un número nuevo" aria-label="Escribir a un número nuevo">✚</button>
-      ${importar}
-      <button class="icon etiqueta" id="ver-respaldos" title="Los chats que ya guardaste">📁 Guardados</button>
-      <button class="icon" id="atajos-ayuda" title="Atajos de teclado" aria-label="Atajos de teclado">⌨</button>
+      <span id="unread" class="badge hidden" aria-label="mensajes sin leer"></span>
+      <button class="icon" id="nuevo" title="Escribir a un número nuevo" aria-label="Escribir a un número nuevo">✚</button>
+      <button class="icon" id="menu-lista" title="Más opciones" aria-label="Más opciones" aria-haspopup="menu" aria-expanded="false">⋮</button>
     </header>
-    ${aviso}
     <div class="search"><input id="q" placeholder="Buscar por nombre o número" autocomplete="off" aria-label="Buscar un chat por nombre o número"></div>
-    <div class="filtros" id="filtros">
+    <div class="filtros" id="filtros" role="tablist" aria-label="Filtrar conversaciones">
       <button class="f activo" type="button" data-filtro="todos">Todos</button>
       <button class="f" type="button" data-filtro="sin_leer">Sin leer</button>
       <button class="f" type="button" data-filtro="esperan">Esperan respuesta</button>
       <button class="f" type="button" data-filtro="ventana">Escribieron hoy</button>
       <button class="f" type="button" data-filtro="grupos">Grupos</button>
+      <button class="f" type="button" data-filtro="apartados">Apartados</button>
     </div>
     <div class="chats" id="chats"></div>
-    <div class="resumen hidden" id="rb-resumen"></div>
-    <div class="chats hidden" id="respaldos"></div>
   </div>
 
   <div class="thread">
     <header id="thread-head" class="hidden">
-      <button class="icon" id="back" title="Volver" aria-label="Volver a la lista">‹</button>
-      <div class="avatar" id="t-avatar"></div>
+      <button class="icon" id="back" title="Volver a la lista" aria-label="Volver a la lista">‹</button>
+      <div class="avatar" id="t-avatar" aria-hidden="true"></div>
       <div style="flex:1;min-width:0">
         <div class="name" id="t-name"></div>
         <div class="sub" id="t-sub"></div>
       </div>
-      <a class="icon llamar hidden" id="t-llamar" href="#" aria-label="Llamar al cliente" title="Llamar al cliente (abre el marcador del teléfono)">📞</a>
-      <button class="link" id="t-panel" type="button" title="Quién es, su pedido de hoy, su última ubicación y sus conversaciones guardadas">Ficha</button>
-      <button class="icon etiqueta" id="pausar-bot" title="Callar las respuestas automáticas en este chat y atenderlo tú"></button>
-      <button class="icon etiqueta" id="cerrar-chat" title="Guarda todo el historial de este chat en Conversaciones guardadas y deja el hilo vacío">🗄 Guardar y vaciar</button>
+      <button class="icon" id="abrir-busqueda" title="Buscar en esta conversación" aria-label="Buscar en esta conversación">🔍</button>
+      <button class="icon" id="menu-chat" title="Más opciones" aria-label="Más opciones de esta conversación" aria-haspopup="menu" aria-expanded="false">⋮</button>
     </header>
+
+    <div class="buscar-hilo hidden" id="buscar-hilo" role="search">
+      <input id="buscar-campo" placeholder="Buscar en esta conversación" autocomplete="off" aria-label="Buscar en esta conversación">
+      <span class="cuenta" id="buscar-cuenta" aria-live="polite"></span>
+      <button type="button" id="buscar-antes" title="Coincidencia anterior" aria-label="Coincidencia anterior">↑</button>
+      <button type="button" id="buscar-despues" title="Coincidencia siguiente" aria-label="Coincidencia siguiente">↓</button>
+      <button type="button" id="buscar-cerrar" title="Cerrar la búsqueda" aria-label="Cerrar la búsqueda">✕</button>
+    </div>
+
+    <div class="seleccion hidden" id="seleccion">
+      <span class="cuantos"></span>
+      <button type="button" id="sel-reenviar" title="Reenviar los seleccionados">↪ Reenviar</button>
+      <button type="button" id="sel-copiar" title="Copiar el texto de los seleccionados">⧉ Copiar</button>
+      <button type="button" id="sel-destacar" title="Destacar los seleccionados">⭐ Destacar</button>
+      <button type="button" id="sel-eliminar" title="Eliminar los seleccionados">🗑 Eliminar</button>
+      <button type="button" id="sel-cerrar" title="Salir de la selección (Esc)" aria-label="Salir de la selección">✕</button>
+    </div>
+
     <aside class="ficha hidden" id="ficha" aria-label="Ficha del cliente">
       <div class="ficha-cab"><b>Ficha del cliente</b><button type="button" class="icon" id="ficha-cerrar" aria-label="Cerrar la ficha">✕</button></div>
       <div class="ficha-cuerpo" id="ficha-cuerpo"><p class="muted">Cargando…</p></div>
     </aside>
+
     <div class="empty" id="placeholder">
       <div>
-        <div style="font-size:44px">💬</div>
-        <p>Elige una conversacion para empezar.<br>
-        Los mensajes que te escriban apareceran aqui solos.</p>
+        <div style="font-size:44px" aria-hidden="true">💬</div>
+        <p>Elige una conversación para empezar.<br>
+        Los mensajes que te escriban aparecen aquí solos.</p>
       </div>
     </div>
-    <div class="historial hidden" id="historial-bar"><button type="button" id="traer-historial" title="Le pide al teléfono los 50 mensajes anteriores de este chat">⤒ Traer mensajes anteriores del teléfono</button> <button type="button" id="sincronizar-chat" title="Le pide al teléfono lo último de este chat: lo que WhatsApp no entregó aquí (por ejemplo un “ver una vez”) aparece si el teléfono lo manda">⟳ Traer lo que falta del teléfono</button></div>
-    <div class="messages hidden" id="messages"></div>
-    <div class="tools hidden plegado" id="tools">
-      <button id="elegir-archivo" title="Foto, video, audio o documento (también puedes pegarlo con Ctrl+V o arrastrarlo aquí)">📷 Foto o archivo</button>
-      <input id="loc" placeholder="Pega un link de mapa o coordenadas para mandar el pin">
-      <button id="send-loc">Mandar pin</button>
-      <button id="ask-loc">Pedir su ubicacion</button>
-    </div>
+
+    <div class="messages hidden" id="messages" tabindex="-1"></div>
+    <button class="bajar hidden" id="bajar" title="Bajar al último mensaje" aria-label="Bajar al último mensaje">↓<span class="nuevos hidden" id="bajar-nuevos"></span></button>
+
     <input type="file" id="archivo" class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip">
-    <div class="previa hidden" id="adjunto-previa"></div>
-    <div class="atajos hidden" id="atajos-popup"></div>
-    <div class="stickers-popup hidden" id="stickers-popup"></div>
-    <div class="rapidas-barra hidden" id="rapidas-barra"></div>
-    <div class="composer hidden" id="composer">
-      <button class="ghost" id="mas" title="Foto, archivo o ubicación" aria-label="Foto, archivo o ubicación">📎</button>
-      <button class="ghost" id="rapidas" title="Respuestas rápidas (escribe / en el mensaje)" aria-label="Respuestas rápidas">⚡</button>
-      <button class="ghost" id="stickers-boton" title="Mandar un sticker" aria-label="Mandar un sticker">🙂</button>
-      <textarea id="text" rows="1" placeholder="Escribe un mensaje (/ para respuestas rápidas · Ctrl+V pega una foto)"></textarea>
-      <button id="send" title="Enviar" aria-label="Enviar">➤</button>
+
+    <div class="cita-previa hidden" id="cita-previa">
+      <div class="bloque"><span class="quien"></span><span class="que"></span></div>
+      <button type="button" class="icon" id="cita-quitar" title="No responder a ese mensaje" aria-label="Quitar la cita">✕</button>
     </div>
+    <div class="previa hidden" id="adjunto-previa"></div>
+    <div class="panel-bajo hidden" id="panel-atajos"></div>
+    <div class="panel-bajo hidden" id="panel-stickers"></div>
+    <div class="panel-bajo emojis hidden" id="panel-emojis">
+      <input class="buscador" id="emojis-buscar" placeholder="Buscar: caras, gestos, corazones, trabajo, comida" aria-label="Buscar emoji">
+      <div id="emojis-rejillas"></div>
+    </div>
+    <div class="rapidas-barra hidden" id="rapidas-barra"></div>
+
+    <div class="grabando hidden" id="grabando"></div>
+    <div class="composer hidden" id="composer">
+      <button class="ghost" id="boton-mas" title="Adjuntar, sticker, ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
+      <button class="ghost" id="boton-emoji" title="Emoji" aria-label="Elegir un emoji" aria-expanded="false">😊</button>
+      <textarea id="text" rows="1" placeholder="Escribe un mensaje  ·  / para respuestas rápidas" aria-label="Escribe un mensaje"></textarea>
+      <button id="grabar" title="Grabar una nota de voz" aria-label="Grabar una nota de voz">🎤</button>
+      <button id="send" class="hidden" title="Enviar" aria-label="Enviar">➤</button>
+    </div>
+
     <div class="confirmar hidden" id="confirmar-cierre"></div>
-    <div class="lectura hidden" id="lectura"></div>
     <div class="locked hidden" id="locked"></div>
   </div>
 </div>`;
 
-  const script = `var TEXTO_VER_UNA_VEZ = ${JSON.stringify(TEXTO_VER_UNA_VEZ)}; var PROVEEDOR = ${JSON.stringify(proveedor)};\n` + String.raw`
+  const nucleo = String.raw`
 /* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
 async function api(path, options) {
   options = options || {};
-    var res = await fetch(path, {
+  var res = await fetch(path, {
     method: options.method || 'GET',
     cache: 'no-store',
     credentials: 'same-origin',
@@ -508,9 +186,13 @@ function withLinks(text) {
     return '<a href="' + u + '" target="_blank" rel="noreferrer">' + u + '</a>';
   });
 }
+/** El primer enlace de un texto, para la previa. */
+function primerEnlace(texto) {
+  var m = String(texto || '').match(/https?:\/\/[^\s<]+/);
+  return m ? m[0] : null;
+}
 function hhmm(iso) {
-  var d = new Date(iso);
-  return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 }
 function dayLabel(iso) {
   var d = new Date(iso), hoy = new Date();
@@ -527,6 +209,11 @@ function shortWhen(iso) {
   if (d.toDateString() === ayer.toDateString()) return 'ayer';
   return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
+function fechaCorta(v) {
+  if (!v) return '';
+  var d = new Date(v);
+  return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
 function inicial(nombre, tel) {
   var s = (nombre || '').trim();
   if (s) return s[0].toUpperCase();
@@ -534,52 +221,25 @@ function inicial(nombre, tel) {
 }
 /* Un grupo sin nombre todavia se ensena como "Grupo", no como su jid. */
 function nombreDe(c) {
+  if (!c) return '';
   if (c.name) return c.name;
   if (c.tipo === 'grupo') return 'Grupo de WhatsApp';
-  return c.phone;
+  return c.phone || '';
 }
 function tick(status) {
-  if (status === 'read') return '<span class="tick read">✓✓</span>';
-  if (status === 'delivered') return '<span class="tick">✓✓</span>';
-  if (status === 'sent') return '<span class="tick">✓</span>';
+  if (status === 'read') return '<span class="tick read" title="leído">✓✓</span>';
+  if (status === 'delivered') return '<span class="tick" title="entregado">✓✓</span>';
+  if (status === 'sent') return '<span class="tick" title="enviado">✓</span>';
   if (status === 'failed') return '<span class="tick" title="no se pudo entregar">⚠</span>';
   return '';
 }
-/* Mostrar y ocultar sin reventar si el nodo ya no existe: el hilo se
-   repinta entero y un getElementById de algo borrado devuelve null. */
-/**
- * El interruptor del bot en este chat.
- *
- * Dice en que estado ESTA, no lo que hace el boton: un rotulo que dice
- * "pausado" cuando el bot esta contestando es la forma mas rapida de que
- * alguien deje una conversacion sola creyendo que la atiende el sistema.
- */
-function pintarBoton(pausado) {
-  var b = document.getElementById('pausar-bot');
-  if (!b) return;
-  b.dataset.pausado = pausado ? "1" : "";
-  b.textContent = pausado ? '🤖 Bot pausado' : '🤖 Bot activo';
-  b.title = pausado
-    ? 'Las respuestas automáticas están calladas en este chat. Pulsa para que el bot vuelva a contestar.'
-    : 'El bot contesta solo en este chat. Pulsa para callarlo y atenderlo tú.';
+function pesoLegible(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
-
-async function alternarBot() {
-  if (!current) return;
-  var b = document.getElementById('pausar-bot');
-  var pausar = !b.dataset.pausado;
-  b.disabled = true;
-  try {
-    await api('/admin/chat/' + current.id + '/bot', { method: 'POST', body: { pausado: pausar } });
-    current.botPausadoAt = pausar ? new Date().toISOString() : null;
-    pintarBoton(pausar);
-  } catch (e) {
-    toast('No se pudo cambiar: ' + (e.message || e));
-  } finally {
-    b.disabled = false;
-  }
-}
-
+/* Mostrar y ocultar sin reventar si el nodo ya no existe: el hilo se repinta
+   entero y un getElementById de algo borrado devuelve null. */
 function ver(id, visible) {
   var el = document.getElementById(id);
   if (el) el.classList.toggle('hidden', !visible);
@@ -587,26 +247,51 @@ function ver(id, visible) {
 function toast(text) {
   var el = document.createElement('div');
   el.className = 'toast';
+  el.setAttribute('role', 'status');
   el.textContent = text;
   document.body.appendChild(el);
   setTimeout(function () { el.remove(); }, 4200);
 }
+/**
+ * El color del avatar, derivado del telefono.
+ *
+ * Que sea derivado y no aleatorio importa: el mismo contacto sale del mismo
+ * color en cada recarga, o la lista deja de reconocerse de un vistazo.
+ */
+function colorDe(phone) {
+  var suma = 0;
+  for (var i = 0; i < (phone || '').length; i++) suma += phone.charCodeAt(i);
+  return 'c' + (suma % 8);
+}
+
+/* ------------------------------------------------------------------ estado */
 
 var ESTADO_REPARTO = { pendiente: 'por pedir ubicación', enviado: 'esperando su ubicación', respondio: 'contestó, sin ubicación aún', resuelto: 'ubicación recibida', supervision: 'necesita revisión', derivado: 'derivado al repartidor', incidencia: 'con incidencia', cancelado: 'cancelado' };
-var current = null;      /* contacto abierto */
-/* Cual quiere ver el usuario, y en que numero de peticion vamos.
-   El refresco automatico corre cada pocos segundos: sin estos dos guardas,
-   una respuesta suya pedida ANTES del ultimo envio llegaba despues y volvia
-   a pintar el hilo sin el mensaje que acababas de mandar. */
+var current = null;      /* el contacto abierto */
+/* Cual quiere ver el usuario, y en que numero de peticion vamos. El refresco
+   corre cada pocos segundos: sin estos dos guardas, una respuesta pedida ANTES
+   del ultimo envio llegaba despues y repintaba el hilo sin lo que acababas de
+   mandar. */
 var deseado = null;
-var peticion = 0;      /* numero de la ultima peticion lanzada */
-var pintado = 0;       /* numero de la ultima que llego a pintarse */
+var peticion = 0;
+var pintado = 0;
 var conversations = [];
 var templates = [];
 var lastCount = 0;
-/* El hilo abierto: lo que llego del servidor mas las paginas anteriores que
-   se fueron cargando al subir. El refresco de cada 5 s trae solo lo ultimo y
-   se funde aqui, para no perder lo antiguo ya cargado. */
+var pintados = [];       /* lo que hay pintado en el hilo ahora mismo */
+var puedeEscribir = false;
+/* Lo que este proveedor sabe hacer. Lo dice el servidor al abrir el hilo; hasta
+   entonces, lo minimo que todos pueden. Nada se pinta "por si acaso". */
+var PUEDE = { citar: false, reaccionar: false, eliminarParaTodos: false, editar: false, presencia: false };
+var filtroLista = 'todos';
+var enviando = 0;
+var input = document.getElementById('text');
+var nuevosSinVer = 0;
+/* El id del ultimo mensaje pintado: con el se sabe que es NUEVO de verdad. */
+var ultimoPintadoId = 0;
+
+/* El hilo abierto: lo del servidor mas las paginas anteriores ya cargadas.
+   El refresco trae solo lo ultimo y se funde aqui, para no perder lo viejo. */
 var hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false };
 
 function fundirHilo(contactId, nuevos, masAntiguos) {
@@ -622,41 +307,11 @@ function fundirHilo(contactId, nuevos, masAntiguos) {
   return hilo.mensajes;
 }
 
-/* Trae la pagina anterior a lo mas viejo que hay en pantalla, sin mover la vista. */
-async function cargarMasAntiguos() {
-  if (!current || modo !== 'chat' || hilo.cargando || !hilo.masAntiguos || hilo.contactId !== current.id) return;
-  var primero = hilo.mensajes[0];
-  if (!primero) return;
-  hilo.cargando = true;
-  var box = document.getElementById('messages');
-  var altoAntes = box.scrollHeight, topAntes = box.scrollTop;
-  var boton = box.querySelector('.mas-antiguos button');
-  if (boton) { boton.disabled = true; boton.textContent = 'Cargando...'; }
-  try {
-    var data = await api('/admin/chat/' + current.id + '?limit=80&before=' + primero.id);
-    if (!current || hilo.contactId !== current.id) return;
-    var mensajes = fundirHilo(current.id, data.messages, data.hasMore);
-    renderMessages(mensajes, false, true);
-    box.scrollTop = box.scrollHeight - altoAntes + topAntes;
-  } catch (error) { toast(error.message); }
-  finally { hilo.cargando = false; }
-}
-document.getElementById('messages').addEventListener('scroll', function () {
-  if (this.scrollTop < 80) cargarMasAntiguos();
-});
-document.getElementById('messages').addEventListener('click', function (e) {
-  if (e.target.closest('[data-mas-antiguos]')) cargarMasAntiguos();
-});
-/* 'chat' = conversacion viva; 'respaldo' = hilo guardado, solo lectura.
-   El refresco automatico mira esto: repintar el chat vivo encima de un
-   respaldo abierto lo cerraria solo cada cinco segundos. */
-var modo = 'chat';
-var enRespaldos = false;
+/* ------------------------------------------------------- lista de chats */
 
-/* Filtros de la lista: todo, sin leer, con el cliente esperando respuesta,
-   o que escribieron en las ultimas 24 h (se les puede escribir libre). */
-var filtroLista = 'todos';
 function pasaFiltro(c) {
+  if (filtroLista === 'apartados') return Boolean(c.apartadoAt);
+  if (c.apartadoAt) return false;
   if (filtroLista === 'grupos') return c.tipo === 'grupo';
   if (filtroLista === 'sin_leer') return c.unread > 0;
   if (filtroLista === 'esperan') return c.lastMessage && c.lastMessage.direction === 'in';
@@ -670,9 +325,10 @@ document.querySelectorAll('#filtros .f').forEach(function (b) {
     loadChats();
   };
 });
+
 async function loadChats(keepScroll) {
   try {
-    var data = await api('/admin/chat/conversations?limit=100&q=' + encodeURIComponent(document.getElementById('q').value.trim()));
+    var data = await api('/admin/chat/conversations?limit=100&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim()));
     conversations = data.items;
     var badge = document.getElementById('unread');
     if (data.unread) { badge.textContent = data.unread; badge.classList.remove('hidden'); }
@@ -680,43 +336,87 @@ async function loadChats(keepScroll) {
 
     var box = document.getElementById('chats');
     var top = box.scrollTop;
+    var visibles = conversations.filter(pasaFiltro);
     if (!conversations.length) {
-      pintarLista(box, '<div class="empty">Todavia no hay conversaciones.<br>En cuanto alguien te escriba, aparece aqui.</div>', top);
+      pintarLista(box, '<div class="empty">Todavía no hay conversaciones.<br>En cuanto alguien te escriba, aparece aquí.</div>', top);
       return;
     }
-    var visibles = conversations.filter(pasaFiltro);
     if (!visibles.length) {
       pintarLista(box, '<div class="empty">Ninguna conversación con ese filtro.</div>', top);
       return;
     }
-    var html = visibles.map(function (c) {
-      var last = c.lastMessage;
-      var prefijo = last && last.direction === 'out' ? tick(last.status) + ' ' : '';
-      var texto = last ? (last.body || '') : 'Sin mensajes todavía';
-      var grupo = c.tipo === 'grupo';
-      return '<div class="chat' + (current && current.id === c.contactId ? ' active' : '') + '" data-id="' + esc(c.contactId) + '">' +
-        (grupo ? '<div class="avatar grupo" title="Grupo de WhatsApp">👥</div>'
-               : '<div class="avatar ' + colorDe(c.phone) + '">' + esc(inicial(c.name, c.phone)) + '</div>') +
-        '<div class="body"><div class="top">' +
-          '<span class="name">' + esc(nombreDe(c)) + '</span>' +
-          '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
-        '</div><div class="last">' + prefijo + esc(texto.slice(0, 70)) +
-          (c.unread ? '<span class="badge">' + c.unread + '</span>' : '') +
-        '</div></div></div>';
-    }).join('');
-
+    var html = visibles.map(filaDeChat).join('');
     pintarLista(box, html, keepScroll ? top : 0);
   } catch (error) { toast(error.message); }
 }
 
-/* Solo se repinta si de verdad cambio algo.
-   Antes se reescribia la lista entera cada 5 segundos, y un clic que caia
-   justo en ese instante se perdia: el nodo pulsado ya no existia. */
+function filaDeChat(c) {
+  var last = c.lastMessage;
+  var prefijo = last && last.direction === 'out' ? tick(last.status) + ' ' : '';
+  var texto = last ? (last.body || '') : 'Sin mensajes todavía';
+  var grupo = c.tipo === 'grupo';
+  var marcas = (c.fijadoAt ? '<span title="fijado arriba">📌</span>' : '') +
+    (c.silenciadoAt ? '<span title="silenciado">🔕</span>' : '') +
+    (c.apartadoAt ? '<span title="apartado de la lista">🗂</span>' : '');
+  return '<div class="chat' + (current && current.id === c.contactId ? ' active' : '') + (c.silenciadoAt ? ' silenciado' : '') + '" data-id="' + esc(c.contactId) + '">' +
+    (grupo ? '<div class="avatar grupo" title="Grupo de WhatsApp">👥</div>'
+           : '<div class="avatar ' + colorDe(c.phone) + '" aria-hidden="true">' + esc(inicial(c.name, c.phone)) + '</div>') +
+    '<div class="body"><div class="top">' +
+      '<span class="name">' + esc(nombreDe(c)) + '</span>' +
+      (marcas ? '<span class="marcas">' + marcas + '</span>' : '') +
+      '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
+    '</div><div class="last">' + prefijo + esc(texto.slice(0, 70)) +
+      (c.unread ? '<span class="badge">' + c.unread + '</span>' : '') +
+    '</div></div>' +
+    '<button class="icon fila-menu" data-menu-fila="' + esc(c.contactId) + '" title="Opciones de esta conversación" aria-label="Opciones de esta conversación">⋮</button>' +
+    '</div>';
+}
+
+/* Solo se repinta si de verdad cambio algo: antes se reescribia la lista
+   entera cada 5 s y un clic que caia justo en ese instante se perdia. */
 function pintarLista(box, html, scrollTop) {
   if (box.innerHTML === html) return;
   box.innerHTML = html;
   box.scrollTop = scrollTop;
 }
+
+/* El clic se escucha en el contenedor: asi sigue funcionando aunque la fila
+   se haya vuelto a pintar entre que la pulsas y la sueltas. */
+document.getElementById('chats').addEventListener('click', function (event) {
+  var menu = event.target.closest('[data-menu-fila]');
+  if (menu) { event.stopPropagation(); return menuDeConversacion(menu, menu.getAttribute('data-menu-fila')); }
+  var fila = event.target.closest('.chat');
+  if (fila) openChat(fila.getAttribute('data-id'));
+});
+document.getElementById('chats').addEventListener('contextmenu', function (event) {
+  var fila = event.target.closest('.chat');
+  if (!fila) return;
+  event.preventDefault();
+  menuDeConversacion(null, fila.getAttribute('data-id'), event.clientX, event.clientY);
+});
+
+/** El menu de una fila: fijar, silenciar, apartar, marcar como no leído. */
+function menuDeConversacion(boton, contactId, x, y) {
+  var c = conversations.filter(function (v) { return v.contactId === contactId; })[0];
+  if (!c) return;
+  var ops = [
+    { icono: '📌', texto: c.fijadoAt ? 'Quitar de arriba' : 'Fijar arriba', accion: function () { ajustarLista(contactId, { fijado: !c.fijadoAt }); } },
+    { icono: c.silenciadoAt ? '🔔' : '🔕', texto: c.silenciadoAt ? 'Volver a avisar' : 'Silenciar', accion: function () { ajustarLista(contactId, { silenciado: !c.silenciadoAt }); } },
+    { icono: '🗂', texto: c.apartadoAt ? 'Devolver a la lista' : 'Apartar de la lista', accion: function () { ajustarLista(contactId, { apartado: !c.apartadoAt }); } },
+    { icono: '●', texto: c.unread ? 'Marcar como leído' : 'Marcar como no leído', accion: function () { ajustarLista(contactId, { noLeido: !c.unread }); } },
+  ];
+  if (boton) menuDeBoton(boton, ops);
+  else abrirMenu(ops, x, y);
+}
+
+async function ajustarLista(contactId, cambios) {
+  try {
+    await api('/admin/chat/' + contactId + '/lista', { method: 'POST', body: cambios });
+    await loadChats(true);
+  } catch (error) { toast(error && error.message ? error.message : 'No se pudo cambiar.'); }
+}
+
+/* ------------------------------------------------------------ abrir un chat */
 
 async function openChat(contactId, silent) {
   if (!contactId) return;
@@ -724,128 +424,164 @@ async function openChat(contactId, silent) {
   var mia = ++peticion;
   try {
     var data = await api('/admin/chat/' + contactId + '?limit=80&read=' + (silent ? 'false' : 'true'));
-    /* Dos guardas, en este orden:
-       - el usuario ya abrio otro chat: esta respuesta es de otro hilo;
-       - ya se pinto algo mas nuevo de ESTE hilo: pintar lo viejo encima
-         borraria el mensaje que se acaba de mandar. */
+    /* Dos guardas, en este orden: el usuario ya abrio otro chat (esta
+       respuesta es de otro hilo), o ya se pinto algo mas nuevo de ESTE. */
     if (deseado && deseado !== contactId) return;
     if (mia < pintado) return;
     pintado = mia;
     var nuevo = !current || current.id !== contactId;
-    // Al abrir un hilo se parte de lo que dice el servidor; en un refresco
-    // se conserva lo que ya se cargo al subir (y si quedaban mas antiguos).
     var otroHilo = hilo.contactId !== contactId;
     var mensajesHilo = fundirHilo(contactId, data.messages, otroHilo ? data.hasMore : undefined);
     current = data.contact;
     current.pedido = data.reparto ? data.reparto.referencia : null;
     current.reparto = data.reparto || null;
-    modo = 'chat';
-    ver('lectura', false);
+    PUEDE = data.puede || PUEDE;
+    puedeEscribir = Boolean(data.canWrite);
+    if (nuevo) { salirDeSeleccion(); quitarCita(); cerrarBusqueda(); cerrarPaneles(); nuevosSinVer = 0; ultimoPintadoId = 0; lastCount = 0; }
     ver('confirmar-cierre', false);
     document.getElementById('app').classList.add('open-thread');
     var sApp = document.getElementById('s-app'); if (sApp) sApp.classList.add('sin-nav-movil');
     ver('thread-head', true);
     ver('placeholder', false);
     ver('messages', true);
+
     var esGrupo = current.tipo === 'grupo';
     var avatar = document.getElementById('t-avatar');
     avatar.textContent = esGrupo ? '👥' : inicial(current.name, current.phone);
     avatar.classList.toggle('grupo', esGrupo);
+    avatar.className = 'avatar ' + (esGrupo ? 'grupo' : colorDe(current.phone));
     document.getElementById('t-name').textContent = nombreDe(current);
-    var llamar = document.getElementById('t-llamar');
-    if (llamar) { var puedeLlamar = !esGrupo && /^\d{8,}$/.test(String(current.phone || '')); llamar.classList.toggle('hidden', !puedeLlamar); llamar.href = puedeLlamar ? 'tel:+' + current.phone : '#'; }
-    if (esGrupo) {
-      document.getElementById('t-sub').innerHTML = '<span class="pill ok">grupo de WhatsApp</span> · ' +
-        'aquí no contesta ningún automatismo: lo que escribas lo mandas tú' +
-        (data.canWrite ? '' : ' · <span class="pill warn">' + esc(data.blockedReason || 'no se puede escribir') + '</span>');
-    } else {
-      document.getElementById('t-sub').innerHTML = esc(current.phone) + ' · ' +
-        (current.optOutAt ? '<span class="pill bad">dado de baja</span>'
-          : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
-          : '<span class="pill warn">fuera de las 24 h</span>') +
-        (data.reparto ? ' · <a class="link" href="/hoy" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
-        '<span id="t-anteriores"></span>';
-      /* Sus conversaciones anteriores, ya guardadas: se ven sin restaurar nada. */
-      var idAnteriores = current.id;
-      api('/admin/archives?contactId=' + encodeURIComponent(current.id) + '&limit=1').then(function (r) {
-        if (!current || current.id !== idAnteriores) return;
-        var el = document.getElementById('t-anteriores');
-        if (el && r.total) el.innerHTML = ' · <a class="link" href="/guardados?tel=' + encodeURIComponent(current.phone) + '" title="Las conversaciones guardadas de este cliente">' + r.total + ' conversaci' + (r.total === 1 ? 'ón' : 'ones') + ' anterior' + (r.total === 1 ? '' : 'es') + '</a>';
-      }).catch(function () {});
-    }
-    /* La ficha y el boton del bot son de un cliente; en un grupo no hay ni
-       ficha ni bot que callar. */
-    ver('t-panel', !esGrupo);
-    ver('pausar-bot', !esGrupo);
-    ver('historial-bar', false);
-
-    pintarBoton(current.botPausadoAt);
+    pintarSubtitulo(data);
 
     renderMessages(mensajesHilo, nuevo);
     renderComposer(data);
-    // Traer lo anterior solo tiene sentido con el QR (el telefono es quien lo
-    // tiene) y con al menos un mensaje que sirva de referencia.
-    ver('historial-bar', PROVEEDOR === 'local');
+    mirarPresencia();
     if (!silent) loadChats(true);
   } catch (error) { toast(error.message); }
 }
 
-var pintados = [];       /* lo que hay pintado en el hilo ahora mismo (para los botones por globo) */
-document.addEventListener('click', function (ev) {
-  var b = ev.target && ev.target.closest ? ev.target.closest('[data-copiar]') : null;
-  if (!b) return;
-  var texto = b.getAttribute('data-copiar') || '';
-  var listo = function () { b.textContent = 'Copiado'; setTimeout(function () { b.textContent = 'Copiar'; }, 1500); };
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(texto).then(listo, function () { window.prompt('Copia las coordenadas:', texto); });
-  else window.prompt('Copia las coordenadas:', texto);
+/** La linea de debajo del nombre: quien es y en que estado esta. Una sola. */
+function pintarSubtitulo(data) {
+  var sub = document.getElementById('t-sub');
+  if (current.tipo === 'grupo') {
+    sub.innerHTML = '<span class="pill ok">grupo</span> aquí no contesta ningún automatismo' +
+      (data.canWrite ? '' : ' · <span class="pill warn">' + esc(data.blockedReason || 'no se puede escribir') + '</span>');
+    return;
+  }
+  sub.innerHTML = '<span id="t-presencia"></span>' + esc(telefonoBonito(current.phone)) + ' · ' +
+    (current.optOutAt ? '<span class="pill bad">dado de baja</span>'
+      : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
+      : '<span class="pill warn">fuera de las 24 h</span>') +
+    (current.botPausadoAt ? ' · <span class="pill warn">bot pausado</span>' : '') +
+    (data.reparto ? ' · <a class="link" href="/hoy" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
+    '<span id="t-anteriores"></span>';
+
+  /* Sus conversaciones anteriores, ya guardadas: se ven sin restaurar nada. */
+  var idAnteriores = current.id;
+  api('/admin/archives?contactId=' + encodeURIComponent(current.id) + '&limit=1').then(function (r) {
+    if (!current || current.id !== idAnteriores) return;
+    var el = document.getElementById('t-anteriores');
+    if (el && r.total) el.innerHTML = ' · <a class="link" href="/guardados?tel=' + encodeURIComponent(current.phone) + '" title="Las conversaciones guardadas de este cliente">' + r.total + ' conversaci' + (r.total === 1 ? 'ón' : 'ones') + ' anterior' + (r.total === 1 ? '' : 'es') + '</a>';
+  }).catch(function (error) { console.log('[chat] no se pudieron contar las conversaciones guardadas:', error && error.message); });
+}
+
+/**
+ * "En línea" y "escribiendo…", solo donde se puede saber de verdad.
+ *
+ * Con la Cloud API de Meta ese dato no existe. En vez de inventarlo, no se
+ * pinta nada: es la unica forma honesta de contarlo.
+ */
+var relojPresencia = null;
+function mirarPresencia() {
+  clearInterval(relojPresencia);
+  if (!PUEDE.presencia || !current || current.tipo === 'grupo') return;
+  var idChat = current.id;
+  var pedir = async function () {
+    if (!current || current.id !== idChat) return clearInterval(relojPresencia);
+    try {
+      var r = await api('/admin/chat/' + idChat + '/presencia');
+      var el = document.getElementById('t-presencia');
+      if (!el || !current || current.id !== idChat) return;
+      var p = r.presencia;
+      el.innerHTML = !p ? ''
+        : p.estado === 'escribiendo' ? '<span class="escribiendo">escribiendo…</span> · '
+        : p.estado === 'grabando' ? '<span class="escribiendo">grabando un audio…</span> · '
+        : p.estado === 'en_linea' ? '<span class="escribiendo">en línea</span> · '
+        : 'últ. vez ' + esc(shortWhen(p.desde)) + ' · ';
+    } catch (error) { /* si no se puede preguntar no se inventa: se deja como esta */ }
+  };
+  pedir();
+  relojPresencia = setInterval(pedir, 6000);
+}
+
+/* ------------------------------------------------------------- el hilo */
+
+/** Trae la pagina anterior a lo mas viejo que hay en pantalla, sin mover la vista. */
+async function cargarMasAntiguos() {
+  if (!current || hilo.cargando || !hilo.masAntiguos || hilo.contactId !== current.id) return;
+  var primero = hilo.mensajes[0];
+  if (!primero) return;
+  hilo.cargando = true;
+  var box = document.getElementById('messages');
+  var altoAntes = box.scrollHeight, topAntes = box.scrollTop;
+  var boton = box.querySelector('.mas-antiguos button');
+  if (boton) { boton.disabled = true; boton.textContent = 'Cargando…'; }
+  try {
+    var data = await api('/admin/chat/' + current.id + '?limit=80&before=' + primero.id);
+    if (!current || hilo.contactId !== current.id) return;
+    var mensajes = fundirHilo(current.id, data.messages, data.hasMore);
+    renderMessages(mensajes, false, true);
+    box.scrollTop = box.scrollHeight - altoAntes + topAntes;
+  } catch (error) { toast(error.message); }
+  finally { hilo.cargando = false; }
+}
+
+document.getElementById('messages').addEventListener('scroll', function () {
+  if (this.scrollTop < 80) cargarMasAntiguos();
+  pintarBotonBajar();
+});
+document.getElementById('messages').addEventListener('click', function (e) {
+  if (e.target.closest('[data-mas-antiguos]')) cargarMasAntiguos();
 });
 
-/* La ficha del cliente: panel lateral con lo que hay que saber antes de contestar. */
-function estadoEntregaEnPalabras(e) {
-  var por = { pendiente: 'Pendiente', esperando_ubicacion: 'Falta su ubicación', esperando_confirmacion: 'Falta que confirme', lista: 'Lista para salir', esperando_motorizado: 'Con un motorizado, sin hora', avisada: 'En camino', entregada: 'Entregada', terminada: 'Terminada', cancelada: 'Cancelada', incidencia: 'Necesita a alguien' };
-  return por[e.estado] || e.estado;
+function estaAbajo() {
+  var box = document.getElementById('messages');
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 120;
 }
-async function abrirFicha() {
-  if (!current) return;
-  var panel = document.getElementById('ficha'); var cuerpo = document.getElementById('ficha-cuerpo');
-  panel.classList.remove('hidden'); cuerpo.innerHTML = '<p class="muted">Cargando…</p>';
-  try {
-    var f = await api('/admin/chat/' + current.id + '/ficha');
-    var c = f.contacto;
-    var html = '<div><h4>Quién es</h4><div class="fila"><b>' + esc(c.name || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(c.phone)) + '</span></div>' +
-      '<div class="muted" style="margin-top:4px">' + (c.optOutAt ? 'Pidió no recibir mensajes (BAJA): solo se le contesta si escribe.' : c.optInAt ? 'Se le puede escribir (dio su consentimiento).' : 'Sin consentimiento todavía: se le contesta cuando escribe; no se le inicia conversación.') + (c.botPausadoAt ? ' Las respuestas automáticas están calladas en este chat.' : '') + (c.lastInboundAt ? ' Último mensaje suyo: ' + hhmm(c.lastInboundAt) + '.' : '') + '</div></div>';
-    if (f.entrega) {
-      var e = f.entrega;
-      html += '<div><h4>Su pedido de hoy</h4><div class="fila"><b>' + esc(e.referencia) + '</b><span class="chip">' + esc(estadoEntregaEnPalabras(e)) + '</span>' + (e.prioridad === 'urgente' ? '<span class="chip tono-rojo">Urgente</span>' : '') + '</div>' +
-        '<div class="muted" style="margin-top:4px">' + esc((e.direccion || '') + (e.distrito ? ', ' + e.distrito : '')) + (e.motorizado ? ' · lo lleva ' + esc(e.motorizado.nombre) : '') + (e.llegaAproxAt ? ' · llega alrededor de las ' + hhmm(e.llegaAproxAt) : '') + (e.entregadaAt ? ' · entregado a las ' + hhmm(e.entregadaAt) : '') + '</div>' +
-        '<div class="fila" style="margin-top:6px"><a class="sm" href="/hoy?buscar=' + encodeURIComponent(e.referencia) + '">Abrir en Hoy</a></div></div>';
-    } else html += '<div><h4>Su pedido de hoy</h4><div class="muted">No tiene ningún pedido en la lista de hoy.</div></div>';
-    if (!(current && current.tipo === 'grupo') && /^\d{8,}$/.test(String(c.phone || ''))) {
-      html += '<div class="ficha-acciones"><a class="principal" href="tel:+' + esc(String(c.phone)) + '">📞 Llamar</a>' + (f.ubicacion ? '<a href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">🗺 Abrir en el mapa</a>' : '') + '</div>';
-    }
-    if (f.ubicacion) {
-      var coords = Number(f.ubicacion.lat).toFixed(6) + ', ' + Number(f.ubicacion.lng).toFixed(6);
-      html += '<div><h4>Su última ubicación</h4><div class="fila"><span class="pin-coords">' + coords + '</span></div><div class="fila" style="margin-top:6px"><a class="sm" href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">Abrir en el mapa</a><button class="sm" type="button" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></div><div class="muted" style="margin-top:4px;font-size:12px">Las coordenadas las ves tú; al cliente solo le llega el enlace.</div></div>';
-    } else html += '<div><h4>Su última ubicación</h4><div class="muted">Todavía no ha mandado ninguna. Con «📍 Pedir ubicación» se le manda el botón.</div></div>';
-    html += '<div><h4>Conversaciones guardadas</h4><div class="fila">' + (f.guardadas ? '<a class="sm" href="/guardados?tel=' + encodeURIComponent(c.phone) + '">Ver las ' + f.guardadas + ' guardada' + (f.guardadas === 1 ? '' : 's') + '</a>' : '<span class="muted">Ninguna todavía.</span>') + '<a class="sm" href="/panel#contactos">Ficha completa</a></div></div>';
-    cuerpo.innerHTML = html;
-  } catch (e) { cuerpo.innerHTML = '<p class="muted">' + esc(e.message) + '</p>'; }
+function pintarBotonBajar() {
+  var abajo = estaAbajo();
+  if (abajo) nuevosSinVer = 0;
+  ver('bajar', !abajo && Boolean(current));
+  var globo = document.getElementById('bajar-nuevos');
+  globo.textContent = nuevosSinVer;
+  globo.classList.toggle('hidden', !nuevosSinVer);
 }
-document.getElementById('t-panel').onclick = abrirFicha;
-document.getElementById('ficha-cerrar').onclick = function () { document.getElementById('ficha').classList.add('hidden'); };
+document.getElementById('bajar').onclick = function () {
+  var box = document.getElementById('messages');
+  box.scrollTop = box.scrollHeight;
+  nuevosSinVer = 0;
+  pintarBotonBajar();
+};
 
+/**
+ * Pinta el hilo.
+ *
+ * mantenerVista es la regla que evita pisar al usuario: si esta leyendo
+ * arriba, un refresco no le tira la vista al final.
+ */
 function renderMessages(messages, scrollToEnd, mantenerVista) {
   pintados = messages;
   var box = document.getElementById('messages');
-  var cerca = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  var cerca = estaAbajo();
   if (!messages.length) {
     var vacio = current && current.tipo === 'grupo'
       ? '<div class="empty">Todavía no hay mensajes de este grupo.<br>Lo que escriban ahí aparecerá aquí, y tú puedes escribir desde abajo.</div>'
-      : '<div class="empty">Sin mensajes con este contacto todavia.<br>Escribele tu, si su ventana esta abierta.</div>';
+      : '<div class="empty">Sin mensajes con este contacto todavía.<br>Escríbele tú, si su ventana está abierta.</div>';
     if (box.innerHTML !== vacio) box.innerHTML = vacio;
     lastCount = 0;
     return;
   }
+
   var html = '', dia = '', diaPrevio = '';
   if (hilo.masAntiguos) {
     html += '<div class="mas-antiguos"><button type="button" data-mas-antiguos="1" title="También se cargan solos al subir">↑ Ver mensajes anteriores</button></div>';
@@ -853,53 +589,311 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
   messages.forEach(function (m, i) {
     var d = dayLabel(m.createdAt);
     if (d !== dia) { dia = d; html += '<div class="day">' + esc(d) + '</div>'; }
-    // El primero de cada bloque lleva pico; los siguientes se pegan a el.
+    /* El primero de cada bloque lleva pico; los siguientes se pegan a el. */
     var primero = i === 0 || messages[i - 1].direction !== m.direction || d !== diaPrevio;
     diaPrevio = d;
     var soloSticker = m.kind === 'sticker' && !(m.body || '').trim();
-    // En un grupo, quien lo dijo: en el primero del bloque o cuando cambia
-    // de persona, que es como lo hace WhatsApp.
+    /* En un grupo, quien lo dijo: en el primero del bloque o al cambiar de
+       persona, que es como lo hace WhatsApp. */
     var autor = m.direction === 'in' && m.payload && m.payload.autor ? m.payload.autor : null;
     var autorPrevio = i > 0 && messages[i - 1].payload && messages[i - 1].payload.autor ? messages[i - 1].payload.autor : null;
     var cambiaAutor = autor && (!autorPrevio || autorPrevio.telefono !== autor.telefono || autorPrevio.nombre !== autor.nombre);
     if (autor && (primero || cambiaAutor)) primero = true;
+    /* Una cita rompe la rafaga: pegada al globo de arriba no se lee. */
+    if (m.payload && m.payload.cita) primero = true;
+
     html += '<div class="msg ' + (m.direction === 'out' ? 'out' : 'in') +
-      (primero ? ' primero' : '') + (soloSticker ? ' solo-sticker' : '') + '">' +
+      (primero ? ' primero' : '') + (soloSticker ? ' solo-sticker' : '') + '" data-id="' + m.id + '">' +
+      (m.payload && m.payload.destacado ? '<span class="estrella" title="destacado" aria-label="destacado">★</span>' : '') +
+      (m.payload && m.payload.reenviado ? '<span class="reenviado">↪ Reenviado</span>' : '') +
       (autor && primero ? autorHtml(autor) : '') +
+      citaHtml(m) +
       adjuntoHtml(m) +
-      (m.payload && m.payload.anuncio ? '<span class="transcrito" title="Escribió desde un anuncio de Facebook/Instagram' + (m.payload.anuncio.url ? ': ' + esc(m.payload.anuncio.url) : '') + '">📣 desde el anuncio' + (m.payload.anuncio.titulo ? ' «' + esc(m.payload.anuncio.titulo) + '»' : '') + '</span><br>' : '') +
+      anuncioHtml(m) +
       (m.payload && m.payload.transcripcion ? '<span class="transcrito" title="Lo que dijo en el audio, transcrito">🎤 dijo:</span> ' : '') +
-      (m.direction === 'out' && m.payload && m.payload.media && m.payload.media.voz ? '<span class="transcrito" title="Salió como nota de voz; esto es lo que dice">🔊 nota de voz:</span> ' : '') +
+      (m.direction === 'out' && m.payload && m.payload.media && m.payload.media.voz ? '<span class="transcrito" title="Salió como nota de voz">🔊 nota de voz:</span> ' : '') +
       ubicacionHtml(m) +
-      withLinks(cuerpoVisible(m)) +
+      resaltar(withLinks(cuerpoVisible(m))) +
+      enlacePreviaHtml(m) +
       verUnaVezHtml(m) +
-      (m.payload && m.payload.borradoPorRemitente ? '<span class="borrado" title="' + esc(hhmm(m.payload.borradoPorRemitente)) + '">🗑 Lo eliminó para todos · aquí se conserva</span>' : '') +
-      '<span class="meta">' + (m.direction === 'out' && current && current.tipo !== 'grupo' ? '<a class="que-paso" data-que-paso="' + i + '" tabindex="0" title="Qué pasó con este mensaje: si salió, si llegó, si lo leyó, o por qué no">¿qué pasó?</a>' : '') + (m.direction === 'out' && m.payload && m.payload.origen === 'ia' ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') + esc(hhmm(m.createdAt)) + ' ' + (m.direction === 'out' ? tick(m.status) : '') + '</span>' +
-      ensenarHtml(m, i, messages) +
+      borradoHtml(m) +
+      '<span class="meta">' +
+        (m.payload && m.payload.editadoAt ? '<span class="editado" title="Se editó después de enviarlo">editado</span>' : '') +
+        (m.direction === 'out' && m.payload && m.payload.origen === 'ia' ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') +
+        esc(hhmm(m.createdAt)) + (m.direction === 'out' ? ' ' + tick(m.status) : '') +
+      '</span>' +
+      reaccionesHtml(m) +
+      '<button type="button" class="abrir-menu" title="Opciones del mensaje" aria-label="Opciones del mensaje" aria-haspopup="menu">⌄</button>' +
       '</div>';
   });
+
   if (box.innerHTML !== html) box.innerHTML = html;
   void cargarMedios(box);
-  if (!mantenerVista && (scrollToEnd || cerca || messages.length !== lastCount)) box.scrollTop = box.scrollHeight;
+  void cargarPrevias(box);
+  if (seleccion && seleccion.length) pintarSeleccion();
+
+  /* Lo nuevo se cuenta por id y no por cuantos hay: cargar mensajes ANTIGUOS
+     tambien aumenta el total, y contarlos como nuevos ponia un globo rojo por
+     algo que llevaba meses ahi. */
+  var ultimo = messages[messages.length - 1].id;
+  var nuevosAbajo = ultimoPintadoId ? messages.filter(function (m) { return m.id > ultimoPintadoId; }).length : 0;
+  ultimoPintadoId = ultimo;
+
+  /* Si el usuario esta leyendo arriba, lo nuevo se anuncia con el boton de
+     bajar en vez de arrastrarle la vista. */
+  if (!mantenerVista && (scrollToEnd || cerca)) box.scrollTop = box.scrollHeight;
+  else if (nuevosAbajo && !mantenerVista) nuevosSinVer += nuevosAbajo;
   lastCount = messages.length;
+  pintarBotonBajar();
+}
+
+function autorHtml(autor) {
+  var nombre = autor.nombre || autor.telefono || 'Alguien del grupo';
+  return '<span class="autor ' + colorDe(autor.telefono || nombre) + '">' + esc(nombre) +
+    (autor.telefono && autor.nombre ? '<span class="tel">' + esc(autor.telefono) + '</span>' : '') + '</span>';
+}
+
+function anuncioHtml(m) {
+  var a = m.payload && m.payload.anuncio;
+  if (!a) return '';
+  return '<span class="transcrito" title="Escribió desde un anuncio de Facebook/Instagram' + (a.url ? ': ' + esc(a.url) : '') + '">📣 desde el anuncio' + (a.titulo ? ' «' + esc(a.titulo) + '»' : '') + '</span><br>';
+}
+
+/** Lo que alguien quito: aqui se conserva, y se dice de quien fue la mano. */
+function borradoHtml(m) {
+  if (!m.payload || !m.payload.borradoPorRemitente) return '';
+  var texto = m.direction === 'out' ? '🗑 Lo eliminaste para todos · aquí se conserva' : '🗑 Lo eliminó para todos · aquí se conserva';
+  return '<span class="borrado" title="' + esc(hhmm(m.payload.borradoPorRemitente)) + '">' + texto + '</span>';
+}
+
+/*
+ * El "ver una vez" que WhatsApp no entrego: el cuerpo ya lo explica; aqui va
+ * el boton para pedirle al cliente que lo mande normal. En un grupo no se
+ * pide: seria escribirle a todos.
+ */
+function verUnaVezHtml(m) {
+  if (m.direction !== 'in' || !m.payload || !m.payload.viewOnce) return '';
+  if (current && current.tipo === 'grupo') return '';
+  return '<span class="solo-telefono"><button type="button" data-pedir-normal="1">Pedirle que la mande normal</button></span>';
+}
+
+/*
+ * El texto del mensaje, sin la etiqueta de relleno.
+ *
+ * Cuando un adjunto llega sin pie, el cuerpo que se guarda es "(foto)" o
+ * "(sticker)": sirve para la lista de conversaciones, donde no hay sitio para
+ * pintar nada. En el hilo sobra -o esta la imagen, o esta el aviso de que no
+ * se pudo bajar- y verlo escrito debajo parece un error.
+ */
+function cuerpoVisible(m) {
+  if (m.kind === 'location' && m.payload && m.payload.location) return '';
+  var cuerpo = (m.body || '').trim();
+  var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
+  return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
 }
 
 /**
+ * El pin que mando el cliente: las coordenadas se ven aqui (para el equipo)
+ * con el enlace al mapa y un boton para copiarlas. Al cliente nunca se le
+ * mandan las coordenadas: solo el enlace.
+ */
+function ubicacionHtml(m) {
+  var loc = m.payload && m.payload.location;
+  if (m.kind !== 'location' || !loc) return '';
+  var lat = Number(loc.latitude), lng = Number(loc.longitude);
+  if (!isFinite(lat) || !isFinite(lng)) return '';
+  var coords = lat.toFixed(6) + ', ' + lng.toFixed(6);
+  var url = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
+  return '<div class="pin-cliente"><span class="pin-titulo">📍 Ubicación' + (loc.name ? ' · ' + esc(loc.name) : '') + '</span>' +
+    '<span class="pin-coords">' + coords + '</span>' +
+    '<span class="pin-acciones"><a href="' + esc(url) + '" target="_blank" rel="noopener">Abrir en el mapa</a>' +
+    '<button type="button" class="pin-copiar" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></span>' +
+    '<span class="pin-nota">Las coordenadas las ves tú; al cliente solo le llega el enlace.</span></div>';
+}
+
+/**
+ * El hueco del adjunto.
+ *
+ * Se pinta vacio y con su id: el fichero se pide despues, porque va detras de
+ * la sesion de administracion y una etiqueta <img> no manda cabeceras.
+ */
+function adjuntoHtml(m) {
+  var media = m.payload && m.payload.media;
+  if (!media || !media.id) return sinFicheroHtml(m.kind);
+
+  var kind = media.kind || m.kind;
+  if (kind === 'sticker' && media.url) return '<img class="adjunto sticker" src="' + esc(media.url) + '" alt="sticker">';
+  var attrs = ' class="adjunto' + (kind === 'sticker' ? ' sticker' : '') + '" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
+
+  /* Lo que en el telefono se abre una sola vez y desaparece, aqui se queda:
+     se dice para que el operador sepa que en el movil ya no lo encontrara. */
+  var unaVez = media.verUnaVez
+    ? '<span class="una-vez" title="El cliente la mandó como “ver una vez”: en el teléfono desaparece al abrirla, aquí queda guardada">👁 Ver una vez · guardada aquí</span>'
+    : '';
+
+  if (kind === 'image') return unaVez + '<img' + attrs + ' alt="foto">';
+  if (kind === 'sticker') return unaVez + '<img' + attrs + ' alt="sticker">';
+  if (kind === 'video') return unaVez + '<video' + attrs + ' controls playsinline></video>';
+  if (kind === 'audio') return unaVez + '<audio' + attrs + ' controls preload="none"></audio>';
+
+  var nombre = media.filename || 'documento';
+  return unaVez + '<a' + attrs + ' class="adjunto fichero" download="' + esc(nombre) + '">' +
+    '<span aria-hidden="true">📄</span><b>' + esc(nombre) + '</b>' +
+    (media.bytes ? '<span class="cargando">' + esc(pesoLegible(media.bytes)) + '</span>' : '') +
+    '</a>';
+}
 
 /*
- * El boton de ensenarle al asistente, en cada globo de texto: en lo que dijo
- * el cliente, "Enseñar respuesta" (con lo que se le contesto ya puesto); en
- * lo que contesto el asistente, "Corregir" (lo que dijo queda como lo que
- * no debe repetir). En un grupo no: ahi no atiende el asistente.
+ * El adjunto que nunca llego a bajarse.
+ *
+ * El mensaje se guarda igual -perderlo entero seria peor-, pero sin fichero el
+ * hilo ensenaba un "(sticker)" suelto que se lee como un fallo de la pantalla.
  */
-function ensenarHtml(m, i, messages) {
-  if (current && current.tipo === 'grupo') return '';
-  // Un audio transcrito cuenta como texto: tambien se le puede ensenar la respuesta.
-  var esTexto = m.kind === 'text' || (m.kind === 'audio' && m.payload && m.payload.transcripcion);
-  if (!esTexto || !(m.body || '').trim()) return '';
-  if (m.direction === 'in') return '<button type="button" class="ensenar" data-ensenar="' + i + '" title="Enséñale al asistente qué responder a esto">Enseñar respuesta</button>';
-  if (m.payload && m.payload.origen === 'ia') return '<button type="button" class="ensenar corregir" data-corregir="' + i + '" title="Dile al asistente qué debió responder">Corregir</button>';
-  return '';
+function sinFicheroHtml(kind) {
+  var nombres = { sticker: 'un sticker', image: 'una foto', video: 'un video', audio: 'un audio', document: 'un documento' };
+  if (!nombres[kind]) return '';
+  return '<div class="cargando">Mandaron ' + nombres[kind] + ' y no se pudo descargar.</div>';
+}
+
+/* Un adjunto ya bajado no cambia nunca -su id sale del wamid-, asi que se
+   guarda la URL y no se vuelve a pedir en cada repintado del hilo. */
+var mediaCache = {};
+
+/**
+ * Rellena los huecos de adjunto que haya en pantalla.
+ *
+ * Se pide con fetch y no con <img src>, porque asi la sesion viaja en la
+ * cookie y no en la URL, que acabaria en el historial y en los logs.
+ */
+async function cargarMedios(box) {
+  var pendientes = box.querySelectorAll('[data-media]:not([data-listo])');
+  for (var i = 0; i < pendientes.length; i++) {
+    var el = pendientes[i];
+    var id = el.getAttribute('data-media');
+    el.setAttribute('data-listo', '1');
+    try {
+      if (!mediaCache[id]) {
+        var res = await fetch('/admin/local/media/' + encodeURIComponent(id), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('no se pudo cargar');
+        mediaCache[id] = URL.createObjectURL(await res.blob());
+      }
+      if (el.tagName === 'A') el.setAttribute('href', mediaCache[id]);
+      else el.setAttribute('src', mediaCache[id]);
+    } catch (error) {
+      el.removeAttribute('data-listo');
+      if (el.tagName !== 'A') {
+        var aviso = document.createElement('div');
+        aviso.className = 'cargando';
+        aviso.textContent = 'No se pudo cargar el adjunto.';
+        el.replaceWith(aviso);
+      }
+    }
+  }
+}
+
+/* ---------------------------------------------------- previa de un enlace */
+
+var previasEnlace = {};
+
+/** El hueco de la previa. Se rellena despues, si el otro sitio contesta. */
+function enlacePreviaHtml(m) {
+  var media = m.payload && m.payload.media;
+  if (media && media.id) return '';
+  var url = primerEnlace(cuerpoVisible(m));
+  if (!url) return '';
+  var p = previasEnlace[url];
+  /* 'no' = ya se intento y no hay nada; 'pidiendo' = se esta trayendo. En los
+     dos casos no se pinta nada: un hueco a medias parece un fallo. */
+  if (p === 'no' || p === 'pidiendo') return '';
+  if (!p) return '<span data-previa="' + esc(url) + '"></span>';
+  return '<a class="enlace-previa" href="' + esc(url) + '" target="_blank" rel="noreferrer">' +
+    (p.imagen ? '<img src="' + esc(p.imagen) + '" alt="" loading="lazy">' : '') +
+    '<span class="txt">' + (p.titulo ? '<span class="t">' + esc(p.titulo) + '</span>' : '') +
+    (p.descripcion ? '<span class="d">' + esc(p.descripcion) + '</span>' : '') +
+    '<span class="s">' + esc(p.sitio) + '</span></span></a>';
+}
+
+/**
+ * Pide las previas que falten.
+ *
+ * Una por enlace y para siempre: si el sitio no contesta se apunta 'no' y no
+ * se vuelve a intentar, para no repetir la misma peticion en cada refresco.
+ */
+async function cargarPrevias(box) {
+  var huecos = box.querySelectorAll('[data-previa]');
+  var urls = {};
+  for (var i = 0; i < huecos.length; i++) urls[huecos[i].getAttribute('data-previa')] = true;
+  var pendientes = Object.keys(urls).filter(function (u) { return !previasEnlace[u]; });
+  if (!pendientes.length) return;
+  for (var k = 0; k < Math.min(pendientes.length, 4); k++) {
+    var url = pendientes[k];
+    previasEnlace[url] = 'pidiendo';
+    try {
+      var p = await api('/admin/chat/previa?url=' + encodeURIComponent(url));
+      previasEnlace[url] = p.titulo || p.descripcion || p.imagen ? p : 'no';
+    } catch (error) {
+      previasEnlace[url] = 'no';
+    }
+  }
+  if (current) renderMessages(hilo.mensajes, false, true);
+}
+
+/* ---------------------------------------------------------- acciones sueltas */
+
+/* Copiar unas coordenadas (o cualquier cosa con data-copiar). */
+document.addEventListener('click', function (ev) {
+  var b = ev.target && ev.target.closest ? ev.target.closest('[data-copiar]') : null;
+  if (!b) return;
+  copiar(b.getAttribute('data-copiar') || '');
+});
+
+/* Pedir que manden la foto de "ver una vez" como foto normal. */
+document.addEventListener('click', function (event) {
+  var pedir = event.target.closest('[data-pedir-normal]');
+  if (!pedir || !current) return;
+  event.preventDefault();
+  if (!enviando) enviar({ text: TEXTO_VER_UNA_VEZ });
+});
+
+/* Clic en una foto o un video: se ve a tamano completo. */
+document.addEventListener('click', function (e) {
+  var el = e.target;
+  if (!el || !el.getAttribute || !el.getAttribute('data-media')) return;
+  if (el.tagName !== 'IMG' && el.tagName !== 'VIDEO') return;
+  if (seleccion && seleccion.length) return;
+  var visor = document.createElement('div');
+  visor.className = 'visor';
+  var copia = el.cloneNode(true);
+  copia.removeAttribute('data-media');
+  if (copia.tagName === 'VIDEO') copia.setAttribute('controls', '');
+  visor.appendChild(copia);
+  visor.onclick = function () { visor.remove(); };
+  document.body.appendChild(visor);
+});
+
+/* "¿Qué pasó con este mensaje?": la traza de punta a punta, en palabras. */
+async function verTraza(m) {
+  if (!current) return;
+  try {
+    var t = await api('/admin/mensajes/' + m.id + '/traza?contacto=' + encodeURIComponent(current.id));
+    mostrarTraza(t);
+  } catch (error) { toast(error && error.message ? error.message : 'No se pudo leer la traza.'); }
+}
+function mostrarTraza(t) {
+  var fondo = document.createElement('div');
+  fondo.className = 'dlg-fondo';
+  var pasos = t.pasos.map(function (p) { return '<li class="' + esc(p.tono) + '"><i></i><span>' + esc(p.que) + (p.cuando ? '<small>' + esc(fechaCorta(p.cuando)) + '</small>' : '') + '</span></li>'; }).join('');
+  var otros = t.otrosIntentos.length ? '<p class="traza-cab" style="margin-top:12px"><b>Cerca de esa hora tampoco salió:</b></p><ul class="traza">' + t.otrosIntentos.map(function (o) { return '<li class="bad"><i></i><span>' + esc(o.que) + ': ' + esc(o.motivo) + '<small>' + esc(fechaCorta(o.cuando)) + '</small></span></li>'; }).join('') + '</ul>' : '';
+  fondo.innerHTML = '<div class="dlg" role="dialog" aria-modal="true" style="width:min(520px,100%)"><h3>Qué pasó con este mensaje</h3>' +
+    '<p class="traza-cab">' + esc(t.quien) + ' ' + esc(t.como) + ' Estado: <b>' + esc(t.estado) + '</b>.</p>' +
+    '<ul class="traza">' + pasos + '</ul>' + otros +
+    '<div class="botones"><button type="button" id="dlg-si" class="principal">Cerrar</button></div></div>';
+  function cerrar() { document.removeEventListener('keydown', teclas); fondo.remove(); }
+  function teclas(ev) { if (ev.key === 'Escape' || ev.key === 'Enter') cerrar(); }
+  fondo.querySelector('#dlg-si').onclick = cerrar;
+  fondo.onclick = function (ev) { if (ev.target === fondo) cerrar(); };
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(fondo);
 }
 
 /* Lo que contesto una persona justo despues de ese mensaje, si lo hubo. */
@@ -920,292 +914,15 @@ function preguntaAnterior(messages, i) {
   return '';
 }
 
-function autorHtml(autor) {
-  var nombre = autor.nombre || autor.telefono || 'Alguien del grupo';
-  return '<span class="autor ' + colorDe(autor.telefono || nombre) + '">' + esc(nombre) +
-    (autor.telefono && autor.nombre ? '<span class="tel">' + esc(autor.telefono) + '</span>' : '') + '</span>';
-}
-
-/*
- * El "ver una vez" que WhatsApp no entrego: el cuerpo ya lo explica; aqui va
- * el boton para pedirle al cliente que lo mande normal, si no se le pidio ya
- * solo (Configuracion). En un grupo no se pide: seria escribirle a todos.
- */
-function verUnaVezHtml(m) {
-  if (m.direction !== 'in' || !m.payload || !m.payload.viewOnce) return '';
-  if (current && current.tipo === 'grupo') return '';
-  return '<span class="solo-telefono"><button type="button" data-pedir-normal="1">Pedirle que la mande normal</button></span>';
-}
-
-/*
- * El texto del mensaje, sin la etiqueta de relleno.
- *
- * Cuando un adjunto llega sin pie de foto, el cuerpo que se guarda es
- * "(foto)" o "(sticker)": sirve para la lista de conversaciones, donde no hay
- * sitio para pintar nada. En el hilo sobra —o esta la imagen, o esta el aviso
- * de que no se pudo bajar— y verlo escrito debajo del sticker parece un error.
- */
-function cuerpoVisible(m) {
-  if (m.kind === 'location' && m.payload && m.payload.location) return '';
-  var cuerpo = (m.body || '').trim();
-  var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
-  return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
-}
 /**
- * El pin que mando el cliente: las coordenadas se ven aqui (para el equipo)
- * con el enlace al mapa y un boton para copiarlas. Al cliente nunca se le
- * mandan las coordenadas: solo el enlace.
+ * Ensenarle al asistente desde el globo: en lo que dijo el cliente, la
+ * respuesta que debio dar; en lo que contesto el asistente, la correccion.
  */
-function ubicacionHtml(m) {
-  var loc = m.payload && m.payload.location;
-  if (m.kind !== 'location' || !loc) return '';
-  var lat = Number(loc.latitude), lng = Number(loc.longitude);
-  if (!isFinite(lat) || !isFinite(lng)) return '';
-  var coords = lat.toFixed(6) + ', ' + lng.toFixed(6);
-  var url = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
-  return '<div class="pin-cliente"><span class="pin-titulo">📍 Ubicación' + (loc.name ? ' · ' + esc(loc.name) : '') + '</span>' +
-    '<span class="pin-coords">' + coords + '</span>' +
-    '<span class="pin-acciones"><a href="' + esc(url) + '" target="_blank" rel="noopener">Abrir en el mapa</a>' +
-    '<button type="button" class="pin-copiar" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></span>' +
-    '<span class="pin-nota">Las coordenadas las ves tú; al cliente solo le llega el enlace.</span></div>';
-}
-/**
- * El hueco del adjunto.
- *
- * Se pinta vacio y con su id: el fichero se pide despues, porque va detras del
- * token de administracion y una etiqueta <img> no manda cabeceras.
- */
-function adjuntoHtml(m) {
-  var media = m.payload && m.payload.media;
-  if (!media || !media.id) return sinFicheroHtml(m.kind);
-
-  var kind = media.kind || m.kind;
-  if (kind === 'sticker' && media.url) return '<img class="adjunto sticker" src="' + esc(media.url) + '" alt="">';
-  var attrs = ' class="adjunto' + (kind === 'sticker' ? ' sticker' : '') + '" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
-
-  /* Lo que en el telefono se abre una sola vez y desaparece, aqui se queda:
-     se dice para que el operador sepa que en el movil ya no lo va a encontrar. */
-  var unaVez = media.verUnaVez
-    ? '<span class="una-vez" title="El cliente la mandó como “ver una vez”: en el teléfono desaparece al abrirla, aquí queda guardada">👁 Ver una vez · guardada aquí</span>'
-    : '';
-
-  if (kind === 'image') return unaVez + '<img' + attrs + ' alt="">';
-  if (kind === 'sticker') {
-    // El sticker que mando el cliente lleva su boton de guardar: el fichero ya
-    // esta en el servidor, asi que quedarselo es un clic y no una descarga
-    // seguida de una subida a mano.
-    return unaVez + '<span class="sticker-wrap"><img' + attrs + ' alt="">' +
-      (m.direction === 'in'
-        ? '<button class="guardar-sticker" data-guardar-sticker="' + esc(media.id) +
-          '" title="Guardar en mis stickers">Guardar</button>'
-        : '') +
-      '</span>';
-  }
-  if (kind === 'video') return unaVez + '<video' + attrs + ' controls playsinline></video>';
-  if (kind === 'audio') return unaVez + '<audio' + attrs + ' controls preload="none"></audio>';
-
-  var nombre = media.filename || 'documento';
-  return unaVez + '<a' + attrs + ' class="adjunto fichero" download="' + esc(nombre) + '">' +
-    '<span>📄</span><b>' + esc(nombre) + '</b>' +
-    (media.bytes ? '<span class="cargando">' + esc(pesoLegible(media.bytes)) + '</span>' : '') +
-    '</a>';
-}
-
-
-/*
- * El adjunto que nunca llego a bajarse.
- *
- * El mensaje se guarda igual -perderlo entero seria peor-, pero sin fichero
- * el hilo enseñaba un "(sticker)" suelto que se lee como un fallo de la
- * pantalla. Se dice que era un sticker y que no se pudo descargar, que es la
- * verdad y ademas se entiende.
- */
-function sinFicheroHtml(kind) {
-  var nombres = {
-    sticker: 'un sticker',
-    image: 'una foto',
-    video: 'un video',
-    audio: 'un audio',
-    document: 'un documento'
-  };
-  if (!nombres[kind]) return '';
-  return '<div class="cargando">Mandaron ' + nombres[kind] + ' y no se pudo descargar.</div>';
-}
-function pesoLegible(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
-/* Un adjunto ya bajado no cambia nunca -su id sale del wamid-, asi que se
-   guarda la URL y no se vuelve a pedir en cada repintado del hilo. */
-var mediaCache = {};
-
-/**
- * Rellena los huecos de adjunto que haya en pantalla.
- *
- * Se pide con fetch y no con <img src>, porque asi el token viaja en la
- * cabecera y no en la URL, que acabaria en el historial y en los logs.
- */
-async function cargarMedios(box) {
-  var pendientes = box.querySelectorAll('[data-media]:not([data-listo])');
-  for (var i = 0; i < pendientes.length; i++) {
-    var el = pendientes[i];
-    var id = el.getAttribute('data-media');
-    el.setAttribute('data-listo', '1');
-
-    try {
-      if (!mediaCache[id]) {
-        var res = await fetch('/admin/local/media/' + encodeURIComponent(id), {
-          credentials: 'same-origin'
-        });
-        if (!res.ok) throw new Error('no se pudo cargar');
-        mediaCache[id] = URL.createObjectURL(await res.blob());
-      }
-      if (el.tagName === 'A') el.setAttribute('href', mediaCache[id]);
-      else el.setAttribute('src', mediaCache[id]);
-    } catch (error) {
-      el.removeAttribute('data-listo');
-      if (el.tagName !== 'A') el.replaceWith(cargaFallida());
-    }
-  }
-}
-
-function cargaFallida() {
-  var aviso = document.createElement('div');
-  aviso.className = 'cargando';
-  aviso.textContent = 'No se pudo cargar el adjunto.';
-  return aviso;
-}
-
-
-/* Guardar en la biblioteca un sticker que mando el cliente. */
-var historialTodos = document.getElementById('historial-todos');
-var historialTexto = historialTodos ? historialTodos.textContent : '';
-var sondeoHistorial = null;
-function pintarProgresoHistorial(p) {
-  if (!historialTodos) return;
-  if (p.enMarcha) {
-    historialTodos.disabled = true;
-    historialTodos.textContent = '⤒ Trayendo ' + p.hechos + '/' + p.chats + ' · ' + p.mensajes + ' mensajes' + (p.chatActual ? ' · ' + p.chatActual.slice(0, 18) : '');
-    historialTodos.title = p.detalle || '';
-  } else {
-    historialTodos.disabled = false;
-    historialTodos.textContent = historialTexto;
-    historialTodos.title = 'Le pide al teléfono TODO lo anterior de cada chat, hasta que no quede más';
-  }
-}
-async function sondearHistorial() {
-  try {
-    var p = await api('/admin/local/historial-todos');
-    pintarProgresoHistorial(p);
-    if (p.enMarcha) {
-      if (!sondeoHistorial) sondeoHistorial = setInterval(sondearHistorial, 3000);
-    } else if (sondeoHistorial) {
-      clearInterval(sondeoHistorial); sondeoHistorial = null;
-      toast((p.detalle || 'Historial traído.') + (p.sinReferencia
-        ? ' Quedan ' + p.sinReferencia + ' chats sin ningún mensaje aquí: el teléfono solo los manda al vincular. Para traerlos todos: Conexión de WhatsApp → Desconectar la cuenta → Conectar y mostrar el QR → escanear; al terminar, el historial completo se trae solo.'
-        : ''));
-      loadChats(true);
-      if (current && modo === 'chat') openChat(current.id, true);
-    }
-  } catch (error) { /* sin sesion local: nada que sondear */ }
-}
-if (historialTodos) {
-  historialTodos.onclick = async function () {
-    historialTodos.disabled = true;
-    try {
-      var r = await api('/admin/local/historial-todos', { method: 'POST' });
-      toast(r.yaEnMarcha ? 'Ya se está trayendo el historial.' :
-        'Trayendo TODO el historial de ' + r.chats + ' chats: va chat por chat y tarda unos minutos. El botón muestra cuánto va.' +
-        (r.sinReferencia ? ' ' + r.sinReferencia + ' chats sin ningún mensaje aquí se saltan (el teléfono necesita uno de referencia).' : ''));
-      pintarProgresoHistorial(r);
-      sondearHistorial();
-    } catch (error) { toast(error.message); historialTodos.disabled = false; }
-  };
-  // Si ya estaba en marcha (otra pestaña, o se recargo la pagina), se sigue.
-  sondearHistorial();
-}
-document.getElementById('sincronizar-chat').onclick = async function () {
-  if (!current) return;
-  var boton = this;
-  boton.disabled = true;
-  try {
-    var r = await api('/admin/local/sincronizar/' + encodeURIComponent(current.id), { method: 'POST' });
-    toast('Pedido al teléfono lo último de este chat. Lo que faltaba aparece en unos segundos, si el teléfono lo manda.');
-    var id = current.id;
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
-  } catch (error) { toast(error.message); }
-  finally { boton.disabled = false; }
-};
-document.getElementById('traer-historial').onclick = async function () {
-  if (!current) return;
-  var boton = this;
-  boton.disabled = true;
-  try {
-    var r = await api('/admin/local/historial/' + encodeURIComponent(current.id), { method: 'POST' });
-    toast(r.sinReferencia
-      ? 'Pedido al teléfono. Si tiene mensajes de este chat, aparecen en unos segundos; si no aparece nada, escribe algo o espera a que escriban y vuelve a pulsar.'
-      : 'Pedido al teléfono. Los mensajes anteriores a ' + (r.desde ? dayLabel(r.desde) : 'los de aquí') + ' aparecen arriba en unos segundos.');
-    var id = current.id;
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
-  } catch (error) { toast(error.message); }
-  finally { boton.disabled = false; }
-};
-document.addEventListener('click', function (event) {
-  var pedir = event.target.closest('[data-pedir-normal]');
-  if (!pedir || !current) return;
-  event.preventDefault();
-  if (!enviando) enviar({ text: TEXTO_VER_UNA_VEZ });
-});
-/* "¿Qué pasó con este mensaje?": la traza de punta a punta, en palabras. */
-function fechaCorta(v) {
-  if (!v) return '';
-  var d = new Date(v);
-  return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-function mostrarTraza(t) {
-  var fondo = document.createElement('div');
-  fondo.className = 'dlg-fondo';
-  var pasos = t.pasos.map(function (p) { return '<li class="' + esc(p.tono) + '"><i></i><span>' + esc(p.que) + (p.cuando ? '<small>' + esc(fechaCorta(p.cuando)) + '</small>' : '') + '</span></li>'; }).join('');
-  var otros = t.otrosIntentos.length ? '<p class="traza-cab" style="margin-top:12px"><b>Cerca de esa hora tampoco salió:</b></p><ul class="traza">' + t.otrosIntentos.map(function (o) { return '<li class="bad"><i></i><span>' + esc(o.que) + ': ' + esc(o.motivo) + '<small>' + esc(fechaCorta(o.cuando)) + '</small></span></li>'; }).join('') + '</ul>' : '';
-  fondo.innerHTML = '<div class="dlg" role="dialog" aria-modal="true" style="width:min(520px,100%)"><h3>Qué pasó con este mensaje</h3>' +
-    '<p class="traza-cab">' + esc(t.quien) + ' ' + esc(t.como) + ' Estado: <b>' + esc(t.estado) + '</b>.</p>' +
-    '<ul class="traza">' + pasos + '</ul>' + otros +
-    '<div class="botones"><button type="button" id="dlg-si" class="principal">Cerrar</button></div></div>';
-  function cerrar() { document.removeEventListener('keydown', teclas); fondo.remove(); }
-  function teclas(ev) { if (ev.key === 'Escape' || ev.key === 'Enter') cerrar(); }
-  fondo.querySelector('#dlg-si').onclick = cerrar;
-  fondo.onclick = function (ev) { if (ev.target === fondo) cerrar(); };
-  document.addEventListener('keydown', teclas);
-  document.body.appendChild(fondo);
-}
-document.addEventListener('click', async function (event) {
-  var a = event.target.closest('[data-que-paso]');
-  if (!a || !current) return;
-  event.preventDefault();
-  var m = pintados[Number(a.getAttribute('data-que-paso'))];
-  if (!m) return;
-  try {
-    var t = await api('/admin/mensajes/' + m.id + '/traza?contacto=' + encodeURIComponent(current.id));
-    mostrarTraza(t);
-  } catch (error) { toast(error && error.message ? error.message : 'No se pudo leer la traza.'); }
-});
-/* Ensenarle al asistente desde el globo (ver ensenarHtml). */
-document.addEventListener('click', async function (event) {
-  var b = event.target.closest('[data-ensenar],[data-corregir]');
-  if (!b || !current) return;
-  event.preventDefault();
-  var mensajes = pintados;
-  var corrigiendo = b.hasAttribute('data-corregir');
-  var i = Number(b.getAttribute(corrigiendo ? 'data-corregir' : 'data-ensenar'));
-  var m = mensajes[i];
-  if (!m) return;
+async function ensenarDesdeMensaje(m, corrigiendo) {
+  var i = pintados.indexOf(m);
   var v = corrigiendo
-    ? await pedirLeccion({ titulo: 'Corregir al asistente', texto: 'Escribe lo que debió responder. Desde ahora, ante una pregunta parecida, contestará así y no repetirá lo de abajo.', pregunta: preguntaAnterior(mensajes, i), respuesta: '', mala: m.body, boton: 'Corregir' })
-    : await pedirLeccion({ titulo: 'Enséñale al asistente', texto: 'Cuando otro cliente pregunte algo parecido, el asistente responderá así.', pregunta: m.body, respuesta: respuestaSiguiente(mensajes, i), boton: 'Enseñar' });
+    ? await pedirLeccion({ titulo: 'Corregir al asistente', texto: 'Escribe lo que debió responder. Desde ahora, ante una pregunta parecida, contestará así y no repetirá lo de abajo.', pregunta: preguntaAnterior(pintados, i), respuesta: '', mala: m.body, boton: 'Corregir' })
+    : await pedirLeccion({ titulo: 'Enséñale al asistente', texto: 'Cuando otro cliente pregunte algo parecido, el asistente responderá así.', pregunta: m.body, respuesta: respuestaSiguiente(pintados, i), boton: 'Enseñar' });
   if (!v) return;
   try {
     var r = await api('/admin/entrenamiento/lecciones', { method: 'POST', body: {
@@ -1213,245 +930,131 @@ document.addEventListener('click', async function (event) {
       origen: corrigiendo ? 'correccion' : 'chat', origenDetalle: (current.name ? current.name + ' (' + current.phone + ')' : current.phone)
     } });
     toast(r.nueva ? (corrigiendo ? 'Corregido: el asistente ya lo sabe.' : 'El asistente ya lo sabe.') : 'Esa lección ya la tenía.');
-  } catch (error) {
-    toast(error && error.message ? error.message : 'No se pudo guardar.');
-  }
-});
-document.addEventListener('click', async function (event) {
-  var boton = event.target && event.target.closest
-    ? event.target.closest('[data-guardar-sticker]')
-    : null;
-  if (!boton) return;
-  event.preventDefault();
-  event.stopPropagation();
+  } catch (error) { toast(error && error.message ? error.message : 'No se pudo guardar.'); }
+}
 
-  var mediaId = boton.getAttribute('data-guardar-sticker');
-  var nombre = prompt('¿Con qué nombre lo guardo?', 'Sticker de ' + (current && current.name ? current.name : 'un cliente'));
-  if (nombre === null) return;
-  nombre = nombre.trim();
-  if (!nombre) return;
+/* ------------------------------------------------------------- la ficha */
 
-  boton.disabled = true;
-  var antes = boton.textContent;
-  boton.textContent = 'Guardando…';
+function estadoEntregaEnPalabras(e) {
+  var por = { pendiente: 'Pendiente', esperando_ubicacion: 'Falta su ubicación', esperando_confirmacion: 'Falta que confirme', lista: 'Lista para salir', esperando_motorizado: 'Con un motorizado, sin hora', avisada: 'En camino', entregada: 'Entregada', terminada: 'Terminada', cancelada: 'Cancelada', incidencia: 'Necesita a alguien' };
+  return por[e.estado] || e.estado;
+}
+async function abrirFicha() {
+  if (!current) return;
+  var panel = document.getElementById('ficha'), cuerpo = document.getElementById('ficha-cuerpo');
+  panel.classList.remove('hidden');
+  cuerpo.innerHTML = '<p class="muted">Cargando…</p>';
   try {
-    await api('/admin/stickers/desde-chat', {
-      method: 'POST',
-      body: JSON.stringify({ mediaId: mediaId, nombre: nombre })
-    });
-    boton.textContent = 'Guardado';
-    toast('Sticker guardado. Ya lo puedes mandar desde el botón de stickers.');
-  } catch (error) {
-    boton.disabled = false;
-    boton.textContent = antes;
-    toast(error && error.message ? error.message : 'No se pudo guardar el sticker.');
-  }
-});
-/* Clic en una foto o un video: se ve a tamaño completo. */
-document.addEventListener('click', function (e) {
-  var el = e.target;
-  if (!el || !el.getAttribute || !el.getAttribute('data-media')) return;
-  if (el.tagName !== 'IMG' && el.tagName !== 'VIDEO') return;
+    var f = await api('/admin/chat/' + current.id + '/ficha');
+    var c = f.contacto;
+    var html = '<div><h4>Quién es</h4><div class="fila"><b>' + esc(c.name || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(c.phone)) + '</span></div>' +
+      '<div class="muted" style="margin-top:4px">' + (c.optOutAt ? 'Pidió no recibir mensajes (BAJA): solo se le contesta si escribe.' : c.optInAt ? 'Se le puede escribir (dio su consentimiento).' : 'Sin consentimiento todavía: se le contesta cuando escribe; no se le inicia conversación.') + (c.botPausadoAt ? ' Las respuestas automáticas están calladas en este chat.' : '') + (c.lastInboundAt ? ' Último mensaje suyo: ' + hhmm(c.lastInboundAt) + '.' : '') + '</div></div>';
+    if (f.entrega) {
+      var e = f.entrega;
+      html += '<div><h4>Su pedido de hoy</h4><div class="fila"><b>' + esc(e.referencia) + '</b><span class="chip">' + esc(estadoEntregaEnPalabras(e)) + '</span>' + (e.prioridad === 'urgente' ? '<span class="chip tono-rojo">Urgente</span>' : '') + '</div>' +
+        '<div class="muted" style="margin-top:4px">' + esc((e.direccion || '') + (e.distrito ? ', ' + e.distrito : '')) + (e.motorizado ? ' · lo lleva ' + esc(e.motorizado.nombre) : '') + (e.llegaAproxAt ? ' · llega alrededor de las ' + hhmm(e.llegaAproxAt) : '') + (e.entregadaAt ? ' · entregado a las ' + hhmm(e.entregadaAt) : '') + '</div>' +
+        '<div class="fila" style="margin-top:6px"><a class="sm" href="/hoy?buscar=' + encodeURIComponent(e.referencia) + '">Abrir en Hoy</a></div></div>';
+    } else html += '<div><h4>Su pedido de hoy</h4><div class="muted">No tiene ningún pedido en la lista de hoy.</div></div>';
+    if (!(current && current.tipo === 'grupo') && /^\d{8,}$/.test(String(c.phone || ''))) {
+      html += '<div class="ficha-acciones"><a class="principal" href="tel:+' + esc(String(c.phone)) + '">📞 Llamar</a>' + (f.ubicacion ? '<a href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">🗺 Abrir en el mapa</a>' : '') + '</div>';
+    }
+    if (f.ubicacion) {
+      var coords = Number(f.ubicacion.lat).toFixed(6) + ', ' + Number(f.ubicacion.lng).toFixed(6);
+      html += '<div><h4>Su última ubicación</h4><div class="fila"><span class="pin-coords">' + coords + '</span></div><div class="fila" style="margin-top:6px"><a class="sm" href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">Abrir en el mapa</a><button class="sm" type="button" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></div><div class="muted" style="margin-top:4px;font-size:12px">Las coordenadas las ves tú; al cliente solo le llega el enlace.</div></div>';
+    } else html += '<div><h4>Su última ubicación</h4><div class="muted">Todavía no ha mandado ninguna. Con «Pedirle su ubicación» (menú ＋) se le manda el botón.</div></div>';
+    html += '<div><h4>Conversaciones guardadas</h4><div class="fila">' + (f.guardadas ? '<a class="sm" href="/guardados?tel=' + encodeURIComponent(c.phone) + '">Ver las ' + f.guardadas + ' guardada' + (f.guardadas === 1 ? '' : 's') + '</a>' : '<span class="muted">Ninguna todavía.</span>') + '<a class="sm" href="/panel#contactos">Ficha completa</a></div></div>';
+    cuerpo.innerHTML = html;
+  } catch (e) { cuerpo.innerHTML = '<p class="muted">' + esc(e.message) + '</p>'; }
+}
+document.getElementById('ficha-cerrar').onclick = function () { document.getElementById('ficha').classList.add('hidden'); };
 
-  var visor = document.createElement('div');
-  visor.className = 'visor';
-  var copia = el.cloneNode(true);
-  copia.removeAttribute('data-media');
-  if (copia.tagName === 'VIDEO') copia.setAttribute('controls', '');
-  visor.appendChild(copia);
-  visor.onclick = function () { visor.remove(); };
-  document.body.appendChild(visor);
-});
-
-document.addEventListener('keydown', function (e) {
-  if (e.key !== 'Escape') return;
-  var visor = document.querySelector('.visor');
-  if (visor) visor.remove();
-});
+/* --------------------------------------------------------- pausar el bot */
 
 /**
- * El color del avatar, derivado del telefono.
- *
- * Que sea derivado y no aleatorio importa: el mismo contacto tiene que salir
- * del mismo color en cada recarga, o la lista deja de reconocerse de un
- * vistazo.
+ * "De este me encargo yo": los mensajes del cliente siguen entrando y se le
+ * puede escribir a mano; lo unico que se calla es la respuesta automatica.
  */
-function colorDe(phone) {
-  var suma = 0;
-  for (var i = 0; i < (phone || '').length; i++) suma += phone.charCodeAt(i);
-  return 'c' + (suma % 8);
-}
-
-/* El clip abre y cierra la fila del pin. */
-/* --- fotos y archivos: pegar (Ctrl+V), arrastrar o elegir con el clip ------- */
-var MAX_ADJUNTO = 16 * 1024 * 1024;
-var adjuntoPendiente = null;
-
-function nombreDeTipo(mime) {
-  if (/^image\//.test(mime)) return 'foto';
-  if (/^video\//.test(mime)) return 'video';
-  if (/^audio\//.test(mime)) return 'audio';
-  return 'archivo';
-}
-
-/* Deja el fichero en la previa, con su pie, listo para mandar. */
-function elegirAdjunto(file) {
-  if (!file || !current) return;
-  if (modo !== 'chat') { toast('Abre una conversación viva para mandar archivos.'); return; }
-  if (file.size > MAX_ADJUNTO) { toast('WhatsApp no acepta ficheros de más de 16 MB. Usa uno más ligero.'); return; }
-  var mime = file.type || 'application/octet-stream';
-  var nombre = file.name || ('pegado.' + (mime.split('/')[1] || 'bin'));
-  var lector = new FileReader();
-  lector.onload = function () {
-    adjuntoPendiente = { datos: lector.result, mimeType: mime, filename: nombre, tipo: nombreDeTipo(mime), bytes: file.size };
-    pintarPrevia();
-  };
-  lector.onerror = function () { toast('No se pudo leer el fichero.'); };
-  lector.readAsDataURL(file);
-}
-
-function pintarPrevia() {
-  var box = document.getElementById('adjunto-previa');
-  var a = adjuntoPendiente;
-  if (!a) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-  var vista = a.tipo === 'foto' ? '<img src="' + a.datos + '" alt="">'
-    : a.tipo === 'video' ? '<video src="' + a.datos + '" muted></video>'
-    : '<div class="icono">' + (a.tipo === 'audio' ? '🎵' : '📄') + '</div>';
-  box.innerHTML = vista +
-    '<div class="datos">' +
-      '<div class="nombre">' + esc(a.filename) + ' · ' + esc(pesoLegible(a.bytes)) + '</div>' +
-      (a.tipo === 'audio' ? '' : '<input id="adjunto-pie" placeholder="Escribe un pie de foto (opcional) y Enter para mandar" autocomplete="off">') +
-      '<div class="acciones"><button class="primary" id="adjunto-enviar">Enviar ' + esc(a.tipo) + '</button><button id="adjunto-cancelar">Cancelar</button></div>' +
-    '</div>';
-  box.classList.remove('hidden');
-  document.getElementById('adjunto-enviar').onclick = enviarAdjunto;
-  document.getElementById('adjunto-cancelar').onclick = function () { adjuntoPendiente = null; pintarPrevia(); input.focus(); };
-  var pie = document.getElementById('adjunto-pie');
-  if (pie) {
-    pie.focus();
-    pie.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); enviarAdjunto(); }
-      if (e.key === 'Escape') { e.preventDefault(); adjuntoPendiente = null; pintarPrevia(); input.focus(); }
-    });
-  }
-}
-
-async function enviarAdjunto() {
-  var a = adjuntoPendiente;
-  if (!a || !current) return;
-  if (enviando) { toast('Espera: todavía está saliendo el anterior.'); return; }
-  var pieEl = document.getElementById('adjunto-pie');
-  var caption = pieEl ? pieEl.value.trim() : '';
-  adjuntoPendiente = null;
-  pintarPrevia();
-  var pendiente = pintarPendiente((a.tipo === 'foto' ? '📷 ' : a.tipo === 'video' ? '🎬 ' : a.tipo === 'audio' ? '🎵 ' : '📄 ') + (caption || a.filename));
-  var boton = document.getElementById('send');
-  enviando++;
-  if (boton) boton.disabled = true;
+async function alternarBot() {
+  if (!current) return;
+  var pausar = !current.botPausadoAt;
   try {
-    var r = await api('/admin/chat/adjunto', { method: 'POST', body: { contactId: current.id, datos: a.datos, mimeType: a.mimeType, filename: a.filename, caption: caption || undefined } });
-    if (r.ok === false) { if (pendiente) pendiente.remove(); toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas')); }
-    await openChat(current.id, true);
-    loadChats(true);
-  } catch (error) { if (pendiente) pendiente.remove(); toast(error.message); }
-  finally { enviando--; if (!enviando && boton) boton.disabled = false; }
+    await api('/admin/chat/' + current.id + '/bot', { method: 'POST', body: { pausado: pausar } });
+    current.botPausadoAt = pausar ? new Date().toISOString() : null;
+    toast(pausar ? 'Bot callado en este chat: lo atiendes tú.' : 'El bot vuelve a contestar en este chat.');
+    openChat(current.id, true);
+  } catch (e) { toast('No se pudo cambiar: ' + (e.message || e)); }
 }
 
-/* Ctrl+V con una imagen en el portapapeles: va directo a la previa. */
-document.addEventListener('paste', function (e) {
-  if (!current || modo !== 'chat') return;
-  var items = (e.clipboardData && e.clipboardData.items) || [];
-  for (var i = 0; i < items.length; i++) {
-    if (items[i].kind === 'file') {
-      var f = items[i].getAsFile();
-      if (f) { e.preventDefault(); elegirAdjunto(f); return; }
-    }
+/* ------------------------------------------------------ menu de la cabecera */
+
+document.getElementById('menu-chat').onclick = function () {
+  if (!current) return;
+  var esGrupo = current.tipo === 'grupo';
+  var c = conversations.filter(function (v) { return v.contactId === current.id; })[0] || {};
+  var ops = [];
+  if (!esGrupo) ops.push({ icono: 'ⓘ', texto: 'Ficha del cliente', accion: abrirFicha });
+  if (!esGrupo && /^\d{8,}$/.test(String(current.phone || ''))) {
+    ops.push({ icono: '📞', texto: 'Llamar', accion: function () { location.href = 'tel:+' + current.phone; } });
   }
-});
-
-/* Arrastrar un fichero encima de la conversacion. */
-var thread = document.querySelector('.thread');
-var arrastres = 0;
-thread.addEventListener('dragenter', function (e) { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') >= 0) { arrastres++; thread.classList.add('arrastrando'); } });
-thread.addEventListener('dragleave', function () { arrastres = Math.max(0, arrastres - 1); if (!arrastres) thread.classList.remove('arrastrando'); });
-thread.addEventListener('dragover', function (e) { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') >= 0) e.preventDefault(); });
-thread.addEventListener('drop', function (e) {
-  arrastres = 0; thread.classList.remove('arrastrando');
-  if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
-  e.preventDefault();
-  elegirAdjunto(e.dataTransfer.files[0]);
-});
-
-document.getElementById('elegir-archivo').onclick = function () { document.getElementById('archivo').click(); };
-document.getElementById('archivo').addEventListener('change', function () {
-  if (this.files && this.files[0]) elegirAdjunto(this.files[0]);
-  this.value = '';
-});
-
-document.getElementById('mas').onclick = function () {
-  var tools = document.getElementById('tools');
-  tools.classList.toggle('plegado');
-  if (!tools.classList.contains('plegado')) document.getElementById('loc').focus();
+  if (!esGrupo) ops.push({ icono: '🤖', texto: current.botPausadoAt ? 'Que el bot vuelva a contestar' : 'Callar al bot en este chat', accion: alternarBot });
+  ops.push({ icono: '⭐', texto: 'Mensajes destacados de este chat', accion: function () { verDestacados(true); } });
+  ops.push({ hr: true });
+  ops.push({ icono: '📌', texto: c.fijadoAt ? 'Quitar de arriba' : 'Fijar arriba', accion: function () { ajustarLista(current.id, { fijado: !c.fijadoAt }); } });
+  ops.push({ icono: c.silenciadoAt ? '🔔' : '🔕', texto: c.silenciadoAt ? 'Volver a avisar' : 'Silenciar', accion: function () { ajustarLista(current.id, { silenciado: !c.silenciadoAt }); } });
+  ops.push({ icono: '🗂', texto: c.apartadoAt ? 'Devolver a la lista' : 'Apartar de la lista', accion: function () { ajustarLista(current.id, { apartado: !c.apartadoAt }); } });
+  if (PROVEEDOR === 'local') {
+    ops.push({ hr: true });
+    ops.push({ icono: '⤒', texto: 'Traer mensajes anteriores del teléfono', accion: traerHistorialDeEsteChat });
+    ops.push({ icono: '⟳', texto: 'Traer lo que falta del teléfono', accion: sincronizarEsteChat });
+  }
+  ops.push({ hr: true });
+  ops.push({ icono: '🗄', texto: 'Guardar el chat y vaciarlo', accion: pedirCierre });
+  menuDeBoton(this, ops);
 };
 
-function renderComposer(data) {
-  var composer = document.getElementById('composer');
-  var tools = document.getElementById('tools');
-  var locked = document.getElementById('locked');
+document.getElementById('abrir-busqueda').onclick = function () {
+  if (document.getElementById('buscar-hilo').classList.contains('hidden')) abrirBusqueda();
+  else cerrarBusqueda();
+};
 
-  if (!composer || !tools || !locked) return;
+/* --------------------------------------------------- menu de la columna */
 
-  var barra = document.getElementById('rapidas-barra');
-  var enGrupo = data.contact && data.contact.tipo === 'grupo';
-  ver('ask-loc', !enGrupo);
-  if (data.canWrite) {
-    composer.classList.remove('hidden');
-    tools.classList.remove('hidden');
-    locked.classList.add('hidden');
-    barra.classList.remove('hidden');
-    pintarBarraRapidas();
-    return;
-  }
+document.getElementById('menu-lista').onclick = function () {
+  var ops = [
+    // El lector de los chats guardados vive en /guardados y es mucho mejor
+    // que el que habia aqui (resumen, etiquetas, notas, adjuntos, buscador,
+    // PDF, compartir). Mantener dos era pagar cada mejora dos veces.
+    { icono: '📁', texto: 'Chats guardados', accion: function () { location.href = '/guardados'; } },
+    { icono: '⭐', texto: 'Todos los mensajes destacados', accion: function () { verDestacados(false); } },
+    ${opcionHistorial ? `${opcionHistorial},` : ''}
+    { hr: true },
+    { icono: '⌨', texto: 'Atajos de teclado', accion: ayudaTeclas },
+  ];
+  menuDeBoton(this, ops);
+};
 
-  composer.classList.add('hidden');
-  tools.classList.add('hidden');
-  barra.classList.add('hidden');
-  locked.classList.remove('hidden');
+document.getElementById('nuevo').onclick = async function () {
+  var tel = await pedirCelular();
+  if (!tel) return;
+  try {
+    var r = await api('/admin/chat/start', { method: 'POST', body: { phone: tel } });
+    await loadChats();
+    openChat(r.contact.id);
+  } catch (error) { toast(error.message); }
+};
 
-  if (enGrupo) {
-    locked.innerHTML = '<b>' + esc(data.blockedReason || 'En este grupo no se puede escribir.') + '</b><br>Los grupos se leen y se contestan con el WhatsApp vinculado por QR en <a class="link" href="/setup">Conectar</a>.';
-    return;
-  }
+document.getElementById('back').onclick = function () {
+  document.getElementById('app').classList.remove('open-thread');
+  var sApp = document.getElementById('s-app'); if (sApp) sApp.classList.remove('sin-nav-movil');
+};
 
-  if (data.contact.optOutAt) {
-    locked.innerHTML = '<b>Este contacto se dio de baja.</b><br>No se le puede escribir: una baja ignorada se convierte en bloqueo, y el bloqueo si castiga la calidad del numero.';
-    return;
-  }
+var buscando;
+document.getElementById('q').addEventListener('input', function () {
+  clearTimeout(buscando);
+  buscando = setTimeout(loadChats, 250);
+});
 
-  var aprobadas = templates.filter(function (t) { return t.status === 'APPROVED'; });
-  locked.innerHTML = '<b>Pasaron mas de 24 horas desde su ultimo mensaje.</b><br>' +
-    'WhatsApp solo deja retomar la conversacion con una plantilla aprobada. En cuanto conteste, puedes escribirle libre otra vez.' +
-    '<div class="actions">' +
-      (aprobadas.length
-        ? '<select id="tpl">' + aprobadas.map(function (t) {
-            return '<option value="' + esc(t.name + '|' + t.language) + '" data-vars="' + t.variables + '">' +
-              esc(t.name + ' (' + t.variables + ' variables)') + '</option>';
-          }).join('') + '</select>' +
-          '<input id="tpl-vars" placeholder="Variables separadas por coma">' +
-          '<button class="primary" id="send-tpl">Enviar plantilla</button>'
-        : '<span>No tienes ninguna plantilla aprobada todavia. <a class="link" href="/panel#plantillas">Darlas de alta</a></span>') +
-    '</div>';
-
-  var boton = document.getElementById('send-tpl');
-  if (boton) boton.onclick = enviarPlantilla;
-}
-
-async function enviarPlantilla() {
-  var sel = document.getElementById('tpl');
-  var partes = sel.value.split('|');
-  var vars = document.getElementById('tpl-vars').value.split(',').map(function (v) { return v.trim(); }).filter(Boolean);
-  await enviar({ templateName: partes[0], templateLanguage: partes[1], variables: vars });
-}
+/* ------------------------------------------------------------- enviar */
 
 /* El mensaje se pinta al instante como "enviando" y se confirma cuando el
    servidor responde: asi el boton se siente inmediato aunque WhatsApp tarde. */
@@ -1467,11 +1070,11 @@ function pintarPendiente(texto) {
   box.scrollTop = box.scrollHeight;
   return el;
 }
-var enviando = 0;
+
 async function enviar(payload) {
   if (!current) return;
   var pendiente = null;
-  if (payload.text) pendiente = pintarPendiente((payload.voz ? '🎤 ' : '') + payload.text);
+  if (payload.text) pendiente = pintarPendiente((payload.voz ? '🔊 ' : '') + payload.text);
   else if (payload.askLocation) pendiente = pintarPendiente('📍 Solicitud de ubicación');
   else if (payload.location) pendiente = pintarPendiente('🗺 Pin: ' + payload.location);
   if (enviando && (payload.askLocation || payload.text)) { toast('Espera: todavía está saliendo el anterior.'); if (pendiente) pendiente.remove(); return; }
@@ -1480,12 +1083,15 @@ async function enviar(payload) {
   enviando++;
   if (boton) boton.disabled = true;
   if (barra) barra.classList.add('ocupada');
+  var cita = citaPendiente;
+  quitarCita();
   try {
     payload.contactId = current.id;
+    if (cita) payload.citaId = cita;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
     if (r.ok === false) {
       if (pendiente) pendiente.remove();
-      toast('No salio: ' + (r.reason || r.error || 'bloqueado por las guardas'));
+      toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas'));
     } else if (payload.voz && r.voz && !r.voz.enviada) {
       toast('Salió por escrito, no como audio: ' + (r.voz.motivo || 'la voz no está lista'));
     }
@@ -1495,10 +1101,20 @@ async function enviar(payload) {
   finally { enviando--; if (!enviando) { if (boton) boton.disabled = false; if (barra) barra.classList.remove('ocupada'); } }
 }
 
-var input = document.getElementById('text');
+async function mandarTexto() {
+  var texto = input.value.trim();
+  if (!texto) return;
+  if (enviando) { toast('Espera: todavía está saliendo el anterior.'); return; }
+  input.value = '';
+  ajustarAlto();
+  pintarBotonDeEnviar();
+  await enviar({ text: texto });
+}
+document.getElementById('send').onclick = mandarTexto;
+
 input.addEventListener('input', function () {
-  input.style.height = 'auto';
-  input.style.height = Math.min(120, input.scrollHeight) + 'px';
+  ajustarAlto();
+  pintarBotonDeEnviar();
   atajosDesdeTexto();
 });
 input.addEventListener('keydown', function (e) {
@@ -1508,355 +1124,279 @@ input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); elegirAtajo(); return; }
     if (e.key === 'Escape') { e.preventDefault(); cerrarAtajos(); return; }
   }
+  if (e.key === 'Escape' && citaPendiente) { e.preventDefault(); quitarCita(); return; }
   /* Enter manda; Shift+Enter hace salto de linea, como en WhatsApp Web. */
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); mandarTexto(); }
 });
 
-/* --- respuestas rapidas: "/" en el mensaje, o el rayo ---------------------- */
-var atajos = [];
-var atajoSel = 0;
-async function cargarAtajos() {
-  try { atajos = (await api('/admin/chat/atajos')).atajos || []; } catch (e) { atajos = []; }
-  pintarBarraRapidas();
-}
-function negocioNombre() {
-  var app = document.getElementById('s-app');
-  return app ? app.getAttribute('data-negocio') || '' : '';
-}
-function rellenarAtajo(texto) {
-  var nombre = current ? ((current.name || '').trim().split(/\s+/)[0] || '') : '';
-  var pedido = current && current.pedido ? current.pedido : '';
-  return texto.replace(/\{nombre\}/g, nombre).replace(/\{pedido\}/g, pedido || 'su pedido').replace(/\{negocio\}/g, negocioNombre()).replace(/\s+,/g, ',').replace(/  +/g, ' ');
-}
-function atajosAbierto() { return !document.getElementById('atajos-popup').classList.contains('hidden'); }
-function cerrarAtajos() { document.getElementById('atajos-popup').classList.add('hidden'); }
-function pintarAtajos(filtro) {
-  var box = document.getElementById('atajos-popup');
-  var lista = atajos.filter(function (a) { return !filtro || a.atajo.indexOf(filtro) === 0 || a.texto.toLowerCase().indexOf(filtro) >= 0; });
-  if (!lista.length) { box.innerHTML = '<div class="pie">Ningún atajo empieza por "/' + esc(filtro) + '". Se crean en Panel → Automatización.</div>'; box.classList.remove('hidden'); box._lista = []; return; }
-  if (atajoSel >= lista.length) atajoSel = 0;
-  box.innerHTML = lista.map(function (a, i) {
-    return '<div class="op' + (i === atajoSel ? ' sel' : '') + '" data-i="' + i + '"><b>/' + esc(a.atajo) + '</b><span>' + esc(rellenarAtajo(a.texto)) + '</span></div>';
-  }).join('') + '<div class="pie">↑↓ para moverte · Enter o Tab para poner el texto · Esc para cerrar</div>';
-  box._lista = lista;
-  box.querySelectorAll('.op').forEach(function (el) { el.onclick = function () { atajoSel = Number(el.getAttribute('data-i')); elegirAtajo(); }; });
-  box.classList.remove('hidden');
-}
-function atajosDesdeTexto() {
-  var v = input.value;
-  if (v.charAt(0) === '/' && v.indexOf(' ') < 0 && v.indexOf('\n') < 0) { atajoSel = atajosAbierto() ? atajoSel : 0; pintarAtajos(v.slice(1).toLowerCase()); }
-  else if (atajosAbierto()) cerrarAtajos();
-}
-function moverAtajo(d) {
-  var lista = document.getElementById('atajos-popup')._lista || [];
-  if (!lista.length) return;
-  atajoSel = (atajoSel + d + lista.length) % lista.length;
-  pintarAtajos(input.value.charAt(0) === '/' ? input.value.slice(1).toLowerCase() : '');
-}
-function elegirAtajo() {
-  var lista = document.getElementById('atajos-popup')._lista || [];
-  var a = lista[atajoSel];
-  cerrarAtajos();
-  if (!a) return;
-  input.value = rellenarAtajo(a.texto);
-  input.style.height = 'auto';
-  input.style.height = Math.min(120, input.scrollHeight) + 'px';
-  input.focus();
-  input.setSelectionRange(input.value.length, input.value.length);
-}
-/* La barra de botones: las acciones fijas y una pastilla por respuesta rapida.
-   Un clic manda el texto tal cual (con el nombre del cliente puesto); con
-   Shift se deja en el cuadro para retocarlo antes. Mientras sale uno, la
-   barra se bloquea: un segundo clic no manda dos veces. */
-function etiquetaDe(atajo) {
-  var t = atajo.replace(/[_-]+/g, ' ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
-}
-function ponerAtajo(a, directo) {
-  var texto = rellenarAtajo(a.texto);
-  if (directo) {
-    enviar({ text: texto }).then(function () { if (a.sticker) return mandarSticker(a.sticker); });
+/* --------------------------------------------------- compositor bloqueado */
+
+function renderComposer(data) {
+  var composer = document.getElementById('composer');
+  var locked = document.getElementById('locked');
+  var barra = document.getElementById('rapidas-barra');
+  if (!composer || !locked) return;
+
+  if (data.canWrite) {
+    ver('composer', true);
+    locked.classList.add('hidden');
+    pintarBarraRapidas();
+    pintarBotonDeEnviar();
     return;
   }
-  input.value = texto;
-  input.style.height = 'auto';
-  input.style.height = Math.min(120, input.scrollHeight) + 'px';
-  input.focus();
-  input.setSelectionRange(input.value.length, input.value.length);
-}
-function pintarBarraRapidas() {
-  var barra = document.getElementById('rapidas-barra');
-  if (!barra) return;
-  var enGrupo = current && current.tipo === 'grupo';
-  var html = (enGrupo ? '' : '<button class="chip accion" type="button" data-accion="ubicacion" title="Le manda la solicitud de ubicación (Ctrl+Shift+U)">📍 Pedir ubicación</button>') +
-    '<button class="chip accion" type="button" data-accion="pin" title="Mandarle un pin del mapa (Ctrl+Shift+L)">🗺 Mandar pin</button>' +
-    (enGrupo ? '' : '<button class="chip accion" type="button" data-accion="voz" title="Manda lo que escribiste como nota de voz, con la voz del asistente (Mi asistente IA → Voz)">🎤 Mandar como audio</button>') +
-    atajos.map(function (a, i) {
-      return '<button class="chip" type="button" data-rapida="' + i + '" title="Manda: ' + esc(rellenarAtajo(a.texto)) + ' (Shift+clic para retocarlo antes)">' + esc(etiquetaDe(a.atajo)) + '</button>';
-    }).join('') +
-    '<a class="chip editar" href="/panel#automatizacion" title="Añadir, cambiar o quitar respuestas rápidas">✎ Editar</a>';
-  if (barra.innerHTML !== html) barra.innerHTML = html;
-  barra.querySelectorAll('[data-rapida]').forEach(function (b) {
-    b.onclick = function (ev) { var a = atajos[Number(b.getAttribute('data-rapida'))]; if (a) ponerAtajo(a, !ev.shiftKey); };
-  });
-  var pedir = barra.querySelector('[data-accion="ubicacion"]');
-  if (pedir) pedir.onclick = function () { if (!enviando) enviar({ askLocation: true }); };
-  var pin = barra.querySelector('[data-accion="pin"]');
-  if (pin) pin.onclick = function () { document.getElementById('tools').classList.remove('plegado'); document.getElementById('loc').focus(); };
-  var voz = barra.querySelector('[data-accion="voz"]');
-  if (voz) voz.onclick = function () {
-    var texto = input.value.trim();
-    if (!texto) { toast('Escribe primero lo que quieres que diga el audio.'); input.focus(); return; }
-    if (enviando) return;
-    input.value = ''; input.style.height = 'auto';
-    enviar({ text: texto, voz: true });
+
+  ver('composer', false);
+  ver('grabando', false);
+  barra.classList.add('hidden');
+  cerrarPaneles();
+  locked.classList.remove('hidden');
+
+  if (data.contact && data.contact.tipo === 'grupo') {
+    locked.innerHTML = '<b>' + esc(data.blockedReason || 'En este grupo no se puede escribir.') + '</b><br>Los grupos se atienden con el WhatsApp vinculado por QR en <a class="link" href="/setup">Conectar</a>.';
+    return;
+  }
+  if (data.contact.optOutAt) {
+    locked.innerHTML = '<b>Este contacto se dio de baja.</b><br>No se le puede escribir: una baja ignorada se convierte en bloqueo, y el bloqueo sí castiga la calidad del número.';
+    return;
+  }
+
+  var aprobadas = templates.filter(function (t) { return t.status === 'APPROVED'; });
+  locked.innerHTML = '<b>Pasaron más de 24 horas desde su último mensaje.</b><br>' +
+    'WhatsApp solo deja retomar la conversación con una plantilla aprobada. En cuanto conteste, puedes escribirle libre otra vez.' +
+    '<div class="actions">' +
+      (aprobadas.length
+        ? '<select id="tpl" aria-label="Plantilla">' + aprobadas.map(function (t) {
+            return '<option value="' + esc(t.name + '|' + t.language) + '" data-vars="' + t.variables + '">' +
+              esc(t.name + ' (' + t.variables + ' variables)') + '</option>';
+          }).join('') + '</select>' +
+          '<input id="tpl-vars" placeholder="Variables separadas por coma" aria-label="Variables de la plantilla">' +
+          '<button class="primary" id="send-tpl">Enviar plantilla</button>'
+        : '<span>No tienes ninguna plantilla aprobada todavía. <a class="link" href="/panel#plantillas">Darlas de alta</a></span>') +
+    '</div>';
+
+  var boton = document.getElementById('send-tpl');
+  if (boton) boton.onclick = async function () {
+    var partes = document.getElementById('tpl').value.split('|');
+    var vars = document.getElementById('tpl-vars').value.split(',').map(function (v) { return v.trim(); }).filter(Boolean);
+    await enviar({ templateName: partes[0], templateLanguage: partes[1], variables: vars });
   };
 }
-document.getElementById('rapidas').onclick = function () {
-  if (atajosAbierto()) return cerrarAtajos();
-  atajoSel = 0;
-  pintarAtajos('');
-  input.focus();
-};
 
-/* --- stickers: el boton 🙂 abre la biblioteca; un clic lo manda ------------ */
-var stickers = [];
-async function cargarStickers() {
-  try { stickers = (await api('/admin/stickers')).stickers || []; } catch (e) { stickers = []; }
+async function loadTemplates() {
+  try { templates = await api('/admin/templates'); }
+  catch (error) { templates = []; console.log('[chat] no se pudo leer el catálogo de plantillas:', error && error.message); }
 }
-function stickersAbierto() { return !document.getElementById('stickers-popup').classList.contains('hidden'); }
-function cerrarStickers() { document.getElementById('stickers-popup').classList.add('hidden'); }
-async function mandarSticker(id) {
-  if (!current) return;
-  if (enviando) { toast('Espera: todavía está saliendo el anterior.'); return; }
-  cerrarStickers();
-  var pendiente = pintarPendiente('🙂 sticker');
-  var barra = document.getElementById('rapidas-barra');
-  enviando++;
-  if (barra) barra.classList.add('ocupada');
-  try {
-    var r = await api('/admin/stickers/' + encodeURIComponent(id) + '/enviar', { method: 'POST', body: { phone: current.phone } });
-    if (r.ok === false) { if (pendiente) pendiente.remove(); toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas')); }
-    await openChat(current.id, true);
-  } catch (error) { if (pendiente) pendiente.remove(); toast(error.message); }
-  finally { enviando--; if (!enviando && barra) barra.classList.remove('ocupada'); }
-}
-document.getElementById('stickers-boton').onclick = async function () {
-  if (stickersAbierto()) return cerrarStickers();
-  if (!stickers.length) await cargarStickers();
-  var box = document.getElementById('stickers-popup');
-  box.innerHTML = stickers.length
-    ? stickers.map(function (s) { return '<img src="/stickers/' + esc(s.archivo) + '" title="' + esc(s.nombre) + '" data-sticker="' + esc(s.id) + '" alt="">'; }).join('') + '<div class="pie">Un clic lo manda. Se suben en Panel → Stickers.</div>'
-    : '<div class="pie">Todavía no hay stickers. Súbelos en <a class="link" href="/panel#stickers">Panel → Stickers</a>.</div>';
-  box.querySelectorAll('[data-sticker]').forEach(function (img) { img.onclick = function () { mandarSticker(img.getAttribute('data-sticker')); }; });
-  cerrarAtajos();
-  box.classList.remove('hidden');
-};
 
-/* --- teclas: moverse entre chats y pedir ubicacion sin soltar el teclado --- */
-function chatVecino(d) {
-  if (!conversations.length) return;
-  var i = current ? conversations.findIndex(function (c) { return c.contactId === current.id; }) : -1;
-  var j = i < 0 ? 0 : (i + d + conversations.length) % conversations.length;
-  openChat(conversations[j].contactId);
-}
+/* --------------------------------------------------------------- teclado */
+
 function enCampo(el) { return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'); }
+function chatVecino(d) {
+  var visibles = conversations.filter(pasaFiltro);
+  if (!visibles.length) return;
+  var i = current ? visibles.findIndex(function (c) { return c.contactId === current.id; }) : -1;
+  var j = i < 0 ? 0 : (i + d + visibles.length) % visibles.length;
+  openChat(visibles[j].contactId);
+}
 document.addEventListener('keydown', function (e) {
   if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); chatVecino(1); return; }
   if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); chatVecino(-1); return; }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'U' || e.key === 'u')) { e.preventDefault(); if (current && document.getElementById('composer') && !document.getElementById('composer').classList.contains('hidden')) enviar({ askLocation: true }); return; }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); if (current) { document.getElementById('tools').classList.remove('plegado'); document.getElementById('loc').focus(); } return; }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'i')) { e.preventDefault(); if (current) { var fichaAbierta = !document.getElementById('ficha').classList.contains('hidden'); if (fichaAbierta) document.getElementById('ficha').classList.add('hidden'); else abrirFicha(); } return; }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'B' || e.key === 'b')) { e.preventDefault(); if (current) alternarBot(); return; }
+  var conCtrl = (e.ctrlKey || e.metaKey) && e.shiftKey;
+  if (conCtrl && (e.key === 'U' || e.key === 'u')) { e.preventDefault(); if (current && puedeEscribir) enviar({ askLocation: true }); return; }
+  if (conCtrl && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); if (current && puedeEscribir) pedirPin(); return; }
+  if (conCtrl && (e.key === 'I' || e.key === 'i')) { e.preventDefault(); if (current) { var f = document.getElementById('ficha'); f.classList.contains('hidden') ? abrirFicha() : f.classList.add('hidden'); } return; }
+  if (conCtrl && (e.key === 'B' || e.key === 'b')) { e.preventDefault(); if (current) alternarBot(); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && current) { e.preventDefault(); abrirBusqueda(); return; }
   if (e.key === '/' && !enCampo(document.activeElement)) {
     e.preventDefault();
-    if (current && !document.getElementById('composer').classList.contains('hidden')) { input.focus(); input.value = '/'; atajosDesdeTexto(); }
+    if (current && puedeEscribir) { input.focus(); input.value = '/'; atajosDesdeTexto(); }
     else document.getElementById('q').focus();
     return;
   }
   if (e.key === 'F1' || ((e.ctrlKey || e.metaKey) && e.key === '/')) { e.preventDefault(); ayudaTeclas(); return; }
-  if (e.key === 'Escape' && !atajosAbierto()) {
-    var ayuda = document.querySelector('.ayuda-teclas');
-    if (ayuda) { ayuda.remove(); return; }
-    if (enCampo(document.activeElement)) { document.activeElement.blur(); return; }
-    if (document.getElementById('app').classList.contains('open-thread')) document.getElementById('back').click();
-  }
+  if (e.key !== 'Escape') return;
+  /* Esc cierra lo mas "de encima" primero: visor, ayuda, seleccion, cita,
+     busqueda, panel, campo y, al final, vuelve a la lista. */
+  var visor = document.querySelector('.visor');
+  if (visor) { visor.remove(); return; }
+  var ayuda = document.querySelector('.ayuda-teclas');
+  if (ayuda) { ayuda.remove(); return; }
+  if (seleccion && seleccion.length) { salirDeSeleccion(); return; }
+  if (citaPendiente) { quitarCita(); return; }
+  if (!document.getElementById('buscar-hilo').classList.contains('hidden')) { cerrarBusqueda(); return; }
+  if (PANELES.some(panelAbierto)) { cerrarPaneles(); return; }
+  if (enCampo(document.activeElement)) { document.activeElement.blur(); return; }
+  if (document.getElementById('app').classList.contains('open-thread')) document.getElementById('back').click();
 });
+
 function ayudaTeclas() {
   if (document.querySelector('.ayuda-teclas')) return;
   var caja = document.createElement('div');
   caja.className = 'ayuda-teclas';
-  caja.innerHTML = '<div class="caja"><h3>Atajos del chat</h3><table>' +
-    '<tr><td><kbd>/</kbd> en el mensaje</td><td>Respuestas rápidas (se filtran al escribir; Enter o Tab pone el texto)</td></tr>' +
-    '<tr><td>Botones sobre el cuadro</td><td>Un clic manda la respuesta rápida al instante (con el nombre puesto); <kbd>Shift</kbd>+clic la deja en el cuadro para retocarla</td></tr>' +
-    '<tr><td><kbd>⚡</kbd></td><td>Ver todas las respuestas rápidas</td></tr>' +
-    '<tr><td><kbd>🙂</kbd></td><td>Mandar un sticker de la biblioteca</td></tr>' +
+  caja.innerHTML = '<div class="caja" role="dialog" aria-modal="true" aria-label="Atajos del chat"><h3>Atajos del chat</h3><table>' +
     '<tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Enviar / salto de línea</td></tr>' +
+    '<tr><td><kbd>/</kbd> en el mensaje</td><td>Respuestas rápidas (se filtran al escribir; Enter o Tab pone el texto)</td></tr>' +
+    '<tr><td>Clic derecho o <kbd>⌄</kbd> en un globo</td><td>Menú del mensaje: responder, reaccionar, reenviar, destacar, eliminar…</td></tr>' +
+    '<tr><td>Mantener pulsado un globo</td><td>Entrar en selección múltiple (en el móvil)</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar dentro de esta conversación (<kbd>Enter</kbd> y <kbd>Shift</kbd>+<kbd>Enter</kbd> saltan entre coincidencias)</td></tr>' +
     '<tr><td><kbd>Alt</kbd>+<kbd>↓</kbd> <kbd>Alt</kbd>+<kbd>↑</kbd></td><td>Siguiente / anterior conversación</td></tr>' +
     '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></td><td>Pedirle su ubicación</td></tr>' +
-    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>Mandar un pin (abre el cuadro del mapa)</td></tr>' +
-    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Abrir o cerrar la ficha del cliente (su pedido de hoy, su última ubicación)</td></tr>' +
-    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td><td>«De este me encargo yo»: callar o soltar al asistente en este chat</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>Mandar un pin del mapa</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Abrir o cerrar la ficha del cliente</td></tr>' +
+    '<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td><td>«De este me encargo yo»: callar o soltar al asistente</td></tr>' +
     '<tr><td><kbd>/</kbd> fuera del mensaje</td><td>Ir al buscador de chats</td></tr>' +
-    '<tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Buscar un módulo del sistema</td></tr>' +
-    '<tr><td><kbd>Esc</kbd></td><td>Cerrar esto, salir del campo o volver a la lista</td></tr>' +
+    '<tr><td><kbd>Esc</kbd></td><td>Cerrar lo que esté abierto y, al final, volver a la lista</td></tr>' +
     '<tr><td><kbd>F1</kbd> o <kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Esta ayuda</td></tr>' +
-    '</table><p class="muted" style="margin:10px 0 0;font-size:12.5px">Las respuestas rápidas se editan en Ajustes → Respuestas rápidas.</p></div>';
+    '</table><p class="muted" style="margin:10px 0 0;font-size:12.5px">Las respuestas rápidas se editan en Panel → Automatización.</p></div>';
   caja.onclick = function (ev) { if (ev.target === caja) caja.remove(); };
   document.body.appendChild(caja);
 }
-document.getElementById('atajos-ayuda').onclick = ayudaTeclas;
-async function mandarTexto() {
-  var texto = input.value.trim();
-  if (!texto) return;
-  if (enviando) { toast('Espera: todavía está saliendo el anterior.'); return; }
-  input.value = '';
-  input.style.height = 'auto';
-  await enviar({ text: texto });
-}
-document.getElementById('send').onclick = mandarTexto;
 
-document.getElementById('send-loc').onclick = async function () {
-  var v = document.getElementById('loc').value.trim();
-  if (!v) return toast('Pega primero un link de mapa o unas coordenadas.');
-  document.getElementById('loc').value = '';
-  await enviar({ location: v });
-};
-document.getElementById('ask-loc').onclick = function () { enviar({ askLocation: true }); };
+/* ------------------------------------------------- historial del telefono */
 
-document.getElementById('back').onclick = function () {
-  document.getElementById('app').classList.remove('open-thread');
-  var sAppCerrar = document.getElementById('s-app'); if (sAppCerrar) sAppCerrar.classList.remove('sin-nav-movil');
-};
-document.getElementById('new').onclick = async function () {
-  var tel = await pedirCelular();
-  if (!tel) return;
+async function sincronizarEsteChat() {
+  if (!current) return;
   try {
-    var r = await api('/admin/chat/start', { method: 'POST', body: { phone: tel } });
-    await loadChats();
-    openChat(r.contact.id);
+    await api('/admin/local/sincronizar/' + encodeURIComponent(current.id), { method: 'POST' });
+    toast('Pedido al teléfono lo último de este chat. Lo que faltaba aparece en unos segundos, si el teléfono lo manda.');
+    var id = current.id;
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
   } catch (error) { toast(error.message); }
-};
-
-/* El clic se escucha en el contenedor: asi sigue funcionando aunque la fila
-   se haya vuelto a pintar entre que la pulsas y la sueltas. */
-document.getElementById('chats').addEventListener('click', function (event) {
-  var fila = event.target.closest('.chat');
-  if (fila) openChat(fila.getAttribute('data-id'));
-});
-
-var buscando;
-document.getElementById('q').addEventListener('input', function () {
-  clearTimeout(buscando);
-  buscando = setTimeout(function () {
-    if (enRespaldos) cargarRespaldos();
-    else loadChats();
-  }, 250);
-});
-
-async function loadTemplates() {
-  try { templates = await api('/admin/templates'); } catch (error) { templates = []; }
+}
+async function traerHistorialDeEsteChat() {
+  if (!current) return;
+  try {
+    var r = await api('/admin/local/historial/' + encodeURIComponent(current.id), { method: 'POST' });
+    toast(r.sinReferencia
+      ? 'Pedido al teléfono. Si tiene mensajes de este chat, aparecen en unos segundos; si no aparece nada, escribe algo o espera a que escriban y vuelve a pulsar.'
+      : 'Pedido al teléfono. Los mensajes anteriores a ' + (r.desde ? dayLabel(r.desde) : 'los de aquí') + ' aparecen arriba en unos segundos.');
+    var id = current.id;
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
+    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
+  } catch (error) { toast(error.message); }
 }
 
-/* Refresco: la lista siempre, el hilo abierto sin marcarlo como leido de
-   nuevo para no pisar el contador mientras se lee. */
-/* Estado de la conexion con WhatsApp.
-   Solo tiene sentido con los proveedores que se vinculan por QR (el cliente
-   local y WAHA): con la Cloud API de Meta no hay sesion que se caiga. */
-var PROVEEDOR = '${proveedor}';
+var sondeoHistorial = null;
+async function traerTodoElHistorial() {
+  try {
+    var r = await api('/admin/local/historial-todos', { method: 'POST' });
+    toast(r.yaEnMarcha ? 'Ya se está trayendo el historial.' :
+      'Trayendo TODO el historial de ' + r.chats + ' chats: va chat por chat y tarda unos minutos.' +
+      (r.sinReferencia ? ' ' + r.sinReferencia + ' chats sin ningún mensaje aquí se saltan (el teléfono necesita uno de referencia).' : ''));
+    sondearHistorial();
+  } catch (error) { toast(error.message); }
+}
+async function sondearHistorial() {
+  try {
+    var p = await api('/admin/local/historial-todos');
+    if (p.enMarcha) {
+      if (!sondeoHistorial) sondeoHistorial = setInterval(sondearHistorial, 3000);
+      return;
+    }
+    if (!sondeoHistorial) return;
+    clearInterval(sondeoHistorial); sondeoHistorial = null;
+    toast((p.detalle || 'Historial traído.') + (p.sinReferencia
+      ? ' Quedan ' + p.sinReferencia + ' chats sin ningún mensaje aquí: el teléfono solo los manda al vincular.'
+      : ''));
+    loadChats(true);
+    if (current) openChat(current.id, true);
+  } catch (error) { /* sin sesion local no hay nada que sondear */ }
+}
 
+async function importarDeWaha() {
+  toast('Trayendo las conversaciones de WhatsApp, puede tardar un poco…');
+  try {
+    var r = await api('/admin/waha/importar', { method: 'POST', body: {} });
+    toast('Listo: ' + r.chats + ' conversaciones y ' + r.mensajes + ' mensajes.' + (r.omitidos ? ' Se omitieron ' + r.omitidos + ' grupos.' : ''));
+    loadChats();
+  } catch (error) { toast(error.message); }
+}
+
+/* ------------------------------------------------------------- refresco */
+
+/**
+ * Estado de la conexion con WhatsApp.
+ *
+ * Solo tiene sentido con los proveedores que se vinculan por QR: con la Cloud
+ * API de Meta no hay sesion que se caiga. En demostracion tampoco se avisa: la
+ * banda de arriba ya dice que nada sale.
+ */
 async function revisarConexion() {
   if (PROVEEDOR !== 'local' && PROVEEDOR !== 'waha') return;
+  if (EN_DEMO) return;
   var caja = document.getElementById('aviso-conexion');
   try {
     var estado = await api('/admin/' + PROVEEDOR + '/status');
-    if (estado.connected) {
-      caja.classList.add('hidden');
-      return;
-    }
-    caja.innerHTML = 'WhatsApp no está conectado' +
-      (estado.detail ? ' (' + esc(estado.detail) + ')' : '') +
-      ': lo que escribas aquí no va a salir. ' +
-      '<a href="/setup">Conectar ahora</a>';
+    if (estado.connected) { caja.classList.add('hidden'); return; }
+    caja.innerHTML = 'WhatsApp no está conectado' + (estado.detail ? ' (' + esc(estado.detail) + ')' : '') +
+      ': lo que escribas aquí no va a salir. <a href="/setup">Conectar ahora</a>';
     caja.classList.remove('hidden');
   } catch (error) {
     /* Si no se puede preguntar, no se inventa un estado: se deja como esta. */
   }
 }
 
-revisarConexion();
-setInterval(revisarConexion, 15000);
+/**
+ * El refresco no puede pisar al usuario.
+ *
+ * Con un menu abierto, una seleccion en marcha, la busqueda abierta o un
+ * adjunto esperando a salir, se salta el turno: repintar ahi es cerrarle al
+ * operador lo que estaba usando.
+ */
+function ocupado() {
+  return Boolean(menuAbierto) || (seleccion && seleccion.length > 0) ||
+    Boolean(adjuntoPendiente) || Boolean(grabadora) ||
+    !document.getElementById('buscar-hilo').classList.contains('hidden') ||
+    document.querySelector('.dlg-fondo, .visor, .ayuda-teclas') !== null;
+}
 
 setInterval(function () {
-  if (modo !== 'chat') return;
-  if (!enRespaldos) loadChats(true);
+  if (ocupado()) return;
+  loadChats(true);
   if (deseado) openChat(deseado, true);
 }, 5000);
 
-/**
- * Abrir un chat desde fuera: /chat?phone=51999888777&text=Hola...
- *
- * Es la puerta por la que entra Stoky. Su boton de "hablar por WhatsApp" en
- * seguimiento y cobranza ya arma el mensaje con el saldo exacto y el numero de
- * pedido; lo unico que cambia es que en vez de abrir wa.me abre esto, y la
- * conversacion queda dentro del sistema en vez de en el WhatsApp personal de
- * quien pulso el boton.
- *
- * El contacto se crea si no existe: quien viene de una venta puede no haber
- * escrito nunca todavia.
- */
+/* ------------------------------------------------------ abrir desde fuera
+
+   /chat?phone=51999888777&text=Hola... Es la puerta por la que entra Stoky:
+   la conversacion queda dentro del sistema en vez de en el WhatsApp personal
+   de quien pulso el boton. El texto se deja escrito, NO se manda. */
 async function abrirDesdeUrl() {
   var params = new URLSearchParams(location.search);
   var tel = (params.get('phone') || '').replace(/\D+/g, '');
   if (!tel) return;
-
   try {
     var r = await api('/admin/chat/start', { method: 'POST', body: { phone: tel } });
     await loadChats();
     await openChat(r.contact.id);
-
     var texto = params.get('text');
     if (texto) {
-      // Se deja escrito, NO se manda: quien pulso el boton tiene que poder
-      // leerlo y cambiarlo antes de que le llegue al cliente.
-      var caja = document.getElementById('text');
-      caja.value = texto;
-      caja.focus();
-      caja.setSelectionRange(texto.length, texto.length);
-      caja.dispatchEvent(new Event('input'));
+      input.value = texto;
+      input.focus();
+      input.setSelectionRange(texto.length, texto.length);
+      input.dispatchEvent(new Event('input'));
     }
-
-    // La URL se limpia para que recargar no vuelva a abrir lo mismo ni deje
-    // el mensaje del cliente colgado en el historial del navegador.
     history.replaceState(null, '', '/chat');
-  } catch (error) {
-    toast(error.message);
-  }
+  } catch (error) { toast(error.message); }
 }
 
-/* ------------------------------------------------------------ respaldos
+/* --------------------------------------------------- guardar y vaciar
 
-   Cerrar un chat guarda el hilo entero en un fichero y lo vacia de la base.
+   Guardar un chat escribe el hilo entero en un fichero y lo vacia de la base.
    Es lo que hace que el historial sobreviva a perder el numero, y de paso lo
    que evita que la base crezca sin fin. El servidor no borra nada hasta haber
-   escrito el respaldo y haberlo vuelto a leer entero. */
+   escrito el respaldo y haberlo vuelto a leer entero.
 
-function motivoTexto(reason) {
-  if (reason === 'lead') return 'al cerrar la ficha';
-  if (reason === 'inactividad') return 'por inactividad';
-  return 'cerrado a mano';
-}
-
-document.getElementById('cerrar-chat').onclick = function () { pedirCierre(); };
-var botonBot = document.getElementById('pausar-bot');
-if (botonBot) botonBot.onclick = function () { alternarBot(); };
+   LEER lo guardado no se hace aqui: para eso esta /guardados, que ademas trae
+   resumen, etiquetas, notas, adjuntos, buscador, PDF y "devolver al chat".
+   Aqui solo se guarda y se vacia, que es la accion que nace en la conversacion. */
 
 function pedirCierre() {
-  if (!current || modo !== 'chat') return;
+  if (!current) return;
   var caja = document.getElementById('confirmar-cierre');
   caja.innerHTML =
-    '<p>Se guarda <b>todo el historial</b> de ' + esc(current.name || current.phone) +
-    ' en «Guardados» y el chat queda vacío aquí. Lo guardado se puede leer, descargar ' +
+    '<p>Se guarda <b>todo el historial</b> de ' + esc(nombreDe(current)) +
+    ' en «Chats guardados» y el chat queda vacío aquí. Lo guardado se puede leer, descargar ' +
     'y devolver al chat cuando quieras, aunque se pierda el número.</p>' +
     '<div class="actions">' +
       '<button class="primary" id="ok-cierre">Guardar y vaciar</button>' +
@@ -1870,11 +1410,11 @@ function pedirCierre() {
 async function cerrarChat() {
   var boton = document.getElementById('ok-cierre');
   boton.disabled = true;
-  boton.textContent = 'Guardando...';
+  boton.textContent = 'Guardando…';
   try {
     var r = await api('/admin/chat/' + current.id + '/archive', { method: 'POST' });
     ver('confirmar-cierre', false);
-    toast('Guardados ' + r.archive.messageCount + ' mensajes. El chat quedó vacío.');
+    toast('Guardados ' + r.archive.messageCount + ' mensajes. El chat quedó vacío; lo guardado está en Chats guardados.');
     await openChat(current.id, true);
     loadChats(true);
   } catch (error) {
@@ -1883,188 +1423,33 @@ async function cerrarChat() {
     boton.textContent = 'Guardar y vaciar';
   }
 }
+`;
 
-/* Traer lo que ya se hablo antes de conectar el sistema (solo WAHA). */
-var botonImportar = document.getElementById('importar');
-if (botonImportar) {
-  botonImportar.onclick = async function () {
-    botonImportar.disabled = true;
-    toast('Trayendo las conversaciones de WhatsApp, puede tardar un poco...');
-    try {
-      var r = await api('/admin/waha/importar', { method: 'POST', body: {} });
-      toast('Listo: ' + r.chats + ' conversaciones y ' + r.mensajes + ' mensajes.' +
-        (r.omitidos ? ' Se omitieron ' + r.omitidos + ' grupos.' : ''));
-      loadChats();
-    } catch (error) {
-      toast(error.message);
-    } finally {
-      botonImportar.disabled = false;
-    }
-  };
-}
-
-document.getElementById('ver-respaldos').onclick = function () {
-  if (enRespaldos) volverAChats();
-  else abrirRespaldos();
-};
-
-function abrirRespaldos() {
-  enRespaldos = true;
-  ver('chats', false);
-  ver('respaldos', true);
-  ver('rb-resumen', true);
-  document.getElementById('q').value = '';
-  document.getElementById('q').placeholder = 'Buscar en los chats guardados';
-  cargarRespaldos();
-}
-
-function volverAChats() {
-  enRespaldos = false;
-  ver('chats', true);
-  ver('respaldos', false);
-  ver('rb-resumen', false);
-  document.getElementById('q').value = '';
-  document.getElementById('q').placeholder = 'Buscar por nombre o número';
-  loadChats();
-}
-
-async function cargarRespaldos() {
-  try {
-    var q = document.getElementById('q').value.trim();
-    var data = await api('/admin/archives?limit=100&q=' + encodeURIComponent(q));
-    var s = data.stats;
-
-    document.getElementById('rb-resumen').innerHTML =
-      '<b>' + s.total + '</b> chats guardados · ' + s.messages + ' mensajes · ' + pesoLegible(s.bytes) +
-      (data.inactividadDias
-        ? ' \u00b7 los chats sin movimiento se cierran solos a los ' + data.inactividadDias + ' dias'
-        : '') +
-      ' \u2014 <a class="link" href="#" id="volver-chats">volver a los chats</a>';
-    document.getElementById('volver-chats').onclick = function (e) {
-      e.preventDefault();
-      volverAChats();
-    };
-
-    var html = data.items.map(function (a) {
-      return '<div class="rb" data-rb="' + a.id + '">' +
-        '<div class="top">' +
-          '<span class="name">' + esc(a.name || a.phone) + '</span>' +
-          '<span class="when">' + esc(shortWhen(a.createdAt)) + '</span>' +
-        '</div>' +
-        '<div class="det">' + a.messageCount + ' mensajes \u00b7 ' + esc(motivoTexto(a.reason)) +
-          ' \u00b7 ' + pesoLegible(a.bytes) + '</div>' +
-        '</div>';
-    }).join('');
-
-    var box = document.getElementById('respaldos');
-    pintarLista(box, html || '<div class="empty">Todavía no has guardado ningún chat.<br>' +
-      'Cierra un chat con el botón de la cabecera y aparecerá aquí.</div>', 0);
-  } catch (error) { toast(error.message); }
-}
-
-document.getElementById('respaldos').addEventListener('click', function (event) {
-  var fila = event.target.closest('[data-rb]');
-  if (fila) abrirRespaldo(Number(fila.getAttribute('data-rb')));
-});
-
-async function abrirRespaldo(id) {
-  try {
-    var data = await api('/admin/archives/' + id);
-    var a = data.archive;
-
-    modo = 'respaldo';
-    ver('historial-bar', false);
-    /* Se suelta el chat que hubiera abierto: si no, el refresco lo repinta. */
-    deseado = null;
-
-    document.getElementById('app').classList.add('open-thread');
-    var sAppLect = document.getElementById('s-app'); if (sAppLect) sAppLect.classList.add('sin-nav-movil');
-    ver('thread-head', true);
-    ver('placeholder', false);
-    ver('messages', true);
-    ver('composer', false);
-    ver('tools', false);
-    ver('locked', false);
-    ver('confirmar-cierre', false);
-
-    document.getElementById('t-avatar').textContent = inicial(a.name, a.phone);
-    document.getElementById('t-name').textContent = a.name || a.phone;
-    document.getElementById('t-sub').innerHTML = esc(a.phone) +
-      ' · <span class="pill warn">chat guardado · solo lectura</span>';
-
-    lastCount = 0;
-    renderMessages(data.messages, true);
-
-    var caja = document.getElementById('lectura');
-    caja.innerHTML =
-      '<span class="que">' + a.messageCount + ' mensajes guardados el ' +
-        esc(dayLabel(a.createdAt)) + ' (' + esc(motivoTexto(a.reason)) + ')</span>' +
-      '<button class="primary" id="rb-restaurar">Devolver al chat</button>' +
-      '<button id="rb-descargar">Descargar</button>' +
-      '<button id="rb-cerrar">Cerrar</button>';
-    ver('lectura', true);
-
-    document.getElementById('rb-cerrar').onclick = function () {
-      ver('lectura', false);
-      ver('messages', false);
-      ver('thread-head', false);
-      ver('placeholder', true);
-      document.getElementById('app').classList.remove('open-thread');
-      var sAppVolver = document.getElementById('s-app'); if (sAppVolver) sAppVolver.classList.remove('sin-nav-movil');
-      modo = 'chat';
-    };
-    document.getElementById('rb-descargar').onclick = function () { descargarRespaldo(a); };
-    document.getElementById('rb-restaurar').onclick = function () { restaurar(a); };
-  } catch (error) { toast(error.message); }
-}
-
-/* La descarga va por fetch y no por un <a href>: el token viaja en la
-   cabecera, no en la URL, igual que con los adjuntos. */
-async function descargarRespaldo(a) {
-  try {
-    var res = await fetch('/admin/archives/' + a.id + '/download', {
-      credentials: 'same-origin'
-    });
-    if (!res.ok) throw new Error('No se pudo descargar el chat guardado.');
-    var url = URL.createObjectURL(await res.blob());
-    var enlace = document.createElement('a');
-    enlace.href = url;
-    enlace.download = 'chat-' + a.phone + '-' + a.createdAt.slice(0, 10) + '.ndjson.gz';
-    document.body.appendChild(enlace);
-    enlace.click();
-    enlace.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-  } catch (error) { toast(error.message); }
-}
-
-async function restaurar(a) {
-  var boton = document.getElementById('rb-restaurar');
-  boton.disabled = true;
-  boton.textContent = 'Devolviendo...';
-  try {
-    var r = await api('/admin/archives/' + a.id + '/restore', { method: 'POST' });
-    toast('Devueltos ' + r.restaurados + ' mensajes al chat.');
-    volverAChats();
-    await openChat(a.contactId);
-  } catch (error) {
-    toast(error.message);
-    boton.disabled = false;
-    boton.textContent = 'Devolver al chat';
-  }
-}
-
+  const arranque = String.raw`
+/* Se arranca al final, cuando ya existe todo lo de arriba. */
+pintarGrabandoVacio();
+pintarBotonDeEnviar();
 cargarAtajos();
 cargarStickers();
 loadTemplates();
+revisarConexion();
+setInterval(revisarConexion, 15000);
+sondearHistorial();
 loadChats().then(abrirDesdeUrl);
 `;
+
+  const script =
+    `var TEXTO_VER_UNA_VEZ = ${JSON.stringify(TEXTO_VER_UNA_VEZ)};\n` +
+    `var PROVEEDOR = ${JSON.stringify(proveedor)};\n` +
+    `var EN_DEMO = ${JSON.stringify(demo)};\n` +
+    nucleo + CHAT_JS_MENU + CHAT_JS_COMPOSITOR + arranque;
 
   return appShell({
     titulo: 'Chats',
     subtitulo: 'Las conversaciones, como en WhatsApp',
     contenido,
     script,
-    css: CSS,
+    css: CHAT_CSS,
     nombreNegocio: opts.nombreNegocio,
     demo,
     lleno: true,

@@ -14,10 +14,10 @@
 import { randomUUID } from 'node:crypto';
 import { CATALOG } from '../../templates/catalog.js';
 import { escribirComoHumano } from '../../salud/humano.js';
-import { WhatsAppApiError, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
+import { WhatsAppApiError, type CitaSaliente, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
 import { renderComponentsIntoBody } from '../waha/client.js';
 import { botonRespuesta, botonUbicacion, enviarConBotones } from './interactive.js';
-import { getLocalSocket, getLocalState, toJid } from './session.js';
+import { getLocalSocket, getLocalState, presenciaDe, suscribirPresencia, toJid } from './session.js';
 
 export interface LocalClientOptions {
   /** Cuerpo guardado de una plantilla: aqui se manda como texto sustituido. */
@@ -64,6 +64,33 @@ function resultOf(sent: { key?: { id?: string } } | undefined): SendResult {
   return { wamid: id || `local:${randomUUID()}` };
 }
 
+/**
+ * La clave de un mensaje, que es lo que Baileys pide para todo lo que actua
+ * SOBRE un mensaje: citarlo, reaccionar, borrarlo o editarlo.
+ *
+ * `participant` solo hace falta en un grupo (quien lo escribio); fuera de un
+ * grupo estorba, asi que solo se pone cuando viene.
+ */
+function claveDe(jid: string, mensaje: CitaSaliente) {
+  return {
+    remoteJid: jid,
+    id: mensaje.id,
+    fromMe: mensaje.fromMe,
+    ...(mensaje.participant ? { participant: mensaje.participant } : {}),
+  };
+}
+
+/**
+ * El mensaje citado tal como lo espera Baileys: su clave y algo de contenido.
+ *
+ * Aqui no se guarda el mensaje original entero, solo su id y un extracto, asi
+ * que se arma un mensaje minimo con el texto. Es lo que WhatsApp pinta dentro
+ * del bloque de la cita, y con eso basta.
+ */
+function citadoDe(jid: string, cita: CitaSaliente) {
+  return { key: claveDe(jid, cita), message: { conversation: cita.texto || '' } };
+}
+
 export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient {
   /**
    * Si el numero tiene WhatsApp, preguntandoselo al servidor.
@@ -108,9 +135,11 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
     );
   }
 
-  async function sendText(to: string, body: string): Promise<SendResult> {
+  async function sendText(to: string, body: string, _previewUrl?: boolean, cita?: CitaSaliente): Promise<SendResult> {
     const sock = socketOrThrow();
-    const sent = await conTeclado(to, body, () => sock.sendMessage(toJid(to), { text: body }));
+    const jid = toJid(to);
+    const opciones = cita ? { quoted: citadoDe(jid, cita) } : undefined;
+    const sent = await conTeclado(to, body, () => sock.sendMessage(jid, { text: body }, opciones));
     return resultOf(sent);
   }
 
@@ -135,8 +164,51 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
       // Una nota de voz no lleva pie: el `caption` de un audio es lo que se
       // dijo (para el hilo) y no se manda aparte; el "escribiendo..." de
       // antes se simula sobre ese texto, como si se estuviera grabando.
-      const sent = await conTeclado(to, media.caption ?? '', () => sock.sendMessage(toJid(to), contenido));
+      const jid = toJid(to);
+      const opciones = media.cita ? { quoted: citadoDe(jid, media.cita) } : undefined;
+      const sent = await conTeclado(to, media.caption ?? '', () => sock.sendMessage(jid, contenido, opciones));
       return resultOf(sent);
+    },
+
+    /**
+     * Reaccionar: para WhatsApp es un mensaje mas, con la clave del
+     * reaccionado dentro. Un texto vacio la quita, igual que en el telefono.
+     */
+    async sendReaction(to, mensaje, emoji) {
+      const sock = socketOrThrow();
+      const jid = toJid(to);
+      const sent = await sock.sendMessage(jid, { react: { text: emoji, key: claveDe(jid, mensaje) } });
+      return resultOf(sent);
+    },
+
+    /** "Eliminar para todos": aqui si existe, porque no hay Meta de por medio. */
+    async borrarParaTodos(to, mensaje) {
+      const sock = socketOrThrow();
+      const jid = toJid(to);
+      await sock.sendMessage(jid, { delete: claveDe(jid, mensaje) });
+    },
+
+    /** Editar un mensaje ya enviado. El cliente lo ensena con su "editado". */
+    async editarMensaje(to, mensaje, texto) {
+      const sock = socketOrThrow();
+      const jid = toJid(to);
+      const sent = await sock.sendMessage(jid, { text: texto, edit: claveDe(jid, mensaje) });
+      return resultOf(sent);
+    },
+
+    /**
+     * Si esta escribiendo, en linea, o cuando se le vio.
+     *
+     * Hay que suscribirse una vez por chat para que WhatsApp lo mande: se hace
+     * aqui mismo, y la primera consulta suele volver sin dato. No se inventa
+     * nada: sin dato, null.
+     */
+    async presencia(to) {
+      const jid = toJid(to);
+      await suscribirPresencia(jid);
+      const p = presenciaDe(jid);
+      if (!p) return null;
+      return { estado: p.estado, desde: new Date(p.ultimaVez ?? p.desde).toISOString() };
     },
 
     /** Un sticker de verdad: Baileys lo empaqueta como stickerMessage. */
@@ -144,6 +216,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
       const sock = socketOrThrow();
       const sent = await conTeclado(to, '', () => sock.sendMessage(toJid(to), { sticker: sticker.datos, mimetype: sticker.mimeType }));
       return resultOf(sent);
+      
     },
 
     async sendLocation(to, location) {
@@ -236,15 +309,33 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
 
     conectado: () => getLocalSocket() !== null,
 
-    async markAsRead(messageId) {
+    /**
+     * Doble check azul de verdad.
+     *
+     * Antes se mandaba `[{ id }]` a secas y Baileys no marcaba NADA: necesita
+     * la clave entera (de que chat es, si era nuestro y, en un grupo, de
+     * quien). Sin `chat` no se puede armar, y entonces se dice en el log en
+     * vez de callarse: un acuse que no llega es una queja del cliente.
+     */
+    async markAsRead(messageId, chat) {
       const sock = getLocalSocket();
       if (!sock) return;
-      // Baileys quiere la clave entera; con solo el id no se puede marcar, asi
-      // que se ignora en vez de fallar: el doble check azul es cosmetico.
+      if (!chat?.to) {
+        console.log('[wa] no se pudo marcar como leido: hace falta saber de que chat es', messageId);
+        return;
+      }
+      const jid = toJid(chat.to);
       try {
-        await sock.readMessages([{ id: messageId }]);
-      } catch {
-        // Idem: no vale la pena tumbar un envio por esto.
+        await sock.readMessages([
+          {
+            remoteJid: jid,
+            id: messageId,
+            fromMe: chat.fromMe ?? false,
+            ...(chat.participant ? { participant: chat.participant } : {}),
+          },
+        ]);
+      } catch (error) {
+        console.log('[wa] WhatsApp no aceptó el acuse de lectura:', String(error).slice(0, 200));
       }
     },
 

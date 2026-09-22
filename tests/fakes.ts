@@ -459,6 +459,17 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         if (!c) return;
         c.botPausadoAt = pausado ? at : null;
       },
+      async ajustesChat(contactId, ajustes, at) {
+        const c = [...contactsByPhone.values()].find((x) => x.id === contactId);
+        if (!c) return;
+        if (ajustes.fijado !== undefined) c.chatFijadoAt = ajustes.fijado ? at : null;
+        if (ajustes.silenciado !== undefined) c.chatSilenciadoAt = ajustes.silenciado ? at : null;
+        if (ajustes.apartado !== undefined) c.chatApartadoAt = ajustes.apartado ? at : null;
+      },
+      async marcarNoLeido(contactId, at) {
+        const c = [...contactsByPhone.values()].find((x) => x.id === contactId) as { chatReadAt?: Date | null } | undefined;
+        if (c) c.chatReadAt = at;
+      },
       async levantarSupresion(phone) {
         const c = contactsByPhone.get(phone);
         if (!c) return;
@@ -992,16 +1003,24 @@ export function createFakeWhatsApp(): FakeWhatsApp {
     },
     remoteTemplates: [],
     subscribedApps: [],
-    sendText: (to, body) => record({ kind: 'text', to, body }),
+    sendText: (to, body, _previewUrl, cita) => record({ kind: 'text', to, body, cita }),
     sendLocation: (to, location) => record({ kind: 'location', to, location }),
     sendLocationRequest: (to, body) => record({ kind: 'location_request', to, body }),
     sendSticker: (to, sticker) => record({ kind: 'sticker', to, bytes: sticker.datos.length, url: sticker.url }),
-    sendMedia: (to, media) => record({ kind: 'media', to, tipo: media.kind, bytes: media.datos.length, mimeType: media.mimeType, filename: media.filename, caption: media.caption, voz: media.voz ?? false }),
+    sendMedia: (to, media) => record({ kind: 'media', to, tipo: media.kind, bytes: media.datos.length, mimeType: media.mimeType, filename: media.filename, caption: media.caption, voz: media.voz ?? false, cita: media.cita }),
     sendButtons: (to, body, buttons) => record({ kind: 'buttons', to, body, buttons }),
     sendTemplate: (to, name, language, components) =>
       record({ kind: 'template', to, name, language, components }),
-    async markAsRead(messageId) {
-      sent.push({ kind: 'read', messageId });
+    async markAsRead(messageId, chat) {
+      sent.push({ kind: 'read', messageId, chat });
+    },
+    sendReaction: (to, mensaje, emoji) => record({ kind: 'reaction', to, messageId: mensaje.id, emoji }),
+    async borrarParaTodos(to, mensaje) {
+      sent.push({ kind: 'delete', to, messageId: mensaje.id });
+    },
+    editarMensaje: (to, mensaje, texto) => record({ kind: 'edit', to, messageId: mensaje.id, texto }),
+    async presencia() {
+      return null;
     },
     async getPhoneNumber() {
       if (client.failNext) {
