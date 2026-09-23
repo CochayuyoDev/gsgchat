@@ -213,65 +213,11 @@ export function explicarCierre(code: number | undefined): string {
   }
 }
 
-const estado: LocalState = {
-  status: 'STOPPED',
-  qr: null,
-  pairingCode: null,
-  phone: '',
-  name: '',
-  detail: 'Sin conectar.',
-};
-
-let socket: LocalSocket | null = null;
-let arrancando: Promise<LocalState> | null = null;
-let opciones: StartLocalOptions | null = null;
-
-/**
- * Nombre de cada grupo, por jid. Un mensaje de grupo no trae el nombre del
- * grupo (solo el `pushName` de quien escribe), y sin esto el chat lo
- * ensenaria como "120363412332267099@g.us".
- */
-const nombresDeGrupo = new Map<string, string>();
-
-export function nombreDeGrupo(jid: string | undefined): string | null {
-  if (!jid) return null;
-  return nombresDeGrupo.get(jid) ?? null;
-}
-
-/** Solo para las pruebas y para la carga inicial. */
-export function recordarGrupo(jid: string, nombre: string): void {
-  if (jid && nombre) nombresDeGrupo.set(jid, nombre);
-}
 
 export function esGrupo(jid: string | undefined): boolean {
   return typeof jid === 'string' && jid.endsWith('@g.us');
 }
 
-function resumirGrupo(jid: string, meta: GrupoMetadata | undefined): GrupoResumen {
-  const nombre = meta?.subject?.trim() || nombreDeGrupo(jid) || jid.replace(/@g\.us$/, '');
-  return { jid, nombre, participantes: Array.isArray(meta?.participants) ? meta!.participants!.length : 0 };
-}
-
-/**
- * Trae los grupos del numero y se los entrega al sistema.
- *
- * Se hace al conectar y en segundo plano: que WhatsApp tarde en contestar, o
- * que falle, no puede retrasar ni tumbar la conexion.
- */
-async function cargarGrupos(sock: LocalSocket, opts: StartLocalOptions, log: (m: string) => void): Promise<void> {
-  if (!sock.groupFetchAllParticipating) return;
-  try {
-    const todos = await sock.groupFetchAllParticipating();
-    const lista = Object.entries(todos ?? {})
-      .filter(([jid]) => esGrupo(jid))
-      .map(([jid, meta]) => resumirGrupo(jid, meta));
-    for (const g of lista) recordarGrupo(g.jid, g.nombre);
-    log(`grupos del numero: ${lista.length}`);
-    if (lista.length) await opts.onGrupos?.(lista);
-  } catch (error) {
-    log(`no se pudieron traer los grupos: ${String(error)}`);
-  }
-}
 
 /** Lo que se sabe del otro lado ahora mismo (ver el listener de `presence.update`). */
 export interface PresenciaChat {
@@ -282,46 +228,9 @@ export interface PresenciaChat {
   ultimaVez: number | null;
 }
 
-/** Presencia por jid. En memoria a proposito: caduca con la sesion. */
-const presencias = new Map<string, PresenciaChat>();
 
 /** "Escribiendo..." dura segundos; pasado esto ya no es verdad. */
 const PRESENCIA_VIVA_MS = 25_000;
-
-/**
- * Se suscribe a la presencia de un chat. Sin esto WhatsApp no manda nada de
- * ese contacto, por mucho que la sesion este abierta.
- */
-export async function suscribirPresencia(jid: string): Promise<void> {
-  const sock = getLocalSocket();
-  if (!sock?.presenceSubscribe) return;
-  await sock.presenceSubscribe(jid).catch(() => undefined);
-}
-
-/**
- * La presencia de un chat, o null si no se sabe.
- *
- * `null` no es "esta desconectado": es "no hay dato". La pantalla no inventa
- * nada con un null, que es justo lo que hay que hacer con la privacidad ajena.
- */
-export function presenciaDe(jid: string): PresenciaChat | null {
-  const p = presencias.get(jid);
-  if (!p) return null;
-  // "Escribiendo" caduca; "en linea" y la ultima vez siguen valiendo.
-  if ((p.estado === 'escribiendo' || p.estado === 'grabando') && Date.now() - p.desde > PRESENCIA_VIVA_MS) {
-    return { ...p, estado: 'en_linea' };
-  }
-  return p;
-}
-
-export function getLocalState(): LocalState {
-  return { ...estado };
-}
-
-/** El socket vivo, o null. Lo usa el cliente para enviar. */
-export function getLocalSocket(): LocalSocket | null {
-  return estado.status === 'WORKING' ? socket : null;
-}
 
 /** Telefono en digitos a jid de WhatsApp. */
 export function toJid(phone: string): string {
@@ -352,331 +261,6 @@ async function baileysSocket(deps: { authDir: string }) {
   return { sock, saveCreds };
 }
 
-/**
- * Deja la sesion arrancada y devuelve el estado en cuanto se sabe algo util:
- * o el QR listo para escanear, o la conexion ya hecha.
- *
- * Es idempotente: llamar dos veces no abre dos sockets, porque dos sesiones
- * con las mismas credenciales se echan la una a la otra.
- */
-export async function startLocal(opts: StartLocalOptions): Promise<LocalState> {
-  opciones = opts;
-  if (estado.status === 'WORKING' && socket) return getLocalState();
-  if (arrancando) return arrancando;
-
-  arrancando = abrir(opts).finally(() => {
-    arrancando = null;
-  });
-  return arrancando;
-}
-
-async function abrir(opts: StartLocalOptions): Promise<LocalState> {
-  const log = opts.log ?? (() => {});
-  mkdirSync(opts.authDir, { recursive: true });
-
-  estado.status = 'STARTING';
-  estado.detail = 'Abriendo la sesion...';
-  estado.qr = null;
-  estado.pairingCode = null;
-
-  const crear = opts.createSocket ?? baileysSocket;
-  const { sock, saveCreds } = await crear({ authDir: opts.authDir });
-  socket = sock;
-
-  // La promesa se resuelve en cuanto hay algo que enseñar: el QR o la
-  // conexion. No se espera a WORKING porque escanear lo hace una persona.
-  return new Promise<LocalState>((resolve) => {
-    let resuelta = false;
-    const listo = () => {
-      if (resuelta) return;
-      resuelta = true;
-      resolve(getLocalState());
-    };
-
-    sock.ev.on('creds.update', ((() => {
-      // Un socket ya cerrado no guarda nada: si se acaba de borrar la
-      // vinculacion por un 401, lo ultimo que hace falta es que un acuse
-      // tardio la vuelva a escribir con las mismas credenciales muertas.
-      if (socket !== sock) return;
-      // La carpeta puede haber desaparecido (un logout la borra): se vuelve a
-      // crear. Y un fallo al escribir se apunta, no revienta el servidor:
-      // era una promesa suelta y un ENOENT tumbo todo el sistema.
-      try {
-        mkdirSync(opts.authDir, { recursive: true });
-      } catch {
-        // Si ni siquiera se puede crear, lo dira el fallo de abajo.
-      }
-      saveCreds().catch((error: unknown) => log(`no se pudo guardar la vinculacion: ${String(error)}`));
-    }) as unknown) as (arg: never) => void);
-
-    sock.ev.on('connection.update', (((update: {
-      connection?: string;
-      qr?: string;
-      lastDisconnect?: { error?: { output?: { statusCode?: number }; message?: string } };
-    }) => {
-      void (async () => {
-        if (update.qr) {
-          estado.status = 'SCAN_QR_CODE';
-          estado.detail = 'Escanea el codigo desde el telefono.';
-          // toDataURL trae el prefijo "data:image/png;base64,"; la pantalla ya
-          // lo pone, asi que aqui se guarda solo el base64.
-          const dataUrl = await QRCode.toDataURL(update.qr, { margin: 1, width: 512 });
-          estado.qr = dataUrl.split(',')[1] ?? null;
-          listo();
-        }
-
-        if (update.connection === 'open') {
-          estado.status = 'WORKING';
-          estado.qr = null;
-          estado.pairingCode = null;
-          estado.phone = fromJid(sock.user?.id ?? '');
-          estado.name = sock.user?.name ?? '';
-          estado.detail = 'Conectado.';
-          log(`WhatsApp conectado: ${estado.phone}`);
-          listo();
-          void cargarGrupos(sock, opts, log);
-        }
-
-        if (update.connection === 'close') {
-          const code = update.lastDisconnect?.error?.output?.statusCode;
-          const explicacion = explicarCierre(code);
-          // Un socket viejo que se cierra tarde (el de un logout, mientras ya
-          // hay otro escaneando el QR) no puede borrar la vinculacion nueva
-          // ni cambiar el estado: eso es justo lo que tumbo el servidor.
-          if (socket !== sock) {
-            log(`cierre tardio de una sesion anterior (${code ?? 'sin codigo'}): se ignora`);
-            listo();
-            return;
-          }
-          try {
-            opts.onDisconnect?.(code, update.lastDisconnect?.error?.message ?? explicacion);
-          } catch {
-            // El aviso no puede tumbar la reconexion.
-          }
-          // 401 es "te desvincularon desde el telefono": no sirve reintentar,
-          // hay que escanear otra vez. 403 es que WhatsApp no quiere esta
-          // sesion -casi siempre un baneo-, y reintentar en bucle es lo peor
-          // que se puede hacer. Cualquier otro corte es de red.
-          if (code === 401 || code === 403 || code === 411 || code === 500) {
-            estado.status = 'STOPPED';
-            estado.detail = explicacion;
-            socket = null;
-            log(`WhatsApp desconectado (${code}): ${explicacion}`);
-            // Con la vinculacion muerta (el telefono la cerro, o esta
-            // corrupta) las credenciales guardadas ya no valen para nada y,
-            // peor, mientras existan cada "conectar" las reutiliza: WhatsApp
-            // las rechaza otra vez, la sesion vuelve a "parada" y el QR no
-            // sale nunca. Se borran para que el siguiente arranque empiece
-            // de cero, con su codigo. Un 403 no las toca: ahi el problema no
-            // es la vinculacion, es el numero.
-            if (vinculacionMuerta(code)) {
-              await rm(opts.authDir, { recursive: true, force: true }).catch((error: unknown) =>
-                log(`no se pudo borrar la vinculacion vieja: ${String(error)}`),
-              );
-              log('vinculacion borrada: al conectar saldra un QR nuevo');
-            }
-          } else {
-            estado.status = 'FAILED';
-            estado.detail = update.lastDisconnect?.error?.message ?? 'Se corto la conexion.';
-            log(`WhatsApp desconectado (${code ?? 'sin codigo'}), reintentando...`);
-            socket = null;
-            // Reintento suelto: el telefono se queda sin cobertura mas a
-            // menudo de lo que uno cree y no hay que perder la vinculacion.
-            setTimeout(() => {
-              if (opciones && estado.status === 'FAILED') void startLocal(opciones).catch(() => {});
-            }, 4000);
-          }
-          listo();
-        }
-      })().catch(() => {
-        estado.status = 'FAILED';
-        estado.detail = 'Fallo abriendo la sesion.';
-        listo();
-      });
-    }) as unknown) as (arg: never) => void);
-
-    /**
-     * Presencia del otro lado: "escribiendo...", "en linea", "ult. vez".
-     *
-     * WhatsApp solo la manda de los chats a los que te has suscrito y mientras
-     * dure la sesion, asi que se guarda en memoria y caduca sola: un dato de
-     * presencia de hace media hora no dice nada y ensenarlo es mentir.
-     */
-    sock.ev.on('presence.update', (((evento: { id?: string; presences?: Record<string, { lastKnownPresence?: string; lastSeen?: number }> }) => {
-      const jid = evento?.id;
-      if (!jid || !evento.presences) return;
-      for (const datos of Object.values(evento.presences)) {
-        const bruto = datos?.lastKnownPresence;
-        if (!bruto) continue;
-        const estado: PresenciaChat['estado'] =
-          bruto === 'composing' ? 'escribiendo'
-          : bruto === 'recording' ? 'grabando'
-          : bruto === 'available' ? 'en_linea'
-          : 'desconectado';
-        presencias.set(jid, { estado, desde: Date.now(), ultimaVez: datos.lastSeen ? datos.lastSeen * 1000 : null });
-      }
-    }) as unknown) as (arg: never) => void);
-
-    // Un grupo nuevo (te agregaron, lo creaste) o un cambio de nombre: se
-    // apunta para que el chat lo ensene con su nombre y no con el jid.
-    const grupoCambiado = (lista: unknown[]) => {
-      const resumen: GrupoResumen[] = [];
-      for (const item of lista ?? []) {
-        const g = item as GrupoMetadata & { id?: string };
-        if (!g?.id || !esGrupo(g.id)) continue;
-        // En `groups.update` solo viene lo que cambio: sin `subject` no hay
-        // nada que apuntar.
-        if (!g.subject?.trim()) continue;
-        const r = resumirGrupo(g.id, g);
-        recordarGrupo(r.jid, r.nombre);
-        resumen.push(r);
-      }
-      if (resumen.length) {
-        void Promise.resolve(opts.onGrupos?.(resumen)).catch((error: unknown) => log(`fallo apuntando un grupo: ${String(error)}`));
-      }
-    };
-    sock.ev.on('groups.upsert', ((lista: unknown[]) => grupoCambiado(lista)) as unknown as (arg: never) => void);
-    sock.ev.on('groups.update', ((lista: unknown[]) => grupoCambiado(lista)) as unknown as (arg: never) => void);
-
-    // Los acuses de los mensajes propios: entregado, leido, fallido. Sin
-    // esto el doble check del chat no se movia y, peor, el monitor de salud
-    // veia que nada de lo enviado constaba entregado y frenaba el numero por
-    // una senal que no existia.
-    sock.ev.on('messages.update', (((updates: unknown[]) => {
-      if (!opts.onChange) return;
-      const statuses = acksToStatuses(updates);
-      if (!statuses.length) return;
-      void Promise.resolve(opts.onChange({ statuses })).catch((error: unknown) =>
-        log(`fallo leyendo un acuse: ${String(error)}`),
-      );
-    }) as unknown) as (arg: never) => void);
-
-    /** Un entrante, venga del evento de Baileys o del sobre crudo. */
-    const procesarEntrante = async (
-      mensaje: unknown,
-      tipoEvento: string | undefined,
-      reenvio: boolean,
-      origen: 'upsert' | 'sobre' | 'historial',
-    ): Promise<void> => {
-      const key = (mensaje as { key?: { id?: string; remoteJid?: string; fromMe?: boolean; isViewOnce?: boolean } }).key;
-      if (key?.fromMe) {
-        await procesarPropio(mensaje, origen === 'historial' ? 'historial' : 'upsert');
-        return;
-      }
-      // El sobre de un "ver una vez" ya se atendio desde el gancho crudo (ver
-      // `escucharSobres`): Baileys lo vuelve a emitir cuando trae la marca.
-      if (origen === 'upsert' && key?.isViewOnce && key.id && sobresAtendidos.has(key.id) && !reenvio) return;
-
-      const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock, { resubida: origen !== 'historial' });
-      const telefono = await resolverTelefono(sock, key);
-      // Un grupo del que no se sabia el nombre todavia: se pregunta una
-      // vez y se recuerda.
-      if (esGrupo(key?.remoteJid) && !nombreDeGrupo(key?.remoteJid)) await aprenderNombreDeGrupo(sock, key!.remoteJid!, opts, log);
-      const value = toChangeValue(mensaje, telefono, media, {
-        nombreGrupo: nombreDeGrupo(key?.remoteJid),
-        // Baileys pone `requestId` cuando el mensaje es la respuesta del
-        // telefono a un reenvio que se le pidio: es la segunda entrega.
-        reenvio,
-      });
-      if (!value) {
-        log(`entrante descartado (${tipoEvento ?? 'sin tipo'}): ${key?.remoteJid ?? 'sin jid'} — ${porQueSeDescarta(mensaje, telefono)}`);
-        return;
-      }
-
-      // Lo que no llega en vivo (historial, cola de cuando el sistema
-      // estaba apagado) se guarda pero no se contesta. Ver `esMensajeViejo`.
-      const m = value.messages?.[0];
-      if (m && origen === 'historial') m.historial = true;
-      if (m && esMensajeViejo(tipoEvento, m.timestamp)) {
-        m.viejo = true;
-        log(`entrante ${m.type} de ${m.from} (${tipoEvento ?? 'sin tipo'}, viejo): se guarda sin contestar`);
-      } else {
-        log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}${m?.reenvio ? ' (reenviado por el telefono, ya con el fichero)' : ''}`);
-      }
-      // El sobre vacio de un "ver una vez": se le pide al telefono que lo
-      // reenvie ANTES de entregar el mensaje, para que la espera del
-      // manejador (que mira si llego el fichero) tenga algo que esperar.
-      if (m?.type === 'view_once' && !m.reenvio) pedirReenvio(sock, mensaje, log);
-      await opts.onChange?.(value);
-    };
-
-    /**
-     * Un mensaje propio (mandado desde el telefono): se traduce como si
-     * fuera entrante -es la misma forma- y se entrega como saliente.
-     */
-    const procesarPropio = async (mensaje: unknown, origen: 'upsert' | 'historial' = 'upsert'): Promise<void> => {
-      if (!opts.onPropio) return;
-      const m = mensaje as { key?: { id?: string; remoteJid?: string; isViewOnce?: boolean }; status?: unknown };
-      const jid = m.key?.remoteJid ?? '';
-      if (!m.key?.id || !jid || /@(broadcast|newsletter)$/.test(jid) || m.key.isViewOnce) return;
-      const media = await bajarAdjunto(mensaje, m.key.id, opts, log, sock, { resubida: origen !== 'historial' });
-      const telefono = await resolverTelefono(sock, m.key);
-      if (esGrupo(jid) && !nombreDeGrupo(jid)) await aprenderNombreDeGrupo(sock, jid, opts, log);
-      const value = toChangeValue({ ...(mensaje as object), key: { ...m.key, fromMe: false } }, telefono, media, { nombreGrupo: nombreDeGrupo(jid) });
-      const traducido = value?.messages?.[0];
-      if (!traducido) return;
-      if (origen === 'historial') traducido.historial = true;
-      // Borrar para todos un mensaje propio: se marca igual que el de un cliente.
-      if (traducido.type === 'revoke' && value) {
-        await opts.onChange?.(value);
-        return;
-      }
-      // Lo que no se ensena de uno mismo: reacciones, botones, avisos.
-      if (!PROPIOS_QUE_SE_GUARDAN.has(traducido.type)) return;
-      await opts.onPropio({ mensaje: traducido, status: ackToStatus(m.status) });
-    };
-
-    // El historial: al vincular, WhatsApp manda las conversaciones recientes
-    // (y bajo demanda, las anteriores de un chat). Entra por aqui, no por
-    // `messages.upsert`; sin esto el chat empezaba vacio.
-    sock.ev.on('messaging-history.set', (((historial: { messages?: unknown[]; syncType?: unknown; progress?: unknown }) => {
-      if (!opts.onChange) return;
-      const lista = historial.messages ?? [];
-      log(`historial del telefono: ${lista.length} mensajes (tipo ${String(historial.syncType ?? '?')}${historial.progress != null ? `, ${String(historial.progress)}%` : ''})`);
-      trozosEnProceso += 1;
-      // HistorySyncType: 0 INITIAL_BOOTSTRAP, 3 RECENT (por trozos, con
-      // `progress`), 6 ON_DEMAND. El ultimo trozo del RECENT marca el final
-      // de la sincronizacion inicial, pero los trozos se guardan en paralelo:
-      // se avisa cuando TODOS terminaron, no cuando llega el ultimo.
-      if (Number(historial.syncType) === 3 && Number(historial.progress) >= 100) finDeSincronizacionPendiente = true;
-      void (async () => {
-        for (const mensaje of lista) {
-          try {
-            await procesarEntrante(mensaje, 'append', false, 'historial');
-          } catch (error) {
-            log(`fallo guardando un mensaje del historial: ${String(error)}`);
-          }
-        }
-        // Se avisa DESPUES de guardar: quien espera va a mirar la base.
-        const avisar = esperasHistorial;
-        esperasHistorial = [];
-        for (const f of avisar) f(lista.length);
-        trozosEnProceso -= 1;
-        if (finDeSincronizacionPendiente && trozosEnProceso === 0) {
-          finDeSincronizacionPendiente = false;
-          log('sincronizacion inicial completa: todos los chats tienen ya su referencia');
-          await Promise.resolve(opts.onSincronizacionInicial?.()).catch((error: unknown) => log(`fallo tras la sincronizacion inicial: ${String(error)}`));
-        }
-      })();
-    }) as unknown) as (arg: never) => void);
-
-    sock.ev.on('messages.upsert', (((evento: { messages?: unknown[]; type?: string; requestId?: string }) => {
-      if (!opts.onChange) return;
-      void (async () => {
-        for (const mensaje of evento.messages ?? []) {
-          await procesarEntrante(mensaje, evento.type, Boolean(evento.requestId), 'upsert');
-        }
-      })().catch((error: unknown) => log(`fallo leyendo un entrante: ${String(error)}`));
-    }) as unknown) as (arg: never) => void);
-
-    // Los sobres de "ver una vez" que Baileys tira antes de avisar.
-    escucharSobres(sock, (mensaje, tipoEvento) => procesarEntrante(mensaje, tipoEvento, false, 'sobre'), log);
-
-    // Si el socket ya venia vinculado no llega ningun QR: se le da un margen
-    // corto para que diga "open" y, si no, se contesta con lo que haya.
-    setTimeout(listo, 8000);
-  });
-}
 
 /**
  * Por que un entrante no se pudo convertir en mensaje, para el log.
@@ -752,68 +336,9 @@ async function resolverTelefono(
   }
 }
 
-/** El nombre de un grupo que se ve por primera vez: se pregunta y se apunta. */
-async function aprenderNombreDeGrupo(sock: LocalSocket, jid: string, opts: StartLocalOptions, log: (m: string) => void): Promise<void> {
-  if (!sock.groupMetadata) return;
-  try {
-    const meta = await sock.groupMetadata(jid);
-    const r = resumirGrupo(jid, meta);
-    recordarGrupo(r.jid, r.nombre);
-    await opts.onGrupos?.([r]);
-  } catch (error) {
-    log(`no se pudo leer el nombre del grupo ${jid}: ${String(error)}`);
-  }
-}
-
-/** Ids de los sobres de "ver una vez" ya atendidos por el gancho crudo. */
-const sobresAtendidos = new Set<string>();
-
-/** Trozos del historial que todavia se estan guardando, y si ya llego el ultimo. */
-let trozosEnProceso = 0;
-let finDeSincronizacionPendiente = false;
-
-/** Quien espera el proximo lote de historial del telefono (ver `proximoHistorial`). */
-let esperasHistorial: Array<(n: number) => void> = [];
-
-/**
- * Se resuelve con el tamano del proximo lote de historial que mande el
- * telefono, o null si no llega en `timeoutMs`. Es lo que permite pedir
- * "lo anterior" una y otra vez sin pisar la peticion anterior.
- */
-export function proximoHistorial(timeoutMs = 20_000): Promise<number | null> {
-  return new Promise((resolve) => {
-    const t = setTimeout(() => {
-      esperasHistorial = esperasHistorial.filter((f) => f !== listo);
-      resolve(null);
-    }, timeoutMs);
-    const listo = (n: number) => {
-      clearTimeout(t);
-      resolve(n);
-    };
-    esperasHistorial.push(listo);
-  });
-}
 
 /** Lo que de un mensaje propio merece una fila en el hilo. */
 const PROPIOS_QUE_SE_GUARDAN = new Set(['text', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'reaction']);
-
-/**
- * Le pide al telefono los mensajes anteriores de un chat.
- *
- * Hace falta un mensaje ancla (el mas viejo que se tiene): el telefono manda
- * los `cantidad` anteriores a el por `messaging-history.set`. Devuelve el id
- * de la peticion; lo que llegue entra solo por el mismo camino que el resto.
- */
-export async function pedirHistorial(
-  jid: string,
-  ancla: { id: string; fromMe: boolean; timestampMs: number },
-  cantidad = 50,
-): Promise<string> {
-  const sock = getLocalSocket();
-  if (!sock) throw new Error('WhatsApp no esta conectado.');
-  if (!sock.fetchMessageHistory) throw new Error('Esta version del cliente no sabe pedir el historial.');
-  return sock.fetchMessageHistory(cantidad, { remoteJid: jid, fromMe: ancla.fromMe, id: ancla.id }, ancla.timestampMs);
-}
 
 /**
  * Engancha el socket crudo para ver los "ver una vez" que Baileys descarta.
@@ -825,10 +350,14 @@ export async function pedirHistorial(
  * el log solo quedaba un debug, y en la pantalla, nada. Aqui se leen los dos
  * del nodo y se atienden igual: aviso en el chat y peticion de reenvio.
  */
+/** Los sobres atendidos de quien llama a `escucharSobres` sin sesion (pruebas). */
+const sobresSueltos = new Set<string>();
+
 export function escucharSobres(
   sock: LocalSocket,
   entregar: (mensaje: unknown, tipoEvento: string) => Promise<void>,
   log: (m: string) => void,
+  sobresAtendidos: Set<string> = sobresSueltos,
 ): void {
   if (!sock.ws?.on) return;
   // Traza de lo que entra por el socket, nodo a nodo (sin contenido): es lo
@@ -916,60 +445,6 @@ function pedirReenvio(sock: LocalSocket, mensaje: unknown, log: (m: string) => v
     .catch((error: unknown) => log(`no se pudo pedir el reenvio del "ver una vez": ${String(error)}`));
 }
 
-/** Vincular con numero en vez de con la camara. */
-export async function requestLocalPairingCode(phone: string): Promise<string> {
-  const digitos = phone.replace(/\D+/g, '');
-  if (!digitos) throw new Error('falta el numero de telefono');
-  if (!socket) throw new Error('la sesion no esta abierta todavia');
-
-  const code = await socket.requestPairingCode(digitos);
-  estado.pairingCode = code;
-  estado.detail = 'Teclea el codigo en el telefono.';
-  return code;
-}
-
-/** Cierra la sesion y borra la vinculacion: obliga a escanear otro QR. */
-export async function logoutLocal(authDir: string): Promise<void> {
-  const viejo = socket;
-  // Se suelta primero: asi el "close" que provoca el logout ya no es el del
-  // socket vigente y no borra nada por su cuenta (ver connection.update).
-  socket = null;
-  try {
-    await viejo?.logout();
-  } catch {
-    // Si el telefono ya la cerro, logout falla y da igual: lo que importa es
-    // borrar las credenciales de aqui.
-  }
-  try {
-    viejo?.end();
-  } catch {
-    // Un socket ya cerrado puede quejarse al cerrarlo otra vez.
-  }
-  await rm(authDir, { recursive: true, force: true });
-  estado.status = 'STOPPED';
-  estado.qr = null;
-  estado.pairingCode = null;
-  estado.phone = '';
-  estado.name = '';
-  estado.detail = 'Sesion cerrada.';
-}
-
-/** Solo para las pruebas: deja el modulo como recien cargado. */
-export function resetLocalForTests(): void {
-  socket = null;
-  arrancando = null;
-  opciones = null;
-  nombresDeGrupo.clear();
-  sobresAtendidos.clear();
-  Object.assign(estado, {
-    status: 'STOPPED',
-    qr: null,
-    pairingCode: null,
-    phone: '',
-    name: '',
-    detail: 'Sin conectar.',
-  });
-}
 
 /** Donde se guarda la vinculacion por defecto. */
 export function defaultAuthDir(base = process.cwd()): string {
@@ -1441,3 +916,626 @@ export function toChangeValue(
   return null;
   }
 }
+
+
+/**
+ * Lo que una sesion de WhatsApp sabe hacer. Hay UNA por tienda: cada tienda
+ * vincula su propio numero y nada de esto se comparte entre tiendas (ni el
+ * socket, ni el QR, ni los nombres de grupo, ni la presencia).
+ */
+export interface SesionLocal {
+  startLocal(opts: StartLocalOptions): Promise<LocalState>;
+  getLocalState(): LocalState;
+  getLocalSocket(): LocalSocket | null;
+  nombreDeGrupo(jid: string | undefined): string | null;
+  recordarGrupo(jid: string, nombre: string): void;
+  suscribirPresencia(jid: string): Promise<void>;
+  presenciaDe(jid: string): PresenciaChat | null;
+  proximoHistorial(timeoutMs?: number): Promise<number | null>;
+  pedirHistorial(jid: string, ancla: { id: string; fromMe: boolean; timestampMs: number }, cantidad?: number): Promise<string>;
+  requestLocalPairingCode(phone: string): Promise<string>;
+  logoutLocal(authDir: string): Promise<void>;
+  /**
+   * Cierra el socket SIN desvincular (la vinculacion se queda en su carpeta)
+   * y sin reintentos: es lo que se hace al parar una tienda.
+   */
+  detener(): void;
+  resetLocalForTests(): void;
+}
+
+/**
+ * Una sesion nueva, con su propia memoria. La plataforma crea una por tienda
+ * (ver src/plataforma); el arranque de una sola tienda usa la de por defecto.
+ */
+export function crearSesionLocal(): SesionLocal {
+  const estado: LocalState = {
+    status: 'STOPPED',
+    qr: null,
+    pairingCode: null,
+    phone: '',
+    name: '',
+    detail: 'Sin conectar.',
+  };
+
+  let socket: LocalSocket | null = null;
+  let arrancando: Promise<LocalState> | null = null;
+  let opciones: StartLocalOptions | null = null;
+
+  /**
+   * Nombre de cada grupo, por jid. Un mensaje de grupo no trae el nombre del
+   * grupo (solo el `pushName` de quien escribe), y sin esto el chat lo
+   * ensenaria como "120363412332267099@g.us".
+   */
+  const nombresDeGrupo = new Map<string, string>();
+
+  function nombreDeGrupo(jid: string | undefined): string | null {
+    if (!jid) return null;
+    return nombresDeGrupo.get(jid) ?? null;
+  }
+
+  /** Solo para las pruebas y para la carga inicial. */
+  function recordarGrupo(jid: string, nombre: string): void {
+    if (jid && nombre) nombresDeGrupo.set(jid, nombre);
+  }
+
+  function resumirGrupo(jid: string, meta: GrupoMetadata | undefined): GrupoResumen {
+    const nombre = meta?.subject?.trim() || nombreDeGrupo(jid) || jid.replace(/@g\.us$/, '');
+    return { jid, nombre, participantes: Array.isArray(meta?.participants) ? meta!.participants!.length : 0 };
+  }
+
+  /**
+   * Trae los grupos del numero y se los entrega al sistema.
+   *
+   * Se hace al conectar y en segundo plano: que WhatsApp tarde en contestar, o
+   * que falle, no puede retrasar ni tumbar la conexion.
+   */
+  async function cargarGrupos(sock: LocalSocket, opts: StartLocalOptions, log: (m: string) => void): Promise<void> {
+    if (!sock.groupFetchAllParticipating) return;
+    try {
+      const todos = await sock.groupFetchAllParticipating();
+      const lista = Object.entries(todos ?? {})
+        .filter(([jid]) => esGrupo(jid))
+        .map(([jid, meta]) => resumirGrupo(jid, meta));
+      for (const g of lista) recordarGrupo(g.jid, g.nombre);
+      log(`grupos del numero: ${lista.length}`);
+      if (lista.length) await opts.onGrupos?.(lista);
+    } catch (error) {
+      log(`no se pudieron traer los grupos: ${String(error)}`);
+    }
+  }
+
+  /** Presencia por jid. En memoria a proposito: caduca con la sesion. */
+  const presencias = new Map<string, PresenciaChat>();
+
+
+  /**
+   * Se suscribe a la presencia de un chat. Sin esto WhatsApp no manda nada de
+   * ese contacto, por mucho que la sesion este abierta.
+   */
+  async function suscribirPresencia(jid: string): Promise<void> {
+    const sock = getLocalSocket();
+    if (!sock?.presenceSubscribe) return;
+    await sock.presenceSubscribe(jid).catch(() => undefined);
+  }
+
+  /**
+   * La presencia de un chat, o null si no se sabe.
+   *
+   * `null` no es "esta desconectado": es "no hay dato". La pantalla no inventa
+   * nada con un null, que es justo lo que hay que hacer con la privacidad ajena.
+   */
+  function presenciaDe(jid: string): PresenciaChat | null {
+    const p = presencias.get(jid);
+    if (!p) return null;
+    // "Escribiendo" caduca; "en linea" y la ultima vez siguen valiendo.
+    if ((p.estado === 'escribiendo' || p.estado === 'grabando') && Date.now() - p.desde > PRESENCIA_VIVA_MS) {
+      return { ...p, estado: 'en_linea' };
+    }
+    return p;
+  }
+
+  function getLocalState(): LocalState {
+    return { ...estado };
+  }
+
+  /** El socket vivo, o null. Lo usa el cliente para enviar. */
+  function getLocalSocket(): LocalSocket | null {
+    return estado.status === 'WORKING' ? socket : null;
+  }
+
+  /**
+   * Deja la sesion arrancada y devuelve el estado en cuanto se sabe algo util:
+   * o el QR listo para escanear, o la conexion ya hecha.
+   *
+   * Es idempotente: llamar dos veces no abre dos sockets, porque dos sesiones
+   * con las mismas credenciales se echan la una a la otra.
+   */
+  async function startLocal(opts: StartLocalOptions): Promise<LocalState> {
+    opciones = opts;
+    if (estado.status === 'WORKING' && socket) return getLocalState();
+    if (arrancando) return arrancando;
+
+    arrancando = abrir(opts).finally(() => {
+      arrancando = null;
+    });
+    return arrancando;
+  }
+
+  async function abrir(opts: StartLocalOptions): Promise<LocalState> {
+    const log = opts.log ?? (() => {});
+    mkdirSync(opts.authDir, { recursive: true });
+
+    estado.status = 'STARTING';
+    estado.detail = 'Abriendo la sesion...';
+    estado.qr = null;
+    estado.pairingCode = null;
+
+    const crear = opts.createSocket ?? baileysSocket;
+    const { sock, saveCreds } = await crear({ authDir: opts.authDir });
+    socket = sock;
+
+    // La promesa se resuelve en cuanto hay algo que enseñar: el QR o la
+    // conexion. No se espera a WORKING porque escanear lo hace una persona.
+    return new Promise<LocalState>((resolve) => {
+      let resuelta = false;
+      const listo = () => {
+        if (resuelta) return;
+        resuelta = true;
+        resolve(getLocalState());
+      };
+
+      sock.ev.on('creds.update', ((() => {
+        // Un socket ya cerrado no guarda nada: si se acaba de borrar la
+        // vinculacion por un 401, lo ultimo que hace falta es que un acuse
+        // tardio la vuelva a escribir con las mismas credenciales muertas.
+        if (socket !== sock) return;
+        // La carpeta puede haber desaparecido (un logout la borra): se vuelve a
+        // crear. Y un fallo al escribir se apunta, no revienta el servidor:
+        // era una promesa suelta y un ENOENT tumbo todo el sistema.
+        try {
+          mkdirSync(opts.authDir, { recursive: true });
+        } catch {
+          // Si ni siquiera se puede crear, lo dira el fallo de abajo.
+        }
+        saveCreds().catch((error: unknown) => log(`no se pudo guardar la vinculacion: ${String(error)}`));
+      }) as unknown) as (arg: never) => void);
+
+      sock.ev.on('connection.update', (((update: {
+        connection?: string;
+        qr?: string;
+        lastDisconnect?: { error?: { output?: { statusCode?: number }; message?: string } };
+      }) => {
+        void (async () => {
+          if (update.qr) {
+            estado.status = 'SCAN_QR_CODE';
+            estado.detail = 'Escanea el codigo desde el telefono.';
+            // toDataURL trae el prefijo "data:image/png;base64,"; la pantalla ya
+            // lo pone, asi que aqui se guarda solo el base64.
+            const dataUrl = await QRCode.toDataURL(update.qr, { margin: 1, width: 512 });
+            estado.qr = dataUrl.split(',')[1] ?? null;
+            listo();
+          }
+
+          if (update.connection === 'open') {
+            estado.status = 'WORKING';
+            estado.qr = null;
+            estado.pairingCode = null;
+            estado.phone = fromJid(sock.user?.id ?? '');
+            estado.name = sock.user?.name ?? '';
+            estado.detail = 'Conectado.';
+            log(`WhatsApp conectado: ${estado.phone}`);
+            listo();
+            void cargarGrupos(sock, opts, log);
+          }
+
+          if (update.connection === 'close') {
+            const code = update.lastDisconnect?.error?.output?.statusCode;
+            const explicacion = explicarCierre(code);
+            // Un socket viejo que se cierra tarde (el de un logout, mientras ya
+            // hay otro escaneando el QR) no puede borrar la vinculacion nueva
+            // ni cambiar el estado: eso es justo lo que tumbo el servidor.
+            if (socket !== sock) {
+              log(`cierre tardio de una sesion anterior (${code ?? 'sin codigo'}): se ignora`);
+              listo();
+              return;
+            }
+            try {
+              opts.onDisconnect?.(code, update.lastDisconnect?.error?.message ?? explicacion);
+            } catch {
+              // El aviso no puede tumbar la reconexion.
+            }
+            // 401 es "te desvincularon desde el telefono": no sirve reintentar,
+            // hay que escanear otra vez. 403 es que WhatsApp no quiere esta
+            // sesion -casi siempre un baneo-, y reintentar en bucle es lo peor
+            // que se puede hacer. Cualquier otro corte es de red.
+            if (code === 401 || code === 403 || code === 411 || code === 500) {
+              estado.status = 'STOPPED';
+              estado.detail = explicacion;
+              socket = null;
+              log(`WhatsApp desconectado (${code}): ${explicacion}`);
+              // Con la vinculacion muerta (el telefono la cerro, o esta
+              // corrupta) las credenciales guardadas ya no valen para nada y,
+              // peor, mientras existan cada "conectar" las reutiliza: WhatsApp
+              // las rechaza otra vez, la sesion vuelve a "parada" y el QR no
+              // sale nunca. Se borran para que el siguiente arranque empiece
+              // de cero, con su codigo. Un 403 no las toca: ahi el problema no
+              // es la vinculacion, es el numero.
+              if (vinculacionMuerta(code)) {
+                await rm(opts.authDir, { recursive: true, force: true }).catch((error: unknown) =>
+                  log(`no se pudo borrar la vinculacion vieja: ${String(error)}`),
+                );
+                log('vinculacion borrada: al conectar saldra un QR nuevo');
+              }
+            } else {
+              estado.status = 'FAILED';
+              estado.detail = update.lastDisconnect?.error?.message ?? 'Se corto la conexion.';
+              log(`WhatsApp desconectado (${code ?? 'sin codigo'}), reintentando...`);
+              socket = null;
+              // Reintento suelto: el telefono se queda sin cobertura mas a
+              // menudo de lo que uno cree y no hay que perder la vinculacion.
+              setTimeout(() => {
+                if (opciones && estado.status === 'FAILED') void startLocal(opciones).catch(() => {});
+              }, 4000);
+            }
+            listo();
+          }
+        })().catch(() => {
+          estado.status = 'FAILED';
+          estado.detail = 'Fallo abriendo la sesion.';
+          listo();
+        });
+      }) as unknown) as (arg: never) => void);
+
+      /**
+       * Presencia del otro lado: "escribiendo...", "en linea", "ult. vez".
+       *
+       * WhatsApp solo la manda de los chats a los que te has suscrito y mientras
+       * dure la sesion, asi que se guarda en memoria y caduca sola: un dato de
+       * presencia de hace media hora no dice nada y ensenarlo es mentir.
+       */
+      sock.ev.on('presence.update', (((evento: { id?: string; presences?: Record<string, { lastKnownPresence?: string; lastSeen?: number }> }) => {
+        const jid = evento?.id;
+        if (!jid || !evento.presences) return;
+        for (const datos of Object.values(evento.presences)) {
+          const bruto = datos?.lastKnownPresence;
+          if (!bruto) continue;
+          const estado: PresenciaChat['estado'] =
+            bruto === 'composing' ? 'escribiendo'
+            : bruto === 'recording' ? 'grabando'
+            : bruto === 'available' ? 'en_linea'
+            : 'desconectado';
+          presencias.set(jid, { estado, desde: Date.now(), ultimaVez: datos.lastSeen ? datos.lastSeen * 1000 : null });
+        }
+      }) as unknown) as (arg: never) => void);
+
+      // Un grupo nuevo (te agregaron, lo creaste) o un cambio de nombre: se
+      // apunta para que el chat lo ensene con su nombre y no con el jid.
+      const grupoCambiado = (lista: unknown[]) => {
+        const resumen: GrupoResumen[] = [];
+        for (const item of lista ?? []) {
+          const g = item as GrupoMetadata & { id?: string };
+          if (!g?.id || !esGrupo(g.id)) continue;
+          // En `groups.update` solo viene lo que cambio: sin `subject` no hay
+          // nada que apuntar.
+          if (!g.subject?.trim()) continue;
+          const r = resumirGrupo(g.id, g);
+          recordarGrupo(r.jid, r.nombre);
+          resumen.push(r);
+        }
+        if (resumen.length) {
+          void Promise.resolve(opts.onGrupos?.(resumen)).catch((error: unknown) => log(`fallo apuntando un grupo: ${String(error)}`));
+        }
+      };
+      sock.ev.on('groups.upsert', ((lista: unknown[]) => grupoCambiado(lista)) as unknown as (arg: never) => void);
+      sock.ev.on('groups.update', ((lista: unknown[]) => grupoCambiado(lista)) as unknown as (arg: never) => void);
+
+      // Los acuses de los mensajes propios: entregado, leido, fallido. Sin
+      // esto el doble check del chat no se movia y, peor, el monitor de salud
+      // veia que nada de lo enviado constaba entregado y frenaba el numero por
+      // una senal que no existia.
+      sock.ev.on('messages.update', (((updates: unknown[]) => {
+        if (!opts.onChange) return;
+        const statuses = acksToStatuses(updates);
+        if (!statuses.length) return;
+        void Promise.resolve(opts.onChange({ statuses })).catch((error: unknown) =>
+          log(`fallo leyendo un acuse: ${String(error)}`),
+        );
+      }) as unknown) as (arg: never) => void);
+
+      /** Un entrante, venga del evento de Baileys o del sobre crudo. */
+      const procesarEntrante = async (
+        mensaje: unknown,
+        tipoEvento: string | undefined,
+        reenvio: boolean,
+        origen: 'upsert' | 'sobre' | 'historial',
+      ): Promise<void> => {
+        const key = (mensaje as { key?: { id?: string; remoteJid?: string; fromMe?: boolean; isViewOnce?: boolean } }).key;
+        if (key?.fromMe) {
+          await procesarPropio(mensaje, origen === 'historial' ? 'historial' : 'upsert');
+          return;
+        }
+        // El sobre de un "ver una vez" ya se atendio desde el gancho crudo (ver
+        // `escucharSobres`): Baileys lo vuelve a emitir cuando trae la marca.
+        if (origen === 'upsert' && key?.isViewOnce && key.id && sobresAtendidos.has(key.id) && !reenvio) return;
+
+        const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock, { resubida: origen !== 'historial' });
+        const telefono = await resolverTelefono(sock, key);
+        // Un grupo del que no se sabia el nombre todavia: se pregunta una
+        // vez y se recuerda.
+        if (esGrupo(key?.remoteJid) && !nombreDeGrupo(key?.remoteJid)) await aprenderNombreDeGrupo(sock, key!.remoteJid!, opts, log);
+        const value = toChangeValue(mensaje, telefono, media, {
+          nombreGrupo: nombreDeGrupo(key?.remoteJid),
+          // Baileys pone `requestId` cuando el mensaje es la respuesta del
+          // telefono a un reenvio que se le pidio: es la segunda entrega.
+          reenvio,
+        });
+        if (!value) {
+          log(`entrante descartado (${tipoEvento ?? 'sin tipo'}): ${key?.remoteJid ?? 'sin jid'} — ${porQueSeDescarta(mensaje, telefono)}`);
+          return;
+        }
+
+        // Lo que no llega en vivo (historial, cola de cuando el sistema
+        // estaba apagado) se guarda pero no se contesta. Ver `esMensajeViejo`.
+        const m = value.messages?.[0];
+        if (m && origen === 'historial') m.historial = true;
+        if (m && esMensajeViejo(tipoEvento, m.timestamp)) {
+          m.viejo = true;
+          log(`entrante ${m.type} de ${m.from} (${tipoEvento ?? 'sin tipo'}, viejo): se guarda sin contestar`);
+        } else {
+          log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}${m?.reenvio ? ' (reenviado por el telefono, ya con el fichero)' : ''}`);
+        }
+        // El sobre vacio de un "ver una vez": se le pide al telefono que lo
+        // reenvie ANTES de entregar el mensaje, para que la espera del
+        // manejador (que mira si llego el fichero) tenga algo que esperar.
+        if (m?.type === 'view_once' && !m.reenvio) pedirReenvio(sock, mensaje, log);
+        await opts.onChange?.(value);
+      };
+
+      /**
+       * Un mensaje propio (mandado desde el telefono): se traduce como si
+       * fuera entrante -es la misma forma- y se entrega como saliente.
+       */
+      const procesarPropio = async (mensaje: unknown, origen: 'upsert' | 'historial' = 'upsert'): Promise<void> => {
+        if (!opts.onPropio) return;
+        const m = mensaje as { key?: { id?: string; remoteJid?: string; isViewOnce?: boolean }; status?: unknown };
+        const jid = m.key?.remoteJid ?? '';
+        if (!m.key?.id || !jid || /@(broadcast|newsletter)$/.test(jid) || m.key.isViewOnce) return;
+        const media = await bajarAdjunto(mensaje, m.key.id, opts, log, sock, { resubida: origen !== 'historial' });
+        const telefono = await resolverTelefono(sock, m.key);
+        if (esGrupo(jid) && !nombreDeGrupo(jid)) await aprenderNombreDeGrupo(sock, jid, opts, log);
+        const value = toChangeValue({ ...(mensaje as object), key: { ...m.key, fromMe: false } }, telefono, media, { nombreGrupo: nombreDeGrupo(jid) });
+        const traducido = value?.messages?.[0];
+        if (!traducido) return;
+        if (origen === 'historial') traducido.historial = true;
+        // Borrar para todos un mensaje propio: se marca igual que el de un cliente.
+        if (traducido.type === 'revoke' && value) {
+          await opts.onChange?.(value);
+          return;
+        }
+        // Lo que no se ensena de uno mismo: reacciones, botones, avisos.
+        if (!PROPIOS_QUE_SE_GUARDAN.has(traducido.type)) return;
+        await opts.onPropio({ mensaje: traducido, status: ackToStatus(m.status) });
+      };
+
+      // El historial: al vincular, WhatsApp manda las conversaciones recientes
+      // (y bajo demanda, las anteriores de un chat). Entra por aqui, no por
+      // `messages.upsert`; sin esto el chat empezaba vacio.
+      sock.ev.on('messaging-history.set', (((historial: { messages?: unknown[]; syncType?: unknown; progress?: unknown }) => {
+        if (!opts.onChange) return;
+        const lista = historial.messages ?? [];
+        log(`historial del telefono: ${lista.length} mensajes (tipo ${String(historial.syncType ?? '?')}${historial.progress != null ? `, ${String(historial.progress)}%` : ''})`);
+        trozosEnProceso += 1;
+        // HistorySyncType: 0 INITIAL_BOOTSTRAP, 3 RECENT (por trozos, con
+        // `progress`), 6 ON_DEMAND. El ultimo trozo del RECENT marca el final
+        // de la sincronizacion inicial, pero los trozos se guardan en paralelo:
+        // se avisa cuando TODOS terminaron, no cuando llega el ultimo.
+        if (Number(historial.syncType) === 3 && Number(historial.progress) >= 100) finDeSincronizacionPendiente = true;
+        void (async () => {
+          for (const mensaje of lista) {
+            try {
+              await procesarEntrante(mensaje, 'append', false, 'historial');
+            } catch (error) {
+              log(`fallo guardando un mensaje del historial: ${String(error)}`);
+            }
+          }
+          // Se avisa DESPUES de guardar: quien espera va a mirar la base.
+          const avisar = esperasHistorial;
+          esperasHistorial = [];
+          for (const f of avisar) f(lista.length);
+          trozosEnProceso -= 1;
+          if (finDeSincronizacionPendiente && trozosEnProceso === 0) {
+            finDeSincronizacionPendiente = false;
+            log('sincronizacion inicial completa: todos los chats tienen ya su referencia');
+            await Promise.resolve(opts.onSincronizacionInicial?.()).catch((error: unknown) => log(`fallo tras la sincronizacion inicial: ${String(error)}`));
+          }
+        })();
+      }) as unknown) as (arg: never) => void);
+
+      sock.ev.on('messages.upsert', (((evento: { messages?: unknown[]; type?: string; requestId?: string }) => {
+        if (!opts.onChange) return;
+        void (async () => {
+          for (const mensaje of evento.messages ?? []) {
+            await procesarEntrante(mensaje, evento.type, Boolean(evento.requestId), 'upsert');
+          }
+        })().catch((error: unknown) => log(`fallo leyendo un entrante: ${String(error)}`));
+      }) as unknown) as (arg: never) => void);
+
+      // Los sobres de "ver una vez" que Baileys tira antes de avisar.
+      escucharSobres(sock, (mensaje, tipoEvento) => procesarEntrante(mensaje, tipoEvento, false, 'sobre'), log, sobresAtendidos);
+
+      // Si el socket ya venia vinculado no llega ningun QR: se le da un margen
+      // corto para que diga "open" y, si no, se contesta con lo que haya.
+      setTimeout(listo, 8000);
+    });
+  }
+
+  /** El nombre de un grupo que se ve por primera vez: se pregunta y se apunta. */
+  async function aprenderNombreDeGrupo(sock: LocalSocket, jid: string, opts: StartLocalOptions, log: (m: string) => void): Promise<void> {
+    if (!sock.groupMetadata) return;
+    try {
+      const meta = await sock.groupMetadata(jid);
+      const r = resumirGrupo(jid, meta);
+      recordarGrupo(r.jid, r.nombre);
+      await opts.onGrupos?.([r]);
+    } catch (error) {
+      log(`no se pudo leer el nombre del grupo ${jid}: ${String(error)}`);
+    }
+  }
+
+
+  /** Ids de los sobres de "ver una vez" ya atendidos por el gancho crudo. */
+  const sobresAtendidos = new Set<string>();
+
+  /** Trozos del historial que todavia se estan guardando, y si ya llego el ultimo. */
+  let trozosEnProceso = 0;
+  let finDeSincronizacionPendiente = false;
+
+  /** Quien espera el proximo lote de historial del telefono (ver `proximoHistorial`). */
+  let esperasHistorial: Array<(n: number) => void> = [];
+
+  /**
+   * Se resuelve con el tamano del proximo lote de historial que mande el
+   * telefono, o null si no llega en `timeoutMs`. Es lo que permite pedir
+   * "lo anterior" una y otra vez sin pisar la peticion anterior.
+   */
+  function proximoHistorial(timeoutMs = 20_000): Promise<number | null> {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => {
+        esperasHistorial = esperasHistorial.filter((f) => f !== listo);
+        resolve(null);
+      }, timeoutMs);
+      const listo = (n: number) => {
+        clearTimeout(t);
+        resolve(n);
+      };
+      esperasHistorial.push(listo);
+    });
+  }
+
+
+  /**
+   * Le pide al telefono los mensajes anteriores de un chat.
+   *
+   * Hace falta un mensaje ancla (el mas viejo que se tiene): el telefono manda
+   * los `cantidad` anteriores a el por `messaging-history.set`. Devuelve el id
+   * de la peticion; lo que llegue entra solo por el mismo camino que el resto.
+   */
+  async function pedirHistorial(
+    jid: string,
+    ancla: { id: string; fromMe: boolean; timestampMs: number },
+    cantidad = 50,
+  ): Promise<string> {
+    const sock = getLocalSocket();
+    if (!sock) throw new Error('WhatsApp no esta conectado.');
+    if (!sock.fetchMessageHistory) throw new Error('Esta version del cliente no sabe pedir el historial.');
+    return sock.fetchMessageHistory(cantidad, { remoteJid: jid, fromMe: ancla.fromMe, id: ancla.id }, ancla.timestampMs);
+  }
+
+  /** Vincular con numero en vez de con la camara. */
+  async function requestLocalPairingCode(phone: string): Promise<string> {
+    const digitos = phone.replace(/\D+/g, '');
+    if (!digitos) throw new Error('falta el numero de telefono');
+    if (!socket) throw new Error('la sesion no esta abierta todavia');
+
+    const code = await socket.requestPairingCode(digitos);
+    estado.pairingCode = code;
+    estado.detail = 'Teclea el codigo en el telefono.';
+    return code;
+  }
+
+  /** Cierra la sesion y borra la vinculacion: obliga a escanear otro QR. */
+  async function logoutLocal(authDir: string): Promise<void> {
+    const viejo = socket;
+    // Se suelta primero: asi el "close" que provoca el logout ya no es el del
+    // socket vigente y no borra nada por su cuenta (ver connection.update).
+    socket = null;
+    try {
+      await viejo?.logout();
+    } catch {
+      // Si el telefono ya la cerro, logout falla y da igual: lo que importa es
+      // borrar las credenciales de aqui.
+    }
+    try {
+      viejo?.end();
+    } catch {
+      // Un socket ya cerrado puede quejarse al cerrarlo otra vez.
+    }
+    await rm(authDir, { recursive: true, force: true });
+    estado.status = 'STOPPED';
+    estado.qr = null;
+    estado.pairingCode = null;
+    estado.phone = '';
+    estado.name = '';
+    estado.detail = 'Sesion cerrada.';
+  }
+
+  /** Solo para las pruebas: deja el modulo como recien cargado. */
+  function resetLocalForTests(): void {
+    socket = null;
+    arrancando = null;
+    opciones = null;
+    nombresDeGrupo.clear();
+    sobresAtendidos.clear();
+    Object.assign(estado, {
+      status: 'STOPPED',
+      qr: null,
+      pairingCode: null,
+      phone: '',
+      name: '',
+      detail: 'Sin conectar.',
+    });
+  }
+
+  function detener(): void {
+    // Sin opciones no hay reintento (ver el "close" de connection.update), y
+    // con el socket soltado su cierre llega como "tardio" y no toca nada.
+    opciones = null;
+    const viejo = socket;
+    socket = null;
+    estado.status = 'STOPPED';
+    estado.qr = null;
+    estado.pairingCode = null;
+    estado.detail = 'Sesion detenida.';
+    try {
+      viejo?.end();
+    } catch {
+      // ya estaba cerrado
+    }
+  }
+
+  return {
+    detener,
+    startLocal,
+    getLocalState,
+    getLocalSocket,
+    nombreDeGrupo,
+    recordarGrupo,
+    suscribirPresencia,
+    presenciaDe,
+    proximoHistorial,
+    pedirHistorial,
+    requestLocalPairingCode,
+    logoutLocal,
+    resetLocalForTests,
+  };
+}
+
+
+/**
+ * La sesion de por defecto: la de una instalacion con una sola tienda, y la
+ * que usan las pruebas de siempre. Las funciones sueltas de abajo son suyas.
+ */
+export const sesionLocalPorDefecto: SesionLocal = crearSesionLocal();
+export const startLocal = (opts: StartLocalOptions): Promise<LocalState> => sesionLocalPorDefecto.startLocal(opts);
+export const getLocalState = (): LocalState => sesionLocalPorDefecto.getLocalState();
+export const getLocalSocket = (): LocalSocket | null => sesionLocalPorDefecto.getLocalSocket();
+export const nombreDeGrupo = (jid: string | undefined): string | null => sesionLocalPorDefecto.nombreDeGrupo(jid);
+export const recordarGrupo = (jid: string, nombre: string): void => sesionLocalPorDefecto.recordarGrupo(jid, nombre);
+export const suscribirPresencia = (jid: string): Promise<void> => sesionLocalPorDefecto.suscribirPresencia(jid);
+export const presenciaDe = (jid: string): PresenciaChat | null => sesionLocalPorDefecto.presenciaDe(jid);
+export const proximoHistorial = (timeoutMs?: number): Promise<number | null> => sesionLocalPorDefecto.proximoHistorial(timeoutMs);
+export const pedirHistorial = (jid: string, ancla: { id: string; fromMe: boolean; timestampMs: number }, cantidad?: number): Promise<string> =>
+  sesionLocalPorDefecto.pedirHistorial(jid, ancla, cantidad);
+export const requestLocalPairingCode = (phone: string): Promise<string> => sesionLocalPorDefecto.requestLocalPairingCode(phone);
+export const logoutLocal = (authDir: string): Promise<void> => sesionLocalPorDefecto.logoutLocal(authDir);
+export const resetLocalForTests = (): void => sesionLocalPorDefecto.resetLocalForTests();

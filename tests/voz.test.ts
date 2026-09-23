@@ -49,7 +49,7 @@ const ENV = {
   GEO_BBOX: 'none',
   BUSINESS_NAME: 'Zapateria Lima',
   BUSINESS_HOURS: 'lunes a sabado de 9 a 19',
-  RUTAS_SUPERVISOR: '51900000000',
+  RUTAS_SUPERVISOR: '51912000000',
 } as NodeJS.ProcessEnv;
 
 const queue: OutboundQueue = {
@@ -245,7 +245,7 @@ async function build() {
     },
   });
   modelo = modeloFalso();
-  ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Zapateria Lima', supervisor: () => '51900000000', proveedor: modelo.proveedor, modelosGratis: ['google/gemma-4-31b-it'], voz });
+  ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Zapateria Lima', supervisor: () => '51912000000', proveedor: modelo.proveedor, modelosGratis: ['google/gemma-4-31b-it'], voz });
   const server = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, ia, voz, mediaDir, bus, webhooks: { fetchImpl: fetchDeFicheros } });
   deps = { repos, wa, sender, config, settings, ia, voz };
   return server;

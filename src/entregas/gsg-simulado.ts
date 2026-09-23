@@ -84,8 +84,11 @@ export interface GsgSimulado {
   reiniciar(): void;
   /** Lo recibido, tal cual llego (para las pruebas y la pantalla). */
   recibido: Array<{ tipo: string; cuerpo: Record<string, unknown>; en: string }>;
-  /** Como contesta ahora mismo: se cambia a mitad de prueba. */
-  modo: 'ok' | 'caido' | 'rechaza';
+  /**
+   * Como contesta ahora mismo: se cambia a mitad de prueba. `sin_red` corta la
+   * conexion sin contestar (como un servidor que no se alcanza).
+   */
+  modo: 'ok' | 'caido' | 'rechaza' | 'sin_red';
   /** Atiende una llamada HTTP (lo usa el plugin y el fetch de las pruebas). */
   atender(method: string, ruta: string, token: string | null, cuerpo: unknown): { status: number; body: unknown };
 }
@@ -290,6 +293,8 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
     atender(method, ruta, token, cuerpo) {
       llamadas++;
       ultimaLlamadaEn = ahora().toISOString();
+      // Sin red: ni siquiera se contesta (status 0; el plugin corta la conexion).
+      if (sim.modo === 'sin_red') return { status: 0, body: null };
       if (token !== opts.token) return { status: 401, body: { error: 'token inválido' } };
       if (sim.modo === 'caido') return { status: 502, body: '<html>502 Bad Gateway</html>' };
       const camino = ruta.replace(/\?.*$/, '').replace(/\/+$/, '');
@@ -391,9 +396,15 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
 export async function registerGsgSimulado(app: FastifyInstance, deps: { simulador: GsgSimulado; prefijo: string }): Promise<void> {
   const { simulador, prefijo } = deps;
   const tokenDe = (auth: string | undefined): string | null => (auth?.startsWith('Bearer ') ? auth.slice(7) : null);
-  const atender = (method: string) => async (request: { url: string; headers: Record<string, unknown>; body: unknown }, reply: { code(n: number): { send(b: unknown): unknown } }) => {
+  const atender = (method: string) => async (request: { url: string; headers: Record<string, unknown>; body: unknown; raw: { socket: { destroy(): void } } }, reply: { code(n: number): { send(b: unknown): unknown }; hijack(): void }) => {
     const ruta = request.url.slice(prefijo.length);
     const r = simulador.atender(method, ruta, tokenDe(request.headers.authorization as string | undefined), request.body);
+    if (r.status === 0) {
+      // Modo "sin red": la conexion se corta sin respuesta.
+      reply.hijack();
+      request.raw.socket.destroy();
+      return;
+    }
     return reply.code(r.status).send(r.body);
   };
   app.get(`${prefijo}/*`, atender('GET'));

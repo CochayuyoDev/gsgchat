@@ -34,7 +34,7 @@ const ENV = {
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'none',
   BUSINESS_NAME: 'Elysian',
-  RUTAS_SUPERVISOR: '51900000000',
+  RUTAS_SUPERVISOR: '51912000000',
 } as NodeJS.ProcessEnv;
 
 const queue: OutboundQueue = {
@@ -143,7 +143,7 @@ describe('el asistente con el catalogo real cierra ventas', () => {
     const sender: Sender = createSender({ repos, wa, phoneNumberId: 'PNID', warmup: { startPerDay: 50, growth: 1.5, hardCap: 1000 }, maxMarketingPerContact7d: 2 });
     const settingsRepo = createMemorySettingsRepo();
     const settings = await createSettingsService(settingsRepo, config, TEST_SETTINGS_KEY);
-    ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Elysian', supervisor: () => '51900000000', proveedor, fetchImpl: fetchElysian, bus, modelosGratis: ['google/gemma-4-31b-it'] });
+    ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Elysian', supervisor: () => '51912000000', proveedor, fetchImpl: fetchElysian, bus, modelosGratis: ['google/gemma-4-31b-it'] });
     await ia.guardar({ activa: true, token: 'tok', conocimiento: 'Relojes originales. Pago con Yape o tarjeta. Envio a Lima 24 h.', catalogoUrl: 'https://elysian.pe/api/products' });
     app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, ia, bus });
     await app.ready();
@@ -194,7 +194,7 @@ describe('el asistente con el catalogo real cierra ventas', () => {
     expect(textos[1]).toContain('Total: S/ 1498.00');
     expect(textos[1]).toContain('Entrega: Av. Larco 123, Miraflores');
     expect(textos[1]).toContain('No encontré: reloj inexistente 999');
-    expect(enviados().find((s) => s.to === '51900000000')?.body).toContain('tomo un pedido');
+    expect(enviados().find((s) => s.to === '51912000000')?.body).toContain('tomo un pedido');
 
     const guardado = repos.pedidos._pedidos[0]!;
     expect(guardado).toMatchObject({ estado: 'nuevo', total: 1498, nombre: 'Maria Quispe', direccion: 'Av. Larco 123, Miraflores', pago: 'yape', origen: 'ia', telefono: '51987654321' });

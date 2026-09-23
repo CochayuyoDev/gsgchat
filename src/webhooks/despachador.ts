@@ -173,8 +173,24 @@ export async function despacharEntregas(deps: DespachadorDeps, limite = 25): Pro
  * Conecta el bus con la cola: cada evento deja una entrega por suscriptor.
  * Devuelve la funcion que desconecta.
  */
+/**
+ * Si un evento es de algo del Modulo desarrollador (un cliente o motorizado
+ * de prueba, un pedido PRUEBA-…). Esos no salen a los webhooks de verdad
+ * (Stoky, GSG): lo de prueba no puede aparecer en otro sistema.
+ */
+export function esEventoDePrueba(payload: unknown): boolean {
+  let texto = '';
+  try {
+    texto = JSON.stringify(payload ?? {});
+  } catch {
+    return false;
+  }
+  return /"(telefono|phone|to|from|wa_id)":"(?:\+?51)?900[01]\d{5}"/.test(texto) || /"referencia":"PRUEBA-/.test(texto);
+}
+
 export function encolarEventos(bus: Bus, repo: WebhooksRepo, log?: DespachadorDeps['log']): () => void {
   return bus.escucharTodo(async (evento: NombreEvento, payload) => {
+    if (esEventoDePrueba(payload)) return;
     const suscritos = await repo.activosPara(evento);
     for (const w of suscritos) {
       try {

@@ -500,10 +500,11 @@ describe('una lista larga de 120 clientes', () => {
     expect(union.size).toBe(120);
   });
 
-  it('GSG recibe las 60 ubicaciones de una sola pasada, y ninguna incidencia: a los otros 60 solo se les ha escrito una vez', async () => {
-    const primera = await e.despacharAGsg();
-    expect(primera.enviados).toBe(60);
+  it('GSG recibe las 60 ubicaciones AL MOMENTO (sin esperar a la pasada), y ninguna incidencia: a los otros 60 solo se les ha escrito una vez', async () => {
+    // Cada ubicacion sale en cuanto llega: la pasada ya no tiene nada que mandar.
     expect(e.gsg.ubicaciones()).toHaveLength(60);
+    const primera = await e.despacharAGsg();
+    expect(primera.enviados).toBe(0);
     expect(e.gsg.telefonosConUbicacion().sort()).toEqual(DAN.map((c) => conPais(c.telefono)).sort());
     expect(e.gsg.incidencias()).toHaveLength(0);
     expect((await e.api.get<{ cifras: Record<string, number> }>('/admin/rutas/cola')).body.cifras.pendiente ?? 0).toBe(0);
@@ -540,9 +541,14 @@ describe('cuando la API de GSG falla', () => {
     e = await crearEscenario();
     await e.cargarLote('Lote con GSG caída', clientesDePrueba(4, 987400001));
     await e.trabajar();
+    // Las ubicaciones llegan con GSG ya caido: el envio al momento falla y se
+    // quedan en la cola. Desde ahi, lo de siempre.
+    e.gsg.modo = 'caido';
     await e.contesta('987400001', { pin: pinDe(1) });
     await e.contesta('987400002', { pin: pinDe(2) });
     await e.contesta('987400003', { pin: pinDe(3) });
+    await new Promise((r) => setTimeout(r, 100));
+    e.gsg.limpiar();
   });
 
   afterAll(async () => {

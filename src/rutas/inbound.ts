@@ -23,7 +23,7 @@
 import type { Contact, Repos } from '../db/repos.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Solicitud } from '../db/rutas.js';
-import { payloadIncidencia, payloadUbicacion, type PuertoGsg } from './gsg.js';
+import { despacharReportes, payloadIncidencia, payloadUbicacion, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 
 export interface EntradaRuta {
@@ -103,6 +103,15 @@ export function pareceNumeroEquivocado(texto: string): boolean {
   return FRASES_NUMERO_EQUIVOCADO.some((frase) => limpio.includes(frase));
 }
 
+/**
+ * La precision en metros enteros: la columna `precision_m` es entera y un
+ * enlace de Google Maps trae decimales (11.132). Sin redondear, Postgres
+ * rechazaba la escritura (500) y la ubicacion del cliente se perdia entera.
+ */
+function metrosEnteros(m: number | null | undefined): number | null {
+  return typeof m === 'number' && Number.isFinite(m) ? Math.round(m) : null;
+}
+
 /** Encola lo que GSG tiene que saber de esta solicitud. */
 async function reportar(
   deps: RutaInboundDeps,
@@ -118,6 +127,19 @@ async function reportar(
     payload:
       tipo === 'ubicacion' ? payloadUbicacion(solicitud, lote) : payloadIncidencia(solicitud, lote),
   });
+  if (tipo === 'ubicacion') despacharYa(deps);
+}
+
+/**
+ * La ubicacion sale YA hacia GSG, sin esperar a la pasada de cada minuto (que
+ * queda para los reintentos y para el resto de reportes, que siguen su ritmo
+ * de siempre). Sin API conectada no hace nada: se queda en la cola. Un fallo
+ * aqui no toca la respuesta al cliente.
+ */
+function despacharYa(deps: RutaInboundDeps): void {
+  void despacharReportes({ rutas: deps.repos.rutas }, deps.gsg, 25, ['ubicacion']).catch((error: unknown) =>
+    deps.log?.('no se pudo mandar a GSG al momento (se reintenta en la siguiente pasada)', { detalle: error instanceof Error ? error.message : String(error) }),
+  );
 }
 
 async function marcarIncidencia(
@@ -163,7 +185,7 @@ async function corregirUbicacion(
     lat: ubicacion.lat,
     lng: ubicacion.lng,
     mapsUrl: ubicacion.mapsUrl ?? null,
-    precisionM: ubicacion.precisionM ?? null,
+    precisionM: metrosEnteros(ubicacion.precisionM),
     ubicacionFuente: ubicacion.fuente ?? 'whatsapp',
     resueltoAt: momento,
   });
@@ -181,6 +203,7 @@ async function corregirUbicacion(
       tipo: 'ubicacion',
       payload: { ...payloadUbicacion(actualizada, lote), corregida: true },
     });
+    despacharYa(deps);
   }
   deps.log?.('ubicacion corregida por el cliente', {
     solicitud: resuelta.id,
@@ -262,7 +285,7 @@ export async function atenderRespuestaDeRuta(
       lat: entrada.ubicacion.lat,
       lng: entrada.ubicacion.lng,
       mapsUrl: entrada.ubicacion.mapsUrl ?? null,
-      precisionM: entrada.ubicacion.precisionM ?? null,
+      precisionM: metrosEnteros(entrada.ubicacion.precisionM),
       ubicacionFuente: entrada.ubicacion.fuente ?? 'whatsapp',
       resueltoAt: momento,
       proximoIntentoAt: null,

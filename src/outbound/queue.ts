@@ -27,9 +27,13 @@ function connection(redisUrl: string): Redis {
   return new Redis(redisUrl, { maxRetriesPerRequest: null });
 }
 
-export function createOutboundQueue(redisUrl: string): OutboundQueue {
+/**
+ * `nombre`: cada tienda de la plataforma tiene su propia cola (wa-outbound-<id>);
+ * la de una instalacion suelta se sigue llamando wa-outbound.
+ */
+export function createOutboundQueue(redisUrl: string, nombre: string = OUTBOUND_QUEUE): OutboundQueue {
   const redis = connection(redisUrl);
-  const queue = new Queue<SendJob>(OUTBOUND_QUEUE, { connection: redis });
+  const queue = new Queue<SendJob>(nombre, { connection: redis });
 
   const defaults: JobsOptions = {
     attempts: 5,
@@ -71,6 +75,8 @@ export interface OutboundWorkerOptions {
   messagesPerSecond?: number;
   concurrency?: number;
   onResult?: (job: SendJob, outcome: Awaited<ReturnType<Sender['send']>>) => void;
+  /** El nombre de la cola de esta tienda (ver createOutboundQueue). */
+  nombre?: string;
 }
 
 export function createOutboundWorker(opts: OutboundWorkerOptions): Worker<SendJob> {
@@ -78,7 +84,7 @@ export function createOutboundWorker(opts: OutboundWorkerOptions): Worker<SendJo
   const redis = connection(redisUrl);
 
   const worker = new Worker<SendJob>(
-    OUTBOUND_QUEUE,
+    opts.nombre ?? OUTBOUND_QUEUE,
     async (job) => {
       const outcome = await sender.send(job.data);
       opts.onResult?.(job.data, outcome);

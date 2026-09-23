@@ -899,6 +899,68 @@ la cierra, porque insistir solo suma bloqueos.
 
 ---
 
+## Tiendas independientes: cada registro es una tienda nueva
+
+GSGchat es una **plataforma de tiendas** (`src/plataforma/`). Cualquiera
+entra en `/registro` (o en la pestaña «Crear mi tienda» de `/login`), escribe
+el nombre de su tienda, qué vende (se toca, es opcional), su nombre, su
+celular para los avisos (opcional), un usuario y una contraseña, y en unos
+segundos está dentro del **panel de SU tienda**. Ya no existe «el registro es
+solo para la primera cuenta, pídele la tuya al administrador».
+
+**Nada se cruza entre tiendas**, y no porque cada consulta filtre por tienda
+(un `WHERE` olvidado sería una fuga), sino porque cada tienda se arma con lo
+suyo (`src/plataforma/tienda.ts`):
+
+| Qué | Dónde vive, por tienda |
+|---|---|
+| Base de datos (clientes, productos, chats, ajustes, usuarios…) | PGlite: su carpeta `TIENDAS_DIR/<id>/datos`. Postgres: su esquema `tienda_<id>` (el `search_path` apunta a él; las consultas no nombran esquema) |
+| WhatsApp | su propia sesión (`crearSesionLocal`), su carpeta de vinculación `TIENDAS_DIR/<id>/vinculacion` y su QR; con la API de Meta, SUS credenciales cifradas en su base |
+| Adjuntos, respaldos, copias | `TIENDAS_DIR/<id>/medios`, `…/respaldos`, `<carpeta de copias>/<slug>` |
+| Secretos | su `.secrets.json`: cifra sus credenciales y firma sus cookies y enlaces (una sesión de una tienda no vale en otra) |
+| Configuración | un entorno filtrado: de `.env` solo hereda ajustes del servidor (`HEREDABLES` en `entorno.ts`); nunca el token de Meta, GSG, Stoky, el supervisor, el modo prueba ni el plan de otra |
+| Cola de envíos | `wa-outbound-<id>` en Redis (o en memoria) |
+| Motores (reparto, entregas, salud, resúmenes…) | los suyos, con sus ajustes |
+
+Lo único compartido es el **directorio** (`src/plataforma/directorio.ts`, en
+`TIENDAS_DIR/plataforma` o el esquema `plataforma`): qué tiendas hay y de qué
+tienda es cada usuario. Se entra solo con usuario y contraseña, así que un
+usuario es de UNA tienda (no se repite ni al registrarse ni al crear cuentas
+del equipo); la contraseña la comprueba la tienda, no el directorio.
+
+**Cómo llega cada petición a su tienda** (`src/plataforma/servidor.ts`):
+
+1. `/tienda/<slug>/…` → esa tienda (sin el prefijo). Es su dirección pública:
+   su `PUBLIC_BASE_URL` ya la lleva, así que su webhook, su API
+   (`/tienda/<slug>/api/v1`), la página del motorizado y los enlaces salen con
+   su prefijo.
+2. `/login`, `/registro`, `/logout` y `/` son de la plataforma.
+3. Una página de `/tienda/<slug>/…` que pide algo con ruta absoluta: el
+   `Referer` dice de qué tienda es.
+4. La cookie `gsg_tienda` que se pone al entrar: el panel de quien entró. No
+   da acceso a nada por sí sola (la sesión la firma cada tienda con su secreto).
+5. Lo demás, a la **tienda principal**: la instalación de antes de la
+   plataforma (`.wa-data`, `.wa-auth`, `.wa-media`, la base `public`), con sus
+   cuentas, su número y sus integraciones de siempre, sin cambiar ninguna URL.
+
+**Roles.** La primera tienda de una plataforma recién puesta (sin principal)
+es la del dueño: su cuenta nace superadministradora. Las demás tiendas nacen
+con su dueño como **administrador de su tienda** y nada más (no ven Tiendas ni
+la membresía del dueño). La tienda principal conserva su superadministrador.
+
+**Arranques.** `npm run quick` y `npm start` levantan la plataforma. Con
+PGlite, una base nueva tarda ~8 s en migrarse: la plataforma prepara al
+arrancar un **molde** ya migrado (`TIENDAS_DIR/.molde`, se rehace solo si
+cambian las migraciones) y cada tienda nueva empieza copiándolo (~2 s el
+registro entero). Registros: 5 por IP y hora. Todas las tiendas activas se
+cargan al arrancar (su WhatsApp tiene que recibir aunque nadie haya entrado);
+con muchas tiendas, mejor Postgres (un esquema por tienda) que una carpeta
+PGlite por tienda en memoria.
+
+Pruebas: `tests/plataforma.test.ts` (registro, aislamiento de datos, de
+sesión y de entorno, cookies cambiadas a mano, usuarios únicos, prefijos,
+Referer, principal, freno de registros).
+
 ## Arquitectura
 
 ```
@@ -1308,11 +1370,14 @@ contrasena, y la sesion queda en una cookie firmada (`wa_sesion`, siete dias,
 `HttpOnly`). Sin sesion, las pantallas mandan al login y `/admin/*` responde
 401.
 
-- **La primera cuenta.** Mientras la tabla `usuarios` este vacia, `/login`
-  ofrece crear la primera cuenta, que nace **superadministradora**: es de
-  quien pone el sistema. En cuanto existe, esa puerta se cierra y solo queda
-  entrar. (La migracion 023 asciende a la primera cuenta admin de las
-  instalaciones anteriores.)
+- **Registro abierto: cada cuenta nueva es una tienda nueva.** `/login`
+  ofrece «Crear mi tienda» (`POST /registro`): la tienda nace independiente
+  y su dueño es su administrador (ver «Tiendas independientes»). La primera
+  tienda de una plataforma recién puesta es la del dueño y nace
+  **superadministradora**. `/login/primera-cuenta` solo existe dentro de una
+  tienda suelta sin plataforma delante (la demo, las pruebas); detrás de la
+  plataforma responde 410 y manda a `/registro`. (La migracion 023 asciende a
+  la primera cuenta admin de las instalaciones anteriores.)
 - **Tres roles.** `superadmin` lleva la membresia, los codigos de conexion y
   las cuentas de otros superadministradores, ademas de todo lo de un admin;
   en la sesion entra con capacidad `admin` y la marca `super` (asi todas las
@@ -2016,7 +2081,11 @@ Lo mínimo para que GSG lo use de verdad, en ese orden:
    }
    ```
 
-5. Abre `https://chat.gsg.pe/login` y crea la primera cuenta (superadministrador).
+5. Si la instalacion ya tenia datos, sigue siendo la tienda principal y se
+   entra con sus cuentas de siempre. Si es nueva, abre
+   `https://chat.gsg.pe/registro` y crea tu tienda: la primera de la
+   plataforma es la del dueño (superadministrador). Cualquier otro negocio
+   se registra ahi mismo y tiene su tienda aparte.
 6. **Conexión** (`/setup`): escanea el QR con el teléfono del negocio; abajo, en
    *El sistema de GSG*, elige el simulador para probar o pega la API real; y
    en *Para los programadores de GSG*, descarga el contrato y crea la clave (y,
@@ -2031,8 +2100,9 @@ Lo mínimo para que GSG lo use de verdad, en ese orden:
 Lo que debe sobrevivir a un reinicio o a una reinstalación, todo dentro de la
 carpeta del proyecto: `.secrets.json`/`data` (secretos), `.wa-auth` (la
 vinculación del QR), `.wa-data` (la base, con PGlite), `.wa-media` (adjuntos),
-`respaldos` (conversaciones guardadas) y la carpeta de copias elegida en *Que
-todo funcione* (mejor si la sincroniza Drive u OneDrive, o está en otro disco).
+`respaldos` (conversaciones guardadas), `.wa-tiendas` (las tiendas
+registradas: su base, su vinculacion, sus adjuntos y sus secretos) y la
+carpeta de copias elegida en *Que todo funcione* (mejor si la sincroniza Drive u OneDrive, o está en otro disco).
 
 ### Con Docker (Postgres y Redis incluidos)
 
@@ -2042,8 +2112,10 @@ todo funcione* (mejor si la sincroniza Drive u OneDrive, o está en otro disco).
    `/app/copias` en *Que todo funcione*, o `COPIAS_DIR=/ruta/del/host`); las
    variables `GSG_URL`/`GSG_TOKEN` son opcionales (se conectan desde la
    pantalla). Para HTTPS, un Caddy delante como arriba.
-2. Abre `/login` y crea la primera cuenta (la administradora). Las demas
-   cuentas se crean desde la seccion Usuarios del panel.
+2. Abre `/registro` y crea tu tienda (la primera de la plataforma es la del
+   dueño). Las cuentas de tu equipo se crean desde la seccion Usuarios del
+   panel; otro negocio se registra en `/registro` y tiene su tienda aparte
+   (su esquema `tienda_<id>` en Postgres y su carpeta en el volumen `tiendas`).
 3. Conecta la cuenta en `/setup`: el boton de Facebook, o pegando los tres datos.
 4. `npm run templates:push` (o el boton del panel) y esperar aprobacion.
 5. `npm run templates:sync`.

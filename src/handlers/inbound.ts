@@ -763,7 +763,9 @@ export async function handleInboundMessage(
           ? await deps.entregas.alUbicacion(contact, { lat: s.lat, lng: s.lng, mapsUrl: s.mapsUrl, fuente: s.ubicacionFuente ?? 'whatsapp', yaReportada: true }).catch(() => ({ atendida: false as const }))
           : { atendida: false as const };
       if (enEntrega.atendida && enEntrega.responder) await responderEntrega(enEntrega);
-      else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }));
+      else if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
+        await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: s?.mapsUrl ?? null }));
+      } else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }));
       if (deps.stickers) await deps.stickers.automatico('gracias', phone);
       return true;
     }

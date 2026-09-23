@@ -32,6 +32,7 @@ import { registerConnectRoutes } from './connect-routes.js';
 import { conexionGsgVigente, RUTA_SIMULADOR, type ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import { registerGsgExtrasRoutes } from '../rutas/gsg-extras-routes.js';
 import type { GsgSimulado } from '../entregas/gsg-simulado.js';
+import type { PuertoGsg } from '../rutas/gsg.js';
 import { crearServicioPerfiles } from '../perfiles/servicio.js';
 import type { SettingsRepo } from '../settings/service.js';
 
@@ -52,7 +53,9 @@ function memoriaDePerfil(): SettingsRepo {
 }
 import type { StokyClient } from '../stoky/client.js';
 import { registerDevRoutes } from './dev-routes.js';
+import { registerDesarrollador } from '../desarrollador/routes.js';
 import { registerLocalRoutes } from './local-routes.js';
+import type { SesionLocal } from '../whatsapp/local/session.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
@@ -111,6 +114,17 @@ export interface WebDeps {
   simulador?: GsgSimulado;
   /** Para guardar por clave (perfil de instalacion). */
   settingsRepo?: SettingsRepo;
+  /**
+   * La sesion de WhatsApp de esta tienda y sus carpetas. Cada tienda de la
+   * plataforma trae las suyas (ver src/plataforma); sin ellas, las de una
+   * instalacion suelta.
+   */
+  sesionLocal?: SesionLocal;
+  authDir?: string;
+  mediaDir?: string;
+  prefijoLog?: string;
+  /** La puerta a GSG de esta tienda: la usan los entrantes del WhatsApp local y del simulador. */
+  gsg?: PuertoGsg;
 }
 
 /**
@@ -251,11 +265,20 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     voz: deps.voz,
     entregas: deps.entregas,
     autoConectar: deps.autoConectarLocal,
+    sesion: deps.sesionLocal,
+    authDir: deps.authDir,
+    mediaDir: deps.mediaDir,
+    prefijoLog: deps.prefijoLog,
+    gsg: deps.gsg,
   });
   // El simulador de entrantes pasa por las mismas piezas que un mensaje real
   // (monitor de salud, ajustes, stickers): si no, lo que se prueba con el no
   // es lo que pasa en la calle.
-  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas });
+  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg });
+
+  // El Modulo desarrollador (solo administradores): probar todo sin WhatsApp
+  // real y comprobar que esta listo para GSG. Ver src/desarrollador.
+  await registerDesarrollador(app, deps);
 
   app.get('/rutas', async (_request, reply) => {
     const page = html(rutasPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));

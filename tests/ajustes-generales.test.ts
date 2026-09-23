@@ -25,7 +25,7 @@ const ENV_BASE = {
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'lima',
   BUSINESS_NAME: 'La Tienda',
-  RUTAS_SUPERVISOR: '51900000001',
+  RUTAS_SUPERVISOR: '51912000001',
   HORARIO_ENVIO_INICIO: '9',
   HORARIO_ENVIO_FIN: '18',
 } as NodeJS.ProcessEnv;
@@ -90,9 +90,9 @@ describe('servicio de ajustes', () => {
     const base = politicaDesdeConfig(config, 'cloud');
 
     expect(ajustes.nombreNegocio()).toBe('La Tienda');
-    expect(ajustes.supervisor()).toBe('51900000001');
+    expect(ajustes.supervisor()).toBe('51912000001');
     expect(ajustes.soloNumeros()).toEqual([]);
-    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18, avisarA: '51900000001' });
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18, avisarA: '51912000001' });
 
     await ajustes.guardar({
       nombreNegocio: 'GSG Reparto',
@@ -113,7 +113,7 @@ describe('servicio de ajustes', () => {
 
     await ajustes.guardar({ horario: { inicio: null }, avisos: { supervisor: '' } });
     expect(ajustes.politica(base).horaInicio).toBe(9);
-    expect(ajustes.supervisor()).toBe('51900000001');
+    expect(ajustes.supervisor()).toBe('51912000001');
 
     await ajustes.restablecer();
     expect(ajustes.nombreNegocio()).toBe('La Tienda');
@@ -198,7 +198,7 @@ describe('/admin/ajustes', () => {
     const res = await app.inject({ method: 'GET', url: '/admin/ajustes', headers: { cookie: admin } });
     expect(res.statusCode).toBe(200);
     const r = res.json();
-    expect(r.servidor).toMatchObject({ nombreNegocio: 'La Tienda', supervisor: '51900000001' });
+    expect(r.servidor).toMatchObject({ nombreNegocio: 'La Tienda', supervisor: '51912000001' });
     expect(r.efectivo).toMatchObject({ nombreNegocio: 'La Tienda', horario: { inicio: 9, fin: 18 }, ritmo: { perfil: 'cloud' } });
     expect(r.modoPruebaFijado).toBe(false);
     expect(r.guardado.horario.inicio).toBeNull();

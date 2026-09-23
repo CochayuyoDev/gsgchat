@@ -351,6 +351,14 @@ export function openApi(baseUrl: string): Json {
       },
       '/entregas/{referencia}': {
         get: { tags: ['entregas'], summary: 'Como va ese pedido hoy, con sus eventos', ...permiso('entregas:leer'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' }, description: 'La referencia del pedido (o su id en GSG)' }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), eventos: { type: 'array', items: { type: 'object', properties: { en: { type: 'string' }, tipo: { type: 'string' }, detalle: { type: 'string', nullable: true } } } } } }), 404: error('No hay ningun pedido de hoy con esa referencia') } },
+        patch: {
+          tags: ['entregas'],
+          summary: 'GSG cambio datos del pedido: nombre, direccion, distrito, notas o urgente (el telefono no: es otro pedido)',
+          ...permiso('entregas:gestionar'),
+          parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', additionalProperties: false, properties: { nombre: { type: 'string' }, direccion: { type: 'string' }, distrito: { type: 'string' }, notas: { type: 'string' }, urgente: { type: 'boolean' } } } } } },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, cambios: { type: 'array', items: { type: 'string' } }, entrega: ref('EntregaDia'), detalle: { type: 'string' } } }), 400: error('El cambio no se entiende, o se intento cambiar el telefono'), 404: error('No existe'), 409: error('Ya estaba entregado, cancelado o terminado'), 429: error('Mas de 120 peticiones por minuto con esta clave') },
+        },
         delete: { tags: ['entregas'], summary: 'Cancelar ese pedido (GSG lo dio de baja)', ...permiso('entregas:gestionar'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' } }, { name: 'motivo', in: 'query', schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), detalle: { type: 'string' } } }), 404: error('No existe'), 409: error('Ya estaba entregado o cancelado') } },
       },
       '/motorizados': {

@@ -33,7 +33,7 @@ const ENV = {
   GEO_BBOX: 'none',
   BUSINESS_NAME: 'Zapateria Lima',
   BUSINESS_HOURS: 'lunes a sabado de 9 a 19',
-  RUTAS_SUPERVISOR: '51900000000',
+  RUTAS_SUPERVISOR: '51912000000',
 } as NodeJS.ProcessEnv;
 
 const queue: OutboundQueue = {
@@ -82,7 +82,7 @@ async function build() {
   settingsRepo = createMemorySettingsRepo();
   const settings = await createSettingsService(settingsRepo, config, TEST_SETTINGS_KEY);
   modelo = modeloFalso();
-  ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Zapateria Lima', supervisor: () => '51900000000', proveedor: modelo.proveedor, modelosGratis: ['google/gemma-4-31b-it', 'google/gemma-4-26b-a4b-it'] });
+  ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Zapateria Lima', supervisor: () => '51912000000', proveedor: modelo.proveedor, modelosGratis: ['google/gemma-4-31b-it', 'google/gemma-4-26b-a4b-it'] });
   const server = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, ia });
   return { server, settings };
 }
@@ -248,7 +248,7 @@ describe('el turno del asistente', () => {
     const r = await ia.turno(c, 'quiero devolver un pedido roto');
     expect(r.resultado).toBe('derivo');
     expect(wa.sent[0]).toMatchObject({ to: '51987654321', body: 'Entiendo, te paso con una persona.' });
-    expect(wa.sent[1]).toMatchObject({ to: '51900000000' });
+    expect(wa.sent[1]).toMatchObject({ to: '51912000000' });
     expect(String(wa.sent[1]!.body)).toContain('Maria (51987654321)');
     expect((await repos.contacts.getById(c.id))!.botPausadoAt).toBeTruthy();
   });

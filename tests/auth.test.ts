@@ -167,11 +167,15 @@ describe('entrar al sistema', () => {
     expect(panel.statusCode).toBe(200);
     const yo = await app.inject({ method: 'GET', url: '/admin/yo', headers: { cookie } });
     expect(yo.json()).toMatchObject({ usuario: 'ali', nombre: 'Ali', rol: 'admin', porToken: false });
-    // Y /login ya no ofrece registrarse: la pestaña sigue ahi, pero sin
-    // formulario, porque el servidor ya solo devuelve 409.
+    // Y /login ya no ofrece la primera cuenta (el servidor devuelve 409): la
+    // segunda pestaña es "Crear mi tienda", porque cada cuenta nueva es una
+    // tienda nueva de la plataforma (ver tests/plataforma.test.ts). Nada de
+    // "pidele tu cuenta al administrador".
     const login = await app.inject({ method: 'GET', url: '/login' });
     expect(login.body).not.toContain('id="f-registro"');
+    expect(login.body).toContain('id="f-tienda"');
     expect(login.body).toContain('id="f-entrar"');
+    expect(login.body).not.toContain('solo para la primera cuenta');
   });
 
   it('login con contrasena mala falla; cinco fallos seguidos bloquean unos minutos', async () => {

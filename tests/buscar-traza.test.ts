@@ -156,7 +156,7 @@ describe('que paso con este mensaje', () => {
     const ahora = new Date();
     const traza = armarTraza(
       { id: 5, contactId: 'c', direction: 'out', wamid: null, kind: 'text', body: 'x', payload: { origen: 'ia' }, status: null, deliveryId: 9, createdAt: ahora },
-      { id: 9, campaignId: null, campaignName: null, contactId: 'c', phone: '51900000000', name: null, wamid: null, kind: 'template', templateName: 'entrega_aviso', category: 'UTILITY', status: 'blocked_by_gate', errorCode: null, errorTitle: 'daily_cap: se llego al cupo', queuedAt: ahora, sentAt: null, deliveredAt: null, readAt: null, failedAt: ahora },
+      { id: 9, campaignId: null, campaignName: null, contactId: 'c', phone: '51912000000', name: null, wamid: null, kind: 'template', templateName: 'entrega_aviso', category: 'UTILITY', status: 'blocked_by_gate', errorCode: null, errorTitle: 'daily_cap: se llego al cupo', queuedAt: ahora, sentAt: null, deliveredAt: null, readAt: null, failedAt: ahora },
       [],
     );
     expect(traza.quien).toBe('Lo escribió el asistente IA.');

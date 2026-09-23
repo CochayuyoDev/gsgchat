@@ -36,7 +36,7 @@ const ENV = {
   GEO_BBOX: 'none',
   BUSINESS_NAME: 'La Tienda',
   RUTAS_PAIS: 'peru',
-  RUTAS_SUPERVISOR: '51900000000',
+  RUTAS_SUPERVISOR: '51912000000',
 } as NodeJS.ProcessEnv;
 
 const queue: OutboundQueue = {
@@ -90,7 +90,7 @@ beforeEach(async () => {
 
 const enviados = () => wa.sent.filter((s) => s.kind !== 'read');
 const motor = (extra: Partial<Parameters<typeof crearMotorLista>[0]> = {}) =>
-  crearMotorLista({ repos, lista, sender, opciones, usarPlantilla: () => false, ahora: () => reloj, azar: () => 0, supervisor: () => '51900000000', ...extra });
+  crearMotorLista({ repos, lista, sender, opciones, usarPlantilla: () => false, ahora: () => reloj, azar: () => 0, supervisor: () => '51912000000', ...extra });
 
 function entrante(texto: string, phone = '51987654321', extra: Partial<InboundMessage> = {}): ChangeValue {
   return {
@@ -201,7 +201,7 @@ describe('el motor: cada pocas horas, como una persona', () => {
     expect(r.accion).toBe('salida');
     expect(await lista.porTelefono('987654321')).toBeNull();
     const aviso = enviados().at(-1)!;
-    expect(aviso).toMatchObject({ kind: 'text', to: '51900000000' });
+    expect(aviso).toMatchObject({ kind: 'text', to: '51912000000' });
     expect(String(aviso.body)).toContain('Juan (51987654321) no mandó su ubicación después de 2 mensajes');
     expect(textoAvisoAgotado({ nombre: null, phone: '51987654321', que: 'mensaje' } as never, 1)).toContain('no contestó después de 1 mensaje');
   });

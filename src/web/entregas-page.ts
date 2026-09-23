@@ -166,7 +166,14 @@ const CSS = `
   .guardar-aj { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .previa { margin-top: 4px; font-size: var(--fs-small); }
   .previa a { cursor: pointer; }
-  .previa .resultado { display: block; margin-top: 4px; padding: 6px 8px; background: var(--superficie-2); border-radius: var(--radio-sm); color: var(--texto-suave); white-space: pre-wrap; }
+  /* «Lo que ve el cliente al mandar su ubicación»: horario, soporte y el mensaje tal cual le llega. */
+.ajuste-fila.tel { grid-template-columns: 1fr 150px; }
+.ajuste-fila .pista-fila { display: block; color: var(--texto-suave); font-size: 12px; font-weight: 400; margin-top: 2px; }
+.burbuja-cliente { margin-top: 10px; }
+.burbuja-cliente .titulo-burbuja { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 12.5px; font-weight: 600; color: var(--texto-suave); margin-bottom: 4px; }
+.burbuja-cliente .sin-guardar { color: var(--ambar); font-weight: 600; }
+.burbuja-cliente .burbuja { background: var(--verde-suave); border: 1px solid var(--borde); border-radius: 10px 10px 10px 2px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--texto); min-height: 3em; }
+.previa .resultado { display: block; margin-top: 4px; padding: 6px 8px; background: var(--superficie-2); border-radius: var(--radio-sm); color: var(--texto-suave); white-space: pre-wrap; }
 
   /* --- pegar la lista del dia y el modo prueba ----------------------------- */
   .cartel-prueba { background: var(--azul-suave); border: 1px solid var(--azul); border-radius: var(--radio); padding: 10px 14px; margin-bottom: var(--esp-3); font-size: var(--fs-cuerpo); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -234,6 +241,7 @@ const CSS = `
     #filas > tr.fila-detalle > td { padding: 0; border: 0; }
     td.nada, td.celda-ancha { padding: 12px; }
     .ajuste-fila, .ajuste-fila.ancha { grid-template-columns: 1fr 96px; }
+  .ajuste-fila.tel { grid-template-columns: 1fr; gap: 4px; }
   }
 `;
 
@@ -404,12 +412,16 @@ ${aviso}
             <label class="linea"><input type="checkbox" id="aj-cierre-activo"> Cerrar el día solo</label>
             <div class="ajuste-fila"><span>Hora del cierre</span><input id="aj-cierre-hora" type="time" step="3600"></div>
           </section>
-          <section class="grupo-aj"><h3>Horario y número de soporte</h3><p class="ayuda-grupo">Se los decimos al cliente al registrar su ubicación: en los textos salen como {desde}, {hasta}, {hastaExtendido} y {soporte}.</p>
-            <div class="ajuste-fila"><span>Las entregas son desde las</span><input id="aj-hor-desde" type="time" step="900"></div>
-            <div class="ajuste-fila"><span>hasta las</span><input id="aj-hor-hasta" type="time" step="900"></div>
-            <div class="ajuste-fila"><span>Horario extendido (algunos casos) hasta las</span><input id="aj-hor-ext" type="time" step="900"></div>
-            <div class="ajuste-fila"><span>Número de soporte (WhatsApp y llamadas) <span class="muted">9 cifras, ej. 987 654 321</span></span><input id="aj-sop-wa" type="tel" inputmode="tel" placeholder="987 654 321"></div>
-            <div class="ajuste-fila"><span>Otro número solo para llamadas <span class="muted">(opcional; vacío = el mismo)</span></span><input id="aj-sop-tel" type="tel" inputmode="tel" placeholder="01 234 5678"></div>
+          <section class="grupo-aj" id="aj-ubicacion-registrada"><h3>Lo que ve el cliente al mandar su ubicación</h3><p class="ayuda-grupo">Con esto se arma el mensaje «Ubicación registrada»: el enlace de su mapa, el horario de entrega y a dónde escribir o llamar si tiene una consulta.</p>
+            <div class="ajuste-fila"><label for="aj-hor-desde">Entregamos desde las</label><input id="aj-hor-desde" type="time" step="900"></div>
+            <div class="ajuste-fila"><label for="aj-hor-hasta">hasta las</label><input id="aj-hor-hasta" type="time" step="900"></div>
+            <div class="ajuste-fila"><label for="aj-hor-ext">Por algunos casos, hasta las</label><input id="aj-hor-ext" type="time" step="900"></div>
+            <div class="ajuste-fila tel"><label for="aj-sop-wa">WhatsApp de soporte<span class="pista-fila">Al que el cliente te escribe. Vacío = este mismo WhatsApp.</span></label><input id="aj-sop-wa" type="tel" inputmode="tel" autocomplete="off" placeholder="987 654 321"></div>
+            <div class="ajuste-fila tel"><label for="aj-sop-tel">Teléfono para llamadas<span class="pista-fila">Solo si es otro. Vacío = el mismo del WhatsApp.</span></label><input id="aj-sop-tel" type="tel" inputmode="tel" autocomplete="off" placeholder="01 234 5678"></div>
+            <div class="burbuja-cliente">
+              <div class="titulo-burbuja"><span>Así le llega al cliente</span><span class="sin-guardar hidden" id="aj-ub-sin-guardar">Sin guardar</span></div>
+              <div class="burbuja" id="aj-ub-previa" aria-live="polite">Cargando…</div>
+            </div>
           </section>
         </div>
         <div id="aj-plantillas-caja" class="grupo-aj ancho hidden"><h3>Plantillas de Meta</h3>
@@ -937,12 +949,73 @@ function pintarAjustes() {
   var sop = a.soporte || {};
   valor('aj-sop-wa', sop.whatsapp || '');
   valor('aj-sop-tel', sop.llamadas || '');
+  guardadoUb = firmaUb();
+  previaUbicacion();
   var pl = resumen.plantillas || { hacenFalta: false, aprobadas: [] };
   $('aj-plantillas-caja').classList.toggle('hidden', !pl.hacenFalta);
   $('aj-plantillas-lista').innerHTML = pl.aprobadas.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
   ['confirmacion', 'motorizado', 'aviso'].forEach(function (k) { valor('aj-pl-' + k, (a.plantillas && a.plantillas[k]) || ''); });
   pintarTextos(a);
 }
+
+/* ------------------------------------ «Ubicación registrada», en vivo --- */
+/* Lo mismo que hace el servidor al mandarlo (src/entregas/textos.ts): la hora
+   como se lee (2:00 PM) y el soporte con sus canales. Asi la vista previa
+   cambia mientras se teclea, sin guardar. */
+function horaLeida(hhmm) {
+  var m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ''));
+  if (!m) return hhmm || '';
+  var h = Number(m[1]);
+  return (h % 12 === 0 ? 12 : h % 12) + ':' + m[2] + ' ' + (h < 12 ? 'AM' : 'PM');
+}
+function telefonoLeido(crudo) {
+  var d = String(crudo || '').replace(/\D/g, '');
+  if (!d) return '';
+  var n = d.indexOf('51') === 0 && d.length === 11 ? d.slice(2) : d;
+  if (n.length === 9 && n.charAt(0) === '9') return '+51 ' + n.slice(0, 3) + ' ' + n.slice(3, 6) + ' ' + n.slice(6);
+  if (n.length === 9 && n.indexOf('01') === 0) return '(01) ' + n.slice(2, 5) + ' ' + n.slice(5);
+  if (n.length === 9 && n.charAt(0) === '0') return '(' + n.slice(0, 3) + ') ' + n.slice(3, 6) + ' ' + n.slice(6);
+  if (n.length === 7) return '(01) ' + n.slice(0, 3) + ' ' + n.slice(3);
+  return '+' + d;
+}
+function soporteLeido() {
+  var wa = telefonoLeido($('aj-sop-wa').value);
+  var tel = telefonoLeido($('aj-sop-tel').value);
+  if (wa && tel && wa !== tel) return 'WhatsApp ' + wa + ' · Llamadas ' + tel;
+  if (wa || tel) return (wa || tel) + ' (WhatsApp y llamadas)';
+  return 'este mismo número, por WhatsApp o llamada';
+}
+var guardadoUb = '';
+function firmaUb() {
+  return ['aj-hor-desde', 'aj-hor-hasta', 'aj-hor-ext', 'aj-sop-wa', 'aj-sop-tel'].map(function (id) { return $(id).value; }).join('|');
+}
+var esperaUb = null;
+async function previaUbicacion() {
+  var caja = $('aj-ub-previa');
+  if (!caja || !resumen || !resumen.textos) return;
+  $('aj-ub-sin-guardar').classList.toggle('hidden', firmaUb() === guardadoUb);
+  var ta = document.querySelector('textarea[data-texto="ubicacionRegistrada"]');
+  var plantilla = (ta && ta.value.trim()) || resumen.textos.porDefecto.ubicacionRegistrada || '';
+  var texto = plantilla
+    .split('{desde}').join(horaLeida($('aj-hor-desde').value || '14:00'))
+    .split('{hasta}').join(horaLeida($('aj-hor-hasta').value || '20:00'))
+    .split('{hastaExtendido}').join(horaLeida($('aj-hor-ext').value || '22:00'))
+    .split('{soporte}').join(soporteLeido());
+  try {
+    var r = await api('/admin/entregas/previsualizar', { method: 'POST', body: { clave: 'ubicacionRegistrada', texto: texto } });
+    caja.textContent = r.texto;
+  } catch (e) {
+    caja.textContent = 'No se pudo armar la vista previa: ' + e.message;
+  }
+}
+['aj-hor-desde', 'aj-hor-hasta', 'aj-hor-ext', 'aj-sop-wa', 'aj-sop-tel'].forEach(function (id) {
+  var campo = $(id);
+  if (!campo) return;
+  campo.addEventListener('input', function () {
+    if (esperaUb) clearTimeout(esperaUb);
+    esperaUb = setTimeout(previaUbicacion, 300);
+  });
+});
 
 /* Los textos se arman una sola vez: llevan chips de variables y vista previa. */
 function pintarTextos(a) {

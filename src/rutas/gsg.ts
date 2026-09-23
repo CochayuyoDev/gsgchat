@@ -18,6 +18,7 @@
 
 import type { Lote, Reporte, RutasRepo, Solicitud, TipoReporte } from '../db/rutas.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
+import { esNumeroDePrueba, PREFIJO_REFERENCIA_PRUEBA } from '../desarrollador/numeros.js';
 
 export interface ResultadoEnvio {
   ok: boolean;
@@ -48,6 +49,11 @@ export interface PuertoGsg {
    * confirme. `ruta` va relativa a la base (p. ej. `/reparto/pendientes`).
    */
   consultar<T = unknown>(ruta: string): Promise<ResultadoConsulta<T>>;
+  /**
+   * true si lo vigente es el simulador de GSG de este servidor. Lo de prueba
+   * (Modulo desarrollador) solo sale hacia el simulador, nunca a la API real.
+   */
+  esSimulador?(): boolean;
 }
 
 export interface OpcionesGsg {
@@ -339,25 +345,59 @@ export interface DespachoResumen {
 }
 
 /**
+ * Los despachos en marcha, por cola (una por tienda). Se hacen UNO DETRAS DE
+ * OTRO: la ubicacion sale en cuanto llega (ver rutas/inbound.ts) y ademas hay
+ * una pasada cada minuto y el boton "reenviar"; si dos coincidieran leyendo
+ * los mismos pendientes, GSG recibiria la misma ubicacion dos veces.
+ */
+const despachosEnMarcha = new WeakMap<object, Promise<unknown>>();
+
+/**
  * Vacia la cola contra GSG.
  *
  * Con el puerto sin conectar no se toca nada: los reportes se quedan
  * 'pendiente' y se mandaran enteros el dia que haya API. Un fallo no
  * reintentable pasa a 'fallido' para que no atasque la cola detras.
  */
-export async function despacharReportes(
+export function despacharReportes(
   repos: { rutas: RutasRepo },
   puerto: PuertoGsg,
   limite = 25,
+  /** Solo estos tipos (el envio al momento solo manda ubicaciones). Sin esto, todo. */
+  soloTipos?: TipoReporte[],
+): Promise<DespachoResumen> {
+  const anterior = despachosEnMarcha.get(repos.rutas) ?? Promise.resolve();
+  const este = anterior.catch(() => undefined).then(() => despacharAhora(repos, puerto, limite, soloTipos));
+  despachosEnMarcha.set(repos.rutas, este);
+  return este;
+}
+
+async function despacharAhora(
+  repos: { rutas: RutasRepo },
+  puerto: PuertoGsg,
+  limite: number,
+  soloTipos?: TipoReporte[],
 ): Promise<DespachoResumen> {
   if (!puerto.conectado()) {
     return { intentados: 0, enviados: 0, fallidos: 0, motivo: puerto.descripcion() };
   }
 
-  const pendientes = await repos.rutas.reportesPendientes(limite);
+  // Se leen DENTRO de la fila de despachos: lo que otro despacho ya mando
+  // no vuelve a salir.
+  const pendientes = soloTipos
+    ? (await repos.rutas.reportesPendientes(Math.max(limite, 200))).filter((r) => soloTipos.includes(r.tipo)).slice(0, limite)
+    : await repos.rutas.reportesPendientes(limite);
   const resumen: DespachoResumen = { intentados: pendientes.length, enviados: 0, fallidos: 0 };
 
   for (const reporte of pendientes) {
+    // Lo del Modulo desarrollador (numeros 51 900 0/1…, referencias PRUEBA-)
+    // solo va al simulador. Contra la API real de GSG no sale NUNCA: se
+    // aparta con el motivo a la vista en vez de quedarse esperando a salir.
+    if (esReporteDePrueba(reporte.payload) && !puerto.esSimulador?.()) {
+      await repos.rutas.marcarReporte(reporte.id, 'fallido', { error: 'Reporte de prueba (Módulo desarrollador): solo se manda al simulador de GSG, nunca a la API real.' });
+      resumen.fallidos++;
+      continue;
+    }
     const salida = await puerto.enviar(reporte.tipo, reporte.payload);
     if (salida.ok) {
       await repos.rutas.marcarReporte(reporte.id, 'enviado', { externoId: salida.id ?? null });
@@ -374,6 +414,13 @@ export async function despacharReportes(
   }
 
   return resumen;
+}
+
+/** Si un reporte es de datos de prueba del Modulo desarrollador. */
+export function esReporteDePrueba(payload: Record<string, unknown> | null | undefined): boolean {
+  if (!payload) return false;
+  const ref = String(payload.referencia ?? '');
+  return ref.toUpperCase().startsWith(PREFIJO_REFERENCIA_PRUEBA) || esNumeroDePrueba(String(payload.telefono ?? ''));
 }
 
 /** Lo que hay en la cola, en JSON, para llevarselo a mano mientras no hay API. */

@@ -21,6 +21,7 @@
  */
 
 import type { Repos } from '../db/repos.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import type { Sender } from '../outbound/sender.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
@@ -187,8 +188,11 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
     }
 
     if (salida.ok) {
-      ultimoEnvio = momento.getTime();
-      pausaActual = sortearPausa();
+      // Lo de prueba no marca el ritmo del numero real (ver src/desarrollador).
+      if (!esNumeroDePrueba(e.phone)) {
+        ultimoEnvio = momento.getTime();
+        pausaActual = sortearPausa();
+      }
       const proximo = new Date(momento.getTime() + opciones.esperaRespuestaMinutos * 60_000);
       const despues = await lista.anotarEnvio(e, { ok: true, proximoEnvioAt: proximo });
       log('mensaje de la lista de envio automatico', { telefono: e.phone, paso: e.que === 'ubicacion' ? paso : 'mensaje', enviados: e.enviados + 1 });
@@ -218,8 +222,11 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
       await lista.anotarEnvio(e, { ok: false, motivo: codigo === 'sin_whatsapp' ? 'el número no tiene WhatsApp' : 'el número no es válido', proximoEnvioAt: null, definitivo: true });
       return { accion: 'salida', entradaId: e.id, motivo: salida.error };
     }
-    ultimoEnvio = momento.getTime();
-    pausaActual = sortearPausa();
+    // Lo de prueba no marca el ritmo del numero real (ver src/desarrollador).
+    if (!esNumeroDePrueba(e.phone)) {
+      ultimoEnvio = momento.getTime();
+      pausaActual = sortearPausa();
+    }
     await lista.anotarEnvio(e, {
       ok: false,
       motivo: `WhatsApp no pudo enviar (${salida.retryable ? 'se reintenta' : 'rechazado'}): ${salida.error.slice(0, 200)}`,
@@ -255,7 +262,8 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
           // Se esperaron sus horas tras el ultimo mensaje y no llego lo que
           // se buscaba: se acabo, y que lo sepa una persona.
           await lista.quitar(e.id, { origen: 'sistema' }, e.que === 'ubicacion' ? `no mandó su ubicación después de ${max} mensaje${max === 1 ? '' : 's'}` : `no contestó después de ${max} mensaje${max === 1 ? '' : 's'}`);
-          await avisarSupervisor(textoAvisoAgotado(e, max));
+          // De un numero de prueba no se molesta al supervisor real.
+          if (!esNumeroDePrueba(e.phone)) await avisarSupervisor(textoAvisoAgotado(e, max));
           return { accion: 'salida', entradaId: e.id, motivo: 'agotó los mensajes' };
         }
 
@@ -277,7 +285,8 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
           continue;
         }
 
-        if (deps.salud && deps.politica) {
+        // Un numero de prueba no sale por WhatsApp: el marcapasos del real no aplica.
+        if (deps.salud && deps.politica && !esNumeroDePrueba(e.phone)) {
           const decision = decidirRitmo(await deps.salud.fotoRitmo(contacto, momento), deps.politica());
           if (!decision.ok) return { accion: 'nada', motivo: `${decision.codigo}: ${decision.motivo}` };
         }

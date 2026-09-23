@@ -20,14 +20,17 @@
 
 export function embedScript(origen: string): string {
   return String.raw`(function () {
-  var ORIGEN = ${JSON.stringify(origen)};
+  // BASE lleva la ruta de la tienda (/tienda/<slug> en la plataforma); los
+  // mensajes entre ventanas se comparan con el ORIGEN, que nunca la lleva.
+  var BASE = ${JSON.stringify(origen)};
+  var ORIGEN = (function () { try { return new URL(BASE).origin; } catch (e) { return BASE; } })();
   function montar(selector, opts) {
     opts = opts || {};
     var caja = typeof selector === 'string' ? document.querySelector(selector) : selector;
     if (!caja) throw new Error('WA.montar: no existe ' + selector);
     var token = opts.token || null;
     var iframe = document.createElement('iframe');
-    var url = ORIGEN + '/embed/chat' + (opts.telefono ? '?telefono=' + encodeURIComponent(opts.telefono) : '');
+    var url = BASE + '/embed/chat' + (opts.telefono ? '?telefono=' + encodeURIComponent(opts.telefono) : '');
     iframe.src = url;
     iframe.title = 'Chat de WhatsApp';
     iframe.style.cssText = 'width:100%;height:100%;border:0;display:block;min-height:' + (opts.altoMinimo || 420) + 'px';

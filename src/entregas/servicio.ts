@@ -55,6 +55,7 @@
  */
 
 import type { Contact, Repos } from '../db/repos.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
 import { payloadConfirmacion, payloadEntrega, payloadUbicacion, RUTA_GSG_PENDIENTES, type PuertoGsg } from '../rutas/gsg.js';
@@ -325,7 +326,12 @@ export interface ServicioEntregas {
   /** El motorizado ya dio su tiempo pero el aviso al cliente no pudo salir (el ritmo del numero lo freno): se vuelve a intentar. */
   reintentarAviso(entrega: Entrega): Promise<{ ok: boolean; motivo?: string; retryAfterMs?: number }>;
   /** El cierre del dia: lo vivo de ayer a incidencia, lo avisado a entregada. No se repite el mismo dia salvo `forzar`. */
-  cerrarDia(opts?: { forzar?: boolean; quien?: string }): Promise<{ ok: boolean; motivo?: string; resultado?: ResultadoCierre }>;
+  /**
+   * `soloPrueba`: cierra SOLO lo del Modulo desarrollador (numeros de prueba),
+   * sin avisar a nadie y sin contar como el cierre del dia (el de verdad sigue
+   * a su hora). Ver src/desarrollador/reloj.ts.
+   */
+  cerrarDia(opts?: { forzar?: boolean; quien?: string; soloPrueba?: boolean }): Promise<{ ok: boolean; motivo?: string; resultado?: ResultadoCierre }>;
   /** Lo llama el motor en cada pasada: cierra si esta activo, aun no se cerro hoy y ya es la hora. */
   cerrarDiaSiToca(): Promise<boolean>;
   ultimoCierre(): ResultadoCierre | null;
@@ -707,7 +713,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   const variablesCliente = (e: Entrega): string[] => [(e.nombre ?? '').trim().split(/\s+/)[0] || 'buenas tardes', e.referencia, deps.nombreNegocio()];
 
-  async function avisarSupervisor(texto: string): Promise<void> {
+  /**
+   * `sobre`: los numeros de los que trata el aviso. Si todos son del Modulo
+   * desarrollador (clientes o motorizados de prueba), no se molesta a la
+   * persona real: lo de prueba se mira en su pantalla.
+   */
+  async function avisarSupervisor(texto: string, sobre: Array<string | null | undefined> = []): Promise<void> {
+    if (sobre.length && sobre.every((t) => esNumeroDePrueba(t))) return;
     const destino = deps.supervisor?.();
     if (!destino) return;
     await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', text: texto, manual: true, origen: 'sistema' }).catch(() => undefined);
@@ -718,7 +730,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     await evento(e, 'incidencia', `${codigo}: ${detalle}`);
     if (opts.avisar ?? true) {
       const quien = e.nombre ? `${e.nombre} (${e.phone})` : e.phone;
-      await avisarSupervisor(`Entrega ${e.referencia} de ${quien}: ${detalle}. Mírala en ${(deps.publicBaseUrl ?? '').replace(/\/+$/, '')}/hoy`);
+      await avisarSupervisor(`Entrega ${e.referencia} de ${quien}: ${detalle}. Mírala en ${(deps.publicBaseUrl ?? '').replace(/\/+$/, '')}/hoy`, [e.phone]);
     }
     emitir('entrega.incidencia', actualizada, await motorizadoDe(actualizada));
     return actualizada;
@@ -1955,7 +1967,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (salida.retryable) return { ok: false, motivo: salida.error, retryAfterMs: 3 * 60_000 };
       // Un numero de motorizado que WhatsApp rechaza: fuera de la lista para este pedido, y se avisa.
       await evento(e, 'incidencia', `WhatsApp rechazó el envío a ${firmaMotorizado(m)}: ${salida.error.slice(0, 160)}`);
-      await avisarSupervisor(`El número del motorizado ${firmaMotorizado(m)} (${m.phone}) no recibe mensajes: ${salida.error.slice(0, 120)}. Revísalo en Entregas del día.`);
+      await avisarSupervisor(`El número del motorizado ${firmaMotorizado(m)} (${m.phone}) no recibe mensajes: ${salida.error.slice(0, 120)}. Revísalo en Entregas del día.`, [m.phone]);
       await descartarMotorizado(e, m, 'WhatsApp rechazó su número');
       return { ok: false, motivo: salida.error };
     }
@@ -2394,7 +2406,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       await sender.send({ phone: m.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: textoDe('motorizadoTraspaso', ajustes, { ...contexto(traspasadas[0]!, m), pedidos: lista }), limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
     }
     if (traspasadas.length || opts.descanso) {
-      await avisarSupervisor(`${firmaMotorizado(m)} ${motivo}: ${opts.descanso ? 'pasa a descanso' : 'sigue activo'}${traspasadas.length ? ` y ${traspasadas.length === 1 ? 'su pedido' : `sus ${traspasadas.length} pedidos`} (${lista}) ${destino ? `pasa${traspasadas.length === 1 ? '' : 'n'} a ${firmaMotorizado(destino)}` : `se reparte${traspasadas.length === 1 ? '' : 'n'} entre los demás`}` : ' sin pedidos entre manos'}. Míralo en ${(deps.publicBaseUrl ?? '').replace(/\/+$/, '')}/motorizados`);
+      await avisarSupervisor(`${firmaMotorizado(m)} ${motivo}: ${opts.descanso ? 'pasa a descanso' : 'sigue activo'}${traspasadas.length ? ` y ${traspasadas.length === 1 ? 'su pedido' : `sus ${traspasadas.length} pedidos`} (${lista}) ${destino ? `pasa${traspasadas.length === 1 ? '' : 'n'} a ${firmaMotorizado(destino)}` : `se reparte${traspasadas.length === 1 ? '' : 'n'} entre los demás`}` : ' sin pedidos entre manos'}. Míralo en ${(deps.publicBaseUrl ?? '').replace(/\/+$/, '')}/motorizados`, [m.phone]);
     }
     const fresco = (await repo.motorizado(m.id)) ?? m;
     return { ok: true, resultado: { motorizado: fresco, traspasadas, destino } };
@@ -2525,10 +2537,11 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   // ------------------------------------------------------ cierre del dia
 
-  async function cerrarDia(opts: { forzar?: boolean; quien?: string } = {}): Promise<{ ok: boolean; motivo?: string; resultado?: ResultadoCierre }> {
+  async function cerrarDia(opts: { forzar?: boolean; quien?: string; soloPrueba?: boolean } = {}): Promise<{ ok: boolean; motivo?: string; resultado?: ResultadoCierre }> {
     const dia = hoy();
-    if (!opts.forzar && ultimoCierre?.dia === dia) return { ok: false, motivo: `El día ya se cerró hoy a las ${ultimoCierre.cuando ? horaEnReloj(new Date(ultimoCierre.cuando), tz()) : '?'}.`, resultado: ultimoCierre };
-    const vivas = await repo.vivasDeDiasAnteriores(dia, 500);
+    if (!opts.soloPrueba && !opts.forzar && ultimoCierre?.dia === dia) return { ok: false, motivo: `El día ya se cerró hoy a las ${ultimoCierre.cuando ? horaEnReloj(new Date(ultimoCierre.cuando), tz()) : '?'}.`, resultado: ultimoCierre };
+    const todas = await repo.vivasDeDiasAnteriores(dia, 500);
+    const vivas = opts.soloPrueba ? todas.filter((e) => esNumeroDePrueba(e.phone)) : todas;
     const resultado: ResultadoCierre = { dia, cuando: ahora().toISOString(), sinTerminar: [], dadasPorEntregadas: [], quien: opts.quien ?? 'motor' };
     for (const e of vivas) {
       const m = await motorizadoDe(e);
@@ -2546,12 +2559,21 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       resultado.sinTerminar.push(e.referencia);
     }
+    // El cierre de prueba no cuenta como el del dia: el de verdad sigue a su hora.
+    if (opts.soloPrueba) {
+      log('cierre del día de prueba hecho', { sinTerminar: resultado.sinTerminar.length, dadasPorEntregadas: resultado.dadasPorEntregadas.length });
+      return { ok: true, resultado };
+    }
     ultimoCierre = resultado;
     await deps.settingsRepo.put(CLAVE_CIERRE, JSON.stringify(resultado), false);
-    if (vivas.length) {
+    // Al supervisor, solo lo real: lo de prueba se cierra en silencio.
+    const deVerdad = new Set(vivas.filter((e) => !esNumeroDePrueba(e.phone)).map((e) => e.referencia));
+    const sinTerminar = resultado.sinTerminar.filter((r) => deVerdad.has(r));
+    const dadas = resultado.dadasPorEntregadas.filter((r) => deVerdad.has(r));
+    if (sinTerminar.length || dadas.length) {
       const partes: string[] = [];
-      if (resultado.sinTerminar.length) partes.push(`${resultado.sinTerminar.length} ${resultado.sinTerminar.length === 1 ? 'pedido quedó' : 'pedidos quedaron'} sin terminar (${resultado.sinTerminar.slice(0, 12).join(', ')}${resultado.sinTerminar.length > 12 ? '…' : ''}) y ${resultado.sinTerminar.length === 1 ? 'necesita' : 'necesitan'} a alguien`);
-      if (resultado.dadasPorEntregadas.length) partes.push(`${resultado.dadasPorEntregadas.length} se ${resultado.dadasPorEntregadas.length === 1 ? 'dio' : 'dieron'} por ${resultado.dadasPorEntregadas.length === 1 ? 'entregado' : 'entregados'} (${resultado.dadasPorEntregadas.slice(0, 12).join(', ')}${resultado.dadasPorEntregadas.length > 12 ? '…' : ''})`);
+      if (sinTerminar.length) partes.push(`${sinTerminar.length} ${sinTerminar.length === 1 ? 'pedido quedó' : 'pedidos quedaron'} sin terminar (${sinTerminar.slice(0, 12).join(', ')}${sinTerminar.length > 12 ? '…' : ''}) y ${sinTerminar.length === 1 ? 'necesita' : 'necesitan'} a alguien`);
+      if (dadas.length) partes.push(`${dadas.length} se ${dadas.length === 1 ? 'dio' : 'dieron'} por ${dadas.length === 1 ? 'entregado' : 'entregados'} (${dadas.slice(0, 12).join(', ')}${dadas.length > 12 ? '…' : ''})`);
       await avisarSupervisor(`Cierre del día: ${partes.join('; ')}. Míralo en ${(deps.publicBaseUrl ?? '').replace(/\/+$/, '')}/hoy`);
     }
     log('cierre del día hecho', { sinTerminar: resultado.sinTerminar.length, dadasPorEntregadas: resultado.dadasPorEntregadas.length });
@@ -2604,6 +2626,12 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       horaEntregada: base.horaEntregada ?? horaEnReloj(en, tz()),
       paradas: 3,
       pedidos: 'P-1001, P-1004, P-1009',
+      // Sin entrega de hoy, el ejemplo no traia el horario ni el soporte y la
+      // vista previa enseñaba «desde las hasta las».
+      desde: base.desde ?? horaEnPalabras(ajustes.horarioEntregas.desde),
+      hasta: base.hasta ?? horaEnPalabras(ajustes.horarioEntregas.hasta),
+      hastaExtendido: base.hastaExtendido ?? horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
+      soporte: base.soporte ?? soporteEnPalabras(ajustes.soporte),
     };
     const propio = texto.trim() || ajustes.textos[clave]?.trim() || TEXTOS_POR_DEFECTO[clave];
     return rellenar(propio, TEXTOS_PARA_MOTORIZADO.has(clave) ? contextoMotorizado(ctx) : ctx);

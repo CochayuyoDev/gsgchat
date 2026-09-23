@@ -26,6 +26,8 @@ import type { Sender } from '../outbound/sender.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
 import { decidirRitmo } from '../salud/ritmo.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
+import { esLoteDePrueba } from './alertas.js';
 import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
@@ -146,6 +148,11 @@ export interface ResultadoTick {
   motivo?: string;
   /** Lotes que se dieron por terminados en esta pasada. */
   lotesCerrados?: string[];
+  /**
+   * Era un numero del Modulo desarrollador: no marco el ritmo del numero real,
+   * asi que el ticker puede seguir con el siguiente en la misma pasada.
+   */
+  dePrueba?: boolean;
 }
 
 /** La hora del negocio, no la del servidor. */
@@ -379,7 +386,8 @@ export function crearMotor(deps: MotorDeps): Motor {
 
     // Antes del primer mensaje, preguntar si ese numero tiene WhatsApp. Solo
     // lo saben los clientes no oficiales; con Meta devuelve null y se sigue.
-    if (solicitud.intentos === 0 && deps.wa?.tieneWhatsApp) {
+    // Un numero de prueba no existe en WhatsApp y no sale nunca: ni se pregunta.
+    if (solicitud.intentos === 0 && deps.wa?.tieneWhatsApp && !esNumeroDePrueba(phone)) {
       const tiene = await deps.wa.tieneWhatsApp(phone).catch(() => null);
       if (tiene === false) {
         await anotarIncidencia(
@@ -430,8 +438,11 @@ export function crearMotor(deps: MotorDeps): Motor {
     const momento = ahora();
 
     if (salida.ok) {
-      ultimoEnvio = momento.getTime();
-      pausaActual = sortearPausa();
+      // Lo de prueba no marca el ritmo del numero real (ver src/desarrollador).
+      if (!esNumeroDePrueba(phone)) {
+        ultimoEnvio = momento.getTime();
+        pausaActual = sortearPausa();
+      }
 
       await repos.rutas.actualizarSolicitud(solicitud.id, {
         estado: solicitud.estado === 'respondio' ? 'respondio' : 'enviado',
@@ -503,8 +514,11 @@ export function crearMotor(deps: MotorDeps): Motor {
         incidenciaDetalle: salida.error.slice(0, 300),
       });
       await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `WhatsApp no pudo enviar (se reintenta): ${salida.error}`);
-      ultimoEnvio = momento.getTime();
-      pausaActual = sortearPausa();
+      // Lo de prueba no marca el ritmo del numero real (ver src/desarrollador).
+      if (!esNumeroDePrueba(phone)) {
+        ultimoEnvio = momento.getTime();
+        pausaActual = sortearPausa();
+      }
       return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
     }
 
@@ -517,8 +531,11 @@ export function crearMotor(deps: MotorDeps): Motor {
       incidenciaDetalle: salida.error.slice(0, 300),
     });
     await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `WhatsApp rechazó el envío: ${salida.error}`);
-    ultimoEnvio = momento.getTime();
-    pausaActual = sortearPausa();
+    // Lo de prueba no marca el ritmo del numero real (ver src/desarrollador).
+    if (!esNumeroDePrueba(phone)) {
+      ultimoEnvio = momento.getTime();
+      pausaActual = sortearPausa();
+    }
 
     return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
   }
@@ -533,6 +550,11 @@ export function crearMotor(deps: MotorDeps): Motor {
       if (vivos > 0) continue;
 
       await repos.rutas.cambiarEstadoLote(lote.id, 'terminado');
+      // El cierre de un lote de prueba no es asunto de GSG.
+      if (await esLoteDePrueba(repos, lote.id)) {
+        cerrados.push(lote.id);
+        continue;
+      }
       await repos.rutas.encolarReporte({
         loteId: lote.id,
         tipo: 'resumen',
@@ -558,26 +580,30 @@ export function crearMotor(deps: MotorDeps): Motor {
         };
       }
 
-      // El ritmo. Es lo que separa "un negocio escribiendo a sus clientes" de
-      // "un robot", y lo unico que de verdad evita el bloqueo del numero.
-      if (ultimoEnvio && momento.getTime() - ultimoEnvio < pausaEfectiva()) {
-        return { accion: 'nada', motivo: 'esperando la pausa entre mensajes' };
-      }
-
-      // El monitor de salud manda sobre el ritmo propio: parado es parado.
-      if (deps.salud && deps.salud.factor() <= 0) {
-        return { accion: 'nada', motivo: 'el monitor de salud tiene el numero parado' };
-      }
-
       const [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
       if (!siguiente) {
         const lotesCerrados = await cerrarLotesTerminados();
         return { accion: 'nada', motivo: 'no hay nada pendiente', lotesCerrados };
       }
+      // Un numero del Modulo desarrollador no sale por WhatsApp (el sender lo
+      // simula): ni la pausa, ni el monitor, ni el marcapasos del numero real
+      // tienen nada que decir, y lo suyo no los consume.
+      const dePrueba = esNumeroDePrueba(siguiente.phone);
+
+      // El ritmo. Es lo que separa "un negocio escribiendo a sus clientes" de
+      // "un robot", y lo unico que de verdad evita el bloqueo del numero.
+      if (!dePrueba && ultimoEnvio && momento.getTime() - ultimoEnvio < pausaEfectiva()) {
+        return { accion: 'nada', motivo: 'esperando la pausa entre mensajes' };
+      }
+
+      // El monitor de salud manda sobre el ritmo propio: parado es parado.
+      if (!dePrueba && deps.salud && deps.salud.factor() <= 0) {
+        return { accion: 'nada', motivo: 'el monitor de salud tiene el numero parado' };
+      }
 
       const paso = pasoDe(siguiente, opciones);
       if (paso === null) return { accion: 'nada', motivo: 'la solicitud ya no espera mensajes' };
-      if (paso === 'derivar') return derivar(siguiente);
+      if (paso === 'derivar') return { ...(await derivar(siguiente)), ...(dePrueba ? { dePrueba: true } : {}) };
 
       // Sin telefono valido no se manda nada: eso ya se marco al cargar el
       // lote, pero mas vale no fiarse.
@@ -589,7 +615,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       // El marcapasos global (cupos por minuto y hora, tier de Meta, contactos
       // nuevos) se consulta ANTES de tocar la solicitud: un "todavia no" no es
       // una incidencia y no tiene por que quedar en su bitacora.
-      if (deps.salud && deps.politica) {
+      if (deps.salud && deps.politica && !dePrueba) {
         const contacto = await repos.contacts.upsertFromInbound(siguiente.phone);
         const decision = decidirRitmo(await deps.salud.fotoRitmo(contacto, momento), deps.politica());
         if (!decision.ok) {
@@ -597,7 +623,8 @@ export function crearMotor(deps: MotorDeps): Motor {
         }
       }
 
-      return enviarPaso(siguiente, paso);
+      const hecho = await enviarPaso(siguiente, paso);
+      return dePrueba ? { ...hecho, dePrueba: true } : hecho;
     },
   };
 }
@@ -617,7 +644,12 @@ export function startMotorRutas(deps: MotorDeps, intervalMs = 5_000): () => void
     if (corriendo) return;
     corriendo = true;
     try {
-      await motor.tick();
+      // Lo de prueba no consume el ritmo: en la misma pasada se sigue con el
+      // siguiente mientras sean de prueba (con tope, para no acaparar el proceso).
+      for (let i = 0; i < 25; i++) {
+        const r = await motor.tick();
+        if (!r.dePrueba) break;
+      }
     } catch (error) {
       deps.log?.('fallo el motor de rutas', {
         detalle: error instanceof Error ? error.message : String(error),

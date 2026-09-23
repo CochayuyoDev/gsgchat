@@ -7,6 +7,7 @@
  */
 
 import { toleranteAlUuid, type Pool } from './pool.js';
+import { createDesarrolladorRepo, type DesarrolladorRepo } from './desarrollador.js';
 import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
 import { createMessagesRepo, type MessagesRepo } from './messages.js';
@@ -571,6 +572,8 @@ export interface Repos {
   tiendas: TiendasRepo;
   /** Las entregas del dia y los motorizados. Ver src/entregas. */
   entregas: EntregasRepo;
+  /** SQL acotado del Modulo desarrollador (borrar y adelantar lo de prueba). Sin base real (pruebas en memoria), no esta. */
+  desarrollador?: DesarrolladorRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1001,21 +1004,22 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async contarNuevosEscritosDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
-        'select count(*)::int as total from contacts where primer_envio_at >= $1',
+        // Sin los numeros del Modulo desarrollador: no cuentan en la salud del numero real.
+        "select count(*)::int as total from contacts where primer_envio_at >= $1 and phone !~ '^51900[01][0-9]{5}$'",
         [since],
       );
       return rows[0]?.total ?? 0;
     },
     async contarSuprimidos(now) {
       const { rows } = await pool.query<{ total: number }>(
-        'select count(*)::int as total from contacts where suprimido_hasta > $1',
+        "select count(*)::int as total from contacts where suprimido_hasta > $1 and phone !~ '^51900[01][0-9]{5}$'",
         [now],
       );
       return rows[0]?.total ?? 0;
     },
     async contarBajasDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
-        'select count(*)::int as total from contacts where opt_out_at >= $1',
+        "select count(*)::int as total from contacts where opt_out_at >= $1 and phone !~ '^51900[01][0-9]{5}$'",
         [since],
       );
       return rows[0]?.total ?? 0;
@@ -1872,6 +1876,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     codigosConexion: createCodigosConexionRepo(pool),
     tiendas: createTiendasRepo(pool),
     entregas: createEntregasRepo(pool),
+    desarrollador: createDesarrolladorRepo(pool),
   };
 }
 

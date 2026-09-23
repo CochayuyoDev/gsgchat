@@ -231,7 +231,9 @@ describe('la pagina y el script', () => {
     const r = await app.inject({ method: 'GET', url: '/embed.js' });
     expect(r.statusCode).toBe(200);
     expect(r.headers['content-type']).toContain('javascript');
-    expect(r.body).toContain('var ORIGEN = "http://localhost:3000"');
+    // BASE (con la ruta de la tienda, si la lleva) para las URLs; ORIGEN, sin ruta, para los mensajes.
+    expect(r.body).toContain('var BASE = "http://localhost:3000"');
+    expect(r.body).toContain('new URL(BASE).origin');
     expect(r.body).toContain('window.WA.montar = montar');
     expect(r.body).toContain('window.WA.flotante = flotante');
     expect(r.body).toContain("'/embed/chat'");

@@ -21,6 +21,7 @@
  */
 
 import { conexionGsgVigente } from '../rutas/conexion-gsg.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
 import type { MensajeIA } from '../ia/proveedores.js';
@@ -145,16 +146,36 @@ export function minutosDe(hhmm: string): number {
 
 const VIVAS = new Set(['pendiente', 'esperando_ubicacion', 'esperando_confirmacion', 'lista', 'esperando_motorizado', 'avisada']);
 
+/** Las cifras de Hoy, contadas de nuevo sobre una lista (sin lo de prueba). */
+function recontar(entregas: ResumenEntregas['entregas']): ResumenEntregas['cifras'] {
+  const c = { ...Object.fromEntries(Object.keys({ pendiente: 0, esperando_ubicacion: 0, esperando_confirmacion: 0, lista: 0, esperando_motorizado: 0, avisada: 0, entregada: 0, terminada: 0, cancelada: 0, incidencia: 0 }).map((k) => [k, 0])) } as Record<string, number>;
+  let faltaUbicacion = 0;
+  let faltaConfirmacion = 0;
+  let enCamino = 0;
+  for (const e of entregas) {
+    c[e.estado] = (c[e.estado] ?? 0) + 1;
+    const x = e as unknown as { ubicacionEstado?: string; confirmacionEstado?: string };
+    if (x.ubicacionEstado === 'pendiente' && e.estado !== 'cancelada') faltaUbicacion++;
+    if ((x.confirmacionEstado === 'pendiente' || x.confirmacionEstado === 'pedida') && e.estado !== 'cancelada') faltaConfirmacion++;
+    if (e.estado === 'lista' || e.estado === 'esperando_motorizado' || e.estado === 'avisada' || e.estado === 'terminada') enCamino++;
+  }
+  return { ...c, total: entregas.length, faltaUbicacion, faltaConfirmacion, enCamino } as unknown as ResumenEntregas['cifras'];
+}
+
 /** Convierte lo que ensena Hoy en las cifras del resumen. */
 export function cifrasDe(r: ResumenEntregas | null, extra: { whatsappConectado: boolean; dia: string }): CifrasResumen {
   if (!r) {
     return { dia: extra.dia, total: 0, faltaUbicacion: 0, faltaConfirmacion: 0, listas: 0, enCamino: 0, entregadas: 0, incidencia: 0, canceladas: 0, sinTerminar: 0, motorizadosActivos: 0, gsgConectada: false, gsgDescripcion: 'sin conexión', reportesFallidos: 0, incidencias: [], vivas: [], mejorMotorizado: null, whatsappConectado: extra.whatsappConectado };
   }
-  const c = r.cifras;
-  const vivas = r.entregas.filter((e) => VIVAS.has(e.estado));
-  const conIncidencia = r.entregas.filter((e) => e.estado === 'incidencia');
-  const activos = r.motorizados.filter((m) => m.estado === 'activo');
-  const mejor = [...r.motorizados].filter((m) => (m.entregasHoy ?? 0) > 0).sort((a, b) => (b.entregasHoy ?? 0) - (a.entregasHoy ?? 0))[0] ?? null;
+  // Lo del Modulo desarrollador (numeros de prueba) no entra en el resumen
+  // que recibe el supervisor real: se recuentan las cifras sin ello.
+  const reales = r.entregas.filter((e) => !esNumeroDePrueba(e.phone));
+  const c = reales.length === r.entregas.length ? r.cifras : recontar(reales);
+  const vivas = reales.filter((e) => VIVAS.has(e.estado));
+  const conIncidencia = reales.filter((e) => e.estado === 'incidencia');
+  const motorizados = r.motorizados.filter((m) => !esNumeroDePrueba(m.phone));
+  const activos = motorizados.filter((m) => m.estado === 'activo');
+  const mejor = [...motorizados].filter((m) => (m.entregasHoy ?? 0) > 0).sort((a, b) => (b.entregasHoy ?? 0) - (a.entregasHoy ?? 0))[0] ?? null;
   return {
     dia: r.dia,
     total: c.total,

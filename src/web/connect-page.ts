@@ -274,6 +274,17 @@ const CSS = `
   #gsg-bitacora table { min-width: 520px; width: 100%; border-collapse: collapse; font-size: 12.5px; }
   #gsg-bitacora th, #gsg-bitacora td { text-align: left; padding: 4px 6px; }
   #gsg-sim-valor, #gsg-clave-valor { overflow-wrap: anywhere; }
+/* Conectar el sistema de GSG: dos campos en la tarjeta, sin ventanas encadenadas. */
+#gsg-form { margin: var(--esp-3) 0 0; padding: var(--esp-3); border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie-2); }
+#gsg-form input { width: 100%; }
+#gsg-form .con-ojo { position: relative; }
+#gsg-form .con-ojo input { padding-right: 88px; }
+#gsg-form .con-ojo button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); min-height: 36px; }
+#gsg-form .campo:first-child { margin-top: 0; }
+#gsg-resultado { margin-top: var(--esp-2); padding: 10px 12px; border-radius: var(--radio-sm); font-size: 14px; line-height: 1.45; }
+#gsg-resultado.bien { background: var(--verde-suave); color: var(--texto); }
+#gsg-resultado.mal { background: var(--rojo-suave); color: var(--texto); }
+#gsg-resultado.espera { background: var(--ambar-suave); color: var(--texto); }
 `;
 
 /* ------------------------------------------------------------------- html */
@@ -458,12 +469,26 @@ ${
 
 <section class="tarjeta paso" id="gsg">
   <h2>El sistema de GSG</h2>
-  <p class="ayuda">De ahí salen cada día los pedidos. Puede ser su API de verdad o el simulador de este servidor.</p>
+  <p class="ayuda">De ahí salen cada día los pedidos, y ahí mandamos cada ubicación en cuanto el cliente la envía por WhatsApp.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>
+  <form id="gsg-form" novalidate>
+    <label class="campo" for="gsg-url">Dirección del sistema de GSG
+      <span class="hint">Te la dan sus programadores. Empieza por https://</span></label>
+    <input id="gsg-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.gsg.pe/v1">
+    <label class="campo" for="gsg-token">Clave de acceso (token)
+      <span class="hint" id="gsg-token-pista">También te la dan ellos. Se guarda cifrada y no se vuelve a mostrar.</span></label>
+    <div class="con-ojo">
+      <input id="gsg-token" type="password" autocomplete="off" spellcheck="false">
+      <button class="btn sm" id="gsg-token-ver" type="button" aria-controls="gsg-token" aria-pressed="false">Mostrar</button>
+    </div>
+    <div class="acciones">
+      <button class="btn primario" id="gsg-guardar" type="submit">Guardar y probar</button>
+    </div>
+    <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
+  </form>
   <div class="acciones">
-    <button class="btn" id="gsg-probar" type="button">Probar</button>
+    <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
     <button class="btn" id="gsg-simulador" type="button">Usar el simulador</button>
-    <button class="btn" id="gsg-real" type="button">Conectar la API real</button>
     <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
     <span id="gsg-state" class="chip hidden" role="status"></span>
   </div>
@@ -1487,38 +1512,74 @@ async function cargarGsg() {
     if (!g) { caja.textContent = 'La conexión con GSG se fija al arrancar el servidor.'; return; }
     var tono = g.modo === 'ninguna' ? 'rojo' : g.modo === 'simulador' ? 'azul' : 'verde';
     caja.innerHTML = '<span class="chip tono-' + tono + '">' + esc(g.descripcion) + '</span>' +
-      (g.url && g.modo === 'real' ? ' <span class="ayuda">(' + esc(g.url) + ')</span>' : '') +
       (g.ultimaPrueba ? '<br><span class="ayuda">Última prueba: ' + esc(g.ultimaPrueba.detalle) + '</span>' : '');
     ver('gsg-simulador', !(g.modo === 'simulador' || !r.simulador));
     ver('gsg-quitar', g.modo !== 'ninguna');
+    ver('gsg-probar', g.modo !== 'ninguna');
+    // Lo guardado a la vista (la clave no: solo si ya hay una).
+    if (g.modo === 'real' && g.url && !$('gsg-url').value) $('gsg-url').value = g.url;
+    var hayClave = g.modo === 'real' && g.tieneToken;
+    $('gsg-token').placeholder = hayClave ? '•••••••• (guardada)' : '';
+    $('gsg-token-pista').textContent = hayClave
+      ? 'Ya hay una guardada. Déjala vacía para conservarla, o pega una nueva para cambiarla.'
+      : 'También te la dan ellos. Se guarda cifrada y no se vuelve a mostrar.';
   } catch (error) { caja.textContent = error.message; }
 }
 
 if ($('gsg')) {
-  $('gsg-probar').onclick = async function () {
-    estado('gsg-state', 'Probando…', 'ambar');
-    try { var r = await api('/admin/entregas/gsg/probar', { method: 'POST', body: {} }); estado('gsg-state', r.prueba.detalle, r.ok ? 'verde' : 'rojo'); cargarGsg(); }
-    catch (error) { estado('gsg-state', error.message, 'rojo'); }
+  /* El resultado de la prueba, en una frase que se lee sin saber de APIs. */
+  function resultadoGsg(texto, tono) {
+    var caja = $('gsg-resultado');
+    caja.textContent = texto;
+    caja.className = tono;
+    ver('gsg-resultado', Boolean(texto));
+  }
+  async function probarGsg() {
+    resultadoGsg('Probando la conexión con GSG…', 'espera');
+    try {
+      var r = await api('/admin/entregas/gsg/probar', { method: 'POST', body: {} });
+      resultadoGsg((r.ok ? '✓ Funciona. ' : '✗ No responde bien. ') + r.prueba.detalle, r.ok ? 'bien' : 'mal');
+    } catch (error) { resultadoGsg('✗ ' + error.message, 'mal'); }
+    cargarGsg();
+  }
+  $('gsg-probar').onclick = probarGsg;
+  $('gsg-token-ver').onclick = function () {
+    var t = $('gsg-token');
+    var visible = t.type === 'text';
+    t.type = visible ? 'password' : 'text';
+    this.textContent = visible ? 'Mostrar' : 'Ocultar';
+    this.setAttribute('aria-pressed', visible ? 'false' : 'true');
+  };
+  $('gsg-form').onsubmit = async function (ev) {
+    ev.preventDefault();
+    var url = $('gsg-url').value.trim();
+    var campoUrl = $('gsg-url');
+    campoUrl.removeAttribute('aria-invalid');
+    if (!/^https?:\/\/[^\s/]+/i.test(url)) {
+      campoUrl.setAttribute('aria-invalid', 'true');
+      campoUrl.focus();
+      resultadoGsg('Escribe la dirección completa, empezando por https:// (por ejemplo https://api.gsg.pe/v1).', 'mal');
+      return;
+    }
+    var boton = $('gsg-guardar');
+    boton.disabled = true;
+    resultadoGsg('Guardando…', 'espera');
+    try {
+      var token = $('gsg-token').value.trim();
+      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, token: token || undefined } });
+      $('gsg-token').value = '';
+      await probarGsg();
+    } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }
+    boton.disabled = false;
   };
   $('gsg-simulador').onclick = async function () {
     try { await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'simulador' } }); estado('gsg-state', 'Ahora GSG es el simulador de este servidor. Cárgalo desde Hoy → Probar con números ficticios.', 'verde'); cargarGsg(); }
     catch (error) { estado('gsg-state', error.message, 'rojo'); }
   };
-  $('gsg-real').onclick = async function () {
-    try {
-      var url = await pedirDato({ titulo: 'API real de GSG', texto: 'La dirección base de la API de GSG (la que tiene /reparto/pendientes, /ubicaciones, /confirmaciones y /entregas).', etiqueta: 'Dirección', marcador: 'https://api.gsg.pe/v1', boton: 'Siguiente' });
-      if (!url) return;
-      var token = await pedirDato({ titulo: 'API real de GSG', etiqueta: 'Token (se guarda cifrado)', marcador: 'el token que te dieron', boton: 'Conectar', validar: function () { return null; } });
-      if (token === null) return;
-      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, token: token || undefined } });
-      estado('gsg-state', 'Conectado. Pulsa «Probar» para comprobarlo.', 'verde');
-      cargarGsg();
-    } catch (error) { estado('gsg-state', error.message, 'rojo'); }
-  };
   $('gsg-quitar').onclick = async function () {
     var ok = await confirmarDialogo({ titulo: 'Desconectar GSG', texto: 'Lo reportable se guarda en la cola y saldrá entero cuando se vuelva a conectar.', boton: 'Desconectar', peligro: true });
     if (!ok) return;
-    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); estado('gsg-state', 'Desconectado.', 'verde'); cargarGsg(); }
+    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); $('gsg-url').value = ''; resultadoGsg('', ''); estado('gsg-state', 'Desconectado: lo que haya que mandarle a GSG se guarda y saldrá entero al volver a conectar.', 'verde'); cargarGsg(); }
     catch (error) { estado('gsg-state', error.message, 'rojo'); }
   };
 

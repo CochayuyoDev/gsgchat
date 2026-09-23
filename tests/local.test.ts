@@ -233,7 +233,7 @@ describe('la sesion local', () => {
    */
   it('con un 401 se borra la vinculacion vieja: el siguiente arranque saca un QR', async () => {
     const authDir = mkdtempSync(join(tmpdir(), 'wa-auth-401-'));
-    writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51900000000:1@s.whatsapp.net"}}');
+    writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51912000000:1@s.whatsapp.net"}}');
     expect(hayVinculacion(authDir)).toBe(true);
 
     // Primer arranque: con credenciales guardadas, Baileys intenta entrar y
@@ -274,7 +274,7 @@ describe('la sesion local', () => {
     // VIEJO llego tarde: borro la carpeta y el guardado de las credenciales
     // nuevas revento el servidor con un ENOENT.
     const authDir = mkdtempSync(join(tmpdir(), 'wa-auth-relink-'));
-    writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51900000000:1@s.whatsapp.net"}}');
+    writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51912000000:1@s.whatsapp.net"}}');
 
     const viejo = fakeSocket();
     let logoutLlamado = 0;
@@ -299,7 +299,7 @@ describe('la sesion local', () => {
       createSocket: async () => ({
         sock: nuevo.sock,
         saveCreds: async () => {
-          writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51900000000:2@s.whatsapp.net"}}');
+          writeFileSync(join(authDir, 'creds.json'), '{"me":{"id":"51912000000:2@s.whatsapp.net"}}');
           guardadas.push('ok');
         },
       }),

@@ -214,7 +214,7 @@ export function horaEnPalabras(hhmm: string): string {
   if (!m) return hhmm;
   const h = Number(m[1]);
   const min = m[2];
-  const sufijo = h < 12 ? 'a. m.' : 'p. m.';
+  const sufijo = h < 12 ? 'AM' : 'PM';
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${min} ${sufijo}`;
 }
@@ -236,9 +236,9 @@ export function telefonoEnPalabras(crudo: string): string {
 export function soporteEnPalabras(soporte: { whatsapp?: string; llamadas?: string }): string {
   const wa = telefonoEnPalabras(soporte.whatsapp ?? '');
   const tel = telefonoEnPalabras(soporte.llamadas ?? '');
-  if (wa && tel && wa !== tel) return `${wa} (WhatsApp) o ${tel} (llamadas)`;
+  if (wa && tel && wa !== tel) return `WhatsApp ${wa} · Llamadas ${tel}`;
   if (wa || tel) return `${wa || tel} (WhatsApp y llamadas)`;
-  return 'este mismo WhatsApp';
+  return 'este mismo número, por WhatsApp o llamada';
 }
 /** "1 h 40 min", "45 min", "2 h". */
 export function minutosEnPalabras(minutos: number): string {
@@ -303,7 +303,8 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
 }
 /** Los textos de siempre. Se usan cuando la pantalla no guardo otros. */
 export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string> = {
-  ubicacionRegistrada: '✅ Ubicación registrada. Gracias, recibimos su ubicación y ya la tiene nuestro equipo de reparto.\n{mapa}\n\nUn motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atento(a).\n\nLas entregas son desde las {desde} hasta las {hasta}, con horario extendido por algunas casuísticas hasta las {hastaExtendido}.\n\nPara consultas, comunícate a nuestro número de soporte: {soporte}.',
+  // Solo el enlace del mapa: nada de latitud y longitud a la vista del cliente.
+  ubicacionRegistrada: '✅ Ubicación registrada\n{mapa}\n\nUn motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
   proponerUbicacion: 'Hola {nombre}, le escribimos de {negocio}: hoy le llevamos {pedido}. ¿Se lo llevamos a la misma dirección de la última vez?\n{mapa}\nResponda SÍ si es la misma; si es otra, mándenos su ubicación desde el clip 📎 → Ubicación.',
   ubicacionOtra: 'Perfecto, {nombre}. Mándenos su ubicación actual desde el clip 📎 → Ubicación → Enviar tu ubicación actual, y seguimos con {pedido}.',
   motorizadoTiempoDudoso: '¿Seguro? Hasta {pedido} son {km}. Responde otra vez solo con los minutos, por favor.',
@@ -311,10 +312,11 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   pedirConfirmacion: 'Hola {nombre}, le escribimos de {negocio}. Hoy le llevamos {pedido}. ¿Nos confirma que va a poder recibirlo? Responda SÍ para confirmar o NO si prefiere cancelarlo.',
   insistirConfirmacion: 'Hola {nombre}, seguimos pendientes de {pedido} de {negocio}. ¿Lo recibe hoy? Responda SÍ o NO, por favor.',
   preguntarOtraVez: 'Disculpe, no me quedó claro. ¿Recibe hoy {pedido}? Responda SÍ para confirmar, NO para cancelar, o cuéntenos si prefiere otro día u otra dirección.',
-  graciasYConfirmar: '✅ Ubicación registrada. Gracias, recibimos su ubicación para {pedido}.\n{mapa}\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.',
-  graciasYConfirmarVarios: '✅ Ubicación registrada. Gracias, recibimos su ubicación para {pedidos}.\n{mapa}\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.',
+  graciasYConfirmar: '✅ Ubicación registrada\n{mapa}\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.',
+  graciasYConfirmarVarios: '✅ Ubicación registrada ({pedidos})\n{mapa}\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.',
   confirmarOtroPedido: 'Y {pedido}, ¿también lo recibe hoy? Responda SÍ o NO.',
-  confirmada: 'Perfecto, {pedido} queda confirmado para hoy. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atento(a).\n\nLas entregas son desde las {desde} hasta las {hasta}, con horario extendido por algunas casuísticas hasta las {hastaExtendido}.\n\nPara consultas, comunícate a nuestro número de soporte: {soporte}.',
+  // El mismo aviso del motorizado, horario y soporte que «Ubicación registrada».
+  confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\nUn motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
   cancelada: 'Entendido, dejamos {pedido} sin entregar por hoy. Si cambia de opinión, escríbanos por aquí. Gracias.',
   cambio: 'Entendido, tomamos nota. Un compañero de {negocio} se comunicará con usted para coordinar {pedido}. Gracias.',
   motorizadoNuevo: '🛵 {urgente}Nuevo pedido: {pedido}\nCliente: {nombreCompleto}{distrito}\n📍 {mapa}\n{notas}\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',

@@ -56,10 +56,10 @@ describe('la lista', () => {
   it('la cola: primero el que lleva mas esperando; los pausados y los que no tocan, fuera', async () => {
     const ahora = new Date('2026-09-15T16:00:00Z');
     const luego = new Date(ahora.getTime() + 3 * 60 * 60_000);
-    const { entrada: nuevo } = await repos.envioAutomatico.agregar({ phone: '51900000001', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual' });
-    const { entrada: viejo } = await repos.envioAutomatico.agregar({ phone: '51900000002', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual', proximoEnvioAt: new Date(ahora.getTime() - 60_000) });
-    const { entrada: pausado } = await repos.envioAutomatico.agregar({ phone: '51900000003', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual' });
-    await repos.envioAutomatico.agregar({ phone: '51900000004', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual', proximoEnvioAt: luego });
+    const { entrada: nuevo } = await repos.envioAutomatico.agregar({ phone: '51912000001', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual' });
+    const { entrada: viejo } = await repos.envioAutomatico.agregar({ phone: '51912000002', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual', proximoEnvioAt: new Date(ahora.getTime() - 60_000) });
+    const { entrada: pausado } = await repos.envioAutomatico.agregar({ phone: '51912000003', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual' });
+    await repos.envioAutomatico.agregar({ phone: '51912000004', que: 'ubicacion', hasta: 'ubicacion', origen: 'manual', proximoEnvioAt: luego });
     await repos.envioAutomatico.actualizar(pausado.id, { estado: 'pausado' });
 
     const cola = await repos.envioAutomatico.tocaEnviar(ahora, 10);
@@ -97,22 +97,22 @@ describe('las consultas nuevas del reparto', () => {
     const cerrado = await repos.rutas.crearLote({ nombre: 'Ayer' });
     await repos.rutas.cambiarEstadoLote(cerrado.id, 'terminado');
     await repos.rutas.agregarSolicitudes(abierto.id, [
-      { telefonoCrudo: '1', phone: '51900000001', nombre: 'A' },
-      { telefonoCrudo: '2', phone: '51900000002', nombre: 'B', estado: 'resuelto' },
+      { telefonoCrudo: '1', phone: '51912000001', nombre: 'A' },
+      { telefonoCrudo: '2', phone: '51912000002', nombre: 'B', estado: 'resuelto' },
     ]);
-    await repos.rutas.agregarSolicitudes(cerrado.id, [{ telefonoCrudo: '3', phone: '51900000003', nombre: 'C' }]);
+    await repos.rutas.agregarSolicitudes(cerrado.id, [{ telefonoCrudo: '3', phone: '51912000003', nombre: 'C' }]);
     const vivas = await repos.rutas.vivasEnLotesAbiertos(10);
-    expect(vivas.map((s) => s.phone)).toEqual(['51900000001']);
+    expect(vivas.map((s) => s.phone)).toEqual(['51912000001']);
     expect(vivas[0]!.lote).toMatchObject({ id: abierto.id, nombre: 'Hoy', estado: 'preparado' });
   });
 
   it('los eventos recientes llevan el cliente y el lote', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Hoy' });
-    const [s] = await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '1', phone: '51900000001', nombre: 'A', referencia: 'P-1' }]);
+    const [s] = await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '1', phone: '51912000001', nombre: 'A', referencia: 'P-1' }]);
     await repos.rutas.registrarEvento(s!.id, 'envio', 'primera solicitud');
     await repos.rutas.registrarEvento(s!.id, 'ubicacion', 'llego el pin');
     const ev = await repos.rutas.eventosRecientes(10);
     expect(ev.map((e) => e.tipo)).toEqual(['ubicacion', 'envio']);
-    expect(ev[0]).toMatchObject({ phone: '51900000001', nombre: 'A', referencia: 'P-1', loteNombre: 'Hoy' });
+    expect(ev[0]).toMatchObject({ phone: '51912000001', nombre: 'A', referencia: 'P-1', loteNombre: 'Hoy' });
   });
 });

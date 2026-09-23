@@ -26,17 +26,8 @@ import { createSeenCache, processChange, type WebhookDeps } from '../whatsapp/we
 import type { StokyClient } from '../stoky/client.js';
 import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
 import { readInbound } from '../handlers/inbound.js';
-import {
-  defaultAuthDir,
-  getLocalState,
-  hayVinculacion,
-  logoutLocal,
-  pedirHistorial,
-  proximoHistorial,
-  requestLocalPairingCode,
-  startLocal,
-  toJid,
-} from '../whatsapp/local/session.js';
+import type { PuertoGsg } from '../rutas/gsg.js';
+import { defaultAuthDir, hayVinculacion, sesionLocalPorDefecto, toJid, type SesionLocal } from '../whatsapp/local/session.js';
 
 /** El progreso del trabajo de traer todo el historial (uno a la vez). */
 interface ProgresoHistorial {
@@ -50,7 +41,6 @@ interface ProgresoHistorial {
   sinReferencia: number;
   detalle: string;
 }
-const progresoHistorial: ProgresoHistorial = { enMarcha: false, empezoEn: null, terminoEn: null, chats: 0, hechos: 0, chatActual: null, mensajes: 0, sinReferencia: 0, detalle: '' };
 /** Tope por chat: 40 lotes de 50 = 2000 mensajes por vuelta. */
 const LOTES_POR_CHAT = 40;
 
@@ -98,6 +88,22 @@ export interface LocalRoutesDeps {
   /** Los ajustes generales (modo prueba, nombre) cambiados desde la pantalla. */
   ajustes?: ServicioAjustes;
   stickers?: ServicioStickers;
+  /**
+   * La sesion de WhatsApp de esta tienda y sus carpetas (vinculacion y
+   * adjuntos). Cada tienda de la plataforma trae las suyas; sin ellas, las de
+   * una instalacion con una sola tienda (.wa-auth y .wa-media).
+   */
+  sesion?: SesionLocal;
+  authDir?: string;
+  mediaDir?: string;
+  /** Como se apuntan las lineas de esta sesion (con el nombre de la tienda delante). */
+  prefijoLog?: string;
+  /**
+   * La puerta a GSG de esta tienda. Sin ella, lo que llega por el WhatsApp
+   * local no podia mandar la ubicacion a GSG al momento (solo en la pasada
+   * de cada minuto).
+   */
+  gsg?: PuertoGsg;
 }
 
 /** El navegador necesita saber que es para decidir si lo pinta o lo baja. */
@@ -128,8 +134,13 @@ export async function registerLocalRoutes(
   deps: LocalRoutesDeps,
 ): Promise<void> {
   const { config, repos, sender, wa, settings, catalogo, salud } = deps;
-  const authDir = defaultAuthDir();
-  const mediaDir = mediaDirectory();
+  const authDir = deps.authDir ?? defaultAuthDir();
+  const mediaDir = deps.mediaDir ?? mediaDirectory();
+  const sesion = deps.sesion ?? sesionLocalPorDefecto;
+  const { getLocalState, logoutLocal, pedirHistorial, proximoHistorial, requestLocalPairingCode, startLocal } = sesion;
+  const prefijo = deps.prefijoLog ?? '[wa]';
+  /** El progreso del trabajo de traer todo el historial (uno a la vez, por tienda). */
+  const progresoHistorial: ProgresoHistorial = { enMarcha: false, empezoEn: null, terminoEn: null, chats: 0, hechos: 0, chatActual: null, mensajes: 0, sinReferencia: 0, detalle: '' };
 
   // Si el proveedor es el local y hay vinculacion guardada, se reconecta
   // sola en cuanto el servidor este escuchando (por eso el onReady).
@@ -144,7 +155,7 @@ export async function registerLocalRoutes(
 
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, seen: createSeenCache() };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg, seen: createSeenCache() };
 
   async function arrancar() {
     return startLocal({
@@ -153,7 +164,7 @@ export async function registerLocalRoutes(
       // console y no app.log a proposito: los arranques cortos corren con el
       // logger apagado, y con el se perdian justo las lineas que explican por
       // que un mensaje no aparece.
-      log: (mensaje) => console.log(`[wa] ${mensaje}`),
+      log: (mensaje) => console.log(`${prefijo} ${mensaje}`),
       // Cada corte con su codigo: tres en una hora frenan; un 403 para todo.
       onDisconnect: (code, detail) => {
         void salud?.registrarDesconexion(code, detail).catch(() => undefined);

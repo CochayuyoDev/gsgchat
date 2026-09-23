@@ -17,7 +17,8 @@ import { registerWebhookRoutes } from './whatsapp/webhook.js';
 import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
 import { registerTrackingRoutes } from './tracking/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
-import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, registerAuth, secretoDeSesion } from './auth/routes.js';
+import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, registerAuth, secretoDeSesion, type DirectorioUsuarios } from './auth/routes.js';
+import type { SesionLocal } from './whatsapp/local/session.js';
 import { registerWebRoutes } from './web/routes.js';
 import type { SettingsRepo, SettingsService } from './settings/service.js';
 import type { StokyClient } from './stoky/client.js';
@@ -122,6 +123,16 @@ export interface ServerDeps {
   secretoInterno?: string;
   /** El resumen de la mañana y de la tarde al supervisor. Ver src/resumenes. */
   resumenes?: ServicioResumenes;
+  /**
+   * Lo propio de cada tienda de la plataforma (ver src/plataforma): su sesion
+   * de WhatsApp, su carpeta de vinculacion, el rol de su primera cuenta y el
+   * directorio de usuarios compartido. Sin esto, una instalacion suelta.
+   */
+  sesionLocal?: SesionLocal;
+  authDir?: string;
+  prefijoLog?: string;
+  primeraCuentaRol?: 'superadmin' | 'admin';
+  directorio?: DirectorioUsuarios;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -146,8 +157,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     (request as unknown as { rawBody: Buffer }).rawBody = body as Buffer;
     try {
       done(null, (body as Buffer).length ? JSON.parse((body as Buffer).toString('utf8')) : {});
-    } catch (error) {
-      done(error as Error, undefined);
+    } catch {
+      // Un JSON roto es culpa de quien lo manda: 400 con el motivo, no un
+      // 500 «error interno» (lo destapo la comprobacion «¿Está listo para GSG?»).
+      const error = new Error('El cuerpo no es un JSON válido: revisa comillas, comas y llaves.') as Error & { statusCode: number };
+      error.statusCode = 400;
+      done(error, undefined);
     }
   });
 
@@ -199,7 +214,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las
   // pantallas privadas; va antes de cualquier ruta que lo necesite.
   const secretoInterno = deps.secretoInterno ?? randomBytes(24).toString('hex');
-  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName, modo: () => ajustes?.modo() ?? 'gsg', secretoInterno, plan: deps.plan });
+  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName, modo: () => ajustes?.modo() ?? 'gsg', secretoInterno, plan: deps.plan, primeraCuentaRol: deps.primeraCuentaRol, directorio: deps.directorio });
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
@@ -277,6 +292,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     voz,
     gsg,
     entregas,
+    conexionGsg: deps.conexionGsg,
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
@@ -308,6 +324,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     fiabilidad: Boolean(deps.fiabilidad),
     simulador: deps.simuladorGsg,
     settingsRepo: deps.settingsRepo,
+    conexionGsg: deps.conexionGsg,
+    sesionLocal: deps.sesionLocal,
+    authDir: deps.authDir,
+    mediaDir,
+    prefijoLog: deps.prefijoLog,
+    // La misma puerta a GSG que el webhook de Meta: la de la conexion vigente.
+    gsg,
   });
 
   // La IA operadora ejecuta las ordenes por las mismas rutas que las

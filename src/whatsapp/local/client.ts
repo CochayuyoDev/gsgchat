@@ -17,7 +17,7 @@ import { escribirComoHumano } from '../../salud/humano.js';
 import { WhatsAppApiError, type CitaSaliente, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
 import { renderComponentsIntoBody } from '../waha/client.js';
 import { botonRespuesta, botonUbicacion, enviarConBotones } from './interactive.js';
-import { getLocalSocket, getLocalState, presenciaDe, suscribirPresencia, toJid } from './session.js';
+import { sesionLocalPorDefecto, toJid, type SesionLocal } from './session.js';
 
 export interface LocalClientOptions {
   /** Cuerpo guardado de una plantilla: aqui se manda como texto sustituido. */
@@ -34,16 +34,21 @@ export interface LocalClientOptions {
   humanizar?: boolean | (() => boolean);
   /** Inyectable para que las pruebas no esperen de verdad. */
   dormir?: (ms: number) => Promise<void>;
+  /**
+   * La sesion de WhatsApp de ESTA tienda. Cada tienda tiene la suya (ver
+   * src/plataforma); sin ella, la de una instalacion con una sola tienda.
+   */
+  sesion?: SesionLocal;
 }
 
 /** El socket, o un error que el sender entiende como transitorio. */
-function socketOrThrow() {
-  const sock = getLocalSocket();
+function socketOrThrow(sesion: SesionLocal) {
+  const sock = sesion.getLocalSocket();
   if (!sock) {
     // Que el telefono se desconecte un rato es normal: reintentable, para que
     // el mensaje se reprograme en vez de darse por perdido.
     throw new WhatsAppApiError(
-      `WhatsApp no esta conectado (${getLocalState().detail}). Escanea el codigo en /setup.`,
+      `WhatsApp no esta conectado (${sesion.getLocalState().detail}). Escanea el codigo en /setup.`,
       503,
       undefined,
       undefined,
@@ -92,6 +97,12 @@ function citadoDe(jid: string, cita: CitaSaliente) {
 }
 
 export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient {
+  // Todo lo de abajo habla con la sesion de esta tienda y con ninguna otra.
+  const sesion = opts.sesion ?? sesionLocalPorDefecto;
+  const getLocalSocket = () => sesion.getLocalSocket();
+  const getLocalState = () => sesion.getLocalState();
+  const presenciaDe = (jid: string) => sesion.presenciaDe(jid);
+  const suscribirPresencia = (jid: string) => sesion.suscribirPresencia(jid);
   /**
    * Si el numero tiene WhatsApp, preguntandoselo al servidor.
    *
@@ -136,7 +147,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
   }
 
   async function sendText(to: string, body: string, _previewUrl?: boolean, cita?: CitaSaliente): Promise<SendResult> {
-    const sock = socketOrThrow();
+    const sock = socketOrThrow(sesion);
     const jid = toJid(to);
     const opciones = cita ? { quoted: citadoDe(jid, cita) } : undefined;
     const sent = await conTeclado(to, body, () => sock.sendMessage(jid, { text: body }, opciones));
@@ -152,7 +163,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
      * cliente lo vea como el fichero que es.
      */
     async sendMedia(to, media) {
-      const sock = socketOrThrow();
+      const sock = socketOrThrow(sesion);
       const contenido: Record<string, unknown> =
         media.kind === 'image'
           ? { image: media.datos, mimetype: media.mimeType, caption: media.caption }
@@ -175,7 +186,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
      * reaccionado dentro. Un texto vacio la quita, igual que en el telefono.
      */
     async sendReaction(to, mensaje, emoji) {
-      const sock = socketOrThrow();
+      const sock = socketOrThrow(sesion);
       const jid = toJid(to);
       const sent = await sock.sendMessage(jid, { react: { text: emoji, key: claveDe(jid, mensaje) } });
       return resultOf(sent);
@@ -183,14 +194,14 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
 
     /** "Eliminar para todos": aqui si existe, porque no hay Meta de por medio. */
     async borrarParaTodos(to, mensaje) {
-      const sock = socketOrThrow();
+      const sock = socketOrThrow(sesion);
       const jid = toJid(to);
       await sock.sendMessage(jid, { delete: claveDe(jid, mensaje) });
     },
 
     /** Editar un mensaje ya enviado. El cliente lo ensena con su "editado". */
     async editarMensaje(to, mensaje, texto) {
-      const sock = socketOrThrow();
+      const sock = socketOrThrow(sesion);
       const jid = toJid(to);
       const sent = await sock.sendMessage(jid, { text: texto, edit: claveDe(jid, mensaje) });
       return resultOf(sent);
@@ -213,14 +224,14 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
 
     /** Un sticker de verdad: Baileys lo empaqueta como stickerMessage. */
     async sendSticker(to, sticker) {
-      const sock = socketOrThrow();
+      const sock = socketOrThrow(sesion);
       const sent = await conTeclado(to, '', () => sock.sendMessage(toJid(to), { sticker: sticker.datos, mimetype: sticker.mimeType }));
       return resultOf(sent);
       
     },
 
     async sendLocation(to, location) {
-      const sock = socketOrThrow();
+      const sock = socketOrThrow(sesion);
       const sent = await conTeclado(to, 'ubicacion', () =>
         sock.sendMessage(toJid(to), {
           location: {
@@ -250,7 +261,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
       if (opts.nativeButtons) {
         try {
           const wamid = await conTeclado(to, texto, () =>
-            enviarConBotones(socketOrThrow(), toJid(to), texto, [botonUbicacion()]),
+            enviarConBotones(socketOrThrow(sesion), toJid(to), texto, [botonUbicacion()]),
           );
           return { wamid };
         } catch (error) {
@@ -274,7 +285,7 @@ export function createLocalClient(opts: LocalClientOptions = {}): WhatsAppClient
         try {
           const wamid = await conTeclado(to, body, () =>
             enviarConBotones(
-              socketOrThrow(),
+              socketOrThrow(sesion),
               toJid(to),
               body,
               // WhatsApp no pinta mas de tres botones de respuesta rapida.

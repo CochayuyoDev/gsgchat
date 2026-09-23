@@ -8,6 +8,8 @@
  */
 
 import type { Repos, TemplateCategory } from '../db/repos.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
+import { randomUUID } from 'node:crypto';
 import type { CitaSaliente, WhatsAppClient } from '../whatsapp/client.js';
 import { WhatsAppApiError } from '../whatsapp/client.js';
 import { renderTemplate, TemplateRenderError } from '../templates/render.js';
@@ -246,8 +248,15 @@ export function createSender(deps: SenderDeps): Sender {
       // Un visitante de la web: no va por WhatsApp, va a su navegador por el
       // flujo de eventos (ver src/web-visitantes). Sin gates de WhatsApp
       // (no hay numero que proteger); solo se respeta que se haya ido.
-      if (esContactoWeb(contact.phone)) {
-        const deliveryId = await repos.deliveries.create({
+      // Un numero del Modulo desarrollador va por el mismo camino: NUNCA sale
+      // al WhatsApp real (ni con el modo prueba apagado), no gasta el cupo ni
+      // el ritmo del numero y queda en el hilo como enviado. Ver src/desarrollador.
+      const dePrueba = esNumeroDePrueba(contact.phone);
+      if (esContactoWeb(contact.phone) || dePrueba) {
+        // Lo de prueba no deja fila en `deliveries`: es de donde salen el cupo
+        // diario y por hora, el marcapasos y la salud del numero real, y nada
+        // de prueba puede gastarlos ni moverlos. -1 = "sin envio" (como sin conexion).
+        const deliveryId = dePrueba ? -1 : await repos.deliveries.create({
           contactId: contact.id,
           campaignId: job.campaignId ?? null,
           kind: job.kind,
@@ -257,13 +266,13 @@ export function createSender(deps: SenderDeps): Sender {
           businessInitiated: false,
         });
         if (contact.optOutAt) {
-          const reason = 'el visitante pidio no recibir mas mensajes';
-          await repos.deliveries.markBlocked(deliveryId, `opt_out: ${reason}`);
+          const reason = dePrueba ? 'el cliente de prueba pidio no recibir mas mensajes' : 'el visitante pidio no recibir mas mensajes';
+          if (!dePrueba) await repos.deliveries.markBlocked(deliveryId, `opt_out: ${reason}`);
           return { ok: false, blocked: true, code: 'opt_out', reason, deliveryId };
         }
         const template = job.kind === 'template' && job.templateName ? await repos.templates.get(job.templateName, job.templateLanguage ?? 'es') : null;
-        const wamid = nuevoIdMensajeWeb('out');
-        await repos.deliveries.markSent(deliveryId, wamid);
+        const wamid = dePrueba ? `prueba:${randomUUID()}` : nuevoIdMensajeWeb('out');
+        if (!dePrueba) await repos.deliveries.markSent(deliveryId, wamid);
         // La fila del hilo es lo que el visitante recibe: el flujo de eventos
         // la anuncia (mensaje.enviado) y su navegador la pinta.
         await repos.messages.add({
@@ -284,7 +293,7 @@ export function createSender(deps: SenderDeps): Sender {
                   : null,
           ),
           status: 'sent',
-          deliveryId,
+          deliveryId: dePrueba ? null : deliveryId,
           createdAt: at,
         });
         return { ok: true, wamid, deliveryId };

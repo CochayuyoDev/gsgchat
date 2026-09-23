@@ -15,6 +15,7 @@
  * sin concurrencia entre servidores.
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -56,6 +57,18 @@ export function asPool(db: PGlite): Pool {
     connect: async () => client,
     end: async () => db.close(),
   } as unknown as Pool;
+}
+
+/**
+ * Una huella de las migraciones (nombres y contenido). Si cambia, una base
+ * preparada de antemano (el molde de la plataforma) ya no sirve y se rehace.
+ */
+export async function firmaDeMigraciones(): Promise<string> {
+  const hash = createHash('sha256');
+  for (const file of (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort()) {
+    hash.update(file).update('\0').update(await readFile(path.join(MIGRATIONS, file))).update('\0');
+  }
+  return hash.digest('hex');
 }
 
 export interface PgliteHandle {

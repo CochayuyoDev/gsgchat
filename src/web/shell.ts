@@ -15,6 +15,7 @@
  */
 
 import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
+import { tiendaActual } from '../plataforma/contexto.js';
 import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
 import { TOKENS_CSS } from './tokens.js';
 import { escapeHtml } from './login-page.js';
@@ -59,6 +60,10 @@ export function fijarModoVigente(f: () => ModoSistema): void {
 }
 export function modoVigente(): ModoSistema {
   try {
+    // En la plataforma cada tienda tiene su modo: manda el de la tienda de
+    // esta peticion (ver src/plataforma/contexto.ts).
+    const tienda = tiendaActual();
+    if (tienda?.modo) return tienda.modo();
     return proveedorModo();
   } catch {
     return 'gsg';
@@ -96,6 +101,21 @@ export const MENU_GSG_DUENO: GrupoMenu = {
     { id: 'membresia', etiqueta: 'Membresía', href: '/panel#membresia', icono: 'campana', descripcion: 'El plan de esta instalación: hasta cuándo está pagada, sus topes y los pagos.', soloAdmin: true, soloSuper: true },
     { id: 'pagar', etiqueta: 'Pagar', href: '/pagar', icono: 'reloj', descripcion: 'Cómo pagar la membresía y mandar la captura del pago.', soloAdmin: true, soloSuper: true },
     { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Quién hizo qué y cuándo.', soloAdmin: true, soloSuper: true },
+  ],
+};
+
+/**
+ * El Modulo desarrollador: probar todo de punta a punta sin WhatsApp real y
+ * comprobar que esta listo para GSG. Solo admin y superadmin; va al final, en
+ * su propio grupo, en los dos modos. Ver src/desarrollador.
+ */
+export const MENU_DESARROLLADOR: GrupoMenu = {
+  id: 'desarrollador',
+  etiqueta: 'Módulo desarrollador',
+  items: [
+    { id: 'dev-generar', etiqueta: 'Clientes de prueba', href: '/desarrollador#generar', icono: 'usuario', descripcion: 'Crea clientes y motorizados de prueba (entran por la API, como los de GSG) y bórralos con un clic. Nada sale al WhatsApp real.', soloAdmin: true },
+    { id: 'dev-vivo', etiqueta: 'Ver el flujo en vivo', href: '/desarrollador#vivo', icono: 'chat', descripcion: 'Escribe como si fueras el cliente o el motorizado y mira, paso a paso, qué entendió el sistema, qué respondió y qué le mandó a GSG.', soloAdmin: true },
+    { id: 'dev-listo', etiqueta: '¿Está listo para GSG?', href: '/desarrollador#listo', icono: 'salud', descripcion: 'Recorre con un clic todo el contrato con GSG contra el simulador y dice qué funciona y qué falta.', soloAdmin: true },
   ],
 };
 
@@ -785,7 +805,7 @@ const JS = String.raw`
     document.getElementById('s-nombre').textContent = u.nombre;
     document.getElementById('s-rol').textContent = u.super ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : 'Operador';
     var chip = document.getElementById('s-chip-nombre'); if (chip) chip.textContent = u.nombre;
-    if (u.rol !== 'admin') document.querySelectorAll('.s-item[data-solo-admin]').forEach(function (a) { a.classList.add('hidden'); });
+    if (u.rol !== 'admin') document.querySelectorAll('.s-item[data-solo-admin], [data-solo-admin-grupo]').forEach(function (a) { a.classList.add('hidden'); });
     if (!u.super) document.querySelectorAll('.s-item[data-solo-super], [data-solo-super-grupo]').forEach(function (a) { a.classList.add('hidden'); });
     /* Pagar solo tiene sentido cuando esta instalacion depende de un maestro (hay a quien mandarle la captura). */
     if (!u.conMaestro) document.querySelectorAll('.s-item[data-ir="/pagar"]').forEach(function (a) { a.classList.add('hidden'); });
@@ -1036,6 +1056,12 @@ export function appShell(opts: ShellOpts): string {
           ${MENU_GSG_DUENO.items.map((i) => itemHtml(i, true)).join('\n          ')}
         </div>
       </div>`;
+  const desarrollador = `<div class="s-grupo" data-grupo="${MENU_DESARROLLADOR.id}" data-solo-admin-grupo="1">
+        <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_DESARROLLADOR.etiqueta)}</span>${icono('chevron')}</button>
+        <div class="s-grupo-items">
+          ${MENU_DESARROLLADOR.items.map((i) => itemHtml(i, true)).join('\n          ')}
+        </div>
+      </div>`;
   const grupos = MENU_GRUPOS.map(
     (g) => `<div class="s-grupo${g.items.every((i) => i.avanzado) ? ' s-grupo-avanzado' : ''}" data-grupo="${g.id}">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(g.etiqueta)}</span>${icono('chevron')}</button>
@@ -1075,11 +1101,13 @@ export function appShell(opts: ShellOpts): string {
       <div class="s-menu-gsg">
       ${menuGsg}
       ${dueno}
+      ${desarrollador}
       </div>
       <div class="s-menu-completo">
       ${arriba}
       <div class="s-buscar">${icono('buscar')}<input id="s-q" placeholder="Buscar módulo…" autocomplete="off"><kbd>Ctrl K</kbd></div>
       ${grupos}
+      ${desarrollador}
       <div class="s-sin">No hay ningún módulo con ese nombre.</div>
       </div>
       <button class="s-modo" id="s-modo" type="button" title="Enseñar u ocultar las funciones avanzadas (reparto, campañas, ritmo, rastreo)">Ver todo</button>
@@ -1154,6 +1182,6 @@ ${opts.script ?? ''}
 
 /** Para el manual: los modulos que se ven en este modo, con su descripcion, en orden. */
 export function todosLosModulos(modo: ModoSistema = modoVigente()): Array<{ grupo: string; items: ItemMenu[] }> {
-  if (modo === 'gsg') return [{ grupo: 'Cada día', items: MENU_GSG }, { grupo: MENU_GSG_DUENO.etiqueta, items: MENU_GSG_DUENO.items }];
-  return [{ grupo: 'General', items: MENU_ARRIBA }, ...MENU_GRUPOS.map((g) => ({ grupo: g.etiqueta, items: g.items }))];
+  if (modo === 'gsg') return [{ grupo: 'Cada día', items: MENU_GSG }, { grupo: MENU_GSG_DUENO.etiqueta, items: MENU_GSG_DUENO.items }, { grupo: MENU_DESARROLLADOR.etiqueta, items: MENU_DESARROLLADOR.items }];
+  return [{ grupo: 'General', items: MENU_ARRIBA }, ...MENU_GRUPOS.map((g) => ({ grupo: g.etiqueta, items: g.items })), { grupo: MENU_DESARROLLADOR.etiqueta, items: MENU_DESARROLLADOR.items }];
 }

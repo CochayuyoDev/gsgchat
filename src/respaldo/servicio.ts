@@ -43,6 +43,13 @@ export interface DepsRespaldo {
   /** Carpeta de los respaldos de chats (ARCHIVE_DIR). */
   archiveDir: string;
   carpetaPorDefecto: string;
+  /**
+   * Si nunca se copio, la primera copia es la de la PROXIMA noche y no la de
+   * ahora. Lo pide la plataforma para cada tienda que arma: una tienda recien
+   * creada no tiene nada que guardar, y volcar su base al nacer congelaba el
+   * alta (ver src/plataforma/tienda.ts).
+   */
+  primeraCopiaLaProximaNoche?: boolean;
   ajustes: () => AjustesCopia;
   settingsRepo: SettingsRepo;
   ahora: () => Date;
@@ -163,6 +170,13 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     }
   }
   await recargar();
+  // Una tienda recien creada (nunca se copio) no se copia al nacer: no hay
+  // nada que guardar todavia y la copia congelaba el alta (volcar la base
+  // ocupa el proceso). Su primera copia es la de la proxima noche.
+  if (deps.primeraCopiaLaProximaNoche && !ultimoDia && !ultima) {
+    ultimoDia = diaEn(ahora(), tz());
+    await deps.settingsRepo.put(CLAVE_ULTIMO_DIA_COPIA, ultimoDia, false).catch(() => undefined);
+  }
 
   const carpeta = () => deps.ajustes().carpeta.trim() || deps.carpetaPorDefecto;
 
@@ -283,7 +297,11 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     try {
       const c = await comprobarCarpeta(dir);
       if (!c.ok) throw new Error(c.detalle);
+      // Un respiro antes del volcado (lo mas pesado): lo que estaba en cola
+      // (una peticion, un mensaje entrante) sale primero.
+      await new Promise((r) => setImmediate(r));
       await copiarBase(dir, dia, ficheros, notas);
+      await new Promise((r) => setImmediate(r));
       await copiarRespaldos(dir, dia, ficheros, notas);
       const borradas = await podar(dir);
       if (borradas) notas.push(`Se borraron ${borradas} ${borradas === 1 ? 'copia vieja' : 'copias viejas'} (se conservan las últimas ${deps.ajustes().conservar}).`);

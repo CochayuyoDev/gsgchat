@@ -138,7 +138,13 @@ ${loader}
 const WS_URL_JS = `
   function wsUrl(token, role) {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return proto + '//' + location.host + '/ws/track/' + encodeURIComponent(token) + '?role=' + role;
+    // En la plataforma la pagina vive en /tienda/<slug>/t/<token>: el socket
+    // va por el mismo prefijo (un WebSocket no manda Referer y sin el
+    // acabaria en otra tienda).
+    // (Sin expresion regular: esto es una plantilla y las barras invertidas no llegan.)
+    var corte = location.pathname.lastIndexOf('/t/');
+    var prefijo = corte > 0 ? location.pathname.slice(0, corte) : '';
+    return proto + '//' + location.host + prefijo + '/ws/track/' + encodeURIComponent(token) + '?role=' + role;
   }
 `;
 

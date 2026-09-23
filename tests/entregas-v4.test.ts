@@ -196,11 +196,16 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     const ficha = await e.api.get<{ eventos: Array<{ detalle: string }> }>(`/admin/entregas/${v6!.id}`);
     expect(ficha.body.eventos.some((ev) => /GSG cambió: dirección/.test(ev.detalle))).toBe(true);
 
-    // V-7 llega hasta tener hora, y entonces GSG lo cancela.
+    // V-7 llega hasta tener hora, y entonces GSG lo cancela. La ubicacion le
+    // llega a GSG al momento y, si solo le faltaba eso, lo da por terminado
+    // (y un terminado ya no se cancela): se le da el pin con GSG caido, para
+    // que siga pendiente alli cuando decide cancelarlo.
+    e.simulador.modo = 'caido';
     await e.contesta('987410007', { pin: pinDe(47) });
     await e.trabajar();
     const rider = await riderDe(e, 'V-7');
     await e.contesta(rider.phone, { texto: 'V-7 30' });
+    e.simulador.modo = 'ok';
     expect((await e.entrega('V-7'))?.estado).toBe('avisada');
     const antesCliente = e.textosA(conPais('987410007')).length;
     const antesRider = e.textosA(rider.phone).length;
@@ -248,7 +253,10 @@ describe('vuelta 4 · la zona horaria de Ajustes manda en las horas de las entre
       zona = 'America/Mexico_City';
       await z.contesta(rider!.phone, { texto: 'P-1010 30' });
       const e = await z.entrega('P-1010');
-      expect(e?.estado).toBe('avisada');
+      // Avisada con su hora; si GSG ya la tenia por terminada (la ubicacion le
+      // llega al momento), el estado es "terminada": el aviso salio igual.
+      expect(['avisada', 'terminada']).toContain(e?.estado);
+      expect(e?.avisoEnviadoAt).toBeTruthy();
       const enMadrid = new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(e!.llegaAproxAt!));
       const enLima = new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(e!.llegaAproxAt!));
       const textos = z.textosA(conPais('987000010'));

@@ -104,7 +104,7 @@ describe('un día de entregas con GSG simulado', () => {
     await e.contesta('987000001', { pin: pinDe(1) });
     const textos = e.textosA('987000001');
     expect(textos).toHaveLength(antes + 1);
-    expect(textos[textos.length - 1]).toMatch(/recibimos su ubicación/i);
+    expect(textos[textos.length - 1]).toMatch(/Ubicación registrada\nhttps:\/\/\S+\n/);
     expect(textos[textos.length - 1]).toMatch(/confirma/i);
 
     const ana = await e.entrega('P-1001');
@@ -344,7 +344,7 @@ describe('un día de entregas con GSG simulado', () => {
     await e.contesta('987000010', { pin: pinDe(10) });
     const textos = e.textosA('987000010');
     // Ya estaba confirmado por teléfono: gracias a secas, sin volver a preguntar.
-    expect(textos[textos.length - 1]).toMatch(/recibimos su ubicación/i);
+    expect(textos[textos.length - 1]).toMatch(/Ubicación registrada\nhttps:\/\/\S+\n/);
     expect(textos[textos.length - 1]).not.toMatch(/confirma/i);
     let diego = await e.entrega('P-1010');
     expect(diego?.estado).toBe('lista');

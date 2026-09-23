@@ -80,6 +80,26 @@ export interface AuthDeps {
   secretoInterno?: string;
   /** La membresia: para el tope de cuentas. Ver src/plan. */
   plan?: import('../plan/servicio.js').ServicioPlan;
+  /**
+   * El rol de la primera cuenta. En una instalacion suelta (y en la primera
+   * tienda de una plataforma vacia) es el superadministrador; en una tienda
+   * que se registra sola en la plataforma, su dueño es administrador de SU
+   * tienda y nada mas. Ver src/plataforma.
+   */
+  primeraCuentaRol?: 'superadmin' | 'admin';
+  /**
+   * El directorio de usuarios de la plataforma. Se entra solo con usuario y
+   * contraseña, sin decir de que tienda: por eso un usuario no puede
+   * repetirse entre tiendas y se reserva aqui antes de crearlo.
+   */
+  directorio?: DirectorioUsuarios;
+}
+
+export interface DirectorioUsuarios {
+  /** Aparta el usuario para esta tienda. false = ya lo usa alguien (de esta u otra tienda). */
+  reservar(usuario: string): Promise<boolean>;
+  /** Lo suelta si al final no se creo la cuenta. */
+  liberar(usuario: string): Promise<void>;
 }
 
 export const CABECERA_INTERNA = 'x-wa-interno';
@@ -90,7 +110,7 @@ export function secretoDeSesion(config: Config): string {
   return createHmac('sha256', config.TRACKING_SECRET).update('sesion-de-usuario').digest('hex');
 }
 
-const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/motorizados', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/mapa', '/pagar', '/fiabilidad', '/docs/contrato-gsg.md'];
+const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/motorizados', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/mapa', '/pagar', '/fiabilidad', '/docs/contrato-gsg.md', '/desarrollador'];
 
 /** Lo que solo toca una persona con rol admin: nunca una clave de API. */
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
@@ -262,6 +282,20 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
   /** La sesion de una persona: su capacidad en el panel y si es superadministrador. */
   const sesionDe = (u: { id: string; usuario: string; nombre: string; rol: Rol }): UsuarioSesion => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, rol: capacidadDe(u.rol), super: u.rol === 'superadmin', porToken: false, permisos: ['*'] });
 
+  /**
+   * Crea la cuenta apartando antes el usuario en el directorio de la
+   * plataforma (si lo hay). null = el usuario ya esta tomado.
+   */
+  const crearConReserva = async (datos: Parameters<UsuariosRepo['crear']>[0]) => {
+    if (deps.directorio && !(await deps.directorio.reservar(datos.usuario))) return null;
+    try {
+      return await usuarios.crear(datos);
+    } catch (error) {
+      await deps.directorio?.liberar(datos.usuario).catch(() => undefined);
+      throw error;
+    }
+  };
+
   const loginSchema = z.object({ usuario: z.string().trim().min(1).max(60), clave: z.string().min(1).max(200), next: z.string().optional() });
 
   app.post('/login', async (request, reply) => {
@@ -304,7 +338,8 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     if (malUsuario) return reply.code(400).send({ error: malUsuario });
     const malClave = claveAceptable(body.clave);
     if (malClave) return reply.code(400).send({ error: malClave });
-    const u = await usuarios.crear({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: 'superadmin' });
+    const u = await crearConReserva({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: deps.primeraCuentaRol ?? 'superadmin' });
+    if (!u) return reply.code(400).send({ error: 'Ese usuario ya existe. Elige otro.' });
     await usuarios.tocarLogin(u.id, ahora());
     abrirSesion(reply, u);
     request.usuario = sesionDe(u);
@@ -315,6 +350,13 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     reply.header('set-cookie', cookieDeCierre(segura));
     return { ok: true };
   });
+
+  // Crear tiendas es cosa de la plataforma (src/plataforma/servidor.ts), que
+  // atiende /registro antes de que llegue a ninguna tienda. Aqui solo se llega
+  // en una tienda suelta sin plataforma delante (la demo): se dice claro.
+  app.post('/registro', async (_request, reply) =>
+    reply.code(403).send({ error: 'Esta es una demostración de una sola tienda: aquí no se pueden crear tiendas nuevas. En el sistema de verdad, cada registro crea una tienda.' }),
+  );
 
   // --- quien soy, y usuarios (solo admin) --------------------------------
 
@@ -347,7 +389,8 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       const activas = (await usuarios.listar()).filter((x) => x.activo).length;
       if (activas >= tope) return reply.code(400).send({ error: `La membresía permite ${tope} cuenta${tope === 1 ? '' : 's'} y ya hay ${activas}. Desactiva una o amplía la membresía.`, ir: '/panel#membresia' });
     }
-    const u = await usuarios.crear({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: body.rol });
+    const u = await crearConReserva({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: body.rol });
+    if (!u) return reply.code(400).send({ error: 'Ese usuario ya lo usa otra cuenta. Elige otro.' });
     return { ok: true, usuario: u };
   });
 

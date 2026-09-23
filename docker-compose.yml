@@ -20,6 +20,9 @@ services:
       GSG_URL: ${GSG_URL:-}
       GSG_TOKEN: ${GSG_TOKEN:-}
       ARCHIVE_DIR: /app/respaldos
+      # Las tiendas que se registran en /registro: su vinculacion de WhatsApp,
+      # sus adjuntos y sus secretos (su base va en su esquema de Postgres).
+      TIENDAS_DIR: /app/tiendas
     volumes:
       # Token de administracion y clave de cifrado: se generan en el primer
       # arranque y deben sobrevivir a un recreate.
@@ -30,6 +33,8 @@ services:
       - wamedia:/app/.wa-media
       # Los respaldos de conversaciones (Conversaciones guardadas).
       - respaldos:/app/respaldos
+      # Una carpeta por cada tienda registrada (ver TIENDAS_DIR).
+      - tiendas:/app/tiendas
       # La copia diaria de la base y de los respaldos (Que todo funcione):
       # apunta aqui la carpeta desde la pantalla, o monta una carpeta del host.
       - ${COPIAS_DIR:-copias}:/app/copias
@@ -74,6 +79,7 @@ volumes:
   waauth:
   wamedia:
   respaldos:
+  tiendas:
   copias:
   pgdata:
   redisdata:

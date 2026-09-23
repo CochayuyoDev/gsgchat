@@ -403,10 +403,10 @@ describe('la lista de quien no mandó su ubicación', () => {
 
 describe('contactos sin ubicación', () => {
   it('lista solo a quien nunca mandó el pin, y sale de la lista al mandarlo', async () => {
-    await repos.contacts.upsertFromInbound('51900000001', 'Sin pin');
-    await repos.contacts.upsertFromInbound('51900000002', 'Con pin');
+    await repos.contacts.upsertFromInbound('51912000001', 'Sin pin');
+    await repos.contacts.upsertFromInbound('51912000002', 'Con pin');
 
-    const conPin = (await repos.contacts.getByPhone('51900000002'))!;
+    const conPin = (await repos.contacts.getByPhone('51912000002'))!;
     const id = await repos.locations.save(
       conPin.id,
       { lat: -12.05, lng: -76.96, mapsUrl: 'https://maps.google.com/?q=-12.05,-76.96' } as never,
@@ -418,13 +418,13 @@ describe('contactos sin ubicación', () => {
     expect(lista.statusCode).toBe(200);
 
     const telefonos = lista.json().items.map((c: { phone: string }) => c.phone);
-    expect(telefonos).toContain('51900000001');
+    expect(telefonos).toContain('51912000001');
     // Y el que ya mandó su ubicación no está: no hay que sacarlo a mano.
-    expect(telefonos).not.toContain('51900000002');
+    expect(telefonos).not.toContain('51912000002');
   });
 
   it('con esos teléfonos se crea el lote sin pegar nada', async () => {
-    await repos.contacts.upsertFromInbound('51900000003', 'Ana');
+    await repos.contacts.upsertFromInbound('51912000003', 'Ana');
 
     const r = await app.inject({
       method: 'POST',
@@ -432,7 +432,7 @@ describe('contactos sin ubicación', () => {
       headers: auth,
       payload: {
         nombre: 'Los que faltan',
-        filas: [{ telefono: '51900000003', nombre: 'Ana' }],
+        filas: [{ telefono: '51912000003', nombre: 'Ana' }],
         arrancar: false,
       },
     });

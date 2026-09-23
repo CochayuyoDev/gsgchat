@@ -202,7 +202,7 @@ describe('POST /api/v1/mensajes', () => {
 
   it('una guarda lo frena: 202 con estado bloqueado y el motivo, nunca 200', async () => {
     // Nadie escribio nunca desde este numero y no hay opt-in: no sale nada.
-    const r = await app.inject({ method: 'POST', url: '/api/v1/mensajes', headers: con(STOKY), payload: { telefono: '51900000001', texto: 'hola' } });
+    const r = await app.inject({ method: 'POST', url: '/api/v1/mensajes', headers: con(STOKY), payload: { telefono: '51911000001', texto: 'hola' } });
     expect(r.statusCode).toBe(202);
     expect(r.json()).toMatchObject({ ok: false, estado: 'bloqueado', codigo: expect.any(String), motivo: expect.any(String) });
     expect(wa.sent).toHaveLength(0);
@@ -214,10 +214,10 @@ describe('POST /api/v1/mensajes', () => {
       method: 'POST',
       url: '/api/v1/mensajes',
       headers: con(STOKY),
-      payload: { telefono: '51900000002', nombre: 'Luis', consentimiento: { origen: 'pedido P-7 en la tienda web' }, plantilla: { nombre: 'confirmacion_pedido', variables: ['P-7'] } },
+      payload: { telefono: '51912000002', nombre: 'Luis', consentimiento: { origen: 'pedido P-7 en la tienda web' }, plantilla: { nombre: 'confirmacion_pedido', variables: ['P-7'] } },
     });
     expect(r.statusCode).toBe(200);
-    const c = await repos.contacts.getByPhone('51900000002');
+    const c = await repos.contacts.getByPhone('51912000002');
     expect(c).toMatchObject({ name: 'Luis', optInSource: 'pedido P-7 en la tienda web' });
     expect(c!.optInAt).toBeTruthy();
   });
@@ -257,7 +257,7 @@ describe('conversaciones y contactos', () => {
     expect(hilo.json()).toMatchObject({ contacto: { telefono: '51987654321' }, ventanaAbierta: true, puedeEscribir: true, motivo: null });
     expect(hilo.json().mensajes[0]).toMatchObject({ mensajeId: 'w1', direccion: 'entrante', tipo: 'text' });
 
-    const nadie = await app.inject({ method: 'GET', url: '/api/v1/conversaciones/51900000009', headers: con(STOKY) });
+    const nadie = await app.inject({ method: 'GET', url: '/api/v1/conversaciones/51912000009', headers: con(STOKY) });
     expect(nadie.statusCode).toBe(404);
   });
 
@@ -285,7 +285,7 @@ describe('conversaciones y contactos', () => {
     const baja = await app.inject({ method: 'POST', url: '/api/v1/contactos/51922222222/baja', headers: con(STOKY) });
     expect(baja.statusCode).toBe(200);
     expect((await repos.contacts.getByPhone('51922222222'))!.optOutAt).toBeTruthy();
-    expect((await app.inject({ method: 'POST', url: '/api/v1/contactos/51900000000/baja', headers: con(STOKY) })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: '/api/v1/contactos/51912000000/baja', headers: con(STOKY) })).statusCode).toBe(404);
   });
 
   it('las plantillas: solo las aprobadas', async () => {

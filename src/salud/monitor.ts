@@ -22,6 +22,7 @@
  */
 
 import type { Contact, NivelRiesgo, NumberState, Repos, TemplateCategory } from '../db/repos.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import { dailyCapFor, daysSince } from '../outbound/throttle.js';
 import type { Politica } from './politica.js';
 import { limiteDelTier } from './politica.js';
@@ -454,6 +455,8 @@ export function crearMonitor(deps: MonitorDeps): Monitor {
     },
 
     async registrarQueja(contact, detalle) {
+      // Un «no soy yo» o una BAJA de un cliente de prueba no es riesgo del numero real.
+      if (esNumeroDePrueba(contact.phone)) return;
       await registrar('respuesta_negativa', null, `${contact.phone}: ${detalle}`, { contactId: contact.id });
     },
 

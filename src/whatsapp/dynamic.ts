@@ -10,6 +10,7 @@
 import { providerOf, type SettingsService } from '../settings/service.js';
 import { createWhatsAppClient, WhatsAppApiError, type WhatsAppClient } from './client.js';
 import { createLocalClient } from './local/client.js';
+import type { SesionLocal } from './local/session.js';
 import { createWahaClient } from './waha/client.js';
 
 export class NotConfiguredError extends Error {
@@ -32,6 +33,8 @@ export interface DynamicClientDeps {
   nativeButtons?: boolean;
   /** Simular escritura con los clientes no oficiales. Ver src/salud/humano.ts. */
   humanizar?: boolean | (() => boolean);
+  /** La sesion de WhatsApp de esta tienda (proveedor local). Ver src/plataforma. */
+  sesion?: SesionLocal;
 }
 
 export function createDynamicWhatsAppClient(
@@ -49,6 +52,7 @@ export function createDynamicWhatsAppClient(
         resolveTemplateBody: deps.resolveTemplateBody,
         nativeButtons: deps.nativeButtons,
         humanizar: deps.humanizar,
+        sesion: deps.sesion,
       });
     }
 

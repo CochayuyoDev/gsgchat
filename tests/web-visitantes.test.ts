@@ -35,7 +35,7 @@ const ENV = {
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'none',
   BUSINESS_NAME: 'Elysian',
-  SOLO_NUMEROS: '51900000000',
+  SOLO_NUMEROS: '51912000000',
 } as NodeJS.ProcessEnv;
 
 const queue: OutboundQueue = {
@@ -72,7 +72,7 @@ beforeAll(async () => {
   bus = crearBus();
   repos = observarRepos(createFakeRepos(), bus) as FakeRepos;
   wa = createFakeWhatsApp();
-  const sender = createSender({ repos, wa, phoneNumberId: 'PNID', warmup: { startPerDay: 50, growth: 1.5, hardCap: 1000 }, maxMarketingPerContact7d: 2, soloNumeros: () => ['51900000000'] });
+  const sender = createSender({ repos, wa, phoneNumberId: 'PNID', warmup: { startPerDay: 50, growth: 1.5, hardCap: 1000 }, maxMarketingPerContact7d: 2, soloNumeros: () => ['51912000000'] });
   const settingsRepo = createMemorySettingsRepo();
   const settings = await createSettingsService(settingsRepo, config, TEST_SETTINGS_KEY);
   const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
@@ -112,8 +112,8 @@ describe('las piezas del canal', () => {
   });
 
   it('el modo prueba no calla a los visitantes web', () => {
-    expect(numeroPermitido({ soloNumeros: ['51900000000'] }, 'web-abcdef0123456789')).toBe(true);
-    expect(numeroPermitido({ soloNumeros: ['51900000000'] }, '51987654321')).toBe(false);
+    expect(numeroPermitido({ soloNumeros: ['51912000000'] }, 'web-abcdef0123456789')).toBe(true);
+    expect(numeroPermitido({ soloNumeros: ['51912000000'] }, '51987654321')).toBe(false);
   });
 });
 

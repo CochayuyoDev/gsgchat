@@ -100,7 +100,7 @@ describe('botones, segunda visita, cerca, sin moto, urgentes y ruta', () => {
     await e.contesta('987300003', { pin: pinDe(3) });
     const conPin = e.botonesA('987300003');
     expect(conPin).toHaveLength(1);
-    expect(conPin[0]!.body).toMatch(/recibimos su ubicación/i);
+    expect(conPin[0]!.body).toMatch(/Ubicación registrada\nhttps:\/\/\S+\n/);
     expect(conPin[0]!.buttons[0]!.title).toBe('Sí, recibo hoy');
     await e.contesta('987300003', { boton: { id: `entrega:si:${(await e.entrega('R-3003'))!.id}`, title: 'Sí, recibo hoy' } });
     expect((await e.entrega('R-3003'))?.estado).toBe('lista');

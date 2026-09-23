@@ -16,6 +16,9 @@ dist/
 .wa-data/
 # Fotos, audios y documentos que llegan por el chat.
 .wa-media/
+# Las tiendas registradas en la plataforma: sus bases, su vinculacion de
+# WhatsApp, sus adjuntos y SUS SECRETOS. Nunca al repositorio.
+.wa-tiendas/
 
 # Respaldos de conversacion (ver ARCHIVE_DIR)
 respaldos/

@@ -119,7 +119,8 @@ const MANUAL: Capitulo[] = [
         titulo: 'Cuentas y claves: quién entra y cómo',
         cuerpo: `
   <ul>
-    <li><b>La primera cuenta</b> se crea en <code>/login</code>, en la pestaña «Primera cuenta», y solo mientras no haya ninguna: es la del <b>superadministrador</b>, quien pone el sistema. A partir de ahí las cuentas se crean desde el panel.</li>
+    <li><b>Cada registro es una tienda nueva.</b> En <code>/login</code>, la pestaña «Crear mi tienda» (o <code>/registro</code>) la abre cualquiera: nombre de la tienda, qué vende, su nombre, su celular para avisos, un usuario y una contraseña. La tienda nace <b>independiente</b>: sus clientes, productos, conversaciones, configuración y su número de WhatsApp son solo suyos, y su dueño es su administrador. La primera tienda de una plataforma recién puesta es la del <b>dueño de la plataforma</b> (superadministrador).</li>
+    <li><b>El equipo de una tienda</b> (operadores, otros administradores) lo crea su dueño desde Usuarios: eso no es una tienda nueva. Un usuario es de una sola tienda: si ya lo usa alguien, se elige otro.</li>
     <li><b>Tres roles.</b> El <b>superadministrador</b> lleva la membresía, los códigos de conexión y las cuentas de otros superadministradores, además de todo lo de un administrador. El <b>administrador</b> configura el negocio y gestiona usuarios (no los superadministradores) y claves. El <b>operador</b> atiende. El último superadministrador no se puede degradar ni desactivar.</li>
     <li><b>Personas</b>: entran en <code>/login</code> con usuario y contraseña. El usuario lleva de 3 a 40 caracteres en minúsculas (números, punto, guion o guion bajo) y la contraseña, ocho caracteres o más.</li>
     <li><b>Programas</b> (el sistema de GSG, un script): entran con una <b>clave de API</b> que crea un administrador en <a href="/panel#integraciones">Integraciones</a>. Se ve una sola vez; revocarla la apaga al instante.</li>

@@ -81,9 +81,20 @@ export function nuevoIdMensajeWeb(direccion: 'in' | 'out'): string {
  * embeber", mas el propio sitio. Se compara el origen entero (esquema y
  * host), en minusculas y sin barra final.
  */
+/** "https://a.b/tienda/x/" -> "https://a.b". */
+export function origenDe(base: string): string {
+  try {
+    return new URL(base).origin.toLowerCase();
+  } catch {
+    return base.toLowerCase().replace(/\/+$/, '');
+  }
+}
+
 export function origenPermitido(origen: string | undefined, propio: string, dominios: string[]): boolean {
   if (!origen) return false;
   const o = origen.trim().toLowerCase().replace(/\/+$/, '');
-  if (o === propio.toLowerCase().replace(/\/+$/, '')) return true;
+  // Un Origin nunca lleva ruta; la base de una tienda de la plataforma si
+  // (https://x/tienda/<slug>): se compara con su scheme+host.
+  if (o === origenDe(propio)) return true;
   return dominios.some((d) => d.trim().toLowerCase().replace(/\/+$/, '') === o);
 }

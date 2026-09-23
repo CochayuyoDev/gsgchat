@@ -108,7 +108,8 @@ export interface VerificacionContrato {
   at: string;
 }
 
-const CAMPOS_PEDIDO = new Set(['referencia', 'telefono', 'nombre', 'direccion', 'distrito', 'notas', 'lat', 'lng', 'id', 'urgente', 'cancelado', 'motivoCancelacion']);
+/** Lo que se lee de cada pedido de GSG (el contrato A.1 lo documenta; ver src/desarrollador/contrato.ts). */
+export const CAMPOS_PEDIDO = new Set(['referencia', 'telefono', 'nombre', 'direccion', 'distrito', 'notas', 'lat', 'lng', 'id', 'urgente', 'cancelado', 'motivoCancelacion']);
 const LISTAS = ['faltaUbicacion', 'faltaConfirmacion', 'terminados'] as const;
 
 /** Revisa el cuerpo de `/reparto/pendientes` campo por campo, sin crear nada. */

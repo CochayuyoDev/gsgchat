@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { horaEnPalabras, soporteEnPalabras, telefonoEnPalabras } from '../src/entregas/textos.js';
+import { horaEnPalabras, soporteEnPalabras, telefonoEnPalabras, TEXTOS_POR_DEFECTO } from '../src/entregas/textos.js';
 import { extraerJson, leerConfirmacion, leerConfirmacionConReglas, leerEntregado, leerEntregadoConReglas, leerPreguntaPorPedido, leerTiempo, leerTiempoConReglas, normalizar, quitarReferencias, type LectorIA, leerMotorizadoCorta } from '../src/entregas/interpretar.js';
 import { distanciaEnPalabras, haversineKm } from '../src/entregas/geo.js';
 import { minutosEnPalabras, rellenar, textoDe, AJUSTES_ENTREGAS_POR_DEFECTO } from '../src/entregas/textos.js';
@@ -338,10 +338,11 @@ describe('distancias', () => {
 
 describe('el «ubicación registrada»: horario y soporte en palabras', () => {
   it('las horas del ajuste salen como se leen', () => {
-    expect(horaEnPalabras('14:00')).toBe('2:00 p. m.');
-    expect(horaEnPalabras('20:30')).toBe('8:30 p. m.');
-    expect(horaEnPalabras('09:15')).toBe('9:15 a. m.');
-    expect(horaEnPalabras('00:00')).toBe('12:00 a. m.');
+    expect(horaEnPalabras('14:00')).toBe('2:00 PM');
+    expect(horaEnPalabras('20:30')).toBe('8:30 PM');
+    expect(horaEnPalabras('09:15')).toBe('9:15 AM');
+    expect(horaEnPalabras('00:00')).toBe('12:00 AM');
+    expect(horaEnPalabras('22:00')).toBe('10:00 PM');
     expect(horaEnPalabras('raro')).toBe('raro');
   });
 
@@ -354,12 +355,32 @@ describe('el «ubicación registrada»: horario y soporte en palabras', () => {
     expect(telefonoEnPalabras('')).toBe('');
   });
 
-  it('el soporte: uno para todo, dos distintos, o este mismo WhatsApp', () => {
+  it('el soporte: uno para todo, dos distintos (WhatsApp y llamadas por separado), o este mismo número', () => {
     expect(soporteEnPalabras({ whatsapp: '987654321' })).toBe('+51 987 654 321 (WhatsApp y llamadas)');
     expect(soporteEnPalabras({ whatsapp: '987654321', llamadas: '987654321' })).toBe('+51 987 654 321 (WhatsApp y llamadas)');
-    expect(soporteEnPalabras({ whatsapp: '987654321', llamadas: '012345678' })).toBe('+51 987 654 321 (WhatsApp) o (01) 234 5678 (llamadas)');
+    expect(soporteEnPalabras({ whatsapp: '987654321', llamadas: '012345678' })).toBe('WhatsApp +51 987 654 321 · Llamadas (01) 234 5678');
     expect(soporteEnPalabras({ llamadas: '012345678' })).toBe('(01) 234 5678 (WhatsApp y llamadas)');
-    expect(soporteEnPalabras({})).toBe('este mismo WhatsApp');
+    expect(soporteEnPalabras({})).toBe('este mismo número, por WhatsApp o llamada');
+  });
+
+  it('el «Ubicación registrada» por defecto: título, SOLO el enlace, motorizado, horario 2 PM - 8 PM (hasta 10 PM) y soporte', () => {
+    const mapa = 'https://maps.google.com/?q=-12.121100,-77.030100';
+    const texto = rellenar(TEXTOS_POR_DEFECTO.ubicacionRegistrada, {
+      nombre: 'Ana', negocio: 'GSG', mapa, lat: -12.1211, lng: -77.0301,
+      desde: horaEnPalabras('14:00'), hasta: horaEnPalabras('20:00'), hastaExtendido: horaEnPalabras('22:00'),
+      soporte: soporteEnPalabras({ whatsapp: '987654321', llamadas: '012345678' }),
+    });
+    const lineas = texto.split('\n');
+    expect(lineas[0]).toBe('✅ Ubicación registrada');
+    expect(lineas[1]).toBe(mapa);
+    // Justo debajo del enlace, el aviso del motorizado.
+    expect(lineas[3]).toBe('Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.');
+    // Ninguna coordenada fuera del enlace.
+    expect(texto.replace(mapa, '')).not.toMatch(/-?\d{1,3}\.\d{3,}/);
+    expect(texto).toContain('de 2:00 PM a 8:00 PM');
+    expect(texto).toContain('hasta las 10:00 PM');
+    expect(texto).toContain('WhatsApp +51 987 654 321 · Llamadas (01) 234 5678');
+    expect(texto).not.toContain('..');
   });
 
   it('el texto sale con el enlace, sin coordenadas, y sin punto doble tras "p. m."', () => {

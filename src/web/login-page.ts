@@ -1,11 +1,18 @@
 /**
- * /login: entrar, y crear la primera cuenta si el sistema esta recien puesto.
+ * /login: entrar, o crear una tienda nueva.
  *
- * La pagina ofrece las dos cosas a la vez y el estado de la base decide cual
- * viene marcada: con la tabla vacia, "Crear la primera cuenta"; con usuarios,
- * "Entrar". El registro abierto es SOLO para esa primera cuenta -el servidor
- * devuelve 409 en cuanto hay una-, asi que cuando ya existe no se enseña un
- * formulario que iba a fallar: se dice a quien pedirle la cuenta.
+ * El sistema es una plataforma de tiendas independientes (ver src/plataforma):
+ * cualquiera puede registrarse y cada registro es una tienda nueva, con sus
+ * clientes, sus productos, sus conversaciones y su propio WhatsApp. Por eso
+ * la segunda pestaña ya no dice "pidele tu cuenta al administrador": es el
+ * formulario de "Crear mi tienda", que manda a POST /registro y deja a la
+ * persona dentro de su panel.
+ *
+ * El equipo de una tienda (operadores, otros administradores) lo sigue
+ * creando su dueño desde Usuarios: eso no es una tienda nueva.
+ *
+ * En una instalacion suelta y recien puesta (sin plataforma delante: la demo,
+ * las pruebas) se ofrece todavia "Crear la primera cuenta" con la tabla vacia.
  *
  * Lo que valida el navegador es exactamente lo que valida el servidor
  * (`usuarioAceptable` y `claveAceptable` en auth/usuarios.ts): las reglas
@@ -36,6 +43,23 @@ export const PROMESA = {
     'Entregas: pide la ubicación, confirma el pedido, manda el pin al motorizado y avisa la hora de llegada.',
     'Salud del número: un semáforo que frena solo antes del baneo.',
     'Cuentas por persona y claves de API para los programas.',
+  ],
+} as const;
+
+/**
+ * Como se presenta la PLATAFORMA en /login y /registro: quien llega aqui
+ * todavia no tiene tienda, y lo que necesita saber es que la suya sera suya
+ * (sus datos, su numero) y que empezar es rapido. La portada de cada tienda
+ * sigue usando PROMESA.
+ */
+export const PROMESA_PLATAFORMA = {
+  titular: 'Tu tienda en WhatsApp,',
+  remate: 'lista en un minuto',
+  bajada: 'Crea tu tienda, conecta tu número escaneando un código y atiende a tus clientes desde un solo chat, con un asistente que responde por ti.',
+  puntos: [
+    'Cada tienda es independiente: tus clientes, productos y conversaciones solo los ves tú.',
+    'Tu propio número de WhatsApp: se conecta con un código QR, como WhatsApp Web.',
+    'Tu equipo entra con su propia cuenta, y tú decides quién hace qué.',
   ],
 } as const;
 
@@ -99,6 +123,7 @@ const CSS = `
   label { display: block; font-size: 13px; font-weight: 600; margin: var(--esp-3) 0 5px; }
   input { width: 100%; min-height: 44px; padding: 11px 12px; font: inherit; font-size: 15px; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); }
   input:focus { border-color: var(--primario); outline: 2px solid var(--primario-suave); outline-offset: 0; }
+  input[aria-invalid="true"] { border-color: var(--rojo); }
   .pista { display: block; margin-top: 5px; font-size: var(--fs-small); color: var(--texto-suave); }
   button[type="submit"] { width: 100%; min-height: 46px; margin-top: var(--esp-4); padding: 12px; font: inherit; font-weight: 700; border: 0; border-radius: var(--radio-sm); background: var(--primario); color: var(--primario-texto); cursor: pointer; }
   button[type="submit"]:hover { filter: brightness(1.06); }
@@ -110,6 +135,26 @@ const CSS = `
   .aviso:not(:empty) { background: var(--rojo-suave); border-radius: var(--radio-sm); padding: 8px 10px; }
 
   .pie { margin-top: var(--esp-4); font-size: var(--fs-small); color: var(--texto-suave); text-align: center; }
+  .cambiar { margin: var(--esp-3) 0 0; font-size: 13.5px; color: var(--texto-suave); text-align: center; }
+  .cambiar button { min-height: 44px; padding: 0 6px; font: inherit; font-weight: 600; color: var(--primario); background: none; border: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+  .cambiar button:focus-visible { outline: 2px solid var(--primario); outline-offset: 2px; border-radius: 4px; }
+
+  /* --- crear mi tienda --- */
+  .opcional { font-weight: 400; color: var(--texto-suave); }
+  .rubros { display: flex; flex-wrap: wrap; gap: 6px; border: 0; padding: 0; margin: 0; }
+  .rubros legend { font-size: 13px; font-weight: 600; margin: var(--esp-3) 0 6px; padding: 0; }
+  .rubros label { margin: 0; font-weight: 500; }
+  .rubros input { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; }
+  .rubros label > span { display: inline-flex; align-items: center; min-height: 36px; padding: 6px 12px; border: 1px solid var(--borde); border-radius: 999px; background: var(--superficie); font-size: 13.5px; cursor: pointer; }
+  .rubros input:checked + span { background: var(--primario-suave); border-color: var(--primario); color: var(--texto); font-weight: 600; }
+  .rubros input:focus-visible + span { outline: 2px solid var(--primario); outline-offset: 2px; }
+  .con-ojo { position: relative; }
+  .con-ojo input { padding-right: 84px; }
+  .con-ojo button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); min-height: 34px; padding: 4px 10px; font: inherit; font-size: 13px; border: 0; border-radius: var(--radio-sm); background: var(--superficie-2); color: var(--texto); cursor: pointer; }
+  .disponible { display: block; margin-top: 5px; font-size: var(--fs-small); color: var(--texto-suave); }
+  .disponible.si { color: var(--verde); }
+  .disponible.no { color: var(--rojo); }
+  .solo-tuyo { margin: 0 0 var(--esp-2); padding: 10px 12px; border-radius: var(--radio-sm); background: var(--superficie-2); font-size: 13px; color: var(--texto-suave); }
   a { color: var(--primario); }
 
   @media (max-width: 860px) {
@@ -130,7 +175,8 @@ const FORM_ENTRAR = `
         <input id="e-clave" name="clave" type="password" required autocomplete="current-password">
         <button type="submit">Entrar</button>
         <div class="aviso" id="e-aviso" role="alert" aria-live="polite"></div>
-      </form>`;
+      </form>
+      <p class="cambiar" data-solo-tienda>¿Aún no tienes tienda? <button type="button" data-ir="registro">Créala gratis</button></p>`;
 
 /**
  * La primera cuenta. Solo se ofrece con la tabla vacia; despues, el servidor
@@ -155,16 +201,60 @@ const FORM_PRIMERA = `
         <div class="aviso" id="r-aviso" role="alert" aria-live="polite"></div>
       </form>`;
 
-const REGISTRO_CERRADO = `
-      <h1>Pídele tu cuenta al administrador</h1>
-      <p class="entradilla">El registro abierto es solo para la primera cuenta del sistema, y ya existe. Quien administra el sistema crea la tuya desde el panel, en Usuarios; después entras por esta misma pantalla.</p>`;
+/** A que se dedica la tienda: se toca, no se escribe. Opcional. */
+export const RUBROS = ['Ropa y calzado', 'Comida', 'Tecnología', 'Belleza', 'Hogar', 'Servicios', 'Otro'] as const;
 
-export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNegocio: string }): string {
+/**
+ * Crear una tienda nueva. Lo minimo para empezar: como se llama, quien la
+ * lleva y con que entra. El celular es opcional (ahi le llegan los avisos
+ * del sistema) y el rubro se elige tocando. El WhatsApp de la tienda se
+ * vincula despues, ya dentro, escaneando su QR: es suyo y de nadie mas.
+ */
+const FORM_TIENDA = `
+      <h1>Crear mi tienda</h1>
+      <p class="entradilla">Gratis y en un minuto. Después conectas el WhatsApp de tu tienda escaneando un código.</p>
+      <p class="solo-tuyo">Cada tienda es independiente: tus clientes, productos, conversaciones y tu número de WhatsApp son solo tuyos.</p>
+      <form id="f-tienda" novalidate>
+        <label for="t-tienda">Nombre de tu tienda</label>
+        <input id="t-tienda" name="tienda" placeholder="Bodega Doña Rosa" required maxlength="80" autocomplete="organization">
+        <fieldset class="rubros">
+          <legend>¿Qué vendes? <span class="opcional">(opcional)</span></legend>
+          ${RUBROS.map((r, i) => `<label><input type="radio" name="rubro" value="${r}" id="t-rubro-${i}"><span>${r}</span></label>`).join('')}
+        </fieldset>
+        <label for="t-nombre">Tu nombre</label>
+        <input id="t-nombre" name="nombre" placeholder="Rosa" required maxlength="80" autocomplete="name">
+        <label for="t-celular">Tu celular <span class="opcional">(opcional)</span></label>
+        <input id="t-celular" name="celular" type="tel" inputmode="tel" placeholder="987 654 321" maxlength="20" autocomplete="tel">
+        <span class="pista">Ahí te avisamos si algo de tu tienda necesita tu atención.</span>
+        <label for="t-usuario">Usuario para entrar</label>
+        <input id="t-usuario" name="usuario" required autocomplete="username" autocapitalize="none" spellcheck="false" pattern="${REGLAS.usuario.patron}">
+        <span class="disponible" id="t-disponible" aria-live="polite">${REGLAS.usuario.ayuda}</span>
+        <label for="t-clave">Contraseña</label>
+        <div class="con-ojo">
+          <input id="t-clave" name="clave" type="password" required autocomplete="new-password" minlength="${REGLAS.clave.minimo}">
+          <button type="button" id="t-ver" aria-controls="t-clave" aria-pressed="false">Mostrar</button>
+        </div>
+        <span class="pista">${REGLAS.clave.ayuda}</span>
+        <button type="submit" data-esperando="Creando tu tienda… (unos segundos)">Crear mi tienda y entrar</button>
+        <div class="aviso" id="t-aviso" role="alert" aria-live="polite"></div>
+      </form>
+      <p class="cambiar">¿Ya tienes tu tienda? <button type="button" data-ir="entrar">Entra aquí</button></p>`;
+
+export function loginPage(opts: {
+  /** Instalacion suelta y sin cuentas: se ofrece la primera cuenta (sin plataforma delante). */
+  primeraCuenta: boolean;
+  next: string;
+  nombreNegocio: string;
+  /** Que pestaña viene abierta. Por defecto: la primera cuenta si toca, si no, entrar. */
+  vista?: 'entrar' | 'tienda';
+}): string {
   const negocio = escapeHtml(opts.nombreNegocio);
+  const vista = opts.primeraCuenta ? 'registro' : (opts.vista ?? 'entrar');
   // El `next` viene de la URL: si trajera un "</script>" cerraria la etiqueta
   // y lo de despues correria como HTML. Escapado, no hay tal cosa.
   const config = JSON.stringify({
     primera: opts.primeraCuenta,
+    vista: vista,
     next: opts.next || '/panel',
     reglas: { usuario: REGLAS.usuario, clave: REGLAS.clave },
   }).replace(/</g, '\\u003c');
@@ -195,9 +285,15 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
   }
 
   VISTAS.entrar.tab.onclick = function () { mostrar('entrar'); };
+  document.querySelectorAll('[data-ir]').forEach(function (b) {
+    b.onclick = function () { mostrar(b.getAttribute('data-ir')); };
+  });
+  // Sin formulario de tienda (instalacion suelta con la primera cuenta), el enlace no tiene sentido.
+  if (!document.getElementById('f-tienda')) document.querySelectorAll('[data-solo-tienda]').forEach(function (p) { p.hidden = true; });
   VISTAS.registro.tab.onclick = function () { mostrar('registro'); };
   // Sin usuarios no hay con que entrar: se abre por la de crear la cuenta.
-  mostrar(CFG.primera ? 'registro' : 'entrar');
+  // Desde /registro se abre por la de crear la tienda.
+  mostrar(CFG.vista === 'entrar' ? 'entrar' : 'registro');
 
   // --- mandar un formulario ---------------------------------------------
   function avisar(caja, texto) { caja.textContent = texto || ''; }
@@ -238,10 +334,18 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
     form.onsubmit = async function (ev) {
       ev.preventDefault();
       avisar(caja, '');
+      form.querySelectorAll('[data-mal]').forEach(function (c) { c.removeAttribute('data-mal'); c.removeAttribute('aria-invalid'); });
       var cuerpo = leer();
-      if (typeof cuerpo === 'string') { avisar(caja, cuerpo); return; }
+      if (typeof cuerpo === 'string') {
+        avisar(caja, cuerpo);
+        // El campo que falla, marcado y con el foco: no hay que buscarlo.
+        var malo = form.querySelector('[data-mal]');
+        if (malo) { malo.setAttribute('aria-invalid', 'true'); malo.focus(); }
+        return;
+      }
       boton.disabled = true;
-      boton.textContent = 'Un momento…';
+      // Crear una tienda son unos segundos (su base nueva): se dice.
+      boton.textContent = boton.getAttribute('data-esperando') || 'Un momento…';
       try {
         location.href = await mandar(url, cuerpo);
       } catch (fallo) {
@@ -255,8 +359,8 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
   var entrar = document.getElementById('f-entrar');
   conectar(entrar, '/login', function () {
     var usuario = entrar.usuario.value.trim();
-    if (!usuario) return 'Escribe tu usuario.';
-    if (!entrar.clave.value) return 'Escribe tu contraseña.';
+    if (!usuario) { entrar.usuario.setAttribute('data-mal', ''); return 'Escribe tu usuario.'; }
+    if (!entrar.clave.value) { entrar.clave.setAttribute('data-mal', ''); return 'Escribe tu contraseña.'; }
     // El servidor decide a donde se va; se le manda para no perder el
     // ?next= con el que llego quien iba a otra pantalla.
     return { usuario: usuario, clave: entrar.clave.value, next: CFG.next };
@@ -276,6 +380,70 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
     if (clave !== registro.clave2.value) return 'Las dos contraseñas no coinciden.';
     return { nombre: nombre, usuario: usuario, clave: clave };
   });
+
+  // --- crear mi tienda -----------------------------------------------------
+  var tienda = document.getElementById('f-tienda');
+  if (tienda) {
+    var cajaUsuario = tienda.usuario;
+    var marca = document.getElementById('t-disponible');
+    var usuarioTocado = false;
+
+    /** Un usuario valido a partir de un nombre: "Bodega Doña Rosa" -> "bodegadonarosa". */
+    function sugerir(texto) {
+      return texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9._-]+/g, '').slice(0, 40);
+    }
+
+    var espera = null;
+    var ultimaPregunta = '';
+    var AYUDA_USUARIO = marca.textContent;
+    function comprobar() {
+      var u = cajaUsuario.value.trim().toLowerCase();
+      marca.className = 'disponible';
+      marca.textContent = AYUDA_USUARIO;
+      if (espera) clearTimeout(espera);
+      if (!u || !new RegExp(CFG.reglas.usuario.patron).test(u)) return;
+      espera = setTimeout(async function () {
+        ultimaPregunta = u;
+        try {
+          var r = await fetch('/registro/disponible?usuario=' + encodeURIComponent(u), { credentials: 'same-origin', cache: 'no-store' });
+          var d = await r.json();
+          if (ultimaPregunta !== u) return;
+          if (d && d.libre === true) { marca.className = 'disponible si'; marca.textContent = '✓ Está libre'; }
+          else if (d && d.libre === false) { marca.className = 'disponible no'; marca.textContent = 'Ya lo usa otra cuenta: elige otro.'; }
+        } catch (fallo) { /* sin red: ya lo dira el servidor al crear */ }
+      }, 350);
+    }
+
+    tienda.tienda.addEventListener('input', function () {
+      if (usuarioTocado) return;
+      cajaUsuario.value = sugerir(tienda.tienda.value);
+      comprobar();
+    });
+    cajaUsuario.addEventListener('input', function () { usuarioTocado = true; comprobar(); });
+
+    var ver = document.getElementById('t-ver');
+    ver.onclick = function () {
+      var visible = tienda.clave.type === 'text';
+      tienda.clave.type = visible ? 'password' : 'text';
+      ver.textContent = visible ? 'Mostrar' : 'Ocultar';
+      ver.setAttribute('aria-pressed', visible ? 'false' : 'true');
+    };
+
+    conectar(tienda, '/registro', function () {
+      var nombreTienda = tienda.tienda.value.trim();
+      var nombre = tienda.nombre.value.trim();
+      var usuario = cajaUsuario.value.trim().toLowerCase();
+      cajaUsuario.value = usuario;
+      var clave = tienda.clave.value;
+      var rubro = tienda.querySelector('input[name="rubro"]:checked');
+      var mal = function (campo, texto) { campo.setAttribute('data-mal', ''); return texto; };
+      if (!nombreTienda) return mal(tienda.tienda, 'Escribe el nombre de tu tienda.');
+      if (!nombre) return mal(tienda.nombre, 'Escribe tu nombre: es el que ve tu equipo en la bitácora.');
+      if (!new RegExp(CFG.reglas.usuario.patron).test(usuario)) return mal(cajaUsuario, CFG.reglas.usuario.error);
+      if (clave.length < CFG.reglas.clave.minimo) return mal(tienda.clave, CFG.reglas.clave.error);
+      return { tienda: nombreTienda, rubro: rubro ? rubro.value : null, nombre: nombre, celular: tienda.celular.value.trim() || null, usuario: usuario, clave: clave };
+    });
+  }
 })();
 `;
 
@@ -287,22 +455,21 @@ export function loginPage(opts: { primeraCuenta: boolean; next: string; nombreNe
 <aside class="marca-lado">
   <a class="logotipo" href="/"><span class="sello">${INICIAL_SISTEMA}</span>${NOMBRE_SISTEMA}</a>
   <div>
-    <h2>${PROMESA.titular} <span>${PROMESA.remate}</span>.</h2>
-    <p>${PROMESA.bajada}</p>
-    <ul>${PROMESA.puntos.map((p) => `<li>${p}</li>`).join('')}</ul>
+    <h2>${PROMESA_PLATAFORMA.titular} <span>${PROMESA_PLATAFORMA.remate}</span>.</h2>
+    <p>${PROMESA_PLATAFORMA.bajada}</p>
+    <ul>${PROMESA_PLATAFORMA.puntos.map((p) => `<li>${p}</li>`).join('')}</ul>
   </div>
-  <small>Acceso solo para el equipo.</small>
+  <small>Cada tienda con sus propios datos y su propio WhatsApp.</small>
 </aside>
 <main class="centro">
 <div class="caja">
   <div class="logotipo"><span class="sello">${INICIAL_SISTEMA}</span><span>${negocio}<small>${NOMBRE_SISTEMA} · ${LEMA_SISTEMA}</small></span></div>
-  <div class="pestanas" role="tablist" aria-label="Entrar o crear la primera cuenta">
+  <div class="pestanas" role="tablist" aria-label="${opts.primeraCuenta ? 'Entrar o crear la primera cuenta' : 'Entrar o crear mi tienda'}">
     <button type="button" id="tab-entrar" role="tab" aria-controls="panel-entrar">Entrar</button>
-    <button type="button" id="tab-registro" role="tab" aria-controls="panel-registro">${opts.primeraCuenta ? 'Primera cuenta' : '¿No tienes cuenta?'}</button>
+    <button type="button" id="tab-registro" role="tab" aria-controls="panel-registro">${opts.primeraCuenta ? 'Primera cuenta' : 'Crear mi tienda'}</button>
   </div>
   <div id="panel-entrar" role="tabpanel" aria-labelledby="tab-entrar">${FORM_ENTRAR}</div>
-  <div id="panel-registro" role="tabpanel" aria-labelledby="tab-registro">${opts.primeraCuenta ? FORM_PRIMERA : REGISTRO_CERRADO}</div>
-  <p class="pie"><a href="/">Volver al inicio</a></p>
+  <div id="panel-registro" role="tabpanel" aria-labelledby="tab-registro">${opts.primeraCuenta ? FORM_PRIMERA : FORM_TIENDA}</div>
 </div>
 </main>
 <script>${script}</script>

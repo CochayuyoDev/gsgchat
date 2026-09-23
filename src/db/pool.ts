@@ -9,13 +9,26 @@ pg.types.setTypeParser(pg.types.builtins.INT8, (value) => Number.parseInt(value,
 
 export type Pool = pg.Pool;
 
-export function createPool(connectionString: string): Pool {
+/**
+ * `esquema`: en la plataforma cada tienda vive en su propio esquema de la
+ * misma base (tienda_<id>). Todas las consultas del proyecto nombran las
+ * tablas sin esquema, asi que con el search_path apuntando al de la tienda
+ * cada una ve SOLO sus tablas. `public` va detras para las extensiones.
+ */
+export function createPool(connectionString: string, esquema?: string): Pool {
   return new pg.Pool({
     connectionString,
     max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
+    ...(esquema ? { options: `-c search_path=${esquemaSeguro(esquema)},public` } : {}),
   });
+}
+
+/** Un nombre de esquema que se puede pegar en SQL sin comillas: letras, numeros y _. */
+export function esquemaSeguro(esquema: string): string {
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(esquema)) throw new Error(`nombre de esquema no valido: ${esquema}`);
+  return esquema;
 }
 
 /**

@@ -175,6 +175,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       return 'GSG no está conectado: lo reportable se guarda y saldrá entero al conectarlo';
     },
     enviar: (tipo, payload): Promise<ResultadoEnvio> => actual().enviar(tipo, payload),
+    esSimulador: () => efectiva().modo === 'simulador',
     consultar: async <T,>(ruta: string): Promise<ResultadoConsulta<T>> => {
       const r = await actual().consultar<T>(ruta);
       if (r.ok && ruta === RUTA_GSG_PENDIENTES && observadores.size) {

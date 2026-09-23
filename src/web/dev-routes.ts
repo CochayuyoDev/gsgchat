@@ -32,6 +32,8 @@ import type { ChangeValue } from '../whatsapp/types.js';
 
 export interface DevRoutesDeps {
   config: Config;
+  /** La puerta a GSG de esta tienda (lo simulado sale a GSG igual que lo real). */
+  gsg?: import('../rutas/gsg.js').PuertoGsg;
   catalogo?: StokyClient;
   repos: Repos;
   sender: Sender;
@@ -46,7 +48,7 @@ export interface DevRoutesDeps {
   entregas?: ServicioEntregas;
 }
 
-const simularSchema = z.object({
+export const simularSchema = z.object({
   phone: z.string().min(6),
   text: z.string().max(4000).optional(),
   /** Ubicacion compartida, como la manda WhatsApp. */
@@ -69,11 +71,57 @@ const MIME_DE_PRUEBA: Record<string, string> = {
   sticker: 'image/webp',
 };
 
+/**
+ * El entrante tal como lo traduce cualquier proveedor, a partir de lo que se
+ * quiere simular. Lo usan /admin/dev/inbound y el Modulo desarrollador
+ * (src/desarrollador/simular.ts), que asi entra por el MISMO camino.
+ */
+export function entranteSimulado(body: z.infer<typeof simularSchema>, phone: string, id: string): ChangeValue {
+  return {
+    messaging_product: 'whatsapp',
+    contacts: [{ wa_id: phone, profile: { name: body.name ?? '' } }],
+    messages: [
+      body.location
+        ? {
+            id,
+            from: phone,
+            timestamp: String(Math.floor(Date.now() / 1000)),
+            type: 'location',
+            location: { latitude: body.location.latitude, longitude: body.location.longitude },
+          }
+        : body.adjunto
+          ? {
+              id,
+              from: phone,
+              timestamp: String(Math.floor(Date.now() / 1000)),
+              type: body.adjunto,
+              [body.adjunto]: { id: `media-${id}`, mime_type: MIME_DE_PRUEBA[body.adjunto] },
+              ...(body.adjunto === 'audio' && body.transcripcion ? { media: { id: `media-${id}`, mimeType: MIME_DE_PRUEBA.audio!, transcripcion: body.transcripcion } } : {}),
+            }
+          : body.boton
+            ? {
+                id,
+                from: phone,
+                timestamp: String(Math.floor(Date.now() / 1000)),
+                type: 'interactive',
+                interactive: { type: 'button_reply', button_reply: { id: body.boton.id, title: body.boton.title } },
+              }
+            : {
+              id,
+              from: phone,
+              timestamp: String(Math.floor(Date.now() / 1000)),
+              type: 'text',
+              text: { body: body.text ?? '' },
+            },
+    ],
+  } as ChangeValue;
+}
+
 export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDeps): Promise<void> {
   const { config, repos, sender, wa, settings, catalogo, salud, ajustes, stickers } = deps;
   if (!config.DEV_SIMULATE_INBOUND) return;
 
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes, stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes, stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg };
 
   /**
    * Mete un entrante como si lo hubiera mandado ese numero.
@@ -85,45 +133,7 @@ export async function registerDevRoutes(app: FastifyInstance, deps: DevRoutesDep
     const body = simularSchema.parse(request.body);
     const phone = normalizePhone(body.phone);
     const id = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    const value: ChangeValue = {
-      messaging_product: 'whatsapp',
-      contacts: [{ wa_id: phone, profile: { name: body.name ?? '' } }],
-      messages: [
-        body.location
-          ? {
-              id,
-              from: phone,
-              timestamp: String(Math.floor(Date.now() / 1000)),
-              type: 'location',
-              location: { latitude: body.location.latitude, longitude: body.location.longitude },
-            }
-          : body.adjunto
-            ? {
-                id,
-                from: phone,
-                timestamp: String(Math.floor(Date.now() / 1000)),
-                type: body.adjunto,
-                [body.adjunto]: { id: `media-${id}`, mime_type: MIME_DE_PRUEBA[body.adjunto] },
-                ...(body.adjunto === 'audio' && body.transcripcion ? { media: { id: `media-${id}`, mimeType: MIME_DE_PRUEBA.audio!, transcripcion: body.transcripcion } } : {}),
-              }
-            : body.boton
-              ? {
-                  id,
-                  from: phone,
-                  timestamp: String(Math.floor(Date.now() / 1000)),
-                  type: 'interactive',
-                  interactive: { type: 'button_reply', button_reply: { id: body.boton.id, title: body.boton.title } },
-                }
-              : {
-                id,
-                from: phone,
-                timestamp: String(Math.floor(Date.now() / 1000)),
-                type: 'text',
-                text: { body: body.text ?? '' },
-              },
-      ],
-    };
+    const value = entranteSimulado(body, phone, id);
 
     await processChange('messages', value, webhookDeps);
 

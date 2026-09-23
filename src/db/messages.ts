@@ -452,7 +452,10 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
 
     async contarEntrantesDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from messages where direction = 'in' and created_at >= $1`,
+        // Sin los numeros del Modulo desarrollador: no cuentan en la salud del numero real.
+        `select count(*)::int as total from messages m
+          where m.direction = 'in' and m.created_at >= $1
+            and not exists (select 1 from contacts c where c.id = m.contact_id and c.phone ~ '^51900[01][0-9]{5}$')`,
         [since],
       );
       return rows[0]?.total ?? 0;

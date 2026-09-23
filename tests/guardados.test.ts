@@ -697,7 +697,7 @@ describe('las rutas de la pantalla', () => {
       const sinConfirmar = await app.inject({ method: 'POST', url: '/admin/archives/borrar-cliente', headers: auth, payload: { contactId: carla.id } });
       expect(sinConfirmar.statusCode).toBe(400);
       expect((sinConfirmar.json() as { error: string }).error).toMatch(/BORRAR/);
-      expect((await app.inject({ method: 'POST', url: '/admin/archives/borrar-cliente', headers: auth, payload: { telefono: '900000000', confirmar: 'BORRAR' } })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'POST', url: '/admin/archives/borrar-cliente', headers: auth, payload: { telefono: '912000000', confirmar: 'BORRAR' } })).statusCode).toBe(404);
       const r = await app.inject({ method: 'POST', url: '/admin/archives/borrar-cliente', headers: auth, payload: { telefono: '987 000 009', confirmar: 'BORRAR' } });
       expect(r.statusCode).toBe(200);
       expect(r.json()).toMatchObject({ ok: true, guardadas: 1, aPapelera: 2, papeleraDias: 30 });

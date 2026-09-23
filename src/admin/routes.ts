@@ -58,6 +58,8 @@ export interface AdminDeps {
   gsg?: import('../rutas/gsg.js').PuertoGsg;
   /** Las entregas del dia: ligan cada conversacion guardada a su pedido. Ver src/entregas. */
   entregas?: import('../entregas/servicio.js').ServicioEntregas;
+  /** La conexion con GSG de ESTA tienda (sus descartes y su cuadre). */
+  conexionGsg?: import('../rutas/conexion-gsg.js').ServicioConexionGsg;
   repos: Repos;
   config: Config;
   settings: SettingsService;
@@ -307,7 +309,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     // Lo que GSG mando y no se pudo leer, y el cuadre de fin de dia con GSG
     // (src/rutas/gsg-extras.ts): un 422 silencioso es un pedido perdido.
     try {
-      const extras = conexionGsgVigente()?.extras;
+      const extras = (deps.conexionGsg ?? conexionGsgVigente())?.extras;
       if (extras) {
         const descartes = extras.descartesDeHoy().lista.length;
         if (descartes > 0) avisos.push({ tipo: 'gsg_descartes', nivel: 'warn', texto: `${descartes} pedido${descartes === 1 ? '' : 's'} de GSG no se pudo${descartes === 1 ? '' : 'ieron'} leer`, href: '/setup#gsg', n: descartes });

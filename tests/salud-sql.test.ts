@@ -75,12 +75,12 @@ async function entrega(phone: string, opts: { status: string; code?: string; bi?
 
 describe('ventanas de entregas', () => {
   it('resume lo enviado desde una fecha: enviados, entregados, fallidos por codigo y destinatarios unicos', async () => {
-    await entrega('51900000001', { status: 'delivered' });
-    await entrega('51900000001', { status: 'read' });
-    await entrega('51900000002', { status: 'failed', code: '131026' });
-    await entrega('51900000003', { status: 'failed', code: '131049' });
-    await entrega('51900000004', { status: 'sent', sentAgoMs: 2 * HORA });
-    await entrega('51900000005', { status: 'sent', bi: false });
+    await entrega('51912000001', { status: 'delivered' });
+    await entrega('51912000001', { status: 'read' });
+    await entrega('51912000002', { status: 'failed', code: '131026' });
+    await entrega('51912000003', { status: 'failed', code: '131049' });
+    await entrega('51912000004', { status: 'sent', sentAgoMs: 2 * HORA });
+    await entrega('51912000005', { status: 'sent', bi: false });
 
     const dia = await repos.deliveries.resumenDesde(new Date(Date.now() - 24 * HORA));
     expect(dia.enviados).toBe(6);
@@ -88,7 +88,7 @@ describe('ventanas de entregas', () => {
     expect(dia.leidos).toBe(1);
     expect(dia.fallidos).toBe(2);
     expect(dia.porCodigo).toEqual({ '131026': 1, '131049': 1 });
-    // Unicos: solo iniciados por la empresa y que salieron: 51900000001 y 51900000004.
+    // Unicos: solo iniciados por la empresa y que salieron: 51912000001 y 51912000004.
     expect(dia.destinatariosUnicos).toBe(2);
 
     const hora = await repos.deliveries.resumenDesde(new Date(Date.now() - HORA));
@@ -96,10 +96,10 @@ describe('ventanas de entregas', () => {
   });
 
   it('los ultimos N respetan el orden y el "desde" de la rampa', async () => {
-    await entrega('51900000010', { status: 'failed', code: '131000', sentAgoMs: 3 * HORA });
-    await entrega('51900000011', { status: 'failed', code: '131000', sentAgoMs: 2 * HORA });
-    await entrega('51900000012', { status: 'sent', sentAgoMs: HORA });
-    await entrega('51900000013', { status: 'sent' });
+    await entrega('51912000010', { status: 'failed', code: '131000', sentAgoMs: 3 * HORA });
+    await entrega('51912000011', { status: 'failed', code: '131000', sentAgoMs: 2 * HORA });
+    await entrega('51912000012', { status: 'sent', sentAgoMs: HORA });
+    await entrega('51912000013', { status: 'sent' });
 
     const todos = await repos.deliveries.resumenUltimos(50);
     expect(todos).toMatchObject({ enviados: 4, fallidos: 2 });
@@ -110,9 +110,9 @@ describe('ventanas de entregas', () => {
   });
 
   it('ultimo envio a un contacto, iniciados desde, por contacto y por plantilla', async () => {
-    const a = await entrega('51900000020', { status: 'sent', sentAgoMs: 2 * HORA, template: 'a' });
-    await entrega('51900000020', { status: 'failed', code: '131000', sentAgoMs: HORA, template: 'a' });
-    await entrega('51900000021', { status: 'sent', template: 'b' });
+    const a = await entrega('51912000020', { status: 'sent', sentAgoMs: 2 * HORA, template: 'a' });
+    await entrega('51912000020', { status: 'failed', code: '131000', sentAgoMs: HORA, template: 'a' });
+    await entrega('51912000021', { status: 'sent', template: 'b' });
 
     const ultimo = await repos.deliveries.ultimoEnvioA(a.contactId);
     // El fallido no cuenta como "ultimo envio" para la separacion.
@@ -127,7 +127,7 @@ describe('ventanas de entregas', () => {
 
 describe('acuses que no retroceden', () => {
   it('un "sent" tardio no pisa un "read" ni mueve sent_at; un "failed" si manda', async () => {
-    const c = await repos.contacts.upsertFromInbound('51900000080');
+    const c = await repos.contacts.upsertFromInbound('51912000080');
     const id = await repos.deliveries.create({ contactId: c.id, kind: 'freeform', category: 'UTILITY', businessInitiated: true });
     await repos.deliveries.markSent(id, 'wamid.80');
     const hace2h = new Date(Date.now() - 2 * HORA);
@@ -140,7 +140,7 @@ describe('acuses que no retroceden', () => {
     await repos.deliveries.updateByWamid('wamid.80', 'sent');
     await repos.messages.setStatusByWamid('wamid.80', 'sent');
 
-    const [fila] = await repos.deliveries.listRecent({ phone: '51900000080', limit: 1, offset: 0 });
+    const [fila] = await repos.deliveries.listRecent({ phone: '51912000080', limit: 1, offset: 0 });
     expect(fila?.status).toBe('read');
     expect(Math.abs(fila!.sentAt!.getTime() - hace2h.getTime())).toBeLessThan(1000);
     const ultimo = await repos.deliveries.ultimoEnvioA(c.id);
@@ -149,7 +149,7 @@ describe('acuses que no retroceden', () => {
     expect(hilo[0]?.status).toBe('read');
 
     await repos.deliveries.updateByWamid('wamid.80', 'failed', { code: '131026', title: 'x' });
-    const [tras] = await repos.deliveries.listRecent({ phone: '51900000080', limit: 1, offset: 0 });
+    const [tras] = await repos.deliveries.listRecent({ phone: '51912000080', limit: 1, offset: 0 });
     expect(tras?.status).toBe('failed');
     expect(tras?.errorCode).toBe('131026');
   });
@@ -157,10 +157,10 @@ describe('acuses que no retroceden', () => {
 
 describe('contactos: supresion, fatiga y bajas', () => {
   it('suprime, cuenta y levanta; anotar envio iniciado lleva la racha y el primer envio', async () => {
-    await repos.contacts.upsertFromInbound('51900000030');
+    await repos.contacts.upsertFromInbound('51912000030');
     const hasta = new Date(Date.now() + HORA);
-    await repos.contacts.suprimir('51900000030', hasta, 'no tiene WhatsApp (131026)', 'todo');
-    let c = (await repos.contacts.getByPhone('51900000030'))!;
+    await repos.contacts.suprimir('51912000030', hasta, 'no tiene WhatsApp (131026)', 'todo');
+    let c = (await repos.contacts.getByPhone('51912000030'))!;
     expect(c.suprimidoAmbito).toBe('todo');
     expect(c.suprimidoHasta!.getTime()).toBe(hasta.getTime());
     expect(await repos.contacts.contarSuprimidos(new Date())).toBe(1);
@@ -168,25 +168,25 @@ describe('contactos: supresion, fatiga y bajas', () => {
 
     await repos.contacts.anotarEnvioIniciado(c.id, new Date());
     await repos.contacts.anotarEnvioIniciado(c.id, new Date());
-    c = (await repos.contacts.getByPhone('51900000030'))!;
+    c = (await repos.contacts.getByPhone('51912000030'))!;
     expect(c.sinRespuestaSeguidas).toBe(2);
     expect(c.enviosIniciados).toBe(2);
     expect(c.primerEnvioAt).not.toBeNull();
     expect(await repos.contacts.contarNuevosEscritosDesde(new Date(Date.now() - HORA))).toBe(1);
 
     // Contestar corta la racha.
-    await repos.contacts.touchInbound('51900000030', new Date());
-    c = (await repos.contacts.getByPhone('51900000030'))!;
+    await repos.contacts.touchInbound('51912000030', new Date());
+    c = (await repos.contacts.getByPhone('51912000030'))!;
     expect(c.sinRespuestaSeguidas).toBe(0);
 
-    await repos.contacts.levantarSupresion('51900000030');
-    c = (await repos.contacts.getByPhone('51900000030'))!;
+    await repos.contacts.levantarSupresion('51912000030');
+    c = (await repos.contacts.getByPhone('51912000030'))!;
     expect(c.suprimidoHasta).toBeNull();
   });
 
   it('cuenta las bajas desde una fecha', async () => {
-    await repos.contacts.upsertFromInbound('51900000040');
-    await repos.contacts.setOptOut('51900000040');
+    await repos.contacts.upsertFromInbound('51912000040');
+    await repos.contacts.setOptOut('51912000040');
     expect(await repos.contacts.contarBajasDesde(new Date(Date.now() - HORA))).toBe(1);
     expect(await repos.contacts.contarBajasDesde(new Date(Date.now() + HORA))).toBe(0);
   });
@@ -248,26 +248,26 @@ describe('campanas por goteo', () => {
   it('guarda los destinatarios en orden, los saca por tandas, los pospone y los cuenta', async () => {
     const id = await repos.campaigns.create({ name: 'Promo', templateName: 'promo', templateLanguage: 'es', category: 'MARKETING', canario: 2, canarioEsperaMin: 30, ritmoPorHora: 50 });
     const n = await repos.campaigns.agregarDestinatarios(id, [
-      { phone: '51900000050', variables: ['a'], orden: 0, canario: true },
-      { phone: '51900000051', variables: [], orden: 1, canario: true },
-      { phone: '51900000052', variables: ['c'], orden: 2, canario: false },
+      { phone: '51912000050', variables: ['a'], orden: 0, canario: true },
+      { phone: '51912000051', variables: [], orden: 1, canario: true },
+      { phone: '51912000052', variables: ['c'], orden: 2, canario: false },
       // Repetido: no se duplica.
-      { phone: '51900000052', variables: ['c'], orden: 3, canario: false },
+      { phone: '51912000052', variables: ['c'], orden: 3, canario: false },
     ]);
     expect(n).toBe(3);
 
     const canario = await repos.campaigns.siguientesPendientes(id, 10, true);
-    expect(canario.map((r) => r.phone)).toEqual(['51900000050', '51900000051']);
+    expect(canario.map((r) => r.phone)).toEqual(['51912000050', '51912000051']);
     expect(canario[0]?.variables).toEqual(['a']);
 
     await repos.campaigns.posponerDestinatario(canario[0]!.id, new Date(Date.now() + HORA), 'separacion');
     const ahora = await repos.campaigns.siguientesPendientes(id, 10, false);
-    expect(ahora.map((r) => r.phone)).toEqual(['51900000051', '51900000052']);
+    expect(ahora.map((r) => r.phone)).toEqual(['51912000051', '51912000052']);
     const luego = await repos.campaigns.siguientesPendientes(id, 10, false, new Date(Date.now() + 2 * HORA));
-    expect(luego.map((r) => r.phone)).toEqual(['51900000050', '51900000051', '51900000052']);
+    expect(luego.map((r) => r.phone)).toEqual(['51912000050', '51912000051', '51912000052']);
     expect(luego[0]?.intentos).toBe(1);
 
-    const d = await entrega('51900000051', { status: 'delivered', campaignId: id });
+    const d = await entrega('51912000051', { status: 'delivered', campaignId: id });
     await repos.campaigns.marcarDestinatario(canario[1]!.id, 'enviado', null, d.id);
     expect(await repos.campaigns.contarPendientes(id)).toBe(2);
     expect(await repos.campaigns.cifrasDestinatarios(id)).toEqual({ pendiente: 2, enviado: 1 });
@@ -301,8 +301,8 @@ describe('campanas por goteo', () => {
     // ninguna campana avanzaba mientras existiera una asi.
     const id = await repos.campaigns.create({ name: 'Promo', templateName: 'promo', templateLanguage: 'es', category: 'MARKETING', canario: 1, canarioEsperaMin: 30, ritmoPorHora: null });
     await repos.campaigns.agregarDestinatarios(id, [
-      { phone: '51900000060', variables: [], orden: 0, canario: true },
-      { phone: '51900000061', variables: [], orden: 1, canario: false },
+      { phone: '51912000060', variables: [], orden: 0, canario: true },
+      { phone: '51912000061', variables: [], orden: 1, canario: false },
     ]);
     await repos.campaigns.setStatus(id, 'canary');
     const [canario] = await repos.campaigns.siguientesPendientes(id, 1, true);
@@ -365,7 +365,7 @@ describe('ajustes del reparto y plantillas propias', () => {
 
 describe('bitacora de senales', () => {
   it('registra, cuenta por tipo y codigo, resume, lista y purga', async () => {
-    const c = await repos.contacts.upsertFromInbound('51900000060');
+    const c = await repos.contacts.upsertFromInbound('51912000060');
     await repos.salud.registrar({ phoneNumberId: 'PN', tipo: 'error_envio', codigo: '131026', detalle: 'x', contactId: c.id });
     await repos.salud.registrar({ phoneNumberId: 'PN', tipo: 'error_envio', codigo: '131049' });
     await repos.salud.registrar({ phoneNumberId: 'PN', tipo: 'desconexion', codigo: '428', at: new Date(Date.now() - 2 * HORA) });
@@ -388,7 +388,7 @@ describe('bitacora de senales', () => {
   });
 
   it('cuenta los entrantes desde una fecha', async () => {
-    const c = await repos.contacts.upsertFromInbound('51900000070');
+    const c = await repos.contacts.upsertFromInbound('51912000070');
     await repos.messages.add({ contactId: c.id, direction: 'in', kind: 'text', body: 'hola', createdAt: new Date() });
     await repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', body: 'buenas', createdAt: new Date() });
     expect(await repos.messages.contarEntrantesDesde(new Date(Date.now() - HORA))).toBe(1);

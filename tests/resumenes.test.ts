@@ -158,7 +158,7 @@ describe('el servicio: cuando sale, a quien, y que pasa si no puede', () => {
   let wa: FakeWhatsApp;
   let servicio: ServicioResumenes;
   let ahora = limaA('08:00');
-  let supervisor = '51900000000';
+  let supervisor = '51912000000';
   let iaRespuesta: string | null = null;
   const activo = { activo: true, horaManana: '08:30', horaTarde: '18:30' };
   let ajustes = { ...activo };
@@ -235,7 +235,7 @@ describe('el servicio: cuando sale, a quien, y que pasa si no puede', () => {
     expect(r.motivo).toContain('supervisor');
     ahora = limaA('08:40', '2026-09-22');
     expect(await servicio.tick()).toBeNull();
-    supervisor = '51900000000';
+    supervisor = '51912000000';
   });
 
   it('si WhatsApp rechaza, queda anotado y se reintenta a los diez minutos', async () => {
@@ -286,7 +286,7 @@ describe('las rutas de la pantalla', () => {
       settingsRepo: createMemorySettingsRepo(),
       sender,
       ajustes: () => ({ activo: true, horaManana: '08:30', horaTarde: '18:30' }),
-      supervisor: () => '51900000000',
+      supervisor: () => '51912000000',
       nombreNegocio: () => 'GSG Reparto',
       entregas: { resumen: async () => resumenDePrueba() },
       timezone: 'America/Lima',
@@ -303,7 +303,7 @@ describe('las rutas de la pantalla', () => {
     const r = await app.inject({ method: 'GET', url: '/admin/resumenes', headers: auth });
     expect(r.statusCode).toBe(200);
     expect(r.json().ajustes.horaManana).toBe('08:30');
-    expect(r.json().supervisor).toBe('51900000000');
+    expect(r.json().supervisor).toBe('51912000000');
     expect(r.json().ultimos).toEqual({ manana: null, tarde: null });
   });
 

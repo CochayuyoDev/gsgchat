@@ -25,6 +25,16 @@ import type { Lote } from '../db/rutas.js';
 import type { Sender } from '../outbound/sender.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { payloadResumen, type PuertoGsg } from './gsg.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
+
+/**
+ * Un lote hecho solo de numeros del Modulo desarrollador: su avance no va a
+ * GSG ni se le cuenta al coordinador real.
+ */
+export async function esLoteDePrueba(repos: Repos, loteId: string): Promise<boolean> {
+  const solicitudes = await repos.rutas.listarSolicitudes({ loteId, limit: 5000, offset: 0 });
+  return solicitudes.length > 0 && solicitudes.every((s) => esNumeroDePrueba(s.phone ?? s.telefonoCrudo));
+}
 
 export interface OpcionesAlertas {
   /** Cada cuanto se le manda a GSG el avance del lote, en minutos. */
@@ -122,6 +132,7 @@ export async function revisarAlertas(
   if (!lotes.length) return { ...salida, motivo: 'no hay ningun lote en marcha' };
 
   for (const lote of lotes) {
+    if (await esLoteDePrueba(deps.repos, lote.id)) continue;
     const avance = await avanceDelLote(deps.repos, lote);
 
     // --- a GSG: el avance del lote ---------------------------------------
@@ -152,7 +163,11 @@ export async function revisarAlertas(
     // --- al coordinador: lo que no puede resolver el bot -------------------
     const supervisor = typeof deps.opciones.supervisor === 'function' ? deps.opciones.supervisor() : deps.opciones.supervisor;
     if (!supervisor) continue;
-    if (avance.necesitanPersona < deps.opciones.minimoCasos) continue;
+    // Solo cuentan los casos reales: los de prueba (un lote mezclado) se miran en su pantalla.
+    const casos = await deps.repos.rutas.listarSolicitudes({ loteId: lote.id, requiereHumano: true, limit: 5000, offset: 0 });
+    const reales = casos.filter((s) => !esNumeroDePrueba(s.phone ?? s.telefonoCrudo)).length;
+    if (reales < deps.opciones.minimoCasos) continue;
+    avance.necesitanPersona = reales;
 
     const previoAviso = memoria.ultimoAviso.get(lote.id) ?? 0;
     if (ahora.getTime() - previoAviso < deps.opciones.avisoCadaMin * 60_000) continue;

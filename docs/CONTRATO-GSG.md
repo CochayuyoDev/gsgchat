@@ -82,7 +82,7 @@ cancela nada; solo `cancelado: true`, pedido a pedido.
 - `terminados`: los que GSG ya dio por cerrados. Basta la `referencia`. Un
   pedido que simplemente desaparece de las listas **no** se cancela solo:
   GSGchat sigue con lo que ya tenía de él. Para cancelarlo, GSG usa
-  `DELETE /api/v1/entregas/{referencia}` (B.3) o lo pasa a `terminados`.
+  `DELETE /api/v1/entregas/{referencia}` (B.4) o lo pasa a `terminados`.
 
 Un mismo pedido puede estar en `faltaUbicacion` y en `faltaConfirmacion`: se
 le pide primero la ubicación y, al recibirla, la pregunta de confirmar va
@@ -105,6 +105,7 @@ Cada JSON lleva `tipo` (`ubicacion` | `confirmacion` | `entrega` |
 ```json
 {
   "tipo": "ubicacion",
+  "solicitudId": 17,
   "referencia": "P-1001",
   "telefono": "51987000001",
   "nombre": "Ana Quispe",
@@ -119,7 +120,9 @@ Cada JSON lleva `tipo` (`ubicacion` | `confirmacion` | `entrega` |
 ```
 
 Si el cliente manda un segundo pin, llega otra vez con `"corregida": true`:
-sustituye al anterior de la misma referencia.
+sustituye al anterior de la misma referencia. `solicitudId` es el número
+interno de GSGchat para esa petición de ubicación (sirve para cruzar dos
+reportes de la misma petición; GSG puede ignorarlo).
 
 #### `POST <GSG_URL>/confirmaciones` — el cliente confirmó (o no)
 
@@ -180,6 +183,7 @@ ya puede darla por **terminada** (el simulador lo hace solo).
 ```json
 {
   "tipo": "incidencia",
+  "solicitudId": 21,
   "referencia": "P-1004",
   "telefono": "51987000004",
   "telefonoOriginal": "987000004",
@@ -238,6 +242,18 @@ Crear la clave para GSG** (sale una sola vez; lleva los permisos
 La base es `https://<gsgchat>/api/v1`. El contrato entero, en OpenAPI 3:
 `https://<gsgchat>/api/v1/openapi.json`.
 
+**Límite de peticiones.** Cada clave puede hacer como mucho **120 peticiones
+por minuto** a `/api/v1/entregas…`. Pasado eso, `429` con la cabecera
+`Retry-After` (segundos) y el motivo en `error`. Como un `POST` lleva hasta
+500 pedidos, sobra para cualquier reparto; el tope existe para que un bucle
+mal hecho no tumbe el sistema.
+
+**Errores.** Todo error viene como `{ "error": "<qué pasó, en palabras>" }`:
+`401` sin clave o con una clave revocada, `403` si a la clave le falta el
+permiso, `400` si el cuerpo no se entiende (JSON roto, falta `referencia`,
+lista vacía), `404` si la referencia no es de hoy, `409` si el pedido ya está
+cerrado, `429` si se pasó el límite.
+
 ### B.1 `POST /api/v1/entregas` — uno o varios pedidos
 
 Acepta un pedido suelto, una lista `[...]` o `{ "pedidos": [...] }` (hasta 500
@@ -257,9 +273,18 @@ curl -X POST https://<gsgchat>/api/v1/entregas \
   }'
 ```
 
-- `faltaUbicacion` (por defecto `true`): pedirle el pin al cliente. Con `lat`/`lng` no se le pide.
-- `faltaConfirmar` (por defecto `true`): preguntarle si recibe hoy.
-- `urgente`: primero hacia el motorizado.
+| Campo | Obligatorio | Qué es |
+|---|---|---|
+| `referencia` | **sí** | El número de pedido en GSG. La misma referencia el mismo día no se duplica. |
+| `telefono` | **sí** | El WhatsApp del cliente (`987654321` o `51987654321`). Uno inválido descarta ese pedido, no la llamada entera. |
+| `nombre`, `direccion`, `distrito`, `notas` | no | Lo que se le dice al cliente y al motorizado. |
+| `lat`, `lng` | no | Si GSG ya tiene el pin: entonces no se le pide la ubicación. |
+| `id` | no | El id del pedido en GSG si es distinto de la referencia. |
+| `faltaUbicacion` | no | Por defecto `true`: pedirle el pin al cliente. Con `lat`/`lng` no se le pide. |
+| `faltaConfirmar` | no | Por defecto `true`: preguntarle si recibe hoy. |
+| `urgente` | no | `true` = va primero hacia el motorizado. |
+
+Para cancelar no se usa `cancelado` aquí: se usa `DELETE` (B.4).
 
 Respuesta `201` (o `200` si no entró nada nuevo):
 
@@ -304,7 +329,26 @@ Estados: `pendiente` → `esperando_ubicacion` → `esperando_confirmacion` →
 `incidencia`, `terminada`. `GET /api/v1/entregas` (sin referencia) devuelve
 el día entero, con las cifras y los motorizados.
 
-### B.3 `DELETE /api/v1/entregas/{referencia}` — GSG lo canceló
+### B.3 `PATCH /api/v1/entregas/{referencia}` — GSG cambió datos del pedido
+
+```bash
+curl -X PATCH https://<gsgchat>/api/v1/entregas/P-1004 \
+  -H "Authorization: Bearer wak_..." -H "Content-Type: application/json" \
+  -d '{ "direccion": "Av. Nueva 100", "distrito": "San Isidro" }'
+```
+
+| Campo | Qué cambia |
+|---|---|
+| `nombre`, `direccion`, `distrito`, `notas` | Los datos que ven el cliente y el motorizado. Vacío = se borra ese dato. |
+| `urgente` | `true` lo pasa delante hacia el motorizado; `false` lo devuelve a normal. |
+
+`200` con `cambios` (en palabras) y el pedido como queda; queda apuntado en su
+bitácora («GSG cambió: dirección … → …»). El **teléfono no se cambia**
+(`400`): al número viejo ya se le pudo escribir, así que es otro pedido
+(cancelar con B.4 y crear con B.1). `404` si no existe hoy; `409` si ya está
+entregado, cancelado o terminado.
+
+### B.4 `DELETE /api/v1/entregas/{referencia}` — GSG lo canceló
 
 ```bash
 curl -X DELETE "https://<gsgchat>/api/v1/entregas/P-1007?motivo=el%20cliente%20anul%C3%B3" -H "Authorization: Bearer wak_..."
@@ -313,7 +357,7 @@ curl -X DELETE "https://<gsgchat>/api/v1/entregas/P-1007?motivo=el%20cliente%20a
 `200` con el pedido ya cancelado; `404` si no existe hoy; `409` si ya estaba
 entregado o cancelado. Al cliente no se le vuelve a escribir.
 
-### B.4 Enterarse de lo que pasa: webhooks
+### B.5 Enterarse de lo que pasa: webhooks
 
 GSG registra una URL suya y GSGchat le manda cada evento con un `POST`
 firmado:
@@ -338,9 +382,11 @@ La respuesta trae el `secreto` (una sola vez). Cada entrega llega así:
 ```
 
 con la cabecera `X-Firma: t=<segundos>,v1=<hmac sha256 hex de "<t>.<cuerpo>"
-con el secreto>`. Se comprueba calculando el HMAC del cuerpo crudo. Un `2xx`
-de GSG cierra la entrega; un `5xx` se reintenta (1 min, 5, 30, 2 h, 12 h); un
-`4xx` no se insiste. Los cuatro eventos de las entregas: `entrega.confirmada`,
+con el secreto>` (y, de ayuda, `X-Evento` y `X-Entrega`). Se comprueba
+calculando el HMAC del cuerpo crudo. Un `2xx` de GSG cierra la entrega; un
+`5xx`, un `408`, un `429`, un timeout o sin red se reintenta a los 15 s, 1 min, 5 min, 30 min, 2 h y 12 h
+(siete intentos en total); cualquier otro `4xx` no se insiste. `intento`
+dice qué intento es (1 el primero). Los cuatro eventos de las entregas: `entrega.confirmada`,
 `entrega.avisada` (hora dada al cliente), `entrega.entregada`,
 `entrega.incidencia`. También existen `mensaje.recibido`, `ubicacion.recibida`
 y el resto (lista en `GET /api/v1/eventos`).
@@ -430,7 +476,7 @@ contra la misma instalación: los pedidos aparecen en Hoy al instante.
 |---|---|---|
 | GSG expone | la lista del día | `GET <GSG_URL>/reparto/pendientes` |
 | GSG acepta | ubicaciones, confirmaciones, entregas, incidencias, resúmenes | `POST <GSG_URL>/ubicaciones` … `/resumenes` |
-| GSG empuja (opcional) | pedidos nuevos, consulta, cancelación | `POST/GET/DELETE https://<gsgchat>/api/v1/entregas[/{referencia}]` |
+| GSG empuja (opcional) | pedidos nuevos, consulta, cambios, cancelación | `POST/GET/PATCH/DELETE https://<gsgchat>/api/v1/entregas[/{referencia}]` (120 por minuto y clave) |
 | GSG se entera (opcional) | eventos `entrega.*` firmados | su propia URL, registrada en `POST /api/v1/webhooks` |
 | Para probar | el simulador | `https://<gsgchat>/simulador/gsg`, con un token `gsgsim_…` (Conexión → Para los programadores de GSG) |
 | Contrato formal | OpenAPI 3 | `https://<gsgchat>/api/v1/openapi.json` |

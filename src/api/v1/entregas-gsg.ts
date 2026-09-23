@@ -7,7 +7,12 @@
  *
  *  POST   /api/v1/entregas                 uno o varios pedidos (entregas:gestionar)
  *  GET    /api/v1/entregas/:referencia     como va ese pedido hoy (entregas:leer)
+ *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas o urgente (entregas:gestionar)
  *  DELETE /api/v1/entregas/:referencia     cancelarlo (entregas:gestionar)
+ *
+ * Cada clave tiene un tope de LIMITE_POR_MINUTO peticiones por minuto a estas
+ * rutas: pasado, 429 con cuanto esperar (un bucle mal hecho en GSG no puede
+ * tumbar el reparto).
  *
  * Lo que pasa despues lo cuentan los webhooks `entrega.confirmada`,
  * `entrega.avisada`, `entrega.entregada` y `entrega.incidencia` (ver
@@ -24,9 +29,27 @@ export interface ApiEntregasGsgDeps {
   entregas: ServicioEntregas;
   /** El repo, para marcar la prioridad sin pasar por la pantalla. */
   repo?: EntregasRepo;
+  /** Peticiones por minuto y por clave (por defecto LIMITE_POR_MINUTO). */
+  limitePorMinuto?: number;
+  ahora?: () => number;
 }
 
-const pedidoSchema = z.object({
+/** Tope por clave y minuto en /api/v1/entregas*. GSG manda en tandas (hasta 500 por llamada): 120 sobra. */
+export const LIMITE_POR_MINUTO = 120;
+
+/** Lo que se puede cambiar de un pedido ya mandado. El telefono no: eso es otro pedido. */
+export const cambioPedidoSchema = z
+  .object({
+    nombre: z.string().trim().max(120).optional(),
+    direccion: z.string().trim().max(300).optional(),
+    distrito: z.string().trim().max(120).optional(),
+    notas: z.string().trim().max(500).optional(),
+    urgente: z.boolean().optional(),
+    telefono: z.unknown().optional(),
+  })
+  .strict();
+
+export const pedidoSchema = z.object({
   referencia: z.string().trim().min(1).max(60),
   // Un telefono malo no tumba la llamada entera: se descarta ese pedido con su motivo.
   telefono: z.coerce.string().trim().max(30).default(''),
@@ -91,6 +114,23 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
 
 export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntregasGsgDeps): Promise<void> {
   const { entregas } = deps;
+  const ahora = deps.ahora ?? (() => Date.now());
+  const tope = deps.limitePorMinuto ?? LIMITE_POR_MINUTO;
+  const usos = new Map<string, number[]>();
+
+  // El tope por clave: se mira antes que nada (tras la autorizacion).
+  app.addHook('preHandler', async (request, reply) => {
+    if (!request.url.startsWith('/api/v1/entregas')) return;
+    const quien = request.usuario?.id ?? request.ip;
+    const t = ahora();
+    const lista = (usos.get(quien) ?? []).filter((x) => x > t - 60_000);
+    if (lista.length >= tope) {
+      const espera = Math.max(1, Math.ceil((lista[0]! + 60_000 - t) / 1000));
+      return reply.code(429).header('retry-after', String(espera)).send({ error: `Demasiadas peticiones con esta clave: como mucho ${tope} por minuto. Espera ${espera} s y vuelve a intentarlo.` });
+    }
+    lista.push(t);
+    usos.set(quien, lista);
+  });
 
   const porReferencia = async (referencia: string): Promise<FilaEntrega | undefined> => {
     const r = await entregas.resumen();
@@ -164,6 +204,45 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
       entrega: entregaParaApi(e),
       eventos: (detalle?.eventos ?? []).map((ev) => ({ en: ev.createdAt instanceof Date ? ev.createdAt.toISOString() : String(ev.createdAt), tipo: ev.tipo, detalle: ev.detalle })),
     };
+  });
+
+  // GSG cambia datos de un pedido ya mandado: lo mismo que el espejo de la
+  // sincronizacion (src/entregas/servicio.ts), pero empujado. Queda apuntado en
+  // la bitacora del pedido. El telefono no se cambia aqui: es otro pedido
+  // (cancelar y crear), porque al numero viejo ya se le pudo escribir.
+  app.patch<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
+    const leido = cambioPedidoSchema.safeParse(request.body ?? {});
+    if (!leido.success) {
+      const i = leido.error.issues[0];
+      return reply.code(400).send({ error: `El cambio no se entiende: ${i ? `${i.path.join('.') || 'cuerpo'}: ${i.message}` : 'revisa los campos'}. Se puede cambiar nombre, direccion, distrito, notas y urgente.` });
+    }
+    const b = leido.data;
+    if (b.telefono !== undefined) return reply.code(400).send({ error: 'El teléfono no se cambia en un pedido ya mandado: cancélalo (DELETE) y créalo de nuevo con el número bueno.' });
+    const e = await porReferencia(request.params.referencia);
+    if (!e) return noExiste(reply, request.params.referencia);
+    if (e.estado === 'cancelada' || e.estado === 'entregada' || e.estado === 'terminada') {
+      return reply.code(409).send({ error: `El pedido ${e.referencia} ya está ${e.estado === 'cancelada' ? 'cancelado' : e.estado === 'entregada' ? 'entregado' : 'terminado'}: ya no se cambia.` });
+    }
+    if (!deps.repo) return reply.code(409).send({ error: 'En este arranque los pedidos no se pueden cambiar por la API.' });
+    const patch: Record<string, unknown> = {};
+    const cambios: string[] = [];
+    for (const campo of ['nombre', 'direccion', 'distrito', 'notas'] as const) {
+      const nuevo = b[campo];
+      if (nuevo !== undefined && nuevo !== ((e as unknown as Record<string, unknown>)[campo] ?? '')) {
+        patch[campo] = nuevo || null;
+        cambios.push(`${campo} «${(e as unknown as Record<string, unknown>)[campo] ?? '—'}» → «${nuevo || '—'}»`);
+      }
+    }
+    if (b.urgente !== undefined && (b.urgente ? 'urgente' : 'normal') !== (e.prioridad ?? 'normal')) {
+      patch.prioridad = b.urgente ? 'urgente' : 'normal';
+      cambios.push(b.urgente ? 'ahora es urgente' : 'ya no es urgente');
+    }
+    if (!cambios.length) return { ok: true, cambios: [], entrega: entregaParaApi(e), detalle: 'No había nada distinto: el pedido queda como estaba.' };
+    await deps.repo.actualizar(e.id, patch as Parameters<EntregasRepo['actualizar']>[1]);
+    const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
+    await deps.repo.registrarEvento(e.id, 'sincronizada', `GSG cambió (${quien}): ${cambios.join('; ')}`, null, new Date());
+    const fila = await porReferencia(request.params.referencia);
+    return { ok: true, cambios, entrega: fila ? entregaParaApi(fila) : null, detalle: `Pedido ${e.referencia} cambiado: ${cambios.join('; ')}.` };
   });
 
   app.delete<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {

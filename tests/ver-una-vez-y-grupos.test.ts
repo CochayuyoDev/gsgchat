@@ -160,8 +160,8 @@ describe('traducir un mensaje de grupo', () => {
   });
 
   it('autorDeGrupo prefiere lo que trae numero', () => {
-    expect(autorDeGrupo({ participant: '1@lid', participantAlt: '51900000001@s.whatsapp.net' })).toBe('51900000001');
-    expect(autorDeGrupo({ participant: '51900000002:3@s.whatsapp.net' })).toBe('51900000002');
+    expect(autorDeGrupo({ participant: '1@lid', participantAlt: '51912000001@s.whatsapp.net' })).toBe('51912000001');
+    expect(autorDeGrupo({ participant: '51912000002:3@s.whatsapp.net' })).toBe('51912000002');
     expect(autorDeGrupo({ participant: '1@lid' })).toBeNull();
     expect(autorDeGrupo(undefined)).toBeNull();
   });
@@ -290,11 +290,11 @@ describe('la sesion local con grupos y "ver una vez"', () => {
     await promesa;
     emitir('messages.upsert', {
       type: 'notify',
-      messages: [{ key: { id: 'G9', remoteJid: '777@g.us', participantAlt: '51900000001@s.whatsapp.net' }, messageTimestamp: ahora(), pushName: 'Pepe', message: { conversation: 'hola grupo' } }],
+      messages: [{ key: { id: 'G9', remoteJid: '777@g.us', participantAlt: '51912000001@s.whatsapp.net' }, messageTimestamp: ahora(), pushName: 'Pepe', message: { conversation: 'hola grupo' } }],
     });
     await espera(30);
     expect(grupos).toEqual([{ jid: '777@g.us', nombre: 'Choferes', participantes: 1 }]);
-    expect(valores[0]?.messages?.[0]).toMatchObject({ from: '777@g.us', grupo: { nombre: 'Choferes', autor: '51900000001', autorNombre: 'Pepe' } });
+    expect(valores[0]?.messages?.[0]).toMatchObject({ from: '777@g.us', grupo: { nombre: 'Choferes', autor: '51912000001', autorNombre: 'Pepe' } });
   });
 
   it('un "ver una vez" vacio se entrega y se le pide al telefono que lo reenvie; la respuesta llega como reenvio', async () => {

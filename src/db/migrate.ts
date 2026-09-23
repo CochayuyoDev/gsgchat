@@ -9,7 +9,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../config.js';
-import { createPool } from './pool.js';
+import { createPool, esquemaSeguro } from './pool.js';
 
 /**
  * Los .sql viven en db/migrations. Con tsx este fichero esta en src/db y el
@@ -31,8 +31,20 @@ function findMigrationsDir(): string {
 
 const MIGRATIONS_DIR = findMigrationsDir();
 
-export async function migrate(connectionString: string): Promise<string[]> {
-  const pool = createPool(connectionString);
+/**
+ * `esquema`: el de una tienda de la plataforma (se crea si no existe). Sin el,
+ * el de siempre (public).
+ */
+export async function migrate(connectionString: string, esquema?: string): Promise<string[]> {
+  if (esquema) {
+    const admin = createPool(connectionString);
+    try {
+      await admin.query(`create schema if not exists ${esquemaSeguro(esquema)}`);
+    } finally {
+      await admin.end();
+    }
+  }
+  const pool = createPool(connectionString, esquema);
   const applied: string[] = [];
 
   try {
