@@ -56,6 +56,10 @@
 
 import type { Contact, Repos } from '../db/repos.js';
 import { esNumeroDePrueba } from '../desarrollador/numeros.js';
+
+/** Los dos son de prueba o los dos son de verdad. Ver elegirMotorizado. */
+const mismoMundo = (a: string, b: string): boolean => esNumeroDePrueba(a) === esNumeroDePrueba(b);
+const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 900 1…) y los de verdad solo a motorizados de verdad.';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
 import { payloadConfirmacion, payloadEntrega, payloadUbicacion, RUTA_GSG_PENDIENTES, type PuertoGsg } from '../rutas/gsg.js';
@@ -586,6 +590,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     lng: e.lng,
     minutos: e.minutosAviso,
     hora: e.llegaAproxAt ? horaEnReloj(e.llegaAproxAt, tz()) : null,
+    faltan: faltanPara(e.llegaAproxAt),
     motorizado: m ? firmaMotorizado(m) : null,
     placa: m?.placa ?? null,
     minutosMotorizado: e.minutosMotorizado,
@@ -598,6 +603,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     hastaExtendido: horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
     soporte: soporteEnPalabras(ajustes.soporte),
   });
+
+  /** " (faltan unos 25 min)" hasta la hora de llegada; vacio si ya paso o falta menos de 3 min. */
+  function faltanPara(llega: Date | null): string {
+    if (!llega) return '';
+    const min = Math.round((llega.getTime() - ahora().getTime()) / 60_000);
+    return min >= 3 ? ` (faltan unos ${minutosEnPalabras(min)})` : '';
+  }
 
   /**
    * El «ubicación registrada» para un cliente que NO tiene entrega de hoy (el
@@ -1280,7 +1292,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         clave = 'dondeEstaEntregada';
         break;
       case 'avisada':
-        clave = 'dondeEstaAvisada';
+        // Si el motorizado ya dijo que esta cerca, eso es lo que el cliente quiere oir.
+        clave = e.cercaAvisadoAt ? 'dondeEstaCerca' : 'dondeEstaAvisada';
         break;
       case 'lista':
       case 'esperando_motorizado':
@@ -1894,7 +1907,10 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * cargado y el que lleva mas tiempo sin encargo.
    */
   async function elegirMotorizado(e: Entrega): Promise<Motorizado | null> {
-    const todos = (await repo.listarMotorizados()).filter((m) => m.estado === 'activo' && !e.motorizadosDescartados.includes(m.id));
+    // Lo de prueba (Modulo desarrollador) con lo de prueba y lo real con lo
+    // real: un pedido inventado no puede llegarle por WhatsApp a un motorizado
+    // de verdad, ni un pedido de un cliente real quedarse en uno de prueba.
+    const todos = (await repo.listarMotorizados()).filter((m) => m.estado === 'activo' && !e.motorizadosDescartados.includes(m.id) && mismoMundo(e.phone, m.phone));
     if (!todos.length) return null;
     // Reservada para uno concreto (una persona la forzo y el envio quedo
     // para mas tarde): ese, mientras siga activo.
@@ -2071,6 +2087,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (motorizadoId) {
       const destino = await repo.motorizado(motorizadoId);
       if (!destino) return { error: 'Ese motorizado no existe: elige uno de la lista de Motorizados.' };
+      if (!mismoMundo(e.phone, destino.phone)) return { error: MEZCLA_PRUEBA };
       if (destino.estado !== 'activo') return { error: `${destino.nombre} está en ${destino.estado === 'descanso' ? 'descanso' : 'baja'} y no puede recibir pedidos: actívalo en Motorizados o elige otro.` };
     }
     if (e.motorizadoId) {
@@ -2368,6 +2385,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       destino = await repo.motorizado(opts.destino);
       if (!destino) return { ok: false, motivo: 'El motorizado al que quieres pasárselos no existe.' };
       if (destino.id === m.id) return { ok: false, motivo: 'Es el mismo motorizado.' };
+      if (!mismoMundo(m.phone, destino.phone)) return { ok: false, motivo: MEZCLA_PRUEBA };
       if (destino.estado !== 'activo') return { ok: false, motivo: `${destino.nombre} no está activo: actívalo primero o deja que el sistema elija.` };
     }
     const vivas = await repo.vivasDeMotorizado(m.id);

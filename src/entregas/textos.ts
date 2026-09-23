@@ -143,6 +143,7 @@ export const ajustesEntregasSchema = z.object({
       dondeEstaConfirmacion: z.string().max(1000).default(''),
       dondeEstaMotorizado: z.string().max(1000).default(''),
       dondeEstaAvisada: z.string().max(1000).default(''),
+      dondeEstaCerca: z.string().max(1000).default(''),
       dondeEstaEntregada: z.string().max(1000).default(''),
       dondeEstaNoLlego: z.string().max(1000).default(''),
       segundaVisitaPreguntar: z.string().max(1000).default(''),
@@ -177,6 +178,8 @@ export interface ContextoTexto {
   minutos?: number | null;
   /** La hora aproximada de llegada, ya formateada ("15:40"). */
   hora?: string | null;
+  /** Lo que falta para esa hora, ya en palabras y con su parentesis: " (faltan unos 25 min)". Vacio si ya paso o no se sabe. */
+  faltan?: string | null;
   motorizado?: string | null;
   placa?: string | null;
   /** Los minutos que dijo el motorizado, sin margen. */
@@ -273,6 +276,7 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
     lng: ctx.lng != null ? String(ctx.lng) : '',
     minutos: ctx.minutos != null ? minutosEnPalabras(ctx.minutos) : '',
     hora: ctx.hora ?? '',
+    faltan: ctx.faltan ?? '',
     motorizado: ctx.motorizado ?? '',
     placa: ctx.placa ?? '',
     minutosMotorizado: ctx.minutosMotorizado != null ? minutosEnPalabras(ctx.minutosMotorizado) : '',
@@ -332,7 +336,8 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   dondeEstaUbicacion: 'Hola {nombre}, para poder mandarle {pedido} nos falta su ubicación. Compártanos el pin desde WhatsApp (el clip 📎 → Ubicación) o un enlace de Google Maps.',
   dondeEstaConfirmacion: 'Hola {nombre}, {pedido} está listo para salir; solo falta que nos confirme que lo recibe hoy. Responda SÍ para confirmar o NO si prefiere cancelarlo.',
   dondeEstaMotorizado: 'Hola {nombre}, {pedido} ya está con un motorizado. En cuanto nos diga su tiempo le avisamos por aquí a qué hora le llega.',
-  dondeEstaAvisada: 'Hola {nombre}, {pedido} va en camino con {motorizado}: le llega alrededor de las {hora}. Gracias por su paciencia.',
+  dondeEstaAvisada: 'Hola {nombre}, {pedido} va en camino con {motorizado}: le llega alrededor de las {hora}{faltan}. Le llamará minutos antes de llegar.',
+  dondeEstaCerca: 'Hola {nombre}, {motorizado} ya está cerca de su dirección con {pedido}: le llega en unos minutos. Por favor, esté atenta al teléfono, le llamará antes de llegar.',
   dondeEstaEntregada: 'Hola {nombre}, según nuestro registro {pedido} quedó entregado a las {horaEntregada}. Si no es así, escríbanos y lo revisamos enseguida.',
   dondeEstaNoLlego: 'Disculpe la demora, {nombre}. Ya avisamos a una persona de {negocio} para que revise {pedido} y se comunique con usted por aquí.',
   segundaVisitaPreguntar: 'Hola {nombre}, el motorizado de {negocio} pasó con {pedido} y no encontró a nadie. ¿Se lo llevamos de nuevo hoy? Responda SÍ para que vuelva a pasar, o NO si prefiere coordinar otro día.',
@@ -404,7 +409,8 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   dondeEstaUbicacion: ['{nombre}', '{pedido}', '{negocio}'],
   dondeEstaConfirmacion: ['{nombre}', '{pedido}', '{negocio}'],
   dondeEstaMotorizado: ['{nombre}', '{pedido}', '{negocio}', '{motorizado}'],
-  dondeEstaAvisada: ['{nombre}', '{pedido}', '{negocio}', '{motorizado}', '{hora}', '{minutos}'],
+  dondeEstaAvisada: ['{nombre}', '{pedido}', '{negocio}', '{motorizado}', '{hora}', '{faltan}', '{minutos}'],
+  dondeEstaCerca: ['{nombre}', '{pedido}', '{negocio}', '{motorizado}', '{hora}'],
   dondeEstaEntregada: ['{nombre}', '{pedido}', '{negocio}', '{horaEntregada}', '{motorizado}'],
   dondeEstaNoLlego: ['{nombre}', '{pedido}', '{negocio}', '{hora}'],
   segundaVisitaPreguntar: ['{nombre}', '{pedido}', '{negocio}', '{direccion}', '{motorizado}'],
@@ -450,6 +456,7 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   dondeEstaConfirmacion: 'Al cliente que pregunta por su pedido cuando todavía falta que confirme',
   dondeEstaMotorizado: 'Al cliente que pregunta por su pedido cuando ya lo tiene un motorizado pero no hay hora',
   dondeEstaAvisada: 'Al cliente que pregunta por su pedido cuando ya se le dio la hora de llegada',
+  dondeEstaCerca: 'Al cliente que pregunta por su pedido cuando el motorizado ya dijo que está cerca',
   dondeEstaEntregada: 'Al cliente que pregunta por su pedido cuando ya figura como entregado',
   dondeEstaNoLlego: 'Al cliente que dice que no le llegó pasada la hora (se avisa a una persona)',
   segundaVisitaPreguntar: 'Al cliente, cuando el motorizado pasó y no había nadie: ¿volvemos hoy?',
