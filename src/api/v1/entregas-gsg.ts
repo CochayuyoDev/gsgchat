@@ -7,7 +7,11 @@
  *
  *  POST   /api/v1/entregas                 uno o varios pedidos (entregas:gestionar)
  *  GET    /api/v1/entregas/:referencia     como va ese pedido hoy (entregas:leer)
- *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas o urgente (entregas:gestionar)
+ *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas, urgente, los datos del envio o el motorizado (entregas:gestionar)
+ *
+ * Cada pedido puede traer los datos del envio que salen en el primer mensaje
+ * al cliente: producto, empresa {codigo, nombre}, tracking, nroPedido,
+ * metodoPago, monto y remitente (ver src/entregas/datos-envio.ts).
  *  DELETE /api/v1/entregas/:referencia     cancelarlo (entregas:gestionar)
  *
  * Cada clave tiene un tope de LIMITE_POR_MINUTO peticiones por minuto a estas
@@ -24,6 +28,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
 import type { EntregasRepo } from '../../entregas/repo.js';
+import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio } from '../../entregas/datos-envio.js';
 
 export interface ApiEntregasGsgDeps {
   entregas: ServicioEntregas;
@@ -37,6 +42,31 @@ export interface ApiEntregasGsgDeps {
 /** Tope por clave y minuto en /api/v1/entregas*. GSG manda en tandas (hasta 500 por llamada): 120 sobra. */
 export const LIMITE_POR_MINUTO = 120;
 
+const textoOpc = z.union([z.string().max(200), z.number()]).nullable().optional();
+
+/**
+ * Los datos del envio que salen en el primer mensaje al cliente. Todos
+ * opcionales; la empresa (tienda que vende) va como {codigo, nombre} o en
+ * campos sueltos. Ver datosEnvioDeCrudo.
+ */
+export const CAMPOS_DATOS_ENVIO = {
+  producto: textoOpc,
+  empresa: z.union([z.object({ codigo: textoOpc, nombre: textoOpc }).passthrough(), z.string().max(200)]).nullable().optional(),
+  empresaCodigo: textoOpc,
+  empresaNombre: textoOpc,
+  tiendaCodigo: textoOpc,
+  tiendaNombre: textoOpc,
+  tracking: textoOpc,
+  nroPedido: textoOpc,
+  metodoPago: textoOpc,
+  monto: textoOpc,
+  remitente: textoOpc,
+  // El motorizado que GSG ya asigno a ese pedido: su numero es el que se le da
+  // al cliente en el cierre y en UBI REGISTRADA (si no, el de soporte).
+  motorizado: z.union([z.object({ nombre: textoOpc, telefono: textoOpc }).passthrough(), z.string().max(200)]).nullable().optional(),
+  telefonoMotorizado: textoOpc,
+};
+
 /** Lo que se puede cambiar de un pedido ya mandado. El telefono no: eso es otro pedido. */
 export const cambioPedidoSchema = z
   .object({
@@ -46,6 +76,8 @@ export const cambioPedidoSchema = z
     notas: z.string().trim().max(500).optional(),
     urgente: z.boolean().optional(),
     telefono: z.unknown().optional(),
+    // Los datos del envio (ver src/entregas/datos-envio.ts): texto, o el monto como numero.
+    ...CAMPOS_DATOS_ENVIO,
   })
   .strict();
 
@@ -63,6 +95,7 @@ export const pedidoSchema = z.object({
   faltaUbicacion: z.boolean().optional(),
   faltaConfirmar: z.boolean().optional(),
   urgente: z.boolean().optional(),
+  ...CAMPOS_DATOS_ENVIO,
 });
 
 type Pedido = z.infer<typeof pedidoSchema>;
@@ -96,12 +129,23 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     direccion: e.direccion,
     distrito: e.distrito,
     notas: e.notas,
+    producto: e.datosEnvio?.producto ?? null,
+    empresa: e.datosEnvio?.empresaCodigo || e.datosEnvio?.empresaNombre ? { codigo: e.datosEnvio?.empresaCodigo ?? null, nombre: e.datosEnvio?.empresaNombre ?? null, texto: empresaEnTexto(e.datosEnvio) } : null,
+    tracking: e.datosEnvio?.tracking ?? null,
+    nroPedido: e.datosEnvio?.nroPedido ?? null,
+    metodoPago: e.datosEnvio?.metodoPago ?? null,
+    monto: e.datosEnvio?.monto ?? null,
+    remitente: e.datosEnvio?.remitente ?? null,
     estado: e.estado,
     situacion: e.situacion,
     prioridad: e.prioridad ?? 'normal',
     ubicacion: { estado: e.ubicacionEstado, lat: e.lat, lng: e.lng, mapa: e.mapsUrl, recibidaEn: e.ubicacionAt ? e.ubicacionAt.toISOString() : null },
     confirmacion: { estado: e.confirmacionEstado, intentos: e.confirmacionIntentos, respuesta: e.confirmacionRespuesta, como: e.confirmacionComo, en: e.confirmacionAt ? e.confirmacionAt.toISOString() : null },
-    motorizado: e.motorizado ? { nombre: e.motorizado.nombre, telefono: e.motorizado.phone, placa: e.motorizado.placa } : null,
+    motorizado: e.motorizado
+      ? { nombre: e.motorizado.nombre, telefono: e.motorizado.phone, placa: e.motorizado.placa }
+      : e.datosEnvio?.telefonoMotorizado || e.datosEnvio?.motorizadoNombre
+        ? { nombre: e.datosEnvio?.motorizadoNombre ?? null, telefono: e.datosEnvio?.telefonoMotorizado ?? null, placa: null }
+        : null,
     minutosMotorizado: e.minutosMotorizado,
     minutosAviso: e.minutosAviso,
     llegaAproxEn: e.llegaAproxAt ? e.llegaAproxAt.toISOString() : null,
@@ -162,17 +206,21 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     }
 
     if (sinPin.length) {
-      const filas = sinPin.map((p) => ({ telefono: p.telefono, nombre: p.nombre ?? undefined, referencia: p.referencia, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: p.faltaUbicacion ?? true, faltaConfirmacion: p.faltaConfirmar ?? true }));
+      const filas = sinPin.map((p) => ({ telefono: p.telefono, nombre: p.nombre ?? undefined, referencia: p.referencia, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: p.faltaUbicacion ?? true, faltaConfirmacion: p.faltaConfirmar ?? true, datosEnvio: datosEnvioDeCrudo(p) }));
       const r = await entregas.crearVarias(filas, quien);
       for (const d of r.descartadas) descartadas.push({ referencia: sinPin[d.linea - 1]?.referencia ?? d.texto, motivo: d.motivo });
       for (const rep of r.repetidas) if (!repetidas.includes(rep)) repetidas.push(rep);
       for (const e of r.creadas) creadas.push({ referencia: e.referencia, id: e.id });
     }
     for (const p of conPin) {
-      const r = await entregas.crearAMano({ referencia: p.referencia, telefono: p.telefono, nombre: p.nombre ?? undefined, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: false, faltaConfirmacion: p.faltaConfirmar ?? true, lat: p.lat!, lng: p.lng! }, quien);
+      const r = await entregas.crearAMano({ referencia: p.referencia, telefono: p.telefono, nombre: p.nombre ?? undefined, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: false, faltaConfirmacion: p.faltaConfirmar ?? true, lat: p.lat!, lng: p.lng!, datosEnvio: datosEnvioDeCrudo(p) }, quien);
       if (r.ok) creadas.push({ referencia: r.entrega.referencia, id: r.entrega.id });
       else if (/ya existe/i.test(r.motivo)) {
         if (!repetidas.includes(p.referencia)) repetidas.push(p.referencia);
+        // Espejo: los datos del envio nuevos de un pedido que ya estaba se guardan.
+        const ya = deps.repo ? await porReferencia(p.referencia) : undefined;
+        const datos = ya ? fusionarDatosEnvio(ya.datosEnvio, datosEnvioDeCrudo(p)) : null;
+        if (ya && datos && deps.repo) await deps.repo.actualizar(ya.id, { datosEnvio: datos });
       } else descartadas.push({ referencia: p.referencia, motivo: r.motivo });
     }
     // Los urgentes van primero hacia el motorizado.
@@ -214,7 +262,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const leido = cambioPedidoSchema.safeParse(request.body ?? {});
     if (!leido.success) {
       const i = leido.error.issues[0];
-      return reply.code(400).send({ error: `El cambio no se entiende: ${i ? `${i.path.join('.') || 'cuerpo'}: ${i.message}` : 'revisa los campos'}. Se puede cambiar nombre, direccion, distrito, notas y urgente.` });
+      return reply.code(400).send({ error: `El cambio no se entiende: ${i ? `${i.path.join('.') || 'cuerpo'}: ${i.message}` : 'revisa los campos'}. Se puede cambiar nombre, direccion, distrito, notas, urgente, los datos del envío (producto, empresa, tracking, nroPedido, metodoPago, monto, remitente) y el motorizado (motorizado, telefonoMotorizado).` });
     }
     const b = leido.data;
     if (b.telefono !== undefined) return reply.code(400).send({ error: 'El teléfono no se cambia en un pedido ya mandado: cancélalo (DELETE) y créalo de nuevo con el número bueno.' });
@@ -236,6 +284,11 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     if (b.urgente !== undefined && (b.urgente ? 'urgente' : 'normal') !== (e.prioridad ?? 'normal')) {
       patch.prioridad = b.urgente ? 'urgente' : 'normal';
       cambios.push(b.urgente ? 'ahora es urgente' : 'ya no es urgente');
+    }
+    const datos = fusionarDatosEnvio(e.datosEnvio, datosEnvioDeCrudo(b));
+    if (datos) {
+      patch.datosEnvio = datos;
+      cambios.push('datos del envío (producto, empresa, código, monto…) actualizados');
     }
     if (!cambios.length) return { ok: true, cambios: [], entrega: entregaParaApi(e), detalle: 'No había nada distinto: el pedido queda como estaba.' };
     await deps.repo.actualizar(e.id, patch as Parameters<EntregasRepo['actualizar']>[1]);

@@ -116,7 +116,9 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     const r = await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 20, faltaUbicacion: 20, motorizados: 5 });
     expect(r.status).toBe(200);
     expect(r.body.creados).toEqual({ faltaConfirmar: 20, faltaUbicacion: 20, motorizados: 5 });
-    expect(r.body.preguntados).toBe(20);
+    // Regla del dueño («Solo lo de GSG»): no se le pregunta SÍ/NO a nadie.
+    expect(r.body.preguntados).toBe(0);
+    expect(r.body.sinPreguntas).toBe(true);
     expect(r.body.tecnico.peticion).toMatchObject({ metodo: 'POST', ruta: '/api/v1/entregas', pedidos: 40 });
     expect(r.body.tecnico.respuesta.status).toBe(201);
     // La clave no sale a la pantalla.
@@ -133,11 +135,12 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     const deprueba = hoy.entregas.filter((e) => e.referencia.startsWith('PRUEBA-'));
     expect(deprueba.length).toBe(40);
     expect(deprueba.every((e) => esNumeroDePrueba(e.phone))).toBe(true);
-    const confirmar = deprueba.filter((e) => e.estado === 'esperando_confirmacion');
+    // Los que ya traen pin no esperan confirmación (regla del dueño): van directo al motorizado.
+    const confirmar = deprueba.filter((e) => e.ubicacionEstado === 'recibida');
     const ubicacion = deprueba.filter((e) => e.estado === 'esperando_ubicacion');
     expect(confirmar.length).toBe(20);
     expect(ubicacion.length).toBe(20);
-    expect(confirmar.every((e) => e.ubicacionEstado === 'recibida' && e.confirmacionEstado !== 'pendiente')).toBe(true);
+    expect(confirmar.every((e) => e.confirmacionEstado === 'no_hace_falta' && e.estado !== 'esperando_confirmacion')).toBe(true);
     expect(deprueba.every((e) => /Cobrar S\//.test(e.notas ?? ''))).toBe(true);
 
     const motos = (await tienda.app.inject({ method: 'GET', url: '/admin/motorizados', headers: { cookie } })).json() as { motorizados?: Array<{ phone: string }> } | Array<{ phone: string }>;
@@ -150,10 +153,11 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     await new Promise((r) => setTimeout(r, 8000));
     expect(wa.sent.filter((m) => esNumeroDePrueba(String(m.to ?? ''))).length).toBe(0);
     const escritos = await cuenta(`select count(distinct c.id) as n from contacts c join messages m on m.contact_id = c.id and m.direction = 'out' where c.phone like '519000%'`);
-    expect(escritos).toBeGreaterThanOrEqual(20);
+    // Sin pregunta SÍ/NO (regla del dueño) solo se les escribe a los que les falta la ubicación.
+    expect(escritos).toBeGreaterThanOrEqual(1);
     const estado = await api('GET', '/admin/desarrollador/prueba');
     expect(estado.body).toMatchObject({ clientes: 40, motorizados: 5 });
-    expect(estado.body.porEstado.esperando_confirmacion).toBe(20);
+    expect(estado.body.porEstado.esperando_confirmacion ?? 0).toBe(0);
   }, 60_000);
 
   it('una segunda tanda no pisa los números de la primera', async () => {

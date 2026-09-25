@@ -62,6 +62,8 @@ export interface EstadoConexionGsg {
   descripcion: string;
   conectadoEn: string | null;
   ultimaPrueba: PruebaGsg | null;
+  /** Algo a revisar antes de producción, en palabras (API real sin https). null = nada. */
+  aviso?: string | null;
 }
 
 export interface ServicioConexionGsg {
@@ -203,6 +205,12 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       descripcion: proxy.descripcion(),
       conectadoEn: guardada.conectadoEn,
       ultimaPrueba,
+      aviso:
+        e.modo === 'real' && !/^https:\/\//i.test(e.url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(e.url)
+          ? 'La dirección de GSG no usa https: los datos de los clientes viajarían sin cifrar. Pídele a GSG su dirección con https.'
+          : e.modo === 'real' && !e.token
+            ? 'Falta el token de GSG: sin él, su API rechazará las llamadas.'
+            : null,
     };
   };
 

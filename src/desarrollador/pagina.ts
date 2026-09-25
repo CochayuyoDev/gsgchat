@@ -9,8 +9,9 @@ import { escapeHtml } from '../web/login-page.js';
 import { seccionGenerar } from './generar.js';
 import { seccionVivo } from './vivo.js';
 import { seccionListo } from './listo.js';
+import { seccionProcesos } from './procesos.js';
 
-const SECCIONES = [seccionGenerar, seccionVivo, seccionListo];
+const SECCIONES = [seccionGenerar, seccionVivo, seccionListo, seccionProcesos];
 
 const CSS = `
   .muted { color: var(--texto-suave); }
@@ -18,7 +19,8 @@ const CSS = `
   .dev-aviso > span:first-child { font-size: 18px; line-height: 1.2; flex: none; }
   /* Las pestañas son los tres pasos del modulo: numeradas, del mismo ancho y
      sin salirse de la pantalla en un movil. */
-  .dev-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--esp-2); margin-bottom: var(--esp-3); }
+  .dev-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--esp-2); margin-bottom: var(--esp-3); }
+  @media (max-width: 760px) { .dev-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .dev-tabs a { min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); color: var(--texto-suave); text-decoration: none; font-weight: 600; line-height: 1.25; min-width: 0; }
   .dev-tabs a:hover { border-color: var(--primario); color: var(--texto); }
   .dev-tabs a[aria-selected="true"] { color: var(--texto); border-color: var(--primario); background: var(--primario-suave); box-shadow: inset 0 -3px 0 var(--primario); }
@@ -49,7 +51,7 @@ ${SECCIONES.map((s) => `<section class="dev-seccion" id="sec-${s.id}" role="tabp
   const script = opts.esAdmin
     ? String.raw`
 (function () {
-  var ids = ['generar', 'vivo', 'listo'];
+  var ids = ['generar', 'vivo', 'listo', 'procesos'];
   function mostrar() {
     var id = (location.hash || '#generar').slice(1);
     if (ids.indexOf(id) < 0) id = 'generar';

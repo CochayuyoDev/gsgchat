@@ -27,7 +27,7 @@ process.on('uncaughtException', (error) => {
   console.error('[sistema] error inesperado (se sigue):', error);
 });
 
-import { loadConfig, type Config } from './config.js';
+import { avisoDireccionPublica, loadConfig, type Config } from './config.js';
 import { bootstrapSecrets } from './settings/crypto.js';
 import { secretsDirectory } from './runtime.js';
 import { redisReachable } from './outbound/queue.js';
@@ -51,6 +51,9 @@ try {
 }
 
 const publicBase = config.PUBLIC_BASE_URL.replace(/\/+$/, '');
+// No frena el arranque (la demo y las pruebas usan localhost), pero se dice
+// fuerte: en produccion los enlaces por WhatsApp y los avisos de GSG la usan.
+const avisoPublico = avisoDireccionPublica(publicBase);
 const conPglite = config.DATABASE_URL.startsWith('pglite://');
 const dirPrincipal = conPglite ? config.DATABASE_URL.slice('pglite://'.length) || '.wa-data' : null;
 const tiendasDir = process.env.TIENDAS_DIR?.trim() || path.join(process.cwd(), '.wa-tiendas');
@@ -116,6 +119,10 @@ ${
     Funciona, pero lo encolado y no enviado se pierde si reinicias.
     Para produccion levanta Redis y reinicia.
 `
+}${avisoPublico ? `\n  ⚠ Dirección pública: ${avisoPublico}\n` : ''}${
+  config.soloNumeros.length
+    ? `\n  ⚠ MODO PRUEBA (SOLO_NUMEROS): solo se escribe a ${config.soloNumeros.join(', ')}.\n    Para atender a los clientes de verdad, deja SOLO_NUMEROS vacío en el .env y reinicia.\n`
+    : ''
 }`);
 
 async function shutdown(signal: string): Promise<void> {

@@ -94,7 +94,9 @@ export type GateCode =
   | 'fatigue'
   | 'contact_daily_cap'
   | 'contact_spacing'
-  | 'rhythm';
+  | 'rhythm'
+  // regla del dueño en «Solo lo de GSG»: un texto del modelo nunca sale a un cliente
+  | 'regla_gsg';
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;

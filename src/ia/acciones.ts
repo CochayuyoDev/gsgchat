@@ -1170,6 +1170,92 @@ export const ACCIONES: Accion[] = [
     },
   }),
 
+  // --------------------------------------------------------------- procesos
+  def({
+    nombre: 'procesos.listar',
+    tipo: 'consulta',
+    descripcion: 'Ver los procesos de la empresa (pedir datos, confirmaciones, avisos al personal, cobranza): sus pasos, cuántas personas tienen en curso y cuántas necesitan a alguien; y las plantillas para crear uno.',
+    parametros: '(sin parámetros)',
+    ejemplo: { orden: '¿qué procesos tenemos?', accion: { accion: 'procesos.listar' } },
+    schema: z.object({}),
+    async ejecutar(_p, ctx) {
+      const r = await ctx.llamar({ method: 'GET', url: '/admin/procesos' });
+      if (!ok(r)) return errorDe(r, 'No se pudieron leer los procesos.');
+      const j = r.json as { procesos: Array<{ id: number; nombre: string; plantilla: string | null; estado: string; resumenPasos: string; vivas: number; necesitan: number; cifras: Record<string, number> }>; plantillas: Array<{ id: string; nombre: string; resumen: string }>; gsgActivo: boolean };
+      return {
+        ok: true,
+        resumen: `${j.procesos.length} proceso(s). Entregas de courier ${j.gsgActivo ? 'activas' : 'sin activar'}.`,
+        datos: { procesos: j.procesos.map((p) => ({ id: p.id, nombre: p.nombre, plantilla: p.plantilla, estado: p.estado, pasos: p.resumenPasos, enCurso: p.vivas, necesitanAAlguien: p.necesitan, completadas: p.cifras.completada ?? 0 })), plantillas: j.plantillas.map((pl) => ({ id: pl.id, nombre: pl.nombre, para: pl.resumen })) },
+        ir: '/procesos',
+      };
+    },
+  }),
+  def({
+    nombre: 'procesos.crear',
+    tipo: 'cambio',
+    soloAdmin: true,
+    descripcion: 'Crear un proceso desde una plantilla: datos (pedir y validar datos), confirmaciones (citas y recordatorios), campo (avisos al personal de campo), cobranza (pagos y trámites) o gsg (activar las entregas de courier).',
+    parametros: 'plantilla (obligatorio: datos | confirmaciones | campo | cobranza | gsg), nombre (opcional)',
+    ejemplo: { orden: 'crea un proceso para confirmar las citas de la clínica', accion: { accion: 'procesos.crear', plantilla: 'confirmaciones', nombre: 'Citas de la clínica' } },
+    schema: z.object({ plantilla: z.enum(['datos', 'confirmaciones', 'campo', 'cobranza', 'gsg']), nombre: z.string().trim().max(120).optional() }),
+    async ejecutar(p, ctx) {
+      const r = await ctx.llamar({ method: 'POST', url: '/admin/procesos/desde-plantilla', body: { plantilla: p.plantilla, nombre: p.nombre } });
+      if (!ok(r)) return errorDe(r, 'No se pudo crear el proceso.');
+      const j = r.json as { proceso: { id: number; nombre: string }; ir: string };
+      return { ok: true, resumen: p.plantilla === 'gsg' ? 'Entregas de courier activadas: Hoy, Números del día, Motorizados y Mapa ya están en el menú.' : `Proceso «${j.proceso.nombre}» creado. Revisa sus mensajes en el editor y carga la lista de personas.`, datos: { id: j.proceso.id }, ir: j.ir };
+    },
+  }),
+  def({
+    nombre: 'procesos.cargarPersonas',
+    tipo: 'cambio',
+    peligrosa: true,
+    descripcion: 'Cargar personas en un proceso para que el sistema empiece a escribirles (pedirles un dato, confirmar su cita, avisarles una tarea o recordarles un pago).',
+    parametros: 'proceso (nombre o número del proceso), personas (lista de { telefono, nombre, y columnas como fecha, hora, monto, tarea, direccion }), nombre (de la corrida, opcional)',
+    ejemplo: { orden: 'carga a Ana 987654321 y a Luis 912345678 en confirmar citas, las dos mañana a las 10', accion: { accion: 'procesos.cargarPersonas', proceso: 'Confirmar citas', personas: [{ telefono: '987654321', nombre: 'Ana', fecha: 'mañana', hora: '10:00' }, { telefono: '912345678', nombre: 'Luis', fecha: 'mañana', hora: '10:00' }] } },
+    schema: z.object({ proceso: z.union([z.string().trim().min(1).max(120), z.number().int().positive()]), personas: z.array(z.record(z.string(), z.union([z.string(), z.number()]))).min(1).max(500), nombre: z.string().trim().max(120).optional() }),
+    async ejecutar(p, ctx) {
+      const lista = await ctx.llamar({ method: 'GET', url: '/admin/procesos' });
+      if (!ok(lista)) return errorDe(lista, 'No se pudieron leer los procesos.');
+      const procesos = (lista.json as { procesos: Array<{ id: number; nombre: string; plantilla: string | null }> }).procesos.filter((x) => x.plantilla !== 'gsg');
+      const q = String(p.proceso).trim().toLowerCase();
+      const proc = procesos.find((x) => String(x.id) === q) ?? procesos.find((x) => x.nombre.toLowerCase() === q) ?? procesos.find((x) => x.nombre.toLowerCase().includes(q));
+      if (!proc) return { ok: false, resumen: `No encuentro ningún proceso «${p.proceso}». Los que hay: ${procesos.map((x) => x.nombre).join(', ') || 'ninguno (créalo desde una plantilla)'}.`, ir: '/procesos' };
+      const filas = p.personas.map((f) => Object.fromEntries(Object.entries(f).map(([k, v]) => [k, String(v)])));
+      const r = await ctx.llamar({ method: 'POST', url: `/admin/procesos/${proc.id}/personas`, body: { personas: filas, nombre: p.nombre } });
+      if (!ok(r)) return errorDe(r, 'No se pudieron cargar las personas.');
+      const j = r.json as { aviso: string; ir: string; listas: number };
+      return { ok: true, resumen: j.aviso, datos: { listas: j.listas }, ir: j.ir };
+    },
+  }),
+  def({
+    nombre: 'procesos.estado',
+    tipo: 'consulta',
+    descripcion: 'Cómo van los procesos: cuántas personas en curso, esperando respuesta, completadas y quién necesita a alguien (y por qué). Con un proceso, el detalle de sus corridas.',
+    parametros: 'proceso (opcional: nombre o número)',
+    ejemplo: { orden: '¿cómo va la confirmación de citas?', accion: { accion: 'procesos.estado', proceso: 'citas' } },
+    schema: z.object({ proceso: z.union([z.string().trim().min(1).max(120), z.number().int().positive()]).optional() }),
+    async ejecutar(p, ctx) {
+      if (p.proceso === undefined) {
+        const r = await ctx.llamar({ method: 'GET', url: '/admin/procesos/resumen' });
+        if (!ok(r)) return errorDe(r, 'No se pudo leer cómo van los procesos.');
+        const j = r.json as { procesosActivos: number; vivas: number; esperando: number; necesitan: number; completadas: number };
+        const personas = await ctx.llamar({ method: 'GET', url: '/admin/procesos/personas?estado=persona&limit=20' });
+        const necesitan = ok(personas) ? ((personas.json as { personas: Array<{ nombre: string | null; telefono: string; proceso: string; motivo: string | null }> }).personas ?? []).map((x) => ({ quien: x.nombre ?? x.telefono, proceso: x.proceso, porque: x.motivo })) : [];
+        return { ok: true, resumen: `${j.procesosActivos} proceso(s) activos; ${j.vivas} persona(s) en curso (${j.esperando} esperando respuesta); ${j.necesitan} necesitan a alguien; ${j.completadas} completadas hoy.`, datos: { necesitanAAlguien: necesitan }, ir: '/personas' };
+      }
+      const lista = await ctx.llamar({ method: 'GET', url: '/admin/procesos' });
+      if (!ok(lista)) return errorDe(lista, 'No se pudieron leer los procesos.');
+      const procesos = (lista.json as { procesos: Array<{ id: number; nombre: string }> }).procesos;
+      const q = String(p.proceso).trim().toLowerCase();
+      const proc = procesos.find((x) => String(x.id) === q) ?? procesos.find((x) => x.nombre.toLowerCase() === q) ?? procesos.find((x) => x.nombre.toLowerCase().includes(q));
+      if (!proc) return { ok: false, resumen: `No encuentro ningún proceso «${p.proceso}».`, ir: '/procesos' };
+      const r = await ctx.llamar({ method: 'GET', url: `/admin/procesos/corridas?procesoId=${proc.id}` });
+      if (!ok(r)) return errorDe(r, 'No se pudieron leer sus corridas.');
+      const corridas = (r.json as { corridas: Array<{ id: number; nombre: string; estado: string; cifras: Record<string, number>; total: number }> }).corridas;
+      return { ok: true, resumen: `«${proc.nombre}»: ${corridas.length} corrida(s).`, datos: corridas.map((c) => ({ corrida: c.nombre, estado: c.estado, personas: c.total, completadas: c.cifras.completada ?? 0, esperando: c.cifras.esperando ?? 0, necesitanAAlguien: c.cifras.persona ?? 0 })), ir: corridas[0] ? `/procesos/corrida?id=${corridas[0].id}` : '/procesos' };
+    },
+  }),
+
   // --------------------------------------------------------------- sistema
   def({
     nombre: 'sistema.resumen',
@@ -1246,9 +1332,15 @@ async function cambiarEstadoEnLista(ctx: ContextoAccion, quien: string, que: 'pa
 
 export const ACCIONES_POR_NOMBRE = new Map(ACCIONES.map((a) => [a.nombre, a]));
 
+/**
+ * Lo comercial (campañas de venta, catalogo de productos): en modo "Solo lo
+ * de GSG" la IA operadora ni lo ofrece ni lo ejecuta. El codigo sigue ahi.
+ */
+export const ACCIONES_DE_VENTAS: ReadonlySet<string> = new Set(['campanas.ver', 'campana.estado', 'catalogo.buscar']);
+
 /** El catalogo tal y como se le cuenta al modelo. */
-export function catalogoParaElModelo(opts: { esAdmin: boolean; conCatalogo: boolean }): string {
-  return ACCIONES.filter((a) => (opts.esAdmin || !a.soloAdmin) && (opts.conCatalogo || a.nombre !== 'catalogo.buscar'))
+export function catalogoParaElModelo(opts: { esAdmin: boolean; conCatalogo: boolean; sinVentas?: boolean }): string {
+  return ACCIONES.filter((a) => (opts.esAdmin || !a.soloAdmin) && (opts.conCatalogo || a.nombre !== 'catalogo.buscar') && !(opts.sinVentas && ACCIONES_DE_VENTAS.has(a.nombre)))
     .map((a) => `- ${a.nombre} [${a.tipo}${a.peligrosa ? ', pide confirmación' : ''}]: ${a.descripcion} Parámetros: ${a.parametros}. Ej.: «${a.ejemplo.orden}» → ${JSON.stringify(a.ejemplo.accion)}`)
     .join('\n');
 }

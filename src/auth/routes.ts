@@ -110,7 +110,7 @@ export function secretoDeSesion(config: Config): string {
   return createHmac('sha256', config.TRACKING_SECRET).update('sesion-de-usuario').digest('hex');
 }
 
-const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/motorizados', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/mapa', '/pagar', '/fiabilidad', '/docs/contrato-gsg.md', '/desarrollador'];
+const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/numeros', '/motorizados', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/mapa', '/pagar', '/fiabilidad', '/docs/contrato-gsg.md', '/desarrollador', '/procesos', '/procesos/editor', '/procesos/corrida', '/personas', '/respuestas'];
 
 /** Lo que solo toca una persona con rol admin: nunca una clave de API. */
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];

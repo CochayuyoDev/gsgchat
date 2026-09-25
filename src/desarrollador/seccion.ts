@@ -10,7 +10,7 @@ import type { PuertoGsg } from '../rutas/gsg.js';
 
 export interface SeccionDesarrollador {
   /** El ancla de la pestaña: /desarrollador#<id>. */
-  id: 'generar' | 'vivo' | 'listo';
+  id: 'generar' | 'vivo' | 'listo' | 'procesos';
   titulo: string;
   /** Una linea bajo el titulo de la pestaña. */
   resumen: string;

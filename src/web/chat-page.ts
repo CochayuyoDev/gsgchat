@@ -473,6 +473,7 @@ function pintarSubtitulo(data) {
       : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
       : '<span class="pill warn">fuera de las 24 h</span>') +
     (current.botPausadoAt ? ' · <span class="pill warn">bot pausado</span>' : '') +
+    (current.iaCerradaAt ? ' · <span class="pill warn" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
     (data.reparto ? ' · <a class="link" href="/hoy" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
     '<span id="t-anteriores"></span>';
 
@@ -985,6 +986,20 @@ async function alternarBot() {
   } catch (e) { toast('No se pudo cambiar: ' + (e.message || e)); }
 }
 
+/**
+ * El agente operativo cerró este chat (mandó su cierre o registró la
+ * ubicación): una persona lo atiende. Esto lo devuelve al asistente.
+ */
+async function reabrirAsistente() {
+  if (!current) return;
+  try {
+    await api('/admin/chat/' + current.id + '/asistente', { method: 'POST', body: { cerrado: false } });
+    current.iaCerradaAt = null;
+    toast('El asistente vuelve a atender este chat.');
+    openChat(current.id, true);
+  } catch (e) { toast('No se pudo cambiar: ' + (e.message || e)); }
+}
+
 /* ------------------------------------------------------ menu de la cabecera */
 
 document.getElementById('menu-chat').onclick = function () {
@@ -997,6 +1012,7 @@ document.getElementById('menu-chat').onclick = function () {
     ops.push({ icono: '📞', texto: 'Llamar', accion: function () { location.href = 'tel:+' + current.phone; } });
   }
   if (!esGrupo) ops.push({ icono: '🤖', texto: current.botPausadoAt ? 'Que el bot vuelva a contestar' : 'Callar al bot en este chat', accion: alternarBot });
+  if (!esGrupo && current.iaCerradaAt) ops.push({ icono: '↩', texto: 'Que el asistente vuelva a atender este chat', accion: reabrirAsistente });
   ops.push({ icono: '⭐', texto: 'Mensajes destacados de este chat', accion: function () { verDestacados(true); } });
   ops.push({ hr: true });
   ops.push({ icono: '📌', texto: c.fijadoAt ? 'Quitar de arriba' : 'Fijar arriba', accion: function () { ajustarLista(current.id, { fijado: !c.fijadoAt }); } });

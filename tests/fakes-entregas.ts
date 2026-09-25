@@ -1,6 +1,7 @@
 /** Doble en memoria de las entregas del dia y los motorizados. */
 
 import {
+  datosEnvioLimpios,
   ESTADOS_ENTREGA_VIVOS,
   type Entrega,
   type EntregasRepo,
@@ -84,6 +85,7 @@ export function createFakeEntregas(): FakeEntregas {
         direccion: input.direccion ?? null,
         distrito: input.distrito ?? null,
         notas: input.notas ?? null,
+        datosEnvio: datosEnvioLimpios(input.datosEnvio),
         ubicacionEstado: input.ubicacionEstado,
         loteId: null,
         lat: input.lat ?? null,
@@ -194,14 +196,14 @@ export function createFakeEntregas(): FakeEntregas {
     },
     async tocaPedirConfirmacion(ahora, limite) {
       return entregas
-        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_confirmacion') && (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.ubicacionEstado !== 'pendiente' && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
+        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_confirmacion') && (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.ubicacionEstado !== 'pendiente' && !e.mensajesPausadosAt && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
         .sort((a, b) => (a.confirmacionProximoAt ?? a.createdAt).getTime() - (b.confirmacionProximoAt ?? b.createdAt).getTime() || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
     },
     async tocaProponerUbicacion(ahora, limite) {
       return entregas
-        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_ubicacion') && e.ubicacionEstado === 'pendiente' && e.ubicacionPropuestaLat != null && !e.ubicacionPropuestaAt && !e.loteId && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
+        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_ubicacion') && e.ubicacionEstado === 'pendiente' && e.ubicacionPropuestaLat != null && !e.ubicacionPropuestaAt && !e.loteId && !e.mensajesPausadosAt && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
         .sort((a, b) => (a.prioridad === 'urgente' ? 0 : 1) - (b.prioridad === 'urgente' ? 0 : 1) || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
@@ -244,6 +246,9 @@ export function createFakeEntregas(): FakeEntregas {
         .sort((a, b) => a.dia.localeCompare(b.dia) || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
+    },
+    async pausadoPorTelefono(phone) {
+      return entregas.some((e) => e.phone === phone && Boolean(e.mensajesPausadosAt) && ESTADOS_ENTREGA_VIVOS.includes(e.estado));
     },
     async registrarEvento(entregaId, tipo, detalle, payload, at) {
       eventos.push({ id: seqEv++, entregaId, tipo, detalle: detalle ?? null, payload: payload ?? null, createdAt: at ?? new Date() });

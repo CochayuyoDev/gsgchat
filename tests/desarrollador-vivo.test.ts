@@ -159,15 +159,32 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(chat.body.trazas.length).toBeGreaterThan(0);
   });
 
-  it('confirma con un «sí»: el lector lo entiende, el pedido avanza y la confirmación va a la cola de GSG', async () => {
-    await esperar(async () => (await entrega('PRUEBA-00002'))!.confirmacion_estado === 'pedida', 60_000, 'que se le pida confirmar a PRUEBA-00002');
-    const r = await escribir('51900000002', { tipo: 'texto', texto: 'Sí, lo recibo hoy' });
+  it('regla del dueño: tras UBI REGISTRADA, «¿a qué hora llega?» recibe SILENCIO y la traza lo dice', async () => {
+    const r = await escribir('51900000001', { tipo: 'texto', texto: '¿a qué hora llega?' });
     expect(r.status).toBe(200);
     const t = pasos(r.body.traza);
-    expect(t).toContain('El lector de reglas entiende que SÍ confirma');
-    expect(t).toMatch(/confirmó/);
-    expect(t).toMatch(/A GSG: la confirmación de PRUEBA-00002/);
-    expect((await entrega('PRUEBA-00002'))!.confirmacion_estado).toBe('confirmada');
+    expect(t).toContain('Regla del dueño: ya recibió UBI REGISTRADA o el cierre → silencio');
+    expect(t).toContain('Silencio: al cliente no se le escribió nada');
+    expect(t).not.toMatch(/Contestó/);
+  });
+
+  it('regla del dueño: sin pregunta SÍ/NO; el que ya tiene pin va directo al motorizado', async () => {
+    await esperar(async () => (await entrega('PRUEBA-00002'))!.confirmacion_estado === 'no_hace_falta', 60_000, 'que PRUEBA-00002 no espere confirmación');
+    const chat = await api('GET', '/admin/desarrollador/vivo/chat/51900000002');
+    expect(chat.body.mensajes.filter((m: { dir: string; texto: string }) => m.dir === 'out' && /SÍ o NO|SÍ para confirmar/.test(m.texto))).toEqual([]);
+  });
+
+  it('regla del dueño: «¿por qué?» recibe la explicación fija; «cuánto cuesta el envío» el cierre con el número, y luego silencio', async () => {
+    const porQue = await escribir('51900000011', { tipo: 'texto', texto: '¿Por qué me piden mi ubicación?' });
+    const tp = pasos(porQue.body.traza);
+    expect(tp).toContain('Regla del dueño: pregunta por qué se le pide la ubicación');
+    expect(tp).toMatch(/Contestó \(texto fijo: la IA solo clasificó\): «Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado/);
+    const otra = await escribir('51900000012', { tipo: 'texto', texto: 'cuánto cuesta el envío' });
+    const to = pasos(otra.body.traza);
+    expect(to).toContain('Regla del dueño: es otra cosa → el cierre UNA vez con el número');
+    expect(to).toMatch(/Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
+    const luego = await escribir('51900000012', { tipo: 'texto', texto: 'hola? me responden?' });
+    expect(pasos(luego.body.traza)).toContain('Silencio: al cliente no se le escribió nada');
   });
 
   it('un intento de manipulación no cambia nada del pedido y la traza lo señala', async () => {
@@ -184,10 +201,13 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     await esperar(async () => (await api('GET', '/admin/desarrollador/vivo/chat/51900100001')).body.mensajes.some((m: { dir: string }) => m.dir === 'out'), 90_000, 'que el motorizado reciba el pedido');
     const tiempo = await escribir('51900100001', { tipo: 'texto', texto: '40' });
     expect(pasos(tiempo.body.traza)).toContain('40 minutos');
-    await esperar(async () => (await entrega('PRUEBA-00002'))!.estado === 'avisada', 30_000, 'el aviso al cliente');
+    // Sin pregunta SÍ/NO (regla del dueño), los que ya tienen pin van al motorizado: el primero que le llegó.
+    const avisada = async () => (await db().query<{ referencia: string }>("select e.referencia from entregas e join motorizados m on m.id = e.motorizado_id where m.phone = '51900100001' and e.estado = 'avisada' order by e.id limit 1")).rows[0]?.referencia;
+    await esperar(async () => Boolean(await avisada()), 30_000, 'el aviso (por dentro) del pedido');
+    const ref = (await avisada())!;
     const fin = await escribir('51900100001', { tipo: 'texto', texto: 'Entregado' });
     expect(pasos(fin.body.traza)).toContain('ya ENTREGÓ');
-    expect((await entrega('PRUEBA-00002'))!.estado).toBe('entregada');
+    expect((await entrega(ref))!.estado).toBe('entregada');
   }, 150_000);
 
   it('adelantar el tiempo hace que se le insista a los que callan, sin mover lo real', async () => {

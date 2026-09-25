@@ -98,6 +98,63 @@ export interface PatchMotorizado {
   enlaceVenceAt?: Date | null;
 }
 
+/**
+ * Lo que GSG cuenta del envio para el primer mensaje al cliente
+ * (textos.ts → solicitudUbicacion). Todo opcional: lo que falta no sale.
+ */
+export interface DatosEnvio {
+  /** "Zapatillas talla 40". */
+  producto?: string | null;
+  /** La tienda que vende: codigo ("516") y nombre ("Zapatería Lima"). */
+  empresaCodigo?: string | null;
+  empresaNombre?: string | null;
+  /** El codigo de seguimiento de GSG ("GSG-A-102345"). */
+  tracking?: string | null;
+  /** El numero de pedido de la tienda ("#1042"). */
+  nroPedido?: string | null;
+  /** "YAPE", "Efectivo", "Pagado"... */
+  metodoPago?: string | null;
+  /** Lo que el motorizado cobra, tal como lo manda GSG ("85.00"). */
+  monto?: string | null;
+  /** Quien firma el mensaje ("Juan Quispe"). */
+  remitente?: string | null;
+  /**
+   * El motorizado que GSG ya asigno a ese pedido (si lo manda por la API):
+   * su nombre y su telefono. El telefono es el que se le da al cliente en el
+   * cierre y en UBI REGISTRADA si aqui no hay otro motorizado asignado.
+   */
+  motorizadoNombre?: string | null;
+  telefonoMotorizado?: string | null;
+}
+
+const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['producto', 'empresaCodigo', 'empresaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'motorizadoNombre', 'telefonoMotorizado'];
+
+/** Solo los campos con texto (recortados a 200); null si no queda ninguno. */
+export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio | null {
+  if (!d || typeof d !== 'object') return null;
+  const limpio: DatosEnvio = {};
+  for (const clave of CLAVES_DATOS_ENVIO) {
+    const v = (d as Record<string, unknown>)[clave];
+    if (v === null || v === undefined) continue;
+    const texto = String(v).trim().slice(0, 200);
+    if (texto) limpio[clave] = texto;
+  }
+  return Object.keys(limpio).length ? limpio : null;
+}
+
+/** La columna jsonb llega como objeto (pg) o como texto (algunas versiones de PGlite). */
+function datosEnvioDeValor(v: unknown): DatosEnvio | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') {
+    try {
+      return datosEnvioLimpios(JSON.parse(v) as DatosEnvio);
+    } catch {
+      return null;
+    }
+  }
+  return datosEnvioLimpios(v as DatosEnvio);
+}
+
 export interface Entrega {
   id: number;
   /** AAAA-MM-DD del reparto. */
@@ -109,6 +166,8 @@ export interface Entrega {
   direccion: string | null;
   distrito: string | null;
   notas: string | null;
+  /** Lo que GSG cuenta del envio (producto, empresa, codigo, monto...). Ver DatosEnvio. */
+  datosEnvio: DatosEnvio | null;
 
   ubicacionEstado: EstadoUbicacion;
   /** El lote del reparto que le pide la ubicacion, si hay uno. */
@@ -170,6 +229,11 @@ export interface Entrega {
   incidenciaDetalle: string | null;
   requiereHumano: boolean;
   terminadaGsgAt: Date | null;
+  /** «Ya contactado» puesto a mano desde Números del día, y quién lo puso. */
+  contactadoAt?: Date | null;
+  contactadoPor?: string | null;
+  /** Mensajes automáticos en pausa (Números del día): no se le pide ubicación ni confirmación. */
+  mensajesPausadosAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -183,6 +247,7 @@ export interface NuevaEntrega {
   direccion?: string | null;
   distrito?: string | null;
   notas?: string | null;
+  datosEnvio?: DatosEnvio | null;
   ubicacionEstado: EstadoUbicacion;
   lat?: number | null;
   lng?: number | null;
@@ -270,6 +335,8 @@ export interface EntregasRepo {
   vivasDeMotorizado(motorizadoId: number): Promise<Entrega[]>;
   /** Las vivas de dias anteriores a `diaHoy` (AAAA-MM-DD): lo que el cierre del dia tiene que resolver. */
   vivasDeDiasAnteriores(diaHoy: string, limite: number): Promise<Entrega[]>;
+  /** Si ese telefono tiene alguna entrega viva con los mensajes automaticos en pausa (Numeros del dia): el reparto no le escribe. */
+  pausadoPorTelefono(phone: string): Promise<boolean>;
 
   registrarEvento(entregaId: number, tipo: TipoEventoEntrega, detalle?: string | null, payload?: Record<string, unknown> | null, at?: Date): Promise<void>;
   eventos(entregaId: number, limite?: number): Promise<EventoEntrega[]>;
@@ -307,6 +374,7 @@ interface EntregaRow {
   direccion: string | null;
   distrito: string | null;
   notas: string | null;
+  datos_envio?: unknown;
   ubicacion_estado: EstadoUbicacion;
   lote_id: string | null;
   lat: number | string | null;
@@ -353,6 +421,9 @@ interface EntregaRow {
   incidencia_detalle: string | null;
   requiere_humano: boolean;
   terminada_gsg_at: Date | null;
+  contactado_at?: Date | null;
+  contactado_por?: string | null;
+  mensajes_pausados_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -407,6 +478,7 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   direccion: r.direccion,
   distrito: r.distrito,
   notas: r.notas,
+  datosEnvio: datosEnvioDeValor(r.datos_envio),
   ubicacionEstado: r.ubicacion_estado,
   loteId: r.lote_id,
   lat: numOpc(r.lat),
@@ -453,6 +525,9 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   incidenciaDetalle: r.incidencia_detalle,
   requiereHumano: Boolean(r.requiere_humano),
   terminadaGsgAt: r.terminada_gsg_at,
+  contactadoAt: r.contactado_at ?? null,
+  contactadoPor: r.contactado_por ?? null,
+  mensajesPausadosAt: r.mensajes_pausados_at ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -474,6 +549,7 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['direccion', 'direccion'],
   ['distrito', 'distrito'],
   ['notas', 'notas'],
+  ['datosEnvio', 'datos_envio'],
   ['ubicacionEstado', 'ubicacion_estado'],
   ['loteId', 'lote_id'],
   ['lat', 'lat'],
@@ -520,6 +596,9 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['incidenciaDetalle', 'incidencia_detalle'],
   ['requiereHumano', 'requiere_humano'],
   ['terminadaGsgAt', 'terminada_gsg_at'],
+  ['contactadoAt', 'contactado_at'],
+  ['contactadoPor', 'contactado_por'],
+  ['mensajesPausadosAt', 'mensajes_pausados_at'],
 ];
 
 const COLUMNAS_MOTORIZADO: Array<[keyof PatchMotorizado, string]> = [
@@ -597,8 +676,8 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async crearEntrega(input) {
       const { rows } = await pool.query<EntregaRow>(
         `insert into entregas
-           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
          on conflict (dia, referencia) do nothing
          returning *`,
         [
@@ -616,6 +695,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           input.confirmacionEstado,
           input.estado,
           input.prioridad ?? 'normal',
+          datosEnvioLimpios(input.datosEnvio) ? JSON.stringify(datosEnvioLimpios(input.datosEnvio)) : null,
         ],
       );
       if (rows[0]) return { entrega: entregaDeFila(rows[0]), nueva: true };
@@ -696,8 +776,9 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       for (const [clave, columna] of COLUMNAS_ENTREGA) {
         if (patch[clave] === undefined) continue;
         const v = patch[clave];
-        valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : v);
-        sets.push(`${columna} = $${valores.length}${clave === 'motorizadosDescartados' ? '::jsonb' : ''}`);
+        const esJson = clave === 'motorizadosDescartados' || clave === 'datosEnvio';
+        valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : clave === 'datosEnvio' ? (v ? JSON.stringify(v) : null) : v);
+        sets.push(`${columna} = $${valores.length}${esJson ? '::jsonb' : ''}`);
       }
       if (!sets.length) return repo.entrega(id);
       valores.push(id);
@@ -726,6 +807,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           where estado in ('pendiente', 'esperando_confirmacion')
             and confirmacion_estado in ('pendiente', 'pedida')
             and ubicacion_estado <> 'pendiente'
+            and mensajes_pausados_at is null
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by coalesce(confirmacion_proximo_at, created_at) asc, id asc
           limit $2`,
@@ -738,6 +820,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         `select * from entregas
           where estado in ('pendiente', 'esperando_ubicacion')
             and ubicacion_estado = 'pendiente' and ubicacion_propuesta_lat is not null and ubicacion_propuesta_at is null and lote_id is null
+            and mensajes_pausados_at is null
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by prioridad desc, id asc
           limit $2`,
@@ -803,6 +886,14 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         [diaHoy, ESTADOS_ENTREGA_VIVOS, limite],
       );
       return rows.map(entregaDeFila);
+    },
+    async pausadoPorTelefono(phone) {
+      const { rows } = await pool.query<{ n: number | string }>(
+        `select count(*)::int as n from entregas
+          where phone = $1 and mensajes_pausados_at is not null and estado = any($2::text[])`,
+        [phone, ESTADOS_ENTREGA_VIVOS],
+      );
+      return Number(rows[0]?.n ?? 0) > 0;
     },
 
     async registrarEvento(entregaId, tipo, detalle, payload, at) {

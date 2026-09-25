@@ -118,20 +118,20 @@ const ICO = {
 
 /** Lo que hace el sistema: una tarjeta por modulo grande. */
 const QUE_HACE: Array<{ ico: string; titulo: string; texto: string }> = [
-  { ico: ICO.pin, titulo: 'Ubicaciones para el reparto', texto: 'Pega la lista del día y el sistema le pide la ubicación a cada cliente, insiste con criterio y aparta lo que necesita una persona. Las incidencias, con nombre.' },
-  { ico: ICO.chat, titulo: 'Un chat para todo el equipo', texto: 'Las conversaciones como en WhatsApp, con el asistente contestando lo rutinario y tú entrando cuando hace falta. Nada se pierde y todo se respalda.' },
-  { ico: ICO.megafono, titulo: 'Campañas por goteo', texto: 'Un canario primero, luego el resto a cuentagotas, con variantes de texto y pausas humanas. Si algo va mal, se frena solo.' },
+  { ico: ICO.pin, titulo: 'Pedir y validar datos', texto: 'Ubicación, DNI o RUC, dirección, fotos y documentos. Cada dato se valida al llegar y lo que no vale se vuelve a pedir explicando por qué.' },
+  { ico: ICO.rayo, titulo: 'Confirmaciones y recordatorios', texto: 'Citas, visitas, turnos o asistencia: SÍ o NO con botones, reprogramar en el mismo chat y el recordatorio antes de la hora.' },
+  { ico: ICO.megafono, titulo: 'Avisos al personal de campo', texto: 'Cada técnico recibe su tarea y responde «llegué», «terminé» o «no pude». El avance de todos se ve en vivo.' },
+  { ico: ICO.llave, titulo: 'Cobranza y trámites', texto: 'Recordatorios de pago o vencimiento, la captura del comprobante recibida en el chat y derivada a una persona para validarla. Sin vender nada.' },
+  { ico: ICO.chat, titulo: 'Una persona cuando hace falta', texto: 'Lo que el sistema no puede resolver solo -una consulta que no es del trámite, alguien que no responde- pasa a tu equipo con todo lo que se respondió.' },
   { ico: ICO.salud, titulo: 'Salud del número', texto: 'Ritmo humano, avisos de riesgo y freno automático antes de que Meta o WhatsApp bloqueen el número. Un semáforo que se explica.' },
-  { ico: ICO.rayo, titulo: 'Automatización con control', texto: 'Reglas, secuencias y plantillas propias. Tú decides cuándo sale cada mensaje, de qué tipo y con qué plantilla.' },
-  { ico: ICO.llave, titulo: 'Cuentas e integraciones', texto: 'Cada persona con su usuario y su rol. Los programas, como el sistema de GSG, con una clave de API que se revoca en un clic.' },
 ];
 
-/** El recorrido del reparto, de la lista de la mañana a las ubicaciones. */
+/** El recorrido de un proceso, de la lista a las respuestas. */
 const PASOS: Array<{ titulo: string; texto: string }> = [
-  { titulo: 'Cargas la lista', texto: 'Nombre, teléfono, pedido y dirección. Los números mal escritos o repetidos se apartan antes de mandar nada.' },
-  { titulo: 'El sistema pide la ubicación', texto: 'Un mensaje a cada cliente, con pausas entre uno y otro y solo en horario. Si no contesta, insiste con otro texto.' },
-  { titulo: 'Lo que llega, se ordena', texto: 'Ubicación: resuelto. Otra cosa: supervisión. Sin respuesta tras varios intentos: al motorizado, que lo llama.' },
-  { titulo: 'Todo queda reportado', texto: 'Cada incidencia con su nombre, lista para el sistema de GSG. Y el avance, en vivo, en el panel.' },
+  { titulo: 'Eliges una plantilla', texto: 'Pedir datos, confirmar citas, avisar tareas o cobrar: se crea en un clic y ajustas sus mensajes paso a paso, sin programar.' },
+  { titulo: 'Cargas la lista', texto: 'Un Excel, un CSV o una tabla pegada; o la manda tu sistema por la API. Los números mal escritos o repetidos se apartan antes de escribir.' },
+  { titulo: 'El sistema escribe a cada uno', texto: 'Un mensaje a cada persona, con pausas entre uno y otro y solo en horario. Si no contesta, insiste con criterio.' },
+  { titulo: 'Las respuestas quedan ordenadas', texto: 'Cada respuesta validada, en una tabla lista para Excel; y lo que necesita a una persona, marcado para tu equipo.' },
 ];
 
 /** Las guardas del numero: lo que separa a este sistema de un envio masivo. */
@@ -171,7 +171,7 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
 <main class="ancho">
   <section class="hero">
     <div>
-      <span class="etiqueta">${NOMBRE_SISTEMA} · ${LEMA_SISTEMA}</span>
+      <span class="etiqueta">${NOMBRE_SISTEMA} · Procesos por WhatsApp para empresas</span>
       <h1>${PROMESA.titular} <span>${PROMESA.remate}</span>.</h1>
       <p class="bajada">${PROMESA.bajada} Con las guardas para que el número siga vivo mañana.</p>
       <div class="acciones">${llamada}<small>Acceso solo para el equipo · usuario y contraseña</small></div>
@@ -183,11 +183,11 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
         <div class="cifra"><span>Fallidos hoy</span><b class="bien">0</b></div>
       </div>
       <div class="barras">${BARRAS.map((alto) => `<i style="height:${alto}%"></i>`).join('')}</div>
-      <div class="marcas"><span class="marca bien">Número en verde</span><span class="marca">Reparto: 42 de 60</span><span class="marca">3 esperan respuesta</span></div>
+      <div class="marcas"><span class="marca bien">Número en verde</span><span class="marca">Procesos: 42 de 60 respondieron</span><span class="marca">3 esperan respuesta</span></div>
     </div>
   </section>
 
-  <p class="compatible"><span>Funciona con</span> <b>WhatsApp Business (API oficial de Meta)</b> · <b>WAHA</b> · <b>WhatsApp Web (QR)</b> · <b>GSG</b></p>
+  <p class="compatible"><span>Funciona con</span> <b>WhatsApp Business (API oficial de Meta)</b> · <b>WAHA</b> · <b>WhatsApp Web (QR)</b> · <b>Excel y CSV</b> · <b>API para tus sistemas</b></p>
 
   <section class="bloque" id="que-hace">
     <div class="titulo"><h2>Todo lo del día, en un solo sitio</h2><p>Cada módulo hace una cosa y la hace bien. Y todos comparten el mismo número, el mismo ritmo y las mismas guardas.</p></div>
@@ -197,7 +197,7 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
   </section>
 
   <section class="bloque" id="como-funciona">
-    <div class="titulo"><h2>Cómo funciona el reparto</h2><p>Del Excel de la mañana a las ubicaciones en el mapa, sin que nadie escriba un mensaje a mano.</p></div>
+    <div class="titulo"><h2>Cómo funciona un proceso</h2><p>De tu lista a las respuestas ordenadas, sin que nadie escriba un mensaje a mano.</p></div>
     <div class="rejilla pasos">
       ${PASOS.map((p) => `<div class="tarjeta"><b>${p.titulo}</b><p>${p.texto}</p></div>`).join('\n      ')}
     </div>
@@ -207,7 +207,7 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
     <div class="franja">
       <div>
         <h2>Las guardas para que el número siga vivo mañana</h2>
-        <p>Un número baneado es un día sin reparto. Por eso el sistema no manda todo lo que puede, sino todo lo que WhatsApp tolera.</p>
+        <p>Un número baneado es un día sin trabajar. Por eso el sistema no manda todo lo que puede, sino todo lo que WhatsApp tolera.</p>
       </div>
       <ul>${GUARDAS.map((g) => `<li>${g}</li>`).join('')}</ul>
     </div>
@@ -215,7 +215,7 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
 
   <section class="cierre">
     <h2>Entra y mira cómo va el día</h2>
-    <p>Chats, reparto, campañas y la salud del número, en una sola pantalla.</p>
+    <p>Procesos, personas, respuestas, chats y la salud del número, en una sola pantalla.</p>
     ${llamada}
   </section>
 </main>

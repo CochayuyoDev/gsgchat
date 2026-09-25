@@ -31,7 +31,7 @@ process.on('uncaughtException', (error) => {
   console.error('[sistema] error inesperado (se sigue):', error);
 });
 
-import { loadConfig } from '../src/config.js';
+import { avisoDireccionPublica, loadConfig } from '../src/config.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { secretsDirectory } from '../src/runtime.js';
 import { defaultAuthDir } from '../src/whatsapp/local/session.js';
@@ -41,7 +41,14 @@ import { crearPlataforma } from '../src/plataforma/plataforma.js';
 import { crearServidorPlataforma } from '../src/plataforma/servidor.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
-const BASE = `http://localhost:${PORT}`;
+// La direccion con la que se arman los enlaces que salen por WhatsApp (la
+// pagina del motorizado, la evidencia) y la que ve GSG. Si el .env trae
+// PUBLIC_BASE_URL (el dominio https de produccion o un tunel), manda esa; si
+// no, localhost, como siempre: solo abre en esta maquina y se avisa abajo.
+const BASE = (process.env.PUBLIC_BASE_URL?.trim() || `http://localhost:${PORT}`).replace(/\/+$/, '');
+// Donde escucha: solo esta maquina (lo de siempre; un proxy https delante la
+// publica) salvo que HOST diga otra cosa (0.0.0.0 = toda la red).
+const HOST = process.env.HOST?.trim() || '127.0.0.1';
 const DATA_DIR = process.env.QUICK_DATA_DIR ?? path.join(process.cwd(), '.wa-data');
 const TIENDAS_DIR = process.env.TIENDAS_DIR ?? path.join(process.cwd(), '.wa-tiendas');
 
@@ -85,6 +92,7 @@ const envPrincipal = {
 } as NodeJS.ProcessEnv;
 // Se valida ya: un .env roto se dice aqui y no a mitad de arranque.
 const configPrincipal = loadConfig(envPrincipal);
+const avisoPublico = avisoDireccionPublica(BASE);
 
 // La tienda de siempre existe si esta maquina ya tenia datos del arranque corto.
 const hayPrincipal = existsSync(DATA_DIR);
@@ -127,7 +135,7 @@ const plataforma = await crearPlataforma({
 await plataforma.arrancar();
 
 const servidor = await crearServidorPlataforma({ plataforma, segura: BASE.startsWith('https://') });
-await servidor.escuchar(PORT, '127.0.0.1');
+await servidor.escuchar(PORT, HOST);
 
 async function apagar(): Promise<void> {
   await servidor.cerrar().catch(() => undefined);
@@ -149,4 +157,8 @@ console.log(`
   Cada tienda conecta SU WhatsApp desde su panel (Conexión → escanear el QR).
   Datos de la principal   ${DATA_DIR}  ·  vinculación ${defaultAuthDir()}
   Tiendas nuevas          ${TIENDAS_DIR}
-`);
+${avisoPublico ? `\n  ⚠ Dirección pública: ${avisoPublico}\n    (Para pruebas en esta PC está bien; para producción mira docs/PASO-A-PRODUCCION.md.)\n` : ''}${
+  configPrincipal.soloNumeros.length
+    ? `\n  ⚠ MODO PRUEBA (SOLO_NUMEROS en el .env): solo se escribe a ${configPrincipal.soloNumeros.join(', ')}.\n    Para atender a los clientes de verdad, deja SOLO_NUMEROS vacío y reinicia.\n`
+    : ''
+}`);

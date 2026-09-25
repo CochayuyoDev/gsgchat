@@ -85,6 +85,8 @@ interface Seccion {
   clave: string;
   titulo: string;
   cuerpo: string;
+  /** De ventas (Stoky, campañas): con «Solo lo de GSG» no se enseña. */
+  ventas?: boolean;
 }
 
 interface Capitulo {
@@ -98,6 +100,49 @@ interface Capitulo {
  * lo que se toca una vez (la IA, el numero, las conexiones y las cuentas).
  */
 const MANUAL: Capitulo[] = [
+  {
+    titulo: 'Procesos',
+    secciones: [
+      {
+        clave: 'procesos',
+        titulo: 'Procesos: lo que el sistema hace solo por WhatsApp',
+        cuerpo: `
+  <p>Un <b>proceso</b> es un trámite que el sistema hace solo con una lista de personas: sus <b>pasos</b>, su <b>ritmo</b> (la franja del día en la que escribe) y su <b>cierre</b>. Se crea desde una plantilla en <a href="/procesos">Procesos</a> y se ajusta en su editor, tarjeta por tarjeta, sin programar.</p>
+  <h3>Las plantillas</h3>
+  <ul>
+    <li><b>Pedir y validar datos</b>: ubicación (pin o enlace de mapa, dentro de la zona), DNI de 8 dígitos, carné de extranjería o RUC con su dígito de control, dirección escrita, fotos o documentos.</li>
+    <li><b>Confirmaciones y recordatorios</b>: citas, visitas, turnos o asistencia. SÍ o NO con botones, <b>reprogramar</b> con la nueva fecha y hora en el mismo chat, y el recordatorio antes de la hora (usa las columnas <code>fecha</code> y <code>hora</code> de la lista).</li>
+    <li><b>Avisos al personal de campo</b>: cada técnico recibe su tarea y responde «llegué», «terminé» o «no pude» (con botones). El avance se ve en vivo en la corrida.</li>
+    <li><b>Cobranza y trámites</b>: el recordatorio sale el día antes del vencimiento, se recibe la captura o foto del comprobante y pasa a una persona para validarla. No vende nada.</li>
+    <li><b>Entregas de courier (GSG)</b>: activa el módulo de entregas (ubicación, confirmación, motorizado, hora de llegada). Con ella activa aparecen Hoy, Números del día, Motorizados y Mapa; al desactivarla se esconden y los pedidos se conservan.</li>
+  </ul>
+  <h3>Los pasos</h3>
+  <p>Pedir un dato, confirmar SÍ o NO, avance del personal, aviso sin respuesta, esperar hasta una fecha u hora, y pasar a una persona. Cada uno lleva su mensaje con variables (<code>{nombre}</code>, <code>{negocio}</code> y las columnas de la lista, como <code>{fecha}</code>, <code>{monto}</code> o <code>{tarea}</code>; se insertan tocando los chips bajo cada texto), lo que se contesta si preguntan «¿por qué?», lo que se contesta si lo que mandan no vale, cuántas veces se insiste y cada cuánto, y qué pasa si no responde. Al guardar, lo que falta se dice en palabras y con el número del paso.</p>
+  <h3>Cómo se comporta con cada persona</h3>
+  <ul>
+    <li>Escribe de uno en uno, con la pausa de siempre entre mensajes y solo en la franja del proceso y en el horario del número: el mismo cuidado anti-baneo que el resto del sistema.</li>
+    <li>Contesta cada mensaje con <b>uno solo</b>: el «gracias» va pegado a la pregunta siguiente.</li>
+    <li>Si pregunta «¿para qué?», se le explica con el texto del paso y se le vuelve a pedir. Si escribe algo que no es del proceso, recibe <b>una vez</b> el mensaje de cierre y pasa a una persona. La IA (si está encendida) solo decide qué tipo de mensaje es; lo que se le manda es siempre el texto del proceso.</li>
+    <li>A la tercera respuesta que no vale, o si no responde después de insistir, pasa a una persona (o lo que diga el paso).</li>
+    <li>Solo se lee como respuesta de un proceso lo que escribe quien tiene una corrida en curso; lo demás sigue su camino de siempre.</li>
+  </ul>`,
+      },
+      {
+        clave: 'personas',
+        titulo: 'Corridas y personas',
+        cuerpo: `
+  <p>Una <b>corrida</b> es un proceso aplicado a una lista. «Cargar personas» acepta una tabla pegada de Excel, un archivo .xlsx o CSV, o las filas que manda otro sistema por la API (<code>POST /api/v1/procesos/:id/personas</code>, con una clave que tenga el permiso <code>procesos:gestionar</code>). Un teléfono que no sirve queda marcado con su motivo, un repetido se deja una vez, y a quien se dio de baja o ya está en otra corrida en curso no se le escribe.</p>
+  <p>La corrida y <a href="/personas">Personas</a> tienen filtros por estado (por escribirle, esperando respuesta, programadas, necesitan a alguien, completadas, no respondieron o dijeron no, no se les puede escribir), «Marcar todos» o una por una, y los botones <b>Pedir ahora</b>, <b>Pausar mensajes</b>, <b>Pasar a una persona</b> y <b>Cancelar</b>. «Historial» enseña todo lo que pasó con cada persona. La campana avisa de quien necesita a alguien.</p>
+  <p>Para probar sin escribirle a nadie: <a href="/desarrollador#procesos">Módulo desarrollador → Probar un proceso</a> simula una corrida de cada plantilla con números de prueba.</p>`,
+      },
+      {
+        clave: 'respuestas',
+        titulo: 'Respuestas',
+        cuerpo: `
+  <p><a href="/respuestas">Respuestas</a> enseña lo que respondió cada persona, un paso por columna: el DNI con su tipo, la ubicación con «Ver en el mapa», el SÍ o NO, la nueva fecha si reprogramó, la hora en que llegó y terminó un técnico, y el enlace a cada foto o captura. «Exportar CSV» lo baja para abrirlo en Excel.</p>`,
+      },
+    ],
+  },
   {
     titulo: 'Empezar',
     secciones: [
@@ -181,6 +226,7 @@ const MANUAL: Capitulo[] = [
       },
       {
         clave: 'grupos',
+        ventas: true,
         titulo: 'Escribirle a muchos sin ir uno por uno',
         cuerpo: `
   <p class="muted">Tres formas, según lo que quieras que pase.</p>
@@ -339,6 +385,7 @@ const MANUAL: Capitulo[] = [
     secciones: [
       {
         clave: 'stoky',
+        ventas: true,
         titulo: 'Conectar Stoky: las dos direcciones, desde la pantalla',
         cuerpo: `
   <p class="muted">Stoky (tu inventario y tus ventas) y este WhatsApp se hablan en dos sentidos, y los dos se configuran en <a href="/panel#integraciones">Conectar mi web y tienda → Stoky</a>, sin tocar ficheros ni reiniciar. Cada sentido tiene su semáforo: verde funciona, ámbar falta un paso, rojo no está.</p>
@@ -405,13 +452,13 @@ export function manualPage(opts: { nombreNegocio: string; demo?: boolean }): str
 
   const indice = MANUAL.map(
     (c) => `<div><h3>${escapeHtml(c.titulo)}</h3><ul>${c.secciones
-      .map((s) => `<li><a href="#m-${s.clave}">${escapeHtml(s.titulo)}</a></li>`)
+      .map((s) => `<li${s.ventas ? ' class="solo-completo"' : ''}><a href="#m-${s.clave}">${escapeHtml(s.titulo)}</a></li>`)
       .join('')}</ul></div>`,
   ).join('\n      ');
 
   const secciones = MANUAL.flatMap((c) => c.secciones)
     .map(
-      (s) => `<section class="tarjeta" id="m-${s.clave}" data-buscar="${escapeHtml(textoBuscable(s.titulo, s.cuerpo))}">
+      (s) => `<section class="tarjeta${s.ventas ? ' solo-completo' : ''}" id="m-${s.clave}" data-buscar="${escapeHtml(textoBuscable(s.titulo, s.cuerpo))}">
   <h2>${escapeHtml(s.titulo)}</h2>${s.cuerpo}
 </section>`,
     )

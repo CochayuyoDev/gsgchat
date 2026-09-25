@@ -20,6 +20,8 @@ export interface ContextoTienda {
   slug: string;
   /** El modo del menu de esta tienda (gsg | completo). */
   modo?: () => 'gsg' | 'completo';
+  /** Si esta tienda usa la plantilla de entregas de courier (GSG): el menu enseña Hoy, Números del día, Motorizados y Mapa. */
+  gsg?: () => boolean;
 }
 
 const almacen = new AsyncLocalStorage<ContextoTienda>();

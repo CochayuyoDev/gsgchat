@@ -43,8 +43,11 @@ Respuesta (200):
 {
   "dia": "2026-09-21",
   "faltaUbicacion": [
-    { "id": "gsg-P-1001", "referencia": "P-1001", "telefono": "987000001", "nombre": "Ana Quispe",
-      "direccion": "Av. Larco 123", "distrito": "Miraflores", "notas": "Dpto. 402", "urgente": false }
+    { "id": "gsg-P-1001", "referencia": "P-1001", "telefono": "987000001", "nombre": "María Pérez",
+      "direccion": "Av. La Marina 1234", "distrito": "San Miguel", "notas": "Dpto. 402", "urgente": false,
+      "producto": "Zapatillas talla 40", "empresa": { "codigo": "516", "nombre": "Zapatería Lima" },
+      "tracking": "GSG-A-102345", "nroPedido": "#1042", "metodoPago": "YAPE", "monto": "85.00",
+      "remitente": "Juan Quispe" }
   ],
   "faltaConfirmacion": [
     { "id": "gsg-P-1007", "referencia": "P-1007", "telefono": "987000007", "nombre": "Luis Rojas",
@@ -67,6 +70,19 @@ Respuesta (200):
 | `urgente` | no | `true` = va primero hacia el motorizado. |
 | `cancelado` | no | `true` = GSG canceló este pedido por su cuenta (el cliente llamó, se anuló la venta…). GSGchat lo cancela aquí, deja de escribirle al cliente y, si ya tenía hora de llegada, le avisa. Puede venir en `cancelados` o en la lista donde estaba. |
 | `motivoCancelacion` | no | Con `cancelado: true`, por qué (en palabras; se apunta en la bitácora del pedido). |
+| `producto` | no | Lo que se entrega («Zapatillas talla 40»). Sale en el primer mensaje al cliente (ver E). |
+| `empresa` | no | La tienda que vende, como `{ "codigo": "516", "nombre": "Zapatería Lima" }`. Sale como «516 - Zapatería Lima». |
+| `empresaCodigo`, `empresaNombre`, `tiendaCodigo`, `tiendaNombre` | no | Lo mismo que `empresa`, en campos sueltos (se acepta cualquiera de las dos formas). |
+| `tracking` | no | El código de seguimiento de GSG («GSG-A-102345»). |
+| `nroPedido` | no | El número de pedido de la tienda («#1042»). |
+| `metodoPago` | no | Cómo paga el cliente («YAPE», «Efectivo», «Pagado»…). |
+| `monto` | no | Lo que el motorizado cobra: número (`85`) o texto (`"85.00"`). Un número sale con dos decimales. |
+| `remitente` | no | Quién firma el mensaje («Juan Quispe»). Sin él, el mensaje dice «Te escribimos de la empresa de entregas GSG». |
+
+Los datos del envío (`producto` … `remitente`) son **todos opcionales**: el que
+no viene simplemente no sale en el mensaje (nunca «Monto: undefined» ni una
+línea vacía). Si GSG los vuelve a mandar distintos para un pedido que ya
+estaba, GSGchat guarda los nuevos; uno que no viene no borra el que había.
 
 **Cambios después de mandar un pedido.** Si un pedido que GSGchat ya tiene
 vuelve a venir con otro `telefono`, `direccion`, `distrito`, `nombre` o `notas`,
@@ -264,9 +280,12 @@ curl -X POST https://<gsgchat>/api/v1/entregas \
   -H "Authorization: Bearer wak_..." -H "Content-Type: application/json" \
   -d '{
     "pedidos": [
-      { "referencia": "P-1001", "telefono": "987000001", "nombre": "Ana Quispe",
-        "direccion": "Av. Larco 123", "distrito": "Miraflores",
-        "faltaUbicacion": true, "faltaConfirmar": true },
+      { "referencia": "P-1001", "telefono": "987000001", "nombre": "María Pérez",
+        "direccion": "Av. La Marina 1234", "distrito": "San Miguel",
+        "faltaUbicacion": true, "faltaConfirmar": true,
+        "producto": "Zapatillas talla 40", "empresa": { "codigo": "516", "nombre": "Zapatería Lima" },
+        "tracking": "GSG-A-102345", "nroPedido": "#1042", "metodoPago": "YAPE", "monto": 85,
+        "remitente": "Juan Quispe" },
       { "referencia": "P-1007", "telefono": "987000007", "nombre": "Luis Rojas",
         "lat": -12.0464, "lng": -77.0308, "faltaConfirmar": true, "urgente": true }
     ]
@@ -283,6 +302,19 @@ curl -X POST https://<gsgchat>/api/v1/entregas \
 | `faltaUbicacion` | no | Por defecto `true`: pedirle el pin al cliente. Con `lat`/`lng` no se le pide. |
 | `faltaConfirmar` | no | Por defecto `true`: preguntarle si recibe hoy. |
 | `urgente` | no | `true` = va primero hacia el motorizado. |
+| `producto` | no | Lo que se entrega. Sale en el primer mensaje al cliente (ver E). |
+| `empresa` | no | La tienda que vende: `{ "codigo": "516", "nombre": "Zapatería Lima" }` (o texto). |
+| `empresaCodigo`, `empresaNombre`, `tiendaCodigo`, `tiendaNombre` | no | La empresa en campos sueltos. |
+| `tracking` | no | El código de seguimiento de GSG. |
+| `nroPedido` | no | El número de pedido de la tienda. |
+| `metodoPago` | no | Cómo paga el cliente. |
+| `monto` | no | Lo que se cobra: número o texto (`85` → «85.00»). |
+| `remitente` | no | Quién firma el mensaje. |
+| `motorizado` | no | El motorizado que GSG ya asignó a ese pedido: `{ "nombre": "Carlos", "telefono": "999000003" }` (o solo el nombre). Su número es el que se le da al cliente en el cierre y en UBI REGISTRADA. |
+| `telefonoMotorizado` | no | El teléfono de ese motorizado, suelto. Si no llega ninguno (ni hay motorizado asignado en GSGchat), al cliente se le da el número de soporte. |
+
+Los datos del envío son opcionales: lo que falta no sale en el mensaje. Si el
+pedido ya estaba (va en `repetidas`) y trae datos del envío nuevos, se guardan.
 
 Para cancelar no se usa `cancelado` aquí: se usa `DELETE` (B.4).
 
@@ -314,6 +346,8 @@ curl -H "Authorization: Bearer wak_..." https://<gsgchat>/api/v1/entregas/P-1007
   "entrega": {
     "referencia": "P-1007", "estado": "avisada", "situacion": "En camino: le llega alrededor de las 16:00",
     "prioridad": "urgente",
+    "producto": "Licuadora 1.5 L", "empresa": { "codigo": "408", "nombre": "TecnoPerú", "texto": "408 - TecnoPerú" },
+    "tracking": "GSG-A-102351", "nroPedido": "#3302", "metodoPago": "Pagado", "monto": null, "remitente": "Juan Quispe",
     "ubicacion": { "estado": "recibida", "lat": -12.0464, "lng": -77.0308, "mapa": "https://…", "recibidaEn": "…" },
     "confirmacion": { "estado": "confirmada", "intentos": 1, "respuesta": "si", "como": "boton", "en": "…" },
     "motorizado": { "nombre": "Carlos Huamán", "telefono": "51999000003", "placa": "M3C-303" },
@@ -341,6 +375,8 @@ curl -X PATCH https://<gsgchat>/api/v1/entregas/P-1004 \
 |---|---|
 | `nombre`, `direccion`, `distrito`, `notas` | Los datos que ven el cliente y el motorizado. Vacío = se borra ese dato. |
 | `urgente` | `true` lo pasa delante hacia el motorizado; `false` lo devuelve a normal. |
+| `producto`, `empresa`, `empresaCodigo`, `empresaNombre`, `tiendaCodigo`, `tiendaNombre`, `tracking`, `nroPedido`, `metodoPago`, `monto`, `remitente` | Los datos del envío (ver B.1). Lo que llega manda; lo que no llega se queda como estaba. |
+| `motorizado`, `telefonoMotorizado` | El motorizado que GSG asignó (ver B.1): desde ahí el cierre le da al cliente ese número. |
 
 `200` con `cambios` (en palabras) y el pedido como queda; queda apuntado en su
 bitácora («GSG cambió: dirección … → …»). El **teléfono no se cambia**
@@ -403,6 +439,8 @@ POST <GSGCHAT_URL>/simulador/gsg/reparto/cancelar   { "referencia": "P-1003", "m
 POST <GSGCHAT_URL>/simulador/gsg/reparto/cambiar    { "referencia": "P-1004", "direccion": "Av. Nueva 100", "distrito": "San Isidro" }
 ```
 
+`cambiar` también acepta los datos del envío (`producto`, `empresa`, `tracking`,
+`nroPedido`, `metodoPago`, `monto`, `remitente`).
 `404` si el pedido no existe en el simulador, `409` si ya estaba cerrado. A
 partir de ahí, `GET /reparto/pendientes` lo devuelve en `cancelados` con
 `cancelado: true` y `motivoCancelacion`, o con los datos nuevos. En Conexión →
@@ -480,3 +518,69 @@ contra la misma instalación: los pedidos aparecen en Hoy al instante.
 | GSG se entera (opcional) | eventos `entrega.*` firmados | su propia URL, registrada en `POST /api/v1/webhooks` |
 | Para probar | el simulador | `https://<gsgchat>/simulador/gsg`, con un token `gsgsim_…` (Conexión → Para los programadores de GSG) |
 | Contrato formal | OpenAPI 3 | `https://<gsgchat>/api/v1/openapi.json` |
+
+---
+
+## E. Lo que recibe el cliente por WhatsApp (GSG Courier)
+
+Para que GSG sepa qué ve su cliente con los datos que manda. Todos los textos
+son editables en GSGchat (Hoy → Ajustes de las entregas → textos); aquí van
+los de fábrica.
+
+**1. El primer mensaje (pedir la ubicación).** Con los datos del envío de A.1 /
+B.1. Ejemplo real, con todos los campos:
+
+```
+¡Hola María Pérez! Soy Juan Quispe de la empresa de entregas GSG. Tengo una entrega para ti:
+📦 Producto: Zapatillas talla 40
+🏢 Empresa: 516 - Zapatería Lima
+📝 Código: GSG-A-102345
+🧾 Nro. de pedido: #1042
+💳 Método de Pago: YAPE
+💰 Monto a Cobrar: 85.00
+🏠 Dirección: San Miguel - Av. La Marina 1234
+
+Por favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!
+```
+
+Si falta un dato, su línea no sale. Sin `remitente`, la presentación dice
+«Te escribimos de la empresa de entregas GSG». Los recordatorios (si no
+contesta) son cortos y no repiten la ficha.
+
+**2. La regla del dueño.** «El único proceso de GSGchat es disparar
+mensajes. Una vez que la IA manda el mensaje de UBI REGISTRADA, ahí llega la
+IA: ya no vuelve a responder.» Mientras se espera el pin, el cliente solo puede
+recibir tres respuestas:
+
+- Si pregunta **por qué** se la piden (o para qué, «¿es seguro?», «¿quién
+  eres?»): «Es necesaria para calcular la ruta exacta de entrega y coordinar
+  con el motorizado.» y se la vuelve a pedir. Sin límite, pero nunca el mismo
+  texto dos veces seguidas.
+- Si manda el **pin** o un enlace de mapa: UBI REGISTRADA (punto 3).
+- **Cualquier otra cosa** (una consulta, un precio, «¿a qué hora llega?», un
+  saludo, un audio, un sticker, algo personal): **una sola vez por pedido** el
+  cierre «Por este canal no se reciben consultas. Te derivamos con un asesor
+  humano. Número del motorizado: <número>.» y el chat pasa a una persona
+  («Para una persona» en Chats). Desde ahí, silencio.
+
+El número es el del motorizado de ese pedido si ya hay uno (asignado en
+GSGchat, o el que GSG manda en `motorizado` / `telefonoMotorizado`, B.1); si
+no, el de soporte; si tampoco hay, el del WhatsApp de la tienda. La IA **solo
+clasifica** (por qué / otra cosa): nunca redacta nada para el cliente; lo que
+sale son siempre los textos fijos (editables en Hoy → Ajustes → Textos). El
+sistema **nunca** manda una ubicación, un pin ni un mapa a nadie: solo el
+cliente manda la suya.
+
+**3. Al recibir el pin.** El pedido queda como **UBI REGISTRADA** (así se ve en
+Hoy y en Números del día) y GSG recibe `POST /ubicaciones` (A.2) al momento. Al
+cliente le llega **un solo mensaje**: «Ubicación registrada correctamente», el
+enlace del mapa de su propio pin, el cierre con el número (arriba), el aviso de
+que un motorizado lo contactará y el horario de entrega (de 2 a 8 p. m., que
+puede extenderse hasta las 10 p. m.). **A partir de ahí no se le escribe nada
+más**: ni pregunta SÍ/NO, ni hora de llegada, ni «cerca», ni «entregado», ni
+recordatorios. Por dentro todo sigue igual: el pedido va a un motorizado, se le
+piden los minutos y GSG recibe la hora aproximada y la entrega (A.3). Es el
+ajuste «Después de UBI REGISTRADA, no escribirle más al cliente» (Hoy →
+Ajustes), encendido de fábrica; apagado, vuelve lo de antes (pregunta de
+confirmar, hora de llegada y aviso de entregado). Los mensajes al cliente se
+presentan como «GSG Courier».

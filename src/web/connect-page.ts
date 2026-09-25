@@ -1449,7 +1449,12 @@ function pintarPerfiles(r) {
   if (!caja) return;
   var actual = r.actual ? r.actual.perfil : null;
   perfilElegido = perfilElegido || actual || 'reparto';
-  caja.innerHTML = (r.perfiles || []).map(function (p) {
+  /* Con «Solo lo de GSG» no se ofrecen los perfiles de venta (tienda, atención comercial):
+     GSGchat es operativo. Siguen ahí con «Todo el sistema» (Ajustes → Qué se enseña). */
+  var app = document.querySelector('.s-app');
+  var modoGsg = window.__modoSistema === 'gsg' || Boolean(app && app.classList.contains('modo-gsg'));
+  var visibles = (r.perfiles || []).filter(function (p) { return !(modoGsg && p.ventas && p.id !== actual && p.id !== perfilElegido); });
+  caja.innerHTML = visibles.map(function (p) {
     var es = p.id === perfilElegido;
     return '<label class="' + (es ? 'elegido' : '') + '"><input type="radio" name="perfil" value="' + esc(p.id) + '"' + (es ? ' checked' : '') + '>' +
       '<b>' + esc(p.nombre) + '</b><span class="ayuda">' + esc(p.descripcion) + '</span><ul>' +

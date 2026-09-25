@@ -77,6 +77,8 @@ export interface ServiciosDeps {
   fiabilidad?: ServicioFiabilidad;
   /** El resumen de la mañana y de la tarde al supervisor. Sin el, no se manda. */
   resumenes?: ServicioResumenes;
+  /** Los procesos: su motor escribe a cada persona lo que le toca. Sin ellos, no arranca. */
+  procesos?: import('./procesos/servicio.js').ServicioProcesos;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
 }
 
@@ -136,6 +138,8 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     // Boton nativo de ubicacion: la Cloud API lo tiene; el cliente no oficial
     // solo si se pidio expresamente (llegan rotos a una cuenta personal).
     conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+    // El primer mensaje de una entrega de GSG: la plantilla con producto, empresa, codigo, monto...
+    textoSolicitud: entregas ? (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) : undefined,
     salud,
     politica,
     log: info,
@@ -193,6 +197,10 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   }, 60_000);
   despachador.unref?.();
 
+  // Los procesos (pedir datos, confirmar, avisos al personal, cobranza): un
+  // mensaje por pasada, con la pausa del reparto y en la franja de cada proceso.
+  const stopProcesos = deps.procesos ? deps.procesos.arrancar() : () => undefined;
+
   // El resumen del dia al supervisor: mira cada minuto si es la hora. Ver src/resumenes.
   const stopResumenes = deps.resumenes ? startResumenes(deps.resumenes, { log: info }) : () => undefined;
 
@@ -214,6 +222,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     stopAlertas();
     stopFiabilidad();
     stopResumenes();
+    stopProcesos();
     clearInterval(despachador);
   };
 }

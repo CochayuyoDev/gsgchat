@@ -76,7 +76,8 @@ beforeAll(async () => {
   const settingsRepo = createMemorySettingsRepo();
   const settings = await createSettingsService(settingsRepo, config, TEST_SETTINGS_KEY);
   const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
-  await ajustes.guardar({ embebido: { dominios: [ORIGEN_TIENDA] } });
+  // Una tienda con «Todo el sistema»: con «Solo lo de GSG» la IA no conversa con clientes (regla del dueño).
+  await ajustes.guardar({ modo: 'completo', embebido: { dominios: [ORIGEN_TIENDA] } });
   const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Elysian', proveedor, modelosGratis: ['google/gemma-4-31b-it'] });
   await ia.guardar({ activa: true, token: 'tok', nombreAsistente: 'Lucia', conocimiento: 'Vendemos relojes originales.' });
   app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, bus, ajustes, ia });

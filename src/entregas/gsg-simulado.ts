@@ -30,6 +30,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { CLIENTES_DE_PRUEBA, type ClienteDePrueba } from './datos-de-prueba.js';
+import { datosEnvioDeCrudo } from './datos-envio.js';
+import type { DatosEnvio } from './repo.js';
 
 export interface ClienteSimulado {
   referencia: string;
@@ -50,6 +52,8 @@ export interface ClienteSimulado {
   motivoCancelacion: string | null;
   /** GSG cambio telefono/direccion/distrito despues de mandarlo. */
   cambiadoEn: string | null;
+  /** Producto, empresa, codigo de seguimiento, numero de pedido, pago, monto y quien firma (el primer mensaje al cliente). */
+  datosEnvio: DatosEnvio | null;
   ubicacion: { lat: number; lng: number; mapsUrl: string | null; corregida: boolean; en: string } | null;
   confirmacion: { confirmada: boolean; respuesta: string | null; como: string | null; motivo: string | null; en: string } | null;
   entrega: { motorizado: unknown; minutosMotorizado: number | null; minutosAviso: number | null; llegaAproxEn: string | null; en: string; entregadoEn: string | null; entregadaComo: string | null; incidencia: string | null; segundaVisita: boolean; visitas: number } | null;
@@ -100,6 +104,8 @@ export interface CambioPedidoSimulado {
   distrito?: string;
   notas?: string;
   urgente?: boolean;
+  /** Los datos del envio (se juntan con los que ya tenia). */
+  datosEnvio?: DatosEnvio | null;
 }
 
 const cambioSchema = z.object({
@@ -110,7 +116,7 @@ const cambioSchema = z.object({
   distrito: z.string().max(120).optional(),
   notas: z.string().max(300).optional(),
   urgente: z.boolean().optional(),
-});
+}).passthrough();
 
 export interface OpcionesSimulador {
   token: string;
@@ -131,7 +137,22 @@ const clienteSchema = z.object({
   faltaUbicacion: z.boolean().optional(),
   faltaConfirmacion: z.boolean().optional(),
   urgente: z.boolean().optional(),
-});
+}).passthrough();
+
+/** Los datos del envio como los manda GSG: la empresa como {codigo, nombre}. */
+export function datosEnvioParaGsg(d: DatosEnvio): Record<string, unknown> {
+  const fuera: Record<string, unknown> = {};
+  if (d.producto) fuera.producto = d.producto;
+  if (d.empresaCodigo || d.empresaNombre) fuera.empresa = { codigo: d.empresaCodigo ?? null, nombre: d.empresaNombre ?? null };
+  if (d.tracking) fuera.tracking = d.tracking;
+  if (d.nroPedido) fuera.nroPedido = d.nroPedido;
+  if (d.metodoPago) fuera.metodoPago = d.metodoPago;
+  if (d.monto) fuera.monto = d.monto;
+  if (d.remitente) fuera.remitente = d.remitente;
+  // El motorizado que GSG ya asigno (opcional): su numero es el que se le da al cliente.
+  if (d.motorizadoNombre || d.telefonoMotorizado) fuera.motorizado = { nombre: d.motorizadoNombre ?? null, telefono: d.telefonoMotorizado ?? null };
+  return fuera;
+}
 
 function diaEnLima(fecha: Date): string {
   try {
@@ -159,6 +180,8 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
     distrito: c.distrito,
     notas: c.notas,
     urgente: c.urgente,
+    // Lo que sale en el primer mensaje al cliente (ver docs/CONTRATO-GSG.md).
+    ...(c.datosEnvio ? datosEnvioParaGsg(c.datosEnvio) : {}),
     ...(c.canceladoPorGsg ? { cancelado: true, motivoCancelacion: c.motivoCancelacion ?? 'cancelado por GSG' } : {}),
     // Si GSG ya tiene la ubicacion (de un pedido anterior o porque acaba de
     // llegar), la manda: asi el otro lado no la vuelve a pedir.
@@ -245,6 +268,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
           canceladoPorGsg: false,
           motivoCancelacion: null,
           cambiadoEn: null,
+          datosEnvio: datosEnvioDeCrudo(c),
           ubicacion: null,
           confirmacion: null,
           entrega: null,
@@ -277,6 +301,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       if (cambios.distrito !== undefined) c.distrito = cambios.distrito;
       if (cambios.notas !== undefined) c.notas = cambios.notas;
       if (cambios.urgente !== undefined) c.urgente = cambios.urgente;
+      if (cambios.datosEnvio) c.datosEnvio = { ...(c.datosEnvio ?? {}), ...cambios.datosEnvio };
       c.cambiadoEn = ahora().toISOString();
       return c;
     },
@@ -319,8 +344,8 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       if (method === 'POST' && camino === '/reparto/cambiar') {
         const b = cambioSchema.parse(cuerpo ?? {});
         if (!clientes.has(b.referencia)) return { status: 404, body: { error: `no conozco el pedido ${b.referencia}` } };
-        const { referencia, ...cambios } = b;
-        const c = sim.cambiar(referencia, cambios);
+        const { referencia, telefono, nombre, direccion, distrito, notas, urgente } = b;
+        const c = sim.cambiar(referencia, { telefono, nombre, direccion, distrito, notas, urgente, datosEnvio: datosEnvioDeCrudo(b) });
         return c ? { status: 200, body: { ok: true, pedido: publico(c) } } : { status: 409, body: { error: `el pedido ${referencia} ya estaba cerrado` } };
       }
 

@@ -46,6 +46,7 @@ import { createFakeEntregas, type FakeEntregas } from './fakes-entregas.js';
 import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
+import { crearProcesosEnMemoria } from '../src/procesos/repo-memoria.js';
 import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
 import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
@@ -333,6 +334,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     codigosConexion: createFakeCodigos(),
     tiendas: createFakeTiendas(),
     entregas: createFakeEntregas(),
+    procesos: crearProcesosEnMemoria(),
     archives: createFakeArchives(),
     rutas: createFakeRutas(),
     leads: createFakeLeads((id) => {
@@ -458,6 +460,12 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         const c = [...contactsByPhone.values()].find((x) => x.id === contactId);
         if (!c) return;
         c.botPausadoAt = pausado ? at : null;
+      },
+      async cerrarIA(contactId, cerrada, at, motivo) {
+        const c = [...contactsByPhone.values()].find((x) => x.id === contactId);
+        if (!c) return;
+        c.iaCerradaAt = cerrada ? at : null;
+        c.iaCerradaMotivo = cerrada ? (motivo ?? null) : null;
       },
       async ajustesChat(contactId, ajustes, at) {
         const c = [...contactsByPhone.values()].find((x) => x.id === contactId);

@@ -104,7 +104,7 @@ describe('un día de entregas con GSG simulado', () => {
     await e.contesta('987000001', { pin: pinDe(1) });
     const textos = e.textosA('987000001');
     expect(textos).toHaveLength(antes + 1);
-    expect(textos[textos.length - 1]).toMatch(/Ubicación registrada\nhttps:\/\/\S+\n/);
+    expect(textos[textos.length - 1]).toMatch(/Ubicación registrada correctamente\.\nhttps:\/\/\S+\n/);
     expect(textos[textos.length - 1]).toMatch(/confirma/i);
 
     const ana = await e.entrega('P-1001');
@@ -149,10 +149,11 @@ describe('un día de entregas con GSG simulado', () => {
     const texto = String(alRider.find((m) => m.kind === 'text')?.body ?? '');
     expect(texto).toContain('P-1001');
     expect(texto).toContain('Ana Quispe');
-    expect(texto).toContain('maps.google.com/?q=');
+    // Nunca se le manda una ubicacion al motorizado: solo el pedido y la pregunta de los minutos.
+    expect(texto).not.toContain('maps.google.com');
     expect(texto).toMatch(/en cuántos minutos/i);
-    // Y el pin nativo, además del enlace.
-    expect(alRider.some((m) => m.kind === 'location')).toBe(true);
+    // Ni pin nativo: la ubicación solo la manda el cliente.
+    expect(alRider.some((m) => m.kind === 'location')).toBe(false);
   });
 
   it('el motorizado dice "40": al cliente se le avisa 1 h 40 min con la hora, y GSG recibe la entrega', async () => {
@@ -344,7 +345,7 @@ describe('un día de entregas con GSG simulado', () => {
     await e.contesta('987000010', { pin: pinDe(10) });
     const textos = e.textosA('987000010');
     // Ya estaba confirmado por teléfono: gracias a secas, sin volver a preguntar.
-    expect(textos[textos.length - 1]).toMatch(/Ubicación registrada\nhttps:\/\/\S+\n/);
+    expect(textos[textos.length - 1]).toMatch(/Ubicación registrada correctamente\.\nhttps:\/\/\S+\n/);
     expect(textos[textos.length - 1]).not.toMatch(/confirma/i);
     let diego = await e.entrega('P-1010');
     expect(diego?.estado).toBe('lista');

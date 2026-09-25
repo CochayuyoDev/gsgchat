@@ -44,6 +44,8 @@ export interface ResultadoGenerar {
   creados: { faltaConfirmar: number; faltaUbicacion: number; motorizados: number };
   /** A cuantos «falta que confirme» ya se les mando la pregunta. */
   preguntados: number;
+  /** La regla del dueño («Solo lo de GSG»): no hay pregunta SÍ/NO, los que tienen pin van directo al motorizado. */
+  sinPreguntas?: boolean;
   descartados: Array<{ referencia: string; motivo: string }>;
   detalle: string;
   /** Lo que se mando a la API y lo que contesto (para «Ver lo técnico»). */
@@ -94,6 +96,14 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
       direccion: c.direccion,
       distrito: c.distrito,
       notas: c.notas,
+      // Los datos del envio, como los mandara GSG (salen en el primer mensaje al cliente).
+      producto: c.producto,
+      empresa: c.empresa,
+      tracking: c.tracking,
+      nroPedido: c.nroPedido,
+      metodoPago: c.metodoPago,
+      ...(c.metodoPago === 'Pagado' ? {} : { monto: c.monto }),
+      remitente: c.remitente,
       ...(conPin ? { lat: c.lat, lng: c.lng, faltaUbicacion: false } : { faltaUbicacion: true }),
       faltaConfirmar: true,
     };
@@ -138,7 +148,8 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
     const e = fila ? await deps.repos.entregas.entrega(fila.id) : null;
     if (!e || e.confirmacionEstado !== 'pendiente') continue;
     const r = await entregas.pedirConfirmacion(e).catch(() => ({ ok: false }));
-    if (r.ok) preguntados++;
+    // Con la regla del dueño no se pregunta nada: la confirmacion queda en «no hace falta».
+    if (r.ok && !entregas.reglaGsgActiva()) preguntados++;
   }
 
   let motos = 0;
@@ -162,6 +173,7 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
     ok: true,
     creados: { faltaConfirmar: creadosConfirmar, faltaUbicacion: creadosUbicacion, motorizados: motos },
     preguntados,
+    sinPreguntas: entregas.reglaGsgActiva(),
     descartados,
     detalle: `Listo: ${partes.join(', ') || 'nada nuevo'}.${descartados.length ? ` ${descartados.length} no entraron (mira el motivo abajo).` : ''}`,
     tecnico: {
@@ -187,8 +199,9 @@ export const registerGenerar: RegistrarSeccion = async (app, deps) => {
     }
   });
 
-  app.get('/admin/desarrollador/prueba', async (_request, reply) => {
-    if (!deps.repos.desarrollador) return reply.code(409).send({ error: 'Esta pantalla necesita la base de datos de la tienda (no funciona en la demostración en memoria).' });
+  app.get('/admin/desarrollador/prueba', async () => {
+    // Solo leer: en la demostracion en memoria no es un error, es que no hay que contar (y la pagina lo dice).
+    if (!deps.repos.desarrollador) return { ok: false, sinBase: true, detalle: 'En la demostración en memoria no se crean clientes de prueba: esta parte necesita la base de datos de la tienda. «Probar un proceso» sí funciona aquí.' };
     return { ok: true, ...(await contarLoDePrueba(deps.repos.desarrollador)) };
   });
 
@@ -305,6 +318,7 @@ const JS =
     var caja = $('gen-cifras');
     try {
       var d = await pedir('/admin/desarrollador/prueba');
+      if (d.sinBase) { caja.innerHTML = '<p class="muted">' + escapar(d.detalle) + '</p>'; $('gen-borrar').disabled = true; return; }
       var filas = Object.keys(NOMBRES).filter(function (k) { return d.porEstado[k]; }).map(function (k) {
         return '<div class="gen-fila"><span>' + escapar(NOMBRES[k]) + '</span><b>' + d.porEstado[k] + '</b></div>';
       });
@@ -343,7 +357,7 @@ const JS =
     avisar(msg, '');
     try {
       var d = await pedir('/admin/desarrollador/generar', { method: 'POST', body: JSON.stringify(cuerpo) });
-      var extra = d.creados.faltaConfirmar ? ' Ya se le preguntó a ' + d.preguntados + ' de ' + d.creados.faltaConfirmar + ' si reciben hoy.' : '';
+      var extra = !d.creados.faltaConfirmar ? '' : d.sinPreguntas ? ' Con «Solo lo de GSG» no se les pregunta SÍ o NO: ya tienen su ubicación y van directo al motorizado.' : ' Ya se le preguntó a ' + d.preguntados + ' de ' + d.creados.faltaConfirmar + ' si reciben hoy.';
       var malos = d.descartados.length ? ' No entraron: ' + d.descartados.slice(0, 3).map(function (x) { return x.referencia + ' (' + x.motivo + ')'; }).join('; ') + '.' : '';
       avisar(msg, d.detalle + extra + malos, d.descartados.length > 0);
       $('gen-tecnico').hidden = false;

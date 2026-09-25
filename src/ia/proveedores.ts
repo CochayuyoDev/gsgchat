@@ -244,6 +244,92 @@ export const SERVICIOS_OPENAI: PresetServicio[] = [
   { id: 'otro', nombre: 'Otro compatible con OpenAI', baseUrl: '', modelos: [], clave: 'la que te dé ese servicio' },
 ];
 
+/** El modelo de OpenAI por defecto: el de consumo muy bajo. */
+export const MODELO_OPENAI_POR_DEFECTO = 'gpt-4o-mini';
+
+/** Los de consumo muy bajo que se recomiendan (si la cuenta los tiene). */
+const MODELOS_MUY_BAJO = ['gpt-4o-mini', 'gpt-4.1-mini'];
+
+export interface ModeloDeLaCuenta {
+  id: string;
+  /** "Recomendado · consumo muy bajo", "consumo bajo" o null. */
+  etiqueta: string | null;
+  recomendado: boolean;
+}
+
+export interface ListaModelosOpenAI {
+  ok: boolean;
+  /** Los modelos de chat de la cuenta, el recomendado primero. Sin lista: solo el de por defecto. */
+  modelos: ModeloDeLaCuenta[];
+  /** El que conviene dejar elegido. */
+  elegido: string;
+  /** En palabras, para la pantalla (por que no se pudo listar, o cuantos hay). */
+  detalle: string;
+}
+
+/**
+ * Lo que no es un modelo para conversar: embeddings, audio, imagen,
+ * moderacion, busqueda... La cuenta de OpenAI los lista todos juntos.
+ */
+const NO_ES_CHAT = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|transcribe|image|search|babbage|davinci|computer-use|codex|sora|instruct/i;
+
+/** Que se le dice en la pantalla junto al modelo, sin inventar nada: solo mira el id. */
+export function etiquetaDeModelo(id: string): string | null {
+  if (MODELOS_MUY_BAJO.includes(id)) return 'Recomendado · consumo muy bajo';
+  if (/5\.6|luna/i.test(id)) return 'consumo bajo';
+  return null;
+}
+
+/** Ordena y etiqueta una lista de ids de modelos (los de chat): recomendados, luego consumo bajo, luego el resto. */
+export function ordenarModelosOpenAI(ids: string[]): ModeloDeLaCuenta[] {
+  const unicos = [...new Set(ids.map((i) => String(i).trim()).filter((i) => i && !NO_ES_CHAT.test(i)))];
+  const peso = (id: string): number => {
+    const i = MODELOS_MUY_BAJO.indexOf(id);
+    if (i >= 0) return i;
+    return etiquetaDeModelo(id) ? 10 : 20;
+  };
+  return unicos
+    .sort((a, b) => peso(a) - peso(b) || a.localeCompare(b))
+    .map((id) => ({ id, etiqueta: etiquetaDeModelo(id), recomendado: MODELOS_MUY_BAJO.includes(id) }));
+}
+
+const SIN_LISTA = (detalle: string): ListaModelosOpenAI => ({
+  ok: false,
+  modelos: [{ id: MODELO_OPENAI_POR_DEFECTO, etiqueta: 'Recomendado · consumo muy bajo', recomendado: true }],
+  elegido: MODELO_OPENAI_POR_DEFECTO,
+  detalle,
+});
+
+/**
+ * Los modelos REALES de la cuenta de OpenAI de esa clave (GET /v1/models).
+ * Nunca lanza: si no se puede listar, devuelve gpt-4o-mini y el motivo en
+ * palabras.
+ */
+export async function listarModelosOpenAI(opts: { clave: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string }): Promise<ListaModelosOpenAI> {
+  const clave = (opts.clave ?? '').trim();
+  if (!clave) return SIN_LISTA('Pega tu clave para ver los modelos de tu cuenta. Mientras tanto se usa gpt-4o-mini (consumo muy bajo).');
+  const doFetch = opts.fetchImpl ?? fetch;
+  const base = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const control = new AbortController();
+  const corte = setTimeout(() => control.abort(), opts.timeoutMs ?? 15_000);
+  try {
+    const r = await doFetch(`${base}/models`, { headers: { authorization: `Bearer ${clave}` }, signal: control.signal });
+    const cuerpo = (await r.json().catch(() => ({}))) as { data?: Array<{ id?: unknown }>; error?: { message?: string } };
+    if (!r.ok) {
+      const porQue = r.status === 401 ? 'OpenAI dice que esa clave no vale (revisa que la pegaste entera).' : r.status === 429 ? 'OpenAI dice que la cuenta llegó a su límite o no tiene saldo.' : 'OpenAI no dejó ver los modelos de la cuenta.';
+      return SIN_LISTA(`${porQue} Se usará gpt-4o-mini (consumo muy bajo).`);
+    }
+    const modelos = ordenarModelosOpenAI((cuerpo.data ?? []).map((m) => String(m?.id ?? '')));
+    if (!modelos.length) return SIN_LISTA('La cuenta no devolvió modelos para conversar. Se usará gpt-4o-mini (consumo muy bajo).');
+    const elegido = modelos.find((m) => m.id === MODELO_OPENAI_POR_DEFECTO)?.id ?? modelos[0]!.id;
+    return { ok: true, modelos, elegido, detalle: `Tu cuenta tiene ${modelos.length} modelos para conversar. Te recomendamos ${elegido}.` };
+  } catch {
+    return SIN_LISTA(control.signal.aborted ? 'OpenAI tardó demasiado en contestar. Se usará gpt-4o-mini (consumo muy bajo).' : 'No se pudo llegar a OpenAI (revisa la conexión a internet). Se usará gpt-4o-mini (consumo muy bajo).');
+  } finally {
+    clearTimeout(corte);
+  }
+}
+
 export function presetDe(id: string): PresetServicio | undefined {
   return SERVICIOS_OPENAI.find((s) => s.id === id);
 }

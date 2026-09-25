@@ -9,6 +9,14 @@
  *   npm run demo
  */
 
+// Un corte de red a mitad de una descarga no debe tumbar la demo entera (igual que quick.ts y main.ts).
+process.on('unhandledRejection', (razon) => {
+  console.error('[sistema] fallo sin atender (se sigue):', razon);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[sistema] error inesperado (se sigue):', error);
+});
+
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { createSender } from '../src/outbound/sender.js';
@@ -33,6 +41,7 @@ import { politicaDesdeConfig } from '../src/salud/politica.js';
 import { crearMonitor, startMonitorSalud } from '../src/salud/monitor.js';
 import { startGoteo } from '../src/campanas/goteo.js';
 import { crearServicioAjustes } from '../src/ajustes/generales.js';
+import { conReglaGsg } from '../src/entregas/regla-gsg.js';
 import { crearServicioStickers } from '../src/stickers/stickers.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,6 +55,7 @@ import { cargarLote } from '../src/rutas/cargar.js';
 import { crearServicioPlan } from '../src/plan/servicio.js';
 import { crearServicioVoz } from '../src/voz/servicio.js';
 import { crearFiabilidad } from '../src/salud/fiabilidad.js';
+import { crearServicioProcesos } from '../src/procesos/servicio.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE = `http://localhost:${PORT}`;
@@ -90,15 +100,20 @@ const salud = crearMonitor({
   phoneNumberId: () => settings.current().phoneNumberId,
 });
 
-const sender = createSender({
-  repos,
-  wa,
-  phoneNumberId: () => settings.current().phoneNumberId,
-  warmup: politica().warmup,
-  maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
-  salud,
-  politica,
-});
+// La regla del dueño en «Solo lo de GSG», como en produccion (src/plataforma/tienda.ts).
+let entregasDeLaRegla: Awaited<ReturnType<typeof crearServicioEntregas>> | null = null;
+const sender = conReglaGsg(
+  createSender({
+    repos,
+    wa,
+    phoneNumberId: () => settings.current().phoneNumberId,
+    warmup: politica().warmup,
+    maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
+    salud,
+    politica,
+  }),
+  { entregas: () => entregasDeLaRegla },
+);
 
 /** Cola de pega: envia en el acto en vez de pasar por Redis. */
 const queue: OutboundQueue = {
@@ -386,7 +401,9 @@ const entregas = await crearServicioEntregas({
   publicBaseUrl: config.PUBLIC_BASE_URL,
   bus,
   geo: { bbox: config.bbox, cobertura: config.coverageName },
+  modo: () => ajustes.modo(),
 });
+entregasDeLaRegla = entregas;
 for (const [nombre, body] of [
   ['entrega_confirmacion', 'Hola {{1}}, hoy le llevamos {{2}} de {{3}}. ¿Nos confirma que va a poder recibirlo? Responda SÍ o NO.'],
   ['entrega_motorizado', 'Nuevo pedido para {{1}}: {{2}}. Pin: {{3}}. ¿En cuántos minutos lo entregas?'],
@@ -401,7 +418,7 @@ const plan = await crearServicioPlan({ settingsRepo, url: '', token: '', baseUrl
 plan.arrancar();
 const mediaDir = mkdtempSync(join(tmpdir(), 'wa-demo-media-'));
 const voz = await crearServicioVoz({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, sender, mediaDir });
-const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista, bus, entrenamiento, entregas, plan, voz });
+const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => ajustes.nombreNegocio(), supervisor: () => politica().avisarA, lista, bus, entrenamiento, entregas, plan, voz, modo: () => ajustes.modo() });
 entrenamiento.conectarIA(iaParaEntrenar(ia));
 // El resumen de la mañana y de la tarde al supervisor: en la demo se prueba con "Mandar ahora".
 const resumenes = await crearServicioResumenes({ settingsRepo, sender, ajustes: () => ajustes.resumenes(), supervisor: () => politica().avisarA, nombreNegocio: () => ajustes.nombreNegocio(), entregas, ia: () => (ia.estado().tieneToken ? { completar: (m, o) => ia.completar(m, o) } : null), whatsappConectado: () => true, zonaHoraria: () => ajustes.zonaHoraria(), timezone: config.timezone, publicBaseUrl: config.PUBLIC_BASE_URL });
@@ -436,7 +453,34 @@ const fiabilidad = await crearFiabilidad({
 });
 const pararFiabilidad = fiabilidad.arrancar();
 process.on('exit', () => pararFiabilidad());
-const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista, entrenamiento, entregas, conexionGsg, simuladorGsg, plan, voz, resumenes, fiabilidad, mediaDir, settingsRepo });
+// La demo NUNCA usa la vinculacion real (.wa-auth): si la compartiera, se
+// conectaria al WhatsApp de la tienda en paralelo con el servidor de verdad.
+const authDir = mkdtempSync(join(tmpdir(), 'wa-demo-auth-'));
+// Los procesos: con la plantilla de entregas activa (la demo es GSG Courier) y
+// una corrida de ejemplo con números de prueba, que nunca salen a WhatsApp.
+const procesos = await crearServicioProcesos({
+  repos,
+  sender,
+  nombreNegocio: () => ajustes.nombreNegocio(),
+  timezone: config.timezone,
+  plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru!,
+  distritos: config.distritos,
+  gsgPorDefecto: true,
+  opciones: opcionesDesdeConfig(config),
+  salud,
+  politica,
+  clasificar: () => (ia.activa() ? (m) => ia.clasificarOperativo(m) : undefined),
+  log: (m, d) => console.warn(`[procesos] ${m}`, d ?? ''),
+});
+await procesos.cargar();
+{
+  const citas = await procesos.crearDesdePlantilla('confirmaciones', 'Confirmar citas de mañana');
+  const manana = new Date(Date.now() + 24 * 60 * 60_000).toLocaleDateString('es-PE', { timeZone: config.timezone, day: '2-digit', month: '2-digit', year: 'numeric' });
+  await procesos.cargarPersonas(citas.id, { nombre: 'Citas de mañana (demo)', texto: `telefono;nombre;fecha;hora\n900000101;Ana Prueba;${manana};10:30\n900000102;Luis Prueba;${manana};15:00\n900000103;Rosa Prueba;${manana};17:00`, origen: 'prueba' });
+  await procesos.crearDesdePlantilla('datos', 'Completar fichas de clientes');
+}
+const app = await buildServer({ config, repos, settings, wa, sender, queue, logger: false, salud, politica, ajustes, stickers, bus, ia, lista, entrenamiento, entregas, conexionGsg, simuladorGsg, plan, voz, resumenes, fiabilidad, mediaDir, settingsRepo, authDir, procesos });
+procesos.arrancar(3_000);
 startMotorLista({ repos, lista, sender, opciones: opcionesDesdeConfig(config), nombreNegocio: () => ajustes.nombreNegocio(), usarPlantilla: () => false, salud, politica, horarioExtra: () => ({ desde: entregas.ajustes().horarioEntregas.desde, hasta: entregas.ajustes().horarioEntregas.extendidoHasta }) });
 startMotorEntregas({ repos, entregas, opciones: opcionesDesdeConfig(config), salud, politica, log: (m, d) => console.warn(`[entregas] ${m}`, d ?? '') }, 3_000);
 const desconectarWebhooks = encolarEventos(bus, repos.webhooks);

@@ -365,6 +365,28 @@ const QUE_ES: Record<string, string> = {
   TRACKING_SECRET: 'una clave larga y secreta cualquiera (firma los enlaces): por ejemplo, 32 letras y números al azar',
 };
 
+/**
+ * Si la direccion publica sirve para produccion. Con ella salen los enlaces
+ * que llegan por WhatsApp (la pagina del motorizado, la evidencia de una
+ * conversacion) y la que se le da a GSG para sus avisos: con localhost o sin
+ * https, nada de eso abre fuera de esta maquina. null = esta bien.
+ */
+export function avisoDireccionPublica(url: string): string | null {
+  const limpia = (url ?? '').trim();
+  if (!limpia) return 'no hay dirección pública (PUBLIC_BASE_URL): los enlaces que salen por WhatsApp y los avisos de GSG no tendrán a dónde apuntar.';
+  let host = '';
+  try {
+    host = new URL(limpia).hostname.toLowerCase();
+  } catch {
+    return `la dirección pública «${limpia}» no es una dirección web válida.`;
+  }
+  if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host.endsWith('.local') || /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host)) {
+    return `la dirección pública es ${limpia}, que solo abre en esta máquina: los enlaces que llegan por WhatsApp (página del motorizado, evidencias) y los avisos de GSG no funcionarán fuera de aquí. En producción pon PUBLIC_BASE_URL con el dominio https.`;
+  }
+  if (!limpia.toLowerCase().startsWith('https://')) return `la dirección pública ${limpia} no usa https: WhatsApp y GSG la verán como insegura. Pon el certificado y usa https://.`;
+  return null;
+}
+
 function explicarVariable(nombre: string, mensaje: string): string {
   const que = QUE_ES[nombre];
   const falta = /required/i.test(mensaje) ? 'falta' : mensaje;

@@ -168,27 +168,33 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     expect(estado.resultados).toHaveLength(GUIONES.length);
   }, 480_000);
 
-  it('el cliente que pregunta por dónde va oye que el motorizado ya está cerca, y la hora con lo que falta', async () => {
-    const curioso = (await api('GET', '/admin/desarrollador/vivo/guiones')).body.resultados.find((x: ResultadoGuion) => x.guion === 'curioso') as ResultadoGuion;
-    const respuestas = curioso.pasos.map((p) => p.respuesta ?? '').join('\n');
-    expect(respuestas).toMatch(/va en camino con .* le llega alrededor de las \d{1,2}:\d{2} \(faltan unos/);
-    expect(respuestas).toMatch(/ya está cerca de su dirección/);
+  it('regla del dueño: «¿por qué?» → explicación → pin → UBI REGISTRADA → «¿a qué hora llega?» → SILENCIO; y «cuánto cuesta el envío» → cierre con el número → SILENCIO', async () => {
+    const resultados = (await api('GET', '/admin/desarrollador/vivo/guiones')).body.resultados as ResultadoGuion[];
+    const pin = resultados.find((x) => x.guion === 'porque_y_pin')!;
+    expect(pin.pasos.map((p) => p.ok)).toEqual(pin.pasos.map(() => true));
+    expect(pin.pasos[0]!.respuesta).toContain('Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado.');
+    expect(pin.pasos[1]!.respuesta).toMatch(/^✅ Ubicación registrada correctamente\./);
+    expect(pin.pasos[1]!.respuesta).not.toMatch(/SÍ o NO/);
+    expect(pin.pasos[2]!.respuesta).toBeNull();
+    const consulta = resultados.find((x) => x.guion === 'consulta')!;
+    expect(consulta.pasos[0]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
+    expect(consulta.pasos[1]!.respuesta).toBeNull();
   });
 
   it('«Mis casos»: se guarda, se edita, se corre de punta a punta y se borra', async () => {
+    // Regla del dueño: al cliente solo le llega el cierre una vez; después, silencio.
     const miCaso = [
       'titulo: Reclama y luego cancela',
       'inicio: con ubicación',
       'cliente: si, lo recibo hoy',
-      '=> estado: con motorizado',
+      '=> dice: no se reciben consultas',
       'motorizado: 25',
       '=> estado: en camino',
       'cliente: por donde va??',
-      '=> dice: va en camino',
+      '=> calla',
       'adelantar: pasada la hora',
       'cliente: ya paso la hora y no llega nada',
-      '=> estado: para una persona',
-      '=> dice: disculpe la demora',
+      '=> calla',
     ].join('\n');
     const revisado = await api('POST', '/admin/desarrollador/vivo/casos/revisar', { texto: miCaso });
     expect(revisado.status).toBe(200);

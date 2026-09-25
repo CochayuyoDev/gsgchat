@@ -1163,6 +1163,22 @@ numero, venga de una campana, una secuencia, el motor de rutas, el chat a
 mano o el asistente. Cada intento queda anotado como `allowlist`. Vacio es
 produccion.
 
+Tres formas de estar en modo prueba, de más fuerte a más suave:
+
+1. **`SOLO_NUMEROS` en el `.env`** (lo fija quien instala): manda sobre todo.
+   La pantalla puede recortar la lista, nunca ampliarla ni quitarla. Para salir
+   hay que vaciar la línea y reiniciar. Al arrancar, la consola lo avisa en
+   grande (`main.ts` y `npm run quick`).
+2. **Ajustes → Modo prueba** (con la lista en pantalla), sin reiniciar.
+3. **Hoy → «Modo prueba con mi número»**: un clic, solo tu número, con cartel
+   arriba y «Salir del modo prueba».
+
+Los números del Módulo desarrollador (clientes y motorizados de prueba) nunca
+salen al WhatsApp real en ningún modo. Antes de atender a los clientes de GSG
+de verdad, el chequeo «¿Está listo para GSG?» → «Para salir a producción»
+tiene que decir que se está **fuera del modo prueba** (ver
+`docs/PASO-A-PRODUCCION.md`).
+
 ### Lo que WhatsApp Web reentrega al reconectar
 
 Al abrir la sesion, WhatsApp Web vuelve a entregar los ultimos mensajes de
@@ -2055,6 +2071,12 @@ webhook que pegan WooCommerce y Shopify, con su firma).
 ## Puesta en marcha
 
 ### El camino corto para GSG (un VPS, sin Postgres)
+
+La lista de lo que le falta hacer al dueño para salir a producción, en
+palabras simples, está en **`docs/PASO-A-PRODUCCION.md`**; y en el panel,
+Módulo desarrollador → «¿Está listo para GSG?» → «Para salir a producción»
+dice en verde o en rojo cada cosa (WhatsApp, GSG real, https, soporte,
+supervisor, modo prueba, agente operativo, IA, motorizados).
 
 Lo mínimo para que GSG lo use de verdad, en ese orden:
 

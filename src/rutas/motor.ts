@@ -137,6 +137,13 @@ export interface MotorDeps {
    * Sin boton, el mensaje explica el camino del clip.
    */
   conBoton?: () => boolean;
+  /**
+   * El primer mensaje de una solicitud que es de una entrega de GSG (ver
+   * entregas → textoSolicitudUbicacion): la plantilla con producto, empresa,
+   * codigo, monto... null = no es de una entrega, va la redaccion de siempre.
+   * Los recordatorios siguen con sus textos cortos de siempre.
+   */
+  textoSolicitud?: (solicitud: Solicitud) => Promise<string | null>;
 }
 
 export interface ResultadoTick {
@@ -410,6 +417,8 @@ export function crearMotor(deps: MotorDeps): Motor {
     const ventanaAbierta = Boolean(contacto?.lastInboundAt && ahora().getTime() - contacto.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
     const conPlantilla = deps.usarPlantilla() && !ventanaAbierta;
     const elegida = conPlantilla ? await plantillaPara(paso, ahora()) : null;
+    // La primera solicitud de una entrega de GSG: la plantilla con los datos del envio.
+    const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud).catch(() => null) : null;
     // La cadencia por cliente la fija el reparto (espera e intentos), no la
     // politica general: ver `SendJob.limitesContacto`.
     const limitesContacto = {
@@ -431,7 +440,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           kind: 'interactive',
           category: 'UTILITY',
           // La redaccion que le toca a este cliente en este intento.
-          interactive: { body: textoDelPaso(paso, ctx, `${phone}:${solicitud.intentos}`), locationRequest: true },
+          interactive: { body: deEntrega || textoDelPaso(paso, ctx, `${phone}:${solicitud.intentos}`), locationRequest: true },
           limitesContacto,
         });
 
@@ -580,7 +589,16 @@ export function crearMotor(deps: MotorDeps): Motor {
         };
       }
 
-      const [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+      let [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+      // Numeros del dia: una persona detuvo los mensajes automaticos a ese
+      // numero. No se le escribe; se aparta unos minutos para que no tape la
+      // cola y se vuelve a mirar (al reanudarlo sale en cuanto le toque).
+      const pausado = async (phone: string | null): Promise<boolean> =>
+        Boolean(phone) && typeof repos.entregas?.pausadoPorTelefono === 'function' && (await repos.entregas.pausadoPorTelefono(phone!).catch(() => false));
+      for (let vueltas = 0; siguiente && vueltas < 50 && (await pausado(siguiente.phone)); vueltas++) {
+        await repos.rutas.actualizarSolicitud(siguiente.id, { proximoIntentoAt: new Date(momento.getTime() + 5 * 60_000) });
+        [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+      }
       if (!siguiente) {
         const lotesCerrados = await cerrarLotesTerminados();
         return { accion: 'nada', motivo: 'no hay nada pendiente', lotesCerrados };

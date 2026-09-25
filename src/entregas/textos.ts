@@ -9,6 +9,7 @@
  * comprueba que la hora siga dentro; si no, sale el texto de siempre.
  */
 import { z } from 'zod';
+import type { DatosEnvio } from './repo.js';
 export const ajustesEntregasSchema = z.object({
   /** Minutos que se suman a lo que dice el motorizado antes de avisar al cliente. */
   margenMinutos: z.number().int().min(0).max(240).default(60),
@@ -27,7 +28,7 @@ export const ajustesEntregasSchema = z.object({
   /** Si la IA lee las respuestas que las reglas no entienden. */
   leerConIA: z.boolean().default(true),
   /** Si el pin del cliente se manda al motorizado como ubicacion nativa ademas del enlace. */
-  mandarPinAlMotorizado: z.boolean().default(true),
+  mandarPinAlMotorizado: z.boolean().default(false),
   /** Si al cliente se le escribe cuando el motorizado dice "entregado". */
   avisarEntregado: z.boolean().default(true),
   /** Si a un cliente que pregunta "donde esta mi pedido" se le contesta solo (sin IA), segun el estado. */
@@ -40,6 +41,16 @@ export const ajustesEntregasSchema = z.object({
   usarBotones: z.boolean().default(true),
   /** Si al cliente se le avisa cuando el motorizado escribe "cerca" / "llegando". */
   avisarCerca: z.boolean().default(true),
+  /**
+   * Regla del dueño (modo «Solo lo de GSG»): «El único proceso de GSGchat es
+   * disparar mensajes. Una vez que la IA manda el mensaje de UBI REGISTRADA,
+   * ahí llega la IA: ya no vuelve a responder.» Encendido: tras UBI REGISTRADA
+   * (o tras el cierre por una consulta) al cliente no se le escribe NADA más
+   * por ese pedido: ni confirmación SÍ/NO, ni hora de llegada, ni «cerca», ni
+   * «entregado», ni recordatorios, ni IA, ni stickers. Lo del motorizado y lo
+   * que se reporta a GSG sigue igual por dentro. Apagado: como antes.
+   */
+  silencioTrasUbi: z.boolean().default(true),
   /**
    * Cliente recurrente: si mando su ubicacion hace menos de `diasMaximo`
    * dias, en vez de pedirle el pin se le propone esa direccion ("¿la misma
@@ -127,6 +138,7 @@ export const ajustesEntregasSchema = z.object({
       graciasYConfirmarVarios: z.string().max(1000).default(''),
       confirmarOtroPedido: z.string().max(1000).default(''),
       confirmada: z.string().max(1000).default(''),
+      confirmadaYaAvisado: z.string().max(1000).default(''),
       cancelada: z.string().max(1000).default(''),
       cambio: z.string().max(1000).default(''),
       motorizadoNuevo: z.string().max(1500).default(''),
@@ -159,6 +171,9 @@ export const ajustesEntregasSchema = z.object({
       motorizadoEnlace: z.string().max(1000).default(''),
       ubicacionFueraDeZona: z.string().max(1000).default(''),
       clienteCanceladoGsg: z.string().max(1000).default(''),
+      solicitudUbicacion: z.string().max(2000).default(''),
+      porQueUbicacion: z.string().max(1000).default(''),
+      cierreAgente: z.string().max(1000).default(''),
     })
     .default({}),
 });
@@ -203,12 +218,31 @@ export interface ContextoTexto {
   hastaExtendido?: string | null;
   /** El numero de soporte ya en palabras, del ajuste. */
   soporte?: string | null;
+  /**
+   * El numero que se le da al cliente en el cierre y en UBI REGISTRADA: el del
+   * motorizado de ese pedido si ya hay uno; si no, el de soporte; si tampoco,
+   * el del WhatsApp de la tienda. Nunca vacio.
+   */
+  telefonoMotorizado?: string | null;
   /** Los kilometros hasta el pin, ya en palabras ("unos 14 km"). */
   km?: string | null;
   /** La zona que se cubre, en palabras ("todo Lima y Callao"). */
   cobertura?: string | null;
   /** Un enlace propio del mensaje (la pagina del motorizado). */
   enlace?: string | null;
+  /** Lo que GSG cuenta del envio (producto, empresa, codigo, monto, quien firma): lo que falta no sale. */
+  envio?: DatosEnvio | null;
+}
+
+/**
+ * Las variables de los datos del envio: si una viene vacia, se quita la LINEA
+ * entera (nada de «Monto a Cobrar: » suelto ni «undefined»).
+ */
+const VARIABLES_DE_LINEA = ['producto', 'empresa', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'direccionCompleta'] as const;
+
+/** «516 - Zapatería Lima», o lo que haya de los dos. */
+export function empresaEnPalabras(envio?: DatosEnvio | null): string {
+  return [envio?.empresaCodigo, envio?.empresaNombre].map((p) => (p ?? '').trim()).filter(Boolean).join(' - ');
 }
 
 /** "14:00" → "2:00 p. m."; "09:30" → "9:30 a. m.". */
@@ -290,12 +324,31 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
     hasta: ctx.hasta ?? '',
     hastaExtendido: ctx.hastaExtendido ?? '',
     soporte: ctx.soporte ?? '',
+    telefonoMotorizado: ctx.telefonoMotorizado?.trim() || ctx.soporte?.trim() || 'este mismo número de WhatsApp',
     km: ctx.km ?? '',
     cobertura: ctx.cobertura ?? '',
     enlace: ctx.enlace ?? '',
+    producto: ctx.envio?.producto?.trim() || '',
+    empresa: empresaEnPalabras(ctx.envio),
+    tracking: ctx.envio?.tracking?.trim() || '',
+    nroPedido: ctx.envio?.nroPedido?.trim() || '',
+    metodoPago: ctx.envio?.metodoPago?.trim() || '',
+    monto: ctx.envio?.monto?.trim() || '',
+    remitente: ctx.envio?.remitente?.trim() || '',
+    direccionCompleta: [ctx.distrito, ctx.direccion].map((p) => (p ?? '').trim()).filter(Boolean).join(' - '),
   };
-  return texto
+  let base = texto;
+  // Sin quien firma: «Soy {remitente} de la empresa…» pasa a «Te escribimos de la empresa…».
+  if (!valores.remitente) base = base.replace(/Soy\s+\{remitente\}\s+de\b/g, 'Te escribimos de');
+  // Una linea con un dato del envio que no vino se quita entera.
+  base = base
+    .split('\n')
+    .filter((linea) => !VARIABLES_DE_LINEA.some((v) => linea.includes(`{${v}}`) && !valores[v]))
+    .join('\n');
+  return base
     .replace(/\{(\w+)\}/g, (_m, clave: string) => valores[clave] ?? '')
+    // «¡Hola !» cuando no hay nombre.
+    .replace(/¡Hola\s+!/g, '¡Hola!')
     // "Hola , " cuando no hay nombre.
     .replace(/Hola\s*,/g, 'Hola,')
     .replace(/\s+,/g, ',')
@@ -305,25 +358,43 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
     .replace(/\.\.(?!\.)/g, '.')
     .trim();
 }
+/**
+ * El cierre (regla del dueño): «por este canal no se reciben consultas», se
+ * deriva a un humano y se da el número del motorizado ({telefonoMotorizado}:
+ * el del motorizado de ese pedido si ya hay uno; si no, el de soporte; si
+ * tampoco, el del WhatsApp de la tienda). Va pegado a «Ubicación registrada
+ * correctamente» y es también el mensaje de cierre ante cualquier consulta.
+ */
+export const TEXTO_CIERRE = 'Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: {telefonoMotorizado}.';
+const CIERRE_UBICACION = TEXTO_CIERRE;
+
 /** Los textos de siempre. Se usan cuando la pantalla no guardo otros. */
 export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string> = {
   // Solo el enlace del mapa: nada de latitud y longitud a la vista del cliente.
-  ubicacionRegistrada: '✅ Ubicación registrada\n{mapa}\n\nUn motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
-  proponerUbicacion: 'Hola {nombre}, le escribimos de {negocio}: hoy le llevamos {pedido}. ¿Se lo llevamos a la misma dirección de la última vez?\n{mapa}\nResponda SÍ si es la misma; si es otra, mándenos su ubicación desde el clip 📎 → Ubicación.',
+  // Es a la vez el cierre del agente operativo: despues de esto la IA ya no
+  // contesta en ese chat (el sistema sigue con la hora de llegada y el entregado).
+  ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.`,
+  solicitudUbicacion: '¡Hola {nombreCompleto}! Soy {remitente} de la empresa de entregas GSG. Tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
+  porQueUbicacion: 'Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado. ¿Podrías compartir tu ubicación por WhatsApp, por favor? (clip 📎 → Ubicación)',
+  cierreAgente: TEXTO_CIERRE,
+  proponerUbicacion: 'Hola {nombre}, somos {negocio}: hoy le llevamos {pedido}. ¿Se lo llevamos a la misma dirección de la última vez?\nResponda SÍ si es la misma; si es otra, mándenos su ubicación desde el clip 📎 → Ubicación.',
   ubicacionOtra: 'Perfecto, {nombre}. Mándenos su ubicación actual desde el clip 📎 → Ubicación → Enviar tu ubicación actual, y seguimos con {pedido}.',
   motorizadoTiempoDudoso: '¿Seguro? Hasta {pedido} son {km}. Responde otra vez solo con los minutos, por favor.',
   motorizadoFueraDeFlujo: 'Por aquí solo coordino los pedidos: tu ruta, los minutos, "cerca", "entregado" o "no puedo". Los datos de los clientes no se comparten por este chat; si necesitas algo más, habla con el coordinador.',
-  pedirConfirmacion: 'Hola {nombre}, le escribimos de {negocio}. Hoy le llevamos {pedido}. ¿Nos confirma que va a poder recibirlo? Responda SÍ para confirmar o NO si prefiere cancelarlo.',
+  pedirConfirmacion: 'Hola {nombre}, somos {negocio}. Hoy le llevamos {pedido}. ¿Nos confirma que va a poder recibirlo? Responda SÍ para confirmar o NO si prefiere cancelarlo.',
   insistirConfirmacion: 'Hola {nombre}, seguimos pendientes de {pedido} de {negocio}. ¿Lo recibe hoy? Responda SÍ o NO, por favor.',
   preguntarOtraVez: 'Disculpe, no me quedó claro. ¿Recibe hoy {pedido}? Responda SÍ para confirmar, NO para cancelar, o cuéntenos si prefiere otro día u otra dirección.',
-  graciasYConfirmar: '✅ Ubicación registrada\n{mapa}\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.',
-  graciasYConfirmarVarios: '✅ Ubicación registrada ({pedidos})\n{mapa}\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.',
+  // El mismo aviso completo que «Ubicación registrada» y, al final, la pregunta.
+  graciasYConfirmar: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.`,
+  graciasYConfirmarVarios: `✅ Ubicación registrada correctamente ({pedidos}).\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.`,
   confirmarOtroPedido: 'Y {pedido}, ¿también lo recibe hoy? Responda SÍ o NO.',
   // El mismo aviso del motorizado, horario y soporte que «Ubicación registrada».
+  // Si ya recibio el aviso completo al mandar su ubicacion: solo el ok, sin repetirlo.
+  confirmadaYaAvisado: 'Perfecto, {pedido} queda confirmado para hoy. ¡Gracias!',
   confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\nUn motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
   cancelada: 'Entendido, dejamos {pedido} sin entregar por hoy. Si cambia de opinión, escríbanos por aquí. Gracias.',
   cambio: 'Entendido, tomamos nota. Un compañero de {negocio} se comunicará con usted para coordinar {pedido}. Gracias.',
-  motorizadoNuevo: '🛵 {urgente}Nuevo pedido: {pedido}\nCliente: {nombreCompleto}{distrito}\n📍 {mapa}\n{notas}\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',
+  motorizadoNuevo: '🛵 {urgente}Nuevo pedido: {pedido}\nCliente: {nombreCompleto}{distrito}\n{notas}\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',
   motorizadoInsistir: 'Hola {motorizado}, sigo esperando tu tiempo para {pedido} ({nombre}). ¿En cuántos minutos lo entregas?',
   motorizadoPreguntarOtraVez: 'No te entendí. Para {pedido}: responde solo los minutos (ej. 40), o "no puedo" si no lo vas a llevar.',
   motorizadoGracias: 'Anotado: {pedido} en {minutosMotorizado}. Al cliente le avisamos que llega en {minutos} aprox. Gracias.',
@@ -332,7 +403,7 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   motorizadoEntregado: 'Perfecto, {pedido} entregado. ¡Gracias!',
   motorizadoNoEntregado: 'Anotado: {pedido} ({nombre}) no se pudo entregar. Una persona de {negocio} lo verá y te avisa qué hacer.',
   motorizadoNoEntregadoPreguntamos: 'Anotado: {pedido} ({nombre}) no se pudo entregar. Le estamos preguntando al cliente si volvemos hoy: si dice que sí, te mando el pin otra vez.',
-  clienteEntregado: '¡Listo! {pedido} quedó entregado. Gracias por su compra en {negocio}. Cualquier cosa, escríbanos por aquí.',
+  clienteEntregado: '¡Listo! {pedido} quedó entregado. Gracias por confiar en {negocio}. Cualquier cosa, escríbanos por aquí.',
   dondeEstaUbicacion: 'Hola {nombre}, para poder mandarle {pedido} nos falta su ubicación. Compártanos el pin desde WhatsApp (el clip 📎 → Ubicación) o un enlace de Google Maps.',
   dondeEstaConfirmacion: 'Hola {nombre}, {pedido} está listo para salir; solo falta que nos confirme que lo recibe hoy. Responda SÍ para confirmar o NO si prefiere cancelarlo.',
   dondeEstaMotorizado: 'Hola {nombre}, {pedido} ya está con un motorizado. En cuanto nos diga su tiempo le avisamos por aquí a qué hora le llega.',
@@ -343,7 +414,7 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   segundaVisitaPreguntar: 'Hola {nombre}, el motorizado de {negocio} pasó con {pedido} y no encontró a nadie. ¿Se lo llevamos de nuevo hoy? Responda SÍ para que vuelva a pasar, o NO si prefiere coordinar otro día.',
   segundaVisitaSi: 'Perfecto, {nombre}: el motorizado vuelve a pasar hoy con {pedido}. En cuanto nos diga su tiempo le avisamos por aquí la hora aproximada.',
   segundaVisitaNo: 'Entendido, {nombre}. Una persona de {negocio} se comunicará con usted para coordinar {pedido} otro día. Gracias.',
-  motorizadoSegundaVisita: '🔁 {urgente}Segunda visita: {pedido}\nCliente: {nombreCompleto}{distrito} (ya está en casa)\n📍 {mapa}\n{notas}\n¿En cuántos minutos vuelves a pasar? Responde solo con los minutos (ej. 20).',
+  motorizadoSegundaVisita: '🔁 {urgente}Segunda visita: {pedido}\nCliente: {nombreCompleto}{distrito} (ya está en casa)\n{notas}\n¿En cuántos minutos vuelves a pasar? Responde solo con los minutos (ej. 20).',
   clienteCerca: 'Hola {nombre}, {motorizado} está a unos minutos de su dirección con {pedido}. Por favor esté atento al timbre o al teléfono. ¡Gracias!',
   motorizadoCerca: 'Listo: a {nombre} le avisamos que estás por llegar con {pedido}.',
   motorizadoRuta: '🗺️ Tu ruta de hoy ({paradas} paradas), en este orden:',
@@ -382,7 +453,7 @@ export const TEXTOS_PARA_MOTORIZADO: ReadonlySet<keyof AjustesEntregas['textos']
 ]);
 /** Las variables que la pantalla enseña junto a cada texto. */
 export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]> = {
-  ubicacionRegistrada: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}'],
+  ubicacionRegistrada: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}'],
   proponerUbicacion: ['{nombre}', '{pedido}', '{negocio}', '{mapa}'],
   ubicacionOtra: ['{nombre}', '{pedido}', '{negocio}'],
   motorizadoTiempoDudoso: ['{pedido}', '{km}', '{motorizado}'],
@@ -390,10 +461,11 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   pedirConfirmacion: ['{nombre}', '{pedido}', '{negocio}', '{direccion}', '{distrito}'],
   insistirConfirmacion: ['{nombre}', '{pedido}', '{negocio}'],
   preguntarOtraVez: ['{nombre}', '{pedido}', '{negocio}'],
-  graciasYConfirmar: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}'],
-  graciasYConfirmarVarios: ['{nombre}', '{pedido}', '{pedidos}', '{negocio}', '{mapa}'],
+  graciasYConfirmar: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}'],
+  graciasYConfirmarVarios: ['{nombre}', '{pedido}', '{pedidos}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}'],
   confirmarOtroPedido: ['{nombre}', '{pedido}', '{negocio}'],
   confirmada: ['{nombre}', '{pedido}', '{negocio}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}'],
+  confirmadaYaAvisado: ['{nombre}', '{pedido}', '{negocio}'],
   cancelada: ['{nombre}', '{pedido}', '{negocio}'],
   cambio: ['{nombre}', '{pedido}', '{negocio}'],
   motorizadoNuevo: ['{pedido}', '{nombreCompleto}', '{nombre}', '{distrito}', '{direccion}', '{mapa}', '{lat}', '{lng}', '{notas}', '{motorizado}', '{urgente}'],
@@ -426,6 +498,9 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   motorizadoEnlace: ['{motorizado}', '{enlace}', '{negocio}'],
   ubicacionFueraDeZona: ['{nombre}', '{pedido}', '{negocio}', '{cobertura}'],
   clienteCanceladoGsg: ['{nombre}', '{pedido}', '{negocio}'],
+  solicitudUbicacion: ['{nombreCompleto}', '{nombre}', '{remitente}', '{producto}', '{empresa}', '{tracking}', '{nroPedido}', '{metodoPago}', '{monto}', '{direccionCompleta}', '{direccion}', '{distrito}', '{pedido}', '{negocio}'],
+  porQueUbicacion: ['{nombre}', '{pedido}', '{negocio}', '{soporte}', '{telefonoMotorizado}'],
+  cierreAgente: ['{nombre}', '{pedido}', '{negocio}', '{soporte}', '{telefonoMotorizado}'],
 };
 export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string> = {
   ubicacionRegistrada: 'Al cliente, justo después de mandar su ubicación, cuando no falta nada más (con el enlace del mapa, el horario de entregas y el número de soporte)',
@@ -439,10 +514,11 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   graciasYConfirmar: 'Al cliente, justo después de mandar su ubicación, cuando además falta confirmar',
   graciasYConfirmarVarios: 'Al cliente con VARIOS pedidos hoy, justo después de mandar su ubicación: se le pregunta por el primero',
   confirmarOtroPedido: 'Al cliente con varios pedidos hoy, después de contestar por uno: se le pregunta por el siguiente',
-  confirmada: 'Al cliente, cuando confirma',
+  confirmada: 'Al cliente, cuando confirma (y todavía no recibió el aviso del motorizado, horario y soporte)',
+  confirmadaYaAvisado: 'Al cliente, cuando confirma después de mandar su ubicación (ya recibió el aviso completo)',
   cancelada: 'Al cliente, cuando dice que no lo quiere',
   cambio: 'Al cliente, cuando pide otro día, otra hora u otra dirección (lo sigue una persona)',
-  motorizadoNuevo: 'Al motorizado, con el pin del cliente, para que diga en cuánto entrega',
+  motorizadoNuevo: 'Al motorizado, con el pedido y el cliente (sin mandarle ninguna ubicación), para que diga en cuánto entrega',
   motorizadoInsistir: 'Al motorizado, cuando no contestó',
   motorizadoPreguntarOtraVez: 'Al motorizado, cuando contestó algo que no era un tiempo',
   motorizadoGracias: 'Al motorizado, cuando dio su tiempo',
@@ -472,4 +548,7 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   motorizadoEnlace: 'Al motorizado, con el enlace a su página de pedidos del día (botones grandes, sin instalar nada)',
   ubicacionFueraDeZona: 'Al cliente cuyo pin cae fuera de la zona que se cubre (pasa a una persona)',
   clienteCanceladoGsg: 'Al cliente que ya tenía hora, cuando GSG cancela su pedido',
+  solicitudUbicacion: 'Al cliente, el PRIMER mensaje que le pide la ubicación, con los datos del envío que manda GSG (la línea de un dato que no vino no sale; sin quien firma, dice «Te escribimos de la empresa de entregas GSG»)',
+  porQueUbicacion: 'Al cliente que pregunta por qué le pedimos la ubicación (se le explica y se le vuelve a pedir)',
+  cierreAgente: 'Al cliente que escribe una consulta que no es mandar su ubicación: se le manda UNA vez y el chat pasa a una persona (el asistente deja de contestar)',
 };

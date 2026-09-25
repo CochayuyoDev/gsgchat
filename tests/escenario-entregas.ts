@@ -21,6 +21,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
+import { conReglaGsg } from '../src/entregas/regla-gsg.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { crearMotor, OPCIONES_POR_DEFECTO, type Motor, type ResultadoTick } from '../src/rutas/motor.js';
 import { despacharReportes, type DespachoResumen } from '../src/rutas/gsg.js';
@@ -33,6 +34,8 @@ import { crearMotorEntregas, type MotorEntregas, type ResultadoTickEntregas } fr
 import type { LectorIA } from '../src/entregas/interpretar.js';
 import type { MensajeIA } from '../src/ia/proveedores.js';
 import { crearBus, type Bus, type NombreEvento } from '../src/eventos/bus.js';
+import { crearServicioAjustes } from '../src/ajustes/generales.js';
+import { crearServicioIA, type ServicioIA } from '../src/ia/servicio.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, type FakeRepos, type FakeWhatsApp, CLAVE_API_PRUEBA } from './fakes.js';
 
 export const GSG_URL_FALSA = 'https://gsg.example/api/v1';
@@ -70,6 +73,8 @@ export interface EscenarioEntregas {
   motorReparto: Motor;
   motorEntregas: MotorEntregas;
   ia: IAFalsa;
+  /** El asistente real (solo con `agente: true`). */
+  asistente?: ServicioIA;
   /** El bus de eventos y todo lo que se emitió por él (nombre + payload). */
   bus: Bus;
   eventos: Array<{ nombre: NombreEvento; payload: unknown }>;
@@ -121,7 +126,20 @@ function urlDe(entrada: Parameters<typeof fetch>[0]): string {
 
 export const conPais = (telefono: string): string => (telefono.startsWith('51') ? telefono : `51${telefono}`);
 
-export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia?: boolean; horario?: [number, number]; margenMinutos?: number; /** El reloj arranca aquí (por defecto, ahora). */ arranque?: Date; /** La zona horaria «de Ajustes» (se puede cambiar en la prueba). */ zonaHoraria?: () => string } = {}): Promise<EscenarioEntregas> {
+export async function crearEscenarioEntregas(opciones: {
+  supervisor?: string;
+  ia?: boolean;
+  horario?: [number, number];
+  margenMinutos?: number;
+  /** El reloj arranca aquí (por defecto, ahora). */ arranque?: Date;
+  /** La zona horaria «de Ajustes» (se puede cambiar en la prueba). */ zonaHoraria?: () => string;
+  /**
+   * Con el agente operativo (modo "Solo lo de GSG"): el asistente de verdad,
+   * con su proveedor de mentira que contesta lo que haya en `ia.respuestas`
+   * (solo lo usa para clasificar si se enciende con clave).
+   */
+  agente?: boolean;
+} = {}): Promise<EscenarioEntregas> {
   const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
     RUTAS_HORA_INICIO: String(horaInicio),
@@ -182,16 +200,21 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
   const settings = await createFakeSettings(config);
   const settingsRepo = createMemorySettingsRepo();
 
-  const sender = createSender({
-    repos,
-    wa,
-    phoneNumberId: 'PNID',
-    warmup: { startPerDay: 5000, growth: 2, hardCap: 10000 },
-    maxMarketingPerContact7d: 2,
-    serviceWindowApplies: false,
-    now: reloj,
-    soloNumeros: () => [],
-  });
+  // Como en produccion: la regla del dueño en la puerta hacia el cliente.
+  let entregasDeLaRegla: ServicioEntregas | null = null;
+  const sender = conReglaGsg(
+    createSender({
+      repos,
+      wa,
+      phoneNumberId: 'PNID',
+      warmup: { startPerDay: 5000, growth: 2, hardCap: 10000 },
+      maxMarketingPerContact7d: 2,
+      serviceWindowApplies: false,
+      now: reloj,
+      soloNumeros: () => [],
+    }),
+    { entregas: () => entregasDeLaRegla },
+  );
 
   const conexionGsg = await crearConexionGsg({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, config });
 
@@ -207,7 +230,10 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
     },
   };
 
+  // El agente operativo: el asistente real en modo "Solo lo de GSG".
+  const ajustes = opciones.agente ? await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0 }) : undefined;
   const entregas = await crearServicioEntregas({
+    ...(ajustes ? { modo: () => ajustes.modo() } : {}),
     repos,
     repo: repos.entregas,
     sender,
@@ -225,7 +251,28 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
     geo: { bbox: config.bbox, cobertura: config.coverageName },
     ahora: reloj,
   });
+  entregasDeLaRegla = entregas;
   if (opciones.margenMinutos !== undefined) await entregas.guardarAjustes({ margenMinutos: opciones.margenMinutos });
+  const asistente = opciones.agente
+    ? await crearServicioIA({
+        settingsRepo,
+        settingsKeyBase64: TEST_SETTINGS_KEY,
+        repos,
+        sender,
+        config,
+        nombreNegocio: () => config.businessName,
+        entregas,
+        modo: () => ajustes!.modo(),
+        modelosGratis: ['google/gemma-4-31b-it'],
+        examenAutomatico: false,
+        proveedor: {
+          nombre: 'prueba',
+          async chat(mensajes) {
+            return ia.completar(mensajes);
+          },
+        },
+      })
+    : undefined;
 
   const app = await buildServer({
     config,
@@ -239,11 +286,13 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
     conexionGsg,
     simuladorGsg: simulador,
     gsg: conexionGsg.puerto(),
+    ...(asistente ? { ia: asistente, ajustes } : {}),
   });
   await app.ready();
 
   const opcionesMotor = { ...OPCIONES_POR_DEFECTO, pausaMinSegundos: PAUSA_SEGUNDOS, pausaMaxSegundos: PAUSA_SEGUNDOS, horaInicio, horaFin, negocio: config.businessName };
-  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0 });
+  // Como en produccion (src/servicios.ts): la primera solicitud de una entrega sale con la plantilla de GSG.
+  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) });
   const motorEntregas = crearMotorEntregas({ repos, entregas, opciones: opcionesMotor, ahora: reloj, azar: () => 0 });
 
   const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
@@ -274,6 +323,7 @@ export async function crearEscenarioEntregas(opciones: { supervisor?: string; ia
     motorReparto,
     motorEntregas,
     ia,
+    asistente,
     bus,
     eventos,
     ahora: reloj,

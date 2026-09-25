@@ -39,6 +39,8 @@ export interface ItemMenu {
    * campanas, ritmo, rastreo) se ensena con "Ver todo".
    */
   avanzado?: boolean;
+  /** Solo si la tienda usa la plantilla de entregas de courier (GSG): Hoy, Números del día, Motorizados, Mapa. */
+  soloGsg?: boolean;
 }
 
 export interface GrupoMenu {
@@ -71,19 +73,46 @@ export function modoVigente(): ModoSistema {
 }
 
 /**
- * El menu de GSG: solo lo que se usa cada dia, sin grupos y sin jerga.
+ * Si la tienda usa la plantilla de entregas de courier (GSG). Lo fija el
+ * arranque (con el servicio de procesos) y lo leen todas las paginas al pintar
+ * el menu; en la plataforma manda el de la tienda de la peticion.
+ */
+let proveedorGsg: () => boolean = () => true;
+export function fijarGsgVigente(f: () => boolean): void {
+  proveedorGsg = f;
+}
+export function gsgVigente(): boolean {
+  try {
+    const tienda = tiendaActual();
+    if (tienda?.gsg) return tienda.gsg();
+    return proveedorGsg();
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * El menu de cada dia: procesos administrativos y operativos, sin grupos y sin
+ * jerga. Inicio, Procesos, Personas y Respuestas van primero; las pantallas de
+ * las entregas de courier (Hoy, Números del día, Motorizados, Mapa) solo se ven
+ * en las tiendas que usan esa plantilla.
  *
  * Es el que se ve por defecto. Todo lo demas (campañas, grupos, rastreo,
  * ritmo, integraciones...) sigue existiendo en el modo completo, que se
  * enciende desde Ajustes.
  */
 export const MENU_GSG: ItemMenu[] = [
-  { id: 'hoy', etiqueta: 'Hoy', href: '/hoy', icono: 'moto', descripcion: 'Las entregas de hoy: a quién falta la ubicación o confirmar, quién las lleva, a qué hora llegan y qué necesita a alguien.' },
+  { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Un vistazo: tus procesos en curso, quién necesita a alguien, los mensajes de hoy y el número.' },
+  { id: 'procesos', etiqueta: 'Procesos', href: '/procesos', icono: 'flujo', descripcion: 'Lo que el sistema hace solo por WhatsApp con tus listas: pedir y validar datos, confirmar y recordar citas, avisar tareas al personal, recordar pagos. Crear desde una plantilla, editar los pasos y cargar personas.' },
+  { id: 'personas', etiqueta: 'Personas', href: '/personas', icono: 'contactos', descripcion: 'Todas las personas de tus procesos: en qué paso va cada una, quién necesita a alguien; pedir ahora, pausar o pasar a una persona.' },
+  { id: 'respuestas', etiqueta: 'Respuestas', href: '/respuestas', icono: 'lista', descripcion: 'Lo que respondió cada persona, paso por paso (DNI, ubicación, SÍ o NO, capturas), para revisar o exportar a Excel.' },
   { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicación.' },
+  { id: 'hoy', etiqueta: 'Hoy', href: '/hoy', icono: 'reloj', descripcion: 'Las entregas de hoy: a quién falta la ubicación o confirmar, quién las lleva, a qué hora llegan y qué necesita a alguien.', soloGsg: true },
+  { id: 'numeros', etiqueta: 'Números del día', href: '/numeros', icono: 'plantilla', descripcion: 'Todos los números que pasó GSG hoy: a quién falta pedirle la ubicación, quién no la manda, quién falta confirmar y quién ya está contactado; marcar uno, varios o todos y pedirles lo que falte.', soloGsg: true },
+  { id: 'motorizados', etiqueta: 'Motorizados', href: '/motorizados', icono: 'moto', descripcion: 'Quiénes reparten hoy: alta, zona, descanso y qué lleva cada uno.', soloGsg: true },
+  { id: 'mapa', etiqueta: 'Mapa del día', href: '/mapa', icono: 'mapa', descripcion: 'Dónde está cada pedido de hoy y cada motorizado, sobre el mapa.', soloGsg: true },
   { id: 'guardados', etiqueta: 'Conversaciones guardadas', href: '/guardados', icono: 'historial', descripcion: 'Las conversaciones ya cerradas: buscarlas, leerlas, exportarlas y devolverlas al chat.' },
-  { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Con qué IA contesta, qué sabe del negocio y si está encendido.' },
-  { id: 'motorizados', etiqueta: 'Motorizados', href: '/motorizados', icono: 'contactos', descripcion: 'Quiénes reparten hoy: alta, zona, descanso y qué lleva cada uno.' },
-  { id: 'mapa', etiqueta: 'Mapa del día', href: '/mapa', icono: 'mapa', descripcion: 'Dónde está cada pedido de hoy y cada motorizado, sobre el mapa.' },
+  { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'El agente operativo: explica por qué se pide cada dato, reconoce lo que no es del trámite y lo pasa a una persona (nada de ventas); con qué IA trabaja y si está encendido.' },
   { id: 'equipo', etiqueta: 'Equipo', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Las cuentas de quienes entran al sistema.', soloAdmin: true },
   { id: 'conexion', etiqueta: 'Conexión', href: '/setup', icono: 'enchufe', descripcion: 'El WhatsApp (QR o API de Meta) y el sistema de GSG.' },
   { id: 'fiabilidad', etiqueta: 'Que todo funcione', href: '/fiabilidad', icono: 'salud', descripcion: 'El WhatsApp vigilado, la prueba de cada mañana, el cupo de hoy y la copia de seguridad.', soloAdmin: true },
@@ -116,6 +145,7 @@ export const MENU_DESARROLLADOR: GrupoMenu = {
     { id: 'dev-generar', etiqueta: 'Clientes de prueba', href: '/desarrollador#generar', icono: 'usuario', descripcion: 'Crea clientes y motorizados de prueba (entran por la API, como los de GSG) y bórralos con un clic. Nada sale al WhatsApp real.', soloAdmin: true },
     { id: 'dev-vivo', etiqueta: 'Ver el flujo en vivo', href: '/desarrollador#vivo', icono: 'chat', descripcion: 'Escribe como si fueras el cliente o el motorizado y mira, paso a paso, qué entendió el sistema, qué respondió y qué le mandó a GSG.', soloAdmin: true },
     { id: 'dev-listo', etiqueta: '¿Está listo para GSG?', href: '/desarrollador#listo', icono: 'salud', descripcion: 'Recorre con un clic todo el contrato con GSG contra el simulador y dice qué funciona y qué falta.', soloAdmin: true },
+    { id: 'dev-procesos', etiqueta: 'Probar un proceso', href: '/desarrollador#procesos', icono: 'flujo', descripcion: 'Simula una corrida de cada plantilla con números de prueba: respuestas buenas, malas, sin respuesta y consultas ajenas, persona por persona.', soloAdmin: true },
   ],
 };
 
@@ -127,6 +157,15 @@ export const MENU_ARRIBA: ItemMenu[] = [
 ];
 
 export const MENU_GRUPOS: GrupoMenu[] = [
+  {
+    id: 'procesos',
+    etiqueta: 'Procesos',
+    items: [
+      { id: 'procesos', etiqueta: 'Procesos', href: '/procesos', icono: 'flujo', descripcion: 'Lo que el sistema hace solo por WhatsApp con tus listas: pedir y validar datos, confirmar y recordar citas, avisar tareas al personal, recordar pagos.' },
+      { id: 'personas', etiqueta: 'Personas', href: '/personas', icono: 'contactos', descripcion: 'Todas las personas de tus procesos y en qué paso va cada una.' },
+      { id: 'respuestas', etiqueta: 'Respuestas', href: '/respuestas', icono: 'lista', descripcion: 'Lo que respondió cada persona, paso por paso, para revisar o exportar.' },
+    ],
+  },
   {
     id: 'atencion',
     etiqueta: 'Atención',
@@ -229,6 +268,8 @@ const ICONOS = {
   reloj: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
   robot: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M8 4h8"/><circle cx="9" cy="13" r="1.2"/><circle cx="15" cy="13" r="1.2"/><path d="M9 16.5h6"/>',
   ayuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
+  flujo: '<rect x="3" y="3" width="7" height="6" rx="1.5"/><rect x="14" y="15" width="7" height="6" rx="1.5"/><path d="M6.5 9v4a2 2 0 0 0 2 2H14"/><path d="m12 13 2 2-2 2"/>',
+  lista: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
 } as const;
 
 export function icono(nombre: keyof typeof ICONOS, clase = 's-ico'): string {
@@ -257,14 +298,14 @@ const CSS = `
   .chip.tono-rojo { background: var(--rojo-suave); color: var(--rojo); }
   .chip.tono-azul { background: var(--azul-suave); color: var(--azul); }
   .chip.tono-gris { background: var(--gris-suave); color: var(--gris); }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 14px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: var(--texto); font: inherit; font-weight: 600; line-height: 1.2; cursor: pointer; text-decoration: none; box-shadow: none; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: var(--texto); font: inherit; font-weight: 600; line-height: 1.2; cursor: pointer; text-decoration: none; box-shadow: none; }
   .btn:hover { border-color: var(--primario); color: var(--primario); }
   .btn.primario { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
   .btn.primario:hover { filter: brightness(1.06); color: var(--primario-texto); }
   .btn.secundario { background: var(--primario-suave); border-color: transparent; color: var(--primario); }
   .btn.peligro { color: var(--rojo); border-color: var(--rojo-suave); background: var(--rojo-suave); }
   .btn.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
-  .btn.sm { min-height: 30px; padding: 4px 10px; font-size: 13px; font-weight: 500; }
+  .btn.sm { min-height: 34px; padding: 6px 12px; font-size: 13.5px; font-weight: 500; }
   .btn:disabled { opacity: .55; cursor: default; }
   .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-4); box-shadow: var(--sombra); }
   .vacio { text-align: center; padding: var(--esp-6) var(--esp-4); color: var(--texto-suave); border: 1px dashed var(--borde); border-radius: var(--radio); background: var(--superficie); }
@@ -354,7 +395,7 @@ const CSS = `
   .s-demo { font-size: 12px; font-weight: 700; color: var(--ambar); background: var(--ambar-suave); border: 1px solid transparent; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
   .s-top-link { color: var(--s-muted); text-decoration: none; font-size: 13.5px; padding: 6px 10px; border-radius: 8px; }
   .s-top-link:hover { background: var(--s-hover); color: var(--s-text); }
-  .s-boton { position: relative; width: 36px; height: 36px; padding: 0; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-muted); border-radius: 9px; cursor: pointer; display: grid; place-items: center; font: inherit; line-height: 1; box-shadow: none; text-decoration: none; }
+  .s-boton { position: relative; width: 38px; height: 38px; padding: 0; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-muted); border-radius: 9px; cursor: pointer; display: grid; place-items: center; font: inherit; line-height: 1; box-shadow: none; text-decoration: none; }
   .s-boton:hover { background: var(--s-hover); color: var(--s-text); }
   .s-boton .s-num { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--rojo); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; }
   .s-boton .s-num:empty { display: none; }
@@ -386,17 +427,21 @@ const CSS = `
   .s-content.lleno { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
   .s-content > .wrap { max-width: 1180px; margin: 0 auto; padding: 0; }
   .s-backdrop { display: none; }
+  /* Fondo compartido de los cajones "a la derecha" (IA y Ayuda): antes se superponian
+     sin avisar y tapaban texto; ahora oscurecen el resto y se cierran al tocar fuera. */
+  .s-panel-fondo { position: fixed; inset: 0; z-index: 79; background: rgba(10,16,20,.4); opacity: 0; visibility: hidden; transition: opacity .18s ease; }
+  .s-panel-fondo.visible { opacity: 1; visibility: visible; }
 
   /* --- la IA operadora: un cajon a la derecha, en todas las pantallas ---- */
   .s-ia-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-weight: 700; font-size: 13.5px; color: var(--s-accent); border-color: var(--s-accent-soft); background: var(--s-accent-soft); }
   .s-ia-boton:hover { color: var(--primario-texto); background: var(--s-accent); }
-  .s-ia { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: none; flex-direction: column; }
-  .s-ia.abierto { display: flex; }
+  .s-ia { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease, visibility 0s linear .2s; visibility: hidden; pointer-events: none; }
+  .s-ia.abierto { transform: translateX(0); transition: transform .2s ease; visibility: visible; pointer-events: auto; }
   .s-ia-cab { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--s-line); }
   .s-ia-cab b { font-size: 15px; }
   .s-ia-cab .s-ia-sub { color: var(--s-muted); font-size: 12px; display: block; }
   .s-ia-cab .sep { flex: 1; }
-  .s-ia-cerrar, .s-ia-limpiar { border: 0; background: transparent; color: var(--s-muted); cursor: pointer; font: inherit; font-size: 13px; min-width: 36px; min-height: 36px; padding: 6px 8px; border-radius: 8px; box-shadow: none; }
+  .s-ia-cerrar, .s-ia-limpiar { border: 0; background: transparent; color: var(--s-muted); cursor: pointer; font: inherit; font-size: 13px; min-width: 38px; min-height: 38px; padding: 6px 8px; border-radius: 8px; box-shadow: none; }
   .s-ia-cerrar:hover, .s-ia-limpiar:hover { background: var(--s-hover); color: var(--s-text); }
   .s-ia-hilo { flex: 1; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
   .s-ia-b { max-width: 92%; padding: 9px 12px; border-radius: 12px; background: var(--s-hover); white-space: pre-wrap; line-height: 1.45; }
@@ -428,7 +473,7 @@ const CSS = `
   .s-ia-vacio { color: var(--s-muted); font-size: 13.5px; line-height: 1.5; }
   .s-ia-vacio ul { margin: 6px 0 0; padding-left: 18px; }
   .s-ia-vacio li { cursor: pointer; color: var(--s-accent); }
-  @media (max-width: 960px) { .s-ia-boton span { display: none; } .s-ia-boton { padding: 0; width: 36px; } }
+  @media (max-width: 960px) { .s-ia-boton span { display: none; } .s-ia-boton { padding: 0; width: 38px; } }
 
   /* --- el buscador global (Ctrl K): clientes, pedidos de hoy, guardados y modulos --- */
   .s-boton.s-buscar-boton, .s-boton.s-ia-boton, .s-boton.s-ayuda-boton { display: flex; align-items: center; }
@@ -458,8 +503,8 @@ const CSS = `
   /* --- la ayuda de cada pantalla: un cajon a la derecha, como la IA --- */
   .s-ayuda-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-size: 13.5px; white-space: nowrap; flex: none; }
   .s-top-der { flex: none; }
-  .s-ayuda-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: none; flex-direction: column; }
-  .s-ayuda-panel.abierto { display: flex; }
+  .s-ayuda-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease, visibility 0s linear .2s; visibility: hidden; pointer-events: none; }
+  .s-ayuda-panel.abierto { transform: translateX(0); transition: transform .2s ease; visibility: visible; pointer-events: auto; }
   .s-ayuda-cuerpo { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 14px; }
   .s-ayuda-que { color: var(--s-muted); font-size: 13px; line-height: 1.45; margin: 8px 0 12px; }
   .s-ayuda-barra { display: none; color: var(--s-muted); font-size: 12.5px; line-height: 1.45; margin: -4px 0 12px; padding: 8px 10px; border-radius: var(--radio-sm); background: var(--superficie-2); }
@@ -475,7 +520,7 @@ const CSS = `
   .s-ayuda-pie { border-top: 1px solid var(--s-line); padding: 10px 14px 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 13px; }
   .s-ayuda-pie a, .s-ayuda-pie button { color: var(--s-accent); text-decoration: none; cursor: pointer; border: 1px solid var(--s-accent-soft); background: var(--s-accent-soft); border-radius: 9px; padding: 7px 11px; font: inherit; font-size: 13px; font-weight: 600; box-shadow: none; }
   .s-ayuda-pie a.ghost { background: transparent; border-color: var(--s-line); color: var(--s-muted); font-weight: 500; }
-  @media (max-width: 960px) { .s-ayuda-boton span { display: none; } .s-ayuda-boton { padding: 0; width: 36px; } .s-buscar-boton { min-width: 0; width: 36px; padding: 0; justify-content: center; } .s-buscar-boton span, .s-buscar-boton kbd { display: none; } }
+  @media (max-width: 960px) { .s-ayuda-boton span { display: none; } .s-ayuda-boton { padding: 0; width: 38px; } .s-buscar-boton { min-width: 0; width: 38px; padding: 0; justify-content: center; } .s-buscar-boton span, .s-buscar-boton kbd { display: none; } }
 
   @media (max-width: 960px) {
     .s-side { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%); transition: transform .18s ease; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
@@ -554,7 +599,7 @@ const JS = String.raw`
     var ruta = location.pathname;
     document.querySelectorAll('#s-nav-movil a[data-ir]').forEach(function (a) {
       var p = a.getAttribute('data-ir').split('#')[0];
-      var activo = p === ruta || (p === '/hoy' && ruta === '/entregas') || (p === '/entregas' && ruta === '/hoy');
+      var activo = p === ruta || (p === '/hoy' && ruta === '/entregas') || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
       a.classList.toggle('activo', activo);
     });
   }
@@ -603,6 +648,8 @@ const JS = String.raw`
     });
     var activo = exacto || porRuta;
     if (!activo && ruta === '/panel' && !hash) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/panel#inicio"]');
+    /* el editor y las corridas son parte de Procesos */
+    if (!activo && ruta.indexOf('/procesos/') === 0) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/procesos"]');
     /* /entregas y /hoy son la misma pantalla */
     if (!activo && (ruta === '/entregas' || ruta === '/hoy')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
     items.forEach(function (a) { a.classList.toggle('activo', a === activo); });
@@ -884,15 +931,27 @@ const JS = String.raw`
     }).join('');
   }
   function iconoPalChevron() { return '<svg class="s-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>'; }
+  var panelFondo = document.getElementById('s-panel-fondo');
+  function actualizarFondoPaneles() {
+    var iaCajaEl = document.getElementById('s-ia');
+    var abierto = ayudaPanel.classList.contains('abierto') || (iaCajaEl && iaCajaEl.classList.contains('abierto'));
+    panelFondo.classList.toggle('visible', Boolean(abierto));
+  }
+  panelFondo.onclick = function () {
+    ayudaPanel.classList.remove('abierto');
+    var iaCajaEl = document.getElementById('s-ia'); if (iaCajaEl) iaCajaEl.classList.remove('abierto');
+    actualizarFondoPaneles();
+  };
   function apuntarAyuda() { if (ayudaPanel.classList.contains('abierto')) pintarAyuda(); }
   function abrirAyuda() {
     pintarAyuda();
     ayudaPanel.classList.add('abierto');
     var ia = document.getElementById('s-ia'); if (ia) ia.classList.remove('abierto');
+    actualizarFondoPaneles();
   }
   window.abrirAyudaPantalla = abrirAyuda;
-  document.getElementById('s-ayuda').onclick = function () { if (ayudaPanel.classList.contains('abierto')) ayudaPanel.classList.remove('abierto'); else abrirAyuda(); };
-  document.getElementById('s-ayuda-cerrar').onclick = function () { ayudaPanel.classList.remove('abierto'); };
+  document.getElementById('s-ayuda').onclick = function () { if (ayudaPanel.classList.contains('abierto')) ayudaPanel.classList.remove('abierto'); else abrirAyuda(); actualizarFondoPaneles(); };
+  document.getElementById('s-ayuda-cerrar').onclick = function () { ayudaPanel.classList.remove('abierto'); actualizarFondoPaneles(); };
   document.getElementById('s-ayuda-cuerpo').addEventListener('click', function (ev) {
     var pregunta = ev.target.closest('[data-preguntar-ia]');
     if (pregunta) {
@@ -910,7 +969,7 @@ const JS = String.raw`
     ayudaPanel.classList.remove('abierto');
     if (window.abrirOperadorIA) window.abrirOperadorIA(a ? 'Sobre la pantalla ' + a.titulo + ': ' : '');
   };
-  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ayudaPanel.classList.contains('abierto')) ayudaPanel.classList.remove('abierto'); });
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ayudaPanel.classList.contains('abierto')) { ayudaPanel.classList.remove('abierto'); actualizarFondoPaneles(); } });
   window.addEventListener('hashchange', apuntarAyuda);
 
   /* --- la IA operadora ------------------------------------------------- */
@@ -921,7 +980,7 @@ const JS = String.raw`
   var iaHistorial = [];
   try { iaHistorial = JSON.parse(sessionStorage.getItem('wa_ia_hilo') || '[]'); } catch (e) { iaHistorial = []; }
   function iaGuardar() { try { sessionStorage.setItem('wa_ia_hilo', JSON.stringify(iaHistorial.slice(-30))); } catch (e) {} }
-  var EJEMPLOS_IA = ['¿cómo va el reparto de hoy?', 'pon a Juan, el 987 654 321, para pedirle su ubicación', 'quita a María de la lista de envío automático', '¿quién nos escribió hoy?', 'escríbele a Rosa que su pedido sale mañana', '¿por qué no salen mensajes?'];
+  var EJEMPLOS_IA = ['¿cómo van los procesos?', '¿quién necesita a alguien en los procesos?', 'crea un proceso para confirmar las citas de mañana', '¿quién nos escribió hoy?', 'escríbele a Rosa que su trámite ya está listo', '¿por qué no salen mensajes?'];
   function iaPintar() {
     if (!iaHistorial.length) {
       iaHilo.innerHTML = '<div class="s-ia-vacio">Dile con palabras qué hacer o qué mirar. Ejecuta con tu misma cuenta y tus mismos permisos; lo delicado te lo deja para confirmar.<ul>' + EJEMPLOS_IA.map(function (e) { return '<li data-ej="' + escapar(e) + '">' + escapar(e) + '</li>'; }).join('') + '</ul></div>';
@@ -943,15 +1002,17 @@ const JS = String.raw`
   }
   function iaAbrir(textoInicial) {
     iaCaja.classList.add('abierto');
+    ayudaPanel.classList.remove('abierto');
+    actualizarFondoPaneles();
     iaPintar();
     if (textoInicial) iaTexto.value = textoInicial;
     setTimeout(function () { iaTexto.focus(); var n = iaTexto.value.length; try { iaTexto.setSelectionRange(n, n); } catch (e) {} }, 30);
   }
   window.abrirOperadorIA = iaAbrir;
-  document.getElementById('s-ia-boton').onclick = function () { if (iaCaja.classList.contains('abierto')) iaCaja.classList.remove('abierto'); else iaAbrir(); };
-  document.getElementById('s-ia-cerrar').onclick = function () { iaCaja.classList.remove('abierto'); };
+  document.getElementById('s-ia-boton').onclick = function () { if (iaCaja.classList.contains('abierto')) { iaCaja.classList.remove('abierto'); actualizarFondoPaneles(); } else iaAbrir(); };
+  document.getElementById('s-ia-cerrar').onclick = function () { iaCaja.classList.remove('abierto'); actualizarFondoPaneles(); };
   document.getElementById('s-ia-limpiar').onclick = function () { iaHistorial = []; iaGuardar(); iaPintar(); };
-  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && iaCaja.classList.contains('abierto') && document.activeElement !== iaTexto) iaCaja.classList.remove('abierto'); });
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && iaCaja.classList.contains('abierto') && document.activeElement !== iaTexto) { iaCaja.classList.remove('abierto'); actualizarFondoPaneles(); } });
   iaHilo.addEventListener('click', function (ev) {
     var ej = ev.target.closest('[data-ej]');
     if (ej) { iaTexto.value = ej.getAttribute('data-ej'); iaTexto.focus(); return; }
@@ -1048,8 +1109,21 @@ function itemHtml(item: ItemMenu, sub: boolean): string {
 export function appShell(opts: ShellOpts): string {
   const negocio = escapeHtml(opts.nombreNegocio || 'WhatsApp');
   const modo = opts.modo ?? modoVigente();
+  const conGsg = gsgVigente();
   const arriba = MENU_ARRIBA.map((i) => itemHtml(i, false)).join('\n      ');
-  const menuGsg = MENU_GSG.map((i) => itemHtml(i, false)).join('\n      ');
+  const menuGsg = MENU_GSG.filter((i) => conGsg || !i.soloGsg).map((i) => itemHtml(i, false)).join('\n      ');
+  // El pie del celular: las cuatro pantallas del dia. Con las entregas de courier, las de siempre; si no, las de los procesos.
+  const pieGsg = conGsg
+    ? `<a class="s-nav-gsg" href="/hoy" data-ir="/hoy">${icono('moto')}<span>Hoy</span></a>
+      <a class="s-nav-completo" href="/panel#inicio" data-ir="/panel#inicio">${icono('inicio')}<span>Inicio</span></a>
+      <a href="/chat" data-ir="/chat">${icono('chat')}<span>Chats</span></a>
+      <a class="s-nav-gsg" href="/motorizados" data-ir="/motorizados">${icono('contactos')}<span>Motorizados</span></a>
+      <a class="s-nav-completo" href="/entregas" data-ir="/entregas">${icono('moto')}<span>Entregas</span></a>
+      <a href="/mapa" data-ir="/mapa">${icono('mapa')}<span>Mapa</span></a>`
+    : `<a href="/procesos" data-ir="/procesos">${icono('flujo')}<span>Procesos</span></a>
+      <a href="/chat" data-ir="/chat">${icono('chat')}<span>Chats</span></a>
+      <a href="/personas" data-ir="/personas">${icono('contactos')}<span>Personas</span></a>
+      <a href="/respuestas" data-ir="/respuestas">${icono('lista')}<span>Respuestas</span></a>`;
   const dueno = `<div class="s-grupo" data-grupo="${MENU_GSG_DUENO.id}" data-solo-super-grupo="1">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_GSG_DUENO.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
@@ -1090,8 +1164,9 @@ export function appShell(opts: ShellOpts): string {
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>${favicon}</text></svg>">
 <style>${CSS}${DIALOGO_CSS}${DIALOGO_ELEGIR_CSS}${opts.css ?? ''}</style>
 </head><body>
-<div class="s-app modo-${modo}" id="s-app" data-negocio="${negocio}" data-modo="${modo}">
+<div class="s-app modo-${modo}" id="s-app" data-negocio="${negocio}" data-modo="${modo}" data-gsg="${conGsg ? '1' : '0'}">
   <div class="s-backdrop" id="s-backdrop"></div>
+  <div class="s-panel-fondo" id="s-panel-fondo"></div>
   <aside class="s-side">
     <div class="s-brand">
       <button class="s-plegar" id="s-plegar" type="button" title="Plegar el menú" aria-label="Plegar o desplegar el menú">${icono('plegar')}</button>
@@ -1130,7 +1205,7 @@ export function appShell(opts: ShellOpts): string {
           <div class="s-avisos-caja" id="s-avisos-caja"><h4>Avisos</h4><div id="s-avisos-lista"><div class="s-aviso-nada">Cargando…</div></div></div>
         </div>
         <button class="s-boton s-buscar-boton" id="s-buscar-boton" type="button" title="Buscar un cliente, un pedido o una conversación (Ctrl K)" aria-label="Buscar (Ctrl K)">${icono('buscar')}<span>Buscar…</span><kbd>Ctrl K</kbd></button>
-        <button class="s-boton s-ia-boton" id="s-ia-boton" type="button" title="Pídeselo a la IA: órdenes con palabras" aria-label="Pídeselo a la IA">${icono('robot')}<span>IA</span></button>
+        <button class="s-boton s-ia-boton" id="s-ia-boton" type="button" title="Dale órdenes al sistema con palabras (buscar, avisar, revisar pedidos…)" aria-label="Dar órdenes al sistema con palabras">${icono('rayo')}<span>Órdenes</span></button>
         <button class="s-boton s-ayuda-boton" id="s-ayuda" type="button" title="Ayuda de esta pantalla" aria-label="Ayuda de esta pantalla">${icono('ayuda')}<span>¿Qué hago si…?</span></button>
         <a class="s-chip" href="/panel#mi-cuenta" title="Mi cuenta"><div class="s-avatar">?</div><b id="s-chip-nombre"></b></a>
       </div>
@@ -1139,12 +1214,7 @@ export function appShell(opts: ShellOpts): string {
 ${opts.contenido}
     </div>
     <nav class="s-nav-movil" id="s-nav-movil" aria-label="Ir a">
-      <a class="s-nav-gsg" href="/hoy" data-ir="/hoy">${icono('moto')}<span>Hoy</span></a>
-      <a class="s-nav-completo" href="/panel#inicio" data-ir="/panel#inicio">${icono('inicio')}<span>Inicio</span></a>
-      <a href="/chat" data-ir="/chat">${icono('chat')}<span>Chats</span></a>
-      <a class="s-nav-gsg" href="/motorizados" data-ir="/motorizados">${icono('contactos')}<span>Motorizados</span></a>
-      <a class="s-nav-completo" href="/entregas" data-ir="/entregas">${icono('moto')}<span>Entregas</span></a>
-      <a href="/mapa" data-ir="/mapa">${icono('mapa')}<span>Mapa</span></a>
+      ${pieGsg}
       <button type="button" id="s-nav-mas" aria-label="Abrir el menú con todas las pantallas">${icono('menu')}<span>Más</span></button>
     </nav>
   </div>
@@ -1182,6 +1252,6 @@ ${opts.script ?? ''}
 
 /** Para el manual: los modulos que se ven en este modo, con su descripcion, en orden. */
 export function todosLosModulos(modo: ModoSistema = modoVigente()): Array<{ grupo: string; items: ItemMenu[] }> {
-  if (modo === 'gsg') return [{ grupo: 'Cada día', items: MENU_GSG }, { grupo: MENU_GSG_DUENO.etiqueta, items: MENU_GSG_DUENO.items }, { grupo: MENU_DESARROLLADOR.etiqueta, items: MENU_DESARROLLADOR.items }];
+  if (modo === 'gsg') return [{ grupo: 'Cada día', items: MENU_GSG.filter((i) => !i.soloGsg || gsgVigente()) },{ grupo: MENU_GSG_DUENO.etiqueta, items: MENU_GSG_DUENO.items }, { grupo: MENU_DESARROLLADOR.etiqueta, items: MENU_DESARROLLADOR.items }];
   return [{ grupo: 'General', items: MENU_ARRIBA }, ...MENU_GRUPOS.map((g) => ({ grupo: g.etiqueta, items: g.items })), { grupo: MENU_DESARROLLADOR.etiqueta, items: MENU_DESARROLLADOR.items }];
 }

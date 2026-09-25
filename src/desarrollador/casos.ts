@@ -5,11 +5,13 @@
  *
  * El formato, pensado para escribirse sin aprender nada:
  *
- *   inicio: sin ubicación            (o «con ubicación»: ya la dio y falta que confirme)
- *   cliente: Hola, ¿cuándo llega mi pedido?
+ *   inicio: sin ubicación            (o «con ubicación»: GSG ya la tenía)
+ *   cliente: ¿Por qué me piden mi ubicación?
+ *   => dice: Es necesaria
  *   cliente: [ubicación]             ([ubicación] [enlace] [foto] [audio: lo que dice])
  *   => dice: Ubicación registrada    (lo que el sistema le tiene que contestar)
- *   cliente: sí
+ *   cliente: ¿a qué hora llega?
+ *   => calla                         (regla del dueño: tras UBI REGISTRADA, silencio)
  *   motorizado: 40                   (espera solo a que un motorizado de prueba tenga el pedido)
  *   => estado: en camino             (entregado, en camino, con motorizado, para una persona, cancelado…)
  *   adelantar: 2 h                   (30 min, 2 h, o «pasada la hora»)
@@ -36,17 +38,14 @@ export interface CasoGuardado {
 }
 
 export const EJEMPLO_CASO = `inicio: sin ubicación
-cliente: Hola, ¿cuándo llega mi pedido?
-=> dice: ubicación
+cliente: ¿Por qué me piden mi ubicación?
+=> dice: Es necesaria para calcular la ruta
 cliente: [ubicación]
 => dice: Ubicación registrada
-cliente: sí, lo recibo hoy
-=> estado: con motorizado
-cliente: ¿en cuánto llega?
+cliente: ¿a qué hora llega?
+=> calla
 motorizado: 30
 => estado: en camino
-cliente: ¿por dónde va?
-=> dice: va en camino
 motorizado: entregado
 => estado: entregado`;
 
@@ -120,7 +119,7 @@ export function interpretarCaso(texto: string, titulo = 'Mi caso', id = 'propio'
       const t = sinTildes(m[1]!);
       if (/sin (ubicacion|pin)|falta (la )?ubicacion/.test(t)) inicio = 'sin_pin';
       else if (/con (ubicacion|pin)|falta confirmar|ya (dio|tiene) (la )?ubicacion/.test(t)) inicio = 'con_pin';
-      else throw new ErrorDeCaso(n, 'en «inicio» escribe «sin ubicación» (se le va a pedir) o «con ubicación» (ya la dio y falta que confirme).');
+      else throw new ErrorDeCaso(n, 'en «inicio» escribe «sin ubicación» (se le va a pedir) o «con ubicación» (GSG ya la tenía).');
       return;
     }
     if ((m = /^t[ií]tulo\s*:\s*(.+)$/i.exec(l))) {
@@ -130,9 +129,16 @@ export function interpretarCaso(texto: string, titulo = 'Mi caso', id = 'propio'
     if ((m = /^(=>|→|->)\s*(.+)$/.exec(l))) {
       const anterior = pasos[pasos.length - 1];
       if (!anterior || anterior.tipo === 'adelantar') throw new ErrorDeCaso(n, '«=>» dice lo que se espera del mensaje de la línea de arriba: ponlo debajo de una línea de «cliente:» o «motorizado:».');
-      const esp = /^(estado|queda|dice|debe decir|responde|contesta)\s*:?\s*(.+)$/i.exec(m[2]!.trim());
-      if (!esp) throw new ErrorDeCaso(n, 'después de «=>» escribe «estado: …» (entregado, en camino, para una persona…) o «dice: …» (un trozo de lo que tiene que contestar).');
       const actual = anterior.espera ?? { que: '' };
+      // Regla del dueño: «=> calla» (o «silencio», «no contesta»): a ese número no se le contesta nada.
+      if (/^(calla|silencio|no contesta|no le contesta|no responde|nada)$/.test(sinTildes(m[2]!))) {
+        actual.calla = true;
+        actual.que = [actual.que, 'que NO se le conteste nada (silencio)'].filter(Boolean).join(' y ');
+        anterior.espera = actual;
+        return;
+      }
+      const esp = /^(estado|queda|dice|debe decir|responde|contesta)\s*:?\s*(.+)$/i.exec(m[2]!.trim());
+      if (!esp) throw new ErrorDeCaso(n, 'después de «=>» escribe «estado: …» (entregado, en camino, para una persona…), «dice: …» (un trozo de lo que tiene que contestar) o «calla» (no se le contesta nada).');
       if (/^(estado|queda)$/i.test(esp[1]!)) {
         const estados = estadosDe(esp[2]!);
         if (!estados) throw new ErrorDeCaso(n, `no conozco el estado «${esp[2]}». Usa: entregado, en camino, con motorizado, listo, para una persona, cancelado, terminado, esperando confirmación o esperando ubicación.`);
@@ -226,16 +232,17 @@ export function crearAlmacenCasos(settings: SettingsRepo | undefined) {
 
 export const INSTRUCCIONES_IA = `Conviertes la descripción de un caso de prueba de un sistema de reparto por WhatsApp (Perú, español) en un guion con este formato EXACTO, una instrucción por línea, sin nada más (ni explicaciones, ni comillas, ni markdown):
 
-inicio: sin ubicación | con ubicación      (sin ubicación = hay que pedírsela; con ubicación = ya la dio y falta que confirme)
+inicio: sin ubicación | con ubicación      (sin ubicación = hay que pedírsela; con ubicación = GSG ya la tenía)
 cliente: <lo que escribe el cliente, como lo escribiría por WhatsApp>
 cliente: [ubicación] | [enlace] | [foto] | [audio: lo que dice]
 motorizado: <lo que escribe el motorizado: minutos como «40», «estoy cerca», «entregado», «no estaba nadie»>
 => estado: entregado | en camino | con motorizado | listo | para una persona | cancelado | terminado | esperando confirmación | esperando ubicación
 => dice: <un trozo corto de lo que el sistema debería contestar a la línea de arriba>
+=> calla      (el sistema no le contesta nada a la línea de arriba)
 adelantar: 30 min | 2 h | pasada la hora
 esperar motorizado
 
-Reglas: el pedido solo llega al motorizado cuando el cliente ya dio la ubicación y confirmó. Para que el cliente pueda reclamar que no llega, primero el motorizado da sus minutos y luego «adelantar: pasada la hora». Usa «=>» solo cuando la descripción diga qué debe pasar. Máximo 30 líneas.
+Reglas (regla del dueño): al cliente solo se le pide la ubicación; no hay pregunta SÍ/NO. Si pregunta por qué se le pide, se le explica («=> dice: Es necesaria»). Si manda su ubicación recibe «Ubicación registrada» y desde ahí el sistema ya no le contesta nada («=> calla»). Cualquier otra cosa antes de la ubicación recibe una vez «no se reciben consultas» con el número, y luego «=> calla». El pedido llega al motorizado cuando ya tiene la ubicación; lo del motorizado sigue igual. Usa «=>» solo cuando la descripción diga qué debe pasar. Máximo 30 líneas.
 
 Ejemplo:
 ${EJEMPLO_CASO}`;

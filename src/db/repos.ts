@@ -27,6 +27,7 @@ import { createEntrenamientoRepo, type EntrenamientoRepo } from '../entrenamient
 import { createCodigosConexionRepo, type CodigosConexionRepo } from '../auth/codigos-conexion.js';
 import { createTiendasRepo, type TiendasRepo } from '../tiendas/repo.js';
 import { createEntregasRepo, type EntregasRepo } from '../entregas/repo.js';
+import { createProcesosRepo, type ProcesosRepo } from '../procesos/repo.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -63,6 +64,9 @@ export interface Contact {
    * se atiende a mano, y el bot no puede meterse por encima.
    */
   botPausadoAt?: Date | null;
+  /** El agente operativo cerro este chat (mando su cierre): la IA calla, lo ve una persona. */
+  iaCerradaAt?: Date | null;
+  iaCerradaMotivo?: string | null;
   /**
    * Como quiere ver esta conversacion quien atiende (ver migracion 037).
    *
@@ -366,6 +370,12 @@ export interface ContactsRepo {
    */
   pausarBot(contactId: string, pausado: boolean, at: Date): Promise<void>;
   /**
+   * El agente operativo ya mando su cierre en este chat: la IA deja de
+   * contestar (lo ve una persona). No es "parar el bot": el sistema sigue con
+   * lo automatico (confirmacion, hora de llegada, entregado).
+   */
+  cerrarIA(contactId: string, cerrada: boolean, at: Date, motivo?: string | null): Promise<void>;
+  /**
    * Como se ve el chat en la lista: fijado, silenciado o apartado.
    *
    * Lo que no venga no se toca, para poder cambiar una sola cosa sin tener
@@ -574,6 +584,8 @@ export interface Repos {
   entregas: EntregasRepo;
   /** SQL acotado del Modulo desarrollador (borrar y adelantar lo de prueba). Sin base real (pruebas en memoria), no esta. */
   desarrollador?: DesarrolladorRepo;
+  /** Los procesos (pedir datos, confirmar, avisos al personal, cobranza) y sus corridas. Ver src/procesos. */
+  procesos?: ProcesosRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -596,6 +608,8 @@ interface ContactRow {
   suprimido_motivo?: string | null;
   suprimido_ambito?: string | null;
   bot_pausado_at?: Date | null;
+  ia_cerrada_at?: Date | null;
+  ia_cerrada_motivo?: string | null;
   chat_fijado_at?: Date | null;
   chat_silenciado_at?: Date | null;
   chat_apartado_at?: Date | null;
@@ -617,6 +631,8 @@ const toContact = (row: ContactRow): Contact => ({
   suprimidoHasta: row.suprimido_hasta ?? null,
   suprimidoMotivo: row.suprimido_motivo ?? null,
   botPausadoAt: row.bot_pausado_at ?? null,
+  iaCerradaAt: row.ia_cerrada_at ?? null,
+  iaCerradaMotivo: row.ia_cerrada_motivo ?? null,
   chatFijadoAt: row.chat_fijado_at ?? null,
   chatSilenciadoAt: row.chat_silenciado_at ?? null,
   chatApartadoAt: row.chat_apartado_at ?? null,
@@ -964,6 +980,13 @@ export function createRepos(poolCrudo: Pool): Repos {
       await pool.query('update contacts set bot_pausado_at = $2 where id = $1', [
         contactId,
         pausado ? at : null,
+      ]);
+    },
+    async cerrarIA(contactId, cerrada, at, motivo) {
+      await pool.query('update contacts set ia_cerrada_at = $2, ia_cerrada_motivo = $3 where id = $1', [
+        contactId,
+        cerrada ? at : null,
+        cerrada ? (motivo ?? '').slice(0, 300) || null : null,
       ]);
     },
     async ajustesChat(contactId, ajustes, at) {
@@ -1877,6 +1900,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     tiendas: createTiendasRepo(pool),
     entregas: createEntregasRepo(pool),
     desarrollador: createDesarrolladorRepo(pool),
+    procesos: createProcesosRepo(pool),
   };
 }
 

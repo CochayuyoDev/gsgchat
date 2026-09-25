@@ -322,6 +322,12 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     } catch {
       // sin conexion con GSG no hay nada que avisar
     }
+    // Los procesos: quien necesita a una persona (una captura por validar, una consulta ajena, alguien que no pudo).
+    if (repos.procesos) {
+      const cifras = await repos.procesos.cifras().catch(() => ({}) as Record<string, number>);
+      const n = cifras.persona ?? 0;
+      if (n > 0) avisos.push({ tipo: 'procesos', nivel: 'warn', texto: `${n} persona${n === 1 ? '' : 's'} de tus procesos necesita${n === 1 ? '' : 'n'} a alguien`, href: '/personas?filtro=persona', n });
+    }
     if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: modoGsg ? '/hoy' : '/rutas', n: requierenPersona });
     // La IA que falla tres veces seguidas es una clave vencida o un proveedor caido: el asistente se queda callado sin que se note.
     if (deps.ia?.activa()) {
@@ -459,6 +465,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         lecciones: deps.entrenamiento ? deps.entrenamiento.cargadas() : null,
         // Lo que GSGchat necesita para arrancar (modo gsg): motorizados, y de donde salen los pedidos.
         modo: deps.ajustes?.modo() ?? 'gsg',
+        // Sin las entregas de courier, los pasos son los de los procesos: crear uno y cargarle personas.
+        procesos: repos.procesos ? (await repos.procesos.procesos().catch(() => [])).filter((x) => x.plantilla !== 'gsg').length : null,
+        personasEnProcesos: repos.procesos ? Object.values(await repos.procesos.cifras().catch(() => ({}) as Record<string, number>)).reduce((s, n) => s + n, 0) : null,
         motorizadosActivos: resumenEntregas ? resumenEntregas.motorizados.filter((m) => m.estado === 'activo').length : null,
         gsg: resumenEntregas?.gsg ? (resumenEntregas.gsg.conectada ? (resumenEntregas.gsg.modo === 'simulador' ? 'simulador' : 'real') : 'ninguna') : null,
         entregasHoy: resumenEntregas ? resumenEntregas.cifras.total : null,

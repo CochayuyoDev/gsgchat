@@ -391,6 +391,7 @@ ${aviso}
             <div class="ajuste-fila"><span>Preguntar a GSG cada (minutos)</span><input id="aj-sync" type="number" min="1" max="1440"></div>
           </section>
           <section class="grupo-aj"><h3>Qué hace solo el sistema</h3><p class="ayuda-grupo">Lo que se contesta y se manda sin que nadie toque nada.</p>
+            <label class="linea"><input type="checkbox" id="aj-silencio-ubi"> Después de UBI REGISTRADA, no escribirle más al cliente <span class="muted">(con «Solo lo de GSG»: ni pregunta SÍ/NO, ni hora de llegada, ni «entregado», ni recordatorios; lo del motorizado sigue igual por dentro)</span></label>
             <label class="linea"><input type="checkbox" id="aj-leer-ia"> La IA lee las respuestas que las reglas no entienden <span class="muted">(necesita <a href="/panel#ia">Mi asistente IA</a> con una clave)</span></label>
             <label class="linea"><input type="checkbox" id="aj-redactar-ia"> La IA redacta el aviso de llegada (la hora la pone el sistema)</label>
             <label class="linea"><input type="checkbox" id="aj-botones"> Preguntar con botones SÍ / NO cuando el WhatsApp lo permite (si no puede, sale como texto)</label>
@@ -509,7 +510,7 @@ function chipPaso(tono, html) { return '<span class="chip tono-' + tono + '">' +
 function raya() { return '<span class="muted">—</span>'; }
 
 function chipUbicacion(e) {
-  if (e.ubicacionEstado === 'recibida') return chipPaso('verde', e.mapsUrl ? '<a href="' + esc(e.mapsUrl) + '" target="_blank" rel="noopener" style="color:inherit">pin recibido</a>' : 'pin recibido');
+  if (e.ubicacionEstado === 'recibida') return chipPaso('verde', e.mapsUrl ? '<a href="' + esc(e.mapsUrl) + '" target="_blank" rel="noopener" style="color:inherit">UBI REGISTRADA</a>' : 'UBI REGISTRADA');
   if (e.ubicacionEstado === 'no_hace_falta') return chipPaso('gris', 'GSG la tiene');
   var s = e.solicitud;
   if (!s) return chipPaso('ambar', 'por pedir');
@@ -932,6 +933,7 @@ function pintarAjustes() {
   marca('aj-donde-esta', a.responderDondeEsta !== false);
   marca('aj-botones', a.usarBotones !== false);
   marca('aj-cerca', a.avisarCerca !== false);
+  marca('aj-silencio-ubi', a.silencioTrasUbi !== false);
   var sv = a.segundaVisita || { activa: true, esperaMin: 30 };
   marca('aj-sv-activa', sv.activa !== false);
   valor('aj-sv-espera', sv.esperaMin);
@@ -1000,7 +1002,9 @@ async function previaUbicacion() {
     .split('{desde}').join(horaLeida($('aj-hor-desde').value || '14:00'))
     .split('{hasta}').join(horaLeida($('aj-hor-hasta').value || '20:00'))
     .split('{hastaExtendido}').join(horaLeida($('aj-hor-ext').value || '22:00'))
-    .split('{soporte}').join(soporteLeido());
+    .split('{soporte}').join(soporteLeido())
+    // Sin motorizado todavía (la vista previa no tiene pedido): el número de soporte.
+    .split('{telefonoMotorizado}').join(telefonoLeido($('aj-sop-wa').value) || telefonoLeido($('aj-sop-tel').value) || 'este mismo número de WhatsApp');
   try {
     var r = await api('/admin/entregas/previsualizar', { method: 'POST', body: { clave: 'ubicacionRegistrada', texto: texto } });
     caja.textContent = r.texto;
@@ -1526,6 +1530,7 @@ $('aj-guardar').onclick = async function () {
       cierreDelDia: { activo: $('aj-cierre-activo').checked, hora: Number(String($('aj-cierre-hora').value || '0').split(':')[0]) || 0 },
       usarBotones: $('aj-botones').checked,
       avisarCerca: $('aj-cerca').checked,
+      silencioTrasUbi: $('aj-silencio-ubi').checked,
       segundaVisita: { activa: $('aj-sv-activa').checked, esperaMin: num('aj-sv-espera', 30) },
       clienteRecurrente: { activo: $('aj-rec-activo').checked, diasMaximo: num('aj-rec-dias', 60), esperaMin: num('aj-rec-espera', 60) },
       plantillas: { confirmacion: $('aj-pl-confirmacion').value.trim(), motorizado: $('aj-pl-motorizado').value.trim(), aviso: $('aj-pl-aviso').value.trim() },

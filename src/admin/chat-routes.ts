@@ -216,7 +216,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     }
     const guardadas = await repos.archives.count({ contactId: contact.id }).catch(() => 0);
     return {
-      contacto: { id: contact.id, phone: contact.phone, name: contact.name, tipo: contact.tipo ?? 'persona', optInAt: contact.optInAt, optOutAt: contact.optOutAt, lastInboundAt: contact.lastInboundAt, botPausadoAt: contact.botPausadoAt ?? null },
+      contacto: { id: contact.id, phone: contact.phone, name: contact.name, tipo: contact.tipo ?? 'persona', optInAt: contact.optInAt, optOutAt: contact.optOutAt, lastInboundAt: contact.lastInboundAt, botPausadoAt: contact.botPausadoAt ?? null, iaCerradaAt: contact.iaCerradaAt ?? null },
       ubicacion: ubicacion ? { lat: ubicacion.lat, lng: ubicacion.lng, mapa: `https://www.google.com/maps/search/?api=1&query=${ubicacion.lat},${ubicacion.lng}` } : null,
       entrega,
       guardadas,
@@ -312,6 +312,20 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     await repos.contacts.pausarBot(contact.id, body.pausado, new Date());
     return { ok: true, pausado: body.pausado };
+  });
+
+  /**
+   * El agente operativo cerro este chat (mando su cierre): una persona lo
+   * atiende. `cerrado: false` se lo devuelve al asistente; `true` lo cierra a mano.
+   */
+  app.post('/admin/chat/:contactId/asistente', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+    const body = z.object({ cerrado: z.boolean() }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'Falta decir si el asistente atiende o no este chat.' });
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
+    await repos.contacts.cerrarIA(contact.id, body.data.cerrado, new Date(), body.data.cerrado ? 'lo cerró una persona desde Chats' : null);
+    return { ok: true, cerrado: body.data.cerrado };
   });
 
   /**

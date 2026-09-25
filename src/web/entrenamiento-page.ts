@@ -116,6 +116,12 @@ const CSS = `
   .leccion .mala { display: block; color: var(--rojo); font-size: var(--fs-small); margin-top: 3px; }
   .leccion .etiquetas { display: flex; gap: var(--esp-2); flex-wrap: wrap; align-items: center; margin-top: var(--esp-2); font-size: var(--fs-small); color: var(--texto-suave); }
   .acciones { display: flex; gap: var(--esp-1); flex-wrap: nowrap; }
+  /* El menu "Mas" de cada fila: un solo overlay compartido (no uno por fila,
+     para no repetirlo mil veces), posicionado con JS junto al boton que lo
+     abrio. position:fixed para que no lo recorte el scroll de la tabla. */
+  .mas-menu { position: fixed; z-index: 40; min-width: 150px; display: flex; flex-direction: column; gap: 2px; padding: 4px; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); box-shadow: var(--sombra-2); }
+  .mas-menu.hidden { display: none; }
+  .mas-menu button { width: 100%; justify-content: flex-start; }
 
   /* --- trabajos largos: la barra dice siempre por donde va -------------- */
   .progreso { margin: var(--esp-2) 0; }
@@ -226,9 +232,10 @@ ${avisoIA}
       </div>
       <div class="paginas"><span id="pag-texto"></span><span><button class="btn sm" id="pag-antes">← Anteriores</button> <button class="btn sm" id="pag-despues">Siguientes →</button></span></div>
     </section>
+    <div id="mas-menu" class="mas-menu hidden" role="menu" aria-label="Más acciones de la lección"></div>
 
     <section class="tarjeta caja" id="caja-examen">
-      <h2><button type="button" class="cab plegador" aria-expanded="true" aria-controls="examen-cuerpo">Examen: ¿responde como le enseñaste? <span class="sep"></span><span class="flecha" aria-hidden="true">▾</span></button></h2>
+      <h2><button type="button" class="cab plegador" aria-expanded="true" aria-controls="examen-cuerpo">Examen de las lecciones enseñadas <span class="sep"></span><span class="flecha" aria-hidden="true">▾</span></button></h2>
       <div class="cuerpo" id="examen-cuerpo">
         <p class="muted">Se le hace a la IA la pregunta de cada lección y se comprueba que diga los mismos datos. Corre en el servidor: puedes seguir trabajando. <span id="ex-sin"></span></p>
         <div class="fila">
@@ -611,10 +618,11 @@ function filaHtml(l) {
     (l.usos ? '<span>· usada ' + plural(l.usos, 'vez', 'veces') + '</span>' : '') +
     (l.nota ? '<span>· ' + esc(acortar(l.nota, 90)) + '</span>' : '');
   var corta = esc(acortar(l.pregunta || l.respuesta, 40));
+  /* Solo Editar y Aprobar (las mas usadas) van sueltas; Descartar y Borrar se
+     agrupan en un menu "Mas" para no apretar 4 botones de 34px en una celda. */
   var acciones = '<button class="btn sm" data-editar="' + l.id + '" aria-label="Editar: ' + corta + '">Editar</button>' +
     (l.estado !== 'activa' ? '<button class="btn sm" data-aprobar="' + l.id + '" aria-label="Poner en uso: ' + corta + '">Aprobar</button>' : '') +
-    (l.estado !== 'descartada' ? '<button class="btn sm" data-descartar="' + l.id + '" aria-label="Descartar: ' + corta + '">Descartar</button>' : '') +
-    '<button class="btn sm peligro" data-borrar="' + l.id + '" aria-label="Borrar: ' + corta + '">Borrar</button>';
+    '<button class="btn sm" type="button" data-mas="' + l.id + '" aria-haspopup="true" aria-expanded="false" aria-label="Más acciones: ' + corta + '">⋯ Más</button>';
   return '<tr>' +
     '<td class="marca"><input type="checkbox" data-marcar="' + l.id + '" aria-label="Marcar: ' + corta + '"' + (marcadas[l.id] ? ' checked' : '') + '></td>' +
     '<td class="leccion">' + dice + (l.mala ? '<span class="mala">No debe decir: «' + esc(acortar(l.mala, 140)) + '»</span>' : '') + '<div class="etiquetas">' + etiquetas + '</div></td>' +
@@ -633,6 +641,7 @@ function vacioHtml() {
 }
 
 function pintarLecciones() {
+  cerrarMasMenu(); /* las filas se van a reemplazar: el boton que lo abrio ya no existira */
   el('lecciones-total').textContent = lista.total ? lecciones(lista.total) : '';
   el('filas').innerHTML = lista.items.length
     ? lista.items.map(filaHtml).join('')
@@ -701,18 +710,9 @@ async function editar(l) {
   return true;
 }
 
-el('filas').addEventListener('click', function (ev) {
-  var b = ev.target.closest('button');
-  if (!b) return;
-  if (b.id === 'limpiar-filtros') {
-    ['f-q', 'f-estado', 'f-tipo', 'f-tema', 'f-origen', 'f-examen'].forEach(function (id) { el(id).value = ''; });
-    pagina = 1;
-    intentar(cargarLecciones);
-    return;
-  }
-  if (b.id === 'ir-ensenar') { el('e-pregunta').focus(); el('e-pregunta').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-  if (b.id === 'reintentar') { location.reload(); return; }
-
+/** Editar, aprobar, descartar o borrar una lección: lo llaman tanto el boton
+ *  suelto de la fila como los del menu "Mas" (comparten los mismos data-*). */
+function accionDeLeccion(b) {
   var id = b.getAttribute('data-editar') || b.getAttribute('data-aprobar') || b.getAttribute('data-descartar') || b.getAttribute('data-borrar');
   var l = lista.items.filter(function (x) { return String(x.id) === id; })[0];
   if (!l) return;
@@ -733,6 +733,57 @@ el('filas').addEventListener('click', function (ev) {
     }
     await cargar();
   });
+}
+
+/* El menu flotante "Mas" de cada fila: uno solo compartido (no uno por fila),
+   con Descartar y Borrar; se posiciona junto al boton que lo abrio. */
+function cerrarMasMenu() {
+  var m = el('mas-menu');
+  m.classList.add('hidden');
+  m.innerHTML = '';
+  document.removeEventListener('click', cerrarMasMenuSiFuera, true);
+}
+function cerrarMasMenuSiFuera(ev) {
+  if (el('mas-menu').contains(ev.target) || (ev.target.closest && ev.target.closest('[data-mas]'))) return;
+  cerrarMasMenu();
+}
+function abrirMasMenu(boton) {
+  var id = boton.getAttribute('data-mas');
+  var l = lista.items.filter(function (x) { return String(x.id) === id; })[0];
+  if (!l) return;
+  var corta = esc(acortar(l.pregunta || l.respuesta, 40));
+  var m = el('mas-menu');
+  m.innerHTML =
+    (l.estado !== 'descartada' ? '<button class="btn sm" data-descartar="' + id + '" aria-label="Descartar: ' + corta + '">Descartar</button>' : '') +
+    '<button class="btn sm peligro" data-borrar="' + id + '" aria-label="Borrar: ' + corta + '">Borrar</button>';
+  var r = boton.getBoundingClientRect();
+  m.style.top = (r.bottom + 4) + 'px';
+  m.style.left = 'auto';
+  m.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  m.classList.remove('hidden');
+  boton.setAttribute('aria-expanded', 'true');
+  setTimeout(function () { document.addEventListener('click', cerrarMasMenuSiFuera, true); }, 0);
+}
+el('mas-menu').addEventListener('click', function (ev) {
+  var b = ev.target.closest('button');
+  if (!b) return;
+  cerrarMasMenu();
+  accionDeLeccion(b);
+});
+
+el('filas').addEventListener('click', function (ev) {
+  var b = ev.target.closest('button');
+  if (!b) return;
+  if (b.id === 'limpiar-filtros') {
+    ['f-q', 'f-estado', 'f-tipo', 'f-tema', 'f-origen', 'f-examen'].forEach(function (id) { el(id).value = ''; });
+    pagina = 1;
+    intentar(cargarLecciones);
+    return;
+  }
+  if (b.id === 'ir-ensenar') { el('e-pregunta').focus(); el('e-pregunta').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  if (b.id === 'reintentar') { location.reload(); return; }
+  if (b.hasAttribute('data-mas')) { abrirMasMenu(b); return; }
+  accionDeLeccion(b);
 });
 
 ['f-estado', 'f-tipo', 'f-tema', 'f-origen', 'f-examen'].forEach(function (id) {

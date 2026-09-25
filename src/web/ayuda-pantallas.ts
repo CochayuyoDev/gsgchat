@@ -88,16 +88,17 @@ const GUARDADOS: AyudaPantalla = {
 
 const IA: AyudaPantalla = {
   titulo: 'Asistente IA',
-  que: 'Con qué IA contesta y qué sabe de tu negocio. Si no contesta, la tira de tres pasos de arriba dice qué falta.',
+  que: 'Con qué IA contesta y cómo atiende al cliente: como agente operativo solo pide y registra la ubicación. Si no contesta, la tira de tres pasos de arriba dice qué falta.',
   preguntas: [
-    { p: '¿Qué hago si el asistente no contesta?', r: 'Mira la tira de tres pasos: ¿hay clave o sesión de Puter? ¿está encendido? Luego: ¿el bot está pausado en ese chat («de este me encargo yo»)? ¿el número está en modo prueba y ese cliente no está en la lista? ¿la membresía tiene tope?' },
-    { p: 'Quiero usar ChatGPT, Groq o Google en vez de Puter', r: 'En «Con qué IA» elige «Una clave de API», elige el servicio (rellena la dirección y sugiere modelos), pega la clave, «Probar la conexión» y guarda.' },
+    { p: '¿Qué hace el agente operativo?', r: 'Con el cliente solo pide, valida y registra la ubicación; si pregunta por qué, le explica que sirve para calcular la ruta de entrega. No da precios ni atiende otras consultas: a esas les manda una sola vez el mensaje de cierre con el número de soporte y el chat pasa a una persona. El sistema sigue mandando solo lo automático (confirmación, hora de llegada, entregado).' },
+    { p: '¿Qué hago si el asistente no contesta?', r: 'Mira la tira de tres pasos: ¿hay clave guardada? ¿está encendido? Luego: ¿el bot está pausado en ese chat («de este me encargo yo»)? ¿ya mandó su mensaje de cierre en ese chat? ¿el número está en modo prueba y ese cliente no está en la lista? ¿la membresía tiene tope?' },
+    { p: '¿Cómo conecto ChatGPT y qué modelo elijo?', r: 'En «Con qué IA» pega tu clave de OpenAI: aparecen los modelos de tu cuenta, con el recomendado de consumo muy bajo (gpt-4o-mini) ya elegido. Pulsa «Vincular clave a esta tienda» y guarda.' },
     { p: '¿Cómo sé cuánto gasto?', r: 'La tarjeta «Uso de la IA» dice cuántas respuestas, lecturas y órdenes hubo hoy y en el mes, los tokens si el servicio los cuenta, los fallos y lo que queda del tope de tu membresía. Tres fallos seguidos avisan en la campana.' },
     { p: '¿Cómo le enseño algo nuevo?', r: 'Escríbelo en «Qué sabe» y guarda: se aplica al siguiente mensaje. Para muchas cosas (un Excel, los chats de meses), Entrenar a la IA.', ir: '/entrenamiento', irTexto: 'Entrenar a la IA' },
     { p: '¿Puede contestar con audio?', r: 'Sí, con una clave de ElevenLabs en la sección Voz de esta pantalla. Si algo falla, el mensaje sale por escrito: la voz nunca deja a nadie sin respuesta.', ir: '/manual#m-voz', irTexto: 'Cómo se configura la voz' },
     { p: '¿Cómo pruebo lo que va a decir?', r: 'La conversación de prueba de esta pantalla (no sale por WhatsApp) y el examen por grupos de escenarios («Ataques al asistente» incluido).' },
     { p: '¿Qué NO hace nunca?', r: 'No cobra, no confirma pagos y no inventa precios ni horas: las cifras las pone el sistema. Y no se deja sacar de su papel, aunque se lo pidan.', ir: '/manual#m-seguridad-ia', irTexto: 'Las defensas del asistente' },
-    { p: '¿Qué hago con «Lo que la IA no entendió»?', r: 'Son respuestas de clientes y motorizados que ni las reglas ni la IA supieron leer. Di qué era («Era un sí», «Eran esos minutos»…) y el lector lo aprende: la próxima vez no vuelve a preguntar. Con la casilla, además queda como lección.', ir: '/panel#ia', irTexto: 'Abrir el tablero' },
+    { p: '¿Qué hago con «Lo que la IA no entendió»?', r: 'Son respuestas de clientes y motorizados que ni las reglas ni la IA supieron leer. Di qué era («Era un sí», «Eran esos minutos»…) y el lector lo aprende: la próxima vez no vuelve a preguntar. Con la casilla, además queda como lección.', ir: '/panel?abrir=no-entendido#ia', irTexto: 'Abrir el tablero' },
     { p: '¿Cómo sé si el lector de respuestas sigue leyendo bien?', r: 'Cada mañana se examina solo con frases reales y aquí se ve cuánto acierta; si baja del umbral avisa al supervisor. «Examinar ahora» lo pasa al momento y enseña los fallos uno a uno.', ir: '/panel#ia', irTexto: 'Ver el examen' },
   ],
 };
@@ -131,7 +132,7 @@ const CONEXION: AyudaPantalla = {
   titulo: 'Conexión',
   que: 'El WhatsApp con el que trabaja el sistema y la conexión con GSG. Si algo está en rojo, se arregla desde aquí.',
   preguntas: [
-    { p: '¿Qué es «¿Para qué vas a usar GSGchat?» (el paso 0)?', r: 'El perfil de la instalación: «Reparto para GSG» (lo de siempre: menú corto, entregas con botones, cierre del día), «Tienda con delivery» (menú completo con catálogo y pedidos del chat) o «Solo atención por chat» (sin reparto). Cambia el menú, qué contesta solo y los interruptores de las entregas; nunca toca tus textos, tus clientes ni tus motorizados. Se puede cambiar cuando quieras.', ir: '/setup', irTexto: 'Ver el paso 0' },
+    { p: '¿Qué es «¿Para qué vas a usar GSGchat?» (el paso 0)?', r: 'El perfil de la instalación: «Entregas de GSG Courier» (lo de siempre: menú corto, entregas con botones, cierre del día y el agente operativo que solo pide la ubicación). Cambia el menú, qué contesta solo y los interruptores de las entregas; nunca toca tus textos, tus clientes ni tus motorizados. Se puede volver a aplicar cuando quieras.', ir: '/setup', irTexto: 'Ver el paso 0' },
     { p: 'GSG canceló un pedido o cambió la dirección, ¿qué pasa aquí?', r: 'En la siguiente sincronización (cada 5 minutos, o trayendo los pendientes de GSG a mano desde Hoy) se refleja solo: si cambió la dirección, el distrito o el teléfono, se actualiza y se le avisa al motorizado que ya lo llevaba; si GSG lo cancela, se cancela aquí y al cliente que ya tenía hora se le avisa. Ojo: una lista vacía o GSG caído nunca cancelan nada; solo una cancelación pedido a pedido. En «Para los programadores de GSG» hay dos botones de prueba para verlo con el simulador.' },
     { p: '¿Cómo conecto el WhatsApp?', r: 'Escaneando el QR desde el teléfono (Dispositivos vinculados), como en WhatsApp Web. Conviene un número secundario. También se puede usar WAHA o la API oficial de Meta.' },
     { p: 'No me sale el QR o dice «parado»', r: 'Pulsa «Conectar» otra vez: si el teléfono cerró la sesión, el sistema borra la vinculación vieja y enseña un QR nuevo. Si sigue igual, «Desconectar la cuenta» y vuelve a vincular.' },
@@ -208,7 +209,7 @@ const MANUAL: AyudaPantalla = {
   preguntas: [
     { p: 'No encuentro lo que busco', r: 'Escribe tu duda en la caja del ayudante, arriba del todo: responde con el manual entero y te dice en qué pantalla se hace.' },
     { p: '¿Y la ayuda de una pantalla concreta?', r: 'Está en la propia pantalla: el botón «¿Qué hago si…?» de arriba a la derecha. El manual es el recorrido largo; ese botón, lo de ahora mismo.' },
-    { p: '¿Puedo pedirle al sistema que haga cosas con palabras?', r: 'Sí: el botón «IA» de arriba abre la IA operadora y ejecuta con tu cuenta; lo delicado te lo deja para confirmar.', ir: '/manual#m-ia-operadora', irTexto: 'Qué le puedo pedir' },
+    { p: '¿Puedo pedirle al sistema que haga cosas con palabras?', r: 'Sí: el botón «Órdenes» de arriba abre la IA operadora y ejecuta con tu cuenta; lo delicado te lo deja para confirmar.', ir: '/manual#m-ia-operadora', irTexto: 'Qué le puedo pedir' },
   ],
 };
 
@@ -325,13 +326,56 @@ const GENERICA = (titulo: string, que: string, propias: PreguntaAyuda[] = []): A
 });
 
 /** La ayuda por clave de pantalla (ver `claveDeAyuda`). */
+const PROCESOS: AyudaPantalla = {
+  titulo: 'Procesos',
+  que: 'Lo que el sistema hace solo con tus listas de personas. Crea uno desde una plantilla, revisa sus mensajes y carga la lista: el resto avanza solo.',
+  preguntas: [
+    { p: '¿Cómo creo mi primer proceso?', r: 'En «Crear desde una plantilla» elige la que se parece a lo que necesitas (pedir datos, confirmar citas, avisar tareas, cobranza) y pulsa «Crear este proceso». Se abre el editor con sus pasos y sus mensajes ya escritos: cámbialos a tu gusto y guarda.', ir: '/procesos#crear', irTexto: 'Ver las plantillas' },
+    { p: '¿Cómo cargo a las personas?', r: '«Cargar personas» en la tarjeta del proceso: pega la tabla copiada de Excel o sube el .xlsx o CSV. Una fila por persona con su teléfono y su nombre; las demás columnas (fecha, hora, monto, tarea) se usan en los mensajes.' },
+    { p: '¿Cuándo salen los mensajes?', r: 'De uno en uno, con la pausa de siempre entre mensaje y mensaje, dentro de la franja del proceso y del horario del número. Así el número no se quema.' },
+    { p: '¿Qué pasa si alguien pregunta otra cosa?', r: 'Si pregunta por qué se le pide algo, se le explica con el texto de ese paso y se le vuelve a pedir. Si es una consulta que no es del proceso, recibe una vez el mensaje de cierre y pasa a una persona: lo ves en Personas → «Necesitan a alguien».', ir: '/personas?filtro=persona', irTexto: 'Ver quién necesita a alguien' },
+    { p: '¿Dónde veo lo que respondieron?', r: 'En Respuestas: una columna por paso, con el enlace del mapa o de la foto. «Exportar CSV» lo baja para abrirlo en Excel.', ir: '/respuestas', irTexto: 'Ir a Respuestas' },
+    { p: '¿Qué es «Entregas de courier (GSG)»?', r: 'El flujo de un courier (ubicación, confirmación, motorizado y hora de llegada). Al activarlo aparecen Hoy, Números del día, Motorizados y Mapa en el menú; al desactivarlo se esconden y los pedidos se conservan.' },
+    { p: '¿Cómo lo pruebo sin escribirle a nadie de verdad?', r: 'En el Módulo desarrollador → «Probar un proceso»: elige la plantilla y simula la corrida con números de prueba que nunca salen a WhatsApp, con respuestas buenas, malas, sin respuesta y consultas ajenas.', ir: '/desarrollador#procesos', irTexto: 'Probar un proceso' },
+  ],
+};
+
+const PERSONAS: AyudaPantalla = {
+  titulo: 'Personas',
+  que: 'Cada persona de tus procesos y en qué paso va. Empieza por «Necesitan a alguien»: el resto avanza solo.',
+  preguntas: [
+    { p: '¿Qué hago con «Necesita a alguien»?', r: 'Debajo de su estado dice por qué (mandó la captura para validar, preguntó otra cosa, no pudo hacer la tarea, no respondió). Abre su chat y atiéndela; si quieres que el sistema retome su paso, márcala y pulsa «Pedir ahora».' },
+    { p: '¿Qué hace «Pedir ahora»?', r: 'Le escribe ya lo que le falta (sale en cuanto le toque, con la pausa de siempre). A quien estaba con una persona o no respondió, se le retoma el paso en el que iba.' },
+    { p: '¿Qué hace «Pausar mensajes»?', r: 'Deja de escribirle hasta que lo reanudes. Lo que responda se sigue leyendo y guardando.' },
+    { p: '¿Por qué dice «No se le puede escribir»?', r: 'El teléfono de la lista no sirve (le faltan dígitos, no es celular), se dio de baja, ya está en otra corrida en curso o no tiene WhatsApp. El motivo sale debajo: corrígelo en la lista y vuelve a cargarlo.' },
+    { p: '¿Dónde veo todo lo que pasó con una persona?', r: 'En «Historial», debajo de su nombre: cada mensaje que se le mandó, lo que respondió y lo que se decidió, con la hora.' },
+  ],
+};
+
+const RESPUESTAS: AyudaPantalla = {
+  titulo: 'Respuestas',
+  que: 'Lo que respondió cada persona, un paso por columna. Elige el proceso arriba; «Exportar CSV» lo baja para Excel.',
+  preguntas: [
+    { p: '¿Cómo abro una foto o una captura?', r: 'Con el enlace «Abrir» junto a la respuesta. Las ubicaciones llevan «Ver en el mapa».' },
+    { p: '¿Por qué no sale alguien?', r: 'Aquí solo salen las personas que ya respondieron algo. Las demás están en Personas, con el paso en el que van.', ir: '/personas', irTexto: 'Ir a Personas' },
+  ],
+};
+
 export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
+  procesos: PROCESOS,
+  personas: PERSONAS,
+  respuestas: RESPUESTAS,
   hoy: HOY,
   entregas: HOY,
   chat: CHAT,
   guardados: GUARDADOS,
   ia: IA,
   motorizados: MOTORIZADOS,
+  numeros: GENERICA('Números del día', 'La lista de GSG número por número. Elige un filtro, marca uno, varios o «Marcar todos» y usa los botones de la barra.', [
+    { p: '¿Por qué un número cambió de filtro solo?', r: 'Porque contestó: al mandar su ubicación pasa a «Falta confirmar» y al decir que sí pasa a «Ya contactados». La pantalla se actualiza sola cada pocos segundos.' },
+    { p: '¿«Pedir ubicación ahora» le escribe al momento?', r: 'Lo pone primero en la cola: sale en cuanto le toque, de uno en uno y con la pausa de siempre, para cuidar el número. Fuera del horario de envío espera a que empiece.' },
+    { p: '¿Qué hace «Pausar mensajes»?', r: 'Deja de pedirle la ubicación y la confirmación a ese número hasta que lo reanudes. Si él escribe, se le sigue leyendo y contestando.' },
+  ]),
   usuarios: EQUIPO,
   setup: CONEXION,
   configuracion: AJUSTES,

@@ -400,10 +400,14 @@ describe('la IA conoce el sistema por el que habla', () => {
     expect(s).toContain(SISTEMA_PARA_CLIENTES);
     expect(s).toContain(ACCIONES_IA.PEDIR_UBICACION);
     expect(s).toContain('BAJA');
-    const manual = manualDelSistema();
+    const manual = manualDelSistema('completo');
     for (const trozo of ['Mi asistente IA (/panel#ia)', 'Conectar mi web y tienda', 'WooCommerce', 'Shopify', 'embed.js', 'Historial de envíos', 'no_opt_in', 'window_closed', 'Reparto', 'SaaS', 'Chats (/chat)']) {
       expect(manual, trozo).toContain(trozo);
     }
+    // Con "Solo lo de GSG" el manual no ofrece ventas: habla del agente operativo.
+    const gsg = manualDelSistema('gsg');
+    for (const trozo of ['AGENTE OPERATIVO', 'UBI REGISTRADA', 'gpt-4o-mini', 'Historial de envíos', 'Chats (/chat)']) expect(gsg, trozo).toContain(trozo);
+    for (const fuera of ['WooCommerce', 'Shopify', 'embed.js', 'PEDIDOS DEL CHAT', 'Campañas por goteo', 'TOMA PEDIDOS']) expect(gsg, fuera).not.toContain(fuera);
   });
 
   it('leerRespuesta separa las dos marcas; derivar manda sobre pedir ubicacion', () => {

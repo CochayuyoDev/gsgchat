@@ -4,6 +4,7 @@
  *  GET  /admin/ia          la configuracion (sin el token; solo si hay uno)
  *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado, `token: ""` lo quita
  *  POST /admin/ia/probar   una conversacion de prueba desde el navegador, sin WhatsApp
+ *  POST /admin/ia/modelos  los modelos de la cuenta de OpenAI de una clave (solo admin)
  *
  * La IA operadora (ver ordenes.ts), para cualquier cuenta del panel:
  *  POST /admin/ia/ordenes            una orden con palabras; ejecuta y devuelve lo hecho y lo pendiente
@@ -13,14 +14,14 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ErrorIA, MODELOS_SUGERIDOS, SERVICIOS_OPENAI } from './proveedores.js';
+import { ErrorIA, listarModelosOpenAI, MODELOS_SUGERIDOS, SERVICIOS_OPENAI } from './proveedores.js';
 import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
 import { ESCENARIOS, GRUPOS } from './escenarios.js';
 import { BANCO_EXAMEN, UMBRAL_EXAMEN } from './examen-lector.js';
 import { configIASchema, type ServicioIA } from './servicio.js';
 import { confirmacionSchema } from './ordenes.js';
 
-export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan }): Promise<void> {
+export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan; fetchImpl?: typeof fetch }): Promise<void> {
   const { ia } = deps;
 
   // Lo que la IA (y las reglas) no entendieron, y el examen del lector de respuestas.
@@ -91,6 +92,19 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
       return reply.code(400).send({ error: 'Para activar el asistente hace falta el token de Puter (o la clave de la API elegida).', estado });
     }
     return { ok: true, estado };
+  });
+
+  /**
+   * Los modelos REALES de la cuenta de OpenAI de la clave pegada, para el
+   * selector: los de consumo muy bajo primero. Si no se pueden listar, cae a
+   * gpt-4o-mini y lo dice en palabras. Solo admin (la clave es de la tienda).
+   */
+  app.post('/admin/ia/modelos', async (request, reply) => {
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
+      return reply.code(403).send({ error: 'Solo un administrador vincula la clave de la IA.' });
+    }
+    const body = z.object({ clave: z.string().max(500).default('') }).parse(request.body ?? {});
+    return listarModelosOpenAI({ clave: body.clave, fetchImpl: deps.fetchImpl });
   });
 
   /** Si la URL del catalogo responde: cuantos productos y un ejemplo. */

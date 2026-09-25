@@ -65,6 +65,11 @@ import type { ServicioFiabilidad } from './salud/fiabilidad.js';
 import { registerFiabilidadRoutes } from './salud/routes-fiabilidad.js';
 import type { ServicioResumenes } from './resumenes/servicio.js';
 import { registerResumenesRoutes } from './resumenes/routes.js';
+import { crearServicioProcesos, type ServicioProcesos } from './procesos/servicio.js';
+import { registerProcesosRoutes } from './procesos/routes.js';
+import { opcionesDesdeConfig } from './rutas/motor.js';
+import { PLANES } from './rutas/telefono.js';
+import { fijarGsgVigente } from './web/shell.js';
 
 export interface ServerDeps {
   config: Config;
@@ -123,6 +128,8 @@ export interface ServerDeps {
   secretoInterno?: string;
   /** El resumen de la mañana y de la tarde al supervisor. Ver src/resumenes. */
   resumenes?: ServicioResumenes;
+  /** Los procesos (pedir datos, confirmar, avisos al personal, cobranza). Si no se pasa, se arma aqui sin motor. Ver src/procesos. */
+  procesos?: ServicioProcesos;
   /**
    * Lo propio de cada tienda de la plataforma (ver src/plataforma): su sesion
    * de WhatsApp, su carpeta de vinculacion, el rol de su primera cuenta y el
@@ -200,6 +207,30 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   await app.register(websocket);
+
+  // Los procesos: si el arranque no trae los suyos (con su motor), se arman
+  // aqui para que las pantallas, la API y los entrantes funcionen igual.
+  let procesos = deps.procesos;
+  if (!procesos) {
+    procesos = await crearServicioProcesos({
+      repos,
+      sender,
+      nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
+      timezone: config.timezone,
+      plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru,
+      distritos: config.distritos,
+      // Una instalacion suelta es la de siempre (GSG Courier): las entregas vienen activas.
+      gsgPorDefecto: true,
+      opciones: opcionesDesdeConfig(config),
+      salud,
+      politica,
+      clasificar: () => (ia?.activa() ? (m) => ia.clasificarOperativo(m) : undefined),
+    });
+    await procesos.cargar();
+  }
+  const servicioProcesos = procesos;
+  // El menu enseña las pantallas de GSG solo si su plantilla esta activa (en la plataforma manda la de cada tienda).
+  fijarGsgVigente(() => servicioProcesos.gsgActivo());
 
   const hub = new TrackingHub({ tracking: repos.tracking });
   // La puerta a GSG: sin credenciales no manda nada y los reportes se quedan
@@ -299,6 +330,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas });
+  // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
+  await registerProcesosRoutes(app, { procesos: servicioProcesos, config, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.
   await registerEmbedRoutes(app, { config, ajustes });
   // El chat para los visitantes de la web del negocio (widget.js). Ver src/web-visitantes.
@@ -331,6 +364,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     prefijoLog: deps.prefijoLog,
     // La misma puerta a GSG que el webhook de Meta: la de la conexion vigente.
     gsg,
+    procesos: servicioProcesos,
   });
 
   // La IA operadora ejecuta las ordenes por las mismas rutas que las

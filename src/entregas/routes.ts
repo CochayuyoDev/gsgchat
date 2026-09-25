@@ -13,6 +13,7 @@
  *  POST /admin/entregas/:id/reintentar
  *  POST /admin/entregas/:id/segunda-visita   el motorizado vuelve a pasar (sin preguntarle al cliente)
  *  POST /admin/entregas/:id/prioridad        { urgente: true|false }
+ *  GET  /admin/entregas/numeros, POST /admin/entregas/masa   Numeros del dia (ver numeros.ts)
  *
  *  GET/POST /admin/motorizados, POST/DELETE /admin/motorizados/:id, POST /admin/motorizados/de-prueba
  *  GET  /admin/motorizados/:id/ruta          sus pedidos de hoy en orden de cercania (y el mensaje)
@@ -37,6 +38,7 @@ import type { GsgSimulado } from './gsg-simulado.js';
 import { MOTORIZADOS_DE_PRUEBA } from './datos-de-prueba.js';
 import { crearGuionDelDia, type EntranteSimulado } from './guion-dia.js';
 import { motorizadoPage } from '../web/motorizado-page.js';
+import { registerNumerosRoutes } from './numeros.js';
 
 export interface EntregasRoutesDeps {
   entregas: ServicioEntregas;
@@ -91,6 +93,9 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   const soloAdmin = (request: { usuario?: { rol?: string; porToken?: boolean } | null }) => request.usuario?.rol === 'admin' && !request.usuario.porToken;
 
   app.get('/admin/entregas', async () => entregas.resumen());
+
+  // Numeros del dia: la lista de GSG numero por numero y las acciones en masa (ver numeros.ts).
+  await registerNumerosRoutes(app, { entregas });
 
   app.post('/admin/entregas/sincronizar', async () => entregas.sincronizar());
 

@@ -36,16 +36,16 @@ const CSS = `
   input:focus, textarea:focus, select:focus { border-color: var(--primario); outline: 2px solid var(--primario-suave); outline-offset: 0; }
   input[type=checkbox], input[type=radio] { min-height: 0; width: 16px; height: 16px; accent-color: var(--primario); }
   textarea { min-height: 92px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
-  button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 8px 16px; font: inherit; font-weight: 600; line-height: 1.2; border: 1px solid var(--accent); border-radius: var(--radio-sm);
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; font: inherit; font-weight: 600; line-height: 1.2; border: 1px solid var(--accent); border-radius: var(--radio-sm);
     background: var(--accent); color: var(--accent-ink); cursor: pointer; }
   button:hover { filter: brightness(1.06); }
   button.ghost { background: var(--card); color: var(--text); border: 1px solid var(--line); }
   button.ghost:hover { filter: none; border-color: var(--primario); color: var(--primario); }
   button.danger { background: var(--rojo-suave); color: var(--rojo); border: 1px solid transparent; }
   button.danger:hover { filter: none; background: var(--rojo); color: #fff; }
-  button.sm { min-height: 30px; padding: 4px 10px; font-size: 12.5px; font-weight: 500; }
+  button.sm { min-height: 34px; padding: 6px 12px; font-size: 13px; font-weight: 500; }
   button:disabled { opacity: .5; cursor: default; filter: none; }
-  @media (max-width: 960px) { button { min-height: 40px; } button.sm { min-height: 36px; } }
+  @media (max-width: 960px) { button { min-height: 44px; } button.sm { min-height: 44px; } }
   .actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
   .toolbar { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: end; margin-top: 8px; }
   .toolbar label { margin-top: 0; }
@@ -443,6 +443,12 @@ ${warning}
     <p class="muted" id="in-pasos-sub">Lo que falta por dejar listo. Cada punto lleva a la pantalla donde se hace; cuando esté todo, esta tarjeta se pliega a una línea.</p>
     <div class="listo-linea hidden" id="in-pasos-listo"></div>
     <ul class="pasos" id="in-pasos"></ul>
+  </section>
+  <section class="card hidden" id="in-procesos-card" style="margin-bottom:14px">
+    <h2>Tus procesos</h2>
+    <p class="muted" id="in-procesos-sub">Lo que el sistema hace solo por WhatsApp con tus listas de personas.</p>
+    <div class="kpis" id="in-procesos"></div>
+    <div class="actions"><a href="/procesos">Ver los procesos</a> <a href="/personas?filtro=persona" style="margin-left:14px">Quién necesita a alguien</a></div>
   </section>
   <section class="card hidden" id="in-entregas-card" style="margin-bottom:14px">
     <h2>Entregas de hoy</h2>
@@ -1107,167 +1113,211 @@ ${warning}
     .ia-paso b { display: block; margin-bottom: 2px; }
     .ia-paso .estado { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
     .ia-paso .estado.ok { background: var(--ok); } .ia-paso .estado.bad { background: var(--bad); }
+    /* Los 4 pasos de esta pantalla: mismo patron de pestañas numeradas que
+       /desarrollador (src/desarrollador/pagina.ts), para no repetir criterio. */
+    .ia-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--esp-2); margin: 4px 0 18px; }
+    .ia-tabs button { min-height: 54px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); color: var(--texto-suave); font: inherit; font-weight: 600; font-size: 13px; line-height: 1.25; min-width: 0; cursor: pointer; text-align: left; }
+    .ia-tabs button:hover { border-color: var(--primario); color: var(--texto); }
+    .ia-tabs button[aria-selected="true"] { color: var(--texto); border-color: var(--primario); background: var(--primario-suave); box-shadow: inset 0 -3px 0 var(--primario); }
+    .ia-tab-n { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: var(--superficie-2); color: var(--texto-suave); }
+    .ia-tabs button[aria-selected="true"] .ia-tab-n { background: var(--primario); color: var(--primario-texto); }
+    .ia-seccion[hidden] { display: none; }
+    @media (max-width: 900px) { .ia-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 560px) { .ia-tabs button { flex-direction: column; justify-content: center; text-align: center; gap: 4px; padding: 8px 6px; font-size: 12px; } }
+    .s-app.modo-completo .solo-gsg { display: none !important; }
   </style>
-  <p class="muted">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
+  <p class="muted solo-completo">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
   Funciona con la IA de <a href="https://puter.com" target="_blank" rel="noopener">Puter</a> (una sola cuenta para GPT, Claude, Gemini y más) o con cualquier servicio de IA con clave (OpenAI, Groq, Google…).</p>
-  <p class="muted" style="background:var(--chip);border-radius:10px;padding:10px 12px;margin:0 0 14px">🎓 <b>¿Quieres enseñarle a gran escala?</b> En <a href="/entrenamiento"><b>Entrenar a la IA</b></a> le das miles de ejemplos, datos y reglas: importas un Excel o un chat exportado, dejas que aprenda de tus conversaciones reales, la corriges desde el chat y la examinas en masa. Lo de aquí abajo es el resumen general del negocio; lo de allí, el detalle.</p>
+  <p class="muted solo-gsg">Atiende a tus clientes por WhatsApp como <b>agente operativo</b>: les pide su ubicación, la valida y la registra. No da precios ni atiende otras consultas: a esas les manda un mensaje de cierre con el número de soporte y pasa el chat a una persona. Funciona con tu clave de OpenAI (consumo muy bajo).</p>
+  <div class="actions" style="margin:0 0 12px">
+    <label class="inline"><input type="checkbox" id="ia-agente-operativo"> <b>Agente operativo</b> <span class="muted" style="font-weight:400">(solo pide y registra la ubicación; ante cualquier otra consulta manda el mensaje de cierre una vez y pasa el chat a una persona)</span></label>
+    <span id="ia-agente-nota" class="muted"></span>
+  </div>
+  <p class="muted solo-completo" style="background:var(--chip);border-radius:10px;padding:10px 12px;margin:0 0 14px">🎓 <b>¿Quieres enseñarle a gran escala?</b> En <a href="/entrenamiento"><b>Entrenar a la IA</b></a> le das miles de ejemplos, datos y reglas: importas un Excel o un chat exportado, dejas que aprenda de tus conversaciones reales, la corriges desde el chat y la examinas en masa. Lo de aquí abajo es el resumen general del negocio; lo de allí, el detalle.</p>
 
   <div class="ia-pasos" id="ia-pasos">
     <div class="ia-paso"><b><span class="estado" id="ia-p1"></span>1. Con qué IA</b><span class="muted" id="ia-p1-t">Sin clave ni sesión todavía.</span></div>
     <div class="ia-paso"><b><span class="estado" id="ia-p2"></span>2. Qué sabe</b><span class="muted" id="ia-p2-t">Todavía no le contaste nada del negocio.</span></div>
     <div class="ia-paso"><b><span class="estado" id="ia-p3"></span>3. Encendido</b><span class="muted" id="ia-p3-t">Apagado: no contesta a nadie.</span></div>
   </div>
-  <div class="dos">
-    <div>
-      <h3>1. Con qué IA contesta</h3>
-      <p class="muted" style="margin:0 0 6px">Elige un servicio, pega su clave y pulsa «Probar la conexión». Puter no necesita clave.</p>
-      <label>Proveedor</label>
-      <select id="ia-proveedor"><option value="puter">Puter (recomendado: un token para todos los modelos)</option><option value="openai">Una clave de API (OpenAI, Groq, Google, OpenRouter, DeepSeek, Ollama...)</option></select>
-      <div id="ia-puter-caja">
-        <p class="muted" style="margin:4px 0 8px">Sin claves ni tarjeta: pulsa el botón, entra con Google, Microsoft, Apple o correo (gratis) y listo. Los modelos Gemma 4 no cuestan nada.</p>
-        <div class="actions"><button id="ia-puter-conectar" type="button">Conectar con Puter</button><span id="ia-puter-estado" class="muted"></span></div>
-        <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">O pegar la clave a mano</summary>
-          <label>Clave de Puter <small class="muted">(en puter.com → Panel → Crear clave; ellos la llaman «token»)</small></label>
-          <input id="ia-token" type="password" placeholder="Pegar aqui; se guarda cifrado y no se vuelve a mostrar" autocomplete="off">
-        </details>
-      </div>
-      <div id="ia-openai-clave" class="hidden">
-        <label>Servicio</label>
-        <select id="ia-servicio"></select>
-        <p id="ia-servicio-nota" class="muted" style="margin:4px 0 8px"></p>
-        <label>Clave de la API</label>
-        <input id="ia-token-openai" type="password" placeholder="sk-…; se guarda cifrada y no se vuelve a mostrar" autocomplete="off">
-      </div>
-      <p id="ia-token-estado" class="muted"></p>
-      <div id="ia-openai" class="hidden"><label>URL base de la API <small class="muted">(la rellena el servicio elegido; cámbiala solo si usas otro)</small></label><input id="ia-baseurl" placeholder="https://api.openai.com/v1 · https://api.groq.com/openai/v1 · http://localhost:11434/v1"></div>
-      <label>Modelo</label>
-      <select id="ia-modelo-gratis"></select>
-      <p id="ia-modelo-nota" class="muted" style="margin-top:4px">Solo modelos <b>completamente gratuitos</b> de Puter (no cuestan nada). Se comprueba con su lista cada hora.</p>
-      <input id="ia-modelo" list="ia-modelos" placeholder="gpt-4o-mini" class="hidden"><datalist id="ia-modelos"></datalist>
-      <div class="actions" style="margin-top:10px"><button class="ghost" id="ia-probar-conexion" type="button">Probar la conexión</button><span id="ia-conexion-estado" class="muted"></span></div>
-      <h3 class="bloque">Cuándo pasar con una persona</h3>
-      <label>Si el cliente escribe alguna de estas palabras (separadas por comas)</label>
-      <input id="ia-derivar" placeholder="asesor, humano, persona, hablar con alguien, reclamo">
-      <label class="inline" style="margin-top:10px"><input type="checkbox" id="ia-avisar"> Avisarme por WhatsApp (al numero del supervisor de Configuracion) cuando pase con una persona</label>
-      <label style="margin-top:10px">Cuantos mensajes anteriores recuerda</label>
-      <input id="ia-memoria" type="number" min="0" max="40" value="12" style="width:100px">
-    </div>
-    <div>
-      <h3>2. Qué sabe de tu negocio</h3>
-      <p class="muted" style="margin:0 0 6px">Escríbelo como se lo contarías a un empleado nuevo. Para enseñarle a gran escala (Excel, chats), ve a <a href="/entrenamiento">Entrenar a la IA</a>.</p>
-      <label>Cómo se llama el asistente</label>
-      <input id="ia-nombre" placeholder="Lucia">
-      <label>Lo que sabe (escríbelo como se lo contarías a un empleado nuevo)</label>
-      <textarea id="ia-conocimiento" rows="12" placeholder="Somos una zapateria en Miraflores. Vendemos zapatos de vestir y zapatillas, tallas 35 a 45.&#10;Precios: zapatos de vestir desde S/ 120, zapatillas desde S/ 90.&#10;Envio a todo Lima en 24 h, gratis desde S/ 150. Provincias 2-3 dias.&#10;Cambios dentro de 7 dias con boleta.&#10;Pagos: Yape, Plin, transferencia y tarjeta al recibir.&#10;Horario: lunes a sabado de 9 a 19."></textarea>
-      <label>Cómo debe hablar (opcional)</label>
-      <textarea id="ia-instrucciones" rows="3" placeholder="Tutea, se breve, usa un emoji como mucho. Si preguntan por stock exacto, di que lo confirmamos en un momento."></textarea>
-      <div class="solo-completo">
-      <h3 class="bloque">Tu catálogo real (opcional)</h3>
-      <p class="muted">La dirección de los productos de tu tienda online: el asistente da precio, stock y enlace de productos que existen, y puede tomar pedidos. Entiende la tienda de Elysian, WooCommerce o una lista simple con código, nombre, precio, stock y enlace de cada producto.</p>
-      <div class="toolbar">
-        <div style="flex:2"><label>Dirección del catálogo</label><input id="ia-catalogo-url" placeholder="https://elysian.pe/api/products"></div>
-        <div><label>Formato</label><select id="ia-catalogo-formato"><option value="auto">Detectar solo</option><option value="elysian">Elysian</option><option value="woocommerce">WooCommerce</option><option value="simple">Lista simple</option></select></div>
-        <div><label>&nbsp;</label><button class="ghost" id="ia-catalogo-probar">Probar</button></div>
-      </div>
-      <p id="ia-catalogo-estado" class="muted"></p>
-      </div>
-    </div>
-  </div>
-  <h3 class="bloque">3. Encender y guardar</h3>
+
   <div class="actions">
     <label class="inline"><input type="checkbox" id="ia-activa"> <b>Asistente encendido</b> <span class="muted" style="font-weight:400">(contesta solo a quien escribe; lo del reparto y las entregas sigue igual)</span></label>
-    <button id="ia-guardar">Guardar</button>
+    <button class="btn primario" id="ia-guardar">Guardar</button>
     <span id="ia-state" class="pill hidden"></span>
   </div>
 
-  <h3 class="bloque">Pruébalo aquí</h3>
-  <p class="muted">Escribe como si fueras un cliente. No sale nada por WhatsApp; usa lo que guardaste arriba.</p>
+  <h3 class="bloque" style="margin-top:16px">Pruébalo aquí</h3>
+  <p class="muted">Escribe como si fueras un cliente. No sale nada por WhatsApp; usa lo que guardaste abajo.</p>
   <div id="ia-chat" class="ia-chat"><div class="muted" style="padding:10px">Guarda primero y escribe abajo.</div></div>
   <div class="toolbar" style="margin-top:8px">
     <div style="flex:1"><input id="ia-probar-texto" placeholder="Hola, ¿tienen zapatillas talla 42?"></div>
-    <div><button class="ghost" id="ia-probar">Enviar</button></div>
-    <div><button class="ghost sm" id="ia-probar-limpiar">Empezar de nuevo</button></div>
+    <div><button class="btn" id="ia-probar">Enviar</button></div>
+    <div><button class="btn sm" id="ia-probar-limpiar">Empezar de nuevo</button></div>
   </div>
 
-  <h3 class="bloque">Cómo va la IA</h3>
-  <details class="ia-mas" id="ia-uso-caja">
-    <summary style="cursor:pointer;font-weight:600">Uso de la IA <span class="muted" id="ia-uso-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
-    <div class="uso-ia" id="ia-uso"></div>
-    <p class="muted" id="ia-uso-nota" style="margin:4px 0 0;font-size:12.5px"></p>
-  </details>
-  <details class="ia-mas" id="ia-noent-caja">
-    <summary style="cursor:pointer;font-weight:600">Lo que la IA no entendió <span class="muted" id="ia-noent-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
-    <p class="muted" style="margin:6px 0 8px;font-size:13px">Respuestas de clientes y motorizados que ni las reglas ni la IA supieron leer estos días. Di qué era y el lector lo aprende: la próxima vez no vuelve a preguntar.</p>
-    <div id="ia-noent"></div>
-  </details>
-  <details class="ia-mas" id="ia-lector-caja">
-    <summary style="cursor:pointer;font-weight:600">El lector de respuestas <span class="muted" id="ia-lector-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
-    <p class="muted" style="margin:6px 0 8px;font-size:13px">Cada mañana se examina solo con un banco de frases reales («ya pues», «media hora», «lo dejé con el portero»). Si acierta menos del <span id="ia-lector-umbral">90</span> %, el supervisor recibe un aviso.</p>
-    <div id="ia-lector"></div>
-    <div class="actions" style="margin-top:8px"><button class="ghost" id="ia-lector-examinar" type="button">Examinar ahora</button><span class="muted" id="ia-lector-estado"></span></div>
-  </details>
+  <nav class="ia-tabs" role="tablist" aria-label="Partes del asistente de IA">
+    <button type="button" data-ia-paso="1" role="tab" id="ia-tab-1" aria-controls="ia-sec-1" aria-selected="true"><span class="ia-tab-n" aria-hidden="true">1</span><span>Con qué IA contesta</span></button>
+    <button type="button" data-ia-paso="2" role="tab" id="ia-tab-2" aria-controls="ia-sec-2" aria-selected="false"><span class="ia-tab-n" aria-hidden="true">2</span><span>Qué sabe y cuándo deriva</span></button>
+    <button type="button" data-ia-paso="3" role="tab" id="ia-tab-3" aria-controls="ia-sec-3" aria-selected="false"><span class="ia-tab-n" aria-hidden="true">3</span><span>Resultados</span></button>
+    <button type="button" data-ia-paso="4" role="tab" id="ia-tab-4" aria-controls="ia-sec-4" aria-selected="false"><span class="ia-tab-n" aria-hidden="true">4</span><span>Voz y avanzado</span></button>
+  </nav>
 
-  <h3 class="bloque">Más cosas que puede hacer</h3>
-  <details class="ia-mas" id="ia-voz-caja"><summary id="ia-voz-titulo">🎤 Voz <span class="muted">contestar con audios y entender los del cliente (opcional)</span></summary>
-  <p class="muted">Con una cuenta de <a href="https://elevenlabs.io" target="_blank" rel="noopener">ElevenLabs</a> (tiene plan gratis), el asistente puede contestar con <b>notas de voz</b> con la voz que elijas, y <b>entender los audios</b> que manda el cliente (se transcriben: los lee el asistente, se ven escritos en el chat y salen por la API). Otros sistemas conectados (Stoky) solo piden «mándalo con voz»: la voz se elige aquí. Si algo falla (se acaba el plan, el mensaje es muy largo), el mensaje sale por escrito: la voz nunca deja a un cliente sin respuesta.</p>
-  <div id="voz-estado-caja" class="muted" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px"></div>
-  <div class="dos">
-    <div>
-      <label>Clave de ElevenLabs <small class="muted">(elevenlabs.io → tu perfil → API Keys)</small></label>
-      <div class="toolbar">
-        <div style="flex:1"><input id="voz-clave" type="password" placeholder="Pegar aquí; se guarda cifrada y no se vuelve a mostrar" autocomplete="off"></div>
-        <div><button class="ghost" id="voz-probar" type="button">Comprobar</button></div>
-      </div>
-      <p id="voz-clave-estado" class="muted" style="margin:4px 0 10px"></p>
-      <label>Voz</label>
-      <div class="toolbar">
-        <div style="flex:1"><select id="voz-voz"><option value="">Guarda la clave para ver tus voces</option></select></div>
-        <div><button class="ghost" id="voz-escuchar" type="button">Escuchar</button></div>
-      </div>
-      <p id="voz-voz-nota" class="muted" style="margin:4px 0 10px"></p>
-      <label>Calidad</label>
-      <select id="voz-modelo"></select>
-      <p id="voz-modelo-nota" class="muted" style="margin:4px 0 10px"></p>
+  <section class="ia-seccion" id="ia-sec-1" role="tabpanel" aria-labelledby="ia-tab-1">
+    <p class="muted" style="margin:0 0 10px">Pega tu clave de la API de OpenAI y pulsa «Probar la conexión».</p>
+    <!-- Proveedor/Servicio/URL base quedan fijos en OpenAI (pedido del dueño: un solo
+         campo de clave, sin elegir nada). Siguen en el DOM ocultos para que
+         Probar/Guardar les sigan mandando el mismo valor de siempre. -->
+    <div class="hidden" id="ia-proveedor-caja">
+      <label>Proveedor</label>
+      <select id="ia-proveedor"><option value="puter">Puter (recomendado: un token para todos los modelos)</option><option value="openai">Una clave de API (OpenAI, Groq, Google, OpenRouter, DeepSeek, Ollama...)</option></select>
     </div>
-    <div>
-      <label>Cuándo contesta el asistente con audio</label>
-      <select id="voz-cuando">
-        <option value="si-manda-audio">Cuando el cliente manda un audio (recomendado)</option>
-        <option value="siempre">Siempre</option>
-        <option value="nunca">Nunca por su cuenta (solo si otro sistema lo pide)</option>
-      </select>
-      <label class="inline" style="margin-top:12px"><input type="checkbox" id="voz-transcribir" checked> <b>Entender los audios del cliente</b> <span class="muted">(se transcriben al llegar)</span></label>
-      <label style="margin-top:12px">Largo máximo de un audio (caracteres)</label>
-      <input id="voz-max" type="number" min="50" max="5000" value="600" style="width:120px">
-      <p class="muted" style="margin:4px 0 0">Un mensaje más largo sale por escrito: un audio de tres minutos no lo escucha nadie. Los mensajes con enlaces también van por escrito.</p>
+    <div id="ia-puter-caja">
+      <p class="muted" style="margin:4px 0 8px">Sin claves ni tarjeta: pulsa el botón, entra con Google, Microsoft, Apple o correo (gratis) y listo. Los modelos Gemma 4 no cuestan nada.</p>
+      <div class="actions"><button class="btn primario" id="ia-puter-conectar" type="button">Conectar con Puter</button><span id="ia-puter-estado" class="muted"></span></div>
+      <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">O pegar la clave a mano</summary>
+        <label>Clave de Puter <small class="muted">(en puter.com → Panel → Crear clave; ellos la llaman «token»)</small></label>
+        <input id="ia-token" type="password" placeholder="Pegar aqui; se guarda cifrado y no se vuelve a mostrar" autocomplete="off">
+      </details>
     </div>
-  </div>
-  <div class="actions" style="margin-top:14px">
-    <label class="inline"><input type="checkbox" id="voz-activa"> <b>Voz encendida</b></label>
-    <button id="voz-guardar">Guardar la voz</button>
-    <span id="voz-state" class="pill hidden"></span>
-  </div>
-  <audio id="voz-player" class="hidden" controls></audio>
-  </details>
+    <div id="ia-openai-clave" class="hidden">
+      <div class="hidden" id="ia-servicio-caja">
+        <label>Servicio</label>
+        <select id="ia-servicio"></select>
+        <p id="ia-servicio-nota" class="muted" style="margin:4px 0 8px"></p>
+      </div>
+      <label>Clave de la API</label>
+      <input id="ia-token-openai" type="password" placeholder="sk-…; se guarda cifrada y no se vuelve a mostrar" autocomplete="off">
+      <p class="muted" style="margin:4px 0 8px">Pega tu clave de OpenAI (platform.openai.com → API keys).</p>
+    </div>
+    <p id="ia-token-estado" class="muted"></p>
+    <div id="ia-openai" class="hidden"><label>URL base de la API <small class="muted">(la rellena el servicio elegido; cámbiala solo si usas otro)</small></label><input id="ia-baseurl" placeholder="https://api.openai.com/v1 · https://api.groq.com/openai/v1 · http://localhost:11434/v1"></div>
+    <label>Modelo</label>
+    <select id="ia-modelo-gratis"></select>
+    <p id="ia-modelo-nota" class="muted" style="margin-top:4px">Solo modelos <b>completamente gratuitos</b> de Puter (no cuestan nada). Se comprueba con su lista cada hora.</p>
+    <input id="ia-modelo" list="ia-modelos" placeholder="gpt-4o-mini" class="hidden" style="max-width:260px"><datalist id="ia-modelos"></datalist>
+    <!-- Con la clave de OpenAI: los modelos REALES de la cuenta (POST /admin/ia/modelos), el de consumo muy bajo primero. -->
+    <select id="ia-modelo-lista" class="hidden" style="max-width:420px"></select>
+    <p id="ia-modelo-lista-nota" class="muted hidden" style="margin-top:4px">Pega tu clave y verás aquí los modelos de tu cuenta. Por defecto se usa <b>gpt-4o-mini</b> (consumo muy bajo).</p>
+    <div class="actions" style="margin-top:10px"><button class="btn primario" id="ia-vincular-clave" type="button">Vincular clave a esta tienda</button><button class="btn" id="ia-probar-conexion" type="button">Probar la conexión</button><span id="ia-conexion-estado" class="muted"></span></div>
+  </section>
 
-  <details class="ia-mas" id="ia-examen-caja"><summary>Examen con clientes de prueba <span class="muted">decenas de clientes inventados le escriben y se revisa cada respuesta</span></summary>
-  <p class="muted">Decenas de clientes distintos (el que regatea, el que ya pagó, el enojado, el que intenta engañar al asistente...) escritos como en la vida real. El asistente responde con lo que sabe de tu negocio y cada respuesta se revisa sola: que no invente precios, que no prometa descuentos, que pase con una persona cuando toca, que no se vaya de largo. Corre un grupo cada vez (tarda unos segundos por cliente).</p>
-  <div class="toolbar">
-    <div><label>Grupo</label><select id="ia-esc-grupo"></select></div>
-    <div><label>&nbsp;</label><button class="ghost" id="ia-esc-correr">Correr el examen</button></div>
-    <span id="ia-esc-state" class="pill hidden"></span>
-  </div>
-  <div id="ia-esc-resumen" class="muted" style="margin:8px 0"></div>
-  <div id="ia-esc-table" class="tablewrap"></div>
-  </details>
+  <section class="ia-seccion" id="ia-sec-2" role="tabpanel" aria-labelledby="ia-tab-2" hidden>
+    <div class="dos">
+      <div>
+        <h3 style="margin-top:0">Qué sabe de tu negocio</h3>
+        <p class="muted" style="margin:0 0 6px">Escríbelo como se lo contarías a un empleado nuevo. Para enseñarle a gran escala (Excel, chats), ve a <a href="/entrenamiento">Entrenar a la IA</a>.</p>
+        <label>Cómo se llama el asistente</label>
+        <input id="ia-nombre" placeholder="Lucia">
+        <label>Lo que sabe (escríbelo como se lo contarías a un empleado nuevo)</label>
+        <textarea id="ia-conocimiento" rows="12" placeholder="Somos una zapateria en Miraflores. Vendemos zapatos de vestir y zapatillas, tallas 35 a 45.&#10;Precios: zapatos de vestir desde S/ 120, zapatillas desde S/ 90.&#10;Envio a todo Lima en 24 h, gratis desde S/ 150. Provincias 2-3 dias.&#10;Cambios dentro de 7 dias con boleta.&#10;Pagos: Yape, Plin, transferencia y tarjeta al recibir.&#10;Horario: lunes a sabado de 9 a 19."></textarea>
+        <label>Cómo debe hablar (opcional)</label>
+        <textarea id="ia-instrucciones" rows="3" placeholder="Tutea, se breve, usa un emoji como mucho. Si preguntan por stock exacto, di que lo confirmamos en un momento."></textarea>
+        <div class="solo-completo">
+        <h3 class="bloque">Tu catálogo real (opcional)</h3>
+        <p class="muted">La dirección de los productos de tu tienda online: el asistente da precio, stock y enlace de productos que existen, y puede tomar pedidos. Entiende la tienda de Elysian, WooCommerce o una lista simple con código, nombre, precio, stock y enlace de cada producto.</p>
+        <div class="toolbar">
+          <div style="flex:2"><label>Dirección del catálogo</label><input id="ia-catalogo-url" placeholder="https://elysian.pe/api/products"></div>
+          <div><label>Formato</label><select id="ia-catalogo-formato"><option value="auto">Detectar solo</option><option value="elysian">Elysian</option><option value="woocommerce">WooCommerce</option><option value="simple">Lista simple</option></select></div>
+          <div><label>&nbsp;</label><button class="btn" id="ia-catalogo-probar">Probar</button></div>
+        </div>
+        <p id="ia-catalogo-estado" class="muted"></p>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-top:0">Cuándo pasar con una persona</h3>
+        <label>Si el cliente escribe alguna de estas palabras (separadas por comas)</label>
+        <input id="ia-derivar" placeholder="asesor, humano, persona, hablar con alguien, reclamo">
+        <label class="inline" style="margin-top:10px"><input type="checkbox" id="ia-avisar"> Avisarme por WhatsApp (al numero del supervisor de Configuracion) cuando pase con una persona</label>
+        <label style="margin-top:10px">Cuantos mensajes anteriores recuerda</label>
+        <input id="ia-memoria" type="number" min="0" max="40" value="12" style="width:100px">
+      </div>
+    </div>
+  </section>
 
-  <details class="ia-mas"><summary>Seguridad <span class="muted">qué pasa si intentan confundirlo o sacarle el sistema</span></summary>
-  <p class="muted">Hay defensas fijas alrededor del modelo, que no dependen de que "se porte bien": los intentos claros de sacarlo de su papel, de sacarle sus instrucciones, de pedir tokens o accesos, de hacerse pasar por el dueño o por el sistema, de pedir datos de otras personas o de que escriba a otros números <b>no llegan al modelo</b> (se contestan con una frase fija; tres seguidos pasan el chat a una persona). Lo que va a salir se revisa antes de salir (instrucciones, secretos, teléfonos ajenos no salen). Hay un tope de turnos por cliente y hora. Y el asistente solo puede pedir la ubicación y pasar con una persona: no tiene con qué hacer nada más. El grupo <b>Ataques al asistente</b> del examen es una muestra; el banco entero (miles de variantes) corre en las pruebas del sistema. <a href="/manual#m-seguridad-ia">Más en el manual</a>.</p>
-  <p class="muted">Para darle órdenes al sistema con palabras (poner números en la lista de envío automático, escribir a un cliente, ver cómo va el reparto…) está la <b>IA operadora</b>: el botón <b>IA</b> de arriba, en todas las pantallas. Usa esta misma conexión.</p>
-  </details>
+  <section class="ia-seccion" id="ia-sec-3" role="tabpanel" aria-labelledby="ia-tab-3" hidden>
+    <p class="muted" style="margin:0 0 12px">Cómo le está yendo al asistente: cuánto se usa, qué no entendió y los exámenes que lo ponen a prueba.</p>
+    <details class="ia-mas" id="ia-uso-caja">
+      <summary style="cursor:pointer;font-weight:600">Uso de la IA <span class="muted" id="ia-uso-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
+      <div class="uso-ia" id="ia-uso"></div>
+      <p class="muted" id="ia-uso-nota" style="margin:4px 0 0;font-size:12.5px"></p>
+    </details>
+    <details class="ia-mas" id="ia-noent-caja">
+      <summary style="cursor:pointer;font-weight:600">Lo que la IA no entendió <span class="muted" id="ia-noent-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
+      <p class="muted" style="margin:6px 0 8px;font-size:13px">Respuestas de clientes y motorizados que ni las reglas ni la IA supieron leer estos días. Di qué era y el lector lo aprende: la próxima vez no vuelve a preguntar.</p>
+      <div id="ia-noent"></div>
+    </details>
+    <details class="ia-mas" id="ia-lector-caja">
+      <summary style="cursor:pointer;font-weight:600">Examen del lector de reglas <span class="muted" id="ia-lector-resumen" style="font-weight:400;font-size:12.5px"></span></summary>
+      <p class="muted" style="margin:6px 0 8px;font-size:13px">Cada mañana se examina solo con un banco de frases reales («ya pues», «media hora», «lo dejé con el portero»). Si acierta menos del <span id="ia-lector-umbral">90</span> %, el supervisor recibe un aviso.</p>
+      <div id="ia-lector"></div>
+      <div class="actions" style="margin-top:8px"><button class="btn" id="ia-lector-examinar" type="button">Examinar ahora</button><span class="muted" id="ia-lector-estado"></span></div>
+    </details>
+    <details class="ia-mas" id="ia-examen-caja"><summary>Examen contra clientes de prueba <span class="muted">decenas de clientes inventados le escriben y se revisa cada respuesta</span></summary>
+    <p class="muted">Decenas de clientes distintos (el que regatea, el que ya pagó, el enojado, el que intenta engañar al asistente...) escritos como en la vida real. El asistente responde con lo que sabe de tu negocio y cada respuesta se revisa sola: que no invente precios, que no prometa descuentos, que pase con una persona cuando toca, que no se vaya de largo. Corre un grupo cada vez (tarda unos segundos por cliente).</p>
+    <div class="toolbar">
+      <div><label>Grupo</label><select id="ia-esc-grupo"></select></div>
+      <div><label>&nbsp;</label><button class="btn" id="ia-esc-correr">Correr el examen</button></div>
+      <span id="ia-esc-state" class="pill hidden"></span>
+    </div>
+    <div id="ia-esc-resumen" style="margin:8px 0"></div>
+    <div id="ia-esc-table" class="tablewrap"></div>
+    </details>
+  </section>
+
+  <section class="ia-seccion" id="ia-sec-4" role="tabpanel" aria-labelledby="ia-tab-4" hidden>
+    <p class="muted" style="margin:0 0 12px">Que además hable con audios, y qué defensas tiene delante de intentos de manipularlo.</p>
+    <details class="ia-mas" id="ia-voz-caja"><summary id="ia-voz-titulo">🎤 Voz <span class="muted">contestar con audios y entender los del cliente (opcional)</span></summary>
+    <p class="muted">Con una cuenta de <a href="https://elevenlabs.io" target="_blank" rel="noopener">ElevenLabs</a> (tiene plan gratis), el asistente puede contestar con <b>notas de voz</b> con la voz que elijas, y <b>entender los audios</b> que manda el cliente (se transcriben: los lee el asistente, se ven escritos en el chat y salen por la API). Otros sistemas conectados (Stoky) solo piden «mándalo con voz»: la voz se elige aquí. Si algo falla (se acaba el plan, el mensaje es muy largo), el mensaje sale por escrito: la voz nunca deja a un cliente sin respuesta.</p>
+    <div id="voz-estado-caja" class="muted" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px"></div>
+    <div class="dos">
+      <div>
+        <label>Clave de ElevenLabs <small class="muted">(elevenlabs.io → tu perfil → API Keys)</small></label>
+        <div class="toolbar">
+          <div style="flex:1"><input id="voz-clave" type="password" placeholder="Pegar aquí; se guarda cifrada y no se vuelve a mostrar" autocomplete="off"></div>
+          <div><button class="btn" id="voz-probar" type="button">Comprobar</button></div>
+        </div>
+        <p id="voz-clave-estado" class="muted" style="margin:4px 0 10px"></p>
+        <label>Voz</label>
+        <div class="toolbar">
+          <div style="flex:1"><select id="voz-voz"><option value="">Guarda la clave para ver tus voces</option></select></div>
+          <div><button class="btn" id="voz-escuchar" type="button">Escuchar</button></div>
+        </div>
+        <p id="voz-voz-nota" class="muted" style="margin:4px 0 10px"></p>
+        <label>Calidad</label>
+        <select id="voz-modelo"></select>
+        <p id="voz-modelo-nota" class="muted" style="margin:4px 0 10px"></p>
+      </div>
+      <div>
+        <label>Cuándo contesta el asistente con audio</label>
+        <select id="voz-cuando">
+          <option value="si-manda-audio">Cuando el cliente manda un audio (recomendado)</option>
+          <option value="siempre">Siempre</option>
+          <option value="nunca">Nunca por su cuenta (solo si otro sistema lo pide)</option>
+        </select>
+        <label class="inline" style="margin-top:12px"><input type="checkbox" id="voz-transcribir" checked> <b>Entender los audios del cliente</b> <span class="muted">(se transcriben al llegar)</span></label>
+        <label style="margin-top:12px">Largo máximo de un audio (caracteres)</label>
+        <input id="voz-max" type="number" min="50" max="5000" value="600" style="width:120px">
+        <p class="muted" style="margin:4px 0 0">Un mensaje más largo sale por escrito: un audio de tres minutos no lo escucha nadie. Los mensajes con enlaces también van por escrito.</p>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:14px">
+      <label class="inline"><input type="checkbox" id="voz-activa"> <b>Voz encendida</b></label>
+      <button class="btn primario" id="voz-guardar">Guardar la voz</button>
+      <span id="voz-state" class="pill hidden"></span>
+    </div>
+    <audio id="voz-player" class="hidden" controls></audio>
+    </details>
+
+    <details class="ia-mas"><summary>Seguridad <span class="muted">qué pasa si intentan confundirlo o sacarle el sistema</span></summary>
+    <p class="muted">Hay defensas fijas alrededor del modelo, que no dependen de que "se porte bien": los intentos claros de sacarlo de su papel, de sacarle sus instrucciones, de pedir tokens o accesos, de hacerse pasar por el dueño o por el sistema, de pedir datos de otras personas o de que escriba a otros números <b>no llegan al modelo</b> (se contestan con una frase fija; tres seguidos pasan el chat a una persona). Lo que va a salir se revisa antes de salir (instrucciones, secretos, teléfonos ajenos no salen). Hay un tope de turnos por cliente y hora. Y el asistente solo puede pedir la ubicación y pasar con una persona: no tiene con qué hacer nada más. El grupo <b>Ataques al asistente</b> del examen es una muestra; el banco entero (miles de variantes) corre en las pruebas del sistema. <a href="/manual#m-seguridad-ia">Más en el manual</a>.</p>
+    <p class="muted">Para darle órdenes al sistema con palabras (poner números en la lista de envío automático, escribir a un cliente, ver cómo va el reparto…) está la <b>IA operadora</b>: el botón <b>Órdenes</b> de arriba, en todas las pantallas. Usa esta misma conexión.</p>
+    </details>
+  </section>
 </section>
 
 <section id="tab-integraciones" class="card hidden">
+  <div class="solo-completo">
   <h2>Stoky: tu inventario y tus ventas</h2>
   <p class="muted">Stoky y este WhatsApp se conectan <b>en dos direcciones</b>, y las dos se configuran desde las pantallas, sin tocar código. Aquí se ve cómo está cada una y qué falta.</p>
   <div class="stk">
@@ -1303,6 +1353,7 @@ ${warning}
       <input id="stk-token" type="password" autocomplete="off" placeholder="Vacío = conservar el que ya hay">
       <div class="actions" style="margin-top:10px"><button class="ghost" id="stk-probar">Probar</button><button id="stk-guardar">Guardar y conectar</button><button class="ghost sm" id="stk-quitar">Quitar la conexión</button><span id="stk-state" class="pill hidden"></span></div>
     </div>
+  </div>
   </div>
 
   <h2>Códigos de conexión</h2>
@@ -1449,8 +1500,12 @@ var SIEMPRE = { inicio: true, estado: true, configuracion: true, actividad: true
 var loaded = {};
 var seccionActiva = '';
 
+/* Con «Solo lo de GSG» nada de ventas: pedidos del chat, campañas y envíos a grupos no se abren ni con el enlace directo. */
+var SECCIONES_DE_VENTA = ['pedidos', 'campanas', 'grupos'];
+function esModoGsg() { return window.__modoSistema === 'gsg' || Boolean(document.querySelector('.s-app') && document.querySelector('.s-app').classList.contains('modo-gsg')); }
 function activate(id) {
   if (TAB_IDS.indexOf(id) < 0) id = TAB_IDS[0];
+  if (SECCIONES_DE_VENTA.indexOf(id) >= 0 && esModoGsg()) id = 'inicio';
   seccionActiva = id;
   TAB_IDS.forEach(function (t) { document.getElementById('tab-' + t).classList.toggle('hidden', t !== id); });
   if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
@@ -1498,7 +1553,14 @@ function pintarPasosGsg(p) {
   var oficial = p.proveedor === 'cloud';
   var moto = p.motorizadosActivos;
   var pedidos = p.entregasHoy || 0;
-  var pasos = [
+  var sinEntregas = document.querySelector('.s-app') && document.querySelector('.s-app').getAttribute('data-gsg') === '0';
+  var pasos = sinEntregas ? [
+    { hecho: p.conectado, titulo: 'Conectar el WhatsApp', que: p.conectado ? (oficial ? 'La API de Meta ya responde.' : 'El teléfono está vinculado.') : (oficial ? 'La API de Meta no responde todavía.' : 'Escanea el QR desde el teléfono, como en WhatsApp Web.'), href: '/setup', boton: p.conectado ? 'Ver la conexión' : 'Conectar' },
+    { hecho: p.procesos > 0, titulo: 'Crear tu primer proceso', que: p.procesos > 0 ? p.procesos + ' proceso' + (p.procesos === 1 ? '' : 's') + ' listo' + (p.procesos === 1 ? '' : 's') + '.' : 'Elige una plantilla (pedir datos, confirmar citas, avisar tareas, cobranza) y ajusta sus mensajes.', href: '/procesos#crear', boton: p.procesos > 0 ? 'Ver los procesos' : 'Crear desde una plantilla' },
+    { hecho: p.personasEnProcesos > 0, titulo: 'Cargar la lista de personas', que: p.personasEnProcesos > 0 ? p.personasEnProcesos + ' persona' + (p.personasEnProcesos === 1 ? '' : 's') + ' en tus procesos.' : 'Pega la tabla de Excel o sube el archivo: el sistema les escribe solo, con su ritmo.', href: '/procesos', boton: p.personasEnProcesos > 0 ? 'Ver las personas' : 'Cargar personas' },
+    { hecho: p.supervisor === true, titulo: '¿A quién avisamos cuando algo necesita a alguien?', que: p.supervisor === true ? 'Ese WhatsApp recibe los avisos, el resumen del día y la prueba diaria.' : 'Sin un número, nadie se entera de lo que necesita a una persona.', href: '/panel#configuracion', boton: p.supervisor === true ? 'Cambiar el número' : 'Poner mi número', accion: 'supervisor', ocultar: p.supervisor === undefined },
+    { hecho: p.ia === true, titulo: 'Encender el asistente IA (opcional)', que: p.ia === true ? 'Distingue una pregunta del trámite de una consulta ajena.' : 'Reconoce mejor el «¿para qué?» y las consultas que no son del trámite. Sin él, todo sigue funcionando por reglas.', href: '/panel#ia', boton: p.ia === true ? 'Ver el asistente' : 'Encender', opcional: true, ocultar: p.iaDisponible === false }
+  ].filter(function (x) { return !x.ocultar; }) : [
     { hecho: p.conectado, titulo: 'Conectar el WhatsApp', que: p.conectado ? (oficial ? 'La API de Meta ya responde.' : 'El teléfono está vinculado.') : (oficial ? 'La API de Meta no responde todavía.' : 'Escanea el QR desde el teléfono, como en WhatsApp Web.'), href: '/setup', boton: p.conectado ? 'Ver la conexión' : 'Conectar' },
     { hecho: moto > 0, titulo: 'Dar de alta a los motorizados', que: moto > 0 ? moto + ' activo' + (moto === 1 ? '' : 's') + '. Son quienes reciben los pines y dicen en cuánto entregan.' : 'Ninguno todavía: sin motorizados, los pedidos listos no pueden salir.', href: '/motorizados', boton: moto > 0 ? 'Ver motorizados' : 'Dar de alta' },
     { hecho: p.supervisor === true, titulo: '¿A quién avisamos cuando algo necesita a alguien?', que: p.supervisor === true ? 'Ese WhatsApp recibe las incidencias, el resumen de la mañana y de la tarde y la prueba diaria.' : 'Sin un número, nadie se entera de las incidencias, ni llegan los resúmenes ni la prueba de la mañana.', href: '/panel#configuracion', boton: p.supervisor === true ? 'Cambiar el número' : 'Poner mi número', accion: 'supervisor', ocultar: p.supervisor === undefined },
@@ -1515,7 +1577,8 @@ function pintarPasosGsg(p) {
   var lista = document.getElementById('in-pasos');
   if (todo && !pasosDesplegados) {
     linea.classList.remove('hidden'); sub.classList.add('hidden'); lista.classList.add('hidden');
-    linea.innerHTML = '<b>✓</b><span>WhatsApp conectado · ' + moto + ' motorizado' + (moto === 1 ? '' : 's') + (p.supervisor === true ? ' · avisos al supervisor' : '') + ' · ' + esc(p.gsg === 'real' ? 'GSG conectado' : p.gsg === 'simulador' ? 'simulador de GSG' : 'pedidos cargados a mano') + (p.ia === true ? ' · asistente IA encendido' : '') + '</span><a id="in-pasos-ver">Ver los pasos</a>';
+    if (sinEntregas) linea.innerHTML = '<b>✓</b><span>WhatsApp conectado · ' + p.procesos + ' proceso' + (p.procesos === 1 ? '' : 's') + ' · ' + p.personasEnProcesos + ' persona' + (p.personasEnProcesos === 1 ? '' : 's') + (p.supervisor === true ? ' · avisos al supervisor' : '') + (p.ia === true ? ' · asistente IA encendido' : '') + '</span><a id="in-pasos-ver">Ver los pasos</a>';
+    else linea.innerHTML = '<b>✓</b><span>WhatsApp conectado · ' + moto + ' motorizado' + (moto === 1 ? '' : 's') + (p.supervisor === true ? ' · avisos al supervisor' : '') + ' · ' + esc(p.gsg === 'real' ? 'GSG conectado' : p.gsg === 'simulador' ? 'simulador de GSG' : 'pedidos cargados a mano') + (p.ia === true ? ' · asistente IA encendido' : '') + '</span><a id="in-pasos-ver">Ver los pasos</a>';
     document.getElementById('in-pasos-ver').onclick = function () { pasosDesplegados = true; pintarPasosGsg(p); };
     return;
   }
@@ -1575,13 +1638,20 @@ function pintarPasos(p) {
   }).join('');
 }
 /* Los accesos rápidos: en modo GSG solo lo que se ve en el menú; en el completo, lo de siempre. */
-var ACCESOS_GSG = [
+var ACCESOS_PROCESOS = [
+  ['/procesos#crear', 'Crear un proceso', 'Desde una plantilla, en un clic'],
+  ['/personas?filtro=persona', 'Quién necesita a alguien', 'Capturas por validar, consultas, quien no pudo'],
+  ['/respuestas', 'Ver las respuestas', 'Y exportarlas a Excel'],
+  ['/desarrollador#procesos', 'Probar un proceso', 'Con números de prueba, sin WhatsApp real']
+];
+var ACCESOS_GSG_ENTREGAS = [
   /* Solo acciones: Hoy, Chats y Mapa ya estan en el menu (y en el pie del celular), no se repiten aqui. */
   ['/motorizados', 'Dar de alta un motorizado', 'Nombre, WhatsApp y zona'],
   ['/hoy#caja-pegar', 'Pegar la lista del día', 'Si GSG no está conectado'],
   ['/hoy#caja-sim', 'Probar sin clientes reales', 'Con los 10 números ficticios'],
   ['/hoy?filtro=incidencia', 'Ver lo que necesita a alguien', 'Incidencias y clientes apartados']
 ];
+var ACCESOS_GSG = (document.querySelector('.s-app') && document.querySelector('.s-app').getAttribute('data-gsg') === '0') ? ACCESOS_PROCESOS : ACCESOS_PROCESOS.slice(0, 2).concat(ACCESOS_GSG_ENTREGAS);
 var ACCESOS_COMPLETO = [
   ['/chat', 'Abrir los chats', 'Responder a los clientes'],
   ['/rutas', 'Cargar el reparto', 'Pegar la lista del día'],
@@ -1628,6 +1698,7 @@ async function loadInicio() {
     document.getElementById('in-grafica').innerHTML = graficaSemana(r.semana);
     pintarPasos(r.primerosPasos);
     pintarEntregasInicio(r.entregas, rp.requierenPersona || 0);
+    pintarProcesosInicio();
 
     var luz = n.nivel || 'verde';
     var numero = '<div class="semaforo" style="margin-top:8px"><span class="luz ' + esc(luz) + '"></span><div><b>' + esc(luz.charAt(0).toUpperCase() + luz.slice(1)) + '</b><p class="muted">' + esc(NIVEL_TXT[luz] || '') + '</p></div></div>';
@@ -1656,13 +1727,30 @@ async function loadInicio() {
       '<div class="actions"><a href="/rutas">Ir al reparto</a>' + (rp.lotesEnMarcha ? ' <span class="pill warn">' + rp.lotesEnMarcha + ' en marcha</span>' : '') + '</div>';
   } catch (error) { show('state', error.message, 'bad'); }
 }
-/* Las entregas del dia (GSG): en modo gsg van primero y el reparto viejo se esconde. */
+/* Los procesos: lo primero de Inicio (en curso, esperando respuesta, quién necesita a alguien). */
+function pintarProcesosInicio() {
+  var card = document.getElementById('in-procesos-card');
+  if (!card) return;
+  fetch('/admin/procesos/resumen', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (pr) {
+    if (!pr) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    document.getElementById('in-procesos').innerHTML =
+      kpi('Procesos activos', pr.procesosActivos, pr.procesosActivos ? 'escribiendo con su ritmo' : 'crea uno desde una plantilla', pr.procesosActivos ? '' : 'warn', '/procesos') +
+      kpi('En curso', pr.vivas, pr.esperando + ' esperando su respuesta', '', '/personas?filtro=esperando') +
+      kpi('Necesitan a alguien', pr.necesitan, pr.necesitan ? 'míralas en Personas' : 'ninguna', pr.necesitan ? 'bad' : 'ok', '/personas?filtro=persona') +
+      kpi('Completadas hoy', pr.completadas, 'terminaron todos sus pasos', pr.completadas ? 'ok' : '', '/personas?filtro=completada');
+    var pasos = document.getElementById('in-pasos-card');
+    if (pasos && pasos.nextElementSibling !== card) pasos.parentNode.insertBefore(card, pasos.nextElementSibling);
+  }).catch(function () {});
+}
+/* Las entregas del dia (GSG): en modo gsg van primero y el reparto viejo se esconde. Sin la plantilla de entregas activa, no se enseñan. */
 function pintarEntregasInicio(en, personasReparto) {
   var card = document.getElementById('in-entregas-card');
   var reparto = document.getElementById('in-reparto-card');
   var modoGsg = window.__modoSistema === 'gsg' || (document.querySelector('.s-app') && document.querySelector('.s-app').classList.contains('modo-gsg'));
+  var conEntregas = !document.querySelector('.s-app') || document.querySelector('.s-app').getAttribute('data-gsg') !== '0';
   if (!card) return;
-  if (!en) { card.classList.add('hidden'); return; }
+  if (!en || !conEntregas) { card.classList.add('hidden'); if (reparto && modoGsg) reparto.classList.add('hidden'); return; }
   card.classList.remove('hidden');
   if (reparto) reparto.classList.toggle('hidden', Boolean(modoGsg));
   var cerrado = en.ultimoCierre && en.ultimoCierre.dia === en.dia;
@@ -2530,12 +2618,18 @@ document.getElementById('pd-estado').onchange = loadPedidos;
 var IA_HISTORIAL = [];
 function iaPintarProveedor() {
   var p = val('ia-proveedor');
-  document.getElementById('ia-openai').classList.toggle('hidden', p !== 'openai');
+  /* La URL base solo hace falta con un servicio sin preset ("otro"): los
+     demas (OpenAI, Groq, Google...) ya la rellenan solos en iaPintarServicio.
+     El input sigue en el DOM (oculto) para que Probar/Guardar la sigan mandando. */
+  document.getElementById('ia-openai').classList.toggle('hidden', p !== 'openai' || val('ia-servicio') !== 'otro');
   document.getElementById('ia-openai-clave').classList.toggle('hidden', p !== 'openai');
   document.getElementById('ia-puter-caja').classList.toggle('hidden', p === 'openai');
   document.getElementById('ia-modelo-gratis').classList.toggle('hidden', p === 'openai');
   document.getElementById('ia-modelo-nota').classList.toggle('hidden', p === 'openai');
-  document.getElementById('ia-modelo').classList.toggle('hidden', p !== 'openai');
+  /* Con OpenAI el modelo se elige del selector con los modelos reales de la cuenta; el campo de texto queda oculto y se sincroniza. */
+  document.getElementById('ia-modelo').classList.add('hidden');
+  document.getElementById('ia-modelo-lista').classList.toggle('hidden', p !== 'openai');
+  document.getElementById('ia-modelo-lista-nota').classList.toggle('hidden', p !== 'openai');
   var lista = (window.__iaModelos && window.__iaModelos[p]) || [];
   if (p === 'openai') {
     var s = iaServicioActual();
@@ -2584,6 +2678,57 @@ document.getElementById('ia-probar-conexion').onclick = async function () {
     }
     var r = await api('/admin/ia/probar-conexion', { method: 'POST', body: body });
     estado.innerHTML = r.ok ? '<b style="color:var(--ok)">Funciona</b> (' + Math.round(r.prueba.ms / 100) / 10 + ' s, ' + esc(r.prueba.modelo) + '). ' + esc(r.prueba.detalle) : '<b style="color:var(--bad)">No responde:</b> ' + esc(r.prueba.detalle);
+  } catch (e) { estado.textContent = e.message; }
+  boton.disabled = false;
+};
+/* El selector de modelos de OpenAI: los de la cuenta (o el de por defecto), con su etiqueta de consumo. */
+var IA_MODELOS_CLAVE = '';
+function iaPintarModelos(modelos, elegido, detalle) {
+  var sel = document.getElementById('ia-modelo-lista');
+  var lista = (modelos && modelos.length) ? modelos.slice() : [{ id: 'gpt-4o-mini', etiqueta: 'Recomendado · consumo muy bajo' }];
+  if (elegido && !lista.some(function (m) { return m.id === elegido; })) lista.unshift({ id: elegido, etiqueta: 'el que tienes guardado' });
+  sel.innerHTML = lista.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.id + (m.etiqueta ? ' — ' + m.etiqueta : '')) + '</option>'; }).join('');
+  sel.value = elegido || lista[0].id;
+  setVal('ia-modelo', sel.value);
+  if (detalle) document.getElementById('ia-modelo-lista-nota').textContent = detalle;
+}
+document.getElementById('ia-modelo-lista').onchange = function () { setVal('ia-modelo', this.value); };
+async function iaListarModelos(clave) {
+  if (!clave || clave === IA_MODELOS_CLAVE) return;
+  var nota = document.getElementById('ia-modelo-lista-nota');
+  nota.textContent = 'Buscando los modelos de tu cuenta…';
+  try {
+    var r = await api('/admin/ia/modelos', { method: 'POST', body: { clave: clave } });
+    IA_MODELOS_CLAVE = r.ok ? clave : '';
+    iaPintarModelos(r.modelos, r.elegido, r.detalle);
+  } catch (e) {
+    IA_MODELOS_CLAVE = '';
+    iaPintarModelos(null, 'gpt-4o-mini', 'No se pudieron ver los modelos de tu cuenta (' + e.message + '). Se usará gpt-4o-mini (consumo muy bajo).');
+  }
+}
+document.getElementById('ia-token-openai').addEventListener('change', function () { iaListarModelos(val('ia-token-openai')); });
+/* La clave de OpenAI se prueba y, si responde, queda guardada (cifrada) en esta tienda: cada tienda tiene la suya. */
+document.getElementById('ia-vincular-clave').onclick = async function () {
+  var estado = document.getElementById('ia-conexion-estado');
+  var boton = this;
+  var clave = val('ia-token-openai');
+  if (!clave) { estado.innerHTML = '<b style="color:var(--bad)">Pega primero tu clave</b> en el campo de arriba.'; document.getElementById('ia-token-openai').focus(); return; }
+  var tienda = (document.getElementById('s-app') && document.getElementById('s-app').getAttribute('data-negocio')) || 'esta tienda';
+  var baseUrl = 'https://api.openai.com/v1';
+  boton.disabled = true;
+  estado.textContent = 'Buscando los modelos de tu cuenta…';
+  await iaListarModelos(clave);
+  var modelo = val('ia-modelo-lista') || 'gpt-4o-mini';
+  setVal('ia-modelo', modelo);
+  estado.textContent = 'Comprobando la clave con OpenAI…';
+  try {
+    var r = await api('/admin/ia/probar-conexion', { method: 'POST', body: { proveedor: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave } });
+    if (!r.ok) { estado.innerHTML = '<b style="color:var(--bad)">No se vinculó:</b> ' + esc(r.prueba.detalle); boton.disabled = false; return; }
+    await api('/admin/ia', { method: 'POST', body: { proveedor: 'openai', servicio: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave } });
+    setVal('ia-token-openai', '');
+    estado.innerHTML = '<b style="color:var(--ok)">✅ Clave vinculada a ' + esc(tienda) + '.</b> OpenAI respondió (' + esc(modelo) + '). Para que conteste a tus clientes, deja encendido el asistente y pulsa Guardar.';
+    await loadIa();
+    estado.innerHTML = '<b style="color:var(--ok)">✅ Clave vinculada a ' + esc(tienda) + '.</b> OpenAI respondió (' + esc(modelo) + '). Para que conteste a tus clientes, deja encendido el asistente y pulsa Guardar.';
   } catch (e) { estado.textContent = e.message; }
   boton.disabled = false;
 };
@@ -2833,7 +2978,32 @@ document.getElementById('ia-lector-examinar').onclick = busy('ia-lector-examinar
 /* La zona horaria como se lee: 'Lima (Perú)' en vez de 'America/Lima'. */
 var ZONAS_EN_PALABRAS = { 'America/Lima': 'Lima (Perú)', 'America/Bogota': 'Bogotá (Colombia)', 'America/Guayaquil': 'Quito y Guayaquil (Ecuador)', 'America/La_Paz': 'La Paz (Bolivia)', 'America/Santiago': 'Santiago (Chile)', 'America/Argentina/Buenos_Aires': 'Buenos Aires (Argentina)', 'America/Mexico_City': 'Ciudad de México', 'America/Caracas': 'Caracas (Venezuela)', 'America/Panama': 'Panamá', 'America/Asuncion': 'Asunción (Paraguay)', 'America/Montevideo': 'Montevideo (Uruguay)', 'America/Madrid': 'Madrid (España)', 'UTC': 'Hora universal (UTC)' };
 function zonaEnPalabras(z) { return ZONAS_EN_PALABRAS[z] || String(z || '').replace(/_/g, ' ').replace(/^.*\//, ''); }
+/* Los 4 pasos de "Asistente IA": clic en la pestaña, sin tocar location.hash
+   (ese ya lo usa la barra de arriba para elegir la pestaña grande #ia). */
+var IA_PASOS = ['1', '2', '3', '4'];
+function iaMostrarPaso(n) {
+  n = String(n);
+  if (IA_PASOS.indexOf(n) < 0) n = '1';
+  IA_PASOS.forEach(function (p) {
+    var sec = document.getElementById('ia-sec-' + p);
+    var tab = document.getElementById('ia-tab-' + p);
+    if (sec) sec.hidden = p !== n;
+    if (tab) tab.setAttribute('aria-selected', p === n ? 'true' : 'false');
+  });
+}
+IA_PASOS.forEach(function (p) {
+  var tab = document.getElementById('ia-tab-' + p);
+  if (tab) tab.onclick = function () { iaMostrarPaso(p); };
+});
 async function loadIa() {
+  /* Enlace de ayuda "Abrir el tablero" (?abrir=no-entendido#ia): salta al
+     paso 3 y expande el acordeon, en vez de dejarlo perdido arriba de todo. */
+  var iaAbrirParam = new URLSearchParams(location.search).get('abrir');
+  if (iaAbrirParam === 'no-entendido') {
+    iaMostrarPaso('3');
+    var cajaNoEnt = document.getElementById('ia-noent-caja');
+    if (cajaNoEnt) { cajaNoEnt.open = true; setTimeout(function () { cajaNoEnt.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 30); }
+  }
   loadIaUso();
   loadNoEntendido();
   loadExamenLector();
@@ -2844,14 +3014,33 @@ async function loadIa() {
     IA_SERVICIOS = e.servicios || [];
     var selServicio = document.getElementById('ia-servicio');
     selServicio.innerHTML = opciones(IA_SERVICIOS.map(function (x) { return { valor: x.id, texto: x.nombre }; }));
-    selServicio.value = e.servicio || 'openai';
+    selServicio.value = 'openai'; /* paso 1 simplificado: siempre OpenAI, sin elegir servicio */
     var gratis = e.modelosGratis || [];
     var selGratis = document.getElementById('ia-modelo-gratis');
     selGratis.innerHTML = opciones(gratis.map(function (m) { return { valor: m, texto: (e.descripcionGratis && e.descripcionGratis[m]) || m, titulo: m }; }));
     selGratis.value = gratis.indexOf(e.modelo) >= 0 ? e.modelo : e.modeloEfectivo;
     document.getElementById('ia-modelo-nota').innerHTML = 'Solo modelos <b>completamente gratuitos</b> de Puter (no cuestan nada). ' + (e.modelosGratisOrigen === 'catalogo' ? 'Comprobado con su lista en vivo.' : 'Lista fija (no se pudo consultar la suya).') + (e.proveedor === 'puter' && e.modelo !== e.modeloEfectivo ? ' <b>El modelo guardado ya no es gratuito: se usa ' + esc(e.modeloEfectivo) + '.</b>' : '');
     setVal('ia-nombre', e.nombreAsistente); setVal('ia-conocimiento', e.conocimiento); setVal('ia-instrucciones', e.instrucciones);
-    setVal('ia-proveedor', e.proveedor); setVal('ia-baseurl', e.baseUrl); setVal('ia-modelo', e.modelo); setVal('ia-derivar', e.derivarSi); setVal('ia-memoria', e.memoria);
+    /* Con «Solo lo de GSG» los ejemplos hablan de pedir la ubicación, no de productos ni precios. */
+    if (esModoGsg()) {
+      document.getElementById('ia-probar-texto').placeholder = 'Hola, ¿para qué necesitan mi ubicación?';
+      document.getElementById('ia-conocimiento').placeholder = 'Somos GSG Courier. Llevamos los pedidos de las tiendas a domicilio en Lima y Callao.\nPedimos la ubicación por WhatsApp para calcular la ruta exacta de entrega y coordinar con el motorizado.\nHorario de entregas: de 2:00 p. m. a 8:00 p. m. (a veces hasta las 10:00 p. m.).';
+      document.getElementById('ia-instrucciones').placeholder = 'Trata de usted, sé breve. Solo pide y valida la ubicación.';
+    }
+    /* Paso 1 simplificado a pedido del dueño: solo se ve la clave de OpenAI.
+       Proveedor, servicio y URL base quedan fijos (ocultos) para que Probar
+       y Guardar sigan mandando lo de siempre sin que el dueño elija nada. Si
+       ya habia un modelo guardado se respeta; si no, gpt-4o-mini por defecto. */
+    setVal('ia-proveedor', 'openai'); setVal('ia-baseurl', 'https://api.openai.com/v1');
+    /* Si lo guardado antes era de Puter (o de otro servicio), su modelo no vale
+       para OpenAI: solo se respeta un modelo ya guardado si era de OpenAI. */
+    setVal('ia-modelo', e.proveedor === 'openai' && e.modelo ? e.modelo : 'gpt-4o-mini');
+    IA_MODELOS_CLAVE = '';
+    iaPintarModelos(null, val('ia-modelo'), e.tieneToken && e.proveedor === 'openai' ? 'Modelo en uso: ' + val('ia-modelo') + '. Para ver todos los modelos de tu cuenta, vuelve a pegar tu clave.' : 'Pega tu clave y verás aquí los modelos de tu cuenta. Por defecto se usa gpt-4o-mini (consumo muy bajo).');
+    document.getElementById('ia-agente-operativo').checked = Boolean(e.agenteOperativoEfectivo);
+    document.getElementById('ia-agente-operativo').removeAttribute('data-tocado');
+    document.getElementById('ia-agente-nota').textContent = e.agenteOperativo === null || e.agenteOperativo === undefined ? 'Sin elegir: se enciende solo con «Solo lo de GSG».' : '';
+    setVal('ia-derivar', e.derivarSi); setVal('ia-memoria', e.memoria);
     iaPintarServicio(false);
     setVal('ia-catalogo-url', e.catalogoUrl || ''); setVal('ia-catalogo-formato', e.catalogoFormato || 'auto');
     document.getElementById('ia-avisar').checked = e.avisarDerivacion;
@@ -2863,7 +3052,7 @@ async function loadIa() {
     p2.className = 'estado ' + (e.conocimiento && e.conocimiento.trim() ? 'ok' : 'bad');
     document.getElementById('ia-p2-t').textContent = e.conocimiento && e.conocimiento.trim() ? 'Sabe ' + e.conocimiento.trim().length + ' caracteres sobre el negocio.' : 'Todavía no le contaste nada del negocio.';
     p3.className = 'estado ' + (e.activa && e.tieneToken ? 'ok' : 'bad');
-    document.getElementById('ia-p3-t').textContent = e.activa && e.tieneToken ? 'Encendido: contesta solo.' : e.activa ? 'Marcado como encendido, pero sin clave no puede contestar.' : 'Apagado: no contesta a nadie.';
+    document.getElementById('ia-p3-t').textContent = e.activa && e.tieneToken ? 'Encendido: contesta solo.' : e.activa ? 'Marcado como encendido, pero sin clave no puede contestar.' : e.agenteOperativoEfectivo ? 'Sin IA: el agente operativo trabaja igual con sus reglas fijas (pide la ubicación y manda el cierre).' : 'Apagado: no contesta a nadie.';
     document.getElementById('ia-token-estado').textContent = e.tieneToken ? 'Hay una sesión o clave guardada. Deja el campo vacío para conservarla; escribe otra para cambiarla.' : 'Todavía no hay sesión ni clave: sin eso el asistente no puede contestar.';
     setVal('ia-token', ''); setVal('ia-token-openai', '');
     document.getElementById('ia-puter-estado').textContent = e.tieneToken && e.proveedor === 'puter' ? 'Hay una sesión de Puter guardada.' : '';
@@ -2883,6 +3072,9 @@ document.getElementById('ia-guardar').onclick = busy('ia-guardar', async functio
       derivarSi: val('ia-derivar'), avisarDerivacion: document.getElementById('ia-avisar').checked, memoria: Number(val('ia-memoria') || 12),
       catalogoUrl: val('ia-catalogo-url'), catalogoFormato: val('ia-catalogo-formato') || 'auto'
     };
+    /* El agente operativo solo se guarda si se tocó: sin eleccion sigue al modo (encendido con «Solo lo de GSG»). */
+    var agente = document.getElementById('ia-agente-operativo');
+    if (agente.getAttribute('data-tocado') === '1') body.agenteOperativo = agente.checked;
     var tokenManual = val('ia-proveedor') === 'openai' ? val('ia-token-openai') : val('ia-token');
     if (tokenManual) body.token = tokenManual;
     var r = await api('/admin/ia', { method: 'POST', body: body });
@@ -2891,6 +3083,7 @@ document.getElementById('ia-guardar').onclick = busy('ia-guardar', async functio
     if (typeof loadInicio === 'function') loaded.inicio = false;
   } catch (error) { show('ia-state', error.message, 'bad'); }
 });
+document.getElementById('ia-agente-operativo').onchange = function () { this.setAttribute('data-tocado', '1'); document.getElementById('ia-agente-nota').textContent = 'Pulsa Guardar para aplicarlo.'; };
 function iaPintarChat() {
   var caja = document.getElementById('ia-chat');
   caja.innerHTML = IA_HISTORIAL.length ? IA_HISTORIAL.map(function (m, i) {
@@ -2962,7 +3155,10 @@ document.getElementById('ia-esc-correr').onclick = busy('ia-esc-correr', async f
   try {
     var r = await api('/admin/ia/escenarios', { method: 'POST', body: { grupo: grupo } });
     var s = r.resumen;
-    document.getElementById('ia-esc-resumen').innerHTML = '<b>' + s.limpias + ' de ' + s.total + '</b> sin observaciones' + (s.conAlertas ? ' · ' + s.conAlertas + ' con observaciones' : '') + (s.conError ? ' · ' + s.conError + ' sin respuesta (error del modelo)' : '');
+    /* Misma tarjeta visual que el examen del lector (.uso-ia): un vistazo y
+       ya se sabe que son dos exámenes distintos con el mismo lenguaje. */
+    var escPct = s.total ? Math.round(100 * s.limpias / s.total) : 0;
+    document.getElementById('ia-esc-resumen').innerHTML = '<div class="uso-ia"><div><span>Sin observaciones</span><b class="' + (escPct < 100 || s.conError ? 'bad' : '') + '">' + escPct + ' %</b><span>' + s.limpias + ' de ' + s.total + (s.conAlertas ? ' · ' + s.conAlertas + ' con observaciones' : '') + (s.conError ? ' · ' + s.conError + ' sin respuesta (error del modelo)' : '') + '</span></div></div>';
     table('ia-esc-table', ['Cliente escribe', 'Responde', 'Observaciones'], r.resultados.map(function (x) {
       var obs = x.error ? pill('bad', 'error') + ' <small class="muted">' + esc(x.error) + '</small>' : x.alertas.length ? x.alertas.map(function (a) { return pill('warn', a); }).join(' ') : pill('ok', 'bien');
       var acc = (x.derivo ? ' <small class="muted">→ pasa con una persona</small>' : '') + (x.pidioUbicacion ? ' <small class="muted">→ pide la ubicación</small>' : '');

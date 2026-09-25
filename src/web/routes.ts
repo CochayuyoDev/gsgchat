@@ -66,6 +66,7 @@ import type { ServicioVoz } from '../voz/servicio.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { entregasPage } from './entregas-page.js';
 import { motorizadosPage } from './motorizados-page.js';
+import { numerosPage } from './numeros-page.js';
 import { fiabilidadPage } from './fiabilidad-page.js';
 import { guardadosPage } from './guardados-page.js';
 import { fijarModoVigente } from './shell.js';
@@ -125,6 +126,8 @@ export interface WebDeps {
   prefijoLog?: string;
   /** La puerta a GSG de esta tienda: la usan los entrantes del WhatsApp local y del simulador. */
   gsg?: PuertoGsg;
+  /** Los procesos de esta tienda (el Modulo desarrollador simula sus corridas). Ver src/procesos. */
+  procesos?: import('../procesos/servicio.js').ServicioProcesos;
 }
 
 /**
@@ -300,6 +303,11 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   app.get('/fiabilidad', async (_request, reply) => {
     const page = html(fiabilidadPage({ disponible: Boolean(deps.fiabilidad), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
+
+  app.get('/numeros', async (_request, reply) => {
+    const page = html(numerosPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 

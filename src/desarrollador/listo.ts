@@ -9,12 +9,15 @@
  * Rutas (el hook de routes.ts ya exige una persona administradora):
  *  POST /admin/desarrollador/listo/comprobar   recorre el contrato
  *  GET  /admin/desarrollador/listo/ultimo      el ultimo resultado y la conexion vigente
+ *  GET  /admin/desarrollador/listo/produccion  lo que falta para salir a produccion (WhatsApp, GSG real,
+ *                                              https, soporte, supervisor, modo prueba, agente operativo)
  *  POST /admin/desarrollador/listo/ping-real   { confirmar: true }  una lectura a la API real
  */
 
 import { z } from 'zod';
 import type { RegistrarSeccion, SeccionDesarrollador } from './seccion.js';
 import { recorrerContrato, type ResultadoRecorrido } from './comprobaciones.js';
+import { avisoDireccionPublica } from '../config.js';
 
 /** Lo que hay que pedirle a GSG para conectar de verdad. Sale en la pantalla y en el informe. */
 export const LO_QUE_PEDIR_A_GSG = [
@@ -24,6 +27,122 @@ export const LO_QUE_PEDIR_A_GSG = [
   'Si prefieren empujar ellos los pedidos: una clave de API de GSGchat (Conexión → «Crear la clave para GSG») y, si quieren enterarse al momento, la URL de su webhook.',
   'Confirmar el formato de dos campos: «telefono» (9 dígitos o con 51 delante; ¿algún cliente con fijo o extranjero?) y «referencia» (¿única por día o para siempre?).',
 ];
+
+/** Una cosa de la lista «Para salir a producción», en palabras. */
+export interface PuntoProduccion {
+  clave: string;
+  ok: boolean;
+  /** true = no frena la salida, pero conviene mirarlo. */
+  aviso?: boolean;
+  titulo: string;
+  explicacion: string;
+  queHacer?: string;
+}
+
+/** Lo que la tienda tiene que tener puesto para pedir ubicaciones de verdad para GSG Courier. */
+export async function revisarProduccion(deps: Parameters<RegistrarSeccion>[1]): Promise<{ listo: boolean; puntos: PuntoProduccion[] }> {
+  const puntos: PuntoProduccion[] = [];
+  const poner = (p: PuntoProduccion) => puntos.push(p);
+
+  const whatsapp = deps.settings.isConfigured() && (deps.wa.conectado?.() ?? true);
+  poner({
+    clave: 'whatsapp',
+    ok: whatsapp,
+    titulo: 'El WhatsApp está conectado',
+    explicacion: whatsapp ? 'El número de la tienda está vinculado y en línea.' : deps.settings.isConfigured() ? 'El número está vinculado pero ahora mismo no está en línea.' : 'Todavía no hay un número de WhatsApp vinculado.',
+    queHacer: whatsapp ? undefined : 'Ve a Conexión y escanea el QR con el teléfono del número de GSG Courier.',
+  });
+
+  const gsg = deps.conexionGsg?.estado();
+  const gsgReal = gsg?.modo === 'real';
+  poner({
+    clave: 'gsg',
+    ok: gsgReal && !gsg?.aviso,
+    titulo: 'Conectado al sistema real de GSG',
+    explicacion: !gsg
+      ? 'En este arranque la conexión con GSG no se configura desde la pantalla.'
+      : gsgReal
+        ? gsg.aviso ?? `Conectado a ${gsg.url}.`
+        : gsg.modo === 'simulador'
+          ? 'Ahora se usa el simulador de GSG (números ficticios): ningún cliente real recibe nada por esta vía.'
+          : 'GSG no está conectado: los pedidos solo entran si GSG los empuja por la API o si se pegan a mano en Hoy.',
+    queHacer: gsgReal && !gsg?.aviso ? undefined : 'Pide a GSG la dirección de su API (con https) y su token, y pégalos en Conexión → «El sistema de GSG». Luego pulsa «Probar».',
+  });
+
+  const aviso = avisoDireccionPublica(deps.config.PUBLIC_BASE_URL);
+  poner({
+    clave: 'direccion',
+    ok: !aviso,
+    titulo: 'La dirección pública usa https',
+    explicacion: aviso
+      ? `Ahora los enlaces salen con ${deps.config.PUBLIC_BASE_URL || '(ninguna dirección)'}: la página del motorizado, las evidencias y los avisos a GSG no abren fuera de esta máquina, o salen sin https.`
+      : `Los enlaces salen con ${deps.config.PUBLIC_BASE_URL}.`,
+    queHacer: aviso ? 'Apunta el dominio al servidor, pon el certificado https y escribe esa dirección como dirección pública en la configuración del servidor. Luego reinicia.' : undefined,
+  });
+
+  const soporte = deps.entregas?.ajustes().soporte;
+  const haySoporte = Boolean(soporte?.whatsapp?.trim() || soporte?.llamadas?.trim());
+  poner({
+    clave: 'soporte',
+    ok: haySoporte,
+    titulo: 'Hay número de soporte',
+    explicacion: haySoporte ? 'El cliente lo recibe al registrar su ubicación y en el mensaje de cierre.' : 'Sin número de soporte, el cliente lee «este mismo número»: en el mensaje de cierre no tendrá a quién llamar.',
+    queHacer: haySoporte ? undefined : 'Hoy → Ajustes → «Horario y número de soporte»: escribe el WhatsApp y el teléfono de soporte.',
+  });
+
+  const supervisor = deps.ajustes?.supervisor() ?? '';
+  poner({
+    clave: 'supervisor',
+    ok: Boolean(supervisor),
+    titulo: 'Hay a quién avisar',
+    explicacion: supervisor ? 'Las incidencias, los chats que pasan a una persona y el resumen del día le llegan al supervisor.' : 'Nadie recibe los avisos: un chat que pasa a una persona no se entera nadie.',
+    queHacer: supervisor ? undefined : 'Ajustes → Avisos: escribe el WhatsApp del supervisor.',
+  });
+
+  const soloNumeros = deps.ajustes ? deps.ajustes.soloNumeros() : deps.config.soloNumeros;
+  poner({
+    clave: 'modoPrueba',
+    ok: soloNumeros.length === 0,
+    titulo: 'Fuera del modo prueba',
+    explicacion: soloNumeros.length ? `Ahora solo se escribe a ${soloNumeros.length} número(s) de prueba: los clientes de GSG no reciben nada.` : 'Se escribe a todos los clientes.',
+    queHacer: soloNumeros.length ? (deps.ajustes?.modoPruebaFijado() ? 'El modo prueba lo fijó quien instaló el servidor: hay que quitar la lista de números de prueba de la configuración del servidor y reiniciar.' : 'Hoy → «Salir del modo prueba» (o Ajustes → Modo prueba).') : undefined,
+  });
+
+  if (deps.ia) {
+    const ia = deps.ia.estado();
+    poner({
+      clave: 'agente',
+      ok: ia.agenteOperativoEfectivo,
+      titulo: 'El agente operativo atiende a los clientes',
+      explicacion: ia.agenteOperativoEfectivo
+        ? 'Con el cliente solo pide y registra la ubicación; ante cualquier otra consulta manda el mensaje de cierre y pasa el chat a una persona.'
+        : 'El asistente no está en modo operativo: podría contestar cosas que no son de la entrega.',
+      queHacer: ia.agenteOperativoEfectivo ? undefined : 'Asistente IA → enciende «Agente operativo» (o Ajustes → «Qué se enseña» → «Solo lo de GSG»).',
+    });
+    poner({
+      clave: 'ia',
+      ok: ia.tieneToken,
+      aviso: true,
+      titulo: 'La IA tiene su clave',
+      explicacion: ia.tieneToken ? `Usa el modelo ${ia.modeloEfectivo}.` : 'Sin clave, el agente trabaja solo con sus reglas fijas (funciona, pero entiende menos respuestas raras).',
+      queHacer: ia.tieneToken ? undefined : 'Asistente IA → pega la clave de OpenAI y elige gpt-4o-mini (consumo muy bajo).',
+    });
+  }
+
+  if (deps.entregas) {
+    const activos = (await deps.entregas.motorizados().catch(() => [])).filter((m) => m.estado === 'activo').length;
+    poner({
+      clave: 'motorizados',
+      ok: activos > 0,
+      aviso: true,
+      titulo: 'Hay motorizados activos',
+      explicacion: activos ? `${activos} motorizado(s) activo(s).` : 'No hay ningún motorizado activo: los pedidos con ubicación se quedarán esperando.',
+      queHacer: activos ? undefined : 'Motorizados → dales de alta con su WhatsApp.',
+    });
+  }
+
+  return { listo: puntos.every((p) => p.ok || p.aviso), puntos };
+}
 
 const CSS = `
   .lst-tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-4); margin-bottom: var(--esp-3); }
@@ -63,6 +182,12 @@ const CSS = `
 `;
 
 const HTML = `
+<div class="lst-tarjeta">
+  <h3>Para salir a producción con GSG Courier</h3>
+  <p>Lo que tiene que estar puesto para pedir las ubicaciones a los clientes de verdad. Se mira al abrir esta pestaña; «Volver a mirar» lo repite.</p>
+  <div id="lst-prod" aria-live="polite"><p class="lst-cargando">Mirando…</p></div>
+  <div class="lst-botones"><button class="btn lst-btn" id="lst-prod-otra" type="button">Volver a mirar</button></div>
+</div>
 <div class="lst-tarjeta">
   <h3>Comprobar la conexión con GSG</h3>
   <p>Recorre todo lo que GSG y GSGchat se van a decir por la API: los pedidos que GSG nos manda, los reportes que le mandamos, los avisos y el contrato escrito. Lo hace contra un simulador de GSG: no toca la conexión de tu tienda, ni la API real, ni a ningún cliente. Tarda unos segundos y al final borra todo lo que creó.</p>
@@ -130,7 +255,25 @@ const JS = String.raw`
     }
   }
 
+  function pintarProduccion(d) {
+    var caja = $('lst-prod');
+    var h = '<div class="lst-titular ' + (d.listo ? 'bien' : 'mal') + '" role="status"><span aria-hidden="true">' + (d.listo ? '✅' : '⚠️') + '</span><span>' +
+      (d.listo ? 'Todo listo para atender a los clientes de GSG Courier.' : 'Todavía falta algo antes de atender a los clientes de verdad.') + '</span></div><ul class="lst-items" style="padding:0">';
+    d.puntos.forEach(function (p) {
+      var bien = p.ok;
+      h += '<li class="lst-item"><span class="lst-marca ' + (bien ? 'bien' : 'mal') + '" aria-label="' + (bien ? 'bien' : p.aviso ? 'conviene mirarlo' : 'falta') + '">' + (bien ? '✓' : p.aviso ? '!' : '✗') + '</span><div><b>' + esc(p.titulo) + '</b><div class="lst-exp">' + esc(p.explicacion) + '</div>' +
+        (p.queHacer ? '<div class="lst-hacer">Qué hacer: ' + esc(p.queHacer) + '</div>' : '') + '</div></li>';
+    });
+    caja.innerHTML = h + '</ul>';
+  }
+  async function cargarProduccion() {
+    try { pintarProduccion(await api('/admin/desarrollador/listo/produccion')); }
+    catch (e) { $('lst-prod').textContent = e.message; }
+  }
+  $('lst-prod-otra').onclick = function () { $('lst-prod').innerHTML = '<p class="lst-cargando">Mirando…</p>'; cargarProduccion(); };
+
   async function cargar() {
+    cargarProduccion();
     try {
       var d = await api('/admin/desarrollador/listo/ultimo');
       pintar(d.resultado);
@@ -178,7 +321,7 @@ const JS = String.raw`
 export const seccionListo: SeccionDesarrollador = {
   id: 'listo',
   titulo: '¿Está listo para GSG?',
-  resumen: 'Comprueba con un clic todo lo que GSG y GSGchat se van a decir por la API.',
+  resumen: 'Lo que falta para salir a producción y, con un clic, todo lo que GSG y GSGchat se van a decir por la API.',
   html: HTML,
   js: JS,
   css: CSS,
@@ -194,6 +337,9 @@ export const registerListo: RegistrarSeccion = async (app, deps) => {
   };
 
   app.get('/admin/desarrollador/listo/ultimo', async () => ({ resultado: ultimo, conexion: conexion() }));
+
+  // Lo que falta para salir a produccion (solo lee: no cambia nada).
+  app.get('/admin/desarrollador/listo/produccion', async () => revisarProduccion(deps));
 
   app.post('/admin/desarrollador/listo/comprobar', async (request, reply) => {
     if (enMarcha) return reply.code(409).send({ error: 'Ya hay una comprobación en marcha: espera a que termine.' });

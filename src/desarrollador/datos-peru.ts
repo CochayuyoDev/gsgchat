@@ -40,10 +40,28 @@ export interface ClienteInventado {
   distrito: string;
   lat: number;
   lng: number;
-  /** "Cobrar S/ 89.90 · zapatillas" (el contrato no tiene campo de monto: va en las notas). */
+  /** "Cobrar S/ 89.90 · zapatillas": lo que lee el motorizado en su mensaje. */
   notas: string;
   monto: number;
+  /** Los datos del envio del contrato (salen en el primer mensaje al cliente). */
+  producto: string;
+  empresa: { codigo: string; nombre: string };
+  tracking: string;
+  nroPedido: string;
+  metodoPago: string;
+  remitente: string;
 }
+
+const EMPRESAS = [
+  { codigo: '516', nombre: 'Zapatería Lima' },
+  { codigo: '231', nombre: 'Moda Gamarra' },
+  { codigo: '408', nombre: 'TecnoPerú' },
+  { codigo: '112', nombre: 'Casa Bonita' },
+  { codigo: '307', nombre: 'Aromas del Sur' },
+  { codigo: '145', nombre: 'Librería El Inca' },
+];
+const METODOS_PAGO = ['YAPE', 'PLIN', 'Efectivo', 'Pagado'];
+const REMITENTES = ['Juan Quispe', 'Rocío Salas', 'Martín Loayza'];
 
 /** Un cliente de Lima inventado. `azar` inyectable para pruebas repetibles. */
 export function clienteInventado(azar: () => number = Math.random): ClienteInventado {
@@ -55,8 +73,24 @@ export function clienteInventado(azar: () => number = Math.random): ClienteInven
   const lng = Number((d.lng + (azar() - 0.5) * 0.012).toFixed(6));
   const monto = Math.round((29 + azar() * 460) * 10) / 10;
   const extra = al(NOTAS, azar);
-  const notas = `Cobrar S/ ${monto.toFixed(2)} · ${al(PRODUCTOS, azar)}${extra ? ` · ${extra}` : ''}`;
-  return { nombre, direccion: `${al(d.calles, azar)} ${numero}`, distrito: d.nombre, lat, lng, notas, monto };
+  const producto = al(PRODUCTOS, azar);
+  const notas = `Cobrar S/ ${monto.toFixed(2)} · ${producto}${extra ? ` · ${extra}` : ''}`;
+  const empresa = al(EMPRESAS, azar);
+  return {
+    nombre,
+    direccion: `${al(d.calles, azar)} ${numero}`,
+    distrito: d.nombre,
+    lat,
+    lng,
+    notas,
+    monto,
+    producto: producto.charAt(0).toUpperCase() + producto.slice(1),
+    empresa,
+    tracking: `GSG-A-${100000 + Math.floor(azar() * 900000)}`,
+    nroPedido: `#${1000 + Math.floor(azar() * 9000)}`,
+    metodoPago: al(METODOS_PAGO, azar),
+    remitente: al(REMITENTES, azar),
+  };
 }
 
 const PLACAS_LETRAS = 'ABCDEFGHJKLMNPRSTUVWXYZ';

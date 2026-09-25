@@ -24,6 +24,12 @@ export interface Perfil {
   /** Lo que cambia, en palabras, para que el dueño sepa a que dice que si. */
   cambia: string[];
   modo: 'gsg' | 'completo';
+  /**
+   * Si el perfil es para vender (catalogo, pedidos del chat). Con «Solo lo de
+   * GSG» la pantalla no los ofrece: GSGchat es un sistema operativo, no de
+   * ventas. Siguen existiendo (se llega con «Todo el sistema» en Ajustes).
+   */
+  ventas: boolean;
   tono: 'tu' | 'usted' | 'auto';
   preventaActiva: boolean;
   entregas: {
@@ -40,10 +46,11 @@ export interface Perfil {
 export const PERFILES: Perfil[] = [
   {
     id: 'reparto',
-    nombre: 'Reparto para GSG',
+    nombre: 'Entregas de GSG Courier',
     descripcion: 'Los pedidos llegan de GSG (o se pegan), el sistema pide la ubicación, confirma, manda al motorizado y avisa la hora. Es el de siempre.',
-    cambia: ['Menú «Solo lo de GSG»', 'Entregas con botones SÍ / NO, segunda visita, cliente recurrente y cierre del día', 'El asistente contesta lo demás; sin cotizador de envíos'],
+    cambia: ['Menú «Solo lo de GSG»', 'Entregas con botones SÍ / NO, segunda visita, cliente recurrente y cierre del día', 'El asistente es el agente operativo: solo pide y registra la ubicación, sin ventas ni cotizaciones'],
     modo: 'gsg',
+    ventas: false,
     tono: 'auto',
     preventaActiva: false,
     entregas: { responderDondeEsta: true, usarBotones: true, avisarEntregado: true, avisarCerca: true, clienteRecurrente: true, segundaVisita: true, cierreDelDia: true },
@@ -54,6 +61,7 @@ export const PERFILES: Perfil[] = [
     descripcion: 'Una tienda que vende por WhatsApp y reparte con sus propios motorizados: catálogo, pedidos desde el chat y entregas del día.',
     cambia: ['Menú completo (catálogo, pedidos del chat, campañas)', 'Entregas con botones, cliente recurrente y cierre del día', 'Trata de tú al cliente; sin cotizador de envíos'],
     modo: 'completo',
+    ventas: true,
     tono: 'tu',
     preventaActiva: false,
     entregas: { responderDondeEsta: true, usarBotones: true, avisarEntregado: true, avisarCerca: true, clienteRecurrente: true, segundaVisita: true, cierreDelDia: true },
@@ -64,6 +72,7 @@ export const PERFILES: Perfil[] = [
     descripcion: 'Atender y vender por WhatsApp con el asistente y las personas del equipo, sin reparto.',
     cambia: ['Menú completo', 'Sin automatismos de entregas (ni cierre del día, ni segunda visita)', 'Trata de usted al cliente; sin cotizador de envíos'],
     modo: 'completo',
+    ventas: true,
     tono: 'usted',
     preventaActiva: false,
     entregas: { responderDondeEsta: false, usarBotones: true, avisarEntregado: false, avisarCerca: false, clienteRecurrente: false, segundaVisita: false, cierreDelDia: false },

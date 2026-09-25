@@ -33,6 +33,7 @@ import type { Sender } from '../outbound/sender.js';
 import type { AnuncioEntrada, InboundMessage } from '../whatsapp/types.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import type { FailureReason } from '../types.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import {
   intencionDe,
   responder,
@@ -57,6 +58,9 @@ import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
 import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
+import { atenderComoAgente, atenderConReglaGsg, cerrarChat, type DepsAgente } from '../ia/agente-operativo.js';
+import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
+import type { EntradaProceso } from '../procesos/validar.js';
 
 export interface InboundDeps {
   repos: Repos;
@@ -733,7 +737,10 @@ export async function handleInboundMessage(
   // Modo prueba (SOLO_NUMEROS): a quien no este en la lista no se le contesta
   // nada, ni siquiera desde el asistente. El sender lo bloquea igual, pero
   // aqui se corta antes para no dejar rastro de "intentos" en la ficha.
-  if (!numeroPermitido({ soloNumeros: deps.ajustes ? deps.ajustes.soloNumeros() : config.soloNumeros }, phone)) return;
+  // Los numeros de prueba del Modulo desarrollador pasan siempre: nunca salen al
+  // WhatsApp real (el sender los simula), y sin esto el modo prueba de la tienda
+  // dejaba sin respuesta toda simulacion.
+  if (!esNumeroDePrueba(phone) && !numeroPermitido({ soloNumeros: deps.ajustes ? deps.ajustes.soloNumeros() : config.soloNumeros }, phone)) return;
 
   // Acuse de lectura: mejora la percepcion y no cuesta cuota.
   await wa.markAsRead(message.id).catch(() => undefined);
@@ -741,6 +748,17 @@ export async function handleInboundMessage(
   // Cualquier mensaje del cliente es una respuesta: corta los seguimientos
   // que estaban esperando precisamente eso.
   await onInboundReply(repos, contact);
+
+  // Los procesos (src/procesos): si esta persona tiene una corrida viva, lo
+  // que manda es su respuesta a ese proceso (un DNI, un SI, «llegué», la
+  // captura del pago) y se atiende ahi. Si no tiene ninguna, el mensaje sigue
+  // su camino de siempre, sin cambiar nada.
+  if (repos.procesos && (await atenderEnProceso(message, contact, deps).catch((error) => {
+    request_log(deps, 'fallo el modulo de procesos al leer un mensaje', error);
+    return false;
+  }))) {
+    return;
+  }
 
   /**
    * Lo que el cliente contesta cuando se le pidio la ubicacion para un
@@ -766,6 +784,8 @@ export async function handleInboundMessage(
       else if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
         await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: s?.mapsUrl ?? null }));
       } else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }));
+      // Primero se cierra (con la regla del dueño, desde aqui silencio: ni el sticker sale).
+      await cerrarTrasUbicacion();
       if (deps.stickers) await deps.stickers.automatico('gracias', phone);
       return true;
     }
@@ -830,6 +850,30 @@ export async function handleInboundMessage(
     return (await repos.automation.getPrefs()).preventaActiva;
   };
 
+  /**
+   * El agente operativo (ver src/ia/agente-operativo.ts): con "Solo lo de GSG"
+   * la IA solo pide, valida y registra la ubicacion; ante otra consulta manda
+   * el cierre una vez y se calla. El sistema sigue con lo automatico.
+   */
+  /** «Solo lo de GSG»: la IA nunca conversa con un cliente (solo clasifica), este encendido o no el agente. */
+  const modoGsg = (): boolean => (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg';
+  const agenteActivo = (): boolean => Boolean(deps.ia?.agenteOperativoActivo?.()) || (modoGsg() && Boolean(deps.ia));
+  /** La regla del dueño (ajuste «Después de UBI REGISTRADA, no escribirle más al cliente»). */
+  const reglaGsg = (): boolean => Boolean(deps.entregas && modoGsg() && deps.entregas.reglaGsgActiva());
+  const depsAgente = (): DepsAgente => ({
+    repos,
+    sender,
+    entregas: deps.entregas,
+    clasificar: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
+    nombreNegocio: () => nombreNegocio(deps),
+    log: (m, d) => console.warn(`[agente] ${m}`, d ?? ''),
+  });
+  /** Tras registrar la ubicacion, la IA se calla en este chat (su mensaje ya lleva el cierre). */
+  const cerrarTrasUbicacion = async (): Promise<void> => {
+    if (!agenteActivo() && !reglaGsg()) return;
+    await cerrarChat({ repos, entregas: deps.entregas }, contact, 'ubicación registrada').catch(() => undefined);
+  };
+
   const askForLocation = (body: string) =>
     sender.send({
       phone,
@@ -837,6 +881,26 @@ export async function handleInboundMessage(
       category: 'UTILITY',
       interactive: { body, locationRequest: true },
     });
+
+  // --- la regla del dueño («Solo lo de GSG») -----------------------------
+  // «El único proceso de GSGchat es disparar mensajes. Una vez que la IA manda
+  // el mensaje de UBI REGISTRADA, ahí llega la IA: ya no vuelve a responder.»
+  // A un cliente (no a un motorizado) solo le pueden llegar tres cosas: la
+  // explicación de por qué se le pide la ubicación, UBI REGISTRADA al mandar
+  // su pin (lo registra el camino de siempre, abajo) o el cierre UNA vez con el
+  // número del motorizado. Todo lo demás, silencio. Ver src/ia/agente-operativo.ts.
+  if (reglaGsg() && !(await deps.entregas!.esMotorizado(phone).catch(() => false))) {
+    const esPin = message.type === 'location' && Boolean(message.location);
+    const cuerpo = message.text?.body ?? '';
+    const escrito = cuerpo || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.media?.transcripcion || '';
+    // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
+    const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
+    const esBaja = Boolean(escrito) && matchesKeyword(escrito, config.optOutKeywords);
+    if (!esPin && !enlace?.ok && !esBaja) {
+      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
+      return;
+    }
+  }
 
   // --- ubicacion nativa: el camino bueno -------------------------------
   if (message.type === 'location' && message.location) {
@@ -897,6 +961,7 @@ export async function handleInboundMessage(
       if (enEntrega.atendida) {
         if (enEntrega.responder) await responderEntrega(enEntrega);
         else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }));
+        await cerrarTrasUbicacion();
         return;
       }
     }
@@ -917,6 +982,7 @@ export async function handleInboundMessage(
     // editable de las entregas (motorizado, horario, soporte).
     if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
       await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }));
+      await cerrarTrasUbicacion();
       return;
     }
     await reply(`Ubicación registrada.\n${result.mapsUrl}`);
@@ -999,6 +1065,12 @@ export async function handleInboundMessage(
         return;
       }
     }
+    // Con el agente operativo: si le falta su ubicacion, el reparto sigue a su
+    // ritmo; si ya la mando, nada que decir; si no tiene entrega, el cierre.
+    if (esAdjunto && message.type !== 'sticker' && agenteActivo()) {
+      await atenderComoAgente(depsAgente(), contact, '').catch((error) => request_log(deps, 'fallo el agente operativo', error));
+      return;
+    }
     // Con la IA activa, un adjunto se reconoce y se pide el texto: el modelo
     // no ve fotos ni oye audios, y callarse deja al cliente hablando solo.
     if (esAdjunto && message.type !== 'sticker' && deps.ia?.activa()) {
@@ -1069,6 +1141,18 @@ export async function handleInboundMessage(
     }
   }
 
+  // El agente operativo: «¿por qué?» se explica y se vuelve a pedir; una
+  // consulta ajena recibe el cierre una vez y el chat pasa a una persona; lo
+  // que es la respuesta al pedido de ubicacion sigue al reparto. Un
+  // motorizado no pasa por aqui (lo suyo lo atienden las entregas).
+  if (!result.ok && agenteActivo() && !(deps.entregas && (await deps.entregas.esMotorizado(phone).catch(() => false)))) {
+    const hecho = await atenderComoAgente(depsAgente(), contact, text).catch((error) => {
+      request_log(deps, 'fallo el agente operativo', error);
+      return 'seguir' as const;
+    });
+    if (hecho !== 'seguir') return;
+  }
+
   // Con una solicitud de ubicacion abierta, esto es su respuesta: un enlace
   // de mapa la resuelve, y cualquier otra cosa la aparta para que la mire una
   // persona. En los dos casos el mensaje no sigue al flujo de preventa.
@@ -1107,6 +1191,7 @@ export async function handleInboundMessage(
       await repos.locations.confirm(guardada);
       if (enEntrega.responder) await responderEntrega(enEntrega);
       else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }));
+      await cerrarTrasUbicacion();
       return;
     }
   }
@@ -1119,6 +1204,10 @@ export async function handleInboundMessage(
     // a mano para ese caso concreto, y encadenar las dos respuestas es
     // exactamente el "dos mensajes por uno" que hay que evitar.
     if (rule) return;
+
+    // Con el agente operativo no hay conversacion libre: lo suyo ya se
+    // atendio arriba (o lo esta pidiendo el reparto).
+    if (agenteActivo()) return;
 
     // El asistente de IA de la tienda: con lo que sabe del negocio (y el
     // catalogo, si esta), contesta; si no puede, deriva a una persona.
@@ -1166,9 +1255,78 @@ export async function handleInboundMessage(
   // entregas, aunque este cliente no tenga pedido de hoy en la lista.
   if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
     await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }));
+    await cerrarTrasUbicacion();
     return;
   }
   await reply(`Ubicación registrada.\n${result.mapsUrl}`);
+}
+
+/**
+ * El gancho de los procesos: arma lo que trajo el mensaje con las mismas
+ * piezas que usa el resto de este fichero (pin nativo, enlace de mapa, boton,
+ * adjunto) y se lo pasa al nucleo de procesos. true = el proceso se quedo con
+ * el mensaje. Solo mira la ubicacion si esa persona tiene algo vivo: nadie mas
+ * paga la lectura de un enlace de mapa.
+ */
+async function atenderEnProceso(message: InboundMessage, contact: Contact, deps: InboundDeps): Promise<boolean> {
+  const repo = deps.repos.procesos;
+  if (!repo) return false;
+  const viva = await repo.vivaPorTelefono(contact.phone);
+  const reciente = viva ? null : await repo.ultimaPorTelefono(contact.phone);
+  if (!viva && !(reciente && reciente.estado === 'persona')) return false;
+  if (!viva) {
+    // Pasado a una persona hace poco: el proceso calla su chat... salvo que ese
+    // numero tenga algo vivo en las entregas o el reparto, que siguen como siempre.
+    const conEntrega = deps.entregas ? (await deps.entregas.estadoUbicacionDe(contact.phone).catch(() => 'sin_entrega' as const)) !== 'sin_entrega' : false;
+    const conRuta = await deps.repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null);
+    if (conEntrega || conRuta) return false;
+  }
+
+  const bbox = { bbox: deps.config.bbox };
+  let ubicacion: EntradaProceso['ubicacion'] = null;
+  let fueraDeZona = false;
+  let guardar: { result: Awaited<ReturnType<typeof extractLocation>>; crudo: string } | null = null;
+  const texto = message.text?.body ?? message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? message.button?.text ?? message.media?.transcripcion ?? message.media?.caption ?? '';
+  if (message.type === 'location' && message.location) {
+    const r = fromWhatsAppLocation(message.location, bbox);
+    if (r.ok) {
+      ubicacion = { lat: r.lat, lng: r.lng, mapsUrl: r.mapsUrl, fuente: 'pin de whatsapp' };
+      guardar = { result: r, crudo: JSON.stringify(message.location) };
+    } else if (r.reason === 'outside_bbox') fueraDeZona = true;
+  } else if (message.text?.body) {
+    const r = await extractLocation(message.text.body, bbox).catch(() => null);
+    if (r?.ok && !r.needsConfirmation) {
+      ubicacion = { lat: r.lat, lng: r.lng, mapsUrl: r.mapsUrl, fuente: `enlace de mapa (${r.source})` };
+      guardar = { result: r, crudo: message.text.body };
+    } else if (r && !r.ok && r.reason === 'outside_bbox') fueraDeZona = true;
+  }
+  const esAdjunto = ['image', 'video', 'audio', 'document', 'sticker'].includes(message.type);
+  const entrada: EntradaProceso = {
+    texto,
+    ubicacion,
+    fueraDeZona,
+    adjunto: esAdjunto ? { tipo: message.type, mediaId: message.media?.id ?? null, mimeType: message.media?.mimeType ?? null, nombre: message.media?.filename ?? null } : null,
+    boton: message.interactive?.button_reply?.id?.startsWith('proc:') ? message.interactive.button_reply.id : null,
+  };
+  const r = await atenderEntranteDeProceso(
+    {
+      repos: deps.repos,
+      sender: deps.sender,
+      nombreNegocio: () => nombreNegocio(deps),
+      timezone: deps.config.timezone,
+      distritos: deps.config.distritos,
+      clasificar: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
+      log: (m, d) => console.warn(`[procesos] ${m}`, d ?? ''),
+    },
+    contact.phone,
+    entrada,
+  );
+  // La ubicacion que sirvio para el proceso queda tambien en el historial de ubicaciones.
+  if (r.atendida && guardar?.result.ok && ubicacion) {
+    const id = await deps.repos.locations.save(contact.id, guardar.result, guardar.crudo).catch(() => null);
+    if (id !== null) await deps.repos.locations.confirm(id).catch(() => undefined);
+  }
+  return r.atendida;
 }
 
 /** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */

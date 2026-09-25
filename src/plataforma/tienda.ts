@@ -62,10 +62,12 @@ import { crearConexionGsg, TOKEN_SIMULADOR } from '../rutas/conexion-gsg.js';
 import { crearGsgSimulado } from '../entregas/gsg-simulado.js';
 import { crearServicioEntregas } from '../entregas/servicio.js';
 import { crearServicioResumenes } from '../resumenes/servicio.js';
+import { crearServicioProcesos } from '../procesos/servicio.js';
 import { cargarLote } from '../rutas/cargar.js';
 import { crearFiabilidad } from '../salud/fiabilidad.js';
 import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, type DirectorioUsuarios } from '../auth/routes.js';
 import { enTienda, type ContextoTienda } from './contexto.js';
+import { conReglaGsg } from '../entregas/regla-gsg.js';
 
 /** Donde vive la base de una tienda. */
 export type BaseDeTienda =
@@ -184,17 +186,23 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         log: (mensaje, detalle) => console.log(`${o.prefijoLog}[salud] ${mensaje}`, detalle ?? ''),
       });
 
-      const sender = createSender({
-        repos,
-        wa,
-        phoneNumberId,
-        warmup: politica().warmup,
-        maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
-        serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
-        salud,
-        politica,
-        soloNumeros: () => ajustes.soloNumeros(),
-      });
+      // La regla del dueño en «Solo lo de GSG» va en la unica puerta hacia el
+      // cliente (ver src/entregas/regla-gsg.ts). Las entregas se crean mas abajo.
+      let entregasDeLaRegla: Awaited<ReturnType<typeof crearServicioEntregas>> | null = null;
+      const sender = conReglaGsg(
+        createSender({
+          repos,
+          wa,
+          phoneNumberId,
+          warmup: politica().warmup,
+          maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
+          serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
+          salud,
+          politica,
+          soloNumeros: () => ajustes.soloNumeros(),
+        }),
+        { entregas: () => entregasDeLaRegla, log: (m, d) => log(`[regla gsg] ${m}`, d) },
+      );
 
       const stickers = crearServicioStickers({ repo: repos.stickers, mediaDir: o.mediaDir, sender, ajustes, publicBase: config.PUBLIC_BASE_URL });
 
@@ -261,8 +269,11 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         publicBaseUrl: config.PUBLIC_BASE_URL,
         bus,
         geo: { bbox: config.bbox, cobertura: config.coverageName },
+        modo: () => ajustes.modo(),
+        numeroPropio: () => sesion.getLocalState().phone || null,
         log: (m, d) => log(`[entregas] ${m}`, d),
       });
+      entregasDeLaRegla = entregas;
 
       ia = await crearServicioIA({
         settingsRepo,
@@ -280,6 +291,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         plan,
         voz,
         entregas,
+        modo: () => ajustes.modo(),
         log: (m, d) => log(m, d),
       });
       entrenamiento.conectarIA(iaParaEntrenar(ia));
@@ -290,6 +302,26 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         entregasHoy: (await entregas.resumen()).cifras.total,
         version: versionDelPaquete(),
       });
+
+      // Los procesos de esta tienda. La principal (GSG Courier) trae activas las
+      // entregas de courier; una tienda nueva empieza sin ellas y las activa
+      // desde Procesos si las usa. Ver src/procesos.
+      const procesos = await crearServicioProcesos({
+        repos,
+        sender,
+        nombreNegocio: () => ajustes.nombreNegocio(),
+        timezone: config.timezone,
+        plan: plantillaPais,
+        distritos: config.distritos,
+        gsgPorDefecto: o.id === 'principal',
+        opciones: opcionesDesdeConfig(config),
+        salud,
+        politica,
+        clasificar: () => (ia.activa() ? (m) => ia.clasificarOperativo(m) : undefined),
+        log: (m, d) => log(`[procesos] ${m}`, d),
+      });
+      await procesos.cargar();
+      contexto.gsg = () => procesos.gsgActivo();
 
       const resumenes = await crearServicioResumenes({
         settingsRepo,
@@ -391,6 +423,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         simuladorGsg,
         resumenes,
         fiabilidad,
+        procesos,
         secretoInterno,
         mediaDir: o.mediaDir,
         autoConectarLocal: o.autoConectarLocal,
@@ -430,6 +463,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         ia,
         resumenes,
         fiabilidad,
+        procesos,
         log: consola as never,
       });
       limpieza.push(() => pararServicios());

@@ -12,6 +12,7 @@ import { desarrolladorPage } from './pagina.js';
 import { registerGenerar } from './generar.js';
 import { registerVivo } from './vivo.js';
 import { registerListo } from './listo.js';
+import { registerProcesosDev } from './procesos.js';
 import type { DepsDesarrollador } from './seccion.js';
 
 export const PREFIJO_ADMIN_DESARROLLADOR = '/admin/desarrollador';
@@ -38,4 +39,5 @@ export async function registerDesarrollador(app: FastifyInstance, deps: DepsDesa
   await registerGenerar(app, deps);
   await registerVivo(app, deps);
   await registerListo(app, deps);
+  await registerProcesosDev(app, deps);
 }

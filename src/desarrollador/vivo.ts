@@ -122,8 +122,10 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
     if (!esNumeroDePrueba(telefono)) throw new NoEsDePrueba(entrada.phone);
     const quien = esMotorizadoDePrueba(telefono) ? 'motorizado' : 'cliente';
     const antes = await fotoDe(db, telefono, quien);
+    // La regla del dueño («Solo lo de GSG»): la traza cuenta qué hizo con el cliente.
+    const regla = { activa: Boolean(deps.entregas?.reglaGsgActiva()), enSilencio: quien === 'cliente' && Boolean(await deps.entregas?.clienteEnSilencio(telefono).catch(() => false)) };
     await simulador.escribir({ ...entrada, phone: telefono });
-    const traza = await trazaDe(db, telefono, quien, entrada, antes, Boolean(deps.gsg?.conectado()));
+    const traza = await trazaDe(db, telefono, quien, entrada, antes, Boolean(deps.gsg?.conectado()), regla);
     const lista = trazas.get(telefono) ?? [];
     lista.unshift(traza);
     trazas.set(telefono, lista.slice(0, 30));
@@ -293,7 +295,7 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
     // contesta 200 con ok:false y la linea, no un error.
     try {
       const g = interpretarCaso(texto);
-      return { ok: true, empieza: g.inicio === 'sin_pin' ? 'sin la ubicación (se le pedirá)' : 'con la ubicación ya dada (falta que confirme)', pasos: enPalabras(g) };
+      return { ok: true, empieza: g.inicio === 'sin_pin' ? 'sin la ubicación (se le pedirá)' : 'con la ubicación ya dada (GSG ya la tenía)', pasos: enPalabras(g) };
     } catch (error) {
       if (error instanceof ErrorDeCaso) return { ok: false, error: error.message, linea: error.linea };
       return errorDeCaso(reply, error);

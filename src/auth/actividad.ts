@@ -138,6 +138,16 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['DELETE', /^\/api\/v1\/conectores\/:id$/, 'conector.borrar'],
   ['POST', /^\/api\/v1\/conectores\/:id\/secreto$/, 'conector.secreto'],
   ['PATCH', /^\/api\/v1\/pedidos\/:id$/, 'pedido.estado'],
+  // Los procesos (src/procesos).
+  ['POST', /^\/admin\/procesos\/desde-plantilla$/, 'proceso.crear'],
+  ['POST', /^\/admin\/procesos$/, 'proceso.crear'],
+  ['POST', /^\/admin\/procesos\/:id$/, 'proceso.editar'],
+  ['POST', /^\/admin\/procesos\/:id\/estado$/, 'proceso.estado'],
+  ['DELETE', /^\/admin\/procesos\/:id$/, 'proceso.borrar'],
+  ['POST', /^\/admin\/procesos\/:id\/personas$/, 'proceso.personas'],
+  ['POST', /^\/api\/v1\/procesos\/:id\/personas$/, 'proceso.personas'],
+  ['POST', /^\/admin\/procesos\/corridas\/:id\/estado$/, 'proceso.corrida'],
+  ['POST', /^\/admin\/procesos\/personas\/masa$/, 'proceso.masa'],
 ];
 
 /** Lo que no merece una fila: mucho trafico y nada que auditar. */
@@ -241,6 +251,13 @@ export const ETIQUETAS: Record<string, string> = {
   'tienda.avisos': 'Cambio los avisos de vencimiento de las tiendas',
   'tienda.pago.aceptar': 'Acepto una captura de pago de una tienda',
   'tienda.pago.rechazar': 'Rechazo una captura de pago de una tienda',
+  'proceso.crear': 'Creo un proceso',
+  'proceso.editar': 'Cambio los pasos de un proceso',
+  'proceso.estado': 'Activo, pauso o archivo un proceso',
+  'proceso.borrar': 'Borro un proceso',
+  'proceso.personas': 'Cargo personas en un proceso',
+  'proceso.corrida': 'Pauso, reanudo o termino una corrida',
+  'proceso.masa': 'Actuo sobre personas de un proceso (pedir, pausar, pasar a una persona)',
   otro: 'Otra accion',
 };
 

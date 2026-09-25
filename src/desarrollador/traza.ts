@@ -15,6 +15,7 @@
 import type { DesarrolladorRepo } from '../db/desarrollador.js';
 import { leerConfirmacionConReglas, leerEntregadoConReglas, leerTiempoConReglas } from '../entregas/interpretar.js';
 import { detectarManipulacion } from '../ia/seguridad.js';
+import { clasificarReglaGsg } from '../ia/agente-operativo.js';
 import type { EntranteDePrueba } from './simular.js';
 
 export type Tono = 'ok' | 'info' | 'warn' | 'bad' | 'muted';
@@ -136,10 +137,39 @@ export function entradaEnPalabras(e: EntranteDePrueba): string {
   return `💬 Escribió: «${(e.text ?? '').slice(0, 300)}»`;
 }
 
+/** La regla del dueño en «Solo lo de GSG», tal como se aplica al cliente (lo que la traza cuenta). */
+export interface ReglaEnTraza {
+  /** La regla está activa (modo «Solo lo de GSG» + el ajuste encendido). */
+  activa: boolean;
+  /** Ese cliente ya recibió UBI REGISTRADA o el cierre ANTES de este mensaje. */
+  enSilencio: boolean;
+}
+
+/** Qué hace la regla del dueño con lo que mandó el cliente (funcion pura: no cambia nada). */
+function lecturaDeLaRegla(e: EntranteDePrueba, regla: ReglaEnTraza): PasoTraza {
+  const texto = (e.text ?? e.transcripcion ?? e.boton?.title ?? '').trim();
+  const esUbicacion = Boolean(e.location) || /https?:\/\/\S*(maps|goo\.gl)/i.test(texto);
+  if (regla.enSilencio) return { tono: 'muted', titulo: 'Regla del dueño: ya recibió UBI REGISTRADA o el cierre → silencio, no se le contesta', detalle: esUbicacion ? 'Su ubicación igual se registra por dentro (y GSG se entera), pero no se le escribe nada.' : 'Lo que escriba queda en el chat para que lo vea una persona.' };
+  if (esUbicacion) return { tono: 'info', titulo: 'Regla del dueño: es su ubicación → UBI REGISTRADA (con el número) y desde ahí silencio' };
+  const clase = texto ? clasificarReglaGsg(texto) : 'otra';
+  if (clase === 'por_que') return { tono: 'info', titulo: 'Regla del dueño: pregunta por qué se le pide la ubicación → la explicación fija y se le vuelve a pedir' };
+  return {
+    tono: 'info',
+    titulo: 'Regla del dueño: es otra cosa → el cierre UNA vez con el número y pasa a una persona',
+    detalle: clase === null ? 'Las reglas no lo tenían claro: si hay clave de IA, la IA solo clasifica (por qué / otra cosa); nunca redacta nada.' : 'Lo decidieron las reglas, sin IA.',
+  };
+}
+
 /** Lo que leen las reglas por su cuenta (funciones puras: no cambian nada). */
-function lecturas(e: EntranteDePrueba, quien: 'cliente' | 'motorizado'): PasoTraza[] {
+function lecturas(e: EntranteDePrueba, quien: 'cliente' | 'motorizado', regla?: ReglaEnTraza): PasoTraza[] {
   const texto = e.text ?? e.transcripcion ?? '';
   const pasos: PasoTraza[] = [];
+  if (quien === 'cliente' && regla?.activa) {
+    const manip = texto.trim() ? detectarManipulacion(texto) : null;
+    if (manip) pasos.push({ tono: 'warn', titulo: `El escudo ve un intento de manipulación (${manip.tipo.replace(/_/g, ' ')})`, detalle: 'No se obedece: se contesta con el texto fijo y no se toca ningún pedido.' });
+    pasos.push(lecturaDeLaRegla(e, regla));
+    return pasos;
+  }
   if (!texto.trim()) return pasos;
   const manip = detectarManipulacion(texto);
   if (manip) pasos.push({ tono: 'warn', titulo: `El escudo ve un intento de manipulación (${manip.tipo.replace(/_/g, ' ')})`, detalle: 'No se obedece: se contesta con el texto fijo y no se toca ningún pedido.' });
@@ -173,10 +203,11 @@ async function esperarReportes(db: DesarrolladorRepo, desde: number, ms = 2500):
   }
 }
 
-export async function trazaDe(db: DesarrolladorRepo, telefono: string, quien: 'cliente' | 'motorizado', entrada: EntranteDePrueba, antes: Foto, gsgConectado: boolean): Promise<Traza> {
+export async function trazaDe(db: DesarrolladorRepo, telefono: string, quien: 'cliente' | 'motorizado', entrada: EntranteDePrueba, antes: Foto, gsgConectado: boolean, regla?: ReglaEnTraza): Promise<Traza> {
   await esperarReportes(db, antes.maxReporte);
   const despues = await fotoDe(db, telefono, quien);
-  const pasos: PasoTraza[] = [{ tono: 'info', titulo: entradaEnPalabras(entrada) }, ...lecturas(entrada, quien)];
+  const leidas = lecturas(entrada, quien, regla);
+  const pasos: PasoTraza[] = [{ tono: 'info', titulo: entradaEnPalabras(entrada) }, ...leidas];
 
   const idsEntregas = [...new Set([...antes.entregas, ...despues.entregas].map((e) => e.id))];
   const idsSolicitudes = [...new Set([...antes.solicitudes, ...despues.solicitudes].map((s) => s.id))];
@@ -213,7 +244,8 @@ export async function trazaDe(db: DesarrolladorRepo, telefono: string, quien: 'c
     : [];
   for (const m of salientes) {
     const origen = (m.payload as { origen?: string } | null)?.origen;
-    pasos.push({ tono: 'ok', titulo: `Contestó${origen === 'ia' ? ' (con la IA)' : ''}: «${(m.body ?? `(${m.kind})`).slice(0, 400)}»`, detalle: 'Número de prueba: no salió al WhatsApp real, quedó en el hilo como enviado.' });
+    const quienEscribe = origen !== 'ia' ? '' : regla?.activa ? ' (texto fijo: la IA solo clasificó)' : ' (con la IA)';
+    pasos.push({ tono: 'ok', titulo: `Contestó${quienEscribe}: «${(m.body ?? `(${m.kind})`).slice(0, 400)}»`, detalle: 'Número de prueba: no salió al WhatsApp real, quedó en el hilo como enviado.' });
   }
   // Lo que se le mando a OTROS numeros por este turno (el motorizado, el cliente del motorizado, el supervisor).
   const aOtros = contacto
@@ -244,7 +276,9 @@ export async function trazaDe(db: DesarrolladorRepo, telefono: string, quien: 'c
   });
   for (const w of webhooks) pasos.push({ tono: 'info', titulo: `Webhook «${w.evento}»: ${w.estado === 'enviada' || w.estado === 'ok' ? 'entregado' : w.estado === 'pendiente' ? 'en camino' : w.estado}` });
 
-  if (pasos.length <= 1 + lecturas(entrada, quien).length) {
+  if (quien === 'cliente' && regla?.activa && !salientes.length) {
+    pasos.push({ tono: 'muted', titulo: 'Silencio: al cliente no se le escribió nada', detalle: 'Regla del dueño: después de UBI REGISTRADA (o del cierre) el sistema ya no le escribe por este pedido. Lo del motorizado sigue igual por dentro.' });
+  } else if (pasos.length <= 1 + leidas.length) {
     pasos.push({ tono: 'muted', titulo: 'No cambió nada: ningún pedido se movió y el sistema no contestó.', detalle: 'Pasa, por ejemplo, con un sticker, con algo fuera del flujo o si el número no tiene pedido de hoy.' });
   }
 

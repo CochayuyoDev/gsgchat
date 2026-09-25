@@ -35,14 +35,14 @@ import { TOKENS_CSS } from './tokens.js';
  * su copia del titular y se fueron separando. Se escribe una vez.
  */
 export const PROMESA = {
-  titular: 'Tu WhatsApp trabajando por ti,',
-  remate: 'sin quemar el número',
+  titular: 'Automatiza los procesos administrativos y operativos de tu empresa',
+  remate: 'por WhatsApp',
   bajada:
-    'Pide la ubicación a cada cliente del reparto, atiende y cotiza desde un solo chat, y manda campañas al ritmo que WhatsApp tolera.',
+    'Pide y valida datos, confirma citas y recuerda turnos, avisa tareas a tu personal y recibe los comprobantes de pago, desde un solo chat y al ritmo que WhatsApp tolera.',
   puntos: [
-    'Entregas: pide la ubicación, confirma el pedido, manda el pin al motorizado y avisa la hora de llegada.',
+    'Procesos listos en un clic: pedir datos, confirmaciones y recordatorios, avisos al personal de campo, cobranza y trámites.',
+    'Lo que no se puede resolver solo pasa a una persona de tu equipo, con todo lo que se respondió.',
     'Salud del número: un semáforo que frena solo antes del baneo.',
-    'Cuentas por persona y claves de API para los programas.',
   ],
 } as const;
 
@@ -53,11 +53,11 @@ export const PROMESA = {
  * sigue usando PROMESA.
  */
 export const PROMESA_PLATAFORMA = {
-  titular: 'Tu tienda en WhatsApp,',
-  remate: 'lista en un minuto',
-  bajada: 'Crea tu tienda, conecta tu número escaneando un código y atiende a tus clientes desde un solo chat, con un asistente que responde por ti.',
+  titular: 'Automatiza los procesos administrativos y operativos de tu empresa por WhatsApp,',
+  remate: 'en marcha en un minuto',
+  bajada: 'Crea tu cuenta, conecta tu número escaneando un código y deja que el sistema pida y valide datos, confirme citas, avise tareas a tu personal y reciba comprobantes, desde un solo chat.',
   puntos: [
-    'Cada tienda es independiente: tus clientes, productos y conversaciones solo los ves tú.',
+    'Cada empresa es independiente: tus clientes, pedidos y conversaciones solo los ves tú.',
     'Tu propio número de WhatsApp: se conecta con un código QR, como WhatsApp Web.',
     'Tu equipo entra con su propia cuenta, y tú decides quién hace qué.',
   ],
@@ -213,7 +213,7 @@ export const RUBROS = ['Ropa y calzado', 'Comida', 'Tecnología', 'Belleza', 'Ho
 const FORM_TIENDA = `
       <h1>Crear mi tienda</h1>
       <p class="entradilla">Gratis y en un minuto. Después conectas el WhatsApp de tu tienda escaneando un código.</p>
-      <p class="solo-tuyo">Cada tienda es independiente: tus clientes, productos, conversaciones y tu número de WhatsApp son solo tuyos.</p>
+      <p class="solo-tuyo">Cada empresa es independiente: tus clientes, pedidos, conversaciones y tu número de WhatsApp son solo tuyos.</p>
       <form id="f-tienda" novalidate>
         <label for="t-tienda">Nombre de tu tienda</label>
         <input id="t-tienda" name="tienda" placeholder="Bodega Doña Rosa" required maxlength="80" autocomplete="organization">
@@ -459,7 +459,7 @@ export function loginPage(opts: {
     <p>${PROMESA_PLATAFORMA.bajada}</p>
     <ul>${PROMESA_PLATAFORMA.puntos.map((p) => `<li>${p}</li>`).join('')}</ul>
   </div>
-  <small>Cada tienda con sus propios datos y su propio WhatsApp.</small>
+  <small>Cada empresa con sus propios datos y su propio WhatsApp.</small>
 </aside>
 <main class="centro">
 <div class="caja">

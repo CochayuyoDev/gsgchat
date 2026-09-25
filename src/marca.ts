@@ -14,7 +14,7 @@ export const NOMBRE_SISTEMA = 'GSGchat';
 export const INICIAL_SISTEMA = 'G';
 
 /** Una linea para debajo del nombre. */
-export const LEMA_SISTEMA = 'WhatsApp para reparto, entregas y ventas';
+export const LEMA_SISTEMA = 'Automatiza los procesos administrativos y operativos de tu empresa por WhatsApp';
 
 /** Como se presenta en cabeceras HTTP (webhooks salientes). */
 export const USER_AGENT_SISTEMA = 'GSGchat';

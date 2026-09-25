@@ -187,6 +187,8 @@ export interface ContextoOperador {
   quien: string;
   esAdmin: boolean;
   conCatalogo: boolean;
+  /** Modo "Solo lo de GSG": sin campañas de venta ni catalogo. */
+  sinVentas?: boolean;
   ahora: Date;
   /** El estado corto del sistema ahora mismo (lista, lotes en marcha...). */
   estado: string;
@@ -213,7 +215,7 @@ export function construirSistemaOperador(ctx: ContextoOperador): string {
     '- Un mensaje a un cliente lo escribes en español, corto y educado, en nombre del negocio; nunca prometas descuentos, plazos ni pagos que la persona no haya dicho.',
     '',
     'CATÁLOGO DE ACCIONES (nombre [tipo]: qué hace. Parámetros. Ejemplo)',
-    catalogoParaElModelo({ esAdmin: ctx.esAdmin, conCatalogo: ctx.conCatalogo }),
+    catalogoParaElModelo({ esAdmin: ctx.esAdmin, conCatalogo: ctx.conCatalogo, sinVentas: ctx.sinVentas }),
     '',
     FORMATO_DE_RESPUESTA,
     '',

@@ -147,7 +147,7 @@ export function avisoDeExamen(r: Pick<ResultadoExamenLector, 'porcentaje' | 'aci
     .slice(0, 3)
     .map((f) => `«${f.texto}» (esperaba ${f.esperaba}, leyó ${f.leyo})`)
     .join('; ');
-  return `El lector de respuestas de las entregas acierta hoy el ${r.porcentaje} % (${r.aciertos} de ${r.total}). Fallos: ${ejemplos}. Revisar en Mi asistente IA → El lector de respuestas.`;
+  return `El lector de respuestas de las entregas acierta hoy el ${r.porcentaje} % (${r.aciertos} de ${r.total}). Fallos: ${ejemplos}. Revisar en Asistente IA → Resultados → Examen del lector de reglas.`;
 }
 
 /** Como se resume en pantalla. */

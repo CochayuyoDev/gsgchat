@@ -371,10 +371,13 @@ describe('el «ubicación registrada»: horario y soporte en palabras', () => {
       soporte: soporteEnPalabras({ whatsapp: '987654321', llamadas: '012345678' }),
     });
     const lineas = texto.split('\n');
-    expect(lineas[0]).toBe('✅ Ubicación registrada');
+    expect(lineas[0]).toBe('✅ Ubicación registrada correctamente.');
     expect(lineas[1]).toBe(mapa);
-    // Justo debajo del enlace, el aviso del motorizado.
-    expect(lineas[3]).toBe('Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.');
+    // Debajo del enlace, el cierre del agente (por aquí no se atienden consultas) con el soporte.
+    // Sin motorizado ni número propio en el contexto: el soporte, tal cual.
+    expect(lineas[3]).toBe('Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: WhatsApp +51 987 654 321 · Llamadas (01) 234 5678.');
+    // Y el aviso del motorizado.
+    expect(lineas[5]).toBe('Somos GSG. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.');
     // Ninguna coordenada fuera del enlace.
     expect(texto.replace(mapa, '')).not.toMatch(/-?\d{1,3}\.\d{3,}/);
     expect(texto).toContain('de 2:00 PM a 8:00 PM');

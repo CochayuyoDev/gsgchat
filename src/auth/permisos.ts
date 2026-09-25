@@ -26,6 +26,7 @@ export const PERMISOS = {
   'stoky:conectar': 'Que Stoky se presente al vincularse: manda su direccion y su token para que este sistema consulte su catalogo (POST/GET /api/v1/stoky/conexion)',
   'entregas:leer': 'Ver las entregas del dia (ubicacion, confirmacion, motorizado, hora de llegada) y los motorizados (GET /api/v1/entregas, /api/v1/motorizados)',
   'entregas:gestionar': 'Pedirle a GSG los pendientes ahora y dar de alta motorizados (POST /api/v1/entregas/sincronizar, /api/v1/motorizados)',
+  'procesos:gestionar': 'Ver los procesos y cargarles personas (GET /api/v1/procesos, POST /api/v1/procesos/:id/personas, GET /api/v1/procesos/corridas/:id)',
   '*': 'Todo, incluida la API interna /admin (como las claves de antes)',
 } as const;
 

@@ -68,6 +68,12 @@ export interface SendJob {
   cita?: CitaSaliente & { autor?: string };
   /** Se reenvio desde otro chat: el globo lo dice, como en WhatsApp. */
   reenviado?: boolean;
+  /**
+   * Un texto fijo (escrito por el negocio, no por el modelo) aunque lo mande
+   * el asistente: la explicacion de «¿por qué?» y el cierre. En «Solo lo de
+   * GSG» es lo unico con origen 'ia' que puede salir a un cliente.
+   */
+  textoFijo?: boolean;
 
   text?: string;
   location?: { latitude: number; longitude: number; name?: string; address?: string };

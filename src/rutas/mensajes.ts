@@ -114,14 +114,14 @@ export const PLANTILLAS: Record<PasoUbicacion, PlantillaPaso> = {
 export const VARIANTES_TEXTO: Record<PasoUbicacion, Array<(ctx: ContextoMensaje) => string>> = {
   solicitud: [
     (ctx) =>
-      `Hola ${tratamiento(ctx.nombre)}, le escribimos de ${ctx.negocio} por ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
+      `Hola ${tratamiento(ctx.nombre)}, somos ${ctx.negocio} y le escribimos por ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
       'Para llegar exacto a su dirección necesitamos su ubicación. ' +
       `Puede enviarla ${comoEnviar(ctx)}.`,
     (ctx) =>
       `Buen día ${tratamiento(ctx.nombre)}, somos ${ctx.negocio} y tenemos ${pedido(ctx.referencia)}${detallePedido(ctx)} listo para entregar. ` +
       `¿Nos comparte su ubicación ${comoEnviar(ctx)}? Así el repartidor llega sin dar vueltas.`,
     (ctx) =>
-      `${tratamiento(ctx.nombre)}, le saluda ${ctx.negocio}. Vamos a entregarle ${pedido(ctx.referencia)}${detallePedido(ctx)} y ` +
+      `${tratamiento(ctx.nombre)}, somos ${ctx.negocio}. Vamos a entregarle ${pedido(ctx.referencia)}${detallePedido(ctx)} y ` +
       `necesitamos el punto exacto: envíe su ubicación ${comoEnviar(ctx)}, por favor.`,
   ],
   recordatorio: [
