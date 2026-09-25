@@ -178,6 +178,13 @@ export async function correrGuion(ctx: ContextoGuion, guion: Guion): Promise<Res
     )).rows;
     return m ? { id: Number(m.id), body: m.body ?? '' } : null;
   };
+  // Como en la vida real: el cliente contesta DESPUÉS de que el sistema le
+  // escribió (regla del dueño: sin eso no se le contesta nada).
+  if (guion.inicio === 'sin_pin') {
+    const limite = Date.now() + 45_000;
+    while (!(await ultimaA(nuevo.phone)) && Date.now() < limite) await new Promise((r) => setTimeout(r, 500));
+  }
+
   const telefonoDelMotorizado = async (): Promise<string | null> => {
     const e = await entrega();
     if (!e?.motorizadoId) return null;

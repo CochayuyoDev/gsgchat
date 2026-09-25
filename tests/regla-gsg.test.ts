@@ -199,7 +199,9 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
       // Un cliente CON pedido de GSG (sin pedido no se le contesta nada: prueba de abajo).
       const creado = await e.entregas.crearAMano({ referencia: `P-EMO-${i}`, telefono: tel, nombre: 'Cliente prueba', faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
       expect(creado.ok).toBe(true);
+      await e.trabajar(); // el sistema le escribe primero (sin eso no se le contesta nada)
       const antes = e.textosA(tel).length;
+      expect(antes, 'le salió el pedido de ubicación').toBeGreaterThan(0);
       // Si el modelo llegara a redactar algo, esto es lo que diría: nunca debe salir.
       e.ia.respuestas.push('Lamento mucho que te sientas así. Estoy aquí para ayudarte, cuéntame más.');
       await e.contesta(tel, { texto });
@@ -225,6 +227,14 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
       await e.contesta(tel, { texto: 'hola' });
       expect(e.textosA(tel), texto).toEqual([]);
     }
+  });
+
+  it('con pedido pero SIN que el sistema le haya escrito todavía: si el cliente escribe primero, no se le contesta', async () => {
+    const creado = await e.entregas.crearAMano({ referencia: 'P-ANTES-1', telefono: '999111500', nombre: 'Escribe primero', faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
+    expect(creado.ok).toBe(true);
+    await e.contesta('999111500', { texto: 'hola, ¿quién me va a traer mi pedido?' });
+    await e.contesta('999111500', { texto: '¿por qué me piden la ubicación?' });
+    expect(e.textosA('999111500').filter((t) => /no se reciben consultas|Es necesaria para calcular/.test(t))).toEqual([]);
   });
 
   it('el silencio es por pedido: un pedido nuevo del mismo cliente lo vuelve a abrir', async () => {

@@ -392,6 +392,20 @@ export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, ent
     return 'silencio';
   }
 
+  // Solo se contesta en un chat que abrió el sistema: si todavía no le salió
+  // el pedido de ubicación (la solicitud sigue «pendiente», p. ej. fuera de
+  // horario) y el cliente escribe primero, no se le contesta nada.
+  const sistemaEscribioPrimero =
+    (abierta ? abierta.estado !== 'pendiente' : false) ||
+    estado === 'registrada' ||
+    (await repos.messages.listMessages(contact.id, 40).catch(() => []))
+      .some((m) => m.direction === 'out' && (m.payload as { origen?: string } | null | undefined)?.origen !== 'persona');
+  if (!sistemaEscribioPrimero) {
+    if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `escribió antes de que el sistema le escribiera (${que}): no se le contesta`).catch(() => undefined);
+    deps.log?.('regla del dueño: el sistema aún no le escribió, no se le contesta', { phone: contact.phone });
+    return 'silencio';
+  }
+
   let clase: ClaseRegla = 'otra';
   let como = 'lo decidieron las reglas';
   if (texto) {
