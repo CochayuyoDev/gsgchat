@@ -52,6 +52,76 @@ const CSS = `
   .wrap > section.card:first-of-type, .wrap > .card { margin-top: 0; }
   .wrap > section.card + section.card { margin-top: 16px; }
   /* --- inicio --- */
+  /* Lo de arriba: saludo, estado en una linea, el aviso de GSG y las cuatro cifras que importan. */
+  .in-hola { margin: 4px 0 20px; }
+  .in-hola h2 { font-size: 22px; margin: 0 0 6px; }
+  .in-estado { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0; font-size: 14.5px; color: var(--texto-suave); }
+  .in-estado b { color: var(--texto); font-weight: 600; }
+  .in-estado a { font-weight: 600; text-decoration: none; }
+  .in-estado a:hover { text-decoration: underline; }
+  .in-punto { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--gris-claro); }
+  .in-punto.ok { background: var(--verde); box-shadow: 0 0 0 4px var(--verde-suave); }
+  .in-punto.warn { background: var(--ambar); box-shadow: 0 0 0 4px var(--ambar-suave); }
+  .in-punto.bad { background: var(--rojo); box-shadow: 0 0 0 4px var(--rojo-suave); }
+  .in-aviso { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; justify-content: space-between; padding: 18px 20px; margin: 0 0 20px; border-radius: var(--radio); background: var(--ambar-suave); border: 1px solid var(--ambar); }
+  .in-aviso-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
+  .in-aviso-txt b { font-size: 16px; }
+  .in-aviso-acciones { display: flex; gap: 10px; flex-wrap: wrap; }
+  .in-grandes { display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 24px; }
+  @media (max-width: 1100px) { .in-grandes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .in-grandes { grid-template-columns: 1fr; gap: 12px; } }
+  .in-grande { display: flex; flex-direction: column; gap: 6px; padding: 20px 22px; min-width: 0; border-radius: var(--radio); background: var(--superficie); border: 1px solid var(--borde); box-shadow: var(--sombra); color: var(--texto); text-decoration: none; transition: border-color .15s, box-shadow .15s, transform .15s; }
+  .in-grande:hover { border-color: var(--primario); box-shadow: var(--sombra-2); transform: translateY(-1px); }
+  .in-grande .t { font-size: 14px; font-weight: 600; color: var(--texto-suave); }
+  .in-grande .n { font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -.02em; color: var(--texto); }
+  .in-grande .d { font-size: 13px; color: var(--texto-suave); }
+  .in-grande .ir { margin-top: auto; padding-top: 8px; font-size: 13px; font-weight: 600; color: var(--primario); }
+  .in-grande.warn .n { color: var(--ambar); } .in-grande.bad .n { color: var(--rojo); } .in-grande.ok .n { color: var(--verde); }
+  .in-grande.bad { border-color: var(--rojo-suave); }
+  @media (max-width: 520px) { .in-grande { flex-direction: row; flex-wrap: wrap; align-items: baseline; padding: 16px 18px; gap: 4px 12px; } .in-grande .n { font-size: 30px; order: -1; } .in-grande .t { flex: 1; font-size: 15px; color: var(--texto); } .in-grande .d, .in-grande .ir { flex-basis: 100%; } .in-grande .ir { padding-top: 2px; } }
+  .in-mas { border-top: 1px solid var(--borde); padding-top: 8px; }
+  .in-mas > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14.5px; color: var(--texto-suave); padding: 10px 0; min-height: 44px; }
+  .in-mas > summary::-webkit-details-marker { display: none; }
+  .in-mas > summary::before { content: '›'; display: inline-block; font-size: 18px; transition: transform .15s; }
+  .in-mas[open] > summary::before { transform: rotate(90deg); }
+  .in-mas > summary .muted { font-weight: 400; }
+  @media (max-width: 520px) { .in-mas > summary .muted { display: none; } }
+  .in-mas-cuerpo { padding-top: 8px; }
+  .in-mas.sin-plegar > summary { display: none; }
+  .in-mas.sin-plegar { border-top: 0; padding-top: 0; }
+  /* --- ajustes: pocas tarjetas, cada una con su titulo y una frase --- */
+  .aj { max-width: 860px; }
+  .aj .aj-card { margin-top: 0; margin-bottom: 20px; padding: 24px; }
+  @media (max-width: 640px) { .aj .aj-card { padding: 18px 16px; } }
+  .aj-cab { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 6px; }
+  .aj-cab h2 { font-size: 18px; margin: 0 0 2px; }
+  .aj-cab .muted { font-size: 13.5px; }
+  .aj-ico { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 19px; background: var(--primario-suave); }
+  .aj-campos { display: grid; gap: 4px 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aj-campos .aj-ancho { grid-column: 1 / -1; }
+  @media (max-width: 640px) { .aj-campos { grid-template-columns: 1fr; } }
+  .aj-campos label { margin-top: 16px; }
+  .aj-falta { margin: 12px 0 0; padding: 10px 14px; border-radius: var(--radio-sm); background: var(--ambar-suave); color: var(--texto); font-size: 13.5px; }
+  .aj-falta b { color: var(--ambar); }
+  .aj-campos .falta input { border-color: var(--ambar); }
+  .aj-opciones { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .aj-opcion { display: flex !important; gap: 10px; align-items: flex-start; margin: 0 !important; padding: 12px 14px; border: 1px solid var(--borde); border-radius: var(--radio-sm); font-weight: 400 !important; cursor: pointer; background: var(--superficie); }
+  .aj-opcion:has(input:checked) { border-color: var(--primario); background: var(--primario-suave); }
+  .aj-opcion input { margin-top: 3px; flex: none; }
+  .aj-opcion small { display: block; color: var(--texto-suave); font-size: 12.5px; margin-top: 2px; }
+  .aj-ia-estado { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; font-size: 14px; }
+  .aj-avanzado > summary { list-style: none; display: flex; gap: 14px; align-items: center; cursor: pointer; }
+  .aj-avanzado > summary::-webkit-details-marker { display: none; }
+  .aj-avanzado > summary > span:last-child { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .aj-avanzado > summary b { font-size: 18px; }
+  .aj-avanzado > summary small { font-size: 13.5px; }
+  .aj-avanzado > summary::after { content: '›'; font-size: 22px; color: var(--texto-suave); transition: transform .15s; }
+  .aj-avanzado[open] > summary::after { transform: rotate(90deg); }
+  .aj-avanzado[open] > summary { margin-bottom: 14px; }
+  .aj-avanzado h3 { margin-top: 26px; }
+  .aj-plan { margin: 0 0 20px; padding: 12px 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
+  .aj-guardar { position: sticky; bottom: 12px; z-index: 2; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; padding: 12px 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); box-shadow: var(--sombra-2); }
+  .aj-guardar .muted { flex: 1 1 200px; font-size: 13px; }
   .kpis { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .kpis .linea-hoy { grid-column: 1 / -1; margin: 0; padding: 12px 16px; font-size: 14px; line-height: 1.6; }
   .kpis .linea-hoy a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
@@ -409,7 +479,7 @@ const SECCIONES: Array<[string, string, string]> = [
   ['historial', 'Historial de envíos', 'Todo lo que salió, con su estado'],
   ['stickers', 'Stickers', 'Tras el saludo, el gracias o la despedida, y a mano desde el chat'],
   ['extraer', 'Extraer coordenadas', 'De un link de mapa o un texto'],
-  ['configuracion', 'Configuración', 'Horario de envío, ritmo, modo prueba, avisos y nombre'],
+  ['configuracion', 'Ajustes', 'Tu negocio, el horario, los mensajes y el asistente IA'],
   ['usuarios', 'Usuarios', 'Cuentas del equipo, roles y contraseñas'],
   ['membresia', 'Membresía', 'El plan de esta instalación: hasta cuándo está pagada, sus topes y los pagos'],
   ['tiendas', 'Tiendas', 'Los negocios que controlas: su plan, hasta cuándo está pagado, si están en línea'],
@@ -438,6 +508,18 @@ export function panelPage(opts: PanelOpts): string {
 ${warning}
 
 <div id="tab-inicio" class="hidden">
+  <div class="in-hola" id="in-hola">
+    <h2 id="in-saludo">Hola</h2>
+    <p class="in-estado" id="in-estado"><span class="in-punto"></span><span>Revisando…</span></p>
+  </div>
+  <div class="in-aviso hidden" id="in-porconfirmar" role="status">
+    <div class="in-aviso-txt"><b id="in-pc-titulo"></b><span class="muted">Todavía no se les escribió: revisa la lista y confirma el envío.</span></div>
+    <div class="in-aviso-acciones"><button class="btn primario" type="button" id="in-pc-enviar">Confirmar y enviar</button><a class="btn" href="/numeros?etapa=por_confirmar_envio">Revisar la lista</a></div>
+  </div>
+  <div class="in-grandes hidden" id="in-grandes"></div>
+  <details class="in-mas" id="in-mas">
+  <summary id="in-mas-resumen">Más <span class="muted">primeros pasos, cifras de mensajes, el número y los procesos</span></summary>
+  <div class="in-mas-cuerpo">
   <section class="card hidden" id="in-pasos-card" style="margin-bottom:14px">
     <h2 id="in-pasos-titulo">Para empezar</h2>
     <p class="muted" id="in-pasos-sub">Lo que falta por dejar listo. Cada punto lleva a la pantalla donde se hace; cuando esté todo, esta tarjeta se pliega a una línea.</p>
@@ -488,6 +570,8 @@ ${warning}
       </div>
     </section>
   </div>
+  </div>
+  </details>
 </div>
 
 <section id="tab-estado" class="card hidden">
@@ -820,105 +904,121 @@ ${warning}
   <div class="pager"><button class="ghost sm" id="h-prev">Anterior</button><span id="h-page"></span><button class="ghost sm" id="h-next">Siguiente</button></div>
 </section>
 
-<section id="tab-configuracion" class="card hidden">
-  <p class="muted">Lo que se guarda aquí se aplica en el siguiente envío, sin reiniciar. Un campo vacío significa "lo de siempre" (el valor aparece en gris).</p>
-  <div class="cf-vigente" id="cf-vigente"></div>
+<section id="tab-configuracion" class="aj hidden">
+  <div id="cf-plan" class="hidden aj-plan"></div>
 
-  <div id="cf-plan" class="hidden" style="margin:12px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:10px"></div>
+  <section class="card aj-card" id="aj-negocio">
+    <div class="aj-cab"><span class="aj-ico" aria-hidden="true">🏪</span><div><h2>Tu negocio</h2><p class="muted">Cómo te presentas y a qué números pueden escribir o llamar.</p></div></div>
+    <div class="aj-falta hidden" id="cf-falta" role="status"></div>
+    <div class="aj-campos">
+      <div class="aj-ancho"><label for="cf-nombre">Nombre del negocio</label><input id="cf-nombre" placeholder=""><div class="cf-nota">Así firma los mensajes y sale en las pantallas.</div></div>
+      <div id="cf-sop-caja"><label for="cf-sop-wa">WhatsApp de soporte</label><div class="con-prefijo"><span>+51</span><input id="cf-sop-wa" type="tel" inputmode="tel" autocomplete="off" placeholder="987 654 321"></div><div class="cf-nota">El cliente lo recibe para consultas. Vacío = este mismo WhatsApp.</div></div>
+      <div id="cf-sop-tel-caja"><label for="cf-sop-tel">Teléfono para llamadas <span class="muted" style="font-weight:400">(opcional)</span></label><input id="cf-sop-tel" type="tel" inputmode="tel" autocomplete="off" placeholder="01 234 5678"><div class="cf-nota">Si el soporte también atiende llamadas.</div></div>
+      <div class="aj-ancho"><label for="cf-supervisor">WhatsApp del supervisor</label><div class="con-prefijo"><span>+51</span><input id="cf-supervisor" inputmode="tel" placeholder="987 654 321"></div><div class="cf-nota">Le avisamos cuando un cliente necesita a una persona, y le llega el resumen del día. Vacío = nadie recibe avisos.</div></div>
+    </div>
+  </section>
 
-  <h3>¿A quién avisamos?</h3>
-  <p class="muted">El número más importante del sistema: recibe las incidencias, el resumen de la mañana y de la tarde, la prueba diaria y los cambios de nivel del número.</p>
-  <div class="toolbar">
-    <div style="grid-column: span 2"><label for="cf-supervisor">WhatsApp del supervisor</label><div class="con-prefijo"><span>+51</span><input id="cf-supervisor" inputmode="tel" placeholder="987 654 321"></div><div class="cf-nota">Los 9 dígitos del celular; el 51 se pone solo. Vacío = nadie recibe avisos.</div></div>
-  </div>
+  <section class="card aj-card" id="aj-horario">
+    <div class="aj-cab"><span class="aj-ico" aria-hidden="true">🕑</span><div><h2>Horario de envío</h2><p class="muted">Fuera de este horario el sistema no le escribe a nadie. Contestar a quien escribe no tiene horario.</p></div></div>
+    <div class="aj-campos">
+      <div><label for="cf-hora-inicio">Desde (hora)</label><input id="cf-hora-inicio" type="number" min="0" max="23"></div>
+      <div><label for="cf-hora-fin">Hasta (hora)</label><input id="cf-hora-fin" type="number" min="1" max="24"></div>
+      <div class="aj-ancho"><label>Días</label><div class="dias" id="cf-dias"></div></div>
+      <div class="aj-ancho"><label for="cf-tz">Zona horaria</label><select id="cf-tz"></select><div class="cf-nota">Si tu negocio está en Perú, déjala en Lima.</div></div>
+    </div>
+  </section>
 
-  <h3>Negocio</h3>
-  <div class="toolbar">
-    <div style="grid-column: span 2"><label for="cf-nombre">Nombre del negocio</label><input id="cf-nombre" placeholder=""><div class="cf-nota">Así se presenta en los mensajes ("{negocio}") y en las pantallas.</div></div>
-    <div><label for="cf-tz">Zona horaria</label><select id="cf-tz"></select><div class="cf-nota">La hora con la que se escribe, se cierra el día y salen los resúmenes. Si tu negocio está en Perú, déjala en Lima.</div></div>
-  </div>
+  <section class="card aj-card" id="aj-mensajes">
+    <div class="aj-cab"><span class="aj-ico" aria-hidden="true">💬</span><div><h2>Mensajes al cliente</h2><p class="muted">Los textos que recibe el cliente (pedir la ubicación, confirmar, el cierre) se escriben en Hoy.</p></div></div>
+    <div class="actions" style="margin-top:4px"><a class="btn" href="/hoy#caja-ajustes">Editar los mensajes en Hoy</a></div>
+    <label style="margin-top:18px">¿De tú o de usted?</label>
+    <div class="aj-opciones">
+      <label class="aj-opcion"><input type="radio" name="cf-tono" value="auto"><span><b>Según el cliente</b> <span class="muted">(recomendado)</span><small>De usted la primera vez; si el cliente tutea, de tú.</small></span></label>
+      <label class="aj-opcion"><input type="radio" name="cf-tono" value="usted"><span><b>Siempre de usted</b><small>«¿Nos confirma que lo recibe hoy?»</small></span></label>
+      <label class="aj-opcion"><input type="radio" name="cf-tono" value="tu"><span><b>Siempre de tú</b><small>«¿Nos confirmas que lo recibes hoy?»</small></span></label>
+    </div>
+    <div class="cf-nota">Lo respeta el asistente IA. Los mensajes fijos de Hoy salen tal cual los escribas.</div>
+  </section>
 
-  <h3>Cómo tratamos al cliente</h3>
-  <p class="muted">De tú o de usted. Lo respeta el asistente de IA en cada respuesta; los mensajes fijos de las entregas los escribes tú en Hoy → Ajustes de las entregas, así que ahí manda lo que escribas.</p>
-  <div class="toolbar" style="align-items:flex-start">
-    <label class="inline" style="flex:1;min-width:220px;align-items:flex-start;gap:10px"><input type="radio" name="cf-tono" value="auto" style="margin-top:4px"><span><b>Según el cliente</b> (recomendado)<br><span class="muted" style="font-size:12.5px">De usted la primera vez; si el cliente tutea, de tú.</span></span></label>
-    <label class="inline" style="flex:1;min-width:220px;align-items:flex-start;gap:10px"><input type="radio" name="cf-tono" value="usted" style="margin-top:4px"><span><b>Siempre de usted</b><br><span class="muted" style="font-size:12.5px">«¿Nos confirma que lo recibe hoy?»</span></span></label>
-    <label class="inline" style="flex:1;min-width:220px;align-items:flex-start;gap:10px"><input type="radio" name="cf-tono" value="tu" style="margin-top:4px"><span><b>Siempre de tú</b><br><span class="muted" style="font-size:12.5px">«¿Nos confirmas que lo recibes hoy?»</span></span></label>
-  </div>
+  <section class="card aj-card" id="aj-ia">
+    <div class="aj-cab"><span class="aj-ico" aria-hidden="true">✨</span><div><h2>Asistente IA</h2><p class="muted">Entiende lo que responde el cliente y, si pregunta otra cosa, lo pasa a una persona. Funciona con tu clave de OpenAI (consumo muy bajo).</p></div></div>
+    <p class="aj-ia-estado" id="cf-ia-estado"><span class="in-punto"></span><span>Revisando…</span></p>
+    <div class="aj-campos">
+      <div class="aj-ancho"><label for="cf-ia-clave">Clave de OpenAI</label><input id="cf-ia-clave" type="password" autocomplete="off" placeholder="sk-…  se guarda cifrada y no se vuelve a mostrar"><div class="cf-nota">En platform.openai.com → API keys.</div></div>
+      <div class="aj-ancho"><label for="cf-ia-modelo">Modelo</label><select id="cf-ia-modelo"><option value="gpt-4o-mini">gpt-4o-mini — Recomendado · consumo muy bajo</option></select></div>
+    </div>
+    <div class="actions"><button class="btn secundario" id="cf-ia-vincular" type="button">Vincular clave a esta tienda</button><a href="/panel#ia">Más opciones del asistente</a></div>
+    <p id="cf-ia-nota" class="cf-nota" role="status"></p>
+  </section>
 
-  <h3>Resumen del día por WhatsApp</h3>
-  <p class="muted">Al supervisor le llega cómo arranca el día (pedidos, qué falta, motorizados, GSG) y cómo cerró (entregados, sin terminar, incidencias). Las cifras las pone el sistema; si el asistente IA está conectado, él redacta el texto alrededor de ellas.</p>
-  <div class="toolbar">
-    <div><label class="inline" style="margin-top:22px"><input type="checkbox" id="cf-rs-activo"> Mandar el resumen</label></div>
-    <div><label for="cf-rs-manana">Por la mañana a las</label><input id="cf-rs-manana" type="time" value="08:30"></div>
-    <div><label for="cf-rs-tarde">Por la tarde a las</label><input id="cf-rs-tarde" type="time" value="18:30"></div>
-  </div>
-  <div id="cf-rs-estado" class="cf-nota" style="margin-top:4px"></div>
-  <div class="actions" style="margin-top:8px">
-    <button class="ghost" id="cf-rs-ver-manana" type="button">Ver cómo queda el de la mañana</button>
-    <button class="ghost" id="cf-rs-ver-tarde" type="button">Ver cómo queda el de la tarde</button>
-    <button class="ghost" id="cf-rs-mandar" type="button">Mandar ahora</button>
-  </div>
-  <pre id="cf-rs-vista" class="vista-previa hidden"></pre>
+  <details class="card aj-card aj-avanzado" id="aj-avanzado">
+    <summary><span class="aj-ico" aria-hidden="true">⚙️</span><span><b>Avanzado</b><small class="muted">Resumen del día, modo prueba, qué se enseña, ritmo y atajos del chat. Lo de fábrica va bien.</small></span></summary>
 
-  <h3>Horario de envío</h3>
-  <p class="muted">Fuera de esta franja no sale nada iniciado por ti (campañas, reparto, secuencias). Responder a quien escribe no tiene horario.</p>
-  <div class="toolbar">
-    <div><label for="cf-hora-inicio">Desde (hora)</label><input id="cf-hora-inicio" type="number" min="0" max="23"></div>
-    <div><label for="cf-hora-fin">Hasta (hora)</label><input id="cf-hora-fin" type="number" min="1" max="24"></div>
-  </div>
-  <label>Días</label>
-  <div class="dias" id="cf-dias"></div>
+    <div class="cf-vigente" id="cf-vigente"></div>
 
-  <h3>Modo prueba</h3>
-  <p class="muted">Con el modo prueba activo, el sistema <b>solo escribe y solo contesta</b> a los números de la lista. Para probar sin molestar a clientes.</p>
-  <div id="cf-fijado" class="cf-aviso hidden"></div>
-  <label class="inline" style="margin-top:8px"><input type="checkbox" id="cf-mp-activo"> Modo prueba activo</label>
-  <label for="cf-mp-numeros">Números permitidos (uno por línea)</label>
-  <textarea id="cf-mp-numeros" placeholder="987 654 321&#10;912 426 667"></textarea>
-  <div class="cf-nota">Los 9 dígitos del celular bastan; el 51 se pone solo.</div>
+    <h3>Resumen del día por WhatsApp</h3>
+    <p class="muted">Al supervisor le llega cómo arranca el día y cómo cerró. Si el asistente IA está conectado, él redacta el texto.</p>
+    <div class="toolbar">
+      <div><label class="inline" style="margin-top:22px"><input type="checkbox" id="cf-rs-activo"> Mandar el resumen</label></div>
+      <div><label for="cf-rs-manana">Por la mañana a las</label><input id="cf-rs-manana" type="time" value="08:30"></div>
+      <div><label for="cf-rs-tarde">Por la tarde a las</label><input id="cf-rs-tarde" type="time" value="18:30"></div>
+    </div>
+    <div id="cf-rs-estado" class="cf-nota" style="margin-top:4px"></div>
+    <div class="actions" style="margin-top:8px">
+      <button class="ghost sm" id="cf-rs-ver-manana" type="button">Ver el de la mañana</button>
+      <button class="ghost sm" id="cf-rs-ver-tarde" type="button">Ver el de la tarde</button>
+      <button class="ghost sm" id="cf-rs-mandar" type="button">Mandar ahora</button>
+    </div>
+    <pre id="cf-rs-vista" class="vista-previa hidden"></pre>
 
+    <h3>Modo prueba</h3>
+    <p class="muted">Con el modo prueba activo, el sistema <b>solo escribe y solo contesta</b> a los números de la lista. Para probar sin molestar a clientes.</p>
+    <div id="cf-fijado" class="cf-aviso hidden"></div>
+    <label class="inline" style="margin-top:8px"><input type="checkbox" id="cf-mp-activo"> Modo prueba activo</label>
+    <label for="cf-mp-numeros">Números permitidos (uno por línea)</label>
+    <textarea id="cf-mp-numeros" placeholder="987 654 321&#10;912 426 667"></textarea>
+    <div class="cf-nota">Los 9 dígitos del celular bastan; el 51 se pone solo.</div>
 
-  <h3>Qué se enseña</h3>
-  <p class="muted">GSGchat viene con lo justo para el día a día de GSG. Todo lo demás (campañas, grupos, rastreo, tiendas conectadas, ritmo del número…) sigue ahí, escondido; se puede enseñar entero cuando haga falta.</p>
-  <div class="toolbar" style="align-items:flex-start">
-    <label class="inline" style="flex:1;min-width:260px;align-items:flex-start;gap:10px"><input type="radio" name="cf-modo" value="gsg" style="margin-top:4px"><span><b>Solo lo de GSG</b> (recomendado)<br><span class="muted" style="font-size:12.5px">Hoy, Chats, Conversaciones guardadas, Asistente IA, Motorizados, Equipo, Conexión y Ajustes.</span></span></label>
-    <label class="inline" style="flex:1;min-width:260px;align-items:flex-start;gap:10px"><input type="radio" name="cf-modo" value="completo" style="margin-top:4px"><span><b>Todo el sistema</b><br><span class="muted" style="font-size:12.5px">Además: campañas, grupos, respuestas automáticas, plantillas, rastreo, riesgo y ritmo, integraciones (Stoky, web, tiendas), reparto por lotes y envío automático como pantallas aparte.</span></span></label>
-  </div>
-  <div class="cf-nota" style="margin-top:4px">Se aplica a todas las cuentas al recargar la página.</div>
+    <h3>Qué se enseña</h3>
+    <p class="muted">GSGchat viene con lo justo para el día a día de GSG. Todo lo demás sigue ahí, escondido; se puede enseñar entero cuando haga falta.</p>
+    <div class="aj-opciones">
+      <label class="aj-opcion"><input type="radio" name="cf-modo" value="gsg"><span><b>Solo lo de GSG</b> <span class="muted">(recomendado)</span><small>Hoy, Chats, Conversaciones guardadas, Asistente IA, Motorizados, Equipo, Conexión y Ajustes.</small></span></label>
+      <label class="aj-opcion"><input type="radio" name="cf-modo" value="completo"><span><b>Todo el sistema</b><small>Además: campañas, grupos, respuestas automáticas, plantillas, rastreo, riesgo y ritmo, integraciones, reparto por lotes y envío automático.</small></span></label>
+    </div>
+    <div class="cf-nota" style="margin-top:4px">Se aplica a todas las cuentas al recargar la página.</div>
 
-  <details class="cf-mas" id="cf-avanzado-caja"><summary>Ajustes avanzados <span class="muted">ritmo del número y comportamiento; lo de fábrica va bien</span></summary>
-  <h4>Ritmo</h4>
-  <p class="muted">Cuánto y cada cuánto. Menos es más seguro para el número; el perfil del proveedor pone unos valores razonables por defecto.</p>
-  <div class="toolbar">
-    <div><label for="cf-r-min">Mensajes por minuto</label><input id="cf-r-min" type="number" min="1" max="60"></div>
-    <div><label for="cf-r-hora">Mensajes por hora</label><input id="cf-r-hora" type="number" min="1" max="2000"></div>
-    <div><label for="cf-r-pmin">Pausa mínima (s)</label><input id="cf-r-pmin" type="number" min="0" max="600"></div>
-    <div><label for="cf-r-pmax">Pausa máxima (s)</label><input id="cf-r-pmax" type="number" min="0" max="900"></div>
-    <div><label for="cf-r-nuevos">Contactos nuevos por día</label><input id="cf-r-nuevos" type="number" min="0" max="5000"></div>
-    <div><label for="cf-r-contacto">Mensajes por contacto y día</label><input id="cf-r-contacto" type="number" min="1" max="20"></div>
-    <div><label for="cf-r-sep">Separación al mismo contacto (min)</label><input id="cf-r-sep" type="number" min="0" max="1440"></div>
-  </div>
+    <details class="cf-mas" id="cf-avanzado-caja" style="margin-top:18px"><summary>Ritmo y comportamiento <span class="muted">lo de fábrica va bien</span></summary>
+    <h4>Ritmo</h4>
+    <p class="muted">Cuánto y cada cuánto. Menos es más seguro para el número.</p>
+    <div class="toolbar">
+      <div><label for="cf-r-min">Mensajes por minuto</label><input id="cf-r-min" type="number" min="1" max="60"></div>
+      <div><label for="cf-r-hora">Mensajes por hora</label><input id="cf-r-hora" type="number" min="1" max="2000"></div>
+      <div><label for="cf-r-pmin">Pausa mínima (s)</label><input id="cf-r-pmin" type="number" min="0" max="600"></div>
+      <div><label for="cf-r-pmax">Pausa máxima (s)</label><input id="cf-r-pmax" type="number" min="0" max="900"></div>
+      <div><label for="cf-r-nuevos">Contactos nuevos por día</label><input id="cf-r-nuevos" type="number" min="0" max="5000"></div>
+      <div><label for="cf-r-contacto">Mensajes por contacto y día</label><input id="cf-r-contacto" type="number" min="1" max="20"></div>
+      <div><label for="cf-r-sep">Separación al mismo contacto (min)</label><input id="cf-r-sep" type="number" min="0" max="1440"></div>
+    </div>
 
-  <h4>Comportamiento</h4>
-  <div class="toolbar">
-    <div><label for="cf-humanizar">Escribe como una persona (pausas al teclear)</label><select id="cf-humanizar"><option value="">Como venga de fábrica (recomendado)</option><option value="true">Sí</option><option value="false">No</option></select></div>
-    <div><label for="cf-autopausa">Pausa automática en rojo</label><select id="cf-autopausa"><option value="">Como venga de fábrica (recomendado)</option><option value="true">Sí</option><option value="false">No</option></select></div>
-    <div style="grid-column: span 2"><label for="cf-verunavez">Foto o video de "ver una vez"</label><select id="cf-verunavez"><option value="true">Pedirle al cliente que lo mande normal</option><option value="false">No decir nada</option></select><div class="cf-nota">WhatsApp entrega los "ver una vez" solo al teléfono, no a este sistema. Se le pide al teléfono que lo reenvíe y, si no lo suelta en unos segundos, se le escribe al cliente para que lo mande como foto normal.</div></div>
-  </div>
-
+    <h4>Comportamiento</h4>
+    <div class="toolbar">
+      <div><label for="cf-humanizar">Escribe como una persona (pausas al teclear)</label><select id="cf-humanizar"><option value="">Como venga de fábrica (recomendado)</option><option value="true">Sí</option><option value="false">No</option></select></div>
+      <div><label for="cf-autopausa">Pausa automática en rojo</label><select id="cf-autopausa"><option value="">Como venga de fábrica (recomendado)</option><option value="true">Sí</option><option value="false">No</option></select></div>
+      <div style="grid-column: 1 / -1"><label for="cf-verunavez">Foto o video de "ver una vez"</label><select id="cf-verunavez"><option value="true">Pedirle al cliente que lo mande normal</option><option value="false">No decir nada</option></select><div class="cf-nota">WhatsApp entrega los "ver una vez" solo al teléfono, no a este sistema. Se le pide al teléfono que lo reenvíe y, si no lo suelta en unos segundos, se le escribe al cliente para que lo mande como foto normal.</div></div>
+    </div>
+    </details>
+    <details class="cf-mas" id="cf-atajos-caja"><summary>Respuestas rápidas del chat <span class="muted">se escriben con / en Chats</span></summary>
+    <p class="muted">Atajos para escribir más rápido en <a href="/chat">Chats</a>: se escribe <code>/</code> y el nombre del atajo, y el texto aparece listo para enviar. Valen <code>{nombre}</code>, <code>{pedido}</code> y <code>{negocio}</code>.</p>
+    <div id="at-lista"></div>
+    <div class="actions"><button class="ghost sm" id="at-anadir">Añadir atajo</button><button class="sm" id="at-guardar">Guardar atajos</button><button class="ghost sm" id="at-fabrica">Volver a los de fábrica</button><span id="at-state" class="pill hidden"></span></div>
+    </details>
+    <div class="actions"><button class="ghost sm" id="cf-restablecer">Volver a lo del servidor</button></div>
   </details>
-  <details class="cf-mas" id="cf-atajos-caja"><summary>Respuestas rápidas del chat <span class="muted">se escriben con / en Chats</span></summary>
-  <p class="muted">Atajos para escribir más rápido en <a href="/chat">Chats</a>: se escribe <code>/</code> y el nombre del atajo, y el texto aparece listo para enviar. Valen <code>{nombre}</code>, <code>{pedido}</code> y <code>{negocio}</code>.</p>
-  <div id="at-lista"></div>
-  <div class="actions"><button class="ghost sm" id="at-anadir">Añadir atajo</button><button class="sm" id="at-guardar">Guardar atajos</button><button class="ghost sm" id="at-fabrica">Volver a los de fábrica</button><span id="at-state" class="pill hidden"></span></div>
 
-
-  </details>
-  <div class="actions">
-    <button id="cf-guardar">Guardar</button>
-    <button class="ghost" id="cf-restablecer">Volver a lo del servidor</button>
+  <div class="aj-guardar">
+    <span class="muted">Los cambios valen desde el siguiente mensaje.</span>
     <span id="cf-state" class="pill hidden"></span>
+    <button class="btn primario" id="cf-guardar">Guardar cambios</button>
   </div>
 </section>
 
@@ -1549,12 +1649,13 @@ function graficaSemana(semana) {
   return out + '</svg>';
 }
 var pasosDesplegados = false;
-function pintarPasosGsg(p) {
+/* Los pasos para dejar GSGchat listo: los usa la tarjeta de «Más» y la linea de estado de arriba. */
+function pasosGsgLista(p) {
   var oficial = p.proveedor === 'cloud';
   var moto = p.motorizadosActivos;
   var pedidos = p.entregasHoy || 0;
   var sinEntregas = document.querySelector('.s-app') && document.querySelector('.s-app').getAttribute('data-gsg') === '0';
-  var pasos = sinEntregas ? [
+  return sinEntregas ? [
     { hecho: p.conectado, titulo: 'Conectar el WhatsApp', que: p.conectado ? (oficial ? 'La API de Meta ya responde.' : 'El teléfono está vinculado.') : (oficial ? 'La API de Meta no responde todavía.' : 'Escanea el QR desde el teléfono, como en WhatsApp Web.'), href: '/setup', boton: p.conectado ? 'Ver la conexión' : 'Conectar' },
     { hecho: p.procesos > 0, titulo: 'Crear tu primer proceso', que: p.procesos > 0 ? p.procesos + ' proceso' + (p.procesos === 1 ? '' : 's') + ' listo' + (p.procesos === 1 ? '' : 's') + '.' : 'Elige una plantilla (pedir datos, confirmar citas, avisar tareas, cobranza) y ajusta sus mensajes.', href: '/procesos#crear', boton: p.procesos > 0 ? 'Ver los procesos' : 'Crear desde una plantilla' },
     { hecho: p.personasEnProcesos > 0, titulo: 'Cargar la lista de personas', que: p.personasEnProcesos > 0 ? p.personasEnProcesos + ' persona' + (p.personasEnProcesos === 1 ? '' : 's') + ' en tus procesos.' : 'Pega la tabla de Excel o sube el archivo: el sistema les escribe solo, con su ritmo.', href: '/procesos', boton: p.personasEnProcesos > 0 ? 'Ver las personas' : 'Cargar personas' },
@@ -1567,6 +1668,11 @@ function pintarPasosGsg(p) {
     { hecho: p.gsg === 'real' || p.gsg === 'simulador' || pedidos > 0, titulo: 'Traer los pedidos del día', que: p.gsg === 'real' ? 'GSG está conectado: los pedidos entran solos cada 5 minutos.' : p.gsg === 'simulador' ? 'Con el simulador de GSG (para probar). Cuando GSG tenga API, se conecta en Conexión.' : pedidos > 0 ? 'Hoy hay ' + pedidos + ' pedido' + (pedidos === 1 ? '' : 's') + ' cargados a mano.' : 'Conecta GSG en Conexión, o pega la lista del día en Hoy.', href: p.gsg === 'ninguna' ? '/setup' : '/hoy', boton: p.gsg === 'ninguna' ? 'Conectar GSG' : 'Ir a Hoy', alt: p.gsg === 'ninguna' ? { href: '/hoy', boton: 'Pegar la lista en Hoy' } : null },
     { hecho: p.ia === true, titulo: 'Encender el asistente IA (opcional)', que: p.ia === true ? 'Contesta solo a los clientes y lee las respuestas dudosas.' : 'Lee las respuestas dudosas de clientes y motorizados, y contesta solo. Sin él, todo sigue funcionando por reglas.', href: '/panel#ia', boton: p.ia === true ? 'Ver el asistente' : 'Encender', opcional: true, ocultar: p.iaDisponible === false }
   ].filter(function (x) { return !x.ocultar; });
+}
+function pintarPasosGsg(p) {
+  var moto = p.motorizadosActivos;
+  var sinEntregas = document.querySelector('.s-app') && document.querySelector('.s-app').getAttribute('data-gsg') === '0';
+  var pasos = pasosGsgLista(p);
   var obligatorios = pasos.filter(function (x) { return !x.opcional; });
   var todo = obligatorios.every(function (x) { return x.hecho; });
   var card = document.getElementById('in-pasos-card');
@@ -1669,11 +1775,111 @@ function pintarAccesos(modoGsg) {
     return '<a href="' + esc(a[0]) + '"' + (enPie[a[0]] ? ' data-en-pie="1"' : '') + '>' + esc(a[1]) + '<small>' + esc(a[2]) + '</small></a>';
   }).join('');
 }
+/* --- Lo de arriba de Inicio: saludo, estado en una linea, el aviso de GSG y las cuatro cifras. --- */
+function saludoDelDia() {
+  var h = new Date().getHours();
+  var nombre = window.__yo && window.__yo.nombre ? String(window.__yo.nombre).split(' ')[0] : '';
+  return (h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches') + (nombre ? ', ' + nombre : '');
+}
+/* Que falta, en orden de importancia: lo primero que no esta hecho es lo que se dice. */
+function pintarEstadoInicio(r) {
+  var caja = document.getElementById('in-estado');
+  if (!caja) return;
+  var p = r.primerosPasos || {};
+  var faltan = [];
+  if (!r.numero.conectado) faltan.push({ nivel: 'bad', texto: 'WhatsApp sin conectar', href: '/setup', boton: 'Conectar' });
+  else if (r.numero.pausado) faltan.push({ nivel: 'warn', texto: 'Los envíos están pausados', href: '/panel#estado', boton: 'Ver por qué' });
+  var conEntregas = Boolean(r.entregas) && !(document.querySelector('.s-app') && document.querySelector('.s-app').getAttribute('data-gsg') === '0');
+  if (conEntregas && p.gsg === 'ninguna') faltan.push({ nivel: 'warn', texto: 'GSG sin conectar: los pedidos no entran solos', href: '/setup#gsg', boton: 'Conectar GSG' });
+  if (conEntregas && !r.entregas.motorizadosActivos) faltan.push({ nivel: 'warn', texto: 'Ningún motorizado activo', href: '/motorizados', boton: 'Dar de alta' });
+  if (p.supervisor === false) faltan.push({ nivel: 'warn', texto: 'Falta el WhatsApp del supervisor', href: '/panel#configuracion', boton: 'Ponerlo', accion: 'supervisor' });
+  if (!faltan.length) {
+    caja.innerHTML = '<span class="in-punto ok"></span><span><b>Todo funcionando.</b> ' + (conEntregas ? (p.gsg === 'simulador' ? 'GSG en modo prueba (simulador).' : 'Los pedidos entran solos desde GSG.') : 'WhatsApp conectado.') + '</span>';
+    return;
+  }
+  var f = faltan[0];
+  caja.innerHTML = '<span class="in-punto ' + f.nivel + '"></span><span><b>' + esc(f.texto) + '.</b></span><a href="' + esc(f.href) + '"' + (f.accion ? ' data-accion="' + esc(f.accion) + '"' : '') + '>' + esc(f.boton) + ' →</a>' +
+    (faltan.length > 1 ? '<a href="#" id="in-estado-mas" style="font-weight:400">y ' + (faltan.length - 1) + ' cosa' + (faltan.length === 2 ? '' : 's') + ' más</a>' : '');
+  var sup = caja.querySelector('[data-accion="supervisor"]');
+  if (sup) sup.onclick = function (ev) { ev.preventDefault(); pedirSupervisor(); };
+  var mas = document.getElementById('in-estado-mas');
+  if (mas) mas.onclick = function (ev) {
+    ev.preventDefault();
+    var det = document.getElementById('in-mas'); det.open = true;
+    pasosDesplegados = true; if (r.primerosPasos) pintarPasos(r.primerosPasos);
+    document.getElementById('in-pasos-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+}
+function tarjetaGrande(titulo, valor, detalle, clase, href, ir) {
+  return '<a class="in-grande' + (clase ? ' ' + clase : '') + '" href="' + esc(href) + '"><span class="t">' + esc(titulo) + '</span><span class="n">' + esc(valor) + '</span><span class="d">' + esc(detalle) + '</span><span class="ir">' + esc(ir) + ' →</span></a>';
+}
+/* Las cuatro cifras de hoy. 'nums' es /admin/entregas/numeros (las mismas etapas que Ubicaciones registradas). */
+function pintarGrandesInicio(r, nums) {
+  var caja = document.getElementById('in-grandes');
+  var mas = document.getElementById('in-mas');
+  var en = r.entregas;
+  var modoGsg = esModoGsg();
+  var conEntregas = Boolean(en) && !(document.querySelector('.s-app') && document.querySelector('.s-app').getAttribute('data-gsg') === '0');
+  if (!modoGsg || !conEntregas) {
+    /* Sin entregas (o con todo el sistema) Inicio es el de siempre, sin plegar. */
+    caja.classList.add('hidden');
+    mas.classList.add('sin-plegar'); mas.open = true;
+    return;
+  }
+  mas.classList.remove('sin-plegar');
+  caja.classList.remove('hidden');
+  var c = (nums && nums.cifras) || null;
+  var esperando = en.faltaUbicacion || 0;
+  var registradas = c ? c.contactados : null;
+  var necesitan = c ? c.necesita : (en.incidencia || 0) + ((r.reparto && r.reparto.requierenPersona) || 0);
+  var motos = en.motorizadosActivos || 0;
+  caja.innerHTML =
+    tarjetaGrande('Esperando ubicación', esperando, esperando ? 'Se les está pidiendo su ubicación por WhatsApp.' : 'Nadie pendiente ahora mismo.', esperando ? 'warn' : '', '/hoy?filtro=faltaUbicacion', 'Ver en Hoy') +
+    tarjetaGrande('Ubicaciones registradas', registradas === null ? '—' : registradas, 'Clientes que ya respondieron hoy.', registradas ? 'ok' : '', '/numeros?etapa=contactados', 'Ver la lista') +
+    tarjetaGrande('Necesitan a alguien', necesitan, necesitan ? 'Preguntaron algo: contéstales tú.' : 'Nadie espera a una persona.', necesitan ? 'bad' : '', '/chat', 'Abrir Chats') +
+    tarjetaGrande('Motorizados activos', motos, motos ? 'Listos para recibir pedidos.' : 'Da de alta al menos uno.', motos ? '' : 'warn', '/motorizados', 'Ver motorizados');
+}
+/* «Confirmar y enviar»: lo que llegó de GSG espera a que alguien lo apruebe. */
+var inPorConfirmar = null;
+function pintarPorConfirmarInicio(nums) {
+  var caja = document.getElementById('in-porconfirmar');
+  var pc = nums && nums.porConfirmar;
+  inPorConfirmar = pc && pc.total ? pc : null;
+  if (!inPorConfirmar || !esModoGsg()) { caja.classList.add('hidden'); return; }
+  caja.classList.remove('hidden');
+  document.getElementById('in-pc-titulo').textContent = 'Llegó la lista de GSG: ' + pc.total + ' número' + (pc.total === 1 ? '' : 's') + ' por confirmar';
+}
+document.getElementById('in-pc-enviar').onclick = async function () {
+  var pc = inPorConfirmar;
+  if (!pc) return;
+  var boton = this;
+  var si = await confirmarDialogo({ titulo: 'Confirmar y enviar a todos', texto: 'Se confirma el envío a ' + (pc.total === 1 ? '1 número' : pc.total + ' números') + ': ' + pc.ubicacion + ' para pedir ubicación · ' + pc.confirmar + ' para confirmar SÍ/NO. Salen de uno en uno, con la pausa de siempre entre mensaje y mensaje.', boton: 'Sí, enviar a todos' });
+  if (!si) return;
+  boton.disabled = true;
+  try {
+    var r = await api('/admin/entregas/confirmar-envio', { method: 'POST', body: { todos: true } });
+    show('state', r.aviso || 'Confirmado: empiezan a salir', 'ok');
+    await loadInicio();
+  } catch (e) { show('state', e.message, 'bad'); }
+  finally { boton.disabled = false; }
+};
+/* Las cifras por etapa de Ubicaciones registradas; sin entregas en este arranque, null y no pasa nada. */
+function pedirNumerosDelDia() {
+  return fetch('/admin/entregas/numeros', { credentials: 'same-origin', cache: 'no-store' })
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .catch(function () { return null; });
+}
 var NIVEL_TXT = { verde: 'Todo en orden', amarillo: 'Con cuidado: el marketing va más lento', naranja: 'Frenado: solo lo imprescindible', rojo: 'Pausado: nada sale hasta que mejore' };
 async function loadInicio() {
   try {
+    var numerosPedido = pedirNumerosDelDia();
     var r = await api('/admin/resumen');
+    var nums = await numerosPedido;
     var h = r.hoy, n = r.numero, c = r.chats, rp = r.reparto;
+    document.getElementById('in-saludo').textContent = saludoDelDia();
+    pintarEstadoInicio(r);
+    pintarPorConfirmarInicio(nums);
+    pintarGrandesInicio(r, nums);
     /* 'pct' es una funcion global (salud): aqui la cifra lleva su propio nombre. */
     var cupoUsadoPct = h.cupo ? Math.min(100, Math.round(100 * h.usados / h.cupo)) : 0;
     var modoGsgInicio = window.__modoSistema === 'gsg' || (document.querySelector('.s-app') && document.querySelector('.s-app').classList.contains('modo-gsg'));
@@ -1827,9 +2033,113 @@ async function loadPlan() {
     caja.classList.add('hidden');
   }
 }
+/* El numero de soporte vive en los ajustes de las entregas: aqui se enseña y se guarda junto a lo demas. */
+var cfSoporteGuardado = null;
+/* Las cifras sin el 51 de delante: asi se comparan lo guardado desde Hoy y lo escrito aqui. */
+function nacional(v) { var d = String(v || '').replace(/\D/g, ''); return d.length === 11 && d.indexOf('51') === 0 ? d.slice(2) : d; }
+async function loadSoporte() {
+  try {
+    var r = await api('/admin/entregas');
+    var sop = (r.ajustes && r.ajustes.soporte) || {};
+    cfSoporteGuardado = { whatsapp: nacional(sop.whatsapp), llamadas: nacional(sop.llamadas) };
+    setVal('cf-sop-wa', cfSoporteGuardado.whatsapp.replace(/^(9\d{2})(\d{3})(\d{3})$/, '$1 $2 $3'));
+    setVal('cf-sop-tel', cfSoporteGuardado.llamadas);
+  } catch (e) {
+    /* Sin entregas en este arranque no hay numero de soporte que poner. */
+    cfSoporteGuardado = null;
+    porId('cf-sop-caja').classList.add('hidden');
+    porId('cf-sop-tel-caja').classList.add('hidden');
+  }
+  pintarFaltaNegocio();
+}
+/* Lo que el dueño todavia no puso, dicho arriba de la tarjeta y marcado en su campo. */
+function pintarFaltaNegocio() {
+  var faltan = [];
+  var cajaSop = porId('cf-sop-caja'), cajaSup = porId('cf-supervisor').closest('.aj-ancho');
+  var sinSoporte = cfSoporteGuardado !== null && !val('cf-sop-wa') && !val('cf-sop-tel');
+  /* Un supervisor puesto al arrancar el servidor (.env) tambien vale. */
+  var sinSupervisor = !val('cf-supervisor') && !cfSupervisorServidor;
+  cajaSop.classList.toggle('falta', sinSoporte);
+  if (cajaSup) cajaSup.classList.toggle('falta', sinSupervisor);
+  if (sinSoporte) faltan.push('el <b>WhatsApp de soporte</b>');
+  if (sinSupervisor) faltan.push('el <b>WhatsApp del supervisor</b>');
+  var caja = porId('cf-falta');
+  caja.classList.toggle('hidden', !faltan.length);
+  if (faltan.length) caja.innerHTML = 'Todavía falta ' + faltan.join(' y ') + '. Escríbelo abajo y pulsa «Guardar cambios».';
+}
+var cfSupervisorServidor = false;
+['cf-sop-wa', 'cf-sop-tel', 'cf-supervisor'].forEach(function (id) { porId(id).addEventListener('input', pintarFaltaNegocio); });
+
+/* El asistente IA desde Ajustes: el mismo camino que «Vincular clave a esta tienda» del Asistente IA. */
+async function loadIaAjustes() {
+  var caja = porId('cf-ia-estado');
+  try {
+    var e = await api('/admin/ia');
+    var conClave = e.tieneToken && e.proveedor === 'openai';
+    var tono = e.activa && e.tieneToken ? 'ok' : e.tieneToken ? 'warn' : 'bad';
+    var txt = e.activa && e.tieneToken ? '<b>Encendido</b> con ' + esc(conClave ? 'tu clave de OpenAI' : 'Puter') + ' · modelo ' + esc(e.modelo || e.modeloEfectivo || '') + '.'
+      : e.tieneToken ? '<b>Clave guardada, pero apagado.</b> Enciéndelo en <a href="/panel#ia">el Asistente IA</a>.'
+      : '<b>Sin clave todavía.</b> ' + (e.agenteOperativoEfectivo ? 'El sistema sigue trabajando con sus reglas fijas.' : 'Pega tu clave para encenderlo.');
+    caja.innerHTML = '<span class="in-punto ' + tono + '"></span><span>' + txt + '</span>';
+    porId('cf-ia-clave').placeholder = e.tieneToken ? 'Ya hay una clave guardada; pega otra solo para cambiarla' : 'sk-…  se guarda cifrada y no se vuelve a mostrar';
+    if (conClave && e.modelo) {
+      var sel = porId('cf-ia-modelo');
+      if (!Array.prototype.some.call(sel.options, function (o) { return o.value === e.modelo; })) sel.insertAdjacentHTML('afterbegin', '<option value="' + esc(e.modelo) + '">' + esc(e.modelo) + ' — el que tienes guardado</option>');
+      sel.value = e.modelo;
+    }
+    var soyAdmin = !window.__yo || ((window.__yo.rol === 'admin' || window.__yo.super) && !window.__yo.porToken);
+    porId('cf-ia-vincular').disabled = !soyAdmin;
+  } catch (err) {
+    /* Sin asistente en este arranque la tarjeta no tiene nada que hacer. */
+    porId('aj-ia').classList.add('hidden');
+  }
+}
+var CF_IA_MODELOS_CLAVE = '';
+async function cfIaListarModelos(clave) {
+  if (!clave || clave === CF_IA_MODELOS_CLAVE) return;
+  var nota = porId('cf-ia-nota');
+  nota.textContent = 'Buscando los modelos de tu cuenta…';
+  try {
+    var r = await api('/admin/ia/modelos', { method: 'POST', body: { clave: clave } });
+    CF_IA_MODELOS_CLAVE = r.ok ? clave : '';
+    var lista = (r.modelos && r.modelos.length) ? r.modelos : [{ id: 'gpt-4o-mini', etiqueta: 'Recomendado · consumo muy bajo' }];
+    porId('cf-ia-modelo').innerHTML = lista.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.id + (m.etiqueta ? ' — ' + m.etiqueta : '')) + '</option>'; }).join('');
+    porId('cf-ia-modelo').value = r.elegido || lista[0].id;
+    nota.textContent = r.detalle || '';
+  } catch (e) {
+    CF_IA_MODELOS_CLAVE = '';
+    nota.textContent = 'No se pudieron ver los modelos de tu cuenta (' + e.message + '). Se usará gpt-4o-mini.';
+  }
+}
+porId('cf-ia-clave').addEventListener('change', function () { cfIaListarModelos(val('cf-ia-clave')); });
+porId('cf-ia-vincular').onclick = async function () {
+  var nota = porId('cf-ia-nota');
+  var boton = this;
+  var clave = val('cf-ia-clave');
+  if (!clave) { nota.innerHTML = '<b style="color:var(--bad)">Pega primero tu clave</b> en el campo de arriba.'; porId('cf-ia-clave').focus(); return; }
+  var tienda = (porId('s-app') && porId('s-app').getAttribute('data-negocio')) || 'esta tienda';
+  var baseUrl = 'https://api.openai.com/v1';
+  boton.disabled = true;
+  await cfIaListarModelos(clave);
+  var modelo = val('cf-ia-modelo') || 'gpt-4o-mini';
+  nota.textContent = 'Comprobando la clave con OpenAI…';
+  try {
+    var r = await api('/admin/ia/probar-conexion', { method: 'POST', body: { proveedor: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave } });
+    if (!r.ok) { nota.innerHTML = '<b style="color:var(--bad)">No se vinculó:</b> ' + esc(r.prueba.detalle); boton.disabled = false; return; }
+    await api('/admin/ia', { method: 'POST', body: { proveedor: 'openai', servicio: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave } });
+    setVal('cf-ia-clave', '');
+    nota.innerHTML = '<b style="color:var(--ok)">✅ Clave vinculada a ' + esc(tienda) + '.</b> OpenAI respondió (' + esc(modelo) + ').';
+    loaded.ia = false;
+    await loadIaAjustes();
+  } catch (e) { nota.textContent = e.message; }
+  boton.disabled = false;
+};
+
 async function loadConfiguracion() {
   loadAtajos();
   loadPlan();
+  loadSoporte();
+  loadIaAjustes();
   try {
     var r = await api('/admin/ajustes');
     var g = r.guardado, e = r.efectivo, sv = r.servidor;
@@ -1865,6 +2175,8 @@ async function loadConfiguracion() {
     fijado.classList.toggle('hidden', !r.modoPruebaFijado);
     if (r.modoPruebaFijado) fijado.textContent = 'El servidor arrancó con SOLO_NUMEROS=' + sv.soloNumeros.join(', ') + '. Desde aquí solo puedes recortar esa lista, no ampliarla ni apagar el modo prueba: eso se cambia en el .env y se reinicia.';
     var sup = document.getElementById('cf-supervisor'); sup.value = sinPrefijoPeru(g.avisos.supervisor || ''); sup.placeholder = sv.supervisor ? sinPrefijoPeru(sv.supervisor) : '987 654 321';
+    cfSupervisorServidor = Boolean(sv.supervisor);
+    pintarFaltaNegocio();
     var rs = g.resumenes || { activo: true, horaManana: '08:30', horaTarde: '18:30' };
     document.getElementById('cf-rs-activo').checked = rs.activo !== false;
     document.getElementById('cf-rs-manana').value = rs.horaManana || '08:30';
@@ -1887,7 +2199,7 @@ async function loadResumenesEstado() {
   try {
     var r = await api('/admin/resumenes');
     var partes = [];
-    if (!r.supervisor) partes.push('<b style="color:var(--warn)">Falta el WhatsApp del supervisor (arriba, en Avisos): sin él no hay a quién mandarlo.</b>');
+    if (!r.supervisor) partes.push('<b style="color:var(--warn)">Falta el WhatsApp del supervisor (arriba, en «Tu negocio»): sin él no hay a quién mandarlo.</b>');
     ['manana', 'tarde'].forEach(function (f) {
       var u = r.ultimos[f];
       if (!u) partes.push('Todavía no salió ' + franjaNombre(f) + '.');
@@ -1947,6 +2259,14 @@ document.getElementById('cf-guardar').onclick = busy('cf-guardar', async functio
     if (patch.horario.inicio !== null && patch.horario.fin !== null && patch.horario.fin <= patch.horario.inicio) throw new Error('La hora final tiene que ser mayor que la inicial.');
     if (patch.modoPrueba.activo && !patch.modoPrueba.numeros.length) throw new Error('Con el modo prueba activo hace falta al menos un número.');
     await api('/admin/ajustes', { method: 'POST', body: patch });
+    /* El soporte se guarda en los ajustes de las entregas, con las mismas cifras que desde Hoy. */
+    if (cfSoporteGuardado !== null) {
+      var sopNuevo = { whatsapp: nacional(val('cf-sop-wa')), llamadas: nacional(val('cf-sop-tel')) };
+      if (sopNuevo.whatsapp !== cfSoporteGuardado.whatsapp || sopNuevo.llamadas !== cfSoporteGuardado.llamadas) {
+        await api('/admin/entregas/ajustes', { method: 'POST', body: { soporte: sopNuevo } });
+        cfSoporteGuardado = sopNuevo;
+      }
+    }
     var cambioModo = window.__modoSistema && window.__modoSistema !== modoElegido;
     show('cf-state', cambioModo ? 'Guardado. El menú cambia al recargar…' : 'Guardado: se aplica en el siguiente envío', 'ok');
     if (cambioModo) { setTimeout(function () { location.reload(); }, 900); return; }

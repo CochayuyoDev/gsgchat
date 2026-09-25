@@ -234,6 +234,14 @@ export interface Entrega {
   contactadoPor?: string | null;
   /** Mensajes automáticos en pausa (Números del día): no se le pide ubicación ni confirmación. */
   mensajesPausadosAt?: Date | null;
+  /**
+   * «Por confirmar el envío»: la lista de GSG espera a que una persona pulse
+   * «Confirmar y enviar». Mientras tenga fecha no sale NADA hacia ese número
+   * (ni ubicación, ni confirmación, ni motorizado). Ver migración 041.
+   */
+  envioRetenidoAt?: Date | null;
+  /** Cuándo se confirmó su envío (null = nunca esperó, o todavía espera). */
+  envioLiberadoAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -254,6 +262,8 @@ export interface NuevaEntrega {
   confirmacionEstado: EstadoConfirmacion;
   estado: EstadoEntrega;
   prioridad?: PrioridadEntrega;
+  /** Llega de la lista de GSG y espera a que se confirme su envío. */
+  envioRetenidoAt?: Date | null;
 }
 
 export type PatchEntrega = Partial<
@@ -424,6 +434,8 @@ interface EntregaRow {
   contactado_at?: Date | null;
   contactado_por?: string | null;
   mensajes_pausados_at?: Date | null;
+  envio_retenido_at?: Date | null;
+  envio_liberado_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -528,6 +540,8 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   contactadoAt: r.contactado_at ?? null,
   contactadoPor: r.contactado_por ?? null,
   mensajesPausadosAt: r.mensajes_pausados_at ?? null,
+  envioRetenidoAt: r.envio_retenido_at ?? null,
+  envioLiberadoAt: r.envio_liberado_at ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -599,6 +613,8 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['contactadoAt', 'contactado_at'],
   ['contactadoPor', 'contactado_por'],
   ['mensajesPausadosAt', 'mensajes_pausados_at'],
+  ['envioRetenidoAt', 'envio_retenido_at'],
+  ['envioLiberadoAt', 'envio_liberado_at'],
 ];
 
 const COLUMNAS_MOTORIZADO: Array<[keyof PatchMotorizado, string]> = [
@@ -676,8 +692,8 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async crearEntrega(input) {
       const { rows } = await pool.query<EntregaRow>(
         `insert into entregas
-           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
+           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio, envio_retenido_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)
          on conflict (dia, referencia) do nothing
          returning *`,
         [
@@ -696,6 +712,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           input.estado,
           input.prioridad ?? 'normal',
           datosEnvioLimpios(input.datosEnvio) ? JSON.stringify(datosEnvioLimpios(input.datosEnvio)) : null,
+          input.envioRetenidoAt ?? null,
         ],
       );
       if (rows[0]) return { entrega: entregaDeFila(rows[0]), nueva: true };
@@ -808,6 +825,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
             and confirmacion_estado in ('pendiente', 'pedida')
             and ubicacion_estado <> 'pendiente'
             and mensajes_pausados_at is null
+            and envio_retenido_at is null
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by coalesce(confirmacion_proximo_at, created_at) asc, id asc
           limit $2`,
@@ -821,6 +839,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           where estado in ('pendiente', 'esperando_ubicacion')
             and ubicacion_estado = 'pendiente' and ubicacion_propuesta_lat is not null and ubicacion_propuesta_at is null and lote_id is null
             and mensajes_pausados_at is null
+            and envio_retenido_at is null
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by prioridad desc, id asc
           limit $2`,
@@ -842,9 +861,10 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async tocaMotorizado(ahora, limite) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
-          where (estado = 'lista')
+          where envio_retenido_at is null and ((estado = 'lista')
+             or (estado = 'incidencia' and incidencia = 'sin_motorizado' and lat is not null and updated_at <= $1::timestamptz - interval '2 minutes')
              or (estado = 'esperando_motorizado' and motorizado_estado = 'enviado' and motorizado_proximo_at is not null and motorizado_proximo_at <= $1)
-             or (estado = 'esperando_motorizado' and motorizado_estado = 'respondio' and aviso_enviado_at is null and motorizado_proximo_at is not null and motorizado_proximo_at <= $1)
+             or (estado = 'esperando_motorizado' and motorizado_estado = 'respondio' and aviso_enviado_at is null and motorizado_proximo_at is not null and motorizado_proximo_at <= $1))
           order by (prioridad = 'urgente') desc, coalesce(motorizado_proximo_at, updated_at) asc, id asc
           limit $2`,
         [ahora, limite],

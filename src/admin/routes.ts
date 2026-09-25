@@ -298,6 +298,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     if (deps.entregas) {
       const r = await deps.entregas.resumen().catch(() => null);
       if (r) {
+        // «Revisar y confirmar antes de enviar»: lo que llegó de GSG no sale hasta que alguien lo confirma.
+        const pc = r.porConfirmarEnvio;
+        if (pc && pc.total > 0) avisos.push({ tipo: 'por_confirmar_envio', nivel: 'warn', texto: `${pc.aviso}. Confírmalos para enviar`, href: '/numeros', n: pc.total });
         const n = r.cifras.incidencia;
         if (n > 0) avisos.push({ tipo: 'entregas', nivel: 'warn', texto: `${n} pedido${n === 1 ? '' : 's'} de hoy necesita${n === 1 ? '' : 'n'} a alguien`, href: '/hoy', n });
         if (r.cierrePendiente > 0) avisos.push({ tipo: 'cierre', nivel: 'info', texto: `${r.cierrePendiente} pedido${r.cierrePendiente === 1 ? '' : 's'} de ayer sigue${r.cierrePendiente === 1 ? '' : 'n'} sin cerrar`, href: '/hoy', n: r.cierrePendiente });

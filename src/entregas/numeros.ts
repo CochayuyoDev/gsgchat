@@ -18,11 +18,12 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { FilaEntrega, MotivoNumero, ResultadoNumero, ServicioEntregas } from './servicio.js';
+import { grupoDe, type FilaEntrega, type MotivoNumero, type ResultadoNumero, type ServicioEntregas } from './servicio.js';
 
-export type EtapaNumero = 'falta_pedir' | 'falta_ubicacion' | 'falta_confirmar' | 'contactados' | 'necesita' | 'cancelada';
+export type EtapaNumero = 'por_confirmar_envio' | 'falta_pedir' | 'falta_ubicacion' | 'falta_confirmar' | 'contactados' | 'necesita' | 'cancelada';
 
 export const ETAPAS: Array<{ id: EtapaNumero; etiqueta: string }> = [
+  { id: 'por_confirmar_envio', etiqueta: 'Por confirmar el envío' },
   { id: 'falta_pedir', etiqueta: 'Falta pedir ubicación' },
   { id: 'falta_ubicacion', etiqueta: 'Falta su ubicación' },
   { id: 'falta_confirmar', etiqueta: 'Falta confirmar' },
@@ -42,6 +43,7 @@ function yaSeLePidioUbicacion(f: FilaEntrega): boolean {
 /**
  * En que punto va un numero. El orden importa:
  *  1. cancelado (por el cliente, por GSG o a mano): solo sale en «Todos»;
+ *  1b. llegó de GSG y espera que una persona confirme su envío → «Por confirmar el envío»;
  *  2. necesita a alguien: la entrega esta apartada (incidencia) o el reparto
  *     la dejo para una persona. Una segunda visita esperando la respuesta
  *     del cliente NO: ese cliente ya esta contactado;
@@ -52,6 +54,7 @@ function yaSeLePidioUbicacion(f: FilaEntrega): boolean {
  */
 export function etapaDe(f: FilaEntrega): EtapaNumero {
   if (f.estado === 'cancelada') return 'cancelada';
+  if (f.envioRetenidoAt && f.estado !== 'terminada' && f.estado !== 'entregada') return 'por_confirmar_envio';
   const esperandoSegundaVisita = f.estado === 'incidencia' && Boolean(f.segundaVisitaPedidaAt) && !f.requiereHumano;
   if (!esperandoSegundaVisita && (f.estado === 'incidencia' || f.requiereHumano)) return 'necesita';
   if (f.ubicacionEstado === 'pendiente' && f.solicitud && ['supervision', 'derivado', 'incidencia', 'cancelado'].includes(f.solicitud.estado)) return 'necesita';
@@ -67,6 +70,10 @@ const plural = (n: number, una: string, varias: string): string => `${n} ${n ===
 /** En qué punto va, en una línea corta (lo largo ya lo dice `situacion`). */
 export function puntoDe(f: FilaEntrega, etapa: EtapaNumero, maxConfirmacion: number): string {
   switch (etapa) {
+    case 'por_confirmar_envio':
+      return grupoDe(f) === 'confirmar'
+        ? 'Por confirmar el envío: todavía no se le escribe. Al confirmar se le pregunta SÍ o NO (GSG ya tiene su dirección).'
+        : 'Por confirmar el envío: todavía no se le escribe. Al confirmar se le pide la ubicación.';
     case 'falta_pedir':
       if (f.ubicacionPropuestaLat != null) return 'Todavía no se le escribió: se le va a proponer la dirección de la última vez.';
       return 'Todavía no se le escribió: se le pide la ubicación en cuanto le toque.';
@@ -75,6 +82,10 @@ export function puntoDe(f: FilaEntrega, etapa: EtapaNumero, maxConfirmacion: num
       if (f.solicitud?.estado === 'respondio') return 'Contestó, pero todavía no manda su ubicación.';
       return `Se le pidió la ubicación (${plural(Math.max(1, f.solicitud?.intentos ?? 1), 'mensaje', 'mensajes')}); todavía no la manda.`;
     case 'falta_confirmar':
+      if (grupoDe(f) === 'confirmar') {
+        if (f.confirmacionEstado === 'pedida') return `GSG ya tiene su dirección. Se le preguntó SÍ o NO (${f.confirmacionIntentos} de ${maxConfirmacion}); falta su respuesta.`;
+        return 'GSG ya tiene su dirección: se le pregunta SÍ o NO en cuanto le toque.';
+      }
       if (f.confirmacionEstado === 'pedida') return `UBI REGISTRADA. Se le pidió confirmar (${f.confirmacionIntentos} de ${maxConfirmacion}); falta su SÍ.`;
       return 'UBI REGISTRADA; falta pedirle que confirme.';
     default:
@@ -90,6 +101,10 @@ export interface FilaNumero {
   direccion: string | null;
   distrito: string | null;
   etapa: EtapaNumero;
+  /** Qué se le manda: pedirle la ubicación, o solo preguntarle SÍ/NO (GSG ya tiene su dirección). */
+  grupo: 'ubicacion' | 'confirmar';
+  /** Espera que una persona confirme su envío. */
+  porConfirmar: boolean;
   punto: string;
   urgente: boolean;
   pausado: boolean;
@@ -97,6 +112,11 @@ export interface FilaNumero {
   contactadoPor: string | null;
   mismoCliente: string[];
   mapa: string | null;
+  /** Las coordenadas del pin, para enseñarlas junto al enlace del mapa. */
+  lat: number | null;
+  lng: number | null;
+  /** Quién lo lleva, si ya tiene motorizado. */
+  motorizado: string | null;
   /** El cliente ya mandó su ubicación: en pantalla sale como «UBI REGISTRADA». */
   ubiRegistrada: boolean;
 }
@@ -111,6 +131,8 @@ export function filaNumero(f: FilaEntrega, maxConfirmacion: number): FilaNumero 
     direccion: f.direccion,
     distrito: f.distrito,
     etapa,
+    grupo: grupoDe(f),
+    porConfirmar: etapa === 'por_confirmar_envio',
     punto: puntoDe(f, etapa, maxConfirmacion),
     urgente: f.prioridad === 'urgente',
     pausado: Boolean(f.mensajesPausadosAt),
@@ -118,17 +140,22 @@ export function filaNumero(f: FilaEntrega, maxConfirmacion: number): FilaNumero 
     contactadoPor: f.contactadoPor ?? null,
     mismoCliente: f.mismoCliente,
     mapa: f.lat != null && f.lng != null ? `https://maps.google.com/?q=${f.lat.toFixed(6)},${f.lng.toFixed(6)}` : null,
-    ubiRegistrada: f.ubicacionEstado === 'recibida',
+    lat: f.lat ?? null,
+    lng: f.lng ?? null,
+    motorizado: f.motorizado?.nombre ?? null,
+    // Solo si la mandó el cliente: a los de «falta confirmar» GSG ya les tenía la dirección.
+    ubiRegistrada: f.ubicacionEstado === 'recibida' && grupoDe(f) === 'ubicacion',
   };
 }
 
 // ------------------------------------------------------------- en masa
 
-export const ACCIONES_EN_MASA = ['pedir_ubicacion', 'pedir_confirmacion', 'marcar_contactado', 'quitar_marca', 'pausar', 'reanudar'] as const;
+export const ACCIONES_EN_MASA = ['confirmar_envio', 'pedir_ubicacion', 'pedir_confirmacion', 'marcar_contactado', 'quitar_marca', 'pausar', 'reanudar'] as const;
 export type AccionEnMasa = (typeof ACCIONES_EN_MASA)[number];
 
 /** Lo hecho, dicho en palabras: «Se pidió la ubicación a 12». */
 const HECHO: Record<AccionEnMasa, (n: number) => string> = {
+  confirmar_envio: (n) => `Envío confirmado a ${n}`,
   pedir_ubicacion: (n) => `Se pidió la ubicación a ${n}`,
   pedir_confirmacion: (n) => `Se pidió la confirmación a ${n}`,
   marcar_contactado: (n) => (n === 1 ? '1 quedó marcado como contactado' : `${n} quedaron marcados como contactados`),
@@ -137,6 +164,7 @@ const HECHO: Record<AccionEnMasa, (n: number) => string> = {
   reanudar: (n) => `Se reanudaron los mensajes automáticos a ${n}`,
 };
 const NADA: Record<AccionEnMasa, string> = {
+  confirmar_envio: 'No se confirmó el envío a ninguno',
   pedir_ubicacion: 'No se pidió la ubicación a ninguno',
   pedir_confirmacion: 'No se pidió la confirmación a ninguno',
   marcar_contactado: 'No se marcó ninguno',
@@ -158,6 +186,7 @@ const SALTADO: Record<Exclude<MotivoNumero, 'hecho'>, [string, string]> = {
   sin_marca: ['no tenía la marca', 'no tenían la marca'],
   ya_pausado: ['ya estaba en pausa', 'ya estaban en pausa'],
   no_pausado: ['no estaba en pausa', 'no estaban en pausa'],
+  no_retenido: ['ya estaba enviado (no esperaba confirmación)', 'ya estaban enviados (no esperaban confirmación)'],
   fallo: ['no se pudo poner en la cola (inténtalo otra vez en un momento)', 'no se pudieron poner en la cola (inténtalo otra vez en un momento)'],
 };
 
@@ -169,7 +198,7 @@ export function avisoEnPalabras(accion: AccionEnMasa, hechos: number, saltados: 
     partes.push(`${n} ${n === 1 ? una : varias} y ${n === 1 ? 'se saltó' : 'se saltaron'}`);
   }
   let texto = partes.join('; ') + '.';
-  if (hechos > 0 && (accion === 'pedir_ubicacion' || accion === 'pedir_confirmacion')) texto += ' Salen de uno en uno, con la pausa de siempre entre mensaje y mensaje.';
+  if (hechos > 0 && (accion === 'pedir_ubicacion' || accion === 'pedir_confirmacion' || accion === 'confirmar_envio')) texto += ' Salen de uno en uno, con la pausa de siempre entre mensaje y mensaje.';
   return texto;
 }
 
@@ -184,8 +213,12 @@ export interface ResultadoEnMasa {
 
 /** La accion de una entrega, repetida en bucle sobre todas. Una que falla no para a las demas. */
 export async function accionEnMasa(entregas: ServicioEntregas, accion: AccionEnMasa, ids: number[], quien: string): Promise<ResultadoEnMasa> {
-  const una = (id: number): Promise<ResultadoNumero> => {
+  const una = async (id: number): Promise<ResultadoNumero> => {
     switch (accion) {
+      case 'confirmar_envio': {
+        const r = await entregas.liberarEnvio([id], quien);
+        return { hecho: r.liberadas > 0, motivo: r.liberadas > 0 ? 'hecho' : 'no_retenido', entrega: null };
+      }
       case 'pedir_ubicacion':
         return entregas.pedirUbicacionAhora(id, quien);
       case 'pedir_confirmacion':
@@ -226,9 +259,19 @@ export async function registerNumerosRoutes(app: FastifyInstance, deps: { entreg
     const r = await entregas.resumen();
     const max = r.ajustes.confirmacionMaxIntentos;
     const numeros = r.entregas.map((f) => filaNumero(f, max));
-    const cifras: Record<EtapaNumero | 'todos', number> = { todos: numeros.length, falta_pedir: 0, falta_ubicacion: 0, falta_confirmar: 0, contactados: 0, necesita: 0, cancelada: 0 };
+    const cifras: Record<EtapaNumero | 'todos', number> = { todos: numeros.length, por_confirmar_envio: 0, falta_pedir: 0, falta_ubicacion: 0, falta_confirmar: 0, contactados: 0, necesita: 0, cancelada: 0 };
     for (const n of numeros) cifras[n.etapa]++;
-    return { dia: r.dia, numeros, cifras, etapas: ETAPAS, motor: r.motor, gsg: r.gsg ? { conectada: r.gsg.conectada, modo: r.gsg.modo } : null };
+    return { dia: r.dia, numeros, cifras, etapas: ETAPAS, porConfirmar: r.porConfirmarEnvio, confirmarListaGsg: r.ajustes.confirmarListaGsg !== false, motor: r.motor, gsg: r.gsg ? { conectada: r.gsg.conectada, modo: r.gsg.modo } : null };
+  });
+
+  /** «Confirmar y enviar a todos (N)» (o solo esos ids): lo que llegó de GSG pasa al reparto con el ritmo de siempre. */
+  app.post('/admin/entregas/confirmar-envio', async (request, reply) => {
+    const cuerpo = z
+      .object({ todos: z.boolean().optional(), ids: z.array(z.coerce.number().int().positive()).max(2000, 'Son demasiados de golpe: como mucho 2000.').optional() })
+      .safeParse(request.body ?? {});
+    if (!cuerpo.success) return reply.code(400).send({ error: cuerpo.error.issues[0]?.message ?? 'Faltan datos para confirmar el envío.' });
+    if (!cuerpo.data.todos && !cuerpo.data.ids?.length) return reply.code(400).send({ error: 'No hay ningún número seleccionado: marca al menos uno, o usa «Confirmar y enviar a todos».' });
+    return entregas.liberarEnvio(cuerpo.data.todos ? 'todos' : cuerpo.data.ids!, quienEs(request.usuario));
   });
 
   app.post('/admin/entregas/masa', async (request, reply) => {

@@ -41,6 +41,8 @@ export interface ItemMenu {
   avanzado?: boolean;
   /** Solo si la tienda usa la plantilla de entregas de courier (GSG): Hoy, Números del día, Motorizados, Mapa. */
   soloGsg?: boolean;
+  /** En modo gsg: la seccion plegada donde va (sin seccion = a la vista, arriba). */
+  seccion?: string;
 }
 
 export interface GrupoMenu {
@@ -103,22 +105,23 @@ export function gsgVigente(): boolean {
  */
 export const MENU_GSG: ItemMenu[] = [
   { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Un vistazo: tus procesos en curso, quién necesita a alguien, los mensajes de hoy y el número.' },
-  { id: 'procesos', etiqueta: 'Procesos', href: '/procesos', icono: 'flujo', descripcion: 'Lo que el sistema hace solo por WhatsApp con tus listas: pedir y validar datos, confirmar y recordar citas, avisar tareas al personal, recordar pagos. Crear desde una plantilla, editar los pasos y cargar personas.' },
-  { id: 'personas', etiqueta: 'Personas', href: '/personas', icono: 'contactos', descripcion: 'Todas las personas de tus procesos: en qué paso va cada una, quién necesita a alguien; pedir ahora, pausar o pasar a una persona.' },
-  { id: 'respuestas', etiqueta: 'Respuestas', href: '/respuestas', icono: 'lista', descripcion: 'Lo que respondió cada persona, paso por paso (DNI, ubicación, SÍ o NO, capturas), para revisar o exportar a Excel.' },
-  { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicación.' },
   { id: 'hoy', etiqueta: 'Hoy', href: '/hoy', icono: 'reloj', descripcion: 'Las entregas de hoy: a quién falta la ubicación o confirmar, quién las lleva, a qué hora llegan y qué necesita a alguien.', soloGsg: true },
-  { id: 'numeros', etiqueta: 'Números del día', href: '/numeros', icono: 'plantilla', descripcion: 'Todos los números que pasó GSG hoy: a quién falta pedirle la ubicación, quién no la manda, quién falta confirmar y quién ya está contactado; marcar uno, varios o todos y pedirles lo que falte.', soloGsg: true },
+  { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicación.' },
+  { id: 'ubicaciones', etiqueta: 'Ubicaciones registradas', href: '/numeros?etapa=contactados', icono: 'mapa', descripcion: 'Los clientes que ya mandaron su ubicación (o confirmaron): con su pin, su pedido y a qué motorizado va.', soloGsg: true },
   { id: 'motorizados', etiqueta: 'Motorizados', href: '/motorizados', icono: 'moto', descripcion: 'Quiénes reparten hoy: alta, zona, descanso y qué lleva cada uno.', soloGsg: true },
-  { id: 'mapa', etiqueta: 'Mapa del día', href: '/mapa', icono: 'mapa', descripcion: 'Dónde está cada pedido de hoy y cada motorizado, sobre el mapa.', soloGsg: true },
-  { id: 'guardados', etiqueta: 'Conversaciones guardadas', href: '/guardados', icono: 'historial', descripcion: 'Las conversaciones ya cerradas: buscarlas, leerlas, exportarlas y devolverlas al chat.' },
-  { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'El agente operativo: explica por qué se pide cada dato, reconoce lo que no es del trámite y lo pasa a una persona (nada de ventas); con qué IA trabaja y si está encendido.' },
-  { id: 'equipo', etiqueta: 'Equipo', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Las cuentas de quienes entran al sistema.', soloAdmin: true },
   { id: 'conexion', etiqueta: 'Conexión', href: '/setup', icono: 'enchufe', descripcion: 'El WhatsApp (QR o API de Meta) y el sistema de GSG.' },
-  { id: 'fiabilidad', etiqueta: 'Que todo funcione', href: '/fiabilidad', icono: 'salud', descripcion: 'El WhatsApp vigilado, la prueba de cada mañana, el cupo de hoy y la copia de seguridad.', soloAdmin: true },
   { id: 'ajustes', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario, avisos, modo prueba y qué se enseña.', soloAdmin: true },
-  { id: 'manual', etiqueta: 'Manual de uso', href: '/manual', icono: 'libro', descripcion: 'Qué hace cada pantalla y cómo se usa.' },
-  { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Si algo falla: qué mirar y qué datos mandar.' },
+  { id: 'numeros', seccion: 'Seguimiento', etiqueta: 'Números del día', href: '/numeros', icono: 'plantilla', descripcion: 'Todos los números que pasó GSG hoy: a quién falta pedirle la ubicación, quién no la manda, quién falta confirmar y quién ya está contactado; marcar uno, varios o todos y pedirles lo que falte.', soloGsg: true },
+  { id: 'procesos', seccion: 'Procesos', etiqueta: 'Procesos', href: '/procesos', icono: 'flujo', descripcion: 'Lo que el sistema hace solo por WhatsApp con tus listas: pedir y validar datos, confirmar y recordar citas, avisar tareas al personal, recordar pagos. Crear desde una plantilla, editar los pasos y cargar personas.' },
+  { id: 'personas', seccion: 'Procesos', etiqueta: 'Personas', href: '/personas', icono: 'contactos', descripcion: 'Todas las personas de tus procesos: en qué paso va cada una, quién necesita a alguien; pedir ahora, pausar o pasar a una persona.' },
+  { id: 'respuestas', seccion: 'Procesos', etiqueta: 'Respuestas', href: '/respuestas', icono: 'lista', descripcion: 'Lo que respondió cada persona, paso por paso (DNI, ubicación, SÍ o NO, capturas), para revisar o exportar a Excel.' },
+  { id: 'mapa', seccion: 'Seguimiento', etiqueta: 'Mapa del día', href: '/mapa', icono: 'mapa', descripcion: 'Dónde está cada pedido de hoy y cada motorizado, sobre el mapa.', soloGsg: true },
+  { id: 'guardados', seccion: 'Seguimiento', etiqueta: 'Conversaciones guardadas', href: '/guardados', icono: 'historial', descripcion: 'Las conversaciones ya cerradas: buscarlas, leerlas, exportarlas y devolverlas al chat.' },
+  { id: 'ia', seccion: 'Configuración', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'El agente operativo: explica por qué se pide cada dato, reconoce lo que no es del trámite y lo pasa a una persona (nada de ventas); con qué IA trabaja y si está encendido.' },
+  { id: 'equipo', seccion: 'Configuración', etiqueta: 'Equipo', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Las cuentas de quienes entran al sistema.', soloAdmin: true },
+  { id: 'fiabilidad', seccion: 'Configuración', etiqueta: 'Que todo funcione', href: '/fiabilidad', icono: 'salud', descripcion: 'El WhatsApp vigilado, la prueba de cada mañana, el cupo de hoy y la copia de seguridad.', soloAdmin: true },
+  { id: 'manual', seccion: 'Ayuda', etiqueta: 'Manual de uso', href: '/manual', icono: 'libro', descripcion: 'Qué hace cada pantalla y cómo se usa.' },
+  { id: 'soporte', seccion: 'Ayuda', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Si algo falla: qué mirar y qué datos mandar.' },
 ];
 
 /** Lo que solo ve el dueño del sistema (superadministrador), en el modo GSG. */
@@ -346,7 +349,7 @@ const CSS = `
   .s-buscar input:focus, .s-buscar input:focus-visible { border: 0; outline: 0; box-shadow: none; }
   .s-buscar kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; background: var(--s-kbd); border: 1px solid var(--s-line); border-radius: 5px; padding: 3px 5px; white-space: nowrap; }
   .s-grupo { margin-top: 2px; }
-  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font: 700 11.5px/1 inherit; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit; }
+  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11.5px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit; }
   .s-grupo-cab:hover { background: var(--s-hover); color: var(--s-text); }
   .s-grupo-cab .s-ico { width: 16px; height: 16px; transition: transform .15s; }
   .s-grupo-cab .s-ico { transform: rotate(90deg); }
@@ -624,7 +627,8 @@ const JS = String.raw`
   /* grupos: todos abiertos; el que se cierre a mano queda cerrado hasta que se vuelva a abrir */
   document.querySelectorAll('.s-grupo').forEach(function (g) {
     var id = g.getAttribute('data-grupo');
-    if (leer('s-grupo-' + id) === 'cerrado') g.classList.add('cerrado');
+    var guardado = leer('s-grupo-' + id);
+    if (guardado === 'cerrado' || (!guardado && g.hasAttribute('data-cerrado'))) g.classList.add('cerrado');
     g.querySelector('.s-grupo-cab').onclick = function () {
       g.classList.toggle('cerrado');
       guardar('s-grupo-' + id, g.classList.contains('cerrado') ? 'cerrado' : 'abierto');
@@ -1111,7 +1115,27 @@ export function appShell(opts: ShellOpts): string {
   const modo = opts.modo ?? modoVigente();
   const conGsg = gsgVigente();
   const arriba = MENU_ARRIBA.map((i) => itemHtml(i, false)).join('\n      ');
-  const menuGsg = MENU_GSG.filter((i) => conGsg || !i.soloGsg).map((i) => itemHtml(i, false)).join('\n      ');
+  // Sin la plantilla de GSG, los procesos son lo del día a día: van a la vista, justo después de Inicio.
+  const visiblesGsg = MENU_GSG.filter((i) => conGsg || !i.soloGsg)
+    .map((i) => (!conGsg && i.seccion === 'Procesos' ? { ...i, seccion: undefined } : i))
+    .sort((a, b) => (!conGsg ? Number(a.id !== 'inicio' && !['procesos', 'personas', 'respuestas'].includes(a.id)) - Number(b.id !== 'inicio' && !['procesos', 'personas', 'respuestas'].includes(b.id)) : 0));
+  // Lo del dia a dia a la vista (el chat, el envio automatico y los motorizados); lo demas, en secciones plegadas.
+  const secciones: string[] = [];
+  for (const i of visiblesGsg) if (i.seccion && !secciones.includes(i.seccion)) secciones.push(i.seccion);
+  const menuGsg = [
+    ...visiblesGsg.filter((i) => !i.seccion).map((i) => itemHtml(i, false)),
+    ...secciones.map((sec) => {
+      const items = visiblesGsg.filter((i) => i.seccion === sec);
+      // Sin la plantilla de GSG, los procesos son lo del dia a dia: esa seccion nace abierta.
+      const cerrada = !(sec === 'Procesos' && !conGsg);
+      return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}"${cerrada ? ' data-cerrado="1"' : ''}>
+        <button class="s-grupo-cab" type="button"><span>${escapeHtml(sec)}</span>${icono('chevron')}</button>
+        <div class="s-grupo-items">
+          ${items.map((i) => itemHtml(i, true)).join('\n          ')}
+        </div>
+      </div>`;
+    }),
+  ].join('\n      ');
   // El pie del celular: las cuatro pantallas del dia. Con las entregas de courier, las de siempre; si no, las de los procesos.
   const pieGsg = conGsg
     ? `<a class="s-nav-gsg" href="/hoy" data-ir="/hoy">${icono('moto')}<span>Hoy</span></a>
@@ -1124,13 +1148,13 @@ export function appShell(opts: ShellOpts): string {
       <a href="/chat" data-ir="/chat">${icono('chat')}<span>Chats</span></a>
       <a href="/personas" data-ir="/personas">${icono('contactos')}<span>Personas</span></a>
       <a href="/respuestas" data-ir="/respuestas">${icono('lista')}<span>Respuestas</span></a>`;
-  const dueno = `<div class="s-grupo" data-grupo="${MENU_GSG_DUENO.id}" data-solo-super-grupo="1">
+  const dueno = `<div class="s-grupo" data-grupo="${MENU_GSG_DUENO.id}" data-solo-super-grupo="1" data-cerrado="1">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_GSG_DUENO.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
           ${MENU_GSG_DUENO.items.map((i) => itemHtml(i, true)).join('\n          ')}
         </div>
       </div>`;
-  const desarrollador = `<div class="s-grupo" data-grupo="${MENU_DESARROLLADOR.id}" data-solo-admin-grupo="1">
+  const desarrollador = `<div class="s-grupo" data-grupo="${MENU_DESARROLLADOR.id}" data-solo-admin-grupo="1" data-cerrado="1">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_DESARROLLADOR.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
           ${MENU_DESARROLLADOR.items.map((i) => itemHtml(i, true)).join('\n          ')}

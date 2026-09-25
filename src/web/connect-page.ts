@@ -285,6 +285,35 @@ const CSS = `
 #gsg-resultado.bien { background: var(--verde-suave); color: var(--texto); }
 #gsg-resultado.mal { background: var(--rojo-suave); color: var(--texto); }
 #gsg-resultado.espera { background: var(--ambar-suave); color: var(--texto); }
+
+/* Arriba, lo unico que importa: dos tarjetas grandes, WhatsApp y GSG. */
+.wrap { max-width: 980px; }
+.con-resumen { display: grid; gap: var(--esp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-bottom: var(--esp-6); }
+.con-resumen.una { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+@media (max-width: 820px) { .con-resumen { grid-template-columns: minmax(0, 1fr); } }
+.con-card { padding: var(--esp-5); display: flex; flex-direction: column; gap: var(--esp-3); min-width: 0; }
+@media (max-width: 640px) { .con-card { padding: var(--esp-4); } }
+.con-cab { display: flex; align-items: center; gap: var(--esp-3); }
+.con-ico { flex: none; width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 24px; background: var(--primario-suave); }
+.con-tit { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.con-tit h2 { font-size: 20px; }
+.con-frase { font-size: 14.5px; color: var(--texto-suave); }
+.con-frase b { color: var(--texto); }
+.con-card .acciones { margin-top: 0; }
+.con-card #qr-box { text-align: center; }
+.con-card #qr-box .qr-marco { margin-top: 0; }
+.con-card #qr-box .bloque { text-align: left; }
+.con-card #gsg-estado .chip, .con-card #gsg-estado br { display: none; }
+.con-card #gsg-estado:empty { display: none; }
+.con-form { margin-top: 0; }
+.con-form > summary { font-size: 13.5px; padding: 4px 0; min-height: 0; }
+.con-form[open] > summary { margin-bottom: var(--esp-2); }
+.con-form #gsg-form { margin-top: 0; }
+.con-avanzado { margin-top: 0; border-top: 1px solid var(--borde); padding-top: var(--esp-2); }
+.con-avanzado > summary { display: flex; flex-direction: column; gap: 2px; color: var(--texto); padding: var(--esp-3) 0; }
+.con-avanzado > summary b { font-size: 15px; }
+.con-avanzado > summary .ayuda { font-weight: 400; }
+.con-avanzado[open] > summary { margin-bottom: var(--esp-3); }
 `;
 
 /* ------------------------------------------------------------------- html */
@@ -327,6 +356,69 @@ export function connectPage(opts: ConnectOpts): string {
 <div class="wrap">
 <div id="app" class="hidden">
 
+<div class="con-resumen${opts.conGsg ? '' : ' una'}">
+<section class="tarjeta con-card" id="card-wa">
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">💬</span><div class="con-tit"><h2>WhatsApp</h2><span id="wa-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <p class="con-frase" id="wa-frase">Revisando la conexión…</p>
+  <div id="qr-box" class="hidden">
+      <div class="qr-marco"><img id="qr-img" alt="Código QR para vincular WhatsApp"></div>
+      <p class="ayuda">En el teléfono: WhatsApp &rarr; Ajustes &rarr; Dispositivos vinculados &rarr;
+        Vincular un dispositivo. Si el código caduca, aquí sale otro solo.</p>
+      <div class="bloque">
+        <p class="ayuda">¿Sin cámara? Pide un código de ocho caracteres y tecléalo en
+          <b>Vincular con el número de teléfono</b>.</p>
+        <div class="acciones">
+          <input id="pair-phone" class="corto" inputmode="numeric" placeholder="51987654321"
+                 aria-label="Tu número con código de país">
+          <button class="btn" id="pair-ask" type="button">Pedir código</button>
+        </div>
+        <div id="pair-code" class="codigo hidden" role="status"></div>
+      </div>
+    </div>
+
+  <p class="ayuda" id="wa-estado" role="status"></p>
+  <div class="acciones">
+    <button class="btn primario hidden" id="wa-conectar" type="button">Conectar y mostrar el QR</button>
+    <a class="btn hidden" id="wa-chats" href="/chat">Ir a Chats</a>
+  </div>
+</section>
+${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <p class="con-frase" id="gsg-frase">De GSG llegan los pedidos del día, y a GSG le mandamos cada ubicación que registra el cliente.</p>
+  <div id="gsg-estado" class="ayuda">Cargando…</div>
+  <details class="con-form" id="gsg-form-caja"><summary id="gsg-form-resumen">Cambiar la dirección o la clave</summary>
+  <form id="gsg-form" novalidate>
+    <label class="campo" for="gsg-url">Dirección del sistema de GSG
+      <span class="hint">Te la dan sus programadores. Empieza por https://</span></label>
+    <input id="gsg-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.gsg.pe/v1">
+    <label class="campo" for="gsg-token">Clave de acceso (token)
+      <span class="hint" id="gsg-token-pista">También te la dan ellos. Se guarda cifrada y no se vuelve a mostrar.</span></label>
+    <div class="con-ojo">
+      <input id="gsg-token" type="password" autocomplete="off" spellcheck="false">
+      <button class="btn sm" id="gsg-token-ver" type="button" aria-controls="gsg-token" aria-pressed="false">Mostrar</button>
+    </div>
+    <div class="acciones">
+      <button class="btn secundario" id="gsg-guardar" type="submit">Guardar y probar</button>
+    </div>
+  </form>
+  </details>
+  <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
+  <div class="acciones">
+    <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
+    <button class="btn" id="gsg-simulador" type="button">Usar el simulador</button>
+    <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
+    <span id="gsg-state" class="chip hidden" role="status"></span>
+  </div>
+  <div id="gsg-descartes" class="nota riesgo hidden">
+    <b id="gsg-descartes-titulo"></b>
+    <p>GSG los mandó en su lista de hoy pero no se pudieron usar. Avísale para que los corrija; en cuanto los mande bien, entran solos.</p>
+    <ul id="gsg-descartes-lista"></ul>
+  </div>
+</section>
+` : ''}</div>
+
+<details class="con-avanzado" id="con-avanzado">
+  <summary><b>Opciones avanzadas</b><span class="ayuda">Otras formas de conectar (API de Meta, WAHA), prueba de envío y datos para programadores.</span></summary>
 <ol class="progreso" id="progreso" aria-label="Progreso de la conexión">
   <li data-paso="1"><span class="n">1</span><span class="t">Cómo</span></li>
   <li data-paso="2"><span class="n">2</span><span class="t">Datos</span></li>
@@ -405,22 +497,6 @@ export function connectPage(opts: ConnectOpts): string {
       <span id="fb-state" class="chip hidden" role="status"></span>
     </div>
 
-    <div id="qr-box" class="hidden">
-      <div class="qr-marco"><img id="qr-img" alt="Código QR para vincular WhatsApp"></div>
-      <p class="ayuda">En el teléfono: WhatsApp &rarr; Ajustes &rarr; Dispositivos vinculados &rarr;
-        Vincular un dispositivo. Si el código caduca, aquí sale otro solo.</p>
-      <div class="bloque">
-        <p class="ayuda">¿Sin cámara? Pide un código de ocho caracteres y tecléalo en
-          <b>Vincular con el número de teléfono</b>.</p>
-        <div class="acciones">
-          <input id="pair-phone" class="corto" inputmode="numeric" placeholder="51987654321"
-                 aria-label="Tu número con código de país">
-          <button class="btn" id="pair-ask" type="button">Pedir código</button>
-        </div>
-        <div id="pair-code" class="codigo hidden" role="status"></div>
-      </div>
-    </div>
-
     <div id="choice" class="hidden bloque">
       <h3>Elige el número</h3>
       <p class="ayuda">Tu cuenta tiene varios.</p>
@@ -467,36 +543,8 @@ ${
   <div class="acciones"><button class="btn primario" id="perfil-aplicar" type="button">Aplicar este perfil</button><span id="perfil-state" class="chip hidden" role="status"></span></div>
 </section>
 
-<section class="tarjeta paso" id="gsg">
-  <h2>El sistema de GSG</h2>
-  <p class="ayuda">De ahí salen cada día los pedidos, y ahí mandamos cada ubicación en cuanto el cliente la envía por WhatsApp.</p>
-  <div id="gsg-estado" class="ayuda">Cargando…</div>
-  <form id="gsg-form" novalidate>
-    <label class="campo" for="gsg-url">Dirección del sistema de GSG
-      <span class="hint">Te la dan sus programadores. Empieza por https://</span></label>
-    <input id="gsg-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.gsg.pe/v1">
-    <label class="campo" for="gsg-token">Clave de acceso (token)
-      <span class="hint" id="gsg-token-pista">También te la dan ellos. Se guarda cifrada y no se vuelve a mostrar.</span></label>
-    <div class="con-ojo">
-      <input id="gsg-token" type="password" autocomplete="off" spellcheck="false">
-      <button class="btn sm" id="gsg-token-ver" type="button" aria-controls="gsg-token" aria-pressed="false">Mostrar</button>
-    </div>
-    <div class="acciones">
-      <button class="btn primario" id="gsg-guardar" type="submit">Guardar y probar</button>
-    </div>
-    <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
-  </form>
-  <div class="acciones">
-    <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
-    <button class="btn" id="gsg-simulador" type="button">Usar el simulador</button>
-    <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
-    <span id="gsg-state" class="chip hidden" role="status"></span>
-  </div>
-  <div id="gsg-descartes" class="nota riesgo hidden">
-    <b id="gsg-descartes-titulo"></b>
-    <p>GSG los mandó en su lista de hoy pero no se pudieron usar. Avísale para que los corrija; en cuanto los mande bien, entran solos.</p>
-    <ul id="gsg-descartes-lista"></ul>
-  </div>
+<section class="tarjeta paso" id="gsg-avanzado">
+  <h2>GSG: herramientas</h2>
   <div class="bloque">
     <h3>Cada día</h3>
     <div class="acciones pegada">
@@ -575,6 +623,7 @@ ${
     <div class="copiar"><input id="hookToken" readonly><button class="btn" data-copy="hookToken" type="button">Copiar</button></div>
   </div>
 </details>
+</details>
 
 </div>
 </div>`;
@@ -618,6 +667,8 @@ function estado(id, t, tono) {
   if (!el) return;
   el.textContent = t;
   el.className = 'chip tono-' + (tono || 'verde');
+  /* Lo que pasa con la conexion se lee tambien en la tarjeta de WhatsApp de arriba. */
+  if (id === 'fb-state') { var wa = $('wa-estado'); if (wa) wa.textContent = t; }
 }
 function sinEstado(id) { var el = $(id); if (el) el.className = 'chip hidden'; }
 
@@ -706,8 +757,58 @@ function pintar() {
   pintarPaso2(paso);
   pintarPaso3(paso);
   pintarPaso4(paso);
+  pintarTarjetaWa();
   gestionarSondeo(paso);
 }
+
+/* --- la tarjeta de WhatsApp de arriba: conectado o el boton para el QR --- */
+function pintarTarjetaWa() {
+  var chip = $('wa-chip');
+  if (!chip) return;
+  var conectado = estaConectado();
+  var viaQr = !modo || esQr();
+  chip.className = 'chip tono-' + (conectado ? 'verde' : 'ambar');
+  chip.textContent = conectado ? 'Conectado' : 'Sin conectar';
+  $('wa-frase').innerHTML = conectado
+    ? 'Los mensajes de tus clientes entran y salen por tu número' + (modo === 'local' || modo === 'waha' ? ' (vinculado con el QR).' : ' (API oficial de Meta).')
+    : viaQr
+      ? (qr.imagen ? '<b>Escanea el código</b> con el teléfono: WhatsApp → Dispositivos vinculados → Vincular un dispositivo.' : 'Pulsa el botón y escanea el código con tu teléfono, como en WhatsApp Web.')
+      : 'Falta terminar la conexión con la API de Meta: sigue los pasos de «Opciones avanzadas».';
+  var boton = $('wa-conectar');
+  boton.textContent = viaQr ? 'Conectar y mostrar el QR' : 'Terminar la conexión';
+  ver('wa-conectar', !conectado && !(viaQr && qr.imagen));
+  ver('wa-chats', conectado);
+  if (conectado) { var wa = $('wa-estado'); if (wa && /Escanea|Abriendo|Esperando|Creando/.test(wa.textContent)) wa.textContent = ''; }
+}
+
+/* Abre «Opciones avanzadas» y lleva al paso que toca. */
+function abrirAvanzado(id) {
+  var det = $('con-avanzado');
+  if (det) det.open = true;
+  var el = $(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+$('wa-conectar').onclick = async function () {
+  var boton = this;
+  if (modo && !esQr()) { abrirAvanzado('paso' + pasoActual()); return; }
+  boton.disabled = true;
+  try {
+    /* Sin camino elegido, el de siempre: el QR en este mismo servidor. */
+    if (!modo) {
+      modo = 'local';
+      localStorage.setItem('waModo', modo);
+      qr = { conectado: false, imagen: '', parado: false };
+      if (guardado.provider !== 'local') await api('/admin/settings', { method: 'POST', body: { provider: 'local' } });
+      await cargar();
+    }
+    $('qr-connect').click();
+  } catch (error) {
+    estado('fb-state', error.message, 'rojo');
+  } finally {
+    boton.disabled = false;
+  }
+};
 
 /** Bloquea o abre una tarjeta y dice por que, fuera del cuerpo apagado. */
 function marcarPaso(id, paso, mio, motivo) {
@@ -1518,6 +1619,21 @@ async function cargarGsg() {
     var tono = g.modo === 'ninguna' ? 'rojo' : g.modo === 'simulador' ? 'azul' : 'verde';
     caja.innerHTML = '<span class="chip tono-' + tono + '">' + esc(g.descripcion) + '</span>' +
       (g.ultimaPrueba ? '<br><span class="ayuda">Última prueba: ' + esc(g.ultimaPrueba.detalle) + '</span>' : '');
+    /* La tarjeta de arriba: en que esta GSG, en palabras, y el formulario abierto solo si falta. */
+    var chipGsg = $('gsg-chip');
+    if (chipGsg) {
+      caja.classList.toggle('hidden', !g.ultimaPrueba);
+      chipGsg.className = 'chip tono-' + (g.modo === 'ninguna' ? 'ambar' : tono);
+      chipGsg.textContent = g.modo === 'real' ? 'Conectado' : g.modo === 'simulador' ? 'Simulador (pruebas)' : 'Sin conectar';
+      $('gsg-frase').innerHTML = g.modo === 'real'
+        ? 'Los pedidos del día entran solos, y cada ubicación registrada le llega a GSG.'
+        : g.modo === 'simulador'
+          ? 'Estás probando con pedidos ficticios. Cuando GSG te dé su <b>dirección</b> y su <b>clave</b>, ponlas aquí.'
+          : 'Falta la <b>dirección</b> del sistema de GSG y su <b>clave (token)</b>. Te las dan sus programadores.';
+      var cajaForm = $('gsg-form-caja');
+      if (cajaForm && g.modo === 'ninguna') cajaForm.open = true;
+      texto('gsg-form-resumen', g.modo === 'real' ? 'Cambiar la dirección o la clave' : 'Poner la dirección y la clave de GSG');
+    }
     ver('gsg-simulador', !(g.modo === 'simulador' || !r.simulador));
     ver('gsg-quitar', g.modo !== 'ninguna');
     ver('gsg-probar', g.modo !== 'ninguna');
@@ -1720,7 +1836,7 @@ if ($('gsg')) {
 
   return appShell({
     titulo: opts.conGsg ? 'Conexión' : 'Conexión de WhatsApp',
-    subtitulo: 'Cuatro pasos; el primero es el único que hay que pensar',
+    subtitulo: 'WhatsApp y GSG: si están conectados y qué falta',
     contenido,
     script,
     css: CSS,

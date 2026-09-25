@@ -192,7 +192,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
   function revisar(c: ClienteSimulado): void {
     if (c.estado !== 'pendiente') return;
     // Sin respuesta, con cambio, por reprogramar o cerrado por el dia: sigue pendiente (una persona lo coordina).
-    if (c.confirmacion && !c.confirmacion.confirmada && !['sin_respuesta', 'cambio', 'dia_cerrado', 'sin_plantilla', 'error_envio', 'reprogramar'].includes(c.confirmacion.motivo ?? '')) {
+    if (c.confirmacion && !c.confirmacion.confirmada && !['sin_respuesta', 'cambio', 'no_confirma', 'dia_cerrado', 'sin_plantilla', 'error_envio', 'reprogramar'].includes(c.confirmacion.motivo ?? '')) {
       c.estado = 'cancelado';
       c.terminadoEn = ahora().toISOString();
       return;

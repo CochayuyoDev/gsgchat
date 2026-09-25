@@ -10,8 +10,10 @@
  *   es necesaria. Hasta ahí llega la IA.»
  *
  * Mientras se espera el pin el cliente solo recibe: la explicación (si
- * pregunta por qué), UBI REGISTRADA (si manda el pin) o el cierre UNA vez con
- * el número (cualquier otra cosa). Después, silencio total por ese pedido. Lo
+ * pregunta por qué), UBI REGISTRADA con «¡Muchas gracias!» (si manda el pin)
+ * o el cierre UNA vez con el número (cualquier otra cosa). Si después del
+ * agradecimiento pregunta algo, el cierre UNA vez con el número del motorizado
+ * asignado. Después, silencio total por ese pedido. Lo
  * del motorizado sigue igual por dentro. Ningún texto del modelo sale nunca.
  */
 
@@ -31,6 +33,11 @@ function hoyALas9(): Date {
 
 const EXPLICACION = 'Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado.';
 const cierreCon = (numero: string) => `Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: ${numero}.`;
+/** '51999000007' → '+51 999 000 007' (como lo escribe el cierre). */
+const bonito = (tel: string) => {
+  const d = tel.replace(/\D/g, '').replace(/^51(?=\d{9}$)/, '');
+  return `+51 ${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+};
 
 async function armar(opts: { silencio?: boolean } = {}): Promise<EscenarioEntregas> {
   const e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
@@ -145,25 +152,34 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
     expect(e.textosA('987000004').slice(antes)).toEqual([cierreCon('+51 987 654 321')]);
   });
 
-  it('el pin: UBI REGISTRADA (sin SÍ/NO, con el número), y después NADA: ni «¿a qué hora llega?», ni la hora de llegada, ni «entregado»', async () => {
+  it('el pin: UBI REGISTRADA con «¡Muchas gracias!» (sin SÍ/NO ni cierre); «¿a qué hora llega?» → el cierre UNA vez con el número del MOTORIZADO ASIGNADO; después NADA', async () => {
     const antes = e.mensajesA('987000001').length;
     await e.contesta('987000001', { pin: PIN_LIMA });
     const nuevos = e.textosA('987000001').slice(antes);
     expect(nuevos).toHaveLength(1);
-    expect(nuevos[0]).toMatch(/^✅ Ubicación registrada correctamente\.\nhttps:\/\/\S+\n/);
-    expect(nuevos[0]).toContain(cierreCon('+51 987 654 321'));
+    expect(nuevos[0]).toMatch(/^✅ Ubicación registrada correctamente\.\nhttps:\/\/\S+\n\n¡Muchas gracias!\n/);
+    expect(nuevos[0]).not.toContain('no se reciben consultas');
     expect(nuevos[0]).not.toMatch(/SÍ o NO/);
-    const tras = e.mensajesA('987000001').length;
-    await e.contesta('987000001', { texto: '¿a qué hora llega?' });
-    expect(e.mensajesA('987000001')).toHaveLength(tras);
 
-    // Por dentro todo sigue: va a un motorizado, contesta los minutos, se entrega.
+    // Por dentro todo sigue: va a un motorizado.
     await e.trabajar();
     const fila = (await e.entrega('P-1001'))!;
     expect(fila.confirmacionEstado).toBe('no_hace_falta');
     expect(fila.motorizado?.phone).toBeTruthy();
     const moto = fila.motorizado!.phone;
     expect(e.textosA(moto).join('\n')).toContain('P-1001');
+
+    // Pregunta después del agradecimiento: el cierre con el número de SU motorizado, y pasa a una persona.
+    const a = e.textosA('987000001').length;
+    await e.contesta('987000001', { texto: '¿a qué hora llega?' });
+    expect(e.textosA('987000001').slice(a)).toEqual([cierreCon(bonito(moto))]);
+    const solicitud = await e.repos.rutas.abiertaPorTelefono(conPais('987000001'));
+    if (solicitud) expect(solicitud.requiereHumano).toBe(true);
+    const tras = e.mensajesA('987000001').length;
+    await e.contesta('987000001', { texto: 'hola?' });
+    expect(e.mensajesA('987000001')).toHaveLength(tras);
+
+    // Contesta los minutos, se entrega: al cliente nada más.
     await e.contesta(moto, { texto: '40' });
     const avisada = (await e.entrega('P-1001'))!;
     expect(avisada.llegaAproxAt).not.toBeNull();
@@ -235,6 +251,50 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
     await e.contesta('999111500', { texto: 'hola, ¿quién me va a traer mi pedido?' });
     await e.contesta('999111500', { texto: '¿por qué me piden la ubicación?' });
     expect(e.textosA('999111500').filter((t) => /no se reciben consultas|Es necesaria para calcular/.test(t))).toEqual([]);
+  });
+
+  it('con el bot en pausa (una persona escribió en el chat), el pin que el sistema pidió igual recibe UBI REGISTRADA (caso real del 25/09)', async () => {
+    const creado = await e.entregas.crearAMano({ referencia: 'P-PAUSA-1', telefono: '999111600', nombre: 'Luis', faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
+    expect(creado.ok).toBe(true);
+    await e.trabajar();
+    const antes = e.textosA('999111600').length;
+    expect(antes).toBeGreaterThan(0);
+    const c = (await e.repos.contacts.getByPhone(conPais('999111600')))!;
+    await e.repos.contacts.pausarBot(c.id, true, new Date());
+    // Con la pausa, un texto sigue sin respuesta...
+    await e.contesta('999111600', { texto: 'ya te mando' });
+    expect(e.textosA('999111600').slice(antes)).toEqual([]);
+    // ...pero el pin se registra y se contesta.
+    await e.contesta('999111600', { pin: PIN_LIMA });
+    const nuevos = e.textosA('999111600').slice(antes);
+    expect(nuevos).toHaveLength(1);
+    expect(nuevos[0]).toMatch(/^✅ Ubicación registrada correctamente\./);
+    expect(nuevos[0]).toContain('¡Muchas gracias!');
+    expect(nuevos[0]).not.toContain('no se reciben consultas');
+  });
+
+  it('sin motorizado: el pedido queda «necesita a alguien», y cuando aparece uno se le asigna SOLO y deja de ser incidencia (caso real del 25/09)', async () => {
+    const motos = await e.entregas.motorizados();
+    const activos = motos.filter((m) => m.estado === 'activo');
+    for (const m of activos) await e.entregas.editarMotorizado(m.id, { estado: 'descanso' });
+    const creado = await e.entregas.crearAMano({ referencia: 'P-SINMOTO-1', telefono: '999111700', nombre: 'Sin moto', faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
+    expect(creado.ok).toBe(true);
+    await e.trabajar();
+    await e.contesta('999111700', { pin: PIN_LIMA });
+    await e.trabajar();
+    let fila = (await e.entrega('P-SINMOTO-1'))!;
+    expect(fila.estado).toBe('incidencia');
+    expect(fila.incidencia).toBe('sin_motorizado');
+    // Vuelve un motorizado: a los pocos minutos el motor se la asigna solo.
+    await e.entregas.editarMotorizado(activos[0]!.id, { estado: 'activo' });
+    e.avanzar(3);
+    await e.trabajar();
+    fila = (await e.entrega('P-SINMOTO-1'))!;
+    expect(fila.estado).toBe('esperando_motorizado');
+    expect(fila.incidencia).toBeNull();
+    expect(fila.requiereHumano).toBe(false);
+    expect(fila.motorizadoId).toBe(activos[0]!.id);
+    for (const m of activos.slice(1)) await e.entregas.editarMotorizado(m.id, { estado: 'activo' });
   });
 
   it('el silencio es por pedido: un pedido nuevo del mismo cliente lo vuelve a abrir', async () => {

@@ -111,7 +111,18 @@ export async function cargarLote(deps: DepsCarga, body: CargaLote): Promise<Resu
     // Si ya se le esta pidiendo la ubicacion en otro lote que no termino,
     // no se abre una segunda conversacion por lo mismo: se aparta para
     // que una persona decida (reintentar desde la ficha la vuelve a la cola).
-    const abierta = await repos.rutas.abiertaPorTelefono(solicitud.phone, lote.id);
+    let abierta = await repos.rutas.abiertaPorTelefono(solicitud.phone, lote.id);
+    // Una solicitud de OTRO DIA que quedo abierta no bloquea el pedido de hoy:
+    // se cierra como reemplazada y el nuevo sale (paso con un numero real: un
+    // pedido de prueba viejo apartaba cada pedido nuevo como incidencia).
+    const diaLima = (d: Date | string | null | undefined) =>
+      d ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d)) : '';
+    // (Una en «supervision» —el cliente dijo «no soy yo»— sí sigue bloqueando: eso lo decide una persona.)
+    if (abierta && abierta.estado !== 'supervision' && abierta.createdAt && diaLima(abierta.createdAt) < diaLima(new Date())) {
+      await repos.rutas.actualizarSolicitud(abierta.id, { estado: 'cancelado', incidenciaDetalle: `reemplazada por un pedido nuevo${solicitud.referencia ? ` (${solicitud.referencia})` : ''}` });
+      await repos.rutas.registrarEvento(abierta.id, 'incidencia', 'llegó un pedido nuevo para este número: esta solicitud de otro día se cierra').catch(() => undefined);
+      abierta = null;
+    }
     if (abierta && ['pendiente', 'enviado', 'respondio', 'supervision'].includes(abierta.estado)) {
       await repos.rutas.actualizarSolicitud(solicitud.id, {
         estado: 'incidencia',

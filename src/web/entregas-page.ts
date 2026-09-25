@@ -22,103 +22,91 @@ import { estadosVisualesJs } from './estados-visuales.js';
 const CSS = `
   /* Hoy usa la paleta y la escala del armazon (--superficie, --texto, --verde...)
      y sus clases compartidas (.btn, .tarjeta, .chip, .vacio): aqui solo va lo
-     que es propio de esta pantalla. */
+     que es propio de esta pantalla. Tres niveles y nada mas: la franja de
+     estado, lo que toca hacer (la lista de GSG y las cuatro cifras) y la
+     lista de pedidos. Lo tecnico, plegado al final. */
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--esp-5); }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
   .hidden { display: none !important; }
-  .aviso { background: var(--ambar-suave); border: 1px solid var(--ambar); border-radius: var(--radio); padding: 12px 14px; margin-bottom: var(--esp-3); font-size: var(--fs-cuerpo); }
+  .aviso { background: var(--ambar-suave); border: 1px solid var(--ambar); border-radius: var(--radio); padding: 12px 14px; font-size: var(--fs-cuerpo); }
   .aviso b { color: var(--ambar); }
   .aviso.malo { background: var(--rojo-suave); border-color: var(--rojo); }
   .aviso.malo b { color: var(--rojo); }
+  /* El armazon ya dice «Demostración» arriba; solo se repite donde lo esconde. */
+  .aviso.demo { display: none; padding: 8px 14px; text-align: center; font-size: var(--fs-small); }
+  @media (max-width: 960px) { .aviso.demo { display: block; } }
 
-  /* Los botones los da .btn del armazon; aqui solo los campos. */
   select, input, textarea { font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px; width: 100%; }
   textarea { min-height: 70px; resize: vertical; }
   label { display: block; font-size: var(--fs-small); color: var(--texto-suave); margin: 10px 0 4px; }
   label.linea { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; color: var(--texto); font-size: var(--fs-cuerpo); cursor: pointer; line-height: 1.4; }
   label.linea input { width: 18px; height: 18px; margin: 1px 0 0; flex: none; accent-color: var(--primario); }
 
-  /* --- la tira de estado: WhatsApp, GSG, motorizados, cierre --------------- */
-  .estado-tira { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--esp-3); margin-bottom: var(--esp-3); align-items: start; }
-  .estado-tira .semaforo { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px 14px; font-size: 13.5px; box-shadow: var(--sombra); display: flex; flex-direction: column; gap: 6px; }
-  .estado-tira .semaforo b { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--texto-suave); }
-  .punto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--gris); margin-right: 6px; vertical-align: middle; flex: none; }
+  /* --- 1. la franja de estado: una linea ----------------------------------- */
+  .franja { display: flex; align-items: center; gap: 6px 18px; flex-wrap: wrap; background: var(--superficie); border: 1px solid var(--borde); border-radius: 999px; padding: 8px 8px 8px 18px; font-size: 14px; box-shadow: var(--sombra); }
+  .franja .item { display: inline-flex; align-items: center; white-space: nowrap; }
+  .franja .item a { color: inherit; text-decoration: underline; text-decoration-color: var(--borde); }
+  .franja .sep { flex: 1; }
+  .franja .btn { border-radius: 999px; }
+  .punto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--gris-claro); margin-right: 8px; vertical-align: middle; flex: none; }
   .punto.ok { background: var(--verde); } .punto.warn { background: var(--ambar); } .punto.bad { background: var(--rojo); } .punto.info { background: var(--azul); }
 
-  /* --- las cifras del dia: tarjetas del armazon que ademas filtran --------- */
-  .tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--esp-2); margin-bottom: var(--esp-3); }
-  .cifra { padding: 10px 12px; min-height: 62px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
-  .cifra:hover { border-color: var(--primario); }
-  .cifra[aria-pressed="true"] { border-color: var(--primario); box-shadow: 0 0 0 2px var(--primario-suave); background: var(--primario-suave); }
-  .cifra .n { font-size: 22px; font-weight: 800; line-height: 1.1; letter-spacing: -.01em; }
-  .cifra .q { font-size: var(--fs-small); color: var(--texto-suave); margin-top: 2px; line-height: 1.3; }
-  .cifra.ok .n { color: var(--verde); } .cifra.warn .n { color: var(--ambar); } .cifra.bad .n { color: var(--rojo); } .cifra.info .n { color: var(--azul); }
-  .mas-cifras { grid-column: 1 / -1; min-width: 0; }
-  .mas-cifras > summary { color: var(--texto-suave); font-size: 13px; cursor: pointer; padding: 4px 2px; }
-  .mas-cifras .tarjetas { margin: 8px 0 0; }
+  /* --- 2a. llego la lista de GSG ------------------------------------------- */
+  .llegada { background: var(--superficie); border: 1px solid var(--borde); border-left: 5px solid var(--ambar); border-radius: var(--radio); padding: 20px 22px; display: flex; gap: 16px 24px; align-items: center; flex-wrap: wrap; box-shadow: var(--sombra-2); }
+  .llegada .txt { flex: 1 1 320px; min-width: 0; }
+  .llegada h2 { margin: 0 0 10px; font-size: 21px; line-height: 1.25; letter-spacing: -.01em; }
+  .llegada .grupos { display: flex; gap: 8px; flex-wrap: wrap; }
+  .llegada .grupo { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--superficie-2); font-weight: 600; font-size: 14px; }
+  .llegada .acc { display: flex; flex-direction: column; gap: 8px; align-items: stretch; min-width: 240px; }
+  .llegada .btn.primario { min-height: 50px; font-size: 16px; font-weight: 700; padding: 12px 24px; }
+  .llegada .acc a { text-align: center; font-size: 13.5px; }
 
-  .explica { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px 16px; margin-bottom: var(--esp-3); }
-  .explica > summary { color: var(--texto-suave); font-size: 13.5px; cursor: pointer; }
-  .explica .texto { margin-top: 8px; }
-  .explica .texto p { margin: 0 0 6px; }
-  .explica .pasos { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-  .explica .paso { background: var(--superficie-2); border-radius: 999px; padding: 3px 10px; font-size: var(--fs-small); }
+  /* --- 2b. el embudo: cuatro cifras que filtran ---------------------------- */
+  .embudo { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--esp-4); }
+  .paso-cifra { position: relative; text-align: left; font: inherit; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 18px 18px 16px; cursor: pointer; box-shadow: var(--sombra); transition: border-color .12s, box-shadow .12s, background .12s; min-width: 0; }
+  .paso-cifra:hover { border-color: var(--primario); }
+  .paso-cifra:focus-visible { outline: 2px solid var(--primario); outline-offset: 2px; }
+  .paso-cifra[aria-pressed="true"] { border-color: var(--primario); box-shadow: 0 0 0 3px var(--primario-suave); }
+  .paso-cifra .num { display: block; font-size: 36px; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .paso-cifra .nom { display: block; font-size: 15px; font-weight: 600; margin-top: 10px; }
+  .paso-cifra .pista { display: block; font-size: var(--fs-small); color: var(--texto-suave); margin-top: 2px; }
+  .paso-cifra .n-paso { position: absolute; top: 14px; right: 16px; font-size: 12px; font-weight: 700; color: var(--texto-suave); }
+  .paso-cifra.ambar .num { color: var(--ambar); } .paso-cifra.verde .num { color: var(--verde); } .paso-cifra.azul .num { color: var(--azul); }
+  .paso-cifra.cero .num { color: var(--gris-claro); }
+  .paso-cifra.rojo { border-color: var(--rojo); background: var(--rojo-suave); }
+  .paso-cifra.rojo .num, .paso-cifra.rojo .nom { color: var(--rojo); }
+  /* La flecha entre paso y paso: se lee como un camino. */
+  .embudo .paso-cifra:not(:last-child)::after { content: ''; position: absolute; right: -12px; top: 50%; width: 8px; height: 8px; border-top: 2px solid var(--gris-claro); border-right: 2px solid var(--gris-claro); transform: translateY(-50%) rotate(45deg); }
 
-  /* --- las dos columnas: la tabla y lo de al lado -------------------------- */
-  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: var(--esp-3); align-items: start; }
-  /* Sin sitio para dos columnas: la tabla a lo ancho y, debajo, "Necesitan a alguien" y "Otros" lado a lado; lo secundario al final. */
-  @media (max-width: 1500px) {
-    .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 var(--esp-3); align-items: start; }
-    .wrap > *, .cols .caja { grid-column: 1 / -1; }
-    .cols, .cols > div { display: contents; }
-    .wrap > .aviso, .wrap > .cartel-prueba { order: 0; }
-    .tira-resumen { order: 1; }
-    #tira { order: 2; }
-    #tarjetas { order: 3; }
-    #como-funciona { order: 4; }
-    #caja-pedidos { order: 5; }
-    #caja-alguien { order: 6; grid-column: 1; }
-    #caja-otros { order: 6; grid-column: 2; }
-    #caja-ajustes { order: 7; }
-    #caja-sim { order: 8; }
-    #caja-eventos { order: 9; }
-  }
-  @media (max-width: 900px) { #caja-alguien, #caja-otros { grid-column: 1 / -1; } }
-  .caja { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); overflow: hidden; margin-bottom: var(--esp-3); box-shadow: var(--sombra); }
-  .caja > h2 { font-size: var(--fs-h3); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .caja > h2 .sep { flex: 1; }
-  /* Lo secundario del titulo (la fecha, el recuento, la ayuda) va pequeño y sin negrita. */
-  .caja > h2 .muted { font-weight: 400; font-size: var(--fs-small); }
-  .caja .cuerpo { padding: 14px; }
-  .caja.plegable > h2 { cursor: pointer; }
-  .caja.plegable > h2::after { content: ''; width: 8px; height: 8px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(45deg); margin: 0 4px 4px 2px; transition: transform .15s; }
-  .caja.plegable.cerrada > h2::after { transform: rotate(-45deg); margin-bottom: 0; }
-  .caja.plegable.cerrada .cuerpo { display: none; }
-
-  /* --- la tabla de pedidos ------------------------------------------------- */
-  .tabla-scroll { overflow: auto; max-height: 70vh; }
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  .tabla-scroll table { min-width: 980px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; position: sticky; top: 0; background: var(--superficie); z-index: 1; }
-  tr:last-child td { border-bottom: 0; }
-  #filas > tr:hover > td { background: var(--superficie-2); }
-  #filas > tr > td:first-child { min-width: 230px; }
-  #filas > tr > td:last-child { min-width: 250px; }
-  td .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 3px; line-height: 1.35; }
-  .chip + .sub, .chip + div.sub { margin-top: 4px; }
-  /* El nombre manda; justo debajo, en que paso va; al final, sus datos. */
-  .quien { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
-  .en-que-va { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 5px 0 2px; }
-  .en-que-va .sub { margin: 0; }
-  .telefono { white-space: nowrap; }
-  .acciones { display: flex; gap: 4px; flex-wrap: wrap; }
+  /* --- 3. la lista de pedidos ---------------------------------------------- */
+  .lista-cab { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: var(--esp-3); }
+  .lista-cab h2 { margin: 0; font-size: var(--fs-h2); }
+  .lista-cab h2 .muted { font-weight: 400; font-size: var(--fs-small); }
+  .lista-cab .sep { flex: 1; }
+  #buscar { width: 240px; }
+  .filtro-activo { display: inline-flex; align-items: center; gap: 8px; margin-bottom: var(--esp-3); padding: 5px 6px 5px 12px; border-radius: 999px; background: var(--primario-suave); color: var(--texto); font-size: 13.5px; }
+  .filtro-activo button { font: inherit; font-size: 13px; border: 0; background: var(--superficie); color: var(--primario); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .pedidos { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); overflow: hidden; }
+  .fila { display: grid; grid-template-columns: minmax(0, 2fr) 150px 200px minmax(0, 1.4fr) 76px; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--borde); }
+  .fila:last-child { border-bottom: 0; }
+  .fila.cab { padding-top: 10px; padding-bottom: 10px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; background: var(--superficie-2); }
+  .fila.urgente { box-shadow: inset 3px 0 0 var(--rojo); }
+  .fila .quien b { font-size: 15px; }
+  .fila .sub, .ficha .sub { color: var(--texto-suave); font-size: var(--fs-small); line-height: 1.35; margin-top: 2px; }
+  .fila .tel { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 14px; }
+  .fila .paso .chip { font-size: 13px; }
+  .fila .mot { font-size: 14px; min-width: 0; }
+  .fila .ver { justify-self: end; }
+  .marca { margin-left: 6px; }
+  .ficha { padding: 14px 18px 16px; background: var(--superficie-2); border-bottom: 1px solid var(--borde); }
+  .ficha .pasos-ficha { display: flex; gap: 8px 18px; flex-wrap: wrap; margin: 0 0 10px; font-size: 13px; align-items: center; }
+  .ficha .pasos-ficha > span { display: inline-flex; gap: 6px; align-items: center; }
+  .acciones { display: flex; gap: 6px; flex-wrap: wrap; }
   .acciones-detalle { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
   .situacion-larga { font-size: 13.5px; margin: 0 0 10px; padding: 8px 10px; background: var(--superficie); border-radius: var(--radio-sm); border: 1px solid var(--borde); }
-  tr.fila-urgente > td:first-child { box-shadow: inset 3px 0 0 var(--rojo); }
-  .fila-detalle td { background: var(--superficie-2); }
+  .nada { color: var(--texto-suave); font-size: 13.5px; text-align: center; padding: 18px 8px; }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
 
   /* Una linea de bitacora: lo ultimo que paso y los casos de "necesitan a alguien". */
@@ -128,20 +116,67 @@ const CSS = `
   .mov .que { flex: 1; line-height: 1.45; }
   .mov .que b { font-weight: 600; }
   .mov-acciones { margin-top: 6px; }
-  /* "Aqui no hay nada", en corto: vale dentro de una caja y como celda de tabla. */
-  .nada { color: var(--texto-suave); font-size: 13.5px; text-align: center; padding: 14px 8px; }
-  .celda-ancha { padding: 14px; }
   .bitacora { max-height: 40vh; overflow: auto; }
+
+  /* Los que necesitan a alguien y no tienen pedido hoy: solo si hay. */
+  .alguien { background: var(--superficie); border: 1px solid var(--rojo); border-radius: var(--radio); padding: 14px 18px; }
+  .alguien h3 { margin: 0 0 4px; font-size: 15px; color: var(--rojo); }
+  .alguien .caso { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--borde); }
+  .alguien .caso:last-child { border-bottom: 0; padding-bottom: 0; }
+  .alguien .caso .que { flex: 1 1 320px; min-width: 0; font-size: 14px; }
+  .alguien .caso .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 2px; overflow-wrap: anywhere; }
+
+  /* --- lo de pegar la lista ------------------------------------------------ */
+  #caja-pegar { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 16px 18px; margin-bottom: var(--esp-3); box-shadow: var(--sombra); }
+  #caja-pegar textarea { min-height: 120px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  #caja-pegar .opciones { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .marcas { display: flex; gap: 14px; flex-wrap: wrap; }
+  .marcas label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--texto); font-size: 13.5px; cursor: pointer; }
+  .marcas input { width: 16px; height: 16px; accent-color: var(--primario); }
+  #pegar-previa { min-height: 20px; margin: 6px 0; font-size: 13px; }
+  .cartel-prueba { background: var(--azul-suave); border: 1px solid var(--azul); border-radius: var(--radio); padding: 10px 14px; font-size: var(--fs-cuerpo); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .cartel-prueba b { color: var(--azul); }
+  .cartel-prueba .sep { flex: 1; }
+
+  /* --- al final: plegables (detalles de la conexion y ajustes) ------------- */
+  .plegable { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); }
+  .plegable > summary { cursor: pointer; padding: 14px 18px; font-weight: 600; font-size: 15px; list-style: none; display: flex; align-items: center; gap: 10px; }
+  .plegable > summary::-webkit-details-marker { display: none; }
+  .plegable > summary::after { content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(45deg); transition: transform .15s; }
+  .plegable[open] > summary::after { transform: rotate(-135deg); }
+  .plegable > summary .muted { font-weight: 400; font-size: var(--fs-small); }
+  .plegable .dentro { padding: 0 18px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .bloque { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; min-width: 0; }
+  .bloque > b { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--texto-suave); margin-bottom: 6px; }
+  .bloque .acciones { margin-top: 8px; }
+  .bloques { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .bloque > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  .bloque > summary .muted { font-weight: 400; font-size: var(--fs-small); }
+  .bloque[open] > summary { margin-bottom: 8px; }
+  .cifras-todas { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cifras-todas button { font: inherit; font-size: 13px; border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+  .cifras-todas button b { margin-left: 4px; }
+  .cifras-todas button[aria-pressed="true"] { border-color: var(--primario); background: var(--primario-suave); }
+  .gsg-cola { margin-top: 2px; font-size: var(--fs-small); }
+  .gsg-cola.mal { color: var(--rojo); }
+  .explica .pasos { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .explica .paso { background: var(--superficie-2); border-radius: 999px; padding: 3px 10px; font-size: var(--fs-small); }
+  .explica p { margin: 0 0 6px; font-size: 13.5px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; }
+  tr:last-child td { border-bottom: 0; }
+  td .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 3px; }
+  td.nada { text-align: center; }
 
   /* --- el simulador -------------------------------------------------------- */
   .sim-lista { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
-  @media (max-width: 700px) { .sim-lista { grid-template-columns: 1fr; } }
   .sim-lista .col { background: var(--superficie-2); border-radius: var(--radio-sm); padding: 8px 10px; font-size: var(--fs-small); min-height: 60px; }
   .sim-lista .col b { display: block; margin-bottom: 4px; }
   .sim-lista .col div { padding: 2px 0; }
   .sim-grupo { margin-top: 10px; }
   .sim-grupo > b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); margin-bottom: 6px; }
-  .sim-grupo .fila { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .sim-grupo .fila-sim { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .sim-pasos { margin: 8px 0 0; padding-left: 30px; font-size: 13px; max-height: 280px; overflow: auto; }
   .sim-pasos li { margin: 3px 0; }
   .sim-pasos li b { display: inline-block; width: 14px; }
@@ -150,11 +185,13 @@ const CSS = `
   .sim-pasos .paso-haciendo b { color: var(--ambar); }
   .sim-pasos .paso-saltado b { color: var(--texto-suave); }
 
-  /* --- los ajustes --------------------------------------------------------- */
+  /* --- los ajustes de los mensajes ---------------------------------------- */
+  #caja-ajustes .cab-aj { display: flex; align-items: center; gap: 10px; padding: 14px 18px; }
+  #caja-ajustes .cab-aj h2 { margin: 0; font-size: 15px; }
+  #caja-ajustes .cab-aj .sep { flex: 1; }
   .ajuste-fila { display: grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: center; margin: 6px 0; font-size: var(--fs-cuerpo); }
   .ajuste-fila.ancha { grid-template-columns: 1fr 220px; }
   .grupos-aj { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  @media (max-width: 1100px) { .grupos-aj { grid-template-columns: 1fr; } }
   .grupo-aj { border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); padding: 12px 14px; min-width: 0; }
   .grupo-aj.ancho { margin-top: 12px; }
   .grupo-aj h3 { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
@@ -163,85 +200,53 @@ const CSS = `
   .grupo-aj > summary .muted { font-weight: 400; font-size: 12.5px; }
   .textos-para { margin: 14px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); }
   .texto-editable { margin-top: 10px; }
-  .guardar-aj { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .guardar-aj { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .previa { margin-top: 4px; font-size: var(--fs-small); }
   .previa a { cursor: pointer; }
-  /* «Lo que ve el cliente al mandar su ubicación»: horario, soporte y el mensaje tal cual le llega. */
-.ajuste-fila.tel { grid-template-columns: 1fr 150px; }
-.ajuste-fila .pista-fila { display: block; color: var(--texto-suave); font-size: 12px; font-weight: 400; margin-top: 2px; }
-.burbuja-cliente { margin-top: 10px; }
-.burbuja-cliente .titulo-burbuja { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 12.5px; font-weight: 600; color: var(--texto-suave); margin-bottom: 4px; }
-.burbuja-cliente .sin-guardar { color: var(--ambar); font-weight: 600; }
-.burbuja-cliente .burbuja { background: var(--verde-suave); border: 1px solid var(--borde); border-radius: 10px 10px 10px 2px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--texto); min-height: 3em; }
-.previa .resultado { display: block; margin-top: 4px; padding: 6px 8px; background: var(--superficie-2); border-radius: var(--radio-sm); color: var(--texto-suave); white-space: pre-wrap; }
+  .ajuste-fila.tel { grid-template-columns: 1fr 150px; }
+  .ajuste-fila .pista-fila { display: block; color: var(--texto-suave); font-size: 12px; font-weight: 400; margin-top: 2px; }
+  .burbuja-cliente { margin-top: 10px; }
+  .burbuja-cliente .titulo-burbuja { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 12.5px; font-weight: 600; color: var(--texto-suave); margin-bottom: 4px; }
+  .burbuja-cliente .sin-guardar { color: var(--ambar); font-weight: 600; }
+  .burbuja-cliente .burbuja { background: var(--verde-suave); border: 1px solid var(--borde); border-radius: 10px 10px 10px 2px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--texto); min-height: 3em; }
+  .previa .resultado { display: block; margin-top: 4px; padding: 6px 8px; background: var(--superficie-2); border-radius: var(--radio-sm); color: var(--texto-suave); white-space: pre-wrap; }
 
-  /* --- pegar la lista del dia y el modo prueba ----------------------------- */
-  .cartel-prueba { background: var(--azul-suave); border: 1px solid var(--azul); border-radius: var(--radio); padding: 10px 14px; margin-bottom: var(--esp-3); font-size: var(--fs-cuerpo); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .cartel-prueba b { color: var(--azul); }
-  .cartel-prueba .sep { flex: 1; }
-  #caja-pegar { padding: 0 14px 12px; }
-  #caja-pegar textarea { min-height: 120px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
-  #caja-pegar .opciones { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
-  .marcas { display: flex; gap: 14px; flex-wrap: wrap; }
-  .marcas label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--texto); font-size: 13.5px; cursor: pointer; }
-  .marcas input { width: 16px; height: 16px; accent-color: var(--primario); }
-  #pegar-previa { min-height: 20px; margin: 6px 0; font-size: 13px; }
-  .gsg-cola { margin-top: 2px; font-size: var(--fs-small); }
-  .gsg-cola.mal { color: var(--rojo); }
-  #buscar { width: 240px; }
-
-  .tira-resumen { display: none; }
-
-  /* --- en el celular: primero lo que necesita a alguien, luego los pedidos; la tira plegada en una linea; cada pedido una tarjeta --- */
+  @media (max-width: 1100px) {
+    .grupos-aj, .bloques { grid-template-columns: 1fr; }
+    .fila { grid-template-columns: minmax(0, 2fr) 140px 180px minmax(0, 1.2fr) 70px; gap: 10px; }
+  }
+  @media (max-width: 900px) {
+    .embudo { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--esp-3); }
+    .embudo .paso-cifra::after { display: none; }
+  }
+  /* --- en el celular: cada pedido es una tarjeta --------------------------- */
   @media (max-width: 760px) {
-    .wrap { display: flex; flex-direction: column; }
-    #caja-alguien { order: 1; }
-    #caja-pedidos { order: 2; }
-    .tira-resumen { order: 3; }
-    #tira { order: 4; }
-    #tarjetas { order: 5; }
-    #como-funciona { order: 6; }
-    #caja-otros { order: 7; }
-    #caja-sim { order: 8; }
-    #caja-eventos { order: 9; }
-    #caja-ajustes { order: 10; }
-    .tira-resumen { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; margin: 0 0 var(--esp-2); font-weight: 500; font-size: 13.5px; }
-    .tira-resumen::after { content: ''; width: 8px; height: 8px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(45deg); flex: none; margin: 0 4px 4px; }
-    .tira-resumen[aria-expanded="true"]::after { transform: rotate(-135deg); margin: 4px 4px 0; }
-    #tira { display: none; }
-    #tira.abierta { display: grid; }
-    .estado-tira { grid-template-columns: 1fr; gap: var(--esp-2); }
-    .estado-tira .semaforo { padding: 10px 12px; }
-    #tarjetas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; min-width: 0; max-width: 100%; }
-    .mas-cifras .tarjetas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-    .acciones .btn { flex: 1 1 auto; }
-    .cifra { padding: 8px 10px; min-height: 0; }
-    .cifra .n { font-size: 19px; }
-    .cifra .q { font-size: 11.5px; }
-    .caja > h2 { padding: 10px 12px; }
-    .caja .cuerpo { padding: 12px; }
+    .wrap { gap: var(--esp-4); }
+    .franja { border-radius: var(--radio); padding: 10px 12px; gap: 6px 12px; font-size: 13.5px; }
+    .franja .sep { display: none; }
+    .franja .btn { width: 100%; border-radius: var(--radio-sm); }
+    .llegada { padding: 16px; }
+    .llegada h2 { font-size: 19px; }
+    .llegada .acc { min-width: 0; width: 100%; }
+    .paso-cifra { padding: 14px; }
+    .paso-cifra .num { font-size: 30px; }
+    .paso-cifra .nom { font-size: 14px; margin-top: 8px; }
+    .lista-cab h2 { width: 100%; }
+    .lista-cab .sep { display: none; }
     #buscar { width: 100%; }
-    .tabla-scroll { max-height: none; overflow: visible; }
-    .tabla-scroll table { min-width: 0; }
-    .tabla-scroll thead { display: none; }
-    .tabla-scroll table, .tabla-scroll tbody, .tabla-scroll tr, .tabla-scroll td { display: block; }
-    #filas > tr { border: 1px solid var(--borde); border-radius: var(--radio); margin: 10px 12px; padding: 10px 12px; background: var(--superficie); box-shadow: var(--sombra); }
-    #filas > tr.fila-urgente { border-left: 3px solid var(--rojo); }
-    #filas > tr.fila-urgente > td:first-child { box-shadow: none; }
-    #filas > tr > td { border: 0; padding: 4px 0; min-width: 0; }
-    #filas > tr:hover > td { background: transparent; }
-    #filas > tr > td:first-child { padding-bottom: 6px; border-bottom: 1px solid var(--borde); margin-bottom: 4px; }
-    #filas > tr > td:nth-child(2)::before, #filas > tr > td:nth-child(3)::before, #filas > tr > td:nth-child(4)::before, #filas > tr > td:nth-child(5)::before { display: inline-block; min-width: 96px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; vertical-align: top; margin-top: 2px; }
-    #filas > tr > td:nth-child(2)::before { content: 'Ubicación'; }
-    #filas > tr > td:nth-child(3)::before { content: 'Confirmación'; }
-    #filas > tr > td:nth-child(4)::before { content: 'Motorizado'; }
-    #filas > tr > td:nth-child(5)::before { content: 'Llega'; }
-    #filas > tr > td:last-child { padding-top: 8px; }
-    #filas > tr.fila-detalle { padding: 8px 12px; background: var(--superficie-2); margin-top: -6px; }
-    #filas > tr.fila-detalle > td { padding: 0; border: 0; }
-    td.nada, td.celda-ancha { padding: 12px; }
+    .lista-cab .btn { flex: 1 1 auto; }
+    .pedidos { background: transparent; border: 0; box-shadow: none; overflow: visible; }
+    .fila.cab { display: none; }
+    .fila { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "quien ver" "paso paso" "tel mot"; gap: 8px 10px; border: 1px solid var(--borde); border-radius: var(--radio); margin-bottom: 10px; background: var(--superficie); box-shadow: var(--sombra); padding: 14px; }
+    .fila:last-child { border-bottom: 1px solid var(--borde); }
+    .fila .quien { grid-area: quien; } .fila .ver { grid-area: ver; } .fila .paso { grid-area: paso; } .fila .tel { grid-area: tel; } .fila .mot { grid-area: mot; text-align: right; }
+    .fila.urgente { border-left: 4px solid var(--rojo); box-shadow: var(--sombra); }
+    .ficha { border: 1px solid var(--borde); border-radius: var(--radio); margin: -6px 0 10px; }
+    .plegable > summary { padding: 14px; }
+    .plegable .dentro { padding: 0 14px 14px; }
+    .sim-lista { grid-template-columns: 1fr; }
     .ajuste-fila, .ajuste-fila.ancha { grid-template-columns: 1fr 96px; }
-  .ajuste-fila.tel { grid-template-columns: 1fr; gap: 4px; }
+    .ajuste-fila.tel { grid-template-columns: 1fr; gap: 4px; }
   }
 `;
 
@@ -251,168 +256,83 @@ export function entregasPage(opts: { disponible: boolean; configured: boolean; d
     ? `<div class="aviso malo"><b>Las entregas del día no están disponibles en este arranque.</b> Arranca el sistema con <code>npm run quick</code> o <code>npm run dev</code>.</div>`
     : configured
       ? ''
-      : `<div class="aviso"><b>Falta conectar WhatsApp.</b> Las entregas se pueden preparar y sincronizar con GSG, pero no saldrá ningún mensaje hasta conectar el número en <a href="/setup">Conexión de WhatsApp</a>.</div>`;
+      : `<div class="aviso"><b>Falta conectar WhatsApp.</b> Los pedidos se pueden preparar, pero no saldrá ningún mensaje hasta conectar el número en <a href="/setup">Conexión de WhatsApp</a>.</div>`;
 
   const contenido = `
 <div class="wrap">
-${demo ? '<div class="aviso">Demostración: <b>nada sale a WhatsApp de verdad.</b></div>' : ''}
+${demo ? '<div class="aviso demo">Demostración: <b>nada sale a WhatsApp de verdad.</b></div>' : ''}
 ${aviso}
 <div class="aviso malo hidden" id="error-carga" role="alert"></div>
 <div class="cartel-prueba hidden" id="cartel-prueba"><b>EN MODO PRUEBA</b><span id="cartel-prueba-texto"></span><span class="sep"></span><button class="btn sm" id="modo-prueba-quitar" type="button">Salir del modo prueba</button><a href="/panel#configuracion" class="btn sm">Ajustes</a></div>
 
-<button type="button" class="btn tira-resumen" id="tira-resumen" aria-expanded="false" aria-controls="tira">Estado del sistema…</button>
-<div class="estado-tira" id="tira">
-  <div class="semaforo"><b>WhatsApp</b><div id="wa-estado"><span class="punto"></span>Cargando…</div></div>
-  <div class="semaforo"><b>GSG</b>
-    <div id="gsg-estado"><span class="punto"></span>Cargando…</div>
-    <div class="acciones">
-      <button class="btn primario sm" id="sincronizar" type="button">Traer los pendientes de GSG</button>
-      <button class="btn sm" id="gsg-probar" type="button">Probar</button>
-      <button class="btn sm" id="gsg-configurar" type="button">Cambiar</button>
-    </div>
-    <div class="muted" id="gsg-ultima" style="font-size:12.5px"></div>
-    <div class="gsg-cola hidden" id="gsg-cola"></div>
-  </div>
-  <div class="semaforo"><b>Motorizados</b><div id="mot-estado"><span class="punto"></span>Cargando…</div><div class="acciones"><a href="/motorizados" class="btn sm">Ver motorizados</a><a href="/mapa" class="btn sm">Ver en el mapa</a></div></div>
-  <div class="semaforo"><b>Cierre del día</b><div id="cierre-estado"><span class="punto"></span>Cargando…</div><div class="acciones"><button class="btn sm hidden" id="cerrar-dia" type="button">Cerrar el día de ayer ahora</button></div></div>
+<!-- 1. Una linea: como esta todo. Lo tecnico va en «Detalles de la conexión». -->
+<div class="franja" id="tira" role="status">
+  <span class="item" id="franja-wa"><span class="punto"></span>WhatsApp…</span>
+  <span class="item" id="franja-gsg"><span class="punto"></span>GSG…</span>
+  <span class="item" id="franja-mot"><span class="punto"></span>Motorizados…</span>
+  <span class="sep"></span>
+  <button class="btn sm" type="button" id="ajustes-abrir" aria-expanded="false" aria-controls="caja-ajustes">⚙ Ajustes de los mensajes</button>
 </div>
 
-<div class="tarjetas" id="tarjetas"></div>
-
-<details class="explica" id="como-funciona">
-  <summary>¿Cómo funciona? Los seis pasos de cada pedido</summary>
-  <div class="texto">
-    <div class="pasos"><span class="paso">1 · Ubicación</span><span class="paso">2 · Confirmación</span><span class="paso">3 · Motorizado</span><span class="paso">4 · Hora de llegada al cliente</span><span class="paso">5 · Terminada en GSG</span><span class="paso">6 · Entregado</span></div>
-    <p>Cada pedido necesita tres cosas por separado: el cliente manda su <b>ubicación</b>, el cliente <b>confirma</b> que lo recibe hoy y un <b>motorizado</b> recibe el pin y dice en cuántos minutos entrega. A esos minutos se les suma el margen y al cliente se le avisa a qué hora le llega. Quién tiene cada cosa lo dice <b>GSG</b>, al que se le pregunta cada pocos minutos; lo que no se entiende lo lee la IA.</p>
-    <p>Cuando el motorizado escribe <b>«entregado»</b> (o manda la foto), GSG recibe la hora y al cliente se le da las gracias. Si escribe <b>«no había nadie»</b>, al cliente se le pregunta si volvemos hoy (<b>segunda visita</b>, con botones SÍ / NO); si escribe <b>«cerca»</b>, al cliente se le avisa; si escribe <b>«me quedo sin moto»</b>, sus pedidos pasan a otros. Los <b>urgentes</b> salen primero y lo que necesita a una persona aparece en «Necesitan a alguien».</p>
+<!-- 2a. Llego la lista de GSG y nada sale hasta confirmarla. -->
+<section class="llegada hidden" id="hoy-por-confirmar" role="status">
+  <div class="txt">
+    <h2 id="hoy-pc-titulo"></h2>
+    <div class="grupos" id="hoy-pc-grupos"></div>
   </div>
-</details>
-
-<div class="cols">
-  <div>
-    <div class="caja" id="caja-pedidos">
-      <h2>Pedidos de hoy <span id="dia" class="muted"></span><span class="sep"></span><input id="buscar" placeholder="Buscar por nombre, pedido o número" aria-label="Buscar por nombre, pedido o número"><button class="btn sm" id="nueva" type="button">+ Pedido a mano</button><button class="btn sm" id="pegar-abrir" type="button" aria-expanded="false" aria-controls="caja-pegar">Pegar la lista del día</button></h2>
-      <div id="caja-pegar" class="hidden">
-        <p class="muted" style="margin:0 0 6px;font-size:13.5px">Pega la lista tal cual sale de Excel (o CSV, o una línea por cliente): <b>teléfono, nombre, pedido, dirección, distrito</b>. Con cabecera se entiende cualquier orden; si además hay columnas <b>ubicación</b> y <b>confirmar</b> con sí/no, mandan sobre las casillas de abajo.</p>
-        <textarea id="pegar-texto" aria-label="La lista del día" placeholder="987654321, Juan Pérez, P-3001, Av. Larco 345, Miraflores&#10;987654322, María Torres, P-3002, Jr. Monterrey 120, Surco&#10;(una línea por cliente)"></textarea>
-        <div class="muted" id="pegar-previa" aria-live="polite"></div>
-        <div class="opciones marcas">
-          <label><input type="checkbox" id="pegar-ubicacion" checked> Pedir ubicación a todos</label>
-          <label><input type="checkbox" id="pegar-confirmacion" checked> Pedir confirmación a todos</label>
-        </div>
-        <div class="marcas" id="pegar-destino">
-          <label><input type="radio" name="pegar-destino" value="sistema" checked> Clientes de verdad: se les empieza a escribir</label>
-          <label id="pegar-destino-sim" class="hidden"><input type="radio" name="pegar-destino" value="simulador"> Solo probar (nadie recibe nada)</label>
-        </div>
-        <div class="opciones">
-          <button class="btn primario sm" id="pegar-cargar" type="button">Cargar la lista</button>
-          <button class="btn sm" id="pegar-cerrar" type="button">Cerrar</button>
-        </div>
-        <div class="muted" id="pegar-resultado" style="font-size:13px" aria-live="polite"></div>
-      </div>
-      <div class="tabla-scroll">
-        <table>
-          <thead><tr><th>Cliente · pedido</th><th>Ubicación</th><th>Confirmación</th><th>Motorizado</th><th>Llega</th><th aria-label="Acciones"></th></tr></thead>
-          <tbody id="filas"><tr><td colspan="6" class="nada">Cargando…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="caja plegable cerrada" id="caja-sim">
-      <h2>Probar con números ficticios<span class="sep"></span><span class="muted" id="sim-resumen"></span></h2>
-      <div class="cuerpo">
-        <p class="muted" style="margin:0 0 8px;font-size:13.5px">El "otro sistema" de mentira: <b>10 clientes</b> (987 000 001 a 010) y <b>10 motorizados</b> (999 000 001 a 010) ficticios, sin tocar a nadie de verdad. Sus respuestas se simulan desde <a href="/panel#enviar">Enviar mensaje → simular entrante</a>.</p>
-        <div class="sim-grupo"><b>Probar con clientes ficticios</b>
-          <div class="fila">
-            <button class="btn primario sm" id="sim-usar" type="button">Usar el simulador como GSG</button>
-            <button class="btn sm" id="sim-cargar" type="button">Cargar 10 clientes de prueba</button>
-            <button class="btn sm" id="mot-cargar" type="button">Cargar 10 motorizados de prueba</button>
-            <button class="btn peligro sm" id="sim-reiniciar" type="button">Reiniciar simulador</button>
-          </div>
-        </div>
-        <div class="sim-grupo"><b>Probar el día entero, solo</b>
-          <div class="fila">
-            <button class="btn primario sm" id="sim-dia" type="button">Probar el día entero con datos ficticios</button>
-            <button class="btn peligro sm hidden" id="sim-dia-parar" type="button">Detener</button>
-            <span class="muted" style="font-size:12.5px">Carga los datos de prueba y simula las respuestas de todos, paso a paso, de punta a punta.</span>
-          </div>
-          <ol class="sim-pasos hidden" id="sim-dia-pasos"></ol>
-          <p class="muted hidden" id="sim-dia-resumen" style="font-size:13px;margin:6px 0 0"></p>
-        </div>
-        <div class="sim-grupo"><b>Probar con mi número</b>
-          <div class="fila">
-            <button class="btn sm" id="modo-prueba" type="button">Modo prueba con mi número</button>
-            <span class="muted" style="font-size:12.5px">Solo se le escribe a tu número; a los demás no les llega nada.</span>
-          </div>
-        </div>
-        <div class="sim-grupo"><b>Simular que GSG…</b>
-          <div class="fila">
-            <select id="sim-modo" style="width:auto" aria-label="Cómo responde el simulador de GSG"><option value="ok">responde bien</option><option value="caido">está caído</option><option value="rechaza">rechaza lo que mandamos</option></select>
-          </div>
-        </div>
-        <div class="sim-lista" id="sim-listas"></div>
-      </div>
-    </div>
-
-    <div class="caja" id="caja-eventos">
-      <h2>Lo último que pasó</h2>
-      <div class="cuerpo bitacora" id="eventos"><div class="nada">Cargando…</div></div>
-    </div>
+  <div class="acc">
+    <button class="btn primario" type="button" id="hoy-pc-todos">Confirmar y enviar</button>
+    <a href="/numeros?etapa=por_confirmar_envio">Revisarlos uno por uno</a>
   </div>
+</section>
 
-  <div>
-    <div class="caja" id="caja-alguien">
-      <h2>Necesitan a alguien <span class="sep"></span><span class="muted" id="alguien-n"></span></h2>
-      <div class="cuerpo" id="alguien" style="padding:8px 14px"><div class="nada">Cargando…</div></div>
+<!-- 2b. El camino de cada cliente, en cuatro cifras que filtran la lista. -->
+<div class="embudo" id="tarjetas" role="group" aria-label="En qué paso van los clientes de hoy"></div>
+
+<!-- 3. Los pedidos de hoy. -->
+<section id="caja-pedidos">
+  <div class="lista-cab">
+    <h2>Pedidos de hoy <span id="dia" class="muted"></span></h2>
+    <span class="sep"></span>
+    <input id="buscar" type="search" placeholder="Buscar nombre, pedido o número" aria-label="Buscar por nombre, pedido o número" autocomplete="off">
+    <button class="btn" id="nueva" type="button">+ Pedido a mano</button>
+    <button class="btn" id="pegar-abrir" type="button" aria-expanded="false" aria-controls="caja-pegar">Pegar la lista del día</button>
+  </div>
+  <div id="caja-pegar" class="hidden">
+    <p class="muted" style="margin:0 0 6px;font-size:13.5px">Pega la lista tal cual sale de Excel (o una línea por cliente): <b>teléfono, nombre, pedido, dirección, distrito</b>. Con cabecera se entiende cualquier orden; si además hay columnas <b>ubicación</b> y <b>confirmar</b> con sí/no, mandan sobre las casillas de abajo.</p>
+    <textarea id="pegar-texto" aria-label="La lista del día" placeholder="987654321, Juan Pérez, P-3001, Av. Larco 345, Miraflores&#10;987654322, María Torres, P-3002, Jr. Monterrey 120, Surco&#10;(una línea por cliente)"></textarea>
+    <div class="muted" id="pegar-previa" aria-live="polite"></div>
+    <div class="opciones marcas">
+      <label><input type="checkbox" id="pegar-ubicacion" checked> Pedir ubicación a todos</label>
+      <label><input type="checkbox" id="pegar-confirmacion" checked> Pedir confirmación a todos</label>
     </div>
-
-    <div class="caja" id="caja-otros">
-      <h2>Otros clientes a los que se escribe solo <span class="sep"></span><span class="muted" id="otros-n"></span></h2>
-      <div class="cuerpo" style="padding:0">
-        <p class="muted" style="margin:0;padding:8px 14px;font-size:12.5px">Del reparto sin pedido de hoy en GSG, y números puestos a mano: se les pide la ubicación cada pocas horas hasta que la manden.</p>
-        <table>
-          <thead><tr><th>Quién</th><th>Situación</th><th aria-label="Acciones"></th></tr></thead>
-          <tbody id="otros"><tr><td colspan="3" class="nada">Cargando…</td></tr></tbody>
-        </table>
-        <div style="padding:8px 14px"><button class="btn sm" id="otros-nuevo" type="button">+ Pedir la ubicación a un número</button></div>
-      </div>
+    <div class="marcas" id="pegar-destino">
+      <label><input type="radio" name="pegar-destino" value="sistema" checked> Clientes de verdad: se les empieza a escribir</label>
+      <label id="pegar-destino-sim" class="hidden"><input type="radio" name="pegar-destino" value="simulador"> Solo probar (nadie recibe nada)</label>
     </div>
+    <div class="opciones">
+      <button class="btn primario sm" id="pegar-cargar" type="button">Cargar la lista</button>
+      <button class="btn sm" id="pegar-cerrar" type="button">Cerrar</button>
+    </div>
+    <div class="muted" id="pegar-resultado" style="font-size:13px" aria-live="polite"></div>
+  </div>
+  <div class="filtro-activo hidden" id="filtro-activo"><span id="filtro-activo-txt"></span><button type="button" id="filtro-quitar">Ver todos</button></div>
+  <div class="pedidos" role="table" aria-label="Pedidos de hoy">
+    <div class="fila cab" role="row"><span role="columnheader">Cliente</span><span role="columnheader">Teléfono</span><span role="columnheader">En qué paso va</span><span role="columnheader">Motorizado</span><span role="columnheader"><span class="hidden">Acciones</span></span></div>
+    <div id="filas"><div class="nada">Cargando…</div></div>
+  </div>
+</section>
 
-    <div class="caja plegable cerrada" id="caja-ajustes">
-      <h2>Ajustes de las entregas <span class="sep"></span><span class="muted">tiempos, qué hace solo, textos</span></h2>
-      <div class="cuerpo">
+<section class="alguien hidden" id="caja-alguien">
+  <h3>Necesitan a alguien <span class="muted" id="alguien-n" style="font-weight:400;font-size:12.5px"></span></h3>
+  <div id="alguien"></div>
+</section>
+
+<!-- Ajustes de los mensajes: se abren con el boton de la franja. -->
+<section class="plegable hidden" id="caja-ajustes">
+  <div class="cab-aj"><h2>Ajustes de los mensajes</h2><span class="muted" style="font-size:12.5px">textos, horario, soporte, tiempos</span><span class="sep"></span><button class="btn sm" type="button" id="ajustes-cerrar">Cerrar</button></div>
+  <div class="dentro">
         <div class="grupos-aj">
-          <section class="grupo-aj"><h3>Tiempos</h3><p class="ayuda-grupo">Cuánto se espera y cuántas veces se insiste antes de pasar a una persona o a otro motorizado.</p>
-            <div class="ajuste-fila"><span>Margen que se suma a lo que dice el motorizado (minutos)</span><input id="aj-margen" type="number" min="0" max="240"></div>
-            <div class="ajuste-fila"><span>Volver a pedir la confirmación cada (minutos)</span><input id="aj-conf-espera" type="number" min="5" max="1440"></div>
-            <div class="ajuste-fila"><span>Veces que se pide la confirmación</span><input id="aj-conf-max" type="number" min="1" max="6"></div>
-            <div class="ajuste-fila"><span>Esperar al motorizado (minutos) antes de insistir</span><input id="aj-mot-espera" type="number" min="1" max="180"></div>
-            <div class="ajuste-fila"><span>Avisos a un mismo motorizado antes de pasar a otro</span><input id="aj-mot-max" type="number" min="1" max="5"></div>
-            <div class="ajuste-fila"><span>Preguntar a GSG cada (minutos)</span><input id="aj-sync" type="number" min="1" max="1440"></div>
-          </section>
-          <section class="grupo-aj"><h3>Qué hace solo el sistema</h3><p class="ayuda-grupo">Lo que se contesta y se manda sin que nadie toque nada.</p>
-            <label class="linea"><input type="checkbox" id="aj-silencio-ubi"> Después de UBI REGISTRADA, no escribirle más al cliente <span class="muted">(con «Solo lo de GSG»: ni pregunta SÍ/NO, ni hora de llegada, ni «entregado», ni recordatorios; lo del motorizado sigue igual por dentro)</span></label>
-            <label class="linea"><input type="checkbox" id="aj-leer-ia"> La IA lee las respuestas que las reglas no entienden <span class="muted">(necesita <a href="/panel#ia">Mi asistente IA</a> con una clave)</span></label>
-            <label class="linea"><input type="checkbox" id="aj-redactar-ia"> La IA redacta el aviso de llegada (la hora la pone el sistema)</label>
-            <label class="linea"><input type="checkbox" id="aj-botones"> Preguntar con botones SÍ / NO cuando el WhatsApp lo permite (si no puede, sale como texto)</label>
-            <label class="linea"><input type="checkbox" id="aj-pin"> Mandar el pin como ubicación de WhatsApp al motorizado (además del enlace)</label>
-            <label class="linea"><input type="checkbox" id="aj-avisar-entregado"> Dar las gracias al cliente cuando el motorizado dice "entregado"</label>
-            <label class="linea"><input type="checkbox" id="aj-donde-esta"> Contestar solo a "¿dónde está mi pedido?" según el estado (sin gastar IA)</label>
-            <label class="linea"><input type="checkbox" id="aj-cerca"> Avisar al cliente cuando el motorizado escribe "cerca" o "llegando"</label>
-          </section>
-          <section class="grupo-aj"><h3>Segunda visita</h3><p class="ayuda-grupo">Cuando el motorizado llega y no hay nadie.</p>
-            <label class="linea"><input type="checkbox" id="aj-sv-activa"> Preguntarle al cliente si volvemos hoy</label>
-            <div class="ajuste-fila"><span>Esperar su respuesta (minutos); después pasa a una persona</span><input id="aj-sv-espera" type="number" min="5" max="1440"></div>
-          </section>
-          <section class="grupo-aj"><h3>Cliente recurrente</h3><p class="ayuda-grupo">Si ya mandó su ubicación hace poco, se le propone en vez de pedirle el pin otra vez.</p>
-            <label class="linea"><input type="checkbox" id="aj-rec-activo"> Proponerle la dirección que ya usó</label>
-            <div class="ajuste-fila"><span>Vale si su última ubicación tiene menos de (días)</span><input id="aj-rec-dias" type="number" min="1" max="365"></div>
-            <div class="ajuste-fila"><span>Si no contesta en (minutos), se le pide el pin como siempre</span><input id="aj-rec-espera" type="number" min="5" max="1440"></div>
-          </section>
-          <section class="grupo-aj"><h3>Cierre del día</h3><p class="ayuda-grupo">Lo que quedó de ayer sin terminar pasa a "necesita una persona" y lo avisado se da por entregado, para que Hoy arranque limpio.</p>
-            <label class="linea"><input type="checkbox" id="aj-cierre-activo"> Cerrar el día solo</label>
-            <div class="ajuste-fila"><span>Hora del cierre</span><input id="aj-cierre-hora" type="time" step="3600"></div>
-          </section>
           <section class="grupo-aj" id="aj-ubicacion-registrada"><h3>Lo que ve el cliente al mandar su ubicación</h3><p class="ayuda-grupo">Con esto se arma el mensaje «Ubicación registrada»: el enlace de su mapa, el horario de entrega y a dónde escribir o llamar si tiene una consulta.</p>
             <div class="ajuste-fila"><label for="aj-hor-desde">Entregamos desde las</label><input id="aj-hor-desde" type="time" step="900"></div>
             <div class="ajuste-fila"><label for="aj-hor-hasta">hasta las</label><input id="aj-hor-hasta" type="time" step="900"></div>
@@ -424,6 +344,36 @@ ${aviso}
               <div class="burbuja" id="aj-ub-previa" aria-live="polite">Cargando…</div>
             </div>
           </section>
+          <section class="grupo-aj"><h3>Qué hace solo el sistema</h3><p class="ayuda-grupo">Lo que se contesta y se manda sin que nadie toque nada.</p>
+            <label class="linea"><input type="checkbox" id="aj-confirmar-lista"> Confirmar la lista de GSG antes de enviar <span class="muted">(lo que llega de GSG espera hasta que pulses «Confirmar y enviar»; apagado, sale solo. Lo creado con «Pedido a mano» nunca espera)</span></label>
+            <label class="linea"><input type="checkbox" id="aj-silencio-ubi"> Después de «Ubicación registrada», no escribirle más al cliente <span class="muted">(ni pregunta SÍ/NO, ni hora de llegada, ni «entregado», ni recordatorios)</span></label>
+            <label class="linea"><input type="checkbox" id="aj-leer-ia"> La IA lee las respuestas que las reglas no entienden <span class="muted">(necesita <a href="/panel#ia">Mi asistente IA</a> con una clave)</span></label>
+            <label class="linea"><input type="checkbox" id="aj-redactar-ia"> La IA redacta el aviso de llegada (la hora la pone el sistema)</label>
+            <label class="linea"><input type="checkbox" id="aj-botones"> Preguntar con botones SÍ / NO cuando el WhatsApp lo permite (si no puede, sale como texto)</label>
+            <label class="linea"><input type="checkbox" id="aj-pin"> Mandar el pin como ubicación de WhatsApp al motorizado (además del enlace)</label>
+            <label class="linea"><input type="checkbox" id="aj-avisar-entregado"> Dar las gracias al cliente cuando el motorizado dice "entregado"</label>
+            <label class="linea"><input type="checkbox" id="aj-donde-esta"> Contestar solo a "¿dónde está mi pedido?" según el estado (sin gastar IA)</label>
+            <label class="linea"><input type="checkbox" id="aj-cerca"> Avisar al cliente cuando el motorizado escribe "cerca" o "llegando"</label>
+          </section>
+          <section class="grupo-aj"><h3>Tiempos</h3><p class="ayuda-grupo">Cuánto se espera y cuántas veces se insiste antes de pasar a una persona o a otro motorizado.</p>
+            <div class="ajuste-fila"><span>Margen que se suma a lo que dice el motorizado (minutos)</span><input id="aj-margen" type="number" min="0" max="240"></div>
+            <div class="ajuste-fila"><span>Volver a pedir la confirmación cada (minutos)</span><input id="aj-conf-espera" type="number" min="5" max="1440"></div>
+            <div class="ajuste-fila"><span>Veces que se pide la confirmación</span><input id="aj-conf-max" type="number" min="1" max="6"></div>
+            <div class="ajuste-fila"><span>Esperar al motorizado (minutos) antes de insistir</span><input id="aj-mot-espera" type="number" min="1" max="180"></div>
+            <div class="ajuste-fila"><span>Avisos a un mismo motorizado antes de pasar a otro</span><input id="aj-mot-max" type="number" min="1" max="5"></div>
+            <div class="ajuste-fila"><span>Preguntar a GSG cada (minutos)</span><input id="aj-sync" type="number" min="1" max="1440"></div>
+          </section>
+          <section class="grupo-aj"><h3>Segunda visita</h3><p class="ayuda-grupo">Cuando el motorizado llega y no hay nadie.</p>
+            <label class="linea"><input type="checkbox" id="aj-sv-activa"> Preguntarle al cliente si volvemos hoy</label>
+            <div class="ajuste-fila"><span>Esperar su respuesta (minutos); después pasa a una persona</span><input id="aj-sv-espera" type="number" min="5" max="1440"></div>
+            <h3 style="margin-top:14px">Cliente recurrente</h3><p class="ayuda-grupo">Si ya mandó su ubicación hace poco, se le propone en vez de pedirle el pin otra vez.</p>
+            <label class="linea"><input type="checkbox" id="aj-rec-activo"> Proponerle la dirección que ya usó</label>
+            <div class="ajuste-fila"><span>Vale si su última ubicación tiene menos de (días)</span><input id="aj-rec-dias" type="number" min="1" max="365"></div>
+            <div class="ajuste-fila"><span>Si no contesta en (minutos), se le pide el pin como siempre</span><input id="aj-rec-espera" type="number" min="5" max="1440"></div>
+            <h3 style="margin-top:14px">Cierre del día</h3><p class="ayuda-grupo">Lo que quedó de ayer sin terminar pasa a «necesitan a alguien» y lo avisado se da por entregado, para que Hoy arranque limpio.</p>
+            <label class="linea"><input type="checkbox" id="aj-cierre-activo"> Cerrar el día solo</label>
+            <div class="ajuste-fila"><span>Hora del cierre</span><input id="aj-cierre-hora" type="time" step="3600"></div>
+          </section>
         </div>
         <div id="aj-plantillas-caja" class="grupo-aj ancho hidden"><h3>Plantillas de Meta</h3>
           <p class="ayuda-grupo">Meta solo deja escribir libremente durante 24 h desde el último mensaje del cliente; pasado eso hace falta una plantilla aprobada (<a href="/panel#plantillas">Mensajes aprobados</a>). Sin ella, la entrega se aparta y se avisa. Variables en orden: confirmación {{1}} nombre, {{2}} pedido, {{3}} negocio · motorizado {{1}} cliente, {{2}} pedido, {{3}} enlace del mapa · aviso {{1}} nombre, {{2}} pedido, {{3}} hora.</p>
@@ -434,10 +384,88 @@ ${aviso}
         </div>
         <details class="grupo-aj ancho"><summary>Textos que se mandan <span class="muted">(vacío = el de siempre)</span></summary><div id="aj-textos"></div></details>
         <div class="guardar-aj"><button class="btn primario" id="aj-guardar" type="button">Guardar ajustes</button><span class="muted" id="aj-estado" aria-live="polite"></span></div>
-      </div>
-    </div>
   </div>
-</div>
+</section>
+
+<!-- Lo tecnico, plegado: estado de cada pieza, todas las cifras, pruebas y bitacora. -->
+<details class="plegable" id="detalles">
+  <summary>Detalles de la conexión <span class="muted" id="detalles-resumen"></span></summary>
+  <div class="dentro">
+    <div class="bloques">
+      <div class="bloque"><b>WhatsApp</b><div id="wa-estado"><span class="punto"></span>Cargando…</div></div>
+      <div class="bloque"><b>GSG</b>
+        <div id="gsg-estado"><span class="punto"></span>Cargando…</div>
+        <div class="muted" id="gsg-ultima" style="font-size:12.5px;margin-top:4px"></div>
+        <div class="gsg-cola hidden" id="gsg-cola"></div>
+        <div class="acciones">
+          <button class="btn sm" id="sincronizar" type="button">Traer los pendientes de GSG</button>
+          <button class="btn sm" id="gsg-probar" type="button">Probar</button>
+          <button class="btn sm" id="gsg-configurar" type="button">Cambiar</button>
+        </div>
+      </div>
+      <div class="bloque"><b>Motorizados</b><div id="mot-estado"><span class="punto"></span>Cargando…</div><div class="acciones"><a href="/motorizados" class="btn sm">Ver motorizados</a><a href="/mapa" class="btn sm">Ver en el mapa</a></div></div>
+      <div class="bloque"><b>Cierre del día</b><div id="cierre-estado"><span class="punto"></span>Cargando…</div><div class="acciones"><button class="btn sm hidden" id="cerrar-dia" type="button">Cerrar el día de ayer ahora</button></div></div>
+    </div>
+
+    <div class="bloque"><b>Todas las cifras de hoy</b><div class="cifras-todas" id="tarjetas-mas"></div></div>
+
+    <details class="bloque" id="caja-otros">
+      <summary>Otros números a los que se les pide la ubicación <span class="muted" id="otros-n"></span></summary>
+      <p class="muted" style="margin:0 0 6px;font-size:12.5px">Del reparto sin pedido de hoy en GSG, y números puestos a mano: se les pide la ubicación cada pocas horas hasta que la manden.</p>
+      <table>
+        <thead><tr><th>Quién</th><th>Situación</th><th aria-label="Acciones"></th></tr></thead>
+        <tbody id="otros"><tr><td colspan="3" class="nada">Cargando…</td></tr></tbody>
+      </table>
+      <div style="padding-top:8px"><button class="btn sm" id="otros-nuevo" type="button">+ Pedir la ubicación a un número</button></div>
+    </details>
+
+    <details class="bloque" id="caja-sim">
+      <summary>Probar con números ficticios <span class="muted" id="sim-resumen"></span></summary>
+      <p class="muted" style="margin:0 0 8px;font-size:13.5px">El «otro sistema» de mentira: <b>10 clientes</b> (987 000 001 a 010) y <b>10 motorizados</b> (999 000 001 a 010) ficticios, sin tocar a nadie de verdad. Sus respuestas se simulan desde <a href="/panel#enviar">Enviar mensaje → simular entrante</a>.</p>
+      <div class="sim-grupo"><b>Probar con clientes ficticios</b>
+        <div class="fila-sim">
+          <button class="btn sm" id="sim-usar" type="button">Usar el simulador como GSG</button>
+          <button class="btn sm" id="sim-cargar" type="button">Cargar 10 clientes de prueba</button>
+          <button class="btn sm" id="mot-cargar" type="button">Cargar 10 motorizados de prueba</button>
+          <button class="btn peligro sm" id="sim-reiniciar" type="button">Reiniciar simulador</button>
+        </div>
+      </div>
+      <div class="sim-grupo"><b>Probar el día entero, solo</b>
+        <div class="fila-sim">
+          <button class="btn sm" id="sim-dia" type="button">Probar el día entero con datos ficticios</button>
+          <button class="btn peligro sm hidden" id="sim-dia-parar" type="button">Detener</button>
+          <span class="muted" style="font-size:12.5px">Carga los datos de prueba y simula las respuestas de todos, paso a paso.</span>
+        </div>
+        <ol class="sim-pasos hidden" id="sim-dia-pasos"></ol>
+        <p class="muted hidden" id="sim-dia-resumen" style="font-size:13px;margin:6px 0 0"></p>
+      </div>
+      <div class="sim-grupo"><b>Probar con mi número</b>
+        <div class="fila-sim">
+          <button class="btn sm" id="modo-prueba" type="button">Modo prueba con mi número</button>
+          <span class="muted" style="font-size:12.5px">Solo se le escribe a tu número; a los demás no les llega nada.</span>
+        </div>
+      </div>
+      <div class="sim-grupo"><b>Simular que GSG…</b>
+        <div class="fila-sim">
+          <select id="sim-modo" style="width:auto" aria-label="Cómo responde el simulador de GSG"><option value="ok">responde bien</option><option value="caido">está caído</option><option value="rechaza">rechaza lo que mandamos</option></select>
+        </div>
+      </div>
+      <div class="sim-lista" id="sim-listas"></div>
+    </details>
+
+    <details class="bloque" id="caja-eventos">
+      <summary>Lo último que pasó</summary>
+      <div class="bitacora" id="eventos"><div class="nada">Cargando…</div></div>
+    </details>
+
+    <details class="bloque explica" id="como-funciona">
+      <summary>¿Cómo funciona? Los seis pasos de cada pedido</summary>
+      <div class="pasos"><span class="paso">1 · Ubicación</span><span class="paso">2 · Confirmación</span><span class="paso">3 · Motorizado</span><span class="paso">4 · Hora de llegada al cliente</span><span class="paso">5 · Terminada en GSG</span><span class="paso">6 · Entregado</span></div>
+      <p>Cada pedido necesita tres cosas por separado: el cliente manda su <b>ubicación</b>, el cliente <b>confirma</b> que lo recibe hoy y un <b>motorizado</b> recibe el pin y dice en cuántos minutos entrega. A esos minutos se les suma el margen y al cliente se le avisa a qué hora le llega. Quién tiene cada cosa lo dice <b>GSG</b>, al que se le pregunta cada pocos minutos; lo que no se entiende lo lee la IA.</p>
+      <p>Cuando el motorizado escribe <b>«entregado»</b> (o manda la foto), GSG recibe la hora y al cliente se le da las gracias. Si escribe <b>«no había nadie»</b>, al cliente se le pregunta si volvemos hoy (<b>segunda visita</b>, con botones SÍ / NO); si escribe <b>«cerca»</b>, al cliente se le avisa; si escribe <b>«me quedo sin moto»</b>, sus pedidos pasan a otros. Los <b>urgentes</b> salen primero y lo que necesita a una persona aparece en «Necesitan a alguien».</p>
+    </details>
+  </div>
+</details>
 </div>
 `;
 
@@ -556,6 +584,7 @@ function chipLlega(e) {
    Una sola lista: el nombre largo se usa en la ficha que abre «Ver» y el
    corto en la fila. Antes habia dos listas paralelas que se iban separando. */
 var ACCIONES = [
+  { clave: 'confirmar_envio', attr: 'enviar', largo: 'Confirmar el envío', corto: 'Enviar' },
   { clave: 'confirmar', attr: 'confirmar', largo: 'Confirmar a mano', corto: 'Confirmar' },
   { clave: 'no_confirmar', attr: 'no-confirmar', largo: 'El cliente no lo quiere' },
   { clave: 'poner_ubicacion', attr: 'ubicacion', largo: 'Poner el pin a mano', corto: 'Poner pin' },
@@ -566,10 +595,6 @@ var ACCIONES = [
   { clave: 'prioridad', attr: 'prioridad', largo: function (e) { return e.prioridad === 'urgente' ? 'Quitar urgente' : 'Marcar urgente'; } },
   { clave: 'cancelar', attr: 'cancelar', largo: 'Cancelar el pedido', peligro: true }
 ];
-/* En la fila caben pocas: estas son las que tocan hacer ahora, por orden. */
-var ACCIONES_EN_FILA = ['confirmar', 'marcar_entregada', 'segunda_visita', 'reintentar'];
-
-function accion(clave) { return ACCIONES.filter(function (a) { return a.clave === clave; })[0]; }
 function botonAccion(e, a, corta) {
   var texto = corta && a.corto ? a.corto : (typeof a.largo === 'function' ? a.largo(e) : a.largo);
   var extra = a.clave === 'prioridad' ? ' data-urgente="' + (e.prioridad === 'urgente' ? '0' : '1') + '"' : '';
@@ -579,14 +604,11 @@ function botonAccion(e, a, corta) {
 function botonesDeFicha(e) {
   return ACCIONES.filter(function (a) { return e.acciones.indexOf(a.clave) >= 0; }).map(function (a) { return botonAccion(e, a, false); });
 }
-/** En la fila: «Ver» y como mucho dos cosas de las que tocan ahora. */
+/** En la fila solo «Ver»: la ficha que abre tiene todas las acciones, con su nombre completo. */
 function botonesDeFila(e) {
   var abierta = Boolean(abiertas[e.id]);
-  var ver = '<button class="btn sm" data-ver="' + e.id + '" type="button" aria-expanded="' + abierta + '">' + (abierta ? 'Cerrar' : 'Ver') + '</button>';
-  var claves = ACCIONES_EN_FILA.filter(function (k) { return e.acciones.indexOf(k) >= 0; });
-  /* Si no hay nada urgente que hacer pero falta el pin, ese es el atajo util. */
-  if (!claves.length && e.acciones.indexOf('poner_ubicacion') >= 0) claves = ['poner_ubicacion'];
-  return '<div class="acciones">' + ver + claves.slice(0, 2).map(function (k) { return botonAccion(e, accion(k), true); }).join('') + '</div>';
+  var nombre = e.nombre || telefonoBonito(e.phone);
+  return '<button class="btn sm" data-ver="' + e.id + '" type="button" aria-expanded="' + abierta + '" aria-label="' + esc((abierta ? 'Cerrar la ficha de ' : 'Ver la ficha de ') + nombre) + '">' + (abierta ? 'Cerrar' : 'Ver') + '</button>';
 }
 
 /* --------------------------------------------------- las cifras y el filtro
@@ -600,7 +622,30 @@ function porEstado(x) { return function (e) { return e.estado === x; }; }
    servidor (vivasDeMotorizado) — le dieron el pin y aun no esta entregada.
    Antes esta pantalla lo contaba de dos maneras distintas. */
 function laLlevaUnMotorizado(e) { return Boolean(e.motorizado) && (e.estado === 'esperando_motorizado' || e.estado === 'avisada'); }
+
+/* En que paso del camino va cada cliente, uno solo por cliente:
+   esperando (su ubicacion o su SÍ/NO) → registrada → con motorizado;
+   o necesita a alguien. Las cuatro cifras, el chip de la fila y el filtro
+   salen de aqui, asi no pueden contradecirse. */
+function pasoDe(e) {
+  if (e.estado === 'cancelada') return { clave: 'cancelado', tono: 'gris', texto: 'Cancelado' };
+  if (e.estado === 'incidencia' && !esperaSegunda(e)) return { clave: 'alguien', tono: 'rojo', texto: 'Necesita a alguien' };
+  if (e.estado === 'entregada' || e.estado === 'terminada') return { clave: 'motorizado', tono: 'verde', texto: 'Entregado' };
+  if (e.envioRetenidoAt) return { clave: 'por_enviar', tono: 'ambar', texto: 'Por enviar' };
+  if (esperaSegunda(e)) return { clave: 'esperando', tono: 'azul', texto: 'Esperando al cliente' };
+  if (laLlevaUnMotorizado(e)) return { clave: 'motorizado', tono: 'azul', texto: 'Con motorizado' };
+  if (e.ubicacionEstado === 'pendiente') return { clave: 'esperando', tono: 'ambar', texto: 'Esperando ubicación' };
+  if ((e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.ubicacionEstado !== 'recibida') return { clave: 'esperando', tono: 'ambar', texto: 'Esperando su SÍ / NO' };
+  if (e.ubicacionEstado === 'recibida') return { clave: 'registrada', tono: 'verde', texto: 'Ubicación registrada' };
+  return { clave: 'registrada', tono: 'verde', texto: 'Confirmado' };
+}
+function enPaso(clave) { return function (e) { return pasoDe(e).clave === clave; }; }
 var FILTROS = {
+  esperando: enPaso('esperando'),
+  registrada: enPaso('registrada'),
+  conMotorizado: enPaso('motorizado'),
+  alguien: enPaso('alguien'),
+  porEnviar: enPaso('por_enviar'),
   total: function () { return true; },
   faltaUbicacion: function (e) { return e.ubicacionEstado === 'pendiente' && e.estado !== 'cancelada'; },
   faltaConfirmacion: function (e) { return (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.estado !== 'cancelada'; },
@@ -618,34 +663,55 @@ var FILTROS = {
 function cuantas(clave) { return resumen.entregas.filter(FILTROS[clave]).length; }
 function pasaFiltro(e) { return !filtro || !FILTROS[filtro] ? true : FILTROS[filtro](e); }
 
-/* Cinco cifras a la vista (las que importan a las 9 de la mañana) y el resto en "Mas cifras". */
-var CIFRAS_PRINCIPALES = [
-  ['total', 'pedidos hoy', ''],
-  ['faltaUbicacion', 'falta ubicación', 'warn'],
-  ['faltaConfirmacion', 'falta confirmar', 'warn'],
-  ['enCamino', 'en camino', 'info'],
-  ['incidencia', 'necesitan una persona', 'bad']
+/* Las cuatro cifras del camino: lo unico que hay que mirar de un vistazo. */
+var EMBUDO = [
+  { clave: 'esperando', nombre: 'Esperando ubicación', pista: 'o su SÍ / NO', tono: 'ambar' },
+  { clave: 'registrada', nombre: 'Ubicación registrada', pista: 'listos para salir', tono: 'verde' },
+  { clave: 'conMotorizado', nombre: 'Con motorizado', pista: 'en camino o entregados', tono: 'azul' },
+  { clave: 'alguien', nombre: 'Necesitan a alguien', pista: 'el cliente preguntó algo', tono: 'rojo' }
 ];
+/* El resto de cifras, pequeñas y dentro de «Detalles». */
 var CIFRAS_MAS = [
-  ['avisada', 'clientes avisados', 'info'],
-  ['entregada', 'entregadas', 'ok'],
-  ['terminada', 'terminadas en GSG', 'ok'],
-  ['urgente', 'urgentes', 'bad'],
-  ['esperandoSegundaVisita', 'esperan al cliente (¿volvemos hoy?)', 'info'],
-  ['lista', 'listas para motorizado', 'info'],
-  ['esperando_motorizado', 'esperando al motorizado', 'info'],
-  ['cancelada', 'canceladas', '']
+  ['total', 'Pedidos hoy'],
+  ['porEnviar', 'Por enviar'],
+  ['faltaUbicacion', 'Falta ubicación'],
+  ['faltaConfirmacion', 'Falta confirmar'],
+  ['enCamino', 'En camino'],
+  ['avisada', 'Clientes avisados'],
+  ['entregada', 'Entregadas'],
+  ['terminada', 'Terminadas en GSG'],
+  ['urgente', 'Urgentes'],
+  ['esperandoSegundaVisita', 'Esperan al cliente (¿volvemos hoy?)'],
+  ['lista', 'Listas para motorizado'],
+  ['esperando_motorizado', 'Esperando al motorizado'],
+  ['cancelada', 'Canceladas']
 ];
+/* Los que necesitan a alguien sin tener pedido hoy (los cuenta pintarAlguien). */
+var alguienSinPedido = 0;
+function nombreFiltro(clave) {
+  var f = EMBUDO.filter(function (x) { return x.clave === clave; })[0];
+  if (f) return f.nombre;
+  var m = CIFRAS_MAS.filter(function (x) { return x[0] === clave; })[0];
+  if (m) return m[1];
+  return clave === 'incidencia' ? 'Necesitan a alguien' : clave;
+}
 function pintarTarjetas() {
-  function tarjeta(x) {
-    var n = cuantas(x[0]);
-    /* Un cero no se pinta de rojo ni de ambar: no hay nada que mirar. */
-    return '<div class="tarjeta cifra ' + (n > 0 ? x[2] : '') + '" data-filtro="' + x[0] + '" role="button" tabindex="0" aria-pressed="' + (filtro === x[0]) + '"><div class="n">' + n + '</div><div class="q">' + x[1] + '</div></div>';
-  }
-  var hayQueMirar = cuantas('urgente') > 0 || cuantas('esperandoSegundaVisita') > 0;
-  var abierto = hayQueMirar || CIFRAS_MAS.some(function (x) { return x[0] === filtro; });
-  $('tarjetas').innerHTML = CIFRAS_PRINCIPALES.map(tarjeta).join('') +
-    '<details class="mas-cifras"' + (abierto ? ' open' : '') + '><summary>Más cifras (avisados, entregadas, urgentes…)</summary><div class="tarjetas">' + CIFRAS_MAS.map(tarjeta).join('') + '</div></details>';
+  var entregados = cuantas('entregada') + cuantas('terminada');
+  $('tarjetas').innerHTML = EMBUDO.map(function (x, i) {
+    var n = cuantas(x.clave) + (x.clave === 'alguien' ? alguienSinPedido : 0);
+    var pista = x.clave === 'conMotorizado' && entregados ? plural(entregados, 'ya entregado', 'ya entregados') : x.pista;
+    /* Un cero no se pinta de color: no hay nada que mirar. «Necesitan a alguien» con algo, en rojo. */
+    var tono = n > 0 ? x.tono : 'cero';
+    return '<button type="button" class="paso-cifra ' + tono + '" data-filtro="' + x.clave + '" aria-pressed="' + (filtro === x.clave) + '">' +
+      '<span class="n-paso" aria-hidden="true">' + (i < 3 ? (i + 1) : '!') + '</span>' +
+      '<span class="num">' + n + '</span><span class="nom">' + x.nombre + '</span><span class="pista">' + esc(pista) + '</span></button>';
+  }).join('');
+  $('tarjetas-mas').innerHTML = CIFRAS_MAS.map(function (x) {
+    return '<button type="button" data-filtro="' + x[0] + '" aria-pressed="' + (filtro === x[0]) + '">' + x[1] + ' <b>' + cuantas(x[0]) + '</b></button>';
+  }).join('');
+  var hay = Boolean(filtro && FILTROS[filtro]);
+  $('filtro-activo').classList.toggle('hidden', !hay);
+  if (hay) $('filtro-activo-txt').textContent = 'Mostrando: ' + nombreFiltro(filtro);
 }
 
 /* ------------------------------------------------------------- la tabla -- */
@@ -657,10 +723,19 @@ function buscadas(lista) {
     return (e.nombre || '').toLowerCase().indexOf(q) >= 0 || (digitos.length >= 3 && e.phone.indexOf(digitos) >= 0) || e.referencia.toLowerCase().indexOf(q) >= 0;
   });
 }
-function filaSuelta(texto) { return '<tr><td colspan="6" class="nada">' + texto + '</td></tr>'; }
+function filaSuelta(texto) { return '<div class="nada">' + texto + '</div>'; }
 function marcasDe(e) {
-  return (FILTROS.urgente(e) ? '<span class="chip tono-rojo sin-punto">Urgente</span>' : '') +
-    (e.segundaVisita ? '<span class="chip tono-azul sin-punto">2.ª visita</span>' : '');
+  return (FILTROS.urgente(e) ? '<span class="chip tono-rojo sin-punto marca">Urgente</span>' : '') +
+    (e.segundaVisita ? '<span class="chip tono-azul sin-punto marca">2.ª visita</span>' : '');
+}
+/* La columna del motorizado: quien lo lleva y, en corto, a que hora llega. */
+function celdaMotorizado(e) {
+  if (!e.motorizado) return e.estado === 'lista' ? '<span class="muted">Buscando uno…</span>' : '<span class="muted">—</span>';
+  var sub = e.estado === 'entregada' ? 'entregó ' + hora(e.entregadaAt)
+    : e.llegaAproxAt ? 'llega ' + hora(e.llegaAproxAt)
+    : e.motorizadoEstado === 'enviado' ? 'esperando su tiempo'
+    : e.motorizadoEstado === 'sin_respuesta' ? 'no contestó' : '';
+  return esc(e.motorizado.nombre) + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '');
 }
 
 function pintarFilas() {
@@ -668,34 +743,25 @@ function pintarFilas() {
   /* Los urgentes que siguen vivos van arriba; el resto conserva su orden
      (sort es estable, asi que no hace falta arrastrar el indice). */
   lista = lista.slice().sort(function (a, b) { return (FILTROS.urgente(a) ? 0 : 1) - (FILTROS.urgente(b) ? 0 : 1); });
-  var tbody = $('filas');
+  var cuerpo = $('filas');
   if (!lista.length) {
-    tbody.innerHTML = resumen.entregas.length
-      ? filaSuelta('Ninguna entrega con ese filtro.')
-      : '<tr><td colspan="6" class="celda-ancha"><div class="vacio"><div class="ico">📦</div><h3>Todavía no hay pedidos hoy</h3><p>Tráelos de GSG (o carga el simulador), o pega la lista del día tal como sale de Excel.</p><div class="acciones"><button class="btn primario" type="button" data-pulsa="sincronizar">Traer los pendientes de GSG</button><button class="btn" type="button" data-pulsa="pegar-abrir">Pegar la lista del día</button></div></div></td></tr>';
+    cuerpo.innerHTML = resumen.entregas.length
+      ? filaSuelta('Nadie en este paso ahora mismo.')
+      : '<div class="vacio"><div class="ico">📦</div><h3>Todavía no hay pedidos hoy</h3><p>Cuando GSG mande la lista, aparecen aquí. También puedes pegarla tal como sale de Excel.</p><div class="acciones" style="justify-content:center"><button class="btn" type="button" data-pulsa="pegar-abrir">Pegar la lista del día</button><button class="btn" type="button" data-pulsa="sincronizar">Traer la lista de GSG</button></div></div>';
     return;
   }
-  tbody.innerHTML = lista.map(function (e) {
-    /* El chip de situacion es el mismo que en el mapa, en Motorizados y en la
-       campana (catalogo compartido). Va bajo el nombre porque es lo primero
-       que hay que mirar; el detalle largo esta dentro de «Ver». */
-    var enQueVa = esperaSegunda(e)
-      ? '<span class="chip tono-azul" data-estado="segunda_visita">Esperando al cliente</span>'
-      : chipEstado('entrega', e.estado);
-    var porQue = FILTROS.incidencia(e) && NOMBRE_INCIDENCIA[e.incidencia] ? '<span class="sub">' + esc(NOMBRE_INCIDENCIA[e.incidencia]) + '</span>' : '';
-    var otros = e.mismoCliente && e.mismoCliente.length
-      ? ' <span class="chip tono-azul sin-punto" title="El mismo cliente tiene otro pedido hoy: su pin y su confirmación valen para los dos y van en el mismo viaje">+' + e.mismoCliente.length + ' del mismo cliente: ' + esc(e.mismoCliente.join(', ')) + '</span>'
-      : '';
-    var fila = '<tr' + (FILTROS.urgente(e) ? ' class="fila-urgente"' : '') + '>' +
-      '<td><div class="quien"><b>' + esc(e.nombre || 'Sin nombre') + '</b>' + marcasDe(e) + '</div>' +
-        '<div class="en-que-va">' + enQueVa + porQue + '</div>' +
-        '<div class="sub">' + esc(e.referencia) + ' · <span class="telefono">' + esc(telefonoBonito(e.phone)) + '</span>' + (e.distrito ? '<br>' + esc(e.distrito) : '') + otros + '</div></td>' +
-      '<td>' + chipUbicacion(e) + '</td>' +
-      '<td>' + chipConfirmacion(e) + '</td>' +
-      '<td>' + chipMotorizado(e) + '</td>' +
-      '<td>' + chipLlega(e) + '</td>' +
-      '<td>' + botonesDeFila(e) + '</td></tr>';
-    if (abiertas[e.id]) fila += '<tr class="fila-detalle"><td colspan="6" id="detalle-' + e.id + '">' + (detalles[e.id] || 'Cargando…') + '</td></tr>';
+  cuerpo.innerHTML = lista.map(function (e) {
+    /* Un chip, un paso: el mismo que cuentan las cuatro cifras de arriba. */
+    var p = pasoDe(e);
+    var porQue = p.clave === 'alguien' && NOMBRE_INCIDENCIA[e.incidencia] ? '<div class="sub">' + esc(NOMBRE_INCIDENCIA[e.incidencia]) + '</div>' : '';
+    var fila = '<div class="fila' + (FILTROS.urgente(e) ? ' urgente' : '') + '" role="row">' +
+      '<div class="quien" role="cell"><b>' + esc(e.nombre || 'Sin nombre') + '</b>' + marcasDe(e) +
+        '<div class="sub">' + esc(e.referencia) + (e.distrito ? ' · ' + esc(e.distrito) : '') + (e.mismoCliente && e.mismoCliente.length ? ' · +' + e.mismoCliente.length + ' del mismo cliente' : '') + '</div></div>' +
+      '<div class="tel" role="cell">' + esc(telefonoBonito(e.phone)) + '</div>' +
+      '<div class="paso" role="cell"><span class="chip tono-' + p.tono + '">' + p.texto + '</span>' + porQue + '</div>' +
+      '<div class="mot" role="cell">' + celdaMotorizado(e) + '</div>' +
+      '<div class="ver" role="cell">' + botonesDeFila(e) + '</div></div>';
+    if (abiertas[e.id]) fila += '<div class="ficha" id="detalle-' + e.id + '">' + (detalles[e.id] || 'Cargando…') + '</div>';
     return fila;
   }).join('');
   Object.keys(abiertas).forEach(function (id) { if (abiertas[id] && !detalles[id]) cargarDetalle(id); });
@@ -704,6 +770,7 @@ function pintarFilas() {
 async function cargarDetalle(id) {
   var td = $('detalle-' + id);
   if (!td) return;
+  /* Aqui td es la ficha (un div) bajo la fila. */
   try {
     var r = await api('/admin/entregas/' + id);
     var e = r.entrega;
@@ -717,10 +784,18 @@ async function cargarDetalle(id) {
     /* Las acciones disponibles vienen en la lista (el resumen), no en la ficha. */
     var enLista = resumen.entregas.filter(function (x) { return String(x.id) === String(id); })[0];
     var acciones = botonesDeFicha(enLista || { id: e.id, acciones: e.acciones || [], prioridad: e.prioridad });
-    var html = (e.situacion ? '<p class="situacion-larga">' + esc(e.situacion) + '</p>' : '') +
+    /* El detalle de cada paso (lo que antes eran cuatro columnas) vive aqui. */
+    var pasos = enLista ? '<div class="pasos-ficha">' +
+      '<span><b>Ubicación</b> ' + chipUbicacion(enLista) + '</span>' +
+      '<span><b>Confirmación</b> ' + chipConfirmacion(enLista) + '</span>' +
+      '<span><b>Motorizado</b> ' + chipMotorizado(enLista) + '</span>' +
+      '<span><b>Llega</b> ' + chipLlega(enLista) + '</span>' +
+      (enLista.mismoCliente && enLista.mismoCliente.length ? '<span class="muted">Mismo cliente, mismo viaje: ' + esc(enLista.mismoCliente.join(', ')) + '</span>' : '') +
+      '</div>' : '';
+    var html = (e.situacion ? '<p class="situacion-larga">' + esc(e.situacion) + '</p>' : '') + pasos +
       (acciones.length ? '<div class="acciones-detalle">' + acciones.join('') + '</div>' : '') +
       datos + r.eventos.map(function (ev) {
-        return '<div class="mov"><span class="hora">' + hora(ev.createdAt) + '</span><span class="que"><b>' + esc(ev.tipo.replace(/_/g, ' ')) + '</b> ' + esc(ev.detalle || '') + '</span></div>';
+        return '<div class="mov"><span class="hora">' + hora(ev.createdAt) + '</span><span class="que"><b>' + esc(ev.tipo === 'sincronizada' ? 'de GSG' : ev.tipo.replace(/_/g, ' ')) + '</b> ' + esc(ev.detalle || '') + '</span></div>';
       }).join('');
     detalles[id] = html;
     td.innerHTML = html;
@@ -734,18 +809,22 @@ function refrescarDetalles() {
   Object.keys(abiertas).forEach(function (id) { if (abiertas[id]) cargarDetalle(id); });
 }
 
-/* ------------------------------------------------------ la tira de estado
-   En una sola linea para el celular: "WhatsApp ✓ · GSG ✓ · 10 motorizados · cierre ✓". */
-var waResumen = '';
+/* ------------------------------------------------------ la franja de estado
+   Una linea: «WhatsApp conectado · GSG: simulador · 1 motorizado activo».
+   El detalle de cada cosa esta en «Detalles de la conexión». */
+var waFranja = { clase: '', html: 'WhatsApp…' };
+function itemFranja(id, clase, html) { $(id).innerHTML = '<span class="punto ' + clase + '"></span>' + html; }
 function pintarTiraResumen() {
   if (!resumen) return;
-  var partes = [];
-  if (waResumen) partes.push(waResumen);
+  itemFranja('franja-wa', waFranja.clase, waFranja.html);
   var g = resumen.gsg;
-  partes.push(!g || g.modo === 'ninguna' ? 'GSG ✕' : g.modo === 'simulador' ? 'GSG simulador' : 'GSG ✓');
-  partes.push(plural(resumen.motorizados.filter(function (m) { return m.estado === 'activo'; }).length, 'motorizado', 'motorizados'));
-  partes.push(resumen.cierrePendiente ? 'cierre pendiente' : 'cierre ✓');
-  $('tira-resumen').textContent = partes.join(' · ');
+  if (!g || g.modo === 'ninguna') itemFranja('franja-gsg', 'bad', 'GSG sin conectar');
+  else if (g.modo === 'simulador') itemFranja('franja-gsg', 'info', 'GSG: simulador');
+  else itemFranja('franja-gsg', 'ok', 'GSG conectado');
+  var activos = resumen.motorizados.filter(function (m) { return m.estado === 'activo'; }).length;
+  itemFranja('franja-mot', activos ? 'ok' : 'bad', activos ? plural(activos, 'motorizado activo', 'motorizados activos') : '<a href="/motorizados">Ningún motorizado activo</a>');
+  /* Lo de dentro de «Detalles», en corto: asi se sabe si vale la pena abrirlo. */
+  $('detalles-resumen').textContent = resumen.cierrePendiente ? '· queda algo de ayer sin cerrar' : '';
 }
 
 function pintarMotorizadosTira() {
@@ -783,20 +862,48 @@ async function pintarWhatsApp() {
   var el = $('wa-estado');
   try {
     var h = await api('/health');
-    if (!h.configured) { el.innerHTML = '<span class="punto bad"></span>Sin conectar. <a href="/setup">Conectar el WhatsApp</a>.'; waResumen = 'WhatsApp ✕'; }
-    else if (!h.connected) { el.innerHTML = '<span class="punto warn"></span>Configurado pero desconectado. <a href="/setup">Volver a vincular</a>.'; waResumen = 'WhatsApp caído'; }
+    if (!h.configured) { el.innerHTML = '<span class="punto bad"></span>Sin conectar. <a href="/setup">Conectar el WhatsApp</a>.'; waFranja = { clase: 'bad', html: '<a href="/setup">WhatsApp sin conectar</a>' }; }
+    else if (!h.connected) { el.innerHTML = '<span class="punto warn"></span>Configurado pero desconectado. <a href="/setup">Volver a vincular</a>.'; waFranja = { clase: 'warn', html: '<a href="/setup">WhatsApp desconectado</a>' }; }
     else {
       var pero = resumen.motor.parado ? ' <span class="muted">Ahora mismo parado: ' + esc(resumen.motor.parado) + '</span>'
         : resumen.motor.enHorario ? '' : ' <span class="muted">Fuera del horario de envío.</span>';
       el.innerHTML = '<span class="punto ok"></span>Conectado y escribiendo.' + pero;
-      waResumen = 'WhatsApp ✓';
+      waFranja = resumen.motor.parado ? { clase: 'warn', html: 'WhatsApp en pausa' } : { clase: 'ok', html: 'WhatsApp conectado' + (resumen.motor.enHorario ? '' : ' <span class="muted">(fuera de horario)</span>') };
     }
   } catch (e) {
     el.innerHTML = '<span class="punto"></span>No se pudo saber: ' + esc(e.message);
-    waResumen = '';
+    waFranja = { clase: '', html: 'WhatsApp: no se sabe' };
   }
   pintarTiraResumen();
 }
+
+/* «Llegaron N números de GSG: X para pedir ubicación · Y para confirmar»: nada sale hasta confirmarlo. */
+function pintarPorConfirmar() {
+  var caja = $('hoy-por-confirmar');
+  var pc = resumen && resumen.porConfirmarEnvio;
+  var hay = Boolean(pc && pc.total);
+  caja.classList.toggle('hidden', !hay);
+  if (!hay) return;
+  $('hoy-pc-titulo').textContent = 'Llegaron ' + (pc.total === 1 ? '1 número' : pc.total + ' números') + ' de GSG';
+  $('hoy-pc-grupos').innerHTML =
+    '<span class="grupo">📍 ' + pc.ubicacion + ' para pedir ubicación</span>' +
+    '<span class="grupo">✅ ' + pc.confirmar + ' para confirmar</span>';
+  $('hoy-pc-todos').textContent = 'Confirmar y enviar (' + pc.total + ')';
+}
+$('hoy-pc-todos').addEventListener('click', async function () {
+  var pc = resumen && resumen.porConfirmarEnvio;
+  if (!pc || !pc.total) return;
+  var boton = this;
+  var si = await confirmarDialogo({ titulo: 'Confirmar y enviar a todos', texto: 'Se confirma el envío a ' + (pc.total === 1 ? '1 número' : pc.total + ' números') + ': ' + pc.ubicacion + ' para pedir ubicación · ' + pc.confirmar + ' para confirmar SÍ/NO. Salen de uno en uno, con la pausa de siempre entre mensaje y mensaje.', boton: 'Sí, enviar a todos' });
+  if (!si) return;
+  boton.disabled = true;
+  try {
+    var r = await api('/admin/entregas/confirmar-envio', { method: 'POST', body: { todos: true } });
+    toast(r.aviso);
+    await cargar();
+  } catch (e) { toast(e.message); }
+  finally { boton.disabled = false; }
+});
 
 function pintarGsg() {
   var g = resumen.gsg;
@@ -855,24 +962,27 @@ function telefonosConEntrega() {
   resumen.entregas.forEach(function (e) { mapa[e.phone] = true; });
   return mapa;
 }
+/* Los pedidos de hoy que necesitan a alguien salen en la lista (cifra
+   «Necesitan a alguien»); aqui solo los del reparto sin pedido hoy, y la
+   caja solo aparece si hay alguno. */
 async function pintarAlguien() {
-  var filas = resumen.entregas.filter(FILTROS.incidencia).map(function (e) {
-    return '<div class="mov"><span class="que"><b>' + esc(e.referencia) + '</b> ' + esc(e.nombre || telefonoBonito(e.phone)) + ': ' + esc(e.incidenciaDetalle || e.incidencia || '') + ' <a href="#" data-ir-fila="' + e.id + '">ver</a></span></div>';
-  });
+  var filas = [];
   var falla = '';
   try {
     var conEntrega = telefonosConEntrega();
     var r = await api('/admin/rutas/solicitudes?requiereHumano=true&limit=50');
     (r.items || []).filter(function (s) { return !conEntrega[s.phone]; }).forEach(function (s) {
-      filas.push('<div class="mov"><span class="que"><b>' + esc(s.referencia || 'sin pedido') + '</b> ' + esc(s.nombre || telefonoBonito(s.phone || s.telefonoCrudo)) + ': ' + esc(s.incidenciaDetalle || s.incidencia || s.estado) +
-        '<div class="acciones mov-acciones"><button class="btn sm" data-sol-reintentar="' + s.id + '" type="button">Volver a intentar</button><a class="btn sm" href="/chat?tel=' + esc(s.phone || '') + '">Abrir chat</a></div></span></div>');
+      filas.push('<div class="caso"><div class="que"><b>' + esc(s.nombre || telefonoBonito(s.phone || s.telefonoCrudo)) + '</b> <span class="muted">' + esc(s.referencia || 'sin pedido') + '</span><div class="sub">' + esc(s.incidenciaDetalle || s.incidencia || s.estado) + '</div></div>' +
+        '<div class="acciones"><a class="btn sm" href="/chat?tel=' + esc(s.phone || '') + '">Abrir chat</a><button class="btn sm" data-sol-reintentar="' + s.id + '" type="button">Volver a intentar</button></div></div>');
     });
   } catch (e) {
     /* Los casos del reparto son un añadido: si fallan se dice, no se esconde el resto. */
-    falla = '<div class="nada">No se pudieron leer los casos del reparto: ' + esc(e.message) + '</div>';
+    falla = '<div class="nada">No se pudo saber si alguien más necesita a una persona: ' + esc(e.message) + '</div>';
   }
-  $('alguien-n').textContent = filas.length ? plural(filas.length, 'caso', 'casos') : 'nada pendiente';
-  $('alguien').innerHTML = (filas.length ? filas.join('') : '<div class="nada">✓ Nadie espera a una persona ahora mismo.</div>') + falla;
+  $('alguien-n').textContent = filas.length ? '· ' + plural(filas.length, 'número', 'números') + ' sin pedido hoy' : '';
+  $('alguien').innerHTML = filas.join('') + falla;
+  $('caja-alguien').classList.toggle('hidden', !filas.length && !falla);
+  if (alguienSinPedido !== filas.length) { alguienSinPedido = filas.length; pintarTarjetas(); }
 }
 
 /* Los otros: la lista de envio automatico (reparto sin pedido de hoy + numeros a mano), tal como la cuenta el sistema. */
@@ -934,6 +1044,7 @@ function pintarAjustes() {
   marca('aj-botones', a.usarBotones !== false);
   marca('aj-cerca', a.avisarCerca !== false);
   marca('aj-silencio-ubi', a.silencioTrasUbi !== false);
+  marca('aj-confirmar-lista', a.confirmarListaGsg !== false);
   var sv = a.segundaVisita || { activa: true, esperaMin: 30 };
   marca('aj-sv-activa', sv.activa !== false);
   valor('aj-sv-espera', sv.esperaMin);
@@ -1101,6 +1212,7 @@ async function cargar() {
   pintarCierre();
   pintarEventos();
   pintarGsg();
+  pintarPorConfirmar();
   pintarAjustes();
   pintarWhatsApp();
   pintarAlguien();
@@ -1120,6 +1232,11 @@ function repintarFiltro() {
    habia nada que cambiar (se cerro el cuadro, por ejemplo). */
 var HACER = {
   pulsa: function (destino) { $(destino).click(); return false; },
+  enviar: async function (id) {
+    var r = await api('/admin/entregas/confirmar-envio', { method: 'POST', body: { ids: [Number(id)] } });
+    toast(r.aviso);
+    return true;
+  },
   ver: function (id) {
     if (abiertas[id]) { delete abiertas[id]; delete detalles[id]; } else { abiertas[id] = true; }
     pintarFilas();
@@ -1221,27 +1338,32 @@ $('filas').addEventListener('click', async function (ev) {
    Llegar con ?filtro=incidencia (desde el Inicio o la campana) abre esa cifra. */
 try {
   var filtroUrl = new URLSearchParams(window.location.search).get('filtro');
+  /* «incidencia» es el nombre viejo de «Necesitan a alguien»: se abre la cifra nueva. */
+  if (filtroUrl === 'incidencia') filtroUrl = 'alguien';
   if (filtroUrl && FILTROS[filtroUrl]) filtro = filtroUrl;
 } catch (e) { /* sin filtro */ }
 
+function irALista() { $('caja-pedidos').scrollIntoView({ block: 'start', behavior: 'smooth' }); }
 $('cierre-estado').addEventListener('click', function (ev) {
   var a = ev.target.closest('[data-filtro-ir]');
   if (!a) return;
   ev.preventDefault();
   filtro = a.getAttribute('data-filtro-ir');
+  if (filtro === 'incidencia') filtro = 'alguien';
   repintarFiltro();
-  $('filas').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  irALista();
 });
-$('tarjetas').addEventListener('click', function (ev) {
+/* Las cuatro cifras (y las pequeñas de «Detalles») filtran la lista; pulsar otra vez la misma, la quita. */
+function alPulsarCifra(ev) {
   var t = ev.target.closest('[data-filtro]');
   if (!t) return;
   filtro = filtro === t.getAttribute('data-filtro') ? '' : t.getAttribute('data-filtro');
   repintarFiltro();
-});
-/* Las cifras tambien se abren con el teclado. */
-$('tarjetas').addEventListener('keydown', function (ev) {
-  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList.contains('cifra')) { ev.preventDefault(); ev.target.click(); }
-});
+  if (filtro && t.closest('#tarjetas-mas')) irALista();
+}
+$('tarjetas').addEventListener('click', alPulsarCifra);
+$('tarjetas-mas').addEventListener('click', alPulsarCifra);
+$('filtro-quitar').onclick = function () { filtro = ''; repintarFiltro(); };
 $('buscar').oninput = function () { if (resumen) pintarFilas(); };
 
 /* ------------------------------------------------------ pedidos a mano -- */
@@ -1439,7 +1561,8 @@ $('sim-dia').onclick = async function () {
   try {
     await api('/admin/entregas/simulador/probar-dia', { method: 'POST', body: {} });
     toast('Empieza el día de prueba: mira los pasos aquí abajo y la tabla de pedidos.');
-    $('caja-sim').classList.remove('cerrada');
+    $('detalles').open = true;
+    $('caja-sim').open = true;
     if (!guionTimer) seguirGuion();
   } catch (e) { toast(e.message); }
 };
@@ -1531,6 +1654,7 @@ $('aj-guardar').onclick = async function () {
       usarBotones: $('aj-botones').checked,
       avisarCerca: $('aj-cerca').checked,
       silencioTrasUbi: $('aj-silencio-ubi').checked,
+      confirmarListaGsg: $('aj-confirmar-lista').checked,
       segundaVisita: { activa: $('aj-sv-activa').checked, esperaMin: num('aj-sv-espera', 30) },
       clienteRecurrente: { activo: $('aj-rec-activo').checked, diasMaximo: num('aj-rec-dias', 60), esperaMin: num('aj-rec-espera', 60) },
       plantillas: { confirmacion: $('aj-pl-confirmacion').value.trim(), motorizado: $('aj-pl-motorizado').value.trim(), aviso: $('aj-pl-aviso').value.trim() },
@@ -1546,20 +1670,17 @@ $('aj-guardar').onclick = async function () {
   b.disabled = false;
 };
 
-/* ------------------------------------------------------ plegar y abrir -- */
-/* Las cajas plegables se abren con el raton y con el teclado. */
-document.querySelectorAll('.caja.plegable > h2').forEach(function (h) {
-  var caja = h.parentElement;
-  h.setAttribute('role', 'button');
-  h.setAttribute('tabindex', '0');
-  h.setAttribute('aria-expanded', caja.classList.contains('cerrada') ? 'false' : 'true');
-  var alternar = function () { h.setAttribute('aria-expanded', caja.classList.toggle('cerrada') ? 'false' : 'true'); };
-  h.onclick = alternar;
-  h.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); alternar(); } };
-});
-$('tira-resumen').onclick = function () {
-  this.setAttribute('aria-expanded', $('tira').classList.toggle('abierta') ? 'true' : 'false');
-};
+/* ------------------------------------------- los ajustes de los mensajes -
+   No se mezclan con lo del dia: se abren con su boton de la franja. */
+function abrirAjustes(abrir) {
+  $('caja-ajustes').classList.toggle('hidden', !abrir);
+  $('ajustes-abrir').setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  if (abrir) $('caja-ajustes').scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+$('ajustes-abrir').onclick = function () { abrirAjustes($('caja-ajustes').classList.contains('hidden')); };
+$('ajustes-cerrar').onclick = function () { abrirAjustes(false); $('ajustes-abrir').focus(); };
+/* Llegar con #ajustes (desde otra pantalla) los abre. */
+if (window.location.hash === '#ajustes') abrirAjustes(true);
 
 /* --------------------------------------------------------------- refresco
    Cada 10 s, pero sin pisar a quien esta escribiendo, con un cuadro abierto
@@ -1577,7 +1698,7 @@ cargar();
 
   return appShell({
     titulo: 'Hoy',
-    subtitulo: 'Cada pedido de hoy: en qué paso va, qué le falta y quién necesita a alguien',
+    subtitulo: 'Los pedidos de hoy, paso a paso',
     contenido,
     script,
     css: CSS,

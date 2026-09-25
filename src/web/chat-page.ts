@@ -93,6 +93,7 @@ ${bandaDemo}
         <div class="name" id="t-name"></div>
         <div class="sub" id="t-sub"></div>
       </div>
+      <button class="icon" id="abrir-ficha" title="Ficha del cliente: su pedido, su ubicación y el estado del chat" aria-label="Ficha del cliente">ⓘ</button>
       <button class="icon" id="abrir-busqueda" title="Buscar en esta conversación" aria-label="Buscar en esta conversación">🔍</button>
       <button class="icon" id="menu-chat" title="Más opciones" aria-label="Más opciones de esta conversación" aria-haspopup="menu" aria-expanded="false">⋮</button>
     </header>
@@ -437,7 +438,7 @@ async function openChat(contactId, silent) {
     current.reparto = data.reparto || null;
     PUEDE = data.puede || PUEDE;
     puedeEscribir = Boolean(data.canWrite);
-    if (nuevo) { salirDeSeleccion(); quitarCita(); cerrarBusqueda(); cerrarPaneles(); nuevosSinVer = 0; ultimoPintadoId = 0; lastCount = 0; }
+    if (nuevo) { ver('ficha', false); salirDeSeleccion(); quitarCita(); cerrarBusqueda(); cerrarPaneles(); nuevosSinVer = 0; ultimoPintadoId = 0; lastCount = 0; }
     ver('confirmar-cierre', false);
     document.getElementById('app').classList.add('open-thread');
     var sApp = document.getElementById('s-app'); if (sApp) sApp.classList.add('sin-nav-movil');
@@ -446,6 +447,7 @@ async function openChat(contactId, silent) {
     ver('messages', true);
 
     var esGrupo = current.tipo === 'grupo';
+    ver('abrir-ficha', !esGrupo);
     var avatar = document.getElementById('t-avatar');
     avatar.textContent = esGrupo ? '👥' : inicial(current.name, current.phone);
     avatar.classList.toggle('grupo', esGrupo);
@@ -468,22 +470,13 @@ function pintarSubtitulo(data) {
       (data.canWrite ? '' : ' · <span class="pill warn">' + esc(data.blockedReason || 'no se puede escribir') + '</span>');
     return;
   }
-  sub.innerHTML = '<span id="t-presencia"></span>' + esc(telefonoBonito(current.phone)) + ' · ' +
-    (current.optOutAt ? '<span class="pill bad">dado de baja</span>'
-      : data.windowOpen ? '<span class="pill ok">puede recibir mensajes</span>'
-      : '<span class="pill warn">fuera de las 24 h</span>') +
-    (current.botPausadoAt ? ' · <span class="pill warn">bot pausado</span>' : '') +
-    (current.iaCerradaAt ? ' · <span class="pill warn" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
-    (data.reparto ? ' · <a class="link" href="/hoy" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'pedido ' + data.reparto.referencia : 'reparto') + ' · ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
-    '<span id="t-anteriores"></span>';
-
-  /* Sus conversaciones anteriores, ya guardadas: se ven sin restaurar nada. */
-  var idAnteriores = current.id;
-  api('/admin/archives?contactId=' + encodeURIComponent(current.id) + '&limit=1').then(function (r) {
-    if (!current || current.id !== idAnteriores) return;
-    var el = document.getElementById('t-anteriores');
-    if (el && r.total) el.innerHTML = ' · <a class="link" href="/guardados?tel=' + encodeURIComponent(current.phone) + '" title="Las conversaciones guardadas de este cliente">' + r.total + ' conversaci' + (r.total === 1 ? 'ón' : 'ones') + ' anterior' + (r.total === 1 ? '' : 'es') + '</a>';
-  }).catch(function (error) { console.log('[chat] no se pudieron contar las conversaciones guardadas:', error && error.message); });
+  /* Arriba solo lo que importa: en que paso va su pedido y si lo tiene que atender una persona.
+     Lo demas (ventana de 24 h, bot callado, baja, conversaciones anteriores) va en la ficha (ⓘ). */
+  current.windowOpen = Boolean(data.windowOpen);
+  sub.innerHTML = '<span id="t-presencia"></span><span class="t-tel">' + esc(telefonoBonito(current.phone)) + '</span>' +
+    (current.iaCerradaAt ? '<span class="pill warn t-marca" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
+    (data.reparto ? '<a class="t-pedido" href="/hoy' + (data.reparto.referencia ? '?buscar=' + encodeURIComponent(data.reparto.referencia) : '') + '" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'Pedido ' + data.reparto.referencia : 'Reparto') + ': ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '');
+  /* Sus conversaciones anteriores ya guardadas se cuentan y se abren desde la ficha (ⓘ). */
 }
 
 /**
@@ -948,7 +941,15 @@ async function abrirFicha() {
   try {
     var f = await api('/admin/chat/' + current.id + '/ficha');
     var c = f.contacto;
-    var html = '<div><h4>Quién es</h4><div class="fila"><b>' + esc(c.name || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(c.phone)) + '</span></div>' +
+    /* El estado del chat: lo que antes llenaba la cabecera de pildoras. */
+    var marcas = [];
+    if (c.optOutAt) marcas.push('<span class="pill bad">Dado de baja</span>');
+    else if (current.windowOpen) marcas.push('<span class="pill ok">Puede recibir mensajes</span>');
+    else marcas.push('<span class="pill warn" title="Pasaron más de 24 horas desde su último mensaje: solo se le puede escribir con una plantilla aprobada.">Fuera de las 24 h</span>');
+    if (c.botPausadoAt || current.botPausadoAt) marcas.push('<span class="pill warn">Bot callado</span>');
+    if (current.iaCerradaAt) marcas.push('<span class="pill warn">Para una persona</span>');
+    var html = '<div><h4>Este chat</h4><div class="fila">' + marcas.join('') + '</div></div>' +
+      '<div><h4>Quién es</h4><div class="fila"><b>' + esc(c.name || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(c.phone)) + '</span></div>' +
       '<div class="muted" style="margin-top:4px">' + (c.optOutAt ? 'Pidió no recibir mensajes (BAJA): solo se le contesta si escribe.' : c.optInAt ? 'Se le puede escribir (dio su consentimiento).' : 'Sin consentimiento todavía: se le contesta cuando escribe; no se le inicia conversación.') + (c.botPausadoAt ? ' Las respuestas automáticas están calladas en este chat.' : '') + (c.lastInboundAt ? ' Último mensaje suyo: ' + hhmm(c.lastInboundAt) + '.' : '') + '</div></div>';
     if (f.entrega) {
       var e = f.entrega;
@@ -967,6 +968,11 @@ async function abrirFicha() {
     cuerpo.innerHTML = html;
   } catch (e) { cuerpo.innerHTML = '<p class="muted">' + esc(e.message) + '</p>'; }
 }
+document.getElementById('abrir-ficha').onclick = function () {
+  if (!current || current.tipo === 'grupo') return;
+  if (document.getElementById('ficha').classList.contains('hidden')) abrirFicha();
+  else document.getElementById('ficha').classList.add('hidden');
+};
 document.getElementById('ficha-cerrar').onclick = function () { document.getElementById('ficha').classList.add('hidden'); };
 
 /* --------------------------------------------------------- pausar el bot */

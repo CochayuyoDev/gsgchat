@@ -166,24 +166,25 @@ describe('el agente operativo en un día de entregas', () => {
     expect((await e.entrega('P-1003'))?.ubicacionEstado).toBe('recibida');
   });
 
-  it('al mandar su pin: «Ubicación registrada correctamente» con el cierre y el soporte en UN mensaje, y la IA se calla', async () => {
+  it('al mandar su pin: «Ubicación registrada correctamente» + «¡Muchas gracias!» en UN mensaje (sin el cierre); lo que pregunte después recibe el cierre UNA vez y luego nada', async () => {
     const antes = e.textosA('987000001').length;
     await e.contesta('987000001', { pin: PIN_LIMA });
     const nuevos = e.textosA('987000001').slice(antes);
     expect(nuevos).toHaveLength(1);
     const t = nuevos[0]!;
-    expect(t).toMatch(/^✅ Ubicación registrada correctamente\.\nhttps:\/\/\S+\n/);
-    expect(t).toContain('Por este canal no se reciben consultas. Te derivamos con un asesor humano');
-    expect(t).toContain('+51 987 654 321');
+    expect(t).toMatch(/^✅ Ubicación registrada correctamente\.\nhttps:\/\/\S+\n\n¡Muchas gracias!\n/);
+    expect(t).not.toContain('no se reciben consultas');
+    expect(t).not.toContain('+51 987 654 321');
     expect(t).toContain('Horario de entrega');
-    // Ni coordenadas sueltas ni el soporte repetido.
-    expect(t.split('+51 987 654 321').length - 1).toBe(1);
     expect(await cerradaDe('987000001')).not.toBeNull();
     // Ni la pregunta SÍ/NO: la confirmación ya no hace falta.
     expect(t).not.toMatch(/SÍ o NO/);
-    // Lo que escriba después ya no recibe NADA (ni el cierre: ya iba dentro de UBI REGISTRADA).
-    const tras = e.mensajesA('987000001').length;
+    // Pregunta después del agradecimiento: el cierre UNA vez (sin motorizado todavía: el soporte).
+    const a = e.textosA('987000001').length;
     await e.contesta('987000001', { texto: 'muchas gracias, a qué hora llega más o menos? y cuánto cobran por envío' });
+    expect(e.textosA('987000001').slice(a)).toEqual(['Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: +51 987 654 321.']);
+    // Y desde ahí, NADA.
+    const tras = e.mensajesA('987000001').length;
     await e.contesta('987000001', { texto: 'sí' });
     expect(e.mensajesA('987000001')).toHaveLength(tras);
     expect((await e.entrega('P-1001'))?.confirmacionEstado).toBe('no_hace_falta');

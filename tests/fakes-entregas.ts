@@ -132,6 +132,8 @@ export function createFakeEntregas(): FakeEntregas {
         incidenciaDetalle: null,
         requiereHumano: false,
         terminadaGsgAt: null,
+        envioRetenidoAt: input.envioRetenidoAt ?? null,
+        envioLiberadoAt: null,
         createdAt: ahora,
         updatedAt: ahora,
       };
@@ -196,14 +198,14 @@ export function createFakeEntregas(): FakeEntregas {
     },
     async tocaPedirConfirmacion(ahora, limite) {
       return entregas
-        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_confirmacion') && (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.ubicacionEstado !== 'pendiente' && !e.mensajesPausadosAt && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
+        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_confirmacion') && (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.ubicacionEstado !== 'pendiente' && !e.mensajesPausadosAt && !e.envioRetenidoAt && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
         .sort((a, b) => (a.confirmacionProximoAt ?? a.createdAt).getTime() - (b.confirmacionProximoAt ?? b.createdAt).getTime() || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
     },
     async tocaProponerUbicacion(ahora, limite) {
       return entregas
-        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_ubicacion') && e.ubicacionEstado === 'pendiente' && e.ubicacionPropuestaLat != null && !e.ubicacionPropuestaAt && !e.loteId && !e.mensajesPausadosAt && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
+        .filter((e) => (e.estado === 'pendiente' || e.estado === 'esperando_ubicacion') && e.ubicacionEstado === 'pendiente' && e.ubicacionPropuestaLat != null && !e.ubicacionPropuestaAt && !e.loteId && !e.mensajesPausadosAt && !e.envioRetenidoAt && (!e.confirmacionProximoAt || e.confirmacionProximoAt.getTime() <= ahora.getTime()))
         .sort((a, b) => (a.prioridad === 'urgente' ? 0 : 1) - (b.prioridad === 'urgente' ? 0 : 1) || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
@@ -217,7 +219,7 @@ export function createFakeEntregas(): FakeEntregas {
     },
     async tocaMotorizado(ahora, limite) {
       return entregas
-        .filter((e) => e.estado === 'lista' || (e.estado === 'esperando_motorizado' && (e.motorizadoEstado === 'enviado' || (e.motorizadoEstado === 'respondio' && !e.avisoEnviadoAt)) && e.motorizadoProximoAt !== null && e.motorizadoProximoAt.getTime() <= ahora.getTime()))
+        .filter((e) => !e.envioRetenidoAt && (e.estado === 'lista' || (e.estado === 'incidencia' && e.incidencia === 'sin_motorizado' && e.lat != null && e.updatedAt.getTime() <= ahora.getTime() - 2 * 60_000) || (e.estado === 'esperando_motorizado' && (e.motorizadoEstado === 'enviado' || (e.motorizadoEstado === 'respondio' && !e.avisoEnviadoAt)) && e.motorizadoProximoAt !== null && e.motorizadoProximoAt.getTime() <= ahora.getTime())))
         .sort((a, b) => Number(b.prioridad === 'urgente') - Number(a.prioridad === 'urgente') || (a.motorizadoProximoAt ?? a.updatedAt).getTime() - (b.motorizadoProximoAt ?? b.updatedAt).getTime() || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);

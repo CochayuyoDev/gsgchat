@@ -116,9 +116,10 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     const r = await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 20, faltaUbicacion: 20, motorizados: 5 });
     expect(r.status).toBe(200);
     expect(r.body.creados).toEqual({ faltaConfirmar: 20, faltaUbicacion: 20, motorizados: 5 });
-    // Regla del dueño («Solo lo de GSG»): no se le pregunta SÍ/NO a nadie.
+    // Como la lista de GSG: nada sale hasta que se confirma el envío.
     expect(r.body.preguntados).toBe(0);
-    expect(r.body.sinPreguntas).toBe(true);
+    expect(r.body.esperanEnvio).toBe(40);
+    expect(r.body.detalle).toContain('Esperan que confirmes el envío: 40');
     expect(r.body.tecnico.peticion).toMatchObject({ metodo: 'POST', ruta: '/api/v1/entregas', pedidos: 40 });
     expect(r.body.tecnico.respuesta.status).toBe(201);
     // La clave no sale a la pantalla.
@@ -135,13 +136,25 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     const deprueba = hoy.entregas.filter((e) => e.referencia.startsWith('PRUEBA-'));
     expect(deprueba.length).toBe(40);
     expect(deprueba.every((e) => esNumeroDePrueba(e.phone))).toBe(true);
-    // Los que ya traen pin no esperan confirmación (regla del dueño): van directo al motorizado.
+    // Todos esperan que se confirme su envío: todavía no se le escribió a nadie.
+    expect(await cuenta(`select count(*) as n from entregas where referencia like 'PRUEBA-%' and envio_retenido_at is not null`)).toBe(40);
+    expect(await cuenta(`select count(*) as n from rutas_solicitudes where phone like '519000%'`)).toBe(0);
+    // Los que ya traen pin son del grupo «falta confirmar»: solo SÍ/NO, nunca la ubicación.
     const confirmar = deprueba.filter((e) => e.ubicacionEstado === 'recibida');
-    const ubicacion = deprueba.filter((e) => e.estado === 'esperando_ubicacion');
+    const ubicacion = deprueba.filter((e) => e.ubicacionEstado === 'pendiente');
     expect(confirmar.length).toBe(20);
     expect(ubicacion.length).toBe(20);
-    expect(confirmar.every((e) => e.confirmacionEstado === 'no_hace_falta' && e.estado !== 'esperando_confirmacion')).toBe(true);
+    expect(confirmar.every((e) => e.confirmacionEstado === 'pendiente')).toBe(true);
     expect(deprueba.every((e) => /Cobrar S\//.test(e.notas ?? ''))).toBe(true);
+
+    // «📤 Confirmar el envío»: lo mismo que el botón de Números del día.
+    const envio = await api('POST', '/admin/desarrollador/confirmar-envio', {});
+    expect(envio.status).toBe(200);
+    expect(envio.body).toMatchObject({ liberadas: 40, ubicacion: 20, confirmar: 20 });
+    expect(await cuenta(`select count(*) as n from entregas where referencia like 'PRUEBA-%' and envio_retenido_at is not null`)).toBe(0);
+    expect(await cuenta(`select count(*) as n from rutas_solicitudes where phone like '519000%'`)).toBe(20);
+    const otra = await api('POST', '/admin/desarrollador/confirmar-envio', {});
+    expect(otra.body.aviso).toContain('No hay ningún cliente de prueba esperando');
 
     const motos = (await tienda.app.inject({ method: 'GET', url: '/admin/motorizados', headers: { cookie } })).json() as { motorizados?: Array<{ phone: string }> } | Array<{ phone: string }>;
     const listaMotos = Array.isArray(motos) ? motos : (motos.motorizados ?? []);
@@ -153,11 +166,11 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     await new Promise((r) => setTimeout(r, 8000));
     expect(wa.sent.filter((m) => esNumeroDePrueba(String(m.to ?? ''))).length).toBe(0);
     const escritos = await cuenta(`select count(distinct c.id) as n from contacts c join messages m on m.contact_id = c.id and m.direction = 'out' where c.phone like '519000%'`);
-    // Sin pregunta SÍ/NO (regla del dueño) solo se les escribe a los que les falta la ubicación.
     expect(escritos).toBeGreaterThanOrEqual(1);
+    // A los de «falta confirmar» nunca se les pide la ubicación.
+    expect(await cuenta(`select count(*) as n from rutas_solicitudes s join entregas e on e.phone = s.phone where e.referencia like 'PRUEBA-%' and e.ubicacion_estado = 'recibida' and e.ubicacion_fuente = 'a mano (GSG (API))'`)).toBe(0);
     const estado = await api('GET', '/admin/desarrollador/prueba');
     expect(estado.body).toMatchObject({ clientes: 40, motorizados: 5 });
-    expect(estado.body.porEstado.esperando_confirmacion ?? 0).toBe(0);
   }, 60_000);
 
   it('una segunda tanda no pisa los números de la primera', async () => {
@@ -192,7 +205,8 @@ describe('Módulo desarrollador: clientes de prueba', () => {
   it('la pestaña se pinta dentro del módulo, sin jerga y con su botón de borrar', async () => {
     const r = await tienda.app.inject({ method: 'GET', url: '/desarrollador', headers: { cookie } });
     expect(r.statusCode).toBe(200);
-    expect(r.body).toContain('Contactado, falta que confirme');
+    expect(r.body).toContain('Falta que confirme');
+    expect(r.body).toContain('Confirmar el envío de los de prueba');
     expect(r.body).toContain('Falta que mande su ubicación');
     expect(r.body).toContain('Borrar todo lo de prueba');
     expect(r.body).toContain('Ver lo técnico');

@@ -66,6 +66,9 @@ describe('«Mis casos»: el caso escrito a mano se entiende (o se dice qué lín
     expect(g.inicio).toBe('sin_pin');
     const escribe = g.pasos.filter((p) => p.tipo === 'escribe');
     expect(escribe[1]).toMatchObject({ quien: 'cliente', dice: { tipo: 'pin' }, espera: { contiene: 'Ubicación registrada' } });
+    // Tras el agradecimiento: el cierre con el número del motorizado asignado, y luego silencio.
+    expect(escribe[2]).toMatchObject({ quien: 'cliente', dice: { texto: '¿a qué hora llega?' }, espera: { contiene: 'no se reciben consultas', numeroDelMotorizado: true } });
+    expect(escribe[3]).toMatchObject({ quien: 'cliente', espera: { calla: true } });
     expect(escribe.at(-1)).toMatchObject({ quien: 'motorizado', dice: { texto: 'entregado' }, espera: { estado: ['entregada'] } });
   });
 
@@ -168,30 +171,61 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     expect(estado.resultados).toHaveLength(GUIONES.length);
   }, 480_000);
 
-  it('regla del dueño: «¿por qué?» → explicación → pin → UBI REGISTRADA → «¿a qué hora llega?» → SILENCIO; y «cuánto cuesta el envío» → cierre con el número → SILENCIO', async () => {
+  it('regla del dueño: «¿por qué?» → explicación → pin → UBI REGISTRADA con «¡Muchas gracias!» → motorizado → «¿a qué hora llega?» → cierre con el número del motorizado → SILENCIO; y «cuánto cuesta el envío» → cierre con el número → SILENCIO', async () => {
     const resultados = (await api('GET', '/admin/desarrollador/vivo/guiones')).body.resultados as ResultadoGuion[];
     const pin = resultados.find((x) => x.guion === 'porque_y_pin')!;
     expect(pin.pasos.map((p) => p.ok)).toEqual(pin.pasos.map(() => true));
-    expect(pin.pasos[0]!.respuesta).toContain('Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado.');
-    expect(pin.pasos[1]!.respuesta).toMatch(/^✅ Ubicación registrada correctamente\./);
-    expect(pin.pasos[1]!.respuesta).not.toMatch(/SÍ o NO/);
-    expect(pin.pasos[2]!.respuesta).toBeNull();
+    // El paso 0 es «📤 Se confirma el envío»: le llega el pedido de ubicación.
+    expect(pin.pasos[0]!.quien).toBe('sistema');
+    expect(pin.pasos[0]!.respuesta).toMatch(/compartir tu ubicación/);
+    expect(pin.pasos[1]!.respuesta).toContain('Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado.');
+    expect(pin.pasos[2]!.respuesta).toMatch(/^✅ Ubicación registrada correctamente\.\nhttps:\/\/\S+\n\n¡Muchas gracias!\n/);
+    expect(pin.pasos[2]!.respuesta).not.toMatch(/SÍ o NO|no se reciben consultas/);
+    // Paso 3: el pedido le llega a un motorizado de prueba (su número es el que recibe el cliente).
+    expect(pin.pasos[3]!.quien).toBe('sistema');
+    const moto = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = $1`, [pin.referencia])).rows[0]!.phone;
+    expect(pin.pasos[4]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
+    expect(pin.pasos[4]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
+    expect(pin.pasos[5]!.respuesta).toBeNull();
     const consulta = resultados.find((x) => x.guion === 'consulta')!;
-    expect(consulta.pasos[0]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
-    expect(consulta.pasos[1]!.respuesta).toBeNull();
+    expect(consulta.pasos[1]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
+    expect(consulta.pasos[2]!.respuesta).toBeNull();
+  });
+
+  it('«falta confirmar»: solo SÍ/NO (nunca la ubicación); SÍ → gracias → pregunta → cierre con el número del motorizado → silencio, NO → cierre → silencio, «¿por qué?» → explicación → SÍ', async () => {
+    const resultados = (await api('GET', '/admin/desarrollador/vivo/guiones')).body.resultados as ResultadoGuion[];
+    const si = resultados.find((x) => x.guion === 'confirmar_si')!;
+    expect(si.ok).toBe(true);
+    expect(si.pasos[0]!.respuesta).toMatch(/¿Nos confirmas que lo recibes hoy en esa dirección\? Responde SÍ o NO\./);
+    expect(si.pasos[0]!.respuesta).not.toMatch(/compartir tu ubicación/);
+    expect(si.pasos[1]!.respuesta).toBe('Perfecto, tu pedido queda confirmado para hoy. ¡Muchas gracias!');
+    const moto = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = $1`, [si.referencia])).rows[0]!.phone;
+    expect(si.pasos[3]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
+    expect(si.pasos[3]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
+    expect(si.pasos[4]!.respuesta).toBeNull();
+    const no = resultados.find((x) => x.guion === 'confirmar_no')!;
+    expect(no.ok).toBe(true);
+    expect(no.pasos[1]).toMatchObject({ estado: 'incidencia' });
+    expect(no.pasos[1]!.respuesta).toMatch(/^Entendido, lo pasamos a un asesor\./);
+    expect(no.pasos[2]!.respuesta).toBeNull();
+    const pq = resultados.find((x) => x.guion === 'confirmar_porque')!;
+    expect(pq.ok).toBe(true);
+    expect(pq.pasos[1]!.respuesta).toMatch(/^Te escribimos para confirmar la entrega de tu pedido de .+ antes de salir\. Responde SÍ o NO\./);
+    expect(pq.pasos[2]!.respuesta).toMatch(/queda confirmado para hoy/);
   });
 
   it('«Mis casos»: se guarda, se edita, se corre de punta a punta y se borra', async () => {
-    // Regla del dueño: al cliente solo le llega el cierre una vez; después, silencio.
+    // Regla del dueño: tras el «queda confirmado», lo que pregunte recibe el cierre UNA vez; después, silencio.
     const miCaso = [
       'titulo: Reclama y luego cancela',
       'inicio: con ubicación',
       'cliente: si, lo recibo hoy',
-      '=> dice: no se reciben consultas',
+      '=> dice: queda confirmado para hoy',
       'motorizado: 25',
       '=> estado: en camino',
       'cliente: por donde va??',
-      '=> calla',
+      '=> dice: no se reciben consultas',
+      '=> con el número del motorizado',
       'adelantar: pasada la hora',
       'cliente: ya paso la hora y no llega nada',
       '=> calla',
@@ -251,6 +285,8 @@ describe('Módulo desarrollador: conversaciones completas', () => {
       payload: JSON.stringify({ pedidos: [{ referencia: 'R-0001', telefono: '51944000099', nombre: 'Cliente Real', distrito: 'Miraflores', lat: -12.1211, lng: -77.0301, faltaConfirmar: false }] }),
     });
     expect(alta.statusCode).toBeLessThan(300);
+    // Lo de GSG espera a que una persona confirme el envío.
+    expect((await api('POST', '/admin/entregas/confirmar-envio', { todos: true })).body.liberadas).toBeGreaterThanOrEqual(1);
     await esperar(async () => {
       const [f] = (await tienda.repos.desarrollador!.query<{ phone: string | null }>(`select m.phone from entregas e left join motorizados m on m.id = e.motorizado_id where e.referencia = 'R-0001'`)).rows;
       return Boolean(f?.phone);

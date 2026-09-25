@@ -187,7 +187,8 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
       //    nueva, porque ya tiene todo y el cliente espera su hora.
       for (const e of await listaMotorizado()) {
         if (frenada(e.id)) continue;
-        if (e.estado === 'lista') {
+        // (una apartada por falta de motorizado se reintenta sola: si ya hay uno, sale de la incidencia)
+        if (e.estado === 'lista' || (e.estado === 'incidencia' && e.incidencia === 'sin_motorizado')) {
           if (!dentroDeHorario) {
             ultimoMotivo = `fuera del horario de envío (${vigentes.horaInicio}:00 a ${vigentes.horaFin}:00)`;
             continue;

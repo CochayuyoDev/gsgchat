@@ -230,13 +230,15 @@ describe('Números del día: los filtros y las acciones en masa', () => {
     expect(vacia.body.error).toMatch(/ningún número seleccionado/);
   });
 
-  it('la pantalla existe, está en el menú justo después de Hoy y no enseña nada técnico', async () => {
+  it('la pantalla existe, está en el menú (y «Ubicaciones registradas» a la vista la abre filtrada) y no enseña nada técnico', async () => {
     const r = await e.app.inject({ method: 'GET', url: '/numeros', headers: { authorization: 'Bearer x' } });
     // Sin sesión de panel la página pide entrar; con la clave de API de las pruebas no hay cookie.
     expect([200, 302]).toContain(r.statusCode);
     const { MENU_GSG } = await import('../src/web/shell.js');
-    const i = MENU_GSG.findIndex((x) => x.id === 'hoy');
-    expect(MENU_GSG[i + 1]?.href).toBe('/numeros');
+    expect(MENU_GSG.find((x) => x.id === 'numeros')?.href).toBe('/numeros');
+    const ubi = MENU_GSG.find((x) => x.id === 'ubicaciones');
+    expect(ubi?.href).toBe('/numeros?etapa=contactados');
+    expect(ubi?.seccion).toBeUndefined();
     const { numerosPage } = await import('../src/web/numeros-page.js');
     const html = numerosPage({ disponible: true, demo: false, nombreNegocio: 'Tienda' });
     expect(html).toContain('Falta pedir ubicación');

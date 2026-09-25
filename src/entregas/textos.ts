@@ -52,6 +52,14 @@ export const ajustesEntregasSchema = z.object({
    */
   silencioTrasUbi: z.boolean().default(true),
   /**
+   * «Revisar y confirmar antes de enviar» (decisión del dueño): la lista del
+   * día que manda GSG (sincronización, la API o el simulador) NO sale sola;
+   * queda en «Números del día» como «Por confirmar el envío» hasta que una
+   * persona pulsa «Confirmar y enviar». Apagado: sale sola, como antes. Lo
+   * creado con «Pedido a mano» nunca espera.
+   */
+  confirmarListaGsg: z.boolean().default(true),
+  /**
    * Cliente recurrente: si mando su ubicacion hace menos de `diasMaximo`
    * dias, en vez de pedirle el pin se le propone esa direccion ("¿la misma
    * de la ultima vez?"). Si en `esperaMin` minutos no contesta, el reparto
@@ -174,6 +182,11 @@ export const ajustesEntregasSchema = z.object({
       solicitudUbicacion: z.string().max(2000).default(''),
       porQueUbicacion: z.string().max(1000).default(''),
       cierreAgente: z.string().max(1000).default(''),
+      confirmarEntregaGsg: z.string().max(2000).default(''),
+      recordarConfirmarGsg: z.string().max(1000).default(''),
+      confirmadaGsg: z.string().max(1000).default(''),
+      noConfirmaGsg: z.string().max(1000).default(''),
+      porQueConfirmar: z.string().max(1000).default(''),
     })
     .default({}),
 });
@@ -366,7 +379,8 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
  * correctamente» y es también el mensaje de cierre ante cualquier consulta.
  */
 export const TEXTO_CIERRE = 'Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: {telefonoMotorizado}.';
-const CIERRE_UBICACION = TEXTO_CIERRE;
+// En el agradecimiento no va el cierre: el numero del motorizado se da cuando el cliente pregunta algo (ya con motorizado asignado).
+const CIERRE_UBICACION = '¡Muchas gracias!';
 
 /** Los textos de siempre. Se usan cuando la pantalla no guardo otros. */
 export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string> = {
@@ -424,6 +438,12 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   motorizadoEnlace: 'Hola {motorizado}, aquí tienes tus pedidos de hoy con botones grandes para avisar desde el celular: {enlace}\nVale por 7 días. Si lo pierdes, pide otro al coordinador.',
   ubicacionFueraDeZona: 'Gracias, {nombre}, recibimos su ubicación, pero queda fuera de la zona que cubrimos{cobertura}. Una persona de {negocio} se comunicará con usted para coordinar {pedido}.',
   clienteCanceladoGsg: 'Hola {nombre}, {pedido} quedó cancelado por {negocio} y hoy ya no se lo llevamos. Si no fue usted quien lo canceló, escríbanos por aquí y lo revisamos.',
+  // Los de «falta confirmar» (GSG ya tiene su dirección): solo SÍ o NO, nunca la ubicación.
+  confirmarEntregaGsg: '¡Hola {nombre}! Soy {remitente} de la empresa de entregas GSG. Tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\n¿Nos confirmas que lo recibes hoy en esa dirección? Responde SÍ o NO.',
+  recordarConfirmarGsg: 'Hola {nombre}, te escribimos otra vez por tu entrega de GSG.\n📦 Producto: {producto}\n🏠 Dirección: {direccionCompleta}\n\n¿Nos confirmas que la recibes hoy? Responde SÍ o NO.',
+  confirmadaGsg: 'Perfecto, tu pedido queda confirmado para hoy. ¡Muchas gracias!',
+  noConfirmaGsg: 'Entendido, lo pasamos a un asesor. Por este canal no se reciben consultas. Número del motorizado: {telefonoMotorizado}.',
+  porQueConfirmar: 'Te escribimos para confirmar la entrega de tu pedido de {empresa} antes de salir. Responde SÍ o NO.',
 };
 /** El texto que toca: el guardado desde la pantalla si lo hay, si no el de siempre. */
 export function textoDe(clave: keyof AjustesEntregas['textos'], ajustes: AjustesEntregas, ctx: ContextoTexto): string {
@@ -501,6 +521,11 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   solicitudUbicacion: ['{nombreCompleto}', '{nombre}', '{remitente}', '{producto}', '{empresa}', '{tracking}', '{nroPedido}', '{metodoPago}', '{monto}', '{direccionCompleta}', '{direccion}', '{distrito}', '{pedido}', '{negocio}'],
   porQueUbicacion: ['{nombre}', '{pedido}', '{negocio}', '{soporte}', '{telefonoMotorizado}'],
   cierreAgente: ['{nombre}', '{pedido}', '{negocio}', '{soporte}', '{telefonoMotorizado}'],
+  confirmarEntregaGsg: ['{nombreCompleto}', '{nombre}', '{remitente}', '{producto}', '{empresa}', '{tracking}', '{nroPedido}', '{metodoPago}', '{monto}', '{direccionCompleta}', '{direccion}', '{distrito}', '{pedido}', '{negocio}'],
+  recordarConfirmarGsg: ['{nombre}', '{producto}', '{empresa}', '{direccionCompleta}', '{pedido}', '{negocio}'],
+  confirmadaGsg: ['{nombre}', '{pedido}', '{negocio}', '{telefonoMotorizado}', '{soporte}'],
+  noConfirmaGsg: ['{nombre}', '{pedido}', '{negocio}', '{telefonoMotorizado}', '{soporte}'],
+  porQueConfirmar: ['{nombre}', '{pedido}', '{empresa}', '{negocio}'],
 };
 export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string> = {
   ubicacionRegistrada: 'Al cliente, justo después de mandar su ubicación, cuando no falta nada más (con el enlace del mapa, el horario de entregas y el número de soporte)',
@@ -551,4 +576,9 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   solicitudUbicacion: 'Al cliente, el PRIMER mensaje que le pide la ubicación, con los datos del envío que manda GSG (la línea de un dato que no vino no sale; sin quien firma, dice «Te escribimos de la empresa de entregas GSG»)',
   porQueUbicacion: 'Al cliente que pregunta por qué le pedimos la ubicación (se le explica y se le vuelve a pedir)',
   cierreAgente: 'Al cliente que escribe una consulta que no es mandar su ubicación: se le manda UNA vez y el chat pasa a una persona (el asistente deja de contestar)',
+  confirmarEntregaGsg: 'Al cliente de «falta confirmar» (GSG ya tiene su dirección): la pregunta SÍ/NO con los datos del envío (la línea de un dato que no vino no sale). Nunca se le pide la ubicación',
+  recordarConfirmarGsg: 'Al cliente de «falta confirmar» que todavía no contestó: el recordatorio SÍ/NO',
+  confirmadaGsg: 'Al cliente de «falta confirmar» que dice SÍ: queda confirmado, se le da el número y desde ahí no se le escribe más',
+  noConfirmaGsg: 'Al cliente de «falta confirmar» que dice NO, otro día u otra dirección: pasa a un asesor y desde ahí no se le escribe más',
+  porQueConfirmar: 'Al cliente de «falta confirmar» que pregunta por qué le escriben o desconfía (se le vuelve a pedir SÍ o NO)',
 };

@@ -115,6 +115,9 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     const r = await api('POST', '/api/v1/entregas', { pedidos }, { authorization: `Bearer ${clave}`, cookie: '' });
     expect(r.status).toBe(201);
     expect(r.body.creadas.length).toBe(pedidos.length);
+    // Lo de GSG espera a que se confirme el envío: se confirma solo lo de prueba (el real sigue esperando).
+    const envio = await api('POST', '/admin/desarrollador/confirmar-envio', {});
+    expect(envio.body).toMatchObject({ liberadas: pedidos.length - 1, confirmar: 1 });
     expect((await api('POST', '/admin/motorizados', { telefono: '51900100001', nombre: 'Carlos Rojas', placa: 'M1A-101' })).status).toBe(200);
   }, 180_000);
 
@@ -159,20 +162,39 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(chat.body.trazas.length).toBeGreaterThan(0);
   });
 
-  it('regla del dueño: tras UBI REGISTRADA, «¿a qué hora llega?» recibe SILENCIO y la traza lo dice', async () => {
+  it('regla del dueño: tras UBI REGISTRADA, «¿a qué hora llega?» recibe el cierre UNA vez con el número, y luego SILENCIO; la traza lo cuenta', async () => {
     const r = await escribir('51900000001', { tipo: 'texto', texto: '¿a qué hora llega?' });
     expect(r.status).toBe(200);
     const t = pasos(r.body.traza);
-    expect(t).toContain('Regla del dueño: ya recibió UBI REGISTRADA o el cierre → silencio');
-    expect(t).toContain('Silencio: al cliente no se le escribió nada');
-    expect(t).not.toMatch(/Contestó/);
+    expect(t).toContain('Regla del dueño: ya recibió el agradecimiento y ahora pregunta algo → el cierre UNA vez con el número del motorizado asignado');
+    expect(t).toMatch(/Contestó \(texto fijo: la IA solo clasificó\): «Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
+    const luego = await escribir('51900000001', { tipo: 'texto', texto: 'hola?' });
+    const tl = pasos(luego.body.traza);
+    expect(tl).toContain('Regla del dueño: ya recibió el cierre');
+    expect(tl).toContain('Silencio: al cliente no se le escribió nada');
+    expect(tl).not.toMatch(/Contestó/);
   });
 
-  it('regla del dueño: sin pregunta SÍ/NO; el que ya tiene pin va directo al motorizado', async () => {
-    await esperar(async () => (await entrega('PRUEBA-00002'))!.confirmacion_estado === 'no_hace_falta', 60_000, 'que PRUEBA-00002 no espere confirmación');
+  it('regla del dueño: al que GSG ya le tiene la dirección se le pregunta SOLO SÍ/NO; dice SÍ y queda confirmado', async () => {
+    await esperar(async () => (await entrega('PRUEBA-00002'))!.confirmacion_estado === 'pedida', 60_000, 'que a PRUEBA-00002 se le pregunte SÍ o NO');
     const chat = await api('GET', '/admin/desarrollador/vivo/chat/51900000002');
-    expect(chat.body.mensajes.filter((m: { dir: string; texto: string }) => m.dir === 'out' && /SÍ o NO|SÍ para confirmar/.test(m.texto))).toEqual([]);
-  });
+    const salientes = chat.body.mensajes.filter((m: { dir: string; texto: string }) => m.dir === 'out');
+    expect(salientes.some((m: { texto: string }) => /¿Nos confirmas que lo recibes hoy en esa dirección\? Responde SÍ o NO\./.test(m.texto))).toBe(true);
+    expect(salientes.some((m: { texto: string }) => /compartir tu ubicación/i.test(m.texto))).toBe(false);
+    const si = await escribir('51900000002', { tipo: 'texto', texto: 'Sí' });
+    const t = pasos(si.body.traza);
+    expect(t).toContain('Regla del dueño («falta confirmar»): dice SÍ');
+    expect(t).toMatch(/Perfecto, tu pedido queda confirmado para hoy\. ¡Muchas gracias!»/);
+    expect(t).not.toMatch(/no se reciben consultas/);
+    expect((await entrega('PRUEBA-00002'))!.confirmacion_estado).toBe('confirmada');
+    // Pregunta después del agradecimiento: el cierre UNA vez con el número; después, silencio.
+    const luego = await escribir('51900000002', { tipo: 'texto', texto: '¿a qué hora llega?' });
+    const tl = pasos(luego.body.traza);
+    expect(tl).toContain('ya recibió el agradecimiento y ahora pregunta algo');
+    expect(tl).toMatch(/«Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
+    const otra = await escribir('51900000002', { tipo: 'texto', texto: 'hola?' });
+    expect(pasos(otra.body.traza)).toContain('Silencio: al cliente no se le escribió nada');
+  }, 90_000);
 
   it('regla del dueño: «¿por qué?» recibe la explicación fija; «cuánto cuesta el envío» el cierre con el número, y luego silencio', async () => {
     const porQue = await escribir('51900000011', { tipo: 'texto', texto: '¿Por qué me piden mi ubicación?' });
@@ -201,7 +223,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     await esperar(async () => (await api('GET', '/admin/desarrollador/vivo/chat/51900100001')).body.mensajes.some((m: { dir: string }) => m.dir === 'out'), 90_000, 'que el motorizado reciba el pedido');
     const tiempo = await escribir('51900100001', { tipo: 'texto', texto: '40' });
     expect(pasos(tiempo.body.traza)).toContain('40 minutos');
-    // Sin pregunta SÍ/NO (regla del dueño), los que ya tienen pin van al motorizado: el primero que le llegó.
+    // El que dijo SÍ (y ya tenía la dirección) va al motorizado: el primero que le llegó.
     const avisada = async () => (await db().query<{ referencia: string }>("select e.referencia from entregas e join motorizados m on m.id = e.motorizado_id where m.phone = '51900100001' and e.estado = 'avisada' order by e.id limit 1")).rows[0]?.referencia;
     await esperar(async () => Boolean(await avisada()), 30_000, 'el aviso (por dentro) del pedido');
     const ref = (await avisada())!;

@@ -18,81 +18,80 @@ import { DISTRITOS_LIMA, DISTRITOS_CALLAO } from '../preventa/distritos.js';
 
 const CSS = `
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1300px; }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--esp-5); }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
+  .hidden { display: none !important; }
   /* El armazon ya avisa "Demostración" en la barra de arriba, pero la esconde
      en pantalla estrecha: solo ahi lo repetimos nosotros. */
-  .demo { display: none; background: var(--ambar-suave); color: var(--ambar); padding: 8px 14px; font-size: var(--fs-small); text-align: center; border-radius: var(--radio-sm); margin-bottom: var(--esp-3); font-weight: 600; }
+  .demo { display: none; background: var(--ambar-suave); color: var(--ambar); padding: 8px 14px; font-size: var(--fs-small); text-align: center; border-radius: var(--radio-sm); font-weight: 600; }
   @media (max-width: 960px) { .demo { display: block; } }
 
-  /* Las cuatro cifras de arriba: libres, repartiendo, descansando, entregado. */
-  .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--esp-2); margin-bottom: var(--esp-3); }
-  .cifra { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 10px 12px; box-shadow: var(--sombra); }
-  .cifra .n { font-size: 22px; font-weight: 800; line-height: 1.1; letter-spacing: -.01em; }
-  .cifra .q { font-size: var(--fs-small); color: var(--texto-suave); margin-top: 2px; line-height: 1.3; }
-  .cifra.verde .n { color: var(--verde); }
-  .cifra.ambar .n { color: var(--ambar); }
-  .cifra.azul .n { color: var(--azul); }
+  /* Arriba: una linea de resumen y el unico boton principal. */
+  .arriba { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
+  .resumen { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 14.5px; flex: 1 1 320px; }
+  .resumen span { display: inline-flex; align-items: center; white-space: nowrap; }
+  .resumen b { font-size: 18px; margin-right: 5px; }
+  .punto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--gris-claro); margin-right: 8px; flex: none; }
+  .punto.verde { background: var(--verde); } .punto.ambar { background: var(--ambar); } .punto.azul { background: var(--azul); }
+  .arriba .btn.primario { min-height: 48px; padding: 10px 22px; font-size: 15.5px; font-weight: 700; }
 
-  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--esp-3); align-items: start; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
-  .caja { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); overflow: hidden; margin-bottom: var(--esp-3); box-shadow: var(--sombra); }
-  .caja > h2 { font-size: var(--fs-h3); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .caja > h2 .sep { flex: 1; }
-  .caja .cuerpo { padding: 14px; }
+  /* Una tarjeta por motorizado. */
+  .motos { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--esp-4); align-items: start; }
+  .moto { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .moto.descanso, .moto.baja { background: var(--superficie-2); }
+  .moto .cab { display: flex; align-items: center; gap: 12px; }
+  .moto .avatar { width: 42px; height: 42px; border-radius: 50%; background: var(--primario-suave); color: var(--primario); display: grid; place-items: center; font-weight: 800; font-size: 17px; flex: none; }
+  .moto.descanso .avatar, .moto.baja .avatar { background: var(--gris-suave); color: var(--texto-suave); }
+  .moto .quien { flex: 1; min-width: 0; }
+  .moto .quien b { display: block; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
+  .moto .quien .tel { color: var(--texto-suave); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .moto .datos { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+  .moto .datos .dato { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+  .moto .datos .dato > span:first-child { flex: none; width: 18px; text-align: center; }
+  .moto .datos .dato > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+  .moto .hoy { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-radius: var(--radio-sm); background: var(--superficie-2); }
+  .moto.descanso .hoy, .moto.baja .hoy { background: var(--superficie); }
+  .moto .hoy .n { font-size: 26px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .moto .hoy .q { font-size: 13.5px; }
+  .moto .hoy .sub { display: block; color: var(--texto-suave); font-size: var(--fs-small); }
+  .moto .sub { color: var(--texto-suave); font-size: var(--fs-small); line-height: 1.4; }
+  .moto .acciones { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+  .moto .acciones .btn { flex: 1 1 auto; }
+  .moto .acciones .btn.mas { flex: 0 0 auto; min-width: 44px; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; }
-  tr:last-child td { border-bottom: 0; }
-  #motorizados > tr:hover > td { background: var(--superficie-2); }
-  #motorizados > tr > td:first-child { min-width: 210px; }
-  #motorizados > tr > td:nth-child(3) { min-width: 180px; }
-  td .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 3px; line-height: 1.35; }
-  td.mensaje { color: var(--texto-suave); text-align: center; padding: 24px; }
-  td.hueco { padding: 14px; }
-  .chip.estado-mot { margin-left: 6px; }
-  .acciones { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-
-  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
-  .pedido { padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: 13px; line-height: 1.45; }
-  .pedido:last-child { border-bottom: 0; }
-  .pedido .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 3px; }
-  .nada { color: var(--texto-suave); font-size: 13.5px; text-align: center; padding: 14px 8px; }
-  .explica { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px 16px; margin-bottom: var(--esp-3); font-size: var(--fs-cuerpo); }
-  .explica summary { color: var(--texto-suave); font-size: 13.5px; cursor: pointer; }
-  .explica p { margin: 8px 0 0; }
-
-  /* La ruta de un motorizado, desplegada bajo su fila. */
-  tr.fila-ruta td { background: var(--superficie-2); }
+  /* La ruta de un motorizado, desplegada dentro de su tarjeta. */
+  .ruta { background: var(--superficie-2); border-radius: var(--radio-sm); padding: 10px 12px; }
   .ruta-cab { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; font-size: 13px; }
   .ruta-cab .sep { flex: 1; }
   .ruta-parada { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--borde); font-size: 13px; align-items: flex-start; }
   .ruta-parada:last-child { border-bottom: 0; }
   .ruta-parada .n { font-weight: 700; min-width: 22px; color: var(--texto-suave); }
 
-  /* En el celular cada motorizado es una tarjeta y las etiquetas van delante del dato. */
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
+  .pedido { padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: 13.5px; line-height: 1.45; }
+  .pedido:last-child { border-bottom: 0; }
+  .pedido .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 3px; }
+  .nada { color: var(--texto-suave); font-size: 13.5px; text-align: center; padding: 14px 8px; }
+
+  /* Lo de menos uso, plegado. */
+  .plegable { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); }
+  .plegable > summary { cursor: pointer; padding: 14px 18px; font-weight: 600; font-size: 15px; list-style: none; display: flex; align-items: center; gap: 10px; }
+  .plegable > summary::-webkit-details-marker { display: none; }
+  .plegable > summary::after { content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(45deg); transition: transform .15s; }
+  .plegable[open] > summary::after { transform: rotate(-135deg); }
+  .plegable > summary .muted { font-weight: 400; font-size: var(--fs-small); }
+  .plegable .dentro { padding: 0 18px 16px; }
+  .plegable .dentro p { margin: 0 0 8px; font-size: 13.5px; }
+  .fila-botones { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+
   @media (max-width: 760px) {
-    .cifras { grid-template-columns: repeat(2, 1fr); gap: 6px; }
-    .cifra { padding: 8px 10px; }
-    .cifra .n { font-size: 19px; }
-    .caja > h2 { padding: 10px 12px; }
-    .caja thead { display: none; }
-    .caja table, .caja tbody, .caja tr, .caja td { display: block; }
-    #motorizados > tr { border: 1px solid var(--borde); border-radius: var(--radio); margin: 10px 12px; padding: 10px 12px; background: var(--superficie); box-shadow: var(--sombra); }
-    #motorizados > tr > td { border: 0; padding: 4px 0; min-width: 0; }
-    #motorizados > tr:hover > td { background: transparent; }
-    #motorizados > tr > td:first-child { padding-bottom: 6px; border-bottom: 1px solid var(--borde); margin-bottom: 4px; font-size: 14.5px; }
-    #motorizados > tr > td:nth-child(2)::before, #motorizados > tr > td:nth-child(3)::before { display: inline-block; min-width: 96px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; vertical-align: top; margin-top: 2px; }
-    #motorizados > tr > td:nth-child(2)::before { content: 'Hoy'; }
-    #motorizados > tr > td:nth-child(3)::before { content: 'Ahora mismo'; }
-    #motorizados > tr > td:last-child { padding-top: 8px; }
-    .acciones { justify-content: stretch; }
-    .acciones .btn { flex: 1 1 auto; }
-    #motorizados > tr.fila-ruta { padding: 8px 12px; background: var(--superficie-2); margin-top: -6px; }
-    #motorizados > tr.fila-ruta > td { padding: 0; border: 0; }
-    td.mensaje, td.hueco { padding: 12px; }
+    .wrap { gap: var(--esp-4); }
+    .arriba .btn.primario { width: 100%; }
+    .motos { grid-template-columns: 1fr; gap: var(--esp-3); }
+    .moto { padding: 14px; }
+    .plegable > summary { padding: 14px; }
+    .plegable .dentro { padding: 0 14px 14px; }
   }
 `;
 
@@ -100,34 +99,31 @@ export function motorizadosPage(opts: { disponible: boolean; demo: boolean; nomb
   const contenido = `
 <div class="wrap">
 ${opts.demo ? '<div class="demo">Demostración: nada sale a WhatsApp de verdad.</div>' : ''}
-${opts.disponible ? '' : '<div class="explica"><b>Los motorizados no están disponibles en este arranque.</b> Arranca el sistema con <code>npm run quick</code>.</div>'}
+${opts.disponible ? '' : '<div class="plegable" style="padding:14px 18px"><b>Los motorizados no están disponibles en este arranque.</b> Arranca el sistema con <code>npm run quick</code>.</div>'}
 
-<details class="explica">
-  <summary>¿Cómo se reparten los pedidos entre los motorizados?</summary>
-  <p><b>Cada pedido listo (con ubicación y confirmación) va al motorizado activo que anda más cerca</b> (su última posición de hoy, a menos de 6 km del pin); si nadie está cerca, al de la zona del distrito; y si no, al que menos lleva hoy. Él recibe el pin por WhatsApp y contesta en cuántos minutos entrega; a eso se le suma el margen y se le avisa al cliente. Cuando escribe <b>«entregado»</b> (o manda la foto), el pedido queda entregado y su última posición pasa a ser ese pin.</p>
-  <p class="muted" style="margin:0">Si no contesta a los avisos o dice «no puedo», el pedido pasa solo a otro. Si escribe <b>«me quedo sin moto»</b> (o «accidente»), todos sus pedidos pasan a otros y él queda en descanso.</p>
+<div class="arriba">
+  <div class="resumen" id="cifras" role="status"></div>
+  <button class="btn primario" id="mot-nuevo" type="button">+ Dar de alta motorizado</button>
+</div>
+
+<div class="motos" id="motorizados"><div class="nada">Cargando…</div></div>
+
+<details class="plegable" id="caja-calle">
+  <summary>Pedidos en la calle ahora <span class="muted" id="calle-n"></span></summary>
+  <div class="dentro" id="calle"><div class="muted">Cargando…</div></div>
 </details>
 
-<div class="cifras" id="cifras"></div>
-
-<div class="cols">
-  <div class="caja">
-    <h2>Motorizados <span class="sep"></span><button class="btn sm primario" id="mot-nuevo" type="button">+ Dar de alta</button><button class="btn sm" id="mot-pegar" type="button">Pegar la lista</button><button class="btn sm hidden" id="mot-cargar" type="button">Cargar 10 de prueba</button></h2>
-    <div class="cuerpo" style="padding:0">
-      <table>
-        <thead><tr><th>Quién</th><th>Hoy</th><th>Ahora mismo</th><th></th></tr></thead>
-        <tbody id="motorizados"><tr><td colspan="4" class="mensaje">Cargando…</td></tr></tbody>
-      </table>
+<details class="plegable">
+  <summary>Más opciones</summary>
+  <div class="dentro">
+    <div class="fila-botones">
+      <button class="btn" id="mot-pegar" type="button">Pegar la lista de motorizados</button>
+      <button class="btn hidden" id="mot-cargar" type="button">Cargar 10 de prueba</button>
     </div>
+    <p><b>¿Cómo se reparten los pedidos?</b> Cada pedido listo (con ubicación y confirmación) va al motorizado activo que anda más cerca (su última posición de hoy, a menos de 6 km del pin); si nadie está cerca, al de la zona del distrito; y si no, al que menos lleva hoy. Él recibe el pin por WhatsApp y contesta en cuántos minutos entrega; a eso se le suma el margen y se le avisa al cliente. Cuando escribe «entregado» (o manda la foto), el pedido queda entregado.</p>
+    <p class="muted">Si no contesta a los avisos o dice «no puedo», el pedido pasa solo a otro. Si escribe «me quedo sin moto» (o «accidente»), todos sus pedidos pasan a otros y él queda en descanso.</p>
   </div>
-
-  <div>
-    <div class="caja">
-      <h2>Pedidos en la calle <span class="sep"></span><span class="muted" id="calle-n" style="font-weight:400;font-size:12.5px"></span></h2>
-      <div class="cuerpo" id="calle"><div class="muted">Cargando…</div></div>
-    </div>
-  </div>
-</div>
+</details>
 </div>
 `;
 
@@ -190,56 +186,64 @@ function ultimaPosicion(m) {
 
 // ----------------------------------------------------------------- pintar
 
+/* Arriba, una linea: cuantos estan activos, cuantos descansan y cuanto hay en la calle. */
 function pintarCifras() {
   var activos = resumen.motorizados.filter(function (m) { return m.estado === 'activo'; });
   var repartiendo = activos.filter(function (m) { return llevaAhora(m.id).length > 0; }).length;
   var descansando = resumen.motorizados.filter(function (m) { return m.estado === 'descanso'; }).length;
   var bajas = resumen.motorizados.filter(function (m) { return m.estado === 'baja'; }).length;
   var entregados = resumen.entregas.filter(function (e) { return e.estado === 'entregada'; }).length;
+  if (!resumen.motorizados.length) { document.getElementById('cifras').innerHTML = '<span class="muted">Todavía no hay motorizados dados de alta.</span>'; return; }
   document.getElementById('cifras').innerHTML =
-    '<div class="cifra verde"><div class="n">' + (activos.length - repartiendo) + '</div><div class="q">libres, listos para un pedido</div></div>' +
-    '<div class="cifra azul"><div class="n">' + repartiendo + '</div><div class="q">repartiendo ahora mismo</div></div>' +
-    '<div class="cifra ' + (descansando ? 'ambar' : '') + '"><div class="n">' + descansando + '</div><div class="q">en descanso hoy' + (bajas ? ' · ' + bajas + ' de baja' : '') + '</div></div>' +
-    '<div class="cifra verde"><div class="n">' + entregados + '</div><div class="q">pedidos entregados hoy</div></div>';
+    '<span><span class="punto verde"></span><b>' + activos.length + '</b>' + (activos.length === 1 ? 'activo' : 'activos') + (repartiendo ? ' <span class="muted">&nbsp;(' + repartiendo + ' repartiendo)</span>' : '') + '</span>' +
+    '<span><span class="punto ' + (descansando ? 'ambar' : '') + '"></span><b>' + descansando + '</b>en descanso' + (bajas ? ' <span class="muted">&nbsp;· ' + bajas + ' ya no reparte' + (bajas === 1 ? '' : 'n') + '</span>' : '') + '</span>' +
+    '<span><span class="punto azul"></span><b>' + entregados + '</b>' + (entregados === 1 ? 'entregado hoy' : 'entregados hoy') + '</span>';
 }
 
-/* Un boton de la fila: siempre con el nombre en el aria-label, que "Descanso" a secas no dice de quien. */
+/* Un boton de la tarjeta: siempre con el nombre en el aria-label, que "Descanso" a secas no dice de quien. */
 function boton(m, accion, texto, aria, clase) {
   return '<button class="btn sm' + (clase ? ' ' + clase : '') + '" type="button" data-accion="' + accion + '" data-id="' + m.id + '" aria-label="' + esc(aria + ' ' + m.nombre) + '">' + esc(texto) + '</button>';
 }
 
-function filaMotorizado(m) {
+function inicial(nombre) { return esc(String(nombre || '?').trim().charAt(0).toUpperCase() || '?'); }
+
+function tarjetaMotorizado(m) {
   var lleva = llevaAhora(m.id);
   var entregados = entregadasDe(m.id);
   var abierta = Boolean(rutasAbiertas[m.id]);
-  var quien = '<td><b>' + esc(m.nombre) + '</b>' + chipEstado('motorizado', m.estado, 'estado-mot') +
-    '<div class="sub">' + esc(telefonoBonito(m.phone)) + (m.placa ? ' · ' + esc(m.placa) : '') + '</div>' +
-    (m.zona ? '<div class="sub">' + esc(m.zona) + '</div>' : '') + '</td>';
-  var hoy = '<td><b>' + plural(entregados, 'entregado', 'entregados') + '</b>' +
-    (m.entregasHoy ? '<div class="sub">de ' + plural(m.entregasHoy, 'pedido', 'pedidos') + ' que se le dieron hoy</div>' : '') +
-    (m.puntualidad ? '<div class="sub" title="Comparando la hora que se le avisó al cliente con la hora real de cada entrega, últimos 30 días">⏱ ' + esc(m.puntualidad.texto) + '</div>' : '') + '</td>';
-  var ahora = '<td>' + (lleva.length
-    ? '<b>' + plural(lleva.length, 'pedido encima', 'pedidos encima') + '</b>' + lleva.map(function (e) {
-      return '<div class="sub"><b>' + esc(e.referencia) + '</b> ' + (e.motorizadoEstado === 'respondio' ? 'llega ' + hora(e.llegaAproxAt) : 'esperando su tiempo desde ' + hora(e.motorizadoEnviadoAt)) + '</div>';
-    }).join('')
-    : '<span class="muted">' + (m.estado === 'activo' ? 'Libre' : 'Sin pedidos') + '</span>') + ultimaPosicion(m) + '</td>';
-  var acciones = '<td><div class="acciones">' +
-    (lleva.length ? boton(m, 'ruta', abierta ? 'Cerrar la ruta' : 'Ver su ruta', abierta ? 'Cerrar la ruta de' : 'Ver la ruta de') : '') +
-    (m.estado === 'activo' ? boton(m, 'descanso', 'Descanso', 'Mandar a descansar a') : boton(m, 'activo', 'Activar', 'Activar a', 'primario')) +
-    boton(m, 'mas', 'Más…', 'Más acciones de') + '</div></td>';
-  return '<tr>' + quien + hoy + ahora + acciones + '</tr>' +
-    (abierta ? '<tr class="fila-ruta"><td colspan="4" id="ruta-' + m.id + '">' + (rutaDibujada[m.id] || 'Cargando la ruta…') + '</td></tr>' : '');
+  var pedidosHoy = Math.max(m.entregasHoy || 0, entregados + lleva.length);
+  var hoy = '<div class="hoy"><span class="n">' + pedidosHoy + '</span><span class="q">' + (pedidosHoy === 1 ? 'pedido hoy' : 'pedidos hoy') +
+    '<span class="sub">' + (lleva.length ? plural(lleva.length, 'encima ahora', 'encima ahora') + ' · ' : '') + plural(entregados, 'entregado', 'entregados') + '</span></span></div>';
+  var encima = lleva.length ? '<div class="sub">' + lleva.map(function (e) {
+    return '<b>' + esc(e.referencia) + '</b> ' + (e.motorizadoEstado === 'respondio' ? 'llega ' + hora(e.llegaAproxAt) : 'esperando su tiempo');
+  }).join(' · ') + '</div>' : '';
+  return '<article class="moto ' + esc(m.estado) + '">' +
+    '<div class="cab"><span class="avatar" aria-hidden="true">' + inicial(m.nombre) + '</span>' +
+      '<div class="quien"><b>' + esc(m.nombre) + '</b><span class="tel">' + esc(telefonoBonito(m.phone)) + '</span></div>' +
+      chipEstado('motorizado', m.estado) + '</div>' +
+    '<div class="datos">' +
+      '<div class="dato"><span aria-hidden="true">📍</span><span>' + (m.zona ? esc(m.zona) : '<span class="muted">Sin zona: recibe de cualquier distrito</span>') + '</span></div>' +
+      (m.placa ? '<div class="dato"><span aria-hidden="true">🛵</span><span>' + esc(m.placa) + '</span></div>' : '') +
+    '</div>' +
+    hoy + encima +
+    (m.puntualidad ? '<div class="sub" title="Comparando la hora que se le avisó al cliente con la hora real de cada entrega, últimos 30 días">⏱ ' + esc(m.puntualidad.texto) + '</div>' : '') +
+    ultimaPosicion(m) +
+    (abierta ? '<div class="ruta" id="ruta-' + m.id + '">' + (rutaDibujada[m.id] || 'Cargando la ruta…') + '</div>' : '') +
+    '<div class="acciones">' +
+      (m.estado === 'activo' ? boton(m, 'descanso', 'Mandar a descanso', 'Mandar a descansar a') : boton(m, 'activo', 'Activar', 'Activar a', 'primario')) +
+      (lleva.length ? boton(m, 'ruta', abierta ? 'Cerrar la ruta' : 'Ver su ruta', abierta ? 'Cerrar la ruta de' : 'Ver la ruta de') : '') +
+      boton(m, 'mas', '⋯', 'Más acciones de', 'mas') +
+    '</div></article>';
 }
 
 function pintarTabla() {
-  var tbody = document.getElementById('motorizados');
+  var caja = document.getElementById('motorizados');
   if (!resumen.motorizados.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="hueco"><div class="vacio"><div class="ico">🛵</div><h3>Todavía no hay motorizados</h3>' +
-      '<p>Da de alta al primero con su WhatsApp: desde ese momento recibe los pedidos listos y contesta en cuántos minutos entrega.</p>' +
-      '<div class="acciones"><button class="btn primario" type="button" data-accion="alta">+ Dar de alta</button></div></div></td></tr>';
+    caja.innerHTML = '<div class="vacio" style="grid-column:1/-1"><div class="ico">🛵</div><h3>Todavía no hay motorizados</h3>' +
+      '<p>Da de alta al primero con su WhatsApp: desde ese momento recibe los pedidos listos y contesta en cuántos minutos entrega.</p></div>';
     return;
   }
-  tbody.innerHTML = resumen.motorizados.map(filaMotorizado).join('');
+  caja.innerHTML = resumen.motorizados.map(tarjetaMotorizado).join('');
   Object.keys(rutasAbiertas).forEach(function (id) {
     // Si el motorizado ya no está (borrado desde otra pestaña), su ruta tampoco.
     if (!motorizadoPorId(id)) { delete rutasAbiertas[id]; delete rutaDibujada[id]; return; }
@@ -251,8 +255,8 @@ function pintarCalle() {
   var enCalle = resumen.entregas.filter(function (e) { return e.motorizado && estaEnLaCalle(e); });
   var sinRespuesta = enCalle.filter(function (e) { return e.motorizadoEstado !== 'respondio'; }).length;
   document.getElementById('calle-n').textContent = enCalle.length
-    ? plural(enCalle.length, 'pedido', 'pedidos') + (sinRespuesta ? ' · ' + sinRespuesta + ' sin respuesta' : '')
-    : 'ninguno';
+    ? '· ' + plural(enCalle.length, 'pedido', 'pedidos') + (sinRespuesta ? ' · ' + sinRespuesta + ' sin respuesta' : '')
+    : '· ninguno';
   document.getElementById('calle').innerHTML = enCalle.length ? enCalle.map(function (e) {
     return '<div class="pedido"><b>' + esc(e.referencia) + '</b> · ' + esc(e.nombre || telefonoBonito(e.phone)) + (e.distrito ? ' · ' + esc(e.distrito) : '') +
       '<div class="sub">' + esc(e.motorizado.nombre) + ': ' + (e.motorizadoEstado === 'respondio' ? 'dijo ' + minutosTexto(e.minutosMotorizado) + ', llega hacia las ' + hora(e.llegaAproxAt) : 'aún no dice en cuánto (aviso ' + e.motorizadoIntentos + ')') + ' · <a href="/hoy">ver en Hoy</a></div></div>';
@@ -320,10 +324,22 @@ function camposMotorizado(m) {
   ];
 }
 
+/* El alta, corta: nombre, WhatsApp y (si quieres) la zona. La placa y la
+   lista de distritos con casillas estan en «Editar sus datos» (menú ⋯). */
 async function altaMotorizado() {
-  var d = await pedirVarios({ titulo: 'Nuevo motorizado', texto: 'Con su WhatsApp recibe los pedidos listos y contesta en cuántos minutos entrega.', campos: camposMotorizado(null), boton: 'Dar de alta' });
+  var d = await pedirVarios({
+    titulo: 'Dar de alta motorizado',
+    texto: 'Con su WhatsApp recibe los pedidos listos y contesta en cuántos minutos entrega.',
+    campos: [
+      { id: 'nombre', etiqueta: 'Nombre', marcador: 'Carlos Rojas' },
+      { id: 'telefono', etiqueta: 'Su WhatsApp', tipo: 'tel', prefijo: '+51', marcador: '999 000 001' },
+      { id: 'zona', etiqueta: 'Zona', marcador: 'Miraflores, San Isidro', opcional: true, ayuda: 'Los distritos que cubre, separados por comas.' }
+    ],
+    boton: 'Dar de alta'
+  });
   if (!d) return;
-  await api('/admin/motorizados', { method: 'POST', body: { nombre: d.nombre, telefono: d.telefono, zona: d.zona.join(', ') || undefined, placa: d.placa || undefined } });
+  var zona = distritosDe(d.zona).join(', ');
+  await api('/admin/motorizados', { method: 'POST', body: { nombre: d.nombre, telefono: d.telefono, zona: zona || undefined } });
   toast(d.nombre + ' dado de alta: ya puede recibir pedidos.');
   await cargar();
 }
@@ -459,7 +475,7 @@ setInterval(function () {
 }, 15000);
 if (DISPONIBLE) cargar().catch(function (e) { toast(e.message); });
 else {
-  document.getElementById('motorizados').innerHTML = '<tr><td colspan="4" class="mensaje">Los motorizados no están disponibles en este arranque.</td></tr>';
+  document.getElementById('motorizados').innerHTML = '<div class="nada">Los motorizados no están disponibles en este arranque.</div>';
   document.getElementById('calle').innerHTML = '<div class="nada">Sin datos en este arranque.</div>';
 }
 `;

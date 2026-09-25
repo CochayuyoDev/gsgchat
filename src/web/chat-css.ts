@@ -87,6 +87,11 @@ export const CHAT_CSS = `
   .thread header .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thread header .sub { font-size: 12.5px; color: var(--muted); }
   .thread header .sub .escribiendo { color: var(--verde); font-weight: 600; }
+  /* La linea de debajo del nombre: el telefono y, como mucho, dos marcas (su pedido y «Para una persona»). */
+  .thread header .sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+  .thread header .sub .t-pedido { display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px; background: var(--primario-suave); color: var(--primario); font-weight: 600; font-size: 12px; text-decoration: none; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .thread header .sub .t-pedido:hover { text-decoration: underline; }
+  .thread header .sub .t-marca { font-size: 12px; }
 
   .ficha { position: absolute; top: 58px; right: 8px; width: min(360px, calc(100% - 16px)); max-height: calc(100% - 70px); overflow: auto; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra-2); z-index: 6; }
   .ficha-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
@@ -338,9 +343,11 @@ export const CHAT_CSS = `
   .emojis .rejilla button:hover { background: var(--superficie-2); }
 
   /* barra de respuestas rapidas */
-  .rapidas-barra { display: flex; gap: 8px; padding: 8px 14px 0; background: var(--header); flex: none; overflow-x: auto; scrollbar-width: thin; }
-  .rapidas-barra .chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; min-height: 34px; }
-  .rapidas-barra .chip:hover { border-color: var(--accent); color: var(--accent); }
+  /* Discreta: texto suave, sin borde, que no compita con los mensajes. */
+  .rapidas-barra { display: flex; gap: 4px; padding: 6px 12px 0; background: var(--header); flex: none; overflow-x: auto; scrollbar-width: none; }
+  .rapidas-barra::-webkit-scrollbar { display: none; }
+  .rapidas-barra .chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap; min-height: 28px; }
+  .rapidas-barra .chip:hover { background: var(--panel); border-color: var(--line); color: var(--accent); }
   /* Son botones con forma de pildora, no chips de estado: sin el punto del armazon. */
   .rapidas-barra .chip::before { display: none; }
   .rapidas-barra .chip.editar { color: var(--muted); border-style: dashed; text-decoration: none; }
@@ -453,6 +460,7 @@ export const CHAT_CSS = `
     .msg .estrella { left: 2px; top: -2px; }
     .msg.out .estrella { right: 2px; left: auto; }
     .filtros { flex-wrap: nowrap; }
+    .rapidas-barra .chip { min-height: 36px; }
     .thread header { padding: 8px 10px; }
     .thread header .sub { white-space: normal; }
     .icon, .composer button, .filtros .f, .flotante button, .flotante a { min-height: 44px; }

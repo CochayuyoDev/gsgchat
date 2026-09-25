@@ -98,7 +98,8 @@ describe('procesos en una tienda (PGlite real)', () => {
     let pagina = await tienda.app.inject({ method: 'GET', url: '/procesos', headers: { cookie } });
     let menu = pagina.body.slice(pagina.body.indexOf('class="s-menu-gsg"'), pagina.body.indexOf('class="s-menu-completo"'));
     expect(menu).toContain('data-ir="/hoy"');
-    expect(menu.indexOf('data-ir="/hoy"')).toBeLessThan(menu.indexOf('data-ir="/numeros"'));
+    expect(menu).toContain('data-ir="/numeros"');
+    expect(menu.indexOf('data-ir="/hoy"')).toBeLessThan(menu.indexOf('data-ir="/motorizados"'));
     const id = (await api('GET', '/admin/procesos')).body.procesos.find((p: { plantilla: string }) => p.plantilla === 'gsg').id;
     expect((await api('POST', `/admin/procesos/${id}/estado`, { estado: 'pausado' })).body.gsgActivo).toBe(false);
     pagina = await tienda.app.inject({ method: 'GET', url: '/procesos', headers: { cookie } });

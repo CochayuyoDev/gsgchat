@@ -139,6 +139,12 @@ export async function crearEscenarioEntregas(opciones: {
    * (solo lo usa para clasificar si se enciende con clave).
    */
   agente?: boolean;
+  /**
+   * «Confirmar la lista de GSG antes de enviar» (encendido de fabrica). Las
+   * pruebas de siempre esperan que la lista salga sola: aqui va apagado salvo
+   * que la prueba lo pida.
+   */
+  confirmarLista?: boolean;
 } = {}): Promise<EscenarioEntregas> {
   const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
@@ -253,6 +259,7 @@ export async function crearEscenarioEntregas(opciones: {
   });
   entregasDeLaRegla = entregas;
   if (opciones.margenMinutos !== undefined) await entregas.guardarAjustes({ margenMinutos: opciones.margenMinutos });
+  if (!opciones.confirmarLista) await entregas.guardarAjustes({ confirmarListaGsg: false });
   const asistente = opciones.agente
     ? await crearServicioIA({
         settingsRepo,

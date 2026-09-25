@@ -732,7 +732,25 @@ export async function handleInboundMessage(
   // de preventa, las reglas por palabra clave, el fallback de ubicacion, el
   // motor de rutas y los stickers. Callar solo una deja al operador creyendo
   // que tiene la conversacion para el mientras el sistema sigue hablando.
-  if (contact.botPausadoAt) return;
+  // Excepcion (regla del dueño, 25/09): una UBICACION (pin o enlace de mapa)
+  // de alguien a quien el sistema le pidio la ubicacion se registra y se
+  // contesta SIEMPRE, aunque el bot este en pausa. Si no, el cliente manda su
+  // pin y nadie le dice nada (paso con un numero real: el recordatorio salio,
+  // el pin se perdio). Todo lo demas sigue callado mientras dure la pausa.
+  if (contact.botPausadoAt) {
+    const texto = message.type === 'text' ? String(message.text?.body ?? '') : '';
+    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com)/i.test(texto);
+    // Los botones «Sí, recibo hoy» / «No» que mandó el sistema tambien: son la respuesta a lo que él preguntó.
+    const esBotonDeEntrega = message.type === 'interactive' && String(message.interactive?.button_reply?.id ?? '').startsWith('entrega:');
+    if (esBotonDeEntrega) request_log(deps, 'bot en pausa, pero el cliente pulsó el botón que mandó el sistema: se atiende', null);
+    else if (!esUbicacion) return;
+    const pideUbicacion =
+      Boolean(await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ||
+      Boolean(await repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null)) ||
+      (deps.entregas ? (await deps.entregas.estadoUbicacionDe(contact.phone).catch(() => 'sin_entrega')) === 'pendiente' : false);
+    if (!esBotonDeEntrega && !pideUbicacion) return;
+    if (!esBotonDeEntrega) request_log(deps, 'bot en pausa, pero llegó la ubicación que el sistema pidió: se registra y se contesta', null);
+  }
 
   // Modo prueba (SOLO_NUMEROS): a quien no este en la lista no se le contesta
   // nada, ni siquiera desde el asistente. El sender lo bloquea igual, pero
@@ -897,7 +915,7 @@ export async function handleInboundMessage(
     const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
     const esBaja = Boolean(escrito) && matchesKeyword(escrito, config.optOutKeywords);
     if (!esPin && !enlace?.ok && !esBaja) {
-      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
+      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
     }
   }

@@ -15,7 +15,7 @@
 import type { DesarrolladorRepo } from '../db/desarrollador.js';
 import { leerConfirmacionConReglas, leerEntregadoConReglas, leerTiempoConReglas } from '../entregas/interpretar.js';
 import { detectarManipulacion } from '../ia/seguridad.js';
-import { clasificarReglaGsg } from '../ia/agente-operativo.js';
+import { clasificarConfirmarGsg, clasificarReglaGsg } from '../ia/agente-operativo.js';
 import type { EntranteDePrueba } from './simular.js';
 
 export type Tono = 'ok' | 'info' | 'warn' | 'bad' | 'muted';
@@ -143,14 +143,28 @@ export interface ReglaEnTraza {
   activa: boolean;
   /** Ese cliente ya recibió UBI REGISTRADA o el cierre ANTES de este mensaje. */
   enSilencio: boolean;
+  /** Lo último que recibió fue el agradecimiento (UBI REGISTRADA o «queda confirmado»), todavía sin el cierre. */
+  trasGracias?: boolean;
+  /** Es de «falta confirmar» y ya se le preguntó SÍ/NO (GSG ya tiene su dirección). */
+  confirmar?: boolean;
 }
 
 /** Qué hace la regla del dueño con lo que mandó el cliente (funcion pura: no cambia nada). */
 function lecturaDeLaRegla(e: EntranteDePrueba, regla: ReglaEnTraza): PasoTraza {
   const texto = (e.text ?? e.transcripcion ?? e.boton?.title ?? '').trim();
   const esUbicacion = Boolean(e.location) || /https?:\/\/\S*(maps|goo\.gl)/i.test(texto);
-  if (regla.enSilencio) return { tono: 'muted', titulo: 'Regla del dueño: ya recibió UBI REGISTRADA o el cierre → silencio, no se le contesta', detalle: esUbicacion ? 'Su ubicación igual se registra por dentro (y GSG se entera), pero no se le escribe nada.' : 'Lo que escriba queda en el chat para que lo vea una persona.' };
-  if (esUbicacion) return { tono: 'info', titulo: 'Regla del dueño: es su ubicación → UBI REGISTRADA (con el número) y desde ahí silencio' };
+  if (regla.enSilencio && regla.trasGracias && !esUbicacion) {
+    return { tono: 'info', titulo: 'Regla del dueño: ya recibió el agradecimiento y ahora pregunta algo → el cierre UNA vez con el número del motorizado asignado, pasa a una persona y desde ahí silencio', detalle: 'Sin motorizado asignado todavía, va el número que mandó GSG o el de soporte.' };
+  }
+  if (regla.enSilencio) return { tono: 'muted', titulo: 'Regla del dueño: ya recibió el cierre (o el agradecimiento, si esto es su ubicación) → silencio, no se le contesta', detalle: esUbicacion ? 'Su ubicación igual se registra por dentro (y GSG se entera), pero no se le escribe nada.' : 'Lo que escriba queda en el chat para que lo vea una persona.' };
+  if (esUbicacion) return { tono: 'info', titulo: 'Regla del dueño: es su ubicación → UBI REGISTRADA con «¡Muchas gracias!» (sin el cierre); si después pregunta algo, el cierre UNA vez con el número del motorizado' };
+  if (regla.confirmar) {
+    const c = texto || e.boton?.id ? clasificarConfirmarGsg(texto, e.boton?.id) : 'otra';
+    if (c === 'si') return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): dice SÍ → «queda confirmado. ¡Muchas gracias!» (sin el cierre) y GSG se entera; si después pregunta algo, el cierre UNA vez con el número del motorizado' };
+    if (c === 'no' || c === 'cambio') return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): dice NO (u otro día / otra dirección) → el cierre corto, pasa a una persona, GSG se entera y silencio' };
+    if (c === 'por_que') return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): pregunta por qué → la explicación fija y otra vez SÍ o NO' };
+    return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): es otra cosa → el cierre UNA vez con el número y pasa a una persona', detalle: c === null ? 'Las reglas no lo tenían claro: si hay clave de IA, la IA solo clasifica (SÍ / NO / por qué / otra cosa); nunca redacta nada.' : 'Lo decidieron las reglas, sin IA.' };
+  }
   const clase = texto ? clasificarReglaGsg(texto) : 'otra';
   if (clase === 'por_que') return { tono: 'info', titulo: 'Regla del dueño: pregunta por qué se le pide la ubicación → la explicación fija y se le vuelve a pedir' };
   return {
@@ -277,7 +291,7 @@ export async function trazaDe(db: DesarrolladorRepo, telefono: string, quien: 'c
   for (const w of webhooks) pasos.push({ tono: 'info', titulo: `Webhook «${w.evento}»: ${w.estado === 'enviada' || w.estado === 'ok' ? 'entregado' : w.estado === 'pendiente' ? 'en camino' : w.estado}` });
 
   if (quien === 'cliente' && regla?.activa && !salientes.length) {
-    pasos.push({ tono: 'muted', titulo: 'Silencio: al cliente no se le escribió nada', detalle: 'Regla del dueño: después de UBI REGISTRADA (o del cierre) el sistema ya no le escribe por este pedido. Lo del motorizado sigue igual por dentro.' });
+    pasos.push({ tono: 'muted', titulo: 'Silencio: al cliente no se le escribió nada', detalle: 'Regla del dueño: después del cierre (el que sale una sola vez) el sistema ya no le escribe por este pedido. Lo del motorizado sigue igual por dentro.' });
   } else if (pasos.length <= 1 + leidas.length) {
     pasos.push({ tono: 'muted', titulo: 'No cambió nada: ningún pedido se movió y el sistema no contestó.', detalle: 'Pasa, por ejemplo, con un sticker, con algo fuera del flujo o si el número no tiene pedido de hoy.' });
   }

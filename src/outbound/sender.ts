@@ -74,6 +74,11 @@ export interface SendJob {
    * GSG» es lo unico con origen 'ia' que puede salir a un cliente.
    */
   textoFijo?: boolean;
+  /**
+   * Regla del dueño: el cierre que se manda UNA vez cuando el cliente pregunta
+   * algo después del agradecimiento. Es lo único que sale a un cliente en silencio.
+   */
+  cierreTrasGracias?: boolean;
 
   text?: string;
   location?: { latitude: number; longitude: number; name?: string; address?: string };

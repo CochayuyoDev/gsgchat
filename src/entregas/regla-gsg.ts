@@ -53,7 +53,7 @@ export function conReglaGsg(sender: Sender, opts: OpcionesReglaGsg): Sender {
         opts.log?.('regla del dueño: un texto del modelo no sale a un cliente en «Solo lo de GSG»', { phone: job.phone });
         return { ok: false, blocked: true, code: 'regla_gsg', reason: 'con «Solo lo de GSG» la IA no le escribe al cliente: solo salen los textos fijos', deliveryId: -1 };
       }
-      if (e.reglaGsgActiva() && (await e.clienteEnSilencio(job.phone).catch(() => false))) {
+      if (!job.cierreTrasGracias && e.reglaGsgActiva() && (await e.clienteEnSilencio(job.phone).catch(() => false))) {
         opts.log?.('regla del dueño: tras UBI REGISTRADA (o el cierre) no se le escribe más al cliente', { phone: job.phone, que: (job.text ?? job.interactive?.body ?? job.kind).slice(0, 60) });
         return { ok: true, wamid: `silencio:${randomUUID()}`, deliveryId: -1 };
       }

@@ -16,6 +16,11 @@
  *        ubicacion con su ritmo (la primera peticion sale en la siguiente
  *        vuelta del motor; en la lista se ve si ya se le escribio).
  *
+ * Como la lista de verdad, lo que entra por la API espera a que se confirme su
+ * envío (ajuste «Confirmar la lista de GSG antes de enviar», encendido de
+ * fabrica): el botón «📤 Confirmar el envío» de esta pestaña hace lo mismo que
+ * «Confirmar y enviar a todos» de Números del día, solo con lo de prueba.
+ *
  * Nada de esto sale al WhatsApp real: los telefonos son del rango reservado
  * (numeros.ts) y el sender los simula. «Borrar todo lo de prueba» esta en
  * limpiar.ts.
@@ -24,7 +29,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { RegistrarSeccion, SeccionDesarrollador, DepsDesarrollador } from './seccion.js';
-import { numeroDePrueba, PREFIJO_CLIENTE_PRUEBA, PREFIJO_MOTORIZADO_PRUEBA, PREFIJO_REFERENCIA_PRUEBA } from './numeros.js';
+import { esNumeroDePrueba, numeroDePrueba, PREFIJO_CLIENTE_PRUEBA, PREFIJO_MOTORIZADO_PRUEBA, PREFIJO_REFERENCIA_PRUEBA } from './numeros.js';
 import { clienteInventado, motorizadoInventado } from './datos-peru.js';
 import { conClaveDePrueba } from './clave-prueba.js';
 import { borrarTodoLoDePrueba, contarLoDePrueba } from './limpiar.js';
@@ -44,8 +49,10 @@ export interface ResultadoGenerar {
   creados: { faltaConfirmar: number; faltaUbicacion: number; motorizados: number };
   /** A cuantos «falta que confirme» ya se les mando la pregunta. */
   preguntados: number;
-  /** La regla del dueño («Solo lo de GSG»): no hay pregunta SÍ/NO, los que tienen pin van directo al motorizado. */
+  /** La regla del dueño («Solo lo de GSG»): a los de ubicación no se les pregunta SÍ/NO; a los de «falta confirmar», sí. */
   sinPreguntas?: boolean;
+  /** Cuántos de los creados esperan que se confirme su envío (nada les sale hasta pulsar «Confirmar el envío»). */
+  esperanEnvio: number;
   descartados: Array<{ referencia: string; motivo: string }>;
   detalle: string;
   /** Lo que se mando a la API y lo que contesto (para «Ver lo técnico»). */
@@ -139,17 +146,23 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
     descartados.push(...(cuerpo.descartadas ?? []));
   }
 
-  // «Contactado, falta que confirme»: se le manda YA la pregunta de confirmar
-  // (el sender la simula: es un numero de prueba), sin esperar al motor.
+  // «Contactado, falta que confirme»: si su envío no espera (ajuste apagado),
+  // se le manda YA la pregunta SÍ/NO (el sender la simula: es un numero de
+  // prueba), sin esperar al motor. Si espera, sale al confirmar el envío.
   let preguntados = 0;
+  let esperanEnvio = 0;
   const hoy = (await entregas.resumen()).entregas;
-  for (const c of creadas.filter((x) => x.conPin)) {
+  for (const c of creadas) {
     const fila = hoy.find((e) => e.referencia === c.referencia);
     const e = fila ? await deps.repos.entregas.entrega(fila.id) : null;
-    if (!e || e.confirmacionEstado !== 'pendiente') continue;
+    if (!e) continue;
+    if (e.envioRetenidoAt) {
+      esperanEnvio++;
+      continue;
+    }
+    if (!c.conPin || e.confirmacionEstado !== 'pendiente') continue;
     const r = await entregas.pedirConfirmacion(e).catch(() => ({ ok: false }));
-    // Con la regla del dueño no se pregunta nada: la confirmacion queda en «no hace falta».
-    if (r.ok && !entregas.reglaGsgActiva()) preguntados++;
+    if (r.ok) preguntados++;
   }
 
   let motos = 0;
@@ -174,8 +187,9 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
     creados: { faltaConfirmar: creadosConfirmar, faltaUbicacion: creadosUbicacion, motorizados: motos },
     preguntados,
     sinPreguntas: entregas.reglaGsgActiva(),
+    esperanEnvio,
     descartados,
-    detalle: `Listo: ${partes.join(', ') || 'nada nuevo'}.${descartados.length ? ` ${descartados.length} no entraron (mira el motivo abajo).` : ''}`,
+    detalle: `Listo: ${partes.join(', ') || 'nada nuevo'}.${esperanEnvio ? ` Esperan que confirmes el envío: ${esperanEnvio} (nada les sale hasta pulsar «📤 Confirmar el envío»).` : ''}${descartados.length ? ` ${descartados.length} no entraron (mira el motivo abajo).` : ''}`,
     tecnico: {
       peticion: { metodo: 'POST', ruta: '/api/v1/entregas', pedidos: pedidos.length, ejemplo: pedidos[0] ?? null },
       respuesta: { status, detalle: detalleApi },
@@ -197,6 +211,14 @@ export const registerGenerar: RegistrarSeccion = async (app, deps) => {
       console.error('[desarrollador] fallo generando los de prueba:', error);
       throw error;
     }
+  });
+
+  /** «📤 Confirmar el envío» de lo de prueba: lo mismo que el botón de Números del día, solo con los números reservados. */
+  app.post('/admin/desarrollador/confirmar-envio', async (request, reply) => {
+    if (!deps.entregas) return reply.code(409).send({ error: 'Las entregas del día no están activas en este arranque.' });
+    const ids = (await deps.entregas.resumen()).entregas.filter((e) => e.envioRetenidoAt && esNumeroDePrueba(e.phone)).map((e) => e.id);
+    if (!ids.length) return { ok: true, liberadas: 0, ubicacion: 0, confirmar: 0, saltadas: 0, aviso: 'No hay ningún cliente de prueba esperando que confirmes el envío.' };
+    return deps.entregas.liberarEnvio(ids, request.usuario?.nombre || 'Módulo desarrollador');
   });
 
   app.get('/admin/desarrollador/prueba', async () => {
@@ -221,7 +243,7 @@ const HTML = `
     <h3>Crear clientes de prueba</h3>
     <p class="muted gen-intro">Entran por la API, igual que llegarán los pedidos de GSG. Números reservados (51 900 0…): nada sale al WhatsApp real.</p>
     <div class="gen-contador">
-      <label for="gen-confirmar"><b>Contactado, falta que confirme</b><span class="muted">Ya dio su ubicación y ya se le preguntó si recibe hoy. En el sistema: «esperando confirmación».</span></label>
+      <label for="gen-confirmar"><b>Falta que confirme</b><span class="muted">GSG ya tiene su dirección: se le pregunta solo SÍ o NO (nunca la ubicación). En el sistema: «esperando confirmación».</span></label>
       <div class="gen-num"><button type="button" class="btn" data-menos="gen-confirmar" aria-label="Uno menos">−</button><input id="gen-confirmar" type="number" inputmode="numeric" min="0" max="${TOPE_POR_TANDA}" value="20"><button type="button" class="btn" data-mas="gen-confirmar" aria-label="Uno más">+</button></div>
     </div>
     <div class="gen-contador">
@@ -238,6 +260,11 @@ const HTML = `
     <p class="muted gen-tope">Tope de seguridad: ${TOPE_POR_TANDA} clientes por tanda y ${TOPE_MOTORIZADOS} motorizados.</p>
     <button type="submit" class="btn primario gen-crear" id="gen-crear">Crear de prueba</button>
     <div class="gen-msg" id="gen-msg" role="status" aria-live="polite"></div>
+    <div class="gen-envio" id="gen-envio">
+      <p class="muted">Como la lista de GSG, lo que se crea <b>espera a que confirmes el envío</b>: a los de «falta que mande su ubicación» se les pide el pin y a los de «falta que confirme» solo SÍ o NO.</p>
+      <button type="button" class="btn primario gen-crear" id="gen-enviar">📤 Confirmar el envío de los de prueba</button>
+      <div class="gen-msg" id="gen-enviar-msg" role="status" aria-live="polite"></div>
+    </div>
     <details class="gen-tecnico" id="gen-tecnico" hidden><summary>Ver lo técnico</summary><pre id="gen-tecnico-pre"></pre></details>
   </form>
 
@@ -270,6 +297,8 @@ const CSS = `
   .gen-rapidos .btn { min-height: 44px; }
   .gen-tope { font-size: 13px; margin: 10px 0; }
   .gen-crear { width: 100%; min-height: 46px; }
+  .gen-envio { margin-top: var(--esp-3); padding-top: var(--esp-3); border-top: 1px solid var(--borde); }
+  .gen-envio p { margin: 0 0 10px; font-size: 14px; }
   .gen-msg:not(:empty) { margin-top: 10px; padding: 10px 12px; border-radius: var(--radio-sm); background: var(--verde-suave); font-size: 14px; }
   .gen-msg.mal { background: var(--rojo-suave); color: var(--rojo); }
   .gen-tecnico { margin-top: 10px; }
@@ -357,7 +386,7 @@ const JS =
     avisar(msg, '');
     try {
       var d = await pedir('/admin/desarrollador/generar', { method: 'POST', body: JSON.stringify(cuerpo) });
-      var extra = !d.creados.faltaConfirmar ? '' : d.sinPreguntas ? ' Con «Solo lo de GSG» no se les pregunta SÍ o NO: ya tienen su ubicación y van directo al motorizado.' : ' Ya se le preguntó a ' + d.preguntados + ' de ' + d.creados.faltaConfirmar + ' si reciben hoy.';
+      var extra = d.esperanEnvio ? '' : !d.creados.faltaConfirmar ? '' : ' Ya se le preguntó a ' + d.preguntados + ' de ' + d.creados.faltaConfirmar + ' si reciben hoy.';
       var malos = d.descartados.length ? ' No entraron: ' + d.descartados.slice(0, 3).map(function (x) { return x.referencia + ' (' + x.motivo + ')'; }).join('; ') + '.' : '';
       avisar(msg, d.detalle + extra + malos, d.descartados.length > 0);
       $('gen-tecnico').hidden = false;
@@ -368,6 +397,22 @@ const JS =
       avisar(msg, e.message, true);
     } finally {
       boton.disabled = false; boton.textContent = 'Crear de prueba';
+    }
+  });
+
+  $('gen-enviar').addEventListener('click', async function () {
+    var msg = $('gen-enviar-msg');
+    var boton = this;
+    boton.disabled = true;
+    try {
+      var d = await pedir('/admin/desarrollador/confirmar-envio', { method: 'POST', body: '{}' });
+      avisar(msg, d.aviso, !d.liberadas);
+      document.dispatchEvent(new CustomEvent('dev:generado', { detail: { enviados: d.liberadas } }));
+      await pintarCifras();
+    } catch (e) {
+      avisar(msg, e.message, true);
+    } finally {
+      boton.disabled = false;
     }
   });
 

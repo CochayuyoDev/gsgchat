@@ -306,8 +306,10 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
-  app.get('/numeros', async (_request, reply) => {
-    const page = html(numerosPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+  app.get('/numeros', async (request, reply) => {
+    // ?etapa=contactados es «Ubicaciones registradas» del menú: la cabecera ya sale con su nombre.
+    const etapa = (request.query as { etapa?: unknown } | undefined)?.etapa;
+    const page = html(numerosPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio(), etapa: typeof etapa === 'string' ? etapa : undefined }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 

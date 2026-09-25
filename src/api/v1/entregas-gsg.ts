@@ -207,13 +207,14 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
 
     if (sinPin.length) {
       const filas = sinPin.map((p) => ({ telefono: p.telefono, nombre: p.nombre ?? undefined, referencia: p.referencia, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: p.faltaUbicacion ?? true, faltaConfirmacion: p.faltaConfirmar ?? true, datosEnvio: datosEnvioDeCrudo(p) }));
-      const r = await entregas.crearVarias(filas, quien);
+      // La lista de GSG espera que una persona confirme el envío (ajuste de Hoy).
+      const r = await entregas.crearVarias(filas, quien, { retener: true });
       for (const d of r.descartadas) descartadas.push({ referencia: sinPin[d.linea - 1]?.referencia ?? d.texto, motivo: d.motivo });
       for (const rep of r.repetidas) if (!repetidas.includes(rep)) repetidas.push(rep);
       for (const e of r.creadas) creadas.push({ referencia: e.referencia, id: e.id });
     }
     for (const p of conPin) {
-      const r = await entregas.crearAMano({ referencia: p.referencia, telefono: p.telefono, nombre: p.nombre ?? undefined, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: false, faltaConfirmacion: p.faltaConfirmar ?? true, lat: p.lat!, lng: p.lng!, datosEnvio: datosEnvioDeCrudo(p) }, quien);
+      const r = await entregas.crearAMano({ referencia: p.referencia, telefono: p.telefono, nombre: p.nombre ?? undefined, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: false, faltaConfirmacion: p.faltaConfirmar ?? true, lat: p.lat!, lng: p.lng!, datosEnvio: datosEnvioDeCrudo(p), retener: true }, quien);
       if (r.ok) creadas.push({ referencia: r.entrega.referencia, id: r.entrega.id });
       else if (/ya existe/i.test(r.motivo)) {
         if (!repetidas.includes(p.referencia)) repetidas.push(p.referencia);

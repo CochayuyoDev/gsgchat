@@ -123,7 +123,15 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
     const quien = esMotorizadoDePrueba(telefono) ? 'motorizado' : 'cliente';
     const antes = await fotoDe(db, telefono, quien);
     // La regla del dueño («Solo lo de GSG»): la traza cuenta qué hizo con el cliente.
-    const regla = { activa: Boolean(deps.entregas?.reglaGsgActiva()), enSilencio: quien === 'cliente' && Boolean(await deps.entregas?.clienteEnSilencio(telefono).catch(() => false)) };
+    const enSilencio = quien === 'cliente' && Boolean(await deps.entregas?.clienteEnSilencio(telefono).catch(() => false));
+    const motivoCierre = enSilencio ? String((await deps.repos.contacts.getByPhone(telefono).catch(() => null))?.iaCerradaMotivo ?? '') : '';
+    const regla = {
+      activa: Boolean(deps.entregas?.reglaGsgActiva()),
+      enSilencio,
+      // Lo último que recibió fue el agradecimiento (UBI REGISTRADA o «queda confirmado»): lo que pregunte ahora recibe el cierre UNA vez.
+      trasGracias: motivoCierre === 'ubicación registrada' || motivoCierre === 'confirmó que lo recibe hoy',
+      confirmar: quien === 'cliente' && (await deps.entregas?.situacionGsg(telefono).catch(() => null))?.confirmar === 'pedida',
+    };
     await simulador.escribir({ ...entrada, phone: telefono });
     const traza = await trazaDe(db, telefono, quien, entrada, antes, Boolean(deps.gsg?.conectado()), regla);
     const lista = trazas.get(telefono) ?? [];
@@ -281,7 +289,9 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
         ? `⏩ ${p.que}`
         : p.tipo === 'esperar_motorizado'
           ? '⏳ esperar a que un motorizado tenga el pedido'
-          : `${p.quien === 'cliente' ? 'Cliente' : 'Motorizado'}: ${p.dice.tipo === 'texto' ? p.dice.texto : `[${p.dice.tipo}${p.dice.texto ? `: ${p.dice.texto}` : ''}]`}${p.espera?.que ? `  → ${p.espera.que}` : ''}`,
+          : p.tipo === 'confirmar_envio'
+            ? `📤 se confirma el envío  → ${p.espera.que}`
+            : `${p.quien === 'cliente' ? 'Cliente' : 'Motorizado'}: ${p.dice.tipo === 'texto' ? p.dice.texto : `[${p.dice.tipo}${p.dice.texto ? `: ${p.dice.texto}` : ''}]`}${p.espera?.que ? `  → ${p.espera.que}` : ''}`,
     );
   const errorDeCaso = (reply: FastifyReply, error: unknown) => {
     if (error instanceof ErrorDeCaso) return reply.code(400).send({ error: error.message, linea: error.linea });

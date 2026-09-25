@@ -10,9 +10,13 @@
  *   => dice: Es necesaria
  *   cliente: [ubicación]             ([ubicación] [enlace] [foto] [audio: lo que dice])
  *   => dice: Ubicación registrada    (lo que el sistema le tiene que contestar)
+ *   esperar motorizado
  *   cliente: ¿a qué hora llega?
- *   => calla                         (regla del dueño: tras UBI REGISTRADA, silencio)
- *   motorizado: 40                   (espera solo a que un motorizado de prueba tenga el pedido)
+ *   => dice: no se reciben consultas (regla del dueño: tras el agradecimiento, el cierre UNA vez…)
+ *   => con el número del motorizado  (…con el número del motorizado asignado)
+ *   cliente: hola?
+ *   => calla                         (y desde ahí, silencio)
+ *   motorizado: 40                  (espera solo a que un motorizado de prueba tenga el pedido)
  *   => estado: en camino             (entregado, en camino, con motorizado, para una persona, cancelado…)
  *   adelantar: 2 h                   (30 min, 2 h, o «pasada la hora»)
  *   cliente: ya pasó la hora y no llega
@@ -42,7 +46,11 @@ cliente: ¿Por qué me piden mi ubicación?
 => dice: Es necesaria para calcular la ruta
 cliente: [ubicación]
 => dice: Ubicación registrada
+esperar motorizado
 cliente: ¿a qué hora llega?
+=> dice: no se reciben consultas
+=> con el número del motorizado
+cliente: hola?
 => calla
 motorizado: 30
 => estado: en camino
@@ -134,6 +142,13 @@ export function interpretarCaso(texto: string, titulo = 'Mi caso', id = 'propio'
       if (/^(calla|silencio|no contesta|no le contesta|no responde|nada)$/.test(sinTildes(m[2]!))) {
         actual.calla = true;
         actual.que = [actual.que, 'que NO se le conteste nada (silencio)'].filter(Boolean).join(' y ');
+        anterior.espera = actual;
+        return;
+      }
+      // «=> con el número del motorizado»: la respuesta lleva el número del motorizado asignado a ese pedido.
+      if (/^(con |lleva |trae )?(el )?(numero|telefono) del motorizado( asignado)?$/.test(sinTildes(m[2]!))) {
+        actual.numeroDelMotorizado = true;
+        actual.que = [actual.que, 'que lleve el número del motorizado asignado'].filter(Boolean).join(' y ');
         anterior.espera = actual;
         return;
       }
@@ -239,10 +254,11 @@ motorizado: <lo que escribe el motorizado: minutos como «40», «estoy cerca»,
 => estado: entregado | en camino | con motorizado | listo | para una persona | cancelado | terminado | esperando confirmación | esperando ubicación
 => dice: <un trozo corto de lo que el sistema debería contestar a la línea de arriba>
 => calla      (el sistema no le contesta nada a la línea de arriba)
+=> con el número del motorizado      (la respuesta lleva el número del motorizado asignado)
 adelantar: 30 min | 2 h | pasada la hora
 esperar motorizado
 
-Reglas (regla del dueño): al cliente solo se le pide la ubicación; no hay pregunta SÍ/NO. Si pregunta por qué se le pide, se le explica («=> dice: Es necesaria»). Si manda su ubicación recibe «Ubicación registrada» y desde ahí el sistema ya no le contesta nada («=> calla»). Cualquier otra cosa antes de la ubicación recibe una vez «no se reciben consultas» con el número, y luego «=> calla». El pedido llega al motorizado cuando ya tiene la ubicación; lo del motorizado sigue igual. Usa «=>» solo cuando la descripción diga qué debe pasar. Máximo 30 líneas.
+Reglas (regla del dueño): al cliente solo se le pide la ubicación; no hay pregunta SÍ/NO. Si pregunta por qué se le pide, se le explica («=> dice: Es necesaria»). Si manda su ubicación recibe «Ubicación registrada» con «¡Muchas gracias!» (con ubicación: si dice SÍ, recibe «queda confirmado»). Si DESPUÉS de ese agradecimiento pregunta cualquier cosa, recibe UNA vez «no se reciben consultas» con el número del motorizado asignado, y desde ahí «=> calla». Cualquier otra cosa antes de la ubicación recibe una vez «no se reciben consultas» con el número, y luego «=> calla». El pedido llega al motorizado cuando ya tiene la ubicación; lo del motorizado sigue igual. Usa «=>» solo cuando la descripción diga qué debe pasar. Máximo 30 líneas.
 
 Ejemplo:
 ${EJEMPLO_CASO}`;

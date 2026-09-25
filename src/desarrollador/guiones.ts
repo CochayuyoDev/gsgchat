@@ -10,8 +10,16 @@
  * Siguen la regla del dueño en «Solo lo de GSG»: «El único proceso de
  * GSGchat es disparar mensajes. Una vez que la IA manda el mensaje de UBI
  * REGISTRADA, ahí llega la IA: ya no vuelve a responder.» Al cliente solo le
- * llega la explicación (si pregunta por qué), UBI REGISTRADA o el cierre con
- * el número; después, silencio. Lo del motorizado sigue igual por dentro.
+ * llega la explicación (si pregunta por qué), UBI REGISTRADA (o «queda
+ * confirmado») con «¡Muchas gracias!», o el cierre con el número. Si después
+ * del agradecimiento pregunta algo, el cierre UNA vez con el número del
+ * motorizado asignado; después, silencio. Lo del motorizado sigue igual por
+ * dentro.
+ *
+ * Como en la vida real, lo que llega de GSG espera a que una persona confirme
+ * el envío («Confirmar la lista de GSG antes de enviar»): el paso «📤 Se
+ * confirma el envío» hace lo mismo que el botón de Números del día. Un guion
+ * sin ese paso lo confirma solo, antes de empezar.
  *
  * Cada paso entra por la MISMA ruta que el chat simulado de la pestaña
  * (/admin/desarrollador/vivo/escribir), asi que la conversacion y su traza se
@@ -38,6 +46,8 @@ interface Espera {
   calla?: boolean;
   /** Al CLIENTE no se le escribe nada por este paso (aunque lo escriba el motorizado). */
   clienteCalla?: boolean;
+  /** La respuesta debe llevar el número del motorizado ASIGNADO a ese pedido. */
+  numeroDelMotorizado?: boolean;
   /** En palabras, para la pantalla. */
   que: string;
 }
@@ -46,7 +56,9 @@ type Paso =
   | { tipo: 'escribe'; quien: Quien; dice: { tipo: 'texto' | 'pin' | 'enlace' | 'foto' | 'audio' | 'boton'; texto?: string; boton?: { id: string; title: string } }; espera?: Espera; pausaMs?: number }
   | { tipo: 'esperar_motorizado'; espera?: Espera }
   /** minutos fijos, o 'pasada_la_hora': lo justo para que la hora de llegada quede 45 min atras. */
-  | { tipo: 'adelantar'; minutos: number | 'pasada_la_hora'; que: string };
+  | { tipo: 'adelantar'; minutos: number | 'pasada_la_hora'; que: string }
+  /** Lo mismo que «Confirmar y enviar» en Números del día; espera el primer mensaje al cliente. */
+  | { tipo: 'confirmar_envio'; espera: Espera };
 
 export interface Guion {
   id: string;
@@ -63,17 +75,30 @@ const mot = (texto: string, espera?: Espera): Paso => ({ tipo: 'escribe', quien:
 /** Estados en los que el pedido ya esta con un motorizado o por salir. */
 const CON_MOTORIZADO = ['lista', 'esperando_motorizado', 'avisada'];
 
+/** «Confirmar y enviar»: al de ubicación se le pide el pin; al de «falta confirmar», SÍ o NO. */
+const ENVIO_UBICACION: Paso = { tipo: 'confirmar_envio', espera: { respuesta: /ubicaci[oó]n/i, que: 'se confirma el envío y le llega el pedido de ubicación' } };
+const ENVIO_CONFIRMAR: Paso = { tipo: 'confirmar_envio', espera: { estado: ['esperando_confirmacion'], respuesta: /¿Nos confirmas que lo recibes hoy en esa dirección\? Responde SÍ o NO/i, que: 'se confirma el envío y le llega SOLO la pregunta SÍ/NO (nunca la ubicación)' } };
+const SI_CONFIRMADO: Espera = { estado: CON_MOTORIZADO, respuesta: /^Perfecto, tu pedido queda confirmado para hoy\. ¡Muchas gracias!$/, que: '«queda confirmado para hoy. ¡Muchas gracias!» (sin el cierre); GSG se entera' };
+/** Tras el agradecimiento, lo que pregunte recibe el cierre UNA vez con el número de SU motorizado. */
+const CIERRE_TRAS_GRACIAS: Espera = {
+  respuesta: /^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/,
+  numeroDelMotorizado: true,
+  que: 'pregunta después del agradecimiento: el cierre UNA vez con el número del motorizado asignado, y el chat pasa a una persona',
+};
+
 export const GUIONES: Guion[] = [
   {
     id: 'porque_y_pin',
     titulo: 'Pregunta por qué, manda su pin y pregunta la hora',
-    resumen: 'Se le pide la ubicación, pregunta por qué, se le explica; manda su pin y recibe UBI REGISTRADA; pregunta a qué hora llega y recibe SILENCIO. Por dentro el motorizado da su tiempo y lo entrega, sin escribirle al cliente.',
+    resumen: 'Se le pide la ubicación, pregunta por qué, se le explica; manda su pin y recibe UBI REGISTRADA con «¡Muchas gracias!»; el pedido va a un motorizado; pregunta a qué hora llega y recibe el cierre UNA vez con el número de ese motorizado; vuelve a escribir y recibe SILENCIO. Por dentro el motorizado da su tiempo y lo entrega, sin escribirle al cliente.',
     inicio: 'sin_pin',
     pasos: [
+      ENVIO_UBICACION,
       cli('¿Por qué me piden mi ubicación?', { respuesta: /Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado/i, que: 'le explica por qué y se la vuelve a pedir' }),
-      { tipo: 'escribe', quien: 'cliente', dice: { tipo: 'pin' }, espera: { estado: CON_MOTORIZADO, respuesta: /Ubicación registrada[^\n]*\n\s*https?:\/\/\S+[\s\S]*no se reciben consultas[\s\S]*Número del motorizado: [^\n]+/i, que: 'UBI REGISTRADA: el enlace del mapa, que no se reciben consultas y el número (sin pregunta SÍ/NO)' } },
-      cli('¿A qué hora llega?', { calla: true, que: 'SILENCIO: tras UBI REGISTRADA ya no se le contesta' }),
+      { tipo: 'escribe', quien: 'cliente', dice: { tipo: 'pin' }, espera: { estado: CON_MOTORIZADO, respuesta: /^✅ Ubicación registrada correctamente\.\n\s*https?:\/\/\S+\n\n¡Muchas gracias!\n(?![\s\S]*no se reciben consultas)(?![\s\S]*SÍ o NO)/, que: 'UBI REGISTRADA: el enlace del mapa y «¡Muchas gracias!» (sin el cierre ni la pregunta SÍ/NO)' } },
       { tipo: 'esperar_motorizado', espera: { estado: ['esperando_motorizado'], que: 'por dentro, el pedido le llega a un motorizado de prueba' } },
+      cli('¿A qué hora llega?', CIERRE_TRAS_GRACIAS),
+      cli('Hola?', { calla: true, que: 'SILENCIO: el cierre sale una sola vez' }),
       mot('40', { estado: ['avisada'], clienteCalla: true, que: 'el motorizado da su tiempo y GSG se entera; al cliente no se le escribe' }),
       mot('Entregado', { estado: ['entregada'], clienteCalla: true, que: 'lo entrega; al cliente no se le escribe' }),
     ],
@@ -84,6 +109,7 @@ export const GUIONES: Guion[] = [
     resumen: 'Se le pide la ubicación y pregunta el precio del envío: recibe el cierre UNA vez con el número y pasa a una persona. Vuelve a escribir y recibe SILENCIO.',
     inicio: 'sin_pin',
     pasos: [
+      ENVIO_UBICACION,
       cli('¿Cuánto cuesta el envío?', { respuesta: /^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/, que: 'el cierre con el número, y el chat pasa a una persona' }),
       cli('Hola?? me responden?', { calla: true, que: 'SILENCIO: el cierre sale una sola vez' }),
     ],
@@ -94,17 +120,20 @@ export const GUIONES: Guion[] = [
     resumen: 'En vez de mandar su ubicación cuenta cómo se siente: la IA no conversa, recibe el cierre con el número y luego silencio.',
     inicio: 'sin_pin',
     pasos: [
+      ENVIO_UBICACION,
       cli('Me siento muy triste, no sé qué hacer', { respuesta: /no se reciben consultas[\s\S]*Número del motorizado/i, que: 'el cierre (la IA nunca conversa ni redacta nada)' }),
       cli('¿Me escuchas?', { calla: true, que: 'SILENCIO' }),
     ],
   },
   {
     id: 'con_pin',
-    titulo: 'GSG ya tenía su pin',
-    resumen: 'Sin pregunta SÍ/NO: el pedido va directo a un motorizado, que da su tiempo, avisa que está cerca y lo entrega; al cliente no se le escribe nada.',
+    titulo: 'GSG ya tenía su dirección',
+    resumen: 'Se le pregunta SOLO SÍ o NO; dice SÍ y el pedido va a un motorizado, que da su tiempo, avisa que está cerca y lo entrega; al cliente no se le escribe nada más.',
     inicio: 'con_pin',
     pasos: [
-      { tipo: 'esperar_motorizado', espera: { estado: ['esperando_motorizado'], que: 'sin pregunta SÍ/NO, el pedido le llega a un motorizado de prueba' } },
+      ENVIO_CONFIRMAR,
+      cli('SÍ', SI_CONFIRMADO),
+      { tipo: 'esperar_motorizado', espera: { estado: ['esperando_motorizado'], que: 'el pedido le llega a un motorizado de prueba' } },
       mot('30', { estado: ['avisada'], clienteCalla: true, que: 'da su tiempo; al cliente no se le escribe la hora' }),
       mot('Estoy cerca, llego en 5', { estado: ['avisada'], clienteCalla: true, que: 'avisa que está cerca; al cliente no se le escribe' }),
       mot('Entregado', { estado: ['entregada'], clienteCalla: true, que: 'lo entrega; al cliente no se le escribe' }),
@@ -116,9 +145,46 @@ export const GUIONES: Guion[] = [
     resumen: 'El motorizado llega y no hay nadie: el pedido queda para una persona, sin preguntarle nada al cliente.',
     inicio: 'con_pin',
     pasos: [
+      ENVIO_CONFIRMAR,
+      cli('Sí', SI_CONFIRMADO),
       { tipo: 'esperar_motorizado', espera: { estado: ['esperando_motorizado'], que: 'el pedido le llega a un motorizado de prueba' } },
       mot('30', { estado: ['avisada'], clienteCalla: true, que: 'el motorizado da su tiempo' }),
       mot('No estaba nadie, no abrieron', { estado: ['incidencia'], clienteCalla: true, que: 'queda como «no se pudo entregar» para una persona; al cliente no se le pregunta nada' }),
+    ],
+  },
+  {
+    id: 'confirmar_si',
+    titulo: 'Confirmar: dice SÍ',
+    resumen: 'GSG ya tiene su dirección: se confirma el envío, le llega SOLO la pregunta SÍ/NO, dice SÍ y recibe «queda confirmado. ¡Muchas gracias!»; el pedido va a un motorizado; pregunta a qué hora llega y recibe el cierre UNA vez con el número de ese motorizado. Vuelve a escribir y recibe SILENCIO.',
+    inicio: 'con_pin',
+    pasos: [
+      ENVIO_CONFIRMAR,
+      cli('Sí', SI_CONFIRMADO),
+      { tipo: 'esperar_motorizado', espera: { estado: ['esperando_motorizado'], que: 'por dentro, el pedido le llega a un motorizado de prueba' } },
+      cli('¿A qué hora llega?', CIERRE_TRAS_GRACIAS),
+      cli('Hola?', { calla: true, que: 'SILENCIO: el cierre sale una sola vez' }),
+    ],
+  },
+  {
+    id: 'confirmar_no',
+    titulo: 'Confirmar: dice NO',
+    resumen: 'Se le pregunta SÍ o NO y dice que hoy no puede: recibe el cierre corto con el número, pasa a un asesor y GSG se entera. Vuelve a escribir y recibe SILENCIO.',
+    inicio: 'con_pin',
+    pasos: [
+      ENVIO_CONFIRMAR,
+      cli('No, hoy no puedo', { estado: ['incidencia'], respuesta: /^Entendido, lo pasamos a un asesor\. Por este canal no se reciben consultas\. Número del motorizado: .+\.$/, que: 'el cierre corto con el número; pasa a una persona y GSG se entera' }),
+      cli('Hola?', { calla: true, que: 'SILENCIO' }),
+    ],
+  },
+  {
+    id: 'confirmar_porque',
+    titulo: 'Confirmar: pregunta por qué y dice SÍ',
+    resumen: 'Se le pregunta SÍ o NO y pregunta por qué le escriben: recibe la explicación y otra vez SÍ o NO; dice SÍ y queda confirmado.',
+    inicio: 'con_pin',
+    pasos: [
+      ENVIO_CONFIRMAR,
+      cli('¿Por qué me escriben?', { estado: ['esperando_confirmacion'], respuesta: /^Te escribimos para confirmar la entrega de tu pedido de .+ antes de salir\. Responde SÍ o NO\./, que: 'la explicación y otra vez SÍ o NO (sin pedirle la ubicación)' }),
+      cli('Sí', SI_CONFIRMADO),
     ],
   },
 ];
@@ -178,9 +244,14 @@ export async function correrGuion(ctx: ContextoGuion, guion: Guion): Promise<Res
     )).rows;
     return m ? { id: Number(m.id), body: m.body ?? '' } : null;
   };
+  // Lo que llega de GSG espera a que una persona confirme el envío: sin el
+  // paso «📤 Se confirma el envío», se confirma solo antes de empezar.
+  const conPaso = guion.pasos.some((p) => p.tipo === 'confirmar_envio');
+  if (!conPaso) await deps.entregas.liberarEnvio([nuevo.id], 'Módulo desarrollador (guion)');
   // Como en la vida real: el cliente contesta DESPUÉS de que el sistema le
   // escribió (regla del dueño: sin eso no se le contesta nada).
-  if (guion.inicio === 'sin_pin') {
+  // (al de ubicación, el pedido del pin; al de «falta confirmar», la pregunta SÍ/NO).
+  if (!conPaso) {
     const limite = Date.now() + 45_000;
     while (!(await ultimaA(nuevo.phone)) && Date.now() < limite) await new Promise((r) => setTimeout(r, 500));
   }
@@ -210,9 +281,11 @@ export async function correrGuion(ctx: ContextoGuion, guion: Guion): Promise<Res
       const ult = await ultimaA(telefono);
       respuesta = ult && (antes === null || ult.id !== antes) ? ult.body : null;
       const estadoOk = !espera?.estado || (estado !== null && espera.estado.includes(estado));
+      const motoTel = espera?.numeroDelMotorizado ? await telefonoDelMotorizado() : null;
       const respuestaOk =
         (!espera?.respuesta || (respuesta !== null && espera.respuesta.test(respuesta))) &&
-        (!espera?.contiene || (respuesta !== null && sinTildes(respuesta).includes(sinTildes(espera.contiene))));
+        (!espera?.contiene || (respuesta !== null && sinTildes(respuesta).includes(sinTildes(espera.contiene)))) &&
+        (!espera?.numeroDelMotorizado || (respuesta !== null && motoTel !== null && respuesta.replace(/\D/g, '').includes(motoTel.replace(/\D/g, '').slice(-9))));
       // Silencio (regla del dueño): unos segundos sin que se le conteste nada.
       if (espera?.calla) {
         if (respuesta !== null) return { ok: false, estado, respuesta, motivo: 'se le contestó, y tenía que ser silencio' };
@@ -227,7 +300,8 @@ export async function correrGuion(ctx: ContextoGuion, guion: Guion): Promise<Res
       if (Date.now() > hasta) {
         const e = await entrega();
         const llega = e?.llegaAproxAt ? ` (la llegada prevista era ${e.llegaAproxAt.toISOString().slice(11, 16)} UTC)` : '';
-        const motivo = (!estadoOk ? `el pedido quedó «${estado ?? 'sin pedido'}» y se esperaba ${espera!.estado!.map((x) => `«${x}»`).join(' o ')}` : `la respuesta no dice lo esperado`) + llega;
+        const sinSuNumero = espera?.numeroDelMotorizado && respuesta !== null && espera.respuesta?.test(respuesta) !== false;
+        const motivo = (!estadoOk ? `el pedido quedó «${estado ?? 'sin pedido'}» y se esperaba ${espera!.estado!.map((x) => `«${x}»`).join(' o ')}` : sinSuNumero ? `la respuesta no lleva el número del motorizado asignado (${motoTel ?? 'sin motorizado'})` : `la respuesta no dice lo esperado`) + llega;
         return { ok: false, estado, respuesta, motivo };
       }
       await dormir(400);
@@ -260,6 +334,19 @@ export async function correrGuion(ctx: ContextoGuion, guion: Guion): Promise<Res
           motivo: movido ? undefined : `la hora de llegada no se movió (filas: ${r.rowCount}; antes ${antes?.toISOString() ?? 'sin hora'}, después ${despues?.toISOString() ?? 'sin hora'})`,
         });
         if (!movido) break;
+        continue;
+      }
+      if (paso.tipo === 'confirmar_envio') {
+        const antes = (await ultimaA(nuevo.phone))?.id ?? null;
+        const r = await deps.entregas.liberarEnvio([nuevo.id], 'Módulo desarrollador (guion)');
+        const e = await entrega();
+        if (e?.envioRetenidoAt) {
+          res.pasos.push({ n, quien: 'sistema', dijo: '📤 Se confirma el envío', esperado: paso.espera.que, ok: false, estado: e.estado, respuesta: null, motivo: `el pedido sigue esperando confirmar su envío (${r.aviso})` });
+          break;
+        }
+        const c = await comprobar(paso.espera, nuevo.phone, antes, 60_000);
+        res.pasos.push({ n, quien: 'sistema', dijo: r.liberadas ? '📤 Se confirma el envío (como el botón de Números del día)' : '📤 Se confirma el envío (ya salía solo: el ajuste está apagado)', esperado: paso.espera.que, ok: c.ok, estado: c.estado, respuesta: c.respuesta, motivo: c.motivo });
+        if (!c.ok) break;
         continue;
       }
       if (paso.tipo === 'esperar_motorizado') {
