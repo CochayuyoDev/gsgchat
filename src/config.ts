@@ -34,6 +34,22 @@ const schema = z.object({
   WAHA_SESSION: z.string().default('default'),
   /** WEBJS | NOWEB | GOWS | WPP. Vacio = el que traiga el contenedor. */
   WAHA_ENGINE: z.string().default(''),
+  /**
+   * Si no aparece ningun WAHA, el sistema levanta el suyo con Docker
+   * (src/whatsapp/waha/gestionado.ts). En false, hay que darle la direccion.
+   */
+  WAHA_AUTOARRANQUE: z
+    .enum(['true', 'false', '1', '0'])
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
+  /** Puerto de esta maquina para el WAHA que levanta el sistema. */
+  WAHA_PUERTO_LOCAL: z.coerce.number().int().positive().default(3001),
+  /**
+   * Donde manda WAHA los mensajes que llegan. Vacio = PUBLIC_BASE_URL, con
+   * localhost cambiado por host.docker.internal si WAHA corre en Docker aqui
+   * mismo. En docker compose es http://app:3000.
+   */
+  WAHA_WEBHOOK_BASE_URL: z.string().default(''),
 
   // Las credenciales de Meta son opcionales a proposito: el sistema arranca
   // sin ellas y las pide por pantalla en /setup. Lo que se guarde ahi tiene

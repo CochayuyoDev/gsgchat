@@ -2,7 +2,7 @@
  * «Borrar todo lo de prueba»: SOLO lo del Modulo desarrollador.
  *
  * Lo de prueba se reconoce por dos marcas que un dato real no puede tener:
- * los telefonos del rango reservado (51 900 0xx xxx clientes, 51 900 1xx xxx
+ * los telefonos del rango reservado (51 000 0xx xxx clientes, 51 000 1xx xxx
  * motorizados, ver numeros.ts) y las referencias que empiezan por PRUEBA-.
  * Cada sentencia va acotada a esas marcas; nada se borra "por fecha" ni "por
  * lote" sin haber comprobado antes que era de prueba.

@@ -305,7 +305,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     const [f] = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = 'R-0001'`)).rows;
     expect(f!.phone).toBe('51944000001');
     // Reasignarlo a mano a uno de prueba tampoco se deja.
-    const [prueba] = (await tienda.repos.desarrollador!.query<{ id: number }>(`select id from motorizados where phone like '519001%' limit 1`)).rows;
+    const [prueba] = (await tienda.repos.desarrollador!.query<{ id: number }>(`select id from motorizados where phone like '510001%' limit 1`)).rows;
     const [ent] = (await tienda.repos.desarrollador!.query<{ id: number }>(`select id from entregas where referencia = 'R-0001'`)).rows;
     const r = await tienda.entregas!.reasignar(ent!.id, prueba!.id, 'prueba');
     expect(r).toMatchObject({ error: expect.stringContaining('No se mezcla lo de prueba con lo real') });

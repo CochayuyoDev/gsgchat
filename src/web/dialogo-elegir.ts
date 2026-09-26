@@ -16,8 +16,8 @@ export const DIALOGO_ELEGIR_CSS = `
   .dlg.elegir { width: min(480px, 100%); }
   .dlg .opciones { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; max-height: 52vh; overflow: auto; }
   .dlg .dlg-opcion { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 10px 14px; border: 1px solid var(--borde, #e3e5e9); border-radius: var(--radio-sm, 9px); background: var(--superficie, #fff); color: var(--texto, #111b21); font: inherit; cursor: pointer; min-height: 44px; }
-  .dlg .dlg-opcion:hover, .dlg .dlg-opcion:focus-visible { border-color: var(--primario, #128c7e); background: var(--primario-suave, #e3f3f0); }
-  .dlg .dlg-opcion.destacada { border-color: var(--primario, #128c7e); background: var(--primario-suave, #e3f3f0); }
+  .dlg .dlg-opcion:hover, .dlg .dlg-opcion:focus-visible { border-color: var(--primario, #0a7f55); background: var(--primario-suave, #e2f4ea); }
+  .dlg .dlg-opcion.destacada { border-color: var(--primario, #0a7f55); background: var(--primario-suave, #e2f4ea); }
   .dlg .dlg-opcion b { font-weight: 600; }
   .dlg .dlg-opcion small { color: var(--texto-suave, #667781); font-size: 12.5px; }
   .dlg .dlg-opcion.peligrosa { color: var(--rojo, #dc2626); }
@@ -30,7 +30,7 @@ export const DIALOGO_ELEGIR_CSS = `
   .dlg .campo.con-error input, .dlg .campo.con-error textarea { border-color: var(--rojo, #dc2626); }
   .dlg .casillas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; max-height: 190px; overflow: auto; padding: 8px 10px; border: 1px solid var(--borde, #e3e5e9); border-radius: var(--radio-sm, 9px); background: var(--superficie, #fff); }
   .dlg .casillas label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13.5px; color: var(--texto, #111b21); cursor: pointer; min-height: 28px; }
-  .dlg .casillas input { width: 16px; height: 16px; margin: 0; accent-color: var(--primario, #128c7e); }
+  .dlg .casillas input { width: 16px; height: 16px; margin: 0; accent-color: var(--primario, #0a7f55); }
   .dlg .casillas-buscar { margin-bottom: 6px; }
   .dlg select { width: 100%; font: inherit; font-size: 15px; padding: 11px 12px; border: 1px solid var(--borde, #e3e5e9); border-radius: var(--radio-sm, 9px); background: var(--superficie, #fff); color: var(--texto, #111b21); }
   @media (max-width: 640px) { .dlg .casillas { grid-template-columns: 1fr 1fr; } }

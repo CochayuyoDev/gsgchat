@@ -19,6 +19,12 @@ services:
       # El sistema de GSG: se puede dejar vacio y conectarlo desde Conexion.
       GSG_URL: ${GSG_URL:-}
       GSG_TOKEN: ${GSG_TOKEN:-}
+      # WAHA (conexion por QR con WAHA) va en su propio servicio, abajo. Aqui
+      # dentro no hay Docker, asi que el sistema no intenta levantarlo solo.
+      WAHA_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY:-cambia-esta-clave-de-waha}
+      WAHA_WEBHOOK_BASE_URL: http://app:3000
+      WAHA_AUTOARRANQUE: 'false'
       ARCHIVE_DIR: /app/respaldos
       # Las tiendas que se registran en /registro: su vinculacion de WhatsApp,
       # sus adjuntos y sus secretos (su base va en su esquema de Postgres).
@@ -43,6 +49,26 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      waha:
+        condition: service_started
+    restart: unless-stopped
+
+  # https://waha.devlike.pro - WhatsApp por QR. Solo hace falta si en /setup se
+  # elige "Conectar con WAHA"; si no, esta parado sin gastar casi nada.
+  waha:
+    image: devlikeapro/waha
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY:-cambia-esta-clave-de-waha}
+      # WEBJS | NOWEB | GOWS | WPP. Vacio = el de la imagen.
+      WHATSAPP_DEFAULT_ENGINE: ${WAHA_ENGINE:-}
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_API_KEY:-cambia-esta-clave-de-waha}
+    ports:
+      # Solo desde esta maquina: el panel de WAHA en http://localhost:3001.
+      - '127.0.0.1:3001:3000'
+    volumes:
+      # La vinculacion del telefono: sin esto, cada recreate pide otro QR.
+      - wahasesiones:/app/.sessions
     restart: unless-stopped
 
   postgres:
@@ -83,3 +109,4 @@ volumes:
   copias:
   pgdata:
   redisdata:
+  wahasesiones:

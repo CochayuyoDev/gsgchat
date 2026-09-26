@@ -8,7 +8,7 @@
 
 export const COMUN_CSS = `
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1180px; }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: var(--ancho-max, 1600px); }
   .muted { color: var(--texto-suave); }
   .demo { display: none; background: var(--ambar-suave); color: var(--ambar); padding: 8px 14px; font-size: var(--fs-small); text-align: center; border-radius: var(--radio-sm); margin-bottom: var(--esp-3); font-weight: 600; }
   @media (max-width: 960px) { .demo { display: block; } }

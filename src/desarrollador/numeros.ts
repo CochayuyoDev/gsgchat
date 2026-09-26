@@ -1,8 +1,13 @@
 /**
  * Los numeros del Modulo desarrollador: un rango reservado y marcado.
  *
- *   clientes de prueba     51 900 0xx xxx   (51900000000 - 51900099999)
- *   motorizados de prueba  51 900 1xx xxx   (51900100000 - 51900199999)
+ *   clientes de prueba     51 000 0xx xxx   (51000000000 - 51000099999)
+ *   motorizados de prueba  51 000 1xx xxx   (51000100000 - 51000199999)
+ *
+ * Ningun numero de Peru empieza por 0 despues del 51: el rango no puede
+ * coincidir con nadie real. Antes era 51 000 0/1…, que SI son celulares de
+ * verdad (el 26/09 un cliente real, 900 048 813, no recibia nada porque el
+ * sistema lo tomaba por uno de prueba).
  *
  * NADA dirigido a estos numeros sale por WhatsApp, este encendido o no el
  * modo prueba: el sender los trata como a un visitante de la web (el mensaje
@@ -13,8 +18,8 @@
  * no estan en este rango: los usa el simulador de GSG y las pruebas antiguas.
  */
 
-export const PREFIJO_CLIENTE_PRUEBA = '519000';
-export const PREFIJO_MOTORIZADO_PRUEBA = '519001';
+export const PREFIJO_CLIENTE_PRUEBA = '510000';
+export const PREFIJO_MOTORIZADO_PRUEBA = '510001';
 
 /** Solo digitos, con el 51 delante si venia sin el. */
 function normal(telefono: string): string {

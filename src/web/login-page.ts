@@ -26,7 +26,7 @@
  */
 
 import { INICIAL_SISTEMA, LEMA_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
-import { TOKENS_CSS } from './tokens.js';
+import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 
 /**
  * Como se presenta el sistema, en un solo sitio.
@@ -448,7 +448,7 @@ export function loginPage(opts: {
 `;
 
   return `<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="es"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Acceso al sistema de ${negocio}.">
 <title>Entrar - ${negocio} · ${NOMBRE_SISTEMA}</title><style>${CSS}</style></head>
 <body>

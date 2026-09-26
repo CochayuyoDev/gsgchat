@@ -455,7 +455,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         // Sin los numeros del Modulo desarrollador: no cuentan en la salud del numero real.
         `select count(*)::int as total from messages m
           where m.direction = 'in' and m.created_at >= $1
-            and not exists (select 1 from contacts c where c.id = m.contact_id and c.phone ~ '^51900[01][0-9]{5}$')`,
+            and not exists (select 1 from contacts c where c.id = m.contact_id and c.phone ~ '^51000[01][0-9]{5}$')`,
         [since],
       );
       return rows[0]?.total ?? 0;

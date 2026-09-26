@@ -15,6 +15,7 @@ import { isPubliclyReachable } from '../whatsapp/onboarding.js';
 import {
   CANDIDATOS_WAHA,
   detectWaha,
+  sondearWaha,
   ensureSession,
   getQrCode,
   getSession,
@@ -23,6 +24,12 @@ import {
   WahaError,
 } from '../whatsapp/waha/session.js';
 import { fromChatId } from '../whatsapp/waha/client.js';
+import {
+  crearWahaGestionado,
+  esLocal,
+  vistaDesdeContenedor,
+  type WahaGestionado,
+} from '../whatsapp/waha/gestionado.js';
 import { importarConversaciones, POR_DEFECTO } from '../whatsapp/waha/importar.js';
 import { providerOf } from '../settings/service.js';
 import type { Repos } from '../db/repos.js';
@@ -32,7 +39,16 @@ export interface WahaRoutesDeps {
   settings: SettingsService;
   /** Hace falta para traerse el historial que ya vive en WAHA. */
   repos: Repos;
+  /**
+   * El WAHA que levanta el propio sistema si no encuentra ninguno. Sin darlo,
+   * se crea uno con Docker cuando WAHA_AUTOARRANQUE esta activo.
+   */
+  wahaGestionado?: WahaGestionado | null;
 }
+
+type Resolucion =
+  | { ok: true; url: string; apiKey: string }
+  | { ok: false; code: number; error: string; step?: string; preparando?: boolean; fase?: string };
 
 const connectSchema = z.object({
   wahaUrl: z.string().trim().url('la direccion de WAHA tiene que ser una URL completa').optional(),
@@ -58,6 +74,98 @@ function connectionFrom(settings: SettingsService) {
 
 export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesDeps): Promise<void> {
   const { config, settings, repos } = deps;
+  const gestionado =
+    deps.wahaGestionado !== undefined
+      ? deps.wahaGestionado
+      : config.WAHA_AUTOARRANQUE
+        ? crearWahaGestionado({
+            // Nunca el mismo puerto que este servidor: WAHA y el se pisarian.
+            puerto: config.WAHA_PUERTO_LOCAL === config.PORT ? config.PORT + 1 : config.WAHA_PUERTO_LOCAL,
+            motor: config.WAHA_ENGINE || undefined,
+          })
+        : null;
+
+  /**
+   * Busca un WAHA que nos deje entrar. Primero con la clave que ya se tiene;
+   * si no, con la del contenedor del sistema, que solo se le pregunta a Docker
+   * cuando hace falta (es lento y en las pruebas no hay Docker que valga).
+   */
+  async function buscarEnLosSitiosDeSiempre(
+    candidatos: string[],
+    apiKey: string,
+  ): Promise<{ url: string; apiKey: string } | null> {
+    const found = await detectWaha(candidatos, fetch, 1200, apiKey || undefined);
+    if (found) return { url: found, apiKey };
+    const delContenedor = gestionado ? await gestionado.claveExistente() : '';
+    if (!delContenedor || delContenedor === apiKey) return null;
+    const conClave = await detectWaha(candidatos, fetch, 1200, delContenedor);
+    return conClave ? { url: conClave, apiKey: delContenedor } : null;
+  }
+
+  /**
+   * Donde esta WAHA y con que clave se entra, en este orden: lo que escribio
+   * el usuario, lo guardado, lo que se encuentre en los puertos de siempre y,
+   * si no hay nada, el contenedor que levanta el sistema.
+   */
+  async function resolverWaha(urlPedida?: string, clavePedida?: string): Promise<Resolucion> {
+    const current = settings.current();
+    const url = urlPedida || current.wahaUrl;
+    let apiKey = clavePedida || current.wahaApiKey || '';
+
+    if (url) {
+      let sonda = await sondearWaha(url, apiKey || undefined);
+      // Un WAHA de esta maquina que pide clave: casi siempre es el nuestro y
+      // la clave se perdio (la demo no guarda nada). Se lee del contenedor.
+      if (sonda === 'clave' && gestionado && esLocal(url)) {
+        const delContenedor = await gestionado.claveExistente();
+        if (delContenedor) {
+          apiKey = delContenedor;
+          sonda = await sondearWaha(url, apiKey);
+        }
+      }
+      if (sonda === 'listo') return { ok: true, url: url.replace(/\/+$/, ''), apiKey };
+      if (sonda === 'clave') {
+        return {
+          ok: false,
+          code: 400,
+          error: `En ${url} hay un WAHA, pero pide una clave de API que no coincide. Pon su WAHA_API_KEY en "Clave de WAHA".`,
+          step: 'entrar en WAHA',
+        };
+      }
+      // Lo escribio el usuario y ahi no hay nada: no se le cambia por otro.
+      if (urlPedida) {
+        return {
+          ok: false,
+          code: 400,
+          error:
+            `En ${url} no hay ningun WAHA escuchando. ` +
+            'Deja la dirección vacía y el sistema levanta su propio WAHA.',
+          step: 'buscar el contenedor',
+        };
+      }
+    }
+
+    const encontrado = await buscarEnLosSitiosDeSiempre(CANDIDATOS_WAHA, apiKey);
+    if (encontrado) return { ok: true, ...encontrado };
+
+    if (!gestionado) {
+      return {
+        ok: false,
+        code: 400,
+        error:
+          'No hay ningún WAHA en esta máquina y el arranque automático está apagado (WAHA_AUTOARRANQUE=false). ' +
+          'Escribe la dirección de tu contenedor.',
+        step: 'buscar el contenedor',
+      };
+    }
+
+    const estado = await gestionado.asegurar();
+    if (estado.fase === 'listo') return { ok: true, url: estado.url, apiKey: estado.apiKey };
+    if (estado.fase === 'descargando' || estado.fase === 'arrancando') {
+      return { ok: false, code: 202, error: estado.detalle, preparando: true, fase: estado.fase };
+    }
+    return { ok: false, code: 400, error: estado.detalle, step: 'levantar WAHA', fase: estado.fase };
+  }
 
   /**
    * Trae al sistema las conversaciones que ya existen en WAHA.
@@ -106,24 +214,16 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
     const body = connectSchema.parse(request.body ?? {});
     const current = settings.current();
 
-    const wahaUrl = body.wahaUrl || current.wahaUrl;
-    if (!wahaUrl) {
-      return reply.code(400).send({ error: 'Falta la direccion del contenedor de WAHA.' });
+    const donde = await resolverWaha(body.wahaUrl, body.wahaApiKey);
+    if (!donde.ok) {
+      // 202 = todavia se esta levantando: la pantalla vuelve a llamar sola.
+      return reply.code(donde.code).send(
+        donde.preparando
+          ? { ok: false, preparando: true, fase: donde.fase, detalle: donde.error }
+          : { error: donde.error, step: donde.step },
+      );
     }
-
-    // Comprobar que ahi vive un WAHA ANTES de guardar nada ni crear la sesion.
-    // El fallo tipico es apuntar a este mismo servidor: entonces el POST a
-    // /api/sessions se estrella contra nuestro propio router y el usuario ve
-    // un "Route POST:/api/sessions not found" que no explica nada.
-    if (!(await detectWaha([wahaUrl]))) {
-      return reply.code(400).send({
-        error:
-          `En ${wahaUrl} no hay ningun WAHA escuchando. ` +
-          'Arranca el contenedor con "docker run -d -p 3001:3000 devlikeapro/waha" ' +
-          'y usa http://localhost:3001. Ojo: el 3000 suele ser este mismo servidor.',
-        step: 'buscar el contenedor',
-      });
-    }
+    const wahaUrl = donde.url;
 
     // La clave del HMAC se la inventa el sistema, igual que el verify token de
     // Meta: es una cadena que solo tienen que compartir WAHA y nosotros.
@@ -133,14 +233,21 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
       provider: 'waha',
       wahaUrl,
       verifyToken,
-      ...(body.wahaApiKey ? { wahaApiKey: body.wahaApiKey } : {}),
+      ...(donde.apiKey && donde.apiKey !== current.wahaApiKey ? { wahaApiKey: donde.apiKey } : {}),
       ...(body.wahaSession ? { wahaSession: body.wahaSession } : {}),
       ...(body.wahaEngine ? { wahaEngine: body.wahaEngine } : {}),
     });
     await settings.reload();
 
     const base = (body.publicUrl || config.PUBLIC_BASE_URL).replace(/\/+$/, '');
-    const webhookUrl = `${base}/webhooks/waha`;
+    // WAHA corre en Docker: si este servidor solo escucha en esta maquina, el
+    // contenedor lo alcanza por host.docker.internal, no por localhost.
+    const baseWebhook = config.WAHA_WEBHOOK_BASE_URL
+      ? config.WAHA_WEBHOOK_BASE_URL.replace(/\/+$/, '')
+      : esLocal(wahaUrl)
+        ? vistaDesdeContenedor(base)
+        : base;
+    const webhookUrl = `${baseWebhook}/webhooks/waha`;
     const saved = settings.current();
 
     try {
@@ -241,8 +348,11 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
    */
   app.get('/admin/waha/detect', async () => {
     const guardada = settings.current().wahaUrl;
-    const found = await detectWaha(guardada ? [guardada, ...CANDIDATOS_WAHA] : CANDIDATOS_WAHA);
-    return { found, saved: guardada || null };
+    const encontrado = await buscarEnLosSitiosDeSiempre(
+      guardada ? [guardada, ...CANDIDATOS_WAHA] : CANDIDATOS_WAHA,
+      settings.current().wahaApiKey,
+    );
+    return { found: encontrado?.url ?? null, saved: guardada || null, autoarranque: Boolean(gestionado) };
   });
 
   /** Desvincula el telefono: obliga a escanear otro QR. */

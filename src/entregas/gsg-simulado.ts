@@ -205,9 +205,17 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
     }
   }
 
-  const porReferencia = (cuerpo: Record<string, unknown>): ClienteSimulado | null => {
+  /**
+   * A qué pedido va un reporte. Por teléfono solo si `porTelefono`: una
+   * ubicación es de la persona (el reparto la manda con su propia referencia),
+   * pero una confirmación o una entrega es de UN pedido. Sin esa distinción,
+   * la cancelación de G-2001 canceló G-2002, el pedido nuevo del mismo
+   * cliente (26/09).
+   */
+  const porReferencia = (cuerpo: Record<string, unknown>, opts: { porTelefono?: boolean } = {}): ClienteSimulado | null => {
     const ref = String(cuerpo.referencia ?? '').trim();
     if (ref && clientes.has(ref)) return clientes.get(ref)!;
+    if (ref && !opts.porTelefono) return null;
     // Sin referencia que cuadre, por telefono (el reparto manda los dos).
     const tel = String(cuerpo.telefono ?? '').replace(/\D+/g, '');
     if (!tel) return null;
@@ -358,7 +366,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
         case '/ubicaciones': {
           contadores.ubicaciones++;
           recibido.push({ tipo: 'ubicacion', cuerpo: c, en });
-          const cli = porReferencia(c);
+          const cli = porReferencia(c, { porTelefono: true });
           if (cli) {
             cli.ubicacion = { lat: Number(c.lat), lng: Number(c.lng), mapsUrl: (c.mapsUrl as string) ?? null, corregida: c.corregida === true, en };
             revisar(cli);

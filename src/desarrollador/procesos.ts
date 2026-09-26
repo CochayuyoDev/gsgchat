@@ -2,7 +2,7 @@
  * Pestaña «Probar un proceso» del Modulo desarrollador.
  *
  * Simula una corrida entera de una plantilla con numeros de prueba
- * (51 900 0…), que NUNCA salen al WhatsApp real: se crea (o se reutiliza) el
+ * (51 000 0…), que NUNCA salen al WhatsApp real: se crea (o se reutiliza) el
  * proceso de la plantilla, se cargan las personas, el motor les escribe (lo
  * de prueba no gasta el ritmo del numero) y cada persona «contesta» por el
  * MISMO camino que un mensaje de verdad (processChange → handlers/inbound.ts →
@@ -245,7 +245,7 @@ const HTML = `
 <div class="pro-grid">
   <form class="tarjeta pro-form" id="pro-form" novalidate>
     <h3>Simular una corrida</h3>
-    <p class="muted">Se crea (o se reutiliza) el proceso de la plantilla con «(prueba)» en el nombre, se cargan personas con números reservados (51 900 0…) y cada una contesta sola por el mismo camino que un mensaje de verdad. Nada sale al WhatsApp real.</p>
+    <p class="muted">Se crea (o se reutiliza) el proceso de la plantilla con «(prueba)» en el nombre, se cargan personas con números reservados (51 000 0…) y cada una contesta sola por el mismo camino que un mensaje de verdad. Nada sale al WhatsApp real.</p>
     <div class="campo"><label for="pro-plantilla">Plantilla</label>
       <select id="pro-plantilla">
         <option value="datos">Pedir y validar datos</option>

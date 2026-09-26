@@ -34,7 +34,7 @@ const instancia = await altaInstancia(
   slug,
   {
     nombre: opcion('nombre'),
-    proveedor: proveedor === 'cloud' || proveedor === 'waha' ? proveedor : 'local',
+    proveedor: proveedor === 'local' || proveedor === 'waha' ? proveedor : 'cloud',
     pais: pais === 'mexico' || pais === 'generico' ? pais : pais === 'peru' ? 'peru' : undefined,
   },
   { log },

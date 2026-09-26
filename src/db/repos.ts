@@ -1028,21 +1028,21 @@ export function createRepos(poolCrudo: Pool): Repos {
     async contarNuevosEscritosDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
         // Sin los numeros del Modulo desarrollador: no cuentan en la salud del numero real.
-        "select count(*)::int as total from contacts where primer_envio_at >= $1 and phone !~ '^51900[01][0-9]{5}$'",
+        "select count(*)::int as total from contacts where primer_envio_at >= $1 and phone !~ '^51000[01][0-9]{5}$'",
         [since],
       );
       return rows[0]?.total ?? 0;
     },
     async contarSuprimidos(now) {
       const { rows } = await pool.query<{ total: number }>(
-        "select count(*)::int as total from contacts where suprimido_hasta > $1 and phone !~ '^51900[01][0-9]{5}$'",
+        "select count(*)::int as total from contacts where suprimido_hasta > $1 and phone !~ '^51000[01][0-9]{5}$'",
         [now],
       );
       return rows[0]?.total ?? 0;
     },
     async contarBajasDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
-        "select count(*)::int as total from contacts where opt_out_at >= $1 and phone !~ '^51900[01][0-9]{5}$'",
+        "select count(*)::int as total from contacts where opt_out_at >= $1 and phone !~ '^51000[01][0-9]{5}$'",
         [since],
       );
       return rows[0]?.total ?? 0;

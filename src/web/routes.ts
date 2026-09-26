@@ -185,7 +185,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
         scope: '/',
         display: 'standalone',
         background_color: '#f6f7f9',
-        theme_color: '#0f766e',
+        theme_color: '#0a7f55',
         lang: 'es-PE',
         icons: [
           { src: '/icono-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },

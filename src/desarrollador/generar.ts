@@ -241,7 +241,7 @@ const HTML = `
 <div class="gen-grid">
   <form class="tarjeta gen-form" id="gen-form" novalidate>
     <h3>Crear clientes de prueba</h3>
-    <p class="muted gen-intro">Entran por la API, igual que llegarán los pedidos de GSG. Números reservados (51 900 0…): nada sale al WhatsApp real.</p>
+    <p class="muted gen-intro">Entran por la API, igual que llegarán los pedidos de GSG. Números reservados (51 000 0…): nada sale al WhatsApp real.</p>
     <div class="gen-contador">
       <label for="gen-confirmar"><b>Falta que confirme</b><span class="muted">GSG ya tiene su dirección: se le pregunta solo SÍ o NO (nunca la ubicación). En el sistema: «esperando confirmación».</span></label>
       <div class="gen-num"><button type="button" class="btn" data-menos="gen-confirmar" aria-label="Uno menos">−</button><input id="gen-confirmar" type="number" inputmode="numeric" min="0" max="${TOPE_POR_TANDA}" value="20"><button type="button" class="btn" data-mas="gen-confirmar" aria-label="Uno más">+</button></div>
@@ -251,7 +251,7 @@ const HTML = `
       <div class="gen-num"><button type="button" class="btn" data-menos="gen-ubicacion" aria-label="Uno menos">−</button><input id="gen-ubicacion" type="number" inputmode="numeric" min="0" max="${TOPE_POR_TANDA}" value="20"><button type="button" class="btn" data-mas="gen-ubicacion" aria-label="Uno más">+</button></div>
     </div>
     <div class="gen-contador">
-      <label for="gen-motos"><b>Motorizados de prueba</b><span class="muted">Reciben los pedidos listos y contestan desde «Ver el flujo en vivo» (51 900 1…).</span></label>
+      <label for="gen-motos"><b>Motorizados de prueba</b><span class="muted">Reciben los pedidos listos y contestan desde «Ver el flujo en vivo» (51 000 1…).</span></label>
       <div class="gen-num"><button type="button" class="btn" data-menos="gen-motos" aria-label="Uno menos">−</button><input id="gen-motos" type="number" inputmode="numeric" min="0" max="${TOPE_MOTORIZADOS}" value="5"><button type="button" class="btn" data-mas="gen-motos" aria-label="Uno más">+</button></div>
     </div>
     <div class="gen-rapidos" role="group" aria-label="Cantidades rápidas"><span class="muted">Rápido:</span>

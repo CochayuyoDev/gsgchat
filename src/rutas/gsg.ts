@@ -390,7 +390,7 @@ async function despacharAhora(
   const resumen: DespachoResumen = { intentados: pendientes.length, enviados: 0, fallidos: 0 };
 
   for (const reporte of pendientes) {
-    // Lo del Modulo desarrollador (numeros 51 900 0/1…, referencias PRUEBA-)
+    // Lo del Modulo desarrollador (numeros 51 000 0/1…, referencias PRUEBA-)
     // solo va al simulador. Contra la API real de GSG no sale NUNCA: se
     // aparta con el motivo a la vista en vez de quedarse esperando a salir.
     if (esReporteDePrueba(reporte.payload) && !puerto.esSimulador?.()) {

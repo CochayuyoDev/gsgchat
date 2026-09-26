@@ -155,7 +155,7 @@ describe('«Para salir a producción» (Módulo desarrollador → ¿Está listo 
 
   it('en la demo (simulador, localhost, sin soporte ni supervisor) dice qué falta, en palabras', async () => {
     const { revisarProduccion } = await import('../src/desarrollador/listo.js');
-    const r = await revisarProduccion(base({ prueba: ['51900000000'] }));
+    const r = await revisarProduccion(base({ prueba: ['51000000000'] }));
     expect(r.listo).toBe(false);
     const faltan = r.puntos.filter((p) => !p.ok).map((p) => p.clave);
     expect(faltan).toEqual(expect.arrayContaining(['gsg', 'direccion', 'soporte', 'supervisor', 'modoPrueba']));

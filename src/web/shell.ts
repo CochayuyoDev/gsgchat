@@ -17,7 +17,7 @@
 import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
 import { tiendaActual } from '../plataforma/contexto.js';
 import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
-import { TOKENS_CSS } from './tokens.js';
+import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 import { escapeHtml } from './login-page.js';
 import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
@@ -110,6 +110,7 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'ubicaciones', etiqueta: 'Ubicaciones registradas', href: '/numeros?etapa=contactados', icono: 'mapa', descripcion: 'Los clientes que ya mandaron su ubicación (o confirmaron): con su pin, su pedido y a qué motorizado va.', soloGsg: true },
   { id: 'motorizados', etiqueta: 'Motorizados', href: '/motorizados', icono: 'moto', descripcion: 'Quiénes reparten hoy: alta, zona, descanso y qué lleva cada uno.', soloGsg: true },
   { id: 'conexion', etiqueta: 'Conexión', href: '/setup', icono: 'enchufe', descripcion: 'El WhatsApp (QR o API de Meta) y el sistema de GSG.' },
+  { id: 'plantillas', etiqueta: 'Plantillas', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Los mensajes con los que el sistema abre y cierra las conversaciones (la solicitud de ubicación, el cierre...): crearlos, ver si Meta los aprobó y sincronizarlos.' },
   { id: 'ajustes', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario, avisos, modo prueba y qué se enseña.', soloAdmin: true },
   { id: 'numeros', seccion: 'Seguimiento', etiqueta: 'Números del día', href: '/numeros', icono: 'plantilla', descripcion: 'Todos los números que pasó GSG hoy: a quién falta pedirle la ubicación, quién no la manda, quién falta confirmar y quién ya está contactado; marcar uno, varios o todos y pedirles lo que falte.', soloGsg: true },
   { id: 'procesos', seccion: 'Procesos', etiqueta: 'Procesos', href: '/procesos', icono: 'flujo', descripcion: 'Lo que el sistema hace solo por WhatsApp con tus listas: pedir y validar datos, confirmar y recordar citas, avisar tareas al personal, recordar pagos. Crear desde una plantilla, editar los pasos y cargar personas.' },
@@ -201,7 +202,7 @@ export const MENU_GRUPOS: GrupoMenu[] = [
       { id: 'grupos', etiqueta: 'Enviar a un grupo', href: '/panel#grupos', icono: 'contactos', descripcion: 'Elegir clientes por como estan (sin ubicacion, ficha incompleta, callados...) y mandarles a todos un mensaje personalizado.', avanzado: true },
       { id: 'campanas', etiqueta: 'Campañas', href: '/panel#campanas', icono: 'megafono', descripcion: 'Envios masivos por goteo, con canario y al ritmo que el numero tolera.', avanzado: true },
       { id: 'automatizacion', etiqueta: 'Respuestas automáticas', href: '/panel#automatizacion', icono: 'rayo', descripcion: 'Reglas por palabra clave y secuencias: que se manda solo y cuando (sin IA).', avanzado: true },
-      { id: 'plantillas', etiqueta: 'Mensajes aprobados (plantillas)', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Las plantillas de Meta y las propias: crear, sincronizar y ver su estado.', avanzado: true },
+      { id: 'plantillas', etiqueta: 'Plantillas', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Las plantillas de Meta y las propias: crear, sincronizar y ver su estado.' },
     ],
   },
   {
@@ -240,6 +241,9 @@ export const MENU_GRUPOS: GrupoMenu[] = [
 
 /** Iconos de trazo, 24x24, sin dependencias. */
 const ICONOS = {
+  luna: '<path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/>',
+  sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  auto: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
   inicio: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
   libro: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5V5.5"/><path d="M8 7h8M8 11h6"/>',
   soporte: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="m5.6 5.6 3.9 3.9M14.5 14.5l3.9 3.9M18.4 5.6l-3.9 3.9M9.5 14.5l-3.9 3.9"/>',
@@ -304,7 +308,7 @@ const CSS = `
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: var(--texto); font: inherit; font-weight: 600; line-height: 1.2; cursor: pointer; text-decoration: none; box-shadow: none; }
   .btn:hover { border-color: var(--primario); color: var(--primario); }
   .btn.primario { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
-  .btn.primario:hover { filter: brightness(1.06); color: var(--primario-texto); }
+  .btn.primario:hover { background: var(--primario-hover, var(--primario)); border-color: var(--primario-hover, var(--primario)); color: var(--primario-texto); }
   .btn.secundario { background: var(--primario-suave); border-color: transparent; color: var(--primario); }
   .btn.peligro { color: var(--rojo); border-color: var(--rojo-suave); background: var(--rojo-suave); }
   .btn.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
@@ -337,7 +341,7 @@ const CSS = `
   .s-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 10px 12px; }
   .s-item { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px; color: var(--s-text); text-decoration: none; font-weight: 500; white-space: nowrap; }
   .s-item:hover { background: var(--s-hover); }
-  .s-item.activo { background: var(--s-accent-soft); color: var(--s-accent); font-weight: 600; }
+  .s-item.activo { background: var(--s-accent-soft); color: var(--s-accent); font-weight: 600; box-shadow: inset 3px 0 0 var(--s-accent); }
   .s-item .s-ico { flex: none; color: var(--s-muted); }
   .s-item.activo .s-ico { color: var(--s-accent); }
   .s-item .s-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -428,7 +432,10 @@ const CSS = `
   .s-chip-var:hover { background: var(--s-accent-soft); }
   @media (max-width: 960px), (pointer: coarse) { .s-chip-var { min-height: 40px; } }
   .s-content.lleno { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
-  .s-content > .wrap { max-width: 1180px; margin: 0 auto; padding: 0; }
+  /* Un solo ancho para todas las pantallas de trabajo: con 1180 px quedaban
+     franjas vacias a los lados en cualquier monitor de 1600 px o mas. */
+  .s-content { --ancho-max: 1600px; }
+  .s-content > .wrap { max-width: var(--ancho-max); margin: 0 auto; padding: 0; }
   .s-backdrop { display: none; }
   /* Fondo compartido de los cajones "a la derecha" (IA y Ayuda): antes se superponian
      sin avisar y tapaban texto; ahora oscurecen el resto y se cierran al tocar fuera. */
@@ -883,6 +890,25 @@ const JS = String.raw`
   /* avisos: lo que espera a una persona, en todas las pantallas */
   var avisosBox = document.getElementById('s-avisos');
   document.getElementById('s-avisos-boton').onclick = function (ev) { ev.stopPropagation(); avisosBox.classList.toggle('abierto'); };
+  /* Modo noche: automatico (el del sistema), noche o claro, en ese orden.
+     Se guarda en este navegador; TEMA_SCRIPT lo aplica antes de pintar. */
+  (function () {
+    var ICO = { auto: ${JSON.stringify(icono('auto'))}, oscuro: ${JSON.stringify(icono('luna'))}, claro: ${JSON.stringify(icono('sol'))} };
+    var NOMBRE = { auto: 'automático (el del sistema)', oscuro: 'modo noche', claro: 'modo claro' };
+    var boton = document.getElementById('s-tema');
+    function actual() { try { var t = localStorage.getItem('gsg-tema'); return t === 'oscuro' || t === 'claro' ? t : 'auto'; } catch (e) { return 'auto'; } }
+    function pintar(t) {
+      if (t === 'auto') document.documentElement.removeAttribute('data-tema'); else document.documentElement.setAttribute('data-tema', t);
+      document.getElementById('s-tema-ico').innerHTML = ICO[t];
+      boton.title = 'Tema: ' + NOMBRE[t] + '. Pulsa para cambiar.';
+    }
+    pintar(actual());
+    boton.onclick = function () {
+      var sig = { auto: 'oscuro', oscuro: 'claro', claro: 'auto' }[actual()];
+      try { if (sig === 'auto') localStorage.removeItem('gsg-tema'); else localStorage.setItem('gsg-tema', sig); } catch (e) {}
+      pintar(sig);
+    };
+  })();
   document.addEventListener('click', function (ev) { if (!avisosBox.contains(ev.target)) avisosBox.classList.remove('abierto'); });
   function escapar(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   /* Un numero como lo leeria una persona: +51 987 000 001. */
@@ -1176,8 +1202,9 @@ export function appShell(opts: ShellOpts): string {
   return `<!doctype html>
 <html lang="es"><head>
 <meta charset="utf-8">
+${TEMA_SCRIPT}
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f766e">
+<meta name="theme-color" content="#0a7f55">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -1224,6 +1251,7 @@ export function appShell(opts: ShellOpts): string {
       <div class="s-titulo"><div class="s-miga" id="s-miga"></div><h1 id="s-h1">${escapeHtml(opts.titulo)}</h1><p id="s-sub">${escapeHtml(opts.subtitulo ?? '')}</p></div>
       <span id="state" class="pill hidden"></span>
       <div class="s-top-der">${demo}
+        <button class="s-boton" id="s-tema" type="button" title="Tema: automático" aria-label="Cambiar entre modo claro, noche o automático"><span id="s-tema-ico">${icono('auto')}</span></button>
         <div class="s-avisos" id="s-avisos">
           <button class="s-boton" id="s-avisos-boton" type="button" title="Avisos" aria-label="Avisos">${icono('campana')}<span class="s-num" id="s-avisos-num"></span></button>
           <div class="s-avisos-caja" id="s-avisos-caja"><h4>Avisos</h4><div id="s-avisos-lista"><div class="s-aviso-nada">Cargando…</div></div></div>

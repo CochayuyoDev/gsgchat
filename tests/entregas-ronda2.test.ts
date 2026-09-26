@@ -171,7 +171,7 @@ describe('botones, segunda visita, cerca, sin moto, urgentes y ruta', () => {
     const alCliente = e.textosA('987300003');
     expect(alCliente[alCliente.length - 1]).toMatch(/vuelve a pasar hoy/i);
 
-    await e.contesta(carlos.phone, { texto: '20' });
+    await e.contesta(carlos.phone, { texto: `${entrega!.referencia} 20` });
     act = await e.entrega('R-3003');
     expect(act?.estado).toBe('avisada');
     expect(act?.minutosAviso).toBe(80);

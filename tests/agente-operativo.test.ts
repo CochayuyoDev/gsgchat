@@ -56,7 +56,7 @@ describe('el primer mensaje con los datos del envío de GSG', () => {
   it('con todo, sale igual que el ejemplo del dueño', () => {
     const t = rellenar(TEXTOS_POR_DEFECTO.solicitudUbicacion, { nombre: 'María Pérez', negocio: 'GSG Courier', direccion: 'Av. La Marina 1234', distrito: 'San Miguel', envio: completo });
     expect(t).toBe(
-      '¡Hola María Pérez! Soy Juan Quispe de la empresa de entregas GSG. Tengo una entrega para ti:\n' +
+      '¡Hola María Pérez! Somos GSG Courier, tengo una entrega para ti:\n' +
         '📦 Producto: Zapatillas talla 40\n' +
         '🏢 Empresa: 516 - Zapatería Lima\n' +
         '📝 Código: GSG-A-102345\n' +
@@ -71,7 +71,7 @@ describe('el primer mensaje con los datos del envío de GSG', () => {
 
   it('lo que no vino no sale: ni la línea, ni «undefined»; sin quien firma, «Te escribimos de…»', () => {
     const t = rellenar(TEXTOS_POR_DEFECTO.solicitudUbicacion, { nombre: 'María Pérez', negocio: 'GSG Courier', direccion: 'Av. La Marina 1234', envio: { producto: 'Zapatillas talla 40', empresaNombre: 'Zapatería Lima' } });
-    expect(t).toContain('¡Hola María Pérez! Te escribimos de la empresa de entregas GSG. Tengo una entrega para ti:');
+    expect(t).toContain('¡Hola María Pérez! Somos GSG Courier, tengo una entrega para ti:');
     expect(t).toContain('🏢 Empresa: Zapatería Lima');
     expect(t).toContain('🏠 Dirección: Av. La Marina 1234');
     for (const fuera of ['Monto', 'Código', 'Nro. de pedido', 'Método de Pago', 'undefined', 'null', '{']) expect(t).not.toContain(fuera);
@@ -80,7 +80,7 @@ describe('el primer mensaje con los datos del envío de GSG', () => {
 
   it('sin nombre ni datos queda un mensaje limpio que igual pide la ubicación', () => {
     const t = textoDe('solicitudUbicacion', AJUSTES_ENTREGAS_POR_DEFECTO, { negocio: 'GSG Courier' });
-    expect(t.startsWith('¡Hola! Te escribimos de la empresa de entregas GSG. Tengo una entrega para ti:')).toBe(true);
+    expect(t.startsWith('¡Hola! Somos GSG Courier, tengo una entrega para ti:')).toBe(true);
     expect(t).toContain('¿podrías compartir tu ubicación por WhatsApp');
     expect(t).not.toContain('📦');
   });
@@ -88,9 +88,13 @@ describe('el primer mensaje con los datos del envío de GSG', () => {
   it('el cierre lleva el número del motorizado (regla del dueño)', () => {
     const t = rellenar(TEXTOS_POR_DEFECTO.cierreAgente, { negocio: 'GSG Courier', soporte: '+51 987 654 321 (WhatsApp y llamadas)', telefonoMotorizado: '+51 911 222 333' });
     expect(t).toBe('Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: +51 911 222 333.');
-    // Nunca vacío ni «undefined»: sin número de nada, el de este WhatsApp.
+    // Sin número de motorizado ni de soporte: la frase del número se quita.
+    // Nunca otro número haciéndose pasar por el del motorizado (26/09).
     const sinNada = rellenar(TEXTOS_POR_DEFECTO.cierreAgente, { negocio: 'GSG Courier' });
-    expect(sinNada).toBe('Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: este mismo número de WhatsApp.');
+    expect(sinNada).toBe('Por este canal no se reciben consultas. Te derivamos con un asesor humano.');
+    // Con soporte y sin motorizado: el de soporte.
+    const conSoporte = rellenar(TEXTOS_POR_DEFECTO.cierreAgente, { negocio: 'GSG Courier', soporte: '+51 987 654 321' });
+    expect(conSoporte).toBe('Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: +51 987 654 321.');
   });
 });
 
@@ -124,13 +128,13 @@ describe('el agente operativo en un día de entregas', () => {
     const pedida = e.mensajesA('987000001').find((m) => m.kind === 'location_request');
     expect(pedida).toBeTruthy();
     const cuerpo = String(pedida!.body);
-    expect(cuerpo).toContain('Soy Juan Quispe de la empresa de entregas GSG');
+    expect(cuerpo).toContain('Somos GSG Courier, tengo una entrega para ti');
     expect(cuerpo).toContain('📦 Producto: Zapatillas talla 40');
     expect(cuerpo).toContain('🏢 Empresa: 516 - Zapatería Lima');
     expect(cuerpo).toContain('💰 Monto a Cobrar: 85.00');
     // Los demás, con lo que mande GSG (el simulador): nunca «undefined» ni «null».
     const otra = String(e.mensajesA('987000002').find((m) => m.kind === 'location_request')!.body);
-    expect(otra).toContain('de la empresa de entregas GSG');
+    expect(otra).toContain('Somos GSG Courier');
     expect(otra).not.toMatch(/undefined|null|\{/);
   });
 

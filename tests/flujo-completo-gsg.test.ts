@@ -1146,7 +1146,7 @@ describe('G. el pin tiene que tener sentido: lejos de su distrito se le pregunta
     }
   }, 60_000);
 
-  it('otra cosa → se le pregunta otra vez (una) → otra cosa por segunda vez cuenta como SÍ; el mismo pin mandado de nuevo también vale', async () => {
+  it('otra cosa → se le pregunta otra vez (una) → otra cosa por segunda vez pasa a una persona sin registrar el pin; el mismo pin mandado de nuevo sí vale', async () => {
     const e = await armar();
     try {
       const tel = '987780003';
@@ -1156,11 +1156,15 @@ describe('G. el pin tiene que tener sentido: lejos de su distrito se le pregunta
       await e.contesta(tel, { pin: PIN_LIMA });
       let n = e.mensajesA(tel).length;
       await e.contesta(tel, { texto: 'hola' });
-      expect(desde(e, tel, n)).toEqual([{ kind: 'buttons', body: PIN_LEJOS_SJL }]);
+      // La repregunta no sale idéntica: se nota que no se le entendió.
+      expect(desde(e, tel, n)).toEqual([{ kind: 'buttons', body: `Perdona, no te entendí. ${PIN_LEJOS_SJL}` }]);
       n = e.mensajesA(tel).length;
-      await e.contesta(tel, { texto: 'ok' });
-      expect(desde(e, tel, n).map((m) => m.body)).toEqual([expect.stringMatching(REGISTRADA)]);
-      expect((await coherente(e, tel, 'dos veces otra cosa')).filas[0]!.ubicacionEstado).toBe('recibida');
+      await e.contesta(tel, { texto: 'hola otra vez' });
+      // Otra cosa por segunda vez: el pin NO se da por bueno; lo decide una
+      // persona y al cliente no se le repite nada.
+      expect(desde(e, tel, n)).toEqual([]);
+      expect((await e.entrega('G-3'))?.ubicacionEstado).toBe('pendiente');
+      expect((await e.entrega('G-3'))?.requiereHumano).toBe(true);
       // El otro manda el mismo pin lejano dos veces: la segunda vale.
       await e.contesta(otro, { pin: PIN_LIMA });
       n = e.mensajesA(otro).length;

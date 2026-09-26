@@ -113,7 +113,7 @@ export const urlPlanDe = (slug: string, cfg: ConfigSaas) => `http://host.docker.
 export interface OpcionesAlta {
   /** Como se llama el negocio de cara a sus clientes. */
   nombre?: string;
-  /** cloud | local | waha. Por defecto local (QR): es lo que casi todos piden. */
+  /** cloud | local | waha. Por defecto cloud (API oficial de Meta); los QR son para pruebas. */
   proveedor?: 'cloud' | 'local' | 'waha';
   pais?: ConfigSaas['pais'];
   /** Variables extra para el .env de esa instancia (GOOGLE_MAPS_API_KEY, STOKY_URL...). */
@@ -138,7 +138,7 @@ export function generarEnv(slug: string, cfg: ConfigSaas, opts: OpcionesAlta = {
     DATABASE_URL: `postgres://wa:${cfg.postgresPassword}@${CONTENEDOR_POSTGRES}:5432/${baseDe(slug)}`,
     REDIS_URL: `redis://${contenedorDe(slug)}-redis:6379`,
     SECRETS_DIR: '/app/data',
-    WHATSAPP_PROVIDER: opts.proveedor ?? 'local',
+    WHATSAPP_PROVIDER: opts.proveedor ?? 'cloud',
     BUSINESS_NAME: opts.nombre ?? slug,
     RUTAS_PAIS: opts.pais ?? cfg.pais,
     TIMEZONE: cfg.zonaHoraria,
@@ -322,7 +322,7 @@ export async function altaInstancia(slug: string, opts: OpcionesAlta = {}, deps:
     nombre: opts.nombre ?? slug,
     dominio: dominioDe(slug, cfg),
     url: urlDe(slug, cfg),
-    proveedor: opts.proveedor ?? 'local',
+    proveedor: opts.proveedor ?? 'cloud',
     creadaEn: (deps.ahora?.() ?? new Date()).toISOString(),
   };
   writeFileSync(path.join(dir, 'instancia.json'), JSON.stringify(instancia, null, 2) + '\n');

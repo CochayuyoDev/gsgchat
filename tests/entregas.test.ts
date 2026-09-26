@@ -276,7 +276,7 @@ describe('un día de entregas con GSG simulado', () => {
     let lucia = await e.entrega('P-1009');
     expect(lucia?.estado).toBe('esperando_motorizado');
     const primero = lucia!.motorizado!;
-    await e.contesta(primero.phone, { texto: 'no puedo, estoy muy lejos' });
+    await e.contesta(primero.phone, { texto: 'P-1009 no puedo, estoy muy lejos' });
     const alPrimero = e.textosA(primero.phone);
     expect(alPrimero[alPrimero.length - 1]).toMatch(/se lo paso a otro/i);
     lucia = await e.entrega('P-1009');
@@ -290,7 +290,7 @@ describe('un día de entregas con GSG simulado', () => {
     expect(segundo.id).not.toBe(primero.id);
 
     const antes = e.textosA('987000009').length;
-    await e.contesta(segundo.phone, { texto: 'media hora' });
+    await e.contesta(segundo.phone, { texto: 'P-1009 media hora' });
     lucia = await e.entrega('P-1009');
     expect(lucia?.minutosMotorizado).toBe(30);
     expect(lucia?.minutosAviso).toBe(90);
@@ -329,7 +329,7 @@ describe('un día de entregas con GSG simulado', () => {
   it('un motorizado que contesta algo sin tiempo recibe la aclaración; "1h15" se lee como 75 minutos', async () => {
     const luis = await e.entrega('P-1002');
     const rider = luis!.motorizado!.phone;
-    await e.contesta(rider, { texto: 'ya voy saliendo' });
+    await e.contesta(rider, { texto: 'P-1002 ya voy saliendo' });
     let aRider = e.textosA(rider);
     expect(aRider[aRider.length - 1]).toMatch(/responde solo los minutos/i);
     await e.contesta(rider, { texto: 'P-1002 en 1h15' });

@@ -199,3 +199,14 @@ describe('la conexion con GSG desde la pantalla', () => {
     expect(ok).toMatchObject({ faltaUbicacion: 7, faltaConfirmacion: 9, terminados: 0 });
   });
 });
+
+describe('reportes de un pedido que ya no existe', () => {
+  it('la cancelación de un pedido viejo no cancela el pedido nuevo del mismo teléfono', () => {
+    const sim = crearGsgSimulado({ token: TOKEN });
+    sim.cargar([{ referencia: 'G-2002', telefono: '912426667', faltaConfirmacion: false }]);
+    const r = sim.atender('POST', '/confirmaciones', TOKEN, { referencia: 'G-2001', telefono: '51912426667', confirmada: false, motivo: 'cancela' });
+    expect((r.body as { encontrado: boolean }).encontrado).toBe(false);
+    expect(sim.pendientes().cancelados).toHaveLength(0);
+    expect(sim.pendientes().faltaUbicacion.map((c) => c.referencia)).toEqual(['G-2002']);
+  });
+});

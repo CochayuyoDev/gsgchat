@@ -121,7 +121,7 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     expect(await sql("select referencia from entregas where referencia like 'PRUEBA-LISTO-%'")).toEqual([]);
     expect(await sql("select referencia from rutas_solicitudes where referencia like 'PRUEBA-LISTO-%'")).toEqual([]);
     expect(await sql("select id from rutas_reportes where payload->>'referencia' like 'PRUEBA-LISTO-%'")).toEqual([]);
-    expect(await sql("select phone from contacts where phone like '5190009%'")).toEqual([]);
+    expect(await sql("select phone from contacts where phone like '5100009%'")).toEqual([]);
     expect(await sql("select nombre from claves_api where nombre like 'Comprobación GSG (temporal)%'")).toEqual([]);
   });
 

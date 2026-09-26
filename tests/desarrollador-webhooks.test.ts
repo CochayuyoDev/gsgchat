@@ -9,22 +9,22 @@ import { esNumeroDePrueba, numeroDePrueba } from '../src/desarrollador/numeros.j
 
 describe('eventos de prueba y webhooks', () => {
   it('reconoce los números y pedidos de prueba en cualquier forma de evento', () => {
-    expect(esEventoDePrueba({ telefono: '51900012345', texto: 'hola' })).toBe(true);
-    expect(esEventoDePrueba({ contacto: { telefono: '51900100002' } })).toBe(true);
+    expect(esEventoDePrueba({ telefono: '51000012345', texto: 'hola' })).toBe(true);
+    expect(esEventoDePrueba({ contacto: { telefono: '51000100002' } })).toBe(true);
     expect(esEventoDePrueba({ entrega: { referencia: 'PRUEBA-00007', telefono: '51987654321' } })).toBe(true);
-    expect(esEventoDePrueba({ mensaje: { to: '+51900000001' } })).toBe(true);
+    expect(esEventoDePrueba({ mensaje: { to: '+51000000001' } })).toBe(true);
   });
 
   it('no confunde a un cliente real', () => {
     expect(esEventoDePrueba({ telefono: '51987654321' })).toBe(false);
     expect(esEventoDePrueba({ telefono: '51911000001', referencia: 'P-1001' })).toBe(false);
-    expect(esEventoDePrueba({ monto: 519000123456 })).toBe(false);
+    expect(esEventoDePrueba({ monto: 510000123456 })).toBe(false);
   });
 
-  it('el rango reservado: 51 900 0xx xxx clientes, 51 900 1xx xxx motorizados', () => {
-    expect(numeroDePrueba('cliente', 7)).toBe('51900000007');
-    expect(numeroDePrueba('motorizado', 7)).toBe('51900100007');
-    expect(esNumeroDePrueba('900000007')).toBe(true);
+  it('el rango reservado: 51 000 0xx xxx clientes, 51 000 1xx xxx motorizados', () => {
+    expect(numeroDePrueba('cliente', 7)).toBe('51000000007');
+    expect(numeroDePrueba('motorizado', 7)).toBe('51000100007');
+    expect(esNumeroDePrueba('000000007')).toBe(true);
     expect(esNumeroDePrueba('51900200007')).toBe(false);
     expect(esNumeroDePrueba('51987000001')).toBe(false);
   });

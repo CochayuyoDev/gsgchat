@@ -25,7 +25,7 @@ import { appShell } from './shell.js';
 
 const CSS = `
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--esp-4); }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: var(--ancho-max, 1600px); margin: 0 auto; display: flex; flex-direction: column; gap: var(--esp-4); }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
   .hidden { display: none !important; }

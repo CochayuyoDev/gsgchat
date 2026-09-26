@@ -9,7 +9,7 @@
  *  2. En horario: la franja del proceso (su «ritmo») y la del numero (la
  *     politica de salud: `decidirRitmo`).
  *  3. Con final: cada paso tiene sus insistencias y que pasa si no responde.
- * Lo de prueba (51 900 0…) no gasta el ritmo del numero real.
+ * Lo de prueba (51 000 0…) no gasta el ritmo del numero real.
  */
 
 import type { Repos } from '../db/repos.js';

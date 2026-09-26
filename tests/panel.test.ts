@@ -545,4 +545,18 @@ describe('las secciones del panel', () => {
       expect(r.body, `el titulo "${repetido}" sale dos veces`).not.toContain(`<h2>${repetido}</h2>`);
     }
   });
+
+  it('Plantillas: la lista por defecto, crear en un cajon y las variables salen del cuerpo', async () => {
+    const r = await app.inject({ url: '/panel', headers: auth });
+    // Dos pestañas (lo tuyo y lo del sistema) y el alta en un cajon aparte, no debajo de la lista.
+    expect(r.body).toContain('id="tp-tab-tuyas"');
+    expect(r.body).toContain('id="tp-tab-sistema"');
+    expect(r.body).toMatch(/<aside class="tp-cajon" id="tp-cajon" role="dialog"/);
+    expect(r.body).toContain('id="tp-nueva"');
+    expect(r.body).toContain('id="tp-insertar"');
+    expect(r.body).toContain('id="tp-previa"');
+    // Ya no se describen las variables a mano en un textarea: se pintan un campo por {{n}}.
+    expect(r.body).not.toContain('<textarea id="tp-vars"');
+    expect(r.body).toContain('<div id="tp-vars"></div>');
+  });
 });

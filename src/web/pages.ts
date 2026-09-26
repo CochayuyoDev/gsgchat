@@ -91,8 +91,13 @@ const CSS = `
   .in-mas.sin-plegar > summary { display: none; }
   .in-mas.sin-plegar { border-top: 0; padding-top: 0; }
   /* --- ajustes: pocas tarjetas, cada una con su titulo y una frase --- */
-  .aj { max-width: 860px; }
-  .aj .aj-card { margin-top: 0; margin-bottom: 20px; padding: 24px; }
+  /* Dos columnas de tarjetas en pantallas anchas: con una sola de 860 px la
+     mitad derecha quedaba vacia. Lo que es de todo el ancho (el plan, lo
+     avanzado y la barra de guardar) ocupa las dos. */
+  .aj:not(.hidden) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: stretch; }
+  @media (min-width: 1280px) { .aj:not(.hidden) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .aj > .aj-plan, .aj > .aj-avanzado, .aj > .aj-guardar { grid-column: 1 / -1; }
+  .aj .aj-card { margin: 0; padding: 24px; }
   @media (max-width: 640px) { .aj .aj-card { padding: 18px 16px; } }
   .aj-cab { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 6px; }
   .aj-cab h2 { font-size: 18px; margin: 0 0 2px; }
@@ -279,6 +284,95 @@ const CSS = `
   .barra i { display: block; height: 100%; background: var(--accent); }
   .barra i.warn { background: var(--warn); } .barra i.bad { background: var(--bad); }
   .stat small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  /* --- plantillas: catalogo por defecto, crear en un cajon a la derecha --- */
+  .tp-cab { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .tp-cab .muted { flex: 1 1 280px; }
+  .tp-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
+  .tp-meta-txt { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--texto-suave); min-width: 0; }
+  .tp-meta-txt b { color: var(--texto); font-size: 13.5px; }
+  .tp-meta-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tp-avisos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .tp-avisos:not(:has(.pill:not(.hidden))) { display: none; }
+  #tp-aviso .res { margin-top: 10px; }
+  .res ul { margin: 2px 0 0; padding-left: 18px; }
+  .tp-tabs { display: flex; gap: 4px; margin: 18px 0 10px; border-bottom: 1px solid var(--borde); overflow-x: auto; }
+  .tp-tabs button { min-height: 40px; padding: 8px 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--texto-suave); font-weight: 600; white-space: nowrap; }
+  .tp-tabs button:hover { filter: none; color: var(--texto); }
+  .tp-tabs button[aria-selected="true"] { color: var(--primario); border-bottom-color: var(--primario); }
+  .tp-n { font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--gris-suave); color: var(--gris); }
+  .tp-n:empty { display: none; }
+  .tp-tabs button[aria-selected="true"] .tp-n { background: var(--primario-suave); color: var(--primario); }
+  #tab-plantillas [role=tabpanel][hidden] { display: none; }
+  .tp-tabla td { vertical-align: middle; }
+  .tp-tabla td.tp-td-cuerpo { width: 44%; }
+  .tp-nombre b { font-family: ui-monospace, Consolas, monospace; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+  .tp-nombre .chips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+  .tp-estado { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .tp-texto { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; color: var(--texto-suave); overflow-wrap: anywhere; }
+  .tp-ver { min-height: 0; padding: 0; margin-top: 2px; border: 0; background: none; color: var(--primario); font-size: 12.5px; font-weight: 600; }
+  .tp-ver:hover { filter: none; text-decoration: underline; }
+  .tp-detalle { display: none; margin-top: 8px; font-size: 13px; }
+  tr.abierta .tp-texto { display: block; -webkit-line-clamp: none; white-space: pre-wrap; color: var(--texto); }
+  tr.abierta .tp-detalle { display: grid; gap: 6px; }
+  .tp-detalle ol { margin: 0; padding-left: 20px; }
+  .tp-detalle ol li { margin: 0; }
+  .tp-detalle .tp-issue { color: var(--texto-suave); }
+  .tp-detalle .tp-issue.error { color: var(--rojo); }
+  .tp-acciones { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+  .tp-lista .empty .actions { justify-content: center; margin-top: 10px; }
+  /* En el movil cada fila es una tarjeta: nada de desplazarse de lado. */
+  @media (max-width: 640px) {
+    .tp-lista.tablewrap { overflow: visible; border: 0; }
+    .tp-tabla thead { display: none; }
+    .tp-tabla, .tp-tabla tbody, .tp-tabla tr, .tp-tabla td { display: block; width: 100%; }
+    .tp-tabla tr { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 10px 12px; margin-bottom: 10px; background: var(--superficie); }
+    .tp-tabla td { border: 0; padding: 3px 0; }
+    .tp-tabla td.tp-td-cuerpo { width: 100%; }
+    .tp-tabla td[data-eti] { display: flex; gap: 10px; align-items: baseline; }
+    .tp-tabla td[data-eti]::before { content: attr(data-eti); flex: 0 0 80px; color: var(--texto-suave); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+    .tp-tabla td[data-eti] > * { min-width: 0; }
+    .tp-acciones { justify-content: flex-start; padding-top: 6px; }
+  }
+  /* El cajon: mismo patron que la IA y la Ayuda del armazon. */
+  .tp-fondo { position: fixed; inset: 0; z-index: 81; background: rgba(10,16,20,.4); opacity: 0; visibility: hidden; transition: opacity .18s ease; }
+  .tp-fondo.visible { opacity: 1; visibility: visible; }
+  .tp-cajon { position: fixed; top: 0; right: 0; bottom: 0; z-index: 82; width: min(560px, 100vw); display: flex; flex-direction: column; background: var(--superficie); color: var(--texto); border-left: 1px solid var(--borde); box-shadow: var(--sombra-2); transform: translateX(100%); visibility: hidden; transition: transform .2s ease, visibility 0s linear .2s; }
+  .tp-cajon.abierto { transform: translateX(0); visibility: visible; transition: transform .2s ease; }
+  .tp-cajon-cab { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--borde); }
+  .tp-cajon-cab > div { flex: 1; min-width: 0; }
+  .tp-cajon-cab b { display: block; font-size: var(--fs-h2); }
+  .tp-cajon-cab small { display: block; color: var(--texto-suave); font-size: 12.5px; line-height: 1.4; margin-top: 2px; }
+  .tp-cajon-cuerpo { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 18px; }
+  .tp-cajon-cuerpo > label:first-child { margin-top: 12px; }
+  .tp-cajon-pie { border-top: 1px solid var(--borde); padding: 12px 16px; background: var(--superficie); }
+  .tp-cajon-pie .res { margin: 0 0 10px; max-height: 26vh; overflow: auto; }
+  .tp-pie-botones { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+  .tp-pie-botones .pill { margin-right: auto; white-space: normal; }
+  .tp-ayuda { display: block; color: var(--texto-suave); font-size: 12.5px; margin-top: 4px; line-height: 1.4; }
+  .tp-ayuda.mal { color: var(--rojo); }
+  .tp-dos { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
+  .tp-cuerpo-cab { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 14px; }
+  .tp-cuerpo-cab label { margin: 0 0 5px; }
+  .tp-cuerpo-cab button { margin-bottom: 5px; }
+  .tp-cuerpo-pie { display: flex; justify-content: space-between; gap: 10px; }
+  .tp-cuerpo-pie #tp-cuenta { flex: none; font-variant-numeric: tabular-nums; }
+  #tp-body { font-family: inherit; font-size: 14px; min-height: 120px; }
+  .tp-lint { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+  .tp-lint:empty { display: none; }
+  .tp-lint li { font-size: 12.5px; padding: 6px 10px; border-radius: var(--radio-sm); background: var(--ambar-suave); color: var(--ambar); }
+  .tp-lint li.error { background: var(--rojo-suave); color: var(--rojo); }
+  .tp-sub { margin: 20px 0 2px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); }
+  .tp-var { display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px dashed var(--borde); }
+  .tp-var:last-child { border-bottom: 0; }
+  .tp-var label { margin: 0 0 4px; font-weight: 600; font-size: 12.5px; }
+  .tp-var label code { font-weight: 700; color: var(--primario); }
+  .tp-var label span { font-weight: 400; color: var(--texto-suave); }
+  .tp-chat { margin-top: 8px; padding: 14px; border-radius: var(--radio); background: var(--superficie-2); border: 1px solid var(--borde); }
+  .tp-burbuja { position: relative; max-width: 88%; padding: 8px 12px 18px; border-radius: 4px 12px 12px 12px; background: var(--superficie); border: 1px solid var(--borde); box-shadow: var(--sombra); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.45; }
+  .tp-burbuja::after { content: 'ahora'; position: absolute; right: 10px; bottom: 3px; font-size: 11px; color: var(--texto-suave); }
+  .tp-burbuja .tp-hueco { padding: 0 3px; border-radius: 4px; background: var(--primario-suave); color: var(--primario); font-weight: 600; }
+  .tp-burbuja .tp-hueco.vacio { background: var(--ambar-suave); color: var(--ambar); }
+  @media (max-width: 520px) { .tp-dos, .tp-var { grid-template-columns: 1fr; } .tp-cab button, .tp-meta-acciones { width: 100%; } .tp-meta-acciones button { flex: 1 1 140px; } .tp-tabs button { flex: 1; white-space: normal; line-height: 1.2; } }
 `;
 
 const AUTH_JS = String.raw`
@@ -857,30 +951,70 @@ ${warning}
 </section>
 
 <section id="tab-plantillas" class="card hidden">
-  <p class="muted">El registro local es lo que consultan las guardas antes de cada envio. Sincroniza para traer estado y calidad desde Meta.</p>
-  <div class="actions"><button id="t-sync">Sincronizar desde Meta</button><span id="t-state" class="pill hidden"></span></div>
-  <div id="t-table" class="tablewrap"></div>
-
-  <h3>Crear una plantilla propia</h3>
-  <p class="muted">Se guarda en el registro y se puede elegir en Ubicaciones (Ajustes) o en una campana. Con la API de Meta queda pendiente hasta que la subas y la aprueben; con el cliente no oficial se manda tal cual, con las variables sustituidas.
-  El nombre va en minusculas con guion bajo; cada <code>{{n}}</code> del cuerpo se describe en orden (es lo que ve el revisor de Meta).</p>
-  <div class="toolbar">
-    <div><label>Nombre</label><input id="tp-name" placeholder="aviso_entrega_hoy"></div>
-    <div><label>Idioma</label><input id="tp-language" value="es"></div>
-    <div><label>Categoria</label><select id="tp-category"><option value="UTILITY">UTILITY</option><option value="MARKETING">MARKETING</option></select></div>
+  <!-- Primero el catalogo (lo que ya hay) y una sola accion principal: crear.
+       Lo de Meta va aparte, en su franja, porque no es lo mismo que el registro local. -->
+  <div class="tp-cab">
+    <p class="muted">Lo que consultan las guardas antes de cada envío: estado, calidad y texto de cada plantilla.</p>
+    <button type="button" id="tp-nueva">Crear plantilla</button>
   </div>
-  <label>Cuerpo</label>
-  <textarea id="tp-body" placeholder="Hola {{1}}, su pedido {{2}} sale hoy con {{3}}. Para entregarlo necesitamos su ubicacion: compartala desde el clip, opcion Ubicacion."></textarea>
-  <label>Que es cada variable, una por linea y en orden ({{1}}, {{2}}...)</label>
-  <textarea id="tp-vars" placeholder="nombre del cliente&#10;numero de pedido&#10;nombre del negocio" style="min-height:60px"></textarea>
-  <div class="actions"><button id="tp-save">Guardar plantilla</button><span id="tp-state" class="pill hidden"></span></div>
-  <pre id="tp-out" class="hidden"></pre>
-
-  <h3>Catalogo y plantillas propias</h3>
-  <p class="muted">Las del catalogo vienen del codigo (<code>src/templates/catalog.ts</code>); las propias se crean arriba. Todas pasan por el linter antes de subir: un rechazo de Meta cuenta en el historial de la cuenta.</p>
-  <div id="t-catalog" class="tablewrap"></div>
-  <div class="actions"><button id="t-push">Dar de alta en Meta las que esten limpias</button><span id="t-push-state" class="pill hidden"></span></div>
+  <div class="tp-meta">
+    <div class="tp-meta-txt"><b>Meta</b><span id="t-sync-cuando">Sin sincronizar desde este navegador</span></div>
+    <div class="tp-meta-acciones">
+      <button type="button" class="ghost sm" id="t-sync">Sincronizar desde Meta</button>
+      <button type="button" class="ghost sm" id="t-push" title="Sube las del sistema y tus propias que pasen la revisión">Dar de alta las limpias</button>
+    </div>
+  </div>
+  <div class="tp-avisos"><span id="t-state" class="pill hidden"></span><span id="t-push-state" class="pill hidden"></span></div>
+  <div id="tp-aviso" class="hidden" role="status"></div>
   <pre id="t-out" class="hidden"></pre>
+
+  <div class="tp-tabs" role="tablist" aria-label="Qué plantillas ver">
+    <button type="button" role="tab" id="tp-tab-tuyas" data-tp-tab="tuyas" aria-controls="tp-sec-tuyas" aria-selected="true">Tus plantillas <span class="tp-n" id="tp-n-tuyas"></span></button>
+    <button type="button" role="tab" id="tp-tab-sistema" data-tp-tab="sistema" aria-controls="tp-sec-sistema" aria-selected="false">Catálogo del sistema <span class="tp-n" id="tp-n-sistema"></span></button>
+  </div>
+  <div id="tp-sec-tuyas" role="tabpanel" aria-labelledby="tp-tab-tuyas">
+    <p class="muted">Las que trae la sincronización con Meta y las que creas aquí. Las propias se editan y se borran; las de Meta se cambian en Meta.</p>
+    <div id="t-table" class="tablewrap tp-lista"></div>
+  </div>
+  <div id="tp-sec-sistema" role="tabpanel" aria-labelledby="tp-tab-sistema" hidden>
+    <p class="muted">Vienen con el sistema (<code>src/templates/catalog.ts</code>). Todas pasan por la revisión antes de subir: un rechazo de Meta cuenta en el historial de la cuenta.</p>
+    <div id="t-catalog" class="tablewrap tp-lista"></div>
+  </div>
+
+  <div class="tp-fondo" id="tp-fondo"></div>
+  <aside class="tp-cajon" id="tp-cajon" role="dialog" aria-modal="true" aria-labelledby="tp-cajon-titulo" aria-hidden="true">
+    <header class="tp-cajon-cab">
+      <div><b id="tp-cajon-titulo">Crear plantilla</b><small>Se guarda en el registro y se elige en Ubicaciones o en una campaña. Con la API de Meta queda pendiente hasta que la aprueben.</small></div>
+      <button type="button" class="ghost sm" id="tp-cerrar">Cerrar</button>
+    </header>
+    <div class="tp-cajon-cuerpo">
+      <label for="tp-name">Nombre</label>
+      <input id="tp-name" placeholder="aviso_entrega_hoy" autocomplete="off" spellcheck="false" maxlength="120">
+      <small class="tp-ayuda" id="tp-name-ayuda">Solo minúsculas, números y guion bajo: los espacios se vuelven <code>_</code> mientras escribes.</small>
+      <div class="tp-dos">
+        <div><label for="tp-language">Idioma</label><input id="tp-language" value="es" maxlength="10"></div>
+        <div><label for="tp-category">Categoría</label><select id="tp-category"><option value="UTILITY">Utilidad (avisos de un pedido)</option><option value="MARKETING">Marketing (promociones)</option></select></div>
+      </div>
+      <div class="tp-cuerpo-cab">
+        <label for="tp-body">Cuerpo</label>
+        <button type="button" class="ghost sm" id="tp-insertar" title="Pone la siguiente variable donde está el cursor">Insertar variable</button>
+      </div>
+      <textarea id="tp-body" rows="5" maxlength="1024" placeholder="Hola {{1}}, su pedido {{2}} sale hoy. Para entregarlo necesitamos su ubicación: compártala desde el clip, opción Ubicación."></textarea>
+      <div class="tp-cuerpo-pie"><small class="tp-ayuda">Cada <code>{{1}}</code>, <code>{{2}}</code>... es un dato que cambia en cada envío.</small><small class="tp-ayuda" id="tp-cuenta">0 / 1024</small></div>
+      <ul class="tp-lint" id="tp-lint"></ul>
+      <div id="tp-vars-caja" class="hidden">
+        <h3 class="tp-sub">Variables</h3>
+        <p class="muted">Qué es cada una: es lo que lee el revisor de Meta. El ejemplo solo sirve para la vista previa.</p>
+        <div id="tp-vars"></div>
+      </div>
+      <h3 class="tp-sub">Vista previa</h3>
+      <div class="tp-chat"><div class="tp-burbuja" id="tp-previa"><span class="muted">Escribe el cuerpo para verlo como le llega al cliente.</span></div></div>
+    </div>
+    <footer class="tp-cajon-pie">
+      <div id="tp-out" class="hidden"></div>
+      <div class="tp-pie-botones"><span id="tp-state" class="pill hidden"></span><button type="button" class="ghost" id="tp-cancelar">Cancelar</button><button type="button" id="tp-save">Guardar plantilla</button></div>
+    </footer>
+  </aside>
 </section>
 
 <section id="tab-historial" class="card hidden">
@@ -3913,73 +4047,153 @@ function templateOptions(select, onlyApproved) {
       esc(t.name + ' (' + t.category + ', ' + t.status + ', ' + t.variables + ' vars)') + '</option>';
   }).join('');
 }
+// ------------------------------------------------------------ plantillas
+/* Estado, calidad y categoria en palabras y con su tono: GREEN/PENDING son
+   de Meta, no de quien opera el panel. El valor crudo queda en el title. */
+var TP_ESTADO = { APPROVED: ['Aprobada', 'tono-verde'], PENDING: ['En revisión', 'tono-ambar'], REJECTED: ['Rechazada', 'tono-rojo'], PAUSED: ['Pausada', 'tono-rojo'], DISABLED: ['Deshabilitada', 'tono-rojo'] };
+var TP_CALIDAD = { GREEN: ['Alta', 'tono-verde'], YELLOW: ['Media', 'tono-ambar'], RED: ['Baja', 'tono-rojo'] };
+var TP_CATEGORIA = { UTILITY: ['Utilidad', 'tono-azul'], MARKETING: ['Marketing', 'tono-gris'], AUTHENTICATION: ['Autenticación', 'tono-gris'] };
+function tpChip(mapa, valor, siNo, sinPunto) {
+  var m = mapa[valor] || [siNo || valor || 'Sin dato', 'tono-gris'];
+  return '<span class="chip ' + m[1] + (sinPunto ? ' sin-punto' : '') + '"' + (valor ? ' title="' + esc(valor) + '"' : '') + '>' + esc(m[0]) + '</span>';
+}
+function tpClave(t) { return t.name + '|' + t.language; }
+/* Lo que dice el linter de una plantilla, en una pildora: errores mandan sobre avisos. */
+function tpLintChip(issues) {
+  var errores = issues.filter(function (i) { return i.severity === 'error'; }).length;
+  var avisos = issues.length - errores;
+  if (errores) return '<span class="chip tono-rojo">' + errores + ' error' + (errores > 1 ? 'es' : '') + '</span>';
+  if (avisos) return '<span class="chip tono-ambar">' + avisos + ' aviso' + (avisos > 1 ? 's' : '') + '</span>';
+  return '<span class="chip tono-verde">Lista para subir</span>';
+}
+/* El cuerpo ocupa una linea; "Ver más" abre la fila con el texto entero,
+   que significa cada variable y lo que dijo el linter. */
+function tpCeldaCuerpo(body, variables, issues) {
+  var detalle = '';
+  if (variables && variables.length) detalle += '<div><b>Variables</b><ol>' + variables.map(function (v, i) { return '<li><code>{{' + (i + 1) + '}}</code> ' + esc(v) + '</li>'; }).join('') + '</ol></div>';
+  if (issues && issues.length) detalle += '<div><b>Revisión</b>' + issues.map(function (i) { return '<div class="tp-issue ' + (i.severity === 'error' ? 'error' : '') + '">' + (i.severity === 'error' ? 'Error: ' : 'Aviso: ') + esc(i.message) + '</div>'; }).join('') + '</div>';
+  return '<div class="tp-texto">' + (body ? esc(body) : '<span class="muted">Sin texto</span>') + '</div>' +
+    (body || detalle ? '<button type="button" class="tp-ver" data-tp-ver aria-expanded="false">Ver más</button>' : '') +
+    (detalle ? '<div class="tp-detalle">' + detalle + '</div>' : '');
+}
+/* Tabla que en el movil se vuelve tarjetas: cada celda lleva su etiqueta en data-eti. */
+function tpTabla(id, cols, filas, vacioHtml) {
+  var caja = porId(id);
+  if (!caja) return;
+  if (!filas.length) { caja.innerHTML = vacioHtml; return; }
+  caja.innerHTML = '<table class="tp-tabla"><thead><tr>' + cols.map(function (c) { return '<th>' + esc(c[0]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+    filas.map(function (f) {
+      return '<tr>' + f.map(function (celda, i) {
+        var c = cols[i];
+        return '<td' + (c[1] ? ' class="' + c[1] + '"' : '') + (c[2] ? ' data-eti="' + esc(c[0]) + '"' : '') + '>' + celda + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody></table>';
+  caja.querySelectorAll('[data-tp-ver]').forEach(function (b) {
+    b.onclick = function () {
+      var fila = b.closest('tr');
+      var abierta = fila.classList.toggle('abierta');
+      b.textContent = abierta ? 'Ver menos' : 'Ver más';
+      b.setAttribute('aria-expanded', abierta ? 'true' : 'false');
+    };
+  });
+  caja.querySelectorAll('[data-tp-crear]').forEach(function (b) { b.onclick = function () { tpAbrir(null); }; });
+}
+function tpVacio(titulo, texto, conBoton) {
+  return '<div class="empty"><b>' + esc(titulo) + '</b>' + esc(texto) +
+    (conBoton ? '<div class="actions"><button type="button" class="sm" data-tp-crear>Crear plantilla</button></div>' : '') + '</div>';
+}
+
+var tpCatalogo = [];
 async function loadTemplates() {
+  cargando('t-table'); cargando('t-catalog');
+  tpPintarSync();
+  var catalogo = api('/admin/templates/catalog').catch(function (e) { return e; });
   try {
     templatesCache = await api('/admin/templates');
     templateOptions(document.getElementById('c-template'), true);
     templateOptions(document.getElementById('sc-template'), true);
     document.querySelectorAll('.step select[data-template]').forEach(function (s) { templateOptions(s, true); });
-    table('t-table', ['Nombre', 'Categoría', 'Estado', 'Calidad', 'Variables', 'Cuerpo'], templatesCache.map(function (t) {
-      var pausada = t.pausadaHasta && new Date(t.pausadaHasta) > new Date();
-      return [esc(t.name) + '<span class="muted">' + esc(t.language) + '</span>', esc(t.category),
-        pill(statusKind(t.status), t.status) + (pausada ? '<span class="muted">pausada por Meta hasta ' + esc(hastaCuando(t.pausadaHasta)) + '</span>' : '') + (t.pausas ? '<span class="muted">' + t.pausas + ' pausa' + (t.pausas > 1 ? 's' : '') + '</span>' : ''),
-        t.quality ? pill(qualityKind(t.quality), t.quality) : '<span class="muted">-</span>', String(t.variables),
-        '<span class="muted">' + esc((t.body || '').slice(0, 90)) + '</span>'];
-    }), { titulo: 'El registro está vacío', texto: 'Sincroniza desde Meta con el botón de arriba, o crea abajo una plantilla propia.' });
-    loadCatalog();
-  } catch (error) { show('t-state', error.message, 'bad'); }
+  } catch (error) { tablaError('t-table', error, loadTemplates); }
+  var cat = await catalogo;
+  if (cat instanceof Error) { tablaError('t-catalog', cat, loadTemplates); cat = null; }
+  else tpCatalogo = cat;
+  tpPintarTuyas();
+  if (cat) tpPintarSistema();
 }
-async function loadCatalog() {
-  try {
-    var list = await api('/admin/templates/catalog');
-    table('t-catalog', ['Nombre', 'Categoria', 'Variables', 'Lint', 'En Meta', 'Cuerpo', ''], list.map(function (t) {
-      var errors = t.issues.filter(function (i) { return i.severity === 'error'; }).length;
-      var warns = t.issues.length - errors;
-      var lint = errors ? pill('bad', errors + ' error' + (errors > 1 ? 'es' : '')) : warns ? pill('warn', warns + ' aviso' + (warns > 1 ? 's' : '')) : pill('ok', 'limpia');
-      var detail = t.issues.map(function (i) { return '<span class="muted">' + esc(i.severity === 'error' ? 'ERROR' : 'aviso') + ' ' + esc(i.message) + '</span>'; }).join('');
-      var acciones = t.propia
-        ? '<button class="ghost sm" data-tp-edit="' + esc(t.name) + '" data-tp-lang="' + esc(t.language) + '">Editar</button> <button class="danger sm" data-tp-del="' + esc(t.name) + '" data-tp-lang="' + esc(t.language) + '">Borrar</button>'
-        : '<span class="muted">catalogo</span>';
-      return [esc(t.name) + (t.propia ? '<span class="muted">propia</span>' : ''), esc(t.category), esc(t.variables.join(', ')), lint + detail,
-        t.registry ? pill(statusKind(t.registry.status), t.registry.status) : '<span class="muted">no subida</span>',
-        '<span class="muted">' + esc(t.body) + '</span>', acciones];
-    }), { titulo: 'El catálogo está vacío', texto: 'Las del catálogo vienen con el sistema; las propias se crean arriba.' });
-    alPulsar('data-tp-del', 'tp-state', async function (nombre, b) {
-      var ok = await confirmarDialogo({ titulo: 'Borrar la plantilla propia', texto: 'Deja de poder elegirse en campañas y secuencias. En Meta, si ya estaba dada de alta, sigue existiendo.', boton: 'Borrar', peligro: true });
-      if (!ok) return;
-      await api('/admin/templates/' + encodeURIComponent(nombre) + '/' + encodeURIComponent(b.getAttribute('data-tp-lang')), { method: 'DELETE' });
-      show('tp-state', 'Borrada', 'ok');
-      loadTemplates();
-    });
-    alPulsar('data-tp-edit', 'tp-state', function (nombre, b) {
-      var t = list.filter(function (x) { return x.name === nombre && x.language === b.getAttribute('data-tp-lang'); })[0];
-      if (!t) return;
-      setVal('tp-name', t.name); setVal('tp-language', t.language); setVal('tp-category', t.category);
-      document.getElementById('tp-body').value = t.body;
-      document.getElementById('tp-vars').value = t.variables.join('\n');
-      document.getElementById('tp-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-  } catch (error) { tablaError('t-catalog', error, loadCatalog); }
-}
-document.getElementById('tp-save').onclick = busy('tp-save', async function () {
-  try {
-    if (!/^[a-z0-9_]+$/.test(val('tp-name'))) throw new Error('El nombre va en minúsculas, números y guion bajo: aviso_entrega_hoy.');
-    if (!document.getElementById('tp-body').value.trim()) throw new Error('Falta el cuerpo de la plantilla.');
-    var r = await api('/admin/templates', { method: 'POST', body: {
-      name: val('tp-name'), language: val('tp-language') || 'es', category: val('tp-category'),
-      body: document.getElementById('tp-body').value,
-      variables: lines(document.getElementById('tp-vars').value)
-    }});
-    show('tp-state', r.subirAMeta ? 'Guardada: pendiente de subir a Meta (boton "Dar de alta")' : 'Guardada y lista para usar', 'ok');
-    var avisos = (r.issues || []).map(function (i) { return (i.severity === 'error' ? 'ERROR ' : 'aviso ') + i.message; });
-    if (avisos.length) out('tp-out', avisos.join('\n')); else document.getElementById('tp-out').classList.add('hidden');
+/* Tus plantillas: el registro local (lo sincronizado de Meta y lo creado aqui). */
+function tpPintarTuyas() {
+  var lint = {};
+  tpCatalogo.forEach(function (t) { if (t.propia) lint[tpClave(t)] = t; });
+  var delSistema = {};
+  tpCatalogo.forEach(function (t) { if (!t.propia) delSistema[tpClave(t)] = true; });
+  var lista = templatesCache;
+  porId('tp-n-tuyas').textContent = lista.length ? String(lista.length) : '';
+  tpTabla('t-table', [['Nombre', 'tp-nombre'], ['Categoría', '', true], ['Estado', '', true], ['Calidad', '', true], ['Texto', 'tp-td-cuerpo'], ['', '']], lista.map(function (t) {
+    var pausada = t.pausadaHasta && new Date(t.pausadaHasta) > new Date();
+    var l = lint[tpClave(t)];
+    var chips = '<span class="chip tono-gris sin-punto">' + esc(t.language) + '</span>' + (t.propia ? '<span class="chip tono-azul sin-punto">Propia</span>' : delSistema[tpClave(t)] ? '<span class="chip tono-gris sin-punto">Del sistema</span>' : '<span class="chip tono-gris sin-punto">De Meta</span>');
+    var estado = '<div class="tp-estado">' + tpChip(TP_ESTADO, t.status, 'Sin estado') +
+      (pausada ? '<span class="muted">pausada por Meta hasta ' + esc(hastaCuando(t.pausadaHasta)) + '</span>' : '') +
+      (t.pausas ? '<span class="muted">' + t.pausas + ' pausa' + (t.pausas > 1 ? 's' : '') + '</span>' : '') +
+      (l && l.issues.length ? tpLintChip(l.issues) : '') + '</div>';
+    var acciones = t.propia
+      ? '<div class="tp-acciones"><button type="button" class="ghost sm" data-tp-edit="' + esc(t.name) + '" data-tp-lang="' + esc(t.language) + '">Editar</button><button type="button" class="danger sm" data-tp-del="' + esc(t.name) + '" data-tp-lang="' + esc(t.language) + '">Borrar</button></div>'
+      : '';
+    return ['<b>' + esc(t.name) + '</b><div class="chips">' + chips + '</div>', tpChip(TP_CATEGORIA, t.category, '', true), estado,
+      t.quality && t.quality !== 'UNKNOWN' ? tpChip(TP_CALIDAD, t.quality) : '<span class="chip tono-gris">Sin dato</span>',
+      tpCeldaCuerpo(t.body || '', l ? l.variables : t.variablesDoc, l ? l.issues : null), acciones];
+  }), tpVacio('Todavía no tienes plantillas', 'Sincroniza desde Meta para traer las que ya tienes aprobadas, o crea la primera aquí.', true));
+  alPulsar('data-tp-del', 't-state', async function (nombre, b) {
+    var ok = await confirmarDialogo({ titulo: 'Borrar la plantilla propia', texto: 'Deja de poder elegirse en campañas y secuencias. En Meta, si ya estaba dada de alta, sigue existiendo.', boton: 'Borrar', peligro: true });
+    if (!ok) return;
+    await api('/admin/templates/' + encodeURIComponent(nombre) + '/' + encodeURIComponent(b.getAttribute('data-tp-lang')), { method: 'DELETE' });
+    tpAviso('ok', 'Plantilla «' + nombre + '» borrada.');
     loadTemplates();
-  } catch (error) { show('tp-state', error.message, 'bad'); }
+  });
+  alPulsar('data-tp-edit', 't-state', function (nombre, b) {
+    var lang = b.getAttribute('data-tp-lang');
+    var t = tpCatalogo.filter(function (x) { return x.propia && x.name === nombre && x.language === lang; })[0] ||
+      templatesCache.filter(function (x) { return x.name === nombre && x.language === lang; })[0];
+    if (t) tpAbrir({ name: t.name, language: t.language, category: t.category, body: t.body || '', variables: t.variables && t.variables.length !== undefined ? t.variables : (t.variablesDoc || []) });
+  });
+}
+/* Catalogo del sistema: lo que viene en el codigo, con su lint y si ya esta en Meta. */
+function tpPintarSistema() {
+  var lista = tpCatalogo.filter(function (t) { return !t.propia; });
+  porId('tp-n-sistema').textContent = lista.length ? String(lista.length) : '';
+  tpTabla('t-catalog', [['Nombre', 'tp-nombre'], ['Categoría', '', true], ['Revisión', '', true], ['En Meta', '', true], ['Texto', 'tp-td-cuerpo']], lista.map(function (t) {
+    return ['<b>' + esc(t.name) + '</b><div class="chips"><span class="chip tono-gris sin-punto">' + esc(t.language) + '</span></div>', tpChip(TP_CATEGORIA, t.category, '', true), tpLintChip(t.issues),
+      t.registry ? tpChip(TP_ESTADO, t.registry.status, 'Sin estado') : '<span class="chip tono-gris">No subida</span>',
+      tpCeldaCuerpo(t.body, t.variables, t.issues)];
+  }), tpVacio('El catálogo está vacío', 'Las plantillas del sistema vienen con el código; las tuyas están en la otra pestaña.', false));
+}
+/* Pestañas: la lista de siempre y la del sistema, sin recargar nada. */
+document.querySelectorAll('[data-tp-tab]').forEach(function (b) {
+  b.onclick = function () {
+    var cual = b.getAttribute('data-tp-tab');
+    document.querySelectorAll('[data-tp-tab]').forEach(function (x) { x.setAttribute('aria-selected', x === b ? 'true' : 'false'); });
+    porId('tp-sec-tuyas').hidden = cual !== 'tuyas';
+    porId('tp-sec-sistema').hidden = cual !== 'sistema';
+  };
 });
+/* El resultado de guardar/borrar se ve arriba de la lista, donde se mira despues. */
+function tpAviso(tono, titulo, lineas) {
+  var caja = porId('tp-aviso');
+  caja.innerHTML = '<div class="res ' + tono + '"><b>' + esc(titulo) + '</b>' + (lineas && lineas.length ? '<ul>' + lineas.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+  caja.classList.remove('hidden');
+}
+/* Meta no guarda cuando se sincronizo por ultima vez: lo recuerda este navegador. */
+var TP_SYNC_KEY = 'gsg.plantillas.sync';
+function tpPintarSync() {
+  var cuando = null;
+  try { cuando = localStorage.getItem(TP_SYNC_KEY); } catch (e) { cuando = null; }
+  porId('t-sync-cuando').textContent = cuando ? 'Última sincronización ' + ago(cuando) + ' (' + fmt(cuando) + ')' : 'Sin sincronizar desde este navegador';
+}
 document.getElementById('t-sync').onclick = busy('t-sync', async function () {
   try {
     var r = await api('/admin/templates/sync', { method: 'POST' });
-    show('t-state', 'Sincronizadas ' + r.synced, 'ok');
+    try { localStorage.setItem(TP_SYNC_KEY, new Date().toISOString()); } catch (e) { /* sin almacenamiento: solo no se recuerda */ }
+    show('t-state', 'Sincronizadas ' + r.synced + ' desde Meta', 'ok');
     loadTemplates();
   } catch (error) { show('t-state', error.message, 'bad'); }
 });
@@ -3991,6 +4205,182 @@ document.getElementById('t-push').onclick = busy('t-push', async function () {
     out('t-out', r.results.map(function (x) { return (x.ok ? 'ALTA   ' : 'FALLO  ') + x.name + (x.ok ? ' -> ' + x.status : ': ' + x.error); }).join('\n'));
     loadTemplates();
   } catch (error) { show('t-push-state', error.message, 'bad'); }
+});
+
+// ------------------------------------------- plantillas: crear / editar
+/* Lo escrito en cada variable se guarda por numero: si el cuerpo cambia y
+   {{2}} vuelve a aparecer, su descripcion y su ejemplo siguen ahi. */
+var tpVars = {};
+var tpClaveVars = null;
+function tpIndices(body) {
+  var vistos = {};
+  (body.match(/\{\{(\d+)\}\}/g) || []).forEach(function (m) { vistos[parseInt(m.replace(/\D/g, ''), 10)] = true; });
+  return Object.keys(vistos).map(Number).sort(function (a, b) { return a - b; });
+}
+/* Minusculas, sin acentos, espacios y guiones a "_": lo que exige Meta. */
+function tpNormalizarNombre(v) {
+  return v.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s-]+/g, '_').replace(/[^a-z0-9_]/g, '').replace(/_+/g, '_');
+}
+/* Las mismas reglas que src/templates/lint.ts que se pueden ver al escribir;
+   el resto (lexico, categoria) lo dice el servidor al guardar. */
+function tpRevisar(body, indices, categoria) {
+  var r = [];
+  var faltan = [];
+  var max = indices.length ? indices[indices.length - 1] : 0;
+  for (var n = 1; n <= max; n++) if (indices.indexOf(n) < 0) faltan.push('{{' + n + '}}');
+  if (faltan.length) r.push(['error', 'Faltan ' + faltan.join(', ') + ': las variables van de {{1}} en adelante, sin saltos.']);
+  if (/^\s*\{\{\d+\}\}/.test(body)) r.push(['error', 'No puede empezar con una variable: Meta la rechaza. Pon texto antes.']);
+  if (/\{\{\d+\}\}\s*$/.test(body)) r.push(['error', 'No puede terminar con una variable: Meta la rechaza. Cierra con una frase.']);
+  if (/\{\{\d+\}\}[\s,.;:-]*\{\{\d+\}\}/.test(body)) r.push(['error', 'Hay dos variables seguidas sin texto entre ellas.']);
+  if (body.trim() && body.trim().length < 10) r.push(['warn', 'El cuerpo es muy corto: al menos 10 caracteres.']);
+  if ((body.match(/!/g) || []).length > 1) r.push(['warn', 'Demasiados signos de exclamación: suena a spam.']);
+  if (categoria === 'MARKETING' && !/baja|parar|stop|cancelar|no deseas recibir|unsubscribe/i.test(body.normalize('NFD').replace(/[̀-ͯ]/g, ''))) {
+    r.push(['error', 'Una de marketing tiene que decir cómo darse de baja (por ejemplo: responde BAJA).']);
+  }
+  return r;
+}
+function tpPintarVars(indices) {
+  var caja = porId('tp-vars');
+  porId('tp-vars-caja').classList.toggle('hidden', !indices.length);
+  caja.innerHTML = indices.map(function (n) {
+    var v = tpVars[n] || { desc: '', ejemplo: '' };
+    return '<div class="tp-var">' +
+      '<div><label for="tp-var-d' + n + '">Variable <code>{{' + n + '}}</code> <span>qué significa</span></label><input id="tp-var-d' + n + '" data-tp-var="' + n + '" data-campo="desc" maxlength="80" placeholder="' + (n === 1 ? 'p. ej. nombre del cliente' : 'qué dato va aquí') + '" value="' + esc(v.desc) + '"></div>' +
+      '<div><label for="tp-var-e' + n + '"><span>Ejemplo</span></label><input id="tp-var-e' + n + '" data-tp-var="' + n + '" data-campo="ejemplo" maxlength="60" placeholder="' + (n === 1 ? 'p. ej. María' : 'valor de ejemplo') + '" value="' + esc(v.ejemplo) + '"></div>' +
+      '</div>';
+  }).join('');
+  caja.querySelectorAll('[data-tp-var]').forEach(function (inp) {
+    inp.oninput = function () {
+      var n = inp.getAttribute('data-tp-var');
+      tpVars[n] = tpVars[n] || { desc: '', ejemplo: '' };
+      tpVars[n][inp.getAttribute('data-campo')] = inp.value;
+      tpPintarPrevia();
+    };
+  });
+}
+/* La burbuja: el cuerpo con el ejemplo de cada variable (o su descripcion entre
+   corchetes, como lo ve el revisor de Meta; o el hueco, si aun no hay nada). */
+function tpPintarPrevia() {
+  var body = porId('tp-body').value;
+  var previa = porId('tp-previa');
+  if (!body.trim()) { previa.innerHTML = '<span class="muted">Escribe el cuerpo para verlo como le llega al cliente.</span>'; return; }
+  previa.innerHTML = esc(body).replace(/\{\{(\d+)\}\}/g, function (todo, n) {
+    var v = tpVars[n] || {};
+    if (v.ejemplo && v.ejemplo.trim()) return '<span class="tp-hueco">' + esc(v.ejemplo.trim()) + '</span>';
+    if (v.desc && v.desc.trim()) return '<span class="tp-hueco">[' + esc(v.desc.trim()) + ']</span>';
+    return '<span class="tp-hueco vacio">{{' + n + '}}</span>';
+  });
+}
+function tpActualizar() {
+  var body = porId('tp-body').value;
+  var indices = tpIndices(body);
+  var clave = indices.join(',');
+  /* Solo se rehacen los campos si cambio que variables hay: asi no se pierde el foco. */
+  if (clave !== tpClaveVars) { tpClaveVars = clave; tpPintarVars(indices); }
+  porId('tp-cuenta').textContent = body.length + ' / 1024';
+  porId('tp-lint').innerHTML = tpRevisar(body, indices, val('tp-category')).map(function (x) {
+    return '<li class="' + (x[0] === 'error' ? 'error' : '') + '">' + esc(x[1]) + '</li>';
+  }).join('');
+  tpPintarPrevia();
+}
+porId('tp-body').addEventListener('input', tpActualizar);
+porId('tp-category').addEventListener('change', tpActualizar);
+porId('tp-name').addEventListener('input', function () {
+  var el = porId('tp-name');
+  var cursor = el.selectionStart || 0;
+  var limpio = tpNormalizarNombre(el.value);
+  if (limpio !== el.value) {
+    var antes = tpNormalizarNombre(el.value.slice(0, cursor)).length;
+    el.value = limpio;
+    try { el.setSelectionRange(antes, antes); } catch (e) { /* algunos tipos de input no dejan */ }
+  }
+  var ayuda = porId('tp-name-ayuda');
+  var corto = limpio.length > 0 && limpio.length < 3;
+  ayuda.classList.toggle('mal', corto);
+  ayuda.innerHTML = corto ? 'Al menos 3 caracteres.' : 'Solo minúsculas, números y guion bajo: los espacios se vuelven <code>_</code> mientras escribes.';
+});
+/* "Insertar variable": la siguiente {{n}} donde esta el cursor. */
+porId('tp-insertar').onclick = function () {
+  var ta = porId('tp-body');
+  var indices = tpIndices(ta.value);
+  var siguiente = (indices.length ? indices[indices.length - 1] : 0) + 1;
+  var ini = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
+  var fin = ta.selectionEnd == null ? ini : ta.selectionEnd;
+  var trozo = '{{' + siguiente + '}}';
+  ta.value = ta.value.slice(0, ini) + trozo + ta.value.slice(fin);
+  ta.focus();
+  ta.setSelectionRange(ini + trozo.length, ini + trozo.length);
+  tpActualizar();
+};
+var tpFocoPrevio = null;
+function tpAbrir(t) {
+  tpFocoPrevio = document.activeElement;
+  tpVars = {};
+  tpClaveVars = null;
+  (t && t.variables || []).forEach(function (d, i) { tpVars[i + 1] = { desc: d, ejemplo: '' }; });
+  setVal('tp-name', t ? t.name : ''); setVal('tp-language', t ? t.language : 'es'); setVal('tp-category', t ? t.category : 'UTILITY');
+  porId('tp-body').value = t ? t.body : '';
+  porId('tp-cajon-titulo').textContent = t ? 'Editar plantilla' : 'Crear plantilla';
+  porId('tp-out').classList.add('hidden');
+  porId('tp-state').classList.add('hidden');
+  porId('tp-name-ayuda').classList.remove('mal');
+  tpActualizar();
+  porId('tp-fondo').classList.add('visible');
+  var cajon = porId('tp-cajon');
+  cajon.classList.add('abierto');
+  cajon.setAttribute('aria-hidden', 'false');
+  setTimeout(function () { porId(t ? 'tp-body' : 'tp-name').focus(); }, 60);
+}
+function tpCerrar() {
+  var cajon = porId('tp-cajon');
+  if (!cajon.classList.contains('abierto')) return;
+  cajon.classList.remove('abierto');
+  cajon.setAttribute('aria-hidden', 'true');
+  porId('tp-fondo').classList.remove('visible');
+  if (tpFocoPrevio && tpFocoPrevio.focus) tpFocoPrevio.focus();
+}
+porId('tp-nueva').onclick = function () { tpAbrir(null); };
+porId('tp-cerrar').onclick = tpCerrar;
+porId('tp-cancelar').onclick = tpCerrar;
+porId('tp-fondo').onclick = tpCerrar;
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') tpCerrar(); });
+/* Al irse de la seccion el cajon no se queda abierto encima de otra pantalla. */
+window.addEventListener('hashchange', tpCerrar);
+function tpError(titulo, lineas) {
+  var caja = porId('tp-out');
+  caja.innerHTML = '<div class="res bad"><b>' + esc(titulo) + '</b>' + (lineas && lineas.length ? '<ul>' + lineas.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+  caja.classList.remove('hidden');
+}
+document.getElementById('tp-save').onclick = busy('tp-save', async function () {
+  porId('tp-out').classList.add('hidden');
+  var body = porId('tp-body').value;
+  var indices = tpIndices(body);
+  var nombre = val('tp-name').replace(/^_+|_+$/g, '');
+  setVal('tp-name', nombre);
+  var errores = [];
+  if (!/^[a-z0-9_]{3,}$/.test(nombre)) errores.push('El nombre va en minúsculas, números y guion bajo, con al menos 3 caracteres: aviso_entrega_hoy.');
+  if (body.trim().length < 10) errores.push('Falta el cuerpo de la plantilla (al menos 10 caracteres).');
+  tpRevisar(body, indices, val('tp-category')).forEach(function (x) { if (x[0] === 'error') errores.push(x[1]); });
+  var variables = indices.map(function (n) { return ((tpVars[n] && tpVars[n].desc) || '').trim(); });
+  variables.forEach(function (d, i) { if (!d) errores.push('Falta decir qué significa {{' + indices[i] + '}}.'); });
+  if (errores.length) { tpError('Revisa antes de guardar', errores); return; }
+  /* El POST devuelve la lista del linter en un 400: api() solo deja el mensaje. */
+  var res = await fetch('/admin/templates', {
+    method: 'POST', cache: 'no-store', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: nombre, language: val('tp-language') || 'es', category: val('tp-category'), body: body, variables: variables })
+  }).catch(function () { return null; });
+  if (!res) { tpError('No se pudo conectar con el servidor. Prueba otra vez.'); return; }
+  if (res.status === 401) { irAlLogin(); return; }
+  var r = await res.json().catch(function () { return {}; });
+  if (!res.ok) {
+    tpError(r.error || r.message || errorHttp(res.status), (r.issues || []).map(function (i) { return (i.severity === 'error' ? 'Error: ' : 'Aviso: ') + i.message; }));
+    return;
+  }
+  var avisos = (r.issues || []).map(function (i) { return 'Aviso: ' + i.message; });
+  tpCerrar();
+  tpAviso(avisos.length ? 'warn' : 'ok', r.subirAMeta ? 'Guardada «' + nombre + '»: queda pendiente hasta subirla a Meta con «Dar de alta las limpias».' : 'Guardada «' + nombre + '» y lista para usar.', avisos);
+  porId('tp-tab-tuyas').click();
+  loadTemplates();
 });
 
 document.getElementById('c-send').onclick = busy('c-send', async function () {

@@ -27,7 +27,7 @@ import { appShell } from './shell.js';
    y las cuatro piezas propias de esta pantalla. */
 const CSS = `
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font-family: var(--fuente); font-size: var(--fs-cuerpo); line-height: 1.5; max-width: 1400px; }
+  .wrap { color: var(--texto); font-family: var(--fuente); font-size: var(--fs-cuerpo); line-height: 1.5; max-width: var(--ancho-max, 1600px); }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
 

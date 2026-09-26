@@ -358,7 +358,7 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
     hasta: ctx.hasta ?? '',
     hastaExtendido: ctx.hastaExtendido ?? '',
     soporte: ctx.soporte ?? '',
-    telefonoMotorizado: ctx.telefonoMotorizado?.trim() || ctx.soporte?.trim() || 'este mismo número de WhatsApp',
+    telefonoMotorizado: ctx.telefonoMotorizado?.trim() || ctx.soporte?.trim() || '',
     telefonoCliente: ctx.telefonoCliente ?? '',
     km: ctx.km ?? '',
     cobertura: ctx.cobertura ?? '',
@@ -375,6 +375,10 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
   let base = texto;
   // Sin quien firma: «Soy {remitente} de la empresa…» pasa a «Te escribimos de la empresa…».
   if (!valores.remitente) base = base.replace(/Soy\s+\{remitente\}\s+de\b/g, 'Te escribimos de');
+  // Sin número de motorizado ni de soporte: se quita la FRASE que lo daba
+  // («Número del motorizado: …»), nunca se pone otro número en su lugar
+  // (26/09: salía el del propio WhatsApp como si fuera el del motorizado).
+  if (!valores.telefonoMotorizado) base = base.replace(/[ \t]*[^.!?\n]*\{telefonoMotorizado\}[^.!?\n]*[.!?]?/g, '');
   // Una linea con un dato del envio que no vino se quita entera.
   base = base
     .split('\n')
@@ -410,7 +414,7 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   // Es a la vez el cierre del agente operativo: despues de esto la IA ya no
   // contesta en ese chat (el sistema sigue con la hora de llegada y el entregado).
   ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.`,
-  solicitudUbicacion: '¡Hola {nombreCompleto}! Soy {remitente} de la empresa de entregas GSG. Tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
+  solicitudUbicacion: '¡Hola {nombreCompleto}! Somos GSG Courier, tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
   porQueUbicacion: 'Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado. ¿Podrías compartir tu ubicación por WhatsApp, por favor? (clip 📎 → Ubicación)',
   cierreAgente: TEXTO_CIERRE,
   proponerUbicacion: 'Hola {nombre}, somos {negocio}: hoy le llevamos {pedido}. ¿Se lo llevamos a la misma dirección de la última vez?\nResponda SÍ si es la misma; si es otra, mándenos su ubicación desde el clip 📎 → Ubicación.',
@@ -463,7 +467,7 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   ubicacionFueraDeZona: 'Gracias, {nombre}, recibimos su ubicación, pero queda fuera de la zona que cubrimos{cobertura}. Una persona de {negocio} se comunicará con usted para coordinar {pedido}.',
   clienteCanceladoGsg: 'Hola {nombre}, {pedido} quedó cancelado por {negocio} y hoy ya no se lo llevamos. Si no fue usted quien lo canceló, escríbanos por aquí y lo revisamos.',
   // Los de «falta confirmar» (GSG ya tiene su dirección): solo SÍ o NO, nunca la ubicación.
-  confirmarEntregaGsg: '¡Hola {nombre}! Soy {remitente} de la empresa de entregas GSG. Tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\n¿Nos confirmas que lo recibes hoy en esa dirección? Responde SÍ o NO.',
+  confirmarEntregaGsg: '¡Hola {nombre}! Somos GSG Courier, tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\n¿Nos confirmas que lo recibes hoy en esa dirección? Responde SÍ o NO.',
   recordarConfirmarGsg: 'Hola {nombre}, te escribimos otra vez por tu entrega de GSG.\n📦 Producto: {producto}\n🏠 Dirección: {direccionCompleta}\n\n¿Nos confirmas que la recibes hoy? Responde SÍ o NO.',
   confirmadaGsg: 'Perfecto, tu pedido queda confirmado para hoy. ¡Muchas gracias!',
   noConfirmaGsg: 'Entendido, lo pasamos a un asesor. Por este canal no se reciben consultas. Número del motorizado: {telefonoMotorizado}.',
@@ -610,7 +614,7 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   motorizadoEnlace: 'Al motorizado, con el enlace a su página de pedidos del día (botones grandes, sin instalar nada)',
   ubicacionFueraDeZona: 'Al cliente cuyo pin cae fuera de la zona que se cubre (pasa a una persona)',
   clienteCanceladoGsg: 'Al cliente que ya tenía hora, cuando GSG cancela su pedido',
-  solicitudUbicacion: 'Al cliente, el PRIMER mensaje que le pide la ubicación, con los datos del envío que manda GSG (la línea de un dato que no vino no sale; sin quien firma, dice «Te escribimos de la empresa de entregas GSG»)',
+  solicitudUbicacion: 'Al cliente, el PRIMER mensaje que le pide la ubicación, con los datos del envío que manda GSG («¡Hola {nombre}! Somos GSG Courier, tengo una entrega para ti:»; la línea de un dato que no vino no sale)',
   porQueUbicacion: 'Al cliente que pregunta por qué le pedimos la ubicación (se le explica y se le vuelve a pedir)',
   cierreAgente: 'Al cliente que escribe una consulta que no es mandar su ubicación: se le manda UNA vez y el chat pasa a una persona (el asistente deja de contestar)',
   confirmarEntregaGsg: 'Al cliente de «falta confirmar» (GSG ya tiene su dirección): la pregunta SÍ/NO con los datos del envío (la línea de un dato que no vino no sale). Nunca se le pide la ubicación',

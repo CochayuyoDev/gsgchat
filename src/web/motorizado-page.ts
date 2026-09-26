@@ -17,7 +17,7 @@
  * asi que su CSS es el de aqui (sobre los tokens, para que el modo oscuro
  * funcione igual).
  */
-import { TOKENS_CSS } from './tokens.js';
+import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 import { escapeHtml } from './login-page.js';
 import { estadosVisualesJs } from './estados-visuales.js';
 
@@ -215,9 +215,10 @@ setInterval(function () { cargar(true); }, 60000);
 <html lang="es">
 <head>
 <meta charset="utf-8">
+${TEMA_SCRIPT}
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#0f766e">
+<meta name="theme-color" content="#0a7f55">
 <title>Mis pedidos de hoy · ${escapeHtml(negocio)}</title>
 <style>
 ${TOKENS_CSS}

@@ -185,7 +185,7 @@ export function esEventoDePrueba(payload: unknown): boolean {
   } catch {
     return false;
   }
-  return /"(telefono|phone|to|from|wa_id)":"(?:\+?51)?900[01]\d{5}"/.test(texto) || /"referencia":"PRUEBA-/.test(texto);
+  return /"(telefono|phone|to|from|wa_id)":"(?:\+?51)?000[01]\d{5}"/.test(texto) || /"referencia":"PRUEBA-/.test(texto);
 }
 
 export function encolarEventos(bus: Bus, repo: WebhooksRepo, log?: DespachadorDeps['log']): () => void {

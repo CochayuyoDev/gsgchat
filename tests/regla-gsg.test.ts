@@ -115,7 +115,7 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
 
   it('el primer mensaje sale como siempre (la plantilla de GSG con el botón de ubicación)', () => {
     const pedida = e.mensajesA('987000001').find((m) => m.kind === 'location_request');
-    expect(String(pedida?.body)).toContain('de la empresa de entregas GSG');
+    expect(String(pedida?.body)).toContain('Somos GSG Courier');
   });
 
   it('«¿por qué?» antes del pin: la explicación y se le vuelve a pedir, sin límite y nunca dos veces seguidas el mismo texto', async () => {

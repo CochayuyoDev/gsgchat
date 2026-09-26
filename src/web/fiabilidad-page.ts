@@ -24,7 +24,7 @@ const CSS = `
   /* Solo lo propio de esta pantalla: los botones, las tarjetas y los chips
      los pone el armazon (.btn, .tarjeta, .chip.tono-*). */
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1300px; }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: var(--ancho-max, 1600px); }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
   .hidden { display: none !important; }

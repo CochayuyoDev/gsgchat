@@ -4,7 +4,7 @@
  * handlers/inbound.ts → el gancho de procesos) y el motor, con respuestas
  * validas, invalidas, sin respuesta, consultas ajenas y el cierre.
  *
- * Se usan numeros de prueba (51 900 0…): el sender los guarda en el hilo sin
+ * Se usan numeros de prueba (51 000 0…): el sender los guarda en el hilo sin
  * mandarlos y no gastan el ritmo, asi el motor no espera la pausa entre uno y
  * otro. Lo que se mando se lee del hilo de cada contacto.
  */
@@ -168,7 +168,7 @@ describe('lo que se valida de cada dato', () => {
 
   it('un aviso se junta con la pregunta siguiente: un solo mensaje', () => {
     const proceso = { id: 1, nombre: 'X', plantilla: null, descripcion: '', estado: 'activo' as const, createdAt: new Date(), updatedAt: new Date(), ritmo: { desde: '00:00', hasta: '23:59' }, cierre: { fin: 'Fin.', ajena: '', persona: '' }, pasos: [{ ...pasoNuevo('aviso', 'a'), texto: 'Aviso para {nombre}.' }, { ...pasoNuevo('pedir', 'b'), texto: '¿Tu DNI?', dato: 'documento_identidad' as const }] };
-    const persona = { id: 9, corridaId: 1, procesoId: 1, phone: '51900000001', telefonoCrudo: '', nombre: 'Ana', datos: {}, estado: 'pendiente' as const, paso: 0, intentos: 0, fallos: 0, sub: null, proximoAt: null, ultimoEnvioAt: null, respuestas: {}, ultimo: null, motivo: null, pausada: false, createdAt: new Date(), updatedAt: new Date(), terminadaAt: null };
+    const persona = { id: 9, corridaId: 1, procesoId: 1, phone: '51000000001', telefonoCrudo: '', nombre: 'Ana', datos: {}, estado: 'pendiente' as const, paso: 0, intentos: 0, fallos: 0, sub: null, proximoAt: null, ultimoEnvioAt: null, respuestas: {}, ultimo: null, motivo: null, pausada: false, createdAt: new Date(), updatedAt: new Date(), terminadaAt: null };
     const c = componer(proceso, persona, 0, '', { negocio: 'N', ahora: new Date(), timezone: TZ });
     expect(c.mensaje!.body).toBe('Aviso para Ana.\n\n¿Tu DNI?');
     expect(c.patch).toMatchObject({ estado: 'esperando', paso: 1, intentos: 1 });
@@ -181,10 +181,10 @@ describe('Pedir y validar datos', () => {
   it('flujo completo: ubicación, un DNI que no vale, el bueno, la dirección y la foto; cierre al final', async () => {
     const t = await armar();
     const p = await t.desde('datos');
-    const r = await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre\n900000201;Ana Ruiz' });
+    const r = await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre\n000000201;Ana Ruiz' });
     expect(r.listas).toBe(1);
     await t.motor();
-    const tel = '51900000201';
+    const tel = '51000000201';
     expect((await t.salidas(tel))[0]).toMatch(/Hola Ana, te escribimos de La Tienda.*ubicación/s);
     expect((await t.persona(tel)).estado).toBe('esperando');
 
@@ -222,30 +222,30 @@ describe('Pedir y validar datos', () => {
   it('«¿para qué?» se explica con el texto del paso y se vuelve a pedir; una consulta ajena recibe el cierre y pasa a una persona', async () => {
     const t = await armar();
     const p = await t.desde('datos');
-    await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre\n900000202;Luis Paz\n900000203;Rosa Díaz' });
+    await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre\n000000202;Luis Paz\n000000203;Rosa Díaz' });
     await t.motor();
-    await t.recibir(texto('51900000202', '¿para qué quieren mi ubicación?'));
-    const s = await t.salidas('51900000202');
+    await t.recibir(texto('51000000202', '¿para qué quieren mi ubicación?'));
+    const s = await t.salidas('51000000202');
     expect(s.at(-1)).toMatch(/solo para ubicar tu domicilio.*Compártenos tu ubicación/s);
-    expect((await t.persona('51900000202')).estado).toBe('esperando');
+    expect((await t.persona('51000000202')).estado).toBe('esperando');
 
-    await t.recibir(texto('51900000203', '¿cuánto cuesta el envío a provincia?'));
-    const r = await t.persona('51900000203');
+    await t.recibir(texto('51000000203', '¿cuánto cuesta el envío a provincia?'));
+    const r = await t.persona('51000000203');
     expect(r.estado).toBe('persona');
     expect(r.motivo).toMatch(/no es de este proceso/);
-    expect((await t.salidas('51900000203')).at(-1)).toMatch(/solo atendemos este trámite, Rosa/);
+    expect((await t.salidas('51000000203')).at(-1)).toMatch(/solo atendemos este trámite, Rosa/);
     // En manos de una persona: el sistema no contesta nada mas.
-    const n = (await t.salidas('51900000203')).length;
-    await t.recibir(texto('51900000203', 'hola? me responden?'));
-    expect((await t.salidas('51900000203')).length).toBe(n);
+    const n = (await t.salidas('51000000203')).length;
+    await t.recibir(texto('51000000203', 'hola? me responden?'));
+    expect((await t.salidas('51000000203')).length).toBe(n);
   });
 
   it('sin respuesta: se insiste las veces del paso y al final pasa a una persona', async () => {
     const t = await armar();
     const p = await t.desde('datos');
-    await t.procesos.cargarPersonas(p.id, { texto: '900000204;Mario' });
+    await t.procesos.cargarPersonas(p.id, { texto: '000000204;Mario' });
     await t.motor();
-    const tel = '51900000204';
+    const tel = '51000000204';
     for (let i = 0; i < 3; i++) {
       await t.repo.actualizarPersona((await t.persona(tel)).id, { proximoAt: new Date(Date.now() - 1000) });
       await t.motor();
@@ -261,9 +261,9 @@ describe('Pedir y validar datos', () => {
   it('a la tercera respuesta que no vale pasa a una persona', async () => {
     const t = await armar();
     const p = await t.desde('datos');
-    await t.procesos.cargarPersonas(p.id, { texto: '900000205;Elena' });
+    await t.procesos.cargarPersonas(p.id, { texto: '000000205;Elena' });
     await t.motor();
-    const tel = '51900000205';
+    const tel = '51000000205';
     for (const x of ['estoy por la iglesia', 'cerca del mercado', 'al costado del colegio']) await t.recibir(texto(tel, x));
     const fin = await t.persona(tel);
     expect(fin.estado).toBe('persona');
@@ -275,9 +275,9 @@ describe('Confirmaciones y recordatorios', () => {
   it('SÍ con el botón: confirma y, con la cita dentro de una hora, el recordatorio sale en el mismo mensaje', async () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
-    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n900000301;Ana;${hoyLima()};${enMinutos(60)}` });
+    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n000000301;Ana;${hoyLima()};${enMinutos(60)}` });
     await t.motor();
-    const tel = '51900000301';
+    const tel = '51000000301';
     expect((await t.salidas(tel))[0]).toMatch(/confirmar tu cita del .* a las .*¿Asistirás\?/s);
     const id = (await t.persona(tel)).id;
     await t.recibir(boton(tel, `proc:${id}:si`, 'Sí'));
@@ -291,37 +291,37 @@ describe('Confirmaciones y recordatorios', () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
     const pasado = new Date(Date.now() + 3 * 86_400_000).toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' });
-    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n900000302;Luis;${pasado};10:00` });
+    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n000000302;Luis;${pasado};10:00` });
     await t.motor();
-    await t.recibir(texto('51900000302', 'sí, confirmo'));
-    const x = await t.persona('51900000302');
+    await t.recibir(texto('51000000302', 'sí, confirmo'));
+    const x = await t.persona('51000000302');
     expect(x.estado).toBe('programada');
     expect(x.proximoAt!.getTime()).toBeGreaterThan(Date.now() + 2 * 86_400_000);
     // Mientras espera, un «gracias» no se contesta; un cambio de planes pasa a una persona.
-    const n = (await t.salidas('51900000302')).length;
-    await t.recibir(texto('51900000302', 'gracias'));
-    expect((await t.salidas('51900000302')).length).toBe(n);
-    await t.recibir(texto('51900000302', 'al final no voy a poder ir, se me cruzó un viaje'));
-    expect((await t.persona('51900000302')).estado).toBe('persona');
+    const n = (await t.salidas('51000000302')).length;
+    await t.recibir(texto('51000000302', 'gracias'));
+    expect((await t.salidas('51000000302')).length).toBe(n);
+    await t.recibir(texto('51000000302', 'al final no voy a poder ir, se me cruzó un viaje'));
+    expect((await t.persona('51000000302')).estado).toBe('persona');
   });
 
   it('NO: se libera con el texto del paso y termina como «dijo que no»', async () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
-    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n900000303;Rosa;${hoyLima()};${enMinutos(90)}` });
+    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n000000303;Rosa;${hoyLima()};${enMinutos(90)}` });
     await t.motor();
-    await t.recibir(texto('51900000303', 'no'));
-    const x = await t.persona('51900000303');
+    await t.recibir(texto('51000000303', 'no'));
+    const x = await t.persona('51000000303');
     expect(x.estado).toBe('rechazo');
-    expect((await t.salidas('51900000303')).at(-1)).toMatch(/liberamos tu cita/);
+    expect((await t.salidas('51000000303')).at(-1)).toMatch(/liberamos tu cita/);
   });
 
   it('REPROGRAMAR: pide la nueva fecha, la guarda y sigue con ella', async () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
-    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n900000304;Jorge;${hoyLima()};${enMinutos(90)}` });
+    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n000000304;Jorge;${hoyLima()};${enMinutos(90)}` });
     await t.motor();
-    const tel = '51900000304';
+    const tel = '51000000304';
     const id = (await t.persona(tel)).id;
     await t.recibir(boton(tel, `proc:${id}:reprogramar`, 'Reprogramar'));
     expect((await t.persona(tel)).sub).toBe('reprogramando');
@@ -341,9 +341,9 @@ describe('Avisos al personal de campo', () => {
   it('llegué, terminé: el avance queda con sus horas y la tarea se cierra', async () => {
     const t = await armar();
     const p = await t.desde('campo');
-    await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre;tarea;direccion;hora\n900000401;Carlos;Instalación de router;Av. Arequipa 1234;10:00' });
+    await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre;tarea;direccion;hora\n000000401;Carlos;Instalación de router;Av. Arequipa 1234;10:00' });
     await t.motor();
-    const tel = '51900000401';
+    const tel = '51000000401';
     expect((await t.salidas(tel))[0]).toMatch(/Instalación de router en Av\. Arequipa 1234, a las 10:00/);
     await t.recibir(texto(tel, 'ya llegué'));
     expect((await t.persona(tel)).sub).toBe('llego');
@@ -361,13 +361,13 @@ describe('Avisos al personal de campo', () => {
   it('no pude: pasa al coordinador', async () => {
     const t = await armar();
     const p = await t.desde('campo');
-    await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre;tarea;direccion;hora\n900000402;Rosa;Inspección;Jr. Puno 340;15:00' });
+    await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre;tarea;direccion;hora\n000000402;Rosa;Inspección;Jr. Puno 340;15:00' });
     await t.motor();
-    const id = (await t.persona('51900000402')).id;
-    await t.recibir(boton('51900000402', `proc:${id}:no_pudo`, 'No pude'));
-    const x = await t.persona('51900000402');
+    const id = (await t.persona('51000000402')).id;
+    await t.recibir(boton('51000000402', `proc:${id}:no_pudo`, 'No pude'));
+    const x = await t.persona('51000000402');
     expect(x.estado).toBe('persona');
-    expect((await t.salidas('51900000402')).at(-1)).toMatch(/El coordinador te escribe/);
+    expect((await t.salidas('51000000402')).at(-1)).toMatch(/El coordinador te escribe/);
   });
 });
 
@@ -375,9 +375,9 @@ describe('Cobranza y trámites', () => {
   it('con el vencimiento cerca pide la captura; un texto no vale; la captura pasa a una persona para validarla', async () => {
     const t = await armar();
     const p = await t.desde('cobranza');
-    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;monto;vencimiento\n900000501;Ana;S/ 150.00;${hoyLima()}` });
+    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;monto;vencimiento\n000000501;Ana;S/ 150.00;${hoyLima()}` });
     await t.motor();
-    const tel = '51900000501';
+    const tel = '51000000501';
     expect((await t.salidas(tel))[0]).toMatch(/tu pago de S\/ 150\.00 vence el/);
     await t.recibir(texto(tel, 'ya pagué ayer'));
     expect((await t.salidas(tel)).at(-1)).toMatch(/necesitamos la captura/);
@@ -393,11 +393,11 @@ describe('Cobranza y trámites', () => {
     const t = await armar();
     const p = await t.desde('cobranza');
     const lejos = new Date(Date.now() + 10 * 86_400_000).toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' });
-    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;monto;vencimiento\n900000502;Luis;S/ 80;${lejos}` });
+    await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;monto;vencimiento\n000000502;Luis;S/ 80;${lejos}` });
     await t.motor();
-    const x = await t.persona('51900000502');
+    const x = await t.persona('51000000502');
     expect(x.estado).toBe('programada');
-    expect(await t.salidas('51900000502')).toHaveLength(0);
+    expect(await t.salidas('51000000502')).toHaveLength(0);
   });
 });
 
@@ -405,21 +405,21 @@ describe('lo que no es de un proceso sigue su camino', () => {
   it('sin corrida viva el gancho no se queda con el mensaje', async () => {
     const t = await armar();
     const { atenderEntrante } = await import('../src/procesos/nucleo.js');
-    const r = await atenderEntrante(t.procesos.depsNucleo(), '51900000999', { texto: 'hola' });
+    const r = await atenderEntrante(t.procesos.depsNucleo(), '51000000999', { texto: 'hola' });
     expect(r.atendida).toBe(false);
   });
 
   it('un chat pasado a una persona no le quita sus mensajes al reparto: si tiene una solicitud de ubicación abierta, la atiende el reparto', async () => {
     const t = await armar();
     const p = await t.desde('datos');
-    await t.procesos.cargarPersonas(p.id, { texto: '900000801;Ana' });
+    await t.procesos.cargarPersonas(p.id, { texto: '000000801;Ana' });
     await t.motor();
-    const tel = '51900000801';
+    const tel = '51000000801';
     await t.recibir(texto(tel, '¿cuánto cuesta el envío a provincia?'));
     expect((await t.persona(tel)).estado).toBe('persona');
     // Ahora le llega un pedido del reparto a ese mismo numero.
     const lote = await t.repos.rutas.crearLote({ nombre: 'Reparto' });
-    const [s] = await t.repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '900000801', phone: tel, nombre: 'Ana', referencia: 'P-1' }]);
+    const [s] = await t.repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '000000801', phone: tel, nombre: 'Ana', referencia: 'P-1' }]);
     await t.repos.rutas.actualizarSolicitud(s!.id, { estado: 'enviado', intentos: 1, ultimoEnvioAt: new Date() });
     await t.recibir(pin(tel));
     const despues = await t.repos.rutas.solicitud(s!.id);
@@ -429,12 +429,12 @@ describe('lo que no es de un proceso sigue su camino', () => {
   it('una persona en otra corrida viva no entra dos veces; quien se dio de baja no recibe nada', async () => {
     const t = await armar();
     const p = await t.desde('datos');
-    await t.repos.contacts.upsertFromInbound('51900000602');
-    await t.repos.contacts.setOptOut('51900000602');
-    await t.procesos.cargarPersonas(p.id, { texto: '900000601;Ana\n900000602;Baja' });
-    const r = await t.procesos.cargarPersonas(p.id, { texto: '900000601;Ana otra vez' });
+    await t.repos.contacts.upsertFromInbound('51000000602');
+    await t.repos.contacts.setOptOut('51000000602');
+    await t.procesos.cargarPersonas(p.id, { texto: '000000601;Ana\n000000602;Baja' });
+    const r = await t.procesos.cargarPersonas(p.id, { texto: '000000601;Ana otra vez' });
     expect(r.conError).toBe(1);
-    const baja = (await t.repo.personas({ phone: '51900000602', limit: 1 }))[0]!;
+    const baja = (await t.repo.personas({ phone: '51000000602', limit: 1 }))[0]!;
     expect(baja).toMatchObject({ estado: 'error' });
     expect(baja.motivo).toMatch(/Se dio de baja/);
   });
@@ -442,9 +442,9 @@ describe('lo que no es de un proceso sigue su camino', () => {
   it('acciones en masa: pausar, pedir ahora, pasar a una persona; y el CSV con las respuestas', async () => {
     const t = await armar();
     const p = await t.desde('datos');
-    const c = await t.procesos.cargarPersonas(p.id, { texto: '900000701;Ana\n900000702;Luis' });
+    const c = await t.procesos.cargarPersonas(p.id, { texto: '000000701;Ana\n000000702;Luis' });
     await t.motor();
-    await t.recibir(pin('51900000701'));
+    await t.recibir(pin('51000000701'));
     const ids = (await t.repo.personas({ corridaId: c.corrida.id })).map((x) => x.id);
     expect((await t.procesos.masa('pausar', ids)).hechos).toBe(2);
     expect((await t.repo.personas({ corridaId: c.corrida.id })).every((x) => x.pausada)).toBe(true);

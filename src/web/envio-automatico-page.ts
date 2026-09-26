@@ -26,7 +26,7 @@ const CSS = `
   /* Solo lo propio de esta pantalla: la paleta, los botones, las tarjetas y
      los chips los pone el armazon. Nunca un color a pelo: rompe el modo oscuro. */
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1500px; }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: var(--ancho-max, 1600px); }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
   .hidden { display: none !important; }

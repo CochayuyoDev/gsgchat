@@ -144,7 +144,7 @@ describe('procesos en una tienda (PGlite real)', () => {
     const k = await api('POST', '/admin/claves-api', { nombre: 'Sistema de citas', permisos: ['procesos:gestionar'] });
     expect(k.status).toBe(200);
     const auth = { authorization: `Bearer ${k.body.clave}` };
-    const carga = await api('POST', `/api/v1/procesos/${id}/personas`, { nombre: 'Lote API', personas: [{ telefono: '900000950', nombre: 'Ana API', fecha: '30/12/2026', hora: '10:00' }, { telefono: '123', nombre: 'Malo' }] }, auth);
+    const carga = await api('POST', `/api/v1/procesos/${id}/personas`, { nombre: 'Lote API', personas: [{ telefono: '000000950', nombre: 'Ana API', fecha: '30/12/2026', hora: '10:00' }, { telefono: '123', nombre: 'Malo' }] }, auth);
     expect(carga.status, JSON.stringify(carga.body)).toBe(201);
     expect(carga.body).toMatchObject({ ok: true, listas: 1, conError: 1 });
     const corrida = await api('GET', `/api/v1/procesos/corridas/${carga.body.corrida.id}`, undefined, auth);
@@ -154,7 +154,7 @@ describe('procesos en una tienda (PGlite real)', () => {
     expect(lista.body.procesos.some((x: { id: number }) => x.id === id)).toBe(true);
 
     const otra = await api('POST', '/admin/claves-api', { nombre: 'Solo mensajes', permisos: ['mensajes:enviar'] });
-    const sin = await api('POST', `/api/v1/procesos/${id}/personas`, { personas: [{ telefono: '900000951' }] }, { authorization: `Bearer ${otra.body.clave}` });
+    const sin = await api('POST', `/api/v1/procesos/${id}/personas`, { personas: [{ telefono: '000000951' }] }, { authorization: `Bearer ${otra.body.clave}` });
     expect(sin.status).toBe(403);
   });
 

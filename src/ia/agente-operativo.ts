@@ -37,7 +37,7 @@ import type { Solicitud } from '../db/rutas.js';
 import type { Sender } from '../outbound/sender.js';
 import type { ClaseConfirmarGsg, ServicioEntregas } from '../entregas/servicio.js';
 import { rellenar, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
-import { leerConfirmacionConReglas } from '../entregas/interpretar.js';
+import { leerConfirmacionConReglas, leerPreguntaPorPedido } from '../entregas/interpretar.js';
 import { pareceNoSoyYo, pareceNumeroEquivocado } from '../rutas/inbound.js';
 import { pareceDireccion } from '../entregas/direccion-escrita.js';
 import { detectarManipulacion } from './seguridad.js';
@@ -793,6 +793,8 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
     return null;
   });
   if (!r) return null;
+  // No se entendió dos veces: lo decide una persona, sin repetirle nada.
+  if (r.tipo === 'persona') return 'silencio';
   if (r.tipo === 'registrada') {
     await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: r.texto });
     await cerrarChat(deps, contact, motivoUbicacionRegistrada(contact));
@@ -848,7 +850,43 @@ async function atenderDireccionEscrita(deps: DepsAgente, contact: Contact, abier
  * del dueño activa. Nunca pasa el mensaje a otro camino: o explica, o cierra,
  * o calla.
  */
+/**
+ * Los mensajes de un mismo cliente se atienden de uno en uno.
+ *
+ * Si el cliente manda dos mensajes seguidos («Ya sé», «Gracias»), llegan a la
+ * vez y, atendidos en paralelo, los dos leían el chat antes de que el otro lo
+ * cerrara: el cierre «Por este canal no se reciben consultas» salía dos veces
+ * (26/09). En fila, el segundo ve el chat ya cerrado y se queda en silencio.
+ */
+const enCurso = new Map<string, Promise<unknown>>();
+
+/** Un «sí», «ok», «gracias», «listo», un 👍…: no pregunta nada. */
+export function esAcuse(texto: string): boolean {
+  const t = texto.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (!t || t.length > 30) return false;
+  return /^(s+i+|si+ es ahi|ok+|okay|oki|vale|dale|listo|ya|ya esta|perfecto|bueno|de acuerdo|entendido|genial|excelente|claro|gracias|muchas gracias|mil gracias|gracias a ti|ok gracias|si gracias|👍+|🙏+|👌+)[\s.!,]*$/u.test(t);
+}
+
 export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null }): Promise<ResultadoRegla> {
+  const clave = contact.phone;
+  const anterior = enCurso.get(clave) ?? Promise.resolve();
+  const turno = anterior
+    .catch(() => undefined)
+    .then(async () => {
+      // El contacto que trae el mensaje se leyó antes de esperar la fila:
+      // lo que hizo el mensaje anterior (cerrar el chat) solo está en la base.
+      const fresco = (await deps.repos.contacts.getById(contact.id).catch(() => null)) ?? contact;
+      return atenderConReglaGsgEnFila(deps, fresco, entrada);
+    });
+  enCurso.set(clave, turno);
+  try {
+    return await turno;
+  } finally {
+    if (enCurso.get(clave) === turno) enCurso.delete(clave);
+  }
+}
+
+async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null }): Promise<ResultadoRegla> {
   const { repos } = deps;
   const ahora = deps.ahora?.() ?? new Date();
   const texto = entrada.texto.trim();
@@ -877,12 +915,17 @@ export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, ent
   // el pedido de ubicación (la solicitud sigue «pendiente», p. ej. fuera de
   // horario) y el cliente escribe primero, no se le contesta nada (tampoco
   // si pregunta por su pedido o la hora).
+  // Con una solicitud abierta manda ella: si su primer mensaje todavía no
+  // salió, el sistema no le ha escrito por ESTE pedido, aunque el chat tenga
+  // mensajes viejos (26/09: un chat con historial del teléfono recibió la
+  // insistencia antes que la plantilla). El historial solo cuenta sin solicitud.
   const sistemaEscribioPrimero =
     esperaSiNo ||
     (abierta ? abierta.estado !== 'pendiente' : false) ||
     estado === 'registrada' ||
-    (await repos.messages.listMessages(contact.id, 40).catch(() => []))
-      .some((m) => m.direction === 'out' && (m.payload as { origen?: string } | null | undefined)?.origen !== 'persona');
+    (!abierta &&
+      (await repos.messages.listMessages(contact.id, 40).catch(() => []))
+        .some((m) => m.direction === 'out' && !(m.payload as { historial?: boolean } | null | undefined)?.historial && (m.payload as { origen?: string } | null | undefined)?.origen !== 'persona'));
   if (!sistemaEscribioPrimero) {
     if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `escribió antes de que el sistema le escribiera (${que}): no se le contesta`).catch(() => undefined);
     deps.log?.('regla del dueño: el sistema aún no le escribió, no se le contesta', { phone: contact.phone });
@@ -921,8 +964,22 @@ export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, ent
   // pregunta la hora se le contesta (la estimada, o que ya está con un
   // motorizado); cualquier otra cosa, silencio como siempre.
   const conMotoSinUbi = callado && yaSalioElCierre && pendiente && Boolean(await deps.entregas?.tieneMotorizadoSinUbicacion(contact.phone).catch(() => false));
-  // Ya recibió el cierre: silencio total por ese pedido (ni la IA se consulta).
-  if (callado && yaSalioElCierre && !conMotoSinUbi) return silencioTrasCierre(deps, contact, abierta, que, enSilencio);
+  // Ya recibió el cierre: silencio total por ese pedido (ni la IA se consulta),
+  // salvo que pregunte cuándo llega: eso se contesta siempre con la hora
+  // estimada (pedido del dueño, 26/09: el cliente preguntaba «¿en cuánto
+  // llega?» con los minutos del motorizado ya puestos y no recibía nada).
+  if (callado && yaSalioElCierre && !conMotoSinUbi) {
+    // Solo la pregunta («¿en cuánto llega?»); un reclamo («ya pasó la hora y
+    // no llega») sigue siendo para la persona que lo atiende.
+    const lectura = texto ? leerPreguntaPorPedido(texto) : { pregunta: false, noLlego: false };
+    const hora = lectura.pregunta && !lectura.noLlego && deps.entregas ? await deps.entregas.respuestaPorPedido(contact.phone, texto).catch(() => null) : null;
+    if (hora) {
+      await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: hora });
+      await deps.entregas!.anotarAgente(contact.phone, `preguntó por su pedido tras el cierre (${que}): se le dio la hora estimada`).catch(() => undefined);
+      return 'hora';
+    }
+    return silencioTrasCierre(deps, contact, abierta, que, enSilencio);
+  }
 
   // Los de «falta confirmar» a los que ya se les preguntó SÍ/NO: SÍ, NO, cambio, por qué, la hora u otra cosa.
   if (!callado && esperaSiNo) return atenderConfirmarGsg(deps, contact, entrada);
@@ -975,6 +1032,10 @@ export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, ent
   // pregunta algo: UNA vez el cierre con el número del motorizado asignado a
   // su pedido, y pasa a una persona. Desde ahí, silencio.
   if (traGracias && enSilencio && cierreYaDado) return silencioTrasCierre(deps, contact, abierta, que, enSilencio);
+  // «Sí», «ok», «gracias»… tras el agradecimiento no es una consulta: no
+  // gasta el cierre (26/09: el «Si» a la pregunta «¿es ahí?» se llevó el
+  // cierre «Por este canal no se reciben consultas»).
+  if (traGracias && enSilencio && esAcuse(texto)) return silencioTrasCierre(deps, contact, abierta, que, enSilencio);
   if (traGracias && enSilencio) {
     const cierre = deps.entregas ? await deps.entregas.textoAgente('cierreAgente', contact.phone, contact.name) : rellenar(TEXTOS_POR_DEFECTO.cierreAgente, { nombre: contact.name, negocio: deps.nombreNegocio() });
     await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: cierre });
@@ -1022,7 +1083,18 @@ export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, ent
     const salientes = (await repos.messages.listMessages(contact.id, 80).catch(() => []))
       .filter((m) => m.direction === 'out' && new Date(m.createdAt as unknown as string).getTime() >= desde)
       .map((m) => String(m.body ?? '').replace(/\n\n\(se pidio la ubicacion\)$/, '').trim());
-    const hechas = salientes.filter((b) => INSISTENCIAS_UBICACION.includes(b)).length;    if (hechas < INSISTENCIAS_UBICACION.length) {
+    const hechas = salientes.filter((b) => INSISTENCIAS_UBICACION.includes(b)).length;
+    // Mientras se leía el mensaje (la IA tarda unos segundos) pudo llegar el
+    // pin: entonces no se le vuelve a pedir (26/09: «Mamahuevaso» y el pin
+    // casi a la vez, y la insistencia le llegó después del pin).
+    const yaLlego = deps.entregas
+      ? (await deps.entregas.situacionGsg(contact.phone).catch(() => null))?.ubicacion === 'registrada' || (await deps.entregas.pinLejosPendiente(contact.phone).catch(() => false))
+      : false;
+    if (yaLlego) {
+      deps.log?.('regla del dueño: la ubicación llegó mientras se leía el mensaje, no se insiste', { phone: contact.phone });
+      return 'silencio';
+    }
+    if (hechas < INSISTENCIAS_UBICACION.length) {
       const cuerpo = INSISTENCIAS_UBICACION[hechas]!;
       await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, interactive: { body: cuerpo, locationRequest: true } });
       if (abierta) {

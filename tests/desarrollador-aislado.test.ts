@@ -107,19 +107,19 @@ describe('lo de prueba no toca el numero real', () => {
     expect(r.status).toBe(200);
     const t0 = Date.now();
     // Con la pausa real (15-30 s entre mensajes) cinco tardarian mas de un minuto.
-    await esperar(async () => (await db().query<{ n: number }>("select count(*)::int as n from rutas_solicitudes where phone like '519000%' and intentos > 0")).rows[0]!.n === 5, 45_000, 'los cinco pedidos de ubicación de prueba');
+    await esperar(async () => (await db().query<{ n: number }>("select count(*)::int as n from rutas_solicitudes where phone like '510000%' and intentos > 0")).rows[0]!.n === 5, 45_000, 'los cinco pedidos de ubicación de prueba');
     expect(Date.now() - t0).toBeLessThan(45_000);
     // No se le pregunto a WhatsApp por ninguno, y ninguno quedo como «sin WhatsApp».
-    expect(wa.preguntados.filter((p) => p.startsWith('519000'))).toEqual([]);
-    const incidencias = await db().query<{ n: number }>("select count(*)::int as n from rutas_solicitudes where phone like '519000%' and incidencia = 'sin_whatsapp'");
+    expect(wa.preguntados.filter((p) => p.startsWith('510000'))).toEqual([]);
+    const incidencias = await db().query<{ n: number }>("select count(*)::int as n from rutas_solicitudes where phone like '510000%' and incidencia = 'sin_whatsapp'");
     expect(incidencias.rows[0]!.n).toBe(0);
     // Nada salio por el WhatsApp (el sender los simula) y nada cuenta en el cupo ni en la salud.
-    expect(wa.sent.filter((m) => String(m.to ?? '').startsWith('519000'))).toEqual([]);
-    const envios = await db().query<{ n: number }>("select count(*)::int as n from deliveries d join contacts c on c.id = d.contact_id where c.phone like '519000%'");
+    expect(wa.sent.filter((m) => String(m.to ?? '').startsWith('510000'))).toEqual([]);
+    const envios = await db().query<{ n: number }>("select count(*)::int as n from deliveries d join contacts c on c.id = d.contact_id where c.phone like '510000%'");
     expect(envios.rows[0]!.n).toBe(0);
     expect(await tienda.repos.deliveries.contarIniciadosDesde(new Date(Date.now() - 3600_000))).toBe(0);
     // Pero en el hilo del chat si quedaron, como enviados.
-    const hilos = await db().query<{ n: number }>("select count(*)::int as n from messages m join contacts c on c.id = m.contact_id where c.phone like '519000%' and m.direction = 'out'");
+    const hilos = await db().query<{ n: number }>("select count(*)::int as n from messages m join contacts c on c.id = m.contact_id where c.phone like '510000%' and m.direction = 'out'");
     expect(hilos.rows[0]!.n).toBeGreaterThanOrEqual(5);
   }, 120_000);
 

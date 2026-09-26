@@ -43,6 +43,12 @@ interface InfoModo {
   boton: string;
   /** Va dentro de «Mas formas de conectar» cuando el menu esta en modo GSG. */
   avanzado?: boolean;
+  /**
+   * Solo para probar sin cuenta de Meta: va dentro de «Solo para pruebas».
+   * Lo de verdad es la API oficial; el QR emula WhatsApp Web y el numero
+   * puede acabar bloqueado.
+   */
+  pruebas?: boolean;
 }
 
 /**
@@ -52,7 +58,8 @@ interface InfoModo {
 const MODOS: Record<Modo, InfoModo> = {
   local: {
     titulo: 'Escanear el QR y ya',
-    etiqueta: 'lo más rápido',
+    etiqueta: 'para pruebas',
+    pruebas: true,
     resumen:
       'Sin cuenta de Meta y sin instalar nada: el código sale aquí mismo y sirve con cualquier WhatsApp, también el verde.',
     oficial: false,
@@ -93,20 +100,20 @@ const MODOS: Record<Modo, InfoModo> = {
   },
   waha: {
     titulo: 'Conectar con WAHA',
-    etiqueta: 'no oficial',
+    etiqueta: 'para pruebas',
     riesgo: true,
+    pruebas: true,
     resumen:
       'El QR de WhatsApp Web desde un contenedor de WAHA que corre en tu servidor. Sirve con cualquier WhatsApp y no necesita app de Meta.',
     oficial: false,
-    paso2: 'Solo hace falta saber dónde corre tu contenedor de WAHA.',
+    paso2: 'No hace falta nada: el sistema levanta su propio WAHA con Docker. Si ya tienes uno en otro servidor, pulsa Cambiar y pon su dirección.',
     paso3: 'Se crea la sesión en tu contenedor y aparece aquí el QR. El teléfono tiene que quedarse con internet.',
     boton: 'Crear la sesión y mostrar el QR',
-    avanzado: true,
   },
 };
 
-/** El orden en el que se ofrecen, de lo mas comun a lo mas raro. */
-const ORDEN_MODOS: Modo[] = ['local', 'coexistence', 'dedicated', 'manual', 'waha'];
+/** El orden en el que se ofrecen: primero la API oficial, que es la que se usa. */
+const ORDEN_MODOS: Modo[] = ['coexistence', 'dedicated', 'manual', 'local', 'waha'];
 
 const SETUP_FIELDS = [
   'token',
@@ -133,11 +140,15 @@ const CAMPOS_POR_MODO: Record<Modo, readonly string[]> = {
   coexistence: ['appId', 'appSecret', 'signupConfigId'],
   dedicated: ['appId', 'appSecret', 'signupConfigId'],
   manual: ['token', 'appId', 'appSecret'],
-  // WAHA no tiene app de Meta: solo hay que decirle donde corre el contenedor.
+  // WAHA no tiene app de Meta. La direccion es opcional (CAMPOS_OPCIONALES):
+  // si se deja vacia, el sistema busca el contenedor o levanta el suyo.
   waha: ['wahaUrl'],
   // El camino corto no pide nada: la vinculacion ES el QR.
   local: [],
 };
+
+/** Se pueden cambiar en el paso 2, pero no hace falta rellenarlos para seguir. */
+const CAMPOS_OPCIONALES: readonly string[] = ['wahaUrl'];
 
 /** Que necesita el paso 2 de cada campo. La pista es una linea: el detalle
  *  vive una sola vez, en el desplegable «¿De dónde saco estos datos?». */
@@ -151,8 +162,8 @@ const AYUDA_CAMPO: Record<string, { titulo: string; pista: string; ph: string }>
     ph: '9876543210987654',
   },
   wahaUrl: {
-    titulo: 'Dirección del contenedor de WAHA',
-    pista: 'Si lo levantaste aquí mismo suele ser http://localhost:3001.',
+    titulo: 'Dirección del contenedor de WAHA (opcional)',
+    pista: 'Déjala vacía y el sistema levanta su propio WAHA. Solo hace falta si ya tienes uno en otro servidor.',
     ph: 'http://localhost:3001',
   },
 };
@@ -287,7 +298,7 @@ const CSS = `
 #gsg-resultado.espera { background: var(--ambar-suave); color: var(--texto); }
 
 /* Arriba, lo unico que importa: dos tarjetas grandes, WhatsApp y GSG. */
-.wrap { max-width: 980px; }
+.wrap { max-width: var(--ancho-max, 1600px); }
 .con-resumen { display: grid; gap: var(--esp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-bottom: var(--esp-6); }
 .con-resumen.una { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
 @media (max-width: 820px) { .con-resumen { grid-template-columns: minmax(0, 1fr); } }
@@ -346,11 +357,13 @@ export function connectPage(opts: ConnectOpts): string {
   <input id="${field}" name="${field}" autocomplete="off" spellcheck="false">`,
   ).join('');
 
-  // En modo GSG el menu es corto y las tres formas raras se esconden tras un
-  // desplegable: quien no las necesita no tiene que descartarlas.
+  // Delante, la API oficial de Meta. Los caminos por QR (sin Meta) solo sirven
+  // para probar y van aparte. En modo GSG el menu es aun mas corto: las formas
+  // raras de Meta tambien se esconden.
   const soloGsg = modoVigente() === 'gsg';
-  const normales = ORDEN_MODOS.filter((id) => !soloGsg || !MODOS[id].avanzado);
-  const escondidos = soloGsg ? ORDEN_MODOS.filter((id) => MODOS[id].avanzado) : [];
+  const normales = ORDEN_MODOS.filter((id) => !MODOS[id].pruebas && !(soloGsg && MODOS[id].avanzado));
+  const escondidos = ORDEN_MODOS.filter((id) => !MODOS[id].pruebas && soloGsg && MODOS[id].avanzado);
+  const dePrueba = ORDEN_MODOS.filter((id) => MODOS[id].pruebas);
 
   const contenido = `
 <div class="wrap">
@@ -418,7 +431,7 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
 ` : ''}</div>
 
 <details class="con-avanzado" id="con-avanzado">
-  <summary><b>Opciones avanzadas</b><span class="ayuda">Otras formas de conectar (API de Meta, WAHA), prueba de envío y datos para programadores.</span></summary>
+  <summary><b>Conectar con Meta, paso a paso</b><span class="ayuda">WhatsApp Business por la API oficial, prueba de envío, conexiones de prueba (QR, WAHA) y datos para programadores.</span></summary>
 <ol class="progreso" id="progreso" aria-label="Progreso de la conexión">
   <li data-paso="1"><span class="n">1</span><span class="t">Cómo</span></li>
   <li data-paso="2"><span class="n">2</span><span class="t">Datos</span></li>
@@ -435,11 +448,16 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
     ${
       escondidos.length
         ? `<details class="mas-formas" id="mas-formas">
-      <summary>Más formas de conectar (número nuevo, token de Meta, WAHA)</summary>
+      <summary>Más formas de conectar con Meta (número nuevo, token)</summary>
       ${escondidos.map(opcionHtml).join('')}
     </details>`
         : ''
     }
+    <details class="mas-formas" id="solo-pruebas">
+      <summary>Solo para pruebas, sin Meta (QR, WAHA)</summary>
+      <p class="ayuda">Emulan WhatsApp Web: están fuera de las normas de Meta y el número puede acabar bloqueado. Úsalos con un número de pruebas, nunca con el del negocio.</p>
+      ${dePrueba.map(opcionHtml).join('')}
+    </details>
     <div class="nota hidden" id="aviso-modo"></div>
   </div>
 </section>
@@ -694,6 +712,7 @@ function fecha(iso) {
 
 var FIELDS = ${JSON.stringify(SETUP_FIELDS)};
 var CAMPOS_POR_MODO = ${JSON.stringify(CAMPOS_POR_MODO)};
+var CAMPOS_OPCIONALES = ${JSON.stringify(CAMPOS_OPCIONALES)};
 var AYUDA = ${JSON.stringify(AYUDA_CAMPO)};
 var MODOS = ${JSON.stringify(MODOS)};
 var SECRETS = ['token', 'appSecret'];
@@ -714,7 +733,9 @@ function prefijo() { return modo === 'local' ? '/admin/local' : '/admin/waha'; }
 
 function faltantes() {
   if (!modo) return [];
-  return (CAMPOS_POR_MODO[modo] || []).filter(function (f) { return !guardado[f]; });
+  return (CAMPOS_POR_MODO[modo] || []).filter(function (f) {
+    return !guardado[f] && CAMPOS_OPCIONALES.indexOf(f) < 0;
+  });
 }
 
 /** Con QR manda lo que diga la sesion; con Meta, lo que el servidor tenga. */
@@ -766,16 +787,18 @@ function pintarTarjetaWa() {
   var chip = $('wa-chip');
   if (!chip) return;
   var conectado = estaConectado();
-  var viaQr = !modo || esQr();
+  var viaQr = !!modo && esQr();
   chip.className = 'chip tono-' + (conectado ? 'verde' : 'ambar');
   chip.textContent = conectado ? 'Conectado' : 'Sin conectar';
   $('wa-frase').innerHTML = conectado
     ? 'Los mensajes de tus clientes entran y salen por tu número' + (modo === 'local' || modo === 'waha' ? ' (vinculado con el QR).' : ' (API oficial de Meta).')
     : viaQr
       ? (qr.imagen ? '<b>Escanea el código</b> con el teléfono: WhatsApp → Dispositivos vinculados → Vincular un dispositivo.' : 'Pulsa el botón y escanea el código con tu teléfono, como en WhatsApp Web.')
-      : 'Falta terminar la conexión con la API de Meta: sigue los pasos de «Opciones avanzadas».';
+      : modo
+        ? 'Falta terminar la conexión con la API de Meta: sigue los pasos de abajo.'
+        : 'Conecta tu WhatsApp Business por la API oficial de Meta: es lo que evita bloqueos del número.';
   var boton = $('wa-conectar');
-  boton.textContent = viaQr ? 'Conectar y mostrar el QR' : 'Terminar la conexión';
+  boton.textContent = viaQr ? 'Conectar y mostrar el QR' : modo ? 'Terminar la conexión' : 'Conectar WhatsApp Business';
   ver('wa-conectar', !conectado && !(viaQr && qr.imagen));
   ver('wa-chats', conectado);
   if (conectado) { var wa = $('wa-estado'); if (wa && /Escanea|Abriendo|Esperando|Creando/.test(wa.textContent)) wa.textContent = ''; }
@@ -791,17 +814,18 @@ function abrirAvanzado(id) {
 
 $('wa-conectar').onclick = async function () {
   var boton = this;
-  if (modo && !esQr()) { abrirAvanzado('paso' + pasoActual()); return; }
+  /* Sin camino elegido, el de verdad: WhatsApp Business por la API de Meta,
+     conservando el numero en el telefono (coexistencia). Los QR son para
+     probar y se eligen a mano en «Solo para pruebas». */
+  if (!modo) {
+    var opcion = document.querySelector('input[name="modo"][value="coexistence"]');
+    if (opcion) opcion.click();
+    abrirAvanzado('paso1');
+    return;
+  }
+  if (!esQr()) { abrirAvanzado('paso' + pasoActual()); return; }
   boton.disabled = true;
   try {
-    /* Sin camino elegido, el de siempre: el QR en este mismo servidor. */
-    if (!modo) {
-      modo = 'local';
-      localStorage.setItem('waModo', modo);
-      qr = { conectado: false, imagen: '', parado: false };
-      if (guardado.provider !== 'local') await api('/admin/settings', { method: 'POST', body: { provider: 'local' } });
-      await cargar();
-    }
     $('qr-connect').click();
   } catch (error) {
     estado('fb-state', error.message, 'rojo');
@@ -861,7 +885,8 @@ function pintarPaso1() {
     var radio = el.querySelector('input');
     if (radio) radio.checked = elegida;
     /* si la forma elegida esta escondida en «Mas formas», que se vea */
-    if (elegida && el.closest('#mas-formas')) el.closest('#mas-formas').open = true;
+    var caja = el.closest('#mas-formas, #solo-pruebas');
+    if (elegida && caja) caja.open = true;
   });
 
   /* Un solo aviso, el que toca: antes cada opcion repetia el mismo parrafo. */
@@ -889,7 +914,8 @@ function pintarPaso2(paso) {
   var pendientes = editandoPaso2 ? todos : faltan;
   var completo = !faltan.length && !editandoPaso2;
 
-  texto('paso2-lead', completo && todos.length ? 'Ya están guardados: solo se vuelven a pedir si los cambias.' : info.paso2);
+  var algoGuardado = todos.some(function (f) { return !!guardado[f]; });
+  texto('paso2-lead', completo && algoGuardado ? 'Ya están guardados: solo se vuelven a pedir si los cambias.' : info.paso2);
   ver('paso2-editar', completo && todos.length > 0);
   ver('paso2-ok', !completo);
 
@@ -964,7 +990,7 @@ $('paso2-ok').onclick = async function () {
   pedidos.forEach(function (f) {
     var v = val('f-' + f);
     if (v) cuerpo[f] = v;
-    else if (!guardado[f]) vacios.push((AYUDA[f] || { titulo: f }).titulo);
+    else if (!guardado[f] && CAMPOS_OPCIONALES.indexOf(f) < 0) vacios.push((AYUDA[f] || { titulo: f }).titulo);
   });
 
   /* Antes el boton guardaba nada y decia "Guardado": el usuario se quedaba
@@ -1127,10 +1153,20 @@ $('qr-connect').onclick = async function () {
     ? 'Abriendo la sesión… si la anterior ya no vale, se borra y sale un código nuevo'
     : 'Creando la sesión en WAHA…', 'ambar');
   try {
-    await api(prefijo() + '/connect', { method: 'POST', body: modo === 'local' ? {} : {
-      wahaUrl: val('f-wahaUrl') || undefined,
-      publicUrl: val('c-url') || undefined
-    }});
+    /* Si no hay WAHA, el servidor lo levanta y contesta 202 mientras se
+       descarga y arranca: se vuelve a pedir hasta que este listo. La primera
+       descarga puede tardar varios minutos. */
+    var limite = Date.now() + 30 * 60 * 1000;
+    for (;;) {
+      var r = await api(prefijo() + '/connect', { method: 'POST', body: modo === 'local' ? {} : {
+        wahaUrl: val('f-wahaUrl') || undefined,
+        publicUrl: val('c-url') || undefined
+      }});
+      if (!r.preparando) break;
+      estado('fb-state', r.detalle || 'Preparando WAHA…', 'ambar');
+      if (Date.now() > limite) throw new Error('WAHA sigue sin arrancar. Revisa Docker Desktop y vuelve a pulsar el botón.');
+      await new Promise(function (ok) { setTimeout(ok, 4000); });
+    }
     pararSondeo();
     arrancarSondeo();
   } catch (error) {

@@ -493,7 +493,7 @@ export function openApi(baseUrl: string): Json {
             nroPedido: { type: 'string', nullable: true, description: 'El numero de pedido de la tienda: "#1042"' },
             metodoPago: { type: 'string', nullable: true, description: '"YAPE", "Efectivo", "Pagado"...' },
             monto: { oneOf: [{ type: 'number' }, { type: 'string' }], nullable: true, description: 'Lo que el motorizado cobra: 85 o "85.00" (un numero sale con 2 decimales)' },
-            remitente: { type: 'string', nullable: true, description: 'Quien firma el mensaje: "Juan Quispe". Sin el, "Te escribimos de la empresa de entregas GSG"' },          },
+            remitente: { type: 'string', nullable: true, description: 'Quien firma el envío ("Juan Quispe"). El primer mensaje al cliente dice "Somos GSG Courier"' },          },
         },
         EntregaDia: {
           type: 'object',

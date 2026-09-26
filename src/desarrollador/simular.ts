@@ -23,7 +23,7 @@ export type EntranteDePrueba = z.infer<typeof simularSchema>;
 export class NoEsDePrueba extends Error {
   readonly statusCode = 400;
   constructor(telefono: string) {
-    super(`El ${telefono} no es un número de prueba: aquí solo se escribe como los clientes y motorizados de prueba (51 900 0… y 51 900 1…), nunca como un cliente real.`);
+    super(`El ${telefono} no es un número de prueba: aquí solo se escribe como los clientes y motorizados de prueba (51 000 0… y 51 000 1…), nunca como un cliente real.`);
   }
 }
 

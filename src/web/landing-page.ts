@@ -17,7 +17,7 @@
 
 import { INICIAL_SISTEMA, LEMA_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { PROMESA, escapeHtml } from './login-page.js';
-import { TOKENS_CSS } from './tokens.js';
+import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 
 const CSS = `
   ${TOKENS_CSS}
@@ -157,7 +157,7 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
     : '<a class="btn grande" href="/login">Entrar al sistema</a>';
 
   return `<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="es"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${negocio} - ${NOMBRE_SISTEMA}: ${LEMA_SISTEMA}</title>
 <meta name="description" content="${PROMESA.bajada}">
 <style>${CSS}</style></head>

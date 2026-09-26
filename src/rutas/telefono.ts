@@ -15,6 +15,7 @@
  */
 
 import type { CodigoIncidencia } from './incidencias.js';
+import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 
 export interface PlanNumeracion {
   /** Prefijo internacional, sin +. */
@@ -98,6 +99,16 @@ export function revisarTelefono(entrada: string, plan: PlanNumeracion = PERU): R
       incidencia: 'numero_invalido',
       detalle: `"${bruto.slice(0, 40)}" no tiene ningún dígito`,
     };
+  }
+
+  // Los del Modulo desarrollador (51 000 0/1…): su rango esta elegido para no
+  // poder ser un numero real, asi que no pasan las reglas de un celular; se
+  // aceptan tal cual y el sender nunca los manda a WhatsApp.
+  // (Sobre los digitos tal cual: `soloDigitos` quitaria el «00» del principio.)
+  const tal = bruto.replace(/\D+/g, '');
+  if (esNumeroDePrueba(tal)) {
+    const phone = tal.length === 9 ? `51${tal}` : tal;
+    return { ok: true, phone, nacional: phone.slice(2), corregido: phone !== bruto.replace(/^\+/, '') };
   }
 
   // Sin plan: se acepta lo que quepa en un numero internacional.

@@ -138,7 +138,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(deprueba.every((e) => esNumeroDePrueba(e.phone))).toBe(true);
     // Todos esperan que se confirme su envío: todavía no se le escribió a nadie.
     expect(await cuenta(`select count(*) as n from entregas where referencia like 'PRUEBA-%' and envio_retenido_at is not null`)).toBe(40);
-    expect(await cuenta(`select count(*) as n from rutas_solicitudes where phone like '519000%'`)).toBe(0);
+    expect(await cuenta(`select count(*) as n from rutas_solicitudes where phone like '510000%'`)).toBe(0);
     // Los que ya traen pin son del grupo «falta confirmar»: solo SÍ/NO, nunca la ubicación.
     const confirmar = deprueba.filter((e) => e.ubicacionEstado === 'recibida');
     const ubicacion = deprueba.filter((e) => e.ubicacionEstado === 'pendiente');
@@ -152,20 +152,20 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(envio.status).toBe(200);
     expect(envio.body).toMatchObject({ liberadas: 40, ubicacion: 20, confirmar: 20 });
     expect(await cuenta(`select count(*) as n from entregas where referencia like 'PRUEBA-%' and envio_retenido_at is not null`)).toBe(0);
-    expect(await cuenta(`select count(*) as n from rutas_solicitudes where phone like '519000%'`)).toBe(20);
+    expect(await cuenta(`select count(*) as n from rutas_solicitudes where phone like '510000%'`)).toBe(20);
     const otra = await api('POST', '/admin/desarrollador/confirmar-envio', {});
     expect(otra.body.aviso).toContain('No hay ningún cliente de prueba esperando');
 
     const motos = (await tienda.app.inject({ method: 'GET', url: '/admin/motorizados', headers: { cookie } })).json() as { motorizados?: Array<{ phone: string }> } | Array<{ phone: string }>;
     const listaMotos = Array.isArray(motos) ? motos : (motos.motorizados ?? []);
-    expect(listaMotos.filter((m) => m.phone.startsWith('519001')).length).toBe(5);
+    expect(listaMotos.filter((m) => m.phone.startsWith('510001')).length).toBe(5);
   }, 180_000);
 
   it('NADA pasó por el WhatsApp: el sender lo simuló y quedó en el hilo como enviado', async () => {
     // Un respiro para que el motor del reparto pida alguna ubicación.
     await new Promise((r) => setTimeout(r, 8000));
     expect(wa.sent.filter((m) => esNumeroDePrueba(String(m.to ?? ''))).length).toBe(0);
-    const escritos = await cuenta(`select count(distinct c.id) as n from contacts c join messages m on m.contact_id = c.id and m.direction = 'out' where c.phone like '519000%'`);
+    const escritos = await cuenta(`select count(distinct c.id) as n from contacts c join messages m on m.contact_id = c.id and m.direction = 'out' where c.phone like '510000%'`);
     expect(escritos).toBeGreaterThanOrEqual(1);
     // A los de «falta confirmar» nunca se les pide la ubicación.
     expect(await cuenta(`select count(*) as n from rutas_solicitudes s join entregas e on e.phone = s.phone where e.referencia like 'PRUEBA-%' and e.ubicacion_estado = 'recibida' and e.ubicacion_fuente = 'a mano (GSG (API))'`)).toBe(0);

@@ -605,6 +605,33 @@ async function applyRule(rule: AutoReply, contact: Contact, deps: InboundDeps): 
   }
 }
 
+/**
+ * «2» a una pregunta con opciones es pulsar la opción 2.
+ *
+ * Por QR (local y WAHA) los botones salen como lista numerada («1. Sí, es
+ * ahí / 2. No — Responde con el número»), y el número llegaba como un texto
+ * suelto que nadie entendía: el 26/09 un cliente contestó «2» (No) a «¿es
+ * ahí?», se le repitió la pregunta y al final el pin se dio por bueno. Si el
+ * último mensaje del sistema en ese chat traía opciones, el número se
+ * convierte en la respuesta de ese botón y todo lo de después lo lee igual
+ * que si se hubiera pulsado.
+ */
+export async function respuestaNumeradaComoBoton(message: InboundMessage, deps: Pick<InboundDeps, 'repos'>): Promise<InboundMessage> {
+  if (message.type !== 'text') return message;
+  const numero = /^\s*([1-9])\s*[.)️⃣]*\s*$/u.exec(message.text?.body ?? '');
+  if (!numero) return message;
+  const contacto = await deps.repos.contacts.getByPhone(message.from).catch(() => null);
+  if (!contacto) return message;
+  const recientes = await deps.repos.messages.listMessages(contacto.id, 15).catch(() => []);
+  const ultimo = [...recientes].reverse().find((m) => m.direction === 'out' && (m.payload as { origen?: string } | null)?.origen !== 'persona');
+  const botones = (ultimo?.payload as { interactive?: { buttons?: Array<{ id?: string; title?: string }> } } | null)?.interactive?.buttons ?? [];
+  const elegido = botones[Number(numero[1]) - 1];
+  if (!elegido?.id) return message;
+  const hace = Date.now() - new Date(ultimo!.createdAt as unknown as string).getTime();
+  if (hace > 24 * 60 * 60_000) return message;
+  return { ...message, type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: elegido.id, title: elegido.title ?? numero[1] } } } as InboundMessage;
+}
+
 export async function handleInboundMessage(
   message: InboundMessage,
   profileName: string | undefined,
@@ -647,6 +674,8 @@ export async function handleInboundMessage(
     await repos.messages.marcarBorradoPorRemitente(message.revoca, receivedAt);
     return;
   }
+
+  message = await respuestaNumeradaComoBoton(message, deps);
 
   const contact = await repos.contacts.upsertFromInbound(phone, profileName);
   // Antes de anotar el entrante: asi se sabe si es el primer mensaje.
@@ -1182,7 +1211,7 @@ export async function handleInboundMessage(
   }
 
   if (deps.entregas && !result.ok) {
-    const enEntrega = await deps.entregas.alTexto(contact, text).catch((error) => {
+    const enEntrega = await deps.entregas.alTexto(contact, text, { citaId: message.context?.id ?? null }).catch((error) => {
       request_log(deps, 'fallo el modulo de entregas al leer un mensaje', error);
       return { atendida: false as const };
     });

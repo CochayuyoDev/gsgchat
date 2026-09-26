@@ -59,7 +59,7 @@ import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 
 /** Los dos son de prueba o los dos son de verdad. Ver elegirMotorizado. */
 const mismoMundo = (a: string, b: string): boolean => esNumeroDePrueba(a) === esNumeroDePrueba(b);
-const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 900 1…) y los de verdad solo a motorizados de verdad.';
+const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 000 1…) y los de verdad solo a motorizados de verdad.';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
 import { payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, RUTA_GSG_PENDIENTES, type PuertoGsg } from '../rutas/gsg.js';
@@ -93,7 +93,7 @@ import {
   soporteEnPalabras,
   telefonoEnPalabras,
 } from './textos.js';
-import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado } from './repo.js';
+import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, EventoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado } from './repo.js';
 import { datosEnvioDeCrudo, fusionarDatosEnvio } from './datos-envio.js';
 import { apartarPorMotorizado, resolverPorUbicacion, soltarSolicitudes, solicitudesAbiertasDe } from './ubicacion-unica.js';
 import { pareceNoSoyYo, TEXTO_NO_SOY_YO } from '../rutas/inbound.js';
@@ -388,8 +388,8 @@ export interface ResumenEntregas {
 
 /** Lo que se le contesta al cliente que tenía un pin lejano por confirmar (la IA solo clasificó SÍ / NO / otra cosa). */
 export interface RespuestaPinLejos {
-  /** registrada = SÍ (o otra cosa por segunda vez); no = se le pide otro pin; repregunta = otra cosa por primera vez. */
-  tipo: 'registrada' | 'no' | 'repregunta';
+  /** registrada = SÍ; no = se le pide otro pin; repregunta = otra cosa por primera vez; persona = otra cosa por segunda vez (no se le escribe nada). */
+  tipo: 'registrada' | 'no' | 'repregunta' | 'persona';
   texto: string;
   botones?: Array<{ id: string; title: string }>;
   entrega: Entrega;
@@ -464,7 +464,7 @@ export interface ServicioEntregas {
   /** Lo que espera confirmar el envío ahora mismo. */
   porConfirmarEnvio(): Promise<PorConfirmarEnvio>;
   /** El cliente o un motorizado escribio algo (o pulso un boton: `boton` trae su id). */
-  alTexto(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, opts?: { boton?: string }): Promise<RespuestaEntregas>;
+  alTexto(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, opts?: { boton?: string; citaId?: string | null }): Promise<RespuestaEntregas>;
   /** Un motorizado mando una foto (o un video o documento): si tiene un pedido con hora avisada, es la prueba de entrega. */
   alAdjuntoDeMotorizado(contact: Pick<Contact, 'id' | 'phone' | 'name'>, tipo: string, texto?: string | null): Promise<RespuestaEntregas>;
   /** Como se llama el negocio (para las paginas sueltas). */
@@ -611,6 +611,8 @@ export interface ServicioEntregas {
 
 export interface DepsEntregas {
   repos: Repos;
+  /** Cuánto espera el cierre a que el reparto asigne motorizado (ver `textoAgente`). 0 en las pruebas. */
+  esperaMotorizadoMs?: number;
   repo: EntregasRepo;
   sender: Sender;
   settingsRepo: SettingsRepo;
@@ -777,6 +779,8 @@ const INCIDENCIA_NO_SOY_YO = 'no_soy_yo';
 
 export async function crearServicioEntregas(deps: DepsEntregas): Promise<ServicioEntregas> {
   const { repos, repo, sender } = deps;
+  /** Los avisos «ya no lo llevas tú» que van en camino (ver `avisarCancelado`). */
+  const avisosCanceladoEnCamino = new Set<string>();
   const log = deps.log ?? (() => undefined);
   const ahora = deps.ahora ?? (() => new Date());
   const zonaBase = deps.timezone ?? 'America/Lima';
@@ -849,7 +853,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    */
   function numeroParaCliente(e: Entrega | null, m: Motorizado | null | undefined): string {
     const t = (x?: string | null): string => (x ? telefonoEnPalabras(x) : '');
-    return t(m?.phone) || t(e?.datosEnvio?.telefonoMotorizado) || t(ajustes.soporte.whatsapp) || t(ajustes.soporte.llamadas) || t(deps.numeroPropio?.() ?? null) || 'este mismo número de WhatsApp';
+    // Nunca el número del propio WhatsApp: el cliente lo leería como el del
+    // motorizado. Sin motorizado ni soporte, vacío (la frase se quita).
+    return t(m?.phone) || t(e?.datosEnvio?.telefonoMotorizado) || t(ajustes.soporte.whatsapp) || t(ajustes.soporte.llamadas) || '';
   }
 
   const contexto = (e: Entrega, m?: Motorizado | null): ContextoTexto => ({
@@ -1761,15 +1767,24 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (clase === 'otra' && (e.pinPropuestoDudas ?? 0) < 1) {
       for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoDudas: (x.pinPropuestoDudas ?? 0) + 1 });
       await evento(e, 'nota', `contestó otra cosa a «¿es ahí?» (${que}; ${como}): se le vuelve a preguntar una vez`);
-      return { tipo: 'repregunta', texto: textoDe('pinLejos', ajustes, { ...contexto(e), distrito }), botones: botonesPinLejos(e), entrega: e };
+      // Nunca el mismo mensaje dos veces seguidas: se nota que no se le entendió.
+      return { tipo: 'repregunta', texto: `Perdona, no te entendí. ${textoDe('pinLejos', ajustes, { ...contexto(e), distrito })}`, botones: botonesPinLejos(e), entrega: e };
     }
     if (clase === 'no') {
       for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 });
       await evento(e, 'nota', `dijo que NO es ahí (${que}; ${como}): se le pide la ubicación correcta`);
       return { tipo: 'no', texto: textoDe('pinLejosNo', ajustes, contexto(e)), entrega: (await repo.entrega(e.id)) ?? e };
     }
-    // SÍ (o otra cosa por segunda vez, que cuenta como SÍ): se registra como siempre.
-    await evento(e, 'nota', clase === 'si' ? `confirmó que es ahí (${que}; ${como}): se registra el pin` : `volvió a contestar otra cosa (${que}): cuenta como SÍ y se registra el pin`);
+    // Otra cosa por segunda vez: NO se da el pin por bueno (26/09: tras varios
+    // «2» sin entender, un pin que el cliente había negado se registró). El
+    // pin queda propuesto y lo decide una persona; al cliente no se le repite nada.
+    if (clase === 'otra') {
+      await evento(e, 'nota', `volvió a contestar otra cosa a «¿es ahí?» (${que}; ${como}): el pin queda sin registrar y lo decide una persona`);
+      await pasarAPersona(phone, 'pin_lejos_sin_respuesta', `no aclaró si su pin lejos de ${distrito} es el bueno: ${que}`).catch(() => 0);
+      return { tipo: 'persona', texto: '', entrega: (await repo.entrega(e.id)) ?? e };
+    }
+    // SÍ: se registra como siempre.
+    await evento(e, 'nota', `confirmó que es ahí (${que}; ${como}): se registra el pin`);
     const contacto = await repos.contacts.getByPhone(phone).catch(() => null);
     const r = await alUbicacion({ id: contacto?.id ?? '', phone, name: contacto?.name ?? e.nombre }, { lat: e.pinPropuestoLat!, lng: e.pinPropuestoLng!, fuente: e.pinPropuestoFuente ?? 'pin de whatsapp' });
     const act = r.entrega ?? (await repo.entrega(e.id)) ?? e;
@@ -1931,9 +1946,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     await reportar(act, 'ubicacion', { ...payloadUbicacion(falsa, { id: act.loteId ?? 'entregas', nombre: 'Entregas del día', externoId: null, origen: 'gsg', estado: 'enviando', notas: null, createdAt: ahora(), updatedAt: ahora() }), ...(corregida ? { corregida: true } : {}) });
   }
 
-  async function alTexto(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, opts: { boton?: string } = {}): Promise<RespuestaEntregas> {
+  async function alTexto(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, opts: { boton?: string; citaId?: string | null } = {}): Promise<RespuestaEntregas> {
     const motorizado = await repo.motorizadoPorTelefono(contact.phone);
-    if (motorizado) return respuestaDeMotorizado(motorizado, texto);
+    if (motorizado) return respuestaDeMotorizado(motorizado, texto, { citaId: opts.citaId ?? null });
     // «No soy yo» va antes que todo: antes o despues del pin, y en «falta confirmar».
     if (!opts.boton && pareceNoSoyYo(texto)) {
       const r = await alNoSoyYo(contact, texto, 'reglas');
@@ -2403,7 +2418,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * Un motorizado contesta: el tiempo de la entrega que tiene entre manos, o
    * el "entregado" (o el "no estaba nadie") de la que ya lleva con hora.
    */
-  async function respuestaDeMotorizado(m: Motorizado, texto: string): Promise<RespuestaEntregas> {
+  async function respuestaDeMotorizado(m: Motorizado, texto: string, opts: { citaId?: string | null } = {}): Promise<RespuestaEntregas> {
     const enManos = await repo.enManosDeMotorizado(m.id);
     const avisadas = await repo.avisadasDeMotorizado(m.id);
     const limpio = texto.toLowerCase();
@@ -2475,8 +2490,42 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       return { atendida: true, resultado: 'motorizado_sin_pendientes', responder: `Gracias, ${m.nombre.split(' ')[0]}. Ahora mismo no tienes ningún pedido esperando tu tiempo; te escribo en cuanto haya uno.` };
     }
-    // Si nombra el pedido ("P-1002 40"), ese; si no, el ultimo que se le mando.
-    const e = nombrada(enManos) ?? enManos[0]!;
+    // Varios pedidos en un mensaje («G-3002 20, G-3001 45»): cada trozo al suyo.
+    const nombradas = enManos.filter((x) => limpio.includes(x.referencia.toLowerCase()));
+    if (nombradas.length > 1) {
+      const cortes = nombradas.map((x) => ({ x, i: limpio.indexOf(x.referencia.toLowerCase()) })).sort((a, b) => a.i - b.i);
+      const respuestas: string[] = [];
+      let ultima: RespuestaEntregas | null = null;
+      for (let k = 0; k < cortes.length; k++) {
+        const trozo = texto.slice(cortes[k]!.i, k + 1 < cortes.length ? cortes[k + 1]!.i : undefined).replace(/[,;y\s]+$/i, '');
+        ultima = await respuestaDeMotorizado(m, trozo);
+        if ('responder' in ultima && ultima.responder) respuestas.push(ultima.responder);
+      }
+      return { ...(ultima ?? { atendida: true }), atendida: true, responder: respuestas.join('\n\n') } as RespuestaEntregas;
+    }
+    // Respondió citando el mensaje de un pedido: ese.
+    let porCita: Entrega | null = null;
+    if (opts.citaId) {
+      for (const x of enManos) {
+        const evs = await repo.eventos(x.id, 40).catch(() => [] as EventoEntrega[]);
+        if (evs.some((ev) => ev.tipo === 'motorizado_enviado' && (ev.payload as { wamid?: string } | null)?.wamid === opts.citaId)) { porCita = x; break; }
+      }
+    }
+    // Si nombra el pedido ("P-1002 40") o cita su mensaje, ese. Con un solo
+    // viaje pendiente, ese. Con VARIOS clientes esperando su tiempo y sin
+    // decir cuál, se le pregunta: adivinar le ponía el tiempo (o el «no») al
+    // pedido equivocado (26/09: un «no» de Chesco soltó G-3001 al azar).
+    const clientes = new Set(enManos.map((x) => x.phone));
+    const elegido = nombrada(enManos) ?? porCita ?? (clientes.size === 1 ? enManos[0]! : null);
+    if (!elegido) {
+      const lista = enManos.filter((x, i, arr) => arr.findIndex((y) => y.phone === x.phone) === i).map((x) => `• ${x.referencia} — ${x.nombre ?? x.phone}${x.distrito ? ` (${x.distrito})` : ''}`).join('\n');
+      await evento(enManos[0]!, 'nota', `${firmaMotorizado(m)} contestó sin decir a qué pedido ("${texto.slice(0, 80)}") y tiene ${clientes.size} esperando su tiempo: se le pregunta cuál`);
+      return { atendida: true, resultado: 'motorizado_cual', responder: `${m.nombre.split(' ')[0]}, tienes ${clientes.size} pedidos esperando tu tiempo:
+${lista}
+
+¿Para cuál es? Responde con el pedido y los minutos, por ejemplo «${enManos[0]!.referencia} 30» (puedes mandar varios: «${enManos[0]!.referencia} 30, ${enManos.find((x) => x.phone !== enManos[0]!.phone)!.referencia} 45»), o responde citando el mensaje del pedido. Si no puedes llevar uno, escribe «no» y su pedido.` };
+    }
+    const e = elegido;
     const lectura = await leerTiempo(texto, { ahora: ahora(), timezone: tz(), ia: ia(), log, propias: await frasesPropias() });
     const en = ahora();
     if (lectura.como === 'ia') await evento(e, 'ia', `la IA leyó al motorizado: ${lectura.rechaza ? 'no puede' : lectura.minutos != null ? `${lectura.minutos} min` : 'no está claro'}${lectura.detalle ? ` (${lectura.detalle})` : ''}`, { texto: texto.slice(0, 300) });
@@ -2593,11 +2642,36 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return act;
   }
 
+  /**
+   * «Ojo: {pedido} ya no lo llevas tú», UNA vez.
+   *
+   * Cancelar dos veces seguidas (o cancelar mientras se reasigna) lo mandaba
+   * dos veces al mismo motorizado (26/09): el envío tarda unos segundos y la
+   * segunda vuelta leía el pedido todavía asignado. Se descarta si ya va uno
+   * igual en camino o si ese mismo texto ya le salió en las últimas 24 horas.
+   */
+  async function avisarCancelado(e: Entrega, m: Motorizado): Promise<void> {
+    const texto = textoDe('motorizadoCancelado', ajustes, contexto(e, m));
+    const clave = `${m.phone}|${texto}`;
+    if (avisosCanceladoEnCamino.has(clave)) return;
+    avisosCanceladoEnCamino.add(clave);
+    try {
+      const c = await repos.contacts.getByPhone(m.phone).catch(() => null);
+      const desde = ahora().getTime() - 24 * 60 * 60_000;
+      const recientes = c ? await repos.messages.listMessages(c.id, 40).catch(() => []) : [];
+      if (recientes.some((x) => x.direction === 'out' && String(x.body ?? '').trim() === texto.trim() && new Date(x.createdAt as unknown as string).getTime() >= desde)) return;
+      await sender.send({ phone: m.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: texto, limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
+    } finally {
+      // Un rato más: lo enviado tarda en quedar guardado en el hilo.
+      setTimeout(() => avisosCanceladoEnCamino.delete(clave), 60_000).unref?.();
+    }
+  }
+
   async function avisarMotorizadoQueSeCancela(e: Entrega): Promise<void> {
     if (!e.motorizadoId || e.motorizadoEstado === 'sin_asignar') return;
     const m = await repo.motorizado(e.motorizadoId);
     if (!m) return;
-    await sender.send({ phone: m.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: textoDe('motorizadoCancelado', ajustes, contexto(e, m)), limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
+    await avisarCancelado(e, m);
     await repo.actualizar(e.id, { motorizadoEstado: 'sin_asignar', motorizadoId: null, motorizadoProximoAt: null });
   }
 
@@ -2764,7 +2838,15 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const ctx = contextoMotorizado({ ...contexto(e, m), pedido: pedidoTexto });
     // La ubicación salió de la dirección que escribió el cliente: va con él (es aproximada).
     const conDireccionEscrita = e.ubicacionFuente === FUENTE_DIRECCION_ESCRITA && e.direccionCliente ? `\n📍 Dirección que escribió el cliente (la ubicación es aproximada): ${e.direccionCliente}` : '';
-    const texto = textoDe(e.segundaVisita ? 'motorizadoSegundaVisita' : 'motorizadoNuevo', ajustes, ctx) + conDireccionEscrita;
+    // Ya tiene otro cliente esperando su tiempo: se le dice cómo contestar
+    // para que cada tiempo vaya a su pedido.
+    const otrosPendientes = (await repo.enManosDeMotorizado(m.id).catch(() => [] as Entrega[])).filter((x) => x.phone !== e.phone && x.motorizadoEstado === 'enviado');
+    const variosPendientes = otrosPendientes.length
+      ? `\n\n📌 Tienes ${otrosPendientes.length + 1} pedidos esperando tu tiempo (${enLista([e.referencia, ...otrosPendientes.map((x) => x.referencia)])}). Responde con el pedido y los minutos, por ejemplo «${e.referencia} 30», o responde citando este mensaje.`
+      : '';
+    const base = textoDe(e.segundaVisita ? 'motorizadoSegundaVisita' : 'motorizadoNuevo', ajustes, ctx);
+    // Con varios, «Responde solo con los minutos» contradice lo de abajo: fuera.
+    const texto = (variosPendientes ? base.replace(/\s*Responde solo con los minutos[^.\n]*\.?/i, '') : base) + conDireccionEscrita + variosPendientes;
     // Con la plantilla de Meta (ventana cerrada) el texto es fijo: la marca de urgente va pegada a la referencia.
     const salida = await enviarA(m.phone, texto, 'motorizado', [(e.nombre ?? '').trim() || e.phone, e.prioridad === 'urgente' ? `URGENTE ${enLista(refs)}` : enLista(refs), enlaceMapa(e.lat, e.lng)], { separacionMs: 0, maxPorDia: 500 });
     if (!salida.ok) {
@@ -2981,7 +3063,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
     // Se acabo la paciencia con este: a otro.
     await evento(e, 'nota', seAcaboElTiempo ? `${firmaMotorizado(m)} no dio sus minutos en ${ajustes.reasignarMotorizadoMin} min: pasa solo a otro motorizado` : `${firmaMotorizado(m)} no contestó a ${e.motorizadoIntentos} avisos`);
-    await sender.send({ phone: m.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: textoDe('motorizadoCancelado', ajustes, contexto(e, m)), limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
+    await avisarCancelado(e, m);
     await repo.actualizar(e.id, { motorizadoEstado: 'sin_respuesta' });
     await descartarMotorizado({ ...e, motorizadoEstado: 'sin_respuesta' }, m, 'no contestó');
     return { ok: true, motivo: 'pasa a otro motorizado' };
@@ -3041,7 +3123,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (e.motorizadoId) {
       const anterior = await repo.motorizado(e.motorizadoId);
       if (anterior) {
-        await sender.send({ phone: anterior.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: textoDe('motorizadoCancelado', ajustes, contexto(e, anterior)), limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
+        await avisarCancelado(e, anterior);
       }
     }
     const descartados = motorizadoId === null ? e.motorizadosDescartados : e.motorizadosDescartados.filter((x) => x !== motorizadoId);
@@ -3640,7 +3722,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (e.ubicacionEstado === 'pendiente') await soltarDeLaEntrega(act, `el día ${e.dia} se cerró sin su ubicación`);
       await reportar(act, 'confirmacion', payloadConfirmacion({ referencia: act.referencia, phone: act.phone, nombre: act.nombre, confirmada: false, respuesta: act.confirmacionRespuesta, como: act.confirmacionComo, motivo: 'dia_cerrado', en: ahora() }));
       if (m && e.motorizadoEstado === 'enviado') {
-        await sender.send({ phone: m.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: textoDe('motorizadoCancelado', ajustes, contexto(act, m)), limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
+        await avisarCancelado(act, m);
       }
       resultado.sinTerminar.push(e.referencia);
     }
@@ -3854,7 +3936,21 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     },
     async textoAgente(clave, phone, nombre) {
       const vivas = await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[]);
-      const e = vivas[vivas.length - 1] ?? null;
+      let e = vivas[vivas.length - 1] ?? null;
+      // Con la ubicación ya registrada, el motorizado se asigna en segundos.
+      // El número que se le da al cliente tiene que ser el SUYO: se espera un
+      // momento a que el reparto lo asigne en vez de dar otro número como si
+      // fuera del motorizado (26/09: el cierre salió 3 s antes de asignar a
+      // Chesco y llevó el número del propio WhatsApp).
+      if (e && !e.motorizadoId && e.ubicacionEstado === 'recibida' && !ESTADOS_FINALES.includes(e.estado) && !e.datosEnvio?.telefonoMotorizado) {
+        const hayActivos = (await repo.listarMotorizados().catch(() => [] as Motorizado[])).some((m) => m.estado === 'activo' && mismoMundo(e!.phone, m.phone));
+        const limite = Date.now() + (hayActivos ? (deps.esperaMotorizadoMs ?? (process.env.VITEST ? 0 : 8_000)) : 0);
+        while (Date.now() < limite) {
+          await new Promise((r) => setTimeout(r, 500));
+          const x = await repo.entrega(e.id).catch(() => null);
+          if (x?.motorizadoId) { e = x; break; }
+        }
+      }
       if (e) return textoDe(clave, ajustes, contexto(e, await motorizadoDe(e).catch(() => null)));
       return textoDe(clave, ajustes, { nombre: nombre ?? null, negocio: deps.nombreNegocio(), soporte: soporteEnPalabras(ajustes.soporte), telefonoMotorizado: numeroParaCliente(null, null) });
     },

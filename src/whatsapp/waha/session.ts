@@ -275,20 +275,44 @@ export async function detectWaha(
   candidatos: string[] = CANDIDATOS_WAHA,
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 1200,
+  apiKey?: string,
 ): Promise<string | null> {
   for (const base of candidatos) {
     const url = base.replace(/\/+$/, '');
-    try {
-      const response = await fetchImpl(`${url}/api/sessions`, {
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!response.ok) continue;
-      const payload: unknown = await response.json();
-      if (Array.isArray(payload)) return url;
-    } catch {
-      // Puerto cerrado, otra cosa escuchando o respuesta que no es JSON: no es
-      // WAHA. Se prueba el siguiente sin ruido.
-    }
+    if ((await sondearWaha(url, apiKey, fetchImpl, timeoutMs)) === 'listo') return url;
   }
   return null;
+}
+
+/**
+ * Que hay en una direccion: un WAHA que nos deja entrar, uno que pide otra
+ * clave o nada.
+ *
+ * Desde 2025 WAHA se inventa una clave de API al arrancar si no le dan una,
+ * asi que un contenedor recien levantado contesta 401 a quien no la trae.
+ * Ese 401 lleva la forma de NestJS (`statusCode` + `message`), que es lo que
+ * lo distingue de este mismo servidor u otra cosa escuchando en el puerto.
+ */
+export async function sondearWaha(
+  base: string,
+  apiKey?: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 1200,
+): Promise<'listo' | 'clave' | 'nada'> {
+  const url = base.replace(/\/+$/, '');
+  try {
+    const response = await fetchImpl(`${url}/api/sessions`, {
+      headers: apiKey ? { 'X-Api-Key': apiKey } : {},
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const payload: unknown = await response.json();
+    if (response.ok) return Array.isArray(payload) ? 'listo' : 'nada';
+    if (response.status === 401 && payload && typeof payload === 'object' && 'statusCode' in payload) {
+      return 'clave';
+    }
+  } catch {
+    // Puerto cerrado, otra cosa escuchando o respuesta que no es JSON: no es
+    // WAHA. Se prueba el siguiente sin ruido.
+  }
+  return 'nada';
 }

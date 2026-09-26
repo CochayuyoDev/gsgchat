@@ -26,7 +26,7 @@ const CSS = `
      estado, lo que toca hacer (la lista de GSG y las cuatro cifras) y la
      lista de pedidos. Lo tecnico, plegado al final. */
   * { box-sizing: border-box; }
-  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--esp-5); }
+  .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); max-width: var(--ancho-max, 1600px); margin: 0 auto; display: flex; flex-direction: column; gap: var(--esp-5); }
   .wrap a { color: var(--primario); }
   .muted { color: var(--texto-suave); }
   .hidden { display: none !important; }
@@ -89,7 +89,7 @@ const CSS = `
   .filtro-activo { display: inline-flex; align-items: center; gap: 8px; margin-bottom: var(--esp-3); padding: 5px 6px 5px 12px; border-radius: 999px; background: var(--primario-suave); color: var(--texto); font-size: 13.5px; }
   .filtro-activo button { font: inherit; font-size: 13px; border: 0; background: var(--superficie); color: var(--primario); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
   .pedidos { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); overflow: hidden; }
-  .fila { display: grid; grid-template-columns: minmax(0, 2fr) 150px 200px minmax(0, 1.4fr) 76px; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--borde); }
+  .fila { display: grid; grid-template-columns: minmax(0, 1.3fr) 170px minmax(190px, 1fr) minmax(0, 1.3fr) 76px; gap: 14px; align-items: center; padding: 10px 18px; border-bottom: 1px solid var(--borde); }
   .fila:last-child { border-bottom: 0; }
   .fila.cab { padding-top: 10px; padding-bottom: 10px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; background: var(--superficie-2); }
   .fila.urgente { box-shadow: inset 3px 0 0 var(--rojo); }

@@ -181,7 +181,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
       const pregunta = e.botonesA(t)[0];
       expect(pregunta, t).toBeTruthy();
       expect(pregunta!.body).toContain(PREGUNTA);
-      expect(pregunta!.body).toContain('Soy Juan Quispe de la empresa de entregas GSG');
+      expect(pregunta!.body).toContain('Somos GSG Courier, tengo una entrega para ti');
       expect(pregunta!.body).toContain('📦 Producto: Zapatillas talla 40');
       expect(pregunta!.body).toContain('🏠 Dirección: Miraflores - Jr. Confirmar');
       // Las líneas de datos que no vinieron no salen.
