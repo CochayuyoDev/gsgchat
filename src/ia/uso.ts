@@ -20,6 +20,7 @@
  */
 
 import type { SettingsRepo } from '../settings/service.js';
+import type { FalloCuentaIA } from './proveedores.js';
 
 export const CLAVE_USO_IA = 'ia.uso';
 
@@ -45,6 +46,19 @@ export interface FalloIA {
   detalle: string;
 }
 
+/**
+ * Se acabó el saldo (o la clave ya no vale): desde cuándo y por qué. Mientras
+ * esté, el sistema contesta con las reglas y avisa para recargar; la primera
+ * llamada buena lo borra solo.
+ */
+export interface SinSaldoIA {
+  desde: string;
+  motivo: FalloCuentaIA;
+  detalle: string;
+  /** La última vez que se probó el modelo estando así (para no probar en cada mensaje). */
+  ultimoIntento: string;
+}
+
 export interface ResumenUsoIA {
   hoy: UsoDia & { dia: string };
   /** Los ultimos 30 dias, hoy incluido. */
@@ -56,20 +70,30 @@ export interface ResumenUsoIA {
   fallosSeguidos: number;
   /** Tiempo medio de una llamada buena hoy, en milisegundos (null si no hubo). */
   msMedioHoy: number | null;
+  /** Se acabó el saldo o la clave no vale (null = la IA responde bien). */
+  sinSaldo: SinSaldoIA | null;
 }
 
 interface Guardado {
   dias: Record<string, UsoDia>;
   ultimoFallo: FalloIA | null;
   fallosSeguidos: number;
+  sinSaldo: SinSaldoIA | null;
 }
 
 export interface ContadorUsoIA {
-  /** Una llamada al modelo que acabo bien. */
-  anotar(tipo: TipoUsoIA, datos?: { ms?: number; tokensEntrada?: number; tokensSalida?: number }): void;
-  /** Una llamada que fallo (la API respondio mal, no respondio, la clave no vale...). */
-  anotarFallo(tipo: TipoUsoIA, detalle: string): void;
-  resumen(): ResumenUsoIA;
+  /** Una llamada al modelo que acabo bien. Devuelve true si con ella se apago el aviso de «sin saldo». */
+  anotar(tipo: TipoUsoIA, datos?: { ms?: number; tokensEntrada?: number; tokensSalida?: number }): boolean;
+  /**
+   * Una llamada que fallo (la API respondio mal, no respondio, la clave no
+   * vale...). Con `cuenta` (sin saldo o clave que no vale) se enciende el
+   * aviso: devuelve true solo la vez que se enciende (para avisar UNA vez).
+   */
+  anotarFallo(tipo: TipoUsoIA, detalle: string, cuenta?: FalloCuentaIA | null): boolean;
+  /** Lo mismo sin contar un fallo del día (p. ej. «Probar la conexión» dio sin saldo). */
+  marcarSinSaldo(cuenta: FalloCuentaIA, detalle: string): boolean;
+  /** Apaga el aviso («Probar la conexión» respondió bien). true si estaba encendido. */
+  limpiarSinSaldo(): boolean;  resumen(): ResumenUsoIA;
   /** Espera a que lo pendiente de guardar este en la base (pruebas). */
   guardado(): Promise<void>;
 }
@@ -100,7 +124,7 @@ function sumar(a: UsoDia, b: UsoDia): UsoDia {
 }
 
 function leerGuardado(valor: string | undefined): Guardado {
-  if (!valor) return { dias: {}, ultimoFallo: null, fallosSeguidos: 0 };
+  if (!valor) return { dias: {}, ultimoFallo: null, fallosSeguidos: 0, sinSaldo: null };
   try {
     const raw = JSON.parse(valor) as Partial<Guardado>;
     const dias: Record<string, UsoDia> = {};
@@ -108,9 +132,11 @@ function leerGuardado(valor: string | undefined): Guardado {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || !d || typeof d !== 'object') continue;
       dias[dia] = { ...DIA_VACIO(), ...Object.fromEntries(Object.entries(d).filter(([, v]) => typeof v === 'number' && Number.isFinite(v))) } as UsoDia;
     }
-    return { dias, ultimoFallo: raw.ultimoFallo ?? null, fallosSeguidos: Number(raw.fallosSeguidos) || 0 };
+    const s = raw.sinSaldo;
+    const sinSaldo = s && typeof s === 'object' && (s.motivo === 'sin_saldo' || s.motivo === 'clave_invalida') ? { desde: String(s.desde ?? ''), motivo: s.motivo, detalle: String(s.detalle ?? ''), ultimoIntento: String(s.ultimoIntento ?? s.desde ?? '') } : null;
+    return { dias, ultimoFallo: raw.ultimoFallo ?? null, fallosSeguidos: Number(raw.fallosSeguidos) || 0, sinSaldo };
   } catch {
-    return { dias: {}, ultimoFallo: null, fallosSeguidos: 0 };
+    return { dias: {}, ultimoFallo: null, fallosSeguidos: 0, sinSaldo: null };
   }
 }
 
@@ -119,7 +145,7 @@ export async function crearContadorUsoIA(deps: { settingsRepo: SettingsRepo; tim
   const ahora = deps.ahora ?? (() => new Date());
   const log = deps.log ?? (() => undefined);
 
-  let estado: Guardado = { dias: {}, ultimoFallo: null, fallosSeguidos: 0 };
+  let estado: Guardado = { dias: {}, ultimoFallo: null, fallosSeguidos: 0, sinSaldo: null };
   for (const row of await deps.settingsRepo.getAll()) {
     if (row.key === CLAVE_USO_IA) estado = leerGuardado(row.value);
   }
@@ -149,6 +175,15 @@ export async function crearContadorUsoIA(deps: { settingsRepo: SettingsRepo; tim
     return estado.dias[hoy]!;
   }
 
+  /** Enciende (o renueva) el aviso de «sin saldo». true = recién encendido (o cambió el motivo). */
+  function marcar(cuenta: FalloCuentaIA, detalle: string): boolean {
+    const cuando = ahora().toISOString();
+    const antes = estado.sinSaldo;
+    const nuevo = !antes || antes.motivo !== cuenta;
+    estado.sinSaldo = nuevo ? { desde: cuando, motivo: cuenta, detalle: String(detalle).slice(0, 300), ultimoIntento: cuando } : { ...antes!, ultimoIntento: cuando };
+    return nuevo;
+  }
+
   return {
     anotar(tipo, datos = {}) {
       const d = deHoy();
@@ -158,14 +193,30 @@ export async function crearContadorUsoIA(deps: { settingsRepo: SettingsRepo; tim
       d.tokensEntrada += Math.max(0, Math.round(datos.tokensEntrada ?? 0));
       d.tokensSalida += Math.max(0, Math.round(datos.tokensSalida ?? 0));
       estado.fallosSeguidos = 0;
+      const volvio = estado.sinSaldo !== null;
+      estado.sinSaldo = null;
       guardar();
+      return volvio;
     },
-    anotarFallo(tipo, detalle) {
+    anotarFallo(tipo, detalle, cuenta) {
       const d = deHoy();
       d.fallos += 1;
       estado.fallosSeguidos += 1;
       estado.ultimoFallo = { cuando: ahora().toISOString(), tipo, detalle: String(detalle).slice(0, 300) };
+      const nuevo = cuenta ? marcar(cuenta, detalle) : false;
       guardar();
+      return nuevo;
+    },
+    marcarSinSaldo(cuenta, detalle) {
+      const nuevo = marcar(cuenta, detalle);
+      guardar();
+      return nuevo;
+    },
+    limpiarSinSaldo() {
+      if (!estado.sinSaldo) return false;
+      estado.sinSaldo = null;
+      guardar();
+      return true;
     },
     resumen() {
       const hoy = diaEn(ahora(), timezone);
@@ -183,6 +234,7 @@ export async function crearContadorUsoIA(deps: { settingsRepo: SettingsRepo; tim
         ultimoFallo: estado.ultimoFallo,
         fallosSeguidos: estado.fallosSeguidos,
         msMedioHoy: deHoyLeido.ok ? Math.round(deHoyLeido.ms / deHoyLeido.ok) : null,
+        sinSaldo: estado.sinSaldo,
       };
     },
     guardado: () => pendiente,

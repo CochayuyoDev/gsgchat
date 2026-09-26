@@ -25,6 +25,7 @@ import type { Monitor } from '../salud/monitor.js';
 import type { Solicitud } from '../db/rutas.js';
 import { despacharReportes, payloadIncidencia, payloadUbicacion, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
+import { resolverPorUbicacion } from '../entregas/ubicacion-unica.js';
 
 export interface EntradaRuta {
   texto?: string;
@@ -100,8 +101,41 @@ const FRASES_NUMERO_EQUIVOCADO = [
 
 export function pareceNumeroEquivocado(texto: string): boolean {
   const limpio = sinTildes(texto);
-  return FRASES_NUMERO_EQUIVOCADO.some((frase) => limpio.includes(frase));
+  return FRASES_NUMERO_EQUIVOCADO.some((frase) => limpio.includes(frase)) || pareceNoSoyYo(texto);
 }
+
+/**
+ * El caso «no soy yo» del flujo de GSG, leido ESTRICTO: quien contesta dice
+ * que no hizo ese pedido, que el numero esta equivocado o que no conoce la
+ * tienda. No incluye «¿quién eres?» ni «¿quiénes son?» (eso es desconfianza:
+ * se le explica por qué se le escribe) ni un «no soy bueno con el celular».
+ */
+const NO_SOY_YO = [
+  /\bno soy (yo|el|la|esa persona|ese|esa|quien|el cliente|la clienta|la senora|el senor|la duena|el dueno)\b/,
+  /\b(numero|telefono|celular) (equivocado|incorrecto|errado|erroneo)\b/,
+  /\b(esta|estan|es un|es el|es) (numero )?equivocad[oa]s?\b/,
+  /\bse (han )?equivoca(do|ron|o)\b/,
+  /\bte equivocaste\b|\bse equivocan\b|\bequivocacion\b/,
+  /\b(yo )?no (he )?(pedi|pedido|compre|comprado|encargue|encargado|ordene|solicite|solicitado)\b.*\b(nada|eso|esto|ese|esa|ningun\w*|nunca)\b/,
+  /\b(yo )?no (he )?(pedi|pedido|compre|encargue|ordene|solicite) (nada|eso|esto|ese|esa|ningun\w*)\b/,
+  /\bno (he )?(hecho|hice|realice|realizado) (ningun|ese|este|esa|esta)\b/,
+  /\bno tengo ningun (pedido|paquete|envio|compra)\b/,
+  /\bno espero ningun\b/,
+  /\bno (es|son) (mi|mio|mia|mios|mias) (pedido|paquete|compra|envio)\b|\bno es mio\b|\bno es mia\b/,
+  /\bno conozco (esa|ese|esta|este|a esa|a ese|la|el|a la|a el|al|a) (tienda|empresa|negocio|marca|persona|senor|senora|cliente|nombre)\b/,
+  /\bno conozco a nadie\b|\bno se (quien es|de que pedido|de que me hablan|de que hablan)\b/,
+  /\bno reconozco (ese|esa|este|esta|el|la) (pedido|compra|paquete|envio|numero|tienda)\b/,
+  /\bwrong number\b/,
+];
+
+export function pareceNoSoyYo(texto: string): boolean {
+  const limpio = sinTildes(texto).replace(/[¿?¡!.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!limpio) return false;
+  return NO_SOY_YO.some((r) => r.test(limpio));
+}
+
+/** Lo que se le dice UNA vez a quien dice que no es el cliente (regla del dueño, 25/09). Texto fijo. */
+export const TEXTO_NO_SOY_YO = 'Gracias por avisarnos. Lo revisamos y, si fue un error, disculpa la molestia. No te volveremos a escribir por este pedido.';
 
 /**
  * La precision en metros enteros: la columna `precision_m` es entera y un
@@ -180,6 +214,11 @@ async function corregirUbicacion(
   ubicacion: NonNullable<EntradaRuta['ubicacion']>,
   momento: Date,
 ): Promise<RespuestaRuta> {
+  // El mismo punto otra vez no es una correccion: nada que reportar.
+  if (resuelta.lat !== null && resuelta.lng !== null && Math.abs(resuelta.lat - ubicacion.lat) < 1e-6 && Math.abs(resuelta.lng - ubicacion.lng) < 1e-6) {
+    await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `volvió a mandar la misma ubicación (${ubicacion.fuente ?? 'whatsapp'})`).catch(() => undefined);
+    return { atendida: true, resultado: 'resuelta', solicitud: resuelta };
+  }
   const anterior = resuelta.lat !== null && resuelta.lng !== null ? `${resuelta.lat.toFixed(5)}, ${resuelta.lng.toFixed(5)}` : 'sin coordenadas';
   const actualizada = await deps.repos.rutas.actualizarSolicitud(resuelta.id, {
     lat: ubicacion.lat,
@@ -303,6 +342,11 @@ export async function atenderRespuestaDeRuta(
       { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng },
     );
     await reportar(deps, actualizada, 'ubicacion');
+    // La «única verdad»: cualquier OTRA solicitud abierta de ese telefono (otro
+    // lote, otro pedido) y la lista de envio automatico dejan de pedirsela.
+    if (contact.phone) {
+      await resolverPorUbicacion(repos, contact.phone, { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng, mapsUrl: entrada.ubicacion.mapsUrl ?? null, fuente: entrada.ubicacion.fuente ?? 'whatsapp' }, { ahora: momento, motivo: 'la mandó por otra solicitud del mismo número', excepto: [solicitud.id], soloVivas: true }).catch(() => []);
+    }
 
     deps.log?.('ubicacion conseguida', {
       solicitud: solicitud.id,
@@ -332,6 +376,18 @@ export async function atenderRespuestaDeRuta(
   // Ya paso al repartidor: lo que conteste se apunta para quien lo llame,
   // pero el bot no vuelve a insistir. (Una ubicacion si lo resuelve: eso va
   // arriba y llega aunque el caso este derivado.)
+  // Dijo que no es el cliente (o pidio que no le escriban): ya lo ve una
+  // persona. Lo que diga despues se apunta y NADA mas: ni se le contesta ni
+  // vuelve a entrar en los recordatorios.
+  if (solicitud.estado === 'supervision' && (solicitud.incidencia === 'numero_equivocado' || solicitud.incidencia === 'rechaza_contacto')) {
+    await repos.rutas.registrarEvento(
+      solicitud.id,
+      'respuesta',
+      texto ? `escribió después de «${solicitud.incidencia === 'numero_equivocado' ? 'no soy yo' : 'baja'}»: "${texto.slice(0, 200)}"` : 'escribió (adjunto) después de «no soy yo»',
+    );
+    return { atendida: true, resultado: 'numero_equivocado', solicitud };
+  }
+
   if (solicitud.estado === 'derivado') {
     await repos.rutas.registrarEvento(
       solicitud.id,
@@ -353,9 +409,7 @@ export async function atenderRespuestaDeRuta(
       atendida: true,
       resultado: 'numero_equivocado',
       solicitud: actualizada,
-      responder:
-        'Disculpe la molestia, tomamos nota de que el número no corresponde. ' +
-        'No le volveremos a escribir.',
+      responder: TEXTO_NO_SOY_YO,
     };
   }
 

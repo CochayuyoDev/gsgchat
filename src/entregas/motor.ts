@@ -188,7 +188,7 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
       for (const e of await listaMotorizado()) {
         if (frenada(e.id)) continue;
         // (una apartada por falta de motorizado se reintenta sola: si ya hay uno, sale de la incidencia)
-        if (e.estado === 'lista' || (e.estado === 'incidencia' && e.incidencia === 'sin_motorizado')) {
+        if (e.estado === 'lista' || (e.estado === 'incidencia' && (e.incidencia === 'sin_motorizado' || (e.incidencia === 'consulta_ajena' && Boolean(e.motorizadoSinUbicacionAt) && e.ubicacionEstado === 'pendiente')))) {
           if (!dentroDeHorario) {
             ultimoMotivo = `fuera del horario de envío (${vigentes.horaInicio}:00 a ${vigentes.horaFin}:00)`;
             continue;

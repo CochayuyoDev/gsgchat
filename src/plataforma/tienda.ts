@@ -34,6 +34,7 @@ import { createOutboundQueue, createOutboundWorker, type OutboundQueue } from '.
 import { createRepos, createSettingsRepo, type Repos } from '../db/repos.js';
 import { openPglite, type PgliteHandle } from '../db/pglite.js';
 import { createPool, type Pool } from '../db/pool.js';
+import { crearCacheGeoSql, crearGeocodificadorNominatim, type Geocodificador } from '../entregas/geocodificar.js';
 import { migrate } from '../db/migrate.js';
 import type { LocalSecrets } from '../settings/crypto.js';
 import { providerOf, createSettingsService } from '../settings/service.js';
@@ -65,6 +66,7 @@ import { crearServicioResumenes } from '../resumenes/servicio.js';
 import { crearServicioProcesos } from '../procesos/servicio.js';
 import { cargarLote } from '../rutas/cargar.js';
 import { crearFiabilidad } from '../salud/fiabilidad.js';
+import type { ServicioCorreo } from '../salud/correo.js';
 import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, type DirectorioUsuarios } from '../auth/routes.js';
 import { enTienda, type ContextoTienda } from './contexto.js';
 import { conReglaGsg } from '../entregas/regla-gsg.js';
@@ -101,6 +103,12 @@ export interface OpcionesTienda {
   sembrarPlantillasLocales: boolean;
   /** Logger de Fastify (el arranque corto lo apaga). */
   logger?: boolean;
+  /**
+   * El buscador de direcciones escritas (Nominatim de OpenStreetMap, gratis).
+   * Sin pasarlo: el de verdad, salvo en las pruebas automáticas (VITEST) o con
+   * GEOCODIFICAR=no. null = sin buscador (la dirección se guarda y se pide el pin).
+   */
+  geocodificador?: Geocodificador | null;
   /** Delante de cada linea de log de esta tienda. */
   prefijoLog: string;
   /**
@@ -250,6 +258,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
 
       // La IA se crea despues de las entregas y estas la piden por funcion.
       let ia!: Awaited<ReturnType<typeof crearServicioIA>>;
+      let correoDeAviso: ServicioCorreo | undefined;
       const entregas = await crearServicioEntregas({
         zonaHoraria: () => ajustes.zonaHoraria(),
         repos,
@@ -271,6 +280,12 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         geo: { bbox: config.bbox, cobertura: config.coverageName },
         modo: () => ajustes.modo(),
         numeroPropio: () => sesion.getLocalState().phone || null,
+        geocodificador:
+          o.geocodificador !== undefined
+            ? o.geocodificador
+            : process.env.VITEST || (o.env.GEOCODIFICAR ?? process.env.GEOCODIFICAR) === 'no'
+              ? null
+              : crearGeocodificadorNominatim({ userAgent: `GSGchat/1.0 (entregas de ${ajustes.nombreNegocio() || 'una tienda'}; ${config.PUBLIC_BASE_URL})`, cache: crearCacheGeoSql(pool), log: (m, d) => log(`[mapa] ${m}`, d) }),
         log: (m, d) => log(`[entregas] ${m}`, d),
       });
       entregasDeLaRegla = entregas;
@@ -292,6 +307,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         voz,
         entregas,
         modo: () => ajustes.modo(),
+        // El correo de aviso vive en «Que todo funcione», que se crea después.
+        correo: () => correoDeAviso,
         log: (m, d) => log(m, d),
       });
       entrenamiento.conectarIA(iaParaEntrenar(ia));
@@ -396,6 +413,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           primeraCopiaLaProximaNoche: true,
         },
       });
+      correoDeAviso = fiabilidad.correo;
 
       const app = await buildServer({
         config,

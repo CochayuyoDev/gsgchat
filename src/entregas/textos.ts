@@ -23,6 +23,20 @@ export const ajustesEntregasSchema = z.object({
   motorizadoMaxIntentos: z.number().int().min(1).max(5).default(2),
   /** Cada cuantos minutos se le piden a GSG los pendientes del dia. */
   sincronizarCadaMin: z.number().int().min(1).max(24 * 60).default(5),
+  /**
+   * El pin tiene que tener sentido: si cae a más de esto (km) del distrito del
+   * pedido, no se da por bueno a ciegas y se le pregunta UNA vez al cliente si
+   * es ahí (SÍ/NO). Sin distrito conocido, se acepta como siempre.
+   */
+  pinDistanciaMaxKm: z.number().min(0.5).max(100).default(3),
+  /** Si la dirección escrita se busca en el mapa gratuito de OpenStreetMap (si falla, se sigue sin él). */
+  buscarDireccionEnMapa: z.boolean().default(true),
+  /** Minutos que se espera a que el motorizado dé sus minutos antes de pasar el pedido SOLO a otro activo. */
+  reasignarMotorizadoMin: z.number().int().min(5).max(240).default(20),
+  /** A esta hora ("HH:MM", reloj del negocio) los pedidos que siguen sin ubicación salen en «Hay que mirar». */
+  alertaSinUbicacionHora: z.string().regex(/^\d{2}:\d{2}$/).default('12:00'),
+  /** Minutos pasada la hora estimada sin «entregado» para que un pedido en camino salga en «Hay que mirar». */
+  alertaEnCaminoMin: z.number().int().min(5).max(480).default(30),
   /** Si el aviso de llegada lo redacta la IA (con la hora puesta por el sistema). */
   redactarConIA: z.boolean().default(false),
   /** Si la IA lee las respuestas que las reglas no entienden. */
@@ -150,6 +164,7 @@ export const ajustesEntregasSchema = z.object({
       cancelada: z.string().max(1000).default(''),
       cambio: z.string().max(1000).default(''),
       motorizadoNuevo: z.string().max(1500).default(''),
+      motorizadoSinUbicacion: z.string().max(1500).default(''),
       motorizadoInsistir: z.string().max(1000).default(''),
       motorizadoPreguntarOtraVez: z.string().max(1000).default(''),
       motorizadoGracias: z.string().max(1000).default(''),
@@ -187,6 +202,10 @@ export const ajustesEntregasSchema = z.object({
       confirmadaGsg: z.string().max(1000).default(''),
       noConfirmaGsg: z.string().max(1000).default(''),
       porQueConfirmar: z.string().max(1000).default(''),
+      pinLejos: z.string().max(1000).default(''),
+      pinLejosNo: z.string().max(1000).default(''),
+      direccionTomada: z.string().max(1000).default(''),
+      direccionAnotada: z.string().max(1000).default(''),
     })
     .default({}),
 });
@@ -237,6 +256,8 @@ export interface ContextoTexto {
    * el del WhatsApp de la tienda. Nunca vacio.
    */
   telefonoMotorizado?: string | null;
+  /** El telefono del cliente, ya en palabras ("+51 987 654 321"): solo para el motorizado. */
+  telefonoCliente?: string | null;
   /** Los kilometros hasta el pin, ya en palabras ("unos 14 km"). */
   km?: string | null;
   /** La zona que se cubre, en palabras ("todo Lima y Callao"). */
@@ -338,6 +359,7 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
     hastaExtendido: ctx.hastaExtendido ?? '',
     soporte: ctx.soporte ?? '',
     telefonoMotorizado: ctx.telefonoMotorizado?.trim() || ctx.soporte?.trim() || 'este mismo número de WhatsApp',
+    telefonoCliente: ctx.telefonoCliente ?? '',
     km: ctx.km ?? '',
     cobertura: ctx.cobertura ?? '',
     enlace: ctx.enlace ?? '',
@@ -409,6 +431,8 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   cancelada: 'Entendido, dejamos {pedido} sin entregar por hoy. Si cambia de opinión, escríbanos por aquí. Gracias.',
   cambio: 'Entendido, tomamos nota. Un compañero de {negocio} se comunicará con usted para coordinar {pedido}. Gracias.',
   motorizadoNuevo: '🛵 {urgente}Nuevo pedido: {pedido}\nCliente: {nombreCompleto}{distrito}\n{notas}\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',
+  // Sin ubicación: NUNCA se le manda un pin ni un mapa; coordina con el cliente por teléfono.
+  motorizadoSinUbicacion: '🛵 {urgente}Nuevo pedido SIN ubicación: {pedido}\nCliente: {nombreCompleto} · {telefonoCliente}\nDirección: {direccion}{distrito}\nNo mandó su ubicación: coordina con el cliente por teléfono.\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',
   motorizadoInsistir: 'Hola {motorizado}, sigo esperando tu tiempo para {pedido} ({nombre}). ¿En cuántos minutos lo entregas?',
   motorizadoPreguntarOtraVez: 'No te entendí. Para {pedido}: responde solo los minutos (ej. 40), o "no puedo" si no lo vas a llevar.',
   motorizadoGracias: 'Anotado: {pedido} en {minutosMotorizado}. Al cliente le avisamos que llega en {minutos} aprox. Gracias.',
@@ -444,6 +468,12 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   confirmadaGsg: 'Perfecto, tu pedido queda confirmado para hoy. ¡Muchas gracias!',
   noConfirmaGsg: 'Entendido, lo pasamos a un asesor. Por este canal no se reciben consultas. Número del motorizado: {telefonoMotorizado}.',
   porQueConfirmar: 'Te escribimos para confirmar la entrega de tu pedido de {empresa} antes de salir. Responde SÍ o NO.',
+  // El pin tiene que tener sentido: si cae lejos de su distrito, se le pregunta UNA vez.
+  pinLejos: 'Recibimos tu ubicación, pero queda lejos de {distrito}. ¿Es ahí donde recibes tu pedido? Responde SÍ o NO',
+  pinLejosNo: 'Por favor, envíanos la ubicación correcta desde el clip 📎 → Ubicación → Enviar tu ubicación actual',
+  // La dirección escrita: va debajo de «Ubicación registrada» cuando se ubicó en el mapa.
+  direccionTomada: 'Tomamos tu dirección: {direccion}. Si puedes, mándanos también el pin para llegar exacto.',
+  direccionAnotada: 'Gracias, anotamos: {direccion}. Para llegar exacto, ¿nos mandas tu ubicación desde el clip 📎 → Ubicación?',
 };
 /** El texto que toca: el guardado desde la pantalla si lo hay, si no el de siempre. */
 export function textoDe(clave: keyof AjustesEntregas['textos'], ajustes: AjustesEntregas, ctx: ContextoTexto): string {
@@ -457,6 +487,7 @@ export function contextoMotorizado(ctx: ContextoTexto): ContextoTexto {
 /** Las claves cuyo texto va al motorizado (llevan el distrito entre parentesis y la nota con etiqueta). */
 export const TEXTOS_PARA_MOTORIZADO: ReadonlySet<keyof AjustesEntregas['textos']> = new Set<keyof AjustesEntregas['textos']>([
   'motorizadoNuevo',
+  'motorizadoSinUbicacion',
   'motorizadoInsistir',
   'motorizadoPreguntarOtraVez',
   'motorizadoGracias',
@@ -489,6 +520,7 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   cancelada: ['{nombre}', '{pedido}', '{negocio}'],
   cambio: ['{nombre}', '{pedido}', '{negocio}'],
   motorizadoNuevo: ['{pedido}', '{nombreCompleto}', '{nombre}', '{distrito}', '{direccion}', '{mapa}', '{lat}', '{lng}', '{notas}', '{motorizado}', '{urgente}'],
+  motorizadoSinUbicacion: ['{pedido}', '{nombreCompleto}', '{nombre}', '{telefonoCliente}', '{direccion}', '{distrito}', '{notas}', '{motorizado}', '{urgente}'],
   motorizadoInsistir: ['{pedido}', '{nombre}', '{motorizado}'],
   motorizadoPreguntarOtraVez: ['{pedido}', '{nombre}', '{motorizado}'],
   motorizadoGracias: ['{pedido}', '{minutosMotorizado}', '{minutos}', '{hora}'],
@@ -526,6 +558,10 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   confirmadaGsg: ['{nombre}', '{pedido}', '{negocio}', '{telefonoMotorizado}', '{soporte}'],
   noConfirmaGsg: ['{nombre}', '{pedido}', '{negocio}', '{telefonoMotorizado}', '{soporte}'],
   porQueConfirmar: ['{nombre}', '{pedido}', '{empresa}', '{negocio}'],
+  pinLejos: ['{nombre}', '{pedido}', '{distrito}', '{negocio}'],
+  pinLejosNo: ['{nombre}', '{pedido}', '{negocio}'],
+  direccionTomada: ['{nombre}', '{pedido}', '{direccion}', '{negocio}'],
+  direccionAnotada: ['{nombre}', '{pedido}', '{direccion}', '{negocio}'],
 };
 export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string> = {
   ubicacionRegistrada: 'Al cliente, justo después de mandar su ubicación, cuando no falta nada más (con el enlace del mapa, el horario de entregas y el número de soporte)',
@@ -544,6 +580,7 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   cancelada: 'Al cliente, cuando dice que no lo quiere',
   cambio: 'Al cliente, cuando pide otro día, otra hora u otra dirección (lo sigue una persona)',
   motorizadoNuevo: 'Al motorizado, con el pedido y el cliente (sin mandarle ninguna ubicación), para que diga en cuánto entrega',
+  motorizadoSinUbicacion: 'Al motorizado, cuando el cliente NO mandó su ubicación pero se le dio el número del motorizado: el pedido, el teléfono y la dirección escrita del cliente (nunca una ubicación), para que coordine por teléfono y diga en cuánto entrega',
   motorizadoInsistir: 'Al motorizado, cuando no contestó',
   motorizadoPreguntarOtraVez: 'Al motorizado, cuando contestó algo que no era un tiempo',
   motorizadoGracias: 'Al motorizado, cuando dio su tiempo',
@@ -581,4 +618,8 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   confirmadaGsg: 'Al cliente de «falta confirmar» que dice SÍ: queda confirmado, se le da el número y desde ahí no se le escribe más',
   noConfirmaGsg: 'Al cliente de «falta confirmar» que dice NO, otro día u otra dirección: pasa a un asesor y desde ahí no se le escribe más',
   porQueConfirmar: 'Al cliente de «falta confirmar» que pregunta por qué le escriben o desconfía (se le vuelve a pedir SÍ o NO)',
+  pinLejos: 'Al cliente cuyo pin cae lejos del distrito de su pedido: se le pregunta UNA vez si es ahí (con botones SÍ / NO). La distancia se cambia en Tiempos',
+  pinLejosNo: 'Al cliente que dice que NO es ahí: se le pide la ubicación correcta',
+  direccionTomada: 'Al cliente que escribió su dirección y se ubicó en el mapa: va debajo de «Ubicación registrada»',
+  direccionAnotada: 'Al cliente que escribió su dirección y no se pudo ubicar bien en el mapa: se guarda y se le pide el pin con amabilidad (no cuenta como insistencia)',
 };

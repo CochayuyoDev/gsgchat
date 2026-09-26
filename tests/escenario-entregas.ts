@@ -32,10 +32,13 @@ import { crearGsgSimulado, type GsgSimulado } from '../src/entregas/gsg-simulado
 import { crearServicioEntregas, type ServicioEntregas, type FilaEntrega, type ResumenEntregas } from '../src/entregas/servicio.js';
 import { crearMotorEntregas, type MotorEntregas, type ResultadoTickEntregas } from '../src/entregas/motor.js';
 import type { LectorIA } from '../src/entregas/interpretar.js';
+import type { Geocodificador } from '../src/entregas/geocodificar.js';
 import type { MensajeIA } from '../src/ia/proveedores.js';
 import { crearBus, type Bus, type NombreEvento } from '../src/eventos/bus.js';
 import { crearServicioAjustes } from '../src/ajustes/generales.js';
 import { crearServicioIA, type ServicioIA } from '../src/ia/servicio.js';
+import { createFakeRutas } from './fakes-rutas.js';
+import { createFakeEntregas } from './fakes-entregas.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, type FakeRepos, type FakeWhatsApp, CLAVE_API_PRUEBA } from './fakes.js';
 
 export const GSG_URL_FALSA = 'https://gsg.example/api/v1';
@@ -145,6 +148,8 @@ export async function crearEscenarioEntregas(opciones: {
    * que la prueba lo pida.
    */
   confirmarLista?: boolean;
+  /** El buscador de direcciones escritas (uno de mentira en las pruebas: nunca la red). */
+  geocodificador?: Geocodificador | null;
 } = {}): Promise<EscenarioEntregas> {
   const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
@@ -201,6 +206,11 @@ export async function crearEscenarioEntregas(opciones: {
   }) as typeof fetch;
 
   const repos = createFakeRepos();
+  // Las solicitudes del reparto y las entregas con el mismo reloj que los
+  // mensajes y que el agente (si no, «desde que se abrió la solicitud» o «el
+  // pedido llegó después del cierre» comparan fechas de dos relojes).
+  repos.rutas = createFakeRutas(reloj);
+  repos.entregas = createFakeEntregas(reloj);
   const wa = createFakeWhatsApp();
   wa.tieneWhatsApp = async () => true;
   const settings = await createFakeSettings(config);
@@ -255,6 +265,7 @@ export async function crearEscenarioEntregas(opciones: {
     publicBaseUrl: config.PUBLIC_BASE_URL,
     bus,
     geo: { bbox: config.bbox, cobertura: config.coverageName },
+    geocodificador: opciones.geocodificador ?? null,
     ahora: reloj,
   });
   entregasDeLaRegla = entregas;

@@ -242,6 +242,25 @@ export interface Entrega {
   envioRetenidoAt?: Date | null;
   /** Cuándo se confirmó su envío (null = nunca esperó, o todavía espera). */
   envioLiberadoAt?: Date | null;
+  /**
+   * Va con un motorizado aunque falte la ubicación (el cliente recibió el
+   * cierre con el número del motorizado, o una persona lo asignó a mano). Ver
+   * migración 042. Mientras falte el pin: sin recordatorios de ubicación.
+   */
+  motorizadoSinUbicacionAt?: Date | null;
+  /**
+   * El pin que mandó el cliente y cae lejos del distrito de su pedido: no se
+   * da por bueno a ciegas, se le pregunta UNA vez si es ahí (SÍ/NO). Ver
+   * migración 043. `pinPropuestoDudas`: veces que contestó otra cosa.
+   */
+  pinPropuestoLat?: number | null;
+  pinPropuestoLng?: number | null;
+  pinPropuestoAt?: Date | null;
+  pinPropuestoFuente?: string | null;
+  pinPropuestoDudas?: number;
+  /** La dirección que el cliente escribió en vez del pin (se ve en Hoy y la recibe el motorizado). */
+  direccionCliente?: string | null;
+  direccionClienteAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -345,8 +364,19 @@ export interface EntregasRepo {
   vivasDeMotorizado(motorizadoId: number): Promise<Entrega[]>;
   /** Las vivas de dias anteriores a `diaHoy` (AAAA-MM-DD): lo que el cierre del dia tiene que resolver. */
   vivasDeDiasAnteriores(diaHoy: string, limite: number): Promise<Entrega[]>;
-  /** Si ese telefono tiene alguna entrega viva con los mensajes automaticos en pausa (Numeros del dia): el reparto no le escribe. */
+  /**
+   * Si ese telefono tiene alguna entrega viva con los mensajes automaticos en
+   * pausa (Numeros del dia) o esperando que diga SÍ/NO a un pin lejano: el
+   * reparto no le escribe.
+   */
   pausadoPorTelefono(phone: string): Promise<boolean>;
+  /**
+   * La ubicacion que ESE cliente ya dio en el dia `dia` (su pin, un enlace, o
+   * la que puso una persona desde el panel; no la que ya tenia GSG), la mas
+   * reciente. null = hoy todavia no la tiene. Es la «única verdad» de la
+   * ubicacion: con ella, nada del sistema le vuelve a pedir el pin.
+   */
+  ubicacionDelClienteDelDia(phone: string, dia: string): Promise<Entrega | null>;
 
   registrarEvento(entregaId: number, tipo: TipoEventoEntrega, detalle?: string | null, payload?: Record<string, unknown> | null, at?: Date): Promise<void>;
   eventos(entregaId: number, limite?: number): Promise<EventoEntrega[]>;
@@ -436,6 +466,14 @@ interface EntregaRow {
   mensajes_pausados_at?: Date | null;
   envio_retenido_at?: Date | null;
   envio_liberado_at?: Date | null;
+  motorizado_sin_ubicacion_at?: Date | null;
+  pin_propuesto_lat?: number | string | null;
+  pin_propuesto_lng?: number | string | null;
+  pin_propuesto_at?: Date | null;
+  pin_propuesto_fuente?: string | null;
+  pin_propuesto_dudas?: number | string | null;
+  direccion_cliente?: string | null;
+  direccion_cliente_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -542,6 +580,14 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   mensajesPausadosAt: r.mensajes_pausados_at ?? null,
   envioRetenidoAt: r.envio_retenido_at ?? null,
   envioLiberadoAt: r.envio_liberado_at ?? null,
+  motorizadoSinUbicacionAt: r.motorizado_sin_ubicacion_at ?? null,
+  pinPropuestoLat: numOpc(r.pin_propuesto_lat ?? null),
+  pinPropuestoLng: numOpc(r.pin_propuesto_lng ?? null),
+  pinPropuestoAt: r.pin_propuesto_at ?? null,
+  pinPropuestoFuente: r.pin_propuesto_fuente ?? null,
+  pinPropuestoDudas: Number(r.pin_propuesto_dudas ?? 0),
+  direccionCliente: r.direccion_cliente ?? null,
+  direccionClienteAt: r.direccion_cliente_at ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -615,6 +661,14 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['mensajesPausadosAt', 'mensajes_pausados_at'],
   ['envioRetenidoAt', 'envio_retenido_at'],
   ['envioLiberadoAt', 'envio_liberado_at'],
+  ['motorizadoSinUbicacionAt', 'motorizado_sin_ubicacion_at'],
+  ['pinPropuestoLat', 'pin_propuesto_lat'],
+  ['pinPropuestoLng', 'pin_propuesto_lng'],
+  ['pinPropuestoAt', 'pin_propuesto_at'],
+  ['pinPropuestoFuente', 'pin_propuesto_fuente'],
+  ['pinPropuestoDudas', 'pin_propuesto_dudas'],
+  ['direccionCliente', 'direccion_cliente'],
+  ['direccionClienteAt', 'direccion_cliente_at'],
 ];
 
 const COLUMNAS_MOTORIZADO: Array<[keyof PatchMotorizado, string]> = [
@@ -863,6 +917,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         `select * from entregas
           where envio_retenido_at is null and ((estado = 'lista')
              or (estado = 'incidencia' and incidencia = 'sin_motorizado' and lat is not null and updated_at <= $1::timestamptz - interval '2 minutes')
+             or (estado = 'incidencia' and incidencia = 'consulta_ajena' and motorizado_sin_ubicacion_at is not null and ubicacion_estado = 'pendiente' and motorizado_id is null)
              or (estado = 'esperando_motorizado' and motorizado_estado = 'enviado' and motorizado_proximo_at is not null and motorizado_proximo_at <= $1)
              or (estado = 'esperando_motorizado' and motorizado_estado = 'respondio' and aviso_enviado_at is null and motorizado_proximo_at is not null and motorizado_proximo_at <= $1))
           order by (prioridad = 'urgente') desc, coalesce(motorizado_proximo_at, updated_at) asc, id asc
@@ -910,10 +965,22 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async pausadoPorTelefono(phone) {
       const { rows } = await pool.query<{ n: number | string }>(
         `select count(*)::int as n from entregas
-          where phone = $1 and mensajes_pausados_at is not null and estado = any($2::text[])`,
+          where phone = $1 and (mensajes_pausados_at is not null or pin_propuesto_at is not null) and estado = any($2::text[])`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
       return Number(rows[0]?.n ?? 0) > 0;
+    },
+    async ubicacionDelClienteDelDia(phone, dia) {
+      const { rows } = await pool.query<EntregaRow>(
+        `select * from entregas
+          where phone = $1 and dia = $2 and ubicacion_estado = 'recibida'
+            and lat is not null and lng is not null
+            and coalesce(ubicacion_fuente, '') not in ('', 'gsg')
+          order by ubicacion_at desc nulls last, id desc
+          limit 1`,
+        [phone, dia],
+      );
+      return rows[0] ? entregaDeFila(rows[0]) : null;
     },
 
     async registrarEvento(entregaId, tipo, detalle, payload, at) {

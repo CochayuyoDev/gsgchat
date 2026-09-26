@@ -13,9 +13,9 @@
  */
 
 import type { DesarrolladorRepo } from '../db/desarrollador.js';
-import { leerConfirmacionConReglas, leerEntregadoConReglas, leerTiempoConReglas } from '../entregas/interpretar.js';
+import { leerConfirmacionConReglas, leerEntregadoConReglas, leerPreguntaPorPedido, leerTiempoConReglas } from '../entregas/interpretar.js';
 import { detectarManipulacion } from '../ia/seguridad.js';
-import { clasificarConfirmarGsg, clasificarReglaGsg } from '../ia/agente-operativo.js';
+import { clasificarConfirmarGsg, clasificarReglaGsg, INSISTENCIAS_UBICACION } from '../ia/agente-operativo.js';
 import type { EntranteDePrueba } from './simular.js';
 
 export type Tono = 'ok' | 'info' | 'warn' | 'bad' | 'muted';
@@ -147,14 +147,25 @@ export interface ReglaEnTraza {
   trasGracias?: boolean;
   /** Es de «falta confirmar» y ya se le preguntó SÍ/NO (GSG ya tiene su dirección). */
   confirmar?: boolean;
+  /** Todavía se espera su ubicación (se le pidió y no la mandó). */
+  esperaUbicacion?: boolean;
+  /** Cuántas de las 3 insistencias fijas ya recibió por este pedido ANTES de este mensaje. */
+  insistencias?: number;
 }
+
+/** Cómo decide: la IA primero (solo clasifica), las reglas de respaldo. */
+const IA_PRIMERO = 'Con clave de IA, la IA clasifica primero (por qué / la hora / SÍ / NO / otra cosa) y las reglas quedan de respaldo si falla o se acaba el saldo; nunca redacta nada.';
 
 /** Qué hace la regla del dueño con lo que mandó el cliente (funcion pura: no cambia nada). */
 function lecturaDeLaRegla(e: EntranteDePrueba, regla: ReglaEnTraza): PasoTraza {
   const texto = (e.text ?? e.transcripcion ?? e.boton?.title ?? '').trim();
   const esUbicacion = Boolean(e.location) || /https?:\/\/\S*(maps|goo\.gl)/i.test(texto);
+  const pideHora = !esUbicacion && Boolean(texto) && leerPreguntaPorPedido(texto).pregunta && !(regla.confirmar && clasificarConfirmarGsg(texto, e.boton?.id) === 'si');
+  if (pideHora && (!regla.enSilencio || regla.trasGracias)) {
+    return { tono: 'info', titulo: 'Regla del dueño: pregunta por su pedido o la hora → SIEMPRE la hora estimada (texto fijo), sin gastar el cierre', detalle: `${IA_PRIMERO} Sin IA lo reconocen las reglas, aunque venga con faltas de tipeo o insultos.` };
+  }
   if (regla.enSilencio && regla.trasGracias && !esUbicacion) {
-    return { tono: 'info', titulo: 'Regla del dueño: ya recibió el agradecimiento y ahora pregunta algo → el cierre UNA vez con el número del motorizado asignado, pasa a una persona y desde ahí silencio', detalle: 'Sin motorizado asignado todavía, va el número que mandó GSG o el de soporte.' };
+    return { tono: 'info', titulo: 'Regla del dueño: ya recibió el agradecimiento y ahora pregunta otra cosa (no la hora) → el cierre UNA vez con el número del motorizado asignado, pasa a una persona y desde ahí silencio', detalle: 'Sin motorizado asignado todavía, va el número que mandó GSG o el de soporte.' };
   }
   if (regla.enSilencio) return { tono: 'muted', titulo: 'Regla del dueño: ya recibió el cierre (o el agradecimiento, si esto es su ubicación) → silencio, no se le contesta', detalle: esUbicacion ? 'Su ubicación igual se registra por dentro (y GSG se entera), pero no se le escribe nada.' : 'Lo que escriba queda en el chat para que lo vea una persona.' };
   if (esUbicacion) return { tono: 'info', titulo: 'Regla del dueño: es su ubicación → UBI REGISTRADA con «¡Muchas gracias!» (sin el cierre); si después pregunta algo, el cierre UNA vez con el número del motorizado' };
@@ -163,14 +174,23 @@ function lecturaDeLaRegla(e: EntranteDePrueba, regla: ReglaEnTraza): PasoTraza {
     if (c === 'si') return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): dice SÍ → «queda confirmado. ¡Muchas gracias!» (sin el cierre) y GSG se entera; si después pregunta algo, el cierre UNA vez con el número del motorizado' };
     if (c === 'no' || c === 'cambio') return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): dice NO (u otro día / otra dirección) → el cierre corto, pasa a una persona, GSG se entera y silencio' };
     if (c === 'por_que') return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): pregunta por qué → la explicación fija y otra vez SÍ o NO' };
-    return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): es otra cosa → el cierre UNA vez con el número y pasa a una persona', detalle: c === null ? 'Las reglas no lo tenían claro: si hay clave de IA, la IA solo clasifica (SÍ / NO / por qué / otra cosa); nunca redacta nada.' : 'Lo decidieron las reglas, sin IA.' };
+    return { tono: 'info', titulo: 'Regla del dueño («falta confirmar»): es otra cosa → el cierre UNA vez con el número y pasa a una persona', detalle: c === null ? IA_PRIMERO : 'Lo decidieron las reglas, sin IA.' };
   }
   const clase = texto ? clasificarReglaGsg(texto) : 'otra';
-  if (clase === 'por_que') return { tono: 'info', titulo: 'Regla del dueño: pregunta por qué se le pide la ubicación → la explicación fija y se le vuelve a pedir' };
+  if (clase === 'por_que') return { tono: 'info', titulo: 'Regla del dueño: pregunta por qué se le pide la ubicación → la explicación fija y se le vuelve a pedir', detalle: 'No cuenta como insistencia.' };
+  const total = INSISTENCIAS_UBICACION.length;
+  const hechas = regla.insistencias ?? 0;
+  if (regla.esperaUbicacion && hechas < total) {
+    return {
+      tono: 'info',
+      titulo: `Regla del dueño: es otra cosa sin mandar la ubicación → insistencia ${hechas + 1} de ${total}: se le vuelve a pedir la ubicación (texto fijo, con el botón)`,
+      detalle: `${hechas + 1 < total ? `Le quedan ${total - hechas - 1} antes del cierre. ` : 'Es la última: lo siguiente que no sea su ubicación recibe el cierre. '}${clase === null ? IA_PRIMERO : 'Lo decidieron las reglas, sin IA.'}`,
+    };
+  }
   return {
     tono: 'info',
-    titulo: 'Regla del dueño: es otra cosa → el cierre UNA vez con el número y pasa a una persona',
-    detalle: clase === null ? 'Las reglas no lo tenían claro: si hay clave de IA, la IA solo clasifica (por qué / otra cosa); nunca redacta nada.' : 'Lo decidieron las reglas, sin IA.',
+    titulo: regla.esperaUbicacion ? `Regla del dueño: otra cosa y ya recibió las ${total} insistencias → el cierre UNA vez con el número y pasa a una persona` : 'Regla del dueño: es otra cosa → el cierre UNA vez con el número y pasa a una persona',
+    detalle: clase === null ? IA_PRIMERO : 'Lo decidieron las reglas, sin IA.',
   };
 }
 

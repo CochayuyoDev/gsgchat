@@ -982,6 +982,54 @@ const PREGUNTA_PEDIDO = [
   'sigo esperando',
   'estoy esperando',
   'todavia lo espero',
+  // Más formas de pedir la hora o el estado (pedido del dueño, 25/09).
+  'ya sale mi pedido',
+  'ya sale',
+  'ya salio el pedido',
+  'ya salio el motorizado',
+  'ya salieron',
+  'como va el pedido',
+  'como va mi paquete',
+  'como va mi entrega',
+  'como va la entrega',
+  'como vamos',
+  'que paso con mi pedido',
+  'que pasa con mi pedido',
+  'que fue de mi pedido',
+  'en que va mi pedido',
+  'en que quedo mi pedido',
+  'como esta mi pedido',
+  'cuanto tiempo falta',
+  'cuanto tiempo demora',
+  'cuanto tiempo tarda',
+  'cuanto tiempo mas',
+  'cuanto mas',
+  'cuanto le falta al motorizado',
+  'en cuanto tiempo',
+  'cuanto tiempo',
+  'a que hora',
+  'que hora',
+  'hora de llegada',
+  'hora aproximada',
+  'hora de entrega',
+  'tiempo de entrega',
+  'tiempo de llegada',
+  'para que hora',
+  'para cuando',
+  'cuando me lo traen',
+  'cuando me traen',
+  'cuando lo entregan',
+  'cuando me lo entregan',
+  'cuando llega mi pedido',
+  'ya mero',
+  'ya casi',
+  'ya viene el motorizado',
+  'ya viene mi pedido',
+  'donde viene mi pedido',
+  'llega o no',
+  'va a llegar',
+  'vendran hoy',
+  'lo traen hoy',
 ];
 
 const NO_LLEGO = [
@@ -1023,8 +1071,46 @@ export function leerPreguntaPorPedido(texto: string): LecturaPreguntaPedido {
   const limpio = normalizar(texto);
   if (!limpio) return { pregunta: false, noLlego: false };
   const noLlego = Boolean(contieneFrase(limpio, NO_LLEGO));
-  const pregunta = noLlego || Boolean(contieneFrase(limpio, PREGUNTA_PEDIDO));
+  let pregunta = noLlego || Boolean(contieneFrase(limpio, PREGUNTA_PEDIDO)) || preguntaConErrores(limpio);
+  // «¿Cuánto cuesta enviar un paquete?» o «¿a qué hora atienden en la agencia?»
+  // no preguntan por SU pedido: si no habla de que llegue o salga, no cuenta.
+  if (pregunta && !noLlego && (COMERCIAL.test(limpio) || OFICINA.test(limpio)) && !LLEGADA.test(limpio)) pregunta = false;
   return { pregunta, noLlego };
+}
+
+const COMERCIAL = /\b(cuesta|cuestan|cobran|cobra|cobras|precio|precios|tarifa|tarifas|costo|costos|cotiza\w*|vale|valen)\b/;
+const OFICINA = /\b(atienden|atiende|atencion|abren|cierran|agencia|agencias|oficina|oficinas|sucursal|tienda)\b/;
+const LLEGADA = /\b(llega|llegan|llegara|llegue|llego|yega|yegue|viene|vienen|sale|salio|mi pedido|mi paquete|pedio|motorizado|demora|demoran|tarda|tardan)\b/;
+
+/** Distancia de edición (Levenshtein) entre dos palabras cortas. */
+function distancia(a: string, b: string): number {
+  if (a === b) return 0;
+  const f = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = f[0]!;
+    f[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = f[j]!;
+      f[j] = Math.min(f[j]! + 1, f[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return f[b.length]!;
+}
+
+const PALABRA_CUANDO = ['cuanto', 'cuantos', 'cuando', 'hora', 'demora', 'demoran', 'tarda', 'falta', 'faltan'];
+const PALABRA_PEDIDO = ['tiempo', 'llega', 'llegan', 'llegara', 'viene', 'vienen', 'pedido', 'paquete', 'entrega', 'motorizado', 'demora', 'minutos'];
+
+/**
+ * «en cuanto timepo llega el pedido maldita basura»: la pregunta de siempre
+ * con faltas de tipeo o insultos en medio. Palabra por palabra, admitiendo una
+ * letra cambiada, de más o de menos (dos en palabras largas): hace falta una
+ * palabra de «cuándo/cuánto/hora» y otra de «tiempo/llega/pedido».
+ */
+function preguntaConErrores(limpio: string): boolean {
+  const palabras = limpio.split(/\s+/).filter((p) => p.length >= 4);
+  const parece = (lista: string[]) => palabras.some((p) => lista.some((w) => distancia(p, w) <= (w.length >= 7 ? 2 : 1)));
+  return parece(PALABRA_CUANDO) && parece(PALABRA_PEDIDO);
 }
 
 // --------------------------------------------------------------------- IA

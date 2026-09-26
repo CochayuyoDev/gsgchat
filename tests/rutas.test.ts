@@ -15,7 +15,7 @@ import { createFakeRepos, type FakeRepos } from './fakes.js';
 import { revisarTelefono, parecidos, distanciaDeTipeo, PERU, GENERICO } from '../src/rutas/telefono.js';
 import { leerLote, prepararFilas } from '../src/rutas/lote.js';
 import { crearMotor, enHorario, pasoDe, OPCIONES_POR_DEFECTO, type OpcionesMotor } from '../src/rutas/motor.js';
-import { atenderRespuestaDeRuta, pareceNumeroEquivocado } from '../src/rutas/inbound.js';
+import { atenderRespuestaDeRuta, pareceNumeroEquivocado, TEXTO_NO_SOY_YO } from '../src/rutas/inbound.js';
 import { crearPuertoEnEspera, crearPuertoHttp, despacharReportes } from '../src/rutas/gsg.js';
 import { incidenciaDeErrorDeEnvio } from '../src/rutas/incidencias.js';
 
@@ -599,7 +599,7 @@ describe('lo que contesta el cliente', () => {
     });
 
     expect(salida.resultado).toBe('numero_equivocado');
-    expect(salida.responder).toMatch(/no le volveremos a escribir/i);
+    expect(salida.responder).toBe(TEXTO_NO_SOY_YO);
     const solicitud = repos.rutas._solicitudes[0]!;
     expect(solicitud.estado).toBe('supervision');
     expect(solicitud.incidencia).toBe('numero_equivocado');

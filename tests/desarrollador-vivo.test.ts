@@ -162,11 +162,17 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(chat.body.trazas.length).toBeGreaterThan(0);
   });
 
-  it('regla del dueño: tras UBI REGISTRADA, «¿a qué hora llega?» recibe el cierre UNA vez con el número, y luego SILENCIO; la traza lo cuenta', async () => {
-    const r = await escribir('51900000001', { tipo: 'texto', texto: '¿a qué hora llega?' });
+  it('regla del dueño: tras UBI REGISTRADA, «¿a qué hora llega?» recibe la hora estimada; «cuánto cuesta el envío» el cierre UNA vez con el número, y luego SILENCIO; la traza lo cuenta', async () => {
+    const h = await escribir('51900000001', { tipo: 'texto', texto: '¿a qué hora llega?' });
+    expect(h.status).toBe(200);
+    const th = pasos(h.body.traza);
+    expect(th).toContain('Regla del dueño: pregunta por su pedido o la hora → SIEMPRE la hora estimada (texto fijo), sin gastar el cierre');
+    expect(th).toMatch(/Contestó/);
+    expect(th).not.toMatch(/no se reciben consultas/);
+    const r = await escribir('51900000001', { tipo: 'texto', texto: 'cuánto cuesta el envío' });
     expect(r.status).toBe(200);
     const t = pasos(r.body.traza);
-    expect(t).toContain('Regla del dueño: ya recibió el agradecimiento y ahora pregunta algo → el cierre UNA vez con el número del motorizado asignado');
+    expect(t).toContain('Regla del dueño: ya recibió el agradecimiento y ahora pregunta otra cosa (no la hora) → el cierre UNA vez con el número del motorizado asignado');
     expect(t).toMatch(/Contestó \(texto fijo: la IA solo clasificó\): «Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
     const luego = await escribir('51900000001', { tipo: 'texto', texto: 'hola?' });
     const tl = pasos(luego.body.traza);
@@ -187,23 +193,38 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(t).toMatch(/Perfecto, tu pedido queda confirmado para hoy\. ¡Muchas gracias!»/);
     expect(t).not.toMatch(/no se reciben consultas/);
     expect((await entrega('PRUEBA-00002'))!.confirmacion_estado).toBe('confirmada');
-    // Pregunta después del agradecimiento: el cierre UNA vez con el número; después, silencio.
-    const luego = await escribir('51900000002', { tipo: 'texto', texto: '¿a qué hora llega?' });
+    // Pregunta por la hora después del agradecimiento: la hora estimada, sin gastar el cierre.
+    const hora = pasos((await escribir('51900000002', { tipo: 'texto', texto: '¿a qué hora llega?' })).body.traza);
+    expect(hora).toContain('pregunta por su pedido o la hora → SIEMPRE la hora estimada');
+    expect(hora).not.toMatch(/no se reciben consultas/);
+    // Otra consulta después del agradecimiento: el cierre UNA vez con el número; después, silencio.
+    const luego = await escribir('51900000002', { tipo: 'texto', texto: 'cuánto cuesta el envío' });
     const tl = pasos(luego.body.traza);
-    expect(tl).toContain('ya recibió el agradecimiento y ahora pregunta algo');
+    expect(tl).toContain('ya recibió el agradecimiento y ahora pregunta otra cosa (no la hora)');
     expect(tl).toMatch(/«Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
     const otra = await escribir('51900000002', { tipo: 'texto', texto: 'hola?' });
     expect(pasos(otra.body.traza)).toContain('Silencio: al cliente no se le escribió nada');
   }, 90_000);
 
-  it('regla del dueño: «¿por qué?» recibe la explicación fija; «cuánto cuesta el envío» el cierre con el número, y luego silencio', async () => {
+  it('regla del dueño: «¿por qué?» recibe la explicación fija; «cuánto cuesta el envío» → insistencias 1, 2 y 3 → a la 4.ª el cierre con el número, y luego silencio (la traza cuenta cada insistencia)', async () => {
     const porQue = await escribir('51900000011', { tipo: 'texto', texto: '¿Por qué me piden mi ubicación?' });
     const tp = pasos(porQue.body.traza);
     expect(tp).toContain('Regla del dueño: pregunta por qué se le pide la ubicación');
     expect(tp).toMatch(/Contestó \(texto fijo: la IA solo clasificó\): «Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado/);
     const otra = await escribir('51900000012', { tipo: 'texto', texto: 'cuánto cuesta el envío' });
-    const to = pasos(otra.body.traza);
-    expect(to).toContain('Regla del dueño: es otra cosa → el cierre UNA vez con el número');
+    const t1 = pasos(otra.body.traza);
+    expect(t1).toContain('insistencia 1 de 3: se le vuelve a pedir la ubicación');
+    expect(t1).toMatch(/«Para entregarte tu pedido necesitamos tu ubicación/);
+    expect(t1).not.toMatch(/no se reciben consultas/);
+    const t2 = pasos((await escribir('51900000012', { tipo: 'texto', texto: 'hola' })).body.traza);
+    expect(t2).toContain('insistencia 2 de 3');
+    expect(t2).toMatch(/«Aún no nos llega tu ubicación/);
+    const t3 = pasos((await escribir('51900000012', { tipo: 'texto', texto: '?' })).body.traza);
+    expect(t3).toContain('insistencia 3 de 3');
+    expect(t3).toMatch(/«Último aviso: sin tu ubicación/);
+    const cuarta = await escribir('51900000012', { tipo: 'texto', texto: 'qué tal' });
+    const to = pasos(cuarta.body.traza);
+    expect(to).toContain('ya recibió las 3 insistencias → el cierre UNA vez con el número');
     expect(to).toMatch(/Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
     const luego = await escribir('51900000012', { tipo: 'texto', texto: 'hola? me responden?' });
     expect(pasos(luego.body.traza)).toContain('Silencio: al cliente no se le escribió nada');

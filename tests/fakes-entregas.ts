@@ -19,7 +19,8 @@ let seqE = 1;
 let seqM = 1;
 let seqEv = 1;
 
-export function createFakeEntregas(): FakeEntregas {
+/** `reloj`: las fechas de las filas (el escenario de entregas pasa el suyo, como los mensajes). */
+export function createFakeEntregas(reloj: () => Date = () => new Date()): FakeEntregas {
   const entregas: Entrega[] = [];
   const motorizados: Motorizado[] = [];
   const eventos: EventoEntrega[] = [];
@@ -34,7 +35,7 @@ export function createFakeEntregas(): FakeEntregas {
     async crearMotorizado(input) {
       const existente = motorizados.find((m) => m.phone === input.phone);
       if (existente) return { motorizado: copiaM(existente), nuevo: false };
-      const ahora = new Date();
+      const ahora = reloj();
       const m: Motorizado = { id: seqM++, phone: input.phone, nombre: input.nombre, placa: input.placa ?? null, zona: input.zona ?? null, estado: input.estado ?? 'activo', entregasHoy: 0, entregasHoyDia: null, ultimoEncargoAt: null, ultimaLat: null, ultimaLng: null, ultimaPosicionAt: null, enlaceToken: null, enlaceVenceAt: null, createdAt: ahora, updatedAt: ahora };
       motorizados.push(m);
       return { motorizado: copiaM(m), nuevo: true };
@@ -60,7 +61,7 @@ export function createFakeEntregas(): FakeEntregas {
       const m = motorizados.find((x) => x.id === id);
       if (!m) return null;
       for (const [k, v] of Object.entries(patch)) if (v !== undefined) (m as unknown as Record<string, unknown>)[k] = v;
-      m.updatedAt = new Date();
+      m.updatedAt = reloj();
       return copiaM(m);
     },
     async quitarMotorizado(id) {
@@ -74,7 +75,7 @@ export function createFakeEntregas(): FakeEntregas {
     async crearEntrega(input) {
       const existente = entregas.find((e) => e.dia === input.dia && e.referencia === input.referencia);
       if (existente) return { entrega: copiaE(existente), nueva: false };
-      const ahora = new Date();
+      const ahora = reloj();
       const e: Entrega = {
         id: seqE++,
         dia: input.dia,
@@ -134,6 +135,14 @@ export function createFakeEntregas(): FakeEntregas {
         terminadaGsgAt: null,
         envioRetenidoAt: input.envioRetenidoAt ?? null,
         envioLiberadoAt: null,
+        motorizadoSinUbicacionAt: null,
+        pinPropuestoLat: null,
+        pinPropuestoLng: null,
+        pinPropuestoAt: null,
+        pinPropuestoFuente: null,
+        pinPropuestoDudas: 0,
+        direccionCliente: null,
+        direccionClienteAt: null,
         createdAt: ahora,
         updatedAt: ahora,
       };
@@ -182,7 +191,7 @@ export function createFakeEntregas(): FakeEntregas {
       const e = entregas.find((x) => x.id === id);
       if (!e) return null;
       for (const [k, v] of Object.entries(patch)) if (v !== undefined) (e as unknown as Record<string, unknown>)[k] = k === 'motorizadosDescartados' ? [...(v as number[])] : v;
-      e.updatedAt = new Date();
+      e.updatedAt = reloj();
       return copiaE(e);
     },
     async quitar(id) {
@@ -219,7 +228,7 @@ export function createFakeEntregas(): FakeEntregas {
     },
     async tocaMotorizado(ahora, limite) {
       return entregas
-        .filter((e) => !e.envioRetenidoAt && (e.estado === 'lista' || (e.estado === 'incidencia' && e.incidencia === 'sin_motorizado' && e.lat != null && e.updatedAt.getTime() <= ahora.getTime() - 2 * 60_000) || (e.estado === 'esperando_motorizado' && (e.motorizadoEstado === 'enviado' || (e.motorizadoEstado === 'respondio' && !e.avisoEnviadoAt)) && e.motorizadoProximoAt !== null && e.motorizadoProximoAt.getTime() <= ahora.getTime())))
+        .filter((e) => !e.envioRetenidoAt && (e.estado === 'lista' || (e.estado === 'incidencia' && e.incidencia === 'sin_motorizado' && e.lat != null && e.updatedAt.getTime() <= ahora.getTime() - 2 * 60_000) || (e.estado === 'incidencia' && e.incidencia === 'consulta_ajena' && Boolean(e.motorizadoSinUbicacionAt) && e.ubicacionEstado === 'pendiente' && !e.motorizadoId) || (e.estado === 'esperando_motorizado' && (e.motorizadoEstado === 'enviado' || (e.motorizadoEstado === 'respondio' && !e.avisoEnviadoAt)) && e.motorizadoProximoAt !== null && e.motorizadoProximoAt.getTime() <= ahora.getTime())))
         .sort((a, b) => Number(b.prioridad === 'urgente') - Number(a.prioridad === 'urgente') || (a.motorizadoProximoAt ?? a.updatedAt).getTime() - (b.motorizadoProximoAt ?? b.updatedAt).getTime() || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
@@ -250,10 +259,16 @@ export function createFakeEntregas(): FakeEntregas {
         .map(copiaE);
     },
     async pausadoPorTelefono(phone) {
-      return entregas.some((e) => e.phone === phone && Boolean(e.mensajesPausadosAt) && ESTADOS_ENTREGA_VIVOS.includes(e.estado));
+      return entregas.some((e) => e.phone === phone && (Boolean(e.mensajesPausadosAt) || Boolean(e.pinPropuestoAt)) && ESTADOS_ENTREGA_VIVOS.includes(e.estado));
+    },
+    async ubicacionDelClienteDelDia(phone, dia) {
+      const suyas = entregas
+        .filter((e) => e.phone === phone && e.dia === dia && e.ubicacionEstado === 'recibida' && e.lat != null && e.lng != null && !['', 'gsg'].includes(e.ubicacionFuente ?? ''))
+        .sort((a, b) => (b.ubicacionAt?.getTime() ?? 0) - (a.ubicacionAt?.getTime() ?? 0) || b.id - a.id);
+      return suyas[0] ? copiaE(suyas[0]) : null;
     },
     async registrarEvento(entregaId, tipo, detalle, payload, at) {
-      eventos.push({ id: seqEv++, entregaId, tipo, detalle: detalle ?? null, payload: payload ?? null, createdAt: at ?? new Date() });
+      eventos.push({ id: seqEv++, entregaId, tipo, detalle: detalle ?? null, payload: payload ?? null, createdAt: at ?? reloj() });
     },
     async eventos(entregaId, limite = 100) {
       return eventos.filter((ev) => ev.entregaId === entregaId).slice(0, limite).map((ev) => ({ ...ev }));

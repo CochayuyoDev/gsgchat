@@ -35,15 +35,45 @@ export interface ProveedorIA {
   chat(mensajes: MensajeIA[], opts: OpcionesChat): Promise<string>;
 }
 
+/**
+ * Un fallo de la CUENTA, no del momento: se acabó el saldo o la cuota
+ * (OpenAI: 429 con `insufficient_quota`, o 402), o la clave ya no vale (401).
+ * Reintentar no sirve: hay que recargar o poner otra clave, y se avisa.
+ */
+export type FalloCuentaIA = 'sin_saldo' | 'clave_invalida';
+
 export class ErrorIA extends Error {
   constructor(
     message: string,
     readonly proveedor: string,
     readonly detalle?: string,
+    readonly cuenta: FalloCuentaIA | null = null,
   ) {
     super(message);
     this.name = 'ErrorIA';
   }
+}
+
+const TEXTO_SIN_SALDO = /insufficient_quota|insufficient_funds|exceeded your current quota|quota exceeded|billing|credit balance|out of credits|insufficient (balance|credits?)|payment required/i;
+
+/** Lo que dice una respuesta HTTP de una API compatible con OpenAI: ¿es un fallo de la cuenta? */
+export function falloDeCuenta(status: number, cuerpo?: { error?: { code?: unknown; type?: unknown; message?: unknown } | string | null } | null): FalloCuentaIA | null {
+  const err = cuerpo?.error;
+  const code = typeof err === 'object' && err ? `${String(err.code ?? '')} ${String(err.type ?? '')}` : '';
+  const mensaje = typeof err === 'string' ? err : typeof err === 'object' && err ? String(err.message ?? '') : '';
+  if (status === 402) return 'sin_saldo';
+  if (status === 401) return 'clave_invalida';
+  if ((status === 429 || status === 403 || status === 400) && (TEXTO_SIN_SALDO.test(code) || TEXTO_SIN_SALDO.test(mensaje))) return 'sin_saldo';
+  return null;
+}
+
+/** De cualquier error que haya lanzado un proveedor: ¿es un fallo de la cuenta? */
+export function falloCuentaDe(error: unknown): FalloCuentaIA | null {
+  if (error instanceof ErrorIA) {
+    if (error.cuenta) return error.cuenta;
+    return TEXTO_SIN_SALDO.test(`${error.message} ${error.detalle ?? ''}`) ? 'sin_saldo' : null;
+  }
+  return null;
 }
 
 /**
@@ -147,7 +177,9 @@ export function crearProveedorPuter(token: string, cargar: (token: string) => Pr
       } catch (error) {
         if (error instanceof ErrorIA) throw error;
         cliente = null;
-        throw new ErrorIA('Puter no pudo responder', 'puter', explicarErrorPuter(error));
+        const explicado = explicarErrorPuter(error);
+        const cuenta: FalloCuentaIA | null = /agoto su asignacion/.test(explicado) ? 'sin_saldo' : /no vale/.test(explicado) ? 'clave_invalida' : null;
+        throw new ErrorIA('Puter no pudo responder', 'puter', explicado, cuenta);
       }
       const texto = limpiarRespuesta(typeof respuesta === 'string' ? respuesta : textoDeContenido(respuesta?.message?.content));
       if (!texto) throw new ErrorIA('Puter devolvio una respuesta vacia', 'puter');
@@ -171,8 +203,8 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
           body: JSON.stringify({ model: o.modelo, messages: mensajes, temperature: o.temperatura ?? 0.4, max_tokens: o.maxTokens ?? 1000 }),
           signal: control.signal,
         });
-        const cuerpo = (await r.json().catch(() => ({}))) as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
-        if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', cuerpo.error?.message);
+        const cuerpo = (await r.json().catch(() => ({}))) as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string; code?: unknown; type?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
+        if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', cuerpo.error?.message, falloDeCuenta(r.status, cuerpo));
         const texto = limpiarRespuesta(textoDeContenido(cuerpo.choices?.[0]?.message?.content));
         if (!texto) throw new ErrorIA('la API devolvio una respuesta vacia', 'openai');
         if (o.alUso && cuerpo.usage) {
@@ -341,6 +373,8 @@ export interface PruebaProveedor {
   ms: number;
   modelo: string;
   proveedor: string;
+  /** Si falló por la cuenta (sin saldo o clave que no vale). */
+  cuenta?: FalloCuentaIA | null;
 }
 
 /** Le pide al proveedor una frase corta y mide cuanto tarda. Nunca lanza. */
@@ -358,7 +392,8 @@ export async function probarProveedor(proveedor: ProveedorIA, modelo: string, ti
   } catch (error) {
     const e = error instanceof ErrorIA ? error : null;
     const detalle = e ? `${e.message}${e.detalle ? ` (${e.detalle})` : ''}` : error instanceof Error ? error.message : String(error);
-    return { ok: false, detalle: explicarFalloConexion(detalle), ms: Date.now() - inicio, modelo, proveedor: proveedor.nombre };
+    const cuenta = falloCuentaDe(error);
+    return { ok: false, detalle: cuenta === 'sin_saldo' ? 'Se acabó el saldo de la cuenta de ese servicio: recárgalo en su página (en OpenAI: platform.openai.com → Billing) y vuelve a probar.' : explicarFalloConexion(detalle), ms: Date.now() - inicio, modelo, proveedor: proveedor.nombre, cuenta };
   }
 }
 

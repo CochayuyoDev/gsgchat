@@ -33,6 +33,7 @@ export interface PuertaReglaGsg {
   reglaGsgActiva(): boolean;
   clienteEnSilencio(phone: string): Promise<boolean>;
   esMotorizado(phone: string): Promise<boolean>;
+  atendidoPorPersona?(phone: string, quien?: string): Promise<number>;
 }
 
 export interface OpcionesReglaGsg {
@@ -48,6 +49,12 @@ export function conReglaGsg(sender: Sender, opts: OpcionesReglaGsg): Sender {
     ...sender,
     async send(job: SendJob): Promise<SendOutcome> {
       const e = opts.entregas();
+      if (e && aMano(job) && !(await e.esMotorizado(job.phone).catch(() => false))) {
+        // Una persona le escribe al cliente desde el panel: queda atendido.
+        const r = await sender.send(job);
+        if (r.ok) await e.atendidoPorPersona?.(job.phone, 'una persona desde el panel').catch(() => 0);
+        return r;
+      }
       if (!e || aMano(job) || !e.modoGsg()) return sender.send(job);
       if (job.origen === 'ia' && !job.textoFijo && !(await e.esMotorizado(job.phone).catch(() => false))) {
         opts.log?.('regla del dueño: un texto del modelo no sale a un cliente en «Solo lo de GSG»', { phone: job.phone });

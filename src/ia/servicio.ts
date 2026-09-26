@@ -23,7 +23,7 @@ import type { StokyClient } from '../stoky/client.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { Monitor } from '../salud/monitor.js';
 import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../catalogo/tienda.js';
-import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, presetDe, probarProveedor, type MensajeIA, type ProveedorIA, type PruebaProveedor } from './proveedores.js';
+import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, falloCuentaDe, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor } from './proveedores.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { MODELO_GRATIS_POR_DEFECTO, modeloGratisEfectivo, modelosGratisEnVivo } from './modelos-gratis.js';
 import { ACCIONES_IA, COMO_TOMAR_PEDIDO, manualDelSistema, SISTEMA_PARA_CLIENTES, SISTEMA_PARA_CLIENTES_GSG } from './conocimiento-sistema.js';
@@ -98,7 +98,55 @@ export interface EstadoIA extends ConfigIA {
   modelosGratisOrigen: 'catalogo' | 'fijo';
   /** Si el agente operativo esta trabajando ahora (lo guardado, o segun el modo si no se eligio). */
   agenteOperativoEfectivo: boolean;
+  /** Se acabó el saldo de la IA (o la clave no vale): el aviso para recargar. null = responde bien. */
+  sinSaldo: AvisoSaldoIA | null;
 }
+
+/**
+ * El aviso de «se acabó el saldo»: lo que se enseña en la campana, en Inicio y
+ * en Asistente IA. Mientras dure, el sistema contesta con las respuestas
+ * automáticas (las reglas) y el cliente no nota nada.
+ */
+export interface AvisoSaldoIA {
+  motivo: FalloCuentaIA;
+  /** El servicio, dicho para la pantalla («OpenAI», «Groq»...). */
+  proveedor: string;
+  /** La frase completa, lista para enseñar. */
+  texto: string;
+  /** Dónde se recarga (o dónde se cambia la clave). */
+  enlace: string;
+  enlaceTexto: string;
+  desde: string;
+}
+
+/** Dónde se recarga el saldo de cada servicio. */
+const RECARGA: Record<string, { url: string; texto: string }> = {
+  openai: { url: 'https://platform.openai.com/settings/organization/billing/overview', texto: 'platform.openai.com → Billing' },
+  groq: { url: 'https://console.groq.com/settings/billing', texto: 'console.groq.com → Billing' },
+  openrouter: { url: 'https://openrouter.ai/settings/credits', texto: 'openrouter.ai → Credits' },
+  deepseek: { url: 'https://platform.deepseek.com/top_up', texto: 'platform.deepseek.com → Top up' },
+  together: { url: 'https://api.together.xyz/settings/billing', texto: 'api.together.xyz → Billing' },
+  mistral: { url: 'https://console.mistral.ai/billing', texto: 'console.mistral.ai → Billing' },
+  google: { url: 'https://aistudio.google.com/', texto: 'aistudio.google.com → Billing' },
+  puter: { url: 'https://puter.com/', texto: 'puter.com (tu cuenta)' },
+};
+
+/** El texto del aviso, en palabras de quien no programa. */
+export function textoAvisoSaldo(motivo: FalloCuentaIA, servicio: string, nombre: string): Omit<AvisoSaldoIA, 'desde' | 'motivo'> {
+  if (motivo === 'clave_invalida') {
+    return { proveedor: nombre, texto: `La clave de tu IA (${nombre}) ya no vale. Mientras tanto contesta con respuestas automáticas. Pega una clave nueva en Asistente IA`, enlace: '/panel#ia', enlaceTexto: 'Poner una clave nueva' };
+  }
+  const r = RECARGA[servicio] ?? null;
+  return {
+    proveedor: nombre,
+    texto: `Se acabó el saldo de tu IA (${nombre}). Mientras tanto contesta con respuestas automáticas. Recarga en ${r ? r.texto : `la página de ${nombre}`}`,
+    enlace: r ? r.url : '/panel#ia',
+    enlaceTexto: r ? 'Recargar saldo' : 'Ver el Asistente IA',
+  };
+}
+
+/** Cada cuánto se vuelve a probar el modelo mientras no hay saldo (entre medias contestan las reglas, al instante). */
+export const REINTENTO_SIN_SALDO_MS = 2 * 60_000;
 
 export interface TurnoIA {
   /** Que se hizo: se contesto, se derivo a una persona, fallo (y se dijo algo neutro), o se paro un intento de manipulacion. */
@@ -125,6 +173,8 @@ export interface ServicioIA {
   agenteOperativoActivo(): boolean;
   /** El modelo como clasificador del agente operativo (una palabra). Lanza si falla. */
   clasificarOperativo(mensajes: MensajeIA[]): Promise<string>;
+  /** El aviso de «se acabó el saldo de tu IA» (o la clave no vale), o null si responde bien. */
+  avisoSaldo(): AvisoSaldoIA | null;
   guardar(patch: Partial<ConfigIA> & { token?: string | null }): Promise<EstadoIA>;
   /** Cuanto se uso la IA hoy y en los ultimos 30 dias: llamadas por tipo, tokens, fallos. Ver uso.ts. */
   uso(): ResumenUsoIA;
@@ -239,6 +289,11 @@ export interface DepsIA {
   log?: (m: string, d?: Record<string, unknown>) => void;
   /** El examen del lector cada mañana solo (false en pruebas que cuentan mensajes). */
   examenAutomatico?: boolean;
+  /**
+   * El correo de aviso (Que todo funcione → Correo de aviso), si está: por ahí
+   * también sale UNA vez el aviso de «se acabó el saldo de tu IA».
+   */
+  correo?: () => { configurado(): { ok: boolean }; enviar(asunto: string, texto: string): Promise<{ ok: boolean; detalle: string }> } | undefined;
 }
 
 const CLAVE_CONFIG = 'ia.config';
@@ -387,7 +442,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   const sinVentas = (): boolean => (deps.modo?.() ?? 'completo') === 'gsg';
   /** El agente operativo: lo que se eligio en la pantalla o, sin eleccion, encendido en modo GSG. */
   const agenteOperativo = (): boolean => cfg.agenteOperativo ?? (deps.modo?.() ?? 'completo') === 'gsg';
-  const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen, agenteOperativoEfectivo: agenteOperativo() });
+  const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen, agenteOperativoEfectivo: agenteOperativo(), sinSaldo: avisoSaldo() });
 
   // Cada llamada al modelo queda contada por lo que era (respuesta a un
   // cliente, lectura para el sistema, orden del panel, prueba), con sus
@@ -395,16 +450,47 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   // "Uso de la IA" en la pantalla y lo que avisa cuando el proveedor cae.
   const uso: ContadorUsoIA = await crearContadorUsoIA({ settingsRepo, timezone: config.timezone, ahora: deps.ahora, log });
   async function chatContado(tipo: TipoUsoIA, mensajes: MensajeIA[], opts: { maxTokens?: number } = {}): Promise<string> {
+    // Sin saldo (o con la clave que ya no vale): entre prueba y prueba no se
+    // llama al modelo; quien llama sigue con las reglas al instante y el
+    // cliente no nota nada. Cada REINTENTO_SIN_SALDO_MS se vuelve a probar:
+    // si responde bien, el aviso se apaga solo.
+    const sin = uso.resumen().sinSaldo;
+    if (sin && tipo !== 'pruebas' && ahoraIA().getTime() - new Date(sin.ultimoIntento).getTime() < REINTENTO_SIN_SALDO_MS) {
+      throw new ErrorIA(sin.motivo === 'sin_saldo' ? 'se acabó el saldo de la IA: contestan las respuestas automáticas' : 'la clave de la IA no vale: contestan las respuestas automáticas', cfg.proveedor, sin.detalle, sin.motivo);
+    }
     const t0 = Date.now();
     let tokens: { tokensEntrada: number; tokensSalida: number } | undefined;
     try {
       const r = await elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens, alUso: (u) => { tokens = u; } });
-      uso.anotar(tipo, { ms: Date.now() - t0, ...(tokens ?? {}) });
+      if (uso.anotar(tipo, { ms: Date.now() - t0, ...(tokens ?? {}) })) log('la IA volvió a responder: se quita el aviso de saldo');
       return r;
     } catch (error) {
-      uso.anotarFallo(tipo, error instanceof ErrorIA ? `${error.message}${error.detalle ? ` (${error.detalle})` : ''}` : error instanceof Error ? error.message : String(error));
+      const detalle = error instanceof ErrorIA ? `${error.message}${error.detalle ? ` (${error.detalle})` : ''}` : error instanceof Error ? error.message : String(error);
+      const cuenta = falloCuentaDe(error);
+      if (uso.anotarFallo(tipo, detalle, cuenta) && cuenta) void avisarSinSaldo().catch(() => undefined);
       throw error;
     }
+  }
+
+  /** El aviso de «se acabó el saldo» tal como se enseña (null = la IA responde bien). */
+  function avisoSaldo(): AvisoSaldoIA | null {
+    const sin = uso.resumen().sinSaldo;
+    if (!sin) return null;
+    const servicio = cfg.proveedor === 'puter' ? 'puter' : cfg.servicio;
+    const nombre = cfg.proveedor === 'puter' ? 'Puter' : (presetDe(cfg.servicio)?.nombre ?? 'OpenAI').split(' (')[0]!;
+    return { motivo: sin.motivo, desde: sin.desde, ...textoAvisoSaldo(sin.motivo, servicio, nombre) };
+  }
+
+  /** UNA vez por episodio: al supervisor por WhatsApp y al correo de aviso, si están configurados. */
+  async function avisarSinSaldo(): Promise<void> {
+    const aviso = avisoSaldo();
+    if (!aviso) return;
+    log('la IA se quedó sin saldo o sin clave válida: contestan las respuestas automáticas', { motivo: aviso.motivo });
+    const texto = `⚠️ ${deps.nombreNegocio()}: ${aviso.texto}${aviso.enlace.startsWith('http') ? ` (${aviso.enlace})` : ''}. Cuando vuelva a responder, este aviso se quita solo.`;
+    const destino = deps.supervisor?.();
+    if (destino) await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', manual: true, origen: 'sistema', text: texto }).catch(() => undefined);
+    const correo = deps.correo?.();
+    if (correo?.configurado().ok) await correo.enviar(aviso.motivo === 'sin_saldo' ? 'Se acabó el saldo de tu IA' : 'La clave de tu IA ya no vale', texto).catch(() => undefined);
   }
 
   // El tono (tu / usted / segun el cliente) vive en los ajustes generales;
@@ -709,6 +795,23 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   await refrescarModelos().catch(() => undefined);
 
+  /** «Probar la conexión»: lo que hay en pantalla (candidata) o lo guardado. */
+  async function probarConexionDe(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; token?: string; modelo?: string }): Promise<PruebaProveedor> {
+    const prov = candidata?.proveedor ?? cfg.proveedor;
+    const modelo = candidata?.modelo?.trim() || (prov === cfg.proveedor ? modeloEfectivo() : (candidata?.modelo ?? ''));
+    if (prov === 'puter') {
+      const t = candidata?.token?.trim() || token;
+      if (!t) return { ok: false, detalle: 'No hay sesión de Puter: pulsa "Conectar con Puter" primero.', ms: 0, modelo, proveedor: 'puter' };
+      return probarProveedor(deps.proveedor ?? crearProveedorPuter(t), modelo || MODELO_GRATIS_POR_DEFECTO);
+    }
+    const baseUrl = candidata?.baseUrl?.trim() || cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '';
+    const clave = candidata?.token?.trim() || (candidata?.token === undefined ? token : '');
+    const preset = presetDe(candidata ? '' : cfg.servicio);
+    if (!clave && !preset?.sinClave && !/localhost|127\.0\.0\.1/.test(baseUrl)) return { ok: false, detalle: 'Falta la clave de la API: pégala y vuelve a probar.', ms: 0, modelo, proveedor: 'openai' };
+    if (!modelo) return { ok: false, detalle: 'Falta el modelo: escribe uno (o elige un servicio de la lista, que trae sugerencias).', ms: 0, modelo, proveedor: 'openai' };
+    return probarProveedor(deps.proveedor ?? crearProveedorOpenAI({ baseUrl, clave, fetchImpl: deps.fetchImpl }), modelo);
+  }
+
   /** Con que identidad y por donde ejecuta la IA operadora lo que se le pide. */
   function contextoDe(usuario: UsuarioSesion): ContextoAccion {
     const quien = usuario.porToken ? `la clave de API "${usuario.nombre || usuario.usuario}"` : usuario.nombre ? `${usuario.nombre} (${usuario.usuario})` : usuario.usuario;
@@ -747,6 +850,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     activa: () => cfg.activa && Boolean(token),
     agenteOperativoActivo: agenteOperativo,
     clasificarOperativo: (mensajes) => chatContado('lecturas', mensajes, { maxTokens: 8 }),
+    avisoSaldo,
     recargar,
     catalogo,
     async probarCatalogo() {
@@ -761,19 +865,16 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       return estado();
     },
     async probarConexion(candidata) {
-      const prov = candidata?.proveedor ?? cfg.proveedor;
-      const modelo = candidata?.modelo?.trim() || (prov === cfg.proveedor ? modeloEfectivo() : (candidata?.modelo ?? ''));
-      if (prov === 'puter') {
-        const t = candidata?.token?.trim() || token;
-        if (!t) return { ok: false, detalle: 'No hay sesión de Puter: pulsa "Conectar con Puter" primero.', ms: 0, modelo, proveedor: 'puter' };
-        return probarProveedor(deps.proveedor ?? crearProveedorPuter(t), modelo || MODELO_GRATIS_POR_DEFECTO);
+      // Lo que se prueba es lo guardado (sin otra clave en pantalla): su
+      // resultado enciende o apaga el aviso de «se acabó el saldo».
+      const esLoGuardado = !candidata || ((candidata.proveedor ?? cfg.proveedor) === cfg.proveedor && (!candidata.token?.trim() || candidata.token.trim() === token) && (!candidata.baseUrl?.trim() || candidata.baseUrl.trim() === cfg.baseUrl));
+      const r = await probarConexionDe(candidata);
+      if (esLoGuardado && token) {
+        if (r.ok) {
+          if (uso.limpiarSinSaldo()) log('«Probar la conexión» respondió bien: se quita el aviso de saldo');
+        } else if (r.cuenta && uso.marcarSinSaldo(r.cuenta, r.detalle)) void avisarSinSaldo().catch(() => undefined);
       }
-      const baseUrl = candidata?.baseUrl?.trim() || cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '';
-      const clave = candidata?.token?.trim() || (candidata?.token === undefined ? token : '');
-      const preset = presetDe(candidata ? '' : cfg.servicio);
-      if (!clave && !preset?.sinClave && !/localhost|127\.0\.0\.1/.test(baseUrl)) return { ok: false, detalle: 'Falta la clave de la API: pégala y vuelve a probar.', ms: 0, modelo, proveedor: 'openai' };
-      if (!modelo) return { ok: false, detalle: 'Falta el modelo: escribe uno (o elige un servicio de la lista, que trae sugerencias).', ms: 0, modelo, proveedor: 'openai' };
-      return probarProveedor(deps.proveedor ?? crearProveedorOpenAI({ baseUrl, clave, fetchImpl: deps.fetchImpl }), modelo);
+      return r;
     },
     async guardar(patch) {
       const { token: nuevoToken, ...resto } = patch;

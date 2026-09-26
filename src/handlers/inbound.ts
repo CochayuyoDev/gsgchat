@@ -800,7 +800,7 @@ export async function handleInboundMessage(
           : { atendida: false as const };
       if (enEntrega.atendida && enEntrega.responder) await responderEntrega(enEntrega);
       else if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
-        await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: s?.mapsUrl ?? null }));
+        await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: s?.mapsUrl ?? null }), { traspasaSilencio: ubiTraspasaSilencio() });
       } else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }));
       // Primero se cierra (con la regla del dueño, desde aqui silencio: ni el sticker sale).
       await cerrarTrasUbicacion();
@@ -843,18 +843,27 @@ export async function handleInboundMessage(
     }
   };
 
-  const reply = (text: string) =>
-    sender.send({ phone, kind: 'freeform', category: 'UTILITY', text });
+  const reply = (text: string, opts: { traspasaSilencio?: boolean } = {}) =>
+    sender.send({ phone, kind: 'freeform', category: 'UTILITY', text, ...(opts.traspasaSilencio ? { cierreTrasGracias: true } : {}) });
+
+  /**
+   * UBI REGISTRADA sale SIEMPRE que llega su ubicacion, aunque el chat
+   * estuviera callado por el cierre (decision del dueño, 25/09: mandar la
+   * ubicacion es justo lo que se le pedia y no puede quedarse sin respuesta).
+   * No sale dos veces (un pin repetido) ni a quien dijo «no soy yo».
+   */
+  const motivoAntes = String(contact.iaCerradaMotivo ?? '');
+  const ubiTraspasaSilencio = (): boolean => !motivoAntes.startsWith('ubicación registrada') && !motivoAntes.startsWith('no soy yo');
 
   /**
    * Una respuesta del modulo de entregas: con botones (SI / NO) si los trae
    * y el WhatsApp puede pintarlos; si no, el texto. El proveedor local cae
    * solo a texto cuando no puede con los botones.
    */
-  const responderEntrega = (r: { responder?: string; botones?: Array<{ id: string; title: string }> }) =>
+  const responderEntrega = (r: { responder?: string; botones?: Array<{ id: string; title: string }>; resultado?: string }) =>
     r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
-      : reply(r.responder ?? '');
+      : reply(r.responder ?? '', { traspasaSilencio: ['ubicacion', 'ubicacion_corregida'].includes(r.resultado ?? '') && ubiTraspasaSilencio() });
 
   /**
    * La preventa del courier (cotizar envio, distritos, asesor) solo trabaja
@@ -885,11 +894,32 @@ export async function handleInboundMessage(
     clasificar: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
     nombreNegocio: () => nombreNegocio(deps),
     log: (m, d) => console.warn(`[agente] ${m}`, d ?? ''),
+    ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),
   });
   /** Tras registrar la ubicacion, la IA se calla en este chat (su mensaje ya lleva el cierre). */
   const cerrarTrasUbicacion = async (): Promise<void> => {
     if (!agenteActivo() && !reglaGsg()) return;
-    await cerrarChat({ repos, entregas: deps.entregas }, contact, 'ubicación registrada').catch(() => undefined);
+    // Tras «no soy yo» el chat sigue con una persona tal cual. Si ya habia
+    // recibido el cierre, se apunta: tras el agradecimiento no le toca otro.
+    if (motivoAntes.startsWith('no soy yo')) return;
+    const yaTuvoCierre = /^(escribió otra cosa|preguntó después|consulta ajena)/.test(motivoAntes) || motivoAntes === 'ubicación registrada (tras el cierre)';
+    await cerrarChat({ repos, entregas: deps.entregas, ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}) }, contact, yaTuvoCierre ? 'ubicación registrada (tras el cierre)' : 'ubicación registrada').catch(() => undefined);
+  };
+
+  /**
+   * Con la regla del dueño, un pin (o enlace) que cae lejos del distrito de su
+   * pedido no se registra a ciegas: queda propuesto y se le pregunta UNA vez si
+   * es ahí, con botones SÍ / NO (ver entregas.revisarPin). true = ya se atendió.
+   */
+  const pinLejano = async (lat: number, lng: number, mapsUrl: string | null | undefined, fuente: string): Promise<boolean> => {
+    if (!deps.entregas || !reglaGsg()) return false;
+    const r = await deps.entregas.revisarPin(contact, { lat, lng, mapsUrl: mapsUrl ?? null, fuente }).catch((error) => {
+      request_log(deps, 'no se pudo revisar si el pin tiene sentido', error);
+      return { atendida: false as const };
+    });
+    if (!r.atendida) return false;
+    if (r.responder) await responderEntrega(r);
+    return true;
   };
 
   const askForLocation = (body: string) =>
@@ -957,6 +987,9 @@ export async function handleInboundMessage(
       await reply(explicarFallo(result.reason) + seguir);
       return;
     }
+    // El pin tiene que tener sentido (regla del dueño, 25/09): si cae lejos del
+    // distrito de su pedido, no se registra a ciegas; se le pregunta si es ahí.
+    if (await pinLejano(result.lat, result.lng, result.mapsUrl, 'pin de whatsapp')) return;
     const id = await repos.locations.save(contact.id, result, JSON.stringify(message.location));
     await repos.locations.confirm(id);
 
@@ -1170,6 +1203,9 @@ export async function handleInboundMessage(
     });
     if (hecho !== 'seguir') return;
   }
+
+  // Un enlace de mapa lejos del distrito de su pedido: como con el pin, se le pregunta si es ahí.
+  if (result.ok && (await pinLejano(result.lat, result.lng, result.mapsUrl, `enlace de mapa (${result.source})`))) return;
 
   // Con una solicitud de ubicacion abierta, esto es su respuesta: un enlace
   // de mapa la resuelve, y cualquier otra cosa la aparta para que la mire una

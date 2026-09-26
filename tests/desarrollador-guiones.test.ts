@@ -66,9 +66,10 @@ describe('«Mis casos»: el caso escrito a mano se entiende (o se dice qué lín
     expect(g.inicio).toBe('sin_pin');
     const escribe = g.pasos.filter((p) => p.tipo === 'escribe');
     expect(escribe[1]).toMatchObject({ quien: 'cliente', dice: { tipo: 'pin' }, espera: { contiene: 'Ubicación registrada' } });
-    // Tras el agradecimiento: el cierre con el número del motorizado asignado, y luego silencio.
-    expect(escribe[2]).toMatchObject({ quien: 'cliente', dice: { texto: '¿a qué hora llega?' }, espera: { contiene: 'no se reciben consultas', numeroDelMotorizado: true } });
-    expect(escribe[3]).toMatchObject({ quien: 'cliente', espera: { calla: true } });
+    // Tras el agradecimiento: la pregunta por la hora recibe la hora estimada; otra consulta, el cierre con el número del motorizado asignado, y luego silencio.
+    expect(escribe[2]).toMatchObject({ quien: 'cliente', dice: { texto: '¿a qué hora llega?' }, espera: { contiene: 'ya está con un motorizado' } });
+    expect(escribe[3]).toMatchObject({ quien: 'cliente', dice: { texto: '¿cuánto cuesta el envío?' }, espera: { contiene: 'no se reciben consultas', numeroDelMotorizado: true } });
+    expect(escribe[4]).toMatchObject({ quien: 'cliente', espera: { calla: true } });
     expect(escribe.at(-1)).toMatchObject({ quien: 'motorizado', dice: { texto: 'entregado' }, espera: { estado: ['entregada'] } });
   });
 
@@ -171,7 +172,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     expect(estado.resultados).toHaveLength(GUIONES.length);
   }, 480_000);
 
-  it('regla del dueño: «¿por qué?» → explicación → pin → UBI REGISTRADA con «¡Muchas gracias!» → motorizado → «¿a qué hora llega?» → cierre con el número del motorizado → SILENCIO; y «cuánto cuesta el envío» → cierre con el número → SILENCIO', async () => {
+  it('regla del dueño: «¿por qué?» → explicación → pin → UBI REGISTRADA con «¡Muchas gracias!» → motorizado → «¿a qué hora llega?» → la hora estimada → «cuánto cuesta el envío» → cierre con el número del motorizado → SILENCIO; y «cuánto cuesta el envío» → insistencias 1, 2 y 3 → cierre con el número → SILENCIO', async () => {
     const resultados = (await api('GET', '/admin/desarrollador/vivo/guiones')).body.resultados as ResultadoGuion[];
     const pin = resultados.find((x) => x.guion === 'porque_y_pin')!;
     expect(pin.pasos.map((p) => p.ok)).toEqual(pin.pasos.map(() => true));
@@ -184,15 +185,22 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     // Paso 3: el pedido le llega a un motorizado de prueba (su número es el que recibe el cliente).
     expect(pin.pasos[3]!.quien).toBe('sistema');
     const moto = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = $1`, [pin.referencia])).rows[0]!.phone;
-    expect(pin.pasos[4]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
-    expect(pin.pasos[4]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
-    expect(pin.pasos[5]!.respuesta).toBeNull();
+    // Paso 4: pregunta la hora → la hora estimada (sin gastar el cierre).
+    expect(pin.pasos[4]!.respuesta).toMatch(/ya está con un motorizado/);
+    expect(pin.pasos[4]!.respuesta).not.toMatch(/no se reciben consultas/);
+    expect(pin.pasos[5]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
+    expect(pin.pasos[5]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
+    expect(pin.pasos[6]!.respuesta).toBeNull();
     const consulta = resultados.find((x) => x.guion === 'consulta')!;
-    expect(consulta.pasos[1]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
-    expect(consulta.pasos[2]!.respuesta).toBeNull();
+    expect(consulta.pasos.map((p) => p.ok)).toEqual(consulta.pasos.map(() => true));
+    expect(consulta.pasos[1]!.respuesta).toMatch(/^Para entregarte tu pedido necesitamos tu ubicación/);
+    expect(consulta.pasos[2]!.respuesta).toMatch(/^Aún no nos llega tu ubicación/);
+    expect(consulta.pasos[3]!.respuesta).toMatch(/^Último aviso: sin tu ubicación/);
+    expect(consulta.pasos[4]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
+    expect(consulta.pasos[5]!.respuesta).toBeNull();
   });
 
-  it('«falta confirmar»: solo SÍ/NO (nunca la ubicación); SÍ → gracias → pregunta → cierre con el número del motorizado → silencio, NO → cierre → silencio, «¿por qué?» → explicación → SÍ', async () => {
+  it('«falta confirmar»: solo SÍ/NO (nunca la ubicación); SÍ → gracias → la hora → la hora estimada → otra consulta → cierre con el número del motorizado → silencio, NO → cierre → silencio, «¿por qué?» → explicación → SÍ', async () => {
     const resultados = (await api('GET', '/admin/desarrollador/vivo/guiones')).body.resultados as ResultadoGuion[];
     const si = resultados.find((x) => x.guion === 'confirmar_si')!;
     expect(si.ok).toBe(true);
@@ -200,9 +208,10 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     expect(si.pasos[0]!.respuesta).not.toMatch(/compartir tu ubicación/);
     expect(si.pasos[1]!.respuesta).toBe('Perfecto, tu pedido queda confirmado para hoy. ¡Muchas gracias!');
     const moto = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = $1`, [si.referencia])).rows[0]!.phone;
-    expect(si.pasos[3]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
-    expect(si.pasos[3]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
-    expect(si.pasos[4]!.respuesta).toBeNull();
+    expect(si.pasos[3]!.respuesta).toMatch(/ya está con un motorizado/);
+    expect(si.pasos[4]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
+    expect(si.pasos[4]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
+    expect(si.pasos[5]!.respuesta).toBeNull();
     const no = resultados.find((x) => x.guion === 'confirmar_no')!;
     expect(no.ok).toBe(true);
     expect(no.pasos[1]).toMatchObject({ estado: 'incidencia' });
@@ -215,7 +224,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
   });
 
   it('«Mis casos»: se guarda, se edita, se corre de punta a punta y se borra', async () => {
-    // Regla del dueño: tras el «queda confirmado», lo que pregunte recibe el cierre UNA vez; después, silencio.
+    // Regla del dueño: tras el «queda confirmado», la pregunta por su pedido recibe la hora; otra consulta, el cierre UNA vez; después, silencio.
     const miCaso = [
       'titulo: Reclama y luego cancela',
       'inicio: con ubicación',
@@ -224,6 +233,8 @@ describe('Módulo desarrollador: conversaciones completas', () => {
       'motorizado: 25',
       '=> estado: en camino',
       'cliente: por donde va??',
+      '=> dice: va en camino',
+      'cliente: cuánto cuesta el envío',
       '=> dice: no se reciben consultas',
       '=> con el número del motorizado',
       'adelantar: pasada la hora',

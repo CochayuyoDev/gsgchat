@@ -37,7 +37,8 @@ export interface FakeRutas extends RutasRepo {
 
 const VIVOS = ['pendiente', 'enviado', 'respondio'];
 
-export function createFakeRutas(): FakeRutas {
+/** `reloj`: las fechas de lotes y solicitudes (el escenario de entregas pasa el suyo, como los mensajes). */
+export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas {
   const lotes: Lote[] = [];
   const solicitudes: Solicitud[] = [];
   const eventos: EventoSolicitud[] = [];
@@ -89,7 +90,7 @@ export function createFakeRutas(): FakeRutas {
     },
 
     async crearLote(datos) {
-      const ahora = new Date();
+      const ahora = reloj();
       const lote: Lote = {
         id: `lote-${seqLote++}`,
         nombre: datos.nombre,
@@ -125,7 +126,7 @@ export function createFakeRutas(): FakeRutas {
       const lote = lotes.find((l) => l.id === id);
       if (!lote) return null;
       lote.estado = estado;
-      lote.updatedAt = new Date();
+      lote.updatedAt = reloj();
       return lote;
     },
 
@@ -153,7 +154,7 @@ export function createFakeRutas(): FakeRutas {
     async agregarSolicitudes(loteId, filas: NuevaSolicitud[]) {
       const creadas: Solicitud[] = [];
       for (const fila of filas) {
-        const ahora = new Date();
+        const ahora = reloj();
         const solicitud: Solicitud = {
           id: seqSolicitud++,
           loteId,
@@ -207,7 +208,7 @@ export function createFakeRutas(): FakeRutas {
     async actualizarSolicitud(id, patch: SolicitudPatch) {
       const solicitud = solicitudes.find((s) => s.id === id);
       if (!solicitud) throw new Error(`no existe la solicitud ${id}`);
-      Object.assign(solicitud, patch, { updatedAt: new Date() });
+      Object.assign(solicitud, patch, { updatedAt: reloj() });
       return { ...solicitud };
     },
 
@@ -295,7 +296,7 @@ export function createFakeRutas(): FakeRutas {
         tipo,
         detalle: detalle ?? null,
         payload: payload ?? null,
-        createdAt: new Date(),
+        createdAt: reloj(),
       });
     },
 
@@ -342,7 +343,7 @@ export function createFakeRutas(): FakeRutas {
         ultimoError: null,
         externoId: null,
         enviadoAt: null,
-        createdAt: new Date(),
+        createdAt: reloj(),
       };
       reportes.push(fila);
       return fila;
@@ -359,7 +360,7 @@ export function createFakeRutas(): FakeRutas {
       reporte.intentos++;
       if (extra?.externoId) reporte.externoId = extra.externoId;
       reporte.ultimoError = extra?.error ?? null;
-      if (estado === 'enviado') reporte.enviadoAt = new Date();
+      if (estado === 'enviado') reporte.enviadoAt = reloj();
     },
 
     async cifrasReportes() {

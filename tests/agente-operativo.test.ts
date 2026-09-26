@@ -1,13 +1,13 @@
 /**
  * El agente operativo de GSG Courier: con el cliente solo pide, valida y
  * registra la ubicación. Si preguntan por qué, explica y vuelve a pedirla;
- * ante una consulta ajena manda el cierre UNA vez y se calla (el chat pasa a
- * una persona); tras registrar la ubicación también se calla. El sistema
+ * ante otra cosa antes del pin insiste 3 veces pidiendo la ubicación y a la
+ * 4.ª manda el cierre UNA vez y se calla (el chat pasa a una persona); tras registrar la ubicación también se calla. El sistema
  * sigue con lo automático (confirmación, hora de llegada, entregado).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { clasificarPorReglas, cierreVigente, leerClase } from '../src/ia/agente-operativo.js';
+import { clasificarPorReglas, cierreVigente, leerClase, INSISTENCIAS_UBICACION } from '../src/ia/agente-operativo.js';
 import { rellenar, TEXTOS_POR_DEFECTO, textoDe, AJUSTES_ENTREGAS_POR_DEFECTO } from '../src/entregas/textos.js';
 import { crearEscenarioEntregas, PIN_LIMA, conPais, type EscenarioEntregas } from './escenario-entregas.js';
 
@@ -144,26 +144,37 @@ describe('el agente operativo en un día de entregas', () => {
     expect(await cerradaDe('987000002')).toBeNull();
   });
 
-  it('una consulta ajena recibe el cierre UNA vez (con el número), sin precios, y la IA se calla', async () => {
+  it('una consulta ajena antes del pin: 3 insistencias pidiendo la ubicación, luego el cierre UNA vez (con el número), sin precios, y la IA se calla', async () => {
     const antes = e.textosA('987000003').length;
     await e.contesta('987000003', { texto: '¿Cuánto cuesta enviar un paquete a Arequipa?' });
-    const nuevos = e.textosA('987000003').slice(antes);
+    await e.contesta('987000003', { texto: '¿y a Cusco?' });
+    await e.contesta('987000003', { texto: 'hola?' });
+    expect(e.textosA('987000003').slice(antes)).toEqual(INSISTENCIAS_UBICACION);
+    expect(await cerradaDe('987000003')).toBeNull();
+    const a = e.textosA('987000003').length;
+    await e.contesta('987000003', { texto: '¿cuánto cobran?' });
+    const nuevos = e.textosA('987000003').slice(a);
     expect(nuevos).toHaveLength(1);
-    // Sin motorizado todavía: el número de soporte.
-    expect(nuevos[0]).toBe('Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: +51 987 654 321.');
+    // Con motorizados activos, se le asigna uno SIN ubicación antes del cierre: su número (no el de soporte).
+    expect(nuevos[0]).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: \+51 999 000 \d{3}\.$/);
     expect(nuevos[0]).not.toMatch(/S\/|precio|tarifa/i);
     expect(await cerradaDe('987000003')).not.toBeNull();
     // Lo siguiente que escribe ya no recibe nada: lo ve una persona.
     await e.contesta('987000003', { texto: 'hola?? me responden' });
     await e.contesta('987000003', { texto: 'quiero hablar con alguien' });
-    expect(e.textosA('987000003')).toHaveLength(antes + 1);
+    expect(e.textosA('987000003')).toHaveLength(a + 1);
   });
 
-  it('con el cierre ya enviado, su pin se registra por dentro pero no se le escribe nada más (regla del dueño)', async () => {
+  it('con el cierre ya enviado, su pin se registra y SÍ recibe «Ubicación registrada» (es lo que se le pedía); después, otra consulta no recibe un segundo cierre', async () => {
     const antes = e.mensajesA('987000003').length;
     await e.contesta('987000003', { pin: { lat: PIN_LIMA.lat + 0.003, lng: PIN_LIMA.lng - 0.003 } });
-    expect(e.mensajesA('987000003')).toHaveLength(antes);
+    const nuevos = e.mensajesA('987000003').slice(antes).map((m) => String(m.body ?? ''));
+    expect(nuevos).toHaveLength(1);
+    expect(nuevos[0]).toMatch(/^✅ Ubicación registrada correctamente/);
     expect((await e.entrega('P-1003'))?.ubicacionEstado).toBe('recibida');
+    const tras = e.mensajesA('987000003').length;
+    await e.contesta('987000003', { texto: 'cuánto cuesta el envío' });
+    expect(e.mensajesA('987000003')).toHaveLength(tras);
   });
 
   it('al mandar su pin: «Ubicación registrada correctamente» + «¡Muchas gracias!» en UN mensaje (sin el cierre); lo que pregunte después recibe el cierre UNA vez y luego nada', async () => {
@@ -179,9 +190,15 @@ describe('el agente operativo en un día de entregas', () => {
     expect(await cerradaDe('987000001')).not.toBeNull();
     // Ni la pregunta SÍ/NO: la confirmación ya no hace falta.
     expect(t).not.toMatch(/SÍ o NO/);
-    // Pregunta después del agradecimiento: el cierre UNA vez (sin motorizado todavía: el soporte).
-    const a = e.textosA('987000001').length;
+    // Pregunta por la hora (aunque venga mezclada con otra cosa): la hora estimada, sin gastar el cierre.
+    const h = e.textosA('987000001').length;
     await e.contesta('987000001', { texto: 'muchas gracias, a qué hora llega más o menos? y cuánto cobran por envío' });
+    const hora = e.textosA('987000001').slice(h);
+    expect(hora).toHaveLength(1);
+    expect(hora[0]).not.toContain('no se reciben consultas');
+    // Otra consulta después del agradecimiento: el cierre UNA vez (sin motorizado todavía: el soporte).
+    const a = e.textosA('987000001').length;
+    await e.contesta('987000001', { texto: 'cuánto cuesta el envío' });
     expect(e.textosA('987000001').slice(a)).toEqual(['Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: +51 987 654 321.']);
     // Y desde ahí, NADA.
     const tras = e.mensajesA('987000001').length;
@@ -218,8 +235,8 @@ describe('el agente operativo en un día de entregas', () => {
     await e.contesta('987000004', { texto: 'mmm bueno pero mañana no estoy toda la tarde en casa sabes' });
     const nuevos = e.textosA('987000004').slice(antes);
     expect(e.ia.llamadas.at(-1)?.sistema).toContain('clasificador del canal de entregas de GSG Courier');
-    expect(nuevos).toHaveLength(1);
-    expect(nuevos[0]).toContain('Te derivamos con un asesor humano');
+    // «OTRA» antes del pin: la primera insistencia fija (nunca un texto del modelo).
+    expect(nuevos).toEqual([INSISTENCIAS_UBICACION[0]]);
   });
 
   it('la prueba del panel enseña lo mismo: una consulta de precio va al cierre, sin precios', async () => {

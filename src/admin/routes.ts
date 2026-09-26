@@ -44,6 +44,7 @@ import { providerOf } from '../settings/service.js';
 import { avisosDeMeta } from '../whatsapp/avisos-meta.js';
 import { correrGoteo } from '../campanas/goteo.js';
 import { crearCampana } from '../campanas/crear.js';
+import { TITULO_ALERTA, type TipoAlertaHoy } from '../entregas/alertas-hoy.js';
 import { registerGruposRoutes } from './grupos-routes.js';
 import { registerBuscarRoutes } from './buscar-routes.js';
 
@@ -301,6 +302,10 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         // «Revisar y confirmar antes de enviar»: lo que llegó de GSG no sale hasta que alguien lo confirma.
         const pc = r.porConfirmarEnvio;
         if (pc && pc.total > 0) avisos.push({ tipo: 'por_confirmar_envio', nivel: 'warn', texto: `${pc.aviso}. Confírmalos para enviar`, href: '/numeros', n: pc.total });
+        // «Hay que mirar» (Hoy): los pedidos trabados, uno por caso.
+        const porTipo = new Map<TipoAlertaHoy, number>();
+        for (const a of r.alertas ?? []) porTipo.set(a.tipo, (porTipo.get(a.tipo) ?? 0) + 1);
+        for (const [tipo, cuantas] of porTipo) avisos.push({ tipo: `hay_que_mirar_${tipo}`, nivel: 'bad', texto: `Hay que mirar: ${TITULO_ALERTA[tipo](cuantas)}`, href: '/hoy', n: cuantas });
         const n = r.cifras.incidencia;
         if (n > 0) avisos.push({ tipo: 'entregas', nivel: 'warn', texto: `${n} pedido${n === 1 ? '' : 's'} de hoy necesita${n === 1 ? '' : 'n'} a alguien`, href: '/hoy', n });
         if (r.cierrePendiente > 0) avisos.push({ tipo: 'cierre', nivel: 'info', texto: `${r.cierrePendiente} pedido${r.cierrePendiente === 1 ? '' : 's'} de ayer sigue${r.cierrePendiente === 1 ? '' : 'n'} sin cerrar`, href: '/hoy', n: r.cierrePendiente });
@@ -333,7 +338,10 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     }
     if (requierenPersona > 0) avisos.push({ tipo: 'reparto', nivel: 'warn', texto: `${requierenPersona} caso${requierenPersona === 1 ? '' : 's'} del reparto necesita${requierenPersona === 1 ? '' : 'n'} una persona`, href: modoGsg ? '/hoy' : '/rutas', n: requierenPersona });
     // La IA que falla tres veces seguidas es una clave vencida o un proveedor caido: el asistente se queda callado sin que se note.
-    if (deps.ia?.activa()) {
+    // Se acabó el saldo de la IA (o la clave no vale): contestan las respuestas automáticas, hay que recargar.
+    const saldoIa = deps.ia?.activa() ? (deps.ia.avisoSaldo?.() ?? null) : null;
+    if (saldoIa) avisos.push({ tipo: 'ia_saldo', nivel: 'bad', texto: saldoIa.texto, href: '/panel#ia' });
+    else if (deps.ia?.activa()) {
       const usoIa = deps.ia.uso();
       if (usoIa.fallosSeguidos >= 3) avisos.push({ tipo: 'ia_fallos', nivel: 'bad', texto: `El asistente IA falló ${usoIa.fallosSeguidos} veces seguidas${usoIa.ultimoFallo ? ` (${usoIa.ultimoFallo.detalle.slice(0, 80)})` : ''}: revisa la clave o el servicio`, href: '/panel#ia', n: usoIa.fallosSeguidos });
     }
@@ -421,6 +429,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     return {
       generadoEn: ahora,
       entregas: entregasHoy,
+      // El aviso de «se acabó el saldo de tu IA» (la línea roja de estado de Inicio).
+      iaSaldo: deps.ia?.activa() ? (deps.ia.avisoSaldo?.() ?? null) : null,
       hoy: {
         enviados: hoy.enviados,
         entregados: hoy.entregados,

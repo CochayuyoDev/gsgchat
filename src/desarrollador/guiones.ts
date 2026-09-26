@@ -11,9 +11,12 @@
  * GSGchat es disparar mensajes. Una vez que la IA manda el mensaje de UBI
  * REGISTRADA, ahí llega la IA: ya no vuelve a responder.» Al cliente solo le
  * llega la explicación (si pregunta por qué), UBI REGISTRADA (o «queda
- * confirmado») con «¡Muchas gracias!», o el cierre con el número. Si después
- * del agradecimiento pregunta algo, el cierre UNA vez con el número del
- * motorizado asignado; después, silencio. Lo del motorizado sigue igual por
+ * confirmado») con «¡Muchas gracias!», o, si antes del pin escribe otra cosa,
+ * hasta 3 insistencias fijas pidiendo la ubicación y recién a la 4.ª el
+ * cierre con el número (regla del dueño, 25/09). Si pregunta por su pedido o
+ * la hora, SIEMPRE la hora estimada (texto fijo), sin gastar el cierre. Si
+ * después del agradecimiento pregunta otra cosa, el cierre UNA vez con el
+ * número del motorizado asignado; después, silencio. Lo del motorizado sigue igual por
  * dentro.
  *
  * Como en la vida real, lo que llega de GSG espera a que una persona confirme
@@ -30,6 +33,7 @@ import type { FastifyInstance } from 'fastify';
 import type { DepsDesarrollador } from './seccion.js';
 import { generarPrueba } from './generar.js';
 import { esMotorizadoDePrueba, PREFIJO_REFERENCIA_PRUEBA } from './numeros.js';
+import { INSISTENCIAS_UBICACION } from '../ia/agente-operativo.js';
 
 const sinTildes = (t: string): string => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
 
@@ -79,25 +83,44 @@ const CON_MOTORIZADO = ['lista', 'esperando_motorizado', 'avisada'];
 const ENVIO_UBICACION: Paso = { tipo: 'confirmar_envio', espera: { respuesta: /ubicaci[oó]n/i, que: 'se confirma el envío y le llega el pedido de ubicación' } };
 const ENVIO_CONFIRMAR: Paso = { tipo: 'confirmar_envio', espera: { estado: ['esperando_confirmacion'], respuesta: /¿Nos confirmas que lo recibes hoy en esa dirección\? Responde SÍ o NO/i, que: 'se confirma el envío y le llega SOLO la pregunta SÍ/NO (nunca la ubicación)' } };
 const SI_CONFIRMADO: Espera = { estado: CON_MOTORIZADO, respuesta: /^Perfecto, tu pedido queda confirmado para hoy\. ¡Muchas gracias!$/, que: '«queda confirmado para hoy. ¡Muchas gracias!» (sin el cierre); GSG se entera' };
-/** Tras el agradecimiento, lo que pregunte recibe el cierre UNA vez con el número de SU motorizado. */
+/** Tras el agradecimiento, otra consulta (no la hora) recibe el cierre UNA vez con el número de SU motorizado. */
 const CIERRE_TRAS_GRACIAS: Espera = {
   respuesta: /^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/,
   numeroDelMotorizado: true,
   que: 'pregunta después del agradecimiento: el cierre UNA vez con el número del motorizado asignado, y el chat pasa a una persona',
 };
 
+/** Pregunta por su pedido o la hora: SIEMPRE la hora estimada (texto fijo), sin gastar el cierre. */
+const HORA_ESTIMADA: Espera = {
+  respuesta: /ya está con un motorizado|le llega|va en camino/i,
+  que: 'pregunta por su pedido o la hora: la hora estimada (texto fijo), sin gastar el cierre',
+};
+
+const literal = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Antes del pin, la insistencia n (1 a 3): el texto fijo, con el botón de ubicación. */
+const insiste = (n: number): Espera => ({
+  respuesta: new RegExp(`^${literal(INSISTENCIAS_UBICACION[n - 1]!)}`),
+  que: `insistencia ${n} de ${INSISTENCIAS_UBICACION.length}: se le vuelve a pedir la ubicación (texto fijo, con el botón)`,
+});
+/** Agotadas las 3 insistencias: el cierre UNA vez con el número. */
+const CIERRE_TRAS_INSISTIR: Espera = {
+  respuesta: /^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/,
+  que: `ya se le insistió ${INSISTENCIAS_UBICACION.length} veces: el cierre UNA vez con el número, y el chat pasa a una persona`,
+};
+
 export const GUIONES: Guion[] = [
   {
     id: 'porque_y_pin',
     titulo: 'Pregunta por qué, manda su pin y pregunta la hora',
-    resumen: 'Se le pide la ubicación, pregunta por qué, se le explica; manda su pin y recibe UBI REGISTRADA con «¡Muchas gracias!»; el pedido va a un motorizado; pregunta a qué hora llega y recibe el cierre UNA vez con el número de ese motorizado; vuelve a escribir y recibe SILENCIO. Por dentro el motorizado da su tiempo y lo entrega, sin escribirle al cliente.',
+    resumen: 'Se le pide la ubicación, pregunta por qué, se le explica; manda su pin y recibe UBI REGISTRADA con «¡Muchas gracias!»; el pedido va a un motorizado; pregunta a qué hora llega y recibe la hora estimada; pregunta cuánto cuesta el envío y recibe el cierre UNA vez con el número de ese motorizado; vuelve a escribir y recibe SILENCIO. Por dentro el motorizado da su tiempo y lo entrega, sin escribirle al cliente.',
     inicio: 'sin_pin',
     pasos: [
       ENVIO_UBICACION,
       cli('¿Por qué me piden mi ubicación?', { respuesta: /Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado/i, que: 'le explica por qué y se la vuelve a pedir' }),
       { tipo: 'escribe', quien: 'cliente', dice: { tipo: 'pin' }, espera: { estado: CON_MOTORIZADO, respuesta: /^✅ Ubicación registrada correctamente\.\n\s*https?:\/\/\S+\n\n¡Muchas gracias!\n(?![\s\S]*no se reciben consultas)(?![\s\S]*SÍ o NO)/, que: 'UBI REGISTRADA: el enlace del mapa y «¡Muchas gracias!» (sin el cierre ni la pregunta SÍ/NO)' } },
       { tipo: 'esperar_motorizado', espera: { estado: ['esperando_motorizado'], que: 'por dentro, el pedido le llega a un motorizado de prueba' } },
-      cli('¿A qué hora llega?', CIERRE_TRAS_GRACIAS),
+      cli('¿A qué hora llega?', HORA_ESTIMADA),
+      cli('¿Cuánto cuesta el envío?', CIERRE_TRAS_GRACIAS),
       cli('Hola?', { calla: true, que: 'SILENCIO: el cierre sale una sola vez' }),
       mot('40', { estado: ['avisada'], clienteCalla: true, que: 'el motorizado da su tiempo y GSG se entera; al cliente no se le escribe' }),
       mot('Entregado', { estado: ['entregada'], clienteCalla: true, que: 'lo entrega; al cliente no se le escribe' }),
@@ -106,22 +129,28 @@ export const GUIONES: Guion[] = [
   {
     id: 'consulta',
     titulo: 'Pregunta cuánto cuesta el envío',
-    resumen: 'Se le pide la ubicación y pregunta el precio del envío: recibe el cierre UNA vez con el número y pasa a una persona. Vuelve a escribir y recibe SILENCIO.',
+    resumen: 'Se le pide la ubicación y pregunta el precio del envío: se le vuelve a pedir la ubicación (insistencia 1 de 3); sigue sin mandarla y recibe la 2 y la 3; a la cuarta, el cierre UNA vez con el número y pasa a una persona. Vuelve a escribir y recibe SILENCIO.',
     inicio: 'sin_pin',
     pasos: [
       ENVIO_UBICACION,
-      cli('¿Cuánto cuesta el envío?', { respuesta: /^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/, que: 'el cierre con el número, y el chat pasa a una persona' }),
+      cli('¿Cuánto cuesta el envío?', insiste(1)),
+      cli('Hola?', insiste(2)),
+      cli('?', insiste(3)),
+      cli('¿Cuánto cuesta el envío? me responden?', CIERRE_TRAS_INSISTIR),
       cli('Hola?? me responden?', { calla: true, que: 'SILENCIO: el cierre sale una sola vez' }),
     ],
   },
   {
     id: 'personal',
     titulo: 'Cuenta algo personal',
-    resumen: 'En vez de mandar su ubicación cuenta cómo se siente: la IA no conversa, recibe el cierre con el número y luego silencio.',
+    resumen: 'En vez de mandar su ubicación cuenta cómo se siente: la IA no conversa; recibe las 3 insistencias fijas pidiendo la ubicación, luego el cierre con el número y después silencio.',
     inicio: 'sin_pin',
     pasos: [
       ENVIO_UBICACION,
-      cli('Me siento muy triste, no sé qué hacer', { respuesta: /no se reciben consultas[\s\S]*Número del motorizado/i, que: 'el cierre (la IA nunca conversa ni redacta nada)' }),
+      cli('Me siento muy triste, no sé qué hacer', insiste(1)),
+      cli('Hola', insiste(2)),
+      cli('¿Qué tal?', insiste(3)),
+      cli('Nadie me entiende', { respuesta: /no se reciben consultas[\s\S]*Número del motorizado/i, que: 'el cierre (la IA nunca conversa ni redacta nada)' }),
       cli('¿Me escuchas?', { calla: true, que: 'SILENCIO' }),
     ],
   },
@@ -155,13 +184,14 @@ export const GUIONES: Guion[] = [
   {
     id: 'confirmar_si',
     titulo: 'Confirmar: dice SÍ',
-    resumen: 'GSG ya tiene su dirección: se confirma el envío, le llega SOLO la pregunta SÍ/NO, dice SÍ y recibe «queda confirmado. ¡Muchas gracias!»; el pedido va a un motorizado; pregunta a qué hora llega y recibe el cierre UNA vez con el número de ese motorizado. Vuelve a escribir y recibe SILENCIO.',
+    resumen: 'GSG ya tiene su dirección: se confirma el envío, le llega SOLO la pregunta SÍ/NO, dice SÍ y recibe «queda confirmado. ¡Muchas gracias!»; el pedido va a un motorizado; pregunta a qué hora llega y recibe la hora estimada; pregunta cuánto cuesta el envío y recibe el cierre UNA vez con el número de ese motorizado. Vuelve a escribir y recibe SILENCIO.',
     inicio: 'con_pin',
     pasos: [
       ENVIO_CONFIRMAR,
       cli('Sí', SI_CONFIRMADO),
       { tipo: 'esperar_motorizado', espera: { estado: ['esperando_motorizado'], que: 'por dentro, el pedido le llega a un motorizado de prueba' } },
-      cli('¿A qué hora llega?', CIERRE_TRAS_GRACIAS),
+      cli('¿A qué hora llega?', HORA_ESTIMADA),
+      cli('¿Cuánto cuesta el envío?', CIERRE_TRAS_GRACIAS),
       cli('Hola?', { calla: true, que: 'SILENCIO: el cierre sale una sola vez' }),
     ],
   },
@@ -373,7 +403,15 @@ export async function correrGuion(ctx: ContextoGuion, guion: Guion): Promise<Res
       }
       const antes = (await ultimaA(telefono))?.id ?? null;
       const antesCliente = (await ultimaA(nuevo.phone))?.id ?? null;
-      await escribir(telefono, paso.dice);
+      // Un motorizado con otros pedidos entre manos (p. ej. uno que lleva sin
+      // ubicación el de otro guion) nombra el pedido, como en la vida real.
+      let dice = paso.dice;
+      if (paso.quien === 'motorizado' && dice.texto) {
+        const e = await entrega();
+        const lleva = e?.motorizadoId ? await deps.repos.entregas.vivasDeMotorizado(e.motorizadoId).catch(() => []) : [];
+        if (lleva.some((x) => x.id !== nuevo.id)) dice = { ...dice, texto: `${nuevo.referencia} ${dice.texto}` };
+      }
+      await escribir(telefono, dice);
       const c = await comprobar(paso.espera, telefono, antes, 30_000);
       // Regla del dueño: al cliente no se le escribe nada por este paso.
       if (c.ok && paso.espera?.clienteCalla) {

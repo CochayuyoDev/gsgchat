@@ -12,10 +12,15 @@
  *   => dice: Ubicación registrada    (lo que el sistema le tiene que contestar)
  *   esperar motorizado
  *   cliente: ¿a qué hora llega?
- *   => dice: no se reciben consultas (regla del dueño: tras el agradecimiento, el cierre UNA vez…)
+ *   => dice: ya está con un motorizado (la pregunta por su pedido o la hora: SIEMPRE la hora estimada)
+ *   cliente: ¿cuánto cuesta el envío?
+ *   => dice: no se reciben consultas (regla del dueño: tras el agradecimiento, otra consulta recibe el cierre UNA vez…)
  *   => con el número del motorizado  (…con el número del motorizado asignado)
  *   cliente: hola?
  *   => calla                         (y desde ahí, silencio)
+ *   (antes de su ubicación, «otra cosa» recibe primero 3 insistencias:
+ *    «=> dice: Para entregarte tu pedido», «=> dice: Aún no nos llega»,
+ *    «=> dice: Último aviso»; recién a la 4.ª «no se reciben consultas»)
  *   motorizado: 40                  (espera solo a que un motorizado de prueba tenga el pedido)
  *   => estado: en camino             (entregado, en camino, con motorizado, para una persona, cancelado…)
  *   adelantar: 2 h                   (30 min, 2 h, o «pasada la hora»)
@@ -48,6 +53,8 @@ cliente: [ubicación]
 => dice: Ubicación registrada
 esperar motorizado
 cliente: ¿a qué hora llega?
+=> dice: ya está con un motorizado
+cliente: ¿cuánto cuesta el envío?
 => dice: no se reciben consultas
 => con el número del motorizado
 cliente: hola?
@@ -258,7 +265,7 @@ motorizado: <lo que escribe el motorizado: minutos como «40», «estoy cerca»,
 adelantar: 30 min | 2 h | pasada la hora
 esperar motorizado
 
-Reglas (regla del dueño): al cliente solo se le pide la ubicación; no hay pregunta SÍ/NO. Si pregunta por qué se le pide, se le explica («=> dice: Es necesaria»). Si manda su ubicación recibe «Ubicación registrada» con «¡Muchas gracias!» (con ubicación: si dice SÍ, recibe «queda confirmado»). Si DESPUÉS de ese agradecimiento pregunta cualquier cosa, recibe UNA vez «no se reciben consultas» con el número del motorizado asignado, y desde ahí «=> calla». Cualquier otra cosa antes de la ubicación recibe una vez «no se reciben consultas» con el número, y luego «=> calla». El pedido llega al motorizado cuando ya tiene la ubicación; lo del motorizado sigue igual. Usa «=>» solo cuando la descripción diga qué debe pasar. Máximo 30 líneas.
+Reglas (regla del dueño): al cliente solo se le pide la ubicación; no hay pregunta SÍ/NO. Si pregunta por qué se le pide, se le explica («=> dice: Es necesaria»). Si manda su ubicación recibe «Ubicación registrada» con «¡Muchas gracias!» (con ubicación: si dice SÍ, recibe «queda confirmado»). Si DESPUÉS de ese agradecimiento pregunta cualquier cosa, recibe UNA vez «no se reciben consultas» con el número del motorizado asignado, y desde ahí «=> calla». Cualquier otra cosa antes de la ubicación (un saludo, un sticker, una consulta) NO recibe el cierre de inmediato: las 3 primeras veces se le vuelve a pedir la ubicación («=> dice: Para entregarte tu pedido necesitamos tu ubicación», luego «=> dice: Aún no nos llega tu ubicación», luego «=> dice: Último aviso»); recién a la 4.ª recibe una vez «no se reciben consultas» con el número, y luego «=> calla». Si en medio manda su ubicación, recibe «Ubicación registrada». El pedido llega al motorizado cuando ya tiene la ubicación; lo del motorizado sigue igual. Usa «=>» solo cuando la descripción diga qué debe pasar. Máximo 30 líneas.
 
 Ejemplo:
 ${EJEMPLO_CASO}`;

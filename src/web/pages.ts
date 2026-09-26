@@ -57,6 +57,7 @@ const CSS = `
   .in-hola h2 { font-size: 22px; margin: 0 0 6px; }
   .in-estado { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0; font-size: 14.5px; color: var(--texto-suave); }
   .in-estado b { color: var(--texto); font-weight: 600; }
+  .in-estado .in-estado-mal b { color: var(--rojo); }
   .in-estado a { font-weight: 600; text-decoration: none; }
   .in-estado a:hover { text-decoration: underline; }
   .in-punto { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--gris-claro); }
@@ -1211,6 +1212,8 @@ ${warning}
     @media (max-width: 900px) { .ia-pasos { grid-template-columns: 1fr; } }
     .ia-paso { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
     .ia-paso b { display: block; margin-bottom: 2px; }
+    .ia-saldo { border: 1px solid var(--rojo); background: var(--rojo-suave); border-radius: var(--radio); padding: 10px 14px; margin: 0 0 12px; font-size: 14px; line-height: 1.45; }
+    .ia-saldo a { font-weight: 600; margin-left: 4px; white-space: nowrap; }
     .ia-paso .estado { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
     .ia-paso .estado.ok { background: var(--ok); } .ia-paso .estado.bad { background: var(--bad); }
     /* Los 4 pasos de esta pantalla: mismo patron de pestañas numeradas que
@@ -1226,6 +1229,7 @@ ${warning}
     @media (max-width: 560px) { .ia-tabs button { flex-direction: column; justify-content: center; text-align: center; gap: 4px; padding: 8px 6px; font-size: 12px; } }
     .s-app.modo-completo .solo-gsg { display: none !important; }
   </style>
+  <div class="ia-saldo hidden" id="ia-saldo" role="alert"></div>
   <p class="muted solo-completo">Contesta solo a tus clientes por WhatsApp con lo que le cuentes de tu negocio. Cuando no sepa algo o el cliente pida hablar con alguien, se calla en ese chat y te avisa.
   Funciona con la IA de <a href="https://puter.com" target="_blank" rel="noopener">Puter</a> (una sola cuenta para GPT, Claude, Gemini y más) o con cualquier servicio de IA con clave (OpenAI, Groq, Google…).</p>
   <p class="muted solo-gsg">Atiende a tus clientes por WhatsApp como <b>agente operativo</b>: les pide su ubicación, la valida y la registra. No da precios ni atiende otras consultas: a esas les manda un mensaje de cierre con el número de soporte y pasa el chat a una persona. Funciona con tu clave de OpenAI (consumo muy bajo).</p>
@@ -1787,6 +1791,8 @@ function pintarEstadoInicio(r) {
   if (!caja) return;
   var p = r.primerosPasos || {};
   var faltan = [];
+  /* Se acabó el saldo de la IA: lo primero, en rojo, con el enlace para recargar. */
+  if (r.iaSaldo) faltan.push({ nivel: 'bad', texto: r.iaSaldo.texto, href: r.iaSaldo.enlace, boton: r.iaSaldo.enlaceTexto, externo: /^https?:/.test(r.iaSaldo.enlace) });
   if (!r.numero.conectado) faltan.push({ nivel: 'bad', texto: 'WhatsApp sin conectar', href: '/setup', boton: 'Conectar' });
   else if (r.numero.pausado) faltan.push({ nivel: 'warn', texto: 'Los envíos están pausados', href: '/panel#estado', boton: 'Ver por qué' });
   var conEntregas = Boolean(r.entregas) && !(document.querySelector('.s-app') && document.querySelector('.s-app').getAttribute('data-gsg') === '0');
@@ -1798,7 +1804,7 @@ function pintarEstadoInicio(r) {
     return;
   }
   var f = faltan[0];
-  caja.innerHTML = '<span class="in-punto ' + f.nivel + '"></span><span><b>' + esc(f.texto) + '.</b></span><a href="' + esc(f.href) + '"' + (f.accion ? ' data-accion="' + esc(f.accion) + '"' : '') + '>' + esc(f.boton) + ' →</a>' +
+  caja.innerHTML = '<span class="in-punto ' + f.nivel + '"></span><span' + (f.nivel === 'bad' ? ' class="in-estado-mal"' : '') + '><b>' + esc(f.texto) + '.</b></span><a href="' + esc(f.href) + '"' + (f.externo ? ' target="_blank" rel="noopener"' : '') + (f.accion ? ' data-accion="' + esc(f.accion) + '"' : '') + '>' + esc(f.boton) + ' →</a>' +
     (faltan.length > 1 ? '<a href="#" id="in-estado-mas" style="font-weight:400">y ' + (faltan.length - 1) + ' cosa' + (faltan.length === 2 ? '' : 's') + ' más</a>' : '');
   var sup = caja.querySelector('[data-accion="supervisor"]');
   if (sup) sup.onclick = function (ev) { ev.preventDefault(); pedirSupervisor(); };
@@ -3315,6 +3321,18 @@ IA_PASOS.forEach(function (p) {
   var tab = document.getElementById('ia-tab-' + p);
   if (tab) tab.onclick = function () { iaMostrarPaso(p); };
 });
+/* «Se acabó el saldo de tu IA»: mientras tanto contestan las respuestas automáticas; se quita solo cuando vuelve. */
+function enlaceSaldoIa(s) {
+  var externo = /^https?:/.test(s.enlace);
+  return '<a href="' + esc(s.enlace) + '"' + (externo ? ' target="_blank" rel="noopener"' : '') + '>' + esc(s.enlaceTexto) + ' →</a>';
+}
+function pintarSaldoIa(s) {
+  var caja = document.getElementById('ia-saldo');
+  if (!caja) return;
+  if (!s) { caja.classList.add('hidden'); caja.innerHTML = ''; return; }
+  caja.innerHTML = '<b>' + esc(s.texto) + '.</b> ' + enlaceSaldoIa(s) + '<br><span class="muted">Cuando tu IA vuelva a responder, este aviso se quita solo. También puedes pulsar «Probar la conexión» después de recargar.</span>';
+  caja.classList.remove('hidden');
+}
 async function loadIa() {
   /* Enlace de ayuda "Abrir el tablero" (?abrir=no-entendido#ia): salta al
      paso 3 y expande el acordeon, en vez de dejarlo perdido arriba de todo. */
@@ -3330,6 +3348,7 @@ async function loadIa() {
   loadVoz();
   try {
     var e = await api('/admin/ia');
+    pintarSaldoIa(e.sinSaldo);
     window.__iaModelos = e.modelosSugeridos;
     IA_SERVICIOS = e.servicios || [];
     var selServicio = document.getElementById('ia-servicio');

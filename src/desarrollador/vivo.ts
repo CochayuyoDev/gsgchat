@@ -28,6 +28,8 @@
 import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { normalizePhone } from '../db/repos.js';
+import { INSISTENCIAS_UBICACION } from '../ia/agente-operativo.js';
+import { CENTROS_DISTRITOS, distritoDePedido } from '../entregas/distritos-centro.js';
 import { esClienteDePrueba, esMotorizadoDePrueba, esNumeroDePrueba } from './numeros.js';
 import { crearSimulador, NoEsDePrueba, type EntranteDePrueba } from './simular.js';
 import { ESTADO_ENTREGA, fotoDe, trazaDe, type Traza } from './traza.js';
@@ -41,8 +43,15 @@ const PUNTOS_LIMA: Array<[number, number]> = [
   [-12.1211, -77.0301], [-12.1087, -76.9975], [-12.0983, -77.0012], [-12.0839, -77.0364], [-12.0592, -77.0521],
   [-12.0781, -77.0486], [-12.0977, -77.0365], [-12.0754, -77.0629], [-12.1269, -77.0163], [-12.0464, -77.0308],
 ];
-const puntoAlAzar = (): [number, number] => {
-  const [lat, lng] = PUNTOS_LIMA[Math.floor(Math.random() * PUNTOS_LIMA.length)]!;
+/**
+ * El pin que manda un cliente de prueba: dentro del distrito de su pedido si
+ * se sabe cuál es (un pin lejos de su distrito recibe la pregunta «¿es ahí?»,
+ * ver src/entregas/servicio.ts → revisarPin); si no, un punto de Lima al azar.
+ */
+const puntoAlAzar = (pedido?: { distrito?: string | null; direccion?: string | null }): [number, number] => {
+  const distrito = pedido ? distritoDePedido(pedido) : null;
+  const centro = distrito ? CENTROS_DISTRITOS[distrito] : undefined;
+  const [lat, lng] = centro ? [centro.lat, centro.lng] : PUNTOS_LIMA[Math.floor(Math.random() * PUNTOS_LIMA.length)]!;
   // Unos metros de ruido: dos clientes no mandan el mismo pin exacto.
   return [Number((lat + (Math.random() - 0.5) * 0.004).toFixed(6)), Number((lng + (Math.random() - 0.5) * 0.004).toFixed(6))];
 };
@@ -125,12 +134,14 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
     // La regla del dueño («Solo lo de GSG»): la traza cuenta qué hizo con el cliente.
     const enSilencio = quien === 'cliente' && Boolean(await deps.entregas?.clienteEnSilencio(telefono).catch(() => false));
     const motivoCierre = enSilencio ? String((await deps.repos.contacts.getByPhone(telefono).catch(() => null))?.iaCerradaMotivo ?? '') : '';
+    const situacion = quien === 'cliente' ? await deps.entregas?.situacionGsg(telefono).catch(() => null) : null;
     const regla = {
       activa: Boolean(deps.entregas?.reglaGsgActiva()),
       enSilencio,
       // Lo último que recibió fue el agradecimiento (UBI REGISTRADA o «queda confirmado»): lo que pregunte ahora recibe el cierre UNA vez.
-      trasGracias: motivoCierre === 'ubicación registrada' || motivoCierre === 'confirmó que lo recibe hoy',
-      confirmar: quien === 'cliente' && (await deps.entregas?.situacionGsg(telefono).catch(() => null))?.confirmar === 'pedida',
+      trasGracias: motivoCierre.startsWith('ubicación registrada') || motivoCierre === 'confirmó que lo recibe hoy',
+      confirmar: situacion?.confirmar === 'pedida',
+      ...(quien === 'cliente' && !enSilencio ? await insistenciasDe(telefono, situacion?.ubicacion === 'pendiente') : {}),
     };
     await simulador.escribir({ ...entrada, phone: telefono });
     const traza = await trazaDe(db, telefono, quien, entrada, antes, Boolean(deps.gsg?.conectado()), regla);
@@ -140,11 +151,28 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
     return traza;
   }
 
+  /**
+   * Cuántas de las 3 insistencias («otra cosa» sin la ubicación) ya recibió ese
+   * cliente por su pedido en curso: se cuentan como el agente, desde que se
+   * abrió su solicitud (o en el último día).
+   */
+  async function insistenciasDe(telefono: string, pendienteGsg: boolean): Promise<{ esperaUbicacion: boolean; insistencias: number }> {
+    const contacto = await deps.repos.contacts.getByPhone(telefono).catch(() => null);
+    const abierta = contacto ? ((await deps.repos.rutas.abiertaPorContacto(contacto.id).catch(() => null)) ?? (await deps.repos.rutas.abiertaPorTelefono(telefono).catch(() => null))) : null;
+    const esperaUbicacion = Boolean(abierta) || pendienteGsg;
+    if (!contacto || !esperaUbicacion) return { esperaUbicacion, insistencias: 0 };
+    const desde = abierta?.createdAt ? new Date(abierta.createdAt).getTime() : Date.now() - 24 * 60 * 60_000;
+    const salientes = (await deps.repos.messages.listMessages(contacto.id, 80).catch(() => []))
+      .filter((m) => m.direction === 'out' && new Date(m.createdAt as unknown as string).getTime() >= desde)
+      .map((m) => String(m.body ?? '').replace(/\n\n\(se pidio la ubicacion\)$/, '').trim());
+    return { esperaUbicacion, insistencias: salientes.filter((b) => INSISTENCIAS_UBICACION.includes(b)).length };
+  }
+
   /** El pin de ese cliente: el de su pedido si GSG ya lo tenia, si no uno de Lima. */
   async function pinDe(telefono: string): Promise<[number, number]> {
     const hoy = deps.entregas ? (await deps.entregas.resumen()).entregas : [];
     const e = hoy.find((x) => x.phone === telefono && x.lat != null && x.lng != null);
-    return e ? [e.lat!, e.lng!] : puntoAlAzar();
+    return e ? [e.lat!, e.lng!] : puntoAlAzar(hoy.find((x) => x.phone === telefono));
   }
 
   app.get('/admin/desarrollador/vivo/lista', async (_request, reply) => {
@@ -247,7 +275,7 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
           // Quien ya dio su ubicacion no la manda otra vez (seria una correccion): confirma.
           if (accion === 'ubicacion' && (e.ubicacionEstado === 'recibida' || e.ubicacionEstado === 'no_hace_falta')) accion = 'confirma';
           if (accion === 'ubicacion') {
-            const [lat, lng] = e.lat != null && e.lng != null ? [e.lat, e.lng] : puntoAlAzar();
+            const [lat, lng] = e.lat != null && e.lng != null ? [e.lat, e.lng] : puntoAlAzar(e);
             await escribirConTraza({ phone: e.phone, location: { latitude: lat, longitude: lng } });
           } else if (accion !== 'calla') {
             await escribirConTraza({ phone: e.phone, text: FRASES[accion] });

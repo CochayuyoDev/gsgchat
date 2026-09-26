@@ -32,7 +32,8 @@ import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
-import { payloadIncidencia, payloadResumen, type PuertoGsg } from './gsg.js';
+import { payloadIncidencia, payloadResumen, payloadUbicacion, type PuertoGsg } from './gsg.js';
+import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
 import {
   DESCRIPCION_PASO,
   PLANTILLAS,
@@ -595,7 +596,32 @@ export function crearMotor(deps: MotorDeps): Motor {
       // cola y se vuelve a mirar (al reanudarlo sale en cuanto le toque).
       const pausado = async (phone: string | null): Promise<boolean> =>
         Boolean(phone) && typeof repos.entregas?.pausadoPorTelefono === 'function' && (await repos.entregas.pausadoPorTelefono(phone!).catch(() => false));
-      for (let vueltas = 0; siguiente && vueltas < 50 && (await pausado(siguiente.phone)); vueltas++) {
+      // La red de seguridad de la «única verdad» de la ubicacion: si ese
+      // telefono ya tiene hoy su ubicacion registrada en las entregas (venga
+      // por donde venga), NO se le pide otra vez: la solicitud (y cualquier
+      // otra abierta de ese telefono) pasa a resuelta con ese punto y el motor
+      // sigue con el siguiente. Asi un recordatorio nunca le llega a quien ya
+      // mando su pin, aunque algun camino se haya olvidado de cerrarla.
+      const yaTieneUbicacion = async (s: Solicitud): Promise<boolean> => {
+        const registrada = await ubicacionYaRegistrada(repos, s.phone, diaEnZona(momento, opciones.timezone));
+        if (!registrada || registrada.lat == null || registrada.lng == null) return false;
+        const cerradas = await resolverPorUbicacion(repos, s.phone!, { lat: registrada.lat, lng: registrada.lng, mapsUrl: registrada.mapsUrl, fuente: registrada.ubicacionFuente }, { ahora: momento, motivo: `ya la había mandado (pedido ${registrada.referencia})` });
+        // Si era de OTRO pedido del mismo cliente (que aun no la tenia), GSG se
+        // entera por aqui, como cuando el reparto la resuelve.
+        for (const c of cerradas) {
+          if (!c.referencia || c.referencia === registrada.referencia) continue;
+          const lote = await repos.rutas.lote(c.loteId).catch(() => null);
+          if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: payloadUbicacion(c, lote) }).catch(() => undefined);
+        }
+        deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
+        return true;
+      };
+      for (let vueltas = 0; siguiente && vueltas < 50; vueltas++) {
+        if (await yaTieneUbicacion(siguiente)) {
+          [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+          continue;
+        }
+        if (!(await pausado(siguiente.phone))) break;
         await repos.rutas.actualizarSolicitud(siguiente.id, { proximoIntentoAt: new Date(momento.getTime() + 5 * 60_000) });
         [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
       }

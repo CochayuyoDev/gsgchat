@@ -61,6 +61,9 @@ const deConfirmar = (n: number) => ({
   remitente: 'Juan Quispe',
 });
 
+/** Un pin dentro de Lince (el distrito de su pedido). */
+const PIN_LINCE = { lat: -12.0839, lng: -77.0364 };
+
 describe('las reglas de «falta confirmar» (la IA solo clasifica: SI / NO / POR QUÉ / OTRA)', () => {
   it('sí, no, otro día, por qué y otra cosa', () => {
     for (const t of ['Sí', 'si', 'SÍ', 'sí, lo recibo hoy', 'Sí, recibo hoy', 'ok sí', 'claro que sí']) expect(clasificarConfirmarGsg(t), t).toBe('si');
@@ -205,9 +208,15 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     const motos = await e.entregas.motorizados();
     const m = motos.find((x) => x.phone.endsWith('999000007')) ?? motos[0]!;
     await e.repos.entregas.actualizar(c1!.id, { motorizadoId: m.id });
-    // Pregunta después del agradecimiento: el cierre con el número del motorizado asignado.
-    const b = e.textosA('987200001').length;
+    // Pregunta por la hora después del agradecimiento: la hora estimada, sin gastar el cierre.
+    const h = e.textosA('987200001').length;
     await e.contesta('987200001', { texto: '¿A qué hora llega?' });
+    const hora = e.textosA('987200001').slice(h);
+    expect(hora).toHaveLength(1);
+    expect(hora[0]).not.toContain('no se reciben consultas');
+    // Otra consulta después del agradecimiento: el cierre con el número del motorizado asignado.
+    const b = e.textosA('987200001').length;
+    await e.contesta('987200001', { texto: 'cuánto cuesta el envío' });
     expect(e.textosA('987200001').slice(b)).toEqual([cierreCon(bonito(m.phone))]);
     expect(String((await e.repos.contacts.getByPhone(conPais('987200001')))?.iaCerradaMotivo ?? '')).toMatch(/preguntó después del agradecimiento/);
     const antes = salidos('987200001');
@@ -282,7 +291,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   });
 
   it('el de ubicación manda su pin: UBI REGISTRADA y pasa solo a «Ya contactados»', async () => {
-    await e.contesta('987100002', { pin: PIN_LIMA });
+    // Su pin en su distrito (Lince): lejos de él se le preguntaría si es ahí (ver la matriz, sección G).
+    await e.contesta('987100002', { pin: PIN_LINCE });
     expect(e.textosA('987100002').at(-1)).toMatch(/^✅ Ubicación registrada correctamente\./);
     const f = await fila('U-2');
     expect(f.ubiRegistrada).toBe(true);

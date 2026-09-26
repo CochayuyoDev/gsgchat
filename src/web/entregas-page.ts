@@ -118,6 +118,15 @@ const CSS = `
   .mov-acciones { margin-top: 6px; }
   .bitacora { max-height: 40vh; overflow: auto; }
 
+  /* «Hay que mirar»: roja, arriba de la lista, solo si hay algo trabado. */
+  .mirar { background: var(--rojo-suave); border: 1px solid var(--rojo); border-left: 5px solid var(--rojo); border-radius: var(--radio); padding: 14px 18px; box-shadow: var(--sombra); }
+  .mirar h2 { margin: 0 0 4px; font-size: 16px; color: var(--rojo); }
+  .mirar h2 .muted { font-weight: 400; font-size: 12.5px; }
+  .mirar .caso { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--borde); }
+  .mirar .caso:last-child { border-bottom: 0; padding-bottom: 0; }
+  .mirar .caso .que { flex: 1 1 320px; min-width: 0; font-size: 14px; }
+  .mirar .caso .sub { color: var(--texto); font-size: var(--fs-small); margin-top: 2px; overflow-wrap: anywhere; }
+
   /* Los que necesitan a alguien y no tienen pedido hoy: solo si hay. */
   .alguien { background: var(--superficie); border: 1px solid var(--rojo); border-radius: var(--radio); padding: 14px 18px; }
   .alguien h3 { margin: 0 0 4px; font-size: 15px; color: var(--rojo); }
@@ -204,6 +213,7 @@ const CSS = `
   .previa { margin-top: 4px; font-size: var(--fs-small); }
   .previa a { cursor: pointer; }
   .ajuste-fila.tel { grid-template-columns: 1fr 150px; }
+  .ajuste-fila > label.normal { margin: 0; color: var(--texto); font-size: var(--fs-cuerpo); }
   .ajuste-fila .pista-fila { display: block; color: var(--texto-suave); font-size: 12px; font-weight: 400; margin-top: 2px; }
   .burbuja-cliente { margin-top: 10px; }
   .burbuja-cliente .titulo-burbuja { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 12.5px; font-weight: 600; color: var(--texto-suave); margin-bottom: 4px; }
@@ -289,6 +299,12 @@ ${aviso}
 <!-- 2b. El camino de cada cliente, en cuatro cifras que filtran la lista. -->
 <div class="embudo" id="tarjetas" role="group" aria-label="En qué paso van los clientes de hoy"></div>
 
+<!-- 2c. «Hay que mirar»: los pedidos trabados. Solo aparece si hay alguno. -->
+<section class="mirar hidden" id="caja-mirar" aria-labelledby="mirar-titulo">
+  <h2 id="mirar-titulo">Hay que mirar <span class="muted" id="mirar-n"></span></h2>
+  <div id="mirar"></div>
+</section>
+
 <!-- 3. Los pedidos de hoy. -->
 <section id="caja-pedidos">
   <div class="lista-cab">
@@ -354,6 +370,7 @@ ${aviso}
             <label class="linea"><input type="checkbox" id="aj-avisar-entregado"> Dar las gracias al cliente cuando el motorizado dice "entregado"</label>
             <label class="linea"><input type="checkbox" id="aj-donde-esta"> Contestar solo a "¿dónde está mi pedido?" según el estado (sin gastar IA)</label>
             <label class="linea"><input type="checkbox" id="aj-cerca"> Avisar al cliente cuando el motorizado escribe "cerca" o "llegando"</label>
+            <label class="linea"><input type="checkbox" id="aj-buscar-mapa"> Buscar en el mapa la dirección que escribe el cliente <span class="muted">(OpenStreetMap, gratis; si no la encuentra, se guarda y se le pide el pin)</span></label>
           </section>
           <section class="grupo-aj"><h3>Tiempos</h3><p class="ayuda-grupo">Cuánto se espera y cuántas veces se insiste antes de pasar a una persona o a otro motorizado.</p>
             <div class="ajuste-fila"><span>Margen que se suma a lo que dice el motorizado (minutos)</span><input id="aj-margen" type="number" min="0" max="240"></div>
@@ -362,6 +379,10 @@ ${aviso}
             <div class="ajuste-fila"><span>Esperar al motorizado (minutos) antes de insistir</span><input id="aj-mot-espera" type="number" min="1" max="180"></div>
             <div class="ajuste-fila"><span>Avisos a un mismo motorizado antes de pasar a otro</span><input id="aj-mot-max" type="number" min="1" max="5"></div>
             <div class="ajuste-fila"><span>Preguntar a GSG cada (minutos)</span><input id="aj-sync" type="number" min="1" max="1440"></div>
+            <div class="ajuste-fila"><label class="normal" for="aj-pin-km">Distancia máxima entre el pin y el distrito (km)<span class="pista-fila">Si el pin cae más lejos, se le pregunta al cliente si es ahí (SÍ / NO).</span></label><input id="aj-pin-km" type="number" min="0.5" max="100" step="0.5"></div>
+            <div class="ajuste-fila"><label class="normal" for="aj-reasignar">Si el motorizado no da sus minutos en (minutos), pasa solo a otro<span class="pista-fila">Si no hay otro activo, sale en «Hay que mirar».</span></label><input id="aj-reasignar" type="number" min="5" max="240"></div>
+            <div class="ajuste-fila"><label class="normal" for="aj-alerta-ubi">Avisar de los pedidos que siguen sin ubicación a las</label><input id="aj-alerta-ubi" type="time" step="900"></div>
+            <div class="ajuste-fila"><label class="normal" for="aj-alerta-camino">Avisar de un pedido en camino pasada su hora estimada por (minutos)</label><input id="aj-alerta-camino" type="number" min="5" max="480"></div>
           </section>
           <section class="grupo-aj"><h3>Segunda visita</h3><p class="ayuda-grupo">Cuando el motorizado llega y no hay nadie.</p>
             <label class="linea"><input type="checkbox" id="aj-sv-activa"> Preguntarle al cliente si volvemos hoy</label>
@@ -592,6 +613,7 @@ var ACCIONES = [
   { clave: 'segunda_visita', attr: 'segunda', largo: 'Segunda visita', corto: 'Segunda visita' },
   { clave: 'reintentar', attr: 'reintentar', largo: 'Reintentar', corto: 'Reintentar' },
   { clave: 'reasignar', attr: 'reasignar', largo: 'Pasar a otro motorizado' },
+  { clave: 'sin_ubicacion', attr: 'sin-ubicacion', largo: 'Asignar motorizado sin ubicación' },
   { clave: 'prioridad', attr: 'prioridad', largo: function (e) { return e.prioridad === 'urgente' ? 'Quitar urgente' : 'Marcar urgente'; } },
   { clave: 'cancelar', attr: 'cancelar', largo: 'Cancelar el pedido', peligro: true }
 ];
@@ -627,12 +649,18 @@ function laLlevaUnMotorizado(e) { return Boolean(e.motorizado) && (e.estado === 
    esperando (su ubicacion o su SÍ/NO) → registrada → con motorizado;
    o necesita a alguien. Las cuatro cifras, el chip de la fila y el filtro
    salen de aqui, asi no pueden contradecirse. */
+/* Apartada pero ya atendida por una persona (un «no soy yo» al que le escribieron):
+   no necesita a nadie y tampoco se libera sola; se libera a mano con «Volver a intentar». */
+function atendidaSinLiberar(e) { return e.estado === 'incidencia' && !e.requiereHumano && Boolean(e.contactadoAt) && !e.segundaVisitaPedidaAt; }
 function pasoDe(e) {
   if (e.estado === 'cancelada') return { clave: 'cancelado', tono: 'gris', texto: 'Cancelado' };
+  if (atendidaSinLiberar(e)) return { clave: 'esperando', tono: 'azul', texto: 'Ya contactado' };
   if (e.estado === 'incidencia' && !esperaSegunda(e)) return { clave: 'alguien', tono: 'rojo', texto: 'Necesita a alguien' };
   if (e.estado === 'entregada' || e.estado === 'terminada') return { clave: 'motorizado', tono: 'verde', texto: 'Entregado' };
   if (e.envioRetenidoAt) return { clave: 'por_enviar', tono: 'ambar', texto: 'Por enviar' };
   if (esperaSegunda(e)) return { clave: 'esperando', tono: 'azul', texto: 'Esperando al cliente' };
+  /* Sin ubicación pero ya con motorizado (el cierre le dio su número): cuenta en «Con motorizado». */
+  if (laLlevaUnMotorizado(e) && e.ubicacionEstado === 'pendiente') return { clave: 'motorizado', tono: 'azul', texto: 'Esperando ubicación · con motorizado' + (e.motorizado && e.motorizado.nombre ? ' ' + e.motorizado.nombre : '') };
   if (laLlevaUnMotorizado(e)) return { clave: 'motorizado', tono: 'azul', texto: 'Con motorizado' };
   if (e.ubicacionEstado === 'pendiente') return { clave: 'esperando', tono: 'ambar', texto: 'Esperando ubicación' };
   if ((e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.ubicacionEstado !== 'recibida') return { clave: 'esperando', tono: 'ambar', texto: 'Esperando su SÍ / NO' };
@@ -650,7 +678,7 @@ var FILTROS = {
   faltaUbicacion: function (e) { return e.ubicacionEstado === 'pendiente' && e.estado !== 'cancelada'; },
   faltaConfirmacion: function (e) { return (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.estado !== 'cancelada'; },
   enCamino: function (e) { return e.estado === 'lista' || e.estado === 'esperando_motorizado' || e.estado === 'avisada'; },
-  incidencia: function (e) { return e.estado === 'incidencia' && !esperaSegunda(e); },
+  incidencia: function (e) { return e.estado === 'incidencia' && !esperaSegunda(e) && !atendidaSinLiberar(e); },
   esperandoSegundaVisita: esperaSegunda,
   urgente: function (e) { return e.prioridad === 'urgente' && !FINAL[e.estado]; },
   avisada: porEstado('avisada'),
@@ -726,7 +754,31 @@ function buscadas(lista) {
 function filaSuelta(texto) { return '<div class="nada">' + texto + '</div>'; }
 function marcasDe(e) {
   return (FILTROS.urgente(e) ? '<span class="chip tono-rojo sin-punto marca">Urgente</span>' : '') +
-    (e.segundaVisita ? '<span class="chip tono-azul sin-punto marca">2.ª visita</span>' : '');
+    (e.segundaVisita ? '<span class="chip tono-azul sin-punto marca">2.ª visita</span>' : '') +
+    /* Escribió su dirección en vez del pin: se ve aquí y en su ficha. */
+    (e.direccionCliente ? '<span class="chip tono-azul sin-punto marca" title="' + esc('Escribió: ' + e.direccionCliente) + '">dirección escrita</span>' : '') +
+    (e.pinPropuestoAt && e.ubicacionEstado === 'pendiente' ? '<span class="chip tono-ambar sin-punto marca" title="Mandó un pin lejos de su distrito: se le preguntó si es ahí">pin por confirmar</span>' : '');
+}
+
+/* ------------------------------------------------------- «Hay que mirar» --
+   Lo trabado, con su accion: no va al cliente. Tiempos en Ajustes → Tiempos. */
+var TITULO_MIRAR = { motorizado_sin_minutos: 'Sin los minutos del motorizado', sin_ubicacion: 'Sin ubicación', en_camino_tarde: 'En camino, pasado de su hora' };
+function telDe(phone) { return 'tel:+' + String(phone || '').replace(/\D/g, ''); }
+function pintarMirar() {
+  var lista = (resumen && resumen.alertas) || [];
+  $('caja-mirar').classList.toggle('hidden', !lista.length);
+  if (!lista.length) { $('mirar').innerHTML = ''; $('mirar-n').textContent = ''; return; }
+  $('mirar-n').textContent = '· ' + plural(lista.length, 'pedido', 'pedidos');
+  $('mirar').innerHTML = lista.map(function (a) {
+    var botones = (a.acciones || []).map(function (ac) {
+      if (ac === 'llamar_motorizado' && a.motorizado) return '<a class="btn sm" href="' + esc(telDe(a.motorizado.phone)) + '">Llamar al motorizado</a>';
+      if (ac === 'marcar_entregada') return '<button class="btn sm" type="button" data-entregada="' + a.entregaId + '">Marcar entregado</button>';
+      if (ac === 'sin_ubicacion') return '<button class="btn sm" type="button" data-sin-ubicacion="' + a.entregaId + '">Asignar motorizado sin ubicación</button>';
+      if (ac === 'reasignar') return '<button class="btn sm" type="button" data-reasignar="' + a.entregaId + '">Pasar a otro motorizado</button>';
+      return '';
+    }).join('');
+    return '<div class="caso" data-alerta="' + esc(a.tipo) + '"><div class="que"><span class="chip tono-rojo sin-punto">' + esc(TITULO_MIRAR[a.tipo] || 'Revisar') + '</span> <b>' + esc(a.nombre || telefonoBonito(a.phone)) + '</b> <span class="muted">' + esc(a.referencia) + '</span><div class="sub">' + esc(a.texto) + '</div></div><div class="acciones">' + botones + '</div></div>';
+  }).join('');
 }
 /* La columna del motorizado: quien lo lleva y, en corto, a que hora llega. */
 function celdaMotorizado(e) {
@@ -776,6 +828,7 @@ async function cargarDetalle(id) {
     var e = r.entrega;
     var datos = '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:8px">' +
       '<span><b>Dirección:</b> ' + esc(e.direccion || '—') + (e.distrito ? ', ' + esc(e.distrito) : '') + '</span>' +
+      (e.direccionCliente ? '<span><b>Escribió:</b> «' + esc(e.direccionCliente) + '»</span>' : '') +
       (e.notas ? '<span><b>Notas:</b> ' + esc(e.notas) + '</span>' : '') +
       (e.lat !== null ? '<span><b>Pin:</b> ' + e.lat.toFixed(5) + ', ' + e.lng.toFixed(5) + (e.mapsUrl ? ' <a href="' + esc(e.mapsUrl) + '" target="_blank" rel="noopener">abrir</a>' : '') + '</span>' : '') +
       (e.confirmacionRespuesta ? '<span><b>Contestó:</b> «' + esc(e.confirmacionRespuesta) + '»</span>' : '') +
@@ -1036,6 +1089,11 @@ function pintarAjustes() {
   valor('aj-mot-espera', a.motorizadoEsperaMin);
   valor('aj-mot-max', a.motorizadoMaxIntentos);
   valor('aj-sync', a.sincronizarCadaMin);
+  valor('aj-pin-km', a.pinDistanciaMaxKm || 3);
+  valor('aj-reasignar', a.reasignarMotorizadoMin || 20);
+  valor('aj-alerta-ubi', a.alertaSinUbicacionHora || '12:00');
+  valor('aj-alerta-camino', a.alertaEnCaminoMin || 30);
+  marca('aj-buscar-mapa', a.buscarDireccionEnMapa !== false);
   marca('aj-leer-ia', a.leerConIA);
   marca('aj-redactar-ia', a.redactarConIA);
   marca('aj-pin', a.mandarPinAlMotorizado);
@@ -1206,6 +1264,7 @@ async function cargar() {
   $('dia').textContent = '· ' + diaEnPalabras(resumen.dia);
   pintarTiraResumen();
   pintarTarjetas();
+  pintarMirar();
   pintarFilas();
   refrescarDetalles();
   pintarMotorizadosTira();
@@ -1298,6 +1357,23 @@ var HACER = {
     toast(nuevo ? 'Ahora la lleva ' + nuevo.nombre + ': le llega el pin por WhatsApp.' : 'El sistema elige al motorizado: le llega el pin por WhatsApp.');
     return true;
   },
+  'sin-ubicacion': async function (id) {
+    var actual = resumen.entregas.filter(function (x) { return String(x.id) === String(id); })[0];
+    var rm = await api('/admin/motorizados');
+    var activos = (rm.motorizados || []).filter(function (m) { return m.estado === 'activo'; });
+    if (!activos.length) { toast('No hay ningún motorizado activo: activa uno en Motorizados y vuelve a intentarlo.'); return false; }
+    var lleva = {};
+    resumen.entregas.forEach(function (x) { if (laLlevaUnMotorizado(x)) lleva[x.motorizado.id] = (lleva[x.motorizado.id] || 0) + 1; });
+    var opciones = [{ valor: '', etiqueta: 'Que elija el sistema', detalle: 'El de su zona (por el distrito o la dirección escrita) o, si no, el que menos lleva.', principal: true }].concat(activos.map(function (m) {
+      return { valor: String(m.id), etiqueta: m.nombre, detalle: (m.zona ? m.zona + ' · ' : '') + 'lleva ' + (lleva[m.id] || 0) };
+    }));
+    var quien = actual ? (actual.nombre || telefonoBonito(actual.phone)) : 'este cliente';
+    var elegido = await elegirOpcion({ titulo: 'Asignar motorizado sin ubicación', texto: quien + ' todavía no manda su ubicación. El motorizado recibe el pedido con su teléfono y la dirección escrita (nunca una ubicación) y coordina con él por teléfono. ¿Quién lo lleva?', opciones: opciones });
+    if (elegido === null) return false;
+    var r = await api('/admin/entregas/' + id + '/sin-ubicacion', { method: 'POST', body: { motorizadoId: elegido ? Number(elegido) : null } });
+    toast('Ahora lo lleva ' + (r.motorizado ? r.motorizado.nombre : 'un motorizado') + ', sin ubicación: le llegó el pedido por WhatsApp.');
+    return true;
+  },
   prioridad: async function (id, boton) {
     var urgente = boton.getAttribute('data-urgente') === '1';
     await api('/admin/entregas/' + id + '/prioridad', { method: 'POST', body: { urgente: urgente } });
@@ -1314,7 +1390,10 @@ var HACER = {
 };
 var CLAVES_HACER = Object.keys(HACER);
 
-$('filas').addEventListener('click', async function (ev) {
+/* Los botones de la lista y los de «Hay que mirar» hacen lo mismo. */
+$('filas').addEventListener('click', alPulsarAccion);
+$('mirar').addEventListener('click', alPulsarAccion);
+async function alPulsarAccion(ev) {
   var b = ev.target.closest('button');
   if (!b) return;
   var clave = null;
@@ -1332,7 +1411,7 @@ $('filas').addEventListener('click', async function (ev) {
   }
   /* Al repintar la tabla el boton ya no esta en el documento; si sigue, se reactiva. */
   b.disabled = false;
-});
+}
 
 /* ----------------------------------------------------------------- filtro
    Llegar con ?filtro=incidencia (desde el Inicio o la campana) abre esa cifra. */
@@ -1645,6 +1724,11 @@ $('aj-guardar').onclick = async function () {
       motorizadoEsperaMin: num('aj-mot-espera', resumen.ajustes.motorizadoEsperaMin),
       motorizadoMaxIntentos: num('aj-mot-max', resumen.ajustes.motorizadoMaxIntentos),
       sincronizarCadaMin: num('aj-sync', resumen.ajustes.sincronizarCadaMin),
+      pinDistanciaMaxKm: Math.max(0.5, num('aj-pin-km', resumen.ajustes.pinDistanciaMaxKm || 3)),
+      reasignarMotorizadoMin: Math.max(5, num('aj-reasignar', resumen.ajustes.reasignarMotorizadoMin || 20)),
+      alertaSinUbicacionHora: /^\d{2}:\d{2}/.test($('aj-alerta-ubi').value) ? $('aj-alerta-ubi').value.slice(0, 5) : (resumen.ajustes.alertaSinUbicacionHora || '12:00'),
+      alertaEnCaminoMin: Math.max(5, num('aj-alerta-camino', resumen.ajustes.alertaEnCaminoMin || 30)),
+      buscarDireccionEnMapa: $('aj-buscar-mapa').checked,
       leerConIA: $('aj-leer-ia').checked,
       redactarConIA: $('aj-redactar-ia').checked,
       mandarPinAlMotorizado: $('aj-pin').checked,

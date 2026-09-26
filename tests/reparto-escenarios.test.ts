@@ -121,7 +121,7 @@ describe('un reparto de 22 clientes: quién dio su ubicación y quién no', () =
 
     // A quien manda su ubicación se le da las gracias; al equivocado se le pide disculpas.
     expect(e.mensajesA(tel(1)).at(-1)?.body).toMatch(/ubicaci[oó]n/i);
-    expect(e.mensajesA(tel(NO_SOY_YO)).at(-1)?.body).toMatch(/no corresponde/i);
+    expect(e.mensajesA(tel(NO_SOY_YO)).at(-1)?.body).toMatch(/No te volveremos a escribir por este pedido/);
     expect(e.mensajesA(tel(BAJA)).at(-1)?.body).toMatch(/no volver/i);
   });
 

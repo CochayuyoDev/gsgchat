@@ -59,6 +59,40 @@ export function payloadDeMensajePropio(payloadLeido: Record<string, unknown> | n
   return { ...base, origen: 'persona', autorNombre: 'Teléfono', ...(historial ? { historial: true } : {}) };
 }
 
+/**
+ * Pruebas con el MISMO número conectado registrado como motorizado (pedido del
+ * dueño, 25/09): los pedidos le llegan al chat «Tú» y lo que conteste ahí a
+ * mano, desde el teléfono, cuenta como respuesta del motorizado. Guardas contra
+ * el bucle: solo el chat propio, solo textos de hasta 120 caracteres, una
+ * espera corta y nunca un texto igual a algo que el sistema ya mandó a ese chat.
+ */
+export async function propioComoMotorizado(
+  d: { repos: Pick<Repos, 'messages'>; entregas: Pick<ServicioEntregas, 'esMotorizado' | 'alTexto'>; sender: Pick<Sender, 'send'>; esperaMs?: number },
+  contacto: { id: string; phone: string; name?: string | null },
+  mensaje: { id: string; texto: string },
+  numeroPropio: string,
+): Promise<'no_es_propio' | 'descartado' | 'no_es_motorizado' | 'atendido' | 'no_atendido'> {
+  const propio = numeroPropio.replace(/\D/g, '').slice(-9);
+  if (!propio || contacto.phone.replace(/\D/g, '').slice(-9) !== propio) return 'no_es_propio';
+  const texto = mensaje.texto.trim();
+  if (!texto || texto.length > 120) return 'descartado';
+  await new Promise((r) => setTimeout(r, d.esperaMs ?? 1500));
+  const recientes = await d.repos.messages.listMessages(contacto.id, 20).catch(() => []);
+  if (recientes.some((m) => m.direction === 'out' && m.wamid !== mensaje.id && String(m.body ?? '').trim() === texto)) return 'descartado';
+  if (!(await d.entregas.esMotorizado(contacto.phone).catch(() => false))) return 'no_es_motorizado';
+  const r = await d.entregas.alTexto({ id: contacto.id, phone: contacto.phone, name: contacto.name ?? null }, texto).catch((error) => {
+    console.warn('[motorizado propio] fallo al leer la respuesta:', error instanceof Error ? error.message : String(error));
+    return { atendida: false as const };
+  });
+  console.log('[motorizado propio]', JSON.stringify({ texto, atendida: r.atendida, resultado: 'resultado' in r ? r.resultado : null }));
+  if (!r.atendida) return 'no_atendido';
+  if ('responder' in r && r.responder) {
+    const salida = await d.sender.send({ phone: contacto.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: r.responder, limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch((error) => ({ ok: false, error: String(error) }));
+    console.log('[motorizado propio] respuesta al motorizado:', JSON.stringify(salida).slice(0, 300));
+  }
+  return 'atendido';
+}
+
 export interface LocalRoutesDeps {
   config: Config;
   catalogo?: StokyClient;
@@ -217,6 +251,19 @@ export async function registerLocalRoutes(
             status,
             createdAt: new Date(Number(mensaje.timestamp) * 1000 || Date.now()),
           });
+          // Una persona le escribió al cliente desde el teléfono: lo que
+          // necesitaba a alguien queda atendido (no lo del historial viejo).
+          if (!mensaje.grupo && !mensaje.historial && deps.entregas) {
+            await deps.entregas.atendidoPorPersona(contacto.phone, 'una persona desde el teléfono').catch(() => 0);
+          }
+          // Pruebas con el MISMO número conectado registrado como motorizado
+          // (pedido del dueño, 25/09): los pedidos le llegan al chat «Tú» y lo
+          // que conteste ahí (a mano, desde el teléfono) cuenta como respuesta
+          // del motorizado. Nunca lo que manda el propio sistema (bucle).
+          if (!mensaje.grupo && !mensaje.historial && deps.entregas && leido.kind === 'text') {
+            const res = await propioComoMotorizado({ repos, entregas: deps.entregas, sender }, contacto, { id: mensaje.id, texto: String(leido.body ?? '') }, String(sesion.getLocalState().phone ?? ''));
+            if (res !== 'no_es_propio') console.log('[motorizado propio] resultado:', res);
+          }
         } catch (error) {
           console.error('[wa] fallo guardando un mensaje propio:', error);
         }

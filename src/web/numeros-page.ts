@@ -306,7 +306,8 @@ function coordenadas(n) {
 }
 
 function fila(n) {
-  var e = ETAPA[n.etapa] || { nombre: n.etapa, tono: 'gris' };
+  /* Sin ubicación pero ya con motorizado (el cierre le dio su número): no necesita a nadie. */
+  var e = n.conMotorizadoSinUbicacion ? { nombre: 'Esperando ubicación · con motorizado' + (n.motorizado ? ' ' + n.motorizado : ''), tono: 'azul' } : (ETAPA[n.etapa] || { nombre: n.etapa, tono: 'gris' });
   var marcado = Boolean(elegidos[n.id]);
   var nombre = n.nombre || 'Sin nombre';
   var marcas = '';
@@ -318,6 +319,9 @@ function fila(n) {
   if (n.contactadoAt) detalle.push('Marcado como contactado' + (n.contactadoPor ? ' por ' + esc(n.contactadoPor) : '') + ' a las ' + esc(hora(n.contactadoAt)) + '.');
   if (n.pausado) detalle.push('No se le pide nada hasta que lo reanudes.');
   if (n.mismoCliente && n.mismoCliente.length) detalle.push('También tiene hoy: ' + n.mismoCliente.map(esc).join(', ') + '.');
+  var botonSinUbi = n.puedeSinUbicacion && (n.etapa === 'falta_pedir' || n.etapa === 'falta_ubicacion' || n.etapa === 'necesita')
+    ? '<div class="sub"><button type="button" class="btn sm" data-sin-ubicacion="' + n.id + '" aria-label="' + esc('Asignar motorizado sin ubicación a ' + nombre) + '">🛵 Asignar motorizado sin ubicación</button></div>'
+    : '';
   var coords = coordenadas(n);
   var mapa = n.mapa
     ? '<a href="' + esc(n.mapa) + '" target="_blank" rel="noopener">📍 Ver en el mapa</a>' + (coords ? '<span class="coords">' + esc(coords) + '</span>' : '')
@@ -328,7 +332,7 @@ function fila(n) {
     '<div class="c-casilla" role="cell"><input type="checkbox" class="casilla" data-id="' + n.id + '"' + (marcado ? ' checked' : '') + ' aria-label="' + esc('Seleccionar a ' + nombre) + '"></div>' +
     '<div class="quien" role="cell"><b class="nombre">' + esc(nombre) + '</b>' + marcas + '<div class="sub">' + sub + '</div>' +
       (detalle.length ? '<div class="sub">' + detalle.join(' ') + '</div>' : '') +
-      (n.motorizado ? '<div class="sub mot-movil">🛵 ' + mot + '</div>' : '') + '</div>' +
+      (n.motorizado ? '<div class="sub mot-movil">🛵 ' + mot + '</div>' : '') + botonSinUbi + '</div>' +
     '<div class="tel" role="cell">' + esc(telefonoBonito(n.telefono)) + '</div>' +
     '<div class="c-paso" role="cell"><span class="chip tono-' + e.tono + '" title="' + esc(n.punto) + '">' + esc(e.nombre) + '</span></div>' +
     '<div class="mapa" role="cell">' + mapa + '</div>' +
@@ -499,7 +503,26 @@ document.getElementById('todos').addEventListener('change', function (ev) {
   if (ev.target.checked) lista.forEach(function (n) { elegidos[n.id] = true; });
   pintarLista();
 });
+/* «Asignar motorizado sin ubicación»: el sistema elige (zona o dirección escrita, y la carga); en Hoy se puede elegir a mano. */
+async function asignarSinUbicacion(id) {
+  var n = datos ? datos.numeros.filter(function (x) { return String(x.id) === String(id); })[0] : null;
+  var quien = n ? (n.nombre || telefonoBonito(n.telefono)) : 'este cliente';
+  var si = await confirmarDialogo({ titulo: 'Asignar motorizado sin ubicación', texto: quien + ' todavía no manda su ubicación. Un motorizado recibe el pedido con su teléfono y la dirección escrita (nunca una ubicación) y coordina con él por teléfono. El sistema elige al de su zona o al que menos lleva; para elegirlo tú, usa la ficha en Hoy.', boton: 'Sí, asignar' });
+  if (!si) return;
+  var r = document.getElementById('resultado');
+  try {
+    var res = await api('/admin/entregas/' + id + '/sin-ubicacion', { method: 'POST', body: {} });
+    r.className = 'resultado';
+    r.textContent = 'Ahora lo lleva ' + (res.motorizado ? res.motorizado.nombre : 'un motorizado') + ', sin ubicación: le llegó el pedido por WhatsApp.';
+  } catch (e) {
+    r.className = 'resultado malo';
+    r.textContent = e.message;
+  }
+  await cargar();
+}
 document.getElementById('numeros').addEventListener('click', function (ev) {
+  var bs = ev.target.closest('button[data-sin-ubicacion]');
+  if (bs) { ev.stopPropagation(); asignarSinUbicacion(bs.getAttribute('data-sin-ubicacion')); return; }
   if (ev.target.closest('a')) return;
   var tr = ev.target.closest('.fila[data-id]');
   if (!tr) return;

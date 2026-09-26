@@ -32,6 +32,7 @@ import { enHorario, type OpcionesMotor } from '../rutas/motor.js';
 import { PLANTILLAS, textoLibre, type ContextoMensaje, type PasoUbicacion } from '../rutas/mensajes.js';
 import { incidenciaDeErrorDeEnvio } from '../rutas/incidencias.js';
 import type { Entrada } from './repo.js';
+import { diaEnZona, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
 import type { ServicioEnvioAutomatico } from './servicio.js';
 
 export interface MotorListaDeps {
@@ -267,6 +268,15 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
           return { accion: 'salida', entradaId: e.id, motivo: 'agotó los mensajes' };
         }
 
+        // La «única verdad» de la ubicacion: si hoy ya la registro (en las
+        // entregas, venga por donde venga), no se le vuelve a pedir: sale.
+        if (e.que === 'ubicacion' || e.hasta === 'ubicacion') {
+          const registrada = await ubicacionYaRegistrada(repos, e.phone, diaEnZona(momento, opciones.timezone));
+          if (registrada) {
+            await lista.quitar(e.id, { origen: 'sistema' }, `ya mandó su ubicación (pedido ${registrada.referencia}): no se le vuelve a pedir`);
+            return { accion: 'salida', entradaId: e.id, motivo: 'ya tenía su ubicación registrada' };
+          }
+        }
         const contacto = await repos.contacts.upsertFromInbound(e.phone, e.nombre ?? undefined);
         if (contacto.optOutAt) {
           await lista.quitar(e.id, { origen: 'sistema' }, 'se dio de baja: no se le escribe más');

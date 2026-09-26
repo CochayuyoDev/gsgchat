@@ -10,6 +10,7 @@
  *  POST /admin/entregas/:id/cancelar         { motivo }
  *  POST /admin/entregas/:id/ubicacion        { lat, lng } o { texto } (un enlace de mapa)
  *  POST /admin/entregas/:id/reasignar        { motorizadoId? }
+ *  POST /admin/entregas/:id/sin-ubicacion     { motorizadoId? } un motorizado para un pedido que espera la ubicacion (sin pin)
  *  POST /admin/entregas/:id/reintentar
  *  POST /admin/entregas/:id/segunda-visita   el motorizado vuelve a pasar (sin preguntarle al cliente)
  *  POST /admin/entregas/:id/prioridad        { urgente: true|false }
@@ -170,6 +171,18 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     if (!e) return reply.code(404).send({ error: 'Esa entrega no existe.' });
     if ('error' in e) return reply.code(400).send({ error: e.error });
     return { ok: true, entrega: e };
+  });
+
+  // «Asignar motorizado sin ubicación» (ficha de Hoy y Números del día): el
+  // motorizado recibe el pedido con el teléfono y la dirección escrita, sin pin.
+  app.post<{ Params: { id: string } }>('/admin/entregas/:id/sin-ubicacion', async (request, reply) => {
+    const id = Number(request.params.id);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: 'Falta el número del pedido.' });
+    const body = z.object({ motorizadoId: z.coerce.number().int().positive().nullable().optional() }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'El motorizado elegido no se entiende: elige uno de la lista.' });
+    const r = await entregas.asignarSinUbicacionAMano(id, body.data.motorizadoId ?? null, quienEs(request.usuario));
+    if (!r.ok) return reply.code(r.motivo.startsWith('Ese pedido ya no existe') ? 404 : 400).send({ error: r.motivo });
+    return { ok: true, entrega: r.entrega, motorizado: { id: r.motorizado.id, nombre: r.motorizado.nombre } };
   });
 
   app.post<{ Params: { id: string } }>('/admin/entregas/:id/entregada', async (request, reply) => {

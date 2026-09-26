@@ -37,17 +37,28 @@ function yaSeLePidioUbicacion(f: FilaEntrega): boolean {
   if (f.ubicacionPropuestaAt) return true;
   const s = f.solicitud;
   if (!s) return false;
+  if (s.incidencia === 'ya_en_curso') return true; // se le pide con su otro pedido de hoy
   return s.intentos > 0 || s.estado === 'enviado' || s.estado === 'respondio';
+}
+
+/**
+ * «Esperando ubicación · con motorizado»: el cliente no mandó su ubicación
+ * pero ya lo lleva un motorizado (el cierre le dio su número, o una persona
+ * lo asignó a mano). No «necesita a alguien»: lo coordina el motorizado.
+ */
+export function conMotorizadoSinUbicacion(f: FilaEntrega): boolean {
+  return Boolean(f.motorizadoSinUbicacionAt) && f.ubicacionEstado === 'pendiente' && Boolean(f.motorizadoId) && (f.estado === 'esperando_motorizado' || f.estado === 'avisada');
 }
 
 /**
  * En que punto va un numero. El orden importa:
  *  1. cancelado (por el cliente, por GSG o a mano): solo sale en «Todos»;
  *  1b. llegó de GSG y espera que una persona confirme su envío → «Por confirmar el envío»;
- *  2. necesita a alguien: la entrega esta apartada (incidencia) o el reparto
- *     la dejo para una persona. Una segunda visita esperando la respuesta
- *     del cliente NO: ese cliente ya esta contactado;
- *  3. marcado a mano como contactado;
+ *  2. necesita a alguien: la entrega esta apartada (incidencia). Una segunda
+ *     visita esperando la respuesta del cliente NO: ese cliente ya esta
+ *     contactado;
+ *  3. marcado como contactado (a mano, o porque una persona le escribio);
+ *  3b. el reparto la dejo para una persona (y nadie la atendio todavia) → necesita;
  *  4. sin ubicacion: ¿ya se le pidio? → «Falta su ubicación»; si no → «Falta pedir ubicación»;
  *  5. con ubicacion y la confirmacion pendiente o pedida → «Falta confirmar»;
  *  6. lo demas (confirmado, con motorizado, avisado, entregado) → «Ya contactados».
@@ -56,9 +67,18 @@ export function etapaDe(f: FilaEntrega): EtapaNumero {
   if (f.estado === 'cancelada') return 'cancelada';
   if (f.envioRetenidoAt && f.estado !== 'terminada' && f.estado !== 'entregada') return 'por_confirmar_envio';
   const esperandoSegundaVisita = f.estado === 'incidencia' && Boolean(f.segundaVisitaPedidaAt) && !f.requiereHumano;
+  // Apartada pero ya atendida por una persona (p. ej. «no soy yo» al que le
+  // escribieron): no se libera sola, y tampoco «necesita a alguien».
+  if (f.estado === 'incidencia' && !f.requiereHumano && f.contactadoAt && !f.segundaVisitaPedidaAt) return 'contactados';
   if (!esperandoSegundaVisita && (f.estado === 'incidencia' || f.requiereHumano)) return 'necesita';
-  if (f.ubicacionEstado === 'pendiente' && f.solicitud && ['supervision', 'derivado', 'incidencia', 'cancelado'].includes(f.solicitud.estado)) return 'necesita';
+  // Sin ubicación pero con motorizado: le falta la ubicación, y ya lo lleva alguien.
+  if (conMotorizadoSinUbicacion(f)) return 'falta_ubicacion';
+  // Una persona ya lo atendió (le escribió o lo marcó): ya no «necesita a
+  // alguien» aunque el reparto lo haya dejado apartado.
   if (f.contactadoAt) return 'contactados';
+  // Un segundo pedido del mismo cliente que el reparto apartó por «ya en curso»
+  // no necesita a nadie: va junto con el otro (su pin sirve para los dos).
+  if (f.ubicacionEstado === 'pendiente' && f.solicitud && f.solicitud.incidencia !== 'ya_en_curso' && ['supervision', 'derivado', 'incidencia', 'cancelado'].includes(f.solicitud.estado)) return 'necesita';
   if (esperandoSegundaVisita) return 'contactados';
   if (f.ubicacionEstado === 'pendiente') return yaSeLePidioUbicacion(f) ? 'falta_ubicacion' : 'falta_pedir';
   if (f.confirmacionEstado === 'pendiente' || f.confirmacionEstado === 'pedida') return 'falta_confirmar';
@@ -78,7 +98,14 @@ export function puntoDe(f: FilaEntrega, etapa: EtapaNumero, maxConfirmacion: num
       if (f.ubicacionPropuestaLat != null) return 'Todavía no se le escribió: se le va a proponer la dirección de la última vez.';
       return 'Todavía no se le escribió: se le pide la ubicación en cuanto le toque.';
     case 'falta_ubicacion':
+      if (conMotorizadoSinUbicacion(f)) {
+        const quien = f.motorizado?.nombre ?? 'un motorizado';
+        return f.estado === 'avisada' && f.llegaAproxAt
+          ? `Esperando ubicación · con motorizado ${quien}: dio su tiempo y coordina con el cliente por teléfono.`
+          : `Esperando ubicación · con motorizado ${quien}: coordina con el cliente por teléfono; falta que diga en cuánto entrega.`;
+      }
       if (f.ubicacionPropuestaAt) return 'Se le propuso la dirección de la última vez; falta que diga si es la misma o mande su pin.';
+      if (f.solicitud?.incidencia === 'ya_en_curso') return 'Va junto con su otro pedido de hoy: el mismo pin sirve para los dos.';
       if (f.solicitud?.estado === 'respondio') return 'Contestó, pero todavía no manda su ubicación.';
       return `Se le pidió la ubicación (${plural(Math.max(1, f.solicitud?.intentos ?? 1), 'mensaje', 'mensajes')}); todavía no la manda.`;
     case 'falta_confirmar':
@@ -119,6 +146,10 @@ export interface FilaNumero {
   motorizado: string | null;
   /** El cliente ya mandó su ubicación: en pantalla sale como «UBI REGISTRADA». */
   ubiRegistrada: boolean;
+  /** Sin ubicación pero ya con motorizado: en pantalla, «Esperando ubicación · con motorizado». */
+  conMotorizadoSinUbicacion: boolean;
+  /** Se le puede asignar un motorizado sin ubicación (el botón de la fila). */
+  puedeSinUbicacion: boolean;
 }
 
 export function filaNumero(f: FilaEntrega, maxConfirmacion: number): FilaNumero {
@@ -145,6 +176,8 @@ export function filaNumero(f: FilaEntrega, maxConfirmacion: number): FilaNumero 
     motorizado: f.motorizado?.nombre ?? null,
     // Solo si la mandó el cliente: a los de «falta confirmar» GSG ya les tenía la dirección.
     ubiRegistrada: f.ubicacionEstado === 'recibida' && grupoDe(f) === 'ubicacion',
+    conMotorizadoSinUbicacion: conMotorizadoSinUbicacion(f),
+    puedeSinUbicacion: f.acciones.includes('sin_ubicacion'),
   };
 }
 
