@@ -100,7 +100,9 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
   /** Tres «otra cosa» antes del pin: las tres insistencias fijas, cada una con el botón de ubicación. */
   const agotarInsistencias = async (tel: string) => {
     const antes = e.mensajesA(tel).length;
-    for (let i = 0; i < 3; i++) await e.contesta(tel, { adjunto: 'sticker' });
+    // Tres mensajes DISTINTOS: la misma acción repetida seguida (tres stickers)
+    // cuenta como una sola (regla del dueño, 26/09).
+    for (const texto of ['jaja', 'mmm', 'eh']) await e.contesta(tel, { texto });
     const nuevos = e.mensajesA(tel).slice(antes);
     expect(nuevos.map((m) => String(m.body))).toEqual(INSISTENCIAS_UBICACION);
     for (const m of nuevos) expect(m.kind).toBe('location_request');

@@ -150,8 +150,13 @@ describe('el agente operativo en un día de entregas', () => {
 
   it('una consulta ajena antes del pin: 3 insistencias pidiendo la ubicación, luego el cierre UNA vez (con el número), sin precios, y la IA se calla', async () => {
     const antes = e.textosA('987000003').length;
+    // Entre mensaje y mensaje pasan dos minutos: al minuto de escribirle, el
+    // sistema no insiste (la petición sigue a la vista en su pantalla).
+    e.avanzar(2);
     await e.contesta('987000003', { texto: '¿Cuánto cuesta enviar un paquete a Arequipa?' });
+    e.avanzar(2);
     await e.contesta('987000003', { texto: '¿y a Cusco?' });
+    e.avanzar(2);
     await e.contesta('987000003', { texto: 'hola?' });
     expect(e.textosA('987000003').slice(antes)).toEqual(INSISTENCIAS_UBICACION);
     expect(await cerradaDe('987000003')).toBeNull();
@@ -236,6 +241,7 @@ describe('el agente operativo en un día de entregas', () => {
     await e.asistente!.guardar({ activa: true, proveedor: 'openai', modelo: 'gpt-4o-mini', token: 'sk-prueba' });
     e.ia.respuestas.push('OTRA');
     const antes = e.textosA('987000004').length;
+    e.avanzar(2);
     await e.contesta('987000004', { texto: 'mmm bueno pero mañana no estoy toda la tarde en casa sabes' });
     const nuevos = e.textosA('987000004').slice(antes);
     expect(e.ia.llamadas.at(-1)?.sistema).toContain('clasificador del canal de entregas de GSG Courier');

@@ -1082,7 +1082,7 @@ ${warning}
       <div class="aj-ancho"><label for="cf-ia-clave">Clave de OpenAI</label><input id="cf-ia-clave" type="password" autocomplete="off" placeholder="sk-…  se guarda cifrada y no se vuelve a mostrar"><div class="cf-nota">En platform.openai.com → API keys.</div></div>
       <div class="aj-ancho"><label for="cf-ia-modelo">Modelo</label><select id="cf-ia-modelo"><option value="gpt-4o-mini">gpt-4o-mini — Recomendado · consumo muy bajo</option></select></div>
     </div>
-    <div class="actions"><button class="btn secundario" id="cf-ia-vincular" type="button">Vincular clave a esta tienda</button><a href="/panel#ia">Más opciones del asistente</a></div>
+    <div class="actions"><button class="btn secundario" id="cf-ia-vincular" type="button">Vincular clave a esta tienda</button><button class="btn peligro hidden" id="cf-ia-desvincular" type="button">Desvincular IA</button><a href="/panel#ia">Más opciones del asistente</a></div>
     <p id="cf-ia-nota" class="cf-nota" role="status"></p>
   </section>
 
@@ -1437,7 +1437,7 @@ ${warning}
     <!-- Con la clave de OpenAI: los modelos REALES de la cuenta (POST /admin/ia/modelos), el de consumo muy bajo primero. -->
     <select id="ia-modelo-lista" class="hidden" style="max-width:420px"></select>
     <p id="ia-modelo-lista-nota" class="muted hidden" style="margin-top:4px">Pega tu clave y verás aquí los modelos de tu cuenta. Por defecto se usa <b>gpt-4o-mini</b> (consumo muy bajo).</p>
-    <div class="actions" style="margin-top:10px"><button class="btn primario" id="ia-vincular-clave" type="button">Vincular clave a esta tienda</button><button class="btn" id="ia-probar-conexion" type="button">Probar la conexión</button><span id="ia-conexion-estado" class="muted"></span></div>
+    <div class="actions" style="margin-top:10px"><button class="btn primario" id="ia-vincular-clave" type="button">Vincular clave a esta tienda</button><button class="btn" id="ia-probar-conexion" type="button">Probar la conexión</button><button class="btn peligro hidden" id="ia-desvincular" type="button">Desvincular IA</button><span id="ia-conexion-estado" class="muted"></span></div>
   </section>
 
   <section class="ia-seccion" id="ia-sec-2" role="tabpanel" aria-labelledby="ia-tab-2" hidden>
@@ -2210,6 +2210,35 @@ function pintarFaltaNegocio() {
 var cfSupervisorServidor = false;
 ['cf-sop-wa', 'cf-sop-tel', 'cf-supervisor'].forEach(function (id) { porId(id).addEventListener('input', pintarFaltaNegocio); });
 
+/**
+ * Desvincular la IA: se borra la clave guardada y el asistente se apaga; la
+ * tienda sigue con sus reglas fijas. Pide pulsar dos veces, para que no se
+ * quite sin querer. Lo usan Ajustes y la pantalla del Asistente IA.
+ */
+function botonDesvincularIa(boton, nota, alTerminar) {
+  var texto = boton.textContent;
+  var espera = null;
+  boton.onclick = async function () {
+    if (!boton.dataset.seguro) {
+      boton.dataset.seguro = '1';
+      boton.textContent = '¿Seguro? Pulsa otra vez para desvincular';
+      espera = setTimeout(function () { delete boton.dataset.seguro; boton.textContent = texto; }, 6000);
+      return;
+    }
+    clearTimeout(espera);
+    delete boton.dataset.seguro;
+    boton.disabled = true;
+    try {
+      await api('/admin/ia', { method: 'POST', body: { activa: false, token: null } });
+      nota.innerHTML = '<b>IA desvinculada.</b> Se borró la clave; el sistema sigue trabajando con sus reglas fijas.';
+      loaded.ia = false;
+      await alTerminar();
+    } catch (e) { nota.textContent = e.message; }
+    boton.disabled = false;
+    boton.textContent = texto;
+  };
+}
+
 /* El asistente IA desde Ajustes: el mismo camino que «Vincular clave a esta tienda» del Asistente IA. */
 async function loadIaAjustes() {
   var caja = porId('cf-ia-estado');
@@ -2229,6 +2258,8 @@ async function loadIaAjustes() {
     }
     var soyAdmin = !window.__yo || ((window.__yo.rol === 'admin' || window.__yo.super) && !window.__yo.porToken);
     porId('cf-ia-vincular').disabled = !soyAdmin;
+    porId('cf-ia-desvincular').classList.toggle('hidden', !e.tieneToken);
+    porId('cf-ia-desvincular').disabled = !soyAdmin;
   } catch (err) {
     /* Sin asistente en este arranque la tarjeta no tiene nada que hacer. */
     porId('aj-ia').classList.add('hidden');
@@ -2252,6 +2283,7 @@ async function cfIaListarModelos(clave) {
   }
 }
 porId('cf-ia-clave').addEventListener('change', function () { cfIaListarModelos(val('cf-ia-clave')); });
+botonDesvincularIa(porId('cf-ia-desvincular'), porId('cf-ia-nota'), loadIaAjustes);
 porId('cf-ia-vincular').onclick = async function () {
   var nota = porId('cf-ia-nota');
   var boton = this;
@@ -3168,6 +3200,7 @@ async function iaListarModelos(clave) {
 }
 document.getElementById('ia-token-openai').addEventListener('change', function () { iaListarModelos(val('ia-token-openai')); });
 /* La clave de OpenAI se prueba y, si responde, queda guardada (cifrada) en esta tienda: cada tienda tiene la suya. */
+botonDesvincularIa(document.getElementById('ia-desvincular'), document.getElementById('ia-conexion-estado'), function () { return loadIa(); });
 document.getElementById('ia-vincular-clave').onclick = async function () {
   var estado = document.getElementById('ia-conexion-estado');
   var boton = this;
@@ -3483,6 +3516,7 @@ async function loadIa() {
   try {
     var e = await api('/admin/ia');
     pintarSaldoIa(e.sinSaldo);
+    document.getElementById('ia-desvincular').classList.toggle('hidden', !e.tieneToken);
     window.__iaModelos = e.modelosSugeridos;
     IA_SERVICIOS = e.servicios || [];
     var selServicio = document.getElementById('ia-servicio');

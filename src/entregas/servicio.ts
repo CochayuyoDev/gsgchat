@@ -1778,6 +1778,23 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // Otra cosa por segunda vez: NO se da el pin por bueno (26/09: tras varios
     // «2» sin entender, un pin que el cliente había negado se registró). El
     // pin queda propuesto y lo decide una persona; al cliente no se le repite nada.
+    // La segunda vez, antes de pasarlo a una persona, se le da una salida
+    // clara (regla del dueño, 26/09): «¿Todo correcto o prefieres empezar de
+    // nuevo?». «Todo correcto» registra su pin; «Empezar de nuevo» le pide
+    // la ubicación otra vez desde cero.
+    if (clase === 'otra' && (e.pinPropuestoDudas ?? 0) < 2) {
+      for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoDudas: 2 });
+      await evento(e, 'nota', `volvió a contestar otra cosa a «¿es ahí?» (${que}; ${como}): se le pregunta si está todo correcto o prefiere empezar de nuevo`);
+      return {
+        tipo: 'repregunta',
+        texto: `¿Está todo correcto con la ubicación que nos enviaste, o prefieres empezar de nuevo y mandarla otra vez?`,
+        botones: [
+          { id: `entrega:pinsi:${e.id}`, title: 'Todo correcto' },
+          { id: `entrega:pinno:${e.id}`, title: 'Empezar de nuevo' },
+        ],
+        entrega: e,
+      };
+    }
     if (clase === 'otra') {
       await evento(e, 'nota', `volvió a contestar otra cosa a «¿es ahí?» (${que}; ${como}): el pin queda sin registrar y lo decide una persona`);
       await pasarAPersona(phone, 'pin_lejos_sin_respuesta', `no aclaró si su pin lejos de ${distrito} es el bueno: ${que}`).catch(() => 0);
@@ -2838,6 +2855,10 @@ ${lista}
     const ctx = contextoMotorizado({ ...contexto(e, m), pedido: pedidoTexto });
     // La ubicación salió de la dirección que escribió el cliente: va con él (es aproximada).
     const conDireccionEscrita = e.ubicacionFuente === FUENTE_DIRECCION_ESCRITA && e.direccionCliente ? `\n📍 Dirección que escribió el cliente (la ubicación es aproximada): ${e.direccionCliente}` : '';
+    // Las coordenadas en texto y el enlace del mapa van en el mismo mensaje
+    // (pedido del dueño, 26/09): se copian a cualquier app y no dependen de
+    // que el pin de WhatsApp llegue o se abra.
+    const conCoordenadas = e.lat != null && e.lng != null ? `\n📍 Ubicación: ${e.lat.toFixed(6)}, ${e.lng.toFixed(6)}\n${enlaceMapa(e.lat, e.lng)}` : '';
     // Ya tiene otro cliente esperando su tiempo: se le dice cómo contestar
     // para que cada tiempo vaya a su pedido.
     const otrosPendientes = (await repo.enManosDeMotorizado(m.id).catch(() => [] as Entrega[])).filter((x) => x.phone !== e.phone && x.motorizadoEstado === 'enviado');
@@ -2846,7 +2867,7 @@ ${lista}
       : '';
     const base = textoDe(e.segundaVisita ? 'motorizadoSegundaVisita' : 'motorizadoNuevo', ajustes, ctx);
     // Con varios, «Responde solo con los minutos» contradice lo de abajo: fuera.
-    const texto = (variosPendientes ? base.replace(/\s*Responde solo con los minutos[^.\n]*\.?/i, '') : base) + conDireccionEscrita + variosPendientes;
+    const texto = (variosPendientes ? base.replace(/\s*Responde solo con los minutos[^.\n]*\.?/i, '') : base) + conCoordenadas + conDireccionEscrita + variosPendientes;
     // Con la plantilla de Meta (ventana cerrada) el texto es fijo: la marca de urgente va pegada a la referencia.
     const salida = await enviarA(m.phone, texto, 'motorizado', [(e.nombre ?? '').trim() || e.phone, e.prioridad === 'urgente' ? `URGENTE ${enLista(refs)}` : enLista(refs), enlaceMapa(e.lat, e.lng)], { separacionMs: 0, maxPorDia: 500 });
     if (!salida.ok) {

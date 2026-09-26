@@ -149,11 +149,12 @@ describe('un día de entregas con GSG simulado', () => {
     const texto = String(alRider.find((m) => m.kind === 'text')?.body ?? '');
     expect(texto).toContain('P-1001');
     expect(texto).toContain('Ana Quispe');
-    // Nunca se le manda una ubicacion al motorizado: solo el pedido y la pregunta de los minutos.
-    expect(texto).not.toContain('maps.google.com');
+    // Con la ubicación del cliente: las coordenadas en texto y el enlace del
+    // mapa en el mismo mensaje, y además el pin de WhatsApp (pedido del dueño, 26/09).
+    expect(texto).toMatch(/📍 Ubicación: -?\d+\.\d{6}, -?\d+\.\d{6}/);
+    expect(texto).toContain('maps.google.com');
     expect(texto).toMatch(/en cuántos minutos/i);
-    // Ni pin nativo: la ubicación solo la manda el cliente.
-    expect(alRider.some((m) => m.kind === 'location')).toBe(false);
+    expect(alRider.some((m) => m.kind === 'location')).toBe(true);
   });
 
   it('el motorizado dice "40": al cliente se le avisa 1 h 40 min con la hora, y GSG recibe la entrega', async () => {

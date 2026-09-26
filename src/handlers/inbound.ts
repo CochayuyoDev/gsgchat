@@ -61,6 +61,7 @@ import type { ServicioEntregas } from '../entregas/servicio.js';
 import { atenderComoAgente, atenderConReglaGsg, cerrarChat, type DepsAgente } from '../ia/agente-operativo.js';
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
+import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
 
 export interface InboundDeps {
   repos: Repos;
@@ -632,7 +633,106 @@ export async function respuestaNumeradaComoBoton(message: InboundMessage, deps: 
   return { ...message, type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: elegido.id, title: elegido.title ?? numero[1] } } } as InboundMessage;
 }
 
+/**
+ * Lo que manda un mismo cliente se atiende de uno en uno, en el orden en que
+ * llegó. Antes el pin y el texto de al lado se atendían a la vez: mientras la
+ * IA leía «Yaya», el pin ya estaba registrado y la insistencia «necesitamos tu
+ * ubicación» le llegaba DESPUÉS de mandarla (26/09).
+ *
+ * Y el mismo texto repetido en pocos segundos («2», «2», «2»…) se guarda pero
+ * se contesta una sola vez: cada copia gastaba una insistencia.
+ */
+const REPETIDO_MS = 30_000;
+// Por instancia (una por tienda, y una por escenario en las pruebas): colgado
+// de sus repos para que dos sistemas en el mismo proceso no se mezclen.
+const estadoPorSistema = new WeakMap<object, { cola: Map<string, Promise<unknown>>; ultimo: Map<string, { firma: string; escritoMs: number; respuestaMs: number | null }> }>();
+function estadoDe(deps: InboundDeps) {
+  let e = estadoPorSistema.get(deps.repos);
+  if (!e) estadoPorSistema.set(deps.repos, (e = { cola: new Map(), ultimo: new Map() }));
+  return e;
+}
+
+/**
+ * Qué acción dispara un mensaje, para reconocer las copias: el mismo texto
+ * (sin tildes ni mayúsculas), la misma ubicación, el mismo botón o un
+ * sticker. Null = no se compara nunca (preguntas por el pedido, que siempre
+ * se contestan, y lo que no es del cliente).
+ */
+export function firmaDeAccion(message: InboundMessage): string | null {
+  if (message.type === 'text') {
+    const t = (message.text?.body ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s.!¡?¿,]+/g, ' ').trim();
+    if (!t || leerPreguntaPorPedido(message.text?.body ?? '').pregunta) return null;
+    return `t:${t}`;
+  }
+  if (message.type === 'location' && message.location) return `l:${Number(message.location.latitude).toFixed(4)},${Number(message.location.longitude).toFixed(4)}`;
+  if (message.type === 'interactive') return `b:${message.interactive?.button_reply?.id ?? message.interactive?.list_reply?.id ?? ''}`;
+  if (message.type === 'button') return `b:${message.button?.payload ?? message.button?.text ?? ''}`;
+  if (message.type === 'sticker') return 'sticker';
+  return null;
+}
+
 export async function handleInboundMessage(
+  message: InboundMessage,
+  profileName: string | undefined,
+  deps: InboundDeps,
+): Promise<void> {
+  // Los grupos y los reenvios del telefono (la foto de un «ver una vez» que
+  // espera el mensaje original) no hacen fila: la fila los bloquearia.
+  if (message.grupo || message.reenvio) return handleInboundMessageEnFila(message, profileName, deps);
+  const clave = message.from;
+  const { cola: colaPorCliente, ultimo: ultimoTexto } = estadoDe(deps);
+  // Regla del dueño (26/09): la MISMA acción repetida seguida (la misma
+  // ubicación, varios «sí»/«no», varios «1»/«2», el mismo botón, stickers)
+  // se atiende una vez. Una copia es la que el cliente ESCRIBIÓ antes de que
+  // le llegara la respuesta a la primera (la hora la pone WhatsApp): los cinco
+  // «2» seguidos. Lo que escribe DESPUÉS de leer la respuesta es una acción
+  // nueva (mandar otra vez el mismo pin tras «¿es ahí?» es decir que sí). Lo
+  // distinto no se pierde (va en fila, en orden), y preguntar por el pedido
+  // («¿dónde va mi pedido?») no tiene firma: se contesta siempre.
+  const firma = firmaDeAccion(message);
+  const turno = (colaPorCliente.get(clave) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(async () => {
+      const escrito = Number(message.timestamp) * 1000 || Date.now();
+      const antes = ultimoTexto.get(clave);
+      let repetido = false;
+      if (firma && antes && antes.firma === firma && !message.viejo) {
+        repetido = antes.respuestaMs != null ? escrito <= antes.respuestaMs : escrito - antes.escritoMs < REPETIDO_MS;
+        // Solo con clientes de un pedido de GSG en curso: un motorizado que
+        // repite su tiempo, o un proceso que recibe dos «sí», sigue como siempre.
+        if (repetido) {
+          const e = deps.entregas;
+          const cliente = e && !(await e.esMotorizado(clave).catch(() => false))
+            ? await e.situacionGsg(clave).catch(() => null)
+            : null;
+          repetido = Boolean(cliente && (cliente.ubicacion !== 'sin_entrega' || cliente.confirmar));
+        }
+      }
+      if (repetido) return handleInboundMessageEnFila({ ...message, viejo: true }, profileName, deps);
+      // La última respuesta del sistema a este cliente, antes y después.
+      const ultimaSalida = async (): Promise<{ id: string; at: number } | null> => {
+        const contacto = await deps.repos.contacts.getByPhone(clave).catch(() => null);
+        const ultimos = contacto ? await deps.repos.messages.listMessages(contacto.id, 10).catch(() => []) : [];
+        const m = [...ultimos].reverse().find((x) => x.direction === 'out');
+        return m ? { id: String(m.id ?? m.wamid ?? ''), at: new Date(m.createdAt as unknown as string).getTime() } : null;
+      };
+      const antesDe = firma && !message.viejo ? await ultimaSalida() : null;
+      await handleInboundMessageEnFila(message, profileName, deps);
+      if (!firma || message.viejo) return;
+      const despues = await ultimaSalida();
+      // La hora real en que salió la respuesta: el mismo reloj que el de WhatsApp.
+      const contesto = despues && despues.id !== antesDe?.id ? Date.now() : null;
+      ultimoTexto.set(clave, { firma, escritoMs: escrito, respuestaMs: contesto });
+    });
+  colaPorCliente.set(clave, turno);
+  try {
+    await turno;
+  } finally {
+    if (colaPorCliente.get(clave) === turno) colaPorCliente.delete(clave);
+  }
+}
+
+async function handleInboundMessageEnFila(
   message: InboundMessage,
   profileName: string | undefined,
   deps: InboundDeps,

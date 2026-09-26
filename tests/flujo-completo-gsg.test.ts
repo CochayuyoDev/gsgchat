@@ -1160,14 +1160,22 @@ describe('G. el pin tiene que tener sentido: lejos de su distrito se le pregunta
       expect(desde(e, tel, n)).toEqual([{ kind: 'buttons', body: `Perdona, no te entendí. ${PIN_LEJOS_SJL}` }]);
       n = e.mensajesA(tel).length;
       await e.contesta(tel, { texto: 'hola otra vez' });
-      // Otra cosa por segunda vez: el pin NO se da por bueno; lo decide una
-      // persona y al cliente no se le repite nada.
+      // Otra cosa por segunda vez: una salida clara, «¿todo correcto o
+      // empezar de nuevo?» (regla del dueño, 26/09).
+      expect(desde(e, tel, n).map((m) => m.body)).toEqual([expect.stringMatching(/todo correcto.*empezar de nuevo/i)]);
+      n = e.mensajesA(tel).length;
+      await e.contesta(tel, { texto: 'no sé' });
+      // Y si tampoco: el pin NO se da por bueno; lo decide una persona y al
+      // cliente no se le repite nada.
       expect(desde(e, tel, n)).toEqual([]);
       expect((await e.entrega('G-3'))?.ubicacionEstado).toBe('pendiente');
       expect((await e.entrega('G-3'))?.requiereHumano).toBe(true);
       // El otro manda el mismo pin lejano dos veces: la segunda vale.
       await e.contesta(otro, { pin: PIN_LIMA });
       n = e.mensajesA(otro).length;
+      // Lo reenvía DESPUÉS de leer «¿es ahí?» (WhatsApp pone la hora al
+      // segundo): es su respuesta, no una copia del primero.
+      await new Promise((r) => setTimeout(r, 1100));
       await e.contesta(otro, { pin: PIN_LIMA });
       expect(desde(e, otro, n).map((m) => m.body)).toEqual([expect.stringMatching(REGISTRADA)]);
       await coherente(e, otro, 'el mismo pin otra vez');

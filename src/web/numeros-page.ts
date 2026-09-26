@@ -63,7 +63,11 @@ const CSS = `
 
   /* La lista: una fila por cliente. */
   .lista { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); overflow: hidden; }
-  .fila { display: grid; grid-template-columns: 34px minmax(0, 1.6fr) 150px 170px minmax(0, 1.5fr) minmax(0, 1fr); gap: 12px; align-items: center; padding: 13px 18px; border-bottom: 1px solid var(--borde); }
+  .fila { display: grid; grid-template-columns: 34px minmax(0, 1.6fr) 150px 200px minmax(0, 1.5fr) minmax(0, 1fr); gap: 12px; align-items: center; padding: 13px 18px; border-bottom: 1px solid var(--borde); }
+  /* La etiqueta del paso se parte en dos líneas si no cabe: antes se salía de
+     su columna y se montaba encima de «Sin ubicación» (26/09). */
+  .fila .c-paso { min-width: 0; }
+  .fila .c-paso .chip { white-space: normal; line-height: 1.3; max-width: 100%; }
   .fila:last-child { border-bottom: 0; }
   .fila.cab { padding-top: 9px; padding-bottom: 9px; background: var(--superficie-2); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); font-weight: 700; }
   .fila.cab label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 600; color: var(--texto); white-space: nowrap; }
@@ -96,7 +100,7 @@ const CSS = `
   .explica p { margin: 8px 0 0; font-size: 13.5px; }
 
   @media (max-width: 1000px) {
-    .fila { grid-template-columns: 34px minmax(0, 1.5fr) 140px 160px minmax(0, 1.3fr); }
+    .fila { grid-template-columns: 34px minmax(0, 1.5fr) 140px 190px minmax(0, 1.3fr); }
     .fila .mot, .fila.cab .c-mot { display: none; }
     .fila .mot-movil { display: block; }
   }
@@ -307,7 +311,7 @@ function coordenadas(n) {
 
 function fila(n) {
   /* Sin ubicación pero ya con motorizado (el cierre le dio su número): no necesita a nadie. */
-  var e = n.conMotorizadoSinUbicacion ? { nombre: 'Esperando ubicación · con motorizado' + (n.motorizado ? ' ' + n.motorizado : ''), tono: 'azul' } : (ETAPA[n.etapa] || { nombre: n.etapa, tono: 'gris' });
+  var e = n.conMotorizadoSinUbicacion ? { nombre: 'Esperando ubicación · con motorizado', tono: 'azul' } : (ETAPA[n.etapa] || { nombre: n.etapa, tono: 'gris' });
   var marcado = Boolean(elegidos[n.id]);
   var nombre = n.nombre || 'Sin nombre';
   var marcas = '';

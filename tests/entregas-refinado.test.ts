@@ -88,7 +88,7 @@ describe('un cliente con dos pedidos el mismo día', () => {
     expect((await e.entrega('D-2'))?.estado).toBe('lista');
   });
 
-  it('los dos van al mismo motorizado en un solo mensaje y sin ninguna ubicación', async () => {
+  it('los dos van al mismo motorizado en un solo mensaje y con un solo pin', async () => {
     await e.trabajar();
     const d1 = await e.entrega('D-1');
     const d2 = await e.entrega('D-2');
@@ -100,8 +100,8 @@ describe('un cliente con dos pedidos el mismo día', () => {
     expect(alMotorizado).toHaveLength(1);
     expect(alMotorizado[0]).toContain('D-1 y D-2');
     expect(alMotorizado[0]).toContain('2 pedidos del mismo cliente');
-    // Ninguna ubicación: al motorizado no se le manda pin.
-    expect(e.mensajesA(rider.phone).filter((m) => m.kind === 'location')).toHaveLength(0);
+    // Un solo pin para los dos (mismo cliente, misma puerta).
+    expect(e.mensajesA(rider.phone).filter((m) => m.kind === 'location')).toHaveLength(1);
   });
 
   it('el tiempo del motorizado vale para los dos: un solo aviso a la clienta, y GSG se entera de cada uno', async () => {

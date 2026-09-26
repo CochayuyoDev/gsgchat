@@ -119,3 +119,35 @@ describe('un motorizado con dos pedidos de clientes distintos', () => {
     expect((await e.entrega('P-1002'))?.minutosMotorizado).toBe(45);
   });
 });
+
+describe('la misma acción repetida seguida se atiende una vez', () => {
+  let e: EscenarioEntregas;
+
+  beforeAll(async () => {
+    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
+    e.simulador.cargarDePrueba();
+    await e.api.post('/admin/motorizados/de-prueba');
+    await e.api.post('/admin/entregas/sincronizar');
+    await e.trabajar();
+  });
+  afterAll(() => e?.cerrar());
+
+  it('cinco «jaja» a la vez: una sola insistencia', async () => {
+    const antes = e.textosA('987000002').length;
+    await Promise.all(Array.from({ length: 5 }, () => e.contesta('987000002', { texto: 'jaja' })));
+    expect(e.textosA('987000002').slice(antes)).toHaveLength(1);
+  });
+
+  it('el mismo pin dos veces a la vez: una sola respuesta', async () => {
+    const antes = e.mensajesA('987000004').length;
+    await Promise.all([e.contesta('987000004', { pin: PIN_LIMA }), e.contesta('987000004', { pin: PIN_LIMA })]);
+    expect(e.mensajesA('987000004').slice(antes)).toHaveLength(1);
+  });
+
+  it('preguntar por el pedido se contesta cada vez', async () => {
+    const antes = e.textosA('987000004').length;
+    await e.contesta('987000004', { texto: '¿dónde va mi pedido?' });
+    await e.contesta('987000004', { texto: '¿dónde va mi pedido?' });
+    expect(e.textosA('987000004').length - antes).toBe(2);
+  });
+});

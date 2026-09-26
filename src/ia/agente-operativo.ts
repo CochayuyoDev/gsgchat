@@ -777,6 +777,10 @@ function motivoUbicacionRegistrada(contact: Contact): string {
  */
 async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null }, que: string): Promise<ResultadoRegla | null> {
   const texto = entrada.texto.trim();
+  // Un sticker o una foto sin texto no contesta «¿es ahí?»: ni gasta la
+  // repregunta ni se le repite nada (26/09: un sticker trajo «Perdona, no te
+  // entendí» y la misma pregunta otra vez).
+  if (!texto && !entrada.boton) return 'silencio';
   let clase: 'si' | 'no' | 'otra' = 'otra';
   let como = 'botón';
   if (entrada.boton && /^entrega:pin(si|no):\d+$/.test(entrada.boton)) clase = clasificarPinLejos('', entrada.boton);

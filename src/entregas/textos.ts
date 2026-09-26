@@ -42,7 +42,7 @@ export const ajustesEntregasSchema = z.object({
   /** Si la IA lee las respuestas que las reglas no entienden. */
   leerConIA: z.boolean().default(true),
   /** Si el pin del cliente se manda al motorizado como ubicacion nativa ademas del enlace. */
-  mandarPinAlMotorizado: z.boolean().default(false),
+  mandarPinAlMotorizado: z.boolean().default(true),
   /** Si al cliente se le escribe cuando el motorizado dice "entregado". */
   avisarEntregado: z.boolean().default(true),
   /** Si a un cliente que pregunta "donde esta mi pedido" se le contesta solo (sin IA), segun el estado. */
