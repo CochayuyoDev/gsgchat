@@ -49,7 +49,7 @@ import type { FilaEntrega } from '../src/entregas/servicio.js';
 import { telefonoEnPalabras } from '../src/entregas/textos.js';
 import { crearEscenarioEntregas, PAUSA_SEGUNDOS, PIN_LIMA, conPais, type EscenarioEntregas } from './escenario-entregas.js';
 import type { Geocodificador, ResultadoGeo } from '../src/entregas/geocodificar.js';
-import { TEXTOS_POR_DEFECTO } from '../src/entregas/textos.js';
+import { TEXTOS_POR_DEFECTO, DESCRIPCION_TEXTOS } from '../src/entregas/textos.js';
 import { FUENTE_DIRECCION_ESCRITA } from '../src/entregas/servicio.js';
 
 /** Las 09:00 de Lima del último día que ya empezó. */
@@ -682,10 +682,10 @@ describe('C. lo que pregunta el cliente, antes y después del pin', () => {
       expect(alMoto.filter((m) => m.kind === 'location')).toEqual([]);
       expect(alMoto.map((m) => m.body)).toContainEqual(expect.stringMatching(/^🛵 Nuevo pedido SIN ubicación: C-2\nCliente: Cliente · \+51 987 730 002\nDirección:.*\nNo mandó su ubicación: coordina con el cliente por teléfono\.\n¿En cuántos minutos lo entregas\?/));
 
-      // La hora antes de que el motorizado dé sus minutos: ya está con un motorizado.
+      // La hora antes de que el motorizado dé sus minutos: el horario de entrega (en silencio, 28/09).
       let n = e.mensajesA(tel).length;
       await e.contesta(tel, { texto: '¿a qué hora llega mi pedido?' });
-      expect(desde(e, tel, n).map((m) => m.body)).toEqual([expect.stringMatching(/ya está con un motorizado/)]);
+      expect(desde(e, tel, n).map((m) => m.body)).toEqual([expect.stringMatching(/su pedido C-2 se entrega hoy entre las 2:00 PM y las 8:00 PM\. El motorizado le llamará antes de llegar a su dirección\./)]);
       // Otra cosa: silencio (un segundo cierre nunca).
       n = e.mensajesA(tel).length;
       await e.contesta(tel, { texto: 'hola?' });
@@ -1170,6 +1170,17 @@ describe('G. el pin tiene que tener sentido: lejos de su distrito se le pregunta
       expect(desde(e, tel, n)).toEqual([]);
       expect((await e.entrega('G-3'))?.ubicacionEstado).toBe('pendiente');
       expect((await e.entrega('G-3'))?.requiereHumano).toBe(true);
+      // Lo ve una persona de verdad: la solicitud del reparto pasa a
+      // «supervisión» y el chat se cierra, así que ni el reparto ni el
+      // asistente le vuelven a insistir «necesitamos tu ubicación».
+      const solicitudes = (await e.repos.rutas.listarSolicitudes({ q: conPais(tel), limit: 10, offset: 0 } as never)).filter((s) => s.phone === conPais(tel));
+      expect(solicitudes.length).toBeGreaterThan(0);
+      for (const s of solicitudes) {
+        expect(s.estado).toBe('supervision');
+        expect(s.requiereHumano).toBe(true);
+      }
+      expect((await e.repos.contacts.getByPhone(conPais(tel)))?.iaCerradaAt).toBeTruthy();
+      const antesDeEsperar = e.mensajesA(tel).length;
       // El otro manda el mismo pin lejano dos veces: la segunda vale.
       await e.contesta(otro, { pin: PIN_LIMA });
       n = e.mensajesA(otro).length;
@@ -1179,6 +1190,11 @@ describe('G. el pin tiene que tener sentido: lejos de su distrito se le pregunta
       await e.contesta(otro, { pin: PIN_LIMA });
       expect(desde(e, otro, n).map((m) => m.body)).toEqual([expect.stringMatching(REGISTRADA)]);
       await coherente(e, otro, 'el mismo pin otra vez');
+      // Y al que lo decide una persona no se le vuelve a pedir la ubicación
+      // aunque pase el tiempo o vuelva a escribir.
+      await pasan(e, ESPERA_MIN * 3);
+      await e.contesta(tel, { texto: 'hola?' });
+      expect(desde(e, tel, antesDeEsperar).filter(pideUbicacion)).toEqual([]);
     } finally {
       await e.cerrar();
     }
@@ -1520,5 +1536,40 @@ describe('I. «Hay que mirar»: motorizado sin minutos, sin ubicación a las 12:
     expect(html).toContain('Distancia máxima entre el pin y el distrito (km)');
     expect(html).toContain('Llamar al motorizado');
     expect(html).toContain('Marcar entregado');
+  });
+
+  it('la vista previa de «Ubicación registrada» pone en {telefonoMotorizado} lo mismo que se envía; y la descripción del mensaje al motorizado dice lo que lleva', async () => {
+    // La función de la pantalla, sacada de la página (no una copia).
+    const html = entregasPage({ disponible: true, configured: true, demo: false, nombreNegocio: 'GSG' });
+    const funcion = (nombre: string): string => {
+      const i = html.indexOf(`function ${nombre}(`);
+      if (i < 0) throw new Error(`la pantalla ya no tiene ${nombre}()`);
+      let j = html.indexOf('{', i);
+      let nivel = 0;
+      for (; j < html.length; j++) {
+        if (html[j] === '{') nivel++;
+        else if (html[j] === '}' && --nivel === 0) break;
+      }
+      return html.slice(i, j + 1);
+    };
+    const fuente = ['telefonoLeido', 'soporteLeido', 'telefonoMotorizadoLeido'].map(funcion).join('\n');
+    const previa = (wa: string, tel: string): string => {
+      const campos: Record<string, { value: string }> = { 'aj-sop-wa': { value: wa }, 'aj-sop-tel': { value: tel } };
+      return (new Function('$', `${fuente}\nreturn telefonoMotorizadoLeido();`) as (f: (id: string) => { value: string }) => string)((id) => campos[id]!);
+    };
+    const e = await armar({ motorizados: false });
+    try {
+      await e.entregas.guardarAjustes({ textos: { ubicacionRegistrada: 'Número: {telefonoMotorizado}.' } } as never);
+      for (const [wa, tel] of [['', ''], ['987654321', ''], ['', '012345678'], ['987654321', '012345678']] as const) {
+        await e.entregas.guardarAjustes({ soporte: { whatsapp: wa, llamadas: tel } });
+        const enviado = e.entregas.textoUbicacionRegistrada({ nombre: null });
+        expect(`Número: ${previa(wa, tel)}.`, `soporte «${wa}» / «${tel}»`).toBe(enviado);
+      }
+    } finally {
+      await e.cerrar();
+    }
+    expect(html).not.toContain('este mismo número de WhatsApp');
+    expect(DESCRIPCION_TEXTOS.motorizadoNuevo).not.toMatch(/sin mandarle ninguna ubicación/);
+    expect(DESCRIPCION_TEXTOS.motorizadoNuevo).toMatch(/ubicación del cliente/);
   });
 });

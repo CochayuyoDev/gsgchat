@@ -678,6 +678,25 @@ function hayContenidoAparteDeLlaves(contenido: Record<string, unknown>): boolean
 export const MAXIMA_EDAD_PARA_CONTESTAR_MS = 10 * 60_000;
 
 /**
+ * Un `append` (lo que se sincroniza al reconectar) escrito hace menos que
+ * esto se contesta: es un mensaje de ahora que tuvo la mala suerte de caer
+ * justo en el reinicio (28/09: «¿cuánto tarda el pedido?» escrito 4 s después
+ * de reiniciar se guardó sin contestar y nadie le respondió).
+ */
+export const EDAD_APPEND_FRESCO_MS = 3 * 60_000;
+
+export interface ContextoEdad {
+  /** Viene del historial del teléfono (`messaging-history.set`): nunca se contesta. */
+  historial?: boolean;
+  /**
+   * La última vez que esta sesión estuvo conectada (el cierre anterior), si
+   * se sabe. Lo escrito DESPUÉS nunca pudo verse en vivo: se contesta si no
+   * pasa de `MAXIMA_EDAD_PARA_CONTESTAR_MS`.
+   */
+  conectadaHastaMs?: number | null;
+}
+
+/**
  * Si un entrante es del historial y no de ahora.
  *
  * Baileys entrega los mensajes en vivo con `type: 'notify'`; el historial y
@@ -685,12 +704,30 @@ export const MAXIMA_EDAD_PARA_CONTESTAR_MS = 10 * 60_000;
  * lo que se acumulo mientras el sistema estaba apagado puede tener horas: a
  * eso tampoco se le contesta en cadena. Diez minutos es el margen para un
  * reinicio normal.
+ *
+ * Regla del incidente del 11/09 (69 mensajes a 10 clientes al reconectar):
+ * lo que llega como `append` NO se contesta... salvo que sea fresco de
+ * verdad: escrito hace menos de `EDAD_APPEND_FRESCO_MS`, o después de la
+ * última vez que la sesión estuvo conectada y dentro de los diez minutos. Lo
+ * ya atendido no se repite de todos modos: el manejador descarta por wamid.
+ * Sin hora conocida, un `append` sigue siendo viejo.
  */
-export function esMensajeViejo(tipoEvento: string | undefined, timestamp: string | number | undefined, ahora = Date.now()): boolean {
-  if (tipoEvento !== 'notify') return true;
+export function esMensajeViejo(
+  tipoEvento: string | undefined,
+  timestamp: string | number | undefined,
+  ahora = Date.now(),
+  contexto: ContextoEdad = {},
+): boolean {
+  if (contexto.historial) return true;
   const segundos = Number(timestamp);
-  if (!Number.isFinite(segundos) || segundos <= 0) return false;
-  return ahora - segundos * 1000 > MAXIMA_EDAD_PARA_CONTESTAR_MS;
+  const conocido = Number.isFinite(segundos) && segundos > 0;
+  const edad = conocido ? ahora - segundos * 1000 : null;
+  if (tipoEvento === 'notify') return edad != null && edad > MAXIMA_EDAD_PARA_CONTESTAR_MS;
+  if (tipoEvento !== 'append' || edad == null) return true;
+  if (edad <= EDAD_APPEND_FRESCO_MS) return false;
+  const hasta = contexto.conectadaHastaMs;
+  if (hasta != null && segundos * 1000 >= hasta && edad <= MAXIMA_EDAD_PARA_CONTESTAR_MS) return false;
+  return true;
 }
 
 /**
@@ -958,6 +995,8 @@ export function crearSesionLocal(): SesionLocal {
   };
 
   let socket: LocalSocket | null = null;
+  /** Cuándo se cortó la conexión anterior de esta sesión (ver `esMensajeViejo`). */
+  let conectadaHastaMs: number | null = null;
   let arrancando: Promise<LocalState> | null = null;
   let opciones: StartLocalOptions | null = null;
 
@@ -1139,6 +1178,7 @@ export function crearSesionLocal(): SesionLocal {
               listo();
               return;
             }
+            conectadaHastaMs = Date.now();
             try {
               opts.onDisconnect?.(code, update.lastDisconnect?.error?.message ?? explicacion);
             } catch {
@@ -1278,11 +1318,12 @@ export function crearSesionLocal(): SesionLocal {
         // estaba apagado) se guarda pero no se contesta. Ver `esMensajeViejo`.
         const m = value.messages?.[0];
         if (m && origen === 'historial') m.historial = true;
-        if (m && esMensajeViejo(tipoEvento, m.timestamp)) {
+        if (m && esMensajeViejo(tipoEvento, m.timestamp, Date.now(), { historial: origen === 'historial', conectadaHastaMs })) {
           m.viejo = true;
           log(`entrante ${m.type} de ${m.from} (${tipoEvento ?? 'sin tipo'}, viejo): se guarda sin contestar`);
         } else {
-          log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}${m?.reenvio ? ' (reenviado por el telefono, ya con el fichero)' : ''}`);
+          const fresco = tipoEvento === 'append' ? ' (append, pero recien escrito: se atiende)' : '';
+          log(`entrante ${m?.type ?? '?'} de ${m?.from ?? '?'}${fresco}${m?.reenvio ? ' (reenviado por el telefono, ya con el fichero)' : ''}`);
         }
         // El sobre vacio de un "ver una vez": se le pide al telefono que lo
         // reenvie ANTES de entregar el mensaje, para que la espera del
@@ -1472,6 +1513,7 @@ export function crearSesionLocal(): SesionLocal {
   /** Solo para las pruebas: deja el modulo como recien cargado. */
   function resetLocalForTests(): void {
     socket = null;
+    conectadaHastaMs = null;
     arrancando = null;
     opciones = null;
     nombresDeGrupo.clear();

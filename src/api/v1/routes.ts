@@ -623,9 +623,24 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     const body = ordenApiSchema.parse(request.body ?? {});
     try {
       const r = await deps.ia.ordenar(body, request.usuario!);
-      return { texto: r.texto, hechas: r.hechas, pendientes: r.pendientes, simulado: r.simulado };
+      return { texto: r.texto, hechas: r.hechas, pendientes: r.pendientes, elegir: r.elegir, simulado: r.simulado };
     } catch (error) {
       if (error instanceof ErrorIA) return reply.code(error.detalle === 'operador' ? 429 : 502).send({ error: error.message });
+      throw error;
+    }
+  });
+
+  // La opcion elegida («¿cuál Carlos?»): su tarjeta, sin cambiar nada.
+  app.post('/api/v1/ia/ordenes/preparar', { config: { permiso: 'ia:ordenar' } }, async (request, reply) => {
+    if (!deps.ia) return reply.code(503).send({ error: 'la IA operadora no esta activa en este arranque' });
+    const body = z.object({ accion: z.record(z.string(), z.unknown()) }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'Falta la acción que preparar.' });
+    try {
+      const r = await deps.ia.prepararUna(body.data.accion, request.usuario!);
+      if (r.error) return reply.code(400).send({ error: r.error });
+      return r;
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(502).send({ error: error.message });
       throw error;
     }
   });

@@ -7,8 +7,11 @@
  *  POST /admin/ia/modelos  los modelos de la cuenta de OpenAI de una clave (solo admin)
  *
  * La IA operadora (ver ordenes.ts), para cualquier cuenta del panel:
- *  POST /admin/ia/ordenes            una orden con palabras; ejecuta y devuelve lo hecho y lo pendiente
- *  POST /admin/ia/ordenes/confirmar  las acciones pendientes que la persona confirmo
+ *  POST /admin/ia/ordenes            una orden con palabras: las consultas se hacen al momento; los
+ *                                    cambios vuelven preparados en una tarjeta (`pendientes`) o con
+ *                                    opciones para elegir (`elegir`), sin hacer nada todavia
+ *  POST /admin/ia/ordenes/preparar   la opcion que eligio la persona con un boton: su tarjeta (solo lee)
+ *  POST /admin/ia/ordenes/confirmar  «Hacerlo»: ejecuta en orden lo de la tarjeta y lo apunta en la bitacora
  *  GET  /admin/ia/ordenes/catalogo   que se le puede pedir
  */
 
@@ -20,8 +23,9 @@ import { ESCENARIOS, GRUPOS } from './escenarios.js';
 import { BANCO_EXAMEN, UMBRAL_EXAMEN } from './examen-lector.js';
 import { configIASchema, type ServicioIA } from './servicio.js';
 import { confirmacionSchema } from './ordenes.js';
+import type { ActividadRepo } from '../auth/actividad.js';
 
-export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan; fetchImpl?: typeof fetch }): Promise<void> {
+export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan; fetchImpl?: typeof fetch; actividad?: ActividadRepo }): Promise<void> {
   const { ia } = deps;
 
   // Lo que la IA (y las reglas) no entendieron, y el examen del lector de respuestas.
@@ -169,11 +173,42 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     }
   });
 
+  /** La opcion elegida con un boton («¿cuál Carlos?»): se prepara su tarjeta. No cambia nada. */
+  app.post('/admin/ia/ordenes/preparar', async (request, reply) => {
+    const body = z.object({ accion: z.record(z.string(), z.unknown()) }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'Falta la acción que preparar.' });
+    if (!request.usuario) return reply.code(401).send({ error: 'Entra para dar órdenes.' });
+    try {
+      const r = await ia.prepararUna(body.data.accion, request.usuario);
+      if (r.error) return reply.code(400).send({ error: r.error });
+      return r;
+    } catch (error) {
+      if (error instanceof ErrorIA) return reply.code(502).send({ error: error.message });
+      throw error;
+    }
+  });
+
+  /** «Hacerlo»: lo de la tarjeta, en orden. Queda en la bitacora quien lo pidio y como salio cada paso. */
   app.post('/admin/ia/ordenes/confirmar', async (request, reply) => {
     const body = confirmacionSchema.parse(request.body ?? {});
     if (!request.usuario) return reply.code(401).send({ error: 'Entra para confirmar.' });
     try {
-      return { hechas: await ia.ejecutarConfirmadas(body.acciones, request.usuario) };
+      const hechas = await ia.ejecutarConfirmadas(body.acciones, request.usuario);
+      await deps.actividad
+        ?.anotar({
+          usuarioId: request.usuario.id,
+          usuario: request.usuario.nombre || request.usuario.usuario,
+          accion: 'ia.hecho',
+          detalle: {
+            ...(body.orden ? { orden: body.orden.slice(0, 300) } : {}),
+            pasos: hechas.map((h) => `${h.ok ? 'hecho' : 'NO'}: ${h.accion} — ${h.resumen}`.slice(0, 300)).join(' | ').slice(0, 2000),
+            bien: hechas.filter((h) => h.ok).length,
+            mal: hechas.filter((h) => !h.ok).length,
+          },
+          ip: request.ip || null,
+        })
+        .catch(() => undefined);
+      return { hechas };
     } catch (error) {
       if (error instanceof ErrorIA) return reply.code(502).send({ error: error.message });
       throw error;

@@ -48,6 +48,8 @@ export interface DepsCarga {
   timezone: string;
   /** La lista de envio automatico: un numero que entra en un lote sale de ella (el reparto se lo queda). */
   lista?: ServicioEnvioAutomatico;
+  /** El reloj (el de la tienda; en las pruebas, uno de mentira). */
+  ahora?: () => Date;
 }
 
 export class ErrorCarga extends Error {}
@@ -115,10 +117,13 @@ export async function cargarLote(deps: DepsCarga, body: CargaLote): Promise<Resu
     // Una solicitud de OTRO DIA que quedo abierta no bloquea el pedido de hoy:
     // se cierra como reemplazada y el nuevo sale (paso con un numero real: un
     // pedido de prueba viejo apartaba cada pedido nuevo como incidencia).
-    const diaLima = (d: Date | string | null | undefined) =>
-      d ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d)) : '';
+    // El dia se cuenta con el MISMO reloj que fecho la solicitud (el de la
+    // tienda): con el reloj de la maquina, una prueba que corre antes de las
+    // 9:00 de Lima veia la solicitud de hace un momento como «de otro dia».
+    const diaLocal = (d: Date | string | null | undefined) =>
+      d ? new Intl.DateTimeFormat('en-CA', { timeZone: deps.timezone || 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d)) : '';
     // (Una en «supervision» —el cliente dijo «no soy yo»— sí sigue bloqueando: eso lo decide una persona.)
-    if (abierta && abierta.estado !== 'supervision' && abierta.createdAt && diaLima(abierta.createdAt) < diaLima(new Date())) {
+    if (abierta && abierta.estado !== 'supervision' && abierta.createdAt && diaLocal(abierta.createdAt) < diaLocal(deps.ahora?.() ?? new Date())) {
       await repos.rutas.actualizarSolicitud(abierta.id, { estado: 'cancelado', incidenciaDetalle: `reemplazada por un pedido nuevo${solicitud.referencia ? ` (${solicitud.referencia})` : ''}` });
       await repos.rutas.registrarEvento(abierta.id, 'incidencia', 'llegó un pedido nuevo para este número: esta solicitud de otro día se cierra').catch(() => undefined);
       abierta = null;

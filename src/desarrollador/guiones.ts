@@ -92,7 +92,8 @@ const CIERRE_TRAS_GRACIAS: Espera = {
 
 /** Pregunta por su pedido o la hora: SIEMPRE la hora estimada (texto fijo), sin gastar el cierre. */
 const HORA_ESTIMADA: Espera = {
-  respuesta: /ya está con un motorizado|le llega|va en camino/i,
+  // Con el silencio tras UBI, la hora (o el horario, sin minutos del motorizado) con los textos «horaEnSilencio…» (28/09).
+  respuesta: /ya está con un motorizado|le llega|va en camino|llega aproximadamente|se entrega hoy entre|debería estar por llegar/i,
   que: 'pregunta por su pedido o la hora: la hora estimada (texto fijo), sin gastar el cierre',
 };
 

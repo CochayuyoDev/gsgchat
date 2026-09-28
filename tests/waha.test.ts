@@ -292,6 +292,47 @@ describe('traducir el webhook de WAHA', () => {
     expect(toChangeValue({ event: 'message', payload: { body: 'hola' } })).toBeNull();
   });
 
+  it('la respuesta citando un mensaje llega con la cita (context.id), como en Meta', () => {
+    const conReplyTo = toChangeValue({
+      event: 'message',
+      payload: { id: 'm2', from: '51987555101@c.us', body: '30', replyTo: { id: '3EB0ABCDEF12', participant: '51999000000@c.us', body: 'Nuevo pedido' } },
+    });
+    expect(conReplyTo?.messages?.[0]?.context?.id).toBe('3EB0ABCDEF12');
+
+    const conStanza = toChangeValue({
+      event: 'message',
+      payload: { id: 'm3', from: '51987555101@c.us', body: '30', _data: { quotedStanzaID: '3EB0FEDCBA98' } },
+    });
+    expect(conStanza?.messages?.[0]?.context?.id).toBe('3EB0FEDCBA98');
+
+    const sinCita = toChangeValue({ event: 'message', payload: { id: 'm4', from: '51987555101@c.us', body: '30' } });
+    expect(sinCita?.messages?.[0]?.context).toBeUndefined();
+  });
+
+  it('un remitente @lid se lee con su teléfono real, no con los dígitos del LID', () => {
+    const value = toChangeValue({
+      event: 'message',
+      payload: {
+        id: 'm5',
+        from: '123456789012345@lid',
+        body: 'hola',
+        _data: { key: { remoteJid: '123456789012345@lid', remoteJidAlt: '51987555101@s.whatsapp.net' } },
+      },
+    });
+    expect(value?.messages?.[0]?.from).toBe('51987555101');
+    expect(value?.contacts).toBeUndefined();
+
+    const conSenderPn = toChangeValue({
+      event: 'message',
+      payload: { id: 'm6', from: '123456789012345@lid', body: 'hola', notifyName: 'Ana', _data: { key: { senderPn: '51987555102@s.whatsapp.net' } } },
+    });
+    expect(conSenderPn?.messages?.[0]?.from).toBe('51987555102');
+    expect(conSenderPn?.contacts?.[0]?.wa_id).toBe('51987555102');
+
+    // Solo el LID, sin teléfono: se descarta (no se inventa un cliente).
+    expect(toChangeValue({ event: 'message', payload: { id: 'm7', from: '123456789012345@lid', body: 'hola' } })).toBeNull();
+  });
+
   it('los acks numericos se traducen al vocabulario de Meta', () => {
     expect(ackToStatus(1)).toBe('sent');
     expect(ackToStatus(2)).toBe('delivered');

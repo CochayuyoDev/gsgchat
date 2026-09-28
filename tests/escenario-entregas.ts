@@ -150,6 +150,8 @@ export async function crearEscenarioEntregas(opciones: {
   confirmarLista?: boolean;
   /** El buscador de direcciones escritas (uno de mentira en las pruebas: nunca la red). */
   geocodificador?: Geocodificador | null;
+  /** Cuánto espera el cierre a que se asigne motorizado (0 en las pruebas salvo que se pida). */
+  esperaMotorizadoMs?: number;
 } = {}): Promise<EscenarioEntregas> {
   const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
@@ -256,7 +258,7 @@ export async function crearEscenarioEntregas(opciones: {
     settingsRepo,
     gsg: conexionGsg.puerto(),
     conexionGsg,
-    cargarLote: (body) => cargarLote({ repos, plan: PLANES.peru!, timezone: config.timezone }, body),
+    cargarLote: (body) => cargarLote({ repos, plan: PLANES.peru!, timezone: config.timezone, ahora: reloj }, body),
     nombreNegocio: () => config.businessName,
     supervisor: () => opciones.supervisor ?? '',
     ia: () => (ia.disponible ? ia : null),
@@ -267,6 +269,7 @@ export async function crearEscenarioEntregas(opciones: {
     geo: { bbox: config.bbox, cobertura: config.coverageName },
     geocodificador: opciones.geocodificador ?? null,
     ahora: reloj,
+    ...(opciones.esperaMotorizadoMs !== undefined ? { esperaMotorizadoMs: opciones.esperaMotorizadoMs } : {}),
   });
   entregasDeLaRegla = entregas;
   if (opciones.margenMinutos !== undefined) await entregas.guardarAjustes({ margenMinutos: opciones.margenMinutos });

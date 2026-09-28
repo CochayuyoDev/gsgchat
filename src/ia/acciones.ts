@@ -12,9 +12,14 @@
  * Dos clases de acciones:
  *  - `consulta`: solo lee. Se ejecuta siempre y su resultado se le devuelve
  *    al modelo para que responda o decida el siguiente paso.
- *  - `cambio`: modifica algo. Las marcadas `peligrosa` (envios a muchos,
- *    borrar, quitar el modo prueba, tocar el ritmo) no se ejecutan sin que
- *    una persona las confirme en pantalla.
+ *  - `cambio`: modifica algo. NINGUNO se ejecuta sin que la persona pulse
+ *    «Hacerlo» en su tarjeta (decision del dueño, 28/09): primero se prepara
+ *    leyendo (`preparar`, ver acciones-base.ts) y se enseña exactamente lo
+ *    que va a pasar; las `peligrosa` llevan ademas su aviso.
+ *
+ * Las acciones de las pantallas del panel (Hoy, Numeros del dia,
+ * Motorizados, Chats, Ajustes, Respuestas rapidas, Campañas...) viven en
+ * acciones-panel.ts; aqui quedan las de siempre y se juntan todas abajo.
  *
  * Lo que NO hay aqui, a proposito: crear o ver claves de API, crear o
  * cambiar usuarios y contrasenas, tocar la conexion de WhatsApp, borrar
@@ -22,100 +27,11 @@
  */
 
 import { z } from 'zod';
-import type { StokyClient } from '../stoky/client.js';
+import { acortar, def, errorDe, ok, telefono, telefonoADigitos, texto, type Accion, type ContextoAccion, type Preparado, type ResultadoAccion, type TipoAccion } from './acciones-base.js';
+import { ACCIONES_PANEL, PREPARAR_DE_SIEMPRE } from './acciones-panel.js';
 
-export type TipoAccion = 'consulta' | 'cambio';
-
-export interface Llamada {
-  method: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
-  url: string;
-  body?: unknown;
-}
-
-export interface RespuestaLlamada {
-  status: number;
-  json: unknown;
-}
-
-/** Como llega al sistema: los endpoints del panel, con la identidad de quien ordena. */
-export type Llamar = (llamada: Llamada) => Promise<RespuestaLlamada>;
-
-export interface ContextoAccion {
-  llamar: Llamar;
-  /** Quien ordena, para apuntarlo en lo que se crea. */
-  quien: string;
-  esAdmin: boolean;
-  catalogo?: StokyClient;
-}
-
-export interface ResultadoAccion {
-  ok: boolean;
-  /** Una o dos frases para el modelo y para la pantalla. */
-  resumen: string;
-  /** Datos compactos (ya sin secretos) para que el modelo siga trabajando. */
-  datos?: unknown;
-  /** Si se puede arreglar en una pantalla, cual. */
-  ir?: string;
-}
-
-export interface Accion<P = unknown> {
-  nombre: string;
-  tipo: TipoAccion;
-  /** Para el prompt: que hace, en una linea. */
-  descripcion: string;
-  /** Para el prompt: los parametros con su significado. */
-  parametros: string;
-  /** Un ejemplo de orden en lenguaje natural y su llamada. */
-  ejemplo: { orden: string; accion: Record<string, unknown> };
-  schema: z.ZodType<P>;
-  peligrosa?: boolean;
-  /** Solo un administrador (las rutas lo exigen igual; es para explicarlo antes). */
-  soloAdmin?: boolean;
-  ejecutar: (params: P, ctx: ContextoAccion) => Promise<ResultadoAccion>;
-}
-
-const telefono = z.string().trim().min(6).max(30);
-const texto = (max: number) => z.string().trim().min(1).max(max);
-
-/** El error de una respuesta HTTP, dicho para una persona. */
-function errorDe(r: RespuestaLlamada, fallback: string): ResultadoAccion {
-  const j = (r.json ?? {}) as { error?: string; ir?: string };
-  if (r.status === 403) return { ok: false, resumen: j.error ? `No tienes permiso: ${j.error}` : 'No tienes permiso para eso.', ir: j.ir };
-  if (r.status === 404) return { ok: false, resumen: j.error ?? 'No existe (o ya no).', ir: j.ir };
-  if (r.status === 401) return { ok: false, resumen: 'La sesión no es válida.' };
-  return { ok: false, resumen: j.error ?? fallback, ir: j.ir };
-}
-
-const ok = (r: RespuestaLlamada) => r.status >= 200 && r.status < 300;
-
-/** Un telefono a digitos con pais: "987 654 321" -> 51987654321 (Peru). */
-export function telefonoADigitos(t: string, pais = '51'): string {
-  let d = t.replace(/\D+/g, '');
-  if (d.startsWith('00')) d = d.slice(2);
-  if (d.length === 9 && pais === '51') d = pais + d;
-  return d;
-}
-
-function acortar(s: unknown, n = 160): string {
-  const t = String(s ?? '');
-  return t.length > n ? `${t.slice(0, n)}…` : t;
-}
-
-/** Busca una entrega de hoy por pedido, nombre o telefono. */
-async function buscarEntrega(ctx: ContextoAccion, quien: string): Promise<{ id: number; referencia: string; phone: string; nombre: string | null } | null> {
-  const r = await ctx.llamar({ method: 'GET', url: '/admin/entregas' });
-  if (!ok(r)) return null;
-  const lista = ((r.json as { entregas?: Array<{ id: number; referencia: string; phone: string; nombre: string | null }> }).entregas ?? []);
-  const digitos = telefonoADigitos(quien);
-  const q = quien.trim().toLowerCase();
-  return (
-    lista.find((e) => e.referencia.toLowerCase() === q) ??
-    lista.find((e) => /^\d{6,}$/.test(digitos) && e.phone === digitos) ??
-    lista.find((e) => (e.nombre ?? '').toLowerCase() === q) ??
-    lista.find((e) => (e.nombre ?? '').toLowerCase().includes(q) || e.referencia.toLowerCase().includes(q)) ??
-    null
-  );
-}
+export type { Accion, ContextoAccion, Llamada, Llamar, Preparado, ResultadoAccion, RespuestaLlamada, Tarjeta, TipoAccion } from './acciones-base.js';
+export { telefonoADigitos } from './acciones-base.js';
 
 /** Busca un motorizado por nombre o telefono. */
 async function buscarMotorizado(ctx: ContextoAccion, quien: string): Promise<{ id: number; nombre: string; phone: string } | null> {
@@ -162,9 +78,7 @@ async function buscarLote(ctx: ContextoAccion, idONombre: string): Promise<{ id:
   return lotes.find((l) => l.id === idONombre) ?? lotes.find((l) => l.nombre.toLowerCase() === n) ?? lotes.find((l) => l.nombre.toLowerCase().includes(n)) ?? null;
 }
 
-const def = <P>(a: Accion<P>): Accion => a as unknown as Accion;
-
-export const ACCIONES: Accion[] = [
+const ACCIONES_DE_SIEMPRE: Accion[] = [
   // ------------------------------------------------ lista de envio automatico
   def({
     nombre: 'lista.ver',
@@ -320,35 +234,6 @@ export const ACCIONES: Accion[] = [
   }),
 
   // -------------------------------------------------------------- mensajes
-  def({
-    nombre: 'mensaje.enviar',
-    tipo: 'cambio',
-    descripcion: 'Mandar UN mensaje de texto a UN número, como si lo escribiera una persona desde el chat.',
-    parametros: 'telefono, texto',
-    ejemplo: { orden: 'escríbele a Juan (987654321) que su pedido sale mañana', accion: { accion: 'mensaje.enviar', telefono: '987654321', texto: 'Hola Juan, tu pedido sale mañana.' } },
-    schema: z.object({ telefono, texto: texto(4000) }),
-    async ejecutar(p, ctx) {
-      const r = await ctx.llamar({ method: 'POST', url: '/admin/chat/send', body: { phone: telefonoADigitos(p.telefono), text: p.texto } });
-      if (!ok(r)) return errorDe(r, 'No se pudo enviar.');
-      const j = r.json as { ok?: boolean; blocked?: boolean; reason?: string; error?: string };
-      if (j.ok) return { ok: true, resumen: `Mensaje enviado a ${telefonoADigitos(p.telefono)}: «${acortar(p.texto, 80)}».`, ir: '/chat' };
-      return { ok: false, resumen: j.blocked ? `No salió: ${j.reason}` : `No salió: ${j.error ?? 'WhatsApp lo rechazó'}`, ir: '/panel#historial' };
-    },
-  }),
-  def({
-    nombre: 'mensaje.pedirUbicacion',
-    tipo: 'cambio',
-    descripcion: 'Pedirle ahora mismo la ubicación a un número (una sola vez; para insistir cada pocas horas usa lista.agregar).',
-    parametros: 'telefono, texto (opcional)',
-    ejemplo: { orden: 'pídele la ubicación al 987654321 ahora', accion: { accion: 'mensaje.pedirUbicacion', telefono: '987654321' } },
-    schema: z.object({ telefono, texto: z.string().trim().max(1000).optional() }),
-    async ejecutar(p, ctx) {
-      const r = await ctx.llamar({ method: 'POST', url: '/admin/chat/send', body: { phone: telefonoADigitos(p.telefono), askLocation: true, text: p.texto } });
-      if (!ok(r)) return errorDe(r, 'No se pudo enviar.');
-      const j = r.json as { ok?: boolean; blocked?: boolean; reason?: string; error?: string };
-      return j.ok ? { ok: true, resumen: `Se le pidió la ubicación a ${telefonoADigitos(p.telefono)}.`, ir: '/chat' } : { ok: false, resumen: `No salió: ${j.reason ?? j.error ?? 'WhatsApp lo rechazó'}`, ir: '/panel#historial' };
-    },
-  }),
 
   // ------------------------------------------------------------------ chat
   def({
@@ -381,21 +266,6 @@ export const ACCIONES: Accion[] = [
       const j = r.json as { messages: Array<{ direction: 'in' | 'out'; body: string | null; kind: string; createdAt: string }>; reparto?: { referencia: string | null; estado: string } | null };
       const lineas = j.messages.map((m) => ({ quien: m.direction === 'in' ? 'cliente' : 'nosotros', cuando: m.createdAt, texto: acortar(m.body ?? `(${m.kind})`, 200) }));
       return { ok: true, resumen: `Conversación con ${c.name ?? c.phone} (${c.phone}): ${lineas.length} mensajes${j.reparto ? `; tiene una solicitud de ubicación del reparto (${j.reparto.estado})` : ''}.`, datos: lineas, ir: '/chat' };
-    },
-  }),
-  def({
-    nombre: 'chat.atenderPersona',
-    tipo: 'cambio',
-    descripcion: 'Parar (o soltar) el bot en un chat: "de este me encargo yo" / "que vuelva a contestar solo".',
-    parametros: 'telefono, pausar (true = una persona atiende; false = el sistema vuelve a contestar)',
-    ejemplo: { orden: 'del chat de Rosa me encargo yo', accion: { accion: 'chat.atenderPersona', telefono: 'Rosa', pausar: true } },
-    schema: z.object({ telefono: z.string().trim().min(2).max(120), pausar: z.boolean().default(true) }),
-    async ejecutar(p, ctx) {
-      const c = await buscarContacto(ctx, p.telefono);
-      if (!c) return { ok: false, resumen: `No encuentro a "${p.telefono}".` };
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/chat/${encodeURIComponent(c.id)}/bot`, body: { pausado: p.pausar } });
-      if (!ok(r)) return errorDe(r, 'No se pudo cambiar.');
-      return { ok: true, resumen: p.pausar ? `Listo: en el chat de ${c.name ?? c.phone} el sistema se calla; lo atiende una persona.` : `Listo: en el chat de ${c.name ?? c.phone} el sistema vuelve a contestar solo.`, ir: '/chat' };
     },
   }),
 
@@ -526,59 +396,6 @@ export const ACCIONES: Accion[] = [
     },
   }),
   def({
-    nombre: 'entregas.confirmar',
-    tipo: 'cambio',
-    descripcion: 'Dar por confirmada a mano la entrega de un cliente (te lo dijo por teléfono) o cancelarla.',
-    parametros: 'cliente (pedido, nombre o teléfono), confirmada (true/false), motivo (si se cancela)',
-    ejemplo: { orden: 'Ana Quispe confirmó por teléfono su pedido', accion: { accion: 'entregas.confirmar', cliente: 'Ana Quispe', confirmada: true } },
-    schema: z.object({ cliente: texto(120), confirmada: z.boolean().default(true), motivo: z.string().trim().max(300).optional() }),
-    async ejecutar(p, ctx) {
-      const e = await buscarEntrega(ctx, p.cliente);
-      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/entregas' };
-      const r = p.confirmada
-        ? await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/confirmar`, body: { confirmada: true } })
-        : await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/cancelar`, body: { motivo: p.motivo ?? `cancelada por la IA a petición de ${ctx.quien}` } });
-      if (!ok(r)) return errorDe(r, 'No se pudo cambiar la entrega.');
-      return { ok: true, resumen: p.confirmada ? `${e.referencia} de ${e.nombre ?? e.phone} queda confirmada; si tiene ubicación, se le manda a un motorizado.` : `${e.referencia} de ${e.nombre ?? e.phone} queda cancelada y GSG se entera.`, ir: '/entregas' };
-    },
-  }),
-  def({
-    nombre: 'entregas.reasignar',
-    tipo: 'cambio',
-    descripcion: 'Pasar la entrega de un cliente a otro motorizado (uno concreto o el que menos carga tenga).',
-    parametros: 'cliente (pedido, nombre o teléfono), motorizado (nombre, opcional)',
-    ejemplo: { orden: 'el pedido P-1003 que lo lleve Carlos', accion: { accion: 'entregas.reasignar', cliente: 'P-1003', motorizado: 'Carlos' } },
-    schema: z.object({ cliente: texto(120), motorizado: z.string().trim().max(120).optional() }),
-    async ejecutar(p, ctx) {
-      const e = await buscarEntrega(ctx, p.cliente);
-      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/entregas' };
-      let motorizadoId: number | null = null;
-      if (p.motorizado) {
-        const m = await buscarMotorizado(ctx, p.motorizado);
-        if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/entregas' };
-        motorizadoId = m.id;
-      }
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/reasignar`, body: { motorizadoId } });
-      if (!ok(r)) return errorDe(r, 'No se pudo reasignar.');
-      return { ok: true, resumen: `${e.referencia} de ${e.nombre ?? e.phone} ${motorizadoId ? `pasa a ${p.motorizado}` : 'vuelve a repartirse al motorizado menos cargado'}.`, ir: '/entregas' };
-    },
-  }),
-  def({
-    nombre: 'entregas.reintentar',
-    tipo: 'cambio',
-    descripcion: 'Volver a poner en marcha una entrega que estaba apartada para una persona (incidencia).',
-    parametros: 'cliente (pedido, nombre o teléfono)',
-    ejemplo: { orden: 'vuelve a intentar la entrega de Luis Huamán', accion: { accion: 'entregas.reintentar', cliente: 'Luis Huamán' } },
-    schema: z.object({ cliente: texto(120) }),
-    async ejecutar(p, ctx) {
-      const e = await buscarEntrega(ctx, p.cliente);
-      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/entregas' };
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/reintentar`, body: {} });
-      if (!ok(r)) return errorDe(r, 'No se pudo reintentar.');
-      return { ok: true, resumen: `${e.referencia} de ${e.nombre ?? e.phone} vuelve a estar en marcha.`, ir: '/entregas' };
-    },
-  }),
-  def({
     nombre: 'motorizados.ver',
     tipo: 'consulta',
     descripcion: 'Los motorizados: quiénes están activos, su zona y cuántas entregas llevan hoy.',
@@ -605,21 +422,6 @@ export const ACCIONES: Accion[] = [
       if (!ok(r)) return errorDe(r, 'No se pudo dar de alta.');
       const j = r.json as { nuevo: boolean; motorizado: { nombre: string; phone: string } };
       return { ok: true, resumen: j.nuevo ? `${j.motorizado.nombre} (${j.motorizado.phone}) dado de alta como motorizado.` : `${j.motorizado.nombre} ya estaba dado de alta.`, ir: '/entregas' };
-    },
-  }),
-  def({
-    nombre: 'motorizados.estado',
-    tipo: 'cambio',
-    descripcion: 'Poner a un motorizado activo, en descanso o de baja.',
-    parametros: 'motorizado (nombre o teléfono), estado: activo | descanso | baja',
-    ejemplo: { orden: 'Julio hoy descansa', accion: { accion: 'motorizados.estado', motorizado: 'Julio', estado: 'descanso' } },
-    schema: z.object({ motorizado: texto(120), estado: z.enum(['activo', 'descanso', 'baja']) }),
-    async ejecutar(p, ctx) {
-      const m = await buscarMotorizado(ctx, p.motorizado);
-      if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/entregas' };
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/motorizados/${m.id}`, body: { estado: p.estado } });
-      if (!ok(r)) return errorDe(r, 'No se pudo cambiar el estado.');
-      return { ok: true, resumen: `${m.nombre} queda ${p.estado === 'activo' ? 'activo' : p.estado === 'descanso' ? 'en descanso' : 'de baja'}.`, ir: '/entregas' };
     },
   }),
 
@@ -689,36 +491,6 @@ export const ACCIONES: Accion[] = [
 
   // ------------------------------------------ entregas: lo de las últimas vueltas
   def({
-    nombre: 'entregas.segundaVisita',
-    tipo: 'cambio',
-    descripcion: 'Mandar al motorizado a pasar otra vez por una entrega en la que no había nadie (sin preguntarle al cliente).',
-    parametros: 'cliente (pedido, nombre o teléfono)',
-    ejemplo: { orden: 'que vuelvan a pasar por el pedido de Rosa', accion: { accion: 'entregas.segundaVisita', cliente: 'Rosa' } },
-    schema: z.object({ cliente: texto(120) }),
-    async ejecutar(p, ctx) {
-      const e = await buscarEntrega(ctx, p.cliente);
-      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/hoy' };
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/segunda-visita`, body: {} });
-      if (!ok(r)) return errorDe(r, 'No se pudo arrancar la segunda visita.');
-      return { ok: true, resumen: `${e.referencia} de ${e.nombre ?? e.phone}: el motorizado vuelve a pasar hoy.`, ir: '/hoy' };
-    },
-  }),
-  def({
-    nombre: 'entregas.urgente',
-    tipo: 'cambio',
-    descripcion: 'Marcar (o quitar) un pedido como urgente: va primero hacia el motorizado y en su ruta.',
-    parametros: 'cliente (pedido, nombre o teléfono), urgente (true por defecto; false para quitarlo)',
-    ejemplo: { orden: 'el pedido P-1003 es urgente', accion: { accion: 'entregas.urgente', cliente: 'P-1003', urgente: true } },
-    schema: z.object({ cliente: texto(120), urgente: z.boolean().default(true) }),
-    async ejecutar(p, ctx) {
-      const e = await buscarEntrega(ctx, p.cliente);
-      if (!e) return { ok: false, resumen: `No encuentro ninguna entrega de hoy para "${p.cliente}".`, ir: '/hoy' };
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/entregas/${e.id}/prioridad`, body: { urgente: p.urgente } });
-      if (!ok(r)) return errorDe(r, 'No se pudo cambiar la prioridad.');
-      return { ok: true, resumen: p.urgente ? `${e.referencia} de ${e.nombre ?? e.phone} queda como URGENTE: va primero.` : `${e.referencia} de ${e.nombre ?? e.phone} deja de ser urgente.`, ir: '/hoy' };
-    },
-  }),
-  def({
     nombre: 'entregas.probarDia',
     tipo: 'cambio',
     soloAdmin: true,
@@ -753,46 +525,6 @@ export const ACCIONES: Accion[] = [
       const paradas = ruta.paradas.map((x) => `${x.orden}) ${x.entrega.referencia}${x.entrega.nombre ? ` · ${x.entrega.nombre}` : ''}${x.entrega.distrito ? ` (${x.entrega.distrito})` : ''}${x.distancia ? `, ${x.distancia}` : ''}`);
       const resumen = paradas.length ? `Ruta de ${m.nombre}: ${paradas.length} parada(s), unos ${Math.round(ruta.totalKm * 10) / 10} km. ${paradas.join(' → ')}.` : `${m.nombre} no lleva pedidos ahora mismo.`;
       return { ok: true, resumen, datos: { motorizado: m.nombre, paradas: ruta.paradas.map((x) => ({ orden: x.orden, pedido: x.entrega.referencia, cliente: x.entrega.nombre, distrito: x.entrega.distrito, distancia: x.distancia, situacion: x.situacion })), totalKm: ruta.totalKm, mensaje: ruta.texto }, ir: '/motorizados' };
-    },
-  }),
-  def({
-    nombre: 'motorizados.mandarRuta',
-    tipo: 'cambio',
-    descripcion: 'Mandarle por WhatsApp a un motorizado su ruta de hoy (un solo mensaje con sus paradas en orden).',
-    parametros: 'motorizado (nombre o teléfono)',
-    ejemplo: { orden: 'mándale su ruta a Carlos', accion: { accion: 'motorizados.mandarRuta', motorizado: 'Carlos' } },
-    schema: z.object({ motorizado: texto(120) }),
-    async ejecutar(p, ctx) {
-      const m = await buscarMotorizado(ctx, p.motorizado);
-      if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/motorizados' };
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/motorizados/${m.id}/ruta/mandar`, body: {} });
-      if (!ok(r)) return errorDe(r, 'No se pudo mandar la ruta.');
-      const ruta = (r.json as { ruta?: { paradas?: unknown[] } }).ruta;
-      return { ok: true, resumen: `Ruta mandada a ${m.nombre}${ruta?.paradas ? ` (${ruta.paradas.length} parada(s))` : ''}.`, ir: '/motorizados' };
-    },
-  }),
-  def({
-    nombre: 'motorizados.traspasar',
-    tipo: 'cambio',
-    peligrosa: true,
-    descripcion: 'Quitarle a un motorizado todo lo que lleva y repartirlo a otro (uno concreto o el que toque), dejándolo activo o en descanso.',
-    parametros: 'motorizado (nombre o teléfono), destino (nombre, opcional), descanso (true para dejarlo en descanso), motivo (opcional)',
-    ejemplo: { orden: 'Carlos se quedó sin moto: pásale sus pedidos a Diego', accion: { accion: 'motorizados.traspasar', motorizado: 'Carlos', destino: 'Diego', descanso: true, motivo: 'se quedó sin moto' } },
-    schema: z.object({ motorizado: texto(120), destino: z.string().trim().max(120).optional(), descanso: z.boolean().default(false), motivo: z.string().trim().max(200).optional() }),
-    async ejecutar(p, ctx) {
-      const m = await buscarMotorizado(ctx, p.motorizado);
-      if (!m) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.motorizado}".`, ir: '/motorizados' };
-      let destino: number | null = null;
-      if (p.destino) {
-        const d = await buscarMotorizado(ctx, p.destino);
-        if (!d) return { ok: false, resumen: `No encuentro ningún motorizado que se llame "${p.destino}".`, ir: '/motorizados' };
-        destino = d.id;
-      }
-      const r = await ctx.llamar({ method: 'POST', url: `/admin/motorizados/${m.id}/traspasar`, body: { motorizadoId: destino, descanso: p.descanso, ...(p.motivo ? { motivo: p.motivo } : {}) } });
-      if (!ok(r)) return errorDe(r, 'No se pudo traspasar.');
-      const j = r.json as { traspasadas?: Array<{ referencia: string }>; destino?: { nombre: string } | null };
-      const cuantos = j.traspasadas?.length ?? 0;
-      return { ok: true, resumen: cuantos ? `${cuantos} pedido(s) de ${m.nombre} (${j.traspasadas!.map((x) => x.referencia).join(', ')}) pasan a ${j.destino?.nombre ?? p.destino ?? 'otros motorizados'}${p.descanso ? '; queda en descanso' : ''}.` : `${m.nombre} no tenía pedidos entre manos${p.descanso ? '; queda en descanso' : ''}.`, ir: '/motorizados' };
     },
   }),
 
@@ -931,25 +663,6 @@ export const ACCIONES: Accion[] = [
       return { ok: true, resumen: `${lista.length} campaña(s).`, datos: lista.slice(0, 20).map((c) => ({ id: c.id, nombre: c.name, estado: c.status ?? c.estado ?? null, total: c.total ?? null })), ir: '/panel#campanas' };
     },
   }),
-  def({
-    nombre: 'campana.estado',
-    tipo: 'cambio',
-    descripcion: 'Pausar, reanudar o parar una campaña.',
-    parametros: 'campana (id o nombre), accion: "pausar" | "reanudar" | "parar"',
-    ejemplo: { orden: 'pausa la campaña de septiembre', accion: { accion: 'campana.estado', campana: 'septiembre', accionCampana: 'pausar' } },
-    schema: z.object({ campana: texto(120), accionCampana: z.enum(['pausar', 'reanudar', 'parar']) }),
-    async ejecutar(p, ctx) {
-      const r = await ctx.llamar({ method: 'GET', url: '/admin/campaigns' });
-      if (!ok(r)) return errorDe(r, 'No se pudieron leer las campañas.');
-      const lista = (Array.isArray(r.json) ? r.json : (r.json as { items?: unknown[] }).items ?? []) as Array<{ id: string; name: string }>;
-      const n = p.campana.toLowerCase();
-      const c = lista.find((x) => x.id === p.campana) ?? lista.find((x) => x.name.toLowerCase().includes(n));
-      if (!c) return { ok: false, resumen: `No encuentro la campaña "${p.campana}".`, ir: '/panel#campanas' };
-      const e = await ctx.llamar({ method: 'POST', url: `/admin/campaigns/${encodeURIComponent(c.id)}/estado`, body: { accion: p.accionCampana, motivo: `por la IA a petición de ${ctx.quien}` } });
-      if (!ok(e)) return errorDe(e, 'No se pudo cambiar la campaña.');
-      return { ok: true, resumen: `Campaña "${c.name}": ${p.accionCampana === 'pausar' ? 'pausada' : p.accionCampana === 'reanudar' ? 'reanudada' : 'parada'}.`, ir: '/panel#campanas' };
-    },
-  }),
 
   // -------------------------------------------------------- numero y salud
   def({
@@ -1024,26 +737,6 @@ export const ACCIONES: Accion[] = [
       if (!ok(r)) return errorDe(r, 'No se pudo leer la configuración.');
       const j = r.json as { efectivo?: Record<string, unknown>; guardado?: Record<string, unknown> };
       return { ok: true, resumen: 'Configuración leída.', datos: j.efectivo ?? j.guardado ?? j, ir: '/panel#configuracion' };
-    },
-  }),
-  def({
-    nombre: 'configuracion.cambiar',
-    tipo: 'cambio',
-    peligrosa: true,
-    soloAdmin: true,
-    descripcion: 'Cambiar la configuración: nombre del negocio, horario de envío, modo prueba (activo y números), supervisor a quien avisar.',
-    parametros: 'nombreNegocio, horario: {inicio, fin}, modoPrueba: {activo, numeros: []}, avisos: {supervisor}; solo lo que se cambia',
-    ejemplo: { orden: 'apaga el modo prueba', accion: { accion: 'configuracion.cambiar', modoPrueba: { activo: false } } },
-    schema: z.object({ nombreNegocio: z.string().trim().max(80).optional(), horario: z.object({ inicio: z.coerce.number().int().min(0).max(23).optional(), fin: z.coerce.number().int().min(1).max(24).optional() }).optional(), modoPrueba: z.object({ activo: z.boolean().optional(), numeros: z.array(z.string()).max(50).optional() }).optional(), avisos: z.object({ supervisor: z.string().nullable().optional() }).optional() }),
-    async ejecutar(p, ctx) {
-      const body: Record<string, unknown> = {};
-      if (p.nombreNegocio) body.nombreNegocio = p.nombreNegocio;
-      if (p.horario) body.horario = p.horario;
-      if (p.modoPrueba) body.modoPrueba = { ...p.modoPrueba, numeros: p.modoPrueba.numeros?.map((n) => telefonoADigitos(n)) };
-      if (p.avisos) body.avisos = { supervisor: p.avisos.supervisor ? telefonoADigitos(p.avisos.supervisor) : p.avisos.supervisor };
-      const r = await ctx.llamar({ method: 'POST', url: '/admin/ajustes', body });
-      if (!ok(r)) return errorDe(r, 'No se pudo guardar la configuración.');
-      return { ok: true, resumen: `Configuración guardada (${Object.keys(body).join(', ')}).`, ir: '/panel#configuracion' };
     },
   }),
   def({
@@ -1330,18 +1023,64 @@ async function cambiarEstadoEnLista(ctx: ContextoAccion, quien: string, que: 'pa
   return { ok: true, resumen: que === 'pausar' ? `${nombre} en pausa: no se le escribe hasta reanudarlo.` : `${nombre} reanudado.`, ir: '/envio-automatico' };
 }
 
+/** Lo comercial que vive aqui (el resto lo marca acciones-panel.ts con `ventas`). */
+for (const a of ACCIONES_DE_SIEMPRE) if (a.nombre === 'campanas.ver' || a.nombre === 'catalogo.buscar') a.ventas = true;
+for (const a of ACCIONES_DE_SIEMPRE) {
+  const preparar = PREPARAR_DE_SIEMPRE[a.nombre];
+  if (preparar) a.preparar = preparar as Accion['preparar'];
+}
+
+/** Todas: las de siempre y las de las pantallas del panel (estas mandan si se llaman igual). */
+const DEL_PANEL = new Set(ACCIONES_PANEL.map((a) => a.nombre));
+export const ACCIONES: Accion[] = [...ACCIONES_DE_SIEMPRE.filter((a) => !DEL_PANEL.has(a.nombre)), ...ACCIONES_PANEL];
+
 export const ACCIONES_POR_NOMBRE = new Map(ACCIONES.map((a) => [a.nombre, a]));
 
 /**
  * Lo comercial (campañas de venta, catalogo de productos): en modo "Solo lo
  * de GSG" la IA operadora ni lo ofrece ni lo ejecuta. El codigo sigue ahi.
  */
-export const ACCIONES_DE_VENTAS: ReadonlySet<string> = new Set(['campanas.ver', 'campana.estado', 'catalogo.buscar']);
+export const ACCIONES_DE_VENTAS: ReadonlySet<string> = new Set(ACCIONES.filter((a) => a.ventas).map((a) => a.nombre));
+
+/** Las unicas llamadas POST que solo leen (previsualizar): las unicas que se permiten al preparar. */
+const POST_QUE_SOLO_LEEN = ['/admin/grupos/previsualizar', '/admin/entregas/previsualizar'];
+
+/** Lo que se le dice a quien no puede: en palabras y a quien pedirselo. */
+export function motivoSoloAdmin(a: Accion): string {
+  return `Eso solo lo puede hacer un administrador de la tienda («${a.descripcion.replace(/\.$/, '')}»). Pídeselo a un administrador: lo puede hacer desde aquí mismo o desde su pantalla.`;
+}
+
+/**
+ * Prepara un cambio para su tarjeta de «Hacerlo». NUNCA escribe: el contexto
+ * que recibe `preparar` rechaza cualquier llamada que no sea de lectura.
+ */
+export async function prepararAccion(accion: Accion, params: Record<string, unknown>, ctx: ContextoAccion): Promise<Preparado> {
+  if (accion.soloAdmin && !ctx.esAdmin) return { tipo: 'no', resumen: motivoSoloAdmin(accion) };
+  if (accion.ventas && ctx.sinVentas) return { tipo: 'no', resumen: 'Con «Solo lo de GSG» no hay campañas ni catálogo: eso está apagado en este modo. Si quieres parar todo lo que sale, dime «pausa todos los envíos».' };
+  const lectura: ContextoAccion = {
+    ...ctx,
+    llamar: async (l) => {
+      if (l.method !== 'GET' && !(l.method === 'POST' && POST_QUE_SOLO_LEEN.includes(l.url.split('?')[0] ?? ''))) throw new Error(`al preparar solo se lee (se intentó ${l.method} ${l.url})`);
+      return ctx.llamar(l);
+    },
+  };
+  if (!accion.preparar) {
+    const partes = Object.entries(params)
+      .filter(([k, v]) => k !== 'accion' && v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+    return { tipo: 'listo', params, tarjeta: { que: accion.descripcion.replace(/\.$/, ''), ...(partes.length ? { despues: partes.join(' · ') } : {}) } };
+  }
+  try {
+    return (await accion.preparar(params, lectura)) as Preparado;
+  } catch (error) {
+    return { tipo: 'no', resumen: `No se pudo preparar: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
 
 /** El catalogo tal y como se le cuenta al modelo. */
 export function catalogoParaElModelo(opts: { esAdmin: boolean; conCatalogo: boolean; sinVentas?: boolean }): string {
   return ACCIONES.filter((a) => (opts.esAdmin || !a.soloAdmin) && (opts.conCatalogo || a.nombre !== 'catalogo.buscar') && !(opts.sinVentas && ACCIONES_DE_VENTAS.has(a.nombre)))
-    .map((a) => `- ${a.nombre} [${a.tipo}${a.peligrosa ? ', pide confirmación' : ''}]: ${a.descripcion} Parámetros: ${a.parametros}. Ej.: «${a.ejemplo.orden}» → ${JSON.stringify(a.ejemplo.accion)}`)
+    .map((a) => `- ${a.nombre} [${a.tipo === 'consulta' ? 'consulta: se hace al momento' : `cambio: tarjeta + «Hacerlo»${a.peligrosa ? ', delicado' : ''}`}]: ${a.descripcion} Parámetros: ${a.parametros}. Ej.: «${a.ejemplo.orden}» → ${JSON.stringify(a.ejemplo.accion)}`)
     .join('\n');
 }
 

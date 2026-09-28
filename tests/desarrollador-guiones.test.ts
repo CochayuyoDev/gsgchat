@@ -67,7 +67,7 @@ describe('«Mis casos»: el caso escrito a mano se entiende (o se dice qué lín
     const escribe = g.pasos.filter((p) => p.tipo === 'escribe');
     expect(escribe[1]).toMatchObject({ quien: 'cliente', dice: { tipo: 'pin' }, espera: { contiene: 'Ubicación registrada' } });
     // Tras el agradecimiento: la pregunta por la hora recibe la hora estimada; otra consulta, el cierre con el número del motorizado asignado, y luego silencio.
-    expect(escribe[2]).toMatchObject({ quien: 'cliente', dice: { texto: '¿a qué hora llega?' }, espera: { contiene: 'ya está con un motorizado' } });
+    expect(escribe[2]).toMatchObject({ quien: 'cliente', dice: { texto: '¿a qué hora llega?' }, espera: { contiene: 'se entrega hoy entre' } });
     expect(escribe[3]).toMatchObject({ quien: 'cliente', dice: { texto: '¿cuánto cuesta el envío?' }, espera: { contiene: 'no se reciben consultas', numeroDelMotorizado: true } });
     expect(escribe[4]).toMatchObject({ quien: 'cliente', espera: { calla: true } });
     expect(escribe.at(-1)).toMatchObject({ quien: 'motorizado', dice: { texto: 'entregado' }, espera: { estado: ['entregada'] } });
@@ -186,7 +186,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     expect(pin.pasos[3]!.quien).toBe('sistema');
     const moto = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = $1`, [pin.referencia])).rows[0]!.phone;
     // Paso 4: pregunta la hora → la hora estimada (sin gastar el cierre).
-    expect(pin.pasos[4]!.respuesta).toMatch(/ya está con un motorizado/);
+    expect(pin.pasos[4]!.respuesta).toMatch(/su pedido .+ se entrega hoy entre las .+\. El motorizado le llamará antes de llegar a su dirección\.$/);
     expect(pin.pasos[4]!.respuesta).not.toMatch(/no se reciben consultas/);
     expect(pin.pasos[5]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
     expect(pin.pasos[5]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
@@ -208,7 +208,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     expect(si.pasos[0]!.respuesta).not.toMatch(/compartir tu ubicación/);
     expect(si.pasos[1]!.respuesta).toBe('Perfecto, tu pedido queda confirmado para hoy. ¡Muchas gracias!');
     const moto = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = $1`, [si.referencia])).rows[0]!.phone;
-    expect(si.pasos[3]!.respuesta).toMatch(/ya está con un motorizado/);
+    expect(si.pasos[3]!.respuesta).toMatch(/su pedido .+ se entrega hoy entre las .+\. El motorizado le llamará antes de llegar a su dirección\.$/);
     expect(si.pasos[4]!.respuesta).toMatch(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: .+\.$/);
     expect(si.pasos[4]!.respuesta!.replace(/\D/g, '')).toContain(moto.replace(/\D/g, '').slice(-9));
     expect(si.pasos[5]!.respuesta).toBeNull();
@@ -233,7 +233,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
       'motorizado: 25',
       '=> estado: en camino',
       'cliente: por donde va??',
-      '=> dice: va en camino',
+      '=> dice: llega aproximadamente a las',
       'cliente: cuánto cuesta el envío',
       '=> dice: no se reciben consultas',
       '=> con el número del motorizado',

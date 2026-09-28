@@ -62,7 +62,7 @@ const mismoMundo = (a: string, b: string): boolean => esNumeroDePrueba(a) === es
 const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 000 1…) y los de verdad solo a motorizados de verdad.';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
-import { payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, RUTA_GSG_PENDIENTES, type PuertoGsg } from '../rutas/gsg.js';
+import { despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, RUTA_GSG_PENDIENTES, type PuertoGsg } from '../rutas/gsg.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import type { CargaLote, ResultadoCarga } from '../rutas/cargar.js';
 import { revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
@@ -176,6 +176,16 @@ export interface RespuestaEntregas {
   /** Que se decidio, para la bitacora y las pruebas. */
   resultado?: string;
 }
+
+/** Lo que se hace cuando el cliente en silencio pregunta por la hora (ver `horaPedidaEnSilencio`). */
+export type HoraPedidaEnSilencio =
+  | { responder: string; entrega: Entrega; tipo: 'con_hora' | 'pasada' | 'sin_tiempo' }
+  | { callar: string; entrega: Entrega };
+
+/** La misma respuesta de la hora no se repite antes de esto (varias preguntas en ráfaga = una respuesta). */
+export const HORA_PEDIDA_REPETIDA_MS = 10 * 60_000;
+/** Como mucho estas respuestas de la hora por pedido y día. */
+export const HORA_PEDIDA_MAX_POR_DIA = 4;
 
 /** Una parada de la ruta de un motorizado. */
 export interface ParadaRuta {
@@ -513,6 +523,15 @@ export interface ServicioEntregas {
   /** Si el cliente pregunta por su pedido o la hora: el texto fijo con la hora estimada (null = no es esa pregunta). */
   /** orzar: la IA ya dijo que pregunta por su pedido o la hora (no hace falta que lo reconozcan las reglas). */
   respuestaPorPedido(phone: string, texto: string, opts?: { forzar?: boolean }): Promise<string | null>;
+  /**
+   * Excepción al silencio tras UBI (pedido del dueño, 28/09): el cliente
+   * pregunta cuándo llega / dónde está su pedido. `responder` = el texto fijo
+   * con la hora (minutos del motorizado + margen) o el horario de entrega;
+   * `callar` = ya se le contestó lo mismo hace poco o llegó al tope del día;
+   * null = no es esa pregunta o no hay pedido al que aplicarla (sigue el
+   * camino de siempre). Solo con la regla del dueño activa.
+   */
+  horaPedidaEnSilencio(phone: string, texto: string): Promise<HoraPedidaEnSilencio | null>;
 
   // --- lo que hace el motor
   pedirConfirmacion(entrega: Entrega): Promise<{ ok: boolean; motivo?: string; retryAfterMs?: number }>;
@@ -667,13 +686,59 @@ function firmaMotorizado(m: Motorizado | null | undefined): string {
   return m.placa ? `${m.nombre} (${m.placa})` : m.nombre;
 }
 
+/**
+ * Donde nombra el motorizado un pedido, por palabra completa (-1 si no lo
+ * nombra): «P-1001 20» nombra a P-1001 y NO a P-100.
+ */
+export function posicionDeReferencia(texto: string, referencia: string): number {
+  const ref = referencia.trim().toLowerCase();
+  if (!ref) return -1;
+  const escapada = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`(^|[^\\p{L}\\p{N}])${escapada}(?![\\p{L}\\p{N}])`, 'u').exec(texto.toLowerCase());
+  return m ? m.index + m[1]!.length : -1;
+}
+
+/**
+ * Un trozo de «P-1001 20, P-2001 30 y P-1002 no voy» sin lo que lo une al
+ * siguiente: la coma, el punto y coma o la «y» SUELTA. Nunca la «y» final
+ * de una palabra («no voy» sigue siendo «no voy»).
+ */
+export function sinUnionFinal(trozo: string): string {
+  return trozo.replace(/[\s,;]+$/, '').replace(/[\s,;]+y$/i, '').replace(/[\s,;]+$/, '');
+}
+
+/** Los wamid que guarda un evento «motorizado_enviado»: el del mensaje y el del pin aparte. */
+export function wamidsDelEvento(payload: unknown): string[] {
+  const p = (payload ?? {}) as { wamid?: unknown; wamids?: unknown };
+  const lista = [p.wamid, ...(Array.isArray(p.wamids) ? p.wamids : [])];
+  return [...new Set(lista.filter((w): w is string => typeof w === 'string' && w.length > 0))];
+}
+
+/**
+ * Si dos ids son el mismo mensaje. WAHA da el id completo al enviar
+ * («true_51987…@c.us_3EB0…») y en la cita a veces solo la ultima parte
+ * («3EB0…»): se comparan tambien por esa parte.
+ */
+export function mismoMensaje(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const cola = (x: string) => x.split('_').pop() ?? x;
+  const ca = cola(a);
+  return ca.length >= 8 && ca === cola(b);
+}
+
 /** El enlace al pin, el que abre Google Maps en cualquier telefono. */
 export function enlaceMapa(lat: number, lng: number): string {
   return `https://maps.google.com/?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
 }
 
 /** Que le pasa a una entrega, en cristiano. */
-export function situacionDe(e: Entrega, motorizado: Motorizado | null, ajustes: AjustesEntregas, timezone: string): string {
+/**
+ * `silencio`: la regla del dueño está activa («Solo lo de GSG» + silencio tras
+ * UBI): el aviso de llegada y el «cerca» NO le salen al cliente, y la ficha no
+ * puede decir que se le avisó (28/09).
+ */
+export function situacionDe(e: Entrega, motorizado: Motorizado | null, ajustes: AjustesEntregas, timezone: string, silencio = false): string {
   if (e.envioRetenidoAt && !['cancelada', 'terminada', 'entregada'].includes(e.estado)) {
     return grupoDe(e) === 'confirmar'
       ? 'Por confirmar el envío: todavía no se le escribe. Al confirmar se le pregunta SÍ o NO (GSG ya tiene su dirección).'
@@ -704,6 +769,7 @@ export function situacionDe(e: Entrega, motorizado: Motorizado | null, ajustes: 
       if (motorizado && e.motorizadoEstado === 'respondio' && !e.avisoEnviadoAt) return `${firmaMotorizado(motorizado)} dijo ${e.minutosMotorizado != null ? minutosEnPalabras(e.minutosMotorizado) : '?'}; el aviso de llegada al cliente sale en cuanto el ritmo del número lo permita.`;
       return motorizado ? `${e.segundaVisita ? 'Segunda visita: ' : ''}${firmaMotorizado(motorizado)} tiene el pin; se espera que diga en cuánto entrega (aviso ${e.motorizadoIntentos} de ${ajustes.motorizadoMaxIntentos}).` : 'Esperando motorizado.';
     case 'avisada':
+      if (silencio) return `${e.segundaVisita ? 'Segunda visita: ' : ''}${firmaMotorizado(motorizado) || 'El motorizado'} dijo ${e.minutosMotorizado != null ? minutosEnPalabras(e.minutosMotorizado) : '?'}: llega hacia las ${e.llegaAproxAt ? horaEnReloj(e.llegaAproxAt, timezone) : '?'}. Al cliente NO se le escribió (silencio tras ubicación registrada): se le dice la hora si la pregunta${e.terminadaGsgAt ? '' : ' (GSG aún no la marcó terminada)'}${e.cercaAvisadoAt ? `; a las ${horaEnReloj(e.cercaAvisadoAt, timezone)} el motorizado dijo que ya está cerca` : ''}. Falta que el motorizado diga "entregado".`;
       return `${e.segundaVisita ? 'Segunda visita: ' : ''}${firmaMotorizado(motorizado) || 'El motorizado'} dijo ${e.minutosMotorizado != null ? minutosEnPalabras(e.minutosMotorizado) : '?'}; al cliente se le avisó que llega hacia las ${e.llegaAproxAt ? horaEnReloj(e.llegaAproxAt, timezone) : '?'}${e.terminadaGsgAt ? '' : ' (GSG aún no la marcó terminada)'}${e.cercaAvisadoAt ? `; a las ${horaEnReloj(e.cercaAvisadoAt, timezone)} se le avisó que ya está cerca` : ''}. Falta que el motorizado diga "entregado".`;
     case 'entregada': {
       const hora = e.entregadaAt ? horaEnReloj(e.entregadaAt, timezone) : '?';
@@ -875,7 +941,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     minutosMotorizado: e.minutosMotorizado,
     notas: e.notas,
     horaEntregada: e.entregadaAt ? horaEnReloj(e.entregadaAt, tz()) : null,
-    situacion: situacionDe(e, m ?? null, ajustes, tz()),
+    situacion: situacionDe(e, m ?? null, ajustes, tz(), reglaGsgActiva()),
     urgente: e.prioridad === 'urgente',
     desde: horaEnPalabras(ajustes.horarioEntregas.desde),
     hasta: horaEnPalabras(ajustes.horarioEntregas.hasta),
@@ -1018,6 +1084,23 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return sender.send({ ...base, kind: 'template', templateName: nombre, templateLanguage: registrada?.language ?? 'es', variables: variables.slice(0, Math.max(0, cuantas)) });
   }
 
+  /**
+   * Si un envío al cliente que «salió bien» en realidad NO salió porque lo
+   * frenó la regla del dueño (enviarA en «Solo lo de GSG», o la puerta del
+   * sender con el silencio tras UBI): el motivo en palabras. null = salió de
+   * verdad. Así la bitácora no dice «avisado al cliente» cuando no se le
+   * escribió (28/09, GSG-IA-001).
+   */
+  async function noSalioAlCliente(phone: string, salida: { ok: boolean; wamid?: string }): Promise<string | null> {
+    const wamid = salida.ok ? String(salida.wamid ?? '') : '';
+    if (!wamid.startsWith('regla-gsg:') && !wamid.startsWith('silencio:')) return null;
+    const c = await repos.contacts.getByPhone(phone).catch(() => null);
+    const motivo = String(c?.iaCerradaMotivo ?? '');
+    if (wamid.startsWith('silencio:') || motivo.startsWith('ubicación registrada')) return 'silencio tras ubicación registrada';
+    if (c?.iaCerradaAt) return 'silencio tras el cierre del chat';
+    return '«Solo lo de GSG»: al cliente solo se le pide la ubicación';
+  }
+
   const variablesCliente = (e: Entrega): string[] => [(e.nombre ?? '').trim().split(/\s+/)[0] || 'buenas tardes', e.referencia, deps.nombreNegocio()];
 
   /**
@@ -1069,6 +1152,12 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   async function reportar(e: Entrega, tipo: 'confirmacion' | 'entrega' | 'ubicacion', payload: Record<string, unknown>): Promise<void> {
     await repos.rutas.encolarReporte({ solicitudId: null, loteId: e.loteId ?? null, tipo, payload });
     await evento(e, 'reporte', `encolado para GSG: ${tipo}`);
+    // La ubicacion sale YA, como en el reparto (rutas/inbound.ts): con el pin
+    // confirmado a mano o por el SI del pin lejano esperaba a la pasada de
+    // cada minuto. Un fallo se queda en la cola y lo reintenta esa pasada.
+    if (tipo === 'ubicacion') {
+      void despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion']).catch(() => undefined);
+    }
   }
 
   // ---------------------------------------------------------- sincronizar
@@ -1245,7 +1334,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       await soltarDeLaEntrega(act, `GSG canceló el pedido ${act.referencia}`);
       if (teniaHora) {
         const salida = await enviarA(act.phone, textoDe('clienteCanceladoGsg', ajustes, contexto(act)), 'aviso', [act.nombre ?? '', act.referencia, ''], { separacionMs: 0, maxPorDia: 20 });
-        await evento(act, 'nota', salida.ok ? 'al cliente se le avisó que GSG canceló su pedido' : `no se pudo avisar al cliente de la cancelación: ${'reason' in salida ? salida.reason : salida.error}`);
+        const callado = await noSalioAlCliente(act.phone, salida);
+        await evento(act, 'nota', callado ? `al cliente NO se le escribió que GSG canceló su pedido (${callado})` : salida.ok ? 'al cliente se le avisó que GSG canceló su pedido' : `no se pudo avisar al cliente de la cancelación: ${'reason' in salida ? salida.reason : salida.error}`);
       }
       resultado.canceladas = (resultado.canceladas ?? 0) + 1;
       tocadas.set(act.id, act);
@@ -1798,6 +1888,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (clase === 'otra') {
       await evento(e, 'nota', `volvió a contestar otra cosa a «¿es ahí?» (${que}; ${como}): el pin queda sin registrar y lo decide una persona`);
       await pasarAPersona(phone, 'pin_lejos_sin_respuesta', `no aclaró si su pin lejos de ${distrito} es el bueno: ${que}`).catch(() => 0);
+      // El reparto deja de pedirle la ubicación: su solicitud pasa a «lo ve
+      // una persona» (si no, volvía a insistirle «necesitamos tu ubicación»).
+      await soltarSolicitudes(repos, phone, { ahora: ahora(), motivo: `no aclaró si su pin lejos de ${distrito} es el bueno (lo decide una persona)`, estado: 'supervision' }).catch(() => []);
       return { tipo: 'persona', texto: '', entrega: (await repo.entrega(e.id)) ?? e };
     }
     // SÍ: se registra como siempre.
@@ -2089,7 +2182,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (ajustes.avisarEntregado && como !== 'cierre' && !opts.sinGracias) {
       const ctx = contexto(act, m);
       const salida = await enviarA(act.phone, textoDe('clienteEntregado', ajustes, ctx), 'aviso', [(act.nombre ?? '').trim().split(/\s+/)[0] || 'buenas tardes', act.referencia, ctx.horaEntregada ?? ''], { separacionMs: 0, maxPorDia: 20 });
-      if (salida.ok) await evento(act, 'aviso', 'se le dio las gracias al cliente: pedido entregado');
+      const callado = await noSalioAlCliente(act.phone, salida);
+      if (callado) await evento(act, 'nota', `al cliente NO se le escribió el «entregado» (${callado})`);
+      else if (salida.ok) await evento(act, 'aviso', 'se le dio las gracias al cliente: pedido entregado');
       else await evento(act, 'nota', `no se pudo avisar al cliente de la entrega: ${'reason' in salida ? salida.reason : salida.error}`);
     }
     act = (await repo.entrega(act.id)) ?? act;
@@ -2155,7 +2250,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         segundaVisitaVenceAt: vence,
         motorizadoProximoAt: null,
       })) ?? e;
-    await evento(act, 'segunda_visita', `se le preguntó al cliente si volvemos hoy; se espera su respuesta hasta las ${horaEnReloj(vence, tz())}`, { wamid: salida.wamid });
+    const calladoSv = await noSalioAlCliente(act.phone, salida);
+    await evento(act, 'segunda_visita', calladoSv ? `al cliente NO se le preguntó si volvemos hoy (${calladoSv}); si nadie lo resuelve, a las ${horaEnReloj(vence, tz())} pasa a una persona` : `se le preguntó al cliente si volvemos hoy; se espera su respuesta hasta las ${horaEnReloj(vence, tz())}`, { wamid: salida.wamid });
     await reportar(act, 'entrega', payloadEntregaDe(act, m, { entregadoAt: null, incidencia: 'no_entregado' }));
     emitir('entrega.incidencia', act, m);
     return act;
@@ -2184,7 +2280,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
           segundaVisitaVenceAt: vence,
           motorizadoProximoAt: null,
         })) ?? e;
-      await evento(act, 'segunda_visita', `se le preguntó al cliente si volvemos hoy; se espera su respuesta hasta las ${horaEnReloj(vence, tz())}`, { wamid: salida.wamid });
+      const calladoSv = await noSalioAlCliente(act.phone, salida);
+      await evento(act, 'segunda_visita', calladoSv ? `al cliente NO se le preguntó si volvemos hoy (${calladoSv}); si nadie lo resuelve, a las ${horaEnReloj(vence, tz())} pasa a una persona` : `se le preguntó al cliente si volvemos hoy; se espera su respuesta hasta las ${horaEnReloj(vence, tz())}`, { wamid: salida.wamid });
       return;
     }
     const pasajero = !('sinPlantilla' in salida) && (salida.blocked ? salida.retryAfterMs !== undefined : salida.retryable);
@@ -2318,7 +2415,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       return { atendida: true, entrega: objetivo, resultado: 'motorizado_cerca_no_enviado', responder: `No pude avisarle a ${nombre} por WhatsApp; sigue nomás y escríbeme "entregado" cuando lo dejes.` };
     }
     const act = (await repo.actualizar(objetivo.id, { cercaAvisadoAt: ahora() })) ?? objetivo;
-    await evento(act, 'cerca', `${firmaMotorizado(m)} avisó que está cerca ("${texto.slice(0, 80)}"); al cliente se le dijo que esté atento`);
+    const calladoCerca = await noSalioAlCliente(act.phone, salida);
+    await evento(act, 'cerca', calladoCerca ? `${firmaMotorizado(m)} avisó que está cerca ("${texto.slice(0, 80)}"); al cliente NO se le escribió (${calladoCerca})` : `${firmaMotorizado(m)} avisó que está cerca ("${texto.slice(0, 80)}"); al cliente se le avisó`);
     const ambigua = avisadas.length > 1 && !nombro;
     return { atendida: true, entrega: act, resultado: 'motorizado_cerca', responder: textoDe('motorizadoCerca', ajustes, contexto(act, m)) + (ambigua ? ` Si era otro pedido, dime cuál (por ejemplo "cerca ${avisadas.find((x) => x.id !== act.id)?.referencia ?? 'P-1002'}").` : '') };
   }
@@ -2435,11 +2533,16 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * Un motorizado contesta: el tiempo de la entrega que tiene entre manos, o
    * el "entregado" (o el "no estaba nadie") de la que ya lleva con hora.
    */
-  async function respuestaDeMotorizado(m: Motorizado, texto: string, opts: { citaId?: string | null } = {}): Promise<RespuestaEntregas> {
+  /**
+   * `fija`: el pedido al que va este trozo, ya decidido (cuando el motorizado
+   * mandó varios pedidos en un mensaje). Con ella no se adivina nada.
+   */
+  async function respuestaDeMotorizado(m: Motorizado, texto: string, opts: { citaId?: string | null; fija?: number } = {}): Promise<RespuestaEntregas> {
     const enManos = await repo.enManosDeMotorizado(m.id);
     const avisadas = await repo.avisadasDeMotorizado(m.id);
     const limpio = texto.toLowerCase();
-    const nombrada = (lista: Entrega[]) => lista.find((x) => limpio.includes(x.referencia.toLowerCase()));
+    // Por palabra completa: «P-1001» no nombra a «P-100».
+    const nombrada = (lista: Entrega[]) => lista.find((x) => posicionDeReferencia(limpio, x.referencia) >= 0);
     const corta = leerMotorizadoCorta(texto);
 
     // El escudo: por este chat no se dan datos de clientes ni se atienden
@@ -2507,33 +2610,44 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       return { atendida: true, resultado: 'motorizado_sin_pendientes', responder: `Gracias, ${m.nombre.split(' ')[0]}. Ahora mismo no tienes ningún pedido esperando tu tiempo; te escribo en cuanto haya uno.` };
     }
-    // Varios pedidos en un mensaje («G-3002 20, G-3001 45»): cada trozo al suyo.
-    const nombradas = enManos.filter((x) => limpio.includes(x.referencia.toLowerCase()));
+    // Varios pedidos en un mensaje («G-3002 20, G-3001 45»): cada trozo va a
+    // SU pedido, ya fijado. El que quedó resuelto por otro trozo del mismo
+    // mensaje (iba en el mismo viaje) se salta: nunca se le pasa a otro.
+    const nombradas = opts.fija == null ? enManos.filter((x) => posicionDeReferencia(limpio, x.referencia) >= 0) : [];
     if (nombradas.length > 1) {
-      const cortes = nombradas.map((x) => ({ x, i: limpio.indexOf(x.referencia.toLowerCase()) })).sort((a, b) => a.i - b.i);
+      const cortes = nombradas.map((x) => ({ x, i: posicionDeReferencia(limpio, x.referencia) })).sort((a, b) => a.i - b.i);
       const respuestas: string[] = [];
       let ultima: RespuestaEntregas | null = null;
       for (let k = 0; k < cortes.length; k++) {
-        const trozo = texto.slice(cortes[k]!.i, k + 1 < cortes.length ? cortes[k + 1]!.i : undefined).replace(/[,;y\s]+$/i, '');
-        ultima = await respuestaDeMotorizado(m, trozo);
+        const { x } = cortes[k]!;
+        if (k > 0 && !(await repo.enManosDeMotorizado(m.id)).some((y) => y.id === x.id)) continue;
+        const trozo = sinUnionFinal(texto.slice(cortes[k]!.i, k + 1 < cortes.length ? cortes[k + 1]!.i : undefined));
+        ultima = await respuestaDeMotorizado(m, trozo, { fija: x.id });
         if ('responder' in ultima && ultima.responder) respuestas.push(ultima.responder);
       }
       return { ...(ultima ?? { atendida: true }), atendida: true, responder: respuestas.join('\n\n') } as RespuestaEntregas;
     }
     // Respondió citando el mensaje de un pedido: ese.
+    // (Vale el mensaje del pedido y también el pin que se le mandó aparte.)
     let porCita: Entrega | null = null;
-    if (opts.citaId) {
+    if (opts.citaId && opts.fija == null) {
       for (const x of enManos) {
         const evs = await repo.eventos(x.id, 40).catch(() => [] as EventoEntrega[]);
-        if (evs.some((ev) => ev.tipo === 'motorizado_enviado' && (ev.payload as { wamid?: string } | null)?.wamid === opts.citaId)) { porCita = x; break; }
+        if (evs.some((ev) => ev.tipo === 'motorizado_enviado' && wamidsDelEvento(ev.payload).some((w) => mismoMensaje(w, opts.citaId!)))) { porCita = x; break; }
       }
     }
     // Si nombra el pedido ("P-1002 40") o cita su mensaje, ese. Con un solo
     // viaje pendiente, ese. Con VARIOS clientes esperando su tiempo y sin
     // decir cuál, se le pregunta: adivinar le ponía el tiempo (o el «no») al
     // pedido equivocado (26/09: un «no» de Chesco soltó G-3001 al azar).
+    // Con el pedido ya fijado (un trozo de un mensaje con varios), ese y
+    // ningún otro: «si queda un solo cliente, ese» le daba los minutos de
+    // P-2001 a P-1002 y a su cliente un aviso de llegada falso.
     const clientes = new Set(enManos.map((x) => x.phone));
-    const elegido = nombrada(enManos) ?? porCita ?? (clientes.size === 1 ? enManos[0]! : null);
+    if (opts.fija != null && !enManos.some((x) => x.id === opts.fija)) {
+      return { atendida: true, resultado: 'motorizado_sin_pendientes', responder: '' };
+    }
+    const elegido = opts.fija != null ? enManos.find((x) => x.id === opts.fija)! : (nombrada(enManos) ?? porCita ?? (clientes.size === 1 ? enManos[0]! : null));
     if (!elegido) {
       const lista = enManos.filter((x, i, arr) => arr.findIndex((y) => y.phone === x.phone) === i).map((x) => `• ${x.referencia} — ${x.nombre ?? x.phone}${x.distrito ? ` (${x.distrito})` : ''}`).join('\n');
       await evento(enManos[0]!, 'nota', `${firmaMotorizado(m)} contestó sin decir a qué pedido ("${texto.slice(0, 80)}") y tiene ${clientes.size} esperando su tiempo: se le pregunta cuál`);
@@ -2645,13 +2759,18 @@ ${lista}
       return act;
     }
     let act = (await repo.actualizar(e.id, { avisoEnviadoAt: ahora() })) ?? e;
-    await evento(act, 'aviso', `avisado al cliente: "${texto.slice(0, 200)}"`);
+    // Frenado por la regla del dueño: la bitácora lo dice tal cual (28/09:
+    // decía «avisado al cliente» y el mensaje nunca salió).
+    const callado = await noSalioAlCliente(e.phone, salida);
+    if (callado) await evento(act, 'nota', `no se le escribe al cliente la hora (${callado}); se le dirá si lo pregunta: llega hacia las ${ctx.hora ?? '?'}`, { avisoNoEnviado: true, motivo: callado });
+    else await evento(act, 'aviso', `avisado al cliente: "${texto.slice(0, 200)}"`);
     await reportar(act, 'entrega', payloadEntregaDe(act, m));
     act = await recalcular(act);
     emitir('entrega.avisada', act, m);
     for (const h of mismoViaje) {
       let hAct = (await repo.actualizar(h.id, { avisoEnviadoAt: ahora() })) ?? h;
-      await evento(hAct, 'aviso', `avisado al cliente junto con ${e.referencia} (mismo viaje)`);
+      if (callado) await evento(hAct, 'nota', `no se le escribe al cliente la hora (${callado}), igual que ${e.referencia} (mismo viaje); se le dirá si lo pregunta`, { avisoNoEnviado: true, motivo: callado });
+      else await evento(hAct, 'aviso', `avisado al cliente junto con ${e.referencia} (mismo viaje)`);
       await reportar(hAct, 'entrega', payloadEntregaDe(hAct, m));
       hAct = await recalcular(hAct);
       emitir('entrega.avisada', hAct, m);
@@ -2665,19 +2784,34 @@ ${lista}
    * Cancelar dos veces seguidas (o cancelar mientras se reasigna) lo mandaba
    * dos veces al mismo motorizado (26/09): el envío tarda unos segundos y la
    * segunda vuelta leía el pedido todavía asignado. Se descarta si ya va uno
-   * igual en camino o si ese mismo texto ya le salió en las últimas 24 horas.
+   * igual en camino o si ese mismo texto ya le salió DESPUÉS de la última vez
+   * que se le mandó este pedido: si se le vuelve a dar y se le vuelve a
+   * quitar, el aviso sale otra vez (una ventana ciega de 24 h lo callaba).
    */
   async function avisarCancelado(e: Entrega, m: Motorizado): Promise<void> {
     const texto = textoDe('motorizadoCancelado', ajustes, contexto(e, m));
-    const clave = `${m.phone}|${texto}`;
+    // La última vez que se le mandó este pedido a ESTE motorizado (sus mensajes).
+    const evs = await repo.eventos(e.id, 500).catch(() => [] as EventoEntrega[]);
+    const ultimoEnvio = [...evs].reverse().find((ev) => ev.tipo === 'motorizado_enviado' && (ev.payload as { motorizadoId?: number } | null)?.motorizadoId === m.id && wamidsDelEvento(ev.payload).length > 0);
+    const deEseEnvio = ultimoEnvio ? wamidsDelEvento(ultimoEnvio.payload) : [];
+    const clave = `${m.phone}|${texto}|${ultimoEnvio?.id ?? ''}`;
     if (avisosCanceladoEnCamino.has(clave)) return;
     avisosCanceladoEnCamino.add(clave);
     try {
       const c = await repos.contacts.getByPhone(m.phone).catch(() => null);
-      const desde = ahora().getTime() - 24 * 60 * 60_000;
       const recientes = c ? await repos.messages.listMessages(c.id, 40).catch(() => []) : [];
-      if (recientes.some((x) => x.direction === 'out' && String(x.body ?? '').trim() === texto.trim() && new Date(x.createdAt as unknown as string).getTime() >= desde)) return;
-      await sender.send({ phone: m.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: texto, limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
+      // Solo cuenta lo que salió después de ese envío (el hilo viene en orden de lectura).
+      let corte = -1;
+      recientes.forEach((x, i) => {
+        if (x.wamid && deEseEnvio.some((w) => mismoMensaje(w, x.wamid!))) corte = i;
+      });
+      if (recientes.slice(corte + 1).some((x) => x.direction === 'out' && String(x.body ?? '').trim() === texto.trim())) return;
+      const salida = await sender.send({ phone: m.phone, kind: 'freeform', category: 'UTILITY', origen: 'sistema', text: texto, limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
+      if (!salida.ok) {
+        // Que se vea: el motorizado puede seguir yendo a un pedido que ya no es suyo.
+        const motivo = 'reason' in salida ? salida.reason : 'error' in salida ? salida.error : 'no se pudo enviar';
+        await evento(e, 'incidencia', `no se le pudo avisar a ${firmaMotorizado(m)} que ya no lleva ${e.referencia}: ${String(motivo).slice(0, 160)}. Llámalo para avisarle.`).catch(() => undefined);
+      }
     } finally {
       // Un rato más: lo enviado tarda en quedar guardado en el hilo.
       setTimeout(() => avisosCanceladoEnCamino.delete(clave), 60_000).unref?.();
@@ -2861,13 +2995,19 @@ ${lista}
     const conCoordenadas = e.lat != null && e.lng != null ? `\n📍 Ubicación: ${e.lat.toFixed(6)}, ${e.lng.toFixed(6)}\n${enlaceMapa(e.lat, e.lng)}` : '';
     // Ya tiene otro cliente esperando su tiempo: se le dice cómo contestar
     // para que cada tiempo vaya a su pedido.
-    const otrosPendientes = (await repo.enManosDeMotorizado(m.id).catch(() => [] as Entrega[])).filter((x) => x.phone !== e.phone && x.motorizadoEstado === 'enviado');
+    // Se cuentan TODOS sus pedidos esperando tiempo (los de este viaje y los
+    // que ya tenía, también los de un mismo cliente): con P-1001 y P-2001 de
+    // un cliente y P-1002 de otro son 3, no 2.
+    const yaEnManos = (await repo.enManosDeMotorizado(m.id).catch(() => [] as Entrega[])).filter((x) => x.motorizadoEstado === 'enviado' && !refs.includes(x.referencia));
+    const otrosPendientes = yaEnManos.filter((x) => x.phone !== e.phone);
+    const todasLasRefs = [...refs, ...yaEnManos.map((x) => x.referencia)];
     const variosPendientes = otrosPendientes.length
-      ? `\n\n📌 Tienes ${otrosPendientes.length + 1} pedidos esperando tu tiempo (${enLista([e.referencia, ...otrosPendientes.map((x) => x.referencia)])}). Responde con el pedido y los minutos, por ejemplo «${e.referencia} 30», o responde citando este mensaje.`
+      ? `\n\n📌 Tienes ${todasLasRefs.length} pedidos esperando tu tiempo (${enLista(todasLasRefs)}). Responde con el pedido y los minutos, por ejemplo «${e.referencia} 30», o responde citando este mensaje.`
       : '';
     const base = textoDe(e.segundaVisita ? 'motorizadoSegundaVisita' : 'motorizadoNuevo', ajustes, ctx);
-    // Con varios, «Responde solo con los minutos» contradice lo de abajo: fuera.
-    const texto = (variosPendientes ? base.replace(/\s*Responde solo con los minutos[^.\n]*\.?/i, '') : base) + conCoordenadas + conDireccionEscrita + variosPendientes;
+    // Con varios, «Responde solo con los minutos (ej. 40).» contradice lo de
+    // abajo: fuera hasta el fin de la línea (cortar en el primer punto dejaba «40).» colgando).
+    const texto = (variosPendientes ? base.replace(/[ \t]*Responde solo con los minutos[^\n]*/i, '').replace(/[ \t]+$/gm, '') : base) + conCoordenadas + conDireccionEscrita + variosPendientes;
     // Con la plantilla de Meta (ventana cerrada) el texto es fijo: la marca de urgente va pegada a la referencia.
     const salida = await enviarA(m.phone, texto, 'motorizado', [(e.nombre ?? '').trim() || e.phone, e.prioridad === 'urgente' ? `URGENTE ${enLista(refs)}` : enLista(refs), enlaceMapa(e.lat, e.lng)], { separacionMs: 0, maxPorDia: 500 });
     if (!salida.ok) {
@@ -2883,16 +3023,20 @@ ${lista}
       await descartarMotorizado(e, m, 'WhatsApp rechazó su número');
       return { ok: false, motivo: salida.error };
     }
+    // El pin aparte también se guarda: si el motorizado contesta citando el
+    // pin (y no el texto), la cita tiene que encontrar su pedido.
+    const wamids = [salida.wamid];
     if (ajustes.mandarPinAlMotorizado) {
-      await sender.send({ phone: m.phone, kind: 'location', category: 'UTILITY', origen: 'sistema', location: { latitude: e.lat, longitude: e.lng, name: `${e.referencia} · ${e.nombre ?? e.phone}`, address: [e.direccion, e.distrito].filter(Boolean).join(', ') || undefined }, limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => undefined);
+      const pin = await sender.send({ phone: m.phone, kind: 'location', category: 'UTILITY', origen: 'sistema', location: { latitude: e.lat, longitude: e.lng, name: `${e.referencia} · ${e.nombre ?? e.phone}`, address: [e.direccion, e.distrito].filter(Boolean).join(', ') || undefined }, limitesContacto: { separacionMs: 0, maxPorDia: 500 } }).catch(() => null);
+      if (pin && pin.ok && pin.wamid) wamids.push(pin.wamid);
     }
     // Si estaba apartada por falta de motorizado, al asignarle uno deja de ser incidencia sola.
     const salioDeIncidencia = e.estado === 'incidencia' && e.incidencia === 'sin_motorizado';
     const act = (await repo.actualizar(e.id, { motorizadoId: m.id, motorizadoEstado: 'enviado', motorizadoIntentos: 1, motorizadoEnviadoAt: en, motorizadoProximoAt: new Date(en.getTime() + ajustes.motorizadoEsperaMin * 60_000), motorizadoRespuesta: null, estado: 'esperando_motorizado', ...(salioDeIncidencia ? { incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) })) ?? e;
-    await evento(act, 'motorizado_enviado', `${e.segundaVisita ? 'segunda visita: ' : ''}pin enviado a ${firmaMotorizado(m)}; se le preguntó en cuánto entrega${hermanas.length ? ` (junto con ${enLista(hermanas.map((x) => x.referencia))}: mismo cliente)` : ''}`, { motorizadoId: m.id, wamid: salida.wamid });
+    await evento(act, 'motorizado_enviado', `${e.segundaVisita ? 'segunda visita: ' : ''}pin enviado a ${firmaMotorizado(m)}; se le preguntó en cuánto entrega${hermanas.length ? ` (junto con ${enLista(hermanas.map((x) => x.referencia))}: mismo cliente)` : ''}`, { motorizadoId: m.id, wamid: salida.wamid, wamids });
     for (const h of hermanas) {
       const hAct = (await repo.actualizar(h.id, { motorizadoId: m.id, motorizadoEstado: 'enviado', motorizadoIntentos: 1, motorizadoEnviadoAt: en, motorizadoProximoAt: new Date(en.getTime() + ajustes.motorizadoEsperaMin * 60_000), motorizadoRespuesta: null, estado: 'esperando_motorizado' })) ?? h;
-      await evento(hAct, 'motorizado_enviado', `va en el mismo viaje que ${e.referencia} (mismo cliente): pin enviado a ${firmaMotorizado(m)}`, { motorizadoId: m.id, wamid: salida.wamid });
+      await evento(hAct, 'motorizado_enviado', `va en el mismo viaje que ${e.referencia} (mismo cliente): pin enviado a ${firmaMotorizado(m)}`, { motorizadoId: m.id, wamid: salida.wamid, wamids });
     }
     return { ok: true, motorizado: m };
   }
@@ -3575,7 +3719,8 @@ ${lista}
       await evento(act, 'nota', `${firmaMotorizado(m)} ya no lo lleva (${motivo}); ${destino ? `pasa a ${firmaMotorizado(destino)}` : 'se busca otro'}`);
       if (teniaHora) {
         const salida = await enviarA(act.phone, textoDe('clienteCambioMotorizado', ajustes, contexto(act)), 'aviso', variablesCliente(act), { separacionMs: 0, maxPorDia: 20 });
-        await evento(act, salida.ok ? 'aviso' : 'nota', salida.ok ? 'se le avisó al cliente del cambio de motorizado' : `no se le pudo avisar al cliente del cambio: ${'reason' in salida ? salida.reason : salida.error}`);
+        const callado = await noSalioAlCliente(act.phone, salida);
+        await evento(act, salida.ok && !callado ? 'aviso' : 'nota', callado ? `al cliente NO se le escribió el cambio de motorizado (${callado})` : salida.ok ? 'se le avisó al cliente del cambio de motorizado' : `no se le pudo avisar al cliente del cambio: ${'reason' in salida ? salida.reason : salida.error}`);
       }
       if (destino) act = await mandarAEste(act, destino.id);
       traspasadas.push(act);
@@ -3737,7 +3882,7 @@ ${lista}
         resultado.dadasPorEntregadas.push(e.referencia);
         continue;
       }
-      const situacion = situacionDe(e, m, ajustes, tz());
+      const situacion = situacionDe(e, m, ajustes, tz(), reglaGsgActiva());
       const act = await marcarIncidencia(e, 'dia_cerrado', `quedó sin terminar el ${e.dia}: ${situacion}`, { avisar: false, cerradaPorDia: true });
       // El dia se cerro: el reparto deja de pedirle la ubicacion por ese pedido (lo ve una persona).
       if (e.ubicacionEstado === 'pendiente') await soltarDeLaEntrega(act, `el día ${e.dia} se cerró sin su ubicación`);
@@ -3823,7 +3968,10 @@ ${lista}
       soporte: base.soporte ?? soporteEnPalabras(ajustes.soporte),
       // Los datos del envio de ejemplo (los de GSG si la entrega los trae).
       envio: base.envio ?? { producto: 'Zapatillas talla 40', empresaCodigo: '516', empresaNombre: 'Zapatería Lima', tracking: 'GSG-A-102345', nroPedido: '#1042', metodoPago: 'YAPE', monto: '85.00', remitente: 'Juan Quispe' },
+      enCuanto: minutosEnPalabras(Math.max(1, Math.ceil((llega.getTime() - en.getTime()) / 60_000))),
     };
+    // La hora pedida en silencio va con AM/PM («11:05 AM»), como la verá el cliente.
+    if (clave.startsWith('horaEnSilencio')) ctx.hora = horaEnPalabras(horaEnReloj(llega, tz()));
     const propio = texto.trim() || ajustes.textos[clave]?.trim() || TEXTOS_POR_DEFECTO[clave];
     return rellenar(propio, TEXTOS_PARA_MOTORIZADO.has(clave) ? contextoMotorizado(ctx) : ctx);
   }
@@ -3837,7 +3985,7 @@ ${lista}
       const s = (await repos.rutas.listarSolicitudes({ loteId: e.loteId, q: e.phone, limit: 5, offset: 0 }).catch(() => [])).find((x) => x.phone === e.phone);
       if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId };
     }
-    return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz()), acciones: accionesDe(e), solicitud, mismoCliente: [] };
+    return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [] };
   }
 
   async function resumen(): Promise<ResumenEntregas> {
@@ -3963,11 +4111,15 @@ ${lista}
       // momento a que el reparto lo asigne en vez de dar otro número como si
       // fuera del motorizado (26/09: el cierre salió 3 s antes de asignar a
       // Chesco y llevó el número del propio WhatsApp).
-      if (e && !e.motorizadoId && e.ubicacionEstado === 'recibida' && !ESTADOS_FINALES.includes(e.estado) && !e.datosEnvio?.telefonoMotorizado) {
+      // Fuera del horario de envío el reparto no asigna a nadie: esperar solo
+      // retrasaba la respuesta. La espera es a trozos de medio segundo con un
+      // temporizador (nunca mirando el reloj en bucle).
+      const repartoEnHorario = motor?.enHorario() ?? true;
+      if (e && repartoEnHorario && !e.motorizadoId && e.ubicacionEstado === 'recibida' && !ESTADOS_FINALES.includes(e.estado) && !e.datosEnvio?.telefonoMotorizado) {
         const hayActivos = (await repo.listarMotorizados().catch(() => [] as Motorizado[])).some((m) => m.estado === 'activo' && mismoMundo(e!.phone, m.phone));
-        const limite = Date.now() + (hayActivos ? (deps.esperaMotorizadoMs ?? (process.env.VITEST ? 0 : 8_000)) : 0);
-        while (Date.now() < limite) {
-          await new Promise((r) => setTimeout(r, 500));
+        const esperaMs = hayActivos ? (deps.esperaMotorizadoMs ?? (process.env.VITEST ? 0 : 8_000)) : 0;
+        for (let esperado = 0; esperado < esperaMs; esperado += 500) {
+          await new Promise((r) => setTimeout(r, Math.min(500, esperaMs - esperado)));
           const x = await repo.entrega(e.id).catch(() => null);
           if (x?.motorizadoId) { e = x; break; }
         }
@@ -4031,6 +4183,79 @@ ${lista}
       if (!e) return null;
       const r = await respuestaDondeEsta(e, texto, p.noLlego);
       return r.responder ?? null;
+    },
+    /**
+     * Caso real del 28/09 (GSG-IA-001): el motorizado dio «30», el aviso de
+     * llegada no salió por el silencio tras UBI y el cliente preguntó «¿cuánto
+     * tiempo se tarda el pedido?» sin que nadie le contestara. Con el silencio
+     * activo, ESTA pregunta (y solo esta) se contesta con la hora que ya se
+     * calculó, recalculando cuánto falta; sin minutos del motorizado, con el
+     * horario de entrega. Ni IA ni stickers. La misma respuesta no se repite
+     * antes de 10 min (una ráfaga de preguntas = una respuesta) y como mucho 4
+     * por pedido al día. Queda en la bitácora del pedido (y así sobrevive a un
+     * reinicio).
+     */
+    async horaPedidaEnSilencio(phone: string, texto: string): Promise<HoraPedidaEnSilencio | null> {
+      if (!reglaGsgActiva()) return null;
+      const p = leerPreguntaPorPedido(texto);
+      if (!p.pregunta) return null;
+      const en = ahora();
+      const dia = hoy();
+      const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !x.envioRetenidoAt);
+      // Las que GSG ya dio por terminadas hoy siguen teniendo su hora.
+      const terminadas = (await repo.listar({ dia, estados: ['terminada'], q: phone, limit: 50 }).catch(() => [] as Entrega[])).filter((x) => x.phone === phone && x.llegaAproxAt);
+      const candidatas = [...vivas, ...terminadas];
+      if (!candidatas.length) return null;
+      // ¿De cuál pregunta? La que nombra; si no, la que tiene hora (la próxima
+      // por llegar; si todas pasaron, la última); si ninguna, la más reciente.
+      const limpio = texto.toLowerCase();
+      const nombrada = candidatas.find((x) => x.referencia && limpio.includes(x.referencia.toLowerCase()));
+      const conHora = candidatas.filter((x) => x.llegaAproxAt).sort((a, b) => a.llegaAproxAt!.getTime() - b.llegaAproxAt!.getTime());
+      const porLlegar = conHora.find((x) => x.llegaAproxAt!.getTime() > en.getTime());
+      const e = nombrada ?? porLlegar ?? conHora[conHora.length - 1] ?? candidatas[candidatas.length - 1]!;
+      const llega = e.llegaAproxAt;
+      // «Ya pasó la hora y no llega»: eso es un reclamo para una persona (el camino de siempre).
+      if (p.noLlego && llega && en.getTime() - llega.getTime() > MINUTOS_TOLERANCIA_LLEGADA * 60_000) return null;
+      const tipo: 'con_hora' | 'pasada' | 'sin_tiempo' = !llega ? 'sin_tiempo' : llega.getTime() > en.getTime() ? 'con_hora' : 'pasada';
+      const horaAmPm = llega ? horaEnPalabras(horaEnReloj(llega, tz())) : null;
+
+      // Anti-repetición, contra la bitácora del pedido.
+      const diaDe = (f: Date): string => {
+        try {
+          return new Intl.DateTimeFormat('en-CA', { timeZone: tz(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(f).slice(0, 10);
+        } catch {
+          return f.toISOString().slice(0, 10);
+        }
+      };
+      const dadas = (await repo.eventos(e.id, 2000).catch(() => []))
+        .filter((ev) => (ev.payload as { horaPedida?: unknown } | null)?.horaPedida && diaDe(new Date(ev.createdAt)) === dia);
+      const ultima = dadas[dadas.length - 1];
+      const que = `"${texto.slice(0, 80)}"`;
+      if (ultima) {
+        const pl = ultima.payload as { tipo?: string; hora?: string | null };
+        const hace = en.getTime() - new Date(ultima.createdAt).getTime();
+        if (hace < HORA_PEDIDA_REPETIDA_MS && pl.tipo === tipo && (pl.hora ?? null) === horaAmPm) {
+          const min = Math.max(1, Math.round(hace / 60_000));
+          await evento(e, 'nota', `preguntó otra vez por la hora (${que}): no se le repite, ya se le contestó hace ${min} min`, { horaPedidaCallada: 'repetida' });
+          return { callar: 'repetida', entrega: e };
+        }
+      }
+      if (dadas.length >= HORA_PEDIDA_MAX_POR_DIA) {
+        await evento(e, 'nota', `preguntó otra vez por la hora (${que}): no se le contesta, ya se le dio ${dadas.length} veces hoy`, { horaPedidaCallada: 'tope' });
+        return { callar: 'tope', entrega: e };
+      }
+
+      const m = await motorizadoDe(e);
+      const ctx: ContextoTexto = {
+        ...contexto(e, m),
+        hora: horaAmPm,
+        enCuanto: llega ? minutosEnPalabras(Math.max(1, Math.ceil((llega.getTime() - en.getTime()) / 60_000))) : null,
+      };
+      const clave = tipo === 'con_hora' ? 'horaEnSilencio' : tipo === 'pasada' ? 'horaEnSilencioPasada' : 'horaEnSilencioSinTiempo';
+      const responder = textoDe(clave, ajustes, ctx);
+      const cual = tipo === 'con_hora' ? `la hora (${horaAmPm}, en aprox. ${ctx.enCuanto})` : tipo === 'pasada' ? `que debería estar por llegar (era para las ${horaAmPm})` : 'el horario de entrega (el motorizado aún no dio su tiempo)';
+      await evento(e, 'aviso', `preguntó por su pedido (${que}): se le contestó ${cual}. Es lo único que se le contesta con el silencio tras la ubicación`, { horaPedida: true, tipo, hora: horaAmPm });
+      return { responder, entrega: e, tipo };
     },
     async atendidoPorPersona(phone: string, quien = 'una persona') {
       // Las vivas NO incluyen las apartadas ('incidencia'): esas se buscan aparte (las de hoy).
@@ -4167,7 +4392,7 @@ ${lista}
       const e = (await repo.vivaPorTelefono(phone)) ?? (await entregadaHoyDe(phone));
       if (!e) return null;
       const m = e.motorizadoId ? await repo.motorizado(e.motorizadoId) : null;
-      const situacion = situacionDe(e, m, ajustes, tz());
+      const situacion = situacionDe(e, m, ajustes, tz(), reglaGsgActiva());
       return `Este cliente tiene hoy el pedido ${e.referencia}${e.nombre ? ` (a nombre de ${e.nombre})` : ''}. Situación: ${situacion}${e.llegaAproxAt && e.estado !== 'entregada' ? ` Hora aproximada de llegada: ${horaEnReloj(e.llegaAproxAt, tz())}.` : ''} Si pregunta por su pedido, responde con esto; no prometas otra hora ni otro día: eso lo coordina una persona.`;
     },
     async pedidoDe(phone) {

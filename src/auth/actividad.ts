@@ -115,6 +115,24 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/ia$/, 'ia.configurar'],
   ['POST', /^\/admin\/ia\/ordenes$/, 'ia.orden'],
   ['POST', /^\/admin\/ia\/ordenes\/confirmar$/, 'ia.confirmar'],
+  // Lo que hace la IA operadora en Hoy, Motorizados y Chats (y lo mismo a mano): con nombre propio.
+  ['POST', /^\/admin\/entregas\/:id\/ubicacion$/, 'entrega.ubicacion'],
+  ['POST', /^\/admin\/entregas\/:id\/cancelar$/, 'entrega.cancelar'],
+  ['POST', /^\/admin\/entregas\/:id\/confirmar$/, 'entrega.confirmar'],
+  ['POST', /^\/admin\/entregas\/:id\/entregada$/, 'entrega.entregada'],
+  ['POST', /^\/admin\/entregas\/:id\/(reasignar|sin-ubicacion)$/, 'entrega.motorizado'],
+  ['POST', /^\/admin\/entregas\/:id\/prioridad$/, 'entrega.prioridad'],
+  ['POST', /^\/admin\/entregas\/ajustes$/, 'entregas.ajustes'],
+  ['POST', /^\/admin\/entregas\/confirmar-envio$/, 'numeros.confirmarEnvio'],
+  ['POST', /^\/admin\/entregas\/masa$/, 'numeros.masa'],
+  ['POST', /^\/admin\/entregas\/crear$/, 'entrega.crear'],
+  ['POST', /^\/admin\/entregas\/cerrar-dia$/, 'entregas.cerrarDia'],
+  ['POST', /^\/admin\/motorizados\/:id$/, 'motorizado.cambiar'],
+  ['DELETE', /^\/admin\/motorizados\/:id$/, 'motorizado.quitar'],
+  ['POST', /^\/admin\/motorizados\/:id\/ruta\/mandar$/, 'motorizado.ruta'],
+  ['POST', /^\/admin\/motorizados\/:id\/traspasar$/, 'motorizado.traspasar'],
+  ['POST', /^\/admin\/chat\/:contactId\/archive$/, 'chat.cerrar'],
+  ['POST', /^\/admin\/chat\/:contactId\/asistente$/, 'chat.asistente'],
   ['POST', /^\/admin\/envio-automatico$/, 'lista.poner'],
   ['DELETE', /^\/admin\/envio-automatico\/:clave$/, 'lista.quitar'],
   ['POST', /^\/admin\/envio-automatico\/:clave\/pausar$/, 'lista.pausar'],
@@ -151,7 +169,7 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
 ];
 
 /** Lo que no merece una fila: mucho trafico y nada que auditar. */
-const IGNORAR: RegExp[] = [/^\/admin\/tiendas\/avisos\/(revisar|previsualizar)$/, /^\/api\/v1\/webhooks\/:id\/probar$/, /^\/api\/v1\/conectores\/:id\/probar$/, /^\/api\/v1\/embed\/token$/, /^\/api\/v1\/conversaciones\/:telefono\/leido$/, /^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/, /^\/admin\/ia\/(ayuda|probar|escenarios)$/];
+const IGNORAR: RegExp[] = [/^\/admin\/ia\/ordenes\/preparar$/, /^\/api\/v1\/ia\/ordenes\/preparar$/, /^\/admin\/tiendas\/avisos\/(revisar|previsualizar)$/, /^\/api\/v1\/webhooks\/:id\/probar$/, /^\/api\/v1\/conectores\/:id\/probar$/, /^\/api\/v1\/embed\/token$/, /^\/api\/v1\/conversaciones\/:telefono\/leido$/, /^\/admin\/chat\/[^/]+\/read$/, /^\/admin\/rutas\/previsualizar$/, /^\/admin\/grupos\/previsualizar$/, /^\/admin\/grupos\/exportar$/, /^\/admin\/geo\/extract$/, /^\/admin\/salud\/evaluar$/, /^\/admin\/automation\/run$/, /^\/admin\/settings\/status$/, /^\/admin\/ia\/(ayuda|probar|escenarios)$/];
 
 export const ETIQUETAS: Record<string, string> = {
   'cuenta.primera': 'Creo la primera cuenta',
@@ -219,6 +237,24 @@ export const ETIQUETAS: Record<string, string> = {
   'rastreo.cerrar': 'Cerro un rastreo en vivo',
   'ia.orden': 'Dio una orden a la IA operadora',
   'ia.confirmar': 'Confirmo acciones de la IA operadora',
+  'ia.hecho': 'Pulso «Hacerlo» en la IA operadora (resultado paso a paso)',
+  'entrega.ubicacion': 'Puso la ubicacion de un pedido a mano',
+  'entrega.cancelar': 'Cancelo un pedido',
+  'entrega.confirmar': 'Confirmo un pedido a mano',
+  'entrega.entregada': 'Marco un pedido como entregado',
+  'entrega.motorizado': 'Asigno o paso un pedido a un motorizado',
+  'entrega.prioridad': 'Cambio la prioridad de un pedido',
+  'entregas.ajustes': 'Cambio los ajustes o textos de las entregas',
+  'numeros.confirmarEnvio': 'Confirmo el envio de los numeros del dia',
+  'numeros.masa': 'Actuo sobre varios numeros del dia',
+  'entrega.crear': 'Creo un pedido a mano',
+  'entregas.cerrarDia': 'Cerro el dia de entregas',
+  'motorizado.cambiar': 'Cambio un motorizado (estado o datos)',
+  'motorizado.quitar': 'Quito un motorizado',
+  'motorizado.ruta': 'Le mando su ruta a un motorizado',
+  'motorizado.traspasar': 'Traspaso los pedidos de un motorizado',
+  'chat.cerrar': 'Cerro y guardo un chat',
+  'chat.asistente': 'Devolvio o quito un chat al asistente',
   'lista.poner': 'Puso numeros en la lista de envio automatico',
   'lista.quitar': 'Quito un numero de la lista de envio automatico',
   'lista.pausar': 'Pauso un numero de la lista de envio automatico',

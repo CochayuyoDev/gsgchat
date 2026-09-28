@@ -47,6 +47,50 @@ function texto(payload: Record<string, unknown>): string {
   return typeof body === 'string' ? body : '';
 }
 
+const cadena = (x: unknown): string => (typeof x === 'string' ? x : '');
+
+/**
+ * El telefono de quien escribe.
+ *
+ * WhatsApp esta migrando a LID: muchos mensajes llegan con `from` en la
+ * forma `1234@lid`, un identificador opaco que NO es un telefono (sacarle
+ * los digitos daba un «cliente» que no existe). El numero de verdad viaja
+ * aparte, en `_data.key.remoteJidAlt` (o `senderPn` / `participantPn`),
+ * igual que en src/whatsapp/local/session.ts. Solo LID y sin numero: se
+ * descarta (null), como alli.
+ */
+export function remitenteDe(payload: Record<string, unknown>): string | null {
+  const from = cadena(payload.from);
+  if (!from) return null;
+  if (!from.endsWith('@lid')) return fromChatId(from) || null;
+  const datos = (payload._data ?? {}) as Record<string, unknown>;
+  const key = (datos.key ?? {}) as Record<string, unknown>;
+  const candidatos = [key.remoteJidAlt, key.senderPn, key.participantPn, datos.senderPn, datos.participantPn, datos.remoteJidAlt].map(cadena);
+  const conNumero = candidatos.find((j) => j && !j.endsWith('@lid') && /@(s\.whatsapp\.net|c\.us)$/.test(j));
+  return conNumero ? fromChatId(conNumero) || null : null;
+}
+
+/**
+ * El mensaje citado (si responde citando uno), en la forma de Meta
+ * (`context.id`): de eso depende, por ejemplo, que el motorizado que
+ * contesta citando el pedido ponga el tiempo en ESE pedido.
+ */
+export function citadoDe(payload: Record<string, unknown>): string | null {
+  const replyTo = payload.replyTo as { id?: unknown } | string | null | undefined;
+  const directo = typeof replyTo === 'string' ? replyTo : cadena(replyTo?.id);
+  if (directo) return directo;
+  const datos = (payload._data ?? {}) as Record<string, unknown>;
+  const stanza = cadena(datos.quotedStanzaID) || cadena(datos.quotedStanzaId);
+  if (stanza) return stanza;
+  // NOWEB (Baileys): dentro del contenido, en `contextInfo.stanzaId`.
+  const mensaje = (datos.message ?? {}) as Record<string, unknown>;
+  for (const valor of Object.values(mensaje)) {
+    const ctx = (valor as { contextInfo?: { stanzaId?: unknown } } | null)?.contextInfo;
+    if (cadena(ctx?.stanzaId)) return cadena(ctx?.stanzaId);
+  }
+  return null;
+}
+
 /**
  * Un evento de WAHA en la forma que ya entiende `processChange`.
  *
@@ -61,15 +105,17 @@ export function toChangeValue(event: WahaEvent): ChangeValue | null {
     // procesarlo seria contestarse a si mismo.
     if (payload.fromMe === true) return null;
 
-    const from = typeof payload.from === 'string' ? fromChatId(payload.from) : '';
+    const from = remitenteDe(payload) ?? '';
     const id = typeof payload.id === 'string' ? payload.id : '';
     if (!from || !id) return null;
 
     const location = payload.location as
       | { latitude?: number; longitude?: number; name?: string; address?: string }
       | undefined;
+    const citado = citadoDe(payload);
 
     const message: InboundMessage = {
+      ...(citado ? { context: { id: citado } } : {}),
       id,
       from,
       timestamp: String(payload.timestamp ?? Math.floor(Date.now() / 1000)),

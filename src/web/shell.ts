@@ -463,17 +463,40 @@ const CSS = `
   .s-ia-hecha .q { flex: 1; min-width: 0; }
   .s-ia-hecha .q small { display: block; color: var(--s-muted); }
   .s-ia-hecha a { color: var(--s-accent); font-size: 12.5px; white-space: nowrap; }
-  .s-ia-pend { border-color: var(--ambar); background: var(--ambar-suave); }
-  .s-ia-pend .botones { display: flex; gap: 6px; margin-top: 6px; }
-  .s-ia-pend button { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-text); cursor: pointer; box-shadow: none; }
-  .s-ia-pend button.si { background: var(--s-accent); border-color: var(--s-accent); color: var(--primario-texto); }
+  /* La tarjeta de «Hacerlo»: lo que va a pasar, paso a paso, antes de hacerlo. */
+  .s-ia-tarjeta { border: 1px solid var(--ambar); background: var(--ambar-suave); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+  .s-ia-tarjeta.apagada { opacity: .6; border-color: var(--s-line); background: var(--s-top); }
+  .s-ia-tarjeta .cab { font-weight: 700; font-size: 13.5px; }
+  .s-ia-tarjeta .pasos { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .s-ia-paso { line-height: 1.4; overflow-wrap: anywhere; }
+  .s-ia-paso b { display: block; }
+  .s-ia-paso .l { display: block; color: var(--s-text); }
+  .s-ia-paso .l i { font-style: normal; color: var(--s-muted); }
+  .s-ia-paso .msj { white-space: pre-wrap; background: var(--s-top); border: 1px solid var(--s-line); border-radius: 8px; padding: 6px 8px; margin-top: 3px; }
+  .s-ia-paso .avisos { color: var(--s-text); font-size: 12.5px; margin-top: 3px; }
+  .s-ia-paso.delicado > b::after { content: ' · delicado'; color: var(--rojo); font-weight: 600; font-size: 12px; }
+  .s-ia-paso .res { margin-top: 3px; font-weight: 600; }
+  .s-ia-paso.mal .res { color: var(--rojo); }
+  .s-ia-paso .res a { color: var(--s-accent); font-weight: 400; }
+  .s-ia-paso .quitar { margin-top: 3px; font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-muted); cursor: pointer; box-shadow: none; }
+  .s-ia-elegir { display: flex; flex-direction: column; gap: 6px; }
+  .s-ia-elegir .ops { display: flex; flex-direction: column; gap: 5px; }
+  .s-ia-elegir .ops button { text-align: left; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--s-accent); background: var(--s-top); color: var(--s-text); cursor: pointer; box-shadow: none; overflow-wrap: anywhere; }
+  .s-ia-elegir .ops button:hover { background: var(--s-accent-soft); }
+  .s-ia-tarjeta .botones { display: flex; gap: 8px; flex-wrap: wrap; }
+  .s-ia-tarjeta .botones button { font: inherit; font-size: 13.5px; font-weight: 600; min-height: 38px; padding: 6px 16px; border-radius: 9px; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-text); cursor: pointer; box-shadow: none; }
+  .s-ia-tarjeta .botones button.si { background: var(--s-accent); border-color: var(--s-accent); color: var(--primario-texto); }
+  .s-ia-tarjeta button:disabled { opacity: .5; cursor: default; }
+  .s-ia-tarjeta .nota { color: var(--s-muted); font-size: 12.5px; }
+  .s-ia-tarjeta .err { color: var(--rojo); font-size: 12.5px; }
   .s-ia-pie { border-top: 1px solid var(--s-line); padding: 10px 14px 12px; }
   .s-ia-entrada { display: flex; gap: 8px; align-items: flex-end; }
   .s-ia-entrada textarea { flex: 1; min-height: 42px; max-height: 140px; resize: none; font: inherit; font-size: 14px; padding: 9px 11px; border: 1px solid var(--s-line); border-radius: 10px; background: var(--s-bg); color: var(--s-text); }
   .s-ia-enviar { height: 42px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--s-accent); background: var(--s-accent); color: var(--primario-texto); font: inherit; font-weight: 700; cursor: pointer; box-shadow: none; }
   .s-ia-enviar:disabled { opacity: .55; cursor: default; }
   .s-ia-opc { display: flex; gap: 12px; align-items: center; margin-top: 8px; font-size: 12.5px; color: var(--s-muted); flex-wrap: wrap; }
-  .s-ia-opc label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+  .s-ia-opc label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .s-ia-opc label input[type="checkbox"] { width: auto; min-width: 0; min-height: 0; flex: none; margin: 0; }
   .s-ia-opc a { color: var(--s-accent); cursor: pointer; }
   .s-ia-cat { display: none; font-size: 12.5px; max-height: 40vh; overflow: auto; padding: 0 14px 10px; }
   .s-ia.con-catalogo .s-ia-cat { display: block; }
@@ -1009,24 +1032,60 @@ const JS = String.raw`
   var iaEnviar = document.getElementById('s-ia-enviar');
   var iaHistorial = [];
   try { iaHistorial = JSON.parse(sessionStorage.getItem('wa_ia_hilo') || '[]'); } catch (e) { iaHistorial = []; }
+  /* Una tarjeta que se estaba haciendo cuando se recargó la página no se vuelve a ofrecer: se mira en Actividad. */
+  iaHistorial.forEach(function (m) { if (m && m.estadoTarjeta === 'haciendo') { m.estadoTarjeta = 'hecha'; m.resultados = []; m.errorTarjeta = 'Se estaba haciendo cuando se recargó la página: mira cómo salió en Actividad.'; } });
   function iaGuardar() { try { sessionStorage.setItem('wa_ia_hilo', JSON.stringify(iaHistorial.slice(-30))); } catch (e) {} }
-  var EJEMPLOS_IA = ['¿cómo van los procesos?', '¿quién necesita a alguien en los procesos?', 'crea un proceso para confirmar las citas de mañana', '¿quién nos escribió hoy?', 'escríbele a Rosa que su trámite ya está listo', '¿por qué no salen mensajes?'];
+  var EJEMPLOS_IA = ['¿cómo van las entregas de hoy?', 'dame los pedidos sin ubicación', 'asígnale el pedido GSG-IA-001 a Carlos', 'pasa a descanso al motorizado Ali', 'confirma el envío de todos los números del día', '¿cuántos entregó Carlos hoy?', 'apaga el bot en el chat de 912426667', '¿por qué no salen mensajes?'];
+  /* Lo que cambia algo llega preparado en UNA tarjeta: exactamente lo que va a
+     pasar (qué, a quién, cuántos, antes → después) y se hace al pulsar
+     «Hacerlo». Varios candidatos = botones para elegir, nunca se adivina. */
+  function iaPaso(p, j, m) {
+    var t = p.tarjeta || { que: p.descripcion };
+    var r = m.resultados ? m.resultados[j] : null;
+    var h = '<li class="s-ia-paso' + (p.peligrosa ? ' delicado' : '') + (r ? (r.ok ? ' bien' : ' mal') : '') + '">';
+    h += '<b>' + escapar(t.que) + '</b>';
+    if (t.aQuien) h += '<span class="l"><i>A quién:</i> ' + escapar(t.aQuien) + '</span>';
+    if (t.cuantos && t.cuantos > 1) h += '<span class="l"><i>Cuántos:</i> ' + escapar(t.cuantos) + '</span>';
+    if (t.antes || t.despues) h += '<span class="l ad"><i>Antes:</i> ' + escapar(t.antes || '—') + '<br><i>Después:</i> ' + escapar(t.despues || '—') + '</span>';
+    if (t.mensaje) h += '<span class="l msj">«' + escapar(t.mensaje) + '»</span>';
+    if (t.avisos && t.avisos.length) h += '<span class="l avisos">' + t.avisos.map(function (a) { return '⚠ ' + escapar(a); }).join('<br>') + '</span>';
+    if (p.peligrosa && !r) h += '<span class="l avisos">Es delicado: revísalo bien.</span>';
+    if (r) h += '<span class="l res">' + (r.ok ? '✅ ' : '⚠ No: ') + escapar(r.resumen) + (r.ir ? ' <a href="' + escapar(r.ir) + '">ver →</a>' : '') + '</span>';
+    else if (!m.estadoTarjeta && m.pendientes.length > 1 && !m.simulado) h += '<button type="button" class="quitar" data-quitar="' + j + '" title="Quitar este paso">Quitar</button>';
+    return h + '</li>';
+  }
+  function iaTarjeta(m, i) {
+    var pend = m.pendientes || [];
+    var eleg = m.elegir || [];
+    if (!pend.length && !eleg.length) return '';
+    var estado = m.estadoTarjeta || '';
+    var h = '<div class="s-ia-tarjeta' + (estado === 'cancelada' ? ' apagada' : '') + '" data-msg="' + i + '">';
+    h += '<div class="cab">' + (m.simulado ? 'Solo simulado: esto es lo que haría (no se hará)' : estado === 'hecha' ? 'Hecho: así salió cada paso' : estado === 'cancelada' ? 'Cancelado: no se hizo nada' : estado === 'haciendo' ? 'Haciéndolo…' : 'Esto es lo que voy a hacer') + '</div>';
+    if (pend.length) h += '<ol class="pasos">' + pend.map(function (p, j) { return iaPaso(p, j, m); }).join('') + '</ol>';
+    eleg.forEach(function (e, k) {
+      h += '<div class="s-ia-elegir"><span>' + escapar(e.pregunta) + '</span><div class="ops">' + e.opciones.map(function (o, n) { return '<button type="button" data-opcion="' + k + ':' + n + '"' + (estado ? ' disabled' : '') + '>' + escapar(o.etiqueta) + '</button>'; }).join('') + '</div>' + (e.error ? '<span class="err">' + escapar(e.error) + '</span>' : '') + '</div>';
+    });
+    if (!m.simulado && !estado) {
+      var falta = eleg.length > 0;
+      h += '<div class="botones"><button type="button" class="si" data-hacer="1"' + (falta || !pend.length ? ' disabled' : '') + '>Hacerlo' + (pend.length > 1 ? ' (' + pend.length + ')' : '') + '</button><button type="button" data-cancelar="1">Cancelar</button></div>';
+      if (falta) h += '<div class="nota">Elige primero ' + (eleg.length > 1 ? 'las opciones' : 'la opción') + ' de arriba.</div>';
+    }
+    if (m.errorTarjeta) h += '<div class="err">' + escapar(m.errorTarjeta) + '</div>';
+    return h + '</div>';
+  }
   function iaPintar() {
     if (!iaHistorial.length) {
-      iaHilo.innerHTML = '<div class="s-ia-vacio">Dile con palabras qué hacer o qué mirar. Ejecuta con tu misma cuenta y tus mismos permisos; lo delicado te lo deja para confirmar.<ul>' + EJEMPLOS_IA.map(function (e) { return '<li data-ej="' + escapar(e) + '">' + escapar(e) + '</li>'; }).join('') + '</ul></div>';
+      iaHilo.innerHTML = '<div class="s-ia-vacio">Dile con palabras qué hacer o qué mirar. Lo que solo lee te lo contesta al momento; lo que cambia algo te lo enseña primero en una tarjeta (qué, a quién, antes → después) y lo hace cuando pulsas <b>Hacerlo</b>. Trabaja con tu cuenta y tus permisos.<ul>' + EJEMPLOS_IA.map(function (e) { return '<li data-ej="' + escapar(e) + '">' + escapar(e) + '</li>'; }).join('') + '</ul></div>';
       return;
     }
     iaHilo.innerHTML = iaHistorial.map(function (m, i) {
       if (m.role === 'user') return '<div class="s-ia-b yo">' + escapar(m.content) + '</div>';
       var html = '<div class="s-ia-b' + (m.error ? ' mal' : '') + '">' + escapar(m.content) + '</div>';
       var hechas = (m.hechas || []).map(function (h) {
-        return '<div class="s-ia-hecha"><span class="ic">' + (h.ok ? (h.tipo === 'consulta' ? '🔎' : '✅') : '⚠') + '</span><span class="q">' + escapar(h.resumen) + '<small>' + escapar(h.accion) + '</small></span>' + (h.ir ? '<a href="' + escapar(h.ir) + '">ver →</a>' : '') + '</div>';
+        return '<div class="s-ia-hecha"><span class="ic">' + (h.ok ? (h.tipo === 'consulta' ? '🔎' : '✅') : '⚠') + '</span><span class="q">' + escapar(h.resumen) + '</span>' + (h.ir ? '<a href="' + escapar(h.ir) + '">ver →</a>' : '') + '</div>';
       });
-      var pend = (m.pendientes || []).map(function (p, j) {
-        return '<div class="s-ia-hecha s-ia-pend" data-msg="' + i + '" data-pend="' + j + '"><span class="ic">⏸</span><span class="q">' + escapar(p.descripcion) + '<small>' + escapar(p.motivo) + '</small><div class="botones"><button class="si" type="button" data-confirmar="1">Sí, hazlo</button><button type="button" data-descartar="1">No</button></div></span></div>';
-      });
-      if (hechas.length || pend.length) html += '<div class="s-ia-hechas">' + hechas.join('') + pend.join('') + '</div>';
-      return html;
+      if (hechas.length) html += '<div class="s-ia-hechas">' + hechas.join('') + '</div>';
+      return html + iaTarjeta(m, i);
     }).join('');
     iaHilo.scrollTop = iaHilo.scrollHeight;
   }
@@ -1043,28 +1102,56 @@ const JS = String.raw`
   document.getElementById('s-ia-cerrar').onclick = function () { iaCaja.classList.remove('abierto'); actualizarFondoPaneles(); };
   document.getElementById('s-ia-limpiar').onclick = function () { iaHistorial = []; iaGuardar(); iaPintar(); };
   document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && iaCaja.classList.contains('abierto') && document.activeElement !== iaTexto) { iaCaja.classList.remove('abierto'); actualizarFondoPaneles(); } });
+  function iaPost(url, cuerpo) {
+    return fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, d: d }; }); });
+  }
   iaHilo.addEventListener('click', function (ev) {
     var ej = ev.target.closest('[data-ej]');
     if (ej) { iaTexto.value = ej.getAttribute('data-ej'); iaTexto.focus(); return; }
     var b = ev.target.closest('button');
-    if (!b) return;
-    var caja = b.closest('.s-ia-pend');
+    if (!b || b.disabled) return;
+    var caja = b.closest('.s-ia-tarjeta');
     if (!caja) return;
-    var msg = iaHistorial[Number(caja.getAttribute('data-msg'))];
-    var pend = msg && msg.pendientes ? msg.pendientes[Number(caja.getAttribute('data-pend'))] : null;
-    if (!pend) return;
-    if (b.hasAttribute('data-descartar')) { msg.pendientes = msg.pendientes.filter(function (p) { return p !== pend; }); iaGuardar(); iaPintar(); return; }
-    b.disabled = true;
-    var accion = Object.assign({ accion: pend.accion }, pend.parametros);
-    fetch('/admin/ia/ordenes/confirmar', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ acciones: [accion] }) })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-      .then(function (x) {
-        msg.pendientes = msg.pendientes.filter(function (p) { return p !== pend; });
-        msg.hechas = (msg.hechas || []).concat(x.ok ? x.d.hechas : [{ accion: pend.accion, ok: false, resumen: x.d.error || 'No se pudo.', tipo: 'cambio' }]);
+    var m = iaHistorial[Number(caja.getAttribute('data-msg'))];
+    if (!m || m.estadoTarjeta) return;
+    m.pendientes = m.pendientes || [];
+    m.elegir = m.elegir || [];
+    if (b.hasAttribute('data-cancelar')) { m.estadoTarjeta = 'cancelada'; iaGuardar(); iaPintar(); return; }
+    if (b.hasAttribute('data-quitar')) { m.pendientes.splice(Number(b.getAttribute('data-quitar')), 1); iaGuardar(); iaPintar(); return; }
+    if (b.hasAttribute('data-opcion')) {
+      var par = b.getAttribute('data-opcion').split(':');
+      var el = m.elegir[Number(par[0])];
+      var op = el ? el.opciones[Number(par[1])] : null;
+      if (!op) return;
+      b.disabled = true;
+      iaPost('/admin/ia/ordenes/preparar', { accion: Object.assign({ accion: el.accion }, op.parametros) }).then(function (x) {
+        if (!x.ok) { el.error = x.d.error || 'No se pudo preparar.'; }
+        else {
+          var k = m.elegir.indexOf(el);
+          if (x.d.elegir) m.elegir.splice(k, 1, x.d.elegir);
+          else { m.elegir.splice(k, 1); if (x.d.pendiente) m.pendientes.push(x.d.pendiente); }
+        }
         iaGuardar(); iaPintar();
-        if (x.ok && x.d.hechas.some(function (h) { return h.ok; })) document.dispatchEvent(new CustomEvent('ia:cambio'));
-      })
-      .catch(function (e) { msg.hechas = (msg.hechas || []).concat([{ accion: pend.accion, ok: false, resumen: e.message, tipo: 'cambio' }]); iaGuardar(); iaPintar(); });
+      }).catch(function (e) { el.error = e.message; iaGuardar(); iaPintar(); });
+      return;
+    }
+    if (b.hasAttribute('data-hacer')) {
+      if (!m.pendientes.length || m.elegir.length) return;
+      m.estadoTarjeta = 'haciendo';
+      iaPintar();
+      var acciones = m.pendientes.map(function (p) { return Object.assign({ accion: p.accion }, p.parametros); });
+      iaPost('/admin/ia/ordenes/confirmar', { acciones: acciones, orden: m.orden || '' }).then(function (x) {
+        if (!x.ok) { m.estadoTarjeta = ''; m.errorTarjeta = x.d.error || ('No se pudo (' + x.status + ').'); }
+        else {
+          m.estadoTarjeta = 'hecha';
+          m.errorTarjeta = '';
+          m.resultados = x.d.hechas || [];
+          if (m.resultados.some(function (h) { return h.ok; })) document.dispatchEvent(new CustomEvent('ia:cambio'));
+        }
+        iaGuardar(); iaPintar();
+      }).catch(function (e) { m.estadoTarjeta = ''; m.errorTarjeta = 'No se pudo hablar con el servidor: ' + e.message; iaGuardar(); iaPintar(); });
+    }
   });
   function iaOrdenar() {
     var texto = iaTexto.value.trim();
@@ -1084,7 +1171,7 @@ const JS = String.raw`
           if (/Puter|conecta/i.test(msg)) msg += ' → Mi asistente IA (/panel#ia).';
           iaHistorial.push({ role: 'assistant', content: msg, error: true });
         } else {
-          iaHistorial.push({ role: 'assistant', content: x.d.texto || '(sin respuesta)', hechas: x.d.hechas || [], pendientes: x.d.pendientes || [], simulado: x.d.simulado });
+          iaHistorial.push({ role: 'assistant', content: x.d.texto || '(sin respuesta)', hechas: x.d.hechas || [], pendientes: x.d.pendientes || [], elegir: x.d.elegir || [], simulado: x.d.simulado, orden: texto });
           if ((x.d.hechas || []).some(function (h) { return h.ok && h.tipo === 'cambio'; })) document.dispatchEvent(new CustomEvent('ia:cambio'));
         }
         iaGuardar(); iaPintar(); iaEnviar.disabled = false; iaTexto.focus();
@@ -1101,7 +1188,7 @@ const JS = String.raw`
     catCargado = true;
     fetch('/admin/ia/ordenes/catalogo', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
       if (!d) return;
-      document.getElementById('s-ia-cat').innerHTML = d.acciones.map(function (a) { return '<div><b>' + escapar(a.descripcion) + (a.peligrosa ? ' <i>(pide confirmación)</i>' : '') + (a.soloAdmin ? ' <i>(solo administrador)</i>' : '') + '</b><i>Ej.: «' + escapar(a.ejemplo) + '»</i></div>'; }).join('');
+      document.getElementById('s-ia-cat').innerHTML = d.acciones.map(function (a) { return '<div><b>' + escapar(a.descripcion) + (a.tipo === 'cambio' ? ' <i>(con «Hacerlo»' + (a.peligrosa ? ', delicado' : '') + ')</i>' : ' <i>(al momento)</i>') + (a.soloAdmin ? ' <i>(solo administrador)</i>' : '') + '</b><i>Ej.: «' + escapar(a.ejemplo) + '»</i></div>'; }).join('');
     }).catch(function () {});
   };
 
@@ -1284,12 +1371,12 @@ ${opts.contenido}
   </aside>
   <script>window.__ayudaPantallas = ${ayudaJson};</script>
   <aside class="s-ia" id="s-ia" aria-label="IA operadora">
-    <div class="s-ia-cab">${icono('robot')}<div><b>Pídeselo a la IA</b><span class="s-ia-sub">Órdenes con palabras; todo queda en la bitácora</span></div><span class="sep"></span><button class="s-ia-limpiar" id="s-ia-limpiar" type="button" title="Empezar de cero">Limpiar</button><button class="s-ia-cerrar" id="s-ia-cerrar" type="button" title="Cerrar" aria-label="Cerrar el cajón de la IA">✕</button></div>
+    <div class="s-ia-cab">${icono('robot')}<div><b>Pídeselo a la IA</b><span class="s-ia-sub">Órdenes con palabras; nada cambia sin tu «Hacerlo»</span></div><span class="sep"></span><button class="s-ia-limpiar" id="s-ia-limpiar" type="button" title="Empezar de cero">Limpiar</button><button class="s-ia-cerrar" id="s-ia-cerrar" type="button" title="Cerrar" aria-label="Cerrar el cajón de la IA">✕</button></div>
     <div class="s-ia-hilo" id="s-ia-hilo"></div>
     <div class="s-ia-cat" id="s-ia-cat"></div>
     <div class="s-ia-pie">
       <div class="s-ia-entrada"><textarea id="s-ia-texto" rows="1" placeholder="Ej.: pon a Juan, el 987 654 321, para pedirle su ubicación"></textarea><button class="s-ia-enviar" id="s-ia-enviar" type="button">Enviar</button></div>
-      <div class="s-ia-opc"><label><input type="checkbox" id="s-ia-simular"> Solo decir qué haría (no ejecutar)</label><a id="s-ia-ver-cat">¿Qué le puedo pedir?</a></div>
+      <div class="s-ia-opc"><label><input type="checkbox" id="s-ia-simular"> Solo decir qué haría (sin botón «Hacerlo»)</label><a id="s-ia-ver-cat">¿Qué le puedo pedir?</a></div>
     </div>
   </aside>
 </div>

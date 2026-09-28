@@ -377,7 +377,7 @@ describe('el «ubicación registrada»: horario y soporte en palabras', () => {
     expect(lineas[3]).toBe('¡Muchas gracias!');
     expect(texto).not.toContain('no se reciben consultas');
     // Y el aviso del motorizado.
-    expect(lineas[5]).toBe('Somos GSG. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, estar atenta.');
+    expect(lineas[5]).toBe('Somos GSG. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, mantente pendiente de tu celular.');
     // Ninguna coordenada fuera del enlace.
     expect(texto.replace(mapa, '')).not.toMatch(/-?\d{1,3}\.\d{3,}/);
     expect(texto).toContain('de 2:00 PM a 8:00 PM');

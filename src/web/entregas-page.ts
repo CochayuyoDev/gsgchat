@@ -1156,6 +1156,11 @@ function soporteLeido() {
   if (wa || tel) return (wa || tel) + ' (WhatsApp y llamadas)';
   return 'este mismo número, por WhatsApp o llamada';
 }
+// Lo mismo que pone el sistema en {telefonoMotorizado} sin motorizado todavía
+// (la vista previa no tiene pedido): el número de soporte y, sin él, el soporte en palabras.
+function telefonoMotorizadoLeido() {
+  return telefonoLeido($('aj-sop-wa').value) || telefonoLeido($('aj-sop-tel').value) || soporteLeido();
+}
 var guardadoUb = '';
 function firmaUb() {
   return ['aj-hor-desde', 'aj-hor-hasta', 'aj-hor-ext', 'aj-sop-wa', 'aj-sop-tel'].map(function (id) { return $(id).value; }).join('|');
@@ -1172,8 +1177,7 @@ async function previaUbicacion() {
     .split('{hasta}').join(horaLeida($('aj-hor-hasta').value || '20:00'))
     .split('{hastaExtendido}').join(horaLeida($('aj-hor-ext').value || '22:00'))
     .split('{soporte}').join(soporteLeido())
-    // Sin motorizado todavía (la vista previa no tiene pedido): el número de soporte.
-    .split('{telefonoMotorizado}').join(telefonoLeido($('aj-sop-wa').value) || telefonoLeido($('aj-sop-tel').value) || 'este mismo número de WhatsApp');
+    .split('{telefonoMotorizado}').join(telefonoMotorizadoLeido());
   try {
     var r = await api('/admin/entregas/previsualizar', { method: 'POST', body: { clave: 'ubicacionRegistrada', texto: texto } });
     caja.textContent = r.texto;

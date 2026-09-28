@@ -797,8 +797,13 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
     return null;
   });
   if (!r) return null;
-  // No se entendió dos veces: lo decide una persona, sin repetirle nada.
-  if (r.tipo === 'persona') return 'silencio';
+  // No se entendió dos veces: lo decide una persona, sin repetirle nada. El
+  // chat se cierra: si no, lo siguiente que escribiera traía otra vez
+  // «necesitamos tu ubicación».
+  if (r.tipo === 'persona') {
+    await cerrarChat(deps, contact, 'pin lejano sin aclarar: lo decide una persona');
+    return 'silencio';
+  }
   if (r.tipo === 'registrada') {
     await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: r.texto });
     await cerrarChat(deps, contact, motivoUbicacionRegistrada(contact));
@@ -963,6 +968,23 @@ async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entr
   const cierreYaDado = motivoCierre === 'ubicación registrada (tras el cierre)';
   const enSilencio = Boolean(await deps.entregas?.clienteEnSilencio(contact.phone).catch(() => false));
   const callado = enSilencio || cierreVigente(contact, abierta, ahora);
+
+  // Excepción al silencio tras UBI (pedido del dueño, 28/09): si pregunta
+  // cuándo llega o dónde está su pedido, se le da la hora que ya se calculó
+  // (o el horario, si el motorizado aún no dio su tiempo). Solo eso: nada de
+  // IA ni stickers, y la misma respuesta no se repite en 10 min.
+  if (enSilencio && texto && deps.entregas) {
+    const r = await deps.entregas.horaPedidaEnSilencio(contact.phone, texto).catch(() => null);
+    if (r && 'responder' in r) {
+      await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: r.responder });
+      deps.log?.('regla del dueño: en silencio, pero preguntó por la hora: se le contesta', { phone: contact.phone, tipo: r.tipo });
+      return 'hora';
+    }
+    if (r && 'callar' in r) {
+      deps.log?.('regla del dueño: ya se le dio la hora hace poco, no se repite', { phone: contact.phone, motivo: r.callar });
+      return 'silencio';
+    }
+  }
 
   // Ya recibió el cierre y su pedido lo lleva un motorizado SIN ubicación: si
   // pregunta la hora se le contesta (la estimada, o que ya está con un

@@ -3,7 +3,7 @@
  * verdad sobre el sistema.
  *
  * El modelo es un doble que contesta lo que se le diga, por rondas: lo que
- * se prueba es lo de alrededor. Que el bloque de acciones se lee aunque
+ * se prueba es lo de alrededor (desde el 28/09 ningun cambio se hace sin «Hacerlo»). Que el bloque de acciones se lee aunque
  * venga torcido; que una orden directa se ejecuta por las rutas del panel
  * con la identidad de quien la dio (y queda en la bitacora "por la IA");
  * que lo delicado y lo decidido tras leer datos se queda pendiente hasta
@@ -185,17 +185,24 @@ async function sesion(rol: 'admin' | 'operador' = 'admin'): Promise<Record<strin
 }
 
 describe('ordenes desde el panel', () => {
-  it('una orden directa se ejecuta por las rutas del panel y queda en la bitacora "por la IA"', async () => {
+  it('un cambio queda en la tarjeta sin tocar nada; «Hacerlo» lo ejecuta por las rutas del panel y queda en la bitacora "por la IA"', async () => {
     const h = await sesion();
     modelo.cola.push('Listo, pongo a Juan.\n[ACCIONES]\n{"accion":"lista.agregar","telefono":"987 654 321","nombre":"Juan"}\n[/ACCIONES]');
     const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: 'pon a Juan, el 987 654 321, para pedirle su ubicación' } });
     expect(r.statusCode).toBe(200);
     const j = r.json();
     expect(j.texto).toBe('Listo, pongo a Juan.');
-    expect(j.hechas).toHaveLength(1);
-    expect(j.hechas[0]).toMatchObject({ accion: 'lista.agregar', ok: true, tipo: 'cambio', ir: '/envio-automatico' });
-    expect(j.pendientes).toEqual([]);
+    expect(j.hechas).toEqual([]);
+    expect(j.pendientes).toHaveLength(1);
+    expect(j.pendientes[0]).toMatchObject({ accion: 'lista.agregar', motivo: expect.stringContaining('Hacerlo') });
+    expect(j.pendientes[0].tarjeta.que).toContain('Juan');
+    // Sin «Hacerlo» no cambia nada.
+    expect(await lista.porTelefono('987654321')).toBeNull();
+    const c = await app.inject({ method: 'POST', url: '/admin/ia/ordenes/confirmar', headers: h, payload: { acciones: [{ accion: j.pendientes[0].accion, ...j.pendientes[0].parametros }], orden: 'pon a Juan' } });
+    expect(c.json().hechas[0]).toMatchObject({ accion: 'lista.agregar', ok: true, tipo: 'cambio', ir: '/envio-automatico' });
     expect(await lista.porTelefono('987654321')).toMatchObject({ nombre: 'Juan', origen: 'manual' });
+    // Queda quien pulso «Hacerlo» y como salio cada paso.
+    expect(repos._actividad.find((e) => e.accion === 'ia.hecho')).toMatchObject({ usuario: 'Ali', detalle: expect.objectContaining({ orden: 'pon a Juan', bien: 1, mal: 0 }) });
     // El prompt llevo el manual, el catalogo y quien ordena.
     const sistema = modelo.recibido[0]![0]!.content;
     expect(sistema).toContain('Ali (ali) (administrador)');
@@ -268,7 +275,7 @@ describe('ordenes desde el panel', () => {
     const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: 'pon al 987654321' } });
     expect(r.statusCode).toBe(200);
     expect(r.json().correcciones[0]).toContain('no existe');
-    expect(r.json().hechas[0]).toMatchObject({ accion: 'lista.agregar', ok: true });
+    expect(r.json().pendientes[0]).toMatchObject({ accion: 'lista.agregar' });
     const correccion = modelo.recibido[1]!.at(-1)!.content;
     expect(correccion).toContain('[SISTEMA] No pude ejecutar');
   });
@@ -280,17 +287,18 @@ describe('ordenes desde el panel', () => {
     expect(r.json().hechas[0]).toMatchObject({ accion: 'lista.quitar', ok: false, resumen: 'María no está en la lista.' });
   });
 
-  it('un operador no puede lo que solo puede un administrador: la ruta lo dice y la IA lo cuenta', async () => {
+  it('un operador no puede lo que solo puede un administrador: se le dice en palabras y a quién pedírselo, ni con la tarjeta falsificada', async () => {
     const h = await sesion('operador');
-    modelo.cola.push('Lo cambio.\n[ACCIONES]\n{"accion":"configuracion.cambiar","nombreNegocio":"Otra"}\n[/ACCIONES]');
+    modelo.cola.push('Lo cambio.\n[ACCIONES]\n{"accion":"configuracion.cambiar","nombreNegocio":"Otra"}\n[/ACCIONES]', 'Eso lo tiene que hacer un administrador.');
     const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: 'cambia el nombre del negocio a Otra' } });
     expect(r.statusCode).toBe(200);
-    // Es delicada: queda pendiente. Al confirmar, la ruta responde 403 y eso es lo que se ve.
-    const p = r.json().pendientes[0];
-    expect(p.accion).toBe('configuracion.cambiar');
-    const c = await app.inject({ method: 'POST', url: '/admin/ia/ordenes/confirmar', headers: h, payload: { acciones: [{ accion: p.accion, ...p.parametros }] } });
+    // Ni llega a la tarjeta: se dice por qué y a quién pedírselo.
+    expect(r.json().pendientes).toEqual([]);
+    expect(r.json().hechas[0]).toMatchObject({ accion: 'configuracion.cambiar', ok: false, resumen: expect.stringContaining('Pídeselo a un administrador') });
+    // Y aunque alguien arme la confirmación a mano, tampoco.
+    const c = await app.inject({ method: 'POST', url: '/admin/ia/ordenes/confirmar', headers: h, payload: { acciones: [{ accion: 'configuracion.cambiar', nombreNegocio: 'Otra' }] } });
     expect(c.json().hechas[0].ok).toBe(false);
-    expect(c.json().hechas[0].resumen).toMatch(/permiso|administrador|no est/i);
+    expect(c.json().hechas[0].resumen).toMatch(/administrador/i);
     // Y el catalogo que vio el modelo no le ofrecia esa accion.
     expect(modelo.recibido[0]![0]!.content).not.toContain('configuracion.cambiar [cambio');
   });
@@ -300,7 +308,11 @@ describe('ordenes desde el panel', () => {
     await repos.contacts.upsertFromInbound('51987654321', 'Juan');
     modelo.cola.push('Le escribo.\n[ACCIONES]\n{"accion":"mensaje.enviar","telefono":"987654321","texto":"Hola Juan, tu pedido sale mañana."}\n[/ACCIONES]');
     const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: 'escríbele a Juan que su pedido sale mañana' } });
-    expect(r.json().hechas[0]).toMatchObject({ accion: 'mensaje.enviar', ok: true });
+    const p = r.json().pendientes[0];
+    expect(p.tarjeta).toMatchObject({ mensaje: 'Hola Juan, tu pedido sale mañana.', cuantos: 1 });
+    expect(wa.sent.find((s) => s.kind === 'text')).toBeUndefined();
+    const c = await app.inject({ method: 'POST', url: '/admin/ia/ordenes/confirmar', headers: h, payload: { acciones: [{ accion: p.accion, ...p.parametros }] } });
+    expect(c.json().hechas[0]).toMatchObject({ accion: 'mensaje.enviar', ok: true });
     expect(wa.sent.find((s) => s.kind === 'text')).toMatchObject({ to: '51987654321', body: 'Hola Juan, tu pedido sale mañana.' });
   });
 
@@ -376,15 +388,24 @@ describe('ordenes desde otro sistema (API publica)', () => {
     modelo.cola.push('Listo.\n[ACCIONES]\n{"accion":"lista.agregar","telefono":"987654321","nombre":"Juan"}\n[/ACCIONES]');
     const ok = await app.inject({ method: 'POST', url: '/api/v1/ia/ordenes', headers: con(TODO), payload: { texto: 'pon a Juan 987654321 en la lista' } });
     expect(ok.statusCode).toBe(200);
-    expect(ok.json().hechas[0]).toMatchObject({ accion: 'lista.agregar', ok: true });
+    // Por la API tambien: nada cambia hasta confirmar (la persona lo vio en el otro sistema).
+    const pend = ok.json().pendientes[0];
+    expect(pend).toMatchObject({ accion: 'lista.agregar' });
+    expect(ok.json().elegir).toEqual([]);
+    expect(await lista.porTelefono('987654321')).toBeNull();
+    const conf = await app.inject({ method: 'POST', url: '/api/v1/ia/ordenes/confirmar', headers: con(TODO), payload: { acciones: [{ accion: pend.accion, ...pend.parametros }] } });
+    expect(conf.json().hechas[0]).toMatchObject({ accion: 'lista.agregar', ok: true });
     expect((await lista.porTelefono('987654321'))?.origen).toBe('api');
 
     // Una clave acotada: la orden entra (tiene ia:ordenar) pero la accion no llega a /admin.
     modelo.cola.push('Listo.\n[ACCIONES]\n{"accion":"lista.agregar","telefono":"912345678"}\n[/ACCIONES]');
     const acot = await app.inject({ method: 'POST', url: '/api/v1/ia/ordenes', headers: con(acotada), payload: { texto: 'pon al 912345678' } });
     expect(acot.statusCode).toBe(200);
-    expect(acot.json().hechas[0]).toMatchObject({ accion: 'lista.agregar', ok: false });
-    expect(acot.json().hechas[0].resumen).toMatch(/permiso/i);
+    const pa = acot.json().pendientes[0];
+    const acotConf = await app.inject({ method: 'POST', url: '/api/v1/ia/ordenes/confirmar', headers: con(acotada), payload: { acciones: [{ accion: pa.accion, ...pa.parametros }] } });
+    expect(acotConf.json().hechas[0]).toMatchObject({ accion: 'lista.agregar', ok: false });
+    expect(acotConf.json().hechas[0].resumen).toMatch(/permiso/i);
+    expect(await lista.porTelefono('912345678')).toBeNull();
 
     const sinPermiso = await crearClaveDePrueba(repos, ['contactos:leer']);
     const no = await app.inject({ method: 'POST', url: '/api/v1/ia/ordenes', headers: con(sinPermiso), payload: { texto: 'x' } });

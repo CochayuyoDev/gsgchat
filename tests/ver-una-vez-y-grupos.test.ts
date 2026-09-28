@@ -383,14 +383,23 @@ describe('el "ver una vez" que Baileys tira sin avisar', () => {
     expect(valores).toHaveLength(1);
     expect(pedidos).toHaveLength(1);
 
-    // Y un sobre de la cola (offline) entra como viejo: se guarda sin contestar.
+    // Y un sobre de la cola (offline) de hace una hora entra como viejo: se guarda sin contestar.
     emitirCrudo('CB:message', {
       tag: 'message',
-      attrs: { from: '51912426667@s.whatsapp.net', id: 'VO-OFF', t: ahora(), notify: 'Luis', type: 'media', offline: '1' },
+      attrs: { from: '51912426667@s.whatsapp.net', id: 'VO-OFF', t: String(Number(ahora()) - 3600), notify: 'Luis', type: 'media', offline: '1' },
       content: [{ tag: 'unavailable', attrs: { type: 'view_once' } }],
     });
     await espera(80);
     expect(valores[1]?.messages?.[0]).toMatchObject({ id: 'VO-OFF', type: 'view_once', viejo: true });
+    // Uno de la cola pero recién mandado (cayó en el reinicio) se atiende (28/09).
+    emitirCrudo('CB:message', {
+      tag: 'message',
+      attrs: { from: '51912426667@s.whatsapp.net', id: 'VO-OFF-2', t: ahora(), notify: 'Luis', type: 'media', offline: '1' },
+      content: [{ tag: 'unavailable', attrs: { type: 'view_once' } }],
+    });
+    await espera(80);
+    expect(valores[2]?.messages?.[0]).toMatchObject({ id: 'VO-OFF-2', type: 'view_once' });
+    expect(valores[2]?.messages?.[0]?.viejo).toBeFalsy();
   });
 
   it('un mensaje propio de "ver una vez" (mandado desde el telefono) no entra', async () => {

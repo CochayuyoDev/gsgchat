@@ -253,7 +253,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
   if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, simulador: deps.simuladorGsg, config });
   if (deps.simuladorGsg) await registerGsgSimulado(app, { simulador: deps.simuladorGsg, prefijo: RUTA_SIMULADOR });
-  if (ia) await registerIaRoutes(app, { ia, plan: deps.plan });
+  if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });
   // El resumen del dia por WhatsApp (Ajustes → Resumen del dia). Ver src/resumenes.
   if (deps.resumenes) await registerResumenesRoutes(app, { resumenes: deps.resumenes });
   // La voz del asistente (Mi asistente IA → Voz). Ver src/voz.

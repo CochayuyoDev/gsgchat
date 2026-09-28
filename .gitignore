@@ -34,3 +34,4 @@ vt-out.txt
 vt-diag.txt
 tsc-*.txt
 vt-*.txt
+*.log.err

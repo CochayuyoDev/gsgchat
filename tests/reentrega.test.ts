@@ -85,19 +85,23 @@ describe('lo reentregado no se contesta', () => {
     expect(wa.sent.length).toBe(enviados);
   });
 
-  it('esMensajeViejo: solo notify y reciente se contesta', () => {
+  it('esMensajeViejo: notify reciente se contesta; append solo si es fresco de verdad (28/09)', () => {
     const ahora = Date.now();
     const hace = (min: number) => String(Math.floor((ahora - min * 60_000) / 1000));
     expect(esMensajeViejo('notify', hace(1), ahora)).toBe(false);
     expect(esMensajeViejo('notify', hace(9), ahora)).toBe(false);
     expect(esMensajeViejo('notify', hace(11), ahora)).toBe(true);
-    expect(esMensajeViejo('append', hace(0), ahora)).toBe(true);
+    // Un append escrito hace segundos (cayó en el reinicio) se contesta; uno de hace rato, no.
+    expect(esMensajeViejo('append', hace(0), ahora)).toBe(false);
+    expect(esMensajeViejo('append', hace(4), ahora)).toBe(true);
+    // Sin tipo, o del historial del teléfono, nunca.
     expect(esMensajeViejo(undefined, hace(0), ahora)).toBe(true);
+    expect(esMensajeViejo('append', hace(0), ahora, { historial: true })).toBe(true);
     // Sin timestamp no se puede saber: se contesta si es notify.
     expect(esMensajeViejo('notify', undefined, ahora)).toBe(false);
   });
 
-  it('la sesion local marca como viejo lo que llega como append o con horas de retraso', async () => {
+  it('la sesion local marca como viejo lo que llega con horas de retraso (un append recien escrito, no)', async () => {
     resetLocalForTests();
     const handlers = new Map<string, (arg: unknown) => void>();
     const recibidos: ChangeValue[] = [];
@@ -137,7 +141,8 @@ describe('lo reentregado no se contesta', () => {
     for (let i = 0; i < 100 && recibidos.length < 3; i++) await new Promise((r) => setTimeout(r, 5));
 
     const porId = Object.fromEntries(recibidos.map((v) => [v.messages![0]!.id, v.messages![0]!.viejo ?? false]));
-    expect(porId).toEqual({ A: true, B: true, C: false });
+    // A (append de ahora mismo) ya no se calla: es fresco (28/09).
+    expect(porId).toEqual({ A: false, B: true, C: false });
   });
 });
 

@@ -33,7 +33,7 @@ import type { ServicioPlan } from '../plan/servicio.js';
 import { calificar, EJEMPLOS_DE_RESPUESTA, ESCENARIOS, resumenDeCalificaciones, type Calificacion, type Grupo } from './escenarios.js';
 import { detectarManipulacion, limpiarSalida, Limitador, respuestaAnteManipulacion, type TipoManipulacion } from './seguridad.js';
 import { catalogoParaPantalla, type ContextoAccion, type Llamar } from './acciones.js';
-import { construirSistemaOperador, ejecutarConfirmadas, ordenar, type AccionHecha, type OrdenEntrada, type RespuestaOrden } from './ordenes.js';
+import { construirSistemaOperador, ejecutarConfirmadas, ordenar, prepararUna, type AccionHecha, type OrdenEntrada, type RespuestaOrden } from './ordenes.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { UsuarioSesion } from '../auth/routes.js';
 import type { LeccionesParaPrompt, ServicioEntrenamiento } from '../entrenamiento/servicio.js';
@@ -205,8 +205,10 @@ export interface ServicioIA {
    * panel con su misma identidad. Hace falta `conectarOperador` antes.
    */
   ordenar(entrada: OrdenEntrada, usuario: UsuarioSesion): Promise<RespuestaOrden>;
-  /** Las acciones que la persona confirmo en pantalla: se ejecutan tal cual. */
+  /** Las acciones que la persona confirmo en pantalla («Hacerlo»): se ejecutan tal cual, en orden. */
   ejecutarConfirmadas(acciones: Array<Record<string, unknown>>, usuario: UsuarioSesion): Promise<AccionHecha[]>;
+  /** Prepara (solo lee) una accion para la tarjeta: la opcion que eligio la persona con un boton. */
+  prepararUna(accion: Record<string, unknown>, usuario: UsuarioSesion): Promise<Awaited<ReturnType<typeof prepararUna>>>;
   /** Lo que se le puede pedir, para la pantalla. */
   catalogoOperador(): ReturnType<typeof catalogoParaPantalla>;
   /** El servidor, una vez montado, le da la forma de llamar a sus propias rutas. */
@@ -815,7 +817,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   /** Con que identidad y por donde ejecuta la IA operadora lo que se le pide. */
   function contextoDe(usuario: UsuarioSesion): ContextoAccion {
     const quien = usuario.porToken ? `la clave de API "${usuario.nombre || usuario.usuario}"` : usuario.nombre ? `${usuario.nombre} (${usuario.usuario})` : usuario.usuario;
-    return { llamar: fabricaLlamar!(usuario), quien, esAdmin: usuario.rol === 'admin', catalogo: hayCatalogo(deps.catalogo) && !sinVentas() ? deps.catalogo : undefined };
+    return { llamar: fabricaLlamar!(usuario), quien, esAdmin: usuario.rol === 'admin', sinVentas: sinVentas(), catalogo: hayCatalogo(deps.catalogo) && !sinVentas() ? deps.catalogo : undefined };
   }
 
   /** El estado del sistema en pocas lineas, para el prompt de la IA operadora. */
@@ -971,6 +973,10 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     async ejecutarConfirmadas(acciones, usuario) {
       if (!fabricaLlamar) throw new ErrorIA('La IA operadora no está conectada en este arranque.', 'operador');
       return ejecutarConfirmadas(acciones, contextoDe(usuario), log);
+    },
+    async prepararUna(accion, usuario) {
+      if (!fabricaLlamar) throw new ErrorIA('La IA operadora no está conectada en este arranque.', 'operador');
+      return prepararUna(accion, contextoDe(usuario));
     },
     async ayuda(historial, texto) {
       const sistema = [

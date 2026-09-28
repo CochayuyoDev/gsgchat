@@ -12,7 +12,7 @@
  *   => dice: Ubicación registrada    (lo que el sistema le tiene que contestar)
  *   esperar motorizado
  *   cliente: ¿a qué hora llega?
- *   => dice: ya está con un motorizado (la pregunta por su pedido o la hora: SIEMPRE la hora estimada)
+ *   => dice: se entrega hoy entre (la pregunta por su pedido o la hora: SIEMPRE la hora estimada, o el horario si el motorizado aún no dio su tiempo)
  *   cliente: ¿cuánto cuesta el envío?
  *   => dice: no se reciben consultas (regla del dueño: tras el agradecimiento, otra consulta recibe el cierre UNA vez…)
  *   => con el número del motorizado  (…con el número del motorizado asignado)
@@ -53,7 +53,7 @@ cliente: [ubicación]
 => dice: Ubicación registrada
 esperar motorizado
 cliente: ¿a qué hora llega?
-=> dice: ya está con un motorizado
+=> dice: se entrega hoy entre
 cliente: ¿cuánto cuesta el envío?
 => dice: no se reciben consultas
 => con el número del motorizado
