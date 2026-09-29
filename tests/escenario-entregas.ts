@@ -266,7 +266,7 @@ export async function crearEscenarioEntregas(opciones: {
     zonaHoraria: opciones.zonaHoraria,
     publicBaseUrl: config.PUBLIC_BASE_URL,
     bus,
-    geo: { bbox: config.bbox, cobertura: config.coverageName },
+    geo: { bbox: config.bbox, zonaSinExtra: config.zonaSinExtra, cobertura: config.coverageName },
     geocodificador: opciones.geocodificador ?? null,
     ahora: reloj,
     ...(opciones.esperaMotorizadoMs !== undefined ? { esperaMotorizadoMs: opciones.esperaMotorizadoMs } : {}),

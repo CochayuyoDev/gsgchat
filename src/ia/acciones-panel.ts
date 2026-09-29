@@ -839,9 +839,11 @@ const entregasDetalle = def({
     }
     const r = await ctx.llamar({ method: 'GET', url: `/admin/entregas/${e.id}` });
     if (!ok(r)) return errorDe(r, 'No se pudo leer ese pedido.');
-    const j = r.json as { entrega: EntregaVista & { incidencia?: string | null; incidenciaDetalle?: string | null }; eventos: Array<{ at: string; tipo: string; detalle: string | null }> };
+    const j = r.json as { entrega: EntregaVista & { incidencia?: string | null; incidenciaDetalle?: string | null }; eventos: Array<{ createdAt?: string; at?: string; tipo: string; detalle: string | null }> };
     const x = j.entrega;
-    const eventos = [...(j.eventos ?? [])].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-20).map((ev) => `${String(ev.at).slice(11, 16)} ${ev.tipo}: ${acortar(ev.detalle ?? '', 140)}`);
+    // La ruta trae `createdAt` (en UTC): la hora se dice en el reloj de la tienda.
+    const cuando = (ev: { createdAt?: string; at?: string }) => String(ev.createdAt ?? ev.at ?? '');
+    const eventos = [...(j.eventos ?? [])].sort((a, b) => cuando(a).localeCompare(cuando(b))).slice(-20).map((ev) => `${cuando(ev) ? horaEnReloj(new Date(cuando(ev)), process.env.TIMEZONE || 'America/Lima') : '--:--'} ${ev.tipo}: ${acortar(ev.detalle ?? '', 140)}`);
     const resumen = `${lineaEntrega(x)}. ${x.situacion ?? ''} Ubicación: ${x.lat != null ? `sí (${mapaDe(x.lat, x.lng!)})` : 'no'}; confirmación: ${x.confirmacionEstado ?? '?'}${x.llegaAproxAt ? `; llega hacia las ${horaEnReloj(new Date(x.llegaAproxAt as string | Date), process.env.TIMEZONE || 'America/Lima')}` : ''}${x.incidenciaDetalle ? `; incidencia: ${x.incidenciaDetalle}` : ''}.`;
     return { ok: true, resumen, datos: { bitacora: eventos }, ir: '/hoy' };
   },
@@ -915,7 +917,7 @@ const chatAsistente = def({
 const chatCerrar = def({
   nombre: 'chat.cerrar',
   tipo: 'cambio',
-  descripcion: 'Cerrar un chat: se guarda entero en Conversaciones guardadas y se vacía de Chats (se puede devolver al chat desde Guardados).',
+  descripcion: 'Guardar todos los mensajes de un número / cerrar su chat: se guarda entero en Conversaciones guardadas y se vacía de Chats (se puede devolver al chat desde Guardados).',
   parametros: 'telefono (o nombre)',
   ejemplo: { orden: 'cierra el chat de Luis', accion: { accion: 'chat.cerrar', telefono: 'Luis' } },
   schema: z.object({ telefono: z.string().trim().min(2).max(120), contactId: z.string().max(80).optional() }),

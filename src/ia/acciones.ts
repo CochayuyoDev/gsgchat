@@ -29,6 +29,10 @@
 import { z } from 'zod';
 import { acortar, def, errorDe, ok, telefono, telefonoADigitos, texto, type Accion, type ContextoAccion, type Preparado, type ResultadoAccion, type TipoAccion } from './acciones-base.js';
 import { ACCIONES_PANEL, PREPARAR_DE_SIEMPRE } from './acciones-panel.js';
+import { ACCIONES_MENSAJES } from './acciones-mensajes.js';
+import { ACCIONES_INFORMES } from './acciones-informes.js';
+import { ACCIONES_GENERAL } from './acciones-general.js';
+import { ACCIONES_CHATS } from './acciones-chats.js';
 
 export type { Accion, ContextoAccion, Llamada, Llamar, Preparado, ResultadoAccion, RespuestaLlamada, Tarjeta, TipoAccion } from './acciones-base.js';
 export { telefonoADigitos } from './acciones-base.js';
@@ -1031,8 +1035,10 @@ for (const a of ACCIONES_DE_SIEMPRE) {
 }
 
 /** Todas: las de siempre y las de las pantallas del panel (estas mandan si se llaman igual). */
-const DEL_PANEL = new Set(ACCIONES_PANEL.map((a) => a.nombre));
-export const ACCIONES: Accion[] = [...ACCIONES_DE_SIEMPRE.filter((a) => !DEL_PANEL.has(a.nombre)), ...ACCIONES_PANEL];
+const DEL_PANEL_Y_NUEVAS = [...ACCIONES_PANEL, ...ACCIONES_MENSAJES, ...ACCIONES_CHATS, ...ACCIONES_INFORMES, ...ACCIONES_GENERAL];
+const DEL_PANEL = new Set(DEL_PANEL_Y_NUEVAS.map((a) => a.nombre));
+// La via general (panel.*) va al final: el modelo prueba antes las acciones con nombre propio.
+export const ACCIONES: Accion[] = [...ACCIONES_DE_SIEMPRE.filter((a) => !DEL_PANEL.has(a.nombre)), ...DEL_PANEL_Y_NUEVAS];
 
 export const ACCIONES_POR_NOMBRE = new Map(ACCIONES.map((a) => [a.nombre, a]));
 
@@ -1051,19 +1057,29 @@ export function motivoSoloAdmin(a: Accion): string {
 }
 
 /**
+ * El mismo contexto, pero que solo lee: cualquier llamada que no sea GET (o
+ * uno de los POST que solo previsualizan) se rechaza. Lo usan `preparar` y
+ * las consultas, que se hacen sin «Hacerlo»: asi ninguna puede cambiar nada
+ * aunque una accion este mal escrita.
+ */
+export function contextoDeLectura(ctx: ContextoAccion, quien = 'una consulta'): ContextoAccion {
+  return {
+    ...ctx,
+    llamar: async (l) => {
+      if (l.method !== 'GET' && !(l.method === 'POST' && POST_QUE_SOLO_LEEN.includes(l.url.split('?')[0] ?? ''))) throw new Error(`${quien} solo se lee (se intentó ${l.method} ${l.url})`);
+      return ctx.llamar(l);
+    },
+  };
+}
+
+/**
  * Prepara un cambio para su tarjeta de «Hacerlo». NUNCA escribe: el contexto
  * que recibe `preparar` rechaza cualquier llamada que no sea de lectura.
  */
 export async function prepararAccion(accion: Accion, params: Record<string, unknown>, ctx: ContextoAccion): Promise<Preparado> {
   if (accion.soloAdmin && !ctx.esAdmin) return { tipo: 'no', resumen: motivoSoloAdmin(accion) };
   if (accion.ventas && ctx.sinVentas) return { tipo: 'no', resumen: 'Con «Solo lo de GSG» no hay campañas ni catálogo: eso está apagado en este modo. Si quieres parar todo lo que sale, dime «pausa todos los envíos».' };
-  const lectura: ContextoAccion = {
-    ...ctx,
-    llamar: async (l) => {
-      if (l.method !== 'GET' && !(l.method === 'POST' && POST_QUE_SOLO_LEEN.includes(l.url.split('?')[0] ?? ''))) throw new Error(`al preparar solo se lee (se intentó ${l.method} ${l.url})`);
-      return ctx.llamar(l);
-    },
-  };
+  const lectura = contextoDeLectura(ctx, 'al preparar');
   if (!accion.preparar) {
     const partes = Object.entries(params)
       .filter(([k, v]) => k !== 'accion' && v !== undefined && v !== null && v !== '')

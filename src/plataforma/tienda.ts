@@ -277,7 +277,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         plan: plantillaPais,
         publicBaseUrl: config.PUBLIC_BASE_URL,
         bus,
-        geo: { bbox: config.bbox, cobertura: config.coverageName },
+        geo: { bbox: config.bbox, zonaSinExtra: config.zonaSinExtra, cobertura: config.coverageName },
         modo: () => ajustes.modo(),
         numeroPropio: () => sesion.getLocalState().phone || null,
         geocodificador:

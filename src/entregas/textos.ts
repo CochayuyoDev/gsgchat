@@ -21,6 +21,12 @@ export const ajustesEntregasSchema = z.object({
   motorizadoEsperaMin: z.number().int().min(1).max(180).default(10),
   /** Cuantas veces se le escribe a un mismo motorizado antes de pasar el pedido a otro. */
   motorizadoMaxIntentos: z.number().int().min(1).max(5).default(2),
+  /**
+   * Hasta que hora del dia (de la tienda) el cliente puede cambiar la
+   * ubicacion ya registrada (regla del dueño, 29/09). Despues, un pin nuevo no
+   * se registra: se le pasa al motorizado y el cliente coordina con el.
+   */
+  cambioUbicacionHasta: z.string().regex(/^\d{2}:\d{2}$/).default('13:00'),
   /** Cada cuantos minutos se le piden a GSG los pendientes del dia. */
   sincronizarCadaMin: z.number().int().min(1).max(24 * 60).default(5),
   /**
@@ -196,6 +202,9 @@ export const ajustesEntregasSchema = z.object({
       motorizadoAudioSinTexto: z.string().max(1000).default(''),
       motorizadoEnlace: z.string().max(1000).default(''),
       ubicacionFueraDeZona: z.string().max(1000).default(''),
+      ubicacionFueraDeLima: z.string().max(1000).default(''),
+      cambioUbicacionAntes: z.string().max(1000).default(''),
+      cambioUbicacionTarde: z.string().max(1000).default(''),
       clienteCanceladoGsg: z.string().max(1000).default(''),
       solicitudUbicacion: z.string().max(2000).default(''),
       porQueUbicacion: z.string().max(1000).default(''),
@@ -267,6 +276,8 @@ export interface ContextoTexto {
   km?: string | null;
   /** La zona que se cubre, en palabras ("todo Lima y Callao"). */
   cobertura?: string | null;
+  /** La hora limite para cambiar la ubicacion («1:00 PM»). */
+  horaLimite?: string | null;
   /** Un enlace propio del mensaje (la pagina del motorizado). */
   enlace?: string | null;
   /** Lo que GSG cuenta del envio (producto, empresa, codigo, monto, quien firma): lo que falta no sale. */
@@ -368,6 +379,7 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
     telefonoCliente: ctx.telefonoCliente ?? '',
     km: ctx.km ?? '',
     cobertura: ctx.cobertura ?? '',
+    horaLimite: ctx.horaLimite ?? '',
     enlace: ctx.enlace ?? '',
     producto: ctx.envio?.producto?.trim() || '',
     empresa: empresaEnPalabras(ctx.envio),
@@ -475,6 +487,9 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   motorizadoTraspaso: 'Entendido, {motorizado}: te quitamos {pedidos} y los repartimos entre los demás. Avísanos cuando puedas volver.',
   motorizadoAudioSinTexto: 'Recibí tu audio, {motorizado}, pero no pude entenderlo. Escríbelo por aquí (por ejemplo "40", "entregado", "no estaba nadie", "cerca") o manda otro audio más claro.',
   motorizadoEnlace: 'Hola {motorizado}, aquí tienes tus pedidos de hoy con botones grandes para avisar desde el celular: {enlace}\nVale por 7 días. Si lo pierdes, pide otro al coordinador.',
+  cambioUbicacionAntes: '¡Claro! Entiendo. Mándame la nueva ubicación para tenerla en cuenta para el mismo día.',
+  cambioUbicacionTarde: 'Entiendo que deseas cambiar tu ubicación, pero al ser después de la {horaLimite}, por favor comunícate directamente con el motorizado para coordinar la entrega. Número del motorizado: {telefonoMotorizado}.',
+  ubicacionFueraDeLima: 'Su ubicación está fuera de Lima y Callao: la entrega de {pedido} tiene un costo extra según la distancia, que le indicará el motorizado al llegar.',
   ubicacionFueraDeZona: 'Gracias, {nombre}, recibimos su ubicación, pero queda fuera de la zona que cubrimos{cobertura}. Una persona de {negocio} se comunicará con usted para coordinar {pedido}.',
   clienteCanceladoGsg: 'Hola {nombre}, {pedido} quedó cancelado por {negocio} y hoy ya no se lo llevamos. Si no fue usted quien lo canceló, escríbanos por aquí y lo revisamos.',
   // Los de «falta confirmar» (GSG ya tiene su dirección): solo SÍ o NO, nunca la ubicación.
@@ -567,6 +582,9 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   motorizadoAudioSinTexto: ['{motorizado}', '{negocio}'],
   motorizadoEnlace: ['{motorizado}', '{enlace}', '{negocio}'],
   ubicacionFueraDeZona: ['{nombre}', '{pedido}', '{negocio}', '{cobertura}'],
+  ubicacionFueraDeLima: ['{nombre}', '{pedido}', '{negocio}'],
+  cambioUbicacionAntes: ['{nombre}', '{pedido}', '{negocio}', '{horaLimite}'],
+  cambioUbicacionTarde: ['{nombre}', '{pedido}', '{negocio}', '{horaLimite}', '{motorizado}', '{telefonoMotorizado}'],
   clienteCanceladoGsg: ['{nombre}', '{pedido}', '{negocio}'],
   solicitudUbicacion: ['{nombreCompleto}', '{nombre}', '{remitente}', '{producto}', '{empresa}', '{tracking}', '{nroPedido}', '{metodoPago}', '{monto}', '{direccionCompleta}', '{direccion}', '{distrito}', '{pedido}', '{negocio}'],
   porQueUbicacion: ['{nombre}', '{pedido}', '{negocio}', '{soporte}', '{telefonoMotorizado}'],
@@ -629,7 +647,10 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   motorizadoTraspaso: 'Al motorizado que no puede seguir, cuando se le quitan sus pedidos',
   motorizadoAudioSinTexto: 'Al motorizado que manda un audio que no se pudo transcribir',
   motorizadoEnlace: 'Al motorizado, con el enlace a su página de pedidos del día (botones grandes, sin instalar nada)',
-  ubicacionFueraDeZona: 'Al cliente cuyo pin cae fuera de la zona que se cubre (pasa a una persona)',
+  cambioUbicacionAntes: 'Al cliente que ya dio su ubicación y pide cambiarla ANTES de la hora límite (1:00 PM por defecto): se le pide la nueva',
+  cambioUbicacionTarde: 'Al cliente que pide cambiar su ubicación (o manda otro pin) DESPUÉS de la hora límite: coordina con el motorizado, con su número',
+  ubicacionFueraDeLima: 'Al cliente cuyo pin cae fuera de Lima y Callao pero cerca (se registra y va al motorizado): va debajo de «Ubicación registrada», avisando del costo extra que le dirá el motorizado',
+  ubicacionFueraDeZona: 'Al cliente cuyo pin cae muy lejos, a más de 100 km de Lima y Callao (no se registra: pasa a una persona)',
   clienteCanceladoGsg: 'Al cliente que ya tenía hora, cuando GSG cancela su pedido',
   solicitudUbicacion: 'Al cliente, el PRIMER mensaje que le pide la ubicación, con los datos del envío que manda GSG («¡Hola {nombre}! Somos GSG Courier, tengo una entrega para ti:»; la línea de un dato que no vino no sale)',
   porQueUbicacion: 'Al cliente que pregunta por qué le pedimos la ubicación (se le explica y se le vuelve a pedir)',

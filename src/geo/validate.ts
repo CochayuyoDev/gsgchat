@@ -95,3 +95,22 @@ export const LIMA_BBOX: BoundingBox = {
   minLng: -77.3,
   maxLng: -76.5,
 };
+
+/**
+ * Lima y Callao con unos 100 km alrededor (Huaral, Cañete, Huarochirí,
+ * Canta...). Es la zona en la que se ACEPTA un pin: fuera de LIMA_BBOX pero
+ * dentro de esta se registra igual y el motorizado cobra un extra por la
+ * distancia (regla del dueño, 29/09). Mas lejos casi siempre es un error
+ * (otra ciudad, otro pais): pasa a una persona.
+ */
+export const LIMA_BBOX_AMPLIADA: BoundingBox = {
+  minLat: LIMA_BBOX.minLat - 0.9,
+  maxLat: LIMA_BBOX.maxLat + 0.9,
+  minLng: LIMA_BBOX.minLng - 0.9,
+  maxLng: LIMA_BBOX.maxLng + 0.9,
+};
+
+/** Si el punto cae dentro del recuadro. */
+export function dentroDe(b: BoundingBox, lat: number, lng: number): boolean {
+  return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
+}

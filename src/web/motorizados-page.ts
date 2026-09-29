@@ -161,6 +161,15 @@ var resumen = null;
 /* Rutas desplegadas y su ultimo dibujo: al refrescar se vuelve a pintar lo que ya habia (nada de parpadear "Cargando"). */
 var rutasAbiertas = {};
 var rutaDibujada = {};
+/* Cuando se le mando la ruta a cada motorizado: el boton lo dice («Ruta mandada») hasta que se recargue la pagina. */
+var rutaMandadaEn = {};
+function botonMandarRuta(id) {
+  var en = rutaMandadaEn[id];
+  if (!en) return '<button class="btn sm primario" type="button" data-accion="mandar-ruta" data-id="' + id + '">Mandarle su ruta</button>';
+  var hora = new Date(en).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+  return '<button class="btn sm" type="button" data-accion="mandar-ruta" data-id="' + id + '" title="Pulsa para volver a mandársela">✓ Ruta mandada (' + hora + ')</button>';
+}
+function conBotonRuta(id, html) { return String(html).replace('@@BOTON_RUTA@@', botonMandarRuta(id)); }
 
 /* Lo que lleva encima ahora: los mismos pedidos que cuentan la ruta y el traspaso en el servidor (estados vivos). */
 function llevaAhora(id) {
@@ -228,7 +237,7 @@ function tarjetaMotorizado(m) {
     hoy + encima +
     (m.puntualidad ? '<div class="sub" title="Comparando la hora que se le avisó al cliente con la hora real de cada entrega, últimos 30 días">⏱ ' + esc(m.puntualidad.texto) + '</div>' : '') +
     ultimaPosicion(m) +
-    (abierta ? '<div class="ruta" id="ruta-' + m.id + '">' + (rutaDibujada[m.id] || 'Cargando la ruta…') + '</div>' : '') +
+    (abierta ? '<div class="ruta" id="ruta-' + m.id + '">' + (rutaDibujada[m.id] ? conBotonRuta(m.id, rutaDibujada[m.id]) : 'Cargando la ruta…') + '</div>' : '') +
     '<div class="acciones">' +
       (m.estado === 'activo' ? boton(m, 'descanso', 'Mandar a descanso', 'Mandar a descansar a') : boton(m, 'activo', 'Activar', 'Activar a', 'primario')) +
       (lleva.length ? boton(m, 'ruta', abierta ? 'Cerrar la ruta' : 'Ver su ruta', abierta ? 'Cerrar la ruta de' : 'Ver la ruta de') : '') +
@@ -292,7 +301,7 @@ async function cargarRuta(id) {
     var desde = ruta.desde ? 'Sale de su última posición (' + haceCuanto(ruta.desde.en) + ').' : 'No se sabe dónde está: el orden empieza por el primero que se le dio.';
     var cab = '<div class="ruta-cab"><b>' + plural(ruta.paradas.length, 'parada', 'paradas') + '</b><span class="muted">' + esc(desde) +
       (ruta.totalKm ? ' Unos ' + Number(ruta.totalKm).toFixed(1).replace('.', ',') + ' km en total.' : '') + '</span><span class="sep"></span>' +
-      '<button class="btn sm primario" type="button" data-accion="mandar-ruta" data-id="' + id + '">Mandarle su ruta</button></div>';
+      '@@BOTON_RUTA@@</div>';
     var paradas = ruta.paradas.map(function (p) {
       var e = p.entrega;
       var que = p.situacion === 'esperando_tiempo' ? 'esperando su tiempo' : p.situacion === 'cerca' ? 'llega ' + (p.llega || '?') + ' · ya avisó que está cerca' : 'llega ' + (p.llega || '?');
@@ -304,7 +313,7 @@ async function cargarRuta(id) {
     }).join('');
     rutaDibujada[id] = cab + paradas;
   }
-  td.innerHTML = rutaDibujada[id];
+  td.innerHTML = conBotonRuta(id, rutaDibujada[id]);
 }
 
 // --------------------------------------------------------------- acciones
@@ -371,8 +380,14 @@ async function mandarEnlace(m) {
 }
 
 async function mandarRuta(m) {
-  var r = await api('/admin/motorizados/' + m.id + '/ruta/mandar', { method: 'POST', body: {} });
-  toast('Ruta enviada por WhatsApp: ' + plural(r.ruta.paradas.length, 'parada', 'paradas') + '.');
+  var botones = function () { return document.querySelectorAll('button[data-accion="mandar-ruta"][data-id="' + m.id + '"]'); };
+  botones().forEach(function (b) { b.disabled = true; b.textContent = 'Mandando…'; });
+  var r;
+  try { r = await api('/admin/motorizados/' + m.id + '/ruta/mandar', { method: 'POST', body: {} }); }
+  catch (e) { botones().forEach(function (b) { b.outerHTML = botonMandarRuta(m.id); }); throw e; }
+  rutaMandadaEn[m.id] = Date.now();
+  botones().forEach(function (b) { b.outerHTML = botonMandarRuta(m.id); });
+  toast('Ruta mandada a ' + m.nombre + ' por WhatsApp: ' + plural(r.ruta.paradas.length, 'parada', 'paradas') + '.');
 }
 
 /* Todo en un cuadro: a quien se los pasa y si el sigue repartiendo. Cancelar aqui no hace nada a medias. */

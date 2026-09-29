@@ -156,7 +156,20 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
 
   const ordenSchema = z.object({
     texto: z.string().trim().min(1).max(4000),
-    historial: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(6000) })).max(24).default([]),
+    historial: z
+      .array(
+        z.object({
+          role: z.enum(['user', 'assistant']),
+          content: z.string().max(6000),
+          // Lo que paso con esa respuesta (ver ContextoTurno en ordenes.ts).
+          contexto: z
+            .array(z.object({ accion: z.string().max(80), estado: z.enum(['consultada', 'preparada', 'hecha', 'cancelada', 'fallo', 'por_elegir']), parametros: z.record(z.string(), z.unknown()).optional(), resumen: z.string().max(600).optional() }))
+            .max(20)
+            .optional(),
+        }),
+      )
+      .max(24)
+      .default([]),
     simular: z.boolean().default(false),
   });
 

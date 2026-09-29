@@ -353,6 +353,7 @@ ${aviso}
             <div class="ajuste-fila"><label for="aj-hor-desde">Entregamos desde las</label><input id="aj-hor-desde" type="time" step="900"></div>
             <div class="ajuste-fila"><label for="aj-hor-hasta">hasta las</label><input id="aj-hor-hasta" type="time" step="900"></div>
             <div class="ajuste-fila"><label for="aj-hor-ext">Por algunos casos, hasta las</label><input id="aj-hor-ext" type="time" step="900"></div>
+            <div class="ajuste-fila"><label for="aj-cambio-hasta">Puede cambiar su ubicación hasta las<span class="pista-fila">Después, un pin nuevo no se registra y se le da el número del motorizado.</span></label><input id="aj-cambio-hasta" type="time" step="900"></div>
             <div class="ajuste-fila tel"><label for="aj-sop-wa">WhatsApp de soporte<span class="pista-fila">Al que el cliente te escribe. Vacío = este mismo WhatsApp.</span></label><input id="aj-sop-wa" type="tel" inputmode="tel" autocomplete="off" placeholder="987 654 321"></div>
             <div class="ajuste-fila tel"><label for="aj-sop-tel">Teléfono para llamadas<span class="pista-fila">Solo si es otro. Vacío = el mismo del WhatsApp.</span></label><input id="aj-sop-tel" type="tel" inputmode="tel" autocomplete="off" placeholder="01 234 5678"></div>
             <div class="burbuja-cliente">
@@ -1117,6 +1118,7 @@ function pintarAjustes() {
   valor('aj-hor-desde', he.desde || '14:00');
   valor('aj-hor-hasta', he.hasta || '20:00');
   valor('aj-hor-ext', he.extendidoHasta || '22:00');
+  valor('aj-cambio-hasta', a.cambioUbicacionHasta || '13:00');
   var sop = a.soporte || {};
   valor('aj-sop-wa', sop.whatsapp || '');
   valor('aj-sop-tel', sop.llamadas || '');
@@ -1721,6 +1723,7 @@ $('aj-guardar').onclick = async function () {
     document.querySelectorAll('[data-texto]').forEach(function (t) { textos[t.getAttribute('data-texto')] = t.value; });
     await api('/admin/entregas/ajustes', { method: 'POST', body: {
       horarioEntregas: { desde: $('aj-hor-desde').value || '14:00', hasta: $('aj-hor-hasta').value || '20:00', extendidoHasta: $('aj-hor-ext').value || '22:00' },
+      cambioUbicacionHasta: $('aj-cambio-hasta').value || '13:00',
       soporte: { whatsapp: $('aj-sop-wa').value.replace(/\D/g, ''), llamadas: $('aj-sop-tel').value.replace(/\D/g, '') },
       margenMinutos: Number($('aj-margen').value) || 0,
       confirmacionEsperaMin: num('aj-conf-espera', resumen.ajustes.confirmacionEsperaMin),

@@ -70,6 +70,7 @@ import type { Solicitud } from '../db/rutas.js';
 import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leerEntregado, leerEntregadoConReglas, leerFrasesPropias, leerMotorizadoCorta, leerMotorizadoFueraDeFlujo, leerPreguntaPorPedido, leerTiempo, tiempoDudoso, type FrasesPropias, type LectorIA } from './interpretar.js';
 import { randomBytes } from 'node:crypto';
 import type { BoundingBox } from '../types.js';
+import { dentroDe } from '../geo/validate.js';
 import { distanciaEnPalabras, haversineKm } from './geo.js';
 import type { Bus, EventoEntregaDelDia } from '../eventos/bus.js';
 import { leerLote, type FilaLote } from '../rutas/lote.js';
@@ -457,6 +458,13 @@ export interface ServicioEntregas {
   textoSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<string | null>;
   /** Los textos del agente operativo (por qué la ubicación, el cierre), con los datos de la entrega viva de ese teléfono si hay. */
   textoAgente(clave: 'porQueUbicacion' | 'cierreAgente', phone: string, nombre?: string | null): Promise<string>;
+  /**
+   * El cliente, con su ubicación ya registrada, pide cambiarla («me equivoqué
+   * de ubicación»). Antes de la hora límite: que mande la nueva. Después:
+   * que coordine con el motorizado (con su número). null = no tiene ninguna
+   * ubicación registrada hoy (no es un cambio).
+   */
+  cambioDeUbicacion(phone: string): Promise<string | null>;
   /** Lo que hizo el agente operativo con un cliente queda en la bitácora de sus entregas vivas. */
   anotarAgente(phone: string, detalle: string): Promise<void>;
   /** Si ese teléfono tiene hoy una entrega viva, y si ya mandó su ubicación. */
@@ -659,8 +667,13 @@ export interface DepsEntregas {
   bus?: Bus;
   /** El gancho de Ajustes para ampliar el horario del numero con el de entregas (Hoy → Ajustes). */
   ampliarHorario?: (fn: () => { desde: string; hasta: string } | null) => void;
-  /** La zona que se cubre: un pin fuera de ella no se registra, se aparta para una persona. */
-  geo?: { bbox?: BoundingBox; cobertura?: string };
+  /**
+   * La zona que se cubre: un pin fuera de `bbox` no se registra, se aparta
+   * para una persona. Uno dentro de `bbox` pero fuera de `zonaSinExtra` (Lima
+   * y Callao) se registra, y al cliente se le avisa del costo extra que le
+   * dira el motorizado (a el GSGchat no le escribe nada de esto).
+   */
+  geo?: { bbox?: BoundingBox; zonaSinExtra?: BoundingBox; cobertura?: string };
   /**
    * El modo de la tienda ("gsg" = «Solo lo de GSG»). Con "gsg" manda la regla
    * del dueño: la IA no redacta nada para el cliente y, con el ajuste
@@ -939,6 +952,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     motorizado: m ? firmaMotorizado(m) : null,
     placa: m?.placa ?? null,
     minutosMotorizado: e.minutosMotorizado,
+    horaLimite: horaEnPalabras(ajustes.cambioUbicacionHasta),
     notas: e.notas,
     horaEntregada: e.entregadaAt ? horaEnReloj(e.entregadaAt, tz()) : null,
     situacion: situacionDe(e, m ?? null, ajustes, tz(), reglaGsgActiva()),
@@ -1545,6 +1559,12 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng;
   }
 
+  /** Dentro de la zona que se cubre pero fuera de Lima y Callao: se registra y lleva un extra. */
+  function fueraDeLima(lat: number, lng: number): boolean {
+    const b = deps.geo?.zonaSinExtra;
+    return Boolean(b) && !fueraDeZona(lat, lng) && !dentroDe(b!, lat, lng);
+  }
+
   async function alUbicacionFueraDeZona(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; fuente?: string | null }): Promise<RespuestaEntregas> {
     const vivas = await repo.vivasPorTelefono(contact.phone);
     const e = vivas.find((x) => x.ubicacionEstado === 'pendiente') ?? vivas[0];
@@ -1672,6 +1692,63 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // Un pin fuera de la zona que se cubre no se registra: se aparta para
     // una persona y al cliente se le explica (venga por donde venga).
     if (fueraDeZona(ubicacion.lat, ubicacion.lng)) return alUbicacionFueraDeZona(contact, ubicacion);
+    // Otro pin después de la hora límite, con la ubicación ya registrada: no
+    // se cambia; se le pasa al motorizado y el cliente coordina con él.
+    if (!ubicacion.aMano && pasoLaHoraDeCambio()) {
+      const tardio = await pinTardio(contact, ubicacion);
+      if (tardio) return tardio;
+    }
+    const r = await registrarUbicacion(contact, ubicacion);
+    // Fuera de Lima y Callao (pero cerca): se registra igual y sigue hacia el
+    // motorizado; al cliente se le avisa, debajo del gracias, del costo extra
+    // que le dira el motorizado (regla del dueño, 29/09). Al motorizado
+    // GSGchat no le dice nada de esto.
+    if (!r.atendida || !r.entrega || !fueraDeLima(ubicacion.lat, ubicacion.lng)) return r;
+    await evento(r.entrega, 'nota', `su pin cae fuera de Lima y Callao: se registra igual y va al motorizado; lleva un extra según la distancia${ubicacion.aMano ? '' : ' (al cliente se le avisó que se lo dirá el motorizado)'}`);
+    if (ubicacion.aMano) return r;
+    const aviso = textoDe('ubicacionFueraDeLima', ajustes, contexto(r.entrega));
+    return { ...r, responder: r.responder ? `${r.responder}\n\n${aviso}` : aviso };
+  }
+
+  /** Ya pasó la hora límite para cambiar la ubicación (1:00 PM por defecto, en el reloj de la tienda). */
+  function pasoLaHoraDeCambio(): boolean {
+    return horaEnReloj(ahora(), tz()) >= ajustes.cambioUbicacionHasta;
+  }
+
+  /**
+   * El número que se le da al cliente para coordinar un cambio de ubicación
+   * tardío: el del motorizado que manda la API de GSG; si GSG no lo manda,
+   * el del motorizado de aquí, y si no, soporte.
+   */
+  function numeroDeGsg(e: Entrega, m: Motorizado | null): string {
+    return e.datosEnvio?.telefonoMotorizado ? telefonoEnPalabras(e.datosEnvio.telefonoMotorizado) : numeroParaCliente(e, m);
+  }
+
+  /**
+   * Regla del dueño (29/09): pasada la hora límite, un pin distinto del que ya
+   * estaba registrado no se registra, y al cliente se le da el número del
+   * motorizado (el de GSG) para que coordine con él. Al motorizado no se le
+   * escribe nada. Sin ningún número que darle, lo ve una persona. null = no
+   * es un cambio (le falta la ubicación a alguno de sus pedidos, o es el
+   * mismo punto): sigue normal.
+   */
+  async function pinTardio(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; fuente?: string | null }): Promise<RespuestaEntregas | null> {
+    const vivas = (await repo.vivasPorTelefono(contact.phone)).filter((x) => !ESTADOS_FINALES.includes(x.estado));
+    if (!vivas.length || vivas.some((x) => x.ubicacionEstado !== 'recibida')) return null;
+    const mismo = (x: Entrega) => x.lat != null && x.lng != null && Math.abs(x.lat - ubicacion.lat) < 1e-6 && Math.abs(x.lng - ubicacion.lng) < 1e-6;
+    if (vivas.every(mismo)) return null;
+    const e = vivas.find((x) => x.datosEnvio?.telefonoMotorizado) ?? vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
+    const m = await motorizadoDe(e).catch(() => null);
+    const numero = numeroDeGsg(e, m);
+    const detalle = `mandó otra ubicación después de la ${horaEnPalabras(ajustes.cambioUbicacionHasta)} (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): NO se cambió`;
+    for (const x of vivas) {
+      if (!numero) await repo.actualizar(x.id, { requiereHumano: true });
+      await evento(x, 'nota', numero ? `${detalle}; se le dio el número del motorizado (${numero}) para que coordine con él` : `${detalle} y no hay número de motorizado que darle: necesita a alguien`);
+    }
+    return { atendida: true, entrega: e, resultado: 'ubicacion_tardia', responder: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(e, m), telefonoMotorizado: numero }) };
+  }
+
+  async function registrarUbicacion(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null; yaReportada?: boolean; aMano?: boolean }): Promise<RespuestaEntregas> {
     // Un cliente puede tener dos pedidos hoy: su pin vale para todos (es la
     // misma direccion), y a GSG se le reporta cada uno. Tambien los de hoy que
     // se apartaron SOLO por no tener la ubicacion (no contesto, contesto otra
@@ -4126,6 +4203,21 @@ ${lista}
       }
       if (e) return textoDe(clave, ajustes, contexto(e, await motorizadoDe(e).catch(() => null)));
       return textoDe(clave, ajustes, { nombre: nombre ?? null, negocio: deps.nombreNegocio(), soporte: soporteEnPalabras(ajustes.soporte), telefonoMotorizado: numeroParaCliente(null, null) });
+    },
+    async cambioDeUbicacion(phone) {
+      const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && x.ubicacionEstado === 'recibida');
+      if (!vivas.length) return null;
+      const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
+      const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
+      if (!pasoLaHoraDeCambio()) {
+        for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
+        return textoDe('cambioUbicacionAntes', ajustes, contexto(e));
+      }
+      const g = vivas.find((x) => x.datosEnvio?.telefonoMotorizado) ?? e;
+      const m = await motorizadoDe(g).catch(() => null);
+      const numero = numeroDeGsg(g, m);
+      for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
+      return textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero });
     },
     async anotarAgente(phone, detalle) {
       for (const e of await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])) {

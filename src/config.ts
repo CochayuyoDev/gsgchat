@@ -6,7 +6,7 @@
 
 import 'dotenv/config';
 import { z } from 'zod';
-import { LIMA_BBOX, MEXICO_BBOX } from './geo/validate.js';
+import { LIMA_BBOX, LIMA_BBOX_AMPLIADA, MEXICO_BBOX } from './geo/validate.js';
 import { DISTRITOS_LIMA_CALLAO } from './preventa/distritos.js';
 import type { BoundingBox } from './types.js';
 
@@ -358,6 +358,8 @@ export interface Config extends RawConfig {
   optOutKeywords: string[];
   optInKeywords: string[];
   bbox?: BoundingBox;
+  /** Lima y Callao: dentro de `bbox` pero fuera de aqui, el pin se registra y lleva un costo extra. */
+  zonaSinExtra?: BoundingBox;
   /** Nombre de la zona atendida, para los mensajes al cliente. */
   coverageName: string;
   /** Zona horaria del negocio: decide el saludo y las fechas. */
@@ -421,7 +423,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ...raw,
     optOutKeywords: csv(raw.OPT_OUT_KEYWORDS),
     optInKeywords: csv(raw.OPT_IN_KEYWORDS),
-    bbox: raw.GEO_BBOX === 'lima' ? LIMA_BBOX : raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
+    // La zona en la que se acepta un pin. Con Lima, Lima y Callao mas unos
+    // 100 km: lo de fuera de Lima y Callao se registra y lleva un extra
+    // (`zonaSinExtra`), que cobra el motorizado.
+    bbox: raw.GEO_BBOX === 'lima' ? LIMA_BBOX_AMPLIADA : raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
+    zonaSinExtra: raw.GEO_BBOX === 'lima' ? LIMA_BBOX : undefined,
     timezone: raw.TIMEZONE,
     // Con cobertura de Lima, los distritos se validan contra los que existen.
     // Fuera de ahi no hay lista que valga y el campo acepta texto libre.

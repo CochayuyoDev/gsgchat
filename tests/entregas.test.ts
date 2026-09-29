@@ -425,6 +425,8 @@ describe('un día de entregas con GSG simulado', () => {
     expect(pedro?.estado).toBe('esperando_motorizado');
     const rider = pedro!.motorizado!.phone;
     const antes = e.textosA(rider).length;
+    // Antes de la hora límite para cambiar la ubicación (1:00 PM; después ya no se cambia: ver cambio-ubicacion.test.ts).
+    await e.entregas.guardarAjustes({ cambioUbicacionHasta: '23:59' });
     await e.contesta('987000006', { pin: pinDe(16) });
     pedro = await e.entrega('P-1006');
     expect(pedro?.lat).toBeCloseTo(pinDe(16).lat, 5);

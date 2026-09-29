@@ -1153,12 +1153,27 @@ const JS = String.raw`
       }).catch(function (e) { m.estadoTarjeta = ''; m.errorTarjeta = 'No se pudo hablar con el servidor: ' + e.message; iaGuardar(); iaPintar(); });
     }
   });
+  // Lo que paso con cada respuesta (consultas, tarjeta hecha, cancelada o sin
+  // pulsar): va con el hilo para que la IA entienda «ese», «lo mismo con Rosa»
+  // o «no, a Carlos» (ver historialParaElModelo en src/ia/ordenes.ts).
+  function iaContextoDe(m) {
+    if (m.role !== 'assistant') return [];
+    var c = [];
+    (m.hechas || []).forEach(function (h) { c.push({ accion: h.accion, estado: h.tipo === 'consulta' ? 'consultada' : (h.ok ? 'hecha' : 'fallo'), parametros: h.parametros, resumen: String(h.resumen || '').slice(0, 500) }); });
+    (m.pendientes || []).forEach(function (p, i) {
+      var r = (m.resultados || [])[i];
+      var estado = m.estadoTarjeta === 'hecha' ? (r && !r.ok ? 'fallo' : 'hecha') : m.estadoTarjeta === 'cancelada' ? 'cancelada' : 'preparada';
+      c.push({ accion: p.accion, estado: estado, parametros: p.parametros, resumen: String((r && r.resumen) || p.descripcion || '').slice(0, 500) });
+    });
+    (m.elegir || []).forEach(function (e) { c.push({ accion: e.accion, estado: 'por_elegir', resumen: String(e.pregunta || '').slice(0, 500) }); });
+    return c.slice(0, 20);
+  }
   function iaOrdenar() {
     var texto = iaTexto.value.trim();
     if (!texto || iaEnviar.disabled) return;
     iaEnviar.disabled = true;
     iaTexto.value = '';
-    var historial = iaHistorial.filter(function (m) { return !m.error; }).map(function (m) { return { role: m.role, content: m.content }; }).slice(-10);
+    var historial = iaHistorial.filter(function (m) { return !m.error; }).map(function (m) { var c = iaContextoDe(m); return c.length ? { role: m.role, content: m.content, contexto: c } : { role: m.role, content: m.content }; }).slice(-10);
     iaHistorial.push({ role: 'user', content: texto });
     iaHistorial.push({ role: 'assistant', content: 'Un momento…', pensando: true });
     iaPintar();

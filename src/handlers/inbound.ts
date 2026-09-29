@@ -992,7 +992,7 @@ async function handleInboundMessageEnFila(
   const responderEntrega = (r: { responder?: string; botones?: Array<{ id: string; title: string }>; resultado?: string }) =>
     r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
-      : reply(r.responder ?? '', { traspasaSilencio: ['ubicacion', 'ubicacion_corregida'].includes(r.resultado ?? '') && ubiTraspasaSilencio() });
+      : reply(r.responder ?? '', { traspasaSilencio: (['ubicacion', 'ubicacion_corregida'].includes(r.resultado ?? '') && ubiTraspasaSilencio()) || r.resultado === 'ubicacion_tardia' });
 
   /**
    * La preventa del courier (cotizar envio, distritos, asesor) solo trabaja
