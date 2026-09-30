@@ -1,0 +1,112 @@
+services:
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      DATABASE_URL: postgres://wa:wa@postgres:5432/wa_locator
+      REDIS_URL: redis://redis:6379
+      # Opcionales: si no se definen, se pegan en /setup y quedan cifradas en la base.
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_BUSINESS_ACCOUNT_ID: ${WHATSAPP_BUSINESS_ACCOUNT_ID:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      GEO_BBOX: ${GEO_BBOX:-lima}
+      # El sistema de GSG: se puede dejar vacio y conectarlo desde Conexion.
+      GSG_URL: ${GSG_URL:-}
+      GSG_TOKEN: ${GSG_TOKEN:-}
+      # WAHA (conexion por QR con WAHA) va en su propio servicio, abajo. Aqui
+      # dentro no hay Docker, asi que el sistema no intenta levantarlo solo.
+      WAHA_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY:-cambia-esta-clave-de-waha}
+      WAHA_WEBHOOK_BASE_URL: http://app:3000
+      WAHA_AUTOARRANQUE: 'false'
+      ARCHIVE_DIR: /app/respaldos
+      # Las tiendas que se registran en /registro: su vinculacion de WhatsApp,
+      # sus adjuntos y sus secretos (su base va en su esquema de Postgres).
+      TIENDAS_DIR: /app/tiendas
+    volumes:
+      # Token de administracion y clave de cifrado: se generan en el primer
+      # arranque y deben sobrevivir a un recreate.
+      - appdata:/app/data
+      # La vinculacion del WhatsApp por QR: sin esto, cada recreate pide escanear.
+      - waauth:/app/.wa-auth
+      # Fotos, audios y documentos de los chats.
+      - wamedia:/app/.wa-media
+      # Los respaldos de conversaciones (Conversaciones guardadas).
+      - respaldos:/app/respaldos
+      # Una carpeta por cada tienda registrada (ver TIENDAS_DIR).
+      - tiendas:/app/tiendas
+      # La copia diaria de la base y de los respaldos (Que todo funcione):
+      # apunta aqui la carpeta desde la pantalla, o monta una carpeta del host.
+      - ${COPIAS_DIR:-copias}:/app/copias
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      waha:
+        condition: service_started
+    restart: unless-stopped
+
+  # https://waha.devlike.pro - WhatsApp por QR. Solo hace falta si en /setup se
+  # elige "Conectar con WAHA"; si no, esta parado sin gastar casi nada.
+  waha:
+    image: devlikeapro/waha
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY:-cambia-esta-clave-de-waha}
+      # WEBJS | NOWEB | GOWS | WPP. Vacio = el de la imagen.
+      WHATSAPP_DEFAULT_ENGINE: ${WAHA_ENGINE:-}
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_API_KEY:-cambia-esta-clave-de-waha}
+    ports:
+      # Solo desde esta maquina: el panel de WAHA en http://localhost:3001.
+      - '127.0.0.1:3001:3000'
+    volumes:
+      # La vinculacion del telefono: sin esto, cada recreate pide otro QR.
+      - wahasesiones:/app/.sessions
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wa
+      POSTGRES_PASSWORD: wa
+      POSTGRES_DB: wa_locator
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wa -d wa_locator']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  appdata:
+  waauth:
+  wamedia:
+  respaldos:
+  tiendas:
+  copias:
+  pgdata:
+  redisdata:
+  wahasesiones:

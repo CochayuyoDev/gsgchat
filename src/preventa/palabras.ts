@@ -1,0 +1,200 @@
+/**
+ * Si lo que escribió el cliente son palabras de verdad.
+ *
+ * No es un diccionario, y a propósito: un diccionario rechazaría "Sublime",
+ * "iPhone 15", "polos oversize" y la mitad de lo que la gente envía de verdad.
+ * Lo que se comprueba es la FORMA de la palabra, que es lo que separa
+ * "documentos" de "asdasd" sin tener que conocer ninguna de las dos.
+ *
+ * Las reglas salen de cómo se construye una palabra en español:
+ *
+ *  - lleva vocales, y no una cada seis letras;
+ *  - no repite la misma letra tres veces seguidas ("aaaa");
+ *  - no encadena cuatro consonantes ("sdfgh");
+ *  - no es una risa ni un relleno ("jajaja", "xd").
+ *
+ * Y se aplica con una regla generosa: basta UNA palabra plausible para que la
+ * respuesta valga. "una caja de documentos xd" es una respuesta legítima con
+ * una coletilla; rechazarla sería pedantear.
+ */
+
+const VOCALES = new Set(['a', 'e', 'i', 'o', 'u', 'y']);
+
+/**
+ * Tramos de teclado de tres letras.
+ *
+ * Los de cuatro ya los caza la regla de las consonantes seguidas; estos de
+ * tres son los que forman "asdasd" y "qweqwe", que por separado tienen
+ * vocales suficientes para colarse.
+ */
+const TRAMOS = [
+  'qwe', 'wer', 'ert', 'rty', 'tyu', 'yui', 'uio', 'iop',
+  'asd', 'sdf', 'dfg', 'fgh', 'ghj', 'hjk', 'jkl',
+  'zxc', 'xcv', 'cvb', 'vbn', 'bnm',
+];
+
+/**
+ * Si la palabra es un trozo corto repetido: "asdasd", "papapa".
+ *
+ * Se exige ademas poca vocal, porque en español hay palabras que son un
+ * trozo repetido y existen: papa, coco, bebe, mama. Sin esa condicion,
+ * rechazariamos la mitad de los apodos.
+ */
+function esTrozoRepetido(palabra: string, proporcionVocales: number): boolean {
+  if (proporcionVocales >= 0.4) return false;
+
+  for (const trozo of [2, 3, 4]) {
+    if (palabra.length < trozo * 2 || palabra.length % trozo !== 0) continue;
+    const primero = palabra.slice(0, trozo);
+    const partes = palabra.match(new RegExp(`.{${trozo}}`, 'g')) ?? [];
+    if (partes.every((x) => x === primero)) return true;
+  }
+
+  return false;
+}
+
+/** Risas y coletillas. Se entienden, pero no contestan nada. */
+const RELLENO = new Set([
+  'jaja', 'jajaja', 'jajajaja', 'jeje', 'jejeje', 'jiji', 'jojo', 'haha',
+  'hahaha', 'lol', 'xd', 'xdd', 'xddd', 'ajaja', 'jsjs', 'jsjsjs', 'ptm',
+  'aaa', 'eee', 'mmm', 'hmm', 'ummm', 'ajá', 'aja', 'uhm',
+]);
+
+const normaliza = (texto: string): string =>
+  texto
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Si esa palabra suelta podría existir.
+ *
+ * Los números pasan: "500mg", "2m", "15" son parte de lo que la gente envía.
+ */
+export function palabraPlausible(palabra: string): boolean {
+  if (!palabra) return false;
+  if (RELLENO.has(palabra)) return false;
+
+  // Con dígitos dentro, es una medida o un modelo: no se le pide estructura
+  // de palabra española a "65W" ni a "iPhone15".
+  if (/\d/.test(palabra)) return true;
+
+  if (palabra.length < 3) return false;
+
+  // La misma letra tres veces seguidas no ocurre en español.
+  if (/(.)\1\1/.test(palabra)) return false;
+
+  // Cuatro consonantes seguidas tampoco.
+  if (/[bcdfghjklmnpqrstvwxyzñ]{4,}/.test(palabra)) return false;
+
+  const vocales = [...palabra].filter((c) => VOCALES.has(c)).length;
+  if (vocales === 0) return false;
+
+  const proporcion = vocales / palabra.length;
+
+  // Un tramo de teclado con poca vocal: "asdasd" tiene "asd" dentro y dos
+  // vocales de seis. "casa" no tiene tramo, y "aeiou" no tiene poca vocal.
+  //
+  // Y el tramo tiene que ser BUENA PARTE de la palabra. Sin esa condicion,
+  // "roberto" se rechazaba -lleva "ert" dentro y tres vocales de siete- y el
+  // cliente que daba su nombre se llevaba un "no reconocí ese mensaje"; a
+  // partir de ahi la conversacion entera se corria un paso y el DNI acababa
+  // guardado como nombre.
+  const tramo = TRAMOS.find((t) => palabra.includes(t));
+  if (tramo && proporcion < 0.45 && tramo.length / palabra.length >= 0.5) return false;
+
+  if (esTrozoRepetido(palabra, proporcion)) return false;
+
+  // Una vocal cada cinco letras o menos. "documentos" tiene 4 de 10.
+  return proporcion >= 0.2 && proporcion <= 0.8;
+}
+
+/**
+ * Si el mensaje entero contiene al menos una palabra que podría existir.
+ *
+ * Es deliberadamente permisivo: basta una. El objetivo es cazar la respuesta
+ * que no dice NADA, no corregirle el castellano al cliente.
+ */
+export function pareceTextoReal(texto: string): boolean {
+  const palabras = normaliza(texto).split(' ').filter(Boolean);
+  if (!palabras.length) return false;
+  return palabras.some((p) => palabraPlausible(p));
+}
+
+/**
+ * Las palabras con las que se saluda, y nada mas.
+ *
+ * El nucleo son las que no pueden ser otra cosa; el resto es lo que las
+ * acompaña. Se separan porque un "que tal" suelto puede ser media pregunta,
+ * mientras que "hola" no es nunca otra cosa.
+ */
+const NUCLEO_SALUDO = new Set([
+  'hola', 'ola', 'alo', 'buenas', 'buenos', 'buen', 'hey', 'hi', 'hello',
+  'saludos', 'holi', 'wenas',
+]);
+
+const ACOMPANA_SALUDO = new Set([
+  'dia', 'dias', 'tarde', 'tardes', 'noche', 'noches', 'que', 'tal', 'muy',
+  'como', 'esta', 'estas', 'senor', 'senora', 'senorita', 'amigo', 'amiga',
+  'disculpe', 'estimado', 'estimada', 'por', 'favor', 'porfavor', 'gracias',
+  'todos', 'ahi', 'alli', 'usted', 'ud',
+]);
+
+/** "holaaa" y "buenaas" son el mismo saludo con enfasis. */
+const sinAlargar = (palabra: string): string => {
+  let corto = '';
+  for (const letra of palabra) if (letra !== corto[corto.length - 1]) corto += letra;
+  return corto;
+};
+
+/**
+ * Si el mensaje es solo un saludo.
+ *
+ * Hace falta distinguirlo porque un saludo NO es un mensaje incomprensible:
+ * contestar "no reconocí ese mensaje" a un "hola buenas" es la clase de
+ * respuesta que hace que el cliente deje de escribir. Y a mitad del
+ * cuestionario tampoco es una respuesta: sin esto, quien saluda cuando se le
+ * pregunta el nombre acaba registrado como "Hola".
+ */
+export function esSaludo(texto: string): boolean {
+  const palabras = normaliza(texto).split(' ').filter(Boolean).map(sinAlargar);
+
+  // Mas de cinco palabras ya no es un saludo: es un saludo Y algo mas, y ese
+  // algo mas es lo que hay que atender.
+  if (!palabras.length || palabras.length > 5) return false;
+  if (!palabras.some((p) => NUCLEO_SALUDO.has(p))) return false;
+
+  return palabras.every((p) => NUCLEO_SALUDO.has(p) || ACOMPANA_SALUDO.has(p));
+}
+
+/**
+ * "Gracias", "ok", "listo", "hasta luego".
+ *
+ * No es una respuesta ni un mensaje incomprensible: es el cliente cerrando
+ * el turno. Contestarle "no reconocí ese mensaje" -y encima repetirle la
+ * pregunta- es la forma mas rapida de que se arrepienta de haber escrito.
+ */
+const NUCLEO_CIERRE = new Set([
+  'gracias', 'grax', 'graciass', 'ok', 'oka', 'okey', 'okay', 'listo', 'vale',
+  'chevere', 'bacan', 'perfecto', 'genial', 'excelente', 'chau', 'adios',
+  'bye', 'nos vemos', 'saludos', 'amable',
+]);
+
+const ACOMPANA_CIERRE = new Set([
+  'muchas', 'mucho', 'muy', 'de', 'nada', 'ya', 'bueno', 'igual',
+  'igualmente', 'entonces', 'pues', 'hasta', 'luego', 'manana', 'mil',
+  'por', 'todo', 'la', 'el', 'info', 'informacion', 'dato', 'datos', 'si',
+]);
+
+export function esAgradecimiento(texto: string): boolean {
+  const palabras = normaliza(texto).split(' ').filter(Boolean).map(sinAlargar);
+
+  if (!palabras.length || palabras.length > 5) return false;
+  if (!palabras.some((p) => NUCLEO_CIERRE.has(p))) return false;
+
+  return palabras.every((p) => NUCLEO_CIERRE.has(p) || ACOMPANA_CIERRE.has(p));
+}

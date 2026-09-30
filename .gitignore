@@ -1,0 +1,37 @@
+node_modules/
+dist/
+*.log
+
+# Credenciales: nunca al repositorio.
+.env
+.env.*
+!.env.example
+# Clave de cifrado, token de admin y firma de los enlaces de rastreo.
+# Se genera sola en el primer arranque.
+.secrets.json
+
+# Vinculacion del cliente local de WhatsApp: son credenciales.
+.wa-auth/
+# Base embebida del arranque corto.
+.wa-data/
+# Fotos, audios y documentos que llegan por el chat.
+.wa-media/
+# Las tiendas registradas en la plataforma: sus bases, su vinculacion de
+# WhatsApp, sus adjuntos y SUS SECRETOS. Nunca al repositorio.
+.wa-tiendas/
+
+# Respaldos de conversacion (ver ARCHIVE_DIR)
+respaldos/
+.wa-demo-respaldos/
+saas/.env
+saas/instancias/
+saas/caddy/instancias/
+saas/Caddyfile
+
+# Salidas de tsc y vitest que se vuelcan a fichero en esta PC.
+tsc-out.txt
+vt-out.txt
+vt-diag.txt
+tsc-*.txt
+vt-*.txt
+*.log.err

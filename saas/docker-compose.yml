@@ -1,0 +1,49 @@
+# Lo comun del SaaS: el proxy (Caddy) y el Postgres. Las instancias de cada
+# tienda son proyectos compose aparte (saas/instancias/<slug>/compose.yml)
+# que se cuelgan de la misma red. Se levanta con `npm run saas:base`.
+name: wa-saas
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: wa-saas-caddy
+    ports:
+      - '${PUERTO_HTTP:-80}:${PUERTO_HTTP:-80}'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/instancias:/etc/caddy/instancias:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      # El panel maestro corre en el host.
+      - 'host.docker.internal:host-gateway'
+    networks: [wa-saas]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: wa-saas-postgres
+    environment:
+      POSTGRES_USER: wa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wa}
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wa -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [wa-saas]
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:
+
+networks:
+  wa-saas:
+    name: wa-saas

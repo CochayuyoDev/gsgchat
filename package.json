@@ -1,0 +1,52 @@
+{
+  "name": "gsgchat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GSGchat: WhatsApp para reparto y entregas (ubicacion, confirmacion, motorizados con hora de llegada) y ventas con IA, con guardas anti-bloqueo",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/src/main.js",
+    "migrate": "tsx src/db/migrate.ts",
+    "extract": "tsx src/cli.ts",
+    "templates:sync": "tsx src/templates/sync-cli.ts",
+    "templates:lint": "tsx src/templates/push-cli.ts --lint",
+    "templates:push": "tsx src/templates/push-cli.ts --push",
+    "demo": "tsx scripts/demo.ts",
+    "quick": "tsx scripts/quick.ts",
+    "saas:base": "tsx saas/base.ts",
+    "saas:alta": "tsx saas/alta.ts",
+    "saas:baja": "tsx saas/baja.ts",
+    "saas:estado": "tsx saas/estado.ts",
+    "saas:maestro": "tsx saas/maestro/server.ts",
+    "saas:prueba": "tsx saas/prueba.ts"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.0.1",
+    "@heyputer/puter.js": "^2.6.3",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "bullmq": "^5.34.5",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.2",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
