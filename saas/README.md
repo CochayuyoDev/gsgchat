@@ -2,8 +2,9 @@
 
 Cada cliente tiene **su** wa-locator: su contenedor, su base de datos, su
 Redis, su numero de WhatsApp y sus ficheros. Nada se comparte. Lo unico
-comun es Postgres (una base por tienda) y Caddy, que enruta por subdominio
-y saca el HTTPS solo.
+comun es MariaDB (una base por tienda, `wa_<slug>`, mas las de las tiendas
+que se registren dentro de esa instancia, `wa_<slug>_t_<id>`; el usuario `wa`
+solo puede con esas) y Caddy, que enruta por subdominio y saca el HTTPS solo.
 
 ```
 tienda1.wa.tuservicio.com  →  wa-tienda1  →  base wa_tienda1  →  su WhatsApp
@@ -22,9 +23,9 @@ maestro.wa.tuservicio.com  →  tu panel para dar de alta y de baja
 ## Puesta en marcha
 
 ```bash
-cp saas/.env.example saas/.env      # DOMINIO_BASE, POSTGRES_PASSWORD, MAESTRO_CLAVE
+cp saas/.env.example saas/.env      # DOMINIO_BASE, MARIADB_PASSWORD, MAESTRO_CLAVE
 npm install
-npm run saas:base                   # construye la imagen y levanta Caddy + Postgres
+npm run saas:base                   # construye la imagen y levanta Caddy + MariaDB
 npm run saas:alta -- tienda1 --nombre "Zapateria Lima"
 ```
 
@@ -127,7 +128,10 @@ pasen de unas 50, es momento de pensar en multi-tenant dentro del codigo.
 
 ## Copias de seguridad
 
-Lo que importa esta en tres sitios: la base de cada tienda (`pg_dump` en
-`wa-saas-postgres`), sus volumenes (`docker volume ls | grep wa-<slug>`) y
-`saas/instancias/`. Un `pg_dumpall` del contenedor de Postgres mas una copia
-de los volumenes lo cubre todo.
+Lo que importa esta en tres sitios: las bases de cada tienda (`wa_<slug>` y
+`wa_<slug>_*`, en `wa-saas-mariadb`), sus volumenes
+(`docker volume ls | grep wa-<slug>`) y `saas/instancias/`. Un
+`docker exec wa-saas-mariadb mariadb-dump -uroot -p --all-databases` mas una
+copia de los volumenes lo cubre todo. Ademas, cada instancia hace su copia
+diaria (con `mysqldump`, que trae la imagen) en la carpeta que se elija en
+*Que todo funcione*.

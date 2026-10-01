@@ -8,9 +8,6 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { readdir, readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
@@ -25,10 +22,11 @@ import { turnoDePreventa } from '../src/handlers/inbound.js';
 import { processChange } from '../src/whatsapp/webhook.js';
 import type { ChangeValue } from '../src/whatsapp/types.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, type FakeWhatsApp } from './fakes.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
 const ENV = {
   PUBLIC_BASE_URL: 'https://wa.ejemplo.pe',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -269,23 +267,16 @@ describe('/admin/stickers', () => {
 });
 
 describe('stickers en SQL', () => {
-  const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
-  let db: PGlite;
+  let base: BaseDePrueba;
   let pool: Pool;
 
   beforeAll(async () => {
-    db = new PGlite();
-    const query = async (text: string, params?: unknown[]) => {
-      const result = await db.query(text, params as never[], { parsers: { 20: (v: string) => Number.parseInt(v, 10) } });
-      return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
-    };
-    pool = { query, connect: async () => ({ query, release: () => undefined }), end: async () => db.close() } as unknown as Pool;
-    const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
-    for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
+    base = await baseDePrueba();
+    pool = base.pool;
   });
 
   afterAll(async () => {
-    await pool.end();
+    await base?.cerrar();
   });
 
   it('crea, lista ordenado por uso, actualiza por id y borra', async () => {

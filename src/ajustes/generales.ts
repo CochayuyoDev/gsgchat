@@ -247,7 +247,7 @@ export interface AjustesGeneralesRepo {
 
 export function createAjustesGeneralesRepo(pool: Pool): AjustesGeneralesRepo {
   async function leer(): Promise<AjustesGenerales> {
-    const { rows } = await pool.query<{ value: string }>('select value from settings where key = $1', [AJUSTES_GENERALES_KEY]);
+    const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [AJUSTES_GENERALES_KEY]);
     if (!rows[0]) return AJUSTES_GENERALES_VACIOS;
     try {
       const parsed = ajustesGeneralesPatchSchema.safeParse(JSON.parse(rows[0].value));
@@ -261,14 +261,14 @@ export function createAjustesGeneralesRepo(pool: Pool): AjustesGeneralesRepo {
     async set(patch) {
       const nuevo = fusionarAjustes(await leer(), patch);
       await pool.query(
-        `insert into settings (key, value, encrypted, updated_at) values ($1,$2,false,now())
-         on conflict (key) do update set value = excluded.value, updated_at = now()`,
+        `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
+         on duplicate key update value = values(value), updated_at = now(3)`,
         [AJUSTES_GENERALES_KEY, JSON.stringify(nuevo)],
       );
       return nuevo;
     },
     async reset() {
-      await pool.query('delete from settings where key = $1', [AJUSTES_GENERALES_KEY]);
+      await pool.query('delete from settings where `key` = $1', [AJUSTES_GENERALES_KEY]);
     },
   };
 }

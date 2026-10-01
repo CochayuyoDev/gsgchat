@@ -181,7 +181,7 @@ const SECRETOS: RegExp[] = [
   /\bEAA[A-Za-z0-9]{20,}\b/,
   /\bsk-[A-Za-z0-9_-]{16,}\b/,
   /\bBearer\s+[A-Za-z0-9._-]{12,}/i,
-  /\b(postgres(ql)?|redis):\/\/[^\s]+/i,
+  /\b(mysql|mariadb|postgres(ql)?|redis):\/\/[^\s]+/i,
   /\/(admin|panel|setup|login)(\/|#|\b)/,
   /\b(WHATSAPP_TOKEN|WHATSAPP_APP_SECRET|TRACKING_SECRET|DATABASE_URL|SETTINGS_KEY|ADMIN_TOKEN)\b/,
   /\b[0-9a-f]{32,}\b/i,

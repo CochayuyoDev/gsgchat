@@ -1,55 +1,35 @@
 /**
- * El SQL de la capa de salud, contra Postgres de verdad (PGlite): las
- * ventanas de entregas (resumen por fecha y ultimos N), la supresion por
- * contacto, las pausas de plantilla, el estado de riesgo del numero, los
- * destinatarios de campana y la bitacora de senales.
+ * El SQL de la capa de salud, contra MySQL/MariaDB de verdad (ver
+ * tests/mysql.ts): las ventanas de entregas (resumen por fecha y ultimos N),
+ * la supresion por contacto, las pausas de plantilla, el estado de riesgo
+ * del numero, los destinatarios de campana y la bitacora de senales.
  */
 
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
 import { correrGoteo } from '../src/campanas/goteo.js';
 import type { Sender } from '../src/outbound/sender.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
-
-function asPool(db: PGlite): Pool {
-  const query = async (text: string, params?: unknown[]) => {
-    const result = await db.query(text, params as never[], {
-      parsers: { 20: (v: string) => Number.parseInt(v, 10) },
-    });
-    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
-  };
-  const client = { query, release: () => undefined };
-  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
-}
-
-let db: PGlite;
+let b: BaseDePrueba;
 let pool: Pool;
 let repos: Repos;
 
 const HORA = 60 * 60 * 1000;
 
 beforeAll(async () => {
-  db = new PGlite();
-  pool = asPool(db);
-  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
-  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
+  b = await baseDePrueba();
+  pool = b.pool;
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await pool.end();
+  await b?.cerrar();
 });
 
 beforeEach(async () => {
-  await db.exec(
-    'delete from salud_eventos; delete from campaign_recipients; delete from deliveries; delete from campaigns; delete from messages; delete from contacts; delete from templates; delete from number_state; delete from settings;',
-  );
+  await b.vaciar();
 });
 
 async function entrega(phone: string, opts: { status: string; code?: string; bi?: boolean; sentAgoMs?: number; campaignId?: string | null; template?: string }) {
@@ -110,18 +90,23 @@ describe('ventanas de entregas', () => {
   });
 
   it('ultimo envio a un contacto, iniciados desde, por contacto y por plantilla', async () => {
+    // Con un servidor cargado cada consulta tarda: las fechas se comprueban
+    // dentro de la ventana en que corrio la prueba, no contra "ahora".
+    const inicio = Date.now();
     const a = await entrega('51912000020', { status: 'sent', sentAgoMs: 2 * HORA, template: 'a' });
     await entrega('51912000020', { status: 'failed', code: '131000', sentAgoMs: HORA, template: 'a' });
     await entrega('51912000021', { status: 'sent', template: 'b' });
 
     const ultimo = await repos.deliveries.ultimoEnvioA(a.contactId);
     // El fallido no cuenta como "ultimo envio" para la separacion.
-    expect(Math.abs(ultimo!.getTime() - (Date.now() - 2 * HORA))).toBeLessThan(5000);
+    expect(ultimo!.getTime()).toBeGreaterThanOrEqual(inicio - 2 * HORA - 1000);
+    expect(ultimo!.getTime()).toBeLessThanOrEqual(Date.now() - 2 * HORA + 1000);
     expect(await repos.deliveries.contarIniciadosDesde(new Date(Date.now() - 3 * HORA))).toBe(3);
     expect(await repos.deliveries.contarIniciadosAContactoDesde(a.contactId, new Date(Date.now() - 3 * HORA))).toBe(2);
     expect(await repos.deliveries.contarPlantillaDesde('a', new Date(Date.now() - 3 * HORA))).toBe(1);
     const ultimoIniciado = await repos.deliveries.ultimoIniciadoAt();
-    expect(Math.abs(ultimoIniciado!.getTime() - Date.now())).toBeLessThan(5000);
+    expect(ultimoIniciado!.getTime()).toBeGreaterThanOrEqual(inicio - 1000);
+    expect(ultimoIniciado!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
   });
 });
 
@@ -297,7 +282,7 @@ describe('campanas por goteo', () => {
 
   it('el canario entero pospuesto o bloqueado no tumba el tick del goteo', async () => {
     // Antes se preguntaba "quedan canarios" con una fecha infinita de JS
-    // (8.64e15), que Postgres rechaza: el tick reventaba en cada vuelta y
+    // (8.64e15), que la base rechaza: el tick reventaba en cada vuelta y
     // ninguna campana avanzaba mientras existiera una asi.
     const id = await repos.campaigns.create({ name: 'Promo', templateName: 'promo', templateLanguage: 'es', category: 'MARKETING', canario: 1, canarioEsperaMin: 30, ritmoPorHora: null });
     await repos.campaigns.agregarDestinatarios(id, [

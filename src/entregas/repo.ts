@@ -6,7 +6,7 @@
  * (un pin, un "si", un "40 minutos") es `servicio.ts`.
  */
 
-import type { Pool } from '../db/pool.js';
+import { esDuplicado, type Pool } from '../db/pool.js';
 
 export type EstadoUbicacion = 'no_hace_falta' | 'pendiente' | 'recibida';
 export type EstadoConfirmacion = 'no_hace_falta' | 'pendiente' | 'pedida' | 'confirmada' | 'rechazada';
@@ -142,7 +142,7 @@ export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio 
   return Object.keys(limpio).length ? limpio : null;
 }
 
-/** La columna jsonb llega como objeto (pg) o como texto (algunas versiones de PGlite). */
+/** La columna json llega como objeto (la capa de la base la convierte); por si acaso, tambien se acepta texto. */
 function datosEnvioDeValor(v: unknown): DatosEnvio | null {
   if (v === null || v === undefined) return null;
   if (typeof v === 'string') {
@@ -490,7 +490,7 @@ interface EventoRow {
   nombre?: string | null;
 }
 
-/** Un `date` de Postgres llega como Date (pg) o como string (PGlite): siempre AAAA-MM-DD. */
+/** Un `date` llega como 'AAAA-MM-DD' (ver db/pool.ts); si llegara un Date, igual: siempre AAAA-MM-DD. */
 export function diaTexto(v: string | Date | null): string | null {
   if (v === null || v === undefined) return null;
   if (v instanceof Date) return v.toISOString().slice(0, 10);
@@ -690,17 +690,23 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
   const repo: EntregasRepo = {
     // ------------------------------------------------------ motorizados
     async crearMotorizado(input) {
-      const { rows } = await pool.query<MotorizadoRow>(
-        `insert into motorizados (phone, nombre, placa, zona, estado)
-         values ($1,$2,$3,$4,$5)
-         on conflict (phone) do nothing
-         returning *`,
-        [input.phone, input.nombre, input.placa ?? null, input.zona ?? null, input.estado ?? 'activo'],
-      );
-      if (rows[0]) return { motorizado: motorizadoDeFila(rows[0]), nuevo: true };
-      const existente = await repo.motorizadoPorTelefono(input.phone);
-      if (!existente) return repo.crearMotorizado(input);
-      return { motorizado: existente, nuevo: false };
+      // Si el telefono ya existe no se toca nada: se devuelve el que habia.
+      // (Con `on duplicate key update` no se distingue bien "inserto" de "ya
+      // estaba": el driver cuenta 1 fila en los dos casos.)
+      try {
+        const r = await pool.query(
+          `insert into motorizados (phone, nombre, placa, zona, estado) values ($1,$2,$3,$4,$5)`,
+          [input.phone, input.nombre, input.placa ?? null, input.zona ?? null, input.estado ?? 'activo'],
+        );
+        const creado = await repo.motorizado(r.insertId);
+        if (!creado) throw new Error(`el motorizado ${r.insertId} recien creado ya no esta`);
+        return { motorizado: creado, nuevo: true };
+      } catch (error) {
+        if (!esDuplicado(error)) throw error;
+        const existente = await repo.motorizadoPorTelefono(input.phone);
+        if (!existente) throw error;
+        return { motorizado: existente, nuevo: false };
+      }
     },
     async motorizado(id) {
       const { rows } = await pool.query<MotorizadoRow>('select * from motorizados where id = $1', [id]);
@@ -731,25 +737,25 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       }
       if (!sets.length) return repo.motorizado(id);
       valores.push(id);
-      const { rows } = await pool.query<MotorizadoRow>(
-        `update motorizados set ${sets.join(', ')}, updated_at = now() where id = $${valores.length} returning *`,
-        valores,
-      );
-      return rows[0] ? motorizadoDeFila(rows[0]) : null;
+      await pool.query(`update motorizados set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
+      return repo.motorizado(id);
     },
     async quitarMotorizado(id) {
-      const { rows } = await pool.query<MotorizadoRow>('delete from motorizados where id = $1 returning *', [id]);
-      return rows[0] ? motorizadoDeFila(rows[0]) : null;
+      const antes = await repo.motorizado(id);
+      if (!antes) return null;
+      const r = await pool.query('delete from motorizados where id = $1', [id]);
+      return r.rowCount ? antes : null;
     },
 
     // --------------------------------------------------------- entregas
     async crearEntrega(input) {
-      const { rows } = await pool.query<EntregaRow>(
+      // Si (dia, referencia) ya existe no se toca nada: se devuelve la que habia.
+      let insertId: number;
+      try {
+        ({ insertId } = await pool.query(
         `insert into entregas
            (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio, envio_retenido_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)
-         on conflict (dia, referencia) do nothing
-         returning *`,
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
         [
           input.dia,
           input.referencia,
@@ -768,11 +774,16 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           datosEnvioLimpios(input.datosEnvio) ? JSON.stringify(datosEnvioLimpios(input.datosEnvio)) : null,
           input.envioRetenidoAt ?? null,
         ],
-      );
-      if (rows[0]) return { entrega: entregaDeFila(rows[0]), nueva: true };
-      const existente = await repo.porDiaYReferencia(input.dia, input.referencia);
-      if (!existente) return repo.crearEntrega(input);
-      return { entrega: existente, nueva: false };
+        ));
+      } catch (error) {
+        if (!esDuplicado(error)) throw error;
+        const existente = await repo.porDiaYReferencia(input.dia, input.referencia);
+        if (!existente) throw error;
+        return { entrega: existente, nueva: false };
+      }
+      const creada = await repo.entrega(insertId);
+      if (!creada) throw new Error(`la entrega ${insertId} recien creada ya no esta`);
+      return { entrega: creada, nueva: true };
     },
     async entrega(id) {
       const { rows } = await pool.query<EntregaRow>('select * from entregas where id = $1', [id]);
@@ -785,7 +796,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async vivaPorTelefono(phone) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
-          where phone = $1 and estado = any($2::text[])
+          where phone = $1 and estado in ($2)
           order by dia desc, id desc limit 1`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
@@ -794,7 +805,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async vivasPorTelefono(phone) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
-          where phone = $1 and estado = any($2::text[])
+          where phone = $1 and estado in ($2)
           order by dia asc, id asc`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
@@ -803,7 +814,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async puntualidadDeMotorizados(desde) {
       const { rows } = await pool.query<{ motorizado_id: number; entregas: string | number; desvio: string | number | null }>(
         `select motorizado_id, count(*) as entregas,
-                avg(extract(epoch from (entregada_at - llega_aprox_at)) / 60) as desvio
+                avg(timestampdiff(microsecond, llega_aprox_at, entregada_at) / 1e6 / 60) as desvio
            from entregas
           where estado = 'entregada' and motorizado_id is not null and llega_aprox_at is not null and entregada_at is not null
             and entregada_como <> 'cierre' and entregada_at >= $1
@@ -820,7 +831,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         condiciones.push(`dia = $${valores.length}`);
       } else {
         valores.push(ESTADOS_ENTREGA_VIVOS);
-        condiciones.push(`estado = any($${valores.length}::text[])`);
+        condiciones.push(`estado in ($${valores.length})`);
       }
       if (filtro.estado) {
         valores.push(filtro.estado);
@@ -828,13 +839,13 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       }
       if (filtro.estados?.length) {
         valores.push(filtro.estados);
-        condiciones.push(`estado = any($${valores.length}::text[])`);
+        condiciones.push(`estado in ($${valores.length})`);
       }
       if (filtro.q?.trim()) {
         valores.push(`%${filtro.q.trim().toLowerCase()}%`);
         condiciones.push(`(lower(coalesce(nombre,'')) like $${valores.length} or phone like $${valores.length} or lower(referencia) like $${valores.length})`);
       }
-      valores.push(filtro.limit ?? 500);
+      valores.push(Number(filtro.limit ?? 500));
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas where ${condiciones.join(' and ')} order by id asc limit $${valores.length}`,
         valores,
@@ -847,25 +858,23 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       for (const [clave, columna] of COLUMNAS_ENTREGA) {
         if (patch[clave] === undefined) continue;
         const v = patch[clave];
-        const esJson = clave === 'motorizadosDescartados' || clave === 'datosEnvio';
         valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : clave === 'datosEnvio' ? (v ? JSON.stringify(v) : null) : v);
-        sets.push(`${columna} = $${valores.length}${esJson ? '::jsonb' : ''}`);
+        sets.push(`${columna} = $${valores.length}`);
       }
       if (!sets.length) return repo.entrega(id);
       valores.push(id);
-      const { rows } = await pool.query<EntregaRow>(
-        `update entregas set ${sets.join(', ')}, updated_at = now() where id = $${valores.length} returning *`,
-        valores,
-      );
-      return rows[0] ? entregaDeFila(rows[0]) : null;
+      await pool.query(`update entregas set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
+      return repo.entrega(id);
     },
     async quitar(id) {
-      const { rows } = await pool.query<EntregaRow>('delete from entregas where id = $1 returning *', [id]);
-      return rows[0] ? entregaDeFila(rows[0]) : null;
+      const antes = await repo.entrega(id);
+      if (!antes) return null;
+      const r = await pool.query('delete from entregas where id = $1', [id]);
+      return r.rowCount ? antes : null;
     },
     async cifras(dia) {
       const { rows } = await pool.query<{ estado: string; n: number | string }>(
-        'select estado, count(*)::int as n from entregas where dia = $1 group by estado',
+        'select estado, count(*) as n from entregas where dia = $1 group by estado',
         [dia],
       );
       const cifras: Record<string, number> = {};
@@ -883,7 +892,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by coalesce(confirmacion_proximo_at, created_at) asc, id asc
           limit $2`,
-        [ahora, limite],
+        [ahora, Number(limite)],
       );
       return rows.map(entregaDeFila);
     },
@@ -897,7 +906,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by prioridad desc, id asc
           limit $2`,
-        [ahora, limite],
+        [ahora, Number(limite)],
       );
       return rows.map(entregaDeFila);
     },
@@ -908,7 +917,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
             and ubicacion_estado = 'pendiente' and ubicacion_propuesta_at is not null and ubicacion_propuesta_at <= $1 and lote_id is null
           order by id asc
           limit $2`,
-        [antesDe, limite],
+        [antesDe, Number(limite)],
       );
       return rows.map(entregaDeFila);
     },
@@ -916,13 +925,13 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where envio_retenido_at is null and ((estado = 'lista')
-             or (estado = 'incidencia' and incidencia = 'sin_motorizado' and lat is not null and updated_at <= $1::timestamptz - interval '2 minutes')
+             or (estado = 'incidencia' and incidencia = 'sin_motorizado' and lat is not null and updated_at <= cast($1 as datetime(3)) - interval 2 minute)
              or (estado = 'incidencia' and incidencia = 'consulta_ajena' and motorizado_sin_ubicacion_at is not null and ubicacion_estado = 'pendiente' and motorizado_id is null)
              or (estado = 'esperando_motorizado' and motorizado_estado = 'enviado' and motorizado_proximo_at is not null and motorizado_proximo_at <= $1)
              or (estado = 'esperando_motorizado' and motorizado_estado = 'respondio' and aviso_enviado_at is null and motorizado_proximo_at is not null and motorizado_proximo_at <= $1))
           order by (prioridad = 'urgente') desc, coalesce(motorizado_proximo_at, updated_at) asc, id asc
           limit $2`,
-        [ahora, limite],
+        [ahora, Number(limite)],
       );
       return rows.map(entregaDeFila);
     },
@@ -930,7 +939,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where motorizado_id = $1 and estado = 'esperando_motorizado' and motorizado_estado = 'enviado'
-          order by motorizado_enviado_at desc nulls last, id desc`,
+          order by motorizado_enviado_at is null, motorizado_enviado_at desc, id desc`,
         [motorizadoId],
       );
       return rows.map(entregaDeFila);
@@ -939,7 +948,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where motorizado_id = $1 and estado = 'avisada'
-          order by aviso_enviado_at desc nulls last, id desc`,
+          order by aviso_enviado_at is null, aviso_enviado_at desc, id desc`,
         [motorizadoId],
       );
       return rows.map(entregaDeFila);
@@ -948,7 +957,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where motorizado_id = $1 and estado in ('esperando_motorizado', 'avisada')
-          order by (prioridad = 'urgente') desc, motorizado_enviado_at asc nulls last, id asc`,
+          order by (prioridad = 'urgente') desc, motorizado_enviado_at is null, motorizado_enviado_at asc, id asc`,
         [motorizadoId],
       );
       return rows.map(entregaDeFila);
@@ -956,16 +965,16 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async vivasDeDiasAnteriores(diaHoy, limite) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
-          where dia < $1 and estado = any($2::text[])
+          where dia < $1 and estado in ($2)
           order by dia asc, id asc limit $3`,
-        [diaHoy, ESTADOS_ENTREGA_VIVOS, limite],
+        [diaHoy, ESTADOS_ENTREGA_VIVOS, Number(limite)],
       );
       return rows.map(entregaDeFila);
     },
     async pausadoPorTelefono(phone) {
       const { rows } = await pool.query<{ n: number | string }>(
-        `select count(*)::int as n from entregas
-          where phone = $1 and (mensajes_pausados_at is not null or pin_propuesto_at is not null) and estado = any($2::text[])`,
+        `select count(*) as n from entregas
+          where phone = $1 and (mensajes_pausados_at is not null or pin_propuesto_at is not null) and estado in ($2)`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
       return Number(rows[0]?.n ?? 0) > 0;
@@ -976,7 +985,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           where phone = $1 and dia = $2 and ubicacion_estado = 'recibida'
             and lat is not null and lng is not null
             and coalesce(ubicacion_fuente, '') not in ('', 'gsg')
-          order by ubicacion_at desc nulls last, id desc
+          order by ubicacion_at is null, ubicacion_at desc, id desc
           limit 1`,
         [phone, dia],
       );
@@ -992,7 +1001,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async eventos(entregaId, limite = 100) {
       const { rows } = await pool.query<EventoRow>(
         'select * from entregas_eventos where entrega_id = $1 order by id asc limit $2',
-        [entregaId, limite],
+        [entregaId, Number(limite)],
       );
       return rows.map(eventoDeFila);
     },
@@ -1001,7 +1010,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         `select ev.*, e.referencia, e.phone, e.nombre
            from entregas_eventos ev join entregas e on e.id = ev.entrega_id
           order by ev.id desc limit $1`,
-        [limite],
+        [Number(limite)],
       );
       return rows.map((r) => ({ ...eventoDeFila(r), referencia: r.referencia!, phone: r.phone!, nombre: r.nombre ?? null }));
     },

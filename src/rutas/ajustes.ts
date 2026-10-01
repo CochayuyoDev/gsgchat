@@ -132,7 +132,7 @@ export interface AjustesRepo {
 
 export function createAjustesRepo(pool: Pool): AjustesRepo {
   async function leer(): Promise<Partial<AjustesRutas>> {
-    const { rows } = await pool.query<{ value: string }>('select value from settings where key = $1', [AJUSTES_KEY]);
+    const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [AJUSTES_KEY]);
     if (!rows[0]) return {};
     try {
       return JSON.parse(rows[0].value) as Partial<AjustesRutas>;
@@ -156,14 +156,14 @@ export function createAjustesRepo(pool: Pool): AjustesRepo {
       const actual = fusionar(porDefecto, await leer());
       const nuevo = fusionar(actual, patch as Partial<AjustesRutas>);
       await pool.query(
-        `insert into settings (key, value, encrypted, updated_at) values ($1,$2,false,now())
-         on conflict (key) do update set value = excluded.value, updated_at = now()`,
+        `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
+         on duplicate key update value = values(value), updated_at = now(3)`,
         [AJUSTES_KEY, JSON.stringify(nuevo)],
       );
       return nuevo;
     },
     async reset() {
-      await pool.query('delete from settings where key = $1', [AJUSTES_KEY]);
+      await pool.query('delete from settings where `key` = $1', [AJUSTES_KEY]);
     },
   };
 }

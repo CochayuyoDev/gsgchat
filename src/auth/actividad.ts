@@ -388,8 +388,8 @@ export function createActividadRepo(pool: Pool): ActividadRepo {
         where.push(`lower(usuario) like $${params.length}`);
       }
       const filtro = where.length ? `where ${where.join(' and ')}` : '';
-      const { rows: total } = await pool.query<{ total: number }>(`select count(*)::int as total from actividad ${filtro}`, params);
-      params.push(query.limit, query.offset);
+      const { rows: total } = await pool.query<{ total: number }>(`select count(*) as total from actividad ${filtro}`, params);
+      params.push(Number(query.limit), Number(query.offset));
       const { rows } = await pool.query<Row>(
         `select * from actividad ${filtro} order by at desc, id desc limit $${params.length - 1} offset $${params.length}`,
         params,

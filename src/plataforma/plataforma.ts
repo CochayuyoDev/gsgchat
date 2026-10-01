@@ -4,8 +4,11 @@
  * Cada registro en /registro es una tienda NUEVA, con su base, su WhatsApp,
  * sus carpetas y sus secretos (ver tienda.ts). Aqui se decide:
  *
- *   - donde vive cada tienda (una carpeta por tienda bajo `raiz`, y en
- *     Postgres un esquema tienda_<id>);
+ *   - donde vive cada tienda: una carpeta por tienda bajo `raiz` (WhatsApp,
+ *     adjuntos, secretos) y una BASE propia en el servidor MySQL/MariaDB.
+ *     Con DATABASE_URL=mysql://.../gsgchat: el directorio en
+ *     `gsgchat_plataforma`, cada tienda en `gsgchat_t_<id>` y las bases
+ *     listas de reserva en `gsgchat_banco_*` (ver src/db/bases.ts);
  *   - que tiendas estan cargadas (todas las activas se cargan al arrancar:
  *     su WhatsApp tiene que recibir mensajes aunque nadie haya entrado);
  *   - a que tienda va cada usuario al entrar (el directorio);
@@ -18,15 +21,17 @@
  * va todo lo que llega sin decir tienda (sus webhooks, sus claves de API).
  */
 
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { rm, rename } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { bootstrapSecrets } from '../settings/crypto.js';
 import { claveAceptable, usuarioAceptable } from '../auth/usuarios.js';
-import { asPool, firmaDeMigraciones, openPglite } from '../db/pglite.js';
-import { createPool, esquemaSeguro, type Pool } from '../db/pool.js';
+import { baseDeLaUrl, createPool, esDuplicado, nombreDeBaseSeguro } from '../db/pool.js';
+import { crearBaseSiNoExiste } from '../db/migrate.js';
+import { borrarBase, rellenarBanco, type OpcionesBanco } from '../db/bases.js';
+import { explicarErrorDeBase } from '../runtime.js';
 import { RUBROS } from '../web/login-page.js';
 import { crearDirectorio, type Directorio, type TiendaRegistrada } from './directorio.js';
 import { entornoDeTienda, lugarDeTienda, pareceSlug, slugDe } from './entorno.js';
@@ -38,7 +43,7 @@ import type { DirectorioUsuarios } from '../auth/routes.js';
 export type OpcionesPrincipal = Omit<OpcionesTienda, 'id' | 'slug' | 'primeraCuentaRol' | 'directorio'>;
 
 export interface OpcionesPlataforma {
-  /** Carpeta de las tiendas nuevas (una subcarpeta por tienda) y del directorio en PGlite. */
+  /** Carpeta de las tiendas nuevas: una subcarpeta por tienda (WhatsApp, adjuntos, secretos). */
   raiz: string;
   /** La URL publica del servidor, sin barra al final. La de cada tienda es esta + /tienda/<slug>. */
   publicBaseUrl: string;
@@ -46,8 +51,16 @@ export interface OpcionesPlataforma {
   proceso: NodeJS.ProcessEnv;
   /** Lo que el arranque fuerza en todas las tiendas nuevas (p. ej. simular entrantes en el arranque corto). */
   extraTiendas?: NodeJS.ProcessEnv;
-  /** Donde van las bases: carpetas PGlite o esquemas de un Postgres. */
-  base: { tipo: 'pglite' } | { tipo: 'postgres'; url: string };
+  /**
+   * El servidor MySQL/MariaDB (la DATABASE_URL de siempre). Cada tienda nueva
+   * va en una base propia de ese servidor: `<base de la URL>_t_<id>`.
+   */
+  base: { url: string };
+  /**
+   * El banco de bases listas (por defecto, prefijo `<base de la URL>_` y una
+   * de reserva). Las pruebas pasan el suyo, sin reserva.
+   */
+  banco?: OpcionesBanco;
   redisUrl?: string | null;
   /** La tienda de siempre, si esta instalacion ya tenia una. */
   principal?: OpcionesPrincipal | null;
@@ -95,6 +108,24 @@ export interface Plataforma {
 
 export const ID_PRINCIPAL = 'principal';
 
+/**
+ * Los nombres de las bases de la plataforma, a partir de la de la URL
+ * (mysql://.../gsgchat): directorio `gsgchat_plataforma`, tiendas
+ * `gsgchat_t_<id>` y banco `gsgchat_banco_*`.
+ */
+export function basesDeLaPlataforma(url: string): { raiz: string; directorio: string; tienda: (id: string) => string; prefijoBanco: string } {
+  const deLaUrl = baseDeLaUrl(url);
+  if (!deLaUrl) throw new Error('DATABASE_URL no dice qué base usar: termínala con /nombre_de_la_base (por ejemplo mysql://root@127.0.0.1:3306/gsgchat).');
+  // Lo que va delante de cada base: minusculas, numeros y _, y corto (un nombre de base son 64 letras como mucho).
+  const raiz = deLaUrl.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40) || 'gsgchat';
+  return {
+    raiz,
+    directorio: nombreDeBaseSeguro(`${raiz}_plataforma`),
+    tienda: (id) => nombreDeBaseSeguro(`${raiz}_t_${id}`),
+    prefijoBanco: `${raiz}_`,
+  };
+}
+
 /** Lo que manda el formulario "Crear mi tienda". */
 export const registroSchema = z.object({
   tienda: z.string().trim().min(1, 'Escribe el nombre de tu tienda.').max(80, 'El nombre de la tienda es demasiado largo (80 letras como mucho).'),
@@ -123,19 +154,15 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
   mkdirSync(o.raiz, { recursive: true });
 
   // --- el directorio ---------------------------------------------------------
-  let poolDirectorio: Pool;
-  let cerrarDirectorio: () => Promise<void>;
-  if (o.base.tipo === 'pglite') {
-    const h = await openPgliteSinMigraciones(path.join(o.raiz, 'plataforma'));
-    poolDirectorio = h.pool;
-    cerrarDirectorio = h.cerrar;
-  } else {
-    const admin = createPool(o.base.url);
-    await admin.query('create schema if not exists plataforma');
-    await admin.end();
-    poolDirectorio = createPool(o.base.url, 'plataforma');
-    cerrarDirectorio = () => poolDirectorio.end();
+  const nombres = basesDeLaPlataforma(o.base.url);
+  const banco: OpcionesBanco = o.banco ?? { url: o.base.url, prefijo: nombres.prefijoBanco, reserva: 1 };
+  try {
+    await crearBaseSiNoExiste(o.base.url, nombres.directorio);
+  } catch (error) {
+    throw new Error(`No se pudo preparar la base de la plataforma (${nombres.directorio}): ${explicarErrorDeBase(error, o.base.url)}`);
   }
+  const poolDirectorio = createPool(o.base.url, nombres.directorio);
+  const cerrarDirectorio = () => poolDirectorio.end();
   const directorio = await crearDirectorio(poolDirectorio);
 
   const vivas = new Map<string, Promise<TiendaViva>>();
@@ -146,46 +173,28 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
     liberar: (usuario) => directorio.liberar(usuario, tiendaId),
   });
 
-  const esquemaDe = (id: string) => esquemaSeguro(`tienda_${id}`);
-
-  // --- el molde ----------------------------------------------------------------
-  // Una base PGlite nueva tarda ~8 s en aplicar todas las migraciones; abrir
-  // una ya migrada, 0,2 s. Se prepara una vez (en segundo plano, al arrancar)
-  // y cada tienda nueva empieza COPIANDOLA: quien se registra no espera. Si
-  // las migraciones cambian, la huella no cuadra y se rehace. El molde no
-  // tiene datos de nadie: es la base vacia recien migrada.
-  const MOLDE = path.join(o.raiz, '.molde');
-  let moldeListo: Promise<boolean> = Promise.resolve(false);
-  async function prepararMolde(): Promise<boolean> {
-    if (o.base.tipo !== 'pglite') return false;
-    const firma = await firmaDeMigraciones();
-    const ficheroFirma = path.join(MOLDE, 'firma.txt');
-    if (existsSync(ficheroFirma) && readFileSync(ficheroFirma, 'utf8') === firma) return true;
-    const temporal = `${MOLDE}-${randomBytes(3).toString('hex')}`;
-    // PGlite crea su carpeta, pero no la de encima.
-    mkdirSync(temporal, { recursive: true });
-    const h = await openPglite(path.join(temporal, 'datos'));
-    await h.db.close();
-    writeFileSync(path.join(temporal, 'firma.txt'), firma);
-    await rm(MOLDE, { recursive: true, force: true });
-    await rename(temporal, MOLDE);
-    return true;
-  }
-  /** Deja la base de una tienda nueva copiada del molde (si esta listo y la tienda aun no tiene base). */
-  async function desdeElMolde(datos: string): Promise<void> {
-    if (existsSync(datos)) return;
-    const listo = await moldeListo.catch(() => false);
-    if (listo && existsSync(path.join(MOLDE, 'datos'))) cpSync(path.join(MOLDE, 'datos'), datos, { recursive: true });
+  // --- el banco de bases listas -------------------------------------------------
+  // Crear las ~50 tablas de una tienda es DDL: en un disco lento, mas de un
+  // minuto. Se tiene de reserva una base ya migrada y vacia; la tienda nueva
+  // se queda con sus tablas al instante (ver src/db/bases.ts) y el banco se
+  // rellena en segundo plano: al arrancar y despues de cada registro.
+  function rellenar(): void {
+    if (!(banco.reserva ?? 1)) return;
+    rellenarBanco(banco).catch((error: unknown) => {
+      log(`no se pudo dejar lista una base de reserva para las tiendas nuevas (se crearan de cero): ${explicarErrorDeBase(error, banco.url)}`);
+    });
   }
 
   function opcionesDe(t: TiendaRegistrada, primeraCuentaRol: 'superadmin' | 'admin'): OpcionesTienda {
     if (t.principal && o.principal) {
-      return { ...o.principal, id: t.id, slug: t.slug, primeraCuentaRol: 'superadmin', directorio: directorioDe(t.id) };
+      // La principal usa su base de siempre (la de la URL); si aun no existe, sale del banco.
+      const base: BaseDeTienda = { ...o.principal.base, banco: o.principal.base.banco ?? banco };
+      return { ...o.principal, base, id: t.id, slug: t.slug, primeraCuentaRol: 'superadmin', directorio: directorioDe(t.id) };
     }
     const lugar = lugarDeTienda(o.raiz, t.id);
     for (const dir of [lugar.dir, lugar.medios, lugar.respaldos]) mkdirSync(dir, { recursive: true });
     const secretos = bootstrapSecrets(lugar.dir);
-    const base: BaseDeTienda = o.base.tipo === 'pglite' ? { tipo: 'pglite', dir: lugar.datos } : { tipo: 'postgres', url: o.base.url, esquema: esquemaDe(t.id) };
+    const base: BaseDeTienda = { url: o.base.url, base: nombres.tienda(t.id), banco };
     const publicBaseUrl = `${o.publicBaseUrl.replace(/\/+$/, '')}/tienda/${t.slug}`;
     return {
       id: t.id,
@@ -194,7 +203,7 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
         o.proceso,
         {
           publicBaseUrl,
-          databaseUrl: o.base.tipo === 'pglite' ? `pglite://${lugar.datos}` : o.base.url,
+          databaseUrl: urlConBase(o.base.url, base.base!),
           trackingSecret: secretos.trackingSecret,
           archiveDir: lugar.respaldos,
           nombre: t.nombre,
@@ -253,11 +262,9 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
     await viva?.parar().catch(() => undefined);
     await directorio.borrar(id).catch(() => undefined);
     await rm(lugarDeTienda(o.raiz, id).dir, { recursive: true, force: true }).catch(() => undefined);
-    if (o.base.tipo === 'postgres') {
-      const admin = createPool(o.base.url);
-      await admin.query(`drop schema if exists ${esquemaDe(id)} cascade`).catch(() => undefined);
-      await admin.end();
-    }
+    await borrarBase(o.base.url, nombres.tienda(id)).catch((error: unknown) => {
+      log(`no se pudo borrar la base ${nombres.tienda(id)} de un registro a medias: ${explicarErrorDeBase(error, o.base.url)}`);
+    });
   }
 
   async function registrar(datos: unknown, ip: string): Promise<ResultadoRegistro> {
@@ -313,7 +320,7 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
       try {
         registrada = await directorio.crear({ id, slug: await slugUnico(d.tienda), nombre: d.tienda, rubro: d.rubro ?? null, ip });
       } catch (error) {
-        if ((error as { code?: string }).code !== '23505' && !/duplicate key|unique/i.test(String((error as Error).message))) throw error;
+        if (!esDuplicado(error)) throw error;
       }
     }
     if (!registrada) return { ok: false, status: 409, error: 'Justo se estaba creando otra tienda con ese nombre. Vuelve a intentarlo.' };
@@ -324,7 +331,6 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
 
     let viva: TiendaViva | null = null;
     try {
-      if (o.base.tipo === 'pglite') await desdeElMolde(lugarDeTienda(o.raiz, id).datos);
       viva = await cargar(registrada, primeraCuentaRol);
       const tienda = viva;
       return await enTienda(tienda.contexto, async () => {
@@ -347,12 +353,14 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
           throw new ErrorDeRegistro(alta.statusCode, motivo ?? 'No se pudo crear la cuenta de la tienda.');
         }
         log(`tienda nueva: ${registrada.slug} (${registrada.nombre}) por ${usuario}`);
+        // Se gasto la base de reserva: se prepara otra para el siguiente.
+        rellenar();
         return { ok: true, status: 200, tienda: registrada, setCookie: cookiesDe(alta.headers['set-cookie']), next: '/panel' };
       });
     } catch (error) {
       await deshacer(id, viva);
       if (error instanceof ErrorDeRegistro) return { ok: false, status: error.status >= 500 ? 500 : 400, error: error.message };
-      log(`no se pudo crear la tienda ${registrada.slug}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      log(`no se pudo crear la tienda ${registrada.slug}: ${explicarErrorDeBase(error, o.base.url)}${error instanceof Error && error.stack ? `\n${error.stack}` : ''}`);
       return { ok: false, status: 500, error: 'No se pudo crear tu tienda por un fallo del servidor. Vuelve a intentarlo en un momento.' };
     }
   }
@@ -395,11 +403,8 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
   return {
     directorio,
     arrancar: async () => {
-      // El molde se prepara mientras tanto; el primer registro lo espera si hace falta.
-      moldeListo = prepararMolde().catch((error: unknown) => {
-        log(`no se pudo preparar el molde de las tiendas nuevas (se crearan de cero): ${error instanceof Error ? error.message : String(error)}`);
-        return false;
-      });
+      // La base de reserva se prepara mientras tanto (si ya la hay, no hace nada).
+      rellenar();
       // La tienda de siempre: se apunta en el directorio la primera vez. Si
       // no tiene ninguna cuenta (una carpeta de datos de una prueba, una base
       // vacia), no es una tienda de nadie: se aparca y la primera que se
@@ -444,7 +449,8 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
     usuarioLibre: async (usuario) => !(await directorio.tiendaDe(usuario)),
     cuantas: async () => (await directorio.tiendas()).length,
     parar: async () => {
-      await moldeListo.catch(() => false);
+      // No se espera al relleno del banco (puede tardar un minuto): una base a
+      // medio preparar no cuenta como lista, y la siguiente vez se hace otra.
       const todas = await Promise.allSettled([...vivas.values()]);
       for (const r of todas) if (r.status === 'fulfilled') await r.value.parar();
       vivas.clear();
@@ -467,10 +473,9 @@ function cookiesDe(cabecera: string | string[] | undefined): string[] {
   return Array.isArray(cabecera) ? cabecera : [cabecera];
 }
 
-/** El directorio en su propia carpeta PGlite, sin las migraciones de una tienda. */
-async function openPgliteSinMigraciones(dir: string): Promise<{ pool: Pool; cerrar: () => Promise<void> }> {
-  const { PGlite } = await import('@electric-sql/pglite');
-  const db = new PGlite(dir);
-  await db.waitReady;
-  return { pool: asPool(db), cerrar: () => db.close() };
+/** La misma URL apuntando a otra base del servidor. */
+function urlConBase(url: string, base: string): string {
+  const u = new URL(url.trim().replace(/^mariadb:/i, 'mysql:'));
+  u.pathname = `/${base}`;
+  return u.toString();
 }

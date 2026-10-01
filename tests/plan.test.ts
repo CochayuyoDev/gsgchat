@@ -20,7 +20,7 @@ import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SET
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',

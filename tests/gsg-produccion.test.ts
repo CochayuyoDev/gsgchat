@@ -5,8 +5,8 @@
  *   pedir la ubicacion por WhatsApp -> el cliente la manda -> sale YA al
  *   endpoint del CRM de GSG (POST /ubicaciones, con su token).
  *
- * Todo es lo de produccion (la tienda entera de `armarTienda`: base PGlite
- * real, motores y despachador reales, la conexion con GSG guardada desde la
+ * Todo es lo de produccion (la tienda entera de `armarTienda`: base MySQL de
+ * prueba real, motores y despachador reales, la conexion con GSG guardada desde la
  * pantalla de Conexion, cifrada) salvo dos cosas: el WhatsApp (sin telefono
  * no hay QR que escanear) y el CRM de GSG, que aqui es un servidor HTTP de
  * verdad, en otro puerto, que apunta todo lo que le llega.
@@ -21,6 +21,7 @@ import type { AddressInfo } from 'node:net';
 import { armarTienda, type OpcionesTienda, type TiendaViva } from '../src/plataforma/tienda.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
 // ------------------------------------------------------ el CRM de GSG, falso
 
@@ -87,6 +88,7 @@ const esperar = async (cond: () => boolean | Promise<boolean>, ms = 60_000, que 
 
 describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)', () => {
   let raiz: string;
+  let b: BaseDePrueba;
   let crm: ReturnType<typeof crmDeGsg>;
   let urlCrm: string;
   let tienda: TiendaViva;
@@ -105,7 +107,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
   };
   /** La cola hacia GSG tal como esta en la base de la tienda. */
   const cola = async () =>
-    (await tienda.pglite!.db.query<{ estado: string; payload: Record<string, unknown>; ultimo_error: string | null; externo_id: string | null }>('select * from rutas_reportes order by id')).rows;
+    (await tienda.pool.query<{ estado: string; payload: Record<string, unknown>; ultimo_error: string | null; externo_id: string | null }>('select * from rutas_reportes order by id')).rows;
   const enCola = async (referencia: string) => (await cola()).filter((r) => r.payload?.referencia === referencia);
   const aEste = (phone: string) => wa.sent.filter((m) => m.to === phone);
   const textosA = (phone: string) => aEste(phone).map((m) => String(m.body ?? m.texto ?? '')).join('\n---\n');
@@ -115,6 +117,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     await new Promise<void>((r) => crm.server.listen(0, '127.0.0.1', () => r()));
     urlCrm = `http://127.0.0.1:${(crm.server.address() as AddressInfo).port}/api`;
 
+    b = await baseDePrueba();
     raiz = mkdtempSync(path.join(tmpdir(), 'gsg-produccion-'));
     const secretos = bootstrapSecrets(raiz);
     wa = createFakeWhatsApp();
@@ -123,7 +126,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
       slug: 'gsg',
       env: {
         PUBLIC_BASE_URL: 'https://chat.gsg.pe',
-        DATABASE_URL: `pglite://${path.join(raiz, 'datos')}`,
+        DATABASE_URL: b.url,
         TRACKING_SECRET: secretos.trackingSecret,
         WHATSAPP_PROVIDER: 'local',
         BUSINESS_NAME: 'GSG',
@@ -140,7 +143,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
         RUTAS_PAUSA_MAX_SEG: '1',
       } as NodeJS.ProcessEnv,
       secretos,
-      base: { tipo: 'pglite', dir: path.join(raiz, 'datos') },
+      base: { url: b.url },
       authDir: path.join(raiz, 'auth'),
       mediaDir: path.join(raiz, 'medios'),
       carpetaCopias: path.join(raiz, 'copias'),
@@ -156,10 +159,11 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     // Horario del reparto abierto todo el dia (lo que se guarda desde la pantalla).
     const aj = await api('POST', '/admin/rutas/ajustes', { horaInicio: 0, horaFin: 24, pausaMinSegundos: 1, pausaMaxSegundos: 1 });
     expect(aj.status).toBe(200);
-  }, 120_000);
+  }, 3_600_000);
 
   afterAll(async () => {
     await tienda?.parar();
+    await b?.cerrar();
     await new Promise<void>((r) => crm?.server.close(() => r()));
     rmSync(raiz, { recursive: true, force: true });
   });

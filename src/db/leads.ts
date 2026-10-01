@@ -183,8 +183,8 @@ const toLead = (r: Row): Lead => ({
   entregaLng: r.entrega_lng,
   servicio: r.servicio,
   contenido: r.contenido,
-  // numeric llega como cadena para no perder precision; la ficha lo quiere
-  // como numero para poder sumarlo y compararlo.
+  // decimal: el pool ya lo da como numero; el Number() es por si llegara
+  // como cadena, la ficha lo quiere sumable y comparable.
   pesoKg: r.peso_kg == null ? null : Number(r.peso_kg),
   fragil: r.fragil,
   cuando: r.cuando,
@@ -244,17 +244,14 @@ export function createLeadsRepo(pool: Pool): LeadsRepo {
     get,
 
     async ensure(contactId, nombre) {
-      const { rows } = await pool.query<Row>(
+      await pool.query(
         `insert into leads (contact_id, nombre)
          values ($1, $2)
-         on conflict (contact_id) do update
-            -- El do update es lo que hace que devuelva la fila existente; de
-            -- paso rellena el nombre si la ficha no tenia ninguno.
-            set nombre = coalesce(leads.nombre, excluded.nombre)
-         returning *`,
+         -- Si la ficha ya existia, de paso rellena el nombre si no tenia ninguno.
+         on duplicate key update nombre = coalesce(nombre, values(nombre))`,
         [contactId, nombre ?? null],
       );
-      return toLead(rows[0]!);
+      return (await get(contactId))!;
     },
 
     async update(contactId, patch) {
@@ -268,26 +265,25 @@ export function createLeadsRepo(pool: Pool): LeadsRepo {
         const columna = COLUMNAS[campo];
         if (!columna) continue;
         const valor = patch[campo] ?? null;
-        // Una lista va a una columna jsonb: pg serializa los arrays como
-        // arrays de Postgres ({"a","b"}), que no es JSON, y la base lo rechaza.
+        // Una lista va a una columna json: el pool expandiria el array a
+        // `?, ?, ?` (es lo que sirve para `in (...)`), asi que se manda como texto JSON.
         valores.push(Array.isArray(valor) ? JSON.stringify(valor) : valor);
-        asignaciones.push(`${columna} = $${valores.length}${campo === 'ultimasOpciones' ? '::jsonb' : ''}`);
+        asignaciones.push(`${columna} = $${valores.length}`);
       }
 
       if (!asignaciones.length) return (await get(contactId))!;
 
-      const { rows } = await pool.query<Row>(
-        `update leads set ${asignaciones.join(', ')}, updated_at = now()
-          where contact_id = $1
-          returning *`,
+      await pool.query(
+        `update leads set ${asignaciones.join(', ')}, updated_at = now(3)
+          where contact_id = $1`,
         valores,
       );
-      return toLead(rows[0]!);
+      return (await get(contactId))!;
     },
 
     async list(query) {
       const where = query.estado ? 'where l.estado = $3' : '';
-      const params: unknown[] = [query.limit, query.offset];
+      const params: unknown[] = [Number(query.limit), Number(query.offset)];
       if (query.estado) params.push(query.estado);
 
       const { rows } = await pool.query<Row>(
@@ -310,8 +306,8 @@ export function createLeadsRepo(pool: Pool): LeadsRepo {
     async marcarEnviada(contactId, crmId) {
       await pool.query(
         `update leads
-            set estado = 'enviado', crm_id = $2, enviado_at = now(),
-                ultimo_error = null, updated_at = now()
+            set estado = 'enviado', crm_id = $2, enviado_at = now(3),
+                ultimo_error = null, updated_at = now(3)
           where contact_id = $1`,
         [contactId, crmId],
       );
@@ -321,14 +317,14 @@ export function createLeadsRepo(pool: Pool): LeadsRepo {
       // El estado NO cambia: una ficha que fallo al enviarse sigue calificada
       // y tiene que volver a intentarse, no quedarse en un limbo propio.
       await pool.query(
-        `update leads set ultimo_error = $2, updated_at = now() where contact_id = $1`,
+        `update leads set ultimo_error = $2, updated_at = now(3) where contact_id = $1`,
         [contactId, error.slice(0, 500)],
       );
     },
 
     async contarPorEstado() {
       const { rows } = await pool.query<{ estado: string; total: number }>(
-        'select estado, count(*)::int as total from leads group by estado',
+        'select estado, count(*) as total from leads group by estado',
       );
       return Object.fromEntries(rows.map((r) => [r.estado, Number(r.total)]));
     },

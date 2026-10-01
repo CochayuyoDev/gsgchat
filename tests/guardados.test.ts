@@ -5,16 +5,14 @@
  * notas, papelera de 30 dias, cerrar en masa las de los pedidos terminados
  * hoy, los adjuntos copiados junto al respaldo, el enlace publico de
  * evidencia, las estadisticas, aprender de lo guardado, borrar todo lo de un
- * cliente e importar un chat del telefono. Contra Postgres de verdad
- * (PGlite), ficheros de verdad y el servidor real.
+ * cliente e importar un chat del telefono. Contra MySQL/MariaDB de verdad
+ * (tests/mysql.ts), ficheros de verdad y el servidor real.
  */
 
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
@@ -37,6 +35,7 @@ import {
   resumirRespaldo,
   revisarRespaldos,
   sacarDePapelera,
+  taparNombre,
   taparTelefono,
   type ArchiveDeps,
 } from '../src/archive/service.js';
@@ -50,19 +49,9 @@ import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, CLAVE_API_PRUEBA } from './fakes.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
-
-function asPool(db: PGlite): Pool {
-  const query = async (text: string, params?: unknown[]) => {
-    const result = await db.query(text, params as never[], { parsers: { 20: (v: string) => Number.parseInt(v, 10) } });
-    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
-  };
-  const client = { query, release: () => undefined };
-  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
-}
-
-let db: PGlite;
+let b: BaseDePrueba;
 let pool: Pool;
 let repos: Repos;
 let dir: string;
@@ -72,24 +61,34 @@ let mediaDir: string;
 const JPEG = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=', 'base64');
 
 beforeAll(async () => {
-  db = new PGlite();
-  pool = asPool(db);
-  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
-  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
+  b = await baseDePrueba();
+  pool = b.pool;
   repos = createRepos(pool);
   dir = await mkdtemp(path.join(tmpdir(), 'gsgchat-guardados-'));
   mediaDir = await mkdtemp(path.join(tmpdir(), 'gsgchat-media-'));
 });
 
 afterAll(async () => {
-  await pool.end();
+  await b?.cerrar();
   await rm(dir, { recursive: true, force: true });
   await rm(mediaDir, { recursive: true, force: true });
 });
 
 beforeEach(async () => {
-  await db.exec('delete from chat_archives; delete from messages; delete from contacts;');
+  for (const tabla of ['chat_archives', 'messages', 'contacts']) await pool.query(`delete from ${tabla}`);
 });
+
+/**
+ * El resumen se escribe despues de guardar, sin hacer esperar: se espera a
+ * que aparezca (con una base cargada puede tardar mas de unos milisegundos).
+ */
+async function esperarResumen(id: number): Promise<void> {
+  const hasta = Date.now() + 120_000;
+  while (Date.now() < hasta) {
+    if ((await repos.archives.get(id))?.resumen) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
 
 type Linea = [dir: 'in' | 'out', texto: string] | { direction: 'in' | 'out'; body?: string | null; kind?: Message['kind']; payload?: Record<string, unknown> | null; enSeg?: number };
 
@@ -123,8 +122,8 @@ describe('guardar una conversacion deja lo que hace falta para encontrarla', () 
     ]);
     const salida = await archivarConversacion({ repos, dir, pedidoDe: async () => 'P-1001' }, c.id, 'manual', 'Ali (ali)');
     expect(salida.ok).toBe(true);
-    // El resumen se pone despues, sin hacer esperar: se le da un momento.
-    await new Promise((r) => setTimeout(r, 50));
+    // El resumen se pone despues, sin hacer esperar: se espera a que este.
+    await esperarResumen(salida.archive!.id);
     const a = (await repos.archives.get(salida.archive!.id))!;
     expect(a.cerradoPor).toBe('Ali (ali)');
     expect(a.pedido).toBe('P-1001');
@@ -218,7 +217,7 @@ describe('adjuntos: las fotos y los audios se copian junto al respaldo', () => {
     expect((await repos.archives.stats()).conAdjuntos).toBe(1);
     // Papelera + purga: la carpeta se va con el fichero.
     await moverAPapelera(deps, a.id);
-    await db.exec(`update chat_archives set deleted_at = now() - interval '31 days' where id = ${a.id}`);
+    await pool.query('update chat_archives set deleted_at = now(3) - interval 31 day where id = $1', [a.id]);
     expect(await purgarPapelera(deps)).toBe(1);
     expect(existsSync(carpeta)).toBe(false);
     expect(existsSync(rutaDe(dir, a.file))).toBe(false);
@@ -229,6 +228,21 @@ describe('adjuntos: las fotos y los audios se copian junto al respaldo', () => {
     const salida = await archivarConversacion({ repos, dir }, c.id, 'manual');
     expect(salida.ok).toBe(true);
     expect(salida.archive!.adjuntos[0]).toMatchObject({ id: 'aaaaaaaaaaaaaaaaaaaaaaaa.jpg', kind: 'image', omitido: 'este arranque no guarda ficheros del chat' });
+  });
+});
+
+describe('el resumen automatico no pisa el de una persona', () => {
+  it('si alguien le puso resumen mientras la IA pensaba, se queda el suyo', async () => {
+    const c = await conversacion('51987000050', 'Rosa', [['in', 'hola'], ['out', 'buenas']]);
+    const salida = await archivarConversacion({ repos, dir }, c.id, 'manual');
+    await esperarResumen(salida.archive!.id);
+    await repos.archives.update(salida.archive!.id, { resumen: 'Lo puso Ali.' });
+    // Lo que escribe el resumen automatico al terminar, llegue cuando llegue.
+    const despues = await repos.archives.ponerResumenSiFalta(salida.archive!.id, 'Rosa escribió 1 mensaje.', ['otro']);
+    expect(despues!.resumen).toBe('Lo puso Ali.');
+    // Y a una sin resumen si se lo pone.
+    await repos.archives.update(salida.archive!.id, { resumen: null });
+    expect((await repos.archives.ponerResumenSiFalta(salida.archive!.id, 'Rosa escribió 1 mensaje.', ['otro']))!.resumen).toBe('Rosa escribió 1 mensaje.');
   });
 });
 
@@ -277,6 +291,10 @@ describe('exportar', () => {
     expect(txt.texto).toContain('[correo]');
     expect(txt.texto).not.toContain('987 654 321');
     expect(txt.texto).toContain('Copia sin datos personales.');
+    // El nombre tampoco se cuela por dentro de los mensajes ni del resumen.
+    expect(txt.texto).toContain('Anotado, M.');
+    expect(txt.texto).not.toMatch(/María|Flores/);
+    expect(taparNombre('María Flores escribió; la de María', 'María Flores')).toBe('M. F. escribió; la de M.');
     const html = (await exportarHtml(deps, salida.archive!.id, { anonimo: true }))!;
     expect(html.html).not.toContain('51987000003');
     expect(html.html).toContain('M. F.');
@@ -304,7 +322,7 @@ describe('la papelera', () => {
     await moverAPapelera(deps, id);
     // Todavia no toca (30 dias).
     expect(await purgarPapelera(deps)).toBe(0);
-    await db.exec(`update chat_archives set deleted_at = now() - interval '31 days' where id = ${id}`);
+    await pool.query('update chat_archives set deleted_at = now(3) - interval 31 day where id = $1', [id]);
     expect(await purgarPapelera(deps)).toBe(1);
     expect(await repos.archives.get(id)).toBeNull();
     expect(existsSync(rutaDe(dir, salida.archive!.file))).toBe(false);
@@ -351,8 +369,8 @@ describe('estadisticas', () => {
     expect(lunes).toHaveLength(8);
     expect(lunes.every((l) => /^\d{4}-\d{2}-\d{2}$/.test(l))).toBe(true);
     // Una de esta semana (ya lo es), una de hace 2 semanas, una de hace 10 (fuera del tramo).
-    await db.exec(`update chat_archives set created_at = created_at - interval '14 days' where id = ${r2.archive!.id}`);
-    await db.exec(`update chat_archives set created_at = created_at - interval '70 days' where id = ${r3.archive!.id}`);
+    await pool.query('update chat_archives set created_at = created_at - interval 14 day where id = $1', [r2.archive!.id]);
+    await pool.query('update chat_archives set created_at = created_at - interval 70 day where id = $1', [r3.archive!.id]);
     const s = await repos.archives.stats();
     expect(s.porSemana).toHaveLength(8);
     expect(s.porSemana.map((w) => w.semana)).toEqual(lunes);
@@ -464,7 +482,7 @@ describe('importar un chat exportado del telefono', () => {
     expect(leido.messages).toHaveLength(5);
     expect(leido.messages[2]!.kind).toBe('image');
     expect((await repos.archives.list({ texto: 'fachada', limit: 5, offset: 0 })).map((x) => x.id)).toEqual([a.id]);
-    await new Promise((res) => setTimeout(res, 50));
+    await esperarResumen(a.id);
     expect((await repos.archives.get(a.id))!.resumen).toMatch(/Ana Quispe escribió 2 mensajes \(5 en total\)/);
     // Sin telefono no hay contacto al que colgarla.
     expect((await importarChatDeWhatsApp(deps, { texto: ANDROID, telefono: '12' })).ok).toBe(false);
@@ -475,7 +493,7 @@ describe('importar un chat exportado del telefono', () => {
 describe('las rutas de la pantalla', () => {
   const cola: OutboundQueue = { async enqueue() {}, async enqueueMany(j) { return j.length; }, async pause() {}, async resume() {}, async counts() { return {}; }, async close() {} };
   const SECRETO = 'x'.repeat(40);
-  const config = loadConfig({ PUBLIC_BASE_URL: 'http://localhost:3000', DATABASE_URL: 'postgres://x/y', WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: 'PNID', WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA', WHATSAPP_APP_SECRET: 's', WHATSAPP_VERIFY_TOKEN: 'v', TRACKING_SECRET: SECRETO, BUSINESS_NAME: 'GSG' } as NodeJS.ProcessEnv);
+  const config = loadConfig({ PUBLIC_BASE_URL: 'http://localhost:3000', DATABASE_URL: 'mysql://x/y', WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: 'PNID', WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA', WHATSAPP_APP_SECRET: 's', WHATSAPP_VERIFY_TOKEN: 'v', TRACKING_SECRET: SECRETO, BUSINESS_NAME: 'GSG' } as NodeJS.ProcessEnv);
 
   async function servidor(extra: { entrenamiento?: unknown; sinMedia?: boolean } = {}) {
     const fakes = createFakeRepos();

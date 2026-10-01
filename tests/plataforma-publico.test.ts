@@ -4,7 +4,7 @@
  * y dos registros a la vez con el mismo nombre de tienda.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,13 @@ import { origenPermitido, origenDe } from '../src/web-visitantes/canal.js';
 import { embedScript } from '../src/embed/embed-js.js';
 import { viewerPage } from '../src/tracking/page.js';
 import { crearPlataforma } from '../src/plataforma/plataforma.js';
+import { bancoDePrueba, devolverBasesDePrueba, urlConBase } from './mysql.js';
+
+/** Las bases de este fichero (directorio, tiendas y su banco) empiezan por aqui y vuelven al banco al terminar. */
+const PREFIJO = 'gsgchat_prueba_pub_';
+const BANCO = bancoDePrueba(PREFIJO);
+beforeAll(() => devolverBasesDePrueba(BANCO), 3_600_000);
+afterAll(() => devolverBasesDePrueba(BANCO), 3_600_000);
 
 const BASE = 'https://chat.gsg.pe/tienda/bodega-rosa';
 
@@ -48,7 +55,7 @@ describe('lo publico de una tienda con prefijo', () => {
 describe('dos registros a la vez con el mismo nombre de tienda', () => {
   it('los dos salen bien, cada uno con su slug', async () => {
     const raiz = mkdtempSync(path.join(tmpdir(), 'plataforma-carrera-'));
-    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: { tipo: 'pglite' }, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), log: () => undefined });
+    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: { url: urlConBase(`${PREFIJO}carrera`) }, banco: BANCO, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), log: () => undefined });
     try {
       await p.arrancar();
       const datos = (usuario: string) => ({ tienda: 'Bodega Rosa', nombre: 'Rosa', usuario, clave: 'clave-12345' });
@@ -64,5 +71,5 @@ describe('dos registros a la vez con el mismo nombre de tienda', () => {
       await p.parar();
       rmSync(raiz, { recursive: true, force: true });
     }
-  }, 180_000);
+  }, 3_600_000);
 });

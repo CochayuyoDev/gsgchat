@@ -10,15 +10,14 @@ con plantilla, ubicacion en vivo y extraccion de coordenadas de cualquier link
 de mapa. Con las guardas anti-bloqueo cableadas para no quemar el numero.
 
 ```bash
-docker compose up -d          # app + postgres + redis, todo junto
+docker compose up -d          # app + mariadb + redis, todo junto
 ```
 
-O sin Docker:
+O sin Docker, con un MySQL 8 o MariaDB 10.4+ (en Windows, el de XAMPP):
 
 ```bash
-docker compose up -d postgres redis
 npm install
-npm run dev                   # aplica migraciones y arranca
+npm run dev                   # crea las tablas y arranca (DATABASE_URL=mysql://root@127.0.0.1:3306/gsgchat)
 ```
 
 Abre `http://localhost:3000` y entra en `/login`: la primera vez te pide crear
@@ -28,13 +27,15 @@ ningun token que pegar.
 **El camino corto, sin montar nada:**
 
 ```bash
-npm run quick                 # servidor real + WhatsApp real, base embebida
+npm run quick                 # servidor real + WhatsApp real, contra el MySQL de XAMPP
 ```
 
-Abre `/setup`, elige "Escanear el QR y ya", escanea desde el telefono y estas
-dentro. Ni Postgres, ni Redis, ni Docker, ni cuenta de Meta. La vinculacion se
-guarda en `.wa-auth` y se reutiliza al reiniciar; los datos no, que para eso
-esta el arranque de verdad.
+Con el MySQL de XAMPP encendido (panel de XAMPP → «Start» en MySQL), abre
+`/setup`, elige "Escanear el QR y ya", escanea desde el telefono y estas
+dentro. Ni Redis, ni Docker, ni cuenta de Meta: la base es
+`mysql://root@127.0.0.1:3306/gsgchat` (otra con `DATABASE_URL`) y las tablas
+se crean solas. Si MySQL no contesta, el arranque dice que hacer. La
+vinculacion se guarda en `.wa-auth` y se reutiliza al reiniciar.
 
 Sin credenciales de Meta se puede ver todo funcionando con datos de ejemplo:
 
@@ -740,12 +741,16 @@ Cuatro cajas con semáforo, cada una con sus ajustes dentro (clave de settings
    lo que necesitan los pedidos vivos (ubicación e insistencias, confirmación y
    repreguntas, pin y pregunta al motorizado, aviso, gracias) más el envío
    automático, frente a `salud.snapshot().ritmo.cupoHoy`; dice qué recortar.
-4. **Copia diaria** (`src/respaldo/`, 03:00): PGlite → `dumpDataDir` o Postgres →
-   `pg_dump -Fc`, más `ARCHIVE_DIR` en un tar propio (`src/respaldo/tar.ts`), a
-   la carpeta elegida (por defecto `OneDrive\GSGchat-copias` o
-   `Documentos\GSGchat-copias`), conserva 14, descarga y «Cómo restaurar»;
-   `.wa-auth` no se copia a propósito. En Docker, montar como volúmenes
-   `.wa-data`, `respaldos` y la carpeta de copias.
+4. **Copia diaria** (`src/respaldo/`, 03:00): la base de la tienda →
+   `base-AAAA-MM-DD.sql.gz`, con `mysqldump` si está (`MYSQLDUMP_PATH`, el
+   PATH o `C:\xampp\mysql\bin`; la imagen de Docker lo trae) y si no con un
+   volcado propio en JS (`volcarBaseEnJs`: cada tabla con su `create table` y
+   sus filas en INSERT, en streaming); más `ARCHIVE_DIR` en un tar propio
+   (`src/respaldo/tar.ts`), a la carpeta elegida (por defecto
+   `OneDrive\GSGchat-copias` o `Documentos\GSGchat-copias`), conserva 14,
+   descarga y «Cómo restaurar» (phpMyAdmin → Importar acepta el .sql.gz tal
+   cual, o `mysql`); `.wa-auth` no se copia a propósito. En Docker, montar como
+   volúmenes `respaldos` y la carpeta de copias.
 
 Pruebas: `tests/fiabilidad-vigilante.test.ts`, `tests/fiabilidad-humo.test.ts`,
 `tests/respaldo.test.ts`, `tests/fiabilidad-rutas.test.ts`.
@@ -914,7 +919,7 @@ suyo (`src/plataforma/tienda.ts`):
 
 | Qué | Dónde vive, por tienda |
 |---|---|
-| Base de datos (clientes, productos, chats, ajustes, usuarios…) | PGlite: su carpeta `TIENDAS_DIR/<id>/datos`. Postgres: su esquema `tienda_<id>` (el `search_path` apunta a él; las consultas no nombran esquema) |
+| Base de datos (clientes, productos, chats, ajustes, usuarios…) | su propia base en el servidor MySQL/MariaDB: con `DATABASE_URL=mysql://…/gsgchat`, `gsgchat_t_<id>` (la conexión de la tienda apunta a ella; las consultas no nombran base) |
 | WhatsApp | su propia sesión (`crearSesionLocal`), su carpeta de vinculación `TIENDAS_DIR/<id>/vinculacion` y su QR; con la API de Meta, SUS credenciales cifradas en su base |
 | Adjuntos, respaldos, copias | `TIENDAS_DIR/<id>/medios`, `…/respaldos`, `<carpeta de copias>/<slug>` |
 | Secretos | su `.secrets.json`: cifra sus credenciales y firma sus cookies y enlaces (una sesión de una tienda no vale en otra) |
@@ -923,7 +928,7 @@ suyo (`src/plataforma/tienda.ts`):
 | Motores (reparto, entregas, salud, resúmenes…) | los suyos, con sus ajustes |
 
 Lo único compartido es el **directorio** (`src/plataforma/directorio.ts`, en
-`TIENDAS_DIR/plataforma` o el esquema `plataforma`): qué tiendas hay y de qué
+la base `gsgchat_plataforma`): qué tiendas hay y de qué
 tienda es cada usuario. Se entra solo con usuario y contraseña, así que un
 usuario es de UNA tienda (no se repite ni al registrarse ni al crear cuentas
 del equipo); la contraseña la comprueba la tienda, no el directorio.
@@ -940,7 +945,7 @@ del equipo); la contraseña la comprueba la tienda, no el directorio.
 4. La cookie `gsg_tienda` que se pone al entrar: el panel de quien entró. No
    da acceso a nada por sí sola (la sesión la firma cada tienda con su secreto).
 5. Lo demás, a la **tienda principal**: la instalación de antes de la
-   plataforma (`.wa-data`, `.wa-auth`, `.wa-media`, la base `public`), con sus
+   plataforma (la base de la URL, `gsgchat`; `.wa-auth`, `.wa-media`), con sus
    cuentas, su número y sus integraciones de siempre, sin cambiar ninguna URL.
 
 **Roles.** La primera tienda de una plataforma recién puesta (sin principal)
@@ -948,14 +953,17 @@ es la del dueño: su cuenta nace superadministradora. Las demás tiendas nacen
 con su dueño como **administrador de su tienda** y nada más (no ven Tiendas ni
 la membresía del dueño). La tienda principal conserva su superadministrador.
 
-**Arranques.** `npm run quick` y `npm start` levantan la plataforma. Con
-PGlite, una base nueva tarda ~8 s en migrarse: la plataforma prepara al
-arrancar un **molde** ya migrado (`TIENDAS_DIR/.molde`, se rehace solo si
-cambian las migraciones) y cada tienda nueva empieza copiándolo (~2 s el
-registro entero). Registros: 5 por IP y hora. Todas las tiendas activas se
-cargan al arrancar (su WhatsApp tiene que recibir aunque nadie haya entrado);
-con muchas tiendas, mejor Postgres (un esquema por tienda) que una carpeta
-PGlite por tienda en memoria.
+**Arranques.** `npm run quick` y `npm start` levantan la plataforma. Crear
+las ~50 tablas de una tienda es DDL (en un disco lento, más de un minuto): la
+plataforma tiene de reserva un **banco** de bases ya migradas y vacías
+(`gsgchat_banco_*`, `src/db/bases.ts`; se rehacen solas si cambian las
+migraciones), la tienda nueva se queda las tablas de una con un `rename table`
+instantáneo, y el banco se rellena en segundo plano al arrancar y tras cada
+registro. Borrar una tienda a medio crear es `drop database` de la suya, así
+que el usuario de `DATABASE_URL` necesita permiso para crear y borrar bases
+(``GRANT ALL ON `gsgchat%`.* TO 'usuario'@'%'``); si no lo tiene, el error lo dice. Registros:
+5 por IP y hora. Todas las tiendas activas se cargan al arrancar (su WhatsApp
+tiene que recibir aunque nadie haya entrado).
 
 Pruebas: `tests/plataforma.test.ts` (registro, aislamiento de datos, de
 sesión y de entorno, cookies cambiadas a mano, usuarios únicos, prefijos,
@@ -1870,8 +1878,8 @@ sus propios datos**, no se comparte nada: una instancia por tienda, con su
 contenedor, su base y su subdominio, y Caddy delante sacando el HTTPS.
 
 ```bash
-cp saas/.env.example saas/.env          # DOMINIO_BASE=wa.tuservicio.com, POSTGRES_PASSWORD, MAESTRO_CLAVE
-npm run saas:base                       # imagen + Caddy + Postgres
+cp saas/.env.example saas/.env          # DOMINIO_BASE=wa.tuservicio.com, MARIADB_PASSWORD, MAESTRO_CLAVE
+npm run saas:base                       # imagen + Caddy + MariaDB
 npm run saas:alta -- tienda1 --nombre "Zapateria Lima"
 # → https://tienda1.wa.tuservicio.com/login
 ```
@@ -2070,7 +2078,7 @@ webhook que pegan WooCommerce y Shopify, con su firma).
 
 ## Puesta en marcha
 
-### El camino corto para GSG (un VPS, sin Postgres)
+### El camino corto para GSG (un VPS con MySQL o MariaDB)
 
 La lista de lo que le falta hacer al dueño para salir a producción, en
 palabras simples, está en **`docs/PASO-A-PRODUCCION.md`**; y en el panel,
@@ -2080,20 +2088,24 @@ supervisor, modo prueba, agente operativo, IA, motorizados).
 
 Lo mínimo para que GSG lo use de verdad, en ese orden:
 
-1. En el servidor: Node 22, `git clone`, `npm ci`, `npm run build`.
+1. En el servidor: Node 22, MySQL 8 o MariaDB 10.4+ (con `mysqldump` para la
+   copia diaria: viene con el cliente), `git clone`, `npm ci`, `npm run build`.
 2. Un `.env` con lo justo (el resto tiene valor por defecto):
 
    ```bash
    PORT=3000
    PUBLIC_BASE_URL=https://chat.gsg.pe      # la dirección pública, con https
-   DATABASE_URL=pglite://./.wa-data          # la base embebida; sin Postgres
+   DATABASE_URL=mysql://gsgchat:CLAVE@127.0.0.1:3306/gsgchat
    ARCHIVE_DIR=respaldos                     # respaldos de conversaciones
    GEO_BBOX=lima
    ```
 
-   Con `DATABASE_URL=pglite://<carpeta>` el servidor abre la base embebida y
-   aplica las migraciones solo (igual que `npm run quick`); `REDIS_URL` puede
-   no existir: la cola va en memoria y lo dice al arrancar.
+   El servidor crea la base y sus tablas solo al arrancar. Cada tienda que se
+   registre va en su propia base (`gsgchat_t_<id>`), así que el usuario tiene
+   que poder crearlas y borrarlas:
+   ``CREATE USER 'gsgchat'@'localhost' IDENTIFIED BY 'CLAVE'; GRANT ALL ON `gsgchat%`.* TO 'gsgchat'@'localhost';``
+   (y en la URL, `127.0.0.1` o `localhost` según cómo lo crees). `REDIS_URL`
+   puede no existir: la cola va en memoria y lo dice al arrancar.
 3. `node dist/src/main.js` (con `pm2` o un `systemd` para que vuelva solo).
 4. HTTPS con Caddy delante (Meta y los enlaces públicos lo exigen):
 
@@ -2121,12 +2133,12 @@ Lo mínimo para que GSG lo use de verdad, en ese orden:
 
 Lo que debe sobrevivir a un reinicio o a una reinstalación, todo dentro de la
 carpeta del proyecto: `.secrets.json`/`data` (secretos), `.wa-auth` (la
-vinculación del QR), `.wa-data` (la base, con PGlite), `.wa-media` (adjuntos),
-`respaldos` (conversaciones guardadas), `.wa-tiendas` (las tiendas
-registradas: su base, su vinculacion, sus adjuntos y sus secretos) y la
+vinculación del QR), `.wa-media` (adjuntos), `respaldos` (conversaciones
+guardadas), `.wa-tiendas` (las tiendas registradas: su vinculacion, sus
+adjuntos y sus secretos), las bases `gsgchat*` del servidor MySQL y la
 carpeta de copias elegida en *Que todo funcione* (mejor si la sincroniza Drive u OneDrive, o está en otro disco).
 
-### Con Docker (Postgres y Redis incluidos)
+### Con Docker (MariaDB y Redis incluidos)
 
 1. `docker compose up -d`. Arranca aunque no haya credenciales y aplica las
    migraciones solo. El compose monta volúmenes para `data`, `.wa-auth`,
@@ -2137,7 +2149,7 @@ carpeta de copias elegida en *Que todo funcione* (mejor si la sincroniza Drive u
 2. Abre `/registro` y crea tu tienda (la primera de la plataforma es la del
    dueño). Las cuentas de tu equipo se crean desde la seccion Usuarios del
    panel; otro negocio se registra en `/registro` y tiene su tienda aparte
-   (su esquema `tienda_<id>` en Postgres y su carpeta en el volumen `tiendas`).
+   (su base `gsgchat_t_<id>` en MariaDB y su carpeta en el volumen `tiendas`).
 3. Conecta la cuenta en `/setup`: el boton de Facebook, o pegando los tres datos.
 4. `npm run templates:push` (o el boton del panel) y esperar aprobacion.
 5. `npm run templates:sync`.
@@ -2156,9 +2168,11 @@ la pagina de rastreo.
 ## Tests
 
 1055 tests. La mayoria no necesita nada montado: los repositorios tienen dobles
-en memoria (`tests/fakes.ts`). Los de `tests/postgres.test.ts` corren el SQL de
-verdad —migraciones incluidas— sobre PGlite, que es Postgres compilado a
-WebAssembly, asi que tampoco hacen falta Docker ni un servidor.
+en memoria (`tests/fakes.ts`). Las que corren el SQL de verdad —migraciones
+incluidas— van contra un MySQL/MariaDB (por defecto el de esta maquina, root
+sin clave en 127.0.0.1:3306; otro con `GSG_TEST_MYSQL_URL`) y solo crean o
+borran bases que empiezan por `gsgchat_prueba_` (`tests/mysql.ts`). Las bases
+se reutilizan entre ejecuciones: la primera vez se crean las tablas y tarda.
 
 ```bash
 npm test

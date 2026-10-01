@@ -1,5 +1,5 @@
 /**
- * Levanta (o actualiza) lo comun del SaaS: Caddy y Postgres, y construye la
+ * Levanta (o actualiza) lo comun del SaaS: Caddy y MariaDB, y construye la
  * imagen de la app. Se puede repetir cuando se quiera; es idempotente.
  *
  *   npm run saas:base

@@ -9,7 +9,7 @@
  */
 
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import type { Pool } from '../db/pool.js';
+import { nuevoId, type Pool } from '../db/pool.js';
 
 /**
  * superadmin: quien puso el sistema. Lo de un admin y ademas la membresia,
@@ -110,7 +110,7 @@ const sinClave = (r: Row): Usuario => ({
 export function createUsuariosRepo(pool: Pool): UsuariosRepo {
   return {
     async contar() {
-      const { rows } = await pool.query<{ total: number }>('select count(*)::int as total from usuarios');
+      const { rows } = await pool.query<{ total: number }>('select count(*) as total from usuarios');
       return rows[0]?.total ?? 0;
     },
     async porUsuario(usuario) {
@@ -122,10 +122,15 @@ export function createUsuariosRepo(pool: Pool): UsuariosRepo {
       return rows[0] ? sinClave(rows[0]) : null;
     },
     async crear(input) {
-      const { rows } = await pool.query<Row>(
-        `insert into usuarios (usuario, nombre, clave, rol) values ($1,$2,$3,$4) returning *`,
-        [input.usuario.trim().toLowerCase(), input.nombre.trim(), input.clave, input.rol],
-      );
+      const id = nuevoId();
+      await pool.query(`insert into usuarios (id, usuario, nombre, clave, rol) values ($1,$2,$3,$4,$5)`, [
+        id,
+        input.usuario.trim().toLowerCase(),
+        input.nombre.trim(),
+        input.clave,
+        input.rol,
+      ]);
+      const { rows } = await pool.query<Row>('select * from usuarios where id = $1', [id]);
       return sinClave(rows[0]!);
     },
     async listar() {

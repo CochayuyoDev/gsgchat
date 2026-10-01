@@ -22,7 +22,7 @@ import type { ChangeValue, InboundMessage } from '../src/whatsapp/types.js';
 
 const ENV = {
   PUBLIC_BASE_URL: 'https://ejemplo.test',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',

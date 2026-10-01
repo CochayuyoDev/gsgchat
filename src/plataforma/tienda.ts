@@ -5,10 +5,10 @@
  * unica tienda de una instalacion, pero con todo lo que guarda o conecta
  * pasado por parametro:
  *
- *   - su BASE: una carpeta de PGlite propia, o un esquema propio de Postgres
- *     (tienda_<id>) con el search_path apuntando a el. Las consultas del
- *     proyecto no nombran esquema, asi que una tienda no puede leer las
- *     tablas de otra aunque quisiera;
+ *   - su BASE: una base propia del servidor MySQL/MariaDB (<raiz>_t_<id>)
+ *     con la conexion apuntando a ella. Las consultas del proyecto no nombran
+ *     base, asi que una tienda no puede leer las tablas de otra aunque
+ *     quisiera;
  *   - su SESION DE WHATSAPP (`crearSesionLocal`) y su carpeta de vinculacion:
  *     cada tienda escanea su QR y su numero no lo ve nadie mas;
  *   - sus carpetas de adjuntos, respaldos y copias;
@@ -32,8 +32,8 @@ import { createSender, type SendJob, type SendOutcome } from '../outbound/sender
 import { createMemoryOutboundQueue } from '../outbound/memory-queue.js';
 import { createOutboundQueue, createOutboundWorker, type OutboundQueue } from '../outbound/queue.js';
 import { createRepos, createSettingsRepo, type Repos } from '../db/repos.js';
-import { openPglite, type PgliteHandle } from '../db/pglite.js';
-import { createPool, type Pool } from '../db/pool.js';
+import { baseDeLaUrl, createPool, type Pool } from '../db/pool.js';
+import { prepararBase, type OpcionesBanco } from '../db/bases.js';
 import { crearCacheGeoSql, crearGeocodificadorNominatim, type Geocodificador } from '../entregas/geocodificar.js';
 import { migrate } from '../db/migrate.js';
 import type { LocalSecrets } from '../settings/crypto.js';
@@ -72,9 +72,18 @@ import { enTienda, type ContextoTienda } from './contexto.js';
 import { conReglaGsg } from '../entregas/regla-gsg.js';
 
 /** Donde vive la base de una tienda. */
-export type BaseDeTienda =
-  | { tipo: 'pglite'; dir: string }
-  | { tipo: 'postgres'; url: string; esquema?: string };
+export interface BaseDeTienda {
+  /** El servidor: mysql://usuario:clave@host:3306/<base>. */
+  url: string;
+  /** La base de ESTA tienda en ese servidor; sin ella, la de la URL (la tienda principal). */
+  base?: string;
+  /**
+   * Bases listas de antemano (ver src/db/bases.ts): si la base de la tienda
+   * aun no existe, se queda las tablas de una de ahi en vez de crearlas de
+   * cero. Sin banco, se migra desde cero.
+   */
+  banco?: OpcionesBanco;
+}
 
 export interface OpcionesTienda {
   /** Identificador interno (no cambia nunca) y el trozo de la URL (/tienda/<slug>/). */
@@ -127,7 +136,10 @@ export interface TiendaViva {
   repos: Repos;
   ajustes: ServicioAjustes;
   sesion: SesionLocal;
-  pglite: PgliteHandle | null;
+  /** La base de esta tienda (para mirar dentro en las pruebas y en el Modulo desarrollador). */
+  pool: Pool;
+  /** El nombre de su base en el servidor. */
+  base: string;
   /** Con esto se envuelve cada peticion que se le pasa (ver src/plataforma/contexto.ts). */
   contexto: ContextoTienda;
   /** Las entregas del dia de esta tienda (el Modulo desarrollador cierra su dia de prueba con esto). */
@@ -138,14 +150,15 @@ export interface TiendaViva {
   parar(): Promise<void>;
 }
 
-async function abrirBase(base: BaseDeTienda): Promise<{ pool: Pool; pglite: PgliteHandle | null; cerrar: () => Promise<void> }> {
-  if (base.tipo === 'pglite') {
-    const pglite = await openPglite(base.dir);
-    return { pool: pglite.pool, pglite, cerrar: () => pglite.db.close() };
-  }
-  await migrate(base.url, base.esquema);
-  const pool = createPool(base.url, base.esquema);
-  return { pool, pglite: null, cerrar: () => pool.end() };
+async function abrirBase(base: BaseDeTienda): Promise<{ pool: Pool; nombre: string; cerrar: () => Promise<void> }> {
+  const nombre = base.base ?? baseDeLaUrl(base.url);
+  if (!nombre) throw new Error('DATABASE_URL no dice qué base usar: termínala con /nombre_de_la_base (por ejemplo mysql://root@127.0.0.1:3306/gsgchat).');
+  // Con banco: si la base no existe, sale de una ya lista; si existe, solo
+  // se le pasan las migraciones pendientes (lo mismo que migrate).
+  if (base.banco) await prepararBase(base.banco, nombre);
+  else await migrate(base.url, nombre);
+  const pool = createPool(base.url, nombre);
+  return { pool, nombre, cerrar: () => pool.end() };
 }
 
 export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
@@ -156,7 +169,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
   return enTienda(contexto, async () => {
     const log = (m: string, d?: unknown) => console.warn(`${o.prefijoLog}${m}`, d ?? '');
     const config = loadConfig(o.env);
-    const { pool, pglite, cerrar } = await abrirBase(o.base);
+    const { pool, nombre: nombreBase, cerrar } = await abrirBase(o.base);
     // Lo que ya se abrio, en orden: si algo falla a mitad de armar la tienda
     // (una migracion, un servicio), se cierra todo al reves en vez de dejar la
     // base abierta y temporizadores vivos de una tienda que no existe.
@@ -399,14 +412,11 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           conexionGsg,
           ia,
           entregas,
-          carpetas: () => [o.base.tipo === 'pglite' ? o.base.dir : o.mediaDir, path.resolve(config.ARCHIVE_DIR)],
+          carpetas: () => [o.mediaDir, path.resolve(config.ARCHIVE_DIR)],
         },
         cupo: { entregas, lista, reparto: () => lista.ajustesReparto() },
         respaldo: {
-          baseDatos: () =>
-            pglite && o.base.tipo === 'pglite'
-              ? { tipo: 'pglite', dump: () => pglite.dump(), dataDir: o.base.dir }
-              : { tipo: 'postgres', url: o.base.tipo === 'postgres' ? o.base.url : config.DATABASE_URL },
+          baseDatos: () => ({ tipo: 'mysql', url: o.base.url, base: nombreBase }),
           archiveDir: config.ARCHIVE_DIR,
           carpetaPorDefecto: o.carpetaCopias,
           // Una tienda recien creada no se copia al nacer: su primera copia, la proxima noche.
@@ -506,7 +516,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         repos,
         ajustes,
         sesion,
-        pglite,
+        pool,
+        base: nombreBase,
         contexto,
         entregas,
         usuarios: async () => (await repos.usuarios.listar()).map((u) => u.usuario),

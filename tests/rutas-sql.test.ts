@@ -1,52 +1,35 @@
 /**
- * El SQL del modulo de rutas, contra Postgres de verdad (PGlite).
+ * El SQL del modulo de rutas, contra MySQL/MariaDB de verdad (tests/mysql.ts).
  *
- * Los dobles en memoria prueban las decisiones; esto prueba las consultas: el
- * `jsonb_object_agg` de las cifras por lote sobre cero filas, el orden de la
- * cola -que es lo que decide a quien le toca- y que los filtros de la bandeja
- * devuelven lo que dicen.
+ * Los dobles en memoria prueban las decisiones; esto prueba las consultas: las
+ * cifras por lote sobre cero filas, el orden de la cola -que es lo que decide
+ * a quien le toca- y que los filtros de la bandeja devuelven lo que dicen.
  */
 
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
 import { ESTADOS_SIN_UBICACION } from '../src/db/rutas.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
-
-function asPool(db: PGlite): Pool {
-  const query = async (text: string, params?: unknown[]) => {
-    const result = await db.query(text, params as never[], {
-      parsers: { 20: (v: string) => Number.parseInt(v, 10) },
-    });
-    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
-  };
-  const client = { query, release: () => undefined };
-  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
-}
-
-let db: PGlite;
+let b: BaseDePrueba;
 let pool: Pool;
 let repos: Repos;
 
 beforeAll(async () => {
-  db = new PGlite();
-  pool = asPool(db);
-  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
-  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
+  b = await baseDePrueba();
+  pool = b.pool;
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await pool.end();
+  await b?.cerrar();
 });
 
 beforeEach(async () => {
-  await db.exec('delete from rutas_reportes; delete from rutas_eventos; delete from rutas_solicitudes; delete from rutas_lotes;');
+  for (const tabla of ['rutas_reportes', 'rutas_eventos', 'rutas_solicitudes', 'rutas_lotes']) {
+    await pool.query(`delete from ${tabla}`);
+  }
 });
 
 describe('lotes y solicitudes', () => {

@@ -20,6 +20,10 @@ import { leerPreguntaPorPedido } from '../src/entregas/interpretar.js';
 import { EJEMPLO_CASO, interpretarCaso, limpiarRespuestaIA } from '../src/desarrollador/casos.js';
 import { desarrolladorPage } from '../src/desarrollador/pagina.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
+
+/** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
+const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
 
 const puertoLibre = () =>
   new Promise<number>((resolve) => {
@@ -100,6 +104,7 @@ describe('«Mis casos»: el caso escrito a mano se entiende (o se dice qué lín
 describe('Módulo desarrollador: conversaciones completas', () => {
   let raiz: string;
   let tienda: TiendaViva;
+  let b: BaseDePrueba;
   let wa: FakeWhatsApp;
   let cookie: string;
 
@@ -107,6 +112,12 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     const r = await tienda.app.inject({ method, url, headers: { cookie, ...(payload !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
     return { status: r.statusCode, body: r.body ? (JSON.parse(r.body) as any) : {} };
   };
+
+  // La base aparte: la primera vez hay que crear sus tablas y tarda (usa el
+  // hookTimeout largo de vitest.config, no el de armar la tienda).
+  beforeAll(async () => {
+    b = await baseDePrueba();
+  });
 
   beforeAll(async () => {
     raiz = mkdtempSync(path.join(tmpdir(), 'dev-guiones-'));
@@ -118,7 +129,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
       slug: 'guiones',
       env: {
         PUBLIC_BASE_URL: `http://127.0.0.1:${puerto}`,
-        DATABASE_URL: `pglite://${path.join(raiz, 'datos')}`,
+        DATABASE_URL: b.url,
         TRACKING_SECRET: secretos.trackingSecret,
         WHATSAPP_PROVIDER: 'local',
         BUSINESS_NAME: 'Tienda de prueba',
@@ -132,7 +143,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
         RUTAS_PAUSA_MAX_SEG: '1',
       } as NodeJS.ProcessEnv,
       secretos,
-      base: { tipo: 'pglite', dir: path.join(raiz, 'datos') },
+      base: { url: b.url, base: b.base },
       authDir: path.join(raiz, 'auth'),
       mediaDir: path.join(raiz, 'medios'),
       carpetaCopias: path.join(raiz, 'copias'),
@@ -152,11 +163,12 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     // Un motorizado DE VERDAD, activo y en la zona: un pedido de prueba no le puede llegar nunca.
     const real = await tienda.entregas!.crearMotorizado({ phone: '51944000001', nombre: 'Motorizado Real', placa: 'REAL-1', zona: 'Miraflores, Surco, San Borja, Lince, Breña, Jesús María, San Isidro, Pueblo Libre, Cercado de Lima' });
     expect(real.ok).toBe(true);
-  }, 180_000);
+  }, 180_000 * LENTO);
 
   afterAll(async () => {
     await tienda?.parar();
-    rmSync(raiz, { recursive: true, force: true });
+    await b?.cerrar();
+    if (raiz) rmSync(raiz, { recursive: true, force: true });
   });
 
   it('las cinco conversaciones salen paso a paso como se espera', async () => {
@@ -166,11 +178,11 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     await esperar(async () => {
       estado = (await api('GET', '/admin/desarrollador/vivo/guiones')).body;
       return !estado.enMarcha;
-    }, 420_000, 'que terminen las conversaciones');
+    }, 420_000 * LENTO, 'que terminen las conversaciones');
     const fallidas = estado.resultados.filter((x) => !x.ok).map((x) => ({ guion: x.guion, error: x.error, paso: x.pasos.find((p) => !p.ok) }));
     expect(fallidas).toEqual([]);
     expect(estado.resultados).toHaveLength(GUIONES.length);
-  }, 480_000);
+  }, 480_000 * LENTO);
 
   it('regla del dueño: «¿por qué?» → explicación → pin → UBI REGISTRADA con «¡Muchas gracias!» → motorizado → «¿a qué hora llega?» → la hora estimada → «cuánto cuesta el envío» → cierre con el número del motorizado → SILENCIO; y «cuánto cuesta el envío» → insistencias 1, 2 y 3 → cierre con el número → SILENCIO', async () => {
     const resultados = (await api('GET', '/admin/desarrollador/vivo/guiones')).body.resultados as ResultadoGuion[];
@@ -261,7 +273,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     await esperar(async () => {
       estado = (await api('GET', '/admin/desarrollador/vivo/guiones')).body;
       return !estado.enMarcha;
-    }, 300_000, 'que terminen los casos');
+    }, 300_000 * LENTO, 'que terminen los casos');
     const fallidos = estado.resultados.filter((x) => !x.ok).map((x) => ({ titulo: x.titulo, paso: x.pasos.find((p) => !p.ok) }));
     expect(fallidos).toEqual([]);
     expect(estado.resultados.map((x) => x.guion).sort()).toEqual([`caso:${id}`, 'caso:sin-guardar'].sort());
@@ -271,7 +283,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     const tienda2 = await tienda.app.inject({ method: 'DELETE', url: `/admin/desarrollador/vivo/casos/${id}`, headers: { cookie } });
     expect(tienda2.statusCode).toBe(200);
     expect((await api('GET', '/admin/desarrollador/vivo/casos')).body.casos).toEqual([]);
-  }, 360_000);
+  }, 360_000 * LENTO);
 
   it('«Escribirlo con la IA» sin IA conectada dice qué hacer', async () => {
     const r = await api('POST', '/admin/desarrollador/vivo/casos/ia', { descripcion: 'un cliente que pregunta tres veces y cancela' });
@@ -283,7 +295,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
   it('un pedido de prueba nunca va a un motorizado de verdad (ni le llega nada por WhatsApp)', async () => {
     const aReal = wa.sent.filter((m) => m.to === '51944000001');
     expect(aReal).toEqual([]);
-    const conReal = (await tienda.repos.desarrollador!.query<{ n: number }>(`select count(*)::int as n from entregas e join motorizados m on m.id = e.motorizado_id where m.phone = '51944000001'`)).rows[0]!.n;
+    const conReal = (await tienda.repos.desarrollador!.query<{ n: number }>(`select count(*) as n from entregas e join motorizados m on m.id = e.motorizado_id where m.phone = '51944000001'`)).rows[0]!.n;
     expect(conReal).toBe(0);
   });
 
@@ -301,7 +313,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     await esperar(async () => {
       const [f] = (await tienda.repos.desarrollador!.query<{ phone: string | null }>(`select m.phone from entregas e left join motorizados m on m.id = e.motorizado_id where e.referencia = 'R-0001'`)).rows;
       return Boolean(f?.phone);
-    }, 60_000, 'que el pedido real tenga motorizado');
+    }, 60_000 * LENTO, 'que el pedido real tenga motorizado');
     const [f] = (await tienda.repos.desarrollador!.query<{ phone: string }>(`select m.phone from entregas e join motorizados m on m.id = e.motorizado_id where e.referencia = 'R-0001'`)).rows;
     expect(f!.phone).toBe('51944000001');
     // Reasignarlo a mano a uno de prueba tampoco se deja.
@@ -309,5 +321,5 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     const [ent] = (await tienda.repos.desarrollador!.query<{ id: number }>(`select id from entregas where referencia = 'R-0001'`)).rows;
     const r = await tienda.entregas!.reasignar(ent!.id, prueba!.id, 'prueba');
     expect(r).toMatchObject({ error: expect.stringContaining('No se mezcla lo de prueba con lo real') });
-  }, 120_000);
+  }, 120_000 * LENTO);
 });

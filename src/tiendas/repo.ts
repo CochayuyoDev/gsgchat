@@ -7,7 +7,7 @@
  * plan que se le manda a la tienda se calcula con el mismo codigo.
  */
 
-import type { Pool } from '../db/pool.js';
+import { nuevoId, type Pool } from '../db/pool.js';
 import type { EstadoInstancia, MembresiaLocal } from '../plan/servicio.js';
 
 export interface Tienda {
@@ -192,11 +192,13 @@ const COLUMNAS_PATCH: Array<[keyof PatchTienda, string, boolean]> = [
 export function createTiendasRepo(pool: Pool): TiendasRepo {
   return {
     async crear(input) {
-      const { rows } = await pool.query<Row>(
-        `insert into tiendas (slug, nombre, url, contacto, notas, membresia, token_hash, token_prefijo, creado_por)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
-        [input.slug, input.nombre, input.url ?? null, input.contacto ?? null, input.notas ?? null, JSON.stringify(input.membresia), input.tokenHash, input.tokenPrefijo, input.creadoPor ?? null],
+      const id = nuevoId();
+      await pool.query(
+        `insert into tiendas (id, slug, nombre, url, contacto, notas, membresia, token_hash, token_prefijo, creado_por)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [id, input.slug, input.nombre, input.url ?? null, input.contacto ?? null, input.notas ?? null, JSON.stringify(input.membresia), input.tokenHash, input.tokenPrefijo, input.creadoPor ?? null],
       );
+      const { rows } = await pool.query<Row>('select * from tiendas where id = $1', [id]);
       return deFila(rows[0]!);
     },
     async porId(id) {
@@ -221,8 +223,8 @@ export function createTiendasRepo(pool: Pool): TiendasRepo {
       }
       if (!sets.length) return this.porId(id);
       valores.push(id);
-      const { rows } = await pool.query<Row>(`update tiendas set ${sets.join(', ')}, updated_at = now() where id = $${valores.length} returning *`, valores);
-      return rows[0] ? deFila(rows[0]) : null;
+      const { rowCount } = await pool.query(`update tiendas set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
+      return rowCount ? this.porId(id) : null;
     },
     async borrar(id) {
       const { rowCount } = await pool.query('delete from tiendas where id = $1', [id]);
@@ -249,16 +251,17 @@ export function createTiendasRepo(pool: Pool): TiendasRepo {
     },
     async guardarConfig(clave, valor) {
       await pool.query(
-        'insert into tiendas_config (clave, valor, updated_at) values ($1, $2, now()) on conflict (clave) do update set valor = excluded.valor, updated_at = now()',
+        'insert into tiendas_config (clave, valor, updated_at) values ($1, $2, now(3)) on duplicate key update valor = values(valor), updated_at = now(3)',
         [clave, JSON.stringify(valor)],
       );
     },
     async crearPago(input, at) {
-      const { rows } = await pool.query<PagoRow>(
+      const { insertId } = await pool.query(
         `insert into tiendas_pagos (tienda_id, meses, monto, moneda, nota, imagen, estado, at)
-         values ($1,$2,$3,$4,$5,$6,'pendiente',$7) returning *`,
+         values ($1,$2,$3,$4,$5,$6,'pendiente',$7)`,
         [input.tiendaId, input.meses, input.monto ?? null, input.moneda ?? null, input.nota ?? null, input.imagen, at],
       );
+      const { rows } = await pool.query<PagoRow>('select * from tiendas_pagos where id = $1', [insertId]);
       return pagoDeFila(rows[0]!);
     },
     async pago(id) {
@@ -276,7 +279,7 @@ export function createTiendasRepo(pool: Pool): TiendasRepo {
         valores.push(filtro.estado);
         where.push(`estado = $${valores.length}`);
       }
-      valores.push(filtro.limit ?? 200);
+      valores.push(Number(filtro.limit ?? 200));
       const { rows } = await pool.query<PagoRow>(
         `select id, tienda_id, meses, monto, moneda, nota, null as imagen, estado, motivo, at, resuelto_at, resuelto_por from tiendas_pagos ${where.length ? `where ${where.join(' and ')}` : ''} order by at desc, id desc limit $${valores.length}`,
         valores,
@@ -284,7 +287,9 @@ export function createTiendasRepo(pool: Pool): TiendasRepo {
       return rows.map(pagoDeFila);
     },
     async resolverPago(id, cambio) {
-      const { rows } = await pool.query<PagoRow>('update tiendas_pagos set estado = $2, motivo = $3, resuelto_por = $4, resuelto_at = $5 where id = $1 returning *', [id, cambio.estado, cambio.motivo, cambio.por, cambio.at]);
+      const { rowCount } = await pool.query('update tiendas_pagos set estado = $2, motivo = $3, resuelto_por = $4, resuelto_at = $5 where id = $1', [id, cambio.estado, cambio.motivo, cambio.por, cambio.at]);
+      if (!rowCount) return null;
+      const { rows } = await pool.query<PagoRow>('select * from tiendas_pagos where id = $1', [id]);
       return rows[0] ? pagoDeFila(rows[0]) : null;
     },
   };

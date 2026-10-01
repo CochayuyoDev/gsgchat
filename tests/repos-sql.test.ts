@@ -1,73 +1,39 @@
 /**
- * Pruebas de la capa de datos contra Postgres de verdad.
+ * Pruebas de la capa de datos contra MySQL/MariaDB de verdad.
  *
- * Los dobles en memoria comprueban la logica, pero no el SQL: un lateral
- * join mal escrito, un `unnest` con los tipos cambiados o un `jsonb_object_agg`
- * sobre cero filas solo fallan cuando hay un motor detras. PGlite es el mismo
- * Postgres compilado a WebAssembly, asi que estas pruebas corren en cualquier
- * maquina sin Docker y sin servidor.
- *
- * Se aplican las migraciones reales del directorio db/migrations.
+ * Los dobles en memoria comprueban la logica, pero no el SQL: una
+ * subconsulta correlacionada mal escrita, un `on duplicate key update` que
+ * pisa lo que no debe o unas cifras agregadas sobre cero filas solo fallan
+ * cuando hay un motor detras. Corren contra el servidor de pruebas (ver
+ * tests/mysql.ts), con la base vacia y el esquema real de db/migrations.
  */
 
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, createSettingsRepo, type Repos } from '../src/db/repos.js';
 import { createSettingsService } from '../src/settings/service.js';
 import { loadConfig } from '../src/config.js';
 import { TEST_SETTINGS_KEY } from './fakes.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
-
-/**
- * Adaptador de PGlite a la interfaz de `pg.Pool` que usan los repositorios.
- * Solo se usan `query`, `connect` y `end`.
- */
-function asPool(db: PGlite): Pool {
-  const query = async (text: string, params?: unknown[]) => {
-    const result = await db.query(text, params as never[], {
-      // pg entrega bigint/numeric como string para no perder precision, y
-      // src/db/pool.ts los convierte a number. Aqui se hace lo mismo para
-      // que los repositorios vean exactamente los mismos tipos.
-      parsers: { 20: (v: string) => Number.parseInt(v, 10) },
-    });
-    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
-  };
-  const client = { query, release: () => undefined };
-  return {
-    query,
-    connect: async () => client,
-    end: async () => db.close(),
-  } as unknown as Pool;
-}
-
-let db: PGlite;
+let b: BaseDePrueba;
 let pool: Pool;
 let repos: Repos;
 
 beforeAll(async () => {
-  db = new PGlite();
-  pool = asPool(db);
-
-  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
-  for (const file of files) {
-    await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
-  }
+  b = await baseDePrueba();
+  pool = b.pool;
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await db.close();
+  await b?.cerrar();
 });
 
 describe('migraciones', () => {
   it('crean todas las tablas del sistema', async () => {
-    const { rows } = await db.query<{ table_name: string }>(
-      `select table_name from information_schema.tables where table_schema = 'public' order by table_name`,
+    const { rows } = await pool.query<{ table_name: string }>(
+      `select table_name as table_name from information_schema.tables where table_schema = database() order by table_name`,
     );
     const tables = rows.map((r) => r.table_name);
     expect(tables).toEqual(
@@ -92,15 +58,15 @@ describe('migraciones', () => {
   });
 });
 
-describe('contactos sobre Postgres', () => {
+describe('contactos sobre MySQL', () => {
   it('el alta masiva inserta, actualiza y no duplica', async () => {
     const first = await repos.contacts.bulkOptIn(
       [
         { phone: '+52 1 55 1000 0001', name: 'Ana' },
         { phone: '5215510000002', name: 'Luis' },
         { phone: '123', name: 'muy corto' },
-        // Repetido en la misma tanda: unnest con dos veces la misma clave
-        // reventaria el on conflict si no se deduplicase antes.
+        // Repetido en la misma tanda: dos veces la misma clave en el mismo
+        // insert contaria doble si no se deduplicase antes.
         { phone: '5215510000002', name: 'Luis otra vez' },
       ],
       'formulario web',
@@ -155,7 +121,7 @@ describe('contactos sobre Postgres', () => {
     const all = await repos.contacts.list({ limit: 50, offset: 0 });
     expect(all.total).toBe(2);
     const listed = all.items.find((c) => c.phone === '5215510000001');
-    // El lateral join debe traer la MAS reciente, no la primera.
+    // La subconsulta debe traer la MAS reciente, no la primera.
     expect(listed?.lastLocation).toMatchObject({ lat: 19.5, lng: -99.2 });
 
     const search = await repos.contacts.list({ q: 'luis', limit: 50, offset: 0 });
@@ -184,7 +150,7 @@ describe('contactos sobre Postgres', () => {
   });
 });
 
-describe('entregas y campanas sobre Postgres', () => {
+describe('entregas y campanas sobre MySQL', () => {
   it('el conteo por estado y el listado con joins funcionan, incluso sin entregas', async () => {
     const empty = await repos.campaigns.list();
     expect(empty).toEqual([]);
@@ -196,8 +162,8 @@ describe('entregas y campanas sobre Postgres', () => {
       category: 'UTILITY',
     });
 
-    // jsonb_object_agg sobre cero filas devuelve null: el repositorio debe
-    // traducirlo a un objeto vacio y no a null.
+    // Una campana sin entregas no tiene filas que agregar: el repositorio
+    // debe dar un objeto vacio y no null.
     const noDeliveries = await repos.campaigns.list();
     expect(noDeliveries[0]).toMatchObject({ id: campaignId, name: 'Marzo', stats: {} });
 
@@ -270,7 +236,7 @@ describe('entregas y campanas sobre Postgres', () => {
   });
 });
 
-describe('rastreo sobre Postgres', () => {
+describe('rastreo sobre MySQL', () => {
   it('lista solo las sesiones vigentes con su ultimo punto', async () => {
     const contact = (await repos.contacts.getByPhone('5215510000001'))!;
     const now = new Date();
@@ -294,7 +260,7 @@ describe('rastreo sobre Postgres', () => {
   });
 });
 
-describe('automatizacion sobre Postgres', () => {
+describe('automatizacion sobre MySQL', () => {
   it('guarda secuencias con sus pasos y las devuelve ordenadas', async () => {
     const sequence = await repos.automation.createSequence({
       name: 'Seguimiento',
@@ -311,7 +277,7 @@ describe('automatizacion sobre Postgres', () => {
     });
 
     expect(sequence.steps.map((s) => s.position)).toEqual([1, 2]);
-    // Las variables viajan como jsonb: deben volver como array, no como texto.
+    // Las variables viajan como JSON: deben volver como array, no como texto.
     expect(sequence.steps[0]!.variables).toEqual(['{nombre}', '{fecha}']);
     expect(sequence.steps[1]!.text).toBe('ultimo aviso');
 
@@ -462,7 +428,7 @@ describe('automatizacion sobre Postgres', () => {
   });
 });
 
-describe('conversaciones sobre Postgres', () => {
+describe('conversaciones sobre MySQL', () => {
   it('guarda entrantes y salientes y arma el hilo en orden', async () => {
     const contact = (await repos.contacts.getByPhone('5215510000001'))!;
     const base = new Date('2026-03-10T12:00:00Z');
@@ -566,7 +532,7 @@ describe('conversaciones sobre Postgres', () => {
   });
 });
 
-describe('el ancla del historial sobre Postgres', () => {
+describe('el ancla del historial sobre MySQL', () => {
   it('el mas antiguo es por fecha, no por orden de llegada, y con id de WhatsApp', async () => {
     const contact = await repos.contacts.upsertFromInbound('5215510007777', 'Ancla');
     // Llega primero lo de hoy; el historial del telefono entra despues con fechas viejas.
@@ -580,10 +546,10 @@ describe('el ancla del historial sobre Postgres', () => {
   });
 });
 
-describe('grupos de WhatsApp sobre Postgres', () => {
+describe('grupos de WhatsApp sobre MySQL', () => {
   const JID = '120363412332267099@g.us';
 
-  it('la migracion 019 deja a los contactos de antes como personas', async () => {
+  it('un contacto sin tipo es una persona', async () => {
     const { rows } = await pool.query<{ tipo: string }>(`select tipo from contacts where phone = '5215510000001'`);
     expect(rows[0]!.tipo).toBe('persona');
     expect((await repos.contacts.getByPhone('5215510000001'))!.tipo).toBe('persona');
@@ -617,11 +583,11 @@ describe('grupos de WhatsApp sobre Postgres', () => {
   });
 });
 
-describe('credenciales sobre Postgres', () => {
+describe('credenciales sobre MySQL', () => {
   it('se guardan cifradas y se releen', async () => {
     const config = loadConfig({
       PUBLIC_BASE_URL: 'http://localhost:3000',
-      DATABASE_URL: 'postgres://x/y',
+      DATABASE_URL: 'mysql://x/y',
       TRACKING_SECRET: 'x'.repeat(40),
     } as NodeJS.ProcessEnv);
 
@@ -650,15 +616,15 @@ describe('credenciales sobre Postgres', () => {
   });
 });
 
-describe('integraciones sobre Postgres', () => {
-  it('la migracion 017 deja permisos en las claves y crea las tablas de webhooks', async () => {
-    const { rows } = await db.query<{ table_name: string }>(
-      `select table_name from information_schema.tables where table_schema = 'public' and table_name in ('webhooks', 'webhook_entregas')`,
+describe('integraciones sobre MySQL', () => {
+  it('una clave sin permisos puede todo y las tablas de webhooks existen', async () => {
+    const { rows } = await pool.query<{ table_name: string }>(
+      `select table_name as table_name from information_schema.tables where table_schema = database() and table_name in ('webhooks', 'webhook_entregas')`,
     );
     expect(rows.map((r) => r.table_name).sort()).toEqual(['webhook_entregas', 'webhooks']);
 
     // Una clave de antes (sin permisos) sigue pudiendo todo.
-    await db.exec(`insert into claves_api (nombre, prefijo, hash) values ('vieja', 'wak_vieja…', 'hash-vieja')`);
+    await pool.query(`insert into claves_api (nombre, prefijo, hash) values ('vieja', 'wak_vieja…', 'hash-vieja')`);
     expect((await repos.claves.porHash('hash-vieja'))?.permisos).toEqual(['*']);
     const acotada = await repos.claves.crear({ nombre: 'Stoky', prefijo: 'wak_stoky…', hash: 'hash-stoky', creadaPor: null, permisos: ['mensajes:enviar', 'conversaciones:leer'] });
     expect(acotada.permisos).toEqual(['mensajes:enviar', 'conversaciones:leer']);
@@ -720,8 +686,9 @@ describe('integraciones sobre Postgres', () => {
     expect(await w.contarPendientes()).toBe(0);
   });
   it('un id que no es uuid es "no existe", no un 500 (webhooks y conectores)', async () => {
-    // Postgres contesta 22P02 al comparar la columna uuid con "no-es-uuid";
-    // antes subia hasta la API como "error interno" (visto el 2026-09-17).
+    // Con Postgres, comparar la columna uuid con "no-es-uuid" era un error
+    // que subia hasta la API como "error interno" (visto el 2026-09-17).
+    // Con char(36) no encuentra nada: que siga siendo "no existe".
     expect(await repos.webhooks.obtener('no-es-uuid')).toBeNull();
     expect(await repos.webhooks.conSecreto('undefined')).toBeNull();
     expect(await repos.webhooks.entregas('no-es-uuid', 10)).toEqual([]);
@@ -738,8 +705,8 @@ describe('integraciones sobre Postgres', () => {
   });
 });
 
-describe('conectores de tiendas sobre Postgres', () => {
-  it('alta, reglas en jsonb, secreto, entradas y borrado en cascada', async () => {
+describe('conectores de tiendas sobre MySQL', () => {
+  it('alta, reglas en JSON, secreto, entradas y borrado en cascada', async () => {
     const c = repos.conectores;
     const regla = { evento: 'pedido.creado' as const, activo: true, plantilla: { nombre: 'confirmacion_pedido', idioma: 'es' }, variables: ['{nombre}', '{numero}'], texto: null };
     const woo = await c.crear({ tipo: 'woocommerce', nombre: 'Tienda Woo', secreto: 'wcs_abc', reglas: [regla], creadoPor: null });
@@ -769,7 +736,7 @@ describe('conectores de tiendas sobre Postgres', () => {
   });
 });
 
-describe('fichas de preventa sobre Postgres', () => {
+describe('fichas de preventa sobre MySQL', () => {
   it('una lista en ultimasOpciones entra como JSON', async () => {
     const c = await repos.contacts.upsertFromInbound('51955555555', 'Ficha');
     const lead = await repos.leads.update(c.id, { ultimasOpciones: ['pv_cotizar', 'pv_datos'], nombre: 'Ficha' });
@@ -779,8 +746,8 @@ describe('fichas de preventa sobre Postgres', () => {
   });
 });
 
-describe('pedidos del chat sobre Postgres', () => {
-  it('alta con items en jsonb, lista con el contacto, cambio de estado y conteo', async () => {
+describe('pedidos del chat sobre MySQL', () => {
+  it('alta con items en JSON, lista con el contacto, cambio de estado y conteo', async () => {
     const c = await repos.contacts.upsertFromInbound('51966666666', 'Compradora');
     const items = [{ sku: 'EFR-S108D-2AV', nombre: 'Casio Edifice azul', cantidad: 2, precio: 749, subtotal: 1498, url: 'https://elysian.pe/producto/efr-s108d-2av' }];
     const p = await repos.pedidos.crear({ contactId: c.id, items, total: 1498, moneda: 'PEN', nombre: 'Maria', telefono: c.phone, direccion: 'Av. Larco 123', pago: 'yape', origen: 'ia' });

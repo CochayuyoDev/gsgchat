@@ -438,12 +438,12 @@ async function limpiar(repos: Repos, pref: string, telefonos: string[], claves: 
   if (!db) return `Claves temporales revocadas (${claves.length}). Sin base de datos real no hay más que borrar.`;
   const like = `${pref}%`;
   const lotes = (await db.query<{ lote_id: string }>('select distinct lote_id from rutas_solicitudes where referencia like $1', [like])).rows.map((r) => r.lote_id);
-  const reportes = (await db.query('delete from rutas_reportes where payload->>\'referencia\' like $1', [like])).rowCount;
-  await db.query('delete from webhook_entregas where payload->>\'referencia\' like $1', [like]);
+  const reportes = (await db.query(`delete from rutas_reportes where json_unquote(json_extract(payload, '$.referencia')) like $1`, [like])).rowCount;
+  await db.query(`delete from webhook_entregas where json_unquote(json_extract(payload, '$.referencia')) like $1`, [like]);
   const pedidos = (await db.query('delete from entregas where referencia like $1', [like])).rowCount;
   await db.query('delete from rutas_solicitudes where referencia like $1', [like]);
-  if (lotes.length) await db.query('delete from rutas_lotes l where l.id = any($1::uuid[]) and not exists (select 1 from rutas_solicitudes s where s.lote_id = l.id)', [lotes]);
-  await db.query('delete from contacts where phone = any($1::text[])', [telefonos]);
-  const borradas = claves.length ? (await db.query('delete from claves_api where id = any($1::uuid[])', [claves])).rowCount : 0;
+  if (lotes.length) await db.query('delete l from rutas_lotes l where l.id in ($1) and not exists (select 1 from rutas_solicitudes s where s.lote_id = l.id)', [lotes]);
+  await db.query('delete from contacts where phone in ($1)', [telefonos]);
+  const borradas = claves.length ? (await db.query('delete from claves_api where id in ($1)', [claves])).rowCount : 0;
   return `Se borró lo de la comprobación: ${pedidos} pedido${pedidos === 1 ? '' : 's'} de prueba, ${reportes} reporte${reportes === 1 ? '' : 's'} en cola, sus clientes de prueba y ${borradas} clave${borradas === 1 ? '' : 's'} temporal${borradas === 1 ? '' : 'es'}.`;
 }

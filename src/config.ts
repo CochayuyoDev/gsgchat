@@ -20,7 +20,13 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   PUBLIC_BASE_URL: z.string().url(),
 
-  DATABASE_URL: z.string().min(1),
+  // MySQL 8 o MariaDB 10.4+: mysql://usuario:clave@host:3306/gsgchat
+  // (mariadb:// vale igual). Cada tienda de la plataforma va en su propia
+  // base del mismo servidor: gsgchat_t_<id>.
+  DATABASE_URL: z
+    .string()
+    .min(1)
+    .refine((v) => /^(mysql|mariadb):\/\//i.test(v.trim()), 'tiene que empezar por mysql:// (GSGchat guarda todo en MySQL o MariaDB)'),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
 
   // Por donde sale y entra WhatsApp. `cloud` es la API oficial de Meta;
@@ -379,7 +385,7 @@ export interface Config extends RawConfig {
 /** Que es cada variable obligatoria, para que el error del arranque diga que poner. */
 const QUE_ES: Record<string, string> = {
   PUBLIC_BASE_URL: 'la dirección pública de este servidor, con https, por ejemplo https://gsgchat.midominio.com (es la que ven WhatsApp y GSG)',
-  DATABASE_URL: 'dónde guardar los datos: postgres://usuario:clave@host/base, o pglite://./.wa-data para la base embebida sin Postgres',
+  DATABASE_URL: 'dónde guardar los datos: el servidor MySQL o MariaDB y la base, mysql://usuario:clave@host:3306/gsgchat (en esta PC, con XAMPP: mysql://root@127.0.0.1:3306/gsgchat)',
   TRACKING_SECRET: 'una clave larga y secreta cualquiera (firma los enlaces): por ejemplo, 32 letras y números al azar',
 };
 

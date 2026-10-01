@@ -85,7 +85,7 @@ export interface ProcesosRepo {
 
 // ------------------------------------------------------------ lectura de filas
 
-/** La columna jsonb llega como objeto (pg) o como texto (algunas versiones de PGlite). */
+/** La columna json llega como objeto (la capa de la base la convierte); por si acaso, tambien se acepta texto. */
 function json<T>(v: unknown, porDefecto: T): T {
   if (v === null || v === undefined) return porDefecto;
   if (typeof v === 'string') {
@@ -216,22 +216,23 @@ const JSON_PERSONA = new Set(['respuestas', 'datos']);
 const VIVOS_SQL = `(${ESTADOS_VIVOS.map((e) => `'${e}'`).join(',')})`;
 
 export function createProcesosRepo(pool: Pool): ProcesosRepo {
-  return {
+  const repo: ProcesosRepo = {
     async crearProceso(p) {
-      const { rows } = await pool.query<ProcesoRow>(
+      const { insertId } = await pool.query(
         `insert into procesos (nombre, plantilla, descripcion, pasos, ritmo, cierre, estado)
-         values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7) returning *`,
+         values ($1, $2, $3, $4, $5, $6, $7)`,
         [p.nombre, p.plantilla ?? null, p.descripcion ?? '', JSON.stringify(p.pasos), JSON.stringify(p.ritmo), JSON.stringify(p.cierre), p.estado ?? 'activo'],
       );
+      const { rows } = await pool.query<ProcesoRow>('select * from procesos where id = $1', [insertId]);
       return procesoDe(rows[0]!);
     },
 
     async actualizarProceso(id, patch) {
       const sets: string[] = [];
       const params: unknown[] = [];
-      const poner = (col: string, v: unknown, jsonb = false) => {
-        params.push(jsonb ? JSON.stringify(v) : v);
-        sets.push(`${col} = $${params.length}${jsonb ? '::jsonb' : ''}`);
+      const poner = (col: string, v: unknown, esJson = false) => {
+        params.push(esJson ? JSON.stringify(v) : v);
+        sets.push(`${col} = $${params.length}`);
       };
       if (patch.nombre !== undefined) poner('nombre', patch.nombre);
       if (patch.descripcion !== undefined) poner('descripcion', patch.descripcion);
@@ -240,7 +241,8 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
       if (patch.cierre !== undefined) poner('cierre', patch.cierre, true);
       if (patch.estado !== undefined) poner('estado', patch.estado);
       params.push(id);
-      const { rows } = await pool.query<ProcesoRow>(`update procesos set ${[...sets, 'updated_at = now()'].join(', ')} where id = $${params.length} returning *`, params);
+      await pool.query(`update procesos set ${[...sets, 'updated_at = now(3)'].join(', ')} where id = $${params.length}`, params);
+      const { rows } = await pool.query<ProcesoRow>('select * from procesos where id = $1', [id]);
       return rows[0] ? procesoDe(rows[0]) : null;
     },
 
@@ -260,7 +262,8 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
     },
 
     async crearCorrida(c) {
-      const { rows } = await pool.query<CorridaRow>('insert into proceso_corridas (proceso_id, nombre, origen) values ($1, $2, $3) returning *', [c.procesoId, c.nombre, c.origen]);
+      const { insertId } = await pool.query('insert into proceso_corridas (proceso_id, nombre, origen) values ($1, $2, $3)', [c.procesoId, c.nombre, c.origen]);
+      const { rows } = await pool.query<CorridaRow>('select * from proceso_corridas where id = $1', [insertId]);
       return corridaDe(rows[0]!);
     },
 
@@ -276,13 +279,13 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
         params.push(filtro.procesoId);
         where = `where proceso_id = $1`;
       }
-      params.push(filtro.limit ?? 50);
+      params.push(Number(filtro.limit ?? 50));
       const { rows } = await pool.query<CorridaRow>(`select * from proceso_corridas ${where} order by id desc limit $${params.length}`, params);
       return rows.map(corridaDe);
     },
 
     async actualizarCorrida(id, patch) {
-      const sets: string[] = ['updated_at = now()'];
+      const sets: string[] = ['updated_at = now(3)'];
       const params: unknown[] = [];
       if (patch.estado !== undefined) {
         params.push(patch.estado);
@@ -293,18 +296,19 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
         sets.push(`nombre = $${params.length}`);
       }
       params.push(id);
-      const { rows } = await pool.query<CorridaRow>(`update proceso_corridas set ${sets.join(', ')} where id = $${params.length} returning *`, params);
-      return rows[0] ? corridaDe(rows[0]) : null;
+      await pool.query(`update proceso_corridas set ${sets.join(', ')} where id = $${params.length}`, params);
+      return repo.corrida(id);
     },
 
     async agregarPersonas(corridaId, procesoId, personas) {
       const creadas: PersonaProceso[] = [];
       for (const p of personas) {
-        const { rows } = await pool.query<PersonaRow>(
+        const { insertId } = await pool.query(
           `insert into proceso_personas (corrida_id, proceso_id, phone, telefono_crudo, nombre, datos, estado, motivo)
-           values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8) returning *`,
+           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [corridaId, procesoId, p.phone, p.telefonoCrudo, p.nombre, JSON.stringify(p.datos ?? {}), p.estado ?? 'pendiente', p.motivo ?? null],
         );
+        const { rows } = await pool.query<PersonaRow>('select * from proceso_personas where id = $1', [insertId]);
         creadas.push(personaDe(rows[0]!));
       }
       return creadas;
@@ -325,15 +329,15 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
       if (filtro.corridaId !== undefined) poner('corrida_id = ?', filtro.corridaId);
       if (filtro.procesoId !== undefined) poner('proceso_id = ?', filtro.procesoId);
       if (filtro.phone) poner('phone = ?', filtro.phone);
-      if (filtro.estados?.length) poner('estado = any(?)', filtro.estados);
-      if (filtro.conRespuestas) where.push(`respuestas <> '{}'::jsonb`);
-      params.push(filtro.limit ?? 2000);
+      if (filtro.estados?.length) poner('estado in (?)', filtro.estados);
+      if (filtro.conRespuestas) where.push(`json_length(respuestas) > 0`);
+      params.push(Number(filtro.limit ?? 2000));
       const { rows } = await pool.query<PersonaRow>(`select * from proceso_personas ${where.length ? `where ${where.join(' and ')}` : ''} order by id desc limit $${params.length}`, params);
       return rows.map(personaDe);
     },
 
     async actualizarPersona(id, patch) {
-      const sets: string[] = ['updated_at = now()'];
+      const sets: string[] = ['updated_at = now(3)'];
       const params: unknown[] = [];
       for (const [clave, valor] of Object.entries(patch) as Array<[keyof PatchPersona, unknown]>) {
         if (valor === undefined) continue;
@@ -341,11 +345,11 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
         if (!col) continue;
         const esJson = JSON_PERSONA.has(clave);
         params.push(esJson ? JSON.stringify(valor) : valor);
-        sets.push(`${col} = $${params.length}${esJson ? '::jsonb' : ''}`);
+        sets.push(`${col} = $${params.length}`);
       }
       params.push(id);
-      const { rows } = await pool.query<PersonaRow>(`update proceso_personas set ${sets.join(', ')} where id = $${params.length} returning *`, params);
-      return rows[0] ? personaDe(rows[0]) : null;
+      await pool.query(`update proceso_personas set ${sets.join(', ')} where id = $${params.length}`, params);
+      return repo.persona(id);
     },
 
     async vivaPorTelefono(phone) {
@@ -371,9 +375,9 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
           where p.estado in ${VIVOS_SQL} and not p.pausada and p.phone is not null
             and c.estado = 'activa' and r.estado = 'activo'
             and (p.proximo_at is null or p.proximo_at <= $1)
-          order by p.proximo_at nulls first, p.id
+          order by p.proximo_at is not null, p.proximo_at, p.id
           limit $2`,
-        [ahora, limit],
+        [ahora, Number(limit)],
       );
       return rows.map(personaDe);
     },
@@ -389,7 +393,7 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
         params.push(filtro.procesoId);
         where.push(`proceso_id = $${params.length}`);
       }
-      const { rows } = await pool.query<{ estado: string; n: number }>(`select estado, count(*)::int as n from proceso_personas ${where.length ? `where ${where.join(' and ')}` : ''} group by estado`, params);
+      const { rows } = await pool.query<{ estado: string; n: number }>(`select estado, count(*) as n from proceso_personas ${where.length ? `where ${where.join(' and ')}` : ''} group by estado`, params);
       const salida: Record<string, number> = {};
       for (const r of rows) salida[r.estado] = Number(r.n);
       return salida;
@@ -400,8 +404,9 @@ export function createProcesosRepo(pool: Pool): ProcesosRepo {
     },
 
     async eventos(personaId, limit = 100) {
-      const { rows } = await pool.query<{ id: number; persona_id: number; tipo: string; detalle: string | null; en: Date | string }>('select * from proceso_eventos where persona_id = $1 order by id desc limit $2', [personaId, limit]);
+      const { rows } = await pool.query<{ id: number; persona_id: number; tipo: string; detalle: string | null; en: Date | string }>('select * from proceso_eventos where persona_id = $1 order by id desc limit $2', [personaId, Number(limit)]);
       return rows.map((r) => ({ id: Number(r.id), personaId: Number(r.persona_id), tipo: r.tipo, detalle: r.detalle, en: fecha(r.en)! }));
     },
   };
+  return repo;
 }

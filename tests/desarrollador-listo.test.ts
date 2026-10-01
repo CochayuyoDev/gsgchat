@@ -1,6 +1,6 @@
 /**
  * «¿Está listo para GSG?» del Modulo desarrollador, sobre una tienda de verdad
- * (armarTienda: base PGlite, API, cola, simulador) con un WhatsApp de mentira.
+ * (armarTienda: base MySQL de prueba, API, cola, simulador) con un WhatsApp de mentira.
  *
  * Lo que tiene que cumplir:
  *  - con todo en orden, el recorrido entero da verde y dice «Listo…»;
@@ -24,21 +24,35 @@ import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { recorrerContrato } from '../src/desarrollador/comprobaciones.js';
 import { compararContrato, leerContrato } from '../src/desarrollador/contrato.js';
 import { createFakeWhatsApp } from './fakes.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
+
+/** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
+const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
 
 describe('Módulo desarrollador: ¿está listo para GSG?', () => {
   let raiz: string;
   let tienda: TiendaViva;
+  let b: BaseDePrueba;
   let cookie: string;
   // La «API real de GSG»: un servidor aparte que apunta cada llamada.
   const llamadasReales: Array<{ metodo: string; ruta: string }> = [];
   let real: http.Server;
   let urlReal: string;
+  /** Lo que la tienda apunta en el log (para saber cuando paso la primera vuelta del motor). */
+  const avisos: string[] = [];
+  const warnOriginal = console.warn;
 
   const api = async (method: 'GET' | 'POST', url: string, payload?: unknown, conCookie = cookie) => {
     const r = await tienda.app.inject({ method, url, headers: { cookie: conCookie, ...(payload !== undefined ? { 'content-type': 'application/json' } : {}) }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
     return { status: r.statusCode, body: r.body ? (JSON.parse(r.body) as Record<string, any>) : {} };
   };
-  const sql = async <T = Record<string, unknown>>(q: string, p: unknown[] = []) => (await tienda.pglite!.db.query<T>(q, p)).rows;
+  const sql = async <T = Record<string, unknown>>(q: string, p: unknown[] = []) => (await b.pool.query<T>(q, p)).rows;
+
+  // La base aparte: la primera vez hay que crear sus tablas y tarda (usa el
+  // hookTimeout largo de vitest.config, no el de armar la tienda).
+  beforeAll(async () => {
+    b = await baseDePrueba();
+  });
 
   beforeAll(async () => {
     real = http.createServer((req, res) => {
@@ -49,14 +63,18 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     await new Promise<void>((r) => real.listen(0, '127.0.0.1', () => r()));
     urlReal = `http://127.0.0.1:${(real.address() as AddressInfo).port}/v1`;
 
+    console.warn = (...a: unknown[]) => {
+      avisos.push(String(a[0]));
+      warnOriginal(...a);
+    };
     raiz = mkdtempSync(path.join(tmpdir(), 'dev-listo-'));
     const secretos = bootstrapSecrets(raiz);
     tienda = await armarTienda({
       id: 'listo',
       slug: 'listo',
-      env: { PUBLIC_BASE_URL: 'https://chat.gsg.pe', DATABASE_URL: `pglite://${path.join(raiz, 'datos')}`, TRACKING_SECRET: secretos.trackingSecret, WHATSAPP_PROVIDER: 'local', BUSINESS_NAME: 'GSG', TIMEZONE: 'America/Lima', RAFAGA_MS: '0' } as NodeJS.ProcessEnv,
+      env: { PUBLIC_BASE_URL: 'https://chat.gsg.pe', DATABASE_URL: b.url, TRACKING_SECRET: secretos.trackingSecret, WHATSAPP_PROVIDER: 'local', BUSINESS_NAME: 'GSG', TIMEZONE: 'America/Lima', RAFAGA_MS: '0' } as NodeJS.ProcessEnv,
       secretos,
-      base: { tipo: 'pglite', dir: path.join(raiz, 'datos') },
+      base: { url: b.url, base: b.base },
       authDir: path.join(raiz, 'auth'),
       mediaDir: path.join(raiz, 'medios'),
       carpetaCopias: path.join(raiz, 'copias'),
@@ -75,16 +93,24 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     // cargada la prueba pasa de 5 minutos y la sincronizacion caia en medio.
     expect((await api('POST', '/admin/entregas/ajustes', { sincronizarCadaMin: 24 * 60 })).status).toBe(200);
     expect((await api('POST', '/admin/fiabilidad/ajustes', { humo: { activo: false } })).status).toBe(200);
+    // La PRIMERA vuelta del motor de entregas sincroniza siempre (no hay una
+    // anterior). Con la base lenta puede caer despues de conectar la API real:
+    // se espera a que haya pasado (todavia sin GSG) antes de conectarla.
+    for (const hasta = Date.now() + 60_000 * LENTO; !avisos.some((m) => m.includes('la sincronización con GSG')) && Date.now() < hasta; ) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
     // La tienda, conectada a su «API real» de GSG.
     const c = await api('POST', '/admin/entregas/gsg', { modo: 'real', url: urlReal, token: 'token-real-de-gsg' });
     expect(c.status).toBe(200);
     llamadasReales.length = 0;
-  }, 180_000);
+  }, 180_000 * LENTO);
 
   afterAll(async () => {
+    console.warn = warnOriginal;
     await tienda?.parar();
+    await b?.cerrar();
     await new Promise<void>((r) => real?.close(() => r()));
-    rmSync(raiz, { recursive: true, force: true });
+    if (raiz) rmSync(raiz, { recursive: true, force: true });
   });
 
   it('el contrato escrito coincide con el código campo por campo', async () => {
@@ -109,7 +135,7 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     // Y el último resultado se puede volver a ver.
     const u = await api('GET', '/admin/desarrollador/listo/ultimo');
     expect(u.body.resultado.listo).toBe(true);
-  }, 180_000);
+  }, 180_000 * LENTO);
 
   it('la conexión de la tienda queda igual y la API real no recibe ninguna llamada', async () => {
     expect(llamadasReales).toEqual([]);
@@ -120,7 +146,7 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
   it('no deja pedidos, clientes, reportes ni claves temporales de la prueba', async () => {
     expect(await sql("select referencia from entregas where referencia like 'PRUEBA-LISTO-%'")).toEqual([]);
     expect(await sql("select referencia from rutas_solicitudes where referencia like 'PRUEBA-LISTO-%'")).toEqual([]);
-    expect(await sql("select id from rutas_reportes where payload->>'referencia' like 'PRUEBA-LISTO-%'")).toEqual([]);
+    expect(await sql("select id from rutas_reportes where json_unquote(json_extract(payload, '$.referencia')) like 'PRUEBA-LISTO-%'")).toEqual([]);
     expect(await sql("select phone from contacts where phone like '5100009%'")).toEqual([]);
     expect(await sql("select nombre from claves_api where nombre like 'Comprobación GSG (temporal)%'")).toEqual([]);
   });
@@ -136,7 +162,7 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     expect(res.faltan.some((f) => f.startsWith('GSG recibe la ubicación'))).toBe(true);
     expect(res.titular).toMatch(/Todavía no está listo/);
     expect(llamadasReales).toEqual([]);
-  }, 180_000);
+  }, 180_000 * LENTO);
 
   it('la lectura contra la API real pide confirmación y, confirmada, es solo un GET de la lista del día', async () => {
     const sin = await api('POST', '/admin/desarrollador/listo/ping-real', {});

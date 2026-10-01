@@ -445,11 +445,9 @@ export async function resumirRespaldo(deps: ArchiveDeps, id: number, opts: { for
     }
   }
   // Si mientras tanto alguien ya le puso resumen (una persona desde la
-  // pantalla), lo suyo manda.
-  if (!opts.forzar) {
-    const ahora = await deps.repos.archives.get(id);
-    if (ahora?.resumen) return ahora;
-  }
+  // pantalla), lo suyo manda: se escribe solo si sigue sin resumen, en la
+  // misma sentencia (mirar y luego escribir dejaba un hueco entre medias).
+  if (!opts.forzar) return deps.repos.archives.ponerResumenSiFalta(id, resumen, etiquetas);
   return deps.repos.archives.update(id, { resumen, etiquetas });
 }
 
@@ -484,6 +482,21 @@ export function iniciales(nombre: string | null): string | null {
   return partes.map((p) => `${p[0]!.toUpperCase()}.`).join(' ');
 }
 
+/**
+ * El nombre del cliente dentro de un texto (el resumen dice "Ana Quispe
+ * escribio...", el negocio contesta "Anotado, Ana"): cada palabra del nombre
+ * pasa a su inicial. Solo las de 3 letras o mas, para no tapar un "de" o un "la".
+ */
+export function taparNombre(texto: string, nombre: string | null): string {
+  if (!nombre?.trim()) return texto;
+  let salida = texto;
+  for (const parte of nombre.trim().split(/\s+/).filter((p) => p.length >= 3)) {
+    const literal = parte.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    salida = salida.replace(new RegExp(`(?<![\\p{L}\\p{N}])${literal}(?![\\p{L}\\p{N}])`, 'giu'), `${parte[0]!.toUpperCase()}.`);
+  }
+  return salida;
+}
+
 export interface OpcionesExportar {
   /** Sin datos personales: telefono tapado, iniciales, y teléfonos/correos/DNI tapados dentro de los textos. */
   anonimo?: boolean;
@@ -498,7 +511,7 @@ export interface OpcionesExportar {
 /** Los textos de una conversacion tal como se van a ensenar, segun las opciones. */
 function vistaDe(a: ChatArchive, opts: OpcionesExportar) {
   const anonimo = Boolean(opts.anonimo);
-  const tapar = (t: string | null | undefined): string => (t ? (anonimo ? taparDatosPersonales(t) : t) : '');
+  const tapar = (t: string | null | undefined): string => (t ? (anonimo ? taparNombre(taparDatosPersonales(t), a.name) : t) : '');
   const nombre = anonimo ? iniciales(a.name) : a.name;
   const telefono = anonimo || opts.publico ? taparTelefono(a.phone) : `+${a.phone}`;
   return {

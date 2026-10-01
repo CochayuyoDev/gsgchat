@@ -73,9 +73,9 @@ async function siguienteIndice(deps: DepsDesarrollador, prefijo: string): Promis
   const db = deps.repos.desarrollador!;
   const r = await db.query<{ n: number | string | null }>(
     `select max(n) as n from (
-       select substring(phone from 7)::int as n from contacts where phone like $1 and length(phone) = 11
-       union all select substring(phone from 7)::int from entregas where phone like $1 and length(phone) = 11
-       union all select substring(phone from 7)::int from motorizados where phone like $1 and length(phone) = 11
+       select cast(substring(phone, 7) as signed) as n from contacts where phone like $1 and char_length(phone) = 11
+       union all select cast(substring(phone, 7) as signed) from entregas where phone like $1 and char_length(phone) = 11
+       union all select cast(substring(phone, 7) as signed) from motorizados where phone like $1 and char_length(phone) = 11
      ) t`,
     [`${prefijo}%`],
   );

@@ -1,23 +1,25 @@
 /**
  * Arranque corto: WhatsApp de verdad, sin montar nada.
  *
- * El servidor real, el cliente real y Postgres real, pero sin instalar nada:
- * cada base corre embebida (PGlite, Postgres compilado a WebAssembly) sobre
- * una carpeta local, y las colas van en memoria en vez de en Redis.
+ * El servidor real y el cliente real, contra el MySQL/MariaDB de esta maquina
+ * (en Windows, el de XAMPP: root sin clave en 127.0.0.1:3306), y con las
+ * colas en memoria en vez de en Redis.
  *
  *   npm run quick        y luego /registro (o /login), escanear el QR, listo
  *
+ * La base por defecto es mysql://root@127.0.0.1:3306/gsgchat; otra con
+ * DATABASE_URL en el entorno o en el .env. Las tablas se crean solas.
+ *
  * Es una PLATAFORMA de tiendas (ver src/plataforma): cualquiera se registra en
- * /registro y cada registro es una tienda nueva, con su base, su WhatsApp y
- * sus carpetas en `.wa-tiendas/<id>/`. La instalacion de antes (`.wa-data`,
- * `.wa-auth`, `.wa-media`) sigue tal cual como la tienda "principal", con sus
- * cuentas, su numero vinculado y sus integraciones.
+ * /registro y cada registro es una tienda nueva, con su base (gsgchat_t_<id>),
+ * su WhatsApp y sus carpetas en `.wa-tiendas/<id>/`. La instalacion de antes
+ * (la base gsgchat, `.wa-auth`, `.wa-media`) sigue tal cual como la tienda
+ * "principal", con sus cuentas, su numero vinculado y sus integraciones.
  *
  * Todo persiste entre reinicios. Es para probar en una maquina, no para
- * produccion: un solo proceso y sin concurrencia.
+ * produccion: un solo proceso y sin Redis.
  */
 
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 // Una promesa suelta que falle no puede apagar el sistema entero: se apunta
@@ -33,11 +35,13 @@ process.on('uncaughtException', (error) => {
 
 import { avisoDireccionPublica, loadConfig } from '../src/config.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
-import { secretsDirectory } from '../src/runtime.js';
+import { comprobarServidorDeBase, explicarErrorDeBase, secretsDirectory } from '../src/runtime.js';
+import { baseDeLaUrl } from '../src/db/pool.js';
+import { existeBase } from '../src/db/bases.js';
 import { defaultAuthDir } from '../src/whatsapp/local/session.js';
 import { mediaDirectory } from '../src/whatsapp/local/media.js';
 import { carpetaDeCopiasPorDefecto } from '../src/respaldo/servicio.js';
-import { crearPlataforma } from '../src/plataforma/plataforma.js';
+import { basesDeLaPlataforma, crearPlataforma } from '../src/plataforma/plataforma.js';
 import { crearServidorPlataforma } from '../src/plataforma/servidor.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -49,7 +53,15 @@ const BASE = (process.env.PUBLIC_BASE_URL?.trim() || `http://localhost:${PORT}`)
 // Donde escucha: solo esta maquina (lo de siempre; un proxy https delante la
 // publica) salvo que HOST diga otra cosa (0.0.0.0 = toda la red).
 const HOST = process.env.HOST?.trim() || '127.0.0.1';
-const DATA_DIR = process.env.QUICK_DATA_DIR ?? path.join(process.cwd(), '.wa-data');
+// La base: la de DATABASE_URL si la hay (entorno o .env), si no la de XAMPP.
+const DATABASE_URL = process.env.DATABASE_URL?.trim() || 'mysql://root@127.0.0.1:3306/gsgchat';
+if (!/^(mysql|mariadb):\/\//i.test(DATABASE_URL)) {
+  console.error(
+    `\n  No se puede arrancar: DATABASE_URL es «${DATABASE_URL.replace(/\/\/[^@/]*@/, '//…@')}» y GSGchat ahora guarda todo en MySQL/MariaDB.\n` +
+      '  Bórrala del .env (se usa la de XAMPP: mysql://root@127.0.0.1:3306/gsgchat) o pon la de tu servidor: mysql://usuario:clave@host:3306/gsgchat\n',
+  );
+  process.exit(1);
+}
 const TIENDAS_DIR = process.env.TIENDAS_DIR ?? path.join(process.cwd(), '.wa-tiendas');
 
 // El mismo .secrets.json que el arranque de verdad: asi la clave que cifra
@@ -64,7 +76,7 @@ const envPrincipal = {
   ...process.env,
   PORT: String(PORT),
   PUBLIC_BASE_URL: BASE,
-  DATABASE_URL: `pglite://${DATA_DIR}`,
+  DATABASE_URL,
   // Ni Meta ni contenedor: el cliente corre dentro de este proceso.
   WHATSAPP_PROVIDER: 'local',
   TRACKING_SECRET: secrets.trackingSecret,
@@ -94,12 +106,26 @@ const envPrincipal = {
 const configPrincipal = loadConfig(envPrincipal);
 const avisoPublico = avisoDireccionPublica(BASE);
 
-// La tienda de siempre existe si esta maquina ya tenia datos del arranque corto.
-const hayPrincipal = existsSync(DATA_DIR);
+// Sin MySQL no hay nada que hacer: se dice que falta y como arreglarlo.
+const sinBase = await comprobarServidorDeBase(DATABASE_URL);
+if (sinBase) {
+  console.error(`\n  No se puede arrancar: ${sinBase}\n`);
+  process.exit(1);
+}
+
+// La tienda de siempre existe si esta maquina ya tenia su base (la de la URL).
+const BASE_PRINCIPAL = baseDeLaUrl(DATABASE_URL)!;
+const hayPrincipal = await existeBase(DATABASE_URL, BASE_PRINCIPAL);
 
 // Donde van las copias de seguridad: COPIAS_DIR si esta (la de cada tienda
 // nueva es COPIAS_DIR/<su nombre>); si no, la carpeta de siempre.
 const CARPETA_COPIAS = process.env.COPIAS_DIR?.trim() || carpetaDeCopiasPorDefecto();
+
+/** Un fallo de la base al arrancar: se explica y se termina. */
+function sinArrancar(error: unknown): never {
+  console.error(`\n  No se puede arrancar: ${explicarErrorDeBase(error, DATABASE_URL)}\n`);
+  process.exit(1);
+}
 
 const plataforma = await crearPlataforma({
   raiz: TIENDAS_DIR,
@@ -108,13 +134,13 @@ const plataforma = await crearPlataforma({
   // Lo mismo que el arranque corto le da a la principal: simular entrantes y
   // esperar a que el cliente termine de escribir.
   extraTiendas: { DEV_SIMULATE_INBOUND: 'true', RAFAGA_MS: process.env.RAFAGA_MS ?? '4000', TIMEZONE: configPrincipal.timezone },
-  base: { tipo: 'pglite' },
+  base: { url: DATABASE_URL },
   redisUrl: null,
   principal: hayPrincipal
     ? {
         env: envPrincipal,
         secretos: secrets,
-        base: { tipo: 'pglite', dir: DATA_DIR },
+        base: { url: DATABASE_URL },
         authDir: defaultAuthDir(),
         mediaDir: mediaDirectory(),
         carpetaCopias: CARPETA_COPIAS,
@@ -131,8 +157,8 @@ const plataforma = await crearPlataforma({
   // El catalogo local hace de catalogo aprobado: sin Meta no hay a quien pedir permiso.
   sembrarPlantillasLocales: true,
   carpetaCopias: CARPETA_COPIAS,
-});
-await plataforma.arrancar();
+}).catch(sinArrancar);
+await plataforma.arrancar().catch(sinArrancar);
 
 const servidor = await crearServidorPlataforma({ plataforma, segura: BASE.startsWith('https://') });
 await servidor.escuchar(PORT, HOST);
@@ -147,7 +173,7 @@ process.on('SIGTERM', () => void apagar());
 
 const tiendas = await plataforma.directorio.tiendas();
 console.log(`
-  GSGchat - plataforma de tiendas (Postgres embebido, WhatsApp de verdad)
+  GSGchat - plataforma de tiendas (MySQL/MariaDB, WhatsApp de verdad)
 
   Entrar           ${BASE}/login
   Crear una tienda ${BASE}/registro   (cada registro es una tienda nueva e independiente)
@@ -155,10 +181,17 @@ console.log(`
   Tiendas: ${tiendas.length ? tiendas.map((t) => `${t.nombre} (${t.principal ? 'principal' : `/tienda/${t.slug}`})`).join(', ') : 'ninguna todavía'}
 
   Cada tienda conecta SU WhatsApp desde su panel (Conexión → escanear el QR).
-  Datos de la principal   ${DATA_DIR}  ·  vinculación ${defaultAuthDir()}
-  Tiendas nuevas          ${TIENDAS_DIR}
+  Base                    ${BASE_PRINCIPAL} en ${servidorDe(DATABASE_URL)} (tiendas nuevas: ${basesDeLaPlataforma(DATABASE_URL).raiz}_t_<id>)
+  Vinculación principal   ${defaultAuthDir()}
+  Carpetas de las tiendas ${TIENDAS_DIR}
 ${avisoPublico ? `\n  ⚠ Dirección pública: ${avisoPublico}\n    (Para pruebas en esta PC está bien; para producción mira docs/PASO-A-PRODUCCION.md.)\n` : ''}${
   configPrincipal.soloNumeros.length
     ? `\n  ⚠ MODO PRUEBA (SOLO_NUMEROS en el .env): solo se escribe a ${configPrincipal.soloNumeros.join(', ')}.\n    Para atender a los clientes de verdad, deja SOLO_NUMEROS vacío y reinicia.\n`
     : ''
 }`);
+
+/** "127.0.0.1:3306" (sin usuario ni clave: esto se ve en la consola). */
+function servidorDe(url: string): string {
+  const u = new URL(url.replace(/^mariadb:/i, 'mysql:'));
+  return `${u.hostname || 'localhost'}:${u.port || '3306'}`;
+}

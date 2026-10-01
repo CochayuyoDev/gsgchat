@@ -9,7 +9,7 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import type { Pool } from '../db/pool.js';
+import { nuevoId, type Pool } from '../db/pool.js';
 
 export interface ClaveApi {
   id: string;
@@ -90,11 +90,16 @@ const COLUMNAS = 'id, nombre, prefijo, creada_por, created_at, ultimo_uso_at, re
 export function createClavesApiRepo(pool: Pool): ClavesApiRepo {
   return {
     async crear(input) {
-      const { rows } = await pool.query<Row>(
-        `insert into claves_api (nombre, prefijo, hash, creada_por, permisos) values ($1,$2,$3,$4,$5)
-         returning ${COLUMNAS}`,
-        [input.nombre.trim(), input.prefijo, input.hash, input.creadaPor, input.permisos?.length ? input.permisos : ['*']],
-      );
+      const id = nuevoId();
+      await pool.query(`insert into claves_api (id, nombre, prefijo, hash, creada_por, permisos) values ($1,$2,$3,$4,$5,$6)`, [
+        id,
+        input.nombre.trim(),
+        input.prefijo,
+        input.hash,
+        input.creadaPor,
+        JSON.stringify(input.permisos?.length ? input.permisos : ['*']),
+      ]);
+      const { rows } = await pool.query<Row>(`select ${COLUMNAS} from claves_api where id = $1`, [id]);
       return deFila(rows[0]!);
     },
     async listar() {
@@ -109,7 +114,7 @@ export function createClavesApiRepo(pool: Pool): ClavesApiRepo {
       return rows[0] ? deFila(rows[0]) : null;
     },
     async revocar(id) {
-      const { rowCount } = await pool.query('update claves_api set revocada_at = now() where id = $1 and revocada_at is null', [id]);
+      const { rowCount } = await pool.query('update claves_api set revocada_at = now(3) where id = $1 and revocada_at is null', [id]);
       return (rowCount ?? 0) > 0;
     },
     async tocarUso(id, at) {

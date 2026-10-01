@@ -3,7 +3,7 @@
  * de datos en memoria y un cliente de WhatsApp falso.
  *
  * Existe para poder ver y tocar el panel y las paginas de rastreo sin
- * Postgres, sin Redis y sin credenciales de Meta. NO es un modo de
+ * MySQL, sin Redis y sin credenciales de Meta. NO es un modo de
  * produccion: no persiste nada y no manda mensajes de verdad.
  *
  *   npm run demo
@@ -63,7 +63,7 @@ const BASE = `http://localhost:${PORT}`;
 const config = loadConfig({
   PORT: String(PORT),
   PUBLIC_BASE_URL: BASE,
-  DATABASE_URL: 'postgres://demo/demo',
+  DATABASE_URL: 'mysql://demo/demo',
   WHATSAPP_TOKEN: 'demo',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',

@@ -105,10 +105,11 @@ export function crearCacheGeoSql(pool: Pool): CacheGeo {
     },
     async guardar(consulta, e) {
       await pool.query(
-        `insert into geocodificacion_cache (consulta, encontrado, lat, lng, precision, distrito, texto, created_at)
+        // `precision` es palabra reservada en MySQL: siempre entre comillas invertidas.
+        `insert into geocodificacion_cache (consulta, encontrado, lat, lng, \`precision\`, distrito, texto, created_at)
          values ($1,$2,$3,$4,$5,$6,$7,$8)
-         on conflict (consulta) do update set encontrado = excluded.encontrado, lat = excluded.lat, lng = excluded.lng,
-           precision = excluded.precision, distrito = excluded.distrito, texto = excluded.texto, created_at = excluded.created_at`,
+         on duplicate key update encontrado = values(encontrado), lat = values(lat), lng = values(lng),
+           \`precision\` = values(\`precision\`), distrito = values(distrito), texto = values(texto), created_at = values(created_at)`,
         [consulta, e.encontrado, e.lat, e.lng, e.precision, e.distrito, e.texto, e.creadoAt],
       );
     },

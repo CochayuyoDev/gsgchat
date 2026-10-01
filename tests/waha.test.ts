@@ -432,7 +432,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
   async function montar() {
     const config = loadConfig({
       PUBLIC_BASE_URL: 'http://localhost:3000',
-      DATABASE_URL: 'postgres://x/y',
+      DATABASE_URL: 'mysql://x/y',
       WHATSAPP_PROVIDER: 'waha',
       WAHA_URL: BASE,
       WHATSAPP_VERIFY_TOKEN: HMAC,

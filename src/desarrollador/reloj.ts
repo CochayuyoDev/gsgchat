@@ -25,7 +25,7 @@ export const MAXIMO_MINUTOS = 24 * 60;
 
 /** La condicion SQL "este telefono es de prueba" sobre una columna. */
 function dePrueba(columna: string): string {
-  return `((${columna} like '${PREFIJO_CLIENTE_PRUEBA}%' or ${columna} like '${PREFIJO_MOTORIZADO_PRUEBA}%') and length(${columna}) = 11)`;
+  return `((${columna} like '${PREFIJO_CLIENTE_PRUEBA}%' or ${columna} like '${PREFIJO_MOTORIZADO_PRUEBA}%') and char_length(${columna}) = 11)`;
 }
 
 /** Que filas de cada tabla son de prueba. */
@@ -41,9 +41,10 @@ const TABLAS: Array<{ tabla: string; donde: string }> = [
 ];
 
 async function columnasDeTiempo(db: DesarrolladorRepo, tabla: string): Promise<string[]> {
+  // El alias hace falta: MySQL 8 devuelve COLUMN_NAME en mayusculas.
   const r = await db.query<{ column_name: string }>(
-    `select column_name from information_schema.columns
-      where table_schema = current_schema() and table_name = $1 and data_type like 'timestamp%'`,
+    `select column_name as column_name from information_schema.columns
+      where table_schema = database() and table_name = $1 and data_type in ('datetime', 'timestamp')`,
     [tabla],
   );
   return r.rows.map((x) => x.column_name).filter((c) => /^[a-z_][a-z0-9_]*$/.test(c));
@@ -69,11 +70,17 @@ export async function cerrarDiaDePrueba(
   db: DesarrolladorRepo,
   entregas: { cerrarDia(opts: { soloPrueba: true; quien: string }): Promise<{ ok: boolean; motivo?: string; resultado?: { sinTerminar: string[]; dadasPorEntregadas: string[] } }> },
 ): Promise<ResultadoCierrePrueba> {
-  // Al dia anterior (si ese dia no tiene ya esa referencia: dia+referencia es unica).
+  // Al dia anterior (si ese dia no tiene ya esa referencia: dia+referencia es
+  // unica). MySQL no deja leer en un subselect la tabla que se actualiza: los
+  // que chocarian se apartan antes en una derivada (que se materializa).
   const movidos = await db.query(
-    `update entregas e set dia = e.dia - 1
+    `update entregas e set e.dia = date_sub(e.dia, interval 1 day)
       where ${dePrueba('e.phone')} and e.estado not in ('entregada', 'terminada', 'cancelada')
-        and not exists (select 1 from entregas x where x.dia = e.dia - 1 and x.referencia = e.referencia)`,
+        and e.id not in (
+          select id from (
+            select y.id from entregas y join entregas x on x.dia = date_sub(y.dia, interval 1 day) and x.referencia = y.referencia
+          ) chocan
+        )`,
   );
   const r = await entregas.cerrarDia({ soloPrueba: true, quien: 'Módulo desarrollador' });
   return { movidos: movidos.rowCount, sinTerminar: r.resultado?.sinTerminar ?? [], dadasPorEntregadas: r.resultado?.dadasPorEntregadas ?? [] };
@@ -86,7 +93,7 @@ export async function adelantarLoDePrueba(db: DesarrolladorRepo, minutos: number
   for (const { tabla, donde } of TABLAS) {
     const cols = await columnasDeTiempo(db, tabla);
     if (!cols.length) continue;
-    const set = cols.map((c) => `${c} = ${c} - make_interval(mins => $1::int)`).join(', ');
+    const set = cols.map((c) => `\`${c}\` = \`${c}\` - interval $1 minute`).join(', ');
     const r = await db.query(`update ${tabla} set ${set} where ${donde}`, [m]);
     porTabla[tabla] = r.rowCount;
     filas += r.rowCount;
