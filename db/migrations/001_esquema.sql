@@ -873,7 +873,7 @@ create table if not exists `tiendas` (
   `estado_at` datetime(3) null,
   primary key (`id`),
   unique key `tiendas_slug_key` (`slug`),
-  key `tiendas_nombre_idx` (`nombre`)
+  key `tiendas_nombre_idx` (`nombre`(191))
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin;
 
 create table if not exists `tiendas_avisos` (
