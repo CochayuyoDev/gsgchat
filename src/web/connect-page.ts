@@ -396,6 +396,7 @@ export function connectPage(opts: ConnectOpts): string {
   </div>
 </section>
 ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
+  <p><a class="btn primario" href="/conexion-gsg">Abrir conexión de GSG Courier</a></p>
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">De GSG llegan los pedidos del día, y a GSG le mandamos cada ubicación que registra el cliente.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>

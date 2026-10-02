@@ -104,6 +104,7 @@ export function gsgVigente(): boolean {
  * enciende desde Ajustes.
  */
 export const MENU_GSG: ItemMenu[] = [
+  { id: 'gsg-courier', etiqueta: 'GSG Courier', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Recibir pedidos de Courier: dirección, claves, contrato, validación y últimas recepciones.', soloAdmin: true },
   { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Un vistazo: tus procesos en curso, quién necesita a alguien, los mensajes de hoy y el número.' },
   { id: 'hoy', etiqueta: 'Hoy', href: '/hoy', icono: 'reloj', descripcion: 'Las entregas de hoy: a quién falta la ubicación o confirmar, quién las lleva, a qué hora llegan y qué necesita a alguien.', soloGsg: true },
   { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicación.' },
@@ -228,6 +229,7 @@ export const MENU_GRUPOS: GrupoMenu[] = [
     etiqueta: 'Mi negocio',
     items: [
       { id: 'setup', etiqueta: 'Conexión de WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'Conectar el numero: QR, WAHA o la API oficial de Meta.' },
+      { id: 'gsg-courier', etiqueta: 'GSG Courier', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Recibir pedidos de Courier: dirección, claves, contrato y validación.', soloAdmin: true },
       { id: 'integraciones', etiqueta: 'Conectar mi web y tienda', href: '/panel#integraciones', icono: 'llave', descripcion: 'Stoky (en las dos direcciones, con su estado), el chat dentro de tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas.', soloAdmin: true },
       { id: 'configuracion', etiqueta: 'Configuración', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio, horario, avisos, modo prueba y ritmo.', soloAdmin: true },
       { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contrasenas. Un superadministrador crea administradores; un administrador crea operadores.', soloAdmin: true, avanzado: true },

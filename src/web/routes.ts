@@ -21,6 +21,7 @@ import type { WhatsAppClient } from '../whatsapp/client.js';
 import { checkConnection } from '../whatsapp/dynamic.js';
 import { panelPage } from './pages.js';
 import { connectPage } from './connect-page.js';
+import { registerGsgCourierRoutes } from './gsg-courier-routes.js';
 import { chatPage } from './chat-page.js';
 import { rutasPage } from './rutas-page.js';
 import { manualPage, soportePage } from './ayuda-pages.js';
@@ -168,6 +169,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
 
   const html = (body: string) => ({ body, type: 'text/html; charset=utf-8' });
   const negocio = () => deps.ajustes?.nombreNegocio() ?? config.businessName;
+  await registerGsgCourierRoutes(app, { nombreNegocio: negocio, disponible: Boolean(deps.entregas), demo: config.DEMO_MODE });
   // El modo del sistema (gsg | completo) lo leen todas las paginas al pintar el armazon.
   fijarModoVigente(() => deps.ajustes?.modo() ?? 'gsg');
 

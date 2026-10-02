@@ -125,7 +125,7 @@ export const pedidoSchema = z.object({
 type Pedido = z.infer<typeof pedidoSchema>;
 
 /** Uno, una lista, o { pedidos: [...] }. */
-function leerCuerpo(body: unknown): Pedido[] | { error: string } {
+export function leerCuerpo(body: unknown): Pedido[] | { error: string } {
   const esObjeto = Boolean(body) && typeof body === 'object' && !Array.isArray(body);
   const lista = Array.isArray(body) ? body : esObjeto && Array.isArray((body as { pedidos?: unknown }).pedidos) ? (body as { pedidos: unknown[] }).pedidos : esObjeto && Object.keys(body as object).length ? [body] : [];
   if (!lista.length) return { error: 'Manda un pedido ({referencia, telefono, ...}), una lista de pedidos, o {pedidos: [...]}.' };
