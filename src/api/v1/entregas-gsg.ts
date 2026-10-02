@@ -50,6 +50,22 @@ const textoOpc = z.union([z.string().max(200), z.number()]).nullable().optional(
  * campos sueltos. Ver datosEnvioDeCrudo.
  */
 export const CAMPOS_DATOS_ENVIO = {
+  costServ: textoOpc,
+  referenciaDireccion: textoOpc,
+  fecRegistro: textoOpc,
+  fecRuta: textoOpc,
+  observacionCliente: textoOpc,
+  detalleProducto: textoOpc,
+  telefono2: textoOpc,
+  tamano: textoOpc,
+  cantBultos: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).nullable().optional(),
+  clientePagaDelivery: z.union([z.boolean().transform(v => v ? 'si' : 'no'), z.string().max(200)]).nullable().optional(),
+  sede: textoOpc,
+  tipoRuta: textoOpc,
+  nroDocumento: textoOpc,
+  agenciaNombre: textoOpc,
+  agenciaDestino: textoOpc,
+  pagoEnDestino: z.union([z.boolean().transform(v => v ? 'si' : 'no'), z.string().max(200)]).nullable().optional(),
   producto: textoOpc,
   empresa: z.union([z.object({ codigo: textoOpc, nombre: textoOpc }).passthrough(), z.string().max(200)]).nullable().optional(),
   empresaCodigo: textoOpc,
@@ -81,6 +97,14 @@ export const cambioPedidoSchema = z
   })
   .strict();
 
+const normalizarPedidoGsg = (body: unknown): unknown => {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  const p = body as Record<string, unknown>;
+  return { ...p, referencia: p.referencia ?? p.tracking ?? p.codigoTracking,
+    tracking: p.tracking ?? p.codigoTracking, nombre: p.nombre ?? p.cliente,
+    motorizado: p.motorizado ?? p.driver, monto: p.monto ?? p.montoCobrar };
+};
+
 export const pedidoSchema = z.object({
   referencia: z.string().trim().min(1).max(60),
   // Un telefono malo no tumba la llamada entera: se descarta ese pedido con su motivo.
@@ -108,7 +132,7 @@ function leerCuerpo(body: unknown): Pedido[] | { error: string } {
   if (lista.length > 500) return { error: 'Como mucho 500 pedidos por llamada.' };
   const pedidos: Pedido[] = [];
   for (const [i, p] of lista.entries()) {
-    const r = pedidoSchema.safeParse(p);
+    const r = pedidoSchema.safeParse(normalizarPedidoGsg(p));
     if (!r.success) {
       const falta = r.error.issues[0];
       return { error: `El pedido ${i + 1} no se entiende: ${falta ? `${falta.path.join('.') || 'cuerpo'}: ${falta.message}` : 'revisa los campos'}.` };
@@ -129,6 +153,22 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     direccion: e.direccion,
     distrito: e.distrito,
     notas: e.notas,
+    costServ: e.datosEnvio?.costServ ?? null,
+    referenciaDireccion: e.datosEnvio?.referenciaDireccion ?? null,
+    fecRegistro: e.datosEnvio?.fecRegistro ?? null,
+    fecRuta: e.datosEnvio?.fecRuta ?? null,
+    observacionCliente: e.datosEnvio?.observacionCliente ?? null,
+    detalleProducto: e.datosEnvio?.detalleProducto ?? null,
+    telefono2: e.datosEnvio?.telefono2 ?? null,
+    tamano: e.datosEnvio?.tamano ?? null,
+    cantBultos: e.datosEnvio?.cantBultos ?? null,
+    clientePagaDelivery: e.datosEnvio?.clientePagaDelivery ?? null,
+    sede: e.datosEnvio?.sede ?? null,
+    tipoRuta: e.datosEnvio?.tipoRuta ?? null,
+    nroDocumento: e.datosEnvio?.nroDocumento ?? null,
+    agenciaNombre: e.datosEnvio?.agenciaNombre ?? null,
+    agenciaDestino: e.datosEnvio?.agenciaDestino ?? null,
+    pagoEnDestino: e.datosEnvio?.pagoEnDestino ?? null,
     producto: e.datosEnvio?.producto ?? null,
     empresa: e.datosEnvio?.empresaCodigo || e.datosEnvio?.empresaNombre ? { codigo: e.datosEnvio?.empresaCodigo ?? null, nombre: e.datosEnvio?.empresaNombre ?? null, texto: empresaEnTexto(e.datosEnvio) } : null,
     tracking: e.datosEnvio?.tracking ?? null,

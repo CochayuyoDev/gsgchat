@@ -312,6 +312,22 @@ curl -X POST https://<gsgchat>/api/v1/entregas \
 | `remitente` | no | Quién firma el mensaje. |
 | `motorizado` | no | El motorizado que GSG ya asignó a ese pedido: `{ "nombre": "Carlos", "telefono": "999000003" }` (o solo el nombre). Su número es el que se le da al cliente en el cierre y en UBI REGISTRADA. |
 | `telefonoMotorizado` | no | El teléfono de ese motorizado, suelto. Si no llega ninguno (ni hay motorizado asignado en GSGchat), al cliente se le da el número de soporte. |
+| `costServ` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `referenciaDireccion` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `fecRegistro` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `fecRuta` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `observacionCliente` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `detalleProducto` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `telefono2` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `tamano` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `cantBultos` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `clientePagaDelivery` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `sede` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `tipoRuta` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `nroDocumento` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `agenciaNombre` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `agenciaDestino` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `pagoEnDestino` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
 
 Los datos del envío son opcionales: lo que falta no sale en el mensaje. Si el
 pedido ya estaba (va en `repetidas`) y trae datos del envío nuevos, se guardan.
@@ -377,6 +393,22 @@ curl -X PATCH https://<gsgchat>/api/v1/entregas/P-1004 \
 | `urgente` | `true` lo pasa delante hacia el motorizado; `false` lo devuelve a normal. |
 | `producto`, `empresa`, `empresaCodigo`, `empresaNombre`, `tiendaCodigo`, `tiendaNombre`, `tracking`, `nroPedido`, `metodoPago`, `monto`, `remitente` | Los datos del envío (ver B.1). Lo que llega manda; lo que no llega se queda como estaba. |
 | `motorizado`, `telefonoMotorizado` | El motorizado que GSG asignó (ver B.1): desde ahí el cierre le da al cliente ese número. |
+| `costServ` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `referenciaDireccion` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `fecRegistro` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `fecRuta` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `observacionCliente` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `detalleProducto` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `telefono2` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `tamano` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `cantBultos` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `clientePagaDelivery` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `sede` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `tipoRuta` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `nroDocumento` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `agenciaNombre` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `agenciaDestino` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `pagoEnDestino` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
 
 `200` con `cambios` (en palabras) y el pedido como queda; queda apuntado en su
 bitácora («GSG cambió: dirección … → …»). El **teléfono no se cambia**
@@ -584,3 +616,6 @@ ajuste «Después de UBI REGISTRADA, no escribirle más al cliente» (Hoy →
 Ajustes), encendido de fábrica; apagado, vuelve lo de antes (pregunta de
 confirmar, hora de llegada y aviso de entregado). Los mensajes al cliente se
 presentan como «GSG Courier».
+
+
+La recepcion de Courier acepta tambien los alias cliente, driver, codigoTracking y montoCobrar. Si se omite referencia, se utiliza tracking (o codigoTracking). Detalle y ejemplo completos en [RECEPCION-GSG.md](RECEPCION-GSG.md).

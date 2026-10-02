@@ -59,6 +59,22 @@ export function datosEnvioDeCrudo(crudo: unknown): DatosEnvio | null {
   } else motorizadoNombre = texto(moto) ?? texto(c.motorizadoNombre);
   if (telefonoMotorizado && telefonoMotorizado.replace(/\D/g, '').length < 6) telefonoMotorizado = null;
   return datosEnvioLimpios({
+    costServ: montoEnTexto(c.costServ),
+    referenciaDireccion: texto(c.referenciaDireccion),
+    fecRegistro: texto(c.fecRegistro),
+    fecRuta: texto(c.fecRuta),
+    observacionCliente: texto(c.observacionCliente),
+    detalleProducto: texto(c.detalleProducto),
+    telefono2: texto(c.telefono2),
+    tamano: texto(c.tamano),
+    cantBultos: texto(c.cantBultos),
+    clientePagaDelivery: texto(c.clientePagaDelivery),
+    sede: texto(c.sede),
+    tipoRuta: texto(c.tipoRuta),
+    nroDocumento: texto(c.nroDocumento),
+    agenciaNombre: texto(c.agenciaNombre),
+    agenciaDestino: texto(c.agenciaDestino),
+    pagoEnDestino: texto(c.pagoEnDestino),
     motorizadoNombre,
     telefonoMotorizado,
     producto: texto(c.producto),

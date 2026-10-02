@@ -103,6 +103,22 @@ export interface PatchMotorizado {
  * (textos.ts → solicitudUbicacion). Todo opcional: lo que falta no sale.
  */
 export interface DatosEnvio {
+  costServ?: string | null;
+  referenciaDireccion?: string | null;
+  fecRegistro?: string | null;
+  fecRuta?: string | null;
+  observacionCliente?: string | null;
+  detalleProducto?: string | null;
+  telefono2?: string | null;
+  tamano?: string | null;
+  cantBultos?: string | null;
+  clientePagaDelivery?: string | null;
+  sede?: string | null;
+  tipoRuta?: string | null;
+  nroDocumento?: string | null;
+  agenciaNombre?: string | null;
+  agenciaDestino?: string | null;
+  pagoEnDestino?: string | null;
   /** "Zapatillas talla 40". */
   producto?: string | null;
   /** La tienda que vende: codigo ("516") y nombre ("Zapatería Lima"). */
@@ -127,7 +143,7 @@ export interface DatosEnvio {
   telefonoMotorizado?: string | null;
 }
 
-const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['producto', 'empresaCodigo', 'empresaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'motorizadoNombre', 'telefonoMotorizado'];
+const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['costServ', 'referenciaDireccion', 'fecRegistro', 'fecRuta', 'observacionCliente', 'detalleProducto', 'telefono2', 'tamano', 'cantBultos', 'clientePagaDelivery', 'sede', 'tipoRuta', 'nroDocumento', 'agenciaNombre', 'agenciaDestino', 'pagoEnDestino', 'producto', 'empresaCodigo', 'empresaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'motorizadoNombre', 'telefonoMotorizado'];
 
 /** Solo los campos con texto (recortados a 200); null si no queda ninguno. */
 export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio | null {

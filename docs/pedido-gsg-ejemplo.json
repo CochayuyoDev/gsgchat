@@ -1,0 +1,35 @@
+{
+  "pedidos": [
+    {
+      "tracking": "GSG-000001",
+      "driver": {
+        "nombre": "Luis",
+        "telefono": "999888777"
+      },
+      "distrito": "Lince",
+      "costServ": 12.5,
+      "empresa": "Tienda Uno",
+      "cliente": "Ana Perez",
+      "telefono": "987654321",
+      "direccion": "Av. Lima 123",
+      "referenciaDireccion": "Frente al parque",
+      "fecRegistro": "2026-10-02T08:00:00-05:00",
+      "fecRuta": "2026-10-03",
+      "observacionCliente": "Llamar antes de llegar",
+      "detalleProducto": "Caja sellada",
+      "telefono2": "988777666",
+      "producto": "Zapatos",
+      "tamano": "40",
+      "cantBultos": 2,
+      "metodoPago": "Efectivo",
+      "montoCobrar": 85,
+      "clientePagaDelivery": false,
+      "sede": "Lima",
+      "tipoRuta": "Agencia",
+      "nroDocumento": "00123456",
+      "agenciaNombre": "Agencia Uno",
+      "agenciaDestino": "Huancayo - Av. Uno 123",
+      "pagoEnDestino": true
+    }
+  ]
+}
