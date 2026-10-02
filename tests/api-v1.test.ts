@@ -372,7 +372,7 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     await esc.cerrar();
   });
 
-  it('dos pedidos entran con sus banderas, el repetido no se duplica, el sin telefono se descarta con motivo, y sin permiso 403 en cristiano', async () => {
+  it('dos pedidos entran con sus banderas, el repetido no se duplica, el sin telefono se descarta con motivo, y sin permiso 404', async () => {
     const r = await esc.api.post<{ ok: boolean; creadas: Array<Record<string, unknown>>; repetidas: string[]; descartadas: Array<{ referencia: string; motivo: string }>; detalle: string }>('/api/v1/entregas', {
       pedidos: [
         { referencia: 'P-5001', telefono: '987000101', nombre: 'Ana Quispe', direccion: 'Av. Larco 123', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
@@ -403,9 +403,9 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     const vacio = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(TODO), payload: {} });
     expect(vacio.statusCode).toBe(400);
     expect(vacio.json().error).toContain('Manda un pedido');
-    // Sin permiso: 403.
+    // Sin permiso de recepci?n: 404.
     const sin = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(SOLO_LEER), payload: { referencia: 'P-5009', telefono: '987000109' } });
-    expect(sin.statusCode).toBe(403);
+    expect(sin.statusCode).toBe(404);
     expect(sin.json().error).toMatch(/permiso/i);
     // Pero si puede leer.
     const lee = await esc.app.inject({ method: 'GET', url: '/api/v1/entregas/P-5002', headers: conClave(SOLO_LEER) });

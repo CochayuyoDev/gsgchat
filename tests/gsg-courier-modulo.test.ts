@@ -60,6 +60,6 @@ describe('modulo especializado GSG Courier', () => {
     const listado = await esc.app.inject({ url: '/admin/claves-api', headers: { cookie } });
     expect(listado.body).not.toContain(clave);
     expect((await esc.app.inject({ method: 'DELETE', url: '/admin/claves-api/' + registro.id, headers: { cookie } })).statusCode).toBe(200);
-    expect((await recibir()).statusCode).toBe(401);
+    expect((await recibir()).statusCode).toBe(404);
   });
 });

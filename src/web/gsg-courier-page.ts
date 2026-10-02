@@ -45,6 +45,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <label for="courier-url">Enviar pedidos con POST</label><input id="courier-url" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url">Copiar dirección</button><button class="btn" id="courier-descargar">Descargar JSON de ejemplo</button></div>
         <p><code>Content-Type: application/json</code><br><code>Authorization: Bearer CLAVE_DE_GSG</code></p>
+        <small>La clave identifica esta tienda y debe tener permiso de recepción. Sin una clave válida: 404, «No tiene permiso».</small>
         <small>Hasta 500 pedidos por llamada. Para 600, enviar 500 + 100. Máximo 120 llamadas por minuto y clave.</small>
         <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>
         <a href="/docs/contrato-gsg.md">Descargar contrato completo</a>
@@ -68,7 +69,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
 (function () {
   var $ = function(id) { return document.getElementById(id); };
   var ejemplo = $('courier-json').value;
-  var endpoint = location.origin + location.pathname.replace(/\/conexion-gsg\/?$/, '') + '/api/v1/entregas';
+  var endpoint = location.origin + '/api/v1/entregas';
   $('courier-url').value = endpoint;
   function aviso(t) { $('courier-aviso').textContent = t; }
   function esc(t) { var el = document.createElement('span'); el.textContent = String(t == null ? '' : t); return el.innerHTML; }

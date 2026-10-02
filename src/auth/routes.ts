@@ -28,6 +28,7 @@ import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
+import { esRecepcionGsg } from '../plataforma/recepcion-gsg.js';
 
 export interface UsuarioSesion {
   id: string;
@@ -201,6 +202,10 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   app.addHook('onRequest', async (request, reply) => {
     request.usuario = await resolver(request);
+    if (esRecepcionGsg(request.method, request.url) &&
+      (!request.usuario?.porToken || !request.headers.authorization?.startsWith('Bearer wak_') || !tienePermiso(request.usuario.permisos, 'entregas:gestionar'))) {
+      return reply.code(404).send({ error: 'No tiene permiso' });
+    }
 
     if (request.url.startsWith('/admin')) {
       if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: entra en /login o manda una clave de API' });

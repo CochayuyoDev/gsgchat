@@ -351,10 +351,12 @@ export function openApi(baseUrl: string): Json {
           ].join(' '),
           ...permiso('entregas:gestionar'),
           requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [ref('PedidoGsg'), { type: 'array', items: ref('PedidoGsg') }, { type: 'object', properties: { pedidos: { type: 'array', items: ref('PedidoGsg') } } }] } } } },
+          servers: [{ url: `${new URL(baseUrl).origin}/api/v1` }],
           responses: {
             201: json({ type: 'object', properties: { ok: { type: 'boolean' }, creadas: { type: 'array', items: ref('EntregaDia') }, repetidas: { type: 'array', items: { type: 'string' } }, descartadas: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, motivo: { type: 'string' } } } }, detalle: { type: 'string' } } }, 'Al menos un pedido nuevo'),
             200: json({ type: 'object' }, 'Nada nuevo (todo repetido o descartado)'),
             400: error('El cuerpo no se entiende'),
+            404: error('No tiene permiso: clave ausente, inválida, revocada o sin permiso de recepción'),
           },
         },
       },

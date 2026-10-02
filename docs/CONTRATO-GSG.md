@@ -348,7 +348,7 @@ Respuesta `201` (o `200` si no entró nada nuevo):
 
 Un pedido con la misma referencia que uno de hoy **no se duplica** (va en
 `repetidas`). Un cuerpo que no se entiende responde `400` con el motivo; sin
-permiso, `403`.
+permiso, `404` con `{ "error": "No tiene permiso" }`.
 
 ### B.2 `GET /api/v1/entregas/{referencia}` — cómo va
 
@@ -619,3 +619,8 @@ presentan como «GSG Courier».
 
 
 La recepcion de Courier acepta tambien los alias cliente, driver, codigoTracking y montoCobrar. Si se omite referencia, se utiliza tracking (o codigoTracking). Detalle y ejemplo completos en [RECEPCION-GSG.md](RECEPCION-GSG.md).
+
+
+## Endpoint global de recepcion
+
+Courier envia exclusivamente a POST https://<dominio>/api/v1/entregas, sin /tienda/<nombre>. Authorization: Bearer <clave> identifica la tienda por la clave vigente guardada en su base, y exige entregas:gestionar. Cookies, Referer y campos del cuerpo no eligen la tienda. Las claves existentes siguen sirviendo. Si no hay clave valida, falta permiso, la tienda esta suspendida o una clave esta asignada a dos tiendas, se devuelve HTTP 404 con {"error":"No tiene permiso"}. La recepcion con prefijo de tienda tambien devuelve ese error. No se guardan pedidos rechazados. Las demas rutas del panel y APIs mantienen su comportamiento.

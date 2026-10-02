@@ -4,6 +4,8 @@
  *
  * Como se sabe de que tienda es una peticion, por orden:
  *
+ *   0. POST /api/v1/entregas -> la clave Bearer identifica la tienda;
+ *      sin cookies, Referer ni prefijo. La recepci?n prefijada se rechaza.
  *   1. /tienda/<slug>/...  -> esa tienda, y se le quita el prefijo. Es la
  *      forma de los enlaces publicos de cada tienda (su webhook, su API, la
  *      pagina del motorizado, los enlaces de rastreo): su PUBLIC_BASE_URL ya
@@ -29,6 +31,7 @@ import { enTienda } from './contexto.js';
 import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
+import { esRecepcionGsg, tiendaDeClaveGsg } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
 const PREFIJO = '/tienda/';
@@ -92,12 +95,17 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
   const { plataforma, segura } = o;
   const web = await rutasDeLaPlataforma(plataforma, segura, o.logger ?? false);
 
-  type Destino = { tipo: 'tienda'; tienda: TiendaViva; url: string } | { tipo: 'plataforma'; url: string } | { tipo: 'no-existe' };
+  type Destino = { tipo: 'tienda'; tienda: TiendaViva; url: string } | { tipo: 'plataforma'; url: string } | { tipo: 'no-existe' } | { tipo: 'sin-permiso' };
 
   /** A quien va esta peticion y con que URL. */
   async function resolver(req: http.IncomingMessage): Promise<Destino> {
     const url = req.url ?? '/';
     const prefijo = partirPrefijo(url);
+    if (prefijo && esRecepcionGsg(req.method, prefijo.resto)) return { tipo: 'sin-permiso' };
+    if (esRecepcionGsg(req.method, url)) {
+      const tienda = await tiendaDeClaveGsg(plataforma, req.headers.authorization);
+      return tienda ? { tipo: 'tienda', tienda, url } : { tipo: 'sin-permiso' };
+    }
     if (prefijo) {
       const tienda = await plataforma.tiendaPorSlug(prefijo.slug);
       if (!tienda) return { tipo: 'no-existe' };
@@ -127,6 +135,11 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
     void (async () => {
       try {
         const destino = await resolver(req);
+        if (destino.tipo === 'sin-permiso') {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+          res.end(JSON.stringify({ error: 'No tiene permiso' }));
+          return;
+        }
         if (destino.tipo === 'no-existe') {
           res.writeHead(404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
           res.end(paginaSinTienda());

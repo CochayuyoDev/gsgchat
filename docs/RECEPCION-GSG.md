@@ -45,8 +45,13 @@ Los campos adicionales son opcionales para mantener compatibilidad. Textos adici
 
 ## Recepcion y cola
 
-Se guardan pedidos en el repositorio de entregas y sus datos en datosEnvio (columna JSON existente; no se necesita otra migracion). La respuesta separa creadas, repetidas y descartadas. 201 indica al menos una creacion; 200 puede significar que todos eran repetidos o descartados: revisar siempre esas listas. 400 significa cuerpo invalido; 401/403 autenticacion/permisos; 429 limite por minuto.
+Se guardan pedidos en el repositorio de entregas y sus datos en datosEnvio (columna JSON existente; no se necesita otra migracion). La respuesta separa creadas, repetidas y descartadas. 201 indica al menos una creacion; 200 puede significar que todos eran repetidos o descartados: revisar siempre esas listas. 400 significa cuerpo invalido; 404 si la clave no tiene permiso de recepcion; 429 limite por minuto.
 
 Los duplicados se detectan por referencia y dia, segun el comportamiento existente. No es una cola independiente de Redis: es la cola operativa persistente del sistema. El procesamiento y los mensajes los hace el motor existente. Con confirmarListaGsg activado (valor predeterminado), los pedidos quedan retenidos hasta confirmar el envio en el panel. Con ese ajuste desactivado, el sistema puede activar el reparto automaticamente. La ampliacion no cambia esa politica.
 
 Para probar localmente: npm ci --ignore-scripts; npm run typecheck; npm test -- tests/gsg-recepcion-campos.test.ts tests/api-v1.test.ts tests/gsg-datos-envio.test.ts tests/confirmar-envio-gsg.test.ts.
+
+
+## Endpoint global de recepcion
+
+Courier envia exclusivamente a POST https://<dominio>/api/v1/entregas, sin /tienda/<nombre>. Authorization: Bearer <clave> identifica la tienda por la clave vigente guardada en su base, y exige entregas:gestionar. Cookies, Referer y campos del cuerpo no eligen la tienda. Las claves existentes siguen sirviendo. Si no hay clave valida, falta permiso, la tienda esta suspendida o una clave esta asignada a dos tiendas, se devuelve HTTP 404 con {"error":"No tiene permiso"}. La recepcion con prefijo de tienda tambien devuelve ese error. No se guardan pedidos rechazados. Las demas rutas del panel y APIs mantienen su comportamiento.
