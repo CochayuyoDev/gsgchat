@@ -140,6 +140,8 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
     await entregas.revisarReparto().catch((error) => log('no se pudo revisar el reparto', { detalle: String(error) }));
     await entregas.revisarSegundasVisitas().catch((error) => log('no se pudieron revisar las segundas visitas', { detalle: String(error) }));
     await entregas.revisarPropuestas().catch((error) => log('no se pudieron revisar las direcciones propuestas', { detalle: String(error) }));
+    // El primer mensaje de cada pedido: lo que quedo a medias (reinicio, reparto que no cargo) se recupera aqui.
+    await entregas.revisarMensajes().catch((error) => log('no se pudieron revisar los primeros mensajes', { detalle: String(error) }));
   }
 
   const motor: MotorEntregas = {

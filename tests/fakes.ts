@@ -247,6 +247,10 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt);
       return c ? sinHash(c) : null;
     },
+    async porHashConRevocadas(hash) {
+      const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt) ?? clavesMem.find((x) => x.hash === hash);
+      return c ? sinHash(c) : null;
+    },
     async revocar(id) {
       const c = clavesMem.find((x) => x.id === id && !x.revocadaAt);
       if (!c) return false;

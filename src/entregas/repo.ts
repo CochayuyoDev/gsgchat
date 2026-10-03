@@ -52,6 +52,9 @@ export const ESTADOS_ENTREGA_VIVOS: EstadoEntrega[] = [
   'avisada',
 ];
 
+/** Ya no pasa nada con ella: no se le escribe ni sale en la bandeja de errores. Una «incidencia» NO es final. */
+export const ESTADOS_ENTREGA_FINALES: EstadoEntrega[] = ['cancelada', 'entregada', 'terminada'];
+
 export type EstadoMotorizado = 'activo' | 'descanso' | 'baja';
 
 export interface Motorizado {
@@ -277,9 +280,30 @@ export interface Entrega {
   /** La dirección que el cliente escribió en vez del pin (se ve en Hoy y la recibe el motorizado). */
   direccionCliente?: string | null;
   direccionClienteAt?: Date | null;
+  /**
+   * El primer mensaje al cliente (pedir la ubicación o la confirmación): en
+   * qué va, cuántas veces se intentó y por qué falló. Ver
+   * src/entregas/primer-mensaje.ts y la migración 002.
+   */
+  mensajeEstado?: EstadoMensaje;
+  mensajeVia?: ViaMensaje | null;
+  mensajeIntentos?: number;
+  mensajeReintentosAuto?: number;
+  mensajeUltimoIntentoAt?: Date | null;
+  mensajeProximoAt?: Date | null;
+  mensajeErrorCodigo?: string | null;
+  mensajeError?: string | null;
+  mensajePermanente?: boolean;
+  mensajeEnviadoAt?: Date | null;
+  mensajeWamid?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+/** En qué va el primer mensaje de un pedido. Ver src/entregas/primer-mensaje.ts. */
+export type EstadoMensaje = 'no_aplica' | 'retenido' | 'pendiente' | 'encolado' | 'enviando' | 'enviado' | 'reintentando' | 'fallido' | 'incierto';
+/** Qué pide ese primer mensaje. */
+export type ViaMensaje = 'ubicacion' | 'confirmacion';
 
 export interface NuevaEntrega {
   dia: string;
@@ -299,6 +323,8 @@ export interface NuevaEntrega {
   prioridad?: PrioridadEntrega;
   /** Llega de la lista de GSG y espera a que se confirme su envío. */
   envioRetenidoAt?: Date | null;
+  mensajeEstado?: EstadoMensaje;
+  mensajeVia?: ViaMensaje | null;
 }
 
 export type PatchEntrega = Partial<
@@ -393,6 +419,24 @@ export interface EntregasRepo {
    * ubicacion: con ella, nada del sistema le vuelve a pedir el pin.
    */
   ubicacionDelClienteDelDia(phone: string, dia: string): Promise<Entrega | null>;
+
+  // --- el primer mensaje (ver src/entregas/primer-mensaje.ts)
+  /**
+   * Cambia el estado del mensaje SOLO si ahora está en uno de `desde`: es el
+   * candado contra dos intentos a la vez (dos procesos, un doble clic, el
+   * motor y una persona). null = otro se adelantó o ya no está en ese estado.
+   */
+  cambiarMensaje(id: number, desde: readonly EstadoMensaje[], patch: PatchEntrega): Promise<Entrega | null>;
+  /** Quita la retención («Confirmar y enviar») solo si aún la tiene: dos confirmaciones a la vez liberan una sola vez. */
+  liberarRetenida(id: number, en: Date): Promise<Entrega | null>;
+  /** Mensajes pendientes o en reintento a los que ya les toca (y cuyo pedido sigue vivo). */
+  mensajesQueTocan(ahora: Date, limite: number): Promise<Entrega[]>;
+  /** Mensajes que se quedaron «enviando» desde antes de `antes` (el proceso se cortó a mitad): su resultado es incierto. */
+  mensajesEnviandoDesde(antes: Date, limite: number): Promise<Entrega[]>;
+  /** La bandeja de errores: pedidos vivos cuyo primer mensaje falló o tiene un error sin resolver. */
+  bandejaMensajes(limite: number): Promise<Entrega[]>;
+  /** Las entregas vivas de ese lote del reparto y ese teléfono (las que una solicitud del reparto atiende). */
+  vivasDeLoteYTelefono(loteId: string, phone: string): Promise<Entrega[]>;
 
   registrarEvento(entregaId: number, tipo: TipoEventoEntrega, detalle?: string | null, payload?: Record<string, unknown> | null, at?: Date): Promise<void>;
   eventos(entregaId: number, limite?: number): Promise<EventoEntrega[]>;
@@ -490,6 +534,17 @@ interface EntregaRow {
   pin_propuesto_dudas?: number | string | null;
   direccion_cliente?: string | null;
   direccion_cliente_at?: Date | null;
+  mensaje_estado?: string | null;
+  mensaje_via?: string | null;
+  mensaje_intentos?: number | string | null;
+  mensaje_reintentos_auto?: number | string | null;
+  mensaje_ultimo_intento_at?: Date | null;
+  mensaje_proximo_at?: Date | null;
+  mensaje_error_codigo?: string | null;
+  mensaje_error?: string | null;
+  mensaje_permanente?: boolean | number | null;
+  mensaje_enviado_at?: Date | null;
+  mensaje_wamid?: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -604,6 +659,17 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   pinPropuestoDudas: Number(r.pin_propuesto_dudas ?? 0),
   direccionCliente: r.direccion_cliente ?? null,
   direccionClienteAt: r.direccion_cliente_at ?? null,
+  mensajeEstado: (r.mensaje_estado as EstadoMensaje | null) ?? 'no_aplica',
+  mensajeVia: (r.mensaje_via as ViaMensaje | null) ?? null,
+  mensajeIntentos: Number(r.mensaje_intentos ?? 0),
+  mensajeReintentosAuto: Number(r.mensaje_reintentos_auto ?? 0),
+  mensajeUltimoIntentoAt: r.mensaje_ultimo_intento_at ?? null,
+  mensajeProximoAt: r.mensaje_proximo_at ?? null,
+  mensajeErrorCodigo: r.mensaje_error_codigo ?? null,
+  mensajeError: r.mensaje_error ?? null,
+  mensajePermanente: Boolean(r.mensaje_permanente),
+  mensajeEnviadoAt: r.mensaje_enviado_at ?? null,
+  mensajeWamid: r.mensaje_wamid ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -685,6 +751,17 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['pinPropuestoDudas', 'pin_propuesto_dudas'],
   ['direccionCliente', 'direccion_cliente'],
   ['direccionClienteAt', 'direccion_cliente_at'],
+  ['mensajeEstado', 'mensaje_estado'],
+  ['mensajeVia', 'mensaje_via'],
+  ['mensajeIntentos', 'mensaje_intentos'],
+  ['mensajeReintentosAuto', 'mensaje_reintentos_auto'],
+  ['mensajeUltimoIntentoAt', 'mensaje_ultimo_intento_at'],
+  ['mensajeProximoAt', 'mensaje_proximo_at'],
+  ['mensajeErrorCodigo', 'mensaje_error_codigo'],
+  ['mensajeError', 'mensaje_error'],
+  ['mensajePermanente', 'mensaje_permanente'],
+  ['mensajeEnviadoAt', 'mensaje_enviado_at'],
+  ['mensajeWamid', 'mensaje_wamid'],
 ];
 
 const COLUMNAS_MOTORIZADO: Array<[keyof PatchMotorizado, string]> = [
@@ -770,8 +847,8 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       try {
         ({ insertId } = await pool.query(
         `insert into entregas
-           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio, envio_retenido_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio, envio_retenido_at, mensaje_estado, mensaje_via)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
         [
           input.dia,
           input.referencia,
@@ -789,6 +866,8 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           input.prioridad ?? 'normal',
           datosEnvioLimpios(input.datosEnvio) ? JSON.stringify(datosEnvioLimpios(input.datosEnvio)) : null,
           input.envioRetenidoAt ?? null,
+          input.mensajeEstado ?? 'no_aplica',
+          input.mensajeVia ?? null,
         ],
         ));
       } catch (error) {
@@ -881,6 +960,71 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       valores.push(id);
       await pool.query(`update entregas set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
       return repo.entrega(id);
+    },
+    async cambiarMensaje(id, desde, patch) {
+      if (!desde.length) return null;
+      const sets: string[] = [];
+      const valores: unknown[] = [];
+      for (const [clave, columna] of COLUMNAS_ENTREGA) {
+        if (patch[clave] === undefined) continue;
+        const v = patch[clave];
+        valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : clave === 'datosEnvio' ? (v ? JSON.stringify(v) : null) : v);
+        sets.push(`${columna} = $${valores.length}`);
+      }
+      valores.push(id);
+      const pId = valores.length;
+      valores.push([...desde]);
+      // FOUND_ROWS (por defecto en mysql2): rowCount son las filas que cumplen el where.
+      const r = await pool.query(
+        `update entregas set ${[...sets, 'updated_at = now(3)'].join(', ')} where id = $${pId} and mensaje_estado in ($${valores.length})`,
+        valores,
+      );
+      return r.rowCount ? repo.entrega(id) : null;
+    },
+    async liberarRetenida(id, en) {
+      const r = await pool.query(
+        `update entregas set envio_retenido_at = null, envio_liberado_at = $1, updated_at = now(3)
+          where id = $2 and envio_retenido_at is not null and estado not in ('cancelada', 'entregada', 'terminada')`,
+        [en, id],
+      );
+      return r.rowCount ? repo.entrega(id) : null;
+    },
+    async mensajesQueTocan(ahora, limite) {
+      const { rows } = await pool.query<EntregaRow>(
+        `select * from entregas
+          where mensaje_estado in ('pendiente', 'reintentando')
+            and (mensaje_proximo_at is null or mensaje_proximo_at <= $1)
+            and envio_retenido_at is null
+            and estado not in ($2)
+          order by mensaje_proximo_at asc, id asc limit $3`,
+        [ahora, ESTADOS_ENTREGA_FINALES, limite],
+      );
+      return rows.map(entregaDeFila);
+    },
+    async mensajesEnviandoDesde(antes, limite) {
+      const { rows } = await pool.query<EntregaRow>(
+        `select * from entregas where mensaje_estado = 'enviando' and (mensaje_ultimo_intento_at is null or mensaje_ultimo_intento_at < $1) order by id asc limit $2`,
+        [antes, limite],
+      );
+      return rows.map(entregaDeFila);
+    },
+    async bandejaMensajes(limite) {
+      const { rows } = await pool.query<EntregaRow>(
+        `select * from entregas
+          where mensaje_estado not in ('enviado', 'no_aplica', 'retenido')
+            and (mensaje_estado in ('fallido', 'incierto') or mensaje_error_codigo is not null)
+            and estado not in ($1)
+          order by coalesce(mensaje_ultimo_intento_at, updated_at) desc, id desc limit $2`,
+        [ESTADOS_ENTREGA_FINALES, limite],
+      );
+      return rows.map(entregaDeFila);
+    },
+    async vivasDeLoteYTelefono(loteId, phone) {
+      const { rows } = await pool.query<EntregaRow>(
+        'select * from entregas where lote_id = $1 and phone = $2 and estado not in ($3) order by id asc',
+        [loteId, phone, ESTADOS_ENTREGA_FINALES],
+      );
+      return rows.map(entregaDeFila);
     },
     async quitar(id) {
       const antes = await repo.entrega(id);

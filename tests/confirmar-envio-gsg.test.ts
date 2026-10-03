@@ -24,7 +24,7 @@ import { clasificarConfirmarGsg, leerClaseConfirmarGsg } from '../src/ia/agente-
 import { avisoPorConfirmar, grupoDe } from '../src/entregas/servicio.js';
 import { etapaDe } from '../src/entregas/numeros.js';
 import { numerosPage } from '../src/web/numeros-page.js';
-import { crearEscenarioEntregas, PIN_LIMA, conPais, type EscenarioEntregas } from './escenario-entregas.js';
+import { crearEscenarioEntregas, PIN_LIMA, conPais, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
 
 /** Las 09:00 de Lima del último día que ya empezó. */
 function hoyALas9(): Date {
@@ -309,7 +309,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   });
 
   it('lo que entra por POST /api/v1/entregas también espera', async () => {
-    const r = await e.api.post<{ creadas: Array<{ referencia: string }> }>('/api/v1/entregas', { pedidos: [{ referencia: 'API-1', telefono: '987400001', nombre: 'Por La Api', distrito: 'Surco' }, { referencia: 'API-2', telefono: '987400002', nombre: 'Api Con Pin', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaConfirmar: true }] });
+    const r = await e.api.post<{ creadas: Array<{ referencia: string }> }>('/api/v1/entregas', { pedidos: [{ ...OBLIGATORIOS_GSG, referencia: 'API-1', telefono: '987400001', nombre: 'Por La Api', distrito: 'Surco' }, { ...OBLIGATORIOS_GSG, referencia: 'API-2', telefono: '987400002', nombre: 'Api Con Pin', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaConfirmar: true }] });
     expect(r.status).toBe(201);
     await e.trabajar();
     expect(salidos('987400001')).toBe(0);

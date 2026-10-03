@@ -48,6 +48,9 @@ export const PAUSA_SEGUNDOS = 5;
 /** Un punto en Miraflores: dentro de la cobertura de Lima. */
 export const PIN_LIMA = { lat: -12.1211, lng: -77.0301 };
 
+/** Lo que GSG manda siempre en cada pedido (obligatorio en POST /api/v1/entregas), aparte de tracking, cliente y telefono. */
+export const OBLIGATORIOS_GSG = { empresa: { codigo: 'T01', nombre: 'Tienda Prueba' }, metodoPago: 'Contraentrega', montoCobrar: 50 };
+
 export type RespuestaCliente = { pin: { lat: number; lng: number } } | { enlace: string } | { texto: string } | { baja: true } | { adjunto: 'image' | 'audio' | 'video' | 'document' | 'sticker' } | { audio: string } | { boton: { id: string; title: string } };
 
 export interface RespuestaApi<T = Record<string, unknown>> {
@@ -313,7 +316,7 @@ export async function crearEscenarioEntregas(opciones: {
 
   const opcionesMotor = { ...OPCIONES_POR_DEFECTO, pausaMinSegundos: PAUSA_SEGUNDOS, pausaMaxSegundos: PAUSA_SEGUNDOS, horaInicio, horaFin, negocio: config.businessName };
   // Como en produccion (src/servicios.ts): la primera solicitud de una entrega sale con la plantilla de GSG.
-  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) });
+  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }), primerMensaje: entregas.primerMensajeReparto });
   const motorEntregas = crearMotorEntregas({ repos, entregas, opciones: opcionesMotor, ahora: reloj, azar: () => 0 });
 
   const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };

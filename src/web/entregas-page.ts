@@ -18,6 +18,7 @@
 
 import { appShell } from './shell.js';
 import { estadosVisualesJs } from './estados-visuales.js';
+import { BANDEJA_MENSAJES_CSS, BANDEJA_MENSAJES_JS, bandejaMensajesHtml, MENSAJE_ERROR_HTTP_JS } from './bandeja-mensajes.js';
 
 const CSS = `
   /* Hoy usa la paleta y la escala del armazon (--superficie, --texto, --verde...)
@@ -258,7 +259,7 @@ const CSS = `
     .ajuste-fila, .ajuste-fila.ancha { grid-template-columns: 1fr 96px; }
     .ajuste-fila.tel { grid-template-columns: 1fr; gap: 4px; }
   }
-`;
+${BANDEJA_MENSAJES_CSS}`;
 
 export function entregasPage(opts: { disponible: boolean; configured: boolean; demo: boolean; nombreNegocio: string }): string {
   const { configured, demo } = opts;
@@ -343,6 +344,7 @@ ${aviso}
   <h3>Necesitan a alguien <span class="muted" id="alguien-n" style="font-weight:400;font-size:12.5px"></span></h3>
   <div id="alguien"></div>
 </section>
+${bandejaMensajesHtml()}
 
 <!-- Ajustes de los mensajes: se abren con el boton de la franja. -->
 <section class="plegable hidden" id="caja-ajustes">
@@ -493,19 +495,35 @@ ${aviso}
 
   const script = String.raw`
 ${estadosVisualesJs()}
+${MENSAJE_ERROR_HTTP_JS}
+/* El error tal como lo dijo el servidor: «HTTP 409 · <su mensaje>», con su codigo y sus detalles. */
 async function api(path, options) {
   options = options || {};
-  var res = await fetch(path, {
-    method: options.method || 'GET',
-    cache: 'no-store',
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-  var data = await res.json().catch(function () { return {}; });
-  if (res.status === 401) { irAlLogin(); throw new Error('Tu sesión terminó: vuelve a entrar.'); }
-  if (!res.ok) { var e = new Error(data.error || errorHttp(res.status)); e.datos = data; throw e; }
-  return data;
+  var res;
+  try {
+    res = await fetch(path, {
+      method: options.method || 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  } catch (fallo) {
+    var sinRed = new Error('Sin conexión con el servidor');
+    sinRed.status = 0;
+    throw sinRed;
+  }
+  var data = await res.json().catch(function () { return null; });
+  if (res.status === 401) { irAlLogin(); var s = new Error(mensajeDeErrorHttp(401, res.statusText, data && data.error ? data : { error: 'Tu sesión terminó: vuelve a entrar.' })); s.status = 401; throw s; }
+  if (!res.ok) {
+    var e = new Error(mensajeDeErrorHttp(res.status, res.statusText || errorHttp(res.status), data));
+    e.status = res.status;
+    e.codigo = data && data.codigo;
+    e.detalles = data && data.detalles;
+    e.datos = data || {};
+    throw e;
+  }
+  return data || {};
 }
 function $(id) { return document.getElementById(id); }
 function esc(v) {
@@ -1284,7 +1302,9 @@ async function cargar() {
   pintarOtros();
   pintarModoPrueba();
   cargarSimulador();
+  cargarBandejaMensajes();
 }
+${BANDEJA_MENSAJES_JS}
 /** Cambiar de filtro no pide nada al servidor: solo repinta cifras y tabla. */
 function repintarFiltro() {
   pintarTarjetas();

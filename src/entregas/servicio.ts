@@ -94,8 +94,10 @@ import {
   soporteEnPalabras,
   telefonoEnPalabras,
 } from './textos.js';
-import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, EventoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado } from './repo.js';
+import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, EstadoMensaje, EventoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado, ViaMensaje } from './repo.js';
 import { datosEnvioDeCrudo, fusionarDatosEnvio } from './datos-envio.js';
+import { desenlaceDeEnvio, esperaDelReintento, MENSAJE_EN_CURSO, MENSAJE_REINTENTABLE, motivoLegible, REINTENTOS_POR_DEFECTO, vistaMensaje, type Desenlace, type ReintentosMensaje, type VistaMensaje } from './primer-mensaje.js';
+import type { PrimerMensajeReparto } from '../rutas/motor.js';
 import { apartarPorMotorizado, resolverPorUbicacion, soltarSolicitudes, solicitudesAbiertasDe } from './ubicacion-unica.js';
 import { pareceNoSoyYo, TEXTO_NO_SOY_YO } from '../rutas/inbound.js';
 import { distanciaAlDistrito, distritoDePedido, distritoEnDireccion } from './distritos-centro.js';
@@ -276,6 +278,9 @@ export interface ResultadoCierre {
   quien: string;
 }
 
+/** Cuantos pedidos de un dia se leen de una vez (Hoy, confirmar el envio, la revision de mensajes). */
+export const TOPE_DEL_DIA = 20_000;
+
 export interface FilaPegada {
   telefono: string;
   nombre?: string;
@@ -288,7 +293,24 @@ export interface FilaPegada {
   faltaConfirmacion?: boolean;
   /** Lo que GSG cuenta del envio (producto, empresa, codigo, monto...), si viene. */
   datosEnvio?: DatosEnvio | null;
+  /** El id del pedido en el sistema de GSG, si lo manda (se guarda en externo_id). */
+  externoId?: string | null;
 }
+
+/** Un renglón de la bandeja de errores de mensajes. */
+export interface ItemBandejaMensajes {
+  id: number;
+  referencia: string;
+  dia: string;
+  nombre: string | null;
+  telefono: string;
+  estadoPedido: EstadoEntrega;
+  mensaje: VistaMensaje;
+}
+
+export type ResultadoReintentoMensaje =
+  | { ok: true; entrega: Entrega; mensaje: VistaMensaje }
+  | { ok: false; status: 404 | 409; codigo: 'NO_EXISTE' | 'CONFLICTO' | 'MENSAJE_EN_CURSO' | 'MENSAJE_YA_ENVIADO' | 'RESULTADO_INCIERTO' | 'ESPERA_CONFIRMACION'; motivo: string };
 
 export interface ResultadoCargaVarias {
   creadas: Entrega[];
@@ -614,7 +636,7 @@ export interface ServicioEntregas {
   pausarMensajes(id: number, pausar: boolean, quien: string): Promise<ResultadoNumero>;
   /** Un pedido metido a mano (sin GSG). */
   /** Un pedido a mano. Sin `referencia`, el sistema la inventa (M-HHMM-N) para que la pantalla solo pida nombre, telefono y direccion. */
-  crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; datosEnvio?: DatosEnvio | null; retener?: boolean }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }>;
+  crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; datosEnvio?: DatosEnvio | null; retener?: boolean; externoId?: string | null }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }>;
 
   // --- motorizados
   motorizados(): Promise<Motorizado[]>;
@@ -643,6 +665,18 @@ export interface ServicioEntregas {
   telefonosTerminadosHoy(): Promise<Array<{ phone: string; referencia: string }>>;
   /** Cuanto queda hasta el proximo envio del motor (lo pone el motor). */
   conectarMotor(m: { proximoEnvioEn(): number; parado(): string | null; enHorario(): boolean }): void;
+
+  // --- el primer mensaje de cada pedido (ver src/entregas/primer-mensaje.ts)
+  /** Lo que el motor del reparto avisa antes y después del primer mensaje de una solicitud de un pedido. */
+  primerMensajeReparto: PrimerMensajeReparto;
+  /** La red de seguridad: inciertos tras un corte, disparos pendientes, encolados al día. La llama el motor. */
+  revisarMensajes(): Promise<{ inciertos: number; disparados: number; puestosAlDia: number }>;
+  /** El dia de hoy en la zona de la tienda (AAAA-MM-DD): el que usa Hoy. */
+  diaDeHoy(): string;
+  /** La bandeja de errores de mensajes de esta tienda. */
+  bandejaMensajes(): Promise<ItemBandejaMensajes[]>;
+  /** «Reintentar mensaje»: el mismo disparador sobre el pedido existente. */
+  reintentarMensaje(id: number, quien: string, opts?: { confirmarIncierto?: boolean }): Promise<ResultadoReintentoMensaje>;
 }
 
 export interface DepsEntregas {
@@ -1460,7 +1494,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   /** Lo que espera confirmar el envio hoy (y si ya se confirmo otra tanda). */
   async function porConfirmarEnvio(): Promise<PorConfirmarEnvio> {
-    const deHoy = await repo.listar({ dia: hoy(), limit: 2000 });
+    const deHoy = await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA });
     const esperan = deHoy.filter((e) => e.envioRetenidoAt && !ESTADOS_FINALES.includes(e.estado));
     const confirmar = esperan.filter((e) => grupoDe(e) === 'confirmar').length;
     const ubicacion = esperan.length - confirmar;
@@ -1474,7 +1508,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * motor de entregas pregunta SÍ/NO a los de «falta confirmar»).
    */
   async function liberarEnvio(ids: number[] | 'todos', quien: string): Promise<ResultadoLiberar> {
-    const deHoy = await repo.listar({ dia: hoy(), limit: 2000 });
+    const deHoy = await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA });
     const lista = ids === 'todos' ? deHoy.filter((e) => e.envioRetenidoAt) : ((await Promise.all([...new Set(ids)].map((id) => repo.entrega(id)))).filter(Boolean) as Entrega[]);
     const en = ahora();
     const liberadas: Entrega[] = [];
@@ -1484,7 +1518,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         saltadas++;
         continue;
       }
-      const act = (await repo.actualizar(e.id, { envioRetenidoAt: null, envioLiberadoAt: en })) ?? e;
+      // Condicional: dos «Confirmar y enviar» a la vez liberan una sola vez (un solo mensaje).
+      const liberada = await repo.liberarRetenida(e.id, en);
+      if (!liberada) {
+        saltadas++;
+        continue;
+      }
+      const act = (await repo.cambiarMensaje(e.id, ['retenido'], { ...mensajeAlCrear(liberada.ubicacionEstado, liberada.confirmacionEstado, false), mensajeProximoAt: null })) ?? liberada;
       await evento(act, 'nota', `${quien} confirmó el envío: ${grupoDe(act) === 'confirmar' ? 'se le pregunta SÍ o NO' : 'se le pide la ubicación'} con el ritmo de siempre`);
       liberadas.push(act);
     }
@@ -1493,7 +1533,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const porId = new Map(encaminado.entregas.map((x) => [x.id, x]));
     for (const e of liberadas) {
       const fresca = (await repo.entrega(e.id)) ?? porId.get(e.id) ?? e;
-      await recalcular(fresca);
+      await recalcular(await asentarDisparo(fresca, encaminado.error));
     }
     const confirmar = liberadas.filter((e) => grupoDe(e) === 'confirmar').length;
     const ubicacion = liberadas.length - confirmar;
@@ -2982,10 +3022,20 @@ ${lista}
       return { ok: false, motivo: `espera a que el cliente conteste por ${enCurso.referencia}`, retryAfterMs: esperaMs };
     }
     const primera = e.confirmacionIntentos === 0;
+    // El primer mensaje del pedido (si es este): «enviando» antes de salir, con candado.
+    const seguido = primera && ['pendiente', 'encolado', 'reintentando'].includes(e.mensajeEstado ?? 'no_aplica');
+    if (seguido && !(await repo.cambiarMensaje(e.id, ['pendiente', 'encolado', 'reintentando'], { mensajeEstado: 'enviando', mensajeVia: 'confirmacion', mensajeUltimoIntentoAt: en }))) {
+      return { ok: false, motivo: 'el primer mensaje de ese pedido ya está en curso', retryAfterMs: 60_000 };
+    }
+    if (primera && MENSAJE_REINTENTABLE.includes(e.mensajeEstado ?? 'no_aplica')) {
+      await repo.actualizar(e.id, { confirmacionProximoAt: null });
+      return { ok: false, motivo: 'el primer mensaje espera a una persona (bandeja de errores)' };
+    }
     const texto = conRegla
       ? textoDe(primera ? 'confirmarEntregaGsg' : 'recordarConfirmarGsg', ajustes, contexto(e))
       : textoDe(primera ? 'pedirConfirmacion' : 'insistirConfirmacion', ajustes, contexto(e));
     const salida = await enviarA(e.phone, texto, 'confirmacion', variablesCliente(e), { separacionMs: Math.min(ajustes.confirmacionEsperaMin * 60_000, 60_000), maxPorDia: ajustes.confirmacionMaxIntentos + 3 }, botonesConfirmacion(e), { conReglaGsg: conRegla });
+    const decision = seguido ? await aplicarDesenlace((await repo.entrega(e.id)) ?? e, desenlaceDeEnvio(salida)) : {};
     if (!salida.ok) {
       if ('sinPlantilla' in salida) {
         const act = await marcarIncidencia(e, 'sin_plantilla', salida.reason);
@@ -2996,10 +3046,12 @@ ${lista}
         await repo.actualizar(e.id, { confirmacionProximoAt: new Date(en.getTime() + (salida.retryAfterMs ?? 15 * 60_000)) });
         return { ok: false, motivo: salida.reason, retryAfterMs: salida.retryAfterMs };
       }
-      if (salida.retryable) {
-        await repo.actualizar(e.id, { confirmacionProximoAt: new Date(en.getTime() + 3 * 60_000) });
+      if (salida.retryable && !decision.detener) {
+        // La espera la decide el seguimiento del primer mensaje (progresiva); si no, la de siempre.
+        const esperaMs = decision.esperaMs ?? 3 * 60_000;
+        await repo.actualizar(e.id, { confirmacionProximoAt: new Date(en.getTime() + esperaMs) });
         await evento(e, 'incidencia', `WhatsApp no pudo enviar (se reintenta): ${salida.error}`);
-        return { ok: false, motivo: salida.error, retryAfterMs: 3 * 60_000 };
+        return { ok: false, motivo: salida.error, retryAfterMs: esperaMs };
       }
       const act = await marcarIncidencia(e, 'error_envio', `WhatsApp rechazó el mensaje de confirmación: ${salida.error.slice(0, 200)}`);
       await reportar(act, 'confirmacion', payloadConfirmacion({ referencia: act.referencia, phone: act.phone, nombre: act.nombre, confirmada: false, respuesta: null, como: null, motivo: 'error_envio', en }));
@@ -3428,7 +3480,7 @@ ${lista}
 
   /** M-1432-1, M-1432-2...: la hora de Lima y un correlativo, sin chocar con las de hoy. */
   async function referenciaAutomatica(): Promise<string> {
-    const deHoy = new Set((await repo.listar({ dia: hoy(), limit: 2000 })).map((x) => x.referencia));
+    const deHoy = new Set((await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA })).map((x) => x.referencia));
     const hhmm = horaEnReloj(ahora(), tz()).replace(':', '');
     for (let n = 1; n < 1000; n++) {
       const ref = `M-${hhmm}-${n}`;
@@ -3437,29 +3489,34 @@ ${lista}
     return `M-${Date.now()}`;
   }
 
-  async function crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; urgente?: boolean; datosEnvio?: DatosEnvio | null; retener?: boolean }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }> {
+  async function crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; urgente?: boolean; datosEnvio?: DatosEnvio | null; retener?: boolean; externoId?: string | null }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }> {
     const referencia = (input.referencia ?? '').trim() || (await referenciaAutomatica());
     const lectura = leerCliente({ referencia, telefono: input.telefono });
     if (!lectura.ok) return { ok: false, motivo: lectura.motivo };
     const conPin = typeof input.lat === 'number' && typeof input.lng === 'number';
     const dia = hoy();
+    const ubicacionEstado = input.faltaUbicacion && !conPin ? 'pendiente' : conPin ? 'recibida' : 'no_hace_falta';
+    const confirmacionEstado = input.faltaConfirmacion ? 'pendiente' : 'no_hace_falta';
+    const retenida = Boolean(input.retener) && ajustes.confirmarListaGsg !== false;
     const { entrega, nueva } = await repo.crearEntrega({
       dia,
       referencia: lectura.referencia,
+      externoId: input.externoId ?? null,
+      ...mensajeAlCrear(ubicacionEstado, confirmacionEstado, retenida),
       phone: lectura.phone,
       nombre: input.nombre ?? null,
       direccion: input.direccion ?? null,
       distrito: input.distrito ?? null,
       notas: input.notas ?? null,
-      ubicacionEstado: input.faltaUbicacion && !conPin ? 'pendiente' : conPin ? 'recibida' : 'no_hace_falta',
+      ubicacionEstado,
       lat: conPin ? input.lat! : null,
       lng: conPin ? input.lng! : null,
-      confirmacionEstado: input.faltaConfirmacion ? 'pendiente' : 'no_hace_falta',
+      confirmacionEstado,
       estado: 'pendiente',
       prioridad: input.urgente ? 'urgente' : 'normal',
       datosEnvio: input.datosEnvio ?? null,
       // Lo de la API de GSG espera a que se confirme el envío (si el ajuste lo pide); lo creado a mano, nunca.
-      envioRetenidoAt: input.retener && ajustes.confirmarListaGsg !== false ? ahora() : null,
+      envioRetenidoAt: retenida ? ahora() : null,
     });
     if (!nueva) return { ok: false, motivo: `Ya existe la entrega ${lectura.referencia} de hoy.` };
     let e = entrega;
@@ -3470,6 +3527,7 @@ ${lista}
     // Hoy ya mando su ubicacion (por otro pedido): vale la misma, no se le pide.
     const conocida = e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt ? await aplicarUbicacionConocida(e) : null;
     const recurrente = !conocida && e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt ? await apuntarRecurrente(e, 'a mano') : null;
+    let falloLote: string | undefined;
     if (conocida) e = conocida;
     else if (recurrente) e = recurrente;
     else if (e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt) {
@@ -3478,9 +3536,12 @@ ${lista}
         e = (await repo.actualizar(e.id, { loteId: carga.lote.id })) ?? e;
         await evento(e, 'nota', `entra en el lote del reparto "${carga.lote.nombre}" para pedirle la ubicación`);
       } catch (error) {
-        log('no se pudo cargar el lote para una entrega a mano', { detalle: String(error) });
+        // El pedido queda guardado: su mensaje pasa a reintento (y a la bandeja si no sale).
+        falloLote = error instanceof Error ? error.message : String(error);
+        log('no se pudo cargar el lote para una entrega a mano', { detalle: falloLote });
       }
     }
+    e = await asentarDisparo(e, falloLote);
     return { ok: true, entrega: await recalcular(e) };
   }
 
@@ -3531,6 +3592,7 @@ ${lista}
   async function pedirUbicacionAhora(id: number, quien: string): Promise<ResultadoNumero> {
     let e = await repo.entrega(id);
     if (!e) return { hecho: false, motivo: 'no_existe', entrega: null };
+    if (!ESTADOS_FINALES.includes(e.estado) && !e.envioRetenidoAt) e = (await rearmarMensaje(e)) ?? e;
     if (ESTADOS_FINALES.includes(e.estado)) return { hecho: false, motivo: 'cerrada', entrega: e };
     if (e.ubicacionEstado !== 'pendiente') return { hecho: false, motivo: 'ya_tiene_ubicacion', entrega: e };
     if (e.mensajesPausadosAt) return { hecho: false, motivo: 'pausado', entrega: e };
@@ -3571,6 +3633,7 @@ ${lista}
   async function pedirConfirmacionAhora(id: number, quien: string): Promise<ResultadoNumero> {
     let e = await repo.entrega(id);
     if (!e) return { hecho: false, motivo: 'no_existe', entrega: null };
+    if (!ESTADOS_FINALES.includes(e.estado) && !e.envioRetenidoAt) e = (await rearmarMensaje(e)) ?? e;
     if (ESTADOS_FINALES.includes(e.estado)) return { hecho: false, motivo: 'cerrada', entrega: e };
     if (e.confirmacionEstado === 'confirmada') return { hecho: false, motivo: 'ya_confirmo', entrega: e };
     if (e.confirmacionEstado === 'no_hace_falta') return { hecho: false, motivo: 'no_hace_falta', entrega: e };
@@ -3906,6 +3969,220 @@ ${lista}
     return { filas, descartadas: lectura.descartadas };
   }
 
+  // ------------------------------------------------------ el primer mensaje
+  // El pedido y su primer mensaje van por separado: ver src/entregas/primer-mensaje.ts.
+
+  const cfgReintentos = (): ReintentosMensaje => ({
+    maximo: ajustes.mensajeReintentosMax ?? REINTENTOS_POR_DEFECTO.maximo,
+    esperaBaseSeg: ajustes.mensajeReintentoBaseSeg ?? REINTENTOS_POR_DEFECTO.esperaBaseSeg,
+    esperaMaxSeg: ajustes.mensajeReintentoMaxSeg ?? REINTENTOS_POR_DEFECTO.esperaMaxSeg,
+  });
+
+  /** Qué pide el primer mensaje de un pedido (o null: no hace falta escribirle). */
+  function viaDelMensaje(e: Pick<Entrega, 'ubicacionEstado' | 'confirmacionEstado'>): ViaMensaje | null {
+    if (e.ubicacionEstado === 'pendiente') return 'ubicacion';
+    if (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') return 'confirmacion';
+    return null;
+  }
+
+  /** El estado del mensaje con el que nace un pedido. Retenido = espera «Confirmar y enviar»: no sale nada. */
+  function mensajeAlCrear(ubicacionEstado: Entrega['ubicacionEstado'], confirmacionEstado: Entrega['confirmacionEstado'], retenida: boolean): { mensajeEstado: EstadoMensaje; mensajeVia: ViaMensaje | null } {
+    const via = viaDelMensaje({ ubicacionEstado, confirmacionEstado });
+    return { mensajeEstado: !via ? 'no_aplica' : retenida ? 'retenido' : 'pendiente', mensajeVia: via };
+  }
+
+  const SIN_ERROR = { mensajeErrorCodigo: null, mensajeError: null, mensajePermanente: false } as const;
+
+  /**
+   * Aplica lo que pasó con un intento (solo si el mensaje sigue en uno de
+   * `desde`) y dice al motor qué hacer: cuándo reintentar o que pare.
+   */
+  async function aplicarDesenlace(e: Entrega, d: Desenlace, desde: readonly EstadoMensaje[] = ['enviando']): Promise<{ esperaMs?: number; detener?: string }> {
+    const en = ahora();
+    const cfg = cfgReintentos();
+    const intentos = (e.mensajeIntentos ?? 0) + 1;
+    if (d.tipo === 'enviado') {
+      const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'enviado', mensajeEnviadoAt: en, mensajeWamid: d.wamid, mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeReintentosAuto: 0, mensajeProximoAt: null, ...SIN_ERROR });
+      if (act && e.mensajeErrorCodigo) await evento(act, 'nota', `el primer mensaje salió al intento ${intentos}`);
+      return {};
+    }
+    if (d.tipo === 'transitorio') {
+      if (!d.cuenta) {
+        // Una guarda propia lo freno: no salio nada y no gasta intento.
+        await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'reintentando', mensajeProximoAt: new Date(en.getTime() + (d.esperaMinMs ?? cfg.esperaBaseSeg * 1000)), mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
+        return {};
+      }
+      const n = (e.mensajeReintentosAuto ?? 0) + 1;
+      if (n > cfg.maximo) {
+        const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'fallido', mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: 'reintentos_agotados', mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
+        if (act) await evento(act, 'incidencia', `el primer mensaje falló ${intentos} veces: se deja de reintentar solo (bandeja de errores)`);
+        return { detener: motivoLegible('reintentos_agotados', d.motivo) };
+      }
+      const esperaMs = esperaDelReintento(n, cfg, d.esperaMinMs ?? 0);
+      const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'reintentando', mensajeIntentos: intentos, mensajeReintentosAuto: n, mensajeUltimoIntentoAt: en, mensajeProximoAt: new Date(en.getTime() + esperaMs), mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
+      if (act) await evento(act, 'incidencia', `el primer mensaje no salió (${d.motivo.slice(0, 120)}): reintento ${n} de ${cfg.maximo} en ${Math.round(esperaMs / 1000)} s`);
+      return { esperaMs };
+    }
+    const estado: EstadoMensaje = d.tipo === 'incierto' ? 'incierto' : 'fallido';
+    const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: estado, mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: d.tipo === 'permanente' });
+    if (act) await evento(act, 'incidencia', d.tipo === 'incierto' ? `no se sabe si le llegó el primer mensaje (${d.motivo.slice(0, 120)}): no se reenvía solo` : `el primer mensaje no se puede mandar: ${motivoLegible(d.codigo, d.motivo)}`);
+    return { detener: motivoLegible(d.codigo, d.motivo) };
+  }
+
+  /**
+   * Tras dispararlo (meterlo en el reparto, dejarlo en la cola de la
+   * confirmación): en qué queda el mensaje. `fallo`: no se pudo disparar.
+   */
+  async function asentarDisparo(e: Entrega, fallo?: string): Promise<Entrega> {
+    const fresca = (await repo.entrega(e.id)) ?? e;
+    const desde: EstadoMensaje[] = ['pendiente', 'reintentando'];
+    if (!desde.includes(fresca.mensajeEstado ?? 'no_aplica')) return fresca;
+    const via = viaDelMensaje(fresca);
+    if (!via) return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'no_aplica', mensajeVia: null, mensajeProximoAt: null, ...SIN_ERROR })) ?? fresca;
+    const enCola = via === 'confirmacion' || Boolean(fresca.loteId) || fresca.ubicacionPropuestaLat != null;
+    if (fallo || !enCola) {
+      await aplicarDesenlace(fresca, { tipo: 'transitorio', codigo: 'no_encolado', motivo: fallo ?? 'no entró en la cola del reparto', cuenta: true }, desde);
+      return (await repo.entrega(fresca.id)) ?? fresca;
+    }
+    // Ya en manos de su motor; si el reparto ya le habia escrito (otro pedido suyo), cuenta como enviado.
+    const s = via === 'ubicacion' && fresca.loteId ? await solicitudDe(fresca) : null;
+    if (s && (s.estado === 'enviado' || s.estado === 'respondio' || s.estado === 'resuelto')) {
+      return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'enviado', mensajeVia: via, mensajeEnviadoAt: s.ultimoEnvioAt ?? ahora(), mensajeProximoAt: null, ...SIN_ERROR })) ?? fresca;
+    }
+    return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'encolado', mensajeVia: via, mensajeProximoAt: null })) ?? fresca;
+  }
+
+  /** Una persona pide otro intento (Números del día, Reintentar): lo fallido o incierto vuelve a pendiente. */
+  async function rearmarMensaje(e: Entrega): Promise<Entrega | null> {
+    return repo.cambiarMensaje(e.id, MENSAJE_REINTENTABLE, { mensajeEstado: 'pendiente', mensajeReintentosAuto: 0, mensajeProximoAt: null, mensajeVia: viaDelMensaje(e) ?? e.mensajeVia ?? null });
+  }
+
+  /** Lo que el reparto hace con el primer mensaje de una solicitud que es de un pedido (ver PrimerMensajeReparto). */
+  const primerMensajeReparto: PrimerMensajeReparto = {
+    async antes(s) {
+      if (!s.phone) return true;
+      const ligadas = await repo.vivasDeLoteYTelefono(s.loteId, s.phone);
+      if (!ligadas.length) return true;
+      if (ligadas.some((e) => e.mensajeEstado === 'enviando')) return false;
+      let marcadas = 0;
+      for (const e of ligadas) {
+        const act = await repo.cambiarMensaje(e.id, ['pendiente', 'encolado', 'reintentando'], { mensajeEstado: 'enviando', mensajeVia: 'ubicacion', mensajeUltimoIntentoAt: ahora() });
+        if (act) marcadas++;
+      }
+      // Ninguna se pudo marcar y alguna espera a una persona (fallida o incierta): no sale.
+      return marcadas > 0 || !ligadas.some((e) => MENSAJE_REINTENTABLE.includes(e.mensajeEstado ?? 'no_aplica'));
+    },
+    async despues(s, salida) {
+      if (!s.phone) return;
+      const d = desenlaceDeEnvio(salida);
+      let decision: { esperaMs?: number; detener?: string } = {};
+      for (const e of await repo.vivasDeLoteYTelefono(s.loteId, s.phone)) {
+        if (e.mensajeEstado !== 'enviando') continue;
+        const r = await aplicarDesenlace(e, d);
+        decision = { esperaMs: Math.max(decision.esperaMs ?? 0, r.esperaMs ?? 0) || undefined, detener: decision.detener ?? r.detener };
+      }
+      return decision;
+    },
+    async sinWhatsApp(s, detalle) {
+      if (!s.phone) return;
+      for (const e of await repo.vivasDeLoteYTelefono(s.loteId, s.phone)) {
+        await aplicarDesenlace(e, { tipo: 'permanente', codigo: 'sin_whatsapp', motivo: detalle }, ['pendiente', 'encolado', 'reintentando', 'enviando']);
+      }
+    },
+  };
+
+  /**
+   * La red de seguridad, en cada revisión del motor (y tras un reinicio):
+   *  - lo que quedó «enviando» de un proceso que se cortó pasa a incierto (no se reenvía a ciegas);
+   *  - lo pendiente o en reintento que nunca entró al reparto se vuelve a disparar;
+   *  - lo encolado cuyo motor ya escribió (o ya no hace falta) se pone al día.
+   */
+  async function revisarMensajes(): Promise<{ inciertos: number; disparados: number; puestosAlDia: number }> {
+    const en = ahora();
+    let inciertos = 0;
+    let disparados = 0;
+    let puestosAlDia = 0;
+    for (const e of await repo.mensajesEnviandoDesde(new Date(en.getTime() - 3 * 60_000), 50)) {
+      const r = await aplicarDesenlace(e, { tipo: 'incierto', codigo: 'resultado_incierto', motivo: 'el servicio se cortó mientras se enviaba' });
+      if (r.detener) inciertos++;
+      // Que el reparto no lo reintente por su cuenta mientras nadie lo mira.
+      const s = await solicitudDe(e);
+      if (s && s.estado === 'pendiente') await repos.rutas.actualizarSolicitud(s.id, { estado: 'incidencia', incidencia: 'error_envio', incidenciaDetalle: 'no se sabe si salió el primer mensaje (el servicio se cortó)', proximoIntentoAt: null });
+    }
+    for (const e of await repo.mensajesQueTocan(en, 20)) {
+      if (e.mensajesPausadosAt) continue;
+      // Lo que ya esta en el reparto (o con la direccion propuesta) lo reintenta su motor.
+      if (e.mensajeVia === 'confirmacion' || e.loteId || e.ubicacionPropuestaLat != null) {
+        await asentarDisparo(e);
+        continue;
+      }
+      let fallo: string | undefined;
+      let act = e;
+      try {
+        act = await alLoteDelReparto(e, 'reintento del primer mensaje');
+        if (!act.loteId && act.ubicacionEstado === 'pendiente') fallo = 'el reparto no aceptó el pedido';
+      } catch (error) {
+        fallo = error instanceof Error ? error.message : String(error);
+      }
+      await asentarDisparo(act, fallo);
+      disparados++;
+    }
+    for (const e of (await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA })).filter((x) => x.mensajeEstado === 'encolado')) {
+      const via = viaDelMensaje(e);
+      const s = via === 'ubicacion' && e.loteId ? await solicitudDe(e) : null;
+      const yaEscrito = (via === 'confirmacion' && (e.confirmacionEstado === 'pedida' || e.confirmacionIntentos > 0)) || Boolean(e.ubicacionPropuestaAt) || Boolean(s && (s.estado === 'enviado' || s.estado === 'respondio' || s.estado === 'resuelto'));
+      if (yaEscrito) {
+        if (await repo.cambiarMensaje(e.id, ['encolado'], { mensajeEstado: 'enviado', mensajeEnviadoAt: s?.ultimoEnvioAt ?? e.confirmacionPedidaAt ?? e.ubicacionPropuestaAt ?? en, mensajeProximoAt: null, ...SIN_ERROR })) puestosAlDia++;
+      } else if (!via) {
+        if (await repo.cambiarMensaje(e.id, ['encolado'], { mensajeEstado: 'no_aplica', mensajeProximoAt: null, ...SIN_ERROR })) puestosAlDia++;
+      }
+    }
+    return { inciertos, disparados, puestosAlDia };
+  }
+
+  /** La bandeja de errores: lo que no salió, con su motivo y si se puede reintentar. */
+  async function bandejaMensajes(): Promise<ItemBandejaMensajes[]> {
+    return (await repo.bandejaMensajes(500)).map((e) => ({
+      id: e.id,
+      referencia: e.referencia,
+      dia: e.dia,
+      nombre: e.nombre,
+      telefono: e.phone,
+      estadoPedido: e.estado,
+      mensaje: vistaMensaje(e),
+    }));
+  }
+
+  /**
+   * «Reintentar mensaje» desde la bandeja: el mismo disparador, sobre el
+   * pedido que ya existe (no se crea otro). Solo desde fallido o incierto, y
+   * el incierto solo si quien pulsa confirma que el cliente no lo recibió.
+   */
+  async function reintentarMensaje(id: number, quien: string, opts: { confirmarIncierto?: boolean } = {}): Promise<ResultadoReintentoMensaje> {
+    const e = await repo.entrega(id);
+    if (!e) return { ok: false, status: 404, codigo: 'NO_EXISTE', motivo: 'Ese pedido no existe en esta tienda.' };
+    const estado = e.mensajeEstado ?? 'no_aplica';
+    if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `${e.referencia} ya está ${e.estado}: no se le escribe.` };
+    if (e.envioRetenidoAt || estado === 'retenido') return { ok: false, status: 409, codigo: 'ESPERA_CONFIRMACION', motivo: `${e.referencia} espera que confirmes su envío («Confirmar y enviar»): el mensaje sale al confirmarlo.` };
+    if (MENSAJE_EN_CURSO.includes(estado)) return { ok: false, status: 409, codigo: 'MENSAJE_EN_CURSO', motivo: `El mensaje de ${e.referencia} ya tiene un intento en curso o programado.` };
+    if (estado === 'enviado') return { ok: false, status: 409, codigo: 'MENSAJE_YA_ENVIADO', motivo: `El mensaje de ${e.referencia} ya se envió.` };
+    if (estado === 'no_aplica') return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `${e.referencia} no tiene ningún mensaje pendiente que mandar.` };
+    if (estado === 'incierto' && !opts.confirmarIncierto) return { ok: false, status: 409, codigo: 'RESULTADO_INCIERTO', motivo: `No se sabe si el mensaje de ${e.referencia} le llegó. Revisa su chat y, si no lo tiene, confirma el reintento.` };
+    if (e.mensajesPausadosAt) return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `Los mensajes a ${e.referencia} están en pausa (Números del día): reanúdalos primero.` };
+    const armada = await rearmarMensaje(e);
+    if (!armada) return { ok: false, status: 409, codigo: 'MENSAJE_EN_CURSO', motivo: `Otro intento del mensaje de ${e.referencia} se adelantó.` };
+    await evento(armada, 'nota', `${quien} reintenta el primer mensaje desde la bandeja de errores`);
+    const via = viaDelMensaje(armada);
+    const r = via === 'confirmacion' ? await pedirConfirmacionAhora(id, quien) : await pedirUbicacionAhora(id, quien);
+    if (!r.hecho && r.motivo !== 'ya_tiene_ubicacion' && r.motivo !== 'ya_confirmo' && r.motivo !== 'no_hace_falta') {
+      // No se pudo disparar: vuelve a como estaba, con el motivo nuevo.
+      await repo.cambiarMensaje(id, ['pendiente'], { mensajeEstado: estado, mensajeErrorCodigo: e.mensajeErrorCodigo ?? 'no_encolado', mensajeError: `no se pudo reintentar: ${r.motivo}` });
+      return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `No se pudo reintentar el mensaje de ${e.referencia} (${r.motivo}).` };
+    }
+    const act = await asentarDisparo((await repo.entrega(id)) ?? armada);
+    return { ok: true, entrega: act, mensaje: vistaMensaje(act) };
+  }
+
   async function crearVarias(filas: FilaPegada[], quien: string, opts: { faltaUbicacion?: boolean; faltaConfirmacion?: boolean; descartadas?: ResultadoCargaVarias['descartadas']; retener?: boolean } = {}): Promise<ResultadoCargaVarias> {
     const dia = hoy();
     const retener = Boolean(opts.retener) && ajustes.confirmarListaGsg !== false;
@@ -3931,6 +4208,8 @@ ${lista}
       const { entrega, nueva } = await repo.crearEntrega({
         dia,
         referencia,
+        externoId: f.externoId ?? null,
+        ...mensajeAlCrear(faltaUbicacion ? 'pendiente' : 'no_hace_falta', faltaConfirmacion ? 'pendiente' : 'no_hace_falta', retener),
         phone: revision.phone,
         nombre: f.nombre?.trim() || null,
         direccion: f.direccion?.trim() || null,
@@ -3965,6 +4244,7 @@ ${lista}
         }
       }
     }
+    let falloLote: string | undefined;
     if (paraLote.length) {
       try {
         const nombre = `Lista pegada ${dia} ${horaEnReloj(ahora(), tz())}`;
@@ -3975,11 +4255,16 @@ ${lista}
           await evento(e, 'nota', `entra en el lote del reparto "${carga.lote.nombre}" para pedirle la ubicación`);
         }
       } catch (error) {
-        log('no se pudo cargar el lote de la lista pegada', { detalle: String(error) });
+        // Los pedidos quedan guardados: su primer mensaje pasa a reintento (y a la bandeja si no sale).
+        falloLote = error instanceof Error ? error.message : String(error);
+        log('no se pudo cargar el lote de la lista pegada', { detalle: falloLote });
       }
     }
     const creadas: Entrega[] = [];
-    for (const e of resultado.creadas) creadas.push(await recalcular((await repo.entrega(e.id)) ?? e));
+    for (const e of resultado.creadas) {
+      const asentada = e.envioRetenidoAt ? e : await asentarDisparo(e, conUbicacion.includes(e) ? falloLote : undefined);
+      creadas.push(await recalcular((await repo.entrega(asentada.id)) ?? asentada));
+    }
     resultado.creadas = creadas;
     return resultado;
   }
@@ -4108,7 +4393,8 @@ ${lista}
 
   async function resumen(): Promise<ResumenEntregas> {
     const dia = hoy();
-    const entregas = await repo.listar({ dia, limit: 1000 });
+    // Sin tope bajo: con un tope de 1000 (y en orden de llegada) lo que entraba despues del 1000 del dia se guardaba pero no salia en Hoy.
+    const entregas = await repo.listar({ dia, limit: TOPE_DEL_DIA });
     const motorizados = await repo.listarMotorizados();
     const porId = new Map(motorizados.map((m) => [m.id, m]));
     const filas: FilaEntrega[] = [];
@@ -4532,7 +4818,7 @@ ${lista}
       const viva = await repo.vivaPorTelefono(phone);
       if (viva) return viva.referencia;
       const dia = hoy();
-      const deHoy = (await repo.listar({ dia, limit: 1000 })).filter((e) => e.phone === phone);
+      const deHoy = (await repo.listar({ dia, limit: TOPE_DEL_DIA })).filter((e) => e.phone === phone);
       if (deHoy.length) return deHoy[deHoy.length - 1]!.referencia;
       const ayer = new Date(ahora().getTime() - 24 * 60 * 60 * 1000);
       const diaAyer = new Intl.DateTimeFormat('en-CA', { timeZone: tz(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(ayer).slice(0, 10);
@@ -4543,6 +4829,11 @@ ${lista}
       const dia = hoy();
       return (await repo.listar({ dia, estados: ['avisada', 'entregada', 'terminada'], limit: 1000 })).map((e) => ({ phone: e.phone, referencia: e.referencia }));
     },
+    primerMensajeReparto,
+    diaDeHoy: () => hoy(),
+    revisarMensajes,
+    bandejaMensajes,
+    reintentarMensaje,
     conectarMotor(m) {
       motor = m;
     },

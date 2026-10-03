@@ -28,6 +28,8 @@ export interface ClavesApiRepo {
   listar(): Promise<ClaveApi[]>;
   /** Solo claves vigentes: una revocada no vuelve. */
   porHash(hash: string): Promise<ClaveApi | null>;
+  /** Tambien las revocadas: solo para contestar «revocada» (401) en vez de «no existe». Nunca para dejar entrar. */
+  porHashConRevocadas?(hash: string): Promise<ClaveApi | null>;
   revocar(id: string): Promise<boolean>;
   tocarUso(id: string, at: Date): Promise<void>;
 }
@@ -111,6 +113,10 @@ export function createClavesApiRepo(pool: Pool): ClavesApiRepo {
         `select ${COLUMNAS} from claves_api where hash = $1 and revocada_at is null`,
         [hash],
       );
+      return rows[0] ? deFila(rows[0]) : null;
+    },
+    async porHashConRevocadas(hash) {
+      const { rows } = await pool.query<Row>(`select ${COLUMNAS} from claves_api where hash = $1 order by (revocada_at is null) desc limit 1`, [hash]);
       return rows[0] ? deFila(rows[0]) : null;
     },
     async revocar(id) {

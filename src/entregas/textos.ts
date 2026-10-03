@@ -17,6 +17,15 @@ export const ajustesEntregasSchema = z.object({
   confirmacionEsperaMin: z.number().int().min(5).max(24 * 60).default(120),
   /** Cuantas veces se pide la confirmacion antes de darla por perdida. */
   confirmacionMaxIntentos: z.number().int().min(1).max(6).default(3),
+  /**
+   * El primer mensaje de un pedido que falla por algo pasajero (WhatsApp caido
+   * un momento, el reparto que no cargo): cuantos reintentos automaticos, y
+   * la espera antes del primero (cada siguiente espera el doble, hasta el
+   * techo). Pasado el tope va a la bandeja de errores. Ver src/entregas/primer-mensaje.ts.
+   */
+  mensajeReintentosMax: z.number().int().min(0).max(20).default(5),
+  mensajeReintentoBaseSeg: z.number().int().min(5).max(3600).default(60),
+  mensajeReintentoMaxSeg: z.number().int().min(60).max(24 * 3600).default(1800),
   /** Cuantos minutos se espera a que el motorizado conteste antes de insistir o pasar a otro. */
   motorizadoEsperaMin: z.number().int().min(1).max(180).default(10),
   /** Cuantas veces se le escribe a un mismo motorizado antes de pasar el pedido a otro. */

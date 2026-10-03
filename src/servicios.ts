@@ -140,6 +140,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
     // El primer mensaje de una entrega de GSG: la plantilla con producto, empresa, codigo, monto...
     textoSolicitud: entregas ? (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) : undefined,
+    primerMensaje: entregas?.primerMensajeReparto,
     salud,
     politica,
     log: info,

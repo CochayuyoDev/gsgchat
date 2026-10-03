@@ -19,6 +19,7 @@ import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { repartir } from '../src/desarrollador/vivo.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
 import { baseDePrueba, type BaseDePrueba } from './mysql.js';
+import { OBLIGATORIOS_GSG } from './escenario-entregas.js';
 
 /** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
 const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
@@ -123,7 +124,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
       // Uno REAL (fuera del rango de prueba): nada del modulo lo puede tocar.
       { referencia: 'REAL-1', telefono: '51987654321', nombre: 'Cliente real', distrito: 'Breña', lat: -12.0592, lng: -77.0521, faltaConfirmar: true },
     ];
-    const r = await api('POST', '/api/v1/entregas', { pedidos }, { authorization: `Bearer ${clave}`, cookie: '' });
+    const r = await api('POST', '/api/v1/entregas', { pedidos: pedidos.map((p) => ({ ...OBLIGATORIOS_GSG, ...p })) }, { authorization: `Bearer ${clave}`, cookie: '' });
     expect(r.status).toBe(201);
     expect(r.body.creadas.length).toBe(pedidos.length);
     // Lo de GSG espera a que se confirme el envío: se confirma solo lo de prueba (el real sigue esperando).

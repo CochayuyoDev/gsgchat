@@ -344,7 +344,9 @@ export function openApi(baseUrl: string): Json {
           tags: ['entregas'],
           summary: 'GSG empuja: uno o varios pedidos de hoy (sin esperar a que se le pregunte)',
           description: [
-            'Mismo contrato que `GET /reparto/pendientes`, pedido a pedido: `referencia` y `telefono` obligatorios; con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
+            'Obligatorios en cada pedido (lo que GSG manda siempre): `tracking`, `cliente`, `telefono`, `empresa`, `metodoPago` y `montoCobrar`. Opcionales: `distrito`, `direccion`, `fecRuta`, `telefono2`, `producto` y `cantBultos`. Si falta uno, 400 con `detalles` campo por campo y no se guarda ninguno de la llamada. Con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
+            'La clave decide la tienda: 401 sin clave, con una que no existe o revocada; 403 si es valida pero sin `entregas:gestionar`; 404 si se usa la ruta con nombre de tienda; 409 si la clave esta en dos tiendas.',
+            'Cada pedido creado vuelve con su `id` (el de este sistema, leido de la base tras guardarlo; el de GSG va en `idExterno`) y su `mensaje` (el primer mensaje al cliente: retenido, encolado, enviado, reintentando, fallido o incierto). Si el pedido se guardo pero su mensaje no salio, la respuesta sigue siendo 201 y lo cuenta en `avisosMensaje`.',
             '`faltaUbicacion` (por defecto true) y `faltaConfirmar` (por defecto true) dicen que le falta a cada uno; `urgente` lo pone primero hacia el motorizado.',
             'Se acepta un pedido suelto, una lista `[...]` o `{ pedidos: [...] }` (hasta 500). Un pedido repetido hoy no se duplica (`repetidas`); uno sin telefono valido va en `descartadas` con su motivo.',
             'Lo que pasa despues (confirmo, se le aviso la hora, se entrego, incidencia) llega por los webhooks `entrega.*`.',
@@ -353,10 +355,16 @@ export function openApi(baseUrl: string): Json {
           requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [ref('PedidoGsg'), { type: 'array', items: ref('PedidoGsg') }, { type: 'object', properties: { pedidos: { type: 'array', items: ref('PedidoGsg') } } }] } } } },
           servers: [{ url: `${new URL(baseUrl).origin}/api/v1` }],
           responses: {
-            201: json({ type: 'object', properties: { ok: { type: 'boolean' }, creadas: { type: 'array', items: ref('EntregaDia') }, repetidas: { type: 'array', items: { type: 'string' } }, descartadas: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, motivo: { type: 'string' } } } }, detalle: { type: 'string' } } }, 'Al menos un pedido nuevo'),
-            200: json({ type: 'object' }, 'Nada nuevo (todo repetido o descartado)'),
-            400: error('El cuerpo no se entiende'),
-            404: error('No tiene permiso: clave ausente, inválida, revocada o sin permiso de recepción'),
+            201: json({ type: 'object', properties: { ok: { type: 'boolean' }, creadas: { type: 'array', items: ref('EntregaDia') }, repetidas: { type: 'array', items: { type: 'string' } }, existentes: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, id: { type: 'integer', nullable: true } } } }, descartadas: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, motivo: { type: 'string' } } } }, avisosMensaje: { type: 'array', items: { type: 'object' } }, detalle: { type: 'string' } } }, 'Al menos un pedido nuevo, guardado (con su id real)'),
+            200: json({ type: 'object' }, 'Nada nuevo: todo ya estaba (`existentes` trae sus ids). Repetir la misma llamada es seguro'),
+            400: error('VALIDACION (faltan campos o no tienen el formato; o ningun pedido tenia un telefono valido) o JSON_INVALIDO'),
+            401: error('CLAVE_AUSENTE, CLAVE_INVALIDA o CLAVE_REVOCADA (con WWW-Authenticate)'),
+            403: error('SIN_PERMISO (la clave no tiene entregas:gestionar) o TIENDA_SUSPENDIDA'),
+            404: error('RUTA_NO_EXISTE: la recepcion con /tienda/<nombre> no existe; se usa POST /api/v1/entregas'),
+            409: error('CLAVE_AMBIGUA: la clave esta registrada en mas de una tienda'),
+            429: error('DEMASIADAS_PETICIONES: mas de 120 por minuto con esta clave (con Retry-After)'),
+            500: error('ERROR_INTERNO: no se guardo nada seguro; repetir la misma llamada no duplica'),
+            503: error('BASE_NO_DISPONIBLE: la base no contesta (con Retry-After); repetir la misma llamada no duplica'),
           },
         },
       },
@@ -483,11 +491,25 @@ export function openApi(baseUrl: string): Json {
       securitySchemes: { claveApi: { type: 'http', scheme: 'bearer', description: 'Clave de API `wak_...` creada en el panel, con permisos' } },
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },
-        Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
+        Error: {
+          type: 'object',
+          required: ['error'],
+          properties: {
+            ok: { type: 'boolean', enum: [false] },
+            codigo: { type: 'string', description: 'Estable, para comparar desde otro sistema: VALIDACION, JSON_INVALIDO, CLAVE_AUSENTE, CLAVE_INVALIDA, CLAVE_REVOCADA, SIN_PERMISO, TIENDA_SUSPENDIDA, RUTA_NO_EXISTE, NO_EXISTE, CLAVE_AMBIGUA, CONFLICTO, MENSAJE_EN_CURSO, MENSAJE_YA_ENVIADO, RESULTADO_INCIERTO, ESPERA_CONFIRMACION, DEMASIADAS_PETICIONES, BASE_NO_DISPONIBLE, ERROR_INTERNO' },
+            error: { type: 'string', description: 'El motivo en palabras' },
+            detalles: { description: 'Campo por campo cuando aplica', oneOf: [{ type: 'array', items: { type: 'object', properties: { campo: { type: 'string' }, mensaje: { type: 'string' } } } }, { type: 'object' }] },
+          },
+        },
         PedidoGsg: {
           type: 'object',
-          required: ['telefono'],
-          anyOf: [{ required: ['referencia'] }, { required: ['tracking'] }, { required: ['codigoTracking'] }],
+          description: 'Obligatorios: tracking (o codigoTracking), cliente (o nombre), telefono, empresa, metodoPago y montoCobrar (o monto). Opcionales del contrato: distrito, direccion, fecRuta, telefono2, producto, cantBultos. Los demas campos se aceptan por compatibilidad.',
+          required: ['telefono', 'empresa', 'metodoPago'],
+          allOf: [
+            { anyOf: [{ required: ['tracking'] }, { required: ['codigoTracking'] }, { required: ['referencia'] }] },
+            { anyOf: [{ required: ['cliente'] }, { required: ['nombre'] }] },
+            { anyOf: [{ required: ['montoCobrar'] }, { required: ['monto'] }] },
+          ],
           properties: {
             referencia: { type: 'string', description: 'El numero de pedido en GSG (P-1001)' },
             telefono: { type: 'string', description: 'El WhatsApp del cliente: 987654321 o 51987654321' },
@@ -532,6 +554,9 @@ export function openApi(baseUrl: string): Json {
         EntregaDia: {
           type: 'object',
           properties: {
+            id: { type: 'integer', description: 'El id del pedido en este sistema (la fila guardada)' },
+            idExterno: { type: 'string', nullable: true, description: 'El id que mando GSG, si mando uno' },
+            mensaje: { type: 'object', description: 'El primer mensaje al cliente, aparte del pedido', properties: { estado: { type: 'string', enum: ['no_aplica', 'retenido', 'pendiente', 'encolado', 'enviando', 'enviado', 'reintentando', 'fallido', 'incierto'] }, via: { type: 'string', nullable: true, enum: ['ubicacion', 'confirmacion', null] }, intentos: { type: 'integer' }, ultimoIntentoEn: { type: 'string', nullable: true }, proximoIntentoEn: { type: 'string', nullable: true }, enviadoEn: { type: 'string', nullable: true }, codigo: { type: 'string', nullable: true }, motivo: { type: 'string', nullable: true }, permanente: { type: 'boolean' }, puedeReintentar: { type: 'boolean' }, requiereConfirmar: { type: 'boolean' } } },
             costServ: { type: 'string', nullable: true },
             referenciaDireccion: { type: 'string', nullable: true },
             fecRegistro: { type: 'string', nullable: true },
@@ -549,7 +574,6 @@ export function openApi(baseUrl: string): Json {
             agenciaDestino: { type: 'string', nullable: true },
             pagoEnDestino: { type: 'string', nullable: true },
             referencia: { type: 'string' },
-            id: { type: 'string', nullable: true },
             dia: { type: 'string' },
             telefono: { type: 'string' },
             nombre: { type: 'string', nullable: true },

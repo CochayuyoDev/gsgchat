@@ -28,7 +28,8 @@ import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
-import { esRecepcionGsg } from '../plataforma/recepcion-gsg.js';
+import { esRecepcionGsg, RECHAZOS, tokenBearer, type RechazoRecepcion } from '../plataforma/recepcion-gsg.js';
+import { cuerpoError } from '../api/errores.js';
 
 export interface UsuarioSesion {
   id: string;
@@ -200,11 +201,32 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     return sesionDe(u);
   }
 
+  /** Por que una peticion a la recepcion no entra (o null si entra). */
+  async function rechazoDeRecepcion(request: FastifyRequest): Promise<RechazoRecepcion | null> {
+    const header = request.headers.authorization;
+    const token = tokenBearer(typeof header === 'string' ? header : undefined);
+    if (!token) return RECHAZOS.ausente();
+    if (!pareceClaveApi(token)) return RECHAZOS.invalida();
+    if (!request.usuario?.porToken) {
+      const registro = await claves.porHashConRevocadas?.(hashClaveApi(token));
+      return registro?.revocadaAt ? RECHAZOS.revocada() : RECHAZOS.invalida();
+    }
+    if (!tienePermiso(request.usuario.permisos, 'entregas:gestionar')) return RECHAZOS.sinPermiso();
+    return null;
+  }
+
   app.addHook('onRequest', async (request, reply) => {
     request.usuario = await resolver(request);
-    if (esRecepcionGsg(request.method, request.url) &&
-      (!request.usuario?.porToken || !request.headers.authorization?.startsWith('Bearer wak_') || !tienePermiso(request.usuario.permisos, 'entregas:gestionar'))) {
-      return reply.code(404).send({ error: 'No tiene permiso' });
+    // La recepcion de pedidos de GSG: solo con una clave de API (nunca con la
+    // sesion del panel) y con el codigo de cada caso: 401 sin clave o con una
+    // que no vale, 403 si vale pero no puede crear pedidos.
+    if (esRecepcionGsg(request.method, request.url)) {
+      const rechazo = await rechazoDeRecepcion(request);
+      if (rechazo) {
+        for (const [k, v] of Object.entries(rechazo.cabeceras ?? {})) reply.header(k, v);
+        return reply.code(rechazo.status).send(rechazo.cuerpo);
+      }
+      return;
     }
 
     if (request.url.startsWith('/admin')) {
@@ -226,10 +248,14 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       // El canje de un codigo de conexion entra sin clave: el codigo es la
       // autorizacion, y de ahi sale la clave (ver super-routes.ts).
       if (API_SIN_CLAVE.includes(request.url.split('?')[0] ?? '') || request.url.startsWith('/api/plan/')) return;
-      if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: manda `Authorization: Bearer <clave de API>`' });
+      if (!request.usuario) {
+        const motivo = await rechazoDeRecepcion(request);
+        reply.header('www-authenticate', 'Bearer realm="gsgchat"');
+        return reply.code(401).send(cuerpoError(motivo?.cuerpo.codigo ?? 'CLAVE_INVALIDA', 'no autorizado: manda `Authorization: Bearer <clave de API>`'));
+      }
       const permiso = request.routeOptions?.config?.permiso;
       if (permiso && !tienePermiso(request.usuario.permisos, permiso)) {
-        return reply.code(403).send({ error: `esta clave no tiene el permiso "${permiso}"` });
+        return reply.code(403).send(cuerpoError('SIN_PERMISO', `esta clave no tiene el permiso "${permiso}"`));
       }
       return;
     }

@@ -273,82 +273,88 @@ cerrado, `429` si se pasó el límite.
 ### B.1 `POST /api/v1/entregas` — uno o varios pedidos
 
 Acepta un pedido suelto, una lista `[...]` o `{ "pedidos": [...] }` (hasta 500
-por llamada). Mismos campos que en `pendientes`, más dos banderas:
+por llamada). La clave decide la tienda: siempre a `POST /api/v1/entregas`, sin
+`/tienda/<nombre>`.
+
+Lo que GSG manda **siempre** (obligatorio): `tracking`, `cliente`, `telefono`,
+`empresa`, `metodoPago` y `montoCobrar`. Opcionales del contrato: `distrito`,
+`direccion`, `fecRuta`, `telefono2`, `producto` y `cantBultos`. Si a un pedido le
+falta un obligatorio, la llamada entera responde `400` con el detalle de cada
+campo y **no se guarda ninguno** (se corrige y se repite la misma llamada).
 
 ```bash
 curl -X POST https://<gsgchat>/api/v1/entregas \
   -H "Authorization: Bearer wak_..." -H "Content-Type: application/json" \
   -d '{
     "pedidos": [
-      { "referencia": "P-1001", "telefono": "987000001", "nombre": "María Pérez",
-        "direccion": "Av. La Marina 1234", "distrito": "San Miguel",
-        "faltaUbicacion": true, "faltaConfirmar": true,
-        "producto": "Zapatillas talla 40", "empresa": { "codigo": "516", "nombre": "Zapatería Lima" },
-        "tracking": "GSG-A-102345", "nroPedido": "#1042", "metodoPago": "YAPE", "monto": 85,
-        "remitente": "Juan Quispe" },
-      { "referencia": "P-1007", "telefono": "987000007", "nombre": "Luis Rojas",
-        "lat": -12.0464, "lng": -77.0308, "faltaConfirmar": true, "urgente": true }
+      { "tracking": "GSG-A-102345", "cliente": "María Pérez", "telefono": "987000001",
+        "empresa": { "codigo": "516", "nombre": "Zapatería Lima" },
+        "metodoPago": "YAPE", "montoCobrar": 85,
+        "direccion": "Av. La Marina 1234", "distrito": "San Miguel", "fecRuta": "2026-10-03",
+        "telefono2": "988777666", "producto": "Zapatillas talla 40", "cantBultos": 1 }
     ]
   }'
 ```
 
 | Campo | Obligatorio | Qué es |
 |---|---|---|
-| `referencia` | **sí** | El número de pedido en GSG. La misma referencia el mismo día no se duplica. |
-| `telefono` | **sí** | El WhatsApp del cliente (`987654321` o `51987654321`). Uno inválido descarta ese pedido, no la llamada entera. |
-| `nombre`, `direccion`, `distrito`, `notas` | no | Lo que se le dice al cliente y al motorizado. |
+| `tracking` | **sí** | El código de tracking de GSG (también se acepta `codigoTracking`). Es la llave del pedido: el mismo tracking el mismo día no se duplica. |
+| `referencia` | no | Solo si el pedido tiene una referencia distinta del tracking (sin ella, el tracking hace de referencia). |
+| `nombre` | **sí** | El cliente. GSG lo manda como `cliente` (también se acepta `nombre`). |
+| `telefono` | **sí** | El WhatsApp del cliente (`987654321` o `51987654321`). Uno inválido descarta ese pedido, no la llamada entera; si todos son inválidos, `400`. |
+| `empresa` | **sí** | La tienda que vende: texto o `{ "codigo": "516", "nombre": "Zapatería Lima" }` (con al menos uno de los dos). |
+| `metodoPago` | **sí** | Cómo paga el cliente («YAPE», «Efectivo», «Pagado»…). |
+| `monto` | **sí** | Lo que se cobra. GSG lo manda como `montoCobrar` (también se acepta `monto`): número (`85`) o texto (`"85.00"`); `0` si ya está pagado. |
+| `distrito`, `direccion` | no | Lo que se le dice al cliente y al motorizado. |
+| `fecRuta` | no | La fecha de ruta de GSG (se guarda como dato; no programa el envío). |
+| `telefono2` | no | Otro teléfono del cliente (solo dato: no se le escribe). |
+| `producto` | no | Lo que se entrega. Sale en el primer mensaje al cliente (ver E). |
+| `cantBultos` | no | Cuántos bultos: entero o texto numérico. |
+| `notas` | no | Nota para el motorizado. |
 | `lat`, `lng` | no | Si GSG ya tiene el pin: entonces no se le pide la ubicación. |
-| `id` | no | El id del pedido en GSG si es distinto de la referencia. |
+| `id` | no | El id del pedido en GSG. Se guarda y vuelve como `idExterno`. |
 | `faltaUbicacion` | no | Por defecto `true`: pedirle el pin al cliente. Con `lat`/`lng` no se le pide. |
 | `faltaConfirmar` | no | Por defecto `true`: preguntarle si recibe hoy. |
 | `urgente` | no | `true` = va primero hacia el motorizado. |
-| `producto` | no | Lo que se entrega. Sale en el primer mensaje al cliente (ver E). |
-| `empresa` | no | La tienda que vende: `{ "codigo": "516", "nombre": "Zapatería Lima" }` (o texto). |
-| `empresaCodigo`, `empresaNombre`, `tiendaCodigo`, `tiendaNombre` | no | La empresa en campos sueltos. |
-| `tracking` | no | El código de seguimiento de GSG. |
-| `nroPedido` | no | El número de pedido de la tienda. |
-| `metodoPago` | no | Cómo paga el cliente. |
-| `monto` | no | Lo que se cobra: número o texto (`85` → «85.00»). |
-| `remitente` | no | Quién firma el mensaje. |
-| `motorizado` | no | El motorizado que GSG ya asignó a ese pedido: `{ "nombre": "Carlos", "telefono": "999000003" }` (o solo el nombre). Su número es el que se le da al cliente en el cierre y en UBI REGISTRADA. |
-| `telefonoMotorizado` | no | El teléfono de ese motorizado, suelto. Si no llega ninguno (ni hay motorizado asignado en GSGchat), al cliente se le da el número de soporte. |
-| `costServ` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `referenciaDireccion` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `fecRegistro` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `fecRuta` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `observacionCliente` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `detalleProducto` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `telefono2` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `tamano` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `cantBultos` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `clientePagaDelivery` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `sede` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `tipoRuta` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `nroDocumento` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `agenciaNombre` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `agenciaDestino` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
-| `pagoEnDestino` | no | Dato de Courier; ver [contrato de recepcion](RECEPCION-GSG.md). |
+| `motorizado`, `telefonoMotorizado` | no | El motorizado que GSG ya asignó (`{ "nombre", "telefono" }` o `driver`). Su número es el que se le da al cliente en el cierre. |
+| `empresaCodigo`, `empresaNombre`, `tiendaCodigo`, `tiendaNombre`, `nroPedido`, `remitente`, `costServ`, `referenciaDireccion`, `fecRegistro`, `observacionCliente`, `detalleProducto`, `tamano`, `clientePagaDelivery`, `sede`, `tipoRuta`, `nroDocumento`, `agenciaNombre`, `agenciaDestino`, `pagoEnDestino` | no | Fuera del contrato actual: se siguen aceptando (y guardando) para no romper a quien ya los manda. Ver [recepción](RECEPCION-GSG.md). |
 
-Los datos del envío son opcionales: lo que falta no sale en el mensaje. Si el
-pedido ya estaba (va en `repetidas`) y trae datos del envío nuevos, se guardan.
-
+Si el pedido ya estaba (va en `repetidas`) y trae datos del envío nuevos, se guardan.
 Para cancelar no se usa `cancelado` aquí: se usa `DELETE` (B.4).
 
-Respuesta `201` (o `200` si no entró nada nuevo):
+Respuesta `201` (o `200` si todo ya estaba): cada pedido creado vuelve **leído de
+la base** después de guardarlo, con su `id` (el de GSGchat) y aparte su primer
+mensaje. Si el pedido se guardó pero su mensaje no salió, sigue siendo `201`: el
+fallo va en `mensaje` y en `avisosMensaje`, y se reintenta solo o desde la
+bandeja de errores de Hoy, sin volver a crear el pedido.
 
 ```json
 {
   "ok": true,
-  "creadas": [ { "referencia": "P-1001", "estado": "esperando_ubicacion", "situacion": "…", "…": "…" } ],
-  "repetidas": ["P-1003"],
-  "descartadas": [ { "referencia": "P-1009", "motivo": "teléfono inválido: tiene 2 dígitos" } ],
+  "creadas": [ { "id": 41, "idExterno": null, "referencia": "GSG-A-102345", "estado": "pendiente",
+                 "mensaje": { "estado": "retenido", "via": "ubicacion", "intentos": 0, "motivo": null, "…": "…" }, "…": "…" } ],
+  "repetidas": ["GSG-A-102300"],
+  "existentes": [ { "referencia": "GSG-A-102300", "id": 38 } ],
+  "descartadas": [ { "referencia": "GSG-A-102399", "motivo": "teléfono inválido: tiene 2 dígitos" } ],
   "detalle": "1 pedido nuevo, 1 ya estaba, 1 descartado."
 }
 ```
 
-Un pedido con la misma referencia que uno de hoy **no se duplica** (va en
-`repetidas`). Un cuerpo que no se entiende responde `400` con el motivo; sin
-permiso, `404` con `{ "error": "No tiene permiso" }`.
+Los errores tienen siempre la misma forma, sin SQL ni trazas:
+`{ "ok": false, "codigo": "VALIDACION", "error": "…", "detalles": [ { "campo": "pedidos[0].empresa", "mensaje": "falta (es obligatorio)" } ] }`.
+
+| HTTP | `codigo` | Cuándo |
+|---|---|---|
+| 400 | `VALIDACION`, `JSON_INVALIDO` | Faltan campos o no tienen el formato; ningún pedido con teléfono válido; JSON mal formado. |
+| 401 | `CLAVE_AUSENTE`, `CLAVE_INVALIDA`, `CLAVE_REVOCADA` | Sin `Authorization: Bearer`, clave que no existe, o revocada (con `WWW-Authenticate`). |
+| 403 | `SIN_PERMISO`, `TIENDA_SUSPENDIDA` | La clave vale pero no tiene `entregas:gestionar`, o su tienda está suspendida. |
+| 404 | `RUTA_NO_EXISTE` | Se usó `/tienda/<nombre>/api/v1/entregas` (o una ruta que no existe). |
+| 409 | `CLAVE_AMBIGUA` | La misma clave está registrada en dos tiendas. |
+| 429 | `DEMASIADAS_PETICIONES` | Más de 120 peticiones por minuto con esa clave (con `Retry-After`). |
+| 500 | `ERROR_INTERNO` | Algo inesperado. Repetir la misma llamada es seguro: lo ya guardado se reconoce por su tracking. |
+| 503 | `BASE_NO_DISPONIBLE` | La base de datos no contesta (con `Retry-After`). Igual: repetir no duplica. |
+
+No hay `402`: ninguna regla de pago bloquea la recepción.
 
 ### B.2 `GET /api/v1/entregas/{referencia}` — cómo va
 
@@ -623,4 +629,4 @@ La recepcion de Courier acepta tambien los alias cliente, driver, codigoTracking
 
 ## Endpoint global de recepcion
 
-Courier envia exclusivamente a POST https://<dominio>/api/v1/entregas, sin /tienda/<nombre>. Authorization: Bearer <clave> identifica la tienda por la clave vigente guardada en su base, y exige entregas:gestionar. Cookies, Referer y campos del cuerpo no eligen la tienda. Las claves existentes siguen sirviendo. Si no hay clave valida, falta permiso, la tienda esta suspendida o una clave esta asignada a dos tiendas, se devuelve HTTP 404 con {"error":"No tiene permiso"}. La recepcion con prefijo de tienda tambien devuelve ese error. No se guardan pedidos rechazados. Las demas rutas del panel y APIs mantienen su comportamiento.
+Courier envia exclusivamente a POST https://<dominio>/api/v1/entregas, sin /tienda/<nombre>. Authorization: Bearer <clave> identifica la tienda por la clave vigente guardada en su base, y exige entregas:gestionar. Cookies, Referer y campos del cuerpo no eligen la tienda. Las claves existentes siguen sirviendo. Cada rechazo tiene su codigo: 401 sin clave, con una clave que no existe o revocada; 403 si la clave vale pero no tiene entregas:gestionar o su tienda esta suspendida; 409 si la clave esta asignada a dos tiendas; 404 si se usa la ruta con prefijo de tienda. El cuerpo es {"ok":false,"codigo":"...","error":"..."} (ver CONTRATO-GSG.md, B.1). No se guardan pedidos rechazados. Las demas rutas del panel y APIs mantienen su comportamiento.

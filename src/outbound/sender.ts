@@ -167,6 +167,12 @@ export type SendOutcome =
       deliveryId: number | null;
       /** Codigo de Meta (131026...) o del cliente, normalizado; null si no se reconocio. */
       code?: string | null;
+      /**
+       * No se sabe si salio: la peticion se corto sin respuesta del proveedor
+       * (red, tiempo agotado) o contesto sin id de mensaje. Reenviar a ciegas
+       * puede duplicar el mensaje: quien llama decide (ver src/entregas/primer-mensaje.ts).
+       */
+      incierto?: boolean;
     };
 
 export interface SenderDeps {
@@ -485,7 +491,10 @@ export function createSender(deps: SenderDeps): Sender {
         // Un error que apunta al contacto (no tiene WhatsApp, esta saturado)
         // no se reintenta: insistir es exactamente lo que hay que evitar.
         const insistir = retryable && !NO_REINTENTAR.has(code ?? '');
-        return { ok: false, blocked: false, error: message, retryable: insistir, deliveryId, code };
+        // Sin respuesta del proveedor (no es un WhatsAppApiError: red, tiempo
+        // agotado) o un 200 sin wamid: puede que el mensaje si saliera.
+        const incierto = !(error instanceof WhatsAppApiError) || error.httpStatus === 200;
+        return { ok: false, blocked: false, error: message, retryable: insistir, deliveryId, code, ...(incierto ? { incierto: true } : {}) };
       }
     },
   };

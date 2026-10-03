@@ -16,7 +16,7 @@ import { hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { NOMBRES_PERMISOS, permisosAceptables, tienePermiso } from '../src/auth/permisos.js';
 import { verificarFirma } from '../src/webhooks/firma.js';
 import { approvedTemplate, createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, type FakeWhatsApp, CLAVE_API_PRUEBA as TODO } from './fakes.js';
-import { crearEscenarioEntregas } from './escenario-entregas.js';
+import { crearEscenarioEntregas, OBLIGATORIOS_GSG } from './escenario-entregas.js';
 import { despacharEntregas, encolarEventos } from '../src/webhooks/despachador.js';
 
 const ENV = {
@@ -372,12 +372,12 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     await esc.cerrar();
   });
 
-  it('dos pedidos entran con sus banderas, el repetido no se duplica, el sin telefono se descarta con motivo, y sin permiso 404', async () => {
+  it('dos pedidos entran con sus banderas, el repetido no se duplica, el sin telefono se descarta con motivo, y sin permiso 403', async () => {
     const r = await esc.api.post<{ ok: boolean; creadas: Array<Record<string, unknown>>; repetidas: string[]; descartadas: Array<{ referencia: string; motivo: string }>; detalle: string }>('/api/v1/entregas', {
       pedidos: [
-        { referencia: 'P-5001', telefono: '987000101', nombre: 'Ana Quispe', direccion: 'Av. Larco 123', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
-        { referencia: 'P-5002', telefono: '51987000102', nombre: 'Luis Rojas', lat: -12.1211, lng: -77.0301, faltaConfirmar: true, urgente: true },
-        { referencia: 'P-5003', telefono: '12', nombre: 'Sin telefono' },
+        { ...OBLIGATORIOS_GSG, referencia: 'P-5001', telefono: '987000101', nombre: 'Ana Quispe', direccion: 'Av. Larco 123', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
+        { ...OBLIGATORIOS_GSG, referencia: 'P-5002', telefono: '51987000102', nombre: 'Luis Rojas', lat: -12.1211, lng: -77.0301, faltaConfirmar: true, urgente: true },
+        { ...OBLIGATORIOS_GSG, referencia: 'P-5003', telefono: '12', nombre: 'Sin telefono' },
       ],
     });
     expect(r.status).toBe(201);
@@ -385,6 +385,8 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     expect(r.body.descartadas).toHaveLength(1);
     expect(r.body.descartadas[0]!.motivo).toContain('tel');
     expect(r.body.detalle).toContain('2 pedidos nuevos');
+    // El id es el de la base (numero real), no null.
+    for (const c of r.body.creadas) expect(typeof c.id).toBe('number');
     // En la pantalla, con lo que le falta a cada uno.
     const p1 = await esc.entrega('P-5001');
     expect(p1).toMatchObject({ ubicacionEstado: 'pendiente', confirmacionEstado: 'pendiente', estado: 'esperando_ubicacion' });
@@ -394,7 +396,7 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     expect(urgente.prioridad).toBe('urgente');
     expect(urgente.ubicacion).toMatchObject({ estado: 'recibida', lat: -12.1211 });
     // Repetido: no se duplica.
-    const otra = await esc.api.post<{ creadas: unknown[]; repetidas: string[] }>('/api/v1/entregas', { referencia: 'P-5001', telefono: '987000101' });
+    const otra = await esc.api.post<{ creadas: unknown[]; repetidas: string[] }>('/api/v1/entregas', { ...OBLIGATORIOS_GSG, referencia: 'P-5001', nombre: 'Ana Quispe', telefono: '987000101' });
     expect(otra.status).toBe(200);
     expect(otra.body.creadas).toEqual([]);
     expect(otra.body.repetidas).toEqual(['P-5001']);
@@ -403,9 +405,10 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     const vacio = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(TODO), payload: {} });
     expect(vacio.statusCode).toBe(400);
     expect(vacio.json().error).toContain('Manda un pedido');
-    // Sin permiso de recepci?n: 404.
-    const sin = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(SOLO_LEER), payload: { referencia: 'P-5009', telefono: '987000109' } });
-    expect(sin.statusCode).toBe(404);
+    // Clave valida sin permiso de recepcion: 403.
+    const sin = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(SOLO_LEER), payload: { ...OBLIGATORIOS_GSG, referencia: 'P-5009', nombre: 'X', telefono: '987000109' } });
+    expect(sin.statusCode).toBe(403);
+    expect(sin.json()).toMatchObject({ ok: false, codigo: 'SIN_PERMISO' });
     expect(sin.json().error).toMatch(/permiso/i);
     // Pero si puede leer.
     const lee = await esc.app.inject({ method: 'GET', url: '/api/v1/entregas/P-5002', headers: conClave(SOLO_LEER) });

@@ -1,31 +1,46 @@
 import { appShell } from './shell.js';
 import { escapeHtml } from './login-page.js';
+import { MENSAJE_ERROR_HTTP_JS } from './bandeja-mensajes.js';
 
+/** Los 12 campos del contrato con GSG Courier. */
 export const EJEMPLO_COURIER = { pedidos: [{
-  tracking: 'GSG-000001', driver: { nombre: 'Luis', telefono: '999888777' }, distrito: 'Lince',
-  costServ: 12.5, empresa: 'Tienda Uno', cliente: 'Ana Pérez', telefono: '987654321',
-  direccion: 'Av. Lima 123', referenciaDireccion: 'Frente al parque',
-  fecRegistro: '2026-10-02T08:00:00-05:00', fecRuta: '2026-10-03',
-  observacionCliente: 'Llamar antes de llegar', detalleProducto: 'Caja sellada', telefono2: '988777666',
-  producto: 'Zapatos', tamano: '40', cantBultos: 2, metodoPago: 'Efectivo', montoCobrar: 85,
-  clientePagaDelivery: false, sede: 'Lima', tipoRuta: 'Agencia', nroDocumento: '00123456',
-  agenciaNombre: 'Agencia Uno', agenciaDestino: 'Huancayo - Av. Uno 123', pagoEnDestino: true,
+  tracking: 'GSG-000001', empresa: 'Tienda Uno', cliente: 'Ana Pérez', telefono: '987654321',
+  metodoPago: 'Efectivo', montoCobrar: 85,
+  distrito: 'Lince', direccion: 'Av. Lima 123', fecRuta: '2026-10-03', telefono2: '988777666',
+  producto: 'Zapatos', cantBultos: 2,
 }] };
 
-const CAMPOS = [
-  ['Código de tracking', 'tracking', 'Identifica el pedido si se omite referencia.'],
-  ['Driver', 'driver', 'Nombre o {nombre, telefono}.'], ['Distrito', 'distrito', ''],
-  ['Cost Serv', 'costServ', 'Costo del servicio.'], ['Empresa', 'empresa', 'Nombre o {codigo, nombre}.'],
-  ['Cliente', 'cliente', ''], ['Teléfono', 'telefono', 'WhatsApp del cliente.'], ['Dirección', 'direccion', ''],
-  ['Referencia de dirección', 'referenciaDireccion', 'Opcional; indicaciones para llegar.'],
-  ['Fec Registro', 'fecRegistro', 'Fecha enviada por Courier.'], ['Fec Ruta', 'fecRuta', 'Dato del pedido; no programa mensajes.'],
-  ['Observación del cliente', 'observacionCliente', ''], ['Detalle del producto', 'detalleProducto', ''],
-  ['Teléfono 2', 'telefono2', ''], ['Producto', 'producto', ''], ['Tamaño', 'tamano', ''],
-  ['Cant Bultos', 'cantBultos', 'Entero no negativo.'], ['Método de pago', 'metodoPago', ''],
-  ['Monto Cobrar', 'montoCobrar', ''], ['Cliente Paga Delivery', 'clientePagaDelivery', 'true o false.'],
-  ['SEDE', 'sede', ''], ['Tipo de Ruta', 'tipoRuta', ''], ['Nro de documento', 'nroDocumento', 'Texto para conservar ceros.'],
-  ['Agencia (nombre)', 'agenciaNombre', ''], ['Agencia (dirección / destino)', 'agenciaDestino', ''],
-  ['Pago en destino', 'pagoEnDestino', 'true o false.'],
+/** [campo de Courier, nombre JSON, obligatorio, detalle] */
+const CAMPOS: Array<[string, string, boolean, string]> = [
+  ['Código de tracking', 'tracking', true, 'El que manda GSG; identifica el pedido (no se duplica en el día).'],
+  ['Empresa', 'empresa', true, 'Nombre o {codigo, nombre}.'],
+  ['Cliente', 'cliente', true, 'Nombre del cliente.'],
+  ['Teléfono', 'telefono', true, 'WhatsApp del cliente.'],
+  ['Método de pago', 'metodoPago', true, ''],
+  ['Monto Cobrar', 'montoCobrar', true, 'Número (por ejemplo 45.50); 0 si ya está pagado.'],
+  ['Distrito', 'distrito', false, ''],
+  ['Dirección', 'direccion', false, ''],
+  ['Fec Ruta', 'fecRuta', false, 'Dato del pedido; no programa mensajes.'],
+  ['Teléfono 2', 'telefono2', false, ''],
+  ['Producto', 'producto', false, ''],
+  ['Cant Bultos', 'cantBultos', false, 'Entero no negativo.'],
+];
+
+/** Los campos de antes: se siguen aceptando para no romper envíos anteriores, pero no son parte del contrato. */
+const CAMPOS_ANTERIORES = ['driver', 'costServ', 'referenciaDireccion', 'fecRegistro', 'observacionCliente', 'detalleProducto', 'tamano', 'clientePagaDelivery', 'sede', 'tipoRuta', 'nroDocumento', 'agenciaNombre', 'agenciaDestino', 'pagoEnDestino'];
+
+/** Lo que contesta POST /api/v1/entregas, código por código. */
+const RESPUESTAS: Array<[string, string]> = [
+  ['201', 'Al menos un pedido quedó guardado. Cada uno trae su id real (el de GSGchat) y el estado de su primer mensaje.'],
+  ['200', 'Todos ya estaban (repetidos): no se duplicó nada; vienen en «existentes» con su id.'],
+  ['400', 'Datos faltantes o con formato incorrecto: «detalles» dice qué campo de qué pedido. No se guarda ninguno.'],
+  ['401', 'Sin clave, o la clave no es válida o fue revocada.'],
+  ['403', 'La clave es válida pero no tiene permiso de recepción (entregas:gestionar), o la tienda está suspendida.'],
+  ['404', 'La ruta no existe (por ejemplo, con /tienda/<nombre> delante).'],
+  ['409', 'La clave está registrada en dos tiendas: no se sabe a cuál va.'],
+  ['429', 'Más de 120 llamadas por minuto con la misma clave: esperar lo que dice Retry-After.'],
+  ['503', 'La base de datos no responde: repetir la misma llamada (lo ya guardado no se duplica).'],
+  ['500', 'Error interno inesperado: repetir la misma llamada; queda en el registro del servidor.'],
 ];
 
 export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolean; demo?: boolean }): string {
@@ -45,7 +60,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <label for="courier-url">Enviar pedidos con POST</label><input id="courier-url" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url">Copiar dirección</button><button class="btn" id="courier-descargar">Descargar JSON de ejemplo</button></div>
         <p><code>Content-Type: application/json</code><br><code>Authorization: Bearer CLAVE_DE_GSG</code></p>
-        <small>La clave identifica esta tienda y debe tener permiso de recepción. Sin una clave válida: 404, «No tiene permiso».</small>
+        <small>La clave identifica esta tienda y debe tener permiso de recepción. Sin clave, o con una clave inválida o revocada: 401. Con una clave sin permiso: 403.</small>
         <small>Hasta 500 pedidos por llamada. Para 600, enviar 500 + 100. Máximo 120 llamadas por minuto y clave.</small>
         <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>
         <a href="/docs/contrato-gsg.md">Descargar contrato completo</a>
@@ -63,7 +78,8 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <pre id="courier-validacion" role="status" aria-live="polite"></pre>
       </section>
       <section class="courier-card courier-wide"><h2>Últimas llamadas de recepción</h2><button class="btn" id="courier-refrescar">Actualizar estado</button><div id="courier-bitacora" class="courier-scroll"></div></section>
-      <section class="courier-card courier-wide"><h2>Campos que envía Courier</h2><p>Envía tracking (o referencia) y teléfono. Los demás campos son opcionales; los textos adicionales admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(c => `<tr>${c.map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></section>
+      <section class="courier-card courier-wide"><h2>Campos que envía Courier</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
+      <section class="courier-card courier-wide" id="courier-respuestas"><h2>Respuestas de la recepción</h2><p>Los errores vienen en JSON: <code>{ "ok": false, "codigo": "...", "error": "...", "detalles": [...] }</code>.</p><div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS.map(([c, t]) => `<tr><td><b>${c}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div></section>
     </div>`,
     script: String.raw`
 (function () {
@@ -73,9 +89,20 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
   $('courier-url').value = endpoint;
   function aviso(t) { $('courier-aviso').textContent = t; }
   function esc(t) { var el = document.createElement('span'); el.textContent = String(t == null ? '' : t); return el.innerHTML; }
+${MENSAJE_ERROR_HTTP_JS}
+  /* El error tal como lo dijo el servidor: «HTTP 400 · <su mensaje> · campo: detalle». */
   async function api(url, method, body) {
-    var r = await fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    var data = await r.json(); if (!r.ok) throw new Error(data.error || 'No se pudo completar la solicitud'); return data;
+    var r;
+    try {
+      r = await fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch (fallo) { var sinRed = new Error('Sin conexión con el servidor'); sinRed.status = 0; throw sinRed; }
+    var data = await r.json().catch(function () { return null; });
+    if (!r.ok) {
+      var e = new Error(mensajeDeErrorHttp(r.status, r.statusText, data));
+      e.status = r.status; e.codigo = data && data.codigo; e.detalles = data && data.detalles; e.datos = data;
+      throw e;
+    }
+    return data || {};
   }
   async function copiar(texto) {
     try { await navigator.clipboard.writeText(texto); aviso('Copiado.'); }
@@ -125,8 +152,15 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
   };
   $('courier-validar').onclick = async function() {
     var b = this; b.disabled = true;
-    try { var body = JSON.parse($('courier-json').value); var r = await api('/admin/gsg-courier/validar', 'POST', body); $('courier-validacion').textContent = JSON.stringify(r, null, 2); }
-    catch(e) { $('courier-validacion').textContent = e.message; } finally { b.disabled = false; }
+    var body;
+    try { body = JSON.parse($('courier-json').value); }
+    catch(e) { $('courier-validacion').textContent = 'El texto no es un JSON válido: ' + e.message; b.disabled = false; return; }
+    try { var r = await api('/admin/gsg-courier/validar', 'POST', body); $('courier-validacion').textContent = 'HTTP 200 · ' + (r.detalle || '') + '\n' + JSON.stringify(r, null, 2); }
+    catch(e) {
+      var lineas = [e.message];
+      if (e.datos) lineas.push(JSON.stringify(e.datos, null, 2));
+      $('courier-validacion').textContent = lineas.join('\n');
+    } finally { b.disabled = false; }
   };
   $('courier-refrescar').onclick = cargar;
   cargar();

@@ -21,6 +21,7 @@ import { EJEMPLO_CASO, interpretarCaso, limpiarRespuestaIA } from '../src/desarr
 import { desarrolladorPage } from '../src/desarrollador/pagina.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
 import { baseDePrueba, type BaseDePrueba } from './mysql.js';
+import { OBLIGATORIOS_GSG } from './escenario-entregas.js';
 
 /** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
 const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
@@ -305,7 +306,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
       method: 'POST',
       url: '/api/v1/entregas',
       headers: { authorization: `Bearer ${k.body.clave}`, 'content-type': 'application/json' },
-      payload: JSON.stringify({ pedidos: [{ referencia: 'R-0001', telefono: '51944000099', nombre: 'Cliente Real', distrito: 'Miraflores', lat: -12.1211, lng: -77.0301, faltaConfirmar: false }] }),
+      payload: JSON.stringify({ pedidos: [{ ...OBLIGATORIOS_GSG, referencia: 'R-0001', telefono: '51944000099', nombre: 'Cliente Real', distrito: 'Miraflores', lat: -12.1211, lng: -77.0301, faltaConfirmar: false }] }),
     });
     expect(alta.statusCode).toBeLessThan(300);
     // Lo de GSG espera a que una persona confirme el envío.

@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
+import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError } from './api/errores.js';
 import type { Config } from './config.js';
 import type { Repos } from './db/repos.js';
 import { WhatsAppApiError, type WhatsAppClient } from './whatsapp/client.js';
@@ -167,8 +168,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } catch {
       // Un JSON roto es culpa de quien lo manda: 400 con el motivo, no un
       // 500 «error interno» (lo destapo la comprobacion «¿Está listo para GSG?»).
-      const error = new Error('El cuerpo no es un JSON válido: revisa comillas, comas y llaves.') as Error & { statusCode: number };
+      const error = new Error('El cuerpo no es un JSON válido: revisa comillas, comas y llaves.') as Error & { statusCode: number; codigo: CodigoError };
       error.statusCode = 400;
+      error.codigo = 'JSON_INVALIDO';
       done(error, undefined);
     }
   });
@@ -178,7 +180,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.setErrorHandler((raw: unknown, request, reply) => {
     const error = raw instanceof Error ? raw : new Error(String(raw));
     if (error instanceof ZodError) {
-      return reply.code(400).send({ error: explicarErrorZod(error) });
+      return reply.code(400).send(cuerpoError('VALIDACION', explicarErrorZod(error), error.issues.map((i) => ({ campo: i.path.join('.') || 'cuerpo', mensaje: i.message }))));
     }
     if (error instanceof NotConfiguredError) {
       return reply.code(409).send({ error: error.message });
@@ -193,10 +195,26 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
     const status = (error as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) {
-      return reply.code(status).send({ error: error.message });
+      const propio = (error as { codigo?: CodigoError }).codigo;
+      const codigo: CodigoError = propio ?? (status === 401 ? 'CLAVE_INVALIDA' : status === 403 ? 'SIN_PERMISO' : status === 404 ? 'NO_EXISTE' : status === 409 ? 'CONFLICTO' : status === 429 ? 'DEMASIADAS_PETICIONES' : 'VALIDACION');
+      return reply.code(status).send(cuerpoError(codigo, error.message));
     }
     request.log.error({ err: error }, 'error no controlado');
-    return reply.code(500).send({ error: 'error interno; revisa el log del servidor' });
+    // La base que no contesta no es un fallo nuestro: 503 y cuando volver.
+    if (esBaseNoDisponible(error)) {
+      reply.header('retry-after', String(ESPERA_BASE_SEGUNDOS));
+      return reply.code(503).send(cuerpoError('BASE_NO_DISPONIBLE', 'La base de datos no responde ahora mismo: vuelve a intentarlo en unos segundos.'));
+    }
+    return reply.code(500).send(cuerpoError('ERROR_INTERNO', 'error interno; revisa el log del servidor'));
+  });
+
+  // Una ruta de la API que no existe: JSON con su codigo, no la pagina de 404.
+  app.setNotFoundHandler((request, reply) => {
+    if (request.url.startsWith('/api/') || request.url.startsWith('/admin/')) {
+      return reply.code(404).send(cuerpoError('RUTA_NO_EXISTE', `No existe ${request.method} ${request.url.split('?')[0]}.`));
+    }
+    // Lo demas, como lo contestaba Fastify.
+    return reply.code(404).send({ message: `Route ${request.method}:${request.url} not found`, error: 'Not Found', statusCode: 404 });
   });
 
   // Nada de /admin se cachea. El chat pide el mismo hilo cada pocos

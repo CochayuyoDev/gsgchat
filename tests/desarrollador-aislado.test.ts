@@ -22,6 +22,7 @@ import { numeroDePrueba } from '../src/desarrollador/numeros.js';
 import { cerrarDiaDePrueba } from '../src/desarrollador/reloj.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
 import { baseDePrueba, type BaseDePrueba } from './mysql.js';
+import { OBLIGATORIOS_GSG } from './escenario-entregas.js';
 
 /** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
 const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
@@ -156,8 +157,8 @@ describe('lo de prueba no toca el numero real', () => {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       payload: JSON.stringify({
         pedidos: [
-          { referencia: 'PRUEBA-C1', telefono: numeroDePrueba('cliente', 11), nombre: 'Prueba Cierre', faltaUbicacion: true, faltaConfirmar: true },
-          { referencia: 'REAL-1', telefono: '987654321', nombre: 'Cliente Real', faltaUbicacion: true, faltaConfirmar: true },
+          { ...OBLIGATORIOS_GSG, referencia: 'PRUEBA-C1', telefono: numeroDePrueba('cliente', 11), nombre: 'Prueba Cierre', faltaUbicacion: true, faltaConfirmar: true },
+          { ...OBLIGATORIOS_GSG, referencia: 'REAL-1', telefono: '987654321', nombre: 'Cliente Real', faltaUbicacion: true, faltaConfirmar: true },
         ],
       }),
     });

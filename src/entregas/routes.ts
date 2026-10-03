@@ -30,6 +30,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { enviarError } from '../api/errores.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import { extractLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
@@ -94,6 +95,22 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   const soloAdmin = (request: { usuario?: { rol?: string; porToken?: boolean } | null }) => request.usuario?.rol === 'admin' && !request.usuario.porToken;
 
   app.get('/admin/entregas', async () => entregas.resumen());
+
+  // La bandeja de errores de mensajes: los pedidos de ESTA tienda (cada tienda
+  // tiene su app y su base) cuyo primer mensaje no salió. Ver src/entregas/primer-mensaje.ts.
+  app.get('/admin/entregas/mensajes/errores', async () => {
+    const items = await entregas.bandejaMensajes();
+    return { ok: true, total: items.length, items };
+  });
+  app.post<{ Params: { id: string } }>('/admin/entregas/:id/mensaje/reintentar', async (request, reply) => {
+    const id = Number(request.params.id);
+    if (!Number.isInteger(id) || id <= 0) return enviarError(reply, 400, 'VALIDACION', 'El id del pedido tiene que ser un número.', [{ campo: 'id', mensaje: 'no es un número' }]);
+    const leido = z.object({ confirmarIncierto: z.boolean().optional() }).safeParse(request.body ?? {});
+    if (!leido.success) return enviarError(reply, 400, 'VALIDACION', 'confirmarIncierto tiene que ser true o false.', [{ campo: 'confirmarIncierto', mensaje: 'tiene que ser booleano' }]);
+    const r = await entregas.reintentarMensaje(id, quienEs(request.usuario), { confirmarIncierto: leido.data.confirmarIncierto });
+    if (!r.ok) return enviarError(reply, r.status, r.codigo, r.motivo);
+    return { ok: true, id, mensaje: r.mensaje, detalle: r.mensaje.estado === 'enviado' ? 'Mensaje enviado.' : 'Reintento en marcha: sale con el ritmo de siempre.' };
+  });
 
   // Numeros del dia: la lista de GSG numero por numero y las acciones en masa (ver numeros.ts).
   await registerNumerosRoutes(app, { entregas });

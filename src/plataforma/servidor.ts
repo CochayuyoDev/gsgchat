@@ -5,7 +5,7 @@
  * Como se sabe de que tienda es una peticion, por orden:
  *
  *   0. POST /api/v1/entregas -> la clave Bearer identifica la tienda;
- *      sin cookies, Referer ni prefijo. La recepci?n prefijada se rechaza.
+ *      sin cookies, Referer ni prefijo. La recepcion con prefijo se rechaza (404).
  *   1. /tienda/<slug>/...  -> esa tienda, y se le quita el prefijo. Es la
  *      forma de los enlaces publicos de cada tienda (su webhook, su API, la
  *      pagina del motorizado, los enlaces de rastreo): su PUBLIC_BASE_URL ya
@@ -31,7 +31,8 @@ import { enTienda } from './contexto.js';
 import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
-import { esRecepcionGsg, tiendaDeClaveGsg } from './recepcion-gsg.js';
+import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS } from '../api/errores.js';
+import { esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
 const PREFIJO = '/tienda/';
@@ -95,16 +96,16 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
   const { plataforma, segura } = o;
   const web = await rutasDeLaPlataforma(plataforma, segura, o.logger ?? false);
 
-  type Destino = { tipo: 'tienda'; tienda: TiendaViva; url: string } | { tipo: 'plataforma'; url: string } | { tipo: 'no-existe' } | { tipo: 'sin-permiso' };
+  type Destino = { tipo: 'tienda'; tienda: TiendaViva; url: string } | { tipo: 'plataforma'; url: string } | { tipo: 'no-existe' } | { tipo: 'rechazo'; rechazo: RechazoRecepcion };
 
   /** A quien va esta peticion y con que URL. */
   async function resolver(req: http.IncomingMessage): Promise<Destino> {
     const url = req.url ?? '/';
     const prefijo = partirPrefijo(url);
-    if (prefijo && esRecepcionGsg(req.method, prefijo.resto)) return { tipo: 'sin-permiso' };
+    if (prefijo && esRecepcionGsg(req.method, prefijo.resto)) return { tipo: 'rechazo', rechazo: RECHAZOS.conPrefijo() };
     if (esRecepcionGsg(req.method, url)) {
-      const tienda = await tiendaDeClaveGsg(plataforma, req.headers.authorization);
-      return tienda ? { tipo: 'tienda', tienda, url } : { tipo: 'sin-permiso' };
+      const r = await tiendaDeClaveGsg(plataforma, req.headers.authorization);
+      return 'tienda' in r ? { tipo: 'tienda', tienda: r.tienda, url } : { tipo: 'rechazo', rechazo: r.rechazo };
     }
     if (prefijo) {
       const tienda = await plataforma.tiendaPorSlug(prefijo.slug);
@@ -135,9 +136,11 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
     void (async () => {
       try {
         const destino = await resolver(req);
-        if (destino.tipo === 'sin-permiso') {
-          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-          res.end(JSON.stringify({ error: 'No tiene permiso' }));
+        if (destino.tipo === 'rechazo') {
+          // Rechazada antes de leer el cuerpo: se descarta para no dejar la conexion a medias.
+          req.resume();
+          res.writeHead(destino.rechazo.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(destino.rechazo.cabeceras ?? {}) });
+          res.end(JSON.stringify(destino.rechazo.cuerpo));
           return;
         }
         if (destino.tipo === 'no-existe') {
@@ -155,8 +158,9 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
         enTienda(destino.tienda.contexto, () => (destino.tienda.app.routing as (q: http.IncomingMessage, r: http.ServerResponse) => void)(req, res));
       } catch (error) {
         console.error('[plataforma] fallo repartiendo una peticion:', error);
-        if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: 'error interno; revisa el log del servidor' }));
+        const caida = esBaseNoDisponible(error);
+        if (!res.headersSent) res.writeHead(caida ? 503 : 500, { 'content-type': 'application/json; charset=utf-8', ...(caida ? { 'retry-after': String(ESPERA_BASE_SEGUNDOS) } : {}) });
+        res.end(JSON.stringify(caida ? RECHAZOS.baseCaida().cuerpo : cuerpoError('ERROR_INTERNO', 'Error interno del servidor; quedó apuntado en el registro.')));
       }
     })();
   });

@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { crearGsgExtras, estadoDeToken, revisarPedidoGsg, verificarCuerpoPendientes, BITACORA_MAX } from '../src/rutas/gsg-extras.js';
 import type { PuertoGsg, ResultadoConsulta } from '../src/rutas/gsg.js';
 import { createMemorySettingsRepo, TEST_SETTINGS_KEY } from './fakes.js';
-import { crearEscenarioEntregas, type EscenarioEntregas } from './escenario-entregas.js';
+import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { crearGsgSimulado, registerGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { crearConexionGsg, RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from '../src/rutas/conexion-gsg.js';
@@ -195,7 +195,7 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
   });
 
   it('las llamadas a la API de pedidos quedan en la bitácora con la clave que entró', async () => {
-    const api = await e.api.post('/api/v1/entregas', { referencia: 'P-API-1', telefono: '987000099', nombre: 'Api' });
+    const api = await e.api.post('/api/v1/entregas', { ...OBLIGATORIOS_GSG, referencia: 'P-API-1', telefono: '987000099', nombre: 'Api' });
     expect([200, 201]).toContain(api.status);
     const r2 = await e.api.get<{ bitacora: Array<{ que: string; quien: string; resultado: string }> }>('/admin/gsg');
     const fila = r2.body.bitacora.find((x) => x.que === 'POST /api/v1/entregas');

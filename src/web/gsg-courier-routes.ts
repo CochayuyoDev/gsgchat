@@ -23,7 +23,7 @@ export async function registerGsgCourierRoutes(app: FastifyInstance, opts: {
     }
     if (!opts.disponible) return reply.code(409).send({ error: 'El módulo de entregas no está disponible en este servidor.' });
     const lectura = leerCuerpo(request.body);
-    if ('error' in lectura) return reply.code(400).send(lectura);
+    if ('error' in lectura) return reply.code(400).send({ ok: false, codigo: 'VALIDACION', error: lectura.error, detalles: lectura.detalles });
     const referencias = new Set<string>();
     const repetidas: string[] = [];
     const descartadas: Array<{ referencia: string; motivo: string }> = [];

@@ -188,9 +188,11 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
       await deps.repos.claves.revocar(revocada.id);
       const paraTope = await nuevaClave('límite', ['entregas:leer']);
 
+      // Lo que GSG manda siempre (obligatorio en el contrato): tracking, cliente, telefono, empresa, metodoPago y montoCobrar.
+      const obligatorios = { empresa: { codigo: 'PRB', nombre: 'Tienda de prueba' }, metodoPago: 'Contraentrega', montoCobrar: 45.5 };
       const valido = [
-        { referencia: refA, telefono: telA, nombre: 'Rosa Quispe (prueba)', direccion: 'Av. Larco 345', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
-        { referencia: refB, telefono: telB, nombre: 'Luis Huamán (prueba)', direccion: 'Jr. Unión 55', distrito: 'Cercado de Lima', lat: -12.0464, lng: -77.0308, faltaConfirmar: true },
+        { ...obligatorios, referencia: refA, telefono: telA, nombre: 'Rosa Quispe (prueba)', direccion: 'Av. Larco 345', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
+        { ...obligatorios, referencia: refB, telefono: telB, nombre: 'Luis Huamán (prueba)', direccion: 'Jr. Unión 55', distrito: 'Cercado de Lima', lat: -12.0464, lng: -77.0308, faltaConfirmar: true },
       ];
 
       let r = await llamar('POST', '/api/v1/entregas', { cuerpo: { pedidos: valido } });
@@ -208,11 +210,11 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
       r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [] } });
       poner({ id: 'lista_vacia', grupo: 'gsg_a_gsgchat', titulo: 'Una lista vacía no crea nada y lo dice', ok: r.status === 400, explicacion: r.status === 400 ? 'Una lista vacía responde 400 («Manda un pedido…»).' : `Una lista vacía respondió ${r.status}.`, tecnico: r.tecnico });
 
-      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [{ telefono: telA, nombre: 'Sin referencia' }] } });
+      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [{ ...obligatorios, telefono: telA, nombre: 'Sin referencia' }] } });
       const errFalta = String((r.cuerpo as { error?: string })?.error ?? '');
-      poner({ id: 'campo_faltante', grupo: 'gsg_a_gsgchat', titulo: 'Un pedido sin referencia se rechaza diciendo qué falta', ok: r.status === 400 && /referencia/i.test(errFalta), explicacion: r.status === 400 ? `Responde 400: «${errFalta}».` : `Un pedido sin referencia respondió ${r.status}.`, tecnico: r.tecnico });
+      poner({ id: 'campo_faltante', grupo: 'gsg_a_gsgchat', titulo: 'Un pedido sin referencia se rechaza diciendo qué falta', ok: r.status === 400 && /tracking/i.test(errFalta), explicacion: r.status === 400 ? `Responde 400: «${errFalta}».` : `Un pedido sin referencia respondió ${r.status}.`, tecnico: r.tecnico });
 
-      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [...valido, { referencia: refC, telefono: '12', nombre: 'Teléfono malo (prueba)' }] } });
+      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [...valido, { ...obligatorios, referencia: refC, telefono: '12', nombre: 'Teléfono malo (prueba)' }] } });
       const alta = (r.cuerpo ?? {}) as { creadas?: Array<{ referencia: string; estado: string }>; descartadas?: Array<{ referencia: string; motivo: string }>; repetidas?: string[] };
       const creadas = alta.creadas ?? [];
       const okCrear = r.status === 201 && creadas.some((c) => c.referencia === refA) && creadas.some((c) => c.referencia === refB);

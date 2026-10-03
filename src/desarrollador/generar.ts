@@ -109,7 +109,8 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
       tracking: c.tracking,
       nroPedido: c.nroPedido,
       metodoPago: c.metodoPago,
-      ...(c.metodoPago === 'Pagado' ? {} : { monto: c.monto }),
+      // Obligatorio en el contrato: lo ya pagado va con 0.
+      monto: c.metodoPago === 'Pagado' ? 0 : c.monto,
       remitente: c.remitente,
       ...(conPin ? { lat: c.lat, lng: c.lng, faltaUbicacion: false } : { faltaUbicacion: true }),
       faltaConfirmar: true,
