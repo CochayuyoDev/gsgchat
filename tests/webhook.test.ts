@@ -275,3 +275,29 @@ describe('deduplicacion de entrantes', () => {
     expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(2);
   });
 });
+
+describe('ráfaga: el cliente escribe en trozos', () => {
+  it('tres mensajes seguidos se contestan una sola vez, con el texto junto', async () => {
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: false });
+    const conRafaga = { ...deps, rafagaMs: 300 };
+    await Promise.all(['hola', 'quiero cotizar', 'un envío a Lince'].map((texto, i) =>
+      processChange('messages', inbound({ id: `wamid.rafaga.${i}`, text: { body: texto } }), conRafaga)));
+    expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
+  });
+
+  it('juntarRafaga une lo que escribió desde la última respuesta', async () => {
+    const { juntarRafaga } = await import('../src/handlers/inbound.js');
+    const ahora = new Date();
+    const hilo = [
+      { direction: 'in', kind: 'text', body: 'mensaje de ayer', createdAt: new Date(ahora.getTime() - 86_400_000) },
+      { direction: 'out', kind: 'text', body: 'Hola, ¿en qué te ayudo?', createdAt: ahora },
+      { direction: 'in', kind: 'text', body: 'hola', createdAt: ahora },
+      { direction: 'in', kind: 'text', body: 'quiero cotizar', createdAt: ahora },
+      { direction: 'in', kind: 'text', body: 'un envío a Lince', createdAt: ahora },
+    ];
+    const ultimo = { id: 'w-x', from: '5215599999998', timestamp: '0', type: 'text', text: { body: 'un envío a Lince' } } as InboundMessage;
+    const unido = await juntarRafaga(ultimo, 'c-1', { messages: { listMessages: async () => hilo } } as never);
+    expect(unido.text?.body).toBe('hola\nquiero cotizar\nun envío a Lince');
+  });
+});

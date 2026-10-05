@@ -94,7 +94,7 @@ const envPrincipal = {
   DEV_SIMULATE_INBOUND: 'true',
   // Se espera 4 s a que el cliente termine de escribir: quien manda tres
   // trozos seguidos recibe UNA respuesta, no tres.
-  RAFAGA_MS: process.env.RAFAGA_MS ?? '4000',
+  RAFAGA_MS: process.env.RAFAGA_MS ?? '10000',
   // El catalogo de Stoky: precios y stock salen de ahi, no de una copia.
   STOKY_URL: process.env.STOKY_URL?.trim() || '',
   STOKY_TOKEN: process.env.STOKY_TOKEN?.trim() || '',
@@ -133,7 +133,7 @@ const plataforma = await crearPlataforma({
   proceso: process.env,
   // Lo mismo que el arranque corto le da a la principal: simular entrantes y
   // esperar a que el cliente termine de escribir.
-  extraTiendas: { DEV_SIMULATE_INBOUND: 'true', RAFAGA_MS: process.env.RAFAGA_MS ?? '4000', TIMEZONE: configPrincipal.timezone },
+  extraTiendas: { DEV_SIMULATE_INBOUND: 'true', RAFAGA_MS: process.env.RAFAGA_MS ?? '10000', TIMEZONE: configPrincipal.timezone },
   base: { url: DATABASE_URL },
   redisUrl: null,
   principal: hayPrincipal

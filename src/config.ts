@@ -121,12 +121,14 @@ const schema = z.object({
    * Quien escribe por WhatsApp manda tres trozos seguidos, y contestar a cada
    * uno le deja tres respuestas encima sin haber dicho nada en medio.
    *
-   * El valor de fabrica es 0 -contestar a cada mensaje- porque esperar mete un
+   * Antes el valor de fabrica era 0 -contestar a cada mensaje- porque esperar mete un
    * retraso en CADA respuesta, y eso lo tiene que decidir quien monta el
    * sistema. El arranque corto lo pone en 4 s, que es lo que se tarda en
    * escribir la segunda frase.
    */
-  RAFAGA_MS: z.coerce.number().int().min(0).max(60_000).default(0),
+  // 10 s de fabrica (decision del dueño, 05/10): se contesta la rafaga entera
+  // de una vez. En las pruebas, 0, para no esperar en cada mensaje.
+  RAFAGA_MS: z.coerce.number().int().min(0).max(60_000).default(process.env.VITEST ? 0 : 10_000),
   HORARIO_ENVIO_INICIO: z.coerce.number().int().min(0).max(23).optional(),
   HORARIO_ENVIO_FIN: z.coerce.number().int().min(1).max(24).optional(),
   /** Dias permitidos, 0 = domingo. Por defecto lunes a sabado. */

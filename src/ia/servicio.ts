@@ -809,7 +809,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       return probarProveedor(deps.proveedor ?? crearProveedorPuter(t), modelo || MODELO_GRATIS_POR_DEFECTO);
     }
     const servicio = candidata?.servicio ?? cfg.servicio;
-    const baseUrl = presetDe(servicio)?.baseUrl || candidata?.baseUrl?.trim() || cfg.baseUrl || '';
+    // La URL escrita en pantalla manda; si no, la del servicio elegido (antes
+    // ganaba el servicio guardado y con Groq se probaba contra OpenAI).
+    const baseUrl = candidata?.baseUrl?.trim() || presetDe(servicio)?.baseUrl || cfg.baseUrl || '';
     const clave = candidata?.token?.trim() || (candidata?.token === undefined ? token : '');
     const preset = presetDe(servicio);
     if (!clave && !preset?.sinClave && !/localhost|127\.0\.0\.1/.test(baseUrl)) return { ok: false, detalle: 'Falta la clave de la API: pégala y vuelve a probar.', ms: 0, modelo, proveedor: 'openai' };

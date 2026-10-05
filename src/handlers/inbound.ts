@@ -16,7 +16,7 @@
  * secuencias de seguimiento con `stopOnReply` se cancelan.
  */
 
-import { esperarRafaga } from './rafaga.js';
+import { esperarRafaga, marcarLlegada, olvidarLlegada } from './rafaga.js';
 import { TEXTO_VER_UNA_VEZ } from './textos.js';
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
@@ -607,6 +607,29 @@ async function applyRule(rule: AutoReply, contact: Contact, deps: InboundDeps): 
 }
 
 /**
+ * Lo que escribio el cliente en una rafaga, en un solo texto: los textos que
+ * mando seguidos desde la ultima vez que se le escribio (como mucho en los
+ * ultimos dos minutos), en orden y sin repetir. Asi se contesta una vez a
+ * todo, no a cada trozo.
+ */
+export async function juntarRafaga(message: InboundMessage, contactId: string, repos: Pick<InboundDeps['repos'], 'messages'>): Promise<InboundMessage> {
+  if (message.type !== 'text' || !message.text?.body) return message;
+  const recientes = await repos.messages.listMessages(contactId, 20).catch(() => []);
+  const desde = Date.now() - 2 * 60_000;
+  const trozos: string[] = [];
+  for (const m of [...recientes].reverse()) {
+    if (m.direction !== 'in') break;
+    if (new Date(m.createdAt as unknown as string).getTime() < desde) break;
+    if (m.kind !== 'text') continue;
+    const cuerpo = String(m.body ?? '').trim();
+    if (cuerpo && trozos[0] !== cuerpo) trozos.unshift(cuerpo);
+  }
+  if (!trozos.includes(message.text.body.trim())) trozos.push(message.text.body.trim());
+  if (trozos.length < 2) return message;
+  return { ...message, text: { ...message.text, body: trozos.join('\n') } };
+}
+
+/**
  * «2» a una pregunta con opciones es pulsar la opción 2.
  *
  * Por QR (local y WAHA) los botones salen como lista numerada («1. Sí, es
@@ -690,6 +713,9 @@ export async function handleInboundMessage(
   // distinto no se pierde (va en fila, en orden), y preguntar por el pedido
   // («¿dónde va mi pedido?») no tiene firma: se contesta siempre.
   const firma = firmaDeAccion(message);
+  // La rafaga se cuenta desde que LLEGA, no desde que le toca en la fila.
+  const marcado = (deps.rafagaMs ?? 0) > 0 && !atiendeYa(message) && Boolean(message.id);
+  if (marcado) marcarLlegada(clave, message.id);
   const turno = (colaPorCliente.get(clave) ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
@@ -735,7 +761,13 @@ export async function handleInboundMessage(
     await turno;
   } finally {
     if (colaPorCliente.get(clave) === turno) colaPorCliente.delete(clave);
+    if (marcado) olvidarLlegada(message.id);
   }
+}
+
+/** Un pin o un boton pulsado se atienden ya: no esperan a la rafaga. */
+function atiendeYa(message: InboundMessage): boolean {
+  return message.type === 'location' || message.type === 'livelocation' || message.type === 'interactive' || message.type === 'button';
 }
 
 async function handleInboundMessageEnFila(
@@ -855,10 +887,15 @@ async function handleInboundMessageEnFila(
     await deps.lista.alRecibir(contact, { ubicacion: message.type === 'location' && Boolean(message.location) }).catch(() => undefined);
   }
 
-  // Si sigue escribiendo, se espera: una rafaga se contesta UNA vez, a lo
-  // ultimo que dijo. Va despues de guardar el mensaje -el hilo los tiene
-  // todos- y antes de cualquier automatismo.
-  if (!(await esperarRafaga(contact.id, deps.rafagaMs ?? 0))) return;
+  // Si sigue escribiendo, se espera: una rafaga se contesta UNA vez, con todo
+  // lo que escribio junto (la IA entiende lo principal). Va despues de
+  // guardar el mensaje -el hilo los tiene todos- y antes de cualquier
+  // automatismo. Un pin o un boton pulsado no esperan: se atienden ya, y si
+  // no, un pin seguido de un «listo» se quedaba sin registrar.
+  if (!atiendeYa(message)) {
+    if (!(await esperarRafaga(phone, deps.rafagaMs ?? 0, message.id))) return;
+    if ((deps.rafagaMs ?? 0) > 0) message = await juntarRafaga(message, contact.id, repos);
+  }
 
   // El operador paro el bot en ESTE chat: se atiende a mano.
   //
