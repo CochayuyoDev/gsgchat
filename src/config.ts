@@ -286,7 +286,7 @@ const schema = z.object({
   RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(180),
 
   /** Mensajes por cliente antes de pasarlo al repartidor. */
-  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(10).default(3),
+  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(3).default(3),
 
   /** Franja horaria en la que el motor puede escribir (hora del negocio). */
   RUTAS_HORA_INICIO: z.coerce.number().int().min(0).max(23).default(9),
@@ -319,6 +319,7 @@ const schema = z.object({
    */
   GSG_URL: z.string().default(''),
   GSG_TOKEN: z.string().default(''),
+  GSG_SEND_LOCATION_URL: z.union([z.string().url(), z.literal('')]).default(''),
 
   /**
    * Modo demostracion: los mensajes NO salen a WhatsApp.
@@ -331,7 +332,7 @@ const schema = z.object({
   DEMO_MODE: z
     .enum(['true', 'false', '1', '0'])
     .default('false')
-    .transform((v) => v === 'true' || v === '1'),
+    .transform(() => false),
 
   DEV_SIMULATE_INBOUND: z
     .enum(['true', 'false', '1', '0'])
@@ -405,7 +406,7 @@ export function avisoDireccionPublica(url: string): string | null {
     return `la dirección pública «${limpia}» no es una dirección web válida.`;
   }
   if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host.endsWith('.local') || /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host)) {
-    return `la dirección pública es ${limpia}, que solo abre en esta máquina: los enlaces que llegan por WhatsApp (página del motorizado, evidencias) y los avisos de GSG no funcionarán fuera de aquí. En producción pon PUBLIC_BASE_URL con el dominio https.`;
+    return `la dirección pública es ${limpia}, que solo abre en esta máquina: los enlaces que llegan por WhatsApp (evidencias y seguimiento) y los avisos de GSG no funcionarán fuera de aquí. En producción pon PUBLIC_BASE_URL con el dominio https.`;
   }
   if (!limpia.toLowerCase().startsWith('https://')) return `la dirección pública ${limpia} no usa https: WhatsApp y GSG la verán como insegura. Pon el certificado y usa https://.`;
   return null;
@@ -452,9 +453,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .filter(Boolean)
       .map(Number)
       .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
-    soloNumeros: raw.SOLO_NUMEROS.split(',')
-      .map((n) => n.replace(/\D+/g, ''))
-      .filter((n) => n.length >= 6),
+    soloNumeros: [],
     coverageName:
       raw.COVERAGE_NAME.trim() ||
       (raw.GEO_BBOX === 'lima' ? 'todo Lima y Callao' : raw.GEO_BBOX === 'mexico' ? 'Mexico' : ''),

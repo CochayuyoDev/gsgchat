@@ -200,7 +200,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   zonaHoraria: ajustesGeneralesSchema.shape.zonaHoraria.optional(),
   guardados: ajustesGeneralesSchema.shape.guardados.optional(),
   resumenes: ajustesGeneralesSchema.shape.resumenes.optional(),
-  modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().optional(),
+  modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().refine(() => false, 'El modo de prueba fue retirado').optional(),
   horario: ajustesGeneralesSchema.shape.horario.partial().optional(),
   ritmo: ajustesGeneralesSchema.shape.ritmo.partial().optional(),
   avisos: ajustesGeneralesSchema.shape.avisos.partial().optional(),
@@ -352,13 +352,13 @@ export async function crearServicioAjustes(deps: {
 
   const servidor: AjustesDelServidor = {
     nombreNegocio: config.businessName,
-    soloNumeros: config.soloNumeros,
+    soloNumeros: [],
     supervisor: config.SALUD_AVISAR_A?.trim() || config.RUTAS_SUPERVISOR?.trim() || '',
     timezone: config.timezone,
   };
 
   return {
-    actual: fresco,
+    actual: () => ({ ...fresco(), modoPrueba: { activo: false, numeros: [] } }),
     async recargar() {
       valor = await repo.get();
       leidoEn = ahora();
@@ -409,17 +409,7 @@ export async function crearServicioAjustes(deps: {
       if (a.autoPausa !== null) p.autoPausa = a.autoPausa;
       return p;
     },
-    soloNumeros() {
-      const a = fresco();
-      const delServidor = config.soloNumeros;
-      if (delServidor.length) {
-        // El servidor fijo la lista: la pantalla solo puede recortarla.
-        if (!a.modoPrueba.activo || !a.modoPrueba.numeros.length) return delServidor;
-        const recorte = a.modoPrueba.numeros.filter((n) => delServidor.includes(n));
-        return recorte.length ? recorte : delServidor;
-      }
-      return a.modoPrueba.activo ? a.modoPrueba.numeros : [];
-    },
+    soloNumeros: () => [],
     nombreNegocio() {
       return fresco().nombreNegocio ?? config.businessName;
     },
@@ -443,7 +433,7 @@ export async function crearServicioAjustes(deps: {
       return a.avisos.supervisor ?? servidor.supervisor;
     },
     servidor: () => servidor,
-    modoPruebaFijado: () => config.soloNumeros.length > 0,
+    modoPruebaFijado: () => false,
     atajos: () => fresco().atajos ?? ATAJOS_POR_DEFECTO,
     dominiosEmbebido: () => fresco().embebido?.dominios ?? [],
     pedirVerUnaVezNormal: () => fresco().pedirVerUnaVezNormal ?? true,

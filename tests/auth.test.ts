@@ -282,7 +282,7 @@ describe('entrar al sistema', () => {
   });
 
   it('el inicio del panel, el manual y soporte responden con sesion; el resumen trae lo que pinta la pantalla', async () => {
-    for (const url of ['/panel', '/manual', '/soporte', '/chat', '/rutas', '/setup']) {
+    for (const url of ['/panel', '/manual', '/soporte', '/chat', '/automatizacion-gsg', '/setup']) {
       const res = await app.inject({ method: 'GET', url, headers: { cookie } });
       expect(res.statusCode, url).toBe(200);
       expect(res.body, url).toContain('id="s-app"');

@@ -404,7 +404,8 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     // Cuerpo vacio: 400 con explicacion.
     const vacio = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(TODO), payload: {} });
     expect(vacio.statusCode).toBe(400);
-    expect(vacio.json().error).toContain('Manda un pedido');
+    expect(vacio.json().error).toContain('empresa falta');
+    expect(vacio.json().camposFaltantes ?? vacio.json().detalles).toBeDefined();
     // Clave valida sin permiso de recepcion: 403.
     const sin = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(SOLO_LEER), payload: { ...OBLIGATORIOS_GSG, referencia: 'P-5009', nombre: 'X', telefono: '987000109' } });
     expect(sin.statusCode).toBe(403);
@@ -452,13 +453,13 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     soltar();
   });
 
-  it('el OpenAPI documenta /entregas, /entregas/{referencia} y /motorizados con su permiso, y cubre todas las rutas de este arranque', async () => {
+  it('el OpenAPI documenta /entregas, /entregas/{referencia} sin /motorizados, y cubre todas las rutas de este arranque', async () => {
     const doc = (await esc.app.inject({ method: 'GET', url: '/api/v1/openapi.json', headers: conClave(TODO) })).json() as { paths: Record<string, Record<string, { 'x-permiso'?: string }>> };
     expect(doc.paths['/entregas']!.post!['x-permiso']).toBe('entregas:gestionar');
     expect(doc.paths['/entregas']!.get!['x-permiso']).toBe('entregas:leer');
     expect(doc.paths['/entregas/{referencia}']!.get!['x-permiso']).toBe('entregas:leer');
     expect(doc.paths['/entregas/{referencia}']!.delete!['x-permiso']).toBe('entregas:gestionar');
-    expect(doc.paths['/motorizados']!.post!['x-permiso']).toBe('entregas:gestionar');
+    expect(doc.paths['/motorizados']).toBeUndefined();
     const registradas = esc.app.rutasApiV1.map((r) => ({ ...r, ruta: r.ruta.replace('/api/v1', '').replace(/:(\w+)/g, '{$1}') || '/' }));
     expect(registradas.some((r) => r.ruta === '/entregas' && r.metodo === 'POST')).toBe(true);
     for (const { ruta, metodo, permiso } of registradas) {

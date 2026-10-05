@@ -14,7 +14,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { crearPlataforma, type Plataforma } from '../src/plataforma/plataforma.js';
+import { basesDeLaPlataforma, crearPlataforma, type Plataforma } from '../src/plataforma/plataforma.js';
+import { createPool } from '../src/db/pool.js';
+import { generarClaveApi, hashClaveApi } from '../src/auth/claves-api.js';
 import { crearServidorPlataforma, type ServidorPlataforma } from '../src/plataforma/servidor.js';
 import { rellenarBanco } from '../src/db/bases.js';
 import { bancoDePrueba, devolverBasesDePrueba, urlConBase } from './mysql.js';
@@ -71,6 +73,7 @@ beforeAll(async () => {
   const clave = await panel(cookieA, '/admin/claves-api', { method: 'POST', body: { nombre: 'GSG Courier', permisos: ['entregas:gestionar', 'entregas:leer'] } });
   expect(clave.status).toBe(200);
   claveA = clave.json.clave;
+  expect((await panel(cookieA, '/admin/entregas/ajustes', { method: 'POST', body: { confirmarListaGsg: true } })).status).toBe(200);
 }, TIEMPO);
 
 afterAll(async () => {
@@ -81,6 +84,30 @@ afterAll(async () => {
 }, TIEMPO);
 
 describe('recepción contra la base de verdad', () => {
+  it('una tienda suspendida devuelve 403 para su clave vigente y 401 para una desconocida o revocada', async () => {
+    const tienda = (await plataforma.tiendaPorSlug('courier-uno'))!;
+    const revocada = generarClaveApi();
+    const registro = await tienda.repos.claves.crear({ nombre: 'Prueba revocada', prefijo: revocada.slice(0, 12), hash: hashClaveApi(revocada), creadaPor: null, permisos: ['entregas:gestionar'] });
+    await tienda.repos.claves.revocar(registro.id);
+    const url = urlConBase(`${PREFIJO}a`);
+    const directorio = createPool(url, basesDeLaPlataforma(url).directorio);
+    try {
+      await directorio.query("update pl_tiendas set estado = 'suspendida' where slug = ?", ['courier-uno']);
+      expect(await plataforma.tiendaPorSlug('courier-uno')).toBeNull();
+      const vigente = await recibir({}, claveA);
+      expect(vigente.status).toBe(403);
+      expect(vigente.json.codigo).toBe('TIENDA_SUSPENDIDA');
+      const desconocida = await recibir({}, generarClaveApi());
+      expect(desconocida.status).toBe(401);
+      expect(desconocida.json.codigo).toBe('CLAVE_INVALIDA');
+      const eliminada = await recibir({}, revocada);
+      expect(eliminada.status).toBe(401);
+      expect(eliminada.json.codigo).toBe('CLAVE_REVOCADA');
+    } finally {
+      await directorio.query("update pl_tiendas set estado = 'activa' where slug = ?", ['courier-uno']);
+      await directorio.end();
+    }
+  }, TIEMPO);
   it('201 con el id de la fila guardada, y el pedido sale en Hoy de SU tienda (no en la otra)', async () => {
     const r = await recibir({ ...GSG, tracking: 'SQL-1', cliente: 'Ana Prueba', telefono: '987111222', direccion: 'Av. Siempre Viva 123', distrito: 'Miraflores', id: 'luis-1' });
     expect(r.status).toBe(201);

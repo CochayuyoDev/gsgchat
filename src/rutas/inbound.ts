@@ -23,7 +23,7 @@
 import type { Contact, Repos } from '../db/repos.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Solicitud } from '../db/rutas.js';
-import { despacharReportes, payloadIncidencia, payloadUbicacion, type PuertoGsg } from './gsg.js';
+import { despacharReportes, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { resolverPorUbicacion } from '../entregas/ubicacion-unica.js';
 
@@ -162,7 +162,7 @@ async function reportar(
     loteId: lote.id,
     tipo,
     payload:
-      tipo === 'ubicacion' ? payloadUbicacion(solicitud, lote) : payloadIncidencia(solicitud, lote),
+      tipo === 'ubicacion' ? await payloadUbicacionDelPedido(deps.repos, solicitud, lote) : payloadIncidencia(solicitud, lote),
   });
   if (tipo === 'ubicacion') despacharYa(deps);
 }
@@ -243,7 +243,7 @@ async function corregirUbicacion(
       solicitudId: resuelta.id,
       loteId: lote.id,
       tipo: 'ubicacion',
-      payload: { ...payloadUbicacion(actualizada, lote), corregida: true },
+      payload: { ...(await payloadUbicacionDelPedido(deps.repos, actualizada, lote)), corregida: true },
     });
     despacharYa(deps);
   }

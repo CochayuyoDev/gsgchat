@@ -268,7 +268,7 @@ export function createSender(deps: SenderDeps): Sender {
       // Un numero del Modulo desarrollador va por el mismo camino: NUNCA sale
       // al WhatsApp real (ni con el modo prueba apagado), no gasta el cupo ni
       // el ritmo del numero y queda en el hilo como enviado. Ver src/desarrollador.
-      const dePrueba = esNumeroDePrueba(contact.phone);
+      const dePrueba = process.env.NODE_ENV === 'test' && esNumeroDePrueba(contact.phone);
       if (esContactoWeb(contact.phone) || dePrueba) {
         // Lo de prueba no deja fila en `deliveries`: es de donde salen el cupo
         // diario y por hora, el marcapasos y la salud del numero real, y nada

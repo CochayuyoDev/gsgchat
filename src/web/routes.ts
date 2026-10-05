@@ -1,3 +1,4 @@
+import { cuentasPage } from './cuentas-page.js';
 /**
  * Rutas de la interfaz web: las paginas y los endpoints que consumen.
  *
@@ -54,7 +55,7 @@ function memoriaDePerfil(): SettingsRepo {
 }
 import type { StokyClient } from '../stoky/client.js';
 import { registerDevRoutes } from './dev-routes.js';
-import { registerDesarrollador } from '../desarrollador/routes.js';
+
 import { registerLocalRoutes } from './local-routes.js';
 import type { SesionLocal } from '../whatsapp/local/session.js';
 import type { Monitor } from '../salud/monitor.js';
@@ -66,16 +67,15 @@ import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { entregasPage } from './entregas-page.js';
-import { motorizadosPage } from './motorizados-page.js';
-import { numerosPage } from './numeros-page.js';
+
 import { fiabilidadPage } from './fiabilidad-page.js';
 import { guardadosPage } from './guardados-page.js';
 import { fijarModoVigente } from './shell.js';
-import { envioAutomaticoPage } from './envio-automatico-page.js';
+
 import { entrenamientoPage } from './entrenamiento-page.js';
-import { tiendasPage } from './tiendas-page.js';
+
 import { mapaPage } from './mapa-page.js';
-import { pagarPage } from './pagar-page.js';
+
 import { ICONO_192_PNG_BASE64, ICONO_512_PNG_BASE64 } from './iconos.js';
 import { NOMBRE_SISTEMA } from '../marca.js';
 import type { ServicioEntrenamiento } from '../entrenamiento/servicio.js';
@@ -182,7 +182,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
       .send({
         name: NOMBRE_SISTEMA,
         short_name: NOMBRE_SISTEMA,
-        description: 'Las entregas de hoy, los chats y los motorizados, desde el celular.',
+        description: 'Los pedidos de hoy, las ubicaciones y los chats, desde el celular.',
         start_url: '/hoy',
         scope: '/',
         display: 'standalone',
@@ -279,21 +279,18 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   // El simulador de entrantes pasa por las mismas piezas que un mensaje real
   // (monitor de salud, ajustes, stickers): si no, lo que se prueba con el no
   // es lo que pasa en la calle.
-  await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg });
+  if (process.env.NODE_ENV === 'test') await registerDevRoutes(app, { config, repos, sender, wa, settings, catalogo, salud: deps.salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg });
 
   // El Modulo desarrollador (solo administradores): probar todo sin WhatsApp
   // real y comprobar que esta listo para GSG. Ver src/desarrollador.
-  await registerDesarrollador(app, deps);
 
-  app.get('/rutas', async (_request, reply) => {
+
+  app.get('/automatizacion-gsg', async (_request, reply) => {
     const page = html(rutasPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
-  app.get('/envio-automatico', async (_request, reply) => {
-    const page = html(envioAutomaticoPage({ configured: settings.isConfigured(), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
-    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
-  });
+  app.get('/envio-automatico', async (_request, reply) => reply.redirect('/automatizacion-gsg'));
 
   // Hoy es la portada de GSGchat; /entregas es el mismo sitio con su nombre viejo.
   for (const ruta of ['/hoy', '/entregas']) {
@@ -303,22 +300,15 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     });
   }
 
-  app.get('/fiabilidad', async (_request, reply) => {
+  app.get('/salud', async (_request, reply) => {
     const page = html(fiabilidadPage({ disponible: Boolean(deps.fiabilidad), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
-  app.get('/numeros', async (request, reply) => {
-    // ?etapa=contactados es «Ubicaciones registradas» del menú: la cabecera ya sale con su nombre.
-    const etapa = (request.query as { etapa?: unknown } | undefined)?.etapa;
-    const page = html(numerosPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio(), etapa: typeof etapa === 'string' ? etapa : undefined }));
-    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
-  });
-
-  app.get('/motorizados', async (_request, reply) => {
-    const page = html(motorizadosPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
-    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
-  });
+  app.get('/numeros', async (request, reply) => reply.redirect('/hoy' + (request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : '')));
+  for (const [origen, destino] of [['/tiendas', '/cuentas'], ['/fiabilidad', '/salud'], ['/rutas', '/automatizacion-gsg']]) {
+    app.get(origen!, async (_request, reply) => reply.redirect(destino!));
+  }
 
   app.get('/guardados', async (_request, reply) => {
     const page = html(guardadosPage({ demo: config.DEMO_MODE, nombreNegocio: negocio(), conIA: Boolean(deps.ia?.estado().tieneToken) }));
@@ -326,8 +316,8 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   });
 
   // El panel del dueño (solo superadministrador), el mapa del dia y la pantalla Pagar de esta instalacion. Constructor E.
-  app.get('/tiendas', async (_request, reply) => {
-    const page = html(tiendasPage({ demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+  app.get('/cuentas', async (_request, reply) => {
+    const page = html(cuentasPage({ nombreNegocio: negocio() }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
@@ -336,10 +326,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
-  app.get('/pagar', async (_request, reply) => {
-    const page = html(pagarPage({ demo: config.DEMO_MODE, nombreNegocio: negocio() }));
-    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
-  });
+
 
   app.get('/entrenamiento', async (_request, reply) => {
     const page = html(entrenamientoPage({ disponible: Boolean(deps.entrenamiento), conIA: Boolean(deps.ia?.estado().tieneToken), demo: config.DEMO_MODE, nombreNegocio: negocio() }));

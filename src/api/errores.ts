@@ -15,6 +15,9 @@ import type { FastifyReply } from 'fastify';
 export type CodigoError =
   | 'VALIDACION'
   | 'JSON_INVALIDO'
+  | 'METODO_NO_PERMITIDO'
+  | 'CUERPO_DEMASIADO_GRANDE'
+  | 'TIPO_CONTENIDO_NO_SOPORTADO'
   | 'CLAVE_AUSENTE'
   | 'CLAVE_INVALIDA'
   | 'CLAVE_REVOCADA'
@@ -36,6 +39,10 @@ export interface DetalleCampo {
   /** Ruta del campo: "pedidos[2].telefono", "cuerpo"... */
   campo: string;
   mensaje: string;
+  /** Posición del pedido en la llamada, empezando en 1. */
+  pedido?: number;
+  cliente?: string | null;
+  tracking?: string | null;
 }
 
 export interface CuerpoError {

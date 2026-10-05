@@ -11,7 +11,7 @@ import { seccionVivo } from './vivo.js';
 import { seccionListo } from './listo.js';
 import { seccionProcesos } from './procesos.js';
 
-const SECCIONES = [seccionGenerar, seccionVivo, seccionListo, seccionProcesos];
+const SECCIONES = [seccionGenerar, seccionProcesos];
 
 const CSS = `
   .muted { color: var(--texto-suave); }
@@ -38,7 +38,7 @@ const CSS = `
 export function desarrolladorPage(opts: { nombreNegocio: string; demo: boolean; esAdmin: boolean }): string {
   const contenido = opts.esAdmin
     ? `
-<div class="dev-aviso" role="note"><span aria-hidden="true">🧪</span><span><b>Todo lo de aquí es de prueba.</b> Los clientes y motorizados de prueba usan números reservados (51 000 0…, 51 000 1…) que <b>nunca</b> salen al WhatsApp real, y lo que se manda a GSG va a su simulador.</span></div>
+<div class="dev-aviso" role="note"><span aria-hidden="true">🧪</span><span><b>Todo lo de aquí es de prueba.</b> Los clientes de prueba usan números reservados (51 000 0…) que <b>nunca</b> salen al WhatsApp real, y lo que se manda a GSG va a su simulador.</span></div>
 <nav class="dev-tabs" role="tablist" aria-label="Partes del módulo desarrollador">
   ${SECCIONES.map((s, i) => `<a href="#${s.id}" role="tab" id="tab-${s.id}" aria-controls="sec-${s.id}"><span class="dev-paso" aria-hidden="true">${i + 1}</span><span class="dev-tab-txt">${escapeHtml(s.titulo)}</span></a>`).join('\n  ')}
 </nav>

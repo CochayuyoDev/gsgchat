@@ -930,7 +930,7 @@ async function ensenarDesdeMensaje(m, corrigiendo) {
 /* ------------------------------------------------------------- la ficha */
 
 function estadoEntregaEnPalabras(e) {
-  var por = { pendiente: 'Pendiente', esperando_ubicacion: 'Falta su ubicación', esperando_confirmacion: 'Falta que confirme', lista: 'Lista para salir', esperando_motorizado: 'Con un motorizado, sin hora', avisada: 'En camino', entregada: 'Entregada', terminada: 'Terminada', cancelada: 'Cancelada', incidencia: 'Necesita a alguien' };
+  var por = { pendiente: 'Pendiente', esperando_ubicacion: 'Falta su ubicación', esperando_confirmacion: 'Falta que confirme', lista: 'Lista para salir', esperando_motorizado: 'Ubicación y confirmación registradas', avisada: 'En camino', entregada: 'Entregada', terminada: 'Terminada', cancelada: 'Cancelada', incidencia: 'Necesita a alguien' };
   return por[e.estado] || e.estado;
 }
 async function abrirFicha() {
@@ -954,7 +954,7 @@ async function abrirFicha() {
     if (f.entrega) {
       var e = f.entrega;
       html += '<div><h4>Su pedido de hoy</h4><div class="fila"><b>' + esc(e.referencia) + '</b><span class="chip">' + esc(estadoEntregaEnPalabras(e)) + '</span>' + (e.prioridad === 'urgente' ? '<span class="chip tono-rojo">Urgente</span>' : '') + '</div>' +
-        '<div class="muted" style="margin-top:4px">' + esc((e.direccion || '') + (e.distrito ? ', ' + e.distrito : '')) + (e.motorizado ? ' · lo lleva ' + esc(e.motorizado.nombre) : '') + (e.llegaAproxAt ? ' · llega alrededor de las ' + hhmm(e.llegaAproxAt) : '') + (e.entregadaAt ? ' · entregado a las ' + hhmm(e.entregadaAt) : '') + '</div>' +
+        '<div class="muted" style="margin-top:4px">' + esc((e.direccion || '') + (e.distrito ? ', ' + e.distrito : '')) + (e.llegaAproxAt ? ' · llega alrededor de las ' + hhmm(e.llegaAproxAt) : '') + (e.entregadaAt ? ' · entregado a las ' + hhmm(e.entregadaAt) : '') + '</div>' +
         '<div class="fila" style="margin-top:6px"><a class="sm" href="/hoy?buscar=' + encodeURIComponent(e.referencia) + '">Abrir en Hoy</a></div></div>';
     } else html += '<div><h4>Su pedido de hoy</h4><div class="muted">No tiene ningún pedido en la lista de hoy.</div></div>';
     if (!(current && current.tipo === 'grupo') && /^\d{8,}$/.test(String(c.phone || ''))) {

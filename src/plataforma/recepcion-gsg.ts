@@ -10,7 +10,7 @@ export function esRecepcionGsg(metodo: string | undefined, url: string): boolean
 
 /** Por que no entra una peticion de recepcion: su codigo HTTP y el cuerpo JSON. */
 export interface RechazoRecepcion {
-  status: 401 | 403 | 404 | 409 | 503;
+  status: 401 | 403 | 404 | 405 | 409 | 503;
   cuerpo: CuerpoError;
   /** Cabeceras extra (WWW-Authenticate en el 401, Retry-After en el 503). */
   cabeceras?: Record<string, string>;
@@ -19,6 +19,11 @@ export interface RechazoRecepcion {
 const BEARER = { 'www-authenticate': 'Bearer realm="gsgchat", charset="UTF-8"' };
 
 export const RECHAZOS = {
+  metodo: (): RechazoRecepcion => ({
+    status: 405,
+    cabeceras: { allow: 'GET, HEAD, POST' },
+    cuerpo: cuerpoError('METODO_NO_PERMITIDO', 'Ese método no está permitido en /api/v1/entregas: usa POST para recibir pedidos o GET para consultar la lista.'),
+  }),
   ausente: (): RechazoRecepcion => ({
     status: 401,
     cabeceras: BEARER,
@@ -71,22 +76,24 @@ export function tokenBearer(authorization: string | undefined): string | null {
  * enviada en el cuerpo para decidir el destino.
  */
 export async function tiendaDeClaveGsg(
-  plataforma: Pick<Plataforma, 'directorio' | 'tiendaPorSlug'>,
+  plataforma: Pick<Plataforma, 'directorio' | 'tiendaPorSlug' | 'consultarClaveGsg'>,
   authorization: string | undefined,
+  permiso: 'entregas:gestionar' | 'entregas:leer' = 'entregas:gestionar',
 ): Promise<{ tienda: TiendaViva } | { rechazo: RechazoRecepcion }> {
   const clave = tokenBearer(authorization);
   if (!clave) return { rechazo: RECHAZOS.ausente() };
   if (!pareceClaveApi(clave)) return { rechazo: RECHAZOS.invalida() };
   const hash = hashClaveApi(clave);
   try {
-    const vigentes: Array<{ tienda: TiendaViva; permisos: readonly string[]; activa: boolean }> = [];
+    const vigentes: Array<{ tienda: TiendaViva | null; permisos: readonly string[]; activa: boolean }> = [];
     let revocada = false;
     for (const registrada of await plataforma.directorio.tiendas()) {
-      // Una tienda suspendida que aun se puede abrir contesta 403; la que la
-      // plataforma ya no carga no se puede mirar y su clave queda como desconocida.
+      // Una suspendida no se arranca para reconocer su clave: solo se lee
+      // su base. Su clave vigente sigue siendo válida, pero responde 403.
       const tienda = await plataforma.tiendaPorSlug(registrada.slug);
-      if (!tienda) continue;
-      const registro = (await tienda.repos.claves.porHashConRevocadas?.(hash)) ?? (await tienda.repos.claves.porHash(hash));
+      const registro = tienda
+        ? (await tienda.repos.claves.porHashConRevocadas?.(hash)) ?? (await tienda.repos.claves.porHash(hash))
+        : registrada.estado === 'suspendida' ? await plataforma.consultarClaveGsg?.(registrada, hash) : null;
       if (!registro) continue;
       if (registro.revocadaAt) {
         revocada = true;
@@ -99,7 +106,12 @@ export async function tiendaDeClaveGsg(
     const una = vigentes[0];
     if (!una) return { rechazo: revocada ? RECHAZOS.revocada() : RECHAZOS.invalida() };
     if (!una.activa) return { rechazo: RECHAZOS.suspendida() };
-    if (!tienePermiso(una.permisos, 'entregas:gestionar')) return { rechazo: RECHAZOS.sinPermiso() };
+    if (!una.tienda) return { rechazo: RECHAZOS.invalida() };
+    if (!tienePermiso(una.permisos, permiso)) {
+      const rechazo = RECHAZOS.sinPermiso();
+      rechazo.cuerpo = cuerpoError('SIN_PERMISO', `La clave es válida pero no tiene el permiso «${permiso}» para esta operación.`);
+      return { rechazo };
+    }
     return { tienda: una.tienda };
   } catch (error) {
     if (esBaseNoDisponible(error)) return { rechazo: RECHAZOS.baseCaida() };

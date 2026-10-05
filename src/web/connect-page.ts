@@ -419,7 +419,6 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
   <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
   <div class="acciones">
     <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
-    <button class="btn" id="gsg-simulador" type="button">Usar el simulador</button>
     <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
     <span id="gsg-state" class="chip hidden" role="status"></span>
   </div>
@@ -586,34 +585,14 @@ ${
       <div class="acciones"><button class="btn sm" id="gsg-clave-copiar" type="button">Copiar la clave</button></div>
     </div>
     <details id="gsg-dev">
-      <summary>Para los programadores de GSG: dirección, contrato, simulador y lo que nos mandaron</summary>
+      <summary>Para los programadores de GSG: dirección, contrato y lo que nos mandaron</summary>
       <div class="copiar"><input id="gsg-api-url" readonly value="/api/v1/entregas" aria-label="Dirección de la API para GSG"><button class="btn" id="gsg-api-copiar" type="button">Copiar la dirección</button></div>
       <div class="acciones">
         <a class="btn" id="gsg-contrato" href="/docs/contrato-gsg.md" download="CONTRATO-GSG.md">Descargar el contrato</a>
         <a class="btn" href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
         <a class="btn" href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a>
       </div>
-      <p class="ayuda separada">El contrato explica cada llamada paso a paso y cómo probar contra el simulador antes de tocar nada real: es lo que se le manda a los programadores de GSG.</p>
-      <div id="gsg-sim" class="bloque punteado hidden">
-        <p class="ayuda"><b>Que prueben contra el simulador desde fuera.</b> Un token propio, con caducidad, para llamar al simulador de este servidor sin tocar nada real. Se ve una sola vez.</p>
-        <div class="copiar"><input id="gsg-sim-url" readonly aria-label="Dirección del simulador"><button class="btn" id="gsg-sim-url-copiar" type="button">Copiar la dirección</button></div>
-        <div class="acciones"><button class="btn" id="gsg-sim-token" type="button">Crear un token del simulador</button><span id="gsg-sim-state" class="chip hidden" role="status"></span></div>
-        <div id="gsg-sim-nuevo" class="secreto hidden">
-          <b>Token del simulador: cópialo ahora, no se volverá a mostrar.</b>
-          <code id="gsg-sim-valor"></code>
-          <p class="ayuda">Lo mandan como <code>Authorization: Bearer &lt;el token&gt;</code> a la dirección de arriba.</p>
-          <div class="acciones"><button class="btn sm" id="gsg-sim-copiar" type="button">Copiar el token</button></div>
-        </div>
-        <ul id="gsg-sim-lista" class="ayuda"></ul>
-        <div class="bloque punteado">
-          <p class="ayuda"><b>Probar lo que GSG puede cambiar después de mandar un pedido.</b> El simulador cancela un pedido o le cambia la dirección, y en la siguiente sincronización este sistema lo refleja.</p>
-          <div class="acciones">
-            <button class="btn sm" id="gsg-sim-cancelar" type="button">Cancelar uno (prueba)</button>
-            <button class="btn sm" id="gsg-sim-cambiar" type="button">Cambiar la dirección de uno (prueba)</button>
-            <span id="gsg-sim-prueba-state" class="chip hidden" role="status"></span>
-          </div>
-        </div>
-      </div>
+      <p class="ayuda separada">El contrato explica cada llamada, sus datos y los errores que devuelve la API.</p>
       <div class="bloque punteado">
         <p class="ayuda"><b>Lo que GSG nos mandó</b> (las últimas llamadas, con lo que se les contestó). <a id="gsg-bitacora-refrescar" href="#">Actualizar</a></p>
         <div id="gsg-bitacora" class="ayuda">Todavía nadie ha llamado.</div>
@@ -1671,7 +1650,6 @@ async function cargarGsg() {
       if (cajaForm && g.modo === 'ninguna') cajaForm.open = true;
       texto('gsg-form-resumen', g.modo === 'real' ? 'Cambiar la dirección o la clave' : 'Poner la dirección y la clave de GSG');
     }
-    ver('gsg-simulador', !(g.modo === 'simulador' || !r.simulador));
     ver('gsg-quitar', g.modo !== 'ninguna');
     ver('gsg-probar', g.modo !== 'ninguna');
     // Lo guardado a la vista (la clave no: solo si ya hay una).
@@ -1730,10 +1708,6 @@ if ($('gsg')) {
     } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }
     boton.disabled = false;
   };
-  $('gsg-simulador').onclick = async function () {
-    try { await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'simulador' } }); estado('gsg-state', 'Ahora GSG es el simulador de este servidor. Cárgalo desde Hoy → Probar con números ficticios.', 'verde'); cargarGsg(); }
-    catch (error) { estado('gsg-state', error.message, 'rojo'); }
-  };
   $('gsg-quitar').onclick = async function () {
     var ok = await confirmarDialogo({ titulo: 'Desconectar GSG', texto: 'Lo reportable se guarda en la cola y saldrá entero cuando se vuelva a conectar.', boton: 'Desconectar', peligro: true });
     if (!ok) return;
@@ -1744,8 +1718,6 @@ if ($('gsg')) {
   setVal('gsg-api-url', location.origin + '/api/v1/entregas');
   $('gsg-api-copiar').onclick = function () { copiar(val('gsg-api-url'), 'gsg-clave-state', 'Dirección'); };
   $('gsg-clave-copiar').onclick = function () { copiar($('gsg-clave-valor').textContent, 'gsg-clave-state', 'Clave'); };
-  $('gsg-sim-url-copiar').onclick = function () { copiar(val('gsg-sim-url'), 'gsg-sim-state', 'Dirección'); };
-  $('gsg-sim-copiar').onclick = function () { copiar($('gsg-sim-valor').textContent, 'gsg-sim-state', 'Token'); };
 
   $('gsg-clave').onclick = async function () {
     if (!(await confirmarDialogo({ titulo: 'Crear la clave para GSG', texto: 'Se crea una clave de API llamada "GSG" con permiso para mandar y ver las entregas del día y registrar webhooks. Si ya había una clave "GSG", sigue valiendo.', boton: 'Crear la clave' }))) return;
@@ -1802,27 +1774,6 @@ if ($('gsg')) {
     pintarHallazgos(r.verificacion);
     pintarCuadre(r.cuadre);
 
-    ver('gsg-sim', !!r.conSimulador);
-    if (r.conSimulador) {
-      setVal('gsg-sim-url', location.origin + r.rutaSimulador);
-      var tokens = r.tokens || [];
-      $('gsg-sim-lista').innerHTML = tokens.length ? tokens.map(function (t) {
-        var tono = t.estado === 'vigente' ? 'verde' : t.estado === 'caducado' ? 'ambar' : 'rojo';
-        return '<li><span class="chip tono-' + tono + '">' + esc(t.estado) + '</span> <b>' + esc(t.nombre) + '</b> (…' + esc(t.pista) + ')' +
-          ' · caduca el ' + esc(fecha(t.caducaAt)) + ' · ' + t.usos + ' llamada' + (t.usos === 1 ? '' : 's') +
-          (t.ultimoUsoAt ? ', la última a las ' + esc(hora(t.ultimoUsoAt)) : '') +
-          (t.estado === 'vigente' ? ' <a href="#" data-anular="' + esc(t.id) + '">Anular</a>' : '') + '</li>';
-      }).join('') : '<li>Todavía no hay tokens: crea uno y pásaselo a los programadores de GSG.</li>';
-      $('gsg-sim-lista').querySelectorAll('[data-anular]').forEach(function (a) {
-        a.onclick = async function (ev) {
-          ev.preventDefault();
-          if (!(await confirmarDialogo({ titulo: 'Anular el token', texto: 'Desde ahora ese token no vale: quien lo use recibirá "token caducado o anulado". Se puede crear otro.', boton: 'Anular', peligro: true }))) return;
-          try { await api('/admin/gsg/tokens-simulador/' + a.getAttribute('data-anular'), { method: 'DELETE' }); estado('gsg-sim-state', 'Token anulado.', 'verde'); cargarExtras(); }
-          catch (error) { estado('gsg-sim-state', error.message, 'rojo'); }
-        };
-      });
-    }
-
     var llamadas = r.bitacora || [];
     $('gsg-bitacora').innerHTML = llamadas.length
       ? '<table><thead><tr><th>Hora</th><th>Llamada</th><th>Con qué entró</th><th>Qué pasó</th></tr></thead><tbody>' +
@@ -1830,7 +1781,7 @@ if ($('gsg')) {
           return '<tr><td>' + esc(hora(l.en)) + '</td><td><code>' + esc(l.que) + '</code></td><td>' + esc(l.quien) +
             '</td><td><span class="chip tono-' + (l.status >= 400 ? 'rojo' : 'verde') + '">' + l.status + '</span> ' + esc(l.resultado) + '</td></tr>';
         }).join('') + '</tbody></table>'
-      : 'Todavía nadie ha llamado. Cuando GSG (o sus programadores, con el token del simulador) manden algo, aquí se verá qué llegó y qué se les contestó.';
+      : 'Todavía nadie ha llamado. Cuando GSG mande pedidos, aquí se verá qué llegó y qué se les contestó.';
   }
   async function cargarExtras() {
     try { pintarExtras(await api('/admin/gsg')); } catch (error) { estado('gsg-state', error.message, 'rojo'); }
@@ -1846,26 +1797,7 @@ if ($('gsg')) {
     try { var r = await api('/admin/gsg/cuadre'); pintarCuadre(r.cuadre); estado('gsg-verificar-state', r.cuadre.ok ? 'El día cuadra.' : 'Hay diferencias (abajo).', r.cuadre.ok ? 'verde' : 'ambar'); }
     catch (error) { estado('gsg-verificar-state', error.message, 'rojo'); }
   };
-  $('gsg-sim-token').onclick = async function () {
-    try {
-      var nombre = await pedirDato({ titulo: 'Token del simulador', texto: 'Un nombre para reconocerlo en la lista. Caduca a los 30 días; después se crea otro.', etiqueta: 'Para quién es', marcador: 'Programadores de GSG', boton: 'Crear el token', validar: function () { return null; } });
-      if (nombre === null) return;
-      var r = await api('/admin/gsg/tokens-simulador', { method: 'POST', body: { nombre: nombre || undefined, dias: 30 } });
-      $('gsg-sim-valor').textContent = r.token;
-      ver('gsg-sim-nuevo', true);
-      estado('gsg-sim-state', 'Token creado: caduca en 30 días.', 'verde');
-      cargarExtras();
-    } catch (error) { estado('gsg-sim-state', error.message, 'rojo'); }
-  };
   $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
-  $('gsg-sim-cancelar').onclick = async function () {
-    try { var r = await api('/admin/gsg/simulador/cancelar-uno', { method: 'POST', body: {} }); estado('gsg-sim-prueba-state', r.detalle, 'verde'); cargarExtras(); }
-    catch (error) { estado('gsg-sim-prueba-state', error.message, 'rojo'); }
-  };
-  $('gsg-sim-cambiar').onclick = async function () {
-    try { var r = await api('/admin/gsg/simulador/cambiar-uno', { method: 'POST', body: {} }); estado('gsg-sim-prueba-state', r.detalle, 'verde'); cargarExtras(); }
-    catch (error) { estado('gsg-sim-prueba-state', error.message, 'rojo'); }
-  };
   cargarGsg();
   cargarExtras();
 }

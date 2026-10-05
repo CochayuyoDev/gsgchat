@@ -13,7 +13,7 @@
  *    supervisor por WhatsApp y por correo; cuando la IA vuelve, se quita solo.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
@@ -35,7 +35,7 @@ import { crearEscenarioEntregas, PIN_LIMA, type EscenarioEntregas } from './esce
 import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, CLAVE_API_PRUEBA, type FakeWhatsApp } from './fakes.js';
 
 const AVISO_OPENAI = 'Se acabó el saldo de tu IA (OpenAI). Mientras tanto contesta con respuestas automáticas. Recarga en platform.openai.com → Billing';
-const EXPLICACION = 'Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado.';
+const EXPLICACION = 'Es necesaria para registrar correctamente la dirección de entrega.';
 const HORA_SIN_PIN = /nos falta su ubicación/;
 const HORA_SIN_CONFIRMAR = /solo falta que nos confirme/;
 
@@ -297,6 +297,10 @@ describe('la IA primero, las reglas de respaldo (un día de entregas en «Solo l
     await e.asistente!.guardar({ activa: true, proveedor: 'openai', servicio: 'openai', modelo: 'gpt-4o-mini', token: 'sk-prueba' });
     expect(e.entregas.reglaGsgActiva()).toBe(true);
   }, 60_000);
+  beforeEach(async () => {
+    modelo.responde = 'OTRA';
+    await e.asistente!.probarConexion();
+  });
   afterAll(() => e?.cerrar());
 
   /** El banco: lo que escriben los clientes de verdad y lo que diría un modelo bien entrenado. */

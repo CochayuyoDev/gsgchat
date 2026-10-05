@@ -99,6 +99,20 @@ describe('recepcion global aislada por clave', () => {
     expect(await a.entrega('AMBIGUO')).toBeFalsy(); expect(await b.entrega('AMBIGUO')).toBeFalsy();
     await b.repos.claves.revocar(copiada.id);
   });
+  it('consultar desde Postman con Bearer también usa la tienda de la clave, sin cookies', async () => {
+    const clave = (await nueva(a, ['entregas:gestionar', 'entregas:leer'])).clave;
+    expect((await enviar(clave, '/api/v1/entregas', 'POSTMAN-CONSULTA')).status).toBe(201);
+    const lista = await fetch(base + '/api/v1/entregas', { headers: { authorization: `Bearer ${clave}`, cookie: 'gsg_tienda=tienda-b' } });
+    expect(lista.status).toBe(200);
+    expect((await lista.json() as any).entregas.some((e: any) => e.referencia === 'POSTMAN-CONSULTA')).toBe(true);
+    const detalle = await fetch(base + '/api/v1/entregas/POSTMAN-CONSULTA', { headers: { authorization: `Bearer ${clave}` } });
+    expect(detalle.status).toBe(200);
+    expect((await detalle.json() as any).entrega.referencia).toBe('POSTMAN-CONSULTA');
+    const ajena = await fetch(base + '/api/v1/entregas/POSTMAN-CONSULTA', { headers: { authorization: `Bearer ${soloLeer}` } });
+    expect(ajena.status).toBe(200);
+    const sinLectura = await fetch(base + '/api/v1/entregas', { headers: { authorization: `Bearer ${claveB}` } });
+    expect(sinLectura.status).toBe(403);
+  });
   it('OpenAPI anuncia el endpoint de recepcion sin slug', () => {
     const doc = openApi('https://gsgchat.example/tienda/tienda-a') as any;
     expect(doc.paths['/entregas'].post.servers).toEqual([{ url: 'https://gsgchat.example/api/v1' }]);

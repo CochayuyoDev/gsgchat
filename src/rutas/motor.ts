@@ -32,7 +32,7 @@ import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
-import { payloadIncidencia, payloadResumen, payloadUbicacion, type PuertoGsg } from './gsg.js';
+import { payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
 import {
   DESCRIPCION_PASO,
@@ -382,23 +382,13 @@ export function crearMotor(deps: MotorDeps): Motor {
     await repos.rutas.registrarEvento(
       solicitud.id,
       'derivacion',
-      'pasa al repartidor para llamada telefónica',
+      'Pendiente de atención: tres intentos sin ubicación',
     );
 
     // Avisar al cliente solo si se puede escribir gratis y si alguna vez
     // contesto: a quien ignoro tres mensajes, un cuarto solo le suma motivos
     // para bloquear; y con plantilla, gastar una en despedirse no aporta.
-    if (!deps.usarPlantilla() && solicitud.phone && respondio) {
-      const despedida = await sender
-        .send({
-          phone: solicitud.phone,
-          kind: 'freeform',
-          category: 'UTILITY',
-          text: textoDerivacion(contexto(solicitud)),
-        })
-        .catch(() => undefined);
-      if (despedida?.ok && deps.stickers) await deps.stickers.automatico('despedida', solicitud.phone);
-    }
+
 
     return { accion: 'derivacion', solicitudId: solicitud.id };
   }
@@ -655,7 +645,7 @@ export function crearMotor(deps: MotorDeps): Motor {
         for (const c of cerradas) {
           if (!c.referencia || c.referencia === registrada.referencia) continue;
           const lote = await repos.rutas.lote(c.loteId).catch(() => null);
-          if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: payloadUbicacion(c, lote) }).catch(() => undefined);
+          if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: await payloadUbicacionDelPedido(repos, c, lote) }).catch(() => undefined);
         }
         deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
         return true;

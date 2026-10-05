@@ -87,7 +87,7 @@ export const ajustesEntregasSchema = z.object({
    * persona pulsa «Confirmar y enviar». Apagado: sale sola, como antes. Lo
    * creado con «Pedido a mano» nunca espera.
    */
-  confirmarListaGsg: z.boolean().default(true),
+  confirmarListaGsg: z.boolean().default(false),
   /**
    * Cliente recurrente: si mando su ubicacion hace menos de `diasMaximo`
    * dias, en vez de pedirle el pin se le propone esa direccion ("¿la misma
@@ -432,7 +432,7 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
  * tampoco, el del WhatsApp de la tienda). Va pegado a «Ubicación registrada
  * correctamente» y es también el mensaje de cierre ante cualquier consulta.
  */
-export const TEXTO_CIERRE = 'Por este canal no se reciben consultas. Te derivamos con un asesor humano. Número del motorizado: {telefonoMotorizado}.';
+export const TEXTO_CIERRE = 'Por este canal no se reciben consultas. Te derivamos con un asesor humano. Contacto de soporte: {soporte}.';
 // En el agradecimiento no va el cierre: el numero del motorizado se da cuando el cliente pregunta algo (ya con motorizado asignado).
 const CIERRE_UBICACION = '¡Muchas gracias!';
 
@@ -441,9 +441,9 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   // Solo el enlace del mapa: nada de latitud y longitud a la vista del cliente.
   // Es a la vez el cierre del agente operativo: despues de esto la IA ya no
   // contesta en ese chat (el sistema sigue con la hora de llegada y el entregado).
-  ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, mantente pendiente de tu celular.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.`,
+  ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. La ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.`,
   solicitudUbicacion: '¡Hola {nombreCompleto}! Somos GSG Courier, tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
-  porQueUbicacion: 'Es necesaria para calcular la ruta exacta de entrega y coordinar con el motorizado. ¿Podrías compartir tu ubicación por WhatsApp, por favor? (clip 📎 → Ubicación)',
+  porQueUbicacion: 'Es necesaria para registrar correctamente la dirección de entrega. ¿Podrías compartir tu ubicación por WhatsApp, por favor? (clip 📎 → Ubicación)',
   cierreAgente: TEXTO_CIERRE,
   proponerUbicacion: 'Hola {nombre}, somos {negocio}: hoy le llevamos {pedido}. ¿Se lo llevamos a la misma dirección de la última vez?\nResponda SÍ si es la misma; si es otra, mándenos su ubicación desde el clip 📎 → Ubicación.',
   ubicacionOtra: 'Perfecto, {nombre}. Mándenos su ubicación actual desde el clip 📎 → Ubicación → Enviar tu ubicación actual, y seguimos con {pedido}.',
@@ -453,13 +453,13 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   insistirConfirmacion: 'Hola {nombre}, seguimos pendientes de {pedido} de {negocio}. ¿Lo recibe hoy? Responda SÍ o NO, por favor.',
   preguntarOtraVez: 'Disculpe, no me quedó claro. ¿Recibe hoy {pedido}? Responda SÍ para confirmar, NO para cancelar, o cuéntenos si prefiere otro día u otra dirección.',
   // El mismo aviso completo que «Ubicación registrada» y, al final, la pregunta.
-  graciasYConfirmar: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, mantente pendiente de tu celular.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.`,
-  graciasYConfirmarVarios: `✅ Ubicación registrada correctamente ({pedidos}).\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. Un motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, mantente pendiente de tu celular.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.`,
+  graciasYConfirmar: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. La ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.`,
+  graciasYConfirmarVarios: `✅ Ubicación registrada correctamente ({pedidos}).\n{mapa}\n\n${CIERRE_UBICACION}\n\nSomos {negocio}. La ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.`,
   confirmarOtroPedido: 'Y {pedido}, ¿también lo recibe hoy? Responda SÍ o NO.',
   // El mismo aviso del motorizado, horario y soporte que «Ubicación registrada».
   // Si ya recibio el aviso completo al mandar su ubicacion: solo el ok, sin repetirlo.
   confirmadaYaAvisado: 'Perfecto, {pedido} queda confirmado para hoy. ¡Gracias!',
-  confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\nUn motorizado se contactará contigo para darte el rango de llegada aproximado y te llamará minutos antes de llegar a tu dirección. Por favor, mantente pendiente de tu celular.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
+  confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
   cancelada: 'Entendido, dejamos {pedido} sin entregar por hoy. Si cambia de opinión, escríbanos por aquí. Gracias.',
   cambio: 'Entendido, tomamos nota. Un compañero de {negocio} se comunicará con usted para coordinar {pedido}. Gracias.',
   motorizadoNuevo: '🛵 {urgente}Nuevo pedido: {pedido}\nCliente: {nombreCompleto}{distrito}\n{notas}\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',
@@ -498,7 +498,7 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   motorizadoAudioSinTexto: 'Recibí tu audio, {motorizado}, pero no pude entenderlo. Escríbelo por aquí (por ejemplo "40", "entregado", "no estaba nadie", "cerca") o manda otro audio más claro.',
   motorizadoEnlace: 'Hola {motorizado}, aquí tienes tus pedidos de hoy con botones grandes para avisar desde el celular: {enlace}\nVale por 7 días. Si lo pierdes, pide otro al coordinador.',
   cambioUbicacionAntes: '¡Claro! Entiendo. Mándame la nueva ubicación para tenerla en cuenta para el mismo día.',
-  cambioUbicacionTarde: 'Entiendo que deseas cambiar tu ubicación, pero al ser después de la {horaLimite}, por favor comunícate directamente con el motorizado para coordinar la entrega. Número del motorizado: {telefonoMotorizado}.',
+  cambioUbicacionTarde: 'Entiendo que deseas cambiar tu ubicación, pero al ser después de la {horaLimite}, por favor comunícate directamente con el motorizado para coordinar la entrega. Contacto de soporte: {soporte}.',
   ubicacionCambiada: '✅ Tu nueva ubicación se ha registrado correctamente.\n{mapa}\n\nLa tendremos en cuenta para la entrega de hoy. Recuerda que los cambios de ubicación solo se toman en cuenta el mismo día si nos avisas antes de la {horaLimite}.',
   ubicacionFueraDeLima: 'Su ubicación está fuera de Lima y Callao: la entrega de {pedido} tiene un costo extra según la distancia, que le indicará el motorizado al llegar.',
   ubicacionFueraDeZona: 'Gracias, {nombre}, recibimos su ubicación, pero queda fuera de la zona que cubrimos{cobertura}. Una persona de {negocio} se comunicará con usted para coordinar {pedido}.',
@@ -660,7 +660,7 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   motorizadoAudioSinTexto: 'Al motorizado que manda un audio que no se pudo transcribir',
   motorizadoEnlace: 'Al motorizado, con el enlace a su página de pedidos del día (botones grandes, sin instalar nada)',
   cambioUbicacionAntes: 'Al cliente que ya dio su ubicación y pide cambiarla ANTES de la hora límite (1:00 PM por defecto): se le pide la nueva',
-  cambioUbicacionTarde: 'Al cliente que pide cambiar su ubicación (o manda otro pin) DESPUÉS de la hora límite: coordina con el motorizado, con su número',
+  cambioUbicacionTarde: 'Al cliente que pide cambiar su ubicación (o manda otro pin) DESPUÉS de la hora límite: comunícate con soporte, con su número',
   ubicacionCambiada: 'Al cliente que ya había dado su ubicación y manda una NUEVA antes de la hora límite: se registró la nueva',
   ubicacionFueraDeLima: 'Al cliente cuyo pin cae fuera de Lima y Callao pero cerca (se registra y va al motorizado): va debajo de «Ubicación registrada», avisando del costo extra que le dirá el motorizado',
   ubicacionFueraDeZona: 'Al cliente cuyo pin cae muy lejos, a más de 100 km de Lima y Callao (no se registra: pasa a una persona)',

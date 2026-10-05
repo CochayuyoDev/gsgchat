@@ -41,8 +41,8 @@ import { providerOf, createSettingsService } from '../settings/service.js';
 import { createDynamicWhatsAppClient } from '../whatsapp/dynamic.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { crearSesionLocal, type SesionLocal } from '../whatsapp/local/session.js';
-import { crearConexionStoky } from '../stoky/conexion.js';
-import { crearServicioPlan, type EstadoInstancia } from '../plan/servicio.js';
+
+import { type EstadoInstancia } from '../plan/servicio.js';
 import { versionDelPaquete } from '../util/version.js';
 import { CATALOG } from '../templates/catalog.js';
 import { countVariables } from '../templates/render.js';
@@ -56,14 +56,13 @@ import { observarRepos } from '../eventos/observar.js';
 import { crearServicioIA } from '../ia/servicio.js';
 import { crearServicioEntrenamiento, iaParaEntrenar } from '../entrenamiento/servicio.js';
 import { crearServicioVoz } from '../voz/servicio.js';
-import { crearServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
+
 import { opcionesDesdeConfig } from '../rutas/motor.js';
 import { PLANES } from '../rutas/telefono.js';
-import { crearConexionGsg, TOKEN_SIMULADOR } from '../rutas/conexion-gsg.js';
-import { crearGsgSimulado } from '../entregas/gsg-simulado.js';
+import { crearConexionGsg } from '../rutas/conexion-gsg.js';
 import { crearServicioEntregas } from '../entregas/servicio.js';
 import { crearServicioResumenes } from '../resumenes/servicio.js';
-import { crearServicioProcesos } from '../procesos/servicio.js';
+
 import { cargarLote } from '../rutas/cargar.js';
 import { crearFiabilidad } from '../salud/fiabilidad.js';
 import type { ServicioCorreo } from '../salud/correo.js';
@@ -244,22 +243,13 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
       limpieza.push(() => queue.close(), () => worker?.close());
 
       const parteDeSalud: { dar: null | (() => Promise<EstadoInstancia>) } = { dar: null };
-      const plan = await crearServicioPlan({
-        settingsRepo,
-        url: config.PLAN_URL,
-        token: config.PLAN_TOKEN,
-        baseUrl: config.PUBLIC_BASE_URL,
-        log: (m, d) => log(m, d),
-        estado: () => (parteDeSalud.dar ? parteDeSalud.dar() : { whatsapp: settings.isConfigured() ? 'conectado' : 'sin_conectar', mensajesHoy: 0, fallosIA: 0, entregasHoy: 0, version: versionDelPaquete() }),
-      });
-      const pararPlan = plan.arrancar();
-      limpieza.push(() => pararPlan?.());
-
-      const conexionStoky = await crearConexionStoky({ settingsRepo, settingsKeyBase64: o.secretos.settingsKey, config, log: (m, d) => log(`[stoky] ${m}`, d) });
-      const catalogo = conexionStoky.cliente();
+      // Sin membresías ni catálogo externo: la IA conserva su conocimiento local.
+      const plan = undefined;
+      const catalogo = undefined;
+      const pararPlan: (() => void) | undefined = undefined;
 
       const plantillaPais = PLANES[config.RUTAS_PAIS] ?? PLANES.peru!;
-      const lista = crearServicioEnvioAutomatico({ repos, opcionesReparto: opcionesDesdeConfig(config), plan: plantillaPais, salud, log: (m, d) => console.log(`${o.prefijoLog}[wa] ${m}`, d ?? '') });
+      const lista = undefined;
 
       const entrenamiento = await crearServicioEntrenamiento({ repo: repos.entrenamiento, nombreNegocio: () => ajustes.nombreNegocio(), log: (m, d) => log(`[entrenamiento] ${m}`, d) });
       await entrenamiento.cargar();
@@ -267,7 +257,6 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
       const voz = await crearServicioVoz({ settingsRepo, settingsKeyBase64: o.secretos.settingsKey, sender, mediaDir: o.mediaDir, log: (m, d) => log(`[voz] ${m}`, d) });
 
       const conexionGsg = await crearConexionGsg({ settingsRepo, settingsKeyBase64: o.secretos.settingsKey, config, log: (m, d) => log(`[gsg] ${m}`, d) });
-      const simuladorGsg = crearGsgSimulado({ token: TOKEN_SIMULADOR });
 
       // La IA se crea despues de las entregas y estas la piden por funcion.
       let ia!: Awaited<ReturnType<typeof crearServicioIA>>;
@@ -333,25 +322,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         version: versionDelPaquete(),
       });
 
-      // Los procesos de esta tienda. La principal (GSG Courier) trae activas las
-      // entregas de courier; una tienda nueva empieza sin ellas y las activa
-      // desde Procesos si las usa. Ver src/procesos.
-      const procesos = await crearServicioProcesos({
-        repos,
-        sender,
-        nombreNegocio: () => ajustes.nombreNegocio(),
-        timezone: config.timezone,
-        plan: plantillaPais,
-        distritos: config.distritos,
-        gsgPorDefecto: o.id === 'principal',
-        opciones: opcionesDesdeConfig(config),
-        salud,
-        politica,
-        clasificar: () => (ia.activa() ? (m) => ia.clasificarOperativo(m) : undefined),
-        log: (m, d) => log(`[procesos] ${m}`, d),
-      });
-      await procesos.cargar();
-      contexto.gsg = () => procesos.gsgActivo();
+      contexto.gsg = () => true;
 
       const resumenes = await crearServicioResumenes({
         settingsRepo,
@@ -414,7 +385,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           entregas,
           carpetas: () => [o.mediaDir, path.resolve(config.ARCHIVE_DIR)],
         },
-        cupo: { entregas, lista, reparto: () => lista.ajustesReparto() },
+        cupo: { entregas, reparto: () => opcionesDesdeConfig(config) },
         respaldo: {
           baseDatos: () => ({ tipo: 'mysql', url: o.base.url, base: nombreBase }),
           archiveDir: config.ARCHIVE_DIR,
@@ -442,16 +413,12 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         bus,
         ia,
         entrenamiento,
-        conexionStoky,
         plan,
         lista,
         voz,
         entregas,
-        conexionGsg,
-        simuladorGsg,
-        resumenes,
+        conexionGsg,        resumenes,
         fiabilidad,
-        procesos,
         secretoInterno,
         mediaDir: o.mediaDir,
         autoConectarLocal: o.autoConectarLocal,
@@ -491,18 +458,9 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         ia,
         resumenes,
         fiabilidad,
-        procesos,
         log: consola as never,
       });
       limpieza.push(() => pararServicios());
-
-      // El catalogo de Stoky se trae antes de que escriba el primer cliente;
-      // sin esperar: una tienda con Stoky caido no retrasa a las demas.
-      if (conexionStoky.estado().configurada) {
-        void Promise.all([catalogo.ping(), catalogo.precargar()])
-          .then(([estado, precarga]) => log(estado.ok ? `Stoky conectado: ${estado.tenant} / ${estado.warehouse} (${precarga.total} productos)` : `Stoky NO responde: ${estado.detail}`))
-          .catch((error: unknown) => log(`Stoky no se pudo precargar: ${String(error)}`));
-      }
 
       // onReady reabre la sesion de WhatsApp guardada (registerLocalRoutes).
       await app.ready();
@@ -525,7 +483,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           if (parada) return;
           parada = true;
           pararServicios();
-          pararPlan?.();
+
           await worker?.close().catch(() => undefined);
           await queue.close().catch(() => undefined);
           await app.close().catch(() => undefined);

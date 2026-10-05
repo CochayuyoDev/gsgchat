@@ -112,7 +112,7 @@ export function secretoDeSesion(config: Config): string {
   return createHmac('sha256', config.TRACKING_SECRET).update('sesion-de-usuario').digest('hex');
 }
 
-const PAGINAS_PRIVADAS = ['/conexion-gsg', '/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/numeros', '/motorizados', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/mapa', '/pagar', '/fiabilidad', '/docs/contrato-gsg.md', '/desarrollador', '/procesos', '/procesos/editor', '/procesos/corrida', '/personas', '/respuestas'];
+const PAGINAS_PRIVADAS = ['/conexion-gsg', '/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/numeros', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/cuentas', '/mapa', '/salud', '/automatizacion-gsg', '/fiabilidad', '/docs/contrato-gsg.md'];
 
 /** Lo que solo toca una persona con rol admin: nunca una clave de API. */
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
@@ -225,6 +225,12 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       if (rechazo) {
         for (const [k, v] of Object.entries(rechazo.cabeceras ?? {})) reply.header(k, v);
         return reply.code(rechazo.status).send(rechazo.cuerpo);
+      }
+      // Solo JSON: text/plain tiene parser en Fastify, pero no es el contrato
+      // de Courier. Se comprueba tras autorizar y antes de leer el cuerpo.
+      const contenido = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase();
+      if (contenido !== 'application/json') {
+        return reply.code(415).send(cuerpoError('TIPO_CONTENIDO_NO_SOPORTADO', 'Manda el cuerpo como JSON con Content-Type: application/json.'));
       }
       return;
     }
@@ -386,7 +392,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
   // atiende /registro antes de que llegue a ninguna tienda. Aqui solo se llega
   // en una tienda suelta sin plataforma delante (la demo): se dice claro.
   app.post('/registro', async (_request, reply) =>
-    reply.code(403).send({ error: 'Esta es una demostración de una sola tienda: aquí no se pueden crear tiendas nuevas. En el sistema de verdad, cada registro crea una tienda.' }),
+    reply.code(403).send({ error: 'Esta instalación no tiene registro de tiendas. Contacta al administrador para obtener una cuenta.' }),
   );
 
   // --- quien soy, y usuarios (solo admin) --------------------------------

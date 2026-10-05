@@ -61,7 +61,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <div class="courier-actions"><button class="btn" id="courier-copiar-url">Copiar dirección</button><button class="btn" id="courier-descargar">Descargar JSON de ejemplo</button></div>
         <p><code>Content-Type: application/json</code><br><code>Authorization: Bearer CLAVE_DE_GSG</code></p>
         <small>La clave identifica esta tienda y debe tener permiso de recepción. Sin clave, o con una clave inválida o revocada: 401. Con una clave sin permiso: 403.</small>
-        <small>Hasta 500 pedidos por llamada. Para 600, enviar 500 + 100. Máximo 120 llamadas por minuto y clave.</small>
+        <small>Hasta 600 pedidos por llamada. Máximo 120 llamadas por minuto y clave.</small>
         <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>
         <a href="/docs/contrato-gsg.md">Descargar contrato completo</a>
       </section>
@@ -145,7 +145,7 @@ ${MENSAJE_ERROR_HTTP_JS}
   $('courier-crear').onclick = async function() {
     var b = this; b.disabled = true;
     try {
-      var r = await api('/admin/claves-api', 'POST', {nombre:'GSG Courier',permisos:['entregas:gestionar']});
+      var r = await api('/admin/claves-api', 'POST', {nombre:'GSG Courier',permisos:['entregas:gestionar','entregas:leer']});
       $('courier-secreto').textContent = r.clave; $('courier-nueva').hidden = false;
       aviso('Clave creada. Solo se mostrará aquí hasta ocultarla o salir de la página.'); await cargar();
     } catch(e) { aviso(e.message); } finally { b.disabled = false; }

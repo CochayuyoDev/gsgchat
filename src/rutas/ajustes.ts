@@ -49,7 +49,7 @@ export const ajustesSchema = z.object({
   pausaMinSegundos: z.coerce.number().int().min(1).max(600),
   pausaMaxSegundos: z.coerce.number().int().min(1).max(900),
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
-  maxIntentos: z.coerce.number().int().min(1).max(10),
+  maxIntentos: z.coerce.number().int().min(1).max(3),
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
   plantillas: z.object({ solicitud: listaDeNombres, recordatorio: listaDeNombres, insistencia: listaDeNombres }),
@@ -80,7 +80,7 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     // El minimo manda si alguien pone el maximo por debajo.
     pausaMaxSegundos: Math.max(ajustes.pausaMinSegundos, ajustes.pausaMaxSegundos),
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
-    maxIntentos: ajustes.maxIntentos,
+    maxIntentos: Math.min(3, ajustes.maxIntentos),
     horaInicio: ajustes.horaInicio,
     horaFin: Math.max(ajustes.horaInicio + 1, ajustes.horaFin),
   };

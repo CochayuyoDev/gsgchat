@@ -4,6 +4,7 @@
  */
 
 import Fastify, { type FastifyInstance } from 'fastify';
+import { moduloRetirado } from './modulos-retirados.js';
 import { randomBytes } from 'node:crypto';
 import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
@@ -16,9 +17,9 @@ import type { Sender } from './outbound/sender.js';
 import type { OutboundQueue } from './outbound/queue.js';
 import { registerWebhookRoutes } from './whatsapp/webhook.js';
 import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
-import { registerTrackingRoutes } from './tracking/routes.js';
+
 import { registerAdminRoutes } from './admin/routes.js';
-import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, registerAuth, secretoDeSesion, type DirectorioUsuarios } from './auth/routes.js';
+import { CABECERA_INTERNA, CABECERA_USUARIO_INTERNO, registerAuth, type DirectorioUsuarios } from './auth/routes.js';
 import type { SesionLocal } from './whatsapp/local/session.js';
 import { registerWebRoutes } from './web/routes.js';
 import type { SettingsRepo, SettingsService } from './settings/service.js';
@@ -36,40 +37,40 @@ import { registerStickersRoutes } from './admin/stickers-routes.js';
 import { registerApiV1 } from './api/v1/routes.js';
 import { registerApiEntregasGsg } from './api/v1/entregas-gsg.js';
 import type { Bus } from './eventos/bus.js';
-import { registerEmbedRoutes } from './embed/routes.js';
-import { registerConectoresRoutes } from './conectores/routes.js';
-import { registerWebVisitantesRoutes } from './web-visitantes/routes.js';
+
+
+
 import type { ServicioIA } from './ia/servicio.js';
 import type { ServicioPlan } from './plan/servicio.js';
 import { registerIaRoutes } from './ia/routes.js';
 import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
-import { registerEnvioAutomaticoRoutes } from './envio-automatico/routes.js';
+
 import type { ServicioEntrenamiento } from './entrenamiento/servicio.js';
 import { registerEntrenamientoRoutes } from './entrenamiento/routes.js';
 import type { ServicioConexionStoky } from './stoky/conexion.js';
-import { registerStokyRoutes } from './stoky/routes.js';
+
 import { registerSuperRoutes } from './auth/super-routes.js';
-import { registerTiendasRoutes } from './tiendas/routes.js';
-import { crearServicioTiendas, type ServicioTiendas } from './tiendas/servicio.js';
-import { crearAvisosTiendas } from './tiendas/avisos.js';
-import { crearAlojamiento, type Alojamiento } from './tiendas/alojamiento.js';
+
+import { type ServicioTiendas } from './tiendas/servicio.js';
+
+import { type Alojamiento } from './tiendas/alojamiento.js';
 import type { ServicioVoz } from './voz/servicio.js';
 import { registerVozRoutes } from './voz/routes.js';
 import type { ServicioEntregas } from './entregas/servicio.js';
 import { registerEntregasRoutes } from './entregas/routes.js';
 import type { GsgSimulado } from './entregas/gsg-simulado.js';
-import { registerGsgSimulado } from './entregas/gsg-simulado.js';
+
 import type { ServicioConexionGsg } from './rutas/conexion-gsg.js';
-import { RUTA_SIMULADOR } from './rutas/conexion-gsg.js';
+
 import type { PuertoGsg } from './rutas/gsg.js';
 import type { ServicioFiabilidad } from './salud/fiabilidad.js';
 import { registerFiabilidadRoutes } from './salud/routes-fiabilidad.js';
 import type { ServicioResumenes } from './resumenes/servicio.js';
 import { registerResumenesRoutes } from './resumenes/routes.js';
-import { crearServicioProcesos, type ServicioProcesos } from './procesos/servicio.js';
-import { registerProcesosRoutes } from './procesos/routes.js';
-import { opcionesDesdeConfig } from './rutas/motor.js';
-import { PLANES } from './rutas/telefono.js';
+import { type ServicioProcesos } from './procesos/servicio.js';
+
+
+
 import { fijarGsgVigente } from './web/shell.js';
 
 export interface ServerDeps {
@@ -159,6 +160,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     routerOptions: { maxParamLength: 512 },
   });
 
+  app.addHook('onRequest', async (request, reply) => {
+    if (moduloRetirado(request.url)) return reply.code(404).send({ ok: false, codigo: 'RUTA_NO_EXISTE', error: 'Este módulo fue retirado. Usa API, WhatsApp o Pedidos GSG.' });
+  });
+
   // El cuerpo crudo hace falta para validar la firma del webhook: si se
   // reserializa el JSON parseado, el HMAC ya no cuadra.
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
@@ -196,8 +201,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const status = (error as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) {
       const propio = (error as { codigo?: CodigoError }).codigo;
-      const codigo: CodigoError = propio ?? (status === 401 ? 'CLAVE_INVALIDA' : status === 403 ? 'SIN_PERMISO' : status === 404 ? 'NO_EXISTE' : status === 409 ? 'CONFLICTO' : status === 429 ? 'DEMASIADAS_PETICIONES' : 'VALIDACION');
-      return reply.code(status).send(cuerpoError(codigo, error.message));
+      const codigo: CodigoError = propio ?? (status === 401 ? 'CLAVE_INVALIDA' : status === 403 ? 'SIN_PERMISO' : status === 404 ? 'NO_EXISTE' : status === 409 ? 'CONFLICTO' : status === 413 ? 'CUERPO_DEMASIADO_GRANDE' : status === 415 ? 'TIPO_CONTENIDO_NO_SOPORTADO' : status === 429 ? 'DEMASIADAS_PETICIONES' : 'VALIDACION');
+      const mensaje = status === 413 ? 'El cuerpo supera el límite de 4 MiB: divide los pedidos en llamadas más pequeñas.'
+        : status === 415 ? 'El tipo de contenido no está soportado: usa Content-Type: application/json.' : error.message;
+      // El parser puede rechazar por Content-Length antes de leer un byte.
+      // Drenar evita dejar la petición pausada mientras se devuelve el 413.
+      if (status === 413) request.raw.resume();
+      return reply.code(status).send(cuerpoError(codigo, mensaje));
     }
     request.log.error({ err: error }, 'error no controlado');
     // La base que no contesta no es un fallo nuestro: 503 y cuando volver.
@@ -211,6 +221,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Una ruta de la API que no existe: JSON con su codigo, no la pagina de 404.
   app.setNotFoundHandler((request, reply) => {
     if (request.url.startsWith('/api/') || request.url.startsWith('/admin/')) {
+      // Una ruta existente con otro método es 405, no 404. Allow enumera
+      // solo los métodos realmente registrados (incluido HEAD cuando existe).
+      const url = request.url.split('?')[0]!;
+      const permitidos = (['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const)
+        .filter((method) => app.findRoute({ method, url }) !== null);
+      if (permitidos.length) {
+        return reply.header('allow', permitidos.join(', ')).code(405)
+          .send(cuerpoError('METODO_NO_PERMITIDO', `No se permite ${request.method} en ${url}. Métodos permitidos: ${permitidos.join(', ')}.`));
+      }
       return reply.code(404).send(cuerpoError('RUTA_NO_EXISTE', `No existe ${request.method} ${request.url.split('?')[0]}.`));
     }
     // Lo demas, como lo contestaba Fastify.
@@ -226,29 +245,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   await app.register(websocket);
 
-  // Los procesos: si el arranque no trae los suyos (con su motor), se arman
-  // aqui para que las pantallas, la API y los entrantes funcionen igual.
-  let procesos = deps.procesos;
-  if (!procesos) {
-    procesos = await crearServicioProcesos({
-      repos,
-      sender,
-      nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
-      timezone: config.timezone,
-      plan: PLANES[config.RUTAS_PAIS] ?? PLANES.peru,
-      distritos: config.distritos,
-      // Una instalacion suelta es la de siempre (GSG Courier): las entregas vienen activas.
-      gsgPorDefecto: true,
-      opciones: opcionesDesdeConfig(config),
-      salud,
-      politica,
-      clasificar: () => (ia?.activa() ? (m) => ia.clasificarOperativo(m) : undefined),
-    });
-    await procesos.cargar();
-  }
-  const servicioProcesos = procesos;
-  // El menu enseña las pantallas de GSG solo si su plantilla esta activa (en la plataforma manda la de cada tienda).
-  fijarGsgVigente(() => servicioProcesos.gsgActivo());
+  // GSG está disponible en todas las cuentas, sin el editor de procesos.
+  fijarGsgVigente(() => true);
 
   const hub = new TrackingHub({ tracking: repos.tracking });
   // La puerta a GSG: sin credenciales no manda nada y los reportes se quedan
@@ -270,7 +268,6 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas });
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
   if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, simulador: deps.simuladorGsg, config });
-  if (deps.simuladorGsg) await registerGsgSimulado(app, { simulador: deps.simuladorGsg, prefijo: RUTA_SIMULADOR });
   if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });
   // El resumen del dia por WhatsApp (Ajustes → Resumen del dia). Ver src/resumenes.
   if (deps.resumenes) await registerResumenesRoutes(app, { resumenes: deps.resumenes });
@@ -278,24 +275,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   if (voz) await registerVozRoutes(app, { voz });
   // Lo que el sistema vigila de si mismo (la pantalla /fiabilidad). Ver src/salud/fiabilidad.ts.
   if (deps.fiabilidad) await registerFiabilidadRoutes(app, { fiabilidad: deps.fiabilidad });
-  if (lista) await registerEnvioAutomaticoRoutes(app, { repos, lista });
+
   if (entrenamiento) await registerEntrenamientoRoutes(app, { entrenamiento });
-  if (deps.conexionStoky) await registerStokyRoutes(app, { conexion: deps.conexionStoky, repos, config });
   // Membresia y codigos de conexion (superadministrador). Ver src/auth/super-routes.ts.
   await registerSuperRoutes(app, { plan: deps.plan, codigos: repos.codigosConexion, claves: repos.claves, config });
-  // Las tiendas que controla el superadministrador, y lo que ellas preguntan. Ver src/tiendas.
-  // Con los avisos de vencimiento (cada hora, la primera a los dos minutos) y el WhatsApp al contacto de cada tienda. Ver src/tiendas/avisos.ts.
-  const servicioTiendas = deps.tiendas ?? crearServicioTiendas({ repo: repos.tiendas, baseUrl: config.PUBLIC_BASE_URL, urlPlanInterna: config.TIENDAS_URL_PLAN_BASE, alojamiento: deps.alojamiento ?? crearAlojamiento({ log: (m) => app.log.info(m) }), actividad: repos.actividad, sender });
-  const avisosTiendas = crearAvisosTiendas({ tiendas: servicioTiendas, repo: repos.tiendas, sender, supervisor: () => ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR, zonaHoraria: () => ajustes?.zonaHoraria?.() ?? config.timezone, log: (m, d) => app.log.warn(d ?? {}, m) });
-  const pararAvisosTiendas = avisosTiendas.arrancar();
-  app.addHook('onClose', async () => pararAvisosTiendas());
-  await registerTiendasRoutes(app, {
-    tiendas: servicioTiendas,
-    avisos: avisosTiendas,
-    plan: deps.plan,
-    usuarios: repos.usuarios,
-    sesion: { secreto: secretoDeSesion(config), segura: config.PUBLIC_BASE_URL.startsWith('https://') },
-  });
   // El endpoint de WAHA convive con el de Meta: cambiar de proveedor no obliga
   // a reiniciar, y cada uno valida su propia firma antes de mirar el cuerpo.
   await registerWahaWebhookRoutes(app, {
@@ -318,7 +301,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     rafagaMs: config.RAFAGA_MS,
     hmacKey: () => settings.current().verifyToken,
   });
-  await registerTrackingRoutes(app, { repos, config, hub, settings });
+
   await registerAdminRoutes(app, {
     repos,
     config,
@@ -349,13 +332,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
-  await registerProcesosRoutes(app, { procesos: servicioProcesos, config, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
+
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.
-  await registerEmbedRoutes(app, { config, ajustes });
+
   // El chat para los visitantes de la web del negocio (widget.js). Ver src/web-visitantes.
-  await registerWebVisitantesRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas, bus: deps.bus, rafagaMs: config.RAFAGA_MS });
+
   // Conectores de tiendas (WooCommerce, Shopify): su webhook entra por /conectores/:id. Ver src/conectores.
-  await registerConectoresRoutes(app, { repos, sender, settings, config, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
+
   await registerWebRoutes(app, {
     config,
     settings,
@@ -382,7 +365,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     prefijoLog: deps.prefijoLog,
     // La misma puerta a GSG que el webhook de Meta: la de la conexion vigente.
     gsg,
-    procesos: servicioProcesos,
+
   });
 
   // La IA operadora ejecuta las ordenes por las mismas rutas que las

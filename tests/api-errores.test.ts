@@ -45,7 +45,8 @@ beforeAll(async () => {
   const vivas = new Map(tiendas.map((t, i) => [t.slug, { id: t.id, slug: t.slug, app: (i ? b : a).app, repos: (i ? b : a).repos, contexto: { id: t.id, slug: t.slug } } as unknown as TiendaViva]));
   const plataforma = {
     directorio: { tiendas: async () => tiendas } as Directorio,
-    tiendaPorSlug: async (slug: string) => vivas.get(slug) ?? null,
+    tiendaPorSlug: async (slug: string) => tiendas.find(t => t.slug === slug)?.estado === 'suspendida' ? null : vivas.get(slug) ?? null,
+    consultarClaveGsg: async (t: TiendaRegistrada, hash: string) => (t.slug === 'tienda-a' ? a : b).repos.claves.porHashConRevocadas!(hash),
     tiendaPrincipal: async () => vivas.get('tienda-b')!,
   } as Plataforma;
   servidor = await crearServidorPlataforma({ plataforma, segura: false });
@@ -58,11 +59,11 @@ afterAll(async () => {
   await b.cerrar();
 });
 
-async function pedir(ruta: string, o: { metodo?: string; clave?: string; cuerpo?: unknown; crudo?: string; tienda?: string } = {}) {
+async function pedir(ruta: string, o: { metodo?: string; clave?: string; cuerpo?: unknown; crudo?: string; tienda?: string; tipoContenido?: string | null } = {}) {
   const res = await fetch(base + ruta, {
     method: o.metodo ?? 'POST',
-    headers: { 'content-type': 'application/json', ...(o.clave ? { authorization: `Bearer ${o.clave}` } : {}), ...(o.tienda ? { cookie: `gsg_tienda=${o.tienda}` } : {}) },
-    body: o.metodo === 'GET' || o.metodo === 'DELETE' ? undefined : (o.crudo ?? JSON.stringify(o.cuerpo ?? {})),
+    headers: { ...(o.tipoContenido === null ? {} : { 'content-type': o.tipoContenido ?? 'application/json' }), ...(o.clave ? { authorization: `Bearer ${o.clave}` } : {}), ...(o.tienda ? { cookie: `gsg_tienda=${o.tienda}` } : {}) },
+    body: o.metodo === 'GET' || o.metodo === 'HEAD' || o.metodo === 'DELETE' ? undefined : (o.crudo ?? JSON.stringify(o.cuerpo ?? {})),
   });
   const texto = await res.text();
   let json: any = null;
@@ -96,6 +97,10 @@ describe('códigos HTTP de POST /api/v1/entregas', () => {
     const campos = (r.json.detalles as Array<{ campo: string; mensaje: string }>).map((d) => d.campo);
     expect(campos).toEqual(expect.arrayContaining(['pedidos[0].cliente', 'pedidos[0].empresa', 'pedidos[0].metodoPago', 'pedidos[0].montoCobrar', 'pedidos[1].montoCobrar']));
     expect(r.json.detalles.find((d: { campo: string }) => d.campo === 'pedidos[0].empresa').mensaje).toMatch(/obligatorio/);
+    expect(r.json.detalles.find((d: { campo: string }) => d.campo === 'pedidos[0].empresa')).toMatchObject({ pedido: 1, tracking: 'ERR-400', cliente: null });
+    expect(r.json.detalles.find((d: { campo: string }) => d.campo === 'pedidos[1].montoCobrar')).toMatchObject({ pedido: 2, tracking: 'ERR-400B', cliente: 'Cliente ERR-400B' });
+    expect(r.json.error).toContain('tracking "ERR-400"');
+    expect(r.json.error).toContain('cliente "Cliente ERR-400B"');
     // Nada se guardó (ni el bueno de la misma llamada).
     expect(await a.entrega('ERR-400')).toBeFalsy();
     expect(await a.entrega('ERR-400B')).toBeFalsy();
@@ -104,7 +109,29 @@ describe('códigos HTTP de POST /api/v1/entregas', () => {
   it('400: sin tracking lo dice con el nombre que usa GSG', async () => {
     const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { ...GSG, cliente: 'Sin tracking', telefono: '987700004' } });
     expect(r.status).toBe(400);
-    expect(r.json.detalles).toEqual(expect.arrayContaining([{ campo: 'tracking', mensaje: 'falta (es obligatorio)' }]));
+    expect(r.json.detalles).toEqual(expect.arrayContaining([expect.objectContaining({ campo: 'tracking', mensaje: 'falta (es obligatorio)', pedido: 1, cliente: 'Sin tracking', tracking: null })]));
+    expect(r.json.error).toContain('cliente "Sin tracking"');
+  });
+
+  it('400: informa los seis obligatorios vacíos sin exigir los campos opcionales', async () => {
+    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { tracking: ' ', cliente: '', telefono: null, empresa: ' ', metodoPago: '', montoCobrar: null } });
+    expect(r.status).toBe(400);
+    expect(r.json.detalles.map((d: { campo: string }) => d.campo).sort()).toEqual(['cliente', 'empresa', 'metodoPago', 'montoCobrar', 'telefono', 'tracking']);
+    expect(r.json.error).toContain('pedido 1');
+    for (const d of r.json.detalles) expect(d.mensaje).toBe('falta (es obligatorio)');
+  });
+
+  it('201: acepta solo los seis obligatorios y monto cero', async () => {
+    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: pedido('ERR-MINIMO', '987700030', { montoCobrar: 0 }) });
+    expect(r.status).toBe(201);
+    expect((await a.entrega('ERR-MINIMO'))?.datosEnvio?.monto).toBe('0.00');
+  });
+
+  it('400: un objeto vacío enumera todos los datos que Luis debe completar', async () => {
+    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: {} });
+    expect(r.status).toBe(400);
+    expect(r.json.detalles.map((d: { campo: string }) => d.campo).sort()).toEqual(['cliente', 'empresa', 'metodoPago', 'montoCobrar', 'telefono', 'tracking']);
+    expect(r.json.detalles.every((d: { pedido: number; cliente: unknown; tracking: unknown }) => d.pedido === 1 && d.cliente === null && d.tracking === null)).toBe(true);
   });
 
   it('400: JSON mal formado', async () => {
@@ -118,6 +145,57 @@ describe('códigos HTTP de POST /api/v1/entregas', () => {
     expect(r.status).toBe(400);
     esErrorLimpio(r, 'VALIDACION');
     expect(r.json.detalles[0].campo).toBe('telefono');
+  });
+
+  it('400 cuando dos filas repiten referencia pero ninguna se guarda', async () => {
+    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: [pedido('ERR-REPETIDO-INVALIDO', '12'), pedido('ERR-REPETIDO-INVALIDO', '12')] });
+    expect(r.status).toBe(400);
+    esErrorLimpio(r, 'VALIDACION');
+    expect(await a.entrega('ERR-REPETIDO-INVALIDO')).toBeFalsy();
+  });
+
+  it('201 y después 200 para duplicados guardados, con su id real', async () => {
+    const p = pedido('ERR-DUPLICADO-VALIDO', '987700020');
+    const primera = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: [p, p] });
+    expect(primera.status).toBe(201);
+    expect(primera.json.creadas).toHaveLength(1);
+    const segunda = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: p });
+    expect(segunda.status).toBe(200);
+    expect(segunda.json.existentes).toEqual([{ referencia: p.tracking, id: primera.json.creadas[0].id }]);
+  });
+
+  it('405 con Allow para métodos no admitidos, sin depender de cookies o de la clave', async () => {
+    for (const metodo of ['PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+      const r = await pedir('/api/v1/entregas?prueba=1', { metodo });
+      expect(r.status).toBe(405);
+      esErrorLimpio(r, 'METODO_NO_PERMITIDO');
+      expect(r.cabeceras.get('allow')).toBe('GET, HEAD, POST');
+    }
+    const detalle = await pedir('/api/v1/entregas/ERR-201', { metodo: 'PUT', clave: claveA, tienda: 'tienda-a' });
+    expect(detalle.status).toBe(405);
+    esErrorLimpio(detalle, 'METODO_NO_PERMITIDO');
+    expect(detalle.cabeceras.get('allow')?.split(', ')).toEqual(['GET', 'HEAD', 'PATCH', 'DELETE']);
+    expect((await pedir('/api/v1/entregas', { metodo: 'GET', clave: soloLeer, tienda: 'tienda-a' })).status).toBe(200);
+    expect((await pedir('/api/v1/entregas', { metodo: 'HEAD', clave: soloLeer, tienda: 'tienda-a' })).status).toBe(200);
+  });
+
+  it('413 para un cuerpo mayor de 4 MiB, sin guardar pedidos', async () => {
+    const r = await pedir('/api/v1/entregas', { clave: claveA, crudo: JSON.stringify({ ...pedido('ERR-413', '987700021'), relleno: 'x'.repeat(4 * 1024 * 1024) }) });
+    expect(r.status).toBe(413);
+    esErrorLimpio(r, 'CUERPO_DEMASIADO_GRANDE');
+    expect(await a.entrega('ERR-413')).toBeFalsy();
+  });
+
+  it('415 para formatos ajenos a JSON, después de comprobar la autenticación', async () => {
+    for (const tipoContenido of ['text/plain', 'application/xml', 'application/octet-stream', null]) {
+      const r = await pedir('/api/v1/entregas', { clave: claveA, tipoContenido, cuerpo: pedido('ERR-415', '987700022') });
+      expect(r.status).toBe(415);
+      esErrorLimpio(r, 'TIPO_CONTENIDO_NO_SOPORTADO');
+    }
+    const sinClave = await pedir('/api/v1/entregas', { tipoContenido: 'text/plain', crudo: '{mal' });
+    expect(sinClave.status).toBe(401);
+    esErrorLimpio(sinClave, 'CLAVE_AUSENTE');
+    expect(await a.entrega('ERR-415')).toBeFalsy();
   });
 
   it('401: sin clave, con una clave que no existe y con una revocada (con WWW-Authenticate)', async () => {
@@ -175,6 +253,37 @@ describe('códigos HTTP de POST /api/v1/entregas', () => {
     tiendas[0]!.estado = 'activa';
     expect(r.status).toBe(403);
     esErrorLimpio(r, 'TIENDA_SUSPENDIDA');
+  });
+
+  it('una suspendida no vuelve válidas claves desconocidas o revocadas', async () => {
+    tiendas[0]!.estado = 'suspendida';
+    try {
+      const desconocida = await pedir('/api/v1/entregas', { clave: generarClaveApi() });
+      expect(desconocida.status).toBe(401);
+      esErrorLimpio(desconocida, 'CLAVE_INVALIDA');
+      const rev = await pedir('/api/v1/entregas', { clave: revocada });
+      expect(rev.status).toBe(401);
+      esErrorLimpio(rev, 'CLAVE_REVOCADA');
+    } finally {
+      tiendas[0]!.estado = 'activa';
+    }
+  });
+
+  it('404 JSON para la API de una tienda inexistente y una plataforma sin principal', async () => {
+    const inexistente = await pedir('/tienda/no-existe/api/v1/entregas/NADA', { metodo: 'GET' });
+    expect(inexistente.status).toBe(404);
+    esErrorLimpio(inexistente, 'RUTA_NO_EXISTE');
+    const vacia = await crearServidorPlataforma({ plataforma: {
+      directorio: { tiendas: async () => [] }, tiendaPrincipal: async () => null, tiendaPorSlug: async () => null,
+    } as unknown as Plataforma, segura: false });
+    try {
+      await vacia.escuchar(0, '127.0.0.1');
+      const res = await fetch(`http://127.0.0.1:${(vacia.server.address() as AddressInfo).port}/api/v1/no-existe`, { headers: { accept: 'text/html' } });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ ok: false, codigo: 'RUTA_NO_EXISTE' });
+    } finally {
+      await vacia.cerrar();
+    }
   });
 
   it('503 con Retry-After si la base no contesta; 500 sin detalles internos si algo revienta', async () => {

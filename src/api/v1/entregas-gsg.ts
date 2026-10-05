@@ -7,7 +7,7 @@
  *
  *  POST   /api/v1/entregas                 uno o varios pedidos (entregas:gestionar)
  *  GET    /api/v1/entregas/:referencia     como va ese pedido hoy (entregas:leer)
- *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas, urgente, los datos del envio o el motorizado (entregas:gestionar)
+ *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas, urgente o los datos del envio (entregas:gestionar)
  *
  * Cada pedido puede traer los datos del envio que salen en el primer mensaje
  * al cliente: producto, empresa {codigo, nombre}, tracking, nroPedido,
@@ -41,7 +41,7 @@ export interface ApiEntregasGsgDeps {
   ahora?: () => number;
 }
 
-/** Tope por clave y minuto en /api/v1/entregas*. GSG manda en tandas (hasta 500 por llamada): 120 sobra. */
+/** Tope por clave y minuto en /api/v1/entregas*. GSG manda en tandas de hasta 600 por llamada. */
 export const LIMITE_POR_MINUTO = 120;
 
 const textoOpc = z.union([z.string().max(200), z.number()]).nullable().optional();
@@ -79,10 +79,6 @@ export const CAMPOS_DATOS_ENVIO = {
   metodoPago: textoOpc,
   monto: textoOpc,
   remitente: textoOpc,
-  // El motorizado que GSG ya asigno a ese pedido: su numero es el que se le da
-  // al cliente en el cierre y en UBI REGISTRADA (si no, el de soporte).
-  motorizado: z.union([z.object({ nombre: textoOpc, telefono: textoOpc }).passthrough(), z.string().max(200)]).nullable().optional(),
-  telefonoMotorizado: textoOpc,
 };
 
 /** Lo que se puede cambiar de un pedido ya mandado. El telefono no: eso es otro pedido. */
@@ -104,7 +100,7 @@ const normalizarPedidoGsg = (body: unknown): unknown => {
   const p = body as Record<string, unknown>;
   const tracking = p.tracking ?? p.codigoTracking ?? p.referencia;
   return { ...p, referencia: p.referencia ?? tracking, tracking,
-    nombre: p.nombre ?? p.cliente, motorizado: p.motorizado ?? p.driver, monto: p.monto ?? p.montoCobrar };
+    nombre: p.nombre ?? p.cliente, monto: p.monto ?? p.montoCobrar };
 };
 
 /** Texto obligatorio: no vale vacio ni solo espacios. */
@@ -150,9 +146,9 @@ const CAMPO_GSG: Record<string, string> = { nombre: 'cliente', monto: 'montoCobr
 export function leerCuerpo(body: unknown): Pedido[] | { error: string; detalles: DetalleCampo[] } {
   const esObjeto = Boolean(body) && typeof body === 'object' && !Array.isArray(body);
   const envuelto = esObjeto && Array.isArray((body as { pedidos?: unknown }).pedidos);
-  const lista = Array.isArray(body) ? body : envuelto ? (body as { pedidos: unknown[] }).pedidos : esObjeto && Object.keys(body as object).length ? [body] : [];
+  const lista = Array.isArray(body) ? body : envuelto ? (body as { pedidos: unknown[] }).pedidos : esObjeto ? [body] : [];
   if (!lista.length) return { error: 'Manda un pedido ({tracking, cliente, telefono, empresa, metodoPago, montoCobrar, ...}), una lista de pedidos, o {pedidos: [...]}.', detalles: [{ campo: 'cuerpo', mensaje: 'vacío' }] };
-  if (lista.length > 500) return { error: 'Como mucho 500 pedidos por llamada.', detalles: [{ campo: 'pedidos', mensaje: `llegaron ${lista.length}` }] };
+  if (lista.length > 600) return { error: 'Como mucho 600 pedidos por llamada.', detalles: [{ campo: 'pedidos', mensaje: `llegaron ${lista.length}` }] };
   const pedidos: Pedido[] = [];
   const detalles: DetalleCampo[] = [];
   for (const [i, p] of lista.entries()) {
@@ -162,6 +158,8 @@ export function leerCuerpo(body: unknown): Pedido[] | { error: string; detalles:
       continue;
     }
     const normalizado = normalizarPedidoGsg(p) as Record<string, unknown>;
+    const identificador = (valor: unknown, max: number) => typeof valor === 'string' || typeof valor === 'number' ? String(valor).trim().slice(0, max) || null : null;
+    const identidad = { pedido: i + 1, cliente: identificador(normalizado.nombre, 120), tracking: identificador(normalizado.tracking, 60) };
     const r = pedidoSchema.safeParse(normalizado);
     if (!r.success) {
       for (const issue of r.error.issues) {
@@ -170,15 +168,24 @@ export function leerCuerpo(body: unknown): Pedido[] | { error: string; detalles:
         const valor = primero ? normalizado[primero] : undefined;
         const falta = !resto.length && (valor === undefined || valor === null || (typeof valor === 'string' && !valor.trim()));
         const mensaje = falta ? 'falta (es obligatorio)' : issue.code === 'invalid_union' ? 'no tiene el formato esperado' : issue.message;
-        if (!detalles.some((d) => d.campo === `${prefijo}${[campo, ...resto].join('.')}`)) detalles.push({ campo: `${prefijo}${[campo, ...resto].join('.')}`, mensaje });
+        if (!detalles.some((d) => d.campo === `${prefijo}${[campo, ...resto].join('.')}`)) detalles.push({ campo: `${prefijo}${[campo, ...resto].join('.')}`, mensaje, ...identidad });
       }
       continue;
     }
     pedidos.push(r.data);
   }
   if (detalles.length) {
-    const malos = new Set(detalles.map((d) => d.campo.match(/^pedidos\[(\d+)\]/)?.[1] ?? '0')).size;
-    return { error: `${malos === 1 ? 'Un pedido no se entiende' : `${malos} pedidos no se entienden`}: ${detalles.slice(0, 3).map((d) => `${d.campo} ${d.mensaje}`).join('; ')}${detalles.length > 3 ? '…' : ''}. No se guardó ninguno.`, detalles };
+    const grupos = new Map<number, DetalleCampo[]>();
+    for (const d of detalles) {
+      const numero = d.pedido ?? Number(d.campo.match(/^pedidos\[(\d+)\]/)?.[1] ?? 0) + 1;
+      grupos.set(numero, [...(grupos.get(numero) ?? []), d]);
+    }
+    const resumen = [...grupos.entries()].slice(0, 3).map(([numero, fallos]) => {
+      const primero = fallos[0]!;
+      const quien = [primero.cliente && `cliente "${primero.cliente}"`, primero.tracking && `tracking "${primero.tracking}"`].filter(Boolean).join(', ') || `pedido ${numero}`;
+      return `${quien}: ${fallos.map((d) => `${d.campo.replace(/^pedidos\[\d+\]\./, '')} ${d.mensaje}`).join('; ')}`;
+    }).join(' | ');
+    return { error: `${resumen}${grupos.size > 3 ? ' | Consulta los demás pedidos en detalles' : ''}. No se guardó ninguno.`, detalles };
   }
   return pedidos;
 }
@@ -224,15 +231,7 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     prioridad: e.prioridad ?? 'normal',
     ubicacion: { estado: e.ubicacionEstado, lat: e.lat, lng: e.lng, mapa: e.mapsUrl, recibidaEn: e.ubicacionAt ? e.ubicacionAt.toISOString() : null },
     confirmacion: { estado: e.confirmacionEstado, intentos: e.confirmacionIntentos, respuesta: e.confirmacionRespuesta, como: e.confirmacionComo, en: e.confirmacionAt ? e.confirmacionAt.toISOString() : null },
-    motorizado: e.motorizado
-      ? { nombre: e.motorizado.nombre, telefono: e.motorizado.phone, placa: e.motorizado.placa }
-      : e.datosEnvio?.telefonoMotorizado || e.datosEnvio?.motorizadoNombre
-        ? { nombre: e.datosEnvio?.motorizadoNombre ?? null, telefono: e.datosEnvio?.telefonoMotorizado ?? null, placa: null }
-        : null,
-    minutosMotorizado: e.minutosMotorizado,
-    minutosAviso: e.minutosAviso,
-    llegaAproxEn: e.llegaAproxAt ? e.llegaAproxAt.toISOString() : null,
-    avisadaEn: e.avisoEnviadoAt ? e.avisoEnviadoAt.toISOString() : null,
+
     entregadaEn: e.entregadaAt ? e.entregadaAt.toISOString() : null,
     entregadaComo: e.entregadaComo,
     incidencia: e.incidencia ? { codigo: e.incidencia, detalle: e.incidenciaDetalle } : null,
@@ -286,7 +285,6 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const creadas: Array<{ referencia: string; id: number; urgente?: boolean }> = [];
     const repetidas: string[] = [];
     const descartadas: Array<{ referencia: string; motivo: string; indice: number }> = [];
-    const vistas = new Set<string>();
     const indiceDe = new Map(lectura.map((p, i) => [p, i]));
 
     // Sin pin: todos juntos en un solo lote del reparto (le pide la ubicacion a
@@ -296,15 +294,9 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const urgentes = new Set(lectura.filter((p) => p.urgente).map((p) => p.referencia.trim().toLowerCase()));
     const externo = (p: Pedido) => (p.id === null || p.id === undefined || p.id === '' ? null : String(p.id));
 
-    for (const p of lectura) {
-      const ref = p.referencia.trim().toLowerCase();
-      if (vistas.has(ref)) repetidas.push(p.referencia);
-      vistas.add(ref);
-    }
-
     try {
       if (sinPin.length) {
-        const filas = sinPin.map((p) => ({ telefono: p.telefono, nombre: p.nombre ?? undefined, referencia: p.referencia, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: p.faltaUbicacion ?? true, faltaConfirmacion: p.faltaConfirmar ?? true, datosEnvio: datosEnvioDeCrudo(p), externoId: externo(p) }));
+        const filas = sinPin.map((p) => ({ telefono: p.telefono, nombre: p.nombre ?? undefined, referencia: p.referencia, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: p.faltaUbicacion ?? true, faltaConfirmacion: p.faltaConfirmar ?? false, datosEnvio: datosEnvioDeCrudo(p), externoId: externo(p) }));
         // La lista de GSG espera que una persona confirme el envío (ajuste de Hoy).
         const r = await entregas.crearVarias(filas, quien, { retener: true });
         for (const d of r.descartadas) {
@@ -315,7 +307,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         for (const e of r.creadas) creadas.push({ referencia: e.referencia, id: e.id });
       }
       for (const p of conPin) {
-        const r = await entregas.crearAMano({ referencia: p.referencia, telefono: p.telefono, nombre: p.nombre ?? undefined, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: false, faltaConfirmacion: p.faltaConfirmar ?? true, lat: p.lat!, lng: p.lng!, datosEnvio: datosEnvioDeCrudo(p), retener: true, externoId: externo(p) }, quien);
+        const r = await entregas.crearAMano({ referencia: p.referencia, telefono: p.telefono, nombre: p.nombre ?? undefined, direccion: p.direccion ?? undefined, distrito: p.distrito ?? undefined, notas: p.notas ?? undefined, faltaUbicacion: false, faltaConfirmacion: p.faltaConfirmar ?? false, lat: p.lat!, lng: p.lng!, datosEnvio: datosEnvioDeCrudo(p), retener: true, externoId: externo(p) }, quien);
         if (r.ok) creadas.push({ referencia: r.entrega.referencia, id: r.entrega.id });
         else if (/ya existe/i.test(r.motivo)) {
           if (!repetidas.includes(p.referencia)) repetidas.push(p.referencia);
@@ -394,7 +386,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const leido = cambioPedidoSchema.safeParse(request.body ?? {});
     if (!leido.success) {
       const i = leido.error.issues[0];
-      return enviarError(reply, 400, 'VALIDACION', `El cambio no se entiende: ${i ? `${i.path.join('.') || 'cuerpo'}: ${i.message}` : 'revisa los campos'}. Se puede cambiar nombre, direccion, distrito, notas, urgente, los datos del envío (producto, empresa, tracking, nroPedido, metodoPago, monto, remitente) y el motorizado (motorizado, telefonoMotorizado).`, leido.error.issues.map((x) => ({ campo: x.path.join('.') || 'cuerpo', mensaje: x.message })));
+      return enviarError(reply, 400, 'VALIDACION', `El cambio no se entiende: ${i ? `${i.path.join('.') || 'cuerpo'}: ${i.message}` : 'revisa los campos'}. Se puede cambiar nombre, direccion, distrito, notas, urgente, los datos del envío (producto, empresa, tracking, nroPedido, metodoPago, monto, remitente).`, leido.error.issues.map((x) => ({ campo: x.path.join('.') || 'cuerpo', mensaje: x.message })));
     }
     const b = leido.data;
     if (b.telefono !== undefined) return enviarError(reply, 400, 'VALIDACION', 'El teléfono no se cambia en un pedido ya mandado: cancélalo (DELETE) y créalo de nuevo con el número bueno.', [{ campo: 'telefono', mensaje: 'no se puede cambiar' }]);

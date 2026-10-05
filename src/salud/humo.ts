@@ -201,7 +201,7 @@ export function crearHumo(deps: DepsHumo): Humo {
 
   async function pasoGsg(): Promise<Omit<PasoHumo, 'clave' | 'nombre' | 'ms'>> {
     if (!deps.conexionGsg) return { ok: true, omitido: true, detalle: 'No hay conexión con GSG en este arranque.' };
-    if (deps.conexionGsg.estado().modo === 'ninguna') return { ok: false, detalle: 'GSG no está conectado: elige el simulador o pega la dirección de su API en Conexión.' };
+    if (deps.conexionGsg.estado().modo === 'ninguna') return { ok: false, detalle: 'GSG no está conectado: configura la dirección de su API en Conexión.' };
     const r = await deps.conexionGsg.probar();
     return { ok: r.ok, detalle: r.detalle };
   }

@@ -102,7 +102,7 @@ export function conexionGsgVigente(): ServicioConexionGsg | null {
 export interface DepsConexionGsg {
   settingsRepo: SettingsRepo;
   settingsKeyBase64: string;
-  config: { GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string; timezone?: string };
+  config: { GSG_SEND_LOCATION_URL?: string; GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string; timezone?: string };
   fetchImpl?: typeof fetch;
   log?: (m: string, d?: Record<string, unknown>) => void;
   ahora?: () => Date;
@@ -127,7 +127,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
 
   /** Lo que manda: la pantalla, y si no hay nada, el .env. */
   const efectiva = (): { modo: EstadoConexionGsg['modo']; url: string; token: string; origen: EstadoConexionGsg['origen'] } => {
-    if (guardada.modo === 'simulador') return { modo: 'simulador', url: urlSimulador(), token: TOKEN_SIMULADOR, origen: 'pantalla' };
+    if (guardada.modo === 'simulador') return { modo: 'ninguna', url: '', token: '', origen: 'ninguna' };
     if (guardada.modo === 'real' && guardada.url) return { modo: 'real', url: guardada.url, token, origen: 'pantalla' };
     if (deps.config.GSG_URL.trim()) return { modo: 'real', url: deps.config.GSG_URL.trim(), token: deps.config.GSG_TOKEN, origen: 'env' };
     return { modo: 'ninguna', url: '', token: '', origen: 'ninguna' };
@@ -140,7 +140,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       return enEspera;
     }
     if (!vigente || vigente.url !== e.url || vigente.token !== e.token) {
-      vigente = { url: e.url, token: e.token, puerto: crearPuertoHttp({ url: e.url, token: e.token, fetchImpl: deps.fetchImpl }) };
+      vigente = { url: e.url, token: e.token, puerto: crearPuertoHttp({ url: e.url, token: e.token, ubicacionUrl: deps.config.GSG_SEND_LOCATION_URL || undefined, fetchImpl: deps.fetchImpl }) };
     }
     return vigente.puerto;
   };
@@ -222,7 +222,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     const puerto = candidata ? crearPuertoHttp({ url: candidata.url, token: candidata.token, fetchImpl: deps.fetchImpl, timeoutSegundos: 10 }) : actual();
     const at = new Date().toISOString();
     if (!puerto.conectado()) {
-      ultimaPrueba = { ok: false, detalle: 'No hay ninguna conexión con GSG: elige el simulador o pega la dirección de su API.', at };
+      ultimaPrueba = { ok: false, detalle: 'No hay ninguna conexión con GSG: configura la dirección de su API.', at };
       return ultimaPrueba;
     }
     const r = await puerto.consultar<PendientesGsg>(RUTA_GSG_PENDIENTES);
@@ -275,12 +275,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       vigente = null;
       return estado();
     },
-    async usarSimulador() {
-      guardada = { modo: 'simulador', url: '', conectadoEn: new Date().toISOString() };
-      await persistir();
-      vigente = null;
-      return estado();
-    },
+    async usarSimulador() { throw new Error('El modo de prueba fue retirado. Configura la API real de GSG.'); },
     async quitar() {
       guardada = conexionSchema.parse({});
       token = '';

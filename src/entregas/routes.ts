@@ -39,7 +39,6 @@ import type { ServicioEntregas } from './servicio.js';
 import type { GsgSimulado } from './gsg-simulado.js';
 import { MOTORIZADOS_DE_PRUEBA } from './datos-de-prueba.js';
 import { crearGuionDelDia, type EntranteSimulado } from './guion-dia.js';
-import { motorizadoPage } from '../web/motorizado-page.js';
 import { registerNumerosRoutes } from './numeros.js';
 
 export interface EntregasRoutesDeps {
@@ -54,44 +53,6 @@ const quienEs = (u: { nombre?: string; usuario?: string } | null | undefined): s
 export async function registerEntregasRoutes(app: FastifyInstance, deps: EntregasRoutesDeps): Promise<void> {
   const { entregas, conexionGsg, simulador } = deps;
 
-  // «Probar el día entero»: las respuestas de clientes y motorizados entran
-  // por el simulador de entrantes de la demostracion, con la sesion de quien
-  // pulso el boton; fuera de la demostracion no existe y se dice por que.
-  let cabecerasGuion: Record<string, string> = {};
-  const hayEntrantes = () => app.hasRoute({ method: 'POST', url: '/admin/dev/inbound' });
-  const inyectar = async (phone: string, contenido: EntranteSimulado, nombre?: string): Promise<boolean> => {
-    if (!hayEntrantes()) return false;
-    const r = await app.inject({ method: 'POST', url: '/admin/dev/inbound', headers: { ...cabecerasGuion, 'content-type': 'application/json' }, payload: { phone, name: nombre, ...contenido } });
-    return r.statusCode < 400;
-  };
-  const despachar = async (): Promise<{ enviados: number; fallidos: number } | null> => {
-    if (!app.hasRoute({ method: 'POST', url: '/admin/rutas/cola/despachar' })) return null;
-    const r = await app.inject({ method: 'POST', url: '/admin/rutas/cola/despachar', headers: cabecerasGuion });
-    if (r.statusCode >= 400) return null;
-    const j = r.json() as { enviados?: number; fallidos?: number };
-    return { enviados: j.enviados ?? 0, fallidos: j.fallidos ?? 0 };
-  };
-  const guion = simulador ? crearGuionDelDia({ entregas, simulador, conexionGsg, inyectar, despachar, log: (m, d) => app.log.warn(d ?? {}, m) }) : null;
-
-  app.post('/admin/entregas/simulador/probar-dia', async (request, reply) => {
-    if (!simulador || !guion) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    // Un administrador del panel o una clave de API con permiso total (las pruebas automáticas).
-    if (request.usuario?.rol !== 'admin') return reply.code(403).send({ error: 'Solo un administrador lanza el día de prueba.' });
-    if (!hayEntrantes()) return reply.code(409).send({ error: 'Esta prueba automática solo funciona en la demostración (npm run demo), donde nadie recibe WhatsApp de verdad. Con el WhatsApp real usa «Modo prueba con mi número» y responde tú desde el teléfono.' });
-    const body = z.object({ pausaMs: z.number().int().min(200).max(10_000).optional() }).parse(request.body ?? {});
-    cabecerasGuion = { ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}), ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) };
-    const r = guion.empezar(body);
-    if (!r.ok) return reply.code(409).send({ error: r.motivo });
-    return { ok: true, estado: guion.estado() };
-  });
-  app.get('/admin/entregas/simulador/probar-dia', async (_request, reply) => {
-    if (!guion) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    return guion.estado();
-  });
-  app.delete('/admin/entregas/simulador/probar-dia', async (_request, reply) => {
-    if (!guion) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    return { ok: guion.parar() };
-  });
   const soloAdmin = (request: { usuario?: { rol?: string; porToken?: boolean } | null }) => request.usuario?.rol === 'admin' && !request.usuario.porToken;
 
   app.get('/admin/entregas', async () => entregas.resumen());
@@ -182,25 +143,11 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     return { ok: true, entrega: e };
   });
 
-  app.post<{ Params: { id: string } }>('/admin/entregas/:id/reasignar', async (request, reply) => {
-    const body = z.object({ motorizadoId: z.coerce.number().int().positive().nullable().optional() }).parse(request.body ?? {});
-    const e = await entregas.reasignar(Number(request.params.id), body.motorizadoId ?? null, quienEs(request.usuario));
-    if (!e) return reply.code(404).send({ error: 'Esa entrega no existe.' });
-    if ('error' in e) return reply.code(400).send({ error: e.error });
-    return { ok: true, entrega: e };
-  });
+
 
   // «Asignar motorizado sin ubicación» (ficha de Hoy y Números del día): el
   // motorizado recibe el pedido con el teléfono y la dirección escrita, sin pin.
-  app.post<{ Params: { id: string } }>('/admin/entregas/:id/sin-ubicacion', async (request, reply) => {
-    const id = Number(request.params.id);
-    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: 'Falta el número del pedido.' });
-    const body = z.object({ motorizadoId: z.coerce.number().int().positive().nullable().optional() }).safeParse(request.body ?? {});
-    if (!body.success) return reply.code(400).send({ error: 'El motorizado elegido no se entiende: elige uno de la lista.' });
-    const r = await entregas.asignarSinUbicacionAMano(id, body.data.motorizadoId ?? null, quienEs(request.usuario));
-    if (!r.ok) return reply.code(r.motivo.startsWith('Ese pedido ya no existe') ? 404 : 400).send({ error: r.motivo });
-    return { ok: true, entrega: r.entrega, motorizado: { id: r.motorizado.id, nombre: r.motorizado.nombre } };
-  });
+
 
   app.post<{ Params: { id: string } }>('/admin/entregas/:id/entregada', async (request, reply) => {
     const id = Number(request.params.id);
@@ -229,25 +176,11 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
         texto: z.string().min(1).max(200_000),
         faltaUbicacion: z.boolean().default(true),
         faltaConfirmacion: z.boolean().default(true),
-        destino: z.enum(['sistema', 'simulador']).default('sistema'),
+        destino: z.enum(['sistema']).default('sistema'),
       })
       .parse(request.body ?? {});
     const lectura = entregas.leerListaPegada(body.texto);
-    if (body.destino === 'simulador') {
-      if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-      const clientes = lectura.filas.map((f, i) => ({
-        referencia: (f.referencia ?? '').trim() || `S/N-${String(f.telefono).replace(/\D/g, '').slice(-9) || i + 1}`,
-        telefono: f.telefono,
-        nombre: f.nombre,
-        direccion: f.direccion,
-        distrito: f.distrito,
-        notas: f.notas,
-        faltaUbicacion: f.faltaUbicacion ?? body.faltaUbicacion,
-        faltaConfirmacion: f.faltaConfirmacion ?? body.faltaConfirmacion,
-      }));
-      const nuevos = clientes.length ? simulador.cargar(clientes as never) : 0;
-      return { ok: true, destino: 'simulador', creadas: nuevos, repetidas: Math.max(0, clientes.length - nuevos), descartadas: lectura.descartadas, lote: null, estado: simulador.estado() };
-    }
+
     const r = await entregas.crearVarias(lectura.filas, quienEs(request.usuario), { faltaUbicacion: body.faltaUbicacion, faltaConfirmacion: body.faltaConfirmacion, descartadas: lectura.descartadas });
     return { ok: true, destino: 'sistema', creadas: r.creadas.length, referencias: r.creadas.map((e) => e.referencia), repetidas: r.repetidas, descartadas: r.descartadas, lote: r.lote };
   });
@@ -267,13 +200,7 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   });
 
   /** La segunda visita a mano: el cliente llamo y ya esta en casa; el motorizado vuelve a pasar. */
-  app.post<{ Params: { id: string } }>('/admin/entregas/:id/segunda-visita', async (request, reply) => {
-    const id = Number(request.params.id);
-    if (!Number.isFinite(id)) return reply.code(400).send({ error: 'Falta el número de la entrega.' });
-    const r = await entregas.segundaVisitaAMano(id, quienEs(request.usuario));
-    if (!r.ok) return reply.code(400).send({ error: r.motivo });
-    return { ok: true, entrega: r.entrega };
-  });
+
 
   app.post<{ Params: { id: string } }>('/admin/entregas/:id/prioridad', async (request, reply) => {
     const body = z.object({ urgente: z.boolean() }).parse(request.body ?? {});
@@ -282,113 +209,15 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     return { ok: true, entrega: e };
   });
 
-  // ------------------------------------------------------------ motorizados
-
-  const motorizadoSchema = z.object({
-    telefono: z.string().trim().min(6).max(20),
-    nombre: z.string().trim().min(1).max(120),
-    placa: z.string().trim().max(20).optional().nullable(),
-    zona: z.string().trim().max(300).optional().nullable(),
-    estado: z.enum(['activo', 'descanso', 'baja']).optional(),
-  });
-
-  app.get('/admin/motorizados', async () => ({ motorizados: await entregas.motorizados() }));
-
-  app.post('/admin/motorizados', async (request, reply) => {
-    const body = motorizadoSchema.parse(request.body ?? {});
-    const r = await entregas.crearMotorizado({ phone: body.telefono, nombre: body.nombre, placa: body.placa ?? null, zona: body.zona ?? null, estado: body.estado });
-    if (!r.ok) return reply.code(400).send({ error: r.motivo });
-    return { ok: true, motorizado: r.motorizado, nuevo: r.nuevo };
-  });
-
-  // Varios de golpe: el texto pegado de una hoja o un chat, una linea por motorizado.
-  app.post('/admin/motorizados/lote', async (request, reply) => {
-    const body = z.object({ texto: z.string().max(200_000) }).parse(request.body ?? {});
-    if (!body.texto.trim()) return reply.code(400).send({ error: 'Pega la lista: una línea por motorizado con su nombre, su WhatsApp y, si quieres, la placa y la zona.' });
-    const r = await entregas.crearMotorizadosDesdeTexto(body.texto);
-    return { ok: true, ...r, motorizados: await entregas.motorizados() };
-  });
-
-  app.post('/admin/motorizados/de-prueba', async () => {
-    let nuevos = 0;
-    for (const m of MOTORIZADOS_DE_PRUEBA) {
-      const r = await entregas.crearMotorizado({ phone: m.telefono, nombre: m.nombre, placa: m.placa, zona: m.zona });
-      if (r.ok && r.nuevo) nuevos++;
-    }
-    return { ok: true, nuevos, motorizados: await entregas.motorizados() };
-  });
-
-  app.post<{ Params: { id: string } }>('/admin/motorizados/:id', async (request, reply) => {
-    const body = motorizadoSchema.partial().parse(request.body ?? {});
-    const m = await entregas.editarMotorizado(Number(request.params.id), { nombre: body.nombre, placa: body.placa, zona: body.zona, estado: body.estado });
-    if (!m) return reply.code(404).send({ error: 'Ese motorizado no existe.' });
-    return { ok: true, motorizado: m };
-  });
-
-  app.delete<{ Params: { id: string } }>('/admin/motorizados/:id', async (request, reply) => {
-    const m = await entregas.quitarMotorizado(Number(request.params.id));
-    if (!m) return reply.code(404).send({ error: 'Ese motorizado no existe.' });
-    return { ok: true, motorizado: m };
-  });
-
-  app.get<{ Params: { id: string } }>('/admin/motorizados/:id/ruta', async (request, reply) => {
-    const ruta = await entregas.rutaDeMotorizado(Number(request.params.id));
-    if (!ruta) return reply.code(404).send({ error: 'Ese motorizado no existe.' });
-    return { ok: true, ruta };
-  });
-
-  app.post<{ Params: { id: string } }>('/admin/motorizados/:id/ruta/mandar', async (request, reply) => {
-    const r = await entregas.mandarRuta(Number(request.params.id), quienEs(request.usuario));
-    if (!r.ok) return reply.code(r.ruta ? 400 : 404).send({ error: r.motivo ?? 'No se pudo mandar la ruta.' });
-    return { ok: true, ruta: r.ruta };
-  });
-
-  // El enlace del motorizado (su pagina sin instalar nada): crear/renovar y mandarselo.
-  app.post<{ Params: { id: string } }>('/admin/motorizados/:id/enlace', async (request, reply) => {
-    const body = z.object({ mandar: z.boolean().default(true) }).parse(request.body ?? {});
-    const r = await entregas.crearEnlaceMotorizado(Number(request.params.id), { mandar: body.mandar, quien: quienEs(request.usuario) });
-    if (!r.ok) return reply.code(400).send({ error: r.motivo });
-    return { ok: true, url: r.url, venceAt: r.venceAt, enviado: r.enviado, ...(r.motivo ? { motivo: r.motivo } : {}) };
-  });
-
-  // ------------------------------------ la pagina del motorizado (publica, con token)
-
-  const tokenLimpio = (t: string): string => String(t ?? '').trim().slice(0, 80);
-  app.get<{ Params: { token: string } }>('/m/:token', async (request, reply) => {
-    const html = motorizadoPage({ token: tokenLimpio(request.params.token), nombreNegocio: entregas.nombreNegocio?.() ?? 'GSGchat' });
-    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').header('x-robots-tag', 'noindex').send(html);
-  });
-  app.get<{ Params: { token: string } }>('/m/:token/datos', async (request, reply) => {
-    const r = await entregas.paginaDeMotorizado(tokenLimpio(request.params.token));
-    if (!r.ok) return reply.code(404).send({ ok: false, error: r.motivo });
-    return r;
-  });
-  app.post<{ Params: { token: string } }>('/m/:token/accion', async (request, reply) => {
-    const body = z.object({ accion: z.enum(['minutos', 'cerca', 'entregado', 'no_estaba', 'no_puedo']), referencia: z.string().trim().min(1).max(60), minutos: z.coerce.number().optional() }).parse(request.body ?? {});
-    const r = await entregas.accionDesdeEnlace(tokenLimpio(request.params.token), body.accion, { referencia: body.referencia, minutos: body.minutos });
-    if (!r.ok) return reply.code(400).send({ ok: false, error: r.motivo });
-    return r;
-  });
-
-  app.post<{ Params: { id: string } }>('/admin/motorizados/:id/traspasar', async (request, reply) => {
-    const body = z.object({ motorizadoId: z.coerce.number().int().positive().nullable().optional(), descanso: z.boolean().default(false), motivo: z.string().trim().max(200).optional() }).parse(request.body ?? {});
-    const r = await entregas.traspasarPedidos(Number(request.params.id), { destino: body.motorizadoId ?? null, descanso: body.descanso, quien: quienEs(request.usuario), motivo: body.motivo });
-    if (!r.ok) return reply.code(400).send({ error: r.motivo });
-    return { ok: true, ...r.resultado };
-  });
-
   // ------------------------------------------------------------------ GSG
 
-  app.get('/admin/entregas/gsg', async () => ({ gsg: conexionGsg?.estado() ?? null, simulador: Boolean(simulador) }));
+  app.get('/admin/entregas/gsg', async () => ({ gsg: conexionGsg?.estado() ?? null, simulador: false }));
 
   app.post('/admin/entregas/gsg', async (request, reply) => {
     if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede cambiar desde la pantalla.' });
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia la conexión con GSG.' });
-    const body = z.object({ modo: z.enum(['real', 'simulador']), url: z.string().trim().max(300).optional(), token: z.string().max(500).nullable().optional() }).parse(request.body ?? {});
-    if (body.modo === 'simulador') {
-      if (!simulador) return reply.code(409).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-      return { ok: true, gsg: await conexionGsg.usarSimulador() };
-    }
+    const body = z.object({ modo: z.enum(['real']), url: z.string().trim().max(300).optional(), token: z.string().max(500).nullable().optional() }).parse(request.body ?? {});
+
     try {
       return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', token: body.token }) };
     } catch (error) {
@@ -409,39 +238,6 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     return { ok: prueba.ok, prueba };
   });
 
-  // ------------------------------------------------------------ simulador
-
-  app.get('/admin/entregas/simulador', async (_request, reply) => {
-    if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    return { estado: simulador.estado(), pendientes: simulador.pendientes(), recibido: simulador.recibido.slice(-50), modo: simulador.modo };
-  });
-
-  app.post('/admin/entregas/simulador/cargar', async (_request, reply) => {
-    if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    const nuevos = simulador.cargarDePrueba();
-    return { ok: true, nuevos, estado: simulador.estado() };
-  });
-
-  app.post('/admin/entregas/simulador/cargar-lista', async (request, reply) => {
-    if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    const body = z.object({ clientes: z.array(z.object({ referencia: z.string().min(1), telefono: z.string().min(6) }).passthrough()).min(1).max(500) }).parse(request.body ?? {});
-    const nuevos = simulador.cargar(body.clientes as never);
-    return { ok: true, nuevos, estado: simulador.estado() };
-  });
-
-  app.post('/admin/entregas/simulador/modo', async (request, reply) => {
-    if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    const body = z.object({ modo: z.enum(['ok', 'caido', 'rechaza']) }).parse(request.body ?? {});
-    simulador.modo = body.modo;
-    return { ok: true, modo: simulador.modo };
-  });
-
-  app.delete('/admin/entregas/simulador', async (_request, reply) => {
-    if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
-    simulador.reiniciar();
-    return { ok: true, estado: simulador.estado() };
-  });
-
   // ------------------------------------------------------------- API v1
 
   app.get('/api/v1/entregas', { config: { permiso: 'entregas:leer' } }, async () => {
@@ -451,12 +247,7 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
 
   app.post('/api/v1/entregas/sincronizar', { config: { permiso: 'entregas:gestionar' } }, async () => entregas.sincronizar());
 
-  app.get('/api/v1/motorizados', { config: { permiso: 'entregas:leer' } }, async () => ({ motorizados: await entregas.motorizados() }));
 
-  app.post('/api/v1/motorizados', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
-    const body = motorizadoSchema.parse(request.body ?? {});
-    const r = await entregas.crearMotorizado({ phone: body.telefono, nombre: body.nombre, placa: body.placa ?? null, zona: body.zona ?? null, estado: body.estado });
-    if (!r.ok) return reply.code(400).send({ error: r.motivo });
-    return { ok: true, motorizado: r.motorizado, nuevo: r.nuevo };
-  });
+
+
 }

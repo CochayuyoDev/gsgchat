@@ -1233,7 +1233,7 @@ refrescar();
 `;
 
   return appShell({
-    titulo: 'Ubicaciones para reparto',
+    titulo: 'Automatización GSG',
     subtitulo: 'Pedir la ubicación a cada cliente del día',
     contenido,
     script,

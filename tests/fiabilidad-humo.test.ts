@@ -31,7 +31,7 @@ function montar(opciones: { supervisor?: string; gsgOk?: boolean; gsgModo?: stri
     sender,
     supervisor: () => opciones.supervisor ?? '51912426667',
     deliveries: { listRecent: async ({ phone }) => entregas.filter((e) => !phone || e.phone === phone) },
-    conexionGsg: { estado: () => ({ modo: opciones.gsgModo ?? 'simulador' }), probar: async () => (opciones.gsgOk === false ? { ok: false, detalle: 'No se pudo consultar a GSG: sin respuesta.' } : { ok: true, detalle: 'GSG contestó: 3 por pedir ubicación.' }) },
+    conexionGsg: { estado: () => ({ modo: opciones.gsgModo ?? 'real' }), probar: async () => (opciones.gsgOk === false ? { ok: false, detalle: 'No se pudo consultar a GSG: sin respuesta.' } : { ok: true, detalle: 'GSG contestó: 3 por pedir ubicación.' }) },
     ia: opciones.iaToken ? { estado: () => ({ tieneToken: true }), probarConexion: async () => ({ ok: true, detalle: 'hola', ms: 900 }) } : null,
     entregas: { resumen: async () => ({ cifras: { total: 12 } }) },
     carpetas: () => [process.cwd()],
@@ -172,14 +172,14 @@ describe('el cupo del día contado por adelantado', () => {
       reparto: () => ({ maxIntentos: 3 }),
       ahora: () => new Date(),
     });
-    // Por pedido: 3 (ubicación) + 3 (confirmar) + 3 (motorizado) + 1 (aviso) + 1 (gracias) = 11.
-    expect(r.necesitan).toBe(60 * 11);
+    // Por pedido: tres solicitudes de ubicación y tres de confirmación.
+    expect(r.necesitan).toBe(60 * 6);
     expect(r.puedenSalir).toBe(100);
     expect(r.alcanza).toBe(false);
-    expect(r.frase).toContain('faltan 560');
+    expect(r.frase).toContain('faltan 260');
     expect(r.queRecortar.some((q) => q.includes('insistencias'))).toBe(true);
-    expect(r.queRecortar.some((q) => q.includes('gracias'))).toBe(true);
-    expect(r.detalle.map((d) => d.cantidad)).toEqual([180, 180, 180, 60, 60]);
+    expect(r.queRecortar.some((q) => q.includes('gracias'))).toBe(false);
+    expect(r.detalle.map((d) => d.cantidad)).toEqual([180, 180]);
   });
 
   it('con pocos pedidos alcanza y las terminadas no cuentan; lo ya hecho tampoco', async () => {
@@ -200,8 +200,8 @@ describe('el cupo del día contado por adelantado', () => {
       ahora: () => new Date(),
     });
     expect(r.puedenSalir).toBe(150);
-    // La avisada: nada. La pedida con 2 de 3 intentos: 1 repregunta + 3 motorizado + 1 aviso. Más 6 de la lista.
-    expect(r.necesitan).toBe(1 + 3 + 1 + 6);
+    // Los pedidos completados no cuentan. Falta una repregunta y seis mensajes de la lista.
+    expect(r.necesitan).toBe(1 + 6);
     expect(r.alcanza).toBe(true);
     expect(r.queRecortar).toEqual([]);
     expect(r.frase).toContain('sobran');

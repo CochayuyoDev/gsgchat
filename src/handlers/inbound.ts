@@ -914,17 +914,6 @@ async function handleInboundMessageEnFila(
   // que estaban esperando precisamente eso.
   await onInboundReply(repos, contact);
 
-  // Los procesos (src/procesos): si esta persona tiene una corrida viva, lo
-  // que manda es su respuesta a ese proceso (un DNI, un SI, «llegué», la
-  // captura del pago) y se atiende ahi. Si no tiene ninguna, el mensaje sigue
-  // su camino de siempre, sin cambiar nada.
-  if (repos.procesos && (await atenderEnProceso(message, contact, deps).catch((error) => {
-    request_log(deps, 'fallo el modulo de procesos al leer un mensaje', error);
-    return false;
-  }))) {
-    return;
-  }
-
   /**
    * Lo que el cliente contesta cuando se le pidio la ubicacion para un
    * reparto.
@@ -1493,74 +1482,6 @@ async function handleInboundMessageEnFila(
     return;
   }
   await reply(`Ubicación registrada.\n${result.mapsUrl}`);
-}
-
-/**
- * El gancho de los procesos: arma lo que trajo el mensaje con las mismas
- * piezas que usa el resto de este fichero (pin nativo, enlace de mapa, boton,
- * adjunto) y se lo pasa al nucleo de procesos. true = el proceso se quedo con
- * el mensaje. Solo mira la ubicacion si esa persona tiene algo vivo: nadie mas
- * paga la lectura de un enlace de mapa.
- */
-async function atenderEnProceso(message: InboundMessage, contact: Contact, deps: InboundDeps): Promise<boolean> {
-  const repo = deps.repos.procesos;
-  if (!repo) return false;
-  const viva = await repo.vivaPorTelefono(contact.phone);
-  const reciente = viva ? null : await repo.ultimaPorTelefono(contact.phone);
-  if (!viva && !(reciente && reciente.estado === 'persona')) return false;
-  if (!viva) {
-    // Pasado a una persona hace poco: el proceso calla su chat... salvo que ese
-    // numero tenga algo vivo en las entregas o el reparto, que siguen como siempre.
-    const conEntrega = deps.entregas ? (await deps.entregas.estadoUbicacionDe(contact.phone).catch(() => 'sin_entrega' as const)) !== 'sin_entrega' : false;
-    const conRuta = await deps.repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null);
-    if (conEntrega || conRuta) return false;
-  }
-
-  const bbox = { bbox: deps.config.bbox };
-  let ubicacion: EntradaProceso['ubicacion'] = null;
-  let fueraDeZona = false;
-  let guardar: { result: Awaited<ReturnType<typeof extractLocation>>; crudo: string } | null = null;
-  const texto = message.text?.body ?? message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? message.button?.text ?? message.media?.transcripcion ?? message.media?.caption ?? '';
-  if (message.type === 'location' && message.location) {
-    const r = fromWhatsAppLocation(message.location, bbox);
-    if (r.ok) {
-      ubicacion = { lat: r.lat, lng: r.lng, mapsUrl: r.mapsUrl, fuente: 'pin de whatsapp' };
-      guardar = { result: r, crudo: JSON.stringify(message.location) };
-    } else if (r.reason === 'outside_bbox') fueraDeZona = true;
-  } else if (message.text?.body) {
-    const r = await extractLocation(message.text.body, bbox).catch(() => null);
-    if (r?.ok && !r.needsConfirmation) {
-      ubicacion = { lat: r.lat, lng: r.lng, mapsUrl: r.mapsUrl, fuente: `enlace de mapa (${r.source})` };
-      guardar = { result: r, crudo: message.text.body };
-    } else if (r && !r.ok && r.reason === 'outside_bbox') fueraDeZona = true;
-  }
-  const esAdjunto = ['image', 'video', 'audio', 'document', 'sticker'].includes(message.type);
-  const entrada: EntradaProceso = {
-    texto,
-    ubicacion,
-    fueraDeZona,
-    adjunto: esAdjunto ? { tipo: message.type, mediaId: message.media?.id ?? null, mimeType: message.media?.mimeType ?? null, nombre: message.media?.filename ?? null } : null,
-    boton: message.interactive?.button_reply?.id?.startsWith('proc:') ? message.interactive.button_reply.id : null,
-  };
-  const r = await atenderEntranteDeProceso(
-    {
-      repos: deps.repos,
-      sender: deps.sender,
-      nombreNegocio: () => nombreNegocio(deps),
-      timezone: deps.config.timezone,
-      distritos: deps.config.distritos,
-      clasificar: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
-      log: (m, d) => console.warn(`[procesos] ${m}`, d ?? ''),
-    },
-    contact.phone,
-    entrada,
-  );
-  // La ubicacion que sirvio para el proceso queda tambien en el historial de ubicaciones.
-  if (r.atendida && guardar?.result.ok && ubicacion) {
-    const id = await deps.repos.locations.save(contact.id, guardar.result, guardar.crudo).catch(() => null);
-    if (id !== null) await deps.repos.locations.confirm(id).catch(() => undefined);
-  }
-  return r.atendida;
 }
 
 /** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */

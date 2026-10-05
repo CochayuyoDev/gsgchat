@@ -120,23 +120,12 @@ const CSS = `
 export function fiabilidadPage(opts: { disponible: boolean; demo: boolean; nombreNegocio: string }): string {
   // Los botones de simular una caida solo existen en la demostracion: asi no
   // hay nada en pantalla que, al pulsarlo, conteste "eso aqui no se puede".
-  const simulacion = opts.demo
-    ? `
-        <details id="wa-simular">
-          <summary>Probar una caída (solo en la demostración)</summary>
-          <div class="botones">
-            <button class="btn sm" id="wa-sim-caida" type="button">Simular una caída</button>
-            <button class="btn sm" id="wa-sim-caida5" type="button">Caída de 5 minutos</button>
-            <button class="btn sm" id="wa-sim-vuelta" type="button">Simular que vuelve</button>
-            <button class="btn sm" id="wa-sim-real" type="button">Volver a lo real</button>
-          </div>
-        </details>`
-    : '';
+  const simulacion = '';
 
   const contenido = `
 <div class="wrap" id="wrap" data-disponible="${opts.disponible ? '1' : '0'}">
-${opts.demo ? '<p class="demo"><span class="chip tono-ambar sin-punto">Demostración</span> Nada sale a WhatsApp de verdad y la base está en memoria.</p>' : ''}
 
+<section class="tarjeta"><h2>API, número y ritmo</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones"><button class="btn" id="api-salud-evaluar" type="button">Evaluar riesgo</button><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a href="/panel#historial">Historial y errores</a></div></section>
 <section class="tarjeta veredicto" id="veredicto" aria-live="polite">
   <div class="cabecera"><span class="chip tono-gris" id="veredicto-chip">Comprobando</span><h2 id="veredicto-titulo">Mirando cómo está todo…</h2></div>
   <p class="muted" id="veredicto-pie">El sistema se vigila a sí mismo cada pocos segundos. Si algo falla, aquí sale qué pasa y a dónde ir.</p>
@@ -624,11 +613,17 @@ if ($('wrap').dataset.disponible === '1') {
   });
   document.querySelectorAll('.caja button').forEach(function (b) { b.disabled = true; });
 }
+
+async function saludNumero(){try{var datos=await Promise.all([api('/health'),api('/admin/health')]);var h=datos[1];$('api-salud-estado').textContent='API: '+(datos[0].ok?'disponible':'no disponible')+' · WhatsApp: '+(datos[0].connected?'conectado':'sin conexión')+' · Riesgo: '+(h.salud?h.salud.nivel:'sin datos')+' · Mensajes hoy: '+h.sentToday+' / '+h.dailyCap+' · Envíos: '+(h.number.paused?'pausados':'activos');}catch(e){$('api-salud-estado').textContent=e.message;}}
+$('api-salud-evaluar').onclick=ocupado($('api-salud-evaluar'),'Evaluando…',async function(){await api('/admin/salud/evaluar',{method:'POST',body:{}});await saludNumero();});
+$('api-salud-pausa').onclick=ocupado($('api-salud-pausa'),'Pausando…',async function(){await api('/admin/pause',{method:'POST',body:{paused:true,reason:'Desde Salud'}});await saludNumero();});
+$('api-salud-reanudar').onclick=ocupado($('api-salud-reanudar'),'Reanudando…',async function(){await api('/admin/salud/reanudar',{method:'POST',body:{motivo:'Desde Salud'}});await saludNumero();});
+saludNumero();setInterval(saludNumero,30000);
 `;
 
   return appShell({
-    titulo: 'Que todo funcione',
-    subtitulo: 'El WhatsApp vigilado, la prueba de cada mañana, el cupo de hoy y la copia de seguridad',
+    titulo: 'Salud',
+    subtitulo: 'API, conexión de WhatsApp, riesgo, cupo y respaldos',
     contenido,
     script,
     css: CSS,

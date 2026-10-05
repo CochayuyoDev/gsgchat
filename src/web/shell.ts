@@ -39,7 +39,7 @@ export interface ItemMenu {
    * campanas, ritmo, rastreo) se ensena con "Ver todo".
    */
   avanzado?: boolean;
-  /** Solo si la tienda usa la plantilla de entregas de courier (GSG): Hoy, Números del día, Motorizados, Mapa. */
+  /** Solo si la tienda usa la plantilla de entregas de courier (GSG): Hoy, Números del día, Mapa. */
   soloGsg?: boolean;
   /** En modo gsg: la seccion plegada donde va (sin seccion = a la vista, arriba). */
   seccion?: string;
@@ -96,7 +96,7 @@ export function gsgVigente(): boolean {
 /**
  * El menu de cada dia: procesos administrativos y operativos, sin grupos y sin
  * jerga. Inicio, Procesos, Personas y Respuestas van primero; las pantallas de
- * las entregas de courier (Hoy, Números del día, Motorizados, Mapa) solo se ven
+ * las entregas de courier (Hoy, Números del día, Mapa) solo se ven
  * en las tiendas que usan esa plantilla.
  *
  * Es el que se ve por defecto. Todo lo demas (campañas, grupos, rastreo,
@@ -104,142 +104,33 @@ export function gsgVigente(): boolean {
  * enciende desde Ajustes.
  */
 export const MENU_GSG: ItemMenu[] = [
-  { id: 'gsg-courier', etiqueta: 'GSG Courier', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Recibir pedidos de Courier: dirección, claves, contrato, validación y últimas recepciones.', soloAdmin: true },
-  { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Un vistazo: tus procesos en curso, quién necesita a alguien, los mensajes de hoy y el número.' },
-  { id: 'hoy', etiqueta: 'Hoy', href: '/hoy', icono: 'reloj', descripcion: 'Las entregas de hoy: a quién falta la ubicación o confirmar, quién las lleva, a qué hora llegan y qué necesita a alguien.', soloGsg: true },
-  { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicación.' },
-  { id: 'ubicaciones', etiqueta: 'Ubicaciones registradas', href: '/numeros?etapa=contactados', icono: 'mapa', descripcion: 'Los clientes que ya mandaron su ubicación (o confirmaron): con su pin, su pedido y a qué motorizado va.', soloGsg: true },
-  { id: 'motorizados', etiqueta: 'Motorizados', href: '/motorizados', icono: 'moto', descripcion: 'Quiénes reparten hoy: alta, zona, descanso y qué lleva cada uno.', soloGsg: true },
-  { id: 'conexion', etiqueta: 'Conexión', href: '/setup', icono: 'enchufe', descripcion: 'El WhatsApp (QR o API de Meta) y el sistema de GSG.' },
-  { id: 'plantillas', etiqueta: 'Plantillas', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Los mensajes con los que el sistema abre y cierra las conversaciones (la solicitud de ubicación, el cierre...): crearlos, ver si Meta los aprobó y sincronizarlos.' },
-  { id: 'ajustes', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario, avisos, modo prueba y qué se enseña.', soloAdmin: true },
-  { id: 'numeros', seccion: 'Seguimiento', etiqueta: 'Números del día', href: '/numeros', icono: 'plantilla', descripcion: 'Todos los números que pasó GSG hoy: a quién falta pedirle la ubicación, quién no la manda, quién falta confirmar y quién ya está contactado; marcar uno, varios o todos y pedirles lo que falte.', soloGsg: true },
-  { id: 'procesos', seccion: 'Procesos', etiqueta: 'Procesos', href: '/procesos', icono: 'flujo', descripcion: 'Lo que el sistema hace solo por WhatsApp con tus listas: pedir y validar datos, confirmar y recordar citas, avisar tareas al personal, recordar pagos. Crear desde una plantilla, editar los pasos y cargar personas.' },
-  { id: 'personas', seccion: 'Procesos', etiqueta: 'Personas', href: '/personas', icono: 'contactos', descripcion: 'Todas las personas de tus procesos: en qué paso va cada una, quién necesita a alguien; pedir ahora, pausar o pasar a una persona.' },
-  { id: 'respuestas', seccion: 'Procesos', etiqueta: 'Respuestas', href: '/respuestas', icono: 'lista', descripcion: 'Lo que respondió cada persona, paso por paso (DNI, ubicación, SÍ o NO, capturas), para revisar o exportar a Excel.' },
-  { id: 'mapa', seccion: 'Seguimiento', etiqueta: 'Mapa del día', href: '/mapa', icono: 'mapa', descripcion: 'Dónde está cada pedido de hoy y cada motorizado, sobre el mapa.', soloGsg: true },
-  { id: 'guardados', seccion: 'Seguimiento', etiqueta: 'Conversaciones guardadas', href: '/guardados', icono: 'historial', descripcion: 'Las conversaciones ya cerradas: buscarlas, leerlas, exportarlas y devolverlas al chat.' },
-  { id: 'ia', seccion: 'Configuración', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'El agente operativo: explica por qué se pide cada dato, reconoce lo que no es del trámite y lo pasa a una persona (nada de ventas); con qué IA trabaja y si está encendido.' },
-  { id: 'equipo', seccion: 'Configuración', etiqueta: 'Equipo', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Las cuentas de quienes entran al sistema.', soloAdmin: true },
-  { id: 'fiabilidad', seccion: 'Configuración', etiqueta: 'Que todo funcione', href: '/fiabilidad', icono: 'salud', descripcion: 'El WhatsApp vigilado, la prueba de cada mañana, el cupo de hoy y la copia de seguridad.', soloAdmin: true },
-  { id: 'manual', seccion: 'Ayuda', etiqueta: 'Manual de uso', href: '/manual', icono: 'libro', descripcion: 'Qué hace cada pantalla y cómo se usa.' },
-  { id: 'soporte', seccion: 'Ayuda', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Si algo falla: qué mirar y qué datos mandar.' },
+  { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Estado de la API, WhatsApp, pedidos y errores.' },
+  { id: 'hoy', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos recibidos por API, solicitudes de ubicación y pendientes de atención.' },
+  { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
+  { id: 'mapa', etiqueta: 'Ubicaciones', href: '/mapa', icono: 'mapa', descripcion: 'Ubicaciones registradas y coordenadas asociadas al tracking.' },
+  { id: 'historial', etiqueta: 'Historial y errores', href: '/panel#historial', icono: 'historial', descripcion: 'Mensajes enviados, entregados y fallidos; reintentos de pedidos.' },
+  { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
+  { id: 'entrenamiento', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
+  { id: 'plantillas', etiqueta: 'Plantillas', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Crear, sincronizar y subir plantillas de WhatsApp.' },
+  { id: 'conexion', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'QR, WAHA o API de Meta; conexión de devolución a GSG.' },
+  { id: 'gsg-courier', etiqueta: 'API y endpoint GSG', href: '/conexion-gsg', icono: 'llave', descripcion: 'Contrato, claves, validaciones y recepciones de pedidos.', soloAdmin: true },
+  { id: 'rutas-ajustes', etiqueta: 'Automatización GSG', href: '/automatizacion-gsg', icono: 'ajustes', descripcion: 'Horarios, ritmo y tres intentos de solicitud de ubicación.', soloAdmin: true },
+  { id: 'fiabilidad', etiqueta: 'Salud', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, riesgos, reconexión, alertas y respaldos.', soloAdmin: true },
+  { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
+  { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario y avisos del sistema.', soloAdmin: true },
+  { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Registro de acciones del equipo.', soloAdmin: true },
+  { id: 'guardados', etiqueta: 'Chats guardados', href: '/guardados', icono: 'historial', descripcion: 'Conversaciones cerradas y respaldadas.' },
+  { id: 'manual', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
+  { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
 ];
-
-/** Lo que solo ve el dueño del sistema (superadministrador), en el modo GSG. */
 export const MENU_GSG_DUENO: GrupoMenu = {
-  id: 'dueno',
-  etiqueta: 'Dueño del sistema',
-  items: [
-    { id: 'tiendas', etiqueta: 'Tiendas', href: '/tiendas', icono: 'inicio', descripcion: 'Los negocios que controlas: cada uno con su instalación, su plan, su salud, hasta cuándo está pagado y los pagos por revisar.', soloAdmin: true, soloSuper: true },
-    { id: 'membresia', etiqueta: 'Membresía', href: '/panel#membresia', icono: 'campana', descripcion: 'El plan de esta instalación: hasta cuándo está pagada, sus topes y los pagos.', soloAdmin: true, soloSuper: true },
-    { id: 'pagar', etiqueta: 'Pagar', href: '/pagar', icono: 'reloj', descripcion: 'Cómo pagar la membresía y mandar la captura del pago.', soloAdmin: true, soloSuper: true },
-    { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Quién hizo qué y cuándo.', soloAdmin: true, soloSuper: true },
+  id: 'dueno', etiqueta: 'Superadministración', items: [
+    { id: 'tiendas', etiqueta: 'Cuentas', href: '/cuentas', icono: 'usuario', descripcion: 'Cuentas independientes de la plataforma y su estado.', soloAdmin: true, soloSuper: true },
   ],
 };
-
-/**
- * El Modulo desarrollador: probar todo de punta a punta sin WhatsApp real y
- * comprobar que esta listo para GSG. Solo admin y superadmin; va al final, en
- * su propio grupo, en los dos modos. Ver src/desarrollador.
- */
-export const MENU_DESARROLLADOR: GrupoMenu = {
-  id: 'desarrollador',
-  etiqueta: 'Módulo desarrollador',
-  items: [
-    { id: 'dev-generar', etiqueta: 'Clientes de prueba', href: '/desarrollador#generar', icono: 'usuario', descripcion: 'Crea clientes y motorizados de prueba (entran por la API, como los de GSG) y bórralos con un clic. Nada sale al WhatsApp real.', soloAdmin: true },
-    { id: 'dev-vivo', etiqueta: 'Ver el flujo en vivo', href: '/desarrollador#vivo', icono: 'chat', descripcion: 'Escribe como si fueras el cliente o el motorizado y mira, paso a paso, qué entendió el sistema, qué respondió y qué le mandó a GSG.', soloAdmin: true },
-    { id: 'dev-listo', etiqueta: '¿Está listo para GSG?', href: '/desarrollador#listo', icono: 'salud', descripcion: 'Recorre con un clic todo el contrato con GSG contra el simulador y dice qué funciona y qué falta.', soloAdmin: true },
-    { id: 'dev-procesos', etiqueta: 'Probar un proceso', href: '/desarrollador#procesos', icono: 'flujo', descripcion: 'Simula una corrida de cada plantilla con números de prueba: respuestas buenas, malas, sin respuesta y consultas ajenas, persona por persona.', soloAdmin: true },
-  ],
-};
-
-/** Lo de arriba del menu, fuera de los grupos (modo completo). */
-export const MENU_ARRIBA: ItemMenu[] = [
-  { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Un vistazo a todo: cifras de hoy, la semana, el numero y lo que espera a una persona.' },
-  { id: 'manual', etiqueta: 'Manual de uso', href: '/manual', icono: 'libro', descripcion: 'Que hace cada modulo y como se usa.' },
-  { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Si algo falla: que mirar y que datos mandar.' },
-];
-
-export const MENU_GRUPOS: GrupoMenu[] = [
-  {
-    id: 'procesos',
-    etiqueta: 'Procesos',
-    items: [
-      { id: 'procesos', etiqueta: 'Procesos', href: '/procesos', icono: 'flujo', descripcion: 'Lo que el sistema hace solo por WhatsApp con tus listas: pedir y validar datos, confirmar y recordar citas, avisar tareas al personal, recordar pagos.' },
-      { id: 'personas', etiqueta: 'Personas', href: '/personas', icono: 'contactos', descripcion: 'Todas las personas de tus procesos y en qué paso va cada una.' },
-      { id: 'respuestas', etiqueta: 'Respuestas', href: '/respuestas', icono: 'lista', descripcion: 'Lo que respondió cada persona, paso por paso, para revisar o exportar.' },
-    ],
-  },
-  {
-    id: 'atencion',
-    etiqueta: 'Atención',
-    items: [
-      { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Las conversaciones como en WhatsApp: leer, responder, mandar o pedir ubicacion.' },
-      { id: 'ia', etiqueta: 'Mi asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Lo que sabe de tu negocio y como contesta solo. Cuando no puede, te pasa la conversacion.' },
-      { id: 'entrenamiento', etiqueta: 'Entrenar a la IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Ensenarle a gran escala: miles de ejemplos, datos y reglas; importar un Excel o un chat; aprender de tus conversaciones reales; examinarla en masa y corregirla.' },
-      { id: 'pedidos', etiqueta: 'Pedidos del chat', href: '/panel#pedidos', icono: 'plantilla', descripcion: 'Lo que el asistente (o una persona) cerro en la conversacion: confirmar, cancelar o pasarlo a la tienda.' },
-      { id: 'contactos', etiqueta: 'Contactos', href: '/panel#contactos', icono: 'contactos', descripcion: 'Importar, buscar y ver el consentimiento de cada numero.' },
-      { id: 'envio-automatico', etiqueta: 'Envío automático', href: '/envio-automatico', icono: 'reloj', descripcion: 'Los numeros a los que el sistema escribe solo: un mensaje cada pocas horas, como una persona, hasta conseguir su ubicacion o una respuesta. Se ponen y se quitan a mano o pidiendoselo a la IA.' },
-      { id: 'enviar', etiqueta: 'Enviar mensaje', href: '/panel#enviar', icono: 'enviar', descripcion: 'Un texto, un pin o una plantilla a un numero concreto.', avanzado: true },
-      { id: 'historial', etiqueta: 'Historial de envios', href: '/panel#historial', icono: 'historial', descripcion: 'Todo lo que salio, con su estado y su error si lo hubo.', avanzado: true },
-      { id: 'stickers', etiqueta: 'Stickers', href: '/panel#stickers', icono: 'sticker', descripcion: 'Los stickers que se mandan tras el saludo, el gracias o la despedida, y a mano desde el chat.', avanzado: true },
-    ],
-  },
-  {
-    id: 'reparto',
-    etiqueta: 'Reparto',
-    items: [
-      { id: 'entregas', etiqueta: 'Entregas del día', href: '/entregas', icono: 'moto', descripcion: 'Cada pedido de hoy: ubicacion, confirmacion, motorizado y hora de llegada. Se sincroniza con GSG (o con su simulador), lee las respuestas con reglas y con la IA, y avisa a quien hace falta.' },
-      { id: 'rutas', etiqueta: 'Ubicaciones para reparto', href: '/rutas', icono: 'pin', descripcion: 'Cargar la lista del dia, pedir la ubicacion a cada cliente y resolver lo que necesita una persona.', avanzado: true },
-      { id: 'rutas-ajustes', etiqueta: 'Ajustes del reparto', href: '/rutas#ajustes', icono: 'ajustes', descripcion: 'Horario, espera entre mensajes, intentos, textos y plantillas del reparto.', avanzado: true },
-      { id: 'mapa', etiqueta: 'Mapa del día', href: '/mapa', icono: 'mapa', descripcion: 'Dónde está cada pedido de hoy y cada motorizado, sobre el mapa.' },
-    ],
-  },
-  {
-    id: 'campanas',
-    etiqueta: 'Campañas',
-    items: [
-      { id: 'grupos', etiqueta: 'Enviar a un grupo', href: '/panel#grupos', icono: 'contactos', descripcion: 'Elegir clientes por como estan (sin ubicacion, ficha incompleta, callados...) y mandarles a todos un mensaje personalizado.', avanzado: true },
-      { id: 'campanas', etiqueta: 'Campañas', href: '/panel#campanas', icono: 'megafono', descripcion: 'Envios masivos por goteo, con canario y al ritmo que el numero tolera.', avanzado: true },
-      { id: 'automatizacion', etiqueta: 'Respuestas automáticas', href: '/panel#automatizacion', icono: 'rayo', descripcion: 'Reglas por palabra clave y secuencias: que se manda solo y cuando (sin IA).', avanzado: true },
-      { id: 'plantillas', etiqueta: 'Plantillas', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Las plantillas de Meta y las propias: crear, sincronizar y ver su estado.' },
-    ],
-  },
-  {
-    id: 'ubicaciones',
-    etiqueta: 'Ubicaciones',
-    items: [
-      { id: 'ubicaciones', etiqueta: 'Ubicaciones recibidas', href: '/panel#ubicaciones', icono: 'mapa', descripcion: 'Los pines que mandaron los clientes.', avanzado: true },
-      { id: 'vivo', etiqueta: 'Rastreo en vivo', href: '/panel#vivo', icono: 'radar', descripcion: 'Enlaces para compartir y ver una posicion en tiempo real.', avanzado: true },
-      { id: 'extraer', etiqueta: 'Extraer coordenadas', href: '/panel#extraer', icono: 'mira', descripcion: 'Pega un link de mapa o un texto y saca las coordenadas.', avanzado: true },
-    ],
-  },
-  {
-    id: 'salud',
-    etiqueta: '¿Va todo bien?',
-    items: [
-      { id: 'estado', etiqueta: 'Estado del número', href: '/panel#estado', icono: 'actividad', descripcion: 'Calidad, cupo del dia, cola y pausa manual.', avanzado: true },
-      { id: 'salud', etiqueta: 'Riesgo y ritmo', href: '/panel#salud', icono: 'salud', descripcion: 'Lo que mira el monitor: errores, bloqueos, bajas; por que frena y cuando.', avanzado: true },
-      { id: 'fiabilidad', etiqueta: 'Que todo funcione', href: '/fiabilidad', icono: 'salud', descripcion: 'El WhatsApp vigilado, la prueba de cada mañana, el cupo de hoy y la copia de seguridad.', soloAdmin: true },
-    ],
-  },
-  {
-    id: 'administracion',
-    etiqueta: 'Mi negocio',
-    items: [
-      { id: 'setup', etiqueta: 'Conexión de WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'Conectar el numero: QR, WAHA o la API oficial de Meta.' },
-      { id: 'gsg-courier', etiqueta: 'GSG Courier', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Recibir pedidos de Courier: dirección, claves, contrato y validación.', soloAdmin: true },
-      { id: 'integraciones', etiqueta: 'Conectar mi web y tienda', href: '/panel#integraciones', icono: 'llave', descripcion: 'Stoky (en las dos direcciones, con su estado), el chat dentro de tu web, tu tienda WooCommerce o Shopify, y las claves para otros programas.', soloAdmin: true },
-      { id: 'configuracion', etiqueta: 'Configuración', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio, horario, avisos, modo prueba y ritmo.', soloAdmin: true },
-      { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contrasenas. Un superadministrador crea administradores; un administrador crea operadores.', soloAdmin: true, avanzado: true },
-      { id: 'membresia', etiqueta: 'Membresía', href: '/panel#membresia', icono: 'campana', descripcion: 'El plan de esta instalacion: hasta cuando esta pagada, sus topes y los pagos apuntados. La cambia el superadministrador; un administrador la ve.', soloAdmin: true },
-      { id: 'pagar', etiqueta: 'Pagar', href: '/pagar', icono: 'reloj', descripcion: 'Como pagar la membresia y mandar la captura del pago.', soloAdmin: true, soloSuper: true },
-      { id: 'tiendas', etiqueta: 'Tiendas', href: '/tiendas', icono: 'inicio', descripcion: 'Las tiendas que controla el superadministrador: cada negocio con su instalacion, su plan, hasta cuando esta pagada, si esta en linea; dar de alta, apuntar pagos, suspender.', soloAdmin: true, soloSuper: true },
-      { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Bitacora: quien hizo que y cuando.', soloAdmin: true, avanzado: true },
-    ],
-  },
-];
+export const MENU_DESARROLLADOR: GrupoMenu = { id: 'desarrollador', etiqueta: '', items: [] };
+export const MENU_ARRIBA: ItemMenu[] = [];
+export const MENU_GRUPOS: GrupoMenu[] = [{ id: 'operacion', etiqueta: 'Operación', items: MENU_GSG }, MENU_GSG_DUENO];
 
 /** Iconos de trazo, 24x24, sin dependencias. */
 const ICONOS = {
@@ -645,11 +536,11 @@ const JS = String.raw`
   function aplicarModo(avanzado) {
     app.classList.toggle('sencillo', !avanzado);
     window.__modoAvanzado = avanzado;
-    botonModo.textContent = avanzado ? 'Modo sencillo' : 'Ver todo';
+    if (botonModo) botonModo.textContent = avanzado ? 'Modo sencillo' : 'Ver todo';
     if (window.__alCambiarModo) window.__alCambiarModo(avanzado);
   }
   aplicarModo(leer('s-modo') === 'avanzado');
-  botonModo.onclick = function () {
+  if (botonModo) botonModo.onclick = function () {
     var avanzado = !app.classList.contains('sencillo');
     guardar('s-modo', avanzado ? 'sencillo' : 'avanzado');
     aplicarModo(!avanzado);
@@ -952,7 +843,7 @@ const JS = String.raw`
         : '<div class="s-aviso-nada">Nada pendiente. Todo al día.</div>';
       document.title = (d.total ? '(' + d.total + ') ' : '') + document.title.replace(/^\(\d+\) /, '');
       var franja = document.getElementById('s-plan');
-      if (d.plan) { franja.className = 's-plan ' + d.plan.nivel; franja.innerHTML = escapar(d.plan.texto) + '<a href="/panel#configuracion">Ver mi plan</a>'; } else { franja.className = 's-plan hidden'; }
+      franja.className = 's-plan hidden';
     }).catch(function () {});
   }
   cargarAvisos();
@@ -1037,7 +928,7 @@ const JS = String.raw`
   /* Una tarjeta que se estaba haciendo cuando se recargó la página no se vuelve a ofrecer: se mira en Actividad. */
   iaHistorial.forEach(function (m) { if (m && m.estadoTarjeta === 'haciendo') { m.estadoTarjeta = 'hecha'; m.resultados = []; m.errorTarjeta = 'Se estaba haciendo cuando se recargó la página: mira cómo salió en Actividad.'; } });
   function iaGuardar() { try { sessionStorage.setItem('wa_ia_hilo', JSON.stringify(iaHistorial.slice(-30))); } catch (e) {} }
-  var EJEMPLOS_IA = ['¿cómo van las entregas de hoy?', 'dame los pedidos sin ubicación', 'asígnale el pedido GSG-IA-001 a Carlos', 'pasa a descanso al motorizado Ali', 'confirma el envío de todos los números del día', '¿cuántos entregó Carlos hoy?', 'apaga el bot en el chat de 912426667', '¿por qué no salen mensajes?'];
+  var EJEMPLOS_IA = ['¿cómo van los pedidos de hoy?', 'dame los pedidos sin ubicación', 'confirma el envío de todos los números del día', 'apaga el bot en el chat de 912426667', '¿por qué no salen mensajes?'];
   /* Lo que cambia algo llega preparado en UNA tarjeta: exactamente lo que va a
      pasar (qué, a quién, cuántos, antes → después) y se hace al pulsar
      «Hacerlo». Varios candidatos = botones para elegir, nunca se adivina. */
@@ -1243,7 +1134,7 @@ function itemHtml(item: ItemMenu, sub: boolean): string {
 export function appShell(opts: ShellOpts): string {
   const negocio = escapeHtml(opts.nombreNegocio || 'WhatsApp');
   const modo = opts.modo ?? modoVigente();
-  const conGsg = gsgVigente();
+  const conGsg = true;
   const arriba = MENU_ARRIBA.map((i) => itemHtml(i, false)).join('\n      ');
   // Sin la plantilla de GSG, los procesos son lo del día a día: van a la vista, justo después de Inicio.
   const visiblesGsg = MENU_GSG.filter((i) => conGsg || !i.soloGsg)
@@ -1267,29 +1158,14 @@ export function appShell(opts: ShellOpts): string {
     }),
   ].join('\n      ');
   // El pie del celular: las cuatro pantallas del dia. Con las entregas de courier, las de siempre; si no, las de los procesos.
-  const pieGsg = conGsg
-    ? `<a class="s-nav-gsg" href="/hoy" data-ir="/hoy">${icono('moto')}<span>Hoy</span></a>
-      <a class="s-nav-completo" href="/panel#inicio" data-ir="/panel#inicio">${icono('inicio')}<span>Inicio</span></a>
-      <a href="/chat" data-ir="/chat">${icono('chat')}<span>Chats</span></a>
-      <a class="s-nav-gsg" href="/motorizados" data-ir="/motorizados">${icono('contactos')}<span>Motorizados</span></a>
-      <a class="s-nav-completo" href="/entregas" data-ir="/entregas">${icono('moto')}<span>Entregas</span></a>
-      <a href="/mapa" data-ir="/mapa">${icono('mapa')}<span>Mapa</span></a>`
-    : `<a href="/procesos" data-ir="/procesos">${icono('flujo')}<span>Procesos</span></a>
-      <a href="/chat" data-ir="/chat">${icono('chat')}<span>Chats</span></a>
-      <a href="/personas" data-ir="/personas">${icono('contactos')}<span>Personas</span></a>
-      <a href="/respuestas" data-ir="/respuestas">${icono('lista')}<span>Respuestas</span></a>`;
+  const pieGsg = '<a href="/hoy" data-ir="/hoy">' + icono('plantilla') + '<span>Pedidos</span></a><a href="/chat" data-ir="/chat">' + icono('chat') + '<span>Chats</span></a><a href="/mapa" data-ir="/mapa">' + icono('mapa') + '<span>Ubicaciones</span></a><a href="/salud" data-ir="/salud">' + icono('salud') + '<span>Salud</span></a>';
   const dueno = `<div class="s-grupo" data-grupo="${MENU_GSG_DUENO.id}" data-solo-super-grupo="1" data-cerrado="1">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_GSG_DUENO.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
           ${MENU_GSG_DUENO.items.map((i) => itemHtml(i, true)).join('\n          ')}
         </div>
       </div>`;
-  const desarrollador = `<div class="s-grupo" data-grupo="${MENU_DESARROLLADOR.id}" data-solo-admin-grupo="1" data-cerrado="1">
-        <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_DESARROLLADOR.etiqueta)}</span>${icono('chevron')}</button>
-        <div class="s-grupo-items">
-          ${MENU_DESARROLLADOR.items.map((i) => itemHtml(i, true)).join('\n          ')}
-        </div>
-      </div>`;
+  const desarrollador = '';
   const grupos = MENU_GRUPOS.map(
     (g) => `<div class="s-grupo${g.items.every((i) => i.avanzado) ? ' s-grupo-avanzado' : ''}" data-grupo="${g.id}">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(g.etiqueta)}</span>${icono('chevron')}</button>
@@ -1340,7 +1216,6 @@ ${TEMA_SCRIPT}
       ${desarrollador}
       <div class="s-sin">No hay ningún módulo con ese nombre.</div>
       </div>
-      <button class="s-modo" id="s-modo" type="button" title="Enseñar u ocultar las funciones avanzadas (reparto, campañas, ritmo, rastreo)">Ver todo</button>
     </nav>
     <div class="s-user">
       <div class="s-avatar">?</div>

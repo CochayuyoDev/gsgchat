@@ -179,7 +179,7 @@ document.querySelector('.wrap').addEventListener('click', async function (ev) {
       var cid = Number(b.getAttribute('data-cargar'));
       var p2 = datos.procesos.filter(function (x) { return x.id === cid; })[0];
       var det = await api('/admin/procesos/' + cid);
-      var res = await abrirCarga({ procesoId: cid, nombre: p2 ? p2.nombre : '', ejemplo: det.ejemplo, columnas: det.columnasSugeridas, motorizados: p2 && p2.plantilla === 'campo' && datos.gsgActivo });
+      var res = await abrirCarga({ procesoId: cid, nombre: p2 ? p2.nombre : '', ejemplo: det.ejemplo, columnas: det.columnasSugeridas, motorizados: false });
       if (!res) return;
       avisar(res.aviso, false, res.ir);
       await cargar();

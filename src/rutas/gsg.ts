@@ -17,6 +17,7 @@
  */
 
 import type { Lote, Reporte, RutasRepo, Solicitud, TipoReporte } from '../db/rutas.js';
+import type { Repos } from '../db/repos.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { esNumeroDePrueba, PREFIJO_REFERENCIA_PRUEBA } from '../desarrollador/numeros.js';
 
@@ -58,6 +59,7 @@ export interface PuertoGsg {
 
 export interface OpcionesGsg {
   url: string;
+  ubicacionUrl?: string;
   token: string;
   fetchImpl?: typeof fetch;
   /** Segundos antes de darse por vencido en una llamada. */
@@ -66,7 +68,7 @@ export interface OpcionesGsg {
 
 /** El camino de cada tipo dentro de la API de GSG. */
 export const RUTAS_GSG: Record<TipoReporte, string> = {
-  ubicacion: '/ubicaciones',
+  ubicacion: '/sendLocation',
   incidencia: '/incidencias',
   resumen: '/resumenes',
   confirmacion: '/confirmaciones',
@@ -92,13 +94,13 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
       try {
-        const respuesta = await doFetch(`${base}${RUTAS_GSG[tipo]}`, {
+        const respuesta = await doFetch(tipo === 'ubicacion' && opts.ubicacionUrl ? opts.ubicacionUrl : `${base}${RUTAS_GSG[tipo]}`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
             ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(tipo === 'ubicacion' ? { tracking: payload.tracking ?? payload.referencia, latitud: payload.latitud ?? payload.lat, longitud: payload.longitud ?? payload.lng } : payload),
           signal: control.signal,
         });
 
@@ -109,7 +111,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
             error: `GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}`,
             // 5xx y 429 son del otro lado y pasan solos; un 4xx es culpa del
             // payload y reintentarlo solo repite el mismo error.
-            reintentable: respuesta.status >= 500 || respuesta.status === 429,
+            reintentable: respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
           };
         }
 
@@ -275,6 +277,12 @@ export function payloadEntrega(e: {
     visitas: e.visitas ?? 0,
     segundaVisita: e.segundaVisita ?? false,
   };
+}
+
+export async function payloadUbicacionDelPedido(repos: Pick<Repos, 'entregas'>, solicitud: Solicitud, lote: Lote): Promise<Record<string, unknown>> {
+  const vinculadas = solicitud.phone ? await repos.entregas.vivasDeLoteYTelefono(lote.id, solicitud.phone) : [];
+  const pedido = vinculadas.find(e => e.referencia === solicitud.referencia);
+  return { ...payloadUbicacion(solicitud, lote), tracking: pedido?.datosEnvio?.tracking ?? solicitud.referencia };
 }
 
 export function payloadUbicacion(solicitud: Solicitud, lote: Lote): Record<string, unknown> {

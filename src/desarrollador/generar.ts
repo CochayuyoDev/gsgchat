@@ -41,7 +41,7 @@ export const TOPE_MOTORIZADOS = 100;
 export const generarSchema = z.object({
   faltaConfirmar: z.coerce.number().int().min(0).max(TOPE_POR_TANDA).default(0),
   faltaUbicacion: z.coerce.number().int().min(0).max(TOPE_POR_TANDA).default(0),
-  motorizados: z.coerce.number().int().min(0).max(TOPE_MOTORIZADOS).default(0),
+  motorizados: z.coerce.number().int().min(0).max(0).default(0),
 });
 
 export interface ResultadoGenerar {
@@ -85,7 +85,7 @@ async function siguienteIndice(deps: DepsDesarrollador, prefijo: string): Promis
 
 export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollador, pedido: z.infer<typeof generarSchema>, quien: string | null): Promise<ResultadoGenerar> {
   const { faltaConfirmar, faltaUbicacion, motorizados } = pedido;
-  if (faltaConfirmar + faltaUbicacion + motorizados === 0) throw new ErrorGenerar(400, 'Elige cuántos clientes o motorizados de prueba quieres crear (al menos uno).');
+  if (faltaConfirmar + faltaUbicacion + motorizados === 0) throw new ErrorGenerar(400, 'Elige cuántos clientes de prueba quieres crear (al menos uno).');
   if (faltaConfirmar + faltaUbicacion > TOPE_POR_TANDA) throw new ErrorGenerar(400, `Como mucho ${TOPE_POR_TANDA} clientes por tanda. Crea el resto en otra tanda.`);
   if (!deps.entregas) throw new ErrorGenerar(409, 'Las entregas del día no están activas en este arranque: sin ellas no hay a dónde meter los pedidos de prueba.');
   if (!deps.repos.desarrollador) throw new ErrorGenerar(409, 'Esta pantalla necesita la base de datos de la tienda (no funciona en la demostración en memoria).');
@@ -167,14 +167,6 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
   }
 
   let motos = 0;
-  if (motorizados) {
-    let m = await siguienteIndice(deps, PREFIJO_MOTORIZADO_PRUEBA);
-    for (let i = 0; i < motorizados; i++) {
-      const d = motorizadoInventado();
-      const r = await entregas.crearMotorizado({ phone: numeroDePrueba('motorizado', m++), nombre: d.nombre, placa: d.placa, zona: d.zona });
-      if (r.ok && r.nuevo) motos++;
-    }
-  }
 
   const creadosConfirmar = creadas.filter((c) => c.conPin).length;
   const creadosUbicacion = creadas.length - creadosConfirmar;
@@ -201,7 +193,7 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
 export const registerGenerar: RegistrarSeccion = async (app, deps) => {
   app.post('/admin/desarrollador/generar', async (request, reply) => {
     const leido = generarSchema.safeParse(request.body ?? {});
-    if (!leido.success) return reply.code(400).send({ error: `Los números no se entienden: cada contador va de 0 a ${TOPE_POR_TANDA} (motorizados, hasta ${TOPE_MOTORIZADOS}).` });
+    if (!leido.success) return reply.code(400).send({ error: `Los números no se entienden: cada contador va de 0 a ${TOPE_POR_TANDA}.` });
     try {
       // La clave la firma quien la pidio: su id de usuario (la columna es uuid).
       const id = request.usuario?.id;
@@ -251,14 +243,11 @@ const HTML = `
       <label for="gen-ubicacion"><b>Falta que mande su ubicación</b><span class="muted">Se le pide el pin y todavía no lo mandó. En el sistema: «esperando ubicación».</span></label>
       <div class="gen-num"><button type="button" class="btn" data-menos="gen-ubicacion" aria-label="Uno menos">−</button><input id="gen-ubicacion" type="number" inputmode="numeric" min="0" max="${TOPE_POR_TANDA}" value="20"><button type="button" class="btn" data-mas="gen-ubicacion" aria-label="Uno más">+</button></div>
     </div>
-    <div class="gen-contador">
-      <label for="gen-motos"><b>Motorizados de prueba</b><span class="muted">Reciben los pedidos listos y contestan desde «Ver el flujo en vivo» (51 000 1…).</span></label>
-      <div class="gen-num"><button type="button" class="btn" data-menos="gen-motos" aria-label="Uno menos">−</button><input id="gen-motos" type="number" inputmode="numeric" min="0" max="${TOPE_MOTORIZADOS}" value="5"><button type="button" class="btn" data-mas="gen-motos" aria-label="Uno más">+</button></div>
-    </div>
+
     <div class="gen-rapidos" role="group" aria-label="Cantidades rápidas"><span class="muted">Rápido:</span>
       <button type="button" class="btn sm" data-rapido="10">10 + 10</button><button type="button" class="btn sm" data-rapido="20">20 + 20</button><button type="button" class="btn sm" data-rapido="50">50 + 50</button><button type="button" class="btn sm" data-rapido="250">250 + 250</button>
     </div>
-    <p class="muted gen-tope">Tope de seguridad: ${TOPE_POR_TANDA} clientes por tanda y ${TOPE_MOTORIZADOS} motorizados.</p>
+    <p class="muted gen-tope">Tope de seguridad: ${TOPE_POR_TANDA} clientes por tanda .</p>
     <button type="submit" class="btn primario gen-crear" id="gen-crear">Crear de prueba</button>
     <div class="gen-msg" id="gen-msg" role="status" aria-live="polite"></div>
     <div class="gen-envio" id="gen-envio">
@@ -275,7 +264,7 @@ const HTML = `
     <div class="gen-borrar">
       <button type="button" class="btn peligro" id="gen-borrar">Borrar todo lo de prueba</button>
       <div class="gen-confirmar-borrar" id="gen-confirmar-borrar" hidden>
-        <p><b>¿Borrar todo lo de prueba?</b> Se van los clientes y motorizados de prueba, sus pedidos, chats y reportes en cola. Lo real no se toca.</p>
+        <p><b>¿Borrar todo lo de prueba?</b> Se van los clientes de prueba, sus pedidos, chats y reportes en cola. Lo real no se toca.</p>
         <button type="button" class="btn peligro" id="gen-borrar-si">Sí, borrar</button>
         <button type="button" class="btn" id="gen-borrar-no">Cancelar</button>
       </div>
@@ -321,8 +310,8 @@ const JS =
     pendiente: 'Recién llegados (aún sin procesar)',
     esperando_ubicacion: 'Falta que mande su ubicación',
     esperando_confirmacion: 'Contactado, falta que confirme',
-    lista: 'Listos para el motorizado',
-    esperando_motorizado: 'Esperando al motorizado',
+    lista: 'Ubicación y confirmación registradas',
+    esperando_motorizado: 'Ubicación y confirmación registradas',
     avisada: 'Avisados con hora de llegada',
     entregada: 'Entregados',
     terminada: 'Terminados',
@@ -353,7 +342,6 @@ const JS =
         return '<div class="gen-fila"><span>' + escapar(NOMBRES[k]) + '</span><b>' + d.porEstado[k] + '</b></div>';
       });
       filas.unshift('<div class="gen-fila"><span><b>Clientes de prueba</b> (ya se les escribió a ' + d.escritos + ')</span><b>' + d.clientes + '</b></div>');
-      filas.push('<div class="gen-fila"><span>Motorizados de prueba</span><b>' + d.motorizados + '</b></div>');
       filas.push('<div class="gen-fila"><span>Reportes para GSG aún en cola</span><b>' + d.reportesPendientes + '</b></div>');
       caja.innerHTML = d.clientes || d.motorizados ? filas.join('') : '<p class="muted">No hay nada de prueba. Crea algunos a la izquierda.</p>';
       $('gen-borrar').disabled = !(d.clientes || d.motorizados || d.reportesPendientes);
@@ -379,9 +367,9 @@ const JS =
   $('gen-form').addEventListener('submit', async function (ev) {
     ev.preventDefault();
     var msg = $('gen-msg');
-    var cuerpo = { faltaConfirmar: numero('gen-confirmar'), faltaUbicacion: numero('gen-ubicacion'), motorizados: numero('gen-motos') };
+    var cuerpo = { faltaConfirmar: numero('gen-confirmar'), faltaUbicacion: numero('gen-ubicacion'), motorizados: 0 };
     if (cuerpo.faltaConfirmar + cuerpo.faltaUbicacion > TOPE) { avisar(msg, 'Como mucho ' + TOPE + ' clientes por tanda.', true); return; }
-    if (!cuerpo.faltaConfirmar && !cuerpo.faltaUbicacion && !cuerpo.motorizados) { avisar(msg, 'Elige al menos un cliente o motorizado.', true); return; }
+    if (!cuerpo.faltaConfirmar && !cuerpo.faltaUbicacion && !cuerpo.motorizados) { avisar(msg, 'Elige al menos un cliente.', true); return; }
     var boton = $('gen-crear');
     boton.disabled = true; boton.textContent = 'Creando… (entran por la API)';
     avisar(msg, '');
@@ -443,7 +431,7 @@ const JS =
 export const seccionGenerar: SeccionDesarrollador = {
   id: 'generar',
   titulo: 'Clientes de prueba',
-  resumen: 'Crea clientes y motorizados de prueba: entran por la API como los de GSG. Nada sale al WhatsApp real.',
+  resumen: 'Crea clientes de prueba: entran por la API como los de GSG. Nada sale al WhatsApp real.',
   html: HTML,
   js: JS,
   css: CSS,

@@ -8,14 +8,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { normalizePhone, type Repos, type TemplateCategory } from '../db/repos.js';
+import { normalizePhone, type Repos } from '../db/repos.js';
 import type { OutboundQueue } from '../outbound/queue.js';
 import { dailyCapFor } from '../outbound/throttle.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioPlan } from '../plan/servicio.js';
-import { createTrackingSession } from '../tracking/routes.js';
-import { buildTrackingUrls } from '../tracking/tokens.js';
+
+
 import type { TrackingHub } from '../tracking/realtime.js';
 import type { Sender } from '../outbound/sender.js';
 import { extractLocation } from '../geo/extract.js';
@@ -42,10 +42,10 @@ import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
 import { providerOf } from '../settings/service.js';
 import { avisosDeMeta } from '../whatsapp/avisos-meta.js';
-import { correrGoteo } from '../campanas/goteo.js';
-import { crearCampana } from '../campanas/crear.js';
+
+
 import { TITULO_ALERTA, type TipoAlertaHoy } from '../entregas/alertas-hoy.js';
-import { registerGruposRoutes } from './grupos-routes.js';
+
 import { registerBuscarRoutes } from './buscar-routes.js';
 
 export interface AdminDeps {
@@ -193,7 +193,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     entrenamiento: deps.entrenamiento,
     publicBase: config.PUBLIC_BASE_URL,
   });
-  await registerGruposRoutes(app, { repos, config, settings, ajustes: deps.ajustes });
+
   // El buscador global (Ctrl K) y "que paso con este mensaje". Ver buscar-routes.ts.
   await registerBuscarRoutes(app, { repos, entregas: deps.entregas });
   await registerRutasRoutes(app, {
@@ -310,7 +310,6 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         if (n > 0) avisos.push({ tipo: 'entregas', nivel: 'warn', texto: `${n} pedido${n === 1 ? '' : 's'} de hoy necesita${n === 1 ? '' : 'n'} a alguien`, href: '/hoy', n });
         if (r.cierrePendiente > 0) avisos.push({ tipo: 'cierre', nivel: 'info', texto: `${r.cierrePendiente} pedido${r.cierrePendiente === 1 ? '' : 's'} de ayer sigue${r.cierrePendiente === 1 ? '' : 'n'} sin cerrar`, href: '/hoy', n: r.cierrePendiente });
         if (r.gsg && !r.gsg.conectada) avisos.push({ tipo: 'gsg', nivel: 'info', texto: 'GSG no está conectado: los pedidos del día no entran solos', href: '/hoy' });
-        if (r.cifras.total > 0 && !r.motorizados.some((m) => m.estado === 'activo')) avisos.push({ tipo: 'motorizados', nivel: 'bad', texto: 'No hay ningún motorizado activo: los pedidos listos no pueden salir', href: '/motorizados' });
         if (r.gsgCola && r.gsgCola.fallido > 0) avisos.push({ tipo: 'gsg_cola', nivel: 'warn', texto: `${r.gsgCola.fallido} reporte${r.gsgCola.fallido === 1 ? '' : 's'} que GSG no aceptó`, href: '/hoy', n: r.gsgCola.fallido });
       }
     }
@@ -364,8 +363,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   });
 
   /** El plan de esta tienda, para la pantalla de configuracion. */
-  app.get('/admin/plan', async () => deps.plan?.estado() ?? { origen: 'libre', plan: null, iaTurnosMes: 0, mes: '', consultadoEn: null, error: null, aviso: null });
-  app.post('/admin/plan/refrescar', async () => (deps.plan ? deps.plan.refrescar() : { origen: 'libre', plan: null, iaTurnosMes: 0, mes: '', consultadoEn: null, error: null, aviso: null }));
+
+
 
   // --- el inicio del panel: un vistazo a todo -----------------------------
 
@@ -380,7 +379,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     inicioHoy.setHours(0, 0, 0, 0);
     const hace7 = new Date(inicioHoy.getTime() - 6 * 24 * 60 * 60 * 1000);
 
-    const [hoy, entrantesHoy, actividad, esperando, sinLeer, estado, cifrasReparto, requierenPersona, lotes, campanas, contactos, usuarios, plantillas] =
+    const [hoy, entrantesHoy, actividad, esperando, sinLeer, estado, cifrasReparto, requierenPersona, lotes, contactos, usuarios, plantillas] =
       await Promise.all([
         repos.deliveries.resumenDesde(inicioHoy),
         repos.messages.contarEntrantesDesde(inicioHoy),
@@ -391,7 +390,6 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         repos.rutas.cifrasPorEstado(),
         repos.rutas.contarSolicitudes({ requiereHumano: true }),
         repos.rutas.listarLotes(20, 0),
-        repos.campaigns.list(),
         repos.contacts.list({ limit: 1, offset: 0 }),
         repos.usuarios.contar(),
         repos.templates.list(),
@@ -419,7 +417,6 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
           entregadas: resumenEntregas.cifras.entregada,
           incidencia: resumenEntregas.cifras.incidencia,
           canceladas: resumenEntregas.cifras.cancelada,
-          motorizadosActivos: resumenEntregas.motorizados.filter((m) => m.estado === 'activo').length,
           gsgConectada: resumenEntregas.gsg?.conectada ?? false,
           gsgDescripcion: resumenEntregas.gsg?.descripcion ?? 'sin conexión',
           ultimoCierre: resumenEntregas.ultimoCierre,
@@ -458,10 +455,6 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         lotesEnMarcha: lotes.filter((l) => l.estado === 'enviando').length,
         lotesRecientes: lotes.slice(0, 5).map((l) => ({ id: l.id, nombre: l.nombre, estado: l.estado, total: l.total, cifras: l.cifras, createdAt: l.createdAt })),
       },
-      campanas: {
-        activas: campanas.filter((c) => c.status === 'running' || c.status === 'canary').length,
-        pausadas: campanas.filter((c) => c.status === 'paused').length,
-      },
       contactos: contactos.total,
       // Para la lista de "primeros pasos" del inicio: que esta hecho y que no.
       primerosPasos: {
@@ -478,20 +471,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         lecciones: deps.entrenamiento ? deps.entrenamiento.cargadas() : null,
         // Lo que GSGchat necesita para arrancar (modo gsg): motorizados, y de donde salen los pedidos.
         modo: deps.ajustes?.modo() ?? 'gsg',
-        // Sin las entregas de courier, los pasos son los de los procesos: crear uno y cargarle personas.
-        procesos: repos.procesos ? (await repos.procesos.procesos().catch(() => [])).filter((x) => x.plantilla !== 'gsg').length : null,
-        personasEnProcesos: repos.procesos ? Object.values(await repos.procesos.cifras().catch(() => ({}) as Record<string, number>)).reduce((s, n) => s + n, 0) : null,
-        motorizadosActivos: resumenEntregas ? resumenEntregas.motorizados.filter((m) => m.estado === 'activo').length : null,
         gsg: resumenEntregas?.gsg ? (resumenEntregas.gsg.conectada ? (resumenEntregas.gsg.modo === 'simulador' ? 'simulador' : 'real') : 'ninguna') : null,
         entregasHoy: resumenEntregas ? resumenEntregas.cifras.total : null,
         supervisor: Boolean(deps.ajustes?.supervisor() || config.RUTAS_SUPERVISOR),
-        // Stoky en las dos direcciones: si este sistema consulta su catalogo y si Stoky ya usa su clave.
-        stoky: deps.conexionStoky
-          ? {
-              configurada: deps.conexionStoky.estado().configurada,
-              claveUsada: (await repos.claves.listar()).some((c) => !c.revocadaAt && /stoky/i.test(c.nombre) && Boolean(c.ultimoUsoAt)),
-            }
-          : null,
       },
     };
   });
@@ -698,76 +680,20 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   });
 
   // --- campanas: por goteo y con canario. Ver src/campanas/goteo.ts -----
-  app.post('/admin/campaigns', async (request, reply) => {
-    const body = campaignSchema.parse(request.body);
-    const sinPlan = deps.plan?.motivo('campanas');
-    if (sinPlan) return reply.code(402).send({ error: sinPlan });
-    const resultado = await crearCampana(repos, {
-      name: body.name,
-      templateName: body.templateName,
-      templateLanguage: body.templateLanguage,
-      category: body.category as TemplateCategory,
-      recipients: body.recipients,
-      ritmoPorHora: body.ritmoPorHora ?? null,
-      canario: body.canario,
-      canarioEsperaMin: body.canarioEsperaMin,
-    });
-    if (!resultado.ok) return reply.code(400).send({ error: resultado.error });
-    const { ok: _ok, ...resto } = resultado;
-    return resto;
-  });
+
 
   /** Lista con conteo por estado de entrega y de destinatarios. */
-  app.get('/admin/campaigns', async () => repos.campaigns.list());
+
 
   /** Pausar, reanudar o parar del todo una campana. */
-  app.post<{ Params: { id: string } }>('/admin/campaigns/:id/estado', async (request, reply) => {
-    const body = z.object({ accion: z.enum(['pausar', 'reanudar', 'parar']), motivo: z.string().max(200).optional() }).parse(request.body);
-    const campaign = await repos.campaigns.get(request.params.id);
-    if (!campaign) return reply.code(404).send({ error: 'campana no encontrada' });
 
-    if (body.accion === 'pausar') {
-      if (!['running', 'canary'].includes(campaign.status)) {
-        return reply.code(400).send({ error: `la campana esta ${campaign.status}: no se puede pausar` });
-      }
-      await repos.campaigns.setStatus(campaign.id, 'paused', body.motivo?.trim() || 'pausa manual');
-    } else if (body.accion === 'reanudar') {
-      if (campaign.status !== 'paused') {
-        return reply.code(400).send({ error: `la campana esta ${campaign.status}: no hay nada que reanudar` });
-      }
-      // Reanudar a mano tras el canario es decir "vi las cifras y sigo".
-      await repos.campaigns.setStatus(campaign.id, 'running');
-      await deps.salud?.registrarEvento('campana', 'REANUDADA', `${campaign.name}: a mano (${body.motivo ?? 'sin motivo'})`, {
-        campaignId: campaign.id,
-      });
-    } else {
-      const cancelados = await repos.campaigns.cancelarPendientes(campaign.id, body.motivo?.trim() || 'campana parada');
-      await repos.campaigns.setStatus(campaign.id, 'stopped', body.motivo?.trim() || 'parada a mano');
-      return { ok: true, cancelados, campaign: await repos.campaigns.get(campaign.id) };
-    }
-    return { ok: true, campaign: await repos.campaigns.get(campaign.id) };
-  });
 
   /** Un tick del goteo ahora mismo, sin esperar al ticker. */
-  app.post('/admin/campaigns/goteo', async () => {
-    const resultado = await correrGoteo({ repos, sender, salud: deps.salud, politica: deps.politica });
-    return { ok: true, ...resultado };
-  });
 
-  app.get<{ Params: { id: string } }>('/admin/campaigns/:id', async (request, reply) => {
-    const campaign = await repos.campaigns.get(request.params.id);
-    if (!campaign) return reply.code(404).send({ error: 'campana no encontrada' });
-    return {
-      ...campaign,
-      stats: await repos.deliveries.campaignStats(campaign.id),
-      destinatarios: await repos.campaigns.cifrasDestinatarios(campaign.id),
-      canarioCifras: campaign.canario ? await repos.campaigns.resumenCanario(campaign.id) : null,
-    };
-  });
 
-  app.get<{ Params: { id: string } }>('/admin/campaigns/:id/stats', async (request) => {
-    return repos.deliveries.campaignStats(request.params.id);
-  });
+
+
+
 
   // --- entregas: cada intento, salga o no ---------------------------------
   app.get('/admin/deliveries', async (request) => {
@@ -824,54 +750,12 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   });
 
   // --- rastreo en vivo --------------------------------------------------
-  app.post('/admin/tracking', async (request, reply) => {
-    const body = trackingSchema.parse(request.body);
 
-    const contact = body.phone ? await repos.contacts.getByPhone(body.phone) : null;
-    if (body.phone && !contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-
-    const session = await createTrackingSession(
-      { repos, config },
-      { contactId: contact?.id ?? null, label: body.label, ttlMinutes: body.ttlMinutes },
-    );
-
-    let notified: Awaited<ReturnType<Sender['send']>> | null = null;
-    if (body.notify && contact) {
-      notified = await sender.send({
-        phone: contact.phone,
-        kind: 'freeform',
-        category: 'UTILITY',
-        text: `Sigue la entrega en vivo aqui:\n${session.viewUrl}\n\nEl enlace caduca el ${session.expiresAt.toLocaleString('es-PE')}.`,
-      });
-    }
-
-    return { ...session, notified };
-  });
 
   /** Sesiones vigentes con sus enlaces regenerados y cuantos las miran. */
-  app.get('/admin/tracking', async () => {
-    const active = await repos.tracking.listActive(new Date());
-    return active.map((link) => {
-      const urls = buildTrackingUrls(
-        link.id,
-        link.expiresAt,
-        config.TRACKING_SECRET,
-        config.PUBLIC_BASE_URL,
-      );
-      return {
-        ...link,
-        publishUrl: urls.publishUrl,
-        viewUrl: urls.viewUrl,
-        viewers: hub.viewerCount(link.id),
-      };
-    });
-  });
 
-  app.delete<{ Params: { id: string } }>('/admin/tracking/:id', async (request) => {
-    await repos.tracking.revoke(request.params.id);
-    hub.close(request.params.id, 'revocada desde el panel');
-    return { ok: true };
-  });
+
+
 
   // --- envios sueltos desde el panel ------------------------------------
   app.post('/admin/messages/text', async (request) => {

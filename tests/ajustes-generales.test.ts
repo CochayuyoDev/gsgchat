@@ -120,51 +120,15 @@ describe('servicio de ajustes', () => {
     expect(ajustes.politica(base).horaFin).toBe(18);
   });
 
-  it('el modo prueba de la pantalla manda cuando el servidor no fijo ninguno', async () => {
-    const config = loadConfig(ENV_BASE);
+  it('retira el modo prueba, incluso si había una lista guardada o en el servidor', async () => {
+    const config = loadConfig({ ...ENV_BASE, SOLO_NUMEROS: '51902464984' });
     const repos = createFakeRepos();
+    await repos.ajustesGenerales.set({ modoPrueba: { activo: true, numeros: ['51902464984'] } });
     const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0 });
-    expect(ajustes.modoPruebaFijado()).toBe(false);
-    await ajustes.guardar({ modoPrueba: { activo: true, numeros: ['+51 902 464 984', '51912426667'] } });
-    expect(ajustes.soloNumeros()).toEqual(['51902464984', '51912426667']);
-    await ajustes.guardar({ modoPrueba: { activo: false } });
     expect(ajustes.soloNumeros()).toEqual([]);
-  });
-
-  it('el SOLO_NUMEROS del servidor solo se puede recortar, nunca ampliar ni apagar', async () => {
-    const config = loadConfig({ ...ENV_BASE, SOLO_NUMEROS: '51902464984,51912426667' });
-    const repos = createFakeRepos();
-    const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0 });
-    expect(ajustes.modoPruebaFijado()).toBe(true);
-    expect(ajustes.soloNumeros()).toEqual(['51902464984', '51912426667']);
-    await ajustes.guardar({ modoPrueba: { activo: false, numeros: [] } });
-    expect(ajustes.soloNumeros()).toEqual(['51902464984', '51912426667']);
-    await ajustes.guardar({ modoPrueba: { activo: true, numeros: ['51912426667', '51999999999'] } });
-    expect(ajustes.soloNumeros()).toEqual(['51912426667']);
-    await ajustes.guardar({ modoPrueba: { activo: true, numeros: ['51999999999'] } });
-    expect(ajustes.soloNumeros()).toEqual(['51902464984', '51912426667']);
-  });
-
-  it('el sender respeta el modo prueba de la pantalla en caliente', async () => {
-    const config = loadConfig(ENV_BASE);
-    const repos = createFakeRepos();
-    const wa = createFakeWhatsApp();
-    const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0 });
-    const sender = createSender({
-      repos,
-      wa,
-      phoneNumberId: 'PNID',
-      warmup: { startPerDay: 50, growth: 1.5, hardCap: 1000 },
-      maxMarketingPerContact7d: 2,
-      soloNumeros: () => ajustes.soloNumeros(),
-    });
-    const contacto = await repos.contacts.upsertFromInbound('51955555555');
-    await repos.contacts.setOptIn(contacto.phone, 'prueba');
-    const antes = await sender.send({ phone: '51955555555', kind: 'freeform', category: 'UTILITY', text: 'hola', manual: true });
-    expect(antes).toMatchObject({ ok: true });
-    await ajustes.guardar({ modoPrueba: { activo: true, numeros: ['51902464984'] } });
-    const despues = await sender.send({ phone: '51955555555', kind: 'freeform', category: 'UTILITY', text: 'hola', manual: true });
-    expect(despues).toMatchObject({ blocked: true, code: 'allowlist' });
+    expect(ajustes.actual().modoPrueba).toEqual({ activo: false, numeros: [] });
+    expect(ajustes.modoPruebaFijado()).toBe(false);
+    await expect(ajustes.guardar({ modoPrueba: { activo: true, numeros: ['51902464984'] } })).rejects.toThrow();
   });
 });
 
@@ -209,11 +173,11 @@ describe('/admin/ajustes', () => {
       method: 'POST',
       url: '/admin/ajustes',
       headers: { cookie: admin },
-      payload: { nombreNegocio: 'Reparto GSG', horario: { inicio: 7, fin: 21, dias: [1, 2, 3, 4, 5] }, modoPrueba: { activo: true, numeros: ['51902464984'] } },
+      payload: { nombreNegocio: 'Reparto GSG', horario: { inicio: 7, fin: 21, dias: [1, 2, 3, 4, 5] } },
     });
     expect(res.statusCode).toBe(200);
     const r = (await app.inject({ method: 'GET', url: '/admin/ajustes', headers: { cookie: admin } })).json();
-    expect(r.efectivo).toMatchObject({ nombreNegocio: 'Reparto GSG', horario: { inicio: 7, fin: 21, dias: [1, 2, 3, 4, 5] }, soloNumeros: ['51902464984'] });
+    expect(r.efectivo).toMatchObject({ nombreNegocio: 'Reparto GSG', horario: { inicio: 7, fin: 21, dias: [1, 2, 3, 4, 5] }, soloNumeros: [] });
     expect((await app.inject({ method: 'GET', url: '/' })).body).toContain('Reparto GSG');
     expect((await app.inject({ method: 'GET', url: '/panel', headers: { cookie: admin } })).body).toContain('Reparto GSG');
   });

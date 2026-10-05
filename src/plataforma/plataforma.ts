@@ -38,6 +38,7 @@ import { entornoDeTienda, lugarDeTienda, pareceSlug, slugDe } from './entorno.js
 import { armarTienda, type BaseDeTienda, type OpcionesTienda, type TiendaViva } from './tienda.js';
 import { enTienda } from './contexto.js';
 import type { DirectorioUsuarios } from '../auth/routes.js';
+import { createClavesApiRepo, type ClaveApi } from '../auth/claves-api.js';
 
 /** Lo que la instalacion de siempre aporta como tienda principal. */
 export type OpcionesPrincipal = Omit<OpcionesTienda, 'id' | 'slug' | 'primeraCuentaRol' | 'directorio'>;
@@ -97,6 +98,8 @@ export interface Plataforma {
   arrancar(): Promise<void>;
   /** La tienda viva por slug (la carga si hace falta). null si no existe o esta suspendida. */
   tiendaPorSlug(slug: string): Promise<TiendaViva | null>;
+  /** Consulta una clave sin arrancar la tienda (también si está suspendida). */
+  consultarClaveGsg?(tienda: TiendaRegistrada, hash: string): Promise<ClaveApi | null>;
   tiendaPrincipal(): Promise<TiendaViva | null>;
   registrar(datos: unknown, ip: string): Promise<ResultadoRegistro>;
   entrar(datos: { usuario: string; clave: string; next?: string }, ip: string): Promise<ResultadoEntrada>;
@@ -438,6 +441,16 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
       const t = await directorio.porSlug(slug);
       if (!t || t.estado !== 'activa' || (t.principal && !o.principal)) return null;
       return cargar(t);
+    },
+    consultarClaveGsg: async (t, hash) => {
+      const base = t.principal ? o.principal?.base : o.base;
+      if (!base) return null;
+      const pool = createPool(base.url, t.principal ? o.principal?.base.base ?? baseDeLaUrl(base.url) : nombres.tienda(t.id));
+      try {
+        return await createClavesApiRepo(pool).porHashConRevocadas!(hash);
+      } finally {
+        await pool.end();
+      }
     },
     tiendaPrincipal: async () => {
       if (!o.principal) return null;

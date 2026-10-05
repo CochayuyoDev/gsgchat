@@ -23,7 +23,7 @@ import {
   despacharReportes,
   exportarCola,
   payloadIncidencia,
-  payloadUbicacion,
+  payloadUbicacionDelPedido,
   type PuertoGsg,
 } from '../rutas/gsg.js';
 import { extractLocation } from '../geo/extract.js';
@@ -500,7 +500,7 @@ export async function registerRutasRoutes(
         solicitudId: solicitud.id,
         loteId: lote.id,
         tipo: 'ubicacion',
-        payload: payloadUbicacion(actualizada, lote),
+        payload: await payloadUbicacionDelPedido(repos, actualizada, lote),
       });
     }
 

@@ -361,7 +361,7 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
       const at = ahora().toISOString();
       const puerto = deps.puerto();
       if (!puerto.conectado()) {
-        ultimaVerificacion = { ok: false, resumen: 'No hay conexión con GSG: elige el simulador o pega la dirección de su API.', hallazgos: [], at };
+        ultimaVerificacion = { ok: false, resumen: 'No hay conexión con GSG: configura la dirección de su API.', hallazgos: [], at };
         return ultimaVerificacion;
       }
       const r = await puerto.consultar<unknown>(RUTA_GSG_PENDIENTES);

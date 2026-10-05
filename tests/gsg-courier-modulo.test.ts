@@ -45,7 +45,7 @@ describe('modulo especializado GSG Courier', () => {
     const p = EJEMPLO_COURIER.pedidos[0]!;
     const malo = await validar({ pedidos: [p, p, { ...p, tracking: 'GSG-MALO', telefono: '12' }] });
     expect(malo.json()).toMatchObject({ ok: false, total: 3, validos: 1, repetidas: [p.tracking], descartadas: [{ referencia: 'GSG-MALO', motivo: expect.any(String) }] });
-    expect((await validar({ pedidos: Array.from({ length: 501 }, () => p) })).statusCode).toBe(400);
+    expect((await validar({ pedidos: Array.from({ length: 601 }, () => p) })).statusCode).toBe(400);
     expect((await validar({ pedidos: [] })).statusCode).toBe(400);
     expect((await esc.resumen()).entregas.length).toBe(antes);
     expect(esc.wa.sent.length).toBe(mensajes);
