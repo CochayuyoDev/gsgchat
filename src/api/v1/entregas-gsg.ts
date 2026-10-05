@@ -267,7 +267,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   // Historial de recepción: /panel#historial muestra tanto intentos de
   // WhatsApp como las llamadas entrantes a esta API. Solo se guardan códigos,
   // cantidades, referencias y errores; nunca teléfonos, tokens ni el JSON entero.
-  if (deps.actividad) {
+  const actividad = deps.actividad;
+  if (actividad) {
     app.addHook('onSend', async (request, reply, payload) => {
       if (request.method !== 'POST' || (request.url.split('?')[0] ?? '') !== '/api/v1/entregas') return payload;
       try {
@@ -280,7 +281,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         const descartadas = Array.isArray(salida.descartadas) ? salida.descartadas : [];
         const error = typeof salida.error === 'string' ? salida.error.slice(0, 800) : null;
         const usuario = request.usuario;
-        await deps.actividad.anotar({
+        await actividad.anotar({
           usuarioId: usuario?.id ?? null,
           usuario: usuario?.nombre ?? 'API/Postman',
           accion: 'gsg.api.recepcion',
