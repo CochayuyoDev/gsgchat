@@ -43,7 +43,7 @@ describe('contrato del diagrama GSG', () => {
     const server = http.createServer((req, res) => {
       let body = '';
       req.on('data', c => body += c);
-      req.on('end', () => { llegadas.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(body) }); res.writeHead(status); res.end('{}'); });
+      req.on('end', () => { llegadas.push({ url: req.url, auth: req.headers.authorization, apiKey: req.headers['x-api-key'], body: JSON.parse(body) }); res.writeHead(status); res.end('{}'); });
     });
     await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
     try {
@@ -57,7 +57,7 @@ describe('contrato del diagrama GSG', () => {
       expect(await despacharReportes(repos, puerto)).toMatchObject({ intentados: 1, enviados: 1 });
       expect(await repos.rutas.cifrasReportes()).toMatchObject({ pendiente: 0, enviado: 1 });
       expect(llegadas).toHaveLength(2);
-      expect(llegadas[1]).toEqual({ url: '/sendLocation', auth: 'Bearer clave-backend', body: { tracking: 'TRACK-001', latitud: PIN_LIMA.lat, longitud: PIN_LIMA.lng } });
+      expect(llegadas[1]).toEqual({ url: '/sendLocation', auth: 'Bearer clave-backend', apiKey: 'clave-backend', body: { tracking: 'TRACK-001', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
     } finally { await new Promise<void>(r => server.close(() => r())); }
   });
 
@@ -81,7 +81,7 @@ describe('contrato del diagrama GSG', () => {
       expect(esc.mensajesA('987100001')).toHaveLength(1);
       expect((await esc.contesta('987100001', { pin: PIN_LIMA })).status).toBe(200);
       for (let i = 0; i < 50 && !llegadas.length; i++) await new Promise(r => setTimeout(r, 20));
-      expect(llegadas).toContainEqual({ url: '/sendLocation', body: { tracking: 'TRACK-PIN-REAL', latitud: PIN_LIMA.lat, longitud: PIN_LIMA.lng } });
+      expect(llegadas).toContainEqual({ url: '/sendLocation', body: { tracking: 'TRACK-PIN-REAL', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
       expect(await esc.entrega('PIN-REAL')).toMatchObject({ ubicacionEstado: 'recibida', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng });
       const antes = esc.mensajesA('987100001').length;
       esc.avanzar(90); await esc.trabajar();

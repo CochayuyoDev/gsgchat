@@ -28,7 +28,7 @@ import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
-import { esRecepcionGsg, RECHAZOS, tokenBearer, type RechazoRecepcion } from '../plataforma/recepcion-gsg.js';
+import { claveDeCabeceras, esRecepcionGsg, RECHAZOS, type RechazoRecepcion } from '../plataforma/recepcion-gsg.js';
 import { cuerpoError } from '../api/errores.js';
 
 export interface UsuarioSesion {
@@ -181,8 +181,9 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
         embebido: { telefono: carga.telefono },
       };
     }
-    if (typeof header === 'string' && header.startsWith('Bearer ')) {
-      const token = header.slice(7).trim();
+    // La clave de API: `Authorization: Bearer` o `X-API-Key`.
+    const token = claveDeCabeceras(request.headers);
+    if (token) {
       if (!pareceClaveApi(token)) return null;
       const clave = await claves.porHash(hashClaveApi(token));
       if (!clave) return null;
@@ -203,8 +204,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   /** Por que una peticion a la recepcion no entra (o null si entra). */
   async function rechazoDeRecepcion(request: FastifyRequest): Promise<RechazoRecepcion | null> {
-    const header = request.headers.authorization;
-    const token = tokenBearer(typeof header === 'string' ? header : undefined);
+    const token = claveDeCabeceras(request.headers);
     if (!token) return RECHAZOS.ausente();
     if (!pareceClaveApi(token)) return RECHAZOS.invalida();
     if (!request.usuario?.porToken) {

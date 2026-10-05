@@ -79,6 +79,14 @@ export const RUTAS_GSG: Record<TipoReporte, string> = {
 export const RUTA_GSG_PENDIENTES = '/reparto/pendientes';
 
 /**
+ * La clave de GSG va como API key (`x-api-key`, lo que pide su backend) y
+ * tambien como Bearer, para los backends que solo leen `Authorization`.
+ */
+function cabecerasDeClave(token: string): Record<string, string> {
+  return token ? { 'x-api-key': token, authorization: `Bearer ${token}` } : {};
+}
+
+/**
  * Puerto real. Manda un POST con el payload tal cual y espera un JSON con
  * `id` o `referencia`; cualquier 2xx se da por aceptado.
  */
@@ -98,9 +106,9 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
+            ...cabecerasDeClave(opts.token),
           },
-          body: JSON.stringify(tipo === 'ubicacion' ? { tracking: payload.tracking ?? payload.referencia, latitud: payload.latitud ?? payload.lat, longitud: payload.longitud ?? payload.lng } : payload),
+          body: JSON.stringify(tipo === 'ubicacion' ? { tracking: payload.tracking ?? payload.referencia, lat: payload.lat ?? payload.latitud, lng: payload.lng ?? payload.longitud } : payload),
           signal: control.signal,
         });
 
@@ -142,7 +150,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
           method: 'GET',
           headers: {
             accept: 'application/json',
-            ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
+            ...cabecerasDeClave(opts.token),
           },
           signal: control.signal,
         });

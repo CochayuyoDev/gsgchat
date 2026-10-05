@@ -27,7 +27,7 @@ export const RECHAZOS = {
   ausente: (): RechazoRecepcion => ({
     status: 401,
     cabeceras: BEARER,
-    cuerpo: cuerpoError('CLAVE_AUSENTE', 'Falta la clave de API: manda la cabecera «Authorization: Bearer <clave>».'),
+    cuerpo: cuerpoError('CLAVE_AUSENTE', 'Falta la clave de API: manda la cabecera «Authorization: Bearer <clave>» o «X-API-Key: <clave>».'),
   }),
   invalida: (): RechazoRecepcion => ({
     status: 401,
@@ -71,16 +71,29 @@ export function tokenBearer(authorization: string | undefined): string | null {
 }
 
 /**
+ * La clave de API de la peticion: `Authorization: Bearer <clave>` o, para los
+ * sistemas que solo saben mandar API keys, `X-API-Key: <clave>`. Si vienen
+ * las dos, manda el Bearer.
+ */
+export function claveDeCabeceras(headers: { authorization?: string; [cabecera: string]: string | string[] | undefined }): string | null {
+  const bearer = tokenBearer(typeof headers.authorization === 'string' ? headers.authorization : undefined);
+  if (bearer) return bearer;
+  const apiKey = headers['x-api-key'];
+  const valor = (Array.isArray(apiKey) ? apiKey[0] : apiKey)?.trim();
+  return valor || null;
+}
+
+/**
  * La tienda de la clave, o por que no entra. Las claves existentes siguen en
  * la base de su tienda. Nunca se usa cookie, Referer, slug ni una tienda
  * enviada en el cuerpo para decidir el destino.
  */
 export async function tiendaDeClaveGsg(
   plataforma: Pick<Plataforma, 'directorio' | 'tiendaPorSlug' | 'consultarClaveGsg'>,
-  authorization: string | undefined,
+  headers: Parameters<typeof claveDeCabeceras>[0],
   permiso: 'entregas:gestionar' | 'entregas:leer' = 'entregas:gestionar',
 ): Promise<{ tienda: TiendaViva } | { rechazo: RechazoRecepcion }> {
-  const clave = tokenBearer(authorization);
+  const clave = claveDeCabeceras(headers);
   if (!clave) return { rechazo: RECHAZOS.ausente() };
   if (!pareceClaveApi(clave)) return { rechazo: RECHAZOS.invalida() };
   const hash = hashClaveApi(clave);

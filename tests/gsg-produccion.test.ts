@@ -217,7 +217,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     const l = crm.ubicaciones().find((x) => x.cuerpo.tracking === 'P-001')!;
     expect(l.metodo).toBe('POST');
     expect(l.autorizacion).toBe(`Bearer ${crm.estado.token}`);
-    expect(l.cuerpo).toMatchObject({ tracking: 'P-001', latitud: -12.1211, longitud: -77.0301 });
+    expect(l.cuerpo).toMatchObject({ tracking: 'P-001', lat: -12.1211, lng: -77.0301 });
     // El cliente recibe su confirmación: solo el enlace, sin coordenadas.
     await esperar(() => /Ubicación registrada/.test(textosA('51987000001')), 10_000, 'la confirmacion al cliente');
     const confirmacion = aEste('51987000001').map((m) => String(m.body ?? '')).find((t) => t.includes('Ubicación registrada'))!;
@@ -232,7 +232,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     await escribe('51987000002', { text: 'aqui esta https://www.google.com/maps?q=-12.0931,-77.0465' });
     await esperar(() => crm.ubicaciones().some((l) => l.cuerpo.tracking === 'P-002'), 10_000, 'que GSG reciba P-002');
     const l = crm.ubicaciones().find((x) => x.cuerpo.tracking === 'P-002')!;
-    expect(l.cuerpo).toMatchObject({ latitud: -12.0931, longitud: -77.0465 });
+    expect(l.cuerpo).toMatchObject({ lat: -12.0931, lng: -77.0465 });
   });
 
   it('6. un texto sin ubicación (una dirección escrita) NO se manda como ubicación a GSG', async () => {
@@ -262,14 +262,14 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     await escribe('51987000005', { location: { latitude: -12.11, longitude: -77.021 } });
     await esperar(() => crm.ubicaciones().filter((l) => l.cuerpo.tracking === 'P-005').length === 2, 10_000, 'la correccion de P-005');
     const ultima = crm.ubicaciones().filter((l) => l.cuerpo.tracking === 'P-005').at(-1)!;
-    expect(ultima.cuerpo).toMatchObject({ tracking: 'P-005', latitud: -12.11, longitud: -77.021 });
+    expect(ultima.cuerpo).toMatchObject({ tracking: 'P-005', lat: -12.11, lng: -77.021 });
   });
 
   it('9. ninguna ubicación se mandó dos veces a GSG (salvo la corrección, que es otra)', () => {
     const aceptadas = crm.ubicaciones().filter((l) => l.autorizacion === `Bearer ${crm.estado.token}`);
     const porClave = new Map<string, number>();
     for (const l of aceptadas) {
-      const clave = `${l.cuerpo.tracking}|${l.cuerpo.latitud}|${l.cuerpo.longitud}`;
+      const clave = `${l.cuerpo.tracking}|${l.cuerpo.lat}|${l.cuerpo.lng}`;
       porClave.set(clave, (porClave.get(clave) ?? 0) + 1);
     }
     // P-004 llego una vez al CRM caido (503) y otra ya aceptada: son dos intentos, un solo alta.

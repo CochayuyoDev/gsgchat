@@ -4,7 +4,7 @@
 
 Endpoint global: POST /api/v1/entregas. La clave Bearer determina la tienda. No anteponer /tienda/<nombre>. GET /api/v1/entregas y GET /api/v1/entregas/<tracking> también seleccionan la tienda por la clave, sin depender de cookies.
 
-Cabeceras: Authorization: Bearer <clave> y Content-Type: application/json. Permisos: entregas:gestionar para crear, modificar o cancelar; entregas:leer para consultar.
+Cabeceras: Authorization: Bearer <clave> (o X-API-Key: <clave>) y Content-Type: application/json. Permisos: entregas:gestionar para crear, modificar o cancelar; entregas:leer para consultar.
 
 Se acepta un objeto, una lista de objetos o { "pedidos": [...] }, hasta 600 pedidos por llamada y 4 MiB. Tope: 120 llamadas por minuto y clave.
 
@@ -74,13 +74,13 @@ Si algunos teléfonos se descartan y otros pedidos se guardan, la respuesta 201 
 
 ## Devolución a GSG
 
-POST <GSG_URL>/sendLocation, con Authorization: Bearer <GSG_TOKEN> y application/json:
+POST <GSG_URL>/sendLocation, con x-api-key: <GSG_TOKEN> (tambien va Authorization: Bearer <GSG_TOKEN>) y application/json:
 
 ```json
 {
   "tracking": "GSG-000001",
-  "latitud": -12.1211,
-  "longitud": -77.0301
+  "lat": -12.1211,
+  "lng": -77.0301
 }
 ```
 

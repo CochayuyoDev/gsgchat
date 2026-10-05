@@ -113,6 +113,17 @@ describe('recepcion global aislada por clave', () => {
     const sinLectura = await fetch(base + '/api/v1/entregas', { headers: { authorization: `Bearer ${claveB}` } });
     expect(sinLectura.status).toBe(403);
   });
+  it('acepta la clave como API key (X-API-Key) igual que como Bearer', async () => {
+    const r = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': claveA, cookie: 'gsg_tienda=tienda-b' },
+      body: JSON.stringify({ ...OBLIGATORIOS_GSG, tracking: 'APIKEY-1', cliente: 'Cliente API key', telefono: '987654321' }) });
+    expect(r.status).toBe(201);
+    expect(await a.entrega('APIKEY-1')).toBeTruthy();
+    expect(await b.entrega('APIKEY-1')).toBeFalsy();
+    const lista = await fetch(base + '/api/v1/entregas', { headers: { 'x-api-key': soloLeer } });
+    expect(lista.status).toBe(200);
+    const mala = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': 'wak_no_existe' }, body: '{}' });
+    expect(mala.status).toBe(401);
+  });
   it('OpenAPI anuncia el endpoint de recepcion sin slug', () => {
     const doc = openApi('https://gsgchat.example/tienda/tienda-a') as any;
     expect(doc.paths['/entregas'].post.servers).toEqual([{ url: 'https://gsgchat.example/api/v1' }]);

@@ -33,7 +33,7 @@ import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS } from '../api/errores.js';
-import { esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
+import { claveDeCabeceras, esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
 const PREFIJO = '/tienda/';
@@ -109,9 +109,9 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
       return { tipo: 'rechazo', rechazo: RECHAZOS.metodo() };
     }
     const rutaApi = url.split('?')[0] ?? '';
-    if (esRecepcionGsg(req.method, url) || (req.headers.authorization && (rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/')))) {
+    if (esRecepcionGsg(req.method, url) || (claveDeCabeceras(req.headers) && (rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/')))) {
       const permiso = req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
-      const r = await tiendaDeClaveGsg(plataforma, req.headers.authorization, permiso);
+      const r = await tiendaDeClaveGsg(plataforma, req.headers, permiso);
       return 'tienda' in r ? { tipo: 'tienda', tienda: r.tienda, url } : { tipo: 'rechazo', rechazo: r.rechazo };
     }
     if (prefijo) {

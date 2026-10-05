@@ -12,7 +12,7 @@ import { PERMISOS } from '../../auth/permisos.js';
 
 type Json = Record<string, unknown>;
 
-const permiso = (p: keyof typeof PERMISOS) => ({ 'x-permiso': p, security: [{ claveApi: [] }] });
+const permiso = (p: keyof typeof PERMISOS) => ({ 'x-permiso': p, security: [{ claveApi: [] }, { claveApiCabecera: [] }] });
 
 const error = (descripcion: string) => ({
   description: descripcion,
@@ -35,7 +35,7 @@ export function openApi(baseUrl: string): Json {
       description: [
         'La puerta para GSG y otros sistemas autorizados. Se entra con una clave de API',
         'creada en API y endpoint GSG, con los permisos justos, en la cabecera',
-        '`Authorization: Bearer wak_...`.',
+        '`Authorization: Bearer wak_...` o, si el sistema solo manda API keys, `X-API-Key: wak_...`.',
         '',
         'Enviar nunca se salta las guardas anti-bloqueo: un mensaje frenado por un gate',
         'responde 202 con `estado: "bloqueado"` y el motivo, no 200.',
@@ -384,7 +384,10 @@ export function openApi(baseUrl: string): Json {
       },
     },
     components: {
-      securitySchemes: { claveApi: { type: 'http', scheme: 'bearer', description: 'Clave de API `wak_...` creada en el panel, con permisos' } },
+      securitySchemes: {
+        claveApi: { type: 'http', scheme: 'bearer', description: 'Clave de API `wak_...` creada en el panel, con permisos' },
+        claveApiCabecera: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'La misma clave `wak_...`, para sistemas que solo mandan API keys' },
+      },
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },
         Error: {

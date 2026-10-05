@@ -2,7 +2,7 @@
 
 Ejecutar `npm run test:api-mock` para verificar recepción de 600 pedidos, duplicados, campos obligatorios, claves, permisos, aislamiento entre cuentas y módulos retirados.
 
-El backend GSG se simula con un servidor HTTP local en un puerto libre. Registra el token y el JSON recibido por `POST /sendLocation`; las pruebas verifican exactamente `tracking`, `latitud` y `longitud`. También devuelve 503 para comprobar que el reporte permanece pendiente y se reenvía tras recuperar el servicio. WhatsApp se sustituye por un adaptador que registra los envíos. Los mocks no habilitan un modo de prueba en la web.
+El backend GSG se simula con un servidor HTTP local en un puerto libre. Registra el token y el JSON recibido por `POST /sendLocation`; las pruebas verifican exactamente `tracking`, `lat` y `lng`. También devuelve 503 para comprobar que el reporte permanece pendiente y se reenvía tras recuperar el servicio. WhatsApp se sustituye por un adaptador que registra los envíos. Los mocks no habilitan un modo de prueba en la web.
 
 Las pruebas `tests/gsg-produccion.test.ts` y `tests/recepcion-plataforma-sql.test.ts` verifican además la persistencia en MySQL/MariaDB, el reinicio, las claves por cuenta y la concurrencia. Requieren un servidor SQL de pruebas; `GSG_TEST_MYSQL_URL` debe apuntar a ese servidor. Crean bases con el prefijo `gsgchat_prueba_`.
 

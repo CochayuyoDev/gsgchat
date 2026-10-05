@@ -1726,7 +1726,7 @@ if ($('gsg')) {
       $('gsg-clave-valor').textContent = r.clave;
       $('gsg-clave-pasos').innerHTML = [
         'Dásela a los programadores de GSG junto con esta dirección: ' + location.origin + '/api/v1/entregas',
-        'Cada pedido nuevo lo mandan con POST y la cabecera Authorization: Bearer <la clave>.',
+        'Cada pedido nuevo lo mandan con POST y la cabecera Authorization: Bearer <la clave> o X-API-Key: <la clave>.',
         'Para enterarse de lo que pasa, registran un webhook con POST ' + location.origin + '/api/v1/webhooks.',
         'Pueden probar contra el simulador antes de tocar nada real: está explicado en el contrato.',
       ].map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');

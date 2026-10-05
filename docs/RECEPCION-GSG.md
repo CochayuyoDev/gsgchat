@@ -7,6 +7,7 @@ La API ya existia en el repositorio. Esta ampliacion conserva POST /api/v1/entre
 POST <URL_DEL_SERVIDOR>/api/v1/entregas
 Content-Type: application/json
 Authorization: Bearer <CLAVE_API>
+(o, si el sistema solo manda API keys: X-API-Key: <CLAVE_API>)
 
 Crear una clave en el panel con permiso entregas:gestionar. No enviar pedidos sin HTTPS en produccion.
 Usar el JSON de pedido-gsg-ejemplo.json. Se acepta uno, una lista o {"pedidos": [...]}.
