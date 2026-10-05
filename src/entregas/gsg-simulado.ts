@@ -180,7 +180,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
     distrito: c.distrito,
     notas: c.notas,
     urgente: c.urgente,
-    // Lo que sale en el primer mensaje al cliente (ver docs/CONTRATO-GSG.md).
+    // Lo que sale en el primer mensaje al cliente (ver /api/v1/openapi.json).
     ...(c.datosEnvio ? datosEnvioParaGsg(c.datosEnvio) : {}),
     ...(c.canceladoPorGsg ? { cancelado: true, motivoCancelacion: c.motivoCancelacion ?? 'cancelado por GSG' } : {}),
     // Si GSG ya tiene la ubicacion (de un pedido anterior o porque acaba de

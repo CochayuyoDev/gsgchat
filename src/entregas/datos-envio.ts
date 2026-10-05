@@ -13,7 +13,7 @@
  *
  * El monto puede venir como numero (85 → "85.00") o como texto. Lo que no
  * viene no se inventa: el primer mensaje al cliente simplemente no lleva esa
- * linea. Ver docs/CONTRATO-GSG.md.
+ * linea. Ver /api/v1/openapi.json.
  */
 
 import { datosEnvioLimpios, type DatosEnvio } from './repo.js';

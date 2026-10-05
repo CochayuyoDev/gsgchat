@@ -16,8 +16,6 @@
  *     conexion de la tienda ni su cola ni su simulador se tocan: la conexion
  *     queda exactamente como estaba, y la API real de GSG no se llama nunca.
  *  3. Webhooks entrega.*: formato, firma y que se reintenta y que no.
- *  4. El contrato escrito contra el codigo, campo por campo (contrato.ts), y
- *     que la descarga del panel es ese mismo documento.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -30,11 +28,10 @@ import { crearPuertoHttp, despacharReportes, payloadConfirmacion, payloadEntrega
 import { entregarUna } from '../webhooks/despachador.js';
 import { generarSecretoWebhook, verificarFirma } from '../webhooks/firma.js';
 import type { WebhookConSecreto } from '../webhooks/repo.js';
-import { compararContrato, leerContrato } from './contrato.js';
 import { numeroDePrueba } from './numeros.js';
 import type { Lote, Solicitud } from '../db/rutas.js';
 
-export type GrupoComprobacion = 'gsg_a_gsgchat' | 'gsgchat_a_gsg' | 'webhooks' | 'contrato';
+export type GrupoComprobacion = 'gsg_a_gsgchat' | 'gsgchat_a_gsg' | 'webhooks';
 
 export interface Comprobacion {
   id: string;
@@ -68,7 +65,7 @@ export interface DepsRecorrido {
   repos: Repos;
   /** Si las entregas del dia estan montadas (sin ellas no hay /api/v1/entregas). */
   hayEntregas: boolean;
-  /** Cabecera cookie de quien pulsa (para bajar el contrato como lo baja el panel). */
+  /** Cabecera cookie de quien pulsa. */
   cookie?: string;
   ahora?: () => Date;
   /** Solo para las pruebas: un simulador de GSG a medida (p. ej. uno que rechaza todo). */
@@ -79,7 +76,6 @@ export const TITULOS_GRUPO: Record<GrupoComprobacion, string> = {
   gsg_a_gsgchat: 'GSG → GSGchat: lo que GSG nos manda por la API',
   gsgchat_a_gsg: 'GSGchat → GSG: los reportes que le mandamos',
   webhooks: 'Avisos a GSG (webhooks entrega.*)',
-  contrato: 'El contrato escrito, campo por campo',
 };
 
 const TOKEN_SIMULADOR_PRIVADO = 'comprobacion-listo';
@@ -391,27 +387,12 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
       const reintentosOk = r500.reintentable && r429.reintentable && r408.reintentable && rRed.reintentable && !r404.reintentable && !r401.reintentable;
       poner({ id: 'webhook_reintentos', grupo: 'webhooks', titulo: 'Qué avisos se reintentan y cuáles no', ok: reintentosOk, explicacion: reintentosOk ? 'Un 5xx, un 408, un 429 o sin red se reintentan con espera creciente; un 401 o 404 (URL o firma mal del lado de GSG) no se insisten.' : `Reintenta: 500 ${r500.reintentable}, 429 ${r429.reintentable}, 408 ${r408.reintentable}, sin red ${rRed.reintentable}, 404 ${r404.reintentable}, 401 ${r401.reintentable}.` });
     }
-
-    // =================================================== 4. Contrato escrito
-    const md = await leerContrato();
-    if (!md) {
-      poner({ id: 'contrato_existe', grupo: 'contrato', titulo: 'El contrato está en esta instalación', ok: false, explicacion: 'No se encuentra docs/CONTRATO-GSG.md: no hay nada que darle a GSG.', queHacer: 'Copia la carpeta docs/ junto al programa.' });
-    } else {
-      for (const d of compararContrato(md)) {
-        poner({ id: `contrato_${d.parte}`, grupo: 'contrato', titulo: d.parte, ok: d.ok, explicacion: d.explicacion, queHacer: d.ok ? undefined : 'Corrige docs/CONTRATO-GSG.md (o el código) hasta que coincidan.', tecnico: d.ok ? undefined : { respuesta: { faltanEnElContrato: d.faltanEnDocumento, sobranEnElContrato: d.sobranEnDocumento } } });
-      }
-      if (deps.cookie) {
-        const r = await deps.app.inject({ method: 'GET', url: '/docs/contrato-gsg.md', headers: { cookie: deps.cookie } });
-        const igual = r.statusCode === 200 && r.body === md;
-        poner({ id: 'contrato_descarga', grupo: 'contrato', titulo: 'Lo que baja el panel es este mismo contrato', ok: igual, explicacion: igual ? '«Descargar el contrato» (Conexión) entrega exactamente este documento.' : `La descarga respondió ${r.statusCode} y no coincide con el fichero.` });
-      }
-    }
   } finally {
     limpieza = await limpiar(deps.repos, pref, [telA, telB], clavesCreadas).catch((error: unknown) => `No se pudo limpiar todo: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const bien = lista.filter((c) => c.ok).length;
-  const orden: GrupoComprobacion[] = ['gsg_a_gsgchat', 'gsgchat_a_gsg', 'webhooks', 'contrato'];
+  const orden: GrupoComprobacion[] = ['gsg_a_gsgchat', 'gsgchat_a_gsg', 'webhooks'];
   const grupos = orden
     .map((g) => ({ id: g, titulo: TITULOS_GRUPO[g], comprobaciones: lista.filter((c) => c.grupo === g) }))
     .filter((g) => g.comprobaciones.length)

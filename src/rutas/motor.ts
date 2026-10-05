@@ -32,7 +32,7 @@ import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
-import { payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
+import { despacharReportes, payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
 import {
   DESCRIPCION_PASO,
@@ -647,6 +647,8 @@ export function crearMotor(deps: MotorDeps): Motor {
           const lote = await repos.rutas.lote(c.loteId).catch(() => null);
           if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: await payloadUbicacionDelPedido(repos, c, lote) }).catch(() => undefined);
         }
+        // La ubicacion sale YA hacia GSG, sin esperar a la pasada de cada minuto.
+        if (cerradas.length) void despacharReportes({ rutas: repos.rutas }, gsg, 25, ['ubicacion']).catch(() => undefined);
         deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
         return true;
       };

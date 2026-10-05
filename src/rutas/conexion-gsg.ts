@@ -178,6 +178,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     },
     enviar: (tipo, payload): Promise<ResultadoEnvio> => actual().enviar(tipo, payload),
     esSimulador: () => efectiva().modo === 'simulador',
+    urlUbicacion: () => actual().urlUbicacion?.() ?? null,
     consultar: async <T,>(ruta: string): Promise<ResultadoConsulta<T>> => {
       const r = await actual().consultar<T>(ruta);
       if (r.ok && ruta === RUTA_GSG_PENDIENTES && observadores.size) {
@@ -229,9 +230,9 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     if (!r.ok) {
       const detalle =
         r.status === 401 || r.status === 403
-          ? 'GSG rechazó el token: revisa que sea el que te dieron.'
+          ? `GSG rechazó el token (error ${r.status}): revisa que sea el que te dieron.`
           : r.status === 404
-            ? `GSG respondió pero no tiene la ruta ${RUTA_GSG_PENDIENTES}: revisa la dirección (tiene que ser la base de su API).`
+            ? `GSG respondió con error 404: no tiene la ruta ${RUTA_GSG_PENDIENTES}. Revisa la dirección (tiene que ser la base de su API).`
             : `No se pudo consultar a GSG: ${r.error ?? 'sin respuesta'}.`;
       ultimaPrueba = { ok: false, detalle, at };
       return ultimaPrueba;

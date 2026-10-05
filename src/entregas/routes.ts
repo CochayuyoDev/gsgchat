@@ -120,6 +120,12 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     return { ok: true, entrega: e };
   });
 
+  app.post<{ Params: { id: string } }>('/admin/entregas/:id/enviar-gsg', async (request, reply) => {
+    const r = await entregas.enviarUbicacionAGsg(Number(request.params.id), quienEs(request.usuario));
+    if (r.estado === 'no_existe') return reply.code(404).send({ error: r.error });
+    return r;
+  });
+
   app.post<{ Params: { id: string } }>('/admin/entregas/:id/cancelar', async (request, reply) => {
     const body = z.object({ motivo: z.string().trim().max(300).default('cancelada desde la pantalla') }).parse(request.body ?? {});
     const e = await entregas.cancelar(Number(request.params.id), body.motivo, quienEs(request.usuario));

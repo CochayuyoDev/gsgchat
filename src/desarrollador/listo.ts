@@ -23,7 +23,7 @@ import { avisoDireccionPublica } from '../config.js';
 export const LO_QUE_PEDIR_A_GSG = [
   'La dirección base de su API (por ejemplo https://api.gsg.pe/v1), con https.',
   'El token con el que GSGchat les llama (va en Authorization: Bearer …).',
-  'Que su API tenga GET /reparto/pendientes y acepte POST /ubicaciones, /confirmaciones, /entregas, /incidencias y /resumenes, tal cual el contrato (docs/CONTRATO-GSG.md, en Conexión → «Descargar el contrato»).',
+  'Que su API tenga GET /reparto/pendientes y acepte POST /ubicaciones, /confirmaciones, /entregas, /incidencias y /resumenes, tal cual el OpenAPI (/api/v1/openapi.json).',
   'Si prefieren empujar ellos los pedidos: una clave de API de GSGchat (Conexión → «Crear la clave para GSG») y, si quieren enterarse al momento, la URL de su webhook.',
   'Confirmar el formato de dos campos: «telefono» (9 dígitos o con 51 delante; ¿algún cliente con fijo o extranjero?) y «referencia» (¿única por día o para siempre?).',
 ];

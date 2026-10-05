@@ -278,17 +278,21 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(porClave.get('P-004|-12.05|-77.04')).toBe(2);
   });
 
-  it('10. un token equivocado se ve como fallo y no se reintenta en bucle', async () => {
+  it('10. un token equivocado se ve como fallo; solo se reintenta cuando alguien pulsa «Enviar ahora»', async () => {
     const r = await api('POST', '/admin/entregas/gsg', { modo: 'real', url: urlCrm, token: 'token-malo' });
     expect(r.status).toBe(200);
     const deP999 = () => crm.llegadas.filter((l) => l.cuerpo.tracking === 'P-999').length;
     await tienda.repos.rutas.encolarReporte({ solicitudId: null, loteId: null, tipo: 'ubicacion', payload: { tipo: 'ubicacion', referencia: 'P-999', lat: -12, lng: -77 } } as never);
-    await api('POST', '/admin/rutas/cola/despachar');
-    await api('POST', '/admin/rutas/cola/despachar');
+    const primero = await api('POST', '/admin/rutas/cola/despachar');
     expect(deP999()).toBe(1);
+    expect(primero.body.errores.join(' ')).toMatch(/Error 401: GSG rechazó la clave/);
     const [reporte] = await enCola('P-999');
     expect(reporte!.estado).toBe('fallido');
     expect(reporte!.ultimo_error).toContain('401');
+    // Volver a pulsar «Enviar ahora» lo reintenta una vez (a mano), y sigue fallido.
+    await api('POST', '/admin/rutas/cola/despachar');
+    expect(deP999()).toBe(2);
+    expect((await enCola('P-999'))[0]!.estado).toBe('fallido');
     // Se deja como estaba.
     await api('POST', '/admin/entregas/gsg', { modo: 'real', url: urlCrm, token: crm.estado.token });
   });

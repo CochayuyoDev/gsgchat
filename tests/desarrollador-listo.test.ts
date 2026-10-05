@@ -22,7 +22,6 @@ import { armarTienda, type TiendaViva } from '../src/plataforma/tienda.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { recorrerContrato } from '../src/desarrollador/comprobaciones.js';
-import { compararContrato, leerContrato } from '../src/desarrollador/contrato.js';
 import { createFakeWhatsApp } from './fakes.js';
 import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
@@ -113,13 +112,6 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     if (raiz) rmSync(raiz, { recursive: true, force: true });
   });
 
-  it('el contrato escrito coincide con el código campo por campo', async () => {
-    const md = await leerContrato();
-    expect(md).toBeTruthy();
-    const diferencias = compararContrato(md!).filter((d) => !d.ok);
-    expect(diferencias, JSON.stringify(diferencias, null, 2)).toEqual([]);
-  });
-
   it('con todo en orden: verde entero y «Listo para conectar con GSG»', async () => {
     const r = await api('POST', '/admin/desarrollador/listo/comprobar', {});
     expect(r.status).toBe(200);
@@ -129,7 +121,7 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     expect(res.titular).toBe('Listo para conectar con GSG: solo falta pegar la dirección y el token.');
     expect(res.total).toBeGreaterThanOrEqual(30);
     const ids = res.grupos.flatMap((g: { comprobaciones: Array<{ id: string }> }) => g.comprobaciones.map((c) => c.id));
-    for (const id of ['sin_clave', 'clave_revocada', 'permiso_faltante', 'json_roto', 'campo_faltante', 'telefono_invalido', 'idempotencia', 'lista_vacia', 'cancelado', 'limite', 'cambiar', 'reporte_ubicacion', 'reporte_confirmacion', 'reporte_entrega', 'reporte_incidencia', 'reintenta_caido', 'reintenta_sin_red', 'rechazado_visible', 'no_duplica', 'prueba_nunca_real', 'webhook_formato', 'webhook_firma', 'webhook_reintentos', 'contrato_descarga']) {
+    for (const id of ['sin_clave', 'clave_revocada', 'permiso_faltante', 'json_roto', 'campo_faltante', 'telefono_invalido', 'idempotencia', 'lista_vacia', 'cancelado', 'limite', 'cambiar', 'reporte_ubicacion', 'reporte_confirmacion', 'reporte_entrega', 'reporte_incidencia', 'reintenta_caido', 'reintenta_sin_red', 'rechazado_visible', 'no_duplica', 'prueba_nunca_real', 'webhook_formato', 'webhook_firma', 'webhook_reintentos']) {
       expect(ids).toContain(id);
     }
     // Y el último resultado se puede volver a ver.

@@ -406,7 +406,7 @@ function menuDeConversacion(boton, contactId, x, y) {
     { icono: '🗂', texto: c.apartadoAt ? 'Devolver a la lista' : 'Apartar de la lista', accion: function () { ajustarLista(contactId, { apartado: !c.apartadoAt }); } },
     { icono: '●', texto: c.unread ? 'Marcar como leído' : 'Marcar como no leído', accion: function () { ajustarLista(contactId, { noLeido: !c.unread }); } },
   ];
-  if (c.tipo !== 'grupo') ops.push({ hr: true }, { icono: '🗑', texto: 'Eliminar cliente', accion: function () { eliminarUnCliente(c); } });
+  if (c.tipo !== 'grupo') ops.push({ hr: true }, { icono: '⟲', texto: 'Volver a empezar', accion: function () { volverAEmpezar(contactId); } }, { icono: '🗑', texto: 'Eliminar cliente', accion: function () { eliminarUnCliente(c); } });
   if (boton) menuDeBoton(boton, ops);
   else abrirMenu(ops, x, y);
 }
@@ -1048,6 +1048,18 @@ async function reabrirAsistente() {
   } catch (e) { toast('No se pudo cambiar: ' + (e.message || e)); }
 }
 
+/* Ya se terminó con este cliente: que su próximo pedido empiece de cero. */
+async function volverAEmpezar(contactId) {
+  var ok = await confirmarDialogo({ titulo: 'Volver a empezar', texto: 'El asistente y el bot vuelven a atender a este cliente desde el principio, para su próximo pedido. Sus mensajes y pedidos anteriores se quedan.', boton: 'Volver a empezar' });
+  if (!ok) return;
+  try {
+    await api('/admin/chat/' + contactId + '/volver-a-empezar', { method: 'POST', body: {} });
+    toast('Listo: este cliente empieza de nuevo.');
+    if (current && current.id === contactId) { current.iaCerradaAt = null; current.botPausadoAt = null; openChat(contactId, true); }
+    await loadChats(true);
+  } catch (e) { toast('No se pudo: ' + (e.message || e)); }
+}
+
 /* ------------------------------------------------------ menu de la cabecera */
 
 document.getElementById('menu-chat').onclick = function () {
@@ -1061,6 +1073,7 @@ document.getElementById('menu-chat').onclick = function () {
   }
   if (!esGrupo) ops.push({ icono: '🤖', texto: current.botPausadoAt ? 'Que el bot vuelva a contestar' : 'Callar al bot en este chat', accion: alternarBot });
   if (!esGrupo && current.iaCerradaAt) ops.push({ icono: '↩', texto: 'Que el asistente vuelva a atender este chat', accion: reabrirAsistente });
+  if (!esGrupo) ops.push({ icono: '⟲', texto: 'Volver a empezar con este cliente', accion: function () { volverAEmpezar(current.id); } });
   ops.push({ icono: '⭐', texto: 'Mensajes destacados de este chat', accion: function () { verDestacados(true); } });
   ops.push({ hr: true });
   ops.push({ icono: '📌', texto: c.fijadoAt ? 'Quitar de arriba' : 'Fijar arriba', accion: function () { ajustarLista(current.id, { fijado: !c.fijadoAt }); } });
@@ -1073,6 +1086,7 @@ document.getElementById('menu-chat').onclick = function () {
   }
   ops.push({ hr: true });
   ops.push({ icono: '🗄', texto: 'Guardar el chat y vaciarlo', accion: pedirCierre });
+  if (!esGrupo) ops.push({ icono: '🗑', texto: 'Eliminar cliente', accion: function () { eliminarUnCliente({ contactId: current.id, name: current.name, phone: current.phone }); } });
   menuDeBoton(this, ops);
 };
 

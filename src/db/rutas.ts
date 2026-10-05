@@ -264,6 +264,13 @@ export interface RutasRepo {
     payload: Record<string, unknown>;
   }): Promise<Reporte>;
   reportesPendientes(limite: number): Promise<Reporte[]>;
+  /**
+   * Devuelve a la cola los fallidos de ese tipo. Con `maxIntentos`, solo los
+   * que llevan menos intentos (el reintento automatico no insiste sin fin).
+   */
+  reencolarFallidos(tipo: TipoReporte, maxIntentos?: number): Promise<number>;
+  /** Los ultimos reportes de ese tipo en cualquier estado, del mas nuevo al mas viejo. */
+  reportesRecientes(limite: number, tipo: TipoReporte): Promise<Reporte[]>;
   marcarReporte(
     id: number,
     estado: EstadoReporte,
@@ -796,6 +803,22 @@ export function createRutasRepo(pool: Pool): RutasRepo {
         `select * from rutas_reportes where estado = 'pendiente'
           order by created_at asc, id asc limit $1`,
         [Number(limite)],
+      );
+      return rows.map(toReporte);
+    },
+
+    async reencolarFallidos(tipo, maxIntentos) {
+      const { rowCount } = maxIntentos
+        ? await pool.query(`update rutas_reportes set estado = 'pendiente' where estado = 'fallido' and tipo = $1 and intentos < $2`, [tipo, maxIntentos])
+        : await pool.query(`update rutas_reportes set estado = 'pendiente' where estado = 'fallido' and tipo = $1`, [tipo]);
+      return rowCount ?? 0;
+    },
+
+    async reportesRecientes(limite, tipo) {
+      const { rows } = await pool.query<ReporteRow>(
+        `select * from rutas_reportes where tipo = $1
+          order by created_at desc, id desc limit $2`,
+        [tipo, Number(limite)],
       );
       return rows.map(toReporte);
     },

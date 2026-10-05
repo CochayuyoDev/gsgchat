@@ -1,14 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { compararContrato, leerContrato } from '../src/desarrollador/contrato.js';
 import { crearEscenarioEntregas } from './escenario-entregas.js';
 
 describe('recepcion completa de pedidos GSG', () => {
-  it('el contrato de integracion conserva los mismos campos que la API', async () => {
-    const md = await leerContrato();
-    expect(md).toBeTruthy();
-    const diferencias = compararContrato(md!).filter(d => !d.ok);
-    expect(diferencias).toEqual([]);
-  });
   it('guarda todos los campos, no envia WhatsApp en la recepcion y no duplica el tracking', async () => {
     const esc = await crearEscenarioEntregas();
     try {

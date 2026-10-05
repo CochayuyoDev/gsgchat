@@ -63,7 +63,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <small>La clave identifica esta tienda y debe tener permiso de recepción. Sin clave, o con una clave inválida o revocada: 401. Con una clave sin permiso: 403.</small>
         <small>Hasta 600 pedidos por llamada. Máximo 120 llamadas por minuto y clave.</small>
         <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>
-        <a href="/docs/contrato-gsg.md">Descargar contrato completo</a>
+        <a href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a>
       </section>
       <section class="courier-card"><h2>2. Clave de GSG Courier</h2>
         <p>Crea una clave exclusiva para los pedidos de Courier. La clave completa se muestra una sola vez.</p>
@@ -77,7 +77,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <div class="courier-actions"><button class="btn primario" id="courier-validar" ${opts.disponible ? '' : 'disabled'}>Validar sin encolar</button><button class="btn" id="courier-ejemplo">Restaurar ejemplo</button></div>
         <pre id="courier-validacion" role="status" aria-live="polite"></pre>
       </section>
-      <section class="courier-card courier-wide"><h2>Últimas llamadas de recepción</h2><button class="btn" id="courier-refrescar">Actualizar estado</button><div id="courier-bitacora" class="courier-scroll"></div></section>
+      <section class="courier-card courier-wide"><h2>Últimas llamadas de recepción</h2><button class="btn" id="courier-refrescar">Actualizar estado</button><h3>Lo que GSG nos envió</h3><div id="courier-bitacora" class="courier-scroll"></div><h3>Lo que enviamos a GSG</h3><p id="courier-envios-destino" class="courier-status"></p><div id="courier-envios" class="courier-scroll"></div></section>
       <section class="courier-card courier-wide"><h2>Campos que envía Courier</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
       <section class="courier-card courier-wide" id="courier-respuestas"><h2>Respuestas de la recepción</h2><p>Los errores vienen en JSON: <code>{ "ok": false, "codigo": "...", "error": "...", "detalles": [...] }</code>.</p><div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS.map(([c, t]) => `<tr><td><b>${c}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div></section>
     </div>`,
@@ -140,6 +140,14 @@ ${MENSAJE_ERROR_HTTP_JS}
         $('courier-bitacora').innerHTML = llamadas.length ? '<table><thead><tr><th>Fecha</th><th>Respuesta</th><th>Resultado</th><th>Origen</th></tr></thead><tbody>' + llamadas.map(function(l) { return '<tr><td>' + esc(new Date(l.en).toLocaleString('es-PE')) + '</td><td>' + esc(l.status) + '</td><td>' + esc(l.resultado) + '</td><td>' + esc(l.quien) + '</td></tr>'; }).join('') + '</tbody></table>' : '<p>Todavía no hay llamadas de recepción registradas.</p>';
         if (estado && llamadas.some(function(l) { return l.status === 201; })) estado.textContent = activas.length ? 'Recepción comprobada: ya se crearon pedidos desde la API.' : 'Hay recepciones anteriores; crea una clave activa para seguir recibiendo.';
       } catch(e) { $('courier-bitacora').textContent = 'Historial no disponible: ' + e.message; }
+      try {
+        var env = await api('/admin/gsg/envios');
+        var ESTADOS = { enviado: 'Enviado a GSG', pendiente: 'Pendiente de enviar', fallido: 'Falló el envío' };
+        $('courier-envios-destino').textContent = env.aviso ? env.aviso : 'Se envía con POST a ' + (env.destino || '(sin dirección)') + ' con la cabecera x-api-key.';
+        $('courier-envios').innerHTML = env.items.length ? '<table><thead><tr><th>Fecha</th><th>Cuerpo enviado</th><th>Estado</th><th>Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function(r) {
+          return '<tr><td>' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></td><td><b>' + esc(ESTADOS[r.estado] || r.estado) + '</b></td><td>' + esc(r.intentos) + '</td><td>' + esc(r.error || '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<p>Todavía no se ha enviado ninguna ubicación a GSG. Se envía sola cuando un cliente manda su ubicación por WhatsApp.</p>';
+      } catch(e) { $('courier-envios').textContent = 'No se pudo consultar lo enviado a GSG: ' + e.message; }
     } catch(e) { aviso(e.message); if ($('courier-estado')) $('courier-estado').textContent = 'No se pudo consultar el estado.'; }
   }
   $('courier-crear').onclick = async function() {

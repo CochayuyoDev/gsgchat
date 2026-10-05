@@ -176,8 +176,12 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
   // La cola hacia GSG. Sin API configurada no hace nada y los reportes se
   // quedan esperando; en cuanto haya URL, sale todo lo acumulado.
+  // Las ubicaciones que GSG rechazo se reintentan solas en cada pasada (hasta
+  // diez intentos): una direccion o clave corregida no deja nada atascado.
   const despachador = setInterval(() => {
-    void despacharReportes({ rutas: repos.rutas }, gsg, 50).catch((error) =>
+    void (gsg.conectado() ? repos.rutas.reencolarFallidos('ubicacion', 10) : Promise.resolve(0))
+      .then(() => despacharReportes({ rutas: repos.rutas }, gsg, 50))
+      .catch((error) =>
       warn('fallo el despacho de reportes a GSG', { detalle: error instanceof Error ? error.message : String(error) }),
     );
   }, 60_000);

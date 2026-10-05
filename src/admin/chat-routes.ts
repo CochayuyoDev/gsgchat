@@ -347,6 +347,24 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   });
 
   /**
+   * Volver a empezar con un cliente con el que ya se termino: el asistente
+   * vuelve a atenderlo, el bot deja de estar callado y se levanta cualquier
+   * freno, para que su siguiente pedido corra desde el principio. Sus
+   * mensajes y sus pedidos se quedan como estan.
+   */
+  app.post('/admin/chat/:contactId/volver-a-empezar', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
+    if (contact.tipo === 'grupo') return reply.code(400).send({ error: 'Un grupo no tiene flujo que reiniciar.' });
+    const ahora = new Date();
+    await repos.contacts.cerrarIA(contact.id, false, ahora, null);
+    await repos.contacts.pausarBot(contact.id, false, ahora);
+    await repos.contacts.levantarSupresion(contact.phone);
+    return { ok: true };
+  });
+
+  /**
    * Envio desde el chat. Acepta texto, un link de mapa, el boton de ubicacion
    * o una plantilla; todo pasa por el sender, asi que las guardas siguen
    * puestas y el bloqueo se devuelve explicado.

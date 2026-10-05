@@ -24,8 +24,6 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY db ./db
-# El contrato para los programadores de GSG se descarga desde Conexion.
-COPY docs ./docs
 # .secrets.json (token de admin, clave de cifrado) se escribe aqui: montar
 # un volumen para que sobreviva a un recreate del contenedor.
 # Lo que debe sobrevivir a un recreate: secretos, la vinculacion del QR, los

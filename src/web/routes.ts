@@ -27,9 +27,6 @@ import { chatPage } from './chat-page.js';
 import { rutasPage } from './rutas-page.js';
 import { manualPage, soportePage } from './ayuda-pages.js';
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { registerConnectRoutes } from './connect-routes.js';
 import { conexionGsgVigente, RUTA_SIMULADOR, type ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import { registerGsgExtrasRoutes } from '../rutas/gsg-extras-routes.js';
@@ -342,33 +339,6 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   app.get('/manual', async (_request, reply) => {
     const page = html(manualPage({ nombreNegocio: negocio(), demo: config.DEMO_MODE }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
-  });
-
-  // El contrato para los programadores de GSG, tal cual esta en docs/ (con
-  // sesion: lo baja quien opera y se lo manda a GSG).
-  app.get('/docs/contrato-gsg.md', async (_request, reply) => {
-    // src/web → ../../docs; dist/src/web → ../../../docs; y si no, la carpeta del proceso.
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const candidatos = [path.join(here, '..', '..', 'docs', 'CONTRATO-GSG.md'), path.join(here, '..', '..', '..', 'docs', 'CONTRATO-GSG.md'), path.resolve(process.cwd(), 'docs', 'CONTRATO-GSG.md')];
-    try {
-      let texto = '';
-      for (const c of candidatos) {
-        try {
-          texto = await readFile(c, 'utf8');
-          break;
-        } catch {
-          /* siguiente */
-        }
-      }
-      if (!texto) throw new Error('no esta');
-      return reply
-        .type('text/markdown; charset=utf-8')
-        .header('content-disposition', 'attachment; filename="CONTRATO-GSG.md"')
-        .header('cache-control', 'no-store')
-        .send(texto);
-    } catch {
-      return reply.code(404).send({ error: 'El contrato no esta en esta instalacion (falta docs/CONTRATO-GSG.md).' });
-    }
   });
 
   app.get('/soporte', async (_request, reply) => {

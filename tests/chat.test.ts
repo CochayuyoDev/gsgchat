@@ -868,3 +868,17 @@ describe('eliminar clientes', () => {
     expect(r.statusCode).toBe(400);
   });
 });
+
+describe('volver a empezar con un cliente', () => {
+  it('el asistente y el bot vuelven a atenderlo, sin borrar nada', async () => {
+    const c = await repos.contacts.upsertFromInbound('5215507070701');
+    await repos.contacts.cerrarIA(c.id, true, new Date(), 'ubicación registrada');
+    await repos.contacts.pausarBot(c.id, true, new Date());
+    const r = await app.inject({ method: 'POST', url: `/admin/chat/${c.id}/volver-a-empezar`, headers: auth, payload: {} });
+    expect(r.json()).toEqual({ ok: true });
+    const despues = (await repos.contacts.getById(c.id))!;
+    expect(despues.iaCerradaAt ?? null).toBeNull();
+    expect(despues.botPausadoAt ?? null).toBeNull();
+    expect((await app.inject({ method: 'POST', url: '/admin/chat/no-existe/volver-a-empezar', headers: auth, payload: {} })).statusCode).toBe(404);
+  });
+});

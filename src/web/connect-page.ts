@@ -585,14 +585,13 @@ ${
       <div class="acciones"><button class="btn sm" id="gsg-clave-copiar" type="button">Copiar la clave</button></div>
     </div>
     <details id="gsg-dev">
-      <summary>Para los programadores de GSG: dirección, contrato y lo que nos mandaron</summary>
+      <summary>Para los programadores de GSG: dirección, OpenAPI y lo que nos mandaron</summary>
       <div class="copiar"><input id="gsg-api-url" readonly value="/api/v1/entregas" aria-label="Dirección de la API para GSG"><button class="btn" id="gsg-api-copiar" type="button">Copiar la dirección</button></div>
       <div class="acciones">
-        <a class="btn" id="gsg-contrato" href="/docs/contrato-gsg.md" download="CONTRATO-GSG.md">Descargar el contrato</a>
         <a class="btn" href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
         <a class="btn" href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a>
       </div>
-      <p class="ayuda separada">El contrato explica cada llamada, sus datos y los errores que devuelve la API.</p>
+      <p class="ayuda separada">El OpenAPI explica cada llamada, sus datos y los errores que devuelve la API.</p>
       <div class="bloque punteado">
         <p class="ayuda"><b>Lo que GSG nos mandó</b> (las últimas llamadas, con lo que se les contestó). <a id="gsg-bitacora-refrescar" href="#">Actualizar</a></p>
         <div id="gsg-bitacora" class="ayuda">Todavía nadie ha llamado.</div>

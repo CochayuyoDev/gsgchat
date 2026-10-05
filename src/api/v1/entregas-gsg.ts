@@ -21,7 +21,7 @@
  * Lo que pasa despues lo cuentan los webhooks `entrega.confirmada`,
  * `entrega.avisada`, `entrega.entregada` y `entrega.incidencia` (ver
  * src/eventos/bus.ts) y la cola de reportes hacia GSG. El contrato entero,
- * en `docs/CONTRATO-GSG.md` y en `/api/v1/openapi.json`.
+ * en `/api/v1/openapi.json`.
  */
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -129,7 +129,7 @@ const obligatorio = (max: number) => z.union([z.string(), z.number()]).transform
  * cliente, telefono, empresa, metodoPago y montoCobrar. Opcionales: distrito,
  * direccion, fecRuta, telefono2, producto y cantBultos. Los demas campos de
  * antes (costServ, sede, agencia...) se siguen aceptando para no romper a
- * quien ya los manda, pero no son parte del contrato. Ver docs/CONTRATO-GSG.md.
+ * quien ya los manda, pero no son parte del contrato. Ver /api/v1/openapi.json.
  */
 export const pedidoSchema = z.object({
   ...CAMPOS_DATOS_ENVIO,

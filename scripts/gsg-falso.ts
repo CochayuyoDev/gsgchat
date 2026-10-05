@@ -7,7 +7,7 @@
  * esto es el mismo codigo que correra el dia que GSG publique su API.
  *
  * Por ahora solo hace una cosa, la que pide el dueño: dar la lista del dia
- * con dos grupos (docs/CONTRATO-GSG.md, A.1). Cada cliente va con su
+ * con dos grupos (el OpenAPI, /api/v1/openapi.json). Cada cliente va con su
  * WhatsApp (`telefono`) y su codigo de tracking (`tracking`): esas dos cosas
  * lo identifican.
  *

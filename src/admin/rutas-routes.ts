@@ -502,6 +502,8 @@ export async function registerRutasRoutes(
         tipo: 'ubicacion',
         payload: await payloadUbicacionDelPedido(repos, actualizada, lote),
       });
+      // Sale YA hacia GSG, como la que manda el cliente.
+      void despacharReportes(repos, gsg, 25, ['ubicacion']).catch(() => undefined);
     }
 
     return { solicitud: actualizada };
@@ -580,6 +582,29 @@ export async function registerRutasRoutes(
     };
   });
 
+  /**
+   * Lo que GSGchat le manda a GSG (la ubicacion: tracking, lat y lng), con su
+   * estado y el error si fallo. Lo pinta «API y endpoint GSG» y Pedidos GSG.
+   */
+  app.get('/admin/gsg/envios', async (request) => {
+    const query = z.object({ limit: z.coerce.number().int().positive().max(500).default(50) }).parse(request.query ?? {});
+    const items = await repos.rutas.reportesRecientes(query.limit, 'ubicacion');
+    return {
+      conectado: gsg.conectado(),
+      destino: gsg.urlUbicacion?.() ?? null,
+      aviso: gsg.conectado() ? null : 'GSG no está conectado: configura su dirección y su clave en Conexión WhatsApp. Las ubicaciones quedan en cola y salen al conectarlo.',
+      items: items.map((r) => ({
+        id: r.id,
+        en: r.createdAt,
+        enviadoEn: r.enviadoAt,
+        estado: r.estado,
+        intentos: r.intentos,
+        error: r.ultimoError ?? (r.estado === 'pendiente' && !gsg.conectado() ? 'GSG no está conectado.' : null),
+        cuerpo: { tracking: r.payload.tracking ?? r.payload.referencia ?? null, lat: r.payload.lat ?? null, lng: r.payload.lng ?? null },
+      })),
+    };
+  });
+
   /** Lo que hay en la cola, en NDJSON: se lleva a GSG a mano si hace falta. */
   app.get('/admin/rutas/cola.ndjson', async (_request, reply) => {
     const pendientes = await repos.rutas.reportesPendientes(5000);
@@ -589,5 +614,10 @@ export async function registerRutasRoutes(
       .send(exportarCola(pendientes));
   });
 
-  app.post('/admin/rutas/cola/despachar', async () => despacharReportes(repos, gsg, 200));
+  // «Enviar ahora»: tambien reintenta las ubicaciones que fallaron (un 404 por
+  // la direccion mal puesta se quedaba en «fallido» y salia «0 de 0»).
+  app.post('/admin/rutas/cola/despachar', async () => {
+    if (gsg.conectado()) await repos.rutas.reencolarFallidos('ubicacion');
+    return despacharReportes(repos, gsg, 200);
+  });
 }

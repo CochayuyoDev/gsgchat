@@ -108,7 +108,7 @@ export interface VerificacionContrato {
   at: string;
 }
 
-/** Lo que se lee de cada pedido de GSG (el contrato A.1 lo documenta; ver src/desarrollador/contrato.ts). */
+/** Lo que se lee de cada pedido de GSG (lo documenta el OpenAPI, /api/v1/openapi.json). */
 export const CAMPOS_PEDIDO = new Set([
   'referencia', 'telefono', 'nombre', 'direccion', 'distrito', 'notas', 'lat', 'lng', 'id', 'urgente', 'cancelado', 'motivoCancelacion',
   // Los datos del envio del primer mensaje al cliente (todos opcionales). Ver src/entregas/datos-envio.ts.
@@ -368,9 +368,9 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
       if (!r.ok) {
         const detalle =
           r.status === 401 || r.status === 403
-            ? 'GSG rechazó el token: revisa que sea el que te dieron.'
+            ? `GSG rechazó el token (error ${r.status}): revisa que sea el que te dieron.`
             : r.status === 404
-              ? `GSG respondió pero no tiene la ruta ${RUTA_GSG_PENDIENTES}: revisa la dirección (tiene que ser la base de su API).`
+              ? `GSG respondió con error 404: no tiene la ruta ${RUTA_GSG_PENDIENTES}. Revisa la dirección (tiene que ser la base de su API).`
               : `No se pudo consultar a GSG: ${r.error ?? 'sin respuesta'}.`;
         ultimaVerificacion = { ok: false, resumen: detalle, hallazgos: [{ tipo: 'falta', donde: RUTA_GSG_PENDIENTES, detalle }], at };
         return ultimaVerificacion;

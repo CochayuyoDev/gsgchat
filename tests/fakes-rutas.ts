@@ -353,6 +353,16 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       return reportes.filter((r) => r.estado === 'pendiente').slice(0, limite);
     },
 
+    async reencolarFallidos(tipo, maxIntentos) {
+      const fallidos = reportes.filter((r) => r.tipo === tipo && r.estado === 'fallido' && (!maxIntentos || r.intentos < maxIntentos));
+      for (const r of fallidos) r.estado = 'pendiente';
+      return fallidos.length;
+    },
+
+    async reportesRecientes(limite, tipo) {
+      return reportes.filter((r) => r.tipo === tipo).slice().reverse().slice(0, limite);
+    },
+
     async marcarReporte(id, estado: EstadoReporte, extra) {
       const reporte = reportes.find((r) => r.id === id);
       if (!reporte) return;

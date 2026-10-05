@@ -184,7 +184,7 @@ console.log(`
   Base                    ${BASE_PRINCIPAL} en ${servidorDe(DATABASE_URL)} (tiendas nuevas: ${basesDeLaPlataforma(DATABASE_URL).raiz}_t_<id>)
   Vinculación principal   ${defaultAuthDir()}
   Carpetas de las tiendas ${TIENDAS_DIR}
-${avisoPublico ? `\n  ⚠ Dirección pública: ${avisoPublico}\n    (Para pruebas en esta PC está bien; para producción mira docs/PASO-A-PRODUCCION.md.)\n` : ''}${
+${avisoPublico ? `\n  ⚠ Dirección pública: ${avisoPublico}\n    (Para pruebas en esta PC está bien; en producción pon PUBLIC_BASE_URL con el dominio https.)\n` : ''}${
   configPrincipal.soloNumeros.length
     ? `\n  ⚠ MODO PRUEBA (SOLO_NUMEROS en el .env): solo se escribe a ${configPrincipal.soloNumeros.join(', ')}.\n    Para atender a los clientes de verdad, deja SOLO_NUMEROS vacío y reinicia.\n`
     : ''

@@ -500,7 +500,7 @@ function pintarGsg(datos) {
   document.getElementById('gsg-enviar').onclick = async function () {
     try {
       var r = await api('/admin/rutas/cola/despachar', { method: 'POST' });
-      toast('Enviados ' + r.enviados + ' de ' + r.intentados + '.');
+      toast(r.motivo && !r.intentados ? 'No se envió nada: ' + r.motivo : 'Enviados ' + r.enviados + ' de ' + r.intentados + '.' + (r.errores && r.errores.length ? ' Error: ' + r.errores.join(' · ') : (r.intentados ? '' : ' No había nada pendiente de enviar.')));
       await refrescar();
     } catch (error) { toast(error.message); }
   };

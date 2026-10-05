@@ -19,7 +19,7 @@ export function pedidosPage(opts: { disponible: boolean; demo: boolean; nombreNe
   const script = String.raw`
 var DISPONIBLE = ${JSON.stringify(opts.disponible)};
 var ETAPA = ${JSON.stringify(opts.etapa ?? 'todos')};
-var filas = [], resumen = null, ocupada = false, ajustesEditados = false;
+var filas = [], envios = {}, resumen = null, ocupada = false, ajustesEditados = false;
 function $(id) { return document.getElementById(id); }
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 async function api(url, opciones) {
@@ -40,12 +40,22 @@ function etapa(e) {
 }
 function visibles() { var q=$('buscar').value.trim().toLowerCase(), f=$('filtro').value; return filas.filter(function(e) { return (f==='todos'||etapa(e)===f) && (!q||[e.nombre,e.phone,e.referencia,e.distrito].join(' ').toLowerCase().includes(q)); }); }
 var etiquetas = { por_confirmar_envio:'Por confirmar el envío', falta_ubicacion:'Falta ubicación', falta_confirmar:'Falta confirmar', contactados:'Ubicación registrada', necesita:'Necesita atención', cancelada:'Cancelado' };
+/* Si la ubicación ya salió hacia GSG: el estado del último envío de su tracking. */
+function envioGsg(e) {
+  if (e.lat == null || e.lng == null) return '';
+  var r = envios[(e.datosEnvio && e.datosEnvio.tracking) || e.referencia];
+  var linea = !r ? '<span class="chip">Sin enviar a GSG</span> <span class="muted">Tiene ubicación pero no salió hacia GSG: usa «Enviar a GSG».</span>'
+    : r.estado === 'enviado' ? '<span class="chip">Enviado a GSG</span> <span class="muted">'+esc(new Date(r.enviadoEn||r.en).toLocaleString('es-PE'))+'</span>'
+    : '<span class="chip">'+(r.estado === 'fallido' ? 'Falló el envío a GSG' : 'Pendiente de enviar a GSG')+'</span>'+(r.error?' <span class="muted">Error: '+esc(r.error)+'</span>':'');
+  return '<p id="gsg-'+e.id+'">'+linea+'</p>';
+}
 function pintar() {
   var lista=visibles(); $('total').textContent=lista.length+' pedidos';
   $('lista-pedidos').innerHTML=lista.length?lista.map(function(e){
     var mapa=e.lat!=null&&e.lng!=null?'https://www.google.com/maps?q='+encodeURIComponent(e.lat+','+e.lng):null;
-    return '<article class="pedido tarjeta"><b>'+esc(e.nombre||e.phone)+'</b><span class="chip">'+esc(etiquetas[etapa(e)])+'</span><p>'+esc(e.referencia)+' · '+esc(e.phone)+(e.distrito?' · '+esc(e.distrito):'')+'</p>'+(e.direccion?'<p class="muted">'+esc(e.direccion)+'</p>':'')+(e.solicitud?'<p class="muted">Intentos de ubicación: '+esc(e.solicitud.intentos)+' / 3'+(e.incidencia==='sin_respuesta'?' · Pendiente sin respuesta':'')+'</p>':'')+'<div class="acciones"><a class="btn" href="/chat?phone='+encodeURIComponent(e.phone)+'">Chat</a>'+(mapa?'<a class="btn" href="'+esc(mapa)+'" target="_blank" rel="noopener">Ver ubicación</a>':'')+'<button class="btn" data-detalle="'+e.id+'">Detalle</button>'+(etapa(e)==='por_confirmar_envio'?'<button class="btn" data-enviar="'+e.id+'">Confirmar y enviar</button>':'')+(etapa(e)==='falta_confirmar'?'<button class="btn" data-confirmar="'+e.id+'">Confirmar</button>':'')+(e.estado!=='cancelada'&&e.estado!=='entregada'?'<button class="btn" data-cancelar="'+e.id+'">Cancelar</button>':'')+'</div><div id="detalle-'+e.id+'" class="detalle"></div></article>';
+    return '<article class="pedido tarjeta"><b>'+esc(e.nombre||e.phone)+'</b><span class="chip">'+esc(etiquetas[etapa(e)])+'</span><p>'+esc(e.referencia)+' · '+esc(e.phone)+(e.distrito?' · '+esc(e.distrito):'')+'</p>'+(e.direccion?'<p class="muted">'+esc(e.direccion)+'</p>':'')+envioGsg(e)+(e.solicitud?'<p class="muted">Intentos de ubicación: '+esc(e.solicitud.intentos)+' / 3'+(e.incidencia==='sin_respuesta'?' · Pendiente sin respuesta':'')+'</p>':'')+'<div class="acciones"><a class="btn" href="/chat?phone='+encodeURIComponent(e.phone)+'">Chat</a>'+(mapa?'<a class="btn" href="'+esc(mapa)+'" target="_blank" rel="noopener">Ver ubicación</a>':'')+'<button class="btn" data-detalle="'+e.id+'">Detalle</button>'+(e.lat!=null&&e.lng!=null?'<button class="btn" data-gsg="'+e.id+'">Enviar a GSG</button>':'')+(etapa(e)==='por_confirmar_envio'?'<button class="btn" data-enviar="'+e.id+'">Confirmar y enviar</button>':'')+(etapa(e)==='falta_confirmar'?'<button class="btn" data-confirmar="'+e.id+'">Confirmar</button>':'')+(e.estado!=='cancelada'&&e.estado!=='entregada'?'<button class="btn" data-cancelar="'+e.id+'">Cancelar</button>':'')+'</div><div id="detalle-'+e.id+'" class="detalle"></div></article>';
   }).join(''):'<div class="tarjeta muted">No hay pedidos en este filtro.</div>';
+  document.querySelectorAll('[data-gsg]').forEach(function(b){b.onclick=async function(){b.disabled=true;var caja=$('gsg-'+b.dataset.gsg);try{var r=await api('/admin/entregas/'+b.dataset.gsg+'/enviar-gsg',{method:'POST',body:{}});var txt=r.ok?'Enviado a GSG: '+JSON.stringify(r.cuerpo):'No se pudo enviar a GSG. Error: '+(r.error||'desconocido');if(caja)caja.textContent=txt;toast(txt);}catch(e){toast('No se pudo enviar a GSG. Error: '+e.message);}finally{b.disabled=false;}};});
   document.querySelectorAll('[data-enviar]').forEach(function(b){b.onclick=function(){confirmarEnvio(b,{ids:[Number(b.dataset.enviar)]});};});
   document.querySelectorAll('[data-detalle]').forEach(function(b){b.onclick=async function(){try { var d=await api('/admin/entregas/'+b.dataset.detalle); $('detalle-'+b.dataset.detalle).innerHTML=(d.eventos||[]).map(function(ev){return '<p>'+esc(ev.detalle)+'</p>';}).join('')||'<p>Sin actividad adicional.</p>'; } catch(e){toast(e.message);} };});
   document.querySelectorAll('[data-confirmar]').forEach(function(b){b.onclick=function(){accionIndividual(b.dataset.confirmar,'confirmar',{confirmada:true});};});
@@ -59,7 +69,7 @@ async function confirmarEnvio(boton,body) { boton.disabled=true; try { var r=awa
 async function accionIndividual(id,accion,body) { try { await api('/admin/entregas/'+id+'/'+accion,{method:'POST',body:body}); await cargar(); }catch(e){toast(e.message);} }
 function pintarReportes() { var c=resumen.gsgCola; var g=resumen.gsg; $('reportes-gsg').textContent = 'Reportes a GSG: '+(c?c.enviado+' enviados · '+c.pendiente+' pendientes · '+c.fallido+' fallidos':'no disponibles')+(!g||!g.conectada?' · Configura el backend de GSG en Conexión para enviar las ubicaciones.':''); }
 function pintarAjustes(a) { if(ajustesEditados||!a)return; var defecto=resumen.textos?resumen.textos.porDefecto:{}; $('desde').value=a.horarioEntregas.desde; $('hasta').value=a.horarioEntregas.hasta; $('extendido').value=a.horarioEntregas.extendidoHasta; $('soporte').value=a.soporte.whatsapp||''; $('texto-ubicacion').value=a.textos.solicitudUbicacion||defecto.solicitudUbicacion||''; $('texto-registrada').value=a.textos.ubicacionRegistrada||defecto.ubicacionRegistrada||''; $('texto-confirmacion').value=a.textos.confirmacion||defecto.confirmacion||''; }
-async function cargar(){if(ocupada||!DISPONIBLE)return; ocupada=true; try{resumen=await api('/admin/entregas');filas=resumen.entregas||[];pintar();pintarReportes();pintarAjustes(resumen.ajustes);if(typeof cargarBandejaMensajes==='function')await cargarBandejaMensajes();}catch(e){toast(e.message);}finally{ocupada=false;}}
+async function cargar(){if(ocupada||!DISPONIBLE)return; ocupada=true; try{resumen=await api('/admin/entregas');filas=resumen.entregas||[];envios={};try{(await api('/admin/gsg/envios?limit=500')).items.slice().reverse().forEach(function(r){if(r.cuerpo&&r.cuerpo.tracking)envios[r.cuerpo.tracking]=r;});}catch(e){}pintar();pintarReportes();pintarAjustes(resumen.ajustes);if(typeof cargarBandejaMensajes==='function')await cargarBandejaMensajes();}catch(e){toast(e.message);}finally{ocupada=false;}}
 $('buscar').value=new URLSearchParams(location.search).get('buscar')||'';
 var filtroViejo = new URLSearchParams(location.search).get('filtro');
 $('filtro').value = ({ faltaUbicacion: 'falta_ubicacion', faltaConfirmacion: 'falta_confirmar', incidencia: 'necesita' })[filtroViejo] || ETAPA;

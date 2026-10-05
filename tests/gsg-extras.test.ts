@@ -88,9 +88,9 @@ describe('los tokens del simulador, los descartes, la bitácora y el cuadre (ser
   it('el verificador usa la conexión vigente y explica un 401 o un 404', async () => {
     let respuesta: ResultadoConsulta<unknown> = { ok: false, status: 401, error: 'Unauthorized' };
     const s = await crearGsgExtras({ settingsRepo: createMemorySettingsRepo(), puerto: () => puertoFalso(() => respuesta) });
-    expect((await s.verificarContrato()).resumen).toMatch(/rechazó el token/);
+    expect((await s.verificarContrato()).resumen).toMatch(/rechazó el token \(error 40[13]\)/);
     respuesta = { ok: false, status: 404, error: 'Not found' };
-    expect((await s.verificarContrato()).resumen).toMatch(/no tiene la ruta/);
+    expect((await s.verificarContrato()).resumen).toMatch(/error 404: no tiene la ruta/);
     respuesta = { ok: true, cuerpo: { dia: '2026-09-21', faltaUbicacion: [], faltaConfirmacion: [] } };
     const v = await s.verificarContrato();
     expect(v.ok).toBe(true);

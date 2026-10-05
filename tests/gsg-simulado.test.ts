@@ -192,8 +192,8 @@ describe('la conexion con GSG desde la pantalla', () => {
       return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'content-type': 'application/json' } });
     }) as typeof fetch;
     const c = await crearConexionGsg({ settingsRepo: createMemorySettingsRepo(), settingsKeyBase64: TEST_SETTINGS_KEY, config, fetchImpl: fetchFalso });
-    expect((await c.probar({ url: 'https://gsg.pe/api', token: 'malo' })).detalle).toMatch(/rechazó el token/);
-    expect((await c.probar({ url: 'https://gsg.pe/api/otra', token: 'bueno' })).detalle).toMatch(/no tiene la ruta/);
+    expect((await c.probar({ url: 'https://gsg.pe/api', token: 'malo' })).detalle).toMatch(/rechazó el token \(error 40[13]\)/);
+    expect((await c.probar({ url: 'https://gsg.pe/api/otra', token: 'bueno' })).detalle).toMatch(/error 404: no tiene la ruta/);
     const ok = await c.probar({ url: 'https://gsg.pe/api', token: 'bueno' });
     expect(ok.ok).toBe(true);
     expect(ok).toMatchObject({ faltaUbicacion: 7, faltaConfirmacion: 9, terminados: 0 });

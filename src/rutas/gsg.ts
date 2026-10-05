@@ -55,6 +55,8 @@ export interface PuertoGsg {
    * (Modulo desarrollador) solo sale hacia el simulador, nunca a la API real.
    */
   esSimulador?(): boolean;
+  /** A donde sale la ubicacion (la URL completa de sendLocation), o null sin conexion. */
+  urlUbicacion?(): string | null;
 }
 
 export interface OpcionesGsg {
@@ -91,18 +93,25 @@ function cabecerasDeClave(token: string): Record<string, string> {
  * `id` o `referencia`; cualquier 2xx se da por aceptado.
  */
 export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
-  const base = opts.url.replace(/\/+$/, '');
+  // Si pegaron la URL completa de sendLocation como direccion, esa es la de
+  // la ubicacion y la base es lo de antes (si no, salia a .../sendLocation/sendLocation).
+  const crudo = opts.url.trim().replace(/\/+$/, '');
+  const pegaronUbicacion = crudo.toLowerCase().endsWith(RUTAS_GSG.ubicacion.toLowerCase());
+  const base = pegaronUbicacion ? crudo.slice(0, -RUTAS_GSG.ubicacion.length) : crudo;
+  const urlUbicacion = opts.ubicacionUrl || (pegaronUbicacion ? crudo : `${base}${RUTAS_GSG.ubicacion}`);
   const doFetch = opts.fetchImpl ?? fetch;
 
   return {
     conectado: () => Boolean(base),
     descripcion: () => `API de GSG en ${base}`,
+    urlUbicacion: () => (base ? urlUbicacion : null),
 
     async enviar(tipo, payload) {
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
+      const url = tipo === 'ubicacion' ? urlUbicacion : `${base}${RUTAS_GSG[tipo]}`;
       try {
-        const respuesta = await doFetch(tipo === 'ubicacion' && opts.ubicacionUrl ? opts.ubicacionUrl : `${base}${RUTAS_GSG[tipo]}`, {
+        const respuesta = await doFetch(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
@@ -114,9 +123,19 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
 
         const texto = await respuesta.text();
         if (!respuesta.ok) {
+          const causa =
+            respuesta.status === 401 || respuesta.status === 403
+              ? 'GSG rechazó la clave (x-api-key): revisa que sea la que te dieron'
+              : respuesta.status === 404
+                ? `GSG no tiene esa ruta (${url}): revisa la dirección`
+                : respuesta.status === 400 || respuesta.status === 422
+                  ? 'GSG no aceptó los datos enviados'
+                  : respuesta.status >= 500
+                    ? 'GSG tuvo un error en su servidor'
+                    : 'GSG no aceptó el envío';
           return {
             ok: false,
-            error: `GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}`,
+            error: `Error ${respuesta.status}: ${causa}.${texto.trim() ? ` Respuesta de GSG: ${texto.trim().slice(0, 200)}` : ''}`,
             // 5xx y 429 son del otro lado y pasan solos; un 4xx es culpa del
             // payload y reintentarlo solo repite el mismo error.
             reintentable: respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
@@ -132,9 +151,12 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         }
         return { ok: true, id };
       } catch (error) {
+        const motivo = control.signal.aborted
+          ? `GSG no respondió a tiempo (${opts.timeoutSegundos ?? 20} s)`
+          : `No se pudo conectar con GSG en ${url}: ${error instanceof Error ? ((error.cause as { code?: string } | undefined)?.code ?? error.message) : String(error)}`;
         return {
           ok: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: `${motivo}. Se reintenta solo.`,
           reintentable: true,
         };
       } finally {
@@ -358,6 +380,8 @@ export interface DespachoResumen {
   fallidos: number;
   /** Por que no se intento nada, cuando no se intento nada. */
   motivo?: string;
+  /** El error de cada envio que no salio (sin repetir), para mostrarlo tal cual. */
+  errores?: string[];
 }
 
 /**
@@ -427,6 +451,7 @@ async function despacharAhora(
       { error: salida.error },
     );
     if (!salida.reintentable) resumen.fallidos++;
+    if (salida.error && !(resumen.errores ??= []).includes(salida.error)) resumen.errores.push(salida.error);
   }
 
   return resumen;

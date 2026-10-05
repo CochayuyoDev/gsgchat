@@ -512,6 +512,11 @@ export interface ServicioEntregas {
   responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null>;
   /** Confirma el envío de lo que llegó de GSG (todo lo que espera, o esos ids): pasa al reparto con el ritmo de siempre. */
   liberarEnvio(ids: number[] | 'todos', quien: string): Promise<ResultadoLiberar>;
+  /**
+   * «Enviar a GSG» de un pedido: manda YA su ubicacion ({tracking, lat, lng})
+   * y dice como fue. Para lo que no salio solo por la razon que sea.
+   */
+  enviarUbicacionAGsg(id: number, quien: string): Promise<{ ok: boolean; estado: 'enviado' | 'pendiente' | 'fallido' | 'sin_ubicacion' | 'no_existe'; error: string | null; cuerpo: Record<string, unknown> | null }>;
   /** Lo que espera confirmar el envío ahora mismo. */
   porConfirmarEnvio(): Promise<PorConfirmarEnvio>;
   /** El cliente o un motorizado escribio algo (o pulso un boton: `boton` trae su id). */
@@ -4488,6 +4493,21 @@ ${lista}
       return true;
     },
     liberarEnvio,
+    async enviarUbicacionAGsg(id, quien) {
+      const e = await repo.entrega(id);
+      if (!e) return { ok: false, estado: 'no_existe', error: 'Ese pedido no existe.', cuerpo: null };
+      if (e.lat == null || e.lng == null) return { ok: false, estado: 'sin_ubicacion', error: 'Este pedido todavía no tiene ubicación: no hay nada que enviar a GSG.', cuerpo: null };
+      const cuerpo = { tracking: e.datosEnvio?.tracking ?? e.referencia, lat: e.lat, lng: e.lng };
+      if (!deps.gsg.conectado()) return { ok: false, estado: 'pendiente', error: 'GSG no está conectado: configura su dirección y su clave en Conexión WhatsApp.', cuerpo };
+      const reporte = await repos.rutas.encolarReporte({ solicitudId: null, loteId: e.loteId ?? null, tipo: 'ubicacion', payload: { tipo: 'ubicacion', referencia: e.referencia, telefono: e.phone, ...cuerpo } });
+      await evento(e, 'reporte', `${quien} pidió enviar la ubicación a GSG`);
+      await despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion']);
+      const tras = (await repos.rutas.reportesRecientes(100, 'ubicacion')).find((r) => r.id === reporte.id);
+      const estado = tras?.estado ?? 'pendiente';
+      const error = estado === 'enviado' ? null : tras?.ultimoError ?? 'No se pudo enviar todavía: queda en cola y se reintenta solo.';
+      await evento(e, 'reporte', estado === 'enviado' ? 'ubicación enviada a GSG' : `no se pudo enviar la ubicación a GSG: ${error}`);
+      return { ok: estado === 'enviado', estado, error, cuerpo };
+    },
     porConfirmarEnvio,
     proponerUbicacion,
     revisarPropuestas,
