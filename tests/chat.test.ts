@@ -844,3 +844,27 @@ describe('la página del chat se puede ejecutar', () => {
     expect(() => new Function(js)).not.toThrow();
   });
 });
+
+describe('eliminar clientes', () => {
+  it('cuenta antes, borra uno o todos y nunca toca los grupos', async () => {
+    const ana = await repos.contacts.upsertFromInbound('5215506060601');
+    await repos.contacts.upsertFromInbound('5215506060602');
+    await repos.contacts.upsertGrupo('120363000000000001@g.us', 'Repartidores');
+
+    const uno = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: { ids: [ana.id] } });
+    expect(uno.json()).toEqual({ eliminados: 1 });
+    expect(await repos.contacts.getByPhone('5215506060601')).toBeNull();
+
+    const cuenta = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: { todos: true, soloContar: true } });
+    expect(cuenta.json().cuantos).toBeGreaterThan(0);
+    const todos = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: { todos: true } });
+    expect(todos.json().eliminados).toBe(cuenta.json().cuantos);
+    expect(await repos.contacts.getByPhone('5215506060602')).toBeNull();
+    expect(await repos.contacts.getByPhone('120363000000000001@g.us')).not.toBeNull();
+  });
+
+  it('sin decir cuáles no borra nada', async () => {
+    const r = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: {} });
+    expect(r.statusCode).toBe(400);
+  });
+});

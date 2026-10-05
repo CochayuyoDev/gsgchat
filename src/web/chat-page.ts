@@ -406,8 +406,42 @@ function menuDeConversacion(boton, contactId, x, y) {
     { icono: '🗂', texto: c.apartadoAt ? 'Devolver a la lista' : 'Apartar de la lista', accion: function () { ajustarLista(contactId, { apartado: !c.apartadoAt }); } },
     { icono: '●', texto: c.unread ? 'Marcar como leído' : 'Marcar como no leído', accion: function () { ajustarLista(contactId, { noLeido: !c.unread }); } },
   ];
+  if (c.tipo !== 'grupo') ops.push({ hr: true }, { icono: '🗑', texto: 'Eliminar cliente', accion: function () { eliminarUnCliente(c); } });
   if (boton) menuDeBoton(boton, ops);
   else abrirMenu(ops, x, y);
+}
+
+/* Eliminar clientes: con sus mensajes, ubicaciones y fichas. No se deshace. */
+async function eliminarUnCliente(c) {
+  var ok = await confirmarDialogo({ titulo: 'Eliminar cliente', texto: 'Se eliminará ' + nombreDe(c) + ' con sus mensajes, ubicaciones y ficha. No se puede deshacer.', boton: 'Eliminar' });
+  if (!ok) return;
+  try {
+    await api('/admin/contacts/eliminar', { method: 'POST', body: { ids: [c.contactId] } });
+    toast('Cliente eliminado.');
+    if (current && current.id === c.contactId) location.reload();
+    else await loadChats(true);
+  } catch (error) { toast(error.message); }
+}
+async function eliminarClientes() {
+  var dias = await pedirDato({
+    titulo: 'Eliminar clientes',
+    texto: 'Deja el campo vacío para eliminar a todos los clientes, o escribe un número de días para eliminar solo los que no escriben desde hace ese tiempo. Los grupos no se tocan.',
+    etiqueta: 'Días sin escribir (opcional)',
+    marcador: 'Vacío = todos',
+    boton: 'Siguiente',
+    validar: function (v) { return v && !/^[1-9][0-9]{0,3}$/.test(v) ? 'Escribe solo un número de días.' : null; },
+  });
+  if (dias === null) return;
+  var filtro = dias ? { todos: true, inactivosDias: Number(dias) } : { todos: true };
+  try {
+    var cuenta = await api('/admin/contacts/eliminar', { method: 'POST', body: Object.assign({ soloContar: true }, filtro) });
+    if (!cuenta.cuantos) { toast('No hay clientes que eliminar con ese filtro.'); return; }
+    var ok = await confirmarDialogo({ titulo: 'Eliminar ' + cuenta.cuantos + ' clientes', texto: 'Se eliminarán ' + cuenta.cuantos + ' clientes' + (dias ? ' que no escriben desde hace ' + dias + ' días' : '') + ', con sus mensajes, ubicaciones y fichas. No se puede deshacer.', boton: 'Eliminar ' + cuenta.cuantos });
+    if (!ok) return;
+    var r = await api('/admin/contacts/eliminar', { method: 'POST', body: filtro });
+    toast(r.eliminados + ' clientes eliminados.');
+    location.reload();
+  } catch (error) { toast(error.message); }
 }
 
 async function ajustarLista(contactId, cambios) {
@@ -948,9 +982,9 @@ async function abrirFicha() {
     else marcas.push('<span class="pill warn" title="Pasaron más de 24 horas desde su último mensaje: solo se le puede escribir con una plantilla aprobada.">Fuera de las 24 h</span>');
     if (c.botPausadoAt || current.botPausadoAt) marcas.push('<span class="pill warn">Bot callado</span>');
     if (current.iaCerradaAt) marcas.push('<span class="pill warn">Para una persona</span>');
-    var html = '<div><h4>Este chat</h4><div class="fila">' + marcas.join('') + '</div></div>' +
+    var html = '<div><h4>Este chat</h4><div class="fila">' + marcas.join('') + '<button class="sm" type="button" id="ficha-baja">' + (c.optOutAt ? 'Dar de alta' : 'Dar de baja') + '</button></div></div>' +
       '<div><h4>Quién es</h4><div class="fila"><b>' + esc(c.name || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(c.phone)) + '</span></div>' +
-      '<div class="muted" style="margin-top:4px">' + (c.optOutAt ? 'Pidió no recibir mensajes (BAJA): solo se le contesta si escribe.' : c.optInAt ? 'Se le puede escribir (dio su consentimiento).' : 'Sin consentimiento todavía: se le contesta cuando escribe; no se le inicia conversación.') + (c.botPausadoAt ? ' Las respuestas automáticas están calladas en este chat.' : '') + (c.lastInboundAt ? ' Último mensaje suyo: ' + hhmm(c.lastInboundAt) + '.' : '') + '</div></div>';
+      '<div class="muted" style="margin-top:4px">' + (c.optOutAt ? 'Dado de baja por el equipo: solo se le contesta si escribe.' : c.optInAt ? 'Se le puede escribir (dio su consentimiento).' : 'Sin consentimiento todavía: se le contesta cuando escribe; no se le inicia conversación.') + (c.botPausadoAt ? ' Las respuestas automáticas están calladas en este chat.' : '') + (c.lastInboundAt ? ' Último mensaje suyo: ' + hhmm(c.lastInboundAt) + '.' : '') + '</div></div>';
     if (f.entrega) {
       var e = f.entrega;
       html += '<div><h4>Su pedido de hoy</h4><div class="fila"><b>' + esc(e.referencia) + '</b><span class="chip">' + esc(estadoEntregaEnPalabras(e)) + '</span>' + (e.prioridad === 'urgente' ? '<span class="chip tono-rojo">Urgente</span>' : '') + '</div>' +
@@ -966,6 +1000,14 @@ async function abrirFicha() {
     } else html += '<div><h4>Su última ubicación</h4><div class="muted">Todavía no ha mandado ninguna. Con «Pedirle su ubicación» (menú ＋) se le manda el botón.</div></div>';
     html += '<div><h4>Conversaciones guardadas</h4><div class="fila">' + (f.guardadas ? '<a class="sm" href="/guardados?tel=' + encodeURIComponent(c.phone) + '">Ver las ' + f.guardadas + ' guardada' + (f.guardadas === 1 ? '' : 's') + '</a>' : '<span class="muted">Ninguna todavía.</span>') + '<a class="sm" href="/panel#contactos">Ficha completa</a></div></div>';
     cuerpo.innerHTML = html;
+    document.getElementById('ficha-baja').onclick = async function () {
+      this.disabled = true;
+      try {
+        await api(c.optOutAt ? '/admin/contacts/opt-in' : '/admin/contacts/opt-out', { method: 'POST', body: c.optOutAt ? { phone: c.phone, source: 'alta desde el chat' } : { phone: c.phone } });
+        toast(c.optOutAt ? 'Contacto dado de alta.' : 'Contacto dado de baja.');
+        abrirFicha();
+      } catch (error) { toast(error.message); this.disabled = false; }
+    };
   } catch (e) { cuerpo.innerHTML = '<p class="muted">' + esc(e.message) + '</p>'; }
 }
 document.getElementById('abrir-ficha').onclick = function () {
@@ -1049,6 +1091,8 @@ document.getElementById('menu-lista').onclick = function () {
     { icono: '📁', texto: 'Chats guardados', accion: function () { location.href = '/guardados'; } },
     { icono: '⭐', texto: 'Todos los mensajes destacados', accion: function () { verDestacados(false); } },
     ${opcionHistorial ? `${opcionHistorial},` : ''}
+    { hr: true },
+    { icono: '🗑', texto: 'Eliminar clientes…', accion: eliminarClientes },
     { hr: true },
     { icono: '⌨', texto: 'Atajos de teclado', accion: ayudaTeclas },
   ];

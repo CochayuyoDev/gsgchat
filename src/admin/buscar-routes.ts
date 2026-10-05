@@ -78,7 +78,7 @@ export async function buscarEnTodo(deps: BuscarDeps, q: string, limite = 6): Pro
 export const MOTIVOS_EN_PALABRAS: Record<string, string> = {
   allowlist: 'El sistema está en modo prueba y este número no está en la lista de permitidos.',
   sin_conexion: 'WhatsApp no estaba conectado en ese momento.',
-  opt_out: 'El cliente pidió no recibir más mensajes (escribió BAJA).',
+  opt_out: 'El equipo lo dio de baja: no recibe más mensajes.',
   no_opt_in: 'El cliente no dio su consentimiento para recibir mensajes iniciados por el negocio.',
   number_paused: 'Los envíos del número estaban pausados.',
   number_quality: 'La calidad del número estaba baja y Meta no deja mandar más.',

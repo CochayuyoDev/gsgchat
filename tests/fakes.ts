@@ -395,6 +395,12 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
         const c = await repos.contacts.upsertFromInbound(phone);
         c.optOutAt = fakeNow();
       },
+      async eliminar(filtro, soloContar) {
+        const limite = filtro.inactivosDias ? fakeNow().getTime() - filtro.inactivosDias * 86_400_000 : null;
+        const borrar = [...repos._contacts.entries()].filter(([, c]) => c.tipo !== 'grupo' && (!filtro.ids || filtro.ids.includes(c.id)) && (limite === null || (c.lastInboundAt?.getTime() ?? 0) < limite));
+        if (!soloContar) for (const [clave] of borrar) repos._contacts.delete(clave);
+        return borrar.length;
+      },
       async touchInbound(phone, at) {
         const c = await repos.contacts.upsertFromInbound(phone);
         c.lastInboundAt = at;

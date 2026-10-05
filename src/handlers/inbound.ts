@@ -147,19 +147,6 @@ const dormirDeVerdad = (ms: number) => new Promise<void>((listo) => setTimeout(l
 export const CONFIRM_PREFIX = 'loc_ok:';
 export const REJECT_ID = 'loc_no';
 
-const normalize = (text: string): string =>
-  text
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    // Quita los diacriticos combinantes: "BAJA", "bajá" y "Bajá" son la misma baja.
-    .replace(/[̀-ͯ]/g, '');
-
-function matchesKeyword(text: string, keywords: string[]): boolean {
-  const clean = normalize(text);
-  return keywords.some((k) => clean === k || clean.startsWith(`${k} `));
-}
-
 /**
  * Como se guarda un entrante en la conversacion.
  *
@@ -1101,8 +1088,7 @@ async function handleInboundMessageEnFila(
     const escrito = cuerpo || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.media?.transcripcion || '';
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
     const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
-    const esBaja = Boolean(escrito) && matchesKeyword(escrito, config.optOutKeywords);
-    if (!esPin && !enlace?.ok && !esBaja) {
+    if (!esPin && !enlace?.ok) {
       await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
     }
@@ -1294,26 +1280,8 @@ async function handleInboundMessageEnFila(
   }
 
   // --- baja y alta ------------------------------------------------------
-  if (matchesKeyword(text, config.optOutKeywords)) {
-    await repos.contacts.setOptOut(phone);
-    // Si estaba en un lote, deja de estarlo: la entrega se coordina por
-    // telefono y GSG tiene que enterarse.
-    await atenderRespuestaDeRuta(rutasDeps, contact, { baja: true });
-    // Se responde dentro de la ventana, asi que el gate de opt-out no aplica
-    // a esta confirmacion: es la ultima cortesia antes de dejar de escribir.
-    if (numeroPermitido({ soloNumeros: deps.ajustes ? deps.ajustes.soloNumeros() : config.soloNumeros }, phone)) {
-      await wa
-        .sendText(phone, 'Listo, no volverás a recibir mensajes nuestros. Responde ALTA si cambias de idea.')
-        .catch(() => undefined);
-    }
-    return;
-  }
-
-  if (matchesKeyword(text, config.optInKeywords)) {
-    await repos.contacts.setOptIn(phone, 'whatsapp_keyword');
-    await reply('Gracias, quedaste suscrito. Responde BAJA cuando quieras dejar de recibirlos.');
-    return;
-  }
+  // Las da quien usa el sistema (ficha del chat, panel o API), nunca el
+  // cliente escribiendo BAJA o ALTA: esas palabras siguen el camino normal.
 
   // --- reglas y coordenadas --------------------------------------------
   const [rules, prefs, result] = await Promise.all([

@@ -551,7 +551,10 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
       else if ('adjunto' in respuesta) carga.adjunto = respuesta.adjunto;
       else if ('baja' in respuesta) carga.text = 'BAJA';
       else carga.text = 'no soy yo, se equivocaron de número';
-      return api.post('/admin/dev/inbound', carga);
+      const r = await api.post('/admin/dev/inbound', carga);
+      // La baja no la da el cliente escribiendo BAJA: la da el equipo desde el panel.
+      if ('baja' in respuesta) await api.post('/admin/contacts/opt-out', { phone });
+      return r;
     },
 
     async vistas(loteId) {

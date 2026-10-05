@@ -351,6 +351,12 @@ export interface ContactsRepo {
   upsertGrupo(jid: string, nombre?: string | null): Promise<Contact>;
   setOptIn(phone: string, source: string): Promise<void>;
   setOptOut(phone: string): Promise<void>;
+  /**
+   * Borra clientes (nunca grupos) con todo lo suyo: mensajes, ubicaciones y
+   * fichas caen en cascada. Sin ids, todos; con `inactivosDias`, solo los que
+   * no escriben desde hace esos dias. `soloContar` dice cuantos serian.
+   */
+  eliminar(filtro: { ids?: string[]; inactivosDias?: number }, soloContar?: boolean): Promise<number>;
   touchInbound(phone: string, at: Date): Promise<void>;
   listOptedIn(limit: number, offset: number): Promise<Contact[]>;
   list(query: ContactListQuery): Promise<{ items: ContactListItem[]; total: number }>;
@@ -882,6 +888,26 @@ export function createRepos(pool: Pool): Repos {
     },
     async setOptOut(phone) {
       await pool.query('update contacts set opt_out_at = now(3) where phone = $1', [phone]);
+    },
+    async eliminar(filtro, soloContar) {
+      if (filtro.ids && !filtro.ids.length) return 0;
+      const condiciones = ["tipo <> 'grupo'"];
+      const valores: unknown[] = [];
+      if (filtro.ids) {
+        valores.push(filtro.ids);
+        condiciones.push(`id in ($${valores.length})`);
+      }
+      if (filtro.inactivosDias) {
+        valores.push(filtro.inactivosDias);
+        condiciones.push(`coalesce(last_inbound_at, created_at) < now(3) - interval $${valores.length} day`);
+      }
+      const donde = condiciones.join(' and ');
+      if (soloContar) {
+        const { rows } = await pool.query<{ n: number }>(`select count(*) as n from contacts where ${donde}`, valores);
+        return Number(rows[0]?.n ?? 0);
+      }
+      const { rowCount } = await pool.query(`delete from contacts where ${donde}`, valores);
+      return rowCount ?? 0;
     },
     async touchInbound(phone, at) {
       // Contestar corta la racha de "sin respuesta": la fatiga se mide en

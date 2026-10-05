@@ -47,6 +47,8 @@ import { avisosDeMeta } from '../whatsapp/avisos-meta.js';
 import { TITULO_ALERTA, type TipoAlertaHoy } from '../entregas/alertas-hoy.js';
 
 import { registerBuscarRoutes } from './buscar-routes.js';
+import { atenderRespuestaDeRuta } from '../rutas/inbound.js';
+import { crearPuertoEnEspera } from '../rutas/gsg.js';
 
 export interface AdminDeps {
   /** La conexion con Stoky configurable desde la pantalla (para el enlace al panel). */
@@ -886,10 +888,31 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     return { ok: true, contact: await repos.contacts.getByPhone(body.phone) };
   });
 
+  // Borrar clientes que ya no se necesitan (los grupos nunca). Solo un
+  // administrador; `soloContar` dice cuantos caerian antes de hacerlo.
+  app.post('/admin/contacts/eliminar', async (request, reply) => {
+    if (request.usuario?.rol !== 'admin') return reply.code(403).send({ error: 'Solo un administrador puede eliminar clientes.' });
+    const body = z
+      .object({
+        ids: z.array(z.string().min(1)).max(5000).optional(),
+        todos: z.boolean().optional(),
+        inactivosDias: z.number().int().min(1).max(3650).optional(),
+        soloContar: z.boolean().optional(),
+      })
+      .refine((b) => b.ids || b.todos, 'Di qué clientes: ids o todos.')
+      .parse(request.body);
+    const filtro = { ...(body.ids ? { ids: body.ids } : {}), ...(body.inactivosDias ? { inactivosDias: body.inactivosDias } : {}) };
+    if (body.soloContar) return { cuantos: await repos.contacts.eliminar(filtro, true) };
+    return { eliminados: await repos.contacts.eliminar(filtro) };
+  });
+
   app.post('/admin/contacts/opt-out', async (request) => {
     const body = z.object({ phone: phoneSchema }).parse(request.body);
-    await repos.contacts.upsertFromInbound(body.phone);
+    const contacto = await repos.contacts.upsertFromInbound(body.phone);
     await repos.contacts.setOptOut(body.phone);
+    // Si se le estaba pidiendo la ubicacion, el reparto deja de insistirle y
+    // GSG se entera (la baja la da el equipo, no el cliente escribiendo BAJA).
+    await atenderRespuestaDeRuta({ repos, gsg: deps.gsg ?? crearPuertoEnEspera(), salud: deps.salud }, contacto, { baja: true }).catch(() => undefined);
     return { ok: true, contact: await repos.contacts.getByPhone(body.phone) };
   });
 }

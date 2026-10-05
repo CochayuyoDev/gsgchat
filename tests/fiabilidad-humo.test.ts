@@ -112,7 +112,7 @@ describe('las pruebas de humo', () => {
     expect(r.pasos[0]!.ok).toBe(true);
     expect(r.pasos[0]!.detalle).toContain('no confirmó la entrega');
 
-    expect(explicarBloqueo('opt_out', '')).toContain('BAJA');
+    expect(explicarBloqueo('opt_out', '')).toContain('dado de baja');
     expect(explicarBloqueo('lo_que_sea', 'motivo crudo')).toBe('motivo crudo');
   });
 

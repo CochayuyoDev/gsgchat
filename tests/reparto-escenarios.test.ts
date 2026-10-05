@@ -122,7 +122,8 @@ describe('un reparto de 22 clientes: quién dio su ubicación y quién no', () =
     // A quien manda su ubicación se le da las gracias; al equivocado se le pide disculpas.
     expect(e.mensajesA(tel(1)).at(-1)?.body).toMatch(/ubicaci[oó]n/i);
     expect(e.mensajesA(tel(NO_SOY_YO)).at(-1)?.body).toMatch(/No te volveremos a escribir por este pedido/);
-    expect(e.mensajesA(tel(BAJA)).at(-1)?.body).toMatch(/no volver/i);
+    // BAJA escrito por el cliente no tiene respuesta propia: la baja la da el equipo.
+    expect(e.mensajesA(tel(BAJA)).at(-1)?.body).not.toMatch(/no volver/i);
   });
 
   it('4. la lista de quienes SÍ dieron su ubicación: los ocho, con sus coordenadas y su fuente', async () => {
@@ -226,9 +227,9 @@ describe('un reparto de 22 clientes: quién dio su ubicación y quién no', () =
     expect(hecho.filter((h) => h.paso === 'recordatorio')).toHaveLength(4);
     expect(hecho.filter((h) => h.paso === 'insistencia')).toHaveLength(3);
 
-    // A "no soy yo", a la BAJA y al de fuera de zona no se les vuelve a escribir.
+    // A "no soy yo", a la BAJA (solo tiene la solicitud: su BAJA no se contesta) y al de fuera de zona no se les vuelve a escribir.
     expect(e.mensajesA(tel(NO_SOY_YO))).toHaveLength(2);
-    expect(e.mensajesA(tel(BAJA))).toHaveLength(2);
+    expect(e.mensajesA(tel(BAJA))).toHaveLength(1);
     expect(e.mensajesA(tel(FUERA_DE_ZONA))).toHaveLength(2);
 
     await e.contesta(tel(CALLADOS[0]!), { pin: pinDe(CALLADOS[0]!) });

@@ -303,7 +303,7 @@ export async function atenderRespuestaDeRuta(
       deps,
       solicitud,
       'rechaza_contacto',
-      'el cliente pidió no recibir más mensajes',
+      'dado de baja por el equipo: no recibe más mensajes',
     );
     return { atendida: true, resultado: 'rechazo', solicitud: actualizada };
   }

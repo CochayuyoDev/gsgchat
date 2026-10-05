@@ -292,12 +292,12 @@ describe('dentro del flujo de entrantes', () => {
     expect(enviados()).toHaveLength(1);
   });
 
-  it('BAJA sigue siendo BAJA aunque la IA este activa; una foto se reconoce sin llamar al modelo', async () => {
+  it('BAJA escrito por el cliente no lo da de baja; una foto se reconoce sin llamar al modelo', async () => {
     await ia.guardar({ activa: true, token: 'tok', conocimiento: 'x' });
     await cliente();
     await processChange('messages', entrante('BAJA'), deps);
-    expect(modelo.recibido).toHaveLength(0);
-    expect((await repos.contacts.getByPhone('51987654321'))!.optOutAt).toBeTruthy();
+    expect((await repos.contacts.getByPhone('51987654321'))!.optOutAt).toBeNull();
+    modelo.recibido.length = 0;
 
     await cliente('51911111111', 'Luis');
     const foto: ChangeValue = { contacts: [{ wa_id: '51911111111', profile: { name: 'Luis' } }], messages: [{ id: 'wamid.foto', from: '51911111111', timestamp: String(Math.floor(Date.now() / 1000)), type: 'image', image: { id: 'm1', mime_type: 'image/jpeg' } } as unknown as InboundMessage] };

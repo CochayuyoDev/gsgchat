@@ -120,26 +120,20 @@ describe('mensajes entrantes', () => {
     expect(wa.sent.some((m) => m.kind === 'location_request')).toBe(true);
   });
 
-  it('BAJA da de baja al contacto de inmediato', async () => {
+  it('el cliente que escribe BAJA no se da de baja: eso lo hace el equipo', async () => {
     const { deps, repos } = await build();
     await processChange('messages', inbound({ text: { body: 'BAJA' } }), deps);
-    expect((await repos.contacts.getByPhone('5215599999999'))?.optOutAt).toBeInstanceOf(Date);
+    expect((await repos.contacts.getByPhone('5215599999999'))?.optOutAt).toBeNull();
   });
 
-  it('reconoce la baja con acentos y espacios', async () => {
-    const { deps, repos } = await build();
-    await processChange('messages', inbound({ text: { body: '  Bajá  ' } }), deps);
-    expect((await repos.contacts.getByPhone('5215599999999'))?.optOutAt).toBeInstanceOf(Date);
-  });
-
-  it('ALTA registra el opt-in y borra la baja previa', async () => {
+  it('el cliente que escribe ALTA tampoco se da de alta', async () => {
     const { deps, repos } = await build();
     await repos.contacts.setOptOut('5215599999999');
     await processChange('messages', inbound({ text: { body: 'alta' } }), deps);
 
     const contact = await repos.contacts.getByPhone('5215599999999');
-    expect(contact?.optInAt).toBeInstanceOf(Date);
-    expect(contact?.optOutAt).toBeNull();
+    expect(contact?.optInAt).toBeNull();
+    expect(contact?.optOutAt).toBeInstanceOf(Date);
   });
 
   it('el entrante abre la ventana de 24 h', async () => {
