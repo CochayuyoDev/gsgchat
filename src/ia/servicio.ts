@@ -23,7 +23,7 @@ import type { StokyClient } from '../stoky/client.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { Monitor } from '../salud/monitor.js';
 import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../catalogo/tienda.js';
-import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, falloCuentaDe, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor } from './proveedores.js';
+import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, falloCuentaDe, listarModelosOpenAI, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor, type ServicioOpenAI } from './proveedores.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { MODELO_GRATIS_POR_DEFECTO, modeloGratisEfectivo, modelosGratisEnVivo } from './modelos-gratis.js';
 import { ACCIONES_IA, COMO_TOMAR_PEDIDO, manualDelSistema, SISTEMA_PARA_CLIENTES, SISTEMA_PARA_CLIENTES_GSG } from './conocimiento-sistema.js';
@@ -49,14 +49,14 @@ import { rellenar, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 export const configIASchema = z.object({
   activa: z.boolean().default(false),
   proveedor: z.enum(['puter', 'openai']).default('puter'),
-  /** Con `openai`, cual de los servicios compatibles se eligio en la pantalla (rellena la URL base). */
+  /** Servicio compatible elegido; su endpoint se resuelve en `presetDe`. */
   servicio: z.enum(['openai', 'groq', 'openrouter', 'together', 'deepseek', 'google', 'mistral', 'ollama', 'otro']).default('openai'),
   /**
    * Con Puter solo se usan modelos gratuitos de verdad (ver modelos-gratis.ts):
    * si el guardado deja de serlo, se usa el gratuito por defecto.
    */
-  modelo: z.string().trim().max(80).default(MODELO_GRATIS_POR_DEFECTO),
-  /** Solo para openai: la URL base (OpenAI, Groq, Ollama...). */
+  modelo: z.string().trim().max(200).default(MODELO_GRATIS_POR_DEFECTO),
+  /** Endpoint legado para configuraciones antiguas del servicio «otro». */
   baseUrl: z.string().trim().max(300).default(''),
   nombreAsistente: z.string().trim().max(60).default('Asistente'),
   /** Lo que el asistente sabe del negocio: productos, precios, horario, politicas. */
@@ -167,7 +167,9 @@ export interface ServicioIA {
    * Le pide una frase al modelo y mide cuanto tarda. Con `candidata`, prueba
    * lo que hay en pantalla sin guardarlo (clave incluida); sin ella, lo guardado.
    */
-  probarConexion(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; token?: string; modelo?: string }): Promise<PruebaProveedor>;
+  probarConexion(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; servicio?: ServicioOpenAI; token?: string; modelo?: string }): Promise<PruebaProveedor>;
+  /** Lista modelos del servicio usando la clave nueva o la que ya está guardada. */
+  listarModelos(servicio: ServicioOpenAI, clave?: string): Promise<import('./proveedores.js').ListaModelosOpenAI>;
   activa(): boolean;
   /** Si el asistente es el agente operativo (solo ubicación, sin ventas): lo guardado o, sin elegir, según el modo. */
   agenteOperativoActivo(): boolean;
@@ -436,7 +438,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   const elProveedor = (): ProveedorIA => {
     if (proveedor) return proveedor;
-    proveedor = cfg.proveedor === 'openai' ? crearProveedorOpenAI({ baseUrl: cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '', clave: token, fetchImpl: deps.fetchImpl }) : crearProveedorPuter(token);
+    proveedor = cfg.proveedor === 'openai' ? crearProveedorOpenAI({ baseUrl: presetDe(cfg.servicio)?.baseUrl || cfg.baseUrl || '', clave: token, fetchImpl: deps.fetchImpl }) : crearProveedorPuter(token);
     return proveedor;
   };
 
@@ -798,7 +800,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   await refrescarModelos().catch(() => undefined);
 
   /** «Probar la conexión»: lo que hay en pantalla (candidata) o lo guardado. */
-  async function probarConexionDe(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; token?: string; modelo?: string }): Promise<PruebaProveedor> {
+  async function probarConexionDe(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; servicio?: ServicioOpenAI; token?: string; modelo?: string }): Promise<PruebaProveedor> {
     const prov = candidata?.proveedor ?? cfg.proveedor;
     const modelo = candidata?.modelo?.trim() || (prov === cfg.proveedor ? modeloEfectivo() : (candidata?.modelo ?? ''));
     if (prov === 'puter') {
@@ -806,9 +808,10 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       if (!t) return { ok: false, detalle: 'No hay sesión de Puter: pulsa "Conectar con Puter" primero.', ms: 0, modelo, proveedor: 'puter' };
       return probarProveedor(deps.proveedor ?? crearProveedorPuter(t), modelo || MODELO_GRATIS_POR_DEFECTO);
     }
-    const baseUrl = candidata?.baseUrl?.trim() || cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '';
+    const servicio = candidata?.servicio ?? cfg.servicio;
+    const baseUrl = presetDe(servicio)?.baseUrl || candidata?.baseUrl?.trim() || cfg.baseUrl || '';
     const clave = candidata?.token?.trim() || (candidata?.token === undefined ? token : '');
-    const preset = presetDe(candidata ? '' : cfg.servicio);
+    const preset = presetDe(servicio);
     if (!clave && !preset?.sinClave && !/localhost|127\.0\.0\.1/.test(baseUrl)) return { ok: false, detalle: 'Falta la clave de la API: pégala y vuelve a probar.', ms: 0, modelo, proveedor: 'openai' };
     if (!modelo) return { ok: false, detalle: 'Falta el modelo: escribe uno (o elige un servicio de la lista, que trae sugerencias).', ms: 0, modelo, proveedor: 'openai' };
     return probarProveedor(deps.proveedor ?? crearProveedorOpenAI({ baseUrl, clave, fetchImpl: deps.fetchImpl }), modelo);
@@ -849,6 +852,10 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   return {
     estado,
+    async listarModelos(servicio, clave) {
+      const guardada = cfg.proveedor === 'openai' ? token : '';
+      return listarModelosOpenAI({ servicio, clave: clave?.trim() || guardada, fetchImpl: deps.fetchImpl });
+    },
     activa: () => cfg.activa && Boolean(token),
     agenteOperativoActivo: agenteOperativo,
     clasificarOperativo: (mensajes) => chatContado('lecturas', mensajes, { maxTokens: 8 }),

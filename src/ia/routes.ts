@@ -17,7 +17,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ErrorIA, listarModelosOpenAI, MODELOS_SUGERIDOS, SERVICIOS_OPENAI } from './proveedores.js';
+import { ErrorIA, listarModelosOpenAI, MODELOS_SUGERIDOS, presetDe, SERVICIOS_OPENAI } from './proveedores.js';
 import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
 import { ESCENARIOS, GRUPOS } from './escenarios.js';
 import { BANCO_EXAMEN, UMBRAL_EXAMEN } from './examen-lector.js';
@@ -76,12 +76,13 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     const body = z
       .object({
         proveedor: z.enum(['puter', 'openai']).optional(),
+        servicio: z.enum(['openai', 'groq', 'openrouter', 'together', 'deepseek', 'google', 'mistral', 'ollama', 'otro']).optional(),
         baseUrl: z.string().trim().max(300).optional(),
         token: z.string().max(500).optional(),
-        modelo: z.string().trim().max(80).optional(),
+        modelo: z.string().trim().max(200).optional(),
       })
       .parse(request.body ?? {});
-    const hayCandidata = body.proveedor !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined;
+    const hayCandidata = body.proveedor !== undefined || body.servicio !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined;
     const prueba = await ia.probarConexion(hayCandidata ? body : undefined);
     return { ok: prueba.ok, prueba };
   });
@@ -107,8 +108,13 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
       return reply.code(403).send({ error: 'Solo un administrador vincula la clave de la IA.' });
     }
-    const body = z.object({ clave: z.string().max(500).default('') }).parse(request.body ?? {});
-    return listarModelosOpenAI({ clave: body.clave, fetchImpl: deps.fetchImpl });
+    const body = z.object({
+      clave: z.string().max(500).default(''),
+      servicio: z.enum(['openai', 'groq', 'openrouter', 'together', 'deepseek', 'google', 'mistral', 'ollama', 'otro']).default('openai'),
+    }).parse(request.body ?? {});
+    if (typeof ia.listarModelos === 'function') return ia.listarModelos(body.servicio, body.clave);
+    // Compatibilidad con dobles de pruebas e integraciones antiguas.
+    return listarModelosOpenAI({ clave: body.clave, servicio: body.servicio, baseUrl: presetDe(body.servicio)?.baseUrl, fetchImpl: deps.fetchImpl });
   });
 
   /** Si la URL del catalogo responde: cuantos productos y un ejemplo. */

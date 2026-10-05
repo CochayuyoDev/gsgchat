@@ -7,8 +7,8 @@
  *    token de sesion es lo que usa el servidor. Los modelos Gemma 4 son
  *    gratuitos; GPT/Claude descuentan de la asignacion de la cuenta. Es lo
  *    mismo que hace Stoky, con lo que ya se aprendio alli.
- *  - Cualquier API compatible con OpenAI (OpenAI, Groq, DeepSeek, Ollama en
- *    local...): una URL base y una clave.
+ *  - Cualquier servicio compatible con OpenAI de la lista: una clave y el
+ *    servicio; la URL se resuelve internamente y sus modelos se consultan a la API.
  *
  * Lo que hay detras no lo sabe el asistente: recibe la conversacion y
  * devuelve texto. Con un fallo, se lanza; quien llama decide que decirle al
@@ -245,8 +245,8 @@ export const MODELOS_SUGERIDOS: Record<'puter' | 'openai', string[]> = {
 
 /**
  * Los servicios compatibles con la API de OpenAI que se ofrecen en la
- * pantalla: se elige uno y la URL base y los modelos se rellenan solos; solo
- * hay que pegar la clave. Es lo mismo que tiene Stoky (Groq, Google,
+ * pantalla: se elige uno y sus modelos se consultan con la clave; la URL base
+ * del servicio se resuelve aquí y no se pide a la persona. Es lo mismo que tiene Stoky (Groq, Google,
  * OpenRouter, Together, Ollama, otro), para que quien ya lo configuro alli
  * lo reconozca aqui.
  */
@@ -303,7 +303,7 @@ export interface ListaModelosOpenAI {
  * Lo que no es un modelo para conversar: embeddings, audio, imagen,
  * moderacion, busqueda... La cuenta de OpenAI los lista todos juntos.
  */
-const NO_ES_CHAT = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|transcribe|image|search|babbage|davinci|computer-use|codex|sora|instruct/i;
+const NO_ES_CHAT = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|transcribe|image|search|babbage|davinci|computer-use|codex|sora/i;
 
 /** Que se le dice en la pantalla junto al modelo, sin inventar nada: solo mira el id. */
 export function etiquetaDeModelo(id: string): string | null {
@@ -337,26 +337,33 @@ const SIN_LISTA = (detalle: string): ListaModelosOpenAI => ({
  * Nunca lanza: si no se puede listar, devuelve gpt-4o-mini y el motivo en
  * palabras.
  */
-export async function listarModelosOpenAI(opts: { clave: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string }): Promise<ListaModelosOpenAI> {
+export async function listarModelosOpenAI(opts: { clave: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string; servicio?: ServicioOpenAI }): Promise<ListaModelosOpenAI> {
   const clave = (opts.clave ?? '').trim();
-  if (!clave) return SIN_LISTA('Pega tu clave para ver los modelos de tu cuenta. Mientras tanto se usa gpt-4o-mini (consumo muy bajo).');
+  const servicio = opts.servicio ?? 'openai';
+  const preset = presetDe(servicio);
+  const nombre = preset?.nombre.split(' (')[0] ?? 'el servicio';
+  const sinLista = (detalle: string): ListaModelosOpenAI => servicio === 'openai'
+    ? SIN_LISTA(detalle)
+    : { ok: false, modelos: [], elegido: '', detalle };
+  if (!preset?.baseUrl) return sinLista('Ese servicio necesita una URL propia y no se puede detectar automáticamente. Elige un servicio de la lista.');
+  if (!clave && !preset?.sinClave) return sinLista(`Pega la clave de ${nombre} para ver los modelos de tu cuenta.`);
   const doFetch = opts.fetchImpl ?? fetch;
-  const base = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const base = (opts.baseUrl || preset?.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const control = new AbortController();
   const corte = setTimeout(() => control.abort(), opts.timeoutMs ?? 15_000);
   try {
     const r = await doFetch(`${base}/models`, { headers: { authorization: `Bearer ${clave}` }, signal: control.signal });
     const cuerpo = (await r.json().catch(() => ({}))) as { data?: Array<{ id?: unknown }>; error?: { message?: string } };
     if (!r.ok) {
-      const porQue = r.status === 401 ? 'OpenAI dice que esa clave no vale (revisa que la pegaste entera).' : r.status === 429 ? 'OpenAI dice que la cuenta llegó a su límite o no tiene saldo.' : 'OpenAI no dejó ver los modelos de la cuenta.';
-      return SIN_LISTA(`${porQue} Se usará gpt-4o-mini (consumo muy bajo).`);
+      const porQue = r.status === 401 ? `${nombre} dice que esa clave no vale (revisa que la pegaste entera).` : r.status === 429 ? `${nombre} dice que la cuenta llegó a su límite o no tiene saldo.` : `${nombre} no dejó ver los modelos de la cuenta.`;
+      return sinLista(porQue);
     }
     const modelos = ordenarModelosOpenAI((cuerpo.data ?? []).map((m) => String(m?.id ?? '')));
-    if (!modelos.length) return SIN_LISTA('La cuenta no devolvió modelos para conversar. Se usará gpt-4o-mini (consumo muy bajo).');
+    if (!modelos.length) return sinLista(`${nombre} no devolvió modelos compatibles con chat.`);
     const elegido = modelos.find((m) => m.id === MODELO_OPENAI_POR_DEFECTO)?.id ?? modelos[0]!.id;
-    return { ok: true, modelos, elegido, detalle: `Tu cuenta tiene ${modelos.length} modelos para conversar. Te recomendamos ${elegido}.` };
+    return { ok: true, modelos, elegido, detalle: `La API de ${nombre} ofrece ${modelos.length} modelos compatibles con chat.` };
   } catch {
-    return SIN_LISTA(control.signal.aborted ? 'OpenAI tardó demasiado en contestar. Se usará gpt-4o-mini (consumo muy bajo).' : 'No se pudo llegar a OpenAI (revisa la conexión a internet). Se usará gpt-4o-mini (consumo muy bajo).');
+    return sinLista(control.signal.aborted ? `${nombre} tardó demasiado en contestar.` : `No se pudo llegar a ${nombre} (revisa la conexión a internet).`);
   } finally {
     clearTimeout(corte);
   }
@@ -401,9 +408,9 @@ export async function probarProveedor(proveedor: ProveedorIA, modelo: string, ti
 export function explicarFalloConexion(detalle: string): string {
   if (/401|invalid api key|incorrect api key|unauthorized|authentication/i.test(detalle)) return 'La clave no vale para ese servicio: revisa que la pegaste entera y que es de ese proveedor.';
   if (/403|forbidden|permission/i.test(detalle)) return 'El servicio rechazó la clave (sin permiso). Revisa el plan o el proyecto de la clave.';
-  if (/404|not found|does not exist|unknown model|model_not_found/i.test(detalle)) return `Ese modelo no existe en ese servicio (o la URL base está mal): ${detalle}`;
+  if (/404|not found|does not exist|unknown model|model_not_found/i.test(detalle)) return `Ese modelo no existe en el servicio elegido: ${detalle}`;
   if (/429|rate limit|quota|insufficient_quota|exceeded/i.test(detalle)) return 'El servicio dice que se agotó el cupo o el límite por minuto. Espera un momento o revisa el plan.';
-  if (/ECONNREFUSED|fetch failed|ENOTFOUND|no se pudo contactar/i.test(detalle)) return 'No se pudo llegar al servicio: revisa la URL base y la conexión a internet (con Ollama, que esté arrancado).';
+  if (/ECONNREFUSED|fetch failed|ENOTFOUND|no se pudo contactar/i.test(detalle)) return 'No se pudo llegar al servicio elegido: revisa la conexión a internet.';
   if (/no respondio a tiempo|timeout|abort/i.test(detalle)) return 'El servicio tardó demasiado en responder. Prueba otra vez o con un modelo más ligero.';
   return detalle;
 }
