@@ -37,6 +37,8 @@ const conexionSchema = z.object({
   /** real = la API de GSG; simulador = la copia de mentira de este servidor; ninguna = solo encolar. */
   modo: z.enum(['ninguna', 'real', 'simulador']).default('ninguna'),
   url: z.string().trim().max(300).default(''),
+  /** La URL exacta a la que se hace POST con la ubicacion (tal cual, sin añadirle nada). Vacia = <url>/sendLocation. */
+  urlUbicacion: z.string().trim().max(300).default(''),
   conectadoEn: z.string().nullable().default(null),
 });
 type ConexionGuardada = z.infer<typeof conexionSchema>;
@@ -54,6 +56,10 @@ export interface PruebaGsg {
 export interface EstadoConexionGsg {
   modo: 'ninguna' | 'real' | 'simulador';
   url: string;
+  /** La URL exacta guardada para la ubicacion ('' = la de siempre). */
+  urlUbicacion: string;
+  /** A donde sale de verdad la ubicacion. */
+  destinoUbicacion: string | null;
   tieneToken: boolean;
   /** true = hay a donde mandar y de donde traer. */
   conectada: boolean;
@@ -71,7 +77,7 @@ export interface ServicioConexionGsg {
   /** El puerto para el resto del sistema: siempre el mismo objeto, apunta a lo vigente. */
   puerto(): PuertoGsg;
   /** Conecta con la API real. Sin `token` conserva el que había. */
-  conectarReal(input: { url: string; token?: string | null }): Promise<EstadoConexionGsg>;
+  conectarReal(input: { url: string; token?: string | null; urlUbicacion?: string | null }): Promise<EstadoConexionGsg>;
   /** Apunta al simulador de este servidor. */
   usarSimulador(): Promise<EstadoConexionGsg>;
   /** Quita la conexión de la pantalla; si el `.env` tenía una, vuelve a mandar esa. */
@@ -121,7 +127,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
   let guardada: ConexionGuardada = conexionSchema.parse({});
   let token = '';
   let ultimaPrueba: PruebaGsg | null = null;
-  let vigente: { url: string; token: string; puerto: PuertoGsg } | null = null;
+  let vigente: { url: string; token: string; ubicacionUrl: string; puerto: PuertoGsg } | null = null;
 
   const urlSimulador = () => `${deps.config.PUBLIC_BASE_URL.replace(/\/+$/, '')}${RUTA_SIMULADOR}`;
 
@@ -139,8 +145,9 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       vigente = null;
       return enEspera;
     }
-    if (!vigente || vigente.url !== e.url || vigente.token !== e.token) {
-      vigente = { url: e.url, token: e.token, puerto: crearPuertoHttp({ url: e.url, token: e.token, ubicacionUrl: deps.config.GSG_SEND_LOCATION_URL || undefined, fetchImpl: deps.fetchImpl }) };
+    const ubicacionUrl = (e.origen === 'pantalla' ? guardada.urlUbicacion : '') || deps.config.GSG_SEND_LOCATION_URL || '';
+    if (!vigente || vigente.url !== e.url || vigente.token !== e.token || vigente.ubicacionUrl !== ubicacionUrl) {
+      vigente = { url: e.url, token: e.token, ubicacionUrl, puerto: crearPuertoHttp({ url: e.url, token: e.token, ubicacionUrl: ubicacionUrl || undefined, fetchImpl: deps.fetchImpl }) };
     }
     return vigente.puerto;
   };
@@ -200,6 +207,8 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     return {
       modo: e.modo,
       url: e.url,
+      urlUbicacion: guardada.urlUbicacion,
+      destinoUbicacion: proxy.urlUbicacion?.() ?? null,
       tieneToken: Boolean(e.token),
       conectada: Boolean(e.url),
       origen: e.origen,
@@ -234,6 +243,13 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
           : r.status === 404
             ? `GSG respondió con error 404: no tiene la ruta ${RUTA_GSG_PENDIENTES}. Revisa la dirección (tiene que ser la base de su API).`
             : `No se pudo consultar a GSG: ${r.error ?? 'sin respuesta'}.`;
+      // Su API contesta y no rechaza la clave, solo no tiene la consulta de
+      // pendientes: para mandar la ubicacion no hace falta, no es un fallo.
+      if (r.status === 404) {
+        const destino = puerto.urlUbicacion?.() ?? null;
+        ultimaPrueba = { ok: true, detalle: `GSG responde. Su API no tiene la consulta ${RUTA_GSG_PENDIENTES} (error 404), que no hace falta para enviar ubicaciones.${destino ? ` Las ubicaciones se envían con POST a ${destino}.` : ''}`, at };
+        return ultimaPrueba;
+      }
       ultimaPrueba = { ok: false, detalle, at };
       return ultimaPrueba;
     }
@@ -266,7 +282,9 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       const url = input.url.trim().replace(/\/+$/, '');
       if (!url) throw new Error('Falta la dirección de la API de GSG.');
       if (!/^https?:\/\//i.test(url)) throw new Error('La dirección tiene que empezar por http:// o https://.');
-      guardada = { modo: 'real', url, conectadoEn: new Date().toISOString() };
+      const urlUbicacion = (input.urlUbicacion ?? guardada.urlUbicacion ?? '').trim().replace(/\/+$/, '');
+      if (urlUbicacion && !/^https?:\/\//i.test(urlUbicacion)) throw new Error('La URL para enviar la ubicación tiene que empezar por http:// o https://.');
+      guardada = { modo: 'real', url, urlUbicacion, conectadoEn: new Date().toISOString() };
       if (input.token !== undefined && input.token !== null) {
         token = input.token.trim();
         if (token) await deps.settingsRepo.put(CLAVE_TOKEN, encrypt(token, key), true);

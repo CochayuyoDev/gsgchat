@@ -91,6 +91,32 @@ describe('contrato del diagrama GSG', () => {
     expect(!sinRed.ok && sinRed.error).toMatch(/No se pudo conectar con GSG en http:\/\/127\.0\.0\.1:9\/api\/sendLocation/);
   });
 
+  it('con la URL exacta de ubicación guardada en la conexión, el POST va justo ahí, sin /sendLocation', async () => {
+    const llegadas: any[] = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        res.setHeader('content-type', 'application/json');
+        if (req.method === 'GET') { res.writeHead(404); res.end('{}'); return; }
+        llegadas.push({ url: req.url, apiKey: req.headers['x-api-key'], body: JSON.parse(body) }); res.writeHead(req.url === '/api/v1/gsgchat/location' ? 201 : 404); res.end('{}');
+      });
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      esc = await crearEscenarioEntregas({ confirmarLista: false });
+      const estado = await esc.conexionGsg.conectarReal({ url: `${base}/api/v1/gsgchat`, token: 'clave-gsg', urlUbicacion: `${base}/api/v1/gsgchat/location` });
+      expect(estado.destinoUbicacion).toBe(`${base}/api/v1/gsgchat/location`);
+      expect((await esc.conexionGsg.probar()).ok).toBe(true);
+      expect((await esc.api.post('/api/v1/entregas', { ...pedido('GSG-E-240258'), referencia: 'URL-EXACTA' })).status).toBe(201);
+      await esc.trabajar();
+      expect((await esc.contesta('987100001', { pin: PIN_LIMA })).status).toBe(200);
+      for (let i = 0; i < 50 && !llegadas.length; i++) await new Promise(r => setTimeout(r, 20));
+      expect(llegadas).toEqual([{ url: '/api/v1/gsgchat/location', apiKey: 'clave-gsg', body: { tracking: 'GSG-E-240258', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } }]);
+    } finally { await new Promise<void>(r => server.close(() => r())); }
+  });
+
   it('si el envío automático falla se ve el error, y «Enviar a GSG» del pedido lo manda con {tracking, lat, lng}', async () => {
     const llegadas: any[] = [];
     let status = 404;

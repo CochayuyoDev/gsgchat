@@ -405,6 +405,9 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
     <label class="campo" for="gsg-url">Dirección del sistema de GSG
       <span class="hint">Te la dan sus programadores. Empieza por https://</span></label>
     <input id="gsg-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.gsg.pe/v1">
+    <label class="campo" for="gsg-url-ubicacion">URL exacta para enviar la ubicación (opcional)
+      <span class="hint">Si GSG te dio una URL concreta para recibir la ubicación, pégala aquí: se hace POST justo ahí, sin añadirle nada. Vacía = la dirección de arriba + /sendLocation.</span></label>
+    <input id="gsg-url-ubicacion" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://backend.gsg.pe/api/v1/gsgchat/location">
     <label class="campo" for="gsg-token">Clave de acceso (token)
       <span class="hint" id="gsg-token-pista">También te la dan ellos. Se guarda cifrada y no se vuelve a mostrar.</span></label>
     <div class="con-ojo">
@@ -1653,6 +1656,7 @@ async function cargarGsg() {
     ver('gsg-probar', g.modo !== 'ninguna');
     // Lo guardado a la vista (la clave no: solo si ya hay una).
     if (g.modo === 'real' && g.url && !$('gsg-url').value) $('gsg-url').value = g.url;
+    if (g.modo === 'real' && g.urlUbicacion && !$('gsg-url-ubicacion').value) $('gsg-url-ubicacion').value = g.urlUbicacion;
     var hayClave = g.modo === 'real' && g.tieneToken;
     $('gsg-token').placeholder = hayClave ? '•••••••• (guardada)' : '';
     $('gsg-token-pista').textContent = hayClave
@@ -1701,7 +1705,7 @@ if ($('gsg')) {
     resultadoGsg('Guardando…', 'espera');
     try {
       var token = $('gsg-token').value.trim();
-      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, token: token || undefined } });
+      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, token: token || undefined, urlUbicacion: $('gsg-url-ubicacion').value.trim() } });
       $('gsg-token').value = '';
       await probarGsg();
     } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }

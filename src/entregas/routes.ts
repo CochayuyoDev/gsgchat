@@ -222,10 +222,10 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   app.post('/admin/entregas/gsg', async (request, reply) => {
     if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede cambiar desde la pantalla.' });
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia la conexión con GSG.' });
-    const body = z.object({ modo: z.enum(['real']), url: z.string().trim().max(300).optional(), token: z.string().max(500).nullable().optional() }).parse(request.body ?? {});
+    const body = z.object({ modo: z.enum(['real']), url: z.string().trim().max(300).optional(), token: z.string().max(500).nullable().optional(), urlUbicacion: z.string().trim().max(300).nullable().optional() }).parse(request.body ?? {});
 
     try {
-      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', token: body.token }) };
+      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', token: body.token, urlUbicacion: body.urlUbicacion }) };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
