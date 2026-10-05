@@ -330,7 +330,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // nombres estables y un permiso por ruta. Ver src/api/v1.
   await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
-  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas });
+  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
 
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.

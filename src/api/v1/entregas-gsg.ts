@@ -28,12 +28,15 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
 import type { EntregasRepo } from '../../entregas/repo.js';
+import type { ActividadRepo } from '../../auth/actividad.js';
 import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio } from '../../entregas/datos-envio.js';
 import { vistaMensaje, type VistaMensaje } from '../../entregas/primer-mensaje.js';
 import { enviarError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type DetalleCampo } from '../errores.js';
 
 export interface ApiEntregasGsgDeps {
   entregas: ServicioEntregas;
+  /** Bitácora de peticiones entrantes desde GSG/Postman. */
+  actividad?: ActividadRepo;
   /** El repo, para marcar la prioridad sin pasar por la pantalla. */
   repo?: EntregasRepo;
   /** Peticiones por minuto y por clave (por defecto LIMITE_POR_MINUTO). */
@@ -43,6 +46,21 @@ export interface ApiEntregasGsgDeps {
 
 /** Tope por clave y minuto en /api/v1/entregas*. GSG manda en tandas de hasta 600 por llamada. */
 export const LIMITE_POR_MINUTO = 120;
+
+function referenciasDeEntrada(body: unknown): { total: number; referencias: string[] } {
+  const pedidos = Array.isArray(body)
+    ? body
+    : body && typeof body === 'object' && Array.isArray((body as { pedidos?: unknown }).pedidos)
+      ? (body as { pedidos: unknown[] }).pedidos
+      : body && typeof body === 'object' ? [body] : [];
+  const referencias = pedidos.slice(0, 100).flatMap((pedido) => {
+    if (!pedido || typeof pedido !== 'object') return [];
+    const p = pedido as Record<string, unknown>;
+    const valor = p.referencia ?? p.tracking ?? p.codigoTracking ?? p.id;
+    return typeof valor === 'string' || typeof valor === 'number' ? [String(valor).slice(0, 120)] : [];
+  });
+  return { total: pedidos.length, referencias };
+}
 
 const textoOpc = z.union([z.string().max(200), z.number()]).nullable().optional();
 
@@ -245,6 +263,54 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   const ahora = deps.ahora ?? (() => Date.now());
   const tope = deps.limitePorMinuto ?? LIMITE_POR_MINUTO;
   const usos = new Map<string, number[]>();
+
+  // Historial de recepción: /panel#historial muestra tanto intentos de
+  // WhatsApp como las llamadas entrantes a esta API. Solo se guardan códigos,
+  // cantidades, referencias y errores; nunca teléfonos, tokens ni el JSON entero.
+  if (deps.actividad) {
+    app.addHook('onSend', async (request, reply, payload) => {
+      if (request.method !== 'POST' || (request.url.split('?')[0] ?? '') !== '/api/v1/entregas') return payload;
+      try {
+        const entrada = referenciasDeEntrada(request.body);
+        const texto = typeof payload === 'string' ? payload : Buffer.isBuffer(payload) ? payload.toString('utf8') : '';
+        let salida: Record<string, unknown> = {};
+        try { salida = JSON.parse(texto) as Record<string, unknown>; } catch { /* respuesta no JSON */ }
+        const creadas = Array.isArray(salida.creadas) ? salida.creadas : [];
+        const repetidas = Array.isArray(salida.repetidas) ? salida.repetidas : [];
+        const descartadas = Array.isArray(salida.descartadas) ? salida.descartadas : [];
+        const error = typeof salida.error === 'string' ? salida.error.slice(0, 800) : null;
+        const usuario = request.usuario;
+        await deps.actividad.anotar({
+          usuarioId: usuario?.id ?? null,
+          usuario: usuario?.nombre ?? 'API/Postman',
+          accion: 'gsg.api.recepcion',
+          ip: request.ip || null,
+          detalle: {
+            metodo: request.method,
+            ruta: '/api/v1/entregas',
+            http: reply.statusCode,
+            estado: reply.statusCode >= 400 ? 'error' : reply.statusCode === 200 ? 'repetido' : 'recibido',
+            recibidas: entrada.total,
+            referencias: entrada.referencias,
+            referenciasRestantes: Math.max(0, entrada.total - entrada.referencias.length),
+            creadas: creadas.length,
+            repetidas: repetidas.length,
+            descartadas: descartadas.length,
+            error,
+            detalles: Array.isArray(salida.detalles) ? salida.detalles.slice(0, 12) : undefined,
+          },
+        });
+      } catch (error) {
+        request.log.warn({ err: error }, 'no se pudo guardar la recepción de GSG en el historial');
+      }
+      return payload;
+    });
+  }
+
+  app.get('/admin/gsg/recepciones', async () => {
+    if (!deps.actividad) return { items: [] };
+    return deps.actividad.listar({ accion: 'gsg.api.recepcion', limit: 100, offset: 0 });
+  });
 
   // El tope por clave: se mira antes que nada (tras la autorizacion).
   app.addHook('preHandler', async (request, reply) => {
