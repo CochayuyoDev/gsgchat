@@ -228,6 +228,7 @@ function leerContenido(message: InboundMessage): { kind: MessageKind; body: stri
     video: '(video)',
     document: '(documento)',
     sticker: '(sticker)',
+    livelocation: '(ubicación en tiempo real)',
   };
 
   // Con el fichero ya bajado, el cuerpo es el pie de foto (o el nombre del
@@ -886,7 +887,7 @@ async function handleInboundMessageEnFila(
   // el pin se perdio). Todo lo demas sigue callado mientras dure la pausa.
   if (contact.botPausadoAt) {
     const texto = message.type === 'text' ? String(message.text?.body ?? '') : '';
-    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com)/i.test(texto);
+    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || message.type === 'livelocation' || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com)/i.test(texto);
     // Los botones «Sí, recibo hoy» / «No» que mandó el sistema tambien: son la respuesta a lo que él preguntó.
     const esBotonDeEntrega = message.type === 'interactive' && String(message.interactive?.button_reply?.id ?? '').startsWith('entrega:');
     if (esBotonDeEntrega) request_log(deps, 'bot en pausa, pero el cliente pulsó el botón que mandó el sistema: se atiende', null);
@@ -1076,6 +1077,16 @@ async function handleInboundMessageEnFila(
       category: 'UTILITY',
       interactive: { body, locationRequest: true },
     });
+
+  // --- ubicacion en tiempo real: no se registra -------------------------
+  // Se mueve con el cliente y no dice donde recibe: se le pide la actual.
+  if (message.type === 'livelocation' && deps.entregas) {
+    const texto = await deps.entregas.alUbicacionEnVivo(phone).catch(() => null);
+    if (texto) {
+      await reply(texto);
+      return;
+    }
+  }
 
   // --- la regla del dueño («Solo lo de GSG») -----------------------------
   // «El único proceso de GSGchat es disparar mensajes. Una vez que la IA manda

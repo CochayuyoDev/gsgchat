@@ -467,6 +467,8 @@ export interface ServicioEntregas {
   revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas>;
   /** Si ese cliente tiene un pin lejano esperando su SÍ o su NO. */
   pinLejosPendiente(phone: string): Promise<boolean>;
+  /** Mandó su ubicación en tiempo real: el texto que le pide la actual. null = no se le estaba pidiendo ubicación. */
+  alUbicacionEnVivo(phone: string): Promise<string | null>;
   /** Su respuesta a «¿es ahí donde recibes tu pedido?». null = no tenía nada por confirmar. */
   responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string): Promise<RespuestaPinLejos | null>;
   /**
@@ -1901,11 +1903,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   // ------------------------------------------- el pin tiene que tener sentido
 
-  const botonesPinLejos = (e: Entrega) => [
-    { id: `entrega:pinsi:${e.id}`, title: 'Sí, es ahí' },
-    { id: `entrega:pinno:${e.id}`, title: 'No' },
-  ];
-
   /** Sus pedidos que esperan la ubicación (lo que espera confirmar el envío no cuenta: aún no se le escribió). */
   async function esperandoUbicacionDe(phone: string): Promise<Entrega[]> {
     return (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !x.envioRetenidoAt && x.ubicacionEstado === 'pendiente');
@@ -1937,7 +1934,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
     const act = (await repo.entrega(e.id)) ?? e;
     log('pin lejos de su distrito: se le pregunta si es ahí', { phone: contact.phone, distrito: d.distrito, km: d.kmCentro });
-    return { atendida: true, entrega: act, resultado: 'pin_lejos', responder: textoDe('pinLejos', ajustes, { ...contexto(act), distrito: d.distrito }), botones: botonesPinLejos(act) };
+    return { atendida: true, entrega: act, resultado: 'pin_lejos', responder: textoDe('pinLejos', ajustes, { ...contexto(act), distrito: d.distrito }) };
   }
 
   async function responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string): Promise<RespuestaPinLejos | null> {
@@ -1951,7 +1948,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoDudas: (x.pinPropuestoDudas ?? 0) + 1 });
       await evento(e, 'nota', `contestó otra cosa a «¿es ahí?» (${que}; ${como}): se le vuelve a preguntar una vez`);
       // Nunca el mismo mensaje dos veces seguidas: se nota que no se le entendió.
-      return { tipo: 'repregunta', texto: `Perdona, no te entendí. ${textoDe('pinLejos', ajustes, { ...contexto(e), distrito })}`, botones: botonesPinLejos(e), entrega: e };
+      return { tipo: 'repregunta', texto: `Perdona, no te entendí. ${textoDe('pinLejos', ajustes, { ...contexto(e), distrito })}`, entrega: e };
     }
     if (clase === 'no') {
       for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 });
@@ -4421,6 +4418,12 @@ ${lista}
     revisarPin,
     async pinLejosPendiente(phone) {
       return (await esperandoUbicacionDe(phone)).some((x) => Boolean(x.pinPropuestoAt) && x.pinPropuestoLat != null);
+    },
+    async alUbicacionEnVivo(phone) {
+      const vivas = await esperandoUbicacionDe(phone);
+      if (!vivas.length) return null;
+      for (const x of vivas) await evento(x, 'nota', 'mandó su ubicación en tiempo real: no se registra, se le pide la ubicación actual');
+      return textoDe('ubicacionEnVivo', ajustes, contexto(vivas[0]!));
     },
     responderPinLejos,
     alDireccionEscrita,
