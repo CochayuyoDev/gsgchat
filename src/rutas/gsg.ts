@@ -7,15 +7,20 @@
  * encola en `rutas_reportes`. Sin credenciales, la cola simplemente se queda
  * llena y se puede mirar, exportar y contar desde el panel.
  *
- * El dia que GSG publique su endpoint: se rellenan GSG_URL y GSG_TOKEN, se
- * pulsa "reenviar pendientes" y sale TODO lo acumulado, incluido lo de las
- * semanas anteriores. No hay que tocar el motor, ni la pantalla, ni volver a
- * pedirle nada al cliente. Es la unica pieza que cambia.
+ * El dia que GSG publique su endpoint: se pone la URL base, la ruta de la
+ * ubicacion y la API Key de GSG en Conexion (o GSG_URL, GSG_LOCATION_PATH y
+ * GSG_API_KEY en el .env), se pulsa "reenviar pendientes" y sale TODO lo
+ * acumulado, incluido lo de las semanas anteriores. No hay que tocar el
+ * motor, ni la pantalla, ni volver a pedirle nada al cliente.
+ *
+ * La clave de GSG sale SOLO en la cabecera `X-API-Key` (nunca Bearer, nunca
+ * en la URL ni en el cuerpo) y nunca aparece en un error guardado.
  *
  * Lo que se manda va documentado abajo, en `PAYLOADS`: es el contrato que hay
  * que ensenarle a quien haga la API del otro lado.
  */
 
+import { createHash } from 'node:crypto';
 import type { Lote, Reporte, RutasRepo, Solicitud, TipoReporte } from '../db/rutas.js';
 import type { Repos } from '../db/repos.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
@@ -28,6 +33,13 @@ export interface ResultadoEnvio {
   error?: string;
   /** true si tiene sentido reintentarlo (caida, timeout). */
   reintentable?: boolean;
+  /**
+   * GSG rechazo la clave: 401 (clave incorrecta) o 403 (sin permisos). No se
+   * reintenta solo: insistir con la misma clave solo repite el rechazo.
+   */
+  autenticacion?: 401 | 403;
+  /** La configuracion (URL base, ruta) no es valida: no se llego a mandar nada. */
+  configuracion?: boolean;
 }
 
 export interface ResultadoConsulta<T = unknown> {
@@ -55,13 +67,29 @@ export interface PuertoGsg {
    * (Modulo desarrollador) solo sale hacia el simulador, nunca a la API real.
    */
   esSimulador?(): boolean;
-  /** A donde sale la ubicacion (la URL completa de sendLocation), o null sin conexion. */
+  /** A donde sale la ubicacion (URL base + ruta), o null sin conexion o con la configuracion mal. */
   urlUbicacion?(): string | null;
+  /** Por que la configuracion no vale (en palabras), o null si vale. Con error no se envia nada. */
+  errorConfiguracion?(): string | null;
+  /**
+   * Una huella de la configuracion (base, ruta y clave, la clave solo como
+   * hash). Si cambia, la cola vuelve a intentar lo que GSG rechazo por la clave.
+   */
+  firma?(): string;
 }
 
 export interface OpcionesGsg {
+  /** La URL base de la API de GSG (p. ej. https://backend.gsg.pe/api/). */
   url: string;
+  /** La ruta, relativa a la base, a la que se hace POST con la ubicacion (p. ej. v1/gsgchat/location). */
+  rutaUbicacion?: string;
+  /**
+   * Compatibilidad: la URL completa de la ubicacion como se guardaba antes.
+   * Solo se usa si no hay `rutaUbicacion`, y se convierte a base + ruta con
+   * `migrarUbicacionAntigua` (si no se puede sin adivinar, no se envia nada).
+   */
   ubicacionUrl?: string;
+  /** La API Key que da GSG. Sale SOLO en la cabecera X-API-Key. */
   token: string;
   fetchImpl?: typeof fetch;
   /** Segundos antes de darse por vencido en una llamada. */
@@ -77,45 +105,215 @@ export const RUTAS_GSG: Record<TipoReporte, string> = {
   entrega: '/entregas',
 };
 
+/** La ruta de la ubicacion cuando no se dio otra: la de siempre (`<base>/sendLocation`). */
+export const RUTA_UBICACION_POR_DEFECTO = 'sendLocation';
+
 /** De donde se traen los pendientes del dia (quien falta ubicacion, quien falta confirmar). */
 export const RUTA_GSG_PENDIENTES = '/reparto/pendientes';
 
+// ------------------------------------------------------- URL base + ruta
+
+export type ResultadoUrlGsg = { ok: true; url: string } | { ok: false; error: string };
+
 /**
- * La clave de GSG va como API key (`x-api-key`, lo que pide su backend) y
- * tambien como Bearer, para los backends que solo leen `Authorization`.
+ * Valida y normaliza la URL base de GSG: http(s), sin usuario ni clave, sin
+ * query (`?`) ni fragmento (`#`), sin segmentos `..`, barras dobles juntadas
+ * y SIEMPRE con la barra final (para que `/api/` se conserve al unir).
+ */
+export function normalizarBaseGsg(base: string): ResultadoUrlGsg {
+  const crudo = (base ?? '').trim();
+  if (!crudo) return { ok: false, error: 'Falta la URL base de GSG.' };
+  if (!/^https?:\/\/[^/\\?#]/i.test(crudo)) return { ok: false, error: 'La URL base de GSG tiene que empezar por https:// (o http://) seguido del dominio.' };
+  if (/[?#]/.test(crudo)) return { ok: false, error: 'La URL base de GSG no puede llevar «?» ni «#»: pon solo la dirección, sin parámetros.' };
+  if (/[\s\\]/.test(crudo)) return { ok: false, error: 'La URL base de GSG no puede llevar espacios ni barras invertidas.' };
+  let u: URL;
+  try {
+    u = new URL(crudo);
+  } catch {
+    return { ok: false, error: 'La URL base de GSG no es una dirección válida.' };
+  }
+  if (u.username || u.password) return { ok: false, error: 'La URL base de GSG no puede llevar usuario ni clave: la API Key va en su propio campo.' };
+  // Los segmentos se miran sobre el texto original: URL() ya resolveria los `..`.
+  const caminoCrudo = crudo.replace(/^https?:\/\/[^/]*/i, '');
+  const segmentos = caminoCrudo.split('/').filter(Boolean);
+  if (segmentos.some((s) => s === '..' || s === '.' || /^(%2e|\.){1,2}$/i.test(s))) return { ok: false, error: 'La URL base de GSG no puede llevar segmentos «..».' };
+  const camino = segmentos.length ? `/${segmentos.join('/')}/` : '/';
+  return { ok: true, url: `${u.protocol}//${u.host}${camino}` };
+}
+
+/**
+ * Une la URL base de GSG con una ruta relativa: la unica forma de armar una
+ * URL hacia GSG (envio, consulta y la vista previa de la pantalla, que la
+ * reimplementa en el navegador con los mismos casos: ver tests).
+ *
+ *  - Conserva el prefijo de la base (`https://x/api/` + `v1/a` = `https://x/api/v1/a`).
+ *  - Normaliza barras: iniciales y finales de la ruta, y dobles en ambas.
+ *  - Rechaza rutas absolutas (`http://…`, `//host`, cualquier `esquema:`),
+ *    segmentos `..`/`.`, query (`?`) y fragmento (`#`), y una base no http(s).
+ */
+export function unirUrlGsg(base: string, ruta: string): ResultadoUrlGsg {
+  const b = normalizarBaseGsg(base);
+  if (!b.ok) return b;
+  const r = (ruta ?? '').trim();
+  if (!r) return { ok: false, error: 'Falta la ruta para enviar la ubicación (por ejemplo v1/gsgchat/location).' };
+  if (/^[a-z][a-z0-9+.-]*:/i.test(r)) return { ok: false, error: 'La ruta no puede ser una dirección completa (http://…): pon solo la parte que va después de la URL base.' };
+  if (/^\/\//.test(r) || r.includes('\\')) return { ok: false, error: 'La ruta no puede empezar por «//» ni llevar barras invertidas: pon solo la parte que va después de la URL base.' };
+  if (/[?#]/.test(r)) return { ok: false, error: 'La ruta no puede llevar «?» ni «#».' };
+  if (/\s/.test(r)) return { ok: false, error: 'La ruta no puede llevar espacios.' };
+  const segmentos = r.split('/').filter(Boolean);
+  if (!segmentos.length) return { ok: false, error: 'Falta la ruta para enviar la ubicación (por ejemplo v1/gsgchat/location).' };
+  if (segmentos.some((s) => /^(%2e|\.){1,2}$/i.test(s))) return { ok: false, error: 'La ruta no puede llevar segmentos «..» ni «.».' };
+  return { ok: true, url: `${b.url}${segmentos.join('/')}` };
+}
+
+export type ResultadoMigracionGsg = { ok: true; base: string; ruta: string; regla: 'sin_url_antigua' | 'prefijo' | 'api' } | { ok: false; error: string };
+
+/**
+ * Convierte la configuracion ANTIGUA (una direccion + la URL completa de la
+ * ubicacion, o solo la direccion) a URL base + ruta, SOLO si es inequivoco:
+ *
+ *  1. Sin URL antigua de ubicacion: antes se mandaba a `<direccion>/sendLocation`
+ *     (o a la direccion tal cual si ya acababa en /sendLocation). Se queda
+ *     exactamente igual: base = la direccion (sin /sendLocation), ruta = `sendLocation`.
+ *  2. La URL antigua empieza por la direccion + `/`: base = la direccion,
+ *     ruta = lo que sigue. Sale a la misma URL y las consultas a la misma base.
+ *  3. Si no, se parte por `/api/` cuando la URL antigua lo tiene UNA sola vez
+ *     (base = hasta `/api/` incluido, ruta = lo de despues), siempre que la
+ *     direccion antigua no diga otra cosa (vacia, igual a la URL antigua o
+ *     igual a esa base). Con dos `/api/`, sin `/api/` o con una direccion que
+ *     apunta a otro sitio, no se adivina: error y no se envia nada.
+ */
+export function migrarUbicacionAntigua(direccion: string, urlUbicacionAntigua: string): ResultadoMigracionGsg {
+  const dir = (direccion ?? '').trim();
+  const antigua = (urlUbicacionAntigua ?? '').trim();
+  const sinFinal = (x: string) => x.replace(/\/+$/, '');
+
+  if (!antigua) {
+    const limpia = sinFinal(dir);
+    const pegaronUbicacion = limpia.toLowerCase().endsWith(RUTAS_GSG.ubicacion.toLowerCase());
+    const base = normalizarBaseGsg(pegaronUbicacion ? limpia.slice(0, -RUTAS_GSG.ubicacion.length) : limpia);
+    if (!base.ok) return base;
+    return { ok: true, base: base.url, ruta: RUTA_UBICACION_POR_DEFECTO, regla: 'sin_url_antigua' };
+  }
+
+  const url = normalizarBaseGsg(antigua);
+  if (!url.ok) return { ok: false, error: `La URL antigua para enviar la ubicación no es válida (${url.error}) Escribe la URL base y la ruta por separado.` };
+  const completa = sinFinal(url.url);
+  const baseDir = dir ? normalizarBaseGsg(dir) : null;
+
+  // Regla 2: la URL antigua cuelga de la direccion.
+  if (baseDir?.ok && completa.toLowerCase().startsWith(baseDir.url.toLowerCase()) && completa.length > baseDir.url.length) {
+    const ruta = completa.slice(baseDir.url.length);
+    if (unirUrlGsg(baseDir.url, ruta).ok) return { ok: true, base: baseDir.url, ruta, regla: 'prefijo' };
+  }
+
+  // Regla 3: se parte por el unico /api/.
+  const camino = completa.replace(/^https?:\/\/[^/]*/i, '');
+  const veces = camino.toLowerCase().split('/api/').length - 1;
+  if (veces === 1) {
+    const corte = completa.toLowerCase().indexOf('/api/', completa.indexOf('//') + 2) + '/api/'.length;
+    const base = completa.slice(0, corte);
+    const ruta = completa.slice(corte);
+    const dirCoincide = !dir || !baseDir?.ok || sinFinal(baseDir.url).toLowerCase() === completa.toLowerCase() || baseDir.url.toLowerCase() === base.toLowerCase();
+    if (ruta && dirCoincide && unirUrlGsg(base, ruta).ok) return { ok: true, base, ruta, regla: 'api' };
+  }
+
+  return {
+    ok: false,
+    error: `No se puede convertir sin adivinar la URL antigua de ubicación (${completa}) a URL base + ruta${dir ? ` con la dirección ${sinFinal(dir)}` : ''}. Escribe la URL base de GSG y la ruta para enviar la ubicación por separado en Conexión; mientras tanto no se envía nada a GSG.`,
+  };
+}
+
+/** Lo que el puerto necesita: base valida + URL de la ubicacion, o el error en palabras. */
+export function resolverDestinoGsg(opts: { url: string; rutaUbicacion?: string; ubicacionUrl?: string }): { ok: true; base: string; ruta: string; urlUbicacion: string } | { ok: false; error: string } {
+  const ruta = (opts.rutaUbicacion ?? '').trim();
+  if (ruta) {
+    const base = normalizarBaseGsg(opts.url);
+    if (!base.ok) return base;
+    const u = unirUrlGsg(base.url, ruta);
+    if (!u.ok) return u;
+    return { ok: true, base: base.url, ruta, urlUbicacion: u.url };
+  }
+  const m = migrarUbicacionAntigua(opts.url, opts.ubicacionUrl ?? '');
+  if (!m.ok) return m;
+  const u = unirUrlGsg(m.base, m.ruta);
+  if (!u.ok) return u;
+  return { ok: true, base: m.base, ruta: m.ruta, urlUbicacion: u.url };
+}
+
+/** La clave enmascarada para mostrarla: solo los ultimos 4 (y nada si es corta). */
+export function enmascararClave(clave: string): string | null {
+  const c = (clave ?? '').trim();
+  if (!c) return null;
+  return c.length >= 12 ? `••••${c.slice(-4)}` : '••••';
+}
+
+/** Quita la clave de cualquier texto que se vaya a guardar o mostrar (por si GSG la devuelve en su respuesta). */
+export function sinClave(texto: string, clave: string): string {
+  const c = (clave ?? '').trim();
+  return c && c.length >= 4 ? texto.split(c).join('••••') : texto;
+}
+
+/**
+ * La clave de GSG va SOLO como `X-API-Key`. Nunca como Bearer, nunca en la
+ * URL ni en el cuerpo.
  */
 function cabecerasDeClave(token: string): Record<string, string> {
-  return token ? { 'x-api-key': token, authorization: `Bearer ${token}` } : {};
+  const t = token.trim();
+  return t ? { 'x-api-key': t } : {};
+}
+
+function huella(texto: string): string {
+  return createHash('sha256').update(texto).digest('hex').slice(0, 16);
+}
+
+/** El mensaje de un rechazo por la clave, sin la clave. */
+export function motivoAutenticacion(status: 401 | 403): string {
+  return status === 401
+    ? 'GSG rechazó la clave: la API Key de GSG es incorrecta. Corrígela en Conexión; no se reintenta sola'
+    : 'GSG rechazó la clave: la API Key de GSG no tiene permisos para esta ruta. Pide a GSG que le dé permiso; no se reintenta sola';
 }
 
 /**
  * Puerto real. Manda un POST con el payload tal cual y espera un JSON con
- * `id` o `referencia`; cualquier 2xx se da por aceptado.
+ * `id` o `referencia`; solo un 2xx se da por aceptado.
  */
 export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
-  // Si pegaron la URL completa de sendLocation como direccion, esa es la de
-  // la ubicacion y la base es lo de antes (si no, salia a .../sendLocation/sendLocation).
-  const crudo = opts.url.trim().replace(/\/+$/, '');
-  const pegaronUbicacion = crudo.toLowerCase().endsWith(RUTAS_GSG.ubicacion.toLowerCase());
-  const base = pegaronUbicacion ? crudo.slice(0, -RUTAS_GSG.ubicacion.length) : crudo;
-  const urlUbicacion = opts.ubicacionUrl || (pegaronUbicacion ? crudo : `${base}${RUTAS_GSG.ubicacion}`);
+  const destino = resolverDestinoGsg(opts);
+  const crudo = opts.url.trim();
+  const base = destino.ok ? destino.base : crudo;
   const doFetch = opts.fetchImpl ?? fetch;
+  const clave = opts.token ?? '';
+  const errorConfig = destino.ok ? null : destino.error;
+  const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}`);
+  const limpio = (t: string) => sinClave(t, clave);
 
   return {
-    conectado: () => Boolean(base),
+    conectado: () => Boolean(crudo),
     descripcion: () => `API de GSG en ${base}`,
-    urlUbicacion: () => (base ? urlUbicacion : null),
+    urlUbicacion: () => (crudo && destino.ok ? destino.urlUbicacion : null),
+    errorConfiguracion: () => errorConfig,
+    firma: () => firma,
 
     async enviar(tipo, payload) {
+      if (!destino.ok) {
+        return { ok: false, error: `Configuración de GSG no válida: ${destino.error} No se envía nada hasta corregirla.`, reintentable: true, configuracion: true };
+      }
+      let url: string;
+      if (tipo === 'ubicacion') url = destino.urlUbicacion;
+      else {
+        const u = unirUrlGsg(destino.base, RUTAS_GSG[tipo]);
+        if (!u.ok) return { ok: false, error: `Configuración de GSG no válida: ${u.error}`, reintentable: true, configuracion: true };
+        url = u.url;
+      }
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
-      const url = tipo === 'ubicacion' ? urlUbicacion : `${base}${RUTAS_GSG[tipo]}`;
       try {
         const respuesta = await doFetch(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            ...cabecerasDeClave(opts.token),
+            ...cabecerasDeClave(clave),
           },
           body: JSON.stringify(tipo === 'ubicacion' ? { tracking: payload.tracking ?? payload.referencia, lat: payload.lat ?? payload.latitud, lng: payload.lng ?? payload.longitud } : payload),
           signal: control.signal,
@@ -123,22 +321,25 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
 
         const texto = await respuesta.text();
         if (!respuesta.ok) {
-          const causa =
-            respuesta.status === 401 || respuesta.status === 403
-              ? 'GSG rechazó la clave (x-api-key): revisa que sea la que te dieron'
-              : respuesta.status === 404
-                ? `GSG no tiene esa ruta (${url}): revisa la dirección`
-                : respuesta.status === 400 || respuesta.status === 422
-                  ? 'GSG no aceptó los datos enviados'
+          const auth = respuesta.status === 401 || respuesta.status === 403 ? (respuesta.status as 401 | 403) : undefined;
+          const causa = auth
+            ? motivoAutenticacion(auth)
+            : respuesta.status === 404
+              ? `GSG no tiene esa ruta (${url}): revisa la URL base y la ruta`
+              : respuesta.status === 400 || respuesta.status === 422
+                ? 'GSG no aceptó los datos enviados'
+                : respuesta.status === 429
+                  ? 'GSG pidió esperar (demasiadas llamadas)'
                   : respuesta.status >= 500
                     ? 'GSG tuvo un error en su servidor'
                     : 'GSG no aceptó el envío';
           return {
             ok: false,
-            error: `Error ${respuesta.status}: ${causa}.${texto.trim() ? ` Respuesta de GSG: ${texto.trim().slice(0, 200)}` : ''}`,
-            // 5xx y 429 son del otro lado y pasan solos; un 4xx es culpa del
-            // payload y reintentarlo solo repite el mismo error.
+            error: limpio(`Error ${respuesta.status}: ${causa}.${texto.trim() ? ` Respuesta de GSG: ${texto.trim().slice(0, 200)}` : ''}`),
+            // 5xx, 429 y 408 son del otro lado y pasan solos; un 4xx es culpa
+            // del payload (o de la clave) y reintentarlo solo repite el error.
             reintentable: respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
+            ...(auth ? { autenticacion: auth } : {}),
           };
         }
 
@@ -147,7 +348,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
           const cuerpo = texto ? (JSON.parse(texto) as Record<string, unknown>) : {};
           id = (cuerpo.id ?? cuerpo.referencia ?? cuerpo.codigo ?? null) as string | null;
         } catch {
-          // Una API que contesta 200 con texto plano tambien vale.
+          // Una API que contesta 2xx con texto plano tambien vale.
         }
         return { ok: true, id };
       } catch (error) {
@@ -156,7 +357,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
           : `No se pudo conectar con GSG en ${url}: ${error instanceof Error ? ((error.cause as { code?: string } | undefined)?.code ?? error.message) : String(error)}`;
         return {
           ok: false,
-          error: `${motivo}. Se reintenta solo.`,
+          error: limpio(`${motivo}. Se reintenta solo.`),
           reintentable: true,
         };
       } finally {
@@ -165,20 +366,24 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
     },
 
     async consultar(ruta) {
+      if (!destino.ok) return { ok: false, error: `Configuración de GSG no válida: ${destino.error}` };
+      const u = unirUrlGsg(destino.base, ruta);
+      if (!u.ok) return { ok: false, error: u.error };
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
       try {
-        const respuesta = await doFetch(`${base}${ruta}`, {
+        // Solo lectura: GET sin cuerpo.
+        const respuesta = await doFetch(u.url, {
           method: 'GET',
           headers: {
             accept: 'application/json',
-            ...cabecerasDeClave(opts.token),
+            ...cabecerasDeClave(clave),
           },
           signal: control.signal,
         });
         const texto = await respuesta.text();
         if (!respuesta.ok) {
-          return { ok: false, status: respuesta.status, error: `GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}` };
+          return { ok: false, status: respuesta.status, error: limpio(`GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}`) };
         }
         try {
           return { ok: true, status: respuesta.status, cuerpo: (texto ? JSON.parse(texto) : {}) as never };
@@ -186,7 +391,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
           return { ok: false, status: respuesta.status, error: 'GSG contesto algo que no es JSON' };
         }
       } catch (error) {
-        return { ok: false, error: control.signal.aborted ? 'GSG no respondio a tiempo' : error instanceof Error ? error.message : String(error) };
+        return { ok: false, error: control.signal.aborted ? 'GSG no respondio a tiempo' : limpio(error instanceof Error ? error.message : String(error)) };
       } finally {
         clearTimeout(corte);
       }
@@ -198,7 +403,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
 export function crearPuertoEnEspera(): PuertoGsg {
   return {
     conectado: () => false,
-    descripcion: () => 'falta GSG_URL: lo reportable se guarda y saldra entero al conectarla',
+    descripcion: () => 'falta GSG_URL (la URL base de GSG): lo reportable se guarda y saldra entero al conectarla',
     async enviar() {
       return { ok: false, error: 'la API de GSG todavia no esta conectada', reintentable: true };
     },
@@ -208,9 +413,15 @@ export function crearPuertoEnEspera(): PuertoGsg {
   };
 }
 
-export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string }): PuertoGsg {
+/** El puerto desde el .env (sin pantalla). GSG_API_KEY; GSG_TOKEN se lee por compatibilidad. */
+export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string; GSG_API_KEY?: string; GSG_LOCATION_PATH?: string; GSG_SEND_LOCATION_URL?: string }): PuertoGsg {
   return config.GSG_URL.trim()
-    ? crearPuertoHttp({ url: config.GSG_URL, token: config.GSG_TOKEN })
+    ? crearPuertoHttp({
+        url: config.GSG_URL,
+        token: (config.GSG_API_KEY ?? '').trim() || config.GSG_TOKEN,
+        rutaUbicacion: config.GSG_LOCATION_PATH || undefined,
+        ubicacionUrl: config.GSG_SEND_LOCATION_URL || undefined,
+      })
     : crearPuertoEnEspera();
 }
 
@@ -393,11 +604,36 @@ export interface DespachoResumen {
 const despachosEnMarcha = new WeakMap<object, Promise<unknown>>();
 
 /**
+ * Las colas paradas porque GSG rechazo la clave (401/403), con la huella de
+ * la configuracion con la que se rechazo. Mientras la configuracion sea la
+ * misma, las pasadas automaticas no vuelven a llamar (insistir con la misma
+ * clave solo repite el rechazo). Se levanta sola al cambiar la URL, la ruta o
+ * la clave, o a mano con «Enviar ahora» / «Enviar a GSG» (`manual`). Vive en
+ * memoria: un reinicio da como mucho UN intento mas.
+ */
+const paradasPorClave = new WeakMap<object, { firma: string; error: string }>();
+
+const firmaDe = (puerto: PuertoGsg): string => puerto.firma?.() ?? puerto.descripcion();
+
+/** Si la cola esta parada por un rechazo de la clave con esta misma configuracion: el motivo, o null. */
+export function paradaPorClave(repos: { rutas: RutasRepo }, puerto: PuertoGsg): string | null {
+  const p = paradasPorClave.get(repos.rutas);
+  return p && p.firma === firmaDe(puerto) ? p.error : null;
+}
+
+/**
  * Vacia la cola contra GSG.
  *
  * Con el puerto sin conectar no se toca nada: los reportes se quedan
- * 'pendiente' y se mandaran enteros el dia que haya API. Un fallo no
- * reintentable pasa a 'fallido' para que no atasque la cola detras.
+ * 'pendiente' y se mandaran enteros el dia que haya API. Con la
+ * configuracion mal (URL base o ruta invalidas) no sale nada: cada reporte
+ * se queda 'pendiente' con el error a la vista. Solo un 2xx lo marca
+ * 'enviado'. Por codigo:
+ *  - 401/403: 'fallido' con el motivo (clave incorrecta / sin permisos) y la
+ *    cola se para hasta que cambie la configuracion o alguien reintente a mano.
+ *  - 429, 5xx, 408, timeout o sin red: se queda 'pendiente' y se reintenta en
+ *    la siguiente pasada.
+ *  - Otro 4xx: 'fallido' para que no atasque la cola detras.
  */
 export function despacharReportes(
   repos: { rutas: RutasRepo },
@@ -405,9 +641,11 @@ export function despacharReportes(
   limite = 25,
   /** Solo estos tipos (el envio al momento solo manda ubicaciones). Sin esto, todo. */
   soloTipos?: TipoReporte[],
+  /** manual = lo pidio una persona («Enviar ahora»): intenta aunque la cola este parada por la clave. */
+  opciones?: { manual?: boolean },
 ): Promise<DespachoResumen> {
   const anterior = despachosEnMarcha.get(repos.rutas) ?? Promise.resolve();
-  const este = anterior.catch(() => undefined).then(() => despacharAhora(repos, puerto, limite, soloTipos));
+  const este = anterior.catch(() => undefined).then(() => despacharAhora(repos, puerto, limite, soloTipos, opciones?.manual ?? false));
   despachosEnMarcha.set(repos.rutas, este);
   return este;
 }
@@ -416,11 +654,16 @@ async function despacharAhora(
   repos: { rutas: RutasRepo },
   puerto: PuertoGsg,
   limite: number,
-  soloTipos?: TipoReporte[],
+  soloTipos: TipoReporte[] | undefined,
+  manual: boolean,
 ): Promise<DespachoResumen> {
   if (!puerto.conectado()) {
     return { intentados: 0, enviados: 0, fallidos: 0, motivo: puerto.descripcion() };
   }
+  if (manual) paradasPorClave.delete(repos.rutas);
+  const parada = paradaPorClave(repos, puerto);
+  if (parada) return { intentados: 0, enviados: 0, fallidos: 0, motivo: parada, errores: [parada] };
+  paradasPorClave.delete(repos.rutas);
 
   // Se leen DENTRO de la fila de despachos: lo que otro despacho ya mando
   // no vuelve a salir.
@@ -452,6 +695,13 @@ async function despacharAhora(
     );
     if (!salida.reintentable) resumen.fallidos++;
     if (salida.error && !(resumen.errores ??= []).includes(salida.error)) resumen.errores.push(salida.error);
+    // La clave no vale: los de detras fallarian igual. Se para la cola (los
+    // demas siguen 'pendiente', sin tocar) hasta que cambie la configuracion.
+    if (salida.autenticacion) {
+      paradasPorClave.set(repos.rutas, { firma: firmaDe(puerto), error: salida.error ?? motivoAutenticacion(salida.autenticacion) });
+      resumen.intentados = pendientes.indexOf(reporte) + 1;
+      break;
+    }
   }
 
   return resumen;

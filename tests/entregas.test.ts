@@ -443,7 +443,7 @@ describe('un día de entregas con GSG simulado', () => {
   });
 
   it('la pantalla, la conexión con GSG y la API pública responden', async () => {
-    const pagina = await e.app.inject({ method: 'GET', url: '/entregas', headers: { authorization: `Bearer ${(await import('./fakes.js')).CLAVE_API_PRUEBA}` } });
+    const pagina = await e.app.inject({ method: 'GET', url: '/entregas', headers: { 'x-api-key': (await import('./fakes.js')).CLAVE_API_PRUEBA } });
     expect(pagina.statusCode).toBe(200);
     expect(pagina.body).toContain('Pedidos de hoy');
     expect(pagina.body).toContain('Probar con números ficticios');
@@ -452,13 +452,13 @@ describe('un día de entregas con GSG simulado', () => {
     expect(gsg.body.gsg).toMatchObject({ modo: 'real', conectada: true, origen: 'env' });
 
     const clave = await crearClaveDePrueba(e.repos, ['entregas:leer']);
-    const r = await e.app.inject({ method: 'GET', url: '/api/v1/entregas', headers: { authorization: `Bearer ${clave}` } });
+    const r = await e.app.inject({ method: 'GET', url: '/api/v1/entregas', headers: { 'x-api-key': clave } });
     expect(r.statusCode).toBe(200);
     const cuerpo = r.json() as { cifras: { total: number }; entregas: Array<{ referencia: string; llegaAproxEn: string | null }> };
     expect(cuerpo.cifras.total).toBe(10);
     expect(cuerpo.entregas.find((x) => x.referencia === 'P-1001')?.llegaAproxEn).not.toBeNull();
     // Sin el permiso de gestionar, no se sincroniza.
-    const sinPermiso = await e.app.inject({ method: 'POST', url: '/api/v1/entregas/sincronizar', headers: { authorization: `Bearer ${clave}` }, payload: {} });
+    const sinPermiso = await e.app.inject({ method: 'POST', url: '/api/v1/entregas/sincronizar', headers: { 'x-api-key': clave }, payload: {} });
     expect(sinPermiso.statusCode).toBe(403);
 
     const sim = await e.api.get<{ estado: { terminados: number; cancelados: number } }>('/admin/entregas/simulador');

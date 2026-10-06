@@ -22,7 +22,8 @@
  *    pedido a pedido.
  *
  * Vive en memoria dentro de este mismo servidor, colgado de
- * `/simulador/gsg`, y exige el mismo token que usaria una API real. Desde la
+ * `/simulador/gsg`, y exige la misma clave que usaria la API real: en la
+ * cabecera `X-API-Key` (un `Authorization: Bearer` solo se rechaza con 401). Desde la
  * pantalla se carga con los diez clientes ficticios y se reinicia. Las
  * pruebas lo usan igual.
  */
@@ -328,7 +329,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       ultimaLlamadaEn = ahora().toISOString();
       // Sin red: ni siquiera se contesta (status 0; el plugin corta la conexion).
       if (sim.modo === 'sin_red') return { status: 0, body: null };
-      if (token !== opts.token) return { status: 401, body: { error: 'token inválido' } };
+      if (token !== opts.token) return { status: 401, body: { error: token === null ? 'Falta la cabecera X-API-Key.' : 'X-API-Key inválida.' } };
       if (sim.modo === 'caido') return { status: 502, body: '<html>502 Bad Gateway</html>' };
       const camino = ruta.replace(/\?.*$/, '').replace(/\/+$/, '');
 
@@ -425,13 +426,24 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
   return sim;
 }
 
+/** La clave de una llamada al simulador: SOLO la cabecera X-API-Key (Bearer no cuenta). */
+export function claveDeCabeceras(headers: Record<string, unknown> | Headers): string | null {
+  const valor = headers instanceof Headers ? headers.get('x-api-key') : headers['x-api-key'];
+  const v = Array.isArray(valor) ? valor[0] : valor;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
 /** Cuelga el simulador de este servidor en `prefijo` (p. ej. /simulador/gsg). */
 export async function registerGsgSimulado(app: FastifyInstance, deps: { simulador: GsgSimulado; prefijo: string }): Promise<void> {
   const { simulador, prefijo } = deps;
-  const tokenDe = (auth: string | undefined): string | null => (auth?.startsWith('Bearer ') ? auth.slice(7) : null);
   const atender = (method: string) => async (request: { url: string; headers: Record<string, unknown>; body: unknown; raw: { socket: { destroy(): void } } }, reply: { code(n: number): { send(b: unknown): unknown }; hijack(): void }) => {
     const ruta = request.url.slice(prefijo.length);
-    const r = simulador.atender(method, ruta, tokenDe(request.headers.authorization as string | undefined), request.body);
+    // Como la API real: la clave solo vale en X-API-Key. Un Bearer solo no entra.
+    const clave = claveDeCabeceras(request.headers);
+    if (clave === null && typeof request.headers.authorization === 'string') {
+      return reply.code(401).send({ error: 'Falta la cabecera X-API-Key.' });
+    }
+    const r = simulador.atender(method, ruta, clave, request.body);
     if (r.status === 0) {
       // Modo "sin red": la conexion se corta sin respuesta.
       reply.hijack();

@@ -134,7 +134,7 @@ describe('GET /admin/chat/:contactId/decisiones', () => {
     await repos.decisiones.registrar(decision({ contactId: contacto.id, detalle: 'regla: sí corto tras pedir confirmación' }));
     setFakeClock(null);
 
-    const r = await app.inject({ url: `/admin/chat/${contacto.id}/decisiones`, headers: { authorization: `Bearer ${ADMIN}` } });
+    const r = await app.inject({ url: `/admin/chat/${contacto.id}/decisiones`, headers: { 'x-api-key': ADMIN } });
     expect(r.statusCode).toBe(200);
     const { decisiones } = r.json() as { decisiones: Array<Record<string, unknown>> };
     expect(decisiones).toHaveLength(2);
@@ -147,14 +147,14 @@ describe('GET /admin/chat/:contactId/decisiones', () => {
     });
     expect(decisiones[1]!.resumen).toContain('intención: enviar ubicación');
 
-    const una = await app.inject({ url: `/admin/chat/${contacto.id}/decisiones?limit=1`, headers: { authorization: `Bearer ${ADMIN}` } });
+    const una = await app.inject({ url: `/admin/chat/${contacto.id}/decisiones?limit=1`, headers: { 'x-api-key': ADMIN } });
     expect(una.json().decisiones).toHaveLength(1);
   });
 
   it('sin sesion ni clave no entra, y un contacto que no existe es 404', async () => {
     const contacto = await repos.contacts.upsertFromInbound('51911111111', 'Beto');
     expect((await app.inject({ url: `/admin/chat/${contacto.id}/decisiones` })).statusCode).toBe(401);
-    const nadie = await app.inject({ url: '/admin/chat/no-existe/decisiones', headers: { authorization: `Bearer ${ADMIN}` } });
+    const nadie = await app.inject({ url: '/admin/chat/no-existe/decisiones', headers: { 'x-api-key': ADMIN } });
     expect(nadie.statusCode).toBe(404);
   });
 });

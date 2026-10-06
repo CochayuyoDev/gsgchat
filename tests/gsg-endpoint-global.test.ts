@@ -38,7 +38,7 @@ afterAll(async () => { await servidor.cerrar(); await a.cerrar(); await b.cerrar
 
 function enviar(clave?: string, ruta = '/api/v1/entregas', tracking = 'GLOBAL-1') {
   return fetch(base + ruta, { method: 'POST', headers: { 'content-type': 'application/json',
-    ...(clave ? { authorization: 'Bearer ' + clave } : {}), cookie: 'gsg_tienda=tienda-b', referer: base + '/tienda/tienda-b/conexion-gsg' },
+    ...(clave ? { 'x-api-key': clave } : {}), cookie: 'gsg_tienda=tienda-b', referer: base + '/tienda/tienda-b/conexion-gsg' },
     body: JSON.stringify({ ...OBLIGATORIOS_GSG, tracking, cliente: 'Cliente Global', telefono: '987654321', tienda: 'tienda-b' }) });
 }
 describe('recepcion global aislada por clave', () => {
@@ -72,7 +72,7 @@ describe('recepcion global aislada por clave', () => {
     for (const [clave, status, codigo] of casos) {
       const r = await enviar(clave);
       expect(r.status).toBe(status);
-      if (status === 401) expect(r.headers.get('www-authenticate')).toMatch(/^Bearer/);
+      if (status === 401) expect(r.headers.get('www-authenticate')).toMatch(/^ApiKey .*X-API-Key/);
       const cuerpo = await r.json() as Record<string, unknown>;
       expect(cuerpo).toMatchObject({ ok: false, codigo });
       expect(typeof cuerpo.error).toBe('string');
@@ -99,21 +99,21 @@ describe('recepcion global aislada por clave', () => {
     expect(await a.entrega('AMBIGUO')).toBeFalsy(); expect(await b.entrega('AMBIGUO')).toBeFalsy();
     await b.repos.claves.revocar(copiada.id);
   });
-  it('consultar desde Postman con Bearer también usa la tienda de la clave, sin cookies', async () => {
+  it('consultar desde Postman con X-API-Key también usa la tienda de la clave, sin cookies', async () => {
     const clave = (await nueva(a, ['entregas:gestionar', 'entregas:leer'])).clave;
     expect((await enviar(clave, '/api/v1/entregas', 'POSTMAN-CONSULTA')).status).toBe(201);
-    const lista = await fetch(base + '/api/v1/entregas', { headers: { authorization: `Bearer ${clave}`, cookie: 'gsg_tienda=tienda-b' } });
+    const lista = await fetch(base + '/api/v1/entregas', { headers: { 'x-api-key': clave, cookie: 'gsg_tienda=tienda-b' } });
     expect(lista.status).toBe(200);
     expect((await lista.json() as any).entregas.some((e: any) => e.referencia === 'POSTMAN-CONSULTA')).toBe(true);
-    const detalle = await fetch(base + '/api/v1/entregas/POSTMAN-CONSULTA', { headers: { authorization: `Bearer ${clave}` } });
+    const detalle = await fetch(base + '/api/v1/entregas/POSTMAN-CONSULTA', { headers: { 'x-api-key': clave } });
     expect(detalle.status).toBe(200);
     expect((await detalle.json() as any).entrega.referencia).toBe('POSTMAN-CONSULTA');
-    const ajena = await fetch(base + '/api/v1/entregas/POSTMAN-CONSULTA', { headers: { authorization: `Bearer ${soloLeer}` } });
+    const ajena = await fetch(base + '/api/v1/entregas/POSTMAN-CONSULTA', { headers: { 'x-api-key': soloLeer } });
     expect(ajena.status).toBe(200);
-    const sinLectura = await fetch(base + '/api/v1/entregas', { headers: { authorization: `Bearer ${claveB}` } });
+    const sinLectura = await fetch(base + '/api/v1/entregas', { headers: { 'x-api-key': claveB } });
     expect(sinLectura.status).toBe(403);
   });
-  it('acepta la clave como API key (X-API-Key) igual que como Bearer', async () => {
+  it('acepta la clave como API key (X-API-Key)', async () => {
     const r = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': claveA, cookie: 'gsg_tienda=tienda-b' },
       body: JSON.stringify({ ...OBLIGATORIOS_GSG, tracking: 'APIKEY-1', cliente: 'Cliente API key', telefono: '987654321' }) });
     expect(r.status).toBe(201);
@@ -123,6 +123,47 @@ describe('recepcion global aislada por clave', () => {
     expect(lista.status).toBe(200);
     const mala = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': 'wak_no_existe' }, body: '{}' });
     expect(mala.status).toBe(401);
+  });
+  it('una clave válida en Authorization: Bearer (sin X-API-Key) da 401 CLAVE_AUSENTE y no guarda nada', async () => {
+    const cuerpo = JSON.stringify({ ...OBLIGATORIOS_GSG, tracking: 'BEARER-1', cliente: 'Cliente Bearer', telefono: '987654321' });
+    const r = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${claveA}` }, body: cuerpo });
+    expect(r.status).toBe(401);
+    expect(r.headers.get('www-authenticate')).toMatch(/^ApiKey .*X-API-Key/);
+    expect(r.headers.get('www-authenticate')).not.toMatch(/Bearer/);
+    const json = await r.json() as Record<string, unknown>;
+    expect(json).toMatchObject({ ok: false, codigo: 'CLAVE_AUSENTE' });
+    expect(String(json.error)).toContain('X-API-Key');
+    expect(JSON.stringify(json)).not.toContain(claveA);
+    expect(await a.entrega('BEARER-1')).toBeFalsy();
+    expect(await b.entrega('BEARER-1')).toBeFalsy();
+    // Tambien al consultar.
+    const lista = await fetch(base + '/api/v1/entregas', { headers: { authorization: `Bearer ${soloLeer}` } });
+    expect(lista.status).toBe(401);
+    expect(await lista.json()).toMatchObject({ codigo: 'CLAVE_AUSENTE' });
+  });
+  it('con las dos cabeceras vale solo X-API-Key: el Bearer se ignora', async () => {
+    const cuerpo = (tracking: string) => JSON.stringify({ ...OBLIGATORIOS_GSG, tracking, cliente: 'Cliente Doble', telefono: '987654321' });
+    // X-API-Key buena y Bearer de otra tienda: entra en la tienda de X-API-Key.
+    const r = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': claveA, authorization: `Bearer ${claveB}` }, body: cuerpo('DOBLE-1') });
+    expect(r.status).toBe(201);
+    expect(await a.entrega('DOBLE-1')).toBeTruthy();
+    expect(await b.entrega('DOBLE-1')).toBeFalsy();
+    // X-API-Key sin permiso y Bearer con permiso: manda X-API-Key (403), no cae en el Bearer.
+    const sinPermiso = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': soloLeer, authorization: `Bearer ${claveA}` }, body: cuerpo('DOBLE-2') });
+    expect(sinPermiso.status).toBe(403);
+    expect(await a.entrega('DOBLE-2')).toBeFalsy();
+    // X-API-Key mala y Bearer bueno: 401 por la X-API-Key.
+    const mala = await fetch(base + '/api/v1/entregas', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': generarClaveApi(), authorization: `Bearer ${claveA}` }, body: cuerpo('DOBLE-3') });
+    expect(mala.status).toBe(401);
+    expect(await mala.json()).toMatchObject({ codigo: 'CLAVE_INVALIDA' });
+    expect(await a.entrega('DOBLE-3')).toBeFalsy();
+  });
+  it('OpenAPI anuncia solo X-API-Key para las claves (sin esquema bearer)', () => {
+    const doc = openApi('https://gsgchat.example') as any;
+    const esquemas = doc.components.securitySchemes as Record<string, any>;
+    expect(Object.values(esquemas).some((e) => e.scheme === 'bearer')).toBe(false);
+    expect(esquemas.claveApi).toMatchObject({ type: 'apiKey', in: 'header', name: 'X-API-Key' });
+    expect(doc.paths['/entregas'].post.security).toEqual([{ claveApi: [] }]);
   });
   it('OpenAPI anuncia el endpoint de recepcion sin slug', () => {
     const doc = openApi('https://gsgchat.example/tienda/tienda-a') as any;

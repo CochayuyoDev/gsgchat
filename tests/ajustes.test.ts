@@ -191,7 +191,7 @@ describe('ajustes y plantillas propias: la API', () => {
     },
     async close() {},
   };
-  const auth = { authorization: `Bearer ${ADMIN}` };
+  const auth = { 'x-api-key': ADMIN };
   let app: FastifyInstance;
   let repos: FakeRepos;
 

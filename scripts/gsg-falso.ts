@@ -11,7 +11,7 @@
  * WhatsApp (`telefono`) y su codigo de tracking (`tracking`): esas dos cosas
  * lo identifican.
  *
- *   GET /reparto/pendientes   (Authorization: Bearer <token>)
+ *   GET /reparto/pendientes   (X-API-Key: <token>; un Authorization: Bearer solo no entra)
  *   -> { dia, faltaUbicacion: [...], faltaConfirmacion: [...], terminados: [] }
  *
  *   faltaUbicacion     a quien hay que pedirle el pin por WhatsApp.
@@ -60,7 +60,10 @@ export interface ListaDelDia {
 export interface Llamada {
   metodo: string;
   ruta: string;
+  /** La cabecera Authorization, si vino (no deberia: GSGchat manda solo X-API-Key). */
   autorizacion: string | undefined;
+  /** La cabecera X-API-Key. */
+  apiKey: string | undefined;
   cuerpo: unknown;
   status: number;
 }
@@ -113,12 +116,13 @@ export async function crearGsgFalso(opts: { puerto?: number; host?: string; toke
         cuerpo = datos;
       }
       const responder = (status: number, json: unknown) => {
-        llamadas.push({ metodo: req.method ?? '', ruta, autorizacion: req.headers.authorization, cuerpo, status });
+        llamadas.push({ metodo: req.method ?? '', ruta, autorizacion: req.headers.authorization, apiKey: typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] : undefined, cuerpo, status });
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(json));
       };
 
-      if (req.headers.authorization !== `Bearer ${falso.token}`) return responder(401, { error: 'token invalido' });
+      // Como la API real: la clave solo en X-API-Key.
+      if (req.headers['x-api-key'] !== falso.token) return responder(401, { error: 'X-API-Key invalida o ausente' });
       if (falso.modo === 'caido') return responder(503, { error: 'GSG en mantenimiento' });
 
       if (req.method === 'GET' && ruta === '/reparto/pendientes') {
@@ -159,8 +163,9 @@ if (esPrincipal) {
   Token: ${falso.token}
 
   En GSGchat: Entregas del día → Conexión con GSG → API real
-    Dirección: ${falso.url}
-    Token:     ${falso.token}
+    URL base:  ${falso.url}
+    Ruta:      sendLocation
+    API Key:   ${falso.token}
   y luego «Sincronizar ahora».
 
   Lista del día: ${l.faltaUbicacion.length} para pedir ubicación · ${l.faltaConfirmacion.length} para confirmar

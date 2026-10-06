@@ -3,7 +3,8 @@
  *
  *  - Un token caducable de los programadores de GSG vale para el simulador:
  *    antes de que el simulador mire la cabecera, se cambia por el token
- *    interno si el caducable está vigente.
+ *    interno si el caducable está vigente. Como en la API real, la clave va
+ *    en `X-API-Key`; un `Authorization: Bearer` solo no cuenta.
  *  - Cada llamada al simulador y a /api/v1/entregas queda en la bitácora
  *    (hora, ruta, resultado en palabras, con qué entró).
  *
@@ -50,7 +51,11 @@ export function resultadoEnPalabras(status: number, cuerpo: unknown): string {
   return 'bien';
 }
 
-const tokenDe = (auth: unknown): string | null => (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7).trim() : null);
+/** La clave de una llamada al simulador: solo la cabecera X-API-Key. */
+const tokenDe = (valor: unknown): string | null => {
+  const v = Array.isArray(valor) ? valor[0] : valor;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+};
 
 export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGsgExtrasRoutes): Promise<void> {
   const { conexion } = deps;
@@ -68,9 +73,9 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
   app.addHook('onRequest', async (request: ConUsuario, reply: FastifyReply) => {
     const url = request.url.split('?')[0] ?? request.url;
     if (!url.startsWith(RUTA_SIMULADOR)) return;
-    const token = tokenDe(request.headers.authorization);
+    const token = tokenDe(request.headers['x-api-key']);
     if (!token) {
-      request.gsgQuien = 'sin token';
+      request.gsgQuien = 'sin X-API-Key';
       return;
     }
     if (token === TOKEN_SIMULADOR) {
@@ -85,7 +90,7 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
         return reply.code(401).send({ error: 'El token del simulador caducó o fue anulado. Pide uno nuevo a quien opera GSGchat (Conexión → Para los programadores de GSG).' });
       }
       request.gsgQuien = `token del simulador «${registro.nombre}»`;
-      request.headers.authorization = `Bearer ${TOKEN_SIMULADOR}`;
+      request.headers['x-api-key'] = TOKEN_SIMULADOR;
       return;
     }
     request.gsgQuien = `token desconocido (…${token.slice(-4)})`;

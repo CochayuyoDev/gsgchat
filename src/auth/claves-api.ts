@@ -2,8 +2,9 @@
  * Claves de API: como entran los programas.
  *
  * Una integracion (el sistema de GSG, un script) no tiene usuario ni
- * contrasena: manda `Authorization: Bearer wak_...` con una clave que un
- * administrador creo desde el panel. La clave completa se ve una sola vez,
+ * contrasena: manda la cabecera `X-API-Key: wak_...` con una clave que un
+ * administrador creo desde el panel. Solo en esa cabecera: con
+ * `Authorization: Bearer wak_...` se responde 401 (ver recepcion-gsg.ts). La clave completa se ve una sola vez,
  * al crearla; en la base solo queda su sha256, asi que ni un volcado de la
  * tabla sirve para entrar. Revocarla es inmediato.
  */
@@ -34,7 +35,8 @@ export interface ClavesApiRepo {
   tocarUso(id: string, at: Date): Promise<void>;
 }
 
-const PREFIJO = 'wak_';
+export const PREFIJO_CLAVE_API = 'wak_';
+const PREFIJO = PREFIJO_CLAVE_API;
 const ALFABETO = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 /** Una clave nueva: "wak_" y 40 caracteres al azar (unos 238 bits). */

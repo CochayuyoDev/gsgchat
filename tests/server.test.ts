@@ -164,7 +164,7 @@ describe('api de administracion', () => {
   it('devuelve la salud del numero', async () => {
     const response = await app.inject({
       url: '/admin/health',
-      headers: { authorization: `Bearer ${ADMIN}` },
+      headers: { 'x-api-key': ADMIN },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ number: { quality: 'GREEN' }, sentToday: 0 });
@@ -174,7 +174,7 @@ describe('api de administracion', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/tracking',
-      headers: { authorization: `Bearer ${ADMIN}` },
+      headers: { 'x-api-key': ADMIN },
       payload: { label: 'Pedido A-2048' },
     });
     expect(response.statusCode).toBe(404);
@@ -186,7 +186,7 @@ describe('api de administracion', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/campaigns',
-      headers: { authorization: `Bearer ${ADMIN}` },
+      headers: { 'x-api-key': ADMIN },
       payload: { name: 'Prueba', templateName: 'no_existe' },
     });
     expect(response.statusCode).toBe(404);

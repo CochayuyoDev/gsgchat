@@ -124,7 +124,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
       // Uno REAL (fuera del rango de prueba): nada del modulo lo puede tocar.
       { referencia: 'REAL-1', telefono: '51987654321', nombre: 'Cliente real', distrito: 'Breña', lat: -12.0592, lng: -77.0521, faltaConfirmar: true },
     ];
-    const r = await api('POST', '/api/v1/entregas', { pedidos: pedidos.map((p) => ({ ...OBLIGATORIOS_GSG, ...p })) }, { authorization: `Bearer ${clave}`, cookie: '' });
+    const r = await api('POST', '/api/v1/entregas', { pedidos: pedidos.map((p) => ({ ...OBLIGATORIOS_GSG, ...p })) }, { 'x-api-key': clave, cookie: '' });
     expect(r.status).toBe(201);
     expect(r.body.creadas.length).toBe(pedidos.length);
     // Lo de GSG espera a que se confirme el envío: se confirma solo lo de prueba (el real sigue esperando).
@@ -307,7 +307,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
   it('solo una persona administradora entra: sin sesión, 401', async () => {
     const r = await tienda.app.inject({ method: 'GET', url: '/admin/desarrollador/vivo/lista' });
     expect(r.statusCode).toBe(401);
-    const conClave = await tienda.app.inject({ method: 'GET', url: '/admin/desarrollador/vivo/lista', headers: { authorization: `Bearer ${clave}` } });
+    const conClave = await tienda.app.inject({ method: 'GET', url: '/admin/desarrollador/vivo/lista', headers: { 'x-api-key': clave } });
     expect(conClave.statusCode).toBe(403);
   });
 });

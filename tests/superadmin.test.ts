@@ -232,8 +232,8 @@ describe('codigos de conexion', () => {
     expect(canje.json()).toMatchObject({ ok: true, direccion: 'http://localhost:3000', para: 'Stoky', permisos: ['estado:leer'], usosRestantes: 0 });
     const clave = canje.json().clave as string;
     expect(clave).toMatch(/^wak_/);
-    expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { authorization: `Bearer ${clave}` } })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'GET', url: '/api/v1/webhooks', headers: { authorization: `Bearer ${clave}` } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { 'x-api-key': clave } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/webhooks', headers: { 'x-api-key': clave } })).statusCode).toBe(403);
     // Segunda vez: ya no vale. Y en la lista queda quien lo canjeo.
     expect((await app.inject({ method: 'POST', url: '/api/v1/conexion/canjear', headers: json, payload: { codigo: c.codigo } })).statusCode).toBe(404);
     const lista = (await app.inject({ method: 'GET', url: '/admin/codigos-conexion', headers: h })).json().codigos;
@@ -258,7 +258,7 @@ describe('codigos de conexion', () => {
     const canje = await app.inject({ method: 'POST', url: '/api/v1/conexion/canjear', headers: json, payload: { codigo: `  ${clave}  `, sistema: 'Stoky' } });
     expect(canje.statusCode).toBe(200);
     expect(canje.json()).toMatchObject({ ok: true, direccion: 'http://localhost:3000', para: 'Stoky' });
-    expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { authorization: `Bearer ${canje.json().clave}` } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { 'x-api-key': canje.json().clave } })).statusCode).toBe(200);
     // Una clave que no descifra no revela nada: mismo 404 que un codigo inventado.
     expect((await app.inject({ method: 'POST', url: '/api/v1/conexion/canjear', headers: json, payload: { codigo: 'wac_zzzz' } })).statusCode).toBe(404);
     // La clave que salio aparece en Claves de API con el nombre del codigo.

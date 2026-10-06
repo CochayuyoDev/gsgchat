@@ -45,7 +45,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 
-const auth = { authorization: `Bearer ${ADMIN}` };
+const auth = { 'x-api-key': ADMIN };
 
 let app: FastifyInstance;
 let repos: FakeRepos;

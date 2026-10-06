@@ -193,7 +193,7 @@ describe('/admin/ajustes', () => {
     expect((await app.inject({ method: 'GET', url: '/admin/ajustes', headers: { cookie: operador } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/admin/ajustes', headers: { cookie: operador }, payload: { nombreNegocio: 'X' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'DELETE', url: '/admin/ajustes', headers: { cookie: operador } })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'POST', url: '/admin/ajustes', headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}` }, payload: { nombreNegocio: 'X' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/admin/ajustes', headers: { 'x-api-key': CLAVE_API_PRUEBA }, payload: { nombreNegocio: 'X' } })).statusCode).toBe(403);
     expect(ajustes.nombreNegocio()).toBe('Reparto GSG');
   });
 

@@ -313,13 +313,24 @@ const schema = z.object({
   RUTAS_RESUMEN_CADA_MIN: z.coerce.number().int().positive().default(30),
 
   /**
-   * La API del sistema de GSG. Vacia = todavia no esta conectada.
+   * La conexion SALIENTE con GSG (GSGchat -> GSG). Vacia = todavia no esta
+   * conectada (o se conecta desde la pantalla Conexion, que manda sobre esto).
    *
    * Sin ella el sistema funciona igual y todo lo reportable se acumula en la
    * cola (`rutas_reportes`). El dia que exista, se rellena esto y se vacia la
    * cola entera, incluido lo de atras. Ver src/rutas/gsg.ts.
+   *
+   *  - GSG_URL: la URL base de su API (p. ej. https://backend.gsg.pe/api/).
+   *  - GSG_LOCATION_PATH: la ruta para enviar la ubicacion, relativa a la
+   *    base (p. ej. v1/gsgchat/location). Vacia = sendLocation.
+   *  - GSG_API_KEY: la clave que da GSG; sale solo en la cabecera X-API-Key.
+   *  - GSG_TOKEN y GSG_SEND_LOCATION_URL: ANTIGUOS, se leen por compatibilidad
+   *    (la clave si no hay GSG_API_KEY; la URL completa se convierte a base +
+   *    ruta solo si es inequivoco).
    */
   GSG_URL: z.string().default(''),
+  GSG_LOCATION_PATH: z.string().default(''),
+  GSG_API_KEY: z.string().default(''),
   GSG_TOKEN: z.string().default(''),
   GSG_SEND_LOCATION_URL: z.union([z.string().url(), z.literal('')]).default(''),
 

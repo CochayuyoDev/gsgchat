@@ -57,7 +57,8 @@ describe('contrato del diagrama GSG', () => {
       expect(await despacharReportes(repos, puerto)).toMatchObject({ intentados: 1, enviados: 1 });
       expect(await repos.rutas.cifrasReportes()).toMatchObject({ pendiente: 0, enviado: 1 });
       expect(llegadas).toHaveLength(2);
-      expect(llegadas[1]).toEqual({ url: '/sendLocation', auth: 'Bearer clave-backend', apiKey: 'clave-backend', body: { tracking: 'TRACK-001', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
+      // La clave sale SOLO en X-API-Key: sin Authorization.
+      expect(llegadas[1]).toEqual({ url: '/sendLocation', auth: undefined, apiKey: 'clave-backend', body: { tracking: 'TRACK-001', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
     } finally { await new Promise<void>(r => server.close(() => r())); }
   });
 

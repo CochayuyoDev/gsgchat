@@ -46,7 +46,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 function planRemoto(extra: Partial<PlanRemoto> = {}): PlanRemoto {
   return {

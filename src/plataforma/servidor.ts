@@ -4,8 +4,9 @@
  *
  * Como se sabe de que tienda es una peticion, por orden:
  *
- *   0. POST /api/v1/entregas -> la clave Bearer identifica la tienda;
- *      sin cookies, Referer ni prefijo. La recepcion con prefijo se rechaza (404).
+ *   0. POST /api/v1/entregas -> la clave de API en `X-API-Key` identifica la
+ *      tienda; sin cookies, Referer ni prefijo. La recepcion con prefijo se
+ *      rechaza (404). Una clave `wak_` en `Authorization: Bearer` no vale: 401.
  *   1. /tienda/<slug>/...  -> esa tienda, y se le quita el prefijo. Es la
  *      forma de los enlaces publicos de cada tienda (su webhook, su API, la
  *      pagina del motorizado, los enlaces de rastreo): su PUBLIC_BASE_URL ya
@@ -33,7 +34,7 @@ import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS } from '../api/errores.js';
-import { claveDeCabeceras, esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
+import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
 const PREFIJO = '/tienda/';
@@ -109,7 +110,7 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
       return { tipo: 'rechazo', rechazo: RECHAZOS.metodo() };
     }
     const rutaApi = url.split('?')[0] ?? '';
-    if (esRecepcionGsg(req.method, url) || (claveDeCabeceras(req.headers) && (rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/')))) {
+    if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) &&(rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/')))) {
       const permiso = req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
       const r = await tiendaDeClaveGsg(plataforma, req.headers, permiso);
       return 'tienda' in r ? { tipo: 'tienda', tienda: r.tienda, url } : { tipo: 'rechazo', rechazo: r.rechazo };

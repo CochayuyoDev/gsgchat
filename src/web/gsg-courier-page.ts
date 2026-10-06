@@ -59,7 +59,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <p>Entrega esta dirección al programador de GSG Courier.</p>
         <label for="courier-url">Enviar pedidos con POST</label><input id="courier-url" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url">Copiar dirección</button><button class="btn" id="courier-descargar">Descargar JSON de ejemplo</button></div>
-        <p><code>Content-Type: application/json</code><br><code>Authorization: Bearer CLAVE_DE_GSG</code><br>o, si su sistema solo manda API keys: <code>X-API-Key: CLAVE_DE_GSG</code></p>
+        <p><code>Content-Type: application/json</code><br><code>X-API-Key: CLAVE_DE_GSG</code></p>
         <small>La clave identifica esta tienda y debe tener permiso de recepción. Sin clave, o con una clave inválida o revocada: 401. Con una clave sin permiso: 403.</small>
         <small>Hasta 600 pedidos por llamada. Máximo 120 llamadas por minuto y clave.</small>
         <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>

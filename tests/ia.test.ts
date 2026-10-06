@@ -50,7 +50,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 /** Un modelo de mentira: contesta lo que diga `siguiente`, y apunta lo que recibe. */
 function modeloFalso() {

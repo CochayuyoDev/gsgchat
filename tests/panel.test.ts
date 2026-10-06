@@ -47,7 +47,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 
-const auth = { authorization: `Bearer ${ADMIN}` };
+const auth = { 'x-api-key': ADMIN };
 
 let app: FastifyInstance;
 let repos: FakeRepos;
@@ -514,7 +514,7 @@ describe('los scripts de las pantallas', () => {
   it('cada <script> del panel, el chat y el manual compila (un error de sintaxis deja la pantalla muerta)', async () => {
     const vm = await import('node:vm');
     for (const url of ['/panel', '/chat', '/rutas', '/manual', '/setup', '/soporte']) {
-      const r = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${ADMIN}` } });
+      const r = await app.inject({ method: 'GET', url, headers: { 'x-api-key': ADMIN } });
       expect(r.statusCode, url).toBe(200);
       let n = 0;
       for (const m of r.body.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {

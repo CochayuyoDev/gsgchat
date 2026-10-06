@@ -151,7 +151,7 @@ describe('sin saldo: sigue con las reglas, avisa para recargar y se quita solo',
       return 'OTRA';
     },
   };
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
   const get = async (url: string) => (await app.inject({ method: 'GET', url, headers: auth })).json();
 
   beforeAll(async () => {

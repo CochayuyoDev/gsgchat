@@ -23,7 +23,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
   let cookie: string;
 
   const api = async (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown, headers: Record<string, string> = {}) => {
-    const r = await tienda.app.inject({ method, url, headers: { ...(headers.authorization ? {} : { cookie }), ...(payload !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
+    const r = await tienda.app.inject({ method, url, headers: { ...(headers.authorization || headers['x-api-key'] ? {} : { cookie }), ...(payload !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
     let body: any = {};
     try {
       body = r.body ? JSON.parse(r.body) : {};
@@ -147,7 +147,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     const id = p.body.proceso.id;
     const k = await api('POST', '/admin/claves-api', { nombre: 'Sistema de citas', permisos: ['procesos:gestionar'] });
     expect(k.status).toBe(200);
-    const auth = { authorization: `Bearer ${k.body.clave}` };
+    const auth = { 'x-api-key': k.body.clave };
     const carga = await api('POST', `/api/v1/procesos/${id}/personas`, { nombre: 'Lote API', personas: [{ telefono: '000000950', nombre: 'Ana API', fecha: '30/12/2026', hora: '10:00' }, { telefono: '123', nombre: 'Malo' }] }, auth);
     expect(carga.status, JSON.stringify(carga.body)).toBe(201);
     expect(carga.body).toMatchObject({ ok: true, listas: 1, conError: 1 });
@@ -158,7 +158,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     expect(lista.body.procesos.some((x: { id: number }) => x.id === id)).toBe(true);
 
     const otra = await api('POST', '/admin/claves-api', { nombre: 'Solo mensajes', permisos: ['mensajes:enviar'] });
-    const sin = await api('POST', `/api/v1/procesos/${id}/personas`, { personas: [{ telefono: '000000951' }] }, { authorization: `Bearer ${otra.body.clave}` });
+    const sin = await api('POST', `/api/v1/procesos/${id}/personas`, { personas: [{ telefono: '000000951' }] }, { 'x-api-key': otra.body.clave });
     expect(sin.status).toBe(403);
   });
 

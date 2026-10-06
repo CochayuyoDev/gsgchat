@@ -4,9 +4,11 @@
  * Dos formas de entrar:
  *  - una persona, con usuario y contrasena en /login; se lleva una cookie
  *    firmada (ver sesion.ts) y las pantallas dejan de pedir nada;
- *  - un programa (el sistema de GSG, un script), con
- *    `Authorization: Bearer wak_...`: una clave de API que un administrador
- *    creo desde el panel (ver claves-api.ts). No hay ningun token fijo.
+ *  - un programa (el sistema de GSG, un script), con la cabecera
+ *    `X-API-Key: wak_...`: una clave de API que un administrador creo desde
+ *    el panel (ver claves-api.ts). No hay ningun token fijo. La clave solo
+ *    vale en X-API-Key: con `Authorization: Bearer wak_...` se responde 401
+ *    (en /api y en /admin) explicando donde va.
  *
  * El hook de aqui resuelve `request.usuario` para todas las peticiones; las
  * rutas /admin exigen que exista. Cuentas y claves las gestionan solo las
@@ -28,7 +30,7 @@ import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
-import { claveDeCabeceras, esRecepcionGsg, RECHAZOS, type RechazoRecepcion } from '../plataforma/recepcion-gsg.js';
+import { claveDeCabeceras, claveEnBearer, DESAFIO_CLAVE_API, esRecepcionGsg, RECHAZOS, rechazoSinClave, type RechazoRecepcion } from '../plataforma/recepcion-gsg.js';
 import { cuerpoError } from '../api/errores.js';
 
 export interface UsuarioSesion {
@@ -181,7 +183,8 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
         embebido: { telefono: carga.telefono },
       };
     }
-    // La clave de API: `Authorization: Bearer` o `X-API-Key`.
+    // La clave de API: solo `X-API-Key`. Una clave en el Bearer no identifica
+    // a nadie (el hook de abajo la rechaza con 401 en /api y /admin).
     const token = claveDeCabeceras(request.headers);
     if (token) {
       if (!pareceClaveApi(token)) return null;
@@ -205,7 +208,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
   /** Por que una peticion a la recepcion no entra (o null si entra). */
   async function rechazoDeRecepcion(request: FastifyRequest): Promise<RechazoRecepcion | null> {
     const token = claveDeCabeceras(request.headers);
-    if (!token) return RECHAZOS.ausente();
+    if (!token) return rechazoSinClave(request.headers);
     if (!pareceClaveApi(token)) return RECHAZOS.invalida();
     if (!request.usuario?.porToken) {
       const registro = await claves.porHashConRevocadas?.(hashClaveApi(token));
@@ -236,7 +239,17 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     }
 
     if (request.url.startsWith('/admin')) {
-      if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: entra en /login o manda una clave de API' });
+      // Una clave `wak_` en el Bearer no vale, aunque sea buena y aunque haya
+      // sesion: se dice donde va en vez de dejarla pasar o ignorarla en silencio.
+      if (claveEnBearer(request.headers)) {
+        const r = RECHAZOS.enBearer();
+        for (const [k, v] of Object.entries(r.cabeceras ?? {})) reply.header(k, v);
+        return reply.code(r.status).send(r.cuerpo);
+      }
+      if (!request.usuario) {
+        reply.header('www-authenticate', DESAFIO_CLAVE_API);
+        return reply.code(401).send({ error: 'no autorizado: entra en /login o manda tu clave de API en la cabecera X-API-Key' });
+      }
       // La API interna es para el panel y para las claves de siempre. Una
       // clave acotada tiene su puerta en /api/v1 y no entra por aqui.
       if (request.usuario.porToken && !tienePermiso(request.usuario.permisos, '*')) {
@@ -254,10 +267,23 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       // El canje de un codigo de conexion entra sin clave: el codigo es la
       // autorizacion, y de ahi sale la clave (ver super-routes.ts).
       if (API_SIN_CLAVE.includes(request.url.split('?')[0] ?? '') || request.url.startsWith('/api/plan/')) return;
+      // Una clave `wak_` en el Bearer: 401 aunque sea valida, diciendo que va en X-API-Key.
+      if (claveEnBearer(request.headers)) {
+        const r = RECHAZOS.enBearer();
+        for (const [k, v] of Object.entries(r.cabeceras ?? {})) reply.header(k, v);
+        return reply.code(r.status).send(r.cuerpo);
+      }
       if (!request.usuario) {
+        // El token del chat embebido (Bearer emb_...) es otra cosa: un token de
+        // sesion firmado, no una clave de API. Su 401 va aparte, sin mezclarlos.
+        const auth = request.headers.authorization;
+        if (!claveDeCabeceras(request.headers) && typeof auth === 'string' && auth.startsWith('Bearer ') && pareceTokenEmbebido(auth.slice(7).trim())) {
+          reply.header('www-authenticate', 'Bearer realm="gsgchat-embed", error="invalid_token"');
+          return reply.code(401).send(cuerpoError('CLAVE_INVALIDA', 'el token del chat embebido caducó o no es válido: pide uno nuevo'));
+        }
         const motivo = await rechazoDeRecepcion(request);
-        reply.header('www-authenticate', 'Bearer realm="gsgchat"');
-        return reply.code(401).send(cuerpoError(motivo?.cuerpo.codigo ?? 'CLAVE_INVALIDA', 'no autorizado: manda `Authorization: Bearer <clave de API>`'));
+        reply.header('www-authenticate', DESAFIO_CLAVE_API);
+        return reply.code(401).send(cuerpoError(motivo?.cuerpo.codigo ?? 'CLAVE_INVALIDA', 'no autorizado: manda tu clave de API en la cabecera `X-API-Key: <clave>`'));
       }
       const permiso = request.routeOptions?.config?.permiso;
       if (permiso && !tienePermiso(request.usuario.permisos, permiso)) {

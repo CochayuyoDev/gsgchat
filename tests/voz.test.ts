@@ -66,7 +66,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 /** Un Ogg/Opus de mentira: lo unico que se mira es la firma "OggS". */
 const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(200, 7)]);

@@ -24,7 +24,7 @@ describe('modulo especializado GSG Courier', () => {
   it('protege el modulo y la validacion: administrador humano, nunca una clave', async () => {
     expect((await esc.app.inject('/conexion-gsg')).statusCode).toBe(302);
     expect((await esc.app.inject({ url: '/conexion-gsg', headers: { cookie: operador } })).statusCode).toBe(403);
-    expect((await esc.app.inject({ url: '/conexion-gsg', headers: { authorization: 'Bearer ' + CLAVE_API_PRUEBA } })).statusCode).toBe(403);
+    expect((await esc.app.inject({ url: '/conexion-gsg', headers: { 'x-api-key': CLAVE_API_PRUEBA } })).statusCode).toBe(403);
     expect((await esc.app.inject({ method: 'POST', url: '/admin/gsg-courier/validar', payload: EJEMPLO_COURIER })).statusCode).toBe(401);
     expect((await esc.app.inject({ method: 'POST', url: '/admin/gsg-courier/validar', headers: { cookie: operador }, payload: EJEMPLO_COURIER })).statusCode).toBe(403);
   });
@@ -54,7 +54,7 @@ describe('modulo especializado GSG Courier', () => {
     const nueva = await esc.app.inject({ method: 'POST', url: '/admin/claves-api', headers: { cookie }, payload: { nombre: 'GSG Courier', permisos: ['entregas:gestionar'] } });
     const { clave, registro } = nueva.json();
     expect(registro.permisos).toEqual(['entregas:gestionar']);
-    const recibir = () => esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { authorization: 'Bearer ' + clave }, payload: EJEMPLO_COURIER });
+    const recibir = () => esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { 'x-api-key': clave }, payload: EJEMPLO_COURIER });
     expect((await recibir()).statusCode).toBe(201);
     expect(esc.wa.sent).toHaveLength(0);
     const listado = await esc.app.inject({ url: '/admin/claves-api', headers: { cookie } });

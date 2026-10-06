@@ -44,7 +44,7 @@ async function panel(cookie: string, ruta: string, init: { method?: string; body
   return { status: r.status, json: (await r.json().catch(() => null)) as any };
 }
 const recibir = (cuerpo: unknown, clave = claveA) =>
-  fetch(`${base}/api/v1/entregas`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${clave}` }, body: JSON.stringify(cuerpo) }).then(async (r) => ({ status: r.status, json: (await r.json()) as any }));
+  fetch(`${base}/api/v1/entregas`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': clave }, body: JSON.stringify(cuerpo) }).then(async (r) => ({ status: r.status, json: (await r.json()) as any }));
 
 beforeAll(async () => {
   await devolverBasesDePrueba(BANCO);

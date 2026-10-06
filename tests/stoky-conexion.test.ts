@@ -236,7 +236,7 @@ describe('desde la pantalla', () => {
     const b = await app.inject({ method: 'POST', url: '/admin/integraciones/stoky/clave', headers: h, payload: {} });
     expect(b.json().revocadas).toBe(1);
     // La vieja ya no entra; la nueva si, y el semaforo lo ve.
-    const cab = (k: string) => ({ authorization: `Bearer ${k}` });
+    const cab = (k: string) => ({ 'x-api-key': k });
     expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: cab(a.json().clave) })).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: cab(b.json().clave) })).statusCode).toBe(200);
     const s = await app.inject({ method: 'GET', url: '/admin/integraciones/stoky', headers: h });
@@ -284,7 +284,7 @@ describe('desde la pantalla', () => {
     const h = await sesion();
     const sin = await crearClaveDePrueba(repos, ['estado:leer']);
     const con = await crearClaveDePrueba(repos, ['stoky:conectar'], 'Stoky');
-    const cab = (k: string) => ({ authorization: `Bearer ${k}`, 'content-type': 'application/json' });
+    const cab = (k: string) => ({ 'x-api-key': k, 'content-type': 'application/json' });
     expect((await app.inject({ method: 'POST', url: '/api/v1/stoky/conexion', headers: cab(sin), payload: { url: 'http://localhost:8102', token: 'stk_bueno' } })).statusCode).toBe(403);
     const r = await app.inject({ method: 'POST', url: '/api/v1/stoky/conexion', headers: cab(con), payload: { url: 'http://localhost:8102', token: 'stk_bueno', panelUrl: 'https://stoky.pe' } });
     expect(r.statusCode).toBe(200);

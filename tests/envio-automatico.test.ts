@@ -53,7 +53,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 /** Un martes a las 11 de la manana en Lima: dentro del horario. */
 const HORA_BUENA = new Date('2026-09-15T16:00:00Z');
 const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, negocio: 'La Tienda', esperaRespuestaMinutos: 180 };

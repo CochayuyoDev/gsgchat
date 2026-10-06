@@ -154,7 +154,7 @@ describe('lo de prueba no toca el numero real', () => {
     const alta = await tienda.app.inject({
       method: 'POST',
       url: '/api/v1/entregas',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      headers: { 'x-api-key': token, 'content-type': 'application/json' },
       payload: JSON.stringify({
         pedidos: [
           { ...OBLIGATORIOS_GSG, referencia: 'PRUEBA-C1', telefono: numeroDePrueba('cliente', 11), nombre: 'Prueba Cierre', faltaUbicacion: true, faltaConfirmar: true },

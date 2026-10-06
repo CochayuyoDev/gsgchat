@@ -171,7 +171,7 @@ describe('la conexion con GSG desde la pantalla', () => {
 
     await c.conectarReal({ url: 'https://gsg.pe/api/', token: 'secreto' });
     expect(c.estado()).toMatchObject({ modo: 'real', url: 'https://gsg.pe/api', tieneToken: true, origen: 'pantalla' });
-    const guardado = (await settingsRepo.getAll()).find((r) => r.key === 'gsg.token');
+    const guardado = (await settingsRepo.getAll()).find((r) => r.key === 'gsg.apiKey');
     expect(guardado?.encrypted).toBe(true);
     expect(guardado?.value).not.toContain('secreto');
     // Lo guardado sobrevive a un reinicio.
@@ -187,12 +187,11 @@ describe('la conexion con GSG desde la pantalla', () => {
     sim.cargarDePrueba();
     const fetchFalso = (async (entrada: string | URL | Request, init?: RequestInit) => {
       const url = typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url;
-      const auth = new Headers(init?.headers).get('authorization');
-      const r = sim.atender('GET', url.replace('https://gsg.pe/api', ''), auth?.startsWith('Bearer ') ? auth.slice(7) : null, undefined);
+      const r = sim.atender('GET', url.replace('https://gsg.pe/api', ''), new Headers(init?.headers).get('x-api-key'), undefined);
       return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'content-type': 'application/json' } });
     }) as typeof fetch;
     const c = await crearConexionGsg({ settingsRepo: createMemorySettingsRepo(), settingsKeyBase64: TEST_SETTINGS_KEY, config, fetchImpl: fetchFalso });
-    expect((await c.probar({ url: 'https://gsg.pe/api', token: 'malo' })).detalle).toMatch(/rechazó el token \(error 40[13]\)/);
+    expect((await c.probar({ url: 'https://gsg.pe/api', token: 'malo' })).detalle).toMatch(/rechazó la clave \(error 401\): la API Key de GSG es incorrecta/);
     // Sin la consulta de pendientes su API responde igual: no es un fallo para enviar ubicaciones.
     const sinPendientes = await c.probar({ url: 'https://gsg.pe/api/otra', token: 'bueno' });
     expect(sinPendientes.ok).toBe(true);

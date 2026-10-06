@@ -62,7 +62,7 @@ const fetchFalso = (async (url: string | URL | Request, init?: RequestInit) => {
   return new Response(respuestaWebhook.body, { status: respuestaWebhook.status });
 }) as unknown as typeof fetch;
 
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 async function build() {
   repos = createFakeRepos();
@@ -362,7 +362,7 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
   let esc: Escenario;
   /** Una clave que solo lee entregas: no puede empujar. */
   const SOLO_LEER = 'wak_claveSoloLeerEntregas0123456789abcdefX';
-  const conClave = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+  const conClave = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
   beforeAll(async () => {
     esc = await crearEscenarioEntregas({ supervisor: '51999888777' });

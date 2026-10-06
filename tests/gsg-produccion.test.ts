@@ -29,6 +29,7 @@ interface Llegada {
   metodo: string;
   ruta: string;
   autorizacion: string | undefined;
+  apiKey: string | undefined;
   cuerpo: Record<string, unknown>;
 }
 
@@ -52,8 +53,9 @@ function crmDeGsg() {
       } catch {
         cuerpo = { crudo: datos };
       }
-      llegadas.push({ metodo: req.method ?? '', ruta, autorizacion: req.headers.authorization, cuerpo });
-      if (req.headers.authorization !== `Bearer ${estado.token}`) {
+      llegadas.push({ metodo: req.method ?? '', ruta, autorizacion: req.headers.authorization, apiKey: req.headers['x-api-key'] as string | undefined, cuerpo });
+      // Como la API real de GSG: la clave solo en X-API-Key.
+      if (req.headers['x-api-key'] !== estado.token) {
         res.writeHead(401, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'token invalido' }));
         return;
@@ -98,7 +100,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
   let opciones: OpcionesTienda;
 
   const api = async (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown) => {
-    const r = await tienda.app.inject({ method, url, headers: { cookie, ...(url.startsWith('/api/v1/entregas') ? { authorization: 'Bearer '+claveGsg } : {}), ...(payload !== undefined ? { 'content-type': 'application/json' } : {}) }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
+    const r = await tienda.app.inject({ method, url, headers: { cookie, ...(url.startsWith('/api/v1/entregas') ? { 'x-api-key': claveGsg } : {}), ...(payload !== undefined ? { 'content-type': 'application/json' } : {}) }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
     return { status: r.statusCode, body: r.body ? (JSON.parse(r.body) as Record<string, any>) : {} };
   };
   const escribe = async (phone: string, datos: { text?: string; location?: { latitude: number; longitude: number } }) => {
@@ -216,7 +218,8 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(performance.now() - t0).toBeLessThan(10_000);
     const l = crm.ubicaciones().find((x) => x.cuerpo.tracking === 'P-001')!;
     expect(l.metodo).toBe('POST');
-    expect(l.autorizacion).toBe(`Bearer ${crm.estado.token}`);
+    expect(l.apiKey).toBe(crm.estado.token);
+    expect(l.autorizacion).toBeUndefined();
     expect(l.cuerpo).toMatchObject({ tracking: 'P-001', lat: -12.1211, lng: -77.0301 });
     // El cliente recibe su confirmación: solo el enlace, sin coordenadas.
     await esperar(() => /Ubicación registrada/.test(textosA('51987000001')), 10_000, 'la confirmacion al cliente');
@@ -266,7 +269,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
   });
 
   it('9. ninguna ubicación se mandó dos veces a GSG (salvo la corrección, que es otra)', () => {
-    const aceptadas = crm.ubicaciones().filter((l) => l.autorizacion === `Bearer ${crm.estado.token}`);
+    const aceptadas = crm.ubicaciones().filter((l) => l.apiKey === crm.estado.token);
     const porClave = new Map<string, number>();
     for (const l of aceptadas) {
       const clave = `${l.cuerpo.tracking}|${l.cuerpo.lat}|${l.cuerpo.lng}`;

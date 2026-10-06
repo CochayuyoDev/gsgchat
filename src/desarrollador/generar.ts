@@ -129,7 +129,7 @@ export async function generarPrueba(app: FastifyInstance, deps: DepsDesarrollado
       app.inject({
         method: 'POST',
         url: '/api/v1/entregas',
-        headers: { authorization: `Bearer ${clave}`, 'content-type': 'application/json' },
+        headers: { 'x-api-key': clave, 'content-type': 'application/json' },
         payload: JSON.stringify({ pedidos }),
       }),
     );

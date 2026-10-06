@@ -135,19 +135,60 @@ describe('entrar al sistema', () => {
   });
 
   it('una clave de API entra como programa; una desconocida no; y no gestiona cuentas ni claves', async () => {
-    const res = await app.inject({ method: 'GET', url: '/admin/health', headers: { authorization: `Bearer ${ADMIN}` } });
+    const res = await app.inject({ method: 'GET', url: '/admin/health', headers: { 'x-api-key': ADMIN } });
     expect(res.statusCode).toBe(200);
-    const yo = await app.inject({ method: 'GET', url: '/admin/yo', headers: { authorization: `Bearer ${ADMIN}` } });
+    const yo = await app.inject({ method: 'GET', url: '/admin/yo', headers: { 'x-api-key': ADMIN } });
     expect(yo.json()).toMatchObject({ porToken: true, rol: 'admin', nombre: 'Pruebas' });
     expect(repos._claves[0]?.ultimoUsoAt).toBeInstanceOf(Date);
-    const mal = await app.inject({ method: 'GET', url: '/admin/health', headers: { authorization: 'Bearer wak_nope' } });
+    const mal = await app.inject({ method: 'GET', url: '/admin/health', headers: { 'x-api-key': 'wak_nope' } });
     expect(mal.statusCode).toBe(401);
     const viejo = await app.inject({ method: 'GET', url: '/admin/health', headers: { authorization: 'Bearer admin-token-de-antes-1234' } });
     expect(viejo.statusCode).toBe(401);
-    const cuentas = await app.inject({ method: 'GET', url: '/admin/usuarios', headers: { authorization: `Bearer ${ADMIN}` } });
+    const cuentas = await app.inject({ method: 'GET', url: '/admin/usuarios', headers: { 'x-api-key': ADMIN } });
     expect(cuentas.statusCode).toBe(403);
-    const claves = await app.inject({ method: 'GET', url: '/admin/claves-api', headers: { authorization: `Bearer ${ADMIN}` } });
+    const claves = await app.inject({ method: 'GET', url: '/admin/claves-api', headers: { 'x-api-key': ADMIN } });
     expect(claves.statusCode).toBe(403);
+  });
+
+  it('la clave de API solo vale en X-API-Key: ausente o mala 401, sin permiso 403, en Bearer 401 aunque sea buena', async () => {
+    // Valida y con permisos: entra.
+    expect((await app.inject({ method: 'GET', url: '/admin/health', headers: { 'x-api-key': ADMIN } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { 'x-api-key': ADMIN } })).statusCode).toBe(200);
+    // Ausente o incorrecta: 401, con un desafio que nombra X-API-Key y no Bearer.
+    for (const headers of [{}, { 'x-api-key': generarClaveApi() }, { 'x-api-key': 'no-es-una-clave' }]) {
+      const admin = await app.inject({ method: 'GET', url: '/admin/health', headers });
+      expect(admin.statusCode).toBe(401);
+      expect(admin.headers['www-authenticate']).toMatch(/^ApiKey .*X-API-Key/);
+      const api = await app.inject({ method: 'GET', url: '/api/v1/estado', headers });
+      expect(api.statusCode).toBe(401);
+      expect(api.headers['www-authenticate']).toMatch(/^ApiKey .*X-API-Key/);
+      expect(api.json().error).toContain('X-API-Key');
+    }
+    // Valida pero sin el permiso: 403 (en /api/v1 y en /admin).
+    const acotada = generarClaveApi();
+    const registroAcotada = await repos.claves.crear({ nombre: 'Acotada', prefijo: prefijoDeClave(acotada), hash: hashClaveApi(acotada), creadaPor: null, permisos: ['estado:leer'] });
+    expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { 'x-api-key': acotada } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/webhooks', headers: { 'x-api-key': acotada } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/admin/health', headers: { 'x-api-key': acotada } })).statusCode).toBe(403);
+    // Bearer con una clave valida: 401 que explica que va en X-API-Key, en /admin, /api/v1 y la recepcion de GSG.
+    for (const [method, url] of [['GET', '/admin/health'], ['GET', '/admin/yo'], ['GET', '/api/v1/estado'], ['POST', '/api/v1/entregas']] as const) {
+      const r = await app.inject({ method, url, headers: { authorization: `Bearer ${ADMIN}`, 'content-type': 'application/json' }, payload: method === 'POST' ? '{}' : undefined });
+      expect(r.statusCode).toBe(401);
+      expect(r.json()).toMatchObject({ codigo: 'CLAVE_AUSENTE' });
+      expect(r.json().error).toContain('X-API-Key');
+      expect(r.body).not.toContain(ADMIN);
+      expect(r.headers['www-authenticate']).not.toMatch(/Bearer/);
+    }
+    // Las dos cabeceras: vale solo X-API-Key (la acotada manda, no la del Bearer).
+    const ambas = await app.inject({ method: 'GET', url: '/api/v1/webhooks', headers: { 'x-api-key': acotada, authorization: `Bearer ${ADMIN}` } });
+    expect(ambas.statusCode).toBe(403);
+    const ambasYo = await app.inject({ method: 'GET', url: '/admin/yo', headers: { 'x-api-key': ADMIN, authorization: `Bearer ${acotada}` } });
+    expect(ambasYo.statusCode).toBe(200);
+    expect(ambasYo.json()).toMatchObject({ porToken: true, nombre: 'Pruebas' });
+    // La clave nunca se guarda en claro: solo su sha256.
+    const fila = repos._claves.find((c) => c.id === registroAcotada.id) as unknown as Record<string, unknown>;
+    expect(JSON.stringify(fila)).not.toContain(acotada);
+    expect(fila.hash).toBe(hashClaveApi(acotada));
   });
 
   it('la primera cuenta se crea una sola vez, es superadministrador (entra como admin) y deja la sesion abierta', async () => {
@@ -229,7 +270,7 @@ describe('entrar al sistema', () => {
     expect(filas.find((f) => f.id === registro.id)).toMatchObject({ nombre: 'Sistema GSG' });
     expect(JSON.stringify(filas)).not.toContain(clave);
 
-    const usa = await app.inject({ method: 'GET', url: '/admin/yo', headers: { authorization: `Bearer ${clave}` } });
+    const usa = await app.inject({ method: 'GET', url: '/admin/yo', headers: { 'x-api-key': clave } });
     expect(usa.json()).toMatchObject({ porToken: true, nombre: 'Sistema GSG' });
 
     const rosa = repos._usuarios.find((u) => u.usuario === 'rosa')!;
@@ -241,7 +282,7 @@ describe('entrar al sistema', () => {
 
     const revocada = await app.inject({ method: 'DELETE', url: `/admin/claves-api/${registro.id}`, headers: { cookie } });
     expect(revocada.statusCode).toBe(200);
-    const yaNo = await app.inject({ method: 'GET', url: '/admin/yo', headers: { authorization: `Bearer ${clave}` } });
+    const yaNo = await app.inject({ method: 'GET', url: '/admin/yo', headers: { 'x-api-key': clave } });
     expect(yaNo.statusCode).toBe(401);
     const otraVez = await app.inject({ method: 'DELETE', url: `/admin/claves-api/${registro.id}`, headers: { cookie } });
     expect(otraVez.statusCode).toBe(404);

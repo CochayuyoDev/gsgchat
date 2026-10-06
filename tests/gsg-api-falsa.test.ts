@@ -72,7 +72,7 @@ describe('GSG por la API: pedir o confirmar la ubicación, gracias y cambio hast
   it('1. pide la lista por la API, con su token, y cada cliente queda identificado por WhatsApp + tracking', async () => {
     const s = (await e.api.post<{ ok: boolean; nuevas: number }>('/admin/entregas/sincronizar')).body;
     expect(s).toMatchObject({ ok: true, nuevas: 3 });
-    expect(gsg.llamadas.some((c) => c.metodo === 'GET' && c.ruta === '/reparto/pendientes' && c.autorizacion === 'Bearer token-de-gsg')).toBe(true);
+    expect(gsg.llamadas.some((c) => c.metodo === 'GET' && c.ruta === '/reparto/pendientes' && c.apiKey === 'token-de-gsg' && c.autorizacion === undefined)).toBe(true);
     expect(await e.entrega('GSG-A-1001')).toMatchObject({ phone: `51${ANA}`, ubicacionEstado: 'pendiente' });
     expect(await e.entrega('GSG-A-1002')).toMatchObject({ phone: `51${BETO}`, ubicacionEstado: 'pendiente' });
     expect(await e.entrega('GSG-A-2001')).toMatchObject({ phone: `51${CARLA}`, confirmacionEstado: 'pendiente' });

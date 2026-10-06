@@ -1,4 +1,4 @@
-import { hashClaveApi, pareceClaveApi } from '../auth/claves-api.js';
+import { hashClaveApi, pareceClaveApi, PREFIJO_CLAVE_API } from '../auth/claves-api.js';
 import { tienePermiso } from '../auth/permisos.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CuerpoError } from '../api/errores.js';
 import type { Plataforma } from './plataforma.js';
@@ -16,7 +16,14 @@ export interface RechazoRecepcion {
   cabeceras?: Record<string, string>;
 }
 
-const BEARER = { 'www-authenticate': 'Bearer realm="gsgchat", charset="UTF-8"' };
+/**
+ * Las claves de API de GSGchat (`wak_...`) solo se aceptan en `X-API-Key`.
+ * El desafio del 401 lo dice asi: un esquema propio que nombra la cabecera,
+ * nunca `Bearer` (que invitaria a mandar la clave donde no vale).
+ */
+export const DESAFIO_CLAVE_API = 'ApiKey realm="gsgchat", header="X-API-Key"';
+const DESAFIO = { 'www-authenticate': DESAFIO_CLAVE_API };
+const DESAFIO_INVALIDA = { 'www-authenticate': `${DESAFIO_CLAVE_API}, error="invalid_key"` };
 
 export const RECHAZOS = {
   metodo: (): RechazoRecepcion => ({
@@ -26,17 +33,19 @@ export const RECHAZOS = {
   }),
   ausente: (): RechazoRecepcion => ({
     status: 401,
-    cabeceras: BEARER,
-    cuerpo: cuerpoError('CLAVE_AUSENTE', 'Falta la clave de API: manda la cabecera «Authorization: Bearer <clave>» o «X-API-Key: <clave>».'),
+    cabeceras: DESAFIO,
+    cuerpo: cuerpoError('CLAVE_AUSENTE', 'Falta la clave de API: mándala en la cabecera «X-API-Key: <clave>».'),
   }),
+  /** Una clave que no vino en X-API-Key: para quien llama es lo mismo que no mandarla. */
+  enBearer: (): RechazoRecepcion => RECHAZOS.ausente(),
   invalida: (): RechazoRecepcion => ({
     status: 401,
-    cabeceras: { 'www-authenticate': 'Bearer realm="gsgchat", error="invalid_token"' },
-    cuerpo: cuerpoError('CLAVE_INVALIDA', 'La clave de API no es válida: revisa que la copiaste entera.'),
+    cabeceras: DESAFIO_INVALIDA,
+    cuerpo: cuerpoError('CLAVE_INVALIDA', 'La clave de API no es válida: revisa que la copiaste entera y que va en la cabecera «X-API-Key».'),
   }),
   revocada: (): RechazoRecepcion => ({
     status: 401,
-    cabeceras: { 'www-authenticate': 'Bearer realm="gsgchat", error="invalid_token"' },
+    cabeceras: DESAFIO_INVALIDA,
     cuerpo: cuerpoError('CLAVE_REVOCADA', 'Esa clave de API fue revocada: pide una nueva en el módulo GSG Courier.'),
   }),
   sinPermiso: (): RechazoRecepcion => ({
@@ -70,17 +79,33 @@ export function tokenBearer(authorization: string | undefined): string | null {
   return m[1]!.trim() || null;
 }
 
+type Cabeceras = { authorization?: string; [cabecera: string]: string | string[] | undefined };
+
 /**
- * La clave de API de la peticion: `Authorization: Bearer <clave>` o, para los
- * sistemas que solo saben mandar API keys, `X-API-Key: <clave>`. Si vienen
- * las dos, manda el Bearer.
+ * La clave de API de la peticion: solo la cabecera `X-API-Key: <clave>`.
+ * `Authorization: Bearer` no cuenta como clave de API (ver claveEnBearer);
+ * si vienen las dos, vale solo X-API-Key.
  */
-export function claveDeCabeceras(headers: { authorization?: string; [cabecera: string]: string | string[] | undefined }): string | null {
-  const bearer = tokenBearer(typeof headers.authorization === 'string' ? headers.authorization : undefined);
-  if (bearer) return bearer;
+export function claveDeCabeceras(headers: Cabeceras): string | null {
   const apiKey = headers['x-api-key'];
   const valor = (Array.isArray(apiKey) ? apiKey[0] : apiKey)?.trim();
   return valor || null;
+}
+
+/**
+ * true si la peticion trae una clave `wak_` en `Authorization: Bearer` y no
+ * trae X-API-Key: se rechaza con 401 explicando que va en X-API-Key, aunque
+ * la clave sea valida. Con X-API-Key presente, el Bearer se ignora.
+ */
+export function claveEnBearer(headers: Cabeceras): boolean {
+  if (claveDeCabeceras(headers)) return false;
+  const bearer = tokenBearer(typeof headers.authorization === 'string' ? headers.authorization : undefined);
+  return bearer !== null && bearer.startsWith(PREFIJO_CLAVE_API);
+}
+
+/** Por que no hay clave: vino en el Bearer (sitio equivocado) o no vino. */
+export function rechazoSinClave(headers: Cabeceras): RechazoRecepcion {
+  return claveEnBearer(headers) ? RECHAZOS.enBearer() : RECHAZOS.ausente();
 }
 
 /**
@@ -94,7 +119,7 @@ export async function tiendaDeClaveGsg(
   permiso: 'entregas:gestionar' | 'entregas:leer' = 'entregas:gestionar',
 ): Promise<{ tienda: TiendaViva } | { rechazo: RechazoRecepcion }> {
   const clave = claveDeCabeceras(headers);
-  if (!clave) return { rechazo: RECHAZOS.ausente() };
+  if (!clave) return { rechazo: rechazoSinClave(headers) };
   if (!pareceClaveApi(clave)) return { rechazo: RECHAZOS.invalida() };
   const hash = hashClaveApi(clave);
   try {

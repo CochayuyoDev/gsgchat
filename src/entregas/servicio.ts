@@ -4509,7 +4509,7 @@ ${lista}
       if (!deps.gsg.conectado()) return { ok: false, estado: 'pendiente', error: 'GSG no está conectado: configura su dirección y su clave en Conexión WhatsApp.', cuerpo };
       const reporte = await repos.rutas.encolarReporte({ solicitudId: null, loteId: e.loteId ?? null, tipo: 'ubicacion', payload: { tipo: 'ubicacion', referencia: e.referencia, telefono: e.phone, ...cuerpo } });
       await evento(e, 'reporte', `${quien} pidió enviar la ubicación a GSG`);
-      await despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion']);
+      await despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion'], { manual: true });
       const tras = (await repos.rutas.reportesRecientes(100, 'ubicacion')).find((r) => r.id === reporte.id);
       const estado = tras?.estado ?? 'pendiente';
       const error = estado === 'enviado' ? null : tras?.ultimoError ?? 'No se pudo enviar todavía: queda en cola y se reintenta solo.';

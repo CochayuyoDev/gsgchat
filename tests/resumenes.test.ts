@@ -275,7 +275,7 @@ describe('el servicio: cuando sale, a quien, y que pasa si no puede', () => {
 describe('las rutas de la pantalla', () => {
   let app: FastifyInstance;
   let wa: FakeWhatsApp;
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
 
   beforeAll(async () => {
     const repos = createFakeRepos();

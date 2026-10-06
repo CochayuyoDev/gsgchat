@@ -118,7 +118,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 /** Un modelo que contesta por turnos: la primera respuesta, luego la segunda... la ultima se repite. */
 function modeloPorTurnos() {

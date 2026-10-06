@@ -367,8 +367,10 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
       const r = await puerto.consultar<unknown>(RUTA_GSG_PENDIENTES);
       if (!r.ok) {
         const detalle =
-          r.status === 401 || r.status === 403
-            ? `GSG rechazó el token (error ${r.status}): revisa que sea el que te dieron.`
+          r.status === 401
+            ? 'GSG rechazó la clave (error 401): la API Key de GSG es incorrecta. Revisa que sea la que te dio GSG.'
+            : r.status === 403
+              ? 'GSG rechazó la clave (error 403): la API Key de GSG no tiene permisos. Pide a GSG que le dé acceso.'
             : r.status === 404
               ? `GSG respondió con error 404: no tiene la ruta ${RUTA_GSG_PENDIENTES}. Revisa la dirección (tiene que ser la base de su API).`
               : `No se pudo consultar a GSG: ${r.error ?? 'sin respuesta'}.`;

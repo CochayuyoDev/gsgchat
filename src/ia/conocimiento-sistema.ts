@@ -82,7 +82,7 @@ export const SISTEMA_PARA_CLIENTES_GSG = `Cómo funciona el sistema por el que h
 export function manualDelSistema(_modoPedido?: 'gsg' | 'completo'): string {
   return [
     'GSGchat atiende WhatsApp y los pedidos recibidos por API. Todas las cuentas tienen el flujo GSG activo.',
-    'POST /api/v1/entregas recibe hasta 600 pedidos. La clave Bearer determina la cuenta. Obligatorios: tracking, empresa, cliente, telefono, metodoPago, montoCobrar. Si faltan, HTTP 400 detalla cliente, tracking y cada campo.',
+    'POST /api/v1/entregas recibe hasta 600 pedidos. La clave de API, en la cabecera X-API-Key, determina la cuenta. Obligatorios: tracking, empresa, cliente, telefono, metodoPago, montoCobrar. Si faltan, HTTP 400 detalla cliente, tracking y cada campo.',
     'Pedidos GSG (/hoy) muestra pedidos, errores, pendientes, historial y reintentos. Tres solicitudes de ubicación como máximo por cliente. Un pin o enlace de Maps válido se registra y se devuelve a GSG como tracking, latitud y longitud.',
     'Chats (/chat) conserva las conversaciones, adjuntos y atención humana. Ubicaciones (/mapa) reúne pines y pedidos.',
     'Asistente IA (/panel#ia): proveedor, modelo, token cifrado, instrucciones y ficha de productos en Conocimiento. Entrenamiento (/entrenamiento) conserva ejemplos y lecciones.',

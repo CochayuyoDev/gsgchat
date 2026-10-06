@@ -232,7 +232,7 @@ describe('el agente operativo en un día de entregas', () => {
 
   it('una persona puede devolverle el chat al asistente desde Chats', async () => {
     const c = (await e.repos.contacts.getByPhone(conPais('999111222')))!;
-    const r = await e.app.inject({ method: 'POST', url: `/admin/chat/${c.id}/asistente`, payload: { cerrado: false }, headers: { authorization: 'Bearer ' + (await import('./fakes.js')).CLAVE_API_PRUEBA } });
+    const r = await e.app.inject({ method: 'POST', url: `/admin/chat/${c.id}/asistente`, payload: { cerrado: false }, headers: { 'x-api-key': (await import('./fakes.js')).CLAVE_API_PRUEBA } });
     expect(r.statusCode).toBe(200);
     expect(await cerradaDe('999111222')).toBeNull();
   });

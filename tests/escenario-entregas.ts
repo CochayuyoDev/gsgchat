@@ -195,8 +195,8 @@ export async function crearEscenarioEntregas(opciones: {
     const url = urlDe(entrada);
     if (!url.startsWith(GSG_URL_FALSA)) return fetchOriginal(entrada, init);
     const headers = new Headers(init?.headers);
-    const auth = headers.get('authorization');
-    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+    // Como la API real de GSG: la clave solo en X-API-Key (un Bearer no cuenta).
+    const token = headers.get('x-api-key');
     let cuerpo: unknown = undefined;
     if (init?.body) {
       try {
@@ -319,7 +319,7 @@ export async function crearEscenarioEntregas(opciones: {
   const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }), primerMensaje: entregas.primerMensajeReparto });
   const motorEntregas = crearMotorEntregas({ repos, entregas, opciones: opcionesMotor, ahora: reloj, azar: () => 0 });
 
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
   async function llamar<T>(method: 'GET' | 'POST' | 'DELETE', url: string, body?: unknown): Promise<RespuestaApi<T>> {
     const res = await app.inject({ method, url, headers: auth, ...(body === undefined ? {} : { payload: body as Record<string, unknown> }) });
     let parsed: unknown;

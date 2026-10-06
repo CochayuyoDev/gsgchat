@@ -222,10 +222,20 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   app.post('/admin/entregas/gsg', async (request, reply) => {
     if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede cambiar desde la pantalla.' });
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia la conexión con GSG.' });
-    const body = z.object({ modo: z.enum(['real']), url: z.string().trim().max(300).optional(), token: z.string().max(500).nullable().optional(), urlUbicacion: z.string().trim().max(300).nullable().optional() }).parse(request.body ?? {});
+    // La conexión SALIENTE: URL base + ruta de la ubicación + API Key de GSG
+    // (`apiKey`; `token` y `urlUbicacion` se aceptan por compatibilidad). La
+    // respuesta nunca trae la clave: solo `claveEnmascarada`.
+    const body = z.object({
+      modo: z.enum(['real']),
+      url: z.string().trim().max(300).optional(),
+      rutaUbicacion: z.string().trim().max(300).nullable().optional(),
+      apiKey: z.string().max(500).nullable().optional(),
+      token: z.string().max(500).nullable().optional(),
+      urlUbicacion: z.string().trim().max(300).nullable().optional(),
+    }).parse(request.body ?? {});
 
     try {
-      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', token: body.token, urlUbicacion: body.urlUbicacion }) };
+      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion }) };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -239,8 +249,9 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
 
   app.post('/admin/entregas/gsg/probar', async (request, reply) => {
     if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede probar desde la pantalla.' });
-    const body = z.object({ url: z.string().trim().max(300).optional(), token: z.string().max(500).optional() }).parse(request.body ?? {});
-    const prueba = body.url ? await conexionGsg.probar({ url: body.url, token: body.token ?? '' }) : await conexionGsg.probar();
+    // Solo lectura: un GET sin cuerpo a la consulta de pendientes. No crea ni manda nada.
+    const body = z.object({ url: z.string().trim().max(300).optional(), rutaUbicacion: z.string().trim().max(300).optional(), apiKey: z.string().max(500).optional(), token: z.string().max(500).optional() }).parse(request.body ?? {});
+    const prueba = body.url ? await conexionGsg.probar({ url: body.url, token: body.apiKey ?? body.token ?? '', rutaUbicacion: body.rutaUbicacion }) : await conexionGsg.probar();
     return { ok: prueba.ok, prueba };
   });
 

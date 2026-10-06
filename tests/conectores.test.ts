@@ -43,7 +43,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 const config = loadConfig(ENV);
 
 let app: FastifyInstance;
@@ -252,7 +252,7 @@ describe('gestion por la API', () => {
   });
 
   it('exige el permiso conectores:gestionar', async () => {
-    const r = await app.inject({ method: 'GET', url: '/api/v1/conectores', headers: { authorization: 'Bearer wak_noExiste00000000000000000000000000' } });
+    const r = await app.inject({ method: 'GET', url: '/api/v1/conectores', headers: { 'x-api-key': 'wak_noExiste00000000000000000000000000' } });
     expect(r.statusCode).toBe(401);
   });
 });

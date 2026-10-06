@@ -299,7 +299,7 @@ describe('el asistente con las defensas puestas', () => {
   });
 
   it('el examen incluye el grupo de seguridad y sus casos se contestan sin modelo', async () => {
-    const r = await app.inject({ method: 'GET', url: '/admin/ia/escenarios', headers: { authorization: `Bearer ${(await import('./fakes.js')).CLAVE_API_PRUEBA}` } });
+    const r = await app.inject({ method: 'GET', url: '/admin/ia/escenarios', headers: { 'x-api-key': (await import('./fakes.js')).CLAVE_API_PRUEBA } });
     expect(r.statusCode).toBe(200);
     expect(r.json().grupos.seguridad).toBeTruthy();
     const seg = r.json().escenarios.filter((e: { grupo: string }) => e.grupo === 'seguridad');

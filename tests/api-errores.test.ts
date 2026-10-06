@@ -62,7 +62,7 @@ afterAll(async () => {
 async function pedir(ruta: string, o: { metodo?: string; clave?: string; cuerpo?: unknown; crudo?: string; tienda?: string; tipoContenido?: string | null } = {}) {
   const res = await fetch(base + ruta, {
     method: o.metodo ?? 'POST',
-    headers: { ...(o.tipoContenido === null ? {} : { 'content-type': o.tipoContenido ?? 'application/json' }), ...(o.clave ? { authorization: `Bearer ${o.clave}` } : {}), ...(o.tienda ? { cookie: `gsg_tienda=${o.tienda}` } : {}) },
+    headers: { ...(o.tipoContenido === null ? {} : { 'content-type': o.tipoContenido ?? 'application/json' }), ...(o.clave ? { 'x-api-key': o.clave } : {}), ...(o.tienda ? { cookie: `gsg_tienda=${o.tienda}` } : {}) },
     body: o.metodo === 'GET' || o.metodo === 'HEAD' || o.metodo === 'DELETE' ? undefined : (o.crudo ?? JSON.stringify(o.cuerpo ?? {})),
   });
   const texto = await res.text();
@@ -202,7 +202,7 @@ describe('códigos HTTP de POST /api/v1/entregas', () => {
     const sin = await pedir('/api/v1/entregas', { cuerpo: pedido('ERR-401', '987700005') });
     expect(sin.status).toBe(401);
     esErrorLimpio(sin, 'CLAVE_AUSENTE');
-    expect(sin.cabeceras.get('www-authenticate')).toMatch(/^Bearer/);
+    expect(sin.cabeceras.get('www-authenticate')).toMatch(/^ApiKey .*X-API-Key/);
     const mala = await pedir('/api/v1/entregas', { clave: generarClaveApi(), cuerpo: pedido('ERR-401', '987700005') });
     expect(mala.status).toBe(401);
     esErrorLimpio(mala, 'CLAVE_INVALIDA');

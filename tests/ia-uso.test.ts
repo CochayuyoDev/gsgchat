@@ -111,7 +111,7 @@ describe('el servicio de IA cuenta cada llamada por lo que era', () => {
       return 'Claro, con gusto.';
     },
   };
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
 
   beforeAll(async () => {
     repos = createFakeRepos();

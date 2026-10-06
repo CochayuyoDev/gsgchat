@@ -97,7 +97,7 @@ describe('probar la conexion desde la pantalla', () => {
     const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Tienda', fetchImpl, modelosGratis: ['google/gemma-4-31b-it'] });
     const app = await buildServer({ config, repos, settings, wa, sender, queue: cola, logger: false, ia });
     await app.ready();
-    const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+    const auth = { 'x-api-key': CLAVE_API_PRUEBA };
     return { app, ia, auth, cerrar: () => app.close() };
   }
 

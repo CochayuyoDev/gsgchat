@@ -12,7 +12,7 @@ import { PERMISOS } from '../../auth/permisos.js';
 
 type Json = Record<string, unknown>;
 
-const permiso = (p: keyof typeof PERMISOS) => ({ 'x-permiso': p, security: [{ claveApi: [] }, { claveApiCabecera: [] }] });
+const permiso = (p: keyof typeof PERMISOS) => ({ 'x-permiso': p, security: [{ claveApi: [] }] });
 
 const error = (descripcion: string) => ({
   description: descripcion,
@@ -35,7 +35,7 @@ export function openApi(baseUrl: string): Json {
       description: [
         'La puerta para GSG y otros sistemas autorizados. Se entra con una clave de API',
         'creada en API y endpoint GSG, con los permisos justos, en la cabecera',
-        '`Authorization: Bearer wak_...` o, si el sistema solo manda API keys, `X-API-Key: wak_...`.',
+        '`X-API-Key: wak_...`.',
         '',
         'Enviar nunca se salta las guardas anti-bloqueo: un mensaje frenado por un gate',
         'responde 202 con `estado: "bloqueado"` y el motivo, no 200.',
@@ -145,7 +145,7 @@ export function openApi(baseUrl: string): Json {
           summary: 'Canjear un codigo de conexion por una clave de API (sin clave previa)',
           description: [
             'Un administrador crea en el panel un codigo corto (WA-XXXX-XXXX) con fecha limite, usos y permisos. El otro sistema',
-            'lo manda aqui, sin Authorization, y recibe su clave `wak_` con esos permisos y la direccion de este sistema. Cada',
+            'lo manda aqui, sin clave (sin X-API-Key), y recibe su clave `wak_` con esos permisos y la direccion de este sistema. Cada',
             'codigo vale los usos que se le dieron (normalmente uno) y hasta su fecha; despues responde 404. Hay tope de',
             'intentos por direccion (429). El codigo se acepta como lo escriba la gente: minusculas, sin guiones, con espacios.',
           ].join(' '),
@@ -385,8 +385,7 @@ export function openApi(baseUrl: string): Json {
     },
     components: {
       securitySchemes: {
-        claveApi: { type: 'http', scheme: 'bearer', description: 'Clave de API `wak_...` creada en el panel, con permisos' },
-        claveApiCabecera: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'La misma clave `wak_...`, para sistemas que solo mandan API keys' },
+        claveApi: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'Clave de API `wak_...` creada en el panel, con permisos, en la cabecera X-API-Key' },
       },
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },

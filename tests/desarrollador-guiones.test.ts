@@ -305,7 +305,7 @@ describe('Módulo desarrollador: conversaciones completas', () => {
     const alta = await tienda.app.inject({
       method: 'POST',
       url: '/api/v1/entregas',
-      headers: { authorization: `Bearer ${k.body.clave}`, 'content-type': 'application/json' },
+      headers: { 'x-api-key': k.body.clave, 'content-type': 'application/json' },
       payload: JSON.stringify({ pedidos: [{ ...OBLIGATORIOS_GSG, referencia: 'R-0001', telefono: '51944000099', nombre: 'Cliente Real', distrito: 'Miraflores', lat: -12.1211, lng: -77.0301, faltaConfirmar: false }] }),
     });
     expect(alta.statusCode).toBeLessThan(300);

@@ -568,7 +568,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/waha/request-code',
-      headers: { authorization: `Bearer ${ADMIN}` },
+      headers: { 'x-api-key': ADMIN },
       payload: { phone: '+52 1 55 1234 5678' },
     });
 
@@ -588,7 +588,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/waha/request-code',
-      headers: { authorization: `Bearer ${ADMIN}` },
+      headers: { 'x-api-key': ADMIN },
       payload: { phone: '5215512345678' },
     });
 
@@ -624,7 +624,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/admin/waha/detect',
-      headers: { authorization: `Bearer ${ADMIN}` },
+      headers: { 'x-api-key': ADMIN },
     });
 
     expect(response.statusCode).toBe(200);

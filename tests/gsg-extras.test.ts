@@ -88,7 +88,7 @@ describe('los tokens del simulador, los descartes, la bitácora y el cuadre (ser
   it('el verificador usa la conexión vigente y explica un 401 o un 404', async () => {
     let respuesta: ResultadoConsulta<unknown> = { ok: false, status: 401, error: 'Unauthorized' };
     const s = await crearGsgExtras({ settingsRepo: createMemorySettingsRepo(), puerto: () => puertoFalso(() => respuesta) });
-    expect((await s.verificarContrato()).resumen).toMatch(/rechazó el token \(error 40[13]\)/);
+    expect((await s.verificarContrato()).resumen).toMatch(/rechazó la clave \(error 401\): la API Key de GSG es incorrecta/);
     respuesta = { ok: false, status: 404, error: 'Not found' };
     expect((await s.verificarContrato()).resumen).toMatch(/error 404: no tiene la ruta/);
     respuesta = { ok: true, cuerpo: { dia: '2026-09-21', faltaUbicacion: [], faltaConfirmacion: [] } };
@@ -233,21 +233,21 @@ describe('el token del simulador vale desde fuera (servidor mínimo con el simul
     const creado = await app.inject({ method: 'POST', url: '/admin/gsg/tokens-simulador', headers: admin, payload: { nombre: 'Equipo GSG', dias: 5 } });
     expect(creado.statusCode, creado.body).toBe(201);
     const { token, registro } = creado.json() as { token: string; registro: { id: string } };
-    const ok = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { authorization: `Bearer ${token}` } });
+    const ok = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { 'x-api-key': token } });
     expect(ok.statusCode, ok.body).toBe(200);
     expect((ok.json() as { faltaUbicacion: unknown[] }).faltaUbicacion.length).toBeGreaterThan(0);
-    const malo = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { authorization: 'Bearer gsgsim_inventado' } });
+    const malo = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { 'x-api-key': 'gsgsim_inventado' } });
     expect(malo.statusCode).toBe(401);
     expect((malo.json() as { error: string }).error).toMatch(/caducó o fue anulado/);
     const sinToken = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes` });
     expect(sinToken.statusCode).toBe(401);
     expect(await app.inject({ method: 'DELETE', url: `/admin/gsg/tokens-simulador/${registro.id}`, headers: { 'x-prueba-admin': '1' } }).then((r) => r.statusCode)).toBe(200);
-    const despues = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { authorization: `Bearer ${token}` } });
+    const despues = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { 'x-api-key': token } });
     expect(despues.statusCode).toBe(401);
     const r = (await app.inject({ method: 'GET', url: '/admin/gsg' })).json() as { bitacora: Array<{ que: string; status: number; quien: string; resultado: string }>; tokens: Array<{ estado: string; usos: number }> };
     expect(r.bitacora[0]).toMatchObject({ que: `GET ${RUTA_SIMULADOR}/reparto/pendientes`, status: 401 });
     expect(r.bitacora.find((x) => x.status === 200 && x.quien.includes('Equipo GSG'))?.resultado).toMatch(/respondió: falta ubicación/);
-    expect(r.bitacora.find((x) => x.quien === 'sin token')?.status).toBe(401);
+    expect(r.bitacora.find((x) => x.quien === 'sin X-API-Key')?.status).toBe(401);
     expect(r.tokens[0]).toMatchObject({ estado: 'anulado', usos: 1 });
     const sinPermiso = await app.inject({ method: 'POST', url: '/admin/gsg/tokens-simulador', payload: { nombre: 'x' } });
     expect(sinPermiso.statusCode).toBe(403);

@@ -38,7 +38,7 @@ const queue: OutboundQueue = {
   },
   async close() {},
 };
-const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+const auth = { 'x-api-key': CLAVE_API_PRUEBA };
 
 let app: FastifyInstance;
 let repos: FakeRepos;

@@ -104,7 +104,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
 
     const clave = generarClaveApi();
     await tienda.repos.claves.crear({ nombre: 'Todo', prefijo: prefijoDeClave(clave), hash: hashClaveApi(clave), creadaPor: null, permisos: ['*'] });
-    expect((await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 1 }, { authorization: `Bearer ${clave}` })).status).toBe(403);
+    expect((await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 1 }, { 'x-api-key': clave })).status).toBe(403);
   });
 
   it('el tope es de 500 clientes por tanda y los errores se dicen en palabras', async () => {

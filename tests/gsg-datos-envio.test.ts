@@ -118,7 +118,7 @@ describe('los datos del envío llegan a la entrega', () => {
   });
 
   it('PATCH cambia los datos del envío (y queda en la bitácora); repetir el POST con datos nuevos también los refleja', async () => {
-    const r = await e.app.inject({ method: 'PATCH', url: '/api/v1/entregas/D-1', headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}` }, payload: { monto: '95.50', metodoPago: 'Efectivo' } });
+    const r = await e.app.inject({ method: 'PATCH', url: '/api/v1/entregas/D-1', headers: { 'x-api-key': CLAVE_API_PRUEBA }, payload: { monto: '95.50', metodoPago: 'Efectivo' } });
     expect(r.statusCode).toBe(200);
     expect(r.json().cambios.join(' ')).toMatch(/datos del envío/);
     expect((await e.entrega('D-1'))?.datosEnvio).toMatchObject({ monto: '95.50', metodoPago: 'Efectivo', producto: 'Zapatillas talla 40' });

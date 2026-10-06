@@ -295,8 +295,8 @@ function crearGsgFalso(): GsgFalsoInterno {
       if (!tipo) return new Response(JSON.stringify({ error: `ruta desconocida ${camino}` }), { status: 404 });
 
       const headers = new Headers(init?.headers);
-      const autorizacion = headers.get('authorization');
-      const token = autorizacion?.startsWith('Bearer ') ? autorizacion.slice(7) : null;
+      // Como la API real de GSG: la clave solo en X-API-Key (un Bearer no cuenta).
+      const token = headers.get('x-api-key');
       if (token !== GSG_TOKEN_FALSO) return new Response(JSON.stringify({ error: 'token inválido' }), { status: 401 });
 
       if (gsg.modo === 'rechaza') {
@@ -450,7 +450,7 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
     ...(salud ? { salud, politica } : {}),
   });
 
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
   const memoriaAlertas = { ultimoResumen: new Map<string, number>(), ultimoAviso: new Map<string, number>() };
 
   async function llamar<T>(method: MetodoHttp, url: string, body?: unknown): Promise<RespuestaApi<T>> {

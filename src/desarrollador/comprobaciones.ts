@@ -97,14 +97,14 @@ function fetchHaciaSimulador(sim: GsgSimulado): typeof fetch {
   return (async (entrada: Parameters<typeof fetch>[0], init?: RequestInit) => {
     if (sim.modo === 'sin_red') throw new TypeError('fetch failed: getaddrinfo ENOTFOUND api.gsg.pe');
     const url = new URL(typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url);
-    const auth = new Headers(init?.headers).get('authorization');
+    const auth = new Headers(init?.headers).get('x-api-key');
     let cuerpo: unknown = null;
     try {
       cuerpo = init?.body ? JSON.parse(String(init.body)) : null;
     } catch {
       cuerpo = init?.body ?? null;
     }
-    const r = sim.atender(init?.method ?? 'GET', url.pathname, auth?.startsWith('Bearer ') ? auth.slice(7) : null, cuerpo);
+    const r = sim.atender(init?.method ?? 'GET', url.pathname, auth || null, cuerpo);
     const esTexto = typeof r.body === 'string';
     return new Response(esTexto ? (r.body as string) : JSON.stringify(r.body), { status: r.status, headers: { 'content-type': esTexto ? 'text/html' : 'application/json' } });
   }) as typeof fetch;
@@ -164,11 +164,11 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
 
   const llamar = async (metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, opts: { clave?: string | null; cuerpo?: unknown; crudo?: string } = {}) => {
     const headers: Record<string, string> = {};
-    if (opts.clave) headers.authorization = `Bearer ${opts.clave}`;
+    if (opts.clave) headers['x-api-key'] = opts.clave;
     if (opts.cuerpo !== undefined || opts.crudo !== undefined) headers['content-type'] = 'application/json';
     const r = await deps.app.inject({ method: metodo, url, headers, payload: opts.crudo ?? (opts.cuerpo === undefined ? undefined : JSON.stringify(opts.cuerpo)), remoteAddress: '127.0.0.9' });
     const respuesta = leerRespuesta(r);
-    const peticion = { metodo, ruta: url, clave: opts.clave ? 'Bearer wak_… (clave temporal de la comprobación)' : 'sin clave', cuerpo: opts.crudo ?? opts.cuerpo };
+    const peticion = { metodo, ruta: url, clave: opts.clave ? 'X-API-Key: wak_… (clave temporal de la comprobación)' : 'sin clave', cuerpo: opts.crudo ?? opts.cuerpo };
     return { ...respuesta, tecnico: { peticion, respuesta: { status: respuesta.status, cuerpo: respuesta.cuerpo } } };
   };
 

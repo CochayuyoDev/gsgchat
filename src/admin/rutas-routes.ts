@@ -22,6 +22,7 @@ import {
 import { CODIGOS, INCIDENCIAS, type CodigoIncidencia } from '../rutas/incidencias.js';
 import {
   despacharReportes,
+  paradaPorClave,
   exportarCola,
   payloadIncidencia,
   payloadUbicacionDelPedido,
@@ -754,7 +755,13 @@ export async function registerRutasRoutes(
     return {
       conectado: gsg.conectado(),
       destino: gsg.urlUbicacion?.() ?? null,
-      aviso: gsg.conectado() ? null : 'GSG no está conectado: configura su dirección y su clave en Conexión WhatsApp. Las ubicaciones quedan en cola y salen al conectarlo.',
+      aviso: !gsg.conectado()
+        ? 'GSG no está conectado: configura su dirección y su clave en Conexión WhatsApp. Las ubicaciones quedan en cola y salen al conectarlo.'
+        : gsg.errorConfiguracion?.()
+          ? `La configuración de GSG no es válida: ${gsg.errorConfiguracion?.()} No se envía nada hasta corregirla en Conexión.`
+          : paradaPorClave(repos, gsg),
+      errorConfiguracion: gsg.errorConfiguracion?.() ?? null,
+      paradaPorClave: paradaPorClave(repos, gsg),
       items: items.map((r) => ({
         id: r.id,
         en: r.createdAt,
@@ -780,6 +787,7 @@ export async function registerRutasRoutes(
   // la direccion mal puesta se quedaba en «fallido» y salia «0 de 0»).
   app.post('/admin/rutas/cola/despachar', async () => {
     if (gsg.conectado()) await repos.rutas.reencolarFallidos('ubicacion');
-    return despacharReportes(repos, gsg, 200);
+    // Lo pidio una persona: se intenta aunque la cola este parada por la clave.
+    return despacharReportes(repos, gsg, 200, undefined, { manual: true });
   });
 }

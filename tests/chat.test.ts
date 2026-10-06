@@ -29,7 +29,7 @@ import {
 import type { ChangeValue, InboundMessage } from '../src/whatsapp/types.js';
 import type { Sender } from '../src/outbound/sender.js';
 
-const auth = { authorization: `Bearer ${ADMIN}` };
+const auth = { 'x-api-key': ADMIN };
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',

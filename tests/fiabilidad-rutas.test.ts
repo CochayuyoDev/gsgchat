@@ -149,7 +149,7 @@ describe('/fiabilidad y /admin/fiabilidad', () => {
     const op = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { cookie: operador }, payload: { humo: { hora: '08:00' } } });
     expect(op.statusCode).toBe(403);
     expect(op.json().error).toContain('administrador');
-    const token = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}` }, payload: { humo: { hora: '08:00' } } });
+    const token = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { 'x-api-key': CLAVE_API_PRUEBA }, payload: { humo: { hora: '08:00' } } });
     expect(token.statusCode).toBe(403);
     const ok = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { cookie: admin }, payload: { humo: { hora: '08:00' }, vigilante: { correoAviso: 'dueno@gsg.pe', minutosAntesDeAvisar: 2 }, claveBrevo: 'xkeysib-secreta', copia: { hora: '04:00', conservar: 7 } } });
     expect(ok.statusCode).toBe(200);

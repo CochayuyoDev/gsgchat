@@ -51,7 +51,8 @@ const queue: OutboundQueue = {
 const EMISORA = 'wak_claveQueEmiteTokens0123456789abcdefXYZ0';
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+// Las claves de API van en X-API-Key; el token del chat embebido (emb_) va en el Bearer.
+const con = (clave: string) => ({ ...(clave.startsWith('wak_') ? { 'x-api-key': clave } : { authorization: `Bearer ${clave}` }), 'content-type': 'application/json' });
 
 let app: FastifyInstance;
 let repos: FakeRepos;
@@ -106,7 +107,7 @@ describe('POST /api/v1/embed/token', () => {
   it('exige el permiso embed:emitir', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: con(TODO), payload: { operador: 'ana' } });
     expect(r.statusCode).toBe(200);
-    const sin = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: { authorization: 'Bearer wak_noExiste00000000000000000000000000' }, payload: { operador: 'ana' } });
+    const sin = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: { 'x-api-key': 'wak_noExiste00000000000000000000000000' }, payload: { operador: 'ana' } });
     expect(sin.statusCode).toBe(401);
   });
 

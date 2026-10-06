@@ -507,7 +507,7 @@ describe('las rutas de la pantalla', () => {
     };
     const app = await buildServer({ config: { ...config, ARCHIVE_DIR: dirRutas }, repos: fakes, settings, wa, sender, queue: cola, logger: false, entregas: entregasFalsas as never, mediaDir: extra.sinMedia ? undefined : mediaDir, entrenamiento: extra.entrenamiento as never });
     await app.ready();
-    return { app, fakes, dirRutas, auth: { authorization: `Bearer ${CLAVE_API_PRUEBA}` } };
+    return { app, fakes, dirRutas, auth: { 'x-api-key': CLAVE_API_PRUEBA } };
   }
 
   it('cerrar de golpe las de los pedidos terminados hoy, listar con filtros, notas, exportar, papelera', async () => {

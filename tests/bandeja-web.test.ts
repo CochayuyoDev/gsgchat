@@ -41,7 +41,7 @@ function trozo(html: string, desde: string, hasta: string): string {
 
 /** El JS de la bandeja y el api() de la página, ejecutados con un DOM de mentira y fetch contra el servidor. */
 async function montarPagina() {
-  const r = await esc.app.inject({ method: 'GET', url: '/entregas', headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}` } });
+  const r = await esc.app.inject({ method: 'GET', url: '/entregas', headers: { 'x-api-key': CLAVE_API_PRUEBA } });
   expect(r.statusCode).toBe(200);
   const html = r.body;
   const elementos: Record<string, { innerHTML: string; textContent: string; clases: Set<string>; classList: { toggle(c: string, si?: boolean): void; add(c: string): void; remove(c: string): void } }> = {};
@@ -65,7 +65,7 @@ async function montarPagina() {
   const confirmaciones: string[] = [];
   let respuestaConfirmar = true;
   const fetchFalso = async (path: string, init: { method?: string; body?: string }) => {
-    const res = await esc.app.inject({ method: (init.method ?? 'GET') as 'GET', url: path, headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}`, 'content-type': 'application/json' }, payload: init.body });
+    const res = await esc.app.inject({ method: (init.method ?? 'GET') as 'GET', url: path, headers: { 'x-api-key': CLAVE_API_PRUEBA, 'content-type': 'application/json' }, payload: init.body });
     return { ok: res.statusCode < 400, status: res.statusCode, statusText: '', json: async () => JSON.parse(res.body) };
   };
   const codigo = [

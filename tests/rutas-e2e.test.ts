@@ -57,7 +57,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 
-const auth = { authorization: `Bearer ${ADMIN}` };
+const auth = { 'x-api-key': ADMIN };
 
 /** 10:00 en Lima: dentro del horario de envío. */
 let ahora = new Date('2026-03-10T15:00:00Z');

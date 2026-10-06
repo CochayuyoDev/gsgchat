@@ -38,7 +38,7 @@ import { startScheduler } from './automation/engine.js';
 
 import { startArchiveSweeper } from './archive/service.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
-import { crearPuertoGsg, despacharReportes } from './rutas/gsg.js';
+import { crearPuertoGsg, despacharReportes, paradaPorClave } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
 
 import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
@@ -178,8 +178,10 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   // quedan esperando; en cuanto haya URL, sale todo lo acumulado.
   // Las ubicaciones que GSG rechazo se reintentan solas en cada pasada (hasta
   // diez intentos): una direccion o clave corregida no deja nada atascado.
+  // Si la cola esta parada porque GSG rechazo la clave (401/403) con esta
+  // misma configuracion, no se reencola nada: se espera a que la cambien.
   const despachador = setInterval(() => {
-    void (gsg.conectado() ? repos.rutas.reencolarFallidos('ubicacion', 10) : Promise.resolve(0))
+    void (gsg.conectado() && !paradaPorClave({ rutas: repos.rutas }, gsg) ? repos.rutas.reencolarFallidos('ubicacion', 10) : Promise.resolve(0))
       .then(() => despacharReportes({ rutas: repos.rutas }, gsg, 50))
       .catch((error) =>
       warn('fallo el despacho de reportes a GSG', { detalle: error instanceof Error ? error.message : String(error) }),
