@@ -43,6 +43,7 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
   const solicitudes: Solicitud[] = [];
   const eventos: EventoSolicitud[] = [];
   const reportes: Reporte[] = [];
+  const candados = new Map<string, Promise<void>>();
 
   const filtrar = (query: Omit<ConsultaSolicitudes, 'limit' | 'offset'>): Solicitud[] => {
     const q = query.q?.trim().toLowerCase();
@@ -197,7 +198,8 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
     async listarSolicitudes(query) {
       return filtrar(query)
         .slice()
-        .sort((a, b) => Number(b.requiereHumano) - Number(a.requiereHumano) || a.id - b.id)
+        // Como el SQL: lo tocado hace poco arriba, y el id desempata.
+        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id - a.id)
         .slice(query.offset, query.offset + query.limit);
     },
 
@@ -282,6 +284,22 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
 
     async telefonosDelLote(loteId) {
       return solicitudes.filter((s) => s.loteId === loteId).map((s) => s.phone ?? s.telefonoCrudo);
+    },
+
+    async conCandadoDeTelefono(phone, fn) {
+      // Como el GET_LOCK del SQL, en memoria: cada llamada espera a la anterior del mismo telefono.
+      const anterior = candados.get(phone) ?? Promise.resolve();
+      let soltar!: () => void;
+      const propio = new Promise<void>((r) => (soltar = r));
+      const cola = anterior.then(() => propio);
+      candados.set(phone, cola);
+      await anterior;
+      try {
+        return await fn();
+      } finally {
+        soltar();
+        if (candados.get(phone) === cola) candados.delete(phone);
+      }
     },
 
     async registrarEvento(

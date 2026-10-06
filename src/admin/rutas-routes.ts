@@ -12,6 +12,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { Repos } from '../db/repos.js';
 import {
+  CandadoOcupado,
   ESTADOS_SIN_UBICACION,
   ESTADOS_SOLICITUD,
   type ConsultaSolicitudes,
@@ -35,6 +36,7 @@ import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, PASOS } from '../rutas/ajustes.js';
 import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js';
 import type { Monitor } from '../salud/monitor.js';
+import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
 
 export interface RutasRoutesDeps {
   repos: Repos;
@@ -152,6 +154,31 @@ export function aCsv(solicitudes: Solicitud[]): string {
   const cabecera = COLUMNAS.map(([nombre]) => nombre).join(';');
   const filas = solicitudes.map((s) => COLUMNAS.map(([, leer]) => celda(leer(s))).join(';'));
   return `﻿${[cabecera, ...filas].join('\r\n')}\r\n`;
+}
+
+/** El id de la ruta, o null si no es un entero positivo. */
+function idDeSolicitud(crudo: string): number | null {
+  if (!/^\d{1,15}$/.test(crudo)) return null;
+  const id = Number(crudo);
+  return id > 0 ? id : null;
+}
+
+/** Por que la solicitud que creo cargarLote no se le puede mandar a nadie. */
+function porQueNoSeEnvia(creada: Solicitud | null): { error: string; motivo: 'opt_out' | 'duplicado' | 'invalida' | 'incidencia' } {
+  if (!creada) return { error: 'No se pudo crear la solicitud nueva con los datos de este cliente.', motivo: 'invalida' };
+  if (creada.incidencia === 'rechaza_contacto') {
+    return { error: 'El cliente se dio de baja: no se le escribe. La entrega se coordina por teléfono.', motivo: 'opt_out' };
+  }
+  if (creada.incidencia === 'ya_en_curso') {
+    return { error: 'Ya se le está pidiendo la ubicación en otro lote: no se le escribe dos veces.', motivo: 'duplicado' };
+  }
+  if (!creada.phone || creada.incidencia?.startsWith('numero_')) {
+    return { error: `El teléfono no sirve para escribirle${creada.incidenciaDetalle ? `: ${creada.incidenciaDetalle}` : '.'}`, motivo: 'invalida' };
+  }
+  return {
+    error: `La solicitud nueva quedó como incidencia y no se le escribe${creada.incidenciaDetalle ? `: ${creada.incidenciaDetalle}` : '.'}`,
+    motivo: 'incidencia',
+  };
 }
 
 export async function registerRutasRoutes(
@@ -566,6 +593,141 @@ export async function registerRutasRoutes(
     });
     await repos.rutas.registrarEvento(solicitud.id, 'nota', 'devuelta a la cola por el operador');
     return { solicitud: actualizada };
+  });
+
+  /**
+   * «Pedir ubicación otra vez»: un flujo NUEVO para ese cliente, en un lote
+   * nuevo de un solo cliente, sin tocar la solicitud de la que se parte (su
+   * ubicacion, sus fechas y sus reportes son historia y se quedan como
+   * estan; solo se le anota en la bitacora que se abrio otro flujo).
+   *
+   * Pasa por `cargarLote`, el mismo camino que la tabla pegada: bajas,
+   * duplicados y numeros malos se deciden ahi y en ningun otro sitio. Y no
+   * manda nada desde aqui: solo arranca el lote, y el motor escribe cuando
+   * le toque (horario, ritmo, salud del numero).
+   */
+  app.post<{ Params: { id: string } }>('/admin/rutas/solicitudes/:id/volver-a-empezar', async (request, reply) => {
+    const id = idDeSolicitud(request.params.id);
+    if (id === null) return reply.code(400).send({ error: 'Ese identificador de solicitud no es válido.' });
+    const original = await repos.rutas.solicitud(id);
+    if (!original) return reply.code(404).send({ error: 'Ese cliente ya no está en la lista.' });
+    const phone = original.phone;
+    if (!phone || !revisarTelefono(phone, plan).ok) {
+      return reply.code(409).send({
+        error: 'Este cliente no tiene un teléfono al que se pueda escribir: corrígelo primero.',
+      });
+    }
+
+    const vigente = aplicarAjustes(opciones, await repos.rutas.ajustes.get(ajustesPorDefecto(opciones)));
+    const timezone = vigente.timezone || opciones.timezone;
+    const quien = request.usuario?.nombre || request.usuario?.usuario || null;
+
+    // Doble clic: comprobar que no hay nada abierto y crear tiene que ser UNA
+    // operacion por telefono. El candado es un GET_LOCK de la base (ver
+    // `conCandadoDeTelefono`): vale aunque haya dos procesos atendiendo. La
+    // segunda peticion espera a la primera y, al entrar, ya ve la solicitud
+    // nueva como abierta y contesta 409 sin crear nada.
+    try {
+      return await repos.rutas.conCandadoDeTelefono(phone, async () => {
+        // «Abierta» es lo que el repo llama abierta (abiertaPorTelefono,
+        // ESTADOS_SOLICITUD_ABIERTA): tambien la derivada, porque cargarLote
+        // cerraria una abierta de otro dia como «reemplazada», y eso seria
+        // tocar una solicitud que esta accion promete no tocar.
+        const abiertas = (
+          await repos.rutas.listarSolicitudes({ q: phone, estados: ESTADOS_SOLICITUD_ABIERTA, limit: 100, offset: 0 })
+        ).filter((s) => s.phone === phone && ESTADOS_SOLICITUD_ABIERTA.includes(s.estado));
+        const abierta = abiertas.sort((a, b) => b.id - a.id)[0];
+        if (abierta) {
+          return reply.code(409).send({
+            error: 'Este cliente ya tiene una solicitud de ubicación abierta: no se le abre otra.',
+            abierta: { id: abierta.id, loteId: abierta.loteId, estado: abierta.estado },
+          });
+        }
+
+        const fecha = new Intl.DateTimeFormat('es-PE', { timeZone: timezone, dateStyle: 'short', timeStyle: 'short' }).format(new Date());
+        const nombreLote = `Reinicio manual — ${original.nombre?.trim() || phone} — ${fecha}`.slice(0, 160);
+        const fila = {
+          telefono: phone,
+          nombre: original.nombre ?? undefined,
+          referencia: original.referencia ?? undefined,
+          direccion: original.direccion ?? undefined,
+          distrito: original.distrito ?? undefined,
+          notas: original.notas ?? undefined,
+        };
+
+        let carga: Awaited<ReturnType<typeof cargarLote>>;
+        try {
+          carga = await cargarLote(
+            { repos, plan, timezone, lista: deps.lista },
+            { nombre: nombreLote, filas: [fila], origen: 'reinicio_manual', notas: `reinicio manual de la solicitud ${original.id}`, arrancar: false },
+          );
+        } catch (error) {
+          if (error instanceof ErrorCarga) return reply.code(422).send({ error: error.message, motivo: 'invalida' });
+          throw error;
+        }
+
+        // Lo que devuelve cargarLote es la fila tal como se inserto: la baja
+        // o el «ya en curso» se le ponen despues. Se relee.
+        const creada = carga.solicitudes[0] ? await repos.rutas.solicitud(carga.solicitudes[0].id) : null;
+        const enviable = Boolean(creada && creada.phone && creada.estado === 'pendiente' && !creada.incidencia);
+        if (!creada || !enviable) {
+          // El lote no tiene a quien escribir: se cierra sin haber estado
+          // nunca «en marcha». La solicitud con su incidencia se queda a la
+          // vista, como en cualquier lote.
+          await repos.rutas.cambiarEstadoLote(carga.lote.id, 'terminado');
+          const { error, motivo } = porQueNoSeEnvia(creada);
+          return reply.code(422).send({ error, motivo });
+        }
+
+        // Se arranca aqui y no con `arrancar: true` dentro de cargarLote: asi
+        // un lote cuya unica solicitud salio como baja o incidencia nunca
+        // llega a estar «enviando» (ni el motor le cierra un resumen para GSG).
+        await repos.rutas.cambiarEstadoLote(carga.lote.id, 'enviando');
+        await repos.rutas.registrarEvento(
+          original.id,
+          'nota',
+          `se inició un nuevo flujo manual: lote ${carga.lote.nombre}, solicitud ${creada.id}`,
+          { loteId: carga.lote.id, solicitudId: creada.id, quien },
+        );
+        await repos.rutas.registrarEvento(
+          creada.id,
+          'nota',
+          `flujo nuevo pedido a mano desde la solicitud ${original.id}`,
+          { origenSolicitudId: original.id, quien },
+        );
+        return { ok: true, loteId: carga.lote.id, solicitudId: creada.id };
+      });
+    } catch (error) {
+      if (error instanceof CandadoOcupado) {
+        return reply.code(409).send({ error: 'Ya se está creando un flujo para este cliente: espera un momento y recarga.' });
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * «Quitar de esta automatización»: la solicitud pasa a cancelada y el motor
+   * deja de escribirle por ella (`tocaIntentar` solo saca pendientes,
+   * enviadas y respondidas). No se borra nada: ni la fila, ni el contacto,
+   * ni los mensajes, ni la ubicacion recibida, ni lo ya reportado a GSG.
+   */
+  app.post<{ Params: { id: string } }>('/admin/rutas/solicitudes/:id/cancelar', async (request, reply) => {
+    const id = idDeSolicitud(request.params.id);
+    if (id === null) return reply.code(400).send({ error: 'Ese identificador de solicitud no es válido.' });
+    const solicitud = await repos.rutas.solicitud(id);
+    if (!solicitud) return reply.code(404).send({ error: 'Ese cliente ya no está en la lista.' });
+
+    const body = z.object({ motivo: z.string().max(300).optional() }).parse(request.body ?? {});
+    if (solicitud.estado === 'cancelado') return { ok: true, yaEstaba: true };
+
+    await repos.rutas.actualizarSolicitud(solicitud.id, { estado: 'cancelado', proximoIntentoAt: null });
+    await repos.rutas.registrarEvento(
+      solicitud.id,
+      'nota',
+      body.motivo?.trim() || 'retirada manualmente de la automatización',
+      { estadoAnterior: solicitud.estado, quien: request.usuario?.nombre || request.usuario?.usuario || null },
+    );
+    return { ok: true, yaEstaba: false };
   });
 
   // ------------------------------------------------------------- cola GSG

@@ -5,6 +5,7 @@
  * `Repos` lo expone como `repos.rutas`.
  */
 
+import { createHash } from 'node:crypto';
 import { nuevoId, type Pool } from './pool.js';
 import type { CodigoIncidencia } from '../rutas/incidencias.js';
 import { createAjustesRepo, type AjustesRepo } from '../rutas/ajustes.js';
@@ -239,6 +240,14 @@ export interface RutasRepo {
    */
   resueltaRecientePorTelefono(phone: string): Promise<Solicitud | null>;
   telefonosDelLote(loteId: string): Promise<string[]>;
+  /**
+   * Ejecuta `fn` con el telefono apartado: dos llamadas con el mismo
+   * telefono no se solapan, ni en este proceso ni entre procesos que usen la
+   * misma base. Es para «comprobar que no hay nada abierto y crear»: sin el,
+   * un doble clic crea dos solicitudes para el mismo cliente. Si no se
+   * consigue en `esperaSegundos`, lanza `CandadoOcupado`.
+   */
+  conCandadoDeTelefono<T>(phone: string, fn: () => Promise<T>, esperaSegundos?: number): Promise<T>;
 
   registrarEvento(
     solicitudId: number,
@@ -283,6 +292,9 @@ export interface RutasRepo {
    */
   cifrasReportes(): Promise<CifrasReportes>;
 }
+
+/** No se pudo apartar el telefono a tiempo: otra peticion lo tiene. */
+export class CandadoOcupado extends Error {}
 
 // ------------------------------------------------------------- mapeo
 
@@ -578,14 +590,12 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       const { where, params } = filtros(query);
       const { rows } = await pool.query<SolicitudRow>(
         `select * from rutas_solicitudes ${where}
-          order by
-            -- Primero lo que espera a una persona, que es lo que se mira.
-            requiere_humano desc,
-            case estado
-              when 'supervision' then 0 when 'incidencia' then 1 when 'derivado' then 2
-              when 'respondio' then 3 when 'enviado' then 4 when 'pendiente' then 5
-              else 6 end,
-            id asc
+          -- Lo que se movio hace poco, arriba: es lo que la operacion busca
+          -- (el cliente que acaba de contestar, la que se corrigio a mano).
+          -- updated_at cambia en cada actualizarSolicitud; el id desempata
+          -- para que dos filas tocadas en el mismo milisegundo no bailen
+          -- entre paginas.
+          order by updated_at desc, id desc
           limit $${params.length + 1} offset $${params.length + 2}`,
         [...params, Number(query.limit), Number(query.offset)],
       );
@@ -697,6 +707,28 @@ export function createRutasRepo(pool: Pool): RutasRepo {
         [loteId],
       );
       return rows.map((r) => r.phone ?? r.telefono_crudo);
+    },
+
+    async conCandadoDeTelefono(phone, fn, esperaSegundos = 10) {
+      // GET_LOCK de MySQL/MariaDB, y no un indice unico: un telefono tiene
+      // (y debe poder tener) muchas solicitudes en su historia, y MySQL no
+      // tiene indices unicos parciales ("solo las abiertas"). El candado es
+      // de la conexion: se aparta una del pool, se pide y se suelta en ella.
+      // El nombre lleva la base (las tiendas comparten servidor) y va en hash
+      // porque GET_LOCK no admite mas de 64 caracteres.
+      const nombre = `gsg_rt_${createHash('sha1').update(`${pool.baseDeDatos ?? ''}:${phone}`).digest('hex')}`;
+      const conexion = await pool.connect();
+      try {
+        const { rows } = await conexion.query<{ ok: number | null }>('select get_lock($1, $2) as ok', [nombre, Number(esperaSegundos)]);
+        if (Number(rows[0]?.ok) !== 1) throw new CandadoOcupado(`el teléfono ${phone} está ocupado por otra petición`);
+        try {
+          return await fn();
+        } finally {
+          await conexion.query('select release_lock($1)', [nombre]).catch(() => undefined);
+        }
+      } finally {
+        conexion.release();
+      }
     },
 
     // ---------------------------------------------------------- bitacora

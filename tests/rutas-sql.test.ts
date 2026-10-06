@@ -9,7 +9,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
-import { ESTADOS_SIN_UBICACION } from '../src/db/rutas.js';
+import { CandadoOcupado, ESTADOS_SIN_UBICACION } from '../src/db/rutas.js';
 import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
 let b: BaseDePrueba;
@@ -103,29 +103,64 @@ describe('lotes y solicitudes', () => {
     expect(await repos.rutas.tocaIntentar(new Date('2026-03-10T13:00:00Z'), 10)).toHaveLength(0);
   });
 
-  it('la bandeja ensena primero lo que espera a una persona', async () => {
+  it('la bandeja ensena primero lo ultimo que se movio, y el id desempata', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Reparto' });
-    const [normal, urgente] = await repos.rutas.agregarSolicitudes(lote.id, [
+    const [a, b, c, d] = await repos.rutas.agregarSolicitudes(lote.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111' },
       { telefonoCrudo: '922222222', phone: '51922222222' },
       { telefonoCrudo: '933333333', phone: '51933333333' },
+      { telefonoCrudo: '944444444', phone: '51944444444' },
     ]);
-    await repos.rutas.actualizarSolicitud(urgente!.id, {
-      estado: 'supervision',
-      requiereHumano: true,
-      incidencia: 'numero_equivocado',
-    });
+    // Fechas a mano: a y c empatan, b es la mas vieja, d la mas nueva. Una
+    // en supervision NO sube por su estado: manda la actividad.
+    const fecha = async (id: number, iso: string) =>
+      pool.query('update rutas_solicitudes set updated_at = $1 where id = $2', [new Date(iso), id]);
+    await fecha(a!.id, '2026-03-10T12:00:00.000Z');
+    await fecha(b!.id, '2026-03-10T11:00:00.000Z');
+    await fecha(c!.id, '2026-03-10T12:00:00.000Z');
+    await fecha(d!.id, '2026-03-10T13:00:00.000Z');
+    await pool.query(`update rutas_solicitudes set estado = 'supervision', requiere_humano = 1 where id = $1`, [b!.id]);
+    await fecha(b!.id, '2026-03-10T11:00:00.000Z');
 
-    const lista = await repos.rutas.listarSolicitudes({ loteId: lote.id, limit: 10, offset: 0 });
-    expect(lista[0]?.id).toBe(urgente!.id);
-    expect(lista[1]?.id).toBe(normal!.id);
+    const ids = async (limit: number, offset: number) =>
+      (await repos.rutas.listarSolicitudes({ loteId: lote.id, limit, offset })).map((s) => s.id);
+    expect(await ids(10, 0)).toEqual([d!.id, c!.id, a!.id, b!.id]);
+    // El limite y el desplazamiento siguen igual, sobre el orden nuevo.
+    expect(await ids(2, 1)).toEqual([c!.id, a!.id]);
 
-    const soloHumano = await repos.rutas.listarSolicitudes({
-      requiereHumano: true,
-      limit: 10,
-      offset: 0,
-    });
-    expect(soloHumano).toHaveLength(1);
+    // Tocarla la sube: actualizarSolicitud pone updated_at a ahora.
+    await repos.rutas.actualizarSolicitud(b!.id, { incidencia: 'numero_equivocado' });
+    expect((await ids(10, 0))[0]).toBe(b!.id);
+
+    const soloHumano = await repos.rutas.listarSolicitudes({ requiereHumano: true, limit: 10, offset: 0 });
+    expect(soloHumano.map((s) => s.id)).toEqual([b!.id]);
     expect(await repos.rutas.contarSolicitudes({ incidencia: 'numero_equivocado' })).toBe(1);
+  });
+
+  it('el candado por telefono no deja solapar dos llamadas del mismo numero', async () => {
+    const traza: string[] = [];
+    const tarea = (n: string) => async () => {
+      traza.push(`entra ${n}`);
+      await new Promise((r) => setTimeout(r, 50));
+      traza.push(`sale ${n}`);
+      return n;
+    };
+    const [uno, dos] = await Promise.all([
+      repos.rutas.conCandadoDeTelefono('51900000001', tarea('1')),
+      repos.rutas.conCandadoDeTelefono('51900000001', tarea('2')),
+    ]);
+    expect([uno, dos]).toEqual(['1', '2']);
+    // Una detras de otra, nunca intercaladas (la que entra primero da igual).
+    const primero = traza[0]!.split(' ')[1];
+    const segundo = primero === '1' ? '2' : '1';
+    expect(traza).toEqual([`entra ${primero}`, `sale ${primero}`, `entra ${segundo}`, `sale ${segundo}`]);
+
+    // Con el candado tomado y sin espera, la segunda no entra.
+    await repos.rutas.conCandadoDeTelefono('51900000002', async () => {
+      await expect(repos.rutas.conCandadoDeTelefono('51900000002', async () => 'no', 0)).rejects.toBeInstanceOf(CandadoOcupado);
+    });
+    // Y al soltarlo, si.
+    expect(await repos.rutas.conCandadoDeTelefono('51900000002', async () => 'si', 0)).toBe('si');
   });
 
   it('cuenta a los que faltan por dar la ubicacion, sea cual sea el motivo', async () => {

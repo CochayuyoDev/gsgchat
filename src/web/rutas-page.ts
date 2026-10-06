@@ -697,6 +697,19 @@ function pintarDetalle(data) {
   detalleId = s.id;
 
   var sinTelefono = !s.phone;
+  var puede = accionesDeEstado(s.estado);
+  var enlaceChat = '<a class="fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>';
+
+  // Quitada de la automatizacion: nada que pueda volver a escribirle. Solo
+  // se dice que esta fuera y se deja abrir el chat.
+  if (puede.cancelada) {
+    document.getElementById('detalle-acciones').innerHTML =
+      '<div class="aviso" style="margin:12px 0 8px"><div><b>Quitada de esta automatización</b><br>' +
+        'No se le volverá a escribir por esta solicitud. El chat, el contacto y el historial se conservan.</div></div>' +
+      '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>';
+    return;
+  }
+
   document.getElementById('detalle-acciones').innerHTML =
     '<div class="campo"><label for="d-telefono">Corregir el teléfono</label>' +
       '<div class="fila"><input id="d-telefono" value="' + esc(s.telefonoCrudo) + '">' +
@@ -706,14 +719,47 @@ function pintarDetalle(data) {
       '<button type="button" class="btn sm fijo" id="d-guardar-ubi">Guardar</button></div></div>' +
     '<div class="fila" style="margin:12px 0 4px">' +
       '<button type="button" class="btn sm fijo" id="d-derivar"' + (s.estado === 'derivado' ? ' disabled title="Ya está con el repartidor"' : '') + '>Pasar al repartidor</button>' +
-      '<button type="button" class="btn sm fijo" id="d-reintentar"' + (sinTelefono ? ' disabled title="Sin un teléfono al que escribir: corrígelo primero"' : '') + '>Devolver a la cola</button>' +
-      '<a class="fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>' +
-    '</div>';
+      (puede.reintentar
+        ? '<button type="button" class="btn sm fijo" id="d-reintentar"' + (sinTelefono ? ' disabled title="Sin un teléfono al que escribir: corrígelo primero"' : '') + '>Reintentar esta solicitud</button>'
+        : '') +
+      (puede.pedirOtraVez
+        ? '<button type="button" class="btn sm fijo" id="d-pedir-otra-vez"' + (sinTelefono ? ' disabled title="Sin un teléfono al que escribir: corrígelo primero"' : '') + '>Pedir ubicación otra vez</button>'
+        : '') +
+      enlaceChat +
+    '</div>' +
+    (puede.quitar
+      ? '<div class="fila" style="margin:4px 0 4px"><button type="button" class="btn sm fijo" id="d-quitar">Quitar de esta automatización</button></div>'
+      : '');
 
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
   document.getElementById('d-guardar-ubi').onclick = function () { guardarUbicacion(s.id); };
-  document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.'); };
-  document.getElementById('d-reintentar').onclick = function () { accionSobre(s.id, '/reintentar', 'Devuelto a la cola.'); };
+  document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.', this); };
+  if (puede.reintentar) {
+    document.getElementById('d-reintentar').onclick = function () { accionSobre(s.id, '/reintentar', 'Vuelve a la cola: se le escribirá en cuanto le toque.', this); };
+  }
+  if (puede.pedirOtraVez) {
+    document.getElementById('d-pedir-otra-vez').onclick = function () { pedirUbicacionOtraVez(s, this); };
+  }
+  if (puede.quitar) {
+    document.getElementById('d-quitar').onclick = function () { quitarDeAutomatizacion(s, this); };
+  }
+}
+
+/**
+ * Que acciones lleva el detalle segun el estado de la solicitud.
+ *
+ * Va aparte, sin tocar el DOM, para poder probarla sola. La regla que no se
+ * puede romper: una solicitud cancelada no ofrece NADA que vuelva a escribir
+ * al cliente (ni reintentar, ni corregir el telefono, que tambien reintenta).
+ */
+function accionesDeEstado(estado) {
+  var cancelada = estado === 'cancelado';
+  return {
+    cancelada: cancelada,
+    reintentar: !cancelada,
+    pedirOtraVez: estado === 'resuelto',
+    quitar: !cancelada
+  };
 }
 
 function cerrarDetalle() {
@@ -727,14 +773,126 @@ function cerrarDetalle() {
   document.getElementById('detalle-historial').innerHTML = '';
 }
 
-/* Derivar y reintentar hacen lo mismo salvo la ruta y el aviso. */
-async function accionSobre(id, ruta, aviso) {
+/**
+ * Deja el boton apagado mientras dura la peticion: un doble clic no puede
+ * mandar dos veces lo mismo. "trabajo" devuelve true si salio bien; si falla
+ * (o devuelve false) el boton vuelve a estar disponible. Si salio bien no hace
+ * falta: el detalle se repinta con botones nuevos.
+ */
+async function conBotonOcupado(boton, trabajo) {
+  if (boton && boton.disabled) return;
+  if (boton) boton.disabled = true;
+  var bien = false;
   try {
+    bien = await trabajo();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (!bien && boton) boton.disabled = false;
+  }
+}
+
+/* Derivar y reintentar hacen lo mismo salvo la ruta y el aviso. */
+async function accionSobre(id, ruta, aviso, boton) {
+  await conBotonOcupado(boton, async function () {
     await api('/admin/rutas/solicitudes/' + id + ruta, { method: 'POST', body: {} });
     toast(aviso);
     detalleId = null;
     await refrescar();
-  } catch (error) { toast(error.message); }
+    return true;
+  });
+}
+
+/**
+ * Un POST que devuelve el codigo ademas de los datos.
+ *
+ * "api" convierte cualquier fallo en un Error con el texto y nada mas, y aqui
+ * hace falta distinguir el 409 (ya hay otra abierta: se ofrece abrirla) del
+ * 422 (no se puede escribirle: se dice por que). Sin cuerpo no se manda
+ * content-type: el servidor rechaza un JSON vacio.
+ */
+async function postConEstado(ruta, cuerpo) {
+  var res = await fetch(ruta, {
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: cuerpo ? { 'content-type': 'application/json' } : {},
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined
+  });
+  var data = await res.json().catch(function () { return {}; });
+  if (res.status === 401) { irAlLogin(); throw new Error('Tu sesión terminó: vuelve a entrar.'); }
+  return { ok: res.ok, status: res.status, data: data };
+}
+
+/* Abre otra solicitud, cambiando de lote si la lista mira otro. */
+async function irASolicitud(id, loteId) {
+  if (loteActual && loteId && loteActual !== loteId) loteActual = loteId;
+  seleccionada = id;
+  detalleId = null;
+  marcarFilaActiva(id);
+  // refrescar() ya abre el detalle de "seleccionada" con lo que haya en el servidor.
+  await refrescar();
+}
+
+/* Solo para las ya resueltas: un flujo nuevo, sin perder lo anterior. */
+async function pedirUbicacionOtraVez(s, boton) {
+  var si = await confirmarDialogo({
+    titulo: 'Pedir ubicación otra vez',
+    texto: 'Se enviará a ' + (s.nombre || 'este cliente') + ' un nuevo flujo de solicitud de ubicación, ' +
+      'respetando el horario y el ritmo de envío. El historial y la ubicación anteriores se conservan.',
+    boton: 'Pedir otra vez'
+  });
+  if (!si) return;
+
+  await conBotonOcupado(boton, async function () {
+    var r = await postConEstado('/admin/rutas/solicitudes/' + s.id + '/volver-a-empezar');
+    if (r.ok) {
+      toast('Listo: se le volverá a pedir la ubicación cuando le toque, dentro del horario.');
+      await irASolicitud(r.data.solicitudId, r.data.loteId);
+      return true;
+    }
+    if (r.status === 409 && r.data.abierta) {
+      var abierta = r.data.abierta;
+      var abrir = await confirmarDialogo({
+        titulo: 'Ya tiene una solicitud abierta',
+        texto: (r.data.error || 'Este cliente ya tiene otra solicitud en marcha.') + ' No se envió nada nuevo.',
+        boton: 'Abrir esa solicitud',
+        cancelar: 'Cerrar'
+      });
+      if (abrir) await irASolicitud(abierta.id, abierta.loteId);
+      return false;
+    }
+    if (r.status === 422) {
+      toast('No se envió nada: ' + (r.data.error || r.data.motivo || 'no se le puede escribir.'));
+      return false;
+    }
+    toast(r.data.error || errorHttp(r.status));
+    return false;
+  });
+}
+
+/* Detiene solo este flujo: el chat, el contacto y el historial se quedan. */
+async function quitarDeAutomatizacion(s, boton) {
+  var motivo = await pedirDato({
+    titulo: 'Quitar de esta automatización',
+    texto: 'Solo se detiene este flujo: no se le volverá a escribir por esta solicitud. ' +
+      'No se borra el chat, ni el contacto, ni el historial.',
+    etiqueta: 'Motivo (opcional)',
+    marcador: 'Ya recogió en tienda, pidió que no le escriban…',
+    boton: 'Quitar',
+    validar: function () { return null; }
+  });
+  if (motivo === null) return;
+
+  await conBotonOcupado(boton, async function () {
+    var r = await api('/admin/rutas/solicitudes/' + s.id + '/cancelar', { method: 'POST', body: motivo ? { motivo: motivo } : {} });
+    toast(r.yaEstaba
+      ? 'Ya estaba quitada de esta automatización.'
+      : 'Quitada de esta automatización. El chat y el historial siguen ahí.');
+    detalleId = null;
+    await refrescar();
+    return true;
+  });
 }
 
 async function guardarTelefono(id) {
