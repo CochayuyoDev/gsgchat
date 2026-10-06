@@ -43,6 +43,7 @@ import type { Bus } from './eventos/bus.js';
 import type { ServicioIA } from './ia/servicio.js';
 import type { ServicioPlan } from './plan/servicio.js';
 import { registerIaRoutes } from './ia/routes.js';
+import { VERSION } from './version.js';
 import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
 
 import type { ServicioEntrenamiento } from './entrenamiento/servicio.js';
@@ -255,7 +256,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // `connected` distingue "tiene proveedor" de "el telefono esta vinculado":
   // con el cliente local, configurado no significa conectado hasta escanear el QR.
-  app.get('/health', async () => ({ ok: true, configured: settings.isConfigured(), connected: settings.isConfigured() && (wa.conectado?.() ?? true) }));
+  app.get('/health', async () => ({ ok: true, version: VERSION, configured: settings.isConfigured(), connected: settings.isConfigured() && (wa.conectado?.() ?? true) }));
 
   // El orden importa: registerAuth instala el hook que resuelve quien pide
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las

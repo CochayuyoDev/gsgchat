@@ -21,6 +21,7 @@ import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 import { escapeHtml } from './login-page.js';
 import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
+import { VERSION } from '../version.js';
 
 export interface ItemMenu {
   id: string;
@@ -294,6 +295,16 @@ const CSS = `
   .s-top-der { margin-left: auto; display: flex; align-items: center; gap: 10px; }
   .s-demo { font-size: 12px; font-weight: 700; color: var(--ambar); background: var(--ambar-suave); border: 1px solid transparent; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
   .s-top-link { color: var(--s-muted); text-decoration: none; font-size: 13.5px; padding: 6px 10px; border-radius: 8px; }
+  /* La señal de la IA: un punto de color y dos palabras. Lleva a Asistente IA. */
+  .s-ia-senal { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border: 1px solid var(--s-line); border-radius: 999px; color: var(--s-muted); text-decoration: none; font-size: 12.5px; font-weight: 600; white-space: nowrap; background: var(--s-top); }
+  .s-ia-senal:hover { background: var(--s-hover); color: var(--s-text); }
+  .s-ia-senal i, .ia-senal-grande i { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--gris); }
+  .s-ia-senal[data-estado="conectada"] i, .ia-senal-grande[data-estado="conectada"] i { background: var(--verde); box-shadow: 0 0 0 3px var(--verde-suave); }
+  .s-ia-senal[data-estado="sin_conexion"] i, .ia-senal-grande[data-estado="sin_conexion"] i { background: var(--rojo); box-shadow: 0 0 0 3px var(--rojo-suave); }
+  .s-ia-senal[data-estado="sin_conexion"] { color: var(--rojo); }
+  .s-ia-senal[data-estado="sin_comprobar"] i, .ia-senal-grande[data-estado="sin_comprobar"] i { background: var(--ambar); box-shadow: 0 0 0 3px var(--ambar-suave); }
+  .s-version { padding: 0 14px 10px; color: var(--s-muted); font-size: 11px; }
+  .s-app.plegado .s-version { display: none; }
   .s-top-link:hover { background: var(--s-hover); color: var(--s-text); }
   .s-boton { position: relative; width: 38px; height: 38px; padding: 0; border: 1px solid var(--s-line); background: var(--s-top); color: var(--s-muted); border-radius: 9px; cursor: pointer; display: grid; place-items: center; font: inherit; line-height: 1; box-shadow: none; text-decoration: none; }
   .s-boton:hover { background: var(--s-hover); color: var(--s-text); }
@@ -462,6 +473,7 @@ const CSS = `
     /* En el movil la barra no puede empujar el ancho: la demo y la ayuda se esconden, el resto se aprieta. */
     .s-top-der { gap: 6px; }
     .s-demo, .s-top .s-chip { display: none; }
+    .s-ia-senal { padding: 0 9px; } .s-ia-senal span { display: none; }
     .s-top #state.pill { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
     .s-content { padding: 16px 16px 24px; }
     /* El pie de navegacion del celular: las cuatro pantallas del dia a un pulgar y "Mas" abre el menu.
@@ -792,6 +804,43 @@ const JS = String.raw`
     window.__modoSistema = u.modo || app.getAttribute('data-modo');
     document.dispatchEvent(new CustomEvent('yo', { detail: u }));
   }).catch(function () {});
+
+  /* --- la señal de la IA (solo administradores): conectada, sin conexión, apagada o sin comprobar --- */
+  var SENAL_IA = { conectada: 'IA conectada', sin_conexion: 'IA sin conexión', apagada: 'IA apagada', sin_comprobar: 'IA sin comprobar' };
+  function horaCorta(iso) { if (!iso) return ''; try { return new Date(iso).toLocaleString('es-PE', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }); } catch (e) { return ''; } }
+  /* Pinta la señal (cabecera y, si la pantalla la tiene, la grande de Asistente IA). La usan tambien las paginas. */
+  window.pintarSenalIA = function (c) {
+    if (!c || !SENAL_IA[c.estado]) return;
+    var texto = SENAL_IA[c.estado];
+    var detalle = c.estado === 'sin_conexion' ? (c.motivo || 'La IA no respondió.') : c.estado === 'apagada' ? 'La IA no está activa o le falta la clave.' : c.estado === 'sin_comprobar' ? 'Aún no se le ha preguntado nada desde que arrancó el sistema.' : 'La última llamada al modelo respondió bien.';
+    var cuando = c.comprobada ? ' (comprobado: ' + horaCorta(c.comprobada) + ')' : '';
+    var a = document.getElementById('s-ia-senal');
+    if (a) {
+      a.setAttribute('data-estado', c.estado);
+      a.querySelector('span').textContent = texto;
+      a.title = texto + ': ' + detalle + cuando + '. Pulsa para abrir el Asistente IA.';
+      a.setAttribute('aria-label', texto);
+    }
+    document.dispatchEvent(new CustomEvent('senal-ia', { detail: c }));
+  };
+  function cargarSenalIA() {
+    fetch('/admin/ia/conexion', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) {
+      if (r.status === 404) return { estado: 'apagada', motivo: null, comprobada: null };
+      return r.ok ? r.json() : null;
+    }).then(function (c) {
+      if (!c) return;
+      var a = document.getElementById('s-ia-senal');
+      if (a) a.classList.remove('hidden');
+      window.pintarSenalIA(c);
+    }).catch(function () {});
+  }
+  document.addEventListener('yo', function (ev) {
+    if (!ev.detail || ev.detail.rol !== 'admin' || window.__senalIA) return;
+    window.__senalIA = true;
+    cargarSenalIA();
+    setInterval(function () { if (!document.hidden) cargarSenalIA(); }, 60000);
+  });
+  window.cargarSenalIA = cargarSenalIA;
 
   /* el globo de chats sin leer */
   function globoChats() {
@@ -1222,6 +1271,7 @@ ${TEMA_SCRIPT}
       <a class="s-user-txt" href="/panel#mi-cuenta" style="text-decoration:none;color:inherit" title="Mi cuenta"><b id="s-nombre">…</b><span id="s-rol"></span></a>
       <button class="s-salir" id="logout" type="button" title="Cerrar sesión" aria-label="Cerrar sesión">${icono('salir')}</button>
     </div>
+    <div class="s-version" id="s-version" title="La versión que está corriendo en el servidor">${NOMBRE_SISTEMA} v${escapeHtml(VERSION)}</div>
   </aside>
   <div class="s-main">
     <div id="s-plan" class="s-plan hidden"></div>
@@ -1230,6 +1280,7 @@ ${TEMA_SCRIPT}
       <div class="s-titulo"><div class="s-miga" id="s-miga"></div><h1 id="s-h1">${escapeHtml(opts.titulo)}</h1><p id="s-sub">${escapeHtml(opts.subtitulo ?? '')}</p></div>
       <span id="state" class="pill hidden"></span>
       <div class="s-top-der">${demo}
+        <a class="s-ia-senal hidden" id="s-ia-senal" href="/panel#ia" data-estado="" title="Asistente IA" aria-label="Estado de la IA"><i></i><span>IA</span></a>
         <button class="s-boton" id="s-tema" type="button" title="Tema: automático" aria-label="Cambiar entre modo claro, noche o automático"><span id="s-tema-ico">${icono('auto')}</span></button>
         <div class="s-avisos" id="s-avisos">
           <button class="s-boton" id="s-avisos-boton" type="button" title="Avisos" aria-label="Avisos">${icono('campana')}<span class="s-num" id="s-avisos-num"></span></button>

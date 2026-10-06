@@ -2,6 +2,7 @@
  * La pantalla "Mi asistente IA" habla con esto.
  *
  *  GET  /admin/ia          la configuracion (sin el token; solo si hay uno)
+ *  GET  /admin/ia/conexion la señal de la cabecera: conectada, sin conexion (y por que), apagada o sin comprobar, y la version
  *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado, `token: ""` lo quita
  *  POST /admin/ia/probar   una conversacion de prueba desde el navegador, sin WhatsApp
  *  POST /admin/ia/modelos  los modelos de la cuenta de OpenAI de una clave (solo admin)
@@ -24,6 +25,7 @@ import { BANCO_EXAMEN, UMBRAL_EXAMEN } from './examen-lector.js';
 import { configIASchema, type ServicioIA } from './servicio.js';
 import { confirmacionSchema } from './ordenes.js';
 import type { ActividadRepo } from '../auth/actividad.js';
+import { VERSION } from '../version.js';
 
 export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan; fetchImpl?: typeof fetch; actividad?: ActividadRepo }): Promise<void> {
   const { ia } = deps;
@@ -45,7 +47,13 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
   app.get('/admin/ia/examen-lector', async () => ({ examen: await ia.examenLector(), umbral: UMBRAL_EXAMEN, total: BANCO_EXAMEN.length }));
   app.post('/admin/ia/examen-lector', async () => ({ examen: await ia.examinarLector(), umbral: UMBRAL_EXAMEN }));
 
-  app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS, servicios: SERVICIOS_OPENAI }));
+  app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS, servicios: SERVICIOS_OPENAI, version: VERSION }));
+
+  /**
+   * La señal «IA conectada / sin conexión» de la cabecera del panel: barata
+   * (no llama al modelo ni a la red), para refrescarla cada minuto.
+   */
+  app.get('/admin/ia/conexion', async () => ({ ...ia.conexion(), version: VERSION }));
 
   /**
    * Cuanto se uso la IA: hoy y en los ultimos 30 dias, por tipo de llamada,
@@ -84,7 +92,7 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
       .parse(request.body ?? {});
     const hayCandidata = body.proveedor !== undefined || body.servicio !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined;
     const prueba = await ia.probarConexion(hayCandidata ? body : undefined);
-    return { ok: prueba.ok, prueba };
+    return { ok: prueba.ok, prueba, conexion: ia.conexion() };
   });
 
   app.post('/admin/ia', async (request, reply) => {

@@ -23,7 +23,7 @@ import type { StokyClient } from '../stoky/client.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { Monitor } from '../salud/monitor.js';
 import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../catalogo/tienda.js';
-import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, falloCuentaDe, listarModelosOpenAI, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor, type ServicioOpenAI } from './proveedores.js';
+import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, explicarFalloConexion, falloCuentaDe, listarModelosOpenAI, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor, type ServicioOpenAI } from './proveedores.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { MODELO_GRATIS_POR_DEFECTO, modeloGratisEfectivo, modelosGratisEnVivo } from './modelos-gratis.js';
 import { ACCIONES_IA, COMO_TOMAR_PEDIDO, LIMITES_DEL_ASISTENTE, manualDelSistema, SISTEMA_PARA_CLIENTES, SISTEMA_PARA_CLIENTES_GSG } from './conocimiento-sistema.js';
@@ -101,6 +101,42 @@ export interface EstadoIA extends ConfigIA {
   agenteOperativoEfectivo: boolean;
   /** Se acabó el saldo de la IA (o la clave no vale): el aviso para recargar. null = responde bien. */
   sinSaldo: AvisoSaldoIA | null;
+  /** La señal «IA conectada / sin conexión» de la cabecera del panel. */
+  conexion: ConexionIA;
+}
+
+/**
+ * Si la IA responde, en una palabra:
+ *  - `apagada`: no está activa o le falta la clave.
+ *  - `conectada`: la última llamada real (o «Comprobar conexión») respondió bien.
+ *  - `sin_conexion`: la última falló; `motivo` lo dice en cristiano, sin claves.
+ *  - `sin_comprobar`: activa, pero desde que arrancó aún no se le ha preguntado nada.
+ */
+export type EstadoConexionIA = 'apagada' | 'conectada' | 'sin_conexion' | 'sin_comprobar';
+
+export interface ConexionIA {
+  estado: EstadoConexionIA;
+  /** Por qué no hay conexión (solo con `sin_conexion`). */
+  motivo: string | null;
+  /** Cuándo se supo por última vez (ISO), o null si nunca. */
+  comprobada: string | null;
+  /** De dónde salió: una llamada de verdad, «Comprobar conexión» o la comprobación automática. */
+  origen: 'llamada' | 'prueba' | 'automatica' | null;
+}
+
+/** Cada cuánto se comprueba sola la conexión si en ese rato no hubo ninguna llamada. */
+export const COMPROBAR_CONEXION_CADA_MS = 10 * 60_000;
+
+/** Un motivo de fallo sin nada que parezca una clave (por si el servicio la repite en el error). */
+export function motivoSinClaves(texto: string, claves: string[] = []): string {
+  let t = String(texto ?? '');
+  for (const c of claves) if (c && c.length >= 6) t = t.split(c).join('***');
+  t = t
+    .replace(/Bearer\s+[^\s"',)]+/gi, 'Bearer ***')
+    .replace(/\b(sk|pk|rk|gsk|xai|key)[-_][A-Za-z0-9_\-]{8,}/g, '***')
+    .replace(/\bAIza[0-9A-Za-z_\-]{20,}/g, '***')
+    .replace(/((?:api[_-]?key|token|clave|key|authorization)\s*[=:]\s*)[^\s&"',)]+/gi, '$1***');
+  return t.length > 300 ? `${t.slice(0, 297)}...` : t;
 }
 
 /**
@@ -178,6 +214,8 @@ export interface ServicioIA {
   clasificarOperativo(mensajes: MensajeIA[]): Promise<string>;
   /** El aviso de «se acabó el saldo de tu IA» (o la clave no vale), o null si responde bien. */
   avisoSaldo(): AvisoSaldoIA | null;
+  /** La señal de conexión: apagada, conectada, sin conexión (con motivo) o sin comprobar. */
+  conexion(): ConexionIA;
   guardar(patch: Partial<ConfigIA> & { token?: string | null }): Promise<EstadoIA>;
   /** Cuanto se uso la IA hoy y en los ultimos 30 dias: llamadas por tipo, tokens, fallos. Ver uso.ts. */
   uso(): ResumenUsoIA;
@@ -298,6 +336,12 @@ export interface DepsIA {
   log?: (m: string, d?: Record<string, unknown>) => void;
   /** El examen del lector cada mañana solo (false en pruebas que cuentan mensajes). */
   examenAutomatico?: boolean;
+  /**
+   * La comprobación sola de la conexión (al arrancar y, si no hubo llamadas,
+   * cada este tanto). false = nunca. Por defecto COMPROBAR_CONEXION_CADA_MS,
+   * y apagada bajo vitest para que las pruebas no llamen al modelo.
+   */
+  comprobarConexionCadaMs?: number | false;
   /**
    * El correo de aviso (Que todo funcione → Correo de aviso), si está: por ahí
    * también sale UNA vez el aviso de «se acabó el saldo de tu IA».
@@ -468,7 +512,31 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   const sinVentas = (): boolean => (deps.modo?.() ?? 'completo') === 'gsg';
   /** El agente operativo: lo que se eligio en la pantalla o, sin eleccion, encendido en modo GSG. */
   const agenteOperativo = (): boolean => cfg.agenteOperativo ?? (deps.modo?.() ?? 'completo') === 'gsg';
-  const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen, agenteOperativoEfectivo: agenteOperativo(), sinSaldo: avisoSaldo() });
+  const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen, agenteOperativoEfectivo: agenteOperativo(), sinSaldo: avisoSaldo(), conexion: conexion() });
+
+  // La señal «IA conectada / sin conexión»: lo último que se supo del modelo
+  // (una llamada de verdad, «Comprobar conexión» o la comprobación sola). Vive
+  // en memoria: al arrancar empieza «sin comprobar» y se comprueba enseguida.
+  let ultimaConexion: { ok: boolean; motivo: string | null; en: Date; origen: 'llamada' | 'prueba' | 'automatica' } | null = null;
+  function apuntarConexion(ok: boolean, origen: 'llamada' | 'prueba' | 'automatica', motivo?: string | null): void {
+    ultimaConexion = { ok, origen, en: new Date(), motivo: ok ? null : motivoSinClaves(motivo || 'La IA no respondió.', [token]) };
+  }
+  /** El motivo de un fallo, en cristiano: el aviso de saldo/clave si es de la cuenta; si no, el fallo explicado. */
+  function motivoDeFallo(detalle: string, cuenta: FalloCuentaIA | null | undefined): string {
+    if (cuenta) return avisoSaldo()?.texto ?? (cuenta === 'sin_saldo' ? 'Se acabó el saldo de tu IA.' : 'La clave de tu IA ya no vale.');
+    return explicarFalloConexion(detalle);
+  }
+  const huellaConexion = (): string => [cfg.activa, cfg.proveedor, cfg.servicio, cfg.modelo, cfg.baseUrl, token].join('|');
+  function conexion(): ConexionIA {
+    if (!(cfg.activa && token)) return { estado: 'apagada', motivo: null, comprobada: ultimaConexion?.en.toISOString() ?? null, origen: ultimaConexion?.origen ?? null };
+    if (!ultimaConexion) {
+      // Recién arrancado pero con el aviso de saldo guardado: ya se sabe que no responde.
+      const sin = uso.resumen().sinSaldo;
+      if (sin) return { estado: 'sin_conexion', motivo: motivoSinClaves(avisoSaldo()?.texto ?? 'Se acabó el saldo de tu IA.', [token]), comprobada: sin.ultimoIntento, origen: null };
+      return { estado: 'sin_comprobar', motivo: null, comprobada: null, origen: null };
+    }
+    return { estado: ultimaConexion.ok ? 'conectada' : 'sin_conexion', motivo: ultimaConexion.motivo, comprobada: ultimaConexion.en.toISOString(), origen: ultimaConexion.origen };
+  }
 
   // Cada llamada al modelo queda contada por lo que era (respuesta a un
   // cliente, lectura para el sistema, orden del panel, prueba), con sus
@@ -489,11 +557,13 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     try {
       const r = await elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens, alUso: (u) => { tokens = u; } });
       if (uso.anotar(tipo, { ms: Date.now() - t0, ...(tokens ?? {}) })) log('la IA volvió a responder: se quita el aviso de saldo');
+      apuntarConexion(true, 'llamada');
       return r;
     } catch (error) {
       const detalle = error instanceof ErrorIA ? `${error.message}${error.detalle ? ` (${error.detalle})` : ''}` : error instanceof Error ? error.message : String(error);
       const cuenta = falloCuentaDe(error);
       if (uso.anotarFallo(tipo, detalle, cuenta) && cuenta) void avisarSinSaldo().catch(() => undefined);
+      apuntarConexion(false, 'llamada', motivoDeFallo(detalle, cuenta));
       throw error;
     }
   }
@@ -899,6 +969,40 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     return probarProveedor(deps.proveedor ?? crearProveedorOpenAI({ baseUrl, clave, fetchImpl: deps.fetchImpl }), modelo);
   }
 
+  /** El resultado de una prueba de lo guardado: enciende o apaga el aviso de saldo y la señal de conexión. */
+  function anotarPrueba(r: PruebaProveedor, origen: 'prueba' | 'automatica'): void {
+    if (r.ok) {
+      if (uso.limpiarSinSaldo()) log('«Probar la conexión» respondió bien: se quita el aviso de saldo');
+    } else if (r.cuenta && uso.marcarSinSaldo(r.cuenta, r.detalle)) void avisarSinSaldo().catch(() => undefined);
+    apuntarConexion(r.ok, origen, r.ok ? null : motivoDeFallo(r.detalle, r.cuenta));
+  }
+
+  // La comprobación sola: al arrancar (si está activa) y luego, cada
+  // COMPROBAR_CONEXION_CADA_MS, solo si en ese rato no hubo ninguna llamada
+  // (cada llamada de verdad ya dice si hay conexión). Es la prueba barata de
+  // «Comprobar conexión» (una frase de 30 tokens como mucho) y no pasa por el
+  // contador de uso: no cuenta como llamada de la tienda.
+  const cadaMs = deps.comprobarConexionCadaMs ?? (process.env.VITEST ? false : COMPROBAR_CONEXION_CADA_MS);
+  let comprobando = false;
+  async function comprobarSola(): Promise<void> {
+    if (comprobando || !(cfg.activa && token)) return;
+    if (ultimaConexion && cadaMs !== false && Date.now() - ultimaConexion.en.getTime() < cadaMs) return;
+    comprobando = true;
+    try {
+      anotarPrueba(await probarConexionDe(), 'automatica');
+    } catch (e) {
+      log('no se pudo comprobar la conexión de la IA', { detalle: e instanceof Error ? e.message : String(e) });
+    } finally {
+      comprobando = false;
+    }
+  }
+  if (cadaMs !== false) {
+    const primera = setTimeout(() => void comprobarSola(), Math.min(3_000, cadaMs));
+    primera.unref();
+    const cada = setInterval(() => void comprobarSola(), Math.min(cadaMs, 60_000));
+    cada.unref();
+  }
+
   /** Con que identidad y por donde ejecuta la IA operadora lo que se le pide. */
   function contextoDe(usuario: UsuarioSesion): ContextoAccion {
     const quien = usuario.porToken ? `la clave de API "${usuario.nombre || usuario.usuario}"` : usuario.nombre ? `${usuario.nombre} (${usuario.usuario})` : usuario.usuario;
@@ -942,6 +1046,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     agenteOperativoActivo: agenteOperativo,
     clasificarOperativo: (mensajes) => chatContado('lecturas', mensajes, { maxTokens: 8 }),
     avisoSaldo,
+    conexion,
     recargar,
     catalogo,
     async probarCatalogo() {
@@ -960,11 +1065,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       // resultado enciende o apaga el aviso de «se acabó el saldo».
       const esLoGuardado = !candidata || ((candidata.proveedor ?? cfg.proveedor) === cfg.proveedor && (!candidata.token?.trim() || candidata.token.trim() === token) && (!candidata.baseUrl?.trim() || candidata.baseUrl.trim() === cfg.baseUrl));
       const r = await probarConexionDe(candidata);
-      if (esLoGuardado && token) {
-        if (r.ok) {
-          if (uso.limpiarSinSaldo()) log('«Probar la conexión» respondió bien: se quita el aviso de saldo');
-        } else if (r.cuenta && uso.marcarSinSaldo(r.cuenta, r.detalle)) void avisarSinSaldo().catch(() => undefined);
-      }
+      if (esLoGuardado && token) anotarPrueba(r, 'prueba');
       return r;
     },
     async guardar(patch) {
@@ -975,7 +1076,10 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         if (nuevoToken === null || nuevoToken === '') await settingsRepo.remove(CLAVE_TOKEN);
         else await settingsRepo.put(CLAVE_TOKEN, encrypt(nuevoToken.trim(), key), true);
       }
+      const antes = huellaConexion();
       await recargar();
+      // Otro modelo, otra clave u otro servicio: lo que se sabía ya no vale.
+      if (huellaConexion() !== antes) ultimaConexion = null;
       return estado();
     },
     responder,

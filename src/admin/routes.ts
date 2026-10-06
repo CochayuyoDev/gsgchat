@@ -37,6 +37,7 @@ import { conexionGsgVigente } from '../rutas/conexion-gsg.js';
 import { opcionesDesdeConfig } from '../rutas/motor.js';
 import type { Monitor } from '../salud/monitor.js';
 import { politicaDesdeConfig, type Politica } from '../salud/politica.js';
+import { VERSION } from '../version.js';
 import { ZONAS_HORARIAS, ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes } from '../ajustes/generales.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
@@ -491,6 +492,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     const politica = politicaVigente();
     const cap = dailyCapFor(state.warmupStartedOn, now, politica.warmup);
     return {
+      // Que version corre (ver src/version.ts): para saber si ya se desplego la nueva.
+      version: VERSION,
       number: state,
       dailyCap: cap,
       sentToday: await repos.counters.totalForDay(phoneNumberId(), now),

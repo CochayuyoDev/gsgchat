@@ -189,14 +189,19 @@ export function crearProveedorPuter(token: string, cargar: (token: string) => Pr
 }
 
 /**
- * Lo que cada modelo NO acepta, aprendido de sus propios errores: los modelos
- * nuevos de OpenAI (gpt-5, o1, o3, o4…) rechazan `max_tokens` (piden
- * `max_completion_tokens`) y una `temperature` distinta de la de fábrica. Los
- * demás servicios compatibles (OpenRouter, Groq, DeepSeek…) siguen pidiendo
- * `max_tokens`, así que no se cambia para todos: se prueba, y si el modelo lo
- * rechaza se reintenta UNA vez sin eso y se recuerda para ese modelo.
+ * Lo que cada modelo NO acepta. Los modelos nuevos de OpenAI (gpt-5, o1, o3,
+ * o4…) rechazan `max_tokens` (piden `max_completion_tokens`) y una
+ * `temperature` distinta de la de fábrica; los demás servicios compatibles
+ * (OpenRouter, Groq, DeepSeek…) siguen pidiendo `max_tokens`.
+ *
+ * Dos capas, para que no vuelva a fallar:
+ *  1. Lo que ya se sabe: en la API de OpenAI, esos modelos salen bien a la
+ *     primera (`usaFormaNueva`).
+ *  2. Lo que no: si la API dice que un parámetro no vale (max_tokens,
+ *     temperature o cualquier otro opcional que nombre), se corrige, se
+ *     reintenta y se recuerda para ese modelo. Nunca más de 4 reintentos.
  */
-const ajustesDelModelo = new Map<string, { completion?: boolean; sinTemperatura?: boolean }>();
+const ajustesDelModelo = new Map<string, { completion?: boolean; sinTemperatura?: boolean; quitar?: string[] }>();
 
 /** Solo para las pruebas: olvida lo aprendido. */
 export function olvidarAjustesDeModelos(): void {
@@ -204,10 +209,28 @@ export function olvidarAjustesDeModelos(): void {
 }
 
 /**
+ * Los modelos de OpenAI que ya se sabe que piden `max_completion_tokens` y la
+ * temperatura de fábrica (los de razonamiento: gpt-5*, o1*, o3*, o4*). Solo en
+ * la API de OpenAI (o una dirección de Azure OpenAI): en otro servicio el
+ * mismo nombre puede querer la forma de siempre.
+ */
+export function usaFormaNueva(base: string, modelo: string): boolean {
+  if (!/api\.openai\.com|openai\.azure\.com/i.test(base)) return false;
+  const m = modelo.toLowerCase().replace(/^openai\//, '');
+  if (/^gpt-5.*-chat/.test(m)) return false;
+  return /^(gpt-5|o1|o3|o4)([-.]|$)/.test(m);
+}
+
+/**
  * Los modelos de razonamiento gastan parte del tope en «pensar»: con el tope
  * corto de clasificar (8 tokens) no les quedaría nada para contestar.
  */
 const MINIMO_CON_RAZONAMIENTO = 2000;
+/** Si aun así se quedó sin texto por pensar demasiado, un reintento con esto. */
+const TOPE_SI_SE_QUEDO_SIN_TEXTO = 8000;
+
+/** Lo que se puede quitar sin cambiar lo que se pide (nunca model ni messages). */
+const OPCIONALES = new Set(['temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'logprobs', 'top_logprobs', 'n', 'stop', 'seed', 'max_tokens']);
 
 export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fetchImpl?: typeof fetch }): ProveedorIA {
   const base = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
@@ -219,17 +242,21 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
       const corte = setTimeout(() => control.abort(), o.timeoutMs ?? 45_000);
       try {
         const clave = `${base}|${o.modelo}`;
+        if (!ajustesDelModelo.has(clave) && usaFormaNueva(base, o.modelo)) ajustesDelModelo.set(clave, { completion: true, sinTemperatura: true });
+        let topeExtra = 0;
         const cuerpoDe = (): string => {
           const aj = ajustesDelModelo.get(clave) ?? {};
-          const tope = o.maxTokens ?? 1000;
-          return JSON.stringify({
+          const tope = Math.max(o.maxTokens ?? 1000, topeExtra);
+          const cuerpo: Record<string, unknown> = {
             model: o.modelo,
             messages: mensajes,
             ...(aj.sinTemperatura ? {} : { temperature: o.temperatura ?? 0.4 }),
             ...(aj.completion ? { max_completion_tokens: Math.max(tope, MINIMO_CON_RAZONAMIENTO) } : { max_tokens: tope }),
-          });
+          };
+          for (const q of aj.quitar ?? []) delete cuerpo[q];
+          return JSON.stringify(cuerpo);
         };
-        type Cuerpo = { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string; code?: unknown; type?: unknown; param?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
+        type Cuerpo = { choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }>; error?: { message?: string; code?: unknown; type?: unknown; param?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
         const pedir = async (): Promise<{ r: Response; cuerpo: Cuerpo }> => {
           const r = await doFetch(`${base}/chat/completions`, {
             method: 'POST',
@@ -239,15 +266,32 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
           });
           return { r, cuerpo: (await r.json().catch(() => ({}))) as Cuerpo };
         };
-        let { r, cuerpo } = await pedir();
-        // Como mucho dos ajustes (el tope y la temperatura), cada uno una vez.
-        for (let intento = 0; intento < 2 && r.status === 400; intento++) {
-          const que = `${String(cuerpo.error?.param ?? '')} ${cuerpo.error?.message ?? ''}`;
+        /** Lo que hay que cambiar por un 400 de «parámetro no soportado»; null = nada que corregir. */
+        const corregir = (cuerpo: Cuerpo): boolean => {
+          const param = String(cuerpo.error?.param ?? '');
+          const mensaje = String(cuerpo.error?.message ?? '');
+          const que = `${param} ${mensaje}`;
+          const noVale = /unsupported|not supported|does not support|only the default|is not allowed|unrecognized|unknown parameter/i.test(que) || String(cuerpo.error?.code ?? '').includes('unsupported');
+          if (!noVale) return false;
           const aj = { ...(ajustesDelModelo.get(clave) ?? {}) };
-          if (!aj.completion && /max_tokens/.test(que) && /max_completion_tokens|not supported|unsupported/i.test(que)) aj.completion = true;
-          else if (!aj.sinTemperatura && /temperature/i.test(que) && /unsupported|not supported|does not support|only the default/i.test(que)) aj.sinTemperatura = true;
-          else break;
+          if (!aj.completion && /max_tokens/.test(que) && !/max_completion_tokens['"]? (is|are) not/i.test(mensaje)) aj.completion = true;
+          // Al revés: un servicio que no conoce max_completion_tokens.
+          else if (aj.completion && /max_completion_tokens/.test(param || mensaje)) aj.completion = false;
+          else if (!aj.sinTemperatura && /temperature/i.test(que)) aj.sinTemperatura = true;
+          else {
+            const nombre = (param || /'([a-z_]+)'/i.exec(mensaje)?.[1] || '').trim();
+            if (!OPCIONALES.has(nombre) || (aj.quitar ?? []).includes(nombre)) return false;
+            aj.quitar = [...(aj.quitar ?? []), nombre];
+          }
           ajustesDelModelo.set(clave, aj);
+          return true;
+        };
+        let { r, cuerpo } = await pedir();
+        for (let intento = 0; intento < 4 && r.status === 400 && corregir(cuerpo); intento++) ({ r, cuerpo } = await pedir());
+        // Pensó tanto que no le quedó para contestar (finish_reason «length» sin
+        // texto): una vez más con más margen.
+        if (r.ok && !limpiarRespuesta(textoDeContenido(cuerpo.choices?.[0]?.message?.content)) && cuerpo.choices?.[0]?.finish_reason === 'length') {
+          topeExtra = TOPE_SI_SE_QUEDO_SIN_TEXTO;
           ({ r, cuerpo } = await pedir());
         }
         if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', cuerpo.error?.message, falloDeCuenta(r.status, cuerpo));
