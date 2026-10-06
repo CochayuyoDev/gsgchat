@@ -168,7 +168,7 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
     if (opts.cuerpo !== undefined || opts.crudo !== undefined) headers['content-type'] = 'application/json';
     const r = await deps.app.inject({ method: metodo, url, headers, payload: opts.crudo ?? (opts.cuerpo === undefined ? undefined : JSON.stringify(opts.cuerpo)), remoteAddress: '127.0.0.9' });
     const respuesta = leerRespuesta(r);
-    const peticion = { metodo, ruta: url, clave: opts.clave ? 'X-API-Key: wak_… (clave temporal de la comprobación)' : 'sin clave', cuerpo: opts.crudo ?? opts.cuerpo };
+    const peticion = { metodo, ruta: url, clave: opts.clave ? 'X-API-Key: (clave temporal de la comprobación)' : 'sin clave', cuerpo: opts.crudo ?? opts.cuerpo };
     return { ...respuesta, tecnico: { peticion, respuesta: { status: respuesta.status, cuerpo: respuesta.cuerpo } } };
   };
 

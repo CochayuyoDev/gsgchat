@@ -35,7 +35,7 @@ export function openApi(baseUrl: string): Json {
       description: [
         'La puerta para GSG y otros sistemas autorizados. Se entra con una clave de API',
         'creada en API y endpoint GSG, con los permisos justos, en la cabecera',
-        '`X-API-Key: wak_...`.',
+        '`X-API-Key: <API Key>`.',
         '',
         'Enviar nunca se salta las guardas anti-bloqueo: un mensaje frenado por un gate',
         'responde 202 con `estado: "bloqueado"` y el motivo, no 200.',
@@ -145,12 +145,12 @@ export function openApi(baseUrl: string): Json {
           summary: 'Canjear un codigo de conexion por una clave de API (sin clave previa)',
           description: [
             'Un administrador crea en el panel un codigo corto (WA-XXXX-XXXX) con fecha limite, usos y permisos. El otro sistema',
-            'lo manda aqui, sin clave (sin X-API-Key), y recibe su clave `wak_` con esos permisos y la direccion de este sistema. Cada',
+            'lo manda aqui, sin clave (sin X-API-Key), y recibe su API Key con esos permisos y la direccion de este sistema. Cada',
             'codigo vale los usos que se le dieron (normalmente uno) y hasta su fecha; despues responde 404. Hay tope de',
             'intentos por direccion (429). El codigo se acepta como lo escriba la gente: minusculas, sin guiones, con espacios.',
           ].join(' '),
           requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { codigo: { type: 'string', example: 'WA-K7M3-9QXZ' }, sistema: { type: 'string', description: 'Quien canjea, para la lista (opcional)', example: 'Stoky CRM' } }, required: ['codigo'] } } } },
-          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, clave: { type: 'string', example: 'wak_...' }, direccion: { type: 'string' }, para: { type: 'string' }, permisos: { type: 'array', items: { type: 'string' } }, usosRestantes: { type: 'integer' } } }), 404: error('El codigo no vale: no existe, ya se uso, caduco o fue anulado'), 409: error('Se acaba de usar'), 429: error('Demasiados intentos') },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, clave: { type: 'string', example: 'Xq3f9aK2...' }, direccion: { type: 'string' }, para: { type: 'string' }, permisos: { type: 'array', items: { type: 'string' } }, usosRestantes: { type: 'integer' } } }), 404: error('El codigo no vale: no existe, ya se uso, caduco o fue anulado'), 409: error('Se acaba de usar'), 429: error('Demasiados intentos') },
         },
       },
 
@@ -385,7 +385,7 @@ export function openApi(baseUrl: string): Json {
     },
     components: {
       securitySchemes: {
-        claveApi: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'Clave de API `wak_...` creada en el panel, con permisos, en la cabecera X-API-Key' },
+        claveApi: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'API Key creada en el panel, con permisos, en la cabecera X-API-Key' },
       },
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },

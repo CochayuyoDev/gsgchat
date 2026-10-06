@@ -231,7 +231,7 @@ describe('codigos de conexion', () => {
     expect(canje.statusCode).toBe(200);
     expect(canje.json()).toMatchObject({ ok: true, direccion: 'http://localhost:3000', para: 'Stoky', permisos: ['estado:leer'], usosRestantes: 0 });
     const clave = canje.json().clave as string;
-    expect(clave).toMatch(/^wak_/);
+    expect(clave).toMatch(/^[A-Za-z0-9]{48}$/);
     expect((await app.inject({ method: 'GET', url: '/api/v1/estado', headers: { 'x-api-key': clave } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/v1/webhooks', headers: { 'x-api-key': clave } })).statusCode).toBe(403);
     // Segunda vez: ya no vale. Y en la lista queda quien lo canjeo.

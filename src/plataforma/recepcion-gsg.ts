@@ -1,4 +1,4 @@
-import { hashClaveApi, pareceClaveApi, PREFIJO_CLAVE_API } from '../auth/claves-api.js';
+import { hashClaveApi, pareceClaveApi } from '../auth/claves-api.js';
 import { tienePermiso } from '../auth/permisos.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CuerpoError } from '../api/errores.js';
 import type { Plataforma } from './plataforma.js';
@@ -100,7 +100,7 @@ export function claveDeCabeceras(headers: Cabeceras): string | null {
 export function claveEnBearer(headers: Cabeceras): boolean {
   if (claveDeCabeceras(headers)) return false;
   const bearer = tokenBearer(typeof headers.authorization === 'string' ? headers.authorization : undefined);
-  return bearer !== null && bearer.startsWith(PREFIJO_CLAVE_API);
+  return bearer !== null && pareceClaveApi(bearer);
 }
 
 /** Por que no hay clave: vino en el Bearer (sitio equivocado) o no vino. */

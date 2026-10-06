@@ -83,16 +83,18 @@ describe('contrasenas y cookies', () => {
     expect(usuarioAceptable('ali.reparto')).toBeNull();
   });
 
-  it('las claves de API nacen distintas, se reconocen por el prefijo y se guardan por hash', () => {
+  it('las claves de API nacen distintas, sin prefijo «wak_», se reconocen y se guardan por hash; las de antes siguen valiendo', () => {
     const a = generarClaveApi();
     const b = generarClaveApi();
     expect(a).not.toBe(b);
-    expect(a).toMatch(/^wak_[A-Za-z0-9]{40}$/);
+    expect(a).toMatch(/^[A-Za-z0-9]{48}$/);
+    expect(a.startsWith('wak_')).toBe(false);
     expect(pareceClaveApi(a)).toBe(true);
+    expect(pareceClaveApi('wak_' + 'A1b2C3d4E5'.repeat(4))).toBe(true);
     expect(pareceClaveApi('admin-token-de-antes')).toBe(false);
     expect(hashClaveApi(a)).toHaveLength(64);
     expect(hashClaveApi(a)).not.toContain(a.slice(4, 20));
-    expect(prefijoDeClave(a)).toBe(a.slice(0, 12) + '…');
+    expect(prefijoDeClave(a)).toBe(a.slice(0, 8) + '…');
   });
 
   it('la cookie firmada se lee, y una alterada o caducada no', () => {
@@ -260,9 +262,8 @@ describe('entrar al sistema', () => {
     const creada = await app.inject({ method: 'POST', url: '/admin/claves-api', headers: { cookie }, payload: { nombre: 'Sistema GSG' } });
     expect(creada.statusCode).toBe(200);
     const { clave, registro } = creada.json() as { clave: string; registro: { id: string; prefijo: string; nombre: string } };
-    expect(clave.startsWith('wak_')).toBe(true);
-    expect(clave.length).toBeGreaterThan(30);
-    expect(registro.prefijo.startsWith('wak_')).toBe(true);
+    expect(clave).toMatch(/^[A-Za-z0-9]{48}$/);
+    expect(registro.prefijo).not.toContain('wak_');
     expect(clave.startsWith(registro.prefijo.replace('…', ''))).toBe(true);
 
     const lista = await app.inject({ method: 'GET', url: '/admin/claves-api', headers: { cookie } });

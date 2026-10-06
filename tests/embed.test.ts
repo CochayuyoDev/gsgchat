@@ -52,7 +52,7 @@ const EMISORA = 'wak_claveQueEmiteTokens0123456789abcdefXYZ0';
 
 const config = loadConfig(ENV);
 // Las claves de API van en X-API-Key; el token del chat embebido (emb_) va en el Bearer.
-const con = (clave: string) => ({ ...(clave.startsWith('wak_') ? { 'x-api-key': clave } : { authorization: `Bearer ${clave}` }), 'content-type': 'application/json' });
+const con = (clave: string) => ({ ...(clave.startsWith('emb_') ? { authorization: `Bearer ${clave}` } : { 'x-api-key': clave }), 'content-type': 'application/json' });
 
 let app: FastifyInstance;
 let repos: FakeRepos;

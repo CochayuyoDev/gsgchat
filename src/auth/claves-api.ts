@@ -35,29 +35,38 @@ export interface ClavesApiRepo {
   tocarUso(id: string, at: Date): Promise<void>;
 }
 
+/**
+ * El prefijo de las claves de antes. Las claves nuevas no llevan prefijo
+ * (pedido del dueño, 06/10: es una API Key, sin formato «wak_»), pero las
+ * que ya se entregaron con él siguen valiendo hasta que se revoquen.
+ */
 export const PREFIJO_CLAVE_API = 'wak_';
-const PREFIJO = PREFIJO_CLAVE_API;
+const PREFIJO_ANTIGUO = PREFIJO_CLAVE_API;
 const ALFABETO = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+/** Largo de una clave nueva: 48 caracteres al azar (unos 285 bits). */
+export const LARGO_CLAVE_API = 48;
 
-/** Una clave nueva: "wak_" y 40 caracteres al azar (unos 238 bits). */
+/** Una clave nueva: 48 caracteres al azar, sin prefijo. */
 export function generarClaveApi(): string {
-  const bytes = randomBytes(40);
+  const bytes = randomBytes(LARGO_CLAVE_API);
   let cuerpo = '';
   for (const b of bytes) cuerpo += ALFABETO[b % ALFABETO.length];
-  return PREFIJO + cuerpo;
+  return cuerpo;
 }
 
 export function hashClaveApi(clave: string): string {
   return createHash('sha256').update(clave).digest('hex');
 }
 
-/** Lo que se enseña en la lista: "wak_3f9aK2…" */
+/** Lo que se enseña en la lista: los primeros 8 caracteres, «3f9aK2xQ…». */
 export function prefijoDeClave(clave: string): string {
-  return clave.slice(0, PREFIJO.length + 8) + '…';
+  return clave.slice(0, 8) + '…';
 }
 
+/** Una clave nueva (48 caracteres al azar) o una de antes («wak_» y al menos 20). */
 export function pareceClaveApi(valor: string): boolean {
-  return valor.startsWith(PREFIJO) && valor.length >= PREFIJO.length + 20;
+  if (valor.startsWith(PREFIJO_ANTIGUO)) return valor.length >= PREFIJO_ANTIGUO.length + 20;
+  return /^[A-Za-z0-9]{40,64}$/.test(valor);
 }
 
 export function nombreDeClaveAceptable(nombre: string): string | null {

@@ -150,7 +150,7 @@ describe('lo de prueba no toca el numero real', () => {
     const clave = await api('POST', '/admin/claves-api', { nombre: 'prueba aislado', permisos: ['entregas:leer', 'entregas:gestionar'] });
     expect(clave.status).toBe(200);
     const token = String(clave.body.clave ?? clave.body.token ?? '');
-    expect(token.startsWith('wak_')).toBe(true);
+    expect(token).toMatch(/^[A-Za-z0-9]{48}$/);
     const alta = await tienda.app.inject({
       method: 'POST',
       url: '/api/v1/entregas',
