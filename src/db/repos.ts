@@ -29,6 +29,7 @@ import { createCodigosConexionRepo, type CodigosConexionRepo } from '../auth/cod
 import { createTiendasRepo, type TiendasRepo } from '../tiendas/repo.js';
 import { createEntregasRepo, type EntregasRepo } from '../entregas/repo.js';
 import { createProcesosRepo, type ProcesosRepo } from '../procesos/repo.js';
+import type { ComoSeDecidio, DecisionBot, IntencionGsg, NuevaDecision } from '../ia/decision.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -545,6 +546,41 @@ export interface SaludRepo {
   purgar(before: Date): Promise<number>;
 }
 
+/**
+ * Por que respondio (o se callo) el bot en cada turno. Ver src/ia/decision.ts
+ * y la migracion 003. El panel lo pinta en el chat como nota interna.
+ */
+export interface DecisionesRepo {
+  registrar(d: NuevaDecision): Promise<void>;
+  /** Las de ese contacto, las mas recientes primero (50 si no se dice). */
+  listarPorContacto(contactId: string, limit?: number): Promise<DecisionBot[]>;
+}
+
+/** El largo de cada columna de `decisiones_bot`: lo que pase se recorta, no revienta el insert. */
+export const LARGO_DECISION = { phone: 191, intencion: 40, dato: 200, respuesta: 200, como: 20, esperaba: 60, detalle: 500 } as const;
+
+/** La decision lista para guardar: textos recortados al largo de su columna y `mensajes` entero >= 1. */
+export function recortarDecision(d: NuevaDecision): NuevaDecision {
+  const corta = (v: string | null | undefined, n: number): string | null => {
+    const t = v?.trim();
+    return t ? t.slice(0, n) : null;
+  };
+  return {
+    contactId: d.contactId,
+    phone: String(d.phone ?? '').slice(0, LARGO_DECISION.phone),
+    mensajes: Math.max(1, Math.trunc(Number(d.mensajes) || 1)),
+    intencion: String(d.intencion).slice(0, LARGO_DECISION.intencion) as IntencionGsg,
+    dato: corta(d.dato, LARGO_DECISION.dato),
+    respuesta: String(d.respuesta ?? '').trim().slice(0, LARGO_DECISION.respuesta),
+    como: String(d.como).slice(0, LARGO_DECISION.como) as ComoSeDecidio,
+    esperaba: corta(d.esperaba, LARGO_DECISION.esperaba),
+    detalle: corta(d.detalle, LARGO_DECISION.detalle),
+  };
+}
+
+/** Cuantas decisiones devuelve `listarPorContacto` como mucho, pida lo que pida. */
+export const TOPE_DECISIONES = 500;
+
 export interface Repos {
   contacts: ContactsRepo;
   locations: LocationsRepo;
@@ -593,6 +629,8 @@ export interface Repos {
   desarrollador?: DesarrolladorRepo;
   /** Los procesos (pedir datos, confirmar, avisos al personal, cobranza) y sus corridas. Ver src/procesos. */
   procesos?: ProcesosRepo;
+  /** Por que respondio el bot en cada turno. Ver src/ia/decision.ts. */
+  decisiones: DecisionesRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1971,6 +2009,24 @@ export function createRepos(pool: Pool): Repos {
     },
   };
 
+  const decisiones: DecisionesRepo = {
+    async registrar(entrada) {
+      const d = recortarDecision(entrada);
+      await pool.query(
+        `insert into decisiones_bot (contact_id, phone, mensajes, intencion, dato, respuesta, como, esperaba, detalle)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [d.contactId, d.phone, d.mensajes, d.intencion, d.dato, d.respuesta, d.como, d.esperaba, d.detalle],
+      );
+    },
+    async listarPorContacto(contactId, limit = 50) {
+      const { rows } = await pool.query<DecisionRow>(
+        'select * from decisiones_bot where contact_id = $1 order by created_at desc, id desc limit $2',
+        [contactId, Math.max(1, Math.min(TOPE_DECISIONES, Math.trunc(Number(limit) || 50)))],
+      );
+      return rows.map(toDecision);
+    },
+  };
+
   return {
     contacts,
     locations,
@@ -2001,8 +2057,37 @@ export function createRepos(pool: Pool): Repos {
     entregas: createEntregasRepo(pool),
     desarrollador: createDesarrolladorRepo(pool),
     procesos: createProcesosRepo(pool),
+    decisiones,
   };
 }
+
+interface DecisionRow {
+  id: number | string;
+  contact_id: string;
+  phone: string;
+  mensajes: number;
+  intencion: string;
+  dato: string | null;
+  respuesta: string;
+  como: string;
+  esperaba: string | null;
+  detalle: string | null;
+  created_at: Date;
+}
+
+const toDecision = (r: DecisionRow): DecisionBot => ({
+  id: Number(r.id),
+  contactId: r.contact_id,
+  phone: r.phone,
+  mensajes: Number(r.mensajes),
+  intencion: r.intencion as IntencionGsg,
+  dato: r.dato,
+  respuesta: r.respuesta,
+  como: r.como as ComoSeDecidio,
+  esperaba: r.esperaba,
+  detalle: r.detalle,
+  createdAt: r.created_at instanceof Date ? r.created_at : new Date(r.created_at),
+});
 
 // ------------------------------------------------------ ajustes editables
 

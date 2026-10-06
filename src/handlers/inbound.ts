@@ -626,7 +626,7 @@ export async function juntarRafaga(message: InboundMessage, contactId: string, r
   }
   if (!trozos.includes(message.text.body.trim())) trozos.push(message.text.body.trim());
   if (trozos.length < 2) return message;
-  return { ...message, text: { ...message.text, body: trozos.join('\n') } };
+  return { ...message, rafaga: trozos.length, text: { ...message.text, body: trozos.join('\n') } };
 }
 
 /**
@@ -714,7 +714,7 @@ export async function handleInboundMessage(
   // («¿dónde va mi pedido?») no tiene firma: se contesta siempre.
   const firma = firmaDeAccion(message);
   // La rafaga se cuenta desde que LLEGA, no desde que le toca en la fila.
-  const marcado = (deps.rafagaMs ?? 0) > 0 && !atiendeYa(message) && Boolean(message.id);
+  const marcado = rafagaDe(deps) > 0 && !atiendeYa(message) && Boolean(message.id);
   if (marcado) marcarLlegada(clave, message.id);
   const turno = (colaPorCliente.get(clave) ?? Promise.resolve())
     .catch(() => undefined)
@@ -763,6 +763,16 @@ export async function handleInboundMessage(
     if (colaPorCliente.get(clave) === turno) colaPorCliente.delete(clave);
     if (marcado) olvidarLlegada(message.id);
   }
+}
+
+/**
+ * Cuánto se espera a que el cliente termine de escribir. Sin valor propio, el
+ * de la configuración (RAFAGA_MS, 10 s): antes solo el webhook de WAHA lo
+ * pasaba, y por Meta, el QR local y el simulador cada trozo se contestaba
+ * por separado (06/10).
+ */
+function rafagaDe(deps: Pick<InboundDeps, 'rafagaMs' | 'config'>): number {
+  return deps.rafagaMs ?? deps.config.RAFAGA_MS ?? 0;
 }
 
 /** Un pin o un boton pulsado se atienden ya: no esperan a la rafaga. */
@@ -893,8 +903,8 @@ async function handleInboundMessageEnFila(
   // automatismo. Un pin o un boton pulsado no esperan: se atienden ya, y si
   // no, un pin seguido de un «listo» se quedaba sin registrar.
   if (!atiendeYa(message)) {
-    if (!(await esperarRafaga(phone, deps.rafagaMs ?? 0, message.id))) return;
-    if ((deps.rafagaMs ?? 0) > 0) message = await juntarRafaga(message, contact.id, repos);
+    if (!(await esperarRafaga(phone, rafagaDe(deps), message.id))) return;
+    if (rafagaDe(deps) > 0) message = await juntarRafaga(message, contact.id, repos);
   }
 
   // El operador paro el bot en ESTE chat: se atiende a mano.
@@ -1063,13 +1073,25 @@ async function handleInboundMessageEnFila(
     repos,
     sender,
     entregas: deps.entregas,
-    clasificar: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
+    // Con «Solo lo de GSG» no hay IA: el turno se decide con reglas y botones,
+    // y lo que no coincide con una regla se guarda y no se contesta (pedido
+    // del dueño, 06/10). Fuera de GSG, la IA clasifica lo que las reglas no saben.
+    clasificar: deps.ia?.activa() && !modoGsg() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
     nombreNegocio: () => nombreNegocio(deps),
     log: (m, d) => console.warn(`[agente] ${m}`, d ?? ''),
     ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),
   });
   /** Tras registrar la ubicacion, la IA se calla en este chat (su mensaje ya lleva el cierre). */
+  /** Con la regla del dueño, el pin (o enlace) también deja su decisión del turno (ver src/ia/decision.ts). */
+  const decisionUbicacion = async (respuesta: string): Promise<void> => {
+    if (!reglaGsg()) return;
+    const dato = message.type === 'location' ? 'pin de WhatsApp' : 'enlace de mapa';
+    await repos.decisiones
+      ?.registrar({ contactId: contact.id, phone, mensajes: message.rafaga ?? 1, intencion: 'enviar_ubicacion', dato, respuesta, como: 'reglas', esperaba: 'ubicación', detalle: null })
+      .catch((error: unknown) => request_log(deps, 'no se pudo guardar la decisión del turno', error));
+  };
   const cerrarTrasUbicacion = async (): Promise<void> => {
+    await decisionUbicacion('plantilla UBI REGISTRADA');
     if (!agenteActivo() && !reglaGsg()) return;
     // Tras «no soy yo» el chat sigue con una persona tal cual. Si ya habia
     // recibido el cierre, se apunta: tras el agradecimiento no le toca otro.
@@ -1091,6 +1113,7 @@ async function handleInboundMessageEnFila(
     });
     if (!r.atendida) return false;
     if (r.responder) await responderEntrega(r);
+    await decisionUbicacion(r.responder ? 'una pregunta de aclaración: ¿es ahí? (pin lejos de su distrito)' : 'silencio');
     return true;
   };
 
@@ -1126,7 +1149,7 @@ async function handleInboundMessageEnFila(
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
     const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
     if (!esPin && !enlace?.ok) {
-      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
+      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1 }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
     }
   }
@@ -1303,11 +1326,13 @@ async function handleInboundMessageEnFila(
       await atenderComoAgente(depsAgente(), contact, '').catch((error) => request_log(deps, 'fallo el agente operativo', error));
       return;
     }
-    // Con la IA activa, un adjunto se reconoce y se pide el texto: el modelo
-    // no ve fotos ni oye audios, y callarse deja al cliente hablando solo.
+    // Con la IA activa, un archivo sin texto no se contesta (pedido del dueño,
+    // 06/10): si era para un pedido activo ya lo atendieron las entregas o el
+    // reparto, arriba. Queda en el chat y la decisión, anotada.
     if (esAdjunto && message.type !== 'sticker' && deps.ia?.activa()) {
-      const que = message.type === 'audio' ? 'tu audio' : message.type === 'image' ? 'tu foto' : message.type === 'video' ? 'tu video' : 'tu archivo';
-      await reply(`Recibí ${que}. ¿Me cuentas por escrito qué necesitas? Así te ayudo más rápido.`);
+      await repos.decisiones
+        ?.registrar({ contactId: contact.id, phone, mensajes: 1, intencion: 'sin_texto', dato: message.type, respuesta: 'silencio (archivo sin texto: queda en el chat)', como: 'reglas', esperaba: null, detalle: null })
+        .catch((error: unknown) => request_log(deps, 'no se pudo guardar la decisión del turno', error));
       return;
     }
     if (esAdjunto && (await preventaActiva())) {
@@ -1382,7 +1407,7 @@ async function handleInboundMessageEnFila(
   // que es la respuesta al pedido de ubicacion sigue al reparto. Un
   // motorizado no pasa por aqui (lo suyo lo atienden las entregas).
   if (!result.ok && agenteActivo() && !(deps.entregas && (await deps.entregas.esMotorizado(phone).catch(() => false)))) {
-    const hecho = await atenderComoAgente(depsAgente(), contact, text).catch((error) => {
+    const hecho = await atenderComoAgente(depsAgente(), contact, text, message.rafaga ?? 1).catch((error) => {
       request_log(deps, 'fallo el agente operativo', error);
       return 'seguir' as const;
     });
@@ -1451,7 +1476,7 @@ async function handleInboundMessageEnFila(
     // El asistente de IA de la tienda: con lo que sabe del negocio (y el
     // catalogo, si esta), contesta; si no puede, deriva a una persona.
     if (deps.ia?.activa()) {
-      await deps.ia.turno(contact, text, { esAudio: message.type === 'audio' });
+      await deps.ia.turno(contact, text, { esAudio: message.type === 'audio', mensajes: message.rafaga ?? 1 });
       return;
     }
 

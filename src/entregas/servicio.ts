@@ -509,7 +509,7 @@ export interface ServicioEntregas {
    * lo que toca y se devuelve el texto fijo que se le manda. null = no tiene
    * ningún pedido al que se le haya preguntado.
    */
-  responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null>;
+  responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string, entregaId?: number | null): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null>;
   /** Confirma el envío de lo que llegó de GSG (todo lo que espera, o esos ids): pasa al reparto con el ritmo de siempre. */
   liberarEnvio(ids: number[] | 'todos', quien: string): Promise<ResultadoLiberar>;
   /**
@@ -569,6 +569,12 @@ export interface ServicioEntregas {
   /** Si el cliente pregunta por su pedido o la hora: el texto fijo con la hora estimada (null = no es esa pregunta). */
   /** orzar: la IA ya dijo que pregunta por su pedido o la hora (no hace falta que lo reconozcan las reglas). */
   respuestaPorPedido(phone: string, texto: string, opts?: { forzar?: boolean }): Promise<string | null>;
+  /**
+   * Varios pedidos en curso y el mensaje no nombra ninguno: no se puede saber
+   * de cuál habla, y no se asume (pedido del dueño, 06/10). Devuelve sus
+   * referencias; null = uno solo, ninguno, o nombró el suyo.
+   */
+  pedidoIndistinguible(phone: string, texto: string): Promise<string[] | null>;
   /**
    * Excepción al silencio tras UBI (pedido del dueño, 28/09): el cliente
    * pregunta cuándo llega / dónde está su pedido. `responder` = el texto fijo
@@ -2569,9 +2575,11 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * (SI / NO / POR QUÉ / OTRA); aquí se hace lo que toca y se devuelve el
    * texto fijo. SÍ y NO se reportan a GSG; tras SÍ, NO u OTRA, silencio.
    */
-  async function responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null> {
+  async function responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string, entregaId?: number | null): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null> {
     const vivas = (await repo.vivasPorTelefono(phone)).filter((e) => !e.envioRetenidoAt && e.confirmacionEstado === 'pedida' && grupoDe(e) === 'confirmar');
-    const e = vivas.sort((a, b) => (b.confirmacionPedidaAt?.getTime() ?? 0) - (a.confirmacionPedidaAt?.getTime() ?? 0))[0];
+    // Un botón dice de qué pedido es: se usa ese, nunca otro. Si ese pedido ya
+    // no espera su SÍ/NO (un botón viejo), no aplica: no se asume otro.
+    const e = entregaId != null ? vivas.find((x) => x.id === entregaId) : vivas.sort((a, b) => (b.confirmacionPedidaAt?.getTime() ?? 0) - (a.confirmacionPedidaAt?.getTime() ?? 0))[0];
     if (!e) return null;
     const en = ahora();
     const respuesta = texto.slice(0, 300);
@@ -4525,6 +4533,13 @@ ${lista}
      * que calculó el sistema (minutos del motorizado + margen). null = no es
      * esa pregunta o no tiene pedido de hoy. Sin IA.
      */
+    async pedidoIndistinguible(phone: string, texto: string) {
+      const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !x.envioRetenidoAt);
+      if (vivas.length < 2) return null;
+      const limpio = texto.toLowerCase();
+      if (vivas.some((x) => x.referencia && limpio.includes(x.referencia.toLowerCase()))) return null;
+      return vivas.map((x) => x.referencia).filter((r): r is string => Boolean(r));
+    },
     async respuestaPorPedido(phone: string, texto: string, opts: { forzar?: boolean } = {}) {
       if (!ajustes.responderDondeEsta) return null;
       const p = leerPreguntaPorPedido(texto);

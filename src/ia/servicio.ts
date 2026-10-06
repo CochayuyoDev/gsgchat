@@ -26,7 +26,7 @@ import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../ca
 import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, falloCuentaDe, listarModelosOpenAI, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor, type ServicioOpenAI } from './proveedores.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { MODELO_GRATIS_POR_DEFECTO, modeloGratisEfectivo, modelosGratisEnVivo } from './modelos-gratis.js';
-import { ACCIONES_IA, COMO_TOMAR_PEDIDO, manualDelSistema, SISTEMA_PARA_CLIENTES, SISTEMA_PARA_CLIENTES_GSG } from './conocimiento-sistema.js';
+import { ACCIONES_IA, COMO_TOMAR_PEDIDO, LIMITES_DEL_ASISTENTE, manualDelSistema, SISTEMA_PARA_CLIENTES, SISTEMA_PARA_CLIENTES_GSG } from './conocimiento-sistema.js';
 import { extraerPedido, registrarPedido, type PedidoDelModelo } from '../pedidos/servicio.js';
 import type { Bus } from '../eventos/bus.js';
 import type { ServicioPlan } from '../plan/servicio.js';
@@ -43,7 +43,8 @@ import { apuntarFrase, extraerCasos, leerFrases, leerRevisados, marcarRevisado, 
 import { avisoDeExamen, examinarLector, guardarExamen, leerExamenGuardado, UMBRAL_EXAMEN, type ResultadoExamenLector } from './examen-lector.js';
 import { instruccionDeTono, tonoDeValor, tonoEfectivo, type Tono } from './tono.js';
 import { AJUSTES_GENERALES_KEY } from '../ajustes/generales.js';
-import { clasificarPorReglas, leerClase, promptClasificador } from './agente-operativo.js';
+import { clasificarPorReglas, esAcuse, leerClase, pideAsesor, promptClasificador } from './agente-operativo.js';
+import type { IntencionGsg } from './decision.js';
 import { rellenar, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 
 export const configIASchema = z.object({
@@ -150,7 +151,7 @@ export const REINTENTO_SIN_SALDO_MS = 2 * 60_000;
 
 export interface TurnoIA {
   /** Que se hizo: se contesto, se derivo a una persona, fallo (y se dijo algo neutro), o se paro un intento de manipulacion. */
-  resultado: 'respondio' | 'derivo' | 'error' | 'inactiva' | 'bloqueado';
+  resultado: 'respondio' | 'derivo' | 'error' | 'inactiva' | 'bloqueado' | 'callado';
   texto: string | null;
   detalle?: string;
 }
@@ -196,7 +197,7 @@ export interface ServicioIA {
   /** El modelo a secas, para los trabajos del entrenamiento (pulir lecciones). */
   completar(mensajes: MensajeIA[], opts?: { maxTokens?: number }): Promise<string>;
   /** El turno completo: contestar por WhatsApp y, si toca, derivar y avisar. `esAudio` = el cliente mando una nota de voz (transcrita en `texto`). */
-  turno(contact: Contact, texto: string, opts?: { esAudio?: boolean }): Promise<TurnoIA>;
+  turno(contact: Contact, texto: string, opts?: { esAudio?: boolean; mensajes?: number }): Promise<TurnoIA>;
   /** Una prueba desde la pantalla, con un historial que trae el navegador. */
   probar(historial: MensajeIA[], texto: string): Promise<RespuestaIA>;
   /** El ayudante del panel: responde al dueño con el manual del sistema. */
@@ -235,6 +236,10 @@ export interface RespuestaIA {
    */
   bloqueada?: 'manipulacion' | 'salida';
   detalle?: string;
+  /** No se contesta (lo ajeno, un acuse, un chiste): queda anotado para el equipo. */
+  silencio?: boolean;
+  /** Lo decidieron las reglas, sin llamar al modelo. */
+  porReglas?: boolean;
   /** El modelo cerro un pedido: lo que dijo, todavia sin comprobar contra el catalogo. */
   pedido?: PedidoDelModelo | null;
 }
@@ -306,6 +311,18 @@ const CLAVE_TOKEN = 'ia.token';
 /** La marca con la que el modelo dice "esto lo tiene que ver una persona". */
 export const MARCA_DERIVAR = ACCIONES_IA.DERIVAR;
 export const MARCA_PEDIR_UBICACION = ACCIONES_IA.PEDIR_UBICACION;
+export const MARCA_SILENCIO = ACCIONES_IA.SILENCIO;
+
+/**
+ * Lo que las reglas ya saben que no se contesta, sin gastar el modelo: un
+ * acuse («ok», «gracias», 👍) y las risas sueltas («jaja», «xd»).
+ */
+export function noSeContestaPorReglas(texto: string): boolean {
+  const t = texto.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (!t) return true;
+  if (esAcuse(texto)) return true;
+  return /^(?:(?:ja|je|ji|jo|ha|he)+h?|x+d+|lol|[😂🤣😅😆😁😄🙂😊👍👌🙏💪🔥]|\s|[.!])+$/u.test(t);
+}
 
 export function textoDeDespedida(nombreNegocio: string): string {
   return `Te paso con una persona del equipo de ${nombreNegocio}; en un momento te atiende por aquí.`;
@@ -336,6 +353,8 @@ export function construirSistema(cfg: Omit<ConfigIA, 'servicio' | 'agenteOperati
     ...(ctx.tomaPedidos && !ctx.sinVentas ? ['', COMO_TOMAR_PEDIDO] : []),
     '',
     EJEMPLOS_DE_RESPUESTA,
+    '',
+    LIMITES_DEL_ASISTENTE,
   ];
   if (cfg.instrucciones.trim()) partes.push('', 'Cómo debes hablar y qué tener en cuenta:', cfg.instrucciones.trim());
   partes.push('', 'Lo que sabes del negocio:', cfg.conocimiento.trim() || (ctx.lecciones ? '(Lo que sabes está en las reglas, los datos y los ejemplos de abajo.)' : '(La tienda no ha escrito nada todavía: sé amable y pasa con una persona cualquier pregunta concreta.)'));
@@ -368,7 +387,10 @@ export function leerRespuesta(cruda: string): RespuestaIA {
   const derivar = sinPedido.includes(MARCA_DERIVAR);
   // Derivar manda: si va a atender una persona, el boton lo manda ella.
   const pedirUbicacion = !derivar && sinPedido.includes(MARCA_PEDIR_UBICACION);
-  const texto = sinPedido.replaceAll(MARCA_DERIVAR, '').replaceAll(MARCA_PEDIR_UBICACION, '').replace(/\s+$/g, '').trim();
+  const texto = sinPedido.replaceAll(MARCA_DERIVAR, '').replaceAll(MARCA_PEDIR_UBICACION, '').replaceAll(MARCA_SILENCIO, '').replace(/\s+$/g, '').trim();
+  // [SILENCIO]: el modelo decidió que a esto no se contesta. Derivar o un
+  // pedido mandan sobre el silencio (son una acción, no charla).
+  if (sinPedido.includes(MARCA_SILENCIO) && !derivar && !pedido) return { texto: '', derivar: false, pedirUbicacion: false, pedido: null, silencio: true };
   return { texto, derivar, pedirUbicacion, pedido: pedido ?? null };
 }
 
@@ -593,8 +615,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       log('intento de manipular al asistente', { phone: contact.phone, tipo: manipulacion.tipo, patron: manipulacion.patron });
       return { texto: respuestaAnteManipulacion(manipulacion.tipo, deps.nombreNegocio()), derivar: false, pedirUbicacion: false, bloqueada: 'manipulacion', detalle: manipulacion.tipo };
     }
-    if (pideUnaPersona(texto, palabrasDeDerivar(cfg.derivarSi))) {
-      return { texto: textoDeDespedida(deps.nombreNegocio()), derivar: true, pedirUbicacion: false };
+    if (pideUnaPersona(texto, palabrasDeDerivar(cfg.derivarSi)) || pideAsesor(texto)) {
+      return { texto: textoDeDespedida(deps.nombreNegocio()), derivar: true, pedirUbicacion: false, porReglas: true };
     }
 
     // El catalogo real (el de la tienda por URL, o el de Stoky): precios y
@@ -622,6 +644,14 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         : []);
     // El ultimo entrante ya esta en el hilo: se evita mandarlo dos veces.
     if (historial.length && historial[historial.length - 1]!.role === 'user' && historial[historial.length - 1]!.content === texto) historial.pop();
+
+    // Las reglas primero: lo que no pide nada («ok», «gracias», «jaja») no
+    // gasta una llamada al modelo. Pero el contexto manda: si lo último que
+    // dijo el asistente fue una pregunta, ese «sí» o «ok» es la respuesta.
+    const ultimaNuestra = [...historial].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+    if (noSeContestaPorReglas(texto) && !/[?¿]\s*$/.test(ultimaNuestra.trim())) {
+      return { texto: '', derivar: false, pedirUbicacion: false, silencio: true, porReglas: true, detalle: 'acuse o risa sin pregunta pendiente: no pide nada' };
+    }
 
     // Lo ensenado que viene al caso: se busca con el mensaje y, si es muy
     // corto ("y a provincias?"), tambien con lo ultimo que dijo el cliente.
@@ -651,7 +681,39 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     return leida;
   }
 
-  async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean } = {}): Promise<TurnoIA> {
+  /**
+   * Una decisión por turno, con su porqué (ver src/ia/decision.ts): así se ve
+   * en el chat por qué contestó o se calló el asistente.
+   */
+  async function anotarDecision(contact: Contact, entrante: string, mensajes: number, r: TurnoIA, respuesta: RespuestaIA | null): Promise<void> {
+    if (r.resultado === 'inactiva') return;
+    const intencion: IntencionGsg =
+      r.resultado === 'derivo' ? 'pedir_persona'
+      : respuesta?.silencio ? (esAcuse(entrante) ? 'acuse' : 'ajena')
+      : respuesta?.pedido ? 'pedido_tienda'
+      : respuesta?.pedirUbicacion ? 'enviar_ubicacion'
+      : 'consulta';
+    const que =
+      r.resultado === 'callado' ? 'silencio (queda anotado para el equipo)'
+      : r.resultado === 'derivo' ? 'derivado a una persona; bot en pausa'
+      : r.resultado === 'error' ? 'texto fijo de fallo; derivado a una persona'
+      : r.resultado === 'bloqueado' ? 'texto fijo ante un intento de manipulación'
+      : respuesta?.pedido ? 'respuesta del asistente con el resumen del pedido'
+      : respuesta?.pedirUbicacion ? 'respuesta del asistente con el botón de ubicación'
+      : 'respuesta del asistente';
+    await repos.decisiones
+      ?.registrar({ contactId: contact.id, phone: contact.phone, mensajes: Math.max(1, mensajes), intencion, dato: null, respuesta: que, como: respuesta?.porReglas || respuesta?.bloqueada === 'manipulacion' ? 'reglas' : 'ia', esperaba: null, detalle: r.detalle ?? respuesta?.detalle ?? null })
+      .catch((error: unknown) => log('no se pudo guardar la decisión del turno', { phone: contact.phone, detalle: String(error) }));
+  }
+
+  async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean; mensajes?: number } = {}): Promise<TurnoIA> {
+    let leida: RespuestaIA | null = null;
+    const r = await turnoSinAnotar(contact, entrante, opts, (x) => (leida = x));
+    await anotarDecision(contact, entrante, opts.mensajes ?? 1, r, leida);
+    return r;
+  }
+
+  async function turnoSinAnotar(contact: Contact, entrante: string, opts: { esAudio?: boolean }, alLeer: (r: RespuestaIA) => void): Promise<TurnoIA> {
     if (!cfg.activa) return { resultado: 'inactiva', texto: null };
     // Regla del dueño: con «Solo lo de GSG» ningun texto del modelo le llega a
     // un cliente, por ningun camino. La IA solo clasifica (agente-operativo.ts)
@@ -697,11 +759,21 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       return { resultado: 'error', texto: textoDeFallo(), detalle };
     }
 
-    await deps.plan?.anotarTurnoIA();
+    alLeer(respuesta);
+    // Lo ajeno, un acuse o una risa: no se contesta (pedido del dueño, 06/10).
+    // El mensaje ya está en el chat y la decisión queda anotada.
+    if (respuesta.silencio) {
+      sospechas.delete(phone);
+      return { resultado: 'callado', texto: null, detalle: respuesta.detalle ?? 'el asistente decidió no contestar: fuera del servicio' };
+    }
+    if (!respuesta.porReglas) await deps.plan?.anotarTurnoIA();
     const texto = respuesta.texto || (respuesta.derivar ? textoDeDespedida(deps.nombreNegocio()) : '');
+    // Una sola respuesta por turno: si además hay que pedir la ubicación o
+    // resumir un pedido, va en el MISMO mensaje (abajo), no en dos.
+    const juntoConAccion = Boolean((respuesta.pedido && !sinVentas()) || respuesta.pedirUbicacion) && !respuesta.derivar && !respuesta.bloqueada;
     // Lo que se bloqueo (una manipulacion) y la despedida al derivar van por
     // escrito: son frases fijas del sistema, no la voz del asistente.
-    if (texto) await (respuesta.bloqueada || respuesta.derivar ? porEscrito(texto) : enviar(texto));
+    if (texto && !juntoConAccion) await (respuesta.bloqueada || respuesta.derivar ? porEscrito(texto) : enviar(texto));
 
     if (respuesta.bloqueada === 'manipulacion') {
       // Tres intentos seguidos de manipular al asistente: se acabo el bot en
@@ -722,6 +794,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       // El pedido se comprueba contra el catalogo real y se guarda; al cliente
       // le llega el resumen con el total del sistema, y a la tienda el evento.
       const r = await registrarPedido(contact, respuesta.pedido, { repos, bus: deps.bus, catalogo, moneda: 'PEN' }, 'ia');
+      // Un solo mensaje: el resumen del sistema (con los precios del catálogo).
+      // Lo que escribió el modelo no sale: podría traer un precio inventado.
       await porEscrito(r.resumen);
       if (r.ok) await avisar(contact, `tomo un pedido (#${r.pedido!.id}, ${r.pedido!.moneda} ${r.pedido!.total.toFixed(2)})`);
       return { resultado: 'respondio', texto: `${texto}\n${r.resumen}`, detalle: r.ok ? `pedido ${r.pedido!.id}` : `pedido no registrado: ${r.noEncontrados.join(', ')}` };
@@ -735,7 +809,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         kind: 'interactive',
         category: 'UTILITY',
         origen: 'ia',
-        interactive: { body: textoPedirUbicacion(conBoton), locationRequest: true },
+        // Lo que dijo el asistente y la petición, en un solo mensaje.
+        interactive: { body: texto ? `${texto}\n\n${textoPedirUbicacion(conBoton)}` : textoPedirUbicacion(conBoton), locationRequest: true },
       });
       // Y queda apuntado en la lista de envio automatico: si no manda la
       // ubicacion, el sistema le insistira cada pocas horas, como una
@@ -774,6 +849,11 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       deps.entregas ? deps.entregas.textoAgente(clave, contact.phone, contact.name) : rellenar(TEXTOS_POR_DEFECTO[clave], { nombre: contact.name, negocio: deps.nombreNegocio(), soporte: 'este mismo número, por WhatsApp o llamada' });
     if (clase === 'por_que') return { texto: await textoAgente('porQueUbicacion'), derivar: false, pedirUbicacion: true, detalle: `pregunta por qué se pide la ubicación (${detalle})` };
     if (clase === 'flujo') return { texto: 'Para poder llegar sin problemas necesitamos tu ubicación. ¿Podrías compartirla por WhatsApp, por favor? (clip 📎 → Ubicación)', derivar: false, pedirUbicacion: true, detalle: `dentro del flujo de la ubicación (${detalle})` };
+    // Lo ajeno no recibe respuesta (pedido del dueño, 06/10); solo quien pide
+    // una persona recibe la derivación, una vez.
+    if (!pideAsesor(texto)) {
+      return { texto: '', derivar: false, pedirUbicacion: false, silencio: true, ...(manipulacion ? { bloqueada: 'manipulacion' as const } : {}), detalle: `consulta ajena: no se le contesta, queda anotado para el equipo (${manipulacion ? `intento de manipulación: ${manipulacion.tipo}` : detalle})` };
+    }
     return {
       texto: await textoAgente('cierreAgente'),
       derivar: true,

@@ -9,7 +9,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { normalizePhone, type Repos } from '../db/repos.js';
+import { normalizePhone, TOPE_DECISIONES, type Repos } from '../db/repos.js';
+import { resumenDecision } from '../ia/decision.js';
 import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
 import { extractLocation } from '../geo/extract.js';
@@ -301,6 +302,22 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       hasMore: messages.length === query.limit,
       puede,
     };
+  });
+
+  /**
+   * Por que respondio el bot en cada turno de este contacto (ver
+   * src/ia/decision.ts). La pantalla las pinta en el hilo como nota interna:
+   * el cliente no las ve. Van de la mas reciente a la mas vieja, cada una con
+   * su `resumen` ya escrito para que la pantalla no repita la regla.
+   */
+  app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/decisiones', async (request, reply) => {
+    const query = z
+      .object({ limit: z.coerce.number().int().positive().max(TOPE_DECISIONES).default(100) })
+      .parse(request.query ?? {});
+    const contact = await repos.contacts.getById(request.params.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    const decisiones = await repos.decisiones.listarPorContacto(contact.id, query.limit);
+    return { decisiones: decisiones.map((d) => ({ ...d, resumen: resumenDecision(d) })) };
   });
 
   app.post('/admin/chat/:contactId/read', async (request, reply) => {

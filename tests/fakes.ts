@@ -47,6 +47,7 @@ import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
 import { crearProcesosEnMemoria } from '../src/procesos/repo-memoria.js';
+import { crearDecisionesEnMemoria, type DecisionesEnMemoria } from '../src/db/decisiones-memoria.js';
 import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
 import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
@@ -67,6 +68,7 @@ export interface FakeRepos extends Repos {
   codigosConexion: FakeCodigos;
   tiendas: FakeTiendas;
   entregas: FakeEntregas;
+  decisiones: DecisionesEnMemoria;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -339,6 +341,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     tiendas: createFakeTiendas(),
     entregas: createFakeEntregas(),
     procesos: crearProcesosEnMemoria(),
+    decisiones: crearDecisionesEnMemoria(fakeNow),
     archives: createFakeArchives(),
     rutas: createFakeRutas(),
     leads: createFakeLeads((id) => {

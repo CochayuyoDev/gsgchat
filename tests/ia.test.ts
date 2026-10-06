@@ -279,6 +279,67 @@ describe('el turno del asistente', () => {
   });
 });
 
+describe('las reglas del turno (pedido del dueño, 06/10)', () => {
+  beforeEach(async () => {
+    await ia.guardar({ activa: true, token: 'tok', nombreAsistente: 'Lucia', conocimiento: 'Vendemos zapatos.', memoria: 6 });
+  });
+
+  it('el prompt lleva la lista cerrada y los límites: qué responde, qué deriva y qué nunca afirma', async () => {
+    const c = await cliente();
+    await ia.turno(c, 'tienen talla 42?');
+    const sistema = modelo.recibido.at(-1)![0]!.content;
+    for (const trozo of ['Lista cerrada de lo que atiendes', 'NUNCA afirmas', '[SILENCIO]', 'Una sola respuesta por turno']) expect(sistema, trozo).toContain(trozo);
+  });
+
+  it('[SILENCIO] del modelo: no se contesta nada y la decisión queda anotada', async () => {
+    const c = await cliente();
+    modelo.estado.siguiente = '[SILENCIO]';
+    const r = await ia.turno(c, 'cuéntame un chiste de pollos', { mensajes: 2 });
+    expect(r.resultado).toBe('callado');
+    expect(enviados()).toHaveLength(0);
+    const [d] = await repos.decisiones.listarPorContacto(c.id, 1);
+    expect(d).toMatchObject({ intencion: 'ajena', como: 'ia', mensajes: 2 });
+    expect(d!.respuesta).toContain('silencio');
+  });
+
+  it('un «jaja» o un «gracias» sin pregunta pendiente no llaman al modelo ni se contestan', async () => {
+    const c = await cliente();
+    for (const t of ['jajaja', 'ok gracias', '👍']) {
+      const r = await ia.turno(c, t);
+      expect(r.resultado, t).toBe('callado');
+    }
+    expect(modelo.recibido).toHaveLength(0);
+    expect(enviados()).toHaveLength(0);
+  });
+
+  it('el contexto manda: un «sí» a una pregunta del asistente sí va al modelo', async () => {
+    const c = await cliente();
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'w0', kind: 'text', body: 'tienen el negro en 42?' });
+    await repos.messages.add({ contactId: c.id, direction: 'out', wamid: 'w1', kind: 'text', body: 'Sí, hay en 42. ¿Te lo separo?' });
+    modelo.estado.siguiente = 'Listo, te lo separo.';
+    const r = await ia.turno(c, 'sí');
+    expect(r.resultado).toBe('respondio');
+    expect(modelo.recibido).toHaveLength(1);
+  });
+
+  it('pedir una persona: la derivación una vez, sin llamar al modelo, y el bot en pausa', async () => {
+    const c = await cliente();
+    const r = await ia.turno(c, 'quiero hablar con alguien de verdad');
+    expect(r.resultado).toBe('derivo');
+    expect(modelo.recibido).toHaveLength(0);
+    expect(enviados().filter((s) => s.to === '51987654321')).toHaveLength(1);
+    expect((await repos.contacts.getById(c.id))!.botPausadoAt).toBeTruthy();
+    const [d] = await repos.decisiones.listarPorContacto(c.id, 1);
+    expect(d).toMatchObject({ intencion: 'pedir_persona', como: 'reglas' });
+  });
+
+  it('leerRespuesta: [SILENCIO] calla, pero derivar manda sobre el silencio', () => {
+    expect(leerRespuesta('[SILENCIO]')).toMatchObject({ texto: '', silencio: true, derivar: false });
+    expect(leerRespuesta('Te paso con alguien. [DERIVAR] [SILENCIO]')).toMatchObject({ derivar: true });
+    expect(leerRespuesta('Te paso con alguien. [DERIVAR] [SILENCIO]').silencio).toBeUndefined();
+  });
+});
+
 describe('dentro del flujo de entrantes', () => {
   it('con la IA activa, el texto libre lo contesta ella; con el bot pausado, nadie', async () => {
     await ia.guardar({ activa: true, token: 'tok', conocimiento: 'x' });
@@ -292,7 +353,7 @@ describe('dentro del flujo de entrantes', () => {
     expect(enviados()).toHaveLength(1);
   });
 
-  it('BAJA escrito por el cliente no lo da de baja; una foto se reconoce sin llamar al modelo', async () => {
+  it('BAJA escrito por el cliente no lo da de baja; una foto sin texto no llama al modelo ni se contesta', async () => {
     await ia.guardar({ activa: true, token: 'tok', conocimiento: 'x' });
     await cliente();
     await processChange('messages', entrante('BAJA'), deps);
@@ -303,7 +364,7 @@ describe('dentro del flujo de entrantes', () => {
     const foto: ChangeValue = { contacts: [{ wa_id: '51911111111', profile: { name: 'Luis' } }], messages: [{ id: 'wamid.foto', from: '51911111111', timestamp: String(Math.floor(Date.now() / 1000)), type: 'image', image: { id: 'm1', mime_type: 'image/jpeg' } } as unknown as InboundMessage] };
     await processChange('messages', foto, deps);
     expect(modelo.recibido).toHaveLength(0);
-    expect(String(enviados().at(-1)!.body)).toContain('Recibí tu foto');
+    expect(enviados().filter((s) => s.to === '51911111111')).toHaveLength(0);
   });
 
   it('la prueba desde la pantalla usa el historial del navegador y no manda nada por WhatsApp', async () => {
@@ -415,15 +476,15 @@ describe('la IA conoce el sistema por el que habla', () => {
     expect(leerRespuesta('Te paso con alguien. [DERIVAR] [PEDIR_UBICACION]')).toEqual({ texto: 'Te paso con alguien.', derivar: true, pedirUbicacion: false, pedido: null });
   });
 
-  it('si el modelo pide la ubicacion, sale el texto y detras el boton (o el camino del clip)', async () => {
+  it('si el modelo pide la ubicacion, el texto y el boton salen en UN solo mensaje', async () => {
     await ia.guardar({ activa: true, token: 'tok', conocimiento: 'Hacemos delivery.' });
     const c = await cliente();
     modelo.estado.siguiente = 'Claro, ¿dónde te lo llevamos? [PEDIR_UBICACION]';
     const r = await ia.turno(c, 'quiero delivery');
     expect(r.resultado).toBe('respondio');
-    expect(enviados().map((s) => s.kind)).toEqual(['text', 'location_request']);
-    expect(enviados()[0]).toMatchObject({ body: 'Claro, ¿dónde te lo llevamos?' });
-    expect(String(enviados()[1]!.body)).toContain('ubicación');
+    expect(enviados().map((s) => s.kind)).toEqual(['location_request']);
+    expect(String(enviados()[0]!.body)).toContain('Claro, ¿dónde te lo llevamos?');
+    expect(String(enviados()[0]!.body)).toContain('ubicación');
     expect((await repos.contacts.getById(c.id))!.botPausadoAt).toBeFalsy();
   });
 

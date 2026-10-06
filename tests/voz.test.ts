@@ -420,24 +420,24 @@ describe('el asistente con voz', () => {
     await cliente();
     eleven.estado.fallar = new ErrorVoz('Se acabaron los caracteres del plan de ElevenLabs por este mes.', 402, 'cuota');
     await processChange('messages', entranteAudio(), deps);
-    // Sin transcripcion posible, se le pide el texto, como sin voz.
-    expect(String(enviados()[0]!.body)).toContain('Recibí tu audio');
+    // Sin transcripcion posible es un archivo sin texto: no se contesta (pedido del dueño, 06/10).
+    expect(enviados()).toHaveLength(0);
     expect(voz.estado().ultimoError?.detalle).toContain('caracteres');
 
     eleven.estado.fallar = null;
     modelo.estado.siguiente = 'x'.repeat(700);
     await voz.guardar({ cuando: 'siempre', maxCaracteres: 600 });
     await processChange('messages', entranteTexto('hola'), deps);
-    expect(enviados()[1]).toMatchObject({ kind: 'text' });
+    expect(enviados()[0]).toMatchObject({ kind: 'text' });
     expect(eleven.estado.hablado).toEqual([]);
   });
 
-  it('sin voz configurada, todo sigue como antes: a un audio se le pide el texto', async () => {
+  it('sin voz configurada, un audio sin transcribir no se contesta (archivo sin texto)', async () => {
     await voz.guardar({ clave: '' });
     await cliente();
     await processChange('messages', entranteAudio(), deps);
     expect(eleven.estado.transcritos).toBe(0);
-    expect(String(enviados()[0]!.body)).toContain('¿Me cuentas por escrito');
+    expect(enviados()).toHaveLength(0);
   });
 
   it('desde el chat, "mandar como audio" manda lo escrito como nota de voz de una persona; si no se puede, lo dice', async () => {

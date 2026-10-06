@@ -293,10 +293,10 @@ var ultimoPintadoId = 0;
 
 /* El hilo abierto: lo del servidor mas las paginas anteriores ya cargadas.
    El refresco trae solo lo ultimo y se funde aqui, para no perder lo viejo. */
-var hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false };
+var hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false, decisiones: [] };
 
 function fundirHilo(contactId, nuevos, masAntiguos) {
-  if (hilo.contactId !== contactId) hilo = { contactId: contactId, mensajes: [], masAntiguos: false, cargando: false };
+  if (hilo.contactId !== contactId) hilo = { contactId: contactId, mensajes: [], masAntiguos: false, cargando: false, decisiones: [] };
   var porId = {};
   hilo.mensajes.forEach(function (m) { porId[m.id] = m; });
   nuevos.forEach(function (m) { porId[m.id] = m; });
@@ -467,6 +467,13 @@ async function openChat(contactId, silent) {
     var nuevo = !current || current.id !== contactId;
     var otroHilo = hilo.contactId !== contactId;
     var mensajesHilo = fundirHilo(contactId, data.messages, otroHilo ? data.hasMore : undefined);
+    /* Por que respondio el bot en cada turno: nota interna que se intercala en
+       el hilo. Si no llegan, el chat se pinta igual, sin ellas. */
+    try {
+      var dec = await api('/admin/chat/' + contactId + '/decisiones?limit=200');
+      if (hilo.contactId === contactId) hilo.decisiones = (dec.decisiones || []).slice().reverse();
+    } catch (e) { /* sin decisiones: no es motivo para no abrir el chat */ }
+    if (deseado && deseado !== contactId) return;
     current = data.contact;
     current.pedido = data.reparto ? data.reparto.referencia : null;
     current.reparto = data.reparto || null;
@@ -614,7 +621,23 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
   if (hilo.masAntiguos) {
     html += '<div class="mas-antiguos"><button type="button" data-mas-antiguos="1" title="También se cargan solos al subir">↑ Ver mensajes anteriores</button></div>';
   }
+  /* Las decisiones del bot van por fecha entre los mensajes. Con mensajes mas
+     viejos sin cargar, las anteriores al primero pintado esperan a que se
+     carguen: amontonadas arriba no dirian a que turno pertenecen. */
+  var decisiones = (hilo.contactId === (current && current.id) ? hilo.decisiones || [] : []).filter(function (x) {
+    return !hilo.masAntiguos || new Date(x.createdAt).getTime() >= new Date(messages[0].createdAt).getTime();
+  });
+  var di = 0;
+  function pintarDecisionesHasta(limite) {
+    while (di < decisiones.length && (limite === null || new Date(decisiones[di].createdAt).getTime() <= limite)) {
+      var dd = dayLabel(decisiones[di].createdAt);
+      if (dd !== dia) { dia = dd; html += '<div class="day">' + esc(dd) + '</div>'; }
+      html += decisionHtml(decisiones[di]);
+      di++;
+    }
+  }
   messages.forEach(function (m, i) {
+    pintarDecisionesHasta(new Date(m.createdAt).getTime());
     var d = dayLabel(m.createdAt);
     if (d !== dia) { dia = d; html += '<div class="day">' + esc(d) + '</div>'; }
     /* El primero de cada bloque lleva pico; los siguientes se pegan a el. */
@@ -654,6 +677,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       '<button type="button" class="abrir-menu" title="Opciones del mensaje" aria-label="Opciones del mensaje" aria-haspopup="menu">⌄</button>' +
       '</div>';
   });
+  pintarDecisionesHasta(null);
 
   if (box.innerHTML !== html) box.innerHTML = html;
   void cargarMedios(box);
@@ -673,6 +697,21 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
   else if (nuevosAbajo && !mantenerVista) nuevosSinVer += nuevosAbajo;
   lastCount = messages.length;
   pintarBotonBajar();
+}
+
+/* Una decision del bot: linea gris, pequena y centrada, que deja claro que es
+   una nota interna. El cliente no la ve; esta para saber por que el bot dijo
+   lo que dijo (o se callo) y corregir la regla si se equivoco. */
+function decisionHtml(x) {
+  var extra = [];
+  if (x.esperaba) extra.push('esperaba: ' + x.esperaba);
+  if (x.detalle) extra.push(x.detalle);
+  return '<div class="decision-bot" role="note" title="Nota interna: el cliente no la ve">' +
+    '<span class="decision-etq">Nota interna · el cliente no la ve</span>' +
+    '<span class="decision-txt">' + esc(x.resumen || '') + '</span>' +
+    (extra.length ? '<span class="decision-extra">' + esc(extra.join(' · ')) + '</span>' : '') +
+    '<span class="decision-hora">' + esc(hhmm(x.createdAt)) + '</span>' +
+    '</div>';
 }
 
 function autorHtml(autor) {

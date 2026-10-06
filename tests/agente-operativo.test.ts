@@ -237,16 +237,21 @@ describe('el agente operativo en un día de entregas', () => {
     expect(await cerradaDe('999111222')).toBeNull();
   });
 
-  it('con la IA conectada, lo que las reglas no entienden lo clasifica el modelo (y nunca redacta al cliente)', async () => {
+  it('con la IA conectada, en GSG no se le pregunta al modelo: lo que las reglas no entienden se guarda y no se contesta', async () => {
     await e.asistente!.guardar({ activa: true, proveedor: 'openai', modelo: 'gpt-4o-mini', token: 'sk-prueba' });
     e.ia.respuestas.push('OTRA');
     const antes = e.textosA('987000004').length;
     e.avanzar(2);
     await e.contesta('987000004', { texto: 'mmm bueno pero mañana no estoy toda la tarde en casa sabes' });
     const nuevos = e.textosA('987000004').slice(antes);
-    expect(e.ia.llamadas.at(-1)?.sistema).toContain('clasificador del canal de entregas de GSG Courier');
-    // «OTRA» antes del pin: la primera insistencia fija (nunca un texto del modelo).
-    expect(nuevos).toEqual([INSISTENCIAS_UBICACION[0]]);
+    // Sin IA en GSG (pedido del dueño, 06/10): solo reglas y botones.
+    expect(e.ia.llamadas.some((l) => String(l.sistema ?? '').includes('clasificador del canal de entregas de GSG Courier'))).toBe(false);
+    // «OTRA» antes del pin: silencio y queda anotado (pedido del dueño, 06/10); nunca un texto del modelo.
+    expect(nuevos).toEqual([]);
+    const c = (await e.repos.contacts.getByPhone(conPais('987000004')))!;
+    const [d] = await e.repos.decisiones.listarPorContacto(c.id, 1);
+    expect(d).toMatchObject({ intencion: 'ajena', como: 'reglas', esperaba: 'ubicación' });
+    expect(d!.respuesta).toContain('silencio');
   });
 
   it('la prueba del panel enseña lo mismo: una consulta de precio va al cierre, sin precios', async () => {

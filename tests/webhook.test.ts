@@ -286,6 +286,16 @@ describe('ráfaga: el cliente escribe en trozos', () => {
     expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
   });
 
+  it('sin rafagaMs en las dependencias (Meta, QR local, simulador) vale RAFAGA_MS de la configuración', async () => {
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: false });
+    // Como el webhook de Meta: no pasa rafagaMs; la configuración trae 300 ms.
+    const sinRafaga = { ...deps, rafagaMs: undefined, config: { ...deps.config, RAFAGA_MS: 300 } };
+    await Promise.all(['hola', 'quiero cotizar', 'un envío a Lince'].map((texto, i) =>
+      processChange('messages', inbound({ id: `wamid.rafaga.cfg.${i}`, text: { body: texto } }), sinRafaga)));
+    expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
+  });
+
   it('juntarRafaga une lo que escribió desde la última respuesta', async () => {
     const { juntarRafaga } = await import('../src/handlers/inbound.js');
     const ahora = new Date();

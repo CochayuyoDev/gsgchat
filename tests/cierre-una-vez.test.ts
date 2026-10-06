@@ -30,13 +30,13 @@ describe('dos mensajes seguidos tras la ubicación registrada', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('llegan a la vez y el cierre sale una sola vez', async () => {
+  it('llegan a la vez pidiendo una persona y la derivación sale una sola vez', async () => {
     await e.contesta('987000001', { pin: PIN_LIMA });
     const antes = e.textosA('987000001').length;
 
     await Promise.all([
-      e.contesta('987000001', { texto: 'Ya se' }),
-      e.contesta('987000001', { texto: 'y cuánto cuesta el envío' }),
+      e.contesta('987000001', { texto: 'quiero hablar con una persona' }),
+      e.contesta('987000001', { texto: 'pásame con un asesor' }),
     ]);
 
     const cierres = e.textosA('987000001').slice(antes).filter((t) => t.includes('no se reciben consultas'));
@@ -132,10 +132,10 @@ describe('la misma acción repetida seguida se atiende una vez', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('cinco «jaja» a la vez: una sola insistencia', async () => {
+  it('cinco «jaja» a la vez: silencio (lo ajeno no se contesta)', async () => {
     const antes = e.textosA('987000002').length;
     await Promise.all(Array.from({ length: 5 }, () => e.contesta('987000002', { texto: 'jaja' })));
-    expect(e.textosA('987000002').slice(antes)).toHaveLength(1);
+    expect(e.textosA('987000002').slice(antes)).toHaveLength(0);
   });
 
   it('el mismo pin dos veces a la vez: una sola respuesta', async () => {
