@@ -188,6 +188,27 @@ export function crearProveedorPuter(token: string, cargar: (token: string) => Pr
   };
 }
 
+/**
+ * Lo que cada modelo NO acepta, aprendido de sus propios errores: los modelos
+ * nuevos de OpenAI (gpt-5, o1, o3, o4…) rechazan `max_tokens` (piden
+ * `max_completion_tokens`) y una `temperature` distinta de la de fábrica. Los
+ * demás servicios compatibles (OpenRouter, Groq, DeepSeek…) siguen pidiendo
+ * `max_tokens`, así que no se cambia para todos: se prueba, y si el modelo lo
+ * rechaza se reintenta UNA vez sin eso y se recuerda para ese modelo.
+ */
+const ajustesDelModelo = new Map<string, { completion?: boolean; sinTemperatura?: boolean }>();
+
+/** Solo para las pruebas: olvida lo aprendido. */
+export function olvidarAjustesDeModelos(): void {
+  ajustesDelModelo.clear();
+}
+
+/**
+ * Los modelos de razonamiento gastan parte del tope en «pensar»: con el tope
+ * corto de clasificar (8 tokens) no les quedaría nada para contestar.
+ */
+const MINIMO_CON_RAZONAMIENTO = 2000;
+
 export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fetchImpl?: typeof fetch }): ProveedorIA {
   const base = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const doFetch = opts.fetchImpl ?? fetch;
@@ -197,13 +218,38 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), o.timeoutMs ?? 45_000);
       try {
-        const r = await doFetch(`${base}/chat/completions`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...(opts.clave ? { authorization: `Bearer ${opts.clave}` } : {}) },
-          body: JSON.stringify({ model: o.modelo, messages: mensajes, temperature: o.temperatura ?? 0.4, max_tokens: o.maxTokens ?? 1000 }),
-          signal: control.signal,
-        });
-        const cuerpo = (await r.json().catch(() => ({}))) as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string; code?: unknown; type?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
+        const clave = `${base}|${o.modelo}`;
+        const cuerpoDe = (): string => {
+          const aj = ajustesDelModelo.get(clave) ?? {};
+          const tope = o.maxTokens ?? 1000;
+          return JSON.stringify({
+            model: o.modelo,
+            messages: mensajes,
+            ...(aj.sinTemperatura ? {} : { temperature: o.temperatura ?? 0.4 }),
+            ...(aj.completion ? { max_completion_tokens: Math.max(tope, MINIMO_CON_RAZONAMIENTO) } : { max_tokens: tope }),
+          });
+        };
+        type Cuerpo = { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string; code?: unknown; type?: unknown; param?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
+        const pedir = async (): Promise<{ r: Response; cuerpo: Cuerpo }> => {
+          const r = await doFetch(`${base}/chat/completions`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(opts.clave ? { authorization: `Bearer ${opts.clave}` } : {}) },
+            body: cuerpoDe(),
+            signal: control.signal,
+          });
+          return { r, cuerpo: (await r.json().catch(() => ({}))) as Cuerpo };
+        };
+        let { r, cuerpo } = await pedir();
+        // Como mucho dos ajustes (el tope y la temperatura), cada uno una vez.
+        for (let intento = 0; intento < 2 && r.status === 400; intento++) {
+          const que = `${String(cuerpo.error?.param ?? '')} ${cuerpo.error?.message ?? ''}`;
+          const aj = { ...(ajustesDelModelo.get(clave) ?? {}) };
+          if (!aj.completion && /max_tokens/.test(que) && /max_completion_tokens|not supported|unsupported/i.test(que)) aj.completion = true;
+          else if (!aj.sinTemperatura && /temperature/i.test(que) && /unsupported|not supported|does not support|only the default/i.test(que)) aj.sinTemperatura = true;
+          else break;
+          ajustesDelModelo.set(clave, aj);
+          ({ r, cuerpo } = await pedir());
+        }
         if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', cuerpo.error?.message, falloDeCuenta(r.status, cuerpo));
         const texto = limpiarRespuesta(textoDeContenido(cuerpo.choices?.[0]?.message?.content));
         if (!texto) throw new ErrorIA('la API devolvio una respuesta vacia', 'openai');

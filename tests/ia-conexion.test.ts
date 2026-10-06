@@ -10,7 +10,7 @@ import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { crearServicioIA, construirSistema, type ServicioIA } from '../src/ia/servicio.js';
-import { crearProveedorOpenAI, explicarFalloConexion, presetDe, probarProveedor, SERVICIOS_OPENAI, type ProveedorIA } from '../src/ia/proveedores.js';
+import { crearProveedorOpenAI, olvidarAjustesDeModelos, explicarFalloConexion, presetDe, probarProveedor, SERVICIOS_OPENAI, type ProveedorIA } from '../src/ia/proveedores.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, CLAVE_API_PRUEBA } from './fakes.js';
 
 const cola: OutboundQueue = { async enqueue() {}, async enqueueMany(j) { return j.length; }, async pause() {}, async resume() {}, async counts() { return {}; }, async close() {} };
@@ -77,6 +77,32 @@ describe('los servicios compatibles con OpenAI', () => {
     const caido = await probarProveedor(crearProveedorOpenAI({ baseUrl: 'http://localhost:11434/v1', clave: '', fetchImpl: fetchOpenAIFalso({ clave: '', modelos: [], caido: true }) }), 'llama3.1');
     expect(caido.ok).toBe(false);
     expect(caido.detalle).toMatch(/No se pudo llegar/);
+  });
+
+  it('modelos nuevos de OpenAI (gpt-5, o-series): si rechaza max_tokens o temperature, se reintenta sin eso y se recuerda', async () => {
+    olvidarAjustesDeModelos();
+    const cuerpos: Array<Record<string, unknown>> = [];
+    // Como la API real de OpenAI con un modelo de razonamiento.
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      const b = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      cuerpos.push(b);
+      const error = (message: string, param: string) => new Response(JSON.stringify({ error: { message, type: 'invalid_request_error', param, code: 'unsupported_parameter' } }), { status: 400 });
+      if ('max_tokens' in b) return error("Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'max_tokens');
+      if ('temperature' in b) return error("Unsupported value: 'temperature' does not support 0.4 with this model. Only the default (1) value is supported.", 'temperature');
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'Hola, estoy listo.' } }] }), { status: 200 });
+    }) as typeof fetch;
+    const p = crearProveedorOpenAI({ baseUrl: 'https://api.openai.com/v1', clave: 'sk-buena', fetchImpl });
+    expect(await p.chat([{ role: 'user', content: 'hola' }], { modelo: 'gpt-5-mini', maxTokens: 8 })).toBe('Hola, estoy listo.');
+    expect(cuerpos).toHaveLength(3);
+    // El tope corto de clasificar no deja sin respuesta a un modelo que razona.
+    expect(cuerpos[2]).toMatchObject({ max_completion_tokens: 2000 });
+    expect(cuerpos[2]).not.toHaveProperty('temperature');
+    // La segunda vez ya sale bien a la primera.
+    expect(await p.chat([{ role: 'user', content: 'otra' }], { modelo: 'gpt-5-mini' })).toBe('Hola, estoy listo.');
+    expect(cuerpos).toHaveLength(4);
+    // Otro modelo sigue con max_tokens (OpenRouter, Groq... lo piden así).
+    await p.chat([{ role: 'user', content: 'hola' }], { modelo: 'gpt-4o-mini' }).catch(() => undefined);
+    expect(cuerpos[4]).toHaveProperty('max_tokens');
   });
 
   it('explicarFalloConexion traduce los fallos tipicos', () => {
