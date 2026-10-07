@@ -143,7 +143,7 @@ export function conexionGsgVigente(): ServicioConexionGsg | null {
 export interface DepsConexionGsg {
   settingsRepo: SettingsRepo;
   settingsKeyBase64: string;
-  config: { GSG_SEND_LOCATION_URL?: string; GSG_LOCATION_PATH?: string; GSG_API_KEY?: string; GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string; timezone?: string };
+  config: { GSG_IDEMPOTENCY_SUPPORTED?: string; GSG_SEND_LOCATION_URL?: string; GSG_LOCATION_PATH?: string; GSG_API_KEY?: string; GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string; timezone?: string };
   fetchImpl?: typeof fetch;
   log?: (m: string, d?: Record<string, unknown>) => void;
   ahora?: () => Date;
@@ -219,7 +219,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     }
     const firma = JSON.stringify([e.url, e.rutaUbicacion, e.ubicacionUrl, e.token]);
     if (!vigente || vigente.firma !== firma) {
-      vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl }) };
+      vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl, idempotenciaUbicacion: deps.config.GSG_IDEMPOTENCY_SUPPORTED === 'true' }) };
     }
     return vigente.puerto;
   };
@@ -353,13 +353,13 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
         })
       : actual();
     const at = new Date().toISOString();
-    if (!puerto.conectado()) {
-      ultimaPrueba = { ok: false, detalle: 'No hay ninguna conexión con GSG: configura la URL base de su API.', at };
-      return ultimaPrueba;
-    }
     const errorConfig = puerto.errorConfiguracion?.() ?? null;
     if (errorConfig) {
       ultimaPrueba = { ok: false, detalle: `La configuración de GSG no es válida: ${errorConfig} No se envía nada hasta corregirla.`, at };
+      return ultimaPrueba;
+    }
+    if (!puerto.conectado()) {
+      ultimaPrueba = { ok: false, detalle: 'No hay ninguna conexión con GSG: configura la URL base de su API.', at };
       return ultimaPrueba;
     }
     const r = await puerto.consultar<PendientesGsg>(RUTA_GSG_PENDIENTES);

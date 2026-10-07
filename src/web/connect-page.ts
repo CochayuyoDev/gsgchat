@@ -437,6 +437,12 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">De GSG llegan los pedidos del día, y a GSG le mandamos cada ubicación que registra el cliente.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>
+  <details><summary>Ubicación y seguimiento del cliente</summary>
+    <p>Las direcciones escritas y los enlaces de Maps se confirman antes de reportar la ubicación. Los horarios y el orden de reparto proceden de GSG.</p>
+    <p id="seguimiento-estado" role="status" aria-live="polite">Revisando seguimiento…</p>
+    <div id="seguimiento-pedidos" class="ayuda"></div>
+    <button class="btn sm" id="seguimiento-refrescar" type="button">Actualizar diagnóstico</button>
+  </details>
   <div id="gsg-config-error" class="nota riesgo hidden" role="alert"></div>
   <details class="con-form" id="gsg-form-caja"><summary id="gsg-form-resumen">Cambiar la URL o la API Key de GSG</summary>
   <form id="gsg-form" novalidate>
@@ -1876,6 +1882,21 @@ if ($('gsg')) {
     catch (error) { estado('gsg-verificar-state', error.message, 'rojo'); }
   };
   $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
+  async function cargarSeguimiento() {
+    var caja = $('seguimiento-estado');
+    if (!caja) return;
+    try {
+      var r = await api('/admin/entregas/seguimiento/estado');
+      caja.textContent = (r.conectado ? 'GSG configurado.' : 'Falta conectar GSG.') + ' ' +
+        (r.googleConfigurado ? 'Cálculo de rutas configurado.' : 'Falta configurar Google Maps para calcular kilómetros y tiempos.') + ' ' +
+        (r.ultimoExito ? 'Último seguimiento válido: ' + new Date(r.ultimoExito).toLocaleString() + '.' : 'Todavía no se ha obtenido seguimiento válido.') + ' ' + (r.ultimoError || '');
+      $('seguimiento-pedidos').textContent = (r.pedidos || []).map(function(p) {
+        return p.tracking + ': ' + (p.fallo ? p.fallo.proveedor + ' / ' + p.fallo.codigo + ' — ' + p.fallo.detalle : 'seguimiento válido') + (p.gpsAt ? ' · GPS ' + new Date(p.gpsAt).toLocaleString() : '') + (p.versionRuta ? ' · ruta ' + p.versionRuta : '');
+      }).join(' | ');
+    } catch (error) { caja.textContent = 'No se pudo consultar el diagnóstico: ' + error.message; }
+  }
+  if ($('seguimiento-refrescar')) $('seguimiento-refrescar').onclick = cargarSeguimiento;
+  cargarSeguimiento();
   cargarGsg();
   cargarExtras();
 }

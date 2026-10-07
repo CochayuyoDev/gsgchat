@@ -34,7 +34,8 @@ import { createOutboundQueue, createOutboundWorker, type OutboundQueue } from '.
 import { createRepos, createSettingsRepo, type Repos } from '../db/repos.js';
 import { baseDeLaUrl, createPool, type Pool } from '../db/pool.js';
 import { prepararBase, type OpcionesBanco } from '../db/bases.js';
-import { crearCacheGeoSql, crearGeocodificadorNominatim, type Geocodificador } from '../entregas/geocodificar.js';
+import { crearCacheGeoSql, crearGeocodificadorGoogle, crearGeocodificadorNominatim, type Geocodificador } from '../entregas/geocodificar.js';
+import { crearCalculadorGoogle } from '../entregas/seguimiento-gsg.js';
 import { migrate } from '../db/migrate.js';
 import type { LocalSecrets } from '../settings/crypto.js';
 import { providerOf, createSettingsService } from '../settings/service.js';
@@ -282,12 +283,15 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         geo: { bbox: config.bbox, zonaSinExtra: config.zonaSinExtra, cobertura: config.coverageName },
         modo: () => ajustes.modo(),
         numeroPropio: () => sesion.getLocalState().phone || null,
+        calcularRuta: config.GOOGLE_MAPS_API_KEY ? crearCalculadorGoogle(config.GOOGLE_MAPS_API_KEY) : undefined,
         geocodificador:
           o.geocodificador !== undefined
             ? o.geocodificador
             : process.env.VITEST || (o.env.GEOCODIFICAR ?? process.env.GEOCODIFICAR) === 'no'
               ? null
-              : crearGeocodificadorNominatim({ userAgent: `GSGchat/1.0 (entregas de ${ajustes.nombreNegocio() || 'una tienda'}; ${config.PUBLIC_BASE_URL})`, cache: crearCacheGeoSql(pool), log: (m, d) => log(`[mapa] ${m}`, d) }),
+              : config.GOOGLE_MAPS_API_KEY
+                ? crearGeocodificadorGoogle(config.GOOGLE_MAPS_API_KEY)
+                : crearGeocodificadorNominatim({ userAgent: `GSGchat/1.0 (entregas de ${ajustes.nombreNegocio() || 'una tienda'}; ${config.PUBLIC_BASE_URL})`, cache: crearCacheGeoSql(pool), log: (m, d) => log(`[mapa] ${m}`, d) }),
         log: (m, d) => log(`[entregas] ${m}`, d),
       });
       entregasDeLaRegla = entregas;

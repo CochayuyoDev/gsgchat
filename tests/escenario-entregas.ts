@@ -215,7 +215,7 @@ export async function crearEscenarioEntregas(opciones: {
   // mensajes y que el agente (si no, «desde que se abrió la solicitud» o «el
   // pedido llegó después del cierre» comparan fechas de dos relojes).
   repos.rutas = createFakeRutas(reloj);
-  repos.entregas = createFakeEntregas(reloj);
+  repos.entregas = createFakeEntregas(reloj, r => repos.rutas.encolarReporte(r));
   const wa = createFakeWhatsApp();
   wa.tieneWhatsApp = async () => true;
   const settings = await createFakeSettings(config);

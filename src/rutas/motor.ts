@@ -637,9 +637,9 @@ export function crearMotor(deps: MotorDeps): Motor {
       // sigue con el siguiente. Asi un recordatorio nunca le llega a quien ya
       // mando su pin, aunque algun camino se haya olvidado de cerrarla.
       const yaTieneUbicacion = async (s: Solicitud): Promise<boolean> => {
-        const registrada = await ubicacionYaRegistrada(repos, s.phone, diaEnZona(momento, opciones.timezone));
+        const registrada = await ubicacionYaRegistrada(repos, s.phone, diaEnZona(momento, opciones.timezone), s.referencia);
         if (!registrada || registrada.lat == null || registrada.lng == null) return false;
-        const cerradas = await resolverPorUbicacion(repos, s.phone!, { lat: registrada.lat, lng: registrada.lng, mapsUrl: registrada.mapsUrl, fuente: registrada.ubicacionFuente }, { ahora: momento, motivo: `ya la había mandado (pedido ${registrada.referencia})` });
+        const cerradas = await resolverPorUbicacion(repos, s.phone!, { lat: registrada.lat, lng: registrada.lng, mapsUrl: registrada.mapsUrl, fuente: registrada.ubicacionFuente }, { ahora: momento, motivo: `ya la había mandado (pedido ${registrada.referencia})`, referencias: [registrada.referencia] });
         // Si era de OTRO pedido del mismo cliente (que aun no la tenia), GSG se
         // entera por aqui, como cuando el reparto la resuelve.
         for (const c of cerradas) {

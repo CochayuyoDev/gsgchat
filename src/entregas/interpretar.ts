@@ -913,6 +913,11 @@ export function leerMotorizadoCorta(texto: string): LecturaMotorizadoCorta {
 // ------------------------------------------------- donde esta mi pedido
 
 const PREGUNTA_PEDIDO = [
+  'donde esta el motorizado',
+  'en que punto esta',
+  'cuantos kilometros faltan',
+  'cuantas paradas faltan',
+  'donde esta mi entrega',
   'donde esta mi pedido',
   'donde esta el pedido',
   'donde esta mi paquete',

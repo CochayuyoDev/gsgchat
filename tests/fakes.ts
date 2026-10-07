@@ -339,7 +339,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     entrenamiento: createFakeEntrenamiento(() => [...contactsByPhone.values()], () => repos.messages._all),
     codigosConexion: createFakeCodigos(),
     tiendas: createFakeTiendas(),
-    entregas: createFakeEntregas(),
+    entregas: createFakeEntregas(() => new Date(), r => repos.rutas.encolarReporte(r)),
     procesos: crearProcesosEnMemoria(),
     decisiones: crearDecisionesEnMemoria(fakeNow),
     archives: createFakeArchives(),

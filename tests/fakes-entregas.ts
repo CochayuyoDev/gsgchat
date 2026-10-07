@@ -21,7 +21,7 @@ let seqM = 1;
 let seqEv = 1;
 
 /** `reloj`: las fechas de las filas (el escenario de entregas pasa el suyo, como los mensajes). */
-export function createFakeEntregas(reloj: () => Date = () => new Date()): FakeEntregas {
+export function createFakeEntregas(reloj: () => Date = () => new Date(), encolar?: (reporte: { loteId: string | null; tipo: "ubicacion"; payload: Record<string, unknown> }) => Promise<unknown>): FakeEntregas {
   const entregas: Entrega[] = [];
   const motorizados: Motorizado[] = [];
   const eventos: EventoEntrega[] = [];
@@ -198,6 +198,12 @@ export function createFakeEntregas(reloj: () => Date = () => new Date()): FakeEn
         lista = lista.filter((e) => (e.nombre ?? '').toLowerCase().includes(q) || e.phone.includes(q) || e.referencia.toLowerCase().includes(q));
       }
       return lista.sort((a, b) => a.id - b.id).slice(0, filtro.limit ?? 500).map(copiaE);
+    },
+    async registrarUbicacionAtomica(id, patch, reporte, propuestaAt) {
+      const actual = entregas.find(x => x.id === id);
+      if (!actual || ESTADOS_ENTREGA_FINALES.includes(actual.estado) || (propuestaAt && (actual.pinPropuestoAt?.getTime() !== propuestaAt.getTime() || actual.pinPropuestoLat !== patch.lat || actual.pinPropuestoLng !== patch.lng)) || (actual.ubicacionEstado === 'recibida' && actual.lat === patch.lat && actual.lng === patch.lng)) return null;
+      if (reporte && encolar) await encolar({ ...reporte, tipo: 'ubicacion' });
+      return repo.actualizar(id, patch);
     },
     async actualizar(id, patch) {
       const e = entregas.find((x) => x.id === id);

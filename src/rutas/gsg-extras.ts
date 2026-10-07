@@ -111,6 +111,7 @@ export interface VerificacionContrato {
 /** Lo que se lee de cada pedido de GSG (lo documenta el OpenAPI, /api/v1/openapi.json). */
 export const CAMPOS_PEDIDO = new Set([
   'referencia', 'telefono', 'nombre', 'direccion', 'distrito', 'notas', 'lat', 'lng', 'id', 'urgente', 'cancelado', 'motivoCancelacion',
+  'horarioEntrega',
   // Los datos del envio del primer mensaje al cliente (todos opcionales). Ver src/entregas/datos-envio.ts.
   'producto', 'empresa', 'empresaCodigo', 'empresaNombre', 'tiendaCodigo', 'tiendaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente',
 ]);
