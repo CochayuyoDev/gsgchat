@@ -73,3 +73,7 @@ El seguimiento admite `estado`: pendiente, en_reparto, llegando, entregado, canc
 Para cruzar medianoche se requieren `fechaDesde`, `fechaHasta` y `zonaHoraria`, además de desde/hasta. Ejemplo: `{ "desde":"22:00", "hasta":"02:00", "fechaDesde":"2026-10-07", "fechaHasta":"2026-10-08", "zonaHoraria":"America/Lima" }`. Sin fechas sigue siendo obligatorio desde anterior a hasta. Un horario nuevo sustituye las fechas anteriores y PATCH con `horarioEntrega:null` borra la ventana. Estos campos están documentados en OpenAPI.
 
 El cálculo sigue el contrato oficial de [Google Geocoding](https://developers.google.com/maps/documentation/geocoding/requests-geocoding) y [Google Routes computeRoutes](https://developers.google.com/maps/documentation/routes/reference/rest/v2/TopLevel/computeRoutes).
+
+## Refuerzo del transporte HTTP
+
+Las consultas y los envíos a GSG rechazan redirecciones HTTP. Configura la URL final de la API para evitar enviar la API key o repetir el POST en otro destino. Un envío incierto de ubicación solo admite reintento automático cuando está habilitado el soporte de idempotencia y ese envío lleva una clave idempotente no vacía. Las claves se ocultan antes de truncar las respuestas de error, incluyendo claves cortas.

@@ -252,7 +252,7 @@ export function enmascararClave(clave: string): string | null {
 /** Quita la clave de cualquier texto que se vaya a guardar o mostrar (por si GSG la devuelve en su respuesta). */
 export function sinClave(texto: string, clave: string): string {
   const c = (clave ?? '').trim();
-  return c && c.length >= 4 ? texto.split(c).join('••••') : texto;
+  return c ? texto.split(c).join('••••') : texto;
 }
 
 /**
@@ -308,15 +308,18 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         if (!u.ok) return { ok: false, error: `Configuración de GSG no válida: ${u.error}`, reintentable: true, configuracion: true };
         url = u.url;
       }
+      const claveIdempotente = tipo === 'ubicacion' && opts.idempotenciaUbicacion && typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey.trim() : '';
+      const idempotente = Boolean(claveIdempotente);
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
       try {
         const respuesta = await doFetch(url, {
           method: 'POST',
+          redirect: 'error',
           headers: {
             'content-type': 'application/json',
             ...cabecerasDeClave(clave),
-            ...(tipo === 'ubicacion' && opts.idempotenciaUbicacion && typeof payload.idempotencyKey === 'string' ? { 'Idempotency-Key': payload.idempotencyKey } : {}),
+            ...(idempotente ? { 'Idempotency-Key': claveIdempotente } : {}),
           },
           body: JSON.stringify(tipo === 'ubicacion' ? { tracking: payload.tracking ?? payload.referencia, lat: payload.lat ?? payload.latitud, lng: payload.lng ?? payload.longitud } : payload),
           signal: control.signal,
@@ -338,10 +341,10 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
                     : 'GSG no aceptó el envío';
           return {
             ok: false,
-            error: limpio(`Error ${respuesta.status}: ${causa}.${tipo === 'ubicacion' && !opts.idempotenciaUbicacion && (respuesta.status >= 500 || respuesta.status === 408) ? ' Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar.' : ''}${texto.trim() ? ` Respuesta de GSG: ${texto.trim().slice(0, 200)}` : ''}`),
+            error: limpio(`Error ${respuesta.status}: ${causa}.${tipo === 'ubicacion' && !idempotente && (respuesta.status >= 500 || respuesta.status === 408) ? ' Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar.' : ''}${texto.trim() ? ` Respuesta de GSG: ${limpio(texto.trim()).slice(0, 200)}` : ''}`),
             // 5xx, 429 y 408 son del otro lado y pasan solos; un 4xx es culpa
             // del payload (o de la clave) y reintentarlo solo repite el error.
-            reintentable: (respuesta.status >= 500 || respuesta.status === 408) && tipo === 'ubicacion' && !opts.idempotenciaUbicacion ? false : respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
+            reintentable: (respuesta.status >= 500 || respuesta.status === 408) && tipo === 'ubicacion' && !idempotente ? false : respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
             ...(auth ? { autenticacion: auth } : {}),
           };
         }
@@ -360,8 +363,8 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
           : `No se pudo conectar con GSG en ${url}: ${error instanceof Error ? ((error.cause as { code?: string } | undefined)?.code ?? error.message) : String(error)}`;
         return {
           ok: false,
-          error: limpio(`${motivo}. ${tipo === 'ubicacion' && !opts.idempotenciaUbicacion ? 'Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar; no se reintenta automáticamente.' : 'Se reintenta solo con la misma clave idempotente cuando está habilitada.'}`),
-          reintentable: tipo !== 'ubicacion' || Boolean(opts.idempotenciaUbicacion),
+          error: limpio(`${motivo}. ${tipo === 'ubicacion' && !idempotente ? 'Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar; no se reintenta automáticamente.' : 'Se reintenta solo con la misma clave idempotente cuando está habilitada.'}`),
+          reintentable: tipo !== 'ubicacion' || idempotente,
         };
       } finally {
         clearTimeout(corte);
@@ -379,6 +382,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         // Solo lectura: GET sin cuerpo.
         const respuesta = await doFetch(u.url, {
           method: 'GET',
+          redirect: 'error',
           headers: {
             accept: 'application/json',
             ...cabecerasDeClave(clave),
@@ -387,7 +391,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         });
         const texto = await respuesta.text();
         if (!respuesta.ok) {
-          return { ok: false, status: respuesta.status, error: limpio(`GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}`) };
+          return { ok: false, status: respuesta.status, error: limpio(`GSG respondio ${respuesta.status}: ${limpio(texto).slice(0, 200)}`) };
         }
         try {
           return { ok: true, status: respuesta.status, cuerpo: (texto ? JSON.parse(texto) : {}) as never };
