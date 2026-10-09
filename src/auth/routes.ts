@@ -25,7 +25,7 @@ import { capacidadDe, claveAceptable, hashClave, usuarioAceptable, verificarClav
 import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookies, leerSesion } from './sesion.js';
 import type { ClavesApiRepo } from './claves-api.js';
 import { ETIQUETAS, type ActividadRepo } from './actividad.js';
-import { generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
+import { claveApiVigente, generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
 import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
@@ -189,7 +189,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     if (token) {
       if (!pareceClaveApi(token)) return null;
       const clave = await claves.porHash(hashClaveApi(token));
-      if (!clave) return null;
+      if (!clave || !claveApiVigente(clave, ahora())) return null;
       const t = ahora().getTime();
       if ((usoAnotado.get(clave.id) ?? 0) + ANOTAR_USO_CADA_MS <= t) {
         usoAnotado.set(clave.id, t);
@@ -218,7 +218,17 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     return null;
   }
 
+  const intentosApi = new Map<string, { desde: number; cantidad: number }>();
   app.addHook('onRequest', async (request, reply) => {
+    if (claveDeCabeceras(request.headers) || claveEnBearer(request.headers)) {
+      const t = ahora().getTime();
+      let ventana = intentosApi.get(request.ip);
+      if (!ventana || t - ventana.desde >= 60_000) {
+        if (intentosApi.size >= 2000) intentosApi.delete(intentosApi.keys().next().value!);
+        ventana = { desde: t, cantidad: 0 }; intentosApi.set(request.ip, ventana);
+      }
+      if (++ventana.cantidad > 120) return reply.header('retry-after', String(Math.max(1, Math.ceil((ventana.desde + 60_000 - t) / 1000)))).code(429).send({ error: 'Demasiados intentos de autenticación. Espera un minuto.' });
+    }
     request.usuario = await resolver(request);
     // La recepcion de pedidos de GSG: solo con una clave de API (nunca con la
     // sesion del panel) y con el codigo de cada caso: 401 sin clave o con una
@@ -502,15 +512,24 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   // --- claves de API (solo admin, solo personas) ---------------------------
 
+  app.addHook('onRequest', async (request, reply) => {
+    if (!request.url.startsWith('/admin/claves-api')) return;
+    reply.header('cache-control', 'no-store');
+    if (request.method === 'GET') return;
+    if (request.headers['sec-fetch-site'] === 'cross-site') return reply.code(403).send({ error: 'Solicitud de otro sitio no permitida.' });
+    const origin = request.headers.origin;
+    if (origin) { let valido = false; try { valido = new URL(origin).origin === new URL(config.PUBLIC_BASE_URL).origin; } catch {} if (!valido) return reply.code(403).send({ error: 'Origen no permitido.' }); }
+  });
   app.get('/admin/claves-api', async () => claves.listar());
 
   /** Crea una clave y la devuelve entera: es la unica vez que se ve. */
   app.post('/admin/claves-api', async (request, reply) => {
-    const body = z.object({ nombre: z.string().max(120), permisos: z.array(z.string()).optional() }).parse(request.body ?? {});
+    const body = z.object({ nombre: z.string().max(120), permisos: z.array(z.string().trim().min(1).max(80)).min(1).max(20).optional(), venceAt: z.string().datetime().nullable().optional() }).strict().parse(request.body ?? {});
     const mal = nombreDeClaveAceptable(body.nombre);
     if (mal) return reply.code(400).send({ error: mal });
-    const permisos = permisosAceptables(body.permisos);
+    const permisos = permisosAceptables(body.permisos ?? ['entregas:leer']);
     if ('error' in permisos) return reply.code(400).send({ error: permisos.error });
+    if (body.venceAt && new Date(body.venceAt).getTime() <= ahora().getTime()) return reply.code(400).send({ error: 'El vencimiento debe estar en el futuro.' });
     const clave = generarClaveApi();
     const registro = await claves.crear({
       nombre: body.nombre,
@@ -518,6 +537,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       hash: hashClaveApi(clave),
       creadaPor: request.usuario?.id ?? null,
       permisos: permisos.permisos,
+      venceAt: body.venceAt ? new Date(body.venceAt) : null,
     });
     return { ok: true, clave, registro };
   });
@@ -525,6 +545,29 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
   app.delete<{ Params: { id: string } }>('/admin/claves-api/:id', async (request, reply) => {
     const ok = await claves.revocar(request.params.id);
     if (!ok) return reply.code(404).send({ error: 'Esa clave no existe o ya estaba revocada.' });
+    return { ok: true };
+  });
+
+  app.patch<{ Params: { id: string } }>('/admin/claves-api/:id', async (request, reply) => {
+    const body = z.object({ nombre: z.string().max(80).optional(), permisos: z.array(z.string().trim().min(1).max(80)).min(1).max(20).optional(), activo: z.boolean().optional(), venceAt: z.string().datetime().nullable().optional() }).strict().parse(request.body ?? {});
+    if (!Object.keys(body).length) return reply.code(400).send({ error: 'Indica el cambio.' });
+    if (body.nombre !== undefined) { const mal = nombreDeClaveAceptable(body.nombre); if (mal) return reply.code(400).send({ error: mal }); }
+    const permisos = body.permisos ? permisosAceptables(body.permisos) : null;
+    if (permisos && 'error' in permisos) return reply.code(400).send({ error: permisos.error });
+    if (body.venceAt && new Date(body.venceAt).getTime() <= ahora().getTime()) return reply.code(400).send({ error: 'El vencimiento debe estar en el futuro.' });
+    const registro = await claves.actualizar(request.params.id, { ...body, permisos: permisos && 'permisos' in permisos ? permisos.permisos : undefined, venceAt: body.venceAt === undefined ? undefined : body.venceAt === null ? null : new Date(body.venceAt) });
+    if (!registro) return reply.code(404).send({ error: 'Clave no disponible, revocada o vencida para activación.' });
+    return { ok: true, registro };
+  });
+  app.post<{ Params: { id: string } }>('/admin/claves-api/:id/renovar', async (request, reply) => {
+    const clave = generarClaveApi();
+    const registro = await claves.renovar(request.params.id, hashClaveApi(clave), prefijoDeClave(clave));
+    if (!registro) return reply.code(404).send({ error: 'Clave no disponible o revocada.' });
+    return { ok: true, clave, registro };
+  });
+  app.post<{ Params: { id: string } }>('/admin/claves-api/:id/eliminar', async (request, reply) => {
+    const body = z.object({ nombre: z.string().min(2).max(80) }).strict().parse(request.body ?? {});
+    if (!await claves.eliminar(request.params.id, body.nombre)) return reply.code(404).send({ error: 'La clave no existe o el nombre no coincide.' });
     return { ok: true };
   });
 

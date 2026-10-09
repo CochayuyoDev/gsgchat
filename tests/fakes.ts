@@ -238,15 +238,15 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
   };
   const claves: ClavesApiRepo = {
     async crear(input) {
-      const c = { id: `clave-${seq++}`, nombre: input.nombre, prefijo: input.prefijo, hash: input.hash, creadaPor: input.creadaPor, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null, permisos: input.permisos?.length ? input.permisos : ['*'] };
+      const c = { id: `clave-${seq++}`, nombre: input.nombre, prefijo: input.prefijo, hash: input.hash, creadaPor: input.creadaPor, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null, venceAt: input.venceAt ?? null, desactivadaAt: null, eliminadaAt: null, permisos: input.permisos?.length ? input.permisos : ['*'] };
       clavesMem.push(c);
       return sinHash(c);
     },
     async listar() {
-      return [...clavesMem].reverse().map(sinHash);
+      return [...clavesMem].filter(c => !c.eliminadaAt).reverse().map(sinHash);
     },
     async porHash(hash) {
-      const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt);
+      const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt && !x.desactivadaAt && !x.eliminadaAt && (!x.venceAt || new Date(x.venceAt) > new Date()));
       return c ? sinHash(c) : null;
     },
     async porHashConRevocadas(hash) {
@@ -258,6 +258,25 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       if (!c) return false;
       c.revocadaAt = new Date();
       return true;
+    },
+    async actualizar(id, patch) {
+      const c = clavesMem.find(c => c.id === id && !c.revocadaAt && !c.eliminadaAt);
+      if (!c || (patch.activo === true && c.venceAt && new Date(c.venceAt) <= new Date())) return null;
+      if (patch.nombre !== undefined) c.nombre = patch.nombre.trim();
+      if (patch.permisos !== undefined) c.permisos = patch.permisos;
+      if (patch.venceAt !== undefined) c.venceAt = patch.venceAt;
+      if (patch.activo !== undefined) c.desactivadaAt = patch.activo ? null : new Date();
+      return sinHash(c);
+    },
+    async renovar(id, hash, prefijo) {
+      const c = clavesMem.find(c => c.id === id && !c.revocadaAt && !c.eliminadaAt);
+      if (!c) return null;
+      Object.assign(c, { hash, prefijo, ultimoUsoAt: null }); return sinHash(c);
+    },
+    async eliminar(id, nombre) {
+      const c = clavesMem.find(c => c.id === id && c.nombre === nombre && !c.eliminadaAt);
+      if (!c) return false;
+      c.eliminadaAt = new Date(); c.revocadaAt = new Date(); c.hash = ''; return true;
     },
     async tocarUso(id, at) {
       const c = clavesMem.find((x) => x.id === id);

@@ -1,0 +1,12 @@
+set @clave_ddl = if((select count(*) from information_schema.columns where table_schema = database() and table_name = 'claves_api' and column_name = 'desactivada_at') = 0, 'alter table claves_api add column desactivada_at datetime(3) null', 'select 1');
+prepare clave_stmt from @clave_ddl;
+execute clave_stmt;
+deallocate prepare clave_stmt;
+set @clave_ddl = if((select count(*) from information_schema.columns where table_schema = database() and table_name = 'claves_api' and column_name = 'vence_at') = 0, 'alter table claves_api add column vence_at datetime(3) null', 'select 1');
+prepare clave_stmt from @clave_ddl;
+execute clave_stmt;
+deallocate prepare clave_stmt;
+set @clave_ddl = if((select count(*) from information_schema.columns where table_schema = database() and table_name = 'claves_api' and column_name = 'eliminada_at') = 0, 'alter table claves_api add column eliminada_at datetime(3) null', 'select 1');
+prepare clave_stmt from @clave_ddl;
+execute clave_stmt;
+deallocate prepare clave_stmt;

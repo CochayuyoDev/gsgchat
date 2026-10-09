@@ -626,7 +626,7 @@ ${
   <div class="bloque">
     <h3>Para que GSG conecte su sistema</h3>
     <p class="ayuda">Con una clave, GSG nos manda cada pedido en cuanto entra y se entera de lo que pasa: confirmó, hora avisada, entregado, incidencia.</p>
-    <div class="acciones"><button class="btn" id="gsg-clave" type="button">Crear la clave para GSG</button><span id="gsg-clave-state" class="chip hidden" role="status"></span></div>
+    <div class="acciones"><button class="btn" id="gsg-clave" type="button">Administrar claves API</button><span id="gsg-clave-state" class="chip hidden" role="status"></span></div>
     <div id="gsg-clave-nueva" class="secreto hidden">
       <b>Clave para GSG: cópiala ahora, no se volverá a mostrar.</b>
       <code id="gsg-clave-valor"></code>
@@ -1803,21 +1803,7 @@ if ($('gsg')) {
   $('gsg-api-copiar').onclick = function () { copiar(val('gsg-api-url'), 'gsg-clave-state', 'Dirección'); };
   $('gsg-clave-copiar').onclick = function () { copiar($('gsg-clave-valor').textContent, 'gsg-clave-state', 'Clave'); };
 
-  $('gsg-clave').onclick = async function () {
-    if (!(await confirmarDialogo({ titulo: 'Crear la clave para GSG', texto: 'Se crea una clave de API llamada "GSG" con permiso para mandar y ver las entregas del día y registrar webhooks. Si ya había una clave "GSG", sigue valiendo.', boton: 'Crear la clave' }))) return;
-    try {
-      var r = await api('/admin/claves-api', { method: 'POST', body: { nombre: 'GSG', permisos: ['entregas:gestionar', 'entregas:leer', 'webhooks:gestionar'] } });
-      $('gsg-clave-valor').textContent = r.clave;
-      $('gsg-clave-pasos').innerHTML = [
-        'Dásela a los programadores de GSG junto con esta dirección: ' + location.origin + '/api/v1/entregas. Va en el .env de GSG, no en el de GSGchat (la API Key que te da GSG es otra y va arriba, en la conexión saliente).',
-        'Cada pedido nuevo lo mandan con POST. La clave va en la cabecera X-API-Key: <la clave>.',
-        'Para enterarse de lo que pasa, registran un webhook con POST ' + location.origin + '/api/v1/webhooks.',
-        'Pueden probar contra el simulador antes de tocar nada real: está explicado en el contrato.',
-      ].map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
-      ver('gsg-clave-nueva', true);
-      estado('gsg-clave-state', 'Clave creada.', 'verde');
-    } catch (error) { estado('gsg-clave-state', error.message, 'rojo'); }
-  };
+  $('gsg-clave').onclick = function() { location.href = '/conexion-gsg'; };
 
   var HALLAZGO = { ok: ['verde', 'bien'], falta: ['rojo', 'falta'], formato: ['rojo', 'formato'], sobra: ['ambar', 'sobra'], aviso: ['ambar', 'aviso'] };
   function pintarHallazgos(v) {
