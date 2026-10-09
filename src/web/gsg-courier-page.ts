@@ -1,4 +1,4 @@
-import { PERMISOS } from '../auth/permisos.js';
+import { calcularVencimientoClave } from './vencimiento-clave.js';
 import { appShell } from './shell.js';
 import { escapeHtml } from './login-page.js';
 import { MENSAJE_ERROR_HTTP_JS } from './bandeja-mensajes.js';
@@ -48,7 +48,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
   const ejemplo = JSON.stringify(EJEMPLO_COURIER, null, 2);
   return appShell({ titulo: 'GSG Courier', subtitulo: 'Conexión para recibir y encolar pedidos',
     nombreNegocio: opts.nombreNegocio, demo: opts.demo,
-    css: `.courier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.courier-card{padding:22px;border:1px solid var(--borde);border-radius:16px;background:var(--superficie)}.courier-card h2{margin-top:0}.courier-card input,.courier-card textarea{width:100%;box-sizing:border-box}.courier-card input{padding:12px}.courier-card textarea{min-height:300px;padding:14px;font:13px/1.6 monospace}.courier-wide{grid-column:1/-1}.courier-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.courier-scroll{overflow:auto}.courier-card table{width:100%;border-collapse:collapse}.courier-card td,.courier-card th{padding:10px;text-align:left;border-bottom:1px solid var(--borde)}.courier-card pre{white-space:pre-wrap;overflow-wrap:anywhere}.courier-secret{overflow-wrap:anywhere}.courier-card small{display:block;margin-top:8px}.courier-status{padding:12px;border-radius:10px;background:var(--superficie-2);margin:12px 0}@media(max-width:800px){.courier-grid{grid-template-columns:1fr}}`,
+    css: `.courier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.courier-card{padding:22px;border:1px solid var(--borde);border-radius:16px;background:var(--superficie)}.courier-card h2{margin-top:0}.courier-card input,.courier-card textarea{width:100%;box-sizing:border-box}.courier-card input{padding:12px}.courier-card textarea{min-height:300px;padding:14px;font:13px/1.6 monospace}.clave-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.clave-field label{display:block;margin-bottom:8px;font-weight:600}.clave-field select,.clave-field input{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--borde);border-radius:10px;background:var(--superficie);color:inherit;font:inherit}.clave-permisos{margin:20px 0;padding:18px;border:1px solid var(--borde);border-radius:12px}.clave-permisos-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.clave-permiso{display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--superficie-2);border-radius:8px;font-size:13px}.courier-card .clave-permiso input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.clave-secret-panel{background:var(--superficie-2);padding:20px;border:1px solid var(--borde);border-radius:12px;margin-bottom:18px}.courier-secret{display:block;padding:12px;background:var(--superficie);border-radius:8px}.courier-wide{grid-column:1/-1}.courier-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.courier-scroll{overflow:auto}.courier-card table{width:100%;border-collapse:collapse}.courier-card td,.courier-card th{padding:10px;text-align:left;border-bottom:1px solid var(--borde)}.courier-card pre{white-space:pre-wrap;overflow-wrap:anywhere}.courier-secret{overflow-wrap:anywhere}.courier-card small{display:block;margin-top:8px}.courier-status{padding:12px;border-radius:10px;background:var(--superficie-2);margin:12px 0}@media(max-width:800px){.courier-grid,.clave-form-grid,.clave-permisos-grid{grid-template-columns:1fr}}`,
     contenido: `<div class="courier-grid">
       <section class="courier-card courier-wide"><h2>Courier envía → GSGchat recibe → el sistema procesa</h2>
         <p>Esta conexión recibe y encola los pedidos. El motor de GSGchat se encarga de los mensajes y sus intentos.</p>
@@ -68,11 +68,12 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       </section>
       <section class="courier-card courier-wide"><h2>2. Claves API de GSGchat</h2>
         <p>Administra el acceso de cada integración. El sistema guarda únicamente la huella de la clave.</p>
-        <form id="courier-form"><label for="courier-nombre">¿Para quién es esta clave?</label><input id="courier-nombre" required minlength="2" maxlength="80" autocomplete="off" placeholder="Ejemplo: GSG principal">
-        <label for="courier-vence">Vencimiento opcional</label><input id="courier-vence" type="datetime-local">
-        <fieldset><legend>Permisos</legend>${Object.entries(PERMISOS).map(([valor, texto]) => `<label style="display:block"><input style="width:auto" type="checkbox" name="clave-permiso" value="${escapeHtml(valor)}" ${valor === 'entregas:leer' ? 'checked' : ''}> ${escapeHtml(texto)}</label>`).join('')}</fieldset>
+        <form id="courier-form"><div class="clave-form-grid"><div class="clave-field"><label for="courier-nombre">¿Para quién es esta clave?</label><input id="courier-nombre" required minlength="2" maxlength="80" autocomplete="off" placeholder="Ejemplo: GSG principal"></div>
+        <div class="clave-field"><label for="courier-vigencia">Vencimiento</label><select id="courier-vigencia"><option value="nunca">No se acaba nunca</option><option value="7">En 7 días</option><option value="30">En 30 días</option><option value="90">En 90 días</option><option value="365">En 1 año (365 días)</option><option value="fecha">Digitar una fecha</option></select></div>
+        <div class="clave-field" id="courier-fecha-campo" hidden><label for="courier-vence">Fecha y hora de vencimiento</label><input id="courier-vence" type="text" maxlength="16" placeholder="DD/MM/AAAA HH:mm" autocomplete="off" aria-describedby="courier-fecha-ayuda"><small id="courier-fecha-ayuda">Puedes escribir solo la fecha; vencerá a las 23:59. Se usa la hora local de tu navegador.</small></div></div>
+
         <div class="courier-actions"><button class="btn primario" id="courier-crear" type="submit" ${opts.disponible ? '' : 'disabled'}>Crear clave</button><button class="btn" id="courier-cancelar" type="button" hidden>Cancelar edición</button></div></form>
-        <div id="courier-nueva" hidden style="background:var(--superficie-2);padding:18px;border:1px solid #d9a441;border-radius:12px"><h3 id="courier-secreto-titulo"></h3><p><strong>Guarda esta clave en un lugar seguro porque luego no la volverás a ver.</strong></p><p>Solo se muestra ahora. Si la pierdes, renueva la clave: la anterior dejará de funcionar.</p><code id="courier-secreto" class="courier-secret"></code><div class="courier-actions"><button class="btn" id="courier-copiar-clave">Copiar clave</button><button class="btn" id="courier-ocultar">Ocultar clave (ya la copié)</button></div></div>
+        <div id="courier-nueva" hidden class="clave-secret-panel"><h3 id="courier-secreto-titulo"></h3><p><strong>Guarda esta clave en un lugar seguro porque luego no la volverás a ver.</strong></p><p>Solo se muestra ahora. Si la pierdes, renueva la clave: la anterior dejará de funcionar.</p><code id="courier-secreto" class="courier-secret"></code><div class="courier-actions"><button class="btn" id="courier-copiar-clave">Copiar clave</button><button class="btn" id="courier-ocultar">Ocultar clave (ya la copié)</button></div></div>
         <div id="courier-claves" class="courier-scroll"></div><p id="courier-aviso" role="status" aria-live="polite"></p>
       </section>
       <section class="courier-card courier-wide"><h2>3. Validar el formato de pedidos</h2>
@@ -121,8 +122,11 @@ ${MENSAJE_ERROR_HTTP_JS}
   window.addEventListener('pageshow', function(e) { if (e.persisted) ocultar(); });
   function mostrar(r) { ocultar(); $('courier-secreto-titulo').textContent = 'Copia ahora la clave de «' + r.registro.nombre + '»'; $('courier-secreto').textContent = r.clave; $('courier-nueva').hidden = false; }
   function estadoClave(c) { return c.revocadaAt ? 'Revocada' : c.venceAt && new Date(c.venceAt) <= new Date() ? 'Vencida' : c.desactivadaAt ? 'Desactivada' : 'Activa'; }
-  function fecha(f) { return f ? new Date(f).toLocaleString('es-PE') : '—'; }
-  function cancelar() { editando = null; $('courier-form').reset(); $('courier-crear').textContent = 'Crear clave'; $('courier-cancelar').hidden = true; }
+  function fecha(f) { return f ? new Date(f).toLocaleString('es-PE') : 'No se acaba nunca'; }
+  var calcularVencimiento = ${calcularVencimientoClave.toString()};
+  function cambiarVigencia() { var manual = $('courier-vigencia').value === 'fecha'; $('courier-fecha-campo').hidden = !manual; $('courier-vence').required = manual; }
+  $('courier-vigencia').onchange = cambiarVigencia;
+  function cancelar() { editando = null; $('courier-form').reset(); cambiarVigencia(); $('courier-crear').textContent = 'Crear clave'; $('courier-cancelar').hidden = true; }
   $('courier-cancelar').onclick = cancelar;
   $('courier-descargar').onclick = function() {
     var url = URL.createObjectURL(new Blob([ejemplo], {type:'application/json'}));
@@ -133,9 +137,9 @@ ${MENSAJE_ERROR_HTTP_JS}
     try {
       var claves = await api('/admin/claves-api');
       var activas = claves.filter(function(c) { return estadoClave(c) === 'Activa' && (c.permisos || []).some(function(p) { return p === '*' || p === 'entregas:gestionar'; }); });
-      $('courier-claves').innerHTML = claves.length ? '<table><thead><tr><th>Nombre / identificador</th><th>Permisos</th><th>Creación / vencimiento</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' + claves.map(function(c) {
+      $('courier-claves').innerHTML = claves.length ? '<table><thead><tr><th>Nombre / identificador</th><th>Creación / vencimiento</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' + claves.map(function(c) {
         var estado = estadoClave(c);
-        return '<tr><td><b>' + esc(c.nombre) + '</b><br><small>' + esc(c.id) + '</small></td><td>' + esc(c.permisos.join(', ')) + '</td><td>' + esc(fecha(c.createdAt)) + '<br>' + esc(fecha(c.venceAt)) + '</td><td>' + esc(c.ultimoUsoAt ? fecha(c.ultimoUsoAt) : 'Nunca se usó') + '</td><td>' + estado + '</td><td>' + (c.revocadaAt ? '' : '<button class="btn sm" data-accion="estado" data-id="' + esc(c.id) + '" ' + (estado === 'Vencida' ? 'disabled' : '') + '>' + (c.desactivadaAt ? 'Activar' : 'Desactivar') + '</button> <button class="btn sm" data-accion="renovar" data-id="' + esc(c.id) + '">Renovar</button> <button class="btn sm" data-accion="editar" data-id="' + esc(c.id) + '">Editar</button> ') + '<button class="btn sm peligro" data-accion="eliminar" data-id="' + esc(c.id) + '">Eliminar</button></td></tr>';
+        return '<tr><td><b>' + esc(c.nombre) + '</b><br><small>' + esc(c.id) + '</small></td><td>' + esc(fecha(c.createdAt)) + '<br>' + esc(fecha(c.venceAt)) + '</td><td>' + esc(c.ultimoUsoAt ? fecha(c.ultimoUsoAt) : 'Nunca se usó') + '</td><td>' + estado + '</td><td>' + (c.revocadaAt ? '' : '<button class="btn sm" data-accion="estado" data-id="' + esc(c.id) + '" ' + (estado === 'Vencida' ? 'disabled' : '') + '>' + (c.desactivadaAt ? 'Activar' : 'Desactivar') + '</button> <button class="btn sm" data-accion="renovar" data-id="' + esc(c.id) + '">Renovar</button> <button class="btn sm" data-accion="editar" data-id="' + esc(c.id) + '">Editar</button> ') + '<button class="btn sm peligro" data-accion="eliminar" data-id="' + esc(c.id) + '">Eliminar</button></td></tr>';
       }).join('') + '</tbody></table>' : '<p>No hay claves creadas.</p>';
       $('courier-claves').querySelectorAll('[data-accion]').forEach(function(b) {
         b.onclick = async function() {
@@ -143,8 +147,12 @@ ${MENSAJE_ERROR_HTTP_JS}
           var c = claves.find(function(c) { return c.id === b.dataset.id; });
           if (b.dataset.accion === 'editar') {
             editando = c.id; $('courier-nombre').value = c.nombre;
-            $('courier-vence').value = c.venceAt ? new Date(new Date(c.venceAt).getTime() - new Date(c.venceAt).getTimezoneOffset() * 60000).toISOString().slice(0,16) : '';
-            document.querySelectorAll('[name="clave-permiso"]').forEach(function(x) { x.checked = c.permisos.includes(x.value); });
+            $('courier-vigencia').value = c.venceAt ? 'fecha' : 'nunca';
+            var vencimiento = c.venceAt ? new Date(c.venceAt) : null;
+            var dos = function(n) { return String(n).padStart(2, '0'); };
+            $('courier-vence').value = vencimiento ? dos(vencimiento.getDate()) + '/' + dos(vencimiento.getMonth()+1) + '/' + vencimiento.getFullYear() + ' ' + dos(vencimiento.getHours()) + ':' + dos(vencimiento.getMinutes()) : '';
+            cambiarVigencia();
+
             $('courier-crear').textContent = 'Guardar cambios'; $('courier-cancelar').hidden = false; $('courier-nombre').focus(); return;
           }
           var accion = b.dataset.accion;
@@ -181,9 +189,12 @@ ${MENSAJE_ERROR_HTTP_JS}
   }
   $('courier-form').onsubmit = async function(e) {
     e.preventDefault(); if (ocupada) return;
-    var permisos = Array.from(document.querySelectorAll('[name="clave-permiso"]:checked')).map(function(x) { return x.value; });
-    if (!permisos.length) { aviso('Selecciona al menos un permiso.'); return; }
-    var body = {nombre:$('courier-nombre').value.trim(), permisos:permisos, venceAt:$('courier-vence').value ? new Date($('courier-vence').value).toISOString() : null};
+
+
+    var venceAt;
+    try { venceAt = calcularVencimiento($('courier-vigencia').value, $('courier-vence').value); } catch(e) { aviso(e.message); return; }
+    var body = {nombre:$('courier-nombre').value.trim(), venceAt:venceAt};
+    if (!editando) body.permisos = ['entregas:gestionar', 'entregas:leer'];
     ocupada = true; $('courier-crear').disabled = true;
     try {
       ocultar();

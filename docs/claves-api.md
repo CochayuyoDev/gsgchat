@@ -1,6 +1,6 @@
 # Administración de claves API
 
-En **API y endpoint GSG** (`/conexion-gsg`) se crean claves con nombre obligatorio, permisos explícitos y vencimiento opcional. La clave completa aparece únicamente al crearla o renovarla. Copiarla no la oculta automáticamente; **Ocultar clave**, recargar o salir elimina el secreto de la pantalla. No se guarda en el almacenamiento del navegador. Las respuestas administrativas usan `Cache-Control: no-store`.
+En **API y endpoint GSG** (`/conexion-gsg`) se crean claves con nombre obligatorio y vencimiento seleccionable: **No se acaba nunca**, 7, 30, 90 o 365 días, o fecha manual `DD/MM/AAAA HH:mm`. Si solo se escribe la fecha, vence a las 23:59, según la hora local del navegador. La pantalla no ofrece un selector de permisos: las nuevas claves utilizan `entregas:gestionar` y `entregas:leer` para el flujo GSG. Editar conserva los permisos de las claves anteriores. La clave completa aparece únicamente al crearla o renovarla. Copiarla no la oculta automáticamente; **Ocultar clave**, recargar o salir elimina el secreto de la pantalla. No se guarda en el almacenamiento del navegador. Las respuestas administrativas usan `Cache-Control: no-store`.
 
 El servidor almacena SHA-256 de un secreto aleatorio de 48 caracteres generado mediante `crypto.randomInt`, sin sesgo modular. La tabla muestra el identificador público, nombre, permisos, fechas, último uso y estado. Las claves anteriores conservan sus permisos; las nuevas sin permisos explícitos reciben solo `entregas:leer`.
 
