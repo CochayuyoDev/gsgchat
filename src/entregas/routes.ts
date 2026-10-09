@@ -56,6 +56,7 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   const soloAdmin = (request: { usuario?: { rol?: string; porToken?: boolean } | null }) => request.usuario?.rol === 'admin' && !request.usuario.porToken;
 
   app.get('/admin/entregas', async () => entregas.resumen());
+  app.get('/admin/entregas/seguimiento/estado', async () => entregas.estadoSeguimiento());
 
   // La bandeja de errores de mensajes: los pedidos de ESTA tienda (cada tienda
   // tiene su app y su base) cuyo primer mensaje no salió. Ver src/entregas/primer-mensaje.ts.

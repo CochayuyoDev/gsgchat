@@ -236,7 +236,7 @@ describe('la cola de reportes ante cada respuesta de GSG', () => {
     const f = fetchFalso(() => (bien ? new Response('{"id":"GSG-1"}', { status: 200 }) : fallo()));
     const repos = createFakeRepos();
     await encolar(repos, 2);
-    const puerto = crearPuertoHttp({ url: BASE, rutaUbicacion: RUTA, token: CLAVE, fetchImpl: f.impl });
+    const puerto = crearPuertoHttp({ url: BASE, rutaUbicacion: RUTA, token: CLAVE, fetchImpl: f.impl, idempotenciaUbicacion: true });
     expect(await despacharReportes(repos, puerto)).toMatchObject({ intentados: 2, enviados: 0, fallidos: 0 });
     expect(repos.rutas._reportes.every((r) => r.estado === 'pendiente')).toBe(true);
     bien = true;
@@ -254,7 +254,7 @@ describe('la cola de reportes ante cada respuesta de GSG', () => {
       }));
       const repos = createFakeRepos();
       await encolar(repos, 1);
-      const puerto = crearPuertoHttp({ url: BASE, rutaUbicacion: RUTA, token: CLAVE, fetchImpl: f.impl, timeoutSegundos: 1 });
+      const puerto = crearPuertoHttp({ url: BASE, rutaUbicacion: RUTA, token: CLAVE, fetchImpl: f.impl, timeoutSegundos: 1, idempotenciaUbicacion: true });
       const p = despacharReportes(repos, puerto);
       await vi.advanceTimersByTimeAsync(6_000);
       const r = await p;

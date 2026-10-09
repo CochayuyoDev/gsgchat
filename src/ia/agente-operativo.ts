@@ -780,8 +780,8 @@ export function promptClasificadorPinLejos(): string {
 
 /** Lo que las reglas saben decir de la respuesta a «¿es ahí?»: si, no u otra. */
 export function clasificarPinLejos(texto: string, boton?: string | null): 'si' | 'no' | 'otra' {
-  if (boton && /^entrega:pinsi:\d+$/.test(boton)) return 'si';
-  if (boton && /^entrega:pinno:\d+$/.test(boton)) return 'no';
+  if (boton && /^entrega:pinsi:\d+(?::\d+)?$/.test(boton)) return 'si';
+  if (boton && /^entrega:pinno:\d+(?::\d+)?$/.test(boton)) return 'no';
   const t = sinTildes(texto ?? '').replace(/[¿?¡!.,]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || detectarManipulacion(texto)) return 'otra';
   if (/\b(no es (ahi|alli|ahy|ahí)|esta mal|la mande mal|me equivoque|otra ubicacion|te mando otra|les mando otra|no es mi casa|no es la correcta|incorrect[ao])\b/.test(t)) return 'no';
@@ -825,7 +825,7 @@ export function leerClaseConfirmarGsg(respuesta: string): ClaseConfirmarGsg {
 /** Lo que va detrás de la explicación cuando la anterior fue la misma (nunca dos veces seguidas el mismo texto). */
 export const OTRA_VEZ_SI_NO = 'Solo necesitamos tu SÍ o tu NO para salir con tu pedido. ¡Gracias!';
 
-async function atenderConfirmarGsg(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null }, turno: TurnoGsg, ahora: Date): Promise<ResultadoRegla> {
+async function atenderConfirmarGsg(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null; citaId?: string | null }, turno: TurnoGsg, ahora: Date): Promise<ResultadoRegla> {
   const { repos } = deps;
   const texto = entrada.texto.trim();
   const que = texto ? `"${texto.slice(0, 160)}"` : `un ${entrada.tipo === 'audio' ? 'audio' : entrada.tipo === 'sticker' ? 'sticker' : entrada.tipo === 'image' ? 'foto' : 'mensaje sin texto'}`;
@@ -993,7 +993,7 @@ function motivoUbicacionRegistrada(contact: Contact): string {
  * reglas); lo que sale son textos fijos: SÍ → UBI REGISTRADA; NO → que mande
  * la correcta; otra cosa → se le pregunta otra vez y, a la segunda, cuenta como SÍ.
  */
-async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null }, que: string, turno: TurnoGsg): Promise<ResultadoRegla | null> {
+async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null; citaId?: string | null }, que: string, turno: TurnoGsg): Promise<ResultadoRegla | null> {
   const texto = entrada.texto.trim();
   turno.esperaba = '¿es ahí? (pin lejos de su distrito)';
   // Un sticker o una foto sin texto no contesta «¿es ahí?»: ni gasta la
@@ -1006,7 +1006,7 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
   }
   let clase: 'si' | 'no' | 'otra' = 'otra';
   let como = 'botón';
-  if (entrada.boton && /^entrega:pin(si|no):\d+$/.test(entrada.boton)) {
+  if (entrada.boton && /^entrega:pin(si|no):\d+(?::\d+)?$/.test(entrada.boton)) {
     clase = clasificarPinLejos('', entrada.boton);
     turno.como = 'boton';
   } else if (texto) {
@@ -1032,7 +1032,7 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
   turno.detalle = como;
   turno.intencion = clase === 'otra' ? 'ajena' : 'corregir_ubicacion';
   turno.dato = clase === 'si' ? 'sí, es ahí' : clase === 'no' ? 'no es ahí' : null;
-  const r = await deps.entregas!.responderPinLejos(contact.phone, clase, texto || que, como).catch((error: unknown) => {
+  const r = await deps.entregas!.responderPinLejos(contact.phone, clase, texto || que, como, entrada.boton ?? undefined, entrada.citaId).catch((error: unknown) => {
     deps.log?.('no se pudo atender la respuesta al pin lejano', { detalle: error instanceof Error ? error.message : String(error) });
     return null;
   });
@@ -1056,15 +1056,15 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
     turno.respuesta = 'plantilla para mandar la ubicación correcta';
     return 'pin_lejos';
   }
-  await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, interactive: { body: r.texto, buttons: r.botones ?? [] } });
+  const aclaracion = await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, interactive: { body: r.texto, buttons: r.botones ?? [] } });
+  if (aclaracion.ok) await deps.entregas!.vincularPropuesta(r.entrega, aclaracion.wamid);
   turno.respuesta = 'una pregunta de aclaración: ¿es ahí? (SÍ / NO)';
   return 'pin_lejos';
 }
 
 /**
- * Escribió su dirección en vez del pin: NO gasta una insistencia. Si el mapa
- * gratuito la ubica bien (y cae en su distrito) se registra como ubicación
- * aproximada; si no, queda anotada y se le pide el pin con amabilidad.
+ * Escribió su dirección: no gasta una insistencia. El punto del mapa espera
+ * confirmación; sin una dirección válida se pide que la complete o mande el pin.
  */
 /** «Me equivoqué de ubicación» con la ubicación ya registrada: el texto fijo de antes o después de la hora límite. */
 async function atenderCambioUbicacion(deps: DepsAgente, contact: Contact, que: string, como: string): Promise<ResultadoRegla | null> {
@@ -1094,7 +1094,8 @@ async function atenderDireccionEscrita(deps: DepsAgente, contact: Contact, abier
     await deps.entregas?.anotarAgente(contact.phone, `volvió a escribir la misma dirección (${como}): no se le repite el mismo mensaje`).catch(() => undefined);
     return 'silencio';
   }
-  await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, interactive: { body: r.texto, locationRequest: true } });
+  const enviada = await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, interactive: { body: r.texto, locationRequest: true } });
+  if (enviada.ok) await deps.entregas!.vincularPropuesta(r.entrega, enviada.wamid);
   if (abierta) {
     await repos.rutas
       .actualizarSolicitud(abierta.id, {
@@ -1130,7 +1131,7 @@ export function esAcuse(texto: string): boolean {
   return /^(s+i+|si+ es ahi|ok+|okay|oki|vale|dale|listo|ya|ya esta|perfecto|bueno|de acuerdo|entendido|genial|excelente|claro|gracias|muchas gracias|mil gracias|gracias a ti|ok gracias|si gracias|👍+|🙏+|👌+)[\s.!,]*$/u.test(t);
 }
 
-export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null; mensajes?: number }): Promise<ResultadoRegla> {
+export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null; mensajes?: number; citaId?: string | null }): Promise<ResultadoRegla> {
   const clave = contact.phone;
   const anterior = enCurso.get(clave) ?? Promise.resolve();
   const turno = anterior
@@ -1155,7 +1156,7 @@ export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, ent
   }
 }
 
-async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null }, turno: TurnoGsg): Promise<ResultadoRegla> {
+async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entrada: { texto: string; tipo: string; boton?: string | null; citaId?: string | null }, turno: TurnoGsg): Promise<ResultadoRegla> {
   const { repos } = deps;
   const ahora = deps.ahora?.() ?? new Date();
   const texto = entrada.texto.trim();
@@ -1238,6 +1239,13 @@ async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entr
   if (deps.entregas && (await deps.entregas.pinLejosPendiente(contact.phone).catch(() => false))) {
     const r = await atenderPinLejos(deps, contact, entrada, que, turno);
     if (r) return r;
+  }
+  if (deps.entregas && estado === 'pendiente' && leerConfirmacionConReglas(texto).decision === 'si') {
+    const r = await deps.entregas.alTexto(contact, texto).catch(() => null);
+    if (r?.atendida && r.responder) {
+      await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, text: r.responder });
+      return 'direccion_anotada';
+    }
   }
   // Un sticker, una reacción o un archivo sin texto no dicen nada: silencio,
   // y queda anotado (pedido del dueño, 06/10). Una foto o un documento

@@ -437,6 +437,12 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">De GSG llegan los pedidos del día, y a GSG le mandamos cada ubicación que registra el cliente.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>
+  <details><summary>Ubicación y seguimiento del cliente</summary>
+    <p>Las direcciones escritas y los enlaces de Maps se confirman antes de reportar la ubicación. Los horarios y el orden de reparto proceden de GSG.</p>
+    <p id="seguimiento-estado" role="status" aria-live="polite">Revisando seguimiento…</p>
+    <div id="seguimiento-pedidos" class="ayuda"></div>
+    <button class="btn sm" id="seguimiento-refrescar" type="button">Actualizar diagnóstico</button>
+  </details>
   <div id="gsg-config-error" class="nota riesgo hidden" role="alert"></div>
   <details class="con-form" id="gsg-form-caja"><summary id="gsg-form-resumen">Cambiar la URL o la API Key de GSG</summary>
   <form id="gsg-form" novalidate>
@@ -620,7 +626,7 @@ ${
   <div class="bloque">
     <h3>Para que GSG conecte su sistema</h3>
     <p class="ayuda">Con una clave, GSG nos manda cada pedido en cuanto entra y se entera de lo que pasa: confirmó, hora avisada, entregado, incidencia.</p>
-    <div class="acciones"><button class="btn" id="gsg-clave" type="button">Crear la clave para GSG</button><span id="gsg-clave-state" class="chip hidden" role="status"></span></div>
+    <div class="acciones"><button class="btn" id="gsg-clave" type="button">Administrar claves API</button><span id="gsg-clave-state" class="chip hidden" role="status"></span></div>
     <div id="gsg-clave-nueva" class="secreto hidden">
       <b>Clave para GSG: cópiala ahora, no se volverá a mostrar.</b>
       <code id="gsg-clave-valor"></code>
@@ -1797,21 +1803,7 @@ if ($('gsg')) {
   $('gsg-api-copiar').onclick = function () { copiar(val('gsg-api-url'), 'gsg-clave-state', 'Dirección'); };
   $('gsg-clave-copiar').onclick = function () { copiar($('gsg-clave-valor').textContent, 'gsg-clave-state', 'Clave'); };
 
-  $('gsg-clave').onclick = async function () {
-    if (!(await confirmarDialogo({ titulo: 'Crear la clave para GSG', texto: 'Se crea una clave de API llamada "GSG" con permiso para mandar y ver las entregas del día y registrar webhooks. Si ya había una clave "GSG", sigue valiendo.', boton: 'Crear la clave' }))) return;
-    try {
-      var r = await api('/admin/claves-api', { method: 'POST', body: { nombre: 'GSG', permisos: ['entregas:gestionar', 'entregas:leer', 'webhooks:gestionar'] } });
-      $('gsg-clave-valor').textContent = r.clave;
-      $('gsg-clave-pasos').innerHTML = [
-        'Dásela a los programadores de GSG junto con esta dirección: ' + location.origin + '/api/v1/entregas. Va en el .env de GSG, no en el de GSGchat (la API Key que te da GSG es otra y va arriba, en la conexión saliente).',
-        'Cada pedido nuevo lo mandan con POST. La clave va en la cabecera X-API-Key: <la clave>.',
-        'Para enterarse de lo que pasa, registran un webhook con POST ' + location.origin + '/api/v1/webhooks.',
-        'Pueden probar contra el simulador antes de tocar nada real: está explicado en el contrato.',
-      ].map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
-      ver('gsg-clave-nueva', true);
-      estado('gsg-clave-state', 'Clave creada.', 'verde');
-    } catch (error) { estado('gsg-clave-state', error.message, 'rojo'); }
-  };
+  $('gsg-clave').onclick = function() { location.href = '/conexion-gsg'; };
 
   var HALLAZGO = { ok: ['verde', 'bien'], falta: ['rojo', 'falta'], formato: ['rojo', 'formato'], sobra: ['ambar', 'sobra'], aviso: ['ambar', 'aviso'] };
   function pintarHallazgos(v) {
@@ -1876,6 +1868,21 @@ if ($('gsg')) {
     catch (error) { estado('gsg-verificar-state', error.message, 'rojo'); }
   };
   $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
+  async function cargarSeguimiento() {
+    var caja = $('seguimiento-estado');
+    if (!caja) return;
+    try {
+      var r = await api('/admin/entregas/seguimiento/estado');
+      caja.textContent = (r.conectado ? 'GSG configurado.' : 'Falta conectar GSG.') + ' ' +
+        (r.googleConfigurado ? 'Cálculo de rutas configurado.' : 'Falta configurar Google Maps para calcular kilómetros y tiempos.') + ' ' +
+        (r.ultimoExito ? 'Último seguimiento válido: ' + new Date(r.ultimoExito).toLocaleString() + '.' : 'Todavía no se ha obtenido seguimiento válido.') + ' ' + (r.ultimoError || '');
+      $('seguimiento-pedidos').textContent = (r.pedidos || []).map(function(p) {
+        return p.tracking + ': ' + (p.fallo ? p.fallo.proveedor + ' / ' + p.fallo.codigo + ' — ' + p.fallo.detalle : 'seguimiento válido') + (p.gpsAt ? ' · GPS ' + new Date(p.gpsAt).toLocaleString() : '') + (p.versionRuta ? ' · ruta ' + p.versionRuta : '');
+      }).join(' | ');
+    } catch (error) { caja.textContent = 'No se pudo consultar el diagnóstico: ' + error.message; }
+  }
+  if ($('seguimiento-refrescar')) $('seguimiento-refrescar').onclick = cargarSeguimiento;
+  cargarSeguimiento();
   cargarGsg();
   cargarExtras();
 }

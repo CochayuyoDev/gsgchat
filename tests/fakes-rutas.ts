@@ -367,6 +367,12 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       return fila;
     },
 
+    async reservarReporte(id) {
+      const r = reportes.find(x => x.id === id);
+      if (!r || r.estado !== 'pendiente') return false;
+      r.estado = 'fallido'; r.ultimoError = 'Resultado incierto: envío reservado.';
+      return true;
+    },
     async reportesPendientes(limite) {
       return reportes.filter((r) => r.estado === 'pendiente').slice(0, limite);
     },

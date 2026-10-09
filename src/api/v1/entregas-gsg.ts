@@ -30,6 +30,7 @@ import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
 import type { EntregasRepo } from '../../entregas/repo.js';
 import type { ActividadRepo } from '../../auth/actividad.js';
 import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio } from '../../entregas/datos-envio.js';
+import { horarioGsgSchema } from '../../entregas/seguimiento-gsg.js';
 import { vistaMensaje, type VistaMensaje } from '../../entregas/primer-mensaje.js';
 import { enviarError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type DetalleCampo } from '../errores.js';
 
@@ -70,6 +71,7 @@ const textoOpc = z.union([z.string().max(200), z.number()]).nullable().optional(
  * campos sueltos. Ver datosEnvioDeCrudo.
  */
 export const CAMPOS_DATOS_ENVIO = {
+  horarioEntrega: horarioGsgSchema.nullable().optional(),
   costServ: textoOpc,
   referenciaDireccion: textoOpc,
   fecRegistro: textoOpc,
@@ -220,6 +222,7 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     nombre: e.nombre,
     direccion: e.direccion,
     distrito: e.distrito,
+    horarioEntrega: e.datosEnvio?.horarioEntregaDesde && e.datosEnvio?.horarioEntregaHasta ? { desde: e.datosEnvio.horarioEntregaDesde, hasta: e.datosEnvio.horarioEntregaHasta, ...(e.datosEnvio.horarioEntregaFechaDesde ? { fechaDesde: e.datosEnvio.horarioEntregaFechaDesde, fechaHasta: e.datosEnvio.horarioEntregaFechaHasta, zonaHoraria: e.datosEnvio.horarioEntregaZonaHoraria } : {}) } : null,
     notas: e.notas,
     costServ: e.datosEnvio?.costServ ?? null,
     referenciaDireccion: e.datosEnvio?.referenciaDireccion ?? null,

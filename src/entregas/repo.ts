@@ -106,6 +106,11 @@ export interface PatchMotorizado {
  * (textos.ts → solicitudUbicacion). Todo opcional: lo que falta no sale.
  */
 export interface DatosEnvio {
+  horarioEntregaDesde?: string | null;
+  horarioEntregaHasta?: string | null;
+  horarioEntregaFechaDesde?: string | null;
+  horarioEntregaFechaHasta?: string | null;
+  horarioEntregaZonaHoraria?: string | null;
   costServ?: string | null;
   referenciaDireccion?: string | null;
   fecRegistro?: string | null;
@@ -152,7 +157,7 @@ const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['costServ', 'referenciaDire
 export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio | null {
   if (!d || typeof d !== 'object') return null;
   const limpio: DatosEnvio = {};
-  for (const clave of CLAVES_DATOS_ENVIO) {
+  for (const clave of [...CLAVES_DATOS_ENVIO, 'horarioEntregaDesde', 'horarioEntregaHasta', 'horarioEntregaFechaDesde', 'horarioEntregaFechaHasta', 'horarioEntregaZonaHoraria'] as Array<keyof DatosEnvio>) {
     const v = (d as Record<string, unknown>)[clave];
     if (v === null || v === undefined) continue;
     const texto = String(v).trim().slice(0, 200);
@@ -388,6 +393,7 @@ export interface EntregasRepo {
   /** Las entregas del dia (o todas las vivas de cualquier dia si no se pasa dia). */
   listar(filtro: { dia?: string; estado?: EstadoEntrega; estados?: EstadoEntrega[]; q?: string; limit?: number }): Promise<Entrega[]>;
   actualizar(id: number, patch: PatchEntrega): Promise<Entrega | null>;
+  registrarUbicacionAtomica(id: number, patch: PatchEntrega, reporte: { loteId: string | null; payload: Record<string, unknown> } | null, propuestaAt?: Date): Promise<Entrega | null>;
   quitar(id: number): Promise<Entrega | null>;
   cifras(dia: string): Promise<Record<string, number>>;
   /** Las que toca pedir confirmacion ahora. */
@@ -946,6 +952,33 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         valores,
       );
       return rows.map(entregaDeFila);
+    },
+    async registrarUbicacionAtomica(id, patch, reporte, propuestaAt) {
+      const c = await pool.connect();
+      try {
+        await c.query('begin');
+        const { rows } = await c.query<EntregaRow>('select * from entregas where id = $1 for update', [id]);
+        const actual = rows[0] ? entregaDeFila(rows[0]) : null;
+        const obsoleta = propuestaAt && (!actual?.pinPropuestoAt || actual.pinPropuestoAt.getTime() !== propuestaAt.getTime() || actual.pinPropuestoLat !== patch.lat || actual.pinPropuestoLng !== patch.lng);
+        const duplicada = actual?.ubicacionEstado === 'recibida' && actual.lat === patch.lat && actual.lng === patch.lng;
+        if (!actual || obsoleta || duplicada || ESTADOS_ENTREGA_FINALES.includes(actual.estado)) {
+          await c.query('rollback'); return null;
+        }
+        const sets: string[] = [], valores: unknown[] = [];
+        for (const [clave, columna] of COLUMNAS_ENTREGA) {
+          if (patch[clave] === undefined) continue;
+          const v = patch[clave];
+          valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : clave === 'datosEnvio' ? (v ? JSON.stringify(v) : null) : v);
+          sets.push(columna + ' = $' + valores.length);
+        }
+        valores.push(id);
+        await c.query('update entregas set ' + sets.join(', ') + ', updated_at = now(3) where id = $' + valores.length, valores);
+        if (reporte) await c.query('insert into rutas_reportes (solicitud_id, lote_id, tipo, payload) values (null,$1,$2,$3)', [reporte.loteId, 'ubicacion', JSON.stringify(reporte.payload)]);
+        const guardada = await c.query<EntregaRow>('select * from entregas where id = $1', [id]);
+        await c.query('commit');
+        return entregaDeFila(guardada.rows[0]!);
+      } catch (error) { await c.query('rollback'); throw error; }
+      finally { c.release(); }
     },
     async actualizar(id, patch) {
       const sets: string[] = [];

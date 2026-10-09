@@ -41,6 +41,9 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/usuarios\/:id$/, 'usuario.cambiar'],
   ['POST', /^\/admin\/mi-clave$/, 'cuenta.clave'],
   ['POST', /^\/admin\/claves-api$/, 'clave.crear'],
+  ['PATCH', /^\/admin\/claves-api\/:id$/, 'clave.editar'],
+  ['POST', /^\/admin\/claves-api\/:id\/renovar$/, 'clave.renovar'],
+  ['POST', /^\/admin\/claves-api\/:id\/eliminar$/, 'clave.eliminar'],
   ['DELETE', /^\/admin\/claves-api\/:id$/, 'clave.revocar'],
   ['POST', /^\/admin\/ajustes$/, 'ajustes.guardar'],
   ['DELETE', /^\/admin\/ajustes$/, 'ajustes.restablecer'],
@@ -184,6 +187,11 @@ export const ETIQUETAS: Record<string, string> = {
   'cuenta.clave': 'Cambio su contraseña',
   'clave.crear': 'Creo una clave de API',
   'clave.revocar': 'Revoco una clave de API',
+  'clave.editar': 'Editó una clave de API',
+  'clave.activar': 'Activó una clave de API',
+  'clave.desactivar': 'Desactivó una clave de API',
+  'clave.renovar': 'Renovó una clave de API',
+  'clave.eliminar': 'Eliminó una clave de API',
   'ajustes.guardar': 'Guardo la configuracion',
   'ajustes.restablecer': 'Restablecio la configuracion',
   'envios.pausa': 'Pauso o reanudo los envios',
@@ -345,6 +353,7 @@ export function instalarBitacora(app: FastifyInstance, repo: ActividadRepo, log?
     }
     const u = request.usuario;
     const body = request.body as Record<string, unknown> | undefined;
+    if (accion === 'clave.editar' && typeof body?.activo === 'boolean') accion = body.activo ? 'clave.activar' : 'clave.desactivar';
     const usuario = u ? u.nombre : typeof body?.usuario === 'string' ? String(body.usuario) : 'desconocido';
     try {
       await repo.anotar({

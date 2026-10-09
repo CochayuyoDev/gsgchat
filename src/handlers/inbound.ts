@@ -1031,8 +1031,8 @@ async function handleInboundMessageEnFila(
    * y el WhatsApp puede pintarlos; si no, el texto. El proveedor local cae
    * solo a texto cuando no puede con los botones.
    */
-  const responderEntrega = (r: { responder?: string; botones?: Array<{ id: string; title: string }>; resultado?: string }) =>
-    r.botones?.length
+  const responderEntrega = async (r: { entrega?: import("../entregas/repo.js").Entrega; responder?: string; botones?: Array<{ id: string; title: string }>; resultado?: string }) => {
+    const enviado = await (r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
       : reply(r.responder ?? '', {
           // La ubicación nueva (el cliente la cambió antes de la hora límite) se
@@ -1045,7 +1045,10 @@ async function handleInboundMessageEnFila(
             // «Me equivoqué de ubicación»: la respuesta a su pedido de cambio.
             r.resultado === 'pide_cambio_ubicacion' ||
             r.resultado === 'pide_cambio_ubicacion_tarde',
-        });
+        }));
+    if (enviado.ok && r.entrega) await deps.entregas?.vincularPropuesta(r.entrega, enviado.wamid);
+    return enviado;
+  };
 
   /**
    * La preventa del courier (cotizar envio, distritos, asesor) solo trabaja
@@ -1106,7 +1109,7 @@ async function handleInboundMessageEnFila(
    * es ahí, con botones SÍ / NO (ver entregas.revisarPin). true = ya se atendió.
    */
   const pinLejano = async (lat: number, lng: number, mapsUrl: string | null | undefined, fuente: string): Promise<boolean> => {
-    if (!deps.entregas || !reglaGsg()) return false;
+    if (!deps.entregas || (!reglaGsg() && !fuente.startsWith('enlace de mapa'))) return false;
     const r = await deps.entregas.revisarPin(contact, { lat, lng, mapsUrl: mapsUrl ?? null, fuente }).catch((error) => {
       request_log(deps, 'no se pudo revisar si el pin tiene sentido', error);
       return { atendida: false as const };
@@ -1149,7 +1152,7 @@ async function handleInboundMessageEnFila(
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
     const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
     if (!esPin && !enlace?.ok) {
-      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1 }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
+      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1, citaId: message.context?.id ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
     }
   }

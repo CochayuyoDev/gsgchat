@@ -348,7 +348,7 @@ export async function atenderRespuestaDeRuta(
     // La «única verdad»: cualquier OTRA solicitud abierta de ese telefono (otro
     // lote, otro pedido) y la lista de envio automatico dejan de pedirsela.
     if (contact.phone) {
-      await resolverPorUbicacion(repos, contact.phone, { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng, mapsUrl: entrada.ubicacion.mapsUrl ?? null, fuente: entrada.ubicacion.fuente ?? 'whatsapp' }, { ahora: momento, motivo: 'la mandó por otra solicitud del mismo número', excepto: [solicitud.id], soloVivas: true }).catch(() => []);
+      await resolverPorUbicacion(repos, contact.phone, { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng, mapsUrl: entrada.ubicacion.mapsUrl ?? null, fuente: entrada.ubicacion.fuente ?? 'whatsapp' }, { ahora: momento, motivo: 'la mandó por otra solicitud del mismo número', excepto: [solicitud.id], soloVivas: true, referencias: solicitud.referencia ? [solicitud.referencia] : [] }).catch(() => []);
     }
 
     deps.log?.('ubicacion conseguida', {

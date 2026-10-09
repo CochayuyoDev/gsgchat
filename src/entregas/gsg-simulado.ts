@@ -30,6 +30,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { seguimientoGsgSchema, type SeguimientoGsg } from './seguimiento-gsg.js';
 import { CLIENTES_DE_PRUEBA, type ClienteDePrueba } from './datos-de-prueba.js';
 import { datosEnvioDeCrudo } from './datos-envio.js';
 import type { DatosEnvio } from './repo.js';
@@ -152,6 +153,7 @@ export function datosEnvioParaGsg(d: DatosEnvio): Record<string, unknown> {
   if (d.remitente) fuera.remitente = d.remitente;
   // El motorizado que GSG ya asigno (opcional): su numero es el que se le da al cliente.
   if (d.motorizadoNombre || d.telefonoMotorizado) fuera.motorizado = { nombre: d.motorizadoNombre ?? null, telefono: d.telefonoMotorizado ?? null };
+  if (d.horarioEntregaDesde && d.horarioEntregaHasta) fuera.horarioEntrega = { desde: d.horarioEntregaDesde, hasta: d.horarioEntregaHasta, ...(d.horarioEntregaFechaDesde ? { fechaDesde: d.horarioEntregaFechaDesde, fechaHasta: d.horarioEntregaFechaHasta, zonaHoraria: d.horarioEntregaZonaHoraria } : {}) };
   return fuera;
 }
 
@@ -167,6 +169,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
   const ahora = opts.ahora ?? (() => new Date());
   const dia = opts.dia ?? (() => diaEnLima(ahora()));
   const clientes = new Map<string, ClienteSimulado>();
+  const seguimientos = new Map<string, SeguimientoGsg>();
   const recibido: GsgSimulado['recibido'] = [];
   const contadores = { ubicaciones: 0, confirmaciones: 0, entregas: 0, incidencias: 0, resumenes: 0 };
   let llamadas = 0;
@@ -317,6 +320,7 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
 
     reiniciar() {
       clientes.clear();
+      seguimientos.clear();
       recibido.length = 0;
       for (const k of Object.keys(contadores) as Array<keyof typeof contadores>) contadores[k] = 0;
       llamadas = 0;
@@ -333,6 +337,19 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       if (sim.modo === 'caido') return { status: 502, body: '<html>502 Bad Gateway</html>' };
       const camino = ruta.replace(/\?.*$/, '').replace(/\/+$/, '');
 
+      if (method === 'POST' && camino === '/reparto/seguimiento') {
+        const leido = seguimientoGsgSchema.safeParse(cuerpo);
+        if (!leido.success) return { status: 400, body: { error: 'Seguimiento de prueba inválido.' } };
+        seguimientos.set(leido.data.tracking, leido.data);
+        return { status: 200, body: { ok: true, tracking: leido.data.tracking } };
+      }
+      if (method === 'GET' && camino.startsWith('/reparto/seguimiento/')) {
+        let tracking;
+        try { tracking = decodeURIComponent(camino.slice('/reparto/seguimiento/'.length)); }
+        catch { return { status: 400, body: { error: 'Tracking inválido.' } }; }
+        const datos = seguimientos.get(tracking);
+        return datos ? { status: 200, body: datos } : { status: 404, body: { error: 'Sin seguimiento de prueba para este tracking.' } };
+      }
       if (method === 'GET' && camino === '/reparto/pendientes') return { status: 200, body: sim.pendientes() };
       if (method === 'GET' && camino === '/reparto/estado') return { status: 200, body: sim.estado() };
       if (method === 'POST' && camino === '/reparto/cargar') {

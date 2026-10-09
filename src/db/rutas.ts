@@ -273,6 +273,7 @@ export interface RutasRepo {
     payload: Record<string, unknown>;
   }): Promise<Reporte>;
   reportesPendientes(limite: number): Promise<Reporte[]>;
+  reservarReporte(id: number): Promise<boolean>;
   /**
    * Devuelve a la cola los fallidos de ese tipo. Con `maxIntentos`, solo los
    * que llevan menos intentos (el reintento automatico no insiste sin fin).
@@ -830,6 +831,10 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       return toReporte(rows[0]!);
     },
 
+    async reservarReporte(id) {
+      const r = await pool.query("update rutas_reportes set estado = 'fallido', ultimo_error = $2 where id = $1 and estado = 'pendiente'", [id, 'Resultado incierto: envío reservado. Si el proceso se interrumpió, verifica en GSG antes de reintentar.']);
+      return r.rowCount === 1;
+    },
     async reportesPendientes(limite) {
       const { rows } = await pool.query<ReporteRow>(
         `select * from rutas_reportes where estado = 'pendiente'

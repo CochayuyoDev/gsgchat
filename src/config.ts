@@ -330,6 +330,7 @@ const schema = z.object({
    */
   GSG_URL: z.string().default(''),
   GSG_LOCATION_PATH: z.string().default(''),
+  GSG_IDEMPOTENCY_SUPPORTED: z.enum(['true', 'false']).default('false'),
   GSG_API_KEY: z.string().default(''),
   GSG_TOKEN: z.string().default(''),
   GSG_SEND_LOCATION_URL: z.union([z.string().url(), z.literal('')]).default(''),

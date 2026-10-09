@@ -259,7 +259,7 @@ describe('entrar al sistema', () => {
   it('un admin crea una clave de API, se ve entera una sola vez, sirve, y revocada deja de servir', async () => {
     const sinNombre = await app.inject({ method: 'POST', url: '/admin/claves-api', headers: { cookie }, payload: { nombre: ' ' } });
     expect(sinNombre.statusCode).toBe(400);
-    const creada = await app.inject({ method: 'POST', url: '/admin/claves-api', headers: { cookie }, payload: { nombre: 'Sistema GSG' } });
+    const creada = await app.inject({ method: 'POST', url: '/admin/claves-api', headers: { cookie }, payload: { nombre: 'Sistema GSG', permisos: ['*'] } });
     expect(creada.statusCode).toBe(200);
     const { clave, registro } = creada.json() as { clave: string; registro: { id: string; prefijo: string; nombre: string } };
     expect(clave).toMatch(/^[A-Za-z0-9]{48}$/);

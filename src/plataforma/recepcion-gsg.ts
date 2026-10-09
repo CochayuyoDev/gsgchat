@@ -1,4 +1,4 @@
-import { hashClaveApi, pareceClaveApi } from '../auth/claves-api.js';
+import { claveApiVigente, hashClaveApi, pareceClaveApi } from '../auth/claves-api.js';
 import { tienePermiso } from '../auth/permisos.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CuerpoError } from '../api/errores.js';
 import type { Plataforma } from './plataforma.js';
@@ -133,7 +133,7 @@ export async function tiendaDeClaveGsg(
         ? (await tienda.repos.claves.porHashConRevocadas?.(hash)) ?? (await tienda.repos.claves.porHash(hash))
         : registrada.estado === 'suspendida' ? await plataforma.consultarClaveGsg?.(registrada, hash) : null;
       if (!registro) continue;
-      if (registro.revocadaAt) {
+      if (!claveApiVigente(registro)) {
         revocada = true;
         continue;
       }

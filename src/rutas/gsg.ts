@@ -79,6 +79,7 @@ export interface PuertoGsg {
 }
 
 export interface OpcionesGsg {
+  idempotenciaUbicacion?: boolean;
   /** La URL base de la API de GSG (p. ej. https://backend.gsg.pe/api/). */
   url: string;
   /** La ruta, relativa a la base, a la que se hace POST con la ubicacion (p. ej. v1/gsgchat/location). */
@@ -251,7 +252,7 @@ export function enmascararClave(clave: string): string | null {
 /** Quita la clave de cualquier texto que se vaya a guardar o mostrar (por si GSG la devuelve en su respuesta). */
 export function sinClave(texto: string, clave: string): string {
   const c = (clave ?? '').trim();
-  return c && c.length >= 4 ? texto.split(c).join('••••') : texto;
+  return c ? texto.split(c).join('••••') : texto;
 }
 
 /**
@@ -284,12 +285,12 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
   const base = destino.ok ? destino.base : crudo;
   const doFetch = opts.fetchImpl ?? fetch;
   const clave = opts.token ?? '';
-  const errorConfig = destino.ok ? null : destino.error;
+  const errorConfig = !destino.ok ? destino.error : !clave.trim() ? 'Falta la API Key de GSG.' : null;
   const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}`);
   const limpio = (t: string) => sinClave(t, clave);
 
   return {
-    conectado: () => Boolean(crudo),
+    conectado: () => Boolean(crudo && clave.trim()),
     descripcion: () => `API de GSG en ${base}`,
     urlUbicacion: () => (crudo && destino.ok ? destino.urlUbicacion : null),
     errorConfiguracion: () => errorConfig,
@@ -299,6 +300,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
       if (!destino.ok) {
         return { ok: false, error: `Configuración de GSG no válida: ${destino.error} No se envía nada hasta corregirla.`, reintentable: true, configuracion: true };
       }
+      if (!clave.trim()) return { ok: false, error: 'Falta la API Key de GSG. Configúrala antes de enviar.', configuracion: true, reintentable: true };
       let url: string;
       if (tipo === 'ubicacion') url = destino.urlUbicacion;
       else {
@@ -306,14 +308,18 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         if (!u.ok) return { ok: false, error: `Configuración de GSG no válida: ${u.error}`, reintentable: true, configuracion: true };
         url = u.url;
       }
+      const claveIdempotente = tipo === 'ubicacion' && opts.idempotenciaUbicacion && typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey.trim() : '';
+      const idempotente = Boolean(claveIdempotente);
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
       try {
         const respuesta = await doFetch(url, {
           method: 'POST',
+          redirect: 'error',
           headers: {
             'content-type': 'application/json',
             ...cabecerasDeClave(clave),
+            ...(idempotente ? { 'Idempotency-Key': claveIdempotente } : {}),
           },
           body: JSON.stringify(tipo === 'ubicacion' ? { tracking: payload.tracking ?? payload.referencia, lat: payload.lat ?? payload.latitud, lng: payload.lng ?? payload.longitud } : payload),
           signal: control.signal,
@@ -335,10 +341,10 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
                     : 'GSG no aceptó el envío';
           return {
             ok: false,
-            error: limpio(`Error ${respuesta.status}: ${causa}.${texto.trim() ? ` Respuesta de GSG: ${texto.trim().slice(0, 200)}` : ''}`),
+            error: limpio(`Error ${respuesta.status}: ${causa}.${tipo === 'ubicacion' && !idempotente && (respuesta.status >= 500 || respuesta.status === 408) ? ' Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar.' : ''}${texto.trim() ? ` Respuesta de GSG: ${limpio(texto.trim()).slice(0, 200)}` : ''}`),
             // 5xx, 429 y 408 son del otro lado y pasan solos; un 4xx es culpa
             // del payload (o de la clave) y reintentarlo solo repite el error.
-            reintentable: respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
+            reintentable: (respuesta.status >= 500 || respuesta.status === 408) && tipo === 'ubicacion' && !idempotente ? false : respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
             ...(auth ? { autenticacion: auth } : {}),
           };
         }
@@ -357,8 +363,8 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
           : `No se pudo conectar con GSG en ${url}: ${error instanceof Error ? ((error.cause as { code?: string } | undefined)?.code ?? error.message) : String(error)}`;
         return {
           ok: false,
-          error: limpio(`${motivo}. Se reintenta solo.`),
-          reintentable: true,
+          error: limpio(`${motivo}. ${tipo === 'ubicacion' && !idempotente ? 'Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar; no se reintenta automáticamente.' : 'Se reintenta solo con la misma clave idempotente cuando está habilitada.'}`),
+          reintentable: tipo !== 'ubicacion' || idempotente,
         };
       } finally {
         clearTimeout(corte);
@@ -366,6 +372,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
     },
 
     async consultar(ruta) {
+      if (!clave.trim()) return { ok: false, error: 'Falta la API Key de GSG.' };
       if (!destino.ok) return { ok: false, error: `Configuración de GSG no válida: ${destino.error}` };
       const u = unirUrlGsg(destino.base, ruta);
       if (!u.ok) return { ok: false, error: u.error };
@@ -375,6 +382,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         // Solo lectura: GET sin cuerpo.
         const respuesta = await doFetch(u.url, {
           method: 'GET',
+          redirect: 'error',
           headers: {
             accept: 'application/json',
             ...cabecerasDeClave(clave),
@@ -383,7 +391,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         });
         const texto = await respuesta.text();
         if (!respuesta.ok) {
-          return { ok: false, status: respuesta.status, error: limpio(`GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}`) };
+          return { ok: false, status: respuesta.status, error: limpio(`GSG respondio ${respuesta.status}: ${limpio(texto).slice(0, 200)}`) };
         }
         try {
           return { ok: true, status: respuesta.status, cuerpo: (texto ? JSON.parse(texto) : {}) as never };
@@ -414,12 +422,13 @@ export function crearPuertoEnEspera(): PuertoGsg {
 }
 
 /** El puerto desde el .env (sin pantalla). GSG_API_KEY; GSG_TOKEN se lee por compatibilidad. */
-export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string; GSG_API_KEY?: string; GSG_LOCATION_PATH?: string; GSG_SEND_LOCATION_URL?: string }): PuertoGsg {
+export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string; GSG_API_KEY?: string; GSG_LOCATION_PATH?: string; GSG_SEND_LOCATION_URL?: string; GSG_IDEMPOTENCY_SUPPORTED?: string }): PuertoGsg {
   return config.GSG_URL.trim()
     ? crearPuertoHttp({
         url: config.GSG_URL,
         token: (config.GSG_API_KEY ?? '').trim() || config.GSG_TOKEN,
         rutaUbicacion: config.GSG_LOCATION_PATH || undefined,
+        idempotenciaUbicacion: config.GSG_IDEMPOTENCY_SUPPORTED === 'true',
         ubicacionUrl: config.GSG_SEND_LOCATION_URL || undefined,
       })
     : crearPuertoEnEspera();
@@ -657,7 +666,7 @@ async function despacharAhora(
   soloTipos: TipoReporte[] | undefined,
   manual: boolean,
 ): Promise<DespachoResumen> {
-  if (!puerto.conectado()) {
+  if (!puerto.conectado() && !puerto.errorConfiguracion?.()) {
     return { intentados: 0, enviados: 0, fallidos: 0, motivo: puerto.descripcion() };
   }
   if (manual) paradasPorClave.delete(repos.rutas);
@@ -681,7 +690,8 @@ async function despacharAhora(
       resumen.fallidos++;
       continue;
     }
-    const salida = await puerto.enviar(reporte.tipo, reporte.payload);
+    if (!(await repos.rutas.reservarReporte(reporte.id))) continue;
+    const salida = await puerto.enviar(reporte.tipo, { ...reporte.payload, idempotencyKey: 'gsgchat-ubicacion-' + reporte.id });
     if (salida.ok) {
       await repos.rutas.marcarReporte(reporte.id, 'enviado', { externoId: salida.id ?? null });
       resumen.enviados++;

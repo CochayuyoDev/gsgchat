@@ -10,6 +10,8 @@
  */
 import { z } from 'zod';
 import type { DatosEnvio } from './repo.js';
+import { tieneNumeracion } from './direccion-escrita.js';
+import { distritoEnDireccion } from './distritos-centro.js';
 export const ajustesEntregasSchema = z.object({
   /** Minutos que se suman a lo que dice el motorizado antes de avisar al cliente. */
   margenMinutos: z.number().int().min(0).max(240).default(60),
@@ -522,6 +524,14 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
 /** El texto que toca: el guardado desde la pantalla si lo hay, si no el de siempre. */
 export function textoDe(clave: keyof AjustesEntregas['textos'], ajustes: AjustesEntregas, ctx: ContextoTexto): string {
   const propio = ajustes.textos[clave]?.trim();
+  if (clave === 'solicitudUbicacion' && !propio) {
+    const completa = tieneNumeracion(ctx.direccion ?? '') && Boolean(ctx.distrito?.trim() || distritoEnDireccion(ctx.direccion));
+    const base = TEXTOS_POR_DEFECTO.solicitudUbicacion;
+    const pedido = completa
+      ? 'Por favor, confirma si la dirección indicada es correcta compartiendo tu ubicación actual por WhatsApp. También puedes escribir tu dirección completa con número y distrito para buscarla en el mapa y confirmarla contigo.'
+      : 'La dirección todavía no permite ubicar una puerta exacta. Por favor, comparte tu ubicación actual por WhatsApp o completa la dirección con número de puerta (o manzana y lote) y distrito.';
+    return rellenar(base.replace('Por favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!', pedido), ctx);
+  }
   // La hora límite sale de los ajustes si quien llama no la trae (si no, quedaba «antes de la  para…»).
   return rellenar(propio || TEXTOS_POR_DEFECTO[clave], { ...ctx, horaLimite: ctx.horaLimite || horaEnPalabras(ajustes.cambioUbicacionHasta) });
 }
