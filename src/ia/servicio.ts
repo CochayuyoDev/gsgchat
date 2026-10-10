@@ -23,10 +23,10 @@ import type { StokyClient } from '../stoky/client.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { Monitor } from '../salud/monitor.js';
 import { crearCatalogoTienda, lineaDeProducto, type CatalogoTienda } from '../catalogo/tienda.js';
-import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, explicarFalloConexion, falloCuentaDe, listarModelosOpenAI, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor, type ServicioOpenAI } from './proveedores.js';
+import { crearProveedorOpenAI, crearProveedorPuter, ErrorIA, falloCuentaDe, presetDe, probarProveedor, type FalloCuentaIA, type MensajeIA, type ProveedorIA, type PruebaProveedor } from './proveedores.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { MODELO_GRATIS_POR_DEFECTO, modeloGratisEfectivo, modelosGratisEnVivo } from './modelos-gratis.js';
-import { ACCIONES_IA, COMO_TOMAR_PEDIDO, LIMITES_DEL_ASISTENTE, manualDelSistema, SISTEMA_PARA_CLIENTES, SISTEMA_PARA_CLIENTES_GSG } from './conocimiento-sistema.js';
+import { ACCIONES_IA, COMO_TOMAR_PEDIDO, manualDelSistema, SISTEMA_PARA_CLIENTES, SISTEMA_PARA_CLIENTES_GSG } from './conocimiento-sistema.js';
 import { extraerPedido, registrarPedido, type PedidoDelModelo } from '../pedidos/servicio.js';
 import type { Bus } from '../eventos/bus.js';
 import type { ServicioPlan } from '../plan/servicio.js';
@@ -43,22 +43,23 @@ import { apuntarFrase, extraerCasos, leerFrases, leerRevisados, marcarRevisado, 
 import { avisoDeExamen, examinarLector, guardarExamen, leerExamenGuardado, UMBRAL_EXAMEN, type ResultadoExamenLector } from './examen-lector.js';
 import { instruccionDeTono, tonoDeValor, tonoEfectivo, type Tono } from './tono.js';
 import { AJUSTES_GENERALES_KEY } from '../ajustes/generales.js';
-import { clasificarPorReglas, esAcuse, leerClase, pideAsesor, promptClasificador } from './agente-operativo.js';
-import type { IntencionGsg } from './decision.js';
+import { clasificarPorReglas, leerClase, promptClasificador } from './agente-operativo.js';
 import { rellenar, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 
 export const configIASchema = z.object({
   activa: z.boolean().default(false),
   proveedor: z.enum(['puter', 'openai']).default('puter'),
-  /** Servicio compatible elegido; su endpoint se resuelve en `presetDe`. */
+  /** Con `openai`, cual de los servicios compatibles se eligio en la pantalla (rellena la URL base). */
   servicio: z.enum(['openai', 'groq', 'openrouter', 'together', 'deepseek', 'google', 'mistral', 'ollama', 'otro']).default('openai'),
   /**
    * Con Puter solo se usan modelos gratuitos de verdad (ver modelos-gratis.ts):
    * si el guardado deja de serlo, se usa el gratuito por defecto.
    */
-  modelo: z.string().trim().max(200).default(MODELO_GRATIS_POR_DEFECTO),
-  /** Endpoint legado para configuraciones antiguas del servicio «otro». */
+  modelo: z.string().trim().max(80).default(MODELO_GRATIS_POR_DEFECTO),
+  /** Solo para openai: la URL base (OpenAI, Groq, Ollama...). */
   baseUrl: z.string().trim().max(300).default(''),
+  /** Solo para openai: cuanto razona un modelo de razonamiento (gpt-6-luna...). Vacio = no se manda. */
+  razonamiento: z.enum(['', 'minimo', 'bajo', 'medio', 'alto']).default(''),
   nombreAsistente: z.string().trim().max(60).default('Asistente'),
   /** Lo que el asistente sabe del negocio: productos, precios, horario, politicas. */
   conocimiento: z.string().max(20_000).default(''),
@@ -101,42 +102,13 @@ export interface EstadoIA extends ConfigIA {
   agenteOperativoEfectivo: boolean;
   /** Se acabó el saldo de la IA (o la clave no vale): el aviso para recargar. null = responde bien. */
   sinSaldo: AvisoSaldoIA | null;
-  /** La señal «IA conectada / sin conexión» de la cabecera del panel. */
-  conexion: ConexionIA;
-}
-
-/**
- * Si la IA responde, en una palabra:
- *  - `apagada`: no está activa o le falta la clave.
- *  - `conectada`: la última llamada real (o «Comprobar conexión») respondió bien.
- *  - `sin_conexion`: la última falló; `motivo` lo dice en cristiano, sin claves.
- *  - `sin_comprobar`: activa, pero desde que arrancó aún no se le ha preguntado nada.
- */
-export type EstadoConexionIA = 'apagada' | 'conectada' | 'sin_conexion' | 'sin_comprobar';
-
-export interface ConexionIA {
-  estado: EstadoConexionIA;
-  /** Por qué no hay conexión (solo con `sin_conexion`). */
-  motivo: string | null;
-  /** Cuándo se supo por última vez (ISO), o null si nunca. */
-  comprobada: string | null;
-  /** De dónde salió: una llamada de verdad, «Comprobar conexión» o la comprobación automática. */
-  origen: 'llamada' | 'prueba' | 'automatica' | null;
-}
-
-/** Cada cuánto se comprueba sola la conexión si en ese rato no hubo ninguna llamada. */
-export const COMPROBAR_CONEXION_CADA_MS = 10 * 60_000;
-
-/** Un motivo de fallo sin nada que parezca una clave (por si el servicio la repite en el error). */
-export function motivoSinClaves(texto: string, claves: string[] = []): string {
-  let t = String(texto ?? '');
-  for (const c of claves) if (c && c.length >= 6) t = t.split(c).join('***');
-  t = t
-    .replace(/Bearer\s+[^\s"',)]+/gi, 'Bearer ***')
-    .replace(/\b(sk|pk|rk|gsk|xai|key)[-_][A-Za-z0-9_\-]{8,}/g, '***')
-    .replace(/\bAIza[0-9A-Za-z_\-]{20,}/g, '***')
-    .replace(/((?:api[_-]?key|token|clave|key|authorization)\s*[=:]\s*)[^\s&"',)]+/gi, '$1***');
-  return t.length > 300 ? `${t.slice(0, 297)}...` : t;
+  /** Los ultimos caracteres de la clave guardada («…a1b2»), para reconocerla sin enseñarla. */
+  pistaClave: string | null;
+  /**
+   * Hay una clave guardada pero no se puede descifrar (cambio el .secrets.json).
+   * No se borra: sigue en la base hasta que el dueño la cambie o la desvincule.
+   */
+  claveIlegible: boolean;
 }
 
 /**
@@ -187,7 +159,7 @@ export const REINTENTO_SIN_SALDO_MS = 2 * 60_000;
 
 export interface TurnoIA {
   /** Que se hizo: se contesto, se derivo a una persona, fallo (y se dijo algo neutro), o se paro un intento de manipulacion. */
-  resultado: 'respondio' | 'derivo' | 'error' | 'inactiva' | 'bloqueado' | 'callado';
+  resultado: 'respondio' | 'derivo' | 'error' | 'inactiva' | 'bloqueado';
   texto: string | null;
   detalle?: string;
 }
@@ -204,9 +176,7 @@ export interface ServicioIA {
    * Le pide una frase al modelo y mide cuanto tarda. Con `candidata`, prueba
    * lo que hay en pantalla sin guardarlo (clave incluida); sin ella, lo guardado.
    */
-  probarConexion(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; servicio?: ServicioOpenAI; token?: string; modelo?: string }): Promise<PruebaProveedor>;
-  /** Lista modelos del servicio usando la clave nueva o la que ya está guardada. */
-  listarModelos(servicio: ServicioOpenAI, clave?: string): Promise<import('./proveedores.js').ListaModelosOpenAI>;
+  probarConexion(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; token?: string; modelo?: string; razonamiento?: ConfigIA['razonamiento'] }): Promise<PruebaProveedor>;
   activa(): boolean;
   /** Si el asistente es el agente operativo (solo ubicación, sin ventas): lo guardado o, sin elegir, según el modo. */
   agenteOperativoActivo(): boolean;
@@ -214,9 +184,11 @@ export interface ServicioIA {
   clasificarOperativo(mensajes: MensajeIA[]): Promise<string>;
   /** El aviso de «se acabó el saldo de tu IA» (o la clave no vale), o null si responde bien. */
   avisoSaldo(): AvisoSaldoIA | null;
-  /** La señal de conexión: apagada, conectada, sin conexión (con motivo) o sin comprobar. */
-  conexion(): ConexionIA;
-  guardar(patch: Partial<ConfigIA> & { token?: string | null }): Promise<EstadoIA>;
+  /**
+   * `token` con texto guarda (o cambia) la clave; vacio o null la conserva.
+   * Solo `borrarClave: true` la quita: la clave se queda hasta que el dueño lo decida.
+   */
+  guardar(patch: Partial<ConfigIA> & { token?: string | null; borrarClave?: boolean }): Promise<EstadoIA>;
   /** Cuanto se uso la IA hoy y en los ultimos 30 dias: llamadas por tipo, tokens, fallos. Ver uso.ts. */
   uso(): ResumenUsoIA;
   /** Lo que las reglas y la IA no supieron leer (clientes y motorizados) estos dias, para corregirlo en un clic. */
@@ -235,7 +207,7 @@ export interface ServicioIA {
   /** El modelo a secas, para los trabajos del entrenamiento (pulir lecciones). */
   completar(mensajes: MensajeIA[], opts?: { maxTokens?: number }): Promise<string>;
   /** El turno completo: contestar por WhatsApp y, si toca, derivar y avisar. `esAudio` = el cliente mando una nota de voz (transcrita en `texto`). */
-  turno(contact: Contact, texto: string, opts?: { esAudio?: boolean; mensajes?: number }): Promise<TurnoIA>;
+  turno(contact: Contact, texto: string, opts?: { esAudio?: boolean }): Promise<TurnoIA>;
   /** Una prueba desde la pantalla, con un historial que trae el navegador. */
   probar(historial: MensajeIA[], texto: string): Promise<RespuestaIA>;
   /** El ayudante del panel: responde al dueño con el manual del sistema. */
@@ -274,10 +246,6 @@ export interface RespuestaIA {
    */
   bloqueada?: 'manipulacion' | 'salida';
   detalle?: string;
-  /** No se contesta (lo ajeno, un acuse, un chiste): queda anotado para el equipo. */
-  silencio?: boolean;
-  /** Lo decidieron las reglas, sin llamar al modelo. */
-  porReglas?: boolean;
   /** El modelo cerro un pedido: lo que dijo, todavia sin comprobar contra el catalogo. */
   pedido?: PedidoDelModelo | null;
 }
@@ -337,12 +305,6 @@ export interface DepsIA {
   /** El examen del lector cada mañana solo (false en pruebas que cuentan mensajes). */
   examenAutomatico?: boolean;
   /**
-   * La comprobación sola de la conexión (al arrancar y, si no hubo llamadas,
-   * cada este tanto). false = nunca. Por defecto COMPROBAR_CONEXION_CADA_MS,
-   * y apagada bajo vitest para que las pruebas no llamen al modelo.
-   */
-  comprobarConexionCadaMs?: number | false;
-  /**
    * El correo de aviso (Que todo funcione → Correo de aviso), si está: por ahí
    * también sale UNA vez el aviso de «se acabó el saldo de tu IA».
    */
@@ -355,18 +317,6 @@ const CLAVE_TOKEN = 'ia.token';
 /** La marca con la que el modelo dice "esto lo tiene que ver una persona". */
 export const MARCA_DERIVAR = ACCIONES_IA.DERIVAR;
 export const MARCA_PEDIR_UBICACION = ACCIONES_IA.PEDIR_UBICACION;
-export const MARCA_SILENCIO = ACCIONES_IA.SILENCIO;
-
-/**
- * Lo que las reglas ya saben que no se contesta, sin gastar el modelo: un
- * acuse («ok», «gracias», 👍) y las risas sueltas («jaja», «xd»).
- */
-export function noSeContestaPorReglas(texto: string): boolean {
-  const t = texto.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  if (!t) return true;
-  if (esAcuse(texto)) return true;
-  return /^(?:(?:ja|je|ji|jo|ha|he)+h?|x+d+|lol|[😂🤣😅😆😁😄🙂😊👍👌🙏💪🔥]|\s|[.!])+$/u.test(t);
-}
 
 export function textoDeDespedida(nombreNegocio: string): string {
   return `Te paso con una persona del equipo de ${nombreNegocio}; en un momento te atiende por aquí.`;
@@ -377,7 +327,7 @@ export function textoDeFallo(): string {
 }
 
 /** El prompt de sistema: quien es, que sabe, como habla, cuando deriva. */
-export function construirSistema(cfg: Omit<ConfigIA, 'servicio' | 'agenteOperativo'> & { servicio?: ConfigIA['servicio']; agenteOperativo?: ConfigIA['agenteOperativo'] }, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null; tomaPedidos?: boolean; lecciones?: string | null; cliente?: string | null; tono?: 'tu' | 'usted' | null; sinVentas?: boolean }): string {
+export function construirSistema(cfg: Omit<ConfigIA, 'servicio' | 'agenteOperativo' | 'razonamiento'> & { servicio?: ConfigIA['servicio']; agenteOperativo?: ConfigIA['agenteOperativo']; razonamiento?: ConfigIA['razonamiento'] }, ctx: { negocio: string; horario: string; ahora: Date; catalogo?: string | null; tomaPedidos?: boolean; lecciones?: string | null; cliente?: string | null; tono?: 'tu' | 'usted' | null; sinVentas?: boolean }): string {
   const partes = [
     `Eres ${cfg.nombreAsistente}, el asistente de WhatsApp de "${ctx.negocio}". Atiendes a clientes por WhatsApp.`,
     `Hoy es ${ctx.ahora.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' })}, ${ctx.ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}. Horario de atención: ${ctx.horario}.`,
@@ -397,8 +347,6 @@ export function construirSistema(cfg: Omit<ConfigIA, 'servicio' | 'agenteOperati
     ...(ctx.tomaPedidos && !ctx.sinVentas ? ['', COMO_TOMAR_PEDIDO] : []),
     '',
     EJEMPLOS_DE_RESPUESTA,
-    '',
-    LIMITES_DEL_ASISTENTE,
   ];
   if (cfg.instrucciones.trim()) partes.push('', 'Cómo debes hablar y qué tener en cuenta:', cfg.instrucciones.trim());
   partes.push('', 'Lo que sabes del negocio:', cfg.conocimiento.trim() || (ctx.lecciones ? '(Lo que sabes está en las reglas, los datos y los ejemplos de abajo.)' : '(La tienda no ha escrito nada todavía: sé amable y pasa con una persona cualquier pregunta concreta.)'));
@@ -427,15 +375,69 @@ export function pideUnaPersona(texto: string, palabras: string[]): boolean {
 
 /** Separa la marca de derivacion del texto que se manda al cliente. */
 export function leerRespuesta(cruda: string): RespuestaIA {
-  const { texto: sinPedido, pedido } = extraerPedido(cruda);
-  const derivar = sinPedido.includes(MARCA_DERIVAR);
+  const { texto: conPedido, pedido } = extraerPedido(String(cruda ?? ''));
+  // Una segunda marca de pedido (o una que no se pudo leer) no sale al
+  // cliente: de ahi en adelante es JSON para el sistema.
+  const resto = conPedido.search(MARCA_PEDIDO_TORCIDA);
+  const sinPedido = resto >= 0 ? conPedido.slice(0, resto) : conPedido;
+  // Las marcas como el modelo las escribe de verdad: en minusculas, con
+  // espacios, sin uno de los corchetes, con tilde, en negrita...
+  const derivar = MARCA_DERIVAR_TORCIDA.test(sinPedido);
   // Derivar manda: si va a atender una persona, el boton lo manda ella.
-  const pedirUbicacion = !derivar && sinPedido.includes(MARCA_PEDIR_UBICACION);
-  const texto = sinPedido.replaceAll(MARCA_DERIVAR, '').replaceAll(MARCA_PEDIR_UBICACION, '').replaceAll(MARCA_SILENCIO, '').replace(/\s+$/g, '').trim();
-  // [SILENCIO]: el modelo decidió que a esto no se contesta. Derivar o un
-  // pedido mandan sobre el silencio (son una acción, no charla).
-  if (sinPedido.includes(MARCA_SILENCIO) && !derivar && !pedido) return { texto: '', derivar: false, pedirUbicacion: false, pedido: null, silencio: true };
+  const pedirUbicacion = !derivar && MARCA_UBICACION_TORCIDA.test(sinPedido);
+  const texto = sinPedido
+    .replace(new RegExp(MARCA_DERIVAR_TORCIDA.source, 'gi'), '')
+    .replace(new RegExp(MARCA_UBICACION_TORCIDA.source, 'gi'), '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
   return { texto, derivar, pedirUbicacion, pedido: pedido ?? null };
+}
+
+/** Las marcas, aunque vengan torcidas: hace falta al menos un corchete para no comerse la palabra «derivar» de una frase normal. */
+const MARCA_DERIVAR_TORCIDA = /[*_`]*(?:\[\s*derivar\s*\]?|derivar\s*\])[*_`]*/i;
+const MARCA_UBICACION_TORCIDA = /[*_`]*(?:\[\s*pedir[\s_-]*ubicaci[oó]n\s*\]?|pedir[\s_-]*ubicaci[oó]n\s*\])[*_`]*/i;
+const MARCA_PEDIDO_TORCIDA = /[*_`]*\[\s*pedido\s*\]|\[\s*pedido\s*\{|\bpedido\s*\]\s*\{/i;
+
+/** Lo que se le pasa al modelo de un mensaje del cliente, como mucho (WhatsApp deja 4096; lo demas es relleno o un ataque). */
+export const MAX_ENTRANTE_IA = 2000;
+/** Lo mas largo que se le manda a un cliente: el limite de un texto de WhatsApp, con margen. */
+export const MAX_RESPUESTA_CLIENTE = 4000;
+
+/** Recorta un texto del cliente para el modelo. */
+export function recortarEntrante(texto: string, max = MAX_ENTRANTE_IA): string {
+  const s = String(texto ?? '');
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/** Si lo que queda para el cliente es JSON (o un bloque de codigo): eso no es un mensaje de WhatsApp. */
+export function pareceJson(texto: string): boolean {
+  const t = texto.trim();
+  if (!t) return false;
+  if (t.includes('```')) return true;
+  if (/\{\s*"[^"\n]{1,60}"\s*:/.test(t)) return true;
+  if (/^[{[]/.test(t) && /[}\]]$/.test(t)) {
+    try {
+      JSON.parse(t);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Lo que el modelo contesto para un cliente, ¿se puede mandar? null = si; si
+ * no, el motivo (y quien llama lo trata como un fallo del modelo: nunca sale
+ * un mensaje vacio, a medias, en JSON o kilometrico).
+ */
+export function problemaDeRespuesta(cruda: string): string | null {
+  const leida = leerRespuesta(cruda);
+  if (!leida.texto && !leida.derivar && !leida.pedirUbicacion && !leida.pedido) return 'el modelo no dijo nada que se pueda mandar';
+  if (leida.texto.length > MAX_RESPUESTA_CLIENTE) return `respuesta demasiado larga para WhatsApp (${leida.texto.length} caracteres)`;
+  if (pareceJson(leida.texto)) return 'el modelo contesto con JSON o codigo en vez de un mensaje';
+  return null;
 }
 
 /** El texto con el que se pide la ubicacion, segun haya boton nativo o no. */
@@ -445,6 +447,11 @@ export function textoPedirUbicacion(conBoton: boolean): string {
     : '¿Me compartes tu ubicación, por favor? Desde el clip 📎 → Ubicación → Enviar tu ubicación actual.';
 }
 
+/** «…a1b2»: lo justo para reconocer la clave guardada. Con claves cortas, nada. */
+export function pistaDe(clave: string): string | null {
+  return clave.length >= 12 ? `…${clave.slice(-4)}` : clave ? '…' : null;
+}
+
 export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   const { settingsRepo, repos, sender, config } = deps;
   const key = keyFromBase64(deps.settingsKeyBase64);
@@ -452,6 +459,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   let cfg: ConfigIA = CONFIG_IA_VACIA;
   let token = '';
+  let claveIlegible = false;
   const limitador = new Limitador(deps.maxTurnosPorHora ?? 30, 60 * 60_000);
   const sospechas = new Map<string, number>();
   const limitadorOrdenes = new Limitador(60, 60 * 60_000);
@@ -486,6 +494,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   async function recargar(): Promise<void> {
     cfg = CONFIG_IA_VACIA;
     token = '';
+    claveIlegible = false;
     for (const row of await settingsRepo.getAll()) {
       if (row.key === CLAVE_CONFIG) {
         const parsed = configIASchema.safeParse(JSON.parse(row.value));
@@ -494,7 +503,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         try {
           token = row.encrypted ? decrypt(row.value, key) : row.value;
         } catch {
-          log('no se pudo descifrar el token de la IA: se ignora');
+          // Se conserva en la base: solo el dueño decide quitarla (ver guardar).
+          claveIlegible = true;
+          log('no se pudo descifrar la clave de la IA (¿cambio el .secrets.json?): se conserva y no se usa');
         }
       }
     }
@@ -504,7 +515,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   const elProveedor = (): ProveedorIA => {
     if (proveedor) return proveedor;
-    proveedor = cfg.proveedor === 'openai' ? crearProveedorOpenAI({ baseUrl: presetDe(cfg.servicio)?.baseUrl || cfg.baseUrl || '', clave: token, fetchImpl: deps.fetchImpl }) : crearProveedorPuter(token);
+    proveedor = cfg.proveedor === 'openai' ? crearProveedorOpenAI({ baseUrl: cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '', clave: token, fetchImpl: deps.fetchImpl, razonamiento: cfg.razonamiento }) : crearProveedorPuter(token);
     return proveedor;
   };
 
@@ -512,38 +523,14 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   const sinVentas = (): boolean => (deps.modo?.() ?? 'completo') === 'gsg';
   /** El agente operativo: lo que se eligio en la pantalla o, sin eleccion, encendido en modo GSG. */
   const agenteOperativo = (): boolean => cfg.agenteOperativo ?? (deps.modo?.() ?? 'completo') === 'gsg';
-  const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen, agenteOperativoEfectivo: agenteOperativo(), sinSaldo: avisoSaldo(), conexion: conexion() });
-
-  // La señal «IA conectada / sin conexión»: lo último que se supo del modelo
-  // (una llamada de verdad, «Comprobar conexión» o la comprobación sola). Vive
-  // en memoria: al arrancar empieza «sin comprobar» y se comprueba enseguida.
-  let ultimaConexion: { ok: boolean; motivo: string | null; en: Date; origen: 'llamada' | 'prueba' | 'automatica' } | null = null;
-  function apuntarConexion(ok: boolean, origen: 'llamada' | 'prueba' | 'automatica', motivo?: string | null): void {
-    ultimaConexion = { ok, origen, en: new Date(), motivo: ok ? null : motivoSinClaves(motivo || 'La IA no respondió.', [token]) };
-  }
-  /** El motivo de un fallo, en cristiano: el aviso de saldo/clave si es de la cuenta; si no, el fallo explicado. */
-  function motivoDeFallo(detalle: string, cuenta: FalloCuentaIA | null | undefined): string {
-    if (cuenta) return avisoSaldo()?.texto ?? (cuenta === 'sin_saldo' ? 'Se acabó el saldo de tu IA.' : 'La clave de tu IA ya no vale.');
-    return explicarFalloConexion(detalle);
-  }
-  const huellaConexion = (): string => [cfg.activa, cfg.proveedor, cfg.servicio, cfg.modelo, cfg.baseUrl, token].join('|');
-  function conexion(): ConexionIA {
-    if (!(cfg.activa && token)) return { estado: 'apagada', motivo: null, comprobada: ultimaConexion?.en.toISOString() ?? null, origen: ultimaConexion?.origen ?? null };
-    if (!ultimaConexion) {
-      // Recién arrancado pero con el aviso de saldo guardado: ya se sabe que no responde.
-      const sin = uso.resumen().sinSaldo;
-      if (sin) return { estado: 'sin_conexion', motivo: motivoSinClaves(avisoSaldo()?.texto ?? 'Se acabó el saldo de tu IA.', [token]), comprobada: sin.ultimoIntento, origen: null };
-      return { estado: 'sin_comprobar', motivo: null, comprobada: null, origen: null };
-    }
-    return { estado: ultimaConexion.ok ? 'conectada' : 'sin_conexion', motivo: ultimaConexion.motivo, comprobada: ultimaConexion.en.toISOString(), origen: ultimaConexion.origen };
-  }
+  const estado = (): EstadoIA => ({ ...cfg, tieneToken: Boolean(token), modeloEfectivo: modeloEfectivo(), modelosGratis: gratis.modelos, modelosGratisOrigen: gratis.origen, agenteOperativoEfectivo: agenteOperativo(), sinSaldo: avisoSaldo(), pistaClave: pistaDe(token), claveIlegible });
 
   // Cada llamada al modelo queda contada por lo que era (respuesta a un
   // cliente, lectura para el sistema, orden del panel, prueba), con sus
   // tokens si la API los dice y con el fallo si lo hubo. Es lo que ensena
   // "Uso de la IA" en la pantalla y lo que avisa cuando el proveedor cae.
   const uso: ContadorUsoIA = await crearContadorUsoIA({ settingsRepo, timezone: config.timezone, ahora: deps.ahora, log });
-  async function chatContado(tipo: TipoUsoIA, mensajes: MensajeIA[], opts: { maxTokens?: number } = {}): Promise<string> {
+  async function chatContado(tipo: TipoUsoIA, mensajes: MensajeIA[], opts: { maxTokens?: number; exigirCompleta?: boolean; validar?: (respuesta: string) => void } = {}): Promise<string> {
     // Sin saldo (o con la clave que ya no vale): entre prueba y prueba no se
     // llama al modelo; quien llama sigue con las reglas al instante y el
     // cliente no nota nada. Cada REINTENTO_SIN_SALDO_MS se vuelve a probar:
@@ -555,15 +542,16 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     const t0 = Date.now();
     let tokens: { tokensEntrada: number; tokensSalida: number } | undefined;
     try {
-      const r = await elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens, alUso: (u) => { tokens = u; } });
+      const r = await elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens, exigirCompleta: opts.exigirCompleta, alUso: (u) => { tokens = u; } });
+      // Lo que no sirve (vacio tras quitar las marcas, JSON, demasiado largo)
+      // cuenta como fallo, no como respuesta.
+      opts.validar?.(r);
       if (uso.anotar(tipo, { ms: Date.now() - t0, ...(tokens ?? {}) })) log('la IA volvió a responder: se quita el aviso de saldo');
-      apuntarConexion(true, 'llamada');
       return r;
     } catch (error) {
       const detalle = error instanceof ErrorIA ? `${error.message}${error.detalle ? ` (${error.detalle})` : ''}` : error instanceof Error ? error.message : String(error);
       const cuenta = falloCuentaDe(error);
       if (uso.anotarFallo(tipo, detalle, cuenta) && cuenta) void avisarSinSaldo().catch(() => undefined);
-      apuntarConexion(false, 'llamada', motivoDeFallo(detalle, cuenta));
       throw error;
     }
   }
@@ -685,8 +673,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       log('intento de manipular al asistente', { phone: contact.phone, tipo: manipulacion.tipo, patron: manipulacion.patron });
       return { texto: respuestaAnteManipulacion(manipulacion.tipo, deps.nombreNegocio()), derivar: false, pedirUbicacion: false, bloqueada: 'manipulacion', detalle: manipulacion.tipo };
     }
-    if (pideUnaPersona(texto, palabrasDeDerivar(cfg.derivarSi)) || pideAsesor(texto)) {
-      return { texto: textoDeDespedida(deps.nombreNegocio()), derivar: true, pedirUbicacion: false, porReglas: true };
+    if (pideUnaPersona(texto, palabrasDeDerivar(cfg.derivarSi))) {
+      return { texto: textoDeDespedida(deps.nombreNegocio()), derivar: true, pedirUbicacion: false };
     }
 
     // El catalogo real (el de la tienda por URL, o el de Stoky): precios y
@@ -715,14 +703,6 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     // El ultimo entrante ya esta en el hilo: se evita mandarlo dos veces.
     if (historial.length && historial[historial.length - 1]!.role === 'user' && historial[historial.length - 1]!.content === texto) historial.pop();
 
-    // Las reglas primero: lo que no pide nada («ok», «gracias», «jaja») no
-    // gasta una llamada al modelo. Pero el contexto manda: si lo último que
-    // dijo el asistente fue una pregunta, ese «sí» o «ok» es la respuesta.
-    const ultimaNuestra = [...historial].reverse().find((m) => m.role === 'assistant')?.content ?? '';
-    if (noSeContestaPorReglas(texto) && !/[?¿]\s*$/.test(ultimaNuestra.trim())) {
-      return { texto: '', derivar: false, pedirUbicacion: false, silencio: true, porReglas: true, detalle: 'acuse o risa sin pregunta pendiente: no pide nada' };
-    }
-
     // Lo ensenado que viene al caso: se busca con el mensaje y, si es muy
     // corto ("y a provincias?"), tambien con lo ultimo que dijo el cliente.
     const anterior = [...historial].reverse().find((m) => m.role === 'user')?.content;
@@ -734,10 +714,16 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     const tono = tonoEfectivo(await tonoDelNegocio(), [...historial.filter((m) => m.role === 'user').map((m) => m.content), texto]);
     const mensajes: MensajeIA[] = [
       { role: 'system', content: construirSistema(cfg, { negocio: deps.nombreNegocio(), horario: config.BUSINESS_HOURS, ahora: new Date(), catalogo: catalogoTexto, tomaPedidos: vende, lecciones: bloqueLecciones || null, cliente: contextoCliente, tono, sinVentas: sinVentas() }) },
-      ...historial,
-      { role: 'user', content: texto },
+      ...historial.map((m) => ({ ...m, content: recortarEntrante(m.content) })),
+      { role: 'user', content: recortarEntrante(texto) },
     ];
-    const cruda = await chatContado(entrada.real ? 'respuestas' : 'pruebas', mensajes);
+    const cruda = await chatContado(entrada.real ? 'respuestas' : 'pruebas', mensajes, {
+      exigirCompleta: true,
+      validar: (r) => {
+        const problema = problemaDeRespuesta(r);
+        if (problema) throw new ErrorIA(problema, cfg.proveedor);
+      },
+    });
     const leida = leerRespuesta(cruda);
     // La defensa de despues del modelo: lo que va a salir, revisado. Si
     // trae el prompt, un secreto o un telefono ajeno, no sale; sale una
@@ -751,39 +737,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     return leida;
   }
 
-  /**
-   * Una decisión por turno, con su porqué (ver src/ia/decision.ts): así se ve
-   * en el chat por qué contestó o se calló el asistente.
-   */
-  async function anotarDecision(contact: Contact, entrante: string, mensajes: number, r: TurnoIA, respuesta: RespuestaIA | null): Promise<void> {
-    if (r.resultado === 'inactiva') return;
-    const intencion: IntencionGsg =
-      r.resultado === 'derivo' ? 'pedir_persona'
-      : respuesta?.silencio ? (esAcuse(entrante) ? 'acuse' : 'ajena')
-      : respuesta?.pedido ? 'pedido_tienda'
-      : respuesta?.pedirUbicacion ? 'enviar_ubicacion'
-      : 'consulta';
-    const que =
-      r.resultado === 'callado' ? 'silencio (queda anotado para el equipo)'
-      : r.resultado === 'derivo' ? 'derivado a una persona; bot en pausa'
-      : r.resultado === 'error' ? 'texto fijo de fallo; derivado a una persona'
-      : r.resultado === 'bloqueado' ? 'texto fijo ante un intento de manipulación'
-      : respuesta?.pedido ? 'respuesta del asistente con el resumen del pedido'
-      : respuesta?.pedirUbicacion ? 'respuesta del asistente con el botón de ubicación'
-      : 'respuesta del asistente';
-    await repos.decisiones
-      ?.registrar({ contactId: contact.id, phone: contact.phone, mensajes: Math.max(1, mensajes), intencion, dato: null, respuesta: que, como: respuesta?.porReglas || respuesta?.bloqueada === 'manipulacion' ? 'reglas' : 'ia', esperaba: null, detalle: r.detalle ?? respuesta?.detalle ?? null })
-      .catch((error: unknown) => log('no se pudo guardar la decisión del turno', { phone: contact.phone, detalle: String(error) }));
-  }
-
-  async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean; mensajes?: number } = {}): Promise<TurnoIA> {
-    let leida: RespuestaIA | null = null;
-    const r = await turnoSinAnotar(contact, entrante, opts, (x) => (leida = x));
-    await anotarDecision(contact, entrante, opts.mensajes ?? 1, r, leida);
-    return r;
-  }
-
-  async function turnoSinAnotar(contact: Contact, entrante: string, opts: { esAudio?: boolean }, alLeer: (r: RespuestaIA) => void): Promise<TurnoIA> {
+  async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean } = {}): Promise<TurnoIA> {
     if (!cfg.activa) return { resultado: 'inactiva', texto: null };
     // Regla del dueño: con «Solo lo de GSG» ningun texto del modelo le llega a
     // un cliente, por ningun camino. La IA solo clasifica (agente-operativo.ts)
@@ -791,6 +745,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     if (sinVentas()) return { resultado: 'inactiva', texto: null, detalle: 'con «Solo lo de GSG» la IA no conversa con clientes: solo clasifica' };
     const sinPlan = deps.plan?.motivo('ia');
     if (sinPlan) return { resultado: 'inactiva', texto: null, detalle: sinPlan };
+    // Sin texto no hay nada que preguntarle al modelo (los adjuntos sin
+    // texto los atiende inbound.ts antes de llegar aqui).
+    if (!String(entrante ?? '').trim()) return { resultado: 'inactiva', texto: null, detalle: 'mensaje sin texto' };
     const phone = contact.phone;
     // Lo que manda el asistente queda marcado (payload.origen = 'ia'): el
     // entrenamiento aprende de lo que contesta una persona, nunca de esto.
@@ -829,21 +786,11 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       return { resultado: 'error', texto: textoDeFallo(), detalle };
     }
 
-    alLeer(respuesta);
-    // Lo ajeno, un acuse o una risa: no se contesta (pedido del dueño, 06/10).
-    // El mensaje ya está en el chat y la decisión queda anotada.
-    if (respuesta.silencio) {
-      sospechas.delete(phone);
-      return { resultado: 'callado', texto: null, detalle: respuesta.detalle ?? 'el asistente decidió no contestar: fuera del servicio' };
-    }
-    if (!respuesta.porReglas) await deps.plan?.anotarTurnoIA();
+    await deps.plan?.anotarTurnoIA();
     const texto = respuesta.texto || (respuesta.derivar ? textoDeDespedida(deps.nombreNegocio()) : '');
-    // Una sola respuesta por turno: si además hay que pedir la ubicación o
-    // resumir un pedido, va en el MISMO mensaje (abajo), no en dos.
-    const juntoConAccion = Boolean((respuesta.pedido && !sinVentas()) || respuesta.pedirUbicacion) && !respuesta.derivar && !respuesta.bloqueada;
     // Lo que se bloqueo (una manipulacion) y la despedida al derivar van por
     // escrito: son frases fijas del sistema, no la voz del asistente.
-    if (texto && !juntoConAccion) await (respuesta.bloqueada || respuesta.derivar ? porEscrito(texto) : enviar(texto));
+    if (texto) await (respuesta.bloqueada || respuesta.derivar ? porEscrito(texto) : enviar(texto));
 
     if (respuesta.bloqueada === 'manipulacion') {
       // Tres intentos seguidos de manipular al asistente: se acabo el bot en
@@ -864,8 +811,6 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       // El pedido se comprueba contra el catalogo real y se guarda; al cliente
       // le llega el resumen con el total del sistema, y a la tienda el evento.
       const r = await registrarPedido(contact, respuesta.pedido, { repos, bus: deps.bus, catalogo, moneda: 'PEN' }, 'ia');
-      // Un solo mensaje: el resumen del sistema (con los precios del catálogo).
-      // Lo que escribió el modelo no sale: podría traer un precio inventado.
       await porEscrito(r.resumen);
       if (r.ok) await avisar(contact, `tomo un pedido (#${r.pedido!.id}, ${r.pedido!.moneda} ${r.pedido!.total.toFixed(2)})`);
       return { resultado: 'respondio', texto: `${texto}\n${r.resumen}`, detalle: r.ok ? `pedido ${r.pedido!.id}` : `pedido no registrado: ${r.noEncontrados.join(', ')}` };
@@ -879,8 +824,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
         kind: 'interactive',
         category: 'UTILITY',
         origen: 'ia',
-        // Lo que dijo el asistente y la petición, en un solo mensaje.
-        interactive: { body: texto ? `${texto}\n\n${textoPedirUbicacion(conBoton)}` : textoPedirUbicacion(conBoton), locationRequest: true },
+        interactive: { body: textoPedirUbicacion(conBoton), locationRequest: true },
       });
       // Y queda apuntado en la lista de envio automatico: si no manda la
       // ubicacion, el sistema le insistira cada pocas horas, como una
@@ -919,11 +863,6 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       deps.entregas ? deps.entregas.textoAgente(clave, contact.phone, contact.name) : rellenar(TEXTOS_POR_DEFECTO[clave], { nombre: contact.name, negocio: deps.nombreNegocio(), soporte: 'este mismo número, por WhatsApp o llamada' });
     if (clase === 'por_que') return { texto: await textoAgente('porQueUbicacion'), derivar: false, pedirUbicacion: true, detalle: `pregunta por qué se pide la ubicación (${detalle})` };
     if (clase === 'flujo') return { texto: 'Para poder llegar sin problemas necesitamos tu ubicación. ¿Podrías compartirla por WhatsApp, por favor? (clip 📎 → Ubicación)', derivar: false, pedirUbicacion: true, detalle: `dentro del flujo de la ubicación (${detalle})` };
-    // Lo ajeno no recibe respuesta (pedido del dueño, 06/10); solo quien pide
-    // una persona recibe la derivación, una vez.
-    if (!pideAsesor(texto)) {
-      return { texto: '', derivar: false, pedirUbicacion: false, silencio: true, ...(manipulacion ? { bloqueada: 'manipulacion' as const } : {}), detalle: `consulta ajena: no se le contesta, queda anotado para el equipo (${manipulacion ? `intento de manipulación: ${manipulacion.tipo}` : detalle})` };
-    }
     return {
       texto: await textoAgente('cierreAgente'),
       derivar: true,
@@ -950,7 +889,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   await refrescarModelos().catch(() => undefined);
 
   /** «Probar la conexión»: lo que hay en pantalla (candidata) o lo guardado. */
-  async function probarConexionDe(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; servicio?: ServicioOpenAI; token?: string; modelo?: string }): Promise<PruebaProveedor> {
+  async function probarConexionDe(candidata?: { proveedor?: 'puter' | 'openai'; baseUrl?: string; token?: string; modelo?: string; razonamiento?: ConfigIA['razonamiento'] }): Promise<PruebaProveedor> {
     const prov = candidata?.proveedor ?? cfg.proveedor;
     const modelo = candidata?.modelo?.trim() || (prov === cfg.proveedor ? modeloEfectivo() : (candidata?.modelo ?? ''));
     if (prov === 'puter') {
@@ -958,49 +897,12 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       if (!t) return { ok: false, detalle: 'No hay sesión de Puter: pulsa "Conectar con Puter" primero.', ms: 0, modelo, proveedor: 'puter' };
       return probarProveedor(deps.proveedor ?? crearProveedorPuter(t), modelo || MODELO_GRATIS_POR_DEFECTO);
     }
-    const servicio = candidata?.servicio ?? cfg.servicio;
-    // La URL escrita en pantalla manda; si no, la del servicio elegido (antes
-    // ganaba el servicio guardado y con Groq se probaba contra OpenAI).
-    const baseUrl = candidata?.baseUrl?.trim() || presetDe(servicio)?.baseUrl || cfg.baseUrl || '';
+    const baseUrl = candidata?.baseUrl?.trim() || cfg.baseUrl || presetDe(cfg.servicio)?.baseUrl || '';
     const clave = candidata?.token?.trim() || (candidata?.token === undefined ? token : '');
-    const preset = presetDe(servicio);
+    const preset = presetDe(candidata ? '' : cfg.servicio);
     if (!clave && !preset?.sinClave && !/localhost|127\.0\.0\.1/.test(baseUrl)) return { ok: false, detalle: 'Falta la clave de la API: pégala y vuelve a probar.', ms: 0, modelo, proveedor: 'openai' };
     if (!modelo) return { ok: false, detalle: 'Falta el modelo: escribe uno (o elige un servicio de la lista, que trae sugerencias).', ms: 0, modelo, proveedor: 'openai' };
-    return probarProveedor(deps.proveedor ?? crearProveedorOpenAI({ baseUrl, clave, fetchImpl: deps.fetchImpl }), modelo);
-  }
-
-  /** El resultado de una prueba de lo guardado: enciende o apaga el aviso de saldo y la señal de conexión. */
-  function anotarPrueba(r: PruebaProveedor, origen: 'prueba' | 'automatica'): void {
-    if (r.ok) {
-      if (uso.limpiarSinSaldo()) log('«Probar la conexión» respondió bien: se quita el aviso de saldo');
-    } else if (r.cuenta && uso.marcarSinSaldo(r.cuenta, r.detalle)) void avisarSinSaldo().catch(() => undefined);
-    apuntarConexion(r.ok, origen, r.ok ? null : motivoDeFallo(r.detalle, r.cuenta));
-  }
-
-  // La comprobación sola: al arrancar (si está activa) y luego, cada
-  // COMPROBAR_CONEXION_CADA_MS, solo si en ese rato no hubo ninguna llamada
-  // (cada llamada de verdad ya dice si hay conexión). Es la prueba barata de
-  // «Comprobar conexión» (una frase de 30 tokens como mucho) y no pasa por el
-  // contador de uso: no cuenta como llamada de la tienda.
-  const cadaMs = deps.comprobarConexionCadaMs ?? (process.env.VITEST ? false : COMPROBAR_CONEXION_CADA_MS);
-  let comprobando = false;
-  async function comprobarSola(): Promise<void> {
-    if (comprobando || !(cfg.activa && token)) return;
-    if (ultimaConexion && cadaMs !== false && Date.now() - ultimaConexion.en.getTime() < cadaMs) return;
-    comprobando = true;
-    try {
-      anotarPrueba(await probarConexionDe(), 'automatica');
-    } catch (e) {
-      log('no se pudo comprobar la conexión de la IA', { detalle: e instanceof Error ? e.message : String(e) });
-    } finally {
-      comprobando = false;
-    }
-  }
-  if (cadaMs !== false) {
-    const primera = setTimeout(() => void comprobarSola(), Math.min(3_000, cadaMs));
-    primera.unref();
-    const cada = setInterval(() => void comprobarSola(), Math.min(cadaMs, 60_000));
-    cada.unref();
+    return probarProveedor(deps.proveedor ?? crearProveedorOpenAI({ baseUrl, clave, fetchImpl: deps.fetchImpl, razonamiento: candidata?.razonamiento ?? cfg.razonamiento }), modelo);
   }
 
   /** Con que identidad y por donde ejecuta la IA operadora lo que se le pide. */
@@ -1038,15 +940,10 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
 
   return {
     estado,
-    async listarModelos(servicio, clave) {
-      const guardada = cfg.proveedor === 'openai' ? token : '';
-      return listarModelosOpenAI({ servicio, clave: clave?.trim() || guardada, fetchImpl: deps.fetchImpl });
-    },
     activa: () => cfg.activa && Boolean(token),
     agenteOperativoActivo: agenteOperativo,
     clasificarOperativo: (mensajes) => chatContado('lecturas', mensajes, { maxTokens: 8 }),
     avisoSaldo,
-    conexion,
     recargar,
     catalogo,
     async probarCatalogo() {
@@ -1065,21 +962,20 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       // resultado enciende o apaga el aviso de «se acabó el saldo».
       const esLoGuardado = !candidata || ((candidata.proveedor ?? cfg.proveedor) === cfg.proveedor && (!candidata.token?.trim() || candidata.token.trim() === token) && (!candidata.baseUrl?.trim() || candidata.baseUrl.trim() === cfg.baseUrl));
       const r = await probarConexionDe(candidata);
-      if (esLoGuardado && token) anotarPrueba(r, 'prueba');
+      if (esLoGuardado && token) {
+        if (r.ok) {
+          if (uso.limpiarSinSaldo()) log('«Probar la conexión» respondió bien: se quita el aviso de saldo');
+        } else if (r.cuenta && uso.marcarSinSaldo(r.cuenta, r.detalle)) void avisarSinSaldo().catch(() => undefined);
+      }
       return r;
     },
     async guardar(patch) {
-      const { token: nuevoToken, ...resto } = patch;
+      const { token: nuevoToken, borrarClave, ...resto } = patch;
       const siguiente = configIASchema.parse({ ...cfg, ...resto });
       await settingsRepo.put(CLAVE_CONFIG, JSON.stringify(siguiente), false);
-      if (nuevoToken !== undefined) {
-        if (nuevoToken === null || nuevoToken === '') await settingsRepo.remove(CLAVE_TOKEN);
-        else await settingsRepo.put(CLAVE_TOKEN, encrypt(nuevoToken.trim(), key), true);
-      }
-      const antes = huellaConexion();
+      if (borrarClave === true) await settingsRepo.remove(CLAVE_TOKEN);
+      else if (nuevoToken?.trim()) await settingsRepo.put(CLAVE_TOKEN, encrypt(nuevoToken.trim(), key), true);
       await recargar();
-      // Otro modelo, otra clave u otro servicio: lo que se sabía ya no vale.
-      if (huellaConexion() !== antes) ultimaConexion = null;
       return estado();
     },
     responder,

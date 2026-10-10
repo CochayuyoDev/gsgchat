@@ -43,10 +43,10 @@ export async function resolveShortLink(input: string, opts: ResolveOptions = {})
     return input;
   }
 
-  if (current.protocol !== 'https:' || current.username || current.password || !isAllowedHost(current.hostname)) return input;
+  if (!isAllowedHost(current.hostname)) return input;
 
   for (let hop = 0; hop < maxRedirects; hop++) {
-    if (current.protocol !== 'https:' || !isAllowedHost(current.hostname)) return input;
+    if (current.protocol !== 'https:' && current.protocol !== 'http:') break;
     await assertPublicHost(current.hostname);
 
     const controller = new AbortController();
@@ -77,8 +77,6 @@ export async function resolveShortLink(input: string, opts: ResolveOptions = {})
     }
 
     const next = new URL(location, current);
-    if (next.protocol !== 'https:' || next.username || next.password || !isAllowedHost(next.hostname)) return input;
-    await assertPublicHost(next.hostname);
     if (next.toString() === current.toString()) break;
     current = next;
 

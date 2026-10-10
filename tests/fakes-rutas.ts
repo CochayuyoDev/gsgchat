@@ -43,7 +43,6 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
   const solicitudes: Solicitud[] = [];
   const eventos: EventoSolicitud[] = [];
   const reportes: Reporte[] = [];
-  const candados = new Map<string, Promise<void>>();
 
   const filtrar = (query: Omit<ConsultaSolicitudes, 'limit' | 'offset'>): Solicitud[] => {
     const q = query.q?.trim().toLowerCase();
@@ -198,8 +197,7 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
     async listarSolicitudes(query) {
       return filtrar(query)
         .slice()
-        // Como el SQL: lo tocado hace poco arriba, y el id desempata.
-        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id - a.id)
+        .sort((a, b) => Number(b.requiereHumano) - Number(a.requiereHumano) || a.id - b.id)
         .slice(query.offset, query.offset + query.limit);
     },
 
@@ -286,22 +284,6 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       return solicitudes.filter((s) => s.loteId === loteId).map((s) => s.phone ?? s.telefonoCrudo);
     },
 
-    async conCandadoDeTelefono(phone, fn) {
-      // Como el GET_LOCK del SQL, en memoria: cada llamada espera a la anterior del mismo telefono.
-      const anterior = candados.get(phone) ?? Promise.resolve();
-      let soltar!: () => void;
-      const propio = new Promise<void>((r) => (soltar = r));
-      const cola = anterior.then(() => propio);
-      candados.set(phone, cola);
-      await anterior;
-      try {
-        return await fn();
-      } finally {
-        soltar();
-        if (candados.get(phone) === cola) candados.delete(phone);
-      }
-    },
-
     async registrarEvento(
       solicitudId: number,
       tipo: TipoEvento,
@@ -367,24 +349,8 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       return fila;
     },
 
-    async reservarReporte(id) {
-      const r = reportes.find(x => x.id === id);
-      if (!r || r.estado !== 'pendiente') return false;
-      r.estado = 'fallido'; r.ultimoError = 'Resultado incierto: envío reservado.';
-      return true;
-    },
     async reportesPendientes(limite) {
       return reportes.filter((r) => r.estado === 'pendiente').slice(0, limite);
-    },
-
-    async reencolarFallidos(tipo, maxIntentos) {
-      const fallidos = reportes.filter((r) => r.tipo === tipo && r.estado === 'fallido' && (!maxIntentos || r.intentos < maxIntentos));
-      for (const r of fallidos) r.estado = 'pendiente';
-      return fallidos.length;
-    },
-
-    async reportesRecientes(limite, tipo) {
-      return reportes.filter((r) => r.tipo === tipo).slice().reverse().slice(0, limite);
     },
 
     async marcarReporte(id, estado: EstadoReporte, extra) {

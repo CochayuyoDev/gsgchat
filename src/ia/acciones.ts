@@ -386,20 +386,6 @@ const ACCIONES_DE_SIEMPRE: Accion[] = [
     },
   }),
   def({
-    nombre: 'entregas.sincronizar',
-    tipo: 'cambio',
-    descripcion: 'Pedirle a GSG ahora mismo su lista del día (quién falta ubicación, quién falta confirmar, quién terminó) y meterla en el sistema.',
-    parametros: '(ninguno)',
-    ejemplo: { orden: 'trae los pendientes de GSG', accion: { accion: 'entregas.sincronizar' } },
-    schema: z.object({}),
-    async ejecutar(_p, ctx) {
-      const r = await ctx.llamar({ method: 'POST', url: '/admin/entregas/sincronizar', body: {} });
-      if (!ok(r)) return errorDe(r, 'No se pudo sincronizar con GSG.');
-      const j = r.json as { ok: boolean; detalle: string };
-      return { ok: j.ok, resumen: j.detalle, ir: '/entregas' };
-    },
-  }),
-  def({
     nombre: 'motorizados.ver',
     tipo: 'consulta',
     descripcion: 'Los motorizados: quiénes están activos, su zona y cuántas entregas llevan hoy.',
@@ -597,9 +583,9 @@ const ACCIONES_DE_SIEMPRE: Accion[] = [
     nombre: 'gsg.verificar',
     tipo: 'consulta',
     soloAdmin: true,
-    descripcion: 'Consultar la lista real de GSG y decir campo por campo qué falta o sobra respecto al contrato, sin crear nada.',
+    descripcion: 'Revisar lo que GSG nos ha mandado (POST /api/v1/entregas y los pedidos descartados) contra el contrato. No llama a GSG: GSGchat nunca le pide nada.',
     parametros: '(ninguno)',
-    ejemplo: { orden: '¿la API de GSG cumple el contrato?', accion: { accion: 'gsg.verificar' } },
+    ejemplo: { orden: '¿lo que manda GSG cumple el contrato?', accion: { accion: 'gsg.verificar' } },
     schema: z.object({}),
     async ejecutar(_p, ctx) {
       const r = await ctx.llamar({ method: 'POST', url: '/admin/gsg/verificar-contrato', body: {} });
@@ -611,15 +597,15 @@ const ACCIONES_DE_SIEMPRE: Accion[] = [
   def({
     nombre: 'gsg.cuadre',
     tipo: 'consulta',
-    descripcion: 'Cuadrar un día con GSG: lo que GSG tiene en terminados frente a lo entregado aquí, en los dos sentidos.',
+    descripcion: 'El cierre de un día con lo de aquí: cuántos pedidos están entregados o cancelados y cuáles siguen abiertos. A GSG no se le pregunta nada.',
     parametros: 'dia (opcional, AAAA-MM-DD; hoy por defecto)',
-    ejemplo: { orden: '¿cuadra el día con GSG?', accion: { accion: 'gsg.cuadre' } },
+    ejemplo: { orden: '¿quedó algún pedido de hoy sin cerrar?', accion: { accion: 'gsg.cuadre' } },
     schema: z.object({ dia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
     async ejecutar(p, ctx) {
       const r = await ctx.llamar({ method: 'GET', url: `/admin/gsg/cuadre${p.dia ? `?dia=${p.dia}` : ''}` });
       if (!ok(r)) return errorDe(r, 'No se pudo cuadrar con GSG.');
-      const c = (r.json as { cuadre: { resumen: string; ok: boolean; faltanEnGsg: string[]; sobranEnGsg: string[]; coinciden: number } }).cuadre;
-      return { ok: true, resumen: c.resumen, datos: { coinciden: c.coinciden, faltanEnGsg: c.faltanEnGsg, sobranEnGsg: c.sobranEnGsg, cuadra: c.ok }, ir: '/setup#gsg' };
+      const c = (r.json as { cuadre: { resumen: string; ok: boolean; total: number; cerradasAqui: number; abiertas: string[] } }).cuadre;
+      return { ok: true, resumen: c.resumen, datos: { total: c.total, cerradas: c.cerradasAqui, abiertas: c.abiertas, cuadra: c.ok }, ir: '/setup#gsg' };
     },
   }),
 
@@ -1038,7 +1024,7 @@ for (const a of ACCIONES_DE_SIEMPRE) {
 const DEL_PANEL_Y_NUEVAS = [...ACCIONES_PANEL, ...ACCIONES_MENSAJES, ...ACCIONES_CHATS, ...ACCIONES_INFORMES, ...ACCIONES_GENERAL];
 const DEL_PANEL = new Set(DEL_PANEL_Y_NUEVAS.map((a) => a.nombre));
 // La via general (panel.*) va al final: el modelo prueba antes las acciones con nombre propio.
-export const ACCIONES: Accion[] = [...ACCIONES_DE_SIEMPRE.filter((a) => !DEL_PANEL.has(a.nombre) && !a.nombre.startsWith('motorizados.')), ...DEL_PANEL_Y_NUEVAS].filter((a) => !/^(?:motorizados|procesos|personas|respuestas|campanas|campana|grupos|tracking|stoky|catalogo|membresia|tiendas|lista)\./.test(a.nombre));
+export const ACCIONES: Accion[] = [...ACCIONES_DE_SIEMPRE.filter((a) => !DEL_PANEL.has(a.nombre)), ...DEL_PANEL_Y_NUEVAS];
 
 export const ACCIONES_POR_NOMBRE = new Map(ACCIONES.map((a) => [a.nombre, a]));
 

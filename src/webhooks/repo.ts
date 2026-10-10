@@ -7,7 +7,7 @@
  * constancia de lo que contesto.
  */
 
-import { nuevoId, type Pool } from '../db/pool.js';
+import { toleranteAlUuid, type Pool } from '../db/pool.js';
 import type { NombreEvento } from '../eventos/bus.js';
 
 export interface Webhook {
@@ -143,40 +143,39 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   enviadaAt: r.enviada_at,
 });
 
-export function createWebhooksRepo(pool: Pool): WebhooksRepo {
-  // Los ids son uuid en char(36): uno mal pegado no encuentra nada (un 404).
-  const leer = async (id: string) => (await pool.query<WebhookRow>(`select ${COLUMNAS} from webhooks where id = $1`, [id])).rows[0] ?? null;
+export function createWebhooksRepo(poolCrudo: Pool): WebhooksRepo {
+  // Los ids son uuid: uno mal pegado es un 404, no un 500 (ver toleranteAlUuid).
+  const pool = toleranteAlUuid(poolCrudo);
   return {
     async crear(input) {
-      const id = nuevoId();
-      await pool.query(
-        `insert into webhooks (id, url, descripcion, secreto, eventos, creado_por)
-         values ($1,$2,$3,$4,$5,$6)`,
-        [id, input.url, input.descripcion, input.secreto, JSON.stringify(input.eventos), input.creadoPor],
+      const { rows } = await pool.query<WebhookRow>(
+        `insert into webhooks (url, descripcion, secreto, eventos, creado_por)
+         values ($1,$2,$3,$4,$5) returning ${COLUMNAS}`,
+        [input.url, input.descripcion, input.secreto, input.eventos, input.creadoPor],
       );
-      return sinSecreto(deFila((await leer(id))!));
+      return sinSecreto(deFila(rows[0]!));
     },
     async listar() {
       const { rows } = await pool.query<WebhookRow>(`select ${COLUMNAS} from webhooks order by created_at desc`);
       return rows.map((r) => sinSecreto(deFila(r)));
     },
     async obtener(id) {
-      const fila = await leer(id);
-      return fila ? sinSecreto(deFila(fila)) : null;
+      const { rows } = await pool.query<WebhookRow>(`select ${COLUMNAS} from webhooks where id = $1`, [id]);
+      return rows[0] ? sinSecreto(deFila(rows[0])) : null;
     },
     async conSecreto(id) {
-      const fila = await leer(id);
-      return fila ? deFila(fila) : null;
+      const { rows } = await pool.query<WebhookRow>(`select ${COLUMNAS} from webhooks where id = $1`, [id]);
+      return rows[0] ? deFila(rows[0]) : null;
     },
     async activosPara(evento) {
       const { rows } = await pool.query<WebhookRow>(
-        `select ${COLUMNAS} from webhooks where activo and (json_contains(eventos, $1) or json_contains(eventos, '"*"')) order by created_at`,
-        [JSON.stringify(evento)],
+        `select ${COLUMNAS} from webhooks where activo and ($1 = any(eventos) or '*' = any(eventos)) order by created_at`,
+        [evento],
       );
       return rows.map(deFila);
     },
     async actualizar(id, patch) {
-      const { rowCount } = await pool.query(
+      const { rows } = await pool.query<WebhookRow>(
         `update webhooks
             set url = coalesce($2, url),
                 descripcion = coalesce($3, descripcion),
@@ -185,12 +184,10 @@ export function createWebhooksRepo(pool: Pool): WebhooksRepo {
                 -- Activarlo a mano borra el motivo de la pausa y el contador.
                 motivo_pausa = case when $5 = true then null else motivo_pausa end,
                 fallos_seguidos = case when $5 = true then 0 else fallos_seguidos end
-          where id = $1`,
-        [id, patch.url ?? null, patch.descripcion ?? null, patch.eventos ? JSON.stringify(patch.eventos) : null, patch.activo ?? null],
+          where id = $1 returning ${COLUMNAS}`,
+        [id, patch.url ?? null, patch.descripcion ?? null, patch.eventos ?? null, patch.activo ?? null],
       );
-      if (!rowCount) return null;
-      const fila = await leer(id);
-      return fila ? sinSecreto(deFila(fila)) : null;
+      return rows[0] ? sinSecreto(deFila(rows[0])) : null;
     },
     async rotarSecreto(id, secreto) {
       const { rowCount } = await pool.query('update webhooks set secreto = $2 where id = $1', [id, secreto]);
@@ -202,12 +199,12 @@ export function createWebhooksRepo(pool: Pool): WebhooksRepo {
     },
 
     async encolar(webhookId, evento, payload, at) {
-      const { insertId } = await pool.query(
+      const { rows } = await pool.query<{ id: number }>(
         `insert into webhook_entregas (webhook_id, evento, payload, proximo_intento_at, created_at)
-         values ($1,$2,$3, coalesce($4, now(3)), coalesce($4, now(3)))`,
+         values ($1,$2,$3, coalesce($4, now()), coalesce($4, now())) returning id`,
         [webhookId, evento, JSON.stringify(payload), at ?? null],
       );
-      return insertId;
+      return rows[0]!.id;
     },
     async pendientes(ahora, limite) {
       const { rows } = await pool.query<EntregaRow>(
@@ -216,7 +213,7 @@ export function createWebhooksRepo(pool: Pool): WebhooksRepo {
           where e.estado = 'pendiente' and e.proximo_intento_at <= $1 and w.activo
           order by e.proximo_intento_at, e.id
           limit $2`,
-        [ahora, Number(limite)],
+        [ahora, limite],
       );
       return rows.map(entregaDeFila);
     },
@@ -247,15 +244,11 @@ export function createWebhooksRepo(pool: Pool): WebhooksRepo {
       );
     },
     async anotarResultado(webhookId, ok, at) {
-      await pool.query(
-        ok
-          ? `update webhooks set ultimo_ok_at = $2, fallos_seguidos = 0 where id = $1`
-          : `update webhooks set ultimo_fallo_at = $2, fallos_seguidos = fallos_seguidos + 1 where id = $1`,
-        [webhookId, at],
-      );
       const { rows } = await pool.query<{ fallos_seguidos: number; ultimo_ok_at: Date | null }>(
-        'select fallos_seguidos, ultimo_ok_at from webhooks where id = $1',
-        [webhookId],
+        ok
+          ? `update webhooks set ultimo_ok_at = $2, fallos_seguidos = 0 where id = $1 returning fallos_seguidos, ultimo_ok_at`
+          : `update webhooks set ultimo_fallo_at = $2, fallos_seguidos = fallos_seguidos + 1 where id = $1 returning fallos_seguidos, ultimo_ok_at`,
+        [webhookId, at],
       );
       return { fallosSeguidos: rows[0]?.fallos_seguidos ?? 0, ultimoOkAt: rows[0]?.ultimo_ok_at ?? null };
     },
@@ -265,7 +258,7 @@ export function createWebhooksRepo(pool: Pool): WebhooksRepo {
     async entregas(webhookId, limite) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from webhook_entregas where webhook_id = $1 order by id desc limit $2`,
-        [webhookId, Number(limite)],
+        [webhookId, limite],
       );
       return rows.map(entregaDeFila);
     },
@@ -278,7 +271,7 @@ export function createWebhooksRepo(pool: Pool): WebhooksRepo {
       return rowCount ?? 0;
     },
     async contarPendientes() {
-      const { rows } = await pool.query<{ n: number }>(`select count(*) as n from webhook_entregas where estado = 'pendiente'`);
+      const { rows } = await pool.query<{ n: number }>(`select count(*)::int as n from webhook_entregas where estado = 'pendiente'`);
       return rows[0]?.n ?? 0;
     },
   };

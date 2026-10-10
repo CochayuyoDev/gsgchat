@@ -169,7 +169,7 @@ describe('ajustes: el motor los usa', () => {
 describe('ajustes y plantillas propias: la API', () => {
     const ENV = {
     PUBLIC_BASE_URL: 'http://localhost:3000',
-    DATABASE_URL: 'mysql://x/y',
+    DATABASE_URL: 'postgres://x/y',
     WHATSAPP_TOKEN: 't',
     WHATSAPP_PHONE_NUMBER_ID: 'PNID',
     WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -191,7 +191,7 @@ describe('ajustes y plantillas propias: la API', () => {
     },
     async close() {},
   };
-  const auth = { 'x-api-key': ADMIN };
+  const auth = { authorization: `Bearer ${ADMIN}` };
   let app: FastifyInstance;
   let repos: FakeRepos;
 

@@ -92,7 +92,7 @@ describe('leer lo que escribe el modelo', () => {
 // ------------------------------------------------------------- con servidor
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -118,7 +118,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
+const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
 
 /** Un modelo que contesta por turnos: la primera respuesta, luego la segunda... la ultima se repite. */
 function modeloPorTurnos() {
@@ -318,7 +318,7 @@ describe('ordenes desde el panel', () => {
 
   it('sin la IA conectada, lo dice y a donde ir', async () => {
     const h = await sesion();
-    await ia.guardar({ token: '' });
+    await ia.guardar({ borrarClave: true });
     const r = await app.inject({ method: 'POST', url: '/admin/ia/ordenes', headers: h, payload: { texto: 'hola' } });
     expect(r.statusCode).toBe(400);
     expect(r.json().error).toContain('/panel#ia');
@@ -481,8 +481,8 @@ describe('las acciones nuevas de las últimas vueltas van por los mismos endpoin
       'POST /admin/archives/9/enlace': { ok: true, url: 'http://x/guardados/ver/tok', caducaEn: '2026-09-28T00:00:00.000Z', dias: 7 },
       'POST /admin/fiabilidad/humo/probar': { ok: true, resultado: { ok: false, pasos: [{ nombre: 'WhatsApp', ok: true, detalle: 'entregado en 2 s' }, { nombre: 'GSG', ok: false, detalle: 'no respondió' }, { nombre: 'IA', ok: false, omitido: true, detalle: 'apagada' }] } },
       'POST /admin/fiabilidad/copia/ahora': { ok: true, resultado: { carpeta: 'D:\\copias', ficheros: [{ nombre: 'base.tar.gz' }], notas: [] } },
-      'POST /admin/gsg/verificar-contrato': { ok: false, verificacion: { resumen: 'Falta el campo telefono en faltaUbicacion.', hallazgos: [{ tipo: 'falta', donde: 'faltaUbicacion[0]', detalle: 'telefono' }] } },
-      'GET /admin/gsg/cuadre': { cuadre: { resumen: 'Cuadra: 5 coinciden.', ok: true, faltanEnGsg: [], sobranEnGsg: [], coinciden: 5 } },
+      'POST /admin/gsg/verificar-contrato': { ok: false, verificacion: { resumen: 'Hay 1 problema(s) en lo que GSG nos mandó.', hallazgos: [{ tipo: 'falta', donde: 'pedido P-1', detalle: 'no se pudo usar: sin referencia' }] } },
+      'GET /admin/gsg/cuadre': { cuadre: { resumen: 'Día cerrado: los 5 pedido(s) están entregados o cancelados.', ok: true, total: 5, cerradasAqui: 5, abiertas: [] } },
     });
     const e = await accion('guardados.enlace').ejecutar(accion('guardados.enlace').schema.parse({ cliente: 'Ana Quispe' }), ctx);
     expect(e.resumen).toContain('http://x/guardados/ver/tok');
@@ -494,10 +494,10 @@ describe('las acciones nuevas de las últimas vueltas van por los mismos endpoin
     const c = await accion('fiabilidad.copia').ejecutar({}, ctx);
     expect(c.resumen).toContain('Copia hecha en D:\\copias (1 fichero(s))');
     const v = await accion('gsg.verificar').ejecutar({}, ctx);
-    expect(v.resumen).toContain('Falta el campo telefono');
+    expect(v.resumen).toContain('1 problema');
     const q = await accion('gsg.cuadre').ejecutar({}, ctx);
-    expect(q.resumen).toBe('Cuadra: 5 coinciden.');
-    expect(q.datos).toMatchObject({ coinciden: 5, cuadra: true });
+    expect(q.resumen).toBe('Día cerrado: los 5 pedido(s) están entregados o cancelados.');
+    expect(q.datos).toMatchObject({ total: 5, cerradas: 5, abiertas: [], cuadra: true });
     expect(catalogoParaElModelo({ esAdmin: true, conCatalogo: false })).toContain('gsg.cuadre');
   });
 });

@@ -16,6 +16,8 @@
  *     conexion de la tienda ni su cola ni su simulador se tocan: la conexion
  *     queda exactamente como estaba, y la API real de GSG no se llama nunca.
  *  3. Webhooks entrega.*: formato, firma y que se reintenta y que no.
+ *  4. El contrato escrito contra el codigo, campo por campo (contrato.ts), y
+ *     que la descarga del panel es ese mismo documento.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -28,10 +30,11 @@ import { crearPuertoHttp, despacharReportes, payloadConfirmacion, payloadEntrega
 import { entregarUna } from '../webhooks/despachador.js';
 import { generarSecretoWebhook, verificarFirma } from '../webhooks/firma.js';
 import type { WebhookConSecreto } from '../webhooks/repo.js';
+import { compararContrato, leerContrato } from './contrato.js';
 import { numeroDePrueba } from './numeros.js';
 import type { Lote, Solicitud } from '../db/rutas.js';
 
-export type GrupoComprobacion = 'gsg_a_gsgchat' | 'gsgchat_a_gsg' | 'webhooks';
+export type GrupoComprobacion = 'gsg_a_gsgchat' | 'gsgchat_a_gsg' | 'webhooks' | 'contrato';
 
 export interface Comprobacion {
   id: string;
@@ -65,7 +68,7 @@ export interface DepsRecorrido {
   repos: Repos;
   /** Si las entregas del dia estan montadas (sin ellas no hay /api/v1/entregas). */
   hayEntregas: boolean;
-  /** Cabecera cookie de quien pulsa. */
+  /** Cabecera cookie de quien pulsa (para bajar el contrato como lo baja el panel). */
   cookie?: string;
   ahora?: () => Date;
   /** Solo para las pruebas: un simulador de GSG a medida (p. ej. uno que rechaza todo). */
@@ -76,6 +79,7 @@ export const TITULOS_GRUPO: Record<GrupoComprobacion, string> = {
   gsg_a_gsgchat: 'GSG → GSGchat: lo que GSG nos manda por la API',
   gsgchat_a_gsg: 'GSGchat → GSG: los reportes que le mandamos',
   webhooks: 'Avisos a GSG (webhooks entrega.*)',
+  contrato: 'El contrato escrito, campo por campo',
 };
 
 const TOKEN_SIMULADOR_PRIVADO = 'comprobacion-listo';
@@ -97,14 +101,14 @@ function fetchHaciaSimulador(sim: GsgSimulado): typeof fetch {
   return (async (entrada: Parameters<typeof fetch>[0], init?: RequestInit) => {
     if (sim.modo === 'sin_red') throw new TypeError('fetch failed: getaddrinfo ENOTFOUND api.gsg.pe');
     const url = new URL(typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url);
-    const auth = new Headers(init?.headers).get('x-api-key');
+    const auth = new Headers(init?.headers).get('authorization');
     let cuerpo: unknown = null;
     try {
       cuerpo = init?.body ? JSON.parse(String(init.body)) : null;
     } catch {
       cuerpo = init?.body ?? null;
     }
-    const r = sim.atender(init?.method ?? 'GET', url.pathname, auth || null, cuerpo);
+    const r = sim.atender(init?.method ?? 'GET', url.pathname, auth?.startsWith('Bearer ') ? auth.slice(7) : null, cuerpo);
     const esTexto = typeof r.body === 'string';
     return new Response(esTexto ? (r.body as string) : JSON.stringify(r.body), { status: r.status, headers: { 'content-type': esTexto ? 'text/html' : 'application/json' } });
   }) as typeof fetch;
@@ -164,11 +168,11 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
 
   const llamar = async (metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, opts: { clave?: string | null; cuerpo?: unknown; crudo?: string } = {}) => {
     const headers: Record<string, string> = {};
-    if (opts.clave) headers['x-api-key'] = opts.clave;
+    if (opts.clave) headers.authorization = `Bearer ${opts.clave}`;
     if (opts.cuerpo !== undefined || opts.crudo !== undefined) headers['content-type'] = 'application/json';
     const r = await deps.app.inject({ method: metodo, url, headers, payload: opts.crudo ?? (opts.cuerpo === undefined ? undefined : JSON.stringify(opts.cuerpo)), remoteAddress: '127.0.0.9' });
     const respuesta = leerRespuesta(r);
-    const peticion = { metodo, ruta: url, clave: opts.clave ? 'X-API-Key: (clave temporal de la comprobación)' : 'sin clave', cuerpo: opts.crudo ?? opts.cuerpo };
+    const peticion = { metodo, ruta: url, clave: opts.clave ? 'Bearer wak_… (clave temporal de la comprobación)' : 'sin clave', cuerpo: opts.crudo ?? opts.cuerpo };
     return { ...respuesta, tecnico: { peticion, respuesta: { status: respuesta.status, cuerpo: respuesta.cuerpo } } };
   };
 
@@ -184,11 +188,9 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
       await deps.repos.claves.revocar(revocada.id);
       const paraTope = await nuevaClave('límite', ['entregas:leer']);
 
-      // Lo que GSG manda siempre (obligatorio en el contrato): tracking, cliente, telefono, empresa, metodoPago y montoCobrar.
-      const obligatorios = { empresa: { codigo: 'PRB', nombre: 'Tienda de prueba' }, metodoPago: 'Contraentrega', montoCobrar: 45.5 };
       const valido = [
-        { ...obligatorios, referencia: refA, telefono: telA, nombre: 'Rosa Quispe (prueba)', direccion: 'Av. Larco 345', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
-        { ...obligatorios, referencia: refB, telefono: telB, nombre: 'Luis Huamán (prueba)', direccion: 'Jr. Unión 55', distrito: 'Cercado de Lima', lat: -12.0464, lng: -77.0308, faltaConfirmar: true },
+        { referencia: refA, telefono: telA, nombre: 'Rosa Quispe (prueba)', direccion: 'Av. Larco 345', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
+        { referencia: refB, telefono: telB, nombre: 'Luis Huamán (prueba)', direccion: 'Jr. Unión 55', distrito: 'Cercado de Lima', lat: -12.0464, lng: -77.0308, faltaConfirmar: true },
       ];
 
       let r = await llamar('POST', '/api/v1/entregas', { cuerpo: { pedidos: valido } });
@@ -206,11 +208,11 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
       r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [] } });
       poner({ id: 'lista_vacia', grupo: 'gsg_a_gsgchat', titulo: 'Una lista vacía no crea nada y lo dice', ok: r.status === 400, explicacion: r.status === 400 ? 'Una lista vacía responde 400 («Manda un pedido…»).' : `Una lista vacía respondió ${r.status}.`, tecnico: r.tecnico });
 
-      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [{ ...obligatorios, telefono: telA, nombre: 'Sin referencia' }] } });
+      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [{ telefono: telA, nombre: 'Sin referencia' }] } });
       const errFalta = String((r.cuerpo as { error?: string })?.error ?? '');
-      poner({ id: 'campo_faltante', grupo: 'gsg_a_gsgchat', titulo: 'Un pedido sin referencia se rechaza diciendo qué falta', ok: r.status === 400 && /tracking/i.test(errFalta), explicacion: r.status === 400 ? `Responde 400: «${errFalta}».` : `Un pedido sin referencia respondió ${r.status}.`, tecnico: r.tecnico });
+      poner({ id: 'campo_faltante', grupo: 'gsg_a_gsgchat', titulo: 'Un pedido sin referencia se rechaza diciendo qué falta', ok: r.status === 400 && /referencia/i.test(errFalta), explicacion: r.status === 400 ? `Responde 400: «${errFalta}».` : `Un pedido sin referencia respondió ${r.status}.`, tecnico: r.tecnico });
 
-      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [...valido, { ...obligatorios, referencia: refC, telefono: '12', nombre: 'Teléfono malo (prueba)' }] } });
+      r = await llamar('POST', '/api/v1/entregas', { clave: completa.clave, cuerpo: { pedidos: [...valido, { referencia: refC, telefono: '12', nombre: 'Teléfono malo (prueba)' }] } });
       const alta = (r.cuerpo ?? {}) as { creadas?: Array<{ referencia: string; estado: string }>; descartadas?: Array<{ referencia: string; motivo: string }>; repetidas?: string[] };
       const creadas = alta.creadas ?? [];
       const okCrear = r.status === 201 && creadas.some((c) => c.referencia === refA) && creadas.some((c) => c.referencia === refB);
@@ -387,12 +389,27 @@ export async function recorrerContrato(deps: DepsRecorrido): Promise<ResultadoRe
       const reintentosOk = r500.reintentable && r429.reintentable && r408.reintentable && rRed.reintentable && !r404.reintentable && !r401.reintentable;
       poner({ id: 'webhook_reintentos', grupo: 'webhooks', titulo: 'Qué avisos se reintentan y cuáles no', ok: reintentosOk, explicacion: reintentosOk ? 'Un 5xx, un 408, un 429 o sin red se reintentan con espera creciente; un 401 o 404 (URL o firma mal del lado de GSG) no se insisten.' : `Reintenta: 500 ${r500.reintentable}, 429 ${r429.reintentable}, 408 ${r408.reintentable}, sin red ${rRed.reintentable}, 404 ${r404.reintentable}, 401 ${r401.reintentable}.` });
     }
+
+    // =================================================== 4. Contrato escrito
+    const md = await leerContrato();
+    if (!md) {
+      poner({ id: 'contrato_existe', grupo: 'contrato', titulo: 'El contrato está en esta instalación', ok: false, explicacion: 'No se encuentra docs/CONTRATO-GSG.md: no hay nada que darle a GSG.', queHacer: 'Copia la carpeta docs/ junto al programa.' });
+    } else {
+      for (const d of compararContrato(md)) {
+        poner({ id: `contrato_${d.parte}`, grupo: 'contrato', titulo: d.parte, ok: d.ok, explicacion: d.explicacion, queHacer: d.ok ? undefined : 'Corrige docs/CONTRATO-GSG.md (o el código) hasta que coincidan.', tecnico: d.ok ? undefined : { respuesta: { faltanEnElContrato: d.faltanEnDocumento, sobranEnElContrato: d.sobranEnDocumento } } });
+      }
+      if (deps.cookie) {
+        const r = await deps.app.inject({ method: 'GET', url: '/docs/contrato-gsg.md', headers: { cookie: deps.cookie } });
+        const igual = r.statusCode === 200 && r.body === md;
+        poner({ id: 'contrato_descarga', grupo: 'contrato', titulo: 'Lo que baja el panel es este mismo contrato', ok: igual, explicacion: igual ? '«Descargar el contrato» (Conexión) entrega exactamente este documento.' : `La descarga respondió ${r.statusCode} y no coincide con el fichero.` });
+      }
+    }
   } finally {
     limpieza = await limpiar(deps.repos, pref, [telA, telB], clavesCreadas).catch((error: unknown) => `No se pudo limpiar todo: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const bien = lista.filter((c) => c.ok).length;
-  const orden: GrupoComprobacion[] = ['gsg_a_gsgchat', 'gsgchat_a_gsg', 'webhooks'];
+  const orden: GrupoComprobacion[] = ['gsg_a_gsgchat', 'gsgchat_a_gsg', 'webhooks', 'contrato'];
   const grupos = orden
     .map((g) => ({ id: g, titulo: TITULOS_GRUPO[g], comprobaciones: lista.filter((c) => c.grupo === g) }))
     .filter((g) => g.comprobaciones.length)
@@ -421,12 +438,12 @@ async function limpiar(repos: Repos, pref: string, telefonos: string[], claves: 
   if (!db) return `Claves temporales revocadas (${claves.length}). Sin base de datos real no hay más que borrar.`;
   const like = `${pref}%`;
   const lotes = (await db.query<{ lote_id: string }>('select distinct lote_id from rutas_solicitudes where referencia like $1', [like])).rows.map((r) => r.lote_id);
-  const reportes = (await db.query(`delete from rutas_reportes where json_unquote(json_extract(payload, '$.referencia')) like $1`, [like])).rowCount;
-  await db.query(`delete from webhook_entregas where json_unquote(json_extract(payload, '$.referencia')) like $1`, [like]);
+  const reportes = (await db.query('delete from rutas_reportes where payload->>\'referencia\' like $1', [like])).rowCount;
+  await db.query('delete from webhook_entregas where payload->>\'referencia\' like $1', [like]);
   const pedidos = (await db.query('delete from entregas where referencia like $1', [like])).rowCount;
   await db.query('delete from rutas_solicitudes where referencia like $1', [like]);
-  if (lotes.length) await db.query('delete l from rutas_lotes l where l.id in ($1) and not exists (select 1 from rutas_solicitudes s where s.lote_id = l.id)', [lotes]);
-  await db.query('delete from contacts where phone in ($1)', [telefonos]);
-  const borradas = claves.length ? (await db.query('delete from claves_api where id in ($1)', [claves])).rowCount : 0;
+  if (lotes.length) await db.query('delete from rutas_lotes l where l.id = any($1::uuid[]) and not exists (select 1 from rutas_solicitudes s where s.lote_id = l.id)', [lotes]);
+  await db.query('delete from contacts where phone = any($1::text[])', [telefonos]);
+  const borradas = claves.length ? (await db.query('delete from claves_api where id = any($1::uuid[])', [claves])).rowCount : 0;
   return `Se borró lo de la comprobación: ${pedidos} pedido${pedidos === 1 ? '' : 's'} de prueba, ${reportes} reporte${reportes === 1 ? '' : 's'} en cola, sus clientes de prueba y ${borradas} clave${borradas === 1 ? '' : 's'} temporal${borradas === 1 ? '' : 'es'}.`;
 }

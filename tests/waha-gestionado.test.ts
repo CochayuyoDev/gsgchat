@@ -158,7 +158,7 @@ describe('conectar sin haber escrito ninguna direccion', () => {
   async function montar(estado: EstadoWaha) {
     const config = loadConfig({
       PUBLIC_BASE_URL: 'http://localhost:3300',
-      DATABASE_URL: 'mysql://x/y',
+      DATABASE_URL: 'postgres://x/y',
       WHATSAPP_PROVIDER: 'waha',
       TRACKING_SECRET: 'x'.repeat(40),
     } as NodeJS.ProcessEnv);

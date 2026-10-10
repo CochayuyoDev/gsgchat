@@ -125,12 +125,6 @@ export interface ArchivesRepo {
   /** Los respaldos vivos de un contacto, del mas reciente al mas viejo. */
   byContact(contactId: string): Promise<ChatArchive[]>;
   update(id: number, patch: ArchivePatch): Promise<ChatArchive | null>;
-  /**
-   * Pone el resumen y las etiquetas SOLO si aun no tiene resumen, en una sola
-   * sentencia: el resumen automatico (que llega en segundo plano) nunca pisa
-   * el que una persona puso entre medias. Devuelve como quedo.
-   */
-  ponerResumenSiFalta(id: number, resumen: string, etiquetas: string[]): Promise<ChatArchive | null>;
   remove(id: number): Promise<void>;
   /** Los de la papelera con mas de `dias` dias: toca borrarlos de verdad. */
   papeleraVencida(dias: number, limite: number): Promise<ChatArchive[]>;
@@ -164,7 +158,7 @@ interface Row {
   created_at: Date;
 }
 
-/** Una columna json llega ya leida (ver pool.ts); por si llegara como cadena, se aceptan las dos formas. */
+/** Un jsonb llega ya leido con pg, y como cadena con algun driver: se acepta de las dos formas. */
 function listaJson<T>(v: unknown): T[] {
   if (Array.isArray(v)) return v as T[];
   if (typeof v === 'string') {
@@ -184,7 +178,7 @@ const toArchive = (r: Row): ChatArchive => ({
   phone: r.phone,
   name: r.name,
   file: r.file,
-  // bigint: el pool ya lo da como numero; el Number() es por si acaso, el panel lo quiere sumable.
+  // bigint llega como cadena con el driver de pg; el panel lo quiere sumable.
   bytes: Number(r.bytes),
   messageCount: Number(r.message_count),
   firstMessageAt: r.first_message_at,
@@ -213,16 +207,15 @@ function condiciones(query: Omit<ArchiveQuery, 'limit' | 'offset'>): { where: st
   }
   if (query.q?.trim()) {
     params.push(`%${query.q.trim()}%`);
-    filtros.push(`(lower(phone) like lower($${params.length}) or lower(name) like lower($${params.length}))`);
+    filtros.push(`(phone ilike $${params.length} or name ilike $${params.length})`);
   }
   if (query.texto?.trim()) {
     params.push(`%${query.texto.trim()}%`);
-    const p = `lower($${params.length})`;
-    filtros.push(`(lower(texto_busqueda) like ${p} or lower(resumen) like ${p} or lower(notas) like ${p})`);
+    filtros.push(`(texto_busqueda ilike $${params.length} or resumen ilike $${params.length} or notas ilike $${params.length})`);
   }
   if (query.etiqueta?.trim()) {
     params.push(JSON.stringify([query.etiqueta.trim()]));
-    filtros.push(`json_contains(etiquetas, $${params.length})`);
+    filtros.push(`etiquetas @> $${params.length}::jsonb`);
   }
   if (query.pedido?.trim()) {
     params.push(query.pedido.trim());
@@ -260,12 +253,13 @@ export function lunesRecientes(n = 8, ahora = new Date()): string[] {
 export function createArchivesRepo(pool: Pool): ArchivesRepo {
   const repo: ArchivesRepo = {
     async add(archive) {
-      const { insertId } = await pool.query(
+      const { rows } = await pool.query<Row>(
         `insert into chat_archives
            (contact_id, phone, name, file, bytes, message_count,
             first_message_at, last_message_at, reason, sha256, texto_busqueda, pedido, cerrado_por,
             adjuntos, primera_respuesta_seg, origen)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16)
+         returning *`,
         [
           archive.contactId,
           archive.phone,
@@ -285,7 +279,7 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
           archive.origen ?? null,
         ],
       );
-      return (await repo.get(insertId))!;
+      return toArchive(rows[0]!);
     },
 
     async get(id) {
@@ -299,14 +293,14 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
         `select * from chat_archives ${where}
           order by created_at desc, id desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, Number(query.limit), Number(query.offset)],
+        [...params, query.limit, query.offset],
       );
       return rows.map(toArchive);
     },
 
     async count(query) {
       const { where, params } = condiciones(query);
-      const { rows } = await pool.query<{ n: number | string }>(`select count(*) as n from chat_archives ${where}`, params);
+      const { rows } = await pool.query<{ n: number | string }>(`select count(*)::int as n from chat_archives ${where}`, params);
       return Number(rows[0]?.n ?? 0);
     },
 
@@ -327,7 +321,7 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
       }
       if (patch.etiquetas !== undefined) {
         valores.push(JSON.stringify(patch.etiquetas));
-        sets.push(`etiquetas = $${valores.length}`);
+        sets.push(`etiquetas = $${valores.length}::jsonb`);
       }
       if (patch.pedido !== undefined) {
         valores.push(patch.pedido);
@@ -343,17 +337,12 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
       }
       if (patch.adjuntos !== undefined) {
         valores.push(JSON.stringify(patch.adjuntos));
-        sets.push(`adjuntos = $${valores.length}`);
+        sets.push(`adjuntos = $${valores.length}::jsonb`);
       }
       if (!sets.length) return repo.get(id);
       valores.push(id);
-      await pool.query(`update chat_archives set ${sets.join(', ')} where id = $${valores.length}`, valores);
-      return repo.get(id);
-    },
-
-    async ponerResumenSiFalta(id, resumen, etiquetas) {
-      await pool.query('update chat_archives set resumen = $1, etiquetas = $2 where id = $3 and resumen is null', [resumen, JSON.stringify(etiquetas), id]);
-      return repo.get(id);
+      const { rows } = await pool.query<Row>(`update chat_archives set ${sets.join(', ')} where id = $${valores.length} returning *`, valores);
+      return rows[0] ? toArchive(rows[0]) : null;
     },
 
     async remove(id) {
@@ -363,7 +352,7 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
     async papeleraVencida(dias, limite) {
       const { rows } = await pool.query<Row>(
         `select * from chat_archives where deleted_at is not null and deleted_at < $1 order by deleted_at asc limit $2`,
-        [new Date(Date.now() - dias * 24 * 60 * 60 * 1000), Number(limite)],
+        [new Date(Date.now() - dias * 24 * 60 * 60 * 1000), limite],
       );
       return rows.map(toArchive);
     },
@@ -371,7 +360,7 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
     async sinResumen(limite) {
       const { rows } = await pool.query<Row>(
         `select * from chat_archives where deleted_at is null and resumen is null and message_count > 0 order by created_at desc limit $1`,
-        [Number(limite)],
+        [limite],
       );
       return rows.map(toArchive);
     },
@@ -386,44 +375,30 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
         con_adjuntos: number;
         primera_respuesta: number | string | null;
       }>(
-        `select count(case when deleted_at is null then 1 end) as total,
-                coalesce(sum(case when deleted_at is null then bytes end), 0) as bytes,
-                coalesce(sum(case when deleted_at is null then message_count end), 0) as messages,
-                count(case when deleted_at is not null then 1 end) as en_papelera,
-                count(case when deleted_at is null and json_contains(etiquetas, '["reclamo"]') then 1 end) as con_reclamo,
-                count(case when deleted_at is null and json_length(adjuntos) > 0 then 1 end) as con_adjuntos,
-                avg(case when deleted_at is null then primera_respuesta_seg end) as primera_respuesta
+        `select count(*) filter (where deleted_at is null)::int as total,
+                coalesce(sum(bytes) filter (where deleted_at is null), 0) as bytes,
+                coalesce(sum(message_count) filter (where deleted_at is null), 0)::int as messages,
+                count(*) filter (where deleted_at is not null)::int as en_papelera,
+                count(*) filter (where deleted_at is null and etiquetas @> '["reclamo"]'::jsonb)::int as con_reclamo,
+                count(*) filter (where deleted_at is null and jsonb_array_length(adjuntos) > 0)::int as con_adjuntos,
+                avg(primera_respuesta_seg) filter (where deleted_at is null) as primera_respuesta
            from chat_archives`,
       );
       const motivos = await pool.query<{ reason: string; n: number | string }>(
-        `select reason, count(*) as n from chat_archives where deleted_at is null group by reason`,
+        `select reason, count(*)::int as n from chat_archives where deleted_at is null group by reason`,
       );
-      // MariaDB 10.4 no tiene JSON_TABLE para abrir la lista en filas: se
-      // traen las listas y se cuentan aqui. Gana la que mas sale; a igualdad,
-      // la que aparecio antes.
-      const conEtiquetas = await pool.query<{ etiquetas: unknown }>(
-        `select etiquetas from chat_archives where deleted_at is null and json_length(etiquetas) > 0`,
+      const etiquetas = await pool.query<{ etiqueta: string; n: number | string }>(
+        `select e as etiqueta, count(*)::int as n from chat_archives, jsonb_array_elements_text(etiquetas) as e where deleted_at is null group by e order by n desc limit 30`,
       );
-      const cuentaEtiquetas = new Map<string, number>();
-      for (const fila of conEtiquetas.rows) {
-        for (const e of listaJson<unknown>(fila.etiquetas)) {
-          const clave = typeof e === 'string' ? e : JSON.stringify(e);
-          cuentaEtiquetas.set(clave, (cuentaEtiquetas.get(clave) ?? 0) + 1);
-        }
-      }
-      const etiquetas = [...cuentaEtiquetas].sort((a, b) => b[1] - a[1]).slice(0, 30);
       // Las semanas se cuentan por su lunes en hora de Lima, que es donde
       // esta el negocio; el lunes de cada fila lo calcula la base para que
-      // coincida con el que calcula `lunesRecientes`. Lima va a UTC-5 todo el
-      // ano (sin horario de verano), asi que no hacen falta las tablas de zonas.
+      // coincida con el que calcula `lunesRecientes`.
       const lunes = lunesRecientes(8);
       const semanas = await pool.query<{ semana: string; n: number | string }>(
-        `select date_format(date_sub(date(convert_tz(created_at, '+00:00', '-05:00')),
-                                     interval weekday(convert_tz(created_at, '+00:00', '-05:00')) day), '%Y-%m-%d') as semana,
-                count(*) as n
+        `select to_char(date_trunc('week', created_at at time zone 'America/Lima'), 'YYYY-MM-DD') as semana, count(*)::int as n
            from chat_archives
           where deleted_at is null and created_at >= $1
-          group by semana`,
+          group by 1`,
         [new Date(`${lunes[0]}T00:00:00-05:00`)],
       );
       const porSemanaMapa = new Map(semanas.rows.map((s) => [s.semana, Number(s.n)]));
@@ -435,7 +410,7 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
         messages: Number(r?.messages ?? 0),
         enPapelera: Number(r?.en_papelera ?? 0),
         porMotivo: Object.fromEntries(motivos.rows.map((m) => [m.reason, Number(m.n)])),
-        porEtiqueta: Object.fromEntries(etiquetas),
+        porEtiqueta: Object.fromEntries(etiquetas.rows.map((e) => [e.etiqueta, Number(e.n)])),
         porSemana: lunes.map((semana) => ({ semana, n: porSemanaMapa.get(semana) ?? 0 })),
         primeraRespuestaMedioSeg: r?.primera_respuesta === null || r?.primera_respuesta === undefined ? null : Math.round(Number(r.primera_respuesta)),
         pctReclamo: total ? Math.round((Number(r?.con_reclamo ?? 0) * 100) / total) : 0,

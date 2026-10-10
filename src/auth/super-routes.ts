@@ -94,13 +94,47 @@ export async function registerSuperRoutes(app: FastifyInstance, deps: SuperRoute
 
   // ---------------------------------------------------------------- membresia
 
+  app.get('/admin/membresia', async (request) => {
+    const e = deps.plan?.estado() ?? sinPlan();
+    // Un admin ve la membresia; los pagos y lo editable son cosa del superadmin.
+    const local = request.usuario?.super ? e.local : e.local ? { ...e.local, pagos: [] } : null;
+    return { ...e, local, planes: PLANES_ELEGIBLES, soySuper: Boolean(request.usuario?.super) };
+  });
 
+  app.post('/admin/membresia', async (request, reply) => {
+    if (!soloSuper(request, reply, 'cambiar la membresía')) return;
+    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
+    const body = membresiaSchema.parse(request.body ?? {});
+    try {
+      const e = await deps.plan.guardarLocal({ ...body, limites: body.limites as Partial<import('../plan/servicio.js').LimitesPlan> | undefined }, quien(request));
+      return { ok: true, ...e, planes: PLANES_ELEGIBLES, soySuper: true, mensaje: `Membresía ${e.plan?.nombre ?? ''} guardada: vence el ${new Date(e.plan!.vencimiento).toLocaleDateString('es-PE')}.` };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
+  app.post('/admin/membresia/pagos', async (request, reply) => {
+    if (!soloSuper(request, reply, 'apuntar pagos')) return;
+    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
+    const body = z.object({ meses: z.coerce.number().int().min(1).max(60), monto: z.coerce.number().min(0).max(10_000_000).default(0), moneda: z.string().trim().max(8).optional(), nota: z.string().trim().max(200).optional() }).parse(request.body ?? {});
+    try {
+      const e = await deps.plan.anotarPago(body, quien(request));
+      return { ok: true, ...e, planes: PLANES_ELEGIBLES, soySuper: true, mensaje: `Pago apuntado: ${body.meses} mes${body.meses === 1 ? '' : 'es'}. Ahora vence el ${new Date(e.plan!.vencimiento).toLocaleDateString('es-PE')}.` };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
-
-
-
-
+  app.delete('/admin/membresia', async (request, reply) => {
+    if (!soloSuper(request, reply, 'quitar la membresía')) return;
+    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
+    try {
+      const e = await deps.plan.quitarLocal();
+      return { ok: true, ...e, planes: PLANES_ELEGIBLES, soySuper: true };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
   // ------------------------------------------------------ codigos de conexion
 

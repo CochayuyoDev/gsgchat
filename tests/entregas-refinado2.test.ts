@@ -55,7 +55,7 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     await e.repos.locations.confirm(id);
 
     e.simulador.cargar([{ referencia: 'R-1', telefono: '987222222', nombre: 'Rosa Recurrente', direccion: 'Jr. Cusco 100', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: true }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     let r1 = await e.entrega('R-1');
     expect(r1?.ubicacionPropuestaLat).toBeCloseTo(pinDe(30).lat, 5);
     expect(r1?.loteId).toBeNull();
@@ -87,7 +87,7 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     const id = await e.repos.locations.save(contacto.id, { ok: true, lat: pinDe(31).lat, lng: pinDe(31).lng, source: 'whatsapp_location', confidence: 'high', precisionMeters: 10, mapsUrl: 'https://maps.google.com/?q=y', warnings: [] } as never, 'pin');
     await e.repos.locations.confirm(id);
     e.simulador.cargar([{ referencia: 'R-2', telefono: '987222233', nombre: 'Tomás Recurrente', faltaUbicacion: true, faltaConfirmacion: false }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     e.avanzarSegundos(10);
     await e.trabajar();
     let r2 = await e.entrega('R-2');
@@ -117,7 +117,7 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     const id = await e.repos.locations.save(contacto.id, { ok: true, lat: pinDe(32).lat, lng: pinDe(32).lng, source: 'whatsapp_location', confidence: 'high', precisionMeters: 10, mapsUrl: 'https://maps.google.com/?q=z', warnings: [] } as never, 'pin');
     await e.repos.locations.confirm(id);
     e.simulador.cargar([{ referencia: 'R-3', telefono: '987222244', nombre: 'Ulises', faltaUbicacion: true, faltaConfirmacion: false }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     const r3 = await e.entrega('R-3');
     expect(r3?.loteId).toBeTruthy();
     expect(r3?.ubicacionPropuestaLat).toBeNull();
@@ -168,7 +168,7 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     expect((await e.entrega('R-1'))?.estado).toBe('entregada');
     // Segunda entrega del mismo motorizado, para que haya al menos dos.
     e.simulador.cargar([{ referencia: 'R-4', telefono: '987222255', nombre: 'Vera', faltaUbicacion: false, faltaConfirmacion: true, lat: pinDe(33).lat, lng: pinDe(33).lng }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     e.avanzarSegundos(10);
     await e.trabajar();
     await e.contesta('987222255', { texto: 'si' });
@@ -188,6 +188,8 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
   });
 
   it('«Probar el día entero» recorre el día solo y termina con todo entregado', async () => {
+    // La prueba del día solo corre con el simulador puesto (nunca con la API real).
+    await e.conexionGsg.usarSimulador();
     e.simulador.cargarDePrueba();
     const inicio = await e.api.post<{ ok: boolean; estado: { estado: string } }>('/admin/entregas/simulador/probar-dia', { pausaMs: 200 });
     expect(inicio.status).toBe(200);
@@ -238,7 +240,7 @@ describe('las frases propias del negocio (lo corregido en «Lo que la IA no ente
     try {
       await e.settingsRepo.put('entregas.frases', JSON.stringify({ si: ['firme causa'], no: [], duda: [], entregado: [], noEntregado: [], minutos: [] }), false);
       e.simulador.cargar([{ referencia: 'F-1', telefono: '987333333', nombre: 'Fátima', faltaUbicacion: false, faltaConfirmacion: true, lat: pinDe(40).lat, lng: pinDe(40).lng }]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       expect((await e.entrega('F-1'))?.confirmacionEstado).toBe('pedida');
       await e.contesta('987333333', { texto: 'firme causa' });

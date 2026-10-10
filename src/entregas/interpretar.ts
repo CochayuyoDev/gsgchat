@@ -152,20 +152,6 @@ const SI = [
   'de una',
   'obvio',
   'siempre si',
-  // Como se contesta en Perú a «¿lo recibes hoy?» (batería del 30/09: la IA
-  // los tomaba por «otra cosa» y el cliente recibía el cierre).
-  'simon',
-  'de hecho',
-  'sep',
-  'sipi',
-  'si si',
-  'yap',
-  'ya pe',
-  'okis',
-  'oki',
-  'lo recibo',
-  'si lo recibo',
-  'ahi estare',
 ];
 
 /** Lo que vale por un "no": cancelar, ya no querer. */
@@ -214,9 +200,6 @@ const NO = [
   'no lo envien',
   'no lo traigan',
   'no traigan',
-  // «no lo recibo» lleva dentro el «lo recibo» de los síes: gana el no.
-  'no lo recibo',
-  'no lo voy a recibir',
 ];
 
 /** Lo que pide cambiar algo: otro día, otra hora, otra dirección. */
@@ -386,7 +369,7 @@ function contieneFrase(texto: string, frases: readonly string[]): string | null 
  * "ya te aviso"). Los demas de la lista SI son confirmaciones con todas las
  * letras ("confirmo", "lo quiero", "manden nomas") y valen siempre.
  */
-const SI_FLOJOS = new Set(['si', 'sii', 'siii', 'sip', 'sis', 'yes', 'ya', 'ok', 'okey', 'okay', 'oka', 'dale', 'claro', 'listo', 'perfecto', 'va', 'vale', 'bueno', 'esta bien', 'todo bien', 'asi es', 'exacto', 'obvio', 'de una', 'ok gracias', 'siempre si', 'simon', 'de hecho', 'sep', 'sipi', 'si si', 'yap', 'ya pe', 'okis', 'oki']);
+const SI_FLOJOS = new Set(['si', 'sii', 'siii', 'sip', 'sis', 'yes', 'ya', 'ok', 'okey', 'okay', 'oka', 'dale', 'claro', 'listo', 'perfecto', 'va', 'vale', 'bueno', 'esta bien', 'todo bien', 'asi es', 'exacto', 'obvio', 'de una', 'ok gracias', 'siempre si']);
 
 /**
  * Lee una respuesta a "¿confirmas tu pedido?" con reglas.
@@ -913,11 +896,6 @@ export function leerMotorizadoCorta(texto: string): LecturaMotorizadoCorta {
 // ------------------------------------------------- donde esta mi pedido
 
 const PREGUNTA_PEDIDO = [
-  'donde esta el motorizado',
-  'en que punto esta',
-  'cuantos kilometros faltan',
-  'cuantas paradas faltan',
-  'donde esta mi entrega',
   'donde esta mi pedido',
   'donde esta el pedido',
   'donde esta mi paquete',
@@ -1133,97 +1111,6 @@ function preguntaConErrores(limpio: string): boolean {
   const palabras = limpio.split(/\s+/).filter((p) => p.length >= 4);
   const parece = (lista: string[]) => palabras.some((p) => lista.some((w) => distancia(p, w) <= (w.length >= 7 ? 2 : 1)));
   return parece(PALABRA_CUANDO) && parece(PALABRA_PEDIDO);
-}
-
-// ------------------------------------------------- cambio de ubicación
-
-/**
- * Lo que nombra el sitio. Se aceptan faltas: «ubicasion», «ubikcion»,
- * «hubicacion», «direcion», «dirrecion» (hasta dos letras cambiadas, de más o
- * de menos en las palabras largas).
- */
-function esLugar(p: string): boolean {
-  if (['ubi', 'ubica', 'pin', 'direc', 'dire', 'lugar', 'sitio', 'localizacion', 'gps', 'mapa'].includes(p)) return true;
-  if (/^h?ubica[csz]/.test(p)) return true;
-  return p.length >= 6 && (distancia(p, 'ubicacion') <= 2 || distancia(p, 'direccion') <= 2);
-}
-
-/** «me equivoqué», «equivocada», «me confundí», «mal», «incorrecta»… con las faltas de siempre (equiboque, ekivoke). */
-function esError(p: string): boolean {
-  if (/^h?e[qk]u?[iy][vb]o[ckq]/.test(p) || /^confund/.test(p)) return true;
-  if (['mal', 'mala', 'malo', 'incorrecta', 'incorrecto', 'erronea', 'erroneo', 'errada', 'errado'].includes(p)) return true;
-  return p.length >= 7 && distancia(p, 'equivoque') <= 2;
-}
-
-/** «cambiar», «cambio», «cambiarla», «corregir», «modificar», «actualizar»… */
-const esCambiar = (p: string): boolean => /^(cambi|corregi|corrij|modific|actualiz|rectific)/.test(p);
-/** «mandé», «envié», «pasé», «compartí», «puse», «marqué». */
-const esMande = (p: string): boolean => /^(mand|envi|pas[eo]$|pasare|comparti|puse|marque)/.test(p);
-const esOtra = (p: string): boolean => ['otra', 'otro', 'nueva', 'nuevo'].includes(p);
-
-/**
- * «Me equivoqué de ubicación», «esa no es mi ubicación», «quiero cambiar mi
- * ubicación», «mandé mal la ubicación», «la ubicación está mal», «te mando
- * otra»…: el cliente que YA dio su ubicación y la quiere cambiar (regla del
- * dueño: antes de la hora límite se le pide la nueva; después, el motorizado).
- *
- * Solo reglas, sin tildes y con faltas de tipeo. Lo que niega («no me
- * equivoqué», «la ubicación no está mal», «no quiero cambiarla») no cuenta,
- * y la negación solo se mira dentro de la misma frase: en «no, me equivoqué
- * de ubicación» el «no» va aparte y sí es un cambio.
- */
-export function pideCambioUbicacion(texto: string): boolean {
-  const frases = texto
-    .split(/[,.;!?¡¿\n]+/)
-    .map((f) => normalizar(f).split(' ').filter(Boolean))
-    .filter((f) => f.length);
-  if (!frases.length) return false;
-  const todo = frases.flat();
-  const hayLugar = todo.some(esLugar);
-  const junto = ` ${todo.join(' ')} `;
-  // «¿Por qué es necesaria mi ubicación?» no es un cambio aunque diga «no es».
-  if (/ (necesari[ao]|obligatori[ao]|para que|por que|porque) /.test(junto) && !todo.some(esError) && !todo.some(esCambiar)) return false;
-
-  for (const f of frases) {
-    const negada = (i: number): boolean => f.slice(Math.max(0, i - 2), i).some((p) => p === 'no' || p === 'nunca' || p === 'ni');
-    for (let i = 0; i < f.length; i++) {
-      const p = f[i]!;
-      // «me equivoqué de ubicación», «la ubicación está mal», «puse mal el pin».
-      if (esError(p) && hayLugar && !negada(i)) return true;
-      // «mandé mal», «la envié mal» (la ubicación que acaba de mandar).
-      if (p === 'mal' && !negada(i) && f.slice(Math.max(0, i - 3), i).some(esMande)) return true;
-      // «quiero cambiar mi ubicación», «cambio de dirección».
-      if (esCambiar(p) && hayLugar && !negada(i)) return true;
-      // «otra ubicación», «la ubicación nueva».
-      if (esLugar(p) && (esOtra(f[i - 1] ?? '') || esOtra(f[i + 1] ?? ''))) return true;
-      // «te mando otra», «te paso la correcta», «ahí va la buena».
-      if (esMande(p) && i < f.length - 1) {
-        const resto = f.slice(i + 1).filter((x) => !['la', 'el', 'una', 'te', 'le', 'les', 'ahora', 'ya', 'ahorita'].includes(x));
-        if (resto.length === 1 && (esOtra(resto[0]!) || resto[0] === 'correcta' || resto[0] === 'buena')) return true;
-      }
-    }
-  }
-  // «esa no es mi ubicación», «la dirección no era esa», «la ubicación es otra».
-  if (hayLugar && / no (es|era|esta bien|corresponde)( | .* )/.test(junto)) return true;
-  if (hayLugar && / (es|era) (otra|otro)( |$)/.test(junto)) return true;
-  // «no es ahí», «no es allí»: sin nombrar el sitio, pero no hace falta.
-  if (/ no (es|era) (ahi|alli|aca|alla|aqui) /.test(junto)) return true;
-  // «Esa no es», «esa no es mi casa», «no es mi casa»: contesta al «Ubicación
-  // registrada» que acaba de recibir (batería del 30/09: con «Todo el sistema»
-  // lo contestaba la IA libre y el pin nuevo no se tomaba como cambio).
-  if (/^ (esa|esta|eso|la|el) no (es|era)( la| el)?( correcta| correcto| buena| mia| mio)? $/.test(junto)) return true;
-  if (/ (esa|esta|eso|ahi|alli|aca|aqui) no (es|era) (mi|la|el) (casa|depa|departamento|domicilio|trabajo|oficina|edificio|lugar|sitio) /.test(junto)) return true;
-  if (/^ no (es|era) (mi|esa|esta) (casa|depa|departamento|domicilio) $/.test(junto)) return true;
-  // «Ya no estoy en casa, estoy en el trabajo», «ahora estoy en la chamba»,
-  // «tráemelo a mi oficina»: dice que hoy lo recibe en OTRO sitio sin nombrar
-  // la ubicación (batería del 30/09: caía al cierre). Solo cuenta con el pin
-  // ya registrado: quien lo llama sabe si el cliente ya mandó su ubicación.
-  const OTRO_SITIO = '(trabajo|chamba|chambita|oficina|centro de trabajo|casa de mi \\w+|donde mi \\w+|otro (sitio|lado|lugar|distrito)|otra (casa|direccion))';
-  if (new RegExp(` (ya no|ahorita no|hoy no) (estoy|voy a estar|estare) en (mi |la )?casa `).test(junto)) return true;
-  if (new RegExp(` (ahora|ahorita|hoy|ya) (estoy|voy a estar|estare) en (el |la |mi |otro |otra )?${OTRO_SITIO}`).test(junto)) return true;
-  if (new RegExp(` (traemelo|traiganlo|traelo|llevamelo|llevenlo|llevalo|mandamelo|mandenlo|mandalo|envienlo|entreguenlo|entregamelo) (mejor )?(a|al|en) (mi |el |la |otro |otra )?${OTRO_SITIO}`).test(junto)) return true;
-  if (new RegExp(` mejor (a|al|en) (mi |el |la )?${OTRO_SITIO}`).test(junto)) return true;
-  return false;
 }
 
 // --------------------------------------------------------------------- IA

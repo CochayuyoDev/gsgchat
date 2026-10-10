@@ -111,16 +111,12 @@ export function createStickersRepo(pool: Pool): StickersRepo {
       return rows[0] ? deFila(rows[0]) : null;
     },
     async crear(s) {
-      // Solo se actualiza si choca el id: si chocara el archivo con otro id,
-      // es un error (como el "on conflict (id)" de Postgres).
-      const { rows: otro } = await pool.query<{ id: string }>('select id from stickers where archivo = $1 and id <> $2', [s.archivo, s.id]);
-      if (otro.length) throw new Error(`ya hay otro sticker con el archivo ${s.archivo}`);
-      await pool.query(
+      const { rows } = await pool.query<Row>(
         `insert into stickers (id, nombre, uso, archivo, bytes) values ($1,$2,$3,$4,$5)
-         on duplicate key update nombre = values(nombre), uso = values(uso)`,
+         on conflict (id) do update set nombre = excluded.nombre, uso = excluded.uso
+         returning *`,
         [s.id, s.nombre, s.uso, s.archivo, s.bytes],
       );
-      const { rows } = await pool.query<Row>('select * from stickers where id = $1', [s.id]);
       return deFila(rows[0]!);
     },
     async borrar(id) {

@@ -12,7 +12,7 @@ const APP_SECRET = 'app-secret-de-prueba';
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -123,9 +123,9 @@ describe('paginas de rastreo', () => {
     expect(path.length).toBeGreaterThan(100);
 
     const response = await app.inject({ method: 'GET', url: path });
-    expect(response.statusCode).toBe(404);
-    expect(response.headers['content-type']).toContain('application/json');
-
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
+    expect(response.headers['cache-control']).toBe('no-store');
   });
 
   it('la pagina de publicar y la de ver son distintas', async () => {
@@ -133,14 +133,13 @@ describe('paginas de rastreo', () => {
     const pub = await app.inject({ url: `/t/${urls.publishUrl.split('/t/')[1]}` });
     const view = await app.inject({ url: `/t/${urls.viewUrl.split('/t/')[1]}` });
 
-    expect(pub.statusCode).toBe(404);
-    expect(view.statusCode).toBe(404);
+    expect(pub.body).toContain('watchPosition');
     expect(view.body).not.toContain('watchPosition');
   });
 
   it('un token invalido devuelve 410 y no filtra la clave de Maps', async () => {
     const response = await app.inject({ method: 'GET', url: '/t/token-invalido' });
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(410);
     expect(response.body).not.toContain('maps-key');
   });
 
@@ -148,7 +147,7 @@ describe('paginas de rastreo', () => {
     const urls = await session();
     await repos.tracking.revoke(urls.linkId);
     const response = await app.inject({ url: `/t/${urls.viewUrl.split('/t/')[1]}` });
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(410);
   });
 });
 
@@ -164,7 +163,7 @@ describe('api de administracion', () => {
   it('devuelve la salud del numero', async () => {
     const response = await app.inject({
       url: '/admin/health',
-      headers: { 'x-api-key': ADMIN },
+      headers: { authorization: `Bearer ${ADMIN}` },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ number: { quality: 'GREEN' }, sentToday: 0 });
@@ -174,21 +173,21 @@ describe('api de administracion', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/tracking',
-      headers: { 'x-api-key': ADMIN },
+      headers: { authorization: `Bearer ${ADMIN}` },
       payload: { label: 'Pedido A-2048' },
     });
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.codigo).toBe('RUTA_NO_EXISTE');
+    expect(body.publishUrl).not.toBe(body.viewUrl);
   });
 
   it('no lanza una campana con una plantilla que no existe', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/campaigns',
-      headers: { 'x-api-key': ADMIN },
+      headers: { authorization: `Bearer ${ADMIN}` },
       payload: { name: 'Prueba', templateName: 'no_existe' },
     });
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(400);
   });
 });

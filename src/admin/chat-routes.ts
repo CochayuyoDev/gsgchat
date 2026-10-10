@@ -9,8 +9,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { normalizePhone, TOPE_DECISIONES, type Repos } from '../db/repos.js';
-import { resumenDecision } from '../ia/decision.js';
+import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
 import { extractLocation } from '../geo/extract.js';
@@ -112,24 +111,6 @@ const sendSchema = z.object({
   templateLanguage: z.string().default('es'),
   variables: z.array(z.string()).default([]),
 });
-
-/**
- * Las entidades HTML de una etiqueta <meta> o <title> ya como texto.
- *
- * Google Maps manda el titulo como `12°04&#39;39.0"S`: la pagina del chat lo
- * escapa otra vez al pintarlo y se veia `&#39;` tal cual (30/09). Se decodifica
- * aqui, una sola vez; el que pinta sigue escapando como siempre.
- */
-export function decodificarEntidades(texto: string): string {
-  const nombradas: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-  return texto.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entera, cuerpo: string) => {
-    if (cuerpo[0] === '#') {
-      const n = cuerpo[1] === 'x' || cuerpo[1] === 'X' ? parseInt(cuerpo.slice(2), 16) : parseInt(cuerpo.slice(1), 10);
-      return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : entera;
-    }
-    return nombradas[cuerpo.toLowerCase()] ?? entera;
-  });
-}
 
 export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): Promise<void> {
   const { repos, sender, config, settings } = deps;
@@ -304,22 +285,6 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     };
   });
 
-  /**
-   * Por que respondio el bot en cada turno de este contacto (ver
-   * src/ia/decision.ts). La pantalla las pinta en el hilo como nota interna:
-   * el cliente no las ve. Van de la mas reciente a la mas vieja, cada una con
-   * su `resumen` ya escrito para que la pantalla no repita la regla.
-   */
-  app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/decisiones', async (request, reply) => {
-    const query = z
-      .object({ limit: z.coerce.number().int().positive().max(TOPE_DECISIONES).default(100) })
-      .parse(request.query ?? {});
-    const contact = await repos.contacts.getById(request.params.contactId);
-    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    const decisiones = await repos.decisiones.listarPorContacto(contact.id, query.limit);
-    return { decisiones: decisiones.map((d) => ({ ...d, resumen: resumenDecision(d) })) };
-  });
-
   app.post('/admin/chat/:contactId/read', async (request, reply) => {
     const { contactId } = request.params as { contactId: string };
     const contact = await repos.contacts.getById(contactId);
@@ -361,24 +326,6 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
     await repos.contacts.cerrarIA(contact.id, body.data.cerrado, new Date(), body.data.cerrado ? 'lo cerró una persona desde Chats' : null);
     return { ok: true, cerrado: body.data.cerrado };
-  });
-
-  /**
-   * Volver a empezar con un cliente con el que ya se termino: el asistente
-   * vuelve a atenderlo, el bot deja de estar callado y se levanta cualquier
-   * freno, para que su siguiente pedido corra desde el principio. Sus
-   * mensajes y sus pedidos se quedan como estan.
-   */
-  app.post('/admin/chat/:contactId/volver-a-empezar', async (request, reply) => {
-    const { contactId } = request.params as { contactId: string };
-    const contact = await repos.contacts.getById(contactId);
-    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
-    if (contact.tipo === 'grupo') return reply.code(400).send({ error: 'Un grupo no tiene flujo que reiniciar.' });
-    const ahora = new Date();
-    await repos.contacts.cerrarIA(contact.id, false, ahora, null);
-    await repos.contacts.pausarBot(contact.id, false, ahora);
-    await repos.contacts.levantarSupresion(contact.phone);
-    return { ok: true };
   });
 
   /**
@@ -829,10 +776,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       const meta = (nombre: string) => {
         const re = new RegExp(`<meta[^>]+(?:property|name)=["']${nombre}["'][^>]*content=["']([^"']+)["']`, 'i');
         const alReves = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${nombre}["']`, 'i');
-        return decodificarEntidades(html.match(re)?.[1] ?? html.match(alReves)?.[1] ?? '').trim() || null;
+        return (html.match(re)?.[1] ?? html.match(alReves)?.[1] ?? '').trim() || null;
       };
       const previa = {
-        titulo: meta('og:title') ?? (decodificarEntidades(html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? '').trim() || null),
+        titulo: meta('og:title') ?? (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() || null),
         descripcion: meta('og:description') ?? meta('description'),
         imagen: meta('og:image'),
         sitio: destino.hostname.replace(/^www\./, ''),

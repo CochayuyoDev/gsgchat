@@ -312,7 +312,7 @@ describe('marcapasos: cuando puede salir el siguiente', () => {
 describe('politica: perfiles y variables', () => {
   const base = {
     PUBLIC_BASE_URL: 'https://ejemplo.test',
-    DATABASE_URL: 'mysql://x/y',
+    DATABASE_URL: 'postgres://x/y',
     TRACKING_SECRET: 'x'.repeat(40),
   };
 

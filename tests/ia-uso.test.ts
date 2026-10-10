@@ -19,7 +19,7 @@ import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SET
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -111,7 +111,7 @@ describe('el servicio de IA cuenta cada llamada por lo que era', () => {
       return 'Claro, con gusto.';
     },
   };
-  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
+  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
 
   beforeAll(async () => {
     repos = createFakeRepos();

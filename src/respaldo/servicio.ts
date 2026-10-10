@@ -3,11 +3,10 @@
  * noche, a una carpeta que elige el dueno.
  *
  * Que se copia y como:
- *  - la base (MySQL/MariaDB) -> `base-AAAA-MM-DD.sql.gz`: un volcado SQL
- *    comprimido, con `mysqldump` si esta (MYSQLDUMP_PATH, el PATH o el de
- *    XAMPP en C:\xampp\mysql\bin) y si no con un volcado propio escrito aqui
- *    (cada tabla con su `create table` y sus filas en INSERT). Se restaura
- *    con phpMyAdmin (Importar acepta el .sql.gz tal cual) o con `mysql`;
+ *  - la base: con PGlite, un volcado de su carpeta de datos (`dumpDataDir`,
+ *    ya comprimido) -> `base-AAAA-MM-DD.tar.gz`; con Postgres de verdad,
+ *    `pg_dump` si esta en el PATH, y si no se dice claro que la copia de la
+ *    base la hace el servidor de Postgres y aqui solo van los respaldos;
  *  - los respaldos de chats y sus adjuntos (`ARCHIVE_DIR`) ->
  *    `respaldos-AAAA-MM-DD.tar.gz` (tar propio, ver tar.ts);
  *  - la vinculacion del telefono (`.wa-auth`) NO se copia: es la sesion de
@@ -18,159 +17,19 @@
  */
 
 import { access, constants, mkdir, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { pipeline } from 'node:stream/promises';
-import { createGzip } from 'node:zlib';
-import mysql from 'mysql2';
 import type { SettingsRepo } from '../settings/service.js';
 import { bytesEnPalabras, diaEn, minutosDe, minutosDelDia } from '../salud/fiabilidad.js';
 import { empaquetarCarpeta } from './tar.js';
 
 export const CLAVE_ULTIMA_COPIA = 'respaldo.ultima';
 export const CLAVE_ULTIMO_DIA_COPIA = 'respaldo.ultimoDia';
-const NOMBRE_COPIA = /^(base|respaldos)-(\d{4}-\d{2}-\d{2})\.(tar\.gz|sql\.gz)$/;
+const NOMBRE_COPIA = /^(base|respaldos)-(\d{4}-\d{2}-\d{2})\.(tar\.gz|dump)$/;
 
-/** `base`: la de la tienda en ese servidor; sin ella, la de la URL. */
-export type FuenteBase = { tipo: 'mysql'; url: string; base?: string } | { tipo: 'memoria' };
-
-/** Donde se busca mysqldump, en orden: MYSQLDUMP_PATH, el PATH y el de XAMPP. */
-export function candidatosMysqldump(env: NodeJS.ProcessEnv = process.env): string[] {
-  const lista: string[] = [];
-  const elegido = env.MYSQLDUMP_PATH?.trim();
-  if (elegido) lista.push(elegido);
-  lista.push('mysqldump');
-  for (const xampp of ['C:\\xampp\\mysql\\bin\\mysqldump.exe', '/opt/lampp/bin/mysqldump']) {
-    if (existsSync(xampp)) lista.push(xampp);
-  }
-  return lista;
-}
-
-interface DatosConexion {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  base: string;
-}
-
-function datosDe(fuente: { url: string; base?: string }): DatosConexion {
-  const u = new URL(fuente.url.trim().replace(/^mariadb:/i, 'mysql:'));
-  const base = fuente.base ?? decodeURIComponent(u.pathname.replace(/^\/+/, ''));
-  if (!base) throw new Error('La dirección de la base (DATABASE_URL) no dice qué base copiar.');
-  return {
-    host: u.hostname || 'localhost',
-    port: u.port ? Number(u.port) : 3306,
-    user: decodeURIComponent(u.username || 'root'),
-    password: decodeURIComponent(u.password || ''),
-    base,
-  };
-}
-
-/** Lo que va delante y detras de un volcado: sin comprobar claves ajenas mientras se cargan las tablas. */
-const CABECERA_VOLCADO = `/*!40101 SET NAMES utf8mb4 */;
-SET time_zone = '+00:00';
-SET FOREIGN_KEY_CHECKS = 0;
-SET UNIQUE_CHECKS = 0;
-SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';
-`;
-const PIE_VOLCADO = `
-SET FOREIGN_KEY_CHECKS = 1;
-SET UNIQUE_CHECKS = 1;
-`;
-
-/**
- * El volcado propio, para cuando no hay mysqldump: cada tabla con su
- * `create table` (el que da el servidor) y sus filas en INSERT de a varias,
- * comprimido. Las filas se leen en streaming (una tabla grande no se carga
- * entera en memoria) y los valores salen tal cual estan guardados: las fechas
- * como texto, los JSON como texto, los numeros grandes sin redondear.
- */
-export async function volcarBaseEnJs(fuente: { url: string; base?: string }, destino: string): Promise<{ tablas: number; filas: number }> {
-  const d = datosDe(fuente);
-  const conexion = mysql.createConnection({
-    host: d.host,
-    port: d.port,
-    user: d.user,
-    password: d.password,
-    database: d.base,
-    charset: 'UTF8MB4_BIN',
-    dateStrings: true,
-    supportBigNumbers: true,
-    bigNumberStrings: true,
-    connectTimeout: 5_000,
-    // Los JSON como texto (en MySQL 8 llegarian como objeto).
-    typeCast(field, next) {
-      if (field.type === 'JSON') return field.string('utf8');
-      return next();
-    },
-  });
-  // Primero se conecta: si la base no contesta, no se deja ni un fichero a medias.
-  try {
-    await new Promise<void>((ok, mal) => conexion.connect((error) => (error ? mal(error) : ok())));
-  } catch (error) {
-    conexion.destroy();
-    throw error;
-  }
-  const promesa = conexion.promise();
-  const salida = createGzip();
-  const escrito = pipeline(salida, createWriteStream(destino));
-  const escribir = async (texto: string) => {
-    if (!salida.write(texto)) await once(salida, 'drain');
-  };
-  let tablas = 0;
-  let filas = 0;
-  try {
-    await promesa.query("set time_zone = '+00:00'");
-    const [lista] = (await promesa.query(
-      `select table_name as t from information_schema.tables where table_schema = database() and table_type = 'BASE TABLE' order by table_name`,
-    )) as unknown as [Array<{ t: string }>];
-    await escribir(`-- Copia de la base ${d.base} hecha por GSGchat el ${new Date().toISOString()} (volcado propio, sin mysqldump).\n`);
-    await escribir(CABECERA_VOLCADO);
-    for (const { t } of lista) {
-      const id = conexion.escapeId(t);
-      const [crear] = (await promesa.query(`show create table ${id}`)) as unknown as [Array<Record<string, string>>];
-      const ddl = crear[0]?.['Create Table'];
-      if (!ddl) continue;
-      tablas += 1;
-      await escribir(`\n-- Tabla ${t}\nDROP TABLE IF EXISTS ${id};\n${ddl};\n`);
-      let lote: string[] = [];
-      let bytes = 0;
-      let columnas = '';
-      const vaciarLote = async () => {
-        if (!lote.length) return;
-        await escribir(`INSERT INTO ${id} (${columnas}) VALUES\n${lote.join(',\n')};\n`);
-        lote = [];
-        bytes = 0;
-      };
-      const filasDeLaTabla = conexion.query(`select * from ${id}`).stream({ highWaterMark: 200 }) as unknown as AsyncIterable<Record<string, unknown>>;
-      for await (const fila of filasDeLaTabla) {
-        if (!columnas) columnas = Object.keys(fila).map((c) => conexion.escapeId(c)).join(', ');
-        const valores = `(${Object.values(fila).map((v) => conexion.escape(v)).join(', ')})`;
-        lote.push(valores);
-        bytes += valores.length;
-        filas += 1;
-        // Sentencias de ~512 KB como mucho: por debajo del max_allowed_packet de cualquier servidor.
-        if (lote.length >= 500 || bytes > 512 * 1024) await vaciarLote();
-      }
-      await vaciarLote();
-    }
-    await escribir(PIE_VOLCADO);
-    salida.end();
-    await escrito;
-  } catch (error) {
-    salida.destroy();
-    await escrito.catch(() => undefined);
-    await rm(destino, { force: true }).catch(() => undefined);
-    throw error;
-  } finally {
-    await promesa.end().catch(() => undefined);
-  }
-  return { tablas, filas };
-}
+export type FuenteBase = { tipo: 'pglite'; dump: () => Promise<Blob | File>; dataDir?: string } | { tipo: 'postgres'; url: string } | { tipo: 'memoria' };
 
 export interface AjustesCopia {
   activa: boolean;
@@ -197,10 +56,8 @@ export interface DepsRespaldo {
   log: (m: string, d?: Record<string, unknown>) => void;
   /** Zona horaria, o una funcion que la da (la elegida en Ajustes). */
   timezone: string | (() => string);
-  /** Inyectable: como se lanza mysqldump. `noEncontrado`: ese programa no esta (se prueba el siguiente). */
-  ejecutar?: (cmd: string, args: string[], opciones?: { env?: NodeJS.ProcessEnv }) => Promise<{ ok: boolean; error?: string; noEncontrado?: boolean }>;
-  /** Inyectable: donde se busca mysqldump (por defecto, candidatosMysqldump()). */
-  mysqldump?: () => string[];
+  /** Inyectable: como se lanza pg_dump. */
+  ejecutar?: (cmd: string, args: string[]) => Promise<{ ok: boolean; error?: string }>;
   cadaMs?: number;
 }
 
@@ -264,18 +121,18 @@ export function carpetaDeCopiasPorDefecto(base = homedir()): string {
   return path.join(base, 'GSGchat-copias');
 }
 
-function ejecutarPorDefecto(cmd: string, args: string[], opciones: { env?: NodeJS.ProcessEnv } = {}): Promise<{ ok: boolean; error?: string; noEncontrado?: boolean }> {
+function ejecutarPorDefecto(cmd: string, args: string[]): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
     let hijo: ReturnType<typeof spawn>;
     try {
-      hijo = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, env: opciones.env ?? process.env });
+      hijo = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
     } catch (error) {
-      resolve({ ok: false, error: error instanceof Error ? error.message : String(error), noEncontrado: (error as { code?: string }).code === 'ENOENT' });
+      resolve({ ok: false, error: error instanceof Error ? error.message : String(error) });
       return;
     }
     let err = '';
     hijo.stderr?.on('data', (d: Buffer) => (err += d.toString()));
-    hijo.on('error', (error) => resolve({ ok: false, error: error.message, noEncontrado: (error as { code?: string }).code === 'ENOENT' }));
+    hijo.on('error', (error) => resolve({ ok: false, error: error.message }));
     hijo.on('close', (code) => resolve(code === 0 ? { ok: true } : { ok: false, error: err.trim() || `salió con código ${code}` }));
   });
 }
@@ -294,7 +151,6 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
   const { ahora, log } = deps;
   const cadaMs = deps.cadaMs ?? 60_000;
   const ejecutar = deps.ejecutar ?? ejecutarPorDefecto;
-  const dondeMysqldump = deps.mysqldump ?? (() => candidatosMysqldump());
 
   let ultima: ResultadoCopia | null = null;
   let ultimoDia = '';
@@ -379,55 +235,25 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
 
   async function copiarBase(dir: string, dia: string, ficheros: FicheroCopia[], notas: string[]): Promise<void> {
     const fuente = deps.baseDatos();
-    if (fuente.tipo === 'mysql') {
-      const d = datosDe(fuente);
-      const nombre = `base-${dia}.sql.gz`;
+    if (fuente.tipo === 'pglite') {
+      const blob = await fuente.dump();
+      const nombre = `base-${dia}.tar.gz`;
+      const datos = Buffer.from(await blob.arrayBuffer());
+      await writeFile(path.join(dir, nombre), datos);
+      ficheros.push({ nombre, bytes: datos.length, que: 'La base de datos (contactos, chats, entregas, ajustes)' });
+      return;
+    }
+    if (fuente.tipo === 'postgres') {
+      const nombre = `base-${dia}.dump`;
       const destino = path.join(dir, nombre);
-      const que = 'La base de datos (contactos, chats, entregas, ajustes)';
-      // 1. mysqldump, si esta: es quien mejor conoce al servidor. Deja un .sql
-      //    al lado, que se comprime y se borra.
-      const temporal = path.join(dir, `.base-${dia}-${process.pid}.sql`);
-      let fallo: string | null = null;
-      for (const programa of dondeMysqldump()) {
-        const r = await ejecutar(
-          programa,
-          ['--host', d.host, '--port', String(d.port), '--user', d.user, '--single-transaction', '--no-tablespaces', '--hex-blob', '--default-character-set=utf8mb4', `--result-file=${temporal}`, d.base],
-          // La clave va por el entorno y no en la linea de comandos (que la ve cualquiera en el administrador de tareas).
-          { env: { ...process.env, MYSQL_PWD: d.password } },
-        );
-        if (r.ok) {
-          try {
-            await pipeline(createReadStream(temporal), createGzip(), createWriteStream(destino));
-            const s = await stat(destino);
-            ficheros.push({ nombre, bytes: s.size, que: `${que}, copiada con mysqldump` });
-            return;
-          } catch (error) {
-            fallo = error instanceof Error ? error.message : String(error);
-          } finally {
-            await rm(temporal, { force: true }).catch(() => undefined);
-          }
-          break;
-        }
-        await rm(temporal, { force: true }).catch(() => undefined);
-        if (r.noEncontrado || /ENOENT/.test(r.error ?? '')) continue;
-        fallo = r.error ?? 'falló';
-        break;
+      const r = await ejecutar('pg_dump', ['--dbname', fuente.url, '-Fc', '-f', destino]);
+      if (r.ok) {
+        const s = await stat(destino);
+        ficheros.push({ nombre, bytes: s.size, que: 'La base de datos (volcado de Postgres, se restaura con pg_restore)' });
+      } else {
+        await rm(destino, { force: true }).catch(() => undefined);
+        notas.push('Con Postgres la copia de la base la hace tu servidor de Postgres (aquí no está pg_dump): aquí solo se copian los respaldos de chats.');
       }
-      // 2. Sin mysqldump (o si fallo): el volcado propio.
-      try {
-        await volcarBaseEnJs(fuente, destino);
-      } catch (error) {
-        const e = error as { code?: string; message?: string };
-        const porque = e?.code === 'ECONNREFUSED' ? `no hay ningún MySQL/MariaDB escuchando en ${d.host}:${d.port}` : (e?.message ?? String(error));
-        throw new Error(`No se pudo leer la base «${d.base}» para copiarla: ${porque}.`);
-      }
-      const s = await stat(destino);
-      ficheros.push({ nombre, bytes: s.size, que: `${que}, copiada con el volcado propio de GSGchat` });
-      notas.push(
-        fallo
-          ? `mysqldump no pudo hacer la copia (${fallo}): la base se copió con el volcado propio de GSGchat, que se restaura igual.`
-          : 'En este servidor no está mysqldump: la base se copió con el volcado propio de GSGchat, que se restaura igual. (Si lo instalas, o pones su ruta en MYSQLDUMP_PATH, se usa ese.)',
-      );
       return;
     }
     notas.push('En la demostración la base está en memoria: no hay base que copiar.');
@@ -504,33 +330,9 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
 
   function describirBase(): { tipo: FuenteBase['tipo']; detalle: string } {
     const f = deps.baseDatos();
-    if (f.tipo === 'mysql') {
-      try {
-        const d = datosDe(f);
-        return { tipo: 'mysql', detalle: `La base es «${d.base}», en el servidor MySQL/MariaDB ${d.host}:${d.port}: se copia entera a base-AAAA-MM-DD.sql.gz (con mysqldump si está; si no, con el volcado propio de GSGchat).` };
-      } catch (error) {
-        return { tipo: 'mysql', detalle: error instanceof Error ? error.message : String(error) };
-      }
-    }
+    if (f.tipo === 'pglite') return { tipo: 'pglite', detalle: `La base vive en la carpeta ${f.dataDir ?? '.wa-data'} de este servidor y se copia entera.` };
+    if (f.tipo === 'postgres') return { tipo: 'postgres', detalle: 'La base es un Postgres aparte: se copia con pg_dump si está instalado en este servidor.' };
     return { tipo: 'memoria', detalle: 'En la demostración la base está en memoria: no hay nada que copiar.' };
-  }
-
-  function pasosParaRestaurar(): string[] {
-    const f = deps.baseDatos();
-    let base = '';
-    try {
-      if (f.tipo === 'mysql') base = datosDe(f).base;
-    } catch {
-      // Sin nombre: se dice en general.
-    }
-    return [
-      'Para el servidor de GSGchat (cierra la ventana o Ctrl+C).',
-      'Descarga la copia base-…sql.gz de aquí abajo.',
-      `Abre phpMyAdmin (con XAMPP: http://localhost/phpmyadmin), elige la base ${base ? `«${base}»` : 'de GSGchat'}, entra en «Importar», elige el fichero base-…sql.gz tal cual (no hace falta descomprimirlo) y pulsa «Continuar». La copia trae cada tabla entera: reemplaza lo que haya en ellas.`,
-      `Sin phpMyAdmin: descomprime el .sql.gz (con 7-Zip, por ejemplo) y ejecuta: mysql -u usuario -p ${base || 'nombre_de_la_base'} < base-….sql`,
-      'Si también quieres los chats guardados, descomprime respaldos-…tar.gz encima de la carpeta de respaldos.',
-      'Arranca el servidor otra vez y entra en Conexión: si pide el QR, escanéalo con el teléfono del número.',
-    ];
   }
 
   return {
@@ -561,7 +363,15 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
         enMarcha,
         proxima,
         alerta,
-        restaurar: { pasos: pasosParaRestaurar() },
+        restaurar: {
+          pasos: [
+            'Para el servidor de GSGchat (cierra la ventana o Ctrl+C).',
+            'Cambia el nombre de la carpeta .wa-data actual (por ejemplo a .wa-data-vieja) por si acaso.',
+            'Descarga la copia base-…tar.gz de aquí abajo y descomprímela: dentro viene la carpeta de la base; ponla donde estaba .wa-data, con ese mismo nombre.',
+            'Si también quieres los chats guardados, descomprime respaldos-…tar.gz encima de la carpeta de respaldos.',
+            'Arranca el servidor otra vez y entra en Conexión: si pide el QR, escanéalo con el teléfono del número.',
+          ],
+        },
       };
     },
     comprobarCarpeta,

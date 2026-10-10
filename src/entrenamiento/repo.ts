@@ -286,11 +286,10 @@ function donde(filtro: FiltroLecciones, valores: unknown[]): string {
   if (filtro.origen) partes.push(`origen = ${param(filtro.origen)}`);
   if (filtro.origenDetalle) partes.push(`origen_detalle = ${param(filtro.origenDetalle)}`);
   if (filtro.examenOk !== undefined) partes.push(`examen_ok = ${param(filtro.examenOk)}`);
-  if (filtro.ids?.length) partes.push(`id in (${param(filtro.ids)})`);
+  if (filtro.ids?.length) partes.push(`id = any(${param(filtro.ids)}::bigint[])`);
   if (filtro.q?.trim()) {
-    // La colacion es binaria: el "ilike" de antes se hace con lower() a los dos lados.
     const p = param(`%${filtro.q.trim()}%`);
-    partes.push(`(lower(coalesce(pregunta, '')) like lower(${p}) or lower(respuesta) like lower(${p}) or lower(coalesce(tema, '')) like lower(${p}))`);
+    partes.push(`(coalesce(pregunta, '') ilike ${p} or respuesta ilike ${p} or coalesce(tema, '') ilike ${p})`);
   }
   return partes.length ? `where ${partes.join(' and ')}` : '';
 }
@@ -311,34 +310,27 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
     async crearVarias(inputs) {
       const ids: number[] = [];
       let nuevas = 0;
-      // Dentro de la misma tanda tambien se quitan las repetidas.
+      // Dentro de la misma tanda tambien se quitan las repetidas: "on
+      // conflict do nothing" no vale entre filas del mismo insert.
       const vistas = new Set<string>();
       const unicas = inputs.filter((i) => (vistas.has(i.huella) ? false : (vistas.add(i.huella), true)));
       for (let i = 0; i < unicas.length; i += 400) {
-        // MySQL no tiene "returning": se miran antes las huellas que ya
-        // estaban, se insertan las otras (la clave unica sigue de guardia:
-        // una que se colara a la vez no se duplica) y se leen sus ids.
-        const candidatas = unicas.slice(i, i + 400);
-        const { rows: yaEstan } = await pool.query<{ huella: string }>('select huella from ia_lecciones where huella in ($1)', [candidatas.map((l) => l.huella)]);
-        const estaban = new Set(yaEstan.map((r) => r.huella));
-        const tanda = candidatas.filter((l) => !estaban.has(l.huella));
-        if (!tanda.length) continue;
+        const tanda = unicas.slice(i, i + 400);
         const valores: unknown[] = [];
         const filas = tanda.map((l) => {
           const base = valores.length;
           valores.push(l.tipo, l.pregunta ?? null, l.respuesta, l.mala ?? null, l.tema ?? null, l.origen, l.origenDetalle ?? null, l.estado ?? 'activa', l.huella, l.nota ?? null, l.creadoPor ?? null);
           return `(${Array.from({ length: 11 }, (_, k) => `$${base + k + 1}`).join(',')})`;
         });
-        const { rowCount } = await pool.query(
+        const { rows } = await pool.query<{ id: number | string }>(
           `insert into ia_lecciones (tipo, pregunta, respuesta, mala, tema, origen, origen_detalle, estado, huella, nota, creado_por)
            values ${filas.join(',')}
-           on duplicate key update huella = huella`,
+           on conflict (huella) do nothing
+           returning id`,
           valores,
         );
-        if (!rowCount) continue;
-        const { rows } = await pool.query<{ id: number | string }>('select id from ia_lecciones where huella in ($1) order by id', [tanda.map((l) => l.huella)]);
-        nuevas += rowCount;
-        for (const r of rows.slice(0, rowCount)) ids.push(Number(r.id));
+        nuevas += rows.length;
+        for (const r of rows) ids.push(Number(r.id));
       }
       return { nuevas, repetidas: inputs.length - nuevas, ids };
     },
@@ -363,8 +355,8 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
       }
       if (!sets.length) return repo.porId(id);
       valores.push(id);
-      const { rowCount } = await pool.query(`update ia_lecciones set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
-      return rowCount ? repo.porId(id) : null;
+      const { rows } = await pool.query<Row>(`update ia_lecciones set ${sets.join(', ')}, updated_at = now() where id = $${valores.length} returning *`, valores);
+      return rows[0] ? deFila(rows[0]) : null;
     },
 
     async borrar(id) {
@@ -375,8 +367,8 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
     async listar(filtro, pagina) {
       const valores: unknown[] = [];
       const where = donde(filtro, valores);
-      const { rows: cuenta } = await pool.query<{ n: number | string }>(`select count(*) as n from ia_lecciones ${where}`, valores);
-      valores.push(Number(pagina.limite), Number(pagina.offset));
+      const { rows: cuenta } = await pool.query<{ n: number | string }>(`select count(*)::int as n from ia_lecciones ${where}`, valores);
+      valores.push(pagina.limite, pagina.offset);
       const { rows } = await pool.query<Row>(`select * from ia_lecciones ${where} order by id desc limit $${valores.length - 1} offset $${valores.length}`, valores);
       return { items: rows.map(deFila), total: Number(cuenta[0]?.n ?? 0) };
     },
@@ -390,7 +382,7 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
       const valores: unknown[] = [];
       const where = donde(filtro, valores);
       valores.push(estado);
-      const { rowCount } = await pool.query(`update ia_lecciones set estado = $${valores.length}, updated_at = now(3) ${where}`, valores);
+      const { rowCount } = await pool.query(`update ia_lecciones set estado = $${valores.length}, updated_at = now() ${where}`, valores);
       return rowCount ?? 0;
     },
 
@@ -403,7 +395,7 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
 
     async cifras() {
       const { rows } = await pool.query<{ estado: EstadoLeccion; tipo: TipoLeccion; origen: string; examen_ok: boolean | null; n: number | string }>(
-        'select estado, tipo, origen, examen_ok, count(*) as n from ia_lecciones group by estado, tipo, origen, examen_ok',
+        'select estado, tipo, origen, examen_ok, count(*)::int as n from ia_lecciones group by estado, tipo, origen, examen_ok',
       );
       const c: Cifras = {
         total: 0,
@@ -431,21 +423,21 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
 
     async temas() {
       const { rows } = await pool.query<{ tema: string; n: number | string }>(
-        `select tema, count(*) as n from ia_lecciones where tema is not null and tema <> '' and estado <> 'descartada' group by tema order by n desc, tema asc limit 200`,
+        `select tema, count(*)::int as n from ia_lecciones where tema is not null and tema <> '' and estado <> 'descartada' group by tema order by n desc, tema asc limit 200`,
       );
       return rows.map((r) => ({ tema: r.tema, total: Number(r.n) }));
     },
 
     async anotarUsos(ids, at) {
       if (!ids.length) return;
-      await pool.query('update ia_lecciones set usos = usos + 1, ultimo_uso_at = $2 where id in ($1)', [ids, at]);
+      await pool.query('update ia_lecciones set usos = usos + 1, ultimo_uso_at = $2 where id = any($1::bigint[])', [ids, at]);
     },
 
     async idsPara(filtro, limite, alAzar) {
       const valores: unknown[] = [];
       const where = donde(filtro, valores);
-      valores.push(Number(limite));
-      const { rows } = await pool.query<{ id: number | string }>(`select id from ia_lecciones ${where} order by ${alAzar ? 'rand()' : 'id asc'} limit $${valores.length}`, valores);
+      valores.push(limite);
+      const { rows } = await pool.query<{ id: number | string }>(`select id from ia_lecciones ${where} order by ${alAzar ? 'random()' : 'id asc'} limit $${valores.length}`, valores);
       return rows.map((r) => Number(r.id));
     },
 
@@ -457,7 +449,7 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
         filtro = `and m.created_at >= $1`;
       }
       const { rows } = await pool.query<{ contact_id: string; phone: string; name: string | null; n: number | string }>(
-        `select c.id as contact_id, c.phone, c.name, count(*) as n
+        `select c.id as contact_id, c.phone, c.name, count(*)::int as n
            from messages m
            join contacts c on c.id = m.contact_id
           where m.kind = 'text' and coalesce(c.tipo, 'persona') <> 'grupo' ${filtro}
@@ -477,9 +469,7 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
         filtro = 'and created_at >= $2';
       }
       const { rows } = await pool.query<{ direction: 'in' | 'out'; body: string | null; kind: string; created_at: Date; origen: string | null }>(
-        // Un `"origen": null` en el JSON es un null de SQL (como el ->> de antes), no el texto 'null'.
-        `select direction, body, kind, created_at,
-                case when json_type(json_extract(payload, '$.origen')) = 'NULL' then null else json_unquote(json_extract(payload, '$.origen')) end as origen
+        `select direction, body, kind, created_at, payload->>'origen' as origen
            from messages
           where contact_id = $1 and kind = 'text' ${filtro}
           order by created_at asc, id asc`,
@@ -489,13 +479,11 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
     },
 
     async crearExamen(input) {
-      const { insertId } = await pool.query(`insert into ia_examenes (nombre, total, creado_por, detalle) values ($1,$2,$3,$4)`, [
-        input.nombre,
-        input.total,
-        input.creadoPor,
-        input.detalle ? JSON.stringify(input.detalle) : null,
-      ]);
-      return (await repo.examen(insertId))!;
+      const { rows } = await pool.query<ExamenRow>(
+        `insert into ia_examenes (nombre, total, creado_por, detalle) values ($1,$2,$3,$4) returning *`,
+        [input.nombre, input.total, input.creadoPor, input.detalle ? JSON.stringify(input.detalle) : null],
+      );
+      return examenDeFila(rows[0]!);
     },
 
     async anotarCaso(c) {
@@ -506,15 +494,15 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
     },
 
     async cerrarExamen(id, estado, cifras, detalle) {
-      const { rowCount } = await pool.query(
-        `update ia_examenes set estado = $2, aprobados = $3, fallados = $4, errores = $5, detalle = coalesce($6, detalle), terminado_at = now(3) where id = $1`,
+      const { rows } = await pool.query<ExamenRow>(
+        `update ia_examenes set estado = $2, aprobados = $3, fallados = $4, errores = $5, detalle = coalesce($6::jsonb, detalle), terminado_at = now() where id = $1 returning *`,
         [id, estado, cifras.aprobados, cifras.fallados, cifras.errores, detalle ? JSON.stringify(detalle) : null],
       );
-      return rowCount ? repo.examen(id) : null;
+      return rows[0] ? examenDeFila(rows[0]) : null;
     },
 
     async examenes(limite) {
-      const { rows } = await pool.query<ExamenRow>('select * from ia_examenes order by id desc limit $1', [Number(limite)]);
+      const { rows } = await pool.query<ExamenRow>('select * from ia_examenes order by id desc limit $1', [limite]);
       return rows.map(examenDeFila);
     },
 
@@ -526,7 +514,7 @@ export function createEntrenamientoRepo(pool: Pool): EntrenamientoRepo {
     async casosDeExamen(id, soloFallos, limite) {
       const { rows } = await pool.query<CasoRow>(
         `select * from ia_examen_casos where examen_id = $1 ${soloFallos ? 'and ok = false' : ''} order by ok asc, id asc limit $2`,
-        [id, Number(limite)],
+        [id, limite],
       );
       return rows.map(casoDeFila);
     },

@@ -1,6 +1,6 @@
 /**
- * Los procesos en una tienda entera (armarTienda, MySQL/MariaDB real con
- * tests/mysql.ts, SQL real, motores reales) y el Modulo desarrollador
+ * Los procesos en una tienda entera (armarTienda, PGlite real con la
+ * migracion 040, SQL real, motores reales) y el Modulo desarrollador
  * simulando una corrida de cada plantilla con numeros de prueba: los cinco
  * casos (bien, primero mal, sin respuesta, consulta ajena, «¿para qué?")
  * terminan donde deben. Ademas: la API publica con su permiso, y que el menu
@@ -14,16 +14,14 @@ import path from 'node:path';
 import { armarTienda, type TiendaViva } from '../src/plataforma/tienda.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { createFakeWhatsApp } from './fakes.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-describe('procesos en una tienda (MySQL/MariaDB real)', () => {
-  let b: BaseDePrueba;
+describe('procesos en una tienda (PGlite real)', () => {
   let raiz: string;
   let tienda: TiendaViva;
   let cookie: string;
 
   const api = async (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown, headers: Record<string, string> = {}) => {
-    const r = await tienda.app.inject({ method, url, headers: { ...(headers.authorization || headers['x-api-key'] ? {} : { cookie }), ...(payload !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
+    const r = await tienda.app.inject({ method, url, headers: { ...(headers.authorization ? {} : { cookie }), ...(payload !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
     let body: any = {};
     try {
       body = r.body ? JSON.parse(r.body) : {};
@@ -34,7 +32,6 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
   };
 
   beforeAll(async () => {
-    b = await baseDePrueba();
     raiz = mkdtempSync(path.join(tmpdir(), 'procesos-tienda-'));
     const secretos = bootstrapSecrets(raiz);
     tienda = await armarTienda({
@@ -42,7 +39,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
       slug: 'clinica',
       env: {
         PUBLIC_BASE_URL: 'http://127.0.0.1:9',
-        DATABASE_URL: b.url,
+        DATABASE_URL: `pglite://${path.join(raiz, 'datos')}`,
         TRACKING_SECRET: secretos.trackingSecret,
         WHATSAPP_PROVIDER: 'local',
         BUSINESS_NAME: 'Clínica de prueba',
@@ -54,7 +51,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
         HORARIO_ENVIO_FIN: '24',
       } as NodeJS.ProcessEnv,
       secretos,
-      base: { url: b.url, base: b.base },
+      base: { tipo: 'pglite', dir: path.join(raiz, 'datos') },
       authDir: path.join(raiz, 'auth'),
       mediaDir: path.join(raiz, 'medios'),
       carpetaCopias: path.join(raiz, 'copias'),
@@ -66,15 +63,14 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     });
     const alta = await tienda.app.inject({ method: 'POST', url: '/login/primera-cuenta', payload: { nombre: 'Ali', usuario: 'ali', clave: 'ali-2026-wa' } });
     cookie = String(alta.headers['set-cookie']).split(';')[0]!;
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await tienda?.parar();
-    await b?.cerrar();
     try {
       rmSync(raiz, { recursive: true, force: true });
     } catch {
-      // Windows a veces tarda en soltar la carpeta (auth, medios)
+      // Windows a veces tarda en soltar la carpeta de PGlite
     }
   });
 
@@ -139,7 +135,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
       expect(csv.status).toBe(200);
       expect(String(csv.headers['content-type'])).toMatch(/text\/csv/);
       expect(csv.crudo.split('\r\n')).toHaveLength(6);
-    }, 600_000);
+    }, 60_000);
   }
 
   it('la API pública: POST /api/v1/procesos/:id/personas con el permiso procesos:gestionar (y sin él, 403)', async () => {
@@ -147,7 +143,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     const id = p.body.proceso.id;
     const k = await api('POST', '/admin/claves-api', { nombre: 'Sistema de citas', permisos: ['procesos:gestionar'] });
     expect(k.status).toBe(200);
-    const auth = { 'x-api-key': k.body.clave };
+    const auth = { authorization: `Bearer ${k.body.clave}` };
     const carga = await api('POST', `/api/v1/procesos/${id}/personas`, { nombre: 'Lote API', personas: [{ telefono: '000000950', nombre: 'Ana API', fecha: '30/12/2026', hora: '10:00' }, { telefono: '123', nombre: 'Malo' }] }, auth);
     expect(carga.status, JSON.stringify(carga.body)).toBe(201);
     expect(carga.body).toMatchObject({ ok: true, listas: 1, conError: 1 });
@@ -158,7 +154,7 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     expect(lista.body.procesos.some((x: { id: number }) => x.id === id)).toBe(true);
 
     const otra = await api('POST', '/admin/claves-api', { nombre: 'Solo mensajes', permisos: ['mensajes:enviar'] });
-    const sin = await api('POST', `/api/v1/procesos/${id}/personas`, { personas: [{ telefono: '000000951' }] }, { 'x-api-key': otra.body.clave });
+    const sin = await api('POST', `/api/v1/procesos/${id}/personas`, { personas: [{ telefono: '000000951' }] }, { authorization: `Bearer ${otra.body.clave}` });
     expect(sin.status).toBe(403);
   });
 

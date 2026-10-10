@@ -35,12 +35,12 @@ import type { Politica } from './salud/politica.js';
 import type { ServicioAjustes } from './ajustes/generales.js';
 import type { ServicioStickers } from './stickers/stickers.js';
 import { startScheduler } from './automation/engine.js';
-
+import { startGoteo } from './campanas/goteo.js';
 import { startArchiveSweeper } from './archive/service.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
-import { crearPuertoGsg, despacharReportes, paradaPorClave } from './rutas/gsg.js';
+import { crearPuertoGsg, despacharReportes } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
-
+import { startMotorLista } from './envio-automatico/motor.js';
 import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
 import { syncTemplates } from './templates/registry.js';
 import type { Bus } from './eventos/bus.js';
@@ -96,7 +96,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
   // Campanas por goteo: cada 10 s salen como mucho cinco, y solo si el
   // marcapasos lo permite. Ver src/campanas/goteo.ts.
-  const stopGoteo = () => undefined;
+  const stopGoteo = startGoteo({ repos, sender, salud, politica, log: warn });
 
   // Con la API oficial, el estado de las plantillas se refresca cada media
   // hora: del final de una pausa Meta no avisa por webhook, y una plantilla
@@ -140,7 +140,6 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
     // El primer mensaje de una entrega de GSG: la plantilla con producto, empresa, codigo, monto...
     textoSolicitud: entregas ? (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) : undefined,
-    primerMensaje: entregas?.primerMensajeReparto,
     salud,
     politica,
     log: info,
@@ -148,10 +147,26 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
   // La lista de envio automatico: un mensaje a cada numero cada pocas horas,
   // con la misma pausa y el mismo marcapasos que el reparto. Ver src/envio-automatico.
-  const stopMotorLista = () => undefined;
+  const stopMotorLista = lista
+    ? startMotorLista({
+        repos,
+        lista,
+        sender,
+        opciones: opcionesDesdeConfig(config),
+        nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
+        usarPlantilla: () => providerOf(settings.current()) === 'cloud',
+        conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+        supervisor: () => ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,
+        salud,
+        politica,
+        log: info,
+        horarioExtra: () => (entregas ? { desde: entregas.ajustes().horarioEntregas.desde, hasta: entregas.ajustes().horarioEntregas.extendidoHasta } : null),
+      })
+    : () => undefined;
 
-  // Las entregas del dia: sincronizar con GSG, pedir confirmaciones, mandar
-  // los pines a los motorizados y avisar la hora de llegada. Ver src/entregas.
+  // Las entregas del dia: pedir confirmaciones, mandar los pines a los
+  // motorizados y avisar la hora de llegada (a GSG no se le pide nada: los
+  // pedidos llegan cuando los empuja). Ver src/entregas.
   // El vigilante del WhatsApp (cada 30 s), la prueba de la manana y la copia de la noche. Ver src/salud/fiabilidad.ts.
   const stopFiabilidad = deps.fiabilidad ? deps.fiabilidad.arrancar() : () => undefined;
 
@@ -176,14 +191,8 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
   // La cola hacia GSG. Sin API configurada no hace nada y los reportes se
   // quedan esperando; en cuanto haya URL, sale todo lo acumulado.
-  // Las ubicaciones que GSG rechazo se reintentan solas en cada pasada (hasta
-  // diez intentos): una direccion o clave corregida no deja nada atascado.
-  // Si la cola esta parada porque GSG rechazo la clave (401/403) con esta
-  // misma configuracion, no se reencola nada: se espera a que la cambien.
   const despachador = setInterval(() => {
-    void (gsg.conectado() && !paradaPorClave({ rutas: repos.rutas }, gsg) ? repos.rutas.reencolarFallidos('ubicacion', 10) : Promise.resolve(0))
-      .then(() => despacharReportes({ rutas: repos.rutas }, gsg, 50))
-      .catch((error) =>
+    void despacharReportes({ rutas: repos.rutas }, gsg, 50).catch((error) =>
       warn('fallo el despacho de reportes a GSG', { detalle: error instanceof Error ? error.message : String(error) }),
     );
   }, 60_000);
@@ -191,7 +200,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
   // Los procesos (pedir datos, confirmar, avisos al personal, cobranza): un
   // mensaje por pasada, con la pausa del reparto y en la franja de cada proceso.
-  const stopProcesos = () => undefined;
+  const stopProcesos = deps.procesos ? deps.procesos.arrancar() : () => undefined;
 
   // El resumen del dia al supervisor: mira cada minuto si es la hora. Ver src/resumenes.
   const stopResumenes = deps.resumenes ? startResumenes(deps.resumenes, { log: info }) : () => undefined;

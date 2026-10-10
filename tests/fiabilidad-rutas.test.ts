@@ -21,7 +21,7 @@ import { createFakeRepos, createFakeSettings, createFakeWhatsApp, createMemorySe
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -112,11 +112,11 @@ describe('/fiabilidad y /admin/fiabilidad', () => {
   });
 
   it('la pantalla es privada y, con sesión, se pinta con sus cuatro cajas', async () => {
-    const sin = await app.inject({ method: 'GET', url: '/salud' });
+    const sin = await app.inject({ method: 'GET', url: '/fiabilidad' });
     expect([302, 303]).toContain(sin.statusCode);
-    const con = await app.inject({ method: 'GET', url: '/salud', headers: { cookie: operador } });
+    const con = await app.inject({ method: 'GET', url: '/fiabilidad', headers: { cookie: operador } });
     expect(con.statusCode).toBe(200);
-    for (const trozo of ['Salud', 'id="caja-wa"', 'id="caja-humo"', 'id="caja-cupo"', 'id="caja-copia"', 'Probar ahora', 'Hacer copia ahora', 'Cómo restaurar una copia']) {
+    for (const trozo of ['Que todo funcione', 'id="caja-wa"', 'id="caja-humo"', 'id="caja-cupo"', 'id="caja-copia"', 'Probar ahora', 'Hacer copia ahora', 'Cómo restaurar una copia']) {
       expect(con.body, trozo).toContain(trozo);
     }
   });
@@ -125,7 +125,7 @@ describe('/fiabilidad y /admin/fiabilidad', () => {
     const { fiabilidadPage } = await import('../src/web/fiabilidad-page.js');
     const conDemo = fiabilidadPage({ disponible: true, demo: true, nombreNegocio: 'Z' });
     const sinDemo = fiabilidadPage({ disponible: true, demo: false, nombreNegocio: 'Z' });
-    expect(conDemo).not.toContain('id="wa-sim-caida5"');
+    expect(conDemo).toContain('id="wa-sim-caida5"');
     // Fuera de la demostración el servidor contesta 400: el botón no se pinta.
     expect(sinDemo).not.toContain('id="wa-sim-caida5"');
     // Sin el servicio, la pantalla lo dice en vez de pedir el estado cada 30 s.
@@ -149,7 +149,7 @@ describe('/fiabilidad y /admin/fiabilidad', () => {
     const op = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { cookie: operador }, payload: { humo: { hora: '08:00' } } });
     expect(op.statusCode).toBe(403);
     expect(op.json().error).toContain('administrador');
-    const token = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { 'x-api-key': CLAVE_API_PRUEBA }, payload: { humo: { hora: '08:00' } } });
+    const token = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}` }, payload: { humo: { hora: '08:00' } } });
     expect(token.statusCode).toBe(403);
     const ok = await app.inject({ method: 'POST', url: '/admin/fiabilidad/ajustes', headers: { cookie: admin }, payload: { humo: { hora: '08:00' }, vigilante: { correoAviso: 'dueno@gsg.pe', minutosAntesDeAvisar: 2 }, claveBrevo: 'xkeysib-secreta', copia: { hora: '04:00', conservar: 7 } } });
     expect(ok.statusCode).toBe(200);
@@ -170,10 +170,15 @@ describe('/fiabilidad y /admin/fiabilidad', () => {
     expect(correos.at(-1)).toMatchObject({ to: [{ email: 'dueno@gsg.pe' }] });
   });
 
-  it('el endpoint de simulación está retirado y no altera la conexión', async () => {
-    const r = await app.inject({ method: 'POST', url: '/admin/fiabilidad/vigilante/simular', headers: { cookie: operador }, payload: { caido: true } });
-    expect(r.statusCode).toBe(404);
-    expect(fiabilidad.vigilante.estado().simulando).toBe(false);
+  it('simular una caída (solo demo): a los 2 minutos del ajuste sale el correo; "mirar ahora" refresca', async () => {
+    let r = await app.inject({ method: 'POST', url: '/admin/fiabilidad/vigilante/mirar', headers: { cookie: operador } });
+    expect(r.json().vigilante.conectado).toBe(true);
+    r = await app.inject({ method: 'POST', url: '/admin/fiabilidad/vigilante/simular', headers: { cookie: operador }, payload: { caido: true } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().vigilante.conectado).toBe(false);
+    expect(r.json().vigilante.simulando).toBe(true);
+    r = await app.inject({ method: 'POST', url: '/admin/fiabilidad/vigilante/simular', headers: { cookie: operador }, payload: { caido: null } });
+    expect(r.json().vigilante.conectado).toBe(true);
   });
 
   it('"Probar ahora" corre la pasada y la devuelve con sus pasos', async () => {

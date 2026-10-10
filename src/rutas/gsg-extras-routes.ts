@@ -3,8 +3,7 @@
  *
  *  - Un token caducable de los programadores de GSG vale para el simulador:
  *    antes de que el simulador mire la cabecera, se cambia por el token
- *    interno si el caducable está vigente. Como en la API real, la clave va
- *    en `X-API-Key`; un `Authorization: Bearer` solo no cuenta.
+ *    interno si el caducable está vigente.
  *  - Cada llamada al simulador y a /api/v1/entregas queda en la bitácora
  *    (hora, ruta, resultado en palabras, con qué entró).
  *
@@ -15,6 +14,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from './conexion-gsg.js';
 import type { GsgSimulado } from '../entregas/gsg-simulado.js';
+import { igualSeguro } from '../util/comparar.js';
 
 export interface DepsGsgExtrasRoutes {
   conexion: ServicioConexionGsg;
@@ -51,21 +51,12 @@ export function resultadoEnPalabras(status: number, cuerpo: unknown): string {
   return 'bien';
 }
 
-/** La clave de una llamada al simulador: solo la cabecera X-API-Key. */
-const tokenDe = (valor: unknown): string | null => {
-  const v = Array.isArray(valor) ? valor[0] : valor;
-  return typeof v === 'string' && v.trim() ? v.trim() : null;
-};
+const tokenDe = (auth: unknown): string | null => (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7).trim() : null);
 
 export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGsgExtrasRoutes): Promise<void> {
   const { conexion } = deps;
   const extras = conexion.extras;
   if (deps.entregasDelDia) extras.usarEntregas(deps.entregasDelDia);
-
-  // Lo que GSG contesta pasa por el observador: apunta lo que no se puede usar.
-  conexion.observar(async (cuerpo) => {
-    await extras.observarPendientes(cuerpo);
-  });
 
   const esLlamadaDeGsg = (url: string) => url.startsWith(`${RUTA_SIMULADOR}/`) || url === RUTA_SIMULADOR || url.startsWith('/api/v1/entregas');
 
@@ -73,12 +64,12 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
   app.addHook('onRequest', async (request: ConUsuario, reply: FastifyReply) => {
     const url = request.url.split('?')[0] ?? request.url;
     if (!url.startsWith(RUTA_SIMULADOR)) return;
-    const token = tokenDe(request.headers['x-api-key']);
+    const token = tokenDe(request.headers.authorization);
     if (!token) {
-      request.gsgQuien = 'sin X-API-Key';
+      request.gsgQuien = 'sin token';
       return;
     }
-    if (token === TOKEN_SIMULADOR) {
+    if (igualSeguro(token, TOKEN_SIMULADOR)) {
       request.gsgQuien = 'este servidor';
       return;
     }
@@ -90,7 +81,7 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
         return reply.code(401).send({ error: 'El token del simulador caducó o fue anulado. Pide uno nuevo a quien opera GSGchat (Conexión → Para los programadores de GSG).' });
       }
       request.gsgQuien = `token del simulador «${registro.nombre}»`;
-      request.headers['x-api-key'] = TOKEN_SIMULADOR;
+      request.headers.authorization = `Bearer ${TOKEN_SIMULADOR}`;
       return;
     }
     request.gsgQuien = `token desconocido (…${token.slice(-4)})`;
@@ -118,8 +109,8 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
   app.get('/admin/gsg', async () => ({
     estado: conexion.estado(),
     descartes: extras.descartesDeHoy(),
-    tokens: [],
-    conSimulador: false,
+    tokens: deps.conSimulador() ? extras.tokensSimulador() : [],
+    conSimulador: deps.conSimulador(),
     rutaSimulador: RUTA_SIMULADOR,
     bitacora: extras.bitacora(),
     verificacion: extras.ultimaVerificacion(),
@@ -130,6 +121,72 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador verifica el contrato con GSG.' });
     const v = await extras.verificarContrato();
     return { ok: v.ok, verificacion: v };
+  });
+
+  app.post('/admin/gsg/tokens-simulador', async (request: ConUsuario, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador crea tokens para el simulador.' });
+    if (!deps.conSimulador()) return reply.code(409).send({ error: 'El simulador de GSG no está montado en este arranque: no hay nada que probar desde fuera.' });
+    const body = z.object({ nombre: z.string().trim().max(80).optional(), dias: z.number().int().min(1).max(365).optional() }).parse(request.body ?? {});
+    const r = await extras.crearTokenSimulador(body);
+    return reply.code(201).send({ ok: true, token: r.token, registro: r.registro, rutaSimulador: RUTA_SIMULADOR });
+  });
+
+  app.delete<{ Params: { id: string } }>('/admin/gsg/tokens-simulador/:id', async (request: ConUsuario & { params: { id: string } }, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador anula tokens del simulador.' });
+    const ok = await extras.anularTokenSimulador(request.params.id);
+    if (!ok) return reply.code(404).send({ error: 'Ese token no existe o ya estaba anulado.' });
+    return { ok: true };
+  });
+
+  // Dos pruebas del "espejo de cambios" desde la pantalla: GSG cancela un
+  // pedido por su cuenta, o le cambia la direccion. Solo con el simulador.
+  // El pedido con el que se prueba: uno que GSG tenga pendiente Y que aqui
+  // siga vivo (no uno descartado por telefono invalido ni uno ya entregado):
+  // si no, la sincronizacion no tendria nada que cancelar ni que cambiar.
+  const FINALES = new Set(['entregada', 'terminada', 'cancelada']);
+  const pendienteDePrueba = async () => {
+    const sim = deps.simulador;
+    if (!sim) return null;
+    const pendientes = sim.estado().clientes.filter((x) => x.estado === 'pendiente');
+    if (!pendientes.length) return null;
+    if (!deps.entregasDelDia) return pendientes[0]!;
+    const aqui = new Map((await deps.entregasDelDia(sim.estado().dia ?? '')).map((e) => [e.referencia, e.estado] as const));
+    return pendientes.find((x) => aqui.has(x.referencia) && !FINALES.has(aqui.get(x.referencia)!)) ?? null;
+  };
+  // Lo que GSG (el simulador) cambia se lo manda al momento a este sistema,
+  // como haria GSG empujando: por la misma ruta que «Cargar» del simulador.
+  const mandarAlSistema = async (request: ConUsuario): Promise<string> => {
+    if (!app.hasRoute({ method: 'POST', url: '/admin/entregas/simulador/enviar' })) return 'Este arranque no tiene entregas: no entra en ningún sitio.';
+    const cabeceras: Record<string, string> = {};
+    for (const k of ['cookie', 'authorization'] as const) if (typeof request.headers[k] === 'string') cabeceras[k] = request.headers[k] as string;
+    const r = await app.inject({ method: 'POST', url: '/admin/entregas/simulador/enviar', headers: cabeceras, payload: {} });
+    let j: { detalle?: string; error?: string } = {};
+    try {
+      j = r.json() as typeof j;
+    } catch {
+      j = {};
+    }
+    return j.detalle ?? j.error ?? `El sistema respondió ${r.statusCode}.`;
+  };
+  app.post('/admin/gsg/simulador/cancelar-uno', async (request: ConUsuario, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador usa las pruebas del simulador.' });
+    if (!deps.simulador || !deps.conSimulador()) return reply.code(409).send({ error: 'El simulador de GSG no está montado en este arranque.' });
+    const c = await pendienteDePrueba();
+    if (!c) return reply.code(409).send({ error: 'No hay ningún pedido de prueba vivo para esto: carga los clientes de prueba en Hoy → Probar con números ficticios.' });
+    deps.simulador.cancelar(c.referencia, 'Prueba: el cliente canceló en GSG');
+    const envio = await mandarAlSistema(request);
+    return { ok: true, referencia: c.referencia, detalle: `GSG marcó ${c.referencia} como cancelado y se lo mandó a este sistema (si el cliente ya tenía hora, se le avisa). ${envio}` };
+  });
+  app.post('/admin/gsg/simulador/cambiar-uno', async (request: ConUsuario, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador usa las pruebas del simulador.' });
+    if (!deps.simulador || !deps.conSimulador()) return reply.code(409).send({ error: 'El simulador de GSG no está montado en este arranque.' });
+    const c = await pendienteDePrueba();
+    if (!c) return reply.code(409).send({ error: 'No hay ningún pedido de prueba vivo para esto: carga los clientes de prueba en Hoy → Probar con números ficticios.' });
+    const direccion = `${(c.direccion ?? 'Av. Nueva 100').replace(/ \(dirección cambiada\)$/, '')} (dirección cambiada)`;
+    const distrito = c.distrito === 'San Isidro' ? 'Miraflores' : 'San Isidro';
+    deps.simulador.cambiar(c.referencia, { direccion, distrito });
+    const envio = await mandarAlSistema(request);
+    return { ok: true, referencia: c.referencia, direccion, distrito, detalle: `GSG cambió la dirección de ${c.referencia} a «${direccion}, ${distrito}» y se lo mandó a este sistema, que la actualiza y lo apunta en la bitácora del pedido. ${envio}` };
   });
 
   app.get<{ Querystring: { dia?: string } }>('/admin/gsg/cuadre', async (request) => {

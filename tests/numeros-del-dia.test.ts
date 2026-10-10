@@ -5,13 +5,16 @@
  * sola entrega, pasando todo por el sender y los motores de siempre.
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
 import { crearEscenarioEntregas, PIN_LIMA, type EscenarioEntregas } from './escenario-entregas.js';
 import { avisoEnPalabras, etapaDe } from '../src/entregas/numeros.js';
 import type { FilaEntrega } from '../src/entregas/servicio.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
 interface Numero {
   id: number;
@@ -278,18 +281,30 @@ describe('etapaDe y el aviso, sin servidor', () => {
 
 // ----------------------------------------------------------- el SQL real
 
-describe('Números del día contra MySQL/MariaDB: las columnas de la migración 038', () => {
-  let b: BaseDePrueba;
+function asPool(db: PGlite): Pool {
+  const query = async (text: string, params?: unknown[]) => {
+    const result = await db.query(text, params as never[], { parsers: { 20: (v: string) => Number.parseInt(v, 10) } });
+    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+  };
+  const client = { query, release: () => undefined };
+  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
+}
+
+describe('Números del día contra Postgres (PGlite): la migración 038', () => {
+  let db: PGlite;
   let pool: Pool;
   let repos: Repos;
+  const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
 
   beforeAll(async () => {
-    b = await baseDePrueba();
-    pool = b.pool;
+    db = new PGlite();
+    pool = asPool(db);
+    const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
+    for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
     repos = createRepos(pool);
   });
   afterAll(async () => {
-    await b?.cerrar();
+    await pool.end();
   });
 
   it('guarda la marca y la pausa, y la pausa saca al número de las colas de confirmar y de proponer dirección', async () => {

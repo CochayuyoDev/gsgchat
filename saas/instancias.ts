@@ -4,9 +4,8 @@
  * Cada cliente tiene su contenedor, su base de datos, su Redis, su numero de
  * WhatsApp y sus ficheros (vinculacion, adjuntos, respaldos). Nada se
  * comparte: una clave de la tienda 1 no abre nada de la tienda 2 porque son
- * servidores distintos. Lo unico comun es MariaDB (una base por tienda, y las
- * de las tiendas que se registren dentro de esa instancia: wa_<slug>_t_<id>)
- * y Caddy, que enruta por subdominio y saca el HTTPS solo.
+ * servidores distintos. Lo unico comun es Postgres (una base por tienda) y
+ * Caddy, que enruta por subdominio y saca el HTTPS solo.
  *
  *   tienda1.wa.tuservicio.com  ->  contenedor wa-tienda1  ->  base wa_tienda1
  *
@@ -29,12 +28,10 @@ const execFileAsync = promisify(execFile);
 export const SAAS_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const RAIZ = path.resolve(SAAS_DIR, '..');
 
-/** Nombre del proyecto compose de la base (Caddy + MariaDB). */
+/** Nombre del proyecto compose de la base (Caddy + Postgres). */
 export const PROYECTO_BASE = 'wa-saas';
 export const RED = 'wa-saas';
-export const CONTENEDOR_MARIADB = 'wa-saas-mariadb';
-/** El usuario de MariaDB con el que entran las instancias (cada una solo a sus bases). */
-export const USUARIO_BASE = 'wa';
+export const CONTENEDOR_POSTGRES = 'wa-saas-postgres';
 export const CONTENEDOR_CADDY = 'wa-saas-caddy';
 export const IMAGEN = 'wa-locator:latest';
 
@@ -43,8 +40,7 @@ export const IMAGEN = 'wa-locator:latest';
 export interface ConfigSaas {
   /** "wa.tuservicio.com": cada tienda es un subdominio. "localhost" para probar. */
   dominioBase: string;
-  /** La clave de MariaDB: la del usuario `wa` y la de root (saas/docker-compose.yml). */
-  mariadbPassword: string;
+  postgresPassword: string;
   /** El pais por defecto de las tiendas nuevas (plan de numeracion). */
   pais: 'peru' | 'mexico' | 'generico';
   zonaHoraria: string;
@@ -72,7 +68,7 @@ export function leerConfigSaas(dir = SAAS_DIR, env: NodeJS.ProcessEnv = process.
   const bbox = v('GEO_BBOX', 'none');
   return {
     dominioBase: v('DOMINIO_BASE', 'localhost').toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, ''),
-    mariadbPassword: v('MARIADB_PASSWORD', 'wa'),
+    postgresPassword: v('POSTGRES_PASSWORD', 'wa'),
     pais: pais === 'mexico' || pais === 'generico' ? pais : 'peru',
     zonaHoraria: v('TIMEZONE', 'America/Lima'),
     geoBbox: bbox === 'lima' || bbox === 'mexico' ? bbox : 'none',
@@ -101,7 +97,7 @@ export function slugValido(slug: string): string | null {
   if (!/^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$/.test(slug)) {
     return 'El nombre corto tiene que ser de 2 a 30 caracteres: minusculas, numeros y guiones, sin empezar ni terminar por guion.';
   }
-  if (['maestro', 'www', 'api', 'caddy', 'mariadb', 'mysql', 'redis', 'saas'].includes(slug)) return `"${slug}" esta reservado.`;
+  if (['maestro', 'www', 'api', 'caddy', 'postgres', 'redis', 'saas'].includes(slug)) return `"${slug}" esta reservado.`;
   return null;
 }
 
@@ -139,7 +135,7 @@ export function generarEnv(slug: string, cfg: ConfigSaas, opts: OpcionesAlta = {
   const lineas: Record<string, string> = {
     PORT: '3000',
     PUBLIC_BASE_URL: urlDe(slug, cfg),
-    DATABASE_URL: `mysql://${USUARIO_BASE}:${encodeURIComponent(cfg.mariadbPassword)}@${CONTENEDOR_MARIADB}:3306/${baseDe(slug)}`,
+    DATABASE_URL: `postgres://wa:${cfg.postgresPassword}@${CONTENEDOR_POSTGRES}:5432/${baseDe(slug)}`,
     REDIS_URL: `redis://${contenedorDe(slug)}-redis:6379`,
     SECRETS_DIR: '/app/data',
     WHATSAPP_PROVIDER: opts.proveedor ?? 'cloud',
@@ -161,7 +157,7 @@ export function generarEnv(slug: string, cfg: ConfigSaas, opts: OpcionesAlta = {
 
 export function generarCompose(slug: string): string {
   const c = contenedorDe(slug);
-  return `# Instancia "${slug}": la app y su Redis. MariaDB y Caddy son los del SaaS (saas/docker-compose.yml).
+  return `# Instancia "${slug}": la app y su Redis. Postgres y Caddy son los del SaaS (saas/docker-compose.yml).
 name: ${c}
 services:
   app:
@@ -256,20 +252,8 @@ export const ejecutarReal: Ejecutor = async (comando, args, opts) => {
   return { stdout: String(r.stdout), stderr: String(r.stderr) };
 };
 
-/** SQL como root dentro del contenedor de MariaDB (la clave por el entorno, no en la linea de comandos). */
-const sqlRoot = (ejecutar: Ejecutor, cfg: ConfigSaas, sql: string) =>
-  ejecutar('docker', ['exec', '-e', `MYSQL_PWD=${cfg.mariadbPassword}`, CONTENEDOR_MARIADB, 'mariadb', '-uroot', '-e', sql]);
-
-/**
- * Lo que puede tocar el usuario `wa` de una instancia: su base y las que la
- * plataforma crea dentro (wa_<slug>_plataforma, wa_<slug>_t_<id>,
- * wa_<slug>_banco_*). El `_` es comodin en un GRANT: va escapado, para que
- * wa_tienda1 no alcance las bases de wa_tienda10.
- */
-export function permisosDe(slug: string): string {
-  const patron = baseDe(slug).replace(/_/g, '\\_');
-  return `grant all privileges on \`${patron}\`.* to '${USUARIO_BASE}'@'%'; grant all privileges on \`${patron}\\_%\`.* to '${USUARIO_BASE}'@'%'`;
-}
+const psql = (ejecutar: Ejecutor, sql: string) =>
+  ejecutar('docker', ['exec', CONTENEDOR_POSTGRES, 'psql', '-U', 'wa', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', sql]);
 
 const recargarCaddy = (ejecutar: Ejecutor) =>
   ejecutar('docker', ['exec', CONTENEDOR_CADDY, 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile']);
@@ -282,7 +266,7 @@ export interface DepsSaas {
   ahora?: () => Date;
 }
 
-/** Levanta lo comun (Caddy + MariaDB) y deja el Caddyfile al dia. Se puede repetir. */
+/** Levanta lo comun (Caddy + Postgres) y deja el Caddyfile al dia. Se puede repetir. */
 export async function prepararBase(deps: DepsSaas = {}): Promise<void> {
   const cfg = deps.cfg ?? leerConfigSaas();
   const base = deps.base ?? SAAS_DIR;
@@ -296,7 +280,7 @@ export async function prepararBase(deps: DepsSaas = {}): Promise<void> {
   const vacio = path.join(dirCaddy(base), '_vacio.caddy');
   if (!existsSync(vacio)) writeFileSync(vacio, '# Sin instancias todavia. Se generan con saas/alta.ts.\n');
 
-  log('Levantando Caddy y MariaDB del SaaS...');
+  log('Levantando Caddy y Postgres del SaaS...');
   await ejecutar('docker', ['compose', '-f', path.join(base, 'docker-compose.yml'), '--env-file', path.join(base, '.env'), 'up', '-d', '--wait'], { cwd: base });
 }
 
@@ -317,17 +301,15 @@ export async function altaInstancia(slug: string, opts: OpcionesAlta = {}, deps:
   const dir = dirInstancia(slug, base);
   if (existsSync(path.join(dir, 'instancia.json'))) throw new Error(`La instancia "${slug}" ya existe.`);
 
-  // 1. Su base de datos, en el MariaDB comun, y el permiso para crear las
-  //    de las tiendas que se registren dentro.
+  // 1. Su base de datos, en el Postgres comun.
   log(`Creando la base ${baseDe(slug)}...`);
   try {
-    await sqlRoot(ejecutar, cfg, `create database ${baseDe(slug)} character set utf8mb4 collate utf8mb4_bin`);
+    await psql(ejecutar, `create database ${baseDe(slug)}`);
   } catch (error) {
     // Si quedo de una baja sin --borrar-datos, se reutiliza: son sus datos.
-    if (!/database exists|already exists|ya existe/i.test(String((error as { stderr?: string }).stderr ?? error))) throw error;
+    if (!/already exists|ya existe/i.test(String((error as { stderr?: string }).stderr ?? error))) throw error;
     log(`La base ${baseDe(slug)} ya existia: se reutiliza.`);
   }
-  await sqlRoot(ejecutar, cfg, permisosDe(slug));
 
   // 2. Sus ficheros.
   mkdirSync(dir, { recursive: true });
@@ -413,18 +395,8 @@ export async function bajaInstancia(slug: string, opciones: { borrarDatos?: bool
   // 3. La base y los ficheros, solo si se pide: una baja normal deja los
   // datos por si el cliente vuelve (o por si hay que entregarselos).
   if (opciones.borrarDatos) {
-    log(`Borrando la base ${baseDe(slug)} y las de sus tiendas...`);
-    const cfg = deps.cfg ?? leerConfigSaas();
-    // Las de las tiendas registradas dentro (wa_<slug>_*) y despues la suya.
-    const { stdout } = await sqlRoot(
-      ejecutar,
-      cfg,
-      `select schema_name from information_schema.schemata where schema_name like '${baseDe(slug).replace(/_/g, '\\_')}\\_%'`,
-    );
-    for (const otra of stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[a-z0-9_]+$/.test(l) && l.startsWith(`${baseDe(slug)}_`))) {
-      await sqlRoot(ejecutar, cfg, `drop database if exists ${otra}`);
-    }
-    await sqlRoot(ejecutar, cfg, `drop database if exists ${baseDe(slug)}`);
+    log(`Borrando la base ${baseDe(slug)}...`);
+    await psql(ejecutar, `drop database if exists ${baseDe(slug)}`);
     rmSync(dir, { recursive: true, force: true });
   } else {
     rmSync(path.join(dir, 'instancia.json'), { force: true });

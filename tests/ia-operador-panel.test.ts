@@ -272,7 +272,7 @@ describe('ajustes, textos, números del día y respuestas rápidas', () => {
       { referencia: 'GSG-N-2', telefono: '51911000002', nombre: 'Dos', faltaUbicacion: true },
       { referencia: 'GSG-N-3', telefono: '51911000003', nombre: 'Tres', faltaUbicacion: false, faltaConfirmacion: true },
     ] as never);
-    expect((await t.api.post('/admin/entregas/sincronizar', {})).status).toBe(200);
+    expect((await t.gsgManda()).body.ok).toBe(true);
     const porConfirmar = async () => (await t.api.get<{ numeros: Json[] }>('/admin/entregas/numeros')).body.numeros.filter((n) => n.porConfirmar).length;
     expect(await porConfirmar()).toBe(3);
     const j = await ordenar(t.app, t.h, 'confirma el envío de todos los números del día', t.dice(bloque({ accion: 'numeros.confirmarEnvio', todos: true })));
@@ -341,7 +341,7 @@ describe('otra tienda intacta', () => {
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',

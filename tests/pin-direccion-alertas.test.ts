@@ -11,7 +11,12 @@
  *  - la respuesta a «¿es ahí?» por reglas.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
+import { describe, expect, it } from 'vitest';
+import type { Pool } from '../src/db/pool.js';
 import { createRepos } from '../src/db/repos.js';
 import { CENTROS_DISTRITOS, distanciaAlDistrito, distritoConocido, distritoDePedido, distritoEnDireccion } from '../src/entregas/distritos-centro.js';
 import { limpiarDireccion, pareceDireccion } from '../src/entregas/direccion-escrita.js';
@@ -21,7 +26,6 @@ import { AJUSTES_ENTREGAS_POR_DEFECTO } from '../src/entregas/textos.js';
 import type { Entrega, Motorizado } from '../src/entregas/repo.js';
 import { clasificarPinLejos, leerCategoria, CATEGORIAS_PIN_LEJOS, CATEGORIAS_REGLA } from '../src/ia/agente-operativo.js';
 import { DISTRITOS_LIMA_CALLAO } from '../src/preventa/distritos.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
 describe('los distritos de Lima y Callao: dónde queda cada uno', () => {
   it('están los 50, cada uno dentro de Lima y Callao y con su radio', () => {
@@ -92,16 +96,6 @@ describe('la dirección escrita: las reglas', () => {
 });
 
 describe('el buscador gratuito de direcciones (Nominatim)', () => {
-  // La base de la caché se aparta en el hook (su tiempo es el de los hooks: la
-  // primera vez hay que crear las tablas).
-  let b: BaseDePrueba;
-  beforeAll(async () => {
-    b = await baseDePrueba();
-  });
-  afterAll(async () => {
-    await b?.cerrar();
-  });
-
   const lugar = (extra: Record<string, unknown> = {}) => [{ lat: '-12.1215', lon: '-77.0302', display_name: 'Avenida José Larco 345, Miraflores, Lima, Perú', addresstype: 'building', place_rank: 30, address: { house_number: '345', road: 'Avenida José Larco', suburb: 'Miraflores', city: 'Lima' }, ...extra }];
   const respuesta = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), { status, headers: { 'content-type': 'application/json' } });
 
@@ -197,24 +191,37 @@ describe('el buscador gratuito de direcciones (Nominatim)', () => {
   });
 
   it('la caché en la base (migración 043) guarda y lee', async () => {
-    const pool = b.pool;
-    const cache = crearCacheGeoSql(pool);
-    const en = new Date('2026-09-25T15:00:00Z');
-    await cache.guardar('av larco 345 | miraflores', { encontrado: true, lat: -12.1215, lng: -77.0302, precision: 'alta', distrito: 'Miraflores', texto: 'Larco', creadoAt: en });
-    await cache.guardar('av larco 345 | miraflores', { encontrado: true, lat: -12.12, lng: -77.03, precision: 'media', distrito: 'Miraflores', texto: 'Larco', creadoAt: en });
-    expect(await cache.leer('av larco 345 | miraflores')).toEqual({ encontrado: true, lat: -12.12, lng: -77.03, precision: 'media', distrito: 'Miraflores', texto: 'Larco', creadoAt: en });
-    expect(await cache.leer('no existe')).toBeNull();
-    // Las columnas nuevas de la entrega se leen y se escriben.
-    const repos = createRepos(pool);
-    const { entrega } = await repos.entregas.crearEntrega({ dia: '2026-09-25', referencia: 'SQL-1', phone: '51987000001', ubicacionEstado: 'pendiente', confirmacionEstado: 'no_hace_falta', estado: 'esperando_ubicacion' });
-    expect(entrega).toMatchObject({ pinPropuestoAt: null, pinPropuestoDudas: 0, direccionCliente: null });
-    const act = await repos.entregas.actualizar(entrega.id, { pinPropuestoLat: -12.12, pinPropuestoLng: -77.03, pinPropuestoAt: en, pinPropuestoFuente: 'pin de whatsapp', pinPropuestoDudas: 1, direccionCliente: 'Av. Larco 345', direccionClienteAt: en });
-    expect(act).toMatchObject({ pinPropuestoLat: -12.12, pinPropuestoLng: -77.03, pinPropuestoFuente: 'pin de whatsapp', pinPropuestoDudas: 1, direccionCliente: 'Av. Larco 345' });
-    // Mientras espera su SÍ/NO, el reparto no le escribe.
-    expect(await repos.entregas.pausadoPorTelefono('51987000001')).toBe(true);
-    await repos.entregas.actualizar(entrega.id, { pinPropuestoAt: null });
-    expect(await repos.entregas.pausadoPorTelefono('51987000001')).toBe(false);
-  }, 600_000);
+    const db = new PGlite();
+    const pool = {
+      query: async (text: string, params?: unknown[]) => {
+        const r = await db.query(text, params as never[]);
+        return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length };
+      },
+      end: async () => db.close(),
+    } as unknown as Pool;
+    try {
+      const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
+      for (const f of (await readdir(dir)).filter((x) => x.endsWith('.sql')).sort()) await db.exec(await readFile(path.join(dir, f), 'utf8'));
+      const cache = crearCacheGeoSql(pool);
+      const en = new Date('2026-09-25T15:00:00Z');
+      await cache.guardar('av larco 345 | miraflores', { encontrado: true, lat: -12.1215, lng: -77.0302, precision: 'alta', distrito: 'Miraflores', texto: 'Larco', creadoAt: en });
+      await cache.guardar('av larco 345 | miraflores', { encontrado: true, lat: -12.12, lng: -77.03, precision: 'media', distrito: 'Miraflores', texto: 'Larco', creadoAt: en });
+      expect(await cache.leer('av larco 345 | miraflores')).toEqual({ encontrado: true, lat: -12.12, lng: -77.03, precision: 'media', distrito: 'Miraflores', texto: 'Larco', creadoAt: en });
+      expect(await cache.leer('no existe')).toBeNull();
+      // Las columnas nuevas de la entrega se leen y se escriben.
+      const repos = createRepos(pool);
+      const { entrega } = await repos.entregas.crearEntrega({ dia: '2026-09-25', referencia: 'SQL-1', phone: '51987000001', ubicacionEstado: 'pendiente', confirmacionEstado: 'no_hace_falta', estado: 'esperando_ubicacion' });
+      expect(entrega).toMatchObject({ pinPropuestoAt: null, pinPropuestoDudas: 0, direccionCliente: null });
+      const act = await repos.entregas.actualizar(entrega.id, { pinPropuestoLat: -12.12, pinPropuestoLng: -77.03, pinPropuestoAt: en, pinPropuestoFuente: 'pin de whatsapp', pinPropuestoDudas: 1, direccionCliente: 'Av. Larco 345', direccionClienteAt: en });
+      expect(act).toMatchObject({ pinPropuestoLat: -12.12, pinPropuestoLng: -77.03, pinPropuestoFuente: 'pin de whatsapp', pinPropuestoDudas: 1, direccionCliente: 'Av. Larco 345' });
+      // Mientras espera su SÍ/NO, el reparto no le escribe.
+      expect(await repos.entregas.pausadoPorTelefono('51987000001')).toBe(true);
+      await repos.entregas.actualizar(entrega.id, { pinPropuestoAt: null });
+      expect(await repos.entregas.pausadoPorTelefono('51987000001')).toBe(false);
+    } finally {
+      await pool.end();
+    }
+  }, 60_000);
 });
 
 describe('«Hay que mirar»: el cálculo', () => {

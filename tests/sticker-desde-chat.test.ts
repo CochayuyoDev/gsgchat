@@ -24,7 +24,7 @@ import { createFakeRepos, createFakeSettings, createFakeWhatsApp } from './fakes
 
 const ENV = {
   PUBLIC_BASE_URL: 'https://wa.ejemplo.pe',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',

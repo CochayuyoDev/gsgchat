@@ -1,35 +1,52 @@
 /**
- * El SQL del modulo de rutas, contra MySQL/MariaDB de verdad (tests/mysql.ts).
+ * El SQL del modulo de rutas, contra Postgres de verdad (PGlite).
  *
- * Los dobles en memoria prueban las decisiones; esto prueba las consultas: las
- * cifras por lote sobre cero filas, el orden de la cola -que es lo que decide
- * a quien le toca- y que los filtros de la bandeja devuelven lo que dicen.
+ * Los dobles en memoria prueban las decisiones; esto prueba las consultas: el
+ * `jsonb_object_agg` de las cifras por lote sobre cero filas, el orden de la
+ * cola -que es lo que decide a quien le toca- y que los filtros de la bandeja
+ * devuelven lo que dicen.
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
-import { CandadoOcupado, ESTADOS_SIN_UBICACION } from '../src/db/rutas.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
+import { ESTADOS_SIN_UBICACION } from '../src/db/rutas.js';
 
-let b: BaseDePrueba;
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
+
+function asPool(db: PGlite): Pool {
+  const query = async (text: string, params?: unknown[]) => {
+    const result = await db.query(text, params as never[], {
+      parsers: { 20: (v: string) => Number.parseInt(v, 10) },
+    });
+    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+  };
+  const client = { query, release: () => undefined };
+  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
+}
+
+let db: PGlite;
 let pool: Pool;
 let repos: Repos;
 
 beforeAll(async () => {
-  b = await baseDePrueba();
-  pool = b.pool;
+  db = new PGlite();
+  pool = asPool(db);
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await b?.cerrar();
+  await pool.end();
 });
 
 beforeEach(async () => {
-  for (const tabla of ['rutas_reportes', 'rutas_eventos', 'rutas_solicitudes', 'rutas_lotes']) {
-    await pool.query(`delete from ${tabla}`);
-  }
+  await db.exec('delete from rutas_reportes; delete from rutas_eventos; delete from rutas_solicitudes; delete from rutas_lotes;');
 });
 
 describe('lotes y solicitudes', () => {
@@ -103,64 +120,29 @@ describe('lotes y solicitudes', () => {
     expect(await repos.rutas.tocaIntentar(new Date('2026-03-10T13:00:00Z'), 10)).toHaveLength(0);
   });
 
-  it('la bandeja ensena primero lo ultimo que se movio, y el id desempata', async () => {
+  it('la bandeja ensena primero lo que espera a una persona', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Reparto' });
-    const [a, b, c, d] = await repos.rutas.agregarSolicitudes(lote.id, [
-      { telefonoCrudo: '911111111', phone: '51911111111' },
+    const [normal, urgente] = await repos.rutas.agregarSolicitudes(lote.id, [
       { telefonoCrudo: '922222222', phone: '51922222222' },
       { telefonoCrudo: '933333333', phone: '51933333333' },
-      { telefonoCrudo: '944444444', phone: '51944444444' },
     ]);
-    // Fechas a mano: a y c empatan, b es la mas vieja, d la mas nueva. Una
-    // en supervision NO sube por su estado: manda la actividad.
-    const fecha = async (id: number, iso: string) =>
-      pool.query('update rutas_solicitudes set updated_at = $1 where id = $2', [new Date(iso), id]);
-    await fecha(a!.id, '2026-03-10T12:00:00.000Z');
-    await fecha(b!.id, '2026-03-10T11:00:00.000Z');
-    await fecha(c!.id, '2026-03-10T12:00:00.000Z');
-    await fecha(d!.id, '2026-03-10T13:00:00.000Z');
-    await pool.query(`update rutas_solicitudes set estado = 'supervision', requiere_humano = 1 where id = $1`, [b!.id]);
-    await fecha(b!.id, '2026-03-10T11:00:00.000Z');
-
-    const ids = async (limit: number, offset: number) =>
-      (await repos.rutas.listarSolicitudes({ loteId: lote.id, limit, offset })).map((s) => s.id);
-    expect(await ids(10, 0)).toEqual([d!.id, c!.id, a!.id, b!.id]);
-    // El limite y el desplazamiento siguen igual, sobre el orden nuevo.
-    expect(await ids(2, 1)).toEqual([c!.id, a!.id]);
-
-    // Tocarla la sube: actualizarSolicitud pone updated_at a ahora.
-    await repos.rutas.actualizarSolicitud(b!.id, { incidencia: 'numero_equivocado' });
-    expect((await ids(10, 0))[0]).toBe(b!.id);
-
-    const soloHumano = await repos.rutas.listarSolicitudes({ requiereHumano: true, limit: 10, offset: 0 });
-    expect(soloHumano.map((s) => s.id)).toEqual([b!.id]);
-    expect(await repos.rutas.contarSolicitudes({ incidencia: 'numero_equivocado' })).toBe(1);
-  });
-
-  it('el candado por telefono no deja solapar dos llamadas del mismo numero', async () => {
-    const traza: string[] = [];
-    const tarea = (n: string) => async () => {
-      traza.push(`entra ${n}`);
-      await new Promise((r) => setTimeout(r, 50));
-      traza.push(`sale ${n}`);
-      return n;
-    };
-    const [uno, dos] = await Promise.all([
-      repos.rutas.conCandadoDeTelefono('51900000001', tarea('1')),
-      repos.rutas.conCandadoDeTelefono('51900000001', tarea('2')),
-    ]);
-    expect([uno, dos]).toEqual(['1', '2']);
-    // Una detras de otra, nunca intercaladas (la que entra primero da igual).
-    const primero = traza[0]!.split(' ')[1];
-    const segundo = primero === '1' ? '2' : '1';
-    expect(traza).toEqual([`entra ${primero}`, `sale ${primero}`, `entra ${segundo}`, `sale ${segundo}`]);
-
-    // Con el candado tomado y sin espera, la segunda no entra.
-    await repos.rutas.conCandadoDeTelefono('51900000002', async () => {
-      await expect(repos.rutas.conCandadoDeTelefono('51900000002', async () => 'no', 0)).rejects.toBeInstanceOf(CandadoOcupado);
+    await repos.rutas.actualizarSolicitud(urgente!.id, {
+      estado: 'supervision',
+      requiereHumano: true,
+      incidencia: 'numero_equivocado',
     });
-    // Y al soltarlo, si.
-    expect(await repos.rutas.conCandadoDeTelefono('51900000002', async () => 'si', 0)).toBe('si');
+
+    const lista = await repos.rutas.listarSolicitudes({ loteId: lote.id, limit: 10, offset: 0 });
+    expect(lista[0]?.id).toBe(urgente!.id);
+    expect(lista[1]?.id).toBe(normal!.id);
+
+    const soloHumano = await repos.rutas.listarSolicitudes({
+      requiereHumano: true,
+      limit: 10,
+      offset: 0,
+    });
+    expect(soloHumano).toHaveLength(1);
+    expect(await repos.rutas.contarSolicitudes({ incidencia: 'numero_equivocado' })).toBe(1);
   });
 
   it('cuenta a los que faltan por dar la ubicacion, sea cual sea el motivo', async () => {

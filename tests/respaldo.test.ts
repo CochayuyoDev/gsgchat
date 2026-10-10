@@ -1,10 +1,8 @@
 /**
- * La copia de seguridad: "Hacer copia ahora" deja en la carpeta la base
- * (base-AAAA-MM-DD.sql.gz, con mysqldump o con el volcado propio) y los
- * respaldos de chats (.tar.gz); la copia de la base se restaura y deja lo
- * mismo que habia; el tar propio se puede leer de vuelta, una carpeta
- * imposible se explica, y con quince copias quedan catorce. El ticker la
- * hace una vez por noche a su hora.
+ * La copia de seguridad: "Hacer copia ahora" deja dos .tar.gz en la carpeta
+ * (la base de PGlite y los respaldos de chats), el tar propio se puede leer
+ * de vuelta, una carpeta imposible se explica, y con quince copias quedan
+ * catorce. El ticker la hace una vez por noche a su hora.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -12,11 +10,8 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import mysqlCrudo from 'mysql2/promise';
-import { crearRespaldo, candidatosMysqldump, carpetaDeCopiasPorDefecto, explicarErrorDeCarpeta, type ServicioRespaldo } from '../src/respaldo/servicio.js';
-import { borrarBase } from '../src/db/bases.js';
-import { crearBaseSiNoExiste } from '../src/db/migrate.js';
-import { PREFIJO_PRUEBAS, URL_PRUEBAS, urlConBase } from './mysql.js';
+import { PGlite } from '@electric-sql/pglite';
+import { crearRespaldo, carpetaDeCopiasPorDefecto, explicarErrorDeCarpeta, type ServicioRespaldo } from '../src/respaldo/servicio.js';
 import { empaquetarCarpeta, cabeceraTar } from '../src/respaldo/tar.js';
 import { createMemorySettingsRepo } from './fakes.js';
 
@@ -84,107 +79,26 @@ describe('el tar escrito a mano', () => {
   });
 });
 
-/**
- * Una base pequeña de verdad en el servidor de pruebas (dos tablas: crearla
- * es un instante, no el minuto de las ~50 de una tienda), con los valores que
- * un volcado suele romper: comillas, barras, saltos de linea, emojis, fechas
- * con milisegundos, JSON, decimales, numeros mas grandes que los de JS,
- * binarios y nulos.
- */
-const BASE_COPIA = `${PREFIJO_PRUEBAS}respaldo`;
-const URL_COPIA = urlConBase(BASE_COPIA);
-
-const TABLAS_COPIA = `
-create table clientes (
-  id bigint not null auto_increment primary key,
-  nombre varchar(191) not null,
-  nota longtext,
-  alta datetime(3) not null,
-  activo tinyint(1) not null default 1,
-  saldo decimal(12,2),
-  grande bigint,
-  datos json,
-  foto varbinary(16),
-  unique key clientes_nombre (nombre)
-) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin;
-create table pedidos (
-  id bigint not null auto_increment primary key,
-  cliente_id bigint not null,
-  total decimal(12,2) not null,
-  constraint pedidos_cliente foreign key (cliente_id) references clientes (id) on delete cascade
-) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin;
-insert into clientes (nombre, nota, alta, activo, saldo, grande, datos, foto) values
-  ('Rosa', 'dijo "hola" y luego \\'chau\\'\\ncon barra \\\\ y emoji 😀 ñ', '2026-09-21 07:30:00.123', 1, 1234.50, 9007199254740993, '{"a": [1, "dos"], "b": null}', x'00ff10'),
-  ('Pedro', null, '2026-01-02 03:04:05.006', 0, null, null, null, null);
-insert into pedidos (cliente_id, total) select id, 99.90 from clientes where nombre = 'Rosa';
-`;
-
-async function conexionCruda(multipleStatements = false) {
-  const u = new URL(URL_COPIA);
-  return mysqlCrudo.createConnection({
-    host: u.hostname,
-    port: Number(u.port || 3306),
-    user: decodeURIComponent(u.username || 'root'),
-    password: decodeURIComponent(u.password || ''),
-    database: BASE_COPIA,
-    charset: 'UTF8MB4_BIN',
-    dateStrings: true,
-    supportBigNumbers: true,
-    bigNumberStrings: true,
-    multipleStatements,
-  });
-}
-
-/** Todo lo que hay en las dos tablas, tal cual (fechas y numeros como texto, binarios en hexadecimal). */
-async function contenido(): Promise<unknown> {
-  const c = await conexionCruda();
-  try {
-    const [clientes] = await c.query('select id, nombre, nota, alta, activo, saldo, grande, cast(datos as char) as datos, hex(foto) as foto from clientes order by id');
-    const [pedidos] = await c.query('select * from pedidos order by id');
-    return { clientes, pedidos };
-  } finally {
-    await c.end();
-  }
-}
-
-/** Restaura un .sql.gz encima de la base (como lo haria phpMyAdmin o el cliente mysql). */
-async function restaurar(fichero: string): Promise<void> {
-  const sql = gunzipSync(readFileSync(fichero)).toString('utf8');
-  const c = await conexionCruda(true);
-  try {
-    await c.query('set foreign_key_checks = 0; drop table if exists pedidos; drop table if exists clientes; set foreign_key_checks = 1');
-    await c.query(sql);
-  } finally {
-    await c.end();
-  }
-}
-
 describe('la copia de seguridad', () => {
+  let db: PGlite;
   let carpeta: string;
   let archiveDir: string;
   let respaldo: ServicioRespaldo;
-  let original: unknown;
   let ahora = new Date('2026-09-21T07:30:00Z'); // 02:30 Lima
   const ajustes = { activa: true, hora: '03:00', carpeta: '', conservar: 14 };
   const settingsRepo = createMemorySettingsRepo();
 
   beforeAll(async () => {
-    await borrarBase(URL_PRUEBAS, BASE_COPIA);
-    await crearBaseSiNoExiste(URL_PRUEBAS, BASE_COPIA);
-    const c = await conexionCruda(true);
-    try {
-      await c.query(TABLAS_COPIA);
-    } finally {
-      await c.end();
-    }
-    original = await contenido();
+    db = new PGlite();
+    await db.waitReady;
+    await db.exec('create table prueba (id int); insert into prueba values (1), (2), (3);');
     carpeta = mkdtempSync(path.join(tmpdir(), 'gsgchat-copias-'));
     archiveDir = mkdtempSync(path.join(tmpdir(), 'gsgchat-respaldos-'));
     writeFileSync(path.join(archiveDir, '51987654321-2026-09-01.ndjson.gz'), Buffer.from('gz-de-mentira'));
     mkdirSync(path.join(archiveDir, '51987654321-2026-09-01-adjuntos'));
     writeFileSync(path.join(archiveDir, '51987654321-2026-09-01-adjuntos', 'foto.jpg'), Buffer.alloc(2000, 1));
     respaldo = await crearRespaldo({
-      baseDatos: () => ({ tipo: 'mysql', url: URL_COPIA }),
+      baseDatos: () => ({ tipo: 'pglite', dump: () => db.dumpDataDir('gzip'), dataDir: '.wa-data' }),
       archiveDir,
       carpetaPorDefecto: carpeta,
       ajustes: () => ajustes,
@@ -193,9 +107,9 @@ describe('la copia de seguridad', () => {
       log: () => undefined,
       timezone: 'America/Lima',
     });
-  }, 120_000);
+  });
   afterAll(async () => {
-    await borrarBase(URL_PRUEBAS, BASE_COPIA).catch(() => undefined);
+    await db.close();
     rmSync(carpeta, { recursive: true, force: true });
     rmSync(archiveDir, { recursive: true, force: true });
   });
@@ -206,31 +120,22 @@ describe('la copia de seguridad', () => {
     expect(e.carpeta).toBe(carpeta);
     expect(e.carpetaEsLaDeSiempre).toBe(true);
     expect(e.carpetaComprobada.ok).toBe(true);
-    expect(e.base.tipo).toBe('mysql');
-    expect(e.base.detalle).toContain(`«${BASE_COPIA}»`);
+    expect(e.base.tipo).toBe('pglite');
     expect(e.restaurar.pasos.length).toBeGreaterThan(3);
-    expect(e.restaurar.pasos.join(' ')).toContain('phpMyAdmin');
-    expect(e.restaurar.pasos.join(' ')).toContain(BASE_COPIA);
     expect(e.proxima).toBe('hoy a las 03:00');
   });
 
-  it('"Hacer copia ahora" deja la base y los respaldos en la carpeta, y la copia de la base se restaura igual', async () => {
+  it('"Hacer copia ahora" deja la base y los respaldos en la carpeta, y lo apunta', async () => {
     const r = await respaldo.hacerCopia('Ali');
     expect(r.ok).toBe(true);
     expect(r.error).toBeNull();
-    expect(r.ficheros.map((f) => f.nombre).sort()).toEqual(['base-2026-09-21.sql.gz', 'respaldos-2026-09-21.tar.gz']);
-    // Con mysqldump si esta en esta maquina (XAMPP lo trae); si no, con el volcado propio.
-    expect(r.ficheros.find((f) => f.nombre.startsWith('base-'))!.que).toMatch(/mysqldump|volcado propio/);
+    expect(r.ficheros.map((f) => f.nombre).sort()).toEqual(['base-2026-09-21.tar.gz', 'respaldos-2026-09-21.tar.gz']);
     expect(r.notas.some((n) => n.includes('.wa-auth'))).toBe(true);
     const nombres = readdirSync(carpeta).sort();
-    expect(nombres).toEqual(['base-2026-09-21.sql.gz', 'respaldos-2026-09-21.tar.gz']);
-    // La base: un volcado SQL comprimido con las dos tablas y sus filas...
-    const sql = gunzipSync(readFileSync(path.join(carpeta, 'base-2026-09-21.sql.gz'))).toString('utf8');
-    expect(sql).toMatch(/CREATE TABLE `clientes`/);
-    expect(sql).toMatch(/CREATE TABLE `pedidos`/);
-    // ...que se restaura y deja exactamente lo que habia.
-    await restaurar(path.join(carpeta, 'base-2026-09-21.sql.gz'));
-    expect(await contenido()).toEqual(original);
+    expect(nombres).toEqual(['base-2026-09-21.tar.gz', 'respaldos-2026-09-21.tar.gz']);
+    // La base es el volcado de PGlite: un tar.gz con la carpeta de datos dentro.
+    const base = gunzipSync(readFileSync(path.join(carpeta, 'base-2026-09-21.tar.gz')));
+    expect(leerTar(base).length).toBeGreaterThan(5);
     // Los respaldos: lo que había, con sus adjuntos.
     const entradas = leerTar(gunzipSync(readFileSync(path.join(carpeta, 'respaldos-2026-09-21.tar.gz'))));
     expect(entradas.map((e) => e.nombre)).toContain('respaldos/51987654321-2026-09-01.ndjson.gz');
@@ -241,30 +146,30 @@ describe('la copia de seguridad', () => {
     expect(e.alerta).toBeNull();
     expect(e.ultima?.quien).toBe('Ali');
     expect(e.copias).toHaveLength(2);
-    const f = await respaldo.ficheroDeCopia('base-2026-09-21.sql.gz');
+    const f = await respaldo.ficheroDeCopia('base-2026-09-21.tar.gz');
     expect(f.ok).toBe(true);
     expect((await respaldo.ficheroDeCopia('../../etc/passwd')).ok).toBe(false);
-    expect((await respaldo.ficheroDeCopia('base-2026-01-01.sql.gz')).ok).toBe(false);
-  }, 300_000);
+    expect((await respaldo.ficheroDeCopia('base-2026-01-01.tar.gz')).ok).toBe(false);
+  });
 
   it('con quince días de copias quedan catorce (las más viejas se borran)', async () => {
     for (let i = 1; i <= 15; i++) {
       const dia = `2026-08-${String(i).padStart(2, '0')}`;
-      writeFileSync(path.join(carpeta, `base-${dia}.sql.gz`), 'x');
+      writeFileSync(path.join(carpeta, `base-${dia}.tar.gz`), 'x');
       writeFileSync(path.join(carpeta, `respaldos-${dia}.tar.gz`), 'x');
     }
     const r = await respaldo.hacerCopia('Ali');
     expect(r.ok).toBe(true);
     const bases = readdirSync(carpeta).filter((n) => n.startsWith('base-'));
     expect(bases).toHaveLength(14);
-    expect(bases).toContain('base-2026-09-21.sql.gz');
-    expect(bases).not.toContain('base-2026-08-01.sql.gz');
-    expect(bases).not.toContain('base-2026-08-02.sql.gz');
+    expect(bases).toContain('base-2026-09-21.tar.gz');
+    expect(bases).not.toContain('base-2026-08-01.tar.gz');
+    expect(bases).not.toContain('base-2026-08-02.tar.gz');
     expect(r.notas.some((n) => n.includes('copias viejas'))).toBe(true);
-  }, 300_000);
+  });
 
   it('una carpeta imposible se explica en cristiano y la copia queda como fallida', async () => {
-    const fichero = path.join(carpeta, 'base-2026-09-21.sql.gz');
+    const fichero = path.join(carpeta, 'base-2026-09-21.tar.gz');
     const r = await respaldo.comprobarCarpeta(fichero);
     expect(r.ok).toBe(false);
     expect(r.detalle).toContain('No se pudo usar la carpeta');
@@ -279,11 +184,11 @@ describe('la copia de seguridad', () => {
   });
 
   it('el ticker copia una vez por noche a su hora', async () => {
-    const antes = statSync(path.join(carpeta, 'base-2026-09-21.sql.gz')).mtimeMs;
+    const antes = statSync(path.join(carpeta, 'base-2026-09-21.tar.gz')).mtimeMs;
     expect(await respaldo.tick()).toBe(false);
     ahora = new Date('2026-09-21T08:00:00Z'); // 03:00 Lima
     expect(await respaldo.tick()).toBe(true);
-    expect(statSync(path.join(carpeta, 'base-2026-09-21.sql.gz')).mtimeMs).toBeGreaterThanOrEqual(antes);
+    expect(statSync(path.join(carpeta, 'base-2026-09-21.tar.gz')).mtimeMs).toBeGreaterThanOrEqual(antes);
     expect((await respaldo.estado()).ultima?.quien).toBe('cada noche');
     ahora = new Date('2026-09-21T09:00:00Z');
     expect(await respaldo.tick()).toBe(false);
@@ -291,7 +196,7 @@ describe('la copia de seguridad', () => {
     ahora = new Date('2026-09-22T08:30:00Z');
     expect(await respaldo.tick()).toBe(false);
     expect((await respaldo.estado()).proxima).toContain('apagada');
-  }, 300_000);
+  });
 
   it('la carpeta de siempre está dentro de la casa del usuario', () => {
     const base = mkdtempSync(path.join(tmpdir(), 'casa-'));
@@ -302,18 +207,11 @@ describe('la copia de seguridad', () => {
     }
   });
 
-  it('mysqldump se busca en MYSQLDUMP_PATH, en el PATH y en el de XAMPP, en ese orden', () => {
-    const lista = candidatosMysqldump({ MYSQLDUMP_PATH: 'D:\\mi\\mysqldump.exe' });
-    expect(lista.slice(0, 2)).toEqual(['D:\\mi\\mysqldump.exe', 'mysqldump']);
-    expect(candidatosMysqldump({})[0]).toBe('mysqldump');
-  });
-
-  it('sin mysqldump la base se copia con el volcado propio, se dice, y se restaura igual', async () => {
-    const carpeta2 = mkdtempSync(path.join(tmpdir(), 'gsgchat-copias-js-'));
-    const probados: string[] = [];
+  it('con Postgres de verdad y sin pg_dump, solo se copian los respaldos y se dice', async () => {
+    const carpeta2 = mkdtempSync(path.join(tmpdir(), 'gsgchat-copias-pg-'));
     try {
       const r2 = await crearRespaldo({
-        baseDatos: () => ({ tipo: 'mysql', url: URL_PRUEBAS, base: BASE_COPIA }),
+        baseDatos: () => ({ tipo: 'postgres', url: 'postgres://x/y' }),
         archiveDir,
         carpetaPorDefecto: carpeta2,
         ajustes: () => ({ activa: true, hora: '03:00', carpeta: '', conservar: 14 }),
@@ -321,74 +219,14 @@ describe('la copia de seguridad', () => {
         ahora: () => ahora,
         log: () => undefined,
         timezone: 'America/Lima',
-        mysqldump: () => ['mysqldump', 'C:\\no\\existe\\mysqldump.exe'],
-        ejecutar: async (cmd) => {
-          probados.push(cmd);
-          return { ok: false, error: `spawn ${cmd} ENOENT`, noEncontrado: true };
-        },
+        ejecutar: async () => ({ ok: false, error: 'spawn pg_dump ENOENT' }),
       });
       const r = await r2.hacerCopia('Ali');
       expect(r.ok).toBe(true);
-      // Se probaron todos los sitios antes de rendirse.
-      expect(probados).toEqual(['mysqldump', 'C:\\no\\existe\\mysqldump.exe']);
-      expect(r.ficheros.map((f) => f.nombre).sort()).toEqual(['base-2026-09-22.sql.gz', 'respaldos-2026-09-22.tar.gz']);
-      expect(r.ficheros.find((f) => f.nombre.startsWith('base-'))!.que).toContain('volcado propio');
-      expect(r.notas.some((n) => n.includes('no está mysqldump'))).toBe(true);
-      const sql = gunzipSync(readFileSync(path.join(carpeta2, 'base-2026-09-22.sql.gz'))).toString('utf8');
-      expect(sql).toContain('SET FOREIGN_KEY_CHECKS = 0');
-      expect(sql).toContain('INSERT INTO `clientes`');
-      await restaurar(path.join(carpeta2, 'base-2026-09-22.sql.gz'));
-      expect(await contenido()).toEqual(original);
+      expect(r.ficheros.map((f) => f.nombre)).toEqual([`respaldos-2026-09-22.tar.gz`]);
+      expect(r.notas.some((n) => n.includes('pg_dump'))).toBe(true);
     } finally {
       rmSync(carpeta2, { recursive: true, force: true });
     }
-  }, 300_000);
-
-  it('si mysqldump falla, la base sale igual con el volcado propio y se dice por qué', async () => {
-    const carpeta3 = mkdtempSync(path.join(tmpdir(), 'gsgchat-copias-falla-'));
-    try {
-      const r3 = await crearRespaldo({
-        baseDatos: () => ({ tipo: 'mysql', url: URL_COPIA }),
-        archiveDir,
-        carpetaPorDefecto: carpeta3,
-        ajustes: () => ({ activa: true, hora: '03:00', carpeta: '', conservar: 14 }),
-        settingsRepo: createMemorySettingsRepo(),
-        ahora: () => ahora,
-        log: () => undefined,
-        timezone: 'America/Lima',
-        mysqldump: () => ['mysqldump'],
-        ejecutar: async () => ({ ok: false, error: 'mysqldump: Got error: 1045: Access denied' }),
-      });
-      const r = await r3.hacerCopia('Ali');
-      expect(r.ok).toBe(true);
-      expect(r.ficheros.some((f) => f.nombre === 'base-2026-09-22.sql.gz')).toBe(true);
-      expect(r.notas.some((n) => n.includes('mysqldump no pudo') && n.includes('Access denied'))).toBe(true);
-    } finally {
-      rmSync(carpeta3, { recursive: true, force: true });
-    }
-  }, 300_000);
-
-  it('si la base no contesta, la copia queda como fallida y lo dice', async () => {
-    const carpeta4 = mkdtempSync(path.join(tmpdir(), 'gsgchat-copias-sin-base-'));
-    try {
-      const r4 = await crearRespaldo({
-        baseDatos: () => ({ tipo: 'mysql', url: urlConBase(`${PREFIJO_PRUEBAS}no_existe_nunca`) }),
-        archiveDir,
-        carpetaPorDefecto: carpeta4,
-        ajustes: () => ({ activa: true, hora: '03:00', carpeta: '', conservar: 14 }),
-        settingsRepo: createMemorySettingsRepo(),
-        ahora: () => ahora,
-        log: () => undefined,
-        timezone: 'America/Lima',
-        mysqldump: () => [],
-      });
-      const r = await r4.hacerCopia('Ali');
-      expect(r.ok).toBe(false);
-      expect(r.error).toContain(`No se pudo leer la base «${PREFIJO_PRUEBAS}no_existe_nunca»`);
-      // No queda un fichero a medias que parezca una copia buena.
-      expect(readdirSync(carpeta4).filter((n) => n.startsWith('base-'))).toEqual([]);
-    } finally {
-      rmSync(carpeta4, { recursive: true, force: true });
-    }
-  }, 300_000);
+  });
 });

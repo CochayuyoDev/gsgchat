@@ -22,7 +22,7 @@ import {
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -47,7 +47,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 
-const auth = { 'x-api-key': ADMIN };
+const auth = { authorization: `Bearer ${ADMIN}` };
 
 let app: FastifyInstance;
 let repos: FakeRepos;
@@ -514,7 +514,7 @@ describe('los scripts de las pantallas', () => {
   it('cada <script> del panel, el chat y el manual compila (un error de sintaxis deja la pantalla muerta)', async () => {
     const vm = await import('node:vm');
     for (const url of ['/panel', '/chat', '/rutas', '/manual', '/setup', '/soporte']) {
-      const r = await app.inject({ method: 'GET', url, headers: { 'x-api-key': ADMIN } });
+      const r = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${ADMIN}` } });
       expect(r.statusCode, url).toBe(200);
       let n = 0;
       for (const m of r.body.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {

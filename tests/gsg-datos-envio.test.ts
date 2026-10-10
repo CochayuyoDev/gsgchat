@@ -6,13 +6,13 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
+import { crearEscenarioEntregas, type EscenarioEntregas } from './escenario-entregas.js';
 import { CLAVE_API_PRUEBA } from './fakes.js';
 import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio, montoEnTexto } from '../src/entregas/datos-envio.js';
 import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { clienteInventado } from '../src/desarrollador/datos-peru.js';
 import { avisoDireccionPublica } from '../src/config.js';
-import { CAMPOS_PEDIDO } from '../src/rutas/gsg-extras.js';
+import { pedidoSchema } from '../src/api/v1/entregas-gsg.js';
 
 function hoyALas9(): Date {
   const d = new Date();
@@ -61,8 +61,8 @@ describe('leer los datos del envío', () => {
     expect(fusionarDatosEnvio(antes, null)).toBeNull();
   });
 
-  it('el verificador del contrato no marca los campos nuevos como sobrantes', () => {
-    for (const c of ['producto', 'empresa', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente']) expect(CAMPOS_PEDIDO.has(c), c).toBe(true);
+  it('POST /api/v1/entregas acepta los campos nuevos', () => {
+    for (const c of ['producto', 'empresa', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente']) expect(c in pedidoSchema.shape, c).toBe(true);
   });
 
   it('el generador del Módulo desarrollador inventa los datos del envío', () => {
@@ -98,46 +98,45 @@ describe('los datos del envío llegan a la entrega', () => {
   });
   afterAll(() => e.cerrar());
 
-  it('por la API: con y sin pin, los obligatorios siempre y lo opcional que falta no se inventa', async () => {
+  it('por la API: con y sin pin, y lo que falta no se inventa', async () => {
     const r = await e.api.post<{ creadas: Array<Record<string, unknown>> }>('/api/v1/entregas', {
       pedidos: [
         { referencia: 'D-1', telefono: '987000301', nombre: 'María Pérez', direccion: 'Av. La Marina 1234', distrito: 'San Miguel', producto: 'Zapatillas talla 40', empresa: { codigo: '516', nombre: 'Zapatería Lima' }, tracking: 'GSG-A-102345', nroPedido: '#1042', metodoPago: 'YAPE', monto: 85, remitente: 'Juan Quispe' },
-        { referencia: 'D-2', telefono: '987000302', nombre: 'Luis Rojas', lat: -12.1211, lng: -77.0301, faltaConfirmar: true, empresa: { codigo: '231', nombre: 'Moda Gamarra' }, metodoPago: 'Pagado', montoCobrar: 0 },
-        { ...OBLIGATORIOS_GSG, referencia: 'D-3', telefono: '987000303', nombre: 'Sin datos' },
+        { referencia: 'D-2', telefono: '987000302', nombre: 'Luis Rojas', lat: -12.1211, lng: -77.0301, faltaConfirmar: true, tiendaCodigo: '231', tiendaNombre: 'Moda Gamarra', metodoPago: 'Pagado' },
+        { referencia: 'D-3', telefono: '987000303', nombre: 'Sin datos' },
       ],
     });
     expect(r.status).toBe(201);
     const d1 = await e.entrega('D-1');
     expect(d1?.datosEnvio).toEqual({ producto: 'Zapatillas talla 40', empresaCodigo: '516', empresaNombre: 'Zapatería Lima', tracking: 'GSG-A-102345', nroPedido: '#1042', metodoPago: 'YAPE', monto: '85.00', remitente: 'Juan Quispe' });
-    // Sin tracking propio, la referencia hace de tracking; lo opcional que no vino no aparece.
-    expect((await e.entrega('D-2'))?.datosEnvio).toEqual({ empresaCodigo: '231', empresaNombre: 'Moda Gamarra', metodoPago: 'Pagado', monto: '0.00', tracking: 'D-2' });
-    expect((await e.entrega('D-3'))?.datosEnvio).toEqual({ empresaCodigo: 'T01', empresaNombre: 'Tienda Prueba', metodoPago: 'Contraentrega', monto: '50.00', tracking: 'D-3' });
+    expect((await e.entrega('D-2'))?.datosEnvio).toEqual({ empresaCodigo: '231', empresaNombre: 'Moda Gamarra', metodoPago: 'Pagado' });
+    expect((await e.entrega('D-3'))?.datosEnvio).toBeNull();
     // La API los devuelve al consultar el pedido.
     const uno = await e.api.get<{ entrega: Record<string, unknown> }>('/api/v1/entregas/D-1');
     expect(uno.body.entrega).toMatchObject({ producto: 'Zapatillas talla 40', empresa: { codigo: '516', nombre: 'Zapatería Lima', texto: '516 - Zapatería Lima' }, monto: '85.00', remitente: 'Juan Quispe' });
   });
 
   it('PATCH cambia los datos del envío (y queda en la bitácora); repetir el POST con datos nuevos también los refleja', async () => {
-    const r = await e.app.inject({ method: 'PATCH', url: '/api/v1/entregas/D-1', headers: { 'x-api-key': CLAVE_API_PRUEBA }, payload: { monto: '95.50', metodoPago: 'Efectivo' } });
+    const r = await e.app.inject({ method: 'PATCH', url: '/api/v1/entregas/D-1', headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}` }, payload: { monto: '95.50', metodoPago: 'Efectivo' } });
     expect(r.statusCode).toBe(200);
     expect(r.json().cambios.join(' ')).toMatch(/datos del envío/);
     expect((await e.entrega('D-1'))?.datosEnvio).toMatchObject({ monto: '95.50', metodoPago: 'Efectivo', producto: 'Zapatillas talla 40' });
-    const otra = await e.api.post<{ repetidas: string[] }>('/api/v1/entregas', { ...OBLIGATORIOS_GSG, referencia: 'D-3', nombre: 'Sin datos', telefono: '987000303', producto: 'Casaca talla L' });
+    const otra = await e.api.post<{ repetidas: string[] }>('/api/v1/entregas', { referencia: 'D-3', telefono: '987000303', producto: 'Casaca talla L' });
     expect(otra.body.repetidas).toEqual(['D-3']);
-    expect((await e.entrega('D-3'))?.datosEnvio).toMatchObject({ producto: 'Casaca talla L', empresaNombre: 'Tienda Prueba' });
-    const conPin = await e.api.post<{ repetidas: string[] }>('/api/v1/entregas', { referencia: 'D-2', nombre: 'Luis Rojas', telefono: '987000302', lat: -12.1211, lng: -77.0301, empresa: { codigo: '231', nombre: 'Moda Gamarra' }, metodoPago: 'Pagado', monto: 40 });
+    expect((await e.entrega('D-3'))?.datosEnvio).toEqual({ producto: 'Casaca talla L' });
+    const conPin = await e.api.post<{ repetidas: string[] }>('/api/v1/entregas', { referencia: 'D-2', telefono: '987000302', lat: -12.1211, lng: -77.0301, monto: 40 });
     expect(conPin.body.repetidas).toEqual(['D-2']);
     expect((await e.entrega('D-2'))?.datosEnvio).toMatchObject({ monto: '40.00', empresaNombre: 'Moda Gamarra' });
   });
 
   it('por la lista de GSG (sincronización con el simulador), con espejo si GSG los cambia', async () => {
     e.simulador.cargarDePrueba();
-    const s = await e.api.post<{ ok: boolean }>('/admin/entregas/sincronizar');
+    const s = await e.gsgManda();
     expect(s.body.ok).toBe(true);
     expect((await e.entrega('P-1001'))?.datosEnvio).toMatchObject({ producto: 'Zapatillas talla 40', empresaCodigo: '516', tracking: 'GSG-A-102345', monto: '85.00', remitente: 'Juan Quispe' });
     expect((await e.entrega('P-1005'))?.datosEnvio?.remitente).toBeUndefined();
     expect(e.simulador.cambiar('P-1001', { datosEnvio: { producto: 'Zapatillas talla 41' } })).not.toBeNull();
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     expect((await e.entrega('P-1001'))?.datosEnvio).toMatchObject({ producto: 'Zapatillas talla 41', monto: '85.00' });
   });
 });

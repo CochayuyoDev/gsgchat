@@ -4,12 +4,13 @@
  *
  * El flujo, en el orden en que pasa:
  *
- *  1. **Sincronizar con GSG.** Cada pocos minutos se le piden los pendientes
- *     del dia: a quien falta pedirle la UBICACION y a quien falta que
- *     CONFIRME. Son dos listas distintas y un cliente puede estar en las
- *     dos, en una o en ninguna. Los de ubicacion entran en un lote del
- *     reparto (que ya sabe pedirla con ritmo, insistir y reportar); los de
- *     confirmacion los atiende este modulo.
+ *  1. **GSG manda los pedidos.** GSGchat nunca le pide nada a GSG: los
+ *     pedidos llegan cuando GSG los empuja (POST /api/v1/entregas, ver
+ *     src/api/v1/entregas-gsg.ts) o, en pruebas, cuando se cargan en el
+ *     simulador de GSG (`recibirListaGsg`). Cada uno dice si falta pedirle
+ *     la UBICACION, si falta que CONFIRME, o las dos cosas. Los de ubicacion
+ *     entran en un lote del reparto (que ya sabe pedirla con ritmo, insistir
+ *     y reportar); los de confirmacion los atiende este modulo.
  *  2. **La ubicacion llega** (el reparto la resuelve y avisa aqui). Si
  *     ademas falta confirmar, el "gracias" lleva la pregunta pegada.
  *  3. **La confirmacion**: se lee lo que contesta (reglas, y la IA si no
@@ -62,12 +63,12 @@ const mismoMundo = (a: string, b: string): boolean => esNumeroDePrueba(a) === es
 const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 000 1…) y los de verdad solo a motorizados de verdad.';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
-import { despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, RUTA_GSG_PENDIENTES, type PuertoGsg } from '../rutas/gsg.js';
+import { despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, type PuertoGsg } from '../rutas/gsg.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import type { CargaLote, ResultadoCarga } from '../rutas/cargar.js';
 import { revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
 import type { Solicitud } from '../db/rutas.js';
-import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leerEntregado, leerEntregadoConReglas, leerFrasesPropias, leerMotorizadoCorta, leerMotorizadoFueraDeFlujo, leerPreguntaPorPedido, leerTiempo, pideCambioUbicacion, tiempoDudoso, type FrasesPropias, type LectorIA } from './interpretar.js';
+import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leerEntregado, leerEntregadoConReglas, leerFrasesPropias, leerMotorizadoCorta, leerMotorizadoFueraDeFlujo, leerPreguntaPorPedido, leerTiempo, tiempoDudoso, type FrasesPropias, type LectorIA } from './interpretar.js';
 import { randomBytes } from 'node:crypto';
 import type { BoundingBox } from '../types.js';
 import { dentroDe } from '../geo/validate.js';
@@ -94,16 +95,12 @@ import {
   soporteEnPalabras,
   telefonoEnPalabras,
 } from './textos.js';
-import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, EstadoMensaje, EventoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado, ViaMensaje } from './repo.js';
+import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, EventoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado } from './repo.js';
 import { datosEnvioDeCrudo, fusionarDatosEnvio } from './datos-envio.js';
-import { desenlaceDeEnvio, esperaDelReintento, MENSAJE_EN_CURSO, MENSAJE_REINTENTABLE, motivoLegible, REINTENTOS_POR_DEFECTO, vistaMensaje, type Desenlace, type ReintentosMensaje, type VistaMensaje } from './primer-mensaje.js';
-import type { PrimerMensajeReparto } from '../rutas/motor.js';
 import { apartarPorMotorizado, resolverPorUbicacion, soltarSolicitudes, solicitudesAbiertasDe } from './ubicacion-unica.js';
 import { pareceNoSoyYo, TEXTO_NO_SOY_YO } from '../rutas/inbound.js';
 import { distanciaAlDistrito, distritoDePedido, distritoEnDireccion } from './distritos-centro.js';
-import { limpiarDireccion, analizarNumeracion } from './direccion-escrita.js';
-import { crearConsultaSeguimiento, textoSeguimiento, textoHorario, type CalcularRuta } from './seguimiento-gsg.js';
-import type { Lote } from '../db/rutas.js';
+import { limpiarDireccion } from './direccion-escrita.js';
 import type { Geocodificador, ResultadoGeo } from './geocodificar.js';
 import { calcularAlertas, type AlertaHoy } from './alertas-hoy.js';
 
@@ -119,12 +116,9 @@ const KM_CERCA = 6;
 /** Pasada la hora avisada mas esto, un "no llegó" del cliente pasa a una persona. */
 const MINUTOS_TOLERANCIA_LLEGADA = 30;
 
-/** Lo que GSG manda en cada lista de pendientes. */
+/** Un pedido tal como lo manda GSG (o el simulador). */
 export interface ClienteGsg {
-  /** El numero de pedido en GSG. Si no viene, se usa `tracking`. */
-  referencia?: string | null;
-  /** El codigo de tracking de GSG: con el WhatsApp, identifica el pedido. */
-  tracking?: string | null;
+  referencia: string;
   telefono: string;
   nombre?: string | null;
   direccion?: string | null;
@@ -145,6 +139,7 @@ export interface ClienteGsg {
   telefonoMotorizado?: string | null;
 }
 
+/** La lista del dia del simulador de GSG, con sus apartados. Ver recibirListaGsg. */
 export interface PendientesGsg {
   faltaUbicacion?: ClienteGsg[];
   faltaConfirmacion?: ClienteGsg[];
@@ -280,9 +275,6 @@ export interface ResultadoCierre {
   quien: string;
 }
 
-/** Cuantos pedidos de un dia se leen de una vez (Hoy, confirmar el envio, la revision de mensajes). */
-export const TOPE_DEL_DIA = 20_000;
-
 export interface FilaPegada {
   telefono: string;
   nombre?: string;
@@ -295,24 +287,7 @@ export interface FilaPegada {
   faltaConfirmacion?: boolean;
   /** Lo que GSG cuenta del envio (producto, empresa, codigo, monto...), si viene. */
   datosEnvio?: DatosEnvio | null;
-  /** El id del pedido en el sistema de GSG, si lo manda (se guarda en externo_id). */
-  externoId?: string | null;
 }
-
-/** Un renglón de la bandeja de errores de mensajes. */
-export interface ItemBandejaMensajes {
-  id: number;
-  referencia: string;
-  dia: string;
-  nombre: string | null;
-  telefono: string;
-  estadoPedido: EstadoEntrega;
-  mensaje: VistaMensaje;
-}
-
-export type ResultadoReintentoMensaje =
-  | { ok: true; entrega: Entrega; mensaje: VistaMensaje }
-  | { ok: false; status: 404 | 409; codigo: 'NO_EXISTE' | 'CONFLICTO' | 'MENSAJE_EN_CURSO' | 'MENSAJE_YA_ENVIADO' | 'RESULTADO_INCIERTO' | 'ESPERA_CONFIRMACION'; motivo: string };
 
 export interface ResultadoCargaVarias {
   creadas: Entrega[];
@@ -442,8 +417,6 @@ export interface RespuestaDireccionEscrita {
 }
 
 export interface ServicioEntregas {
-  vincularPropuesta(entrega: Entrega, wamid: string): Promise<void>;
-  estadoSeguimiento(): ReturnType<ReturnType<typeof crearConsultaSeguimiento>['estado']>;
   /** El reloj del servicio (en produccion, la hora real): el agente lo usa para que sus fechas cuadren con las del reparto. */
   ahora?(): Date;
   ajustes(): AjustesEntregas;
@@ -452,8 +425,13 @@ export interface ServicioEntregas {
   /** El dia del reparto de hoy, AAAA-MM-DD en el reloj del negocio. */
   hoy(): string;
 
-  /** Le pide a GSG los pendientes y los mete en el sistema. */
-  sincronizar(): Promise<ResultadoSincronizacion>;
+  /**
+   * Mete en el sistema una lista del dia ya recibida (la del simulador de
+   * GSG): crea lo nuevo, refleja lo cambiado, cancela lo cancelado y marca lo
+   * terminado. No llama a nadie: GSGchat nunca le pide nada a GSG. Los
+   * pedidos de verdad entran por POST /api/v1/entregas.
+   */
+  recibirListaGsg(cuerpo: PendientesGsg): Promise<ResultadoSincronizacion>;
   ultimaSincronizacion(): ResultadoSincronizacion | null;
   /** Mira las que el reparto dio por perdidas (sin WhatsApp, numero mal...) y las marca aqui. */
   revisarReparto(): Promise<number>;
@@ -471,13 +449,12 @@ export interface ServicioEntregas {
   revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas>;
   /** Si ese cliente tiene un pin lejano esperando su SÍ o su NO. */
   pinLejosPendiente(phone: string): Promise<boolean>;
-  /** Mandó su ubicación en tiempo real: el texto que le pide la actual. null = no se le estaba pidiendo ubicación. */
-  alUbicacionEnVivo(phone: string): Promise<string | null>;
   /** Su respuesta a «¿es ahí donde recibes tu pedido?». null = no tenía nada por confirmar. */
-  responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string, boton?: string, citaId?: string | null): Promise<RespuestaPinLejos | null>;
+  responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string): Promise<RespuestaPinLejos | null>;
   /**
-   * Escribió su dirección: se valida y se propone el punto del mapa. Solo se
-   * registra tras confirmar SÍ. null = no hay un pedido esperando ubicación.
+   * Escribió su dirección en vez del pin: se guarda en el pedido y, si el mapa
+   * gratuito la ubica bien y cae en su distrito, se registra como ubicación
+   * aproximada. null = no tiene ningún pedido esperando la ubicación.
    */
   alDireccionEscrita(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, como: string): Promise<RespuestaDireccionEscrita | null>;
   /**
@@ -495,12 +472,6 @@ export interface ServicioEntregas {
    * ubicación registrada hoy (no es un cambio).
    */
   cambioDeUbicacion(phone: string): Promise<string | null>;
-  /**
-   * Si este telefono tiene alguna entrega en curso (aunque todavia no se le
-   * haya escrito). A un cliente de entrega nunca se le ofrece «Cotizar envío»:
-   * eso es de la preventa del courier para quien NO tiene un paquete en camino.
-   */
-  tieneEntregaEnCurso(phone: string): Promise<boolean>;
   /** Lo que hizo el agente operativo con un cliente queda en la bitácora de sus entregas vivas. */
   anotarAgente(phone: string, detalle: string): Promise<void>;
   /** Si ese teléfono tiene hoy una entrega viva, y si ya mandó su ubicación. */
@@ -512,14 +483,9 @@ export interface ServicioEntregas {
    * lo que toca y se devuelve el texto fijo que se le manda. null = no tiene
    * ningún pedido al que se le haya preguntado.
    */
-  responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string, entregaId?: number | null): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null>;
+  responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null>;
   /** Confirma el envío de lo que llegó de GSG (todo lo que espera, o esos ids): pasa al reparto con el ritmo de siempre. */
   liberarEnvio(ids: number[] | 'todos', quien: string): Promise<ResultadoLiberar>;
-  /**
-   * «Enviar a GSG» de un pedido: manda YA su ubicacion ({tracking, lat, lng})
-   * y dice como fue. Para lo que no salio solo por la razon que sea.
-   */
-  enviarUbicacionAGsg(id: number, quien: string): Promise<{ ok: boolean; estado: 'enviado' | 'pendiente' | 'fallido' | 'sin_ubicacion' | 'no_existe'; error: string | null; cuerpo: Record<string, unknown> | null }>;
   /** Lo que espera confirmar el envío ahora mismo. */
   porConfirmarEnvio(): Promise<PorConfirmarEnvio>;
   /** El cliente o un motorizado escribio algo (o pulso un boton: `boton` trae su id). */
@@ -572,12 +538,6 @@ export interface ServicioEntregas {
   /** Si el cliente pregunta por su pedido o la hora: el texto fijo con la hora estimada (null = no es esa pregunta). */
   /** orzar: la IA ya dijo que pregunta por su pedido o la hora (no hace falta que lo reconozcan las reglas). */
   respuestaPorPedido(phone: string, texto: string, opts?: { forzar?: boolean }): Promise<string | null>;
-  /**
-   * Varios pedidos en curso y el mensaje no nombra ninguno: no se puede saber
-   * de cuál habla, y no se asume (pedido del dueño, 06/10). Devuelve sus
-   * referencias; null = uno solo, ninguno, o nombró el suyo.
-   */
-  pedidoIndistinguible(phone: string, texto: string): Promise<string[] | null>;
   /**
    * Excepción al silencio tras UBI (pedido del dueño, 28/09): el cliente
    * pregunta cuándo llega / dónde está su pedido. `responder` = el texto fijo
@@ -652,7 +612,7 @@ export interface ServicioEntregas {
   pausarMensajes(id: number, pausar: boolean, quien: string): Promise<ResultadoNumero>;
   /** Un pedido metido a mano (sin GSG). */
   /** Un pedido a mano. Sin `referencia`, el sistema la inventa (M-HHMM-N) para que la pantalla solo pida nombre, telefono y direccion. */
-  crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; datosEnvio?: DatosEnvio | null; retener?: boolean; externoId?: string | null }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }>;
+  crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; datosEnvio?: DatosEnvio | null; retener?: boolean }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }>;
 
   // --- motorizados
   motorizados(): Promise<Motorizado[]>;
@@ -681,18 +641,6 @@ export interface ServicioEntregas {
   telefonosTerminadosHoy(): Promise<Array<{ phone: string; referencia: string }>>;
   /** Cuanto queda hasta el proximo envio del motor (lo pone el motor). */
   conectarMotor(m: { proximoEnvioEn(): number; parado(): string | null; enHorario(): boolean }): void;
-
-  // --- el primer mensaje de cada pedido (ver src/entregas/primer-mensaje.ts)
-  /** Lo que el motor del reparto avisa antes y después del primer mensaje de una solicitud de un pedido. */
-  primerMensajeReparto: PrimerMensajeReparto;
-  /** La red de seguridad: inciertos tras un corte, disparos pendientes, encolados al día. La llama el motor. */
-  revisarMensajes(): Promise<{ inciertos: number; disparados: number; puestosAlDia: number }>;
-  /** El dia de hoy en la zona de la tienda (AAAA-MM-DD): el que usa Hoy. */
-  diaDeHoy(): string;
-  /** La bandeja de errores de mensajes de esta tienda. */
-  bandejaMensajes(): Promise<ItemBandejaMensajes[]>;
-  /** «Reintentar mensaje»: el mismo disparador sobre el pedido existente. */
-  reintentarMensaje(id: number, quien: string, opts?: { confirmarIncierto?: boolean }): Promise<ResultadoReintentoMensaje>;
 }
 
 export interface DepsEntregas {
@@ -748,7 +696,6 @@ export interface DepsEntregas {
    * le pide el pin al cliente, como si el mapa no la encontrara.
    */
   geocodificador?: Geocodificador | null;
-  calcularRuta?: CalcularRuta;
   ahora?: () => Date;
   log?: (m: string, d?: Record<string, unknown>) => void;
 }
@@ -811,15 +758,66 @@ export function enlaceMapa(lat: number, lng: number): string {
  * UBI): el aviso de llegada y el «cerca» NO le salen al cliente, y la ficha no
  * puede decir que se le avisó (28/09).
  */
-export function situacionDe(e: Entrega, _motorizado: Motorizado | null, _ajustes: AjustesEntregas, _timezone: string, _silencio = false): string {
-  if (e.estado === 'cancelada') return 'Pedido cancelado.';
-  if (e.estado === 'entregada') return 'Pedido entregado.';
-  if (e.estado === 'terminada') return 'Trámite completado.';
-  if (e.envioRetenidoAt) return 'Espera que confirmes el envío.';
-  if (e.requiereHumano || e.estado === 'incidencia') return 'Necesita atención: ' + (e.incidenciaDetalle || e.incidencia || 'revisar el pedido') + '.';
-  if (e.ubicacionEstado === 'pendiente') return 'Esperando la ubicación del cliente.';
-  if (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') return 'Ubicación registrada; falta confirmar con el cliente.';
-  return 'Ubicación y confirmación registradas.';
+export function situacionDe(e: Entrega, motorizado: Motorizado | null, ajustes: AjustesEntregas, timezone: string, silencio = false): string {
+  if (e.envioRetenidoAt && !['cancelada', 'terminada', 'entregada'].includes(e.estado)) {
+    return grupoDe(e) === 'confirmar'
+      ? 'Por confirmar el envío: todavía no se le escribe. Al confirmar se le pregunta SÍ o NO (GSG ya tiene su dirección).'
+      : 'Por confirmar el envío: todavía no se le escribe. Al confirmar se le pide la ubicación.';
+  }
+  // Mandó un pin lejos de su distrito: se le preguntó si es ahí.
+  if (e.pinPropuestoAt && e.ubicacionEstado === 'pendiente' && !['cancelada', 'terminada', 'entregada', 'incidencia'].includes(e.estado)) {
+    return `Mandó un pin que queda lejos de ${distritoDePedido(e) ?? 'su distrito'} (${horaEnReloj(e.pinPropuestoAt, timezone)}): se le preguntó si es ahí donde recibe su pedido y se espera su SÍ o su NO.`;
+  }
+  if (e.direccionCliente && e.ubicacionEstado === 'pendiente' && (e.estado === 'esperando_ubicacion' || e.estado === 'pendiente')) {
+    return `Escribió su dirección («${e.direccionCliente}») pero no se pudo ubicar con seguridad: se le pidió el pin para llegar exacto.`;
+  }
+  switch (e.estado) {
+    case 'pendiente':
+      return 'Recién llegada de GSG: todavía no se le ha escrito.';
+    case 'esperando_ubicacion':
+      if (e.ubicacionPropuestaAt && e.ubicacionPropuestaLat != null) return `Se le propuso la dirección de la última vez (${horaEnReloj(e.ubicacionPropuestaAt, timezone)}); se espera que diga si es la misma o mande otro pin.`;
+      if (e.ubicacionPropuestaLat != null && !e.loteId) return 'Ya mandó su ubicación otro día: se le va a proponer esa dirección en cuanto toque.';
+      if (e.ubicacionPropuestaAt && !e.loteId) return 'Dijo que hoy es otra dirección: se espera su pin.';
+      return e.confirmacionEstado === 'pendiente' ? 'El reparto le está pidiendo la ubicación; después se le pedirá confirmar.' : 'El reparto le está pidiendo la ubicación.';
+    case 'esperando_confirmacion':
+      if (e.confirmacionEstado === 'pedida') return `Se le pidió confirmar (${e.confirmacionIntentos} de ${ajustes.confirmacionMaxIntentos}); se espera su SÍ o NO.`;
+      return 'Ubicación lista; falta pedirle que confirme.';
+    case 'lista':
+      return motorizado ? `Ubicación y confirmación listas: reservada para ${firmaMotorizado(motorizado)}, se le manda en cuanto toque.` : 'Ubicación y confirmación listas: se le va a mandar a un motorizado.';
+    case 'esperando_motorizado':
+      if (motorizado && e.ubicacionEstado === 'pendiente' && e.motorizadoSinUbicacionAt && e.motorizadoEstado === 'enviado') return `Esperando ubicación · con motorizado: ${firmaMotorizado(motorizado)} tiene el pedido SIN ubicación (coordina con el cliente por teléfono); se espera que diga en cuánto entrega (aviso ${e.motorizadoIntentos} de ${ajustes.motorizadoMaxIntentos}).`;
+      if (motorizado && e.motorizadoEstado === 'respondio' && !e.avisoEnviadoAt) return `${firmaMotorizado(motorizado)} dijo ${e.minutosMotorizado != null ? minutosEnPalabras(e.minutosMotorizado) : '?'}; el aviso de llegada al cliente sale en cuanto el ritmo del número lo permita.`;
+      return motorizado ? `${e.segundaVisita ? 'Segunda visita: ' : ''}${firmaMotorizado(motorizado)} tiene el pin; se espera que diga en cuánto entrega (aviso ${e.motorizadoIntentos} de ${ajustes.motorizadoMaxIntentos}).` : 'Esperando motorizado.';
+    case 'avisada':
+      if (silencio) return `${e.segundaVisita ? 'Segunda visita: ' : ''}${firmaMotorizado(motorizado) || 'El motorizado'} dijo ${e.minutosMotorizado != null ? minutosEnPalabras(e.minutosMotorizado) : '?'}: llega hacia las ${e.llegaAproxAt ? horaEnReloj(e.llegaAproxAt, timezone) : '?'}. Al cliente NO se le escribió (silencio tras ubicación registrada): se le dice la hora si la pregunta${e.terminadaGsgAt ? '' : ' (GSG aún no la marcó terminada)'}${e.cercaAvisadoAt ? `; a las ${horaEnReloj(e.cercaAvisadoAt, timezone)} el motorizado dijo que ya está cerca` : ''}. Falta que el motorizado diga "entregado".`;
+      return `${e.segundaVisita ? 'Segunda visita: ' : ''}${firmaMotorizado(motorizado) || 'El motorizado'} dijo ${e.minutosMotorizado != null ? minutosEnPalabras(e.minutosMotorizado) : '?'}; al cliente se le avisó que llega hacia las ${e.llegaAproxAt ? horaEnReloj(e.llegaAproxAt, timezone) : '?'}${e.terminadaGsgAt ? '' : ' (GSG aún no la marcó terminada)'}${e.cercaAvisadoAt ? `; a las ${horaEnReloj(e.cercaAvisadoAt, timezone)} se le avisó que ya está cerca` : ''}. Falta que el motorizado diga "entregado".`;
+    case 'entregada': {
+      const hora = e.entregadaAt ? horaEnReloj(e.entregadaAt, timezone) : '?';
+      const quien = firmaMotorizado(motorizado) || 'el motorizado';
+      switch (e.entregadaComo) {
+        case 'foto':
+          return `Entregada a las ${hora}: ${quien} mandó la foto.`;
+        case 'persona':
+          return `Entregada a las ${hora}: la marcó una persona desde el panel.`;
+        case 'cierre':
+          return `Se dio por entregada al cerrar el día (${quien} avisó la hora pero nadie escribió "entregado").`;
+        default:
+          return `Entregada a las ${hora} por ${quien}.`;
+      }
+    }
+    case 'terminada':
+      return `Terminada: llega hacia las ${e.llegaAproxAt ? horaEnReloj(e.llegaAproxAt, timezone) : '?'} con ${firmaMotorizado(motorizado) || 'el motorizado'}.`;
+    case 'cancelada':
+      return `Cancelada: ${e.incidenciaDetalle ?? 'el cliente no la quiso'}.`;
+    case 'incidencia':
+      if (e.segundaVisitaPedidaAt && !e.requiereHumano) {
+        if (e.motorizadoProximoAt) return 'El motorizado pasó y no había nadie; se le va a preguntar al cliente si volvemos hoy en cuanto el ritmo del número lo permita.';
+        return `El motorizado pasó y no había nadie; se le preguntó al cliente si volvemos hoy (se espera su respuesta hasta las ${e.segundaVisitaVenceAt ? horaEnReloj(e.segundaVisitaVenceAt, timezone) : '?'}).`;
+      }
+      return `Necesita una persona: ${e.incidenciaDetalle ?? e.incidencia ?? 'incidencia'}.`;
+    default:
+      return e.estado;
+  }
 }
 
 function accionesDe(e: Entrega): string[] {
@@ -828,10 +826,13 @@ function accionesDe(e: Entrega): string[] {
   if (e.envioRetenidoAt) acciones.push('confirmar_envio');
   if (e.ubicacionEstado === 'pendiente') acciones.push('poner_ubicacion');
   if (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') acciones.push('confirmar', 'no_confirmar');
+  if (['lista', 'esperando_motorizado', 'avisada'].includes(e.estado)) acciones.push('reasignar');
   // «Asignar motorizado sin ubicación»: espera la ubicación y todavía no lo lleva nadie.
+  if (e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt && !(e.motorizadoId && (e.motorizadoEstado === 'enviado' || e.motorizadoEstado === 'respondio'))) acciones.push('sin_ubicacion');
   if (e.estado === 'avisada' || (e.estado === 'esperando_motorizado' && e.motorizadoEstado === 'respondio') || (e.estado === 'incidencia' && e.motorizadoId && ['no_entregado', 'no_llego', 'aviso_no_enviado'].includes(e.incidencia ?? ''))) acciones.push('marcar_entregada');
   if (e.estado === 'incidencia') acciones.push('reintentar');
   // La segunda visita a mano: cuando el motorizado no pudo entregar y todavia no se hizo una.
+  if (e.estado === 'incidencia' && ['no_entregado', 'no_llego', 'reprogramar'].includes(e.incidencia ?? '') && !e.segundaVisita) acciones.push('segunda_visita');
   acciones.push('prioridad');
   acciones.push('cancelar');
   return acciones;
@@ -868,7 +869,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   const avisosCanceladoEnCamino = new Set<string>();
   const log = deps.log ?? (() => undefined);
   const ahora = deps.ahora ?? (() => new Date());
-  const seguimientoGsg = crearConsultaSeguimiento(deps.gsg, deps.calcularRuta, ahora);
   const zonaBase = deps.timezone ?? 'America/Lima';
   /** La zona horaria de cada momento: la de Ajustes si la hay, si no la de arranque. */
   const tz = (): string => (deps.zonaHoraria ? deps.zonaHoraria() || zonaBase : zonaBase);
@@ -885,7 +885,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   const sinOtroAvisados = new Set<string>();
 
   async function recargar(): Promise<void> {
-    seguimientoGsg.invalidar();
     ajustes = AJUSTES_ENTREGAS_POR_DEFECTO;
     ultimoCierre = null;
     for (const row of await deps.settingsRepo.getAll()) {
@@ -942,7 +941,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const t = (x?: string | null): string => (x ? telefonoEnPalabras(x) : '');
     // Nunca el número del propio WhatsApp: el cliente lo leería como el del
     // motorizado. Sin motorizado ni soporte, vacío (la frase se quita).
-    return t(ajustes.soporte.whatsapp) || t(ajustes.soporte.llamadas) || '';
+    return t(m?.phone) || t(e?.datosEnvio?.telefonoMotorizado) || t(ajustes.soporte.whatsapp) || t(ajustes.soporte.llamadas) || '';
   }
 
   const contexto = (e: Entrega, m?: Motorizado | null): ContextoTexto => ({
@@ -965,9 +964,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     horaEntregada: e.entregadaAt ? horaEnReloj(e.entregadaAt, tz()) : null,
     situacion: situacionDe(e, m ?? null, ajustes, tz(), reglaGsgActiva()),
     urgente: e.prioridad === 'urgente',
-    desde: horaEnPalabras(e.datosEnvio?.horarioEntregaDesde || ajustes.horarioEntregas.desde) + (e.datosEnvio?.horarioEntregaFechaDesde ? ` del ${e.datosEnvio.horarioEntregaFechaDesde}` : ""),
-    hasta: horaEnPalabras(e.datosEnvio?.horarioEntregaHasta || ajustes.horarioEntregas.hasta) + (e.datosEnvio?.horarioEntregaFechaHasta ? ` del ${e.datosEnvio.horarioEntregaFechaHasta} (${e.datosEnvio.horarioEntregaZonaHoraria})` : ""),
-    hastaExtendido: horaEnPalabras(e.datosEnvio?.horarioEntregaHasta || ajustes.horarioEntregas.extendidoHasta),
+    desde: horaEnPalabras(ajustes.horarioEntregas.desde),
+    hasta: horaEnPalabras(ajustes.horarioEntregas.hasta),
+    hastaExtendido: horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
     soporte: soporteEnPalabras(ajustes.soporte),
     telefonoMotorizado: numeroParaCliente(e, m),
     telefonoCliente: telefonoEnPalabras(e.phone),
@@ -1026,7 +1025,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
   }
 
-  const motorizadoDe = async (_e: Entrega): Promise<Motorizado | null> => null;
+  const motorizadoDe = async (e: Entrega): Promise<Motorizado | null> => (e.motorizadoId ? await repo.motorizado(e.motorizadoId) : null);
 
   async function evento(e: Entrega | number, tipo: Parameters<EntregasRepo['registrarEvento']>[1], detalle?: string | null, payload?: Record<string, unknown> | null): Promise<void> {
     await repo.registrarEvento(typeof e === 'number' ? e : e.id, tipo, detalle ?? null, payload ?? null, ahora());
@@ -1036,9 +1035,12 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   function estadoQueToca(e: Entrega): EstadoEntrega {
     if (e.estado === 'terminada' || e.estado === 'cancelada' || e.estado === 'incidencia' || e.estado === 'entregada') return e.estado;
     // Con motorizado sin ubicación (el cierre le dio su número): sigue el camino del motorizado.
-    if (e.ubicacionEstado === 'pendiente') return 'esperando_ubicacion';
+    if (e.ubicacionEstado === 'pendiente' && !e.motorizadoSinUbicacionAt) return 'esperando_ubicacion';
     if (e.confirmacionEstado === 'rechazada') return 'cancelada';
     if (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') return 'esperando_confirmacion';
+    if (e.motorizadoEstado === 'sin_asignar') return 'lista';
+    if (e.motorizadoEstado === 'enviado') return 'esperando_motorizado';
+    if (e.motorizadoEstado === 'respondio') return e.avisoEnviadoAt ? (e.terminadaGsgAt ? 'terminada' : 'avisada') : 'esperando_motorizado';
     return 'lista';
   }
 
@@ -1169,7 +1171,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     });
 
   async function reportar(e: Entrega, tipo: 'confirmacion' | 'entrega' | 'ubicacion', payload: Record<string, unknown>): Promise<void> {
-    await repos.rutas.encolarReporte({ solicitudId: null, loteId: e.loteId ?? null, tipo, payload: { ...payload, tracking: e.datosEnvio?.tracking ?? e.referencia } });
+    await repos.rutas.encolarReporte({ solicitudId: null, loteId: e.loteId ?? null, tipo, payload });
     await evento(e, 'reporte', `encolado para GSG: ${tipo}`);
     // La ubicacion sale YA, como en el reparto (rutas/inbound.ts): con el pin
     // confirmado a mano o por el SI del pin lejano esperaba a la pasada de
@@ -1179,34 +1181,23 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
   }
 
-  // ---------------------------------------------------------- sincronizar
+  // ------------------------------------------------- la lista recibida
 
   function leerCliente(c: ClienteGsg): { ok: true; phone: string; referencia: string } | { ok: false; motivo: string } {
-    // La llave del pedido es su WhatsApp + su código de tracking: si GSG no
-    // manda `referencia`, el tracking hace de referencia.
-    const referencia = String(c.referencia ?? c.tracking ?? '').trim();
-    if (!referencia) return { ok: false, motivo: 'sin referencia ni código de tracking' };
+    const referencia = String(c.referencia ?? '').trim();
+    if (!referencia) return { ok: false, motivo: 'sin referencia' };
     const revision = revisarTelefono(String(c.telefono ?? ''), plan);
     if (!revision.ok) return { ok: false, motivo: `teléfono inválido: ${revision.detalle}` };
     return { ok: true, phone: revision.phone, referencia };
   }
 
-  async function sincronizar(): Promise<ResultadoSincronizacion> {
-    seguimientoGsg.invalidar();
+  async function recibirListaGsg(recibido: PendientesGsg): Promise<ResultadoSincronizacion> {
     const dia = hoy();
     const at = ahora().toISOString();
     const base: ResultadoSincronizacion = { ok: false, detalle: '', dia, nuevas: 0, actualizadas: 0, ubicacionesPedidas: 0, confirmacionesPendientes: 0, terminadas: 0, lote: null, at };
-    if (!deps.gsg.conectado()) {
-      ultimaSync = { ...base, detalle: 'GSG no está conectado: configura la API real en Conexión.' };
-      return ultimaSync;
-    }
-    const r = await deps.gsg.consultar<PendientesGsg>(RUTA_GSG_PENDIENTES);
-    if (!r.ok || !r.cuerpo) {
-      ultimaSync = { ...base, detalle: `GSG no respondió: ${r.error ?? 'sin cuerpo'}` };
-      log('no se pudieron traer los pendientes de GSG', { detalle: r.error });
-      return ultimaSync;
-    }
-    const cuerpo = r.cuerpo;
+    const cuerpo: PendientesGsg = recibido && typeof recibido === 'object' ? recibido : {};
+    // Lo que no se puede usar queda apuntado (Conexión → GSG y la campana).
+    await deps.conexionGsg?.extras.observarPendientes(cuerpo).catch((error) => log('no se pudieron apuntar los descartes de GSG', { detalle: String(error) }));
     const diaGsg = typeof cuerpo.dia === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cuerpo.dia) ? cuerpo.dia : dia;
     const resultado: ResultadoSincronizacion = { ...base, ok: true, dia: diaGsg };
 
@@ -1219,7 +1210,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (c.cancelado === true) return null;
       const lectura = leerCliente(c);
       if (!lectura.ok) {
-        log('GSG mandó un cliente que no se puede usar', { referencia: c.referencia ?? c.tracking, motivo: lectura.motivo });
+        log('GSG mandó un cliente que no se puede usar', { referencia: c.referencia, motivo: lectura.motivo });
         return null;
       }
       const conPin = typeof c.lat === 'number' && typeof c.lng === 'number' && Number.isFinite(c.lat) && Number.isFinite(c.lng);
@@ -1338,9 +1329,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // (`cancelado: true`). Solo referencias explicitas: una lista vacia o un
     // pedido que simplemente ya no viene NO cancela nada.
     const canceladasGsg = new Map<string, string>();
-    for (const c of [...(cuerpo.faltaUbicacion ?? []), ...(cuerpo.faltaConfirmacion ?? [])]) if (c.cancelado === true) canceladasGsg.set(String(c.referencia ?? c.tracking ?? '').trim(), String(c.motivoCancelacion ?? '').trim());
+    for (const c of [...(cuerpo.faltaUbicacion ?? []), ...(cuerpo.faltaConfirmacion ?? [])]) if (c.cancelado === true) canceladasGsg.set(String(c.referencia ?? '').trim(), String(c.motivoCancelacion ?? '').trim());
     for (const t of Array.isArray(cuerpo.cancelados) ? cuerpo.cancelados : []) {
-      const ref = typeof t === 'string' ? t : String(t.referencia ?? (t as ClienteGsg).tracking ?? '');
+      const ref = typeof t === 'string' ? t : String(t.referencia ?? '');
       const motivo = typeof t === 'string' ? '' : String(t.motivoCancelacion ?? t.motivo ?? '').trim();
       if (ref.trim()) canceladasGsg.set(ref.trim(), motivo || canceladasGsg.get(ref.trim()) || '');
     }
@@ -1365,7 +1356,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
     // Las que necesitan ubicacion y todavia no estan en un lote del reparto
     // (lo que espera confirmar el envio, no: sale al confirmarlo).
-    const encaminado = await encaminarUbicaciones([...tocadas.values()], `Entregas GSG ${diaGsg} · ${horaEnReloj(ahora(), tz())}`, 'gsg', `gsg-entregas:${diaGsg}:${Date.now()}`, 'Cargado por la sincronización con GSG (Entregas del día).');
+    const encaminado = await encaminarUbicaciones([...tocadas.values()], `Entregas GSG ${diaGsg} · ${horaEnReloj(ahora(), tz())}`, 'gsg', `gsg-entregas:${diaGsg}:${Date.now()}`, 'Cargado de la lista de GSG (Entregas del día).');
     for (const act of encaminado.entregas) tocadas.set(act.id, act);
     resultado.lote = encaminado.lote;
     resultado.ubicacionesPedidas += encaminado.pedidas;
@@ -1393,7 +1384,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (fresca) await recalcular(fresca);
     }
 
-    resultado.detalle += `GSG respondió: ${resultado.nuevas} nuevas, ${resultado.actualizadas} actualizadas, ${resultado.ubicacionesPedidas} al reparto para pedir ubicación, ${resultado.confirmacionesPendientes} por pedir confirmación ya, ${resultado.terminadas} terminadas${resultado.retenidas ? `, ${resultado.retenidas} esperan que confirmes el envío en Números del día` : ''}${resultado.canceladas ? `, ${resultado.canceladas} canceladas por GSG` : ''}${resultado.cambiadas ? `, ${resultado.cambiadas} con datos cambiados por GSG` : ''}.`;
+    resultado.detalle += `Lista recibida: ${resultado.nuevas} nuevas, ${resultado.actualizadas} actualizadas, ${resultado.ubicacionesPedidas} al reparto para pedir ubicación, ${resultado.confirmacionesPendientes} por pedir confirmación ya, ${resultado.terminadas} terminadas${resultado.retenidas ? `, ${resultado.retenidas} esperan que confirmes el envío en Números del día` : ''}${resultado.canceladas ? `, ${resultado.canceladas} canceladas por GSG` : ''}${resultado.cambiadas ? `, ${resultado.cambiadas} con datos cambiados por GSG` : ''}.`;
     ultimaSync = resultado;
     return resultado;
   }
@@ -1424,7 +1415,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         continue;
       }
       // Ya se le propuso su direccion (o esta por proponerse): no se repite
-      // en cada sincronizacion; si no contesta, revisarPropuestas la pasa al reparto.
+      // en cada lista que llega; si no contesta, revisarPropuestas la pasa al reparto.
       if (e.ubicacionPropuestaAt || e.ubicacionPropuestaLat != null) continue;
       // Cliente recurrente: ya nos mando su ubicacion hace poco. En vez de
       // pedirle el pin se le propone esa direccion; el motor le pregunta.
@@ -1457,7 +1448,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   /** Lo que espera confirmar el envio hoy (y si ya se confirmo otra tanda). */
   async function porConfirmarEnvio(): Promise<PorConfirmarEnvio> {
-    const deHoy = await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA });
+    const deHoy = await repo.listar({ dia: hoy(), limit: 2000 });
     const esperan = deHoy.filter((e) => e.envioRetenidoAt && !ESTADOS_FINALES.includes(e.estado));
     const confirmar = esperan.filter((e) => grupoDe(e) === 'confirmar').length;
     const ubicacion = esperan.length - confirmar;
@@ -1471,7 +1462,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * motor de entregas pregunta SÍ/NO a los de «falta confirmar»).
    */
   async function liberarEnvio(ids: number[] | 'todos', quien: string): Promise<ResultadoLiberar> {
-    const deHoy = await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA });
+    const deHoy = await repo.listar({ dia: hoy(), limit: 2000 });
     const lista = ids === 'todos' ? deHoy.filter((e) => e.envioRetenidoAt) : ((await Promise.all([...new Set(ids)].map((id) => repo.entrega(id)))).filter(Boolean) as Entrega[]);
     const en = ahora();
     const liberadas: Entrega[] = [];
@@ -1481,13 +1472,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         saltadas++;
         continue;
       }
-      // Condicional: dos «Confirmar y enviar» a la vez liberan una sola vez (un solo mensaje).
-      const liberada = await repo.liberarRetenida(e.id, en);
-      if (!liberada) {
-        saltadas++;
-        continue;
-      }
-      const act = (await repo.cambiarMensaje(e.id, ['retenido'], { ...mensajeAlCrear(liberada.ubicacionEstado, liberada.confirmacionEstado, false), mensajeProximoAt: null })) ?? liberada;
+      const act = (await repo.actualizar(e.id, { envioRetenidoAt: null, envioLiberadoAt: en })) ?? e;
       await evento(act, 'nota', `${quien} confirmó el envío: ${grupoDe(act) === 'confirmar' ? 'se le pregunta SÍ o NO' : 'se le pide la ubicación'} con el ritmo de siempre`);
       liberadas.push(act);
     }
@@ -1496,7 +1481,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const porId = new Map(encaminado.entregas.map((x) => [x.id, x]));
     for (const e of liberadas) {
       const fresca = (await repo.entrega(e.id)) ?? porId.get(e.id) ?? e;
-      await recalcular(await asentarDisparo(fresca, encaminado.error));
+      await recalcular(fresca);
     }
     const confirmar = liberadas.filter((e) => grupoDe(e) === 'confirmar').length;
     const ubicacion = liberadas.length - confirmar;
@@ -1706,13 +1691,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // Un pin fuera de la zona que se cubre no se registra: se aparta para
     // una persona y al cliente se le explica (venga por donde venga).
     if (fueraDeZona(ubicacion.lat, ubicacion.lng)) return alUbicacionFueraDeZona(contact, ubicacion);
-    if (!ubicacion.aMano && !ubicacion.yaReportada) {
-      const pendientes = await esperandoUbicacionDe(contact.phone);
-      if (pendientes.length > 1) {
-        for (const e of pendientes) await repo.actualizar(e.id, { pinPropuestoLat: ubicacion.lat, pinPropuestoLng: ubicacion.lng, pinPropuestoAt: ahora(), pinPropuestoFuente: ubicacion.fuente ?? 'pin de whatsapp', pinPropuestoDudas: 0 });
-        return { atendida: true, entrega: (await repo.entrega(pendientes[0]!.id)) ?? pendientes[0]!, resultado: 'seleccionar_pedido', responder: `Recibimos tu ubicación. Tienes varios pedidos: ${pendientes.map(e => e.referencia).join(', ')}. Responde SÍ junto con el código del pedido al que corresponde esta ubicación.` };
-      }
-    }
     // Otro pin después de la hora límite, con la ubicación ya registrada: no
     // se cambia; se le pasa al motorizado y el cliente coordina con él.
     if (!ubicacion.aMano && pasoLaHoraDeCambio()) {
@@ -1734,28 +1712,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   /** Ya pasó la hora límite para cambiar la ubicación (1:00 PM por defecto, en el reloj de la tienda). */
   function pasoLaHoraDeCambio(): boolean {
     return horaEnReloj(ahora(), tz()) >= ajustes.cambioUbicacionHasta;
-  }
-
-  /**
-   * El cliente, con su ubicación ya registrada, pide cambiarla. Antes de la
-   * hora límite: que mande la nueva (el pin siguiente se registra como
-   * «ubicación cambiada»). Después: el número del motorizado para que
-   * coordine con él. null = no tiene ninguna ubicación registrada en curso.
-   */
-  async function pedidoDeCambioDeUbicacion(phone: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean } | null> {
-    const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && x.ubicacionEstado === 'recibida');
-    if (!vivas.length) return null;
-    const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
-    const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
-    if (!pasoLaHoraDeCambio()) {
-      for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
-      return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false };
-    }
-    const g = vivas.find((x) => x.datosEnvio?.telefonoMotorizado) ?? e;
-    const m = await motorizadoDe(g).catch(() => null);
-    const numero = numeroDeGsg(g, m);
-    for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
-    return { texto: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero }), entrega: g, tarde: true };
   }
 
   /**
@@ -1791,7 +1747,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return { atendida: true, entrega: e, resultado: 'ubicacion_tardia', responder: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(e, m), telefonoMotorizado: numero }) };
   }
 
-  async function registrarUbicacion(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null; yaReportada?: boolean; aMano?: boolean; entregaId?: number; propuestaAt?: Date }): Promise<RespuestaEntregas> {
+  async function registrarUbicacion(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null; yaReportada?: boolean; aMano?: boolean }): Promise<RespuestaEntregas> {
     // Un cliente puede tener dos pedidos hoy: su pin vale para todos (es la
     // misma direccion), y a GSG se le reporta cada uno. Tambien los de hoy que
     // se apartaron SOLO por no tener la ubicacion (no contesto, contesto otra
@@ -1803,7 +1759,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const apartadas = (await repo.listar({ dia: hoy(), estados: ['incidencia'], q: contact.phone, limit: 50 }).catch(() => [] as Entrega[])).filter(
       (x) => x.phone === contact.phone && x.ubicacionEstado === 'pendiente' && !x.envioRetenidoAt,
     );
-    const todas = [...vivas, ...apartadas.filter((x) => !vivas.some((v) => v.id === x.id))].filter(x => ubicacion.entregaId == null || x.id === ubicacion.entregaId);
+    const todas = [...vivas, ...apartadas.filter((x) => !vivas.some((v) => v.id === x.id))];
     if (!todas.length) return { atendida: false };
     // A quien YA se le estaba pidiendo confirmar y manda su ubicacion, eso
     // vale como su SI: quiere el pedido en esa direccion (regla del dueño,
@@ -1825,13 +1781,14 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       const corrige = e.ubicacionEstado === 'recibida';
       corrigeAlguna = corrigeAlguna || corrige;
       const liberada = e.estado === 'incidencia' && LIBERA_CON_PIN.has(e.incidencia ?? '');
-      const falsa = { id: 0, loteId: e.loteId ?? '', contactId: contact.id, telefonoCrudo: e.phone, phone: e.phone, nombre: e.nombre, referencia: e.referencia, direccion: e.direccion, distrito: e.distrito, estado: 'resuelto', resueltoAt: ahora(), lat: ubicacion.lat, lng: ubicacion.lng, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', mapsUrl } as Solicitud;
-      const debeReportar = !ubicacion.yaReportada || e.id !== primeraQueCambia?.id;
-      const payload = { ...payloadUbicacion(falsa, { id: e.loteId ?? 'entregas', nombre: 'Entregas del día', externoId: null, origen: 'gsg', estado: 'enviando' } as Lote), ...(corrige ? { corregida: true } : {}), tracking: e.datosEnvio?.tracking ?? e.referencia };
-      let act = await repo.registrarUbicacionAtomica(e.id, { ubicacionEstado: 'recibida', lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', ubicacionAt: ahora(), ubicacionPropuestaAt: null, ...(e.pinPropuestoAt ? { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 } : {}), ...(liberada ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) }, debeReportar ? { loteId: e.loteId ?? null, payload } : null, ubicacion.propuestaAt);
-      if (!act) continue;
+      let act = (await repo.actualizar(e.id, { ubicacionEstado: 'recibida', lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', ubicacionAt: ahora(), ubicacionPropuestaAt: null, ...(e.pinPropuestoAt ? { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 } : {}), ...(liberada ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) })) ?? e;
       await evento(act, 'ubicacion', corrige ? `ubicación corregida por el cliente (${ubicacion.fuente ?? 'whatsapp'})` : `ubicación recibida (${ubicacion.fuente ?? 'whatsapp'})${todas.length > 1 ? ` (vale para sus ${todas.length} pedidos de hoy)` : ''}${liberada ? `: ya no necesita a nadie (estaba apartada: ${e.incidenciaDetalle ?? e.incidencia ?? 'sin ubicación'})` : ''}`, { lat: ubicacion.lat, lng: ubicacion.lng });
-      if (debeReportar) await evento(act, 'reporte', 'ubicación y reporte guardados en una transacción');
+      if (!ubicacion.yaReportada || e.id !== primeraQueCambia?.id) {
+        // Sin solicitud del reparto de por medio (o para el segundo pedido del
+        // mismo cliente, que el reparto no conoce), GSG se entera por aqui.
+        const falsa = { id: 0, loteId: act.loteId ?? '', contactId: contact.id, telefonoCrudo: act.phone, phone: act.phone, nombre: act.nombre, referencia: act.referencia, direccion: act.direccion, distrito: act.distrito, notas: act.notas, estado: 'resuelto', intentos: 0, ultimoEnvioAt: null, proximoIntentoAt: null, primeraRespuestaAt: null, resueltoAt: ahora(), lat: ubicacion.lat, lng: ubicacion.lng, precisionM: null, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', mapsUrl, incidencia: null, incidenciaDetalle: null, requiereHumano: false, asignadoA: null, createdAt: ahora(), updatedAt: ahora() } as Solicitud;
+        await reportar(act, 'ubicacion', { ...payloadUbicacion(falsa, { id: act.loteId ?? 'entregas', nombre: 'Entregas del día', externoId: null, origen: 'gsg', estado: 'enviando', notas: null, createdAt: ahora(), updatedAt: ahora() }), ...(corrige ? { corregida: true } : {}) });
+      }
 
       // Lo llevaba un motorizado SIN ubicación: sigue con el mismo, y solo se le
       // dice que GSG ya la tiene (sin coordenadas ni mapa). Si aún no dio sus
@@ -1853,12 +1810,11 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       tocadas.push(await recalcular(act));
     }
 
-    if (!tocadas.length) return { atendida: true, resultado: 'propuesta_obsoleta', responder: 'La ubicación ya fue registrada o la propuesta cambió. Revisa la propuesta vigente antes de confirmar.' };
     // La «única verdad»: desde aqui nadie le vuelve a pedir la ubicacion. Las
     // solicitudes abiertas del reparto de este telefono (de cualquier lote)
     // pasan a resueltas y la lista de envio automatico lo suelta. Vale para el
     // pin, el enlace, el pin con el bot en pausa y la que pone una persona.
-    await resolverPorUbicacion(repos, contact.phone, { lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, fuente: ubicacion.fuente ?? 'whatsapp' }, { ahora: ahora(), motivo: 'registrada en Entregas del día', referencias: tocadas.map(e => e.referencia) }).catch((error) => log('no se pudieron cerrar las solicitudes del reparto de ese número', { detalle: String(error) }));
+    await resolverPorUbicacion(repos, contact.phone, { lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, fuente: ubicacion.fuente ?? 'whatsapp' }, { ahora: ahora(), motivo: 'registrada en Entregas del día' }).catch((error) => log('no se pudieron cerrar las solicitudes del reparto de ese número', { detalle: String(error) }));
 
     // Regla del dueño («Solo lo de GSG»): UBI REGISTRADA y nada más. Ni la
     // pregunta SÍ/NO: la confirmacion ya no hace falta y el pedido sigue solo
@@ -1887,7 +1843,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       const act = tocadas[0]!;
       const m = await motorizadoDe(act).catch(() => null);
-      return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }) };
+      return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: textoDe('ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }) };
     }
 
     // Su ubicacion, cuando ya se le pedia confirmar, cuenta como confirmacion.
@@ -1923,10 +1879,15 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
     const act = tocadas[0]!;
     const m = await motorizadoDe(act).catch(() => null);
-    return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }) };
+    return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: textoDe('ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }) };
   }
 
   // ------------------------------------------- el pin tiene que tener sentido
+
+  const botonesPinLejos = (e: Entrega) => [
+    { id: `entrega:pinsi:${e.id}`, title: 'Sí, es ahí' },
+    { id: `entrega:pinno:${e.id}`, title: 'No' },
+  ];
 
   /** Sus pedidos que esperan la ubicación (lo que espera confirmar el envío no cuenta: aún no se le escribió). */
   async function esperandoUbicacionDe(phone: string): Promise<Entrega[]> {
@@ -1934,14 +1895,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   }
 
   async function revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas> {
-    if (ubicacion.fuente?.startsWith('enlace de mapa')) {
-      const pendientes = await esperandoUbicacionDe(contact.phone);
-      if (pendientes.length && Number.isFinite(ubicacion.lat) && Number.isFinite(ubicacion.lng) && !fueraDeZona(ubicacion.lat, ubicacion.lng)) {
-        for (const e of pendientes) await repo.actualizar(e.id, { pinPropuestoLat: ubicacion.lat, pinPropuestoLng: ubicacion.lng, pinPropuestoAt: ahora(), pinPropuestoFuente: ubicacion.fuente, pinPropuestoDudas: 0 });
-        const e = (await repo.entrega(pendientes[0]!.id)) ?? pendientes[0]!;
-        return { atendida: true, entrega: e, resultado: 'mapa_por_confirmar', responder: `Esta es la ubicación de tu enlace: ${enlaceMapa(ubicacion.lat, ubicacion.lng)}\n¿Sí es donde recibirás el pedido? Responde SÍ o NO, o comparte tu ubicación actual por WhatsApp.` };
-      }
-    }
     if (!reglaGsgActiva()) return { atendida: false };
     const vivas = await esperandoUbicacionDe(contact.phone);
     if (!vivas.length) return { atendida: false };
@@ -1967,57 +1920,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
     const act = (await repo.entrega(e.id)) ?? e;
     log('pin lejos de su distrito: se le pregunta si es ahí', { phone: contact.phone, distrito: d.distrito, km: d.kmCentro });
-    return { atendida: true, entrega: act, resultado: 'pin_lejos', responder: textoDe('pinLejos', ajustes, { ...contexto(act), distrito: d.distrito }) };
+    return { atendida: true, entrega: act, resultado: 'pin_lejos', responder: textoDe('pinLejos', ajustes, { ...contexto(act), distrito: d.distrito }), botones: botonesPinLejos(act) };
   }
 
-  const confirmacionesPinEnCurso = new Map<string, Promise<RespuestaPinLejos | null>>();
-  async function responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string, boton?: string, citaId?: string | null): Promise<RespuestaPinLejos | null> {
-    const anterior = confirmacionesPinEnCurso.get(phone);
-    const trabajo = (async () => {
-      if (anterior) await anterior.catch(() => null);
-      return responderPinLejosSerial(phone, clase, texto, como, boton, citaId);
-    })();
-    confirmacionesPinEnCurso.set(phone, trabajo);
-    try { return await trabajo; }
-    finally { if (confirmacionesPinEnCurso.get(phone) === trabajo) confirmacionesPinEnCurso.delete(phone); }
-  }
-  async function responderPinLejosSerial(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string, boton?: string, citaId?: string | null): Promise<RespuestaPinLejos | null> {
-    let vivas = (await esperandoUbicacionDe(phone)).filter((x) => x.pinPropuestoAt && x.pinPropuestoLat != null && x.pinPropuestoLng != null);
+  async function responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string): Promise<RespuestaPinLejos | null> {
+    const vivas = (await esperandoUbicacionDe(phone)).filter((x) => x.pinPropuestoAt && x.pinPropuestoLat != null && x.pinPropuestoLng != null);
     if (!vivas.length) return null;
-    if (boton) {
-      const revision = /^entrega:pin(?:si|no):(\d+):(\d+)$/.exec(boton);
-      const propuesta = revision && vivas.find(x => x.id === Number(revision[1]) && x.pinPropuestoAt?.getTime() === Number(revision[2]));
-      if (!propuesta) return { tipo: 'repregunta', entrega: vivas[0]!, texto: 'Ese botón pertenece a una ubicación anterior. Revisa la propuesta actual y confirma nuevamente indicando el código del pedido.' };
-      vivas = [propuesta];
-    }
-    if (citaId) {
-      const coincide: Entrega[] = [];
-      for (const x of vivas) {
-        const eventos = await repo.eventos(x.id, 200);
-        if (eventos.some(ev => { const p = ev.payload as { wamid?: string; propuestaAt?: string; lat?: number; lng?: number } | null;
-          return p?.wamid && mismoMensaje(p.wamid, citaId) && p.propuestaAt === x.pinPropuestoAt?.toISOString() && p.lat === x.pinPropuestoLat && p.lng === x.pinPropuestoLng;
-        })) coincide.push(x);
-      }
-      if (coincide.length !== 1) return { tipo: 'repregunta', entrega: vivas[0]!, texto: 'La respuesta cita una propuesta anterior o no identificada. Responde al mensaje de la ubicación vigente o utiliza su botón.' };
-      vivas = coincide;
-    }
-    const mencionadas = (await repo.vivasPorTelefono(phone)).filter(x => posicionDeReferencia(texto, x.referencia) >= 0);
-    if (mencionadas.length && (mencionadas.length !== 1 || !vivas.some(x => x.id === mencionadas[0]!.id))) {
-      return { tipo: 'repregunta', entrega: vivas[0]!, texto: 'Ese pedido no tiene esta propuesta pendiente. Indica el código del pedido cuya ubicación deseas confirmar.' };
-    }
-    if (vivas.length > 1) {
-      const elegidas = vivas.filter(x => posicionDeReferencia(texto, x.referencia) >= 0);
-      if (elegidas.length !== 1) return { tipo: 'repregunta', entrega: vivas[0]!, texto: `Tienes varias ubicaciones pendientes: ${vivas.map(x => x.referencia).join(', ')}. Responde SÍ o NO junto con el código del pedido para confirmar solo ese pedido.` };
-      vivas = elegidas;
-    }
     const e = vivas[0]!;
-    if (!boton && !citaId && clase !== 'otra') {
-      const anteriores = await repo.eventos(e.id, 200);
-      const reemplazada = anteriores.some(ev => { const p = ev.payload as { wamid?: string; propuestaAt?: string; lat?: number; lng?: number } | null;
-        return p?.wamid && p.propuestaAt && (p.propuestaAt !== e.pinPropuestoAt?.toISOString() || p.lat !== e.pinPropuestoLat || p.lng !== e.pinPropuestoLng);
-      });
-      if (reemplazada) return { tipo: 'repregunta', entrega: e, texto: `La ubicación del pedido ${e.referencia} cambió. Confirma esta propuesta: ${enlaceMapa(e.pinPropuestoLat!, e.pinPropuestoLng!)}. Utiliza sus botones o responde citando este mensaje.`, botones: [{ id: `entrega:pinsi:${e.id}:${e.pinPropuestoAt!.getTime()}`, title: 'Sí, esta ubicación' }, { id: `entrega:pinno:${e.id}:${e.pinPropuestoAt!.getTime()}`, title: 'No, corregir' }] };
-    }
     const que = texto ? `«${texto.slice(0, 120)}»` : 'sin texto';
     const distrito = distritoDePedido(e) ?? 'su distrito';
     // Otra cosa, la primera vez: se le vuelve a preguntar (con los botones).
@@ -2025,7 +1934,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoDudas: (x.pinPropuestoDudas ?? 0) + 1 });
       await evento(e, 'nota', `contestó otra cosa a «¿es ahí?» (${que}; ${como}): se le vuelve a preguntar una vez`);
       // Nunca el mismo mensaje dos veces seguidas: se nota que no se le entendió.
-      return { tipo: 'repregunta', texto: `Perdona, no te entendí. ${textoDe('pinLejos', ajustes, { ...contexto(e), distrito })}`, entrega: e };
+      return { tipo: 'repregunta', texto: `Perdona, no te entendí. ${textoDe('pinLejos', ajustes, { ...contexto(e), distrito })}`, botones: botonesPinLejos(e), entrega: e };
     }
     if (clase === 'no') {
       for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 });
@@ -2046,8 +1955,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         tipo: 'repregunta',
         texto: `¿Está todo correcto con la ubicación que nos enviaste, o prefieres empezar de nuevo y mandarla otra vez?`,
         botones: [
-          { id: `entrega:pinsi:${e.id}:${e.pinPropuestoAt!.getTime()}`, title: 'Todo correcto' },
-          { id: `entrega:pinno:${e.id}:${e.pinPropuestoAt!.getTime()}`, title: 'Empezar de nuevo' },
+          { id: `entrega:pinsi:${e.id}`, title: 'Todo correcto' },
+          { id: `entrega:pinno:${e.id}`, title: 'Empezar de nuevo' },
         ],
         entrega: e,
       };
@@ -2061,12 +1970,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       return { tipo: 'persona', texto: '', entrega: (await repo.entrega(e.id)) ?? e };
     }
     // SÍ: se registra como siempre.
-    if (fueraDeZona(e.pinPropuestoLat!, e.pinPropuestoLng!)) {
-      return { tipo: 'repregunta', entrega: e, texto: 'Esta ubicación está fuera de la zona de cobertura. Comparte otra ubicación o solicita ayuda de una persona para revisar el pedido.' };
-    }
     await evento(e, 'nota', `confirmó que es ahí (${que}; ${como}): se registra el pin`);
     const contacto = await repos.contacts.getByPhone(phone).catch(() => null);
-    const r = await registrarUbicacion({ id: contacto?.id ?? '', phone, name: contacto?.name ?? e.nombre }, { lat: e.pinPropuestoLat!, lng: e.pinPropuestoLng!, fuente: e.pinPropuestoFuente ?? 'pin de whatsapp', entregaId: e.id, propuestaAt: e.pinPropuestoAt! });
+    const r = await alUbicacion({ id: contacto?.id ?? '', phone, name: contacto?.name ?? e.nombre }, { lat: e.pinPropuestoLat!, lng: e.pinPropuestoLng!, fuente: e.pinPropuestoFuente ?? 'pin de whatsapp' });
     const act = r.entrega ?? (await repo.entrega(e.id)) ?? e;
     return { tipo: 'registrada', texto: r.responder ?? textoDe('ubicacionRegistrada', ajustes, contexto(act)), entrega: act };
   }
@@ -2080,22 +1986,17 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const direccion = limpiarDireccion(texto);
     if (!direccion) return null;
     const en = ahora();
-    for (const x of vivas) await repo.actualizar(x.id, { direccionCliente: direccion, direccionClienteAt: en, pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 });
+    for (const x of vivas) await repo.actualizar(x.id, { direccionCliente: direccion, direccionClienteAt: en });
     for (const x of vivas) await evento(x, 'nota', `escribió su dirección en vez del pin (${como}): «${direccion}» (no cuenta como insistencia)`);
     const distritoEscrito = distritoEnDireccion(direccion);
     const distritoPedido = distritoDePedido(e);
     const distritoRef = distritoPedido ?? distritoEscrito;
-    const numerada = await analizarNumeracion(direccion, deps.ia?.());
-    if (!numerada || !distritoRef) {
-      const falta = !numerada ? 'el número de puerta (o manzana y lote)' : 'el distrito';
-      return { tipo: 'anotada', texto: `La dirección todavía no es válida para agendar la entrega: falta ${falta}. Por favor, completa la dirección o comparte tu ubicación actual por WhatsApp.`, entrega: (await repo.entrega(e.id)) ?? e };
-    }
     const buscar = Boolean(deps.geocodificador) && ajustes.buscarDireccionEnMapa;
     const ubicada: ResultadoGeo | null = buscar ? await deps.geocodificador!.buscar(direccion, distritoEscrito ?? distritoPedido).catch(() => null) : null;
     let porQue: string | null = null;
     if (!buscar) porQue = 'la búsqueda en el mapa está apagada';
     else if (!ubicada) porQue = 'el mapa no la encontró (o no hubo red)';
-    else if (ubicada.precision !== 'alta') porQue = 'el mapa no identificó el número de puerta';
+    else if (ubicada.precision === 'baja') porQue = 'el mapa solo la ubica por la zona';
     else if (!distritoRef) porQue = 'no se sabe su distrito para comprobarla';
     else if (distritoPedido && distritoEscrito && distritoPedido !== distritoEscrito) porQue = `escribió ${distritoEscrito} pero el pedido es de ${distritoPedido}`;
     else if (fueraDeZona(ubicada.lat, ubicada.lng)) porQue = 'cae fuera de la zona que se cubre';
@@ -2104,9 +2005,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (!d || d.kmFuera > KM_DIRECCION_EN_SU_DISTRITO) porQue = `el mapa la pone fuera de ${distritoRef}`;
     }
     if (!porQue && ubicada) {
-      for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoLat: ubicada.lat, pinPropuestoLng: ubicada.lng, pinPropuestoAt: en, pinPropuestoFuente: FUENTE_DIRECCION_ESCRITA, pinPropuestoDudas: 0 });
-      await evento(e, 'nota', 'dirección ubicada en el mapa: espera el SÍ del cliente antes de enviar a GSG', { lat: ubicada.lat, lng: ubicada.lng });
-      return { tipo: 'anotada', texto: `Encontramos «${direccion}» en ${distritoRef}: ${enlaceMapa(ubicada.lat, ubicada.lng)}\n¿Sí es tu ubicación para recibir el pedido? Responde SÍ o NO. También puedes compartir tu ubicación actual por WhatsApp.`, entrega: (await repo.entrega(e.id)) ?? e };
+      const r = await alUbicacion(contact, { lat: ubicada.lat, lng: ubicada.lng, fuente: FUENTE_DIRECCION_ESCRITA });
+      if (r.atendida) {
+        const act = r.entrega ?? (await repo.entrega(e.id)) ?? e;
+        await evento(act, 'ubicacion', `su dirección escrita se ubicó en el mapa (${ubicada.precision === 'alta' ? 'con el número' : 'por la calle'}, en ${distritoRef}): queda como ubicación aproximada`, { lat: ubicada.lat, lng: ubicada.lng });
+        const gracias = r.responder ?? textoDe('ubicacionRegistrada', ajustes, contexto(act));
+        return { tipo: 'registrada', texto: `${gracias}\n\n${textoDe('direccionTomada', ajustes, { ...contexto(act), direccion })}`, entrega: act };
+      }
     }
     await evento(e, 'nota', `su dirección escrita no se pudo ubicar con seguridad (${porQue ?? 'sin motivo'}): queda anotada y se le pide el pin con amabilidad`);
     return { tipo: 'anotada', texto: textoDe('direccionAnotada', ajustes, { ...contexto(e), direccion }), entrega: (await repo.entrega(e.id)) ?? e };
@@ -2228,22 +2133,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   }
 
   async function alTexto(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, opts: { boton?: string; citaId?: string | null } = {}): Promise<RespuestaEntregas> {
-    const propuestaDireccion = (await esperandoUbicacionDe(contact.phone)).find(x => x.pinPropuestoAt && (x.pinPropuestoFuente === FUENTE_DIRECCION_ESCRITA || x.pinPropuestoFuente?.startsWith('enlace de mapa')));
-    if (propuestaDireccion) {
-      const lectura = await leerConfirmacion(texto, deps.ia?.(), log);
-      if (lectura.decision === 'si' || lectura.decision === 'no') {
-        const r = await responderPinLejos(contact.phone, lectura.decision, texto, lectura.como, opts.boton, opts.citaId);
-        if (r) return { atendida: true, entrega: r.entrega, resultado: `direccion_${r.tipo}`, responder: r.texto };
-      }
-    }
-    const confirmaDireccion = leerConfirmacionConReglas(texto);
-    if (!propuestaDireccion && confirmaDireccion.decision === 'si') {
-      const pendiente = (await esperandoUbicacionDe(contact.phone)).find(x => x.direccion && x.confirmacionEstado !== 'pedida');
-      if (pendiente) {
-        const r = await alDireccionEscrita(contact, pendiente.direccion!, 'confirmó la dirección del pedido');
-        if (r) return { atendida: true, entrega: r.entrega, resultado: 'direccion_por_confirmar', responder: r.texto };
-      }
-    }
+    const motorizado = await repo.motorizadoPorTelefono(contact.phone);
+    if (motorizado) return respuestaDeMotorizado(motorizado, texto, { citaId: opts.citaId ?? null });
     // «No soy yo» va antes que todo: antes o despues del pin, y en «falta confirmar».
     if (!opts.boton && pareceNoSoyYo(texto)) {
       const r = await alNoSoyYo(contact, texto, 'reglas');
@@ -2263,14 +2154,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (propuesta && (!opts.boton || /^entrega:(misma|otra):/.test(opts.boton))) return respuestaAPropuesta(propuesta, contact, texto, opts);
     // ¿Se le pregunto si volvemos hoy (segunda visita)? Esa entrega esta
     // apartada, no viva, asi que se busca aparte.
-    // «Me equivoqué de ubicación» con la ubicación ya registrada: antes de la
-    // hora límite se le pide la nueva; después, que coordine con el motorizado.
-    // Va aquí (y no solo en el agente operativo) para que valga en todos los
-    // modos: con «Todo el sistema» caía al menú de la preventa (30/09).
-    if (!opts.boton && pideCambioUbicacion(texto)) {
-      const cambio = await pedidoDeCambioDeUbicacion(contact.phone);
-      if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto };
-    }
+    const esperandoSegunda = await esperandoSegundaVisitaDe(contact.phone);
+    if (esperandoSegunda) return respuestaDeSegundaVisita(esperandoSegunda, texto, opts);
     // "¿Dónde está mi pedido?": se contesta segun el estado, sin IA. Vale
     // para la viva de hoy y para la que ya figura como entregada hoy.
     if (ajustes.responderDondeEsta) {
@@ -2293,10 +2178,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   async function respuestaDondeEsta(e: Entrega, texto: string, noLlego: boolean): Promise<RespuestaEntregas> {
     const m = await motorizadoDe(e);
     const en = ahora();
-    if (!noLlego && !['entregada', 'cancelada', 'terminada'].includes(e.estado)) {
-      const seguimiento = await seguimientoGsg.consultar(e.datosEnvio?.tracking ?? e.referencia);
-      if (seguimiento) return { atendida: true, entrega: e, resultado: 'seguimiento_gsg', responder: textoSeguimiento(e.datosEnvio?.tracking ?? e.referencia, seguimiento) };
-    }
     const horaPasada = e.llegaAproxAt ? en.getTime() - e.llegaAproxAt.getTime() > MINUTOS_TOLERANCIA_LLEGADA * 60_000 : false;
     if (noLlego && ((e.estado === 'avisada' && horaPasada) || e.estado === 'entregada')) {
       const detalle = e.estado === 'entregada' ? `el cliente dice que NO le llegó aunque figura entregada${e.entregadaAt ? ` a las ${horaEnReloj(e.entregadaAt, tz())}` : ''}: "${texto.slice(0, 120)}"` : `el cliente dice que no le llegó; se le avisó para las ${e.llegaAproxAt ? horaEnReloj(e.llegaAproxAt, tz()) : '?'}: "${texto.slice(0, 120)}"`;
@@ -2665,11 +2546,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * (SI / NO / POR QUÉ / OTRA); aquí se hace lo que toca y se devuelve el
    * texto fijo. SÍ y NO se reportan a GSG; tras SÍ, NO u OTRA, silencio.
    */
-  async function responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string, entregaId?: number | null): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null> {
+  async function responderConfirmacionGsg(phone: string, clase: ClaseConfirmarGsg, texto: string, como: string): Promise<{ texto: string; botones?: Array<{ id: string; title: string }>; cerrar: boolean; entrega: Entrega } | null> {
     const vivas = (await repo.vivasPorTelefono(phone)).filter((e) => !e.envioRetenidoAt && e.confirmacionEstado === 'pedida' && grupoDe(e) === 'confirmar');
-    // Un botón dice de qué pedido es: se usa ese, nunca otro. Si ese pedido ya
-    // no espera su SÍ/NO (un botón viejo), no aplica: no se asume otro.
-    const e = entregaId != null ? vivas.find((x) => x.id === entregaId) : vivas.sort((a, b) => (b.confirmacionPedidaAt?.getTime() ?? 0) - (a.confirmacionPedidaAt?.getTime() ?? 0))[0];
+    const e = vivas.sort((a, b) => (b.confirmacionPedidaAt?.getTime() ?? 0) - (a.confirmacionPedidaAt?.getTime() ?? 0))[0];
     if (!e) return null;
     const en = ahora();
     const respuesta = texto.slice(0, 300);
@@ -3061,20 +2940,10 @@ ${lista}
       return { ok: false, motivo: `espera a que el cliente conteste por ${enCurso.referencia}`, retryAfterMs: esperaMs };
     }
     const primera = e.confirmacionIntentos === 0;
-    // El primer mensaje del pedido (si es este): «enviando» antes de salir, con candado.
-    const seguido = primera && ['pendiente', 'encolado', 'reintentando'].includes(e.mensajeEstado ?? 'no_aplica');
-    if (seguido && !(await repo.cambiarMensaje(e.id, ['pendiente', 'encolado', 'reintentando'], { mensajeEstado: 'enviando', mensajeVia: 'confirmacion', mensajeUltimoIntentoAt: en }))) {
-      return { ok: false, motivo: 'el primer mensaje de ese pedido ya está en curso', retryAfterMs: 60_000 };
-    }
-    if (primera && MENSAJE_REINTENTABLE.includes(e.mensajeEstado ?? 'no_aplica')) {
-      await repo.actualizar(e.id, { confirmacionProximoAt: null });
-      return { ok: false, motivo: 'el primer mensaje espera a una persona (bandeja de errores)' };
-    }
     const texto = conRegla
       ? textoDe(primera ? 'confirmarEntregaGsg' : 'recordarConfirmarGsg', ajustes, contexto(e))
       : textoDe(primera ? 'pedirConfirmacion' : 'insistirConfirmacion', ajustes, contexto(e));
     const salida = await enviarA(e.phone, texto, 'confirmacion', variablesCliente(e), { separacionMs: Math.min(ajustes.confirmacionEsperaMin * 60_000, 60_000), maxPorDia: ajustes.confirmacionMaxIntentos + 3 }, botonesConfirmacion(e), { conReglaGsg: conRegla });
-    const decision = seguido ? await aplicarDesenlace((await repo.entrega(e.id)) ?? e, desenlaceDeEnvio(salida)) : {};
     if (!salida.ok) {
       if ('sinPlantilla' in salida) {
         const act = await marcarIncidencia(e, 'sin_plantilla', salida.reason);
@@ -3085,12 +2954,10 @@ ${lista}
         await repo.actualizar(e.id, { confirmacionProximoAt: new Date(en.getTime() + (salida.retryAfterMs ?? 15 * 60_000)) });
         return { ok: false, motivo: salida.reason, retryAfterMs: salida.retryAfterMs };
       }
-      if (salida.retryable && !decision.detener) {
-        // La espera la decide el seguimiento del primer mensaje (progresiva); si no, la de siempre.
-        const esperaMs = decision.esperaMs ?? 3 * 60_000;
-        await repo.actualizar(e.id, { confirmacionProximoAt: new Date(en.getTime() + esperaMs) });
+      if (salida.retryable) {
+        await repo.actualizar(e.id, { confirmacionProximoAt: new Date(en.getTime() + 3 * 60_000) });
         await evento(e, 'incidencia', `WhatsApp no pudo enviar (se reintenta): ${salida.error}`);
-        return { ok: false, motivo: salida.error, retryAfterMs: esperaMs };
+        return { ok: false, motivo: salida.error, retryAfterMs: 3 * 60_000 };
       }
       const act = await marcarIncidencia(e, 'error_envio', `WhatsApp rechazó el mensaje de confirmación: ${salida.error.slice(0, 200)}`);
       await reportar(act, 'confirmacion', payloadConfirmacion({ referencia: act.referencia, phone: act.phone, nombre: act.nombre, confirmada: false, respuesta: null, como: null, motivo: 'error_envio', en }));
@@ -3519,7 +3386,7 @@ ${lista}
 
   /** M-1432-1, M-1432-2...: la hora de Lima y un correlativo, sin chocar con las de hoy. */
   async function referenciaAutomatica(): Promise<string> {
-    const deHoy = new Set((await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA })).map((x) => x.referencia));
+    const deHoy = new Set((await repo.listar({ dia: hoy(), limit: 2000 })).map((x) => x.referencia));
     const hhmm = horaEnReloj(ahora(), tz()).replace(':', '');
     for (let n = 1; n < 1000; n++) {
       const ref = `M-${hhmm}-${n}`;
@@ -3528,34 +3395,29 @@ ${lista}
     return `M-${Date.now()}`;
   }
 
-  async function crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; urgente?: boolean; datosEnvio?: DatosEnvio | null; retener?: boolean; externoId?: string | null }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }> {
+  async function crearAMano(input: { referencia?: string; telefono: string; nombre?: string; direccion?: string; distrito?: string; notas?: string; faltaUbicacion: boolean; faltaConfirmacion: boolean; lat?: number; lng?: number; urgente?: boolean; datosEnvio?: DatosEnvio | null; retener?: boolean }, quien: string): Promise<{ ok: true; entrega: Entrega } | { ok: false; motivo: string }> {
     const referencia = (input.referencia ?? '').trim() || (await referenciaAutomatica());
     const lectura = leerCliente({ referencia, telefono: input.telefono });
     if (!lectura.ok) return { ok: false, motivo: lectura.motivo };
     const conPin = typeof input.lat === 'number' && typeof input.lng === 'number';
     const dia = hoy();
-    const ubicacionEstado = input.faltaUbicacion && !conPin ? 'pendiente' : conPin ? 'recibida' : 'no_hace_falta';
-    const confirmacionEstado = input.faltaConfirmacion ? 'pendiente' : 'no_hace_falta';
-    const retenida = Boolean(input.retener) && ajustes.confirmarListaGsg !== false;
     const { entrega, nueva } = await repo.crearEntrega({
       dia,
       referencia: lectura.referencia,
-      externoId: input.externoId ?? null,
-      ...mensajeAlCrear(ubicacionEstado, confirmacionEstado, retenida),
       phone: lectura.phone,
       nombre: input.nombre ?? null,
       direccion: input.direccion ?? null,
       distrito: input.distrito ?? null,
       notas: input.notas ?? null,
-      ubicacionEstado,
+      ubicacionEstado: input.faltaUbicacion && !conPin ? 'pendiente' : conPin ? 'recibida' : 'no_hace_falta',
       lat: conPin ? input.lat! : null,
       lng: conPin ? input.lng! : null,
-      confirmacionEstado,
+      confirmacionEstado: input.faltaConfirmacion ? 'pendiente' : 'no_hace_falta',
       estado: 'pendiente',
       prioridad: input.urgente ? 'urgente' : 'normal',
       datosEnvio: input.datosEnvio ?? null,
       // Lo de la API de GSG espera a que se confirme el envío (si el ajuste lo pide); lo creado a mano, nunca.
-      envioRetenidoAt: retenida ? ahora() : null,
+      envioRetenidoAt: input.retener && ajustes.confirmarListaGsg !== false ? ahora() : null,
     });
     if (!nueva) return { ok: false, motivo: `Ya existe la entrega ${lectura.referencia} de hoy.` };
     let e = entrega;
@@ -3566,7 +3428,6 @@ ${lista}
     // Hoy ya mando su ubicacion (por otro pedido): vale la misma, no se le pide.
     const conocida = e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt ? await aplicarUbicacionConocida(e) : null;
     const recurrente = !conocida && e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt ? await apuntarRecurrente(e, 'a mano') : null;
-    let falloLote: string | undefined;
     if (conocida) e = conocida;
     else if (recurrente) e = recurrente;
     else if (e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt) {
@@ -3575,12 +3436,9 @@ ${lista}
         e = (await repo.actualizar(e.id, { loteId: carga.lote.id })) ?? e;
         await evento(e, 'nota', `entra en el lote del reparto "${carga.lote.nombre}" para pedirle la ubicación`);
       } catch (error) {
-        // El pedido queda guardado: su mensaje pasa a reintento (y a la bandeja si no sale).
-        falloLote = error instanceof Error ? error.message : String(error);
-        log('no se pudo cargar el lote para una entrega a mano', { detalle: falloLote });
+        log('no se pudo cargar el lote para una entrega a mano', { detalle: String(error) });
       }
     }
-    e = await asentarDisparo(e, falloLote);
     return { ok: true, entrega: await recalcular(e) };
   }
 
@@ -3631,7 +3489,6 @@ ${lista}
   async function pedirUbicacionAhora(id: number, quien: string): Promise<ResultadoNumero> {
     let e = await repo.entrega(id);
     if (!e) return { hecho: false, motivo: 'no_existe', entrega: null };
-    if (!ESTADOS_FINALES.includes(e.estado) && !e.envioRetenidoAt) e = (await rearmarMensaje(e)) ?? e;
     if (ESTADOS_FINALES.includes(e.estado)) return { hecho: false, motivo: 'cerrada', entrega: e };
     if (e.ubicacionEstado !== 'pendiente') return { hecho: false, motivo: 'ya_tiene_ubicacion', entrega: e };
     if (e.mensajesPausadosAt) return { hecho: false, motivo: 'pausado', entrega: e };
@@ -3672,7 +3529,6 @@ ${lista}
   async function pedirConfirmacionAhora(id: number, quien: string): Promise<ResultadoNumero> {
     let e = await repo.entrega(id);
     if (!e) return { hecho: false, motivo: 'no_existe', entrega: null };
-    if (!ESTADOS_FINALES.includes(e.estado) && !e.envioRetenidoAt) e = (await rearmarMensaje(e)) ?? e;
     if (ESTADOS_FINALES.includes(e.estado)) return { hecho: false, motivo: 'cerrada', entrega: e };
     if (e.confirmacionEstado === 'confirmada') return { hecho: false, motivo: 'ya_confirmo', entrega: e };
     if (e.confirmacionEstado === 'no_hace_falta') return { hecho: false, motivo: 'no_hace_falta', entrega: e };
@@ -4008,220 +3864,6 @@ ${lista}
     return { filas, descartadas: lectura.descartadas };
   }
 
-  // ------------------------------------------------------ el primer mensaje
-  // El pedido y su primer mensaje van por separado: ver src/entregas/primer-mensaje.ts.
-
-  const cfgReintentos = (): ReintentosMensaje => ({
-    maximo: ajustes.mensajeReintentosMax ?? REINTENTOS_POR_DEFECTO.maximo,
-    esperaBaseSeg: ajustes.mensajeReintentoBaseSeg ?? REINTENTOS_POR_DEFECTO.esperaBaseSeg,
-    esperaMaxSeg: ajustes.mensajeReintentoMaxSeg ?? REINTENTOS_POR_DEFECTO.esperaMaxSeg,
-  });
-
-  /** Qué pide el primer mensaje de un pedido (o null: no hace falta escribirle). */
-  function viaDelMensaje(e: Pick<Entrega, 'ubicacionEstado' | 'confirmacionEstado'>): ViaMensaje | null {
-    if (e.ubicacionEstado === 'pendiente') return 'ubicacion';
-    if (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') return 'confirmacion';
-    return null;
-  }
-
-  /** El estado del mensaje con el que nace un pedido. Retenido = espera «Confirmar y enviar»: no sale nada. */
-  function mensajeAlCrear(ubicacionEstado: Entrega['ubicacionEstado'], confirmacionEstado: Entrega['confirmacionEstado'], retenida: boolean): { mensajeEstado: EstadoMensaje; mensajeVia: ViaMensaje | null } {
-    const via = viaDelMensaje({ ubicacionEstado, confirmacionEstado });
-    return { mensajeEstado: !via ? 'no_aplica' : retenida ? 'retenido' : 'pendiente', mensajeVia: via };
-  }
-
-  const SIN_ERROR = { mensajeErrorCodigo: null, mensajeError: null, mensajePermanente: false } as const;
-
-  /**
-   * Aplica lo que pasó con un intento (solo si el mensaje sigue en uno de
-   * `desde`) y dice al motor qué hacer: cuándo reintentar o que pare.
-   */
-  async function aplicarDesenlace(e: Entrega, d: Desenlace, desde: readonly EstadoMensaje[] = ['enviando']): Promise<{ esperaMs?: number; detener?: string }> {
-    const en = ahora();
-    const cfg = cfgReintentos();
-    const intentos = (e.mensajeIntentos ?? 0) + 1;
-    if (d.tipo === 'enviado') {
-      const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'enviado', mensajeEnviadoAt: en, mensajeWamid: d.wamid, mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeReintentosAuto: 0, mensajeProximoAt: null, ...SIN_ERROR });
-      if (act && e.mensajeErrorCodigo) await evento(act, 'nota', `el primer mensaje salió al intento ${intentos}`);
-      return {};
-    }
-    if (d.tipo === 'transitorio') {
-      if (!d.cuenta) {
-        // Una guarda propia lo freno: no salio nada y no gasta intento.
-        await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'reintentando', mensajeProximoAt: new Date(en.getTime() + (d.esperaMinMs ?? cfg.esperaBaseSeg * 1000)), mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
-        return {};
-      }
-      const n = (e.mensajeReintentosAuto ?? 0) + 1;
-      if (n > cfg.maximo) {
-        const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'fallido', mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: 'reintentos_agotados', mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
-        if (act) await evento(act, 'incidencia', `el primer mensaje falló ${intentos} veces: se deja de reintentar solo (bandeja de errores)`);
-        return { detener: motivoLegible('reintentos_agotados', d.motivo) };
-      }
-      const esperaMs = esperaDelReintento(n, cfg, d.esperaMinMs ?? 0);
-      const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'reintentando', mensajeIntentos: intentos, mensajeReintentosAuto: n, mensajeUltimoIntentoAt: en, mensajeProximoAt: new Date(en.getTime() + esperaMs), mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
-      if (act) await evento(act, 'incidencia', `el primer mensaje no salió (${d.motivo.slice(0, 120)}): reintento ${n} de ${cfg.maximo} en ${Math.round(esperaMs / 1000)} s`);
-      return { esperaMs };
-    }
-    const estado: EstadoMensaje = d.tipo === 'incierto' ? 'incierto' : 'fallido';
-    const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: estado, mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: d.tipo === 'permanente' });
-    if (act) await evento(act, 'incidencia', d.tipo === 'incierto' ? `no se sabe si le llegó el primer mensaje (${d.motivo.slice(0, 120)}): no se reenvía solo` : `el primer mensaje no se puede mandar: ${motivoLegible(d.codigo, d.motivo)}`);
-    return { detener: motivoLegible(d.codigo, d.motivo) };
-  }
-
-  /**
-   * Tras dispararlo (meterlo en el reparto, dejarlo en la cola de la
-   * confirmación): en qué queda el mensaje. `fallo`: no se pudo disparar.
-   */
-  async function asentarDisparo(e: Entrega, fallo?: string): Promise<Entrega> {
-    const fresca = (await repo.entrega(e.id)) ?? e;
-    const desde: EstadoMensaje[] = ['pendiente', 'reintentando'];
-    if (!desde.includes(fresca.mensajeEstado ?? 'no_aplica')) return fresca;
-    const via = viaDelMensaje(fresca);
-    if (!via) return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'no_aplica', mensajeVia: null, mensajeProximoAt: null, ...SIN_ERROR })) ?? fresca;
-    const enCola = via === 'confirmacion' || Boolean(fresca.loteId) || fresca.ubicacionPropuestaLat != null;
-    if (fallo || !enCola) {
-      await aplicarDesenlace(fresca, { tipo: 'transitorio', codigo: 'no_encolado', motivo: fallo ?? 'no entró en la cola del reparto', cuenta: true }, desde);
-      return (await repo.entrega(fresca.id)) ?? fresca;
-    }
-    // Ya en manos de su motor; si el reparto ya le habia escrito (otro pedido suyo), cuenta como enviado.
-    const s = via === 'ubicacion' && fresca.loteId ? await solicitudDe(fresca) : null;
-    if (s && (s.estado === 'enviado' || s.estado === 'respondio' || s.estado === 'resuelto')) {
-      return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'enviado', mensajeVia: via, mensajeEnviadoAt: s.ultimoEnvioAt ?? ahora(), mensajeProximoAt: null, ...SIN_ERROR })) ?? fresca;
-    }
-    return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'encolado', mensajeVia: via, mensajeProximoAt: null })) ?? fresca;
-  }
-
-  /** Una persona pide otro intento (Números del día, Reintentar): lo fallido o incierto vuelve a pendiente. */
-  async function rearmarMensaje(e: Entrega): Promise<Entrega | null> {
-    return repo.cambiarMensaje(e.id, MENSAJE_REINTENTABLE, { mensajeEstado: 'pendiente', mensajeReintentosAuto: 0, mensajeProximoAt: null, mensajeVia: viaDelMensaje(e) ?? e.mensajeVia ?? null });
-  }
-
-  /** Lo que el reparto hace con el primer mensaje de una solicitud que es de un pedido (ver PrimerMensajeReparto). */
-  const primerMensajeReparto: PrimerMensajeReparto = {
-    async antes(s) {
-      if (!s.phone) return true;
-      const ligadas = await repo.vivasDeLoteYTelefono(s.loteId, s.phone);
-      if (!ligadas.length) return true;
-      if (ligadas.some((e) => e.mensajeEstado === 'enviando')) return false;
-      let marcadas = 0;
-      for (const e of ligadas) {
-        const act = await repo.cambiarMensaje(e.id, ['pendiente', 'encolado', 'reintentando'], { mensajeEstado: 'enviando', mensajeVia: 'ubicacion', mensajeUltimoIntentoAt: ahora() });
-        if (act) marcadas++;
-      }
-      // Ninguna se pudo marcar y alguna espera a una persona (fallida o incierta): no sale.
-      return marcadas > 0 || !ligadas.some((e) => MENSAJE_REINTENTABLE.includes(e.mensajeEstado ?? 'no_aplica'));
-    },
-    async despues(s, salida) {
-      if (!s.phone) return;
-      const d = desenlaceDeEnvio(salida);
-      let decision: { esperaMs?: number; detener?: string } = {};
-      for (const e of await repo.vivasDeLoteYTelefono(s.loteId, s.phone)) {
-        if (e.mensajeEstado !== 'enviando') continue;
-        const r = await aplicarDesenlace(e, d);
-        decision = { esperaMs: Math.max(decision.esperaMs ?? 0, r.esperaMs ?? 0) || undefined, detener: decision.detener ?? r.detener };
-      }
-      return decision;
-    },
-    async sinWhatsApp(s, detalle) {
-      if (!s.phone) return;
-      for (const e of await repo.vivasDeLoteYTelefono(s.loteId, s.phone)) {
-        await aplicarDesenlace(e, { tipo: 'permanente', codigo: 'sin_whatsapp', motivo: detalle }, ['pendiente', 'encolado', 'reintentando', 'enviando']);
-      }
-    },
-  };
-
-  /**
-   * La red de seguridad, en cada revisión del motor (y tras un reinicio):
-   *  - lo que quedó «enviando» de un proceso que se cortó pasa a incierto (no se reenvía a ciegas);
-   *  - lo pendiente o en reintento que nunca entró al reparto se vuelve a disparar;
-   *  - lo encolado cuyo motor ya escribió (o ya no hace falta) se pone al día.
-   */
-  async function revisarMensajes(): Promise<{ inciertos: number; disparados: number; puestosAlDia: number }> {
-    const en = ahora();
-    let inciertos = 0;
-    let disparados = 0;
-    let puestosAlDia = 0;
-    for (const e of await repo.mensajesEnviandoDesde(new Date(en.getTime() - 3 * 60_000), 50)) {
-      const r = await aplicarDesenlace(e, { tipo: 'incierto', codigo: 'resultado_incierto', motivo: 'el servicio se cortó mientras se enviaba' });
-      if (r.detener) inciertos++;
-      // Que el reparto no lo reintente por su cuenta mientras nadie lo mira.
-      const s = await solicitudDe(e);
-      if (s && s.estado === 'pendiente') await repos.rutas.actualizarSolicitud(s.id, { estado: 'incidencia', incidencia: 'error_envio', incidenciaDetalle: 'no se sabe si salió el primer mensaje (el servicio se cortó)', proximoIntentoAt: null });
-    }
-    for (const e of await repo.mensajesQueTocan(en, 20)) {
-      if (e.mensajesPausadosAt) continue;
-      // Lo que ya esta en el reparto (o con la direccion propuesta) lo reintenta su motor.
-      if (e.mensajeVia === 'confirmacion' || e.loteId || e.ubicacionPropuestaLat != null) {
-        await asentarDisparo(e);
-        continue;
-      }
-      let fallo: string | undefined;
-      let act = e;
-      try {
-        act = await alLoteDelReparto(e, 'reintento del primer mensaje');
-        if (!act.loteId && act.ubicacionEstado === 'pendiente') fallo = 'el reparto no aceptó el pedido';
-      } catch (error) {
-        fallo = error instanceof Error ? error.message : String(error);
-      }
-      await asentarDisparo(act, fallo);
-      disparados++;
-    }
-    for (const e of (await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA })).filter((x) => x.mensajeEstado === 'encolado')) {
-      const via = viaDelMensaje(e);
-      const s = via === 'ubicacion' && e.loteId ? await solicitudDe(e) : null;
-      const yaEscrito = (via === 'confirmacion' && (e.confirmacionEstado === 'pedida' || e.confirmacionIntentos > 0)) || Boolean(e.ubicacionPropuestaAt) || Boolean(s && (s.estado === 'enviado' || s.estado === 'respondio' || s.estado === 'resuelto'));
-      if (yaEscrito) {
-        if (await repo.cambiarMensaje(e.id, ['encolado'], { mensajeEstado: 'enviado', mensajeEnviadoAt: s?.ultimoEnvioAt ?? e.confirmacionPedidaAt ?? e.ubicacionPropuestaAt ?? en, mensajeProximoAt: null, ...SIN_ERROR })) puestosAlDia++;
-      } else if (!via) {
-        if (await repo.cambiarMensaje(e.id, ['encolado'], { mensajeEstado: 'no_aplica', mensajeProximoAt: null, ...SIN_ERROR })) puestosAlDia++;
-      }
-    }
-    return { inciertos, disparados, puestosAlDia };
-  }
-
-  /** La bandeja de errores: lo que no salió, con su motivo y si se puede reintentar. */
-  async function bandejaMensajes(): Promise<ItemBandejaMensajes[]> {
-    return (await repo.bandejaMensajes(500)).map((e) => ({
-      id: e.id,
-      referencia: e.referencia,
-      dia: e.dia,
-      nombre: e.nombre,
-      telefono: e.phone,
-      estadoPedido: e.estado,
-      mensaje: vistaMensaje(e),
-    }));
-  }
-
-  /**
-   * «Reintentar mensaje» desde la bandeja: el mismo disparador, sobre el
-   * pedido que ya existe (no se crea otro). Solo desde fallido o incierto, y
-   * el incierto solo si quien pulsa confirma que el cliente no lo recibió.
-   */
-  async function reintentarMensaje(id: number, quien: string, opts: { confirmarIncierto?: boolean } = {}): Promise<ResultadoReintentoMensaje> {
-    const e = await repo.entrega(id);
-    if (!e) return { ok: false, status: 404, codigo: 'NO_EXISTE', motivo: 'Ese pedido no existe en esta tienda.' };
-    const estado = e.mensajeEstado ?? 'no_aplica';
-    if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `${e.referencia} ya está ${e.estado}: no se le escribe.` };
-    if (e.envioRetenidoAt || estado === 'retenido') return { ok: false, status: 409, codigo: 'ESPERA_CONFIRMACION', motivo: `${e.referencia} espera que confirmes su envío («Confirmar y enviar»): el mensaje sale al confirmarlo.` };
-    if (MENSAJE_EN_CURSO.includes(estado)) return { ok: false, status: 409, codigo: 'MENSAJE_EN_CURSO', motivo: `El mensaje de ${e.referencia} ya tiene un intento en curso o programado.` };
-    if (estado === 'enviado') return { ok: false, status: 409, codigo: 'MENSAJE_YA_ENVIADO', motivo: `El mensaje de ${e.referencia} ya se envió.` };
-    if (estado === 'no_aplica') return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `${e.referencia} no tiene ningún mensaje pendiente que mandar.` };
-    if (estado === 'incierto' && !opts.confirmarIncierto) return { ok: false, status: 409, codigo: 'RESULTADO_INCIERTO', motivo: `No se sabe si el mensaje de ${e.referencia} le llegó. Revisa su chat y, si no lo tiene, confirma el reintento.` };
-    if (e.mensajesPausadosAt) return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `Los mensajes a ${e.referencia} están en pausa (Números del día): reanúdalos primero.` };
-    const armada = await rearmarMensaje(e);
-    if (!armada) return { ok: false, status: 409, codigo: 'MENSAJE_EN_CURSO', motivo: `Otro intento del mensaje de ${e.referencia} se adelantó.` };
-    await evento(armada, 'nota', `${quien} reintenta el primer mensaje desde la bandeja de errores`);
-    const via = viaDelMensaje(armada);
-    const r = via === 'confirmacion' ? await pedirConfirmacionAhora(id, quien) : await pedirUbicacionAhora(id, quien);
-    if (!r.hecho && r.motivo !== 'ya_tiene_ubicacion' && r.motivo !== 'ya_confirmo' && r.motivo !== 'no_hace_falta') {
-      // No se pudo disparar: vuelve a como estaba, con el motivo nuevo.
-      await repo.cambiarMensaje(id, ['pendiente'], { mensajeEstado: estado, mensajeErrorCodigo: e.mensajeErrorCodigo ?? 'no_encolado', mensajeError: `no se pudo reintentar: ${r.motivo}` });
-      return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `No se pudo reintentar el mensaje de ${e.referencia} (${r.motivo}).` };
-    }
-    const act = await asentarDisparo((await repo.entrega(id)) ?? armada);
-    return { ok: true, entrega: act, mensaje: vistaMensaje(act) };
-  }
-
   async function crearVarias(filas: FilaPegada[], quien: string, opts: { faltaUbicacion?: boolean; faltaConfirmacion?: boolean; descartadas?: ResultadoCargaVarias['descartadas']; retener?: boolean } = {}): Promise<ResultadoCargaVarias> {
     const dia = hoy();
     const retener = Boolean(opts.retener) && ajustes.confirmarListaGsg !== false;
@@ -4247,8 +3889,6 @@ ${lista}
       const { entrega, nueva } = await repo.crearEntrega({
         dia,
         referencia,
-        externoId: f.externoId ?? null,
-        ...mensajeAlCrear(faltaUbicacion ? 'pendiente' : 'no_hace_falta', faltaConfirmacion ? 'pendiente' : 'no_hace_falta', retener),
         phone: revision.phone,
         nombre: f.nombre?.trim() || null,
         direccion: f.direccion?.trim() || null,
@@ -4283,7 +3923,6 @@ ${lista}
         }
       }
     }
-    let falloLote: string | undefined;
     if (paraLote.length) {
       try {
         const nombre = `Lista pegada ${dia} ${horaEnReloj(ahora(), tz())}`;
@@ -4294,16 +3933,11 @@ ${lista}
           await evento(e, 'nota', `entra en el lote del reparto "${carga.lote.nombre}" para pedirle la ubicación`);
         }
       } catch (error) {
-        // Los pedidos quedan guardados: su primer mensaje pasa a reintento (y a la bandeja si no sale).
-        falloLote = error instanceof Error ? error.message : String(error);
-        log('no se pudo cargar el lote de la lista pegada', { detalle: falloLote });
+        log('no se pudo cargar el lote de la lista pegada', { detalle: String(error) });
       }
     }
     const creadas: Entrega[] = [];
-    for (const e of resultado.creadas) {
-      const asentada = e.envioRetenidoAt ? e : await asentarDisparo(e, conUbicacion.includes(e) ? falloLote : undefined);
-      creadas.push(await recalcular((await repo.entrega(asentada.id)) ?? asentada));
-    }
+    for (const e of resultado.creadas) creadas.push(await recalcular((await repo.entrega(e.id)) ?? e));
     resultado.creadas = creadas;
     return resultado;
   }
@@ -4317,11 +3951,6 @@ ${lista}
     const vivas = opts.soloPrueba ? todas.filter((e) => esNumeroDePrueba(e.phone)) : todas;
     const resultado: ResultadoCierre = { dia, cuando: ahora().toISOString(), sinTerminar: [], dadasPorEntregadas: [], quien: opts.quien ?? 'motor' };
     for (const e of vivas) {
-      if (e.ubicacionEstado !== 'pendiente' && (e.confirmacionEstado === 'confirmada' || e.confirmacionEstado === 'no_hace_falta')) {
-        await repo.actualizar(e.id, { estado: 'terminada', cerradaPorDia: true });
-        await evento(e, 'nota', 'Flujo terminado: ubicación y confirmación registradas. No implica que el pedido haya sido entregado.');
-        continue;
-      }
       const m = await motorizadoDe(e);
       if (e.estado === 'avisada') {
         await darPorEntregada(e, m, 'cierre', null);
@@ -4437,10 +4066,9 @@ ${lista}
 
   async function resumen(): Promise<ResumenEntregas> {
     const dia = hoy();
-    // Sin tope bajo: con un tope de 1000 (y en orden de llegada) lo que entraba despues del 1000 del dia se guardaba pero no salia en Hoy.
-    const entregas = await repo.listar({ dia, limit: TOPE_DEL_DIA });
-    const motorizados: Motorizado[] = [];
-    const porId = new Map<number, Motorizado>();
+    const entregas = await repo.listar({ dia, limit: 1000 });
+    const motorizados = await repo.listarMotorizados();
+    const porId = new Map(motorizados.map((m) => [m.id, m]));
     const filas: FilaEntrega[] = [];
     for (const e of entregas) filas.push(await fila(e, porId));
     // Un cliente con varios pedidos hoy: cada fila sabe de las otras.
@@ -4456,7 +4084,7 @@ ${lista}
       if (e.prioridad === 'urgente' && !ESTADOS_FINALES.includes(e.estado)) cifras.urgente++;
       if (e.ubicacionEstado === 'pendiente' && e.estado !== 'cancelada') cifras.faltaUbicacion++;
       if ((e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') && e.estado !== 'cancelada') cifras.faltaConfirmacion++;
-
+      if (e.motorizadoId && e.motorizadoEstado !== 'sin_asignar') cifras.conMotorizado++;
       if (e.estado === 'lista' || e.estado === 'esperando_motorizado' || e.estado === 'avisada' || e.estado === 'terminada') cifras.enCamino++;
     }
     const cola = await repos.rutas.cifrasReportes().catch(() => null);
@@ -4464,6 +4092,14 @@ ${lista}
     const enManos = new Map<number, number>();
     for (const e of entregas) if (e.motorizadoId && e.motorizadoEstado === 'enviado') enManos.set(e.motorizadoId, (enManos.get(e.motorizadoId) ?? 0) + 1);
     const eventos = (await repo.eventosRecientes(40)).map((ev) => ({ at: ev.createdAt, referencia: ev.referencia, phone: ev.phone, nombre: ev.nombre, tipo: ev.tipo, detalle: ev.detalle }));
+    // La puntualidad real de cada motorizado en los ultimos 30 dias, en palabras.
+    const puntualidad = new Map<number, PuntualidadMotorizado>();
+    for (const p of await repo.puntualidadDeMotorizados(new Date(ahora().getTime() - 30 * 86_400_000)).catch(() => [])) {
+      if (p.entregas < 2) continue;
+      const d = p.desvioMedioMin;
+      const texto = d <= -5 ? `suele llegar ${minutosEnPalabras(-d)} antes de la hora avisada` : d >= 5 ? `suele llegar ${minutosEnPalabras(d)} después de la hora avisada` : 'suele llegar a la hora avisada';
+      puntualidad.set(p.motorizadoId, { entregas: p.entregas, desvioMedioMin: d, texto: `${texto} (${p.entregas} entregas en 30 días)` });
+    }
     const esperan = entregas.filter((e) => e.envioRetenidoAt && !ESTADOS_FINALES.includes(e.estado));
     const esperanConfirmar = esperan.filter((e) => grupoDe(e) === 'confirmar').length;
     const yaSeConfirmo = entregas.some((e) => Boolean(e.envioLiberadoAt));
@@ -4473,7 +4109,7 @@ ${lista}
       ajustes,
       cifras,
       entregas: filas,
-      motorizados: [],
+      motorizados: motorizados.map((m) => ({ ...m, entregasHoy: m.entregasHoyDia === dia ? m.entregasHoy : 0, enManos: enManos.get(m.id) ?? 0, puntualidad: puntualidad.get(m.id) ?? null })),
       eventos,
       gsg: deps.conexionGsg?.estado() ?? null,
       ultimaSincronizacion: ultimaSync,
@@ -4483,7 +4119,7 @@ ${lista}
       ultimoCierre,
       cierrePendiente,
       gsgCola: cola ? { pendiente: cola.pendiente ?? 0, enviado: cola.enviado ?? 0, fallido: cola.fallido ?? 0, atascado: cola.atascado ?? 0 } : null,
-      alertas: [],
+      alertas: calcularAlertas(entregas, motorizados, ajustes, ahora(), tz()),
     };
   }
 
@@ -4514,33 +4150,23 @@ ${lista}
     },
     recargar,
     hoy,
-    sincronizar,
+    recibirListaGsg,
     ultimaSincronizacion: () => ultimaSync,
     revisarReparto,
     alUbicacion,
-    estadoSeguimiento: seguimientoGsg.estado,
-    async vincularPropuesta(e, wamid) {
-      if (e.pinPropuestoAt && e.pinPropuestoLat != null && e.pinPropuestoLng != null) await evento(e, 'nota', 'mensaje de propuesta vinculado para validar respuestas citadas', { wamid, propuestaAt: e.pinPropuestoAt.toISOString(), lat: e.pinPropuestoLat, lng: e.pinPropuestoLng });
-    },
     revisarPin,
     async pinLejosPendiente(phone) {
       return (await esperandoUbicacionDe(phone)).some((x) => Boolean(x.pinPropuestoAt) && x.pinPropuestoLat != null);
     },
-    async alUbicacionEnVivo(phone) {
-      const vivas = await esperandoUbicacionDe(phone);
-      if (!vivas.length) return null;
-      for (const x of vivas) await evento(x, 'nota', 'mandó su ubicación en tiempo real: no se registra, se le pide la ubicación actual');
-      return textoDe('ubicacionEnVivo', ajustes, contexto(vivas[0]!));
-    },
     responderPinLejos,
     alDireccionEscrita,
     alTexto,
-    alAdjuntoDeMotorizado: async () => ({ atendida: false }),
+    alAdjuntoDeMotorizado,
     nombreNegocio: () => deps.nombreNegocio(),
     alUbicacionFueraDeZona,
-    crearEnlaceMotorizado: async () => ({ ok: false, motivo: 'La gestión de repartidores fue retirada.' }),
-    paginaDeMotorizado: async () => ({ ok: false, motivo: 'La gestión de repartidores fue retirada.' }),
-    accionDesdeEnlace: async () => ({ ok: false, motivo: 'La gestión de repartidores fue retirada.' }),
+    crearEnlaceMotorizado,
+    paginaDeMotorizado,
+    accionDesdeEnlace,
     textoUbicacionRegistrada,
     async textoSolicitudUbicacion(solicitud) {
       if (!solicitud.phone) return null;
@@ -4556,14 +4182,41 @@ ${lista}
     async textoAgente(clave, phone, nombre) {
       const vivas = await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[]);
       let e = vivas[vivas.length - 1] ?? null;
+      // Con la ubicación ya registrada, el motorizado se asigna en segundos.
+      // El número que se le da al cliente tiene que ser el SUYO: se espera un
+      // momento a que el reparto lo asigne en vez de dar otro número como si
+      // fuera del motorizado (26/09: el cierre salió 3 s antes de asignar a
+      // Chesco y llevó el número del propio WhatsApp).
+      // Fuera del horario de envío el reparto no asigna a nadie: esperar solo
+      // retrasaba la respuesta. La espera es a trozos de medio segundo con un
+      // temporizador (nunca mirando el reloj en bucle).
+      const repartoEnHorario = motor?.enHorario() ?? true;
+      if (e && repartoEnHorario && !e.motorizadoId && e.ubicacionEstado === 'recibida' && !ESTADOS_FINALES.includes(e.estado) && !e.datosEnvio?.telefonoMotorizado) {
+        const hayActivos = (await repo.listarMotorizados().catch(() => [] as Motorizado[])).some((m) => m.estado === 'activo' && mismoMundo(e!.phone, m.phone));
+        const esperaMs = hayActivos ? (deps.esperaMotorizadoMs ?? (process.env.VITEST ? 0 : 8_000)) : 0;
+        for (let esperado = 0; esperado < esperaMs; esperado += 500) {
+          await new Promise((r) => setTimeout(r, Math.min(500, esperaMs - esperado)));
+          const x = await repo.entrega(e.id).catch(() => null);
+          if (x?.motorizadoId) { e = x; break; }
+        }
+      }
       if (e) return textoDe(clave, ajustes, contexto(e, await motorizadoDe(e).catch(() => null)));
       return textoDe(clave, ajustes, { nombre: nombre ?? null, negocio: deps.nombreNegocio(), soporte: soporteEnPalabras(ajustes.soporte), telefonoMotorizado: numeroParaCliente(null, null) });
     },
     async cambioDeUbicacion(phone) {
-      return (await pedidoDeCambioDeUbicacion(phone))?.texto ?? null;
-    },
-    async tieneEntregaEnCurso(phone) {
-      return (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).length > 0;
+      const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && x.ubicacionEstado === 'recibida');
+      if (!vivas.length) return null;
+      const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
+      const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
+      if (!pasoLaHoraDeCambio()) {
+        for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
+        return textoDe('cambioUbicacionAntes', ajustes, contexto(e));
+      }
+      const g = vivas.find((x) => x.datosEnvio?.telefonoMotorizado) ?? e;
+      const m = await motorizadoDe(g).catch(() => null);
+      const numero = numeroDeGsg(g, m);
+      for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
+      return textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero });
     },
     async anotarAgente(phone, detalle) {
       for (const e of await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])) {
@@ -4595,25 +4248,10 @@ ${lista}
       return true;
     },
     liberarEnvio,
-    async enviarUbicacionAGsg(id, quien) {
-      const e = await repo.entrega(id);
-      if (!e) return { ok: false, estado: 'no_existe', error: 'Ese pedido no existe.', cuerpo: null };
-      if (e.lat == null || e.lng == null) return { ok: false, estado: 'sin_ubicacion', error: 'Este pedido todavía no tiene ubicación: no hay nada que enviar a GSG.', cuerpo: null };
-      const cuerpo = { tracking: e.datosEnvio?.tracking ?? e.referencia, lat: e.lat, lng: e.lng };
-      if (!deps.gsg.conectado()) return { ok: false, estado: 'pendiente', error: 'GSG no está conectado: configura su dirección y su clave en Conexión WhatsApp.', cuerpo };
-      const reporte = await repos.rutas.encolarReporte({ solicitudId: null, loteId: e.loteId ?? null, tipo: 'ubicacion', payload: { tipo: 'ubicacion', referencia: e.referencia, telefono: e.phone, ...cuerpo } });
-      await evento(e, 'reporte', `${quien} pidió enviar la ubicación a GSG`);
-      await despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion'], { manual: true });
-      const tras = (await repos.rutas.reportesRecientes(100, 'ubicacion')).find((r) => r.id === reporte.id);
-      const estado = tras?.estado ?? 'pendiente';
-      const error = estado === 'enviado' ? null : tras?.ultimoError ?? 'No se pudo enviar todavía: queda en cola y se reintenta solo.';
-      await evento(e, 'reporte', estado === 'enviado' ? 'ubicación enviada a GSG' : `no se pudo enviar la ubicación a GSG: ${error}`);
-      return { ok: estado === 'enviado', estado, error, cuerpo };
-    },
     porConfirmarEnvio,
     proponerUbicacion,
     revisarPropuestas,
-    esMotorizado: async () => false,
+    esMotorizado: async (phone) => (await repo.motorizadoPorTelefono(phone)) !== null,
     reglaGsgActiva,
     modoGsg,
     /**
@@ -4627,13 +4265,6 @@ ${lista}
      * que calculó el sistema (minutos del motorizado + margen). null = no es
      * esa pregunta o no tiene pedido de hoy. Sin IA.
      */
-    async pedidoIndistinguible(phone: string, texto: string) {
-      const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !x.envioRetenidoAt);
-      if (vivas.length < 2) return null;
-      const limpio = texto.toLowerCase();
-      if (vivas.some((x) => x.referencia && limpio.includes(x.referencia.toLowerCase()))) return null;
-      return vivas.map((x) => x.referencia).filter((r): r is string => Boolean(r));
-    },
     async respuestaPorPedido(phone: string, texto: string, opts: { forzar?: boolean } = {}) {
       if (!ajustes.responderDondeEsta) return null;
       const p = leerPreguntaPorPedido(texto);
@@ -4712,8 +4343,7 @@ ${lista}
         enCuanto: llega ? minutosEnPalabras(Math.max(1, Math.ceil((llega.getTime() - en.getTime()) / 60_000))) : null,
       };
       const clave = tipo === 'con_hora' ? 'horaEnSilencio' : tipo === 'pasada' ? 'horaEnSilencioPasada' : 'horaEnSilencioSinTiempo';
-      const seguimiento = await seguimientoGsg.consultar(e.datosEnvio?.tracking ?? e.referencia);
-      const responder = seguimiento ? textoSeguimiento(e.datosEnvio?.tracking ?? e.referencia, seguimiento) : textoDe(clave, ajustes, ctx);
+      const responder = textoDe(clave, ajustes, ctx);
       const cual = tipo === 'con_hora' ? `la hora (${horaAmPm}, en aprox. ${ctx.enCuanto})` : tipo === 'pasada' ? `que debería estar por llegar (era para las ${horaAmPm})` : 'el horario de entrega (el motorizado aún no dio su tiempo)';
       await evento(e, 'aviso', `preguntó por su pedido (${que}): se le contestó ${cual}. Es lo único que se le contesta con el silencio tras la ubicación`, { horaPedida: true, tipo, hora: horaAmPm });
       return { responder, entrega: e, tipo };
@@ -4754,6 +4384,7 @@ ${lista}
       const c = await repos.contacts.getByPhone(phone).catch(() => null);
       const en = c?.iaCerradaAt ? new Date(c.iaCerradaAt) : null;
       if (!en || Number.isNaN(en.getTime())) return false;
+      if (await repo.motorizadoPorTelefono(phone).catch(() => null)) return false;
       // Un pedido nuevo (llegado despues del cierre) vuelve a abrir el chat;
       // uno que todavia espera confirmar su envio, no (aun no se le escribio).
       const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((e) => !e.envioRetenidoAt);
@@ -4766,9 +4397,9 @@ ${lista}
       return true;
     },
     pedirConfirmacion,
-    mandarAMotorizado: async () => ({ ok: false, motivo: 'La asignación de reparto ya no forma parte del flujo.' }),
-    asignarSinUbicacion: async () => null,
-    asignarSinUbicacionAMano: async () => ({ ok: false, motivo: 'La asignación de reparto fue retirada.' }),
+    mandarAMotorizado,
+    asignarSinUbicacion,
+    asignarSinUbicacionAMano,
     async tieneMotorizadoSinUbicacion(phone) {
       return (await sinPinDe(phone)).some(conMotorizadoSinUbicacion);
     },
@@ -4777,14 +4408,14 @@ ${lista}
     cerrarDia,
     cerrarDiaSiToca,
     ultimoCierre: () => ultimoCierre,
-    revisarSegundasVisitas: async () => 0,
+    revisarSegundasVisitas,
     confirmarAMano,
     cancelar,
     ponerUbicacion,
-    reasignar: async () => null,
+    reasignar,
     reintentar,
     marcarEntregada,
-    segundaVisitaAMano: async () => ({ ok: false, motivo: 'La segunda visita ya no forma parte del flujo.' }),
+    segundaVisitaAMano,
     marcarPrioridad,
     pedirUbicacionAhora,
     pedirConfirmacionAhora,
@@ -4794,8 +4425,8 @@ ${lista}
     leerListaPegada,
     previsualizar,
     crearAMano,
-    motorizados: async () => [],
-    crearMotorizado: async () => ({ ok: false, motivo: 'La gestión de repartidores fue retirada.' }),
+    motorizados: () => repo.listarMotorizados(),
+    crearMotorizado,
     async crearMotorizadosDesdeTexto(texto) {
       const lectura = leerListaMotorizados(texto);
       const salida: ResultadoLoteMotorizados = { creados: [], repetidos: [], descartados: [...lectura.descartadas], detalle: '' };
@@ -4818,16 +4449,24 @@ ${lista}
       salida.detalle = partes.join(', ') + '.';
       return salida;
     },
-    editarMotorizado: async () => null,
-    quitarMotorizado: async () => null,
-    rutaDeMotorizado: async () => null,
-    mandarRuta: async () => ({ ok: false, motivo: 'La gestión de repartidores fue retirada.' }),
-    traspasarPedidos: async () => ({ ok: false, motivo: 'La gestión de repartidores fue retirada.' }),
+    editarMotorizado: async (id, patch) => {
+      // A descanso o de baja con pedidos entre manos: primero se reparten
+      // entre los demas (y el cliente con hora se entera), y despues el cambio.
+      if (patch.estado === 'baja' || patch.estado === 'descanso') {
+        const vivas = await repo.vivasDeMotorizado(id);
+        if (vivas.length) await traspasarPedidos(id, { descanso: patch.estado === 'descanso', quien: 'una persona', motivo: patch.estado === 'baja' ? 'lo dieron de baja con pedidos entre manos' : 'lo pusieron en descanso con pedidos entre manos' });
+      }
+      return repo.actualizarMotorizado(id, patch);
+    },
+    quitarMotorizado: (id) => repo.quitarMotorizado(id),
+    rutaDeMotorizado,
+    mandarRuta,
+    traspasarPedidos,
     resumen,
     async entrega(id) {
       const e = await repo.entrega(id);
       if (!e) return null;
-      const motorizados = new Map<number, Motorizado>();
+      const motorizados = new Map((await repo.listarMotorizados()).map((m) => [m.id, m]));
       return { entrega: await fila(e, motorizados), eventos: await repo.eventos(id, 200) };
     },
     async descripcionParaIA() {
@@ -4845,25 +4484,13 @@ ${lista}
       if (!e) return null;
       const m = e.motorizadoId ? await repo.motorizado(e.motorizadoId) : null;
       const situacion = situacionDe(e, m, ajustes, tz(), reglaGsgActiva());
-      const h = e.datosEnvio?.horarioEntregaDesde && e.datosEnvio?.horarioEntregaHasta ? { desde: e.datosEnvio.horarioEntregaDesde, hasta: e.datosEnvio.horarioEntregaHasta, extendidoHasta: e.datosEnvio.horarioEntregaHasta } : ajustes.horarioEntregas;
-      const seguimiento = await seguimientoGsg.consultar(e.datosEnvio?.tracking ?? e.referencia);
-      // Lo que la IA necesita para no inventar (batería del 30/09: «sí,
-      // llegamos a Comas», «su pedido está en camino» sin estarlo): el
-      // horario de entregas, la regla del cambio de ubicación y lo que NO es.
-      return [
-        seguimiento ? textoSeguimiento(e.datosEnvio?.tracking ?? e.referencia, seguimiento) : 'No hay seguimiento reciente confirmado por la API de GSG. No inventes la posición del motorizado, kilómetros ni tiempo restante.',
-        e.datosEnvio?.horarioEntregaFechaDesde ? `Ventana fechada de GSG: ${textoHorario({ desde: e.datosEnvio.horarioEntregaDesde!, hasta: e.datosEnvio.horarioEntregaHasta!, fechaDesde: e.datosEnvio.horarioEntregaFechaDesde, fechaHasta: e.datosEnvio.horarioEntregaFechaHasta ?? undefined, zonaHoraria: e.datosEnvio.horarioEntregaZonaHoraria ?? undefined })}. Usa estas fechas; no la anuncies como horario de hoy si corresponde a otra fecha.` : '',
-        `Este cliente tiene hoy el pedido ${e.referencia}${e.nombre ? ` (a nombre de ${e.nombre})` : ''}. Situación: ${situacion}${e.llegaAproxAt && e.estado !== 'entregada' ? ` Hora aproximada de llegada: ${horaEnReloj(e.llegaAproxAt, tz())}.` : ''} Si pregunta por su pedido, responde con esto; no prometas otra hora ni otro día: eso lo coordina una persona.`,
-        !e.datosEnvio?.horarioEntregaFechaDesde ? `Horario de entrega de hoy: de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)} (por algunas casuísticas se puede extender hasta las ${horaEnPalabras(h.extendidoHasta)}). Si pregunta a qué hora llega o el horario y no hay hora aproximada, dale este horario.` : '',
-        `Si quiere cambiar su ubicación: antes de la ${horaEnPalabras(ajustes.cambioUbicacionHasta)} que mande el pin nuevo por WhatsApp (clip 📎 → Ubicación) y se tiene en cuenta hoy; después de esa hora, que coordine con el motorizado.`,
-        'Es un cliente con una entrega en curso: no le ofrezcas cotizar envíos, precios ni hacer pedidos. No digas que su pedido ya salió o está en camino si la situación no lo dice. Si pregunta si llegan a una zona o distrito y no está en lo que sabes, no lo afirmes: di que una persona se lo confirma.',
-      ].join('\n');
+      return `Este cliente tiene hoy el pedido ${e.referencia}${e.nombre ? ` (a nombre de ${e.nombre})` : ''}. Situación: ${situacion}${e.llegaAproxAt && e.estado !== 'entregada' ? ` Hora aproximada de llegada: ${horaEnReloj(e.llegaAproxAt, tz())}.` : ''} Si pregunta por su pedido, responde con esto; no prometas otra hora ni otro día: eso lo coordina una persona.`;
     },
     async pedidoDe(phone) {
       const viva = await repo.vivaPorTelefono(phone);
       if (viva) return viva.referencia;
       const dia = hoy();
-      const deHoy = (await repo.listar({ dia, limit: TOPE_DEL_DIA })).filter((e) => e.phone === phone);
+      const deHoy = (await repo.listar({ dia, limit: 1000 })).filter((e) => e.phone === phone);
       if (deHoy.length) return deHoy[deHoy.length - 1]!.referencia;
       const ayer = new Date(ahora().getTime() - 24 * 60 * 60 * 1000);
       const diaAyer = new Intl.DateTimeFormat('en-CA', { timeZone: tz(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(ayer).slice(0, 10);
@@ -4874,11 +4501,6 @@ ${lista}
       const dia = hoy();
       return (await repo.listar({ dia, estados: ['avisada', 'entregada', 'terminada'], limit: 1000 })).map((e) => ({ phone: e.phone, referencia: e.referencia }));
     },
-    primerMensajeReparto,
-    diaDeHoy: () => hoy(),
-    revisarMensajes,
-    bandejaMensajes,
-    reintentarMensaje,
     conectarMotor(m) {
       motor = m;
     },

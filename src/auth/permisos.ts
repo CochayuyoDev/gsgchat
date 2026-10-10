@@ -18,16 +18,19 @@ export const PERMISOS = {
   'plantillas:leer': 'Ver las plantillas aprobadas',
   'estado:leer': 'Ver el estado del numero, la conexion y la salud',
   'webhooks:gestionar': 'Crear, cambiar y borrar webhooks salientes',
+  'embed:emitir': 'Pedir tokens para el chat embebido (lo hace el servidor del otro sistema)',
+  'conectores:gestionar': 'Crear y configurar conectores de tiendas (WooCommerce, Shopify)',
   'ia:ordenar': 'Darle ordenes con palabras a la IA operadora (POST /api/v1/ia/ordenes); ejecuta solo lo que los demas permisos de la clave dejan',
   'pedidos:gestionar': 'Ver y cambiar de estado los pedidos tomados en el chat',
   'ia:entrenar': 'Ensenarle lecciones al asistente de WhatsApp y leerlas (POST/GET /api/v1/ia/lecciones)',
-  'entregas:leer': 'Ver los pedidos del día, sus ubicaciones y confirmaciones (GET /api/v1/entregas)',
-  'entregas:gestionar': 'Recibir y gestionar los pedidos y sincronizar con GSG',
+  'stoky:conectar': 'Que Stoky se presente al vincularse: manda su direccion y su token para que este sistema consulte su catalogo (POST/GET /api/v1/stoky/conexion)',
+  'entregas:leer': 'Ver las entregas del dia (ubicacion, confirmacion, motorizado, hora de llegada) y los motorizados (GET /api/v1/entregas, /api/v1/motorizados)',
+  'entregas:gestionar': 'Mandar, cambiar y cancelar pedidos y dar de alta motorizados (POST/PATCH/DELETE /api/v1/entregas, POST /api/v1/motorizados)',
+  'procesos:gestionar': 'Ver los procesos y cargarles personas (GET /api/v1/procesos, POST /api/v1/procesos/:id/personas, GET /api/v1/procesos/corridas/:id)',
   '*': 'Todo, incluida la API interna /admin (como las claves de antes)',
 } as const;
 
-/** Los nombres retirados quedan solo como tipos para leer registros históricos. */
-export type Permiso = keyof typeof PERMISOS | 'embed:emitir' | 'conectores:gestionar' | 'stoky:conectar' | 'procesos:gestionar';
+export type Permiso = keyof typeof PERMISOS;
 
 export const NOMBRES_PERMISOS = Object.keys(PERMISOS) as Permiso[];
 

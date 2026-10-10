@@ -2,8 +2,8 @@
  * La pantalla "Mi asistente IA" habla con esto.
  *
  *  GET  /admin/ia          la configuracion (sin el token; solo si hay uno)
- *  GET  /admin/ia/conexion la señal de la cabecera: conectada, sin conexion (y por que), apagada o sin comprobar, y la version
- *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado, `token: ""` lo quita
+ *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado; vacio la conserva.
+ *                          Solo `borrarClave: true` la quita (Desvincular IA)
  *  POST /admin/ia/probar   una conversacion de prueba desde el navegador, sin WhatsApp
  *  POST /admin/ia/modelos  los modelos de la cuenta de OpenAI de una clave (solo admin)
  *
@@ -18,14 +18,13 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ErrorIA, listarModelosOpenAI, MODELOS_SUGERIDOS, presetDe, SERVICIOS_OPENAI } from './proveedores.js';
+import { ErrorIA, listarModelosOpenAI, MODELOS_SUGERIDOS, SERVICIOS_OPENAI } from './proveedores.js';
 import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
 import { ESCENARIOS, GRUPOS } from './escenarios.js';
 import { BANCO_EXAMEN, UMBRAL_EXAMEN } from './examen-lector.js';
 import { configIASchema, type ServicioIA } from './servicio.js';
 import { confirmacionSchema } from './ordenes.js';
 import type { ActividadRepo } from '../auth/actividad.js';
-import { VERSION } from '../version.js';
 
 export async function registerIaRoutes(app: FastifyInstance, deps: { ia: ServicioIA; plan?: import('../plan/servicio.js').ServicioPlan; fetchImpl?: typeof fetch; actividad?: ActividadRepo }): Promise<void> {
   const { ia } = deps;
@@ -47,13 +46,7 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
   app.get('/admin/ia/examen-lector', async () => ({ examen: await ia.examenLector(), umbral: UMBRAL_EXAMEN, total: BANCO_EXAMEN.length }));
   app.post('/admin/ia/examen-lector', async () => ({ examen: await ia.examinarLector(), umbral: UMBRAL_EXAMEN }));
 
-  app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS, servicios: SERVICIOS_OPENAI, version: VERSION }));
-
-  /**
-   * La señal «IA conectada / sin conexión» de la cabecera del panel: barata
-   * (no llama al modelo ni a la red), para refrescarla cada minuto.
-   */
-  app.get('/admin/ia/conexion', async () => ({ ...ia.conexion(), version: VERSION }));
+  app.get('/admin/ia', async () => ({ ...(await ia.refrescarModelos()), modelosSugeridos: MODELOS_SUGERIDOS, descripcionGratis: DESCRIPCION_GRATIS, servicios: SERVICIOS_OPENAI }));
 
   /**
    * Cuanto se uso la IA: hoy y en los ultimos 30 dias, por tipo de llamada,
@@ -84,22 +77,22 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     const body = z
       .object({
         proveedor: z.enum(['puter', 'openai']).optional(),
-        servicio: z.enum(['openai', 'groq', 'openrouter', 'together', 'deepseek', 'google', 'mistral', 'ollama', 'otro']).optional(),
         baseUrl: z.string().trim().max(300).optional(),
         token: z.string().max(500).optional(),
-        modelo: z.string().trim().max(200).optional(),
+        modelo: z.string().trim().max(80).optional(),
+        razonamiento: configIASchema.shape.razonamiento.optional(),
       })
       .parse(request.body ?? {});
-    const hayCandidata = body.proveedor !== undefined || body.servicio !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined;
+    const hayCandidata = body.proveedor !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined || body.razonamiento !== undefined;
     const prueba = await ia.probarConexion(hayCandidata ? body : undefined);
-    return { ok: prueba.ok, prueba, conexion: ia.conexion() };
+    return { ok: prueba.ok, prueba };
   });
 
   app.post('/admin/ia', async (request, reply) => {
     if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
       return reply.code(403).send({ error: 'solo un administrador configura el asistente' });
     }
-    const body = configIASchema.partial().extend({ token: z.string().max(500).nullable().optional() }).parse(request.body ?? {});
+    const body = configIASchema.partial().extend({ token: z.string().max(500).nullable().optional(), borrarClave: z.boolean().optional() }).parse(request.body ?? {});
     const estado = await ia.guardar(body);
     if (estado.activa && !estado.tieneToken) {
       return reply.code(400).send({ error: 'Para activar el asistente hace falta el token de Puter (o la clave de la API elegida).', estado });
@@ -116,13 +109,8 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
       return reply.code(403).send({ error: 'Solo un administrador vincula la clave de la IA.' });
     }
-    const body = z.object({
-      clave: z.string().max(500).default(''),
-      servicio: z.enum(['openai', 'groq', 'openrouter', 'together', 'deepseek', 'google', 'mistral', 'ollama', 'otro']).default('openai'),
-    }).parse(request.body ?? {});
-    if (typeof ia.listarModelos === 'function') return ia.listarModelos(body.servicio, body.clave);
-    // Compatibilidad con dobles de pruebas e integraciones antiguas.
-    return listarModelosOpenAI({ clave: body.clave, servicio: body.servicio, baseUrl: presetDe(body.servicio)?.baseUrl, fetchImpl: deps.fetchImpl });
+    const body = z.object({ clave: z.string().max(500).default('') }).parse(request.body ?? {});
+    return listarModelosOpenAI({ clave: body.clave, fetchImpl: deps.fetchImpl });
   });
 
   /** Si la URL del catalogo responde: cuantos productos y un ejemplo. */

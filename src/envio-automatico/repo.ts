@@ -6,7 +6,7 @@
  * es `servicio.ts`.
  */
 
-import { esDuplicado, type Pool } from '../db/pool.js';
+import type { Pool } from '../db/pool.js';
 
 /** Que se le manda a cada numero. */
 export type QueEnviar = 'ubicacion' | 'mensaje';
@@ -172,13 +172,12 @@ const COLUMNAS_PATCH: Array<[keyof PatchEntrada, string]> = [
 export function createEnvioAutomaticoRepo(pool: Pool): EnvioAutomaticoRepo {
   return {
     async agregar(input) {
-      // Si el numero ya esta no se toca nada: se devuelve la fila que habia.
-      let insertId: number;
-      try {
-        ({ insertId } = await pool.query(
+      const { rows } = await pool.query<Row>(
         `insert into envio_automatico
            (phone, nombre, que, texto, hasta, referencia, origen, origen_detalle, enviados, max_envios, ultimo_envio_at, proximo_envio_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         on conflict (phone) do nothing
+         returning *`,
         [
           input.phone,
           input.nombre ?? null,
@@ -193,18 +192,13 @@ export function createEnvioAutomaticoRepo(pool: Pool): EnvioAutomaticoRepo {
           input.ultimoEnvioAt ?? null,
           input.proximoEnvioAt ?? null,
         ],
-        ));
-      } catch (error) {
-        if (!esDuplicado(error)) throw error;
-        const existente = await this.porTelefono(input.phone);
-        // Entre el insert y el select nadie la borra en la practica; si pasara,
-        // se vuelve a insertar y ya.
-        if (!existente) return this.agregar(input);
-        return { entrada: existente, nueva: false };
-      }
-      const creada = await this.porId(insertId);
-      if (!creada) return this.agregar(input);
-      return { entrada: creada, nueva: true };
+      );
+      if (rows[0]) return { entrada: deFila(rows[0]), nueva: true };
+      const existente = await this.porTelefono(input.phone);
+      // Entre el insert y el select nadie la borra en la practica; si pasara,
+      // se vuelve a insertar y ya.
+      if (!existente) return this.agregar(input);
+      return { entrada: existente, nueva: false };
     },
 
     async porTelefono(phone) {
@@ -236,15 +230,16 @@ export function createEnvioAutomaticoRepo(pool: Pool): EnvioAutomaticoRepo {
       }
       if (!sets.length) return this.porId(id);
       valores.push(id);
-      await pool.query(`update envio_automatico set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
-      return this.porId(id);
+      const { rows } = await pool.query<Row>(
+        `update envio_automatico set ${sets.join(', ')}, updated_at = now() where id = $${valores.length} returning *`,
+        valores,
+      );
+      return rows[0] ? deFila(rows[0]) : null;
     },
 
     async quitar(id) {
-      const antes = await this.porId(id);
-      if (!antes) return null;
-      const { rowCount } = await pool.query('delete from envio_automatico where id = $1', [id]);
-      return rowCount ? antes : null;
+      const { rows } = await pool.query<Row>('delete from envio_automatico where id = $1 returning *', [id]);
+      return rows[0] ? deFila(rows[0]) : null;
     },
 
     async tocaEnviar(ahora, limite) {
@@ -256,14 +251,14 @@ export function createEnvioAutomaticoRepo(pool: Pool): EnvioAutomaticoRepo {
           -- adelanta al recordatorio que ya tocaba.
           order by coalesce(proximo_envio_at, created_at) asc, id asc
           limit $2`,
-        [ahora, Number(limite)],
+        [ahora, limite],
       );
       return rows.map(deFila);
     },
 
     async contar() {
       const { rows } = await pool.query<{ estado: EstadoEntrada; n: number | string }>(
-        'select estado, count(*) as n from envio_automatico group by estado',
+        'select estado, count(*)::int as n from envio_automatico group by estado',
       );
       const cifras = { activos: 0, pausados: 0 };
       for (const r of rows) {
@@ -284,14 +279,14 @@ export function createEnvioAutomaticoRepo(pool: Pool): EnvioAutomaticoRepo {
     async movimientos(limite) {
       const { rows } = await pool.query<MovimientoRow>(
         'select * from envio_automatico_movimientos order by id desc limit $1',
-        [Number(limite)],
+        [limite],
       );
       return rows.map(movimientoDeFila);
     },
 
     async enviadosDesde(desde) {
       const { rows } = await pool.query<{ n: number | string }>(
-        `select count(*) as n from envio_automatico_movimientos where tipo = 'envio' and created_at >= $1`,
+        `select count(*)::int as n from envio_automatico_movimientos where tipo = 'envio' and created_at >= $1`,
         [desde],
       );
       return Number(rows[0]?.n ?? 0);

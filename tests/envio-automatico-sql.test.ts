@@ -1,30 +1,46 @@
 /**
- * El SQL de la lista de envio automatico, contra MySQL/MariaDB de verdad
- * (tests/mysql.ts): el esquema, el "no se pisa" del mismo numero, el orden de la cola, el
+ * El SQL de la lista de envio automatico, contra Postgres de verdad (PGlite):
+ * la migracion, el "no se pisa" del mismo numero, el orden de la cola, el
  * patch parcial, los movimientos y las dos consultas nuevas del reparto.
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-let b: BaseDePrueba;
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
+
+function asPool(db: PGlite): Pool {
+  const query = async (text: string, params?: unknown[]) => {
+    const result = await db.query(text, params as never[], { parsers: { 20: (v: string) => Number.parseInt(v, 10) } });
+    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+  };
+  const client = { query, release: () => undefined };
+  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
+}
+
+let db: PGlite;
 let pool: Pool;
 let repos: Repos;
 
 beforeAll(async () => {
-  b = await baseDePrueba();
-  pool = b.pool;
+  db = new PGlite();
+  pool = asPool(db);
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await b?.cerrar();
+  await pool.end();
 });
 
 beforeEach(async () => {
-  for (const tabla of ['envio_automatico_movimientos', 'envio_automatico', 'rutas_eventos', 'rutas_solicitudes', 'rutas_lotes']) await pool.query(`delete from ${tabla}`);
+  await db.exec('delete from envio_automatico_movimientos; delete from envio_automatico; delete from rutas_eventos; delete from rutas_solicitudes; delete from rutas_lotes;');
 });
 
 describe('la lista', () => {

@@ -29,12 +29,13 @@ import { politicaDesdeConfig } from '../../salud/politica.js';
 import { dailyCapFor } from '../../outbound/throttle.js';
 import { extractLocation } from '../../geo/extract.js';
 import { DESCRIPCION_EVENTOS, NOMBRES_EVENTOS, esNombreEvento, type Bus, type NombreEvento } from '../../eventos/bus.js';
-
-
+import { permisosAceptables } from '../../auth/permisos.js';
+import { DURACION_MAX_MIN, DURACION_POR_DEFECTO_MIN, firmarTokenEmbebido, PERMISOS_EMBEBIDO_MAX, secretoDeEmbebido } from '../../embed/token.js';
 import { PERMISOS } from '../../auth/permisos.js';
 import { generarSecretoWebhook } from '../../webhooks/firma.js';
 import { entregarUna, type DespachadorDeps } from '../../webhooks/despachador.js';
 import { openApi } from './openapi.js';
+import { crearIdempotencia } from './idempotencia.js';
 import { confirmacionSchema } from '../../ia/ordenes.js';
 import type { ServicioIA } from '../../ia/servicio.js';
 import { ErrorIA } from '../../ia/proveedores.js';
@@ -266,7 +267,10 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
 
   // --- mensajes ------------------------------------------------------------
 
-  app.post('/api/v1/mensajes', { config: { permiso: 'mensajes:enviar' } }, async (request, reply) => {
+  // Un reintento del otro sistema con la misma Idempotency-Key no envia dos veces. Ver idempotencia.ts.
+  const idempotencia = crearIdempotencia();
+
+  app.post('/api/v1/mensajes', { config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
     const body = mensajeSchema.parse(request.body ?? {});
     const phone = body.telefono;
     if (fueraDeAlcance(request.usuario, phone)) return reply.code(403).send(ERROR_ALCANCE);
@@ -444,7 +448,28 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
    * sistema con su clave (la clave nunca viaja al navegador); el token si,
    * y caduca. Con `telefono`, solo abre ese hilo.
    */
-
+  app.post('/api/v1/embed/token', { config: { permiso: 'embed:emitir' } }, async (request, reply) => {
+    const body = z
+      .object({
+        operador: z.string().trim().min(1).max(80),
+        telefono: telefonoSchema.optional(),
+        permisos: z.array(z.string()).optional(),
+        duracionMin: z.coerce.number().int().min(1).max(DURACION_MAX_MIN).default(DURACION_POR_DEFECTO_MIN),
+      })
+      .parse(request.body ?? {});
+    // Lo que pida, acotado a lo que un chat puede necesitar y a lo que la
+    // propia clave tiene: nadie emite mas de lo que es.
+    const pedidos = permisosAceptables(body.permisos);
+    if ('error' in pedidos) return reply.code(400).send({ error: pedidos.error });
+    const propios = request.usuario?.permisos ?? [];
+    const permisos = (pedidos.permisos.includes('*') ? [...PERMISOS_EMBEBIDO_MAX] : pedidos.permisos.filter((p) => (PERMISOS_EMBEBIDO_MAX as readonly string[]).includes(p))).filter(
+      (p) => propios.includes('*') || propios.includes(p),
+    );
+    if (!permisos.length) return reply.code(400).send({ error: `el token necesita al menos un permiso de: ${PERMISOS_EMBEBIDO_MAX.join(', ')}` });
+    const momento = ahora().getTime();
+    const token = firmarTokenEmbebido(secretoDeEmbebido(config), { operador: body.operador, telefono: body.telefono ?? null, permisos }, body.duracionMin, momento);
+    return { ok: true, token, caduca: new Date(momento + body.duracionMin * 60_000), permisos, telefono: body.telefono ?? null, url: `${config.PUBLIC_BASE_URL.replace(/\/+$/, '')}/embed/chat` };
+  });
 
   /**
    * Lo que pasa, en vivo (Server-Sent Events). Es lo que mantiene al dia

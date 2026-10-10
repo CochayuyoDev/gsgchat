@@ -1,6 +1,6 @@
 /**
  * Módulo desarrollador · «Ver el flujo en vivo», de punta a punta y con lo de
- * produccion: la tienda entera (armarTienda, base MySQL de prueba, motores reales) y el
+ * produccion: la tienda entera (armarTienda, PGlite real, motores reales) y el
  * simulador de GSG de la propia tienda, escuchando en un puerto de verdad.
  *
  * Los pedidos de prueba entran por la API (POST /api/v1/entregas con una
@@ -18,11 +18,6 @@ import { armarTienda, type TiendaViva } from '../src/plataforma/tienda.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { repartir } from '../src/desarrollador/vivo.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
-import { OBLIGATORIOS_GSG } from './escenario-entregas.js';
-
-/** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
-const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
 
 const esperar = async (cond: () => boolean | Promise<boolean>, ms = 60_000, que = 'la condicion'): Promise<void> => {
   const hasta = Date.now() + ms;
@@ -45,7 +40,6 @@ const puertoLibre = () =>
 describe('Módulo desarrollador: ver el flujo en vivo', () => {
   let raiz: string;
   let tienda: TiendaViva;
-  let b: BaseDePrueba;
   let wa: FakeWhatsApp;
   let cookie: string;
   let clave: string;
@@ -65,12 +59,6 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
   const entrega = async (ref: string) => (await db().query<{ estado: string; ubicacion_estado: string; confirmacion_estado: string; created_at: Date }>('select estado, ubicacion_estado, confirmacion_estado, created_at from entregas where referencia = $1', [ref])).rows[0];
   const pasos = (t: { pasos: Array<{ titulo: string }> }) => t.pasos.map((p) => p.titulo).join('\n');
 
-  // La base aparte: la primera vez hay que crear sus tablas y tarda (usa el
-  // hookTimeout largo de vitest.config, no el de armar la tienda).
-  beforeAll(async () => {
-    b = await baseDePrueba();
-  });
-
   beforeAll(async () => {
     raiz = mkdtempSync(path.join(tmpdir(), 'dev-vivo-'));
     const secretos = bootstrapSecrets(raiz);
@@ -81,7 +69,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
       slug: 'vivo',
       env: {
         PUBLIC_BASE_URL: `http://127.0.0.1:${puerto}`,
-        DATABASE_URL: b.url,
+        DATABASE_URL: `pglite://${path.join(raiz, 'datos')}`,
         TRACKING_SECRET: secretos.trackingSecret,
         WHATSAPP_PROVIDER: 'local',
         BUSINESS_NAME: 'Tienda de prueba',
@@ -96,7 +84,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
         RUTAS_PAUSA_MAX_SEG: '1',
       } as NodeJS.ProcessEnv,
       secretos,
-      base: { url: b.url, base: b.base },
+      base: { tipo: 'pglite', dir: path.join(raiz, 'datos') },
       authDir: path.join(raiz, 'auth'),
       mediaDir: path.join(raiz, 'medios'),
       carpetaCopias: path.join(raiz, 'copias'),
@@ -124,19 +112,18 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
       // Uno REAL (fuera del rango de prueba): nada del modulo lo puede tocar.
       { referencia: 'REAL-1', telefono: '51987654321', nombre: 'Cliente real', distrito: 'Breña', lat: -12.0592, lng: -77.0521, faltaConfirmar: true },
     ];
-    const r = await api('POST', '/api/v1/entregas', { pedidos: pedidos.map((p) => ({ ...OBLIGATORIOS_GSG, ...p })) }, { 'x-api-key': clave, cookie: '' });
+    const r = await api('POST', '/api/v1/entregas', { pedidos }, { authorization: `Bearer ${clave}`, cookie: '' });
     expect(r.status).toBe(201);
     expect(r.body.creadas.length).toBe(pedidos.length);
     // Lo de GSG espera a que se confirme el envío: se confirma solo lo de prueba (el real sigue esperando).
     const envio = await api('POST', '/admin/desarrollador/confirmar-envio', {});
     expect(envio.body).toMatchObject({ liberadas: pedidos.length - 1, confirmar: 1 });
     expect((await api('POST', '/admin/motorizados', { telefono: '51000100001', nombre: 'Carlos Rojas', placa: 'M1A-101' })).status).toBe(200);
-  }, 180_000 * LENTO);
+  }, 180_000);
 
   afterAll(async () => {
     await tienda?.parar();
-    await b?.cerrar();
-    if (raiz) rmSync(raiz, { recursive: true, force: true });
+    rmSync(raiz, { recursive: true, force: true });
   });
 
   it('un número real no se puede usar para escribir: se rechaza en palabras', async () => {
@@ -156,9 +143,9 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
   });
 
   it('al cliente sin pin se le pide la ubicación, y a un número de prueba NUNCA se le llama por WhatsApp', async () => {
-    await esperar(async () => (await api('GET', '/admin/desarrollador/vivo/chat/51000000001')).body.mensajes.some((m: { dir: string }) => m.dir === 'out'), 90_000 * LENTO, 'la peticion de ubicacion a 51000000001');
+    await esperar(async () => (await api('GET', '/admin/desarrollador/vivo/chat/51000000001')).body.mensajes.some((m: { dir: string }) => m.dir === 'out'), 90_000, 'la peticion de ubicacion a 51000000001');
     expect(wa.sent.filter((m) => String(m.to).startsWith('510000') || String(m.to).startsWith('510001'))).toEqual([]);
-  }, 120_000 * LENTO);
+  }, 120_000);
 
   it('manda su pin: el pedido cambia de estado, la traza lo cuenta y la ubicación sale al simulador de GSG', async () => {
     const r = await escribir('51000000001', { tipo: 'pin', lat: -12.1211, lng: -77.0301 });
@@ -168,12 +155,12 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(t).toMatch(/Ubicación registrada/);
     expect(t).toMatch(/A GSG: la ubicación de PRUEBA-00001 — ya salió/);
     expect((await entrega('PRUEBA-00001'))!.ubicacion_estado).toBe('recibida');
-    const [rep] = (await db().query<{ estado: string; externo_id: string | null }>("select estado, externo_id from rutas_reportes where json_unquote(json_extract(payload, '$.referencia')) = 'PRUEBA-00001' and tipo = 'ubicacion'")).rows;
+    const [rep] = (await db().query<{ estado: string; externo_id: string | null }>("select estado, externo_id from rutas_reportes where payload->>'referencia' = 'PRUEBA-00001' and tipo = 'ubicacion'")).rows;
     expect(rep).toMatchObject({ estado: 'enviado' });
     // Y la traza queda para verla al abrir el chat.
     const chat = await api('GET', '/admin/desarrollador/vivo/chat/51000000001');
     expect(chat.body.trazas.length).toBeGreaterThan(0);
-  }, 30_000 * LENTO);
+  });
 
   it('regla del dueño: tras UBI REGISTRADA, «¿a qué hora llega?» recibe la hora estimada; «cuánto cuesta el envío» el cierre UNA vez con el número, y luego SILENCIO; la traza lo cuenta', async () => {
     const h = await escribir('51000000001', { tipo: 'texto', texto: '¿a qué hora llega?' });
@@ -192,10 +179,10 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(tl).toContain('Regla del dueño: ya recibió el cierre');
     expect(tl).toContain('Silencio: al cliente no se le escribió nada');
     expect(tl).not.toMatch(/Contestó/);
-  }, 30_000 * LENTO);
+  });
 
   it('regla del dueño: al que GSG ya le tiene la dirección se le pregunta SOLO SÍ/NO; dice SÍ y queda confirmado', async () => {
-    await esperar(async () => (await entrega('PRUEBA-00002'))!.confirmacion_estado === 'pedida', 60_000 * LENTO, 'que a PRUEBA-00002 se le pregunte SÍ o NO');
+    await esperar(async () => (await entrega('PRUEBA-00002'))!.confirmacion_estado === 'pedida', 60_000, 'que a PRUEBA-00002 se le pregunte SÍ o NO');
     const chat = await api('GET', '/admin/desarrollador/vivo/chat/51000000002');
     const salientes = chat.body.mensajes.filter((m: { dir: string; texto: string }) => m.dir === 'out');
     expect(salientes.some((m: { texto: string }) => /¿Nos confirmas que lo recibes hoy en esa dirección\? Responde SÍ o NO\./.test(m.texto))).toBe(true);
@@ -217,7 +204,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(tl).toMatch(/«Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
     const otra = await escribir('51000000002', { tipo: 'texto', texto: 'hola?' });
     expect(pasos(otra.body.traza)).toContain('Silencio: al cliente no se le escribió nada');
-  }, 90_000 * LENTO);
+  }, 90_000);
 
   it('regla del dueño: «¿por qué?» recibe la explicación fija; «cuánto cuesta el envío» → insistencias 1, 2 y 3 → a la 4.ª el cierre con el número, y luego silencio (la traza cuenta cada insistencia)', async () => {
     const porQue = await escribir('51000000011', { tipo: 'texto', texto: '¿Por qué me piden mi ubicación?' });
@@ -241,7 +228,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     expect(to).toMatch(/Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: /);
     const luego = await escribir('51000000012', { tipo: 'texto', texto: 'hola? me responden?' });
     expect(pasos(luego.body.traza)).toContain('Silencio: al cliente no se le escribió nada');
-  }, 30_000 * LENTO);
+  });
 
   it('un intento de manipulación no cambia nada del pedido y la traza lo señala', async () => {
     const antes = await entrega('PRUEBA-00003');
@@ -251,50 +238,50 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
     const despues = await entrega('PRUEBA-00003');
     expect(despues!.estado).toBe(antes!.estado);
     expect(despues!.confirmacion_estado).toBe(antes!.confirmacion_estado);
-  }, 30_000 * LENTO);
+  });
 
   it('el motorizado de prueba recibe el pedido confirmado, da su tiempo y entrega', async () => {
-    await esperar(async () => (await api('GET', '/admin/desarrollador/vivo/chat/51000100001')).body.mensajes.some((m: { dir: string }) => m.dir === 'out'), 90_000 * LENTO, 'que el motorizado reciba el pedido');
+    await esperar(async () => (await api('GET', '/admin/desarrollador/vivo/chat/51000100001')).body.mensajes.some((m: { dir: string }) => m.dir === 'out'), 90_000, 'que el motorizado reciba el pedido');
     // Con varios pedidos esperando su tiempo, el motorizado dice a cuál (si no, se le pregunta).
     const pendiente = (await db().query<{ referencia: string }>("select e.referencia from entregas e join motorizados m on m.id = e.motorizado_id where m.phone = '51000100001' and e.estado = 'esperando_motorizado' order by e.motorizado_enviado_at limit 1")).rows[0]!.referencia;
     const tiempo = await escribir('51000100001', { tipo: 'texto', texto: `${pendiente} 40` });
     expect(pasos(tiempo.body.traza)).toContain('40 minutos');
     // El que dijo SÍ (y ya tenía la dirección) va al motorizado: el primero que le llegó.
     const avisada = async () => (await db().query<{ referencia: string }>("select e.referencia from entregas e join motorizados m on m.id = e.motorizado_id where m.phone = '51000100001' and e.estado = 'avisada' order by e.id limit 1")).rows[0]?.referencia;
-    await esperar(async () => Boolean(await avisada()), 30_000 * LENTO, 'el aviso (por dentro) del pedido');
+    await esperar(async () => Boolean(await avisada()), 30_000, 'el aviso (por dentro) del pedido');
     const ref = (await avisada())!;
     const fin = await escribir('51000100001', { tipo: 'texto', texto: 'Entregado' });
     expect(pasos(fin.body.traza)).toContain('ya ENTREGÓ');
     expect((await entrega(ref))!.estado).toBe('entregada');
-  }, 150_000 * LENTO);
+  }, 150_000);
 
   it('adelantar el tiempo hace que se le insista a los que callan, sin mover lo real', async () => {
     const intentosDePrueba = async () => Number((await db().query<{ n: number | string }>("select coalesce(sum(intentos), 0) as n from rutas_solicitudes where phone like '510000%'")).rows[0]!.n);
     const real = await entrega('REAL-1');
-    await esperar(async () => Number((await db().query<{ intentos: number }>("select intentos from rutas_solicitudes where referencia = 'PRUEBA-0010'")).rows[0]?.intentos ?? 0) >= 1, 120_000 * LENTO, 'la primera peticion a PRUEBA-0010');
+    await esperar(async () => Number((await db().query<{ intentos: number }>("select intentos from rutas_solicitudes where referencia = 'PRUEBA-0010'")).rows[0]?.intentos ?? 0) >= 1, 120_000, 'la primera peticion a PRUEBA-0010');
     const antes = await intentosDePrueba();
     const r = await api('POST', '/admin/desarrollador/vivo/adelantar', { minutos: 240 });
     expect(r.status).toBe(200);
     expect(r.body.detalle).toContain('Lo real no se tocó');
     expect(r.body.filas).toBeGreaterThan(0);
     // En su siguiente vuelta, el motor insiste (un recordatorio) a los que no contestaron.
-    await esperar(async () => (await intentosDePrueba()) > antes, 150_000 * LENTO, 'una insistencia tras adelantar');
+    await esperar(async () => (await intentosDePrueba()) > antes, 150_000, 'una insistencia tras adelantar');
     const realDespues = await entrega('REAL-1');
     expect(new Date(realDespues!.created_at).getTime()).toBe(new Date(real!.created_at).getTime());
-  }, 300_000 * LENTO);
+  }, 300_000);
 
   it('«responder a todos» contesta una vez por cliente según los porcentajes, sin bloquear el servidor', async () => {
     const r = await api('POST', '/admin/desarrollador/vivo/responder-todos', { ubicacion: 70, confirma: 20 });
     expect(r.status).toBe(200);
     // El servidor sigue atendiendo mientras tanto.
     expect((await api('GET', '/admin/desarrollador/vivo/lista')).status).toBe(200);
-    await esperar(async () => !(await api('GET', '/admin/desarrollador/vivo/responder-todos')).body.enMarcha, 120_000 * LENTO, 'que termine la respuesta en masa');
+    await esperar(async () => !(await api('GET', '/admin/desarrollador/vivo/responder-todos')).body.enMarcha, 120_000, 'que termine la respuesta en masa');
     const p = (await api('GET', '/admin/desarrollador/vivo/responder-todos')).body;
     const suma = Object.values(p.porAccion as Record<string, number>).reduce((s, n) => s + n, 0);
     expect(suma).toBe(p.total);
     expect(p.errores).toEqual([]);
     expect(wa.sent.filter((m) => String(m.to).startsWith('510000') || String(m.to).startsWith('510001'))).toEqual([]);
-  }, 180_000 * LENTO);
+  }, 180_000);
 
   it('el reparto de porcentajes es exacto y el resto calla', () => {
     const l = repartir(10, { ubicacion: 70, confirma: 20, rechaza: 0, duda: 0 });
@@ -307,7 +294,7 @@ describe('Módulo desarrollador: ver el flujo en vivo', () => {
   it('solo una persona administradora entra: sin sesión, 401', async () => {
     const r = await tienda.app.inject({ method: 'GET', url: '/admin/desarrollador/vivo/lista' });
     expect(r.statusCode).toBe(401);
-    const conClave = await tienda.app.inject({ method: 'GET', url: '/admin/desarrollador/vivo/lista', headers: { 'x-api-key': clave } });
+    const conClave = await tienda.app.inject({ method: 'GET', url: '/admin/desarrollador/vivo/lista', headers: { authorization: `Bearer ${clave}` } });
     expect(conClave.statusCode).toBe(403);
   });
 });

@@ -165,7 +165,7 @@ export function problemasDe(e: FilaHoy, l: Lectura): Problema[] {
   if ((e.estado === 'incidencia' || e.requiereHumano) && !segundaVisita && !e.contactadoAt) {
     p.push({ problema: `Necesita una persona: ${e.incidenciaDetalle ?? e.incidencia ?? 'incidencia'}.`, hacer: 'Llámalo o escríbele desde Chats; después márcalo como contactado, reasígnalo o cancélalo.' });
   } else if (e.ubicacionEstado === 'pendiente' && e.solicitud && e.solicitud.incidencia !== 'ya_en_curso' && ['supervision', 'derivado', 'incidencia'].includes(e.solicitud.estado) && !e.contactadoAt) {
-    p.push({ problema: `El reparto lo dejó para una persona (pedirle la ubicación no funcionó${e.solicitud.incidencia ? `: ${e.solicitud.incidencia.replace(/_/g, ' ')}` : ''}).`, hacer: 'Llámalo o atiéndelo desde Chats.' });
+    p.push({ problema: `El reparto lo dejó para una persona (pedirle la ubicación no funcionó${e.solicitud.incidencia ? `: ${e.solicitud.incidencia.replace(/_/g, ' ')}` : ''}).`, hacer: 'Llámalo, o asígnale un motorizado sin ubicación para que coordine por teléfono.' });
   }
   if (sinEscribirle(e) && !e.mensajesPausadosAt) {
     if (hoy.motor?.enHorario === false) {
@@ -181,6 +181,19 @@ export function problemasDe(e: FilaHoy, l: Lectura): Problema[] {
       hacer: a.tipo === 'sin_ubicacion' ? 'Asígnale un motorizado sin ubicación o llámalo.' : a.tipo === 'en_camino_tarde' ? 'Llama al motorizado o márcalo como entregado.' : 'Llama al motorizado o pásale el pedido a otro.',
     });
   }
+  const conAlerta = (tipo: string) => alertas.some((a) => a.tipo === tipo);
+  const activos = hoy.motorizados.filter((m) => (m.estado ?? 'activo') === 'activo');
+  if (e.estado === 'lista' && !e.motorizado) {
+    p.push(activos.length ? { problema: 'Tiene ubicación y confirmación pero todavía no tiene motorizado.', hacer: 'Asígnale uno (pídeme «asígnale este pedido a Carlos»).' } : { problema: 'Está listo pero no hay ningún motorizado activo a quien mandárselo.', hacer: 'Saca a alguien de descanso o da de alta un motorizado.' });
+  }
+  if (e.estado === 'esperando_motorizado' && e.motorizadoEstado === 'enviado' && !conAlerta('motorizado_sin_minutos')) {
+    const espera = minutosDesde(e.motorizadoEnviadoAt);
+    if (espera >= (aj.reasignarMotorizadoMin ?? 15)) p.push({ problema: `${e.motorizado?.nombre ?? 'El motorizado'} no dice en cuánto entrega desde hace ${minutosEnPalabras(espera)}.`, hacer: 'Llámalo o pásale el pedido a otro motorizado.' });
+  }
+  if (e.estado === 'avisada' && e.llegaAproxAt && !conAlerta('en_camino_tarde') && minutosDesde(e.llegaAproxAt) >= (aj.alertaEnCaminoMin ?? 30)) {
+    p.push({ problema: `Pasó su hora de llegada (${hora(e.llegaAproxAt, l.tz)}) y nadie dijo «entregado».`, hacer: 'Llama al motorizado o márcalo como entregado.' });
+  }
+  if (e.prioridad === 'urgente' && !e.motorizado) p.push({ problema: 'Es urgente y todavía no tiene motorizado.', hacer: 'Asígnale uno ya.' });
   return p;
 }
 
@@ -290,6 +303,8 @@ async function revisarDia(l: Lectura, ctx: ContextoAccion): Promise<ResultadoAcc
   if (hoy.motor?.enHorario === false) general.push(`Ahora está fuera del horario de envío (${ventana.inicio}:00 a ${ventana.fin}:00)${sinEscribir ? `: ${sinEscribir} pedido(s) sin escribir salen a las ${ventana.inicio}:00` : ''}.`);
   else if (hoy.motor?.parado && !/horario/i.test(hoy.motor.parado)) general.push(`Los envíos están frenados: ${hoy.motor.parado}.`);
   if (hoy.porConfirmarEnvio?.total) general.push(hoy.porConfirmarEnvio.aviso || `${hoy.porConfirmarEnvio.total} pedido(s) esperan «Confirmar y enviar» en Números del día.`);
+  const activos = hoy.motorizados.filter((m) => (m.estado ?? 'activo') === 'activo').length;
+  if (vivas.length && !activos) general.push('No hay ningún motorizado activo: los pedidos listos no tienen a quién ir.');
   if (hoy.cierrePendiente) general.push(`Quedan ${hoy.cierrePendiente} pedido(s) vivos de días anteriores: falta cerrar el día.`);
   if (hoy.gsgCola && (hoy.gsgCola.fallido || hoy.gsgCola.atascado)) general.push(`GSG no aceptó ${hoy.gsgCola.fallido + hoy.gsgCola.atascado} aviso(s) (fallidos o atascados en la cola).`);
   if (vivas.length) {
@@ -393,6 +408,7 @@ const reportesDia = def({
     const mejor = [...porMotorizado].sort((a, b) => b.entregadas - a.entregadas)[0];
     const frases = [
       `Hoy (${hoy.dia}): ${c.total ?? hoy.entregas.length} pedido(s); ${c.entregada ?? 0} entregado(s), ${(c.avisada ?? 0) + (c.terminada ?? 0) + (c.esperando_motorizado ?? 0) + (c.lista ?? 0)} en camino o por salir, ${c.cancelada ?? 0} cancelado(s), ${c.incidencia ?? 0} con incidencia y ${c.faltaUbicacion ?? 0} sin ubicación.`,
+      porMotorizado.length ? `Motorizados: ${porMotorizado.map((f) => `${f.motorizado} ${f.entregadas} entregado(s)${f.tiempoMedio ? ` (media ${f.tiempoMedio})` : ''}`).join(', ')}${mejor && mejor.entregadas ? `; el que más, ${mejor.motorizado}` : ''}.` : 'Ningún motorizado con pedidos todavía.',
       h ? `Mensajes: ${h.enviados} enviados, ${h.entrantes} recibidos, ${h.fallidos} fallidos y ${frenados} frenados por el sistema.` : frenados ? `${frenados} mensaje(s) frenados por el sistema.` : '',
     ];
     const otros = desde !== hasta ? { mensajesPorDia: semana, aviso: 'De los días pasados del rango solo hay cifras de mensajes; los pedidos son solo de hoy.' } : {};

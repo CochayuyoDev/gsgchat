@@ -64,7 +64,7 @@ function abrirCarga(opciones) {
         '<div class="campo"><label for="carga-nombre">Nombre de esta corrida (opcional)</label><input id="carga-nombre" maxlength="120" autocomplete="off"></div>' +
         '<div class="campo"><label for="carga-tabla">Pega aquí la lista (copiada de Excel o de un CSV)</label><textarea id="carga-tabla" spellcheck="false"></textarea><p class="pista" id="carga-pista"></p></div>' +
         '<div class="fila-archivo"><button type="button" id="carga-archivo-btn">📎 Subir un Excel o CSV</button><input type="file" id="carga-archivo" accept=".xlsx,.csv,.txt,.tsv" hidden><span id="carga-archivo-nombre">Ningún archivo elegido</span>' +
-        (false ? '<button type="button" id="carga-motorizados">Traer a los motorizados</button>' : '') + '</div>' +
+        (opciones.motorizados ? '<button type="button" id="carga-motorizados">Traer a los motorizados</button>' : '') + '</div>' +
         '<div class="mal" id="carga-mal" role="alert"></div>' +
         '<div class="botones"><button type="button" id="carga-no">Cancelar</button><button type="button" class="principal" id="carga-si">Cargar y empezar</button></div>' +
       '</div>';

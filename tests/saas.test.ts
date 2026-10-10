@@ -34,7 +34,7 @@ import {
 
 const CFG: ConfigSaas = {
   dominioBase: 'wa.tuservicio.com',
-  mariadbPassword: 'secreta',
+  postgresPassword: 'secreta',
   pais: 'peru',
   zonaHoraria: 'America/Lima',
   geoBbox: 'none',
@@ -89,9 +89,9 @@ describe('nombres y configuracion', () => {
   });
 
   it('saas/.env se lee con valores por defecto y lo del entorno manda', () => {
-    writeFileSync(path.join(base, '.env'), '# comentario\nDOMINIO_BASE=https://WA.Ejemplo.com/\nMARIADB_PASSWORD="clave"\nPAIS=mexico\nMAESTRO_PUERTO=4000\n');
+    writeFileSync(path.join(base, '.env'), '# comentario\nDOMINIO_BASE=https://WA.Ejemplo.com/\nPOSTGRES_PASSWORD="clave"\nPAIS=mexico\nMAESTRO_PUERTO=4000\n');
     const cfg = leerConfigSaas(base, {});
-    expect(cfg).toMatchObject({ dominioBase: 'wa.ejemplo.com', mariadbPassword: 'clave', pais: 'mexico', maestroPuerto: 4000, maestroUsuario: 'maestro', geoBbox: 'none' });
+    expect(cfg).toMatchObject({ dominioBase: 'wa.ejemplo.com', postgresPassword: 'clave', pais: 'mexico', maestroPuerto: 4000, maestroUsuario: 'maestro', geoBbox: 'none' });
     expect(leerConfigSaas(base, { DOMINIO_BASE: 'otro.com' }).dominioBase).toBe('otro.com');
     expect(leerConfigSaas(path.join(base, 'no-existe'), {}).dominioBase).toBe('localhost');
   });
@@ -101,7 +101,7 @@ describe('los ficheros de una instancia', () => {
   it('el .env apunta a SU base, SU Redis y SU URL', () => {
     const env = generarEnv('tienda1', CFG, { nombre: 'Zapateria', proveedor: 'cloud', extra: { GOOGLE_MAPS_API_KEY: 'k' } });
     expect(env).toContain('PUBLIC_BASE_URL=https://tienda1.wa.tuservicio.com');
-    expect(env).toContain('DATABASE_URL=mysql://wa:secreta@wa-saas-mariadb:3306/wa_tienda1');
+    expect(env).toContain('DATABASE_URL=postgres://wa:secreta@wa-saas-postgres:5432/wa_tienda1');
     expect(env).toContain('REDIS_URL=redis://wa-tienda1-redis:6379');
     expect(env).toContain('WHATSAPP_PROVIDER=cloud');
     expect(env).toContain('BUSINESS_NAME=Zapateria');
@@ -141,18 +141,11 @@ describe('alta y baja', () => {
     expect(JSON.parse(readFileSync(path.join(dir, 'instancia.json'), 'utf8'))).toMatchObject({ slug: 'tienda1' });
     expect(readFileSync(path.join(base, 'caddy', 'instancias', 'tienda1.caddy'), 'utf8')).toContain('reverse_proxy wa-tienda1:3000');
 
-    expect(llamadas.map((l) => l.slice(0, 2).join(' '))).toEqual(['docker exec', 'docker exec', 'docker compose', 'docker exec']);
-    // La base y los permisos, como root dentro del MariaDB comun (la clave por el entorno).
-    expect(llamadas[0]).toContain('wa-saas-mariadb');
-    expect(llamadas[0]).toContain('MYSQL_PWD=secreta');
-    expect(llamadas[0]!.join(' ')).toContain('create database wa_tienda1 character set utf8mb4 collate utf8mb4_bin');
-    // El usuario wa puede con wa_tienda1 y con las bases de sus tiendas (wa_tienda1_*), y con nada mas.
-    expect(llamadas[1]).toContain('wa-saas-mariadb');
-    expect(llamadas[1]!.join(' ')).toContain("grant all privileges on `wa\\_tienda1`.* to 'wa'@'%'; grant all privileges on `wa\\_tienda1\\_%`.* to 'wa'@'%'");
-    expect(llamadas[2]).toContain(path.join(dir, 'compose.yml'));
-    expect(llamadas[2]).toContain('--wait');
-    expect(llamadas[3]).toContain('wa-saas-caddy');
-    expect(llamadas[3]).toContain('reload');
+    expect(llamadas.map((l) => l.slice(0, 3).join(' '))).toEqual(['docker exec wa-saas-postgres', 'docker compose -f', 'docker exec wa-saas-caddy']);
+    expect(llamadas[0]).toContain('create database wa_tienda1');
+    expect(llamadas[1]).toContain(path.join(dir, 'compose.yml'));
+    expect(llamadas[1]).toContain('--wait');
+    expect(llamadas[2]).toContain('reload');
 
     expect(listarInstancias(base).map((x) => x.slug)).toEqual(['tienda1']);
     await expect(altaInstancia('tienda1', {}, { cfg: CFG, base, ejecutar })).rejects.toThrow(/ya existe/);
@@ -175,14 +168,12 @@ describe('alta y baja', () => {
   it('si la base ya existia (de una baja anterior) se reutiliza', async () => {
     const conBase: Ejecutor = async (cmd, args) => {
       llamadas.push([cmd, ...args]);
-      if (args.join(' ').includes('create database')) throw Object.assign(new Error('mariadb'), { stderr: "ERROR 1007 (HY000) at line 1: Can't create database 'wa_tienda1'; database exists" });
+      if (args.join(' ').includes('create database')) throw Object.assign(new Error('psql'), { stderr: 'ERROR:  database "wa_tienda1" already exists' });
       return { stdout: '', stderr: '' };
     };
     const registro: string[] = [];
     await altaInstancia('tienda1', {}, { cfg: CFG, base, ejecutar: conBase, log: (l) => registro.push(l) });
     expect(registro.join('\n')).toContain('ya existia');
-    // Los permisos se dan igual.
-    expect(llamadas.some((l) => l.join(' ').includes('grant all privileges'))).toBe(true);
   });
 
   it('la baja normal para el contenedor y conserva los datos; con --borrar-datos se lleva todo', async () => {
@@ -200,16 +191,9 @@ describe('alta y baja', () => {
 
     await altaInstancia('tienda2', {}, { cfg: CFG, base, ejecutar });
     llamadas = [];
-    // MariaDB contesta con las bases de las tiendas registradas dentro de esa instancia.
-    const conTiendas: Ejecutor = async (cmd, args) => {
-      llamadas.push([cmd, ...args]);
-      if (args.join(' ').includes('information_schema.schemata')) return { stdout: 'schema_name\nwa_tienda2_plataforma\nwa_tienda2_t_abc123\n', stderr: '' };
-      return { stdout: '', stderr: '' };
-    };
-    await bajaInstancia('tienda2', { borrarDatos: true }, { cfg: CFG, base, ejecutar: conTiendas });
+    await bajaInstancia('tienda2', { borrarDatos: true }, { cfg: CFG, base, ejecutar });
     expect(llamadas[1]).toContain('--volumes');
-    const borradas = llamadas.map((l) => l.join(' ')).filter((l) => l.includes('drop database'));
-    expect(borradas.map((l) => /drop database if exists (\S+)/.exec(l)![1])).toEqual(['wa_tienda2_plataforma', 'wa_tienda2_t_abc123', 'wa_tienda2']);
+    expect(llamadas.some((l) => l.join(' ').includes('drop database if exists wa_tienda2'))).toBe(true);
     expect(existsSync(path.join(base, 'instancias', 'tienda2'))).toBe(false);
 
     await expect(bajaInstancia('no-existe', {}, { cfg: CFG, base, ejecutar })).rejects.toThrow(/no existe/);

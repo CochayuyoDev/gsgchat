@@ -110,12 +110,11 @@ const CON_CONTACTO = `select p.*, c.phone as contacto_telefono, c.name as contac
 export function createPedidosRepo(pool: Pool): PedidosRepo {
   return {
     async crear(p) {
-      const { insertId } = await pool.query(
+      const { rows } = await pool.query<Row>(
         `insert into pedidos_chat (contact_id, items, total, moneda, nombre, telefono, direccion, referencia, pago, notas, origen)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         values ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
         [p.contactId, JSON.stringify(p.items), p.total, p.moneda ?? 'PEN', p.nombre ?? null, p.telefono ?? null, p.direccion ?? null, p.referencia ?? null, p.pago ?? null, p.notas ?? null, p.origen ?? 'ia'],
       );
-      const { rows } = await pool.query<Row>('select * from pedidos_chat where id = $1', [insertId]);
       return deFila(rows[0]!);
     },
     async obtener(id) {
@@ -129,25 +128,24 @@ export function createPedidosRepo(pool: Pool): PedidosRepo {
         params.push(q.estado);
         where = `where p.estado = $${params.length}`;
       }
-      const { rows: cuenta } = await pool.query<{ n: number }>(`select count(*) as n from pedidos_chat p ${where}`, params);
-      params.push(Number(q.limit), Number(q.offset));
+      const { rows: cuenta } = await pool.query<{ n: number }>(`select count(*)::int as n from pedidos_chat p ${where}`, params);
+      params.push(q.limit, q.offset);
       const { rows } = await pool.query<Row>(`${CON_CONTACTO} ${where} order by p.id desc limit $${params.length - 1} offset $${params.length}`, params);
       return { items: rows.map(deFila), total: cuenta[0]?.n ?? 0 };
     },
     async porContacto(contactId, limit) {
-      const { rows } = await pool.query<Row>(`select * from pedidos_chat where contact_id = $1 order by id desc limit $2`, [contactId, Number(limit)]);
+      const { rows } = await pool.query<Row>(`select * from pedidos_chat where contact_id = $1 order by id desc limit $2`, [contactId, limit]);
       return rows.map(deFila);
     },
     async cambiarEstado(id, estado, externoId) {
-      await pool.query(
-        `update pedidos_chat set estado = $2, externo_id = coalesce($3, externo_id), updated_at = now(3) where id = $1`,
+      const { rows } = await pool.query<Row>(
+        `update pedidos_chat set estado = $2, externo_id = coalesce($3, externo_id), updated_at = now() where id = $1 returning *`,
         [id, estado, externoId ?? null],
       );
-      const { rows } = await pool.query<Row>('select * from pedidos_chat where id = $1', [id]);
       return rows[0] ? deFila(rows[0]) : null;
     },
     async contarPorEstado() {
-      const { rows } = await pool.query<{ estado: string; n: number }>(`select estado, count(*) as n from pedidos_chat group by estado`);
+      const { rows } = await pool.query<{ estado: string; n: number }>(`select estado, count(*)::int as n from pedidos_chat group by estado`);
       return Object.fromEntries(rows.map((r) => [r.estado, r.n]));
     },
   };

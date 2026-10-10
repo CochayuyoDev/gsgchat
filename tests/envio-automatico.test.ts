@@ -26,7 +26,7 @@ import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -53,7 +53,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
+const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
 /** Un martes a las 11 de la manana en Lima: dentro del horario. */
 const HORA_BUENA = new Date('2026-09-15T16:00:00Z');
 const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, negocio: 'La Tienda', esperaRespuestaMinutos: 180 };

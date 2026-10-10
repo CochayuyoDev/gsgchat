@@ -15,7 +15,7 @@ import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -136,7 +136,7 @@ describe('/admin/actividad', () => {
   it('un operador o una clave de API no la leen', async () => {
     const rosa = cookieDe(await app.inject({ method: 'POST', url: '/login', payload: { usuario: 'rosa', clave: 'rosa-clave-1' }, remoteAddress: '10.0.0.8' }));
     expect((await app.inject({ method: 'GET', url: '/admin/actividad', headers: { cookie: rosa } })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'GET', url: '/admin/actividad', headers: { 'x-api-key': CLAVE_API_PRUEBA } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/admin/actividad', headers: { authorization: `Bearer ${CLAVE_API_PRUEBA}` } })).statusCode).toBe(403);
     // Pero su entrada si quedo apuntada, con su nombre.
     const r = (await app.inject({ method: 'GET', url: '/admin/actividad?accion=entrar', headers: { cookie: admin } })).json();
     expect(r.items[0]).toMatchObject({ usuario: 'Rosa', accion: 'entrar' });

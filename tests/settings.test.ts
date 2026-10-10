@@ -10,7 +10,7 @@ import path from 'node:path';
 
 const BARE_ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   TRACKING_SECRET: 'x'.repeat(40),
 } as NodeJS.ProcessEnv;
 

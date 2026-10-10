@@ -2,7 +2,7 @@
  * La clave de API de prueba del Modulo desarrollador.
  *
  * Los pedidos de prueba entran por la API publica igual que llegarian de GSG
- * (POST /api/v1/entregas con la cabecera `X-API-Key: wak_...`), asi el
+ * (POST /api/v1/entregas con `Authorization: Bearer wak_...`), asi el
  * generador prueba tambien el endpoint, la clave y sus permisos. La clave se
  * crea para cada tanda, solo con permisos de entregas, se usa por dentro
  * (app.inject) y se revoca al terminar: nunca sale a la pantalla y no queda

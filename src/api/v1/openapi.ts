@@ -33,9 +33,9 @@ export function openApi(baseUrl: string): Json {
       title: 'GSGchat: API publica',
       version: '1.0.0',
       description: [
-        'La puerta para GSG y otros sistemas autorizados. Se entra con una clave de API',
-        'creada en API y endpoint GSG, con los permisos justos, en la cabecera',
-        '`X-API-Key: <API Key>`.',
+        'La puerta para otros sistemas (Stoky, GSG, scripts). Se entra con una clave de API',
+        'creada en el panel (Integraciones), con los permisos justos, en la cabecera',
+        '`Authorization: Bearer wak_...`.',
         '',
         'Enviar nunca se salta las guardas anti-bloqueo: un mensaje frenado por un gate',
         'responde 202 con `estado: "bloqueado"` y el motivo, no 200.',
@@ -145,15 +145,35 @@ export function openApi(baseUrl: string): Json {
           summary: 'Canjear un codigo de conexion por una clave de API (sin clave previa)',
           description: [
             'Un administrador crea en el panel un codigo corto (WA-XXXX-XXXX) con fecha limite, usos y permisos. El otro sistema',
-            'lo manda aqui, sin clave (sin X-API-Key), y recibe su API Key con esos permisos y la direccion de este sistema. Cada',
+            'lo manda aqui, sin Authorization, y recibe su clave `wak_` con esos permisos y la direccion de este sistema. Cada',
             'codigo vale los usos que se le dieron (normalmente uno) y hasta su fecha; despues responde 404. Hay tope de',
             'intentos por direccion (429). El codigo se acepta como lo escriba la gente: minusculas, sin guiones, con espacios.',
           ].join(' '),
           requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { codigo: { type: 'string', example: 'WA-K7M3-9QXZ' }, sistema: { type: 'string', description: 'Quien canjea, para la lista (opcional)', example: 'Stoky CRM' } }, required: ['codigo'] } } } },
-          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, clave: { type: 'string', example: 'Xq3f9aK2...' }, direccion: { type: 'string' }, para: { type: 'string' }, permisos: { type: 'array', items: { type: 'string' } }, usosRestantes: { type: 'integer' } } }), 404: error('El codigo no vale: no existe, ya se uso, caduco o fue anulado'), 409: error('Se acaba de usar'), 429: error('Demasiados intentos') },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, clave: { type: 'string', example: 'wak_...' }, direccion: { type: 'string' }, para: { type: 'string' }, permisos: { type: 'array', items: { type: 'string' } }, usosRestantes: { type: 'integer' } } }), 404: error('El codigo no vale: no existe, ya se uso, caduco o fue anulado'), 409: error('Se acaba de usar'), 429: error('Demasiados intentos') },
         },
       },
-
+      '/stoky/conexion': {
+        get: {
+          tags: ['stoky'],
+          summary: 'Como esta la conexion de este sistema hacia Stoky (catalogo y panel), sin el token',
+          ...permiso('stoky:conectar'),
+          responses: { 200: json({ type: 'object', properties: { configurada: { type: 'boolean' }, url: { type: 'string' }, panelUrl: { type: 'string' }, origen: { type: 'string', enum: ['pantalla', 'stoky', 'env', 'ninguna'] }, tienda: { type: 'string', nullable: true }, almacen: { type: 'string', nullable: true }, ultimaPrueba: { type: 'object', nullable: true } } }), 401: error('Sin clave'), 403: error('Sin permiso') },
+        },
+        post: {
+          tags: ['stoky'],
+          summary: 'Stoky se presenta: su direccion, su token de conexion de tienda y su panel',
+          description: [
+            'Es lo que hace que vincular Stoky con este WhatsApp sea un solo boton del lado de Stoky: con la clave `wak_` que',
+            'la tienda pego en Stoky, Stoky manda aqui la direccion de su API, un token `stk_` de una conexion de tienda',
+            '(para que el asistente consulte precios y stock y tome pedidos) y la direccion de su panel (para registrar la',
+            'venta). Se guarda cifrado y se prueba en el acto; la respuesta dice si Stoky respondio y cuantos productos hay.',
+          ].join(' '),
+          ...permiso('stoky:conectar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', example: 'http://localhost:8102' }, token: { type: 'string', example: 'stk_...' }, panelUrl: { type: 'string', example: 'https://stoky.miempresa.com' } }, required: ['url', 'token'] } } } },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, configurada: { type: 'boolean' }, prueba: { type: 'object', properties: { ok: { type: 'boolean' }, tienda: { type: 'string' }, almacen: { type: 'string' }, productos: { type: 'integer' }, detalle: { type: 'string' } } } } }), 400: error('Direccion o token invalidos'), 401: error('Sin clave'), 403: error('Sin permiso') },
+        },
+      },
 
       '/estado': {
         get: {
@@ -233,7 +253,34 @@ export function openApi(baseUrl: string): Json {
           responses: { 200: { description: 'Flujo de eventos', content: { 'text/event-stream': { schema: { type: 'string' } } } }, 503: error('El flujo no esta activo en este arranque') },
         },
       },
-
+      '/embed/token': {
+        post: {
+          tags: ['embebido'],
+          summary: 'Un token corto para la pantalla de chat embebida',
+          description:
+            'Lo pide el SERVIDOR de la otra web con su clave; el token es lo que viaja al navegador y se le pasa a `WA.montar` (embed.js). ' +
+            'Caduca (60 min por defecto, 12 h como mucho). Con `telefono`, solo abre ese hilo. Los permisos se acotan a los del chat y a los de la propia clave.',
+          ...permiso('embed:emitir'),
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['operador'],
+                  properties: {
+                    operador: { type: 'string', description: 'quien tiene la pantalla abierta, como lo llama el otro sistema' },
+                    telefono: { type: 'string', description: 'limitar el token a este hilo' },
+                    permisos: { type: 'array', items: { type: 'string' }, description: 'por defecto: mensajes:enviar, conversaciones:leer, contactos:leer, plantillas:leer, estado:leer' },
+                    duracionMin: { type: 'integer', default: 60, maximum: 720 },
+                  },
+                },
+              },
+            },
+          },
+          responses: { 200: json({ type: 'object', properties: { token: { type: 'string' }, caduca: { type: 'string', format: 'date-time' }, permisos: { type: 'array', items: { type: 'string' } }, url: { type: 'string', description: 'la pagina que embebe el iframe' } } }) },
+        },
+      },
 
       '/contactos': {
         get: {
@@ -292,40 +339,24 @@ export function openApi(baseUrl: string): Json {
         patch: { tags: ['pedidos'], summary: 'Cambiar el estado (confirmado, cancelado, enviado_tienda con su externoId)', ...permiso('pedidos:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['estado'], properties: { estado: { type: 'string', enum: ['nuevo', 'confirmado', 'cancelado', 'enviado_tienda'] }, externoId: { type: 'string' } } } } } }, responses: { 200: json({ type: 'object' }), 404: error('No existe') } },
       },
       '/entregas': {
-        get: { tags: ['entregas'], summary: 'Las entregas del dia: como va cada pedido (ubicacion y confirmacion)', ...permiso('entregas:leer'), responses: { 200: json({ type: 'object', properties: { dia: { type: 'string' }, cifras: { type: 'object' }, entregas: { type: 'array', items: { type: 'object' } }, motorizados: { type: 'array', items: { type: 'object' } } } }) } },
+        get: { tags: ['entregas'], summary: 'Las entregas del dia: como va cada pedido (ubicacion, confirmacion, motorizado, hora de llegada)', ...permiso('entregas:leer'), responses: { 200: json({ type: 'object', properties: { dia: { type: 'string' }, cifras: { type: 'object' }, entregas: { type: 'array', items: { type: 'object' } }, motorizados: { type: 'array', items: { type: 'object' } } } }) } },
         post: {
           tags: ['entregas'],
           summary: 'GSG empuja: uno o varios pedidos de hoy (sin esperar a que se le pregunte)',
           description: [
-            'Obligatorios en cada pedido (lo que GSG manda siempre): `tracking`, `cliente`, `telefono`, `empresa`, `metodoPago` y `montoCobrar`. Opcionales: `distrito`, `direccion`, `fecRuta`, `telefono2`, `producto` y `cantBultos`. Si falta uno, 400 con `detalles` campo por campo y no se guarda ninguno de la llamada. Con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
-            'La clave decide la tienda: 401 sin clave, con una que no existe o revocada; 403 si es valida pero sin `entregas:gestionar`; 404 si se usa la ruta con nombre de tienda; 409 si la clave esta en dos tiendas.',
-            'Cada pedido creado vuelve con su `id` (el de este sistema, leido de la base tras guardarlo; el de GSG va en `idExterno`) y su `mensaje` (el primer mensaje al cliente: retenido, encolado, enviado, reintentando, fallido o incierto). Si el pedido se guardo pero su mensaje no salio, la respuesta sigue siendo 201 y lo cuenta en `avisosMensaje`.',
+            'La unica via por la que entran los pedidos (GSGchat nunca le pide nada a GSG), pedido a pedido: `referencia` y `telefono` obligatorios; con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
             '`faltaUbicacion` (por defecto true) y `faltaConfirmar` (por defecto true) dicen que le falta a cada uno; `urgente` lo pone primero hacia el motorizado.',
-            'Se acepta un pedido suelto, una lista `[...]` o `{ pedidos: [...] }` (hasta 600). Un pedido repetido hoy no se duplica (`repetidas`); uno sin telefono valido va en `descartadas` con su motivo.',
+            'Se acepta un pedido suelto, una lista `[...]` o `{ pedidos: [...] }` (hasta 500). Un pedido repetido hoy no se duplica (`repetidas`); uno sin telefono valido va en `descartadas` con su motivo.',
             'Lo que pasa despues (confirmo, se le aviso la hora, se entrego, incidencia) llega por los webhooks `entrega.*`.',
           ].join(' '),
           ...permiso('entregas:gestionar'),
           requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [ref('PedidoGsg'), { type: 'array', items: ref('PedidoGsg') }, { type: 'object', properties: { pedidos: { type: 'array', items: ref('PedidoGsg') } } }] } } } },
-          servers: [{ url: `${new URL(baseUrl).origin}/api/v1` }],
           responses: {
-            201: json({ type: 'object', properties: { ok: { type: 'boolean' }, creadas: { type: 'array', items: ref('EntregaDia') }, repetidas: { type: 'array', items: { type: 'string' } }, existentes: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, id: { type: 'integer', nullable: true } } } }, descartadas: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, motivo: { type: 'string' } } } }, avisosMensaje: { type: 'array', items: { type: 'object' } }, detalle: { type: 'string' } } }, 'Al menos un pedido nuevo, guardado (con su id real)'),
-            200: json({ type: 'object' }, 'Nada nuevo: todo ya estaba (`existentes` trae sus ids). Repetir la misma llamada es seguro'),
-            400: error('VALIDACION (faltan campos o no tienen el formato; o ningun pedido tenia un telefono valido) o JSON_INVALIDO'),
-            401: error('CLAVE_AUSENTE, CLAVE_INVALIDA o CLAVE_REVOCADA (con WWW-Authenticate)'),
-            403: error('SIN_PERMISO (la clave no tiene entregas:gestionar) o TIENDA_SUSPENDIDA'),
-            404: error('RUTA_NO_EXISTE: la recepcion con /tienda/<nombre> no existe; se usa POST /api/v1/entregas'),
-            405: { ...error('METODO_NO_PERMITIDO: método no admitido en la ruta'), headers: { Allow: { schema: { type: 'string' }, description: 'Métodos admitidos: GET, HEAD, POST' } } },
-            409: error('CLAVE_AMBIGUA: la clave esta registrada en mas de una tienda'),
-            413: error('CUERPO_DEMASIADO_GRANDE: más de 4 MiB; dividir la llamada'),
-            415: error('TIPO_CONTENIDO_NO_SOPORTADO: se exige Content-Type: application/json'),
-            429: error('DEMASIADAS_PETICIONES: mas de 120 por minuto con esta clave (con Retry-After)'),
-            500: error('ERROR_INTERNO: no se guardo nada seguro; repetir la misma llamada no duplica'),
-            503: error('BASE_NO_DISPONIBLE: la base no contesta (con Retry-After); repetir la misma llamada no duplica'),
+            201: json({ type: 'object', properties: { ok: { type: 'boolean' }, creadas: { type: 'array', items: ref('EntregaDia') }, repetidas: { type: 'array', items: { type: 'string' } }, descartadas: { type: 'array', items: { type: 'object', properties: { referencia: { type: 'string' }, motivo: { type: 'string' } } } }, detalle: { type: 'string' } } }, 'Al menos un pedido nuevo'),
+            200: json({ type: 'object' }, 'Nada nuevo (todo repetido o descartado)'),
+            400: error('El cuerpo no se entiende'),
           },
         },
-      },
-      '/entregas/sincronizar': {
-        post: { tags: ['entregas'], summary: 'Pedirle a GSG los pendientes ahora (GET /reparto/pendientes), sin esperar los 5 minutos', ...permiso('entregas:gestionar'), responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, detalle: { type: 'string' }, nuevas: { type: 'integer' }, actualizadas: { type: 'integer' } } }) } },
       },
       '/entregas/{referencia}': {
         get: { tags: ['entregas'], summary: 'Como va ese pedido hoy, con sus eventos', ...permiso('entregas:leer'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' }, description: 'La referencia del pedido (o su id en GSG)' }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), eventos: { type: 'array', items: { type: 'object', properties: { en: { type: 'string' }, tipo: { type: 'string' }, detalle: { type: 'string', nullable: true } } } } } }), 404: error('No hay ningun pedido de hoy con esa referencia') } },
@@ -339,9 +370,31 @@ export function openApi(baseUrl: string): Json {
         },
         delete: { tags: ['entregas'], summary: 'Cancelar ese pedido (GSG lo dio de baja)', ...permiso('entregas:gestionar'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' } }, { name: 'motivo', in: 'query', schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), detalle: { type: 'string' } } }), 404: error('No existe'), 409: error('Ya estaba entregado o cancelado') } },
       },
-
-
-
+      '/procesos': {
+        get: { tags: ['procesos'], summary: 'Los procesos de la empresa (pedir datos, confirmaciones, avisos al personal, cobranza): sus pasos y cuántas personas tiene cada uno en curso', ...permiso('procesos:gestionar'), responses: { 200: json({ type: 'object', properties: { procesos: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, nombre: { type: 'string' }, plantilla: { type: 'string', nullable: true }, estado: { type: 'string', enum: ['activo', 'pausado', 'archivado'] }, pasos: { type: 'array', items: { type: 'object' } }, personas: { type: 'object' } } } } } }) } },
+      },
+      '/procesos/{id}/personas': {
+        post: {
+          tags: ['procesos'],
+          summary: 'Cargar personas en un proceso: crea una corrida y el sistema empieza a escribirles con su ritmo',
+          description: [
+            'Cada fila lleva `telefono` (obligatorio) y `nombre`; las demás columnas (fecha, hora, monto, tarea, vencimiento...) quedan como datos de la persona y se usan en los mensajes del proceso.',
+            'Se acepta `personas` o `filas` (hasta 5000), `texto` (una tabla CSV o pegada de Excel) o `xlsxBase64` (un Excel). Un teléfono repetido se deja una vez; uno que no sirve entra marcado «no se le puede escribir» con su motivo.',
+            'A quien se dio de baja o ya está en otra corrida en curso no se le escribe. Lo que responde cada persona se consulta en GET /procesos/corridas/{id}.',
+          ].join(' '),
+          ...permiso('procesos:gestionar'),
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { nombre: { type: 'string', description: 'Nombre de la corrida' }, personas: { type: 'array', items: { type: 'object', required: ['telefono'], properties: { telefono: { type: 'string' }, nombre: { type: 'string' } }, additionalProperties: { type: 'string' } } }, texto: { type: 'string' }, xlsxBase64: { type: 'string' } } } } } },
+          responses: { 201: json({ type: 'object', properties: { ok: { type: 'boolean' }, corrida: { type: 'object', properties: { id: { type: 'integer' }, nombre: { type: 'string' } } }, total: { type: 'integer' }, listas: { type: 'integer' }, conError: { type: 'integer' }, duplicadas: { type: 'integer' }, aviso: { type: 'string' } } }, 'Corrida creada con personas a las que escribir'), 200: json({ type: 'object' }, 'Corrida creada, pero a nadie se le puede escribir'), 400: error('La lista no se entiende o el proceso no tiene pasos'), 404: error('El proceso no existe') },
+        },
+      },
+      '/procesos/corridas/{id}': {
+        get: { tags: ['procesos'], summary: 'Cómo va una corrida: el estado de cada persona y todo lo que respondió, paso por paso', ...permiso('procesos:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: json({ type: 'object', properties: { corrida: { type: 'object' }, cifras: { type: 'object' }, personas: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, telefono: { type: 'string' }, nombre: { type: 'string', nullable: true }, estado: { type: 'string', enum: ['pendiente', 'esperando', 'programada', 'persona', 'completada', 'sin_respuesta', 'rechazo', 'cancelada', 'error'] }, paso: { type: 'integer' }, respuestas: { type: 'object' }, motivo: { type: 'string', nullable: true } } } } } }), 404: error('No existe') } },
+      },
+      '/motorizados': {
+        get: { tags: ['entregas'], summary: 'Los motorizados: quien esta activo, que lleva hoy y su ultima posicion', ...permiso('entregas:leer'), responses: { 200: json({ type: 'object', properties: { motorizados: { type: 'array', items: { type: 'object' } } } }) } },
+        post: { tags: ['entregas'], summary: 'Dar de alta un motorizado (telefono, nombre, placa, zona)', ...permiso('entregas:gestionar'), requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['telefono', 'nombre'], properties: { telefono: { type: 'string' }, nombre: { type: 'string' }, placa: { type: 'string' }, zona: { type: 'string' }, estado: { type: 'string', enum: ['activo', 'descanso', 'baja'] } } } } } }, responses: { 200: json({ type: 'object' }), 400: error('Telefono o nombre invalidos') } },
+      },
       '/webhooks': {
         get: { tags: ['webhooks'], summary: 'Los webhooks registrados', ...permiso('webhooks:gestionar'), responses: { 200: json({ type: 'object' }) } },
         post: {
@@ -373,41 +426,62 @@ export function openApi(baseUrl: string): Json {
       '/webhooks/{id}/reencolar': {
         post: { tags: ['webhooks'], summary: 'Volver a intentar las entregas fallidas', ...permiso('webhooks:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { reencoladas: { type: 'integer' } } }) } },
       },
-
-
-
-
-
-
+      '/conectores/opciones': {
+        get: { tags: ['conectores'], summary: 'Tipos de tienda, eventos, variables y plantillas aprobadas para armar las reglas', ...permiso('conectores:gestionar'), responses: { 200: json({ type: 'object' }) } },
+      },
+      '/conectores': {
+        get: { tags: ['conectores'], summary: 'Los conectores de tiendas, con la URL que se pega en cada una', ...permiso('conectores:gestionar'), responses: { 200: json({ type: 'object', properties: { conectores: { type: 'array', items: ref('Conector') } } }) } },
+        post: {
+          tags: ['conectores'],
+          summary: 'Crear un conector. Devuelve la URL y el secreto',
+          description:
+            'WooCommerce: el secreto se genera aqui y se escribe en WooCommerce > Ajustes > Avanzado > Webhooks. ' +
+            'Shopify: el secreto lo ensena Shopify en Configuracion > Notificaciones > Webhooks y se manda en `secreto`.',
+          ...permiso('conectores:gestionar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['tipo', 'nombre'], properties: { tipo: { type: 'string', enum: ['woocommerce', 'shopify'] }, nombre: { type: 'string' }, secreto: { type: 'string' }, reglas: { type: 'array', items: ref('ReglaConector') } } } } } },
+          responses: { 201: json({ type: 'object', properties: { conector: ref('Conector'), secreto: { type: 'string' } } }) },
+        },
+      },
+      '/conectores/{id}': {
+        get: { tags: ['conectores'], summary: 'Un conector', ...permiso('conectores:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { conector: ref('Conector') } }), 404: error('No existe') } },
+        patch: {
+          tags: ['conectores'],
+          summary: 'Cambiar nombre, reglas o pausarlo',
+          ...permiso('conectores:gestionar'),
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { nombre: { type: 'string' }, activo: { type: 'boolean' }, reglas: { type: 'array', items: ref('ReglaConector') } } } } } },
+          responses: { 200: json({ type: 'object' }), 404: error('No existe') },
+        },
+        delete: { tags: ['conectores'], summary: 'Borrarlo', ...permiso('conectores:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: json(ref('Ok')), 404: error('No existe') } },
+      },
+      '/conectores/{id}/secreto': {
+        post: { tags: ['conectores'], summary: 'Secreto nuevo: el que se pase (Shopify) o uno generado (WooCommerce)', ...permiso('conectores:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { secreto: { type: 'string' } } } } } }, responses: { 200: json({ type: 'object', properties: { secreto: { type: 'string' } } }) } },
+      },
+      '/conectores/{id}/entradas': {
+        get: { tags: ['conectores'], summary: 'Lo que llego de la tienda y que se hizo con cada pedido', ...permiso('conectores:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'limite', in: 'query', schema: { type: 'integer', default: 50 } }], responses: { 200: json({ type: 'object', properties: { entradas: { type: 'array', items: ref('EntradaConector') } } }) } },
+      },
+      '/conectores/{id}/probar': {
+        post: {
+          tags: ['conectores'],
+          summary: 'Simular un pedido y mandar el mensaje de la regla a un telefono real',
+          ...permiso('conectores:gestionar'),
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['telefono'], properties: { evento: { type: 'string', enum: ['pedido.creado', 'pedido.pagado', 'pedido.enviado', 'pedido.completado', 'pedido.cancelado', 'pedido.actualizado'], default: 'pedido.creado' }, telefono: { type: 'string' }, nombre: { type: 'string' }, numero: { type: 'string' }, total: { type: 'string' } } } } } },
+          responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, resultado: { type: 'string' }, detalle: { type: 'string', nullable: true } } }) },
+        },
+      },
       '/webhooks/{id}/probar': {
         post: { tags: ['webhooks'], summary: 'Mandar ahora un evento `prueba.ping` y ver que contesta la URL', ...permiso('webhooks:gestionar'), parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, codigo: { type: 'integer', nullable: true }, respuesta: { type: 'string', nullable: true }, error: { type: 'string', nullable: true } } }) } },
       },
     },
     components: {
-      securitySchemes: {
-        claveApi: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'API Key creada en el panel, con permisos, en la cabecera X-API-Key' },
-      },
+      securitySchemes: { claveApi: { type: 'http', scheme: 'bearer', description: 'Clave de API `wak_...` creada en el panel, con permisos' } },
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },
-        Error: {
-          type: 'object',
-          required: ['error'],
-          properties: {
-            ok: { type: 'boolean', enum: [false] },
-            codigo: { type: 'string', description: 'Estable, para comparar desde otro sistema: VALIDACION, JSON_INVALIDO, METODO_NO_PERMITIDO, CUERPO_DEMASIADO_GRANDE, TIPO_CONTENIDO_NO_SOPORTADO, CLAVE_AUSENTE, CLAVE_INVALIDA, CLAVE_REVOCADA, SIN_PERMISO, TIENDA_SUSPENDIDA, RUTA_NO_EXISTE, NO_EXISTE, CLAVE_AMBIGUA, CONFLICTO, MENSAJE_EN_CURSO, MENSAJE_YA_ENVIADO, RESULTADO_INCIERTO, ESPERA_CONFIRMACION, DEMASIADAS_PETICIONES, BASE_NO_DISPONIBLE, ERROR_INTERNO' },
-            error: { type: 'string', description: 'El motivo en palabras' },
-            detalles: { description: 'Campo por campo cuando aplica', oneOf: [{ type: 'array', items: { type: 'object', properties: { campo: { type: 'string' }, mensaje: { type: 'string' } } } }, { type: 'object' }] },
-          },
-        },
+        Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
         PedidoGsg: {
           type: 'object',
-          description: 'Obligatorios: tracking (o codigoTracking), cliente (o nombre), telefono, empresa, metodoPago y montoCobrar (o monto). Opcionales del contrato: distrito, direccion, fecRuta, telefono2, producto, cantBultos. Los demas campos se aceptan por compatibilidad.',
-          required: ['telefono', 'empresa', 'metodoPago'],
-          allOf: [
-            { anyOf: [{ required: ['tracking'] }, { required: ['codigoTracking'] }, { required: ['referencia'] }] },
-            { anyOf: [{ required: ['cliente'] }, { required: ['nombre'] }] },
-            { anyOf: [{ required: ['montoCobrar'] }, { required: ['monto'] }] },
-          ],
+          required: ['referencia', 'telefono'],
           properties: {
             referencia: { type: 'string', description: 'El numero de pedido en GSG (P-1001)' },
             telefono: { type: 'string', description: 'El WhatsApp del cliente: 987654321 o 51987654321' },
@@ -421,27 +495,6 @@ export function openApi(baseUrl: string): Json {
             faltaUbicacion: { type: 'boolean', default: true },
             faltaConfirmar: { type: 'boolean', default: true },
             urgente: { type: 'boolean', default: false },
-            costServ: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            referenciaDireccion: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            fecRegistro: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            fecRuta: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            horarioEntrega: { type: 'object', nullable: true, required: ['desde', 'hasta'], description: 'Ventana aproximada de GSG. Sin fechas, desde precede a hasta. Para cruzar medianoche se requieren fechaDesde, fechaHasta y zonaHoraria.', properties: { desde: { type: 'string', example: '22:00' }, hasta: { type: 'string', example: '02:00' }, fechaDesde: { type: 'string', format: 'date', example: '2026-10-07' }, fechaHasta: { type: 'string', format: 'date', example: '2026-10-08' }, zonaHoraria: { type: 'string', example: 'America/Lima' } } },
-            observacionCliente: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            detalleProducto: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            telefono2: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            tamano: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            cantBultos: { oneOf: [{ type: 'integer', minimum: 0 }, { type: 'string', pattern: '^[0-9]+$' }], nullable: true },
-            clientePagaDelivery: { oneOf: [{ type: 'boolean' }, { type: 'string', maxLength: 200 }], nullable: true, description: 'Booleanos se guardan como si/no' },
-            sede: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            tipoRuta: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            nroDocumento: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            agenciaNombre: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            agenciaDestino: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            pagoEnDestino: { oneOf: [{ type: 'boolean' }, { type: 'string', maxLength: 200 }], nullable: true, description: 'Booleanos se guardan como si/no' },
-            cliente: { type: 'string', description: 'Alias de nombre' },
-            codigoTracking: { type: 'string', description: 'Alias de tracking; se usa como referencia si se omite referencia' },
-            driver: { oneOf: [{ type: 'string' }, { type: 'object', properties: { nombre: { type: 'string' }, telefono: { type: 'string' } } }] },
-            montoCobrar: { oneOf: [{ type: 'number' }, { type: 'string' }], description: 'Alias de monto' },
             producto: { type: 'string', nullable: true, description: 'Lo que se entrega (sale en el primer mensaje): "Zapatillas talla 40"' },
             empresa: { type: 'object', nullable: true, description: 'La tienda que vende: {codigo: "516", nombre: "Zapatería Lima"}. Tambien se acepta empresaCodigo/empresaNombre o tiendaCodigo/tiendaNombre sueltos', properties: { codigo: { type: 'string', nullable: true }, nombre: { type: 'string', nullable: true } } },
             tracking: { type: 'string', nullable: true, description: 'El codigo de seguimiento de GSG: "GSG-A-102345"' },
@@ -453,27 +506,8 @@ export function openApi(baseUrl: string): Json {
         EntregaDia: {
           type: 'object',
           properties: {
-            id: { type: 'integer', description: 'El id del pedido en este sistema (la fila guardada)' },
-            idExterno: { type: 'string', nullable: true, description: 'El id que mando GSG, si mando uno' },
-            mensaje: { type: 'object', description: 'El primer mensaje al cliente, aparte del pedido', properties: { estado: { type: 'string', enum: ['no_aplica', 'retenido', 'pendiente', 'encolado', 'enviando', 'enviado', 'reintentando', 'fallido', 'incierto'] }, via: { type: 'string', nullable: true, enum: ['ubicacion', 'confirmacion', null] }, intentos: { type: 'integer' }, ultimoIntentoEn: { type: 'string', nullable: true }, proximoIntentoEn: { type: 'string', nullable: true }, enviadoEn: { type: 'string', nullable: true }, codigo: { type: 'string', nullable: true }, motivo: { type: 'string', nullable: true }, permanente: { type: 'boolean' }, puedeReintentar: { type: 'boolean' }, requiereConfirmar: { type: 'boolean' } } },
-            costServ: { type: 'string', nullable: true },
-            referenciaDireccion: { type: 'string', nullable: true },
-            fecRegistro: { type: 'string', nullable: true },
-            fecRuta: { type: 'string', nullable: true },
-            horarioEntrega: { type: 'object', nullable: true, required: ['desde', 'hasta'], description: 'Ventana aproximada de GSG. Sin fechas, desde precede a hasta. Para cruzar medianoche se requieren fechaDesde, fechaHasta y zonaHoraria.', properties: { desde: { type: 'string', example: '22:00' }, hasta: { type: 'string', example: '02:00' }, fechaDesde: { type: 'string', format: 'date', example: '2026-10-07' }, fechaHasta: { type: 'string', format: 'date', example: '2026-10-08' }, zonaHoraria: { type: 'string', example: 'America/Lima' } } },
-            observacionCliente: { type: 'string', nullable: true },
-            detalleProducto: { type: 'string', nullable: true },
-            telefono2: { type: 'string', nullable: true },
-            tamano: { type: 'string', nullable: true },
-            cantBultos: { type: 'string', nullable: true },
-            clientePagaDelivery: { type: 'string', nullable: true },
-            sede: { type: 'string', nullable: true },
-            tipoRuta: { type: 'string', nullable: true },
-            nroDocumento: { type: 'string', nullable: true },
-            agenciaNombre: { type: 'string', nullable: true },
-            agenciaDestino: { type: 'string', nullable: true },
-            pagoEnDestino: { type: 'string', nullable: true },
             referencia: { type: 'string' },
+            id: { type: 'string', nullable: true },
             dia: { type: 'string' },
             telefono: { type: 'string' },
             nombre: { type: 'string', nullable: true },

@@ -25,18 +25,18 @@ describe('dos mensajes seguidos tras la ubicación registrada', () => {
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());
 
-  it('llegan a la vez pidiendo una persona y la derivación sale una sola vez', async () => {
+  it('llegan a la vez y el cierre sale una sola vez', async () => {
     await e.contesta('987000001', { pin: PIN_LIMA });
     const antes = e.textosA('987000001').length;
 
     await Promise.all([
-      e.contesta('987000001', { texto: 'quiero hablar con una persona' }),
-      e.contesta('987000001', { texto: 'pásame con un asesor' }),
+      e.contesta('987000001', { texto: 'Ya se' }),
+      e.contesta('987000001', { texto: 'y cuánto cuesta el envío' }),
     ]);
 
     const cierres = e.textosA('987000001').slice(antes).filter((t) => t.includes('no se reciben consultas'));
@@ -51,7 +51,7 @@ describe('cancelar dos veces seguidas', () => {
     e = await crearEscenarioEntregas({ arranque: hoyALas9() });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());
@@ -82,7 +82,7 @@ describe('un motorizado con dos pedidos de clientes distintos', () => {
     e = await crearEscenarioEntregas({ arranque: hoyALas9() });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados', { telefono: MOTO, nombre: 'Chesco Prueba', zona: 'Miraflores' });
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     for (const [tel, dLat] of [['987000001', 0], ['987000002', 0.004]] as const) {
       await e.contesta(tel, { pin: { lat: PIN_LIMA.lat + dLat, lng: PIN_LIMA.lng } });
@@ -127,15 +127,15 @@ describe('la misma acción repetida seguida se atiende una vez', () => {
     e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());
 
-  it('cinco «jaja» a la vez: silencio (lo ajeno no se contesta)', async () => {
+  it('cinco «jaja» a la vez: una sola insistencia', async () => {
     const antes = e.textosA('987000002').length;
     await Promise.all(Array.from({ length: 5 }, () => e.contesta('987000002', { texto: 'jaja' })));
-    expect(e.textosA('987000002').slice(antes)).toHaveLength(0);
+    expect(e.textosA('987000002').slice(antes)).toHaveLength(1);
   });
 
   it('el mismo pin dos veces a la vez: una sola respuesta', async () => {

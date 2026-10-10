@@ -2,7 +2,7 @@
  * Conectores de tiendas: la configuracion y el registro de lo que llega.
  */
 
-import { nuevoId, type Pool } from '../db/pool.js';
+import { toleranteAlUuid, type Pool } from '../db/pool.js';
 import type { EventoTienda, TipoTienda } from './tiendas.js';
 
 export interface ReglaConector {
@@ -112,44 +112,37 @@ const entradaDeFila = (r: EntradaRow): EntradaConector => ({
   createdAt: r.created_at,
 });
 
-export function createConectoresRepo(pool: Pool): ConectoresRepo {
-  // Los ids son uuid en char(36): uno mal pegado no encuentra nada (un 404).
-  const leer = async (id: string) => (await pool.query<Row>(`select ${COLUMNAS} from conectores where id = $1`, [id])).rows[0] ?? null;
+export function createConectoresRepo(poolCrudo: Pool): ConectoresRepo {
+  // Los ids son uuid: uno mal pegado es un 404, no un 500 (ver toleranteAlUuid).
+  const pool = toleranteAlUuid(poolCrudo);
   return {
     async crear(input) {
-      const id = nuevoId();
-      await pool.query(`insert into conectores (id, tipo, nombre, secreto, reglas, creado_por) values ($1,$2,$3,$4,$5,$6)`, [
-        id,
-        input.tipo,
-        input.nombre,
-        input.secreto,
-        JSON.stringify(input.reglas),
-        input.creadoPor,
-      ]);
-      return sinSecretoConector(deFila((await leer(id))!));
+      const { rows } = await pool.query<Row>(
+        `insert into conectores (tipo, nombre, secreto, reglas, creado_por) values ($1,$2,$3,$4,$5) returning ${COLUMNAS}`,
+        [input.tipo, input.nombre, input.secreto, JSON.stringify(input.reglas), input.creadoPor],
+      );
+      return sinSecretoConector(deFila(rows[0]!));
     },
     async listar() {
       const { rows } = await pool.query<Row>(`select ${COLUMNAS} from conectores order by created_at desc`);
       return rows.map((r) => sinSecretoConector(deFila(r)));
     },
     async obtener(id) {
-      const fila = await leer(id);
-      return fila ? sinSecretoConector(deFila(fila)) : null;
+      const { rows } = await pool.query<Row>(`select ${COLUMNAS} from conectores where id = $1`, [id]);
+      return rows[0] ? sinSecretoConector(deFila(rows[0])) : null;
     },
     async conSecreto(id) {
-      const fila = await leer(id);
-      return fila ? deFila(fila) : null;
+      const { rows } = await pool.query<Row>(`select ${COLUMNAS} from conectores where id = $1`, [id]);
+      return rows[0] ? deFila(rows[0]) : null;
     },
     async actualizar(id, patch) {
-      const { rowCount } = await pool.query(
+      const { rows } = await pool.query<Row>(
         `update conectores
-            set nombre = coalesce($2, nombre), activo = coalesce($3, activo), reglas = coalesce($4, reglas)
-          where id = $1`,
+            set nombre = coalesce($2, nombre), activo = coalesce($3, activo), reglas = coalesce($4::jsonb, reglas)
+          where id = $1 returning ${COLUMNAS}`,
         [id, patch.nombre ?? null, patch.activo ?? null, patch.reglas ? JSON.stringify(patch.reglas) : null],
       );
-      if (!rowCount) return null;
-      const fila = await leer(id);
-      return fila ? sinSecretoConector(deFila(fila)) : null;
+      return rows[0] ? sinSecretoConector(deFila(rows[0])) : null;
     },
     async cambiarSecreto(id, secreto) {
       const { rowCount } = await pool.query('update conectores set secreto = $2 where id = $1', [id, secreto]);
@@ -162,18 +155,18 @@ export function createConectoresRepo(pool: Pool): ConectoresRepo {
     async anotarEntrada(e) {
       await pool.query(
         `insert into conector_entradas (conector_id, evento, evento_origen, pedido, telefono, resultado, detalle, created_at)
-         values ($1,$2,$3,$4,$5,$6,$7, coalesce($8, now(3)))`,
+         values ($1,$2,$3,$4,$5,$6,$7, coalesce($8, now()))`,
         [e.conectorId, e.evento, e.eventoOrigen, e.pedido, e.telefono, e.resultado, e.detalle, e.at ?? null],
       );
       await pool.query(
-        `update conectores set ultimo_evento_at = coalesce($2, now(3)), eventos_recibidos = eventos_recibidos + 1 where id = $1`,
+        `update conectores set ultimo_evento_at = coalesce($2, now()), eventos_recibidos = eventos_recibidos + 1 where id = $1`,
         [e.conectorId, e.at ?? null],
       );
     },
     async entradas(conectorId, limite) {
       const { rows } = await pool.query<EntradaRow>(
         `select * from conector_entradas where conector_id = $1 order by id desc limit $2`,
-        [conectorId, Number(limite)],
+        [conectorId, limite],
       );
       return rows.map(entradaDeFila);
     },

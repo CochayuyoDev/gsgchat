@@ -200,7 +200,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   zonaHoraria: ajustesGeneralesSchema.shape.zonaHoraria.optional(),
   guardados: ajustesGeneralesSchema.shape.guardados.optional(),
   resumenes: ajustesGeneralesSchema.shape.resumenes.optional(),
-  modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().refine(() => false, 'El modo de prueba fue retirado').optional(),
+  modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().optional(),
   horario: ajustesGeneralesSchema.shape.horario.partial().optional(),
   ritmo: ajustesGeneralesSchema.shape.ritmo.partial().optional(),
   avisos: ajustesGeneralesSchema.shape.avisos.partial().optional(),
@@ -247,7 +247,7 @@ export interface AjustesGeneralesRepo {
 
 export function createAjustesGeneralesRepo(pool: Pool): AjustesGeneralesRepo {
   async function leer(): Promise<AjustesGenerales> {
-    const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [AJUSTES_GENERALES_KEY]);
+    const { rows } = await pool.query<{ value: string }>('select value from settings where key = $1', [AJUSTES_GENERALES_KEY]);
     if (!rows[0]) return AJUSTES_GENERALES_VACIOS;
     try {
       const parsed = ajustesGeneralesPatchSchema.safeParse(JSON.parse(rows[0].value));
@@ -261,14 +261,14 @@ export function createAjustesGeneralesRepo(pool: Pool): AjustesGeneralesRepo {
     async set(patch) {
       const nuevo = fusionarAjustes(await leer(), patch);
       await pool.query(
-        `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
-         on duplicate key update value = values(value), updated_at = now(3)`,
+        `insert into settings (key, value, encrypted, updated_at) values ($1,$2,false,now())
+         on conflict (key) do update set value = excluded.value, updated_at = now()`,
         [AJUSTES_GENERALES_KEY, JSON.stringify(nuevo)],
       );
       return nuevo;
     },
     async reset() {
-      await pool.query('delete from settings where `key` = $1', [AJUSTES_GENERALES_KEY]);
+      await pool.query('delete from settings where key = $1', [AJUSTES_GENERALES_KEY]);
     },
   };
 }
@@ -352,13 +352,13 @@ export async function crearServicioAjustes(deps: {
 
   const servidor: AjustesDelServidor = {
     nombreNegocio: config.businessName,
-    soloNumeros: [],
+    soloNumeros: config.soloNumeros,
     supervisor: config.SALUD_AVISAR_A?.trim() || config.RUTAS_SUPERVISOR?.trim() || '',
     timezone: config.timezone,
   };
 
   return {
-    actual: () => ({ ...fresco(), modoPrueba: { activo: false, numeros: [] } }),
+    actual: fresco,
     async recargar() {
       valor = await repo.get();
       leidoEn = ahora();
@@ -409,7 +409,17 @@ export async function crearServicioAjustes(deps: {
       if (a.autoPausa !== null) p.autoPausa = a.autoPausa;
       return p;
     },
-    soloNumeros: () => [],
+    soloNumeros() {
+      const a = fresco();
+      const delServidor = config.soloNumeros;
+      if (delServidor.length) {
+        // El servidor fijo la lista: la pantalla solo puede recortarla.
+        if (!a.modoPrueba.activo || !a.modoPrueba.numeros.length) return delServidor;
+        const recorte = a.modoPrueba.numeros.filter((n) => delServidor.includes(n));
+        return recorte.length ? recorte : delServidor;
+      }
+      return a.modoPrueba.activo ? a.modoPrueba.numeros : [];
+    },
     nombreNegocio() {
       return fresco().nombreNegocio ?? config.businessName;
     },
@@ -433,7 +443,7 @@ export async function crearServicioAjustes(deps: {
       return a.avisos.supervisor ?? servidor.supervisor;
     },
     servidor: () => servidor,
-    modoPruebaFijado: () => false,
+    modoPruebaFijado: () => config.soloNumeros.length > 0,
     atajos: () => fresco().atajos ?? ATAJOS_POR_DEFECTO,
     dominiosEmbebido: () => fresco().embebido?.dominios ?? [],
     pedirVerUnaVezNormal: () => fresco().pedirVerUnaVezNormal ?? true,

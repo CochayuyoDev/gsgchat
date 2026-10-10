@@ -36,7 +36,7 @@ describe('pin fuera de Lima y Callao: se registra con un extra que cobra el moto
       { referencia: 'X-2', telefono: '987420002', nombre: 'Ana Lince', direccion: 'Jr. Uno 2', distrito: 'Lince', faltaUbicacion: true, faltaConfirmacion: false },
       { referencia: 'X-3', telefono: '987420003', nombre: 'Juan Arequipa', direccion: 'Calle 3', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false },
     ]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());

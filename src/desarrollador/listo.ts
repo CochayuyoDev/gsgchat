@@ -3,18 +3,18 @@
  *
  * Un boton recorre el contrato entero (comprobaciones.ts) SIEMPRE contra un
  * simulador de GSG: nunca la API real, y sin tocar la conexion de la tienda
- * ni su cola. Otro boton, aparte y con confirmacion, hace UNA lectura (la
- * lista del dia, GET /reparto/pendientes) contra la API real configurada.
+ * ni su cola. A la API real de GSG no se le pide nada nunca (ni para
+ * probarla): los pedidos entran cuando GSG los empuja y GSGchat solo le
+ * manda los reportes.
  *
  * Rutas (el hook de routes.ts ya exige una persona administradora):
  *  POST /admin/desarrollador/listo/comprobar   recorre el contrato
  *  GET  /admin/desarrollador/listo/ultimo      el ultimo resultado y la conexion vigente
  *  GET  /admin/desarrollador/listo/produccion  lo que falta para salir a produccion (WhatsApp, GSG real,
- *                                              https, soporte, supervisor, modo prueba, agente operativo)
- *  POST /admin/desarrollador/listo/ping-real   { confirmar: true }  una lectura a la API real
+ *                                              https, la clave de GSG, su webhook, soporte, supervisor,
+ *                                              modo prueba, agente operativo)
  */
 
-import { z } from 'zod';
 import type { RegistrarSeccion, SeccionDesarrollador } from './seccion.js';
 import { recorrerContrato, type ResultadoRecorrido } from './comprobaciones.js';
 import { avisoDireccionPublica } from '../config.js';
@@ -22,9 +22,10 @@ import { avisoDireccionPublica } from '../config.js';
 /** Lo que hay que pedirle a GSG para conectar de verdad. Sale en la pantalla y en el informe. */
 export const LO_QUE_PEDIR_A_GSG = [
   'La dirección base de su API (por ejemplo https://api.gsg.pe/v1), con https.',
-  'La API Key con la que GSGchat les llama (va en la cabecera X-API-Key).',
-  'Que su API tenga GET /reparto/pendientes y acepte POST /ubicaciones, /confirmaciones, /entregas, /incidencias y /resumenes, tal cual el OpenAPI (/api/v1/openapi.json).',
-  'Si prefieren empujar ellos los pedidos: una clave de API de GSGchat (Conexión → «Crear la clave para GSG») y, si quieren enterarse al momento, la URL de su webhook.',
+  'El token con el que GSGchat les llama (va en Authorization: Bearer …).',
+  'Que su API acepte POST /ubicaciones, /confirmaciones, /entregas, /incidencias y /resumenes, tal cual el contrato (docs/CONTRATO-GSG.md, en Conexión → «Descargar el contrato»). GSGchat no le pide nada a su API: solo le manda esos reportes.',
+  'Que manden los pedidos del día a POST /api/v1/entregas con la clave de API de GSGchat (Conexión → «Crear la clave para GSG»): es la única forma en que entran.',
+  'La URL de su webhook, para enterarse al momento de lo que pasa con cada pedido (confirmado, avisado, entregado, incidencia).',
   'Confirmar el formato de dos campos: «telefono» (9 dígitos o con 51 delante; ¿algún cliente con fijo o extranjero?) y «referencia» (¿única por día o para siempre?).',
 ];
 
@@ -66,8 +67,30 @@ export async function revisarProduccion(deps: Parameters<RegistrarSeccion>[1]): 
         : gsg.modo === 'simulador'
           ? 'Ahora se usa el simulador de GSG (números ficticios): ningún cliente real recibe nada por esta vía.'
           : 'GSG no está conectado: los pedidos solo entran si GSG los empuja por la API o si se pegan a mano en Hoy.',
-    queHacer: gsgReal && !gsg?.aviso ? undefined : 'Pide a GSG la dirección de su API (con https) y su token, y pégalos en Conexión → «El sistema de GSG». Luego pulsa «Probar».',
+    queHacer: gsgReal && !gsg?.aviso ? undefined : 'Pide a GSG la dirección de su API (con https) y su token, y pégalos en Conexión → «El sistema de GSG». Es a donde se le mandan los reportes; a GSG no se le pide nada.',
   });
+
+  // Los pedidos solo entran si GSG los empuja: hace falta su clave de API.
+  if (deps.repos?.claves) {
+    const claves = (await deps.repos.claves.listar().catch(() => [])).filter((c) => !c.revocadaAt && (c.permisos.includes('*') || c.permisos.includes('entregas:gestionar')));
+    poner({
+      clave: 'claveGsg',
+      ok: claves.length > 0,
+      titulo: 'GSG tiene su clave para mandar los pedidos',
+      explicacion: claves.length ? `Hay ${claves.length} clave(s) de API que pueden mandar pedidos a POST /api/v1/entregas.` : 'No hay ninguna clave de API que pueda mandar pedidos: GSG no tiene cómo hacerlos entrar (GSGchat no se los pide).',
+      queHacer: claves.length ? undefined : 'Conexión → «Crear la clave para GSG» y dásela a sus programadores.',
+    });
+  }
+  if (deps.repos?.webhooks) {
+    const avisos = (await deps.repos.webhooks.listar().catch(() => [])).filter((w) => w.activo && w.eventos.some((ev) => ev === '*' || ev.startsWith('entrega.')));
+    poner({
+      clave: 'webhookGsg',
+      ok: avisos.length > 0,
+      titulo: 'GSG se entera al momento (webhook)',
+      explicacion: avisos.length ? `${avisos.length} webhook(s) activo(s) con los avisos de las entregas.` : 'Ningún webhook recibe los avisos de las entregas (confirmado, avisado, entregado, incidencia).',
+      queHacer: avisos.length ? undefined : 'Pide a GSG la URL de su webhook y dala de alta en Conexión → Webhooks con los eventos entrega.*.',
+    });
+  }
 
   const aviso = avisoDireccionPublica(deps.config.PUBLIC_BASE_URL);
   poner({
@@ -175,8 +198,6 @@ const CSS = `
   .lst-tecnico pre { white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; background: var(--superficie-2); padding: 8px; border-radius: var(--radio-sm); font-size: 12px; margin: 4px 0 0; }
   .lst-pedir { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
   .lst-aviso { font-size: 14px; margin-top: var(--esp-2); }
-  .lst-confirmar { display: none; margin-top: var(--esp-2); padding: 12px; border-radius: var(--radio-sm); background: var(--ambar-suave); }
-  .lst-confirmar.abierto { display: block; }
   .lst-limpieza { font-size: 13px; color: var(--texto-suave); margin-top: var(--esp-2); }
   .lst-cargando { color: var(--texto-suave); }
 `;
@@ -197,16 +218,6 @@ const HTML = `
 <div class="lst-tarjeta">
   <h3>Lo que hay que pedirle a GSG</h3>
   <ol class="lst-pedir">${LO_QUE_PEDIR_A_GSG.map((t) => `<li>${t.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</li>`).join('')}</ol>
-</div>
-<div class="lst-tarjeta">
-  <h3>Probar contra la API real de GSG</h3>
-  <p id="lst-real-estado">Mirando qué conexión tiene la tienda…</p>
-  <div class="lst-botones"><button class="btn lst-btn" id="lst-real" type="button" disabled>Probar contra la API real de GSG</button></div>
-  <div class="lst-confirmar" id="lst-real-confirmar" role="alertdialog" aria-labelledby="lst-real-pregunta">
-    <p id="lst-real-pregunta"><b>¿Llamar a la API real de GSG?</b> Solo se hace una lectura: se le pide la lista del día (GET /reparto/pendientes). No se crea, cambia ni manda nada.</p>
-    <div class="lst-botones"><button class="btn primario lst-btn" id="lst-real-si" type="button">Sí, hacer la lectura</button><button class="btn lst-btn" id="lst-real-no" type="button">Cancelar</button></div>
-  </div>
-  <div class="lst-aviso" id="lst-real-resultado" aria-live="polite"></div>
 </div>
 `;
 
@@ -241,20 +252,6 @@ const JS = String.raw`
     caja.innerHTML = h;
   }
 
-  function pintarConexion(c) {
-    var boton = $('lst-real');
-    if (!c) { $('lst-real-estado').textContent = 'En este arranque la conexión con GSG no se configura desde la pantalla.'; boton.disabled = true; return; }
-    if (c.modo === 'real') {
-      $('lst-real-estado').innerHTML = 'La tienda está conectada a la API real de GSG en <b>' + esc(c.url) + '</b>.';
-      boton.disabled = false;
-    } else {
-      $('lst-real-estado').textContent = c.modo === 'simulador'
-        ? 'Ahora la tienda usa el simulador de GSG. Cuando pegues la dirección y el token de GSG en Conexión, aquí podrás hacer una lectura de prueba.'
-        : 'La tienda todavía no tiene la API de GSG. Pega su dirección y su token en Conexión → «El sistema de GSG».';
-      boton.disabled = true;
-    }
-  }
-
   function pintarProduccion(d) {
     var caja = $('lst-prod');
     var h = '<div class="lst-titular ' + (d.listo ? 'bien' : 'mal') + '" role="status"><span aria-hidden="true">' + (d.listo ? '✅' : '⚠️') + '</span><span>' +
@@ -277,8 +274,7 @@ const JS = String.raw`
     try {
       var d = await api('/admin/desarrollador/listo/ultimo');
       pintar(d.resultado);
-      pintarConexion(d.conexion);
-    } catch (e) { $('lst-real-estado').textContent = e.message; }
+    } catch (e) { $('lst-resultado').textContent = e.message; }
   }
 
   $('lst-comprobar').onclick = async function () {
@@ -293,23 +289,6 @@ const JS = String.raw`
     } catch (e) {
       $('lst-cargando').textContent = e.message;
     } finally { b.disabled = false; }
-  };
-
-  $('lst-real').onclick = function () { $('lst-real-confirmar').classList.add('abierto'); $('lst-real-si').focus(); };
-  $('lst-real-no').onclick = function () { $('lst-real-confirmar').classList.remove('abierto'); $('lst-real').focus(); };
-  $('lst-real-si').onclick = async function () {
-    var b = this;
-    b.disabled = true;
-    $('lst-real-resultado').textContent = 'Preguntándole a GSG…';
-    try {
-      var d = await api('/admin/desarrollador/listo/ping-real', { method: 'POST', body: JSON.stringify({ confirmar: true }) });
-      $('lst-real-resultado').innerHTML = (d.ok ? '✅ ' : '❌ ') + esc(d.detalle);
-    } catch (e) {
-      $('lst-real-resultado').textContent = '❌ ' + e.message;
-    } finally {
-      b.disabled = false;
-      $('lst-real-confirmar').classList.remove('abierto');
-    }
   };
 
   var cargado = false;
@@ -350,18 +329,5 @@ export const registerListo: RegistrarSeccion = async (app, deps) => {
     } finally {
       enMarcha = false;
     }
-  });
-
-  app.post('/admin/desarrollador/listo/ping-real', async (request, reply) => {
-    const body = z.object({ confirmar: z.literal(true) }).safeParse(request.body ?? {});
-    if (!body.success) return reply.code(400).send({ error: 'Confirma primero que quieres llamar a la API real de GSG (solo se hace una lectura).' });
-    if (!deps.conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se configura desde la pantalla.' });
-    const e = deps.conexionGsg.estado();
-    if (e.modo !== 'real') {
-      return reply.code(409).send({ error: e.modo === 'simulador' ? 'La tienda está usando el simulador, no la API real: pega la dirección y el token de GSG en Conexión.' : 'La tienda todavía no tiene la API de GSG: pega su dirección y su token en Conexión.' });
-    }
-    // Solo lectura: la lista del dia. No crea, cambia ni manda nada.
-    const prueba = await deps.conexionGsg.probar();
-    return { ok: prueba.ok, detalle: prueba.detalle, url: e.url };
   });
 };

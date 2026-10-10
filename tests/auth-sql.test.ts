@@ -1,26 +1,44 @@
 /**
- * Los repos de cuentas y claves de API contra MySQL/MariaDB de verdad:
- * que el esquema tenga lo que el codigo espera y que revocar,
+ * Los repos de cuentas y claves de API contra Postgres de verdad (PGlite):
+ * que las migraciones 012 y 013 creen lo que el codigo espera y que revocar,
  * desactivar y cambiar la contrasena hagan en SQL lo que hacen en los fakes.
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 import { createUsuariosRepo } from '../src/auth/usuarios.js';
 import { createClavesApiRepo, generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { createActividadRepo } from '../src/auth/actividad.js';
 
-let b: BaseDePrueba;
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
+
+function asPool(db: PGlite): Pool {
+  const query = async (text: string, params?: unknown[]) => {
+    const result = await db.query(text, params as never[], {
+      parsers: { 20: (v: string) => Number.parseInt(v, 10) },
+    });
+    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+  };
+  const client = { query, release: () => undefined };
+  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
+}
+
+let db: PGlite;
 let pool: Pool;
 
 beforeAll(async () => {
-  b = await baseDePrueba();
-  pool = b.pool;
+  db = new PGlite();
+  pool = asPool(db);
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
 });
 
 afterAll(async () => {
-  await b?.cerrar();
+  await pool.end();
 });
 
 describe('usuarios en SQL', () => {
@@ -77,7 +95,7 @@ describe('claves de API en SQL', () => {
     expect((await claves.listar())[0]?.revocadaAt).toBeInstanceOf(Date);
 
     // Borrar al creador no borra la clave: queda sin dueno.
-    await pool.query('delete from usuarios where id = $1', [admin!.id]);
+    await db.exec(`delete from usuarios where id = '${admin!.id}'`);
     expect((await claves.listar())[0]?.creadaPor).toBeNull();
   });
 });

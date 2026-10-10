@@ -33,26 +33,6 @@ export interface Geocodificador {
   buscar(direccion: string, distrito?: string | null): Promise<ResultadoGeo | null>;
 }
 
-/** Google propone el punto; el servicio exige numeración y confirmación. */
-export function crearGeocodificadorGoogle(apiKey: string, pedir: typeof fetch = fetch): Geocodificador {
-  return { async buscar(direccion, distrito) {
-    if (!apiKey.trim()) return null;
-    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
-    url.search = new URLSearchParams({ address: [direccion, distrito, 'Perú'].filter(Boolean).join(', '), key: apiKey, language: 'es', components: 'country:PE' }).toString();
-    try {
-      const r = await pedir(url, { signal: AbortSignal.timeout(5000) });
-      if (!r.ok) return null;
-      const body = await r.json() as { status?: string; results?: Array<{ partial_match?: boolean; formatted_address?: string; geometry?: { location?: { lat: number; lng: number }; location_type?: string }; address_components?: Array<{ long_name: string; types: string[] }> }> };
-      if (body.status !== 'OK' || body.results?.length !== 1) return null;
-      const lugar = body.results[0]!;
-      const punto = lugar.geometry?.location;
-      if (!punto || !Number.isFinite(punto.lat) || !Number.isFinite(punto.lng) || Math.abs(punto.lat) > 90 || Math.abs(punto.lng) > 180 || lugar.partial_match) return null;
-      const puerta = lugar.address_components?.some(c => c.types.includes('street_number'));
-      return { ...punto, precision: puerta && lugar.geometry?.location_type === 'ROOFTOP' ? 'alta' : 'baja', distrito: distritoEnDireccion(lugar.formatted_address) ?? distritoConocido(distrito), texto: lugar.formatted_address ?? null };
-    } catch { return null; }
-  } };
-}
-
 export interface EntradaCacheGeo {
   encontrado: boolean;
   lat: number | null;
@@ -125,11 +105,10 @@ export function crearCacheGeoSql(pool: Pool): CacheGeo {
     },
     async guardar(consulta, e) {
       await pool.query(
-        // `precision` es palabra reservada en MySQL: siempre entre comillas invertidas.
-        `insert into geocodificacion_cache (consulta, encontrado, lat, lng, \`precision\`, distrito, texto, created_at)
+        `insert into geocodificacion_cache (consulta, encontrado, lat, lng, precision, distrito, texto, created_at)
          values ($1,$2,$3,$4,$5,$6,$7,$8)
-         on duplicate key update encontrado = values(encontrado), lat = values(lat), lng = values(lng),
-           \`precision\` = values(\`precision\`), distrito = values(distrito), texto = values(texto), created_at = values(created_at)`,
+         on conflict (consulta) do update set encontrado = excluded.encontrado, lat = excluded.lat, lng = excluded.lng,
+           precision = excluded.precision, distrito = excluded.distrito, texto = excluded.texto, created_at = excluded.created_at`,
         [consulta, e.encontrado, e.lat, e.lng, e.precision, e.distrito, e.texto, e.creadoAt],
       );
     },

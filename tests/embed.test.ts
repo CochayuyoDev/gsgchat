@@ -23,7 +23,7 @@ import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -51,8 +51,7 @@ const queue: OutboundQueue = {
 const EMISORA = 'wak_claveQueEmiteTokens0123456789abcdefXYZ0';
 
 const config = loadConfig(ENV);
-// Las claves de API van en X-API-Key; el token del chat embebido (emb_) va en el Bearer.
-const con = (clave: string) => ({ ...(clave.startsWith('emb_') ? { authorization: `Bearer ${clave}` } : { 'x-api-key': clave }), 'content-type': 'application/json' });
+const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
 
 let app: FastifyInstance;
 let repos: FakeRepos;
@@ -107,7 +106,7 @@ describe('POST /api/v1/embed/token', () => {
   it('exige el permiso embed:emitir', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: con(TODO), payload: { operador: 'ana' } });
     expect(r.statusCode).toBe(200);
-    const sin = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: { 'x-api-key': 'wak_noExiste00000000000000000000000000' }, payload: { operador: 'ana' } });
+    const sin = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: { authorization: 'Bearer wak_noExiste00000000000000000000000000' }, payload: { operador: 'ana' } });
     expect(sin.statusCode).toBe(401);
   });
 

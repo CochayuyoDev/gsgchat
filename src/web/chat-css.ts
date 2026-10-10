@@ -258,17 +258,6 @@ export const CHAT_CSS = `
     z-index: 2; box-shadow: var(--sombra); text-transform: uppercase;
     letter-spacing: .3px; font-weight: 500;
   }
-  /* por que respondio el bot: nota interna, discreta, que el cliente no ve */
-  .decision-bot {
-    align-self: center; max-width: min(560px, 92%); margin: 4px 0 6px; padding: 4px 10px;
-    border: 1px dashed var(--line); border-radius: 8px; background: transparent;
-    color: var(--muted); font-size: 11.5px; line-height: 1.35; text-align: center;
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; overflow-wrap: anywhere;
-  }
-  .decision-bot .decision-etq { font-weight: 600; text-transform: uppercase; letter-spacing: .3px; font-size: 10.5px; }
-  .decision-bot .decision-txt { flex-basis: 100%; }
-  .decision-bot .decision-extra { flex-basis: 100%; font-style: italic; }
-  .decision-bot .decision-hora { font-size: 10.5px; opacity: .8; }
   .mas-antiguos { text-align: center; padding: 6px 0 2px; }
   .mas-antiguos button { font-size: 12px; padding: 6px 12px; min-height: 32px; border-radius: 999px; border: 1px solid var(--line); background: var(--superficie); cursor: pointer; color: var(--muted); }
   .mas-antiguos button:disabled { opacity: .6; }

@@ -98,6 +98,7 @@ ${opts.disponible ? '' : '<div class="explica"><b>Las entregas del día no está
   <div class="ficha hidden" id="ficha" tabindex="-1"></div>
   <div class="leyenda" aria-label="Qué significa cada marca del mapa">
     <span><i class="punto" style="background:transparent;width:8px;height:8px;outline:2px solid var(--rojo);outline-offset:1px"></i> aro rojo: urgente</span>
+    <span><i class="punto" style="background:var(--texto);border-radius:3px"></i> motorizado (última posición)</span>
     <span class="muted" id="ultima-carga"></span>
   </div>
 </div>
@@ -113,7 +114,7 @@ var LEAFLET = '${LEAFLET_BASE}';
    marcha, verde hecho, rojo con incidencia. */
 var GRUPOS = [
   { clave: 'falta_confirmar', etiqueta: 'Falta confirmar', color: 'var(--ambar)', tono: 'ambar' },
-  { clave: 'en_camino', etiqueta: 'Ubicación registrada', color: 'var(--azul)', tono: 'azul' },
+  { clave: 'en_camino', etiqueta: 'En camino', color: 'var(--azul)', tono: 'azul' },
   { clave: 'entregada', etiqueta: 'Entregadas', color: 'var(--verde)', tono: 'verde' },
   { clave: 'incidencia', etiqueta: 'Incidencia', color: 'var(--rojo)', tono: 'rojo' }
 ];
@@ -139,6 +140,8 @@ function motoTienePin(m) {
 
 var filtroEstado = {};
 GRUPOS.forEach(function (g) { filtroEstado[g.clave] = true; });
+var filtroMotorizado = null;
+var mostrarMotorizados = true;
 var datos = null;
 var mapa = null;
 var capa = null;
@@ -163,6 +166,7 @@ function entregasVisibles() {
   return (datos ? datos.entregas : []).filter(function (e) {
     var g = grupoDe(e);
     if (!g || !tienePin(e) || !filtroEstado[g]) return false;
+    if (filtroMotorizado !== null && !(e.motorizado && e.motorizado.id === filtroMotorizado)) return false;
     return true;
   });
 }
@@ -184,13 +188,34 @@ function pintarFiltros() {
   var estados = GRUPOS.map(function (g) {
     return chipFiltro('data-estado', g.clave, filtroEstado[g.clave],
       '<i class="punto" style="background:' + g.color + '"></i>' + esc(g.etiqueta) + ' <span class="n">' + (cuenta[g.clave] || 0) + '</span>');
+  }).join('') +
+    chipFiltro('data-motos', '1', mostrarMotorizados,
+      '<i class="punto" style="background:var(--texto);border-radius:3px"></i>Motorizados <span class="n">' + motorizados.filter(motoTienePin).length + '</span>');
+
+  var activos = motorizados.filter(function (m) { return m.estado === 'activo'; });
+  /* Si el motorizado elegido deja de estar activo, su chip desaparece: sin
+     esto el filtro se quedaria puesto y el mapa vacio, sin forma de quitarlo. */
+  if (filtroMotorizado !== null && !activos.some(function (m) { return m.id === filtroMotorizado; })) filtroMotorizado = null;
+
+  var motos = activos.map(function (m) {
+    var n = entregas.filter(function (e) { return e.motorizado && e.motorizado.id === m.id && tienePin(e) && grupoDe(e); }).length;
+    return chipFiltro('data-moto', m.id, filtroMotorizado === m.id, '🛵 ' + esc(m.nombre || 'Sin nombre') + ' <span class="n">' + n + '</span>');
   }).join('');
+
+  /* dos filas: los estados (se envuelven) y, debajo, un motorizado por chip (en el celular se deslizan de lado) */
   var caja = document.getElementById('filtros');
-  caja.innerHTML = '<div class="fila-estados">' + estados + '</div>';
+  caja.innerHTML = '<div class="fila-estados">' + estados + '</div>' +
+    (motos ? '<div class="fila-motos" aria-label="Ver solo lo de un motorizado">' + motos + '</div>' : '');
+
   caja.querySelectorAll('[data-estado]').forEach(function (c) {
     c.onclick = function () { var k = c.getAttribute('data-estado'); filtroEstado[k] = !filtroEstado[k]; pintar(); };
   });
-
+  caja.querySelectorAll('[data-motos]').forEach(function (c) {
+    c.onclick = function () { mostrarMotorizados = !mostrarMotorizados; pintar(); };
+  });
+  caja.querySelectorAll('[data-moto]').forEach(function (c) {
+    c.onclick = function () { var id = Number(c.getAttribute('data-moto')); filtroMotorizado = filtroMotorizado === id ? null : id; pintar(); };
+  });
 }
 
 function pinPedido(e, color) {
@@ -211,6 +236,7 @@ function abrirFicha(e) {
     '<h3>' + esc(e.nombre || 'Sin nombre') + ' · ' + esc(e.referencia) + (e.prioridad === 'urgente' ? ' <span class="chip tono-rojo sin-punto">Urgente</span>' : '') + '</h3>' +
     '<div class="dato"><span class="chip tono-' + (g ? g.tono : 'gris') + '">' + esc(g ? g.etiqueta : e.estado) + '</span> <span class="muted">' + esc(e.situacion || '') + '</span></div>' +
     (e.direccion ? '<div class="dato muted">' + esc(e.direccion) + (e.distrito ? ' · ' + esc(e.distrito) : '') + '</div>' : '') +
+    (e.motorizado ? '<div class="dato">Motorizado: <b>' + esc(e.motorizado.nombre) + '</b>' + (e.llegaAproxAt ? ' · llega alrededor de las ' + esc(hora(e.llegaAproxAt)) : '') + '</div>' : '') +
     '<div class="acciones"><a class="btn sm primario" href="/hoy?buscar=' + encodeURIComponent(e.referencia) + '">Abrir en Hoy</a>' +
       (e.mapsUrl ? '<a class="btn sm" href="' + esc(e.mapsUrl) + '" target="_blank" rel="noopener">Google Maps</a>' : '') + '</div>';
   t.classList.remove('hidden');
@@ -241,7 +267,16 @@ function pintar() {
     puntos.push([e.lat, e.lng]);
   });
 
-
+  if (mostrarMotorizados) {
+    (datos ? datos.motorizados : []).forEach(function (mo) {
+      if (!motoTienePin(mo)) return;
+      if (filtroMotorizado !== null && mo.id !== filtroMotorizado) return;
+      var mk = L.marker([mo.ultimaLat, mo.ultimaLng], { icon: pinMoto(mo), title: mo.nombre, zIndexOffset: 1000 });
+      mk.bindTooltip(esc(mo.nombre) + ' · ' + esc(haceCuanto(mo.ultimaPosicionAt)) + (mo.enManos ? ' · lleva ' + mo.enManos : ''), { direction: 'top', offset: [0, -8] });
+      capa.addLayer(mk);
+      puntos.push([mo.ultimaLat, mo.ultimaLng]);
+    });
+  }
 
   var conPin = (datos ? datos.entregas : []).some(function (e) { return tienePin(e) && grupoDe(e); });
   document.getElementById('sin-pines').classList.toggle('hidden', conPin);
@@ -312,8 +347,8 @@ function avisoDelMapa(titulo, explicacion) {
 `;
 
   return appShell({
-    titulo: 'Ubicaciones',
-    subtitulo: 'Ubicaciones registradas y coordenadas de los pedidos GSG',
+    titulo: 'Mapa del día',
+    subtitulo: 'Dónde está cada pedido de hoy y cada motorizado',
     contenido,
     script,
     css: CSS,

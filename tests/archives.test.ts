@@ -1,7 +1,7 @@
 /**
  * Respaldo y limpieza de conversaciones.
  *
- * Se prueba contra MySQL/MariaDB de verdad (tests/mysql.ts) y con ficheros de verdad en un
+ * Se prueba contra Postgres de verdad (PGlite) y con ficheros de verdad en un
  * directorio temporal, porque lo que hay que demostrar no es que las funciones
  * se llamen: es que despues de borrar el hilo, lo hablado sigue existiendo y
  * se puede volver a leer. Eso solo se ve con el fichero delante.
@@ -11,10 +11,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 import {
   archivarConversacion,
   barrerInactivas,
@@ -24,27 +26,40 @@ import {
 } from '../src/archive/service.js';
 import { rutaDe } from '../src/archive/store.js';
 
-let b: BaseDePrueba;
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
+
+function asPool(db: PGlite): Pool {
+  const query = async (text: string, params?: unknown[]) => {
+    const result = await db.query(text, params as never[], {
+      parsers: { 20: (v: string) => Number.parseInt(v, 10) },
+    });
+    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+  };
+  const client = { query, release: () => undefined };
+  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
+}
+
+let db: PGlite;
 let pool: Pool;
 let repos: Repos;
 let dir: string;
 
 beforeAll(async () => {
-  b = await baseDePrueba();
-  pool = b.pool;
+  db = new PGlite();
+  pool = asPool(db);
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
   repos = createRepos(pool);
   dir = await mkdtemp(path.join(tmpdir(), 'wa-respaldos-'));
 });
 
 afterAll(async () => {
-  await b?.cerrar();
-  if (dir) await rm(dir, { recursive: true, force: true });
+  await pool.end();
+  await rm(dir, { recursive: true, force: true });
 });
 
 beforeEach(async () => {
-  await pool.query('delete from chat_archives');
-  await pool.query('delete from messages');
-  await pool.query('delete from contacts');
+  await db.exec('delete from chat_archives; delete from messages; delete from contacts;');
 });
 
 /** Un contacto con `cuantos` mensajes alternando entrada y salida. */

@@ -4,9 +4,6 @@
  *
  * Como se sabe de que tienda es una peticion, por orden:
  *
- *   0. POST /api/v1/entregas -> la clave de API en `X-API-Key` identifica la
- *      tienda; sin cookies, Referer ni prefijo. La recepcion con prefijo se
- *      rechaza (404). Una clave `wak_` en `Authorization: Bearer` no vale: 401.
  *   1. /tienda/<slug>/...  -> esa tienda, y se le quita el prefijo. Es la
  *      forma de los enlaces publicos de cada tienda (su webhook, su API, la
  *      pagina del motorizado, los enlaces de rastreo): su PUBLIC_BASE_URL ya
@@ -24,7 +21,6 @@
  */
 
 import http from 'node:http';
-import { moduloRetirado } from '../modulos-retirados.js';
 import type { Duplex } from 'node:stream';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { cookieDeCierre, leerCookies } from '../auth/sesion.js';
@@ -33,14 +29,12 @@ import { enTienda } from './contexto.js';
 import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
-import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS } from '../api/errores.js';
-import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
 const PREFIJO = '/tienda/';
 
 /** Rutas que atiende la plataforma y no una tienda. */
-const DE_LA_PLATAFORMA = new Set(['/', '/login', '/registro', '/registro/disponible', '/logout', '/login/primera-cuenta', '/admin/cuentas-plataforma']);
+const DE_LA_PLATAFORMA = new Set(['/', '/login', '/registro', '/registro/disponible', '/logout', '/login/primera-cuenta']);
 
 export interface OpcionesServidor {
   plataforma: Plataforma;
@@ -98,23 +92,12 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
   const { plataforma, segura } = o;
   const web = await rutasDeLaPlataforma(plataforma, segura, o.logger ?? false);
 
-  type Destino = { tipo: 'tienda'; tienda: TiendaViva; url: string } | { tipo: 'plataforma'; url: string } | { tipo: 'no-existe' } | { tipo: 'rechazo'; rechazo: RechazoRecepcion };
+  type Destino = { tipo: 'tienda'; tienda: TiendaViva; url: string } | { tipo: 'plataforma'; url: string } | { tipo: 'no-existe' };
 
   /** A quien va esta peticion y con que URL. */
   async function resolver(req: http.IncomingMessage): Promise<Destino> {
     const url = req.url ?? '/';
     const prefijo = partirPrefijo(url);
-    if (moduloRetirado(prefijo?.resto ?? url)) return { tipo: 'rechazo', rechazo: { status: 404, cuerpo: cuerpoError('RUTA_NO_EXISTE', 'Este módulo fue retirado. Usa API, WhatsApp o Pedidos GSG.') } };
-    if (prefijo && esRecepcionGsg(req.method, prefijo.resto)) return { tipo: 'rechazo', rechazo: RECHAZOS.conPrefijo() };
-    if (url.split('?')[0] === '/api/v1/entregas' && !['GET', 'HEAD', 'POST'].includes(req.method ?? '')) {
-      return { tipo: 'rechazo', rechazo: RECHAZOS.metodo() };
-    }
-    const rutaApi = url.split('?')[0] ?? '';
-    if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) &&(rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/')))) {
-      const permiso = req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
-      const r = await tiendaDeClaveGsg(plataforma, req.headers, permiso);
-      return 'tienda' in r ? { tipo: 'tienda', tienda: r.tienda, url } : { tipo: 'rechazo', rechazo: r.rechazo };
-    }
     if (prefijo) {
       const tienda = await plataforma.tiendaPorSlug(prefijo.slug);
       if (!tienda) return { tipo: 'no-existe' };
@@ -144,20 +127,7 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
     void (async () => {
       try {
         const destino = await resolver(req);
-        if (destino.tipo === 'rechazo') {
-          // Rechazada antes de leer el cuerpo: se descarta para no dejar la conexion a medias.
-          req.resume();
-          res.writeHead(destino.rechazo.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(destino.rechazo.cabeceras ?? {}) });
-          res.end(JSON.stringify(destino.rechazo.cuerpo));
-          return;
-        }
         if (destino.tipo === 'no-existe') {
-          if ((req.url ?? '').includes('/api/')) {
-            req.resume();
-            res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-            res.end(JSON.stringify(cuerpoError('RUTA_NO_EXISTE', 'La tienda o la ruta de API no existe.')));
-            return;
-          }
           res.writeHead(404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
           res.end(paginaSinTienda());
           return;
@@ -172,9 +142,8 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
         enTienda(destino.tienda.contexto, () => (destino.tienda.app.routing as (q: http.IncomingMessage, r: http.ServerResponse) => void)(req, res));
       } catch (error) {
         console.error('[plataforma] fallo repartiendo una peticion:', error);
-        const caida = esBaseNoDisponible(error);
-        if (!res.headersSent) res.writeHead(caida ? 503 : 500, { 'content-type': 'application/json; charset=utf-8', ...(caida ? { 'retry-after': String(ESPERA_BASE_SEGUNDOS) } : {}) });
-        res.end(JSON.stringify(caida ? RECHAZOS.baseCaida().cuerpo : cuerpoError('ERROR_INTERNO', 'Error interno del servidor; quedó apuntado en el registro.')));
+        if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'error interno; revisa el log del servidor' }));
       }
     })();
   });
@@ -247,28 +216,6 @@ async function rutasDeLaPlataforma(plataforma: Plataforma, segura: boolean, logg
   web.get('/login', (request, reply) => pagina(request, reply, 'entrar'));
   web.get('/registro', (request, reply) => pagina(request, reply, 'tienda'));
 
-  async function comprobarSuper(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
-    const slug = leerCookies(request.headers.cookie)[COOKIE_TIENDA];
-    const tienda = slug ? await plataforma.tiendaPorSlug(decodeURIComponent(slug)) : await plataforma.tiendaPrincipal();
-    if (!tienda) { reply.code(401).send(cuerpoError('CLAVE_AUSENTE', 'Inicia sesión.')); return false; }
-    const r = await tienda.app.inject({ method: 'GET', url: '/admin/yo', headers: { cookie: request.headers.cookie ?? '' } });
-    if (r.statusCode !== 200) { reply.code(401).send(cuerpoError('CLAVE_INVALIDA', 'Inicia sesión.')); return false; }
-    const usuario = r.json() as { super?: boolean; porToken?: boolean };
-    if (!usuario?.super || usuario.porToken) { reply.code(403).send(cuerpoError('SIN_PERMISO', 'Solo un superadministrador gestiona las cuentas de la plataforma.')); return false; }
-    return true;
-  }
-
-  web.get('/admin/cuentas-plataforma', async (request, reply) => {
-    if (!(await comprobarSuper(request, reply))) return;
-    return { cuentas: await plataforma.directorio.tiendas() };
-  });
-  web.post('/admin/cuentas-plataforma', async (request, reply) => {
-    if (!(await comprobarSuper(request, reply))) return;
-    const r = await plataforma.registrar(request.body, ip(request));
-    if (!r.ok) return reply.code(r.status).send({ ok: false, error: r.error });
-    return { ok: true, cuenta: { slug: r.tienda?.slug, nombre: r.tienda?.nombre } };
-  });
-
   const ip = (request: FastifyRequest) => ipDe(request.raw);
 
   web.post('/login', async (request, reply) => {
@@ -317,9 +264,6 @@ async function rutasDeLaPlataforma(plataforma: Plataforma, segura: boolean, logg
 
   // Lo que no es de ninguna tienda: una pantalla lleva a entrar; lo demas, un 404 que se entiende.
   web.setNotFoundHandler(async (request, reply) => {
-    if (request.url.startsWith('/api/')) {
-      return reply.header('cache-control', 'no-store').code(404).send(cuerpoError('RUTA_NO_EXISTE', 'No existe esa ruta de API en la plataforma.'));
-    }
     const aceptaHtml = String(request.headers.accept ?? '').includes('text/html');
     if (request.method === 'GET' && aceptaHtml) return reply.redirect(`/login?next=${encodeURIComponent(request.url)}`);
     return reply.code(404).send({ error: 'No encontrado. Si es de una tienda, usa su dirección (/tienda/<nombre>/...) o entra en /login.' });

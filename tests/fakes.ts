@@ -47,7 +47,6 @@ import { createFakeLeads } from './fakes-leads.js';
 import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
 import { crearProcesosEnMemoria } from '../src/procesos/repo-memoria.js';
-import { crearDecisionesEnMemoria, type DecisionesEnMemoria } from '../src/db/decisiones-memoria.js';
 import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
 import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
@@ -68,7 +67,6 @@ export interface FakeRepos extends Repos {
   codigosConexion: FakeCodigos;
   tiendas: FakeTiendas;
   entregas: FakeEntregas;
-  decisiones: DecisionesEnMemoria;
   _contacts: Map<string, Contact>;
   _deliveries: Array<Record<string, unknown>>;
   _locations: Array<Record<string, unknown>>;
@@ -238,19 +236,15 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
   };
   const claves: ClavesApiRepo = {
     async crear(input) {
-      const c = { id: `clave-${seq++}`, nombre: input.nombre, prefijo: input.prefijo, hash: input.hash, creadaPor: input.creadaPor, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null, venceAt: input.venceAt ?? null, desactivadaAt: null, eliminadaAt: null, permisos: input.permisos?.length ? input.permisos : ['*'] };
+      const c = { id: `clave-${seq++}`, nombre: input.nombre, prefijo: input.prefijo, hash: input.hash, creadaPor: input.creadaPor, createdAt: new Date(), ultimoUsoAt: null, revocadaAt: null, permisos: input.permisos?.length ? input.permisos : ['*'] };
       clavesMem.push(c);
       return sinHash(c);
     },
     async listar() {
-      return [...clavesMem].filter(c => !c.eliminadaAt).reverse().map(sinHash);
+      return [...clavesMem].reverse().map(sinHash);
     },
     async porHash(hash) {
-      const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt && !x.desactivadaAt && !x.eliminadaAt && (!x.venceAt || new Date(x.venceAt) > new Date()));
-      return c ? sinHash(c) : null;
-    },
-    async porHashConRevocadas(hash) {
-      const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt) ?? clavesMem.find((x) => x.hash === hash);
+      const c = clavesMem.find((x) => x.hash === hash && !x.revocadaAt);
       return c ? sinHash(c) : null;
     },
     async revocar(id) {
@@ -258,25 +252,6 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       if (!c) return false;
       c.revocadaAt = new Date();
       return true;
-    },
-    async actualizar(id, patch) {
-      const c = clavesMem.find(c => c.id === id && !c.revocadaAt && !c.eliminadaAt);
-      if (!c || (patch.activo === true && c.venceAt && new Date(c.venceAt) <= new Date())) return null;
-      if (patch.nombre !== undefined) c.nombre = patch.nombre.trim();
-      if (patch.permisos !== undefined) c.permisos = patch.permisos;
-      if (patch.venceAt !== undefined) c.venceAt = patch.venceAt;
-      if (patch.activo !== undefined) c.desactivadaAt = patch.activo ? null : new Date();
-      return sinHash(c);
-    },
-    async renovar(id, hash, prefijo) {
-      const c = clavesMem.find(c => c.id === id && !c.revocadaAt && !c.eliminadaAt);
-      if (!c) return null;
-      Object.assign(c, { hash, prefijo, ultimoUsoAt: null }); return sinHash(c);
-    },
-    async eliminar(id, nombre) {
-      const c = clavesMem.find(c => c.id === id && c.nombre === nombre && !c.eliminadaAt);
-      if (!c) return false;
-      c.eliminadaAt = new Date(); c.revocadaAt = new Date(); c.hash = ''; return true;
     },
     async tocarUso(id, at) {
       const c = clavesMem.find((x) => x.id === id);
@@ -358,9 +333,8 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     entrenamiento: createFakeEntrenamiento(() => [...contactsByPhone.values()], () => repos.messages._all),
     codigosConexion: createFakeCodigos(),
     tiendas: createFakeTiendas(),
-    entregas: createFakeEntregas(() => new Date(), r => repos.rutas.encolarReporte(r)),
+    entregas: createFakeEntregas(),
     procesos: crearProcesosEnMemoria(),
-    decisiones: crearDecisionesEnMemoria(fakeNow),
     archives: createFakeArchives(),
     rutas: createFakeRutas(),
     leads: createFakeLeads((id) => {
@@ -416,12 +390,6 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
       async setOptOut(phone) {
         const c = await repos.contacts.upsertFromInbound(phone);
         c.optOutAt = fakeNow();
-      },
-      async eliminar(filtro, soloContar) {
-        const limite = filtro.inactivosDias ? fakeNow().getTime() - filtro.inactivosDias * 86_400_000 : null;
-        const borrar = [...repos._contacts.entries()].filter(([, c]) => c.tipo !== 'grupo' && (!filtro.ids || filtro.ids.includes(c.id)) && (limite === null || (c.lastInboundAt?.getTime() ?? 0) < limite));
-        if (!soloContar) for (const [clave] of borrar) repos._contacts.delete(clave);
-        return borrar.length;
       },
       async touchInbound(phone, at) {
         const c = await repos.contacts.upsertFromInbound(phone);

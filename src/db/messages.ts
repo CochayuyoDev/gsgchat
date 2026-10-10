@@ -259,13 +259,12 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         return 0;
       }
 
-      // Si el wamid ya estaba, se actualiza el estado y `last_insert_id(id)`
-      // hace que insertId sea el id de la fila que ya existia.
-      const { insertId } = await pool.query(
+      const { rows } = await pool.query<{ id: number }>(
         `insert into messages
            (contact_id, direction, wamid, kind, body, payload, status, delivery_id, created_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8, coalesce($9, now(3)))
-         on duplicate key update id = last_insert_id(id), status = coalesce(values(status), status)`,
+         values ($1,$2,$3,$4,$5,$6,$7,$8, coalesce($9, now()))
+         on conflict (wamid) do update set status = coalesce(excluded.status, messages.status)
+         returning id`,
         [
           message.contactId,
           message.direction,
@@ -278,7 +277,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           message.createdAt ?? null,
         ],
       );
-      return insertId;
+      return rows[0]!.id;
     },
 
     async setStatusByWamid(wamid, status) {
@@ -301,7 +300,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       const condiciones: string[] = [];
       if (query.q?.trim()) {
         params.push(`%${query.q.trim()}%`);
-        condiciones.push(`(lower(c.phone) like lower($${params.length}) or lower(c.name) like lower($${params.length}))`);
+        condiciones.push(`(c.phone ilike $${params.length} or c.name ilike $${params.length})`);
       }
       // Un chat apartado no sale en la lista normal, pero vuelve solo en
       // cuanto el cliente escribe: apartar no es dejar de atender.
@@ -332,30 +331,30 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         `select c.id as contact_id, c.phone, c.name, c.tipo, c.opt_in_at, c.opt_out_at, c.last_inbound_at,
                 c.chat_fijado_at, c.chat_silenciado_at, c.chat_apartado_at,
                 m.direction, m.kind, m.body, m.status, m.created_at as message_at, m.id as message_id,
-                (select count(*)
-                   from messages u
-                  where u.contact_id = c.id and u.direction = 'in'
-                    and u.created_at > coalesce(c.chat_read_at, cast('1970-01-01' as datetime(3)))) as unread
+                coalesce(u.unread, 0) as unread
            from contacts c
-           -- El ultimo mensaje del hilo. MariaDB no tiene LATERAL: su id sale
-           -- de una subconsulta que va por el indice (contact_id, created_at, id).
-           left join messages m on m.id = (
-             select m2.id from messages m2
-              where m2.contact_id = c.id
-              order by m2.created_at desc, m2.id desc limit 1
-           )
+           left join lateral (
+             select id, direction, kind, body, status, created_at
+               from messages where contact_id = c.id
+              order by created_at desc, id desc limit 1
+           ) m on true
+           left join lateral (
+             select count(*)::int as unread
+               from messages
+              where contact_id = c.id and direction = 'in'
+                and created_at > coalesce(c.chat_read_at, to_timestamp(0))
+           ) u on true
           ${where}
           -- Los chats con mensajes primero, y dentro de ellos el mas reciente.
           -- El desempate por id importa: WhatsApp marca la hora en SEGUNDOS,
           -- asi que dos mensajes seguidos comparten instante y sin el la lista
           -- se reordena sola en cada refresco.
           -- Lo fijado manda sobre la hora: es lo que pidio quien atiende.
-          -- ("x is null, x desc" = de mayor a menor con los vacios al final.)
-          order by c.chat_fijado_at is null, c.chat_fijado_at desc,
-                   coalesce(m.created_at, c.last_inbound_at) is null, coalesce(m.created_at, c.last_inbound_at) desc,
-                   m.id is null, m.id desc, c.created_at desc
+          order by c.chat_fijado_at desc nulls last,
+                   coalesce(m.created_at, c.last_inbound_at) desc nulls last,
+                   m.id desc nulls last, c.created_at desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, Number(query.limit), Number(query.offset)],
+        [...params, query.limit, query.offset],
       );
 
       const now = Date.now();
@@ -376,7 +375,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
               createdAt: r.message_at,
             }
           : null,
-        unread: Number(r.unread ?? 0),
+        unread: r.unread,
         windowOpen: Boolean(r.last_inbound_at && now - r.last_inbound_at.getTime() < WINDOW_MS),
         fijadoAt: r.chat_fijado_at ?? null,
         silenciadoAt: r.chat_silenciado_at ?? null,
@@ -396,10 +395,10 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         // respaldo y la traza lo necesitan (ver `ocultar`).
         `select * from messages
           where contact_id = $1 ${cursor}
-            and not json_contains_path(coalesce(payload, '{}'), 'one', '$.eliminadoAqui')
+            and not (coalesce(payload, '{}'::jsonb) ? 'eliminadoAqui')
           order by created_at desc, id desc
           limit $${params.length + 1}`,
-        [...params, Number(limit)],
+        [...params, limit],
       );
       // Se consulta al reves para poder paginar hacia atras; se devuelve en
       // orden de lectura.
@@ -412,11 +411,11 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
 
     async unreadTotal() {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*) as total
+        `select count(*)::int as total
            from messages m
            join contacts c on c.id = m.contact_id
           where m.direction = 'in'
-            and m.created_at > coalesce(c.chat_read_at, cast('1970-01-01' as datetime(3)))`,
+            and m.created_at > coalesce(c.chat_read_at, to_timestamp(0))`,
       );
       return rows[0]?.total ?? 0;
     },
@@ -426,7 +425,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
     },
     async tieneAdjunto(wamid) {
       const { rows } = await pool.query<{ uno: number }>(
-        `select 1 as uno from messages where wamid = $1 and json_contains_path(payload, 'one', '$.media') limit 1`,
+        `select 1 as uno from messages where wamid = $1 and payload ? 'media' limit 1`,
         [wamid],
       );
       return rows.length > 0;
@@ -434,7 +433,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
     async marcarBorradoPorRemitente(wamid, at) {
       const { rowCount } = await pool.query(
         `update messages
-            set payload = json_set(coalesce(payload, '{}'), '$.borradoPorRemitente', $2)
+            set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object('borradoPorRemitente', $2::text)
           where wamid = $1`,
         [wamid, at.toISOString()],
       );
@@ -445,7 +444,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         `update messages
             set kind = $2, body = $3, payload = $4
           where wamid = $1
-            and (payload is null or not json_contains_path(payload, 'one', '$.media'))`,
+            and (payload is null or not (payload ? 'media'))`,
         [wamid, datos.kind, datos.body, datos.payload ? JSON.stringify(datos.payload) : null],
       );
       return (rowCount ?? 0) > 0;
@@ -454,9 +453,9 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
     async contarEntrantesDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
         // Sin los numeros del Modulo desarrollador: no cuentan en la salud del numero real.
-        `select count(*) as total from messages m
+        `select count(*)::int as total from messages m
           where m.direction = 'in' and m.created_at >= $1
-            and not exists (select 1 from contacts c where c.id = m.contact_id and c.phone regexp '^51000[01][0-9]{5}$')`,
+            and not exists (select 1 from contacts c where c.id = m.contact_id and c.phone ~ '^51000[01][0-9]{5}$')`,
         [since],
       );
       return rows[0]?.total ?? 0;
@@ -464,33 +463,32 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
 
     async actividadPorDia(since) {
       const { rows } = await pool.query<{ dia: string; entrantes: number; salientes: number }>(
-        // El dia sale en UTC, que es la zona de la sesion.
-        `select date_format(created_at, '%Y-%m-%d') as dia,
-                count(case when direction = 'in' then 1 end) as entrantes,
-                count(case when direction = 'out' then 1 end) as salientes
+        `select to_char(created_at, 'YYYY-MM-DD') as dia,
+                count(*) filter (where direction = 'in')::int as entrantes,
+                count(*) filter (where direction = 'out')::int as salientes
            from messages
           where created_at >= $1
-          group by dia
-          order by dia`,
+          group by 1
+          order by 1`,
         [since],
       );
-      return rows.map((r) => ({ dia: r.dia, entrantes: Number(r.entrantes), salientes: Number(r.salientes) }));
+      return rows.map((r) => ({ dia: r.dia, entrantes: r.entrantes, salientes: r.salientes }));
     },
 
     async contarEsperandoRespuesta() {
       // El ultimo mensaje del hilo es del cliente y es posterior a la ultima
       // lectura: alguien tiene que contestar (o al menos mirarlo).
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*) as total
+        `select count(*)::int as total
            from contacts c
-           join messages u on u.id = (
-             select m.id from messages m
+           join lateral (
+             select direction, created_at from messages m
               where m.contact_id = c.id
-              order by m.created_at desc, m.id desc
+              order by created_at desc, id desc
               limit 1
-           )
+           ) u on true
           where u.direction = 'in'
-            and u.created_at > coalesce(c.chat_read_at, cast('1970-01-01' as datetime(3)))`,
+            and u.created_at > coalesce(c.chat_read_at, to_timestamp(0))`,
       );
       return rows[0]?.total ?? 0;
     },
@@ -501,7 +499,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           where contact_id = $1 and id > $2
           order by id asc
           limit $3`,
-        [contactId, afterId, Number(limit)],
+        [contactId, afterId, limit],
       );
       return rows.map(toMessage);
     },
@@ -533,14 +531,14 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         last_at: Date | null;
         last_id: number | null;
       }>(
-        `select count(*) as total, min(created_at) as first_at,
+        `select count(*)::int as total, min(created_at) as first_at,
                 max(created_at) as last_at, max(id) as last_id
            from messages where contact_id = $1`,
         [contactId],
       );
       const r = rows[0];
       return {
-        count: Number(r?.total ?? 0),
+        count: r?.total ?? 0,
         firstAt: r?.first_at ?? null,
         lastAt: r?.last_at ?? null,
         lastId: Number(r?.last_id ?? 0),
@@ -555,7 +553,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
          having max(created_at) < $1
           order by max(created_at) asc
           limit $2`,
-        [before, Number(limit)],
+        [before, limit],
       );
       return rows.map((r) => ({ contactId: r.contact_id, lastAt: r.last_at }));
     },
@@ -565,22 +563,21 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
     async reaccionar(wamid, quien, emoji, at) {
       const limpio = emoji.trim();
       // Quitarla es borrar la clave; ponerla, reemplazarla. En los dos casos
-      // se funde sobre el payload que ya hubiera, sin pisar nada mas:
-      // json_merge_patch funde objeto dentro de objeto, y un null en el
-      // parche borra esa clave (asi no hay que armar una ruta JSON con el
-      // telefono dentro).
+      // se funde sobre el payload que ya hubiera, sin pisar nada mas.
       const { rowCount } = limpio
         ? await pool.query(
             `update messages
-                set payload = json_merge_patch(coalesce(payload, '{}'),
-                      json_object('reacciones', json_object($2, json_object('emoji', $3, 'at', $4))))
+                set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object(
+                      'reacciones',
+                      coalesce(payload->'reacciones', '{}'::jsonb) ||
+                        jsonb_build_object($2::text, jsonb_build_object('emoji', $3::text, 'at', $4::text)))
               where wamid = $1`,
             [wamid, quien, limpio, at.toISOString()],
           )
         : await pool.query(
             `update messages
-                set payload = json_merge_patch(coalesce(payload, '{}'),
-                      json_object('reacciones', json_object($2, null)))
+                set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object(
+                      'reacciones', coalesce(payload->'reacciones', '{}'::jsonb) - $2::text)
               where wamid = $1`,
             [wamid, quien],
           );
@@ -595,7 +592,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
     async porIds(contactId, ids) {
       if (!ids.length) return [];
       const { rows } = await pool.query<Row>(
-        `select * from messages where contact_id = $1 and id in ($2)
+        `select * from messages where contact_id = $1 and id = any($2::bigint[])
           order by created_at asc, id asc`,
         [contactId, ids],
       );
@@ -607,13 +604,13 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       const { rowCount } = destacado
         ? await pool.query(
             `update messages
-                set payload = json_set(coalesce(payload, '{}'), '$.destacado', $3)
-              where contact_id = $1 and id in ($2)`,
+                set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object('destacado', $3::text)
+              where contact_id = $1 and id = any($2::bigint[])`,
             [contactId, ids, at.toISOString()],
           )
         : await pool.query(
-            `update messages set payload = json_remove(coalesce(payload, '{}'), '$.destacado')
-              where contact_id = $1 and id in ($2)`,
+            `update messages set payload = coalesce(payload, '{}'::jsonb) - 'destacado'
+              where contact_id = $1 and id = any($2::bigint[])`,
             [contactId, ids],
           );
       return rowCount ?? 0;
@@ -623,8 +620,8 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       if (!ids.length) return 0;
       const { rowCount } = await pool.query(
         `update messages
-            set payload = json_set(coalesce(payload, '{}'), '$.eliminadoAqui', $3)
-          where contact_id = $1 and id in ($2)`,
+            set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object('eliminadoAqui', $3::text)
+          where contact_id = $1 and id = any($2::bigint[])`,
         [contactId, ids, at.toISOString()],
       );
       return rowCount ?? 0;
@@ -634,7 +631,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       const { rowCount } = await pool.query(
         `update messages
             set body = $3,
-                payload = json_set(coalesce(payload, '{}'), '$.editadoAt', $4)
+                payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object('editadoAt', $4::text)
           where contact_id = $1 and id = $2`,
         [contactId, id, texto, at.toISOString()],
       );
@@ -646,11 +643,11 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       if (!texto) return [];
       const { rows } = await pool.query<Row>(
         `select * from messages
-          where contact_id = $1 and lower(body) like lower($2)
-            and not json_contains_path(coalesce(payload, '{}'), 'one', '$.eliminadoAqui')
+          where contact_id = $1 and body ilike $2
+            and not (coalesce(payload, '{}'::jsonb) ? 'eliminadoAqui')
           order by created_at desc, id desc
           limit $3`,
-        [query.contactId, `%${texto}%`, Number(query.limit)],
+        [query.contactId, `%${texto}%`, query.limit],
       );
       // Se consulta del mas nuevo al mas viejo (lo reciente importa mas) y se
       // devuelve en orden de lectura, como el hilo.
@@ -668,12 +665,12 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         `select m.*, c.phone, c.name
            from messages m
            join contacts c on c.id = m.contact_id
-          where json_contains_path(coalesce(m.payload, '{}'), 'one', '$.destacado')
-            and not json_contains_path(coalesce(m.payload, '{}'), 'one', '$.eliminadoAqui')
+          where coalesce(m.payload, '{}'::jsonb) ? 'destacado'
+            and not (coalesce(m.payload, '{}'::jsonb) ? 'eliminadoAqui')
             ${filtro}
           order by m.created_at desc, m.id desc
           limit $${params.length + 1}`,
-        [...params, Number(query.limit)],
+        [...params, query.limit],
       );
       return rows.map((r) => ({ ...toMessage(r), phone: r.phone, name: r.name }));
     },

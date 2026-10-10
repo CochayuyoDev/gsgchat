@@ -15,7 +15,7 @@
  */
 
 import { randomInt } from 'node:crypto';
-import { nuevoId, type Pool } from '../db/pool.js';
+import type { Pool } from '../db/pool.js';
 
 export type EstadoCodigo = 'activo' | 'usado' | 'caducado' | 'anulado';
 
@@ -141,13 +141,11 @@ export function estadoDe(c: CodigoConexion, ahora: Date): EstadoCodigo {
 export function createCodigosConexionRepo(pool: Pool): CodigosConexionRepo {
   return {
     async crear(input) {
-      const id = nuevoId();
-      await pool.query(
-        `insert into codigos_conexion (id, codigo, para, permisos, caduca_at, usos_max, creado_por)
-         values ($1,$2,$3,$4,$5,$6,$7)`,
-        [id, input.codigo, input.para, JSON.stringify(input.permisos), input.caducaAt, input.usosMax, input.creadoPor],
+      const { rows } = await pool.query<Row>(
+        `insert into codigos_conexion (codigo, para, permisos, caduca_at, usos_max, creado_por)
+         values ($1,$2,$3,$4,$5,$6) returning *`,
+        [input.codigo, input.para, JSON.stringify(input.permisos), input.caducaAt, input.usosMax, input.creadoPor],
       );
-      const { rows } = await pool.query<Row>('select * from codigos_conexion where id = $1', [id]);
       return deFila(rows[0]!);
     },
     async porCodigo(codigo) {
@@ -159,20 +157,17 @@ export function createCodigosConexionRepo(pool: Pool): CodigosConexionRepo {
       return rows[0] ? deFila(rows[0]) : null;
     },
     async listar(limite = 100) {
-      const { rows } = await pool.query<Row>('select * from codigos_conexion order by created_at desc limit $1', [Number(limite)]);
+      const { rows } = await pool.query<Row>('select * from codigos_conexion order by created_at desc limit $1', [limite]);
       return rows.map(deFila);
     },
     async canjear(id, datos) {
-      // El update es atomico (la fila queda bloqueada mientras se evalua el
-      // where): de dos canjes a la vez por el ultimo uso, solo uno cambia la fila.
-      const { rowCount } = await pool.query(
+      const { rows } = await pool.query<Row>(
         `update codigos_conexion
             set usos = usos + 1, canjeado_por = $2, canjeado_desde = $3, canjeado_at = $4, clave_id = $5
-          where id = $1 and estado = 'activo' and usos < usos_max and caduca_at > $4`,
+          where id = $1 and estado = 'activo' and usos < usos_max and caduca_at > $4
+          returning *`,
         [id, datos.por, datos.desde, datos.ahora, datos.claveId],
       );
-      if (!rowCount) return null;
-      const { rows } = await pool.query<Row>('select * from codigos_conexion where id = $1', [id]);
       return rows[0] ? deFila(rows[0]) : null;
     },
     async anular(id) {

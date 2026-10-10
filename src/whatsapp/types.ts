@@ -85,8 +85,6 @@ export interface InboundMessage {
    * como si fueran nuevos es escribirle a media libreta de golpe.
    */
   viejo?: boolean;
-  /** Cuántos mensajes del cliente juntó la ráfaga en este turno (ver juntarRafaga). */
-  rafaga?: number;
   /**
    * Vino del volcado de historial del telefono (`messaging-history.set` al
    * vincular), no en vivo ni de la cola de cuando el sistema estaba apagado.

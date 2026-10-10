@@ -30,7 +30,7 @@ import {
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -57,7 +57,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 
-const auth = { 'x-api-key': ADMIN };
+const auth = { authorization: `Bearer ${ADMIN}` };
 
 /** 10:00 en Lima: dentro del horario de envío. */
 let ahora = new Date('2026-03-10T15:00:00Z');

@@ -56,14 +56,10 @@ export async function solicitudesAbiertasDe(repos: Repos, phone: string): Promis
  * La ubicacion que ese cliente ya dio hoy (no la que tenia GSG), o null. La
  * consultan los motores antes de pedirla: si ya esta, no se pide.
  */
-export async function ubicacionYaRegistrada(repos: Repos, phone: string | null | undefined, dia: string, referencia?: string | null): Promise<Entrega | null> {
+export async function ubicacionYaRegistrada(repos: Repos, phone: string | null | undefined, dia: string): Promise<Entrega | null> {
   if (!phone) return null;
   const repo = repos.entregas as Partial<Repos['entregas']> | undefined;
   if (!repo || typeof repo.ubicacionDelClienteDelDia !== 'function') return null;
-  const entregas = await repos.entregas.listar({ dia, q: phone, limit: 100 });
-  const propias = entregas.filter(e => e.phone === phone);
-  if (referencia) return propias.find(e => e.referencia === referencia && e.ubicacionEstado === 'recibida' && e.lat != null && e.lng != null) ?? null;
-  if (propias.some(e => e.ubicacionEstado === 'pendiente' && !['cancelada','entregada','terminada'].includes(e.estado))) return null;
   return repo.ubicacionDelClienteDelDia(phone, dia).catch(() => null);
 }
 
@@ -72,11 +68,10 @@ export async function ubicacionYaRegistrada(repos: Repos, phone: string | null |
  * pasan a resueltas (con ese punto) y sin recordatorios, y la lista de envio
  * automatico deja de pedirsela. Devuelve cuantas solicitudes cerro.
  */
-export async function resolverPorUbicacion(repos: Repos, phone: string, ubicacion: UbicacionRegistrada, opts: { ahora: Date; motivo: string; excepto?: number[]; soloVivas?: boolean; referencias?: string[] }): Promise<Solicitud[]> {
+export async function resolverPorUbicacion(repos: Repos, phone: string, ubicacion: UbicacionRegistrada, opts: { ahora: Date; motivo: string; excepto?: number[]; soloVivas?: boolean }): Promise<Solicitud[]> {
   const cerradas: Solicitud[] = [];
   for (const s of await solicitudesAbiertasDe(repos, phone)) {
     if (opts.excepto?.includes(s.id)) continue;
-    if (opts.referencias && !opts.referencias.includes(s.referencia ?? "")) continue;
     // `soloVivas`: lo que el motor todavia iba a escribir; lo que ya paso a una persona se deja.
     if (opts.soloVivas && !ESTADOS_SOLICITUD_VIVA.includes(s.estado)) continue;
     const actualizada = await repos.rutas
@@ -97,8 +92,7 @@ export async function resolverPorUbicacion(repos: Repos, phone: string, ubicacio
     await repos.rutas.registrarEvento(s.id, 'ubicacion', `ubicación ya registrada (${ubicacion.fuente ?? 'whatsapp'}): ${opts.motivo}; no se le vuelve a pedir`, { lat: ubicacion.lat, lng: ubicacion.lng }).catch(() => undefined);
     cerradas.push(actualizada);
   }
-  const pendientes = await repos.entregas.vivasPorTelefono(phone);
-  if (!pendientes.some(e => e.ubicacionEstado === 'pendiente')) await sacarDeLaLista(repos, phone, 'mandó su ubicación', opts.ahora);
+  await sacarDeLaLista(repos, phone, 'mandó su ubicación', opts.ahora);
   return cerradas;
 }
 

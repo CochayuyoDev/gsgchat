@@ -359,7 +359,7 @@ describe('el motor', () => {
     expect(reportes.some((r) => r.tipo === 'incidencia')).toBe(true);
   });
 
-  it('el motor conserva la cadencia y termina al tercer intento sin un cuarto mensaje', async () => {
+  it('el motor manda su propia cadencia por cliente y solo se despide de quien contesto', async () => {
     await loteListo(repos, ['51987654321']);
     await repos.rutas.actualizarSolicitud(repos.rutas._solicitudes[0]!.id, { estado: 'enviado', intentos: 3 });
     const { sender, enviados } = senderFalso();
@@ -369,18 +369,18 @@ describe('el motor', () => {
     expect(salida.accion).toBe('derivacion');
     expect(enviados).toHaveLength(0);
 
-    // Si contestó sin mandar ubicación también pasa a pendientes sin un cuarto mensaje.
+    // Un cliente que si contesto recibe la despedida, y con los limites del reparto.
     await loteListo(repos, ['51987654322']);
     const sol = repos.rutas._solicitudes.find((s) => s.phone === '51987654322')!;
     await repos.rutas.actualizarSolicitud(sol.id, { estado: 'respondio', intentos: 3, primeraRespuestaAt: HORA_BUENA });
     await motor.tick();
-    expect(enviados).toHaveLength(0);
+    expect(enviados.at(-1)?.text).toMatch(/repartidor/);
 
     // Y un envio normal del motor lleva la espera como separacion y intentos+1 como techo.
     await loteListo(repos, ['51987654323']);
-    const motor2 = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones: { ...opciones, esperaRespuestaMinutos: 5, maxIntentos: 3 }, usarPlantilla: () => false, ahora: () => new Date(HORA_BUENA.getTime() + 60 * 60_000) });
+    const motor2 = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones: { ...opciones, esperaRespuestaMinutos: 5, maxIntentos: 4 }, usarPlantilla: () => false, ahora: () => new Date(HORA_BUENA.getTime() + 60 * 60_000) });
     await motor2.tick();
-    expect(enviados.at(-1)?.limitesContacto).toEqual({ separacionMs: 60_000, maxPorDia: 4 });
+    expect(enviados.at(-1)?.limitesContacto).toEqual({ separacionMs: 60_000, maxPorDia: 5 });
   });
 
   it('un numero sin WhatsApp se marca y no se le insiste', async () => {
@@ -648,7 +648,7 @@ describe('la cola hacia GSG', () => {
 
     expect(salida).toMatchObject({ intentados: 1, enviados: 1 });
     expect(fetchFalso).toHaveBeenCalledWith(
-      'https://gsg.test/api/sendLocation',
+      'https://gsg.test/api/ubicaciones',
       expect.objectContaining({ method: 'POST' }),
     );
     const cifras = await repos.rutas.cifrasReportes();

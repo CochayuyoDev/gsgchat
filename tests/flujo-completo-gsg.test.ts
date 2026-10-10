@@ -351,7 +351,7 @@ describe('A. la ubicación registrada: una sola verdad, venga por donde venga', 
         { referencia: 'G-9A', telefono: tel, nombre: 'Doble', faltaUbicacion: true, faltaConfirmacion: false },
         { referencia: 'G-9B', telefono: tel, nombre: 'Doble', faltaUbicacion: true, faltaConfirmacion: false },
       ]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       expect(desde(e, tel, 0).filter(pideUbicacion)).toHaveLength(1);
       let f = await coherente(e, tel, 'antes del pin');
@@ -379,7 +379,7 @@ describe('A. la ubicación registrada: una sola verdad, venga por donde venga', 
       const antes = e.mensajesA(tel).length;
       await pedidoAMano(e, tel, 'A-10-bis');
       e.simulador.cargar([{ referencia: 'G-10', telefono: tel, nombre: 'Cliente', faltaUbicacion: true, faltaConfirmacion: false }]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       await pasan(e, 90);
       expect(desde(e, tel, antes).filter(pideUbicacion), 'no se le vuelve a pedir').toEqual([]);
@@ -444,7 +444,7 @@ describe('B. «no soy yo»: texto fijo una vez, a una persona, GSG se entera y s
     try {
       const tel = '987720001';
       e.simulador.cargar([{ referencia: 'G-NS1', telefono: tel, nombre: 'Equivocado', faltaUbicacion: true, faltaConfirmacion: false }]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       const antes = e.mensajesA(tel).length;
       await e.contesta(tel, { texto: 'No soy yo, número equivocado' });
@@ -458,7 +458,7 @@ describe('B. «no soy yo»: texto fijo una vez, a una persona, GSG se entera y s
       const aGsg = e.simulador.recibido.find((r) => r.tipo === 'confirmacion' && r.cuerpo.referencia === 'G-NS1');
       expect(aGsg?.cuerpo).toMatchObject({ confirmada: false, motivo: 'numero_equivocado' });
       // GSG no lo cancela solo (lo ve una persona): sigue en «necesita a alguien».
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       expect((await coherente(e, tel, 'tras sincronizar')).etapas).toEqual(['necesita']);
       const n = e.mensajesA(tel).length;
       await e.contesta(tel, { texto: 'ok' });
@@ -554,7 +554,7 @@ describe('B. «no soy yo»: texto fijo una vez, a una persona, GSG se entera y s
     try {
       const tel = '987720003';
       e.simulador.cargar([{ referencia: 'G-NS3', telefono: tel, nombre: 'Confirma', direccion: 'Jr. X 1', distrito: 'Miraflores', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaUbicacion: false, faltaConfirmacion: true }]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       expect(e.botonesA(tel).length).toBeGreaterThan(0);
       const antes = e.mensajesA(tel).length;
@@ -748,7 +748,7 @@ describe('C. lo que pregunta el cliente, antes y después del pin', () => {
     try {
       const tel = '987730004';
       e.simulador.cargar([{ referencia: 'G-C4', telefono: tel, nombre: 'Confirma', direccion: 'Jr. X 1', distrito: 'Miraflores', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaUbicacion: false, faltaConfirmacion: true }]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       let f = await coherente(e, tel, 'se le preguntó SÍ/NO');
       expect(f.etapas).toEqual(['falta_confirmar']);
@@ -977,10 +977,10 @@ describe('E. cancelaciones y cierre del día', () => {
     try {
       const tel = '987750001';
       e.simulador.cargar([{ referencia: 'G-C1', telefono: tel, nombre: 'Cancelado', faltaUbicacion: true, faltaConfirmacion: false }]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       expect(e.simulador.cancelar('G-C1', 'el cliente llamó')).toBe(true);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       const f = await coherente(e, tel, 'cancelado por GSG');
       expect(f.filas[0]!.estado).toBe('cancelada');
       expect(f.etapas).toEqual(['cancelada']);
@@ -1001,7 +1001,7 @@ describe('E. cancelaciones y cierre del día', () => {
       const tel = '987750004';
       const panel = '987750005';
       e.simulador.cargar([{ referencia: 'G-C5', telefono: tel, nombre: 'Con moto', faltaUbicacion: true, faltaConfirmacion: true }]);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       await e.contesta(tel, { pin: PIN_LIMA });
       await e.trabajar();
@@ -1009,7 +1009,7 @@ describe('E. cancelaciones y cierre del día', () => {
       const n = e.mensajesA(tel).length;
       const nMoto = e.mensajesA(moto).length;
       expect(e.simulador.cancelar('G-C5', 'el cliente llamó')).toBe(true);
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       expect(e.mensajesA(moto).length).toBeGreaterThan(nMoto);
       let f = await coherente(e, tel, 'cancelado con motorizado');
       expect([f.etapas, f.pasos]).toEqual([['cancelada'], ['cancelado']]);

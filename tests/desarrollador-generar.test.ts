@@ -1,7 +1,7 @@
 /**
  * Modulo desarrollador · «Clientes de prueba»: generar por la API, que nada
  * salga al WhatsApp, y borrar SOLO lo de prueba. Con la tienda entera de
- * produccion (armarTienda, base MySQL de prueba real) y un WhatsApp de mentira que
+ * produccion (armarTienda, base PGlite real) y un WhatsApp de mentira que
  * apunta todo lo que se le pide mandar.
  */
 
@@ -16,15 +16,10 @@ import { NOMBRE_CLAVE_PRUEBA } from '../src/desarrollador/clave-prueba.js';
 import { esNumeroDePrueba } from '../src/desarrollador/numeros.js';
 import { clienteInventado, DISTRITOS } from '../src/desarrollador/datos-peru.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
-
-/** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
-const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
 
 describe('Módulo desarrollador: clientes de prueba', () => {
   let raiz: string;
   let tienda: TiendaViva;
-  let b: BaseDePrueba;
   let wa: FakeWhatsApp;
   let cookie: string;
 
@@ -32,14 +27,8 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     const r = await tienda.app.inject({ method, url, headers: { ...headers, ...(payload !== undefined ? { 'content-type': 'application/json' } : {}) }, payload: payload === undefined ? undefined : JSON.stringify(payload) });
     return { status: r.statusCode, body: r.body ? (JSON.parse(r.body) as Record<string, any>) : {} };
   };
-  const db = () => b.pool;
+  const db = () => tienda.pglite!.db;
   const cuenta = async (sql: string, params: unknown[] = []) => Number((await db().query<{ n: number | string }>(sql, params)).rows[0]?.n ?? 0);
-
-  // La base aparte: la primera vez hay que crear sus tablas y tarda (usa el
-  // hookTimeout largo de vitest.config, no el de armar la tienda).
-  beforeAll(async () => {
-    b = await baseDePrueba();
-  });
 
   beforeAll(async () => {
     raiz = mkdtempSync(path.join(tmpdir(), 'dev-generar-'));
@@ -50,7 +39,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
       slug: 'dev',
       env: {
         PUBLIC_BASE_URL: 'https://chat.gsg.pe',
-        DATABASE_URL: b.url,
+        DATABASE_URL: `pglite://${path.join(raiz, 'datos')}`,
         TRACKING_SECRET: secretos.trackingSecret,
         WHATSAPP_PROVIDER: 'local',
         BUSINESS_NAME: 'GSG',
@@ -64,7 +53,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
         RUTAS_PAUSA_MAX_SEG: '1',
       } as NodeJS.ProcessEnv,
       secretos,
-      base: { url: b.url, base: b.base },
+      base: { tipo: 'pglite', dir: path.join(raiz, 'datos') },
       authDir: path.join(raiz, 'auth'),
       mediaDir: path.join(raiz, 'medios'),
       carpetaCopias: path.join(raiz, 'copias'),
@@ -78,12 +67,11 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     cookie = String(alta.headers['set-cookie']).split(';')[0]!;
     // Horario de entregas abierto todo el dia: la prueba no puede depender de la hora.
     await api('POST', '/admin/entregas/ajustes', { horarioEntregas: { desde: '00:00', hasta: '23:59', extendidoHasta: '23:59' } });
-  }, 180_000 * LENTO);
+  }, 180_000);
 
   afterAll(async () => {
     await tienda?.parar();
-    await b?.cerrar();
-    if (raiz) rmSync(raiz, { recursive: true, force: true });
+    rmSync(raiz, { recursive: true, force: true });
   });
 
   it('los datos inventados son de Lima y el monto va en soles', () => {
@@ -104,7 +92,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
 
     const clave = generarClaveApi();
     await tienda.repos.claves.crear({ nombre: 'Todo', prefijo: prefijoDeClave(clave), hash: hashClaveApi(clave), creadaPor: null, permisos: ['*'] });
-    expect((await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 1 }, { 'x-api-key': clave })).status).toBe(403);
+    expect((await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 1 }, { authorization: `Bearer ${clave}` })).status).toBe(403);
   });
 
   it('el tope es de 500 clientes por tanda y los errores se dicen en palabras', async () => {
@@ -171,7 +159,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     const motos = (await tienda.app.inject({ method: 'GET', url: '/admin/motorizados', headers: { cookie } })).json() as { motorizados?: Array<{ phone: string }> } | Array<{ phone: string }>;
     const listaMotos = Array.isArray(motos) ? motos : (motos.motorizados ?? []);
     expect(listaMotos.filter((m) => m.phone.startsWith('510001')).length).toBe(5);
-  }, 180_000 * LENTO);
+  }, 180_000);
 
   it('NADA pasó por el WhatsApp: el sender lo simuló y quedó en el hilo como enviado', async () => {
     // Un respiro para que el motor del reparto pida alguna ubicación.
@@ -183,13 +171,13 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(await cuenta(`select count(*) as n from rutas_solicitudes s join entregas e on e.phone = s.phone where e.referencia like 'PRUEBA-%' and e.ubicacion_estado = 'recibida' and e.ubicacion_fuente = 'a mano (GSG (API))'`)).toBe(0);
     const estado = await api('GET', '/admin/desarrollador/prueba');
     expect(estado.body).toMatchObject({ clientes: 40, motorizados: 5 });
-  }, 60_000 * LENTO);
+  }, 60_000);
 
   it('una segunda tanda no pisa los números de la primera', async () => {
     const r = await api('POST', '/admin/desarrollador/generar', { faltaUbicacion: 3, motorizados: 1 });
     expect(r.body.creados).toEqual({ faltaConfirmar: 0, faltaUbicacion: 3, motorizados: 1 });
     expect((await api('GET', '/admin/desarrollador/prueba')).body).toMatchObject({ clientes: 43, motorizados: 6 });
-  }, 120_000 * LENTO);
+  }, 120_000);
 
   it('«Borrar todo lo de prueba» deja todo limpio y lo real intacto', async () => {
     const r = await api('DELETE', '/admin/desarrollador/prueba');
@@ -202,7 +190,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(await cuenta(`select count(*) as n from contacts where phone like '51900%'`)).toBe(0);
     expect(await cuenta(`select count(*) as n from motorizados where phone like '51900%'`)).toBe(0);
     expect(await cuenta(`select count(*) as n from rutas_solicitudes where phone like '51900%'`)).toBe(0);
-    expect(await cuenta(`select count(*) as n from rutas_reportes where json_unquote(json_extract(payload, '$.referencia')) like 'PRUEBA-%'`)).toBe(0);
+    expect(await cuenta(`select count(*) as n from rutas_reportes where payload->>'referencia' like 'PRUEBA-%'`)).toBe(0);
     expect(await cuenta(`select count(*) as n from messages m join contacts c on c.id = m.contact_id where c.phone like '51900%'`)).toBe(0);
     expect(await cuenta(`select count(*) as n from envio_automatico where phone like '51900%'`)).toBe(0);
     // Lo real, en su sitio.
@@ -212,7 +200,7 @@ describe('Módulo desarrollador: clientes de prueba', () => {
 
     const otra = await api('DELETE', '/admin/desarrollador/prueba');
     expect(otra.body.detalle).toContain('No había nada de prueba');
-  }, 120_000 * LENTO);
+  }, 120_000);
 
   it('la pestaña se pinta dentro del módulo, sin jerga y con su botón de borrar', async () => {
     const r = await tienda.app.inject({ method: 'GET', url: '/desarrollador', headers: { cookie } });

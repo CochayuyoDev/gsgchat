@@ -37,7 +37,7 @@ export async function registerDesarrollador(app: FastifyInstance, deps: DepsDesa
   });
 
   await registerGenerar(app, deps);
-
-
+  await registerVivo(app, deps);
+  await registerListo(app, deps);
   await registerProcesosDev(app, deps);
 }

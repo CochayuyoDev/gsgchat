@@ -24,7 +24,7 @@ import { clasificarConfirmarGsg, leerClaseConfirmarGsg } from '../src/ia/agente-
 import { avisoPorConfirmar, grupoDe } from '../src/entregas/servicio.js';
 import { etapaDe } from '../src/entregas/numeros.js';
 import { numerosPage } from '../src/web/numeros-page.js';
-import { crearEscenarioEntregas, PIN_LIMA, conPais, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
+import { crearEscenarioEntregas, PIN_LIMA, conPais, type EscenarioEntregas } from './escenario-entregas.js';
 
 /** Las 09:00 de Lima del último día que ya empezó. */
 function hoyALas9(): Date {
@@ -116,7 +116,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     await e.api.post('/admin/motorizados/de-prueba');
     e.simulador.cargar([deUbicacion(1), deUbicacion(2), deConfirmar(1), deConfirmar(2), deConfirmar(3), deConfirmar(4)]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());
@@ -263,7 +263,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   it('cualquier otra cosa → el cierre UNA vez con el número, una persona y silencio', async () => {
     // Un pedido nuevo de «falta confirmar» para este caso (llega, se confirma su envío y se le pregunta).
     e.simulador.cargar([deConfirmar(5)]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     expect(salidos('987200005')).toBe(0);
     // Ya se confirmó otra tanda hoy: el aviso dice «más».
@@ -309,7 +309,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   });
 
   it('lo que entra por POST /api/v1/entregas también espera', async () => {
-    const r = await e.api.post<{ creadas: Array<{ referencia: string }> }>('/api/v1/entregas', { pedidos: [{ ...OBLIGATORIOS_GSG, referencia: 'API-1', telefono: '987400001', nombre: 'Por La Api', distrito: 'Surco' }, { ...OBLIGATORIOS_GSG, referencia: 'API-2', telefono: '987400002', nombre: 'Api Con Pin', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaConfirmar: true }] });
+    const r = await e.api.post<{ creadas: Array<{ referencia: string }> }>('/api/v1/entregas', { pedidos: [{ referencia: 'API-1', telefono: '987400001', nombre: 'Por La Api', distrito: 'Surco' }, { referencia: 'API-2', telefono: '987400002', nombre: 'Api Con Pin', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaConfirmar: true }] });
     expect(r.status).toBe(201);
     await e.trabajar();
     expect(salidos('987400001')).toBe(0);
@@ -321,7 +321,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   it('con el ajuste apagado, la lista sale sola como antes', async () => {
     await e.entregas.guardarAjustes({ confirmarListaGsg: false });
     e.simulador.cargar([deUbicacion(3)]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     expect(e.mensajesA('987100003').some((m) => m.kind === 'location_request')).toBe(true);
     expect((await fila('U-3')).etapa).not.toBe('por_confirmar_envio');

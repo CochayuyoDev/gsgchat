@@ -347,8 +347,8 @@ export async function correrGuion(ctx: ContextoGuion, guion: Guion): Promise<Res
         const antes = (await entrega())?.llegaAproxAt ?? null;
         const minutos = paso.minutos === 'pasada_la_hora' ? (antes ? Math.max(1, Math.ceil((antes.getTime() - Date.now()) / 60_000) + 45) : 60) : paso.minutos;
         const r = await db.query(
-          `update entregas set llega_aprox_at = llega_aprox_at - interval $2 minute,
-                               aviso_enviado_at = aviso_enviado_at - interval $2 minute
+          `update entregas set llega_aprox_at = llega_aprox_at - make_interval(mins => $2::int),
+                               aviso_enviado_at = aviso_enviado_at - make_interval(mins => $2::int)
             where id = $1`,
           [nuevo.id, minutos],
         );

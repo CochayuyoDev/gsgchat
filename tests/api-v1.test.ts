@@ -16,12 +16,12 @@ import { hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { NOMBRES_PERMISOS, permisosAceptables, tienePermiso } from '../src/auth/permisos.js';
 import { verificarFirma } from '../src/webhooks/firma.js';
 import { approvedTemplate, createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, type FakeWhatsApp, CLAVE_API_PRUEBA as TODO } from './fakes.js';
-import { crearEscenarioEntregas, OBLIGATORIOS_GSG } from './escenario-entregas.js';
+import { crearEscenarioEntregas } from './escenario-entregas.js';
 import { despacharEntregas, encolarEventos } from '../src/webhooks/despachador.js';
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -62,7 +62,7 @@ const fetchFalso = (async (url: string | URL | Request, init?: RequestInit) => {
   return new Response(respuestaWebhook.body, { status: respuestaWebhook.status });
 }) as unknown as typeof fetch;
 
-const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
+const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
 
 async function build() {
   repos = createFakeRepos();
@@ -362,7 +362,7 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
   let esc: Escenario;
   /** Una clave que solo lee entregas: no puede empujar. */
   const SOLO_LEER = 'wak_claveSoloLeerEntregas0123456789abcdefX';
-  const conClave = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
+  const conClave = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
 
   beforeAll(async () => {
     esc = await crearEscenarioEntregas({ supervisor: '51999888777' });
@@ -372,12 +372,12 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     await esc.cerrar();
   });
 
-  it('dos pedidos entran con sus banderas, el repetido no se duplica, el sin telefono se descarta con motivo, y sin permiso 403', async () => {
+  it('dos pedidos entran con sus banderas, el repetido no se duplica, el sin telefono se descarta con motivo, y sin permiso 403 en cristiano', async () => {
     const r = await esc.api.post<{ ok: boolean; creadas: Array<Record<string, unknown>>; repetidas: string[]; descartadas: Array<{ referencia: string; motivo: string }>; detalle: string }>('/api/v1/entregas', {
       pedidos: [
-        { ...OBLIGATORIOS_GSG, referencia: 'P-5001', telefono: '987000101', nombre: 'Ana Quispe', direccion: 'Av. Larco 123', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
-        { ...OBLIGATORIOS_GSG, referencia: 'P-5002', telefono: '51987000102', nombre: 'Luis Rojas', lat: -12.1211, lng: -77.0301, faltaConfirmar: true, urgente: true },
-        { ...OBLIGATORIOS_GSG, referencia: 'P-5003', telefono: '12', nombre: 'Sin telefono' },
+        { referencia: 'P-5001', telefono: '987000101', nombre: 'Ana Quispe', direccion: 'Av. Larco 123', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmar: true },
+        { referencia: 'P-5002', telefono: '51987000102', nombre: 'Luis Rojas', lat: -12.1211, lng: -77.0301, faltaConfirmar: true, urgente: true },
+        { referencia: 'P-5003', telefono: '12', nombre: 'Sin telefono' },
       ],
     });
     expect(r.status).toBe(201);
@@ -385,8 +385,6 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     expect(r.body.descartadas).toHaveLength(1);
     expect(r.body.descartadas[0]!.motivo).toContain('tel');
     expect(r.body.detalle).toContain('2 pedidos nuevos');
-    // El id es el de la base (numero real), no null.
-    for (const c of r.body.creadas) expect(typeof c.id).toBe('number');
     // En la pantalla, con lo que le falta a cada uno.
     const p1 = await esc.entrega('P-5001');
     expect(p1).toMatchObject({ ubicacionEstado: 'pendiente', confirmacionEstado: 'pendiente', estado: 'esperando_ubicacion' });
@@ -396,7 +394,7 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     expect(urgente.prioridad).toBe('urgente');
     expect(urgente.ubicacion).toMatchObject({ estado: 'recibida', lat: -12.1211 });
     // Repetido: no se duplica.
-    const otra = await esc.api.post<{ creadas: unknown[]; repetidas: string[] }>('/api/v1/entregas', { ...OBLIGATORIOS_GSG, referencia: 'P-5001', nombre: 'Ana Quispe', telefono: '987000101' });
+    const otra = await esc.api.post<{ creadas: unknown[]; repetidas: string[] }>('/api/v1/entregas', { referencia: 'P-5001', telefono: '987000101' });
     expect(otra.status).toBe(200);
     expect(otra.body.creadas).toEqual([]);
     expect(otra.body.repetidas).toEqual(['P-5001']);
@@ -404,12 +402,10 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     // Cuerpo vacio: 400 con explicacion.
     const vacio = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(TODO), payload: {} });
     expect(vacio.statusCode).toBe(400);
-    expect(vacio.json().error).toContain('empresa falta');
-    expect(vacio.json().camposFaltantes ?? vacio.json().detalles).toBeDefined();
-    // Clave valida sin permiso de recepcion: 403.
-    const sin = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(SOLO_LEER), payload: { ...OBLIGATORIOS_GSG, referencia: 'P-5009', nombre: 'X', telefono: '987000109' } });
+    expect(vacio.json().error).toContain('Manda un pedido');
+    // Sin permiso: 403.
+    const sin = await esc.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: conClave(SOLO_LEER), payload: { referencia: 'P-5009', telefono: '987000109' } });
     expect(sin.statusCode).toBe(403);
-    expect(sin.json()).toMatchObject({ ok: false, codigo: 'SIN_PERMISO' });
     expect(sin.json().error).toMatch(/permiso/i);
     // Pero si puede leer.
     const lee = await esc.app.inject({ method: 'GET', url: '/api/v1/entregas/P-5002', headers: conClave(SOLO_LEER) });
@@ -453,13 +449,13 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     soltar();
   });
 
-  it('el OpenAPI documenta /entregas, /entregas/{referencia} sin /motorizados, y cubre todas las rutas de este arranque', async () => {
+  it('el OpenAPI documenta /entregas, /entregas/{referencia} y /motorizados con su permiso, y cubre todas las rutas de este arranque', async () => {
     const doc = (await esc.app.inject({ method: 'GET', url: '/api/v1/openapi.json', headers: conClave(TODO) })).json() as { paths: Record<string, Record<string, { 'x-permiso'?: string }>> };
     expect(doc.paths['/entregas']!.post!['x-permiso']).toBe('entregas:gestionar');
     expect(doc.paths['/entregas']!.get!['x-permiso']).toBe('entregas:leer');
     expect(doc.paths['/entregas/{referencia}']!.get!['x-permiso']).toBe('entregas:leer');
     expect(doc.paths['/entregas/{referencia}']!.delete!['x-permiso']).toBe('entregas:gestionar');
-    expect(doc.paths['/motorizados']).toBeUndefined();
+    expect(doc.paths['/motorizados']!.post!['x-permiso']).toBe('entregas:gestionar');
     const registradas = esc.app.rutasApiV1.map((r) => ({ ...r, ruta: r.ruta.replace('/api/v1', '').replace(/:(\w+)/g, '{$1}') || '/' }));
     expect(registradas.some((r) => r.ruta === '/entregas' && r.metodo === 'POST')).toBe(true);
     for (const { ruta, metodo, permiso } of registradas) {

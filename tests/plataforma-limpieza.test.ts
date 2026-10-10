@@ -5,38 +5,30 @@
  *    varios registros simultaneos desde la misma conexion pasaban todos;
  *  - una tienda que fallaba a mitad de armarse dejaba su base abierta y sus
  *    temporizadores vivos.
- *
- * Las bases son de verdad (servidor MySQL/MariaDB de pruebas, nombres
- * gsgchat_prueba_limp_*) y vuelven al banco al terminar.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const estado = vi.hoisted(() => ({ fallarServidor: false, bases: [] as Array<{ base: string | null; cerrada: boolean }> }));
+const estado = vi.hoisted(() => ({ fallarServidor: false, bases: [] as Array<{ dir: string; cerrada: boolean }> }));
 
-// Cada conexion a una base que se abre queda apuntada, con si se cerro.
-vi.mock('../src/db/pool.js', async (original) => {
-  const m = await original<typeof import('../src/db/pool.js')>();
+// Cada base PGlite que se abre queda apuntada, con si se cerro.
+vi.mock('../src/db/pglite.js', async (original) => {
+  const m = await original<typeof import('../src/db/pglite.js')>();
   return {
     ...m,
-    createPool: (...args: Parameters<typeof m.createPool>) => {
-      const pool = m.createPool(...args);
-      const registro = { base: pool.baseDeDatos, cerrada: false };
+    openPglite: async (dir: string) => {
+      const h = await m.openPglite(dir);
+      const registro = { dir, cerrada: false };
       estado.bases.push(registro);
-      const cerrar = pool.end.bind(pool);
-      return {
-        ...pool,
-        query: pool.query.bind(pool),
-        connect: pool.connect.bind(pool),
-        baseDeDatos: pool.baseDeDatos,
-        end: async () => {
-          registro.cerrada = true;
-          return cerrar();
-        },
+      const cerrar = h.db.close.bind(h.db);
+      h.db.close = async () => {
+        registro.cerrada = true;
+        return cerrar();
       };
+      return h;
     },
   };
 });
@@ -56,15 +48,6 @@ vi.mock('../src/server.js', async (original) => {
 const { crearPlataforma } = await import('../src/plataforma/plataforma.js');
 const { armarTienda } = await import('../src/plataforma/tienda.js');
 const { bootstrapSecrets } = await import('../src/settings/crypto.js');
-const { existeBase } = await import('../src/db/bases.js');
-const { bancoDePrueba, devolverBasesDePrueba, URL_PRUEBAS, urlConBase } = await import('./mysql.js');
-
-const PREFIJO = 'gsgchat_prueba_limp_';
-const BANCO = bancoDePrueba(PREFIJO);
-const baseDePlataforma = (nombre: string) => ({ url: urlConBase(`${PREFIJO}${nombre}`) });
-const TIEMPO = 3_600_000;
-beforeAll(() => devolverBasesDePrueba(BANCO), 3_600_000);
-afterAll(() => devolverBasesDePrueba(BANCO), 3_600_000);
 
 const REGISTRO = (usuario: string, tienda = `Tienda ${usuario}`) => ({ tienda, nombre: 'X', usuario, clave: 'clave-segura-123' });
 const carpetas: string[] = [];
@@ -82,7 +65,7 @@ afterEach(() => {
 describe('freno de registros con registros simultaneos', () => {
   it('con tope 1, dos registros a la vez desde la misma conexion: pasa uno y el otro se frena', async () => {
     const raiz = carpeta('freno-');
-    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: baseDePlataforma('freno'), banco: BANCO, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), registrosPorHora: 1, log: () => undefined });
+    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: { tipo: 'pglite' }, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), registrosPorHora: 1, log: () => undefined });
     try {
       await p.arrancar();
       const [a, b] = await Promise.all([p.registrar(REGISTRO('uno-1'), '1.2.3.4'), p.registrar(REGISTRO('dos-2'), '1.2.3.4')]);
@@ -91,11 +74,11 @@ describe('freno de registros con registros simultaneos', () => {
     } finally {
       await p.parar();
     }
-  }, TIEMPO);
+  }, 180_000);
 
   it('un registro que no llega a crear la tienda devuelve su hueco', async () => {
     const raiz = carpeta('freno-hueco-');
-    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: baseDePlataforma('hueco'), banco: BANCO, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), registrosPorHora: 1, log: () => undefined });
+    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: { tipo: 'pglite' }, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), registrosPorHora: 1, log: () => undefined });
     try {
       await p.arrancar();
       expect((await p.registrar(REGISTRO('ocupado'), '5.5.5.5')).status).toBe(200);
@@ -105,23 +88,22 @@ describe('freno de registros con registros simultaneos', () => {
     } finally {
       await p.parar();
     }
-  }, TIEMPO);
+  }, 180_000);
 });
 
 describe('una tienda que falla a mitad de armarse', () => {
   it('cierra su base y no deja la tienda a medias', async () => {
     const raiz = carpeta('mitad-');
     const secretos = bootstrapSecrets(raiz);
-    const nombre = `${PREFIJO}mitad`;
-    const url = urlConBase(nombre);
+    const dir = path.join(raiz, 'datos');
     estado.fallarServidor = true;
     await expect(
       armarTienda({
         id: 'x',
         slug: 'x',
-        env: { PUBLIC_BASE_URL: 'http://localhost:0', DATABASE_URL: url, TRACKING_SECRET: secretos.trackingSecret, WHATSAPP_PROVIDER: 'local' } as NodeJS.ProcessEnv,
+        env: { PUBLIC_BASE_URL: 'http://localhost:0', DATABASE_URL: `pglite://${dir}`, TRACKING_SECRET: secretos.trackingSecret, WHATSAPP_PROVIDER: 'local' } as NodeJS.ProcessEnv,
         secretos,
-        base: { url, banco: BANCO },
+        base: { tipo: 'pglite', dir },
         authDir: path.join(raiz, 'auth'),
         mediaDir: path.join(raiz, 'medios'),
         carpetaCopias: path.join(raiz, 'copias'),
@@ -131,14 +113,13 @@ describe('una tienda que falla a mitad de armarse', () => {
         prefijoLog: '[x] ',
       }),
     ).rejects.toThrow('fallo a mitad');
-    const base = estado.bases.filter((b) => b.base === nombre);
-    expect(base.length).toBeGreaterThan(0);
-    expect(base.every((b) => b.cerrada)).toBe(true);
-  }, TIEMPO);
+    const base = estado.bases.find((b) => b.dir === dir);
+    expect(base?.cerrada).toBe(true);
+  }, 120_000);
 
   it('en un registro, el fallo se explica, la tienda no queda en el directorio y su base se cierra', async () => {
     const raiz = carpeta('mitad-registro-');
-    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: baseDePlataforma('rota'), banco: BANCO, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), log: () => undefined });
+    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: { tipo: 'pglite' }, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), log: () => undefined });
     try {
       await p.arrancar();
       estado.fallarServidor = true;
@@ -147,14 +128,12 @@ describe('una tienda que falla a mitad de armarse', () => {
       expect(r.error).toContain('No se pudo crear tu tienda');
       expect(await p.cuantas()).toBe(0);
       expect(await p.usuarioLibre('rota-1')).toBe(true);
-      const deTienda = estado.bases.filter((b) => b.base?.startsWith(`${PREFIJO}rota_t_`));
+      const deTienda = estado.bases.filter((b) => b.dir.startsWith(raiz) && !b.dir.includes('.molde'));
       expect(deTienda.length).toBeGreaterThan(0);
       expect(deTienda.every((b) => b.cerrada)).toBe(true);
-      // Y la base de la tienda que no llego a nacer no se queda en el servidor.
-      expect(await existeBase(URL_PRUEBAS, deTienda[0]!.base!)).toBe(false);
     } finally {
       estado.fallarServidor = false;
       await p.parar();
     }
-  }, TIEMPO);
+  }, 180_000);
 });

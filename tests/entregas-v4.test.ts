@@ -36,7 +36,7 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
 
   it('un audio del motorizado con transcripción vale como texto ("entregado"); sin transcripción se le pide que lo escriba', async () => {
     e.simulador.cargar([{ referencia: 'V-1', telefono: '987410001', nombre: 'Vera Audio', direccion: 'Av. Salaverry 500', distrito: 'Jesús María', faltaUbicacion: true, faltaConfirmacion: false }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     await e.contesta('987410001', { pin: pinDe(41) });
     await e.trabajar();
@@ -59,7 +59,7 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
 
   it('la página del motorizado: enlace de 7 días, sus paradas en orden y botones que hacen lo mismo que su WhatsApp', async () => {
     e.simulador.cargar([{ referencia: 'V-2', telefono: '987410002', nombre: 'Víctor Página', direccion: 'Jr. Lampa 300', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     await e.contesta('987410002', { pin: pinDe(42) });
     await e.trabajar();
@@ -159,7 +159,7 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
 
   it('un pin fuera de Lima no se registra: pasa a una persona y al cliente se le explica', async () => {
     e.simulador.cargar([{ referencia: 'V-5', telefono: '987410005', nombre: 'Fuera Zona', direccion: 'Km 30', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     // Arequipa, lejos de Lima.
     await e.contesta('987410005', { pin: { lat: -16.409, lng: -71.537 } });
@@ -184,11 +184,11 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
       { referencia: 'V-6', telefono: '987410006', nombre: 'Cambio Dirección', direccion: 'Calle A 1', distrito: 'Lince', faltaUbicacion: true, faltaConfirmacion: false },
       { referencia: 'V-7', telefono: '987410007', nombre: 'Cancelado Gsg', direccion: 'Calle B 2', distrito: 'Lince', faltaUbicacion: true, faltaConfirmacion: false },
     ]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     // GSG cambia la direccion de V-6.
     expect(e.simulador.cambiar('V-6', { direccion: 'Calle A 99, dpto 3', distrito: 'San Isidro' })).toBeTruthy();
-    const s = await e.api.post<{ cambiadas?: number }>('/admin/entregas/sincronizar');
+    const s = await e.gsgManda();
     expect(s.body.cambiadas).toBe(1);
     const v6 = await e.entrega('V-6');
     expect(v6?.direccion).toBe('Calle A 99, dpto 3');
@@ -210,7 +210,7 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     const antesCliente = e.textosA(conPais('987410007')).length;
     const antesRider = e.textosA(rider.phone).length;
     expect(e.simulador.cancelar('V-7', 'el cliente llamó a GSG')).toBe(true);
-    const s2 = await e.api.post<{ canceladas?: number }>('/admin/entregas/sincronizar');
+    const s2 = await e.gsgManda();
     expect(s2.body.canceladas).toBe(1);
     const v7 = await e.entrega('V-7');
     expect(v7?.estado).toBe('cancelada');
@@ -223,10 +223,10 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     // Salvaguarda: GSG contesta vacio (o se cae): nada se cancela.
     const vivasAntes = (await e.resumen()).cifras.cancelada;
     e.simulador.reiniciar();
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     expect((await e.resumen()).cifras.cancelada).toBe(vivasAntes);
     e.simulador.modo = 'caido';
-    const caido = await e.api.post<{ ok: boolean }>('/admin/entregas/sincronizar');
+    const caido = await e.gsgManda();
     expect(caido.body.ok).toBe(false);
     expect((await e.resumen()).cifras.cancelada).toBe(vivasAntes);
     e.simulador.modo = 'ok';
@@ -244,7 +244,7 @@ describe('vuelta 4 · la zona horaria de Ajustes manda en las horas de las entre
     try {
       z.simulador.cargarDePrueba();
       await z.api.post('/admin/motorizados/de-prueba');
-      await z.api.post('/admin/entregas/sincronizar');
+      await z.gsgManda();
       await z.contesta('987000010', { pin: pinDe(10) });
       await z.trabajar();
       const antes = await z.entrega('P-1010');

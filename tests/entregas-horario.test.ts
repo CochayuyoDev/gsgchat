@@ -24,7 +24,7 @@ describe('el horario de entregas amplía la franja del reparto', () => {
     e = await crearEscenarioEntregas({ supervisor: SUPERVISOR, horario: [9, 19], arranque: hoyALas2030() });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
   });
   afterAll(() => e.cerrar());
 

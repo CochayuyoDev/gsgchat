@@ -432,7 +432,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
   async function montar() {
     const config = loadConfig({
       PUBLIC_BASE_URL: 'http://localhost:3000',
-      DATABASE_URL: 'mysql://x/y',
+      DATABASE_URL: 'postgres://x/y',
       WHATSAPP_PROVIDER: 'waha',
       WAHA_URL: BASE,
       WHATSAPP_VERIFY_TOKEN: HMAC,
@@ -568,7 +568,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/waha/request-code',
-      headers: { 'x-api-key': ADMIN },
+      headers: { authorization: `Bearer ${ADMIN}` },
       payload: { phone: '+52 1 55 1234 5678' },
     });
 
@@ -588,7 +588,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/admin/waha/request-code',
-      headers: { 'x-api-key': ADMIN },
+      headers: { authorization: `Bearer ${ADMIN}` },
       payload: { phone: '5215512345678' },
     });
 
@@ -624,7 +624,7 @@ describe('el webhook de WAHA dentro del servidor', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/admin/waha/detect',
-      headers: { 'x-api-key': ADMIN },
+      headers: { authorization: `Bearer ${ADMIN}` },
     });
 
     expect(response.statusCode).toBe(200);

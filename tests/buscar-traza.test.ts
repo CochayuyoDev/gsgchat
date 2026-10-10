@@ -16,7 +16,7 @@ import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -38,7 +38,7 @@ const queue: OutboundQueue = {
   },
   async close() {},
 };
-const auth = { 'x-api-key': CLAVE_API_PRUEBA };
+const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
 
 let app: FastifyInstance;
 let repos: FakeRepos;

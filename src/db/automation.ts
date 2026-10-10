@@ -6,7 +6,7 @@
  * como `repos.automation` y `tests/fakes.ts` tiene su doble en memoria.
  */
 
-import { nuevoId, type Pool } from './pool.js';
+import type { Pool } from './pool.js';
 import type { TemplateCategory } from './repos.js';
 
 // ---------------------------------------------------------------- modelos
@@ -230,7 +230,7 @@ export interface AutomationRepo {
   setPrefs(prefs: Partial<AutomationPrefs>): Promise<AutomationPrefs>;
 }
 
-// ---------------------------------------------------------- impl MySQL
+// -------------------------------------------------------- impl Postgres
 
 interface RuleRow {
   id: string;
@@ -357,7 +357,7 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
     const map = new Map<string, SequenceStep[]>();
     if (!sequenceIds.length) return map;
     const { rows } = await pool.query<StepRow>(
-      `select * from sequence_steps where sequence_id in ($1) order by sequence_id, position`,
+      `select * from sequence_steps where sequence_id = any($1::uuid[]) order by sequence_id, position`,
       [sequenceIds],
     );
     for (const row of rows) {
@@ -397,13 +397,10 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
       return rows.map(toRule);
     },
     async createRule(input) {
-      // `trigger` y `match` son palabras reservadas en MySQL: van entre comillas invertidas.
-      const id = nuevoId();
-      await pool.query(
-        `insert into auto_replies (id, name, \`trigger\`, keyword, \`match\`, reply, sequence_id, enabled, priority)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      const { rows } = await pool.query<RuleRow>(
+        `insert into auto_replies (name, trigger, keyword, match, reply, sequence_id, enabled, priority)
+         values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
         [
-          id,
           input.name,
           input.trigger,
           input.keyword ?? null,
@@ -414,23 +411,20 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
           input.priority ?? 100,
         ],
       );
-      const { rows } = await pool.query<RuleRow>('select * from auto_replies where id = $1', [id]);
       return toRule(rows[0]!);
     },
     async updateRule(id, patch) {
-      // Sin `returning`: se actualiza y se lee. Si el id no existe, el select
-      // no trae nada (aunque el update no cambie ninguna columna, la fila sigue).
-      await pool.query(
+      const { rows } = await pool.query<RuleRow>(
         `update auto_replies set
            name = coalesce($2, name),
-           \`trigger\` = coalesce($3, \`trigger\`),
+           trigger = coalesce($3, trigger),
            keyword = case when $9 then $4 else keyword end,
-           \`match\` = coalesce($5, \`match\`),
+           match = coalesce($5, match),
            reply = case when $10 then $6 else reply end,
-           sequence_id = case when $11 then $7 else sequence_id end,
+           sequence_id = case when $11 then $7::uuid else sequence_id end,
            enabled = coalesce($8, enabled),
            priority = coalesce($12, priority)
-         where id = $1`,
+         where id = $1 returning *`,
         [
           id,
           patch.name ?? null,
@@ -446,7 +440,6 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
           patch.priority ?? null,
         ],
       );
-      const { rows } = await pool.query<RuleRow>('select * from auto_replies where id = $1', [id]);
       return rows[0] ? toRule(rows[0]) : null;
     },
     async deleteRule(id) {
@@ -456,8 +449,8 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
     async listSequences() {
       const { rows } = await pool.query<SequenceRow & { active: number; total: number }>(
         `select s.*,
-                (select count(*) from enrollments e where e.sequence_id = s.id and e.status = 'active') as active,
-                (select count(*) from enrollments e where e.sequence_id = s.id) as total
+                (select count(*)::int from enrollments e where e.sequence_id = s.id and e.status = 'active') as active,
+                (select count(*)::int from enrollments e where e.sequence_id = s.id) as total
            from sequences s order by s.created_at desc`,
       );
       const steps = await stepsFor(rows.map((r) => r.id));
@@ -489,24 +482,21 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
       };
     },
     async createSequence(input) {
-      const id = nuevoId();
-      await pool.query(
-        `insert into sequences (id, name, description, stop_on_reply, enabled)
-         values ($1,$2,$3,$4,$5)`,
-        [id, input.name, input.description ?? null, input.stopOnReply ?? true, input.enabled ?? true],
+      const { rows } = await pool.query<SequenceRow>(
+        `insert into sequences (name, description, stop_on_reply, enabled)
+         values ($1,$2,$3,$4) returning *`,
+        [input.name, input.description ?? null, input.stopOnReply ?? true, input.enabled ?? true],
       );
+      const id = rows[0]!.id;
       await insertSteps(id, input.steps);
       return (await repo.getSequence(id))!;
     },
     async updateSequence(id, input) {
-      // En MySQL rowCount son las filas CAMBIADAS (0 si se guarda igual que
-      // estaba): la existencia se mira aparte.
-      const existe = await pool.query('select 1 from sequences where id = $1', [id]);
-      if (!existe.rowCount) return null;
-      await pool.query(
+      const { rowCount } = await pool.query(
         `update sequences set name = $2, description = $3, stop_on_reply = $4, enabled = $5 where id = $1`,
         [id, input.name, input.description ?? null, input.stopOnReply ?? true, input.enabled ?? true],
       );
+      if (!rowCount) return null;
       await pool.query('delete from sequence_steps where sequence_id = $1', [id]);
       await insertSteps(id, input.steps);
       return repo.getSequence(id);
@@ -521,12 +511,10 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
         [sequenceId, contactId],
       );
       if (existing.rows[0]) return { enrollment: toEnrollment(existing.rows[0]), created: false };
-      const id = nuevoId();
-      await pool.query(
-        `insert into enrollments (id, sequence_id, contact_id, source) values ($1,$2,$3,$4)`,
-        [id, sequenceId, contactId, source],
+      const { rows } = await pool.query<EnrollmentRow>(
+        `insert into enrollments (sequence_id, contact_id, source) values ($1,$2,$3) returning *`,
+        [sequenceId, contactId, source],
       );
-      const { rows } = await pool.query<EnrollmentRow>('select * from enrollments where id = $1', [id]);
       return { enrollment: toEnrollment(rows[0]!), created: true };
     },
     async getEnrollment(id) {
@@ -559,7 +547,7 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
         }
       >(
         `select e.*, s.name as sequence_name, c.phone, c.name,
-                (select count(*) from sequence_steps st where st.sequence_id = e.sequence_id) as total_steps,
+                (select count(*)::int from sequence_steps st where st.sequence_id = e.sequence_id) as total_steps,
                 (select min(due_at) from scheduled_messages m
                   where m.enrollment_id = e.id and m.status = 'pending') as next_due_at
            from enrollments e
@@ -568,7 +556,7 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
           ${where}
           order by e.started_at desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, Number(query.limit), Number(query.offset)],
+        [...params, query.limit, query.offset],
       );
       return rows.map((r) => ({
         ...toEnrollment(r),
@@ -593,17 +581,17 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
     },
     async finishEnrollment(id, status) {
       await pool.query(
-        `update enrollments set status = $2, finished_at = now(3) where id = $1 and status = 'active'`,
+        `update enrollments set status = $2, finished_at = now() where id = $1 and status = 'active'`,
         [id, status],
       );
     },
 
     async schedule(input) {
-      const { insertId } = await pool.query(
+      const { rows } = await pool.query<{ id: number }>(
         `insert into scheduled_messages
            (contact_id, enrollment_id, step_position, due_at, kind, category,
             template_name, template_language, variables, text)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
         [
           input.contactId,
           input.enrollmentId ?? null,
@@ -617,7 +605,7 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
           input.text ?? null,
         ],
       );
-      return insertId;
+      return rows[0]!.id;
     },
     async listScheduled(query) {
       const conditions: string[] = [];
@@ -640,13 +628,13 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
           ${where}
           order by case when m.status = 'pending' then 0 else 1 end, m.due_at desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, Number(query.limit), Number(query.offset)],
+        [...params, query.limit, query.offset],
       );
       return rows.map((r) => ({ ...toScheduled(r), phone: r.phone, name: r.name, sequenceName: r.sequence_name }));
     },
     async cancelScheduled(id) {
       const { rowCount } = await pool.query(
-        `update scheduled_messages set status = 'cancelled', processed_at = now(3)
+        `update scheduled_messages set status = 'cancelled', processed_at = now()
           where id = $1 and status = 'pending'`,
         [id],
       );
@@ -654,60 +642,38 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
     },
     async cancelPendingForEnrollment(enrollmentId) {
       const { rowCount } = await pool.query(
-        `update scheduled_messages set status = 'cancelled', processed_at = now(3)
+        `update scheduled_messages set status = 'cancelled', processed_at = now()
           where enrollment_id = $1 and status = 'pending'`,
         [enrollmentId],
       );
       return rowCount ?? 0;
     },
     async claimDue(now, limit) {
-      // Reparto sin SKIP LOCKED (MariaDB 10.4 no lo tiene) y sin bloquear a
-      // nadie: se leen los candidatos y cada uno se reclama con un update
-      // condicionado a que SIGA pendiente. El update de una fila es atomico,
-      // asi que si dos workers ven el mismo mensaje solo a uno le afecta
-      // (affectedRows = 1) y el otro lo deja pasar. Si se perdio alguno
-      // frente a otro worker se vuelve a mirar, hasta llenar `limit` o no
-      // quedar pendientes: lo mismo que daba SKIP LOCKED. Termina porque cada
-      // vuelta deja menos pendientes (los reclamados por uno u otro).
-      const tope = Number(limit);
-      const reclamados: number[] = [];
-      while (reclamados.length < tope) {
-        const candidatos = await pool.query<{ id: number }>(
-          `select id from scheduled_messages
-            where status = 'pending' and due_at <= $1
-            order by due_at, id
-            limit $2`,
-          [now, tope - reclamados.length],
-        );
-        let perdidos = 0;
-        for (const { id } of candidatos.rows) {
-          const { rowCount } = await pool.query(
-            `update scheduled_messages set status = 'processing' where id = $1 and status = 'pending'`,
-            [id],
-          );
-          if (rowCount === 1) reclamados.push(id);
-          else perdidos++;
-        }
-        if (!perdidos) break;
-      }
-      if (!reclamados.length) return [];
       const { rows } = await pool.query<ScheduledRow>(
-        `select * from scheduled_messages where id in ($1) order by due_at, id`,
-        [reclamados],
+        `update scheduled_messages set status = 'processing'
+          where id in (
+            select id from scheduled_messages
+             where status = 'pending' and due_at <= $1
+             order by due_at
+             limit $2
+             for update skip locked
+          )
+          returning *`,
+        [now, limit],
       );
       return rows.map(toScheduled);
     },
     async markScheduled(id, status, detail, deliveryId) {
       await pool.query(
         `update scheduled_messages
-            set status = $2, detail = $3, delivery_id = $4, processed_at = now(3)
+            set status = $2, detail = $3, delivery_id = $4, processed_at = now()
           where id = $1`,
         [id, status, detail ?? null, deliveryId ?? null],
       );
     },
 
     async getPrefs() {
-      const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [PREFS_KEY]);
+      const { rows } = await pool.query<{ value: string }>('select value from settings where key = $1', [PREFS_KEY]);
       if (!rows[0]) return { ...DEFAULT_PREFS };
       try {
         return { ...DEFAULT_PREFS, ...(JSON.parse(rows[0].value) as Partial<AutomationPrefs>) };
@@ -718,8 +684,8 @@ export function createAutomationRepo(pool: Pool): AutomationRepo {
     async setPrefs(patch) {
       const merged = { ...(await repo.getPrefs()), ...patch };
       await pool.query(
-        `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
-         on duplicate key update value = values(value), updated_at = now(3)`,
+        `insert into settings (key, value, encrypted, updated_at) values ($1,$2,false,now())
+         on conflict (key) do update set value = excluded.value, updated_at = now()`,
         [PREFS_KEY, JSON.stringify(merged)],
       );
       return merged;

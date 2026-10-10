@@ -140,6 +140,7 @@ const GUARDAS: string[] = [
   'Nada sale sin consentimiento, a quien se dio de baja, o fuera del horario.',
   'Un monitor mira errores, bloqueos, bajas y quejas cada minuto y frena solo: amarillo, naranja, rojo.',
   'Plantillas pausadas por Meta se detectan y se cambian por otra; las variantes evitan repetir el mismo texto.',
+  'Un modo prueba para trabajar solo con los números que tú digas.',
 ];
 
 /** Las alturas de las barras de la "captura": solo decoración. */

@@ -83,14 +83,6 @@ export interface Contexto {
    * tienda que no toca nada sigue teniendo una conversacion completa.
    */
   mensajes?: Mensajes;
-  /**
-   * El cliente tiene una entrega en curso: se le esta llevando un paquete.
-   *
-   * Entonces no es un cliente de la preventa: «Cotizar envío» no existe para
-   * el (ni el cuestionario de recojo y destino). Su menu es «Horarios y zona»
-   * y «Hablar con asesor», y lo que no se entiende vuelve a ese menu.
-   */
-  conEntrega?: boolean;
 }
 
 export interface Resultado {
@@ -260,13 +252,6 @@ function mensaje(ctx: Contexto, clave: string): string {
 
 /** Las tres opciones del menu, con las etiquetas que puso la tienda. */
 function menuDe(ctx: Contexto) {
-  // A quien se le esta entregando un paquete no se le ofrece cotizar un envio.
-  if (ctx.conEntrega) {
-    return [
-      { id: BOTON.info, title: mensaje(ctx, 'botonInfo') },
-      { id: BOTON.asesor, title: mensaje(ctx, 'botonAsesor') },
-    ];
-  }
   return [
     { id: BOTON.cotizar, title: mensaje(ctx, 'botonCotizar') },
     { id: BOTON.info, title: mensaje(ctx, 'botonInfo') },
@@ -508,16 +493,12 @@ export function responder(lead: Lead, entrada: Entrada, ctx: Contexto): Resultad
 }
 
 function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
-  const leida = intencionDe(entrada, lead.ultimasOpciones);
-  // Con una entrega en curso, «cotizar» no es una opcion: «mi envío» o «me lo
-  // llevan hoy» hablan de SU paquete, no de mandar uno.
-  const intencion = ctx.conEntrega && leida === BOTON.cotizar ? null : leida;
+  const intencion = intencionDe(entrada, lead.ultimasOpciones);
 
   // Lo que el cliente ya dijo en su mensaje se guarda antes de preguntar
   // nada: "de Surco a Miraflores hoy" trae origen, destino y fecha, y
   // pedirle que empiece por el principio es hacerle repetir lo que ya dijo.
-  // (Con una entrega en curso no hay ficha de cotizacion que rellenar.)
-  const deducido = ctx.conEntrega ? {} : extraerDeMensaje(entrada.texto, lead, ctx.distritos);
+  const deducido = extraerDeMensaje(entrada.texto, lead, ctx.distritos);
   const conocido = Object.keys(deducido).length ? ({ ...lead, ...deducido } as Lead) : lead;
 
   // Ya esta en manos de un asesor: el bot se calla. Meterse aqui es lo que
@@ -529,8 +510,7 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
   if (lead.estado === 'descartado') return { patch: {} };
 
   // --- la ubicacion vale como respuesta a "de donde" y "a donde" ---------
-  // (No con una entrega en curso: su ubicacion la atienden las entregas.)
-  if (entrada.ubicacion && !ctx.conEntrega) {
+  if (entrada.ubicacion) {
     // La ubicacion responde a lo que se pregunto, no al primer hueco: si lo
     // pendiente era la entrega, la ubicacion es la entrega.
     const campo =
@@ -588,12 +568,10 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
       patch: {},
       respuesta: {
         texto: mensaje(ctx, claveDeInfo(entrada)),
-        botones: ctx.conEntrega
-          ? [{ id: BOTON.asesor, title: mensaje(ctx, 'botonAsesor') }]
-          : [
-              { id: BOTON.cotizar, title: mensaje(ctx, 'botonCotizar') },
-              { id: BOTON.asesor, title: mensaje(ctx, 'botonAsesor') },
-            ],
+        botones: [
+          { id: BOTON.cotizar, title: mensaje(ctx, 'botonCotizar') },
+          { id: BOTON.asesor, title: mensaje(ctx, 'botonAsesor') },
+        ],
       },
     };
   }
@@ -608,23 +586,6 @@ function decidir(lead: Lead, entrada: Entrada, ctx: Contexto): Resultado {
       patch: { estado: 'en_conversacion' },
       respuesta: { texto: mensaje(ctx, 'bienvenida'), botones: menuDe(ctx) },
     };
-  }
-
-  // --- cliente con una entrega en curso: solo el menu corto ---------------
-  //
-  // Ni cuestionario ni cotizacion: las gracias se contestan, un saludo
-  // también, y lo demas recibe el menu de dos opciones (a la tercera vez sin
-  // entenderse, pasa a una persona, como siempre).
-  if (ctx.conEntrega) {
-    if (esAgradecimiento(entrada.texto)) return { patch: {}, respuesta: { texto: mensaje(ctx, 'deNada') } };
-    if (esSaludo(entrada.texto)) {
-      return { patch: { estado: 'en_conversacion' }, respuesta: { texto: mensaje(ctx, 'saludoDeVuelta'), botones: menuDe(ctx) } };
-    }
-    if (entrada.adjunto || entrada.ubicacion || !entrada.texto.trim()) return { patch: {} };
-    if (lead.estado === 'nuevo') {
-      return { patch: { estado: 'en_conversacion' }, respuesta: { texto: mensaje(ctx, 'menu'), botones: menuDe(ctx) } };
-    }
-    return conIntentoSinPregunta(lead, ctx);
   }
 
   // --- cotizar: empieza (o sigue) el cuestionario -----------------------

@@ -249,11 +249,11 @@ export async function trazaDe(db: DesarrolladorRepo, telefono: string, quien: 'c
 
   // Lo que el reparto y las entregas apuntaron (ahi va lo que decidieron y como leyeron).
   const evRutas = idsSolicitudes.length
-    ? (await db.query<{ tipo: string; detalle: string | null }>(`select tipo, detalle from rutas_eventos where id > $1 and solicitud_id in ($2) order by id`, [antes.maxEventoRuta, idsSolicitudes])).rows
+    ? (await db.query<{ tipo: string; detalle: string | null }>(`select tipo, detalle from rutas_eventos where id > $1 and solicitud_id = any($2::bigint[]) order by id`, [antes.maxEventoRuta, idsSolicitudes])).rows
     : [];
   for (const ev of evRutas) pasos.push({ tono: 'info', titulo: `Reparto: ${ev.detalle || ev.tipo.replace(/_/g, ' ')}` });
   const evEntregas = idsEntregas.length
-    ? (await db.query<{ tipo: string; detalle: string | null; referencia: string }>(`select v.tipo, v.detalle, e.referencia from entregas_eventos v join entregas e on e.id = v.entrega_id where v.id > $1 and v.entrega_id in ($2) order by v.id`, [antes.maxEventoEntrega, idsEntregas])).rows
+    ? (await db.query<{ tipo: string; detalle: string | null; referencia: string }>(`select v.tipo, v.detalle, e.referencia from entregas_eventos v join entregas e on e.id = v.entrega_id where v.id > $1 and v.entrega_id = any($2::bigint[]) order by v.id`, [antes.maxEventoEntrega, idsEntregas])).rows
     : [];
   for (const ev of evEntregas) {
     const tono: Tono = ev.tipo === 'incidencia' || ev.tipo === 'rechazada' ? 'warn' : ev.tipo === 'ia' ? 'info' : 'ok';

@@ -204,8 +204,8 @@ export const PLANTILLAS: Plantilla[] = [
   {
     id: 'gsg',
     nombre: 'Entregas de courier (GSG)',
-    resumen: 'Pedidos, ubicación y confirmación: el flujo de GSG Courier con Hoy, Números del día y Mapa.',
-    descripcion: 'El flujo completo de un courier: el sistema de GSG manda los pedidos del día, se le pide la ubicación y la confirmación a cada cliente, la ubicación y la confirmación quedan disponibles para GSG. Al activarlo aparecen en el menú Hoy, Números del día y Mapa.',
+    resumen: 'Ubicación, confirmación, motorizado y entrega: el flujo de GSG Courier con Hoy, Números del día, Mapa y Motorizados.',
+    descripcion: 'El flujo completo de un courier: el sistema de GSG manda los pedidos del día, se le pide la ubicación y la confirmación a cada cliente, el pedido va al motorizado más cercano y se avisa la hora de llegada. Al activarlo aparecen en el menú Hoy, Números del día, Motorizados y Mapa.',
     icono: '🛵',
     columnas: [],
     ejemplo: '',

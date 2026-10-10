@@ -10,14 +10,14 @@ import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { crearServicioIA, construirSistema, type ServicioIA } from '../src/ia/servicio.js';
-import { crearProveedorOpenAI, olvidarAjustesDeModelos, usaFormaNueva, explicarFalloConexion, presetDe, probarProveedor, SERVICIOS_OPENAI, type ProveedorIA } from '../src/ia/proveedores.js';
+import { crearProveedorOpenAI, explicarFalloConexion, presetDe, probarProveedor, SERVICIOS_OPENAI, type ProveedorIA } from '../src/ia/proveedores.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, CLAVE_API_PRUEBA } from './fakes.js';
 
 const cola: OutboundQueue = { async enqueue() {}, async enqueueMany(j) { return j.length; }, async pause() {}, async resume() {}, async counts() { return {}; }, async close() {} };
 
 const config = loadConfig({
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -79,87 +79,6 @@ describe('los servicios compatibles con OpenAI', () => {
     expect(caido.detalle).toMatch(/No se pudo llegar/);
   });
 
-  /** Un servidor como la API de OpenAI con un modelo de razonamiento: rechaza max_tokens y temperature. */
-  const apiQueRazona = (cuerpos: Array<Record<string, unknown>>, opts: { sinCompletion?: boolean; vacioPrimero?: boolean } = {}) => {
-    let vacio = Boolean(opts.vacioPrimero);
-    return (async (_url: string, init?: RequestInit) => {
-      const b = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      cuerpos.push(b);
-      const error = (message: string, param: string) => new Response(JSON.stringify({ error: { message, type: 'invalid_request_error', param, code: 'unsupported_parameter' } }), { status: 400 });
-      if (opts.sinCompletion) {
-        if ('max_completion_tokens' in b) return error("Unrecognized request argument supplied: max_completion_tokens", 'max_completion_tokens');
-      } else {
-        if ('max_tokens' in b) return error("Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'max_tokens');
-        if ('temperature' in b) return error("Unsupported value: 'temperature' does not support 0.4 with this model. Only the default (1) value is supported.", 'temperature');
-      }
-      if (vacio) {
-        vacio = false;
-        return new Response(JSON.stringify({ choices: [{ message: { content: '' }, finish_reason: 'length' }] }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ choices: [{ message: { content: 'Hola, estoy listo.' }, finish_reason: 'stop' }] }), { status: 200 });
-    }) as typeof fetch;
-  };
-
-  it('usaFormaNueva: los modelos de razonamiento de OpenAI, solo en la API de OpenAI', () => {
-    for (const m of ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5.1', 'o1', 'o1-mini', 'o3', 'o3-mini', 'o4-mini', 'openai/gpt-5-mini']) expect(usaFormaNueva('https://api.openai.com/v1', m), m).toBe(true);
-    for (const m of ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-chat-latest', 'o10-algo']) expect(usaFormaNueva('https://api.openai.com/v1', m), m).toBe(false);
-    expect(usaFormaNueva('https://openrouter.ai/api/v1', 'gpt-5-mini')).toBe(false);
-  });
-
-  it('un modelo nuevo de OpenAI sale bien a la PRIMERA: max_completion_tokens y sin temperature', async () => {
-    olvidarAjustesDeModelos();
-    const cuerpos: Array<Record<string, unknown>> = [];
-    const p = crearProveedorOpenAI({ baseUrl: 'https://api.openai.com/v1', clave: 'sk-buena', fetchImpl: apiQueRazona(cuerpos) });
-    expect(await p.chat([{ role: 'user', content: 'hola' }], { modelo: 'gpt-5-mini', maxTokens: 8 })).toBe('Hola, estoy listo.');
-    expect(cuerpos).toHaveLength(1);
-    // El tope corto de clasificar no deja sin respuesta a un modelo que razona.
-    expect(cuerpos[0]).toMatchObject({ max_completion_tokens: 2000 });
-    expect(cuerpos[0]).not.toHaveProperty('max_tokens');
-    expect(cuerpos[0]).not.toHaveProperty('temperature');
-  });
-
-  it('un modelo desconocido que rechaza max_tokens o temperature: se corrige, se reintenta y se recuerda', async () => {
-    olvidarAjustesDeModelos();
-    const cuerpos: Array<Record<string, unknown>> = [];
-    const p = crearProveedorOpenAI({ baseUrl: 'https://mi-proxy.example/v1', clave: 'sk-buena', fetchImpl: apiQueRazona(cuerpos) });
-    expect(await p.chat([{ role: 'user', content: 'hola' }], { modelo: 'razonador-nuevo' })).toBe('Hola, estoy listo.');
-    expect(cuerpos).toHaveLength(3);
-    expect(cuerpos[2]).toHaveProperty('max_completion_tokens');
-    expect(cuerpos[2]).not.toHaveProperty('temperature');
-    // La segunda vez ya sale bien a la primera.
-    await p.chat([{ role: 'user', content: 'otra' }], { modelo: 'razonador-nuevo' });
-    expect(cuerpos).toHaveLength(4);
-  });
-
-  it('al revés: un servicio que no conoce max_completion_tokens vuelve a max_tokens', async () => {
-    olvidarAjustesDeModelos();
-    const cuerpos: Array<Record<string, unknown>> = [];
-    const p = crearProveedorOpenAI({ baseUrl: 'https://api.openai.com/v1', clave: 'sk-buena', fetchImpl: apiQueRazona(cuerpos, { sinCompletion: true }) });
-    expect(await p.chat([{ role: 'user', content: 'hola' }], { modelo: 'o3-mini' })).toBe('Hola, estoy listo.');
-    expect(cuerpos.at(-1)).toHaveProperty('max_tokens');
-  });
-
-  it('si pensó tanto que se quedó sin texto (finish_reason length), se reintenta una vez con más margen', async () => {
-    olvidarAjustesDeModelos();
-    const cuerpos: Array<Record<string, unknown>> = [];
-    const p = crearProveedorOpenAI({ baseUrl: 'https://api.openai.com/v1', clave: 'sk-buena', fetchImpl: apiQueRazona(cuerpos, { vacioPrimero: true }) });
-    expect(await p.chat([{ role: 'user', content: 'hola' }], { modelo: 'gpt-5-nano', maxTokens: 30 })).toBe('Hola, estoy listo.');
-    expect(cuerpos).toHaveLength(2);
-    expect(cuerpos[1]).toMatchObject({ max_completion_tokens: 8000 });
-  });
-
-  it('los demás modelos y servicios siguen con max_tokens y temperature', async () => {
-    olvidarAjustesDeModelos();
-    const cuerpos: Array<Record<string, unknown>> = [];
-    const fetchImpl = (async (_url: string, init?: RequestInit) => {
-      cuerpos.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
-    }) as typeof fetch;
-    await crearProveedorOpenAI({ baseUrl: 'https://api.openai.com/v1', clave: 'k', fetchImpl }).chat([{ role: 'user', content: 'hola' }], { modelo: 'gpt-4o-mini', maxTokens: 50 });
-    await crearProveedorOpenAI({ baseUrl: 'https://openrouter.ai/api/v1', clave: 'k', fetchImpl }).chat([{ role: 'user', content: 'hola' }], { modelo: 'openai/gpt-5-mini', maxTokens: 50 });
-    for (const c of cuerpos) expect(c).toMatchObject({ max_tokens: 50, temperature: 0.4 });
-  });
-
   it('explicarFalloConexion traduce los fallos tipicos', () => {
     expect(explicarFalloConexion('429 rate limit exceeded')).toMatch(/cupo o el límite/);
     expect(explicarFalloConexion('el modelo no respondio a tiempo')).toMatch(/tardó demasiado/);
@@ -178,7 +97,7 @@ describe('probar la conexion desde la pantalla', () => {
     const ia = await crearServicioIA({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, repos, sender, config, nombreNegocio: () => 'Tienda', fetchImpl, modelosGratis: ['google/gemma-4-31b-it'] });
     const app = await buildServer({ config, repos, settings, wa, sender, queue: cola, logger: false, ia });
     await app.ready();
-    const auth = { 'x-api-key': CLAVE_API_PRUEBA };
+    const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
     return { app, ia, auth, cerrar: () => app.close() };
   }
 

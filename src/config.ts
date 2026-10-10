@@ -20,13 +20,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   PUBLIC_BASE_URL: z.string().url(),
 
-  // MySQL 8 o MariaDB 10.4+: mysql://usuario:clave@host:3306/gsgchat
-  // (mariadb:// vale igual). Cada tienda de la plataforma va en su propia
-  // base del mismo servidor: gsgchat_t_<id>.
-  DATABASE_URL: z
-    .string()
-    .min(1)
-    .refine((v) => /^(mysql|mariadb):\/\//i.test(v.trim()), 'tiene que empezar por mysql:// (GSGchat guarda todo en MySQL o MariaDB)'),
+  DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
 
   // Por donde sale y entra WhatsApp. `cloud` es la API oficial de Meta;
@@ -121,14 +115,12 @@ const schema = z.object({
    * Quien escribe por WhatsApp manda tres trozos seguidos, y contestar a cada
    * uno le deja tres respuestas encima sin haber dicho nada en medio.
    *
-   * Antes el valor de fabrica era 0 -contestar a cada mensaje- porque esperar mete un
+   * El valor de fabrica es 0 -contestar a cada mensaje- porque esperar mete un
    * retraso en CADA respuesta, y eso lo tiene que decidir quien monta el
    * sistema. El arranque corto lo pone en 4 s, que es lo que se tarda en
    * escribir la segunda frase.
    */
-  // 10 s de fabrica (decision del dueño, 05/10): se contesta la rafaga entera
-  // de una vez. En las pruebas, 0, para no esperar en cada mensaje.
-  RAFAGA_MS: z.coerce.number().int().min(0).max(60_000).default(process.env.VITEST ? 0 : 10_000),
+  RAFAGA_MS: z.coerce.number().int().min(0).max(60_000).default(0),
   HORARIO_ENVIO_INICIO: z.coerce.number().int().min(0).max(23).optional(),
   HORARIO_ENVIO_FIN: z.coerce.number().int().min(1).max(24).optional(),
   /** Dias permitidos, 0 = domingo. Por defecto lunes a sabado. */
@@ -288,7 +280,7 @@ const schema = z.object({
   RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(180),
 
   /** Mensajes por cliente antes de pasarlo al repartidor. */
-  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(3).default(3),
+  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(10).default(3),
 
   /** Franja horaria en la que el motor puede escribir (hora del negocio). */
   RUTAS_HORA_INICIO: z.coerce.number().int().min(0).max(23).default(9),
@@ -313,27 +305,14 @@ const schema = z.object({
   RUTAS_RESUMEN_CADA_MIN: z.coerce.number().int().positive().default(30),
 
   /**
-   * La conexion SALIENTE con GSG (GSGchat -> GSG). Vacia = todavia no esta
-   * conectada (o se conecta desde la pantalla Conexion, que manda sobre esto).
+   * La API del sistema de GSG. Vacia = todavia no esta conectada.
    *
    * Sin ella el sistema funciona igual y todo lo reportable se acumula en la
    * cola (`rutas_reportes`). El dia que exista, se rellena esto y se vacia la
    * cola entera, incluido lo de atras. Ver src/rutas/gsg.ts.
-   *
-   *  - GSG_URL: la URL base de su API (p. ej. https://backend.gsg.pe/api/).
-   *  - GSG_LOCATION_PATH: la ruta para enviar la ubicacion, relativa a la
-   *    base (p. ej. v1/gsgchat/location). Vacia = sendLocation.
-   *  - GSG_API_KEY: la clave que da GSG; sale solo en la cabecera X-API-Key.
-   *  - GSG_TOKEN y GSG_SEND_LOCATION_URL: ANTIGUOS, se leen por compatibilidad
-   *    (la clave si no hay GSG_API_KEY; la URL completa se convierte a base +
-   *    ruta solo si es inequivoco).
    */
   GSG_URL: z.string().default(''),
-  GSG_LOCATION_PATH: z.string().default(''),
-  GSG_IDEMPOTENCY_SUPPORTED: z.enum(['true', 'false']).default('false'),
-  GSG_API_KEY: z.string().default(''),
   GSG_TOKEN: z.string().default(''),
-  GSG_SEND_LOCATION_URL: z.union([z.string().url(), z.literal('')]).default(''),
 
   /**
    * Modo demostracion: los mensajes NO salen a WhatsApp.
@@ -346,7 +325,7 @@ const schema = z.object({
   DEMO_MODE: z
     .enum(['true', 'false', '1', '0'])
     .default('false')
-    .transform(() => false),
+    .transform((v) => v === 'true' || v === '1'),
 
   DEV_SIMULATE_INBOUND: z
     .enum(['true', 'false', '1', '0'])
@@ -400,7 +379,7 @@ export interface Config extends RawConfig {
 /** Que es cada variable obligatoria, para que el error del arranque diga que poner. */
 const QUE_ES: Record<string, string> = {
   PUBLIC_BASE_URL: 'la dirección pública de este servidor, con https, por ejemplo https://gsgchat.midominio.com (es la que ven WhatsApp y GSG)',
-  DATABASE_URL: 'dónde guardar los datos: el servidor MySQL o MariaDB y la base, mysql://usuario:clave@host:3306/gsgchat (en esta PC, con XAMPP: mysql://root@127.0.0.1:3306/gsgchat)',
+  DATABASE_URL: 'dónde guardar los datos: postgres://usuario:clave@host/base, o pglite://./.wa-data para la base embebida sin Postgres',
   TRACKING_SECRET: 'una clave larga y secreta cualquiera (firma los enlaces): por ejemplo, 32 letras y números al azar',
 };
 
@@ -420,7 +399,7 @@ export function avisoDireccionPublica(url: string): string | null {
     return `la dirección pública «${limpia}» no es una dirección web válida.`;
   }
   if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host.endsWith('.local') || /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host)) {
-    return `la dirección pública es ${limpia}, que solo abre en esta máquina: los enlaces que llegan por WhatsApp (evidencias y seguimiento) y los avisos de GSG no funcionarán fuera de aquí. En producción pon PUBLIC_BASE_URL con el dominio https.`;
+    return `la dirección pública es ${limpia}, que solo abre en esta máquina: los enlaces que llegan por WhatsApp (página del motorizado, evidencias) y los avisos de GSG no funcionarán fuera de aquí. En producción pon PUBLIC_BASE_URL con el dominio https.`;
   }
   if (!limpia.toLowerCase().startsWith('https://')) return `la dirección pública ${limpia} no usa https: WhatsApp y GSG la verán como insegura. Pon el certificado y usa https://.`;
   return null;
@@ -467,7 +446,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .filter(Boolean)
       .map(Number)
       .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
-    soloNumeros: [],
+    soloNumeros: raw.SOLO_NUMEROS.split(',')
+      .map((n) => n.replace(/\D+/g, ''))
+      .filter((n) => n.length >= 6),
     coverageName:
       raw.COVERAGE_NAME.trim() ||
       (raw.GEO_BBOX === 'lima' ? 'todo Lima y Callao' : raw.GEO_BBOX === 'mexico' ? 'Mexico' : ''),

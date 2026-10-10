@@ -35,12 +35,12 @@ import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
  * su copia del titular y se fueron separando. Se escribe una vez.
  */
 export const PROMESA = {
-  titular: 'Atiende tus pedidos y clientes',
+  titular: 'Automatiza los procesos administrativos y operativos de tu empresa',
   remate: 'por WhatsApp',
   bajada:
-    'Recibe pedidos por API, solicita ubicaciones y atiende a tus clientes con WhatsApp e IA.',
+    'Pide y valida datos, confirma citas y recuerda turnos, avisa tareas a tu personal y recibe los comprobantes de pago, desde un solo chat y al ritmo que WhatsApp tolera.',
   puntos: [
-    'API GSG, pedidos, ubicaciones, plantillas y ficha de productos para la IA.',
+    'Procesos listos en un clic: pedir datos, confirmaciones y recordatorios, avisos al personal de campo, cobranza y trámites.',
     'Lo que no se puede resolver solo pasa a una persona de tu equipo, con todo lo que se respondió.',
     'Salud del número: un semáforo que frena solo antes del baneo.',
   ],
@@ -53,9 +53,9 @@ export const PROMESA = {
  * sigue usando PROMESA.
  */
 export const PROMESA_PLATAFORMA = {
-  titular: 'Atiende tus pedidos y clientes por WhatsApp,',
+  titular: 'Automatiza los procesos administrativos y operativos de tu empresa por WhatsApp,',
   remate: 'en marcha en un minuto',
-  bajada: 'Crea tu cuenta, conecta WhatsApp y recibe pedidos por API. Solicita ubicaciones, atiende chats y configura tu asistente IA.',
+  bajada: 'Crea tu cuenta, conecta tu número escaneando un código y deja que el sistema pida y valide datos, confirme citas, avise tareas a tu personal y reciba comprobantes, desde un solo chat.',
   puntos: [
     'Cada empresa es independiente: tus clientes, pedidos y conversaciones solo los ves tú.',
     'Tu propio número de WhatsApp: se conecta con un código QR, como WhatsApp Web.',

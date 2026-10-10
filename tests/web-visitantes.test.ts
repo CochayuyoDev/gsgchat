@@ -26,7 +26,7 @@ import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SET
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -168,7 +168,7 @@ describe('desde la web de la tienda', () => {
 
     // Nada salio por WhatsApp; todo esta en el hilo, y lo ve el equipo.
     expect(wa.sent.filter((x) => x.kind !== 'read')).toHaveLength(0);
-    const hilo = await app.inject({ method: 'GET', url: `/admin/chat/${s.contactoId}`, headers: { 'x-api-key': TODO } });
+    const hilo = await app.inject({ method: 'GET', url: `/admin/chat/${s.contactoId}`, headers: { authorization: `Bearer ${TODO}` } });
     const textos = (hilo.json().messages as Array<{ direction: string; body: string }>).map((m) => `${m.direction}:${m.body}`);
     expect(textos).toEqual(['in:hola, tienen relojes de mujer?', 'out:Hola Carla, tenemos relojes desde S/ 300. ¿Buscas para hombre o mujer?']);
     expect(modelo.recibido.at(-1)![0]!.content).toContain('Vendemos relojes originales');
@@ -182,7 +182,7 @@ describe('desde la web de la tienda', () => {
 
   it('el operador contesta desde Chats y le llega al visitante por el mismo canal', async () => {
     const sesion = (await app.inject({ method: 'POST', url: '/web/sesion', headers: desde, payload: { nombre: 'Luis' } })).json() as { sesion: string; contactoId: string };
-    const r = await app.inject({ method: 'POST', url: '/admin/chat/send', headers: { 'x-api-key': TODO }, payload: { contactId: sesion.contactoId, text: 'Hola Luis, ¿en qué te ayudo?' } });
+    const r = await app.inject({ method: 'POST', url: '/admin/chat/send', headers: { authorization: `Bearer ${TODO}` }, payload: { contactId: sesion.contactoId, text: 'Hola Luis, ¿en qué te ayudo?' } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ ok: true });
     expect(String(r.json().wamid)).toMatch(/^web\.out\./);

@@ -28,7 +28,7 @@ import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SET
 
 const ENV = {
   PUBLIC_BASE_URL: 'https://panel.wa.tuservicio.com',
-  DATABASE_URL: 'mysql://x/y',
+  DATABASE_URL: 'postgres://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -74,7 +74,7 @@ let docker: ReturnType<typeof dockerFalso>;
 async function build(conEnv: boolean) {
   carpetaSaas = mkdtempSync(path.join(tmpdir(), 'wa-saas-prueba-'));
   writeFileSync(path.join(carpetaSaas, 'docker-compose.yml'), '# base de prueba\n');
-  if (conEnv) writeFileSync(path.join(carpetaSaas, '.env'), 'DOMINIO_BASE=wa.tuservicio.com\nMARIADB_PASSWORD=x\nMAESTRO_CLAVE=y\n');
+  if (conEnv) writeFileSync(path.join(carpetaSaas, '.env'), 'DOMINIO_BASE=wa.tuservicio.com\nPOSTGRES_PASSWORD=x\nMAESTRO_CLAVE=y\n');
   docker = dockerFalso();
   const config = loadConfig(ENV);
   repos = createFakeRepos();

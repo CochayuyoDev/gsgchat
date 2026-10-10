@@ -1,31 +1,47 @@
 /**
- * El SQL de las entregas y los motorizados, contra MySQL/MariaDB de verdad
- * (tests/mysql.ts): el esquema, el "no se pisa" de (dia, referencia) y del telefono del
+ * El SQL de las entregas y los motorizados, contra Postgres de verdad (PGlite):
+ * la migracion, el "no se pisa" de (dia, referencia) y del telefono del
  * motorizado, las colas (a quien toca pedir confirmacion, a quien toca
  * motorizado), el patch parcial con el JSON de descartados y la bitacora.
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-let b: BaseDePrueba;
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
+
+function asPool(db: PGlite): Pool {
+  const query = async (text: string, params?: unknown[]) => {
+    const result = await db.query(text, params as never[], { parsers: { 20: (v: string) => Number.parseInt(v, 10) } });
+    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+  };
+  const client = { query, release: () => undefined };
+  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
+}
+
+let db: PGlite;
 let pool: Pool;
 let repos: Repos;
 
 beforeAll(async () => {
-  b = await baseDePrueba();
-  pool = b.pool;
+  db = new PGlite();
+  pool = asPool(db);
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await b?.cerrar();
+  await pool.end();
 });
 
 beforeEach(async () => {
-  for (const tabla of ['entregas_eventos', 'entregas', 'motorizados']) await pool.query(`delete from ${tabla}`);
+  await db.exec('delete from entregas_eventos; delete from entregas; delete from motorizados;');
 });
 
 const nueva = (referencia: string, phone: string, extra: Partial<Parameters<Repos['entregas']['crearEntrega']>[0]> = {}) =>

@@ -1,43 +1,60 @@
 /**
- * El SQL del superadministrador contra MySQL/MariaDB de verdad: el esquema
- * trae los valores por defecto de cuentas y codigos, y los codigos de
- * conexion se crean, se canjean sin colarse dos por el mismo ultimo uso, y
- * se anulan.
- *
- * (Con Postgres habia una migracion que ascendia a superadmin a la primera
- * cuenta admin de una instalacion vieja. En MySQL la base nace con el esquema
- * entero y la primera cuenta ya se crea superadmin: ver auth/routes.)
+ * El SQL del superadministrador contra Postgres de verdad (PGlite): la
+ * migracion asciende a la primera cuenta admin (y solo una vez), y los
+ * codigos de conexion se crean, se canjean sin colarse dos por el mismo
+ * ultimo uso, y se anulan.
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
-import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-let base: BaseDePrueba;
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
+
+function asPool(db: PGlite): Pool {
+  const query = async (text: string, params?: unknown[]) => {
+    const result = await db.query(text, params as never[], { parsers: { 20: (v: string) => Number.parseInt(v, 10) } });
+    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+  };
+  const client = { query, release: () => undefined };
+  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
+}
+
+let db: PGlite;
 let pool: Pool;
 let repos: Repos;
+let migracionSuper = '';
 
 beforeAll(async () => {
-  base = await baseDePrueba();
-  pool = base.pool;
+  db = new PGlite();
+  pool = asPool(db);
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
+  migracionSuper = await readFile(path.join(MIGRATIONS, '023_superadmin_y_codigos.sql'), 'utf8');
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await base?.cerrar();
+  await pool.end();
 });
 
 beforeEach(async () => {
-  await base.vaciar();
+  await db.exec('delete from codigos_conexion; delete from tiendas_pagos; delete from tiendas_avisos; delete from tiendas_config; delete from tiendas; delete from usuarios;');
 });
 
-describe('el esquema', () => {
-  it('una cuenta sin rol nace operador y un codigo sin mas datos vale para todo, una vez', async () => {
-    await pool.query(`insert into usuarios (id, usuario, nombre, clave) values ('aaaaaaaa-0000-0000-0000-000000000001', 'ope', 'Ope', 'x')`);
-    expect((await repos.usuarios.porUsuario('ope'))).toMatchObject({ rol: 'operador', activo: true, sesionVersion: 1 });
-    await pool.query(`insert into codigos_conexion (id, codigo, para, caduca_at) values ('aaaaaaaa-0000-0000-0000-000000000002', 'WA-EEEE-FFFF', 'Stoky', '2027-01-01 00:00:00')`);
-    expect(await repos.codigosConexion.porCodigo('WA-EEEE-FFFF')).toMatchObject({ permisos: ['*'], usosMax: 1, usos: 0, estado: 'activo', canjeadoAt: null });
+describe('la migracion', () => {
+  it('asciende a superadmin a la primera cuenta admin, una sola vez', async () => {
+    await db.exec(`insert into usuarios (usuario, nombre, clave, rol, created_at) values ('ali', 'Ali', 'x', 'admin', '2026-09-01'), ('rosa', 'Rosa', 'x', 'admin', '2026-09-05'), ('ope', 'Ope', 'x', 'operador', '2026-08-01')`);
+    await db.exec(migracionSuper);
+    const roles = async () => Object.fromEntries((await repos.usuarios.listar()).map((u) => [u.usuario, u.rol]));
+    expect(await roles()).toEqual({ ali: 'superadmin', rosa: 'admin', ope: 'operador' });
+    // Otra vez (la migracion es idempotente): nadie mas sube.
+    await db.exec(migracionSuper);
+    expect(await roles()).toEqual({ ali: 'superadmin', rosa: 'admin', ope: 'operador' });
   });
 });
 
@@ -114,7 +131,7 @@ describe('las tiendas del dueño (migracion 031)', () => {
     await repos.tiendas.guardarConfig('cobro', { activo: true, numero: '987 111 333', texto: 'Yape', qr: '' });
     expect(await repos.tiendas.config<{ numero: string }>('cobro')).toMatchObject({ numero: '987 111 333' });
     await repos.tiendas.borrar(t.id);
-    const { rows } = await pool.query<{ n: number }>('select count(*) as n from tiendas_avisos');
+    const { rows } = await pool.query<{ n: number }>('select count(*)::int as n from tiendas_avisos');
     expect(rows[0]!.n).toBe(0);
   });
 

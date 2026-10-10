@@ -6,7 +6,7 @@
  * (un pin, un "si", un "40 minutos") es `servicio.ts`.
  */
 
-import { esDuplicado, type Pool } from '../db/pool.js';
+import type { Pool } from '../db/pool.js';
 
 export type EstadoUbicacion = 'no_hace_falta' | 'pendiente' | 'recibida';
 export type EstadoConfirmacion = 'no_hace_falta' | 'pendiente' | 'pedida' | 'confirmada' | 'rechazada';
@@ -51,9 +51,6 @@ export const ESTADOS_ENTREGA_VIVOS: EstadoEntrega[] = [
   'esperando_motorizado',
   'avisada',
 ];
-
-/** Ya no pasa nada con ella: no se le escribe ni sale en la bandeja de errores. Una «incidencia» NO es final. */
-export const ESTADOS_ENTREGA_FINALES: EstadoEntrega[] = ['cancelada', 'entregada', 'terminada'];
 
 export type EstadoMotorizado = 'activo' | 'descanso' | 'baja';
 
@@ -106,27 +103,6 @@ export interface PatchMotorizado {
  * (textos.ts → solicitudUbicacion). Todo opcional: lo que falta no sale.
  */
 export interface DatosEnvio {
-  horarioEntregaDesde?: string | null;
-  horarioEntregaHasta?: string | null;
-  horarioEntregaFechaDesde?: string | null;
-  horarioEntregaFechaHasta?: string | null;
-  horarioEntregaZonaHoraria?: string | null;
-  costServ?: string | null;
-  referenciaDireccion?: string | null;
-  fecRegistro?: string | null;
-  fecRuta?: string | null;
-  observacionCliente?: string | null;
-  detalleProducto?: string | null;
-  telefono2?: string | null;
-  tamano?: string | null;
-  cantBultos?: string | null;
-  clientePagaDelivery?: string | null;
-  sede?: string | null;
-  tipoRuta?: string | null;
-  nroDocumento?: string | null;
-  agenciaNombre?: string | null;
-  agenciaDestino?: string | null;
-  pagoEnDestino?: string | null;
   /** "Zapatillas talla 40". */
   producto?: string | null;
   /** La tienda que vende: codigo ("516") y nombre ("Zapatería Lima"). */
@@ -151,13 +127,13 @@ export interface DatosEnvio {
   telefonoMotorizado?: string | null;
 }
 
-const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['costServ', 'referenciaDireccion', 'fecRegistro', 'fecRuta', 'observacionCliente', 'detalleProducto', 'telefono2', 'tamano', 'cantBultos', 'clientePagaDelivery', 'sede', 'tipoRuta', 'nroDocumento', 'agenciaNombre', 'agenciaDestino', 'pagoEnDestino', 'producto', 'empresaCodigo', 'empresaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'motorizadoNombre', 'telefonoMotorizado'];
+const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['producto', 'empresaCodigo', 'empresaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'motorizadoNombre', 'telefonoMotorizado'];
 
 /** Solo los campos con texto (recortados a 200); null si no queda ninguno. */
 export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio | null {
   if (!d || typeof d !== 'object') return null;
   const limpio: DatosEnvio = {};
-  for (const clave of [...CLAVES_DATOS_ENVIO, 'horarioEntregaDesde', 'horarioEntregaHasta', 'horarioEntregaFechaDesde', 'horarioEntregaFechaHasta', 'horarioEntregaZonaHoraria'] as Array<keyof DatosEnvio>) {
+  for (const clave of CLAVES_DATOS_ENVIO) {
     const v = (d as Record<string, unknown>)[clave];
     if (v === null || v === undefined) continue;
     const texto = String(v).trim().slice(0, 200);
@@ -166,7 +142,7 @@ export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio 
   return Object.keys(limpio).length ? limpio : null;
 }
 
-/** La columna json llega como objeto (la capa de la base la convierte); por si acaso, tambien se acepta texto. */
+/** La columna jsonb llega como objeto (pg) o como texto (algunas versiones de PGlite). */
 function datosEnvioDeValor(v: unknown): DatosEnvio | null {
   if (v === null || v === undefined) return null;
   if (typeof v === 'string') {
@@ -285,30 +261,9 @@ export interface Entrega {
   /** La dirección que el cliente escribió en vez del pin (se ve en Hoy y la recibe el motorizado). */
   direccionCliente?: string | null;
   direccionClienteAt?: Date | null;
-  /**
-   * El primer mensaje al cliente (pedir la ubicación o la confirmación): en
-   * qué va, cuántas veces se intentó y por qué falló. Ver
-   * src/entregas/primer-mensaje.ts y la migración 002.
-   */
-  mensajeEstado?: EstadoMensaje;
-  mensajeVia?: ViaMensaje | null;
-  mensajeIntentos?: number;
-  mensajeReintentosAuto?: number;
-  mensajeUltimoIntentoAt?: Date | null;
-  mensajeProximoAt?: Date | null;
-  mensajeErrorCodigo?: string | null;
-  mensajeError?: string | null;
-  mensajePermanente?: boolean;
-  mensajeEnviadoAt?: Date | null;
-  mensajeWamid?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
-
-/** En qué va el primer mensaje de un pedido. Ver src/entregas/primer-mensaje.ts. */
-export type EstadoMensaje = 'no_aplica' | 'retenido' | 'pendiente' | 'encolado' | 'enviando' | 'enviado' | 'reintentando' | 'fallido' | 'incierto';
-/** Qué pide ese primer mensaje. */
-export type ViaMensaje = 'ubicacion' | 'confirmacion';
 
 export interface NuevaEntrega {
   dia: string;
@@ -328,8 +283,6 @@ export interface NuevaEntrega {
   prioridad?: PrioridadEntrega;
   /** Llega de la lista de GSG y espera a que se confirme su envío. */
   envioRetenidoAt?: Date | null;
-  mensajeEstado?: EstadoMensaje;
-  mensajeVia?: ViaMensaje | null;
 }
 
 export type PatchEntrega = Partial<
@@ -393,7 +346,6 @@ export interface EntregasRepo {
   /** Las entregas del dia (o todas las vivas de cualquier dia si no se pasa dia). */
   listar(filtro: { dia?: string; estado?: EstadoEntrega; estados?: EstadoEntrega[]; q?: string; limit?: number }): Promise<Entrega[]>;
   actualizar(id: number, patch: PatchEntrega): Promise<Entrega | null>;
-  registrarUbicacionAtomica(id: number, patch: PatchEntrega, reporte: { loteId: string | null; payload: Record<string, unknown> } | null, propuestaAt?: Date): Promise<Entrega | null>;
   quitar(id: number): Promise<Entrega | null>;
   cifras(dia: string): Promise<Record<string, number>>;
   /** Las que toca pedir confirmacion ahora. */
@@ -425,24 +377,6 @@ export interface EntregasRepo {
    * ubicacion: con ella, nada del sistema le vuelve a pedir el pin.
    */
   ubicacionDelClienteDelDia(phone: string, dia: string): Promise<Entrega | null>;
-
-  // --- el primer mensaje (ver src/entregas/primer-mensaje.ts)
-  /**
-   * Cambia el estado del mensaje SOLO si ahora está en uno de `desde`: es el
-   * candado contra dos intentos a la vez (dos procesos, un doble clic, el
-   * motor y una persona). null = otro se adelantó o ya no está en ese estado.
-   */
-  cambiarMensaje(id: number, desde: readonly EstadoMensaje[], patch: PatchEntrega): Promise<Entrega | null>;
-  /** Quita la retención («Confirmar y enviar») solo si aún la tiene: dos confirmaciones a la vez liberan una sola vez. */
-  liberarRetenida(id: number, en: Date): Promise<Entrega | null>;
-  /** Mensajes pendientes o en reintento a los que ya les toca (y cuyo pedido sigue vivo). */
-  mensajesQueTocan(ahora: Date, limite: number): Promise<Entrega[]>;
-  /** Mensajes que se quedaron «enviando» desde antes de `antes` (el proceso se cortó a mitad): su resultado es incierto. */
-  mensajesEnviandoDesde(antes: Date, limite: number): Promise<Entrega[]>;
-  /** La bandeja de errores: pedidos vivos cuyo primer mensaje falló o tiene un error sin resolver. */
-  bandejaMensajes(limite: number): Promise<Entrega[]>;
-  /** Las entregas vivas de ese lote del reparto y ese teléfono (las que una solicitud del reparto atiende). */
-  vivasDeLoteYTelefono(loteId: string, phone: string): Promise<Entrega[]>;
 
   registrarEvento(entregaId: number, tipo: TipoEventoEntrega, detalle?: string | null, payload?: Record<string, unknown> | null, at?: Date): Promise<void>;
   eventos(entregaId: number, limite?: number): Promise<EventoEntrega[]>;
@@ -540,17 +474,6 @@ interface EntregaRow {
   pin_propuesto_dudas?: number | string | null;
   direccion_cliente?: string | null;
   direccion_cliente_at?: Date | null;
-  mensaje_estado?: string | null;
-  mensaje_via?: string | null;
-  mensaje_intentos?: number | string | null;
-  mensaje_reintentos_auto?: number | string | null;
-  mensaje_ultimo_intento_at?: Date | null;
-  mensaje_proximo_at?: Date | null;
-  mensaje_error_codigo?: string | null;
-  mensaje_error?: string | null;
-  mensaje_permanente?: boolean | number | null;
-  mensaje_enviado_at?: Date | null;
-  mensaje_wamid?: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -567,7 +490,7 @@ interface EventoRow {
   nombre?: string | null;
 }
 
-/** Un `date` llega como 'AAAA-MM-DD' (ver db/pool.ts); si llegara un Date, igual: siempre AAAA-MM-DD. */
+/** Un `date` de Postgres llega como Date (pg) o como string (PGlite): siempre AAAA-MM-DD. */
 export function diaTexto(v: string | Date | null): string | null {
   if (v === null || v === undefined) return null;
   if (v instanceof Date) return v.toISOString().slice(0, 10);
@@ -665,17 +588,6 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   pinPropuestoDudas: Number(r.pin_propuesto_dudas ?? 0),
   direccionCliente: r.direccion_cliente ?? null,
   direccionClienteAt: r.direccion_cliente_at ?? null,
-  mensajeEstado: (r.mensaje_estado as EstadoMensaje | null) ?? 'no_aplica',
-  mensajeVia: (r.mensaje_via as ViaMensaje | null) ?? null,
-  mensajeIntentos: Number(r.mensaje_intentos ?? 0),
-  mensajeReintentosAuto: Number(r.mensaje_reintentos_auto ?? 0),
-  mensajeUltimoIntentoAt: r.mensaje_ultimo_intento_at ?? null,
-  mensajeProximoAt: r.mensaje_proximo_at ?? null,
-  mensajeErrorCodigo: r.mensaje_error_codigo ?? null,
-  mensajeError: r.mensaje_error ?? null,
-  mensajePermanente: Boolean(r.mensaje_permanente),
-  mensajeEnviadoAt: r.mensaje_enviado_at ?? null,
-  mensajeWamid: r.mensaje_wamid ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -757,17 +669,6 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['pinPropuestoDudas', 'pin_propuesto_dudas'],
   ['direccionCliente', 'direccion_cliente'],
   ['direccionClienteAt', 'direccion_cliente_at'],
-  ['mensajeEstado', 'mensaje_estado'],
-  ['mensajeVia', 'mensaje_via'],
-  ['mensajeIntentos', 'mensaje_intentos'],
-  ['mensajeReintentosAuto', 'mensaje_reintentos_auto'],
-  ['mensajeUltimoIntentoAt', 'mensaje_ultimo_intento_at'],
-  ['mensajeProximoAt', 'mensaje_proximo_at'],
-  ['mensajeErrorCodigo', 'mensaje_error_codigo'],
-  ['mensajeError', 'mensaje_error'],
-  ['mensajePermanente', 'mensaje_permanente'],
-  ['mensajeEnviadoAt', 'mensaje_enviado_at'],
-  ['mensajeWamid', 'mensaje_wamid'],
 ];
 
 const COLUMNAS_MOTORIZADO: Array<[keyof PatchMotorizado, string]> = [
@@ -789,23 +690,17 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
   const repo: EntregasRepo = {
     // ------------------------------------------------------ motorizados
     async crearMotorizado(input) {
-      // Si el telefono ya existe no se toca nada: se devuelve el que habia.
-      // (Con `on duplicate key update` no se distingue bien "inserto" de "ya
-      // estaba": el driver cuenta 1 fila en los dos casos.)
-      try {
-        const r = await pool.query(
-          `insert into motorizados (phone, nombre, placa, zona, estado) values ($1,$2,$3,$4,$5)`,
-          [input.phone, input.nombre, input.placa ?? null, input.zona ?? null, input.estado ?? 'activo'],
-        );
-        const creado = await repo.motorizado(r.insertId);
-        if (!creado) throw new Error(`el motorizado ${r.insertId} recien creado ya no esta`);
-        return { motorizado: creado, nuevo: true };
-      } catch (error) {
-        if (!esDuplicado(error)) throw error;
-        const existente = await repo.motorizadoPorTelefono(input.phone);
-        if (!existente) throw error;
-        return { motorizado: existente, nuevo: false };
-      }
+      const { rows } = await pool.query<MotorizadoRow>(
+        `insert into motorizados (phone, nombre, placa, zona, estado)
+         values ($1,$2,$3,$4,$5)
+         on conflict (phone) do nothing
+         returning *`,
+        [input.phone, input.nombre, input.placa ?? null, input.zona ?? null, input.estado ?? 'activo'],
+      );
+      if (rows[0]) return { motorizado: motorizadoDeFila(rows[0]), nuevo: true };
+      const existente = await repo.motorizadoPorTelefono(input.phone);
+      if (!existente) return repo.crearMotorizado(input);
+      return { motorizado: existente, nuevo: false };
     },
     async motorizado(id) {
       const { rows } = await pool.query<MotorizadoRow>('select * from motorizados where id = $1', [id]);
@@ -836,25 +731,25 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       }
       if (!sets.length) return repo.motorizado(id);
       valores.push(id);
-      await pool.query(`update motorizados set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
-      return repo.motorizado(id);
+      const { rows } = await pool.query<MotorizadoRow>(
+        `update motorizados set ${sets.join(', ')}, updated_at = now() where id = $${valores.length} returning *`,
+        valores,
+      );
+      return rows[0] ? motorizadoDeFila(rows[0]) : null;
     },
     async quitarMotorizado(id) {
-      const antes = await repo.motorizado(id);
-      if (!antes) return null;
-      const r = await pool.query('delete from motorizados where id = $1', [id]);
-      return r.rowCount ? antes : null;
+      const { rows } = await pool.query<MotorizadoRow>('delete from motorizados where id = $1 returning *', [id]);
+      return rows[0] ? motorizadoDeFila(rows[0]) : null;
     },
 
     // --------------------------------------------------------- entregas
     async crearEntrega(input) {
-      // Si (dia, referencia) ya existe no se toca nada: se devuelve la que habia.
-      let insertId: number;
-      try {
-        ({ insertId } = await pool.query(
+      const { rows } = await pool.query<EntregaRow>(
         `insert into entregas
-           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio, envio_retenido_at, mensaje_estado, mensaje_via)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+           (dia, referencia, externo_id, phone, nombre, direccion, distrito, notas, ubicacion_estado, lat, lng, confirmacion_estado, estado, prioridad, datos_envio, envio_retenido_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)
+         on conflict (dia, referencia) do nothing
+         returning *`,
         [
           input.dia,
           input.referencia,
@@ -872,19 +767,12 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           input.prioridad ?? 'normal',
           datosEnvioLimpios(input.datosEnvio) ? JSON.stringify(datosEnvioLimpios(input.datosEnvio)) : null,
           input.envioRetenidoAt ?? null,
-          input.mensajeEstado ?? 'no_aplica',
-          input.mensajeVia ?? null,
         ],
-        ));
-      } catch (error) {
-        if (!esDuplicado(error)) throw error;
-        const existente = await repo.porDiaYReferencia(input.dia, input.referencia);
-        if (!existente) throw error;
-        return { entrega: existente, nueva: false };
-      }
-      const creada = await repo.entrega(insertId);
-      if (!creada) throw new Error(`la entrega ${insertId} recien creada ya no esta`);
-      return { entrega: creada, nueva: true };
+      );
+      if (rows[0]) return { entrega: entregaDeFila(rows[0]), nueva: true };
+      const existente = await repo.porDiaYReferencia(input.dia, input.referencia);
+      if (!existente) return repo.crearEntrega(input);
+      return { entrega: existente, nueva: false };
     },
     async entrega(id) {
       const { rows } = await pool.query<EntregaRow>('select * from entregas where id = $1', [id]);
@@ -897,7 +785,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async vivaPorTelefono(phone) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
-          where phone = $1 and estado in ($2)
+          where phone = $1 and estado = any($2::text[])
           order by dia desc, id desc limit 1`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
@@ -906,7 +794,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async vivasPorTelefono(phone) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
-          where phone = $1 and estado in ($2)
+          where phone = $1 and estado = any($2::text[])
           order by dia asc, id asc`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
@@ -915,7 +803,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async puntualidadDeMotorizados(desde) {
       const { rows } = await pool.query<{ motorizado_id: number; entregas: string | number; desvio: string | number | null }>(
         `select motorizado_id, count(*) as entregas,
-                avg(timestampdiff(microsecond, llega_aprox_at, entregada_at) / 1e6 / 60) as desvio
+                avg(extract(epoch from (entregada_at - llega_aprox_at)) / 60) as desvio
            from entregas
           where estado = 'entregada' and motorizado_id is not null and llega_aprox_at is not null and entregada_at is not null
             and entregada_como <> 'cierre' and entregada_at >= $1
@@ -932,7 +820,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         condiciones.push(`dia = $${valores.length}`);
       } else {
         valores.push(ESTADOS_ENTREGA_VIVOS);
-        condiciones.push(`estado in ($${valores.length})`);
+        condiciones.push(`estado = any($${valores.length}::text[])`);
       }
       if (filtro.estado) {
         valores.push(filtro.estado);
@@ -940,45 +828,18 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       }
       if (filtro.estados?.length) {
         valores.push(filtro.estados);
-        condiciones.push(`estado in ($${valores.length})`);
+        condiciones.push(`estado = any($${valores.length}::text[])`);
       }
       if (filtro.q?.trim()) {
         valores.push(`%${filtro.q.trim().toLowerCase()}%`);
         condiciones.push(`(lower(coalesce(nombre,'')) like $${valores.length} or phone like $${valores.length} or lower(referencia) like $${valores.length})`);
       }
-      valores.push(Number(filtro.limit ?? 500));
+      valores.push(filtro.limit ?? 500);
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas where ${condiciones.join(' and ')} order by id asc limit $${valores.length}`,
         valores,
       );
       return rows.map(entregaDeFila);
-    },
-    async registrarUbicacionAtomica(id, patch, reporte, propuestaAt) {
-      const c = await pool.connect();
-      try {
-        await c.query('begin');
-        const { rows } = await c.query<EntregaRow>('select * from entregas where id = $1 for update', [id]);
-        const actual = rows[0] ? entregaDeFila(rows[0]) : null;
-        const obsoleta = propuestaAt && (!actual?.pinPropuestoAt || actual.pinPropuestoAt.getTime() !== propuestaAt.getTime() || actual.pinPropuestoLat !== patch.lat || actual.pinPropuestoLng !== patch.lng);
-        const duplicada = actual?.ubicacionEstado === 'recibida' && actual.lat === patch.lat && actual.lng === patch.lng;
-        if (!actual || obsoleta || duplicada || ESTADOS_ENTREGA_FINALES.includes(actual.estado)) {
-          await c.query('rollback'); return null;
-        }
-        const sets: string[] = [], valores: unknown[] = [];
-        for (const [clave, columna] of COLUMNAS_ENTREGA) {
-          if (patch[clave] === undefined) continue;
-          const v = patch[clave];
-          valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : clave === 'datosEnvio' ? (v ? JSON.stringify(v) : null) : v);
-          sets.push(columna + ' = $' + valores.length);
-        }
-        valores.push(id);
-        await c.query('update entregas set ' + sets.join(', ') + ', updated_at = now(3) where id = $' + valores.length, valores);
-        if (reporte) await c.query('insert into rutas_reportes (solicitud_id, lote_id, tipo, payload) values (null,$1,$2,$3)', [reporte.loteId, 'ubicacion', JSON.stringify(reporte.payload)]);
-        const guardada = await c.query<EntregaRow>('select * from entregas where id = $1', [id]);
-        await c.query('commit');
-        return entregaDeFila(guardada.rows[0]!);
-      } catch (error) { await c.query('rollback'); throw error; }
-      finally { c.release(); }
     },
     async actualizar(id, patch) {
       const sets: string[] = [];
@@ -986,88 +847,25 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       for (const [clave, columna] of COLUMNAS_ENTREGA) {
         if (patch[clave] === undefined) continue;
         const v = patch[clave];
+        const esJson = clave === 'motorizadosDescartados' || clave === 'datosEnvio';
         valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : clave === 'datosEnvio' ? (v ? JSON.stringify(v) : null) : v);
-        sets.push(`${columna} = $${valores.length}`);
+        sets.push(`${columna} = $${valores.length}${esJson ? '::jsonb' : ''}`);
       }
       if (!sets.length) return repo.entrega(id);
       valores.push(id);
-      await pool.query(`update entregas set ${sets.join(', ')}, updated_at = now(3) where id = $${valores.length}`, valores);
-      return repo.entrega(id);
-    },
-    async cambiarMensaje(id, desde, patch) {
-      if (!desde.length) return null;
-      const sets: string[] = [];
-      const valores: unknown[] = [];
-      for (const [clave, columna] of COLUMNAS_ENTREGA) {
-        if (patch[clave] === undefined) continue;
-        const v = patch[clave];
-        valores.push(clave === 'motorizadosDescartados' ? JSON.stringify(v ?? []) : clave === 'datosEnvio' ? (v ? JSON.stringify(v) : null) : v);
-        sets.push(`${columna} = $${valores.length}`);
-      }
-      valores.push(id);
-      const pId = valores.length;
-      valores.push([...desde]);
-      // FOUND_ROWS (por defecto en mysql2): rowCount son las filas que cumplen el where.
-      const r = await pool.query(
-        `update entregas set ${[...sets, 'updated_at = now(3)'].join(', ')} where id = $${pId} and mensaje_estado in ($${valores.length})`,
+      const { rows } = await pool.query<EntregaRow>(
+        `update entregas set ${sets.join(', ')}, updated_at = now() where id = $${valores.length} returning *`,
         valores,
       );
-      return r.rowCount ? repo.entrega(id) : null;
-    },
-    async liberarRetenida(id, en) {
-      const r = await pool.query(
-        `update entregas set envio_retenido_at = null, envio_liberado_at = $1, updated_at = now(3)
-          where id = $2 and envio_retenido_at is not null and estado not in ('cancelada', 'entregada', 'terminada')`,
-        [en, id],
-      );
-      return r.rowCount ? repo.entrega(id) : null;
-    },
-    async mensajesQueTocan(ahora, limite) {
-      const { rows } = await pool.query<EntregaRow>(
-        `select * from entregas
-          where mensaje_estado in ('pendiente', 'reintentando')
-            and (mensaje_proximo_at is null or mensaje_proximo_at <= $1)
-            and envio_retenido_at is null
-            and estado not in ($2)
-          order by mensaje_proximo_at asc, id asc limit $3`,
-        [ahora, ESTADOS_ENTREGA_FINALES, limite],
-      );
-      return rows.map(entregaDeFila);
-    },
-    async mensajesEnviandoDesde(antes, limite) {
-      const { rows } = await pool.query<EntregaRow>(
-        `select * from entregas where mensaje_estado = 'enviando' and (mensaje_ultimo_intento_at is null or mensaje_ultimo_intento_at < $1) order by id asc limit $2`,
-        [antes, limite],
-      );
-      return rows.map(entregaDeFila);
-    },
-    async bandejaMensajes(limite) {
-      const { rows } = await pool.query<EntregaRow>(
-        `select * from entregas
-          where mensaje_estado not in ('enviado', 'no_aplica', 'retenido')
-            and (mensaje_estado in ('fallido', 'incierto') or mensaje_error_codigo is not null)
-            and estado not in ($1)
-          order by coalesce(mensaje_ultimo_intento_at, updated_at) desc, id desc limit $2`,
-        [ESTADOS_ENTREGA_FINALES, limite],
-      );
-      return rows.map(entregaDeFila);
-    },
-    async vivasDeLoteYTelefono(loteId, phone) {
-      const { rows } = await pool.query<EntregaRow>(
-        'select * from entregas where lote_id = $1 and phone = $2 and estado not in ($3) order by id asc',
-        [loteId, phone, ESTADOS_ENTREGA_FINALES],
-      );
-      return rows.map(entregaDeFila);
+      return rows[0] ? entregaDeFila(rows[0]) : null;
     },
     async quitar(id) {
-      const antes = await repo.entrega(id);
-      if (!antes) return null;
-      const r = await pool.query('delete from entregas where id = $1', [id]);
-      return r.rowCount ? antes : null;
+      const { rows } = await pool.query<EntregaRow>('delete from entregas where id = $1 returning *', [id]);
+      return rows[0] ? entregaDeFila(rows[0]) : null;
     },
     async cifras(dia) {
       const { rows } = await pool.query<{ estado: string; n: number | string }>(
-        'select estado, count(*) as n from entregas where dia = $1 group by estado',
+        'select estado, count(*)::int as n from entregas where dia = $1 group by estado',
         [dia],
       );
       const cifras: Record<string, number> = {};
@@ -1085,7 +883,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by coalesce(confirmacion_proximo_at, created_at) asc, id asc
           limit $2`,
-        [ahora, Number(limite)],
+        [ahora, limite],
       );
       return rows.map(entregaDeFila);
     },
@@ -1099,7 +897,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
             and (confirmacion_proximo_at is null or confirmacion_proximo_at <= $1)
           order by prioridad desc, id asc
           limit $2`,
-        [ahora, Number(limite)],
+        [ahora, limite],
       );
       return rows.map(entregaDeFila);
     },
@@ -1110,7 +908,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
             and ubicacion_estado = 'pendiente' and ubicacion_propuesta_at is not null and ubicacion_propuesta_at <= $1 and lote_id is null
           order by id asc
           limit $2`,
-        [antesDe, Number(limite)],
+        [antesDe, limite],
       );
       return rows.map(entregaDeFila);
     },
@@ -1118,13 +916,13 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where envio_retenido_at is null and ((estado = 'lista')
-             or (estado = 'incidencia' and incidencia = 'sin_motorizado' and lat is not null and updated_at <= cast($1 as datetime(3)) - interval 2 minute)
+             or (estado = 'incidencia' and incidencia = 'sin_motorizado' and lat is not null and updated_at <= $1::timestamptz - interval '2 minutes')
              or (estado = 'incidencia' and incidencia = 'consulta_ajena' and motorizado_sin_ubicacion_at is not null and ubicacion_estado = 'pendiente' and motorizado_id is null)
              or (estado = 'esperando_motorizado' and motorizado_estado = 'enviado' and motorizado_proximo_at is not null and motorizado_proximo_at <= $1)
              or (estado = 'esperando_motorizado' and motorizado_estado = 'respondio' and aviso_enviado_at is null and motorizado_proximo_at is not null and motorizado_proximo_at <= $1))
           order by (prioridad = 'urgente') desc, coalesce(motorizado_proximo_at, updated_at) asc, id asc
           limit $2`,
-        [ahora, Number(limite)],
+        [ahora, limite],
       );
       return rows.map(entregaDeFila);
     },
@@ -1132,7 +930,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where motorizado_id = $1 and estado = 'esperando_motorizado' and motorizado_estado = 'enviado'
-          order by motorizado_enviado_at is null, motorizado_enviado_at desc, id desc`,
+          order by motorizado_enviado_at desc nulls last, id desc`,
         [motorizadoId],
       );
       return rows.map(entregaDeFila);
@@ -1141,7 +939,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where motorizado_id = $1 and estado = 'avisada'
-          order by aviso_enviado_at is null, aviso_enviado_at desc, id desc`,
+          order by aviso_enviado_at desc nulls last, id desc`,
         [motorizadoId],
       );
       return rows.map(entregaDeFila);
@@ -1150,7 +948,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
           where motorizado_id = $1 and estado in ('esperando_motorizado', 'avisada')
-          order by (prioridad = 'urgente') desc, motorizado_enviado_at is null, motorizado_enviado_at asc, id asc`,
+          order by (prioridad = 'urgente') desc, motorizado_enviado_at asc nulls last, id asc`,
         [motorizadoId],
       );
       return rows.map(entregaDeFila);
@@ -1158,16 +956,16 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async vivasDeDiasAnteriores(diaHoy, limite) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
-          where dia < $1 and estado in ($2)
+          where dia < $1 and estado = any($2::text[])
           order by dia asc, id asc limit $3`,
-        [diaHoy, ESTADOS_ENTREGA_VIVOS, Number(limite)],
+        [diaHoy, ESTADOS_ENTREGA_VIVOS, limite],
       );
       return rows.map(entregaDeFila);
     },
     async pausadoPorTelefono(phone) {
       const { rows } = await pool.query<{ n: number | string }>(
-        `select count(*) as n from entregas
-          where phone = $1 and (mensajes_pausados_at is not null or pin_propuesto_at is not null) and estado in ($2)`,
+        `select count(*)::int as n from entregas
+          where phone = $1 and (mensajes_pausados_at is not null or pin_propuesto_at is not null) and estado = any($2::text[])`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
       return Number(rows[0]?.n ?? 0) > 0;
@@ -1178,7 +976,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           where phone = $1 and dia = $2 and ubicacion_estado = 'recibida'
             and lat is not null and lng is not null
             and coalesce(ubicacion_fuente, '') not in ('', 'gsg')
-          order by ubicacion_at is null, ubicacion_at desc, id desc
+          order by ubicacion_at desc nulls last, id desc
           limit 1`,
         [phone, dia],
       );
@@ -1194,7 +992,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
     async eventos(entregaId, limite = 100) {
       const { rows } = await pool.query<EventoRow>(
         'select * from entregas_eventos where entrega_id = $1 order by id asc limit $2',
-        [entregaId, Number(limite)],
+        [entregaId, limite],
       );
       return rows.map(eventoDeFila);
     },
@@ -1203,7 +1001,7 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         `select ev.*, e.referencia, e.phone, e.nombre
            from entregas_eventos ev join entregas e on e.id = ev.entrega_id
           order by ev.id desc limit $1`,
-        [Number(limite)],
+        [limite],
       );
       return rows.map((r) => ({ ...eventoDeFila(r), referencia: r.referencia!, phone: r.phone!, nombre: r.nombre ?? null }));
     },

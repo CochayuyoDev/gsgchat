@@ -41,9 +41,6 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/usuarios\/:id$/, 'usuario.cambiar'],
   ['POST', /^\/admin\/mi-clave$/, 'cuenta.clave'],
   ['POST', /^\/admin\/claves-api$/, 'clave.crear'],
-  ['PATCH', /^\/admin\/claves-api\/:id$/, 'clave.editar'],
-  ['POST', /^\/admin\/claves-api\/:id\/renovar$/, 'clave.renovar'],
-  ['POST', /^\/admin\/claves-api\/:id\/eliminar$/, 'clave.eliminar'],
   ['DELETE', /^\/admin\/claves-api\/:id$/, 'clave.revocar'],
   ['POST', /^\/admin\/ajustes$/, 'ajustes.guardar'],
   ['DELETE', /^\/admin\/ajustes$/, 'ajustes.restablecer'],
@@ -86,7 +83,6 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/contacts\/import$/, 'contactos.importar'],
   ['POST', /^\/admin\/contacts\/opt-in$/, 'contacto.optin'],
   ['POST', /^\/admin\/contacts\/opt-out$/, 'contacto.baja'],
-  ['POST', /^\/admin\/contacts\/eliminar$/, 'contactos.eliminar'],
   ['POST', /^\/admin\/automation\/rules/, 'automatizacion.regla'],
   ['PUT', /^\/admin\/automation\/rules/, 'automatizacion.regla'],
   ['DELETE', /^\/admin\/automation\/rules/, 'automatizacion.regla.borrar'],
@@ -105,8 +101,6 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/rutas\/solicitudes\/:id\/resolver$/, 'solicitud.resolver'],
   ['POST', /^\/admin\/rutas\/solicitudes\/:id\/derivar$/, 'solicitud.derivar'],
   ['POST', /^\/admin\/rutas\/solicitudes\/:id\/reintentar$/, 'solicitud.reintentar'],
-  ['POST', /^\/admin\/rutas\/solicitudes\/:id\/volver-a-empezar$/, 'solicitud.volver_a_empezar'],
-  ['POST', /^\/admin\/rutas\/solicitudes\/:id\/cancelar$/, 'solicitud.cancelar'],
   ['PATCH', /^\/admin\/rutas\/solicitudes\/:id$/, 'solicitud.cambiar'],
   ['POST', /^\/admin\/rutas\/cola\/despachar$/, 'gsg.despachar'],
   ['POST', /^\/admin\/settings/, 'conexion.cambiar'],
@@ -187,11 +181,6 @@ export const ETIQUETAS: Record<string, string> = {
   'cuenta.clave': 'Cambio su contraseña',
   'clave.crear': 'Creo una clave de API',
   'clave.revocar': 'Revoco una clave de API',
-  'clave.editar': 'Editó una clave de API',
-  'clave.activar': 'Activó una clave de API',
-  'clave.desactivar': 'Desactivó una clave de API',
-  'clave.renovar': 'Renovó una clave de API',
-  'clave.eliminar': 'Eliminó una clave de API',
   'ajustes.guardar': 'Guardo la configuracion',
   'ajustes.restablecer': 'Restablecio la configuracion',
   'envios.pausa': 'Pauso o reanudo los envios',
@@ -221,7 +210,6 @@ export const ETIQUETAS: Record<string, string> = {
   'contactos.importar': 'Importo contactos',
   'contacto.optin': 'Registro un consentimiento',
   'contacto.baja': 'Dio de baja un contacto',
-  'contactos.eliminar': 'Elimino clientes',
   'automatizacion.regla': 'Cambio una regla automatica',
   'automatizacion.secuencia': 'Cambio una secuencia',
   'automatizacion.programar': 'Programo un mensaje',
@@ -238,8 +226,6 @@ export const ETIQUETAS: Record<string, string> = {
   'solicitud.resolver': 'Resolvio una solicitud a mano',
   'solicitud.derivar': 'Derivo una solicitud al repartidor',
   'solicitud.reintentar': 'Reintento una solicitud',
-  'solicitud.volver_a_empezar': 'Pidio la ubicacion otra vez (flujo nuevo)',
-  'solicitud.cancelar': 'Quito una solicitud de la automatizacion',
   'solicitud.cambiar': 'Cambio una solicitud a mano',
   'gsg.despachar': 'Despacho la cola hacia GSG',
   'conexion.cambiar': 'Cambio la conexion de WhatsApp',
@@ -353,7 +339,6 @@ export function instalarBitacora(app: FastifyInstance, repo: ActividadRepo, log?
     }
     const u = request.usuario;
     const body = request.body as Record<string, unknown> | undefined;
-    if (accion === 'clave.editar' && typeof body?.activo === 'boolean') accion = body.activo ? 'clave.activar' : 'clave.desactivar';
     const usuario = u ? u.nombre : typeof body?.usuario === 'string' ? String(body.usuario) : 'desconocido';
     try {
       await repo.anotar({
@@ -403,8 +388,8 @@ export function createActividadRepo(pool: Pool): ActividadRepo {
         where.push(`lower(usuario) like $${params.length}`);
       }
       const filtro = where.length ? `where ${where.join(' and ')}` : '';
-      const { rows: total } = await pool.query<{ total: number }>(`select count(*) as total from actividad ${filtro}`, params);
-      params.push(Number(query.limit), Number(query.offset));
+      const { rows: total } = await pool.query<{ total: number }>(`select count(*)::int as total from actividad ${filtro}`, params);
+      params.push(query.limit, query.offset);
       const { rows } = await pool.query<Row>(
         `select * from actividad ${filtro} order by at desc, id desc limit $${params.length - 1} offset $${params.length}`,
         params,
