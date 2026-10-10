@@ -2,7 +2,7 @@
  * Regla del dueño (29/09): el cliente que ya dio su ubicación y la quiere
  * cambiar.
  *
- *  - Antes de la 1:00 PM: «¡Claro! Entiendo. Mándame la nueva ubicación…» y
+ *  - Antes de la 1:00 PM: «Claro, Rosa, por favor mándeme su nueva ubicación…» y
  *    el pin nuevo se registra como siempre.
  *  - Después de la 1:00 PM: «…comunícate directamente con el motorizado…»
  *    con el número del motorizado que manda la API de GSG. Un pin nuevo NO se
@@ -49,7 +49,7 @@ describe('cambio de ubicación antes y después de la 1:00 PM', () => {
   afterAll(() => e?.cerrar());
 
   it('antes de la 1:00 PM: se le pide la nueva y el pin nuevo se registra', async () => {
-    expect(await pide({ texto: 'me equivoqué de ubicación' })).toEqual(['¡Claro! Entiendo. Mándame la nueva ubicación para tenerla en cuenta para el mismo día.']);
+    expect(await pide({ texto: 'me equivoqué de ubicación' })).toEqual(['Claro, Rosa, por favor mándeme su nueva ubicación por WhatsApp (el botón de ubicación) para registrarla.']);
     await e.contesta(TEL, { pin: OTRO_PIN });
     const c1 = await e.entrega('C-1');
     expect(c1?.lat).toBeCloseTo(OTRO_PIN.lat, 5);

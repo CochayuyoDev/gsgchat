@@ -1037,10 +1037,14 @@ async function handleInboundMessageEnFila(
    * y el WhatsApp puede pintarlos; si no, el texto. El proveedor local cae
    * solo a texto cuando no puede con los botones.
    */
-  const responderEntrega = async (r: { entrega?: import("../entregas/repo.js").Entrega; responder?: string; botones?: Array<{ id: string; title: string }>; resultado?: string }) => {
+  const responderEntrega = async (r: { entrega?: import("../entregas/repo.js").Entrega; responder?: string; botones?: Array<{ id: string; title: string }>; pedirUbicacion?: boolean; resultado?: string }) => {
     const enviado = await (r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
-      : reply(r.responder ?? '', {
+      : r.pedirUbicacion
+        // «Claro, {nombre}, por favor mándeme su nueva ubicación»: con el botón
+        // de ubicación, como el primer mensaje; sale aunque el chat esté en silencio.
+        ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', cierreTrasGracias: true, interactive: { body: r.responder ?? '', locationRequest: true } })
+        : reply(r.responder ?? '', {
           // La ubicación nueva (el cliente la cambió antes de la hora límite) se
           // le confirma aunque el chat esté en silencio tras UBI REGISTRADA,
           // igual que el «después de la 1:00 PM»: es la respuesta a su cambio.
@@ -1086,6 +1090,10 @@ async function handleInboundMessageEnFila(
     // y lo que no coincide con una regla se guarda y no se contesta (pedido
     // del dueño, 06/10). Fuera de GSG, la IA clasifica lo que las reglas no saben.
     clasificar: deps.ia?.activa() && !modoGsg() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
+    // El cambio de ubicación es la excepción: con la IA configurada (también
+    // en «Solo lo de GSG») reconoce el que las reglas no vieron. Solo AÑADE
+    // ese caso; su etiqueta nunca sale al cliente.
+    clasificarCambio: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
     // Regla del dueño (10/10): tras UBI REGISTRADA, la IA contesta las
     // consultas del cliente sobre su pedido (con el contexto del pedido y la
     // revisión de src/ia/consulta-pedido.ts). Una llamada por mensaje entrante,

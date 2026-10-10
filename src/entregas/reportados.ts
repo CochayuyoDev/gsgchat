@@ -509,14 +509,17 @@ export async function fichasDeTrackings(deps: DepsMapa, delDia: Entrega[], soloI
     const deEste = reportes.filter((r) => r.clave === tracking || r.clave === e.referencia || r.referencia === e.referencia);
 
     const avisos: AvisoWhatsapp[] = [];
-    // Un pedido anterior de hoy con el mismo telefono que aun espera la misma ubicacion: va en el mismo mensaje.
-    const agrupadoCon = hermanas.filter((h) => h.id < e.id && h.ubicacionEstado === 'pendiente' && e.ubicacionEstado === 'pendiente');
+    // Un pedido anterior de hoy con el mismo telefono (dos trackings de dos
+    // tiendas): va en el mismo mensaje y, si ese ya tenia su ubicacion, este
+    // la toma (la ubicacion vale por dia, regla del dueño del 10/10).
+    const agrupadoCon = hermanas.filter((h) => h.id < e.id && !['cancelada'].includes(h.estado));
     if (contactado) {
       avisos.push({ codigo: 'ya_contactado', en: iso(contactadoAt), mensaje: `Este tracking ya se le envió mensaje por WhatsApp el ${fechaEnPalabras(new Date(contactadoAt!), tz)}. No se le manda otro.` });
     }
     if (agrupadoCon.length) {
       const otro = trackingDe(agrupadoCon[0]!);
-      avisos.push({ codigo: 'agrupado_con', con: otro, en: iso(contactadoAt), mensaje: `Este teléfono ya tiene hoy el tracking «${otro}»: va agrupado con ese y el cliente recibe un solo mensaje por los dos.` });
+      const tomoLaDeOtro = agrupadoCon[0]!.ubicacionEstado === 'recibida' && e.ubicacionEstado === 'recibida';
+      avisos.push({ codigo: 'agrupado_con', con: otro, en: iso(contactadoAt), mensaje: tomoLaDeOtro ? `Este teléfono ya tiene hoy el tracking «${otro}» con la ubicación registrada: este tracking toma la misma, el cliente no recibe otro mensaje y se reporta la lat/lng a los dos.` : `Este teléfono ya tiene hoy el tracking «${otro}»: va agrupado con ese y el cliente recibe un solo mensaje por los dos.` });
     }
     if (pedida && estadoUbicacion === 'pendiente') {
       avisos.push({ codigo: 'ubicacion_pedida', veces, en: iso(pedidaPor?.ultimoEnvioAt ?? pedidaEn), mensaje: `Ya se pidió la ubicación (${veces === 1 ? '1 vez' : `${veces} veces`}, la última el ${fechaEnPalabras(new Date(pedidaPor?.ultimoEnvioAt ?? pedidaEn!), tz)}).` });

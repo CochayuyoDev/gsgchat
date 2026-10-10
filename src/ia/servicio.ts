@@ -223,7 +223,7 @@ export interface ServicioIA {
    * IA, sin plan, tope por hora, manipulacion, fallo o no paso la revision):
    * quien llama usa el texto fijo. `derivar` = el modelo dice que es para una persona.
    */
-  consultaPedido(entrada: { contact: Contact; texto: string; contexto: string | null }): Promise<{ texto: string } | { derivar: true } | null>;
+  consultaPedido(entrada: { contact: Contact; texto: string; contexto: string | null }): Promise<{ texto: string } | { derivar: true } | { cambioUbicacion: true } | null>;
   /** El aviso de «se acabó el saldo de tu IA» (o la clave no vale), o null si responde bien. */
   avisoSaldo(): AvisoSaldoIA | null;
   /** La señal de conexión: apagada, conectada, sin conexión (con motivo) o sin comprobar. */
@@ -469,6 +469,8 @@ export function leerRespuesta(cruda: string): RespuestaIA {
 
 /** Las marcas, aunque vengan torcidas: hace falta al menos un corchete para no comerse la palabra «derivar» de una frase normal. */
 const MARCA_DERIVAR_TORCIDA = /[*_`]*(?:\[\s*derivar\s*\]?|derivar\s*\])[*_`]*/i;
+/** La marca de la consulta de pedido cuando el cliente en realidad quiere cambiar su ubicación (nunca sale al cliente). */
+const MARCA_CAMBIO_UBICACION = /\[\s*cambi[oa]r?[\s_]*(?:de[\s_]*)?ubicaci[oó]n\s*\]/i;
 const MARCA_UBICACION_TORCIDA = /[*_`]*(?:\[\s*pedir[\s_-]*ubicaci[oó]n\s*\]?|pedir[\s_-]*ubicaci[oó]n\s*\])[*_`]*/i;
 const MARCA_SILENCIO_TORCIDA = /[*_`]*(?:\[\s*silencio\s*\]?|silencio\s*\])[*_`]*/i;
 const MARCA_PEDIDO_TORCIDA = /[*_`]*\[\s*pedido\s*\]|\[\s*pedido\s*\{|\bpedido\s*\]\s*\{/i;
@@ -870,7 +872,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       .catch((error: unknown) => log('no se pudo guardar la decisión del turno', { phone: contact.phone, detalle: String(error) }));
   }
 
-  async function consultaPedido(entrada: { contact: Contact; texto: string; contexto: string | null }): Promise<{ texto: string } | { derivar: true } | null> {
+  async function consultaPedido(entrada: { contact: Contact; texto: string; contexto: string | null }): Promise<{ texto: string } | { derivar: true } | { cambioUbicacion: true } | null> {
     const { contact, contexto } = entrada;
     const texto = String(entrada.texto ?? '').trim();
     if (!(cfg.activa && token) || !texto) return null;
@@ -898,6 +900,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       return null;
     }
     if (MARCA_DERIVAR_TORCIDA.test(cruda)) return { derivar: true };
+    if (MARCA_CAMBIO_UBICACION.test(cruda)) return { cambioUbicacion: true };
     const revisada = revisarRespuestaConsulta(cruda, contexto, texto);
     if (!revisada.ok) {
       log('la respuesta de la IA a la consulta de pedido no pasó la revisión: sale el texto fijo', { phone: contact.phone, motivo: revisada.motivo });

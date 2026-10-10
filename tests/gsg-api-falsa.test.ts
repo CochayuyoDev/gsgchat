@@ -99,7 +99,7 @@ describe('GSG por la API: pedir o confirmar la ubicación, gracias y cambio hast
   });
 
   it('4. antes de la 1:00 PM pide cambiarla: se le pide la nueva y, al mandarla, «se ha registrado»', async () => {
-    expect(await nuevos(ANA, () => e.contesta(ANA, { texto: 'me equivoqué de ubicación' }))).toEqual(['¡Claro! Entiendo. Mándame la nueva ubicación para tenerla en cuenta para el mismo día.']);
+    expect(await nuevos(ANA, () => e.contesta(ANA, { texto: 'me equivoqué de ubicación' }))).toEqual(['Claro, Ana, por favor mándeme su nueva ubicación por WhatsApp (el botón de ubicación) para registrarla.']);
     const r = await nuevos(ANA, () => e.contesta(ANA, { pin: PIN_NUEVO }));
     expect(r.some((t) => /Tu nueva ubicación se ha registrado correctamente/.test(t)), r.join('\n---\n')).toBe(true);
     expect((await e.entrega('GSG-A-1001'))?.lat).toBeCloseTo(PIN_NUEVO.lat, 5);

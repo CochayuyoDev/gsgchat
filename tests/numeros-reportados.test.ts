@@ -266,6 +266,17 @@ describe('números reportados a GSG', () => {
     const otra = await llamar('POST', '/api/v1/entregas', pedido('G-2', '987000130'));
     const ficha = (otra.body.whatsapp as Cuerpo[]).find((w) => w.tracking === 'G-2')!;
     expect((ficha.avisos as Cuerpo[]).map((a) => a.codigo)).toEqual(expect.arrayContaining(['ya_contactado', 'ubicacion_registrada']));
+    // Un cuarto tracking DESPUES del pin, el mismo dia: toma la ubicacion ya
+    // registrada, no se le escribe al cliente y la lat/lng sale tambien para el.
+    const yaEnviados = e.mensajesA('987000130').length;
+    const despues = await llamar('POST', '/api/v1/entregas', pedido('G-4', '987000130'));
+    expect(despues.status).toBe(201);
+    await e.trabajar();
+    expect(e.mensajesA('987000130').length, 'no se le escribe otra vez').toBe(yaEnviados);
+    expect((await e.entrega('G-4'))!.ubicacionEstado).toBe('recibida');
+    const g4 = (await llamar('GET', `/api/v1/trackings?dia=${e.entregas.diaDeHoy()}`)).body.trackings.find((t: Cuerpo) => t.tracking === 'G-4');
+    expect((g4.avisos as Cuerpo[]).find((a) => a.codigo === 'agrupado_con')!.mensaje).toMatch(/toma la misma/);
+    expect((await e.repos.rutas.reportesRecientes(500, 'ubicacion')).map((x) => x.payload.tracking)).toContain('G-4');
   });
 
   it('el mapa de trackings del día dice lo hecho por WhatsApp con cada uno', async () => {
