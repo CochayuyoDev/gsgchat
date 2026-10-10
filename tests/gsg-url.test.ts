@@ -151,10 +151,8 @@ describe('lo que sale hacia GSG', () => {
     const puerto = crearPuertoHttp({ url: BASE, rutaUbicacion: RUTA, token: CLAVE, fetchImpl: f.impl });
     expect(puerto.urlUbicacion?.()).toBe(FINAL);
     expect((await puerto.enviar('ubicacion', { tracking: 'T-1', lat: -12, lng: -77 })).ok).toBe(true);
-    await puerto.consultar('/reparto/pendientes');
-    expect(f.llamadas).toHaveLength(2);
+    expect(f.llamadas).toHaveLength(1);
     expect(f.llamadas[0]).toMatchObject({ url: FINAL, metodo: 'POST' });
-    expect(f.llamadas[1]).toMatchObject({ url: 'https://backend.developer.gsgcorp.pe/api/reparto/pendientes', metodo: 'GET' });
     for (const l of f.llamadas) {
       expect(l.cabeceras.get('x-api-key')).toBe(CLAVE);
       expect(l.cabeceras.has('authorization')).toBe(false);
@@ -359,31 +357,21 @@ describe('la conexión saliente guardada', () => {
     expect(JSON.parse((await settingsRepo.getAll()).find((r) => r.key === 'gsg.conexion')!.value).urlUbicacion).toBe('https://otro.gsg.pe/recibir/ubicacion');
   });
 
-  it('la prueba de conexión es de solo lectura: un GET sin cuerpo, y 401/403 en palabras sin la clave', async () => {
-    let status = 200;
-    const f = fetchFalso(() => new Response(JSON.stringify(status === 200 ? { faltaUbicacion: [1], faltaConfirmacion: [], terminados: [] } : { error: `mala ${CLAVE}` }), { status }));
+  it('la prueba de conexión no llama a GSG: revisa URL, ruta y clave sin red y no enseña la clave', async () => {
+    const f = fetchFalso(() => new Response('{}', { status: 200 }));
     const c = await crearConexionGsg({ settingsRepo: createMemorySettingsRepo(), settingsKeyBase64: TEST_SETTINGS_KEY, config, fetchImpl: f.impl });
     await c.conectarReal({ url: BASE, rutaUbicacion: RUTA, apiKey: CLAVE });
     const bien = await c.probar();
-    expect(bien).toMatchObject({ ok: true, faltaUbicacion: 1 });
-    status = 401;
-    const p401 = await c.probar();
-    expect(p401.detalle).toMatch(/clave incorrecta|es incorrecta/);
-    status = 403;
-    const p403 = await c.probar();
-    expect(p403.detalle).toMatch(/no tiene permisos/);
-    // Candidata sin guardar: tampoco escribe nada.
-    status = 200;
-    await c.probar({ url: 'https://otra.gsg.pe/api/', token: CLAVE, rutaUbicacion: RUTA });
-    expect(f.llamadas.length).toBe(4);
-    for (const l of f.llamadas) {
-      expect(l.metodo).toBe('GET');
-      expect(l.cuerpo).toBeUndefined();
-      expect(l.url).toMatch(/\/reparto\/pendientes$/);
-      expect(l.cabeceras.get('x-api-key')).toBe(CLAVE);
-      expect(l.cabeceras.has('authorization')).toBe(false);
-    }
-    expect(JSON.stringify([bien, p401, p403, c.estado()])).not.toContain(CLAVE);
+    expect(bien.ok).toBe(true);
+    expect(bien.detalle).toContain(FINAL);
+    expect(bien.detalle).toMatch(/GSGchat no le pide nada a GSG/);
+    // Candidata sin guardar: tampoco llama ni escribe nada.
+    const otra = await c.probar({ url: 'https://otra.gsg.pe/api/', token: CLAVE, rutaUbicacion: RUTA });
+    expect(otra.ok).toBe(true);
+    const mala = await c.probar({ url: 'https://otra.gsg.pe/api/', token: CLAVE, rutaUbicacion: '../x' });
+    expect(mala.ok).toBe(false);
+    expect(f.llamadas).toEqual([]);
+    expect(JSON.stringify([bien, otra, mala, c.estado()])).not.toContain(CLAVE);
   });
 });
 
@@ -396,12 +384,12 @@ describe('el simulador de GSG exige X-API-Key', () => {
     await registerGsgSimulado(app, { simulador, prefijo: '/simulador/gsg' });
     await app.ready();
     try {
-      const bien = await app.inject({ method: 'GET', url: '/simulador/gsg/reparto/pendientes', headers: { 'x-api-key': CLAVE } });
+      const bien = await app.inject({ method: 'GET', url: '/simulador/gsg/reparto/estado', headers: { 'x-api-key': CLAVE } });
       expect(bien.statusCode).toBe(200);
-      const bearer = await app.inject({ method: 'GET', url: '/simulador/gsg/reparto/pendientes', headers: { authorization: `Bearer ${CLAVE}` } });
+      const bearer = await app.inject({ method: 'GET', url: '/simulador/gsg/reparto/estado', headers: { authorization: `Bearer ${CLAVE}` } });
       expect(bearer.statusCode).toBe(401);
       expect(bearer.json().error).toMatch(/X-API-Key/);
-      const mala = await app.inject({ method: 'GET', url: '/simulador/gsg/reparto/pendientes', headers: { 'x-api-key': 'otra' } });
+      const mala = await app.inject({ method: 'GET', url: '/simulador/gsg/reparto/estado', headers: { 'x-api-key': 'otra' } });
       expect(mala.statusCode).toBe(401);
     } finally {
       await app.close();
@@ -415,9 +403,11 @@ describe('el simulador de GSG exige X-API-Key', () => {
       const r = sim.atender(l.metodo, l.url.replace('https://gsg.pe/api', ''), l.cabeceras.get('x-api-key'), l.cuerpo ? JSON.parse(String(l.cuerpo)) : undefined);
       return new Response(JSON.stringify(r.body), { status: r.status });
     });
-    const bueno = crearPuertoHttp({ url: 'https://gsg.pe/api', token: CLAVE, fetchImpl: f.impl });
-    expect((await bueno.consultar('/reparto/pendientes')).ok).toBe(true);
-    const malo = crearPuertoHttp({ url: 'https://gsg.pe/api', token: 'otra', fetchImpl: f.impl });
-    expect((await malo.consultar('/reparto/pendientes')).status).toBe(401);
+    const bueno = crearPuertoHttp({ url: 'https://gsg.pe/api', rutaUbicacion: 'ubicaciones', token: CLAVE, fetchImpl: f.impl });
+    expect((await bueno.enviar('ubicacion', { tracking: 'GSG-PRUEBA-0001', referencia: 'GSG-PRUEBA-0001', lat: -12.1, lng: -77.03 })).ok).toBe(true);
+    const malo = crearPuertoHttp({ url: 'https://gsg.pe/api', rutaUbicacion: 'ubicaciones', token: 'otra', fetchImpl: f.impl });
+    expect((await malo.enviar('ubicacion', { tracking: 'GSG-PRUEBA-0001', lat: -12.1, lng: -77.03 })).autenticacion).toBe(401);
+    // Solo POST: ninguna llamada de lectura a GSG.
+    expect(f.llamadas.every((l) => l.metodo === 'POST')).toBe(true);
   });
 });

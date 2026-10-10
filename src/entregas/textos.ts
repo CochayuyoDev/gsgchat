@@ -38,7 +38,11 @@ export const ajustesEntregasSchema = z.object({
    * se registra: se le pasa al motorizado y el cliente coordina con el.
    */
   cambioUbicacionHasta: z.string().regex(/^\d{2}:\d{2}$/).default('13:00'),
-  /** Cada cuantos minutos se le piden a GSG los pendientes del dia. */
+  /**
+   * Ya no se usa: GSGchat nunca le pide nada a GSG (los pedidos llegan cuando
+   * GSG los empuja). Se queda en el esquema para que un ajuste guardado de
+   * antes se siga leyendo sin error.
+   */
   sincronizarCadaMin: z.number().int().min(1).max(24 * 60).default(5),
   /**
    * El pin tiene que tener sentido: si cae a más de esto (km) del distrito del
@@ -84,7 +88,7 @@ export const ajustesEntregasSchema = z.object({
   silencioTrasUbi: z.boolean().default(true),
   /**
    * «Revisar y confirmar antes de enviar» (decisión del dueño): la lista del
-   * día que manda GSG (sincronización, la API o el simulador) NO sale sola;
+   * día que manda GSG (la API o el simulador) NO sale sola;
    * queda en «Números del día» como «Por confirmar el envío» hasta que una
    * persona pulsa «Confirmar y enviar». Apagado: sale sola, como antes. Lo
    * creado con «Pedido a mano» nunca espera.

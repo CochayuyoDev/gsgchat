@@ -435,7 +435,7 @@ export function connectPage(opts: ConnectOpts): string {
 ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
   <p><a class="btn primario" href="/conexion-gsg">Abrir conexión de GSG Courier</a></p>
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
-  <p class="con-frase" id="gsg-frase">De GSG llegan los pedidos del día, y a GSG le mandamos cada ubicación que registra el cliente.</p>
+  <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>
   <details><summary>Ubicación y seguimiento del cliente</summary>
     <p>Las direcciones escritas y los enlaces de Maps se confirman antes de reportar la ubicación. Los horarios y el orden de reparto proceden de GSG.</p>
@@ -473,7 +473,7 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
   </div>
   <div id="gsg-descartes" class="nota riesgo hidden">
     <b id="gsg-descartes-titulo"></b>
-    <p>GSG los mandó en su lista de hoy pero no se pudieron usar. Avísale para que los corrija; en cuanto los mande bien, entran solos.</p>
+    <p>GSG los mandó hoy pero no se pudieron usar. Avísale para que los corrija y los vuelva a mandar; en cuanto lleguen bien, entran solos.</p>
     <ul id="gsg-descartes-lista"></ul>
   </div>
 </section>
@@ -613,19 +613,8 @@ ${
 <section class="tarjeta paso" id="gsg-avanzado">
   <h2>GSG: herramientas</h2>
   <div class="bloque">
-    <h3>Cada día</h3>
-    <div class="acciones pegada">
-      <button class="btn" id="gsg-cuadrar" type="button">Cuadrar el día con GSG</button>
-      <button class="btn" id="gsg-verificar" type="button">Verificar el contrato</button>
-      <span id="gsg-verificar-state" class="chip hidden" role="status"></span>
-    </div>
-    <p class="ayuda separada">«Cuadrar» compara lo que GSG tiene como terminado con lo que aquí figura entregado o cancelado. «Verificar el contrato» pide su lista del día y dice, campo por campo, qué falta o sobra; no crea ningún pedido.</p>
-    <div id="gsg-verificacion" class="hidden"></div>
-    <div id="gsg-cuadre" class="hidden"></div>
-  </div>
-  <div class="bloque">
     <h3>Para que GSG conecte su sistema</h3>
-    <p class="ayuda">Con una clave, GSG nos manda cada pedido en cuanto entra y se entera de lo que pasa: confirmó, hora avisada, entregado, incidencia.</p>
+    <p class="ayuda">Con una clave, GSG nos manda cada pedido en cuanto entra y se entera de lo que pasa: confirmó, hora avisada, entregado, incidencia. Es la única forma en que llegan los pedidos: GSGchat no se los pide.</p>
     <div class="acciones"><button class="btn" id="gsg-clave" type="button">Administrar claves API</button><span id="gsg-clave-state" class="chip hidden" role="status"></span></div>
     <div id="gsg-clave-nueva" class="secreto hidden">
       <b>Clave para GSG: cópiala ahora, no se volverá a mostrar.</b>
@@ -1705,7 +1694,7 @@ async function cargarGsg() {
       chipGsg.className = 'chip tono-' + (g.modo === 'ninguna' ? 'ambar' : tono);
       chipGsg.textContent = g.modo === 'real' ? 'Conectado' : g.modo === 'simulador' ? 'Simulador (pruebas)' : 'Sin conectar';
       $('gsg-frase').innerHTML = g.modo === 'real'
-        ? 'Los pedidos del día entran solos, y cada ubicación registrada le llega a GSG.'
+        ? 'Los pedidos del día entran solos cuando GSG los manda, y cada ubicación registrada le llega a GSG.'
         : g.modo === 'simulador'
           ? 'Estás probando con pedidos ficticios. Cuando GSG te dé su <b>dirección</b> y su <b>clave</b>, ponlas aquí.'
           : 'Falta la <b>URL base</b> de GSG, la <b>ruta</b> para enviar la ubicación y su <b>API Key</b>. Te las dan sus programadores.';
@@ -1743,10 +1732,10 @@ if ($('gsg')) {
     ver('gsg-resultado', Boolean(texto));
   }
   async function probarGsg() {
-    resultadoGsg('Probando la conexión con GSG…', 'espera');
+    resultadoGsg('Revisando la configuración de GSG (sin llamarle)…', 'espera');
     try {
       var r = await api('/admin/entregas/gsg/probar', { method: 'POST', body: {} });
-      resultadoGsg((r.ok ? '✓ Funciona. ' : '✗ No responde bien. ') + r.prueba.detalle, r.ok ? 'bien' : 'mal');
+      resultadoGsg((r.ok ? '✓ Bien configurado. ' : '✗ Hay que corregirlo. ') + r.prueba.detalle, r.ok ? 'bien' : 'mal');
     } catch (error) { resultadoGsg('✗ ' + error.message, 'mal'); }
     cargarGsg();
   }
@@ -1805,44 +1794,15 @@ if ($('gsg')) {
 
   $('gsg-clave').onclick = function() { location.href = '/conexion-gsg'; };
 
-  var HALLAZGO = { ok: ['verde', 'bien'], falta: ['rojo', 'falta'], formato: ['rojo', 'formato'], sobra: ['ambar', 'sobra'], aviso: ['ambar', 'aviso'] };
-  function pintarHallazgos(v) {
-    var caja = $('gsg-verificacion');
-    if (!v) { caja.classList.add('hidden'); return; }
-    var filas = (v.hallazgos || []).filter(function (h) { return h.tipo !== 'ok'; });
-    var html = '<div><span class="chip tono-' + (v.ok ? 'verde' : 'rojo') + '">' + esc(v.resumen) + '</span> <span class="ayuda">' + esc(hora(v.at)) + '</span></div>';
-    if (filas.length) {
-      html += '<ul>' + filas.map(function (h) {
-        var t = HALLAZGO[h.tipo] || ['ambar', h.tipo];
-        return '<li><span class="chip tono-' + t[0] + '">' + t[1] + '</span> <b>' + esc(h.donde) + '</b>: ' + esc(h.detalle) + '</li>';
-      }).join('') + '</ul>';
-    } else if (v.ok) {
-      html += '<p class="ayuda">Todas las listas y todos los pedidos vienen como este sistema los espera.</p>';
-    }
-    caja.innerHTML = html;
-    caja.classList.remove('hidden');
-  }
-  function pintarCuadre(c) {
-    var caja = $('gsg-cuadre');
-    if (!c) { caja.classList.add('hidden'); return; }
-    var html = '<div><span class="chip tono-' + (c.ok ? 'verde' : 'ambar') + '">' + esc(c.resumen) + '</span> <span class="ayuda">' + esc(c.dia) + ' · ' + esc(hora(c.at)) + '</span></div>';
-    if (c.faltanEnGsg && c.faltanEnGsg.length) html += '<p><b>Cerrados aquí que GSG no tiene como terminados:</b> ' + esc(c.faltanEnGsg.join(', ')) + '. Suele ser que el reporte no salió: mira «reportes que GSG no aceptó» en Hoy y pulsa Reintentar.</p>';
-    if (c.sobranEnGsg && c.sobranEnGsg.length) html += '<p><b>Terminados en GSG que aquí siguen abiertos:</b> ' + esc(c.sobranEnGsg.join(', ')) + '. Revísalos en Hoy: si ya se entregaron, márcalos «Entregada».</p>';
-    caja.innerHTML = html;
-    caja.classList.remove('hidden');
-  }
   function pintarExtras(r) {
     var d = r.descartes || { lista: [] };
     if (d.lista && d.lista.length) {
       texto('gsg-descartes-titulo', d.lista.length + (d.lista.length === 1 ? ' pedido de hoy no se pudo leer' : ' pedidos de hoy no se pudieron leer'));
       $('gsg-descartes-lista').innerHTML = d.lista.map(function (x) {
-        return '<li><b>' + esc(x.referencia) + '</b> (' + esc(x.lista === 'faltaUbicacion' ? 'lista de ubicación' : 'lista de confirmación') + '): ' + esc(x.motivo) + '</li>';
+        return '<li><b>' + esc(x.referencia) + '</b>' + (x.lista ? ' (' + esc(x.lista === 'faltaUbicacion' ? 'para pedir la ubicación' : 'para confirmar') + ')' : '') + ': ' + esc(x.motivo) + '</li>';
       }).join('');
       ver('gsg-descartes', true);
     } else ver('gsg-descartes', false);
-
-    pintarHallazgos(r.verificacion);
-    pintarCuadre(r.cuadre);
 
     var llamadas = r.bitacora || [];
     $('gsg-bitacora').innerHTML = llamadas.length
@@ -1857,23 +1817,13 @@ if ($('gsg')) {
     try { pintarExtras(await api('/admin/gsg')); } catch (error) { estado('gsg-state', error.message, 'rojo'); }
   }
 
-  $('gsg-verificar').onclick = async function () {
-    estado('gsg-verificar-state', 'Preguntando a GSG…', 'ambar');
-    try { var r = await api('/admin/gsg/verificar-contrato', { method: 'POST', body: {} }); pintarHallazgos(r.verificacion); estado('gsg-verificar-state', r.ok ? 'El contrato se cumple.' : 'Hay cosas que corregir (abajo).', r.ok ? 'verde' : 'rojo'); }
-    catch (error) { estado('gsg-verificar-state', error.message, 'rojo'); }
-  };
-  $('gsg-cuadrar').onclick = async function () {
-    estado('gsg-verificar-state', 'Cuadrando…', 'ambar');
-    try { var r = await api('/admin/gsg/cuadre'); pintarCuadre(r.cuadre); estado('gsg-verificar-state', r.cuadre.ok ? 'El día cuadra.' : 'Hay diferencias (abajo).', r.cuadre.ok ? 'verde' : 'ambar'); }
-    catch (error) { estado('gsg-verificar-state', error.message, 'rojo'); }
-  };
   $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
   async function cargarSeguimiento() {
     var caja = $('seguimiento-estado');
     if (!caja) return;
     try {
       var r = await api('/admin/entregas/seguimiento/estado');
-      caja.textContent = (r.conectado ? 'GSG configurado.' : 'Falta conectar GSG.') + ' ' +
+      caja.textContent = (r.conectado ? 'Hay seguimiento recibido de GSG.' : 'Sin seguimiento de GSG: GSGchat no se lo pide (nunca le pide nada a GSG), así que al cliente se le contesta con el horario y la situación de su pedido.') + ' ' +
         (r.googleConfigurado ? 'Cálculo de rutas configurado.' : 'Falta configurar Google Maps para calcular kilómetros y tiempos.') + ' ' +
         (r.ultimoExito ? 'Último seguimiento válido: ' + new Date(r.ultimoExito).toLocaleString() + '.' : 'Todavía no se ha obtenido seguimiento válido.') + ' ' + (r.ultimoError || '');
       $('seguimiento-pedidos').textContent = (r.pedidos || []).map(function(p) {

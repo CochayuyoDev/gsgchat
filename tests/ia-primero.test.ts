@@ -270,7 +270,7 @@ describe('sin IA en «Solo lo de GSG»: reglas y botones (pedido del dueño, 06/
     n++;
     const tel = `9874${String(n).padStart(5, '0')}`;
     e.simulador.cargar([{ referencia: `IA-C-${n}`, telefono: tel, nombre: `Carla ${n}`, direccion: `Jr. Confirmar ${n}`, distrito: 'Miraflores', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaUbicacion: false, faltaConfirmacion: true, producto: 'Zapatillas', empresa: { codigo: '516', nombre: 'Zapatería Lima' }, remitente: 'Juan Quispe' }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     expect(e.botonesA(tel).length, 'le llegó la pregunta SÍ/NO').toBeGreaterThan(0);
     return tel;

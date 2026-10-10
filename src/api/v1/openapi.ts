@@ -324,9 +324,6 @@ export function openApi(baseUrl: string): Json {
           },
         },
       },
-      '/entregas/sincronizar': {
-        post: { tags: ['entregas'], summary: 'Pedirle a GSG los pendientes ahora (GET /reparto/pendientes), sin esperar los 5 minutos', ...permiso('entregas:gestionar'), responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, detalle: { type: 'string' }, nuevas: { type: 'integer' }, actualizadas: { type: 'integer' } } }) } },
-      },
       '/entregas/{referencia}': {
         get: { tags: ['entregas'], summary: 'Como va ese pedido hoy, con sus eventos', ...permiso('entregas:leer'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' }, description: 'La referencia del pedido (o su id en GSG)' }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), eventos: { type: 'array', items: { type: 'object', properties: { en: { type: 'string' }, tipo: { type: 'string' }, detalle: { type: 'string', nullable: true } } } } } }), 404: error('No hay ningun pedido de hoy con esa referencia') } },
         patch: {

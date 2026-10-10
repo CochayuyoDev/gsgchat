@@ -7,6 +7,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { igualSeguro } from '../util/comparar.js';
 
 const PREFIX = 'sha256=';
 
@@ -42,7 +43,9 @@ export function verifyChallenge(
   const mode = query['hub.mode'];
   const token = query['hub.verify_token'];
   const challenge = query['hub.challenge'];
-  if (mode === 'subscribe' && token === verifyToken && typeof challenge === 'string') {
+  // Sin verify token configurado no se suscribe nadie: antes, con el ajuste
+  // vacio, un `hub.verify_token=` vacio pasaba el handshake.
+  if (mode === 'subscribe' && igualSeguro(token, verifyToken) && typeof challenge === 'string' && challenge.length <= 200) {
     return challenge;
   }
   return null;

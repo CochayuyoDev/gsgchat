@@ -165,7 +165,8 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     // Sin `agente`: sin «Solo lo de GSG», con la preventa encendida (como las tiendas nuevas).
     e = await crearEscenarioEntregas({ arranque: hoyALas9(), confirmarLista: true });
     await e.conexionGsg.conectarReal({ url: gsg.url, token: gsg.token });
-    await e.api.post('/admin/entregas/sincronizar');
+    // GSG manda su lista (GSGchat no se la pide).
+    await e.entregas.recibirListaGsg(gsg.lista as never);
     await e.api.post('/admin/entregas/confirmar-envio', { todos: true });
     await e.trabajar();
   });
@@ -255,7 +256,8 @@ describe('«Solo lo de GSG»: variantes del cambio y el cliente que escribe ante
     });
     e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, confirmarLista: true });
     await e.conexionGsg.conectarReal({ url: gsg.url, token: gsg.token });
-    await e.api.post('/admin/entregas/sincronizar');
+    // GSG manda su lista (GSGchat no se la pide).
+    await e.entregas.recibirListaGsg(gsg.lista as never);
     await e.api.post('/admin/entregas/confirmar-envio', { todos: true });
   });
   afterAll(async () => {

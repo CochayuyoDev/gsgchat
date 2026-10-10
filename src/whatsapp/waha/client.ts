@@ -24,7 +24,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { WhatsAppApiError, type CitaSaliente, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
+import { fetchProveedor, TIMEOUT_PROVEEDOR_MS, WhatsAppApiError, type CitaSaliente, type PhoneNumberInfo, type SendResult, type WhatsAppClient } from '../client.js';
 import type { TemplateComponent } from '../types.js';
 import { CATALOG } from '../../templates/catalog.js';
 import { escribirComoHumano } from '../../salud/humano.js';
@@ -39,6 +39,8 @@ export interface WahaClientOptions {
   /** Nombre de la sesion; una por numero conectado. */
   session?: string;
   fetchImpl?: typeof fetch;
+  /** Corte de cada llamada a WAHA (por defecto 30 s). */
+  timeoutMs?: number;
   /**
    * Cuerpo de la plantilla, para poder mandarla como texto.
    *
@@ -97,26 +99,14 @@ export function createWahaClient(opts: WahaClientOptions): WhatsAppClient {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (opts.apiKey) headers['X-Api-Key'] = opts.apiKey;
 
-    let response: Response;
-    try {
-      response = await doFetch(`${base}${path}`, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    } catch (error) {
-      // El contenedor caido es transitorio: merece reintento, no descarte.
-      throw new WhatsAppApiError(
-        `no se pudo contactar con WAHA en ${base}: ${error instanceof Error ? error.message : String(error)}`,
-        503,
-        undefined,
-        undefined,
-        true,
-      );
-    }
-
-    const text = await response.text();
-    const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    // El contenedor caido sin llegar a conectar es transitorio y se reintenta;
+    // uno que se queda colgado se corta a los 30 s (ver fetchProveedor).
+    const { response, payload } = await fetchProveedor(
+      doFetch,
+      `${base}${path}`,
+      { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
+      { timeoutMs: opts.timeoutMs ?? TIMEOUT_PROVEEDOR_MS, quien: `WAHA en ${base}`, reintentarFallosDeRed: true },
+    );
 
     if (!response.ok) {
       const detail =

@@ -1,9 +1,8 @@
 /**
- * GSG empuja: en vez de esperar a que se le pregunte cada cinco minutos,
- * el sistema de GSG (o cualquiera con una clave `entregas:gestionar`) manda
- * los pedidos del dia en cuanto los tiene, y pregunta o cancela por
- * referencia. Mismo contrato que `GET /reparto/pendientes` (ClienteGsg),
- * con dos banderas por pedido: `faltaUbicacion` y `faltaConfirmar`.
+ * GSG empuja: GSGchat nunca le pide nada a GSG. El sistema de GSG (o
+ * cualquiera con una clave `entregas:gestionar`) manda los pedidos del dia
+ * en cuanto los tiene, y pregunta o cancela por referencia. Cada pedido es
+ * un ClienteGsg con dos banderas: `faltaUbicacion` y `faltaConfirmar`.
  *
  *  POST   /api/v1/entregas                 uno o varios pedidos (entregas:gestionar)
  *  GET    /api/v1/entregas/:referencia     como va ese pedido hoy (entregas:leer)
@@ -448,8 +447,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     };
   });
 
-  // GSG cambia datos de un pedido ya mandado: lo mismo que el espejo de la
-  // sincronizacion (src/entregas/servicio.ts), pero empujado. Queda apuntado en
+  // GSG cambia datos de un pedido ya mandado: lo mismo que hace
+  // `recibirListaGsg` (src/entregas/servicio.ts) con una lista, pero empujado. Queda apuntado en
   // la bitacora del pedido. El telefono no se cambia aqui: es otro pedido
   // (cancelar y crear), porque al numero viejo ya se le pudo escribir.
   app.patch<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {

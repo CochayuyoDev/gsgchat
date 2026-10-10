@@ -34,6 +34,7 @@ import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS } from '../api/errores.js';
+import { normalizarRuta } from '../util/ruta-normalizada.js';
 import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
@@ -102,7 +103,9 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
 
   /** A quien va esta peticion y con que URL. */
   async function resolver(req: http.IncomingMessage): Promise<Destino> {
-    const url = req.url ?? '/';
+    // La forma canonica (ver util/ruta-normalizada.ts): `/tienda/x/%61pi/...`
+    // tiene que verse como `/api/...` aqui igual que en el enrutador.
+    const url = normalizarRuta(req.url ?? '/');
     const prefijo = partirPrefijo(url);
     if (moduloRetirado(prefijo?.resto ?? url)) return { tipo: 'rechazo', rechazo: { status: 404, cuerpo: cuerpoError('RUTA_NO_EXISTE', 'Este módulo fue retirado. Usa API, WhatsApp o Pedidos GSG.') } };
     if (prefijo && esRecepcionGsg(req.method, prefijo.resto)) return { tipo: 'rechazo', rechazo: RECHAZOS.conPrefijo() };

@@ -132,12 +132,12 @@ describe('los datos del envío llegan a la entrega', () => {
 
   it('por la lista de GSG (sincronización con el simulador), con espejo si GSG los cambia', async () => {
     e.simulador.cargarDePrueba();
-    const s = await e.api.post<{ ok: boolean }>('/admin/entregas/sincronizar');
+    const s = await e.gsgManda();
     expect(s.body.ok).toBe(true);
     expect((await e.entrega('P-1001'))?.datosEnvio).toMatchObject({ producto: 'Zapatillas talla 40', empresaCodigo: '516', tracking: 'GSG-A-102345', monto: '85.00', remitente: 'Juan Quispe' });
     expect((await e.entrega('P-1005'))?.datosEnvio?.remitente).toBeUndefined();
     expect(e.simulador.cambiar('P-1001', { datosEnvio: { producto: 'Zapatillas talla 41' } })).not.toBeNull();
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     expect((await e.entrega('P-1001'))?.datosEnvio).toMatchObject({ producto: 'Zapatillas talla 41', monto: '85.00' });
   });
 });

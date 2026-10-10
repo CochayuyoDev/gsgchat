@@ -2,6 +2,8 @@
 
 GSG gestiona el reparto, sus motorizados, puntos y horarios. GSGchat recibe pedidos, conversa por WhatsApp y devuelve las ubicaciones confirmadas. La autenticación entre ambos es `X-API-Key`; la clave de Google es independiente.
 
+GSGchat nunca le pide nada a GSG: no hace ningún `GET` a su API (ni pendientes, ni seguimiento, ni para probar la conexión). Los pedidos entran solo cuando GSG los manda a `POST /api/v1/entregas`, y GSGchat solo le manda la ubicación y los demás reportes.
+
 ## Ubicación
 
 1. GSG entrega dirección, distrito y tracking. La plantilla distingue una dirección completa de una zona sin puerta.
@@ -12,7 +14,7 @@ GSG gestiona el reparto, sus motorizados, puntos y horarios. GSGchat recibe pedi
 
 ## Horario por distrito
 
-GSG adjunta el horario correspondiente al distrito en cada pedido, tanto en `/reparto/pendientes` como en el POST a `/api/v1/entregas`. Puede actualizarlo por PATCH del pedido. Las horas corresponden a la zona horaria de la tienda y son aproximadas; el inicio debe ser anterior al final.
+GSG adjunta el horario correspondiente al distrito en cada pedido, en el POST a `/api/v1/entregas`. Puede actualizarlo por PATCH del pedido. Las horas corresponden a la zona horaria de la tienda y son aproximadas; el inicio debe ser anterior al final.
 
 ```json
 {
@@ -30,9 +32,9 @@ GSG adjunta el horario correspondiente al distrito en cada pedido, tanto en `/re
 
 Ese horario se guarda con el pedido y se utiliza en sus mensajes y en el contexto del asistente. Si GSG no lo proporciona, se usa el horario general configurado. No se crean rangos inventados por distrito.
 
-## Contrato propuesto de seguimiento, pendiente de confirmar con GSG
+## Formato de seguimiento (sin consulta a GSG)
 
-GSGchat hace `GET <GSG_URL>/reparto/seguimiento/{tracking}` con `X-API-Key`. Este endpoint pertenece al sistema GSG externo: este cambio no lo implementa dentro de GSGchat. Debe devolver solo los datos del tracking solicitado y las paradas pendientes hasta el cliente, sin información personal de otros destinatarios.
+GSGchat **no** consulta `GET <GSG_URL>/reparto/seguimiento/{tracking}`: a GSG no se le pide nada. El formato de abajo se conserva como contrato de lectura (`leerSeguimiento` en `src/entregas/seguimiento-gsg.ts`) por si GSG lo empuja en el futuro; hoy no hay fuente de seguimiento y al cliente se le contesta con el estado y el horario de su pedido. Debe traer solo los datos del tracking y las paradas pendientes hasta el cliente, sin información personal de otros destinatarios.
 
 ```json
 {
@@ -52,7 +54,7 @@ GSGchat hace `GET <GSG_URL>/reparto/seguimiento/{tracking}` con `X-API-Key`. Est
 
 Si el motorizado va por el punto 2 y el cliente está en el 10, el contrato anterior exige las ocho paradas 3–10 en orden. GSG puede declarar `secuenciaCompleta:true` y enviar solo las paradas todavía pendientes, con índices crecientes y destino final correcto. Se rechazan otro tracking, coordenadas inválidas y posiciones de más de diez minutos. Se aceptan hasta cien paradas y Google Routes calcula tramos de máximo veintiséis destinos sin reorganizarlos. Si falta algún tiempo de atención antes del cliente, se comunica tiempo de conducción, sin presentarlo como tiempo completo de llegada.
 
-GSGchat contesta los puntos actual y del cliente, paradas previas, kilómetros, minutos aproximados y horario cuando existe. No revela direcciones de otros clientes. Si falla Google, se conserva la información válida de GSG sin inventar kilómetros/minutos. Si falla GSG o la posición es antigua, se usa la respuesta existente sobre el estado y horario del pedido.
+GSGchat contesta los puntos actual y del cliente, paradas previas, kilómetros, minutos aproximados y horario cuando existe. No revela direcciones de otros clientes. Si falla Google, se conserva la información válida de GSG sin inventar kilómetros/minutos. Si no hay seguimiento o la posición es antigua, se usa la respuesta existente sobre el estado y horario del pedido.
 
 ## Configuración y validación
 
@@ -66,7 +68,7 @@ GSGchat contesta los puntos actual y del cliente, paradas previas, kilómetros, 
 
 Una propuesta confirmada se compara con su fecha y coordenadas bajo bloqueo de fila en MySQL. La ubicación y su reporte se guardan en una transacción. Los reportes se reservan condicionalmente antes del envío; una interrupción deja visible un resultado incierto. Los mensajes citados se contrastan con el id saliente, fecha y coordenadas persistidos. Tras sustituir una propuesta enviada, un SÍ textual aislado solicita confirmación mediante botón o cita vigente.
 
-El seguimiento admite `estado`: pendiente, en_reparto, llegando, entregado, cancelado e incidencia. Los estados terminales pueden omitir posición y paradas. `versionRuta` aparece en el diagnóstico y `secuenciaCompleta` declara que no faltan paradas pendientes. La caché de treinta segundos se invalida al sincronizar o recargar ajustes; no es una suscripción instantánea a la ruta.
+El seguimiento admite `estado`: pendiente, en_reparto, llegando, entregado, cancelado e incidencia. Los estados terminales pueden omitir posición y paradas. `versionRuta` aparece en el diagnóstico y `secuenciaCompleta` declara que no faltan paradas pendientes. La caché de treinta segundos se invalida al recibir una lista de GSG o recargar ajustes.
 
 ## Horarios nocturnos y actualizaciones
 
@@ -76,4 +78,4 @@ El cálculo sigue el contrato oficial de [Google Geocoding](https://developers.g
 
 ## Refuerzo del transporte HTTP
 
-Las consultas y los envíos a GSG rechazan redirecciones HTTP. Configura la URL final de la API para evitar enviar la API key o repetir el POST en otro destino. Un envío incierto de ubicación solo admite reintento automático cuando está habilitado el soporte de idempotencia y ese envío lleva una clave idempotente no vacía. Las claves se ocultan antes de truncar las respuestas de error, incluyendo claves cortas.
+Los envíos a GSG rechazan redirecciones HTTP. Configura la URL final de la API para evitar enviar la API key o repetir el POST en otro destino. Un envío incierto de ubicación solo admite reintento automático cuando está habilitado el soporte de idempotencia y ese envío lleva una clave idempotente no vacía. Las claves se ocultan antes de truncar las respuestas de error, incluyendo claves cortas.

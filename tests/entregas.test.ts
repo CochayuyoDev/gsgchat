@@ -41,11 +41,12 @@ describe('un día de entregas con GSG simulado', () => {
 
   it('GSG manda sus dos listas y el sistema las reparte: 7 al reparto (ubicación) y 9 por confirmar', async () => {
     expect(e.simulador.cargarDePrueba()).toBe(10);
+    // GSG (el simulador) manda su lista: es lo primero, GSGchat no se la pide.
+    const s = await e.gsgManda();
     const m = await e.api.post<{ nuevos: number }>('/admin/motorizados/de-prueba');
     expect(m.status).toBe(200);
     expect(m.body.nuevos).toBe(10);
 
-    const s = await e.api.post<{ ok: boolean; nuevas: number; ubicacionesPedidas: number; confirmacionesPendientes: number; lote: { total: number } | null; detalle: string }>('/admin/entregas/sincronizar');
     expect(s.status).toBe(200);
     expect(s.body.ok).toBe(true);
     expect(s.body.nuevas).toBe(10);
@@ -73,7 +74,7 @@ describe('un día de entregas con GSG simulado', () => {
     expect(diego?.ubicacionEstado).toBe('pendiente');
 
     // Sincronizar dos veces no duplica nada.
-    const otra = await e.api.post<{ nuevas: number; ubicacionesPedidas: number }>('/admin/entregas/sincronizar');
+    const otra = await e.gsgManda();
     expect(otra.body.nuevas).toBe(0);
     expect(otra.body.ubicacionesPedidas).toBe(0);
     expect((await e.resumen()).cifras.total).toBe(10);
@@ -187,7 +188,7 @@ describe('un día de entregas con GSG simulado', () => {
     expect((entrega?.cuerpo.motorizado as { telefono: string }).telefono).toBe(rider);
 
     // GSG la tiene en terminados: al sincronizar, aquí queda terminada.
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     expect((await e.entrega('P-1001'))?.estado).toBe('terminada');
     // Y el motorizado cuenta una entrega más hoy.
     const r = await e.resumen();
@@ -397,13 +398,15 @@ describe('un día de entregas con GSG simulado', () => {
     expect(r.body.entrega.estado).toBe('lista');
   });
 
-  it('GSG caído: la sincronización lo dice en cristiano y los reportes esperan en la cola hasta que vuelve', async () => {
+  it('GSG caído: no manda nada (y aquí no se toca nada), «Probar» no le llama y los reportes esperan en la cola hasta que vuelve', async () => {
     e.simulador.modo = 'caido';
-    const s = await e.api.post<{ ok: boolean; detalle: string }>('/admin/entregas/sincronizar');
+    const s = await e.gsgManda();
     expect(s.body.ok).toBe(false);
-    expect(s.body.detalle).toMatch(/GSG no respondió/);
+    expect(s.body.detalle).toMatch(/no manda nada/);
+    const antes = e.llamadasAGsg.length;
     const p = await e.api.post<{ ok: boolean; prueba: { detalle: string } }>('/admin/entregas/gsg/probar');
-    expect(p.body.ok).toBe(false);
+    expect(p.body.prueba.detalle).toMatch(/GSGchat no le pide nada a GSG/);
+    expect(e.llamadasAGsg.length).toBe(antes);
 
     // P-1006 confirma mientras GSG está caído: el reporte se queda esperando.
     await e.contesta('987000006', { pin: pinDe(6) });
@@ -457,9 +460,9 @@ describe('un día de entregas con GSG simulado', () => {
     const cuerpo = r.json() as { cifras: { total: number }; entregas: Array<{ referencia: string; llegaAproxEn: string | null }> };
     expect(cuerpo.cifras.total).toBe(10);
     expect(cuerpo.entregas.find((x) => x.referencia === 'P-1001')?.llegaAproxEn).not.toBeNull();
-    // Sin el permiso de gestionar, no se sincroniza.
-    const sinPermiso = await e.app.inject({ method: 'POST', url: '/api/v1/entregas/sincronizar', headers: { 'x-api-key': clave }, payload: {} });
-    expect(sinPermiso.statusCode).toBe(403);
+    // Ya no existe la sincronización por la API: GSG manda, no se le pide.
+    const sinRuta = await e.app.inject({ method: 'POST', url: '/api/v1/entregas/sincronizar', headers: { 'x-api-key': clave }, payload: {} });
+    expect(sinRuta.statusCode).not.toBe(200);
 
     const sim = await e.api.get<{ estado: { terminados: number; cancelados: number } }>('/admin/entregas/simulador');
     expect(sim.status).toBe(200);

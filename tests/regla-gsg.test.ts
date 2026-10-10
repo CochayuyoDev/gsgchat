@@ -48,7 +48,7 @@ async function armar(opts: { silencio?: boolean } = {}): Promise<EscenarioEntreg
   await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' }, ...(opts.silencio === false ? { silencioTrasUbi: false } : {}) });
   e.simulador.cargarDePrueba();
   await e.api.post('/admin/motorizados/de-prueba');
-  await e.api.post('/admin/entregas/sincronizar');
+  await e.gsgManda();
   await e.trabajar();
   return e;
 }

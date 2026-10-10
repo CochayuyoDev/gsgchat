@@ -1,5 +1,14 @@
+/**
+ * El seguimiento de un pedido en la ruta de GSG (posicion del motorizado,
+ * paradas que faltan) y el recorrido que calcula Google.
+ *
+ * GSGchat nunca le pide nada a GSG: aqui no hay ningun GET a su API. Lo que
+ * hay es la lectura y la validacion de un seguimiento ya recibido
+ * (`leerSeguimiento`) y una consulta con cache que solo mira una fuente local
+ * (`crearConsultaSeguimiento`). Sin fuente, que es lo que hay hoy en
+ * produccion, no hay seguimiento y el cliente recibe el texto de siempre.
+ */
 import { z } from 'zod';
-import type { PuertoGsg } from '../rutas/gsg.js';
 
 const punto = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(f => { const d = new Date(f); return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === f; });
@@ -26,13 +35,15 @@ export interface DistanciaRuta { km: number; minutos: number; soloConduccion?: b
 export type CalcularRuta = (ruta: SeguimientoGsg) => Promise<DistanciaRuta | null>;
 export interface FalloSeguimiento { proveedor: 'gsg' | 'google'; codigo: string; detalle: string }
 
-export async function consultarSeguimiento(gsg: PuertoGsg, tracking: string, calcular?: CalcularRuta, ahora = new Date(), diagnosticar?: (fallo: FalloSeguimiento) => void): Promise<{ ruta: SeguimientoGsg; distancia: DistanciaRuta | null } | null> {
+/**
+ * Lee y valida un seguimiento YA RECIBIDO (no llama a GSG) y, si el pedido va
+ * en reparto, le pide a Google el recorrido que falta.
+ */
+export async function leerSeguimiento(cuerpo: unknown, tracking: string, calcular?: CalcularRuta, ahora = new Date(), diagnosticar?: (fallo: FalloSeguimiento) => void): Promise<{ ruta: SeguimientoGsg; distancia: DistanciaRuta | null } | null> {
   const fallo = (codigo: string, detalle: string): null => { diagnosticar?.({ proveedor: 'gsg', codigo, detalle }); return null; };
-  if (!gsg.conectado()) return fallo('sin_configurar', 'Falta configurar la conexión de GSG.');
+  if (cuerpo === undefined || cuerpo === null) return fallo('sin_tracking', 'No hay seguimiento recibido para este tracking.');
   try {
-    const r = await gsg.consultar(`/reparto/seguimiento/${encodeURIComponent(tracking)}`);
-    const leido = seguimientoGsgSchema.safeParse(r.cuerpo);
-    if (!r.ok) return fallo(r.status === 401 || r.status === 403 ? 'autenticacion' : r.status === 404 ? 'sin_tracking' : r.status === 429 ? 'cuota' : r.status ? 'http_' + r.status : 'red_o_timeout', `Consulta de GSG fallida${r.status ? ` (HTTP ${r.status})` : ' por red o tiempo de espera'}.`);
+    const leido = seguimientoGsgSchema.safeParse(cuerpo);
     if (!leido.success) return fallo('contrato', 'La respuesta de GSG no cumple el contrato de seguimiento.');
     const ruta = leido.data;
     if (ruta.tracking !== tracking) return fallo('tracking_incorrecto', 'GSG respondió con otro tracking.');
@@ -49,12 +60,18 @@ export async function consultarSeguimiento(gsg: PuertoGsg, tracking: string, cal
     const distancia = calcular ? await calcular(ruta).catch(() => null) : null;
     if (calcular && !distancia) diagnosticar?.({ proveedor: 'google', codigo: 'ruta_no_disponible', detalle: 'Google no devolvió un cálculo válido. Revisa clave, cuota, red y cobertura de ruta.' });
     return { ruta, distancia };
-  } catch { return fallo('red_o_timeout', 'No se pudo consultar GSG por red o tiempo de espera.'); }
+  } catch { return fallo('lectura', 'No se pudo leer el seguimiento recibido.'); }
 }
 
-/** Una instancia por tienda: no comparte resultados entre claves o negocios. */
-export function crearConsultaSeguimiento(gsg: PuertoGsg, calcular?: CalcularRuta, reloj: () => Date = () => new Date()) {
-  type Resultado = Awaited<ReturnType<typeof consultarSeguimiento>>;
+/** De donde sale el seguimiento de un tracking: algo local, nunca una llamada a GSG. */
+export type FuenteSeguimiento = (tracking: string) => Promise<unknown> | unknown;
+
+/**
+ * Una instancia por tienda: no comparte resultados entre claves o negocios.
+ * Sin `fuente` no hay seguimiento (siempre null): GSGchat no se lo pide a GSG.
+ */
+export function crearConsultaSeguimiento(fuente: FuenteSeguimiento | null, calcular?: CalcularRuta, reloj: () => Date = () => new Date()) {
+  type Resultado = Awaited<ReturnType<typeof leerSeguimiento>>;
   const cache = new Map<string, { hasta: number; resultado: Resultado }>();
   const enCurso = new Map<string, Promise<Resultado>>();
   let ultimoIntento: string | null = null;
@@ -63,10 +80,10 @@ export function crearConsultaSeguimiento(gsg: PuertoGsg, calcular?: CalcularRuta
   let generacion = 0;
   const pedidos = new Map<string, { tracking: string; consultadoAt: string; versionRuta?: string; gpsAt?: string; fallo: FalloSeguimiento | null }>();
   return {
-    estado: () => ({ conectado: gsg.conectado(), googleConfigurado: Boolean(calcular), ultimoIntento, ultimoExito, ultimoError, cacheSegundos: 30, pedidos: [...pedidos.values()].reverse() }),
+    estado: () => ({ conectado: Boolean(fuente), googleConfigurado: Boolean(calcular), ultimoIntento, ultimoExito, ultimoError, cacheSegundos: 30, pedidos: [...pedidos.values()].reverse() }),
     invalidar() { generacion++; cache.clear(); enCurso.clear(); },
     async consultar(tracking: string): Promise<Resultado> {
-      if (!gsg.conectado()) { cache.clear(); return null; }
+      if (!fuente) { cache.clear(); return null; }
       const ahora = reloj();
       const entrada = cache.get(tracking);
       const posicion = entrada?.resultado?.ruta.posicion;
@@ -77,7 +94,7 @@ export function crearConsultaSeguimiento(gsg: PuertoGsg, calcular?: CalcularRuta
       const revision = generacion;
       ultimoIntento = ahora.toISOString();
       let errorConsulta: FalloSeguimiento | null = null;
-      const promesa = consultarSeguimiento(gsg, tracking, calcular, ahora, fallo => { errorConsulta = fallo; }).then(resultado => {
+      const promesa = Promise.resolve().then(() => fuente(tracking)).then(cuerpo => leerSeguimiento(cuerpo, tracking, calcular, ahora, fallo => { errorConsulta = fallo; })).catch(() => { errorConsulta = { proveedor: 'gsg', codigo: 'lectura', detalle: 'No se pudo leer el seguimiento recibido.' }; return null; }).then(resultado => {
         if (revision !== generacion) return null;
         if (resultado) ultimoExito = reloj().toISOString();
         ultimoError = errorConsulta?.detalle ?? null;

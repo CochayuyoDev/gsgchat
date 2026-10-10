@@ -618,7 +618,7 @@ describe('examen a gran escala', () => {
     const h = await sesion();
     const r = await app.inject({ method: 'POST', url: '/admin/entrenamiento/examen', headers: h, payload: { tema: 'nada' } });
     expect(r.statusCode).toBe(404);
-    await ia.guardar({ token: '' });
+    await ia.guardar({ borrarClave: true });
     const s = await app.inject({ method: 'POST', url: '/admin/entrenamiento/examen', headers: h, payload: {} });
     expect(s.statusCode).toBe(400);
     expect(s.json()).toMatchObject({ ir: '/panel#ia' });

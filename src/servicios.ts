@@ -150,7 +150,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   // con la misma pausa y el mismo marcapasos que el reparto. Ver src/envio-automatico.
   const stopMotorLista = () => undefined;
 
-  // Las entregas del dia: sincronizar con GSG, pedir confirmaciones, mandar
+  // Las entregas del dia (GSG las empuja; a GSG no se le pide nada): pedir confirmaciones, mandar
   // los pines a los motorizados y avisar la hora de llegada. Ver src/entregas.
   // El vigilante del WhatsApp (cada 30 s), la prueba de la manana y la copia de la noche. Ver src/salud/fiabilidad.ts.
   const stopFiabilidad = deps.fiabilidad ? deps.fiabilidad.arrancar() : () => undefined;

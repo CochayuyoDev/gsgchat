@@ -14,7 +14,7 @@
  */
 
 import type { ServicioEntregas } from './servicio.js';
-import type { GsgSimulado } from './gsg-simulado.js';
+import { enviarListaDelSimulador, type GsgSimulado } from './gsg-simulado.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import { CLIENTES_DE_PRUEBA, MOTORIZADOS_DE_PRUEBA } from './datos-de-prueba.js';
 
@@ -99,7 +99,12 @@ export function crearGuionDelDia(deps: DepsGuion): GuionDelDia {
     if (deps.conexionGsg && modoGsg === 'ninguna') {
       await deps.conexionGsg.usarSimulador();
       cierra(p, 'hecho', 'listo: GSG es ahora el simulador de este servidor');
-    } else cierra(p, 'saltado', modoGsg === 'real' ? 'GSG ya está conectado a una dirección: se usa tal cual' : 'ya lo era');
+    } else if (modoGsg === 'real') {
+      // Lo de prueba no se mezcla con lo de verdad: con la API real puesta no se corre.
+      const motivo = 'GSG está conectado a su API real: la prueba del día solo corre con el simulador (cámbialo en Conexión → GSG).';
+      cierra(p, 'fallo', motivo);
+      throw new Error(motivo);
+    } else cierra(p, 'saltado', 'ya lo era');
     await pausa(pausaMs);
 
     // 2. Los clientes y los motorizados de mentira.
@@ -118,8 +123,9 @@ export function crearGuionDelDia(deps: DepsGuion): GuionDelDia {
     await pausa(pausaMs);
 
     // 3. La lista del dia.
-    p = paso('Preguntándole a GSG su lista del día');
-    const s = await entregas.sincronizar();
+    // GSG (el simulador) la manda; aqui no se le pregunta nada.
+    p = paso('GSG (el simulador) manda su lista del día');
+    const s = await enviarListaDelSimulador(simulador, entregas);
     cierra(p, s.ok ? 'hecho' : 'fallo', s.detalle);
     if (!s.ok) throw new Error(s.detalle);
     await pausa(pausaMs);

@@ -83,6 +83,8 @@ export function manualDelSistema(_modoPedido?: 'gsg' | 'completo'): string {
   return [
     'GSGchat atiende WhatsApp y los pedidos recibidos por API. Todas las cuentas tienen el flujo GSG activo.',
     'POST /api/v1/entregas recibe hasta 600 pedidos. La clave de API, en la cabecera X-API-Key, determina la cuenta. Obligatorios: tracking, empresa, cliente, telefono, metodoPago, montoCobrar. Si faltan, HTTP 400 detalla cliente, tracking y cada campo.',
+    'Los pedidos solo entran cuando GSG los manda (POST /api/v1/entregas). GSGchat nunca le pide nada a GSG: no hay consulta de pendientes, ni botón para traerlos, ni cuadre con su lista. Lo único que GSGchat le manda a GSG es la ubicación (POST a la URL base + la ruta configurada, con X-API-Key) y los demás reportes.',
+    'El primer mensaje a cada cliente es la plantilla de solicitud de ubicación rellenada con los datos que mandó GSG (tracking, empresa, producto, monto...).',
     'Pedidos GSG (/hoy) muestra pedidos, errores, pendientes, historial y reintentos. Tres solicitudes de ubicación como máximo por cliente. Un pin o enlace de Maps válido se registra y se devuelve a GSG como tracking, latitud y longitud.',
     'Chats (/chat) conserva las conversaciones, adjuntos y atención humana. Ubicaciones (/mapa) reúne pines y pedidos.',
     'Asistente IA (/panel#ia): proveedor, modelo, token cifrado, instrucciones y ficha de productos en Conocimiento. Entrenamiento (/entrenamiento) conserva ejemplos y lecciones.',

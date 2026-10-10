@@ -1,6 +1,6 @@
 /**
- * El que mueve las entregas: cuando se sincroniza con GSG, cuando se pide
- * una confirmacion y cuando se le manda un pedido a un motorizado.
+ * El que mueve las entregas: cuando se pide una confirmacion y cuando se le
+ * manda un pedido a un motorizado.
  *
  * Es hermano del motor del reparto y del de la lista, y sigue sus reglas
  * porque el numero es uno solo y WhatsApp lo mira entero:
@@ -14,11 +14,16 @@
  *  3. Con final. Las confirmaciones sin respuesta y los motorizados que no
  *     contestan tienen su tope y pasan a otro o a una persona.
  *
- * Ademas, cada pocos minutos (ajuste "sincronizar cada"), le pide a GSG los
- * pendientes del dia, revisa lo que el reparto dio por perdido y, a la hora
- * del cierre, cierra el dia de ayer. Lo que este fichero NO hace es leer
- * respuestas: eso es de `servicio.alTexto` y `servicio.alUbicacion`, desde
- * el manejador de entrantes.
+ * Ademas, cada minuto revisa lo que el reparto dio por perdido (y las
+ * segundas visitas y las direcciones propuestas) y, a la hora del cierre,
+ * cierra el dia de ayer.
+ *
+ * Lo que este fichero NO hace:
+ *  - Pedirle nada a GSG. Nunca: ni la lista del dia, ni en la primera
+ *    vuelta, ni "por si acaso". Los pedidos llegan cuando GSG los empuja
+ *    (POST /api/v1/entregas) o cuando se cargan en el simulador.
+ *  - Leer respuestas: eso es de `servicio.alTexto` y `servicio.alUbicacion`,
+ *    desde el manejador de entrantes.
  */
 
 import type { Repos } from '../db/repos.js';
@@ -41,15 +46,13 @@ export interface MotorEntregasDeps {
 }
 
 export interface ResultadoTickEntregas {
-  accion: 'nada' | 'confirmacion' | 'propuesta' | 'motorizado' | 'insistencia_motorizado' | 'aviso' | 'incidencia' | 'sincronizacion' | 'cierre';
+  accion: 'nada' | 'confirmacion' | 'propuesta' | 'motorizado' | 'insistencia_motorizado' | 'aviso' | 'incidencia' | 'cierre';
   entregaId?: number;
   motivo?: string;
 }
 
 export interface MotorEntregas {
   tick(): Promise<ResultadoTickEntregas>;
-  /** Sincroniza con GSG si toca (o si se fuerza). */
-  sincronizarSiToca(forzar?: boolean): Promise<boolean>;
   proximoEnvioEn(): number;
   parado(): string | null;
   enHorario(): boolean;
@@ -64,7 +67,6 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
   let opciones: OpcionesMotor = deps.opciones;
   let ultimoEnvio = 0;
   let pausaActual = opciones.pausaMinSegundos * 1000;
-  let ultimaSync = 0;
   let ultimaRevision = 0;
   let ultimoMotivo: string | null = null;
 
@@ -86,20 +88,6 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
     } catch (error) {
       log('no se pudieron leer los ajustes del reparto para las entregas', { detalle: String(error) });
     }
-  }
-
-  async function sincronizarSiToca(forzar = false): Promise<boolean> {
-    const cada = entregas.ajustes().sincronizarCadaMin * 60_000;
-    const t = ahora().getTime();
-    if (!forzar && ultimaSync && t - ultimaSync < cada) return false;
-    ultimaSync = t;
-    try {
-      const r = await entregas.sincronizar();
-      if (!r.ok) log('la sincronización con GSG no salió', { detalle: r.detalle });
-    } catch (error) {
-      log('falló la sincronización con GSG', { detalle: error instanceof Error ? error.message : String(error) });
-    }
-    return true;
   }
 
   const anotarEnvio = () => {
@@ -147,18 +135,14 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
     proximoEnvioEn: () => Math.max(0, ultimoEnvio + pausaEfectiva() - Date.now()),
     parado: () => ultimoMotivo,
     enHorario: () => enHorario(ahora(), opcionesVigentes()),
-    sincronizarSiToca,
 
     async tick() {
       const momento = ahora();
       await refrescar();
 
-      // GSG y el reparto, cada pocos minutos: no dependen del ritmo de envio.
-      if (await sincronizarSiToca()) {
-        // La revision del reparto va pegada a la sincronizacion.
-        ultimaRevision = momento.getTime();
-        await revisar();
-      } else if (momento.getTime() - ultimaRevision > 60_000) {
+      // El reparto, cada minuto (y en la primera vuelta): no depende del
+      // ritmo de envio. A GSG no se le pregunta nada.
+      if (!ultimaRevision || momento.getTime() - ultimaRevision > 60_000) {
         ultimaRevision = momento.getTime();
         await revisar();
       }

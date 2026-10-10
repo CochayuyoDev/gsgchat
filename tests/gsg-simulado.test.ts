@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { crearConexionGsg, TOKEN_SIMULADOR } from '../src/rutas/conexion-gsg.js';
 import { createMemorySettingsRepo, TEST_SETTINGS_KEY } from './fakes.js';
+import { crearEscenarioEntregas } from './escenario-entregas.js';
 
 const TOKEN = 'token-de-prueba';
 
@@ -26,8 +27,8 @@ describe('el simulador de GSG', () => {
 
   it('exige el token y contesta 404 a lo que no conoce', () => {
     const sim = crearGsgSimulado({ token: TOKEN });
-    expect(sim.atender('GET', '/reparto/pendientes', 'otro', undefined).status).toBe(401);
-    expect(sim.atender('GET', '/reparto/pendientes', TOKEN, undefined).status).toBe(200);
+    expect(sim.atender('GET', '/reparto/estado', 'otro', undefined).status).toBe(401);
+    expect(sim.atender('GET', '/reparto/estado', TOKEN, undefined).status).toBe(200);
     expect(sim.atender('POST', '/lo-que-sea', TOKEN, {}).status).toBe(404);
   });
 
@@ -76,10 +77,10 @@ describe('el simulador de GSG', () => {
     const sim = crearGsgSimulado({ token: TOKEN });
     sim.cargarDePrueba();
     sim.modo = 'caido';
-    expect(sim.atender('GET', '/reparto/pendientes', TOKEN, undefined).status).toBe(502);
+    expect(sim.atender('GET', '/reparto/estado', TOKEN, undefined).status).toBe(502);
     sim.modo = 'rechaza';
     expect(sim.atender('POST', '/ubicaciones', TOKEN, { referencia: 'P-1001' }).status).toBe(422);
-    expect(sim.atender('GET', '/reparto/pendientes', TOKEN, undefined).status).toBe(200);
+    expect(sim.atender('GET', '/reparto/estado', TOKEN, undefined).status).toBe(200);
     sim.reiniciar();
     expect(sim.modo).toBe('ok');
     expect(sim.estado().clientes).toEqual([]);
@@ -140,7 +141,7 @@ describe('lo que GSG puede hacer con un pedido ya mandado (espejo de cambios)', 
     const sim = crearGsgSimulado({ token: TOKEN });
     sim.cargarDePrueba();
     sim.modo = 'caido';
-    expect(sim.atender('GET', '/reparto/pendientes', TOKEN, null).status).toBe(502);
+    expect(sim.atender('GET', '/reparto/estado', TOKEN, null).status).toBe(502);
     sim.modo = 'ok';
     const p = sim.pendientes();
     expect(p.cancelados).toHaveLength(0);
@@ -182,23 +183,70 @@ describe('la conexion con GSG desde la pantalla', () => {
     void TOKEN_SIMULADOR;
   });
 
-  it('probar dice en cristiano que paso (token malo, ruta que no existe, todo bien)', async () => {
-    const sim = crearGsgSimulado({ token: 'bueno' });
-    sim.cargarDePrueba();
-    const fetchFalso = (async (entrada: string | URL | Request, init?: RequestInit) => {
-      const url = typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url;
-      const r = sim.atender('GET', url.replace('https://gsg.pe/api', ''), new Headers(init?.headers).get('x-api-key'), undefined);
-      return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'content-type': 'application/json' } });
+  it('probar no llama a GSG: revisa la URL, la ruta y la forma de la clave y explica que los pedidos llegan cuando GSG los manda', async () => {
+    const llamadas: Array<{ metodo: string; url: string }> = [];
+    const fetchEspia = (async (entrada: string | URL | Request, init?: RequestInit) => {
+      llamadas.push({ metodo: init?.method ?? 'GET', url: typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url });
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     }) as typeof fetch;
-    const c = await crearConexionGsg({ settingsRepo: createMemorySettingsRepo(), settingsKeyBase64: TEST_SETTINGS_KEY, config, fetchImpl: fetchFalso });
-    expect((await c.probar({ url: 'https://gsg.pe/api', token: 'malo' })).detalle).toMatch(/rechazó la clave \(error 401\): la API Key de GSG es incorrecta/);
-    // Sin la consulta de pendientes su API responde igual: no es un fallo para enviar ubicaciones.
-    const sinPendientes = await c.probar({ url: 'https://gsg.pe/api/otra', token: 'bueno' });
-    expect(sinPendientes.ok).toBe(true);
-    expect(sinPendientes.detalle).toMatch(/no tiene la consulta \/reparto\/pendientes \(error 404\)/);
-    const ok = await c.probar({ url: 'https://gsg.pe/api', token: 'bueno' });
+    const c = await crearConexionGsg({ settingsRepo: createMemorySettingsRepo(), settingsKeyBase64: TEST_SETTINGS_KEY, config, fetchImpl: fetchEspia });
+    expect((await c.probar({ url: 'gsg.pe/api', token: 'token-bueno-123' })).ok).toBe(false);
+    expect((await c.probar({ url: 'https://gsg.pe/api', token: '' })).detalle).toMatch(/Falta la API Key de GSG/);
+    expect((await c.probar({ url: 'https://gsg.pe/api', token: 'con espacios dentro' })).ok).toBe(false);
+    expect((await c.probar({ url: 'https://gsg.pe/api', token: 'token-bueno-123', rutaUbicacion: '../fuera' })).ok).toBe(false);
+    const ok = await c.probar({ url: 'https://gsg.pe/api', token: 'token-bueno-123', rutaUbicacion: 'v1/gsgchat/location' });
     expect(ok.ok).toBe(true);
-    expect(ok).toMatchObject({ faltaUbicacion: 7, faltaConfirmacion: 9, terminados: 0 });
+    expect(ok.detalle).toMatch(/GSGchat no le pide nada a GSG/);
+    expect(ok.detalle).toContain('POST /api/v1/entregas');
+    expect(ok.detalle).toContain('https://gsg.pe/api/v1/gsgchat/location');
+    await c.conectarReal({ url: 'http://gsg.pe/api', token: 'token-bueno-123', rutaUbicacion: 'v1/gsgchat/location' });
+    expect((await c.probar()).detalle).toMatch(/no usa https/);
+    // Ni una llamada: ni GET ni nada.
+    expect(llamadas).toEqual([]);
+  });
+});
+
+describe('GSGchat nunca le pide nada a GSG', () => {
+  it('con la API real conectada (un fetch falso), el motor de entregas da vueltas durante horas simuladas y «Probar» no hacen ni un GET', async () => {
+    const e = await crearEscenarioEntregas({ supervisor: '51912426667' });
+    try {
+      expect(e.conexionGsg.estado()).toMatchObject({ modo: 'real', conectada: true });
+      // 6 horas en vueltas de 5 minutos, incluida la primera vuelta.
+      for (let i = 0; i < 72; i++) {
+        await e.motorEntregas.tick();
+        e.avanzar(5);
+      }
+      const p1 = await e.api.post<{ ok: boolean }>('/admin/entregas/gsg/probar');
+      expect(p1.status).toBe(200);
+      await e.api.post('/admin/entregas/gsg/probar', { url: 'https://otra.gsg.pe/api', apiKey: 'token-bueno-123', rutaUbicacion: 'v1/gsgchat/location' });
+      expect(e.llamadasAGsg.filter((l) => l.metodo === 'GET')).toEqual([]);
+      expect(e.llamadasAGsg).toEqual([]);
+      // Tampoco a mano: las rutas de sincronizar ya no existen.
+      expect([404, 405]).toContain((await e.api.post('/admin/entregas/sincronizar')).status);
+      expect((await e.api.post('/api/v1/entregas/sincronizar')).status).not.toBe(200);
+      expect(e.llamadasAGsg).toEqual([]);
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('lo que GSG (el simulador) manda entra al momento, en memoria; la ubicación sí sale hacia GSG por POST', async () => {
+    const e = await crearEscenarioEntregas({ supervisor: '51912426667' });
+    try {
+      e.simulador.cargarDePrueba();
+      const r = await e.gsgManda();
+      expect(r.body).toMatchObject({ ok: true, nuevas: 10 });
+      expect((await e.resumen()).cifras.total).toBe(10);
+      e.simulador.cancelar('P-1003', 'prueba');
+      expect((await e.gsgManda()).body).toMatchObject({ ok: true, canceladas: 1 });
+      await e.motorEntregas.tick();
+      await e.contesta('987000001', { pin: { lat: -12.1211, lng: -77.0301 } });
+      await e.despacharAGsg();
+      expect(e.llamadasAGsg.length).toBeGreaterThan(0);
+      expect(e.llamadasAGsg.every((l) => l.metodo === 'POST')).toBe(true);
+    } finally {
+      await e.cerrar();
+    }
   });
 });
 

@@ -2,12 +2,17 @@
  * El sistema de GSG de mentira: para probar el flujo entero sin que GSG
  * tenga API todavia.
  *
+ * GSGchat no le pregunta nada (tampoco al de verdad): lo que se carga en el
+ * simulador entra en el sistema por `enviarListaDelSimulador`, como si GSG lo
+ * empujara, sin red y en memoria.
+ *
  * Se comporta como se espera que se comporte el de verdad, con el contrato
  * de src/rutas/gsg.ts:
  *
  *  - Tiene la lista del dia con tres apartados: a quien **falta pedir la
  *    ubicacion**, a quien **falta confirmar** y quien **ya termino**.
- *    `GET /reparto/pendientes` la devuelve entera.
+ *    `GET /reparto/estado` la ensena (para mirarla desde fuera); GSGchat no
+ *    la lee por red: se la pasa `enviarListaDelSimulador`, en memoria.
  *  - Recibe lo que este sistema le manda: `POST /ubicaciones`,
  *    `POST /confirmaciones`, `POST /entregas` (la hora de llegada),
  *    `POST /incidencias` y `POST /resumenes`.
@@ -30,10 +35,11 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { seguimientoGsgSchema, type SeguimientoGsg } from './seguimiento-gsg.js';
+import { igualSeguro } from '../util/comparar.js';
 import { CLIENTES_DE_PRUEBA, type ClienteDePrueba } from './datos-de-prueba.js';
 import { datosEnvioDeCrudo } from './datos-envio.js';
 import type { DatosEnvio } from './repo.js';
+import type { PendientesGsg, ResultadoSincronizacion, ServicioEntregas } from './servicio.js';
 
 export interface ClienteSimulado {
   referencia: string;
@@ -76,7 +82,7 @@ export interface EstadoSimulador {
 }
 
 export interface GsgSimulado {
-  /** Lo que devuelve GET /reparto/pendientes. */
+  /** La lista del dia con sus apartados (lo que el simulador le manda a GSGchat en memoria). */
   pendientes(): { dia: string; faltaUbicacion: Record<string, unknown>[]; faltaConfirmacion: Record<string, unknown>[]; terminados: Record<string, unknown>[]; cancelados: Record<string, unknown>[] };
   estado(): EstadoSimulador;
   /** Mete clientes en la lista del dia (los que ya estan, se dejan como estan). */
@@ -169,7 +175,6 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
   const ahora = opts.ahora ?? (() => new Date());
   const dia = opts.dia ?? (() => diaEnLima(ahora()));
   const clientes = new Map<string, ClienteSimulado>();
-  const seguimientos = new Map<string, SeguimientoGsg>();
   const recibido: GsgSimulado['recibido'] = [];
   const contadores = { ubicaciones: 0, confirmaciones: 0, entregas: 0, incidencias: 0, resumenes: 0 };
   let llamadas = 0;
@@ -320,7 +325,6 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
 
     reiniciar() {
       clientes.clear();
-      seguimientos.clear();
       recibido.length = 0;
       for (const k of Object.keys(contadores) as Array<keyof typeof contadores>) contadores[k] = 0;
       llamadas = 0;
@@ -333,24 +337,10 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       ultimaLlamadaEn = ahora().toISOString();
       // Sin red: ni siquiera se contesta (status 0; el plugin corta la conexion).
       if (sim.modo === 'sin_red') return { status: 0, body: null };
-      if (token !== opts.token) return { status: 401, body: { error: token === null ? 'Falta la cabecera X-API-Key.' : 'X-API-Key inválida.' } };
+      if (!igualSeguro(token, opts.token)) return { status: 401, body: { error: token === null ? 'Falta la cabecera X-API-Key.' : 'X-API-Key inválida.' } };
       if (sim.modo === 'caido') return { status: 502, body: '<html>502 Bad Gateway</html>' };
       const camino = ruta.replace(/\?.*$/, '').replace(/\/+$/, '');
 
-      if (method === 'POST' && camino === '/reparto/seguimiento') {
-        const leido = seguimientoGsgSchema.safeParse(cuerpo);
-        if (!leido.success) return { status: 400, body: { error: 'Seguimiento de prueba inválido.' } };
-        seguimientos.set(leido.data.tracking, leido.data);
-        return { status: 200, body: { ok: true, tracking: leido.data.tracking } };
-      }
-      if (method === 'GET' && camino.startsWith('/reparto/seguimiento/')) {
-        let tracking;
-        try { tracking = decodeURIComponent(camino.slice('/reparto/seguimiento/'.length)); }
-        catch { return { status: 400, body: { error: 'Tracking inválido.' } }; }
-        const datos = seguimientos.get(tracking);
-        return datos ? { status: 200, body: datos } : { status: 404, body: { error: 'Sin seguimiento de prueba para este tracking.' } };
-      }
-      if (method === 'GET' && camino === '/reparto/pendientes') return { status: 200, body: sim.pendientes() };
       if (method === 'GET' && camino === '/reparto/estado') return { status: 200, body: sim.estado() };
       if (method === 'POST' && camino === '/reparto/cargar') {
         const lista = z.array(clienteSchema).parse((cuerpo as { clientes?: unknown })?.clientes ?? cuerpo);
@@ -448,6 +438,21 @@ export function claveDeCabeceras(headers: Record<string, unknown> | Headers): st
   const valor = headers instanceof Headers ? headers.get('x-api-key') : headers['x-api-key'];
   const v = Array.isArray(valor) ? valor[0] : valor;
   return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+/**
+ * El simulador le manda a GSGchat su lista del dia, como haria GSG empujando
+ * sus pedidos: lo nuevo se crea, lo cambiado se refleja, lo cancelado se
+ * cancela y lo terminado se marca. Sin red: es memoria de este mismo
+ * servidor. En modo «caído» o «sin red» no manda nada (y aqui no se toca
+ * nada: una lista que no llega no cancela ningun pedido).
+ */
+export async function enviarListaDelSimulador(sim: GsgSimulado, entregas: Pick<ServicioEntregas, 'recibirListaGsg' | 'hoy'>): Promise<ResultadoSincronizacion> {
+  if (sim.modo === 'caido' || sim.modo === 'sin_red') {
+    const detalle = `El simulador de GSG está en modo «${sim.modo === 'caido' ? 'caído' : 'sin red'}»: no manda nada y aquí no se toca ningún pedido.`;
+    return { ok: false, detalle, dia: entregas.hoy(), nuevas: 0, actualizadas: 0, ubicacionesPedidas: 0, confirmacionesPendientes: 0, terminadas: 0, lote: null, at: new Date().toISOString() };
+  }
+  return entregas.recibirListaGsg(sim.pendientes() as unknown as PendientesGsg);
 }
 
 /** Cuelga el simulador de este servidor en `prefijo` (p. ej. /simulador/gsg). */

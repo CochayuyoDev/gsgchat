@@ -22,7 +22,7 @@ export const PERMISOS = {
   'pedidos:gestionar': 'Ver y cambiar de estado los pedidos tomados en el chat',
   'ia:entrenar': 'Ensenarle lecciones al asistente de WhatsApp y leerlas (POST/GET /api/v1/ia/lecciones)',
   'entregas:leer': 'Ver los pedidos del día, sus ubicaciones y confirmaciones (GET /api/v1/entregas)',
-  'entregas:gestionar': 'Recibir y gestionar los pedidos y sincronizar con GSG',
+  'entregas:gestionar': 'Recibir y gestionar los pedidos que manda GSG',
   '*': 'Todo, incluida la API interna /admin (como las claves de antes)',
 } as const;
 

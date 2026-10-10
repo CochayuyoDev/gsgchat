@@ -1,9 +1,8 @@
 /**
  * La pantalla "Entregas del dia" habla con esto, y otros sistemas por /api/v1.
  *
- *  GET  /admin/entregas                      todo: cifras, entregas, motorizados, GSG, ultima sincronizacion
+ *  GET  /admin/entregas                      todo: cifras, entregas, motorizados, GSG, ultima lista recibida
  *  GET  /admin/entregas/:id                  una entrega con su bitacora
- *  POST /admin/entregas/sincronizar          pedirle a GSG los pendientes ahora
  *  POST /admin/entregas/ajustes              margen, esperas, intentos, textos (solo admin)
  *  POST /admin/entregas/crear                un pedido a mano
  *  POST /admin/entregas/:id/confirmar        { confirmada: true|false }
@@ -21,11 +20,11 @@
  *  POST /admin/motorizados/:id/ruta/mandar   se la manda por WhatsApp
  *  POST /admin/motorizados/:id/traspasar     { motorizadoId?, descanso? } le quita todo lo que lleva y lo reparte
  *
- *  GET/POST/DELETE /admin/entregas/gsg       la conexion con GSG (real o simulador), POST .../probar
- *  GET /admin/entregas/simulador, POST .../cargar, POST .../cargar-lista, POST .../modo, DELETE /admin/entregas/simulador
+ *  GET/POST/DELETE /admin/entregas/gsg       la conexion con GSG (lo que se le MANDA), POST .../probar
  *
- *  API publica: GET /api/v1/entregas (entregas:leer), POST /api/v1/entregas/sincronizar (entregas:gestionar),
- *  GET /api/v1/motorizados (entregas:leer), POST /api/v1/motorizados (entregas:gestionar).
+ *  API publica: GET /api/v1/entregas (entregas:leer). Los pedidos entran
+ *  cuando GSG los empuja (POST /api/v1/entregas): GSGchat nunca le pide nada
+ *  a GSG, ni la lista del dia ni "por si acaso".
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -76,8 +75,6 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
 
   // Numeros del dia: la lista de GSG numero por numero y las acciones en masa (ver numeros.ts).
   await registerNumerosRoutes(app, { entregas });
-
-  app.post('/admin/entregas/sincronizar', async () => entregas.sincronizar());
 
   app.post('/admin/entregas/ajustes', async (request, reply) => {
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia los ajustes de las entregas.' });
@@ -250,7 +247,7 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
 
   app.post('/admin/entregas/gsg/probar', async (request, reply) => {
     if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede probar desde la pantalla.' });
-    // Solo lectura: un GET sin cuerpo a la consulta de pendientes. No crea ni manda nada.
+    // Sin red: revisa la URL base, la ruta y la forma de la clave. A GSG no se le pide nada.
     const body = z.object({ url: z.string().trim().max(300).optional(), rutaUbicacion: z.string().trim().max(300).optional(), apiKey: z.string().max(500).optional(), token: z.string().max(500).optional() }).parse(request.body ?? {});
     const prueba = body.url ? await conexionGsg.probar({ url: body.url, token: body.apiKey ?? body.token ?? '', rutaUbicacion: body.rutaUbicacion }) : await conexionGsg.probar();
     return { ok: prueba.ok, prueba };
@@ -263,7 +260,6 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     return { dia: r.dia, cifras: r.cifras, entregas: r.entregas.map((e) => ({ id: e.id, referencia: e.referencia, telefono: e.phone, nombre: e.nombre, estado: e.estado, situacion: e.situacion, ubicacion: e.ubicacionEstado, lat: e.lat, lng: e.lng, confirmacion: e.confirmacionEstado, motorizado: e.motorizado, minutosMotorizado: e.minutosMotorizado, minutosAviso: e.minutosAviso, llegaAproxEn: e.llegaAproxAt, avisadoEn: e.avisoEnviadoAt, prioridad: e.prioridad, segundaVisita: e.segundaVisita, visitas: e.visitas, entregadoEn: e.entregadaAt })), gsg: r.gsg ? { modo: r.gsg.modo, conectada: r.gsg.conectada } : null, ultimaSincronizacion: r.ultimaSincronizacion };
   });
 
-  app.post('/api/v1/entregas/sincronizar', { config: { permiso: 'entregas:gestionar' } }, async () => entregas.sincronizar());
 
 
 

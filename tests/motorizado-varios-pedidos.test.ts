@@ -34,7 +34,7 @@ async function armar(pedidos: Array<{ referencia: string; telefono: string; nomb
   const e = await crearEscenarioEntregas({ arranque: hoyALas9() });
   e.simulador.cargar(pedidos.map((p) => ({ ...p, direccion: 'Av. Arequipa 100', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false })));
   for (const m of motorizados) await e.api.post('/admin/motorizados', { telefono: m.telefono, nombre: m.nombre, zona: 'Lima' });
-  await e.api.post('/admin/entregas/sincronizar');
+  await e.gsgManda();
   await e.trabajar();
   // Un pin por cliente, y el motor reparte entre pin y pin (así se sabe en qué orden le llegan).
   for (const [i, tel] of ordenPines.entries()) {
@@ -213,7 +213,7 @@ describe('el cierre fuera del horario de envío', () => {
     try {
       e.simulador.cargar([{ referencia: 'P-5001', telefono: '987000141', nombre: 'Siete Prueba', direccion: 'Av. Arequipa 100', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false }]);
       await e.api.post('/admin/motorizados', { telefono: MOTO, nombre: 'Chesco Prueba', zona: 'Lima' });
-      await e.api.post('/admin/entregas/sincronizar');
+      await e.gsgManda();
       await e.trabajar();
       await e.contesta('987000141', { pin: PIN_LIMA });
       // Sin pasar por el motor: ubicación registrada y todavía sin motorizado.

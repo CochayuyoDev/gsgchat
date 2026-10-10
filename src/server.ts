@@ -73,6 +73,7 @@ import { type ServicioProcesos } from './procesos/servicio.js';
 
 
 import { fijarGsgVigente } from './web/shell.js';
+import { normalizarRuta } from './util/ruta-normalizada.js';
 
 export interface ServerDeps {
   config: Config;
@@ -159,6 +160,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // Los tokens de rastreo van en el path y superan los 100 caracteres del
     // limite por defecto de Fastify, que devolvia 414 en todos los enlaces.
     routerOptions: { maxParamLength: 512 },
+    // Que los ganchos de autorizacion vean la misma ruta que el enrutador
+    // (sin esto, `/%61dmin/...` se saltaba el de /admin). Ver util/ruta-normalizada.ts.
+    rewriteUrl: (req) => normalizarRuta(req.url ?? '/'),
   });
 
   app.addHook('onRequest', async (request, reply) => {

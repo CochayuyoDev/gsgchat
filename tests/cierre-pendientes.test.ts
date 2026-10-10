@@ -1,12 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { consultarSeguimiento, crearCalculadorGoogle, horarioGsgSchema, crearConsultaSeguimiento } from '../src/entregas/seguimiento-gsg.js';
+import { leerSeguimiento, crearCalculadorGoogle, horarioGsgSchema, crearConsultaSeguimiento } from '../src/entregas/seguimiento-gsg.js';
 import { crearPuertoHttp } from '../src/rutas/gsg.js';
 import { datosEnvioDeCrudo, fusionarDatosEnvio } from '../src/entregas/datos-envio.js';
 import { crearEscenarioEntregas } from './escenario-entregas.js';
 import { ubicacionYaRegistrada } from '../src/entregas/ubicacion-unica.js';
 const ahora = new Date('2026-10-07T17:00:00Z');
 const posicion = { lat: -12.12, lng: -77.03, actualizadaAt: ahora.toISOString() };
-const puerto = (datos: unknown, status=200) => crearPuertoHttp({ url: 'https://gsg.example', token: 'key', fetchImpl: (async () => new Response(JSON.stringify(datos), { status })) as typeof fetch });
 
 describe('cierre de pendientes', () => {
   it('PATCH con horario null borra la ventana y cambiarla elimina las fechas antiguas', () => {
@@ -33,7 +32,7 @@ describe('cierre de pendientes', () => {
   it('calcula todos los tramos sin truncar y usa salida futura en el segundo tramo', async () => {
     const paradas = Array.from({length:30}, (_,i) => ({orden:i+1,lat:-12.12-i/1000,lng:-77.03,servicioMinutos:2}));
     const pedir=vi.fn(async () => new Response(JSON.stringify({routes:[{distanceMeters:10000,duration:'600s'}]}))) as unknown as typeof fetch;
-    const r = await consultarSeguimiento(puerto({tracking:'LARGA',posicion,puntoActual:0,puntoCliente:30,paradas}), 'LARGA', crearCalculadorGoogle('key',pedir,()=>ahora), ahora);
+    const r = await leerSeguimiento({tracking:'LARGA',posicion,puntoActual:0,puntoCliente:30,paradas}, 'LARGA', crearCalculadorGoogle('key',pedir,()=>ahora), ahora);
     expect(r?.distancia).toEqual({km:20,minutos:78});
     const cuerpos=vi.mocked(pedir).mock.calls.map(c=>JSON.parse(String(c[1]?.body)));
     expect(cuerpos).toHaveLength(2);
@@ -44,8 +43,8 @@ describe('cierre de pendientes', () => {
   });
   it('acepta índices no consecutivos solo cuando GSG declara la secuencia completa', async () => {
     const ruta={tracking:'GAPS',posicion,puntoActual:2,puntoCliente:10,paradas:[{orden:5,lat:-12.1,lng:-77.1},{orden:10,lat:-12.2,lng:-77.2}]};
-    expect(await consultarSeguimiento(puerto(ruta),'GAPS',undefined,ahora)).toBeNull();
-    expect(await consultarSeguimiento(puerto({...ruta,secuenciaCompleta:true,versionRuta:'v2'}),'GAPS',undefined,ahora)).not.toBeNull();
+    expect(await leerSeguimiento(ruta,'GAPS',undefined,ahora)).toBeNull();
+    expect(await leerSeguimiento({...ruta,secuenciaCompleta:true,versionRuta:'v2'},'GAPS',undefined,ahora)).not.toBeNull();
   });
   it('conserva un horario nocturno con fechas y zona y rechaza fechas imposibles', () => {
     const h={desde:'22:00',hasta:'02:00',fechaDesde:'2026-10-07',fechaHasta:'2026-10-08',zonaHoraria:'America/Lima'};
@@ -54,9 +53,9 @@ describe('cierre de pendientes', () => {
     expect(horarioGsgSchema.safeParse({...h,fechaHasta:'2026-02-30'}).success).toBe(false);
     expect(horarioGsgSchema.safeParse({...h,zonaHoraria:'inventada'}).success).toBe(false);
   });
-  it('distingue errores de autenticación, contrato y GPS en el diagnóstico', async () => {
-    for (const [datos,status,codigo] of [[{},401,'autenticacion'],[{},200,'contrato'],[{tracking:'P',posicion:{...posicion,actualizadaAt:'2026-10-06T17:00:00Z'},puntoActual:0,puntoCliente:1,paradas:[]},200,'gps_antiguo']] as const) {
-      const c=crearConsultaSeguimiento(puerto(datos,status),undefined,()=>ahora);
+  it('distingue seguimiento ausente, contrato y GPS en el diagnóstico (sin llamar a GSG)', async () => {
+    for (const [datos,codigo] of [[undefined,'sin_tracking'],[{},'contrato'],[{tracking:'P',posicion:{...posicion,actualizadaAt:'2026-10-06T17:00:00Z'},puntoActual:0,puntoCliente:1,paradas:[]},'gps_antiguo']] as const) {
+      const c=crearConsultaSeguimiento(()=>datos,undefined,()=>ahora);
       await c.consultar('P');
       expect(c.estado().pedidos[0]?.fallo?.codigo).toBe(codigo);
     }

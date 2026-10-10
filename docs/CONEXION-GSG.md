@@ -11,6 +11,8 @@ Hay dos conexiones y dos claves distintas. No se mezclan.
 
 En las dos, la clave va en la cabecera `X-API-Key`. Nunca va en la URL ni en el cuerpo.
 
+GSGchat **nunca le pide nada a GSG**: ni la lista del día (no existe `GET /reparto/pendientes`), ni de forma automática cada pocos minutos, ni con un botón, ni al probar la conexión, ni para verificar el contrato o cerrar el día. Los pedidos entran solo cuando GSG los manda a `POST /api/v1/entregas`. El primer mensaje a cada cliente es la plantilla de solicitud de ubicación rellenada con los datos que mandó GSG.
+
 ## Conexión saliente (GSGchat → GSG)
 
 Tres campos, en Conexión (o en el `.env`):
@@ -34,9 +36,10 @@ Tras guardar, la clave solo se ve enmascarada (`••••` y los últimos 4).
 
 ### Prueba de conexión
 
-«Probar» hace un `GET` sin cuerpo a `<base>/reparto/pendientes` con `X-API-Key`. Es de solo lectura:
-no crea pedidos ni manda ubicaciones. Un 401 es «la API Key de GSG es incorrecta», un 403 «la API Key
-de GSG no tiene permisos». Un 404 significa que GSG responde pero no tiene esa consulta, que no hace falta para enviar ubicaciones.
+«Probar» no hace ninguna llamada a GSG. Revisa sin red que la URL base y la ruta sean válidas (las mismas
+reglas de arriba) y que la API Key tenga buena forma (sin espacios, al menos 8 caracteres), y explica el
+modelo: GSG manda los pedidos a `POST /api/v1/entregas` y GSGchat le manda la ubicación (`POST` a base + ruta,
+con `X-API-Key`) y los demás reportes. Si GSG rechaza la clave (401/403), se ve en la cola de reportes.
 
 ### Cola de reportes
 

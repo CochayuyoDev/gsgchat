@@ -30,7 +30,7 @@ describe('un cliente con dos pedidos el mismo día', () => {
       { referencia: 'D-1', telefono: DORA, nombre: 'Dora Díaz', direccion: 'Av. Brasil 1200', distrito: 'Jesús María', faltaUbicacion: true, faltaConfirmacion: true },
       { referencia: 'D-2', telefono: DORA, nombre: 'Dora Díaz', direccion: 'Av. Brasil 1200', distrito: 'Jesús María', faltaUbicacion: true, faltaConfirmacion: true },
     ]);
-    const s = await e.api.post<{ nuevas: number }>('/admin/entregas/sincronizar');
+    const s = await e.gsgManda();
     expect(s.body.nuevas).toBe(2);
     await e.trabajar();
   });

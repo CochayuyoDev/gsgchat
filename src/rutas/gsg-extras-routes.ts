@@ -15,6 +15,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from './conexion-gsg.js';
 import type { GsgSimulado } from '../entregas/gsg-simulado.js';
+import { igualSeguro } from '../util/comparar.js';
 
 export interface DepsGsgExtrasRoutes {
   conexion: ServicioConexionGsg;
@@ -44,10 +45,6 @@ export function resultadoEnPalabras(status: number, cuerpo: unknown): string {
   if (cuenta(c.creadas) !== null) return `creados ${cuenta(c.creadas)}, repetidos ${cuenta(c.repetidas) ?? 0}, descartados ${cuenta(c.descartadas) ?? 0}`;
   if (detalle) return detalle;
   if (status === 201) return 'creado';
-  const n = (x: unknown) => (Array.isArray(x) ? x.length : null);
-  if (n(c.faltaUbicacion) !== null || n(c.faltaConfirmacion) !== null) {
-    return `respondió: falta ubicación ${n(c.faltaUbicacion) ?? 0} · falta confirmar ${n(c.faltaConfirmacion) ?? 0} · terminados ${n(c.terminados) ?? 0}`;
-  }
   return 'bien';
 }
 
@@ -62,11 +59,6 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
   const extras = conexion.extras;
   if (deps.entregasDelDia) extras.usarEntregas(deps.entregasDelDia);
 
-  // Lo que GSG contesta pasa por el observador: apunta lo que no se puede usar.
-  conexion.observar(async (cuerpo) => {
-    await extras.observarPendientes(cuerpo);
-  });
-
   const esLlamadaDeGsg = (url: string) => url.startsWith(`${RUTA_SIMULADOR}/`) || url === RUTA_SIMULADOR || url.startsWith('/api/v1/entregas');
 
   // Gancho 1: el token caducable vale para el simulador.
@@ -78,7 +70,7 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
       request.gsgQuien = 'sin X-API-Key';
       return;
     }
-    if (token === TOKEN_SIMULADOR) {
+    if (igualSeguro(token, TOKEN_SIMULADOR)) {
       request.gsgQuien = 'este servidor';
       return;
     }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { analizarNumeracion, tieneNumeracion, pareceDireccion } from '../src/entregas/direccion-escrita.js';
 import { crearGeocodificadorGoogle } from '../src/entregas/geocodificar.js';
-import { consultarSeguimiento, crearCalculadorGoogle, textoSeguimiento } from '../src/entregas/seguimiento-gsg.js';
+import { leerSeguimiento, crearCalculadorGoogle, textoSeguimiento } from '../src/entregas/seguimiento-gsg.js';
 import { datosEnvioDeCrudo } from '../src/entregas/datos-envio.js';
 import { crearPuertoHttp } from '../src/rutas/gsg.js';
 import { crearEscenarioEntregas } from './escenario-entregas.js';
@@ -70,21 +70,16 @@ describe('GSG externo y recorrido de Google', () => {
     const gsg = crearPuertoHttp({ url: 'https://gsg.example', token: '', fetchImpl: pedir as typeof fetch });
     expect(gsg.conectado()).toBe(false);
     expect((await gsg.enviar('ubicacion',{ tracking: 'GSG-1', lat: -12, lng: -77 })).ok).toBe(false);
-    expect((await gsg.consultar('/reparto/pendientes')).ok).toBe(false);
     expect(pedir).not.toHaveBeenCalled();
   });
-  it('consulta por tracking con X-API-Key y usa todas las paradas en orden', async () => {
-    const gsgFetch = vi.fn(async () => new Response(JSON.stringify(ruta))) as unknown as typeof fetch;
-    const gsg = crearPuertoHttp({ url: 'https://gsg.example/api/', token: 'gsg-key', fetchImpl: gsgFetch });
+  it('lee un seguimiento recibido sin llamar a GSG y usa todas las paradas en orden', async () => {
     const googleFetch = vi.fn(async () => new Response(JSON.stringify({ routes: [{ distanceMeters: 20000, duration: '1200s' }] }))) as unknown as typeof fetch;
-    const r = await consultarSeguimiento(gsg, 'GSG-1', crearCalculadorGoogle('google-key', googleFetch), ahora);
+    const r = await leerSeguimiento(ruta, 'GSG-1', crearCalculadorGoogle('google-key', googleFetch), ahora);
     expect(r?.distancia).toEqual({ km: 20, minutos: 24 });
     expect(textoSeguimiento('GSG-1',r!)).toContain('punto 2');
     expect(textoSeguimiento('GSG-1',r!)).toContain('punto 10');
-    const [url, init] = vi.mocked(gsgFetch).mock.calls[0]!;
-    expect(String(url)).toBe('https://gsg.example/api/reparto/seguimiento/GSG-1');
-    expect(new Headers(init?.headers).get('x-api-key')).toBe('gsg-key');
-    expect(new Headers(init?.headers).get('authorization')).toBeNull();
+    // La única red es Google: a GSG no se le pide nada.
+    expect(vi.mocked(googleFetch).mock.calls.every((c) => String(c[0]).startsWith('https://routes.googleapis.com/'))).toBe(true);
     const body = JSON.parse(String(vi.mocked(googleFetch).mock.calls[0]![1]?.body));
     expect(body.intermediates).toHaveLength(7);
     expect(body.optimizeWaypointOrder).toBe(false);
@@ -92,8 +87,7 @@ describe('GSG externo y recorrido de Google', () => {
   it('no calcula con posiciones antiguas, otro tracking ni paradas fuera de orden', async () => {
     for (const bad of [{ ...ruta, tracking: 'OTRO' }, { ...ruta, posicion: { ...ruta.posicion, actualizadaAt: '2026-10-06T17:00:00Z' } }, { ...ruta, paradas: [...ruta.paradas].reverse() }]) {
       const calcular = vi.fn();
-      const gsg = crearPuertoHttp({ url: 'https://gsg.example', token: 'key', fetchImpl: (async () => new Response(JSON.stringify(bad))) as typeof fetch });
-      expect(await consultarSeguimiento(gsg,'GSG-1',calcular,ahora)).toBeNull();
+      expect(await leerSeguimiento(bad,'GSG-1',calcular,ahora)).toBeNull();
       expect(calcular).not.toHaveBeenCalled();
     }
   });

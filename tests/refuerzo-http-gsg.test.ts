@@ -11,10 +11,9 @@ describe('protecciones del transporte GSG', () => {
     expect((fetchImpl as any).mock.calls[0][1].headers).not.toHaveProperty('Idempotency-Key');
   });
 
-  it('bloquea redirecciones en lectura y escritura', async () => {
+  it('bloquea redirecciones en los envíos (no hay lecturas: a GSG no se le pide nada)', async () => {
     const pedir = vi.fn(async () => new Response('{}'));
     const p = crearPuertoHttp({ url: 'https://gsg.example', token: 'secret', fetchImpl: pedir as typeof fetch });
-    await p.consultar('/reparto/pendientes');
     await p.enviar('ubicacion', { tracking: 'P', lat: -12, lng: -77 });
     for (const llamada of pedir.mock.calls as unknown as Array<[string, RequestInit]>) expect(llamada[1].redirect).toBe('error');
   });
@@ -28,7 +27,6 @@ describe('protecciones del transporte GSG', () => {
     await new Promise<void>(resolve => origen.listen(0, '127.0.0.1', resolve));
     try {
       const p = crearPuertoHttp({ url: `http://127.0.0.1:${(origen.address() as AddressInfo).port}`, token: 'secreto-local' });
-      expect(await p.consultar('/pendientes')).toMatchObject({ ok: false });
       expect(await p.enviar('ubicacion', { tracking: 'P', lat: -12, lng: -77 })).toMatchObject({ ok: false, reintentable: false });
       expect(recibidos).toBe(0);
     } finally {
@@ -41,8 +39,6 @@ describe('protecciones del transporte GSG', () => {
     const token = 'CLAVE_PRIVADA_DE_PRUEBA';
     const p = crearPuertoHttp({ url: 'https://gsg.example', token, fetchImpl: (async () => new Response('x'.repeat(190) + token, { status: 400 })) as typeof fetch });
     const envio = await p.enviar('ubicacion', { tracking: 'P', lat: -12, lng: -77 });
-    const consulta = await p.consultar('/reparto/pendientes');
     expect(envio.error).not.toContain('CLAVE_');
-    expect(consulta.error).not.toContain('CLAVE_');
   });
 });

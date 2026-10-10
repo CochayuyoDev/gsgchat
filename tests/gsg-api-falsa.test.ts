@@ -3,9 +3,9 @@
  * (scripts/gsg-falso.ts) conectada como «API real»: servidor aparte, con su
  * token, por la red.
  *
- *  1. Por la API se pide la lista: los que falta pedirles la ubicación y los
- *     que falta confirmar. Cada uno se identifica por su WhatsApp + su código
- *     de tracking.
+ *  1. GSG manda la lista (GSGchat nunca se la pide): los que falta pedirles
+ *     la ubicación y los que falta confirmar. Cada uno se identifica por su
+ *     WhatsApp + su código de tracking.
  *  2. Primer mensaje: pedir la ubicación, o preguntar SÍ/NO para confirmar.
  *  3. Llega la ubicación: gracias, con el aviso de que un cambio tiene que
  *     ser antes de la 1:00 PM para tenerlo en cuenta el mismo día.
@@ -69,15 +69,16 @@ describe('GSG por la API: pedir o confirmar la ubicación, gracias y cambio hast
     await gsg?.cerrar();
   });
 
-  it('1. pide la lista por la API, con su token, y cada cliente queda identificado por WhatsApp + tracking', async () => {
-    const s = (await e.api.post<{ ok: boolean; nuevas: number }>('/admin/entregas/sincronizar')).body;
+  it('1. GSG manda la lista (sin que se le pida) y cada cliente queda identificado por WhatsApp + tracking', async () => {
+    const s = await e.entregas.recibirListaGsg(gsg.lista as never);
     expect(s).toMatchObject({ ok: true, nuevas: 3 });
-    expect(gsg.llamadas.some((c) => c.metodo === 'GET' && c.ruta === '/reparto/pendientes' && c.apiKey === 'token-de-gsg' && c.autorizacion === undefined)).toBe(true);
+    // A la API de GSG no se le hizo ninguna lectura.
+    expect(gsg.llamadas.filter((c) => c.metodo === 'GET')).toEqual([]);
     expect(await e.entrega('GSG-A-1001')).toMatchObject({ phone: `51${ANA}`, ubicacionEstado: 'pendiente' });
     expect(await e.entrega('GSG-A-1002')).toMatchObject({ phone: `51${BETO}`, ubicacionEstado: 'pendiente' });
     expect(await e.entrega('GSG-A-2001')).toMatchObject({ phone: `51${CARLA}`, confirmacionEstado: 'pendiente' });
     // Otra vez la misma lista: no duplica.
-    expect((await e.api.post<{ nuevas: number }>('/admin/entregas/sincronizar')).body.nuevas).toBe(0);
+    expect((await e.entregas.recibirListaGsg(gsg.lista as never)).nuevas).toBe(0);
   });
 
   it('2. primer mensaje: a los de «falta ubicación» se les pide el pin; a los de «falta confirmar», SÍ/NO', async () => {

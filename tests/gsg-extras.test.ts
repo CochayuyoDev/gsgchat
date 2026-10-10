@@ -6,8 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { crearGsgExtras, estadoDeToken, revisarPedidoGsg, verificarCuerpoPendientes, BITACORA_MAX } from '../src/rutas/gsg-extras.js';
-import type { PuertoGsg, ResultadoConsulta } from '../src/rutas/gsg.js';
+import { crearGsgExtras, estadoDeToken, revisarPedidoGsg, BITACORA_MAX } from '../src/rutas/gsg-extras.js';
 import { createMemorySettingsRepo, TEST_SETTINGS_KEY } from './fakes.js';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -16,15 +15,6 @@ import { crearConexionGsg, RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexio
 import { registerGsgExtrasRoutes, resultadoEnPalabras } from '../src/rutas/gsg-extras-routes.js';
 
 const pedidoBueno = { referencia: 'P-1', telefono: '987654321', nombre: 'Ana', direccion: 'Av. Larco 123', distrito: 'Miraflores' };
-
-function puertoFalso(respuesta: () => ResultadoConsulta<unknown>, conectado = true): PuertoGsg {
-  return {
-    conectado: () => conectado,
-    descripcion: () => 'falso',
-    enviar: async () => ({ ok: true }),
-    consultar: async <T,>() => respuesta() as ResultadoConsulta<T>,
-  };
-}
 
 describe('revisar cada pedido de GSG', () => {
   it('acepta lo bien formado y explica en palabras lo que no', () => {
@@ -38,41 +28,34 @@ describe('revisar cada pedido de GSG', () => {
   });
 });
 
-describe('el verificador del contrato', () => {
-  it('dice campo por campo qué falta, qué viene raro y qué sobra', () => {
-    const v = verificarCuerpoPendientes({
-      dia: '21/09/2026',
-      faltaUbicacion: [{ ...pedidoBueno, color: 'rojo' }, { referencia: 'P-2', telefono: '999', urgente: 'si' }],
-      terminados: [{ referencia: 'P-9' }, {}],
-    });
-    expect(v.ok).toBe(false);
-    const de = (donde: string) => v.hallazgos.filter((h) => h.donde.startsWith(donde));
-    expect(v.hallazgos.find((h) => h.donde === 'dia')?.tipo).toBe('formato');
-    expect(v.hallazgos.find((h) => h.donde === 'faltaConfirmacion')?.tipo).toBe('falta');
-    expect(de('faltaUbicacion[0] (P-1).color')[0]?.tipo).toBe('sobra');
-    expect(de('faltaUbicacion[1] (P-2)').some((h) => h.tipo === 'formato' && /teléfono/.test(h.detalle))).toBe(true);
-    expect(de('faltaUbicacion[1] (P-2).urgente')[0]?.detalle).toMatch(/true\/false/);
-    expect(de('terminados[1]')[0]?.tipo).toBe('falta');
-    expect(v.resumen).toMatch(/problema/);
-  });
-
-  it('con un cuerpo perfecto, se cumple', () => {
-    const v = verificarCuerpoPendientes({ dia: '2026-09-21', faltaUbicacion: [pedidoBueno], faltaConfirmacion: [{ ...pedidoBueno, referencia: 'P-3', lat: -12.1, lng: -77.03 }], terminados: [] });
-    expect(v.ok).toBe(true);
-    expect(v.resumen).toMatch(/se cumple/);
-    expect(v.hallazgos.every((h) => h.tipo === 'ok')).toBe(true);
-  });
-
-  it('una respuesta que no es un objeto se explica', () => {
-    expect(verificarCuerpoPendientes([]).ok).toBe(false);
-    expect(verificarCuerpoPendientes('hola').resumen).toMatch(/objeto JSON/);
+describe('el verificador del contrato: solo con lo que GSG nos mandó, sin llamarle', () => {
+  it('sin nada recibido lo dice; con llamadas aceptadas se cumple; un 400, un 401 o un descarte son problemas', async () => {
+    const s = await crearGsgExtras({ settingsRepo: createMemorySettingsRepo() });
+    const nada = await s.verificarContrato();
+    expect(nada.ok).toBe(false);
+    expect(nada.resumen).toMatch(/no ha mandado ningún pedido/);
+    await s.anotarLlamada({ que: 'POST /api/v1/entregas', status: 201, resultado: 'creados 2, repetidos 0, descartados 0', quien: 'clave de API «GSG»' });
+    await s.anotarLlamada({ que: 'GET /api/v1/entregas/P-1', status: 200, resultado: 'bien', quien: 'clave de API «GSG»' });
+    const bien = await s.verificarContrato();
+    expect(bien.ok).toBe(true);
+    expect(bien.resumen).toMatch(/se cumple/);
+    expect(s.ultimaVerificacion()?.at).toBe(bien.at);
+    await s.anotarLlamada({ que: 'POST /api/v1/entregas', status: 400, resultado: 'rechazada: El pedido 1 no se entiende', quien: 'clave de API «GSG»' });
+    await s.anotarLlamada({ que: 'PATCH /api/v1/entregas/P-1', status: 401, resultado: 'rechazada: clave inválida', quien: 'sin token' });
+    await s.observarPendientes({ faltaUbicacion: [{ referencia: 'P-MAL', telefono: '12' }], faltaConfirmacion: [] });
+    const mal = await s.verificarContrato();
+    expect(mal.ok).toBe(false);
+    expect(mal.resumen).toMatch(/3 problema/);
+    expect(mal.hallazgos.some((h) => h.tipo === 'formato' && h.donde.startsWith('POST /api/v1/entregas'))).toBe(true);
+    expect(mal.hallazgos.some((h) => h.tipo === 'falta' && h.donde.startsWith('PATCH'))).toBe(true);
+    expect(mal.hallazgos.some((h) => h.donde === 'pedido P-MAL' && /teléfono inválido/.test(h.detalle))).toBe(true);
   });
 });
 
 describe('los tokens del simulador, los descartes, la bitácora y el cuadre (servicio)', () => {
   it('los descartes de hoy se guardan con su motivo y no se repiten en cada consulta', async () => {
     const settingsRepo = createMemorySettingsRepo();
-    const s = await crearGsgExtras({ settingsRepo, puerto: () => puertoFalso(() => ({ ok: true, cuerpo: {} })) });
+    const s = await crearGsgExtras({ settingsRepo });
     const cuerpo = { faltaUbicacion: [pedidoBueno, { referencia: 'P-MAL', telefono: '12' }], faltaConfirmacion: [{ telefono: '987654321' }] };
     expect(await s.observarPendientes(cuerpo)).toBe(2);
     expect(await s.observarPendientes(cuerpo)).toBe(2);
@@ -81,28 +64,14 @@ describe('los tokens del simulador, los descartes, la bitácora y el cuadre (ser
     expect(d.lista.map((x) => x.referencia)).toEqual(['P-MAL', '(sin referencia, el n.º 1 de faltaConfirmacion)']);
     expect(d.lista[0]?.motivo).toMatch(/teléfono inválido/);
     // Sobrevive a un reinicio: se lee de settings.
-    const s2 = await crearGsgExtras({ settingsRepo, puerto: () => puertoFalso(() => ({ ok: true, cuerpo: {} })) });
+    const s2 = await crearGsgExtras({ settingsRepo });
     expect(s2.descartesDeHoy().lista).toHaveLength(2);
-  });
-
-  it('el verificador usa la conexión vigente y explica un 401 o un 404', async () => {
-    let respuesta: ResultadoConsulta<unknown> = { ok: false, status: 401, error: 'Unauthorized' };
-    const s = await crearGsgExtras({ settingsRepo: createMemorySettingsRepo(), puerto: () => puertoFalso(() => respuesta) });
-    expect((await s.verificarContrato()).resumen).toMatch(/rechazó la clave \(error 401\): la API Key de GSG es incorrecta/);
-    respuesta = { ok: false, status: 404, error: 'Not found' };
-    expect((await s.verificarContrato()).resumen).toMatch(/error 404: no tiene la ruta/);
-    respuesta = { ok: true, cuerpo: { dia: '2026-09-21', faltaUbicacion: [], faltaConfirmacion: [] } };
-    const v = await s.verificarContrato();
-    expect(v.ok).toBe(true);
-    expect(s.ultimaVerificacion()?.at).toBe(v.at);
-    const sinConexion = await crearGsgExtras({ settingsRepo: createMemorySettingsRepo(), puerto: () => puertoFalso(() => respuesta, false) });
-    expect((await sinConexion.verificarContrato()).resumen).toMatch(/No hay conexión/);
   });
 
   it('un token se ve una vez, se guarda como hash, caduca y se anula', async () => {
     let reloj = new Date('2026-09-21T15:00:00Z');
     const settingsRepo = createMemorySettingsRepo();
-    const s = await crearGsgExtras({ settingsRepo, puerto: () => puertoFalso(() => ({ ok: true, cuerpo: {} })), ahora: () => reloj });
+    const s = await crearGsgExtras({ settingsRepo, ahora: () => reloj });
     const { token, registro } = await s.crearTokenSimulador({ nombre: 'Equipo GSG', dias: 2 });
     expect(token).toMatch(/^gsgsim_/);
     expect(registro.pista).toBe(token.slice(-4));
@@ -122,11 +91,9 @@ describe('los tokens del simulador, los descartes, la bitácora y el cuadre (ser
     expect(await s.resolverTokenSimulador(t2)).toBeNull();
   });
 
-  it('la bitácora guarda las últimas 50 y el cuadre compara con terminados', async () => {
-    const terminados = [{ referencia: 'P-1' }, { referencia: 'P-2' }, { referencia: 'P-7' }];
+  it('la bitácora guarda las últimas 50 y el cuadre dice, solo con lo de aquí, qué sigue abierto', async () => {
     const s = await crearGsgExtras({
       settingsRepo: createMemorySettingsRepo(),
-      puerto: () => puertoFalso(() => ({ ok: true, cuerpo: { terminados } })),
       entregasDelDia: async () => [
         { referencia: 'P-1', estado: 'entregada' },
         { referencia: 'P-2', estado: 'cancelada' },
@@ -138,13 +105,12 @@ describe('los tokens del simulador, los descartes, la bitácora y el cuadre (ser
     expect(s.bitacora()).toHaveLength(BITACORA_MAX);
     expect(s.bitacora()[0]?.que).toBe(`GET /x/${BITACORA_MAX + 4}`);
     const c = await s.cuadrar('2026-09-21');
-    expect(c).toMatchObject({ ok: false, terminadosGsg: 3, cerradasAqui: 3, coinciden: 2, faltanEnGsg: ['P-3'], sobranEnGsg: ['P-7'] });
-    expect(c.resumen).toMatch(/No cuadra/);
+    expect(c).toMatchObject({ ok: false, total: 4, cerradasAqui: 3, abiertas: ['P-4'] });
+    expect(c.resumen).toMatch(/Quedan 1 de 4/);
     expect(s.ultimoCuadre()?.dia).toBe('2026-09-21');
   });
 
   it('cada llamada se cuenta en palabras', () => {
-    expect(resultadoEnPalabras(200, { faltaUbicacion: [1, 2], faltaConfirmacion: [], terminados: [3] })).toBe('respondió: falta ubicación 2 · falta confirmar 0 · terminados 1');
     expect(resultadoEnPalabras(201, { creadas: 3, repetidas: 1, descartadas: [{}] })).toBe('creados 3, repetidos 1, descartados 1');
     expect(resultadoEnPalabras(401, { error: 'token inválido' })).toBe('rechazada: token inválido');
     expect(resultadoEnPalabras(404, {})).toBe('rechazada: ruta desconocida');
@@ -172,7 +138,7 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
   it('un pedido de GSG con teléfono inválido queda a la vista en /admin/gsg', async () => {
     e.simulador.cargarDePrueba();
     e.simulador.cargar([{ referencia: 'P-ROTO', telefono: '123456', nombre: 'Sin número' }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     const r = await e.api.get<{ descartes: { lista: Array<{ referencia: string; motivo: string }> }; conSimulador: boolean; estado: { modo: string } }>('/admin/gsg');
     expect(r.status).toBe(200);
     expect(r.body.conSimulador).toBe(true);
@@ -180,16 +146,20 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
     expect(r.body.descartes.lista.find((d) => d.referencia === 'P-ROTO')?.motivo).toMatch(/teléfono inválido/);
   });
 
-  it('el verificador y el cuadre responden con el simulador', async () => {
+  it('el verificador y el cuadre responden sin llamar a GSG', async () => {
     const v = await e.app.inject({ method: 'POST', url: '/admin/gsg/verificar-contrato', headers: admin, payload: {} });
     expect(v.statusCode).toBe(200);
     const cuerpo = v.json() as { ok: boolean; verificacion: { hallazgos: Array<{ donde: string; tipo: string }> } };
     // P-ROTO tiene el teléfono mal: el verificador lo señala, sin crear nada.
     expect(cuerpo.ok).toBe(false);
     expect(cuerpo.verificacion.hallazgos.some((h) => h.donde.includes('P-ROTO') && h.tipo === 'formato')).toBe(true);
-    const c = await e.api.get<{ cuadre: { ok: boolean; dia: string } }>('/admin/gsg/cuadre');
+    const c = await e.api.get<{ cuadre: { ok: boolean; dia: string; abiertas: string[] } }>('/admin/gsg/cuadre');
     expect(c.status).toBe(200);
-    expect(c.body.cuadre.ok).toBe(true);
+    // Los pedidos de prueba siguen vivos: el día no está cerrado.
+    expect(c.body.cuadre.ok).toBe(false);
+    expect(c.body.cuadre.abiertas.length).toBeGreaterThan(0);
+    // Ni el verificador ni el cuadre le hicieron ninguna llamada a GSG.
+    expect(e.llamadasAGsg.filter((l) => l.metodo === 'GET')).toEqual([]);
     const nadie = await e.app.inject({ method: 'POST', url: '/admin/gsg/verificar-contrato', headers: { authorization: 'Bearer nada' }, payload: {} });
     expect(nadie.statusCode).toBe(401);
   });
@@ -233,20 +203,20 @@ describe('el token del simulador vale desde fuera (servidor mínimo con el simul
     const creado = await app.inject({ method: 'POST', url: '/admin/gsg/tokens-simulador', headers: admin, payload: { nombre: 'Equipo GSG', dias: 5 } });
     expect(creado.statusCode, creado.body).toBe(201);
     const { token, registro } = creado.json() as { token: string; registro: { id: string } };
-    const ok = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { 'x-api-key': token } });
+    const ok = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { 'x-api-key': token } });
     expect(ok.statusCode, ok.body).toBe(200);
-    expect((ok.json() as { faltaUbicacion: unknown[] }).faltaUbicacion.length).toBeGreaterThan(0);
-    const malo = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { 'x-api-key': 'gsgsim_inventado' } });
+    expect((ok.json() as { faltaUbicacion: number }).faltaUbicacion).toBeGreaterThan(0);
+    const malo = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { 'x-api-key': 'gsgsim_inventado' } });
     expect(malo.statusCode).toBe(401);
     expect((malo.json() as { error: string }).error).toMatch(/caducó o fue anulado/);
-    const sinToken = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes` });
+    const sinToken = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado` });
     expect(sinToken.statusCode).toBe(401);
     expect(await app.inject({ method: 'DELETE', url: `/admin/gsg/tokens-simulador/${registro.id}`, headers: { 'x-prueba-admin': '1' } }).then((r) => r.statusCode)).toBe(200);
-    const despues = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/pendientes`, headers: { 'x-api-key': token } });
+    const despues = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { 'x-api-key': token } });
     expect(despues.statusCode).toBe(401);
     const r = (await app.inject({ method: 'GET', url: '/admin/gsg' })).json() as { bitacora: Array<{ que: string; status: number; quien: string; resultado: string }>; tokens: Array<{ estado: string; usos: number }> };
-    expect(r.bitacora[0]).toMatchObject({ que: `GET ${RUTA_SIMULADOR}/reparto/pendientes`, status: 401 });
-    expect(r.bitacora.find((x) => x.status === 200 && x.quien.includes('Equipo GSG'))?.resultado).toMatch(/respondió: falta ubicación/);
+    expect(r.bitacora[0]).toMatchObject({ que: `GET ${RUTA_SIMULADOR}/reparto/estado`, status: 401 });
+    expect(r.bitacora.find((x) => x.status === 200 && x.quien.includes('Equipo GSG'))).toBeTruthy();
     expect(r.bitacora.find((x) => x.quien === 'sin X-API-Key')?.status).toBe(401);
     expect(r.tokens[0]).toMatchObject({ estado: 'anulado', usos: 1 });
     const sinPermiso = await app.inject({ method: 'POST', url: '/admin/gsg/tokens-simulador', payload: { nombre: 'x' } });
@@ -285,7 +255,7 @@ describe('las pruebas del espejo de cambios desde la pantalla (cancelar uno / ca
     expect(String(c!.motivoCancelacion)).toContain('Prueba');
   });
 
-  it('cambia la dirección de uno y la lista lo devuelve con la nueva; el verificador no lo cuenta como campo que sobra', async () => {
+  it('cambia la dirección de uno y la lista lo devuelve con la nueva', async () => {
     const r = await app.inject({ method: 'POST', url: '/admin/gsg/simulador/cambiar-uno', payload: {} });
     expect(r.statusCode).toBe(200);
     const { referencia, direccion, distrito } = r.json() as { referencia: string; direccion: string; distrito: string };
@@ -294,7 +264,5 @@ describe('las pruebas del espejo de cambios desde la pantalla (cancelar uno / ca
     const c = [...p.faltaUbicacion, ...p.faltaConfirmacion].find((x) => x.referencia === referencia)!;
     expect(c.direccion).toBe(direccion);
     expect(c.distrito).toBe(distrito);
-    const v = verificarCuerpoPendientes({ dia: '2026-09-21', faltaUbicacion: [{ referencia: 'X-1', telefono: '987000001', cancelado: true, motivoCancelacion: 'anulado' }], faltaConfirmacion: [], terminados: [] });
-    expect(v.hallazgos.filter((h) => h.tipo === 'sobra')).toHaveLength(0);
   });
 });

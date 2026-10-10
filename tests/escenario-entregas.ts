@@ -3,7 +3,8 @@
  *
  * Lo que se prueba es el flujo entero con el servidor real:
  *
- *   GSG (simulado) dice quién falta ubicación y quién falta confirmar
+ *   GSG (simulado) manda quién falta ubicación y quién falta confirmar
+ *     (`gsgManda()`: en memoria, como si empujara; GSGchat nunca le pide nada)
  *     → el reparto pide la ubicación, este módulo pide la confirmación
  *     → los clientes contestan (pin, "sí", "no", "mañana", cosas raras)
  *     → con las dos cosas, el pin va a un motorizado (otros diez números)
@@ -28,8 +29,8 @@ import { despacharReportes, type DespachoResumen } from '../src/rutas/gsg.js';
 import { crearConexionGsg, type ServicioConexionGsg } from '../src/rutas/conexion-gsg.js';
 import { cargarLote } from '../src/rutas/cargar.js';
 import { PLANES } from '../src/rutas/telefono.js';
-import { crearGsgSimulado, type GsgSimulado } from '../src/entregas/gsg-simulado.js';
-import { crearServicioEntregas, type ServicioEntregas, type FilaEntrega, type ResumenEntregas } from '../src/entregas/servicio.js';
+import { crearGsgSimulado, enviarListaDelSimulador, type GsgSimulado } from '../src/entregas/gsg-simulado.js';
+import { crearServicioEntregas, type ServicioEntregas, type FilaEntrega, type ResumenEntregas, type ResultadoSincronizacion } from '../src/entregas/servicio.js';
 import { crearMotorEntregas, type MotorEntregas, type ResultadoTickEntregas } from '../src/entregas/motor.js';
 import type { LectorIA } from '../src/entregas/interpretar.js';
 import type { Geocodificador } from '../src/entregas/geocodificar.js';
@@ -108,6 +109,14 @@ export interface EscenarioEntregas {
   resumen(): Promise<ResumenEntregas>;
   /** Vacía la cola de reportes contra el simulador. */
   despacharAGsg(): Promise<DespachoResumen>;
+  /**
+   * GSG (el simulador) le manda a GSGchat su lista del día, en memoria, como
+   * si la empujara. Es la única forma en que entran sus pedidos: GSGchat
+   * nunca se la pide. Devuelve lo mismo que devolvía la antigua sincronización.
+   */
+  gsgManda(): Promise<RespuestaApi<ResultadoSincronizacion>>;
+  /** Cada llamada HTTP que GSGchat le hizo a la API (falsa) de GSG, en orden. */
+  llamadasAGsg: Array<{ metodo: string; ruta: string }>;
   cerrar(): Promise<void>;
 }
 
@@ -191,9 +200,11 @@ export async function crearEscenarioEntregas(opciones: {
   // El simulador de GSG, colgado de fetch como si fuera su API.
   const simulador = crearGsgSimulado({ token: GSG_TOKEN_FALSO, ahora: reloj });
   const fetchOriginal = globalThis.fetch;
+  const llamadasAGsg: Array<{ metodo: string; ruta: string }> = [];
   globalThis.fetch = (async (entrada: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = urlDe(entrada);
     if (!url.startsWith(GSG_URL_FALSA)) return fetchOriginal(entrada, init);
+    llamadasAGsg.push({ metodo: (init?.method ?? 'GET').toUpperCase(), ruta: url.slice(GSG_URL_FALSA.length) });
     const headers = new Headers(init?.headers);
     // Como la API real de GSG: la clave solo en X-API-Key (un Bearer no cuenta).
     const token = headers.get('x-api-key');
@@ -418,6 +429,10 @@ export async function crearEscenarioEntregas(opciones: {
     },
     resumen: () => entregas.resumen(),
     despacharAGsg: () => despacharReportes({ rutas: repos.rutas }, conexionGsg.puerto(), 100),
+    async gsgManda() {
+      return { status: 200, body: await enviarListaDelSimulador(simulador, entregas) };
+    },
+    llamadasAGsg,
     async cerrar() {
       globalThis.fetch = fetchOriginal;
       await app.close();

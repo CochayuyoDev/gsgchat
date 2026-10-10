@@ -81,8 +81,8 @@ describe('contrato del diagrama GSG', () => {
       status = 201;
       expect((await puerto.enviar('ubicacion', { tracking: 'GSG-E-240255', lat: -12.0453, lng: -77.0311 })).ok).toBe(true);
       expect(llegadas.at(-1)).toEqual({ url: '/api/sendLocation', apiKey: 'k-1', body: { tracking: 'GSG-E-240255', lat: -12.0453, lng: -77.0311 } });
-      await puerto.consultar('/reparto/pendientes');
-      expect(llegadas.at(-1)!.url).toBe('/api/reparto/pendientes');
+      // El puerto solo manda: no tiene ninguna consulta (GSGchat nunca le pide nada a GSG).
+      expect('consultar' in puerto).toBe(false);
       status = 401;
       const rechazo = await puerto.enviar('ubicacion', { tracking: 'X', lat: 1, lng: 2 });
       expect(!rechazo.ok && rechazo.error).toMatch(/^Error 401: GSG rechazó la clave/);
