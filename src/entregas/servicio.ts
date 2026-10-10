@@ -110,6 +110,13 @@ import type { Geocodificador, ResultadoGeo } from './geocodificar.js';
 import { calcularAlertas, type AlertaHoy } from './alertas-hoy.js';
 
 /** La fuente de una ubicación que salió de la dirección escrita (no es un pin: es aproximada). */
+
+/**
+ * Regla del dueño (10/10): a un cliente que ya tiene una ubicacion registrada
+ * se le pide igual la de cada pedido nuevo. No se copia la de otro pedido.
+ */
+const PEDIR_UBICACION_EN_CADA_PEDIDO = true;
+
 export const FUENTE_DIRECCION_ESCRITA = 'dirección escrita (aproximada)';
 /** Una dirección escrita vale si el mapa la pone a menos de esto (km) de su distrito. */
 const KM_DIRECCION_EN_SU_DISTRITO = 1;
@@ -2203,9 +2210,15 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   /**
    * Un pedido nuevo de un cliente que HOY ya mando su ubicacion (por otro
-   * pedido): vale la misma, no se le vuelve a pedir. GSG se entera.
+   * pedido). Antes valia la misma y no se le volvia a pedir; por regla del
+   * dueño (10/10) cada pedido pide SU ubicacion, aunque el cliente ya tenga
+   * una registrada: puede ser otra direccion. Queda apagado.
    */
   async function aplicarUbicacionConocida(e: Entrega): Promise<Entrega | null> {
+    if (!PEDIR_UBICACION_EN_CADA_PEDIDO) return aplicarUbicacionConocidaDe(e);
+    return null;
+  }
+  async function aplicarUbicacionConocidaDe(e: Entrega): Promise<Entrega | null> {
     if (e.ubicacionEstado !== 'pendiente' || e.envioRetenidoAt || ESTADOS_FINALES.includes(e.estado)) return null;
     const conocida = await repo.ubicacionDelClienteDelDia(e.phone, e.dia).catch(() => null);
     if (!conocida || conocida.id === e.id || conocida.lat == null || conocida.lng == null) return null;
@@ -4590,9 +4603,13 @@ ${lista}
     async sanarUbicacion(phone) {
       const conocida = await repo.ubicacionDelClienteDelDia(phone, hoy()).catch(() => null);
       if (!conocida || conocida.lat == null || conocida.lng == null) return false;
-      const cerradas = await resolverPorUbicacion(repos, phone, { lat: conocida.lat, lng: conocida.lng, mapsUrl: conocida.mapsUrl, fuente: conocida.ubicacionFuente }, { ahora: ahora(), motivo: `ya estaba registrada (pedido ${conocida.referencia})` }).catch(() => []);
-      if (cerradas.length) log('habia solicitudes del reparto abiertas para un cliente con la ubicación ya registrada: se cerraron', { phone, solicitudes: cerradas.map((s) => s.id) });
-      return true;
+      // Solo se cierran las solicitudes de pedidos que YA tienen su ubicacion:
+      // la de otro pedido del mismo cliente no vale para este (regla del dueño, 10/10).
+      const conUbicacion = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((e) => e.ubicacionEstado === 'recibida').map((e) => e.referencia);
+      if (!conUbicacion.length) return false;
+      const cerradas = await resolverPorUbicacion(repos, phone, { lat: conocida.lat, lng: conocida.lng, mapsUrl: conocida.mapsUrl, fuente: conocida.ubicacionFuente }, { ahora: ahora(), motivo: `ya estaba registrada (pedido ${conocida.referencia})`, referencias: conUbicacion }).catch(() => []);
+      if (cerradas.length) log('habia solicitudes del reparto abiertas de pedidos con la ubicación ya registrada: se cerraron', { phone, solicitudes: cerradas.map((s) => s.id) });
+      return cerradas.length > 0;
     },
     liberarEnvio,
     async enviarUbicacionAGsg(id, quien) {
