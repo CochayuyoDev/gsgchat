@@ -7,8 +7,8 @@
  *    token de sesion es lo que usa el servidor. Los modelos Gemma 4 son
  *    gratuitos; GPT/Claude descuentan de la asignacion de la cuenta. Es lo
  *    mismo que hace Stoky, con lo que ya se aprendio alli.
- *  - Cualquier API compatible con OpenAI (OpenAI, Groq, DeepSeek, Ollama en
- *    local...): una URL base y una clave.
+ *  - Cualquier servicio compatible con OpenAI de la lista: una clave y el
+ *    servicio; la URL se resuelve internamente y sus modelos se consultan a la API.
  *
  * Lo que hay detras no lo sabe el asistente: recibe la conversacion y
  * devuelve texto. Con un fallo, se lanza; quien llama decide que decirle al
@@ -90,12 +90,24 @@ function mensajeDeError(cuerpo: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-/** El detalle de un fallo, sin la clave (hay APIs que la repiten en el error) y de largo razonable. */
+/**
+ * Un texto sin nada que parezca una clave: las conocidas y las que lo
+ * parecen (hay APIs que repiten la clave en el error). De largo razonable.
+ */
+export function sinClaves(texto: string, claves: string[] = []): string {
+  let t = String(texto ?? '');
+  for (const c of claves) if (c && c.length >= 6) t = t.split(c).join('***');
+  t = t
+    .replace(/Bearer\s+[^\s"',)]+/gi, 'Bearer ***')
+    .replace(/\b(sk|pk|rk|gsk|xai|key)[-_][A-Za-z0-9_\-]{8,}/g, '***')
+    .replace(/\bAIza[0-9A-Za-z_\-]{20,}/g, '***')
+    .replace(/((?:api[_-]?key|token|clave|key|authorization)\s*[=:]\s*)[^\s&"',)]+/gi, '$1***');
+  return t.length > 300 ? `${t.slice(0, 297)}...` : t;
+}
+
+/** El detalle de un fallo para un ErrorIA: sin la clave; undefined si no hay. */
 function detalleSeguro(detalle: string | undefined, clave: string): string | undefined {
-  if (detalle == null) return undefined;
-  let s = String(detalle);
-  if (clave && clave.length >= 8) s = s.split(clave).join('…');
-  return s.length > 300 ? `${s.slice(0, 300)}…` : s;
+  return detalle == null ? undefined : sinClaves(detalle, [clave]);
 }
 
 /** De cualquier error que haya lanzado un proveedor: ¿es un fallo de la cuenta? */
@@ -225,31 +237,63 @@ export function crearProveedorPuter(token: string, cargar: (token: string) => Pr
   };
 }
 
-/** Cuanto razona el modelo (los de razonamiento: gpt-6-luna, o3...). Vacio = no se dice. */
+/**
+ * Lo que cada modelo NO acepta. Los modelos nuevos de OpenAI (gpt-5, o1, o3,
+ * o4…) rechazan `max_tokens` (piden `max_completion_tokens`) y una
+ * `temperature` distinta de la de fábrica; los demás servicios compatibles
+ * (OpenRouter, Groq, DeepSeek…) siguen pidiendo `max_tokens`.
+ *
+ * Dos capas, para que no vuelva a fallar:
+ *  1. Lo que ya se sabe: en la API de OpenAI, esos modelos salen bien a la
+ *     primera (`usaFormaNueva`).
+ *  2. Lo que no: si la API dice que un parámetro no vale (max_tokens,
+ *     temperature o cualquier otro opcional que nombre), se corrige, se
+ *     reintenta y se recuerda para ese modelo. Nunca más de 4 reintentos.
+ */
+const ajustesDelModelo = new Map<string, { completion?: boolean; sinTemperatura?: boolean; quitar?: string[] }>();
+
+/** Solo para las pruebas: olvida lo aprendido. */
+export function olvidarAjustesDeModelos(): void {
+  ajustesDelModelo.clear();
+}
+
+/**
+ * Los modelos de OpenAI que ya se sabe que piden `max_completion_tokens` y la
+ * temperatura de fábrica (los de razonamiento: gpt-5*, o1*, o3*, o4*). Solo en
+ * la API de OpenAI (o una dirección de Azure OpenAI): en otro servicio el
+ * mismo nombre puede querer la forma de siempre.
+ */
+export function usaFormaNueva(base: string, modelo: string): boolean {
+  if (!/api\.openai\.com|openai\.azure\.com/i.test(base)) return false;
+  const m = modelo.toLowerCase().replace(/^openai\//, '');
+  if (/^gpt-[56].*-chat/.test(m)) return false;
+  return /^(gpt-5|gpt-6|o1|o3|o4)([-.]|$)/.test(m);
+}
+
+/**
+ * Los modelos de razonamiento gastan parte del tope en «pensar»: con el tope
+ * corto de clasificar (8 tokens) no les quedaría nada para contestar.
+ */
+export const MINIMO_CON_RAZONAMIENTO = 2000;
+/** Si aun así se quedó sin texto por pensar demasiado, un reintento con esto. */
+const TOPE_SI_SE_QUEDO_SIN_TEXTO = 8000;
+
+/** Lo que se puede quitar sin cambiar lo que se pide (nunca model ni messages). */
+const OPCIONALES = new Set(['temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'logprobs', 'top_logprobs', 'n', 'stop', 'seed', 'max_tokens', 'reasoning_effort']);
+
+/**
+ * Cuanto razona el modelo (los de razonamiento: gpt-6-luna, gpt-5, o3...).
+ * Vacio = no se dice. Elegirlo es saber que el modelo razona: va desde la
+ * primera llamada con `reasoning_effort`, `max_completion_tokens` y sin
+ * `temperature`.
+ */
 export type RazonamientoIA = '' | 'minimo' | 'bajo' | 'medio' | 'alto';
 
 const ESFUERZO: Record<Exclude<RazonamientoIA, ''>, string> = { minimo: 'minimal', bajo: 'low', medio: 'medium', alto: 'high' };
 
-/**
- * Con un modelo que razona, lo que piensa cuenta dentro de
- * `max_completion_tokens`: con un tope pequeño se le va todo en pensar y la
- * respuesta llega vacia. Este es el margen minimo.
- */
-export const MINIMO_TOKENS_RAZONANDO = 2000;
-
-/**
- * El 400 de un modelo de razonamiento que no acepta `max_tokens` («Use
- * 'max_completion_tokens' instead») o una `temperature` distinta de 1.
- */
-export function rechazaParametros(status: number, cuerpo: Record<string, unknown> | null | undefined): boolean {
-  if (status !== 400 || !cuerpo) return false;
-  const err = cuerpo.error && typeof cuerpo.error === 'object' ? (cuerpo.error as { code?: unknown; param?: unknown; type?: unknown; message?: unknown }) : null;
-  const texto = err ? `${String(err.code ?? '')} ${String(err.param ?? '')} ${String(err.type ?? '')} ${String(err.message ?? '')}` : String(cuerpo.error ?? cuerpo.message ?? '');
-  return /max_tokens|temperature/i.test(texto) && /unsupported|not supported|does not support|only the default|max_completion_tokens/i.test(texto);
-}
-
 type CuerpoChat = {
   choices?: unknown;
+  error?: unknown;
   usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
 } & Record<string, unknown>;
 
@@ -257,18 +301,6 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
   const base = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const doFetch = opts.fetchImpl ?? fetch;
   const esfuerzo = opts.razonamiento ? ESFUERZO[opts.razonamiento] : undefined;
-  // Los modelos que ya dijeron que no aceptan max_tokens/temperature: las
-  // llamadas siguientes van directas con el cuerpo adaptado.
-  const adaptados = new Set<string>();
-
-  function cuerpoPeticion(mensajes: MensajeIA[], o: OpcionesChat, adaptado: boolean): Record<string, unknown> {
-    const tope = o.maxTokens ?? 1000;
-    if (esfuerzo || adaptado) {
-      return { model: o.modelo, messages: mensajes, ...(esfuerzo ? { reasoning_effort: esfuerzo } : {}), max_completion_tokens: Math.max(tope, MINIMO_TOKENS_RAZONANDO) };
-    }
-    return { model: o.modelo, messages: mensajes, temperature: o.temperatura ?? 0.4, max_tokens: tope };
-  }
-
   return {
     nombre: 'openai',
     async chat(mensajes, o) {
@@ -278,38 +310,95 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
       // se use no haga caso de la señal.
       const abortado = new Promise<never>((_r, reject) => control.signal.addEventListener('abort', () => reject(new Error('tiempo agotado')), { once: true }));
       abortado.catch(() => undefined);
-      const pedir = async (cuerpo: Record<string, unknown>): Promise<{ r: Response; cuerpo: CuerpoChat; esJson: boolean }> => {
-        const r = await Promise.race([
-          doFetch(`${base}/chat/completions`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', ...(opts.clave ? { authorization: `Bearer ${opts.clave}` } : {}) },
-            body: JSON.stringify(cuerpo),
-            signal: control.signal,
-          }),
-          abortado,
-        ]);
-        const crudo = await Promise.race([r.text().catch(() => ''), abortado]);
-        try {
-          const j: unknown = JSON.parse(crudo);
-          // `null`, un numero o una lista no son una respuesta: se tratan como "no es JSON".
-          if (j && typeof j === 'object' && !Array.isArray(j)) return { r, cuerpo: j as CuerpoChat, esJson: true };
-        } catch {
-          // HTML de un proxy, texto suelto, cuerpo cortado...
-        }
-        return { r, cuerpo: {}, esJson: false };
-      };
       try {
-        let { r, cuerpo, esJson } = await pedir(cuerpoPeticion(mensajes, o, adaptados.has(o.modelo)));
-        if (!r.ok && !esfuerzo && !adaptados.has(o.modelo) && rechazaParametros(r.status, cuerpo)) {
-          // Un modelo de razonamiento sin «Razonamiento» elegido: se reintenta
-          // UNA vez como el pide y se recuerda para las siguientes.
-          adaptados.add(o.modelo);
-          ({ r, cuerpo, esJson } = await pedir(cuerpoPeticion(mensajes, o, true)));
+        const clave = `${base}|${o.modelo}`;
+        if (!ajustesDelModelo.has(clave) && usaFormaNueva(base, o.modelo)) ajustesDelModelo.set(clave, { completion: true, sinTemperatura: true });
+        let topeExtra = 0;
+        /**
+         * Lo aprendido de ese modelo, con el «Razonamiento» elegido encima: si
+         * se eligió, el modelo razona (max_completion_tokens y sin temperature)
+         * salvo que el servicio ya dijera que no conoce max_completion_tokens.
+         */
+        const efectivo = (): { completion: boolean; sinTemperatura: boolean; quitar: string[] } => {
+          const aj = ajustesDelModelo.get(clave) ?? {};
+          return {
+            completion: esfuerzo ? aj.completion !== false : Boolean(aj.completion),
+            sinTemperatura: Boolean(esfuerzo) || Boolean(aj.sinTemperatura),
+            quitar: aj.quitar ?? [],
+          };
+        };
+        const cuerpoDe = (): string => {
+          const aj = efectivo();
+          const tope = Math.max(o.maxTokens ?? 1000, topeExtra);
+          const cuerpo: Record<string, unknown> = {
+            model: o.modelo,
+            messages: mensajes,
+            ...(aj.sinTemperatura ? {} : { temperature: o.temperatura ?? 0.4 }),
+            ...(aj.completion ? { max_completion_tokens: Math.max(tope, MINIMO_CON_RAZONAMIENTO) } : { max_tokens: tope }),
+            ...(esfuerzo ? { reasoning_effort: esfuerzo } : {}),
+          };
+          for (const q of aj.quitar) delete cuerpo[q];
+          return JSON.stringify(cuerpo);
+        };
+        const pedir = async (): Promise<{ r: Response; cuerpo: CuerpoChat; esJson: boolean }> => {
+          const r = await Promise.race([
+            doFetch(`${base}/chat/completions`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', ...(opts.clave ? { authorization: `Bearer ${opts.clave}` } : {}) },
+              body: cuerpoDe(),
+              signal: control.signal,
+            }),
+            abortado,
+          ]);
+          const crudo = await Promise.race([r.text().catch(() => ''), abortado]);
+          try {
+            const j: unknown = JSON.parse(crudo);
+            // `null`, un número o una lista no son una respuesta: se tratan como «no es JSON».
+            if (j && typeof j === 'object' && !Array.isArray(j)) return { r, cuerpo: j as CuerpoChat, esJson: true };
+          } catch {
+            // HTML de un proxy, texto suelto, cuerpo cortado...
+          }
+          return { r, cuerpo: {}, esJson: false };
+        };
+        /** Lo que hay que cambiar por un 400 de «parámetro no soportado»; false = nada que corregir. */
+        const corregir = (cuerpo: CuerpoChat): boolean => {
+          const err = cuerpo.error && typeof cuerpo.error === 'object' ? (cuerpo.error as { param?: unknown; message?: unknown; code?: unknown }) : {};
+          const param = String(err.param ?? '');
+          const mensaje = String(err.message ?? (typeof cuerpo.error === 'string' ? cuerpo.error : ''));
+          const que = `${param} ${mensaje}`;
+          const noVale = /unsupported|not supported|does not support|only the default|is not allowed|unrecognized|unknown parameter/i.test(que) || String(err.code ?? '').includes('unsupported');
+          if (!noVale) return false;
+          const ahora = efectivo();
+          const aj = { ...(ajustesDelModelo.get(clave) ?? {}) };
+          if (!ahora.completion && /max_tokens/.test(que) && !/max_completion_tokens['"]? (is|are) not/i.test(mensaje)) aj.completion = true;
+          // Al revés: un servicio que no conoce max_completion_tokens.
+          else if (ahora.completion && /max_completion_tokens/.test(param || mensaje)) aj.completion = false;
+          else if (!ahora.sinTemperatura && /temperature/i.test(que)) aj.sinTemperatura = true;
+          else {
+            const nombre = (param || /'([a-z_]+)'/i.exec(mensaje)?.[1] || '').trim();
+            if (!OPCIONALES.has(nombre) || ahora.quitar.includes(nombre)) return false;
+            aj.quitar = [...(aj.quitar ?? []), nombre];
+          }
+          ajustesDelModelo.set(clave, aj);
+          return true;
+        };
+        /** La primera elección, si la hay y es un objeto (hay APIs que mandan cualquier cosa). */
+        const eleccionDe = (cuerpo: CuerpoChat): { message?: { content?: unknown }; finish_reason?: unknown } | undefined => {
+          const e: unknown = Array.isArray(cuerpo.choices) ? cuerpo.choices[0] : undefined;
+          return e && typeof e === 'object' ? (e as { message?: { content?: unknown }; finish_reason?: unknown }) : undefined;
+        };
+        let { r, cuerpo, esJson } = await pedir();
+        for (let intento = 0; intento < 4 && r.status === 400 && corregir(cuerpo); intento++) ({ r, cuerpo, esJson } = await pedir());
+        // Pensó tanto que no le quedó para contestar (finish_reason «length» sin
+        // texto): una vez más con más margen.
+        if (r.ok && !limpiarRespuesta(textoDeContenido(eleccionDe(cuerpo)?.message?.content)) && eleccionDe(cuerpo)?.finish_reason === 'length') {
+          topeExtra = TOPE_SI_SE_QUEDO_SIN_TEXTO;
+          ({ r, cuerpo, esJson } = await pedir());
         }
         if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', detalleSeguro(mensajeDeError(cuerpo), opts.clave), falloDeCuenta(r.status, cuerpo as Parameters<typeof falloDeCuenta>[1]));
         if (!esJson) throw new ErrorIA('la API devolvio algo que no es JSON', 'openai', `HTTP ${r.status}`);
-        const eleccion = Array.isArray(cuerpo.choices) ? (cuerpo.choices[0] as { message?: { content?: unknown }; finish_reason?: unknown } | undefined) : undefined;
-        if (!eleccion || typeof eleccion !== 'object') throw new ErrorIA('la API devolvio una respuesta sin choices', 'openai', detalleSeguro(mensajeDeError(cuerpo), opts.clave));
+        const eleccion = eleccionDe(cuerpo);
+        if (!eleccion) throw new ErrorIA('la API devolvio una respuesta sin choices', 'openai', detalleSeguro(mensajeDeError(cuerpo), opts.clave));
         const cortada = eleccion.finish_reason === 'length';
         if (o.alUso && cuerpo.usage && typeof cuerpo.usage === 'object') {
           const entrada = Number(cuerpo.usage.prompt_tokens);
@@ -317,7 +406,7 @@ export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fet
           if (Number.isFinite(entrada) || Number.isFinite(salida)) o.alUso({ tokensEntrada: Number.isFinite(entrada) ? entrada : 0, tokensSalida: Number.isFinite(salida) ? salida : 0 });
         }
         const texto = limpiarRespuesta(textoDeContenido(eleccion.message?.content));
-        if (!texto) throw new ErrorIA('la API devolvio una respuesta vacia', 'openai', cortada ? 'se acabo el tope de tokens antes de contestar (con razonamiento, sube el tope o baja el razonamiento)' : undefined);
+        if (!texto) throw new ErrorIA('la API devolvio una respuesta vacia', 'openai', cortada ? 'se acabo el tope de tokens antes de contestar (con razonamiento, baja el razonamiento)' : undefined);
         if (cortada && o.exigirCompleta) throw new ErrorIA('la respuesta llego cortada (tope de tokens)', 'openai');
         return texto;
       } catch (error) {
@@ -352,8 +441,8 @@ export const MODELOS_SUGERIDOS: Record<'puter' | 'openai', string[]> = {
 
 /**
  * Los servicios compatibles con la API de OpenAI que se ofrecen en la
- * pantalla: se elige uno y la URL base y los modelos se rellenan solos; solo
- * hay que pegar la clave. Es lo mismo que tiene Stoky (Groq, Google,
+ * pantalla: se elige uno y sus modelos se consultan con la clave; la URL base
+ * del servicio se resuelve aquí y no se pide a la persona. Es lo mismo que tiene Stoky (Groq, Google,
  * OpenRouter, Together, Ollama, otro), para que quien ya lo configuro alli
  * lo reconozca aqui.
  */
@@ -410,7 +499,7 @@ export interface ListaModelosOpenAI {
  * Lo que no es un modelo para conversar: embeddings, audio, imagen,
  * moderacion, busqueda... La cuenta de OpenAI los lista todos juntos.
  */
-const NO_ES_CHAT = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|transcribe|image|search|babbage|davinci|computer-use|codex|sora|instruct/i;
+const NO_ES_CHAT = /embedding|whisper|tts|dall-?e|moderation|audio|realtime|transcribe|image|search|babbage|davinci|computer-use|codex|sora/i;
 
 /** Que se le dice en la pantalla junto al modelo, sin inventar nada: solo mira el id. */
 export function etiquetaDeModelo(id: string): string | null {
@@ -444,26 +533,33 @@ const SIN_LISTA = (detalle: string): ListaModelosOpenAI => ({
  * Nunca lanza: si no se puede listar, devuelve gpt-4o-mini y el motivo en
  * palabras.
  */
-export async function listarModelosOpenAI(opts: { clave: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string }): Promise<ListaModelosOpenAI> {
+export async function listarModelosOpenAI(opts: { clave: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string; servicio?: ServicioOpenAI }): Promise<ListaModelosOpenAI> {
   const clave = (opts.clave ?? '').trim();
-  if (!clave) return SIN_LISTA('Pega tu clave para ver los modelos de tu cuenta. Mientras tanto se usa gpt-4o-mini (consumo muy bajo).');
+  const servicio = opts.servicio ?? 'openai';
+  const preset = presetDe(servicio);
+  const nombre = preset?.nombre.split(' (')[0] ?? 'el servicio';
+  const sinLista = (detalle: string): ListaModelosOpenAI => servicio === 'openai'
+    ? SIN_LISTA(detalle)
+    : { ok: false, modelos: [], elegido: '', detalle };
+  if (!preset?.baseUrl) return sinLista('Ese servicio necesita una URL propia y no se puede detectar automáticamente. Elige un servicio de la lista.');
+  if (!clave && !preset?.sinClave) return sinLista(`Pega la clave de ${nombre} para ver los modelos de tu cuenta.`);
   const doFetch = opts.fetchImpl ?? fetch;
-  const base = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const base = (opts.baseUrl || preset?.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const control = new AbortController();
   const corte = setTimeout(() => control.abort(), opts.timeoutMs ?? 15_000);
   try {
     const r = await doFetch(`${base}/models`, { headers: { authorization: `Bearer ${clave}` }, signal: control.signal });
     const cuerpo = (await r.json().catch(() => ({}))) as { data?: Array<{ id?: unknown }>; error?: { message?: string } };
     if (!r.ok) {
-      const porQue = r.status === 401 ? 'OpenAI dice que esa clave no vale (revisa que la pegaste entera).' : r.status === 429 ? 'OpenAI dice que la cuenta llegó a su límite o no tiene saldo.' : 'OpenAI no dejó ver los modelos de la cuenta.';
-      return SIN_LISTA(`${porQue} Se usará gpt-4o-mini (consumo muy bajo).`);
+      const porQue = r.status === 401 ? `${nombre} dice que esa clave no vale (revisa que la pegaste entera).` : r.status === 429 ? `${nombre} dice que la cuenta llegó a su límite o no tiene saldo.` : `${nombre} no dejó ver los modelos de la cuenta.`;
+      return sinLista(porQue);
     }
     const modelos = ordenarModelosOpenAI((cuerpo.data ?? []).map((m) => String(m?.id ?? '')));
-    if (!modelos.length) return SIN_LISTA('La cuenta no devolvió modelos para conversar. Se usará gpt-4o-mini (consumo muy bajo).');
+    if (!modelos.length) return sinLista(`${nombre} no devolvió modelos compatibles con chat.`);
     const elegido = modelos.find((m) => m.id === MODELO_OPENAI_POR_DEFECTO)?.id ?? modelos[0]!.id;
-    return { ok: true, modelos, elegido, detalle: `Tu cuenta tiene ${modelos.length} modelos para conversar. Te recomendamos ${elegido}.` };
+    return { ok: true, modelos, elegido, detalle: `La API de ${nombre} ofrece ${modelos.length} modelos compatibles con chat.` };
   } catch {
-    return SIN_LISTA(control.signal.aborted ? 'OpenAI tardó demasiado en contestar. Se usará gpt-4o-mini (consumo muy bajo).' : 'No se pudo llegar a OpenAI (revisa la conexión a internet). Se usará gpt-4o-mini (consumo muy bajo).');
+    return sinLista(control.signal.aborted ? `${nombre} tardó demasiado en contestar.` : `No se pudo llegar a ${nombre} (revisa la conexión a internet).`);
   } finally {
     clearTimeout(corte);
   }
@@ -508,9 +604,9 @@ export async function probarProveedor(proveedor: ProveedorIA, modelo: string, ti
 export function explicarFalloConexion(detalle: string): string {
   if (/401|invalid api key|incorrect api key|unauthorized|authentication/i.test(detalle)) return 'La clave no vale para ese servicio: revisa que la pegaste entera y que es de ese proveedor.';
   if (/403|forbidden|permission/i.test(detalle)) return 'El servicio rechazó la clave (sin permiso). Revisa el plan o el proyecto de la clave.';
-  if (/404|not found|does not exist|unknown model|model_not_found/i.test(detalle)) return `Ese modelo no existe en ese servicio (o la URL base está mal): ${detalle}`;
+  if (/404|not found|does not exist|unknown model|model_not_found/i.test(detalle)) return `Ese modelo no existe en el servicio elegido: ${detalle}`;
   if (/429|rate limit|quota|insufficient_quota|exceeded/i.test(detalle)) return 'El servicio dice que se agotó el cupo o el límite por minuto. Espera un momento o revisa el plan.';
-  if (/ECONNREFUSED|fetch failed|ENOTFOUND|no se pudo contactar/i.test(detalle)) return 'No se pudo llegar al servicio: revisa la URL base y la conexión a internet (con Ollama, que esté arrancado).';
+  if (/ECONNREFUSED|fetch failed|ENOTFOUND|no se pudo contactar/i.test(detalle)) return 'No se pudo llegar al servicio elegido: revisa la conexión a internet.';
   if (/no respondio a tiempo|timeout|abort/i.test(detalle)) return 'El servicio tardó demasiado en responder. Prueba otra vez o con un modelo más ligero.';
   return detalle;
 }

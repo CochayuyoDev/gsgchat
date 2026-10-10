@@ -217,11 +217,10 @@ export function textoFijo(franja: Franja, c: CifrasResumen, ctx: { negocio: stri
     if (!c.whatsappConectado) lineas.push('⚠ WhatsApp no está conectado: no sale ni entra nada hasta vincularlo.');
     if (c.total === 0) lineas.push(c.gsgConectada ? '• Todavía no hay pedidos de hoy en GSG.' : '• Todavía no hay pedidos de hoy: GSG no está conectado, hay que pegar la lista del día en Hoy.');
     else {
-      lineas.push(`• Pedidos de hoy: ${c.total} (falta ubicación: ${c.faltaUbicacion} · falta confirmar: ${c.faltaConfirmacion} · listos para salir: ${c.listas} · en camino: ${c.enCamino}).`);
+      lineas.push(`• Pedidos de hoy: ${c.total} (falta ubicación: ${c.faltaUbicacion} · falta confirmar: ${c.faltaConfirmacion} · ubicación y confirmación registradas: ${c.listas} · en camino: ${c.enCamino}).`);
       if (c.gsgConectada) lineas.push(`• GSG: ${c.gsgDescripcion}.`);
       else lineas.push('• GSG sin conectar: los pedidos se pegan a mano.');
     }
-    lineas.push(c.motorizadosActivos ? `• Motorizados activos: ${c.motorizadosActivos}.` : '• ⚠ No hay ningún motorizado activo: los pedidos listos no pueden salir.');
     if (c.incidencia) lineas.push(`• Necesitan a alguien: ${c.incidencia} (${c.incidencias.map((i) => i.referencia).join(', ')}).`);
     if (c.reportesFallidos) lineas.push(`• Reportes que GSG no aceptó: ${c.reportesFallidos}.`);
   } else {
@@ -234,9 +233,8 @@ export function textoFijo(franja: Franja, c: CifrasResumen, ctx: { negocio: stri
       if (c.incidencia) lineas.push(`• Necesitan a alguien: ${c.incidencia}${c.incidencias.length ? ' — ' + c.incidencias.map((i) => `${i.referencia}: ${i.detalle}`).join('; ') : ''}.`);
       if (c.canceladas) lineas.push(`• ${plural(c.canceladas, 'Cancelado', 'Cancelados')}: ${c.canceladas}.`);
       if (c.reportesFallidos) lineas.push(`• Reportes que GSG no aceptó: ${c.reportesFallidos} (en Hoy se reintentan).`);
-      if (c.mejorMotorizado) lineas.push(`• Quien más entregó: ${c.mejorMotorizado.nombre} (${c.mejorMotorizado.entregas}).`);
     }
-    if (c.cuadreGsg) lineas.push(`• Cierre del día: ${c.cuadreGsg}`);
+    if (c.cuadreGsg) lineas.push(`• Cuadre con GSG: ${c.cuadreGsg}`);
     if (!c.whatsappConectado) lineas.push('⚠ WhatsApp no está conectado.');
   }
   lineas.push(`Lo ves en ${ctx.url.replace(/\/+$/, '')}/hoy`);
@@ -290,8 +288,8 @@ export async function crearServicioResumenes(deps: DepsResumenes): Promise<Servi
     const conectado = deps.whatsappConectado?.() ?? true;
     const r = deps.entregas ? await deps.entregas.resumen().catch(() => null) : null;
     const base = cifrasDe(r, { whatsappConectado: conectado, dia });
-    // Por la tarde, el cierre del dia con lo de aqui (que pedidos siguen sin
-    // cerrar; a GSG no se le pregunta nada), en palabras y sin tocar las cifras.
+    // Por la tarde, el cuadre con GSG (lo que aqui figura cerrado frente a
+    // lo que GSG tiene en terminados), en palabras y sin tocar las cifras.
     if (franja === 'tarde' && base.gsgConectada) {
       const extras = deps.gsgExtras?.() ?? conexionGsgVigente()?.extras ?? null;
       if (extras) base.cuadreGsg = await extras.cuadrar(dia).then((q) => q.resumen).catch(() => null);

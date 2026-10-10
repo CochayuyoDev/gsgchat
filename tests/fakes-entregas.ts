@@ -2,6 +2,7 @@
 
 import {
   datosEnvioLimpios,
+  ESTADOS_ENTREGA_FINALES,
   ESTADOS_ENTREGA_VIVOS,
   type Entrega,
   type EntregasRepo,
@@ -20,7 +21,7 @@ let seqM = 1;
 let seqEv = 1;
 
 /** `reloj`: las fechas de las filas (el escenario de entregas pasa el suyo, como los mensajes). */
-export function createFakeEntregas(reloj: () => Date = () => new Date()): FakeEntregas {
+export function createFakeEntregas(reloj: () => Date = () => new Date(), encolar?: (reporte: { loteId: string | null; tipo: "ubicacion"; payload: Record<string, unknown> }) => Promise<unknown>): FakeEntregas {
   const entregas: Entrega[] = [];
   const motorizados: Motorizado[] = [];
   const eventos: EventoEntrega[] = [];
@@ -143,6 +144,17 @@ export function createFakeEntregas(reloj: () => Date = () => new Date()): FakeEn
         pinPropuestoDudas: 0,
         direccionCliente: null,
         direccionClienteAt: null,
+        mensajeEstado: input.mensajeEstado ?? 'no_aplica',
+        mensajeVia: input.mensajeVia ?? null,
+        mensajeIntentos: 0,
+        mensajeReintentosAuto: 0,
+        mensajeUltimoIntentoAt: null,
+        mensajeProximoAt: null,
+        mensajeErrorCodigo: null,
+        mensajeError: null,
+        mensajePermanente: false,
+        mensajeEnviadoAt: null,
+        mensajeWamid: null,
         createdAt: ahora,
         updatedAt: ahora,
       };
@@ -187,12 +199,48 @@ export function createFakeEntregas(reloj: () => Date = () => new Date()): FakeEn
       }
       return lista.sort((a, b) => a.id - b.id).slice(0, filtro.limit ?? 500).map(copiaE);
     },
+    async registrarUbicacionAtomica(id, patch, reporte, propuestaAt) {
+      const actual = entregas.find(x => x.id === id);
+      if (!actual || ESTADOS_ENTREGA_FINALES.includes(actual.estado) || (propuestaAt && (actual.pinPropuestoAt?.getTime() !== propuestaAt.getTime() || actual.pinPropuestoLat !== patch.lat || actual.pinPropuestoLng !== patch.lng)) || (actual.ubicacionEstado === 'recibida' && actual.lat === patch.lat && actual.lng === patch.lng)) return null;
+      if (reporte && encolar) await encolar({ ...reporte, tipo: 'ubicacion' });
+      return repo.actualizar(id, patch);
+    },
     async actualizar(id, patch) {
       const e = entregas.find((x) => x.id === id);
       if (!e) return null;
       for (const [k, v] of Object.entries(patch)) if (v !== undefined) (e as unknown as Record<string, unknown>)[k] = k === 'motorizadosDescartados' ? [...(v as number[])] : v;
       e.updatedAt = reloj();
       return copiaE(e);
+    },
+    async cambiarMensaje(id, desde, patch) {
+      const e = entregas.find((x) => x.id === id);
+      if (!e || !desde.includes(e.mensajeEstado ?? 'no_aplica')) return null;
+      return repo.actualizar(id, patch);
+    },
+    async liberarRetenida(id, en) {
+      const e = entregas.find((x) => x.id === id);
+      if (!e || !e.envioRetenidoAt || ['cancelada', 'entregada', 'terminada'].includes(e.estado)) return null;
+      return repo.actualizar(id, { envioRetenidoAt: null, envioLiberadoAt: en });
+    },
+    async mensajesQueTocan(ahora, limite) {
+      return entregas
+        .filter((e) => (e.mensajeEstado === 'pendiente' || e.mensajeEstado === 'reintentando') && (!e.mensajeProximoAt || e.mensajeProximoAt.getTime() <= ahora.getTime()) && !e.envioRetenidoAt && !ESTADOS_ENTREGA_FINALES.includes(e.estado))
+        .sort((a, b) => (a.mensajeProximoAt?.getTime() ?? 0) - (b.mensajeProximoAt?.getTime() ?? 0) || a.id - b.id)
+        .slice(0, limite)
+        .map(copiaE);
+    },
+    async mensajesEnviandoDesde(antes, limite) {
+      return entregas.filter((e) => e.mensajeEstado === 'enviando' && (!e.mensajeUltimoIntentoAt || e.mensajeUltimoIntentoAt.getTime() < antes.getTime())).slice(0, limite).map(copiaE);
+    },
+    async bandejaMensajes(limite) {
+      return entregas
+        .filter((e) => !['enviado', 'no_aplica', 'retenido'].includes(e.mensajeEstado ?? 'no_aplica') && (e.mensajeEstado === 'fallido' || e.mensajeEstado === 'incierto' || Boolean(e.mensajeErrorCodigo)) && !ESTADOS_ENTREGA_FINALES.includes(e.estado))
+        .sort((a, b) => (b.mensajeUltimoIntentoAt ?? b.updatedAt).getTime() - (a.mensajeUltimoIntentoAt ?? a.updatedAt).getTime() || b.id - a.id)
+        .slice(0, limite)
+        .map(copiaE);
+    },
+    async vivasDeLoteYTelefono(loteId, phone) {
+      return entregas.filter((e) => e.loteId === loteId && e.phone === phone && !ESTADOS_ENTREGA_FINALES.includes(e.estado)).sort((a, b) => a.id - b.id).map(copiaE);
     },
     async quitar(id) {
       const i = entregas.findIndex((x) => x.id === id);

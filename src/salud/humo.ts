@@ -104,7 +104,7 @@ export function explicarBloqueo(code: string, reason: string): string {
   const porCodigo: Record<string, string> = {
     allowlist: 'el modo prueba solo deja escribir a los números de su lista y el supervisor no está en ella',
     sin_conexion: 'WhatsApp no está conectado',
-    opt_out: 'el número del supervisor se dio de baja (escribió BAJA); que escriba ALTA',
+    opt_out: 'el número del supervisor está dado de baja; dalo de alta desde su ficha en Chats',
     no_opt_in: 'el número del supervisor no tiene consentimiento: dale de alta en Contactos con opt-in',
     number_paused: 'el número está en pausa (Estado del número)',
     number_quality: 'Meta tiene el número con calidad baja y se frenó todo',
@@ -201,7 +201,7 @@ export function crearHumo(deps: DepsHumo): Humo {
 
   async function pasoGsg(): Promise<Omit<PasoHumo, 'clave' | 'nombre' | 'ms'>> {
     if (!deps.conexionGsg) return { ok: true, omitido: true, detalle: 'No hay conexión con GSG en este arranque.' };
-    if (deps.conexionGsg.estado().modo === 'ninguna') return { ok: false, detalle: 'GSG no está conectado: elige el simulador o pega la dirección de su API en Conexión.' };
+    if (deps.conexionGsg.estado().modo === 'ninguna') return { ok: false, detalle: 'GSG no está conectado: configura la dirección de su API en Conexión.' };
     const r = await deps.conexionGsg.probar();
     return { ok: r.ok, detalle: r.detalle };
   }

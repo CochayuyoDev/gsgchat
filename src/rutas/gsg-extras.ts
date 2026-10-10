@@ -14,8 +14,8 @@
  *    una vez, caducan y se anulan. Se guardan solo como hash.
  *  - **Bitácora**: las últimas 50 llamadas que GSG (o quien tenga un token)
  *    hizo al simulador y a `/api/v1/entregas`: hora, ruta, resultado, motivo.
- *  - **Cuadre de fin de día**: solo con lo de aquí (a GSG no se le pregunta
- *    su lista de terminados): qué pedidos del día siguen sin cerrar.
+ *  - **Cierre del día**: solo con lo de aquí (a GSG no se le pregunta su
+ *    lista de terminados): qué pedidos del día siguen sin cerrar.
  *
  * Todo vive en `settings` (claves `gsg.*`) y se lee al arrancar.
  */
@@ -107,6 +107,14 @@ export interface VerificacionContrato {
   hallazgos: HallazgoContrato[];
   at: string;
 }
+
+/** Los campos que se leen de cada pedido de GSG (lo documenta el OpenAPI, /api/v1/openapi.json). */
+export const CAMPOS_PEDIDO = new Set([
+  'referencia', 'telefono', 'nombre', 'direccion', 'distrito', 'notas', 'lat', 'lng', 'id', 'urgente', 'cancelado', 'motivoCancelacion',
+  'horarioEntrega',
+  // Los datos del envio del primer mensaje al cliente (todos opcionales). Ver src/entregas/datos-envio.ts.
+  'producto', 'empresa', 'empresaCodigo', 'empresaNombre', 'tiendaCodigo', 'tiendaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente',
+]);
 
 // ------------------------------------------------------------ tokens del simulador
 
@@ -295,7 +303,7 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
       // Sin red: solo lo que GSG ya nos mandó (la bitácora) y lo que hoy no se pudo leer.
       const at = ahora().toISOString();
       const h: HallazgoContrato[] = [];
-      const deGsg = llamadas.filter((l) => /^(POST|PATCH|DELETE) \/api\/v1\/entregas(\/|$)/.test(l.que));
+      const deGsg = llamadas.filter((l) => /^(POST|PUT|PATCH|DELETE) \/api\/v1\/entregas(\/|$)/.test(l.que));
       let aceptadas = 0;
       let problemas = 0;
       for (const l of deGsg.slice(0, 20)) {
@@ -303,9 +311,9 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
         if (l.status >= 200 && l.status < 300) {
           aceptadas++;
           h.push({ tipo: 'ok', donde, detalle: l.resultado || 'aceptada' });
-        } else if (l.status === 400 || l.status === 401 || l.status === 403) {
+        } else if (l.status === 400 || l.status === 401 || l.status === 403 || l.status === 422) {
           problemas++;
-          h.push({ tipo: l.status === 400 ? 'formato' : 'falta', donde, detalle: l.status === 400 ? l.resultado : `${l.resultado} (la clave de API que usa GSG no vale o no tiene el permiso entregas:gestionar)` });
+          h.push({ tipo: l.status === 401 || l.status === 403 ? 'falta' : 'formato', donde, detalle: l.status === 401 || l.status === 403 ? `${l.resultado} (la clave de API que usa GSG no vale o no tiene el permiso entregas:gestionar)` : l.resultado });
         } else {
           h.push({ tipo: 'aviso', donde, detalle: l.resultado });
         }

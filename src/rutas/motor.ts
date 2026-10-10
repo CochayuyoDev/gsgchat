@@ -22,7 +22,7 @@ import type { ServicioStickers } from '../stickers/stickers.js';
 import type { Config } from '../config.js';
 import type { Repos } from '../db/repos.js';
 import type { Solicitud } from '../db/rutas.js';
-import type { Sender } from '../outbound/sender.js';
+import type { Sender, SendOutcome } from '../outbound/sender.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
 import { decidirRitmo } from '../salud/ritmo.js';
@@ -32,7 +32,7 @@ import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
-import { payloadIncidencia, payloadResumen, payloadUbicacion, type PuertoGsg } from './gsg.js';
+import { despacharReportes, payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
 import {
   DESCRIPCION_PASO,
@@ -145,6 +145,22 @@ export interface MotorDeps {
    * Los recordatorios siguen con sus textos cortos de siempre.
    */
   textoSolicitud?: (solicitud: Solicitud) => Promise<string | null>;
+  /**
+   * El seguimiento del primer mensaje de los pedidos (src/entregas/primer-mensaje.ts):
+   * el reparto avisa antes y despues de mandar el primer mensaje de una
+   * solicitud, y obedece cuando reintentar o que se pare.
+   */
+  primerMensaje?: PrimerMensajeReparto;
+}
+
+/** Ver MotorDeps.primerMensaje. */
+export interface PrimerMensajeReparto {
+  /** Justo antes del primer mensaje. false = no se manda ahora (otro intento en curso o espera a una persona). */
+  antes(solicitud: Solicitud): Promise<boolean>;
+  /** Lo que paso. `esperaMs`: cuando reintentar un fallo pasajero; `detener`: no insistir solo (incierto, permanente o tope de reintentos). */
+  despues(solicitud: Solicitud, salida: SendOutcome): Promise<{ esperaMs?: number; detener?: string } | void>;
+  /** Antes de enviar ya se supo que el numero no tiene WhatsApp. */
+  sinWhatsApp(solicitud: Solicitud, detalle: string): Promise<void>;
 }
 
 export interface ResultadoTick {
@@ -366,23 +382,13 @@ export function crearMotor(deps: MotorDeps): Motor {
     await repos.rutas.registrarEvento(
       solicitud.id,
       'derivacion',
-      'pasa al repartidor para llamada telefónica',
+      'Pendiente de atención: tres intentos sin ubicación',
     );
 
     // Avisar al cliente solo si se puede escribir gratis y si alguna vez
     // contesto: a quien ignoro tres mensajes, un cuarto solo le suma motivos
     // para bloquear; y con plantilla, gastar una en despedirse no aporta.
-    if (!deps.usarPlantilla() && solicitud.phone && respondio) {
-      const despedida = await sender
-        .send({
-          phone: solicitud.phone,
-          kind: 'freeform',
-          category: 'UTILITY',
-          text: textoDerivacion(contexto(solicitud)),
-        })
-        .catch(() => undefined);
-      if (despedida?.ok && deps.stickers) await deps.stickers.automatico('despedida', solicitud.phone);
-    }
+
 
     return { accion: 'derivacion', solicitudId: solicitud.id };
   }
@@ -403,6 +409,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           'sin_whatsapp',
           `el número ${phone} no tiene una cuenta de WhatsApp`,
         );
+        if (paso === 'solicitud') await deps.primerMensaje?.sinWhatsApp(solicitud, `el número ${phone} no tiene una cuenta de WhatsApp`).catch((error: unknown) => deps.log?.('no se pudo anotar el primer mensaje', { detalle: String(error) }));
         // Que lo sepa el resto del sistema: una campana o una secuencia no
         // tienen por que volver a descubrirlo a base de intentos fallidos.
         await repos.contacts
@@ -426,6 +433,14 @@ export function crearMotor(deps: MotorDeps): Motor {
       separacionMs: Math.min(opciones.esperaRespuestaMinutos * 60_000, 60_000),
       maxPorDia: opciones.maxIntentos + 1,
     };
+    // El primer mensaje de un pedido: queda «enviando» en la base antes de
+    // salir. Si otro intento ya esta en marcha (otro proceso, un reintento
+    // manual) o el pedido espera a una persona, no se manda.
+    const esPrimero = paso === 'solicitud' && Boolean(deps.primerMensaje);
+    if (esPrimero && !(await deps.primerMensaje!.antes(solicitud))) {
+      await repos.rutas.actualizarSolicitud(solicitud.id, { proximoIntentoAt: new Date(ahora().getTime() + 2 * 60_000) });
+      return { accion: 'nada', solicitudId: solicitud.id, motivo: 'el primer mensaje de ese pedido ya está en curso o espera a una persona' };
+    }
     const salida = conPlantilla
       ? await sender.send({
           phone,
@@ -446,6 +461,11 @@ export function crearMotor(deps: MotorDeps): Motor {
         });
 
     const momento = ahora();
+    const decision = esPrimero
+      ? ((await deps.primerMensaje!.despues(solicitud, salida).catch((error: unknown) => {
+          deps.log?.('no se pudo anotar el resultado del primer mensaje', { detalle: String(error) });
+        })) ?? {})
+      : {};
 
     if (salida.ok) {
       // Lo de prueba no marca el ritmo del numero real (ver src/desarrollador).
@@ -490,6 +510,12 @@ export function crearMotor(deps: MotorDeps): Motor {
         await anotarIncidencia(solicitud, 'sin_whatsapp', salida.reason.slice(0, 300));
         return { accion: 'incidencia', solicitudId: solicitud.id };
       }
+      // Una guarda que no se va a abrir sola (baja del cliente, modo prueba,
+      // sin plantilla) con el primer mensaje de un pedido: a la bandeja.
+      if (decision.detener) {
+        await anotarIncidencia(solicitud, 'envio_bloqueado', decision.detener.slice(0, 300));
+        return { accion: 'incidencia', solicitudId: solicitud.id, motivo: decision.detener };
+      }
       // Una guarda propia (cupo, calentamiento, opt-out). No cuenta como
       // intento: el cliente no ha recibido nada.
       const espera = salida.retryAfterMs ?? 15 * 60_000;
@@ -514,12 +540,20 @@ export function crearMotor(deps: MotorDeps): Motor {
       await anotarIncidencia(solicitud, codigo, salida.error.slice(0, 300));
       return { accion: 'incidencia', solicitudId: solicitud.id };
     }
+    // El primer mensaje de un pedido con un resultado incierto, un rechazo que
+    // no se arregla insistiendo o el tope de reintentos: no se reenvia solo.
+    // Queda en la bandeja de errores para que una persona decida.
+    if (decision.detener) {
+      await anotarIncidencia(solicitud, 'error_envio', decision.detener.slice(0, 300));
+      return { accion: 'incidencia', solicitudId: solicitud.id, motivo: decision.detener };
+    }
 
     // Un tropiezo pasajero (5xx, rate limit, socket caido a mitad) no gasta
     // un intento: el cliente no recibio nada. Se vuelve en unos minutos.
     if (salida.retryable) {
       await repos.rutas.actualizarSolicitud(solicitud.id, {
-        proximoIntentoAt: new Date(momento.getTime() + 3 * 60_000),
+        // La espera la decide el seguimiento del primer mensaje (progresiva); si no, la de siempre.
+        proximoIntentoAt: new Date(momento.getTime() + (decision.esperaMs ?? 3 * 60_000)),
         incidencia: 'error_envio',
         incidenciaDetalle: salida.error.slice(0, 300),
       });
@@ -603,16 +637,18 @@ export function crearMotor(deps: MotorDeps): Motor {
       // sigue con el siguiente. Asi un recordatorio nunca le llega a quien ya
       // mando su pin, aunque algun camino se haya olvidado de cerrarla.
       const yaTieneUbicacion = async (s: Solicitud): Promise<boolean> => {
-        const registrada = await ubicacionYaRegistrada(repos, s.phone, diaEnZona(momento, opciones.timezone));
+        const registrada = await ubicacionYaRegistrada(repos, s.phone, diaEnZona(momento, opciones.timezone), s.referencia);
         if (!registrada || registrada.lat == null || registrada.lng == null) return false;
-        const cerradas = await resolverPorUbicacion(repos, s.phone!, { lat: registrada.lat, lng: registrada.lng, mapsUrl: registrada.mapsUrl, fuente: registrada.ubicacionFuente }, { ahora: momento, motivo: `ya la había mandado (pedido ${registrada.referencia})` });
+        const cerradas = await resolverPorUbicacion(repos, s.phone!, { lat: registrada.lat, lng: registrada.lng, mapsUrl: registrada.mapsUrl, fuente: registrada.ubicacionFuente }, { ahora: momento, motivo: `ya la había mandado (pedido ${registrada.referencia})`, referencias: [registrada.referencia] });
         // Si era de OTRO pedido del mismo cliente (que aun no la tenia), GSG se
         // entera por aqui, como cuando el reparto la resuelve.
         for (const c of cerradas) {
           if (!c.referencia || c.referencia === registrada.referencia) continue;
           const lote = await repos.rutas.lote(c.loteId).catch(() => null);
-          if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: payloadUbicacion(c, lote) }).catch(() => undefined);
+          if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: await payloadUbicacionDelPedido(repos, c, lote) }).catch(() => undefined);
         }
+        // La ubicacion sale YA hacia GSG, sin esperar a la pasada de cada minuto.
+        if (cerradas.length) void despacharReportes({ rutas: repos.rutas }, gsg, 25, ['ubicacion']).catch(() => undefined);
         deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
         return true;
       };

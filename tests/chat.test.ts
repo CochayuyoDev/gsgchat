@@ -29,11 +29,11 @@ import {
 import type { ChangeValue, InboundMessage } from '../src/whatsapp/types.js';
 import type { Sender } from '../src/outbound/sender.js';
 
-const auth = { authorization: `Bearer ${ADMIN}` };
+const auth = { 'x-api-key': ADMIN };
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -842,5 +842,43 @@ describe('la página del chat se puede ejecutar', () => {
 
     const js = html.slice(desde + '<script>'.length, hasta);
     expect(() => new Function(js)).not.toThrow();
+  });
+});
+
+describe('eliminar clientes', () => {
+  it('cuenta antes, borra uno o todos y nunca toca los grupos', async () => {
+    const ana = await repos.contacts.upsertFromInbound('5215506060601');
+    await repos.contacts.upsertFromInbound('5215506060602');
+    await repos.contacts.upsertGrupo('120363000000000001@g.us', 'Repartidores');
+
+    const uno = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: { ids: [ana.id] } });
+    expect(uno.json()).toEqual({ eliminados: 1 });
+    expect(await repos.contacts.getByPhone('5215506060601')).toBeNull();
+
+    const cuenta = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: { todos: true, soloContar: true } });
+    expect(cuenta.json().cuantos).toBeGreaterThan(0);
+    const todos = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: { todos: true } });
+    expect(todos.json().eliminados).toBe(cuenta.json().cuantos);
+    expect(await repos.contacts.getByPhone('5215506060602')).toBeNull();
+    expect(await repos.contacts.getByPhone('120363000000000001@g.us')).not.toBeNull();
+  });
+
+  it('sin decir cuáles no borra nada', async () => {
+    const r = await app.inject({ method: 'POST', url: '/admin/contacts/eliminar', headers: auth, payload: {} });
+    expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('volver a empezar con un cliente', () => {
+  it('el asistente y el bot vuelven a atenderlo, sin borrar nada', async () => {
+    const c = await repos.contacts.upsertFromInbound('5215507070701');
+    await repos.contacts.cerrarIA(c.id, true, new Date(), 'ubicación registrada');
+    await repos.contacts.pausarBot(c.id, true, new Date());
+    const r = await app.inject({ method: 'POST', url: `/admin/chat/${c.id}/volver-a-empezar`, headers: auth, payload: {} });
+    expect(r.json()).toEqual({ ok: true });
+    const despues = (await repos.contacts.getById(c.id))!;
+    expect(despues.iaCerradaAt ?? null).toBeNull();
+    expect(despues.botPausadoAt ?? null).toBeNull();
+    expect((await app.inject({ method: 'POST', url: '/admin/chat/no-existe/volver-a-empezar', headers: auth, payload: {} })).statusCode).toBe(404);
   });
 });

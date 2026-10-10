@@ -6,7 +6,9 @@ services:
     environment:
       PORT: 3000
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
-      DATABASE_URL: postgres://wa:wa@postgres:5432/wa_locator
+      # La principal en la base gsgchat; cada tienda que se registre, en la
+      # suya (gsgchat_t_<id>): por eso entra con un usuario que puede crear bases.
+      DATABASE_URL: mysql://root:${MARIADB_PASSWORD:-wa}@mariadb:3306/gsgchat
       REDIS_URL: redis://redis:6379
       # Opcionales: si no se definen, se pegan en /setup y quedan cifradas en la base.
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
@@ -27,7 +29,7 @@ services:
       WAHA_AUTOARRANQUE: 'false'
       ARCHIVE_DIR: /app/respaldos
       # Las tiendas que se registran en /registro: su vinculacion de WhatsApp,
-      # sus adjuntos y sus secretos (su base va en su esquema de Postgres).
+      # sus adjuntos y sus secretos (su base va aparte, en MariaDB: gsgchat_t_<id>).
       TIENDAS_DIR: /app/tiendas
     volumes:
       # Token de administracion y clave de cifrado: se generan en el primer
@@ -45,7 +47,7 @@ services:
       # apunta aqui la carpeta desde la pantalla, o monta una carpeta del host.
       - ${COPIAS_DIR:-copias}:/app/copias
     depends_on:
-      postgres:
+      mariadb:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -71,21 +73,21 @@ services:
       - wahasesiones:/app/.sessions
     restart: unless-stopped
 
-  postgres:
-    image: postgres:16-alpine
+  mariadb:
+    image: mariadb:11.4
     environment:
-      POSTGRES_USER: wa
-      POSTGRES_PASSWORD: wa
-      POSTGRES_DB: wa_locator
+      MARIADB_ROOT_PASSWORD: ${MARIADB_PASSWORD:-wa}
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_bin']
     ports:
-      - '5432:5432'
+      # Solo desde esta maquina (para phpMyAdmin, mysqldump o un cliente).
+      - '127.0.0.1:3306:3306'
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mariadb:/var/lib/mysql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U wa -d wa_locator']
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -107,6 +109,6 @@ volumes:
   respaldos:
   tiendas:
   copias:
-  pgdata:
+  mariadb:
   redisdata:
   wahasesiones:

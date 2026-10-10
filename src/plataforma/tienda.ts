@@ -5,10 +5,10 @@
  * unica tienda de una instalacion, pero con todo lo que guarda o conecta
  * pasado por parametro:
  *
- *   - su BASE: una carpeta de PGlite propia, o un esquema propio de Postgres
- *     (tienda_<id>) con el search_path apuntando a el. Las consultas del
- *     proyecto no nombran esquema, asi que una tienda no puede leer las
- *     tablas de otra aunque quisiera;
+ *   - su BASE: una base propia del servidor MySQL/MariaDB (<raiz>_t_<id>)
+ *     con la conexion apuntando a ella. Las consultas del proyecto no nombran
+ *     base, asi que una tienda no puede leer las tablas de otra aunque
+ *     quisiera;
  *   - su SESION DE WHATSAPP (`crearSesionLocal`) y su carpeta de vinculacion:
  *     cada tienda escanea su QR y su numero no lo ve nadie mas;
  *   - sus carpetas de adjuntos, respaldos y copias;
@@ -32,17 +32,18 @@ import { createSender, type SendJob, type SendOutcome } from '../outbound/sender
 import { createMemoryOutboundQueue } from '../outbound/memory-queue.js';
 import { createOutboundQueue, createOutboundWorker, type OutboundQueue } from '../outbound/queue.js';
 import { createRepos, createSettingsRepo, type Repos } from '../db/repos.js';
-import { openPglite, type PgliteHandle } from '../db/pglite.js';
-import { createPool, type Pool } from '../db/pool.js';
-import { crearCacheGeoSql, crearGeocodificadorNominatim, type Geocodificador } from '../entregas/geocodificar.js';
+import { baseDeLaUrl, createPool, type Pool } from '../db/pool.js';
+import { prepararBase, type OpcionesBanco } from '../db/bases.js';
+import { crearCacheGeoSql, crearGeocodificadorGoogle, crearGeocodificadorNominatim, type Geocodificador } from '../entregas/geocodificar.js';
+import { crearCalculadorGoogle } from '../entregas/seguimiento-gsg.js';
 import { migrate } from '../db/migrate.js';
 import type { LocalSecrets } from '../settings/crypto.js';
 import { providerOf, createSettingsService } from '../settings/service.js';
 import { createDynamicWhatsAppClient } from '../whatsapp/dynamic.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { crearSesionLocal, type SesionLocal } from '../whatsapp/local/session.js';
-import { crearConexionStoky } from '../stoky/conexion.js';
-import { crearServicioPlan, type EstadoInstancia } from '../plan/servicio.js';
+
+import { type EstadoInstancia } from '../plan/servicio.js';
 import { versionDelPaquete } from '../util/version.js';
 import { CATALOG } from '../templates/catalog.js';
 import { countVariables } from '../templates/render.js';
@@ -56,14 +57,13 @@ import { observarRepos } from '../eventos/observar.js';
 import { crearServicioIA } from '../ia/servicio.js';
 import { crearServicioEntrenamiento, iaParaEntrenar } from '../entrenamiento/servicio.js';
 import { crearServicioVoz } from '../voz/servicio.js';
-import { crearServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
+
 import { opcionesDesdeConfig } from '../rutas/motor.js';
 import { PLANES } from '../rutas/telefono.js';
-import { crearConexionGsg, TOKEN_SIMULADOR } from '../rutas/conexion-gsg.js';
-import { crearGsgSimulado } from '../entregas/gsg-simulado.js';
+import { crearConexionGsg } from '../rutas/conexion-gsg.js';
 import { crearServicioEntregas } from '../entregas/servicio.js';
 import { crearServicioResumenes } from '../resumenes/servicio.js';
-import { crearServicioProcesos } from '../procesos/servicio.js';
+
 import { cargarLote } from '../rutas/cargar.js';
 import { crearFiabilidad } from '../salud/fiabilidad.js';
 import type { ServicioCorreo } from '../salud/correo.js';
@@ -72,9 +72,18 @@ import { enTienda, type ContextoTienda } from './contexto.js';
 import { conReglaGsg } from '../entregas/regla-gsg.js';
 
 /** Donde vive la base de una tienda. */
-export type BaseDeTienda =
-  | { tipo: 'pglite'; dir: string }
-  | { tipo: 'postgres'; url: string; esquema?: string };
+export interface BaseDeTienda {
+  /** El servidor: mysql://usuario:clave@host:3306/<base>. */
+  url: string;
+  /** La base de ESTA tienda en ese servidor; sin ella, la de la URL (la tienda principal). */
+  base?: string;
+  /**
+   * Bases listas de antemano (ver src/db/bases.ts): si la base de la tienda
+   * aun no existe, se queda las tablas de una de ahi en vez de crearlas de
+   * cero. Sin banco, se migra desde cero.
+   */
+  banco?: OpcionesBanco;
+}
 
 export interface OpcionesTienda {
   /** Identificador interno (no cambia nunca) y el trozo de la URL (/tienda/<slug>/). */
@@ -127,7 +136,10 @@ export interface TiendaViva {
   repos: Repos;
   ajustes: ServicioAjustes;
   sesion: SesionLocal;
-  pglite: PgliteHandle | null;
+  /** La base de esta tienda (para mirar dentro en las pruebas y en el Modulo desarrollador). */
+  pool: Pool;
+  /** El nombre de su base en el servidor. */
+  base: string;
   /** Con esto se envuelve cada peticion que se le pasa (ver src/plataforma/contexto.ts). */
   contexto: ContextoTienda;
   /** Las entregas del dia de esta tienda (el Modulo desarrollador cierra su dia de prueba con esto). */
@@ -138,14 +150,15 @@ export interface TiendaViva {
   parar(): Promise<void>;
 }
 
-async function abrirBase(base: BaseDeTienda): Promise<{ pool: Pool; pglite: PgliteHandle | null; cerrar: () => Promise<void> }> {
-  if (base.tipo === 'pglite') {
-    const pglite = await openPglite(base.dir);
-    return { pool: pglite.pool, pglite, cerrar: () => pglite.db.close() };
-  }
-  await migrate(base.url, base.esquema);
-  const pool = createPool(base.url, base.esquema);
-  return { pool, pglite: null, cerrar: () => pool.end() };
+async function abrirBase(base: BaseDeTienda): Promise<{ pool: Pool; nombre: string; cerrar: () => Promise<void> }> {
+  const nombre = base.base ?? baseDeLaUrl(base.url);
+  if (!nombre) throw new Error('DATABASE_URL no dice qué base usar: termínala con /nombre_de_la_base (por ejemplo mysql://root@127.0.0.1:3306/gsgchat).');
+  // Con banco: si la base no existe, sale de una ya lista; si existe, solo
+  // se le pasan las migraciones pendientes (lo mismo que migrate).
+  if (base.banco) await prepararBase(base.banco, nombre);
+  else await migrate(base.url, nombre);
+  const pool = createPool(base.url, nombre);
+  return { pool, nombre, cerrar: () => pool.end() };
 }
 
 export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
@@ -156,7 +169,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
   return enTienda(contexto, async () => {
     const log = (m: string, d?: unknown) => console.warn(`${o.prefijoLog}${m}`, d ?? '');
     const config = loadConfig(o.env);
-    const { pool, pglite, cerrar } = await abrirBase(o.base);
+    const { pool, nombre: nombreBase, cerrar } = await abrirBase(o.base);
     // Lo que ya se abrio, en orden: si algo falla a mitad de armar la tienda
     // (una migracion, un servicio), se cierra todo al reves en vez de dejar la
     // base abierta y temporizadores vivos de una tienda que no existe.
@@ -231,22 +244,13 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
       limpieza.push(() => queue.close(), () => worker?.close());
 
       const parteDeSalud: { dar: null | (() => Promise<EstadoInstancia>) } = { dar: null };
-      const plan = await crearServicioPlan({
-        settingsRepo,
-        url: config.PLAN_URL,
-        token: config.PLAN_TOKEN,
-        baseUrl: config.PUBLIC_BASE_URL,
-        log: (m, d) => log(m, d),
-        estado: () => (parteDeSalud.dar ? parteDeSalud.dar() : { whatsapp: settings.isConfigured() ? 'conectado' : 'sin_conectar', mensajesHoy: 0, fallosIA: 0, entregasHoy: 0, version: versionDelPaquete() }),
-      });
-      const pararPlan = plan.arrancar();
-      limpieza.push(() => pararPlan?.());
-
-      const conexionStoky = await crearConexionStoky({ settingsRepo, settingsKeyBase64: o.secretos.settingsKey, config, log: (m, d) => log(`[stoky] ${m}`, d) });
-      const catalogo = conexionStoky.cliente();
+      // Sin membresías ni catálogo externo: la IA conserva su conocimiento local.
+      const plan = undefined;
+      const catalogo = undefined;
+      const pararPlan: (() => void) | undefined = undefined;
 
       const plantillaPais = PLANES[config.RUTAS_PAIS] ?? PLANES.peru!;
-      const lista = crearServicioEnvioAutomatico({ repos, opcionesReparto: opcionesDesdeConfig(config), plan: plantillaPais, salud, log: (m, d) => console.log(`${o.prefijoLog}[wa] ${m}`, d ?? '') });
+      const lista = undefined;
 
       const entrenamiento = await crearServicioEntrenamiento({ repo: repos.entrenamiento, nombreNegocio: () => ajustes.nombreNegocio(), log: (m, d) => log(`[entrenamiento] ${m}`, d) });
       await entrenamiento.cargar();
@@ -254,7 +258,6 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
       const voz = await crearServicioVoz({ settingsRepo, settingsKeyBase64: o.secretos.settingsKey, sender, mediaDir: o.mediaDir, log: (m, d) => log(`[voz] ${m}`, d) });
 
       const conexionGsg = await crearConexionGsg({ settingsRepo, settingsKeyBase64: o.secretos.settingsKey, config, log: (m, d) => log(`[gsg] ${m}`, d) });
-      const simuladorGsg = crearGsgSimulado({ token: TOKEN_SIMULADOR });
 
       // La IA se crea despues de las entregas y estas la piden por funcion.
       let ia!: Awaited<ReturnType<typeof crearServicioIA>>;
@@ -280,12 +283,15 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         geo: { bbox: config.bbox, zonaSinExtra: config.zonaSinExtra, cobertura: config.coverageName },
         modo: () => ajustes.modo(),
         numeroPropio: () => sesion.getLocalState().phone || null,
+        calcularRuta: config.GOOGLE_MAPS_API_KEY ? crearCalculadorGoogle(config.GOOGLE_MAPS_API_KEY) : undefined,
         geocodificador:
           o.geocodificador !== undefined
             ? o.geocodificador
             : process.env.VITEST || (o.env.GEOCODIFICAR ?? process.env.GEOCODIFICAR) === 'no'
               ? null
-              : crearGeocodificadorNominatim({ userAgent: `GSGchat/1.0 (entregas de ${ajustes.nombreNegocio() || 'una tienda'}; ${config.PUBLIC_BASE_URL})`, cache: crearCacheGeoSql(pool), log: (m, d) => log(`[mapa] ${m}`, d) }),
+              : config.GOOGLE_MAPS_API_KEY
+                ? crearGeocodificadorGoogle(config.GOOGLE_MAPS_API_KEY)
+                : crearGeocodificadorNominatim({ userAgent: `GSGchat/1.0 (entregas de ${ajustes.nombreNegocio() || 'una tienda'}; ${config.PUBLIC_BASE_URL})`, cache: crearCacheGeoSql(pool), log: (m, d) => log(`[mapa] ${m}`, d) }),
         log: (m, d) => log(`[entregas] ${m}`, d),
       });
       entregasDeLaRegla = entregas;
@@ -320,25 +326,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         version: versionDelPaquete(),
       });
 
-      // Los procesos de esta tienda. La principal (GSG Courier) trae activas las
-      // entregas de courier; una tienda nueva empieza sin ellas y las activa
-      // desde Procesos si las usa. Ver src/procesos.
-      const procesos = await crearServicioProcesos({
-        repos,
-        sender,
-        nombreNegocio: () => ajustes.nombreNegocio(),
-        timezone: config.timezone,
-        plan: plantillaPais,
-        distritos: config.distritos,
-        gsgPorDefecto: o.id === 'principal',
-        opciones: opcionesDesdeConfig(config),
-        salud,
-        politica,
-        clasificar: () => (ia.activa() ? (m) => ia.clasificarOperativo(m) : undefined),
-        log: (m, d) => log(`[procesos] ${m}`, d),
-      });
-      await procesos.cargar();
-      contexto.gsg = () => procesos.gsgActivo();
+      contexto.gsg = () => true;
 
       const resumenes = await crearServicioResumenes({
         settingsRepo,
@@ -399,14 +387,11 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           conexionGsg,
           ia,
           entregas,
-          carpetas: () => [o.base.tipo === 'pglite' ? o.base.dir : o.mediaDir, path.resolve(config.ARCHIVE_DIR)],
+          carpetas: () => [o.mediaDir, path.resolve(config.ARCHIVE_DIR)],
         },
-        cupo: { entregas, lista, reparto: () => lista.ajustesReparto() },
+        cupo: { entregas, reparto: () => opcionesDesdeConfig(config) },
         respaldo: {
-          baseDatos: () =>
-            pglite && o.base.tipo === 'pglite'
-              ? { tipo: 'pglite', dump: () => pglite.dump(), dataDir: o.base.dir }
-              : { tipo: 'postgres', url: o.base.tipo === 'postgres' ? o.base.url : config.DATABASE_URL },
+          baseDatos: () => ({ tipo: 'mysql', url: o.base.url, base: nombreBase }),
           archiveDir: config.ARCHIVE_DIR,
           carpetaPorDefecto: o.carpetaCopias,
           // Una tienda recien creada no se copia al nacer: su primera copia, la proxima noche.
@@ -432,16 +417,12 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         bus,
         ia,
         entrenamiento,
-        conexionStoky,
         plan,
         lista,
         voz,
         entregas,
-        conexionGsg,
-        simuladorGsg,
-        resumenes,
+        conexionGsg,        resumenes,
         fiabilidad,
-        procesos,
         secretoInterno,
         mediaDir: o.mediaDir,
         autoConectarLocal: o.autoConectarLocal,
@@ -481,18 +462,9 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         ia,
         resumenes,
         fiabilidad,
-        procesos,
         log: consola as never,
       });
       limpieza.push(() => pararServicios());
-
-      // El catalogo de Stoky se trae antes de que escriba el primer cliente;
-      // sin esperar: una tienda con Stoky caido no retrasa a las demas.
-      if (conexionStoky.estado().configurada) {
-        void Promise.all([catalogo.ping(), catalogo.precargar()])
-          .then(([estado, precarga]) => log(estado.ok ? `Stoky conectado: ${estado.tenant} / ${estado.warehouse} (${precarga.total} productos)` : `Stoky NO responde: ${estado.detail}`))
-          .catch((error: unknown) => log(`Stoky no se pudo precargar: ${String(error)}`));
-      }
 
       // onReady reabre la sesion de WhatsApp guardada (registerLocalRoutes).
       await app.ready();
@@ -506,7 +478,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         repos,
         ajustes,
         sesion,
-        pglite,
+        pool,
+        base: nombreBase,
         contexto,
         entregas,
         usuarios: async () => (await repos.usuarios.listar()).map((u) => u.usuario),
@@ -514,7 +487,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           if (parada) return;
           parada = true;
           pararServicios();
-          pararPlan?.();
+
           await worker?.close().catch(() => undefined);
           await queue.close().catch(() => undefined);
           await app.close().catch(() => undefined);

@@ -321,7 +321,12 @@ export async function registerConnectRoutes(app: FastifyInstance, deps: ConnectD
     const respuesta = await app.inject({
       method: 'POST',
       url: '/admin/connect',
-      headers: { authorization: request.headers.authorization ?? '' },
+      // La misma identidad de quien llama: su clave de API (solo en X-API-Key) o su sesion.
+      headers: {
+        ...(typeof request.headers['x-api-key'] === 'string' ? { 'x-api-key': request.headers['x-api-key'] } : {}),
+        ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
+        ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
+      },
       payload: {
         ...(body.phoneNumberId ? { phoneNumberId: body.phoneNumberId } : {}),
         ...(body.publicUrl ? { publicUrl: body.publicUrl } : {}),

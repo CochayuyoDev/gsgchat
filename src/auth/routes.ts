@@ -4,9 +4,11 @@
  * Dos formas de entrar:
  *  - una persona, con usuario y contrasena en /login; se lleva una cookie
  *    firmada (ver sesion.ts) y las pantallas dejan de pedir nada;
- *  - un programa (el sistema de GSG, un script), con
- *    `Authorization: Bearer wak_...`: una clave de API que un administrador
- *    creo desde el panel (ver claves-api.ts). No hay ningun token fijo.
+ *  - un programa (el sistema de GSG, un script), con la cabecera
+ *    `X-API-Key: wak_...`: una clave de API que un administrador creo desde
+ *    el panel (ver claves-api.ts). No hay ningun token fijo. La clave solo
+ *    vale en X-API-Key: con `Authorization: Bearer wak_...` se responde 401
+ *    (en /api y en /admin) explicando donde va.
  *
  * El hook de aqui resuelve `request.usuario` para todas las peticiones; las
  * rutas /admin exigen que exista. Cuentas y claves las gestionan solo las
@@ -23,11 +25,13 @@ import { capacidadDe, claveAceptable, hashClave, usuarioAceptable, verificarClav
 import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookies, leerSesion } from './sesion.js';
 import type { ClavesApiRepo } from './claves-api.js';
 import { ETIQUETAS, type ActividadRepo } from './actividad.js';
-import { generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
+import { claveApiVigente, generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
 import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
+import { claveDeCabeceras, claveEnBearer, DESAFIO_CLAVE_API, esRecepcionGsg, RECHAZOS, rechazoSinClave, type RechazoRecepcion } from '../plataforma/recepcion-gsg.js';
+import { cuerpoError } from '../api/errores.js';
 
 export interface UsuarioSesion {
   id: string;
@@ -110,7 +114,7 @@ export function secretoDeSesion(config: Config): string {
   return createHmac('sha256', config.TRACKING_SECRET).update('sesion-de-usuario').digest('hex');
 }
 
-const PAGINAS_PRIVADAS = ['/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/numeros', '/motorizados', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/mapa', '/pagar', '/fiabilidad', '/docs/contrato-gsg.md', '/desarrollador', '/procesos', '/procesos/editor', '/procesos/corrida', '/personas', '/respuestas'];
+const PAGINAS_PRIVADAS = ['/conexion-gsg', '/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/numeros', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/cuentas', '/mapa', '/salud', '/automatizacion-gsg', '/fiabilidad'];
 
 /** Lo que solo toca una persona con rol admin: nunca una clave de API. */
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
@@ -179,11 +183,13 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
         embebido: { telefono: carga.telefono },
       };
     }
-    if (typeof header === 'string' && header.startsWith('Bearer ')) {
-      const token = header.slice(7).trim();
+    // La clave de API: solo `X-API-Key`. Una clave en el Bearer no identifica
+    // a nadie (el hook de abajo la rechaza con 401 en /api y /admin).
+    const token = claveDeCabeceras(request.headers);
+    if (token) {
       if (!pareceClaveApi(token)) return null;
       const clave = await claves.porHash(hashClaveApi(token));
-      if (!clave) return null;
+      if (!clave || !claveApiVigente(clave, ahora())) return null;
       const t = ahora().getTime();
       if ((usoAnotado.get(clave.id) ?? 0) + ANOTAR_USO_CADA_MS <= t) {
         usoAnotado.set(clave.id, t);
@@ -199,11 +205,61 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     return sesionDe(u);
   }
 
+  /** Por que una peticion a la recepcion no entra (o null si entra). */
+  async function rechazoDeRecepcion(request: FastifyRequest): Promise<RechazoRecepcion | null> {
+    const token = claveDeCabeceras(request.headers);
+    if (!token) return rechazoSinClave(request.headers);
+    if (!pareceClaveApi(token)) return RECHAZOS.invalida();
+    if (!request.usuario?.porToken) {
+      const registro = await claves.porHashConRevocadas?.(hashClaveApi(token));
+      return registro?.revocadaAt ? RECHAZOS.revocada() : RECHAZOS.invalida();
+    }
+    if (!tienePermiso(request.usuario.permisos, 'entregas:gestionar')) return RECHAZOS.sinPermiso();
+    return null;
+  }
+
+  const intentosApi = new Map<string, { desde: number; cantidad: number }>();
   app.addHook('onRequest', async (request, reply) => {
+    if (claveDeCabeceras(request.headers) || claveEnBearer(request.headers)) {
+      const t = ahora().getTime();
+      let ventana = intentosApi.get(request.ip);
+      if (!ventana || t - ventana.desde >= 60_000) {
+        if (intentosApi.size >= 2000) intentosApi.delete(intentosApi.keys().next().value!);
+        ventana = { desde: t, cantidad: 0 }; intentosApi.set(request.ip, ventana);
+      }
+      if (++ventana.cantidad > 120) return reply.header('retry-after', String(Math.max(1, Math.ceil((ventana.desde + 60_000 - t) / 1000)))).code(429).send({ error: 'Demasiados intentos de autenticación. Espera un minuto.' });
+    }
     request.usuario = await resolver(request);
+    // La recepcion de pedidos de GSG: solo con una clave de API (nunca con la
+    // sesion del panel) y con el codigo de cada caso: 401 sin clave o con una
+    // que no vale, 403 si vale pero no puede crear pedidos.
+    if (esRecepcionGsg(request.method, request.url)) {
+      const rechazo = await rechazoDeRecepcion(request);
+      if (rechazo) {
+        for (const [k, v] of Object.entries(rechazo.cabeceras ?? {})) reply.header(k, v);
+        return reply.code(rechazo.status).send(rechazo.cuerpo);
+      }
+      // Solo JSON: text/plain tiene parser en Fastify, pero no es el contrato
+      // de Courier. Se comprueba tras autorizar y antes de leer el cuerpo.
+      const contenido = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase();
+      if (contenido !== 'application/json') {
+        return reply.code(415).send(cuerpoError('TIPO_CONTENIDO_NO_SOPORTADO', 'Manda el cuerpo como JSON con Content-Type: application/json.'));
+      }
+      return;
+    }
 
     if (request.url.startsWith('/admin')) {
-      if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: entra en /login o manda una clave de API' });
+      // Una clave `wak_` en el Bearer no vale, aunque sea buena y aunque haya
+      // sesion: se dice donde va en vez de dejarla pasar o ignorarla en silencio.
+      if (claveEnBearer(request.headers)) {
+        const r = RECHAZOS.enBearer();
+        for (const [k, v] of Object.entries(r.cabeceras ?? {})) reply.header(k, v);
+        return reply.code(r.status).send(r.cuerpo);
+      }
+      if (!request.usuario) {
+        reply.header('www-authenticate', DESAFIO_CLAVE_API);
+        return reply.code(401).send({ error: 'no autorizado: entra en /login o manda tu clave de API en la cabecera X-API-Key' });
+      }
       // La API interna es para el panel y para las claves de siempre. Una
       // clave acotada tiene su puerta en /api/v1 y no entra por aqui.
       if (request.usuario.porToken && !tienePermiso(request.usuario.permisos, '*')) {
@@ -221,10 +277,27 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       // El canje de un codigo de conexion entra sin clave: el codigo es la
       // autorizacion, y de ahi sale la clave (ver super-routes.ts).
       if (API_SIN_CLAVE.includes(request.url.split('?')[0] ?? '') || request.url.startsWith('/api/plan/')) return;
-      if (!request.usuario) return reply.code(401).send({ error: 'no autorizado: manda `Authorization: Bearer <clave de API>`' });
+      // Una clave `wak_` en el Bearer: 401 aunque sea valida, diciendo que va en X-API-Key.
+      if (claveEnBearer(request.headers)) {
+        const r = RECHAZOS.enBearer();
+        for (const [k, v] of Object.entries(r.cabeceras ?? {})) reply.header(k, v);
+        return reply.code(r.status).send(r.cuerpo);
+      }
+      if (!request.usuario) {
+        // El token del chat embebido (Bearer emb_...) es otra cosa: un token de
+        // sesion firmado, no una clave de API. Su 401 va aparte, sin mezclarlos.
+        const auth = request.headers.authorization;
+        if (!claveDeCabeceras(request.headers) && typeof auth === 'string' && auth.startsWith('Bearer ') && pareceTokenEmbebido(auth.slice(7).trim())) {
+          reply.header('www-authenticate', 'Bearer realm="gsgchat-embed", error="invalid_token"');
+          return reply.code(401).send(cuerpoError('CLAVE_INVALIDA', 'el token del chat embebido caducó o no es válido: pide uno nuevo'));
+        }
+        const motivo = await rechazoDeRecepcion(request);
+        reply.header('www-authenticate', DESAFIO_CLAVE_API);
+        return reply.code(401).send(cuerpoError(motivo?.cuerpo.codigo ?? 'CLAVE_INVALIDA', 'no autorizado: manda tu clave de API en la cabecera `X-API-Key: <clave>`'));
+      }
       const permiso = request.routeOptions?.config?.permiso;
       if (permiso && !tienePermiso(request.usuario.permisos, permiso)) {
-        return reply.code(403).send({ error: `esta clave no tiene el permiso "${permiso}"` });
+        return reply.code(403).send(cuerpoError('SIN_PERMISO', `esta clave no tiene el permiso "${permiso}"`));
       }
       return;
     }
@@ -355,7 +428,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
   // atiende /registro antes de que llegue a ninguna tienda. Aqui solo se llega
   // en una tienda suelta sin plataforma delante (la demo): se dice claro.
   app.post('/registro', async (_request, reply) =>
-    reply.code(403).send({ error: 'Esta es una demostración de una sola tienda: aquí no se pueden crear tiendas nuevas. En el sistema de verdad, cada registro crea una tienda.' }),
+    reply.code(403).send({ error: 'Esta instalación no tiene registro de tiendas. Contacta al administrador para obtener una cuenta.' }),
   );
 
   // --- quien soy, y usuarios (solo admin) --------------------------------
@@ -439,15 +512,24 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   // --- claves de API (solo admin, solo personas) ---------------------------
 
+  app.addHook('onRequest', async (request, reply) => {
+    if (!request.url.startsWith('/admin/claves-api')) return;
+    reply.header('cache-control', 'no-store');
+    if (request.method === 'GET') return;
+    if (request.headers['sec-fetch-site'] === 'cross-site') return reply.code(403).send({ error: 'Solicitud de otro sitio no permitida.' });
+    const origin = request.headers.origin;
+    if (origin) { let valido = false; try { valido = new URL(origin).origin === new URL(config.PUBLIC_BASE_URL).origin; } catch {} if (!valido) return reply.code(403).send({ error: 'Origen no permitido.' }); }
+  });
   app.get('/admin/claves-api', async () => claves.listar());
 
   /** Crea una clave y la devuelve entera: es la unica vez que se ve. */
   app.post('/admin/claves-api', async (request, reply) => {
-    const body = z.object({ nombre: z.string().max(120), permisos: z.array(z.string()).optional() }).parse(request.body ?? {});
+    const body = z.object({ nombre: z.string().max(120), permisos: z.array(z.string().trim().min(1).max(80)).min(1).max(20).optional(), venceAt: z.string().datetime().nullable().optional() }).strict().parse(request.body ?? {});
     const mal = nombreDeClaveAceptable(body.nombre);
     if (mal) return reply.code(400).send({ error: mal });
-    const permisos = permisosAceptables(body.permisos);
+    const permisos = permisosAceptables(body.permisos ?? ['entregas:leer']);
     if ('error' in permisos) return reply.code(400).send({ error: permisos.error });
+    if (body.venceAt && new Date(body.venceAt).getTime() <= ahora().getTime()) return reply.code(400).send({ error: 'El vencimiento debe estar en el futuro.' });
     const clave = generarClaveApi();
     const registro = await claves.crear({
       nombre: body.nombre,
@@ -455,6 +537,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       hash: hashClaveApi(clave),
       creadaPor: request.usuario?.id ?? null,
       permisos: permisos.permisos,
+      venceAt: body.venceAt ? new Date(body.venceAt) : null,
     });
     return { ok: true, clave, registro };
   });
@@ -462,6 +545,29 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
   app.delete<{ Params: { id: string } }>('/admin/claves-api/:id', async (request, reply) => {
     const ok = await claves.revocar(request.params.id);
     if (!ok) return reply.code(404).send({ error: 'Esa clave no existe o ya estaba revocada.' });
+    return { ok: true };
+  });
+
+  app.patch<{ Params: { id: string } }>('/admin/claves-api/:id', async (request, reply) => {
+    const body = z.object({ nombre: z.string().max(80).optional(), permisos: z.array(z.string().trim().min(1).max(80)).min(1).max(20).optional(), activo: z.boolean().optional(), venceAt: z.string().datetime().nullable().optional() }).strict().parse(request.body ?? {});
+    if (!Object.keys(body).length) return reply.code(400).send({ error: 'Indica el cambio.' });
+    if (body.nombre !== undefined) { const mal = nombreDeClaveAceptable(body.nombre); if (mal) return reply.code(400).send({ error: mal }); }
+    const permisos = body.permisos ? permisosAceptables(body.permisos) : null;
+    if (permisos && 'error' in permisos) return reply.code(400).send({ error: permisos.error });
+    if (body.venceAt && new Date(body.venceAt).getTime() <= ahora().getTime()) return reply.code(400).send({ error: 'El vencimiento debe estar en el futuro.' });
+    const registro = await claves.actualizar(request.params.id, { ...body, permisos: permisos && 'permisos' in permisos ? permisos.permisos : undefined, venceAt: body.venceAt === undefined ? undefined : body.venceAt === null ? null : new Date(body.venceAt) });
+    if (!registro) return reply.code(404).send({ error: 'Clave no disponible, revocada o vencida para activación.' });
+    return { ok: true, registro };
+  });
+  app.post<{ Params: { id: string } }>('/admin/claves-api/:id/renovar', async (request, reply) => {
+    const clave = generarClaveApi();
+    const registro = await claves.renovar(request.params.id, hashClaveApi(clave), prefijoDeClave(clave));
+    if (!registro) return reply.code(404).send({ error: 'Clave no disponible o revocada.' });
+    return { ok: true, clave, registro };
+  });
+  app.post<{ Params: { id: string } }>('/admin/claves-api/:id/eliminar', async (request, reply) => {
+    const body = z.object({ nombre: z.string().min(2).max(80) }).strict().parse(request.body ?? {});
+    if (!await claves.eliminar(request.params.id, body.nombre)) return reply.code(404).send({ error: 'La clave no existe o el nombre no coincide.' });
     return { ok: true };
   });
 

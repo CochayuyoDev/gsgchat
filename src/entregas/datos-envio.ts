@@ -13,10 +13,11 @@
  *
  * El monto puede venir como numero (85 → "85.00") o como texto. Lo que no
  * viene no se inventa: el primer mensaje al cliente simplemente no lleva esa
- * linea. Ver docs/CONTRATO-GSG.md.
+ * linea. Ver /api/v1/openapi.json.
  */
 
 import { datosEnvioLimpios, type DatosEnvio } from './repo.js';
+import { horarioGsgSchema } from './seguimiento-gsg.js';
 
 const texto = (v: unknown): string | null => {
   if (v === null || v === undefined) return null;
@@ -37,6 +38,7 @@ export function montoEnTexto(v: unknown): string | null {
 export function datosEnvioDeCrudo(crudo: unknown): DatosEnvio | null {
   if (!crudo || typeof crudo !== 'object') return null;
   const c = crudo as Record<string, unknown>;
+  const horario = horarioGsgSchema.safeParse(c.horarioEntrega);
   let empresaCodigo = texto(c.empresaCodigo) ?? texto(c.tiendaCodigo);
   let empresaNombre = texto(c.empresaNombre) ?? texto(c.tiendaNombre);
   const empresa = c.empresa ?? c.tienda;
@@ -58,7 +60,28 @@ export function datosEnvioDeCrudo(crudo: unknown): DatosEnvio | null {
     telefonoMotorizado ??= texto(m.telefono) ?? texto(m.phone);
   } else motorizadoNombre = texto(moto) ?? texto(c.motorizadoNombre);
   if (telefonoMotorizado && telefonoMotorizado.replace(/\D/g, '').length < 6) telefonoMotorizado = null;
-  return datosEnvioLimpios({
+  const datos = datosEnvioLimpios({
+    horarioEntregaDesde: horario.success ? horario.data.desde : null,
+    horarioEntregaHasta: horario.success ? horario.data.hasta : null,
+    horarioEntregaFechaDesde: horario.success ? horario.data.fechaDesde ?? null : null,
+    horarioEntregaFechaHasta: horario.success ? horario.data.fechaHasta ?? null : null,
+    horarioEntregaZonaHoraria: horario.success ? horario.data.zonaHoraria ?? null : null,
+    costServ: montoEnTexto(c.costServ),
+    referenciaDireccion: texto(c.referenciaDireccion),
+    fecRegistro: texto(c.fecRegistro),
+    fecRuta: texto(c.fecRuta),
+    observacionCliente: texto(c.observacionCliente),
+    detalleProducto: texto(c.detalleProducto),
+    telefono2: texto(c.telefono2),
+    tamano: texto(c.tamano),
+    cantBultos: texto(c.cantBultos),
+    clientePagaDelivery: texto(c.clientePagaDelivery),
+    sede: texto(c.sede),
+    tipoRuta: texto(c.tipoRuta),
+    nroDocumento: texto(c.nroDocumento),
+    agenciaNombre: texto(c.agenciaNombre),
+    agenciaDestino: texto(c.agenciaDestino),
+    pagoEnDestino: texto(c.pagoEnDestino),
     motorizadoNombre,
     telefonoMotorizado,
     producto: texto(c.producto),
@@ -70,6 +93,9 @@ export function datosEnvioDeCrudo(crudo: unknown): DatosEnvio | null {
     monto: montoEnTexto(c.monto),
     remitente: texto(c.remitente),
   });
+  if (Object.hasOwn(c, 'horarioEntrega') && c.horarioEntrega === null) return { ...(datos ?? {}), horarioEntregaDesde: null, horarioEntregaHasta: null, horarioEntregaFechaDesde: null, horarioEntregaFechaHasta: null, horarioEntregaZonaHoraria: null };
+  if (horario.success) return { ...(datos ?? {}), horarioEntregaDesde: horario.data.desde, horarioEntregaHasta: horario.data.hasta, horarioEntregaFechaDesde: horario.data.fechaDesde ?? null, horarioEntregaFechaHasta: horario.data.fechaHasta ?? null, horarioEntregaZonaHoraria: horario.data.zonaHoraria ?? null };
+  return datos;
 }
 
 /** "516 - Zapatería Lima", "516" o "Zapatería Lima", segun lo que haya. */
@@ -88,7 +114,7 @@ export function empresaEnTexto(d: DatosEnvio | null | undefined): string {
 export function fusionarDatosEnvio(antes: DatosEnvio | null | undefined, nuevos: DatosEnvio | null | undefined): DatosEnvio | null {
   if (!nuevos) return null;
   const junto = datosEnvioLimpios({ ...(antes ?? {}), ...nuevos });
-  if (!junto) return null;
+  if (!junto) return datosEnvioLimpios(antes ?? null) ? {} : null;
   const a = JSON.stringify(datosEnvioLimpios(antes ?? null) ?? {});
   return JSON.stringify(junto) === a ? null : junto;
 }

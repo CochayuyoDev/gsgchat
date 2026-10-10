@@ -23,7 +23,7 @@
 import type { Contact, Repos } from '../db/repos.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Solicitud } from '../db/rutas.js';
-import { despacharReportes, payloadIncidencia, payloadUbicacion, type PuertoGsg } from './gsg.js';
+import { despacharReportes, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { resolverPorUbicacion } from '../entregas/ubicacion-unica.js';
 
@@ -126,6 +126,9 @@ const NO_SOY_YO = [
   /\bno conozco a nadie\b|\bno se (quien es|de que pedido|de que me hablan|de que hablan)\b/,
   /\bno reconozco (ese|esa|este|esta|el|la) (pedido|compra|paquete|envio|numero|tienda)\b/,
   /\bwrong number\b/,
+  // «Aquí no vive nadie con ese nombre», «esa persona no vive aquí» (batería del 30/09).
+  /\b(aqui|aca) no vive (nadie|ningun\w*|esa persona|ese senor|esa senora)\b/,
+  /\bno vive (nadie )?(aqui|aca) (nadie )?(con ese nombre|asi)\b|\b(esa persona|ese senor|esa senora) no vive (aqui|aca)\b/,
 ];
 
 export function pareceNoSoyYo(texto: string): boolean {
@@ -159,7 +162,7 @@ async function reportar(
     loteId: lote.id,
     tipo,
     payload:
-      tipo === 'ubicacion' ? payloadUbicacion(solicitud, lote) : payloadIncidencia(solicitud, lote),
+      tipo === 'ubicacion' ? await payloadUbicacionDelPedido(deps.repos, solicitud, lote) : payloadIncidencia(solicitud, lote),
   });
   if (tipo === 'ubicacion') despacharYa(deps);
 }
@@ -240,7 +243,7 @@ async function corregirUbicacion(
       solicitudId: resuelta.id,
       loteId: lote.id,
       tipo: 'ubicacion',
-      payload: { ...payloadUbicacion(actualizada, lote), corregida: true },
+      payload: { ...(await payloadUbicacionDelPedido(deps.repos, actualizada, lote)), corregida: true },
     });
     despacharYa(deps);
   }
@@ -300,7 +303,7 @@ export async function atenderRespuestaDeRuta(
       deps,
       solicitud,
       'rechaza_contacto',
-      'el cliente pidió no recibir más mensajes',
+      'dado de baja por el equipo: no recibe más mensajes',
     );
     return { atendida: true, resultado: 'rechazo', solicitud: actualizada };
   }
@@ -345,7 +348,7 @@ export async function atenderRespuestaDeRuta(
     // La «única verdad»: cualquier OTRA solicitud abierta de ese telefono (otro
     // lote, otro pedido) y la lista de envio automatico dejan de pedirsela.
     if (contact.phone) {
-      await resolverPorUbicacion(repos, contact.phone, { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng, mapsUrl: entrada.ubicacion.mapsUrl ?? null, fuente: entrada.ubicacion.fuente ?? 'whatsapp' }, { ahora: momento, motivo: 'la mandó por otra solicitud del mismo número', excepto: [solicitud.id], soloVivas: true }).catch(() => []);
+      await resolverPorUbicacion(repos, contact.phone, { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng, mapsUrl: entrada.ubicacion.mapsUrl ?? null, fuente: entrada.ubicacion.fuente ?? 'whatsapp' }, { ahora: momento, motivo: 'la mandó por otra solicitud del mismo número', excepto: [solicitud.id], soloVivas: true, referencias: solicitud.referencia ? [solicitud.referencia] : [] }).catch(() => []);
     }
 
     deps.log?.('ubicacion conseguida', {

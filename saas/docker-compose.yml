@@ -1,4 +1,4 @@
-# Lo comun del SaaS: el proxy (Caddy) y el Postgres. Las instancias de cada
+# Lo comun del SaaS: el proxy (Caddy) y el MariaDB. Las instancias de cada
 # tienda son proyectos compose aparte (saas/instancias/<slug>/compose.yml)
 # que se cuelgan de la misma red. Se levanta con `npm run saas:base`.
 name: wa-saas
@@ -22,27 +22,30 @@ services:
     networks: [wa-saas]
     restart: unless-stopped
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: wa-saas-postgres
+  mariadb:
+    image: mariadb:11.4
+    container_name: wa-saas-mariadb
     environment:
-      POSTGRES_USER: wa
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wa}
-      POSTGRES_DB: postgres
+      MARIADB_ROOT_PASSWORD: ${MARIADB_PASSWORD:-wa}
+      # Con el usuario wa entran las instancias; saas/alta.ts le da permiso
+      # solo sobre las bases de cada una (wa_<slug> y wa_<slug>_*).
+      MARIADB_USER: wa
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-wa}
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_bin']
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mariadb:/var/lib/mysql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U wa -d postgres']
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
     networks: [wa-saas]
     restart: unless-stopped
 
 volumes:
   caddy_data:
   caddy_config:
-  pgdata:
+  mariadb:
 
 networks:
   wa-saas:

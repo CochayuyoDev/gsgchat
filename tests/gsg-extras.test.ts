@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { crearGsgExtras, estadoDeToken, revisarPedidoGsg, BITACORA_MAX } from '../src/rutas/gsg-extras.js';
 import { createMemorySettingsRepo, TEST_SETTINGS_KEY } from './fakes.js';
-import { crearEscenarioEntregas, type EscenarioEntregas } from './escenario-entregas.js';
+import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { crearGsgSimulado, registerGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { crearConexionGsg, RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from '../src/rutas/conexion-gsg.js';
@@ -111,7 +111,6 @@ describe('los tokens del simulador, los descartes, la bitácora y el cuadre (ser
   });
 
   it('cada llamada se cuenta en palabras', () => {
-    expect(resultadoEnPalabras(200, { faltaUbicacion: [1, 2], faltaConfirmacion: [], terminados: [3] })).toBe('respondió: falta ubicación 2 · falta confirmar 0 · terminados 1');
     expect(resultadoEnPalabras(201, { creadas: 3, repetidas: 1, descartadas: [{}] })).toBe('creados 3, repetidos 1, descartados 1');
     expect(resultadoEnPalabras(401, { error: 'token inválido' })).toBe('rechazada: token inválido');
     expect(resultadoEnPalabras(404, {})).toBe('rechazada: ruta desconocida');
@@ -159,12 +158,14 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
     // Los pedidos de prueba siguen vivos: el día no está cerrado.
     expect(c.body.cuadre.ok).toBe(false);
     expect(c.body.cuadre.abiertas.length).toBeGreaterThan(0);
+    // Ni el verificador ni el cuadre le hicieron ninguna llamada a GSG.
+    expect(e.llamadasAGsg.filter((l) => l.metodo === 'GET')).toEqual([]);
     const nadie = await e.app.inject({ method: 'POST', url: '/admin/gsg/verificar-contrato', headers: { authorization: 'Bearer nada' }, payload: {} });
     expect(nadie.statusCode).toBe(401);
   });
 
   it('las llamadas a la API de pedidos quedan en la bitácora con la clave que entró', async () => {
-    const api = await e.api.post('/api/v1/entregas', { referencia: 'P-API-1', telefono: '987000099', nombre: 'Api' });
+    const api = await e.api.post('/api/v1/entregas', { ...OBLIGATORIOS_GSG, referencia: 'P-API-1', telefono: '987000099', nombre: 'Api' });
     expect([200, 201]).toContain(api.status);
     const r2 = await e.api.get<{ bitacora: Array<{ que: string; quien: string; resultado: string }> }>('/admin/gsg');
     const fila = r2.body.bitacora.find((x) => x.que === 'POST /api/v1/entregas');
@@ -202,21 +203,21 @@ describe('el token del simulador vale desde fuera (servidor mínimo con el simul
     const creado = await app.inject({ method: 'POST', url: '/admin/gsg/tokens-simulador', headers: admin, payload: { nombre: 'Equipo GSG', dias: 5 } });
     expect(creado.statusCode, creado.body).toBe(201);
     const { token, registro } = creado.json() as { token: string; registro: { id: string } };
-    const ok = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { authorization: `Bearer ${token}` } });
+    const ok = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { 'x-api-key': token } });
     expect(ok.statusCode, ok.body).toBe(200);
     expect((ok.json() as { faltaUbicacion: number }).faltaUbicacion).toBeGreaterThan(0);
-    const malo = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { authorization: 'Bearer gsgsim_inventado' } });
+    const malo = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { 'x-api-key': 'gsgsim_inventado' } });
     expect(malo.statusCode).toBe(401);
     expect((malo.json() as { error: string }).error).toMatch(/caducó o fue anulado/);
     const sinToken = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado` });
     expect(sinToken.statusCode).toBe(401);
     expect(await app.inject({ method: 'DELETE', url: `/admin/gsg/tokens-simulador/${registro.id}`, headers: { 'x-prueba-admin': '1' } }).then((r) => r.statusCode)).toBe(200);
-    const despues = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { authorization: `Bearer ${token}` } });
+    const despues = await app.inject({ method: 'GET', url: `${RUTA_SIMULADOR}/reparto/estado`, headers: { 'x-api-key': token } });
     expect(despues.statusCode).toBe(401);
     const r = (await app.inject({ method: 'GET', url: '/admin/gsg' })).json() as { bitacora: Array<{ que: string; status: number; quien: string; resultado: string }>; tokens: Array<{ estado: string; usos: number }> };
     expect(r.bitacora[0]).toMatchObject({ que: `GET ${RUTA_SIMULADOR}/reparto/estado`, status: 401 });
     expect(r.bitacora.find((x) => x.status === 200 && x.quien.includes('Equipo GSG'))).toBeTruthy();
-    expect(r.bitacora.find((x) => x.quien === 'sin token')?.status).toBe(401);
+    expect(r.bitacora.find((x) => x.quien === 'sin X-API-Key')?.status).toBe(401);
     expect(r.tokens[0]).toMatchObject({ estado: 'anulado', usos: 1 });
     const sinPermiso = await app.inject({ method: 'POST', url: '/admin/gsg/tokens-simulador', payload: { nombre: 'x' } });
     expect(sinPermiso.statusCode).toBe(403);

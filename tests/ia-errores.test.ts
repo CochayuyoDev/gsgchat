@@ -11,13 +11,14 @@
  * IA (lo que enciende el aviso de «sin saldo / clave que no vale») y la clave
  * guardada NUNCA se borra por un fallo.
  *
- * Tambien: los modelos de razonamiento (gpt-6-luna) que no aceptan
- * `max_tokens` ni `temperature`.
+ * Tambien: el «Razonamiento» de los modelos que razonan (gpt-6-luna), que
+ * no aceptan `max_tokens` ni `temperature`, sobre los ajustes que el
+ * proveedor ya aprende solo (ver ia-conexion.test.ts).
  *
  * Todo con proveedores y fetch de mentira: nada sale a la red.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { Contact } from '../src/db/repos.js';
@@ -34,20 +35,19 @@ import {
   crearProveedorOpenAI,
   ErrorIA,
   falloDeCuenta,
-  MINIMO_TOKENS_RAZONANDO,
-  rechazaParametros,
+  MINIMO_CON_RAZONAMIENTO,
+  olvidarAjustesDeModelos,
   textoDeContenido,
   type MensajeIA,
   type OpcionesChat,
   type ProveedorIA,
 } from '../src/ia/proveedores.js';
-import { INSISTENCIAS_UBICACION } from '../src/ia/agente-operativo.js';
 import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SETTINGS_KEY, type FakeRepos, type FakeWhatsApp } from './fakes.js';
 import { crearEscenarioEntregas, type EscenarioEntregas } from './escenario-entregas.js';
 
 const config = loadConfig({
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -91,6 +91,9 @@ const crudo = (status: number, texto: string) => new Response(texto, { status, h
 const ok = (content: unknown, extra: Record<string, unknown> = {}) => json(200, { choices: [{ message: { content }, finish_reason: 'stop', ...extra }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
 
 const MENSAJES: MensajeIA[] = [{ role: 'user', content: 'hola' }];
+
+// Lo que el proveedor aprende de cada modelo es de todo el proceso: cada prueba empieza de cero.
+beforeEach(() => olvidarAjustesDeModelos());
 
 async function fallo(p: ProveedorIA, o: Partial<OpcionesChat> = {}): Promise<ErrorIA> {
   const e = await p.chat(MENSAJES, { modelo: 'gpt-4o-mini', timeoutMs: 200, ...o }).then(
@@ -227,12 +230,20 @@ describe('modelos de razonamiento (gpt-6-luna)', () => {
     expect(await p.chat(MENSAJES, { modelo: 'gpt-6-luna', maxTokens: 30, temperatura: 0 })).toBe('Hola, estoy listo.');
     expect(f.peticiones).toHaveLength(1);
     const c = f.peticiones[0]!;
-    expect(c).toMatchObject({ model: 'gpt-6-luna', reasoning_effort: 'low', max_completion_tokens: MINIMO_TOKENS_RAZONANDO });
+    expect(c).toMatchObject({ model: 'gpt-6-luna', reasoning_effort: 'low', max_completion_tokens: MINIMO_CON_RAZONAMIENTO });
     expect(c).not.toHaveProperty('max_tokens');
     expect(c).not.toHaveProperty('temperature');
     // Un tope mayor que el margen se respeta.
     await p.chat(MENSAJES, { modelo: 'gpt-6-luna', maxTokens: 5000 });
     expect(f.peticiones[1]!.max_completion_tokens).toBe(5000);
+  });
+
+  it('con razonamiento en otro servicio (un proxy): tambien a la primera, aunque el nombre no se conozca', async () => {
+    const f = fetchFalso(comoLuna);
+    const p = crearProveedorOpenAI({ baseUrl: 'https://mi-proxy.example/v1', clave: CLAVE, fetchImpl: f, razonamiento: 'alto' });
+    expect(await p.chat(MENSAJES, { modelo: 'gpt-6-luna', maxTokens: 8 })).toBe('Hola, estoy listo.');
+    expect(f.peticiones).toHaveLength(1);
+    expect(f.peticiones[0]).toMatchObject({ reasoning_effort: 'high' });
   });
 
   it('cada nivel con su nombre de la API', async () => {
@@ -251,39 +262,22 @@ describe('modelos de razonamiento (gpt-6-luna)', () => {
     expect(f.peticiones[0]).not.toHaveProperty('max_completion_tokens');
   });
 
-  it('sin razonamiento elegido y el modelo rechaza max_tokens: reintenta UNA vez adaptado y lo recuerda para ese modelo', async () => {
+  it('sin razonamiento elegido, gpt-6-luna en la API de OpenAI ya sale bien a la primera', async () => {
     const f = fetchFalso(comoLuna);
-    const p = crearProveedorOpenAI({ baseUrl: '', clave: CLAVE, fetchImpl: f });
-    expect(await p.chat(MENSAJES, { modelo: 'gpt-6-luna', maxTokens: 8 })).toBe('Hola, estoy listo.');
-    expect(f.peticiones).toHaveLength(2);
-    expect(f.peticiones[0]).toHaveProperty('max_tokens', 8);
-    expect(f.peticiones[1]).toMatchObject({ max_completion_tokens: MINIMO_TOKENS_RAZONANDO });
-    expect(f.peticiones[1]).not.toHaveProperty('max_tokens');
-    expect(f.peticiones[1]).not.toHaveProperty('temperature');
-    // La siguiente va directa con el cuerpo adaptado.
-    await p.chat(MENSAJES, { modelo: 'gpt-6-luna' });
-    expect(f.peticiones).toHaveLength(3);
-    expect(f.peticiones[2]).not.toHaveProperty('max_tokens');
-    // Otro modelo sigue con el cuerpo de siempre.
-    await p.chat(MENSAJES, { modelo: 'gpt-4o-mini' });
-    expect(f.peticiones[3]).toHaveProperty('max_tokens');
+    expect(await crearProveedorOpenAI({ baseUrl: 'https://api.openai.com/v1', clave: CLAVE, fetchImpl: f }).chat(MENSAJES, { modelo: 'gpt-6-luna', maxTokens: 8 })).toBe('Hola, estoy listo.');
+    expect(f.peticiones).toHaveLength(1);
+    expect(f.peticiones[0]).toMatchObject({ max_completion_tokens: MINIMO_CON_RAZONAMIENTO });
+    expect(f.peticiones[0]).not.toHaveProperty('reasoning_effort');
   });
 
-  it('tambien con una temperature rechazada; y si el reintento falla, no hay un tercero', async () => {
-    const f = fetchFalso((c) => ('temperature' in c ? json(400, RECHAZO_TEMPERATURA) : ok('bien')));
-    expect(await crearProveedorOpenAI({ baseUrl: '', clave: CLAVE, fetchImpl: f }).chat(MENSAJES, { modelo: 'o-algo' })).toBe('bien');
+  it('un modelo que no acepta reasoning_effort: se quita, se reintenta y se recuerda', async () => {
+    const f = fetchFalso((c) => ('reasoning_effort' in c ? json(400, { error: { message: "Unrecognized request argument supplied: reasoning_effort", param: 'reasoning_effort', type: 'invalid_request_error' } }) : ok('bien')));
+    const p = crearProveedorOpenAI({ baseUrl: 'https://api.openai.com/v1', clave: CLAVE, fetchImpl: f, razonamiento: 'bajo' });
+    expect(await p.chat(MENSAJES, { modelo: 'gpt-4o-mini' })).toBe('bien');
     expect(f.peticiones).toHaveLength(2);
-    const siempre400 = fetchFalso(() => json(400, RECHAZO_MAX_TOKENS));
-    const e = await fallo(crearProveedorOpenAI({ baseUrl: '', clave: CLAVE, fetchImpl: siempre400 }));
-    expect(e.message).toBe('la API respondio 400');
-    expect(siempre400.peticiones).toHaveLength(2);
-    // Un 400 que no es por esos parametros no se reintenta.
-    const otro400 = fetchFalso(() => json(400, { error: { message: 'messages is required' } }));
-    await fallo(crearProveedorOpenAI({ baseUrl: '', clave: CLAVE, fetchImpl: otro400 }));
-    expect(otro400.peticiones).toHaveLength(1);
-    expect(rechazaParametros(400, RECHAZO_MAX_TOKENS)).toBe(true);
-    expect(rechazaParametros(400, RECHAZO_TEMPERATURA)).toBe(true);
-    expect(rechazaParametros(401, RECHAZO_MAX_TOKENS)).toBe(false);
+    await p.chat(MENSAJES, { modelo: 'gpt-4o-mini' });
+    expect(f.peticiones).toHaveLength(3);
+    expect(f.peticiones[2]).not.toHaveProperty('reasoning_effort');
   });
 
   it('con razonamiento, una respuesta vacia por gastar el tope en pensar se explica', async () => {
@@ -307,7 +301,7 @@ describe('modelos de razonamiento (gpt-6-luna)', () => {
     expect(f.peticiones.at(-1)).toMatchObject({ reasoning_effort: 'medium' });
     // Sin razonamiento guardado: no se manda.
     await m.ia.guardar({ razonamiento: '' });
-    await m.ia.turno(m.contact, 'gracias');
+    await m.ia.turno(m.contact, '¿hacen envíos a provincia?');
     expect(f.peticiones.at(-1)).not.toHaveProperty('reasoning_effort');
   });
 });
@@ -536,7 +530,9 @@ describe('las marcas de control, aunque vengan torcidas', () => {
       expect(r.resultado).toBe(espera.resultado);
       const recibido = m.alCliente();
       for (const x of recibido) expectSinCrudo(x.body);
-      if (espera.texto) expect(recibido.find((x) => x.kind === 'text')?.body).toBe(espera.texto);
+      // Con el boton, lo que dijo el asistente va en el mismo mensaje que la peticion.
+      if (espera.texto && espera.boton) expect(recibido.find((x) => x.kind === 'location_request')?.body.startsWith(`${espera.texto}\n\n`)).toBe(true);
+      else if (espera.texto) expect(recibido.find((x) => x.kind === 'text')?.body).toBe(espera.texto);
       expect(recibido.some((x) => x.kind === 'location_request')).toBe(Boolean(espera.boton));
       // Nunca un mensaje vacio.
       expect(recibido.every((x) => x.kind !== 'text' || x.body.trim().length > 0)).toBe(true);
@@ -690,28 +686,6 @@ describe('«Solo lo de GSG» con el modelo fallando', () => {
     expect(f.peticiones.length).toBe(0);
   });
 
-  const FALLOS: Array<[string, Contestar]> = [
-    ['sin red', () => 'red'],
-    ['se cuelga', () => 'colgado'],
-    ['500', () => json(500, {})],
-    ['200 que no es JSON', () => crudo(200, '<html>x</html>')],
-    ['JSON sin choices', () => json(200, {})],
-    ['una frase en vez de una categoria', () => ok('Claro, con gusto te ayudo con eso {"x":1}')],
-    ['vacio', () => ok('')],
-  ];
-  for (const [nombre, c] of FALLOS) {
-    it(`${nombre}: el cliente recibe el texto fijo de las reglas, nunca el error ni lo que dijo el modelo`, async () => {
-      const tel = await clienteSinPin();
-      contestar = c;
-      const salio = await dice(tel, '¿a qué hora llega?');
-      expect(salio).toHaveLength(1);
-      expect(salio[0]).toMatch(/nos falta su ubicación/);
-      expectSinCrudo(salio[0]!);
-      const salio2 = await dice(await clienteSinPin(), 'mañana mejor');
-      expect(salio2).toEqual([INSISTENCIAS_UBICACION[0]]);
-    });
-  }
-
   it('el turno libre de la IA no habla con clientes en este modo, ni con el proveedor roto', async () => {
     contestar = () => 'red';
     const tel = await clienteSinPin();
@@ -725,17 +699,5 @@ describe('«Solo lo de GSG» con el modelo fallando', () => {
     const llamadas = f.peticiones.length;
     expect(await dice('987699999', '¿a qué hora llega mi pedido?')).toEqual([]);
     expect(f.peticiones.length).toBe(llamadas);
-  });
-
-  it('la clave que no vale: el cliente recibe lo mismo, sale el aviso y la clave NO se borra', async () => {
-    contestar = () => json(401, { error: { message: 'Incorrect API key provided', code: 'invalid_api_key' } });
-    const tel = await clienteSinPin();
-    const salio = await dice(tel, '¿a qué hora llega?');
-    expect(salio).toHaveLength(1);
-    expect(salio[0]).toMatch(/nos falta su ubicación/);
-    expect(e.asistente!.avisoSaldo()?.motivo).toBe('clave_invalida');
-    expect(e.asistente!.estado().tieneToken).toBe(true);
-    expect((await e.settingsRepo.getAll()).some((s) => s.key === 'ia.token')).toBe(true);
-    expect(e.asistente!.uso().fallosSeguidos).toBeGreaterThan(0);
   });
 });

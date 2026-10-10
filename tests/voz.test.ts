@@ -39,7 +39,7 @@ import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SET
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -66,7 +66,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 /** Un Ogg/Opus de mentira: lo unico que se mira es la firma "OggS". */
 const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(200, 7)]);
@@ -420,24 +420,24 @@ describe('el asistente con voz', () => {
     await cliente();
     eleven.estado.fallar = new ErrorVoz('Se acabaron los caracteres del plan de ElevenLabs por este mes.', 402, 'cuota');
     await processChange('messages', entranteAudio(), deps);
-    // Sin transcripcion posible, se le pide el texto, como sin voz.
-    expect(String(enviados()[0]!.body)).toContain('Recibí tu audio');
+    // Sin transcripcion posible es un archivo sin texto: no se contesta (pedido del dueño, 06/10).
+    expect(enviados()).toHaveLength(0);
     expect(voz.estado().ultimoError?.detalle).toContain('caracteres');
 
     eleven.estado.fallar = null;
     modelo.estado.siguiente = 'x'.repeat(700);
     await voz.guardar({ cuando: 'siempre', maxCaracteres: 600 });
     await processChange('messages', entranteTexto('hola'), deps);
-    expect(enviados()[1]).toMatchObject({ kind: 'text' });
+    expect(enviados()[0]).toMatchObject({ kind: 'text' });
     expect(eleven.estado.hablado).toEqual([]);
   });
 
-  it('sin voz configurada, todo sigue como antes: a un audio se le pide el texto', async () => {
+  it('sin voz configurada, un audio sin transcribir no se contesta (archivo sin texto)', async () => {
     await voz.guardar({ clave: '' });
     await cliente();
     await processChange('messages', entranteAudio(), deps);
     expect(eleven.estado.transcritos).toBe(0);
-    expect(String(enviados()[0]!.body)).toContain('¿Me cuentas por escrito');
+    expect(enviados()).toHaveLength(0);
   });
 
   it('desde el chat, "mandar como audio" manda lo escrito como nota de voz de una persona; si no se puede, lo dice', async () => {

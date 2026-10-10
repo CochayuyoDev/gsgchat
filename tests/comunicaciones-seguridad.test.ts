@@ -2,7 +2,8 @@
  * Las comunicaciones con fuera: lo que se arreglo en la revision de
  * seguridad, consistencia y estabilidad de las APIs.
  *
- *  - Un escape en la ruta (`/%61dmin`) ya no se salta la autorizacion.
+ *  - Un escape en la ruta (`/%61dmin`) ya no se salta la autorizacion: ni en
+ *    /admin, ni en /api/v1, ni en la recepcion de pedidos de GSG.
  *  - El handshake de Meta no acepta un verify token vacio.
  *  - El simulador de GSG no se abre con el token fijo de antes.
  *  - Graph y WAHA se cortan por tiempo y un fallo de red es un error tipado.
@@ -25,12 +26,13 @@ import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { createWhatsAppClient, WhatsAppApiError } from '../src/whatsapp/client.js';
 import { createWahaClient } from '../src/whatsapp/waha/client.js';
 import { despacharEntregas } from '../src/webhooks/despachador.js';
-import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, type FakeWhatsApp } from './fakes.js';
+import { createFakeRepos, createFakeSettings, createFakeWhatsApp, CLAVE_API_PRUEBA, type FakeRepos, type FakeWhatsApp } from './fakes.js';
 import { createFakeWebhooks } from './fakes-webhooks.js';
+import { crearEscenarioEntregas, OBLIGATORIOS_GSG } from './escenario-entregas.js';
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -54,7 +56,7 @@ const queue: OutboundQueue = {
 };
 
 const CLAVE = 'wak_claveDeEnvioSeguridad0123456789abcdefXY';
-const con = (clave: string, extra: Record<string, string> = {}) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json', ...extra });
+const con = (clave: string, extra: Record<string, string> = {}) => ({ 'x-api-key': clave, 'content-type': 'application/json', ...extra });
 
 let app: FastifyInstance | null = null;
 let repos: FakeRepos;
@@ -90,11 +92,40 @@ describe('la ruta que ven los ganchos es la que ve el enrutador', () => {
   });
 
   it('/%61dmin y /%61pi sin credenciales dan 401, como sin escape', async () => {
-    for (const url of ['/admin/health', '/%61dmin/health', '/%61%64min/health']) {
+    for (const url of ['/admin/health', '/%61dmin/health', '/%61%64min/health', '/a%64min/health']) {
       expect((await app!.inject({ method: 'GET', url })).statusCode, url).toBe(401);
     }
-    for (const url of ['/api/v1/estado', '/%61pi/v1/estado', '/api/v1/%65stado']) {
+    for (const url of ['/api/v1/estado', '/%61pi/v1/estado', '/api/v1/%65stado', '/%61%70%69/v1/conversaciones']) {
       expect((await app!.inject({ method: 'GET', url })).statusCode, url).toBe(401);
+    }
+  });
+
+  it('una clave acotada no entra a /admin con escapes', async () => {
+    for (const url of ['/admin/health', '/%61dmin/health']) {
+      expect((await app!.inject({ method: 'GET', url, headers: con(CLAVE) })).statusCode, url).toBe(403);
+    }
+  });
+
+  it('la recepcion de pedidos de GSG con escapes pasa por sus mismas reglas', async () => {
+    const esc = await crearEscenarioEntregas({});
+    try {
+      const pedido = (tracking: string) => JSON.stringify({ ...OBLIGATORIOS_GSG, tracking, cliente: 'Cliente Escape', telefono: '987654321' });
+      for (const url of ['/api/v1/entregas', '/%61pi/v1/entregas', '/api/v1/%65ntregas', '/api/%76%31/entregas']) {
+        // Sin clave: 401 con el codigo de la recepcion.
+        const sin = await esc.app.inject({ method: 'POST', url, headers: { 'content-type': 'application/json' }, payload: pedido('ESC-1') });
+        expect(sin.statusCode, url).toBe(401);
+        expect(sin.json(), url).toMatchObject({ codigo: 'CLAVE_AUSENTE' });
+        // Con clave pero sin JSON: la recepcion exige application/json (solo
+        // la ve si el gancho reconoce la ruta).
+        const texto = await esc.app.inject({ method: 'POST', url, headers: { 'x-api-key': CLAVE_API_PRUEBA, 'content-type': 'text/plain' }, payload: 'hola' });
+        expect(texto.statusCode, url).toBe(415);
+      }
+      expect(await esc.entrega('ESC-1')).toBeFalsy();
+      const ok = await esc.app.inject({ method: 'POST', url: '/%61pi/v1/entregas', headers: con(CLAVE_API_PRUEBA), payload: pedido('ESC-2') });
+      expect(ok.statusCode).toBe(201);
+      expect(await esc.entrega('ESC-2')).toBeTruthy();
+    } finally {
+      await esc.cerrar();
     }
   });
 });
@@ -108,6 +139,10 @@ describe('handshake del webhook de Meta', () => {
   it('sin verify token configurado no se suscribe nadie, ni con uno vacio', () => {
     expect(verifyChallenge({ 'hub.mode': 'subscribe', 'hub.verify_token': '', 'hub.challenge': '123' }, '')).toBeNull();
     expect(verifyChallenge({ 'hub.mode': 'subscribe', 'hub.challenge': '123' }, '')).toBeNull();
+  });
+
+  it('un challenge de mas de 200 caracteres no se devuelve', () => {
+    expect(verifyChallenge({ 'hub.mode': 'subscribe', 'hub.verify_token': 'verify-me', 'hub.challenge': 'x'.repeat(201) }, 'verify-me')).toBeNull();
   });
 
   it('igualSeguro: vacio o de otro tipo nunca coincide', () => {
@@ -152,6 +187,10 @@ describe('los clientes de Meta y WAHA no se cuelgan', () => {
     const html = (async () => new Response('<html>502 Bad Gateway</html>', { status: 502 })) as unknown as typeof fetch;
     const meta2 = createWhatsAppClient({ token: 't', phoneNumberId: 'P', businessAccountId: 'W', fetchImpl: html });
     await expect(meta2.sendText('51987654321', 'hola')).rejects.toMatchObject({ name: 'WhatsAppApiError', httpStatus: 502, retryable: true });
+
+    const noJson = (async () => new Response('hola', { status: 200 })) as unknown as typeof fetch;
+    const meta3 = createWhatsAppClient({ token: 't', phoneNumberId: 'P', businessAccountId: 'W', fetchImpl: noJson });
+    await expect(meta3.sendText('51987654321', 'hola')).rejects.toMatchObject({ name: 'WhatsAppApiError', httpStatus: 502, retryable: false });
   });
 
   it('WAHA colgado se corta por tiempo', async () => {

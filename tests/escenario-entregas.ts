@@ -3,7 +3,8 @@
  *
  * Lo que se prueba es el flujo entero con el servidor real:
  *
- *   GSG (simulado) dice quién falta ubicación y quién falta confirmar
+ *   GSG (simulado) manda quién falta ubicación y quién falta confirmar
+ *     (`gsgManda()`: en memoria, como si empujara; GSGchat nunca le pide nada)
  *     → el reparto pide la ubicación, este módulo pide la confirmación
  *     → los clientes contestan (pin, "sí", "no", "mañana", cosas raras)
  *     → con las dos cosas, el pin va a un motorizado (otros diez números)
@@ -25,7 +26,7 @@ import { conReglaGsg } from '../src/entregas/regla-gsg.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { crearMotor, OPCIONES_POR_DEFECTO, type Motor, type ResultadoTick } from '../src/rutas/motor.js';
 import { despacharReportes, type DespachoResumen } from '../src/rutas/gsg.js';
-import { crearConexionGsg, RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from '../src/rutas/conexion-gsg.js';
+import { crearConexionGsg, type ServicioConexionGsg } from '../src/rutas/conexion-gsg.js';
 import { cargarLote } from '../src/rutas/cargar.js';
 import { PLANES } from '../src/rutas/telefono.js';
 import { crearGsgSimulado, enviarListaDelSimulador, type GsgSimulado } from '../src/entregas/gsg-simulado.js';
@@ -47,6 +48,9 @@ export const PAUSA_SEGUNDOS = 5;
 
 /** Un punto en Miraflores: dentro de la cobertura de Lima. */
 export const PIN_LIMA = { lat: -12.1211, lng: -77.0301 };
+
+/** Lo que GSG manda siempre en cada pedido (obligatorio en POST /api/v1/entregas), aparte de tracking, cliente y telefono. */
+export const OBLIGATORIOS_GSG = { empresa: { codigo: 'T01', nombre: 'Tienda Prueba' }, metodoPago: 'Contraentrega', montoCobrar: 50 };
 
 export type RespuestaCliente = { pin: { lat: number; lng: number } } | { enlace: string } | { texto: string } | { baja: true } | { adjunto: 'image' | 'audio' | 'video' | 'document' | 'sticker' } | { audio: string } | { boton: { id: string; title: string } };
 
@@ -103,15 +107,16 @@ export interface EscenarioEntregas {
   /** La entrega de hoy de un cliente (por teléfono o referencia), tal como la ve la pantalla. */
   entrega(quien: string): Promise<FilaEntrega | undefined>;
   resumen(): Promise<ResumenEntregas>;
-  /**
-   * GSG (el simulador) le manda a GSGchat su lista del día, como si la
-   * empujara: en memoria, sin red. GSGchat nunca se la pide.
-   */
-  gsgManda(): Promise<RespuestaApi<ResultadoSincronizacion>>;
-  /** Todas las llamadas que salieron hacia GSG (la URL falsa o el simulador): método y ruta. */
-  llamadasAGsg: Array<{ metodo: string; ruta: string }>;
   /** Vacía la cola de reportes contra el simulador. */
   despacharAGsg(): Promise<DespachoResumen>;
+  /**
+   * GSG (el simulador) le manda a GSGchat su lista del día, en memoria, como
+   * si la empujara. Es la única forma en que entran sus pedidos: GSGchat
+   * nunca se la pide. Devuelve lo mismo que devolvía la antigua sincronización.
+   */
+  gsgManda(): Promise<RespuestaApi<ResultadoSincronizacion>>;
+  /** Cada llamada HTTP que GSGchat le hizo a la API (falsa) de GSG, en orden. */
+  llamadasAGsg: Array<{ metodo: string; ruta: string }>;
   cerrar(): Promise<void>;
 }
 
@@ -167,7 +172,7 @@ export async function crearEscenarioEntregas(opciones: {
     RUTAS_PAUSA_MIN_SEG: String(PAUSA_SEGUNDOS),
     RUTAS_PAUSA_MAX_SEG: String(PAUSA_SEGUNDOS),
     PUBLIC_BASE_URL: 'http://localhost:3000',
-    DATABASE_URL: 'postgres://x/y',
+    DATABASE_URL: 'mysql://x/y',
     WHATSAPP_TOKEN: 't',
     WHATSAPP_PHONE_NUMBER_ID: 'PNID',
     WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -192,23 +197,17 @@ export async function crearEscenarioEntregas(opciones: {
     eventos.push({ nombre, payload });
   });
 
-  // El simulador de GSG, colgado de fetch como si fuera su API (la URL
-  // falsa del .env) y tambien como el simulador de este servidor (cuando la
-  // prueba pone la conexion en modo simulador).
+  // El simulador de GSG, colgado de fetch como si fuera su API.
   const simulador = crearGsgSimulado({ token: GSG_TOKEN_FALSO, ahora: reloj });
-  const URL_SIMULADOR_LOCAL = `http://localhost:3000${RUTA_SIMULADOR}`;
-  const llamadasAGsg: Array<{ metodo: string; ruta: string }> = [];
   const fetchOriginal = globalThis.fetch;
+  const llamadasAGsg: Array<{ metodo: string; ruta: string }> = [];
   globalThis.fetch = (async (entrada: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = urlDe(entrada);
-    const base = url.startsWith(GSG_URL_FALSA) ? GSG_URL_FALSA : url.startsWith(URL_SIMULADOR_LOCAL) ? URL_SIMULADOR_LOCAL : null;
-    if (!base) return fetchOriginal(entrada, init);
-    llamadasAGsg.push({ metodo: (init?.method ?? 'GET').toUpperCase(), ruta: url.slice(base.length) });
+    if (!url.startsWith(GSG_URL_FALSA)) return fetchOriginal(entrada, init);
+    llamadasAGsg.push({ metodo: (init?.method ?? 'GET').toUpperCase(), ruta: url.slice(GSG_URL_FALSA.length) });
     const headers = new Headers(init?.headers);
-    const auth = headers.get('authorization');
-    const crudo = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-    // El token interno del simulador vale como el de la URL falsa.
-    const token = base === URL_SIMULADOR_LOCAL && crudo === TOKEN_SIMULADOR ? GSG_TOKEN_FALSO : crudo;
+    // Como la API real de GSG: la clave solo en X-API-Key (un Bearer no cuenta).
+    const token = headers.get('x-api-key');
     let cuerpo: unknown = undefined;
     if (init?.body) {
       try {
@@ -217,7 +216,7 @@ export async function crearEscenarioEntregas(opciones: {
         cuerpo = {};
       }
     }
-    const r = simulador.atender((init?.method ?? 'GET').toUpperCase(), url.slice(base.length), token, cuerpo);
+    const r = simulador.atender((init?.method ?? 'GET').toUpperCase(), url.slice(GSG_URL_FALSA.length), token, cuerpo);
     const body = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     return new Response(body, { status: r.status, headers: { 'content-type': typeof r.body === 'string' ? 'text/html' : 'application/json' } });
   }) as typeof fetch;
@@ -227,7 +226,7 @@ export async function crearEscenarioEntregas(opciones: {
   // mensajes y que el agente (si no, «desde que se abrió la solicitud» o «el
   // pedido llegó después del cierre» comparan fechas de dos relojes).
   repos.rutas = createFakeRutas(reloj);
-  repos.entregas = createFakeEntregas(reloj);
+  repos.entregas = createFakeEntregas(reloj, r => repos.rutas.encolarReporte(r));
   const wa = createFakeWhatsApp();
   wa.tieneWhatsApp = async () => true;
   const settings = await createFakeSettings(config);
@@ -328,10 +327,10 @@ export async function crearEscenarioEntregas(opciones: {
 
   const opcionesMotor = { ...OPCIONES_POR_DEFECTO, pausaMinSegundos: PAUSA_SEGUNDOS, pausaMaxSegundos: PAUSA_SEGUNDOS, horaInicio, horaFin, negocio: config.businessName };
   // Como en produccion (src/servicios.ts): la primera solicitud de una entrega sale con la plantilla de GSG.
-  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) });
+  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }), primerMensaje: entregas.primerMensajeReparto });
   const motorEntregas = crearMotorEntregas({ repos, entregas, opciones: opcionesMotor, ahora: reloj, azar: () => 0 });
 
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
   async function llamar<T>(method: 'GET' | 'POST' | 'DELETE', url: string, body?: unknown): Promise<RespuestaApi<T>> {
     const res = await app.inject({ method, url, headers: auth, ...(body === undefined ? {} : { payload: body as Record<string, unknown> }) });
     let parsed: unknown;
@@ -364,10 +363,6 @@ export async function crearEscenarioEntregas(opciones: {
     eventos,
     ahora: reloj,
     inicio,
-    llamadasAGsg,
-    async gsgManda() {
-      return { status: 200, body: await enviarListaDelSimulador(simulador, entregas) };
-    },
     avanzar(minutos) {
       ahora = new Date(ahora.getTime() + minutos * 60_000);
     },
@@ -434,6 +429,10 @@ export async function crearEscenarioEntregas(opciones: {
     },
     resumen: () => entregas.resumen(),
     despacharAGsg: () => despacharReportes({ rutas: repos.rutas }, conexionGsg.puerto(), 100),
+    async gsgManda() {
+      return { status: 200, body: await enviarListaDelSimulador(simulador, entregas) };
+    },
+    llamadasAGsg,
     async cerrar() {
       globalThis.fetch = fetchOriginal;
       await app.close();

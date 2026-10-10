@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+﻿import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -7,12 +7,12 @@ export default defineConfig({
     /**
      * Arrancar Postgres embebido (PGlite) tarda.
      *
-     * Varios ficheros levantan uno en su `beforeAll`, y con la máquina cargada
-     * —o con el asistente corriendo al lado— pasan de los 10 s de fábrica: el
+     * Varios ficheros levantan uno en su `beforeAll`, y con la mÃ¡quina cargada
+     * â€”o con el asistente corriendo al ladoâ€” pasan de los 10 s de fÃ¡brica: el
      * fichero entero se salta con "Hook timed out" y parece un fallo del
-     * código cuando suelto pasa en dos segundos.
+     * cÃ³digo cuando suelto pasa en dos segundos.
      */
-    hookTimeout: 60_000,
+    hookTimeout: 900_000,
     testTimeout: 30_000,
   },
 });

@@ -10,7 +10,7 @@ const SECRET = 'app-secret-de-prueba';
 
 const ENV = {
   PUBLIC_BASE_URL: 'https://ejemplo.test',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -120,26 +120,20 @@ describe('mensajes entrantes', () => {
     expect(wa.sent.some((m) => m.kind === 'location_request')).toBe(true);
   });
 
-  it('BAJA da de baja al contacto de inmediato', async () => {
+  it('el cliente que escribe BAJA no se da de baja: eso lo hace el equipo', async () => {
     const { deps, repos } = await build();
     await processChange('messages', inbound({ text: { body: 'BAJA' } }), deps);
-    expect((await repos.contacts.getByPhone('5215599999999'))?.optOutAt).toBeInstanceOf(Date);
+    expect((await repos.contacts.getByPhone('5215599999999'))?.optOutAt).toBeNull();
   });
 
-  it('reconoce la baja con acentos y espacios', async () => {
-    const { deps, repos } = await build();
-    await processChange('messages', inbound({ text: { body: '  Bajá  ' } }), deps);
-    expect((await repos.contacts.getByPhone('5215599999999'))?.optOutAt).toBeInstanceOf(Date);
-  });
-
-  it('ALTA registra el opt-in y borra la baja previa', async () => {
+  it('el cliente que escribe ALTA tampoco se da de alta', async () => {
     const { deps, repos } = await build();
     await repos.contacts.setOptOut('5215599999999');
     await processChange('messages', inbound({ text: { body: 'alta' } }), deps);
 
     const contact = await repos.contacts.getByPhone('5215599999999');
-    expect(contact?.optInAt).toBeInstanceOf(Date);
-    expect(contact?.optOutAt).toBeNull();
+    expect(contact?.optInAt).toBeNull();
+    expect(contact?.optOutAt).toBeInstanceOf(Date);
   });
 
   it('el entrante abre la ventana de 24 h', async () => {
@@ -279,5 +273,41 @@ describe('deduplicacion de entrantes', () => {
     // ...y otro id es otro mensaje.
     await processChange('messages', inbound({ id: 'wamid.in.2', text: { body: 'hola' } }), deps);
     expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(2);
+  });
+});
+
+describe('ráfaga: el cliente escribe en trozos', () => {
+  it('tres mensajes seguidos se contestan una sola vez, con el texto junto', async () => {
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: false });
+    const conRafaga = { ...deps, rafagaMs: 300 };
+    await Promise.all(['hola', 'quiero cotizar', 'un envío a Lince'].map((texto, i) =>
+      processChange('messages', inbound({ id: `wamid.rafaga.${i}`, text: { body: texto } }), conRafaga)));
+    expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
+  });
+
+  it('sin rafagaMs en las dependencias (Meta, QR local, simulador) vale RAFAGA_MS de la configuración', async () => {
+    const { deps, repos, wa } = await build();
+    await repos.automation.setPrefs({ askLocationFallback: true, preventaActiva: false });
+    // Como el webhook de Meta: no pasa rafagaMs; la configuración trae 300 ms.
+    const sinRafaga = { ...deps, rafagaMs: undefined, config: { ...deps.config, RAFAGA_MS: 300 } };
+    await Promise.all(['hola', 'quiero cotizar', 'un envío a Lince'].map((texto, i) =>
+      processChange('messages', inbound({ id: `wamid.rafaga.cfg.${i}`, text: { body: texto } }), sinRafaga)));
+    expect(wa.sent.filter((m) => m.kind === 'location_request')).toHaveLength(1);
+  });
+
+  it('juntarRafaga une lo que escribió desde la última respuesta', async () => {
+    const { juntarRafaga } = await import('../src/handlers/inbound.js');
+    const ahora = new Date();
+    const hilo = [
+      { direction: 'in', kind: 'text', body: 'mensaje de ayer', createdAt: new Date(ahora.getTime() - 86_400_000) },
+      { direction: 'out', kind: 'text', body: 'Hola, ¿en qué te ayudo?', createdAt: ahora },
+      { direction: 'in', kind: 'text', body: 'hola', createdAt: ahora },
+      { direction: 'in', kind: 'text', body: 'quiero cotizar', createdAt: ahora },
+      { direction: 'in', kind: 'text', body: 'un envío a Lince', createdAt: ahora },
+    ];
+    const ultimo = { id: 'w-x', from: '5215599999998', timestamp: '0', type: 'text', text: { body: 'un envío a Lince' } } as InboundMessage;
+    const unido = await juntarRafaga(ultimo, 'c-1', { messages: { listMessages: async () => hilo } } as never);
+    expect(unido.text?.body).toBe('hola\nquiero cotizar\nun envío a Lince');
   });
 });

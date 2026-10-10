@@ -126,8 +126,9 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
   /** Lo que se mira cada minuto: el reparto (ubicaciones que llegaron por ahi) y las segundas visitas sin respuesta. */
   async function revisar(): Promise<void> {
     await entregas.revisarReparto().catch((error) => log('no se pudo revisar el reparto', { detalle: String(error) }));
-    await entregas.revisarSegundasVisitas().catch((error) => log('no se pudieron revisar las segundas visitas', { detalle: String(error) }));
     await entregas.revisarPropuestas().catch((error) => log('no se pudieron revisar las direcciones propuestas', { detalle: String(error) }));
+    // El primer mensaje de cada pedido: lo que quedo a medias (reinicio, reparto que no cargo) se recupera aqui.
+    await entregas.revisarMensajes().catch((error) => log('no se pudieron revisar los primeros mensajes', { detalle: String(error) }));
   }
 
   const motor: MotorEntregas = {
@@ -165,56 +166,6 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
       if (deps.salud && deps.salud.factor() <= 0) {
         ultimoMotivo = 'el monitor de salud tiene el número parado';
         return { accion: 'nada', motivo: ultimoMotivo };
-      }
-
-      // 1. Los motorizados: un pedido listo sale antes que una confirmacion
-      //    nueva, porque ya tiene todo y el cliente espera su hora.
-      for (const e of await listaMotorizado()) {
-        if (frenada(e.id)) continue;
-        // (una apartada por falta de motorizado se reintenta sola: si ya hay uno, sale de la incidencia)
-        if (e.estado === 'lista' || (e.estado === 'incidencia' && (e.incidencia === 'sin_motorizado' || (e.incidencia === 'consulta_ajena' && Boolean(e.motorizadoSinUbicacionAt) && e.ubicacionEstado === 'pendiente')))) {
-          if (!dentroDeHorario) {
-            ultimoMotivo = `fuera del horario de envío (${vigentes.horaInicio}:00 a ${vigentes.horaFin}:00)`;
-            continue;
-          }
-          const r = await entregas.mandarAMotorizado(e);
-          if (r.ok) {
-            anotarEnvio();
-            ultimoMotivo = null;
-            return { accion: 'motorizado', entregaId: e.id };
-          }
-          if (r.retryAfterMs) {
-            ultimoMotivo = r.motivo ?? null;
-            frenar(e.id, r.retryAfterMs);
-            continue;
-          }
-          return { accion: 'incidencia', entregaId: e.id, motivo: r.motivo };
-        }
-        // El motorizado ya dio su tiempo pero el aviso al cliente quedo
-        // esperando su turno (el ritmo del numero): se vuelve a intentar.
-        if (e.motorizadoEstado === 'respondio') {
-          const r = await entregas.reintentarAviso(e);
-          if (r.ok) {
-            anotarEnvio();
-            ultimoMotivo = null;
-            return { accion: 'aviso', entregaId: e.id };
-          }
-          if (r.retryAfterMs) {
-            ultimoMotivo = r.motivo ?? null;
-            frenar(e.id, r.retryAfterMs);
-            continue;
-          }
-          return { accion: 'incidencia', entregaId: e.id, motivo: r.motivo };
-        }
-        // Esperando a un motorizado que no contesta: se le insiste aunque
-        // sea tarde, el pedido ya esta en marcha.
-        const r = await entregas.atenderMotorizadoQueNoContesta(e);
-        if (r.ok) {
-          anotarEnvio();
-          return { accion: 'insistencia_motorizado', entregaId: e.id, motivo: r.motivo };
-        }
-        if (r.retryAfterMs) continue;
-        return { accion: 'incidencia', entregaId: e.id, motivo: r.motivo };
       }
 
       // 2. Las confirmaciones que toca pedir (y, antes, las direcciones que

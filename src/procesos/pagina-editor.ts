@@ -118,8 +118,8 @@ function pintar() {
   var caja = document.getElementById('editor');
   if (p.plantilla === 'gsg') {
     caja.innerHTML = '<div class="tarjeta gsg-aviso"><h2 class="titulo-sec">' + esc(p.nombre) + ' ' + (p.estado === 'activo' ? chip('verde', 'Activo') : chip('gris', 'Desactivado')) + '</h2>' +
-      '<p>Este proceso usa el módulo de entregas: los pedidos llegan desde GSG, a cada cliente se le pide la ubicación y la confirmación, el pedido va al motorizado y se avisa la hora de llegada. Sus mensajes, horarios y motorizados se configuran en sus propias pantallas.</p>' +
-      '<div class="acciones"><a class="btn primario" href="/hoy">Abrir Hoy</a><a class="btn" href="/numeros">Números del día</a><a class="btn" href="/motorizados">Motorizados</a><a class="btn" href="/mapa">Mapa</a><a class="btn" href="/procesos">Volver a Procesos</a></div></div>';
+      '<p>Este proceso usa el módulo de entregas: los pedidos llegan desde GSG, a cada cliente se le pide la ubicación y la confirmación, la ubicación y la confirmación quedan registradas. Sus mensajes y horarios se configuran en Hoy.</p>' +
+      '<div class="acciones"><a class="btn primario" href="/hoy">Abrir Hoy</a><a class="btn" href="/numeros">Números del día</a><a class="btn" href="/mapa">Mapa</a><a class="btn" href="/procesos">Volver a Procesos</a></div></div>';
     return;
   }
   var variables = d.variables;
@@ -225,7 +225,7 @@ document.getElementById('editor').addEventListener('click', async function (ev) 
   }
   if (b.id === 'cargar-personas') {
     if (cambios) { avisar('Primero guarda los cambios de los pasos: la lista usa lo que está guardado.', true); return; }
-    var r = await abrirCarga({ procesoId: ID, nombre: p.nombre, ejemplo: d.ejemplo, columnas: d.columnasSugeridas, motorizados: p.plantilla === 'campo' });
+    var r = await abrirCarga({ procesoId: ID, nombre: p.nombre, ejemplo: d.ejemplo, columnas: d.columnasSugeridas, motorizados: false });
     if (r) { avisar(r.aviso, false, r.ir); await cargar(); }
   }
 });

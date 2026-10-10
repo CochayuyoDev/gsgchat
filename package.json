@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "GSGchat: WhatsApp para reparto y entregas (ubicacion, confirmacion, motorizados con hora de llegada) y ventas con IA, con guardas anti-bloqueo",
+  "description": "GSGchat: pedidos, ubicación y confirmación por WhatsApp",
   "engines": {
     "node": ">=20"
   },
@@ -19,14 +19,16 @@
     "templates:sync": "tsx src/templates/sync-cli.ts",
     "templates:lint": "tsx src/templates/push-cli.ts --lint",
     "templates:push": "tsx src/templates/push-cli.ts --push",
-    "demo": "tsx scripts/demo.ts",
     "quick": "tsx scripts/quick.ts",
     "saas:base": "tsx saas/base.ts",
     "saas:alta": "tsx saas/alta.ts",
     "saas:baja": "tsx saas/baja.ts",
     "saas:estado": "tsx saas/estado.ts",
     "saas:maestro": "tsx saas/maestro/server.ts",
-    "saas:prueba": "tsx saas/prueba.ts"
+    "saas:prueba": "tsx saas/prueba.ts",
+    "test:api-mock": "vitest run tests/flujo-diagrama-gsg.test.ts tests/api-errores.test.ts tests/gsg-endpoint-global.test.ts tests/modulos-reducidos.test.ts --maxWorkers=2 --minWorkers=1",
+    "test:release": "vitest run tests/api-v1.test.ts tests/server.test.ts tests/sender.test.ts tests/chat.test.ts tests/ia-conexion.test.ts tests/ia-primero.test.ts tests/ia-lector.test.ts tests/templates.test.ts tests/monitor.test.ts tests/salud.test.ts tests/waha.test.ts tests/voz.test.ts tests/settings.test.ts tests/units.test.ts tests/entrenamiento.test.ts tests/fiabilidad-vigilante.test.ts tests/fiabilidad-rutas.test.ts tests/flujo-diagrama-gsg.test.ts tests/api-errores.test.ts tests/gsg-endpoint-global.test.ts tests/modulos-reducidos.test.ts tests/fiabilidad-humo.test.ts tests/auth.test.ts tests/flujo-sin-motorizados.test.ts tests/ajustes-generales.test.ts --maxWorkers=2 --minWorkers=1",
+    "test:release:sql": "vitest run tests/gsg-produccion.test.ts tests/recepcion-plataforma-sql.test.ts --maxWorkers=1 --minWorkers=1"
   },
   "dependencies": {
     "@fastify/websocket": "^11.0.1",
@@ -36,14 +38,12 @@
     "dotenv": "^16.4.7",
     "fastify": "^5.2.0",
     "ioredis": "^5.4.2",
-    "pg": "^8.13.1",
+    "mysql2": "^3.24.5",
     "qrcode": "^1.5.4",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^22.10.2",
-    "@types/pg": "^8.11.10",
     "@types/qrcode": "^1.5.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

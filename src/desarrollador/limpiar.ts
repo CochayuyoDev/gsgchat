@@ -35,12 +35,12 @@ export async function borrarTodoLoDePrueba(db: DesarrolladorRepo): Promise<Resul
   // que llevan dentro. Antes que las solicitudes (algunos reportes cuelgan de ellas).
   const reportes = await n(
     `delete from rutas_reportes
-      where payload->>'referencia' like $1 or payload->>'telefono' like $2 or payload->>'telefono' like $3`,
+      where json_unquote(json_extract(payload, '$.referencia')) like $1 or json_unquote(json_extract(payload, '$.telefono')) like $2 or json_unquote(json_extract(payload, '$.telefono')) like $3`,
     [REF, CLI, MOTO],
   );
   const webhooks = await n(
     `delete from webhook_entregas
-      where estado <> 'enviada' and (payload::text like $1 or payload::text like $2 or payload::text like $3)`,
+      where estado <> 'enviada' and (cast(payload as char) like $1 or cast(payload as char) like $2 or cast(payload as char) like $3)`,
     [`%${PREFIJO_REFERENCIA_PRUEBA}%`, `%${PREFIJO_CLIENTE_PRUEBA}%`, `%${PREFIJO_MOTORIZADO_PRUEBA}%`],
   );
 
@@ -55,7 +55,7 @@ export async function borrarTodoLoDePrueba(db: DesarrolladorRepo): Promise<Resul
   let lotesBorrados = 0;
   if (lotes.length) {
     lotesBorrados = await n(
-      `delete from rutas_lotes l where l.id = any($1::uuid[]) and not exists (select 1 from rutas_solicitudes s where s.lote_id = l.id)`,
+      `delete l from rutas_lotes l where l.id in ($1) and not exists (select 1 from rutas_solicitudes s where s.lote_id = l.id)`,
       [lotes],
     );
   }
@@ -71,7 +71,7 @@ export async function borrarTodoLoDePrueba(db: DesarrolladorRepo): Promise<Resul
 
   // La clave de prueba ya se revoca al terminar cada tanda; por si quedo alguna
   // de un corte a medias, se revocan todas las que llevan su nombre.
-  const claves = await n(`update claves_api set revocada_at = now() where nombre = $1 and revocada_at is null`, ['Módulo desarrollador (prueba)']);
+  const claves = await n(`update claves_api set revocada_at = now(3) where nombre = $1 and revocada_at is null`, ['Módulo desarrollador (prueba)']);
 
   return { entregas, solicitudes, lotes: lotesBorrados, reportes, webhooks, envioAutomatico, contactos, motorizados, claves };
 }
@@ -87,7 +87,7 @@ export async function contarLoDePrueba(db: DesarrolladorRepo): Promise<{ porEsta
     porEstado,
     clientes: Object.values(porEstado).reduce((a, b) => a + b, 0),
     motorizados: await uno(`select count(*) as n from motorizados where phone like $1`, [MOTO]),
-    reportesPendientes: await uno(`select count(*) as n from rutas_reportes where estado = 'pendiente' and (payload->>'referencia' like $1 or payload->>'telefono' like $2)`, [REF, CLI]),
+    reportesPendientes: await uno(`select count(*) as n from rutas_reportes where estado = 'pendiente' and (json_unquote(json_extract(payload, '$.referencia')) like $1 or json_unquote(json_extract(payload, '$.telefono')) like $2)`, [REF, CLI]),
     // A cuantos clientes de prueba ya se les escribio (hay un mensaje saliente en su hilo).
     escritos: await uno(`select count(distinct c.id) as n from contacts c join messages m on m.contact_id = c.id and m.direction = 'out' where c.phone like $1`, [CLI]),
   };

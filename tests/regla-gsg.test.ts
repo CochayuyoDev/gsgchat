@@ -144,32 +144,31 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
     expect(String(nuevos[0]!.body)).toContain(EXPLICACION);
   });
 
-  it('otra cosa antes del pin: sticker → insistencia 1 → «hola» → insistencia 2 → «?» → insistencia 3 → «qué tal» → el cierre UNA vez con el número del motorizado asignado sin ubicación → «hola» → nada (ni recordatorios)', async () => {
+  it('otra cosa antes del pin: sticker, «hola», «?» y «qué tal» → silencio y queda anotado; «quiero hablar con una persona» → se deriva UNA vez y el bot se pausa; después nada (ni recordatorios)', async () => {
     const antes = e.mensajesA('987000003').length;
-    const paso = async (entrada: Parameters<EscenarioEntregas['contesta']>[1], esperado: string | RegExp, conBoton: boolean) => {
-      const a = e.mensajesA('987000003').length;
-      await e.contesta('987000003', entrada);
-      const nuevos = e.mensajesA('987000003').slice(a);
-      expect(nuevos.map((m) => String(m.body))).toEqual([typeof esperado === 'string' ? esperado : expect.stringMatching(esperado)]);
-      expect(nuevos[0]!.kind === 'location_request').toBe(conBoton);
-    };
-    await paso({ adjunto: 'sticker' }, INSISTENCIAS_UBICACION[0]!, true);
+    await e.contesta('987000003', { adjunto: 'sticker' });
+    await e.contesta('987000003', { texto: 'hola' });
+    await e.contesta('987000003', { texto: '?' });
+    await e.contesta('987000003', { texto: 'qué tal' });
+    expect(e.mensajesA('987000003')).toHaveLength(antes);
     expect(await cerrada('987000003')).toBeNull();
-    await paso({ texto: 'hola' }, INSISTENCIAS_UBICACION[1]!, true);
-    await paso({ texto: '?' }, INSISTENCIAS_UBICACION[2]!, true);
-    expect(await cerrada('987000003')).toBeNull();
-    // Con motorizados activos, se le asigna uno SIN ubicación antes del cierre: el número es el suyo.
-    await paso({ texto: 'qué tal' }, /^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: \+51 999 000 \d{3}\.$/, false);
-    expect(e.textosA('987000003').slice(antes)).toHaveLength(4);
+    const c0 = (await e.repos.contacts.getByPhone(conPais('987000003')))!;
+    const decisiones = await e.repos.decisiones.listarPorContacto(c0.id, 10);
+    expect(decisiones.map((d) => d.intencion)).toEqual(['ajena', 'ajena', 'ajena', 'sin_texto']);
+    expect(decisiones.every((d) => d.respuesta.startsWith('silencio') && d.esperaba === 'ubicación')).toBe(true);
+    // Pide una persona: el texto de derivación UNA vez, el bot en pausa.
+    await e.contesta('987000003', { texto: 'quiero hablar con una persona' });
+    const nuevos = e.textosA('987000003').slice(e.textosA('987000003').length - 1);
+    expect(e.mensajesA('987000003')).toHaveLength(antes + 1);
+    expect(nuevos[0]).toMatch(/^Por este canal no se reciben consultas. Te derivamos con un asesor humano./);
+    const c = (await e.repos.contacts.getByPhone(conPais('987000003')))!;
+    expect(c.botPausadoAt).not.toBeNull();
     expect(await cerrada('987000003')).not.toBeNull();
-    const p3 = (await e.entrega('P-1003'))!;
-    expect(p3.motorizadoId).not.toBeNull();
-    expect([p3.estado, p3.requiereHumano, p3.ubicacionEstado]).toEqual(['esperando_motorizado', false, 'pendiente']);
-    const solicitud = await e.repos.rutas.abiertaPorTelefono(conPais('987000003'));
-    if (solicitud) expect([solicitud.requiereHumano, solicitud.proximoIntentoAt]).toEqual([false, null]);
+    const [ultima] = await e.repos.decisiones.listarPorContacto(c.id, 1);
+    expect(ultima).toMatchObject({ intencion: 'pedir_persona', como: 'reglas' });
+    expect((await e.entrega('P-1003'))!.requiereHumano).toBe(true);
     const tras = e.mensajesA('987000003').length;
     await e.contesta('987000003', { texto: 'hola' });
-    expect(e.mensajesA('987000003')).toHaveLength(tras);
     await e.contesta('987000003', { texto: 'hola?? me responden' });
     await e.contesta('987000003', { adjunto: 'audio' });
     // Pasan horas: el reparto no le vuelve a escribir.
@@ -180,11 +179,11 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
     expect(e.mensajesA('987000003')).toHaveLength(tras);
   });
 
-  it('dos insistencias (un sticker, un audio) y luego el pin: UBI REGISTRADA con «¡Muchas gracias!», sin cierre', async () => {
+  it('un sticker y un audio sin texto no reciben nada; luego el pin: UBI REGISTRADA con «¡Muchas gracias!», sin cierre', async () => {
     const antes = e.mensajesA('987000004').length;
     await e.contesta('987000004', { adjunto: 'sticker' });
     await e.contesta('987000004', { adjunto: 'audio' });
-    expect(e.textosA('987000004').slice(antes)).toEqual([INSISTENCIAS_UBICACION[0], INSISTENCIAS_UBICACION[1]]);
+    expect(e.textosA('987000004').slice(antes)).toEqual([]);
     const a = e.textosA('987000004').length;
     // Su pin en su distrito (Lince): lejos de él se le preguntaría si es ahí (ver la matriz, sección G).
     await e.contesta('987000004', { pin: PIN_LINCE });
@@ -265,7 +264,7 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
     expect(e.textosA('987000010').slice(a10)).toEqual([cierreCon(telefonoEnPalabras(asignado.phone))]);
   });
 
-  it('nunca un texto del modelo: lo emocional, un saludo, un chiste, salud o política reciben las 3 insistencias fijas, el cierre UNA vez y luego silencio', async () => {
+  it('nunca un texto del modelo: lo emocional, un saludo, un chiste, salud o política quedan en silencio (anotados para el equipo)', async () => {
     await e.asistente!.guardar({ activa: true, proveedor: 'openai', modelo: 'gpt-4o-mini', token: 'sk-prueba' });
     const casos = ['me siento muy triste, no sé qué hacer', 'hola ¿cómo estás?', 'cuéntame un chiste', 'me duele mucho la cabeza, ¿qué tomo?', '¿qué piensas de las elecciones?', 'mmm bueno pero mañana no estoy toda la tarde en casa sabes'];
     for (const [i, texto] of casos.entries()) {
@@ -284,8 +283,8 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
       await e.contesta(tel, { texto: 'bueno ya' });
       await e.contesta(tel, { texto: 'hola' });
       const textos = e.textosA(tel).slice(antes);
-      // El cierre con el número del motorizado que se le asignó sin ubicación.
-      expect(textos, texto).toEqual([...INSISTENCIAS_UBICACION, expect.stringMatching(/^Por este canal no se reciben consultas\. Te derivamos con un asesor humano\. Número del motorizado: \+51 999 000 \d{3}\.$/)]);
+      // Lo personal y lo ajeno no reciben respuesta automática (pedido del dueño, 06/10).
+      expect(textos, texto).toEqual([]);
     }
     for (const m of e.wa.sent) expect(String(m.body ?? '')).not.toContain('Lamento mucho');
     // El asistente de clientes no conversa en este modo, ni llamándolo directo.

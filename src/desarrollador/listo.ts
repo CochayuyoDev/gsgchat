@@ -5,14 +5,13 @@
  * simulador de GSG: nunca la API real, y sin tocar la conexion de la tienda
  * ni su cola. A la API real de GSG no se le pide nada nunca (ni para
  * probarla): los pedidos entran cuando GSG los empuja y GSGchat solo le
- * manda los reportes.
+ * manda la ubicacion y los demas reportes.
  *
  * Rutas (el hook de routes.ts ya exige una persona administradora):
  *  POST /admin/desarrollador/listo/comprobar   recorre el contrato
  *  GET  /admin/desarrollador/listo/ultimo      el ultimo resultado y la conexion vigente
  *  GET  /admin/desarrollador/listo/produccion  lo que falta para salir a produccion (WhatsApp, GSG real,
- *                                              https, la clave de GSG, su webhook, soporte, supervisor,
- *                                              modo prueba, agente operativo)
+ *                                              https, soporte, supervisor, modo prueba, agente operativo)
  */
 
 import type { RegistrarSeccion, SeccionDesarrollador } from './seccion.js';
@@ -22,10 +21,9 @@ import { avisoDireccionPublica } from '../config.js';
 /** Lo que hay que pedirle a GSG para conectar de verdad. Sale en la pantalla y en el informe. */
 export const LO_QUE_PEDIR_A_GSG = [
   'La dirección base de su API (por ejemplo https://api.gsg.pe/v1), con https.',
-  'El token con el que GSGchat les llama (va en Authorization: Bearer …).',
-  'Que su API acepte POST /ubicaciones, /confirmaciones, /entregas, /incidencias y /resumenes, tal cual el contrato (docs/CONTRATO-GSG.md, en Conexión → «Descargar el contrato»). GSGchat no le pide nada a su API: solo le manda esos reportes.',
-  'Que manden los pedidos del día a POST /api/v1/entregas con la clave de API de GSGchat (Conexión → «Crear la clave para GSG»): es la única forma en que entran.',
-  'La URL de su webhook, para enterarse al momento de lo que pasa con cada pedido (confirmado, avisado, entregado, incidencia).',
+  'La API Key con la que GSGchat les llama (va en la cabecera X-API-Key).',
+  'Que su API acepte el POST de la ubicación (y los de /confirmaciones, /entregas, /incidencias y /resumenes), tal cual el OpenAPI (/api/v1/openapi.json). GSGchat no le pide nada a su API: solo le manda esos reportes.',
+  'Que manden los pedidos del día a POST /api/v1/entregas con una clave de API de GSGchat (Conexión → «Crear la clave para GSG»): es la única forma en que entran. Si quieren enterarse al momento, la URL de su webhook.',
   'Confirmar el formato de dos campos: «telefono» (9 dígitos o con 51 delante; ¿algún cliente con fijo o extranjero?) y «referencia» (¿única por día o para siempre?).',
 ];
 
@@ -67,30 +65,8 @@ export async function revisarProduccion(deps: Parameters<RegistrarSeccion>[1]): 
         : gsg.modo === 'simulador'
           ? 'Ahora se usa el simulador de GSG (números ficticios): ningún cliente real recibe nada por esta vía.'
           : 'GSG no está conectado: los pedidos solo entran si GSG los empuja por la API o si se pegan a mano en Hoy.',
-    queHacer: gsgReal && !gsg?.aviso ? undefined : 'Pide a GSG la dirección de su API (con https) y su token, y pégalos en Conexión → «El sistema de GSG». Es a donde se le mandan los reportes; a GSG no se le pide nada.',
+    queHacer: gsgReal && !gsg?.aviso ? undefined : 'Pide a GSG la dirección de su API (con https) y su token, y pégalos en Conexión → «El sistema de GSG». Es a donde se le manda la ubicación; a GSG no se le pide nada.',
   });
-
-  // Los pedidos solo entran si GSG los empuja: hace falta su clave de API.
-  if (deps.repos?.claves) {
-    const claves = (await deps.repos.claves.listar().catch(() => [])).filter((c) => !c.revocadaAt && (c.permisos.includes('*') || c.permisos.includes('entregas:gestionar')));
-    poner({
-      clave: 'claveGsg',
-      ok: claves.length > 0,
-      titulo: 'GSG tiene su clave para mandar los pedidos',
-      explicacion: claves.length ? `Hay ${claves.length} clave(s) de API que pueden mandar pedidos a POST /api/v1/entregas.` : 'No hay ninguna clave de API que pueda mandar pedidos: GSG no tiene cómo hacerlos entrar (GSGchat no se los pide).',
-      queHacer: claves.length ? undefined : 'Conexión → «Crear la clave para GSG» y dásela a sus programadores.',
-    });
-  }
-  if (deps.repos?.webhooks) {
-    const avisos = (await deps.repos.webhooks.listar().catch(() => [])).filter((w) => w.activo && w.eventos.some((ev) => ev === '*' || ev.startsWith('entrega.')));
-    poner({
-      clave: 'webhookGsg',
-      ok: avisos.length > 0,
-      titulo: 'GSG se entera al momento (webhook)',
-      explicacion: avisos.length ? `${avisos.length} webhook(s) activo(s) con los avisos de las entregas.` : 'Ningún webhook recibe los avisos de las entregas (confirmado, avisado, entregado, incidencia).',
-      queHacer: avisos.length ? undefined : 'Pide a GSG la URL de su webhook y dala de alta en Conexión → Webhooks con los eventos entrega.*.',
-    });
-  }
 
   const aviso = avisoDireccionPublica(deps.config.PUBLIC_BASE_URL);
   poner({

@@ -313,21 +313,9 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
 
   // ------------------------------------------- esta instalacion depende de un maestro
 
-  app.post('/admin/membresia/maestro', async (request, reply) => {
-    if (!soloSuper(request, reply, 'conectar esta instalación a un maestro')) return;
-    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
-    const body = z.object({ url: z.string().trim().min(8).max(300), token: z.string().trim().min(8).max(200) }).parse(request.body ?? {});
-    return con400(reply, async () => {
-      const e = await deps.plan!.conectarMaestro(body);
-      return { ok: true, ...e, mensaje: `Conectado: esta instalación toma su plan de ${body.url.replace(/\/api\/plan\/.*$/, '')} (${e.plan?.nombre ?? '?'}, vence el ${e.plan ? new Date(e.plan.vencimiento).toLocaleDateString('es-PE') : '?'}).` };
-    });
-  });
 
-  app.delete('/admin/membresia/maestro', async (request, reply) => {
-    if (!soloSuper(request, reply, 'desconectar el maestro')) return;
-    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
-    return con400(reply, async () => ({ ok: true, ...(await deps.plan!.desconectarMaestro()) }));
-  });
+
+
 
   // ------------------------------------------- acceso de soporte (esta instalacion)
 
@@ -343,27 +331,11 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
     });
   }
 
-  app.get('/admin/membresia/soporte', async (_request, reply) => {
-    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
-    return { ok: true, soporte: deps.plan.soporte(), conMaestro: deps.plan.estado().origen === 'maestro' };
-  });
 
-  app.post('/admin/membresia/soporte', async (request, reply) => {
-    if (!soloSuper(request, reply, 'dar acceso de soporte')) return;
-    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
-    if (!deps.usuarios || !deps.sesion) return reply.code(409).send({ error: 'Este arranque no puede abrir cuentas de soporte.' });
-    const body = z.object({ horas: z.coerce.number().int().min(1).max(72).default(24) }).parse(request.body ?? {});
-    const acceso = await deps.plan.concederSoporte(body.horas);
-    return { ok: true, soporte: acceso, mensaje: `Acceso concedido hasta las ${new Date(acceso.hasta).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false })}: el dueño del sistema podrá entrar a este panel como administrador. Se quita solo al caducar, o cuando lo quites tú.` };
-  });
 
-  app.delete('/admin/membresia/soporte', async (request, reply) => {
-    if (!soloSuper(request, reply, 'quitar el acceso de soporte')) return;
-    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
-    await deps.plan.revocarSoporte();
-    await apagarCuentaSoporte();
-    return { ok: true, mensaje: 'Acceso de soporte quitado: el dueño del sistema ya no puede entrar a este panel.' };
-  });
+
+
+
 
   // El enlace que recibe el dueño: si vale, entra como la cuenta "soporte" (administrador) y va al panel.
   app.get<{ Params: { codigo: string } }>('/soporte/:codigo', async (request, reply) => {
@@ -389,20 +361,7 @@ export async function registerTiendasRoutes(app: FastifyInstance, deps: TiendasR
 
   // ------------------------------------------- la pantalla Pagar de esta instalacion
 
-  app.get('/admin/membresia/pagar', async (_request, reply) => {
-    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
-    // Con maestro, se le pregunta otra vez si lo ultimo tiene mas de medio
-    // minuto: la tienda entra aqui a ver si le aceptaron la captura.
-    const e = deps.plan.estado();
-    if (e.origen === 'maestro' && (!e.consultadoEn || Date.now() - new Date(e.consultadoEn).getTime() > 30_000)) await deps.plan.refrescar();
-    return { ok: true, ...deps.plan.paraPagar() };
-  });
 
-  app.post('/admin/membresia/pago-captura', { bodyLimit: CUERPO_CAPTURA }, async (request, reply) => {
-    if (!deps.plan) return reply.code(409).send({ error: 'Este arranque no lleva membresía.' });
-    const body = z.object({ imagen: z.string().max(3_100_000), meses: z.coerce.number().int().min(1).max(60).default(1), monto: z.coerce.number().min(0).max(10_000_000).optional(), nota: z.string().max(300).optional() }).parse(request.body ?? {});
-    const r = await deps.plan.mandarCaptura(body);
-    if (!r.ok) return reply.code(400).send({ error: r.error });
-    return r;
-  });
+
+
 }

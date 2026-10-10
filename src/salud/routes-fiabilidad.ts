@@ -71,15 +71,6 @@ export async function registerFiabilidadRoutes(app: FastifyInstance, deps: Fiabi
     return { ok: true, vigilante: fiabilidad.vigilante.estado() };
   });
 
-  app.post('/admin/fiabilidad/vigilante/simular', async (request, reply) => {
-    const estado = await fiabilidad.estado();
-    if (!estado.demo) return reply.code(400).send({ error: 'Simular una caída solo se puede en la demostración.' });
-    const body = z.object({ caido: z.boolean().nullable(), minutos: z.number().int().min(1).max(60).optional() }).parse(request.body ?? {});
-    fiabilidad.vigilante.simular(body.caido, body.minutos);
-    await fiabilidad.vigilante.tick();
-    return { ok: true, vigilante: fiabilidad.vigilante.estado() };
-  });
-
   app.post('/admin/fiabilidad/humo/probar', async (request) => {
     const resultado = await fiabilidad.humo.correr({ quien: quienEs(request.usuario), avisar: false });
     return { ok: true, resultado };

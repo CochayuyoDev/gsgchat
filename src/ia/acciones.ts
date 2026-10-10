@@ -1024,7 +1024,7 @@ for (const a of ACCIONES_DE_SIEMPRE) {
 const DEL_PANEL_Y_NUEVAS = [...ACCIONES_PANEL, ...ACCIONES_MENSAJES, ...ACCIONES_CHATS, ...ACCIONES_INFORMES, ...ACCIONES_GENERAL];
 const DEL_PANEL = new Set(DEL_PANEL_Y_NUEVAS.map((a) => a.nombre));
 // La via general (panel.*) va al final: el modelo prueba antes las acciones con nombre propio.
-export const ACCIONES: Accion[] = [...ACCIONES_DE_SIEMPRE.filter((a) => !DEL_PANEL.has(a.nombre)), ...DEL_PANEL_Y_NUEVAS];
+export const ACCIONES: Accion[] = [...ACCIONES_DE_SIEMPRE.filter((a) => !DEL_PANEL.has(a.nombre) && !a.nombre.startsWith('motorizados.')), ...DEL_PANEL_Y_NUEVAS].filter((a) => !/^(?:motorizados|procesos|personas|respuestas|campanas|campana|grupos|tracking|stoky|catalogo|membresia|tiendas|lista)\./.test(a.nombre));
 
 export const ACCIONES_POR_NOMBRE = new Map(ACCIONES.map((a) => [a.nombre, a]));
 

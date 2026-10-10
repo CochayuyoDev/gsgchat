@@ -41,11 +41,12 @@ describe('un día de entregas con GSG simulado', () => {
 
   it('GSG manda sus dos listas y el sistema las reparte: 7 al reparto (ubicación) y 9 por confirmar', async () => {
     expect(e.simulador.cargarDePrueba()).toBe(10);
+    // GSG (el simulador) manda su lista: es lo primero, GSGchat no se la pide.
+    const s = await e.gsgManda();
     const m = await e.api.post<{ nuevos: number }>('/admin/motorizados/de-prueba');
     expect(m.status).toBe(200);
     expect(m.body.nuevos).toBe(10);
 
-    const s = await e.gsgManda();
     expect(s.status).toBe(200);
     expect(s.body.ok).toBe(true);
     expect(s.body.nuevas).toBe(10);
@@ -397,16 +398,14 @@ describe('un día de entregas con GSG simulado', () => {
     expect(r.body.entrega.estado).toBe('lista');
   });
 
-  it('GSG caído: no manda nada (y aquí no se toca nada), «Probar» no le pregunta, y los reportes esperan en la cola hasta que vuelve', async () => {
+  it('GSG caído: no manda nada (y aquí no se toca nada), «Probar» no le llama y los reportes esperan en la cola hasta que vuelve', async () => {
     e.simulador.modo = 'caido';
     const s = await e.gsgManda();
     expect(s.body.ok).toBe(false);
-    expect(s.body.detalle).toMatch(/caído/);
+    expect(s.body.detalle).toMatch(/no manda nada/);
     const antes = e.llamadasAGsg.length;
     const p = await e.api.post<{ ok: boolean; prueba: { detalle: string } }>('/admin/entregas/gsg/probar');
-    // «Probar» solo mira la forma de la dirección y el token: no hace ni un GET.
-    expect(p.body.ok).toBe(true);
-    expect(p.body.prueba.detalle).toMatch(/no le pide nada a GSG/);
+    expect(p.body.prueba.detalle).toMatch(/GSGchat no le pide nada a GSG/);
     expect(e.llamadasAGsg.length).toBe(antes);
 
     // P-1006 confirma mientras GSG está caído: el reporte se queda esperando.
@@ -447,7 +446,7 @@ describe('un día de entregas con GSG simulado', () => {
   });
 
   it('la pantalla, la conexión con GSG y la API pública responden', async () => {
-    const pagina = await e.app.inject({ method: 'GET', url: '/entregas', headers: { authorization: `Bearer ${(await import('./fakes.js')).CLAVE_API_PRUEBA}` } });
+    const pagina = await e.app.inject({ method: 'GET', url: '/entregas', headers: { 'x-api-key': (await import('./fakes.js')).CLAVE_API_PRUEBA } });
     expect(pagina.statusCode).toBe(200);
     expect(pagina.body).toContain('Pedidos de hoy');
     expect(pagina.body).toContain('Probar con números ficticios');
@@ -456,16 +455,14 @@ describe('un día de entregas con GSG simulado', () => {
     expect(gsg.body.gsg).toMatchObject({ modo: 'real', conectada: true, origen: 'env' });
 
     const clave = await crearClaveDePrueba(e.repos, ['entregas:leer']);
-    const r = await e.app.inject({ method: 'GET', url: '/api/v1/entregas', headers: { authorization: `Bearer ${clave}` } });
+    const r = await e.app.inject({ method: 'GET', url: '/api/v1/entregas', headers: { 'x-api-key': clave } });
     expect(r.statusCode).toBe(200);
     const cuerpo = r.json() as { cifras: { total: number }; entregas: Array<{ referencia: string; llegaAproxEn: string | null }> };
     expect(cuerpo.cifras.total).toBe(10);
     expect(cuerpo.entregas.find((x) => x.referencia === 'P-1001')?.llegaAproxEn).not.toBeNull();
-    // No hay "sincronizar": a GSG no se le pide nada, ni a mano.
-    const gestion = await crearClaveDePrueba(e.repos, ['entregas:gestionar']);
-    const sincronizar = await e.app.inject({ method: 'POST', url: '/api/v1/entregas/sincronizar', headers: { authorization: `Bearer ${gestion}` }, payload: {} });
-    expect(sincronizar.statusCode).toBe(404);
-    expect((await e.app.inject({ method: 'POST', url: '/admin/entregas/sincronizar', headers: { authorization: `Bearer ${(await import('./fakes.js')).CLAVE_API_PRUEBA}` }, payload: {} })).statusCode).toBe(404);
+    // Ya no existe la sincronización por la API: GSG manda, no se le pide.
+    const sinRuta = await e.app.inject({ method: 'POST', url: '/api/v1/entregas/sincronizar', headers: { 'x-api-key': clave }, payload: {} });
+    expect(sinRuta.statusCode).not.toBe(200);
 
     const sim = await e.api.get<{ estado: { terminados: number; cancelados: number } }>('/admin/entregas/simulador');
     expect(sim.status).toBe(200);

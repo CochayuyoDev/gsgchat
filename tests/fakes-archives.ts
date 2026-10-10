@@ -86,6 +86,16 @@ export function createFakeArchives(): FakeArchives {
       return { ...a };
     },
 
+    async ponerResumenSiFalta(id, resumen, etiquetas) {
+      const a = all.find((x) => x.id === id);
+      if (!a) return null;
+      if (a.resumen === null) {
+        a.resumen = resumen;
+        a.etiquetas = [...etiquetas];
+      }
+      return { ...a };
+    },
+
     async remove(id) {
       const i = all.findIndex((a) => a.id === id);
       if (i >= 0) all.splice(i, 1);

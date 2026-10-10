@@ -8,11 +8,11 @@
  * tienda: la plataforma mira aqui a que tienda va ese usuario y le pasa la
  * contraseña a ELLA, que es quien la comprueba.
  *
- * Vive en su propia base: una carpeta PGlite (`<raiz>/plataforma`) o el
- * esquema `plataforma` de Postgres.
+ * Vive en su propia base del mismo servidor MySQL/MariaDB: `<raiz>_plataforma`
+ * (con DATABASE_URL=mysql://.../gsgchat, `gsgchat_plataforma`).
  */
 
-import type { Pool } from '../db/pool.js';
+import { esDuplicado, type Pool } from '../db/pool.js';
 
 export interface TiendaRegistrada {
   id: string;
@@ -27,21 +27,22 @@ export interface TiendaRegistrada {
 
 export const ESQUEMA_DIRECTORIO = `
 create table if not exists pl_tiendas (
-  id text primary key,
-  slug text not null unique,
-  nombre text not null,
-  rubro text,
-  principal boolean not null default false,
-  estado text not null default 'activa' check (estado in ('activa', 'suspendida')),
-  creada_at timestamptz not null default now(),
-  creada_ip text
-);
+  id varchar(64) not null primary key,
+  slug varchar(64) not null unique,
+  nombre varchar(191) not null,
+  rubro varchar(191),
+  principal tinyint(1) not null default 0,
+  estado varchar(16) not null default 'activa' check (estado in ('activa', 'suspendida')),
+  creada_at datetime(3) not null default current_timestamp(3),
+  creada_ip varchar(64)
+) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin;
 create table if not exists pl_accesos (
-  usuario text primary key,
-  tienda_id text not null references pl_tiendas(id) on delete cascade,
-  creado_at timestamptz not null default now()
-);
-create index if not exists pl_accesos_tienda on pl_accesos (tienda_id);
+  usuario varchar(191) not null primary key,
+  tienda_id varchar(64) not null,
+  creado_at datetime(3) not null default current_timestamp(3),
+  key pl_accesos_tienda (tienda_id),
+  constraint pl_accesos_tienda_fk foreign key (tienda_id) references pl_tiendas (id) on delete cascade
+) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin;
 `;
 
 export interface Directorio {
@@ -94,10 +95,15 @@ export async function crearDirectorio(pool: Pool): Promise<Directorio> {
       return f ? deFila(f) : null;
     },
     crear: async (t) => {
-      const [f] = await q<Fila>(
-        'insert into pl_tiendas (id, slug, nombre, rubro, principal, creada_ip) values ($1, $2, $3, $4, $5, $6) returning *',
-        [t.id, t.slug, t.nombre, t.rubro, t.principal ?? false, t.ip ?? null],
-      );
+      await pool.query('insert into pl_tiendas (id, slug, nombre, rubro, principal, creada_ip) values ($1, $2, $3, $4, $5, $6)', [
+        t.id,
+        t.slug,
+        t.nombre,
+        t.rubro,
+        t.principal ?? false,
+        t.ip ?? null,
+      ]);
+      const [f] = await q<Fila>('select * from pl_tiendas where id = $1', [t.id]);
       return deFila(f!);
     },
     borrar: async (id) => {
@@ -105,11 +111,14 @@ export async function crearDirectorio(pool: Pool): Promise<Directorio> {
     },
     slugLibre: async (slug) => (await q('select 1 from pl_tiendas where slug = $1', [slug])).length === 0,
     reservar: async (usuario, tiendaId) => {
-      const filas = await q<{ tienda_id: string }>(
-        'insert into pl_accesos (usuario, tienda_id) values ($1, $2) on conflict (usuario) do nothing returning tienda_id',
-        [usuario.toLowerCase(), tiendaId],
-      );
-      return filas.length === 1;
+      // Gana quien inserta primero: el segundo choca con la clave primaria.
+      try {
+        await pool.query('insert into pl_accesos (usuario, tienda_id) values ($1, $2)', [usuario.toLowerCase(), tiendaId]);
+        return true;
+      } catch (error) {
+        if (esDuplicado(error)) return false;
+        throw error;
+      }
     },
     liberar: async (usuario, tiendaId) => {
       await pool.query('delete from pl_accesos where usuario = $1 and tienda_id = $2', [usuario.toLowerCase(), tiendaId]);
@@ -122,7 +131,7 @@ export async function crearDirectorio(pool: Pool): Promise<Directorio> {
       const ajenos: string[] = [];
       for (const u of usuarios) {
         const nombre = u.toLowerCase();
-        await pool.query('insert into pl_accesos (usuario, tienda_id) values ($1, $2) on conflict (usuario) do nothing', [nombre, tiendaId]);
+        await pool.query('insert into pl_accesos (usuario, tienda_id) values ($1, $2) on duplicate key update usuario = usuario', [nombre, tiendaId]);
         const [f] = await q<{ tienda_id: string }>('select tienda_id from pl_accesos where usuario = $1', [nombre]);
         if (f && f.tienda_id !== tiendaId) ajenos.push(nombre);
       }

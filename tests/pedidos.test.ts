@@ -25,7 +25,7 @@ import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SET
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -51,7 +51,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 /** La API de productos de Elysian, de mentira: dos paginas. */
 const ELYSIAN_P1 = {
@@ -188,12 +188,14 @@ describe('el asistente con el catalogo real cierra ventas', () => {
     expect(r.resultado).toBe('respondio');
     expect(r.detalle).toMatch(/^pedido \d+$/);
 
-    const textos = enviados().map((s) => String(s.body));
-    expect(textos[0]).toBe('Perfecto, te resumo: 2 Edifice azul a S/ 500 cada uno, a Av. Larco 123, pago Yape. ¿Confirmas?');
-    expect(textos[1]).toContain('2 x Casio Edifice Slim EFR-S108D — Acero / Esfera azul — S/ 1498.00');
-    expect(textos[1]).toContain('Total: S/ 1498.00');
-    expect(textos[1]).toContain('Entrega: Av. Larco 123, Miraflores');
-    expect(textos[1]).toContain('No encontré: reloj inexistente 999');
+    // Una sola respuesta: el resumen del sistema; el precio inventado del modelo no sale.
+    const textos = enviados().filter((s) => s.to !== '51912000000').map((s) => String(s.body));
+    expect(textos).toHaveLength(1);
+    expect(textos[0]).not.toContain('S/ 500');
+    expect(textos[0]).toContain('2 x Casio Edifice Slim EFR-S108D — Acero / Esfera azul — S/ 1498.00');
+    expect(textos[0]).toContain('Total: S/ 1498.00');
+    expect(textos[0]).toContain('Entrega: Av. Larco 123, Miraflores');
+    expect(textos[0]).toContain('No encontré: reloj inexistente 999');
     expect(enviados().find((s) => s.to === '51912000000')?.body).toContain('tomo un pedido');
 
     const guardado = repos.pedidos._pedidos[0]!;

@@ -1,12 +1,13 @@
 /**
  * Acceso a datos.
  *
- * Cada repositorio es una interfaz + una implementacion sobre Postgres.
- * Las interfaces existen para que los gates y el router se puedan probar
- * con dobles en memoria (`tests/fakes.ts`) sin levantar la base.
+ * Cada repositorio es una interfaz + una implementacion sobre MySQL 8 /
+ * MariaDB 10.4 (el SQL usa solo lo que tienen los dos). Las interfaces
+ * existen para que los gates y el router se puedan probar con dobles en
+ * memoria (`tests/fakes.ts`) sin levantar la base.
  */
 
-import { toleranteAlUuid, type Pool } from './pool.js';
+import { nuevoId, type Pool, type Queryable } from './pool.js';
 import { createDesarrolladorRepo, type DesarrolladorRepo } from './desarrollador.js';
 import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
@@ -28,6 +29,7 @@ import { createCodigosConexionRepo, type CodigosConexionRepo } from '../auth/cod
 import { createTiendasRepo, type TiendasRepo } from '../tiendas/repo.js';
 import { createEntregasRepo, type EntregasRepo } from '../entregas/repo.js';
 import { createProcesosRepo, type ProcesosRepo } from '../procesos/repo.js';
+import type { ComoSeDecidio, DecisionBot, IntencionGsg, NuevaDecision } from '../ia/decision.js';
 
 // ---------------------------------------------------------------- modelos
 
@@ -350,6 +352,12 @@ export interface ContactsRepo {
   upsertGrupo(jid: string, nombre?: string | null): Promise<Contact>;
   setOptIn(phone: string, source: string): Promise<void>;
   setOptOut(phone: string): Promise<void>;
+  /**
+   * Borra clientes (nunca grupos) con todo lo suyo: mensajes, ubicaciones y
+   * fichas caen en cascada. Sin ids, todos; con `inactivosDias`, solo los que
+   * no escriben desde hace esos dias. `soloContar` dice cuantos serian.
+   */
+  eliminar(filtro: { ids?: string[]; inactivosDias?: number }, soloContar?: boolean): Promise<number>;
   touchInbound(phone: string, at: Date): Promise<void>;
   listOptedIn(limit: number, offset: number): Promise<Contact[]>;
   list(query: ContactListQuery): Promise<{ items: ContactListItem[]; total: number }>;
@@ -538,6 +546,41 @@ export interface SaludRepo {
   purgar(before: Date): Promise<number>;
 }
 
+/**
+ * Por que respondio (o se callo) el bot en cada turno. Ver src/ia/decision.ts
+ * y la migracion 003. El panel lo pinta en el chat como nota interna.
+ */
+export interface DecisionesRepo {
+  registrar(d: NuevaDecision): Promise<void>;
+  /** Las de ese contacto, las mas recientes primero (50 si no se dice). */
+  listarPorContacto(contactId: string, limit?: number): Promise<DecisionBot[]>;
+}
+
+/** El largo de cada columna de `decisiones_bot`: lo que pase se recorta, no revienta el insert. */
+export const LARGO_DECISION = { phone: 191, intencion: 40, dato: 200, respuesta: 200, como: 20, esperaba: 60, detalle: 500 } as const;
+
+/** La decision lista para guardar: textos recortados al largo de su columna y `mensajes` entero >= 1. */
+export function recortarDecision(d: NuevaDecision): NuevaDecision {
+  const corta = (v: string | null | undefined, n: number): string | null => {
+    const t = v?.trim();
+    return t ? t.slice(0, n) : null;
+  };
+  return {
+    contactId: d.contactId,
+    phone: String(d.phone ?? '').slice(0, LARGO_DECISION.phone),
+    mensajes: Math.max(1, Math.trunc(Number(d.mensajes) || 1)),
+    intencion: String(d.intencion).slice(0, LARGO_DECISION.intencion) as IntencionGsg,
+    dato: corta(d.dato, LARGO_DECISION.dato),
+    respuesta: String(d.respuesta ?? '').trim().slice(0, LARGO_DECISION.respuesta),
+    como: String(d.como).slice(0, LARGO_DECISION.como) as ComoSeDecidio,
+    esperaba: corta(d.esperaba, LARGO_DECISION.esperaba),
+    detalle: corta(d.detalle, LARGO_DECISION.detalle),
+  };
+}
+
+/** Cuantas decisiones devuelve `listarPorContacto` como mucho, pida lo que pida. */
+export const TOPE_DECISIONES = 500;
+
 export interface Repos {
   contacts: ContactsRepo;
   locations: LocationsRepo;
@@ -586,6 +629,8 @@ export interface Repos {
   desarrollador?: DesarrolladorRepo;
   /** Los procesos (pedir datos, confirmar, avisos al personal, cobranza) y sus corridas. Ver src/procesos. */
   procesos?: ProcesosRepo;
+  /** Por que respondio el bot en cada turno. Ver src/ia/decision.ts. */
+  decisiones: DecisionesRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -593,7 +638,29 @@ export function normalizePhone(phone: string): string {
   return phone.replace(/\D+/g, '');
 }
 
-// ------------------------------------------------------- impl. Postgres
+// ---------------------------------------------------------- impl. MySQL
+
+/** Filas por sentencia en las altas masivas (`values (...), (...)`). */
+const TANDA = 500;
+
+/** Una columna `date` llega como 'AAAA-MM-DD': se lee como medianoche UTC. */
+const fechaDeDia = (v: Date | string): Date => (v instanceof Date ? v : new Date(`${String(v).slice(0, 10)}T00:00:00Z`));
+
+/** Corre `fn` en una transaccion con una conexion apartada. */
+async function enTransaccion<T>(pool: Pool, fn: (c: Queryable) => Promise<T>): Promise<T> {
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    const r = await fn(c);
+    await c.query('commit');
+    return r;
+  } catch (error) {
+    await c.query('rollback').catch(() => undefined);
+    throw error;
+  } finally {
+    c.release();
+  }
+}
 
 interface ContactRow {
   id: string;
@@ -648,7 +715,7 @@ interface NumberStateRow {
   quality: NumberState['quality'];
   paused: boolean;
   paused_reason: string | null;
-  warmup_started_on: Date;
+  warmup_started_on: Date | string;
   tier: string | null;
   estado?: string;
   riesgo?: number;
@@ -666,7 +733,7 @@ const toNumberState = (row: NumberStateRow): NumberState => ({
   quality: row.quality,
   paused: row.paused,
   pausedReason: row.paused_reason,
-  warmupStartedOn: row.warmup_started_on,
+  warmupStartedOn: fechaDeDia(row.warmup_started_on),
   tier: row.tier,
   estado: row.estado ?? 'CONNECTED',
   riesgo: row.riesgo ?? 0,
@@ -773,11 +840,11 @@ interface ResumenRow {
 
 /** El SELECT que resume entregas; se comparte entre las ventanas. */
 const RESUMEN_SELECT = `
-  count(*) filter (where status in ('sent','delivered','read','failed'))::int as enviados,
-  count(*) filter (where status in ('delivered','read'))::int as entregados,
-  count(*) filter (where status = 'read')::int as leidos,
-  count(*) filter (where status = 'failed')::int as fallidos,
-  count(distinct contact_id) filter (where business_initiated and status in ('sent','delivered','read'))::int as unicos`;
+  count(case when status in ('sent','delivered','read','failed') then 1 end) as enviados,
+  count(case when status in ('delivered','read') then 1 end) as entregados,
+  count(case when status = 'read' then 1 end) as leidos,
+  count(case when status = 'failed' then 1 end) as fallidos,
+  count(distinct case when business_initiated and status in ('sent','delivered','read') then contact_id end) as unicos`;
 
 const toResumen = (row: ResumenRow | undefined, porCodigo: Array<{ code: string; count: number }>): ResumenEntregas => ({
   enviados: row?.enviados ?? 0,
@@ -812,10 +879,14 @@ const toSaludEvento = (row: SaludRow): SaludEvento => ({
   payload: row.payload,
 });
 
-export function createRepos(poolCrudo: Pool): Repos {
-  // Campanas, webhooks y conectores tienen id uuid: uno mal pegado en la
-  // URL ("None", "undefined") es un 404, no un 500 (ver toleranteAlUuid).
-  const pool = toleranteAlUuid(poolCrudo);
+export function createRepos(pool: Pool): Repos {
+  // Los ids uuid son char(36): uno mal pegado en la URL ("None",
+  // "undefined") simplemente no encuentra nada (un 404, no un 500).
+  /** El contacto recien insertado o actualizado, por su telefono. */
+  const contactoPorTelefono = async (phone: string): Promise<Contact> => {
+    const { rows } = await pool.query<ContactRow>('select * from contacts where phone = $1', [phone]);
+    return toContact(rows[0]!);
+  };
   const contacts: ContactsRepo = {
     async getByPhone(phone) {
       const { rows } = await pool.query<ContactRow>('select * from contacts where phone = $1', [phone]);
@@ -826,36 +897,55 @@ export function createRepos(poolCrudo: Pool): Repos {
       return rows[0] ? toContact(rows[0]) : null;
     },
     async upsertFromInbound(phone, name) {
-      const { rows } = await pool.query<ContactRow>(
-        `insert into contacts (phone, name)
-         values ($1, $2)
-         on conflict (phone) do update set name = coalesce(excluded.name, contacts.name)
-         returning *`,
-        [phone, name ?? null],
+      // La unica clave unica aparte del id (nuevo) es el telefono.
+      await pool.query(
+        `insert into contacts (id, phone, name)
+         values ($1, $2, $3)
+         on duplicate key update name = coalesce(values(name), name)`,
+        [nuevoId(), phone, name ?? null],
       );
-      return toContact(rows[0]!);
+      return contactoPorTelefono(phone);
     },
     async upsertGrupo(jid, nombre) {
-      const { rows } = await pool.query<ContactRow>(
-        `insert into contacts (phone, name, tipo)
-         values ($1, $2, 'grupo')
-         on conflict (phone) do update set name = coalesce(excluded.name, contacts.name), tipo = 'grupo'
-         returning *`,
-        [jid, nombre?.trim() || null],
+      await pool.query(
+        `insert into contacts (id, phone, name, tipo)
+         values ($1, $2, $3, 'grupo')
+         on duplicate key update name = coalesce(values(name), name), tipo = 'grupo'`,
+        [nuevoId(), jid, nombre?.trim() || null],
       );
-      return toContact(rows[0]!);
+      return contactoPorTelefono(jid);
     },
     async setOptIn(phone, source) {
       // Un alta borra la baja previa: el contacto acaba de decir que si.
       await pool.query(
         `update contacts
-            set opt_in_at = now(), opt_in_source = $2, opt_out_at = null
+            set opt_in_at = now(3), opt_in_source = $2, opt_out_at = null
           where phone = $1`,
         [phone, source],
       );
     },
     async setOptOut(phone) {
-      await pool.query('update contacts set opt_out_at = now() where phone = $1', [phone]);
+      await pool.query('update contacts set opt_out_at = now(3) where phone = $1', [phone]);
+    },
+    async eliminar(filtro, soloContar) {
+      if (filtro.ids && !filtro.ids.length) return 0;
+      const condiciones = ["tipo <> 'grupo'"];
+      const valores: unknown[] = [];
+      if (filtro.ids) {
+        valores.push(filtro.ids);
+        condiciones.push(`id in ($${valores.length})`);
+      }
+      if (filtro.inactivosDias) {
+        valores.push(filtro.inactivosDias);
+        condiciones.push(`coalesce(last_inbound_at, created_at) < now(3) - interval $${valores.length} day`);
+      }
+      const donde = condiciones.join(' and ');
+      if (soloContar) {
+        const { rows } = await pool.query<{ n: number }>(`select count(*) as n from contacts where ${donde}`, valores);
+        return Number(rows[0]?.n ?? 0);
+      }
+      const { rowCount } = await pool.query(`delete from contacts where ${donde}`, valores);
+      return rowCount ?? 0;
     },
     async touchInbound(phone, at) {
       // Contestar corta la racha de "sin respuesta": la fatiga se mide en
@@ -871,7 +961,7 @@ export function createRepos(poolCrudo: Pool): Repos {
           where opt_in_at is not null and opt_out_at is null and tipo <> 'grupo'
           order by created_at
           limit $1 offset $2`,
-        [limit, offset],
+        [Number(limit), Number(offset)],
       );
       return rows.map(toContact);
     },
@@ -882,7 +972,8 @@ export function createRepos(poolCrudo: Pool): Repos {
       const params: unknown[] = [];
       if (query.q?.trim()) {
         params.push(`%${query.q.trim()}%`);
-        conditions.push(`(c.phone ilike $${params.length} or c.name ilike $${params.length})`);
+        // La colacion es binaria: sin lower() el like distingue mayusculas.
+        conditions.push(`(lower(c.phone) like lower($${params.length}) or lower(c.name) like lower($${params.length}))`);
       }
       switch (query.state ?? 'all') {
         case 'opted_in':
@@ -907,7 +998,7 @@ export function createRepos(poolCrudo: Pool): Repos {
       const where = conditions.length ? `where ${conditions.join(' and ')}` : '';
 
       const total = await pool.query<{ total: number }>(
-        `select count(*)::int as total from contacts c ${where}`,
+        `select count(*) as total from contacts c ${where}`,
         params,
       );
 
@@ -921,14 +1012,16 @@ export function createRepos(poolCrudo: Pool): Repos {
       >(
         `select c.*, l.lat as loc_lat, l.lng as loc_lng, l.created_at as loc_at
            from contacts c
-           left join lateral (
-             select lat, lng, created_at from locations
-              where contact_id = c.id order by created_at desc, id desc limit 1
-           ) l on true
+           -- La ultima ubicacion (sin LATERAL, que MariaDB no tiene): el id de
+           -- la mas reciente por una subconsulta correlacionada.
+           left join locations l on l.id = (
+             select l1.id from locations l1
+              where l1.contact_id = c.id order by l1.created_at desc, l1.id desc limit 1
+           )
           ${where}
           order by coalesce(c.last_inbound_at, c.created_at) desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, query.limit, query.offset],
+        [...params, Number(query.limit), Number(query.offset)],
       );
 
       return {
@@ -952,20 +1045,28 @@ export function createRepos(poolCrudo: Pool): Repos {
       }
       if (!cleaned.size) return 0;
 
+      // Cada telefono entra o se actualiza: el total es el de la tanda
+      // (affectedRows cuenta 2 por actualizado, no sirve como cifra).
       const phones = [...cleaned.keys()];
-      const names = phones.map((p) => cleaned.get(p) ?? null);
-      const { rowCount } = await pool.query(
-        `insert into contacts (phone, name, opt_in_at, opt_in_source, opt_out_at)
-         select p, n, now(), $3, null
-           from unnest($1::text[], $2::text[]) as t(p, n)
-         on conflict (phone) do update set
-           name = coalesce(excluded.name, contacts.name),
-           opt_in_at = now(),
-           opt_in_source = excluded.opt_in_source,
-           opt_out_at = null`,
-        [phones, names, source],
-      );
-      return rowCount ?? phones.length;
+      for (let i = 0; i < phones.length; i += TANDA) {
+        const tanda = phones.slice(i, i + TANDA);
+        const params: unknown[] = [];
+        const filas = tanda.map((p) => {
+          params.push(nuevoId(), p, cleaned.get(p) ?? null, source);
+          return '(?, ?, ?, now(3), ?, null)';
+        });
+        await pool.query(
+          `insert into contacts (id, phone, name, opt_in_at, opt_in_source, opt_out_at)
+           values ${filas.join(', ')}
+           on duplicate key update
+             name = coalesce(values(name), name),
+             opt_in_at = now(3),
+             opt_in_source = values(opt_in_source),
+             opt_out_at = null`,
+          params,
+        );
+      }
+      return phones.length;
     },
 
     async suprimir(phone, hasta, motivo, ambito) {
@@ -1028,21 +1129,21 @@ export function createRepos(poolCrudo: Pool): Repos {
     async contarNuevosEscritosDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
         // Sin los numeros del Modulo desarrollador: no cuentan en la salud del numero real.
-        "select count(*)::int as total from contacts where primer_envio_at >= $1 and phone !~ '^51000[01][0-9]{5}$'",
+        "select count(*) as total from contacts where primer_envio_at >= $1 and phone not regexp '^51000[01][0-9]{5}$'",
         [since],
       );
       return rows[0]?.total ?? 0;
     },
     async contarSuprimidos(now) {
       const { rows } = await pool.query<{ total: number }>(
-        "select count(*)::int as total from contacts where suprimido_hasta > $1 and phone !~ '^51000[01][0-9]{5}$'",
+        "select count(*) as total from contacts where suprimido_hasta > $1 and phone not regexp '^51000[01][0-9]{5}$'",
         [now],
       );
       return rows[0]?.total ?? 0;
     },
     async contarBajasDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
-        "select count(*)::int as total from contacts where opt_out_at >= $1 and phone !~ '^51000[01][0-9]{5}$'",
+        "select count(*) as total from contacts where opt_out_at >= $1 and phone not regexp '^51000[01][0-9]{5}$'",
         [since],
       );
       return rows[0]?.total ?? 0;
@@ -1051,11 +1152,10 @@ export function createRepos(poolCrudo: Pool): Repos {
 
   const locations: LocationsRepo = {
     async save(contactId, result, rawInput) {
-      const { rows } = await pool.query<{ id: number }>(
+      const { insertId } = await pool.query(
         `insert into locations
            (contact_id, lat, lng, source, confidence, precision_meters, raw_input, resolved_url)
-         values ($1,$2,$3,$4,$5,$6,$7,$8)
-         returning id`,
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
           contactId,
           result.lat,
@@ -1067,7 +1167,7 @@ export function createRepos(poolCrudo: Pool): Repos {
           result.resolvedUrl ?? null,
         ],
       );
-      return rows[0]!.id;
+      return insertId;
     },
     async confirm(locationId) {
       await pool.query('update locations set confirmed = true where id = $1', [locationId]);
@@ -1108,7 +1208,7 @@ export function createRepos(poolCrudo: Pool): Repos {
           ${where}
           order by l.created_at desc, l.id desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, query.limit, query.offset],
+        [...params, Number(query.limit), Number(query.offset)],
       );
       return rows.map((r) => ({
         id: r.id,
@@ -1130,11 +1230,10 @@ export function createRepos(poolCrudo: Pool): Repos {
 
   const deliveries: DeliveriesRepo = {
     async create(input) {
-      const { rows } = await pool.query<{ id: number }>(
+      const { insertId } = await pool.query(
         `insert into deliveries
            (contact_id, campaign_id, kind, template_name, category, variables, business_initiated)
-         values ($1,$2,$3,$4,$5,$6,$7)
-         returning id`,
+         values ($1,$2,$3,$4,$5,$6,$7)`,
         [
           input.contactId,
           input.campaignId ?? null,
@@ -1145,18 +1244,18 @@ export function createRepos(poolCrudo: Pool): Repos {
           input.businessInitiated ?? false,
         ],
       );
-      return rows[0]!.id;
+      return insertId;
     },
     async markSent(id, wamid) {
       await pool.query(
-        `update deliveries set status = 'sent', wamid = $2, sent_at = now() where id = $1`,
+        `update deliveries set status = 'sent', wamid = $2, sent_at = now(3) where id = $1`,
         [id, wamid],
       );
     },
     async markBlocked(id, reason) {
       await pool.query(
         `update deliveries
-            set status = 'blocked_by_gate', error_title = $2, failed_at = now()
+            set status = 'blocked_by_gate', error_title = $2, failed_at = now(3)
           where id = $1`,
         [id, reason],
       );
@@ -1168,7 +1267,7 @@ export function createRepos(poolCrudo: Pool): Repos {
       await pool.query(
         `update deliveries
             set status = 'failed', error_code = $2, error_title = $3,
-                sent_at = coalesce(sent_at, now()), failed_at = now()
+                sent_at = coalesce(sent_at, now(3)), failed_at = now(3)
           where id = $1`,
         [id, code, title.slice(0, 500)],
       );
@@ -1184,7 +1283,7 @@ export function createRepos(poolCrudo: Pool): Repos {
               : 'sent_at';
       // Los acuses no van hacia atras ni mueven fechas ya puestas: al
       // reconectar, WhatsApp Web vuelve a mandar el "sent" de mensajes de
-      // hace horas, y con un `sent_at = now()` a secas esos envios parecian
+      // hace horas, y con un `sent_at = now(3)` a secas esos envios parecian
       // recientes (la separacion por contacto los veia como "hace 1 min").
       // Un `failed` si manda siempre: es informacion nueva.
       await pool.query(
@@ -1193,7 +1292,7 @@ export function createRepos(poolCrudo: Pool): Repos {
                   when $2 = 'failed' then 'failed'
                   when ${RANGO_ESTADO('status')} >= ${RANGO_ESTADO('$2')} then status
                   else $2 end,
-                ${column} = coalesce(${column}, now()),
+                ${column} = coalesce(${column}, now(3)),
                 error_code = coalesce($3, error_code),
                 error_title = coalesce($4, error_title)
           where wamid = $1`,
@@ -1202,7 +1301,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async countMarketingSince(contactId, since) {
       const { rows } = await pool.query<{ count: number }>(
-        `select count(*)::int as count
+        `select count(*) as count
            from deliveries
           where contact_id = $1
             and category = 'MARKETING'
@@ -1214,7 +1313,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async campaignStats(campaignId) {
       const { rows } = await pool.query<{ status: string; count: number }>(
-        `select status, count(*)::int as count
+        `select status, count(*) as count
            from deliveries where campaign_id = $1 group by status`,
         [campaignId],
       );
@@ -1226,7 +1325,7 @@ export function createRepos(poolCrudo: Pool): Repos {
         [since],
       );
       const codes = await pool.query<{ code: string; count: number }>(
-        `select error_code as code, count(*)::int as count
+        `select error_code as code, count(*) as count
            from deliveries
           where sent_at >= $1 and status = 'failed' and error_code is not null
           group by error_code`,
@@ -1235,7 +1334,7 @@ export function createRepos(poolCrudo: Pool): Repos {
       return toResumen(rows[0], codes.rows);
     },
     async resumenUltimos(n, desde) {
-      const params: unknown[] = [n, desde ?? new Date(0)];
+      const params: unknown[] = [Number(n), desde ?? new Date(0)];
       const { rows } = await pool.query<ResumenRow>(
         `select ${RESUMEN_SELECT}
            from (select * from deliveries where sent_at is not null and sent_at >= $2
@@ -1243,7 +1342,7 @@ export function createRepos(poolCrudo: Pool): Repos {
         params,
       );
       const codes = await pool.query<{ code: string; count: number }>(
-        `select error_code as code, count(*)::int as count
+        `select error_code as code, count(*) as count
            from (select * from deliveries where sent_at is not null and sent_at >= $2
                   order by sent_at desc, id desc limit $1) d
           where status = 'failed' and error_code is not null
@@ -1254,7 +1353,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async contarCampanaDesde(campaignId, since) {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from deliveries
+        `select count(*) as total from deliveries
           where campaign_id = $1 and sent_at >= $2 and status in ('sent','delivered','read','failed')`,
         [campaignId, since],
       );
@@ -1268,7 +1367,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async contarIniciadosAContactoDesde(contactId, since) {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from deliveries
+        `select count(*) as total from deliveries
           where contact_id = $1 and business_initiated and sent_at >= $2
             and status in ('sent','delivered','read','failed')`,
         [contactId, since],
@@ -1285,7 +1384,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async contarIniciadosDesde(since) {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from deliveries
+        `select count(*) as total from deliveries
           where business_initiated and sent_at >= $1 and status in ('sent','delivered','read','failed')`,
         [since],
       );
@@ -1293,7 +1392,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async contarPlantillaDesde(templateName, since) {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from deliveries
+        `select count(*) as total from deliveries
           where template_name = $1 and sent_at >= $2 and status in ('sent','delivered','read')`,
         [templateName, since],
       );
@@ -1344,7 +1443,7 @@ export function createRepos(poolCrudo: Pool): Repos {
           ${where}
           order by d.queued_at desc, d.id desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, query.limit, query.offset],
+        [...params, Number(query.limit), Number(query.offset)],
       );
       return rows.map((r) => ({
         id: r.id,
@@ -1416,25 +1515,25 @@ export function createRepos(poolCrudo: Pool): Repos {
       await pool.query(
         `insert into templates
            (name, language, category, status, quality, variables, body, propia, variables_doc, footer, synced_at, updated_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), now())
-         on conflict (name, language) do update set
-           category = excluded.category,
-           status = excluded.status,
-           quality = coalesce(excluded.quality, templates.quality),
-           variables = excluded.variables,
-           body = excluded.body,
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(3), now(3))
+         on duplicate key update
+           category = values(category),
+           status = values(status),
+           quality = coalesce(values(quality), quality),
+           variables = values(variables),
+           body = values(body),
            -- Propia se queda propia: una sincronizacion con Meta no la
            -- convierte en "del catalogo".
-           propia = templates.propia or excluded.propia,
-           variables_doc = coalesce(excluded.variables_doc, templates.variables_doc),
-           footer = coalesce(excluded.footer, templates.footer),
+           propia = propia or values(propia),
+           variables_doc = coalesce(values(variables_doc), variables_doc),
+           footer = coalesce(values(footer), footer),
            -- Desde cuando esta aprobada: se fija la primera vez que se ve
            -- APPROVED y no se toca mas. Una plantilla nueva sale con ritmo.
            aprobada_at = case
-             when excluded.status = 'APPROVED' then coalesce(templates.aprobada_at, now())
-             else templates.aprobada_at end,
-           synced_at = now(),
-           updated_at = now()`,
+             when values(status) = 'APPROVED' then coalesce(aprobada_at, now(3))
+             else aprobada_at end,
+           synced_at = now(3),
+           updated_at = now(3)`,
         [
           t.name,
           t.language,
@@ -1450,7 +1549,7 @@ export function createRepos(poolCrudo: Pool): Repos {
       );
       if (t.status === 'APPROVED') {
         await pool.query(
-          'update templates set aprobada_at = coalesce(aprobada_at, now()) where name = $1 and language = $2',
+          'update templates set aprobada_at = coalesce(aprobada_at, now(3)) where name = $1 and language = $2',
           [t.name, t.language],
         );
       }
@@ -1460,7 +1559,7 @@ export function createRepos(poolCrudo: Pool): Repos {
         `update templates
             set status = $3,
                 motivo = coalesce($4, motivo),
-                aprobada_at = case when $3 = 'APPROVED' then coalesce(aprobada_at, now()) else aprobada_at end,
+                aprobada_at = case when $3 = 'APPROVED' then coalesce(aprobada_at, now(3)) else aprobada_at end,
                 -- Aprobada o reinstaurada: ya no esta pausada.
                 pausada_hasta = case when $3 = 'APPROVED' then null else pausada_hasta end
           where name = $1 and language = $2`,
@@ -1493,40 +1592,40 @@ export function createRepos(poolCrudo: Pool): Repos {
 
   const numberState: NumberStateRepo = {
     async get(phoneNumberId) {
-      const { rows } = await pool.query<NumberStateRow>(
+      await pool.query(
         `insert into number_state (phone_number_id) values ($1)
-         on conflict (phone_number_id) do update set updated_at = now()
-         returning *`,
+         on duplicate key update updated_at = now(3)`,
         [phoneNumberId],
       );
+      const { rows } = await pool.query<NumberStateRow>('select * from number_state where phone_number_id = $1', [phoneNumberId]);
       return toNumberState(rows[0]!);
     },
     async setQuality(phoneNumberId, quality) {
       await pool.query(
         `insert into number_state (phone_number_id, quality) values ($1,$2)
-         on conflict (phone_number_id) do update set quality = $2, updated_at = now()`,
+         on duplicate key update quality = $2, updated_at = now(3)`,
         [phoneNumberId, quality],
       );
     },
     async setPaused(phoneNumberId, paused, reason) {
       await pool.query(
         `insert into number_state (phone_number_id, paused, paused_reason) values ($1,$2,$3)
-         on conflict (phone_number_id) do update set
-           paused = $2, paused_reason = $3, updated_at = now()`,
+         on duplicate key update
+           paused = $2, paused_reason = $3, updated_at = now(3)`,
         [phoneNumberId, paused, reason ?? null],
       );
     },
     async setTier(phoneNumberId, tier) {
       await pool.query(
         `insert into number_state (phone_number_id, tier) values ($1,$2)
-         on conflict (phone_number_id) do update set tier = $2, updated_at = now()`,
+         on duplicate key update tier = $2, updated_at = now(3)`,
         [phoneNumberId, tier],
       );
     },
     async setEstado(phoneNumberId, estado) {
       await pool.query(
         `insert into number_state (phone_number_id, estado) values ($1,$2)
-         on conflict (phone_number_id) do update set estado = $2, updated_at = now()`,
+         on duplicate key update estado = $2, updated_at = now(3)`,
         [phoneNumberId, estado],
       );
     },
@@ -1535,9 +1634,9 @@ export function createRepos(poolCrudo: Pool): Repos {
         `insert into number_state
            (phone_number_id, riesgo, nivel, factor, motivos, pausada_hasta, rampa_desde, ultima_evaluacion)
          values ($1,$2,$3,$4,$5,$6,$7,$8)
-         on conflict (phone_number_id) do update set
+         on duplicate key update
            riesgo = $2, nivel = $3, factor = $4, motivos = $5,
-           pausada_hasta = $6, rampa_desde = $7, ultima_evaluacion = $8, updated_at = now()`,
+           pausada_hasta = $6, rampa_desde = $7, ultima_evaluacion = $8, updated_at = now(3)`,
         [
           phoneNumberId,
           patch.riesgo,
@@ -1553,14 +1652,15 @@ export function createRepos(poolCrudo: Pool): Repos {
     async setLimite24h(phoneNumberId, limite) {
       await pool.query(
         `insert into number_state (phone_number_id, limite_24h) values ($1,$2)
-         on conflict (phone_number_id) do update set limite_24h = $2, updated_at = now()`,
+         on duplicate key update limite_24h = $2, updated_at = now(3)`,
         [phoneNumberId, limite],
       );
     },
     async reiniciarWarmup(phoneNumberId, day) {
       await pool.query(
-        `insert into number_state (phone_number_id, warmup_started_on) values ($1,$2)
-         on conflict (phone_number_id) do update set warmup_started_on = $2, updated_at = now()`,
+        // Una columna date: el dia (en UTC) del momento que llega.
+        `insert into number_state (phone_number_id, warmup_started_on) values ($1, date($2))
+         on duplicate key update warmup_started_on = date($2), updated_at = now(3)`,
         [phoneNumberId, day],
       );
     },
@@ -1568,20 +1668,27 @@ export function createRepos(poolCrudo: Pool): Repos {
 
   const counters: CountersRepo = {
     async increment(phoneNumberId, category, day) {
-      const { rows } = await pool.query<{ sent: number }>(
-        `insert into send_counters (phone_number_id, day, category, sent)
-         values ($1,$2,$3,1)
-         on conflict (phone_number_id, day, category)
-           do update set sent = send_counters.sent + 1
-         returning sent`,
-        [phoneNumberId, day, category],
-      );
-      return rows[0]!.sent;
+      // Sin RETURNING: se suma y se lee en la misma transaccion. El upsert
+      // deja la fila bloqueada hasta el commit, asi que dos envios a la vez
+      // no leen el mismo total.
+      return enTransaccion(pool, async (c) => {
+        await c.query(
+          `insert into send_counters (phone_number_id, day, category, sent)
+           values ($1, date($2), $3, 1)
+           on duplicate key update sent = sent + 1`,
+          [phoneNumberId, day, category],
+        );
+        const { rows } = await c.query<{ sent: number }>(
+          'select sent from send_counters where phone_number_id = $1 and day = date($2) and category = $3',
+          [phoneNumberId, day, category],
+        );
+        return rows[0]!.sent;
+      });
     },
     async totalForDay(phoneNumberId, day) {
       const { rows } = await pool.query<{ total: number }>(
-        `select coalesce(sum(sent),0)::int as total
-           from send_counters where phone_number_id = $1 and day = $2`,
+        `select coalesce(sum(sent),0) as total
+           from send_counters where phone_number_id = $1 and day = date($2)`,
         [phoneNumberId, day],
       );
       return rows[0]?.total ?? 0;
@@ -1590,11 +1697,13 @@ export function createRepos(poolCrudo: Pool): Repos {
 
   const tracking: TrackingRepo = {
     async createLink(contactId, label, expiresAt) {
-      const { rows } = await pool.query<LinkRow>(
-        `insert into tracking_links (contact_id, label, expires_at)
-         values ($1,$2,$3) returning *`,
-        [contactId, label, expiresAt],
+      const id = nuevoId();
+      await pool.query(
+        `insert into tracking_links (id, contact_id, label, expires_at)
+         values ($1,$2,$3,$4)`,
+        [id, contactId, label, expiresAt],
       );
+      const { rows } = await pool.query<LinkRow>('select * from tracking_links where id = $1', [id]);
       return toLink(rows[0]!);
     },
     async getLink(id) {
@@ -1602,7 +1711,7 @@ export function createRepos(poolCrudo: Pool): Repos {
       return rows[0] ? toLink(rows[0]) : null;
     },
     async revoke(id) {
-      await pool.query('update tracking_links set revoked_at = now() where id = $1', [id]);
+      await pool.query('update tracking_links set revoked_at = now(3) where id = $1', [id]);
     },
     async addPoint(linkId, p) {
       await pool.query(
@@ -1615,10 +1724,10 @@ export function createRepos(poolCrudo: Pool): Repos {
       const { rows } = await pool.query<TrackPoint>(
         // El desempate por id importa: dos posiciones seguidas pueden caer en
         // el mismo instante y sin el la polilinea del mapa se dibuja al reves.
-        `select lat, lng, accuracy, heading, speed, recorded_at as "recordedAt"
+        `select lat, lng, accuracy, heading, speed, recorded_at as \`recordedAt\`
            from track_points where link_id = $1
           order by recorded_at desc, id desc limit $2`,
-        [linkId, limit],
+        [linkId, Number(limit)],
       );
       return rows.reverse();
     },
@@ -1635,14 +1744,15 @@ export function createRepos(poolCrudo: Pool): Repos {
         }
       >(
         `select t.*, c.phone, c.name,
-                (select count(*)::int from track_points p where p.link_id = t.id) as point_count,
+                (select count(*) from track_points p where p.link_id = t.id) as point_count,
                 lp.lat as last_lat, lp.lng as last_lng, lp.recorded_at as last_at
            from tracking_links t
            left join contacts c on c.id = t.contact_id
-           left join lateral (
-             select lat, lng, recorded_at from track_points
-              where link_id = t.id order by recorded_at desc, id desc limit 1
-           ) lp on true
+           -- El ultimo punto (sin LATERAL): el id del mas reciente.
+           left join track_points lp on lp.id = (
+             select p1.id from track_points p1
+              where p1.link_id = t.id order by p1.recorded_at desc, p1.id desc limit 1
+           )
           where t.revoked_at is null and t.expires_at > $1
           order by t.created_at desc`,
         [now],
@@ -1663,11 +1773,13 @@ export function createRepos(poolCrudo: Pool): Repos {
 
   const campaigns: CampaignsRepo = {
     async create(input) {
-      const { rows } = await pool.query<{ id: string }>(
+      const id = nuevoId();
+      await pool.query(
         `insert into campaigns
-           (name, template_name, template_language, category, ritmo_por_hora, canario, canario_espera_min)
-         values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+           (id, name, template_name, template_language, category, ritmo_por_hora, canario, canario_espera_min)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
+          id,
           input.name,
           input.templateName,
           input.templateLanguage,
@@ -1677,15 +1789,15 @@ export function createRepos(poolCrudo: Pool): Repos {
           input.canarioEsperaMin ?? 60,
         ],
       );
-      return rows[0]!.id;
+      return id;
     },
     async setStatus(id, status, motivo) {
       await pool.query(
         `update campaigns
             set status = $2,
                 motivo_pausa = $3,
-                started_at = case when $2 in ('running','canary') then coalesce(started_at, now()) else started_at end,
-                finished_at = case when $2 in ('finished','stopped','empty') then coalesce(finished_at, now()) else null end
+                started_at = case when $2 in ('running','canary') then coalesce(started_at, now(3)) else started_at end,
+                finished_at = case when $2 in ('finished','stopped','empty') then coalesce(finished_at, now(3)) else null end
           where id = $1`,
         [id, status, motivo ?? null],
       );
@@ -1695,40 +1807,67 @@ export function createRepos(poolCrudo: Pool): Repos {
       return rows[0] ? toCampaign(rows[0]) : null;
     },
     async list() {
-      const { rows } = await pool.query<
-        CampaignRow & { stats: Record<string, number> | null; destinatarios: Record<string, number> | null }
-      >(
-        `select k.*,
-                (select jsonb_object_agg(s.status, s.count)
-                   from (select status, count(*)::int as count
-                           from deliveries where campaign_id = k.id group by status) s) as stats,
-                (select jsonb_object_agg(r.estado, r.count)
-                   from (select estado, count(*)::int as count
-                           from campaign_recipients where campaign_id = k.id group by estado) r) as destinatarios
-           from campaigns k
-          order by k.created_at desc`,
-      );
+      const { rows } = await pool.query<CampaignRow>('select * from campaigns k order by k.created_at desc');
+      if (!rows.length) return [];
+      // Las cifras por estado se agregan en JS (MariaDB 10.4 no tiene
+      // JSON_OBJECTAGG): una campana sin entregas queda en {}.
+      const ids = rows.map((r) => r.id);
+      const [entregas, destinatarios] = await Promise.all([
+        pool.query<{ campaign_id: string; clave: string; count: number }>(
+          `select campaign_id, status as clave, count(*) as count
+             from deliveries where campaign_id in ($1) group by campaign_id, status`,
+          [ids],
+        ),
+        pool.query<{ campaign_id: string; clave: string; count: number }>(
+          `select campaign_id, estado as clave, count(*) as count
+             from campaign_recipients where campaign_id in ($1) group by campaign_id, estado`,
+          [ids],
+        ),
+      ]);
+      const agrupar = (filas: Array<{ campaign_id: string; clave: string; count: number }>) => {
+        const m = new Map<string, Record<string, number>>();
+        for (const f of filas) {
+          const o = m.get(f.campaign_id) ?? {};
+          o[f.clave] = f.count;
+          m.set(f.campaign_id, o);
+        }
+        return m;
+      };
+      const stats = agrupar(entregas.rows);
+      const porEstado = agrupar(destinatarios.rows);
       return rows.map((row) => ({
         ...toCampaign(row),
-        stats: row.stats ?? {},
-        destinatarios: row.destinatarios ?? {},
+        stats: stats.get(row.id) ?? {},
+        destinatarios: porEstado.get(row.id) ?? {},
       }));
     },
 
     async agregarDestinatarios(campaignId, entries) {
       if (!entries.length) return 0;
-      const phones = entries.map((e) => e.phone);
-      const variables = entries.map((e) => JSON.stringify(e.variables ?? []));
-      const ordenes = entries.map((e) => e.orden);
-      const canarios = entries.map((e) => e.canario);
-      const { rowCount } = await pool.query(
-        `insert into campaign_recipients (campaign_id, phone, variables, orden, canario)
-         select $1, p, v::jsonb, o, c
-           from unnest($2::text[], $3::text[], $4::int[], $5::boolean[]) as t(p, v, o, c)
-         on conflict (campaign_id, phone) do nothing`,
-        [campaignId, phones, variables, ordenes, canarios],
-      );
-      return rowCount ?? 0;
+      // Un repetido (misma campana y telefono) no entra (`phone = phone` no
+      // cambia nada). affectedRows no distingue el repetido del nuevo (mysql2
+      // cuenta filas encontradas), asi que lo que entro se cuenta antes y
+      // despues, en la misma transaccion.
+      return enTransaccion(pool, async (c) => {
+        const contar = async () =>
+          (await c.query<{ n: number }>('select count(*) as n from campaign_recipients where campaign_id = $1', [campaignId])).rows[0]?.n ?? 0;
+        const antes = await contar();
+        for (let i = 0; i < entries.length; i += TANDA) {
+          const tanda = entries.slice(i, i + TANDA);
+          const params: unknown[] = [];
+          const filas = tanda.map((e) => {
+            params.push(campaignId, e.phone, JSON.stringify(e.variables ?? []), e.orden, e.canario);
+            return '(?, ?, ?, ?, ?)';
+          });
+          await c.query(
+            `insert into campaign_recipients (campaign_id, phone, variables, orden, canario)
+             values ${filas.join(', ')}
+             on duplicate key update phone = phone`,
+            params,
+          );
+        }
+        return (await contar()) - antes;
+      });
     },
     async siguientesPendientes(campaignId, limit, soloCanario = false, ahora = new Date()) {
       const { rows } = await pool.query<RecipientRow>(
@@ -1737,7 +1876,7 @@ export function createRepos(poolCrudo: Pool): Repos {
             and (posponer_hasta is null or posponer_hasta <= $3)
           order by canario desc, orden, id
           limit $2`,
-        [campaignId, limit, ahora],
+        [campaignId, Number(limit), ahora],
       );
       return rows.map(toRecipient);
     },
@@ -1751,7 +1890,7 @@ export function createRepos(poolCrudo: Pool): Repos {
     },
     async contarPendientes(campaignId, soloCanario = false) {
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from campaign_recipients
+        `select count(*) as total from campaign_recipients
           where campaign_id = $1 and estado = 'pendiente' ${soloCanario ? 'and canario' : ''}`,
         [campaignId],
       );
@@ -1761,14 +1900,14 @@ export function createRepos(poolCrudo: Pool): Repos {
       await pool.query(
         `update campaign_recipients
             set estado = $2, detalle = $3, delivery_id = $4,
-                enviado_at = case when $2 = 'enviado' then coalesce($5, now()) else enviado_at end
+                enviado_at = case when $2 = 'enviado' then coalesce($5, now(3)) else enviado_at end
           where id = $1`,
         [id, estado, detalle, deliveryId, at ?? null],
       );
     },
     async cifrasDestinatarios(campaignId) {
       const { rows } = await pool.query<{ estado: string; count: number }>(
-        `select estado, count(*)::int as count from campaign_recipients
+        `select estado, count(*) as count from campaign_recipients
           where campaign_id = $1 group by estado`,
         [campaignId],
       );
@@ -1801,7 +1940,7 @@ export function createRepos(poolCrudo: Pool): Repos {
         [campaignId],
       );
       const codes = await pool.query<{ code: string; count: number }>(
-        `select error_code as code, count(*)::int as count
+        `select error_code as code, count(*) as count
            from deliveries d
           where d.campaign_id = $1 and d.status = 'failed' and d.error_code is not null
             and d.id in (select delivery_id from campaign_recipients
@@ -1815,11 +1954,10 @@ export function createRepos(poolCrudo: Pool): Repos {
 
   const salud: SaludRepo = {
     async registrar(evento) {
-      const { rows } = await pool.query<{ id: number }>(
+      const { insertId } = await pool.query(
         `insert into salud_eventos
            (phone_number_id, at, tipo, codigo, detalle, contact_id, campaign_id, payload)
-         values ($1, coalesce($2, now()), $3, $4, $5, $6, $7, $8)
-         returning id`,
+         values ($1, coalesce($2, now(3)), $3, $4, $5, $6, $7, $8)`,
         [
           evento.phoneNumberId ?? '',
           evento.at ?? null,
@@ -1831,7 +1969,7 @@ export function createRepos(poolCrudo: Pool): Repos {
           evento.payload ? JSON.stringify(evento.payload) : null,
         ],
       );
-      return rows[0]!.id;
+      return insertId;
     },
     async contar(since, tipo, codigo) {
       const params: unknown[] = [since];
@@ -1845,14 +1983,14 @@ export function createRepos(poolCrudo: Pool): Repos {
         where += ` and codigo = $${params.length}`;
       }
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from salud_eventos where ${where}`,
+        `select count(*) as total from salud_eventos where ${where}`,
         params,
       );
       return rows[0]?.total ?? 0;
     },
     async resumen(since) {
       const { rows } = await pool.query<{ clave: string; count: number }>(
-        `select tipo || ':' || coalesce(codigo, '') as clave, count(*)::int as count
+        `select tipo || ':' || coalesce(codigo, '') as clave, count(*) as count
            from salud_eventos where at >= $1 group by 1`,
         [since],
       );
@@ -1861,13 +1999,31 @@ export function createRepos(poolCrudo: Pool): Repos {
     async ultimos(limit) {
       const { rows } = await pool.query<SaludRow>(
         'select * from salud_eventos order by at desc, id desc limit $1',
-        [limit],
+        [Number(limit)],
       );
       return rows.map(toSaludEvento);
     },
     async purgar(before) {
       const { rowCount } = await pool.query('delete from salud_eventos where at < $1', [before]);
       return rowCount ?? 0;
+    },
+  };
+
+  const decisiones: DecisionesRepo = {
+    async registrar(entrada) {
+      const d = recortarDecision(entrada);
+      await pool.query(
+        `insert into decisiones_bot (contact_id, phone, mensajes, intencion, dato, respuesta, como, esperaba, detalle)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [d.contactId, d.phone, d.mensajes, d.intencion, d.dato, d.respuesta, d.como, d.esperaba, d.detalle],
+      );
+    },
+    async listarPorContacto(contactId, limit = 50) {
+      const { rows } = await pool.query<DecisionRow>(
+        'select * from decisiones_bot where contact_id = $1 order by created_at desc, id desc limit $2',
+        [contactId, Math.max(1, Math.min(TOPE_DECISIONES, Math.trunc(Number(limit) || 50)))],
+      );
+      return rows.map(toDecision);
     },
   };
 
@@ -1901,8 +2057,37 @@ export function createRepos(poolCrudo: Pool): Repos {
     entregas: createEntregasRepo(pool),
     desarrollador: createDesarrolladorRepo(pool),
     procesos: createProcesosRepo(pool),
+    decisiones,
   };
 }
+
+interface DecisionRow {
+  id: number | string;
+  contact_id: string;
+  phone: string;
+  mensajes: number;
+  intencion: string;
+  dato: string | null;
+  respuesta: string;
+  como: string;
+  esperaba: string | null;
+  detalle: string | null;
+  created_at: Date;
+}
+
+const toDecision = (r: DecisionRow): DecisionBot => ({
+  id: Number(r.id),
+  contactId: r.contact_id,
+  phone: r.phone,
+  mensajes: Number(r.mensajes),
+  intencion: r.intencion as IntencionGsg,
+  dato: r.dato,
+  respuesta: r.respuesta,
+  como: r.como as ComoSeDecidio,
+  esperaba: r.esperaba,
+  detalle: r.detalle,
+  createdAt: r.created_at instanceof Date ? r.created_at : new Date(r.created_at),
+});
 
 // ------------------------------------------------------ ajustes editables
 
@@ -1911,21 +2096,22 @@ export function createSettingsRepo(pool: Pool) {
   return {
     async getAll() {
       const { rows } = await pool.query<{ key: string; value: string; encrypted: boolean }>(
-        'select key, value, encrypted from settings',
+        // `key` es palabra reservada en MySQL: siempre entre comillas invertidas.
+        'select `key`, value, encrypted from settings',
       );
       return rows;
     },
     async put(key: string, value: string, encrypted: boolean) {
       await pool.query(
-        `insert into settings (key, value, encrypted, updated_at)
-         values ($1,$2,$3, now())
-         on conflict (key) do update set
-           value = excluded.value, encrypted = excluded.encrypted, updated_at = now()`,
+        `insert into settings (\`key\`, value, encrypted, updated_at)
+         values ($1,$2,$3, now(3))
+         on duplicate key update
+           value = values(value), encrypted = values(encrypted), updated_at = now(3)`,
         [key, value, encrypted],
       );
     },
     async remove(key: string) {
-      await pool.query('delete from settings where key = $1', [key]);
+      await pool.query('delete from settings where `key` = $1', [key]);
     },
   };
 }

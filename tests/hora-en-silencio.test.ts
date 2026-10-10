@@ -173,10 +173,14 @@ describe('varios pedidos del día: se usa el correcto', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('sin nombrar ninguno: el que llega primero; nombrando uno: ese', async () => {
+  it('sin nombrar ninguno: no se asume cuál (silencio y queda anotado); nombrando uno: ese', async () => {
     let a = e.textosA(TEL).length;
     await e.contesta(TEL, { texto: 'a que hora llega mi pedido?' });
-    expect(e.textosA(TEL).slice(a)).toEqual([expect.stringContaining('su pedido P-VARIOS-2 llega aproximadamente')]);
+    expect(e.textosA(TEL).slice(a)).toEqual([]);
+    const c = (await e.repos.contacts.getByPhone(conPais(TEL)))!;
+    const [d] = await e.repos.decisiones.listarPorContacto(c.id, 1);
+    expect(d).toMatchObject({ intencion: 'estado_pedido' });
+    expect(d!.respuesta).toContain('varios pedidos');
     a = e.textosA(TEL).length;
     await e.contesta(TEL, { texto: 'y a que hora llega el P-VARIOS-1?' });
     expect(e.textosA(TEL).slice(a)).toEqual([expect.stringContaining('su pedido P-VARIOS-1 llega aproximadamente')]);

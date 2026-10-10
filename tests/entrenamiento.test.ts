@@ -264,7 +264,7 @@ describe('calificar una leccion', () => {
 // ------------------------------------------------------------ con servidor
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -499,7 +499,7 @@ describe('importar en masa', () => {
   it('por la API, con el permiso ia:entrenar', async () => {
     const clave = await crearClaveDePrueba(repos, ['ia:entrenar']);
     const sin = await crearClaveDePrueba(repos, ['estado:leer']);
-    const cab = (k: string) => ({ authorization: `Bearer ${k}`, 'content-type': 'application/json' });
+    const cab = (k: string) => ({ 'x-api-key': k, 'content-type': 'application/json' });
     expect((await app.inject({ method: 'POST', url: '/api/v1/ia/lecciones', headers: cab(sin), payload: { pregunta: 'a?', respuesta: 'bb' } })).statusCode).toBe(403);
     const una = await app.inject({ method: 'POST', url: '/api/v1/ia/lecciones', headers: cab(clave), payload: { pregunta: '¿Envían a Cusco?', respuesta: 'Sí, en 3 días.', tema: 'envios' } });
     expect(una.statusCode).toBe(200);

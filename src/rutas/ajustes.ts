@@ -49,7 +49,7 @@ export const ajustesSchema = z.object({
   pausaMinSegundos: z.coerce.number().int().min(1).max(600),
   pausaMaxSegundos: z.coerce.number().int().min(1).max(900),
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
-  maxIntentos: z.coerce.number().int().min(1).max(10),
+  maxIntentos: z.coerce.number().int().min(1).max(3),
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
   plantillas: z.object({ solicitud: listaDeNombres, recordatorio: listaDeNombres, insistencia: listaDeNombres }),
@@ -80,7 +80,7 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     // El minimo manda si alguien pone el maximo por debajo.
     pausaMaxSegundos: Math.max(ajustes.pausaMinSegundos, ajustes.pausaMaxSegundos),
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
-    maxIntentos: ajustes.maxIntentos,
+    maxIntentos: Math.min(3, ajustes.maxIntentos),
     horaInicio: ajustes.horaInicio,
     horaFin: Math.max(ajustes.horaInicio + 1, ajustes.horaFin),
   };
@@ -132,7 +132,7 @@ export interface AjustesRepo {
 
 export function createAjustesRepo(pool: Pool): AjustesRepo {
   async function leer(): Promise<Partial<AjustesRutas>> {
-    const { rows } = await pool.query<{ value: string }>('select value from settings where key = $1', [AJUSTES_KEY]);
+    const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [AJUSTES_KEY]);
     if (!rows[0]) return {};
     try {
       return JSON.parse(rows[0].value) as Partial<AjustesRutas>;
@@ -156,14 +156,14 @@ export function createAjustesRepo(pool: Pool): AjustesRepo {
       const actual = fusionar(porDefecto, await leer());
       const nuevo = fusionar(actual, patch as Partial<AjustesRutas>);
       await pool.query(
-        `insert into settings (key, value, encrypted, updated_at) values ($1,$2,false,now())
-         on conflict (key) do update set value = excluded.value, updated_at = now()`,
+        `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
+         on duplicate key update value = values(value), updated_at = now(3)`,
         [AJUSTES_KEY, JSON.stringify(nuevo)],
       );
       return nuevo;
     },
     async reset() {
-      await pool.query('delete from settings where key = $1', [AJUSTES_KEY]);
+      await pool.query('delete from settings where `key` = $1', [AJUSTES_KEY]);
     },
   };
 }

@@ -295,8 +295,8 @@ function crearGsgFalso(): GsgFalsoInterno {
       if (!tipo) return new Response(JSON.stringify({ error: `ruta desconocida ${camino}` }), { status: 404 });
 
       const headers = new Headers(init?.headers);
-      const autorizacion = headers.get('authorization');
-      const token = autorizacion?.startsWith('Bearer ') ? autorizacion.slice(7) : null;
+      // Como la API real de GSG: la clave solo en X-API-Key (un Bearer no cuenta).
+      const token = headers.get('x-api-key');
       if (token !== GSG_TOKEN_FALSO) return new Response(JSON.stringify({ error: 'token inválido' }), { status: 401 });
 
       if (gsg.modo === 'rechaza') {
@@ -331,7 +331,7 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
     RUTAS_PAUSA_MIN_SEG: String(PAUSA_SEGUNDOS),
     RUTAS_PAUSA_MAX_SEG: String(PAUSA_SEGUNDOS),
     PUBLIC_BASE_URL: 'http://localhost:3000',
-    DATABASE_URL: 'postgres://x/y',
+    DATABASE_URL: 'mysql://x/y',
     WHATSAPP_TOKEN: 't',
     WHATSAPP_PHONE_NUMBER_ID: 'PNID',
     WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -450,7 +450,7 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
     ...(salud ? { salud, politica } : {}),
   });
 
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
   const memoriaAlertas = { ultimoResumen: new Map<string, number>(), ultimoAviso: new Map<string, number>() };
 
   async function llamar<T>(method: MetodoHttp, url: string, body?: unknown): Promise<RespuestaApi<T>> {
@@ -551,7 +551,10 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
       else if ('adjunto' in respuesta) carga.adjunto = respuesta.adjunto;
       else if ('baja' in respuesta) carga.text = 'BAJA';
       else carga.text = 'no soy yo, se equivocaron de número';
-      return api.post('/admin/dev/inbound', carga);
+      const r = await api.post('/admin/dev/inbound', carga);
+      // La baja no la da el cliente escribiendo BAJA: la da el equipo desde el panel.
+      if ('baja' in respuesta) await api.post('/admin/contacts/opt-out', { phone });
+      return r;
     },
 
     async vistas(loteId) {

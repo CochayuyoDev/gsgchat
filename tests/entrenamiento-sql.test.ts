@@ -1,48 +1,32 @@
 /**
- * El SQL del entrenamiento contra Postgres de verdad (PGlite): la migracion,
+ * El SQL del entrenamiento contra MySQL/MariaDB de verdad: el esquema,
  * la huella unica (tambien dentro de la misma tanda), los filtros y la
  * paginacion, el cambio en masa, las cifras, el recorrido de conversaciones
  * (solo personas, con el origen del payload) y los examenes con sus casos.
  */
 
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
 import { huellaDe } from '../src/entrenamiento/texto.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
 
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations');
-
-function asPool(db: PGlite): Pool {
-  const query = async (text: string, params?: unknown[]) => {
-    const result = await db.query(text, params as never[], { parsers: { 20: (v: string) => Number.parseInt(v, 10) } });
-    return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
-  };
-  const client = { query, release: () => undefined };
-  return { query, connect: async () => client, end: async () => db.close() } as unknown as Pool;
-}
-
-let db: PGlite;
+let base: BaseDePrueba;
 let pool: Pool;
 let repos: Repos;
 
 beforeAll(async () => {
-  db = new PGlite();
-  pool = asPool(db);
-  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql')).sort();
-  for (const file of files) await db.exec(await readFile(path.join(MIGRATIONS, file), 'utf8'));
+  base = await baseDePrueba();
+  pool = base.pool;
   repos = createRepos(pool);
 });
 
 afterAll(async () => {
-  await pool.end();
+  await base?.cerrar();
 });
 
 beforeEach(async () => {
-  await db.exec('delete from ia_examen_casos; delete from ia_examenes; delete from ia_lecciones; delete from messages; delete from contacts;');
+  await base.vaciar();
 });
 
 const nueva = (pregunta: string | null, respuesta: string, extra: Record<string, unknown> = {}) =>

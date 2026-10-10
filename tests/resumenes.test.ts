@@ -17,7 +17,7 @@ import { createFakeRepos, createFakeSettings, createFakeWhatsApp, createMemorySe
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -101,11 +101,11 @@ describe('el texto fijo y las cifras', () => {
     expect(t).toContain('Quien más entregó: Kevin Aguilar (12)');
   });
 
-  it('el de la tarde lleva el cierre del día en palabras cuando hay conexión, y no por la mañana', async () => {
-    const t = textoFijo('tarde', { ...cifras, cuadreGsg: 'Quedan 1 de 25 pedido(s) sin cerrar (P-1010).' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
-    expect(t).toContain('Cierre del día: Quedan 1 de 25');
+  it('el de la tarde lleva el cuadre con GSG en palabras cuando hay conexión, y no por la mañana', async () => {
+    const t = textoFijo('tarde', { ...cifras, cuadreGsg: 'No cuadra: 1 cerrado(s) aquí que GSG no tiene como terminados (P-1010); 0 terminado(s) en GSG que aquí siguen abiertos.' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
+    expect(t).toContain('Cuadre con GSG: No cuadra: 1 cerrado(s)');
     const m = textoFijo('manana', { ...cifras, cuadreGsg: 'lo que sea' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
-    expect(m).not.toContain('Cierre del día');
+    expect(m).not.toContain('Cuadre con GSG');
     // Por el servicio: el cuadre se pide solo por la tarde y solo con GSG conectado.
     const pedidos: string[] = [];
     const sender = { send: async () => ({ ok: true }) } as unknown as import('../src/outbound/sender.js').Sender;
@@ -116,15 +116,15 @@ describe('el texto fijo y las cifras', () => {
       supervisor: () => '51912426667',
       nombreNegocio: () => 'GSG Reparto',
       entregas: { resumen: async () => resumenDePrueba() },
-      gsgExtras: () => ({ cuadrar: async (dia?: string) => { pedidos.push(dia ?? ''); return { resumen: 'Día cerrado: los 25 pedido(s) están entregados o cancelados.' }; } }),
+      gsgExtras: () => ({ cuadrar: async (dia?: string) => { pedidos.push(dia ?? ''); return { resumen: 'Cuadra: 25 entregados aquí y 25 terminados en GSG.' }; } }),
       timezone: 'America/Lima',
       publicBaseUrl: URL,
     });
     const tarde = await servicio.redactar('tarde');
-    expect(tarde.texto).toContain('Cierre del día: Día cerrado: los 25');
+    expect(tarde.texto).toContain('Cuadre con GSG: Cuadra: 25 entregados');
     expect(pedidos).toHaveLength(1);
     const manana = await servicio.redactar('manana');
-    expect(manana.texto).not.toContain('Cierre del día');
+    expect(manana.texto).not.toContain('Cuadre con GSG');
     expect(pedidos).toHaveLength(1);
   });
 
@@ -275,7 +275,7 @@ describe('el servicio: cuando sale, a quien, y que pasa si no puede', () => {
 describe('las rutas de la pantalla', () => {
   let app: FastifyInstance;
   let wa: FakeWhatsApp;
-  const auth = { authorization: `Bearer ${CLAVE_API_PRUEBA}` };
+  const auth = { 'x-api-key': CLAVE_API_PRUEBA };
 
   beforeAll(async () => {
     const repos = createFakeRepos();

@@ -188,8 +188,6 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
   });
 
   it('«Probar el día entero» recorre el día solo y termina con todo entregado', async () => {
-    // La prueba del día solo corre con el simulador puesto (nunca con la API real).
-    await e.conexionGsg.usarSimulador();
     e.simulador.cargarDePrueba();
     const inicio = await e.api.post<{ ok: boolean; estado: { estado: string } }>('/admin/entregas/simulador/probar-dia', { pausaMs: 200 });
     expect(inicio.status).toBe(200);

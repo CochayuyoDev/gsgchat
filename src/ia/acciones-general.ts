@@ -1,9 +1,10 @@
+import { moduloRetirado } from '../modulos-retirados.js';
 /**
  * La via general de la IA operadora: todo lo que se puede hacer en el panel
  * y NO tiene una accion con nombre propio (acciones.ts, acciones-panel.ts).
  *
  *  - `panel.mapa` (consulta): el mapa curado de lo que se puede hacer, por
- *    secciones (motorizados, entregas, chat, contactos...): para cada ruta,
+ *    secciones (entregas, chat, contactos...): para cada ruta,
  *    metodo, url, para que sirve en palabras y la forma del body. Con filtro
  *    por seccion o por palabra para no mandarlo todo de golpe.
  *  - `panel.consultar` (consulta): un GET a una ruta del mapa. Devuelve el
@@ -29,7 +30,7 @@ type Metodo = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface RutaDelMapa {
   metodo: Metodo;
-  /** Con `:id`, `:contactId`... para lo que cambia: '/admin/motorizados/:id'. */
+  /** Con `:id`, `:contactId`... para lo que cambia: '/admin/entregas/:id'. */
   ruta: string;
   /** Para que sirve, en palabras. */
   para: string;
@@ -58,29 +59,13 @@ const MANDA_WHATSAPP = 'Sale un WhatsApp de verdad (pasa por el ritmo, el horari
 
 // ======================================================================= EL MAPA
 
-export const MAPA_PANEL: SeccionDelMapa[] = [
-  {
-    id: 'motorizados',
-    nombre: 'Motorizados',
-    ir: '/motorizados',
-    rutas: [
-      { metodo: 'GET', ruta: '/admin/motorizados', para: 'ver la lista de motorizados (id, nombre, teléfono, estado, zona, placa)' },
-      { metodo: 'POST', ruta: '/admin/motorizados', para: 'dar de alta un motorizado', body: '{ telefono: "51987654321", nombre: "Carlos Rojas", placa?: "ABC-123", zona?: "Lince, Jesús María", estado?: "activo"|"descanso"|"baja" }', obligatorios: ['telefono', 'nombre'] },
-      { metodo: 'POST', ruta: '/admin/motorizados/lote', para: 'dar de alta varios motorizados de golpe', body: '{ texto: "una línea por motorizado: nombre, WhatsApp, placa, zona" }', obligatorios: ['texto'] },
-      { metodo: 'POST', ruta: '/admin/motorizados/:id', para: 'cambiar los datos de un motorizado (nombre, placa, zona o estado)', body: '{ nombre?, placa?, zona?, estado?: "activo"|"descanso"|"baja" } (solo lo que cambia)', leer: '/admin/motorizados' },
-      { metodo: 'DELETE', ruta: '/admin/motorizados/:id', para: 'quitar un motorizado de la lista', leer: '/admin/motorizados' },
-      { metodo: 'GET', ruta: '/admin/motorizados/:id/ruta', para: 'ver la ruta de hoy de un motorizado (sus pedidos en orden y el mensaje)' },
-      { metodo: 'POST', ruta: '/admin/motorizados/:id/ruta/mandar', para: 'mandarle su ruta de hoy por WhatsApp', aviso: MANDA_WHATSAPP, leer: '/admin/motorizados' },
-      { metodo: 'POST', ruta: '/admin/motorizados/:id/enlace', para: 'crear el enlace de su página de motorizado (y mandárselo)', body: '{ mandar?: true|false }', leer: '/admin/motorizados' },
-      { metodo: 'POST', ruta: '/admin/motorizados/:id/traspasar', para: 'quitarle todo lo que lleva y pasarlo a otro (o repartirlo)', body: '{ motorizadoId?: 7 (a quién; vacío = se reparte), descanso?: true, motivo?: "se le malogró la moto" }', leer: '/admin/motorizados' },
-    ],
-  },
+export const MAPA_PANEL: SeccionDelMapa[] = ([
   {
     id: 'entregas',
     nombre: 'Entregas de hoy y Números del día',
     ir: '/hoy',
     rutas: [
-      { metodo: 'GET', ruta: '/admin/entregas', para: 'ver todo lo de hoy: cifras, entregas, motorizados, ajustes' },
+      { metodo: 'GET', ruta: '/admin/entregas', para: 'ver todo lo de hoy: cifras, entregas, ajustes' },
       { metodo: 'GET', ruta: '/admin/entregas/:id', para: 'ver una entrega con su bitácora' },
       { metodo: 'GET', ruta: '/admin/entregas/numeros', para: 'ver los números del día con su etapa (falta ubicación, falta confirmar...)' },
       { metodo: 'POST', ruta: '/admin/entregas/crear', para: 'crear un pedido a mano', body: '{ telefono: "51987654321", nombre?, referencia?, direccion?, distrito?, notas?, faltaUbicacion?: true, faltaConfirmacion?: true, lat?, lng?, urgente? }', obligatorios: ['telefono'] },
@@ -88,11 +73,8 @@ export const MAPA_PANEL: SeccionDelMapa[] = [
       { metodo: 'POST', ruta: '/admin/entregas/:id/confirmar', para: 'dar la entrega por confirmada (o no) a mano', body: '{ confirmada: true|false }', leer: '/admin/entregas/:id' },
       { metodo: 'POST', ruta: '/admin/entregas/:id/cancelar', para: 'cancelar una entrega', body: '{ motivo?: "…" }', leer: '/admin/entregas/:id' },
       { metodo: 'POST', ruta: '/admin/entregas/:id/ubicacion', para: 'ponerle la ubicación a una entrega', body: '{ lat: -12.05, lng: -77.03 } o { texto: "enlace de Google Maps" }', leer: '/admin/entregas/:id' },
-      { metodo: 'POST', ruta: '/admin/entregas/:id/reasignar', para: 'pasar la entrega a otro motorizado (o que el sistema elija)', body: '{ motorizadoId?: 7 }', leer: '/admin/entregas/:id' },
-      { metodo: 'POST', ruta: '/admin/entregas/:id/sin-ubicacion', para: 'darle un motorizado a un pedido que aún no tiene ubicación', body: '{ motorizadoId?: 7 }', leer: '/admin/entregas/:id' },
       { metodo: 'POST', ruta: '/admin/entregas/:id/entregada', para: 'marcar la entrega como entregada', leer: '/admin/entregas/:id' },
       { metodo: 'POST', ruta: '/admin/entregas/:id/reintentar', para: 'volver a intentar una entrega que se quedó parada', leer: '/admin/entregas/:id' },
-      { metodo: 'POST', ruta: '/admin/entregas/:id/segunda-visita', para: 'que el motorizado vuelva a pasar (el cliente ya está)', leer: '/admin/entregas/:id' },
       { metodo: 'POST', ruta: '/admin/entregas/:id/prioridad', para: 'marcar o desmarcar la entrega como urgente', body: '{ urgente: true|false }', obligatorios: ['urgente'], leer: '/admin/entregas/:id' },
       { metodo: 'POST', ruta: '/admin/entregas/confirmar-envio', para: 'confirmar el envío de los números que llegaron de GSG', body: '{ todos: true } o { ids: [12, 13] }', aviso: MANDA_WHATSAPP },
       { metodo: 'POST', ruta: '/admin/entregas/masa', para: 'una acción sobre varios números del día', body: '{ accion: "confirmar_envio"|"pedir_ubicacion"|"pedir_confirmacion"|"marcar_contactado"|"quitar_marca"|"pausar"|"reanudar", ids: [12, 13] }', obligatorios: ['accion', 'ids'] },
@@ -285,7 +267,7 @@ export const MAPA_PANEL: SeccionDelMapa[] = [
     ir: '/panel#configuracion',
     rutas: [
       { metodo: 'GET', ruta: '/admin/ajustes', para: 'ver los ajustes generales (negocio, modo prueba, horario, ritmo, supervisor)' },
-      { metodo: 'POST', ruta: '/admin/ajustes', para: 'cambiar ajustes generales', body: '{ nombreNegocio?, tono?, zonaHoraria?, modoPrueba?: { activo, numeros: [] }, horario?: { inicio: "09:00", fin: "20:00", dias }, ritmo?: { maxPorMinuto, maxPorHora, … }, avisos?: { supervisor: "51…" }, resumenes? } (solo lo que cambia)', soloAdmin: true, leer: '/admin/ajustes' },
+      { metodo: 'POST', ruta: '/admin/ajustes', para: 'cambiar ajustes generales', body: '{ nombreNegocio?, tono?, zonaHoraria?, horario?: { inicio: "09:00", fin: "20:00", dias }, ritmo?: { maxPorMinuto, maxPorHora, … }, avisos?: { supervisor: "51…" }, resumenes? } (solo lo que cambia)', soloAdmin: true, leer: '/admin/ajustes' },
       { metodo: 'DELETE', ruta: '/admin/ajustes', para: 'volver TODOS los ajustes generales a los de fábrica', soloAdmin: true, leer: '/admin/ajustes' },
       { metodo: 'GET', ruta: '/admin/perfil', para: 'ver el perfil de la instalación (reparto, tienda o chat)' },
       { metodo: 'POST', ruta: '/admin/perfil', para: 'cambiar el perfil de la instalación', body: '{ perfil: "reparto"|"tienda"|"chat" }', obligatorios: ['perfil'], soloAdmin: true, leer: '/admin/perfil' },
@@ -310,7 +292,7 @@ export const MAPA_PANEL: SeccionDelMapa[] = [
     ir: '/panel#integraciones',
     rutas: [
       { metodo: 'GET', ruta: '/admin/integraciones/stoky', para: 'ver la conexión con Stoky' },
-      { metodo: 'GET', ruta: '/admin/gsg/cuadre', para: 'ver qué pedidos del día siguen sin cerrar (solo con lo de aquí: a GSG no se le pregunta nada)', body: 'query: ?dia=2026-09-29' },
+      { metodo: 'GET', ruta: '/admin/gsg/cuadre', para: 'ver el cierre del día con lo de aquí (pedidos sin cerrar; a GSG no se le pregunta)', body: 'query: ?dia=2026-09-29' },
       { metodo: 'GET', ruta: '/admin/ia', para: 'ver la configuración de la IA (sin el token)' },
       { metodo: 'GET', ruta: '/admin/ia/uso', para: 'ver cuánto se usó la IA' },
     ],
@@ -351,7 +333,8 @@ export const MAPA_PANEL: SeccionDelMapa[] = [
       { metodo: 'GET', ruta: '/admin/deliveries', para: 'ver el estado de los mensajes enviados' },
     ],
   },
-];
+] satisfies SeccionDelMapa[]).map((seccion) => ({ ...seccion, rutas: seccion.rutas.filter((ruta) => !moduloRetirado(ruta.ruta)) })).filter((seccion) => seccion.rutas.length > 0);
+
 
 // ================================================================ LISTA NEGRA
 
@@ -380,14 +363,14 @@ export const LISTA_NEGRA = [
   '/admin/ia/probar-conexion',
   '/admin/voz/probar',
   '/admin/fiabilidad/copia/descargar',
-  '/admin/motorizados/de-prueba',
+  '/admin/entregas/de-prueba',
 ];
 
 /** Cualquier cosa que huela a credencial, en la ruta, la query o un campo del body. */
 const PALABRAS_PROHIBIDAS = /token|secret|password|passwd|contrase|clave|api[-_]?key|hash|credencial|cookie|authorization|webhook/i;
 
 export interface RutaResuelta {
-  /** El path sin query: '/admin/motorizados/5'. */
+  /** El path sin query: '/admin/entregas/5'. */
   path: string;
   /** La url tal cual se llama (con su query). */
   url: string;
@@ -401,9 +384,9 @@ export interface RutaResuelta {
  * \), fuera de la lista negra. Devuelve el path y la query, o el motivo.
  */
 export function revisarUrl(cruda: unknown): { path: string; query: string } | { motivo: string } {
-  if (typeof cruda !== 'string') return { motivo: 'Falta la ruta (p. ej. "/admin/motorizados").' };
+  if (typeof cruda !== 'string') return { motivo: 'Falta la ruta (p. ej. "/admin/entregas").' };
   const url = cruda.trim();
-  if (!url) return { motivo: 'Falta la ruta (p. ej. "/admin/motorizados").' };
+  if (!url) return { motivo: 'Falta la ruta (p. ej. "/admin/entregas").' };
   if (url.length > 600) return { motivo: 'Esa ruta es demasiado larga.' };
   if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//') || url.includes('\\')) return { motivo: 'Solo rutas del panel que empiecen por /admin/ (nada de direcciones de fuera).' };
   if (/[\s\u0000-\u001f#]/.test(url)) return { motivo: 'Esa ruta trae caracteres que no valen.' };
@@ -411,7 +394,7 @@ export function revisarUrl(cruda: unknown): { path: string; query: string } | { 
   const path = i >= 0 ? url.slice(0, i) : url;
   const query = i >= 0 ? url.slice(i + 1) : '';
   if (path.includes('%')) return { motivo: 'La ruta va sin codificar (sin %): escribe los números o ids tal cual.' };
-  if (path.includes('//')) return { motivo: 'Esa ruta tiene barras dobles: escríbela bien (p. ej. "/admin/motorizados").' };
+  if (path.includes('//')) return { motivo: 'Esa ruta tiene barras dobles: escríbela bien (p. ej. "/admin/entregas").' };
   const segmentos = path.split('/');
   if (segmentos.some((s) => s === '.' || s === '..')) return { motivo: 'Esa ruta no vale (lleva "." o "..").' };
   const bajo = path.toLowerCase();
@@ -574,7 +557,7 @@ function campoProhibido(body: unknown, profundidad = 0): string | null {
   return null;
 }
 
-/** El objeto de la lista cuyo id es este (motorizados, reglas...), o el json tal cual. */
+/** El objeto de la lista cuyo id es este (reglas...), o el json tal cual. */
 function elDeLaLista(json: unknown, params: Record<string, string>): { obj: unknown; encontrado: boolean } {
   const id = params.id ?? params.contactId ?? params.clave;
   if (!id) return { obj: json, encontrado: true };
@@ -635,7 +618,7 @@ const panelMapa = def({
   nombre: 'panel.mapa',
   tipo: 'consulta',
   descripcion:
-    'El mapa de TODO lo que se puede hacer en el panel (rutas /admin por secciones: motorizados, entregas, chat, contactos, campanas, plantillas, automatizacion, stickers, procesos, envio-automatico, reparto, leads, ajustes, integraciones, entrenamiento, resumenes, seguimiento). Úsalo SOLO si no hay una acción con nombre propio para lo que te piden; luego usa panel.consultar o panel.hacer con la ruta exacta del mapa.',
+    'El mapa de TODO lo que se puede hacer en el panel (rutas /admin por secciones: entregas, chat, contactos, campanas, plantillas, automatizacion, stickers, procesos, envio-automatico, reparto, leads, ajustes, integraciones, entrenamiento, resumenes, seguimiento). Úsalo SOLO si no hay una acción con nombre propio para lo que te piden; luego usa panel.consultar o panel.hacer con la ruta exacta del mapa.',
   parametros: 'seccion (opcional: una de las de arriba), buscar (opcional: una palabra, p. ej. "sticker" o "placa"). Sin nada, da la lista de secciones',
   ejemplo: { orden: 'guarda el sticker que me mandó Ana', accion: { accion: 'panel.mapa', buscar: 'sticker' } },
   schema: z.object({ seccion: z.string().trim().max(60).optional(), buscar: z.string().trim().max(60).optional() }),
@@ -666,7 +649,7 @@ const panelConsultar = def({
   nombre: 'panel.consultar',
   tipo: 'consulta',
   descripcion: 'Leer cualquier pantalla del panel por su ruta GET del mapa (panel.mapa) y ver el JSON (recortado y sin secretos). Úsalo SOLO si no hay una acción de consulta con nombre propio para eso.',
-  parametros: 'ruta (la ruta GET del mapa con los ids ya puestos y, si quieres, la query: "/admin/motorizados", "/admin/chat/conversations?q=Ana")',
+  parametros: 'ruta (la ruta GET del mapa con los ids ya puestos y, si quieres, la query: "/admin/entregas", "/admin/chat/conversations?q=Ana")',
   ejemplo: { orden: '¿qué stickers tenemos?', accion: { accion: 'panel.consultar', ruta: '/admin/stickers' } },
   schema: z.object({ ruta: z.string().trim().min(1).max(600) }),
   async ejecutar(p, ctx): Promise<ResultadoAccion> {
@@ -740,8 +723,8 @@ const panelHacer = def({
   peligrosa: true,
   descripcion:
     'Hacer en el panel cualquier cambio del mapa (panel.mapa) que NO tenga una acción con nombre propio: POST/PUT/PATCH/DELETE a su ruta con sus datos, igual que el botón de la pantalla. Primero mira la ruta y la forma del body en panel.mapa; si hace falta un id, sácalo con panel.consultar. Nunca cuentas, claves ni conexión de WhatsApp.',
-  parametros: 'metodo ("POST", "PUT", "PATCH" o "DELETE"; si la ruta solo tiene uno, se puede omitir), ruta (la del mapa con los ids puestos: "/admin/motorizados/7"), datos (el body como objeto, con la forma que dice el mapa; en DELETE va sin datos)',
-  ejemplo: { orden: 'cámbiale la placa al motorizado 7 a ABC-123', accion: { accion: 'panel.hacer', metodo: 'POST', ruta: '/admin/motorizados/7', datos: { placa: 'ABC-123' } } },
+  parametros: 'metodo ("POST", "PUT", "PATCH" o "DELETE"; si la ruta solo tiene uno, se puede omitir), ruta (la del mapa con los ids puestos: "/admin/entregas/7/prioridad"), datos (el body como objeto, con la forma que dice el mapa; en DELETE va sin datos)',
+  ejemplo: { orden: 'marca el pedido 7 como urgente', accion: { accion: 'panel.hacer', metodo: 'POST', ruta: '/admin/entregas/7/prioridad', datos: { urgente: true } } },
   schema: hacerSchema as unknown as z.ZodType<ParamsHacer>,
   async preparar(p: ParamsHacer, ctx): Promise<Preparado<ParamsHacer>> {
     const c = comprobarCambio(p, ctx);

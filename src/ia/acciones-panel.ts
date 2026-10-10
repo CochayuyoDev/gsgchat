@@ -977,7 +977,7 @@ async function prepararMensaje<P extends { telefono: string }>(ctx: ContextoAcci
 const mensajeEnviar = def({
   nombre: 'mensaje.enviar',
   tipo: 'cambio',
-  descripcion: 'Mandar UN mensaje de texto a UN número, como si lo escribiera una persona desde el chat (pasa por todas las guardas: modo prueba, anti-baneo, horario y tope).',
+  descripcion: 'Mandar UN mensaje de texto a UN número, como si lo escribiera una persona desde el chat (pasa por todas las guardas: anti-baneo, horario y tope).',
   parametros: 'telefono, texto (tal cual lo dijo la persona si lo dictó entre comillas o tras dos puntos)',
   ejemplo: { orden: 'mándale a 51912426667: ya salió tu pedido', accion: { accion: 'mensaje.enviar', telefono: '51912426667', texto: 'ya salió tu pedido' } },
   schema: z.object({ telefono, texto: texto(4000) }),
@@ -1066,54 +1066,15 @@ async function leerAjustes(ctx: ContextoAccion): Promise<{ guardado: Record<stri
   return { guardado: j.guardado ?? {}, efectivo: j.efectivo ?? {}, fijado: Boolean(j.modoPruebaFijado) };
 }
 
-const ajustesModoPrueba = def({
-  nombre: 'ajustes.modoPrueba',
-  tipo: 'cambio',
-  soloAdmin: true,
-  descripcion: 'Activar el modo prueba (el sistema SOLO le escribe a esos números y a nadie más) o apagarlo (vuelve a escribir a todos). «Con mi número» = el número de avisos (supervisor).',
-  parametros: 'activo (true/false), numeros (lista; si no se dicen al activarlo, se usa el número de avisos)',
-  ejemplo: { orden: 'activa el modo prueba solo con mi número', accion: { accion: 'ajustes.modoPrueba', activo: true } },
-  schema: z.object({ activo: z.boolean(), numeros: z.array(z.string().trim().min(6).max(30)).max(50).optional() }),
-  async preparar(p, ctx) {
-    const a = await leerAjustes(ctx);
-    if ('error' in a) return { tipo: 'no', resumen: a.error };
-    const mp = (a.guardado.modoPrueba ?? { activo: false, numeros: [] }) as { activo: boolean; numeros: string[] };
-    let numeros = (p.numeros ?? []).map((n) => telefonoADigitos(n));
-    if (p.activo && !numeros.length) {
-      const sup = String(a.efectivo.supervisor ?? '').replace(/\D/g, '');
-      if (!sup) return { tipo: 'no', resumen: '¿Con qué número? No tengo el tuyo (no hay número de avisos en Ajustes): dímelo y lo activo con ese.', ir: '/panel#configuracion' };
-      numeros = [sup];
-    }
-    const antes = mp.activo && mp.numeros.length ? `activo: solo se escribe a ${mp.numeros.map(telefonoBonito).join(', ')}` : 'apagado: se escribe a todos';
-    const despues = p.activo ? `activo: solo se escribe a ${numeros.map(telefonoBonito).join(', ')}` : 'apagado: se escribe a todos los clientes de verdad';
-    if (antes === despues) return { tipo: 'no', resumen: `El modo prueba ya está así (${antes}).` };
-    const avisos = p.activo ? ['Mientras esté activo, cualquier mensaje a otro número se frena (y se dice por qué).'] : ['Desde que pulses, los mensajes salen a clientes reales.'];
-    if (a.fijado) avisos.push('El servidor tiene fijada una lista de números de prueba: la pantalla solo puede recortarla, no quitarla.');
-    return { tipo: 'listo', params: { activo: p.activo, numeros: p.activo ? numeros : undefined }, tarjeta: { que: p.activo ? 'Activar el modo prueba' : 'Apagar el modo prueba', antes, despues, avisos } };
-  },
-  async ejecutar(p, ctx) {
-    let numeros = (p.numeros ?? []).map((n) => telefonoADigitos(n));
-    if (p.activo && !numeros.length) {
-      const a = await leerAjustes(ctx);
-      const sup = 'error' in a ? '' : String(a.efectivo.supervisor ?? '').replace(/\D/g, '');
-      if (!sup) return { ok: false, resumen: 'Falta el número para el modo prueba.', ir: '/panel#configuracion' };
-      numeros = [sup];
-    }
-    const r = await ctx.llamar({ method: 'POST', url: '/admin/ajustes', body: { modoPrueba: p.activo ? { activo: true, numeros } : { activo: false } } });
-    if (!ok(r)) return errorDe(r, 'No se pudo cambiar el modo prueba.');
-    return { ok: true, resumen: p.activo ? `Modo prueba activo: solo se escribe a ${numeros.map(telefonoBonito).join(', ')}.` : 'Modo prueba apagado: se escribe a todos.', ir: '/hoy' };
-  },
-});
-
 const configuracionCambiar = def({
   nombre: 'configuracion.cambiar',
   tipo: 'cambio',
   peligrosa: true,
   soloAdmin: true,
-  descripcion: 'Cambiar la configuración general: nombre del negocio, horario de envío del número (inicio, fin), modo prueba (activo y números), número de avisos (supervisor).',
-  parametros: 'nombreNegocio, horario: {inicio, fin} (horas 0-24), modoPrueba: {activo, numeros: []}, avisos: {supervisor}; solo lo que se cambia',
+  descripcion: 'Cambiar la configuración general: nombre del negocio, horario de envío del número (inicio, fin), número de avisos (supervisor).',
+  parametros: 'nombreNegocio, horario: {inicio, fin} (horas 0-24), avisos: {supervisor}; solo lo que se cambia',
   ejemplo: { orden: 'que los mensajes salgan de 8 a 20', accion: { accion: 'configuracion.cambiar', horario: { inicio: 8, fin: 20 } } },
-  schema: z.object({ nombreNegocio: z.string().trim().max(80).optional(), horario: z.object({ inicio: z.coerce.number().int().min(0).max(23).optional(), fin: z.coerce.number().int().min(1).max(24).optional() }).optional(), modoPrueba: z.object({ activo: z.boolean().optional(), numeros: z.array(z.string()).max(50).optional() }).optional(), avisos: z.object({ supervisor: z.string().nullable().optional() }).optional() }),
+  schema: z.object({ nombreNegocio: z.string().trim().max(80).optional(), horario: z.object({ inicio: z.coerce.number().int().min(0).max(23).optional(), fin: z.coerce.number().int().min(1).max(24).optional() }).optional(), avisos: z.object({ supervisor: z.string().nullable().optional() }).optional() }),
   async preparar(p, ctx) {
     const a = await leerAjustes(ctx);
     if ('error' in a) return { tipo: 'no', resumen: a.error };
@@ -1128,11 +1089,7 @@ const configuracionCambiar = def({
       antes.push(`horario de envío: de ${h.inicio ?? '?'}:00 a ${h.fin ?? '?'}:00`);
       despues.push(`horario de envío: de ${p.horario.inicio ?? h.inicio ?? '?'}:00 a ${p.horario.fin ?? h.fin ?? '?'}:00`);
     }
-    if (p.modoPrueba) {
-      const mp = (a.guardado.modoPrueba ?? { activo: false, numeros: [] }) as { activo: boolean; numeros: string[] };
-      antes.push(`modo prueba: ${mp.activo ? `activo (${mp.numeros.join(', ')})` : 'apagado'}`);
-      despues.push(`modo prueba: ${p.modoPrueba.activo ?? mp.activo ? `activo (${(p.modoPrueba.numeros ?? mp.numeros).map((n) => telefonoADigitos(n)).join(', ')})` : 'apagado'}`);
-    }
+
     if (p.avisos) {
       antes.push(`avisos a: ${a.efectivo.supervisor || 'nadie'}`);
       despues.push(`avisos a: ${p.avisos.supervisor ? telefonoADigitos(p.avisos.supervisor) : 'nadie'}`);
@@ -1144,7 +1101,6 @@ const configuracionCambiar = def({
     const body: Record<string, unknown> = {};
     if (p.nombreNegocio) body.nombreNegocio = p.nombreNegocio;
     if (p.horario) body.horario = p.horario;
-    if (p.modoPrueba) body.modoPrueba = { ...p.modoPrueba, numeros: p.modoPrueba.numeros?.map((n) => telefonoADigitos(n)) };
     if (p.avisos) body.avisos = { supervisor: p.avisos.supervisor ? telefonoADigitos(p.avisos.supervisor) : p.avisos.supervisor };
     const r = await ctx.llamar({ method: 'POST', url: '/admin/ajustes', body });
     if (!ok(r)) return errorDe(r, 'No se pudo guardar la configuración.');
@@ -1353,9 +1309,7 @@ const procesosCambiarEstado = def({
 export const ACCIONES_PANEL: Accion[] = [
   entregasConfirmar,
   entregasCancelar,
-  entregasReasignar,
   entregasReintentar,
-  entregasSegundaVisita,
   entregasUrgente,
   entregasUbicacion,
   entregasEntregada,
@@ -1367,13 +1321,6 @@ export const ACCIONES_PANEL: Accion[] = [
   entregasSinUbicacion,
   numerosConfirmarEnvio,
   numerosMasa,
-  motorizadosEstado,
-  motorizadosEditar,
-  motorizadosQuitar,
-  motorizadosEnlace,
-  motorizadosMandarRuta,
-  motorizadosTraspasar,
-  motorizadosHoy,
   chatAtenderPersona,
   chatAsistente,
   chatCerrar,
@@ -1381,7 +1328,6 @@ export const ACCIONES_PANEL: Accion[] = [
   mensajeEnviar,
   mensajePedirUbicacion,
   mensajeProgramar,
-  ajustesModoPrueba,
   configuracionCambiar,
   respuestasVer,
   respuestasGuardar,

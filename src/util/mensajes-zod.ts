@@ -136,7 +136,7 @@ export const NOMBRES_DE_CAMPO: Record<string, string> = {
   confirmacionMaxIntentos: 'las veces que se pide la confirmación',
   motorizadoEsperaMin: 'los minutos de espera al motorizado',
   motorizadoMaxIntentos: 'las veces que se insiste al motorizado',
-  sincronizarCadaMin: 'un ajuste que ya no se usa (a GSG no se le pregunta nada)',
+  sincronizarCadaMin: 'un ajuste antiguo que ya no se usa (a GSG no se le pregunta nada)',
   pinDistanciaMaxKm: 'la distancia máxima entre el pin y el distrito (km)',
   buscarDireccionEnMapa: 'si la dirección escrita se busca en el mapa',
   reasignarMotorizadoMin: 'los minutos para pasar el pedido a otro motorizado si no da sus minutos',

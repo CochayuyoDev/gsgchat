@@ -178,10 +178,12 @@ const HUELLAS_DEL_PROMPT: RegExp[] = [
 /** Tokens, claves y rutas internas que nunca deben salir hacia un cliente. */
 const SECRETOS: RegExp[] = [
   /\bwak_[A-Za-z0-9]{10,}\b/,
+  // Una API Key nueva: 48 caracteres al azar con mayúsculas, minúsculas y cifras.
+  /\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{48}\b/,
   /\bEAA[A-Za-z0-9]{20,}\b/,
   /\bsk-[A-Za-z0-9_-]{16,}\b/,
   /\bBearer\s+[A-Za-z0-9._-]{12,}/i,
-  /\b(postgres(ql)?|redis):\/\/[^\s]+/i,
+  /\b(mysql|mariadb|postgres(ql)?|redis):\/\/[^\s]+/i,
   /\/(admin|panel|setup|login)(\/|#|\b)/,
   /\b(WHATSAPP_TOKEN|WHATSAPP_APP_SECRET|TRACKING_SECRET|DATABASE_URL|SETTINGS_KEY|ADMIN_TOKEN)\b/,
   /\b[0-9a-f]{32,}\b/i,
@@ -289,7 +291,7 @@ export function taparSecretos<T>(valor: T, profundidad = 0): T {
   if (profundidad > 12) return '[…]' as unknown as T;
   if (typeof valor === 'string') {
     let s: string = valor;
-    for (const re of SECRETOS.slice(0, 5)) s = s.replace(new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`), '[oculto]');
+    for (const re of SECRETOS.slice(0, 6)) s = s.replace(new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`), '[oculto]');
     return s as unknown as T;
   }
   if (Array.isArray(valor)) return valor.map((v) => taparSecretos(v, profundidad + 1)) as unknown as T;
@@ -305,5 +307,5 @@ export function taparSecretos<T>(valor: T, profundidad = 0): T {
 
 /** Si un texto trae algo con forma de token o clave (para no dejarlo pasar a ningun sitio). */
 export function contieneSecreto(texto: string): boolean {
-  return SECRETOS.slice(0, 5).some((re) => re.test(texto));
+  return SECRETOS.slice(0, 6).some((re) => re.test(texto));
 }

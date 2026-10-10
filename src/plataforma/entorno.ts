@@ -30,7 +30,7 @@ export const HEREDABLES = [
 export interface DatosDeEntorno {
   /** La URL publica de la tienda: la de la plataforma + /tienda/<slug>. */
   publicBaseUrl: string;
-  /** pglite://<carpeta> o la URL de Postgres (el esquema va aparte). */
+  /** La URL del servidor MySQL/MariaDB apuntando a la base de la tienda (mysql://.../gsgchat_t_<id>). */
   databaseUrl: string;
   trackingSecret: string;
   archiveDir: string;
@@ -81,10 +81,9 @@ export function pareceSlug(slug: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,39}$/.test(slug);
 }
 
-/** Donde guarda sus cosas una tienda nueva, dentro de la raiz de la plataforma. */
+/** Donde guarda sus ficheros una tienda nueva, dentro de la raiz de la plataforma (su base va aparte, en el servidor MySQL). */
 export interface LugarDeTienda {
   dir: string;
-  datos: string;
   vinculacion: string;
   medios: string;
   respaldos: string;
@@ -94,7 +93,6 @@ export function lugarDeTienda(raiz: string, id: string): LugarDeTienda {
   const dir = path.join(raiz, id);
   return {
     dir,
-    datos: path.join(dir, 'datos'),
     vinculacion: path.join(dir, 'vinculacion'),
     medios: path.join(dir, 'medios'),
     respaldos: path.join(dir, 'respaldos'),

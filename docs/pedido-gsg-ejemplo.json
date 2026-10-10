@@ -1,0 +1,18 @@
+{
+  "pedidos": [
+    {
+      "tracking": "GSG-000001",
+      "cliente": "Ana Perez",
+      "telefono": "987654321",
+      "empresa": "Tienda Uno",
+      "metodoPago": "Efectivo",
+      "montoCobrar": 85,
+      "distrito": "Lince",
+      "direccion": "Av. Lima 123",
+      "fecRuta": "2026-10-03",
+      "telefono2": "988777666",
+      "producto": "Zapatos",
+      "cantBultos": 2
+    }
+  ]
+}

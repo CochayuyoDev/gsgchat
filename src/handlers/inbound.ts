@@ -16,7 +16,7 @@
  * secuencias de seguimiento con `stopOnReply` se cancelan.
  */
 
-import { esperarRafaga } from './rafaga.js';
+import { esperarRafaga, marcarLlegada, olvidarLlegada } from './rafaga.js';
 import { TEXTO_VER_UNA_VEZ } from './textos.js';
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
@@ -58,10 +58,11 @@ import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
 import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
-import { atenderComoAgente, atenderConReglaGsg, cerrarChat, type DepsAgente } from '../ia/agente-operativo.js';
+import { atenderComoAgente, atenderConReglaGsg, cerrarChat, pideAsesor, type DepsAgente } from '../ia/agente-operativo.js';
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
+import { horaEnPalabras } from '../entregas/textos.js';
 
 export interface InboundDeps {
   repos: Repos;
@@ -146,19 +147,6 @@ const dormirDeVerdad = (ms: number) => new Promise<void>((listo) => setTimeout(l
 export const CONFIRM_PREFIX = 'loc_ok:';
 export const REJECT_ID = 'loc_no';
 
-const normalize = (text: string): string =>
-  text
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    // Quita los diacriticos combinantes: "BAJA", "bajá" y "Bajá" son la misma baja.
-    .replace(/[̀-ͯ]/g, '');
-
-function matchesKeyword(text: string, keywords: string[]): boolean {
-  const clean = normalize(text);
-  return keywords.some((k) => clean === k || clean.startsWith(`${k} `));
-}
-
 /**
  * Como se guarda un entrante en la conversacion.
  *
@@ -227,6 +215,7 @@ function leerContenido(message: InboundMessage): { kind: MessageKind; body: stri
     video: '(video)',
     document: '(documento)',
     sticker: '(sticker)',
+    livelocation: '(ubicación en tiempo real)',
   };
 
   // Con el fichero ya bajado, el cuerpo es el pie de foto (o el nombre del
@@ -288,18 +277,29 @@ export async function turnoDePreventa(
     repos.automation.getPrefs(),
   ]);
 
+  // Un cliente con una entrega en curso (se le está llevando un paquete) no
+  // es un cliente de la preventa: nada de «Cotizar envío» ni de precios. Su
+  // menú de respaldo es «Horarios y zona» y «Hablar con asesor», y el horario
+  // que se le da es el de las entregas (30/09).
+  const conEntrega = deps.entregas ? await deps.entregas.tieneEntregaEnCurso(contact.phone).catch(() => false) : false;
+  const horarioEntregas = (): string | null => {
+    const h = deps.entregas?.ajustes().horarioEntregas;
+    return h ? `de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)}` : null;
+  };
+
   // Una consulta de precio se contesta con el catalogo y NO sigue al flujo:
   // dos respuestas por un mensaje es justo lo que no puede pasar.
-  if (await contestarPrecio(contact, entrada, lead, prefs, deps)) return;
+  if (!conEntrega && (await contestarPrecio(contact, entrada, lead, prefs, deps))) return;
 
   const { patch, respuesta } = responder(lead, entrada, {
     negocio: nombreNegocio(deps),
     cobertura: config.coverageName || 'tu zona',
     saludo: saludoPorHora(new Date(), config.timezone),
-    horario: config.businessHours,
+    horario: (conEntrega ? horarioEntregas() : null) ?? config.businessHours,
     servicios: prefs.serviciosPreventa,
     mensajes: prefs.mensajesPreventa,
     distritos: config.distritos,
+    conEntrega,
   });
 
   if (Object.keys(patch).length) await repos.leads.update(contact.id, patch);
@@ -607,6 +607,29 @@ async function applyRule(rule: AutoReply, contact: Contact, deps: InboundDeps): 
 }
 
 /**
+ * Lo que escribio el cliente en una rafaga, en un solo texto: los textos que
+ * mando seguidos desde la ultima vez que se le escribio (como mucho en los
+ * ultimos dos minutos), en orden y sin repetir. Asi se contesta una vez a
+ * todo, no a cada trozo.
+ */
+export async function juntarRafaga(message: InboundMessage, contactId: string, repos: Pick<InboundDeps['repos'], 'messages'>): Promise<InboundMessage> {
+  if (message.type !== 'text' || !message.text?.body) return message;
+  const recientes = await repos.messages.listMessages(contactId, 20).catch(() => []);
+  const desde = Date.now() - 2 * 60_000;
+  const trozos: string[] = [];
+  for (const m of [...recientes].reverse()) {
+    if (m.direction !== 'in') break;
+    if (new Date(m.createdAt as unknown as string).getTime() < desde) break;
+    if (m.kind !== 'text') continue;
+    const cuerpo = String(m.body ?? '').trim();
+    if (cuerpo && trozos[0] !== cuerpo) trozos.unshift(cuerpo);
+  }
+  if (!trozos.includes(message.text.body.trim())) trozos.push(message.text.body.trim());
+  if (trozos.length < 2) return message;
+  return { ...message, rafaga: trozos.length, text: { ...message.text, body: trozos.join('\n') } };
+}
+
+/**
  * «2» a una pregunta con opciones es pulsar la opción 2.
  *
  * Por QR (local y WAHA) los botones salen como lista numerada («1. Sí, es
@@ -645,7 +668,7 @@ export async function respuestaNumeradaComoBoton(message: InboundMessage, deps: 
 const REPETIDO_MS = 30_000;
 // Por instancia (una por tienda, y una por escenario en las pruebas): colgado
 // de sus repos para que dos sistemas en el mismo proceso no se mezclen.
-const estadoPorSistema = new WeakMap<object, { cola: Map<string, Promise<unknown>>; ultimo: Map<string, { firma: string; escritoMs: number; respuestaMs: number | null }> }>();
+const estadoPorSistema = new WeakMap<object, { cola: Map<string, Promise<unknown>>; ultimo: Map<string, { firma: string; escritoMs: number; respuestaMs: number | null; salidaId: string | null }> }>();
 function estadoDe(deps: InboundDeps) {
   let e = estadoPorSistema.get(deps.repos);
   if (!e) estadoPorSistema.set(deps.repos, (e = { cola: new Map(), ultimo: new Map() }));
@@ -690,14 +713,30 @@ export async function handleInboundMessage(
   // distinto no se pierde (va en fila, en orden), y preguntar por el pedido
   // («¿dónde va mi pedido?») no tiene firma: se contesta siempre.
   const firma = firmaDeAccion(message);
+  // La rafaga se cuenta desde que LLEGA, no desde que le toca en la fila.
+  const marcado = rafagaDe(deps) > 0 && !atiendeYa(message) && Boolean(message.id);
+  if (marcado) marcarLlegada(clave, message.id);
   const turno = (colaPorCliente.get(clave) ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
       const escrito = Number(message.timestamp) * 1000 || Date.now();
       const antes = ultimoTexto.get(clave);
+      // La última respuesta del sistema a este cliente, antes y después.
+      const ultimaSalida = async (): Promise<{ id: string; at: number } | null> => {
+        const contacto = await deps.repos.contacts.getByPhone(clave).catch(() => null);
+        const ultimos = contacto ? await deps.repos.messages.listMessages(contacto.id, 10).catch(() => []) : [];
+        const m = [...ultimos].reverse().find((x) => x.direction === 'out');
+        return m ? { id: String(m.id ?? m.wamid ?? ''), at: new Date(m.createdAt as unknown as string).getTime() } : null;
+      };
       let repetido = false;
       if (firma && antes && antes.firma === firma && !message.viejo) {
         repetido = antes.respuestaMs != null ? escrito <= antes.respuestaMs : escrito - antes.escritoMs < REPETIDO_MS;
+        // Si desde el primero el sistema le escribió algo (la pregunta que le
+        // tocaba en su turno), lo de ahora contesta a ESO: no es una copia.
+        // Pasó con un «Sí» escrito antes de que se le preguntara (sin
+        // respuesta) y el «Sí» de verdad, segundos después de la pregunta,
+        // se tomaba por copia y se perdía (30/09).
+        if (repetido && ((await ultimaSalida())?.id ?? null) !== antes.salidaId) repetido = false;
         // Solo con clientes de un pedido de GSG en curso: un motorizado que
         // repite su tiempo, o un proceso que recibe dos «sí», sigue como siempre.
         if (repetido) {
@@ -709,27 +748,36 @@ export async function handleInboundMessage(
         }
       }
       if (repetido) return handleInboundMessageEnFila({ ...message, viejo: true }, profileName, deps);
-      // La última respuesta del sistema a este cliente, antes y después.
-      const ultimaSalida = async (): Promise<{ id: string; at: number } | null> => {
-        const contacto = await deps.repos.contacts.getByPhone(clave).catch(() => null);
-        const ultimos = contacto ? await deps.repos.messages.listMessages(contacto.id, 10).catch(() => []) : [];
-        const m = [...ultimos].reverse().find((x) => x.direction === 'out');
-        return m ? { id: String(m.id ?? m.wamid ?? ''), at: new Date(m.createdAt as unknown as string).getTime() } : null;
-      };
       const antesDe = firma && !message.viejo ? await ultimaSalida() : null;
       await handleInboundMessageEnFila(message, profileName, deps);
       if (!firma || message.viejo) return;
       const despues = await ultimaSalida();
       // La hora real en que salió la respuesta: el mismo reloj que el de WhatsApp.
       const contesto = despues && despues.id !== antesDe?.id ? Date.now() : null;
-      ultimoTexto.set(clave, { firma, escritoMs: escrito, respuestaMs: contesto });
+      ultimoTexto.set(clave, { firma, escritoMs: escrito, respuestaMs: contesto, salidaId: despues?.id ?? null });
     });
   colaPorCliente.set(clave, turno);
   try {
     await turno;
   } finally {
     if (colaPorCliente.get(clave) === turno) colaPorCliente.delete(clave);
+    if (marcado) olvidarLlegada(message.id);
   }
+}
+
+/**
+ * Cuánto se espera a que el cliente termine de escribir. Sin valor propio, el
+ * de la configuración (RAFAGA_MS, 10 s): antes solo el webhook de WAHA lo
+ * pasaba, y por Meta, el QR local y el simulador cada trozo se contestaba
+ * por separado (06/10).
+ */
+function rafagaDe(deps: Pick<InboundDeps, 'rafagaMs' | 'config'>): number {
+  return deps.rafagaMs ?? deps.config.RAFAGA_MS ?? 0;
+}
+
+/** Un pin o un boton pulsado se atienden ya: no esperan a la rafaga. */
+function atiendeYa(message: InboundMessage): boolean {
+  return message.type === 'location' || message.type === 'livelocation' || message.type === 'interactive' || message.type === 'button';
 }
 
 async function handleInboundMessageEnFila(
@@ -849,10 +897,15 @@ async function handleInboundMessageEnFila(
     await deps.lista.alRecibir(contact, { ubicacion: message.type === 'location' && Boolean(message.location) }).catch(() => undefined);
   }
 
-  // Si sigue escribiendo, se espera: una rafaga se contesta UNA vez, a lo
-  // ultimo que dijo. Va despues de guardar el mensaje -el hilo los tiene
-  // todos- y antes de cualquier automatismo.
-  if (!(await esperarRafaga(contact.id, deps.rafagaMs ?? 0))) return;
+  // Si sigue escribiendo, se espera: una rafaga se contesta UNA vez, con todo
+  // lo que escribio junto (la IA entiende lo principal). Va despues de
+  // guardar el mensaje -el hilo los tiene todos- y antes de cualquier
+  // automatismo. Un pin o un boton pulsado no esperan: se atienden ya, y si
+  // no, un pin seguido de un «listo» se quedaba sin registrar.
+  if (!atiendeYa(message)) {
+    if (!(await esperarRafaga(phone, rafagaDe(deps), message.id))) return;
+    if (rafagaDe(deps) > 0) message = await juntarRafaga(message, contact.id, repos);
+  }
 
   // El operador paro el bot en ESTE chat: se atiende a mano.
   //
@@ -868,7 +921,7 @@ async function handleInboundMessageEnFila(
   // el pin se perdio). Todo lo demas sigue callado mientras dure la pausa.
   if (contact.botPausadoAt) {
     const texto = message.type === 'text' ? String(message.text?.body ?? '') : '';
-    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com)/i.test(texto);
+    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || message.type === 'livelocation' || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com)/i.test(texto);
     // Los botones «Sí, recibo hoy» / «No» que mandó el sistema tambien: son la respuesta a lo que él preguntó.
     const esBotonDeEntrega = message.type === 'interactive' && String(message.interactive?.button_reply?.id ?? '').startsWith('entrega:');
     if (esBotonDeEntrega) request_log(deps, 'bot en pausa, pero el cliente pulsó el botón que mandó el sistema: se atiende', null);
@@ -895,17 +948,6 @@ async function handleInboundMessageEnFila(
   // Cualquier mensaje del cliente es una respuesta: corta los seguimientos
   // que estaban esperando precisamente eso.
   await onInboundReply(repos, contact);
-
-  // Los procesos (src/procesos): si esta persona tiene una corrida viva, lo
-  // que manda es su respuesta a ese proceso (un DNI, un SI, «llegué», la
-  // captura del pago) y se atiende ahi. Si no tiene ninguna, el mensaje sigue
-  // su camino de siempre, sin cambiar nada.
-  if (repos.procesos && (await atenderEnProceso(message, contact, deps).catch((error) => {
-    request_log(deps, 'fallo el modulo de procesos al leer un mensaje', error);
-    return false;
-  }))) {
-    return;
-  }
 
   /**
    * Lo que el cliente contesta cuando se le pidio la ubicacion para un
@@ -989,10 +1031,24 @@ async function handleInboundMessageEnFila(
    * y el WhatsApp puede pintarlos; si no, el texto. El proveedor local cae
    * solo a texto cuando no puede con los botones.
    */
-  const responderEntrega = (r: { responder?: string; botones?: Array<{ id: string; title: string }>; resultado?: string }) =>
-    r.botones?.length
+  const responderEntrega = async (r: { entrega?: import("../entregas/repo.js").Entrega; responder?: string; botones?: Array<{ id: string; title: string }>; resultado?: string }) => {
+    const enviado = await (r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
-      : reply(r.responder ?? '', { traspasaSilencio: (['ubicacion', 'ubicacion_corregida'].includes(r.resultado ?? '') && ubiTraspasaSilencio()) || r.resultado === 'ubicacion_tardia' });
+      : reply(r.responder ?? '', {
+          // La ubicación nueva (el cliente la cambió antes de la hora límite) se
+          // le confirma aunque el chat esté en silencio tras UBI REGISTRADA,
+          // igual que el «después de la 1:00 PM»: es la respuesta a su cambio.
+          traspasaSilencio:
+            (r.resultado === 'ubicacion' && ubiTraspasaSilencio()) ||
+            (r.resultado === 'ubicacion_corregida' && !motivoAntes.startsWith('no soy yo')) ||
+            r.resultado === 'ubicacion_tardia' ||
+            // «Me equivoqué de ubicación»: la respuesta a su pedido de cambio.
+            r.resultado === 'pide_cambio_ubicacion' ||
+            r.resultado === 'pide_cambio_ubicacion_tarde',
+        }));
+    if (enviado.ok && r.entrega) await deps.entregas?.vincularPropuesta(r.entrega, enviado.wamid);
+    return enviado;
+  };
 
   /**
    * La preventa del courier (cotizar envio, distritos, asesor) solo trabaja
@@ -1020,13 +1076,25 @@ async function handleInboundMessageEnFila(
     repos,
     sender,
     entregas: deps.entregas,
-    clasificar: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
+    // Con «Solo lo de GSG» no hay IA: el turno se decide con reglas y botones,
+    // y lo que no coincide con una regla se guarda y no se contesta (pedido
+    // del dueño, 06/10). Fuera de GSG, la IA clasifica lo que las reglas no saben.
+    clasificar: deps.ia?.activa() && !modoGsg() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
     nombreNegocio: () => nombreNegocio(deps),
     log: (m, d) => console.warn(`[agente] ${m}`, d ?? ''),
     ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),
   });
   /** Tras registrar la ubicacion, la IA se calla en este chat (su mensaje ya lleva el cierre). */
+  /** Con la regla del dueño, el pin (o enlace) también deja su decisión del turno (ver src/ia/decision.ts). */
+  const decisionUbicacion = async (respuesta: string): Promise<void> => {
+    if (!reglaGsg()) return;
+    const dato = message.type === 'location' ? 'pin de WhatsApp' : 'enlace de mapa';
+    await repos.decisiones
+      ?.registrar({ contactId: contact.id, phone, mensajes: message.rafaga ?? 1, intencion: 'enviar_ubicacion', dato, respuesta, como: 'reglas', esperaba: 'ubicación', detalle: null })
+      .catch((error: unknown) => request_log(deps, 'no se pudo guardar la decisión del turno', error));
+  };
   const cerrarTrasUbicacion = async (): Promise<void> => {
+    await decisionUbicacion('plantilla UBI REGISTRADA');
     if (!agenteActivo() && !reglaGsg()) return;
     // Tras «no soy yo» el chat sigue con una persona tal cual. Si ya habia
     // recibido el cierre, se apunta: tras el agradecimiento no le toca otro.
@@ -1041,13 +1109,14 @@ async function handleInboundMessageEnFila(
    * es ahí, con botones SÍ / NO (ver entregas.revisarPin). true = ya se atendió.
    */
   const pinLejano = async (lat: number, lng: number, mapsUrl: string | null | undefined, fuente: string): Promise<boolean> => {
-    if (!deps.entregas || !reglaGsg()) return false;
+    if (!deps.entregas || (!reglaGsg() && !fuente.startsWith('enlace de mapa'))) return false;
     const r = await deps.entregas.revisarPin(contact, { lat, lng, mapsUrl: mapsUrl ?? null, fuente }).catch((error) => {
       request_log(deps, 'no se pudo revisar si el pin tiene sentido', error);
       return { atendida: false as const };
     });
     if (!r.atendida) return false;
     if (r.responder) await responderEntrega(r);
+    await decisionUbicacion(r.responder ? 'una pregunta de aclaración: ¿es ahí? (pin lejos de su distrito)' : 'silencio');
     return true;
   };
 
@@ -1058,6 +1127,16 @@ async function handleInboundMessageEnFila(
       category: 'UTILITY',
       interactive: { body, locationRequest: true },
     });
+
+  // --- ubicacion en tiempo real: no se registra -------------------------
+  // Se mueve con el cliente y no dice donde recibe: se le pide la actual.
+  if (message.type === 'livelocation' && deps.entregas) {
+    const texto = await deps.entregas.alUbicacionEnVivo(phone).catch(() => null);
+    if (texto) {
+      await reply(texto);
+      return;
+    }
+  }
 
   // --- la regla del dueño («Solo lo de GSG») -----------------------------
   // «El único proceso de GSGchat es disparar mensajes. Una vez que la IA manda
@@ -1072,9 +1151,8 @@ async function handleInboundMessageEnFila(
     const escrito = cuerpo || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.media?.transcripcion || '';
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
     const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
-    const esBaja = Boolean(escrito) && matchesKeyword(escrito, config.optOutKeywords);
-    if (!esPin && !enlace?.ok && !esBaja) {
-      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
+    if (!esPin && !enlace?.ok) {
+      await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1, citaId: message.context?.id ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
     }
   }
@@ -1251,11 +1329,13 @@ async function handleInboundMessageEnFila(
       await atenderComoAgente(depsAgente(), contact, '').catch((error) => request_log(deps, 'fallo el agente operativo', error));
       return;
     }
-    // Con la IA activa, un adjunto se reconoce y se pide el texto: el modelo
-    // no ve fotos ni oye audios, y callarse deja al cliente hablando solo.
+    // Con la IA activa, un archivo sin texto no se contesta (pedido del dueño,
+    // 06/10): si era para un pedido activo ya lo atendieron las entregas o el
+    // reparto, arriba. Queda en el chat y la decisión, anotada.
     if (esAdjunto && message.type !== 'sticker' && deps.ia?.activa()) {
-      const que = message.type === 'audio' ? 'tu audio' : message.type === 'image' ? 'tu foto' : message.type === 'video' ? 'tu video' : 'tu archivo';
-      await reply(`Recibí ${que}. ¿Me cuentas por escrito qué necesitas? Así te ayudo más rápido.`);
+      await repos.decisiones
+        ?.registrar({ contactId: contact.id, phone, mensajes: 1, intencion: 'sin_texto', dato: message.type, respuesta: 'silencio (archivo sin texto: queda en el chat)', como: 'reglas', esperaba: null, detalle: null })
+        .catch((error: unknown) => request_log(deps, 'no se pudo guardar la decisión del turno', error));
       return;
     }
     if (esAdjunto && (await preventaActiva())) {
@@ -1265,26 +1345,8 @@ async function handleInboundMessageEnFila(
   }
 
   // --- baja y alta ------------------------------------------------------
-  if (matchesKeyword(text, config.optOutKeywords)) {
-    await repos.contacts.setOptOut(phone);
-    // Si estaba en un lote, deja de estarlo: la entrega se coordina por
-    // telefono y GSG tiene que enterarse.
-    await atenderRespuestaDeRuta(rutasDeps, contact, { baja: true });
-    // Se responde dentro de la ventana, asi que el gate de opt-out no aplica
-    // a esta confirmacion: es la ultima cortesia antes de dejar de escribir.
-    if (numeroPermitido({ soloNumeros: deps.ajustes ? deps.ajustes.soloNumeros() : config.soloNumeros }, phone)) {
-      await wa
-        .sendText(phone, 'Listo, no volverás a recibir mensajes nuestros. Responde ALTA si cambias de idea.')
-        .catch(() => undefined);
-    }
-    return;
-  }
-
-  if (matchesKeyword(text, config.optInKeywords)) {
-    await repos.contacts.setOptIn(phone, 'whatsapp_keyword');
-    await reply('Gracias, quedaste suscrito. Responde BAJA cuando quieras dejar de recibirlos.');
-    return;
-  }
+  // Las da quien usa el sistema (ficha del chat, panel o API), nunca el
+  // cliente escribiendo BAJA o ALTA: esas palabras siguen el camino normal.
 
   // --- reglas y coordenadas --------------------------------------------
   const [rules, prefs, result] = await Promise.all([
@@ -1321,12 +1383,34 @@ async function handleInboundMessageEnFila(
     }
   }
 
+  // Con «Todo el sistema», quien tiene una entrega en curso y pide una persona
+  // («quiero hablar con alguien», «ASESOR», «operador»): se le dice que lo
+  // atiende una persona, el bot se para en su chat y su pedido (o su pedido de
+  // ubicación) pasa a «Necesita a alguien», sin más insistencias. Antes, el
+  // reparto lo apartaba EN SILENCIO y un minuto después le volvía a pedir la
+  // ubicación (batería del 30/09). Con «Solo lo de GSG» lo atiende la regla
+  // del dueño (arriba), con su cierre.
+  if (!result.ok && !modoGsg() && deps.entregas && pideAsesor(text) && (await deps.entregas.tieneEntregaEnCurso(phone).catch(() => false))) {
+    await reply(`Te paso con una persona del equipo de ${nombreNegocio(deps)}; en un momento te atiende por aquí.`);
+    await repos.contacts.pausarBot(contact.id, true, new Date()).catch(() => undefined);
+    const abiertaAsesor = (await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ?? (await repos.rutas.abiertaPorTelefono(phone).catch(() => null));
+    if (abiertaAsesor) {
+      await repos.rutas
+        .actualizarSolicitud(abiertaAsesor.id, { estado: abiertaAsesor.estado === 'pendiente' ? 'pendiente' : 'supervision', requiereHumano: true, proximoIntentoAt: null, incidencia: 'respondio_sin_ubicacion', incidenciaDetalle: `pidió hablar con una persona: ${text.slice(0, 240)}` })
+        .catch(() => undefined);
+      await repos.rutas.registrarEvento(abiertaAsesor.id, 'respuesta', `pidió hablar con una persona («${text.slice(0, 160)}»): pasa a una persona y no se le insiste`).catch(() => undefined);
+    }
+    await deps.entregas.pasarAPersona(phone, 'consulta_ajena', `pidió hablar con una persona: ${text.slice(0, 200)}`).catch(() => 0);
+    await deps.entregas.anotarAgente(phone, `pidió hablar con una persona («${text.slice(0, 120)}»): el bot se paró en su chat`).catch(() => undefined);
+    return;
+  }
+
   // El agente operativo: «¿por qué?» se explica y se vuelve a pedir; una
   // consulta ajena recibe el cierre una vez y el chat pasa a una persona; lo
   // que es la respuesta al pedido de ubicacion sigue al reparto. Un
   // motorizado no pasa por aqui (lo suyo lo atienden las entregas).
   if (!result.ok && agenteActivo() && !(deps.entregas && (await deps.entregas.esMotorizado(phone).catch(() => false)))) {
-    const hecho = await atenderComoAgente(depsAgente(), contact, text).catch((error) => {
+    const hecho = await atenderComoAgente(depsAgente(), contact, text, message.rafaga ?? 1).catch((error) => {
       request_log(deps, 'fallo el agente operativo', error);
       return 'seguir' as const;
     });
@@ -1395,7 +1479,7 @@ async function handleInboundMessageEnFila(
     // El asistente de IA de la tienda: con lo que sabe del negocio (y el
     // catalogo, si esta), contesta; si no puede, deriva a una persona.
     if (deps.ia?.activa()) {
-      await deps.ia.turno(contact, text, { esAudio: message.type === 'audio' });
+      await deps.ia.turno(contact, text, { esAudio: message.type === 'audio', mensajes: message.rafaga ?? 1 });
       return;
     }
 
@@ -1442,74 +1526,6 @@ async function handleInboundMessageEnFila(
     return;
   }
   await reply(`Ubicación registrada.\n${result.mapsUrl}`);
-}
-
-/**
- * El gancho de los procesos: arma lo que trajo el mensaje con las mismas
- * piezas que usa el resto de este fichero (pin nativo, enlace de mapa, boton,
- * adjunto) y se lo pasa al nucleo de procesos. true = el proceso se quedo con
- * el mensaje. Solo mira la ubicacion si esa persona tiene algo vivo: nadie mas
- * paga la lectura de un enlace de mapa.
- */
-async function atenderEnProceso(message: InboundMessage, contact: Contact, deps: InboundDeps): Promise<boolean> {
-  const repo = deps.repos.procesos;
-  if (!repo) return false;
-  const viva = await repo.vivaPorTelefono(contact.phone);
-  const reciente = viva ? null : await repo.ultimaPorTelefono(contact.phone);
-  if (!viva && !(reciente && reciente.estado === 'persona')) return false;
-  if (!viva) {
-    // Pasado a una persona hace poco: el proceso calla su chat... salvo que ese
-    // numero tenga algo vivo en las entregas o el reparto, que siguen como siempre.
-    const conEntrega = deps.entregas ? (await deps.entregas.estadoUbicacionDe(contact.phone).catch(() => 'sin_entrega' as const)) !== 'sin_entrega' : false;
-    const conRuta = await deps.repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null);
-    if (conEntrega || conRuta) return false;
-  }
-
-  const bbox = { bbox: deps.config.bbox };
-  let ubicacion: EntradaProceso['ubicacion'] = null;
-  let fueraDeZona = false;
-  let guardar: { result: Awaited<ReturnType<typeof extractLocation>>; crudo: string } | null = null;
-  const texto = message.text?.body ?? message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? message.button?.text ?? message.media?.transcripcion ?? message.media?.caption ?? '';
-  if (message.type === 'location' && message.location) {
-    const r = fromWhatsAppLocation(message.location, bbox);
-    if (r.ok) {
-      ubicacion = { lat: r.lat, lng: r.lng, mapsUrl: r.mapsUrl, fuente: 'pin de whatsapp' };
-      guardar = { result: r, crudo: JSON.stringify(message.location) };
-    } else if (r.reason === 'outside_bbox') fueraDeZona = true;
-  } else if (message.text?.body) {
-    const r = await extractLocation(message.text.body, bbox).catch(() => null);
-    if (r?.ok && !r.needsConfirmation) {
-      ubicacion = { lat: r.lat, lng: r.lng, mapsUrl: r.mapsUrl, fuente: `enlace de mapa (${r.source})` };
-      guardar = { result: r, crudo: message.text.body };
-    } else if (r && !r.ok && r.reason === 'outside_bbox') fueraDeZona = true;
-  }
-  const esAdjunto = ['image', 'video', 'audio', 'document', 'sticker'].includes(message.type);
-  const entrada: EntradaProceso = {
-    texto,
-    ubicacion,
-    fueraDeZona,
-    adjunto: esAdjunto ? { tipo: message.type, mediaId: message.media?.id ?? null, mimeType: message.media?.mimeType ?? null, nombre: message.media?.filename ?? null } : null,
-    boton: message.interactive?.button_reply?.id?.startsWith('proc:') ? message.interactive.button_reply.id : null,
-  };
-  const r = await atenderEntranteDeProceso(
-    {
-      repos: deps.repos,
-      sender: deps.sender,
-      nombreNegocio: () => nombreNegocio(deps),
-      timezone: deps.config.timezone,
-      distritos: deps.config.distritos,
-      clasificar: deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
-      log: (m, d) => console.warn(`[procesos] ${m}`, d ?? ''),
-    },
-    contact.phone,
-    entrada,
-  );
-  // La ubicacion que sirvio para el proceso queda tambien en el historial de ubicaciones.
-  if (r.atendida && guardar?.result.ok && ubicacion) {
-    const id = await deps.repos.locations.save(contact.id, guardar.result, guardar.crudo).catch(() => null);
-    if (id !== null) await deps.repos.locations.confirm(id).catch(() => undefined);
-  }
-  return r.atendida;
 }
 
 /** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */

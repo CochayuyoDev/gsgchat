@@ -3,8 +3,13 @@
  * nueva, y NADA se cruza entre tiendas (datos, sesiones, WhatsApp, entorno).
  *
  * Se levanta el servidor de verdad (el de delante, con sus reglas de reparto)
- * sobre bases PGlite en una carpeta temporal y se le habla por HTTP, como un
+ * sobre bases de verdad del servidor MySQL/MariaDB de pruebas (una por tienda,
+ * con nombres gsgchat_prueba_plat_*) y se le habla por HTTP, como un
  * navegador: cookies, prefijos /tienda/<slug>/ y Referer incluidos.
+ *
+ * Las bases de las tiendas que se crean aqui vuelven al banco al terminar
+ * (vaciadas): la siguiente ejecucion no paga otra vez el DDL. La PRIMERA vez
+ * cada tienda crea sus tablas desde cero y tarda (minutos en un disco lento).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -12,11 +17,25 @@ import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { crearPlataforma, celularDe, type Plataforma } from '../src/plataforma/plataforma.js';
+import { basesDeLaPlataforma, crearPlataforma, celularDe, type Plataforma } from '../src/plataforma/plataforma.js';
 import { crearServidorPlataforma, partirPrefijo, type ServidorPlataforma } from '../src/plataforma/servidor.js';
 import { entornoDeTienda, slugDe } from '../src/plataforma/entorno.js';
 import { armarTienda } from '../src/plataforma/tienda.js';
 import { bootstrapSecrets } from '../src/settings/crypto.js';
+import { existeBase, rellenarBanco } from '../src/db/bases.js';
+import { bancoDePrueba, devolverBasesDePrueba, URL_PRUEBAS, urlConBase } from './mysql.js';
+
+/** Todas las bases de este fichero empiezan por aqui (directorios, tiendas y su banco). */
+const PREFIJO = 'gsgchat_prueba_plat_';
+const BANCO = bancoDePrueba(PREFIJO);
+/** Una plataforma de prueba: su directorio en <PREFIJO><nombre>_plataforma y sus tiendas en <PREFIJO><nombre>_t_<id>. */
+const baseDePlataforma = (nombre: string) => ({ url: urlConBase(`${PREFIJO}${nombre}`) });
+const TIEMPO = 3_600_000;
+
+// Lo que dejo a medias una ejecucion anterior vuelve al banco antes de empezar,
+// y lo de esta, al terminar.
+beforeAll(() => devolverBasesDePrueba(BANCO), 3_600_000);
+afterAll(() => devolverBasesDePrueba(BANCO), 3_600_000);
 
 /** Un navegador minimo: guarda las cookies que le ponen y las manda. */
 class Navegador {
@@ -66,6 +85,10 @@ describe('plataforma de tiendas', () => {
   let navPedro: Navegador;
 
   beforeAll(async () => {
+    // Las dos tiendas de este bloque se registran por HTTP, y fetch se rinde a
+    // los 5 minutos sin respuesta: sus bases se dejan listas antes (si el banco
+    // ya las tiene, esto no hace nada), y el registro solo se las queda.
+    await rellenarBanco({ ...BANCO, reserva: 2 });
     raiz = mkdtempSync(path.join(tmpdir(), 'plataforma-'));
     plataforma = await crearPlataforma({
       raiz,
@@ -85,7 +108,8 @@ describe('plataforma de tiendas', () => {
         TIMEZONE: 'America/Lima',
       },
       extraTiendas: { DEV_SIMULATE_INBOUND: 'true', RAFAGA_MS: '0' },
-      base: { tipo: 'pglite' },
+      base: baseDePlataforma('a'),
+      banco: BANCO,
       principal: null,
       autoConectarLocal: false,
       sembrarPlantillasLocales: true,
@@ -97,7 +121,7 @@ describe('plataforma de tiendas', () => {
     servidor = await crearServidorPlataforma({ plataforma, segura: false });
     await servidor.escuchar(0, '127.0.0.1');
     base = `http://127.0.0.1:${(servidor.server.address() as AddressInfo).port}`;
-  }, 120_000);
+  }, TIEMPO);
 
   afterAll(async () => {
     await servidor?.cerrar();
@@ -137,13 +161,13 @@ describe('plataforma de tiendas', () => {
     const ajustes = (await (await navRosa.pedir('/admin/ajustes')).json()) as { guardado: { nombreNegocio: string; avisos: { supervisor: string } } };
     expect(ajustes.guardado.nombreNegocio).toBe('Bodega Doña Rosa');
     expect(ajustes.guardado.avisos.supervisor).toBe('51987654321');
-    // Y su carpeta propia, con su base (copiada del molde ya migrado).
-    expect(existsSync(path.join(raiz, '.molde', 'firma.txt'))).toBe(true);
+    // Y su base propia en el servidor, y su carpeta propia con sus secretos.
     const t = await plataforma.directorio.porSlug('bodega-dona-rosa');
     expect(t?.rubro).toBe('Comida');
-    expect(existsSync(path.join(raiz, t!.id, 'datos'))).toBe(true);
+    expect(await existeBase(URL_PRUEBAS, `${PREFIJO}a_t_${t!.id}`)).toBe(true);
+    expect((await plataforma.tiendaPorSlug('bodega-dona-rosa'))!.base).toBe(`${PREFIJO}a_t_${t!.id}`);
     expect(existsSync(path.join(raiz, t!.id, '.secrets.json'))).toBe(true);
-  }, 180_000);
+  }, TIEMPO);
 
   it('la segunda tienda es otra tienda: su dueño es administrador de la suya y nada mas', async () => {
     navPedro = new Navegador(base, '10.0.0.2');
@@ -157,7 +181,11 @@ describe('plataforma de tiendas', () => {
     const ajustes = (await (await navPedro.pedir('/admin/ajustes')).json()) as { guardado: { nombreNegocio: string; avisos: { supervisor: string | null } } };
     expect(ajustes.guardado.nombreNegocio).toBe('Pedro Tecno');
     expect(ajustes.guardado.avisos.supervisor).toBeNull();
-  }, 180_000);
+    // Cada una en su base.
+    const tRosa = (await plataforma.tiendaPorSlug('bodega-dona-rosa'))!;
+    const tPedro = (await plataforma.tiendaPorSlug('pedro-tecno'))!;
+    expect(tRosa.base).not.toBe(tPedro.base);
+  }, TIEMPO);
 
   it('los clientes y mensajes de una tienda no aparecen en otra', async () => {
     const entra = await navRosa.pedir('/admin/dev/inbound', { method: 'POST', json: { phone: '51911111111', name: 'Cliente de Rosa', text: 'hola, ¿tienen arroz?' } });
@@ -306,7 +334,7 @@ describe('plataforma de tiendas', () => {
 describe('plataforma: freno de registros y tienda principal', () => {
   it('frena a quien crea tiendas en bucle desde la misma conexion', async () => {
     const raiz = mkdtempSync(path.join(tmpdir(), 'plataforma-freno-'));
-    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: { tipo: 'pglite' }, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), registrosPorHora: 1, log: () => undefined });
+    const p = await crearPlataforma({ raiz, publicBaseUrl: 'http://localhost:0', proceso: {}, base: baseDePlataforma('freno'), banco: BANCO, principal: null, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), registrosPorHora: 1, log: () => undefined });
     try {
       await p.arrancar();
       expect((await p.registrar(REGISTRO({ usuario: 'uno-1' }), '1.2.3.4')).status).toBe(200);
@@ -318,17 +346,17 @@ describe('plataforma: freno de registros y tienda principal', () => {
       await p.parar();
       rmSync(raiz, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, TIEMPO);
 
   it('la instalacion de antes sigue como principal: sus cuentas entran, sus webhooks llegan y sus usuarios quedan apartados', async () => {
     const raiz = mkdtempSync(path.join(tmpdir(), 'plataforma-principal-'));
-    const dirPrincipal = path.join(raiz, 'wa-data');
+    const urlPrincipal = urlConBase(`${PREFIJO}principal`);
     const secretos = bootstrapSecrets(raiz);
-    const envPrincipal = { PUBLIC_BASE_URL: 'http://localhost:0', DATABASE_URL: `pglite://${dirPrincipal}`, TRACKING_SECRET: secretos.trackingSecret, WHATSAPP_PROVIDER: 'local', BUSINESS_NAME: 'GSG' } as NodeJS.ProcessEnv;
+    const envPrincipal = { PUBLIC_BASE_URL: 'http://localhost:0', DATABASE_URL: urlPrincipal, TRACKING_SECRET: secretos.trackingSecret, WHATSAPP_PROVIDER: 'local', BUSINESS_NAME: 'GSG' } as NodeJS.ProcessEnv;
     const principal = {
       env: envPrincipal,
       secretos,
-      base: { tipo: 'pglite' as const, dir: dirPrincipal },
+      base: { url: urlPrincipal, banco: BANCO },
       authDir: path.join(raiz, 'wa-auth'),
       mediaDir: path.join(raiz, 'wa-media'),
       carpetaCopias: path.join(raiz, 'copias'),
@@ -342,7 +370,7 @@ describe('plataforma: freno de registros y tienda principal', () => {
     expect(alta.statusCode).toBe(200);
     await antes.parar();
 
-    const p = await crearPlataforma({ raiz: path.join(raiz, 'tiendas'), publicBaseUrl: 'http://localhost:0', proceso: {}, base: { tipo: 'pglite' }, principal, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), log: () => undefined });
+    const p = await crearPlataforma({ raiz: path.join(raiz, 'tiendas'), publicBaseUrl: 'http://localhost:0', proceso: {}, base: baseDePlataforma('conprincipal'), banco: BANCO, principal, autoConectarLocal: false, sembrarPlantillasLocales: false, carpetaCopias: path.join(raiz, 'c'), log: () => undefined });
     const s = await crearServidorPlataforma({ plataforma: p, segura: false });
     try {
       await p.arrancar();
@@ -360,26 +388,30 @@ describe('plataforma: freno de registros y tienda principal', () => {
       expect(nueva.status).toBe(200);
       const tRosa = await p.tiendaPorSlug(nueva.tienda!.slug);
       expect((await tRosa!.repos.usuarios.listar())[0]).toMatchObject({ usuario: 'rosa', rol: 'admin' });
+      // La principal sigue en su base de siempre; la nueva, en la suya.
+      expect((await p.tiendaPrincipal())!.base).toBe(`${PREFIJO}principal`);
+      expect(tRosa!.base).toBe(`${PREFIJO}conprincipal_t_${nueva.tienda!.id}`);
     } finally {
       await s.cerrar();
       await p.parar();
       rmSync(raiz, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, TIEMPO);
 
   it('una instalacion de antes sin cuentas no se usa como principal', async () => {
     const raiz = mkdtempSync(path.join(tmpdir(), 'plataforma-vacia-'));
     const secretos = bootstrapSecrets(raiz);
-    const dirPrincipal = path.join(raiz, 'wa-data');
+    const urlPrincipal = urlConBase(`${PREFIJO}vacia`);
     const p = await crearPlataforma({
       raiz: path.join(raiz, 'tiendas'),
       publicBaseUrl: 'http://localhost:0',
       proceso: {},
-      base: { tipo: 'pglite' },
+      base: baseDePlataforma('sinprincipal'),
+      banco: BANCO,
       principal: {
-        env: { PUBLIC_BASE_URL: 'http://localhost:0', DATABASE_URL: `pglite://${dirPrincipal}`, TRACKING_SECRET: secretos.trackingSecret } as NodeJS.ProcessEnv,
+        env: { PUBLIC_BASE_URL: 'http://localhost:0', DATABASE_URL: urlPrincipal, TRACKING_SECRET: secretos.trackingSecret } as NodeJS.ProcessEnv,
         secretos,
-        base: { tipo: 'pglite', dir: dirPrincipal },
+        base: { url: urlPrincipal },
         authDir: path.join(raiz, 'wa-auth'),
         mediaDir: path.join(raiz, 'wa-media'),
         carpetaCopias: path.join(raiz, 'copias'),
@@ -404,7 +436,7 @@ describe('plataforma: freno de registros y tienda principal', () => {
       await p.parar();
       rmSync(raiz, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, TIEMPO);
 });
 
 describe('plataforma: piezas sueltas', () => {
@@ -426,7 +458,7 @@ describe('plataforma: piezas sueltas', () => {
   it('una tienda nueva solo hereda del servidor lo que no es de nadie', () => {
     const env = entornoDeTienda(
       { WHATSAPP_TOKEN: 'x', GSG_TOKEN: 'y', SOLO_NUMEROS: '1', RUTAS_SUPERVISOR: '2', TIMEZONE: 'America/Lima', GRAPH_API_VERSION: 'v25.0' },
-      { publicBaseUrl: 'https://a.b/tienda/c', databaseUrl: 'pglite://d', trackingSecret: 's'.repeat(40), archiveDir: 'r', nombre: 'C' },
+      { publicBaseUrl: 'https://a.b/tienda/c', databaseUrl: 'mysql://root@localhost:3306/gsgchat_t_abc', trackingSecret: 's'.repeat(40), archiveDir: 'r', nombre: 'C' },
     );
     expect(env.WHATSAPP_TOKEN).toBeUndefined();
     expect(env.GSG_TOKEN).toBeUndefined();
@@ -435,5 +467,16 @@ describe('plataforma: piezas sueltas', () => {
     expect(env.TIMEZONE).toBe('America/Lima');
     expect(env.GRAPH_API_VERSION).toBe('v25.0');
     expect(env.PUBLIC_BASE_URL).toBe('https://a.b/tienda/c');
+    expect(env.DATABASE_URL).toBe('mysql://root@localhost:3306/gsgchat_t_abc');
+  });
+
+  it('los nombres de las bases salen de la de la URL', () => {
+    const n = basesDeLaPlataforma('mysql://root@127.0.0.1:3306/gsgchat');
+    expect(n.directorio).toBe('gsgchat_plataforma');
+    expect(n.tienda('a1b2c3d4e5f6')).toBe('gsgchat_t_a1b2c3d4e5f6');
+    expect(n.prefijoBanco).toBe('gsgchat_');
+    // Una base con mayusculas o guiones en la URL: los nombres nuevos salen limpios.
+    expect(basesDeLaPlataforma('mariadb://u:c@h/Wa-Locator').directorio).toBe('wa_locator_plataforma');
+    expect(() => basesDeLaPlataforma('mysql://root@127.0.0.1:3306/')).toThrow(/qué base usar/);
   });
 });

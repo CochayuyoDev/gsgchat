@@ -8,7 +8,7 @@
  *     y el «fin del dia» de prueba cierra solo lo de prueba;
  *  4. una tienda recien creada no hace su copia de seguridad al nacer.
  *
- * Todo lo de produccion (armarTienda con su base PGlite y sus motores) salvo
+ * Todo lo de produccion (armarTienda con su base MySQL de prueba y sus motores) salvo
  * el WhatsApp, que es uno falso que apunta lo que se le pide.
  */
 
@@ -21,6 +21,11 @@ import { bootstrapSecrets } from '../src/settings/crypto.js';
 import { numeroDePrueba } from '../src/desarrollador/numeros.js';
 import { cerrarDiaDePrueba } from '../src/desarrollador/reloj.js';
 import { createFakeWhatsApp, type FakeWhatsApp } from './fakes.js';
+import { baseDePrueba, type BaseDePrueba } from './mysql.js';
+import { OBLIGATORIOS_GSG } from './escenario-entregas.js';
+
+/** Con un disco lento (cada commit de MySQL tarda) se alargan todas las esperas: GSG_PRUEBAS_LENTO=4. */
+const LENTO = Number(process.env.GSG_PRUEBAS_LENTO) || 1;
 
 const SUPERVISOR = '51999888777';
 
@@ -36,6 +41,7 @@ const esperar = async (cond: () => boolean | Promise<boolean>, ms: number, que: 
 describe('lo de prueba no toca el numero real', () => {
   let raiz: string;
   let tienda: TiendaViva;
+  let b: BaseDePrueba;
   let wa: FakeWhatsApp & { preguntados: string[] };
   let cookie: string;
   const copias = () => path.join(raiz, 'copias');
@@ -47,6 +53,12 @@ describe('lo de prueba no toca el numero real', () => {
   const escribe = (phone: string, text: string) => api('POST', '/admin/dev/inbound', { phone, name: 'Cliente', text });
   const alSupervisor = () => wa.sent.filter((m) => m.to === SUPERVISOR);
   const db = () => tienda.repos.desarrollador!;
+
+  // La base aparte: la primera vez hay que crear sus tablas y tarda (usa el
+  // hookTimeout largo de vitest.config, no el de armar la tienda).
+  beforeAll(async () => {
+    b = await baseDePrueba();
+  });
 
   beforeAll(async () => {
     raiz = mkdtempSync(path.join(tmpdir(), 'aislado-'));
@@ -61,7 +73,7 @@ describe('lo de prueba no toca el numero real', () => {
       slug: 'aislado',
       env: {
         PUBLIC_BASE_URL: 'http://localhost:0',
-        DATABASE_URL: `pglite://${path.join(raiz, 'datos')}`,
+        DATABASE_URL: b.url,
         TRACKING_SECRET: secretos.trackingSecret,
         WHATSAPP_PROVIDER: 'local',
         DEV_SIMULATE_INBOUND: 'true',
@@ -73,7 +85,7 @@ describe('lo de prueba no toca el numero real', () => {
         HORARIO_ENVIO_FIN: '24',
       } as NodeJS.ProcessEnv,
       secretos,
-      base: { tipo: 'pglite', dir: path.join(raiz, 'datos') },
+      base: { url: b.url, base: b.base },
       authDir: path.join(raiz, 'auth'),
       mediaDir: path.join(raiz, 'medios'),
       carpetaCopias: copias(),
@@ -88,11 +100,12 @@ describe('lo de prueba no toca el numero real', () => {
     // Horario abierto todo el dia, pero la pausa entre mensajes la de siempre (15-30 s).
     expect((await api('POST', '/admin/rutas/ajustes', { horaInicio: 0, horaFin: 24 })).status).toBe(200);
     expect((await api('POST', '/admin/ajustes', { avisos: { supervisor: SUPERVISOR } })).status).toBe(200);
-  }, 180_000);
+  }, 180_000 * LENTO);
 
   afterAll(async () => {
     await tienda?.parar();
-    rmSync(raiz, { recursive: true, force: true });
+    await b?.cerrar();
+    if (raiz) rmSync(raiz, { recursive: true, force: true });
   });
 
   it('4. una tienda recién creada no hace su copia de seguridad al nacer', async () => {
@@ -107,21 +120,21 @@ describe('lo de prueba no toca el numero real', () => {
     expect(r.status).toBe(200);
     const t0 = Date.now();
     // Con la pausa real (15-30 s entre mensajes) cinco tardarian mas de un minuto.
-    await esperar(async () => (await db().query<{ n: number }>("select count(*)::int as n from rutas_solicitudes where phone like '510000%' and intentos > 0")).rows[0]!.n === 5, 45_000, 'los cinco pedidos de ubicación de prueba');
+    await esperar(async () => (await db().query<{ n: number }>("select count(*) as n from rutas_solicitudes where phone like '510000%' and intentos > 0")).rows[0]!.n === 5, 45_000 * LENTO, 'los cinco pedidos de ubicación de prueba');
     expect(Date.now() - t0).toBeLessThan(45_000);
     // No se le pregunto a WhatsApp por ninguno, y ninguno quedo como «sin WhatsApp».
     expect(wa.preguntados.filter((p) => p.startsWith('510000'))).toEqual([]);
-    const incidencias = await db().query<{ n: number }>("select count(*)::int as n from rutas_solicitudes where phone like '510000%' and incidencia = 'sin_whatsapp'");
+    const incidencias = await db().query<{ n: number }>("select count(*) as n from rutas_solicitudes where phone like '510000%' and incidencia = 'sin_whatsapp'");
     expect(incidencias.rows[0]!.n).toBe(0);
     // Nada salio por el WhatsApp (el sender los simula) y nada cuenta en el cupo ni en la salud.
     expect(wa.sent.filter((m) => String(m.to ?? '').startsWith('510000'))).toEqual([]);
-    const envios = await db().query<{ n: number }>("select count(*)::int as n from deliveries d join contacts c on c.id = d.contact_id where c.phone like '510000%'");
+    const envios = await db().query<{ n: number }>("select count(*) as n from deliveries d join contacts c on c.id = d.contact_id where c.phone like '510000%'");
     expect(envios.rows[0]!.n).toBe(0);
     expect(await tienda.repos.deliveries.contarIniciadosDesde(new Date(Date.now() - 3600_000))).toBe(0);
     // Pero en el hilo del chat si quedaron, como enviados.
-    const hilos = await db().query<{ n: number }>("select count(*)::int as n from messages m join contacts c on c.id = m.contact_id where c.phone like '510000%' and m.direction = 'out'");
+    const hilos = await db().query<{ n: number }>("select count(*) as n from messages m join contacts c on c.id = m.contact_id where c.phone like '510000%' and m.direction = 'out'");
     expect(hilos.rows[0]!.n).toBeGreaterThanOrEqual(5);
-  }, 120_000);
+  }, 120_000 * LENTO);
 
   it('una BAJA o un «no soy yo» de prueba no cuentan como riesgo del número real', async () => {
     const desde = new Date(Date.now() - 3600_000);
@@ -129,7 +142,7 @@ describe('lo de prueba no toca el numero real', () => {
     await escribe(numeroDePrueba('cliente', 2), 'no soy yo, número equivocado');
     expect(await tienda.repos.contacts.contarBajasDesde(desde)).toBe(0);
     expect(await tienda.repos.messages.contarEntrantesDesde(desde)).toBe(0);
-    const quejas = await db().query<{ n: number }>("select count(*)::int as n from salud_eventos where tipo = 'respuesta_negativa'").catch(() => ({ rows: [{ n: 0 }] }));
+    const quejas = await db().query<{ n: number }>("select count(*) as n from salud_eventos where tipo = 'respuesta_negativa'").catch(() => ({ rows: [{ n: 0 }] }));
     expect(quejas.rows[0]!.n).toBe(0);
   });
 
@@ -137,15 +150,15 @@ describe('lo de prueba no toca el numero real', () => {
     const clave = await api('POST', '/admin/claves-api', { nombre: 'prueba aislado', permisos: ['entregas:leer', 'entregas:gestionar'] });
     expect(clave.status).toBe(200);
     const token = String(clave.body.clave ?? clave.body.token ?? '');
-    expect(token.startsWith('wak_')).toBe(true);
+    expect(token).toMatch(/^[A-Za-z0-9]{48}$/);
     const alta = await tienda.app.inject({
       method: 'POST',
       url: '/api/v1/entregas',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      headers: { 'x-api-key': token, 'content-type': 'application/json' },
       payload: JSON.stringify({
         pedidos: [
-          { referencia: 'PRUEBA-C1', telefono: numeroDePrueba('cliente', 11), nombre: 'Prueba Cierre', faltaUbicacion: true, faltaConfirmar: true },
-          { referencia: 'REAL-1', telefono: '987654321', nombre: 'Cliente Real', faltaUbicacion: true, faltaConfirmar: true },
+          { ...OBLIGATORIOS_GSG, referencia: 'PRUEBA-C1', telefono: numeroDePrueba('cliente', 11), nombre: 'Prueba Cierre', faltaUbicacion: true, faltaConfirmar: true },
+          { ...OBLIGATORIOS_GSG, referencia: 'REAL-1', telefono: '987654321', nombre: 'Cliente Real', faltaUbicacion: true, faltaConfirmar: true },
         ],
       }),
     });
@@ -158,7 +171,7 @@ describe('lo de prueba no toca el numero real', () => {
     expect(r.sinTerminar).toContain('PRUEBA-C1');
     expect(r.sinTerminar).not.toContain('REAL-1');
 
-    const filas = await db().query<{ referencia: string; estado: string; dia: string }>("select referencia, estado, dia::text as dia from entregas where referencia in ('PRUEBA-C1','REAL-1') order by referencia");
+    const filas = await db().query<{ referencia: string; estado: string; dia: string }>("select referencia, estado, cast(dia as char) as dia from entregas where referencia in ('PRUEBA-C1','REAL-1') order by referencia");
     const real = filas.rows.find((f) => f.referencia === 'REAL-1')!;
     const prueba = filas.rows.find((f) => f.referencia === 'PRUEBA-C1')!;
     expect(prueba.estado).toBe('incidencia');

@@ -5,7 +5,8 @@
  * `Repos` lo expone como `repos.rutas`.
  */
 
-import type { Pool } from './pool.js';
+import { createHash } from 'node:crypto';
+import { nuevoId, type Pool } from './pool.js';
 import type { CodigoIncidencia } from '../rutas/incidencias.js';
 import { createAjustesRepo, type AjustesRepo } from '../rutas/ajustes.js';
 
@@ -239,6 +240,14 @@ export interface RutasRepo {
    */
   resueltaRecientePorTelefono(phone: string): Promise<Solicitud | null>;
   telefonosDelLote(loteId: string): Promise<string[]>;
+  /**
+   * Ejecuta `fn` con el telefono apartado: dos llamadas con el mismo
+   * telefono no se solapan, ni en este proceso ni entre procesos que usen la
+   * misma base. Es para «comprobar que no hay nada abierto y crear»: sin el,
+   * un doble clic crea dos solicitudes para el mismo cliente. Si no se
+   * consigue en `esperaSegundos`, lanza `CandadoOcupado`.
+   */
+  conCandadoDeTelefono<T>(phone: string, fn: () => Promise<T>, esperaSegundos?: number): Promise<T>;
 
   registrarEvento(
     solicitudId: number,
@@ -264,6 +273,14 @@ export interface RutasRepo {
     payload: Record<string, unknown>;
   }): Promise<Reporte>;
   reportesPendientes(limite: number): Promise<Reporte[]>;
+  reservarReporte(id: number): Promise<boolean>;
+  /**
+   * Devuelve a la cola los fallidos de ese tipo. Con `maxIntentos`, solo los
+   * que llevan menos intentos (el reintento automatico no insiste sin fin).
+   */
+  reencolarFallidos(tipo: TipoReporte, maxIntentos?: number): Promise<number>;
+  /** Los ultimos reportes de ese tipo en cualquier estado, del mas nuevo al mas viejo. */
+  reportesRecientes(limite: number, tipo: TipoReporte): Promise<Reporte[]>;
   marcarReporte(
     id: number,
     estado: EstadoReporte,
@@ -276,6 +293,9 @@ export interface RutasRepo {
    */
   cifrasReportes(): Promise<CifrasReportes>;
 }
+
+/** No se pudo apartar el telefono a tiempo: otra peticion lo tiene. */
+export class CandadoOcupado extends Error {}
 
 // ------------------------------------------------------------- mapeo
 
@@ -433,7 +453,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     }
     if (query.estados?.length) {
       params.push(query.estados);
-      partes.push(`estado = any($${params.length})`);
+      partes.push(`estado in ($${params.length})`);
     }
     if (query.incidencia) {
       params.push(query.incidencia);
@@ -441,17 +461,20 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     }
     if (query.incidencias?.length) {
       params.push(query.incidencias);
-      partes.push(`incidencia = any($${params.length})`);
+      partes.push(`incidencia in ($${params.length})`);
     }
     if (query.requiereHumano !== undefined) {
       params.push(query.requiereHumano);
       partes.push(`requiere_humano = $${params.length}`);
     }
     if (query.q?.trim()) {
+      // La colacion es binaria (distingue mayusculas): el ilike de antes es
+      // lower(...) like lower(...).
       params.push(`%${query.q.trim()}%`);
+      const n = params.length;
       partes.push(
-        `(telefono_crudo ilike $${params.length} or phone ilike $${params.length}` +
-          ` or nombre ilike $${params.length} or referencia ilike $${params.length})`,
+        `(lower(telefono_crudo) like lower($${n}) or lower(phone) like lower($${n})` +
+          ` or lower(nombre) like lower($${n}) or lower(referencia) like lower($${n}))`,
       );
     }
     return { where: partes.length ? `where ${partes.join(' and ')}` : '', params };
@@ -468,11 +491,13 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     // ------------------------------------------------------------ lotes
 
     async crearLote(datos) {
-      const { rows } = await pool.query<LoteRow>(
-        `insert into rutas_lotes (nombre, origen, notas, externo_id)
-         values ($1, $2, $3, $4) returning *`,
-        [datos.nombre, datos.origen ?? 'csv', datos.notas ?? null, datos.externoId ?? null],
+      const id = nuevoId();
+      await pool.query(
+        `insert into rutas_lotes (id, nombre, origen, notas, externo_id)
+         values ($1, $2, $3, $4, $5)`,
+        [id, datos.nombre, datos.origen ?? 'csv', datos.notas ?? null, datos.externoId ?? null],
       );
+      const { rows } = await pool.query<LoteRow>('select * from rutas_lotes where id = $1', [id]);
       return toLote(rows[0]!);
     },
 
@@ -482,35 +507,38 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     },
 
     async listarLotes(limit, offset) {
-      const { rows } = await pool.query<LoteRow & { total: number; cifras: Record<string, number> }>(
-        `select l.*,
-                coalesce(c.total, 0)::int as total,
-                coalesce(c.cifras, '{}'::jsonb) as cifras
-           from rutas_lotes l
-           left join lateral (
-             select count(*)::int as total,
-                    jsonb_object_agg(estado, n) as cifras
-               from (
-                 select estado, count(*)::int as n
-                   from rutas_solicitudes where lote_id = l.id group by estado
-               ) por_estado
-           ) c on true
-          order by l.created_at desc
-          limit $1 offset $2`,
-        [limit, offset],
+      // Sin LATERAL ni jsonb_object_agg (MariaDB no los tiene): la pagina de
+      // lotes y, aparte, el conteo por estado de esos lotes, que se junta aqui.
+      const { rows } = await pool.query<LoteRow>(
+        `select * from rutas_lotes order by created_at desc limit $1 offset $2`,
+        [Number(limit), Number(offset)],
       );
-      return rows.map((r) => ({
-        ...toLote(r),
-        total: Number(r.total ?? 0),
-        cifras: r.cifras ?? {},
-      }));
+      const cifrasPorLote = new Map<string, Record<string, number>>();
+      if (rows.length) {
+        const conteo = await pool.query<{ lote_id: string; estado: string; n: number }>(
+          `select lote_id, estado, count(*) as n
+             from rutas_solicitudes where lote_id in ($1) group by lote_id, estado`,
+          [rows.map((r) => r.id)],
+        );
+        for (const c of conteo.rows) {
+          const cifras = cifrasPorLote.get(c.lote_id) ?? {};
+          cifras[c.estado] = Number(c.n);
+          cifrasPorLote.set(c.lote_id, cifras);
+        }
+      }
+      return rows.map((r) => {
+        const cifras = cifrasPorLote.get(r.id) ?? {};
+        return {
+          ...toLote(r),
+          total: Object.values(cifras).reduce((a, b) => a + b, 0),
+          cifras,
+        };
+      });
     },
 
     async cambiarEstadoLote(id, estado) {
-      const { rows } = await pool.query<LoteRow>(
-        'update rutas_lotes set estado = $2, updated_at = now() where id = $1 returning *',
-        [id, estado],
-      );
+      await pool.query('update rutas_lotes set estado = $2, updated_at = now(3) where id = $1', [id, estado]);
+      const { rows } = await pool.query<LoteRow>('select * from rutas_lotes where id = $1', [id]);
       return rows[0] ? toLote(rows[0]) : null;
     },
 
@@ -531,12 +559,11 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       if (!filas.length) return [];
       const creadas: Solicitud[] = [];
       for (const fila of filas) {
-        const { rows } = await pool.query<SolicitudRow>(
+        const { insertId } = await pool.query(
           `insert into rutas_solicitudes
              (lote_id, telefono_crudo, phone, nombre, referencia, direccion, distrito, notas,
               estado, incidencia, incidencia_detalle, requiere_humano, proximo_intento_at)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-           returning *`,
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [
             loteId,
             fila.telefonoCrudo,
@@ -553,7 +580,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
             fila.proximoIntentoAt ?? null,
           ],
         );
-        creadas.push(toSolicitud(rows[0]!));
+        creadas.push((await solicitud(insertId))!);
       }
       return creadas;
     },
@@ -564,16 +591,14 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       const { where, params } = filtros(query);
       const { rows } = await pool.query<SolicitudRow>(
         `select * from rutas_solicitudes ${where}
-          order by
-            -- Primero lo que espera a una persona, que es lo que se mira.
-            requiere_humano desc,
-            case estado
-              when 'supervision' then 0 when 'incidencia' then 1 when 'derivado' then 2
-              when 'respondio' then 3 when 'enviado' then 4 when 'pendiente' then 5
-              else 6 end,
-            id asc
+          -- Lo que se movio hace poco, arriba: es lo que la operacion busca
+          -- (el cliente que acaba de contestar, la que se corrigio a mano).
+          -- updated_at cambia en cada actualizarSolicitud; el id desempata
+          -- para que dos filas tocadas en el mismo milisegundo no bailen
+          -- entre paginas.
+          order by updated_at desc, id desc
           limit $${params.length + 1} offset $${params.length + 2}`,
-        [...params, query.limit, query.offset],
+        [...params, Number(query.limit), Number(query.offset)],
       );
       return rows.map(toSolicitud);
     },
@@ -581,10 +606,10 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     async contarSolicitudes(query) {
       const { where, params } = filtros(query);
       const { rows } = await pool.query<{ total: number }>(
-        `select count(*)::int as total from rutas_solicitudes ${where}`,
+        `select count(*) as total from rutas_solicitudes ${where}`,
         params,
       );
-      return rows[0]?.total ?? 0;
+      return Number(rows[0]?.total ?? 0);
     },
 
     async actualizarSolicitud(id, patch) {
@@ -600,17 +625,17 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       }
       if (!asignaciones.length) return (await solicitud(id))!;
 
-      const { rows } = await pool.query<SolicitudRow>(
-        `update rutas_solicitudes set ${asignaciones.join(', ')}, updated_at = now()
-          where id = $1 returning *`,
+      await pool.query(
+        `update rutas_solicitudes set ${asignaciones.join(', ')}, updated_at = now(3)
+          where id = $1`,
         valores,
       );
-      return toSolicitud(rows[0]!);
+      return (await solicitud(id))!;
     },
 
     async cifrasPorEstado(loteId) {
       const { rows } = await pool.query<{ estado: string; total: number }>(
-        `select estado, count(*)::int as total from rutas_solicitudes
+        `select estado, count(*) as total from rutas_solicitudes
           ${loteId ? 'where lote_id = $1' : ''}
           group by estado`,
         loteId ? [loteId] : [],
@@ -620,7 +645,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
 
     async cifrasPorIncidencia(loteId) {
       const { rows } = await pool.query<{ incidencia: string; total: number }>(
-        `select incidencia, count(*)::int as total from rutas_solicitudes
+        `select incidencia, count(*) as total from rutas_solicitudes
           where incidencia is not null ${loteId ? 'and lote_id = $1' : ''}
           group by incidencia`,
         loteId ? [loteId] : [],
@@ -640,7 +665,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
           -- adelanta a los recordatorios del anterior y nadie recibe el suyo.
           order by coalesce(s.proximo_intento_at, s.created_at) asc, s.id asc
           limit $2`,
-        [ahora, limite],
+        [ahora, Number(limite)],
       );
       return rows.map(toSolicitud);
     },
@@ -659,7 +684,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       const { rows } = await pool.query<SolicitudRow>(
         `select * from rutas_solicitudes
           where phone = $1 and estado in ('pendiente','enviado','respondio','supervision','derivado')
-            and ($2::uuid is null or lote_id <> $2::uuid)
+            and ($2 is null or lote_id <> $2)
           order by id desc limit 1`,
         [phone, excluirLoteId ?? null],
       );
@@ -685,6 +710,28 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       return rows.map((r) => r.phone ?? r.telefono_crudo);
     },
 
+    async conCandadoDeTelefono(phone, fn, esperaSegundos = 10) {
+      // GET_LOCK de MySQL/MariaDB, y no un indice unico: un telefono tiene
+      // (y debe poder tener) muchas solicitudes en su historia, y MySQL no
+      // tiene indices unicos parciales ("solo las abiertas"). El candado es
+      // de la conexion: se aparta una del pool, se pide y se suelta en ella.
+      // El nombre lleva la base (las tiendas comparten servidor) y va en hash
+      // porque GET_LOCK no admite mas de 64 caracteres.
+      const nombre = `gsg_rt_${createHash('sha1').update(`${pool.baseDeDatos ?? ''}:${phone}`).digest('hex')}`;
+      const conexion = await pool.connect();
+      try {
+        const { rows } = await conexion.query<{ ok: number | null }>('select get_lock($1, $2) as ok', [nombre, Number(esperaSegundos)]);
+        if (Number(rows[0]?.ok) !== 1) throw new CandadoOcupado(`el teléfono ${phone} está ocupado por otra petición`);
+        try {
+          return await fn();
+        } finally {
+          await conexion.query('select release_lock($1)', [nombre]).catch(() => undefined);
+        }
+      } finally {
+        conexion.release();
+      }
+    },
+
     // ---------------------------------------------------------- bitacora
 
     async registrarEvento(solicitudId, tipo, detalle, payload) {
@@ -706,7 +753,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       }>(
         `select * from rutas_eventos where solicitud_id = $1
           order by created_at asc, id asc limit $2`,
-        [solicitudId, limite],
+        [solicitudId, Number(limite)],
       );
       return rows.map((r) => ({
         id: Number(r.id),
@@ -729,7 +776,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
             and s.estado in ('pendiente','enviado','respondio')
           order by coalesce(s.proximo_intento_at, s.created_at) asc, s.id asc
           limit $1`,
-        [limite],
+        [Number(limite)],
       );
       return rows.map((r) => ({ ...toSolicitud(r), lote: { id: r.lote_id, nombre: r.lote_nombre, estado: r.lote_estado } }));
     },
@@ -753,7 +800,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
            join rutas_lotes l on l.id = s.lote_id
           order by e.id desc
           limit $1`,
-        [limite],
+        [Number(limite)],
       );
       return rows.map((r) => ({
         id: Number(r.id),
@@ -770,9 +817,9 @@ export function createRutasRepo(pool: Pool): RutasRepo {
     },
 
     async encolarReporte(reporte) {
-      const { rows } = await pool.query<ReporteRow>(
+      const { insertId } = await pool.query(
         `insert into rutas_reportes (solicitud_id, lote_id, tipo, payload)
-         values ($1,$2,$3,$4) returning *`,
+         values ($1,$2,$3,$4)`,
         [
           reporte.solicitudId ?? null,
           reporte.loteId ?? null,
@@ -780,14 +827,35 @@ export function createRutasRepo(pool: Pool): RutasRepo {
           JSON.stringify(reporte.payload),
         ],
       );
+      const { rows } = await pool.query<ReporteRow>('select * from rutas_reportes where id = $1', [insertId]);
       return toReporte(rows[0]!);
     },
 
+    async reservarReporte(id) {
+      const r = await pool.query("update rutas_reportes set estado = 'fallido', ultimo_error = $2 where id = $1 and estado = 'pendiente'", [id, 'Resultado incierto: envío reservado. Si el proceso se interrumpió, verifica en GSG antes de reintentar.']);
+      return r.rowCount === 1;
+    },
     async reportesPendientes(limite) {
       const { rows } = await pool.query<ReporteRow>(
         `select * from rutas_reportes where estado = 'pendiente'
           order by created_at asc, id asc limit $1`,
-        [limite],
+        [Number(limite)],
+      );
+      return rows.map(toReporte);
+    },
+
+    async reencolarFallidos(tipo, maxIntentos) {
+      const { rowCount } = maxIntentos
+        ? await pool.query(`update rutas_reportes set estado = 'pendiente' where estado = 'fallido' and tipo = $1 and intentos < $2`, [tipo, maxIntentos])
+        : await pool.query(`update rutas_reportes set estado = 'pendiente' where estado = 'fallido' and tipo = $1`, [tipo]);
+      return rowCount ?? 0;
+    },
+
+    async reportesRecientes(limite, tipo) {
+      const { rows } = await pool.query<ReporteRow>(
+        `select * from rutas_reportes where tipo = $1
+          order by created_at desc, id desc limit $2`,
+        [tipo, Number(limite)],
       );
       return rows.map(toReporte);
     },
@@ -799,7 +867,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
                 intentos = intentos + 1,
                 externo_id = coalesce($3, externo_id),
                 ultimo_error = $4,
-                enviado_at = case when $2 = 'enviado' then now() else enviado_at end
+                enviado_at = case when $2 = 'enviado' then now(3) else enviado_at end
           where id = $1`,
         [id, estado, extra?.externoId ?? null, extra?.error?.slice(0, 500) ?? null],
       );
@@ -807,8 +875,8 @@ export function createRutasRepo(pool: Pool): RutasRepo {
 
     async cifrasReportes() {
       const { rows } = await pool.query<{ estado: EstadoReporte; total: number; atascados: number }>(
-        `select estado, count(*)::int as total,
-                count(*) filter (where estado = 'pendiente' and intentos > 0)::int as atascados
+        `select estado, count(*) as total,
+                sum(case when estado = 'pendiente' and intentos > 0 then 1 else 0 end) as atascados
            from rutas_reportes group by estado`,
       );
       const cifras: CifrasReportes = { pendiente: 0, enviado: 0, fallido: 0, atascado: 0 };

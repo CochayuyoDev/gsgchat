@@ -92,7 +92,7 @@ describe('leer lo que escribe el modelo', () => {
 // ------------------------------------------------------------- con servidor
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -118,7 +118,7 @@ const queue: OutboundQueue = {
 };
 
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 /** Un modelo que contesta por turnos: la primera respuesta, luego la segunda... la ultima se repite. */
 function modeloPorTurnos() {

@@ -20,7 +20,7 @@ import { createFakeRepos, createFakeWhatsApp, createMemorySettingsRepo, TEST_SET
 
 const ENV = {
   PUBLIC_BASE_URL: 'http://localhost:3000',
-  DATABASE_URL: 'postgres://x/y',
+  DATABASE_URL: 'mysql://x/y',
   WHATSAPP_TOKEN: 't',
   WHATSAPP_PHONE_NUMBER_ID: 'PNID',
   WHATSAPP_BUSINESS_ACCOUNT_ID: 'WABA',
@@ -46,7 +46,7 @@ const queue: OutboundQueue = {
   async close() {},
 };
 const config = loadConfig(ENV);
-const con = (clave: string) => ({ authorization: `Bearer ${clave}`, 'content-type': 'application/json' });
+const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 function planRemoto(extra: Partial<PlanRemoto> = {}): PlanRemoto {
   return {
@@ -239,7 +239,8 @@ describe('el plan dentro del sistema', () => {
   }
 
   it('con el plan vigente todo funciona y cada respuesta de la IA cuenta', async () => {
-    // El vencimiento se cuenta desde hoy: con una fecha fija la prueba se venceria sola.
+    // Con el reloj de verdad: el vencimiento cuenta desde hoy (con la fecha
+    // fija del 29/09/2026 la prueba caducó sola el 30/09).
     const s = await levantar(() => planRemoto({ vencimiento: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString() }));
     const r = await s.ia.turno(s.contacto, 'hola');
     expect(r.resultado).toBe('respondio');
