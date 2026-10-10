@@ -38,7 +38,7 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { SettingsRepo } from '../settings/service.js';
 import { decrypt, encrypt, keyFromBase64 } from '../settings/crypto.js';
-import { crearPuertoEnEspera, crearPuertoHttp, enmascararClave, migrarUbicacionAntigua, normalizarBaseGsg, RUTA_REPORTADOS_POR_DEFECTO, RUTA_UBICACION_POR_DEFECTO, unirUrlGsg, type PuertoGsg, type ResultadoEnvio } from './gsg.js';
+import { crearPuertoEnEspera, crearPuertoHttp, enmascararClave, migrarUbicacionAntigua, normalizarBaseGsg, RUTA_UBICACION_POR_DEFECTO, unirUrlGsg, type PuertoGsg, type ResultadoEnvio } from './gsg.js';
 import { crearGsgExtras, type ServicioGsgExtras } from './gsg-extras.js';
 
 const CLAVE_CONEXION = 'gsg.conexion';
@@ -52,6 +52,8 @@ export const TOKEN_SIMULADOR = `simulador-gsg-local-${randomBytes(24).toString('
 /** Donde se monta el simulador dentro de este mismo servidor. */
 export const RUTA_SIMULADOR = '/simulador/gsg';
 
+// z.object descarta las claves que no conoce: una configuracion guardada con
+// la antigua `rutaReportados` (ya no se le manda nada a GSG) sigue cargando.
 const conexionSchema = z.object({
   /** real = la API de GSG; simulador = la copia de mentira de este servidor; ninguna = solo encolar. */
   modo: z.enum(['ninguna', 'real', 'simulador']).default('ninguna'),
@@ -59,8 +61,6 @@ const conexionSchema = z.object({
   url: z.string().trim().max(300).default(''),
   /** La ruta, relativa a la base, a la que se hace POST con la ubicacion (p. ej. v1/gsgchat/location). */
   rutaUbicacion: z.string().trim().max(300).default(''),
-  /** La ruta, relativa a la base, a la que se hace POST con cada numero reportado (vacia = numeros-reportados). */
-  rutaReportados: z.string().trim().max(300).default(''),
   /**
    * ANTIGUA: la URL completa de la ubicacion. Solo se lee para convertirla a
    * base + ruta (ver recargar); al guardar de nuevo se vacia.
@@ -84,10 +84,6 @@ export interface EstadoConexionGsg {
   rutaUbicacion: string;
   /** La URL completa antigua, si sigue guardada sin poder convertirse ('' = ninguna). */
   urlUbicacion: string;
-  /** La ruta de los numeros reportados, relativa a la base ('' = numeros-reportados). */
-  rutaReportados: string;
-  /** A donde salen los numeros reportados (base + ruta), o null sin conexion o con la configuracion mal. */
-  destinoReportados: string | null;
   /** A donde sale de verdad la ubicacion (base + ruta), o null si no hay o la configuracion no vale. */
   destinoUbicacion: string | null;
   tieneToken: boolean;
@@ -118,7 +114,7 @@ export interface ServicioConexionGsg {
    * había; sin ruta conserva la guardada (o `sendLocation`). `urlUbicacion`
    * (la URL completa antigua) se acepta solo si se convierte sin adivinar.
    */
-  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaReportados?: string | null }): Promise<EstadoConexionGsg>;
+  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null }): Promise<EstadoConexionGsg>;
   /** Apunta al simulador de este servidor. */
   usarSimulador(): Promise<EstadoConexionGsg>;
   /** Quita la conexión de la pantalla; si el `.env` tenía una, vuelve a mandar esa. */
@@ -146,7 +142,7 @@ export function conexionGsgVigente(): ServicioConexionGsg | null {
 export interface DepsConexionGsg {
   settingsRepo: SettingsRepo;
   settingsKeyBase64: string;
-  config: { GSG_IDEMPOTENCY_SUPPORTED?: string; GSG_SEND_LOCATION_URL?: string; GSG_LOCATION_PATH?: string; GSG_REPORTADOS_PATH?: string; GSG_API_KEY?: string; GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string; timezone?: string };
+  config: { GSG_IDEMPOTENCY_SUPPORTED?: string; GSG_SEND_LOCATION_URL?: string; GSG_LOCATION_PATH?: string; GSG_API_KEY?: string; GSG_URL: string; GSG_TOKEN: string; PUBLIC_BASE_URL: string; timezone?: string };
   fetchImpl?: typeof fetch;
   log?: (m: string, d?: Record<string, unknown>) => void;
   ahora?: () => Date;
@@ -171,12 +167,11 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     rutaUbicacion: string;
     /** La URL completa antigua, solo si no hay ruta (se convierte en el puerto). */
     ubicacionUrl: string;
-    rutaReportados: string;
     token: string;
     origen: EstadoConexionGsg['origen'];
     origenClave: EstadoConexionGsg['origenClave'];
   }
-  const ninguna: Efectiva = { modo: 'ninguna', url: '', rutaUbicacion: '', ubicacionUrl: '', rutaReportados: '', token: '', origen: 'ninguna', origenClave: null };
+  const ninguna: Efectiva = { modo: 'ninguna', url: '', rutaUbicacion: '', ubicacionUrl: '', token: '', origen: 'ninguna', origenClave: null };
 
   /** Lo que manda: la pantalla, y si no hay nada, el .env. */
   const efectiva = (): Efectiva => {
@@ -187,7 +182,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
         url: guardada.url,
         rutaUbicacion: guardada.rutaUbicacion,
         ubicacionUrl: guardada.rutaUbicacion ? '' : guardada.urlUbicacion || deps.config.GSG_SEND_LOCATION_URL || '',
-        rutaReportados: guardada.rutaReportados || (deps.config.GSG_REPORTADOS_PATH ?? '').trim(),
         token,
         origen: 'pantalla',
         origenClave: token ? (tokenAntiguo ? 'pantalla_antigua' : 'pantalla') : null,
@@ -202,7 +196,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
         url: deps.config.GSG_URL.trim(),
         rutaUbicacion: ruta,
         ubicacionUrl: ruta ? '' : deps.config.GSG_SEND_LOCATION_URL || '',
-        rutaReportados: (deps.config.GSG_REPORTADOS_PATH ?? '').trim(),
         token: clave,
         origen: 'env',
         origenClave: clave ? (nueva ? 'env' : 'env_antigua') : null,
@@ -217,9 +210,9 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       vigente = null;
       return enEspera;
     }
-    const firma = JSON.stringify([e.url, e.rutaUbicacion, e.ubicacionUrl, e.rutaReportados, e.token]);
+    const firma = JSON.stringify([e.url, e.rutaUbicacion, e.ubicacionUrl, e.token]);
     if (!vigente || vigente.firma !== firma) {
-      vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, rutaReportados: e.rutaReportados || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl, idempotenciaUbicacion: deps.config.GSG_IDEMPOTENCY_SUPPORTED === 'true' }) };
+      vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl, idempotenciaUbicacion: deps.config.GSG_IDEMPOTENCY_SUPPORTED === 'true' }) };
     }
     return vigente.puerto;
   };
@@ -298,12 +291,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       rutaUbicacion: e.rutaUbicacion,
       urlUbicacion: e.origen === 'pantalla' && !e.rutaUbicacion ? guardada.urlUbicacion : '',
       destinoUbicacion: proxy.urlUbicacion?.() ?? null,
-      rutaReportados: e.rutaReportados,
-      destinoReportados: (() => {
-        if (!e.url || !proxy.urlUbicacion?.()) return null;
-        const u = unirUrlGsg(e.url, e.rutaReportados || RUTA_REPORTADOS_POR_DEFECTO);
-        return u.ok ? u.url : null;
-      })(),
       tieneToken: Boolean(e.token),
       claveEnmascarada: enmascararClave(e.token),
       origenClave: e.origenClave,
@@ -397,13 +384,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       }
       const destino = unirUrlGsg(urlBase, ruta);
       if (!destino.ok) throw new Error(destino.error);
-      // La ruta de los numeros reportados: la que se mande, o la guardada (vacia = numeros-reportados).
-      const rutaReportados = input.rutaReportados !== undefined && input.rutaReportados !== null ? input.rutaReportados.trim() : guardada.modo === 'real' ? guardada.rutaReportados : '';
-      if (rutaReportados) {
-        const r = unirUrlGsg(urlBase, rutaReportados);
-        if (!r.ok) throw new Error(`Ruta de los números reportados: ${r.error.replace('para enviar la ubicación', 'para reportar números')}`);
-      }
-      guardada = { modo: 'real', url: urlBase, rutaUbicacion: ruta, rutaReportados, urlUbicacion: '', conectadoEn: new Date().toISOString() };
+      guardada = { modo: 'real', url: urlBase, rutaUbicacion: ruta, urlUbicacion: '', conectadoEn: new Date().toISOString() };
       const nueva = input.apiKey ?? input.token;
       if (nueva !== undefined && nueva !== null) {
         token = nueva.trim();

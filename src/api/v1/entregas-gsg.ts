@@ -7,7 +7,7 @@
  *  POST   /api/v1/entregas                 uno o varios pedidos (entregas:gestionar)
  *  GET    /api/v1/entregas/:referencia     como va ese pedido hoy (entregas:leer)
  *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas, urgente, los datos del envio o corregir el telefono (entregas:gestionar)
- *  GET    /api/v1/reportados               los numeros y trackings malos que se le reportaron a GSG (entregas:leer)
+ *  GET    /api/v1/reportados               los numeros y trackings malos guardados para GSG (entregas:leer)
  *  POST   /api/v1/reportados/:tracking/correccion   GSG corrige { telefono?, tracking? } (entregas:gestionar)
  *  GET    /api/v1/trackings?dia=AAAA-MM-DD  lo que ya se hizo por WhatsApp con cada tracking del dia (entregas:leer)
  *
@@ -422,7 +422,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
 
     // Antes de guardar: el tracking repetido en la llamada con otro telefono,
     // el tracking que ya es de otro pedido de hoy y el telefono de un
-    // motorizado. No se guardan y se le reportan a GSG.
+    // motorizado. No se guardan y quedan reportados (GET /api/v1/reportados).
     const aceptados: Pedido[] = [];
     const vistos = new Map<string, string>();
     const delDia: Entrega[] = deps.repo ? await deps.repo.listar({ dia: entregas.diaDeHoy(), limit: 5000 }).catch(() => [] as Entrega[]) : [];
@@ -556,7 +556,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     return reply.code(r.status).send(r.body);
   };
 
-  /** La llamada no paso la validacion: los trackings y telefonos malos igual se le reportan a GSG. */
+  /** La llamada no paso la validacion: los trackings y telefonos malos igual quedan reportados. */
   const reportarDeValidacion = async (body: unknown): Promise<void> => {
     for (const p of pedidosCrudos(body)) {
       const t = trackingNoValido(p.tracking);

@@ -454,9 +454,6 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
       <span class="hint">Lo que va después de la URL base, sin http:// ni «..». Por ejemplo v1/gsgchat/location</span></label>
     <input id="gsg-ruta" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/location" aria-describedby="gsg-url-final">
     <p class="ayuda" id="gsg-url-final" role="status" aria-live="polite"></p>
-    <label class="campo" for="gsg-ruta-reportados">Ruta para reportar números malos
-      <span class="hint">Opcional. A dónde se le avisa a GSG de un teléfono o tracking malo (uno por tracking y error). Vacía = numeros-reportados. Por ejemplo v1/gsgchat/reportados</span></label>
-    <input id="gsg-ruta-reportados" type="text" autocomplete="off" spellcheck="false" placeholder="numeros-reportados">
     <label class="campo" for="gsg-token">API Key de GSG
       <span class="hint" id="gsg-token-pista">Te la da GSG. Se manda solo en la cabecera X-API-Key, se guarda cifrada y no se vuelve a mostrar entera.</span></label>
     <div class="con-ojo">
@@ -1717,7 +1714,6 @@ async function cargarGsg() {
     // Lo guardado a la vista (la clave no: solo enmascarada).
     if (g.modo === 'real' && g.url && !$('gsg-url').value) $('gsg-url').value = g.url;
     if (g.modo === 'real' && g.rutaUbicacion && !$('gsg-ruta').value) $('gsg-ruta').value = g.rutaUbicacion;
-    if (g.modo === 'real' && g.rutaReportados && $('gsg-ruta-reportados') && !$('gsg-ruta-reportados').value) $('gsg-ruta-reportados').value = g.rutaReportados;
     pintarUrlFinalGsg();
     var hayClave = g.modo === 'real' && g.tieneToken;
     $('gsg-token').placeholder = hayClave ? (g.claveEnmascarada || '••••') + ' (guardada)' : '';
@@ -1779,7 +1775,7 @@ if ($('gsg')) {
     resultadoGsg('Guardando…', 'espera');
     try {
       var token = $('gsg-token').value.trim();
-      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaReportados: $('gsg-ruta-reportados') ? $('gsg-ruta-reportados').value.trim() : undefined, apiKey: token || undefined } });
+      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), apiKey: token || undefined } });
       $('gsg-token').value = '';
       await probarGsg();
     } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }
@@ -1788,7 +1784,7 @@ if ($('gsg')) {
   $('gsg-quitar').onclick = async function () {
     var ok = await confirmarDialogo({ titulo: 'Desconectar GSG', texto: 'Lo reportable se guarda en la cola y saldrá entero cuando se vuelva a conectar.', boton: 'Desconectar', peligro: true });
     if (!ok) return;
-    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); $('gsg-url').value = ''; $('gsg-ruta').value = ''; if ($('gsg-ruta-reportados')) $('gsg-ruta-reportados').value = ''; pintarUrlFinalGsg(); resultadoGsg('', ''); estado('gsg-state', 'Desconectado: lo que haya que mandarle a GSG se guarda y saldrá entero al volver a conectar.', 'verde'); cargarGsg(); }
+    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); $('gsg-url').value = ''; $('gsg-ruta').value = ''; pintarUrlFinalGsg(); resultadoGsg('', ''); estado('gsg-state', 'Desconectado: lo que haya que mandarle a GSG se guarda y saldrá entero al volver a conectar.', 'verde'); cargarGsg(); }
     catch (error) { estado('gsg-state', error.message, 'rojo'); }
   };
 

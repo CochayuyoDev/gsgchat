@@ -304,7 +304,7 @@ export function openApi(baseUrl: string): Json {
             'Se acepta un pedido suelto, una lista `[...]` o `{ pedidos: [...] }` (hasta 600). Un pedido repetido hoy no se duplica (`repetidas`); uno sin telefono valido va en `descartadas` con su motivo.',
             'Lo que pasa despues (confirmo, se le aviso la hora, se entrego, incidencia) llega por los webhooks `entrega.*`.',
             'Cada respuesta trae `whatsapp`: por pedido, lo que YA se hizo HOY por WhatsApp con ese tracking o ese telefono (`ya_contactado` con la fecha, `agrupado_con` el otro tracking del mismo telefono, `ubicacion_pedida`, `ubicacion_registrada`, `ubicacion_cambiada`, `confirmado`, `reportado`, `corregido`). Al cliente ya contactado no se le manda otro mensaje. Solo cuenta el mismo dia: el mismo cliente otro dia es un intento nuevo y se le vuelve a escribir.',
-            'Un telefono o tracking malo se le reporta a GSG (una vez por tracking + error; ver GET /reportados) y va en `descartadas` con su `error`: telefono_invalido, tracking_duplicado (el mismo tracking dos veces en la llamada con otro telefono), tracking_de_otro_pedido (ya es de otro pedido de hoy con otro telefono) o telefono_de_motorizado. Sin tracking o con uno que no vale (mas de 60 caracteres, caracteres de control) la llamada da 400 y tambien se reporta (tracking_falta, tracking_invalido).',
+            'Un telefono o tracking malo se guarda como reportado (una vez por tracking + error; GSG lo lee de GET /reportados) y va en `descartadas` con su `error`: telefono_invalido, tracking_duplicado (el mismo tracking dos veces en la llamada con otro telefono), tracking_de_otro_pedido (ya es de otro pedido de hoy con otro telefono) o telefono_de_motorizado. Sin tracking o con uno que no vale (mas de 60 caracteres, caracteres de control) la llamada da 400 y tambien se reporta (tracking_falta, tracking_invalido).',
           ].join(' '),
           ...permiso('entregas:gestionar'),
           requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [ref('PedidoGsg'), { type: 'array', items: ref('PedidoGsg') }, { type: 'object', properties: { pedidos: { type: 'array', items: ref('PedidoGsg') } } }] } } } },
@@ -375,9 +375,9 @@ export function openApi(baseUrl: string): Json {
       '/reportados': {
         get: {
           tags: ['entregas'],
-          summary: 'La bandeja de numeros reportados: lo que GSGchat le reporto a GSG y si ya se corrigio',
+          summary: 'La bandeja de numeros reportados: los telefonos y trackings malos que GSGchat guardo para GSG y si ya se corrigieron',
           description: [
-            'Cuando un pedido de GSG trae un telefono o un tracking malo, GSGchat se lo reporta a GSG UNA vez por tracking + error (POST a la ruta configurable, ver «Reportes a GSG») y lo deja aqui.',
+            'Cuando un pedido de GSG trae un telefono o un tracking malo, GSGchat lo guarda aqui UNA vez por tracking + error. No se le manda a GSG: esta bandeja es la forma de enterarse.',
             'Errores: `telefono_invalido` (no es un numero valido), `sin_whatsapp` (el numero no tiene WhatsApp), `envio_fallido` (WhatsApp rechazo el mensaje y no se reintenta solo), `tracking_falta`, `tracking_invalido`, `tracking_duplicado` (dos veces en la misma llamada con otro telefono), `tracking_de_otro_pedido` (ya es de otro pedido de hoy), `telefono_de_motorizado` y `no_soy_yo` (el cliente dijo que no es el).',
             'Sale de la base de GSGchat: GSG lo lee cuando quiere. Se corrige con POST /reportados/{tracking}/correccion o con PATCH /entregas/{referencia}.',
           ].join(' '),
@@ -531,7 +531,7 @@ export function openApi(baseUrl: string): Json {
         },
         NumeroReportado: {
           type: 'object',
-          description: 'Un telefono o tracking malo reportado a GSG. Es tambien el cuerpo del POST que GSGchat le manda (con `tipo: "numero_reportado"` e `idReporte`, que va ademas en la cabecera Idempotency-Key).',
+          description: 'Un telefono o tracking malo que GSGchat guarda para GSG. GSGchat no se lo manda: GSG lo lee de GET /api/v1/reportados y lo corrige con POST /api/v1/reportados/{tracking}/correccion (o PATCH /api/v1/entregas/{referencia}).',
           properties: {
             clave: { type: 'string', description: 'El tracking; sin tracking, `ref:<referencia>` o `tel:<telefono>`' },
             tracking: { type: 'string', nullable: true },

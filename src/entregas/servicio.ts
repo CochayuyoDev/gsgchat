@@ -4175,7 +4175,7 @@ ${lista}
   const esDeGsg = (e: Entrega): boolean => Boolean(e.datosEnvio?.tracking || e.externoId);
 
   async function reportarNumeroInterno(n: Omit<NuevoReportado, 'dia'> & { dia?: string }): Promise<NumeroReportado | null> {
-    return reportarNumero({ repos, gsg: deps.gsg, ahora, log }, { ...n, dia: n.dia ?? hoy() });
+    return reportarNumero({ repos, ahora, log }, { ...n, dia: n.dia ?? hoy() });
   }
 
   /** El primer mensaje ya no sale y es por el numero: GSG se entera (una vez). */

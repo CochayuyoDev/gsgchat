@@ -15,14 +15,13 @@ GSGchat **nunca le pide nada a GSG**: ni la lista del día (no existe `GET /repa
 
 ## Conexión saliente (GSGchat → GSG)
 
-Tres campos (y la ruta de los números reportados, opcional), en Conexión (o en el `.env`):
+Tres campos, en Conexión (o en el `.env`):
 
 | Pantalla | `.env` | Ejemplo |
 |---|---|---|
 | URL base de GSG | `GSG_URL` | `https://backend.developer.gsgcorp.pe/api/` |
 | Ruta para enviar la ubicación | `GSG_LOCATION_PATH` | `v1/gsgchat/location` |
 | API Key de GSG | `GSG_API_KEY` | (la da GSG) |
-| Ruta para reportar números malos (opcional) | `GSG_REPORTADOS_PATH` | `v1/gsgchat/reportados` (vacía = `numeros-reportados`) |
 
 La URL final es la base + la ruta: `https://backend.developer.gsgcorp.pe/api/v1/gsgchat/location`.
 La pantalla la enseña en vivo antes de guardar. Reglas (`unirUrlGsg` en `src/rutas/gsg.ts`):
@@ -67,9 +66,13 @@ Ningún error guardado contiene la clave.
 
 ## Números reportados (para GSG)
 
-Cuando un pedido que manda GSG trae un teléfono o un tracking que no sirve, GSGchat se lo reporta a GSG con su
-error concreto. Se reporta **una sola vez por tracking + error**: no en cada reintento ni en cada pasada del motor.
-Si GSG lo corrige y el mismo error vuelve después, se reporta otra vez.
+Cuando un pedido que manda GSG trae un teléfono o un tracking que no sirve, GSGchat lo guarda con su error
+concreto en su bandeja de números reportados. Se guarda **una sola vez por tracking + error**: no en cada reintento
+ni en cada pasada del motor. Si GSG lo corrige y el mismo error vuelve después, se guarda otra vez.
+
+GSGchat **no** le manda nada a GSG por esto (no hay POST ni ruta que configurar): Luis (GSG) lee la bandeja con
+`GET /api/v1/reportados` y corrige con `POST /api/v1/reportados/{tracking}/correccion` (o `PATCH`). Además, cada
+respuesta de `POST /api/v1/entregas` y `GET /api/v1/trackings` trae los avisos `reportado` / `corregido`.
 
 ### Errores
 
@@ -85,32 +88,9 @@ Si GSG lo corrige y el mismo error vuelve después, se reporta otra vez.
 | `telefono_de_motorizado` | El teléfono es de un motorizado registrado, no de un cliente. No se guarda. |
 | `no_soy_yo` | El cliente contestó que no es él (no hizo el pedido o el número no es suyo). |
 
-### El reporte (GSGchat → GSG)
-
-`POST` a la URL base + **ruta de los números reportados** (pantalla Conexión o `GSG_REPORTADOS_PATH`; vacía =
-`numeros-reportados`), con `X-API-Key` y la cabecera `Idempotency-Key` igual a `idReporte`. Sale por la misma cola
-de reportes (reintentos incluidos):
-
-```json
-{
-  "tipo": "numero_reportado",
-  "tracking": "GSG-123",
-  "referencia": "GSG-123",
-  "telefono": "98765432",
-  "error": "telefono_invalido",
-  "mensaje": "El teléfono «98765432» no es un número válido: no se le puede escribir. Corrígelo y vuelve a mandarlo.",
-  "detalle": "teléfono inválido: ...",
-  "reportadoAt": "2026-10-10T14:05:00.000Z",
-  "dia": "2026-10-10",
-  "idReporte": "gsgchat-reportado-17-1"
-}
-```
-
-`telefono` va tal como llegó de GSG. Si llegó sin tracking, `tracking` es `null`.
-
 ### La bandeja: `GET /api/v1/reportados`
 
-Con la clave de GSGchat (`entregas:leer`). Filtros: `?estado=pendiente|corregido`, `?tracking=GSG-123`.
+Es como GSG se entera de los números malos. Con la clave de GSGchat (`entregas:leer`). Filtros: `?estado=pendiente|corregido`, `?tracking=GSG-123`.
 Cada elemento trae `clave`, `tracking`, `referencia`, `telefono`, `error`, `titulo`, `mensaje`, `detalle`,
 `reportadoAt`, `estado` (`pendiente` o `corregido`), `corregidoAt` y `correccion`. Sale de la base de GSGchat:
 GSG la lee cuando quiere. En el panel está en Pedidos GSG → «Números reportados», junto a la bandeja de errores.
