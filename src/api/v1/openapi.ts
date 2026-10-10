@@ -336,6 +336,36 @@ export function openApi(baseUrl: string): Json {
         },
         delete: { tags: ['entregas'], summary: 'Cancelar ese pedido (GSG lo dio de baja)', ...permiso('entregas:gestionar'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' } }, { name: 'motivo', in: 'query', schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), detalle: { type: 'string' } } }), 404: error('No existe'), 409: error('Ya estaba entregado o cancelado') } },
       },
+      '/seguimiento': {
+        post: {
+          tags: ['entregas'],
+          summary: 'GSG empuja el seguimiento de un pedido (GSGchat nunca lo pide)',
+          description: [
+            'GSG manda, cuando quiera, la posición del motorizado y la ruta que falta de un tracking ya recibido por POST /entregas. Se valida y se guarda el último de cada tracking; con él (mientras tenga menos de 30 minutos y la posición menos de 10) se contesta al cliente que pregunta dónde está su pedido. Si no hay uno reciente, GSGchat arma el seguimiento con sus propios datos.',
+            '`puntoActual` es la última parada atendida, `puntoCliente` la del cliente y `paradas` solo las que faltan, en orden, hasta la del cliente incluida (con `secuenciaCompleta: true` se aceptan huecos en la numeración).',
+            'Google Maps calcula km y minutos solo cuando el cliente pregunta, y una sola vez por versión de los datos.',
+          ].join(' '),
+          ...permiso('entregas:gestionar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['tracking'], properties: {
+            tracking: { type: 'string' },
+            estado: { type: 'string', enum: ['pendiente', 'en_reparto', 'llegando', 'entregado', 'cancelado', 'incidencia'], default: 'en_reparto' },
+            posicion: { type: 'object', required: ['lat', 'lng', 'actualizadaAt'], properties: { lat: { type: 'number' }, lng: { type: 'number' }, actualizadaAt: { type: 'string', format: 'date-time' } } },
+            puntoActual: { type: 'integer', minimum: 0 },
+            puntoCliente: { type: 'integer', minimum: 1 },
+            paradas: { type: 'array', maxItems: 100, items: { type: 'object', required: ['lat', 'lng', 'orden'], properties: { lat: { type: 'number' }, lng: { type: 'number' }, orden: { type: 'integer', minimum: 1 }, servicioMinutos: { type: 'number', minimum: 0, maximum: 120 } } } },
+            secuenciaCompleta: { type: 'boolean', default: false },
+            versionRuta: { type: 'string' },
+          } } } } },
+          responses: {
+            201: json({ type: 'object', properties: { ok: { type: 'boolean' }, tracking: { type: 'string' }, referencia: { type: 'string' }, estado: { type: 'string' }, puntoActual: { type: 'integer', nullable: true }, puntoCliente: { type: 'integer', nullable: true }, paradas: { type: 'integer' } } }, 'Guardado: es el seguimiento vigente de ese tracking'),
+            400: error('VALIDACION: falta `tracking` o el cuerpo no es un objeto'),
+            401: error('CLAVE_AUSENTE, CLAVE_INVALIDA o CLAVE_REVOCADA (con WWW-Authenticate)'),
+            403: error('SIN_PERMISO (la clave no tiene entregas:gestionar)'),
+            404: error('NO_EXISTE: no hay ningún pedido con ese tracking'),
+            422: error('VALIDACION: el seguimiento no cumple el contrato (`detalles.motivo`: contrato, ruta_incompleta, gps_antiguo, ruta_incoherente)'),
+          },
+        },
+      },
 
 
 

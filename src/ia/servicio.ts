@@ -44,6 +44,7 @@ import { avisoDeExamen, examinarLector, guardarExamen, leerExamenGuardado, UMBRA
 import { instruccionDeTono, tonoDeValor, tonoEfectivo, type Tono } from './tono.js';
 import { AJUSTES_GENERALES_KEY } from '../ajustes/generales.js';
 import { clasificarPorReglas, esAcuse, leerClase, pideAsesor, promptClasificador } from './agente-operativo.js';
+import { promptConsultaPedido, revisarRespuestaConsulta } from './consulta-pedido.js';
 import type { IntencionGsg } from './decision.js';
 import { rellenar, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 
@@ -215,6 +216,14 @@ export interface ServicioIA {
   agenteOperativoActivo(): boolean;
   /** El modelo como clasificador del agente operativo (una palabra). Lanza si falla. */
   clasificarOperativo(mensajes: MensajeIA[]): Promise<string>;
+  /**
+   * La consulta del cliente sobre su pedido tras UBI REGISTRADA (ver
+   * src/ia/consulta-pedido.ts): el modelo redacta con el contexto del pedido y
+   * el codigo lo revisa. No envia nada. null = no hay respuesta de la IA (sin
+   * IA, sin plan, tope por hora, manipulacion, fallo o no paso la revision):
+   * quien llama usa el texto fijo. `derivar` = el modelo dice que es para una persona.
+   */
+  consultaPedido(entrada: { contact: Contact; texto: string; contexto: string | null }): Promise<{ texto: string } | { derivar: true } | null>;
   /** El aviso de «se acabó el saldo de tu IA» (o la clave no vale), o null si responde bien. */
   avisoSaldo(): AvisoSaldoIA | null;
   /** La señal de conexión: apagada, conectada, sin conexión (con motivo) o sin comprobar. */
@@ -861,6 +870,48 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
       .catch((error: unknown) => log('no se pudo guardar la decisión del turno', { phone: contact.phone, detalle: String(error) }));
   }
 
+  async function consultaPedido(entrada: { contact: Contact; texto: string; contexto: string | null }): Promise<{ texto: string } | { derivar: true } | null> {
+    const { contact, contexto } = entrada;
+    const texto = String(entrada.texto ?? '').trim();
+    if (!(cfg.activa && token) || !texto) return null;
+    if (deps.plan?.motivo('ia')) return null;
+    // La defensa de antes del modelo: un intento de manipulacion no llega al modelo.
+    const manipulacion = detectarManipulacion(texto);
+    if (manipulacion) {
+      log('intento de manipular al asistente en una consulta de pedido', { phone: contact.phone, tipo: manipulacion.tipo });
+      return null;
+    }
+    // El mismo tope por hora que los turnos del asistente: pasado, el texto fijo.
+    if (!limitador.permitir(contact.phone)) {
+      log('tope de turnos de la IA por hora: la consulta de pedido sale con el texto fijo', { phone: contact.phone });
+      return null;
+    }
+    const mensajes: MensajeIA[] = [
+      { role: 'system', content: promptConsultaPedido(deps.nombreNegocio(), contexto, ahoraIA(), await zonaHoraria()) },
+      { role: 'user', content: recortarEntrante(texto, 600) },
+    ];
+    let cruda: string;
+    try {
+      cruda = await chatContado('respuestas', mensajes, { maxTokens: 220 });
+    } catch (error) {
+      log('la IA no respondió a la consulta de pedido: sale el texto fijo', { phone: contact.phone, detalle: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+    if (MARCA_DERIVAR_TORCIDA.test(cruda)) return { derivar: true };
+    const revisada = revisarRespuestaConsulta(cruda, contexto, texto);
+    if (!revisada.ok) {
+      log('la respuesta de la IA a la consulta de pedido no pasó la revisión: sale el texto fijo', { phone: contact.phone, motivo: revisada.motivo });
+      return null;
+    }
+    const limpia = limpiarSalida(revisada.texto, { telefonoCliente: contact.phone, conocimiento: contexto ?? '', nombreNegocio: deps.nombreNegocio() });
+    if (limpia.bloqueada) {
+      log('la respuesta de la IA a la consulta de pedido no podía salir: sale el texto fijo', { phone: contact.phone, motivo: limpia.motivo });
+      return null;
+    }
+    await deps.plan?.anotarTurnoIA();
+    return { texto: limpia.texto };
+  }
+
   async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean; mensajes?: number } = {}): Promise<TurnoIA> {
     let leida: RespuestaIA | null = null;
     const r = await turnoSinAnotar(contact, entrante, opts, (x) => (leida = x));
@@ -1133,6 +1184,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     activa: () => cfg.activa && Boolean(token),
     agenteOperativoActivo: agenteOperativo,
     clasificarOperativo: (mensajes) => chatContado('lecturas', mensajes, { maxTokens: 8 }),
+    consultaPedido,
     avisoSaldo,
     conexion,
     recargar,

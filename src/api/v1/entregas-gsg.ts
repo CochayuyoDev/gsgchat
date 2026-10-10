@@ -12,6 +12,7 @@
  * al cliente: producto, empresa {codigo, nombre}, tracking, nroPedido,
  * metodoPago, monto y remitente (ver src/entregas/datos-envio.ts).
  *  DELETE /api/v1/entregas/:referencia     cancelarlo (entregas:gestionar)
+ *  POST   /api/v1/seguimiento              GSG empuja el seguimiento de un tracking (entregas:gestionar)
  *
  * Cada clave tiene un tope de LIMITE_POR_MINUTO peticiones por minuto a estas
  * rutas: pasado, 429 con cuanto esperar (un bucle mal hecho en GSG no puede
@@ -505,5 +506,14 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     if (!cancelada) return noExiste(reply, request.params.referencia);
     const fila = await porReferencia(request.params.referencia);
     return { ok: true, entrega: fila ? entregaParaApi(fila) : null, detalle: `Pedido ${e.referencia} cancelado: ${motivo}.` };
+  });
+
+  // GSG empuja el seguimiento de un pedido (posicion del motorizado, punto
+  // actual, punto del cliente y paradas). GSGchat nunca se lo pide: guarda el
+  // ultimo de cada tracking y con el contesta al cliente mientras sea reciente.
+  app.post('/api/v1/seguimiento', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
+    const r = await entregas.recibirSeguimiento(request.body);
+    if (!r.ok) return enviarError(reply, r.status, r.codigo, r.detalle, r.motivo ? { motivo: r.motivo } : undefined);
+    return reply.code(201).send(r);
   });
 }

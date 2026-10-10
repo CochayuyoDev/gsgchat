@@ -3,7 +3,10 @@
  * modulo (margen, intentos, esperas), todo editable desde la pantalla.
  *
  * Los textos llevan variables entre llaves ({nombre}, {pedido}, {negocio},
- * {mapa}, {minutos}, {hora}...) y se rellenan aqui. Las cifras (minutos,
+ * {mapa}, {minutos}, {hora}...) y se rellenan aqui. {horario} es la ventana
+ * de llegada del pedido dicha en palabras («de 6 a 8 de la noche») y
+ * {distrito} el distrito del pedido: «Horario aproximado de llegada para
+ * {distrito}: {horario}» (sin distrito, se quita el «para {distrito}»). Las cifras (minutos,
  * hora de llegada) las pone SIEMPRE el sistema: si se pide a la IA que
  * redacte, se le da el texto ya rellenado para que lo diga mas natural y se
  * comprueba que la hora siga dentro; si no, sale el texto de siempre.
@@ -11,7 +14,36 @@
 import { z } from 'zod';
 import type { DatosEnvio } from './repo.js';
 import { tieneNumeracion } from './direccion-escrita.js';
-import { distritoEnDireccion } from './distritos-centro.js';
+import { distritoConocido, distritoEnDireccion } from './distritos-centro.js';
+/** Una hora del reloj del negocio, "HH:MM" (00:00 a 23:59). */
+const horaHHMM = z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'La hora va como HH:MM (por ejemplo 18:00).');
+/** Una fila del horario por distrito: el distrito queda con su nombre de siempre («ancon» → «Ancón»). */
+export const horarioDistritoSchema = z
+  .object({
+    distrito: z
+      .string()
+      .trim()
+      .min(1, 'Falta el distrito.')
+      .max(60)
+      .transform((d, ctx) => {
+        const nombre = distritoConocido(d);
+        if (!nombre) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `«${d}» no es un distrito de Lima o Callao.` });
+          return z.NEVER;
+        }
+        return nombre;
+      }),
+    desde: horaHHMM,
+    hasta: horaHHMM,
+  })
+  .refine((f) => f.desde < f.hasta, { message: 'La hora «desde» tiene que ser antes que la hora «hasta».', path: ['hasta'] });
+export type HorarioDistrito = z.infer<typeof horarioDistritoSchema>;
+/** Los ejemplos del dueño, de fábrica. */
+export const HORARIOS_POR_DISTRITO_POR_DEFECTO: readonly HorarioDistrito[] = [
+  { distrito: 'Ancón', desde: '18:00', hasta: '20:00' },
+  { distrito: 'Jesús María', desde: '15:00', hasta: '17:00' },
+  { distrito: 'Comas', desde: '17:00', hasta: '19:00' },
+];
 export const ajustesEntregasSchema = z.object({
   /** Minutos que se suman a lo que dice el motorizado antes de avisar al cliente. */
   margenMinutos: z.number().int().min(0).max(240).default(60),
@@ -132,7 +164,9 @@ export const ajustesEntregasSchema = z.object({
     .default({}),
   /**
    * El horario en el que se entrega (reloj del negocio, "HH:MM"): sale en
-   * los textos al cliente como {desde}, {hasta} y {hastaExtendido}.
+   * los textos al cliente como {desde}, {hasta}, {hastaExtendido} y {horario}
+   * («de 2 de la tarde a 8 de la noche») cuando el pedido no trae ventana de
+   * GSG ni su distrito esta en `horariosPorDistrito`.
    */
   horarioEntregas: z
     .object({
@@ -141,6 +175,23 @@ export const ajustesEntregasSchema = z.object({
       extendidoHasta: z.string().regex(/^\d{2}:\d{2}$/).default('22:00'),
     })
     .default({}),
+  /**
+   * La hora aproximada de llegada por distrito (regla del dueño: GSGchat no le
+   * pide nada a GSG; «Ancón de 6 a 8 de la noche, Jesús María de 3 a 5 de la
+   * tarde, Comas de 5 a 7 de la noche»). Manda sobre el horario general y
+   * cede ante la ventana que GSG mande para un pedido. Ver src/entregas/horario-distrito.ts.
+   */
+  horariosPorDistrito: z
+    .array(horarioDistritoSchema)
+    .max(60)
+    .superRefine((filas, ctx) => {
+      const vistos = new Set<string>();
+      filas.forEach((f, i) => {
+        if (vistos.has(f.distrito)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i, 'distrito'], message: `${f.distrito} está dos veces en el horario por distrito.` });
+        vistos.add(f.distrito);
+      });
+    })
+    .default(() => HORARIOS_POR_DISTRITO_POR_DEFECTO.map((f) => ({ ...f }))),
   /**
    * El numero de soporte que se le da al cliente ({soporte}): uno para
    * WhatsApp y llamadas, o dos distintos. Vacio = "este mismo WhatsApp".
@@ -275,10 +326,15 @@ export interface ContextoTexto {
   paradas?: number | null;
   /** Los pedidos que se le quitan a un motorizado, ya en lista ("P-1001, P-1002"). */
   pedidos?: string | null;
-  /** El horario de entregas ya en palabras ("2:00 p. m."), del ajuste. */
+  /**
+   * El horario de entregas ya en palabras ("2:00 p. m."): el que GSG mando
+   * para ese pedido, si no el de su distrito, si no el general.
+   */
   desde?: string | null;
   hasta?: string | null;
   hastaExtendido?: string | null;
+  /** La misma ventana como se dice: "de 6 a 8 de la noche" ({horario}). */
+  horario?: string | null;
   /** El numero de soporte ya en palabras, del ajuste. */
   soporte?: string | null;
   /**
@@ -321,6 +377,42 @@ export function horaEnPalabras(hhmm: string): string {
   const sufijo = h < 12 ? 'AM' : 'PM';
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${min} ${sufijo}`;
+}
+/** La parte del dia de una hora: «de la tarde», «del mediodía»... */
+function parteDelDia(h: number): string {
+  if (h === 0) return 'de la noche';
+  if (h < 6) return 'de la madrugada';
+  if (h < 12) return 'de la mañana';
+  if (h === 12) return 'del mediodía';
+  if (h < 18) return 'de la tarde';
+  return 'de la noche';
+}
+/** "18:00" → { numero: "6", parte: "de la noche" }; "15:30" → "3:30". */
+function horaHablada(hhmm: string): { numero: string; parte: string; h12: number; minutos: number } | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return { numero: min ? `${h12}:${m[2]}` : String(h12), parte: parteDelDia(h), h12, minutos: h * 60 + min };
+}
+/**
+ * Una ventana de llegada como se dice en el Perú: "de 6 a 8 de la noche",
+ * "de 3 a 5 de la tarde", "de 10 a 12 del mediodía". Si cruza de una parte
+ * del dia a otra y es corta (hasta 3 h, sin dar la vuelta al 12), se dice
+ * como el dueño: "de 5 a 7 de la noche"; si no, entera: "de 2 de la tarde a
+ * 8 de la noche".
+ */
+export function horarioEnPalabras(desde: string, hasta: string): string {
+  const a = horaHablada(desde);
+  const b = horaHablada(hasta);
+  if (!a || !b) return `de ${desde} a ${hasta}`;
+  if (a.parte === b.parte) return `de ${a.numero} a ${b.numero} ${b.parte}`;
+  const corta = b.minutos - a.minutos > 0 && b.minutos - a.minutos <= 180 && a.h12 < b.h12;
+  // «de 4 a 6 de la tarde»: las 6 en punto todavía se dicen de la tarde.
+  if (corta) return `de ${a.numero} a ${b.numero} ${b.minutos === 18 * 60 ? a.parte : b.parte}`;
+  return `de ${a.numero} ${a.parte} a ${b.numero} ${b.parte}`;
 }
 /**
  * Un telefono peruano como se lee: celular "+51 987 654 321"; fijo de Lima
@@ -391,6 +483,7 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
     desde: ctx.desde ?? '',
     hasta: ctx.hasta ?? '',
     hastaExtendido: ctx.hastaExtendido ?? '',
+    horario: ctx.horario?.trim() || (ctx.desde && ctx.hasta ? `de ${ctx.desde} a ${ctx.hasta}` : ''),
     soporte: ctx.soporte ?? '',
     telefonoMotorizado: ctx.telefonoMotorizado?.trim() || ctx.soporte?.trim() || '',
     telefonoCliente: ctx.telefonoCliente ?? '',
@@ -410,6 +503,8 @@ export function rellenar(texto: string, ctx: ContextoTexto): string {
   let base = texto;
   // Sin quien firma: «Soy {remitente} de la empresa…» pasa a «Te escribimos de la empresa…».
   if (!valores.remitente) base = base.replace(/Soy\s+\{remitente\}\s+de\b/g, 'Te escribimos de');
+  // Sin distrito: «Horario aproximado de llegada para {distrito}:» pasa a «Horario aproximado de llegada:».
+  if (!(valores.distrito ?? '').trim()) base = base.replace(/\s+para\s+\{distrito\}(?=\s*:)/g, '');
   // Sin número de motorizado ni de soporte: se quita la FRASE que lo daba
   // («Número del motorizado: …»), nunca se pone otro número en su lugar
   // (26/09: salía el del propio WhatsApp como si fuera el del motorizado).
@@ -448,7 +543,7 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   // Solo el enlace del mapa: nada de latitud y longitud a la vista del cliente.
   // Es a la vez el cierre del agente operativo: despues de esto la IA ya no
   // contesta en ese chat (el sistema sigue con la hora de llegada y el entregado).
-  ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.`,
+  ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.`,
   solicitudUbicacion: '¡Hola {nombreCompleto}! Somos GSG Courier, tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
   porQueUbicacion: 'Es necesaria para registrar correctamente la dirección de entrega. ¿Podrías compartir tu ubicación por WhatsApp, por favor? (clip 📎 → Ubicación)',
   cierreAgente: TEXTO_CIERRE,
@@ -460,13 +555,13 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   insistirConfirmacion: 'Hola {nombre}, seguimos pendientes de {pedido} de {negocio}. ¿Lo recibe hoy? Responda SÍ o NO, por favor.',
   preguntarOtraVez: 'Disculpe, no me quedó claro. ¿Recibe hoy {pedido}? Responda SÍ para confirmar, NO para cancelar, o cuéntenos si prefiere otro día u otra dirección.',
   // El mismo aviso completo que «Ubicación registrada» y, al final, la pregunta.
-  graciasYConfirmar: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.`,
-  graciasYConfirmarVarios: `✅ Ubicación registrada correctamente ({pedidos}).\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.`,
+  graciasYConfirmar: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.`,
+  graciasYConfirmarVarios: `✅ Ubicación registrada correctamente ({pedidos}).\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.`,
   confirmarOtroPedido: 'Y {pedido}, ¿también lo recibe hoy? Responda SÍ o NO.',
   // El mismo aviso del motorizado, horario y soporte que «Ubicación registrada».
   // Si ya recibio el aviso completo al mandar su ubicacion: solo el ok, sin repetirlo.
   confirmadaYaAvisado: 'Perfecto, {pedido} queda confirmado para hoy. ¡Gracias!',
-  confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario de entrega: de {desde} a {hasta}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
+  confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
   cancelada: 'Entendido, dejamos {pedido} sin entregar por hoy. Si cambia de opinión, escríbanos por aquí. Gracias.',
   cambio: 'Entendido, tomamos nota. Un compañero de {negocio} se comunicará con usted para coordinar {pedido}. Gracias.',
   motorizadoNuevo: '🛵 {urgente}Nuevo pedido: {pedido}\nCliente: {nombreCompleto}{distrito}\n{notas}\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',
@@ -563,7 +658,7 @@ export const TEXTOS_PARA_MOTORIZADO: ReadonlySet<keyof AjustesEntregas['textos']
 ]);
 /** Las variables que la pantalla enseña junto a cada texto. */
 export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]> = {
-  ubicacionRegistrada: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}', '{horaLimite}'],
+  ubicacionRegistrada: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{distrito}', '{horario}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}', '{horaLimite}'],
   proponerUbicacion: ['{nombre}', '{pedido}', '{negocio}', '{mapa}'],
   ubicacionOtra: ['{nombre}', '{pedido}', '{negocio}'],
   motorizadoTiempoDudoso: ['{pedido}', '{km}', '{motorizado}'],
@@ -571,10 +666,10 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   pedirConfirmacion: ['{nombre}', '{pedido}', '{negocio}', '{direccion}', '{distrito}'],
   insistirConfirmacion: ['{nombre}', '{pedido}', '{negocio}'],
   preguntarOtraVez: ['{nombre}', '{pedido}', '{negocio}'],
-  graciasYConfirmar: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}', '{horaLimite}'],
-  graciasYConfirmarVarios: ['{nombre}', '{pedido}', '{pedidos}', '{negocio}', '{mapa}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}', '{horaLimite}'],
+  graciasYConfirmar: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{distrito}', '{horario}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}', '{horaLimite}'],
+  graciasYConfirmarVarios: ['{nombre}', '{pedido}', '{pedidos}', '{negocio}', '{mapa}', '{distrito}', '{horario}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}', '{telefonoMotorizado}', '{horaLimite}'],
   confirmarOtroPedido: ['{nombre}', '{pedido}', '{negocio}'],
-  confirmada: ['{nombre}', '{pedido}', '{negocio}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}'],
+  confirmada: ['{nombre}', '{pedido}', '{negocio}', '{distrito}', '{horario}', '{desde}', '{hasta}', '{hastaExtendido}', '{soporte}'],
   confirmadaYaAvisado: ['{nombre}', '{pedido}', '{negocio}'],
   cancelada: ['{nombre}', '{pedido}', '{negocio}'],
   cambio: ['{nombre}', '{pedido}', '{negocio}'],
@@ -598,7 +693,7 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   dondeEstaNoLlego: ['{nombre}', '{pedido}', '{negocio}', '{hora}'],
   horaEnSilencio: ['{nombre}', '{pedido}', '{negocio}', '{hora}', '{enCuanto}', '{motorizado}', '{telefonoMotorizado}'],
   horaEnSilencioPasada: ['{nombre}', '{pedido}', '{negocio}', '{hora}', '{motorizado}', '{telefonoMotorizado}'],
-  horaEnSilencioSinTiempo: ['{nombre}', '{pedido}', '{negocio}', '{desde}', '{hasta}', '{hastaExtendido}', '{telefonoMotorizado}'],
+  horaEnSilencioSinTiempo: ['{nombre}', '{pedido}', '{negocio}', '{distrito}', '{horario}', '{desde}', '{hasta}', '{hastaExtendido}', '{telefonoMotorizado}'],
   segundaVisitaPreguntar: ['{nombre}', '{pedido}', '{negocio}', '{direccion}', '{motorizado}'],
   segundaVisitaSi: ['{nombre}', '{pedido}', '{negocio}', '{motorizado}'],
   segundaVisitaNo: ['{nombre}', '{pedido}', '{negocio}'],

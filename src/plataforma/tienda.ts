@@ -36,6 +36,7 @@ import { baseDeLaUrl, createPool, type Pool } from '../db/pool.js';
 import { prepararBase, type OpcionesBanco } from '../db/bases.js';
 import { crearCacheGeoSql, crearGeocodificadorGoogle, crearGeocodificadorNominatim, type Geocodificador } from '../entregas/geocodificar.js';
 import { crearCalculadorGoogle } from '../entregas/seguimiento-gsg.js';
+import { crearSeguimientosRecibidosSql } from '../entregas/seguimiento-recibido.js';
 import { migrate } from '../db/migrate.js';
 import type { LocalSecrets } from '../settings/crypto.js';
 import { providerOf, createSettingsService } from '../settings/service.js';
@@ -284,6 +285,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         modo: () => ajustes.modo(),
         numeroPropio: () => sesion.getLocalState().phone || null,
         calcularRuta: config.GOOGLE_MAPS_API_KEY ? crearCalculadorGoogle(config.GOOGLE_MAPS_API_KEY) : undefined,
+        seguimientosRecibidos: crearSeguimientosRecibidosSql(pool),
         geocodificador:
           o.geocodificador !== undefined
             ? o.geocodificador

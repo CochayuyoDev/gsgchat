@@ -62,7 +62,8 @@ import { atenderComoAgente, atenderConReglaGsg, cerrarChat, pideAsesor, type Dep
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
-import { horaEnPalabras } from '../entregas/textos.js';
+import { horaEnPalabras, horarioEnPalabras } from '../entregas/textos.js';
+import { ventanaDeEntrega } from '../entregas/horario-distrito.js';
 
 export interface InboundDeps {
   repos: Repos;
@@ -282,9 +283,14 @@ export async function turnoDePreventa(
   // menú de respaldo es «Horarios y zona» y «Hablar con asesor», y el horario
   // que se le da es el de las entregas (30/09).
   const conEntrega = deps.entregas ? await deps.entregas.tieneEntregaEnCurso(contact.phone).catch(() => false) : false;
-  const horarioEntregas = (): string | null => {
-    const h = deps.entregas?.ajustes().horarioEntregas;
-    return h ? `de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)}` : null;
+  // La ventana de SU pedido (la de GSG, si no la de su distrito, si no la
+  // general): la misma que dicen los textos y la IA (ver horario-distrito.ts).
+  const horarioEntregas = async (): Promise<string | null> => {
+    const ajustesEntregas = deps.entregas?.ajustes();
+    if (!ajustesEntregas) return null;
+    const pedido = conEntrega ? await repos.entregas?.vivaPorTelefono(contact.phone).catch(() => null) : null;
+    const v = ventanaDeEntrega(pedido ?? null, ajustesEntregas);
+    return horarioEnPalabras(v.desde, v.hasta);
   };
 
   // Una consulta de precio se contesta con el catalogo y NO sigue al flujo:
@@ -295,7 +301,7 @@ export async function turnoDePreventa(
     negocio: nombreNegocio(deps),
     cobertura: config.coverageName || 'tu zona',
     saludo: saludoPorHora(new Date(), config.timezone),
-    horario: (conEntrega ? horarioEntregas() : null) ?? config.businessHours,
+    horario: (conEntrega ? await horarioEntregas() : null) ?? config.businessHours,
     servicios: prefs.serviciosPreventa,
     mensajes: prefs.mensajesPreventa,
     distritos: config.distritos,
@@ -1080,6 +1086,11 @@ async function handleInboundMessageEnFila(
     // y lo que no coincide con una regla se guarda y no se contesta (pedido
     // del dueño, 06/10). Fuera de GSG, la IA clasifica lo que las reglas no saben.
     clasificar: deps.ia?.activa() && !modoGsg() ? (m) => deps.ia!.clasificarOperativo(m) : undefined,
+    // Regla del dueño (10/10): tras UBI REGISTRADA, la IA contesta las
+    // consultas del cliente sobre su pedido (con el contexto del pedido y la
+    // revisión de src/ia/consulta-pedido.ts). Una llamada por mensaje entrante,
+    // nunca por temporizador. Sin IA activa: los textos fijos.
+    consultarPedido: deps.ia?.activa() && typeof deps.ia.consultaPedido === 'function' ? async (c, t, ctx) => deps.ia!.consultaPedido({ contact: c, texto: t, contexto: ctx }) : undefined,
     nombreNegocio: () => nombreNegocio(deps),
     log: (m, d) => console.warn(`[agente] ${m}`, d ?? ''),
     ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),

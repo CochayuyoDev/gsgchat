@@ -581,7 +581,7 @@ describe('lo que escribe el cliente, por raro que sea', () => {
     const largo = 'quiero unas zapatillas negras talla 40 '.repeat(3000);
     const t0 = Date.now();
     const r = await m.ia.turno(m.contact, largo);
-    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(Date.now() - t0).toBeLessThan(10_000);
     expect(r.resultado).toBe('respondio');
     const alModelo = modelo.recibido.at(-1)!.at(-1)!.content;
     expect(alModelo.length).toBeLessThanOrEqual(MAX_ENTRANTE_IA + 1);

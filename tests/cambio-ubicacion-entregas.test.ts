@@ -211,7 +211,8 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     expect(menu[0]!.buttons.map((b) => b.title)).toEqual(['Horarios y zona', 'Hablar con asesor']);
 
     const info = await botonesNuevos(ANA, () => e.contesta(ANA, { texto: '1' }));
-    expect(info[0]?.body).toMatch(/Horario: de \d{1,2}:\d{2} [AP]M a \d{1,2}:\d{2} [AP]M/);
+    // La ventana de SU pedido (GSG, distrito o general), dicha como se habla (10/10).
+    expect(info[0]?.body).toMatch(/Horario: de \d{1,2}(:\d{2})?( de la (mañana|tarde|noche))? a \d{1,2}(:\d{2})? de la (mañana|tarde|noche)/);
     expect(info[0]?.buttons.map((b) => b.title)).toEqual(['Hablar con asesor']);
 
     await botonesNuevos(ANA, () => e.contesta(ANA, { texto: 'zzz' }));

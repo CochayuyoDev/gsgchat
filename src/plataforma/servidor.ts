@@ -113,7 +113,7 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
       return { tipo: 'rechazo', rechazo: RECHAZOS.metodo() };
     }
     const rutaApi = url.split('?')[0] ?? '';
-    if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) &&(rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/')))) {
+    if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) &&(rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/') || (rutaApi === '/api/v1/seguimiento' && req.method === 'POST')))) {
       const permiso = req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
       const r = await tiendaDeClaveGsg(plataforma, req.headers, permiso);
       return 'tienda' in r ? { tipo: 'tienda', tienda: r.tienda, url } : { tipo: 'rechazo', rechazo: r.rechazo };

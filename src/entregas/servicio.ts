@@ -103,8 +103,11 @@ import type { PrimerMensajeReparto } from '../rutas/motor.js';
 import { apartarPorMotorizado, resolverPorUbicacion, soltarSolicitudes, solicitudesAbiertasDe } from './ubicacion-unica.js';
 import { pareceNoSoyYo, TEXTO_NO_SOY_YO } from '../rutas/inbound.js';
 import { distanciaAlDistrito, distritoDePedido, distritoEnDireccion } from './distritos-centro.js';
+import { ventanaDeEntrega, variablesDeVentana, fuenteEnPalabras } from './horario-distrito.js';
 import { limpiarDireccion, analizarNumeracion } from './direccion-escrita.js';
-import { crearConsultaSeguimiento, textoSeguimiento, textoHorario, type CalcularRuta } from './seguimiento-gsg.js';
+import { crearConsultaSeguimiento, leerSeguimiento, textoSeguimiento, textoHorario, type CalcularRuta, type DistanciaRuta, type FalloSeguimiento, type SeguimientoGsg } from './seguimiento-gsg.js';
+import { crearFuentePropia, trackingDe } from './seguimiento-propio.js';
+import { crearFuenteCombinada, crearSeguimientosRecibidosMemoria, type SeguimientosRecibidosRepo } from './seguimiento-recibido.js';
 import type { Lote } from '../db/rutas.js';
 import type { Geocodificador, ResultadoGeo } from './geocodificar.js';
 import { calcularAlertas, type AlertaHoy } from './alertas-hoy.js';
@@ -690,6 +693,14 @@ export interface ServicioEntregas {
   descripcionParaIA(): Promise<string>;
   /** Lo que el asistente puede decirle a ESTE cliente sobre su pedido de hoy. */
   contextoDeCliente(phone: string): Promise<string | null>;
+  /**
+   * El seguimiento de cada pedido vivo de ese telefono (lo empujado por GSG o
+   * lo armado con datos propios), con el texto listo para el cliente. Lee de
+   * la base, sin llamar a GSG; Google solo si hace falta y con cache.
+   */
+  seguimientoDeCliente(phone: string): Promise<Array<{ referencia: string; tracking: string; seguimiento: SeguimientoGsg | null; distancia: DistanciaRuta | null; texto: string | null }>>;
+  /** GSG empuja el seguimiento de un tracking (POST /api/v1/seguimiento): se valida y se guarda el ultimo. */
+  recibirSeguimiento(cuerpo: unknown): Promise<{ ok: true; tracking: string; referencia: string; estado: SeguimientoGsg['estado']; puntoActual: number | null; puntoCliente: number | null; paradas: number } | { ok: false; status: 400 | 404 | 422; codigo: 'VALIDACION' | 'NO_EXISTE'; detalle: string; motivo?: string }>;
   /** El pedido (referencia) mas reciente de ese telefono, de hoy o de ayer, para ligarle una conversacion guardada. */
   pedidoDe(phone: string): Promise<string | null>;
   /** Los pedidos de hoy que ya terminaron (avisados o terminados) con su telefono: para guardar sus conversaciones de golpe. */
@@ -764,6 +775,8 @@ export interface DepsEntregas {
    */
   geocodificador?: Geocodificador | null;
   calcularRuta?: CalcularRuta;
+  /** Donde se guarda el ultimo seguimiento que GSG empujo (en memoria si no se da). */
+  seguimientosRecibidos?: SeguimientosRecibidosRepo;
   ahora?: () => Date;
   log?: (m: string, d?: Record<string, unknown>) => void;
 }
@@ -883,7 +896,22 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   const avisosCanceladoEnCamino = new Set<string>();
   const log = deps.log ?? (() => undefined);
   const ahora = deps.ahora ?? (() => new Date());
-  const seguimientoGsg = crearConsultaSeguimiento(null, deps.calcularRuta, ahora);
+  // El seguimiento sale de la base: primero lo que GSG empujo (reciente y
+  // valido), si no lo que arma GSGchat con sus pedidos, motorizados y rastreo.
+  const seguimientosRecibidos = deps.seguimientosRecibidos ?? crearSeguimientosRecibidosMemoria();
+  const fuentePropia = crearFuentePropia({
+    entregasDelDia: () => repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA }),
+    motorizado: (id) => repo.motorizado(id),
+    motorizadoPorTelefono: (phone) => repo.motorizadoPorTelefono(phone),
+    posicionEnVivo: async (phone) => {
+      const sesiones = await repos.tracking.listActive(ahora()).catch(() => []);
+      const puntos = sesiones.filter((s) => s.phone === phone && s.lastPoint).map((s) => s.lastPoint!);
+      const ultimo = puntos.sort((a, b) => b.at.getTime() - a.at.getTime())[0];
+      return ultimo ? { lat: ultimo.lat, lng: ultimo.lng, at: ultimo.at } : null;
+    },
+    ahora,
+  });
+  const seguimientoGsg = crearConsultaSeguimiento(crearFuenteCombinada(seguimientosRecibidos, fuentePropia, ahora), deps.calcularRuta, ahora);
   const zonaBase = deps.timezone ?? 'America/Lima';
   /** La zona horaria de cada momento: la de Ajustes si la hay, si no la de arranque. */
   const tz = (): string => (deps.zonaHoraria ? deps.zonaHoraria() || zonaBase : zonaBase);
@@ -965,7 +993,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     pedido: e.referencia,
     negocio: deps.nombreNegocio(),
     direccion: e.direccion,
-    distrito: e.distrito,
+    // El que manda GSG; si no vino, el que nombra la dirección (para «Horario aproximado de llegada para {distrito}»).
+    distrito: e.distrito || distritoDePedido(e),
     mapa: e.lat != null && e.lng != null ? enlaceMapa(e.lat, e.lng) : e.mapsUrl,
     lat: e.lat,
     lng: e.lng,
@@ -980,9 +1009,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     horaEntregada: e.entregadaAt ? horaEnReloj(e.entregadaAt, tz()) : null,
     situacion: situacionDe(e, m ?? null, ajustes, tz(), reglaGsgActiva()),
     urgente: e.prioridad === 'urgente',
-    desde: horaEnPalabras(e.datosEnvio?.horarioEntregaDesde || ajustes.horarioEntregas.desde) + (e.datosEnvio?.horarioEntregaFechaDesde ? ` del ${e.datosEnvio.horarioEntregaFechaDesde}` : ""),
-    hasta: horaEnPalabras(e.datosEnvio?.horarioEntregaHasta || ajustes.horarioEntregas.hasta) + (e.datosEnvio?.horarioEntregaFechaHasta ? ` del ${e.datosEnvio.horarioEntregaFechaHasta} (${e.datosEnvio.horarioEntregaZonaHoraria})` : ""),
-    hastaExtendido: horaEnPalabras(e.datosEnvio?.horarioEntregaHasta || ajustes.horarioEntregas.extendidoHasta),
+    // La ventana de GSG para el pedido; si no, la de su distrito; si no, la general.
+    ...variablesDeVentana(ventanaDeEntrega(e, ajustes)),
     soporte: soporteEnPalabras(ajustes.soporte),
     telefonoMotorizado: numeroParaCliente(e, m),
     telefonoCliente: telefonoEnPalabras(e.phone),
@@ -1005,9 +1033,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       nombre: datos.nombre ?? null,
       negocio: deps.nombreNegocio(),
       mapa: datos.mapa ?? null,
-      desde: horaEnPalabras(ajustes.horarioEntregas.desde),
-      hasta: horaEnPalabras(ajustes.horarioEntregas.hasta),
-      hastaExtendido: horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
+      ...variablesDeVentana(ventanaDeEntrega(null, ajustes)),
       soporte: soporteEnPalabras(ajustes.soporte),
       telefonoMotorizado: numeroParaCliente(null, null),
     });
@@ -4425,6 +4451,7 @@ ${lista}
       desde: base.desde ?? horaEnPalabras(ajustes.horarioEntregas.desde),
       hasta: base.hasta ?? horaEnPalabras(ajustes.horarioEntregas.hasta),
       hastaExtendido: base.hastaExtendido ?? horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
+      horario: base.horario ?? variablesDeVentana(ventanaDeEntrega(null, ajustes)).horario,
       soporte: base.soporte ?? soporteEnPalabras(ajustes.soporte),
       // Los datos del envio de ejemplo (los de GSG si la entrega los trae).
       envio: base.envio ?? { producto: 'Zapatillas talla 40', empresaCodigo: '516', empresaNombre: 'Zapatería Lima', tracking: 'GSG-A-102345', nroPedido: '#1042', metodoPago: 'YAPE', monto: '85.00', remitente: 'Juan Quispe' },
@@ -4857,21 +4884,62 @@ ${lista}
       if (c.incidencia) partes.push('Con incidencia: ' + r.entregas.filter((e) => e.estado === 'incidencia').slice(0, 8).map((e) => `${e.referencia} (${e.nombre ?? e.phone}): ${e.incidenciaDetalle ?? e.incidencia}`).join('; ') + '.');
       return partes.join('\n');
     },
+    async seguimientoDeCliente(phone) {
+      const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado)).slice(0, 5);
+      const salida: Awaited<ReturnType<ServicioEntregas['seguimientoDeCliente']>> = [];
+      for (const e of vivas) {
+        const tracking = trackingDe(e);
+        const s = await seguimientoGsg.consultar(tracking);
+        salida.push({ referencia: e.referencia, tracking, seguimiento: s?.ruta ?? null, distancia: s?.distancia ?? null, texto: s ? textoSeguimiento(tracking, s) : null });
+      }
+      return salida;
+    },
+    async recibirSeguimiento(cuerpo) {
+      const crudo = cuerpo && typeof cuerpo === 'object' && !Array.isArray(cuerpo) ? (cuerpo as Record<string, unknown>) : null;
+      const tracking = typeof crudo?.tracking === 'string' ? crudo.tracking.trim() : '';
+      if (!crudo || !tracking) return { ok: false, status: 400, codigo: 'VALIDACION', detalle: 'Falta `tracking`: el seguimiento se manda como un objeto con el tracking del pedido.' };
+      const coincide = (x: Entrega) => trackingDe(x) === tracking || x.referencia === tracking;
+      const e = (await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA })).find(coincide) ?? (await repo.listar({ limit: 1000 })).find(coincide) ?? null;
+      if (!e) return { ok: false, status: 404, codigo: 'NO_EXISTE', detalle: `No hay ningún pedido con el tracking "${tracking}".` };
+      // Lo que manda GSG siempre cuenta como de GSG (no puede pasar por datos propios).
+      const marcado = { ...crudo, tracking, origen: 'gsg' };
+      const fallos: FalloSeguimiento[] = [];
+      const en = ahora();
+      const leido = await leerSeguimiento(marcado, tracking, undefined, en, (f) => fallos.push(f));
+      if (!leido) return { ok: false, status: 422, codigo: 'VALIDACION', detalle: fallos[0]?.detalle ?? 'El seguimiento no cumple el contrato.', ...(fallos[0] ? { motivo: fallos[0].codigo } : {}) };
+      await seguimientosRecibidos.guardar({ tracking, cuerpo: marcado, recibidoAt: en });
+      seguimientoGsg.invalidar();
+      return { ok: true, tracking, referencia: e.referencia, estado: leido.ruta.estado, puntoActual: leido.ruta.puntoActual ?? null, puntoCliente: leido.ruta.puntoCliente ?? null, paradas: leido.ruta.paradas.length };
+    },
     async contextoDeCliente(phone) {
       const e = (await repo.vivaPorTelefono(phone)) ?? (await entregadaHoyDe(phone));
       if (!e) return null;
       const m = e.motorizadoId ? await repo.motorizado(e.motorizadoId) : null;
       const situacion = situacionDe(e, m, ajustes, tz(), reglaGsgActiva());
-      const h = e.datosEnvio?.horarioEntregaDesde && e.datosEnvio?.horarioEntregaHasta ? { desde: e.datosEnvio.horarioEntregaDesde, hasta: e.datosEnvio.horarioEntregaHasta, extendidoHasta: e.datosEnvio.horarioEntregaHasta } : ajustes.horarioEntregas;
-      const seguimiento = await seguimientoGsg.consultar(e.datosEnvio?.tracking ?? e.referencia);
+      // La ventana del pedido: la de GSG, si no la de su distrito, si no la general.
+      const h = ventanaDeEntrega(e, ajustes);
+      const tracking = trackingDe(e);
+      const seguimiento = ESTADOS_FINALES.includes(e.estado) ? null : await seguimientoGsg.consultar(tracking);
+      // Los otros pedidos vivos del mismo cliente, con su seguimiento: si no
+      // queda claro por cual pregunta, se le nombran todos.
+      const otras = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => x.id !== e.id).slice(0, 3);
+      const deOtras = await Promise.all(otras.map(async (x) => {
+        const s = await seguimientoGsg.consultar(trackingDe(x));
+        return `Otro pedido de este cliente: ${x.referencia} (código de seguimiento ${trackingDe(x)}). ${s ? textoSeguimiento(trackingDe(x), s) : 'Sin seguimiento reciente del motorizado.'}`;
+      }));
       // Lo que la IA necesita para no inventar (batería del 30/09: «sí,
       // llegamos a Comas», «su pedido está en camino» sin estarlo): el
       // horario de entregas, la regla del cambio de ubicación y lo que NO es.
       return [
-        seguimiento ? textoSeguimiento(e.datosEnvio?.tracking ?? e.referencia, seguimiento) : 'No hay seguimiento reciente confirmado por la API de GSG. No inventes la posición del motorizado, kilómetros ni tiempo restante.',
+        seguimiento ? `Seguimiento del pedido según los datos del sistema: ${textoSeguimiento(tracking, seguimiento)} Si pregunta dónde está su pedido o cuánto falta, contesta con estas paradas, kilómetros y minutos tal cual.` : 'No hay seguimiento reciente del motorizado (posición y paradas). No inventes la posición del motorizado, kilómetros ni tiempo restante.',
+        `El código de seguimiento de este pedido es ${tracking} y ya lo tienes: nunca le pidas al cliente su código de seguimiento ni su número de pedido.`,
+        ...deOtras,
+        otras.length ? 'Este cliente tiene más de un pedido vivo: si no queda claro por cuál pregunta, nómbrale cada uno con su seguimiento.' : '',
         e.datosEnvio?.horarioEntregaFechaDesde ? `Ventana fechada de GSG: ${textoHorario({ desde: e.datosEnvio.horarioEntregaDesde!, hasta: e.datosEnvio.horarioEntregaHasta!, fechaDesde: e.datosEnvio.horarioEntregaFechaDesde, fechaHasta: e.datosEnvio.horarioEntregaFechaHasta ?? undefined, zonaHoraria: e.datosEnvio.horarioEntregaZonaHoraria ?? undefined })}. Usa estas fechas; no la anuncies como horario de hoy si corresponde a otra fecha.` : '',
+        // Lo que la consulta tras UBI REGISTRADA necesita: estado, motorizado y la hora del aviso.
+        `Datos del pedido: estado ${e.estado}; código de seguimiento ${tracking}${(m?.nombre ?? e.datosEnvio?.motorizadoNombre) ? `; motorizado: ${m?.nombre ?? e.datosEnvio?.motorizadoNombre}` : '; motorizado: aún sin asignar o sin dato'}${e.avisoEnviadoAt ? `; aviso de llegada enviado a las ${horaEnReloj(e.avisoEnviadoAt, tz())}` : ''}.`,
         `Este cliente tiene hoy el pedido ${e.referencia}${e.nombre ? ` (a nombre de ${e.nombre})` : ''}. Situación: ${situacion}${e.llegaAproxAt && e.estado !== 'entregada' ? ` Hora aproximada de llegada: ${horaEnReloj(e.llegaAproxAt, tz())}.` : ''} Si pregunta por su pedido, responde con esto; no prometas otra hora ni otro día: eso lo coordina una persona.`,
-        !e.datosEnvio?.horarioEntregaFechaDesde ? `Horario de entrega de hoy: de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)} (por algunas casuísticas se puede extender hasta las ${horaEnPalabras(h.extendidoHasta)}). Si pregunta a qué hora llega o el horario y no hay hora aproximada, dale este horario.` : '',
+        !e.datosEnvio?.horarioEntregaFechaDesde ? `Horario de entrega de hoy: de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)} (${variablesDeVentana(h).horario}${h.distrito ? `, distrito ${h.distrito}` : ''}; sale de ${fuenteEnPalabras(h)}; por algunas casuísticas se puede extender hasta las ${horaEnPalabras(h.extendidoHasta)}). Si pregunta a qué hora llega o el horario y no hay hora aproximada, dale este horario tal cual. No inventes otro horario ni otras horas, ni el de otro distrito.` : '',
         `Si quiere cambiar su ubicación: antes de la ${horaEnPalabras(ajustes.cambioUbicacionHasta)} que mande el pin nuevo por WhatsApp (clip 📎 → Ubicación) y se tiene en cuenta hoy; después de esa hora, que coordine con el motorizado.`,
         'Es un cliente con una entrega en curso: no le ofrezcas cotizar envíos, precios ni hacer pedidos. No digas que su pedido ya salió o está en camino si la situación no lo dice. Si pregunta si llegan a una zona o distrito y no está en lo que sabes, no lo afirmes: di que una persona se lo confirma.',
       ].join('\n');

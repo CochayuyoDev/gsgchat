@@ -23,10 +23,17 @@
  *     hora de llegada, ni «cerca», ni «entregado», ni recordatorios, ni
  *     stickers. El mensaje no sale pero quien lo mandaba lo da por hecho, asi
  *     que todo lo de dentro (el motorizado, los reportes a GSG) sigue igual.
+ *
+ * La regla nueva del dueño (10/10): ese silencio es para lo automatico, no
+ * para el cliente que pregunta. Tras UBI REGISTRADA, la respuesta de la IA a
+ * una consulta del cliente sobre su pedido (`consultaCliente`, ver
+ * src/ia/consulta-pedido.ts) sale siempre: la redacta el modelo SOLO con el
+ * contexto del pedido y se revisa en codigo antes de salir.
  */
 
 import { randomUUID } from 'node:crypto';
 import type { Sender, SendJob, SendOutcome } from '../outbound/sender.js';
+import { esEtiquetaDeClasificador } from '../ia/consulta-pedido.js';
 
 export interface PuertaReglaGsg {
   modoGsg(): boolean;
@@ -55,7 +62,14 @@ export function conReglaGsg(sender: Sender, opts: OpcionesReglaGsg): Sender {
         if (r.ok) await e.atendidoPorPersona?.(job.phone, 'una persona desde el panel').catch(() => 0);
         return r;
       }
+      // Una etiqueta de un clasificador («OTRA», «POR_QUE») nunca le llega a nadie, en ningún modo.
+      if (!aMano(job) && job.origen === 'ia' && esEtiquetaDeClasificador(job.text ?? job.interactive?.body)) {
+        opts.log?.('una etiqueta del clasificador iba a salir a un chat: no sale', { phone: job.phone, texto: (job.text ?? job.interactive?.body ?? '').slice(0, 30) });
+        return { ok: false, blocked: true, code: 'regla_gsg', reason: 'una etiqueta del clasificador no es un mensaje', deliveryId: -1 };
+      }
       if (!e || aMano(job) || !e.modoGsg()) return sender.send(job);
+      // La respuesta a la consulta del cliente sobre su pedido: sale (regla del dueño, 10/10).
+      if (job.consultaCliente === true && job.origen === 'ia') return sender.send(job);
       if (job.origen === 'ia' && !job.textoFijo && !(await e.esMotorizado(job.phone).catch(() => false))) {
         opts.log?.('regla del dueño: un texto del modelo no sale a un cliente en «Solo lo de GSG»', { phone: job.phone });
         return { ok: false, blocked: true, code: 'regla_gsg', reason: 'con «Solo lo de GSG» la IA no le escribe al cliente: solo salen los textos fijos', deliveryId: -1 };
