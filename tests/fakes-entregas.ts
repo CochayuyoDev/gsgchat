@@ -155,6 +155,11 @@ export function createFakeEntregas(reloj: () => Date = () => new Date(), encolar
         mensajePermanente: false,
         mensajeEnviadoAt: null,
         mensajeWamid: null,
+        ubicacionCambioPedidoAt: null,
+        ubicacionCambiadaAt: null,
+        ubicacionCambios: 0,
+        ubicacionAnteriorLat: null,
+        ubicacionAnteriorLng: null,
         createdAt: ahora,
         updatedAt: ahora,
       };

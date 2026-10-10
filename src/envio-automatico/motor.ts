@@ -268,11 +268,10 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
           return { accion: 'salida', entradaId: e.id, motivo: 'agotó los mensajes' };
         }
 
-        // Si ESTE pedido ya tiene su ubicacion registrada, no se le vuelve a
-        // pedir: sale. La de otro pedido del mismo cliente no cuenta (regla
-        // del dueño, 10/10): cada pedido pide la suya.
-        if ((e.que === 'ubicacion' || e.hasta === 'ubicacion') && e.referencia) {
-          const registrada = await ubicacionYaRegistrada(repos, e.phone, diaEnZona(momento, opciones.timezone), e.referencia);
+        // La «única verdad» de la ubicacion, por dia: si hoy ya la registro
+        // (por este u otro pedido suyo de hoy), no se le vuelve a pedir: sale.
+        if (e.que === 'ubicacion' || e.hasta === 'ubicacion') {
+          const registrada = await ubicacionYaRegistrada(repos, e.phone, diaEnZona(momento, opciones.timezone));
           if (registrada) {
             await lista.quitar(e.id, { origen: 'sistema' }, `ya mandó su ubicación (pedido ${registrada.referencia}): no se le vuelve a pedir`);
             return { accion: 'salida', entradaId: e.id, motivo: 'ya tenía su ubicación registrada' };

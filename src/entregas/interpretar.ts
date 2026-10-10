@@ -1151,7 +1151,7 @@ function esLugar(p: string): boolean {
 /** «me equivoqué», «equivocada», «me confundí», «mal», «incorrecta»… con las faltas de siempre (equiboque, ekivoke). */
 function esError(p: string): boolean {
   if (/^h?e[qk]u?[iy][vb]o[ckq]/.test(p) || /^confund/.test(p)) return true;
-  if (['mal', 'mala', 'malo', 'incorrecta', 'incorrecto', 'erronea', 'erroneo', 'errada', 'errado'].includes(p)) return true;
+  if (['mal', 'mala', 'malo', 'incorrecta', 'incorrecto', 'erronea', 'erroneo', 'errada', 'errado', 'error', 'errores'].includes(p)) return true;
   return p.length >= 7 && distancia(p, 'equivoque') <= 2;
 }
 
@@ -1185,7 +1185,8 @@ export function pideCambioUbicacion(texto: string): boolean {
   if (/ (necesari[ao]|obligatori[ao]|para que|por que|porque) /.test(junto) && !todo.some(esError) && !todo.some(esCambiar)) return false;
 
   for (const f of frases) {
-    const negada = (i: number): boolean => f.slice(Math.max(0, i - 2), i).some((p) => p === 'no' || p === 'nunca' || p === 'ni');
+    // «no quiero cambiar», «no voy a cambiar», «no hay que cambiar»: hasta tres palabras antes.
+    const negada = (i: number): boolean => f.slice(Math.max(0, i - 3), i).some((p) => p === 'no' || p === 'nunca' || p === 'ni' || p === 'tampoco');
     for (let i = 0; i < f.length; i++) {
       const p = f[i]!;
       // «me equivoqué de ubicación», «la ubicación está mal», «puse mal el pin».
@@ -1204,7 +1205,7 @@ export function pideCambioUbicacion(texto: string): boolean {
     }
   }
   // «esa no es mi ubicación», «la dirección no era esa», «la ubicación es otra».
-  if (hayLugar && / no (es|era|esta bien|corresponde)( | .* )/.test(junto)) return true;
+  if (hayLugar && / no (es|era|esta bien|corresponde)(?! (necesari[ao]|obligatori[ao]|para que|por que) )( | .* )/.test(junto)) return true;
   if (hayLugar && / (es|era) (otra|otro)( |$)/.test(junto)) return true;
   // «no es ahí», «no es allí»: sin nombrar el sitio, pero no hace falta.
   if (/ no (es|era) (ahi|alli|aca|alla|aqui) /.test(junto)) return true;
@@ -1223,6 +1224,23 @@ export function pideCambioUbicacion(texto: string): boolean {
   if (new RegExp(` (ahora|ahorita|hoy|ya) (estoy|voy a estar|estare) en (el |la |mi |otro |otra )?${OTRO_SITIO}`).test(junto)) return true;
   if (new RegExp(` (traemelo|traiganlo|traelo|llevamelo|llevenlo|llevalo|mandamelo|mandenlo|mandalo|envienlo|entreguenlo|entregamelo) (mejor )?(a|al|en) (mi |el |la |otro |otra )?${OTRO_SITIO}`).test(junto)) return true;
   if (new RegExp(` mejor (a|al|en) (mi |el |la )?${OTRO_SITIO}`).test(junto)) return true;
+  // Como se dice en Perú (pedido del dueño, 10/10): «cambié de casa, ahora
+  // estoy en…», «me mudé», «ya no vivo ahí», «es otra dirección», «me lo
+  // pueden llevar a otro sitio», «la dejan en otra casa». Lo negado («no me
+  // mudé», «no cambié de casa») no cuenta.
+  const sinNegar = (re: RegExp): boolean => {
+    const m = re.exec(junto);
+    if (!m) return false;
+    const antes = junto.slice(0, m.index).trim().split(' ').slice(-3);
+    return !antes.some((p) => p === 'no' || p === 'nunca' || p === 'ni' || p === 'tampoco');
+  };
+  if (sinNegar(/ (me )?(cambie|cambiamos|cambio|cambiare|cambiaremos|voy a cambiar|estoy cambiando|me cambie|me estoy cambiando) de (casa|domicilio|depa|departamento|direccion|dire|sitio|lugar|local|oficina|trabajo|ubicacion|ubi|distrito) /)) return true;
+  if (sinNegar(/ me (mude|mudo|mudare|estoy mudando|voy a mudar|he mudado|acabo de mudar)( |$)/)) return true;
+  if (/ ya no (vivo|estoy viviendo|trabajo) (ahi|alli|alla|aca|en esa (direccion|casa|ubicacion)|en la direccion que (te )?(di|mande|pase)) /.test(junto)) return true;
+  if (/ no vivo (ahi|alli|alla|en esa (direccion|casa|ubicacion)) /.test(junto)) return true;
+  if (sinNegar(/ (ahora|ahorita|desde hoy|ya) (vivo|estoy viviendo|me quedo|me estoy quedando) en /) && / (cambie|mude|nueva|otra|otro|ya no) /.test(junto)) return true;
+  if (sinNegar(/ (llev|tra[ie]|mand|envi|entreg|dej)\w* (mejor )?(a|al|en|por) (otr[oa]|mi nuev[oa]|la nueva|el nuevo) (sitio|lado|lugar|direccion|dire|casa|distrito|domicilio|depa|departamento|ubicacion|punto|local) /)) return true;
+  if (sinNegar(/ (es|era|sera|seria) (en )?(otra|otro|una nueva|un nuevo) (direccion|dire|ubicacion|ubi|casa|sitio|lugar|domicilio|punto) /)) return true;
   return false;
 }
 

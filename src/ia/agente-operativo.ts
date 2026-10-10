@@ -172,7 +172,16 @@ export interface DepsAgente {
    * REGISTRADA (ver src/ia/consulta-pedido.ts). Sin ella (sin IA, o caída):
    * los textos fijos de siempre.
    */
-  consultarPedido?: (contact: Contact, texto: string, contexto: string | null) => Promise<{ texto: string } | { derivar: true } | null>;
+  consultarPedido?: (contact: Contact, texto: string, contexto: string | null) => Promise<{ texto: string } | { derivar: true } | { cambioUbicacion: true } | null>;
+  /**
+   * El modelo, SOLO para reconocer un pedido de cambio de ubicación que las
+   * reglas no vieron («cambié de casa, ahora estoy por el óvalo»), con la
+   * ubicación ya registrada. Va aunque `clasificar` no esté (con «Solo lo de
+   * GSG» la IA no clasifica lo demás):
+   * de lo que diga solo cuenta CAMBIAR_UBICACION; lo demás sigue como si no
+   * hubiera IA. Las reglas van primero y la etiqueta nunca sale al cliente.
+   */
+  clasificarCambio?: (mensajes: MensajeIA[]) => Promise<string>;
   /** Cómo se llama el negocio (para los textos sin entrega). */
   nombreNegocio: () => string;
   ahora?: () => Date;
@@ -359,7 +368,8 @@ const PERSONAL = /\b(triste|tristeza|deprimid[oa]|depresion|ansiedad|ansios[oa]|
 const LUGAR = '(ubicacion|ubi|ubicasion|direccion|direc|dirrecion|pin)';
 const CAMBIO_UBICACION = [
   new RegExp(`\\b(me equivoque|me confundi|equivocad[ao]|mal|incorrect[ao]|erronea?)\\b.*\\b${LUGAR}\\b`),
-  new RegExp(`\\b${LUGAR}\\b.*\\b(equivocad[ao]|esta mal|incorrect[ao]|no es|errone[ao])\\b`),
+  // (lo negado dentro de la frase no cuenta: «la ubicación no está mal», «no es necesario»)
+  new RegExp(`\\b${LUGAR}\\b.*\\b(equivocad[ao]|(?<!\\bno )esta mal|(?<!\\bno (esta|es) )incorrect[ao]|no es(?! (necesari[ao]|obligatori[ao]|para))|errone[ao])\\b`),
   new RegExp(`\\b(cambiar|cambio|corregir|modificar|actualizar)( de)? (la |mi |su |el )?${LUGAR}\\b`),
   new RegExp(`\\b(te|les|le) (mando|envio|paso) (otra|la nueva|una nueva|la correcta)\\b|\\b(otra|nueva) ${LUGAR}\\b`),
   /\b(no es ahi|no es alli|la mande mal|la envie mal)\b/,
@@ -390,9 +400,16 @@ export function preguntaHorarioDeEntrega(texto: string): boolean {
 
 export function pareceCambioUbicacion(texto: string): boolean {
   const t = sinTildes(texto).replace(/[¿?¡!.,]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Lo negado justo antes no cuenta: «no quiero cambiar mi ubicación», «no me
+  // equivoqué de dirección», «no voy a cambiar la ubicación».
+  const vale = (r: RegExp): boolean => {
+    const m = r.exec(t);
+    if (!m) return false;
+    return !t.slice(0, m.index).trim().split(' ').slice(-3).some((p) => p === 'no' || p === 'nunca' || p === 'ni' || p === 'tampoco');
+  };
   // Y las mismas reglas que las entregas (faltas de tipeo, negaciones):
   // «esa no es mi ubicación», «me equiboque de ubicasion».
-  return CAMBIO_UBICACION.some((r) => r.test(t)) || pideCambioUbicacion(texto);
+  return CAMBIO_UBICACION.some(vale) || pideCambioUbicacion(texto);
 }
 
 /**
@@ -1075,9 +1092,13 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
  */
 /** «Me equivoqué de ubicación» con la ubicación ya registrada: el texto fijo de antes o después de la hora límite. */
 async function atenderCambioUbicacion(deps: DepsAgente, contact: Contact, que: string, como: string): Promise<ResultadoRegla | null> {
-  const texto = await deps.entregas!.cambioDeUbicacion(contact.phone).catch(() => null);
-  if (!texto) return null;
-  await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: texto });
+  const cambio = await deps.entregas!.cambioDeUbicacionDetalle(contact.phone).catch(() => null);
+  if (!cambio) return null;
+  // Antes de la hora límite: «Claro, {nombre}, por favor mándeme su nueva
+  // ubicación», con el botón de ubicación como el primer mensaje. Después, el
+  // texto de siempre (que coordine con el motorizado).
+  if (cambio.tarde) await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: cambio.texto });
+  else await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, interactive: { body: cambio.texto, locationRequest: true } });
   await deps.entregas!.anotarAgente(contact.phone, `pidió cambiar su ubicación (${que}; ${como})`).catch(() => undefined);
   deps.log?.('regla del dueño: pidió cambiar su ubicación', { phone: contact.phone });
   return 'cambio_ubicacion';
@@ -1279,7 +1300,9 @@ async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entr
   // se le contesta aunque el chat esté en silencio o ya tuviera el cierre.
   // Antes de la hora límite, que mande la nueva; después, el número del
   // motorizado (el de GSG) para que coordine con él (regla del dueño, 29/09).
-  if (texto && estado === 'registrada' && deps.entregas && pareceCambioUbicacion(texto)) {
+  // También si aún esperaba su ubicación («la dirección que tienen está mal»):
+  // se le pide la nueva y el pin que mande cuenta como el cambio.
+  if (texto && (estado === 'registrada' || estado === 'pendiente') && deps.entregas && pareceCambioUbicacion(texto)) {
     const r = await atenderCambioUbicacion(deps, contact, que, 'lo reconocieron las reglas');
     if (r) {
       turno.intencion = 'corregir_ubicacion';
@@ -1375,11 +1398,23 @@ async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entr
     categoria = reglas.categoria;
     acuse = Boolean(reglas.acuse);
     tambienHora = Boolean(reglas.tambienHora);
-  } else {
+  } else if (deps.clasificar) {
     const ia = await clasificarConIA(deps, promptClasificadorReglaGsg(), texto, CATEGORIAS_REGLA);
     como = ia.como;
     categoria = ia.clase ?? 'otra';
     if (ia.clase) turno.como = 'ia';
+  } else if (deps.clasificarCambio && estado === 'registrada') {
+    // Sin el clasificador general: la IA solo AÑADE el cambio de ubicación, y
+    // solo tras UBI REGISTRADA (donde la IA ya atiende sus consultas, 10/10).
+    // Antes del pin, con «Solo lo de GSG», el modelo no se consulta (06/10).
+    const ia = await clasificarConIA({ clasificar: deps.clasificarCambio, log: deps.log }, promptClasificadorReglaGsg(), texto, CATEGORIAS_REGLA);
+    if (ia.clase === 'cambiar_ubicacion') {
+      categoria = 'cambiar_ubicacion';
+      como = ia.como;
+      turno.como = 'ia';
+    } else como = 'sin IA: lo decidieron las reglas';
+  } else {
+    como = 'sin IA: lo decidieron las reglas';
   }
   turno.detalle = como;
 
@@ -1421,7 +1456,7 @@ async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entr
   // Lo que las reglas no vieron y la IA sí: también es un cambio de ubicación.
   if (categoria === 'cambiar_ubicacion') {
     turno.intencion = 'corregir_ubicacion';
-    const r = estado === 'registrada' && deps.entregas ? await atenderCambioUbicacion(deps, contact, que, como) : null;
+    const r = (estado === 'registrada' || estado === 'pendiente') && deps.entregas ? await atenderCambioUbicacion(deps, contact, que, como) : null;
     if (r) {
       turno.respuesta = 'plantilla de cambio de ubicación';
       return r;
@@ -1524,7 +1559,18 @@ async function atenderConsultaTrasUbicacion(deps: DepsAgente, contact: Contact, 
     const contexto = await deps.entregas.contextoDeCliente(contact.phone).catch(() => null);
     const r = await deps.consultarPedido(contact, texto, contexto).catch(() => null);
     if (r && 'derivar' in r) return derivarAPersona(deps, contact, abierta, texto, que, 'lo pidió la IA', opts.yaDerivado, turno, ahora);
-    if (r?.texto) {
+    // Lo que parecía una consulta era un cambio de ubicación («¿me lo pueden
+    // llevar a mi trabajo?»): va al flujo del cambio, no se contesta como consulta.
+    if (r && 'cambioUbicacion' in r) {
+      const c = await atenderCambioUbicacion(deps, contact, que, 'lo dijo la IA de la consulta');
+      if (c) {
+        turno.intencion = 'corregir_ubicacion';
+        turno.como = 'ia';
+        turno.respuesta = 'plantilla de cambio de ubicación';
+        return c;
+      }
+    }
+    if (r && 'texto' in r && r.texto) {
       const salida = await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', consultaCliente: true, text: r.texto }).catch(() => null);
       if (salida?.ok) {
         await deps.entregas.anotarAgente(contact.phone, `preguntó por su pedido tras UBI REGISTRADA (${que}): le contestó la IA con los datos del pedido`).catch(() => undefined);

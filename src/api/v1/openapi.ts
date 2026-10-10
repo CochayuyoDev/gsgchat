@@ -509,7 +509,7 @@ export function openApi(baseUrl: string): Json {
             estado: { type: 'string', enum: ['pendiente', 'esperando_ubicacion', 'esperando_confirmacion', 'lista', 'esperando_motorizado', 'avisada', 'entregada', 'terminada', 'cancelada', 'incidencia'] },
             situacion: { type: 'string', description: 'Que le esta pasando ahora mismo, en palabras' },
             prioridad: { type: 'string', enum: ['normal', 'urgente'] },
-            ubicacion: { type: 'object', properties: { estado: { type: 'string' }, lat: { type: 'number', nullable: true }, lng: { type: 'number', nullable: true }, mapa: { type: 'string', nullable: true }, recibidaEn: { type: 'string', nullable: true } } },
+            ubicacion: { type: 'object', properties: { estado: { type: 'string' }, lat: { type: 'number', nullable: true }, lng: { type: 'number', nullable: true }, mapa: { type: 'string', nullable: true }, recibidaEn: { type: 'string', nullable: true }, cambiada: { type: 'boolean', description: 'El cliente cambió su ubicación (pidió cambiarla y mandó otra)' }, cambiadaEn: { type: 'string', nullable: true }, cambios: { type: 'integer' }, anterior: { type: 'object', nullable: true, properties: { lat: { type: 'number' }, lng: { type: 'number' } } } } },
             confirmacion: { type: 'object', properties: { estado: { type: 'string' }, intentos: { type: 'integer' }, respuesta: { type: 'string', nullable: true }, como: { type: 'string', nullable: true }, en: { type: 'string', nullable: true } } },
             motorizado: { type: 'object', nullable: true, properties: { nombre: { type: 'string' }, telefono: { type: 'string' }, placa: { type: 'string', nullable: true } } },
             minutosMotorizado: { type: 'integer', nullable: true },

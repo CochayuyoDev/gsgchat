@@ -301,6 +301,16 @@ export interface Entrega {
   mensajePermanente?: boolean;
   mensajeEnviadoAt?: Date | null;
   mensajeWamid?: string | null;
+  /**
+   * El cliente que cambió su ubicación (migración 006): cuándo pidió
+   * cambiarla, cuándo llegó la nueva, cuántas veces y la que tenía antes.
+   * Con `ubicacionCambiadaAt` las pantallas dicen «cambió su ubicación».
+   */
+  ubicacionCambioPedidoAt?: Date | null;
+  ubicacionCambiadaAt?: Date | null;
+  ubicacionCambios?: number;
+  ubicacionAnteriorLat?: number | null;
+  ubicacionAnteriorLng?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -551,6 +561,11 @@ interface EntregaRow {
   mensaje_permanente?: boolean | number | null;
   mensaje_enviado_at?: Date | null;
   mensaje_wamid?: string | null;
+  ubicacion_cambio_pedido_at?: Date | null;
+  ubicacion_cambiada_at?: Date | null;
+  ubicacion_cambios?: number | string | null;
+  ubicacion_anterior_lat?: number | string | null;
+  ubicacion_anterior_lng?: number | string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -676,6 +691,11 @@ const entregaDeFila = (r: EntregaRow): Entrega => ({
   mensajePermanente: Boolean(r.mensaje_permanente),
   mensajeEnviadoAt: r.mensaje_enviado_at ?? null,
   mensajeWamid: r.mensaje_wamid ?? null,
+  ubicacionCambioPedidoAt: r.ubicacion_cambio_pedido_at ?? null,
+  ubicacionCambiadaAt: r.ubicacion_cambiada_at ?? null,
+  ubicacionCambios: Number(r.ubicacion_cambios ?? 0),
+  ubicacionAnteriorLat: numOpc(r.ubicacion_anterior_lat ?? null),
+  ubicacionAnteriorLng: numOpc(r.ubicacion_anterior_lng ?? null),
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -768,6 +788,11 @@ const COLUMNAS_ENTREGA: Array<[keyof PatchEntrega, string]> = [
   ['mensajePermanente', 'mensaje_permanente'],
   ['mensajeEnviadoAt', 'mensaje_enviado_at'],
   ['mensajeWamid', 'mensaje_wamid'],
+  ['ubicacionCambioPedidoAt', 'ubicacion_cambio_pedido_at'],
+  ['ubicacionCambiadaAt', 'ubicacion_cambiada_at'],
+  ['ubicacionCambios', 'ubicacion_cambios'],
+  ['ubicacionAnteriorLat', 'ubicacion_anterior_lat'],
+  ['ubicacionAnteriorLng', 'ubicacion_anterior_lng'],
 ];
 
 const COLUMNAS_MOTORIZADO: Array<[keyof PatchMotorizado, string]> = [

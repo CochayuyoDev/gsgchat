@@ -146,6 +146,15 @@ export interface FilaNumero {
   motorizado: string | null;
   /** El cliente ya mandó su ubicación: en pantalla sale como «UBI REGISTRADA». */
   ubiRegistrada: boolean;
+  /**
+   * El cliente cambió su ubicación (pidió cambiarla y mandó otra): en
+   * pantalla, «Ubicación registrada» con la marca «cambió su ubicación (hora)».
+   */
+  ubicacionCambiada: boolean;
+  ubicacionCambiadaAt: Date | null;
+  ubicacionCambios: number;
+  /** «cambió su ubicación (10:42)», o null. */
+  cambioUbicacion: string | null;
   /** Sin ubicación pero ya con motorizado: en pantalla, «Esperando ubicación · con motorizado». */
   conMotorizadoSinUbicacion: boolean;
   /** Se le puede asignar un motorizado sin ubicación (el botón de la fila). */
@@ -176,6 +185,10 @@ export function filaNumero(f: FilaEntrega, maxConfirmacion: number): FilaNumero 
     motorizado: f.motorizado?.nombre ?? null,
     // Solo si la mandó el cliente: a los de «falta confirmar» GSG ya les tenía la dirección.
     ubiRegistrada: f.ubicacionEstado === 'recibida' && grupoDe(f) === 'ubicacion',
+    ubicacionCambiada: Boolean(f.ubicacionCambiadaAt),
+    ubicacionCambiadaAt: f.ubicacionCambiadaAt ?? null,
+    ubicacionCambios: f.ubicacionCambios ?? 0,
+    cambioUbicacion: f.cambioUbicacion ?? null,
     conMotorizadoSinUbicacion: conMotorizadoSinUbicacion(f),
     puedeSinUbicacion: f.acciones.includes('sin_ubicacion'),
   };

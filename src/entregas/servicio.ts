@@ -115,10 +115,12 @@ import { calcularAlertas, type AlertaHoy } from './alertas-hoy.js';
 /** La fuente de una ubicación que salió de la dirección escrita (no es un pin: es aproximada). */
 
 /**
- * Regla del dueño (10/10): a un cliente que ya tiene una ubicacion registrada
- * se le pide igual la de cada pedido nuevo. No se copia la de otro pedido.
+ * Regla del dueño (10/10): la ubicacion vale por DIA. El mismo dia, otro
+ * pedido del mismo numero (p. ej. dos trackings de dos tiendas) toma la ya
+ * registrada: un solo mensaje al cliente y la lat/lng va a GSG para cada
+ * tracking. Otro dia se le vuelve a pedir (cada dia es un pedido nuevo).
  */
-const PEDIR_UBICACION_EN_CADA_PEDIDO = true;
+const PEDIR_UBICACION_EN_CADA_PEDIDO = false;
 
 export const FUENTE_DIRECCION_ESCRITA = 'dirección escrita (aproximada)';
 /** Una dirección escrita vale si el mapa la pone a menos de esto (km) de su distrito. */
@@ -193,6 +195,8 @@ export interface RespuestaEntregas {
   responder?: string;
   /** Si la respuesta lleva botones (SI / NO): quien la manda los pone si el WhatsApp puede. */
   botones?: Array<{ id: string; title: string }>;
+  /** La respuesta pide la ubicación: quien la manda pone el botón de ubicación de WhatsApp (como el primer mensaje). */
+  pedirUbicacion?: boolean;
   entrega?: Entrega;
   /** Que se decidio, para la bitacora y las pruebas. */
   resultado?: string;
@@ -278,6 +282,20 @@ export interface FilaEntrega extends Entrega {
   solicitud?: Pick<Solicitud, 'id' | 'estado' | 'intentos' | 'incidencia' | 'loteId'> | null;
   /** Las referencias de los OTROS pedidos vivos de hoy del mismo cliente (mismo telefono). */
   mismoCliente: string[];
+  /** «cambió su ubicación (10:42)»: la marca que ven Hoy, Números del día y la ficha. null = nunca la cambió. */
+  cambioUbicacion?: string | null;
+}
+
+/**
+ * La marca del cliente que cambió su ubicación, con la hora (en el reloj de
+ * la tienda) y, si fue más de una vez, cuántas: «cambió su ubicación (10:42)»,
+ * «cambió su ubicación 2 veces (la última, 12:05)». null = nunca la cambió.
+ */
+export function marcaCambioUbicacion(e: Pick<Entrega, 'ubicacionCambiadaAt' | 'ubicacionCambios'>, timezone: string): string | null {
+  if (!e.ubicacionCambiadaAt) return null;
+  const hora = horaEnReloj(e.ubicacionCambiadaAt, timezone);
+  const veces = e.ubicacionCambios ?? 1;
+  return veces > 1 ? `cambió su ubicación ${veces} veces (la última, ${hora})` : `cambió su ubicación (${hora})`;
 }
 
 /** Lo que hizo el ultimo cierre del dia. */
@@ -513,6 +531,8 @@ export interface ServicioEntregas {
    * ubicación registrada hoy (no es un cambio).
    */
   cambioDeUbicacion(phone: string): Promise<string | null>;
+  /** Lo mismo, diciendo si ya pasó la hora límite (antes de ella se manda con el botón de ubicación). */
+  cambioDeUbicacionDetalle(phone: string): Promise<{ texto: string; tarde: boolean } | null>;
   /**
    * Si este telefono tiene alguna entrega en curso (aunque todavia no se le
    * haya escrito). A un cliente de entrega nunca se le ofrece «Cotizar envío»:
@@ -1770,20 +1790,33 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   }
 
   /**
-   * El cliente, con su ubicación ya registrada, pide cambiarla. Antes de la
-   * hora límite: que mande la nueva (el pin siguiente se registra como
-   * «ubicación cambiada»). Después: el número del motorizado para que
-   * coordine con él. null = no tiene ninguna ubicación registrada en curso.
+   * El cliente pide cambiar su ubicación («quiero cambiar mi ubicación», «me
+   * equivoqué de dirección», «te mando otra»). Antes de la hora límite: que
+   * mande la nueva, con el botón de ubicación (`pedirUbicacion`), y sus
+   * pedidos quedan marcados (`ubicacionCambioPedidoAt`): el pin siguiente se
+   * registra como «cambió su ubicación» aunque alguno aún no la tuviera.
+   * Después: el número del motorizado para que coordine con él (regla del
+   * dueño, sin cambios). null = no tiene pedidos en curso a los que aplique
+   * (después de la hora, solo cuenta quien ya la tenía registrada).
    */
   async function pedidoDeCambioDeUbicacion(phone: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean } | null> {
-    const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && x.ubicacionEstado === 'recibida');
-    if (!vivas.length) return null;
-    const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
+    const enCurso = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
+    const vivas = enCurso.filter((x) => x.ubicacionEstado === 'recibida');
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
     if (!pasoLaHoraDeCambio()) {
-      for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
+      // Con su ubicación registrada, o esperándola (la dirección que tenía GSG está mal).
+      const aCambiar = vivas.length ? enCurso.filter((x) => x.ubicacionEstado !== 'no_hace_falta') : enCurso.filter((x) => x.ubicacionEstado === 'pendiente');
+      if (!aCambiar.length) return null;
+      const e = aCambiar.find((x) => x.motorizadoId) ?? aCambiar[0]!;
+      const en = ahora();
+      for (const x of aCambiar) {
+        await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
+        await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
+      }
       return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false };
     }
+    if (!vivas.length) return null;
+    const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
     const g = vivas.find((x) => x.datosEnvio?.telefonoMotorizado) ?? e;
     const m = await motorizadoDe(g).catch(() => null);
     const numero = numeroDeGsg(g, m);
@@ -1856,14 +1889,24 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         continue;
       }
       const corrige = e.ubicacionEstado === 'recibida';
-      corrigeAlguna = corrigeAlguna || corrige;
+      // «Cambió su ubicación»: ya tenía una registrada, o pidió cambiarla
+      // antes de que llegara (queda en el pedido y lo ven las pantallas).
+      const cambia = corrige || Boolean(e.ubicacionCambioPedidoAt);
+      corrigeAlguna = corrigeAlguna || cambia;
+      const enCambio = ahora();
+      const anterior = cambia && e.lat != null && e.lng != null ? { lat: e.lat, lng: e.lng } : null;
+      const cambios = cambia ? (e.ubicacionCambios ?? 0) + 1 : (e.ubicacionCambios ?? 0);
+      const marcaCambio = cambia
+        ? { ubicacionCambiadaAt: enCambio, ubicacionCambios: cambios, ubicacionCambioPedidoAt: null, ubicacionAnteriorLat: anterior?.lat ?? null, ubicacionAnteriorLng: anterior?.lng ?? null }
+        : {};
       const liberada = e.estado === 'incidencia' && LIBERA_CON_PIN.has(e.incidencia ?? '');
       const falsa = { id: 0, loteId: e.loteId ?? '', contactId: contact.id, telefonoCrudo: e.phone, phone: e.phone, nombre: e.nombre, referencia: e.referencia, direccion: e.direccion, distrito: e.distrito, estado: 'resuelto', resueltoAt: ahora(), lat: ubicacion.lat, lng: ubicacion.lng, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', mapsUrl } as Solicitud;
       const debeReportar = !ubicacion.yaReportada || e.id !== primeraQueCambia?.id;
-      const payload = { ...payloadUbicacion(falsa, { id: e.loteId ?? 'entregas', nombre: 'Entregas del día', externoId: null, origen: 'gsg', estado: 'enviando' } as Lote), ...(corrige ? { corregida: true } : {}), tracking: e.datosEnvio?.tracking ?? e.referencia };
-      let act = await repo.registrarUbicacionAtomica(e.id, { ubicacionEstado: 'recibida', lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', ubicacionAt: ahora(), ubicacionPropuestaAt: null, ...(e.pinPropuestoAt ? { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 } : {}), ...(liberada ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) }, debeReportar ? { loteId: e.loteId ?? null, payload } : null, ubicacion.propuestaAt);
+      const payload = { ...payloadUbicacion(falsa, { id: e.loteId ?? 'entregas', nombre: 'Entregas del día', externoId: null, origen: 'gsg', estado: 'enviando' } as Lote), ...(corrige ? { corregida: true } : {}), ...(cambia ? { cambioUbicacion: true, cambiadaEn: enCambio.toISOString(), cambios, ...(anterior ? { anterior } : {}) } : {}), tracking: e.datosEnvio?.tracking ?? e.referencia };
+      let act = await repo.registrarUbicacionAtomica(e.id, { ubicacionEstado: 'recibida', lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', ubicacionAt: ahora(), ubicacionPropuestaAt: null, ...marcaCambio, ...(e.pinPropuestoAt ? { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 } : {}), ...(liberada ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) }, debeReportar ? { loteId: e.loteId ?? null, payload } : null, ubicacion.propuestaAt);
       if (!act) continue;
-      await evento(act, 'ubicacion', corrige ? `ubicación corregida por el cliente (${ubicacion.fuente ?? 'whatsapp'})` : `ubicación recibida (${ubicacion.fuente ?? 'whatsapp'})${todas.length > 1 ? ` (vale para sus ${todas.length} pedidos de hoy)` : ''}${liberada ? `: ya no necesita a nadie (estaba apartada: ${e.incidenciaDetalle ?? e.incidencia ?? 'sin ubicación'})` : ''}`, { lat: ubicacion.lat, lng: ubicacion.lng });
+      const coords = (p: { lat: number; lng: number }) => `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
+      await evento(act, 'ubicacion', cambia ? `ubicación cambiada por el cliente (${ubicacion.fuente ?? 'whatsapp'}): ${anterior ? `antes ${coords(anterior)}` : 'antes sin ubicación'}, ahora ${coords(ubicacion)}${cambios > 1 ? ` (cambio ${cambios})` : ''}` : `ubicación recibida (${ubicacion.fuente ?? 'whatsapp'})${todas.length > 1 ? ` (vale para sus ${todas.length} pedidos de hoy)` : ''}${liberada ? `: ya no necesita a nadie (estaba apartada: ${e.incidenciaDetalle ?? e.incidencia ?? 'sin ubicación'})` : ''}`, { lat: ubicacion.lat, lng: ubicacion.lng, ...(cambia ? { cambiada: true, anterior, cambios } : {}) });
       if (debeReportar) await evento(act, 'reporte', 'ubicación y reporte guardados en una transacción');
 
       // Lo llevaba un motorizado SIN ubicación: sigue con el mismo, y solo se le
@@ -2236,9 +2279,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   /**
    * Un pedido nuevo de un cliente que HOY ya mando su ubicacion (por otro
-   * pedido). Antes valia la misma y no se le volvia a pedir; por regla del
-   * dueño (10/10) cada pedido pide SU ubicacion, aunque el cliente ya tenga
-   * una registrada: puede ser otra direccion. Queda apagado.
+   * pedido): vale la misma, no se le vuelve a pedir. GSG se entera para ese
+   * tracking. De otro dia no vale (ubicacionDelClienteDelDia es del dia).
    */
   async function aplicarUbicacionConocida(e: Entrega): Promise<Entrega | null> {
     if (!PEDIR_UBICACION_EN_CADA_PEDIDO) return aplicarUbicacionConocidaDe(e);
@@ -2308,7 +2350,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // modos: con «Todo el sistema» caía al menú de la preventa (30/09).
     if (!opts.boton && pideCambioUbicacion(texto)) {
       const cambio = await pedidoDeCambioDeUbicacion(contact.phone);
-      if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto };
+      if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto, ...(cambio.tarde ? {} : { pedirUbicacion: true }) };
     }
     // "¿Dónde está mi pedido?": se contesta segun el estado, sin IA. Vale
     // para la viva de hoy y para la que ya figura como entregada hoy.
@@ -4472,7 +4514,7 @@ ${lista}
       const s = (await repos.rutas.listarSolicitudes({ loteId: e.loteId, q: e.phone, limit: 5, offset: 0 }).catch(() => [])).find((x) => x.phone === e.phone);
       if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId };
     }
-    return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [] };
+    return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [], cambioUbicacion: marcaCambioUbicacion(e, tz()) };
   }
 
   async function resumen(): Promise<ResumenEntregas> {
@@ -4602,6 +4644,10 @@ ${lista}
     async cambioDeUbicacion(phone) {
       return (await pedidoDeCambioDeUbicacion(phone))?.texto ?? null;
     },
+    async cambioDeUbicacionDetalle(phone) {
+      const r = await pedidoDeCambioDeUbicacion(phone);
+      return r ? { texto: r.texto, tarde: r.tarde } : null;
+    },
     async tieneEntregaEnCurso(phone) {
       return (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).length > 0;
     },
@@ -4630,13 +4676,10 @@ ${lista}
     async sanarUbicacion(phone) {
       const conocida = await repo.ubicacionDelClienteDelDia(phone, hoy()).catch(() => null);
       if (!conocida || conocida.lat == null || conocida.lng == null) return false;
-      // Solo se cierran las solicitudes de pedidos que YA tienen su ubicacion:
-      // la de otro pedido del mismo cliente no vale para este (regla del dueño, 10/10).
-      const conUbicacion = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((e) => e.ubicacionEstado === 'recibida').map((e) => e.referencia);
-      if (!conUbicacion.length) return false;
-      const cerradas = await resolverPorUbicacion(repos, phone, { lat: conocida.lat, lng: conocida.lng, mapsUrl: conocida.mapsUrl, fuente: conocida.ubicacionFuente }, { ahora: ahora(), motivo: `ya estaba registrada (pedido ${conocida.referencia})`, referencias: conUbicacion }).catch(() => []);
-      if (cerradas.length) log('habia solicitudes del reparto abiertas de pedidos con la ubicación ya registrada: se cerraron', { phone, solicitudes: cerradas.map((s) => s.id) });
-      return cerradas.length > 0;
+      // La ubicacion de hoy vale para todos sus pedidos de hoy (regla del dueño, 10/10).
+      const cerradas = await resolverPorUbicacion(repos, phone, { lat: conocida.lat, lng: conocida.lng, mapsUrl: conocida.mapsUrl, fuente: conocida.ubicacionFuente }, { ahora: ahora(), motivo: `ya estaba registrada (pedido ${conocida.referencia})` }).catch(() => []);
+      if (cerradas.length) log('habia solicitudes del reparto abiertas para un cliente con la ubicación ya registrada: se cerraron', { phone, solicitudes: cerradas.map((s) => s.id) });
+      return true;
     },
     liberarEnvio,
     async enviarUbicacionAGsg(id, quien) {

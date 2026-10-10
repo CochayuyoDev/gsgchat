@@ -250,7 +250,18 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     estado: e.estado,
     situacion: e.situacion,
     prioridad: e.prioridad ?? 'normal',
-    ubicacion: { estado: e.ubicacionEstado, lat: e.lat, lng: e.lng, mapa: e.mapsUrl, recibidaEn: e.ubicacionAt ? e.ubicacionAt.toISOString() : null },
+    ubicacion: {
+      estado: e.ubicacionEstado,
+      lat: e.lat,
+      lng: e.lng,
+      mapa: e.mapsUrl,
+      recibidaEn: e.ubicacionAt ? e.ubicacionAt.toISOString() : null,
+      // El cliente la cambió (pidió cambiarla y mandó otra): cuándo, cuántas veces y la de antes.
+      cambiada: Boolean(e.ubicacionCambiadaAt),
+      cambiadaEn: e.ubicacionCambiadaAt ? e.ubicacionCambiadaAt.toISOString() : null,
+      cambios: e.ubicacionCambios ?? 0,
+      anterior: e.ubicacionAnteriorLat != null && e.ubicacionAnteriorLng != null ? { lat: e.ubicacionAnteriorLat, lng: e.ubicacionAnteriorLng } : null,
+    },
     confirmacion: { estado: e.confirmacionEstado, intentos: e.confirmacionIntentos, respuesta: e.confirmacionRespuesta, como: e.confirmacionComo, en: e.confirmacionAt ? e.confirmacionAt.toISOString() : null },
 
     entregadaEn: e.entregadaAt ? e.entregadaAt.toISOString() : null,
