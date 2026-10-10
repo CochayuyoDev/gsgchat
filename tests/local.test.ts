@@ -82,6 +82,11 @@ describe('traducir lo que llega por el socket', () => {
     expect(value?.messages?.[0]?.location).toMatchObject({ latitude: 19.43, longitude: -99.13, name: 'Centro' });
   });
 
+  it('una ubicacion en tiempo real llega con su tipo propio: no es donde recibe', () => {
+    const value = toChangeValue({ ...base, message: { liveLocationMessage: { degreesLatitude: 19.43, degreesLongitude: -99.13 } } });
+    expect(value?.messages?.[0]?.type).toBe('livelocation');
+  });
+
   it('una foto llega con su tipo, para que la vea una persona en el chat', () => {
     const value = toChangeValue({ ...base, message: { imageMessage: { mimetype: 'image/jpeg' } } });
     expect(value?.messages?.[0]?.type).toBe('image');

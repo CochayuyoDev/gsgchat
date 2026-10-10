@@ -314,7 +314,7 @@ describe('campanas por goteo', () => {
 describe('ajustes del reparto y plantillas propias', () => {
   it('los ajustes se guardan encima de los valores por defecto y se pueden borrar', async () => {
     const porDefecto = {
-      pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 3, horaInicio: 9, horaFin: 19,
+      pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 3, pedirUbicacionCadaMinutos: 0, horaInicio: 9, horaFin: 19,
       plantillas: { solicitud: [], recordatorio: [], insistencia: [] },
       textos: { solicitud: [], recordatorio: [], insistencia: [] },
     };

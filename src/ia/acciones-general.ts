@@ -240,7 +240,7 @@ export const MAPA_PANEL: SeccionDelMapa[] = ([
       { metodo: 'GET', ruta: '/admin/rutas/lotes/:id', para: 'ver un lote' },
       { metodo: 'GET', ruta: '/admin/rutas/cola', para: 'ver lo que falta por reportar a GSG' },
       { metodo: 'GET', ruta: '/admin/rutas/ajustes', para: 'ver los ajustes del reparto (pausas, esperas, horario, textos)' },
-      { metodo: 'POST', ruta: '/admin/rutas/ajustes', para: 'cambiar los ajustes del reparto', body: '{ pausaMinSegundos?, pausaMaxSegundos?, esperaRespuestaMinutos?, maxIntentos?, horaInicio?, horaFin?, textos?: { solicitud: [..], recordatorio: [..], insistencia: [..] } }', leer: '/admin/rutas/ajustes' },
+      { metodo: 'POST', ruta: '/admin/rutas/ajustes', para: 'cambiar los ajustes del reparto', body: '{ pausaMinSegundos?, pausaMaxSegundos?, esperaRespuestaMinutos?, maxIntentos?, pedirUbicacionCadaMinutos?, horaInicio?, horaFin?, textos?: { solicitud: [..], recordatorio: [..], insistencia: [..] } }', leer: '/admin/rutas/ajustes' },
       { metodo: 'POST', ruta: '/admin/rutas/lotes', para: 'cargar un lote de clientes para pedirles la ubicación', body: '{ nombre?, texto: "tabla pegada" o filas: [{ telefono, nombre?, referencia?, direccion?, distrito? }], arrancar?: false }', aviso: 'Con arrancar: true empieza a escribirles ya.' },
       { metodo: 'POST', ruta: '/admin/rutas/lotes/:id/estado', para: 'arrancar, pausar o terminar un lote', body: '{ estado: "enviando"|"pausado"|"terminado"|"preparado" }', obligatorios: ['estado'], leer: '/admin/rutas/lotes/:id' },
       { metodo: 'DELETE', ruta: '/admin/rutas/lotes/:id', para: 'borrar un lote', leer: '/admin/rutas/lotes/:id' },

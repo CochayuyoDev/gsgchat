@@ -76,6 +76,8 @@ export interface OpcionesGsg {
   url: string;
   /** La ruta, relativa a la base, a la que se hace POST con la ubicacion (p. ej. v1/gsgchat/location). */
   rutaUbicacion?: string;
+  /** La ruta, relativa a la base, a la que se hace POST con cada numero reportado (por defecto `numeros-reportados`). */
+  rutaReportados?: string;
   /**
    * Compatibilidad: la URL completa de la ubicacion como se guardaba antes.
    * Solo se usa si no hay `rutaUbicacion`, y se convierte a base + ruta con
@@ -96,10 +98,14 @@ export const RUTAS_GSG: Record<TipoReporte, string> = {
   resumen: '/resumenes',
   confirmacion: '/confirmaciones',
   entrega: '/entregas',
+  numero_reportado: '/numeros-reportados',
 };
 
 /** La ruta de la ubicacion cuando no se dio otra: la de siempre (`<base>/sendLocation`). */
 export const RUTA_UBICACION_POR_DEFECTO = 'sendLocation';
+
+/** La ruta de los numeros reportados cuando no se dio otra (`<base>/numeros-reportados`). */
+export const RUTA_REPORTADOS_POR_DEFECTO = 'numeros-reportados';
 
 // ------------------------------------------------------- URL base + ruta
 
@@ -293,12 +299,22 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
       let url: string;
       if (tipo === 'ubicacion') url = destino.urlUbicacion;
       else {
-        const u = unirUrlGsg(destino.base, RUTAS_GSG[tipo]);
+        const ruta = tipo === 'numero_reportado' ? (opts.rutaReportados ?? '').trim() || RUTA_REPORTADOS_POR_DEFECTO : RUTAS_GSG[tipo];
+        const u = unirUrlGsg(destino.base, ruta);
         if (!u.ok) return { ok: false, error: `Configuración de GSG no válida: ${u.error}`, reintentable: true, configuracion: true };
         url = u.url;
       }
-      const claveIdempotente = tipo === 'ubicacion' && opts.idempotenciaUbicacion && typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey.trim() : '';
+      // Un numero reportado lleva SIEMPRE su clave idempotente (`idReporte`):
+      // si GSG lo recibe dos veces tras un corte, es el mismo reporte.
+      const claveIdempotente = tipo === 'numero_reportado' && typeof payload.idReporte === 'string'
+        ? payload.idReporte.trim()
+        : tipo === 'ubicacion' && opts.idempotenciaUbicacion && typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey.trim() : '';
       const idempotente = Boolean(claveIdempotente);
+      const cuerpo = tipo === 'ubicacion'
+        ? { tracking: payload.tracking ?? payload.referencia, lat: payload.lat ?? payload.latitud, lng: payload.lng ?? payload.longitud }
+        : tipo === 'numero_reportado'
+          ? (({ idempotencyKey: _clave, ...resto }) => resto)(payload)
+          : payload;
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
       try {
@@ -310,7 +326,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
             ...cabecerasDeClave(clave),
             ...(idempotente ? { 'Idempotency-Key': claveIdempotente } : {}),
           },
-          body: JSON.stringify(tipo === 'ubicacion' ? { tracking: payload.tracking ?? payload.referencia, lat: payload.lat ?? payload.latitud, lng: payload.lng ?? payload.longitud } : payload),
+          body: JSON.stringify(cuerpo),
           signal: control.signal,
         });
 
@@ -374,12 +390,13 @@ export function crearPuertoEnEspera(): PuertoGsg {
 }
 
 /** El puerto desde el .env (sin pantalla). GSG_API_KEY; GSG_TOKEN se lee por compatibilidad. */
-export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string; GSG_API_KEY?: string; GSG_LOCATION_PATH?: string; GSG_SEND_LOCATION_URL?: string; GSG_IDEMPOTENCY_SUPPORTED?: string }): PuertoGsg {
+export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string; GSG_API_KEY?: string; GSG_LOCATION_PATH?: string; GSG_REPORTADOS_PATH?: string; GSG_SEND_LOCATION_URL?: string; GSG_IDEMPOTENCY_SUPPORTED?: string }): PuertoGsg {
   return config.GSG_URL.trim()
     ? crearPuertoHttp({
         url: config.GSG_URL,
         token: (config.GSG_API_KEY ?? '').trim() || config.GSG_TOKEN,
         rutaUbicacion: config.GSG_LOCATION_PATH || undefined,
+        rutaReportados: config.GSG_REPORTADOS_PATH || undefined,
         idempotenciaUbicacion: config.GSG_IDEMPOTENCY_SUPPORTED === 'true',
         ubicacionUrl: config.GSG_SEND_LOCATION_URL || undefined,
       })
@@ -398,7 +415,8 @@ export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string; GSG
 export const PAYLOADS = {
   ubicacion:
     'referencia, telefono, nombre, lat, lng, mapsUrl, precisionMetros, fuente, recibidoEn, lote' +
-    ' (+ corregida: true cuando el cliente mando un segundo pin: sustituye al anterior de la misma referencia)',
+    ' (+ corregida: true cuando el cliente mando un segundo pin: sustituye al anterior de la misma referencia)' +
+    ' (+ cambioUbicacion: true, cambiadaEn, cambios y anterior {lat, lng} cuando el cliente cambio su ubicacion: pidio cambiarla o mando otra)',
   incidencia:
     'referencia, telefono, nombre, codigo, titulo, detalle, queHacer, intentos, ultimoEnvio, requiereHumano, lote',
   resumen: 'lote, nombre, total, porEstado, porIncidencia, generadoEn',
@@ -409,6 +427,10 @@ export const PAYLOADS = {
     'referencia, telefono, nombre, lat, lng, motorizado {telefono, nombre, placa}, minutosMotorizado, margenMinutos, minutosAviso, llegaAproxEn, avisadoEn,' +
     ' entregadoEn (null hasta que el motorizado dice "entregado"), entregadaComo (reglas|ia|foto|persona|cierre), incidencia (no_entregado cuando no se pudo),' +
     ' prioridad (normal|urgente), visitas (veces que el motorizado fue sin poder entregar), segundaVisita (true cuando el cliente pidio que volviera hoy)',
+  numero_reportado:
+    'tipo (numero_reportado), tracking, referencia, telefono (tal como llego), error (telefono_invalido | sin_whatsapp | envio_fallido | tracking_falta |' +
+    ' tracking_invalido | tracking_duplicado | tracking_de_otro_pedido | telefono_de_motorizado | no_soy_yo), mensaje (en palabras), detalle, reportadoAt, dia,' +
+    ' idReporte (va tambien en la cabecera Idempotency-Key). Un reporte por tracking + error: se corrige con POST /api/v1/reportados/{tracking}/correccion',
 } as const;
 
 /** GSG dice que el cliente confirmo (o no) su pedido de hoy. Ver src/entregas. */

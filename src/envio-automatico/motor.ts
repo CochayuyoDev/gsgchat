@@ -268,8 +268,8 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
           return { accion: 'salida', entradaId: e.id, motivo: 'agotó los mensajes' };
         }
 
-        // La «única verdad» de la ubicacion: si hoy ya la registro (en las
-        // entregas, venga por donde venga), no se le vuelve a pedir: sale.
+        // La «única verdad» de la ubicacion, por dia: si hoy ya la registro
+        // (por este u otro pedido suyo de hoy), no se le vuelve a pedir: sale.
         if (e.que === 'ubicacion' || e.hasta === 'ubicacion') {
           const registrada = await ubicacionYaRegistrada(repos, e.phone, diaEnZona(momento, opciones.timezone));
           if (registrada) {

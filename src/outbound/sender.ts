@@ -79,6 +79,14 @@ export interface SendJob {
    * algo después del agradecimiento. Es lo único que sale a un cliente en silencio.
    */
   cierreTrasGracias?: boolean;
+  /**
+   * Regla del dueño (10/10): tras UBI REGISTRADA, la respuesta de la IA a una
+   * consulta del cliente sobre SU pedido (dónde está, cuándo llega, la
+   * ventana). Redactada por el modelo con el contexto del pedido y revisada
+   * en código (ver src/ia/consulta-pedido.ts): sale aunque el chat esté en
+   * silencio y aunque sea «Solo lo de GSG».
+   */
+  consultaCliente?: boolean;
 
   text?: string;
   location?: { latitude: number; longitude: number; name?: string; address?: string };

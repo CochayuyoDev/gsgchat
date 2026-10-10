@@ -29,6 +29,7 @@ import { createCodigosConexionRepo, type CodigosConexionRepo } from '../auth/cod
 import { createTiendasRepo, type TiendasRepo } from '../tiendas/repo.js';
 import { createEntregasRepo, type EntregasRepo } from '../entregas/repo.js';
 import { createProcesosRepo, type ProcesosRepo } from '../procesos/repo.js';
+import { crearReportadosRepo, type ReportadosRepo } from '../entregas/reportados.js';
 import type { ComoSeDecidio, DecisionBot, IntencionGsg, NuevaDecision } from '../ia/decision.js';
 
 // ---------------------------------------------------------------- modelos
@@ -631,6 +632,8 @@ export interface Repos {
   procesos?: ProcesosRepo;
   /** Por que respondio el bot en cada turno. Ver src/ia/decision.ts. */
   decisiones: DecisionesRepo;
+  /** Los numeros y trackings malos reportados a GSG (migracion 006). Ver src/entregas/reportados.ts. */
+  reportados?: ReportadosRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -2055,6 +2058,7 @@ export function createRepos(pool: Pool): Repos {
     codigosConexion: createCodigosConexionRepo(pool),
     tiendas: createTiendasRepo(pool),
     entregas: createEntregasRepo(pool),
+    reportados: crearReportadosRepo(pool),
     desarrollador: createDesarrolladorRepo(pool),
     procesos: createProcesosRepo(pool),
     decisiones,

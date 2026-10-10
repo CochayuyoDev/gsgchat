@@ -30,6 +30,7 @@ import { crearConexionGsg, type ServicioConexionGsg } from '../src/rutas/conexio
 import { cargarLote } from '../src/rutas/cargar.js';
 import { PLANES } from '../src/rutas/telefono.js';
 import { crearGsgSimulado, enviarListaDelSimulador, type GsgSimulado } from '../src/entregas/gsg-simulado.js';
+import type { CalcularRuta } from '../src/entregas/seguimiento-gsg.js';
 import { crearServicioEntregas, type ServicioEntregas, type FilaEntrega, type ResumenEntregas, type ResultadoSincronizacion } from '../src/entregas/servicio.js';
 import { crearMotorEntregas, type MotorEntregas, type ResultadoTickEntregas } from '../src/entregas/motor.js';
 import type { LectorIA } from '../src/entregas/interpretar.js';
@@ -164,6 +165,8 @@ export async function crearEscenarioEntregas(opciones: {
   geocodificador?: Geocodificador | null;
   /** Cuánto espera el cierre a que se asigne motorizado (0 en las pruebas salvo que se pida). */
   esperaMotorizadoMs?: number;
+  /** El calculador de rutas (Google en producción; uno de mentira en las pruebas). */
+  calcularRuta?: CalcularRuta;
 } = {}): Promise<EscenarioEntregas> {
   const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
@@ -171,6 +174,10 @@ export async function crearEscenarioEntregas(opciones: {
     RUTAS_HORA_FIN: String(horaFin),
     RUTAS_PAUSA_MIN_SEG: String(PAUSA_SEGUNDOS),
     RUTAS_PAUSA_MAX_SEG: String(PAUSA_SEGUNDOS),
+    // El motor de la prueba arranca con OPCIONES_POR_DEFECTO (sin pedir la
+    // ubicacion cada 15 min): el manejador de entrantes, igual. Quien quiera
+    // probar el modo de 15 min lo guarda en los ajustes del reparto.
+    RUTAS_PEDIR_UBI_CADA_MIN: '0',
     PUBLIC_BASE_URL: 'http://localhost:3000',
     DATABASE_URL: 'mysql://x/y',
     WHATSAPP_TOKEN: 't',
@@ -284,6 +291,7 @@ export async function crearEscenarioEntregas(opciones: {
     geocodificador: opciones.geocodificador ?? null,
     ahora: reloj,
     ...(opciones.esperaMotorizadoMs !== undefined ? { esperaMotorizadoMs: opciones.esperaMotorizadoMs } : {}),
+    ...(opciones.calcularRuta ? { calcularRuta: opciones.calcularRuta } : {}),
   });
   entregasDeLaRegla = entregas;
   if (opciones.margenMinutos !== undefined) await entregas.guardarAjustes({ margenMinutos: opciones.margenMinutos });

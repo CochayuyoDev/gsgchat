@@ -26,6 +26,8 @@ export interface AjustesRutas {
   esperaRespuestaMinutos: number;
   /** Mensajes por cliente antes de pasarlo al repartidor. */
   maxIntentos: number;
+  /** Sin ubicacion, se le vuelve a pedir cada tantos minutos y sin tope (0 = apagado). Ver OpcionesMotor. */
+  pedirUbicacionCadaMinutos: number;
   /** Franja horaria de envio, hora del negocio. */
   horaInicio: number;
   horaFin: number;
@@ -50,6 +52,7 @@ export const ajustesSchema = z.object({
   pausaMaxSegundos: z.coerce.number().int().min(1).max(900),
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
   maxIntentos: z.coerce.number().int().min(1).max(3),
+  pedirUbicacionCadaMinutos: z.coerce.number().int().min(0).max(24 * 60),
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
   plantillas: z.object({ solicitud: listaDeNombres, recordatorio: listaDeNombres, insistencia: listaDeNombres }),
@@ -65,6 +68,7 @@ export function ajustesPorDefecto(opciones: OpcionesMotor): AjustesRutas {
     pausaMaxSegundos: opciones.pausaMaxSegundos,
     esperaRespuestaMinutos: opciones.esperaRespuestaMinutos,
     maxIntentos: opciones.maxIntentos,
+    pedirUbicacionCadaMinutos: opciones.pedirUbicacionCadaMinutos,
     horaInicio: opciones.horaInicio,
     horaFin: opciones.horaFin,
     plantillas: { solicitud: [], recordatorio: [], insistencia: [] },
@@ -81,6 +85,7 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     pausaMaxSegundos: Math.max(ajustes.pausaMinSegundos, ajustes.pausaMaxSegundos),
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
     maxIntentos: Math.min(3, ajustes.maxIntentos),
+    pedirUbicacionCadaMinutos: Math.max(0, ajustes.pedirUbicacionCadaMinutos ?? opciones.pedirUbicacionCadaMinutos),
     horaInicio: ajustes.horaInicio,
     horaFin: Math.max(ajustes.horaInicio + 1, ajustes.horaFin),
   };

@@ -28,7 +28,9 @@ function hoyALas9(): Date {
   return d;
 }
 
-const PIDE_LA_NUEVA = '¡Claro! Entiendo. Mándame la nueva ubicación para tenerla en cuenta para el mismo día.';
+/** «Claro, {nombre}, por favor mándeme su nueva ubicación…» (pedido del dueño, 10/10). */
+const pideLaNueva = (nombre: string): string => `Claro, ${nombre}, por favor mándeme su nueva ubicación por WhatsApp (el botón de ubicación) para registrarla.`;
+const PIDE_LA_NUEVA = pideLaNueva('Ana');
 const AVISO_1PM = /Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la 1:00 PM para tenerla en cuenta el mismo día\./;
 const MOTO = '999888777';
 
@@ -211,7 +213,8 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     expect(menu[0]!.buttons.map((b) => b.title)).toEqual(['Horarios y zona', 'Hablar con asesor']);
 
     const info = await botonesNuevos(ANA, () => e.contesta(ANA, { texto: '1' }));
-    expect(info[0]?.body).toMatch(/Horario: de \d{1,2}:\d{2} [AP]M a \d{1,2}:\d{2} [AP]M/);
+    // La ventana de SU pedido (GSG, distrito o general), dicha como se habla (10/10).
+    expect(info[0]?.body).toMatch(/Horario: de \d{1,2}(:\d{2})?( de la (mañana|tarde|noche))? a \d{1,2}(:\d{2})? de la (mañana|tarde|noche)/);
     expect(info[0]?.buttons.map((b) => b.title)).toEqual(['Hablar con asesor']);
 
     await botonesNuevos(ANA, () => e.contesta(ANA, { texto: 'zzz' }));
@@ -290,7 +293,7 @@ describe('«Solo lo de GSG»: variantes del cambio y el cliente que escribe ante
     const r = await nuevos(BRUNO, () => e.contesta(BRUNO, { pin: EN_CERCADO }));
     expect(r.some((t) => t.includes('Ubicación registrada correctamente')), r.join('\n---\n')).toBe(true);
     for (const texto of ['esa no es mi ubicación', 'me equiboque de ubicasion', 'la mandé mal']) {
-      expect(await nuevos(BRUNO, () => e.contesta(BRUNO, { texto })), texto).toEqual([PIDE_LA_NUEVA]);
+      expect(await nuevos(BRUNO, () => e.contesta(BRUNO, { texto })), texto).toEqual([pideLaNueva('Bruno')]);
     }
     const r2 = await nuevos(BRUNO, () => e.contesta(BRUNO, { pin: { lat: EN_CERCADO.lat + 0.003, lng: EN_CERCADO.lng + 0.003 } }));
     expect(r2.some((t) => /Tu nueva ubicación se ha registrado correctamente/.test(t)), r2.join('\n---\n')).toBe(true);

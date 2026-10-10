@@ -103,13 +103,26 @@ import type { PrimerMensajeReparto } from '../rutas/motor.js';
 import { apartarPorMotorizado, resolverPorUbicacion, soltarSolicitudes, solicitudesAbiertasDe } from './ubicacion-unica.js';
 import { pareceNoSoyYo, TEXTO_NO_SOY_YO } from '../rutas/inbound.js';
 import { distanciaAlDistrito, distritoDePedido, distritoEnDireccion } from './distritos-centro.js';
+import { ventanaDeEntrega, variablesDeVentana, fuenteEnPalabras } from './horario-distrito.js';
 import { limpiarDireccion, analizarNumeracion } from './direccion-escrita.js';
-import { crearConsultaSeguimiento, textoSeguimiento, textoHorario, type CalcularRuta } from './seguimiento-gsg.js';
+import { crearConsultaSeguimiento, leerSeguimiento, textoSeguimiento, textoHorario, type CalcularRuta, type DistanciaRuta, type FalloSeguimiento, type SeguimientoGsg } from './seguimiento-gsg.js';
+import { crearFuentePropia, trackingDe } from './seguimiento-propio.js';
+import { crearFuenteCombinada, crearSeguimientosRecibidosMemoria, type SeguimientosRecibidosRepo } from './seguimiento-recibido.js';
 import type { Lote } from '../db/rutas.js';
 import type { Geocodificador, ResultadoGeo } from './geocodificar.js';
 import { calcularAlertas, type AlertaHoy } from './alertas-hoy.js';
+import { errorDeEnvio, fichasDeTrackings, reportarNumero, type FichaTracking, type NuevoReportado, type NumeroReportado } from './reportados.js';
 
 /** La fuente de una ubicación que salió de la dirección escrita (no es un pin: es aproximada). */
+
+/**
+ * Regla del dueño (10/10): la ubicacion vale por DIA. El mismo dia, otro
+ * pedido del mismo numero (p. ej. dos trackings de dos tiendas) toma la ya
+ * registrada: un solo mensaje al cliente y la lat/lng va a GSG para cada
+ * tracking. Otro dia se le vuelve a pedir (cada dia es un pedido nuevo).
+ */
+const PEDIR_UBICACION_EN_CADA_PEDIDO = false;
+
 export const FUENTE_DIRECCION_ESCRITA = 'dirección escrita (aproximada)';
 /** Una dirección escrita vale si el mapa la pone a menos de esto (km) de su distrito. */
 const KM_DIRECCION_EN_SU_DISTRITO = 1;
@@ -183,6 +196,8 @@ export interface RespuestaEntregas {
   responder?: string;
   /** Si la respuesta lleva botones (SI / NO): quien la manda los pone si el WhatsApp puede. */
   botones?: Array<{ id: string; title: string }>;
+  /** La respuesta pide la ubicación: quien la manda pone el botón de ubicación de WhatsApp (como el primer mensaje). */
+  pedirUbicacion?: boolean;
   entrega?: Entrega;
   /** Que se decidio, para la bitacora y las pruebas. */
   resultado?: string;
@@ -268,6 +283,20 @@ export interface FilaEntrega extends Entrega {
   solicitud?: Pick<Solicitud, 'id' | 'estado' | 'intentos' | 'incidencia' | 'loteId'> | null;
   /** Las referencias de los OTROS pedidos vivos de hoy del mismo cliente (mismo telefono). */
   mismoCliente: string[];
+  /** «cambió su ubicación (10:42)»: la marca que ven Hoy, Números del día y la ficha. null = nunca la cambió. */
+  cambioUbicacion?: string | null;
+}
+
+/**
+ * La marca del cliente que cambió su ubicación, con la hora (en el reloj de
+ * la tienda) y, si fue más de una vez, cuántas: «cambió su ubicación (10:42)»,
+ * «cambió su ubicación 2 veces (la última, 12:05)». null = nunca la cambió.
+ */
+export function marcaCambioUbicacion(e: Pick<Entrega, 'ubicacionCambiadaAt' | 'ubicacionCambios'>, timezone: string): string | null {
+  if (!e.ubicacionCambiadaAt) return null;
+  const hora = horaEnReloj(e.ubicacionCambiadaAt, timezone);
+  const veces = e.ubicacionCambios ?? 1;
+  return veces > 1 ? `cambió su ubicación ${veces} veces (la última, ${hora})` : `cambió su ubicación (${hora})`;
 }
 
 /** Lo que hizo el ultimo cierre del dia. */
@@ -503,6 +532,8 @@ export interface ServicioEntregas {
    * ubicación registrada hoy (no es un cambio).
    */
   cambioDeUbicacion(phone: string): Promise<string | null>;
+  /** Lo mismo, diciendo si ya pasó la hora límite (antes de ella se manda con el botón de ubicación). */
+  cambioDeUbicacionDetalle(phone: string): Promise<{ texto: string; tarde: boolean } | null>;
   /**
    * Si este telefono tiene alguna entrega en curso (aunque todavia no se le
    * haya escrito). A un cliente de entrega nunca se le ofrece «Cotizar envío»:
@@ -683,6 +714,14 @@ export interface ServicioEntregas {
   descripcionParaIA(): Promise<string>;
   /** Lo que el asistente puede decirle a ESTE cliente sobre su pedido de hoy. */
   contextoDeCliente(phone: string): Promise<string | null>;
+  /**
+   * El seguimiento de cada pedido vivo de ese telefono (lo empujado por GSG o
+   * lo armado con datos propios), con el texto listo para el cliente. Lee de
+   * la base, sin llamar a GSG; Google solo si hace falta y con cache.
+   */
+  seguimientoDeCliente(phone: string): Promise<Array<{ referencia: string; tracking: string; seguimiento: SeguimientoGsg | null; distancia: DistanciaRuta | null; texto: string | null }>>;
+  /** GSG empuja el seguimiento de un tracking (POST /api/v1/seguimiento): se valida y se guarda el ultimo. */
+  recibirSeguimiento(cuerpo: unknown): Promise<{ ok: true; tracking: string; referencia: string; estado: SeguimientoGsg['estado']; puntoActual: number | null; puntoCliente: number | null; paradas: number } | { ok: false; status: 400 | 404 | 422; codigo: 'VALIDACION' | 'NO_EXISTE'; detalle: string; motivo?: string }>;
   /** El pedido (referencia) mas reciente de ese telefono, de hoy o de ayer, para ligarle una conversacion guardada. */
   pedidoDe(phone: string): Promise<string | null>;
   /** Los pedidos de hoy que ya terminaron (avisados o terminados) con su telefono: para guardar sus conversaciones de golpe. */
@@ -697,6 +736,22 @@ export interface ServicioEntregas {
   revisarMensajes(): Promise<{ inciertos: number; disparados: number; puestosAlDia: number }>;
   /** El dia de hoy en la zona de la tienda (AAAA-MM-DD): el que usa Hoy. */
   diaDeHoy(): string;
+  /** El telefono normalizado (51...), o null si no es valido. */
+  normalizarTelefono(texto: string): string | null;
+  /**
+   * Reporta a GSG un numero o tracking malo (ver src/entregas/reportados.ts):
+   * una vez por tracking + error. null = ya estaba reportado (no se repite).
+   */
+  reportarNumero(n: Omit<NuevoReportado, 'dia'> & { dia?: string }): Promise<NumeroReportado | null>;
+  /**
+   * GSG corrigio el telefono de un pedido: se cambia, se suelta lo que se le
+   * pedia al numero viejo y, si aun falta la ubicacion, se le pide al nuevo
+   * por el flujo normal (o queda esperando «Confirmar y enviar» si ese ajuste
+   * esta encendido).
+   */
+  corregirTelefono(id: number, telefono: string, quien: string): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }>;
+  /** Lo que ya se hizo por WhatsApp con cada tracking de `dia` (todos, o solo esos ids). */
+  fichasTrackings(dia: string, soloIds?: number[]): Promise<FichaTracking[]>;
   /** La bandeja de errores de mensajes de esta tienda. */
   bandejaMensajes(): Promise<ItemBandejaMensajes[]>;
   /** «Reintentar mensaje»: el mismo disparador sobre el pedido existente. */
@@ -757,6 +812,8 @@ export interface DepsEntregas {
    */
   geocodificador?: Geocodificador | null;
   calcularRuta?: CalcularRuta;
+  /** Donde se guarda el ultimo seguimiento que GSG empujo (en memoria si no se da). */
+  seguimientosRecibidos?: SeguimientosRecibidosRepo;
   ahora?: () => Date;
   log?: (m: string, d?: Record<string, unknown>) => void;
 }
@@ -876,7 +933,22 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   const avisosCanceladoEnCamino = new Set<string>();
   const log = deps.log ?? (() => undefined);
   const ahora = deps.ahora ?? (() => new Date());
-  const seguimientoGsg = crearConsultaSeguimiento(null, deps.calcularRuta, ahora);
+  // El seguimiento sale de la base: primero lo que GSG empujo (reciente y
+  // valido), si no lo que arma GSGchat con sus pedidos, motorizados y rastreo.
+  const seguimientosRecibidos = deps.seguimientosRecibidos ?? crearSeguimientosRecibidosMemoria();
+  const fuentePropia = crearFuentePropia({
+    entregasDelDia: () => repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA }),
+    motorizado: (id) => repo.motorizado(id),
+    motorizadoPorTelefono: (phone) => repo.motorizadoPorTelefono(phone),
+    posicionEnVivo: async (phone) => {
+      const sesiones = await repos.tracking.listActive(ahora()).catch(() => []);
+      const puntos = sesiones.filter((s) => s.phone === phone && s.lastPoint).map((s) => s.lastPoint!);
+      const ultimo = puntos.sort((a, b) => b.at.getTime() - a.at.getTime())[0];
+      return ultimo ? { lat: ultimo.lat, lng: ultimo.lng, at: ultimo.at } : null;
+    },
+    ahora,
+  });
+  const seguimientoGsg = crearConsultaSeguimiento(crearFuenteCombinada(seguimientosRecibidos, fuentePropia, ahora), deps.calcularRuta, ahora);
   const zonaBase = deps.timezone ?? 'America/Lima';
   /** La zona horaria de cada momento: la de Ajustes si la hay, si no la de arranque. */
   const tz = (): string => (deps.zonaHoraria ? deps.zonaHoraria() || zonaBase : zonaBase);
@@ -958,7 +1030,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     pedido: e.referencia,
     negocio: deps.nombreNegocio(),
     direccion: e.direccion,
-    distrito: e.distrito,
+    // El que manda GSG; si no vino, el que nombra la dirección (para «Horario aproximado de llegada para {distrito}»).
+    distrito: e.distrito || distritoDePedido(e),
     mapa: e.lat != null && e.lng != null ? enlaceMapa(e.lat, e.lng) : e.mapsUrl,
     lat: e.lat,
     lng: e.lng,
@@ -973,9 +1046,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     horaEntregada: e.entregadaAt ? horaEnReloj(e.entregadaAt, tz()) : null,
     situacion: situacionDe(e, m ?? null, ajustes, tz(), reglaGsgActiva()),
     urgente: e.prioridad === 'urgente',
-    desde: horaEnPalabras(e.datosEnvio?.horarioEntregaDesde || ajustes.horarioEntregas.desde) + (e.datosEnvio?.horarioEntregaFechaDesde ? ` del ${e.datosEnvio.horarioEntregaFechaDesde}` : ""),
-    hasta: horaEnPalabras(e.datosEnvio?.horarioEntregaHasta || ajustes.horarioEntregas.hasta) + (e.datosEnvio?.horarioEntregaFechaHasta ? ` del ${e.datosEnvio.horarioEntregaFechaHasta} (${e.datosEnvio.horarioEntregaZonaHoraria})` : ""),
-    hastaExtendido: horaEnPalabras(e.datosEnvio?.horarioEntregaHasta || ajustes.horarioEntregas.extendidoHasta),
+    // La ventana de GSG para el pedido; si no, la de su distrito; si no, la general.
+    ...variablesDeVentana(ventanaDeEntrega(e, ajustes)),
     soporte: soporteEnPalabras(ajustes.soporte),
     telefonoMotorizado: numeroParaCliente(e, m),
     telefonoCliente: telefonoEnPalabras(e.phone),
@@ -998,9 +1070,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       nombre: datos.nombre ?? null,
       negocio: deps.nombreNegocio(),
       mapa: datos.mapa ?? null,
-      desde: horaEnPalabras(ajustes.horarioEntregas.desde),
-      hasta: horaEnPalabras(ajustes.horarioEntregas.hasta),
-      hastaExtendido: horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
+      ...variablesDeVentana(ventanaDeEntrega(null, ajustes)),
       soporte: soporteEnPalabras(ajustes.soporte),
       telefonoMotorizado: numeroParaCliente(null, null),
     });
@@ -1737,20 +1807,33 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   }
 
   /**
-   * El cliente, con su ubicación ya registrada, pide cambiarla. Antes de la
-   * hora límite: que mande la nueva (el pin siguiente se registra como
-   * «ubicación cambiada»). Después: el número del motorizado para que
-   * coordine con él. null = no tiene ninguna ubicación registrada en curso.
+   * El cliente pide cambiar su ubicación («quiero cambiar mi ubicación», «me
+   * equivoqué de dirección», «te mando otra»). Antes de la hora límite: que
+   * mande la nueva, con el botón de ubicación (`pedirUbicacion`), y sus
+   * pedidos quedan marcados (`ubicacionCambioPedidoAt`): el pin siguiente se
+   * registra como «cambió su ubicación» aunque alguno aún no la tuviera.
+   * Después: el número del motorizado para que coordine con él (regla del
+   * dueño, sin cambios). null = no tiene pedidos en curso a los que aplique
+   * (después de la hora, solo cuenta quien ya la tenía registrada).
    */
   async function pedidoDeCambioDeUbicacion(phone: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean } | null> {
-    const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && x.ubicacionEstado === 'recibida');
-    if (!vivas.length) return null;
-    const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
+    const enCurso = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
+    const vivas = enCurso.filter((x) => x.ubicacionEstado === 'recibida');
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
     if (!pasoLaHoraDeCambio()) {
-      for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
+      // Con su ubicación registrada, o esperándola (la dirección que tenía GSG está mal).
+      const aCambiar = vivas.length ? enCurso.filter((x) => x.ubicacionEstado !== 'no_hace_falta') : enCurso.filter((x) => x.ubicacionEstado === 'pendiente');
+      if (!aCambiar.length) return null;
+      const e = aCambiar.find((x) => x.motorizadoId) ?? aCambiar[0]!;
+      const en = ahora();
+      for (const x of aCambiar) {
+        await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
+        await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
+      }
       return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false };
     }
+    if (!vivas.length) return null;
+    const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
     const g = vivas.find((x) => x.datosEnvio?.telefonoMotorizado) ?? e;
     const m = await motorizadoDe(g).catch(() => null);
     const numero = numeroDeGsg(g, m);
@@ -1823,14 +1906,24 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         continue;
       }
       const corrige = e.ubicacionEstado === 'recibida';
-      corrigeAlguna = corrigeAlguna || corrige;
+      // «Cambió su ubicación»: ya tenía una registrada, o pidió cambiarla
+      // antes de que llegara (queda en el pedido y lo ven las pantallas).
+      const cambia = corrige || Boolean(e.ubicacionCambioPedidoAt);
+      corrigeAlguna = corrigeAlguna || cambia;
+      const enCambio = ahora();
+      const anterior = cambia && e.lat != null && e.lng != null ? { lat: e.lat, lng: e.lng } : null;
+      const cambios = cambia ? (e.ubicacionCambios ?? 0) + 1 : (e.ubicacionCambios ?? 0);
+      const marcaCambio = cambia
+        ? { ubicacionCambiadaAt: enCambio, ubicacionCambios: cambios, ubicacionCambioPedidoAt: null, ubicacionAnteriorLat: anterior?.lat ?? null, ubicacionAnteriorLng: anterior?.lng ?? null }
+        : {};
       const liberada = e.estado === 'incidencia' && LIBERA_CON_PIN.has(e.incidencia ?? '');
       const falsa = { id: 0, loteId: e.loteId ?? '', contactId: contact.id, telefonoCrudo: e.phone, phone: e.phone, nombre: e.nombre, referencia: e.referencia, direccion: e.direccion, distrito: e.distrito, estado: 'resuelto', resueltoAt: ahora(), lat: ubicacion.lat, lng: ubicacion.lng, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', mapsUrl } as Solicitud;
       const debeReportar = !ubicacion.yaReportada || e.id !== primeraQueCambia?.id;
-      const payload = { ...payloadUbicacion(falsa, { id: e.loteId ?? 'entregas', nombre: 'Entregas del día', externoId: null, origen: 'gsg', estado: 'enviando' } as Lote), ...(corrige ? { corregida: true } : {}), tracking: e.datosEnvio?.tracking ?? e.referencia };
-      let act = await repo.registrarUbicacionAtomica(e.id, { ubicacionEstado: 'recibida', lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', ubicacionAt: ahora(), ubicacionPropuestaAt: null, ...(e.pinPropuestoAt ? { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 } : {}), ...(liberada ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) }, debeReportar ? { loteId: e.loteId ?? null, payload } : null, ubicacion.propuestaAt);
+      const payload = { ...payloadUbicacion(falsa, { id: e.loteId ?? 'entregas', nombre: 'Entregas del día', externoId: null, origen: 'gsg', estado: 'enviando' } as Lote), ...(corrige ? { corregida: true } : {}), ...(cambia ? { cambioUbicacion: true, cambiadaEn: enCambio.toISOString(), cambios, ...(anterior ? { anterior } : {}) } : {}), tracking: e.datosEnvio?.tracking ?? e.referencia };
+      let act = await repo.registrarUbicacionAtomica(e.id, { ubicacionEstado: 'recibida', lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl, ubicacionFuente: ubicacion.fuente ?? 'whatsapp', ubicacionAt: ahora(), ubicacionPropuestaAt: null, ...marcaCambio, ...(e.pinPropuestoAt ? { pinPropuestoLat: null, pinPropuestoLng: null, pinPropuestoAt: null, pinPropuestoFuente: null, pinPropuestoDudas: 0 } : {}), ...(liberada ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) }, debeReportar ? { loteId: e.loteId ?? null, payload } : null, ubicacion.propuestaAt);
       if (!act) continue;
-      await evento(act, 'ubicacion', corrige ? `ubicación corregida por el cliente (${ubicacion.fuente ?? 'whatsapp'})` : `ubicación recibida (${ubicacion.fuente ?? 'whatsapp'})${todas.length > 1 ? ` (vale para sus ${todas.length} pedidos de hoy)` : ''}${liberada ? `: ya no necesita a nadie (estaba apartada: ${e.incidenciaDetalle ?? e.incidencia ?? 'sin ubicación'})` : ''}`, { lat: ubicacion.lat, lng: ubicacion.lng });
+      const coords = (p: { lat: number; lng: number }) => `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
+      await evento(act, 'ubicacion', cambia ? `ubicación cambiada por el cliente (${ubicacion.fuente ?? 'whatsapp'}): ${anterior ? `antes ${coords(anterior)}` : 'antes sin ubicación'}, ahora ${coords(ubicacion)}${cambios > 1 ? ` (cambio ${cambios})` : ''}` : `ubicación recibida (${ubicacion.fuente ?? 'whatsapp'})${todas.length > 1 ? ` (vale para sus ${todas.length} pedidos de hoy)` : ''}${liberada ? `: ya no necesita a nadie (estaba apartada: ${e.incidenciaDetalle ?? e.incidencia ?? 'sin ubicación'})` : ''}`, { lat: ubicacion.lat, lng: ubicacion.lng, ...(cambia ? { cambiada: true, anterior, cambios } : {}) });
       if (debeReportar) await evento(act, 'reporte', 'ubicación y reporte guardados en una transacción');
 
       // Lo llevaba un motorizado SIN ubicación: sigue con el mismo, y solo se le
@@ -2148,6 +2241,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       let act = (await repo.actualizar(e.id, { confirmacionProximoAt: null, motorizadoProximoAt: null, ...(conMotorizado ? { motorizadoId: null, motorizadoEstado: 'sin_asignar' as const } : {}) })) ?? e;
       act = await marcarIncidencia(act, INCIDENCIA_NO_SOY_YO, detalle);
       await reportar(act, 'confirmacion', payloadConfirmacion({ referencia: act.referencia, phone: act.phone, nombre: act.nombre, confirmada: false, respuesta: texto.slice(0, 300), como: comoConfirmo, motivo: 'numero_equivocado', en }));
+      if (esDeGsg(act)) await reportarNumeroInterno({ error: 'no_soy_yo', tracking: act.datosEnvio?.tracking ?? act.referencia, referencia: act.referencia, telefono: act.phone, detalle: `contestó: "${texto.slice(0, 200)}"`, entregaId: act.id, dia: act.dia }).catch(() => undefined);
       tocadas.push(act);
     }
     const soltadas = await soltarSolicitudes(repos, contact.phone, { ahora: en, motivo: `dijo que no es el cliente: "${texto.slice(0, 120)}"`, estado: 'supervision', incidencia: 'numero_equivocado' }).catch(() => []);
@@ -2203,9 +2297,14 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   /**
    * Un pedido nuevo de un cliente que HOY ya mando su ubicacion (por otro
-   * pedido): vale la misma, no se le vuelve a pedir. GSG se entera.
+   * pedido): vale la misma, no se le vuelve a pedir. GSG se entera para ese
+   * tracking. De otro dia no vale (ubicacionDelClienteDelDia es del dia).
    */
   async function aplicarUbicacionConocida(e: Entrega): Promise<Entrega | null> {
+    if (!PEDIR_UBICACION_EN_CADA_PEDIDO) return aplicarUbicacionConocidaDe(e);
+    return null;
+  }
+  async function aplicarUbicacionConocidaDe(e: Entrega): Promise<Entrega | null> {
     if (e.ubicacionEstado !== 'pendiente' || e.envioRetenidoAt || ESTADOS_FINALES.includes(e.estado)) return null;
     const conocida = await repo.ubicacionDelClienteDelDia(e.phone, e.dia).catch(() => null);
     if (!conocida || conocida.id === e.id || conocida.lat == null || conocida.lng == null) return null;
@@ -2269,7 +2368,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // modos: con «Todo el sistema» caía al menú de la preventa (30/09).
     if (!opts.boton && pideCambioUbicacion(texto)) {
       const cambio = await pedidoDeCambioDeUbicacion(contact.phone);
-      if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto };
+      if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto, ...(cambio.tarde ? {} : { pedirUbicacion: true }) };
     }
     // "¿Dónde está mi pedido?": se contesta segun el estado, sin IA. Vale
     // para la viva de hoy y para la que ya figura como entregada hoy.
@@ -4055,6 +4154,7 @@ ${lista}
       if (n > cfg.maximo) {
         const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'fallido', mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: 'reintentos_agotados', mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
         if (act) await evento(act, 'incidencia', `el primer mensaje falló ${intentos} veces: se deja de reintentar solo (bandeja de errores)`);
+        if (act) await reportarFalloDeEnvio(act, 'reintentos_agotados', d.motivo);
         return { detener: motivoLegible('reintentos_agotados', d.motivo) };
       }
       const esperaMs = esperaDelReintento(n, cfg, d.esperaMinMs ?? 0);
@@ -4065,7 +4165,24 @@ ${lista}
     const estado: EstadoMensaje = d.tipo === 'incierto' ? 'incierto' : 'fallido';
     const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: estado, mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: d.tipo === 'permanente' });
     if (act) await evento(act, 'incidencia', d.tipo === 'incierto' ? `no se sabe si le llegó el primer mensaje (${d.motivo.slice(0, 120)}): no se reenvía solo` : `el primer mensaje no se puede mandar: ${motivoLegible(d.codigo, d.motivo)}`);
+    if (act && estado === 'fallido') await reportarFalloDeEnvio(act, d.codigo, d.motivo);
     return { detener: motivoLegible(d.codigo, d.motivo) };
+  }
+
+  // ---------------------------------------------- numeros reportados a GSG
+
+  /** Un pedido que mando GSG (trae su tracking o su id de GSG): solo esos se le reportan. */
+  const esDeGsg = (e: Entrega): boolean => Boolean(e.datosEnvio?.tracking || e.externoId);
+
+  async function reportarNumeroInterno(n: Omit<NuevoReportado, 'dia'> & { dia?: string }): Promise<NumeroReportado | null> {
+    return reportarNumero({ repos, gsg: deps.gsg, ahora, log }, { ...n, dia: n.dia ?? hoy() });
+  }
+
+  /** El primer mensaje ya no sale y es por el numero: GSG se entera (una vez). */
+  async function reportarFalloDeEnvio(e: Entrega, codigo: string, motivo: string): Promise<void> {
+    const error = errorDeEnvio(codigo);
+    if (!error || !esDeGsg(e)) return;
+    await reportarNumeroInterno({ error, tracking: e.datosEnvio?.tracking ?? e.referencia, referencia: e.referencia, telefono: e.phone, detalle: motivoLegible(codigo, motivo).slice(0, 500), entregaId: e.id, dia: e.dia }).catch((fallo: unknown) => log('no se pudo reportar el número a GSG', { detalle: String(fallo) }));
   }
 
   /**
@@ -4308,6 +4425,61 @@ ${lista}
     return resultado;
   }
 
+  /** GSG corrigio el telefono (ver ServicioEntregas.corregirTelefono). */
+  async function corregirTelefono(id: number, telefono: string, quien: string): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }> {
+    const e = await repo.entrega(id);
+    if (!e) return { ok: false, codigo: 'no_existe', motivo: 'el pedido no existe' };
+    if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, codigo: 'cerrada', motivo: `el pedido ${e.referencia} ya está cerrado (${e.estado})` };
+    const revision = revisarTelefono(String(telefono ?? ''), plan);
+    if (!revision.ok) return { ok: false, codigo: 'telefono_invalido', motivo: `teléfono inválido: ${revision.detalle}` };
+    if (await repo.motorizadoPorTelefono(revision.phone).catch(() => null)) return { ok: false, codigo: 'telefono_de_motorizado', motivo: `el ${revision.phone} es el teléfono de un motorizado, no de un cliente` };
+    if (revision.phone === e.phone) return { ok: true, entrega: e, cambiado: false };
+    const viejo = e.phone;
+    // Lo que se le pedia al numero viejo se suelta (salvo que otro pedido suyo siga esperando).
+    await soltarDeLaEntrega(e, `GSG corrigió el teléfono del pedido ${e.referencia}`);
+    // Con «Confirmar y enviar» encendido, el numero corregido vuelve a esperar a una persona.
+    const retener = ajustes.confirmarListaGsg !== false;
+    const confirmacionEstado = e.confirmacionEstado === 'pedida' || e.confirmacionEstado === 'rechazada' ? ('pendiente' as const) : e.confirmacionEstado;
+    let act = (await repo.actualizar(e.id, {
+      phone: revision.phone,
+      loteId: null,
+      estado: 'pendiente',
+      incidencia: null,
+      incidenciaDetalle: null,
+      requiereHumano: false,
+      confirmacionEstado,
+      confirmacionIntentos: 0,
+      confirmacionProximoAt: null,
+      contactadoAt: null,
+      contactadoPor: null,
+      mensajesPausadosAt: null,
+      envioRetenidoAt: retener ? ahora() : null,
+      envioLiberadoAt: null,
+      ...mensajeAlCrear(e.ubicacionEstado, confirmacionEstado, retener),
+      mensajeIntentos: 0,
+      mensajeReintentosAuto: 0,
+      mensajeUltimoIntentoAt: null,
+      mensajeProximoAt: null,
+      mensajeEnviadoAt: null,
+      mensajeWamid: null,
+      ...SIN_ERROR,
+    })) ?? e;
+    await evento(act, 'sincronizada', `${quien} corrigió el teléfono: ${viejo} → ${revision.phone}${retener ? ' (espera «Confirmar y enviar»)' : ''}`);
+    const contacto = await repos.contacts.upsertFromInbound(act.phone, act.nombre ?? undefined);
+    if (!contacto.optInAt) await repos.contacts.setOptIn(act.phone, `entrega: pedido ${act.referencia} (teléfono corregido por GSG)`);
+    if (!retener) {
+      if (act.ubicacionEstado === 'pendiente') act = await alLoteDelReparto(act, `${quien} corrigió el teléfono`);
+      act = await asentarDisparo(act, act.ubicacionEstado === 'pendiente' && !act.loteId ? 'no entró en la cola del reparto' : undefined);
+    }
+    log('GSG corrigió el teléfono de un pedido', { referencia: act.referencia, retenido: retener });
+    return { ok: true, entrega: await recalcular((await repo.entrega(act.id)) ?? act), cambiado: true };
+  }
+
+  async function fichasTrackings(dia: string, soloIds?: number[]): Promise<FichaTracking[]> {
+    const delDia = await repo.listar({ dia, limit: TOPE_DEL_DIA });
+    return fichasDeTrackings({ repo, rutas: repos.rutas, reportados: repos.reportados, timezone: tz }, delDia, soloIds ? new Set(soloIds) : undefined);
+  }
+
   // ------------------------------------------------------ cierre del dia
 
   async function cerrarDia(opts: { forzar?: boolean; quien?: string; soloPrueba?: boolean } = {}): Promise<{ ok: boolean; motivo?: string; resultado?: ResultadoCierre }> {
@@ -4412,6 +4584,7 @@ ${lista}
       desde: base.desde ?? horaEnPalabras(ajustes.horarioEntregas.desde),
       hasta: base.hasta ?? horaEnPalabras(ajustes.horarioEntregas.hasta),
       hastaExtendido: base.hastaExtendido ?? horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
+      horario: base.horario ?? variablesDeVentana(ventanaDeEntrega(null, ajustes)).horario,
       soporte: base.soporte ?? soporteEnPalabras(ajustes.soporte),
       // Los datos del envio de ejemplo (los de GSG si la entrega los trae).
       envio: base.envio ?? { producto: 'Zapatillas talla 40', empresaCodigo: '516', empresaNombre: 'Zapatería Lima', tracking: 'GSG-A-102345', nroPedido: '#1042', metodoPago: 'YAPE', monto: '85.00', remitente: 'Juan Quispe' },
@@ -4432,7 +4605,7 @@ ${lista}
       const s = (await repos.rutas.listarSolicitudes({ loteId: e.loteId, q: e.phone, limit: 5, offset: 0 }).catch(() => [])).find((x) => x.phone === e.phone);
       if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId };
     }
-    return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [] };
+    return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [], cambioUbicacion: marcaCambioUbicacion(e, tz()) };
   }
 
   async function resumen(): Promise<ResumenEntregas> {
@@ -4562,6 +4735,10 @@ ${lista}
     async cambioDeUbicacion(phone) {
       return (await pedidoDeCambioDeUbicacion(phone))?.texto ?? null;
     },
+    async cambioDeUbicacionDetalle(phone) {
+      const r = await pedidoDeCambioDeUbicacion(phone);
+      return r ? { texto: r.texto, tarde: r.tarde } : null;
+    },
     async tieneEntregaEnCurso(phone) {
       return (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).length > 0;
     },
@@ -4590,6 +4767,7 @@ ${lista}
     async sanarUbicacion(phone) {
       const conocida = await repo.ubicacionDelClienteDelDia(phone, hoy()).catch(() => null);
       if (!conocida || conocida.lat == null || conocida.lng == null) return false;
+      // La ubicacion de hoy vale para todos sus pedidos de hoy (regla del dueño, 10/10).
       const cerradas = await resolverPorUbicacion(repos, phone, { lat: conocida.lat, lng: conocida.lng, mapsUrl: conocida.mapsUrl, fuente: conocida.ubicacionFuente }, { ahora: ahora(), motivo: `ya estaba registrada (pedido ${conocida.referencia})` }).catch(() => []);
       if (cerradas.length) log('habia solicitudes del reparto abiertas para un cliente con la ubicación ya registrada: se cerraron', { phone, solicitudes: cerradas.map((s) => s.id) });
       return true;
@@ -4840,21 +5018,62 @@ ${lista}
       if (c.incidencia) partes.push('Con incidencia: ' + r.entregas.filter((e) => e.estado === 'incidencia').slice(0, 8).map((e) => `${e.referencia} (${e.nombre ?? e.phone}): ${e.incidenciaDetalle ?? e.incidencia}`).join('; ') + '.');
       return partes.join('\n');
     },
+    async seguimientoDeCliente(phone) {
+      const vivas = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado)).slice(0, 5);
+      const salida: Awaited<ReturnType<ServicioEntregas['seguimientoDeCliente']>> = [];
+      for (const e of vivas) {
+        const tracking = trackingDe(e);
+        const s = await seguimientoGsg.consultar(tracking);
+        salida.push({ referencia: e.referencia, tracking, seguimiento: s?.ruta ?? null, distancia: s?.distancia ?? null, texto: s ? textoSeguimiento(tracking, s) : null });
+      }
+      return salida;
+    },
+    async recibirSeguimiento(cuerpo) {
+      const crudo = cuerpo && typeof cuerpo === 'object' && !Array.isArray(cuerpo) ? (cuerpo as Record<string, unknown>) : null;
+      const tracking = typeof crudo?.tracking === 'string' ? crudo.tracking.trim() : '';
+      if (!crudo || !tracking) return { ok: false, status: 400, codigo: 'VALIDACION', detalle: 'Falta `tracking`: el seguimiento se manda como un objeto con el tracking del pedido.' };
+      const coincide = (x: Entrega) => trackingDe(x) === tracking || x.referencia === tracking;
+      const e = (await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA })).find(coincide) ?? (await repo.listar({ limit: 1000 })).find(coincide) ?? null;
+      if (!e) return { ok: false, status: 404, codigo: 'NO_EXISTE', detalle: `No hay ningún pedido con el tracking "${tracking}".` };
+      // Lo que manda GSG siempre cuenta como de GSG (no puede pasar por datos propios).
+      const marcado = { ...crudo, tracking, origen: 'gsg' };
+      const fallos: FalloSeguimiento[] = [];
+      const en = ahora();
+      const leido = await leerSeguimiento(marcado, tracking, undefined, en, (f) => fallos.push(f));
+      if (!leido) return { ok: false, status: 422, codigo: 'VALIDACION', detalle: fallos[0]?.detalle ?? 'El seguimiento no cumple el contrato.', ...(fallos[0] ? { motivo: fallos[0].codigo } : {}) };
+      await seguimientosRecibidos.guardar({ tracking, cuerpo: marcado, recibidoAt: en });
+      seguimientoGsg.invalidar();
+      return { ok: true, tracking, referencia: e.referencia, estado: leido.ruta.estado, puntoActual: leido.ruta.puntoActual ?? null, puntoCliente: leido.ruta.puntoCliente ?? null, paradas: leido.ruta.paradas.length };
+    },
     async contextoDeCliente(phone) {
       const e = (await repo.vivaPorTelefono(phone)) ?? (await entregadaHoyDe(phone));
       if (!e) return null;
       const m = e.motorizadoId ? await repo.motorizado(e.motorizadoId) : null;
       const situacion = situacionDe(e, m, ajustes, tz(), reglaGsgActiva());
-      const h = e.datosEnvio?.horarioEntregaDesde && e.datosEnvio?.horarioEntregaHasta ? { desde: e.datosEnvio.horarioEntregaDesde, hasta: e.datosEnvio.horarioEntregaHasta, extendidoHasta: e.datosEnvio.horarioEntregaHasta } : ajustes.horarioEntregas;
-      const seguimiento = await seguimientoGsg.consultar(e.datosEnvio?.tracking ?? e.referencia);
+      // La ventana del pedido: la de GSG, si no la de su distrito, si no la general.
+      const h = ventanaDeEntrega(e, ajustes);
+      const tracking = trackingDe(e);
+      const seguimiento = ESTADOS_FINALES.includes(e.estado) ? null : await seguimientoGsg.consultar(tracking);
+      // Los otros pedidos vivos del mismo cliente, con su seguimiento: si no
+      // queda claro por cual pregunta, se le nombran todos.
+      const otras = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => x.id !== e.id).slice(0, 3);
+      const deOtras = await Promise.all(otras.map(async (x) => {
+        const s = await seguimientoGsg.consultar(trackingDe(x));
+        return `Otro pedido de este cliente: ${x.referencia} (código de seguimiento ${trackingDe(x)}). ${s ? textoSeguimiento(trackingDe(x), s) : 'Sin seguimiento reciente del motorizado.'}`;
+      }));
       // Lo que la IA necesita para no inventar (batería del 30/09: «sí,
       // llegamos a Comas», «su pedido está en camino» sin estarlo): el
       // horario de entregas, la regla del cambio de ubicación y lo que NO es.
       return [
-        seguimiento ? textoSeguimiento(e.datosEnvio?.tracking ?? e.referencia, seguimiento) : 'No hay seguimiento reciente confirmado por la API de GSG. No inventes la posición del motorizado, kilómetros ni tiempo restante.',
+        seguimiento ? `Seguimiento del pedido según los datos del sistema: ${textoSeguimiento(tracking, seguimiento)} Si pregunta dónde está su pedido o cuánto falta, contesta con estas paradas, kilómetros y minutos tal cual.` : 'No hay seguimiento reciente del motorizado (posición y paradas). No inventes la posición del motorizado, kilómetros ni tiempo restante.',
+        `El código de seguimiento de este pedido es ${tracking} y ya lo tienes: nunca le pidas al cliente su código de seguimiento ni su número de pedido.`,
+        ...deOtras,
+        otras.length ? 'Este cliente tiene más de un pedido vivo: si no queda claro por cuál pregunta, nómbrale cada uno con su seguimiento.' : '',
         e.datosEnvio?.horarioEntregaFechaDesde ? `Ventana fechada de GSG: ${textoHorario({ desde: e.datosEnvio.horarioEntregaDesde!, hasta: e.datosEnvio.horarioEntregaHasta!, fechaDesde: e.datosEnvio.horarioEntregaFechaDesde, fechaHasta: e.datosEnvio.horarioEntregaFechaHasta ?? undefined, zonaHoraria: e.datosEnvio.horarioEntregaZonaHoraria ?? undefined })}. Usa estas fechas; no la anuncies como horario de hoy si corresponde a otra fecha.` : '',
+        // Lo que la consulta tras UBI REGISTRADA necesita: estado, motorizado y la hora del aviso.
+        `Datos del pedido: estado ${e.estado}; código de seguimiento ${tracking}${(m?.nombre ?? e.datosEnvio?.motorizadoNombre) ? `; motorizado: ${m?.nombre ?? e.datosEnvio?.motorizadoNombre}` : '; motorizado: aún sin asignar o sin dato'}${e.avisoEnviadoAt ? `; aviso de llegada enviado a las ${horaEnReloj(e.avisoEnviadoAt, tz())}` : ''}.`,
         `Este cliente tiene hoy el pedido ${e.referencia}${e.nombre ? ` (a nombre de ${e.nombre})` : ''}. Situación: ${situacion}${e.llegaAproxAt && e.estado !== 'entregada' ? ` Hora aproximada de llegada: ${horaEnReloj(e.llegaAproxAt, tz())}.` : ''} Si pregunta por su pedido, responde con esto; no prometas otra hora ni otro día: eso lo coordina una persona.`,
-        !e.datosEnvio?.horarioEntregaFechaDesde ? `Horario de entrega de hoy: de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)} (por algunas casuísticas se puede extender hasta las ${horaEnPalabras(h.extendidoHasta)}). Si pregunta a qué hora llega o el horario y no hay hora aproximada, dale este horario.` : '',
+        !e.datosEnvio?.horarioEntregaFechaDesde ? `Horario de entrega de hoy: de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)} (${variablesDeVentana(h).horario}${h.distrito ? `, distrito ${h.distrito}` : ''}; sale de ${fuenteEnPalabras(h)}; por algunas casuísticas se puede extender hasta las ${horaEnPalabras(h.extendidoHasta)}). Si pregunta a qué hora llega o el horario y no hay hora aproximada, dale este horario tal cual. No inventes otro horario ni otras horas, ni el de otro distrito.` : '',
         `Si quiere cambiar su ubicación: antes de la ${horaEnPalabras(ajustes.cambioUbicacionHasta)} que mande el pin nuevo por WhatsApp (clip 📎 → Ubicación) y se tiene en cuenta hoy; después de esa hora, que coordine con el motorizado.`,
         'Es un cliente con una entrega en curso: no le ofrezcas cotizar envíos, precios ni hacer pedidos. No digas que su pedido ya salió o está en camino si la situación no lo dice. Si pregunta si llegan a una zona o distrito y no está en lo que sabes, no lo afirmes: di que una persona se lo confirma.',
       ].join('\n');
@@ -4876,6 +5095,13 @@ ${lista}
     },
     primerMensajeReparto,
     diaDeHoy: () => hoy(),
+    normalizarTelefono: (texto) => {
+      const r = revisarTelefono(String(texto ?? ''), plan);
+      return r.ok ? r.phone : null;
+    },
+    reportarNumero: reportarNumeroInterno,
+    corregirTelefono,
+    fichasTrackings,
     revisarMensajes,
     bandejaMensajes,
     reintentarMensaje,

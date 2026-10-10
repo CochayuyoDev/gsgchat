@@ -195,7 +195,7 @@ describe('el agente operativo en un día de entregas', () => {
     expect(t).toMatch(/^✅ Ubicación registrada correctamente\.\nhttps:\/\/\S+\n\n¡Muchas gracias!\n/);
     expect(t).not.toContain('no se reciben consultas');
     expect(t).not.toContain('+51 987 654 321');
-    expect(t).toContain('Horario de entrega');
+    expect(t).toContain('Horario aproximado de llegada');
     expect(await cerradaDe('987000001')).not.toBeNull();
     // Ni la pregunta SÍ/NO: la confirmación ya no hace falta.
     expect(t).not.toMatch(/SÍ o NO/);
