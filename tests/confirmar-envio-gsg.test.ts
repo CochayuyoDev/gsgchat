@@ -116,7 +116,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     await e.api.post('/admin/motorizados/de-prueba');
     e.simulador.cargar([deUbicacion(1), deUbicacion(2), deConfirmar(1), deConfirmar(2), deConfirmar(3), deConfirmar(4)]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());
@@ -263,7 +263,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   it('cualquier otra cosa → el cierre UNA vez con el número, una persona y silencio', async () => {
     // Un pedido nuevo de «falta confirmar» para este caso (llega, se confirma su envío y se le pregunta).
     e.simulador.cargar([deConfirmar(5)]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     expect(salidos('987200005')).toBe(0);
     // Ya se confirmó otra tanda hoy: el aviso dice «más».
@@ -321,7 +321,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   it('con el ajuste apagado, la lista sale sola como antes', async () => {
     await e.entregas.guardarAjustes({ confirmarListaGsg: false });
     e.simulador.cargar([deUbicacion(3)]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     expect(e.mensajesA('987100003').some((m) => m.kind === 'location_request')).toBe(true);
     expect((await fila('U-3')).etapa).not.toBe('por_confirmar_envio');

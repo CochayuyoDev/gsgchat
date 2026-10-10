@@ -207,9 +207,27 @@ describe('configurar y guardar', () => {
     const leido = await app.inject({ method: 'GET', url: '/admin/ia', headers: { cookie } });
     expect(leido.json()).toMatchObject({ activa: true, tieneToken: true, modelosSugeridos: expect.any(Object) });
 
-    // Quitar el token desactiva de hecho al asistente.
+    // Guardar con el campo vacio (o null) conserva la clave: solo se quita a proposito.
     await app.inject({ method: 'POST', url: '/admin/ia', headers: { cookie }, payload: { token: '' } });
+    await app.inject({ method: 'POST', url: '/admin/ia', headers: { cookie }, payload: { token: null, nombreAsistente: 'Otro' } });
+    expect(ia.activa()).toBe(true);
+    expect((await app.inject({ method: 'GET', url: '/admin/ia', headers: { cookie } })).json()).toMatchObject({ tieneToken: true, pistaClave: '…-123', claveIlegible: false });
+
+    // Desvincular la quita y desactiva de hecho al asistente.
+    await app.inject({ method: 'POST', url: '/admin/ia', headers: { cookie }, payload: { borrarClave: true } });
     expect(ia.activa()).toBe(false);
+  });
+
+  it('una clave que no se puede descifrar no se borra: se avisa y sigue en la base', async () => {
+    await ia.guardar({ token: 'sk-clave-del-dueno-9z8y' });
+    // Otro .secrets.json: la misma base con otra clave de cifrado.
+    const otra = await crearServicioIA({ settingsRepo, settingsKeyBase64: Buffer.alloc(32, 9).toString('base64'), repos, sender, config, nombreNegocio: () => 'Zapateria Lima', supervisor: () => '', proveedor: modelo.proveedor, modelosGratis: [] });
+    expect(otra.estado()).toMatchObject({ tieneToken: false, claveIlegible: true, pistaClave: null });
+    await otra.guardar({ nombreAsistente: 'Otro', token: '' });
+    expect((await settingsRepo.getAll()).some((r) => r.key === 'ia.token')).toBe(true);
+    // Con la clave de cifrado de siempre, vuelve tal cual.
+    await ia.guardar({});
+    expect(ia.estado()).toMatchObject({ tieneToken: true, claveIlegible: false, pistaClave: '…9z8y' });
   });
 
   it('solo un administrador con cuenta configura; una clave de API no', async () => {
@@ -439,7 +457,7 @@ describe('la IA conoce el sistema por el que habla', () => {
     expect(mensajes.at(-1)).toEqual({ role: 'user', content: 'como conecto shopify?' });
     expect(enviados()).toHaveLength(0);
 
-    await ia.guardar({ token: '' });
+    await ia.guardar({ borrarClave: true });
     const sin = await app.inject({ method: 'POST', url: '/admin/ia/ayuda', headers: con(TODO), payload: { texto: 'hola' } });
     expect(sin.statusCode).toBe(400);
     expect(sin.json().error).toContain('/panel#ia');

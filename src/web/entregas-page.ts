@@ -379,7 +379,6 @@ ${aviso}
             <div class="ajuste-fila"><span>Veces que se pide la confirmación</span><input id="aj-conf-max" type="number" min="1" max="6"></div>
             <div class="ajuste-fila"><span>Esperar al motorizado (minutos) antes de insistir</span><input id="aj-mot-espera" type="number" min="1" max="180"></div>
             <div class="ajuste-fila"><span>Avisos a un mismo motorizado antes de pasar a otro</span><input id="aj-mot-max" type="number" min="1" max="5"></div>
-            <div class="ajuste-fila"><span>Preguntar a GSG cada (minutos)</span><input id="aj-sync" type="number" min="1" max="1440"></div>
             <div class="ajuste-fila"><label class="normal" for="aj-pin-km">Distancia máxima entre el pin y el distrito (km)<span class="pista-fila">Si el pin cae más lejos, se le pregunta al cliente si es ahí (SÍ / NO).</span></label><input id="aj-pin-km" type="number" min="0.5" max="100" step="0.5"></div>
             <div class="ajuste-fila"><label class="normal" for="aj-reasignar">Si el motorizado no da sus minutos en (minutos), pasa solo a otro<span class="pista-fila">Si no hay otro activo, sale en «Hay que mirar».</span></label><input id="aj-reasignar" type="number" min="5" max="240"></div>
             <div class="ajuste-fila"><label class="normal" for="aj-alerta-ubi">Avisar de los pedidos que siguen sin ubicación a las</label><input id="aj-alerta-ubi" type="time" step="900"></div>
@@ -420,7 +419,6 @@ ${aviso}
         <div class="muted" id="gsg-ultima" style="font-size:12.5px;margin-top:4px"></div>
         <div class="gsg-cola hidden" id="gsg-cola"></div>
         <div class="acciones">
-          <button class="btn sm" id="sincronizar" type="button">Traer los pendientes de GSG</button>
           <button class="btn sm" id="gsg-probar" type="button">Probar</button>
           <button class="btn sm" id="gsg-configurar" type="button">Cambiar</button>
         </div>
@@ -483,7 +481,7 @@ ${aviso}
     <details class="bloque explica" id="como-funciona">
       <summary>¿Cómo funciona? Los seis pasos de cada pedido</summary>
       <div class="pasos"><span class="paso">1 · Ubicación</span><span class="paso">2 · Confirmación</span><span class="paso">3 · Motorizado</span><span class="paso">4 · Hora de llegada al cliente</span><span class="paso">5 · Terminada en GSG</span><span class="paso">6 · Entregado</span></div>
-      <p>Cada pedido necesita tres cosas por separado: el cliente manda su <b>ubicación</b>, el cliente <b>confirma</b> que lo recibe hoy y un <b>motorizado</b> recibe el pin y dice en cuántos minutos entrega. A esos minutos se les suma el margen y al cliente se le avisa a qué hora le llega. Quién tiene cada cosa lo dice <b>GSG</b>, al que se le pregunta cada pocos minutos; lo que no se entiende lo lee la IA.</p>
+      <p>Cada pedido necesita tres cosas por separado: el cliente manda su <b>ubicación</b>, el cliente <b>confirma</b> que lo recibe hoy y un <b>motorizado</b> recibe el pin y dice en cuántos minutos entrega. A esos minutos se les suma el margen y al cliente se le avisa a qué hora le llega. Quién tiene cada cosa lo dice <b>GSG</b> cuando manda los pedidos (o la lista que se pega a mano); lo que no se entiende lo lee la IA.</p>
       <p>Cuando el motorizado escribe <b>«entregado»</b> (o manda la foto), GSG recibe la hora y al cliente se le da las gracias. Si escribe <b>«no había nadie»</b>, al cliente se le pregunta si volvemos hoy (<b>segunda visita</b>, con botones SÍ / NO); si escribe <b>«cerca»</b>, al cliente se le avisa; si escribe <b>«me quedo sin moto»</b>, sus pedidos pasan a otros. Los <b>urgentes</b> salen primero y lo que necesita a una persona aparece en «Necesitan a alguien».</p>
     </details>
   </div>
@@ -800,7 +798,7 @@ function pintarFilas() {
   if (!lista.length) {
     cuerpo.innerHTML = resumen.entregas.length
       ? filaSuelta('Nadie en este paso ahora mismo.')
-      : '<div class="vacio"><div class="ico">📦</div><h3>Todavía no hay pedidos hoy</h3><p>Cuando GSG mande la lista, aparecen aquí. También puedes pegarla tal como sale de Excel.</p><div class="acciones" style="justify-content:center"><button class="btn" type="button" data-pulsa="pegar-abrir">Pegar la lista del día</button><button class="btn" type="button" data-pulsa="sincronizar">Traer la lista de GSG</button></div></div>';
+      : '<div class="vacio"><div class="ico">📦</div><h3>Todavía no hay pedidos hoy</h3><p>Los pedidos aparecen aquí solos en cuanto GSG los manda. También puedes pegar la lista tal como sale de Excel.</p><div class="acciones" style="justify-content:center"><button class="btn" type="button" data-pulsa="pegar-abrir">Pegar la lista del día</button></div></div>';
     return;
   }
   cuerpo.innerHTML = lista.map(function (e) {
@@ -965,10 +963,13 @@ function pintarGsg() {
   if (!g) { el.innerHTML = '<span class="punto"></span>La conexión con GSG se fija al arrancar (no se cambia desde aquí).'; return; }
   var clase = g.modo === 'ninguna' ? 'bad' : g.modo === 'simulador' ? 'info' : 'ok';
   el.innerHTML = '<span class="punto ' + clase + '"></span>' + esc(g.descripcion) + (g.origen === 'env' ? ' <span class="muted">(del arranque)</span>' : '');
+  /* GSG manda los pedidos (POST /api/v1/entregas); aqui no se le pregunta nada.
+     Si el servidor aun informa de la ultima llegada, se enseña; si no, solo el motor parado. */
   var u = resumen.ultimaSincronizacion;
+  var motorParado = resumen.motor && resumen.motor.parado ? 'Motor: ' + resumen.motor.parado : '';
   $('gsg-ultima').textContent = u
-    ? 'Última sincronización ' + hora(u.at) + (u.ok ? ': ' : ' falló: ') + u.detalle
-    : 'Todavía no se sincronizó hoy.' + (resumen.motor.parado ? ' Motor: ' + resumen.motor.parado : '');
+    ? 'Lo último que mandó GSG: ' + hora(u.at) + (u.ok ? ' · ' : ' · falló: ') + u.detalle
+    : motorParado;
   $('sim-usar').classList.toggle('hidden', g.modo === 'simulador');
   $('pegar-destino-sim').classList.toggle('hidden', g.modo !== 'simulador');
   pintarColaGsg();
@@ -1089,7 +1090,6 @@ function pintarAjustes() {
   valor('aj-conf-max', a.confirmacionMaxIntentos);
   valor('aj-mot-espera', a.motorizadoEsperaMin);
   valor('aj-mot-max', a.motorizadoMaxIntentos);
-  valor('aj-sync', a.sincronizarCadaMin);
   valor('aj-pin-km', a.pinDistanciaMaxKm || 3);
   valor('aj-reasignar', a.reasignarMotorizadoMin || 20);
   valor('aj-alerta-ubi', a.alertaSinUbicacionHora || '12:00');
@@ -1565,18 +1565,12 @@ $('modo-prueba-quitar').onclick = async function () {
 };
 
 /* ------------------------------------------------------------------ GSG - */
-$('sincronizar').onclick = async function () {
-  var b = this;
-  b.disabled = true;
-  try { var r = await api('/admin/entregas/sincronizar', { method: 'POST', body: {} }); toast(r.detalle); await cargar(); } catch (e) { toast(e.message); }
-  b.disabled = false;
-};
 $('gsg-probar').onclick = async function () {
   try { var r = await api('/admin/entregas/gsg/probar', { method: 'POST', body: {} }); toast(r.prueba.detalle); } catch (e) { toast(e.message); }
 };
 $('gsg-configurar').onclick = async function () {
   try {
-    var url = await pedirDato({ titulo: 'API real de GSG', texto: 'La dirección base de la API de GSG (la que tiene /reparto/pendientes, /ubicaciones, /confirmaciones, /entregas). Para usar el simulador, cancela y pulsa «Usar el simulador como GSG».', etiqueta: 'Dirección', marcador: 'https://api.gsg.pe/v1', boton: 'Siguiente' });
+    var url = await pedirDato({ titulo: 'API real de GSG', texto: 'La dirección base a la que GSGchat le manda sus reportes (/ubicaciones, /confirmaciones, /entregas, /incidencias, /resumenes). Los pedidos no se piden desde aquí: GSG los manda solo. Para usar el simulador, cancela y pulsa «Usar el simulador como GSG».', etiqueta: 'Dirección', marcador: 'https://api.gsg.pe/v1', boton: 'Siguiente' });
     if (!url) return;
     var token = await pedirDato({ titulo: 'API real de GSG', etiqueta: 'Token (se guarda cifrado)', marcador: 'el token que te dieron', boton: 'Conectar', validar: function () { return null; } });
     if (token === null) return;
@@ -1591,7 +1585,7 @@ $('sim-usar').onclick = async function () {
   try { await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'simulador' } }); toast('Ahora GSG es el simulador de este servidor.'); await cargar(); } catch (e) { toast(e.message); }
 };
 $('sim-cargar').onclick = async function () {
-  try { var r = await api('/admin/entregas/simulador/cargar', { method: 'POST', body: {} }); toast(r.nuevos + ' clientes de prueba en la lista de GSG. Pulsa «Traer los pendientes de GSG».'); await cargar(); } catch (e) { toast(e.message); }
+  try { var r = await api('/admin/entregas/simulador/cargar', { method: 'POST', body: {} }); toast(r.nuevos + ' clientes de prueba cargados en el simulador.'); await cargar(); } catch (e) { toast(e.message); }
 };
 $('mot-cargar').onclick = async function () {
   try { var r = await api('/admin/motorizados/de-prueba', { method: 'POST', body: {} }); toast(r.nuevos + ' motorizados de prueba dados de alta.'); await cargar(); } catch (e) { toast(e.message); }
@@ -1730,7 +1724,6 @@ $('aj-guardar').onclick = async function () {
       confirmacionMaxIntentos: num('aj-conf-max', resumen.ajustes.confirmacionMaxIntentos),
       motorizadoEsperaMin: num('aj-mot-espera', resumen.ajustes.motorizadoEsperaMin),
       motorizadoMaxIntentos: num('aj-mot-max', resumen.ajustes.motorizadoMaxIntentos),
-      sincronizarCadaMin: num('aj-sync', resumen.ajustes.sincronizarCadaMin),
       pinDistanciaMaxKm: Math.max(0.5, num('aj-pin-km', resumen.ajustes.pinDistanciaMaxKm || 3)),
       reasignarMotorizadoMin: Math.max(5, num('aj-reasignar', resumen.ajustes.reasignarMotorizadoMin || 20)),
       alertaSinUbicacionHora: /^\d{2}:\d{2}/.test($('aj-alerta-ubi').value) ? $('aj-alerta-ubi').value.slice(0, 5) : (resumen.ajustes.alertaSinUbicacionHora || '12:00'),

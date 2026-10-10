@@ -236,7 +236,7 @@ export function textoFijo(franja: Franja, c: CifrasResumen, ctx: { negocio: stri
       if (c.reportesFallidos) lineas.push(`• Reportes que GSG no aceptó: ${c.reportesFallidos} (en Hoy se reintentan).`);
       if (c.mejorMotorizado) lineas.push(`• Quien más entregó: ${c.mejorMotorizado.nombre} (${c.mejorMotorizado.entregas}).`);
     }
-    if (c.cuadreGsg) lineas.push(`• Cuadre con GSG: ${c.cuadreGsg}`);
+    if (c.cuadreGsg) lineas.push(`• Cierre del día: ${c.cuadreGsg}`);
     if (!c.whatsappConectado) lineas.push('⚠ WhatsApp no está conectado.');
   }
   lineas.push(`Lo ves en ${ctx.url.replace(/\/+$/, '')}/hoy`);
@@ -290,8 +290,8 @@ export async function crearServicioResumenes(deps: DepsResumenes): Promise<Servi
     const conectado = deps.whatsappConectado?.() ?? true;
     const r = deps.entregas ? await deps.entregas.resumen().catch(() => null) : null;
     const base = cifrasDe(r, { whatsappConectado: conectado, dia });
-    // Por la tarde, el cuadre con GSG (lo que aqui figura cerrado frente a
-    // lo que GSG tiene en terminados), en palabras y sin tocar las cifras.
+    // Por la tarde, el cierre del dia con lo de aqui (que pedidos siguen sin
+    // cerrar; a GSG no se le pregunta nada), en palabras y sin tocar las cifras.
     if (franja === 'tarde' && base.gsgConectada) {
       const extras = deps.gsgExtras?.() ?? conexionGsgVigente()?.extras ?? null;
       if (extras) base.cuadreGsg = await extras.cuadrar(dia).then((q) => q.resumen).catch(() => null);

@@ -1,9 +1,8 @@
 /**
  * La pantalla "Entregas del dia" habla con esto, y otros sistemas por /api/v1.
  *
- *  GET  /admin/entregas                      todo: cifras, entregas, motorizados, GSG, ultima sincronizacion
+ *  GET  /admin/entregas                      todo: cifras, entregas, motorizados, GSG, la ultima lista recibida del simulador
  *  GET  /admin/entregas/:id                  una entrega con su bitacora
- *  POST /admin/entregas/sincronizar          pedirle a GSG los pendientes ahora
  *  POST /admin/entregas/ajustes              margen, esperas, intentos, textos (solo admin)
  *  POST /admin/entregas/crear                un pedido a mano
  *  POST /admin/entregas/:id/confirmar        { confirmada: true|false }
@@ -22,10 +21,14 @@
  *  POST /admin/motorizados/:id/traspasar     { motorizadoId?, descanso? } le quita todo lo que lleva y lo reparte
  *
  *  GET/POST/DELETE /admin/entregas/gsg       la conexion con GSG (real o simulador), POST .../probar
- *  GET /admin/entregas/simulador, POST .../cargar, POST .../cargar-lista, POST .../modo, DELETE /admin/entregas/simulador
+ *  GET /admin/entregas/simulador, POST .../cargar, POST .../cargar-lista, POST .../enviar, POST .../modo, DELETE /admin/entregas/simulador
  *
- *  API publica: GET /api/v1/entregas (entregas:leer), POST /api/v1/entregas/sincronizar (entregas:gestionar),
+ *  API publica: GET /api/v1/entregas (entregas:leer),
  *  GET /api/v1/motorizados (entregas:leer), POST /api/v1/motorizados (entregas:gestionar).
+ *
+ * GSGchat nunca le pide nada a GSG: no hay "sincronizar". Los pedidos de
+ * verdad entran cuando GSG los empuja (POST /api/v1/entregas); los de prueba,
+ * cuando se cargan en el simulador (entran al momento, sin red).
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -35,7 +38,7 @@ import { extractLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
 import { ajustesEntregasSchema } from './textos.js';
 import type { ServicioEntregas } from './servicio.js';
-import type { GsgSimulado } from './gsg-simulado.js';
+import { enviarListaDelSimulador, type GsgSimulado } from './gsg-simulado.js';
 import { MOTORIZADOS_DE_PRUEBA } from './datos-de-prueba.js';
 import { crearGuionDelDia, type EntranteSimulado } from './guion-dia.js';
 import { motorizadoPage } from '../web/motorizado-page.js';
@@ -98,7 +101,6 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   // Numeros del dia: la lista de GSG numero por numero y las acciones en masa (ver numeros.ts).
   await registerNumerosRoutes(app, { entregas });
 
-  app.post('/admin/entregas/sincronizar', async () => entregas.sincronizar());
 
   app.post('/admin/entregas/ajustes', async (request, reply) => {
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia los ajustes de las entregas.' });
@@ -394,6 +396,16 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
 
   // ------------------------------------------------------------ simulador
 
+  // El simulador hace de GSG: lo que se carga en el entra al momento, como si
+  // GSG lo empujara (en memoria, sin red). Solo con la conexion puesta en el
+  // simulador: con la API real de GSG, lo de prueba no se mezcla con lo de verdad.
+  const enSimulador = () => !conexionGsg || conexionGsg.estado().modo === 'simulador';
+  const NO_ES_SIMULADOR = 'GSG no está puesto en el simulador (Conexión → GSG): lo cargado se queda en el simulador y no entra aquí.';
+  const enviarDelSimulador = async () => {
+    if (!simulador || !enSimulador()) return { ok: false, detalle: NO_ES_SIMULADOR };
+    return enviarListaDelSimulador(simulador, entregas);
+  };
+
   app.get('/admin/entregas/simulador', async (_request, reply) => {
     if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
     return { estado: simulador.estado(), pendientes: simulador.pendientes(), recibido: simulador.recibido.slice(-50), modo: simulador.modo };
@@ -402,14 +414,24 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   app.post('/admin/entregas/simulador/cargar', async (_request, reply) => {
     if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
     const nuevos = simulador.cargarDePrueba();
-    return { ok: true, nuevos, estado: simulador.estado() };
+    const envio = await enviarDelSimulador();
+    return { ok: true, nuevos, estado: simulador.estado(), envio };
   });
 
   app.post('/admin/entregas/simulador/cargar-lista', async (request, reply) => {
     if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
     const body = z.object({ clientes: z.array(z.object({ referencia: z.string().min(1), telefono: z.string().min(6) }).passthrough()).min(1).max(500) }).parse(request.body ?? {});
     const nuevos = simulador.cargar(body.clientes as never);
-    return { ok: true, nuevos, estado: simulador.estado() };
+    const envio = await enviarDelSimulador();
+    return { ok: true, nuevos, estado: simulador.estado(), envio };
+  });
+
+  // Lo que el simulador tenga ahora (tras cancelar o cambiar un pedido en él)
+  // se lo manda a este sistema. Es el simulador quien manda: a GSG no se le pide nada.
+  app.post('/admin/entregas/simulador/enviar', async (_request, reply) => {
+    if (!simulador) return reply.code(404).send({ error: 'El simulador de GSG no está montado en este arranque.' });
+    if (!enSimulador()) return reply.code(409).send({ error: NO_ES_SIMULADOR });
+    return enviarListaDelSimulador(simulador, entregas);
   });
 
   app.post('/admin/entregas/simulador/modo', async (request, reply) => {
@@ -431,8 +453,6 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     const r = await entregas.resumen();
     return { dia: r.dia, cifras: r.cifras, entregas: r.entregas.map((e) => ({ id: e.id, referencia: e.referencia, telefono: e.phone, nombre: e.nombre, estado: e.estado, situacion: e.situacion, ubicacion: e.ubicacionEstado, lat: e.lat, lng: e.lng, confirmacion: e.confirmacionEstado, motorizado: e.motorizado, minutosMotorizado: e.minutosMotorizado, minutosAviso: e.minutosAviso, llegaAproxEn: e.llegaAproxAt, avisadoEn: e.avisoEnviadoAt, prioridad: e.prioridad, segundaVisita: e.segundaVisita, visitas: e.visitas, entregadoEn: e.entregadaAt })), gsg: r.gsg ? { modo: r.gsg.modo, conectada: r.gsg.conectada } : null, ultimaSincronizacion: r.ultimaSincronizacion };
   });
-
-  app.post('/api/v1/entregas/sincronizar', { config: { permiso: 'entregas:gestionar' } }, async () => entregas.sincronizar());
 
   app.get('/api/v1/motorizados', { config: { permiso: 'entregas:leer' } }, async () => ({ motorizados: await entregas.motorizados() }));
 

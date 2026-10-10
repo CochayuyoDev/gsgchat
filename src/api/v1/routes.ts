@@ -35,6 +35,7 @@ import { PERMISOS } from '../../auth/permisos.js';
 import { generarSecretoWebhook } from '../../webhooks/firma.js';
 import { entregarUna, type DespachadorDeps } from '../../webhooks/despachador.js';
 import { openApi } from './openapi.js';
+import { crearIdempotencia } from './idempotencia.js';
 import { confirmacionSchema } from '../../ia/ordenes.js';
 import type { ServicioIA } from '../../ia/servicio.js';
 import { ErrorIA } from '../../ia/proveedores.js';
@@ -266,7 +267,10 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
 
   // --- mensajes ------------------------------------------------------------
 
-  app.post('/api/v1/mensajes', { config: { permiso: 'mensajes:enviar' } }, async (request, reply) => {
+  // Un reintento del otro sistema con la misma Idempotency-Key no envia dos veces. Ver idempotencia.ts.
+  const idempotencia = crearIdempotencia();
+
+  app.post('/api/v1/mensajes', { config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
     const body = mensajeSchema.parse(request.body ?? {});
     const phone = body.telefono;
     if (fueraDeAlcance(request.usuario, phone)) return reply.code(403).send(ERROR_ALCANCE);

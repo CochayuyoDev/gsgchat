@@ -14,6 +14,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from './conexion-gsg.js';
 import type { GsgSimulado } from '../entregas/gsg-simulado.js';
+import { igualSeguro } from '../util/comparar.js';
 
 export interface DepsGsgExtrasRoutes {
   conexion: ServicioConexionGsg;
@@ -57,11 +58,6 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
   const extras = conexion.extras;
   if (deps.entregasDelDia) extras.usarEntregas(deps.entregasDelDia);
 
-  // Lo que GSG contesta pasa por el observador: apunta lo que no se puede usar.
-  conexion.observar(async (cuerpo) => {
-    await extras.observarPendientes(cuerpo);
-  });
-
   const esLlamadaDeGsg = (url: string) => url.startsWith(`${RUTA_SIMULADOR}/`) || url === RUTA_SIMULADOR || url.startsWith('/api/v1/entregas');
 
   // Gancho 1: el token caducable vale para el simulador.
@@ -73,7 +69,7 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
       request.gsgQuien = 'sin token';
       return;
     }
-    if (token === TOKEN_SIMULADOR) {
+    if (igualSeguro(token, TOKEN_SIMULADOR)) {
       request.gsgQuien = 'este servidor';
       return;
     }
@@ -157,23 +153,40 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
     const aqui = new Map((await deps.entregasDelDia(sim.estado().dia ?? '')).map((e) => [e.referencia, e.estado] as const));
     return pendientes.find((x) => aqui.has(x.referencia) && !FINALES.has(aqui.get(x.referencia)!)) ?? null;
   };
+  // Lo que GSG (el simulador) cambia se lo manda al momento a este sistema,
+  // como haria GSG empujando: por la misma ruta que «Cargar» del simulador.
+  const mandarAlSistema = async (request: ConUsuario): Promise<string> => {
+    if (!app.hasRoute({ method: 'POST', url: '/admin/entregas/simulador/enviar' })) return 'Este arranque no tiene entregas: no entra en ningún sitio.';
+    const cabeceras: Record<string, string> = {};
+    for (const k of ['cookie', 'authorization'] as const) if (typeof request.headers[k] === 'string') cabeceras[k] = request.headers[k] as string;
+    const r = await app.inject({ method: 'POST', url: '/admin/entregas/simulador/enviar', headers: cabeceras, payload: {} });
+    let j: { detalle?: string; error?: string } = {};
+    try {
+      j = r.json() as typeof j;
+    } catch {
+      j = {};
+    }
+    return j.detalle ?? j.error ?? `El sistema respondió ${r.statusCode}.`;
+  };
   app.post('/admin/gsg/simulador/cancelar-uno', async (request: ConUsuario, reply) => {
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador usa las pruebas del simulador.' });
     if (!deps.simulador || !deps.conSimulador()) return reply.code(409).send({ error: 'El simulador de GSG no está montado en este arranque.' });
     const c = await pendienteDePrueba();
-    if (!c) return reply.code(409).send({ error: 'No hay ningún pedido de prueba vivo para esto: carga los clientes de prueba en Hoy → Probar con números ficticios y sincroniza.' });
+    if (!c) return reply.code(409).send({ error: 'No hay ningún pedido de prueba vivo para esto: carga los clientes de prueba en Hoy → Probar con números ficticios.' });
     deps.simulador.cancelar(c.referencia, 'Prueba: el cliente canceló en GSG');
-    return { ok: true, referencia: c.referencia, detalle: `GSG marcó ${c.referencia} como cancelado. En la próxima sincronización (o con «Sincronizar ahora» en Hoy) este sistema lo cancela aquí y, si el cliente ya tenía hora, le avisa.` };
+    const envio = await mandarAlSistema(request);
+    return { ok: true, referencia: c.referencia, detalle: `GSG marcó ${c.referencia} como cancelado y se lo mandó a este sistema (si el cliente ya tenía hora, se le avisa). ${envio}` };
   });
   app.post('/admin/gsg/simulador/cambiar-uno', async (request: ConUsuario, reply) => {
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador usa las pruebas del simulador.' });
     if (!deps.simulador || !deps.conSimulador()) return reply.code(409).send({ error: 'El simulador de GSG no está montado en este arranque.' });
     const c = await pendienteDePrueba();
-    if (!c) return reply.code(409).send({ error: 'No hay ningún pedido de prueba vivo para esto: carga los clientes de prueba en Hoy → Probar con números ficticios y sincroniza.' });
+    if (!c) return reply.code(409).send({ error: 'No hay ningún pedido de prueba vivo para esto: carga los clientes de prueba en Hoy → Probar con números ficticios.' });
     const direccion = `${(c.direccion ?? 'Av. Nueva 100').replace(/ \(dirección cambiada\)$/, '')} (dirección cambiada)`;
     const distrito = c.distrito === 'San Isidro' ? 'Miraflores' : 'San Isidro';
     deps.simulador.cambiar(c.referencia, { direccion, distrito });
-    return { ok: true, referencia: c.referencia, direccion, distrito, detalle: `GSG cambió la dirección de ${c.referencia} a «${direccion}, ${distrito}». En la próxima sincronización este sistema la actualiza y lo apunta en la bitácora del pedido.` };
+    const envio = await mandarAlSistema(request);
+    return { ok: true, referencia: c.referencia, direccion, distrito, detalle: `GSG cambió la dirección de ${c.referencia} a «${direccion}, ${distrito}» y se lo mandó a este sistema, que la actualiza y lo apunta en la bitácora del pedido. ${envio}` };
   });
 
   app.get<{ Querystring: { dia?: string } }>('/admin/gsg/cuadre', async (request) => {

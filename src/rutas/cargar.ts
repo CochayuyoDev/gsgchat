@@ -3,7 +3,7 @@
  *
  * Vivia dentro de `POST /admin/rutas/lotes` y se saco aqui porque ahora hay
  * dos caminos que cargan lotes: la pantalla /rutas (una tabla pegada o un
- * CSV) y la sincronizacion con GSG del modulo de entregas (las filas que
+ * CSV) y los pedidos que GSG manda al modulo de entregas (las filas que
  * GSG dice que faltan de ubicacion). Los dos tienen que hacer exactamente
  * lo mismo con cada cliente: consentimiento, bajas, duplicados, incidencias
  * de lectura. Un lote cargado por GSG que se saltara la baja de un cliente

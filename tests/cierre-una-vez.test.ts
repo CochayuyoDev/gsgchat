@@ -25,7 +25,7 @@ describe('dos mensajes seguidos tras la ubicación registrada', () => {
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());
@@ -51,7 +51,7 @@ describe('cancelar dos veces seguidas', () => {
     e = await crearEscenarioEntregas({ arranque: hoyALas9() });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());
@@ -82,7 +82,7 @@ describe('un motorizado con dos pedidos de clientes distintos', () => {
     e = await crearEscenarioEntregas({ arranque: hoyALas9() });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados', { telefono: MOTO, nombre: 'Chesco Prueba', zona: 'Miraflores' });
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     for (const [tel, dLat] of [['987000001', 0], ['987000002', 0.004]] as const) {
       await e.contesta(tel, { pin: { lat: PIN_LIMA.lat + dLat, lng: PIN_LIMA.lng } });
@@ -127,7 +127,7 @@ describe('la misma acción repetida seguida se atiende una vez', () => {
     e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
   });
   afterAll(() => e?.cerrar());

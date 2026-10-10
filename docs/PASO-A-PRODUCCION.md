@@ -59,21 +59,27 @@ El dominio de producción **está confirmado: `stoky360.gsgcorp.pe`**, pero
 
 ## 2. Conectar con el sistema real de GSG
 
-Hoy está conectado al **simulador** (números ficticios). Hay que pedirle a GSG:
+Hoy está conectado al **simulador** (números ficticios). GSGchat **nunca le
+pide nada a GSG**: los pedidos llegan solo cuando GSG los manda, y GSGchat le
+cuenta a GSG lo que pasa. Son dos cosas:
 
-- La **dirección de su API**, con **https** (por ejemplo `https://api.gsg.pe/v1`).
-- El **token** con el que GSGchat les llama.
-- Que su API cumpla el contrato: `docs/CONTRATO-GSG.md` (en Conexión se
-  descarga con un botón). Incluye los datos nuevos del envío: producto,
-  empresa, código, número de pedido, forma de pago, monto y remitente.
+1. **Que GSG mande los pedidos.** En **Conexión → «Crear la clave para GSG»**
+   sale una clave (se ve una sola vez). Se la pasas a los programadores de GSG
+   junto con el contrato, `docs/CONTRATO-GSG.md` (en Conexión se descarga con
+   un botón). Con ella mandan cada pedido a `POST /api/v1/entregas` en cuanto
+   lo tienen, con los datos del envío: producto, empresa, código, número de
+   pedido, forma de pago, monto y remitente. Si un día no llegan, se puede
+   pegar la lista del día en Hoy («Pegar la lista del día»).
+2. **Adónde le contamos lo que pasa.** Hay que pedirle a GSG la **dirección de
+   su API** (con **https**, por ejemplo `https://api.gsg.pe/v1`) y el
+   **token**: ahí GSGchat le manda las ubicaciones, confirmaciones, entregas,
+   incidencias y resúmenes (los cinco `POST` del contrato). En **Conexión →
+   GSG**: pegar la dirección y el token y **Guardar**. No hay que tocar código
+   ni reiniciar. Si GSG prefiere enterarse por webhook, lo registra él con su
+   clave (también está en el contrato).
 
-Luego, en **Conexión → «El sistema de GSG» → «Conectar la API real»**: pegar
-la dirección y el token, **Guardar** y **Probar**. No hay que tocar código ni
-reiniciar. Después, en «Verificar el contrato» se ve campo por campo si lo que
-manda GSG está bien.
-
-Si GSG prefiere empujar ellos los pedidos: **Conexión → «Crear la clave para
-GSG»** y pasarles esa clave (se ve una sola vez).
+Lo que GSG manda se ve en Conexión → «Para los programadores de GSG» → «Lo que
+GSG nos mandó», con lo que se le contestó a cada llamada.
 
 ## 3. Número de soporte
 

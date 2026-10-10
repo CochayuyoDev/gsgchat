@@ -189,7 +189,7 @@ export const MENU_GRUPOS: GrupoMenu[] = [
     id: 'reparto',
     etiqueta: 'Reparto',
     items: [
-      { id: 'entregas', etiqueta: 'Entregas del día', href: '/entregas', icono: 'moto', descripcion: 'Cada pedido de hoy: ubicacion, confirmacion, motorizado y hora de llegada. Se sincroniza con GSG (o con su simulador), lee las respuestas con reglas y con la IA, y avisa a quien hace falta.' },
+      { id: 'entregas', etiqueta: 'Entregas del día', href: '/entregas', icono: 'moto', descripcion: 'Cada pedido de hoy: ubicacion, confirmacion, motorizado y hora de llegada. Recibe los pedidos que manda GSG (o su simulador), le cuenta lo que pasa, lee las respuestas con reglas y con la IA, y avisa a quien hace falta.' },
       { id: 'rutas', etiqueta: 'Ubicaciones para reparto', href: '/rutas', icono: 'pin', descripcion: 'Cargar la lista del dia, pedir la ubicacion a cada cliente y resolver lo que necesita una persona.', avanzado: true },
       { id: 'rutas-ajustes', etiqueta: 'Ajustes del reparto', href: '/rutas#ajustes', icono: 'ajustes', descripcion: 'Horario, espera entre mensajes, intentos, textos y plantillas del reparto.', avanzado: true },
       { id: 'mapa', etiqueta: 'Mapa del día', href: '/mapa', icono: 'mapa', descripcion: 'Dónde está cada pedido de hoy y cada motorizado, sobre el mapa.' },

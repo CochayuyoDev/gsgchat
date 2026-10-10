@@ -12,7 +12,7 @@ import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio, montoEnTexto } f
 import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { clienteInventado } from '../src/desarrollador/datos-peru.js';
 import { avisoDireccionPublica } from '../src/config.js';
-import { CAMPOS_PEDIDO } from '../src/rutas/gsg-extras.js';
+import { pedidoSchema } from '../src/api/v1/entregas-gsg.js';
 
 function hoyALas9(): Date {
   const d = new Date();
@@ -61,8 +61,8 @@ describe('leer los datos del envío', () => {
     expect(fusionarDatosEnvio(antes, null)).toBeNull();
   });
 
-  it('el verificador del contrato no marca los campos nuevos como sobrantes', () => {
-    for (const c of ['producto', 'empresa', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente']) expect(CAMPOS_PEDIDO.has(c), c).toBe(true);
+  it('POST /api/v1/entregas acepta los campos nuevos', () => {
+    for (const c of ['producto', 'empresa', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente']) expect(c in pedidoSchema.shape, c).toBe(true);
   });
 
   it('el generador del Módulo desarrollador inventa los datos del envío', () => {
@@ -131,12 +131,12 @@ describe('los datos del envío llegan a la entrega', () => {
 
   it('por la lista de GSG (sincronización con el simulador), con espejo si GSG los cambia', async () => {
     e.simulador.cargarDePrueba();
-    const s = await e.api.post<{ ok: boolean }>('/admin/entregas/sincronizar');
+    const s = await e.gsgManda();
     expect(s.body.ok).toBe(true);
     expect((await e.entrega('P-1001'))?.datosEnvio).toMatchObject({ producto: 'Zapatillas talla 40', empresaCodigo: '516', tracking: 'GSG-A-102345', monto: '85.00', remitente: 'Juan Quispe' });
     expect((await e.entrega('P-1005'))?.datosEnvio?.remitente).toBeUndefined();
     expect(e.simulador.cambiar('P-1001', { datosEnvio: { producto: 'Zapatillas talla 41' } })).not.toBeNull();
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     expect((await e.entrega('P-1001'))?.datosEnvio).toMatchObject({ producto: 'Zapatillas talla 41', monto: '85.00' });
   });
 });

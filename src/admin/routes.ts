@@ -314,7 +314,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         if (r.gsgCola && r.gsgCola.fallido > 0) avisos.push({ tipo: 'gsg_cola', nivel: 'warn', texto: `${r.gsgCola.fallido} reporte${r.gsgCola.fallido === 1 ? '' : 's'} que GSG no aceptó`, href: '/hoy', n: r.gsgCola.fallido });
       }
     }
-    // Lo que GSG mando y no se pudo leer, y el cuadre de fin de dia con GSG
+    // Lo que GSG mando y no se pudo leer, y el cierre del dia con lo de aqui
     // (src/rutas/gsg-extras.ts): un 422 silencioso es un pedido perdido.
     try {
       const extras = (deps.conexionGsg ?? conexionGsgVigente())?.extras;
@@ -323,8 +323,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         if (descartes > 0) avisos.push({ tipo: 'gsg_descartes', nivel: 'warn', texto: `${descartes} pedido${descartes === 1 ? '' : 's'} de GSG no se pudo${descartes === 1 ? '' : 'ieron'} leer`, href: '/setup#gsg', n: descartes });
         const cuadre = extras.ultimoCuadre();
         if (cuadre && !cuadre.ok) {
-          const diferencias = cuadre.faltanEnGsg.length + cuadre.sobranEnGsg.length;
-          avisos.push({ tipo: 'gsg_cuadre', nivel: 'warn', texto: diferencias ? `El día no cuadra con GSG: ${diferencias} diferencia${diferencias === 1 ? '' : 's'}` : 'El día no cuadra con GSG', href: '/setup#gsg', ...(diferencias ? { n: diferencias } : {}) });
+          const abiertas = cuadre.abiertas.length;
+          avisos.push({ tipo: 'gsg_cuadre', nivel: 'warn', texto: `El día ${cuadre.dia} tiene ${abiertas} pedido${abiertas === 1 ? '' : 's'} sin cerrar`, href: '/setup#gsg', n: abiertas });
         }
       }
     } catch {

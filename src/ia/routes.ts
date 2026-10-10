@@ -2,7 +2,8 @@
  * La pantalla "Mi asistente IA" habla con esto.
  *
  *  GET  /admin/ia          la configuracion (sin el token; solo si hay uno)
- *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado, `token: ""` lo quita
+ *  POST /admin/ia          guardar (solo admin); `token` se guarda cifrado; vacio la conserva.
+ *                          Solo `borrarClave: true` la quita (Desvincular IA)
  *  POST /admin/ia/probar   una conversacion de prueba desde el navegador, sin WhatsApp
  *  POST /admin/ia/modelos  los modelos de la cuenta de OpenAI de una clave (solo admin)
  *
@@ -79,9 +80,10 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
         baseUrl: z.string().trim().max(300).optional(),
         token: z.string().max(500).optional(),
         modelo: z.string().trim().max(80).optional(),
+        razonamiento: configIASchema.shape.razonamiento.optional(),
       })
       .parse(request.body ?? {});
-    const hayCandidata = body.proveedor !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined;
+    const hayCandidata = body.proveedor !== undefined || body.baseUrl !== undefined || body.token !== undefined || body.modelo !== undefined || body.razonamiento !== undefined;
     const prueba = await ia.probarConexion(hayCandidata ? body : undefined);
     return { ok: prueba.ok, prueba };
   });
@@ -90,7 +92,7 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     if (request.usuario?.rol !== 'admin' || request.usuario.porToken) {
       return reply.code(403).send({ error: 'solo un administrador configura el asistente' });
     }
-    const body = configIASchema.partial().extend({ token: z.string().max(500).nullable().optional() }).parse(request.body ?? {});
+    const body = configIASchema.partial().extend({ token: z.string().max(500).nullable().optional(), borrarClave: z.boolean().optional() }).parse(request.body ?? {});
     const estado = await ia.guardar(body);
     if (estado.activa && !estado.tieneToken) {
       return reply.code(400).send({ error: 'Para activar el asistente hace falta el token de Puter (o la clave de la API elegida).', estado });

@@ -14,6 +14,12 @@
  *
  * Lo que se manda va documentado abajo, en `PAYLOADS`: es el contrato que hay
  * que ensenarle a quien haga la API del otro lado.
+ *
+ * Esta puerta solo MANDA (POST de reportes). GSGchat nunca le pide nada a
+ * GSG: ni la lista del dia, ni para probar la conexion, ni para cuadrar. Los
+ * pedidos llegan solo cuando GSG los empuja (POST /api/v1/entregas, ver
+ * src/api/v1/entregas-gsg.ts). GSG nunca tuvo un GET de pendientes y
+ * preguntarle cada cinco minutos solo daba 404.
  */
 
 import type { Lote, Reporte, RutasRepo, Solicitud, TipoReporte } from '../db/rutas.js';
@@ -29,26 +35,12 @@ export interface ResultadoEnvio {
   reintentable?: boolean;
 }
 
-export interface ResultadoConsulta<T = unknown> {
-  ok: boolean;
-  cuerpo?: T;
-  error?: string;
-  /** El codigo HTTP que devolvio GSG, si llego a contestar. */
-  status?: number;
-}
-
 export interface PuertoGsg {
   /** Si hay a donde mandar. Falso = todo queda en la cola. */
   conectado(): boolean;
   /** Como describirlo en pantalla. */
   descripcion(): string;
   enviar(tipo: TipoReporte, payload: Record<string, unknown>): Promise<ResultadoEnvio>;
-  /**
-   * Una consulta (GET) a la API de GSG: lo que el modulo de entregas usa
-   * para traerse a quien falta pedir la ubicacion y a quien falta que
-   * confirme. `ruta` va relativa a la base (p. ej. `/reparto/pendientes`).
-   */
-  consultar<T = unknown>(ruta: string): Promise<ResultadoConsulta<T>>;
   /**
    * true si lo vigente es el simulador de GSG de este servidor. Lo de prueba
    * (Modulo desarrollador) solo sale hacia el simulador, nunca a la API real.
@@ -72,9 +64,6 @@ export const RUTAS_GSG: Record<TipoReporte, string> = {
   confirmacion: '/confirmaciones',
   entrega: '/entregas',
 };
-
-/** De donde se traen los pendientes del dia (quien falta ubicacion, quien falta confirmar). */
-export const RUTA_GSG_PENDIENTES = '/reparto/pendientes';
 
 /**
  * Puerto real. Manda un POST con el payload tal cual y espera un JSON con
@@ -131,34 +120,6 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         clearTimeout(corte);
       }
     },
-
-    async consultar(ruta) {
-      const control = new AbortController();
-      const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
-      try {
-        const respuesta = await doFetch(`${base}${ruta}`, {
-          method: 'GET',
-          headers: {
-            accept: 'application/json',
-            ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
-          },
-          signal: control.signal,
-        });
-        const texto = await respuesta.text();
-        if (!respuesta.ok) {
-          return { ok: false, status: respuesta.status, error: `GSG respondio ${respuesta.status}: ${texto.slice(0, 200)}` };
-        }
-        try {
-          return { ok: true, status: respuesta.status, cuerpo: (texto ? JSON.parse(texto) : {}) as never };
-        } catch {
-          return { ok: false, status: respuesta.status, error: 'GSG contesto algo que no es JSON' };
-        }
-      } catch (error) {
-        return { ok: false, error: control.signal.aborted ? 'GSG no respondio a tiempo' : error instanceof Error ? error.message : String(error) };
-      } finally {
-        clearTimeout(corte);
-      }
-    },
   };
 }
 
@@ -169,9 +130,6 @@ export function crearPuertoEnEspera(): PuertoGsg {
     descripcion: () => 'falta GSG_URL: lo reportable se guarda y saldra entero al conectarla',
     async enviar() {
       return { ok: false, error: 'la API de GSG todavia no esta conectada', reintentable: true };
-    },
-    async consultar() {
-      return { ok: false, error: 'la API de GSG todavia no esta conectada' };
     },
   };
 }

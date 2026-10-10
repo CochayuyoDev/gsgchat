@@ -239,7 +239,8 @@ describe('el plan dentro del sistema', () => {
   }
 
   it('con el plan vigente todo funciona y cada respuesta de la IA cuenta', async () => {
-    const s = await levantar(() => planRemoto());
+    // El vencimiento se cuenta desde hoy: con una fecha fija la prueba se venceria sola.
+    const s = await levantar(() => planRemoto({ vencimiento: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString() }));
     const r = await s.ia.turno(s.contacto, 'hola');
     expect(r.resultado).toBe('respondio');
     expect(s.modelo.llamadas).toBe(1);

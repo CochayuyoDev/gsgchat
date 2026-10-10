@@ -344,7 +344,7 @@ export function openApi(baseUrl: string): Json {
           tags: ['entregas'],
           summary: 'GSG empuja: uno o varios pedidos de hoy (sin esperar a que se le pregunte)',
           description: [
-            'Mismo contrato que `GET /reparto/pendientes`, pedido a pedido: `referencia` y `telefono` obligatorios; con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
+            'La unica via por la que entran los pedidos (GSGchat nunca le pide nada a GSG), pedido a pedido: `referencia` y `telefono` obligatorios; con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
             '`faltaUbicacion` (por defecto true) y `faltaConfirmar` (por defecto true) dicen que le falta a cada uno; `urgente` lo pone primero hacia el motorizado.',
             'Se acepta un pedido suelto, una lista `[...]` o `{ pedidos: [...] }` (hasta 500). Un pedido repetido hoy no se duplica (`repetidas`); uno sin telefono valido va en `descartadas` con su motivo.',
             'Lo que pasa despues (confirmo, se le aviso la hora, se entrego, incidencia) llega por los webhooks `entrega.*`.',
@@ -357,9 +357,6 @@ export function openApi(baseUrl: string): Json {
             400: error('El cuerpo no se entiende'),
           },
         },
-      },
-      '/entregas/sincronizar': {
-        post: { tags: ['entregas'], summary: 'Pedirle a GSG los pendientes ahora (GET /reparto/pendientes), sin esperar los 5 minutos', ...permiso('entregas:gestionar'), responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, detalle: { type: 'string' }, nuevas: { type: 'integer' }, actualizadas: { type: 'integer' } } }) } },
       },
       '/entregas/{referencia}': {
         get: { tags: ['entregas'], summary: 'Como va ese pedido hoy, con sus eventos', ...permiso('entregas:leer'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' }, description: 'La referencia del pedido (o su id en GSG)' }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), eventos: { type: 'array', items: { type: 'object', properties: { en: { type: 'string' }, tipo: { type: 'string' }, detalle: { type: 'string', nullable: true } } } } } }), 404: error('No hay ningun pedido de hoy con esa referencia') } },

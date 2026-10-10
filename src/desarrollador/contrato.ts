@@ -9,10 +9,9 @@
  *   - lo que GSGchat MANDA a GSG: las claves que producen payloadUbicacion,
  *     payloadConfirmacion, payloadEntrega, payloadIncidencia y payloadResumen
  *     (src/rutas/gsg.ts), contra el JSON de ejemplo de cada POST en A.2;
- *   - lo que GSGchat LEE de GSG en /reparto/pendientes (CAMPOS_PEDIDO del
- *     verificador, src/rutas/gsg-extras.ts), contra la tabla de A.1;
  *   - lo que ACEPTA POST /api/v1/entregas (pedidoSchema) y PATCH
- *     (cambioPedidoSchema), contra las tablas de B.1 y B.3;
+ *     (cambioPedidoSchema), contra las tablas de A.1 y A.3. Es la unica via
+ *     por la que entran los pedidos: GSGchat nunca le pide nada a GSG;
  *   - las esperas de reintento de los webhooks (ESPERAS_MS), contra B.5.
  */
 
@@ -21,7 +20,6 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadResumen, payloadUbicacion } from '../rutas/gsg.js';
-import { CAMPOS_PEDIDO } from '../rutas/gsg-extras.js';
 import { cambioPedidoSchema, pedidoSchema } from '../api/v1/entregas-gsg.js';
 import { ESPERAS_MS } from '../webhooks/despachador.js';
 import type { Lote, Solicitud } from '../db/rutas.js';
@@ -146,12 +144,9 @@ export function compararContrato(md: string): DiferenciaContrato[] {
     const opcionales = m.aVeces.filter((c) => (seccion(md, titulo) ?? '').includes(`"${c}"`));
     salida.push(comparar(`Lo que GSG recibe en ${titulo.replace('<GSG_URL>', '')}`, new Set(m.siempre), doc, opcionales, 'el ejemplo de ese POST'));
   }
-  const pendientes = camposDeTabla(md, 'GET <GSG_URL>/reparto/pendientes');
-  pendientes?.delete('dia');
-  salida.push(comparar('Lo que GSGchat lee de GET /reparto/pendientes', new Set(CAMPOS_PEDIDO), pendientes, [], 'lo que se lee de cada pedido (la tabla de A.1)'));
-  salida.push(comparar('Lo que acepta POST /api/v1/entregas', new Set(Object.keys(pedidoSchema.shape)), camposDeTabla(md, 'POST /api/v1/entregas'), [], 'lo que se acepta de cada pedido (la tabla de B.1)'));
+  salida.push(comparar('Lo que acepta POST /api/v1/entregas', new Set(Object.keys(pedidoSchema.shape)), camposDeTabla(md, 'POST /api/v1/entregas'), [], 'lo que se acepta de cada pedido (la tabla de A.1)'));
   const cambiables = new Set(Object.keys(cambioPedidoSchema.shape).filter((c) => c !== 'telefono'));
-  salida.push(comparar('Lo que acepta PATCH /api/v1/entregas/{referencia}', cambiables, camposDeTabla(md, 'PATCH /api/v1/entregas/{referencia}'), [], 'lo que se puede cambiar (la tabla de B.3)'));
+  salida.push(comparar('Lo que acepta PATCH /api/v1/entregas/{referencia}', cambiables, camposDeTabla(md, 'PATCH /api/v1/entregas/{referencia}'), [], 'lo que se puede cambiar (la tabla de A.3)'));
   const esperas = esperasEnPalabras();
   const conEsperas = md.includes(esperas);
   salida.push({

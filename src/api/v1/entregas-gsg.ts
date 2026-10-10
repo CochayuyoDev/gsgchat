@@ -1,9 +1,9 @@
 /**
- * GSG empuja: en vez de esperar a que se le pregunte cada cinco minutos,
- * el sistema de GSG (o cualquiera con una clave `entregas:gestionar`) manda
- * los pedidos del dia en cuanto los tiene, y pregunta o cancela por
- * referencia. Mismo contrato que `GET /reparto/pendientes` (ClienteGsg),
- * con dos banderas por pedido: `faltaUbicacion` y `faltaConfirmar`.
+ * GSG empuja: es la UNICA via por la que entran los pedidos. GSGchat nunca
+ * le pide nada a GSG; el sistema de GSG (o cualquiera con una clave
+ * `entregas:gestionar`) manda los pedidos del dia en cuanto los tiene, y
+ * pregunta o cancela por referencia. Cada pedido es un ClienteGsg con dos
+ * banderas: `faltaUbicacion` y `faltaConfirmar`.
  *
  *  POST   /api/v1/entregas                 uno o varios pedidos (entregas:gestionar)
  *  GET    /api/v1/entregas/:referencia     como va ese pedido hoy (entregas:leer)
@@ -37,6 +37,8 @@ export interface ApiEntregasGsgDeps {
   /** Peticiones por minuto y por clave (por defecto LIMITE_POR_MINUTO). */
   limitePorMinuto?: number;
   ahora?: () => number;
+  /** Apunta los pedidos que no se pueden usar (Conexión → GSG, la campana y el verificador del contrato). */
+  apuntarDescartes?: (cuerpo: { faltaUbicacion: unknown[]; faltaConfirmacion: unknown[] }) => Promise<unknown>;
 }
 
 /** Tope por clave y minuto en /api/v1/entregas*. GSG manda en tandas (hasta 500 por llamada): 120 sobra. */
@@ -233,6 +235,12 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         }
       }
     }
+    // Lo que no se pudo usar queda apuntado del dia (no frena la respuesta si falla).
+    if (deps.apuntarDescartes && descartadas.length) {
+      const malos = new Set(descartadas.map((d) => d.referencia));
+      const de = (lista: Pedido[]) => lista.filter((p) => malos.has(p.referencia));
+      await deps.apuntarDescartes({ faltaUbicacion: de(sinPin), faltaConfirmacion: de(conPin) }).catch(() => undefined);
+    }
     const resumen = await entregas.resumen();
     const salida = creadas.map((c) => resumen.entregas.find((e) => e.id === c.id)).filter((e): e is FilaEntrega => Boolean(e)).map(entregaParaApi);
     return reply.code(creadas.length ? 201 : 200).send({
@@ -256,7 +264,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   });
 
   // GSG cambia datos de un pedido ya mandado: lo mismo que el espejo de la
-  // sincronizacion (src/entregas/servicio.ts), pero empujado. Queda apuntado en
+  // lista recibida (src/entregas/servicio.ts), pero empujado. Queda apuntado en
   // la bitacora del pedido. El telefono no se cambia aqui: es otro pedido
   // (cancelar y crear), porque al numero viejo ya se le pudo escribir.
   app.patch<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {

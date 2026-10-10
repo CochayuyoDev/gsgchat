@@ -451,7 +451,7 @@ menú que toca). El manual y la IA operadora siguen el mismo modo.
 
 Para que nadie tenga que explicarlo: en Inicio, con el modo GSG, **«Para
 empezar»** son tres pasos con su estado real y su botón (conectar el WhatsApp,
-dar de alta a los motorizados, traer los pedidos: GSG, simulador o lista pegada)
+dar de alta a los motorizados, recibir los pedidos: GSG, simulador o lista pegada)
 que se pliegan a «Todo listo» cuando están hechos (`pintarPasosGsg` en
 `src/web/pages.ts`, datos en `/admin/resumen.primerosPasos`); arriba, en todas
 las pantallas, **Buscar… (Ctrl K)** encuentra pedidos de hoy, clientes,
@@ -624,14 +624,13 @@ hoy de principio a fin. Son tres cosas distintas, cada una por separado:
 
 **GSG** se conecta desde la misma pantalla: la API real (dirección + token,
 cifrado) o el **simulador** que trae este servidor (`/simulador/gsg`), una
-copia de mentira del sistema de GSG con sus tres listas (falta ubicación,
-falta confirmar, terminados). Con "Cargar 10 clientes de prueba" y "Cargar 10
-motorizados de prueba" se recorre el flujo entero con números ficticios
-(987 000 001-010 y 999 000 001-010). Contrato: `GET /reparto/pendientes`
-devuelve `{ dia, faltaUbicacion: [{referencia, telefono, nombre, direccion,
-distrito, notas, lat?, lng?}], faltaConfirmacion: [...], terminados: [...] }`;
-los reportes van a `/ubicaciones`, `/confirmaciones`, `/entregas`,
-`/incidencias` y `/resumenes` (ver `src/rutas/gsg.ts`, `PAYLOADS`).
+copia de mentira del sistema de GSG que recibe los reportes. Con "Cargar 10
+clientes de prueba" y "Cargar 10 motorizados de prueba" se recorre el flujo
+entero con números ficticios (987 000 001-010 y 999 000 001-010). GSGchat
+**nunca le pide nada a GSG**: los pedidos entran solo cuando GSG los manda
+(`POST /api/v1/entregas`, ver más abajo) o cuando se pega la lista del día; los
+reportes van a `/ubicaciones`, `/confirmaciones`, `/entregas`, `/incidencias`
+y `/resumenes` (ver `src/rutas/gsg.ts`, `PAYLOADS`).
 
 Con la **API de Meta**, fuera de la ventana de 24 h hace falta una plantilla
 aprobada para cada caso (Ajustes → Plantillas); sin ella la entrega se aparta
@@ -661,9 +660,8 @@ motorizados (alta, zona, placa, descanso, baja); ajustes (margen, esperas,
 intentos, IA, avisar al entregar, responder «dónde está», hora del cierre,
 textos con variables). API
 pública: `GET /api/v1/entregas`, `GET /api/v1/motorizados` (`entregas:leer`),
-`POST /api/v1/entregas/sincronizar`, `POST /api/v1/motorizados`
-(`entregas:gestionar`). La IA operadora entiende `entregas.ver`,
-`entregas.sincronizar`, `entregas.confirmar`, `entregas.reasignar`,
+`POST /api/v1/motorizados` (`entregas:gestionar`). La IA operadora entiende
+`entregas.ver`, `entregas.confirmar`, `entregas.reasignar`,
 `entregas.reintentar`, `motorizados.ver`, `motorizados.alta`,
 `motorizados.estado`; y el asistente de WhatsApp sabe qué pedido tiene hoy
 el cliente que le escribe y a qué hora le llega.
@@ -675,20 +673,19 @@ entregada, rojo incidencia, aro rojo si es urgente), los motorizados en su
 refresco cada 30 s.
 
 **GSG por la API** (para sus programadores: `docs/CONTRATO-GSG.md`, con el JSON
-real de cada llamada y cómo probar desde fuera contra el simulador). Dos
-caminos que se combinan: (A) GSGchat pregunta `GET /reparto/pendientes` cada 5
-minutos y reporta con los cinco `POST`; (B) GSG **empuja** con `POST
-/api/v1/entregas` (uno, lista o `{pedidos}`, hasta 500, banderas
+real de cada llamada y cómo probar desde fuera contra el simulador). Un solo
+camino de entrada: GSGchat **nunca le pregunta nada a GSG**. GSG **empuja** con
+`POST /api/v1/entregas` (uno, lista o `{pedidos}`, hasta 500, banderas
 `faltaUbicacion`/`faltaConfirmar`/`urgente`; responde `{creadas, repetidas,
 descartadas[{referencia, motivo}]}`), consulta `GET /api/v1/entregas/:referencia`,
-cancela `DELETE /api/v1/entregas/:referencia?motivo=` (409 si ya terminó) y
-recibe los webhooks `entrega.confirmada|avisada|entregada|incidencia` firmados
-(`src/api/v1/entregas-gsg.ts`, OpenAPI incluido). En la lista de pendientes un
-pedido puede venir con `cancelado: true` y `motivoCancelacion` (GSG lo anuló)
-o con teléfono/dirección/distrito distintos (GSG lo cambió): el simulador lo
-admite con `POST /reparto/cancelar` y `POST /reparto/cambiar`, y en Conexión
-→ «Para los programadores de GSG» hay «Cancelar uno (prueba)» y «Cambiar la
-dirección de uno (prueba)»; una lista vacía o un fallo nunca cancela nada.
+cambia datos con `PATCH /api/v1/entregas/:referencia`, cancela `DELETE
+/api/v1/entregas/:referencia?motivo=` (409 si ya terminó) y se entera por los
+webhooks `entrega.confirmada|avisada|entregada|incidencia` firmados
+(`src/api/v1/entregas-gsg.ts`, OpenAPI incluido). GSGchat le cuenta lo que pasa
+con los cinco `POST` de reporte a `GSG_URL`. Que GSG deje de mandar un pedido o
+esté caído nunca cancela nada: solo un `DELETE`. En Conexión → «Para los
+programadores de GSG» hay «Cancelar uno (prueba)» y «Cambiar la dirección de
+uno (prueba)» con el simulador.
 Para sus programadores, en
 Conexión → «Para los programadores de GSG»: **token del simulador** (`gsgsim_…`,
 hash SHA-256, caduca a 30 días, anulable; `POST/DELETE
@@ -696,14 +693,9 @@ hash SHA-256, caduca a 30 días, anulable; `POST/DELETE
 y la **bitácora «Lo que GSG nos mandó»** (últimas 50 llamadas al simulador y a
 `/api/v1/entregas*`). Y para el día a día (`src/rutas/gsg-extras.ts`,
 `src/rutas/gsg-extras-routes.ts`): **descartes a la vista** (los pedidos que
-GSG mandó y no se pudieron leer, con motivo; `gsg.descartes`), **«Verificar
-el contrato»** (`POST /admin/gsg/verificar-contrato`, campo por campo) y
-**«Cuadrar el día con GSG»** (`GET /admin/gsg/cuadre?dia=`: terminados de GSG
-frente a lo entregado aquí; la campana avisa si no cuadra y el resumen de la
-tarde lo lleva). La clave sale de Conexión →
-GSG → «Crear la clave para GSG» (`entregas:gestionar`, `entregas:leer`,
-`webhooks:gestionar`). Un pedido que desaparece de las listas de GSG no se
-cancela solo.
+GSG mandó y no se pudieron leer, con motivo; `gsg.descartes`). La clave sale
+de Conexión → GSG → «Crear la clave para GSG» (`entregas:gestionar`,
+`entregas:leer`, `webhooks:gestionar`).
 
 Pruebas: `tests/entregas.test.ts` (el día entero con el servidor real, WhatsApp
 falso, GSG simulado y reloj propio), `tests/entregas-interpretar.test.ts`

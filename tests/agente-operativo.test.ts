@@ -116,7 +116,7 @@ describe('el agente operativo en un día de entregas', () => {
     expect(e.asistente?.agenteOperativoActivo()).toBe(true);
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     // Los datos del envío de P-1001, tal como los manda GSG.
     const ana = (await e.entrega('P-1001'))!;
     await e.repos.entregas.actualizar(ana.id, { datosEnvio: { producto: 'Zapatillas talla 40', empresaCodigo: '516', empresaNombre: 'Zapatería Lima', tracking: 'GSG-A-102345', nroPedido: '#1042', metodoPago: 'YAPE', monto: '85.00', remitente: 'Juan Quispe' } });

@@ -4,12 +4,13 @@
  *
  * El flujo, en el orden en que pasa:
  *
- *  1. **Sincronizar con GSG.** Cada pocos minutos se le piden los pendientes
- *     del dia: a quien falta pedirle la UBICACION y a quien falta que
- *     CONFIRME. Son dos listas distintas y un cliente puede estar en las
- *     dos, en una o en ninguna. Los de ubicacion entran en un lote del
- *     reparto (que ya sabe pedirla con ritmo, insistir y reportar); los de
- *     confirmacion los atiende este modulo.
+ *  1. **GSG manda los pedidos.** GSGchat nunca le pide nada a GSG: los
+ *     pedidos llegan cuando GSG los empuja (POST /api/v1/entregas, ver
+ *     src/api/v1/entregas-gsg.ts) o, en pruebas, cuando se cargan en el
+ *     simulador de GSG (`recibirListaGsg`). Cada uno dice si falta pedirle
+ *     la UBICACION, si falta que CONFIRME, o las dos cosas. Los de ubicacion
+ *     entran en un lote del reparto (que ya sabe pedirla con ritmo, insistir
+ *     y reportar); los de confirmacion los atiende este modulo.
  *  2. **La ubicacion llega** (el reparto la resuelve y avisa aqui). Si
  *     ademas falta confirmar, el "gracias" lleva la pregunta pegada.
  *  3. **La confirmacion**: se lee lo que contesta (reglas, y la IA si no
@@ -62,7 +63,7 @@ const mismoMundo = (a: string, b: string): boolean => esNumeroDePrueba(a) === es
 const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 000 1…) y los de verdad solo a motorizados de verdad.';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
-import { despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, RUTA_GSG_PENDIENTES, type PuertoGsg } from '../rutas/gsg.js';
+import { despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, type PuertoGsg } from '../rutas/gsg.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import type { CargaLote, ResultadoCarga } from '../rutas/cargar.js';
 import { revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
@@ -115,7 +116,7 @@ const KM_CERCA = 6;
 /** Pasada la hora avisada mas esto, un "no llegó" del cliente pasa a una persona. */
 const MINUTOS_TOLERANCIA_LLEGADA = 30;
 
-/** Lo que GSG manda en cada lista de pendientes. */
+/** Un pedido tal como lo manda GSG (o el simulador). */
 export interface ClienteGsg {
   referencia: string;
   telefono: string;
@@ -138,6 +139,7 @@ export interface ClienteGsg {
   telefonoMotorizado?: string | null;
 }
 
+/** La lista del dia del simulador de GSG, con sus apartados. Ver recibirListaGsg. */
 export interface PendientesGsg {
   faltaUbicacion?: ClienteGsg[];
   faltaConfirmacion?: ClienteGsg[];
@@ -423,8 +425,13 @@ export interface ServicioEntregas {
   /** El dia del reparto de hoy, AAAA-MM-DD en el reloj del negocio. */
   hoy(): string;
 
-  /** Le pide a GSG los pendientes y los mete en el sistema. */
-  sincronizar(): Promise<ResultadoSincronizacion>;
+  /**
+   * Mete en el sistema una lista del dia ya recibida (la del simulador de
+   * GSG): crea lo nuevo, refleja lo cambiado, cancela lo cancelado y marca lo
+   * terminado. No llama a nadie: GSGchat nunca le pide nada a GSG. Los
+   * pedidos de verdad entran por POST /api/v1/entregas.
+   */
+  recibirListaGsg(cuerpo: PendientesGsg): Promise<ResultadoSincronizacion>;
   ultimaSincronizacion(): ResultadoSincronizacion | null;
   /** Mira las que el reparto dio por perdidas (sin WhatsApp, numero mal...) y las marca aqui. */
   revisarReparto(): Promise<number>;
@@ -1174,7 +1181,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
   }
 
-  // ---------------------------------------------------------- sincronizar
+  // ------------------------------------------------- la lista recibida
 
   function leerCliente(c: ClienteGsg): { ok: true; phone: string; referencia: string } | { ok: false; motivo: string } {
     const referencia = String(c.referencia ?? '').trim();
@@ -1184,21 +1191,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return { ok: true, phone: revision.phone, referencia };
   }
 
-  async function sincronizar(): Promise<ResultadoSincronizacion> {
+  async function recibirListaGsg(recibido: PendientesGsg): Promise<ResultadoSincronizacion> {
     const dia = hoy();
     const at = ahora().toISOString();
     const base: ResultadoSincronizacion = { ok: false, detalle: '', dia, nuevas: 0, actualizadas: 0, ubicacionesPedidas: 0, confirmacionesPendientes: 0, terminadas: 0, lote: null, at };
-    if (!deps.gsg.conectado()) {
-      ultimaSync = { ...base, detalle: 'GSG no está conectado: conecta el simulador o la API real en Entregas del día.' };
-      return ultimaSync;
-    }
-    const r = await deps.gsg.consultar<PendientesGsg>(RUTA_GSG_PENDIENTES);
-    if (!r.ok || !r.cuerpo) {
-      ultimaSync = { ...base, detalle: `GSG no respondió: ${r.error ?? 'sin cuerpo'}` };
-      log('no se pudieron traer los pendientes de GSG', { detalle: r.error });
-      return ultimaSync;
-    }
-    const cuerpo = r.cuerpo;
+    const cuerpo: PendientesGsg = recibido && typeof recibido === 'object' ? recibido : {};
+    // Lo que no se puede usar queda apuntado (Conexión → GSG y la campana).
+    await deps.conexionGsg?.extras.observarPendientes(cuerpo).catch((error) => log('no se pudieron apuntar los descartes de GSG', { detalle: String(error) }));
     const diaGsg = typeof cuerpo.dia === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cuerpo.dia) ? cuerpo.dia : dia;
     const resultado: ResultadoSincronizacion = { ...base, ok: true, dia: diaGsg };
 
@@ -1357,7 +1356,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
     // Las que necesitan ubicacion y todavia no estan en un lote del reparto
     // (lo que espera confirmar el envio, no: sale al confirmarlo).
-    const encaminado = await encaminarUbicaciones([...tocadas.values()], `Entregas GSG ${diaGsg} · ${horaEnReloj(ahora(), tz())}`, 'gsg', `gsg-entregas:${diaGsg}:${Date.now()}`, 'Cargado por la sincronización con GSG (Entregas del día).');
+    const encaminado = await encaminarUbicaciones([...tocadas.values()], `Entregas GSG ${diaGsg} · ${horaEnReloj(ahora(), tz())}`, 'gsg', `gsg-entregas:${diaGsg}:${Date.now()}`, 'Cargado de la lista de GSG (Entregas del día).');
     for (const act of encaminado.entregas) tocadas.set(act.id, act);
     resultado.lote = encaminado.lote;
     resultado.ubicacionesPedidas += encaminado.pedidas;
@@ -1385,7 +1384,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (fresca) await recalcular(fresca);
     }
 
-    resultado.detalle += `GSG respondió: ${resultado.nuevas} nuevas, ${resultado.actualizadas} actualizadas, ${resultado.ubicacionesPedidas} al reparto para pedir ubicación, ${resultado.confirmacionesPendientes} por pedir confirmación ya, ${resultado.terminadas} terminadas${resultado.retenidas ? `, ${resultado.retenidas} esperan que confirmes el envío en Números del día` : ''}${resultado.canceladas ? `, ${resultado.canceladas} canceladas por GSG` : ''}${resultado.cambiadas ? `, ${resultado.cambiadas} con datos cambiados por GSG` : ''}.`;
+    resultado.detalle += `Lista recibida: ${resultado.nuevas} nuevas, ${resultado.actualizadas} actualizadas, ${resultado.ubicacionesPedidas} al reparto para pedir ubicación, ${resultado.confirmacionesPendientes} por pedir confirmación ya, ${resultado.terminadas} terminadas${resultado.retenidas ? `, ${resultado.retenidas} esperan que confirmes el envío en Números del día` : ''}${resultado.canceladas ? `, ${resultado.canceladas} canceladas por GSG` : ''}${resultado.cambiadas ? `, ${resultado.cambiadas} con datos cambiados por GSG` : ''}.`;
     ultimaSync = resultado;
     return resultado;
   }
@@ -1416,7 +1415,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         continue;
       }
       // Ya se le propuso su direccion (o esta por proponerse): no se repite
-      // en cada sincronizacion; si no contesta, revisarPropuestas la pasa al reparto.
+      // en cada lista que llega; si no contesta, revisarPropuestas la pasa al reparto.
       if (e.ubicacionPropuestaAt || e.ubicacionPropuestaLat != null) continue;
       // Cliente recurrente: ya nos mando su ubicacion hace poco. En vez de
       // pedirle el pin se le propone esa direccion; el motor le pregunta.
@@ -4151,7 +4150,7 @@ ${lista}
     },
     recargar,
     hoy,
-    sincronizar,
+    recibirListaGsg,
     ultimaSincronizacion: () => ultimaSync,
     revisarReparto,
     alUbicacion,

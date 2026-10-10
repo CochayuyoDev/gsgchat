@@ -343,7 +343,7 @@ describe('panel.consultar: sin secretos y recortado', () => {
     await consultar.ejecutar({ ruta: '/admin/chat/conversations?q=Ana&limit=5' }, ctx);
     expect(llamadas).toEqual([{ method: 'GET', url: '/admin/chat/conversations?q=Ana&limit=5' }]);
     // Un GET a una ruta que solo existe para cambiar: no.
-    expect((await consultar.ejecutar({ ruta: '/admin/entregas/sincronizar' }, ctx)).ok).toBe(false);
+    expect((await consultar.ejecutar({ ruta: '/admin/entregas/crear' }, ctx)).ok).toBe(false);
   });
 });
 

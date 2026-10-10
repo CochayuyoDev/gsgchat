@@ -70,6 +70,7 @@ import { registerProcesosRoutes } from './procesos/routes.js';
 import { opcionesDesdeConfig } from './rutas/motor.js';
 import { PLANES } from './rutas/telefono.js';
 import { fijarGsgVigente } from './web/shell.js';
+import { normalizarRuta } from './util/ruta-normalizada.js';
 
 export interface ServerDeps {
   config: Config;
@@ -156,6 +157,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // Los tokens de rastreo van en el path y superan los 100 caracteres del
     // limite por defecto de Fastify, que devolvia 414 en todos los enlaces.
     routerOptions: { maxParamLength: 512 },
+    // Que los ganchos de autorizacion vean la misma ruta que el enrutador
+    // (sin esto, `/%61dmin/...` se saltaba el de /admin). Ver util/ruta-normalizada.ts.
+    rewriteUrl: (req) => normalizarRuta(req.url ?? '/'),
   });
 
   // El cuerpo crudo hace falta para validar la firma del webhook: si se
@@ -328,8 +332,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
   await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
-  // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
-  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas });
+  // GSG empuja sus pedidos por la API (POST /api/v1/entregas): es la unica via por la que entran. Ver src/api/v1/entregas-gsg.ts.
+  const conexionDeGsg = deps.conexionGsg;
+  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, apuntarDescartes: conexionDeGsg ? (cuerpo) => conexionDeGsg.extras.observarPendientes(cuerpo) : undefined });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
   await registerProcesosRoutes(app, { procesos: servicioProcesos, config, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName });
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.

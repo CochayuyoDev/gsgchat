@@ -66,6 +66,31 @@ export function cuerpoDeEntrega(entrega: Pick<Entrega, 'id' | 'evento' | 'payloa
   });
 }
 
+/**
+ * Solo el principio de lo que contesto el receptor. `text()` se lo leia
+ * entero antes de recortarlo: un receptor que devuelve megas (o un flujo que
+ * no acaba) se comia la memoria del proceso.
+ */
+async function leerPrincipio(respuesta: Response, max: number): Promise<string> {
+  if (!respuesta.body) return (await respuesta.text().catch(() => '')).slice(0, max);
+  const lector = respuesta.body.getReader();
+  const trozos: Uint8Array[] = [];
+  let leidos = 0;
+  try {
+    while (leidos < max * 4) {
+      const { done, value } = await lector.read();
+      if (done || !value) break;
+      trozos.push(value);
+      leidos += value.length;
+    }
+  } catch {
+    // Lo que se corte a medias no importa: es para diagnosticar.
+  } finally {
+    void lector.cancel().catch(() => undefined);
+  }
+  return Buffer.concat(trozos).toString('utf8').slice(0, max);
+}
+
 /** Un POST firmado, y que paso. No toca la base: eso lo hace quien llama. */
 export async function entregarUna(
   webhook: WebhookConSecreto,
@@ -93,7 +118,7 @@ export async function entregarUna(
       body: cuerpo,
       signal: control.signal,
     });
-    const texto = (await respuesta.text().catch(() => '')).slice(0, MAX_RESPUESTA) || null;
+    const texto = (await leerPrincipio(respuesta, MAX_RESPUESTA)) || null;
     if (respuesta.ok) return { ok: true, codigo: respuesta.status, respuesta: texto, reintentable: false };
     // 408 y 429 son "ahora no": se vuelve. El resto de 4xx es un "no" que
     // insistir no cambia (URL mal, firma rechazada, cuerpo que no entiende).
@@ -123,11 +148,20 @@ export async function despacharEntregas(deps: DespachadorDeps, limite = 25): Pro
   const resumen: DespachoResumen = { intentadas: pendientes.length, enviadas: 0, reintentar: 0, fallidas: 0, apagados: [] };
   // El mismo webhook suele tener varias entregas en la pasada: se lee una vez.
   const webhooks = new Map<string, WebhookConSecreto | null>();
+  // Un receptor que no contesto (caido, sin respuesta a tiempo) no se vuelve
+  // a probar en esta pasada: sus demas entregas esperan intactas a la
+  // siguiente. Antes, uno colgado se comia hasta 25 x 40 s y retrasaba las
+  // entregas de todos los demas webhooks. Un 5xx contesta rapido: ese sigue.
+  const caidos = new Set<string>();
 
   for (const entrega of pendientes) {
     if (!webhooks.has(entrega.webhookId)) webhooks.set(entrega.webhookId, await repo.conSecreto(entrega.webhookId));
     const webhook = webhooks.get(entrega.webhookId);
     if (!webhook || !webhook.activo) continue;
+    if (caidos.has(webhook.id)) {
+      resumen.intentadas--;
+      continue;
+    }
 
     const salida = await entregarUna(webhook, entrega, deps);
     const momento = deps.ahora?.() ?? new Date();
@@ -139,6 +173,7 @@ export async function despacharEntregas(deps: DespachadorDeps, limite = 25): Pro
       continue;
     }
 
+    if (salida.reintentable && salida.codigo === null) caidos.add(webhook.id);
     const intentosHechos = entrega.intentos + 1;
     if (salida.reintentable && intentosHechos < MAX_INTENTOS) {
       const espera = ESPERAS_MS[Math.min(intentosHechos - 1, ESPERAS_MS.length - 1)]!;

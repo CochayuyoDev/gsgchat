@@ -404,7 +404,7 @@ describe('botones, segunda visita, cerca, sin moto, urgentes y ruta', () => {
 
     // Lo que viene de GSG con urgente: true entra urgente.
     e.simulador.cargar([{ referencia: 'U-3015', telefono: '987300015', nombre: 'Urgente GSG', faltaUbicacion: false, faltaConfirmacion: true, lat: pinDe(15).lat, lng: pinDe(15).lng, urgente: true }]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     expect((await e.entrega('U-3015'))?.prioridad).toBe('urgente');
     expect(e.simulador.pendientes().faltaConfirmacion.find((c) => c.referencia === 'U-3015')?.urgente).toBe(true);
   });

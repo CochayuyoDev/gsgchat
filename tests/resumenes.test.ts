@@ -101,11 +101,11 @@ describe('el texto fijo y las cifras', () => {
     expect(t).toContain('Quien más entregó: Kevin Aguilar (12)');
   });
 
-  it('el de la tarde lleva el cuadre con GSG en palabras cuando hay conexión, y no por la mañana', async () => {
-    const t = textoFijo('tarde', { ...cifras, cuadreGsg: 'No cuadra: 1 cerrado(s) aquí que GSG no tiene como terminados (P-1010); 0 terminado(s) en GSG que aquí siguen abiertos.' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
-    expect(t).toContain('Cuadre con GSG: No cuadra: 1 cerrado(s)');
+  it('el de la tarde lleva el cierre del día en palabras cuando hay conexión, y no por la mañana', async () => {
+    const t = textoFijo('tarde', { ...cifras, cuadreGsg: 'Quedan 1 de 25 pedido(s) sin cerrar (P-1010).' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
+    expect(t).toContain('Cierre del día: Quedan 1 de 25');
     const m = textoFijo('manana', { ...cifras, cuadreGsg: 'lo que sea' }, { negocio: 'GSG Reparto', timezone: 'America/Lima', url: URL });
-    expect(m).not.toContain('Cuadre con GSG');
+    expect(m).not.toContain('Cierre del día');
     // Por el servicio: el cuadre se pide solo por la tarde y solo con GSG conectado.
     const pedidos: string[] = [];
     const sender = { send: async () => ({ ok: true }) } as unknown as import('../src/outbound/sender.js').Sender;
@@ -116,15 +116,15 @@ describe('el texto fijo y las cifras', () => {
       supervisor: () => '51912426667',
       nombreNegocio: () => 'GSG Reparto',
       entregas: { resumen: async () => resumenDePrueba() },
-      gsgExtras: () => ({ cuadrar: async (dia?: string) => { pedidos.push(dia ?? ''); return { resumen: 'Cuadra: 25 entregados aquí y 25 terminados en GSG.' }; } }),
+      gsgExtras: () => ({ cuadrar: async (dia?: string) => { pedidos.push(dia ?? ''); return { resumen: 'Día cerrado: los 25 pedido(s) están entregados o cancelados.' }; } }),
       timezone: 'America/Lima',
       publicBaseUrl: URL,
     });
     const tarde = await servicio.redactar('tarde');
-    expect(tarde.texto).toContain('Cuadre con GSG: Cuadra: 25 entregados');
+    expect(tarde.texto).toContain('Cierre del día: Día cerrado: los 25');
     expect(pedidos).toHaveLength(1);
     const manana = await servicio.redactar('manana');
-    expect(manana.texto).not.toContain('Cuadre con GSG');
+    expect(manana.texto).not.toContain('Cierre del día');
     expect(pedidos).toHaveLength(1);
   });
 

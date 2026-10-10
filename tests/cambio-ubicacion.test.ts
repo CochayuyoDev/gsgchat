@@ -40,7 +40,7 @@ describe('cambio de ubicación antes y después de la 1:00 PM', () => {
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     await e.api.post('/admin/motorizados/de-prueba');
     e.simulador.cargar([{ referencia: 'C-1', telefono: TEL, nombre: 'Rosa Cambio', direccion: 'Av. Larco 1', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmacion: false, telefonoMotorizado: MOTO_GSG } as never]);
-    await e.api.post('/admin/entregas/sincronizar');
+    await e.gsgManda();
     await e.trabajar();
     await e.contesta(TEL, { pin: PIN_LIMA });
     await e.trabajar();

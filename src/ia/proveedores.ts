@@ -28,6 +28,12 @@ export interface OpcionesChat {
   timeoutMs?: number;
   /** Si la API dice cuantos tokens gasto (OpenAI y compatibles lo traen en `usage`), se avisa aqui. */
   alUso?: (uso: { tokensEntrada: number; tokensSalida: number }) => void;
+  /**
+   * Una respuesta cortada por el tope de tokens (`finish_reason: "length"`)
+   * es un fallo, no una respuesta: para lo que sale a un cliente, que nunca
+   * reciba un mensaje a medias.
+   */
+  exigirCompleta?: boolean;
 }
 
 export interface ProveedorIA {
@@ -56,15 +62,40 @@ export class ErrorIA extends Error {
 
 const TEXTO_SIN_SALDO = /insufficient_quota|insufficient_funds|exceeded your current quota|quota exceeded|billing|credit balance|out of credits|insufficient (balance|credits?)|payment required/i;
 
+/**
+ * La clave no vale aunque el codigo no sea 401: Google AI Studio contesta 400
+ * «API key not valid» (API_KEY_INVALID) y otros 403 con «invalid api key».
+ */
+const TEXTO_CLAVE_MALA = /api[_ ]?key[_ ]?invalid|invalid[_ ]api[_ ]key|incorrect api key|api key not valid|api key (is )?(missing|expired|revoked)|invalid (x-)?api[- ]key|no auth credentials|invalid authentication|unauthenticated/i;
+
 /** Lo que dice una respuesta HTTP de una API compatible con OpenAI: ¿es un fallo de la cuenta? */
-export function falloDeCuenta(status: number, cuerpo?: { error?: { code?: unknown; type?: unknown; message?: unknown } | string | null } | null): FalloCuentaIA | null {
+export function falloDeCuenta(status: number, cuerpo?: { error?: { code?: unknown; type?: unknown; message?: unknown; status?: unknown } | string | null } | null): FalloCuentaIA | null {
   const err = cuerpo?.error;
-  const code = typeof err === 'object' && err ? `${String(err.code ?? '')} ${String(err.type ?? '')}` : '';
+  const code = typeof err === 'object' && err ? `${String(err.code ?? '')} ${String(err.type ?? '')} ${String(err.status ?? '')}` : '';
   const mensaje = typeof err === 'string' ? err : typeof err === 'object' && err ? String(err.message ?? '') : '';
   if (status === 402) return 'sin_saldo';
   if (status === 401) return 'clave_invalida';
   if ((status === 429 || status === 403 || status === 400) && (TEXTO_SIN_SALDO.test(code) || TEXTO_SIN_SALDO.test(mensaje))) return 'sin_saldo';
+  if ((status === 403 || status === 400) && (TEXTO_CLAVE_MALA.test(code) || TEXTO_CLAVE_MALA.test(mensaje))) return 'clave_invalida';
   return null;
+}
+
+/** El mensaje de error de un cuerpo de la API, tenga la forma que tenga ({error:{message}}, {error:"..."}, {message}). */
+function mensajeDeError(cuerpo: Record<string, unknown>): string | undefined {
+  const err = cuerpo.error;
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string') return (err as { message: string }).message;
+  if (typeof cuerpo.message === 'string') return cuerpo.message;
+  if (typeof cuerpo.detail === 'string') return cuerpo.detail;
+  return undefined;
+}
+
+/** El detalle de un fallo, sin la clave (hay APIs que la repiten en el error) y de largo razonable. */
+function detalleSeguro(detalle: string | undefined, clave: string): string | undefined {
+  if (detalle == null) return undefined;
+  let s = String(detalle);
+  if (clave && clave.length >= 8) s = s.split(clave).join('…');
+  return s.length > 300 ? `${s.slice(0, 300)}…` : s;
 }
 
 /** De cualquier error que haya lanzado un proveedor: ¿es un fallo de la cuenta? */
@@ -90,12 +121,18 @@ export function textoDeContenido(content: unknown): string {
         if (!b || typeof b !== 'object') return '';
         const parte = b as { type?: unknown; text?: unknown };
         if (typeof parte.type === 'string' && /think|reason/i.test(parte.type)) return '';
-        return parte.text == null ? '' : String(parte.text);
+        return typeof parte.text === 'string' ? parte.text : '';
       })
       .join('')
       .trim();
   }
-  if (content && typeof content === 'object' && 'toString' in content) return String(content);
+  // Un bloque suelto ({type:'text', text:'...'}): su texto. Cualquier otro
+  // objeto NO se pasa a texto: saldria «[object Object]» al cliente.
+  if (content && typeof content === 'object') {
+    const parte = content as { type?: unknown; text?: unknown };
+    if (typeof parte.type === 'string' && /think|reason/i.test(parte.type)) return '';
+    return typeof parte.text === 'string' ? parte.text : '';
+  }
   return '';
 }
 
@@ -188,34 +225,104 @@ export function crearProveedorPuter(token: string, cargar: (token: string) => Pr
   };
 }
 
-export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fetchImpl?: typeof fetch }): ProveedorIA {
+/** Cuanto razona el modelo (los de razonamiento: gpt-6-luna, o3...). Vacio = no se dice. */
+export type RazonamientoIA = '' | 'minimo' | 'bajo' | 'medio' | 'alto';
+
+const ESFUERZO: Record<Exclude<RazonamientoIA, ''>, string> = { minimo: 'minimal', bajo: 'low', medio: 'medium', alto: 'high' };
+
+/**
+ * Con un modelo que razona, lo que piensa cuenta dentro de
+ * `max_completion_tokens`: con un tope pequeño se le va todo en pensar y la
+ * respuesta llega vacia. Este es el margen minimo.
+ */
+export const MINIMO_TOKENS_RAZONANDO = 2000;
+
+/**
+ * El 400 de un modelo de razonamiento que no acepta `max_tokens` («Use
+ * 'max_completion_tokens' instead») o una `temperature` distinta de 1.
+ */
+export function rechazaParametros(status: number, cuerpo: Record<string, unknown> | null | undefined): boolean {
+  if (status !== 400 || !cuerpo) return false;
+  const err = cuerpo.error && typeof cuerpo.error === 'object' ? (cuerpo.error as { code?: unknown; param?: unknown; type?: unknown; message?: unknown }) : null;
+  const texto = err ? `${String(err.code ?? '')} ${String(err.param ?? '')} ${String(err.type ?? '')} ${String(err.message ?? '')}` : String(cuerpo.error ?? cuerpo.message ?? '');
+  return /max_tokens|temperature/i.test(texto) && /unsupported|not supported|does not support|only the default|max_completion_tokens/i.test(texto);
+}
+
+type CuerpoChat = {
+  choices?: unknown;
+  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+} & Record<string, unknown>;
+
+export function crearProveedorOpenAI(opts: { baseUrl: string; clave: string; fetchImpl?: typeof fetch; razonamiento?: RazonamientoIA }): ProveedorIA {
   const base = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const doFetch = opts.fetchImpl ?? fetch;
+  const esfuerzo = opts.razonamiento ? ESFUERZO[opts.razonamiento] : undefined;
+  // Los modelos que ya dijeron que no aceptan max_tokens/temperature: las
+  // llamadas siguientes van directas con el cuerpo adaptado.
+  const adaptados = new Set<string>();
+
+  function cuerpoPeticion(mensajes: MensajeIA[], o: OpcionesChat, adaptado: boolean): Record<string, unknown> {
+    const tope = o.maxTokens ?? 1000;
+    if (esfuerzo || adaptado) {
+      return { model: o.modelo, messages: mensajes, ...(esfuerzo ? { reasoning_effort: esfuerzo } : {}), max_completion_tokens: Math.max(tope, MINIMO_TOKENS_RAZONANDO) };
+    }
+    return { model: o.modelo, messages: mensajes, temperature: o.temperatura ?? 0.4, max_tokens: tope };
+  }
+
   return {
     nombre: 'openai',
     async chat(mensajes, o) {
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), o.timeoutMs ?? 45_000);
+      // El tiempo cuenta para todo (cabeceras y cuerpo), aunque el fetch que
+      // se use no haga caso de la señal.
+      const abortado = new Promise<never>((_r, reject) => control.signal.addEventListener('abort', () => reject(new Error('tiempo agotado')), { once: true }));
+      abortado.catch(() => undefined);
+      const pedir = async (cuerpo: Record<string, unknown>): Promise<{ r: Response; cuerpo: CuerpoChat; esJson: boolean }> => {
+        const r = await Promise.race([
+          doFetch(`${base}/chat/completions`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(opts.clave ? { authorization: `Bearer ${opts.clave}` } : {}) },
+            body: JSON.stringify(cuerpo),
+            signal: control.signal,
+          }),
+          abortado,
+        ]);
+        const crudo = await Promise.race([r.text().catch(() => ''), abortado]);
+        try {
+          const j: unknown = JSON.parse(crudo);
+          // `null`, un numero o una lista no son una respuesta: se tratan como "no es JSON".
+          if (j && typeof j === 'object' && !Array.isArray(j)) return { r, cuerpo: j as CuerpoChat, esJson: true };
+        } catch {
+          // HTML de un proxy, texto suelto, cuerpo cortado...
+        }
+        return { r, cuerpo: {}, esJson: false };
+      };
       try {
-        const r = await doFetch(`${base}/chat/completions`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...(opts.clave ? { authorization: `Bearer ${opts.clave}` } : {}) },
-          body: JSON.stringify({ model: o.modelo, messages: mensajes, temperature: o.temperatura ?? 0.4, max_tokens: o.maxTokens ?? 1000 }),
-          signal: control.signal,
-        });
-        const cuerpo = (await r.json().catch(() => ({}))) as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string; code?: unknown; type?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
-        if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', cuerpo.error?.message, falloDeCuenta(r.status, cuerpo));
-        const texto = limpiarRespuesta(textoDeContenido(cuerpo.choices?.[0]?.message?.content));
-        if (!texto) throw new ErrorIA('la API devolvio una respuesta vacia', 'openai');
-        if (o.alUso && cuerpo.usage) {
+        let { r, cuerpo, esJson } = await pedir(cuerpoPeticion(mensajes, o, adaptados.has(o.modelo)));
+        if (!r.ok && !esfuerzo && !adaptados.has(o.modelo) && rechazaParametros(r.status, cuerpo)) {
+          // Un modelo de razonamiento sin «Razonamiento» elegido: se reintenta
+          // UNA vez como el pide y se recuerda para las siguientes.
+          adaptados.add(o.modelo);
+          ({ r, cuerpo, esJson } = await pedir(cuerpoPeticion(mensajes, o, true)));
+        }
+        if (!r.ok) throw new ErrorIA(`la API respondio ${r.status}`, 'openai', detalleSeguro(mensajeDeError(cuerpo), opts.clave), falloDeCuenta(r.status, cuerpo as Parameters<typeof falloDeCuenta>[1]));
+        if (!esJson) throw new ErrorIA('la API devolvio algo que no es JSON', 'openai', `HTTP ${r.status}`);
+        const eleccion = Array.isArray(cuerpo.choices) ? (cuerpo.choices[0] as { message?: { content?: unknown }; finish_reason?: unknown } | undefined) : undefined;
+        if (!eleccion || typeof eleccion !== 'object') throw new ErrorIA('la API devolvio una respuesta sin choices', 'openai', detalleSeguro(mensajeDeError(cuerpo), opts.clave));
+        const cortada = eleccion.finish_reason === 'length';
+        if (o.alUso && cuerpo.usage && typeof cuerpo.usage === 'object') {
           const entrada = Number(cuerpo.usage.prompt_tokens);
           const salida = Number(cuerpo.usage.completion_tokens);
           if (Number.isFinite(entrada) || Number.isFinite(salida)) o.alUso({ tokensEntrada: Number.isFinite(entrada) ? entrada : 0, tokensSalida: Number.isFinite(salida) ? salida : 0 });
         }
+        const texto = limpiarRespuesta(textoDeContenido(eleccion.message?.content));
+        if (!texto) throw new ErrorIA('la API devolvio una respuesta vacia', 'openai', cortada ? 'se acabo el tope de tokens antes de contestar (con razonamiento, sube el tope o baja el razonamiento)' : undefined);
+        if (cortada && o.exigirCompleta) throw new ErrorIA('la respuesta llego cortada (tope de tokens)', 'openai');
         return texto;
       } catch (error) {
         if (error instanceof ErrorIA) throw error;
-        throw new ErrorIA(control.signal.aborted ? 'la API no respondio a tiempo' : 'no se pudo contactar con la API', 'openai', error instanceof Error ? error.message : String(error));
+        throw new ErrorIA(control.signal.aborted ? 'la API no respondio a tiempo' : 'no se pudo contactar con la API', 'openai', detalleSeguro(error instanceof Error ? error.message : String(error), opts.clave));
       } finally {
         clearTimeout(corte);
       }
@@ -265,7 +372,7 @@ export interface PresetServicio {
 }
 
 export const SERVICIOS_OPENAI: PresetServicio[] = [
-  { id: 'openai', nombre: 'OpenAI (ChatGPT)', baseUrl: 'https://api.openai.com/v1', modelos: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'], clave: 'platform.openai.com → API keys (de pago, por uso)' },
+  { id: 'openai', nombre: 'OpenAI (ChatGPT)', baseUrl: 'https://api.openai.com/v1', modelos: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-6-luna', 'gpt-4.1', 'gpt-4o'], clave: 'platform.openai.com → API keys (de pago, por uso)' },
   { id: 'groq', nombre: 'Groq (gratis, muy rápido)', baseUrl: 'https://api.groq.com/openai/v1', modelos: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'], clave: 'console.groq.com → API Keys (plan gratis con límites por minuto)' },
   { id: 'google', nombre: 'Google AI Studio (Gemini, gratis)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', modelos: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'], clave: 'aistudio.google.com → Get API key (plan gratis con límites)' },
   { id: 'openrouter', nombre: 'OpenRouter (muchos modelos, algunos gratis)', baseUrl: 'https://openrouter.ai/api/v1', modelos: ['openai/gpt-4o-mini', 'google/gemma-3-27b-it:free', 'meta-llama/llama-3.3-70b-instruct:free'], clave: 'openrouter.ai → Keys' },

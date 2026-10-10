@@ -8,7 +8,8 @@
  *  - la conexion de la tienda (aqui, una API «real» de mentira) queda exactamente igual
  *    y la API real no recibe NI UNA llamada durante la comprobacion;
  *  - no quedan pedidos, clientes, reportes ni claves temporales de la prueba;
- *  - la lectura contra la API real no se hace sin confirmar, y con confirmacion es solo un GET;
+ *  - a la API real no se le pide nada nunca: ni el motor, ni «Probar», ni este modulo;
+ *  - «Para salir a produccion» pide lo del push (la clave de GSG y su webhook) y los reportes;
  *  - un operador no entra.
  */
 
@@ -68,12 +69,7 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     });
     const alta = await tienda.app.inject({ method: 'POST', url: '/login/primera-cuenta', payload: { nombre: 'Ali', usuario: 'ali', clave: 'ali-2026-wa' } });
     cookie = String(alta.headers['set-cookie']).split(';')[0]!;
-    // Lo que la tienda hace sola con su GSG conectado (y que es lo correcto en
-    // produccion) tambien llama a la API real: el motor de entregas pide la
-    // lista del dia cada 5 minutos y la prueba de cada manana hace un ping.
-    // Aqui se mide SOLO el modulo, asi que esas dos se apartan: con la maquina
-    // cargada la prueba pasa de 5 minutos y la sincronizacion caia en medio.
-    expect((await api('POST', '/admin/entregas/ajustes', { sincronizarCadaMin: 24 * 60 })).status).toBe(200);
+    // La prueba de cada manana no entra en lo que se mide aqui.
     expect((await api('POST', '/admin/fiabilidad/ajustes', { humo: { activo: false } })).status).toBe(200);
     // La tienda, conectada a su «API real» de GSG.
     const c = await api('POST', '/admin/entregas/gsg', { modo: 'real', url: urlReal, token: 'token-real-de-gsg' });
@@ -138,15 +134,23 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     expect(llamadasReales).toEqual([]);
   }, 180_000);
 
-  it('la lectura contra la API real pide confirmación y, confirmada, es solo un GET de la lista del día', async () => {
-    const sin = await api('POST', '/admin/desarrollador/listo/ping-real', {});
-    expect(sin.status).toBe(400);
+  it('a la API real no se le pide nada: «Probar» solo mira la forma, el motor da vueltas sin llamarla y no hay lectura manual', async () => {
+    const p = await api('POST', '/admin/entregas/gsg/probar', {});
+    expect(p.status).toBe(200);
+    expect(p.body.prueba.detalle).toMatch(/no le pide nada a GSG/);
+    // El motor de entregas de la tienda da vueltas cada 5 s: se le deja dar varias.
+    await new Promise((r) => setTimeout(r, 6_000));
+    expect((await api('POST', '/admin/desarrollador/listo/ping-real', { confirmar: true })).status).toBe(404);
+    expect((await api('POST', '/admin/entregas/sincronizar', {})).status).toBe(404);
     expect(llamadasReales).toEqual([]);
-    const con = await api('POST', '/admin/desarrollador/listo/ping-real', { confirmar: true });
-    expect(con.status).toBe(200);
-    expect(con.body).toMatchObject({ ok: true });
-    expect(con.body.detalle).toContain('GSG responde');
-    expect(llamadasReales).toEqual([{ metodo: 'GET', ruta: '/v1/reparto/pendientes' }]);
+  }, 30_000);
+
+  it('para salir a producción pide la clave de GSG y su webhook (el push), no una lectura de su API', async () => {
+    const r = await api('GET', '/admin/desarrollador/listo/produccion');
+    expect(r.status).toBe(200);
+    const claves = r.body.puntos.map((x: { clave: string }) => x.clave);
+    expect(claves).toEqual(expect.arrayContaining(['gsg', 'claveGsg', 'webhookGsg']));
+    expect(JSON.stringify(r.body)).not.toMatch(/reparto\/pendientes/);
   });
 
   it('un operador no usa el módulo', async () => {

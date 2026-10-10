@@ -9,27 +9,41 @@
  * Tres formas de estar:
  *  - **Sin conexión**: lo reportable se encola y espera. Es como nació el
  *    sistema, porque GSG no tenía API.
- *  - **Con la API real de GSG**: dirección + token.
+ *  - **Con la API real de GSG**: dirección + token. Solo para MANDARLE los
+ *    reportes (ubicaciones, confirmaciones, entregas, incidencias,
+ *    resúmenes). GSGchat nunca le pide nada a GSG: los pedidos llegan cuando
+ *    GSG los empuja a POST /api/v1/entregas.
  *  - **Con el simulador**: el propio servidor levanta una copia de mentira
  *    del sistema de GSG (ver src/entregas/gsg-simulado.ts) con sus listas
  *    de quién falta ubicación, quién falta confirmar y quién ya terminó. Es
- *    para probar el flujo entero con números ficticios sin tocar a nadie.
+ *    para probar el flujo entero con números ficticios sin tocar a nadie;
+ *    lo que se carga en él entra al momento, sin preguntarle nada.
  *
  * El puerto que ve el resto del sistema (`puerto()`) es siempre el mismo
  * objeto: apunta a lo vigente en cada llamada. Nada se reinicia al cambiar.
  */
 
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { SettingsRepo } from '../settings/service.js';
 import { decrypt, encrypt, keyFromBase64 } from '../settings/crypto.js';
-import { crearPuertoEnEspera, crearPuertoHttp, RUTA_GSG_PENDIENTES, type PuertoGsg, type ResultadoConsulta, type ResultadoEnvio } from './gsg.js';
+import { crearPuertoEnEspera, crearPuertoHttp, type PuertoGsg, type ResultadoEnvio } from './gsg.js';
 import { crearGsgExtras, type ServicioGsgExtras } from './gsg-extras.js';
 
 const CLAVE_CONEXION = 'gsg.conexion';
 const CLAVE_TOKEN = 'gsg.token';
 
-/** El token con el que este servidor habla con su propio simulador. */
-export const TOKEN_SIMULADOR = 'simulador-gsg-local';
+/**
+ * El token con el que este servidor habla con su propio simulador.
+ *
+ * Al azar en cada arranque: el simulador va montado en produccion y antes el
+ * token era fijo y publico (salia en el contrato). Con el, cualquiera podia
+ * cargar pedidos con telefonos de verdad (y, en modo simulador, el sistema
+ * les escribia por WhatsApp) o leer las ubicaciones que se le mandaron. Desde
+ * fuera se entra con los tokens caducables «gsgsim_…» (Conexion → Para los
+ * programadores de GSG), que el gancho de gsg-extras-routes.ts traduce a este.
+ */
+export const TOKEN_SIMULADOR = `simulador-gsg-local-${randomBytes(24).toString('hex')}`;
 /** Donde se monta el simulador dentro de este mismo servidor. */
 export const RUTA_SIMULADOR = '/simulador/gsg';
 
@@ -41,13 +55,13 @@ const conexionSchema = z.object({
 });
 type ConexionGuardada = z.infer<typeof conexionSchema>;
 
+/**
+ * Lo que dice «Probar». No llama a GSG: revisa que la dirección y el token
+ * tengan buena forma y explica cómo se hablan los dos sistemas.
+ */
 export interface PruebaGsg {
   ok: boolean;
   detalle: string;
-  /** Cuantos pendientes devolvio, si contesto. */
-  faltaUbicacion?: number;
-  faltaConfirmacion?: number;
-  terminados?: number;
   at: string;
 }
 
@@ -55,7 +69,7 @@ export interface EstadoConexionGsg {
   modo: 'ninguna' | 'real' | 'simulador';
   url: string;
   tieneToken: boolean;
-  /** true = hay a donde mandar y de donde traer. */
+  /** true = hay a donde mandar los reportes. */
   conectada: boolean;
   /** De donde salio lo vigente. */
   origen: 'pantalla' | 'env' | 'ninguna';
@@ -76,15 +90,12 @@ export interface ServicioConexionGsg {
   usarSimulador(): Promise<EstadoConexionGsg>;
   /** Quita la conexión de la pantalla; si el `.env` tenía una, vuelve a mandar esa. */
   quitar(): Promise<EstadoConexionGsg>;
-  /** Pide los pendientes a lo vigente (o a lo que se le pase, sin guardar) y dice qué contestó. */
+  /**
+   * Revisa lo vigente (o lo que se le pase, sin guardar): que la dirección y
+   * el token tengan buena forma. Sin red: a GSG no se le pregunta nada.
+   */
   probar(candidata?: { url: string; token: string }): Promise<PruebaGsg>;
   recargar(): Promise<void>;
-  /**
-   * Quien quiera ver lo que GSG contesta en /reparto/pendientes (por ejemplo,
-   * para apuntar los pedidos que no se pueden usar). Se llama tras cada consulta
-   * buena; un fallo del observador no rompe la consulta.
-   */
-  observar(fn: (cuerpo: unknown) => void | Promise<void>): () => void;
   /** Lo que rodea a la conexión: descartes, verificador del contrato, tokens del simulador, bitácora y cuadre. */
   extras: ServicioGsgExtras;
 }
@@ -106,12 +117,6 @@ export interface DepsConexionGsg {
   fetchImpl?: typeof fetch;
   log?: (m: string, d?: Record<string, unknown>) => void;
   ahora?: () => Date;
-}
-
-export interface PendientesGsg {
-  faltaUbicacion?: unknown[];
-  faltaConfirmacion?: unknown[];
-  terminados?: unknown[];
 }
 
 export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioConexionGsg> {
@@ -178,21 +183,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     },
     enviar: (tipo, payload): Promise<ResultadoEnvio> => actual().enviar(tipo, payload),
     esSimulador: () => efectiva().modo === 'simulador',
-    consultar: async <T,>(ruta: string): Promise<ResultadoConsulta<T>> => {
-      const r = await actual().consultar<T>(ruta);
-      if (r.ok && ruta === RUTA_GSG_PENDIENTES && observadores.size) {
-        for (const fn of observadores) {
-          try {
-            await fn(r.cuerpo);
-          } catch (error) {
-            log('un observador de los pendientes de GSG falló', { error: String(error) });
-          }
-        }
-      }
-      return r;
-    },
   };
-  const observadores = new Set<(cuerpo: unknown) => void | Promise<void>>();
 
   const estado = (): EstadoConexionGsg => {
     const e = efectiva();
@@ -219,37 +210,44 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
   }
 
   async function probar(candidata?: { url: string; token: string }): Promise<PruebaGsg> {
-    const puerto = candidata ? crearPuertoHttp({ url: candidata.url, token: candidata.token, fetchImpl: deps.fetchImpl, timeoutSegundos: 10 }) : actual();
     const at = new Date().toISOString();
-    if (!puerto.conectado()) {
+    const e = efectiva();
+    // Sin red: ni un GET. Solo la forma de lo que hay (o de lo que se quiere poner).
+    const probada = candidata ? { modo: 'real' as const, url: candidata.url.trim().replace(/\/+$/, ''), token: candidata.token.trim() } : e;
+    if (probada.modo === 'ninguna' || !probada.url) {
       ultimaPrueba = { ok: false, detalle: 'No hay ninguna conexión con GSG: elige el simulador o pega la dirección de su API.', at };
       return ultimaPrueba;
     }
-    const r = await puerto.consultar<PendientesGsg>(RUTA_GSG_PENDIENTES);
-    if (!r.ok) {
-      const detalle =
-        r.status === 401 || r.status === 403
-          ? 'GSG rechazó el token: revisa que sea el que te dieron.'
-          : r.status === 404
-            ? `GSG respondió pero no tiene la ruta ${RUTA_GSG_PENDIENTES}: revisa la dirección (tiene que ser la base de su API).`
-            : `No se pudo consultar a GSG: ${r.error ?? 'sin respuesta'}.`;
-      ultimaPrueba = { ok: false, detalle, at };
+    if (probada.modo === 'simulador') {
+      ultimaPrueba = { ok: true, detalle: 'Se usa el simulador de GSG de este servidor (números ficticios). Lo que cargues en él entra al momento; los reportes le llegan a él.', at };
       return ultimaPrueba;
     }
-    const c = r.cuerpo ?? {};
-    const n = (x: unknown) => (Array.isArray(x) ? x.length : 0);
-    ultimaPrueba = {
-      ok: true,
-      detalle: `GSG responde. Falta ubicación: ${n(c.faltaUbicacion)} · falta confirmar: ${n(c.faltaConfirmacion)} · terminados: ${n(c.terminados)}.`,
-      faltaUbicacion: n(c.faltaUbicacion),
-      faltaConfirmacion: n(c.faltaConfirmacion),
-      terminados: n(c.terminados),
-      at,
-    };
+    const sinPedir = 'GSGchat no le pide nada a GSG: los pedidos llegan solo cuando GSG los manda a POST /api/v1/entregas (con su clave de API), y GSGchat le manda a esta dirección los reportes (ubicaciones, confirmaciones, entregas, incidencias y resúmenes).';
+    let url: URL | null = null;
+    try {
+      url = new URL(probada.url);
+    } catch {
+      url = null;
+    }
+    if (!url || !/^https?:$/.test(url.protocol) || !url.hostname) {
+      ultimaPrueba = { ok: false, detalle: 'La dirección de GSG no es una dirección web válida: tiene que empezar por https:// (por ejemplo https://api.gsg.pe/v1).', at };
+      return ultimaPrueba;
+    }
+    if (!probada.token) {
+      ultimaPrueba = { ok: false, detalle: `Falta el token de GSG: sin él, su API rechazará los reportes. ${sinPedir}`, at };
+      return ultimaPrueba;
+    }
+    if (/\s/.test(probada.token) || probada.token.length < 8) {
+      ultimaPrueba = { ok: false, detalle: 'El token de GSG no tiene buena forma (tiene espacios o es demasiado corto): cópialo otra vez tal cual te lo dieron.', at };
+      return ultimaPrueba;
+    }
+    const local = /^(localhost|127\.0\.0\.1)$/i.test(url.hostname);
+    const aviso = url.protocol === 'https:' || local ? '' : ' Ojo: la dirección no usa https y los datos de los clientes viajarían sin cifrar.';
+    ultimaPrueba = { ok: true, detalle: `La dirección y el token tienen buena forma. ${sinPedir}${aviso}`, at };
     return ultimaPrueba;
   }
 
-  const extras = await crearGsgExtras({ settingsRepo: deps.settingsRepo, puerto: () => proxy, ahora: deps.ahora, timezone: deps.config.timezone, log });
+  const extras = await crearGsgExtras({ settingsRepo: deps.settingsRepo, ahora: deps.ahora, timezone: deps.config.timezone, log });
 
   const servicio: ServicioConexionGsg = {
     estado,
@@ -257,10 +255,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     recargar,
     probar,
     extras,
-    observar(fn) {
-      observadores.add(fn);
-      return () => observadores.delete(fn);
-    },
     async conectarReal(input) {
       const url = input.url.trim().replace(/\/+$/, '');
       if (!url) throw new Error('Falta la dirección de la API de GSG.');

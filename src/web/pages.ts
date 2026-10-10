@@ -1437,6 +1437,7 @@ ${warning}
     <!-- Con la clave de OpenAI: los modelos REALES de la cuenta (POST /admin/ia/modelos), el de consumo muy bajo primero. -->
     <select id="ia-modelo-lista" class="hidden" style="max-width:420px"></select>
     <p id="ia-modelo-lista-nota" class="muted hidden" style="margin-top:4px">Pega tu clave y verás aquí los modelos de tu cuenta. Por defecto se usa <b>gpt-4o-mini</b> (consumo muy bajo).</p>
+    <div id="ia-razonamiento-caja" class="hidden" style="margin-top:8px"><label for="ia-razonamiento">Razonamiento <small class="muted">(solo para modelos que razonan, como gpt-6-luna; con los demás déjalo en «Sin indicar»)</small></label><select id="ia-razonamiento" style="max-width:260px"><option value="">Sin indicar</option><option value="minimo">Mínimo</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option></select></div>
     <div class="actions" style="margin-top:10px"><button class="btn primario" id="ia-vincular-clave" type="button">Vincular clave a esta tienda</button><button class="btn" id="ia-probar-conexion" type="button">Probar la conexión</button><button class="btn peligro hidden" id="ia-desvincular" type="button">Desvincular IA</button><span id="ia-conexion-estado" class="muted"></span></div>
   </section>
 
@@ -1803,7 +1804,7 @@ function pasosGsgLista(p) {
     { hecho: p.conectado, titulo: 'Conectar el WhatsApp', que: p.conectado ? (oficial ? 'La API de Meta ya responde.' : 'El teléfono está vinculado.') : (oficial ? 'La API de Meta no responde todavía.' : 'Escanea el QR desde el teléfono, como en WhatsApp Web.'), href: '/setup', boton: p.conectado ? 'Ver la conexión' : 'Conectar' },
     { hecho: moto > 0, titulo: 'Dar de alta a los motorizados', que: moto > 0 ? moto + ' activo' + (moto === 1 ? '' : 's') + '. Son quienes reciben los pines y dicen en cuánto entregan.' : 'Ninguno todavía: sin motorizados, los pedidos listos no pueden salir.', href: '/motorizados', boton: moto > 0 ? 'Ver motorizados' : 'Dar de alta' },
     { hecho: p.supervisor === true, titulo: '¿A quién avisamos cuando algo necesita a alguien?', que: p.supervisor === true ? 'Ese WhatsApp recibe las incidencias, el resumen de la mañana y de la tarde y la prueba diaria.' : 'Sin un número, nadie se entera de las incidencias, ni llegan los resúmenes ni la prueba de la mañana.', href: '/panel#configuracion', boton: p.supervisor === true ? 'Cambiar el número' : 'Poner mi número', accion: 'supervisor', ocultar: p.supervisor === undefined },
-    { hecho: p.gsg === 'real' || p.gsg === 'simulador' || pedidos > 0, titulo: 'Traer los pedidos del día', que: p.gsg === 'real' ? 'GSG está conectado: los pedidos entran solos cada 5 minutos.' : p.gsg === 'simulador' ? 'Con el simulador de GSG (para probar). Cuando GSG tenga API, se conecta en Conexión.' : pedidos > 0 ? 'Hoy hay ' + pedidos + ' pedido' + (pedidos === 1 ? '' : 's') + ' cargados a mano.' : 'Conecta GSG en Conexión, o pega la lista del día en Hoy.', href: p.gsg === 'ninguna' ? '/setup' : '/hoy', boton: p.gsg === 'ninguna' ? 'Conectar GSG' : 'Ir a Hoy', alt: p.gsg === 'ninguna' ? { href: '/hoy', boton: 'Pegar la lista en Hoy' } : null },
+    { hecho: p.gsg === 'real' || p.gsg === 'simulador' || pedidos > 0, titulo: 'Recibir los pedidos del día', que: p.gsg === 'real' ? 'GSG está conectado: los pedidos entran solos en cuanto GSG los manda.' : p.gsg === 'simulador' ? 'Con el simulador de GSG (para probar). Cuando GSG tenga API, se conecta en Conexión.' : pedidos > 0 ? 'Hoy hay ' + pedidos + ' pedido' + (pedidos === 1 ? '' : 's') + ' cargados a mano.' : 'Conecta GSG en Conexión, o pega la lista del día en Hoy.', href: p.gsg === 'ninguna' ? '/setup' : '/hoy', boton: p.gsg === 'ninguna' ? 'Conectar GSG' : 'Ir a Hoy', alt: p.gsg === 'ninguna' ? { href: '/hoy', boton: 'Pegar la lista en Hoy' } : null },
     { hecho: p.ia === true, titulo: 'Encender el asistente IA (opcional)', que: p.ia === true ? 'Contesta solo a los clientes y lee las respuestas dudosas.' : 'Lee las respuestas dudosas de clientes y motorizados, y contesta solo. Sin él, todo sigue funcionando por reglas.', href: '/panel#ia', boton: p.ia === true ? 'Ver el asistente' : 'Encender', opcional: true, ocultar: p.iaDisponible === false }
   ].filter(function (x) { return !x.ocultar; });
 }
@@ -2229,7 +2230,7 @@ function botonDesvincularIa(boton, nota, alTerminar) {
     delete boton.dataset.seguro;
     boton.disabled = true;
     try {
-      await api('/admin/ia', { method: 'POST', body: { activa: false, token: null } });
+      await api('/admin/ia', { method: 'POST', body: { activa: false, borrarClave: true } });
       nota.innerHTML = '<b>IA desvinculada.</b> Se borró la clave; el sistema sigue trabajando con sus reglas fijas.';
       loaded.ia = false;
       await alTerminar();
@@ -3122,6 +3123,7 @@ function iaPintarProveedor() {
   document.getElementById('ia-modelo').classList.add('hidden');
   document.getElementById('ia-modelo-lista').classList.toggle('hidden', p !== 'openai');
   document.getElementById('ia-modelo-lista-nota').classList.toggle('hidden', p !== 'openai');
+  document.getElementById('ia-razonamiento-caja').classList.toggle('hidden', p !== 'openai');
   var lista = (window.__iaModelos && window.__iaModelos[p]) || [];
   if (p === 'openai') {
     var s = iaServicioActual();
@@ -3161,6 +3163,7 @@ document.getElementById('ia-probar-conexion').onclick = async function () {
     if (p === 'openai') {
       body.baseUrl = val('ia-baseurl');
       body.modelo = val('ia-modelo');
+      body.razonamiento = val('ia-razonamiento');
       var clave = val('ia-token-openai');
       if (clave) body.token = clave;
     } else {
@@ -3215,9 +3218,9 @@ document.getElementById('ia-vincular-clave').onclick = async function () {
   setVal('ia-modelo', modelo);
   estado.textContent = 'Comprobando la clave con OpenAI…';
   try {
-    var r = await api('/admin/ia/probar-conexion', { method: 'POST', body: { proveedor: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave } });
+    var r = await api('/admin/ia/probar-conexion', { method: 'POST', body: { proveedor: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave, razonamiento: val('ia-razonamiento') } });
     if (!r.ok) { estado.innerHTML = '<b style="color:var(--bad)">No se vinculó:</b> ' + esc(r.prueba.detalle); boton.disabled = false; return; }
-    await api('/admin/ia', { method: 'POST', body: { proveedor: 'openai', servicio: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave } });
+    await api('/admin/ia', { method: 'POST', body: { proveedor: 'openai', servicio: 'openai', baseUrl: baseUrl, modelo: modelo, token: clave, razonamiento: val('ia-razonamiento') } });
     setVal('ia-token-openai', '');
     estado.innerHTML = '<b style="color:var(--ok)">✅ Clave vinculada a ' + esc(tienda) + '.</b> OpenAI respondió (' + esc(modelo) + '). Para que conteste a tus clientes, deja encendido el asistente y pulsa Guardar.';
     await loadIa();
@@ -3548,6 +3551,7 @@ async function loadIa() {
     document.getElementById('ia-agente-operativo').removeAttribute('data-tocado');
     document.getElementById('ia-agente-nota').textContent = e.agenteOperativo === null || e.agenteOperativo === undefined ? 'Sin elegir: se enciende solo con «Solo lo de GSG».' : '';
     setVal('ia-derivar', e.derivarSi); setVal('ia-memoria', e.memoria);
+    setVal('ia-razonamiento', e.razonamiento || '');
     iaPintarServicio(false);
     setVal('ia-catalogo-url', e.catalogoUrl || ''); setVal('ia-catalogo-formato', e.catalogoFormato || 'auto');
     document.getElementById('ia-avisar').checked = e.avisarDerivacion;
@@ -3560,7 +3564,7 @@ async function loadIa() {
     document.getElementById('ia-p2-t').textContent = e.conocimiento && e.conocimiento.trim() ? 'Sabe ' + e.conocimiento.trim().length + ' caracteres sobre el negocio.' : 'Todavía no le contaste nada del negocio.';
     p3.className = 'estado ' + (e.activa && e.tieneToken ? 'ok' : 'bad');
     document.getElementById('ia-p3-t').textContent = e.activa && e.tieneToken ? 'Encendido: contesta solo.' : e.activa ? 'Marcado como encendido, pero sin clave no puede contestar.' : e.agenteOperativoEfectivo ? 'Sin IA: el agente operativo trabaja igual con sus reglas fijas (pide la ubicación y manda el cierre).' : 'Apagado: no contesta a nadie.';
-    document.getElementById('ia-token-estado').textContent = e.tieneToken ? 'Hay una sesión o clave guardada. Deja el campo vacío para conservarla; escribe otra para cambiarla.' : 'Todavía no hay sesión ni clave: sin eso el asistente no puede contestar.';
+    document.getElementById('ia-token-estado').textContent = e.tieneToken ? 'Clave guardada' + (e.pistaClave ? ' (termina en ' + e.pistaClave + ')' : '') + '. Se queda hasta que la cambies o pulses «Desvincular IA»: deja el campo vacío para conservarla.' : e.claveIlegible ? 'Hay una clave guardada que este servidor no puede leer (cambió el archivo .secrets.json). No se borró: vuelve a pegarla para usarla aquí.' : 'Todavía no hay sesión ni clave: sin eso el asistente no puede contestar.';
     setVal('ia-token', ''); setVal('ia-token-openai', '');
     document.getElementById('ia-puter-estado').textContent = e.tieneToken && e.proveedor === 'puter' ? 'Hay una sesión de Puter guardada.' : '';
     iaPintarProveedor();
@@ -3577,7 +3581,8 @@ document.getElementById('ia-guardar').onclick = busy('ia-guardar', async functio
       proveedor: val('ia-proveedor'), servicio: val('ia-servicio') || 'openai', modelo: val('ia-proveedor') === 'openai' ? (val('ia-modelo') || 'gpt-4o-mini') : val('ia-modelo-gratis'), baseUrl: val('ia-baseurl'),
       nombreAsistente: val('ia-nombre') || 'Asistente', conocimiento: document.getElementById('ia-conocimiento').value, instrucciones: document.getElementById('ia-instrucciones').value,
       derivarSi: val('ia-derivar'), avisarDerivacion: document.getElementById('ia-avisar').checked, memoria: Number(val('ia-memoria') || 12),
-      catalogoUrl: val('ia-catalogo-url'), catalogoFormato: val('ia-catalogo-formato') || 'auto'
+      catalogoUrl: val('ia-catalogo-url'), catalogoFormato: val('ia-catalogo-formato') || 'auto',
+      razonamiento: val('ia-proveedor') === 'openai' ? val('ia-razonamiento') : ''
     };
     /* El agente operativo solo se guarda si se tocó: sin eleccion sigue al modo (encendido con «Solo lo de GSG»). */
     var agente = document.getElementById('ia-agente-operativo');

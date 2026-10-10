@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from '../src/db/pool.js';
 import { createRepos, type Repos } from '../src/db/repos.js';
 import { lunesRecientes } from '../src/db/archives.js';
@@ -123,8 +123,8 @@ describe('guardar una conversacion deja lo que hace falta para encontrarla', () 
     ]);
     const salida = await archivarConversacion({ repos, dir, pedidoDe: async () => 'P-1001' }, c.id, 'manual', 'Ali (ali)');
     expect(salida.ok).toBe(true);
-    // El resumen se pone despues, sin hacer esperar: se le da un momento.
-    await new Promise((r) => setTimeout(r, 50));
+    // El resumen se pone despues, sin hacer esperar: se espera a que este.
+    await vi.waitFor(async () => expect((await repos.archives.get(salida.archive!.id))!.resumen).toBeTruthy(), { timeout: 5000 });
     const a = (await repos.archives.get(salida.archive!.id))!;
     expect(a.cerradoPor).toBe('Ali (ali)');
     expect(a.pedido).toBe('P-1001');
@@ -464,7 +464,8 @@ describe('importar un chat exportado del telefono', () => {
     expect(leido.messages).toHaveLength(5);
     expect(leido.messages[2]!.kind).toBe('image');
     expect((await repos.archives.list({ texto: 'fachada', limit: 5, offset: 0 })).map((x) => x.id)).toEqual([a.id]);
-    await new Promise((res) => setTimeout(res, 50));
+    // El resumen se pone despues, sin esperar: con la maquina cargada tarda mas de 50 ms.
+    await vi.waitFor(async () => expect((await repos.archives.get(a.id))!.resumen).toBeTruthy(), { timeout: 5000 });
     expect((await repos.archives.get(a.id))!.resumen).toMatch(/Ana Quispe escribió 2 mensajes \(5 en total\)/);
     // Sin telefono no hay contacto al que colgarla.
     expect((await importarChatDeWhatsApp(deps, { texto: ANDROID, telefono: '12' })).ok).toBe(false);
@@ -505,7 +506,9 @@ describe('las rutas de la pantalla', () => {
       expect(r.guardadas).toBe(1);
       expect(r.hechas[0]!.pedido).toBe('P-2001');
       expect(r.saltadas).toHaveLength(1);
-      await new Promise((res) => setTimeout(res, 50));
+      // El resumen y las etiquetas se ponen despues, sin esperar: se espera a
+      // que esten (con la maquina cargada, 50 ms fijos no alcanzaban).
+      await vi.waitFor(async () => expect((await fakes.archives.list({ limit: 5, offset: 0 }))[0]?.resumen).toBeTruthy(), { timeout: 5000 });
 
       const lista = await app.inject({ method: 'GET', url: '/admin/archives?texto=reclamo', headers: auth });
       const l = lista.json() as { items: Array<{ id: number; pedido: string; reason: string; etiquetas: string[]; cerradoPor: string }>; total: number; etiquetas: unknown[]; conIA: boolean; conAdjuntos: boolean; conEnlaces: boolean; conEntrenamiento: boolean; stats: { porSemana: unknown[]; pctReclamo: number } };

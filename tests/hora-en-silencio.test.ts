@@ -42,7 +42,7 @@ async function armar(): Promise<EscenarioEntregas> {
   await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
   e.simulador.cargarDePrueba();
   await e.api.post('/admin/motorizados/de-prueba');
-  await e.api.post('/admin/entregas/sincronizar');
+  await e.gsgManda();
   await e.trabajar();
   return e;
 }

@@ -1,20 +1,21 @@
 /**
  * Lo que rodea a la conexión con GSG y que antes no se veía:
  *
- *  - **Descartes**: cada pedido que GSG manda en `/reparto/pendientes` y que
- *    no se puede usar (sin referencia, teléfono inválido, pin con formato
- *    raro). Antes solo quedaba en el log del servidor; ahora se guarda por día
- *    y se enseña en Conexión → GSG y en la campana.
- *  - **Verificador del contrato**: consulta la API real de GSG y dice, campo
- *    por campo, qué falta o sobra respecto a lo que este sistema espera. No
- *    crea nada.
+ *  - **Descartes**: cada pedido que GSG nos manda (POST /api/v1/entregas, o
+ *    la lista del simulador) y que no se puede usar (sin referencia, teléfono
+ *    inválido, pin con formato raro). Antes solo quedaba en el log del
+ *    servidor; ahora se guarda por día y se enseña en Conexión → GSG y en la
+ *    campana.
+ *  - **Verificador del contrato**: mira lo que GSG nos ha mandado (la
+ *    bitácora de /api/v1/entregas y los descartes) y dice qué se aceptó y qué
+ *    no. NO llama a GSG: GSGchat nunca le pide nada.
  *  - **Tokens del simulador**: para que los programadores de GSG prueben
  *    desde fuera contra `/simulador/gsg` sin conocer el token interno. Se ven
  *    una vez, caducan y se anulan. Se guardan solo como hash.
  *  - **Bitácora**: las últimas 50 llamadas que GSG (o quien tenga un token)
  *    hizo al simulador y a `/api/v1/entregas`: hora, ruta, resultado, motivo.
- *  - **Cuadre de fin de día**: lo que GSG tiene en «terminados» frente a lo
- *    que aquí figura entregado o cancelado.
+ *  - **Cuadre de fin de día**: solo con lo de aquí (a GSG no se le pregunta
+ *    su lista de terminados): qué pedidos del día siguen sin cerrar.
  *
  * Todo vive en `settings` (claves `gsg.*`) y se lee al arrancar.
  */
@@ -23,7 +24,6 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { SettingsRepo } from '../settings/service.js';
 import { PERU, revisarTelefono } from './telefono.js';
-import { RUTA_GSG_PENDIENTES, type PuertoGsg } from './gsg.js';
 
 const CLAVE_DESCARTES = 'gsg.descartes';
 const CLAVE_TOKENS = 'gsg.tokensSimulador';
@@ -108,69 +108,6 @@ export interface VerificacionContrato {
   at: string;
 }
 
-/** Lo que se lee de cada pedido de GSG (el contrato A.1 lo documenta; ver src/desarrollador/contrato.ts). */
-export const CAMPOS_PEDIDO = new Set([
-  'referencia', 'telefono', 'nombre', 'direccion', 'distrito', 'notas', 'lat', 'lng', 'id', 'urgente', 'cancelado', 'motivoCancelacion',
-  // Los datos del envio del primer mensaje al cliente (todos opcionales). Ver src/entregas/datos-envio.ts.
-  'producto', 'empresa', 'empresaCodigo', 'empresaNombre', 'tiendaCodigo', 'tiendaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente',
-]);
-const LISTAS = ['faltaUbicacion', 'faltaConfirmacion', 'terminados'] as const;
-
-/** Revisa el cuerpo de `/reparto/pendientes` campo por campo, sin crear nada. */
-export function verificarCuerpoPendientes(cuerpo: unknown): Omit<VerificacionContrato, 'at'> {
-  const h: HallazgoContrato[] = [];
-  if (!cuerpo || typeof cuerpo !== 'object' || Array.isArray(cuerpo)) {
-    return { ok: false, resumen: 'La respuesta no es un objeto JSON con las listas del día.', hallazgos: [{ tipo: 'falta', donde: 'respuesta', detalle: 'Se esperaba { dia, faltaUbicacion: [...], faltaConfirmacion: [...], terminados: [...] }.' }] };
-  }
-  const c = cuerpo as Record<string, unknown>;
-  if (typeof c.dia !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(c.dia)) {
-    h.push({ tipo: c.dia === undefined ? 'aviso' : 'formato', donde: 'dia', detalle: c.dia === undefined ? 'No viene "dia": se usa la fecha de hoy. Mejor mandarla como "2026-09-21".' : `"dia" tiene que ser AAAA-MM-DD (vino ${JSON.stringify(c.dia)}).` });
-  } else h.push({ tipo: 'ok', donde: 'dia', detalle: c.dia });
-  for (const lista of LISTAS) {
-    const v = c[lista];
-    if (v === undefined) {
-      h.push({ tipo: lista === 'terminados' ? 'aviso' : 'falta', donde: lista, detalle: lista === 'terminados' ? 'No viene "terminados": vale, pero sin ella no se puede cuadrar el día.' : `Falta la lista "${lista}" (puede venir vacía: []).` });
-      continue;
-    }
-    if (!Array.isArray(v)) {
-      h.push({ tipo: 'formato', donde: lista, detalle: `"${lista}" tiene que ser una lista (vino ${typeof v}).` });
-      continue;
-    }
-    h.push({ tipo: 'ok', donde: lista, detalle: `${v.length} pedido(s)` });
-    v.forEach((p, i) => {
-      const donde = `${lista}[${i}]`;
-      if (!p || typeof p !== 'object') {
-        h.push({ tipo: 'formato', donde, detalle: 'no es un objeto' });
-        return;
-      }
-      const o = p as Record<string, unknown>;
-      const ref = String(o.referencia ?? '').trim() || `#${i + 1}`;
-      if (lista === 'terminados') {
-        if (!String(o.referencia ?? '').trim()) h.push({ tipo: 'falta', donde, detalle: 'sin "referencia": no se sabe qué pedido terminó.' });
-        return;
-      }
-      const r = revisarPedidoGsg(o as PedidoCrudo);
-      if (!r.ok) h.push({ tipo: r.motivo.startsWith('sin ') ? 'falta' : 'formato', donde: `${donde} (${ref})`, detalle: r.motivo });
-      if (lista === 'faltaConfirmacion' && (o.lat === undefined || o.lng === undefined)) {
-        h.push({ tipo: 'aviso', donde: `${donde} (${ref})`, detalle: 'está en "faltaConfirmacion" sin pin: se le pedirá la ubicación primero.' });
-      }
-      if (o.urgente !== undefined && typeof o.urgente !== 'boolean') h.push({ tipo: 'formato', donde: `${donde} (${ref}).urgente`, detalle: `tiene que ser true/false (vino ${JSON.stringify(o.urgente)}).` });
-      for (const k of Object.keys(o)) if (!CAMPOS_PEDIDO.has(k)) h.push({ tipo: 'sobra', donde: `${donde} (${ref}).${k}`, detalle: 'este campo no se usa: no pasa nada, pero no hace falta mandarlo.' });
-    });
-  }
-  const faltan = h.filter((x) => x.tipo === 'falta').length;
-  const formato = h.filter((x) => x.tipo === 'formato').length;
-  const sobran = h.filter((x) => x.tipo === 'sobra').length;
-  const ok = faltan === 0 && formato === 0;
-  const partes: string[] = [];
-  if (ok) partes.push('El contrato se cumple');
-  else partes.push(`Hay ${faltan + formato} problema(s)`);
-  if (faltan) partes.push(`${faltan} obligatorio(s) que faltan`);
-  if (formato) partes.push(`${formato} con formato raro`);
-  if (sobran) partes.push(`${sobran} campo(s) que sobran (no molestan)`);
-  return { ok, resumen: partes.join(' · ') + '.', hallazgos: h };
-}
-
 // ------------------------------------------------------------ tokens del simulador
 
 export interface TokenSimulador {
@@ -214,7 +151,7 @@ export function estadoDeToken(t: Pick<TokenSimulador, 'caducaAt' | 'anuladoAt'>,
 
 export interface LlamadaGsg {
   en: string;
-  /** "GET /simulador/gsg/reparto/pendientes", "POST /api/v1/entregas"... */
+  /** "POST /api/v1/entregas", "POST /simulador/gsg/ubicaciones"... */
   que: string;
   /** El HTTP que se le devolvió. */
   status: number;
@@ -236,18 +173,16 @@ const bitacoraSchema = z.array(
 
 // ------------------------------------------------------------ cuadre
 
+/** El cierre de un día con lo de aquí. A GSG no se le pregunta nada. */
 export interface CuadreGsg {
   dia: string;
-  /** Referencias que GSG tiene en terminados. */
-  terminadosGsg: number;
-  /** Lo que aquí figura entregado o cancelado ese día. */
+  /** Los pedidos de ese día que hay aquí. */
+  total: number;
+  /** Lo que aquí figura entregado, terminado o cancelado ese día. */
   cerradasAqui: number;
-  /** Entregadas aquí que GSG no tiene en terminados. */
-  faltanEnGsg: string[];
-  /** Terminados en GSG que aquí no figuran entregados ni cancelados. */
-  sobranEnGsg: string[];
-  /** Entregadas aquí y en GSG: coincide. */
-  coinciden: number;
+  /** Referencias que siguen abiertas (ni entregadas ni canceladas). */
+  abiertas: string[];
+  /** true = no queda ninguno abierto. */
   ok: boolean;
   resumen: string;
   at: string;
@@ -257,8 +192,6 @@ export interface CuadreGsg {
 
 export interface DepsGsgExtras {
   settingsRepo: SettingsRepo;
-  /** El puerto vigente (real o simulador) para el verificador y el cuadre. */
-  puerto: () => PuertoGsg;
   /** Para el cuadre: lo que aquí figura ese día. Solo lectura. */
   entregasDelDia?: (dia: string) => Promise<Array<{ referencia: string; estado: string }>>;
   ahora?: () => Date;
@@ -267,7 +200,7 @@ export interface DepsGsgExtras {
 }
 
 export interface ServicioGsgExtras {
-  /** Revisa las listas que llegaron y apunta lo que no se puede usar. Devuelve cuántos descartó. */
+  /** Revisa los pedidos que llegaron (empujados por GSG o del simulador) y apunta lo que no se puede usar. Devuelve cuántos descartó. */
   observarPendientes(cuerpo: unknown): Promise<number>;
   descartesDeHoy(): { dia: string; lista: DescarteGsg[] };
   verificarContrato(): Promise<VerificacionContrato>;
@@ -325,6 +258,10 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
   const guardarTokens = () => deps.settingsRepo.put(CLAVE_TOKENS, JSON.stringify(tokens), false);
 
   const hoy = () => diaDe(ahora(), timezone);
+  const descartesDeHoy = () => {
+    const dia = hoy();
+    return descartes.dia === dia ? descartes : { dia, lista: [] };
+  };
 
   return {
     recargar,
@@ -352,30 +289,42 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
       return nuevos.length;
     },
 
-    descartesDeHoy() {
-      const dia = hoy();
-      return descartes.dia === dia ? descartes : { dia, lista: [] };
-    },
+    descartesDeHoy,
 
     async verificarContrato() {
+      // Sin red: solo lo que GSG ya nos mandó (la bitácora) y lo que hoy no se pudo leer.
       const at = ahora().toISOString();
-      const puerto = deps.puerto();
-      if (!puerto.conectado()) {
-        ultimaVerificacion = { ok: false, resumen: 'No hay conexión con GSG: elige el simulador o pega la dirección de su API.', hallazgos: [], at };
-        return ultimaVerificacion;
+      const h: HallazgoContrato[] = [];
+      const deGsg = llamadas.filter((l) => /^(POST|PATCH|DELETE) \/api\/v1\/entregas(\/|$)/.test(l.que));
+      let aceptadas = 0;
+      let problemas = 0;
+      for (const l of deGsg.slice(0, 20)) {
+        const donde = `${l.que} (${l.en.slice(0, 16).replace('T', ' ')})`;
+        if (l.status >= 200 && l.status < 300) {
+          aceptadas++;
+          h.push({ tipo: 'ok', donde, detalle: l.resultado || 'aceptada' });
+        } else if (l.status === 400 || l.status === 401 || l.status === 403) {
+          problemas++;
+          h.push({ tipo: l.status === 400 ? 'formato' : 'falta', donde, detalle: l.status === 400 ? l.resultado : `${l.resultado} (la clave de API que usa GSG no vale o no tiene el permiso entregas:gestionar)` });
+        } else {
+          h.push({ tipo: 'aviso', donde, detalle: l.resultado });
+        }
       }
-      const r = await puerto.consultar<unknown>(RUTA_GSG_PENDIENTES);
-      if (!r.ok) {
-        const detalle =
-          r.status === 401 || r.status === 403
-            ? 'GSG rechazó el token: revisa que sea el que te dieron.'
-            : r.status === 404
-              ? `GSG respondió pero no tiene la ruta ${RUTA_GSG_PENDIENTES}: revisa la dirección (tiene que ser la base de su API).`
-              : `No se pudo consultar a GSG: ${r.error ?? 'sin respuesta'}.`;
-        ultimaVerificacion = { ok: false, resumen: detalle, hallazgos: [{ tipo: 'falta', donde: RUTA_GSG_PENDIENTES, detalle }], at };
-        return ultimaVerificacion;
+      const descartados = descartesDeHoy().lista;
+      for (const d of descartados) {
+        problemas++;
+        h.push({ tipo: d.motivo.startsWith('sin ') ? 'falta' : 'formato', donde: `pedido ${d.referencia}`, detalle: `no se pudo usar: ${d.motivo}` });
       }
-      ultimaVerificacion = { ...verificarCuerpoPendientes(r.cuerpo), at };
+      if (!deGsg.length) {
+        h.unshift({ tipo: 'aviso', donde: 'POST /api/v1/entregas', detalle: 'GSG todavía no nos ha mandado ningún pedido. GSGchat no le pide nada: cuando GSG los mande, aquí se verá si cumplen el contrato.' });
+      }
+      const ok = aceptadas > 0 && problemas === 0;
+      const resumen = !deGsg.length && !problemas
+        ? 'Todavía no hay nada que verificar: GSG no ha mandado ningún pedido a POST /api/v1/entregas.'
+        : ok
+          ? `El contrato se cumple: ${aceptadas} llamada(s) de GSG aceptadas y ningún pedido descartado hoy.`
+          : `Hay ${problemas} problema(s) en lo que GSG nos mandó${aceptadas ? ` (y ${aceptadas} llamada(s) aceptadas)` : ''}.`;
+      ultimaVerificacion = { ok, resumen, hallazgos: h, at };
       return ultimaVerificacion;
     },
     ultimaVerificacion: () => ultimaVerificacion,
@@ -439,31 +388,19 @@ export async function crearGsgExtras(deps: DepsGsgExtras): Promise<ServicioGsgEx
     bitacora: () => llamadas,
 
     async cuadrar(dia) {
+      // Solo con lo de aquí: GSGchat no le pide a GSG su lista de terminados.
       const d = dia && /^\d{4}-\d{2}-\d{2}$/.test(dia) ? dia : hoy();
       const at = ahora().toISOString();
-      const puerto = deps.puerto();
-      const base: CuadreGsg = { dia: d, terminadosGsg: 0, cerradasAqui: 0, faltanEnGsg: [], sobranEnGsg: [], coinciden: 0, ok: false, resumen: '', at };
-      if (!puerto.conectado()) {
-        ultimoCuadre = { ...base, resumen: 'No hay conexión con GSG: no se puede cuadrar.' };
-        return ultimoCuadre;
-      }
-      const r = await puerto.consultar<{ dia?: string; terminados?: Array<{ referencia?: unknown }> }>(RUTA_GSG_PENDIENTES);
-      if (!r.ok || !r.cuerpo) {
-        ultimoCuadre = { ...base, resumen: `GSG no respondió: ${r.error ?? 'sin cuerpo'}.` };
-        return ultimoCuadre;
-      }
-      const terminados = new Set((Array.isArray(r.cuerpo.terminados) ? r.cuerpo.terminados : []).map((t) => String(t?.referencia ?? '').trim()).filter(Boolean));
       const aqui = entregasDelDia ? await entregasDelDia(d) : [];
       const cerradas = aqui.filter((e) => e.estado === 'entregada' || e.estado === 'terminada' || e.estado === 'cancelada');
-      const refsAqui = new Set(cerradas.map((e) => e.referencia));
-      const faltanEnGsg = [...refsAqui].filter((ref) => !terminados.has(ref)).sort();
-      const sobranEnGsg = [...terminados].filter((ref) => !refsAqui.has(ref)).sort();
-      const coinciden = [...refsAqui].filter((ref) => terminados.has(ref)).length;
-      const ok = faltanEnGsg.length === 0 && sobranEnGsg.length === 0;
-      const resumen = ok
-        ? `Cuadra: ${coinciden} pedido(s) cerrados aquí y terminados en GSG.`
-        : `No cuadra: ${faltanEnGsg.length} cerrado(s) aquí que GSG no tiene como terminados` + (faltanEnGsg.length ? ` (${faltanEnGsg.slice(0, 8).join(', ')}${faltanEnGsg.length > 8 ? '…' : ''})` : '') + `; ${sobranEnGsg.length} terminado(s) en GSG que aquí siguen abiertos` + (sobranEnGsg.length ? ` (${sobranEnGsg.slice(0, 8).join(', ')}${sobranEnGsg.length > 8 ? '…' : ''})` : '') + '.';
-      ultimoCuadre = { dia: d, terminadosGsg: terminados.size, cerradasAqui: cerradas.length, faltanEnGsg, sobranEnGsg, coinciden, ok, resumen, at };
+      const abiertas = aqui.filter((e) => !cerradas.includes(e)).map((e) => e.referencia).sort();
+      const ok = abiertas.length === 0;
+      const resumen = !aqui.length
+        ? `El ${d} no hay pedidos aquí.`
+        : ok
+          ? `Día cerrado: los ${aqui.length} pedido(s) están entregados o cancelados.`
+          : `Quedan ${abiertas.length} de ${aqui.length} pedido(s) sin cerrar (${abiertas.slice(0, 8).join(', ')}${abiertas.length > 8 ? '…' : ''}).`;
+      ultimoCuadre = { dia: d, total: aqui.length, cerradasAqui: cerradas.length, abiertas, ok, resumen, at };
       return ultimoCuadre;
     },
     ultimoCuadre: () => ultimoCuadre,

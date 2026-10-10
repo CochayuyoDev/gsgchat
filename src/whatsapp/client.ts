@@ -65,6 +65,78 @@ export interface WhatsAppClientOptions {
   graphVersion?: string;
   fetchImpl?: typeof fetch;
   baseUrl?: string;
+  /** Corte de cada llamada a Graph (por defecto 30 s; la subida de ficheros, el cuadruple). */
+  timeoutMs?: number;
+}
+
+/** Corte por defecto de una llamada al proveedor de WhatsApp (Meta o WAHA). */
+export const TIMEOUT_PROVEEDOR_MS = 30_000;
+
+/**
+ * Fallos de red en los que la peticion no llego a salir: reintentar no puede
+ * duplicar nada. Un corte por tiempo o una conexion que se cae a medias si
+ * pueden haber dejado el mensaje enviado, y esos no se reintentan solos.
+ */
+const SIN_CONEXION = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+
+function codigoDeRed(error: unknown): string | undefined {
+  const causa = (error as { cause?: { code?: unknown } } | null)?.cause;
+  const code = typeof causa?.code === 'string' ? causa.code : (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Un fetch al proveedor con corte por tiempo, y cualquier fallo de red
+ * convertido en `WhatsAppApiError`. Sin esto, un Graph o un WAHA que no
+ * contesta dejaba colgado el envio (y el worker de la cola) para siempre, y
+ * un `fetch failed` salia como error generico que el sender no reintentaba.
+ */
+export async function fetchProveedor(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  opts: {
+    timeoutMs: number;
+    quien: string;
+    /** WAHA es un contenedor propio: cualquier fallo de red (no un corte por tiempo) se reintenta. */
+    reintentarFallosDeRed?: boolean;
+  },
+): Promise<{ response: Response; payload: Record<string, unknown> }> {
+  const control = new AbortController();
+  const corte = setTimeout(() => control.abort(), opts.timeoutMs);
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(url, { ...init, signal: control.signal });
+    } catch (error) {
+      if (control.signal.aborted) {
+        throw new WhatsAppApiError(`${opts.quien} no respondio en ${Math.round(opts.timeoutMs / 1000)} s`, 504, undefined, undefined, false);
+      }
+      const code = codigoDeRed(error);
+      const detalle = error instanceof Error ? error.message : String(error);
+      throw new WhatsAppApiError(`no se pudo contactar con ${opts.quien}: ${detalle}${code ? ` (${code})` : ''}`, 503, undefined, undefined, opts.reintentarFallosDeRed === true || Boolean(code && SIN_CONEXION.has(code)));
+    }
+    let text = '';
+    try {
+      text = await response.text();
+    } catch {
+      throw new WhatsAppApiError(`${opts.quien} corto la respuesta a medias (HTTP ${response.status})`, response.status || 502, undefined, undefined, false);
+    }
+    let payload: Record<string, unknown> = {};
+    if (text) {
+      try {
+        const leido = JSON.parse(text) as unknown;
+        if (leido && typeof leido === 'object') payload = leido as Record<string, unknown>;
+      } catch {
+        // Un 502 de un proxy llega en HTML: no es JSON y no es culpa de nadie
+        // de aqui. Se sigue con el estado HTTP, que dice lo que paso.
+        if (response.ok) throw new WhatsAppApiError(`${opts.quien} contesto algo que no es JSON`, 502, undefined, undefined, false);
+      }
+    }
+    return { response, payload };
+  } finally {
+    clearTimeout(corte);
+  }
 }
 
 /** Codigos de Meta que merecen reintento en vez de darse por perdidos. */
@@ -243,22 +315,25 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     graphVersion = 'v25.0',
     fetchImpl = fetch,
     baseUrl = 'https://graph.facebook.com',
+    timeoutMs = TIMEOUT_PROVEEDOR_MS,
   } = opts;
 
   const messagesUrl = `${baseUrl}/${graphVersion}/${phoneNumberId}/messages`;
 
   async function call<T>(url: string, init: RequestInit): Promise<T> {
-    const response = await fetchImpl(url, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        ...(init.headers ?? {}),
+    const { response, payload } = await fetchProveedor(
+      fetchImpl,
+      url,
+      {
+        ...init,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          ...(init.headers ?? {}),
+        },
       },
-    });
-
-    const text = await response.text();
-    const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      { timeoutMs, quien: 'Meta' },
+    );
 
     if (!response.ok) {
       const error = (payload.error ?? {}) as { code?: number; message?: string; error_data?: { details?: string } };
@@ -284,14 +359,19 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     form.append('messaging_product', 'whatsapp');
     form.append('type', media.mimeType);
     form.append('file', new Blob([media.datos], { type: media.mimeType }), media.filename ?? `archivo.${media.mimeType.split('/')[1] ?? 'bin'}`);
-    const response = await fetchImpl(`${baseUrl}/${graphVersion}/${phoneNumberId}/media`, {
-      method: 'POST',
-      // Sin content-type a mano: fetch pone el multipart con su frontera.
-      headers: { authorization: `Bearer ${token}` },
-      body: form,
-    });
-    const text = await response.text();
-    const payload = text ? (JSON.parse(text) as { id?: string; error?: { code?: number; message?: string } }) : {};
+    // Hasta 16 MB de subida: mas margen que un mensaje.
+    const { response, payload: crudo } = await fetchProveedor(
+      fetchImpl,
+      `${baseUrl}/${graphVersion}/${phoneNumberId}/media`,
+      {
+        method: 'POST',
+        // Sin content-type a mano: fetch pone el multipart con su frontera.
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+      },
+      { timeoutMs: timeoutMs * 4, quien: 'Meta' },
+    );
+    const payload = crudo as { id?: string; error?: { code?: number; message?: string } };
     if (!response.ok || !payload.id) {
       throw new WhatsAppApiError(payload.error?.message ?? `no se pudo subir el fichero (HTTP ${response.status})`, response.status, payload.error?.code, undefined, response.status >= 500);
     }

@@ -25,11 +25,11 @@ import { conReglaGsg } from '../src/entregas/regla-gsg.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { crearMotor, OPCIONES_POR_DEFECTO, type Motor, type ResultadoTick } from '../src/rutas/motor.js';
 import { despacharReportes, type DespachoResumen } from '../src/rutas/gsg.js';
-import { crearConexionGsg, type ServicioConexionGsg } from '../src/rutas/conexion-gsg.js';
+import { crearConexionGsg, RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from '../src/rutas/conexion-gsg.js';
 import { cargarLote } from '../src/rutas/cargar.js';
 import { PLANES } from '../src/rutas/telefono.js';
-import { crearGsgSimulado, type GsgSimulado } from '../src/entregas/gsg-simulado.js';
-import { crearServicioEntregas, type ServicioEntregas, type FilaEntrega, type ResumenEntregas } from '../src/entregas/servicio.js';
+import { crearGsgSimulado, enviarListaDelSimulador, type GsgSimulado } from '../src/entregas/gsg-simulado.js';
+import { crearServicioEntregas, type ServicioEntregas, type FilaEntrega, type ResumenEntregas, type ResultadoSincronizacion } from '../src/entregas/servicio.js';
 import { crearMotorEntregas, type MotorEntregas, type ResultadoTickEntregas } from '../src/entregas/motor.js';
 import type { LectorIA } from '../src/entregas/interpretar.js';
 import type { Geocodificador } from '../src/entregas/geocodificar.js';
@@ -103,6 +103,13 @@ export interface EscenarioEntregas {
   /** La entrega de hoy de un cliente (por teléfono o referencia), tal como la ve la pantalla. */
   entrega(quien: string): Promise<FilaEntrega | undefined>;
   resumen(): Promise<ResumenEntregas>;
+  /**
+   * GSG (el simulador) le manda a GSGchat su lista del día, como si la
+   * empujara: en memoria, sin red. GSGchat nunca se la pide.
+   */
+  gsgManda(): Promise<RespuestaApi<ResultadoSincronizacion>>;
+  /** Todas las llamadas que salieron hacia GSG (la URL falsa o el simulador): método y ruta. */
+  llamadasAGsg: Array<{ metodo: string; ruta: string }>;
   /** Vacía la cola de reportes contra el simulador. */
   despacharAGsg(): Promise<DespachoResumen>;
   cerrar(): Promise<void>;
@@ -185,15 +192,23 @@ export async function crearEscenarioEntregas(opciones: {
     eventos.push({ nombre, payload });
   });
 
-  // El simulador de GSG, colgado de fetch como si fuera su API.
+  // El simulador de GSG, colgado de fetch como si fuera su API (la URL
+  // falsa del .env) y tambien como el simulador de este servidor (cuando la
+  // prueba pone la conexion en modo simulador).
   const simulador = crearGsgSimulado({ token: GSG_TOKEN_FALSO, ahora: reloj });
+  const URL_SIMULADOR_LOCAL = `http://localhost:3000${RUTA_SIMULADOR}`;
+  const llamadasAGsg: Array<{ metodo: string; ruta: string }> = [];
   const fetchOriginal = globalThis.fetch;
   globalThis.fetch = (async (entrada: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = urlDe(entrada);
-    if (!url.startsWith(GSG_URL_FALSA)) return fetchOriginal(entrada, init);
+    const base = url.startsWith(GSG_URL_FALSA) ? GSG_URL_FALSA : url.startsWith(URL_SIMULADOR_LOCAL) ? URL_SIMULADOR_LOCAL : null;
+    if (!base) return fetchOriginal(entrada, init);
+    llamadasAGsg.push({ metodo: (init?.method ?? 'GET').toUpperCase(), ruta: url.slice(base.length) });
     const headers = new Headers(init?.headers);
     const auth = headers.get('authorization');
-    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+    const crudo = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+    // El token interno del simulador vale como el de la URL falsa.
+    const token = base === URL_SIMULADOR_LOCAL && crudo === TOKEN_SIMULADOR ? GSG_TOKEN_FALSO : crudo;
     let cuerpo: unknown = undefined;
     if (init?.body) {
       try {
@@ -202,7 +217,7 @@ export async function crearEscenarioEntregas(opciones: {
         cuerpo = {};
       }
     }
-    const r = simulador.atender((init?.method ?? 'GET').toUpperCase(), url.slice(GSG_URL_FALSA.length), token, cuerpo);
+    const r = simulador.atender((init?.method ?? 'GET').toUpperCase(), url.slice(base.length), token, cuerpo);
     const body = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     return new Response(body, { status: r.status, headers: { 'content-type': typeof r.body === 'string' ? 'text/html' : 'application/json' } });
   }) as typeof fetch;
@@ -349,6 +364,10 @@ export async function crearEscenarioEntregas(opciones: {
     eventos,
     ahora: reloj,
     inicio,
+    llamadasAGsg,
+    async gsgManda() {
+      return { status: 200, body: await enviarListaDelSimulador(simulador, entregas) };
+    },
     avanzar(minutos) {
       ahora = new Date(ahora.getTime() + minutos * 60_000);
     },
