@@ -111,6 +111,7 @@ import { crearFuenteCombinada, crearSeguimientosRecibidosMemoria, type Seguimien
 import type { Lote } from '../db/rutas.js';
 import type { Geocodificador, ResultadoGeo } from './geocodificar.js';
 import { calcularAlertas, type AlertaHoy } from './alertas-hoy.js';
+import { errorDeEnvio, fichasDeTrackings, reportarNumero, type FichaTracking, type NuevoReportado, type NumeroReportado } from './reportados.js';
 
 /** La fuente de una ubicación que salió de la dirección escrita (no es un pin: es aproximada). */
 
@@ -715,6 +716,22 @@ export interface ServicioEntregas {
   revisarMensajes(): Promise<{ inciertos: number; disparados: number; puestosAlDia: number }>;
   /** El dia de hoy en la zona de la tienda (AAAA-MM-DD): el que usa Hoy. */
   diaDeHoy(): string;
+  /** El telefono normalizado (51...), o null si no es valido. */
+  normalizarTelefono(texto: string): string | null;
+  /**
+   * Reporta a GSG un numero o tracking malo (ver src/entregas/reportados.ts):
+   * una vez por tracking + error. null = ya estaba reportado (no se repite).
+   */
+  reportarNumero(n: Omit<NuevoReportado, 'dia'> & { dia?: string }): Promise<NumeroReportado | null>;
+  /**
+   * GSG corrigio el telefono de un pedido: se cambia, se suelta lo que se le
+   * pedia al numero viejo y, si aun falta la ubicacion, se le pide al nuevo
+   * por el flujo normal (o queda esperando «Confirmar y enviar» si ese ajuste
+   * esta encendido).
+   */
+  corregirTelefono(id: number, telefono: string, quien: string): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }>;
+  /** Lo que ya se hizo por WhatsApp con cada tracking de `dia` (todos, o solo esos ids). */
+  fichasTrackings(dia: string, soloIds?: number[]): Promise<FichaTracking[]>;
   /** La bandeja de errores de mensajes de esta tienda. */
   bandejaMensajes(): Promise<ItemBandejaMensajes[]>;
   /** «Reintentar mensaje»: el mismo disparador sobre el pedido existente. */
@@ -2181,6 +2198,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       let act = (await repo.actualizar(e.id, { confirmacionProximoAt: null, motorizadoProximoAt: null, ...(conMotorizado ? { motorizadoId: null, motorizadoEstado: 'sin_asignar' as const } : {}) })) ?? e;
       act = await marcarIncidencia(act, INCIDENCIA_NO_SOY_YO, detalle);
       await reportar(act, 'confirmacion', payloadConfirmacion({ referencia: act.referencia, phone: act.phone, nombre: act.nombre, confirmada: false, respuesta: texto.slice(0, 300), como: comoConfirmo, motivo: 'numero_equivocado', en }));
+      if (esDeGsg(act)) await reportarNumeroInterno({ error: 'no_soy_yo', tracking: act.datosEnvio?.tracking ?? act.referencia, referencia: act.referencia, telefono: act.phone, detalle: `contestó: "${texto.slice(0, 200)}"`, entregaId: act.id, dia: act.dia }).catch(() => undefined);
       tocadas.push(act);
     }
     const soltadas = await soltarSolicitudes(repos, contact.phone, { ahora: en, motivo: `dijo que no es el cliente: "${texto.slice(0, 120)}"`, estado: 'supervision', incidencia: 'numero_equivocado' }).catch(() => []);
@@ -4094,6 +4112,7 @@ ${lista}
       if (n > cfg.maximo) {
         const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: 'fallido', mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: 'reintentos_agotados', mensajeError: d.motivo.slice(0, 500), mensajePermanente: false });
         if (act) await evento(act, 'incidencia', `el primer mensaje falló ${intentos} veces: se deja de reintentar solo (bandeja de errores)`);
+        if (act) await reportarFalloDeEnvio(act, 'reintentos_agotados', d.motivo);
         return { detener: motivoLegible('reintentos_agotados', d.motivo) };
       }
       const esperaMs = esperaDelReintento(n, cfg, d.esperaMinMs ?? 0);
@@ -4104,7 +4123,24 @@ ${lista}
     const estado: EstadoMensaje = d.tipo === 'incierto' ? 'incierto' : 'fallido';
     const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: estado, mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: d.tipo === 'permanente' });
     if (act) await evento(act, 'incidencia', d.tipo === 'incierto' ? `no se sabe si le llegó el primer mensaje (${d.motivo.slice(0, 120)}): no se reenvía solo` : `el primer mensaje no se puede mandar: ${motivoLegible(d.codigo, d.motivo)}`);
+    if (act && estado === 'fallido') await reportarFalloDeEnvio(act, d.codigo, d.motivo);
     return { detener: motivoLegible(d.codigo, d.motivo) };
+  }
+
+  // ---------------------------------------------- numeros reportados a GSG
+
+  /** Un pedido que mando GSG (trae su tracking o su id de GSG): solo esos se le reportan. */
+  const esDeGsg = (e: Entrega): boolean => Boolean(e.datosEnvio?.tracking || e.externoId);
+
+  async function reportarNumeroInterno(n: Omit<NuevoReportado, 'dia'> & { dia?: string }): Promise<NumeroReportado | null> {
+    return reportarNumero({ repos, gsg: deps.gsg, ahora, log }, { ...n, dia: n.dia ?? hoy() });
+  }
+
+  /** El primer mensaje ya no sale y es por el numero: GSG se entera (una vez). */
+  async function reportarFalloDeEnvio(e: Entrega, codigo: string, motivo: string): Promise<void> {
+    const error = errorDeEnvio(codigo);
+    if (!error || !esDeGsg(e)) return;
+    await reportarNumeroInterno({ error, tracking: e.datosEnvio?.tracking ?? e.referencia, referencia: e.referencia, telefono: e.phone, detalle: motivoLegible(codigo, motivo).slice(0, 500), entregaId: e.id, dia: e.dia }).catch((fallo: unknown) => log('no se pudo reportar el número a GSG', { detalle: String(fallo) }));
   }
 
   /**
@@ -4345,6 +4381,61 @@ ${lista}
     }
     resultado.creadas = creadas;
     return resultado;
+  }
+
+  /** GSG corrigio el telefono (ver ServicioEntregas.corregirTelefono). */
+  async function corregirTelefono(id: number, telefono: string, quien: string): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }> {
+    const e = await repo.entrega(id);
+    if (!e) return { ok: false, codigo: 'no_existe', motivo: 'el pedido no existe' };
+    if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, codigo: 'cerrada', motivo: `el pedido ${e.referencia} ya está cerrado (${e.estado})` };
+    const revision = revisarTelefono(String(telefono ?? ''), plan);
+    if (!revision.ok) return { ok: false, codigo: 'telefono_invalido', motivo: `teléfono inválido: ${revision.detalle}` };
+    if (await repo.motorizadoPorTelefono(revision.phone).catch(() => null)) return { ok: false, codigo: 'telefono_de_motorizado', motivo: `el ${revision.phone} es el teléfono de un motorizado, no de un cliente` };
+    if (revision.phone === e.phone) return { ok: true, entrega: e, cambiado: false };
+    const viejo = e.phone;
+    // Lo que se le pedia al numero viejo se suelta (salvo que otro pedido suyo siga esperando).
+    await soltarDeLaEntrega(e, `GSG corrigió el teléfono del pedido ${e.referencia}`);
+    // Con «Confirmar y enviar» encendido, el numero corregido vuelve a esperar a una persona.
+    const retener = ajustes.confirmarListaGsg !== false;
+    const confirmacionEstado = e.confirmacionEstado === 'pedida' || e.confirmacionEstado === 'rechazada' ? ('pendiente' as const) : e.confirmacionEstado;
+    let act = (await repo.actualizar(e.id, {
+      phone: revision.phone,
+      loteId: null,
+      estado: 'pendiente',
+      incidencia: null,
+      incidenciaDetalle: null,
+      requiereHumano: false,
+      confirmacionEstado,
+      confirmacionIntentos: 0,
+      confirmacionProximoAt: null,
+      contactadoAt: null,
+      contactadoPor: null,
+      mensajesPausadosAt: null,
+      envioRetenidoAt: retener ? ahora() : null,
+      envioLiberadoAt: null,
+      ...mensajeAlCrear(e.ubicacionEstado, confirmacionEstado, retener),
+      mensajeIntentos: 0,
+      mensajeReintentosAuto: 0,
+      mensajeUltimoIntentoAt: null,
+      mensajeProximoAt: null,
+      mensajeEnviadoAt: null,
+      mensajeWamid: null,
+      ...SIN_ERROR,
+    })) ?? e;
+    await evento(act, 'sincronizada', `${quien} corrigió el teléfono: ${viejo} → ${revision.phone}${retener ? ' (espera «Confirmar y enviar»)' : ''}`);
+    const contacto = await repos.contacts.upsertFromInbound(act.phone, act.nombre ?? undefined);
+    if (!contacto.optInAt) await repos.contacts.setOptIn(act.phone, `entrega: pedido ${act.referencia} (teléfono corregido por GSG)`);
+    if (!retener) {
+      if (act.ubicacionEstado === 'pendiente') act = await alLoteDelReparto(act, `${quien} corrigió el teléfono`);
+      act = await asentarDisparo(act, act.ubicacionEstado === 'pendiente' && !act.loteId ? 'no entró en la cola del reparto' : undefined);
+    }
+    log('GSG corrigió el teléfono de un pedido', { referencia: act.referencia, retenido: retener });
+    return { ok: true, entrega: await recalcular((await repo.entrega(act.id)) ?? act), cambiado: true };
+  }
+
+  async function fichasTrackings(dia: string, soloIds?: number[]): Promise<FichaTracking[]> {
+    const delDia = await repo.listar({ dia, limit: TOPE_DEL_DIA });
+    return fichasDeTrackings({ repo, rutas: repos.rutas, reportados: repos.reportados, timezone: tz }, delDia, soloIds ? new Set(soloIds) : undefined);
   }
 
   // ------------------------------------------------------ cierre del dia
@@ -4961,6 +5052,13 @@ ${lista}
     },
     primerMensajeReparto,
     diaDeHoy: () => hoy(),
+    normalizarTelefono: (texto) => {
+      const r = revisarTelefono(String(texto ?? ''), plan);
+      return r.ok ? r.phone : null;
+    },
+    reportarNumero: reportarNumeroInterno,
+    corregirTelefono,
+    fichasTrackings,
     revisarMensajes,
     bandejaMensajes,
     reintentarMensaje,

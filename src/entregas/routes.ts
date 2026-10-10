@@ -230,10 +230,11 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
       apiKey: z.string().max(500).nullable().optional(),
       token: z.string().max(500).nullable().optional(),
       urlUbicacion: z.string().trim().max(300).nullable().optional(),
+      rutaReportados: z.string().trim().max(300).nullable().optional(),
     }).parse(request.body ?? {});
 
     try {
-      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion }) };
+      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion, rutaReportados: body.rutaReportados }) };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }

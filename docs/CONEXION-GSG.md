@@ -15,13 +15,14 @@ GSGchat **nunca le pide nada a GSG**: ni la lista del día (no existe `GET /repa
 
 ## Conexión saliente (GSGchat → GSG)
 
-Tres campos, en Conexión (o en el `.env`):
+Tres campos (y la ruta de los números reportados, opcional), en Conexión (o en el `.env`):
 
 | Pantalla | `.env` | Ejemplo |
 |---|---|---|
 | URL base de GSG | `GSG_URL` | `https://backend.developer.gsgcorp.pe/api/` |
 | Ruta para enviar la ubicación | `GSG_LOCATION_PATH` | `v1/gsgchat/location` |
 | API Key de GSG | `GSG_API_KEY` | (la da GSG) |
+| Ruta para reportar números malos (opcional) | `GSG_REPORTADOS_PATH` | `v1/gsgchat/reportados` (vacía = `numeros-reportados`) |
 
 La URL final es la base + la ruta: `https://backend.developer.gsgcorp.pe/api/v1/gsgchat/location`.
 La pantalla la enseña en vivo antes de guardar. Reglas (`unirUrlGsg` en `src/rutas/gsg.ts`):
@@ -63,3 +64,92 @@ Ningún error guardado contiene la clave.
   2. La URL antigua empieza por la dirección + `/`: base = la dirección, ruta = el resto.
   3. Si no, se parte por `/api/` cuando aparece una sola vez y la dirección no apunta a otro sitio.
   En otro caso, la pantalla y el estado muestran el error y no se envía nada hasta escribir la base y la ruta.
+
+## Números reportados (para GSG)
+
+Cuando un pedido que manda GSG trae un teléfono o un tracking que no sirve, GSGchat se lo reporta a GSG con su
+error concreto. Se reporta **una sola vez por tracking + error**: no en cada reintento ni en cada pasada del motor.
+Si GSG lo corrige y el mismo error vuelve después, se reporta otra vez.
+
+### Errores
+
+| `error` | Cuándo |
+|---|---|
+| `telefono_invalido` | El teléfono no es un número válido (o no vino). El pedido no se guarda. |
+| `sin_whatsapp` | El número no tiene WhatsApp. |
+| `envio_fallido` | WhatsApp rechazó el mensaje y ya no se reintenta solo. |
+| `tracking_falta` | El pedido llegó sin tracking (la llamada da 400). |
+| `tracking_invalido` | El tracking tiene más de 60 caracteres o caracteres de control (la llamada da 400). |
+| `tracking_duplicado` | El mismo tracking vino dos veces en la misma llamada con teléfonos distintos. Se guarda solo el primero. |
+| `tracking_de_otro_pedido` | El tracking ya es de otro pedido de hoy con otro teléfono. Este no se guarda. |
+| `telefono_de_motorizado` | El teléfono es de un motorizado registrado, no de un cliente. No se guarda. |
+| `no_soy_yo` | El cliente contestó que no es él (no hizo el pedido o el número no es suyo). |
+
+### El reporte (GSGchat → GSG)
+
+`POST` a la URL base + **ruta de los números reportados** (pantalla Conexión o `GSG_REPORTADOS_PATH`; vacía =
+`numeros-reportados`), con `X-API-Key` y la cabecera `Idempotency-Key` igual a `idReporte`. Sale por la misma cola
+de reportes (reintentos incluidos):
+
+```json
+{
+  "tipo": "numero_reportado",
+  "tracking": "GSG-123",
+  "referencia": "GSG-123",
+  "telefono": "98765432",
+  "error": "telefono_invalido",
+  "mensaje": "El teléfono «98765432» no es un número válido: no se le puede escribir. Corrígelo y vuelve a mandarlo.",
+  "detalle": "teléfono inválido: ...",
+  "reportadoAt": "2026-10-10T14:05:00.000Z",
+  "dia": "2026-10-10",
+  "idReporte": "gsgchat-reportado-17-1"
+}
+```
+
+`telefono` va tal como llegó de GSG. Si llegó sin tracking, `tracking` es `null`.
+
+### La bandeja: `GET /api/v1/reportados`
+
+Con la clave de GSGchat (`entregas:leer`). Filtros: `?estado=pendiente|corregido`, `?tracking=GSG-123`.
+Cada elemento trae `clave`, `tracking`, `referencia`, `telefono`, `error`, `titulo`, `mensaje`, `detalle`,
+`reportadoAt`, `estado` (`pendiente` o `corregido`), `corregidoAt` y `correccion`. Sale de la base de GSGchat:
+GSG la lee cuando quiere. En el panel está en Pedidos GSG → «Números reportados», junto a la bandeja de errores.
+
+### Corregir (GSG → GSGchat)
+
+- `POST /api/v1/reportados/{tracking}/correccion` con `{ "telefono": "987654321" }`, `{ "tracking": "GSG-124" }`
+  o los dos (`entregas:gestionar`). Sin tracking, se usa la `clave` que da la bandeja.
+- O `PATCH /api/v1/entregas/{referencia}` con `{ "telefono": "987654321" }` (y el `tracking` como siempre).
+
+Al corregir: lo pendiente de ese tracking pasa a `corregido`, el pedido cambia y, si aún falta la ubicación, se le
+pide al número nuevo por el flujo normal (si «Confirmar y enviar» está encendido, espera a que una persona lo
+confirme). Si el pedido no se llegó a guardar (teléfono inválido, de un motorizado, tracking malo), se crea ahora con
+lo corregido. Respuestas: 200; 400 si lo corregido tampoco vale; 404 si no hay nada reportado; 409 si ya estaba
+corregido o el tracking nuevo ya es de otro pedido de hoy.
+
+### Lo que ya se hizo por WhatsApp
+
+Cada respuesta a `POST /api/v1/entregas`, `PATCH /api/v1/entregas/{referencia}` y a la corrección trae `whatsapp`:
+por pedido, lo que **ya** se hizo **hoy** con ese tracking o ese teléfono. Al cliente ya contactado no se le manda
+otro mensaje.
+
+| `codigo` | Ejemplo de `mensaje` |
+|---|---|
+| `ya_contactado` | Este tracking ya se le envió mensaje por WhatsApp el 10/10/2026 a las 09:15. No se le manda otro. |
+| `agrupado_con` | Este teléfono ya tiene hoy el tracking «GSG-122»: va agrupado con ese y el cliente recibe un solo mensaje por los dos. (`con`: el otro tracking) |
+| `ubicacion_pedida` | Ya se pidió la ubicación (2 veces, la última el ...). (`veces`) |
+| `ubicacion_registrada` | Ubicación registrada el ... |
+| `ubicacion_cambiada` | El cliente cambió su ubicación el ... |
+| `confirmado` | El cliente confirmó el pedido el ... |
+| `reportado` / `corregido` | Lo reportado de ese tracking y si ya se corrigió (`error`). |
+
+Solo cuenta **el mismo día**: si GSG manda el mismo cliente (mismo teléfono, incluso el mismo tracking) otro día,
+es un intento de entrega nuevo y se le vuelve a escribir. Dos trackings con el mismo teléfono el mismo día reciben
+un solo mensaje, y la ubicación se le manda a GSG para los dos trackings.
+
+### El mapa de trackings: `GET /api/v1/trackings?dia=AAAA-MM-DD`
+
+Con `entregas:leer`; sin `dia`, hoy. Por tracking: `mensaje` (estado y `enviadoEn`), `contactado`/`contactadoEn`,
+`agrupadoCon`, `ubicacion` (`estado`: pendiente, registrada, cambiada o no_hace_falta; `pedida`, `pedidaEn`,
+`ultimaPeticionEn`, `veces`, `registradaEn`, `cambiadaEn`), `confirmacion`, `reportes` y `avisos` (los mismos
+códigos de arriba). GSG lo lee cuando quiere; GSGchat nunca lo empuja ni le pregunta nada a GSG.

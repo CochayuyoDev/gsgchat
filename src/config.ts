@@ -323,6 +323,8 @@ const schema = z.object({
    *  - GSG_URL: la URL base de su API (p. ej. https://backend.gsg.pe/api/).
    *  - GSG_LOCATION_PATH: la ruta para enviar la ubicacion, relativa a la
    *    base (p. ej. v1/gsgchat/location). Vacia = sendLocation.
+   *  - GSG_REPORTADOS_PATH: la ruta para reportar numeros y trackings malos,
+   *    relativa a la base (p. ej. v1/gsgchat/reportados). Vacia = numeros-reportados.
    *  - GSG_API_KEY: la clave que da GSG; sale solo en la cabecera X-API-Key.
    *  - GSG_TOKEN y GSG_SEND_LOCATION_URL: ANTIGUOS, se leen por compatibilidad
    *    (la clave si no hay GSG_API_KEY; la URL completa se convierte a base +
@@ -330,6 +332,7 @@ const schema = z.object({
    */
   GSG_URL: z.string().default(''),
   GSG_LOCATION_PATH: z.string().default(''),
+  GSG_REPORTADOS_PATH: z.string().default(''),
   GSG_IDEMPOTENCY_SUPPORTED: z.enum(['true', 'false']).default('false'),
   GSG_API_KEY: z.string().default(''),
   GSG_TOKEN: z.string().default(''),

@@ -6,7 +6,14 @@
  *
  *  POST   /api/v1/entregas                 uno o varios pedidos (entregas:gestionar)
  *  GET    /api/v1/entregas/:referencia     como va ese pedido hoy (entregas:leer)
- *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas, urgente o los datos del envio (entregas:gestionar)
+ *  PATCH  /api/v1/entregas/:referencia     cambiar nombre, direccion, distrito, notas, urgente, los datos del envio o corregir el telefono (entregas:gestionar)
+ *  GET    /api/v1/reportados               los numeros y trackings malos que se le reportaron a GSG (entregas:leer)
+ *  POST   /api/v1/reportados/:tracking/correccion   GSG corrige { telefono?, tracking? } (entregas:gestionar)
+ *  GET    /api/v1/trackings?dia=AAAA-MM-DD  lo que ya se hizo por WhatsApp con cada tracking del dia (entregas:leer)
+ *
+ * Cada respuesta a POST/PATCH/correccion trae, por pedido, lo que ya se hizo
+ * HOY por WhatsApp (`whatsapp`: ya_contactado, agrupado_con, ubicacion_pedida...).
+ * Solo cuenta el mismo dia: el mismo cliente otro dia es un intento nuevo.
  *
  * Cada pedido puede traer los datos del envio que salen en el primer mensaje
  * al cliente: producto, empresa {codigo, nombre}, tracking, nroPedido,
@@ -24,7 +31,7 @@
  * en `/api/v1/openapi.json`.
  */
 
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
 import type { EntregasRepo } from '../../entregas/repo.js';
@@ -32,7 +39,9 @@ import type { ActividadRepo } from '../../auth/actividad.js';
 import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio } from '../../entregas/datos-envio.js';
 import { horarioGsgSchema } from '../../entregas/seguimiento-gsg.js';
 import { vistaMensaje, type VistaMensaje } from '../../entregas/primer-mensaje.js';
-import { enviarError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type DetalleCampo } from '../errores.js';
+import { enviarError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError, type DetalleCampo } from '../errores.js';
+import { avisosParaApi, reportadoParaApi, TEXTOS_REPORTADOS, type ErrorReportado, type ReportadosRepo } from '../../entregas/reportados.js';
+import type { Entrega } from '../../entregas/repo.js';
 
 export interface ApiEntregasGsgDeps {
   entregas: ServicioEntregas;
@@ -40,6 +49,8 @@ export interface ApiEntregasGsgDeps {
   actividad?: ActividadRepo;
   /** El repo, para marcar la prioridad sin pasar por la pantalla. */
   repo?: EntregasRepo;
+  /** La bandeja de numeros reportados a GSG (ver src/entregas/reportados.ts). */
+  reportados?: ReportadosRepo;
   /** Peticiones por minuto y por clave (por defecto LIMITE_POR_MINUTO). */
   limitePorMinuto?: number;
   ahora?: () => number;
@@ -126,6 +137,17 @@ const normalizarPedidoGsg = (body: unknown): unknown => {
 /** Texto obligatorio: no vale vacio ni solo espacios. */
 const obligatorio = (max: number) => z.union([z.string(), z.number()]).transform((v) => String(v).trim()).pipe(z.string().min(1, 'no puede ir vacío').max(max));
 
+/** Caracteres de control (saltos de linea, tabuladores...): un tracking con ellos no vale. */
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** Por que un tracking no vale, o null si vale. */
+export function trackingNoValido(valor: unknown): 'tracking_falta' | 'tracking_invalido' | null {
+  if (valor === undefined || valor === null || (typeof valor === 'string' && !valor.trim())) return 'tracking_falta';
+  if (typeof valor !== 'string' && typeof valor !== 'number') return 'tracking_invalido';
+  const t = String(valor).trim();
+  return t.length > 60 || CONTROL.test(t) ? 'tracking_invalido' : null;
+}
+
 /**
  * Un pedido de GSG Courier. Lo que GSG manda siempre (obligatorio): tracking,
  * cliente, telefono, empresa, metodoPago y montoCobrar. Opcionales: distrito,
@@ -136,7 +158,7 @@ const obligatorio = (max: number) => z.union([z.string(), z.number()]).transform
 export const pedidoSchema = z.object({
   ...CAMPOS_DATOS_ENVIO,
   referencia: z.string().trim().min(1).max(60),
-  tracking: obligatorio(60),
+  tracking: obligatorio(60).refine((t) => !CONTROL.test(t), 'tiene caracteres no válidos'),
   nombre: obligatorio(120),
   // Un telefono malo no tumba la llamada entera: se descarta ese pedido con su motivo.
   telefono: obligatorio(30),
@@ -209,6 +231,15 @@ export function leerCuerpo(body: unknown): Pedido[] | { error: string; detalles:
   }
   return pedidos;
 }
+
+/** Los pedidos tal como llegaron (uno, lista o { pedidos }), ya con los nombres de GSG normalizados. */
+function pedidosCrudos(body: unknown): Record<string, unknown>[] {
+  const esObjeto = Boolean(body) && typeof body === 'object' && !Array.isArray(body);
+  const lista = Array.isArray(body) ? body : esObjeto && Array.isArray((body as { pedidos?: unknown }).pedidos) ? (body as { pedidos: unknown[] }).pedidos : esObjeto ? [body] : [];
+  return lista.slice(0, 600).filter((p) => p && typeof p === 'object' && !Array.isArray(p)).map((p) => normalizarPedidoGsg(p) as Record<string, unknown>);
+}
+
+const textoDe = (v: unknown): string | null => (typeof v === 'string' || typeof v === 'number' ? String(v).trim().slice(0, 191) || null : null);
 
 /** Como va un pedido, para otro sistema: sin ids internos de mas, con la situacion en palabras. */
 export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
@@ -348,21 +379,85 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
 
   const noExiste = (reply: FastifyReply, referencia: string) => enviarError(reply, 404, 'NO_EXISTE', `No hay ningún pedido de hoy con la referencia "${referencia}".`);
 
-  app.post('/api/v1/entregas', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
-    const lectura = leerCuerpo(request.body);
-    if ('error' in lectura) return enviarError(reply, 400, 'VALIDACION', lectura.error, lectura.detalles);
-    const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
+  type Descartada = { referencia: string; motivo: string; indice: number; error?: ErrorReportado };
+  type Salida = { status: number; body: Record<string, unknown>; headers?: Record<string, string> } | { status: number; error: { codigo: CodigoError; mensaje: string; detalles?: unknown }; headers?: Record<string, string> };
+
+  /** Reporta a GSG un numero o tracking malo de un pedido que mando (una vez por tracking + error). */
+  const reportar = async (error: ErrorReportado, p: Record<string, unknown>, detalle?: string | null, entregaId?: number | null): Promise<void> => {
+    await entregas.reportarNumero({ error, tracking: textoDe(p.tracking), referencia: textoDe(p.referencia), telefono: textoDe(p.telefono), detalle: detalle ?? null, entregaId: entregaId ?? null, pedido: p }).catch(() => undefined);
+  };
+
+  /** Lo que ya se hizo hoy por WhatsApp con esos pedidos (por id). */
+  const whatsappDe = async (ids: number[]): Promise<Record<string, unknown>[]> => {
+    if (!ids.length) return [];
+    try {
+      return (await entregas.fichasTrackings(entregas.diaDeHoy(), ids)).map(avisosParaApi);
+    } catch {
+      return [];
+    }
+  };
+
+  /**
+   * Una llamada de GSG con sus pedidos ya validados: los guarda (o reconoce
+   * los que ya estaban) y reporta los numeros y trackings malos. Es lo mismo
+   * para POST /api/v1/entregas y para la correccion de un reportado que no se
+   * llego a guardar.
+   */
+  async function recibirPedidos(lectura: Pedido[], quien: string, log: { error(o: unknown, m: string): void }): Promise<Salida> {
     const creadas: Array<{ referencia: string; id: number; urgente?: boolean }> = [];
     const repetidas: string[] = [];
-    const descartadas: Array<{ referencia: string; motivo: string; indice: number }> = [];
+    const descartadas: Descartada[] = [];
     const indiceDe = new Map(lectura.map((p, i) => [p, i]));
+
+    // Antes de guardar: el tracking repetido en la llamada con otro telefono,
+    // el tracking que ya es de otro pedido de hoy y el telefono de un
+    // motorizado. No se guardan y se le reportan a GSG.
+    const aceptados: Pedido[] = [];
+    const vistos = new Map<string, string>();
+    const delDia: Entrega[] = deps.repo ? await deps.repo.listar({ dia: entregas.diaDeHoy(), limit: 5000 }).catch(() => [] as Entrega[]) : [];
+    for (const p of lectura) {
+      const crudo = p as unknown as Record<string, unknown>;
+      const phone = entregas.normalizarTelefono(String(p.telefono));
+      const tracking = String(p.tracking).trim();
+      const k = tracking.toLowerCase();
+      const descartar = async (error: ErrorReportado, detalle: string) => {
+        descartadas.push({ referencia: p.referencia, motivo: `${TEXTOS_REPORTADOS[error].titulo}: ${detalle}`, indice: indiceDe.get(p) ?? 0, error });
+        await reportar(error, crudo, detalle);
+      };
+      if (vistos.has(k)) {
+        if (phone && vistos.get(k) && vistos.get(k) !== phone) {
+          await descartar('tracking_duplicado', `el tracking ${tracking} vino dos veces en la misma llamada con teléfonos distintos`);
+          continue;
+        }
+        aceptados.push(p);
+        continue;
+      }
+      vistos.set(k, phone ?? '');
+      if (!phone) {
+        aceptados.push(p);
+        continue;
+      }
+      const otro = delDia.find((e) => e.estado !== 'cancelada' && e.phone !== phone && (e.referencia.toLowerCase() === p.referencia.toLowerCase() || String(e.datosEnvio?.tracking ?? '').toLowerCase() === k));
+      if (otro) {
+        await descartar('tracking_de_otro_pedido', `el tracking ${tracking} ya es del pedido ${otro.referencia} de hoy, con otro teléfono`);
+        continue;
+      }
+      if (deps.repo && (await deps.repo.motorizadoPorTelefono(phone).catch(() => null))) {
+        await descartar('telefono_de_motorizado', `el ${phone} está registrado como motorizado`);
+        continue;
+      }
+      aceptados.push(p);
+    }
 
     // Sin pin: todos juntos en un solo lote del reparto (le pide la ubicacion a
     // cada uno con su ritmo). Con pin: uno a uno, ya con su ubicacion puesta.
-    const sinPin = lectura.filter((p) => !(typeof p.lat === 'number' && typeof p.lng === 'number'));
-    const conPin = lectura.filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number');
-    const urgentes = new Set(lectura.filter((p) => p.urgente).map((p) => p.referencia.trim().toLowerCase()));
+    const sinPin = aceptados.filter((p) => !(typeof p.lat === 'number' && typeof p.lng === 'number'));
+    const conPin = aceptados.filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number');
+    const urgentes = new Set(aceptados.filter((p) => p.urgente).map((p) => p.referencia.trim().toLowerCase()));
     const externo = (p: Pedido) => (p.id === null || p.id === undefined || p.id === '' ? null : String(p.id));
+    const telefonoMalo = async (p: Pedido, motivo: string) => {
+      if (/tel[eé]fono inv[aá]lido/i.test(motivo)) await reportar('telefono_invalido', p as unknown as Record<string, unknown>, motivo);
+    };
 
     try {
       if (sinPin.length) {
@@ -371,7 +466,9 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         const r = await entregas.crearVarias(filas, quien, { retener: true });
         for (const d of r.descartadas) {
           const p = sinPin[d.linea - 1];
-          descartadas.push({ referencia: p?.referencia ?? d.texto, motivo: d.motivo, indice: p ? (indiceDe.get(p) ?? d.linea - 1) : d.linea - 1 });
+          const malo = /tel[eé]fono inv[aá]lido/i.test(d.motivo);
+          descartadas.push({ referencia: p?.referencia ?? d.texto, motivo: d.motivo, indice: p ? (indiceDe.get(p) ?? d.linea - 1) : d.linea - 1, ...(malo ? { error: 'telefono_invalido' as const } : {}) });
+          if (p) await telefonoMalo(p, d.motivo);
         }
         for (const rep of r.repetidas) if (!repetidas.includes(rep)) repetidas.push(rep);
         for (const e of r.creadas) creadas.push({ referencia: e.referencia, id: e.id });
@@ -385,7 +482,10 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
           const ya = deps.repo ? await porReferencia(p.referencia) : undefined;
           const datos = ya ? fusionarDatosEnvio(ya.datosEnvio, datosEnvioDeCrudo(p)) : null;
           if (ya && datos && deps.repo) await deps.repo.actualizar(ya.id, { datosEnvio: datos });
-        } else descartadas.push({ referencia: p.referencia, motivo: r.motivo, indice: indiceDe.get(p) ?? 0 });
+        } else {
+          descartadas.push({ referencia: p.referencia, motivo: r.motivo, indice: indiceDe.get(p) ?? 0, ...(/tel[eé]fono/i.test(r.motivo) ? { error: 'telefono_invalido' as const } : {}) });
+          await telefonoMalo(p, r.motivo);
+        }
       }
       // Los urgentes van primero hacia el motorizado.
       if (deps.repo && urgentes.size) {
@@ -409,32 +509,60 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
       for (const ref of repetidas) existentes.push({ referencia: ref, id: (await porReferencia(ref))?.id ?? null });
 
       if (!creadas.length && !repetidas.length) {
-        return enviarError(reply, 400, 'VALIDACION', `Ningún pedido se pudo guardar: ${descartadas.map((d) => `${d.referencia} (${d.motivo})`).join('; ')}.`,
-          descartadas.map((d) => ({ campo: lectura.length > 1 ? `pedidos[${d.indice}].telefono` : 'telefono', mensaje: d.motivo })));
+        return { status: 400, error: { codigo: 'VALIDACION', mensaje: `Ningún pedido se pudo guardar: ${descartadas.map((d) => `${d.referencia} (${d.motivo})`).join('; ')}.`,
+          detalles: descartadas.map((d) => ({ campo: lectura.length > 1 ? `pedidos[${d.indice}].${d.error?.startsWith('tracking') ? 'tracking' : 'telefono'}` : d.error?.startsWith('tracking') ? 'tracking' : 'telefono', mensaje: d.motivo, ...(d.error ? { error: d.error } : {}) })) } };
       }
+      // Lo que ya se hizo hoy por WhatsApp con cada uno (para no volver a escribirle).
+      const whatsapp = await whatsappDe([...creadas.map((c) => c.id), ...existentes.flatMap((x) => (x.id ? [x.id] : []))]);
       // El pedido se guardo aunque su primer mensaje no haya salido: eso va aparte.
       const conAviso = salida.filter((e) => {
         const m = e.mensaje as VistaMensaje;
         return m.estado === 'reintentando' || m.estado === 'fallido' || m.estado === 'incierto';
       });
-      return reply.code(creadas.length ? 201 : 200).send({
+      return { status: creadas.length ? 201 : 200, body: {
         ok: true,
         creadas: salida,
         repetidas,
         existentes,
-        descartadas: descartadas.map(({ referencia, motivo }) => ({ referencia, motivo })),
+        descartadas: descartadas.map(({ referencia, motivo, error }) => ({ referencia, motivo, ...(error ? { error } : {}) })),
+        whatsapp,
         ...(conAviso.length ? { avisosMensaje: conAviso.map((e) => ({ referencia: e.referencia, id: e.id, estado: (e.mensaje as VistaMensaje).estado, motivo: (e.mensaje as VistaMensaje).motivo })) } : {}),
         detalle: `${creadas.length} pedido${creadas.length === 1 ? '' : 's'} nuevo${creadas.length === 1 ? '' : 's'}${repetidas.length ? `, ${repetidas.length} ya estaba${repetidas.length === 1 ? '' : 'n'}` : ''}${descartadas.length ? `, ${descartadas.length} descartado${descartadas.length === 1 ? '' : 's'}` : ''}.${conAviso.length ? ` ${conAviso.length} quedaron guardados pero su primer mensaje no salió (se reintenta o está en la bandeja de errores).` : ''}`,
-      });
+      } };
     } catch (error) {
-      request.log.error({ err: error }, 'no se pudieron guardar los pedidos de GSG');
+      log.error({ err: error }, 'no se pudieron guardar los pedidos de GSG');
       const yaGuardados = creadas.map((c) => c.referencia);
       if (esBaseNoDisponible(error)) {
-        reply.header('retry-after', String(ESPERA_BASE_SEGUNDOS));
-        return enviarError(reply, 503, 'BASE_NO_DISPONIBLE', 'La base de datos no responde ahora mismo. Repite la MISMA llamada en unos segundos: lo que ya se hubiera guardado se reconoce por su tracking y no se duplica.', { guardados: yaGuardados });
+        return { status: 503, headers: { 'retry-after': String(ESPERA_BASE_SEGUNDOS) }, error: { codigo: 'BASE_NO_DISPONIBLE', mensaje: 'La base de datos no responde ahora mismo. Repite la MISMA llamada en unos segundos: lo que ya se hubiera guardado se reconoce por su tracking y no se duplica.', detalles: { guardados: yaGuardados } } };
       }
-      return enviarError(reply, 500, 'ERROR_INTERNO', 'Error interno al guardar los pedidos (quedó en el registro del servidor). Repite la MISMA llamada: lo ya guardado se reconoce por su tracking y no se duplica.', { guardados: yaGuardados });
+      return { status: 500, error: { codigo: 'ERROR_INTERNO', mensaje: 'Error interno al guardar los pedidos (quedó en el registro del servidor). Repite la MISMA llamada: lo ya guardado se reconoce por su tracking y no se duplica.', detalles: { guardados: yaGuardados } } };
     }
+  }
+
+  const responder = (reply: FastifyReply, r: Salida) => {
+    for (const [k, v] of Object.entries(r.headers ?? {})) reply.header(k, v);
+    if ('error' in r) return enviarError(reply, r.status, r.error.codigo, r.error.mensaje, r.error.detalles as DetalleCampo[] | undefined);
+    return reply.code(r.status).send(r.body);
+  };
+
+  /** La llamada no paso la validacion: los trackings y telefonos malos igual se le reportan a GSG. */
+  const reportarDeValidacion = async (body: unknown): Promise<void> => {
+    for (const p of pedidosCrudos(body)) {
+      const t = trackingNoValido(p.tracking);
+      if (t) await reportar(t, p, t === 'tracking_falta' ? 'el pedido llegó sin tracking' : `tracking recibido: ${JSON.stringify(p.tracking).slice(0, 120)}`);
+      const tel = p.telefono;
+      if (tel === undefined || tel === null || !entregas.normalizarTelefono(String(tel))) await reportar('telefono_invalido', p, tel === undefined || tel === null || !String(tel).trim() ? 'el pedido llegó sin teléfono' : `teléfono recibido: ${String(tel).slice(0, 40)}`);
+    }
+  };
+
+  app.post('/api/v1/entregas', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
+    const lectura = leerCuerpo(request.body);
+    if ('error' in lectura) {
+      await reportarDeValidacion(request.body);
+      return enviarError(reply, 400, 'VALIDACION', lectura.error, lectura.detalles);
+    }
+    const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
+    return responder(reply, await recibirPedidos(lectura, quien, request.log));
   });
 
   app.get<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:leer' } }, async (request, reply) => {
@@ -459,15 +587,32 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
       return enviarError(reply, 400, 'VALIDACION', `El cambio no se entiende: ${i ? `${i.path.join('.') || 'cuerpo'}: ${i.message}` : 'revisa los campos'}. Se puede cambiar nombre, direccion, distrito, notas, urgente, los datos del envío (producto, empresa, tracking, nroPedido, metodoPago, monto, remitente).`, leido.error.issues.map((x) => ({ campo: x.path.join('.') || 'cuerpo', mensaje: x.message })));
     }
     const b = leido.data;
-    if (b.telefono !== undefined) return enviarError(reply, 400, 'VALIDACION', 'El teléfono no se cambia en un pedido ya mandado: cancélalo (DELETE) y créalo de nuevo con el número bueno.', [{ campo: 'telefono', mensaje: 'no se puede cambiar' }]);
-    const e = await porReferencia(request.params.referencia);
+    if (b.telefono !== undefined && typeof b.telefono !== 'string' && typeof b.telefono !== 'number') return enviarError(reply, 400, 'VALIDACION', 'El teléfono corregido tiene que ser un texto (por ejemplo "987654321").', [{ campo: 'telefono', mensaje: 'no tiene el formato esperado' }]);
+    let e = await porReferencia(request.params.referencia);
     if (!e) return noExiste(reply, request.params.referencia);
     if (e.estado === 'cancelada' || e.estado === 'entregada' || e.estado === 'terminada') {
       return enviarError(reply, 409, 'CONFLICTO', `El pedido ${e.referencia} ya está ${e.estado === 'cancelada' ? 'cancelado' : e.estado === 'entregada' ? 'entregado' : 'terminado'}: ya no se cambia.`);
     }
     if (!deps.repo) return enviarError(reply, 409, 'CONFLICTO', 'En este arranque los pedidos no se pueden cambiar por la API.');
-    const patch: Record<string, unknown> = {};
+    const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
+    const trackingAntes = e.datosEnvio?.tracking ?? e.referencia;
     const cambios: string[] = [];
+    // GSG corrige el telefono (un numero reportado): se cambia y, si falta la
+    // ubicacion, se le pide al numero nuevo por el flujo normal.
+    let telefonoCorregido: string | null = null;
+    if (b.telefono !== undefined) {
+      const r = await entregas.corregirTelefono(e.id, String(b.telefono), quien);
+      if (!r.ok) {
+        if (r.codigo === 'telefono_invalido' || r.codigo === 'telefono_de_motorizado') await reportar(r.codigo, { tracking: trackingAntes, referencia: e.referencia, telefono: String(b.telefono) }, r.motivo, e.id);
+        return enviarError(reply, r.codigo === 'cerrada' ? 409 : 400, r.codigo === 'cerrada' ? 'CONFLICTO' : 'VALIDACION', `No se corrigió el teléfono: ${r.motivo}.`, [{ campo: 'telefono', mensaje: r.motivo }]);
+      }
+      if (r.cambiado) {
+        telefonoCorregido = r.entrega.phone;
+        cambios.push(`teléfono corregido → ${r.entrega.phone}`);
+        e = (await porReferencia(request.params.referencia)) ?? e;
+      }
+    }
+    const patch: Record<string, unknown> = {};
     for (const campo of ['nombre', 'direccion', 'distrito', 'notas'] as const) {
       const nuevo = b[campo];
       if (nuevo !== undefined && nuevo !== ((e as unknown as Record<string, unknown>)[campo] ?? '')) {
@@ -484,12 +629,127 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
       patch.datosEnvio = datos;
       cambios.push('datos del envío (producto, empresa, código, monto…) actualizados');
     }
-    if (!cambios.length) return { ok: true, cambios: [], entrega: entregaParaApi(e), detalle: 'No había nada distinto: el pedido queda como estaba.' };
-    await deps.repo.actualizar(e.id, patch as Parameters<EntregasRepo['actualizar']>[1]);
-    const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
-    await deps.repo.registrarEvento(e.id, 'sincronizada', `GSG cambió (${quien}): ${cambios.join('; ')}`, null, new Date());
+    if (!cambios.length) return { ok: true, cambios: [], entrega: entregaParaApi(e), whatsapp: await whatsappDe([e.id]), detalle: 'No había nada distinto: el pedido queda como estaba.' };
+    if (Object.keys(patch).length) await deps.repo.actualizar(e.id, patch as Parameters<EntregasRepo['actualizar']>[1]);
+    const otrosCambios = cambios.filter((c) => !c.startsWith('teléfono corregido'));
+    if (otrosCambios.length) await deps.repo.registrarEvento(e.id, 'sincronizada', `GSG cambió (${quien}): ${otrosCambios.join('; ')}`, null, new Date());
     const fila = await porReferencia(request.params.referencia);
-    return { ok: true, cambios, entrega: fila ? entregaParaApi(fila) : null, detalle: `Pedido ${e.referencia} cambiado: ${cambios.join('; ')}.` };
+    // Lo reportado de este tracking queda corregido si cambio el telefono o el tracking.
+    const trackingDespues = fila?.datosEnvio?.tracking ?? fila?.referencia ?? trackingAntes;
+    const corregidos = deps.reportados && (telefonoCorregido || trackingDespues !== trackingAntes)
+      ? await deps.reportados.marcarCorregidos(trackingAntes, { telefono: telefonoCorregido, tracking: trackingDespues !== trackingAntes ? trackingDespues : null, por: quien, via: 'PATCH /api/v1/entregas' }, new Date()).catch(() => [])
+      : [];
+    return { ok: true, cambios, entrega: fila ? entregaParaApi(fila) : null, corregidos: corregidos.map(reportadoParaApi), whatsapp: await whatsappDe([e.id]), detalle: `Pedido ${e.referencia} cambiado: ${cambios.join('; ')}.` };
+  });
+
+  // ------------------------------------------------ numeros reportados
+
+  // La bandeja de GSG: lo que se le reporto y si ya lo corrigio. Sale de la
+  // base (GSGchat no le pregunta nada a GSG).
+  app.get('/api/v1/reportados', { config: { permiso: 'entregas:leer' } }, async (request, reply) => {
+    const q = z.object({ estado: z.enum(['pendiente', 'corregido']).optional(), tracking: z.string().trim().max(191).optional(), limit: z.coerce.number().int().min(1).max(2000).optional() }).safeParse(request.query ?? {});
+    if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`estado` tiene que ser pendiente o corregido.', [{ campo: 'estado', mensaje: 'pendiente | corregido' }]);
+    if (!deps.reportados) return { ok: true, total: 0, items: [] };
+    const items = await deps.reportados.listar({ estado: q.data.estado, clave: q.data.tracking || undefined, limit: q.data.limit ?? 500 });
+    return { ok: true, total: items.length, items: items.map(reportadoParaApi) };
+  });
+
+  // GSG corrige un reportado: el telefono, el tracking o los dos.
+  const corregirReportado = async (request: FastifyRequest<{ Params: { tracking: string } }>, reply: FastifyReply) => {
+    const leido = z.object({
+      telefono: z.union([z.string().trim().min(1).max(30), z.number()]).transform(String).optional(),
+      tracking: z.union([z.string(), z.number()]).transform((v) => String(v).trim()).pipe(z.string().min(1).max(60).refine((t) => !CONTROL.test(t), 'tiene caracteres no válidos')).optional(),
+    }).strict().safeParse(request.body ?? {});
+    if (!leido.success || (!leido.data.telefono && !leido.data.tracking)) {
+      return enviarError(reply, 400, 'VALIDACION', 'Manda el teléfono corregido, el tracking corregido o los dos: { "telefono": "987654321", "tracking": "GSG-123" }.', leido.success ? [{ campo: 'cuerpo', mensaje: 'falta telefono o tracking' }] : leido.error.issues.map((i) => ({ campo: i.path.join('.') || 'cuerpo', mensaje: i.message })));
+    }
+    if (!deps.reportados) return enviarError(reply, 409, 'CONFLICTO', 'En este arranque no hay bandeja de números reportados.');
+    const clave = request.params.tracking.trim();
+    const b = leido.data;
+    const pendientes = await deps.reportados.listar({ estado: 'pendiente', clave });
+    if (!pendientes.length) {
+      const todos = await deps.reportados.listar({ clave, limit: 1 });
+      return todos.length
+        ? enviarError(reply, 409, 'CONFLICTO', `Lo reportado del tracking "${clave}" ya está corregido.`)
+        : enviarError(reply, 404, 'NO_EXISTE', `No hay nada reportado con el tracking "${clave}".`);
+    }
+    const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
+    const ref = pendientes.find((x) => x.referencia)?.referencia ?? clave;
+    let e = (await porReferencia(ref)) ?? (await porReferencia(clave));
+    let trackingFinal = b.tracking ?? pendientes[0]!.tracking ?? clave;
+    if (e && !['cancelada', 'entregada', 'terminada'].includes(e.estado)) {
+      if (b.tracking && b.tracking.toLowerCase() !== String(e.datosEnvio?.tracking ?? e.referencia).toLowerCase()) {
+        const delDia = deps.repo ? await deps.repo.listar({ dia: entregas.diaDeHoy(), limit: 5000 }) : [];
+        const otro = delDia.find((x) => x.id !== e!.id && x.estado !== 'cancelada' && (x.referencia.toLowerCase() === b.tracking!.toLowerCase() || String(x.datosEnvio?.tracking ?? '').toLowerCase() === b.tracking!.toLowerCase()));
+        if (otro) return enviarError(reply, 409, 'CONFLICTO', `El tracking "${b.tracking}" ya es del pedido ${otro.referencia} de hoy.`);
+        if (deps.repo) {
+          await deps.repo.actualizar(e.id, { datosEnvio: fusionarDatosEnvio(e.datosEnvio, datosEnvioDeCrudo({ tracking: b.tracking })) ?? e.datosEnvio });
+          await deps.repo.registrarEvento(e.id, 'sincronizada', `${quien} corrigió el tracking: ${e.datosEnvio?.tracking ?? e.referencia} → ${b.tracking}`, null, new Date());
+        }
+      }
+      if (b.telefono) {
+        const r = await entregas.corregirTelefono(e.id, b.telefono, quien);
+        if (!r.ok) {
+          if (r.codigo === 'telefono_invalido' || r.codigo === 'telefono_de_motorizado') await reportar(r.codigo, { tracking: trackingFinal, referencia: e.referencia, telefono: b.telefono }, r.motivo, e.id);
+          return enviarError(reply, 400, 'VALIDACION', `No se corrigió: ${r.motivo}.`, [{ campo: 'telefono', mensaje: r.motivo }]);
+        }
+      }
+      e = (await porReferencia(e.referencia)) ?? e;
+    } else {
+      // No se llego a guardar (telefono invalido, de un motorizado, tracking
+      // malo...): se crea ahora con lo corregido, por el camino de siempre.
+      const pedido = pendientes.find((x) => x.pedido)?.pedido;
+      if (!pedido) return enviarError(reply, 409, 'CONFLICTO', `No hay un pedido guardado para "${clave}": mándalo de nuevo con POST /api/v1/entregas.`);
+      const original = pedido as Record<string, unknown>;
+      const corregido: Record<string, unknown> = { ...original };
+      if (b.telefono) corregido.telefono = b.telefono;
+      if (b.tracking) {
+        const refEraTracking = !original.referencia || String(original.referencia) === String(original.tracking ?? '');
+        corregido.tracking = b.tracking;
+        if (refEraTracking) corregido.referencia = b.tracking;
+      }
+      const lectura = leerCuerpo(corregido);
+      if ('error' in lectura) return enviarError(reply, 400, 'VALIDACION', `La corrección no basta: ${lectura.error}`, lectura.detalles);
+      const r = await recibirPedidos(lectura, quien, request.log);
+      if ('error' in r) return responder(reply, r);
+      const creadas = (r.body.creadas as Array<{ id: number }>) ?? [];
+      const existentes = (r.body.existentes as Array<{ id: number | null }>) ?? [];
+      if (!creadas.length && !existentes.some((x) => x.id)) {
+        const d = (r.body.descartadas as Array<{ motivo: string }>)?.[0];
+        return enviarError(reply, 400, 'VALIDACION', `No se corrigió: ${d?.motivo ?? 'el pedido no se pudo guardar'}.`);
+      }
+      trackingFinal = String(lectura[0]!.tracking);
+      e = await porReferencia(lectura[0]!.referencia);
+    }
+    const corregidos = await deps.reportados.marcarCorregidos(clave, { telefono: b.telefono ?? null, tracking: b.tracking ?? null, por: quien, via: 'POST /api/v1/reportados/correccion' }, new Date());
+    return {
+      ok: true,
+      tracking: trackingFinal,
+      corregidos: corregidos.map(reportadoParaApi),
+      entrega: e ? entregaParaApi(e) : null,
+      whatsapp: e ? await whatsappDe([e.id]) : [],
+      detalle: `Corregido: ${[b.telefono ? `teléfono ${b.telefono}` : '', b.tracking ? `tracking ${b.tracking}` : ''].filter(Boolean).join(' y ')}. ${e?.envioRetenidoAt ? 'Espera «Confirmar y enviar» en Pedidos GSG.' : e?.ubicacionEstado === 'pendiente' ? 'Se le pide la ubicación al número corregido.' : ''}`.trim(),
+    };
+  };
+  app.post<{ Params: { tracking: string } }>('/api/v1/reportados/:tracking/correccion', { config: { permiso: 'entregas:gestionar' } }, corregirReportado);
+
+  // Lo mismo para la pantalla (Pedidos GSG → Números reportados), con la sesión del panel.
+  app.get('/admin/entregas/reportados', async (request, reply) => {
+    const q = z.object({ estado: z.enum(['pendiente', 'corregido']).optional() }).safeParse(request.query ?? {});
+    if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`estado` tiene que ser pendiente o corregido.');
+    const items = deps.reportados ? await deps.reportados.listar({ estado: q.data.estado, limit: 500 }) : [];
+    return { ok: true, total: items.length, items: items.map(reportadoParaApi) };
+  });
+  app.post<{ Params: { tracking: string } }>('/admin/entregas/reportados/:tracking/correccion', corregirReportado);
+
+  // El mapa de trackings de un dia: lo que ya se hizo por WhatsApp con cada
+  // uno. GSG lo lee cuando quiere; GSGchat nunca se lo empuja.
+  app.get('/api/v1/trackings', { config: { permiso: 'entregas:leer' } }, async (request, reply) => {
+    const q = z.object({ dia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).safeParse(request.query ?? {});
+    if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`dia` va como AAAA-MM-DD (por ejemplo 2026-10-10).', [{ campo: 'dia', mensaje: 'AAAA-MM-DD' }]);
+    const dia = q.data.dia ?? entregas.diaDeHoy();
+    const fichas = await entregas.fichasTrackings(dia);
+    return { ok: true, dia, total: fichas.length, trackings: fichas };
   });
 
   app.delete<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
