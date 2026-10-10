@@ -53,6 +53,8 @@ export const simularSchema = z.object({
   text: z.string().max(4000).optional(),
   /** Ubicacion compartida, como la manda WhatsApp. */
   location: z.object({ latitude: z.number(), longitude: z.number() }).optional(),
+  /** Con `location`: la compartio en tiempo real (no se registra; se le pide la actual). */
+  enVivo: z.boolean().optional(),
   /** Un adjunto sin texto: la foto de la fachada, el audio con la direccion. */
   adjunto: z.enum(['image', 'audio', 'video', 'document', 'sticker']).optional(),
   /** Lo que dijo en el audio, como si la voz ya lo hubiera transcrito (solo con adjunto: 'audio'). */
@@ -86,7 +88,7 @@ export function entranteSimulado(body: z.infer<typeof simularSchema>, phone: str
             id,
             from: phone,
             timestamp: String(Math.floor(Date.now() / 1000)),
-            type: 'location',
+            type: body.enVivo ? 'livelocation' : 'location',
             location: { latitude: body.location.latitude, longitude: body.location.longitude },
           }
         : body.adjunto

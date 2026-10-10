@@ -281,6 +281,20 @@ describe('traducir el webhook de WAHA', () => {
     expect(value?.messages?.[0]?.location).toMatchObject({ latitude: 19.43, longitude: -99.13 });
   });
 
+  it('una ubicacion en tiempo real llega con su tipo propio: no es donde recibe', () => {
+    const value = toChangeValue({
+      event: 'message',
+      payload: {
+        id: 'm2',
+        from: '5215512345678@c.us',
+        location: { latitude: 19.43, longitude: -99.13 },
+        _data: { message: { liveLocationMessage: { degreesLatitude: 19.43, degreesLongitude: -99.13 } } },
+      },
+    });
+
+    expect(value?.messages?.[0]?.type).toBe('livelocation');
+  });
+
   it('los mensajes propios se ignoran: contestarse a si mismo es un bucle', () => {
     expect(toChangeValue({
       event: 'message',

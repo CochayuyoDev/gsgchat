@@ -39,6 +39,8 @@ const ENV = {
   TRACKING_SECRET: 'x'.repeat(40),
   GEO_BBOX: 'lima',
   RUTAS_PAIS: 'peru',
+  // Este dia de reparto es el de siempre: tres intentos y derivar (ver pedir-ubicacion-cada-15.test.ts).
+  RUTAS_PEDIR_UBI_CADA_MIN: '0',
   // El simulador de entrantes: es lo que permite que el cliente "conteste".
   DEV_SIMULATE_INBOUND: 'true',
   BUSINESS_NAME: 'Tienda de prueba',

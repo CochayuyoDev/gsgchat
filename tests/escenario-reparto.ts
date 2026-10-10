@@ -330,6 +330,10 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
     RUTAS_HORA_FIN: String(horaFin),
     RUTAS_PAUSA_MIN_SEG: String(PAUSA_SEGUNDOS),
     RUTAS_PAUSA_MAX_SEG: String(PAUSA_SEGUNDOS),
+    // El motor de la prueba arranca con OPCIONES_POR_DEFECTO (sin pedir la
+    // ubicacion cada 15 min): el manejador de entrantes, igual. Quien quiera
+    // probar el modo de 15 min lo guarda en los ajustes del reparto.
+    RUTAS_PEDIR_UBI_CADA_MIN: '0',
     PUBLIC_BASE_URL: 'http://localhost:3000',
     DATABASE_URL: 'mysql://x/y',
     WHATSAPP_TOKEN: 't',

@@ -903,6 +903,19 @@ export function toChangeValue(
       };
     }
 
+    // La ubicacion en tiempo real: no dice donde recibe (se mueve con el
+    // cliente). Llega con su tipo propio y el manejador le pide la actual.
+    const enVivo = contenido.liveLocationMessage as { degreesLatitude?: number; degreesLongitude?: number } | undefined;
+    if (enVivo) {
+      return {
+        id,
+        from,
+        timestamp,
+        type: 'livelocation',
+        ...(enVivo.degreesLatitude != null && enVivo.degreesLongitude != null ? { location: { latitude: enVivo.degreesLatitude, longitude: enVivo.degreesLongitude } } : {}),
+      };
+    }
+
     const ubicacion = contenido.locationMessage as
       | { degreesLatitude?: number; degreesLongitude?: number; name?: string; address?: string }
       | undefined;
