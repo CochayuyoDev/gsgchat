@@ -215,6 +215,8 @@ export function rutasPage(opts: RutasOpts): string {
       <p class="aj-frase">Si el cliente no responde, se le vuelve a escribir a los <input id="aj-espera" type="number" min="1" class="aj-num" aria-label="Minutos de espera">
         minutos. Como máximo <input id="aj-intentos" type="number" min="1" max="10" class="aj-num" aria-label="Mensajes como máximo"> mensajes por cliente;
         si sigue sin mandar su ubicación, pasa al repartidor para que lo llame.</p>
+      <p class="aj-frase">O mejor: pedirle la ubicación cada <input id="aj-cada" type="number" min="0" max="1440" class="aj-num" aria-label="Pedir la ubicación cada tantos minutos">
+        minutos hasta que la mande, sin tope de mensajes. Mientras tanto, lo que escriba que no sea su ubicación no se contesta. Con 0, se usa lo de arriba.</p>
 
       <h3 class="aj-titulo">¿A qué ritmo?</h3>
       <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num" aria-label="Pausa mínima en segundos">
@@ -533,7 +535,8 @@ async function cargarLista() {
   document.getElementById('titulo-lista').textContent =
     (nombresVista[vista] || 'Clientes') + ' (' + data.total + ')';
 
-  var maxIntentos = resumen ? resumen.motor.maxIntentos : 0;
+  // Pidiendo la ubicación cada tantos minutos no hay tope: «intento 5», sin «de 3».
+  var maxIntentos = resumen && !(resumen.motor.pedirUbicacionCadaMinutos > 0) ? resumen.motor.maxIntentos : 0;
   document.getElementById('filas').innerHTML = data.items.map(function (s) {
     return '<tr data-id="' + s.id + '" tabindex="0"' + (seleccionada === s.id ? ' class="activa"' : '') + '>' +
       '<td><b>' + esc(s.nombre || 'Sin nombre') + '</b>' +
@@ -1116,6 +1119,7 @@ function pintarAjustes(d) {
   document.getElementById('aj-pausa-max').value = a.pausaMaxSegundos;
   document.getElementById('aj-espera').value = a.esperaRespuestaMinutos;
   document.getElementById('aj-intentos').value = a.maxIntentos;
+  document.getElementById('aj-cada').value = a.pedirUbicacionCadaMinutos || 0;
   document.getElementById('aj-hora-inicio').value = a.horaInicio;
   document.getElementById('aj-hora-fin').value = a.horaFin;
 
@@ -1223,14 +1227,17 @@ document.getElementById('aj-guardar').onclick = async function () {
       pausaMaxSegundos: Number(document.getElementById('aj-pausa-max').value),
       esperaRespuestaMinutos: Number(document.getElementById('aj-espera').value),
       maxIntentos: Number(document.getElementById('aj-intentos').value),
+      pedirUbicacionCadaMinutos: Number(document.getElementById('aj-cada').value) || 0,
       horaInicio: Number(document.getElementById('aj-hora-inicio').value),
       horaFin: Number(document.getElementById('aj-hora-fin').value),
       plantillas: plantillas,
       textos: textos
     }});
     var v = r.vigente;
-    estado.textContent = 'Guardado: de ' + v.horaInicio + ':00 a ' + v.horaFin + ':00, se insiste a los ' +
-      v.esperaRespuestaMinutos + ' min, máximo ' + v.maxIntentos + ' mensajes, ' +
+    estado.textContent = 'Guardado: de ' + v.horaInicio + ':00 a ' + v.horaFin + ':00, ' +
+      (v.pedirUbicacionCadaMinutos > 0
+        ? 'se le pide la ubicación cada ' + v.pedirUbicacionCadaMinutos + ' min hasta que la mande, '
+        : 'se insiste a los ' + v.esperaRespuestaMinutos + ' min, máximo ' + v.maxIntentos + ' mensajes, ') +
       v.pausaMinSegundos + '-' + v.pausaMaxSegundos + ' s entre clientes. Se aplica en el siguiente mensaje.';
     await refrescar();
   } catch (e) { estado.textContent = e.message; }

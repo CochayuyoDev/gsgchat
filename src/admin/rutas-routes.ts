@@ -211,6 +211,7 @@ export async function registerRutasRoutes(
         pausa: [vigente.pausaMinSegundos, vigente.pausaMaxSegundos],
         espera: vigente.esperaRespuestaMinutos,
         maxIntentos: vigente.maxIntentos,
+        pedirUbicacionCadaMinutos: vigente.pedirUbicacionCadaMinutos,
         horario: [vigente.horaInicio, vigente.horaFin],
         timezone: vigente.timezone,
         // Si ahora mismo puede salir un mensaje. Sin esto, un lote "en

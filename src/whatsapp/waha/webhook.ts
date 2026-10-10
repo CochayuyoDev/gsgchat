@@ -113,23 +113,30 @@ export function toChangeValue(event: WahaEvent): ChangeValue | null {
       | { latitude?: number; longitude?: number; name?: string; address?: string }
       | undefined;
     const citado = citadoDe(payload);
+    // La ubicacion en tiempo real (NOWEB la trae en `_data.message`, WEBJS
+    // la marca como «live»): no se registra, el manejador le pide la actual.
+    const datos = (payload._data ?? {}) as Record<string, unknown>;
+    const mensajeCrudo = (datos.message ?? {}) as Record<string, unknown>;
+    const enVivo = Boolean(mensajeCrudo.liveLocationMessage) || datos.isLive === true || (location as { live?: unknown } | undefined)?.live === true;
 
     const message: InboundMessage = {
       ...(citado ? { context: { id: citado } } : {}),
       id,
       from,
       timestamp: String(payload.timestamp ?? Math.floor(Date.now() / 1000)),
-      type: location ? 'location' : payload.hasMedia === true ? 'image' : 'text',
-      ...(location?.latitude !== undefined && location?.longitude !== undefined
-        ? {
-            location: {
-              latitude: Number(location.latitude),
-              longitude: Number(location.longitude),
-              name: location.name,
-              address: location.address,
-            },
-          }
-        : { text: { body: texto(payload) } }),
+      type: enVivo ? 'livelocation' : location ? 'location' : payload.hasMedia === true ? 'image' : 'text',
+      ...(enVivo
+        ? {}
+        : location?.latitude !== undefined && location?.longitude !== undefined
+          ? {
+              location: {
+                latitude: Number(location.latitude),
+                longitude: Number(location.longitude),
+                name: location.name,
+                address: location.address,
+              },
+            }
+          : { text: { body: texto(payload) } }),
     };
 
     const nombre = typeof payload.notifyName === 'string' ? payload.notifyName : undefined;
