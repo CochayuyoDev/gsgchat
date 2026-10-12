@@ -213,7 +213,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   });
 
   app.get('/setup', async (_request, reply) => {
-    const page = html(connectPage({ labels: FIELD_LABELS, nombreNegocio: negocio(), demo: config.DEMO_MODE, conGsg: Boolean(deps.entregas) }));
+    const page = html(connectPage({ labels: FIELD_LABELS, nombreNegocio: negocio(), demo: config.DEMO_MODE, conGsg: Boolean(deps.entregas), vista: 'whatsapp' }));
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 

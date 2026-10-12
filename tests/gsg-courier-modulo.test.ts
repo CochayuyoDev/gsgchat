@@ -22,14 +22,14 @@ afterAll(async () => { await esc.cerrar(); });
 
 describe('modulo especializado GSG Courier', () => {
   it('protege el modulo y la validacion: administrador humano, nunca una clave', async () => {
-    expect((await esc.app.inject('/conexion-gsg')).statusCode).toBe(302);
-    expect((await esc.app.inject({ url: '/conexion-gsg', headers: { cookie: operador } })).statusCode).toBe(403);
-    expect((await esc.app.inject({ url: '/conexion-gsg', headers: { 'x-api-key': CLAVE_API_PRUEBA } })).statusCode).toBe(403);
+    expect((await esc.app.inject('/api-gsgchat')).statusCode).toBe(302);
+    expect((await esc.app.inject({ url: '/api-gsgchat', headers: { cookie: operador } })).statusCode).toBe(403);
+    expect((await esc.app.inject({ url: '/api-gsgchat', headers: { 'x-api-key': CLAVE_API_PRUEBA } })).statusCode).toBe(403);
     expect((await esc.app.inject({ method: 'POST', url: '/admin/gsg-courier/validar', payload: EJEMPLO_COURIER })).statusCode).toBe(401);
     expect((await esc.app.inject({ method: 'POST', url: '/admin/gsg-courier/validar', headers: { cookie: operador }, payload: EJEMPLO_COURIER })).statusCode).toBe(403);
   });
   it('abre la pantalla con script valido y el contrato completo', async () => {
-    const r = await esc.app.inject({ url: '/conexion-gsg', headers: { cookie } });
+    const r = await esc.app.inject({ url: '/api-gsgchat', headers: { cookie } });
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('no-store');
     expect(r.body).toContain('Validar sin encolar');

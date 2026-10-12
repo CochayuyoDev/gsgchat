@@ -66,6 +66,11 @@ const conexionSchema = z.object({
    * base + ruta (ver recargar); al guardar de nuevo se vacia.
    */
   urlUbicacion: z.string().trim().max(300).default(''),
+  /** La ruta, relativa a la base, del GET con el estado de un envio ('' = no se consulta). */
+  rutaEstado: z.string().trim().max(300).default(''),
+  /** Los nombres de los parametros de ese GET (los da GSG). */
+  paramTracking: z.string().trim().max(60).default('trackingCode'),
+  paramTelefono: z.string().trim().max(60).default('phone'),
   conectadoEn: z.string().nullable().default(null),
 });
 type ConexionGuardada = z.infer<typeof conexionSchema>;
@@ -84,6 +89,12 @@ export interface EstadoConexionGsg {
   rutaUbicacion: string;
   /** La URL completa antigua, si sigue guardada sin poder convertirse ('' = ninguna). */
   urlUbicacion: string;
+  /** La ruta del GET con el estado de un envio ('' = no se consulta) y sus parametros. */
+  rutaEstado: string;
+  paramTracking: string;
+  paramTelefono: string;
+  /** La URL completa de la consulta de estado (base + ruta), o null. */
+  destinoEstado: string | null;
   /** A donde sale de verdad la ubicacion (base + ruta), o null si no hay o la configuracion no vale. */
   destinoUbicacion: string | null;
   tieneToken: boolean;
@@ -114,7 +125,7 @@ export interface ServicioConexionGsg {
    * había; sin ruta conserva la guardada (o `sendLocation`). `urlUbicacion`
    * (la URL completa antigua) se acepta solo si se convierte sin adivinar.
    */
-  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null }): Promise<EstadoConexionGsg>;
+  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaEstado?: string | null; paramTracking?: string | null; paramTelefono?: string | null }): Promise<EstadoConexionGsg>;
   /** Apunta al simulador de este servidor. */
   usarSimulador(): Promise<EstadoConexionGsg>;
   /** Quita la conexión de la pantalla; si el `.env` tenía una, vuelve a mandar esa. */
@@ -210,9 +221,10 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       vigente = null;
       return enEspera;
     }
-    const firma = JSON.stringify([e.url, e.rutaUbicacion, e.ubicacionUrl, e.token]);
+    const consulta = e.origen === 'pantalla' ? { rutaEstado: guardada.rutaEstado, paramTracking: guardada.paramTracking, paramTelefono: guardada.paramTelefono } : {};
+    const firma = JSON.stringify([e.url, e.rutaUbicacion, e.ubicacionUrl, e.token, consulta]);
     if (!vigente || vigente.firma !== firma) {
-      vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl, idempotenciaUbicacion: deps.config.GSG_IDEMPOTENCY_SUPPORTED === 'true' }) };
+      vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl, idempotenciaUbicacion: deps.config.GSG_IDEMPOTENCY_SUPPORTED === 'true', ...consulta }) };
     }
     return vigente.puerto;
   };
@@ -281,6 +293,8 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     urlUbicacion: () => actual().urlUbicacion?.() ?? null,
     errorConfiguracion: () => actual().errorConfiguracion?.() ?? null,
     firma: () => actual().firma?.() ?? actual().descripcion(),
+    urlEstado: () => actual().urlEstado?.() ?? null,
+    consultarEstado: (c) => actual().consultarEstado?.(c) ?? Promise.resolve({ decision: 'desconocido', motivo: 'GSG no está conectado: no se consulta el estado.', configurada: false }),
   };
 
   const estado = (): EstadoConexionGsg => {
@@ -291,6 +305,10 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       rutaUbicacion: e.rutaUbicacion,
       urlUbicacion: e.origen === 'pantalla' && !e.rutaUbicacion ? guardada.urlUbicacion : '',
       destinoUbicacion: proxy.urlUbicacion?.() ?? null,
+      rutaEstado: e.origen === 'pantalla' ? guardada.rutaEstado : '',
+      paramTracking: guardada.paramTracking,
+      paramTelefono: guardada.paramTelefono,
+      destinoEstado: proxy.urlEstado?.() ?? null,
       tieneToken: Boolean(e.token),
       claveEnmascarada: enmascararClave(e.token),
       origenClave: e.origenClave,
@@ -316,7 +334,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
   }
 
   /**
-   * La prueba de conexión: SIN RED. No le pide nada a GSG (ni un GET): solo
+   * La prueba de conexión: SIN RED. No llama a GSG (la consulta de estado se prueba aparte): solo
    * revisa que la URL base, la ruta de la ubicación y la API Key tengan buena
    * forma, y explica cómo funciona: GSG manda los pedidos y GSGchat le manda
    * los reportes. La clave no aparece en ningún mensaje.
@@ -339,7 +357,11 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       return ultimaPrueba;
     }
     const destino = puerto.urlUbicacion?.() ?? null;
-    const comoFunciona = `GSGchat no le pide nada a GSG: los pedidos llegan solo cuando GSG los manda a POST /api/v1/entregas (con la clave de API de GSGchat), y GSGchat le manda a GSG la ubicación${destino ? ` (POST a ${destino}, con la API Key en X-API-Key)` : ''} y los demás reportes.`;
+    const estadoUrl = guardada.rutaEstado ? unirUrlGsg(probada.url, guardada.rutaEstado) : null;
+    const envios = `los pedidos llegan solo cuando GSG los manda a POST /api/v1/entregas (con la clave de API de GSGchat), y GSGchat le manda a GSG la ubicación${destino ? ` (POST a ${destino}, con la API Key en X-API-Key)` : ''} y los demás reportes.`;
+    const comoFunciona = estadoUrl?.ok
+      ? `GSGchat solo le pregunta a GSG el estado de un tracking antes de escribirle al cliente (GET a ${estadoUrl.url}): si está cancelado, con el número o el tracking mal, o sin poder contactar, deja de escribir solo por ese tracking. Además, ${envios}`
+      : `GSGchat no le pide nada a GSG: ${envios}`;
     if (!probada.token) {
       ultimaPrueba = { ok: false, detalle: `Falta la API Key de GSG: sin ella, su API rechazará la ubicación y los reportes. ${comoFunciona}`, at };
       return ultimaPrueba;
@@ -384,7 +406,24 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       }
       const destino = unirUrlGsg(urlBase, ruta);
       if (!destino.ok) throw new Error(destino.error);
-      guardada = { modo: 'real', url: urlBase, rutaUbicacion: ruta, urlUbicacion: '', conectadoEn: new Date().toISOString() };
+      // La consulta de estado: lo que venga; si no viene, lo que habia.
+      const antes = guardada;
+      const rutaEstado = input.rutaEstado !== undefined && input.rutaEstado !== null ? input.rutaEstado.trim().replace(/^\/+/, '') : antes.rutaEstado;
+      if (rutaEstado) {
+        const u = unirUrlGsg(urlBase, rutaEstado);
+        if (!u.ok) throw new Error(`La ruta de consulta de estado no vale: ${u.error}`);
+      }
+      const param = (nuevo: string | null | undefined, previo: string, porDefecto: string) => {
+        const v = nuevo !== undefined && nuevo !== null ? nuevo.trim() : previo;
+        if (v && !/^[A-Za-z0-9_.-]{1,60}$/.test(v)) throw new Error(`El nombre del parámetro «${v}» no vale: solo letras, números, punto, guion o guion bajo.`);
+        return v || porDefecto;
+      };
+      guardada = {
+        modo: 'real', url: urlBase, rutaUbicacion: ruta, urlUbicacion: '', conectadoEn: new Date().toISOString(),
+        rutaEstado,
+        paramTracking: param(input.paramTracking, antes.paramTracking, 'trackingCode'),
+        paramTelefono: param(input.paramTelefono, antes.paramTelefono, 'phone'),
+      };
       const nueva = input.apiKey ?? input.token;
       if (nueva !== undefined && nueva !== null) {
         token = nueva.trim();

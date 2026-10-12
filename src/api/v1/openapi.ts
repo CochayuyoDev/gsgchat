@@ -316,7 +316,7 @@ export function openApi(baseUrl: string): Json {
             'La clave decide la tienda: 401 sin clave, con una que no existe o revocada; 403 si es valida pero sin `entregas:gestionar`; 404 si se usa la ruta con nombre de tienda; 409 si la clave esta en dos tiendas.',
             'Cada pedido creado vuelve con su `id` (el de este sistema, leido de la base tras guardarlo; el de GSG va en `idExterno`) y su `mensaje` (el primer mensaje al cliente: retenido, encolado, enviado, reintentando, fallido o incierto). Si el pedido se guardo pero su mensaje no salio, la respuesta sigue siendo 201 y lo cuenta en `avisosMensaje`.',
             '`faltaUbicacion` (por defecto true) y `faltaConfirmar` (por defecto true) dicen que le falta a cada uno; `urgente` lo pone primero hacia el motorizado.',
-            'La MISMA direccion cancela o reintenta un pedido: un objeto con `accion` (`{ tracking, accion: "CANCELAR" | "REINTENTAR", telefono?, motivo?, simular? }`). CANCELAR: el bot deja de pedirle la ubicacion. REINTENTAR: con `telefono` se corrige el numero y se le escribe al nuevo; sin el, se reinicia la solicitud de ESE pedido (no se crea otro ni se tocan los demas del mismo cliente). `simular: true` dice lo que haria sin cambiar nada. Responde 200 con `accion`, `entrega` y `detalle`; una repeticion no duplica (`sinCambios: true`); 404 si no hay pedido en curso con ese tracking; 409 si ya esta entregado, cancelado o terminado.',
+            'Para cancelar o reintentar un pedido hay otra direccion: POST /flujo (un cuerpo con `accion` aqui responde 400 y lo dice).',
             'Se acepta un pedido suelto, una lista `[...]` o `{ pedidos: [...] }` (hasta 600). Un pedido repetido hoy no se duplica (`repetidas`); uno sin telefono valido va en `descartadas` con su motivo.',
             'Lo que pasa despues (confirmo, se le aviso la hora, se entrego, incidencia) llega por los webhooks `entrega.*`.',
             'Cada respuesta trae `whatsapp`: por pedido, lo que YA se hizo HOY por WhatsApp con ese tracking o ese telefono (`ya_contactado` con la fecha, `agrupado_con` el otro tracking del mismo telefono, `ubicacion_pedida`, `ubicacion_registrada`, `ubicacion_cambiada`, `confirmado`, `reportado`, `corregido`). Al cliente ya contactado no se le manda otro mensaje. Solo cuenta el mismo dia: el mismo cliente otro dia es un intento nuevo y se le vuelve a escribir.',
@@ -354,6 +354,28 @@ export function openApi(baseUrl: string): Json {
           responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, cambios: { type: 'array', items: { type: 'string' } }, entrega: ref('EntregaDia'), corregidos: { type: 'array', items: ref('NumeroReportado') }, whatsapp: { type: 'array', items: ref('WhatsappPedido') }, detalle: { type: 'string' } } }), 400: error('El cambio no se entiende, o el telefono corregido no vale (invalido o de un motorizado)'), 404: error('No existe'), 409: error('Ya estaba entregado, cancelado o terminado'), 429: error('Mas de 120 peticiones por minuto con esta clave') },
         },
         delete: { tags: ['entregas'], summary: 'Cancelar ese pedido (GSG lo dio de baja)', ...permiso('entregas:gestionar'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' } }, { name: 'motivo', in: 'query', schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), detalle: { type: 'string' } } }), 404: error('No existe'), 409: error('Ya estaba entregado o cancelado') } },
+      },
+      '/flujo': {
+        post: {
+          tags: ['entregas'],
+          summary: 'API 2: cancelar o reintentar el flujo de un pedido',
+          description: [
+            'GSG pide dejar de escribirle a un tracking (`CANCELAR`) o volver a escribirle porque ya corrigio los datos (`REINTENTAR`). Misma clave que la recepcion de pedidos.',
+            'REINTENTAR con `telefono` corrige el numero y le escribe al nuevo; sin el, reinicia la solicitud de ESE pedido (no crea otro ni toca los demas del mismo cliente).',
+            'Busca el pedido de hoy y, si no hay, el vivo mas reciente con ese tracking. Una repeticion no duplica: 200 con `sinCambios: true`. `simular: true` dice lo que haria sin cambiar nada.',
+          ].join(' '),
+          ...permiso('entregas:gestionar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['tracking', 'accion'], properties: { tracking: { type: 'string' }, accion: { type: 'string', enum: ['CANCELAR', 'REINTENTAR'] }, telefono: { type: 'string', description: 'El telefono corregido (solo con REINTENTAR)' }, motivo: { type: 'string', maxLength: 300 }, simular: { type: 'boolean', description: 'true: dice lo que haria, sin cambiar nada' } } } } } },
+          responses: {
+            200: json({ type: 'object', properties: { ok: { type: 'boolean' }, simulado: { type: 'boolean' }, accion: { type: 'string' }, tracking: { type: 'string' }, sinCambios: { type: 'boolean' }, telefonoCorregido: { type: 'string' }, entrega: ref('EntregaDia'), whatsapp: { type: 'array', items: ref('WhatsappPedido') }, detalle: { type: 'string' } } }),
+            400: error('VALIDACION: falta el tracking, la accion no es CANCELAR/REINTENTAR o el telefono no vale'),
+            401: error('Sin clave'),
+            403: error('Sin permiso'),
+            404: error('NO_EXISTE: no hay pedido en curso con ese tracking'),
+            409: error('CONFLICTO / ESPERA_CONFIRMACION: ya entregado, cancelado o terminado, o espera «Confirmar y enviar»'),
+            429: error('Mas de 120 peticiones por minuto con esta clave'),
+          },
+        },
       },
       '/seguimiento': {
         post: {

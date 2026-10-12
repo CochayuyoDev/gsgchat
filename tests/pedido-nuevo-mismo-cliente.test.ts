@@ -153,7 +153,7 @@ describe('el mismo cliente puede volver a pedir', () => {
 });
 
 describe('POST /api/v1/entregas: GSG le dice a GSGchat que cancele o reintente', () => {
-  const flujo = (e: EscenarioEntregas, cuerpo: Record<string, unknown>) => e.api.post<any>('/api/v1/entregas', cuerpo);
+  const flujo = (e: EscenarioEntregas, cuerpo: Record<string, unknown>) => e.api.post<any>('/api/v1/flujo', cuerpo);
 
   it('CANCELAR: el pedido se cancela y la repeticion no cambia nada', async () => {
     const e = await armar();
@@ -234,7 +234,7 @@ describe('POST /api/v1/entregas: GSG le dice a GSGchat que cancele o reintente',
       await e.trabajar();
       const ayer = await flujo(e, { tracking: 'PED-730', accion: 'REINTENTAR' });
       expect(ayer.status).toBe(404);
-      expect(ayer.body.error).toContain('sin «accion»');
+      expect(ayer.body.error).toContain('POST /api/v1/entregas');
     } finally {
       await e.cerrar();
     }

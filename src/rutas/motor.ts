@@ -160,6 +160,12 @@ export interface MotorDeps {
    * solicitud, y obedece cuando reintentar o que se pare.
    */
   primerMensaje?: PrimerMensajeReparto;
+  /**
+   * Justo antes de escribirle (primer mensaje o recordatorio): GSG dice si a
+   * esos envios se les sigue escribiendo. false = no se manda nada (los envios
+   * parados ya quedaron con su motivo). Un fallo de la consulta no para nada.
+   */
+  antesDeEscribir?: (solicitud: Solicitud) => Promise<boolean>;
 }
 
 /** Ver MotorDeps.primerMensaje. */
@@ -410,6 +416,11 @@ export function crearMotor(deps: MotorDeps): Motor {
   async function enviarPaso(solicitud: Solicitud, paso: PasoUbicacion): Promise<ResultadoTick> {
     const phone = solicitud.phone!;
     const ctx = contexto(solicitud);
+
+    // GSG puede haber cancelado el envio (o marcado el numero como malo) despues de encolarlo.
+    if (deps.antesDeEscribir && !(await deps.antesDeEscribir(solicitud).catch(() => true))) {
+      return { accion: 'nada', solicitudId: solicitud.id, motivo: 'GSG indicó que no se le escriba por estos trackings' };
+    }
 
     // Antes del primer mensaje, preguntar si ese numero tiene WhatsApp. Solo
     // lo saben los clientes no oficiales; con Meta devuelve null y se sigue.

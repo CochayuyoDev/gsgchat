@@ -68,6 +68,72 @@ export interface PuertoGsg {
    * hash). Si cambia, la cola vuelve a intentar lo que GSG rechazo por la clave.
    */
   firma?(): string;
+  /** A donde va la consulta del estado de un envio (base + ruta), o null si no esta configurada. */
+  urlEstado?(): string | null;
+  /**
+   * El endpoint de GSG que dice si a un envio se le puede seguir escribiendo:
+   * GET {base}/{rutaEstado}?{paramTracking}=…&{paramTelefono}=… con la API Key
+   * en X-API-Key. Nunca lanza: un fallo vuelve como decision 'desconocido'.
+   */
+  consultarEstado?(consulta: { tracking: string; telefono: string }): Promise<ConsultaEstadoGsg>;
+}
+
+/**
+ * Lo que GSG dice de un envio, ya decidido para GSGchat:
+ *  - activo: se sigue el flujo y se le pide la ubicacion.
+ *  - cancelado / numero_incorrecto / tracking_incorrecto / no_contactable:
+ *    no se le escribe mas por ESE tracking (sus otros envios siguen).
+ *  - desconocido: no se entendio o fallo la consulta. NUNCA se toma como
+ *    cancelado: se apunta y se sigue.
+ */
+export type DecisionGsg = 'activo' | 'cancelado' | 'numero_incorrecto' | 'tracking_incorrecto' | 'no_contactable' | 'desconocido';
+
+export interface ConsultaEstadoGsg {
+  decision: DecisionGsg;
+  /** En palabras, para la actividad del pedido y la pantalla. */
+  motivo: string;
+  /** false = no hay ruta de consulta configurada (no se llamo a GSG). */
+  configurada: boolean;
+  /** El HTTP que contesto GSG (si llego a contestar). */
+  http?: number;
+  /** 401/403: la clave o los permisos (problema de conexion, no del envio). */
+  autenticacion?: 401 | 403;
+  /** Lo que mando GSG, recortado (para la pantalla de prueba). */
+  respuesta?: unknown;
+}
+
+/** Las decisiones que paran los mensajes de un tracking. */
+export const DECISIONES_QUE_PARAN: readonly DecisionGsg[] = ['cancelado', 'numero_incorrecto', 'tracking_incorrecto', 'no_contactable'];
+
+const sinTildes = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/**
+ * La respuesta de GSG convertida en decision. El contrato final lo da GSG;
+ * mientras, se entienden las formas razonables: un campo de estado en texto
+ * (`estado`, `status`, `state`, `situacion`, `codigo`, `motivo`… tambien
+ * dentro de `data`) o banderas (`cancelado: true`, `numeroIncorrecto: true`,
+ * `contactable: false`). Lo que no se entienda es 'desconocido'.
+ */
+export function interpretarEstadoGsg(cuerpo: unknown): { decision: DecisionGsg; motivo: string } {
+  const raiz = cuerpo && typeof cuerpo === 'object' ? (cuerpo as Record<string, unknown>) : {};
+  const capas = [raiz, ...['data', 'resultado', 'result', 'envio', 'shipment'].map((k) => raiz[k]).filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === 'object' && !Array.isArray(x))];
+  const banderas = (claves: string[], valor: boolean) => capas.some((c) => claves.some((k) => c[k] === valor));
+  if (banderas(['cancelado', 'cancelada', 'cancelled', 'canceled', 'anulado'], true)) return { decision: 'cancelado', motivo: 'GSG indica que el envío fue cancelado' };
+  if (banderas(['numeroIncorrecto', 'telefonoIncorrecto', 'wrongNumber', 'numeroMalo'], true)) return { decision: 'numero_incorrecto', motivo: 'GSG indica que el número es incorrecto' };
+  if (banderas(['trackingIncorrecto', 'trackingInvalido', 'wrongTracking'], true)) return { decision: 'tracking_incorrecto', motivo: 'GSG indica que el código de tracking es incorrecto' };
+  if (banderas(['contactable', 'puedeContactar'], false) || banderas(['noContactable', 'sinContacto'], true)) return { decision: 'no_contactable', motivo: 'GSG indica que no se puede contactar al cliente' };
+  const textos: string[] = [];
+  for (const c of capas) for (const k of ['estado', 'status', 'state', 'situacion', 'codigo', 'code', 'motivo', 'reason', 'detalle', 'mensaje', 'message']) if (typeof c[k] === 'string' && c[k]) textos.push(String(c[k]));
+  if (typeof cuerpo === 'string') textos.push(cuerpo);
+  const t = sinTildes(textos.join(' | '));
+  const dicho = textos.join(' · ').slice(0, 160);
+  if (!t.trim()) return { decision: 'desconocido', motivo: 'GSG no dijo en qué estado está el envío' };
+  if (/cancel|anulad/.test(t)) return { decision: 'cancelado', motivo: `GSG: ${dicho}` };
+  if (/(numero|telefono|celular|phone)\W*(es\W*|esta\W*)?(incorrect|mal\b|malo|invalid|erroneo|equivocad|wrong|no existe)|wrong.?number|numero_incorrecto|telefono_incorrecto/.test(t)) return { decision: 'numero_incorrecto', motivo: `GSG: ${dicho}` };
+  if (/(tracking|codigo)\W*(de\W*tracking\W*)?(es\W*|esta\W*)?(incorrect|mal\b|malo|invalid|erroneo|no existe|no encontrado|not.?found)|tracking_incorrecto/.test(t)) return { decision: 'tracking_incorrecto', motivo: `GSG: ${dicho}` };
+  if (/no.?(se.?puede.?)?(contact|comunic)|sin.?contacto|incontactable|ilocalizable|unreachable|no_contactable/.test(t)) return { decision: 'no_contactable', motivo: `GSG: ${dicho}` };
+  if (/activ|pendient|pending|en.?ruta|en.?camino|entregable|programad|asignad|vigente|en.?proceso|\bok\b/.test(t)) return { decision: 'activo', motivo: `GSG: ${dicho}` };
+  return { decision: 'desconocido', motivo: `GSG contestó un estado que no se reconoce: ${dicho}` };
 }
 
 export interface OpcionesGsg {
@@ -84,6 +150,12 @@ export interface OpcionesGsg {
   ubicacionUrl?: string;
   /** La API Key que da GSG. Sale SOLO en la cabecera X-API-Key. */
   token: string;
+  /** La ruta, relativa a la base, del GET que dice el estado de un envio. Sin ella no se consulta. */
+  rutaEstado?: string;
+  /** Como llama GSG al parametro del tracking (por defecto trackingCode). */
+  paramTracking?: string;
+  /** Como llama GSG al parametro del telefono (por defecto phone). */
+  paramTelefono?: string;
   fetchImpl?: typeof fetch;
   /** Segundos antes de darse por vencido en una llamada. */
   timeoutSegundos?: number;
@@ -278,13 +350,50 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
   const doFetch = opts.fetchImpl ?? fetch;
   const clave = opts.token ?? '';
   const errorConfig = !destino.ok ? destino.error : !clave.trim() ? 'Falta la API Key de GSG.' : null;
-  const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}`);
+  const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}|${opts.rutaEstado ?? ''}`);
   const limpio = (t: string) => sinClave(t, clave);
+
+  const rutaEstado = (opts.rutaEstado ?? '').trim();
+  const destinoEstado = destino.ok && rutaEstado ? unirUrlGsg(destino.base, rutaEstado) : null;
+  const paramTracking = (opts.paramTracking ?? '').trim() || 'trackingCode';
+  const paramTelefono = (opts.paramTelefono ?? '').trim() || 'phone';
 
   return {
     conectado: () => Boolean(crudo && clave.trim()),
     descripcion: () => `API de GSG en ${base}`,
     urlUbicacion: () => (crudo && destino.ok ? destino.urlUbicacion : null),
+    urlEstado: () => (crudo && destinoEstado?.ok ? destinoEstado.url : null),
+
+    async consultarEstado({ tracking, telefono }) {
+      if (!rutaEstado) return { decision: 'desconocido', motivo: 'No hay ruta de consulta de estado configurada: no se le pregunta a GSG.', configurada: false };
+      if (!destinoEstado || !destinoEstado.ok) return { decision: 'desconocido', motivo: `La ruta de consulta de estado no es válida${destinoEstado && !destinoEstado.ok ? `: ${destinoEstado.error}` : ''}.`, configurada: true };
+      if (!clave.trim()) return { decision: 'desconocido', motivo: 'Falta la API Key de GSG: no se puede consultar el estado.', configurada: true };
+      const url = new URL(destinoEstado.url);
+      url.searchParams.set(paramTracking, tracking);
+      if (telefono) url.searchParams.set(paramTelefono, telefono);
+      const control = new AbortController();
+      const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 10) * 1000);
+      try {
+        const r = await doFetch(url.toString(), { method: 'GET', redirect: 'error', headers: { accept: 'application/json', ...cabecerasDeClave(clave) }, signal: control.signal });
+        const texto = await r.text();
+        let cuerpo: unknown = texto;
+        try { cuerpo = texto ? JSON.parse(texto) : {}; } catch { /* texto plano */ }
+        const respuesta = typeof cuerpo === 'string' ? limpio(cuerpo).slice(0, 500) : cuerpo;
+        if (r.status === 401 || r.status === 403) return { decision: 'desconocido', motivo: `${motivoAutenticacion(r.status)}: no se pudo consultar el estado.`, configurada: true, http: r.status, autenticacion: r.status, respuesta };
+        if (!r.ok) {
+          // Un 404 puede ser «ese tracking no lo tengo»: solo se toma como tal si GSG lo dice en el cuerpo.
+          const leida = interpretarEstadoGsg(cuerpo);
+          if (r.status === 404 && leida.decision === 'tracking_incorrecto') return { ...leida, configurada: true, http: r.status, respuesta };
+          return { decision: 'desconocido', motivo: limpio(`GSG respondió ${r.status} a la consulta de estado${r.status === 404 ? ' (¿la ruta es correcta?)' : r.status >= 500 ? ' (error en su servidor)' : ''}: se sigue y se reintenta en la próxima consulta.`), configurada: true, http: r.status, respuesta };
+        }
+        return { ...interpretarEstadoGsg(cuerpo), configurada: true, http: r.status, respuesta };
+      } catch (error) {
+        const motivo = control.signal.aborted ? `GSG no respondió a tiempo a la consulta de estado (${opts.timeoutSegundos ?? 10} s)` : `No se pudo consultar el estado en GSG: ${error instanceof Error ? ((error.cause as { code?: string; message?: string } | undefined)?.code ?? (error.cause as { message?: string } | undefined)?.message ?? error.message) : String(error)}`;
+        return { decision: 'desconocido', motivo: limpio(`${motivo}. No se toma como cancelado: se sigue.`), configurada: true };
+      } finally {
+        clearTimeout(corte);
+      }
+    },
     errorConfiguracion: () => errorConfig,
     firma: () => firma,
 

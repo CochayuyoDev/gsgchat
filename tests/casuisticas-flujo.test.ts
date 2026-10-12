@@ -11,6 +11,7 @@ import { ajustesPorDefecto } from '../src/rutas/ajustes.js';
 import { crearEscenarioEntregas, PAUSA_SEGUNDOS, PIN_LIMA, type EscenarioEntregas } from './escenario-entregas.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { connectPage } from '../src/web/connect-page.js';
+import { gsgCourierPage } from '../src/web/gsg-courier-page.js';
 
 const ESPERA_MIN = 30;
 const GSG = { empresa: { codigo: 'T01', nombre: 'Tienda Prueba' }, metodoPago: 'Contraentrega', montoCobrar: 40 };
@@ -45,7 +46,7 @@ async function desdeGsg(e: EscenarioEntregas, tracking: string, telefono: string
 }
 
 const flujo = (e: EscenarioEntregas, cuerpo: unknown, headers?: Record<string, string>) =>
-  e.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { 'x-api-key': (e as any).claveApi ?? CLAVE, 'content-type': 'application/json', ...(headers ?? {}) }, payload: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) });
+  e.app.inject({ method: 'POST', url: '/api/v1/flujo', headers: { 'x-api-key': (e as any).claveApi ?? CLAVE, 'content-type': 'application/json', ...(headers ?? {}) }, payload: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) });
 
 // La clave «de todo» del escenario (la misma que usa e.api).
 let CLAVE = '';
@@ -98,14 +99,14 @@ describe('POST /api/v1/entregas: entradas raras', () => {
     const e = await armar();
     try {
       await preparar(e);
-      const sin = await e.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { 'content-type': 'application/json' }, payload: '{}' });
+      const sin = await e.app.inject({ method: 'POST', url: '/api/v1/flujo', headers: { 'content-type': 'application/json' }, payload: '{}' });
       expect(sin.statusCode).toBe(401);
       expect(sin.json().ok).toBe(false);
       const leer = await conClave(e, ['entregas:leer']);
       const r403 = await flujo(e, { tracking: 'X', accion: 'CANCELAR' }, { 'x-api-key': leer });
       expect(r403.statusCode).toBe(403);
       expect(r403.json()).toMatchObject({ ok: false, codigo: 'SIN_PERMISO' });
-      const texto = await e.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { 'x-api-key': CLAVE, 'content-type': 'text/plain' }, payload: 'CANCELAR X' });
+      const texto = await e.app.inject({ method: 'POST', url: '/api/v1/flujo', headers: { 'x-api-key': CLAVE, 'content-type': 'text/plain' }, payload: 'CANCELAR X' });
       expect([400, 415]).toContain(texto.statusCode);
       expect(texto.json().ok).toBe(false);
     } finally {
@@ -350,8 +351,11 @@ describe('Conexión → endpoints de GSGchat para GSG', () => {
       await flujo(e, { tracking: 'PED-S2', accion: 'CANCELAR', simular: true });
       await flujo(e, { tracking: 'NO-HAY', accion: 'CANCELAR' });
       const r = await e.api.get<any>('/admin/gsg');
-      const deFlujo = (r.body.bitacora as any[]).filter((l) => String(l.que).includes('/api/v1/entregas'));
-      expect(deFlujo.some((l) => l.status === 200 && /Se cancelaría/.test(l.resultado))).toBe(true);
+      const bitacora = r.body.bitacora as any[];
+      const deFlujo = bitacora.filter((l) => String(l.que).includes('/api/v1/flujo'));
+      expect(deFlujo.some((l) => l.status === 200 && /Se cancelaría/.test(l.resultado) && /accion CANCELAR/.test(l.que))).toBe(true);
+      // El pedido (API 1) va por su propia dirección.
+      expect(bitacora.some((l) => l.status === 201 && /^POST \/api\/v1\/entregas$/.test(l.que))).toBe(true);
       expect(deFlujo.some((l) => l.status === 404 && /NO-HAY/.test(l.resultado))).toBe(true);
       // La prueba desde Conexión (con la sesión) tambien queda, por su ruta del panel.
       await e.api.post<any>('/admin/entregas/flujo', { tracking: 'PED-S2', accion: 'REINTENTAR', simular: true });
@@ -362,12 +366,14 @@ describe('Conexión → endpoints de GSGchat para GSG', () => {
     }
   }, 90_000);
 
-  it('la página de Conexión trae los tres endpoints, el probador y un script que el navegador puede ejecutar', async () => {
-    const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true });
-    for (const id of ['ep-entregas', 'ep-flujo-form', 'ep-llamadas', 'seguimiento-cuando']) expect(html, id).toContain(`id="${id}"`);
-    // Un solo endpoint: ni /flujo ni el catalogo como direcciones aparte.
-    for (const id of ['ep-flujo"', 'ep-errores']) expect(html).not.toContain(`id="${id}`);
-    expect(html).not.toContain('/api/v1/flujo');
+  it('Conexión con GSG trae el diagnóstico, y Nuestra API el único endpoint y su probador, con scripts que compilan', async () => {
+    const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true, vista: 'gsg' });
+    expect(html).toContain('id="seguimiento-cuando"');
+    expect(html).not.toContain('id="ep-');
+    const api = gsgCourierPage({ nombreNegocio: 'Prueba', disponible: true });
+    for (const id of ['courier-url', 'np-flujo-form', 'courier-bitacora']) expect(api, id).toContain(`id="${id}"`);
+    expect(api).toContain("'/api/v1/flujo'");
+    for (const m of api.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) if (m[1]!.trim()) expect(() => new Function(m[1]!)).not.toThrow();
     for (const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
       if (!m[1]!.trim()) continue;
       expect(() => new Function(m[1]!), 'el script de la página no compila').not.toThrow();

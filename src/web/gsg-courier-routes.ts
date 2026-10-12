@@ -2,18 +2,29 @@ import type { FastifyInstance } from 'fastify';
 import { leerCuerpo } from '../api/v1/entregas-gsg.js';
 import { revisarTelefono } from '../rutas/telefono.js';
 import { gsgCourierPage } from './gsg-courier-page.js';
+import { connectPage } from './connect-page.js';
 
 export async function registerGsgCourierRoutes(app: FastifyInstance, opts: {
   nombreNegocio: () => string;
   disponible: boolean;
   demo?: boolean;
 }): Promise<void> {
-  app.get('/conexion-gsg', async (request, reply) => {
+  // Nuestra API: el endpoint de GSGchat para GSG (direccion, claves, validar, recepciones).
+  app.get('/api-gsgchat', async (request, reply) => {
     if (!request.usuario || request.usuario.porToken || request.usuario.rol !== 'admin') {
-      return reply.code(403).send({ error: 'Entra como administrador para conectar GSG Courier.' });
+      return reply.code(403).send({ error: 'Entra como administrador para ver la API de GSGchat.' });
     }
     return reply.type('text/html; charset=utf-8').header('cache-control', 'no-store')
       .send(gsgCourierPage({ ...opts, nombreNegocio: opts.nombreNegocio() }));
+  });
+
+  // Conexión con GSG: lo que GSGchat le manda y le pregunta a GSG (su URL y su API Key).
+  app.get('/conexion-gsg', async (request, reply) => {
+    if (!request.usuario || request.usuario.porToken || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'Entra como administrador para conectar con GSG.' });
+    }
+    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-store')
+      .send(connectPage({ labels: {}, nombreNegocio: opts.nombreNegocio(), demo: opts.demo, conGsg: opts.disponible, vista: 'gsg' }));
   });
 
   // Validar no guarda pedidos, no crea contactos y no activa el reparto.

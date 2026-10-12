@@ -64,7 +64,7 @@ const mismoMundo = (a: string, b: string): boolean => esNumeroDePrueba(a) === es
 const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 000 1…) y los de verdad solo a motorizados de verdad.';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
-import { despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, type PuertoGsg } from '../rutas/gsg.js';
+import { DECISIONES_QUE_PARAN, despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, type ConsultaEstadoGsg, type PuertoGsg } from '../rutas/gsg.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import type { CargaLote, ResultadoCarga } from '../rutas/cargar.js';
 import { revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
@@ -769,6 +769,15 @@ export interface ServicioEntregas {
    * pedido nuevo de GSG) vuelve a disparar el mensaje.
    */
   volverAPedirUbicacion(id: number, quien: string): Promise<ResultadoReintentoMensaje>;
+  /**
+   * Justo antes de que el reparto le escriba a un cliente: se le pregunta a GSG
+   * por cada envio ligado a esa solicitud. Los que GSG da por cancelados, con
+   * numero o tracking incorrecto, o sin poder contactar, se paran (solo esos).
+   * false = no queda ninguno al que escribirle: el reparto no manda nada.
+   */
+  antesDeEscribirReparto(solicitud: Solicitud): Promise<boolean>;
+  /** Pregunta a GSG por un pedido y, si toca, para sus mensajes. Para probar y para el flujo. */
+  revisarConGsg(id: number): Promise<{ seguir: boolean; consulta: ConsultaEstadoGsg | null }>;
 }
 
 export interface DepsEntregas {
@@ -881,6 +890,12 @@ export function mismoMensaje(a: string, b: string): boolean {
 /** El enlace al pin, el que abre Google Maps en cualquier telefono. */
 export function enlaceMapa(lat: number, lng: number): string {
   return `https://maps.google.com/?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
+}
+
+/** El telefono como lo maneja GSG: los 9 digitos de Peru, sin el 51 delante. */
+export function telefonoParaGsg(phone: string): string {
+  const d = String(phone ?? '').replace(/\D/g, '');
+  return d.length === 11 && d.startsWith('51') ? d.slice(2) : d;
 }
 
 /** Que le pasa a una entrega, en cristiano. */
@@ -1720,6 +1735,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
 
   async function proponerUbicacion(e: Entrega): Promise<{ ok: boolean; motivo?: string; retryAfterMs?: number }> {
     if (e.ubicacionPropuestaLat == null || e.ubicacionPropuestaLng == null) return { ok: false, motivo: 'no hay dirección que proponer' };
+    if (!(await revisarConGsg(e.id)).seguir) return { ok: false, motivo: 'GSG indicó que no se le escriba por este tracking' };
     const en = ahora();
     const ctx = { ...contexto(e), mapa: enlaceMapa(e.ubicacionPropuestaLat, e.ubicacionPropuestaLng) };
     const salida = await enviarA(e.phone, textoDe('proponerUbicacion', ajustes, ctx), 'confirmacion', variablesCliente(e), { separacionMs: 60_000, maxPorDia: 6 }, ajustes.usarBotones ? botonesPropuesta(e) : undefined);
@@ -4366,6 +4382,74 @@ ${lista}
     return { ok: true, entrega: act, mensaje: vistaMensaje(act) };
   }
 
+  // --------------------------------------- el estado del envio segun GSG
+
+  /** Ultima respuesta de GSG por pedido: no se le pregunta mas de una vez cada 2 minutos. */
+  const consultasGsg = new Map<number, { en: number; consulta: ConsultaEstadoGsg }>();
+  const CONSULTA_GSG_VALE_MS = 2 * 60_000;
+
+  const TEXTO_DECISION: Record<string, string> = {
+    cancelado: 'el envío fue cancelado',
+    numero_incorrecto: 'el número es incorrecto',
+    tracking_incorrecto: 'el código de tracking es incorrecto',
+    no_contactable: 'no se puede contactar al cliente',
+  };
+
+  /**
+   * Para los mensajes de ESTE pedido (no los del telefono): cancelado queda
+   * cancelado; lo demas, «necesita atención» con el motivo de GSG. Al cliente
+   * no se le escribe nada, y los otros envios del mismo cliente siguen.
+   */
+  async function detenerPorGsg(e: Entrega, consulta: ConsultaEstadoGsg): Promise<Entrega> {
+    const que = TEXTO_DECISION[consulta.decision] ?? consulta.decision;
+    const detalle = `GSG: ${que}${consulta.motivo && !consulta.motivo.includes(que) ? ` (${consulta.motivo.replace(/^GSG:\s*/, '')})` : ''}`.slice(0, 300);
+    const patch = consulta.decision === 'cancelado'
+      ? { estado: 'cancelada' as const, incidencia: 'cancela', incidenciaDetalle: detalle, confirmacionProximoAt: null, motorizadoProximoAt: null }
+      : { estado: 'incidencia' as const, incidencia: `gsg_${consulta.decision}`, incidenciaDetalle: detalle, requiereHumano: true, confirmacionProximoAt: null, motorizadoProximoAt: null };
+    const act = (await repo.actualizar(e.id, patch)) ?? e;
+    await evento(act, 'incidencia', `${detalle}: no se le escribe más por el tracking ${trackingDe(act)}; los otros envíos de este cliente siguen su flujo`);
+    await soltarDeLaEntrega(act, `GSG: ${que} (tracking ${trackingDe(act)})`);
+    return act;
+  }
+
+  const trackingDe = (e: Entrega): string => e.datosEnvio?.tracking ?? e.referencia;
+
+  async function revisarConGsg(id: number): Promise<{ seguir: boolean; consulta: ConsultaEstadoGsg | null }> {
+    const e = await repo.entrega(id);
+    if (!e) return { seguir: false, consulta: null };
+    if (ESTADOS_FINALES.includes(e.estado)) return { seguir: false, consulta: null };
+    if (!deps.gsg.consultarEstado || !deps.gsg.urlEstado?.()) return { seguir: true, consulta: null };
+    const guardada = consultasGsg.get(e.id);
+    let consulta: ConsultaEstadoGsg;
+    if (guardada && ahora().getTime() - guardada.en < CONSULTA_GSG_VALE_MS) consulta = guardada.consulta;
+    else {
+      consulta = await deps.gsg.consultarEstado({ tracking: trackingDe(e), telefono: telefonoParaGsg(e.phone) }).catch((error: unknown) => ({ decision: 'desconocido' as const, motivo: `No se pudo consultar el estado en GSG: ${String(error)}`, configurada: true }));
+      if (consultasGsg.size > 5000) consultasGsg.clear();
+      consultasGsg.set(e.id, { en: ahora().getTime(), consulta });
+      // En la actividad solo cuando cambia lo que dice GSG (nada de una linea por mensaje).
+      if (!guardada || guardada.consulta.decision !== consulta.decision) {
+        await evento(e, 'nota', consulta.decision === 'desconocido' ? `consulta a GSG sin respuesta clara: ${consulta.motivo}` : `GSG dice del tracking ${trackingDe(e)}: ${consulta.decision === 'activo' ? 'activo, se sigue' : TEXTO_DECISION[consulta.decision]}`);
+      }
+    }
+    if (!DECISIONES_QUE_PARAN.includes(consulta.decision)) return { seguir: true, consulta };
+    await detenerPorGsg(e, consulta);
+    return { seguir: false, consulta };
+  }
+
+  async function antesDeEscribirReparto(s: Solicitud): Promise<boolean> {
+    if (!s.phone || !s.loteId) return true;
+    if (!deps.gsg.consultarEstado || !deps.gsg.urlEstado?.()) return true;
+    const ligadas = await repo.vivasDeLoteYTelefono(s.loteId, s.phone).catch(() => [] as Entrega[]);
+    if (!ligadas.length) return true;
+    let quedan = 0;
+    for (const e of ligadas) if ((await revisarConGsg(e.id)).seguir) quedan++;
+    if (quedan) return true;
+    // Ninguno de sus envios de esta solicitud sigue: la solicitud se cierra sin escribirle.
+    await repos.rutas.actualizarSolicitud(s.id, { estado: 'cancelado', proximoIntentoAt: null, requiereHumano: false, incidenciaDetalle: 'GSG indicó que no se le escriba por estos trackings' }).catch(() => null);
+    await repos.rutas.registrarEvento(s.id, 'nota', 'GSG indicó que no se le escriba por estos trackings: no se le manda nada').catch(() => undefined);
+    return false;
+  }
+
   async function volverAPedirUbicacion(id: number, quien: string): Promise<ResultadoReintentoMensaje> {
     const e = await repo.entrega(id);
     if (!e) return { ok: false, status: 404, codigo: 'NO_EXISTE', motivo: 'Ese pedido no existe en esta tienda.' };
@@ -5192,6 +5276,8 @@ ${lista}
     bandejaMensajes,
     reintentarMensaje,
     volverAPedirUbicacion,
+    antesDeEscribirReparto,
+    revisarConGsg,
     conectarMotor(m) {
       motor = m;
     },
