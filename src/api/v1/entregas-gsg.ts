@@ -792,6 +792,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     accion: z.string().transform((v) => v.trim().toUpperCase()).pipe(z.enum(['CANCELAR', 'REINTENTAR'], { errorMap: () => ({ message: 'tiene que ser CANCELAR o REINTENTAR' }) })),
     telefono: z.union([z.string(), z.number()]).transform((v) => String(v).trim()).optional(),
     motivo: z.string().trim().max(300).optional(),
+    /** Solo dice lo que haria, sin cambiar nada (para probar desde Conexión o desde GSG). */
+    simular: z.boolean().optional(),
   });
 
   /** El pedido de ese tracking: el de hoy, o el vivo mas reciente de otro dia. */
@@ -816,6 +818,24 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const e = await pedidoDelTracking(b.tracking);
     if (!e) return enviarError(reply, 404, 'NO_EXISTE', `No hay ningún pedido en curso con el tracking "${b.tracking}". Los de días anteriores se cierran con el día: si hay que volver a escribirle, mándalo como pedido nuevo por POST /api/v1/entregas.`);
     const cerrado = e.estado === 'entregada' || e.estado === 'terminada';
+
+    // Simulado: las mismas comprobaciones, sin tocar el pedido ni escribirle al cliente.
+    if (b.simular) {
+      const r = (detalle: string, extra: Record<string, unknown> = {}) => ({ ok: true, simulado: true, accion: b.accion, tracking: b.tracking, entrega: entregaParaApi(e), detalle, ...extra });
+      if (b.accion === 'CANCELAR') {
+        if (e.estado === 'cancelada') return r(`El flujo de ${e.referencia} ya está cancelado: no cambiaría nada.`, { sinCambios: true });
+        if (cerrado) return enviarError(reply, 409, 'CONFLICTO', `El pedido ${e.referencia} ya está ${e.estado === 'entregada' ? 'entregado' : 'terminado'}: no queda flujo que cancelar.`);
+        return r(`Se cancelaría ${e.referencia}: el bot dejaría de escribirle al cliente.`);
+      }
+      if (e.estado === 'cancelada' || cerrado) return enviarError(reply, 409, 'CONFLICTO', `El pedido ${e.referencia} ya está ${e.estado === 'cancelada' ? 'cancelado' : e.estado === 'entregada' ? 'entregado' : 'terminado'}: no se reintenta.`);
+      if (e.envioRetenidoAt) return enviarError(reply, 409, 'ESPERA_CONFIRMACION', `${e.referencia} espera que confirmes su envío («Confirmar y enviar»).`);
+      if (b.telefono) {
+        const nuevo = entregas.normalizarTelefono(b.telefono);
+        if (!nuevo) return enviarError(reply, 400, 'VALIDACION', 'No se corregiría el teléfono: no es un número válido.', [{ campo: 'telefono', mensaje: 'no es un número válido' }]);
+        if (nuevo !== e.phone) return r(`Se corregiría el teléfono de ${e.referencia} a ${nuevo} y se le escribiría al número nuevo.`);
+      }
+      return r(`Se reiniciaría la solicitud de ubicación de ${e.referencia} y se le volvería a mandar la plantilla.`);
+    }
 
     if (b.accion === 'CANCELAR') {
       if (e.estado === 'cancelada') return { ok: true, accion: b.accion, tracking: b.tracking, sinCambios: true, entrega: entregaParaApi(e), detalle: `El flujo de ${e.referencia} ya estaba cancelado.` };

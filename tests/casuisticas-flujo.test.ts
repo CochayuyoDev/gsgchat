@@ -10,6 +10,7 @@ import { OPCIONES_POR_DEFECTO } from '../src/rutas/motor.js';
 import { ajustesPorDefecto } from '../src/rutas/ajustes.js';
 import { crearEscenarioEntregas, PAUSA_SEGUNDOS, PIN_LIMA, type EscenarioEntregas } from './escenario-entregas.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
+import { connectPage } from '../src/web/connect-page.js';
 
 const ESPERA_MIN = 30;
 const GSG = { empresa: { codigo: 'T01', nombre: 'Tienda Prueba' }, metodoPago: 'Contraentrega', montoCobrar: 40 };
@@ -312,4 +313,58 @@ describe('reprogramados: casos limite', () => {
       await e.cerrar();
     }
   }, 120_000);
+});
+
+describe('Conexión → endpoints de GSGchat para GSG', () => {
+  it('simular dice lo que haria sin cambiar el pedido ni escribirle al cliente', async () => {
+    const e = await armar();
+    try {
+      await preparar(e);
+      const tel = '987740040';
+      await desdeGsg(e, 'PED-S1', tel);
+      const antes = e.mensajesA(tel).length;
+      for (const accion of ['CANCELAR', 'REINTENTAR']) {
+        const r = await flujo(e, { tracking: 'PED-S1', accion, simular: true });
+        expect(r.statusCode, r.body).toBe(200);
+        expect(r.json()).toMatchObject({ ok: true, simulado: true, accion });
+        expect(r.json().detalle).toMatch(/^Se (cancelaría|reiniciaría)/);
+      }
+      const tel2 = await flujo(e, { tracking: 'PED-S1', accion: 'REINTENTAR', telefono: '987740041', simular: true });
+      expect(tel2.json().detalle).toContain('51987740041');
+      const malo = await flujo(e, { tracking: 'PED-S1', accion: 'REINTENTAR', telefono: '12', simular: true });
+      expect(malo.statusCode).toBe(400);
+      await trabajar(e);
+      expect(e.mensajesA(tel).length).toBe(antes);
+      const sigue = await e.api.get<any>('/api/v1/entregas/PED-S1');
+      expect(sigue.body.entrega.estado).not.toBe('cancelada');
+    } finally {
+      await e.cerrar();
+    }
+  }, 90_000);
+
+  it('la bitácora de GSG anota las llamadas a /api/v1/flujo con lo que se contestó', async () => {
+    const e = await armar();
+    try {
+      await preparar(e);
+      await desdeGsg(e, 'PED-S2', '987740042');
+      await flujo(e, { tracking: 'PED-S2', accion: 'CANCELAR', simular: true });
+      await flujo(e, { tracking: 'NO-HAY', accion: 'CANCELAR' });
+      const r = await e.api.get<any>('/admin/gsg');
+      const deFlujo = (r.body.bitacora as any[]).filter((l) => String(l.que).includes('/api/v1/flujo'));
+      expect(deFlujo.length).toBe(2);
+      expect(deFlujo.some((l) => l.status === 200 && /Se cancelaría/.test(l.resultado))).toBe(true);
+      expect(deFlujo.some((l) => l.status === 404)).toBe(true);
+    } finally {
+      await e.cerrar();
+    }
+  }, 90_000);
+
+  it('la página de Conexión trae los tres endpoints, el probador y un script que el navegador puede ejecutar', async () => {
+    const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true });
+    for (const id of ['ep-entregas', 'ep-flujo', 'ep-errores', 'ep-flujo-form', 'ep-errores-cargar', 'ep-llamadas', 'seguimiento-cuando']) expect(html, id).toContain(`id="${id}"`);
+    for (const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
+      if (!m[1]!.trim()) continue;
+      expect(() => new Function(m[1]!), 'el script de la página no compila').not.toThrow();
+    }
+  });
 });

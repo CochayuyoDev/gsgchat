@@ -364,9 +364,9 @@ export function openApi(baseUrl: string): Json {
             'Busca el pedido de hoy y, si no hay, el vivo más reciente con ese tracking. Una repetición no duplica: responde 200 con `sinCambios: true`.',
           ].join(' '),
           ...permiso('entregas:gestionar'),
-          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['tracking', 'accion'], properties: { tracking: { type: 'string' }, accion: { type: 'string', enum: ['CANCELAR', 'REINTENTAR'] }, telefono: { type: 'string', description: 'El teléfono corregido (solo con REINTENTAR)' }, motivo: { type: 'string', maxLength: 300 } } } } } },
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['tracking', 'accion'], properties: { tracking: { type: 'string' }, accion: { type: 'string', enum: ['CANCELAR', 'REINTENTAR'] }, telefono: { type: 'string', description: 'El teléfono corregido (solo con REINTENTAR)' }, motivo: { type: 'string', maxLength: 300 }, simular: { type: 'boolean', description: 'true: dice lo que haría, sin cambiar nada' } } } } } },
           responses: {
-            200: json({ type: 'object', properties: { ok: { type: 'boolean' }, accion: { type: 'string' }, tracking: { type: 'string' }, sinCambios: { type: 'boolean' }, telefonoCorregido: { type: 'string' }, entrega: ref('EntregaDia'), whatsapp: { type: 'array', items: ref('WhatsappPedido') }, detalle: { type: 'string' } } }),
+            200: json({ type: 'object', properties: { ok: { type: 'boolean' }, simulado: { type: 'boolean' }, accion: { type: 'string' }, tracking: { type: 'string' }, sinCambios: { type: 'boolean' }, telefonoCorregido: { type: 'string' }, entrega: ref('EntregaDia'), whatsapp: { type: 'array', items: ref('WhatsappPedido') }, detalle: { type: 'string' } } }),
             400: error('VALIDACION: falta el tracking, la acción no es CANCELAR/REINTENTAR o el teléfono no vale'),
             401: error('Sin clave'),
             403: error('Sin permiso'),
