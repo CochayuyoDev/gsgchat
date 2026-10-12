@@ -1,6 +1,6 @@
 /**
  * Casuisticas del flujo antes del PR: entradas raras, repeticiones,
- * llamadas a la vez y estados limite en /api/v1/flujo, «Volver a solicitar
+ * llamadas a la vez y estados limite en /api/v1/entregas, «Volver a solicitar
  * ubicación», el catalogo de errores y los reprogramados. Cada caso dice que
  * deberia pasar; si falla, es un fallo del sistema, no de la prueba.
  */
@@ -45,7 +45,7 @@ async function desdeGsg(e: EscenarioEntregas, tracking: string, telefono: string
 }
 
 const flujo = (e: EscenarioEntregas, cuerpo: unknown, headers?: Record<string, string>) =>
-  e.app.inject({ method: 'POST', url: '/api/v1/flujo', headers: { 'x-api-key': (e as any).claveApi ?? CLAVE, 'content-type': 'application/json', ...(headers ?? {}) }, payload: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) });
+  e.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { 'x-api-key': (e as any).claveApi ?? CLAVE, 'content-type': 'application/json', ...(headers ?? {}) }, payload: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) });
 
 // La clave «de todo» del escenario (la misma que usa e.api).
 let CLAVE = '';
@@ -59,7 +59,7 @@ async function preparar(e: EscenarioEntregas) {
   CLAVE = await conClave(e, ['*']);
 }
 
-describe('POST /api/v1/flujo: entradas raras', () => {
+describe('POST /api/v1/entregas: entradas raras', () => {
   it('tracking numerico, accion en minusculas con espacios y tracking en otra caja: todo encuentra el mismo pedido', async () => {
     const e = await armar();
     try {
@@ -76,14 +76,14 @@ describe('POST /api/v1/flujo: entradas raras', () => {
     }
   }, 90_000);
 
-  it('cuerpos malos: JSON roto, lista, vacio, tracking en blanco o larguisimo, accion desconocida → 400 con su campo', async () => {
+  it('cuerpos malos: JSON roto, sin tracking, tracking en blanco o larguisimo, accion desconocida → 400 con su campo', async () => {
     const e = await armar();
     try {
       await preparar(e);
       const roto = await flujo(e, '{"tracking": "X"');
       expect(roto.statusCode).toBe(400);
       expect(roto.json()).toMatchObject({ ok: false, codigo: 'JSON_INVALIDO' });
-      for (const [cuerpo, campo] of [[[], 'cuerpo'], [{}, 'tracking'], [{ tracking: '   ', accion: 'CANCELAR' }, 'tracking'], [{ tracking: 'x'.repeat(121), accion: 'CANCELAR' }, 'tracking'], [{ tracking: 'X', accion: 'BORRAR' }, 'accion'], [{ tracking: 'X', accion: 5 }, 'accion']] as const) {
+      for (const [cuerpo, campo] of [[{ accion: 'CANCELAR' }, 'tracking'], [{ tracking: '   ', accion: 'CANCELAR' }, 'tracking'], [{ tracking: 'x'.repeat(121), accion: 'CANCELAR' }, 'tracking'], [{ tracking: 'X', accion: 'BORRAR' }, 'accion'], [{ tracking: 'X', accion: 5 }, 'accion']] as const) {
         const r = await flujo(e, cuerpo);
         expect(r.statusCode, JSON.stringify(cuerpo)).toBe(400);
         expect(r.json()).toMatchObject({ ok: false, codigo: 'VALIDACION' });
@@ -98,14 +98,14 @@ describe('POST /api/v1/flujo: entradas raras', () => {
     const e = await armar();
     try {
       await preparar(e);
-      const sin = await e.app.inject({ method: 'POST', url: '/api/v1/flujo', headers: { 'content-type': 'application/json' }, payload: '{}' });
+      const sin = await e.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { 'content-type': 'application/json' }, payload: '{}' });
       expect(sin.statusCode).toBe(401);
       expect(sin.json().ok).toBe(false);
       const leer = await conClave(e, ['entregas:leer']);
       const r403 = await flujo(e, { tracking: 'X', accion: 'CANCELAR' }, { 'x-api-key': leer });
       expect(r403.statusCode).toBe(403);
       expect(r403.json()).toMatchObject({ ok: false, codigo: 'SIN_PERMISO' });
-      const texto = await e.app.inject({ method: 'POST', url: '/api/v1/flujo', headers: { 'x-api-key': CLAVE, 'content-type': 'text/plain' }, payload: 'CANCELAR X' });
+      const texto = await e.app.inject({ method: 'POST', url: '/api/v1/entregas', headers: { 'x-api-key': CLAVE, 'content-type': 'text/plain' }, payload: 'CANCELAR X' });
       expect([400, 415]).toContain(texto.statusCode);
       expect(texto.json().ok).toBe(false);
     } finally {
@@ -148,7 +148,7 @@ describe('POST /api/v1/flujo: entradas raras', () => {
   }, 90_000);
 });
 
-describe('POST /api/v1/flujo: a la vez y en orden raro', () => {
+describe('POST /api/v1/entregas: a la vez y en orden raro', () => {
   it('cinco REINTENTAR a la vez: el cliente recibe UNA sola solicitud', async () => {
     const e = await armar();
     try {
@@ -342,7 +342,7 @@ describe('Conexión → endpoints de GSGchat para GSG', () => {
     }
   }, 90_000);
 
-  it('la bitácora de GSG anota las llamadas a /api/v1/flujo con lo que se contestó', async () => {
+  it('la bitácora de GSG anota las llamadas a /api/v1/entregas con lo que se contestó', async () => {
     const e = await armar();
     try {
       await preparar(e);
@@ -350,10 +350,13 @@ describe('Conexión → endpoints de GSGchat para GSG', () => {
       await flujo(e, { tracking: 'PED-S2', accion: 'CANCELAR', simular: true });
       await flujo(e, { tracking: 'NO-HAY', accion: 'CANCELAR' });
       const r = await e.api.get<any>('/admin/gsg');
-      const deFlujo = (r.body.bitacora as any[]).filter((l) => String(l.que).includes('/api/v1/flujo'));
-      expect(deFlujo.length).toBe(2);
+      const deFlujo = (r.body.bitacora as any[]).filter((l) => String(l.que).includes('/api/v1/entregas'));
       expect(deFlujo.some((l) => l.status === 200 && /Se cancelaría/.test(l.resultado))).toBe(true);
-      expect(deFlujo.some((l) => l.status === 404)).toBe(true);
+      expect(deFlujo.some((l) => l.status === 404 && /NO-HAY/.test(l.resultado))).toBe(true);
+      // La prueba desde Conexión (con la sesión) tambien queda, por su ruta del panel.
+      await e.api.post<any>('/admin/entregas/flujo', { tracking: 'PED-S2', accion: 'REINTENTAR', simular: true });
+      const tras = await e.api.get<any>('/admin/gsg');
+      expect((tras.body.bitacora as any[]).some((l) => String(l.que).includes('/admin/entregas/flujo') && /Se reiniciaría/.test(l.resultado))).toBe(true);
     } finally {
       await e.cerrar();
     }
@@ -361,7 +364,10 @@ describe('Conexión → endpoints de GSGchat para GSG', () => {
 
   it('la página de Conexión trae los tres endpoints, el probador y un script que el navegador puede ejecutar', async () => {
     const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true });
-    for (const id of ['ep-entregas', 'ep-flujo', 'ep-errores', 'ep-flujo-form', 'ep-errores-cargar', 'ep-llamadas', 'seguimiento-cuando']) expect(html, id).toContain(`id="${id}"`);
+    for (const id of ['ep-entregas', 'ep-flujo-form', 'ep-llamadas', 'seguimiento-cuando']) expect(html, id).toContain(`id="${id}"`);
+    // Un solo endpoint: ni /flujo ni el catalogo como direcciones aparte.
+    for (const id of ['ep-flujo"', 'ep-errores']) expect(html).not.toContain(`id="${id}`);
+    expect(html).not.toContain('/api/v1/flujo');
     for (const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
       if (!m[1]!.trim()) continue;
       expect(() => new Function(m[1]!), 'el script de la página no compila').not.toThrow();

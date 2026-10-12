@@ -19,7 +19,7 @@
  * al cliente: producto, empresa {codigo, nombre}, tracking, nroPedido,
  * metodoPago, monto y remitente (ver src/entregas/datos-envio.ts).
  *  DELETE /api/v1/entregas/:referencia     cancelarlo (entregas:gestionar)
- *  POST   /api/v1/flujo                    GSG le dice a GSGchat que CANCELE o REINTENTE el flujo de un tracking (entregas:gestionar)
+ *  POST   /api/v1/entregas  con «accion»   la MISMA direccion: CANCELAR o REINTENTAR el flujo de un tracking (entregas:gestionar)
  *  POST   /api/v1/seguimiento              GSG empuja el seguimiento de un tracking (entregas:gestionar)
  *
  * Cada clave tiene un tope de LIMITE_POR_MINUTO peticiones por minuto a estas
@@ -304,6 +304,11 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
   };
 }
 
+/** Un cuerpo de POST /api/v1/entregas que no trae pedidos sino una orden sobre un tracking. */
+export function esOrdenDeFlujo(cuerpo: unknown): boolean {
+  return Boolean(cuerpo) && typeof cuerpo === 'object' && !Array.isArray(cuerpo) && Object.hasOwn(cuerpo as object, 'accion');
+}
+
 export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntregasGsgDeps): Promise<void> {
   const { entregas } = deps;
   const ahora = deps.ahora ?? (() => Date.now());
@@ -336,7 +341,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
             metodo: request.method,
             ruta: '/api/v1/entregas',
             http: reply.statusCode,
-            estado: reply.statusCode >= 400 ? 'error' : reply.statusCode === 200 ? 'repetido' : 'recibido',
+            estado: reply.statusCode >= 400 ? 'error' : esOrdenDeFlujo(request.body) ? `accion ${String((request.body as { accion?: unknown }).accion ?? '').trim().toUpperCase()}` : reply.statusCode === 200 ? 'repetido' : 'recibido',
             recibidas: entrada.total,
             referencias: entrada.referencias,
             referenciasRestantes: Math.max(0, entrada.total - entrada.referencias.length),
@@ -361,7 +366,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
 
   // El tope por clave: se mira antes que nada (tras la autorizacion).
   app.addHook('preHandler', async (request, reply) => {
-    if (!request.url.startsWith('/api/v1/entregas') && !request.url.startsWith('/api/v1/flujo')) return;
+    if (!request.url.startsWith('/api/v1/entregas')) return;
     const quien = request.usuario?.id ?? request.ip;
     const t = ahora();
     const lista = (usos.get(quien) ?? []).filter((x) => x > t - 60_000);
@@ -568,6 +573,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   };
 
   app.post('/api/v1/entregas', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
+    // Una sola direccion para GSG: con «accion» es cancelar o reintentar un tracking (ver manejarFlujo).
+    if (esOrdenDeFlujo(request.body)) return manejarFlujo(request, reply);
     const lectura = leerCuerpo(request.body);
     if ('error' in lectura) {
       await reportarDeValidacion(request.body);
@@ -780,7 +787,9 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     return { ok: true, entrega: fila ? entregaParaApi(fila) : null, detalle: `Pedido ${e.referencia} cancelado: ${motivo}.` };
   });
 
-  // El flujo de UN pedido, empujado por GSG (plan fase 2, seccion 10):
+  // El flujo de UN pedido, empujado por GSG (plan fase 2, seccion 10), por la
+  // MISMA direccion que los pedidos: POST /api/v1/entregas con «accion».
+  // El panel lo prueba por /admin/entregas/flujo (la recepcion solo acepta clave de API).
   //  CANCELAR   el bot deja de pedirle la ubicacion (el pedido se cancela aqui).
   //  REINTENTAR GSG ya corrigio los datos: se le vuelve a escribir. Con `telefono`
   //             se corrige el numero y se le pide al nuevo; sin el, se reinicia
@@ -807,7 +816,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     return vivo ? (await entregas.entrega(vivo.id))?.entrega : undefined;
   };
 
-  app.post('/api/v1/flujo', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
+  async function manejarFlujo(request: FastifyRequest, reply: FastifyReply) {
     const leido = flujoSchema.safeParse(request.body ?? {});
     if (!leido.success) {
       const detalles = leido.error.issues.map((i) => ({ campo: i.path.join('.') || 'cuerpo', mensaje: i.message }));
@@ -816,7 +825,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const b = leido.data;
     const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
     const e = await pedidoDelTracking(b.tracking);
-    if (!e) return enviarError(reply, 404, 'NO_EXISTE', `No hay ningún pedido en curso con el tracking "${b.tracking}". Los de días anteriores se cierran con el día: si hay que volver a escribirle, mándalo como pedido nuevo por POST /api/v1/entregas.`);
+    if (!e) return enviarError(reply, 404, 'NO_EXISTE', `No hay ningún pedido en curso con el tracking "${b.tracking}". Los de días anteriores se cierran con el día: si hay que volver a escribirle, mándalo como pedido nuevo (sin «accion»).`);
     const cerrado = e.estado === 'entregada' || e.estado === 'terminada';
 
     // Simulado: las mismas comprobaciones, sin tocar el pedido ni escribirle al cliente.
@@ -846,7 +855,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     }
 
     // REINTENTAR
-    if (e.estado === 'cancelada' || cerrado) return enviarError(reply, 409, 'CONFLICTO', `El pedido ${e.referencia} ya está ${e.estado === 'cancelada' ? 'cancelado' : e.estado === 'entregada' ? 'entregado' : 'terminado'}: no se reintenta. Si es un pedido nuevo, mándalo por POST /api/v1/entregas.`);
+    if (e.estado === 'cancelada' || cerrado) return enviarError(reply, 409, 'CONFLICTO', `El pedido ${e.referencia} ya está ${e.estado === 'cancelada' ? 'cancelado' : e.estado === 'entregada' ? 'entregado' : 'terminado'}: no se reintenta. Si es un pedido nuevo, mándalo sin «accion».`);
     if (b.motivo) await deps.repo?.registrarEvento(e.id, 'nota', `GSG pide reintentar (${quien}): ${b.motivo}`, null, new Date()).catch(() => undefined);
     if (b.telefono) {
       const r = await entregas.corregirTelefono(e.id, b.telefono, quien);
@@ -855,7 +864,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         return enviarError(reply, r.codigo === 'cerrada' ? 409 : 400, r.codigo === 'cerrada' ? 'CONFLICTO' : 'VALIDACION', `No se corrigió el teléfono: ${r.motivo}.`, [{ campo: 'telefono', mensaje: r.motivo }]);
       }
       if (r.cambiado) {
-        const corregidos = deps.reportados ? await deps.reportados.marcarCorregidos(e.datosEnvio?.tracking ?? e.referencia, { telefono: r.entrega.phone, tracking: null, por: quien, via: 'POST /api/v1/flujo' }, new Date()).catch(() => []) : [];
+        const corregidos = deps.reportados ? await deps.reportados.marcarCorregidos(e.datosEnvio?.tracking ?? e.referencia, { telefono: r.entrega.phone, tracking: null, por: quien, via: 'POST /api/v1/entregas (accion REINTENTAR)' }, new Date()).catch(() => []) : [];
         const fila = (await entregas.entrega(e.id))?.entrega ?? e;
         return { ok: true, accion: b.accion, tracking: b.tracking, telefonoCorregido: r.entrega.phone, entrega: entregaParaApi(fila), corregidos: corregidos.map(reportadoParaApi), whatsapp: await whatsappDe([e.id]), detalle: `Teléfono de ${e.referencia} corregido a ${r.entrega.phone}: se le escribe al número nuevo.` };
       }
@@ -868,7 +877,10 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     }
     const fila = (await entregas.entrega(e.id))?.entrega ?? e;
     return { ok: true, accion: b.accion, tracking: b.tracking, entrega: entregaParaApi(fila), whatsapp: await whatsappDe([e.id]), detalle: `Se le vuelve a pedir la ubicación para ${e.referencia}.` };
-  });
+  }
+
+  // La prueba desde Conexión (con la sesión del panel): la misma lógica, sin clave de API.
+  app.post('/admin/entregas/flujo', async (request, reply) => manejarFlujo(request, reply));
 
   // GSG empuja el seguimiento de un pedido (posicion del motorizado, punto
   // actual, punto del cliente y paradas). GSGchat nunca se lo pide: guarda el

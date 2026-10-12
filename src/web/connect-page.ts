@@ -285,12 +285,13 @@ const CSS = `
   #gsg-endpoints h3 { margin: 0 0 6px; }
   #gsg-endpoints .ep { margin: 10px 0; }
   #gsg-endpoints .ep .copiar { margin-top: 4px; }
+  #gsg-endpoints .ep-usos { margin: 6px 0 10px; padding-left: 18px; }
   #gsg-endpoints .ep-form { display: grid; gap: 6px; max-width: 420px; margin: 8px 0; }
   #gsg-endpoints .ep-check { display: flex; gap: 8px; align-items: center; }
   #gsg-endpoints .ep-resultado { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--superficie-2); font-size: 12.5px; }
-  #ep-errores-tabla, #ep-llamadas { overflow-x: auto; max-width: 100%; }
-  #ep-errores-tabla table, #ep-llamadas table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  #ep-errores-tabla th, #ep-errores-tabla td, #ep-llamadas th, #ep-llamadas td { text-align: left; padding: 4px 6px; vertical-align: top; }
+  #ep-llamadas { overflow-x: auto; max-width: 100%; }
+  #ep-llamadas table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  #ep-llamadas th, #ep-llamadas td { text-align: left; padding: 4px 6px; vertical-align: top; }
   #gsg-bitacora table { min-width: 520px; width: 100%; border-collapse: collapse; font-size: 12.5px; }
   #gsg-bitacora th, #gsg-bitacora td { text-align: left; padding: 4px 6px; }
   #gsg-sim-valor, #gsg-clave-valor { overflow-wrap: anywhere; }
@@ -447,13 +448,13 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
   <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>
   <div class="bloque punteado" id="gsg-endpoints">
-    <h3>Endpoints de GSGchat para GSG</h3>
-    <p class="ayuda">Las direcciones que GSG llama, con la clave de API en la cabecera <code>X-API-Key</code>. El contrato completo está en el <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI</a>.</p>
-    <div class="ep-lista">
-      <div class="ep"><span class="chip tono-azul">POST</span> <b>Recibir pedidos</b><div class="copiar"><input id="ep-entregas" readonly aria-label="Dirección para recibir pedidos"><button class="btn sm" type="button" data-copiar="ep-entregas">Copiar</button></div></div>
-      <div class="ep"><span class="chip tono-azul">POST</span> <b>Cancelar o reintentar un pedido</b> <span class="ayuda">{ tracking, accion: "CANCELAR" | "REINTENTAR", telefono?, motivo?, simular? }</span><div class="copiar"><input id="ep-flujo" readonly aria-label="Dirección de flujo"><button class="btn sm" type="button" data-copiar="ep-flujo">Copiar</button></div></div>
-      <div class="ep"><span class="chip tono-verde">GET</span> <b>Catálogo de errores</b> <span class="ayuda">sin clave</span><div class="copiar"><input id="ep-errores" readonly aria-label="Dirección del catálogo de errores"><button class="btn sm" type="button" data-copiar="ep-errores">Copiar</button></div></div>
-    </div>
+    <h3>Endpoint de GSGchat para GSG</h3>
+    <p class="ayuda">Una sola dirección para todo, con la clave de API en la cabecera <code>X-API-Key</code>. El contrato completo está en el <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI</a>.</p>
+    <div class="ep"><span class="chip tono-azul">POST</span><div class="copiar"><input id="ep-entregas" readonly aria-label="Dirección del endpoint de GSGchat"><button class="btn sm" type="button" data-copiar="ep-entregas">Copiar</button></div></div>
+    <ul class="ayuda ep-usos">
+      <li><b>Pedidos nuevos:</b> <code>{ tracking, cliente, telefono, empresa, metodoPago, montoCobrar, … }</code> (uno o una lista).</li>
+      <li><b>Cancelar o reintentar un pedido:</b> <code>{ tracking, accion: "CANCELAR" | "REINTENTAR", telefono?, motivo?, simular? }</code></li>
+    </ul>
     <span id="ep-copiado" class="chip hidden" role="status"></span>
     <details id="ep-probar-flujo"><summary>Probar «Cancelar o reintentar»</summary>
       <form id="ep-flujo-form" class="ep-form" novalidate>
@@ -465,13 +466,9 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
       </form>
       <pre id="ep-flujo-resultado" class="ep-resultado hidden" role="status" aria-live="polite"></pre>
     </details>
-    <details id="ep-probar-errores"><summary>Ver el catálogo de errores</summary>
-      <div class="acciones"><button class="btn sm" id="ep-errores-cargar" type="button">Consultar ahora</button></div>
-      <div id="ep-errores-tabla" class="ayuda"></div>
-    </details>
     <div class="bloque">
-      <p class="ayuda"><b>Últimas llamadas a «Cancelar o reintentar»</b> <a id="ep-llamadas-refrescar" href="#">Actualizar</a></p>
-      <div id="ep-llamadas" class="ayuda">Todavía nadie la ha llamado.</div>
+      <p class="ayuda"><b>Últimas llamadas al endpoint</b> <a id="ep-llamadas-refrescar" href="#">Actualizar</a></p>
+      <div id="ep-llamadas" class="ayuda">Todavía nadie lo ha llamado.</div>
     </div>
   </div>
   <details><summary>Ubicación y seguimiento del cliente</summary>
@@ -1856,20 +1853,18 @@ if ($('gsg')) {
 
   /* Endpoints de GSGchat para GSG: direcciones, probar y las ultimas llamadas. */
   setVal('ep-entregas', location.origin + '/api/v1/entregas');
-  setVal('ep-flujo', location.origin + '/api/v1/flujo');
-  setVal('ep-errores', location.origin + '/api/v1/errores');
   Array.prototype.forEach.call(document.querySelectorAll('[data-copiar]'), function (b) {
     b.onclick = function () { copiar(val(b.getAttribute('data-copiar')), 'ep-copiado', 'Dirección'); };
   });
   function pintarLlamadasFlujo(bitacora) {
     var caja = $('ep-llamadas');
     if (!caja) return;
-    var deFlujo = bitacora.filter(function (l) { return String(l.que || '').indexOf('/api/v1/flujo') >= 0; });
+    var deFlujo = bitacora.filter(function (l) { var q = String(l.que || ''); return q.indexOf('/api/v1/entregas') >= 0 || q.indexOf('/admin/entregas/flujo') >= 0; });
     caja.innerHTML = deFlujo.length
       ? '<table><thead><tr><th>Hora</th><th>Quién</th><th>Qué pasó</th></tr></thead><tbody>' + deFlujo.map(function (l) {
-          return '<tr><td>' + esc(hora(l.en)) + '</td><td>' + esc(l.quien) + '</td><td><span class="chip tono-' + (l.status >= 400 ? 'rojo' : 'verde') + '">' + esc(l.status) + '</span> ' + esc(l.resultado) + '</td></tr>';
+          return '<tr><td>' + esc(hora(l.en)) + '</td><td>' + esc(l.quien) + (String(l.que || '').indexOf('/admin/') >= 0 ? ' (prueba)' : '') + '</td><td><span class="chip tono-' + (l.status >= 400 ? 'rojo' : 'verde') + '">' + esc(l.status) + '</span> ' + esc(l.resultado) + '</td></tr>';
         }).join('') + '</tbody></table>'
-      : 'Todavía nadie la ha llamado. Cuando GSG (o la prueba de arriba) llame, aquí se verá qué pidió y qué se le contestó.';
+      : 'Todavía nadie lo ha llamado. Cuando GSG (o la prueba de arriba) llame, aquí se verá qué pidió y qué se le contestó.';
   }
   if ($('ep-llamadas-refrescar')) $('ep-llamadas-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
   if ($('ep-flujo-form')) $('ep-flujo-form').onsubmit = async function (ev) {
@@ -1886,7 +1881,7 @@ if ($('gsg')) {
     salida.textContent = 'Enviando…';
     ver('ep-flujo-resultado', true);
     try {
-      var res = await fetch('/api/v1/flujo', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      var res = await fetch('/admin/entregas/flujo', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
       var datos = await res.json().catch(function () { return {}; });
       salida.textContent = 'HTTP ' + res.status + (datos.codigo ? ' · ' + datos.codigo : '') + '\n' + (datos.detalle || datos.error || '') + '\n\n' + JSON.stringify(datos, null, 2);
     } catch (error) {
@@ -1895,16 +1890,6 @@ if ($('gsg')) {
       boton.disabled = false;
       cargarExtras();
     }
-  };
-  if ($('ep-errores-cargar')) $('ep-errores-cargar').onclick = async function () {
-    var caja = $('ep-errores-tabla');
-    caja.textContent = 'Consultando…';
-    try {
-      var r = await api('/api/v1/errores');
-      caja.innerHTML = '<table><thead><tr><th>HTTP</th><th>Código</th><th>Qué significa</th><th>Qué hacer</th></tr></thead><tbody>' + (r.errores || []).map(function (e) {
-        return '<tr><td>' + esc(e.status) + '</td><td><code>' + esc(e.codigo) + '</code></td><td>' + esc(e.significa) + '</td><td>' + esc(e.queHacer) + '</td></tr>';
-      }).join('') + '</tbody></table>';
-    } catch (error) { caja.textContent = 'No se pudo consultar: ' + error.message; }
   };
 
   $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
