@@ -120,7 +120,7 @@ const PAGINAS_PRIVADAS = ['/conexion-gsg', '/panel', '/chat', '/rutas', '/setup'
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
 
 /** Rutas de la API publica que no piden clave. */
-const API_SIN_CLAVE = ['/api/v1/conexion/canjear'];
+const API_SIN_CLAVE = ['/api/v1/conexion/canjear', '/api/v1/errores'];
 
 /** Cada cuanto se anota el "ultimo uso" de una clave: no una escritura por peticion. */
 const ANOTAR_USO_CADA_MS = 60_000;
@@ -258,7 +258,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       }
       if (!request.usuario) {
         reply.header('www-authenticate', DESAFIO_CLAVE_API);
-        return reply.code(401).send({ error: 'no autorizado: entra en /login o manda tu clave de API en la cabecera X-API-Key' });
+        return reply.code(401).send(cuerpoError('SESION_REQUERIDA', 'no autorizado: entra en /login o manda tu clave de API en la cabecera X-API-Key', undefined, '/login'));
       }
       // La API interna es para el panel y para las claves de siempre. Una
       // clave acotada tiene su puerta en /api/v1 y no entra por aqui.
@@ -276,7 +276,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     if (request.url.startsWith('/api/')) {
       // El canje de un codigo de conexion entra sin clave: el codigo es la
       // autorizacion, y de ahi sale la clave (ver super-routes.ts).
-      if (API_SIN_CLAVE.includes(request.url.split('?')[0] ?? '') || request.url.startsWith('/api/plan/')) return;
+      if (API_SIN_CLAVE.includes(request.url.split('?')[0] ?? '') || request.url.startsWith('/api/plan/') || request.url.startsWith('/api/v1/errores/')) return;
       // Una clave `wak_` en el Bearer: 401 aunque sea valida, diciendo que va en X-API-Key.
       if (claveEnBearer(request.headers)) {
         const r = RECHAZOS.enBearer();

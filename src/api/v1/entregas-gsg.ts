@@ -19,6 +19,7 @@
  * al cliente: producto, empresa {codigo, nombre}, tracking, nroPedido,
  * metodoPago, monto y remitente (ver src/entregas/datos-envio.ts).
  *  DELETE /api/v1/entregas/:referencia     cancelarlo (entregas:gestionar)
+ *  POST   /api/v1/flujo                    GSG le dice a GSGchat que CANCELE o REINTENTE el flujo de un tracking (entregas:gestionar)
  *  POST   /api/v1/seguimiento              GSG empuja el seguimiento de un tracking (entregas:gestionar)
  *
  * Cada clave tiene un tope de LIMITE_POR_MINUTO peticiones por minuto a estas
@@ -360,7 +361,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
 
   // El tope por clave: se mira antes que nada (tras la autorizacion).
   app.addHook('preHandler', async (request, reply) => {
-    if (!request.url.startsWith('/api/v1/entregas')) return;
+    if (!request.url.startsWith('/api/v1/entregas') && !request.url.startsWith('/api/v1/flujo')) return;
     const quien = request.usuario?.id ?? request.ip;
     const t = ahora();
     const lista = (usos.get(quien) ?? []).filter((x) => x > t - 60_000);
@@ -777,6 +778,76 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     if (!cancelada) return noExiste(reply, request.params.referencia);
     const fila = await porReferencia(request.params.referencia);
     return { ok: true, entrega: fila ? entregaParaApi(fila) : null, detalle: `Pedido ${e.referencia} cancelado: ${motivo}.` };
+  });
+
+  // El flujo de UN pedido, empujado por GSG (plan fase 2, seccion 10):
+  //  CANCELAR   el bot deja de pedirle la ubicacion (el pedido se cancela aqui).
+  //  REINTENTAR GSG ya corrigio los datos: se le vuelve a escribir. Con `telefono`
+  //             se corrige el numero y se le pide al nuevo; sin el, se reinicia
+  //             la solicitud de ubicacion de ESE pedido (no se crea otro).
+  // Una repeticion tecnica no duplica: cancelar lo cancelado o reintentar lo
+  // que ya esta en camino contesta 200 sin escribirle otra vez al cliente.
+  const flujoSchema = z.object({
+    tracking: z.union([z.string(), z.number()]).transform((v) => String(v).trim()).pipe(z.string().min(1, 'falta el tracking').max(120)),
+    accion: z.string().transform((v) => v.trim().toUpperCase()).pipe(z.enum(['CANCELAR', 'REINTENTAR'], { errorMap: () => ({ message: 'tiene que ser CANCELAR o REINTENTAR' }) })),
+    telefono: z.union([z.string(), z.number()]).transform((v) => String(v).trim()).optional(),
+    motivo: z.string().trim().max(300).optional(),
+  });
+
+  /** El pedido de ese tracking: el de hoy, o el vivo mas reciente de otro dia. */
+  const pedidoDelTracking = async (tracking: string): Promise<FilaEntrega | undefined> => {
+    const hoy = await porReferencia(tracking);
+    if (hoy || !deps.repo) return hoy;
+    const ref = tracking.toLowerCase();
+    const vivo = (await deps.repo.listar({ q: ref, limit: 50 }))
+      .filter((x) => x.referencia.toLowerCase() === ref || String(x.datosEnvio?.tracking ?? '').toLowerCase() === ref || String(x.externoId ?? '').toLowerCase() === ref)
+      .sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id)[0];
+    return vivo ? (await entregas.entrega(vivo.id))?.entrega : undefined;
+  };
+
+  app.post('/api/v1/flujo', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
+    const leido = flujoSchema.safeParse(request.body ?? {});
+    if (!leido.success) {
+      const detalles = leido.error.issues.map((i) => ({ campo: i.path.join('.') || 'cuerpo', mensaje: i.message }));
+      return enviarError(reply, 400, 'VALIDACION', `No se entiende el aviso: ${detalles.map((d) => `${d.campo}: ${d.mensaje}`).join('; ')}. Manda { tracking, accion: "CANCELAR" | "REINTENTAR", telefono?, motivo? }.`, detalles);
+    }
+    const b = leido.data;
+    const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
+    const e = await pedidoDelTracking(b.tracking);
+    if (!e) return enviarError(reply, 404, 'NO_EXISTE', `No hay ningún pedido en curso con el tracking "${b.tracking}". Los de días anteriores se cierran con el día: si hay que volver a escribirle, mándalo como pedido nuevo por POST /api/v1/entregas.`);
+    const cerrado = e.estado === 'entregada' || e.estado === 'terminada';
+
+    if (b.accion === 'CANCELAR') {
+      if (e.estado === 'cancelada') return { ok: true, accion: b.accion, tracking: b.tracking, sinCambios: true, entrega: entregaParaApi(e), detalle: `El flujo de ${e.referencia} ya estaba cancelado.` };
+      if (cerrado) return enviarError(reply, 409, 'CONFLICTO', `El pedido ${e.referencia} ya está ${e.estado === 'entregada' ? 'entregado' : 'terminado'}: no queda flujo que cancelar.`);
+      await entregas.cancelar(e.id, b.motivo || 'GSG canceló el flujo', quien);
+      const fila = (await entregas.entrega(e.id))?.entrega ?? e;
+      return { ok: true, accion: b.accion, tracking: b.tracking, entrega: entregaParaApi(fila), detalle: `Flujo de ${e.referencia} cancelado: no se le vuelve a escribir al cliente.` };
+    }
+
+    // REINTENTAR
+    if (e.estado === 'cancelada' || cerrado) return enviarError(reply, 409, 'CONFLICTO', `El pedido ${e.referencia} ya está ${e.estado === 'cancelada' ? 'cancelado' : e.estado === 'entregada' ? 'entregado' : 'terminado'}: no se reintenta. Si es un pedido nuevo, mándalo por POST /api/v1/entregas.`);
+    if (b.motivo) await deps.repo?.registrarEvento(e.id, 'nota', `GSG pide reintentar (${quien}): ${b.motivo}`, null, new Date()).catch(() => undefined);
+    if (b.telefono) {
+      const r = await entregas.corregirTelefono(e.id, b.telefono, quien);
+      if (!r.ok) {
+        if (r.codigo === 'telefono_invalido' || r.codigo === 'telefono_de_motorizado') await reportar(r.codigo, { tracking: b.tracking, referencia: e.referencia, telefono: b.telefono }, r.motivo, e.id);
+        return enviarError(reply, r.codigo === 'cerrada' ? 409 : 400, r.codigo === 'cerrada' ? 'CONFLICTO' : 'VALIDACION', `No se corrigió el teléfono: ${r.motivo}.`, [{ campo: 'telefono', mensaje: r.motivo }]);
+      }
+      if (r.cambiado) {
+        const corregidos = deps.reportados ? await deps.reportados.marcarCorregidos(e.datosEnvio?.tracking ?? e.referencia, { telefono: r.entrega.phone, tracking: null, por: quien, via: 'POST /api/v1/flujo' }, new Date()).catch(() => []) : [];
+        const fila = (await entregas.entrega(e.id))?.entrega ?? e;
+        return { ok: true, accion: b.accion, tracking: b.tracking, telefonoCorregido: r.entrega.phone, entrega: entregaParaApi(fila), corregidos: corregidos.map(reportadoParaApi), whatsapp: await whatsappDe([e.id]), detalle: `Teléfono de ${e.referencia} corregido a ${r.entrega.phone}: se le escribe al número nuevo.` };
+      }
+    }
+    const r = await entregas.volverAPedirUbicacion(e.id, quien);
+    if (!r.ok) {
+      // La misma orden repetida: lo de antes todavia esta en camino, no se le escribe dos veces.
+      if (r.codigo === 'MENSAJE_EN_CURSO') return { ok: true, accion: b.accion, tracking: b.tracking, sinCambios: true, entrega: entregaParaApi(e), detalle: r.motivo };
+      return enviarError(reply, r.status, r.codigo, r.motivo);
+    }
+    const fila = (await entregas.entrega(e.id))?.entrega ?? e;
+    return { ok: true, accion: b.accion, tracking: b.tracking, entrega: entregaParaApi(fila), whatsapp: await whatsappDe([e.id]), detalle: `Se le vuelve a pedir la ubicación para ${e.referencia}.` };
   });
 
   // GSG empuja el seguimiento de un pedido (posicion del motorizado, punto

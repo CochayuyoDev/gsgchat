@@ -8,7 +8,8 @@ import { moduloRetirado } from './modulos-retirados.js';
 import { randomBytes } from 'node:crypto';
 import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
-import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError } from './api/errores.js';
+import { codigoPorStatus, cuerpoError, ErrorApi, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError } from './api/errores.js';
+import { paginaError } from './web/pagina-error.js';
 import type { Config } from './config.js';
 import type { Repos } from './db/repos.js';
 import { WhatsAppApiError, type WhatsAppClient } from './whatsapp/client.js';
@@ -189,6 +190,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // cuerpo mal formado o la falta de credenciales salian como 500 generico.
   app.setErrorHandler((raw: unknown, request, reply) => {
     const error = raw instanceof Error ? raw : new Error(String(raw));
+    // El error que una ruta lanza ya con su status y su codigo.
+    if (error instanceof ErrorApi) return reply.code(error.status).send(error.cuerpo());
     if (error instanceof ZodError) {
       return reply.code(400).send(cuerpoError('VALIDACION', explicarErrorZod(error), error.issues.map((i) => ({ campo: i.path.join('.') || 'cuerpo', mensaje: i.message }))));
     }
@@ -206,7 +209,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const status = (error as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) {
       const propio = (error as { codigo?: CodigoError }).codigo;
-      const codigo: CodigoError = propio ?? (status === 401 ? 'CLAVE_INVALIDA' : status === 403 ? 'SIN_PERMISO' : status === 404 ? 'NO_EXISTE' : status === 409 ? 'CONFLICTO' : status === 413 ? 'CUERPO_DEMASIADO_GRANDE' : status === 415 ? 'TIPO_CONTENIDO_NO_SOPORTADO' : status === 429 ? 'DEMASIADAS_PETICIONES' : 'VALIDACION');
+      const codigo: CodigoError = propio ?? codigoPorStatus(status);
       const mensaje = status === 413 ? 'El cuerpo supera el límite de 4 MiB: divide los pedidos en llamadas más pequeñas.'
         : status === 415 ? 'El tipo de contenido no está soportado: usa Content-Type: application/json.' : error.message;
       // El parser puede rechazar por Content-Length antes de leer un byte.
@@ -236,6 +239,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           .send(cuerpoError('METODO_NO_PERMITIDO', `No se permite ${request.method} en ${url}. Métodos permitidos: ${permitidos.join(', ')}.`));
       }
       return reply.code(404).send(cuerpoError('RUTA_NO_EXISTE', `No existe ${request.method} ${request.url.split('?')[0]}.`));
+    }
+    // Una persona en el navegador ve una pagina que se entiende, no un JSON.
+    if (request.method === 'GET' && String(request.headers.accept ?? '').includes('text/html')) {
+      return reply.code(404).type('text/html; charset=utf-8').send(paginaError(404, `No hay nada en ${request.url.split('?')[0]}. Revisa la dirección o vuelve al panel.`, 'RUTA_NO_EXISTE'));
     }
     // Lo demas, como lo contestaba Fastify.
     return reply.code(404).send({ message: `Route ${request.method}:${request.url} not found`, error: 'Not Found', statusCode: 404 });
@@ -333,7 +340,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
-  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
+  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.

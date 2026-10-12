@@ -63,6 +63,21 @@ export function openApi(baseUrl: string): Json {
     paths: {
       '/': { get: { summary: 'Que es esto y donde esta el contrato', responses: { 200: json({ type: 'object' }) } } },
       '/openapi.json': { get: { summary: 'Este documento', responses: { 200: json({ type: 'object' }) } } },
+      '/errores': {
+        get: {
+          summary: 'El catálogo de errores: cada `codigo` con su HTTP, qué significa y qué hacer',
+          description: 'Sin clave. `?status=402` filtra por código HTTP. Todas las respuestas de error tienen la forma del esquema Error.',
+          parameters: [{ name: 'status', in: 'query', required: false, schema: { type: 'integer' } }],
+          responses: { 200: json({ type: 'object', properties: { forma: { type: 'object' }, errores: { type: 'array', items: ref('EntradaError') } } }) },
+        },
+      },
+      '/errores/{codigo}': {
+        get: {
+          summary: 'Un código de error del catálogo',
+          parameters: [{ name: 'codigo', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { 200: json(ref('EntradaError')), 404: error('No existe ese código (NO_EXISTE)') },
+        },
+      },
       '/eventos': { get: { summary: 'Los eventos que se pueden suscribir y como se firma cada entrega', responses: { 200: json({ type: 'object' }) } } },
 
       '/ia/ordenes': {
@@ -80,7 +95,7 @@ export function openApi(baseUrl: string): Json {
           ].join(' '),
           ...permiso('ia:ordenar'),
           requestBody: { required: true, content: { 'application/json': { schema: ref('Orden') } } },
-          responses: { 200: json(ref('RespuestaOrden')), 401: error('Sin clave'), 403: error('Sin permiso'), 409: error('La IA no esta conectada'), 429: error('Demasiadas ordenes seguidas'), 502: error('La IA no respondio'), 503: error('La IA no esta activa en este arranque') },
+          responses: { 200: json(ref('RespuestaOrden')), 401: error('Sin clave'), 402: error('La membresía no cubre la IA (PAGO_REQUERIDO)'), 403: error('Sin permiso'), 409: error('La IA no esta conectada'), 429: error('Demasiadas ordenes seguidas'), 502: error('La IA no respondio'), 503: error('La IA no esta activa en este arranque') },
         },
       },
       '/ia/ordenes/preparar': {
@@ -339,6 +354,28 @@ export function openApi(baseUrl: string): Json {
         },
         delete: { tags: ['entregas'], summary: 'Cancelar ese pedido (GSG lo dio de baja)', ...permiso('entregas:gestionar'), parameters: [{ name: 'referencia', in: 'path', required: true, schema: { type: 'string' } }, { name: 'motivo', in: 'query', schema: { type: 'string' } }], responses: { 200: json({ type: 'object', properties: { ok: { type: 'boolean' }, entrega: ref('EntregaDia'), detalle: { type: 'string' } } }), 404: error('No existe'), 409: error('Ya estaba entregado o cancelado') } },
       },
+      '/flujo': {
+        post: {
+          tags: ['entregas'],
+          summary: 'GSG le dice a GSGchat que CANCELE o REINTENTE el flujo de un tracking',
+          description: [
+            '`CANCELAR`: el bot deja de pedirle la ubicación (el pedido se cancela). `REINTENTAR`: los datos ya están corregidos y se le vuelve a escribir;',
+            'con `telefono` se corrige el número y se le pide al nuevo; sin él, se reinicia la solicitud de ESE pedido (no se crea otro ni se tocan los demás del mismo cliente).',
+            'Busca el pedido de hoy y, si no hay, el vivo más reciente con ese tracking. Una repetición no duplica: responde 200 con `sinCambios: true`.',
+          ].join(' '),
+          ...permiso('entregas:gestionar'),
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['tracking', 'accion'], properties: { tracking: { type: 'string' }, accion: { type: 'string', enum: ['CANCELAR', 'REINTENTAR'] }, telefono: { type: 'string', description: 'El teléfono corregido (solo con REINTENTAR)' }, motivo: { type: 'string', maxLength: 300 } } } } } },
+          responses: {
+            200: json({ type: 'object', properties: { ok: { type: 'boolean' }, accion: { type: 'string' }, tracking: { type: 'string' }, sinCambios: { type: 'boolean' }, telefonoCorregido: { type: 'string' }, entrega: ref('EntregaDia'), whatsapp: { type: 'array', items: ref('WhatsappPedido') }, detalle: { type: 'string' } } }),
+            400: error('VALIDACION: falta el tracking, la acción no es CANCELAR/REINTENTAR o el teléfono no vale'),
+            401: error('Sin clave'),
+            403: error('Sin permiso'),
+            404: error('NO_EXISTE: no hay pedido en curso con ese tracking'),
+            409: error('CONFLICTO / ESPERA_CONFIRMACION: ya entregado, cancelado o terminado, o espera «Confirmar y enviar»'),
+            429: error('Mas de 120 peticiones por minuto con esta clave'),
+          },
+        },
+      },
       '/seguimiento': {
         post: {
           tags: ['entregas'],
@@ -468,12 +505,16 @@ export function openApi(baseUrl: string): Json {
       },
       schemas: {
         Ok: { type: 'object', properties: { ok: { type: 'boolean' } } },
+        EntradaError: {
+          type: 'object',
+          properties: { codigo: { type: 'string' }, status: { type: 'integer' }, significa: { type: 'string' }, queHacer: { type: 'string' } },
+        },
         Error: {
           type: 'object',
           required: ['error'],
           properties: {
             ok: { type: 'boolean', enum: [false] },
-            codigo: { type: 'string', description: 'Estable, para comparar desde otro sistema: VALIDACION, JSON_INVALIDO, METODO_NO_PERMITIDO, CUERPO_DEMASIADO_GRANDE, TIPO_CONTENIDO_NO_SOPORTADO, CLAVE_AUSENTE, CLAVE_INVALIDA, CLAVE_REVOCADA, SIN_PERMISO, TIENDA_SUSPENDIDA, RUTA_NO_EXISTE, NO_EXISTE, CLAVE_AMBIGUA, CONFLICTO, MENSAJE_EN_CURSO, MENSAJE_YA_ENVIADO, RESULTADO_INCIERTO, ESPERA_CONFIRMACION, DEMASIADAS_PETICIONES, BASE_NO_DISPONIBLE, ERROR_INTERNO' },
+            codigo: { type: 'string', description: 'Estable, para comparar desde otro sistema: VALIDACION, JSON_INVALIDO, METODO_NO_PERMITIDO, CUERPO_DEMASIADO_GRANDE, TIPO_CONTENIDO_NO_SOPORTADO, SESION_REQUERIDA, PAGO_REQUERIDO, CLAVE_AUSENTE, CLAVE_INVALIDA, CLAVE_REVOCADA, SIN_PERMISO, TIENDA_SUSPENDIDA, RUTA_NO_EXISTE, NO_EXISTE, CLAVE_AMBIGUA, CONFLICTO, MENSAJE_EN_CURSO, MENSAJE_YA_ENVIADO, RESULTADO_INCIERTO, ESPERA_CONFIRMACION, DEMASIADAS_PETICIONES, BASE_NO_DISPONIBLE, ERROR_INTERNO' },
             error: { type: 'string', description: 'El motivo en palabras' },
             detalles: { description: 'Campo por campo cuando aplica', oneOf: [{ type: 'array', items: { type: 'object', properties: { campo: { type: 'string' }, mensaje: { type: 'string' } } } }, { type: 'object' }] },
           },

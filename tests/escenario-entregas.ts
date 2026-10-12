@@ -167,6 +167,8 @@ export async function crearEscenarioEntregas(opciones: {
   esperaMotorizadoMs?: number;
   /** El calculador de rutas (Google en producción; uno de mentira en las pruebas). */
   calcularRuta?: CalcularRuta;
+  /** La membresia (para probar el 402 cuando no cubre la IA). */
+  plan?: import('../src/plan/servicio.js').ServicioPlan;
 } = {}): Promise<EscenarioEntregas> {
   const [horaInicio, horaFin] = opciones.horario ?? [0, 24];
   const config = loadConfig({
@@ -330,6 +332,7 @@ export async function crearEscenarioEntregas(opciones: {
     simuladorGsg: simulador,
     gsg: conexionGsg.puerto(),
     ...(asistente ? { ia: asistente, ajustes } : {}),
+    ...(opciones.plan ? { plan: opciones.plan } : {}),
   });
   await app.ready();
 

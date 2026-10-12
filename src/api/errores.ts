@@ -18,6 +18,8 @@ export type CodigoError =
   | 'METODO_NO_PERMITIDO'
   | 'CUERPO_DEMASIADO_GRANDE'
   | 'TIPO_CONTENIDO_NO_SOPORTADO'
+  | 'SESION_REQUERIDA'
+  | 'PAGO_REQUERIDO'
   | 'CLAVE_AUSENTE'
   | 'CLAVE_INVALIDA'
   | 'CLAVE_REVOCADA'
@@ -50,14 +52,95 @@ export interface CuerpoError {
   codigo: CodigoError;
   error: string;
   detalles?: DetalleCampo[] | Record<string, unknown>;
+  /** Pantalla del panel donde se arregla (p. ej. el 402 lleva a la membresía). */
+  ir?: string;
 }
 
-export function cuerpoError(codigo: CodigoError, error: string, detalles?: CuerpoError['detalles']): CuerpoError {
-  return detalles === undefined ? { ok: false, codigo, error } : { ok: false, codigo, error, detalles };
+export function cuerpoError(codigo: CodigoError, error: string, detalles?: CuerpoError['detalles'], ir?: string): CuerpoError {
+  const cuerpo: CuerpoError = { ok: false, codigo, error };
+  if (detalles !== undefined) cuerpo.detalles = detalles;
+  if (ir) cuerpo.ir = ir;
+  return cuerpo;
 }
 
 export function enviarError(reply: FastifyReply, status: number, codigo: CodigoError, error: string, detalles?: CuerpoError['detalles']): FastifyReply {
   return reply.code(status).send(cuerpoError(codigo, error, detalles));
+}
+
+/**
+ * Un error que una ruta lanza y el manejador central convierte en su
+ * respuesta: `throw new ErrorApi(402, 'PAGO_REQUERIDO', '...', { ir })`.
+ * Asi ninguna ruta arma el cuerpo a mano.
+ */
+export class ErrorApi extends Error {
+  constructor(
+    readonly status: number,
+    readonly codigo: CodigoError,
+    mensaje: string,
+    readonly extra: { detalles?: CuerpoError['detalles']; ir?: string } = {},
+  ) {
+    super(mensaje);
+    this.name = 'ErrorApi';
+  }
+
+  cuerpo(): CuerpoError {
+    return cuerpoError(this.codigo, this.message, this.extra.detalles, this.extra.ir);
+  }
+}
+
+export interface EntradaCatalogo {
+  status: number;
+  /** Que paso, en una linea. */
+  significa: string;
+  /** Que hacer para que salga bien. */
+  queHacer: string;
+}
+
+/**
+ * Todos los codigos con su HTTP y que hacer. Lo publica GET /api/v1/errores
+ * para quien integra y lo usa el manejador central para elegir el codigo
+ * cuando un error solo trae el status.
+ */
+export const CATALOGO_ERRORES: Record<CodigoError, EntradaCatalogo> = {
+  VALIDACION: { status: 400, significa: 'Algún campo falta o no tiene el formato esperado.', queHacer: 'Corrige los campos que indica `detalles` y vuelve a enviar.' },
+  JSON_INVALIDO: { status: 400, significa: 'El cuerpo no es un JSON válido.', queHacer: 'Revisa comillas, comas y llaves.' },
+  SESION_REQUERIDA: { status: 401, significa: 'No hay sesión iniciada en el panel.', queHacer: 'Entra en /login (o manda una clave de API en X-API-Key).' },
+  CLAVE_AUSENTE: { status: 401, significa: 'Falta la clave de API.', queHacer: 'Mándala en la cabecera `X-API-Key: <clave>`.' },
+  CLAVE_INVALIDA: { status: 401, significa: 'La clave de API no existe o no es válida.', queHacer: 'Revisa la clave o pide una nueva a un administrador.' },
+  CLAVE_REVOCADA: { status: 401, significa: 'La clave de API fue revocada.', queHacer: 'Pide una clave nueva a un administrador.' },
+  PAGO_REQUERIDO: { status: 402, significa: 'La membresía está vencida o no incluye esta función.', queHacer: 'Renueva o amplía la membresía; `ir` dice dónde.' },
+  SIN_PERMISO: { status: 403, significa: 'La clave o la cuenta no tiene permiso para esto.', queHacer: 'Pide a un administrador el permiso que indica el mensaje.' },
+  TIENDA_SUSPENDIDA: { status: 403, significa: 'La tienda está suspendida.', queHacer: 'Habla con quien administra las tiendas.' },
+  RUTA_NO_EXISTE: { status: 404, significa: 'No existe esa ruta.', queHacer: 'Revisa la dirección y el método en /api/v1/openapi.json.' },
+  NO_EXISTE: { status: 404, significa: 'Lo que se pide no existe (o ya no).', queHacer: 'Revisa el identificador.' },
+  METODO_NO_PERMITIDO: { status: 405, significa: 'La ruta existe pero no con ese método.', queHacer: 'Usa uno de los métodos de la cabecera Allow.' },
+  CLAVE_AMBIGUA: { status: 409, significa: 'La clave coincide con más de una tienda.', queHacer: 'Indica la tienda o usa una clave propia de la tienda.' },
+  CONFLICTO: { status: 409, significa: 'Choca con el estado actual.', queHacer: 'Vuelve a leer el recurso y repite la operación.' },
+  MENSAJE_EN_CURSO: { status: 409, significa: 'Ese mensaje se está enviando ahora mismo.', queHacer: 'Espera y consulta su estado; no lo repitas.' },
+  MENSAJE_YA_ENVIADO: { status: 409, significa: 'Ese mensaje ya se envió.', queHacer: 'Nada: no se manda dos veces.' },
+  RESULTADO_INCIERTO: { status: 409, significa: 'No se sabe si el envío anterior salió.', queHacer: 'Revisa la conversación antes de repetir.' },
+  ESPERA_CONFIRMACION: { status: 409, significa: 'La operación espera una confirmación.', queHacer: 'Confírmala antes de seguir.' },
+  CUERPO_DEMASIADO_GRANDE: { status: 413, significa: 'El cuerpo supera el límite de 4 MiB.', queHacer: 'Divide los datos en llamadas más pequeñas.' },
+  TIPO_CONTENIDO_NO_SOPORTADO: { status: 415, significa: 'El tipo de contenido no está soportado.', queHacer: 'Usa Content-Type: application/json.' },
+  DEMASIADAS_PETICIONES: { status: 429, significa: 'Demasiadas peticiones seguidas.', queHacer: 'Espera lo que diga Retry-After.' },
+  ERROR_INTERNO: { status: 500, significa: 'Fallo inesperado del servidor.', queHacer: 'Reintenta; si sigue, avisa con la hora exacta.' },
+  BASE_NO_DISPONIBLE: { status: 503, significa: 'La base de datos no responde.', queHacer: 'Reintenta tras Retry-After.' },
+};
+
+/** El codigo por defecto de un status 4xx que no trae el suyo. */
+export function codigoPorStatus(status: number): CodigoError {
+  switch (status) {
+    case 401: return 'CLAVE_INVALIDA';
+    case 402: return 'PAGO_REQUERIDO';
+    case 403: return 'SIN_PERMISO';
+    case 404: return 'NO_EXISTE';
+    case 405: return 'METODO_NO_PERMITIDO';
+    case 409: return 'CONFLICTO';
+    case 413: return 'CUERPO_DEMASIADO_GRANDE';
+    case 415: return 'TIPO_CONTENIDO_NO_SOPORTADO';
+    case 429: return 'DEMASIADAS_PETICIONES';
+    default: return 'VALIDACION';
+  }
 }
 
 /** Codigos de mysql2/Node que significan "la base no contesta ahora", no "la consulta esta mal". */

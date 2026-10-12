@@ -19,6 +19,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { ErrorApi } from '../api/errores.js';
 import { ErrorIA, listarModelosOpenAI, MODELOS_SUGERIDOS, presetDe, SERVICIOS_OPENAI } from './proveedores.js';
 import { DESCRIPCION_GRATIS } from './modelos-gratis.js';
 import { ESCENARIOS, GRUPOS } from './escenarios.js';
@@ -189,10 +190,17 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     simular: z.boolean().default(false),
   });
 
+  /** La membresia vencida o sin IA: 402 con el motivo y donde arreglarlo. */
+  const exigirPlanIA = () => {
+    const motivo = deps.plan?.motivo('ia');
+    if (motivo) throw new ErrorApi(402, 'PAGO_REQUERIDO', motivo, { ir: '/panel#configuracion' });
+  };
+
   /** La IA operadora: una orden con palabras, con la identidad de quien la da. */
   app.post('/admin/ia/ordenes', async (request, reply) => {
     const body = ordenSchema.parse(request.body ?? {});
     if (!request.usuario) return reply.code(401).send({ error: 'Entra para dar órdenes.' });
+    exigirPlanIA();
     if (!ia.estado().tieneToken) return reply.code(400).send({ error: 'La IA operadora usa la misma IA que el asistente: conecta Puter en Mi asistente IA (/panel#ia).' });
     try {
       return await ia.ordenar(body, request.usuario);
@@ -207,6 +215,7 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
     const body = z.object({ accion: z.record(z.string(), z.unknown()) }).safeParse(request.body ?? {});
     if (!body.success) return reply.code(400).send({ error: 'Falta la acción que preparar.' });
     if (!request.usuario) return reply.code(401).send({ error: 'Entra para dar órdenes.' });
+    exigirPlanIA();
     try {
       const r = await ia.prepararUna(body.data.accion, request.usuario);
       if (r.error) return reply.code(400).send({ error: r.error });
@@ -221,6 +230,7 @@ export async function registerIaRoutes(app: FastifyInstance, deps: { ia: Servici
   app.post('/admin/ia/ordenes/confirmar', async (request, reply) => {
     const body = confirmacionSchema.parse(request.body ?? {});
     if (!request.usuario) return reply.code(401).send({ error: 'Entra para confirmar.' });
+    exigirPlanIA();
     try {
       const hechas = await ia.ejecutarConfirmadas(body.acciones, request.usuario);
       await deps.actividad

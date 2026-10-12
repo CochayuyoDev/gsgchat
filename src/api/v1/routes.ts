@@ -38,6 +38,8 @@ import { openApi } from './openapi.js';
 import { confirmacionSchema } from '../../ia/ordenes.js';
 import type { ServicioIA } from '../../ia/servicio.js';
 import { ErrorIA } from '../../ia/proveedores.js';
+import { CATALOGO_ERRORES, ErrorApi, type CodigoError } from '../errores.js';
+import type { ServicioPlan } from '../../plan/servicio.js';
 import type { ServicioVoz } from '../../voz/servicio.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
 import { MAX_BYTES_ADJUNTO, tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
@@ -57,6 +59,8 @@ export interface ApiV1Deps {
   bus?: Bus;
   /** La IA operadora, para que otro sistema le de ordenes con palabras. Sin ella, 503. */
   ia?: ServicioIA;
+  /** La membresia: si no cubre la IA, las ordenes salen con 402. Sin ella, todo permitido. */
+  plan?: ServicioPlan;
   /** La voz del asistente (ver src/voz): `voz: true` en POST /mensajes manda el texto como nota de voz. Sin ella, sale por escrito y se dice. */
   voz?: ServicioVoz;
   /** Donde se guardan los ficheros que llegan por URL (`media`), para que el chat los pinte. */
@@ -230,8 +234,26 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     version: 'v1',
     documentacion: '/api/v1/openapi.json',
     eventos: '/api/v1/eventos',
+    errores: '/api/v1/errores',
     permisos: PERMISOS,
   }));
+
+  // El catalogo de errores: cada codigo con su HTTP, que significa y que
+  // hacer. Sin clave, como el contrato: es lo que lee quien integra.
+  const entradaError = (codigo: CodigoError) => ({ codigo, ...CATALOGO_ERRORES[codigo] });
+  app.get('/api/v1/errores', async (request) => {
+    const status = Number((request.query as { status?: string }).status);
+    const codigos = (Object.keys(CATALOGO_ERRORES) as CodigoError[]).filter((c) => !status || CATALOGO_ERRORES[c].status === status);
+    return {
+      forma: { ok: false, codigo: 'CODIGO_ESTABLE', error: 'El motivo en palabras', detalles: '[{ campo, mensaje }] (opcional)', ir: '/panel#... (opcional)' },
+      errores: codigos.map(entradaError),
+    };
+  });
+  app.get<{ Params: { codigo: string } }>('/api/v1/errores/:codigo', async (request) => {
+    const codigo = request.params.codigo.toUpperCase() as CodigoError;
+    if (!Object.hasOwn(CATALOGO_ERRORES, codigo)) throw new ErrorApi(404, 'NO_EXISTE', `No hay ningún error con el código ${request.params.codigo}. La lista está en /api/v1/errores.`);
+    return entradaError(codigo);
+  });
 
   app.get('/api/v1/openapi.json', async () => openApi(config.PUBLIC_BASE_URL));
 
@@ -600,8 +622,15 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     simular: z.boolean().default(false),
   });
 
+  /** La membresia vencida o sin IA: 402 con el motivo y donde arreglarlo. */
+  const exigirPlanIA = () => {
+    const motivo = deps.plan?.motivo('ia');
+    if (motivo) throw new ErrorApi(402, 'PAGO_REQUERIDO', motivo, { ir: '/panel#configuracion' });
+  };
+
   app.post('/api/v1/ia/ordenes', { config: { permiso: 'ia:ordenar' } }, async (request, reply) => {
     if (!deps.ia) return reply.code(503).send({ error: 'la IA operadora no esta activa en este arranque' });
+    exigirPlanIA();
     if (!deps.ia.estado().tieneToken) return reply.code(409).send({ error: 'la IA no esta conectada: un administrador tiene que conectar Puter en Mi asistente IA' });
     const body = ordenApiSchema.parse(request.body ?? {});
     try {
@@ -616,6 +645,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   // La opcion elegida («¿cuál Carlos?»): su tarjeta, sin cambiar nada.
   app.post('/api/v1/ia/ordenes/preparar', { config: { permiso: 'ia:ordenar' } }, async (request, reply) => {
     if (!deps.ia) return reply.code(503).send({ error: 'la IA operadora no esta activa en este arranque' });
+    exigirPlanIA();
     const body = z.object({ accion: z.record(z.string(), z.unknown()) }).safeParse(request.body ?? {});
     if (!body.success) return reply.code(400).send({ error: 'Falta la acción que preparar.' });
     try {
@@ -630,6 +660,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
 
   app.post('/api/v1/ia/ordenes/confirmar', { config: { permiso: 'ia:ordenar' } }, async (request, reply) => {
     if (!deps.ia) return reply.code(503).send({ error: 'la IA operadora no esta activa en este arranque' });
+    exigirPlanIA();
     const body = confirmacionSchema.parse(request.body ?? {});
     try {
       return { hechas: await deps.ia.ejecutarConfirmadas(body.acciones, request.usuario!) };
