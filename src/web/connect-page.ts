@@ -386,6 +386,11 @@ export interface ConnectOpts {
   demo?: boolean;
   /** Si hay modulo de entregas: se ensena tambien la conexion con GSG. */
   conGsg?: boolean;
+  /**
+   * Que pantalla: 'whatsapp' (Conexión WhatsApp, /setup) o 'gsg' (Conexión con
+   * GSG, /conexion-gsg: lo que GSGchat le manda y le pregunta a GSG).
+   */
+  vista?: 'whatsapp' | 'gsg';
 }
 
 function opcionHtml(id: Modo): string {
@@ -402,6 +407,9 @@ function opcionHtml(id: Modo): string {
 
 export function connectPage(opts: ConnectOpts): string {
   const { labels } = opts;
+  const vista = opts.vista ?? 'whatsapp';
+  const vistaWa = vista === 'whatsapp';
+  const tarjetaGsg = Boolean(opts.conGsg) && vista === 'gsg';
   const avanzados = SETUP_FIELDS.map(
     (field) => `
   <label class="campo" for="${field}">${labels[field] ?? field}</label>
@@ -420,8 +428,8 @@ export function connectPage(opts: ConnectOpts): string {
 <div class="wrap">
 <div id="app" class="hidden">
 
-<div class="con-resumen${opts.conGsg ? '' : ' una'}">
-<section class="tarjeta con-card" id="card-wa">
+<div class="con-resumen una">
+${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">💬</span><div class="con-tit"><h2>WhatsApp</h2><span id="wa-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="wa-frase">Revisando la conexión…</p>
   <div id="qr-box" class="hidden">
@@ -446,35 +454,10 @@ export function connectPage(opts: ConnectOpts): string {
     <a class="btn hidden" id="wa-chats" href="/chat">Ir a Chats</a>
   </div>
 </section>
-${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
-  <p><a class="btn primario" href="/conexion-gsg">Abrir conexión de GSG Courier</a></p>
+` : ''}${tarjetaGsg ? `<section class="tarjeta con-card" id="gsg">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>
-  <div class="bloque punteado" id="gsg-endpoints">
-    <h3>Endpoint de GSGchat para GSG</h3>
-    <p class="ayuda">Una sola dirección para todo, con la clave de API en la cabecera <code>X-API-Key</code>. El contrato completo está en el <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI</a>.</p>
-    <div class="ep"><span class="chip tono-azul">POST</span><div class="copiar"><input id="ep-entregas" readonly aria-label="Dirección del endpoint de GSGchat"><button class="btn sm" type="button" data-copiar="ep-entregas">Copiar</button></div></div>
-    <ul class="ayuda ep-usos">
-      <li><b>Pedidos nuevos:</b> <code>{ tracking, cliente, telefono, empresa, metodoPago, montoCobrar, … }</code> (uno o una lista).</li>
-      <li><b>Cancelar o reintentar un pedido:</b> <code>{ tracking, accion: "CANCELAR" | "REINTENTAR", telefono?, motivo?, simular? }</code></li>
-    </ul>
-    <span id="ep-copiado" class="chip hidden" role="status"></span>
-    <details id="ep-probar-flujo"><summary>Probar «Cancelar o reintentar»</summary>
-      <form id="ep-flujo-form" class="ep-form" novalidate>
-        <label class="campo" for="ep-tracking">Tracking</label><input id="ep-tracking" type="text" autocomplete="off" placeholder="PED-205" required>
-        <label class="campo" for="ep-accion">Acción</label><select id="ep-accion"><option value="REINTENTAR">REINTENTAR</option><option value="CANCELAR">CANCELAR</option></select>
-        <label class="campo" for="ep-telefono">Teléfono corregido (opcional, solo REINTENTAR)</label><input id="ep-telefono" type="tel" autocomplete="off" placeholder="987654321">
-        <label class="ep-check"><input id="ep-simular" type="checkbox" checked> Simular: decir lo que haría sin cambiar el pedido</label>
-        <div class="acciones"><button class="btn primario sm" id="ep-flujo-enviar" type="submit">Enviar</button></div>
-      </form>
-      <pre id="ep-flujo-resultado" class="ep-resultado hidden" role="status" aria-live="polite"></pre>
-    </details>
-    <div class="bloque">
-      <p class="ayuda"><b>Últimas llamadas al endpoint</b> <a id="ep-llamadas-refrescar" href="#">Actualizar</a></p>
-      <div id="ep-llamadas" class="ayuda">Todavía nadie lo ha llamado.</div>
-    </div>
-  </div>
   <div class="bloque punteado" id="gsg-consulta">
     <h3>Consulta del estado de un envío en GSG</h3>
     <p class="ayuda" id="gsg-consulta-url">Sin ruta de consulta configurada: GSGchat no le pregunta nada a GSG. Configúrala en «Cambiar la URL o la API Key de GSG».</p>
@@ -485,6 +468,12 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
       <div class="acciones"><button class="btn sm" id="gsg-consulta-enviar" type="submit">Consultar a GSG (solo lectura)</button></div>
     </form>
     <pre id="gsg-consulta-resultado" class="ep-resultado hidden" role="status" aria-live="polite"></pre>
+  </div>
+  <div class="bloque punteado" id="gsg-envios-caja">
+    <h3>Lo que enviamos a GSG</h3>
+    <p class="ayuda" id="gsg-envios-destino"></p>
+    <div id="gsg-envios" class="ayuda">Cargando…</div>
+    <p class="ayuda"><a id="gsg-envios-refrescar" href="#">Actualizar</a></p>
   </div>
   <details><summary>Ubicación y seguimiento del cliente</summary>
     <p>Las direcciones escritas y los enlaces de Maps se confirman antes de reportar la ubicación. Los horarios y el orden de reparto proceden de GSG.</p>
@@ -536,7 +525,7 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
 </section>
 ` : ''}</div>
 
-<details class="con-avanzado" id="con-avanzado">
+${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
   <summary><b>Conectar con Meta, paso a paso</b><span class="ayuda">WhatsApp Business por la API oficial, prueba de envío, conexiones de prueba (QR, WAHA) y datos para programadores.</span></summary>
 <ol class="progreso" id="progreso" aria-label="Progreso de la conexión">
   <li data-paso="1"><span class="n">1</span><span class="t">Cómo</span></li>
@@ -667,33 +656,6 @@ ${
   <div class="acciones"><button class="btn primario" id="perfil-aplicar" type="button">Aplicar este perfil</button><span id="perfil-state" class="chip hidden" role="status"></span></div>
 </section>
 
-<section class="tarjeta paso" id="gsg-avanzado">
-  <h2>GSG: herramientas</h2>
-  <div class="bloque">
-    <h3>Para que GSG conecte su sistema</h3>
-    <p class="ayuda">Con una clave, GSG nos manda cada pedido en cuanto entra y se entera de lo que pasa: confirmó, hora avisada, entregado, incidencia. Es la única forma en que llegan los pedidos: GSGchat no se los pide.</p>
-    <div class="acciones"><button class="btn" id="gsg-clave" type="button">Administrar claves API</button><span id="gsg-clave-state" class="chip hidden" role="status"></span></div>
-    <div id="gsg-clave-nueva" class="secreto hidden">
-      <b>Clave para GSG: cópiala ahora, no se volverá a mostrar.</b>
-      <code id="gsg-clave-valor"></code>
-      <ol id="gsg-clave-pasos" class="ayuda"></ol>
-      <div class="acciones"><button class="btn sm" id="gsg-clave-copiar" type="button">Copiar la clave</button></div>
-    </div>
-    <details id="gsg-dev">
-      <summary>Para los programadores de GSG: dirección, OpenAPI y lo que nos mandaron</summary>
-      <div class="copiar"><input id="gsg-api-url" readonly value="/api/v1/entregas" aria-label="Dirección de la API para GSG"><button class="btn" id="gsg-api-copiar" type="button">Copiar la dirección</button></div>
-      <div class="acciones">
-        <a class="btn" href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
-        <a class="btn" href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a>
-      </div>
-      <p class="ayuda separada">El OpenAPI explica cada llamada, sus datos y los errores que devuelve la API.</p>
-      <div class="bloque punteado">
-        <p class="ayuda"><b>Lo que GSG nos mandó</b> (las últimas llamadas, con lo que se les contestó). <a id="gsg-bitacora-refrescar" href="#">Actualizar</a></p>
-        <div id="gsg-bitacora" class="ayuda">Todavía nadie ha llamado.</div>
-      </div>
-    </details>
-  </div>
-</section>
 `
     : ''
 }
@@ -716,11 +678,11 @@ ${
   </div>
 </details>
 </details>
-
+` : ''}
 </div>
 </div>`;
 
-  const script = String.raw`
+  const scriptComun = String.raw`
 /* --- acceso ----------------------------------------------------------- */
 /* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
 async function api(path, options) {
@@ -784,6 +746,8 @@ function fecha(iso) {
   return isNaN(d.getTime()) ? '' : d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+`;
+  const scriptWa = String.raw`
 var FIELDS = ${JSON.stringify(SETUP_FIELDS)};
 var CAMPOS_POR_MODO = ${JSON.stringify(CAMPOS_POR_MODO)};
 var CAMPOS_OPCIONALES = ${JSON.stringify(CAMPOS_OPCIONALES)};
@@ -1719,6 +1683,11 @@ if ($('perfil')) {
   cargarPerfil();
 }
 
+`;
+  const scriptGsg = String.raw`
+/* En la pantalla de GSG no hay tarjeta de WhatsApp: el armazon se enseña aqui. */
+if (!document.getElementById('card-wa') && $('app')) $('app').classList.remove('hidden');
+
 ${UNIR_URL_GSG_JS}
 
 /* La URL final (URL base + ruta) en vivo, con el mismo algoritmo que el servidor. */
@@ -1882,12 +1851,6 @@ if ($('gsg')) {
     catch (error) { estado('gsg-state', error.message, 'rojo'); }
   };
 
-  setVal('gsg-api-url', location.origin + '/api/v1/entregas');
-  $('gsg-api-copiar').onclick = function () { copiar(val('gsg-api-url'), 'gsg-clave-state', 'Dirección'); };
-  $('gsg-clave-copiar').onclick = function () { copiar($('gsg-clave-valor').textContent, 'gsg-clave-state', 'Clave'); };
-
-  $('gsg-clave').onclick = function() { location.href = '/conexion-gsg'; };
-
   function pintarExtras(r) {
     var d = r.descartes || { lista: [] };
     if (d.lista && d.lista.length) {
@@ -1899,7 +1862,7 @@ if ($('gsg')) {
     } else ver('gsg-descartes', false);
 
     var llamadas = r.bitacora || [];
-    $('gsg-bitacora').innerHTML = llamadas.length
+    if ($('gsg-bitacora')) $('gsg-bitacora').innerHTML = llamadas.length
       ? '<table><thead><tr><th>Hora</th><th>Llamada</th><th>Con qué entró</th><th>Qué pasó</th></tr></thead><tbody>' +
         llamadas.map(function (l) {
           return '<tr><td>' + esc(hora(l.en)) + '</td><td><code>' + esc(l.que) + '</code></td><td>' + esc(l.quien) +
@@ -1908,51 +1871,27 @@ if ($('gsg')) {
       : 'Todavía nadie ha llamado. Cuando GSG mande pedidos, aquí se verá qué llegó y qué se les contestó.';
   }
   async function cargarExtras() {
-    try { var r = await api('/admin/gsg'); pintarExtras(r); pintarLlamadasFlujo(r.bitacora || []); } catch (error) { estado('gsg-state', error.message, 'rojo'); }
+    try { pintarExtras(await api('/admin/gsg')); } catch (error) { estado('gsg-state', error.message, 'rojo'); }
   }
 
-  /* Endpoints de GSGchat para GSG: direcciones, probar y las ultimas llamadas. */
-  setVal('ep-entregas', location.origin + '/api/v1/entregas');
-  Array.prototype.forEach.call(document.querySelectorAll('[data-copiar]'), function (b) {
-    b.onclick = function () { copiar(val(b.getAttribute('data-copiar')), 'ep-copiado', 'Dirección'); };
-  });
-  function pintarLlamadasFlujo(bitacora) {
-    var caja = $('ep-llamadas');
+  /* Lo que enviamos a GSG: cada ubicacion, con su estado. */
+  async function cargarEnvios() {
+    var caja = $('gsg-envios');
     if (!caja) return;
-    var deFlujo = bitacora.filter(function (l) { var q = String(l.que || ''); return q.indexOf('/api/v1/entregas') >= 0 || q.indexOf('/admin/entregas/flujo') >= 0; });
-    caja.innerHTML = deFlujo.length
-      ? '<table><thead><tr><th>Hora</th><th>Quién</th><th>Qué pasó</th></tr></thead><tbody>' + deFlujo.map(function (l) {
-          return '<tr><td>' + esc(hora(l.en)) + '</td><td>' + esc(l.quien) + (String(l.que || '').indexOf('/admin/') >= 0 ? ' (prueba)' : '') + '</td><td><span class="chip tono-' + (l.status >= 400 ? 'rojo' : 'verde') + '">' + esc(l.status) + '</span> ' + esc(l.resultado) + '</td></tr>';
-        }).join('') + '</tbody></table>'
-      : 'Todavía nadie lo ha llamado. Cuando GSG (o la prueba de arriba) llame, aquí se verá qué pidió y qué se le contestó.';
-  }
-  if ($('ep-llamadas-refrescar')) $('ep-llamadas-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
-  if ($('ep-flujo-form')) $('ep-flujo-form').onsubmit = async function (ev) {
-    ev.preventDefault();
-    var salida = $('ep-flujo-resultado');
-    var boton = $('ep-flujo-enviar');
-    var cuerpo = { tracking: val('ep-tracking'), accion: $('ep-accion').value, simular: $('ep-simular').checked };
-    if (val('ep-telefono')) cuerpo.telefono = val('ep-telefono');
-    if (!cuerpo.simular) {
-      var seguro = await confirmarDialogo({ titulo: cuerpo.accion === 'CANCELAR' ? 'Cancelar el pedido de verdad' : 'Reintentar de verdad', texto: 'No es una simulación: ' + (cuerpo.accion === 'CANCELAR' ? 'el pedido ' + cuerpo.tracking + ' se cancelará.' : 'al cliente de ' + cuerpo.tracking + ' se le volverá a escribir.'), boton: 'Enviar', peligro: cuerpo.accion === 'CANCELAR' });
-      if (!seguro) return;
-    }
-    boton.disabled = true;
-    salida.textContent = 'Enviando…';
-    ver('ep-flujo-resultado', true);
     try {
-      var res = await fetch('/admin/entregas/flujo', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
-      var datos = await res.json().catch(function () { return {}; });
-      salida.textContent = 'HTTP ' + res.status + (datos.codigo ? ' · ' + datos.codigo : '') + '\n' + (datos.detalle || datos.error || '') + '\n\n' + JSON.stringify(datos, null, 2);
-    } catch (error) {
-      salida.textContent = 'No se pudo llamar: ' + error.message;
-    } finally {
-      boton.disabled = false;
-      cargarExtras();
-    }
-  };
+      var env = await api('/admin/gsg/envios');
+      var ESTADOS = { enviado: 'Enviado a GSG', pendiente: 'Pendiente de enviar', fallido: 'Falló el envío' };
+      texto('gsg-envios-destino', env.aviso ? env.aviso : 'Se envía con POST a ' + (env.destino || '(sin dirección)') + ' con la cabecera X-API-Key.');
+      caja.innerHTML = (env.items || []).length
+        ? '<table><thead><tr><th>Fecha</th><th>Cuerpo enviado</th><th>Estado</th><th>Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
+            return '<tr><td>' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></td><td><b>' + esc(ESTADOS[r.estado] || r.estado) + '</b></td><td>' + esc(r.intentos) + '</td><td>' + esc(r.error || '') + '</td></tr>';
+          }).join('') + '</tbody></table>'
+        : 'Todavía no se ha enviado ninguna ubicación a GSG. Se envía sola cuando un cliente manda su ubicación por WhatsApp.';
+    } catch (error) { caja.textContent = 'No se pudo consultar lo enviado a GSG: ' + error.message; }
+  }
+  if ($('gsg-envios-refrescar')) $('gsg-envios-refrescar').onclick = function (ev) { ev.preventDefault(); cargarEnvios(); };
 
-  $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
+  if ($('gsg-bitacora-refrescar')) $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
   async function cargarSeguimiento() {
     var caja = $('seguimiento-estado');
     if (!caja) return;
@@ -1974,7 +1913,7 @@ if ($('gsg')) {
     boton.disabled = true;
     boton.textContent = 'Revisando…';
     sinEstado('seguimiento-cuando');
-    await Promise.all([cargarSeguimiento(), cargarGsg(), cargarExtras()]);
+    await Promise.all([cargarSeguimiento(), cargarGsg(), cargarExtras(), cargarEnvios()]);
     boton.disabled = false;
     boton.textContent = 'Actualizar diagnóstico';
     var ahora = new Date();
@@ -1983,12 +1922,14 @@ if ($('gsg')) {
   cargarSeguimiento();
   cargarGsg();
   cargarExtras();
+  cargarEnvios();
 }
 `;
+  const script = scriptComun + (vistaWa ? scriptWa : '') + (tarjetaGsg ? scriptGsg : '');
 
   return appShell({
-    titulo: opts.conGsg ? 'Conexión' : 'Conexión de WhatsApp',
-    subtitulo: 'WhatsApp y GSG: si están conectados y qué falta',
+    titulo: vistaWa ? 'Conexión WhatsApp' : 'Conexión con GSG',
+    subtitulo: vistaWa ? 'El número de WhatsApp: si está conectado y qué falta' : 'Lo que GSGchat le manda y le pregunta a GSG: URL, API Key, ubicaciones y consulta de estado',
     contenido,
     script,
     css: CSS,

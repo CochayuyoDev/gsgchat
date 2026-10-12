@@ -11,6 +11,7 @@ import { ajustesPorDefecto } from '../src/rutas/ajustes.js';
 import { crearEscenarioEntregas, PAUSA_SEGUNDOS, PIN_LIMA, type EscenarioEntregas } from './escenario-entregas.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { connectPage } from '../src/web/connect-page.js';
+import { gsgCourierPage } from '../src/web/gsg-courier-page.js';
 
 const ESPERA_MIN = 30;
 const GSG = { empresa: { codigo: 'T01', nombre: 'Tienda Prueba' }, metodoPago: 'Contraentrega', montoCobrar: 40 };
@@ -362,12 +363,14 @@ describe('Conexión → endpoints de GSGchat para GSG', () => {
     }
   }, 90_000);
 
-  it('la página de Conexión trae los tres endpoints, el probador y un script que el navegador puede ejecutar', async () => {
-    const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true });
-    for (const id of ['ep-entregas', 'ep-flujo-form', 'ep-llamadas', 'seguimiento-cuando']) expect(html, id).toContain(`id="${id}"`);
-    // Un solo endpoint: ni /flujo ni el catalogo como direcciones aparte.
-    for (const id of ['ep-flujo"', 'ep-errores']) expect(html).not.toContain(`id="${id}`);
-    expect(html).not.toContain('/api/v1/flujo');
+  it('Conexión con GSG trae el diagnóstico, y Nuestra API el único endpoint y su probador, con scripts que compilan', async () => {
+    const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true, vista: 'gsg' });
+    expect(html).toContain('id="seguimiento-cuando"');
+    expect(html).not.toContain('id="ep-');
+    const api = gsgCourierPage({ nombreNegocio: 'Prueba', disponible: true });
+    for (const id of ['courier-url', 'np-flujo-form', 'courier-bitacora']) expect(api, id).toContain(`id="${id}"`);
+    expect(api).not.toContain('/api/v1/flujo');
+    for (const m of api.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) if (m[1]!.trim()) expect(() => new Function(m[1]!)).not.toThrow();
     for (const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
       if (!m[1]!.trim()) continue;
       expect(() => new Function(m[1]!), 'el script de la página no compila').not.toThrow();

@@ -250,7 +250,7 @@ describe('antes de escribirle, GSG dice si sigue', () => {
 
 describe('la pantalla de Conexión', () => {
   it('trae la ruta de consulta, sus parámetros, el probador y un script que compila', () => {
-    const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true });
+    const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true, vista: 'gsg' });
     for (const id of ['gsg-ruta-estado', 'gsg-param-tracking', 'gsg-param-telefono', 'gsg-url-estado', 'gsg-consulta-form', 'gsg-consulta-resultado']) expect(html, id).toContain(`id="${id}"`);
     for (const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
       if (!m[1]!.trim()) continue;

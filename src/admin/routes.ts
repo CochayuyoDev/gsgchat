@@ -322,11 +322,11 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       const extras = (deps.conexionGsg ?? conexionGsgVigente())?.extras;
       if (extras) {
         const descartes = extras.descartesDeHoy().lista.length;
-        if (descartes > 0) avisos.push({ tipo: 'gsg_descartes', nivel: 'warn', texto: `${descartes} pedido${descartes === 1 ? '' : 's'} de GSG no se pudo${descartes === 1 ? '' : 'ieron'} leer`, href: '/setup#gsg', n: descartes });
+        if (descartes > 0) avisos.push({ tipo: 'gsg_descartes', nivel: 'warn', texto: `${descartes} pedido${descartes === 1 ? '' : 's'} de GSG no se pudo${descartes === 1 ? '' : 'ieron'} leer`, href: '/conexion-gsg', n: descartes });
         const cuadre = extras.ultimoCuadre();
         if (cuadre && !cuadre.ok) {
           const abiertas = cuadre.abiertas.length;
-          avisos.push({ tipo: 'gsg_cuadre', nivel: 'warn', texto: `El día ${cuadre.dia} tiene ${abiertas} pedido${abiertas === 1 ? '' : 's'} sin cerrar`, href: '/setup#gsg', n: abiertas });
+          avisos.push({ tipo: 'gsg_cuadre', nivel: 'warn', texto: `El día ${cuadre.dia} tiene ${abiertas} pedido${abiertas === 1 ? '' : 's'} sin cerrar`, href: '/conexion-gsg', n: abiertas });
         }
       }
     } catch {

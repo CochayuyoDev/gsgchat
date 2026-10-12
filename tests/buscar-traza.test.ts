@@ -182,7 +182,7 @@ describe('los primeros pasos del modo GSG', () => {
     const descarte = avisos.find((a) => a.tipo === 'gsg_descartes');
     expect(descarte).toBeTruthy();
     expect(descarte!.texto).toMatch(/de GSG no se pud/);
-    expect(descarte!.href).toBe('/setup#gsg');
+    expect(descarte!.href).toBe('/conexion-gsg');
     expect(descarte!.n).toBe(descartados);
     // Sin cuadre hecho, no hay aviso de cuadre.
     expect(avisos.find((a) => a.tipo === 'gsg_cuadre')).toBeUndefined();

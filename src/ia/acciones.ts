@@ -591,7 +591,7 @@ const ACCIONES_DE_SIEMPRE: Accion[] = [
       const r = await ctx.llamar({ method: 'POST', url: '/admin/gsg/verificar-contrato', body: {} });
       if (!ok(r)) return errorDe(r, 'No se pudo verificar el contrato con GSG.');
       const j = r.json as { ok: boolean; verificacion: { resumen: string; hallazgos: Array<{ tipo: string; donde: string; detalle: string }> } };
-      return { ok: true, resumen: j.verificacion.resumen, datos: j.verificacion.hallazgos.slice(0, 20), ir: '/setup#gsg' };
+      return { ok: true, resumen: j.verificacion.resumen, datos: j.verificacion.hallazgos.slice(0, 20), ir: '/conexion-gsg' };
     },
   }),
   def({
@@ -605,7 +605,7 @@ const ACCIONES_DE_SIEMPRE: Accion[] = [
       const r = await ctx.llamar({ method: 'GET', url: `/admin/gsg/cuadre${p.dia ? `?dia=${p.dia}` : ''}` });
       if (!ok(r)) return errorDe(r, 'No se pudo cuadrar con GSG.');
       const c = (r.json as { cuadre: { resumen: string; ok: boolean; total: number; cerradasAqui: number; abiertas: string[] } }).cuadre;
-      return { ok: true, resumen: c.resumen, datos: { total: c.total, cerradas: c.cerradasAqui, abiertas: c.abiertas, cuadra: c.ok }, ir: '/setup#gsg' };
+      return { ok: true, resumen: c.resumen, datos: { total: c.total, cerradas: c.cerradasAqui, abiertas: c.abiertas, cuadra: c.ok }, ir: '/conexion-gsg' };
     },
   }),
 
