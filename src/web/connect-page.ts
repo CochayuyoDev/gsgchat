@@ -463,7 +463,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
     <p class="ayuda" id="gsg-consulta-url">Sin ruta de consulta configurada: GSGchat no le pregunta nada a GSG. Configúrala en «Cambiar la URL o la API Key de GSG».</p>
     <p class="ayuda">Antes de escribirle a un cliente, GSGchat pregunta por ese tracking. Si GSG dice <b>cancelado</b>, <b>número incorrecto</b>, <b>tracking incorrecto</b> o <b>no se puede contactar</b>, deja de escribir <b>solo por ese tracking</b>: los otros envíos del mismo cliente siguen. Si GSG no contesta o no se entiende, no se toma como cancelado.</p>
     <form id="gsg-consulta-form" class="ep-form" novalidate>
-      <label class="campo" for="gsg-consulta-tracking">Tracking</label><input id="gsg-consulta-tracking" type="text" autocomplete="off" placeholder="PED-205" required>
+      <label class="campo" for="gsg-consulta-tracking">Tracking</label><input id="gsg-consulta-tracking" type="text" autocomplete="off" placeholder="GSG-E-205" required>
       <label class="campo" for="gsg-consulta-telefono">Teléfono (opcional)</label><input id="gsg-consulta-telefono" type="tel" autocomplete="off" placeholder="987654321">
       <div class="acciones"><button class="btn sm" id="gsg-consulta-enviar" type="submit">Consultar a GSG (solo lectura)</button></div>
     </form>

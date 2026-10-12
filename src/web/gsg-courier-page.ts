@@ -5,7 +5,7 @@ import { MENSAJE_ERROR_HTTP_JS } from './bandeja-mensajes.js';
 
 /** Los 12 campos del contrato con GSG Courier. */
 export const EJEMPLO_COURIER = { pedidos: [{
-  tracking: 'GSG-000001', empresa: 'Tienda Uno', cliente: 'Ana Pérez', telefono: '987654321',
+  tracking: 'GSG-E-205', empresa: 'Tienda Uno', cliente: 'Ana Pérez', telefono: '987654321',
   metodoPago: 'Efectivo', montoCobrar: 85,
   distrito: 'Lince', direccion: 'Av. Lima 123', fecRuta: '2026-10-03', telefono2: '988777666',
   producto: 'Zapatos', cantBultos: 2,
@@ -31,7 +31,7 @@ const CAMPOS: Array<[string, string, boolean, string]> = [
 const CAMPOS_ANTERIORES = ['driver', 'costServ', 'referenciaDireccion', 'fecRegistro', 'observacionCliente', 'detalleProducto', 'tamano', 'clientePagaDelivery', 'sede', 'tipoRuta', 'nroDocumento', 'agenciaNombre', 'agenciaDestino', 'pagoEnDestino'];
 
 /** Un cuerpo de ejemplo de la API 2 (el mismo tracking que el ejemplo de la API 1). */
-export const EJEMPLO_FLUJO = { tracking: 'GSG-000001', accion: 'CANCELAR', motivo: 'El cliente anuló el pedido' };
+export const EJEMPLO_FLUJO = { tracking: 'GSG-E-205', accion: 'CANCELAR', motivo: 'El cliente anuló el pedido' };
 
 /** Como se arma la llamada en Postman: [paso, valor]. */
 function postman(id: string, url: string, cuerpo: string, extra: string): string {
@@ -58,6 +58,7 @@ const RESPUESTAS_FLUJO: Array<[string, string]> = [
   ['400', 'Falta el tracking, la acción no es CANCELAR o REINTENTAR, o el teléfono corregido no vale: «detalles» dice qué campo.'],
   ['401 / 403', 'Lo mismo que en la API 1: sin clave, clave inválida o sin permiso de recepción.'],
   ['404', 'No hay ningún pedido en curso con ese tracking (los de días anteriores se cierran con el día: mándalo como pedido nuevo).'],
+  ['405', 'Se usó GET u otro método: la API 2 solo acepta POST.'],
   ['409', 'Ya está entregado, cancelado o terminado, o espera «Confirmar y enviar».'],
   ['429', 'Más de 120 llamadas por minuto con la misma clave (se cuentan junto con la API 1).'],
   ['400 en la API 1', 'Si se manda una orden con «accion» a la dirección de pedidos, se responde 400 indicando que va en /api/v1/flujo.'],
@@ -71,7 +72,10 @@ const RESPUESTAS: Array<[string, string]> = [
   ['401', 'Sin clave, o la clave no es válida o fue revocada.'],
   ['403', 'La clave es válida pero no tiene permiso de recepción (entregas:gestionar), o la tienda está suspendida.'],
   ['404', 'La ruta no existe (por ejemplo, con /tienda/<nombre> delante).'],
+  ['405', 'Método no permitido: los pedidos se mandan con POST (la cabecera Allow dice cuáles valen).'],
   ['409', 'La clave está registrada en dos tiendas: no se sabe a cuál va.'],
+  ['413', 'El cuerpo pasa de 4 MiB: dividir los pedidos en varias llamadas (hasta 600 por llamada).'],
+  ['415', 'No es JSON: mandar Content-Type: application/json.'],
   ['429', 'Más de 120 llamadas por minuto con la misma clave: esperar lo que dice Retry-After.'],
   ['503', 'La base de datos no responde: repetir la misma llamada (lo ya guardado no se duplica).'],
   ['500', 'Error interno inesperado: repetir la misma llamada; queda en el registro del servidor.'],
@@ -107,14 +111,14 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <div class="courier-actions"><button class="btn" id="courier-copiar-url-2" type="button">Copiar dirección</button></div>
         <p><code>Content-Type: application/json</code><br><code>X-API-Key: CLAVE_DE_GSG</code> (la misma clave de la API 1)</p>
         ${postman('postman-2', '/api/v1/flujo', JSON.stringify(EJEMPLO_FLUJO, null, 2), '<p><b>Antes</b>, crea el pedido con la API 1: la API 2 no crea pedidos, actúa sobre uno que ya existe. Usa su <code>tracking</code> de GSG (o su <code>referencia</code>). Para probar sin cambiar nada, añade <code>"simular": true</code>.</p><p>Respuesta esperada: <b>200</b> con <code>detalle</code>. Si el tracking no está en curso: <b>404</b>.</p><div class="courier-actions"><button class="btn" id="courier-descargar-2" type="button">Descargar JSON de ejemplo</button></div>')}
-        <p>Para reintentar con el teléfono corregido: <code>{ "tracking": "GSG-000001", "accion": "REINTENTAR", "telefono": "987654321" }</code></p>
+        <p>Para reintentar con el teléfono corregido: <code>{ "tracking": "GSG-E-205", "accion": "REINTENTAR", "telefono": "987654321" }</code></p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_FLUJO.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
         <h3>Respuestas</h3>
         <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS_FLUJO.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div>
         <h3>Probar</h3>
         <p>La misma lógica que cuando GSG llama a la API 2. Por defecto se simula: dice lo que haría sin tocar el pedido.</p>
         <form id="np-flujo-form" novalidate>
-          <label for="np-tracking">Tracking</label><input id="np-tracking" autocomplete="off" placeholder="PED-205" required>
+          <label for="np-tracking">Tracking</label><input id="np-tracking" autocomplete="off" placeholder="GSG-E-205" required>
           <label for="np-accion">Acción</label><select id="np-accion"><option value="REINTENTAR">REINTENTAR</option><option value="CANCELAR">CANCELAR</option></select>
           <label for="np-telefono">Teléfono corregido (opcional, solo REINTENTAR)</label><input id="np-telefono" type="tel" autocomplete="off" placeholder="987654321">
           <label class="np-check"><input id="np-simular" type="checkbox" checked> Simular: decir lo que haría sin cambiar el pedido</label>
