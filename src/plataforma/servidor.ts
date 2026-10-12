@@ -33,9 +33,9 @@ import { enTienda } from './contexto.js';
 import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
-import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS } from '../api/errores.js';
+import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, registrarCatalogoErrores } from '../api/errores.js';
 import { normalizarRuta } from '../util/ruta-normalizada.js';
-import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
+import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, rechazoSinClave, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
 const PREFIJO = '/tienda/';
@@ -113,7 +113,13 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
       return { tipo: 'rechazo', rechazo: RECHAZOS.metodo() };
     }
     const rutaApi = url.split('?')[0] ?? '';
-    if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) &&(rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/') || (rutaApi === '/api/v1/seguimiento' && req.method === 'POST')))) {
+    // El catalogo de errores es el mismo en todas las tiendas: lo contesta la plataforma, sin clave.
+    if (rutaApi === '/api/v1/errores' || rutaApi.startsWith('/api/v1/errores/')) return { tipo: 'plataforma', url };
+    // Lo que usa GSG con su clave va a la tienda de esa clave (sin prefijo ni
+    // cookie): la recepcion (que tambien cancela o reintenta con «accion»), el
+    // seguimiento y la bandeja de reportados.
+    const deGsg = rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/') || (rutaApi === '/api/v1/seguimiento' && req.method === 'POST') || rutaApi === '/api/v1/reportados' || rutaApi.startsWith('/api/v1/reportados/') || rutaApi === '/api/v1/trackings';
+    if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) && deGsg)) {
       const permiso = req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
       const r = await tiendaDeClaveGsg(plataforma, req.headers, permiso);
       return 'tienda' in r ? { tipo: 'tienda', tienda: r.tienda, url } : { tipo: 'rechazo', rechazo: r.rechazo };
@@ -140,7 +146,10 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
       if (tienda) return { tipo: 'tienda', tienda, url };
     }
     const principal = await plataforma.tiendaPrincipal();
-    return principal ? { tipo: 'tienda', tienda: principal, url } : { tipo: 'plataforma', url };
+    if (principal) return { tipo: 'tienda', tienda: principal, url };
+    // Una ruta de GSG sin clave ni tienda a la vista: falta la clave (401), no «la ruta no existe».
+    if (deGsg) return { tipo: 'rechazo', rechazo: rechazoSinClave(req.headers) };
+    return { tipo: 'plataforma', url };
   }
 
   const server = http.createServer((req, res) => {
@@ -317,6 +326,9 @@ async function rutasDeLaPlataforma(plataforma: Plataforma, segura: boolean, logg
   );
 
   web.get('/health', async () => ({ ok: true, plataforma: true, tiendas: await plataforma.cuantas() }));
+
+  // El catalogo de errores de la API (igual en todas las tiendas).
+  registrarCatalogoErrores(web);
 
   // Lo que no es de ninguna tienda: una pantalla lleva a entrar; lo demas, un 404 que se entiende.
   web.setNotFoundHandler(async (request, reply) => {

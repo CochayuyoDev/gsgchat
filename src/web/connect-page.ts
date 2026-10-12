@@ -282,6 +282,16 @@ const CSS = `
   .secreto { display: block; border: 1px dashed var(--primario); border-radius: var(--radio-sm); padding: 10px 12px; margin-top: var(--esp-2); }
   .secreto code { display: block; margin: 6px 0; }
   #gsg-bitacora { overflow-x: auto; max-width: 100%; font-size: 13px; }
+  #gsg-endpoints h3 { margin: 0 0 6px; }
+  #gsg-endpoints .ep { margin: 10px 0; }
+  #gsg-endpoints .ep .copiar { margin-top: 4px; }
+  #gsg-endpoints .ep-usos { margin: 6px 0 10px; padding-left: 18px; }
+  #gsg-endpoints .ep-form { display: grid; gap: 6px; max-width: 420px; margin: 8px 0; }
+  #gsg-endpoints .ep-check { display: flex; gap: 8px; align-items: center; }
+  #gsg-endpoints .ep-resultado { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--superficie-2); font-size: 12.5px; }
+  #ep-llamadas { overflow-x: auto; max-width: 100%; }
+  #ep-llamadas table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  #ep-llamadas th, #ep-llamadas td { text-align: left; padding: 4px 6px; vertical-align: top; }
   #gsg-bitacora table { min-width: 520px; width: 100%; border-collapse: collapse; font-size: 12.5px; }
   #gsg-bitacora th, #gsg-bitacora td { text-align: left; padding: 4px 6px; }
   #gsg-sim-valor, #gsg-clave-valor { overflow-wrap: anywhere; }
@@ -437,11 +447,35 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
   <div id="gsg-estado" class="ayuda">Cargando…</div>
+  <div class="bloque punteado" id="gsg-endpoints">
+    <h3>Endpoint de GSGchat para GSG</h3>
+    <p class="ayuda">Una sola dirección para todo, con la clave de API en la cabecera <code>X-API-Key</code>. El contrato completo está en el <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI</a>.</p>
+    <div class="ep"><span class="chip tono-azul">POST</span><div class="copiar"><input id="ep-entregas" readonly aria-label="Dirección del endpoint de GSGchat"><button class="btn sm" type="button" data-copiar="ep-entregas">Copiar</button></div></div>
+    <ul class="ayuda ep-usos">
+      <li><b>Pedidos nuevos:</b> <code>{ tracking, cliente, telefono, empresa, metodoPago, montoCobrar, … }</code> (uno o una lista).</li>
+      <li><b>Cancelar o reintentar un pedido:</b> <code>{ tracking, accion: "CANCELAR" | "REINTENTAR", telefono?, motivo?, simular? }</code></li>
+    </ul>
+    <span id="ep-copiado" class="chip hidden" role="status"></span>
+    <details id="ep-probar-flujo"><summary>Probar «Cancelar o reintentar»</summary>
+      <form id="ep-flujo-form" class="ep-form" novalidate>
+        <label class="campo" for="ep-tracking">Tracking</label><input id="ep-tracking" type="text" autocomplete="off" placeholder="PED-205" required>
+        <label class="campo" for="ep-accion">Acción</label><select id="ep-accion"><option value="REINTENTAR">REINTENTAR</option><option value="CANCELAR">CANCELAR</option></select>
+        <label class="campo" for="ep-telefono">Teléfono corregido (opcional, solo REINTENTAR)</label><input id="ep-telefono" type="tel" autocomplete="off" placeholder="987654321">
+        <label class="ep-check"><input id="ep-simular" type="checkbox" checked> Simular: decir lo que haría sin cambiar el pedido</label>
+        <div class="acciones"><button class="btn primario sm" id="ep-flujo-enviar" type="submit">Enviar</button></div>
+      </form>
+      <pre id="ep-flujo-resultado" class="ep-resultado hidden" role="status" aria-live="polite"></pre>
+    </details>
+    <div class="bloque">
+      <p class="ayuda"><b>Últimas llamadas al endpoint</b> <a id="ep-llamadas-refrescar" href="#">Actualizar</a></p>
+      <div id="ep-llamadas" class="ayuda">Todavía nadie lo ha llamado.</div>
+    </div>
+  </div>
   <details><summary>Ubicación y seguimiento del cliente</summary>
     <p>Las direcciones escritas y los enlaces de Maps se confirman antes de reportar la ubicación. Los horarios y el orden de reparto proceden de GSG.</p>
     <p id="seguimiento-estado" role="status" aria-live="polite">Revisando seguimiento…</p>
     <div id="seguimiento-pedidos" class="ayuda"></div>
-    <button class="btn sm" id="seguimiento-refrescar" type="button">Actualizar diagnóstico</button>
+    <div class="acciones"><button class="btn sm" id="seguimiento-refrescar" type="button">Actualizar diagnóstico</button><span id="seguimiento-cuando" class="chip hidden" role="status"></span></div>
   </details>
   <div id="gsg-config-error" class="nota riesgo hidden" role="alert"></div>
   <details class="con-form" id="gsg-form-caja"><summary id="gsg-form-resumen">Cambiar la URL o la API Key de GSG</summary>
@@ -1814,13 +1848,55 @@ if ($('gsg')) {
       : 'Todavía nadie ha llamado. Cuando GSG mande pedidos, aquí se verá qué llegó y qué se les contestó.';
   }
   async function cargarExtras() {
-    try { pintarExtras(await api('/admin/gsg')); } catch (error) { estado('gsg-state', error.message, 'rojo'); }
+    try { var r = await api('/admin/gsg'); pintarExtras(r); pintarLlamadasFlujo(r.bitacora || []); } catch (error) { estado('gsg-state', error.message, 'rojo'); }
   }
+
+  /* Endpoints de GSGchat para GSG: direcciones, probar y las ultimas llamadas. */
+  setVal('ep-entregas', location.origin + '/api/v1/entregas');
+  Array.prototype.forEach.call(document.querySelectorAll('[data-copiar]'), function (b) {
+    b.onclick = function () { copiar(val(b.getAttribute('data-copiar')), 'ep-copiado', 'Dirección'); };
+  });
+  function pintarLlamadasFlujo(bitacora) {
+    var caja = $('ep-llamadas');
+    if (!caja) return;
+    var deFlujo = bitacora.filter(function (l) { var q = String(l.que || ''); return q.indexOf('/api/v1/entregas') >= 0 || q.indexOf('/admin/entregas/flujo') >= 0; });
+    caja.innerHTML = deFlujo.length
+      ? '<table><thead><tr><th>Hora</th><th>Quién</th><th>Qué pasó</th></tr></thead><tbody>' + deFlujo.map(function (l) {
+          return '<tr><td>' + esc(hora(l.en)) + '</td><td>' + esc(l.quien) + (String(l.que || '').indexOf('/admin/') >= 0 ? ' (prueba)' : '') + '</td><td><span class="chip tono-' + (l.status >= 400 ? 'rojo' : 'verde') + '">' + esc(l.status) + '</span> ' + esc(l.resultado) + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : 'Todavía nadie lo ha llamado. Cuando GSG (o la prueba de arriba) llame, aquí se verá qué pidió y qué se le contestó.';
+  }
+  if ($('ep-llamadas-refrescar')) $('ep-llamadas-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
+  if ($('ep-flujo-form')) $('ep-flujo-form').onsubmit = async function (ev) {
+    ev.preventDefault();
+    var salida = $('ep-flujo-resultado');
+    var boton = $('ep-flujo-enviar');
+    var cuerpo = { tracking: val('ep-tracking'), accion: $('ep-accion').value, simular: $('ep-simular').checked };
+    if (val('ep-telefono')) cuerpo.telefono = val('ep-telefono');
+    if (!cuerpo.simular) {
+      var seguro = await confirmarDialogo({ titulo: cuerpo.accion === 'CANCELAR' ? 'Cancelar el pedido de verdad' : 'Reintentar de verdad', texto: 'No es una simulación: ' + (cuerpo.accion === 'CANCELAR' ? 'el pedido ' + cuerpo.tracking + ' se cancelará.' : 'al cliente de ' + cuerpo.tracking + ' se le volverá a escribir.'), boton: 'Enviar', peligro: cuerpo.accion === 'CANCELAR' });
+      if (!seguro) return;
+    }
+    boton.disabled = true;
+    salida.textContent = 'Enviando…';
+    ver('ep-flujo-resultado', true);
+    try {
+      var res = await fetch('/admin/entregas/flujo', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      var datos = await res.json().catch(function () { return {}; });
+      salida.textContent = 'HTTP ' + res.status + (datos.codigo ? ' · ' + datos.codigo : '') + '\n' + (datos.detalle || datos.error || '') + '\n\n' + JSON.stringify(datos, null, 2);
+    } catch (error) {
+      salida.textContent = 'No se pudo llamar: ' + error.message;
+    } finally {
+      boton.disabled = false;
+      cargarExtras();
+    }
+  };
 
   $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
   async function cargarSeguimiento() {
     var caja = $('seguimiento-estado');
     if (!caja) return;
+    caja.textContent = 'Revisando…';
     try {
       var r = await api('/admin/entregas/seguimiento/estado');
       caja.textContent = (r.conectado ? 'Hay seguimiento recibido de GSG.' : 'Sin seguimiento de GSG: GSGchat no se lo pide (nunca le pide nada a GSG), así que al cliente se le contesta con el horario y la situación de su pedido.') + ' ' +
@@ -1831,7 +1907,19 @@ if ($('gsg')) {
       }).join(' | ');
     } catch (error) { caja.textContent = 'No se pudo consultar el diagnóstico: ' + error.message; }
   }
-  if ($('seguimiento-refrescar')) $('seguimiento-refrescar').onclick = cargarSeguimiento;
+  /* «Actualizar diagnóstico»: antes volvia a pintar el mismo texto y parecia
+     que no hacia nada. Ahora revisa todo lo de GSG y dice cuando lo hizo. */
+  if ($('seguimiento-refrescar')) $('seguimiento-refrescar').onclick = async function () {
+    var boton = $('seguimiento-refrescar');
+    boton.disabled = true;
+    boton.textContent = 'Revisando…';
+    sinEstado('seguimiento-cuando');
+    await Promise.all([cargarSeguimiento(), cargarGsg(), cargarExtras()]);
+    boton.disabled = false;
+    boton.textContent = 'Actualizar diagnóstico';
+    var ahora = new Date();
+    estado('seguimiento-cuando', 'Actualizado a las ' + String(ahora.getHours()).padStart(2, '0') + ':' + String(ahora.getMinutes()).padStart(2, '0') + ':' + String(ahora.getSeconds()).padStart(2, '0'), 'verde');
+  };
   cargarSeguimiento();
   cargarGsg();
   cargarExtras();

@@ -59,7 +59,7 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
   const extras = conexion.extras;
   if (deps.entregasDelDia) extras.usarEntregas(deps.entregasDelDia);
 
-  const esLlamadaDeGsg = (url: string) => url.startsWith(`${RUTA_SIMULADOR}/`) || url === RUTA_SIMULADOR || url.startsWith('/api/v1/entregas');
+  const esLlamadaDeGsg = (url: string) => url.startsWith(`${RUTA_SIMULADOR}/`) || url === RUTA_SIMULADOR || url.startsWith('/api/v1/entregas') || url === '/admin/entregas/flujo';
 
   // Gancho 1: el token caducable vale para el simulador.
   app.addHook('onRequest', async (request: ConUsuario, reply: FastifyReply) => {

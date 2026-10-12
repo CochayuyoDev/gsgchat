@@ -236,7 +236,7 @@ describe('el mismo cliente vuelve a pedir otro dia (MySQL real)', () => {
     await escribe(wa, { location: { latitude: -12.1211, longitude: -77.0301 } });
     await esperar(() => /Ubicación registrada/.test(textosA(wa)), 20_000, 'la confirmacion');
     const antes = aEste(wa).length;
-    const rs = await Promise.all(Array.from({ length: 5 }, () => api('POST', '/api/v1/flujo', { tracking: 'PED-CONC', accion: 'REINTENTAR' })));
+    const rs = await Promise.all(Array.from({ length: 5 }, () => api('POST', '/api/v1/entregas', { tracking: 'PED-CONC', accion: 'REINTENTAR' })));
     for (const r of rs) expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(rs.filter((r) => !r.body.sinCambios).length, 'solo uno reinicia').toBe(1);
     await esperar(() => aEste(wa).length > antes, 90_000, 'la solicitud nueva');
