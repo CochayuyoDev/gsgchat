@@ -107,7 +107,10 @@ describe('cada módulo con lo suyo', () => {
   it('Nuestra API: dirección, claves, validar, últimas recepciones, campos, respuestas y probar cancelar/reintentar', async () => {
     const html = await pagina('/api-gsgchat');
     const hay = ids(html);
-    for (const id of ['courier-url', 'courier-form', 'courier-claves', 'courier-json', 'courier-validar', 'courier-bitacora', 'courier-respuestas', 'np-flujo-form']) expect(hay.has(id), id).toBe(true);
+    for (const id of ['api-1', 'api-2', 'courier-url', 'courier-url-2', 'courier-form', 'courier-claves', 'courier-json', 'courier-validar', 'courier-bitacora', 'courier-campos', 'courier-respuestas', 'np-flujo-form']) expect(hay.has(id), id).toBe(true);
+    // Las dos APIs, cada una con su tarjeta.
+    expect(html).toContain('API 1</span> Recibir pedidos');
+    expect(html).toContain('API 2</span> Cancelar o reintentar un pedido');
     for (const id of ['card-wa', 'gsg-form', 'gsg-ruta-estado', 'courier-envios']) expect(hay.has(id), id).toBe(false);
     expect(html).toContain('Campos que envía Courier');
     expect(await correr(html)).toEqual([]);

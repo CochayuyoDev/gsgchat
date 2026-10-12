@@ -352,7 +352,9 @@ describe('Conexión → endpoints de GSGchat para GSG', () => {
       await flujo(e, { tracking: 'NO-HAY', accion: 'CANCELAR' });
       const r = await e.api.get<any>('/admin/gsg');
       const deFlujo = (r.body.bitacora as any[]).filter((l) => String(l.que).includes('/api/v1/entregas'));
-      expect(deFlujo.some((l) => l.status === 200 && /Se cancelaría/.test(l.resultado))).toBe(true);
+      expect(deFlujo.some((l) => l.status === 200 && /Se cancelaría/.test(l.resultado) && /accion CANCELAR/.test(l.que))).toBe(true);
+      // Un pedido (API 1) no lleva la marca de accion.
+      expect(deFlujo.some((l) => l.status === 201 && !/accion/.test(l.que))).toBe(true);
       expect(deFlujo.some((l) => l.status === 404 && /NO-HAY/.test(l.resultado))).toBe(true);
       // La prueba desde Conexión (con la sesión) tambien queda, por su ruta del panel.
       await e.api.post<any>('/admin/entregas/flujo', { tracking: 'PED-S2', accion: 'REINTENTAR', simular: true });

@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { RUTA_SIMULADOR, TOKEN_SIMULADOR, type ServicioConexionGsg } from './conexion-gsg.js';
 import type { GsgSimulado } from '../entregas/gsg-simulado.js';
 import { igualSeguro } from '../util/comparar.js';
+import { esOrdenDeFlujo } from '../api/v1/entregas-gsg.js';
 
 export interface DepsGsgExtrasRoutes {
   conexion: ServicioConexionGsg;
@@ -101,7 +102,9 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
       }
     }
     const quien = request.gsgQuien ?? (request.usuario?.porToken ? `clave de API «${request.usuario.nombre ?? 'api'}»` : request.usuario ? `una persona (${request.usuario.nombre ?? ''})` : 'sin token');
-    await extras.anotarLlamada({ que: `${request.method} ${url}`, status: reply.statusCode, resultado: resultadoEnPalabras(reply.statusCode, cuerpo), quien });
+    // Por la misma direccion llegan pedidos y ordenes: la orden se anota con su accion.
+    const orden = url === '/api/v1/entregas' && esOrdenDeFlujo(request.body) ? ` · accion ${String((request.body as { accion?: unknown }).accion ?? '').trim().toUpperCase()}` : '';
+    await extras.anotarLlamada({ que: `${request.method} ${url}${orden}`, status: reply.statusCode, resultado: resultadoEnPalabras(reply.statusCode, cuerpo), quien });
     return payload;
   });
 
