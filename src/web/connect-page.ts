@@ -282,7 +282,11 @@ const CSS = `
   .secreto { display: block; border: 1px dashed var(--primario); border-radius: var(--radio-sm); padding: 10px 12px; margin-top: var(--esp-2); }
   .secreto code { display: block; margin: 6px 0; }
   #gsg-bitacora { overflow-x: auto; max-width: 100%; font-size: 13px; }
-  #gsg-endpoints h3 { margin: 0 0 6px; }
+  #gsg-endpoints h3, #gsg-consulta h3 { margin: 0 0 6px; }
+  .ep-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+  .ep-params input { width: 100%; box-sizing: border-box; }
+  #gsg-consulta .ep-form { display: grid; gap: 6px; max-width: 420px; margin: 8px 0; }
+  #gsg-consulta .ep-resultado { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--superficie-2); font-size: 12.5px; }
   #gsg-endpoints .ep { margin: 10px 0; }
   #gsg-endpoints .ep .copiar { margin-top: 4px; }
   #gsg-endpoints .ep-usos { margin: 6px 0 10px; padding-left: 18px; }
@@ -471,6 +475,17 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
       <div id="ep-llamadas" class="ayuda">Todavía nadie lo ha llamado.</div>
     </div>
   </div>
+  <div class="bloque punteado" id="gsg-consulta">
+    <h3>Consulta del estado de un envío en GSG</h3>
+    <p class="ayuda" id="gsg-consulta-url">Sin ruta de consulta configurada: GSGchat no le pregunta nada a GSG. Configúrala en «Cambiar la URL o la API Key de GSG».</p>
+    <p class="ayuda">Antes de escribirle a un cliente, GSGchat pregunta por ese tracking. Si GSG dice <b>cancelado</b>, <b>número incorrecto</b>, <b>tracking incorrecto</b> o <b>no se puede contactar</b>, deja de escribir <b>solo por ese tracking</b>: los otros envíos del mismo cliente siguen. Si GSG no contesta o no se entiende, no se toma como cancelado.</p>
+    <form id="gsg-consulta-form" class="ep-form" novalidate>
+      <label class="campo" for="gsg-consulta-tracking">Tracking</label><input id="gsg-consulta-tracking" type="text" autocomplete="off" placeholder="PED-205" required>
+      <label class="campo" for="gsg-consulta-telefono">Teléfono (opcional)</label><input id="gsg-consulta-telefono" type="tel" autocomplete="off" placeholder="987654321">
+      <div class="acciones"><button class="btn sm" id="gsg-consulta-enviar" type="submit">Consultar a GSG (solo lectura)</button></div>
+    </form>
+    <pre id="gsg-consulta-resultado" class="ep-resultado hidden" role="status" aria-live="polite"></pre>
+  </div>
   <details><summary>Ubicación y seguimiento del cliente</summary>
     <p>Las direcciones escritas y los enlaces de Maps se confirman antes de reportar la ubicación. Los horarios y el orden de reparto proceden de GSG.</p>
     <p id="seguimiento-estado" role="status" aria-live="polite">Revisando seguimiento…</p>
@@ -488,6 +503,14 @@ ${opts.conGsg ? `<section class="tarjeta con-card" id="gsg">
       <span class="hint">Lo que va después de la URL base, sin http:// ni «..». Por ejemplo v1/gsgchat/location</span></label>
     <input id="gsg-ruta" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/location" aria-describedby="gsg-url-final">
     <p class="ayuda" id="gsg-url-final" role="status" aria-live="polite"></p>
+    <label class="campo" for="gsg-ruta-estado">Ruta para consultar el estado de un envío (opcional)
+      <span class="hint">El GET de GSG que dice si un tracking está cancelado, con el número o el tracking mal, o sin poder contactar. Vacía = no se le pregunta. Por ejemplo v1/gsgchat/estado</span></label>
+    <input id="gsg-ruta-estado" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/estado" aria-describedby="gsg-url-estado">
+    <div class="ep-params">
+      <label class="campo" for="gsg-param-tracking">Parámetro del tracking<input id="gsg-param-tracking" type="text" autocomplete="off" spellcheck="false" placeholder="trackingCode"></label>
+      <label class="campo" for="gsg-param-telefono">Parámetro del teléfono<input id="gsg-param-telefono" type="text" autocomplete="off" spellcheck="false" placeholder="phone"></label>
+    </div>
+    <p class="ayuda" id="gsg-url-estado" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-token">API Key de GSG
       <span class="hint" id="gsg-token-pista">Te la da GSG. Se manda solo en la cabecera X-API-Key, se guarda cifrada y no se vuelve a mostrar entera.</span></label>
     <div class="con-ojo">
@@ -1711,6 +1734,18 @@ function pintarUrlFinalGsg() {
   return r;
 }
 
+function pintarUrlEstadoGsg() {
+  var caja = $('gsg-url-estado');
+  if (!caja) return;
+  var ruta = $('gsg-ruta-estado').value.trim();
+  if (!ruta) { caja.textContent = 'Sin ruta de consulta: no se le pregunta a GSG por el estado.'; caja.className = 'ayuda'; return; }
+  var r = unirUrlGsg($('gsg-url').value.trim(), ruta);
+  var pt = $('gsg-param-tracking').value.trim() || 'trackingCode';
+  var pf = $('gsg-param-telefono').value.trim() || 'phone';
+  caja.textContent = r.ok ? 'El estado se consultará con GET a: ' + r.url + '?' + pt + '=…&' + pf + '=…' : 'No vale: ' + r.error;
+  caja.className = r.ok ? 'ayuda' : 'ayuda error';
+}
+
 async function cargarGsg() {
   var caja = $('gsg-estado');
   if (!caja) return;
@@ -1748,7 +1783,14 @@ async function cargarGsg() {
     // Lo guardado a la vista (la clave no: solo enmascarada).
     if (g.modo === 'real' && g.url && !$('gsg-url').value) $('gsg-url').value = g.url;
     if (g.modo === 'real' && g.rutaUbicacion && !$('gsg-ruta').value) $('gsg-ruta').value = g.rutaUbicacion;
+    if (g.rutaEstado && !$('gsg-ruta-estado').value) $('gsg-ruta-estado').value = g.rutaEstado;
+    if (g.paramTracking && !$('gsg-param-tracking').value) $('gsg-param-tracking').value = g.paramTracking;
+    if (g.paramTelefono && !$('gsg-param-telefono').value) $('gsg-param-telefono').value = g.paramTelefono;
     pintarUrlFinalGsg();
+    pintarUrlEstadoGsg();
+    texto('gsg-consulta-url', g.destinoEstado
+      ? 'Consulta configurada: GET ' + g.destinoEstado + '?' + (g.paramTracking || 'trackingCode') + '=…&' + (g.paramTelefono || 'phone') + '=…, con la API Key de GSG en X-API-Key.'
+      : 'Sin ruta de consulta configurada: GSGchat no le pregunta nada a GSG. Configúrala en «Cambiar la URL o la API Key de GSG».');
     var hayClave = g.modo === 'real' && g.tieneToken;
     $('gsg-token').placeholder = hayClave ? (g.claveEnmascarada || '••••') + ' (guardada)' : '';
     $('gsg-token-pista').textContent = hayClave
@@ -1783,6 +1825,24 @@ if ($('gsg')) {
   };
   $('gsg-url').oninput = pintarUrlFinalGsg;
   $('gsg-ruta').oninput = pintarUrlFinalGsg;
+  ['gsg-url', 'gsg-ruta-estado', 'gsg-param-tracking', 'gsg-param-telefono'].forEach(function (id) { $(id).addEventListener('input', pintarUrlEstadoGsg); });
+  $('gsg-consulta-form').onsubmit = async function (ev) {
+    ev.preventDefault();
+    var salida = $('gsg-consulta-resultado');
+    var boton = $('gsg-consulta-enviar');
+    boton.disabled = true;
+    salida.textContent = 'Consultando a GSG…';
+    ver('gsg-consulta-resultado', true);
+    try {
+      var r = await api('/admin/entregas/gsg/consultar-estado', { method: 'POST', body: { tracking: val('gsg-consulta-tracking'), telefono: val('gsg-consulta-telefono') || undefined } });
+      var que = { activo: 'Activo: se sigue el flujo y se le pide la ubicación.', cancelado: 'Cancelado: se deja de escribir por este tracking.', numero_incorrecto: 'Número incorrecto: se deja de escribir por este tracking.', tracking_incorrecto: 'Tracking incorrecto: se deja de escribir por este tracking.', no_contactable: 'No se puede contactar: se deja de escribir por este tracking.', desconocido: 'Desconocido: no se toma como cancelado, se sigue.' }[r.decision] || r.decision;
+      salida.textContent = (r.configurada ? '' : 'Sin ruta de consulta configurada.\n') + 'Decisión: ' + que + '\n' + (r.motivo || '') + (r.http ? '\nHTTP ' + r.http : '') + (r.url ? '\nURL: ' + r.url : '') + (r.respuesta !== undefined ? '\n\nRespuesta de GSG:\n' + JSON.stringify(r.respuesta, null, 2) : '');
+    } catch (error) {
+      salida.textContent = 'No se pudo consultar: ' + error.message;
+    } finally {
+      boton.disabled = false;
+    }
+  };
   $('gsg-form').onsubmit = async function (ev) {
     ev.preventDefault();
     var url = $('gsg-url').value.trim();
@@ -1809,7 +1869,7 @@ if ($('gsg')) {
     resultadoGsg('Guardando…', 'espera');
     try {
       var token = $('gsg-token').value.trim();
-      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), apiKey: token || undefined } });
+      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
       $('gsg-token').value = '';
       await probarGsg();
     } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }

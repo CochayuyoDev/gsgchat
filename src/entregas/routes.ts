@@ -31,6 +31,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { enviarError } from '../api/errores.js';
+import { DECISIONES_QUE_PARAN } from '../rutas/gsg.js';
+import { telefonoParaGsg } from './servicio.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import { extractLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
@@ -240,10 +242,13 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
       apiKey: z.string().max(500).nullable().optional(),
       token: z.string().max(500).nullable().optional(),
       urlUbicacion: z.string().trim().max(300).nullable().optional(),
+      rutaEstado: z.string().trim().max(300).nullable().optional(),
+      paramTracking: z.string().trim().max(60).nullable().optional(),
+      paramTelefono: z.string().trim().max(60).nullable().optional(),
     }).parse(request.body ?? {});
 
     try {
-      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion }) };
+      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion , rutaEstado: body.rutaEstado, paramTracking: body.paramTracking, paramTelefono: body.paramTelefono }) };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -253,6 +258,16 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede cambiar desde la pantalla.' });
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia la conexión con GSG.' });
     return { ok: true, gsg: await conexionGsg.quitar() };
+  });
+
+  // Probar la consulta de estado contra GSG: solo lectura (no cambia ningun pedido).
+  app.post('/admin/entregas/gsg/consultar-estado', async (request, reply) => {
+    if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede probar desde la pantalla.' });
+    const body = z.object({ tracking: z.string().trim().min(1, 'falta el tracking').max(120), telefono: z.string().trim().max(30).optional() }).safeParse(request.body ?? {});
+    if (!body.success) return enviarError(reply, 400, 'VALIDACION', 'Escribe el tracking (y si quieres el teléfono) para consultar.', body.error.issues.map((i) => ({ campo: i.path.join('.') || 'cuerpo', mensaje: i.message })));
+    const puerto = conexionGsg.puerto();
+    const r = await puerto.consultarEstado!({ tracking: body.data.tracking, telefono: telefonoParaGsg(body.data.telefono ?? '') });
+    return { ok: true, url: puerto.urlEstado?.() ?? null, ...r, para: DECISIONES_QUE_PARAN.includes(r.decision) };
   });
 
   app.post('/admin/entregas/gsg/probar', async (request, reply) => {
