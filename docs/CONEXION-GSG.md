@@ -70,9 +70,25 @@ Cuando un pedido que manda GSG trae un teléfono o un tracking que no sirve, GSG
 concreto en su bandeja de números reportados. Se guarda **una sola vez por tracking + error**: no en cada reintento
 ni en cada pasada del motor. Si GSG lo corrige y el mismo error vuelve después, se guarda otra vez.
 
-GSGchat **no** le manda nada a GSG por esto (no hay POST ni ruta que configurar): Luis (GSG) lee la bandeja con
-`GET /api/v1/reportados` y corrige con `POST /api/v1/reportados/{tracking}/correccion` (o `PATCH`). Además, cada
-respuesta de `POST /api/v1/entregas` y `GET /api/v1/trackings` trae los avisos `reportado` / `corregido`.
+Además, GSGchat **se lo manda a GSG** (desde el 12/10), junto con las incidencias del reparto (número sin
+WhatsApp, inválido, «no soy yo», rechaza, sin respuesta…): POST a la «Ruta para reportar problemas» de Conexión
+con GSG (por ejemplo `v1/gsgchat/reported`; vacía = `incidencias`), con la API Key de GSG en `X-API-Key` y el
+contrato del plan de GSG:
+
+```json
+{ "tracking": "GSG-E-240268", "tipo": "PROBLEMA", "motivo": "TELEFONO_MAL",
+  "comentario": "El número no tiene WhatsApp: el número 51999999999 no tiene una cuenta de WhatsApp",
+  "telefonoOrigen": "51999999999", "fechaMensaje": "2026-10-12T18:40:00.000Z",
+  "eventoId": "gsgchat-GSG-E-240268-sin_whatsapp-2026-10-12" }
+```
+
+`motivo` es el catálogo de GSG (`TELEFONO_MAL`, `NO_RECONOCE_PEDIDO`, `RECHAZA`, `DIRECCION_MAL`, `REPROGRAMA`,
+`OTRO`); el `eventoId` va también en `Idempotency-Key` y es uno por tracking + error + día: el mismo problema que
+llega por el reparto y por la bandeja sale una sola vez. Lo enviado se ve en Conexión con GSG → «Lo que enviamos a GSG».
+
+La bandeja sigue disponible: Luis (GSG) la lee con `GET /api/v1/reportados` y corrige con
+`POST /api/v1/reportados/{tracking}/correccion` (o `PATCH`). Además, cada respuesta de `POST /api/v1/entregas` y
+`GET /api/v1/trackings` trae los avisos `reportado` / `corregido`.
 
 ### Errores
 

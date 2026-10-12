@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { Repos } from '../db/repos.js';
+import { problemaParaGsg } from '../rutas/gsg.js';
 import {
   CandadoOcupado,
   ESTADOS_SIN_UBICACION,
@@ -752,10 +753,14 @@ export async function registerRutasRoutes(
    */
   app.get('/admin/gsg/envios', async (request) => {
     const query = z.object({ limit: z.coerce.number().int().positive().max(500).default(50) }).parse(request.query ?? {});
-    const items = await repos.rutas.reportesRecientes(query.limit, 'ubicacion');
+    // Las ubicaciones y los problemas (numeros mal y errores), los mas recientes primero.
+    const items = [...(await repos.rutas.reportesRecientes(query.limit, 'ubicacion')), ...(await repos.rutas.reportesRecientes(query.limit, 'incidencia'))]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() || b.id - a.id)
+      .slice(0, query.limit);
     return {
       conectado: gsg.conectado(),
       destino: gsg.urlUbicacion?.() ?? null,
+      destinoProblemas: gsg.urlIncidencias?.() ?? null,
       aviso: !gsg.conectado()
         ? 'GSG no está conectado: configura su dirección y su clave en Conexión WhatsApp. Las ubicaciones quedan en cola y salen al conectarlo.'
         : gsg.errorConfiguracion?.()
@@ -770,7 +775,8 @@ export async function registerRutasRoutes(
         estado: r.estado,
         intentos: r.intentos,
         error: r.ultimoError ?? (r.estado === 'pendiente' && !gsg.conectado() ? 'GSG no está conectado.' : null),
-        cuerpo: { tracking: r.payload.tracking ?? r.payload.referencia ?? null, lat: r.payload.lat ?? null, lng: r.payload.lng ?? null },
+        tipo: r.tipo,
+        cuerpo: r.tipo === 'incidencia' ? problemaParaGsg(r.payload) : { tracking: r.payload.tracking ?? r.payload.referencia ?? null, lat: r.payload.lat ?? null, lng: r.payload.lng ?? null },
       })),
     };
   });

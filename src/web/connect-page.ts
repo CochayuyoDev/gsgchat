@@ -492,8 +492,8 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <span class="hint">Lo que va después de la URL base, sin http:// ni «..». Por ejemplo v1/gsgchat/location</span></label>
     <input id="gsg-ruta" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/location" aria-describedby="gsg-url-final">
     <p class="ayuda" id="gsg-url-final" role="status" aria-live="polite"></p>
-    <label class="campo" for="gsg-ruta-incidencias">Ruta para reportar incidencias (opcional)
-      <span class="hint">El POST con cada incidencia del reparto (número sin WhatsApp, sin respuesta…). Vacía = la de siempre, incidencias. Por ejemplo v1/gsgchat/reported</span></label>
+    <label class="campo" for="gsg-ruta-incidencias">Ruta para reportar problemas: números mal y errores (opcional)
+      <span class="hint">El POST con cada problema: número mal (sin WhatsApp, inválido), no reconoce el pedido, rechaza, sin respuesta… en el formato de GSG ({ tracking, tipo: PROBLEMA, motivo, comentario, telefonoOrigen, fechaMensaje, eventoId }). Vacía = incidencias. Por ejemplo v1/gsgchat/reported</span></label>
     <input id="gsg-ruta-incidencias" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/reported" aria-describedby="gsg-url-incidencias">
     <p class="ayuda" id="gsg-url-incidencias" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-estado">Ruta para consultar el estado de un envío (opcional)
@@ -1897,10 +1897,10 @@ if ($('gsg')) {
     try {
       var env = await api('/admin/gsg/envios');
       var ESTADOS = { enviado: 'Enviado a GSG', pendiente: 'Pendiente de enviar', fallido: 'Falló el envío' };
-      texto('gsg-envios-destino', env.aviso ? env.aviso : 'Se envía con POST a ' + (env.destino || '(sin dirección)') + ' con la cabecera X-API-Key.');
+      texto('gsg-envios-destino', env.aviso ? env.aviso : 'Ubicaciones: POST a ' + (env.destino || '(sin dirección)') + ' · Problemas (números mal y errores): POST a ' + (env.destinoProblemas || '(sin dirección)') + ' · con la cabecera X-API-Key.');
       caja.innerHTML = (env.items || []).length
-        ? '<table><thead><tr><th>Fecha</th><th>Cuerpo enviado</th><th>Estado</th><th>Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
-            return '<tr><td>' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></td><td><b>' + esc(ESTADOS[r.estado] || r.estado) + '</b></td><td>' + esc(r.intentos) + '</td><td>' + esc(r.error || '') + '</td></tr>';
+        ? '<table><thead><tr><th>Fecha</th><th>Qué</th><th>Cuerpo enviado</th><th>Estado</th><th>Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
+            return '<tr><td>' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td>' + (r.tipo === 'incidencia' ? 'Problema' : 'Ubicación') + '</td><td><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></td><td><b>' + esc(ESTADOS[r.estado] || r.estado) + '</b></td><td>' + esc(r.intentos) + '</td><td>' + esc(r.error || '') + '</td></tr>';
           }).join('') + '</tbody></table>'
         : 'Todavía no se ha enviado ninguna ubicación a GSG. Se envía sola cuando un cliente manda su ubicación por WhatsApp.';
     } catch (error) { caja.textContent = 'No se pudo consultar lo enviado a GSG: ' + error.message; }

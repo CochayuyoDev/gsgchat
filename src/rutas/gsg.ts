@@ -168,6 +168,71 @@ export interface OpcionesGsg {
   timeoutSegundos?: number;
 }
 
+/**
+ * Los problemas que GSGchat le reporta a GSG (su endpoint de reportes, p. ej.
+ * POST v1/gsgchat/reported), con el contrato del plan de GSG (seccion 4):
+ * { tracking, tipo: 'PROBLEMA', motivo, comentario, telefonoOrigen, fechaMensaje, eventoId }.
+ * `motivo` es su catalogo cerrado; cada codigo de GSGchat cae en uno.
+ */
+export type MotivoGsg = 'DIRECCION_MAL' | 'TELEFONO_MAL' | 'NO_RECONOCE_PEDIDO' | 'RECHAZA' | 'REPROGRAMA' | 'OTRO';
+
+const MOTIVOS_GSG: Record<string, MotivoGsg> = {
+  numero_corto: 'TELEFONO_MAL', numero_largo: 'TELEFONO_MAL', numero_invalido: 'TELEFONO_MAL', numero_fijo: 'TELEFONO_MAL',
+  sin_whatsapp: 'TELEFONO_MAL', telefono_invalido: 'TELEFONO_MAL', telefono_de_motorizado: 'TELEFONO_MAL',
+  numero_equivocado: 'NO_RECONOCE_PEDIDO', no_soy_yo: 'NO_RECONOCE_PEDIDO',
+  rechaza_contacto: 'RECHAZA',
+  ubicacion_fuera_de_zona: 'DIRECCION_MAL',
+};
+
+/** El motivo de GSG de un codigo de GSGchat (lo que no tiene uno propio es OTRO, con su comentario). */
+export function motivoGsg(codigo: string | null | undefined): MotivoGsg {
+  return MOTIVOS_GSG[String(codigo ?? '')] ?? 'OTRO';
+}
+
+/** El eventoId de un problema: uno por tracking, codigo y dia (un reenvio no duplica). */
+export function eventoIdProblema(tracking: string, codigo: string, en: Date): string {
+  return `gsgchat-${tracking}-${codigo}-${en.toISOString().slice(0, 10)}`;
+}
+
+/**
+ * Lo que sale hacia GSG por una incidencia o un numero reportado, en su
+ * formato. Acepta lo que guarda la cola (el payload de GSGchat, con
+ * `tracking`/`referencia`, `codigo`/`error`, `titulo`/`mensaje`, `detalle`).
+ */
+export function problemaParaGsg(p: Record<string, unknown>): Record<string, unknown> {
+  const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const tracking = texto(p.tracking) ?? texto(p.referencia);
+  const codigo = texto(p.codigo) ?? texto(p.error) ?? 'otro';
+  const en = new Date(texto(p.detectadoEn) ?? texto(p.reportadoAt) ?? texto(p.fechaMensaje) ?? Date.now());
+  const comentario = [texto(p.comentario) ?? texto(p.titulo) ?? texto(p.mensaje), texto(p.detalle)].filter(Boolean).join(': ').slice(0, 500) || null;
+  return {
+    tracking,
+    tipo: 'PROBLEMA',
+    motivo: texto(p.motivo) ?? motivoGsg(codigo),
+    comentario,
+    telefonoOrigen: texto(p.telefonoOrigen) ?? texto(p.telefono),
+    fechaMensaje: Number.isNaN(en.getTime()) ? new Date().toISOString() : en.toISOString(),
+    eventoId: texto(p.eventoId) ?? (tracking ? eventoIdProblema(tracking, codigo, Number.isNaN(en.getTime()) ? new Date() : en) : null),
+  };
+}
+
+/**
+ * Encola un problema para GSG, una vez: si ese mismo eventoId ya esta en la
+ * cola (pendiente o enviado), no se repite. Asi «sin WhatsApp» que llega por
+ * el reparto y por la bandeja de numeros reportados sale una sola vez.
+ */
+export async function encolarProblemaGsg(
+  rutas: { encolarReporte: RutasRepo['encolarReporte']; reportesRecientes: RutasRepo['reportesRecientes'] },
+  payload: Record<string, unknown> & { tracking: string; codigo: string },
+  opts: { solicitudId?: number | null; loteId?: string | null; en: Date },
+): Promise<boolean> {
+  const eventoId = eventoIdProblema(payload.tracking, payload.codigo, opts.en);
+  const recientes = await rutas.reportesRecientes(500, 'incidencia').catch(() => []);
+  if (recientes.some((r) => (r.payload as Record<string, unknown>)?.eventoId === eventoId)) return false;
+  await rutas.encolarReporte({ solicitudId: opts.solicitudId ?? null, loteId: opts.loteId ?? null, tipo: 'incidencia', payload: { ...payload, eventoId, detectadoEn: opts.en.toISOString() } });
+  return true;
+}
+
 /** El camino de cada tipo dentro de la API de GSG. */
 export const RUTAS_GSG: Record<TipoReporte, string> = {
   ubicacion: '/sendLocation',
@@ -420,11 +485,16 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         if (!u.ok) return { ok: false, error: `Configuración de GSG no válida: ${u.error}`, reintentable: true, configuracion: true };
         url = u.url;
       }
-      const claveIdempotente = tipo === 'ubicacion' && opts.idempotenciaUbicacion && typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey.trim() : '';
+      // Un problema (incidencia o numero reportado) va en el formato de GSG y sin tracking no sirve.
+      const problema = tipo === 'incidencia' ? problemaParaGsg(payload) : null;
+      if (problema && !problema.tracking) return { ok: false, error: 'El reporte no tiene tracking: GSG no podría saber de qué envío es. No se envía.', reintentable: false };
+      const claveIdempotente = problema && typeof problema.eventoId === 'string'
+        ? problema.eventoId
+        : tipo === 'ubicacion' && opts.idempotenciaUbicacion && typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey.trim() : '';
       const idempotente = Boolean(claveIdempotente);
       const cuerpo = tipo === 'ubicacion'
         ? { tracking: payload.tracking ?? payload.referencia, lat: payload.lat ?? payload.latitud, lng: payload.lng ?? payload.longitud }
-        : payload;
+        : problema ?? payload;
       const control = new AbortController();
       const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
       try {
