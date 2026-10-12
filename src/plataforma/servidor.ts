@@ -35,7 +35,7 @@ import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, registrarCatalogoErrores } from '../api/errores.js';
 import { normalizarRuta } from '../util/ruta-normalizada.js';
-import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
+import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, rechazoSinClave, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
 const PREFIJO = '/tienda/';
@@ -146,7 +146,10 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
       if (tienda) return { tipo: 'tienda', tienda, url };
     }
     const principal = await plataforma.tiendaPrincipal();
-    return principal ? { tipo: 'tienda', tienda: principal, url } : { tipo: 'plataforma', url };
+    if (principal) return { tipo: 'tienda', tienda: principal, url };
+    // Una ruta de GSG sin clave ni tienda a la vista: falta la clave (401), no «la ruta no existe».
+    if (deGsg) return { tipo: 'rechazo', rechazo: rechazoSinClave(req.headers) };
+    return { tipo: 'plataforma', url };
   }
 
   const server = http.createServer((req, res) => {
