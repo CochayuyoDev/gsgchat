@@ -300,7 +300,7 @@ describe('un día de reparto, de punta a punta', () => {
     expect(salida.enviados).toBe(pendientesAntes);
     expect((await repos.rutas.cifrasReportes()).pendiente).toBe(0);
     // Cada tipo va a su endpoint.
-    expect(recibido.some((r) => r.ruta.endsWith('/ubicaciones'))).toBe(true);
+    expect(recibido.some((r) => r.ruta.endsWith('/sendLocation'))).toBe(true);
     expect(recibido.some((r) => r.ruta.endsWith('/incidencias'))).toBe(true);
   });
 });

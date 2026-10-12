@@ -439,7 +439,7 @@ export interface EntregasRepo {
    * La entrega mas reciente de un dia ANTERIOR con cada una de esas
    * referencias: en GSG el tracking solo se repite cuando el envio se
    * reprograma (rechazados, cancelados, rutas reutilizadas y pedidos nuevos
-   * llegan con tracking nuevo). Clave: la referencia.
+   * llegan con tracking nuevo). Clave: la referencia en minusculas.
    */
   anterioresPorReferencia(referencias: string[], antesDe: string): Promise<Map<string, Entrega>>;
 
@@ -1205,20 +1205,21 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       return Number(rows[0]?.n ?? 0) > 0;
     },
     async anterioresPorReferencia(referencias, antesDe) {
-      const unicas = [...new Set(referencias.filter(Boolean))];
+      // Sin distinguir mayusculas, como la busqueda por referencia de la API.
+      const unicas = [...new Set(referencias.filter(Boolean).map((r) => r.toLowerCase()))];
       const salida = new Map<string, Entrega>();
       // En tandas: un dia de GSG puede traer cientos de pedidos.
       for (let i = 0; i < unicas.length; i += 500) {
         const tanda = unicas.slice(i, i + 500);
         const { rows } = await pool.query<EntregaRow>(
           `select * from entregas
-            where dia < $1 and referencia in (${tanda.map((_, k) => `$${k + 2}`).join(',')})
+            where dia < $1 and lower(referencia) in (${tanda.map((_, k) => `$${k + 2}`).join(',')})
             order by dia desc, id desc`,
           [antesDe, ...tanda],
         );
         for (const row of rows) {
           const e = entregaDeFila(row);
-          if (!salida.has(e.referencia)) salida.set(e.referencia, e);
+          if (!salida.has(e.referencia.toLowerCase())) salida.set(e.referencia.toLowerCase(), e);
         }
       }
       return salida;

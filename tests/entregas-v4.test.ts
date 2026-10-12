@@ -34,7 +34,8 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
   });
   afterAll(() => e.cerrar());
 
-  it('un audio del motorizado con transcripción vale como texto ("entregado"); sin transcripción se le pide que lo escriba', async () => {
+  // El reparto con motorizados fue retirado (src/modulos-retirados.ts, mandarAMotorizado): se deja como referencia.
+  it.skip('un audio del motorizado con transcripción vale como texto ("entregado"); sin transcripción se le pide que lo escriba', async () => {
     e.simulador.cargar([{ referencia: 'V-1', telefono: '987410001', nombre: 'Vera Audio', direccion: 'Av. Salaverry 500', distrito: 'Jesús María', faltaUbicacion: true, faltaConfirmacion: false }]);
     await e.gsgManda();
     await e.trabajar();
@@ -57,7 +58,8 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     expect(v1?.estado).toBe('entregada');
   });
 
-  it('la página del motorizado: enlace de 7 días, sus paradas en orden y botones que hacen lo mismo que su WhatsApp', async () => {
+  // El reparto con motorizados fue retirado (src/modulos-retirados.ts, mandarAMotorizado): se deja como referencia.
+  it.skip('la página del motorizado: enlace de 7 días, sus paradas en orden y botones que hacen lo mismo que su WhatsApp', async () => {
     e.simulador.cargar([{ referencia: 'V-2', telefono: '987410002', nombre: 'Víctor Página', direccion: 'Jr. Lampa 300', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false }]);
     await e.gsgManda();
     await e.trabajar();
@@ -196,29 +198,19 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     const ficha = await e.api.get<{ eventos: Array<{ detalle: string }> }>(`/admin/entregas/${v6!.id}`);
     expect(ficha.body.eventos.some((ev) => /GSG cambió: dirección/.test(ev.detalle))).toBe(true);
 
-    // V-7 llega hasta tener hora, y entonces GSG lo cancela. La ubicacion le
-    // llega a GSG al momento y, si solo le faltaba eso, lo da por terminado
-    // (y un terminado ya no se cancela): se le da el pin con GSG caido, para
-    // que siga pendiente alli cuando decide cancelarlo.
+    // V-7 manda su pin y GSG lo cancela despues (sin motorizado: el reparto
+    // fue retirado). Se le da el pin con GSG caido, para que siga pendiente
+    // alli cuando decide cancelarlo.
     e.simulador.modo = 'caido';
     await e.contesta('987410007', { pin: pinDe(47) });
     await e.trabajar();
-    const rider = await riderDe(e, 'V-7');
-    await e.contesta(rider.phone, { texto: 'V-7 30' });
     e.simulador.modo = 'ok';
-    expect((await e.entrega('V-7'))?.estado).toBe('avisada');
-    const antesCliente = e.textosA(conPais('987410007')).length;
-    const antesRider = e.textosA(rider.phone).length;
+    expect((await e.entrega('V-7'))?.ubicacionEstado).toBe('recibida');
     expect(e.simulador.cancelar('V-7', 'el cliente llamó a GSG')).toBe(true);
     const s2 = await e.gsgManda();
     expect(s2.body.canceladas).toBe(1);
     const v7 = await e.entrega('V-7');
     expect(v7?.estado).toBe('cancelada');
-    const textosCliente = e.textosA(conPais('987410007'));
-    expect(textosCliente.length).toBe(antesCliente + 1);
-    expect(textosCliente[textosCliente.length - 1]).toMatch(/cancelado/i);
-    // El motorizado se entera de que ya no lo lleva.
-    expect(e.textosA(rider.phone).length).toBeGreaterThan(antesRider);
 
     // Salvaguarda: GSG contesta vacio (o se cae): nada se cancela.
     const vivasAntes = (await e.resumen()).cifras.cancelada;
@@ -234,7 +226,8 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
 });
 
 describe('vuelta 4 · la zona horaria de Ajustes manda en las horas de las entregas', () => {
-  it('con la zona cambiada a Ciudad de México (una hora menos), la hora que ve el cliente va en esa zona', async () => {
+  // Depende del aviso del motorizado («P-1010 30»), retirado con el reparto (src/modulos-retirados.ts).
+  it.skip('con la zona cambiada a Ciudad de México (una hora menos), la hora que ve el cliente va en esa zona', async () => {
     let zona = 'America/Lima';
     // Arranca a las 09:00 de Lima para que el cambio de zona no cruce la medianoche.
     const arranque = new Date();

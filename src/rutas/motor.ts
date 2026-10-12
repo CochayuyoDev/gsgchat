@@ -663,7 +663,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: await payloadUbicacionDelPedido(repos, c, lote) }).catch(() => undefined);
         }
         // La ubicacion sale YA hacia GSG, sin esperar a la pasada de cada minuto.
-        if (cerradas.length) void despacharReportes({ rutas: repos.rutas }, gsg, 25, ['ubicacion']).catch(() => undefined);
+        if (cerradas.length) void despacharReportes({ rutas: repos.rutas }, gsg, 25, ['ubicacion'], { alMomento: true }).catch(() => undefined);
         deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
         return true;
       };

@@ -147,6 +147,32 @@ export interface ServerDeps {
   directorio?: DirectorioUsuarios;
 }
 
+/** Lee y descarta lo que queda del cuerpo (hasta 64 MiB o 15 s); pasado eso, corta. */
+function drenarCuerpo(raw: import('node:http').IncomingMessage): Promise<void> {
+  if (raw.readableEnded || raw.destroyed) return Promise.resolve();
+  return new Promise((resolve) => {
+    let leidos = 0;
+    const fin = () => {
+      clearTimeout(corte);
+      raw.off('data', contar);
+      resolve();
+    };
+    const contar = (trozo: Buffer) => {
+      leidos += trozo.length;
+      if (leidos > 64 * 1024 * 1024) {
+        raw.destroy();
+        fin();
+      }
+    };
+    const corte = setTimeout(fin, 15_000);
+    raw.on('data', contar);
+    raw.once('end', fin);
+    raw.once('close', fin);
+    raw.once('error', fin);
+    raw.resume();
+  });
+}
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const { config, repos, wa, sender, queue, settings, catalogo, salud, politica, ajustes, stickers, mediaDir, ia, lista, entrenamiento, voz, entregas } = deps;
 
@@ -188,7 +214,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Errores con un mensaje que el panel pueda ensenar tal cual. Sin esto, un
   // cuerpo mal formado o la falta de credenciales salian como 500 generico.
-  app.setErrorHandler((raw: unknown, request, reply) => {
+  app.setErrorHandler(async (raw: unknown, request, reply) => {
     const error = raw instanceof Error ? raw : new Error(String(raw));
     // El error que una ruta lanza ya con su status y su codigo.
     if (error instanceof ErrorApi) return reply.code(error.status).send(error.cuerpo());
@@ -212,9 +238,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const codigo: CodigoError = propio ?? codigoPorStatus(status);
       const mensaje = status === 413 ? 'El cuerpo supera el límite de 4 MiB: divide los pedidos en llamadas más pequeñas.'
         : status === 415 ? 'El tipo de contenido no está soportado: usa Content-Type: application/json.' : error.message;
-      // El parser puede rechazar por Content-Length antes de leer un byte.
-      // Drenar evita dejar la petición pausada mientras se devuelve el 413.
-      if (status === 413) request.raw.resume();
+      // El parser puede rechazar por Content-Length antes de leer un byte. Si
+      // se contesta mientras el cliente sigue subiendo, Node corta la conexion
+      // y el cliente ve ECONNRESET en vez del 413: se lee (y descarta) el
+      // resto antes de contestar, con tope de bytes y de tiempo.
+      if (status === 413) await drenarCuerpo(request.raw);
       return reply.code(status).send(cuerpoError(codigo, mensaje));
     }
     request.log.error({ err: error }, 'error no controlado');

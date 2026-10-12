@@ -174,7 +174,7 @@ async function reportar(
  * aqui no toca la respuesta al cliente.
  */
 function despacharYa(deps: RutaInboundDeps): void {
-  void despacharReportes({ rutas: deps.repos.rutas }, deps.gsg, 25, ['ubicacion']).catch((error: unknown) =>
+  void despacharReportes({ rutas: deps.repos.rutas }, deps.gsg, 25, ['ubicacion'], { alMomento: true }).catch((error: unknown) =>
     deps.log?.('no se pudo mandar a GSG al momento (se reintenta en la siguiente pasada)', { detalle: error instanceof Error ? error.message : String(error) }),
   );
 }

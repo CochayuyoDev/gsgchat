@@ -370,7 +370,10 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       if (sim.modo === 'rechaza') return { status: 422, body: { error: 'payload no válido: falta el campo pedido' } };
 
       const en = ahora().toISOString();
+      // El contrato vigente de GSG es POST /sendLocation con { tracking, lat, lng }.
+      if (camino === '/sendLocation' && c.referencia === undefined && c.tracking !== undefined) c.referencia = c.tracking;
       switch (camino) {
+        case '/sendLocation':
         case '/ubicaciones': {
           contadores.ubicaciones++;
           recibido.push({ tipo: 'ubicacion', cuerpo: c, en });

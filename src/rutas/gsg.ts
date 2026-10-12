@@ -268,6 +268,9 @@ export function motivoAutenticacion(status: 401 | 403): string {
  * Puerto real. Manda un POST con el payload tal cual y espera un JSON con
  * `id` o `referencia`; solo un 2xx se da por aceptado.
  */
+/** Errores de red en los que la peticion no llego a salir (no hay resultado incierto). */
+const SIN_CONEXION = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'EADDRNOTAVAIL']);
+
 export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
   const destino = resolverDestinoGsg(opts);
   const crudo = opts.url.trim();
@@ -333,10 +336,11 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
                     : 'GSG no aceptó el envío';
           return {
             ok: false,
-            error: limpio(`Error ${respuesta.status}: ${causa}.${tipo === 'ubicacion' && !idempotente && (respuesta.status >= 500 || respuesta.status === 408) ? ' Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar.' : ''}${texto.trim() ? ` Respuesta de GSG: ${limpio(texto.trim()).slice(0, 200)}` : ''}`),
+            error: limpio(`Error ${respuesta.status}: ${causa}.${tipo === 'ubicacion' && !idempotente && respuesta.status !== 503 && (respuesta.status >= 500 || respuesta.status === 408) ? ' Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar.' : ''}${texto.trim() ? ` Respuesta de GSG: ${limpio(texto.trim()).slice(0, 200)}` : ''}`),
             // 5xx, 429 y 408 son del otro lado y pasan solos; un 4xx es culpa
             // del payload (o de la clave) y reintentarlo solo repite el error.
-            reintentable: (respuesta.status >= 500 || respuesta.status === 408) && tipo === 'ubicacion' && !idempotente ? false : respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
+            // El 503 dice «no lo procese»: se reintenta aunque sea una ubicacion.
+            reintentable: respuesta.status === 503 ? true : (respuesta.status >= 500 || respuesta.status === 408) && tipo === 'ubicacion' && !idempotente ? false : respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
             ...(auth ? { autenticacion: auth } : {}),
           };
         }
@@ -350,13 +354,19 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         }
         return { ok: true, id };
       } catch (error) {
+        const codigo = error instanceof Error ? (error.cause as { code?: string } | undefined)?.code : undefined;
         const motivo = control.signal.aborted
           ? `GSG no respondió a tiempo (${opts.timeoutSegundos ?? 20} s)`
-          : `No se pudo conectar con GSG en ${url}: ${error instanceof Error ? ((error.cause as { code?: string } | undefined)?.code ?? error.message) : String(error)}`;
+          : `No se pudo conectar con GSG en ${url}: ${error instanceof Error ? (codigo ?? (error.cause as { message?: string } | undefined)?.message ?? error.message) : String(error)}`;
+        // Sin conexion (rechazada, sin DNS, sin ruta) el pedido nunca salio:
+        // no hay nada incierto y se reintenta solo. Un corte a mitad o un
+        // tiempo agotado si pueden haber llegado.
+        const causa = error instanceof Error ? (error.cause as { message?: string } | undefined)?.message : undefined;
+        const noSalio = !control.signal.aborted && (Boolean(codigo && SIN_CONEXION.has(codigo)) || causa === 'bad port');
         return {
           ok: false,
-          error: limpio(`${motivo}. ${tipo === 'ubicacion' && !idempotente ? 'Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar; no se reintenta automáticamente.' : 'Se reintenta solo con la misma clave idempotente cuando está habilitada.'}`),
-          reintentable: tipo !== 'ubicacion' || idempotente,
+          error: limpio(`${motivo}. ${noSalio ? 'No llegó a GSG: se reintenta solo.' : tipo === 'ubicacion' && !idempotente ? 'Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar; no se reintenta automáticamente.' : 'Se reintenta solo con la misma clave idempotente cuando está habilitada.'}`),
+          reintentable: noSalio || tipo !== 'ubicacion' || idempotente,
         };
       } finally {
         clearTimeout(corte);
@@ -577,6 +587,15 @@ const despachosEnMarcha = new WeakMap<object, Promise<unknown>>();
  * memoria: un reinicio da como mucho UN intento mas.
  */
 const paradasPorClave = new WeakMap<object, { firma: string; error: string }>();
+/**
+ * Tras un fallo reintentable (GSG caido, 503, sin conexion), el envio al
+ * momento (`alMomento`) no vuelve a intentar ese reporte hasta pasado un rato:
+ * el pin y el SI disparan cada uno su envio y, sin esto, el segundo insistia
+ * al instante contra un GSG caido. La pasada de cada minuto y el boton
+ * «Enviar ahora» no esperan.
+ */
+const ESPERA_REINTENTO_MS = 30_000;
+const reintentoTras = new WeakMap<object, Map<number, number>>();
 
 const firmaDe = (puerto: PuertoGsg): string => puerto.firma?.() ?? puerto.descripcion();
 
@@ -606,11 +625,14 @@ export function despacharReportes(
   limite = 25,
   /** Solo estos tipos (el envio al momento solo manda ubicaciones). Sin esto, todo. */
   soloTipos?: TipoReporte[],
-  /** manual = lo pidio una persona («Enviar ahora»): intenta aunque la cola este parada por la clave. */
-  opciones?: { manual?: boolean },
+  /**
+   * manual = lo pidio una persona («Enviar ahora»): intenta aunque la cola este parada por la clave.
+   * alMomento = el envio inmediato tras registrar una ubicacion: respeta la espera tras un fallo reintentable.
+   */
+  opciones?: { manual?: boolean; alMomento?: boolean },
 ): Promise<DespachoResumen> {
   const anterior = despachosEnMarcha.get(repos.rutas) ?? Promise.resolve();
-  const este = anterior.catch(() => undefined).then(() => despacharAhora(repos, puerto, limite, soloTipos, opciones?.manual ?? false));
+  const este = anterior.catch(() => undefined).then(() => despacharAhora(repos, puerto, limite, soloTipos, opciones?.manual ?? false, opciones?.alMomento ?? false));
   despachosEnMarcha.set(repos.rutas, este);
   return este;
 }
@@ -621,6 +643,7 @@ async function despacharAhora(
   limite: number,
   soloTipos: TipoReporte[] | undefined,
   manual: boolean,
+  alMomento = false,
 ): Promise<DespachoResumen> {
   if (!puerto.conectado() && !puerto.errorConfiguracion?.()) {
     return { intentados: 0, enviados: 0, fallidos: 0, motivo: puerto.descripcion() };
@@ -657,9 +680,16 @@ async function despacharAhora(
       resumen.fallidos++;
       continue;
     }
+    const esperas = reintentoTras.get(repos.rutas) ?? new Map<number, number>();
+    reintentoTras.set(repos.rutas, esperas);
+    if (alMomento && !manual && (esperas.get(reporte.id) ?? 0) > Date.now()) {
+      resumen.intentados--;
+      continue;
+    }
     if (!(await repos.rutas.reservarReporte(reporte.id))) continue;
     const salida = await puerto.enviar(reporte.tipo, { ...reporte.payload, idempotencyKey: 'gsgchat-ubicacion-' + reporte.id });
     if (salida.ok) {
+      esperas.delete(reporte.id);
       await repos.rutas.marcarReporte(reporte.id, 'enviado', { externoId: salida.id ?? null });
       resumen.enviados++;
       continue;
@@ -670,7 +700,11 @@ async function despacharAhora(
       salida.reintentable ? 'pendiente' : 'fallido',
       { error: salida.error },
     );
-    if (!salida.reintentable) resumen.fallidos++;
+    if (salida.reintentable) esperas.set(reporte.id, Date.now() + ESPERA_REINTENTO_MS);
+    else {
+      esperas.delete(reporte.id);
+      resumen.fallidos++;
+    }
     if (salida.error && !(resumen.errores ??= []).includes(salida.error)) resumen.errores.push(salida.error);
     // La clave no vale: los de detras fallarian igual. Se para la cola (los
     // demas siguen 'pendiente', sin tocar) hasta que cambie la configuracion.

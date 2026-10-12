@@ -220,16 +220,30 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
 
   const intentosApi = new Map<string, { desde: number; cantidad: number }>();
   app.addHook('onRequest', async (request, reply) => {
-    if (claveDeCabeceras(request.headers) || claveEnBearer(request.headers)) {
-      const t = ahora().getTime();
-      let ventana = intentosApi.get(request.ip);
-      if (!ventana || t - ventana.desde >= 60_000) {
+    // El freno de fuerza bruta: cuenta solo las claves que NO valen, por IP.
+    // Una clave buena no gasta este cupo (tiene el suyo por clave en cada ruta);
+    // antes contaba todo y frenaba a las demas claves de la misma IP.
+    const conClave = Boolean(claveDeCabeceras(request.headers) || claveEnBearer(request.headers));
+    const t = ahora().getTime();
+    const ventanaDe = () => {
+      let v = intentosApi.get(request.ip);
+      if (!v || t - v.desde >= 60_000) {
         if (intentosApi.size >= 2000) intentosApi.delete(intentosApi.keys().next().value!);
-        ventana = { desde: t, cantidad: 0 }; intentosApi.set(request.ip, ventana);
+        v = { desde: t, cantidad: 0 }; intentosApi.set(request.ip, v);
       }
-      if (++ventana.cantidad > 120) return reply.header('retry-after', String(Math.max(1, Math.ceil((ventana.desde + 60_000 - t) / 1000)))).code(429).send({ error: 'Demasiados intentos de autenticación. Espera un minuto.' });
+      return v;
+    };
+    const frenada = () => {
+      const v = intentosApi.get(request.ip);
+      if (!v || t - v.desde >= 60_000 || v.cantidad < 120) return null;
+      return Math.max(1, Math.ceil((v.desde + 60_000 - t) / 1000));
+    };
+    if (conClave) {
+      const espera = frenada();
+      if (espera) return reply.header('retry-after', String(espera)).code(429).send(cuerpoError('DEMASIADAS_PETICIONES', 'Demasiados intentos con claves que no valen desde esta dirección. Espera un minuto.'));
     }
     request.usuario = await resolver(request);
+    if (conClave && !request.usuario) ventanaDe().cantidad++;
     // La recepcion de pedidos de GSG: solo con una clave de API (nunca con la
     // sesion del panel) y con el codigo de cada caso: 401 sin clave o con una
     // que no vale, 403 si vale pero no puede crear pedidos.

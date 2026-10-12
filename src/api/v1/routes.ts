@@ -251,7 +251,8 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   });
   app.get<{ Params: { codigo: string } }>('/api/v1/errores/:codigo', async (request) => {
     const codigo = request.params.codigo.toUpperCase() as CodigoError;
-    if (!Object.hasOwn(CATALOGO_ERRORES, codigo)) throw new ErrorApi(404, 'NO_EXISTE', `No hay ningún error con el código ${request.params.codigo}. La lista está en /api/v1/errores.`);
+    // Lo pedido solo se repite si tiene forma de codigo: nada de devolver lo que mande cualquiera.
+    if (!Object.hasOwn(CATALOGO_ERRORES, codigo)) throw new ErrorApi(404, 'NO_EXISTE', `No hay ningún error con ${/^[A-Z0-9_]{1,40}$/.test(codigo) ? `el código ${codigo}` : 'ese código'}. La lista está en /api/v1/errores.`);
     return entradaError(codigo);
   });
 

@@ -227,4 +227,29 @@ describe('el mismo cliente vuelve a pedir otro dia (MySQL real)', () => {
     expect(fila.reprogramado.dia < fila.dia).toBe(true);
     expect((hoy.body.entregas as any[]).find((x) => x.referencia === 'PED-205').reprogramado).toBeNull();
   }, 180_000);
+
+  it('cinco REINTENTAR a la vez contra MySQL: UNA sola solicitud nueva al cliente', async () => {
+    const tel = '987000092';
+    const wa = '51' + tel;
+    expect((await api('POST', '/api/v1/entregas', pedido('PED-CONC', tel))).status).toBe(201);
+    await esperar(() => aEste(wa).length > 0, 90_000, 'el primer mensaje');
+    await escribe(wa, { location: { latitude: -12.1211, longitude: -77.0301 } });
+    await esperar(() => /Ubicación registrada/.test(textosA(wa)), 20_000, 'la confirmacion');
+    const antes = aEste(wa).length;
+    const rs = await Promise.all(Array.from({ length: 5 }, () => api('POST', '/api/v1/flujo', { tracking: 'PED-CONC', accion: 'REINTENTAR' })));
+    for (const r of rs) expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(rs.filter((r) => !r.body.sinCambios).length, 'solo uno reinicia').toBe(1);
+    await esperar(() => aEste(wa).length > antes, 90_000, 'la solicitud nueva');
+    await new Promise((res) => setTimeout(res, 6_000));
+    expect(aEste(wa).length - antes).toBe(1);
+  }, 180_000);
+
+  it('reprogramado con el tracking en otra caja (ped-caja ayer, PED-CAJA hoy) se reconoce en MySQL', async () => {
+    const tel = '987000093';
+    expect((await api('POST', '/api/v1/entregas', pedido('ped-caja', tel))).status).toBe(201);
+    await pasarUnDia();
+    expect((await api('POST', '/api/v1/entregas', pedido('PED-CAJA', tel))).status).toBe(201);
+    const fila = ((await api('GET', '/admin/entregas')).body.entregas as any[]).find((x) => x.referencia === 'PED-CAJA');
+    expect(fila.reprogramado).toBeTruthy();
+  }, 120_000);
 });

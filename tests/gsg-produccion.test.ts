@@ -231,8 +231,12 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(JSON.stringify(reporte)).toContain('GSG-');
   });
 
-  it('5. el cliente pega un enlace de Google Maps: también sale a GSG', async () => {
+  it('5. el cliente pega un enlace de Google Maps: se le pregunta si es ahí y, con su SÍ, sale a GSG', async () => {
     await escribe('51987000002', { text: 'aqui esta https://www.google.com/maps?q=-12.0931,-77.0465' });
+    // Un enlace no se da por bueno a ciegas: se le enseña el punto y se espera su SÍ.
+    await esperar(() => /Esta es la ubicación de tu enlace/.test(textosA('51987000002')), 10_000, 'la pregunta del enlace');
+    expect(crm.ubicaciones().some((l) => l.cuerpo.tracking === 'P-002')).toBe(false);
+    await escribe('51987000002', { text: 'sí' });
     await esperar(() => crm.ubicaciones().some((l) => l.cuerpo.tracking === 'P-002'), 10_000, 'que GSG reciba P-002');
     const l = crm.ubicaciones().find((x) => x.cuerpo.tracking === 'P-002')!;
     expect(l.cuerpo).toMatchObject({ lat: -12.0931, lng: -77.0465 });
