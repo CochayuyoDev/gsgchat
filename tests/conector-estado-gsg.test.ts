@@ -258,3 +258,37 @@ describe('la pantalla de Conexión', () => {
     }
   });
 });
+
+describe('la ruta de las incidencias se configura en el panel', () => {
+  it('sin ruta van a /incidencias (como siempre); con ruta, a la que diga el panel', async () => {
+    const llamadas: string[] = [];
+    const fetchImpl = (async (url: string) => { llamadas.push(url); return new Response('{}', { status: 201 }); }) as unknown as typeof fetch;
+    const siempre = crearPuertoHttp({ url: 'https://gsg.example/api', token: 'clave-gsg-123', fetchImpl });
+    expect(siempre.urlIncidencias?.()).toBe('https://gsg.example/api/incidencias');
+    await siempre.enviar('incidencia', { referencia: 'X', codigo: 'sin_whatsapp' });
+    expect(llamadas.at(-1)).toBe('https://gsg.example/api/incidencias');
+    const reported = crearPuertoHttp({ url: 'https://gsg.example/api', token: 'clave-gsg-123', rutaIncidencias: 'v1/gsgchat/reported', fetchImpl });
+    expect(reported.urlIncidencias?.()).toBe('https://gsg.example/api/v1/gsgchat/reported');
+    await reported.enviar('incidencia', { referencia: 'X', codigo: 'sin_whatsapp' });
+    expect(llamadas.at(-1)).toBe('https://gsg.example/api/v1/gsgchat/reported');
+    // Lo demas no cambia de ruta.
+    await reported.enviar('confirmacion', { referencia: 'X' });
+    expect(llamadas.at(-1)).toBe('https://gsg.example/api/confirmaciones');
+  });
+
+  it('se guarda desde Conexión, sobrevive al guardar otra vez sin ella, y una ruta mala no se guarda', async () => {
+    const gsg = gsgFalso();
+    const e = await armar(gsg);
+    try {
+      const con = await e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaUbicacion: 'v1/gsgchat/send-location', rutaIncidencias: 'v1/gsgchat/reported', apiKey: 'clave-gsg-123' });
+      expect(con).toMatchObject({ rutaIncidencias: 'v1/gsgchat/reported', destinoIncidencias: 'https://gsg.example/api/v1/gsgchat/reported', destinoUbicacion: 'https://gsg.example/api/v1/gsgchat/send-location' });
+      const otraVez = await e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaUbicacion: 'v1/gsgchat/send-location' });
+      expect(otraVez.rutaIncidencias).toBe('v1/gsgchat/reported');
+      await expect(e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaIncidencias: '../x' })).rejects.toThrow(/incidencias no vale/);
+      const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true, vista: 'gsg' });
+      expect(html).toContain('id="gsg-ruta-incidencias"');
+    } finally {
+      await e.cerrar();
+    }
+  }, 90_000);
+});

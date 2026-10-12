@@ -70,6 +70,8 @@ export interface PuertoGsg {
   firma?(): string;
   /** A donde va la consulta del estado de un envio (base + ruta), o null si no esta configurada. */
   urlEstado?(): string | null;
+  /** A donde salen las incidencias (base + ruta configurada, o la de siempre), o null sin conexion. */
+  urlIncidencias?(): string | null;
   /**
    * El endpoint de GSG que dice si a un envio se le puede seguir escribiendo:
    * GET {base}/{rutaEstado}?{paramTracking}=…&{paramTelefono}=… con la API Key
@@ -152,6 +154,11 @@ export interface OpcionesGsg {
   token: string;
   /** La ruta, relativa a la base, del GET que dice el estado de un envio. Sin ella no se consulta. */
   rutaEstado?: string;
+  /**
+   * La ruta, relativa a la base, a la que se hace POST con cada incidencia
+   * (p. ej. v1/gsgchat/reported). Sin ella, la de siempre: RUTAS_GSG.incidencia.
+   */
+  rutaIncidencias?: string;
   /** Como llama GSG al parametro del tracking (por defecto trackingCode). */
   paramTracking?: string;
   /** Como llama GSG al parametro del telefono (por defecto phone). */
@@ -350,10 +357,12 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
   const doFetch = opts.fetchImpl ?? fetch;
   const clave = opts.token ?? '';
   const errorConfig = !destino.ok ? destino.error : !clave.trim() ? 'Falta la API Key de GSG.' : null;
-  const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}|${opts.rutaEstado ?? ''}`);
+  const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}|${opts.rutaEstado ?? ''}|${opts.rutaIncidencias ?? ''}`);
   const limpio = (t: string) => sinClave(t, clave);
 
   const rutaEstado = (opts.rutaEstado ?? '').trim();
+  const rutaIncidencias = (opts.rutaIncidencias ?? '').trim() || RUTAS_GSG.incidencia;
+  const destinoIncidencias = destino.ok ? unirUrlGsg(destino.base, rutaIncidencias) : null;
   const destinoEstado = destino.ok && rutaEstado ? unirUrlGsg(destino.base, rutaEstado) : null;
   const paramTracking = (opts.paramTracking ?? '').trim() || 'trackingCode';
   const paramTelefono = (opts.paramTelefono ?? '').trim() || 'phone';
@@ -363,6 +372,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
     descripcion: () => `API de GSG en ${base}`,
     urlUbicacion: () => (crudo && destino.ok ? destino.urlUbicacion : null),
     urlEstado: () => (crudo && destinoEstado?.ok ? destinoEstado.url : null),
+    urlIncidencias: () => (crudo && destinoIncidencias?.ok ? destinoIncidencias.url : null),
 
     async consultarEstado({ tracking, telefono }) {
       if (!rutaEstado) return { decision: 'desconocido', motivo: 'No hay ruta de consulta de estado configurada: no se le pregunta a GSG.', configurada: false };
@@ -405,7 +415,8 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
       let url: string;
       if (tipo === 'ubicacion') url = destino.urlUbicacion;
       else {
-        const u = unirUrlGsg(destino.base, RUTAS_GSG[tipo]);
+        // Las incidencias van a la ruta del panel (si la hay); lo demas, a la de siempre.
+        const u = unirUrlGsg(destino.base, tipo === 'incidencia' ? rutaIncidencias : RUTAS_GSG[tipo]);
         if (!u.ok) return { ok: false, error: `Configuración de GSG no válida: ${u.error}`, reintentable: true, configuracion: true };
         url = u.url;
       }

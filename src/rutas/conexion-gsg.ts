@@ -68,6 +68,8 @@ const conexionSchema = z.object({
   urlUbicacion: z.string().trim().max(300).default(''),
   /** La ruta, relativa a la base, del GET con el estado de un envio ('' = no se consulta). */
   rutaEstado: z.string().trim().max(300).default(''),
+  /** La ruta, relativa a la base, del POST de cada incidencia ('' = la de siempre, /incidencias). */
+  rutaIncidencias: z.string().trim().max(300).default(''),
   /** Los nombres de los parametros de ese GET (los da GSG). */
   paramTracking: z.string().trim().max(60).default('trackingCode'),
   paramTelefono: z.string().trim().max(60).default('phone'),
@@ -95,6 +97,9 @@ export interface EstadoConexionGsg {
   paramTelefono: string;
   /** La URL completa de la consulta de estado (base + ruta), o null. */
   destinoEstado: string | null;
+  /** La ruta de las incidencias ('' = la de siempre) y a donde salen de verdad. */
+  rutaIncidencias: string;
+  destinoIncidencias: string | null;
   /** A donde sale de verdad la ubicacion (base + ruta), o null si no hay o la configuracion no vale. */
   destinoUbicacion: string | null;
   tieneToken: boolean;
@@ -125,7 +130,7 @@ export interface ServicioConexionGsg {
    * había; sin ruta conserva la guardada (o `sendLocation`). `urlUbicacion`
    * (la URL completa antigua) se acepta solo si se convierte sin adivinar.
    */
-  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaEstado?: string | null; paramTracking?: string | null; paramTelefono?: string | null }): Promise<EstadoConexionGsg>;
+  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaEstado?: string | null; paramTracking?: string | null; paramTelefono?: string | null; rutaIncidencias?: string | null }): Promise<EstadoConexionGsg>;
   /** Apunta al simulador de este servidor. */
   usarSimulador(): Promise<EstadoConexionGsg>;
   /** Quita la conexión de la pantalla; si el `.env` tenía una, vuelve a mandar esa. */
@@ -221,7 +226,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       vigente = null;
       return enEspera;
     }
-    const consulta = e.origen === 'pantalla' ? { rutaEstado: guardada.rutaEstado, paramTracking: guardada.paramTracking, paramTelefono: guardada.paramTelefono } : {};
+    const consulta = e.origen === 'pantalla' ? { rutaEstado: guardada.rutaEstado, paramTracking: guardada.paramTracking, paramTelefono: guardada.paramTelefono, rutaIncidencias: guardada.rutaIncidencias || undefined } : {};
     const firma = JSON.stringify([e.url, e.rutaUbicacion, e.ubicacionUrl, e.token, consulta]);
     if (!vigente || vigente.firma !== firma) {
       vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl, idempotenciaUbicacion: deps.config.GSG_IDEMPOTENCY_SUPPORTED === 'true', ...consulta }) };
@@ -294,6 +299,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     errorConfiguracion: () => actual().errorConfiguracion?.() ?? null,
     firma: () => actual().firma?.() ?? actual().descripcion(),
     urlEstado: () => actual().urlEstado?.() ?? null,
+    urlIncidencias: () => actual().urlIncidencias?.() ?? null,
     consultarEstado: (c) => actual().consultarEstado?.(c) ?? Promise.resolve({ decision: 'desconocido', motivo: 'GSG no está conectado: no se consulta el estado.', configurada: false }),
   };
 
@@ -309,6 +315,8 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       paramTracking: guardada.paramTracking,
       paramTelefono: guardada.paramTelefono,
       destinoEstado: proxy.urlEstado?.() ?? null,
+      rutaIncidencias: e.origen === 'pantalla' ? guardada.rutaIncidencias : '',
+      destinoIncidencias: proxy.urlIncidencias?.() ?? null,
       tieneToken: Boolean(e.token),
       claveEnmascarada: enmascararClave(e.token),
       origenClave: e.origenClave,
@@ -418,9 +426,15 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
         if (v && !/^[A-Za-z0-9_.-]{1,60}$/.test(v)) throw new Error(`El nombre del parámetro «${v}» no vale: solo letras, números, punto, guion o guion bajo.`);
         return v || porDefecto;
       };
+      const rutaIncidencias = input.rutaIncidencias !== undefined && input.rutaIncidencias !== null ? input.rutaIncidencias.trim().replace(/^\/+/, '') : antes.rutaIncidencias;
+      if (rutaIncidencias) {
+        const u = unirUrlGsg(urlBase, rutaIncidencias);
+        if (!u.ok) throw new Error(`La ruta de las incidencias no vale: ${u.error}`);
+      }
       guardada = {
         modo: 'real', url: urlBase, rutaUbicacion: ruta, urlUbicacion: '', conectadoEn: new Date().toISOString(),
         rutaEstado,
+        rutaIncidencias,
         paramTracking: param(input.paramTracking, antes.paramTracking, 'trackingCode'),
         paramTelefono: param(input.paramTelefono, antes.paramTelefono, 'phone'),
       };

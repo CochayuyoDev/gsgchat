@@ -113,6 +113,10 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
       return { tipo: 'rechazo', rechazo: RECHAZOS.metodo() };
     }
     const rutaApi = url.split('?')[0] ?? '';
+    // La API 2 solo existe con POST: otro metodo es 405 «usa POST», no «la ruta no existe».
+    if (rutaApi === '/api/v1/flujo' && req.method !== 'POST') {
+      return { tipo: 'rechazo', rechazo: { status: 405, cabeceras: { allow: 'POST' }, cuerpo: cuerpoError('METODO_NO_PERMITIDO', `No se permite ${req.method ?? 'ese método'} en /api/v1/flujo: usa POST con { tracking, accion: "CANCELAR" | "REINTENTAR" }.`) } };
+    }
     // El catalogo de errores es el mismo en todas las tiendas: lo contesta la plataforma, sin clave.
     if (rutaApi === '/api/v1/errores' || rutaApi.startsWith('/api/v1/errores/')) return { tipo: 'plataforma', url };
     // Lo que usa GSG con su clave va a la tienda de esa clave (sin prefijo ni

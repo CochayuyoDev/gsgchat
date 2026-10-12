@@ -243,12 +243,13 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
       token: z.string().max(500).nullable().optional(),
       urlUbicacion: z.string().trim().max(300).nullable().optional(),
       rutaEstado: z.string().trim().max(300).nullable().optional(),
+      rutaIncidencias: z.string().trim().max(300).nullable().optional(),
       paramTracking: z.string().trim().max(60).nullable().optional(),
       paramTelefono: z.string().trim().max(60).nullable().optional(),
     }).parse(request.body ?? {});
 
     try {
-      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion , rutaEstado: body.rutaEstado, paramTracking: body.paramTracking, paramTelefono: body.paramTelefono }) };
+      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion , rutaEstado: body.rutaEstado, paramTracking: body.paramTracking, paramTelefono: body.paramTelefono, rutaIncidencias: body.rutaIncidencias }) };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
