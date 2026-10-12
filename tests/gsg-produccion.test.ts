@@ -60,9 +60,11 @@ function crmDeGsg() {
         res.end(JSON.stringify({ error: 'token invalido' }));
         return;
       }
+      // «Caido»: GSG no lo procesa y pide esperar (429). Un 5xx sin clave
+      // idempotente seria resultado incierto y no se reintentaria solo.
       if (estado.modo === 'caido') {
-        res.writeHead(503, { 'content-type': 'text/html' });
-        res.end('<html>503</html>');
+        res.writeHead(429, { 'content-type': 'text/html', 'retry-after': '1' });
+        res.end('<html>429</html>');
         return;
       }
       if (estado.modo === 'rechaza') {
@@ -279,7 +281,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
       const clave = `${l.cuerpo.tracking}|${l.cuerpo.lat}|${l.cuerpo.lng}`;
       porClave.set(clave, (porClave.get(clave) ?? 0) + 1);
     }
-    // P-004 llego una vez al CRM caido (503) y otra ya aceptada: son dos intentos, un solo alta.
+    // P-004 llego una vez al CRM caido (429) y otra ya aceptada: son dos intentos, un solo alta.
     const repetidas = [...porClave].filter(([clave, n]) => n > 1 && !clave.startsWith('P-004'));
     expect(repetidas).toEqual([]);
     expect(porClave.get('P-004|-12.05|-77.04')).toBe(2);

@@ -39,7 +39,9 @@ describe('contrato del diagrama GSG', () => {
 
   it('manda tracking y coordenadas al endpoint HTTP sendLocation y conserva fallos para reintentar', async () => {
     const llegadas: any[] = [];
-    let status = 503;
+    // 429: GSG pide esperar (no proceso nada). Un 5xx sin clave idempotente es
+    // resultado incierto y no se reintenta solo (ver refuerzo-http-gsg.test.ts).
+    let status = 429;
     const server = http.createServer((req, res) => {
       let body = '';
       req.on('data', c => body += c);

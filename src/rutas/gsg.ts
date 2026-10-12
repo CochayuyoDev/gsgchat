@@ -336,11 +336,10 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
                     : 'GSG no aceptó el envío';
           return {
             ok: false,
-            error: limpio(`Error ${respuesta.status}: ${causa}.${tipo === 'ubicacion' && !idempotente && respuesta.status !== 503 && (respuesta.status >= 500 || respuesta.status === 408) ? ' Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar.' : ''}${texto.trim() ? ` Respuesta de GSG: ${limpio(texto.trim()).slice(0, 200)}` : ''}`),
+            error: limpio(`Error ${respuesta.status}: ${causa}.${tipo === 'ubicacion' && !idempotente && (respuesta.status >= 500 || respuesta.status === 408) ? ' Resultado incierto: verifica en GSG si registró la ubicación antes de reintentar.' : ''}${texto.trim() ? ` Respuesta de GSG: ${limpio(texto.trim()).slice(0, 200)}` : ''}`),
             // 5xx, 429 y 408 son del otro lado y pasan solos; un 4xx es culpa
             // del payload (o de la clave) y reintentarlo solo repite el error.
-            // El 503 dice «no lo procese»: se reintenta aunque sea una ubicacion.
-            reintentable: respuesta.status === 503 ? true : (respuesta.status >= 500 || respuesta.status === 408) && tipo === 'ubicacion' && !idempotente ? false : respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
+            reintentable: (respuesta.status >= 500 || respuesta.status === 408) && tipo === 'ubicacion' && !idempotente ? false : respuesta.status >= 500 || respuesta.status === 429 || respuesta.status === 408,
             ...(auth ? { autenticacion: auth } : {}),
           };
         }
@@ -588,7 +587,7 @@ const despachosEnMarcha = new WeakMap<object, Promise<unknown>>();
  */
 const paradasPorClave = new WeakMap<object, { firma: string; error: string }>();
 /**
- * Tras un fallo reintentable (GSG caido, 503, sin conexion), el envio al
+ * Tras un fallo reintentable (GSG pide esperar, sin conexion), el envio al
  * momento (`alMomento`) no vuelve a intentar ese reporte hasta pasado un rato:
  * el pin y el SI disparan cada uno su envio y, sin esto, el segundo insistia
  * al instante contra un GSG caido. La pasada de cada minuto y el boton
