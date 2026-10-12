@@ -373,3 +373,38 @@ describe('aislamiento entre tiendas en la bandeja de errores', () => {
     expect(desdeA.json.ok).toBe(true);
   });
 });
+
+describe('lo nuevo de GSG por el servidor de la plataforma', () => {
+  it('POST /api/v1/flujo con la clave de una tienda que no es la principal llega a ESA tienda', async () => {
+    const alta = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: pedido('FLUJO-PLAT', '987800050') });
+    expect(alta.status).toBe(201);
+    const r = await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
+    expect(r.status, r.texto).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, accion: 'CANCELAR' });
+    // Con la clave de la otra tienda, ese tracking no existe alli.
+    const otra = await pedir('/api/v1/flujo', { clave: claveB, cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
+    expect(otra.status).toBe(404);
+    esErrorLimpio(otra, 'NO_EXISTE');
+    // Sin clave: 401 con su forma, no el 404 de la plataforma.
+    const sin = await pedir('/api/v1/flujo', { cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
+    expect(sin.status).toBe(401);
+  });
+
+  it('GET /api/v1/reportados y /api/v1/trackings con la clave van a su tienda', async () => {
+    for (const ruta of ['/api/v1/reportados', '/api/v1/trackings']) {
+      const r = await pedir(ruta, { clave: adminA, metodo: 'GET' });
+      expect(r.status, `${ruta}: ${r.texto}`).toBe(200);
+    }
+  });
+
+  it('el catalogo de errores lo contesta la plataforma, sin clave ni tienda', async () => {
+    const r = await pedir('/api/v1/errores', { metodo: 'GET' });
+    expect(r.status).toBe(200);
+    expect(r.json.errores.some((x: any) => x.codigo === 'PAGO_REQUERIDO' && x.status === 402)).toBe(true);
+    const uno = await pedir('/api/v1/errores/no_existe', { metodo: 'GET' });
+    expect(uno.status).toBe(200);
+    const falta = await pedir('/api/v1/errores/INVENTADO', { metodo: 'GET' });
+    expect(falta.status).toBe(404);
+    esErrorLimpio(falta, 'NO_EXISTE');
+  });
+});

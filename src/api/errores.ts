@@ -10,7 +10,7 @@
  * solo un texto general.
  */
 
-import type { FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 
 export type CodigoError =
   | 'VALIDACION'
@@ -126,6 +126,29 @@ export const CATALOGO_ERRORES: Record<CodigoError, EntradaCatalogo> = {
   ERROR_INTERNO: { status: 500, significa: 'Fallo inesperado del servidor.', queHacer: 'Reintenta; si sigue, avisa con la hora exacta.' },
   BASE_NO_DISPONIBLE: { status: 503, significa: 'La base de datos no responde.', queHacer: 'Reintenta tras Retry-After.' },
 };
+
+/**
+ * GET /api/v1/errores y GET /api/v1/errores/:codigo. Es igual para todas las
+ * tiendas: lo monta la tienda y tambien la plataforma (que lo contesta sin
+ * clave, sin tener que saber de que tienda es quien pregunta).
+ */
+export function registrarCatalogoErrores(app: FastifyInstance): void {
+  const entrada = (codigo: CodigoError) => ({ codigo, ...CATALOGO_ERRORES[codigo] });
+  app.get('/api/v1/errores', async (request) => {
+    const status = Number((request.query as { status?: string }).status);
+    const codigos = (Object.keys(CATALOGO_ERRORES) as CodigoError[]).filter((c) => !status || CATALOGO_ERRORES[c].status === status);
+    return {
+      forma: { ok: false, codigo: 'CODIGO_ESTABLE', error: 'El motivo en palabras', detalles: '[{ campo, mensaje }] (opcional)', ir: '/panel#... (opcional)' },
+      errores: codigos.map(entrada),
+    };
+  });
+  app.get<{ Params: { codigo: string } }>('/api/v1/errores/:codigo', async (request, reply) => {
+    const codigo = request.params.codigo.toUpperCase() as CodigoError;
+    // Lo pedido solo se repite si tiene forma de codigo: nada de devolver lo que mande cualquiera.
+    if (!Object.hasOwn(CATALOGO_ERRORES, codigo)) return reply.code(404).send(cuerpoError('NO_EXISTE', `No hay ningún error con ${/^[A-Z0-9_]{1,40}$/.test(codigo) ? `el código ${codigo}` : 'ese código'}. La lista está en /api/v1/errores.`));
+    return entrada(codigo);
+  });
+}
 
 /** El codigo por defecto de un status 4xx que no trae el suyo. */
 export function codigoPorStatus(status: number): CodigoError {

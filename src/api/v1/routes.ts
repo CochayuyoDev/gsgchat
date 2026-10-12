@@ -38,7 +38,7 @@ import { openApi } from './openapi.js';
 import { confirmacionSchema } from '../../ia/ordenes.js';
 import type { ServicioIA } from '../../ia/servicio.js';
 import { ErrorIA } from '../../ia/proveedores.js';
-import { CATALOGO_ERRORES, ErrorApi, type CodigoError } from '../errores.js';
+import { ErrorApi, registrarCatalogoErrores } from '../errores.js';
 import type { ServicioPlan } from '../../plan/servicio.js';
 import type { ServicioVoz } from '../../voz/servicio.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
@@ -240,21 +240,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
 
   // El catalogo de errores: cada codigo con su HTTP, que significa y que
   // hacer. Sin clave, como el contrato: es lo que lee quien integra.
-  const entradaError = (codigo: CodigoError) => ({ codigo, ...CATALOGO_ERRORES[codigo] });
-  app.get('/api/v1/errores', async (request) => {
-    const status = Number((request.query as { status?: string }).status);
-    const codigos = (Object.keys(CATALOGO_ERRORES) as CodigoError[]).filter((c) => !status || CATALOGO_ERRORES[c].status === status);
-    return {
-      forma: { ok: false, codigo: 'CODIGO_ESTABLE', error: 'El motivo en palabras', detalles: '[{ campo, mensaje }] (opcional)', ir: '/panel#... (opcional)' },
-      errores: codigos.map(entradaError),
-    };
-  });
-  app.get<{ Params: { codigo: string } }>('/api/v1/errores/:codigo', async (request) => {
-    const codigo = request.params.codigo.toUpperCase() as CodigoError;
-    // Lo pedido solo se repite si tiene forma de codigo: nada de devolver lo que mande cualquiera.
-    if (!Object.hasOwn(CATALOGO_ERRORES, codigo)) throw new ErrorApi(404, 'NO_EXISTE', `No hay ningún error con ${/^[A-Z0-9_]{1,40}$/.test(codigo) ? `el código ${codigo}` : 'ese código'}. La lista está en /api/v1/errores.`);
-    return entradaError(codigo);
-  });
+  registrarCatalogoErrores(app);
 
   app.get('/api/v1/openapi.json', async () => openApi(config.PUBLIC_BASE_URL));
 
