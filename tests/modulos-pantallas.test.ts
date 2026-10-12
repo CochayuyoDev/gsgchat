@@ -111,6 +111,9 @@ describe('cada módulo con lo suyo', () => {
     // Las dos APIs, cada una con su tarjeta.
     expect(html).toContain('API 1</span> Recibir pedidos');
     expect(html).toContain('API 2</span> Cancelar o reintentar un pedido');
+    // Cómo probar cada una en Postman, y el validador de la API 2.
+    for (const id of ['postman-1', 'postman-2', 'validar-2', 'courier-json-2', 'courier-validar-2', 'courier-descargar-2']) expect(hay.has(id), id).toBe(true);
+    expect(html).toContain('data-url="/api/v1/flujo"');
     // Cada API con su dirección.
     expect(html).toContain("location.origin + '/api/v1/entregas'");
     expect(html).toContain("location.origin + '/api/v1/flujo'");

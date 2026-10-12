@@ -390,6 +390,23 @@ describe('lo nuevo de GSG por el servidor de la plataforma', () => {
     expect(sin.status).toBe(401);
   });
 
+  it('GET a /api/v1/flujo: 405 que dice que se usa POST, no «la ruta no existe»', async () => {
+    const r = await pedir('/api/v1/flujo', { clave: claveA, metodo: 'GET' });
+    expect(r.status).toBe(405);
+    esErrorLimpio(r, 'METODO_NO_PERMITIDO');
+    expect(r.cabeceras.get('allow')).toBe('POST');
+  });
+
+  it('el pedido con tracking de GSG distinto de su referencia se encuentra por los dos', async () => {
+    const alta = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { ...GSG, tracking: 'GSG-E-905', referencia: 'PED-905', cliente: 'Cliente', telefono: '987800090' } });
+    expect(alta.status).toBe(201);
+    for (const tracking of ['GSG-E-905', 'PED-905', 'gsg-e-905']) {
+      const r = await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking, accion: 'CANCELAR', simular: true } });
+      expect(r.status, `${tracking}: ${r.texto}`).toBe(200);
+      expect(r.json.entrega.referencia).toBe('PED-905');
+    }
+  });
+
   it('una orden con accion mandada a la dirección de pedidos: 400 que dice que va en /api/v1/flujo', async () => {
     const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { tracking: 'X', accion: 'CANCELAR' } });
     expect(r.status).toBe(400);

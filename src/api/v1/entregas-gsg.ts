@@ -809,11 +809,13 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   const pedidoDelTracking = async (tracking: string): Promise<FilaEntrega | undefined> => {
     const hoy = await porReferencia(tracking);
     if (hoy || !deps.repo) return hoy;
+    // GSG manda su tracking (GSG-E-205), que puede no ser la referencia (PED-205):
+    // se busca por los tres, primero hoy y si no entre los vivos de otros dias.
     const ref = tracking.toLowerCase();
-    const vivo = (await deps.repo.listar({ q: ref, limit: 50 }))
-      .filter((x) => x.referencia.toLowerCase() === ref || String(x.datosEnvio?.tracking ?? '').toLowerCase() === ref || String(x.externoId ?? '').toLowerCase() === ref)
-      .sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id)[0];
-    return vivo ? (await entregas.entrega(vivo.id))?.entrega : undefined;
+    const coincide = (x: Entrega) => x.referencia.toLowerCase() === ref || String(x.datosEnvio?.tracking ?? '').toLowerCase() === ref || String(x.externoId ?? '').toLowerCase() === ref;
+    const masReciente = (lista: Entrega[]) => lista.filter(coincide).sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id)[0];
+    const encontrado = masReciente(await deps.repo.listar({ dia: entregas.diaDeHoy(), limit: 5000 })) ?? masReciente(await deps.repo.listar({ limit: 5000 }));
+    return encontrado ? (await entregas.entrega(encontrado.id))?.entrega : undefined;
   };
 
   async function manejarFlujo(request: FastifyRequest, reply: FastifyReply) {

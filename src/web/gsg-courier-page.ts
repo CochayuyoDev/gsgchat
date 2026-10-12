@@ -30,6 +30,19 @@ const CAMPOS: Array<[string, string, boolean, string]> = [
 /** Los campos de antes: se siguen aceptando para no romper envíos anteriores, pero no son parte del contrato. */
 const CAMPOS_ANTERIORES = ['driver', 'costServ', 'referenciaDireccion', 'fecRegistro', 'observacionCliente', 'detalleProducto', 'tamano', 'clientePagaDelivery', 'sede', 'tipoRuta', 'nroDocumento', 'agenciaNombre', 'agenciaDestino', 'pagoEnDestino'];
 
+/** Un cuerpo de ejemplo de la API 2 (el mismo tracking que el ejemplo de la API 1). */
+export const EJEMPLO_FLUJO = { tracking: 'GSG-000001', accion: 'CANCELAR', motivo: 'El cliente anuló el pedido' };
+
+/** Como se arma la llamada en Postman: [paso, valor]. */
+function postman(id: string, url: string, cuerpo: string, extra: string): string {
+  return `<div class="postman" id="${id}"><h3>Probar en Postman</h3><ol>
+    <li>Método: <b>POST</b> (con GET responde 405).</li>
+    <li>URL: <code class="postman-url"></code></li>
+    <li>Headers: <code>Content-Type: application/json</code> y <code>X-API-Key: TU_CLAVE</code> (la clave que creas abajo).</li>
+    <li>Body → <b>raw</b> → <b>JSON</b>, y pega:</li></ol>
+    <pre class="api-json">${escapeHtml(cuerpo)}</pre>${extra}<span hidden data-url="${escapeHtml(url)}"></span></div>`;
+}
+
 /** API 2: los campos de una orden de cancelar o reintentar. [nombre JSON, obligatorio, detalle] */
 const CAMPOS_FLUJO: Array<[string, boolean, string]> = [
   ['tracking', true, 'El tracking del pedido en curso (texto o número).'],
@@ -68,7 +81,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
   const ejemplo = JSON.stringify(EJEMPLO_COURIER, null, 2);
   return appShell({ titulo: 'Nuestra API', subtitulo: 'El endpoint de GSGchat para GSG: dirección, claves, validación y recepciones',
     nombreNegocio: opts.nombreNegocio, demo: opts.demo,
-    css: `.courier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.courier-card{padding:22px;border:1px solid var(--borde);border-radius:16px;background:var(--superficie)}.courier-card h2{margin-top:0}.courier-card input,.courier-card textarea{width:100%;box-sizing:border-box}.courier-card input{padding:12px}.courier-card textarea{min-height:300px;padding:14px;font:13px/1.6 monospace}.clave-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.clave-field label{display:block;margin-bottom:8px;font-weight:600}.clave-field select,.clave-field input{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--borde);border-radius:10px;background:var(--superficie);color:inherit;font:inherit}.clave-permisos{margin:20px 0;padding:18px;border:1px solid var(--borde);border-radius:12px}.clave-permisos-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.clave-permiso{display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--superficie-2);border-radius:8px;font-size:13px}.courier-card .clave-permiso input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.clave-secret-panel{background:var(--superficie-2);padding:20px;border:1px solid var(--borde);border-radius:12px;margin-bottom:18px}.courier-secret{display:block;padding:12px;background:var(--superficie);border-radius:8px}.courier-wide{grid-column:1/-1}.courier-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.courier-scroll{overflow:auto}.courier-card table{width:100%;border-collapse:collapse}.courier-card td,.courier-card th{padding:10px;text-align:left;border-bottom:1px solid var(--borde)}.courier-card pre{white-space:pre-wrap;overflow-wrap:anywhere}.courier-secret{overflow-wrap:anywhere}.courier-card small{display:block;margin-top:8px}.api-num{display:inline-block;margin-right:8px;padding:2px 10px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:.8em;vertical-align:middle}.api-json{padding:12px;border-radius:10px;background:var(--superficie-2);font:13px/1.5 monospace}.courier-status{padding:12px;border-radius:10px;background:var(--superficie-2);margin:12px 0}#np-flujo-form{display:grid;gap:6px}#np-flujo-form select{padding:10px;border:1px solid var(--borde);border-radius:10px;background:var(--superficie);color:inherit;font:inherit}.np-check{display:flex;gap:8px;align-items:center}.courier-card .np-check input{width:auto}#np-flujo-resultado{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}@media(max-width:800px){.courier-grid,.clave-form-grid,.clave-permisos-grid{grid-template-columns:1fr}}`,
+    css: `.courier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.courier-card{padding:22px;border:1px solid var(--borde);border-radius:16px;background:var(--superficie)}.courier-card h2{margin-top:0}.courier-card input,.courier-card textarea{width:100%;box-sizing:border-box}.courier-card input{padding:12px}.courier-card textarea{min-height:300px;padding:14px;font:13px/1.6 monospace}.clave-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.clave-field label{display:block;margin-bottom:8px;font-weight:600}.clave-field select,.clave-field input{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--borde);border-radius:10px;background:var(--superficie);color:inherit;font:inherit}.clave-permisos{margin:20px 0;padding:18px;border:1px solid var(--borde);border-radius:12px}.clave-permisos-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.clave-permiso{display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--superficie-2);border-radius:8px;font-size:13px}.courier-card .clave-permiso input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.clave-secret-panel{background:var(--superficie-2);padding:20px;border:1px solid var(--borde);border-radius:12px;margin-bottom:18px}.courier-secret{display:block;padding:12px;background:var(--superficie);border-radius:8px}.courier-wide{grid-column:1/-1}.courier-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.courier-scroll{overflow:auto}.courier-card table{width:100%;border-collapse:collapse}.courier-card td,.courier-card th{padding:10px;text-align:left;border-bottom:1px solid var(--borde)}.courier-card pre{white-space:pre-wrap;overflow-wrap:anywhere}.courier-secret{overflow-wrap:anywhere}.courier-card small{display:block;margin-top:8px}.api-num{display:inline-block;margin-right:8px;padding:2px 10px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:.8em;vertical-align:middle}.postman{margin:12px 0;padding:14px;border:1px dashed var(--borde);border-radius:12px}.postman h3{margin-top:0}.postman ol{margin:6px 0 8px;padding-left:20px}.postman li{margin:4px 0}.postman-url{overflow-wrap:anywhere}.api-json{padding:12px;border-radius:10px;background:var(--superficie-2);font:13px/1.5 monospace}.courier-status{padding:12px;border-radius:10px;background:var(--superficie-2);margin:12px 0}#np-flujo-form{display:grid;gap:6px}#np-flujo-form select{padding:10px;border:1px solid var(--borde);border-radius:10px;background:var(--superficie);color:inherit;font:inherit}.np-check{display:flex;gap:8px;align-items:center}.courier-card .np-check input{width:auto}#np-flujo-resultado{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}@media(max-width:800px){.courier-grid,.clave-form-grid,.clave-permisos-grid{grid-template-columns:1fr}}`,
     contenido: `<div class="courier-grid">
       <section class="courier-card courier-wide"><h2>GSG llama → GSGchat recibe → el sistema procesa</h2>
         <p>Estas son <b>nuestras dos APIs</b>, las que GSG llama: la <b>API 1</b> para mandarnos los pedidos y la <b>API 2</b> para pedirnos cancelar o reintentar uno. Cada una tiene su dirección; las dos usan la misma clave. Lo que GSGchat le manda o le pregunta a GSG está en <a href="/conexion-gsg">Conexión con GSG</a>.</p>
@@ -85,6 +98,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <small>Hasta 600 pedidos por llamada. Máximo 120 llamadas por minuto y clave.</small>
         <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>
         <p>Cuerpo: un pedido, una lista o <code>{ pedidos: [...] }</code>. Sus campos y respuestas están más abajo: <a href="#courier-campos">campos</a> · <a href="#courier-respuestas">respuestas</a>.</p>
+        ${postman('postman-1', '/api/v1/entregas', JSON.stringify(EJEMPLO_COURIER.pedidos[0], null, 2), '<p>Respuesta esperada: <b>201</b> con el pedido creado (su <code>id</code>). Si lo mandas otra vez: <b>200</b>, repetido, sin duplicar.</p>')}
         <a href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a> · <a href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
       </section>
       <section class="courier-card" id="api-2"><h2><span class="api-num">API 2</span> Cancelar o reintentar un pedido</h2>
@@ -92,7 +106,8 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <label for="courier-url-2">Enviar con POST</label><input id="courier-url-2" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url-2" type="button">Copiar dirección</button></div>
         <p><code>Content-Type: application/json</code><br><code>X-API-Key: CLAVE_DE_GSG</code> (la misma clave de la API 1)</p>
-        <pre class="api-json">{ "tracking": "PED-205", "accion": "REINTENTAR", "telefono": "987654321", "motivo": "número corregido" }</pre>
+        ${postman('postman-2', '/api/v1/flujo', JSON.stringify(EJEMPLO_FLUJO, null, 2), '<p><b>Antes</b>, crea el pedido con la API 1: la API 2 no crea pedidos, actúa sobre uno que ya existe. Usa su <code>tracking</code> de GSG (o su <code>referencia</code>). Para probar sin cambiar nada, añade <code>"simular": true</code>.</p><p>Respuesta esperada: <b>200</b> con <code>detalle</code>. Si el tracking no está en curso: <b>404</b>.</p><div class="courier-actions"><button class="btn" id="courier-descargar-2" type="button">Descargar JSON de ejemplo</button></div>')}
+        <p>Para reintentar con el teléfono corregido: <code>{ "tracking": "GSG-000001", "accion": "REINTENTAR", "telefono": "987654321" }</code></p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_FLUJO.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
         <h3>Respuestas</h3>
         <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS_FLUJO.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div>
@@ -122,6 +137,12 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <label for="courier-json">Pedidos en JSON</label><textarea id="courier-json" spellcheck="false">${escapeHtml(ejemplo)}</textarea>
         <div class="courier-actions"><button class="btn primario" id="courier-validar" ${opts.disponible ? '' : 'disabled'}>Validar sin encolar</button><button class="btn" id="courier-ejemplo">Restaurar ejemplo</button></div>
         <pre id="courier-validacion" role="status" aria-live="polite"></pre>
+      </section>
+      <section class="courier-card courier-wide" id="validar-2"><h2>Validar el formato de órdenes (API 2)</h2>
+        <p>Pega el JSON que mandaría GSG a la API 2. Revisa los campos y busca el pedido por su tracking; dice lo que haría <b>sin cambiar nada</b> (se valida siempre en modo simulado).</p>
+        <label for="courier-json-2">Orden en JSON</label><textarea id="courier-json-2" spellcheck="false">${escapeHtml(JSON.stringify(EJEMPLO_FLUJO, null, 2))}</textarea>
+        <div class="courier-actions"><button class="btn primario" id="courier-validar-2" type="button" ${opts.disponible ? '' : 'disabled'}>Validar sin cambiar nada</button><button class="btn" id="courier-ejemplo-2" type="button">Restaurar ejemplo</button></div>
+        <pre id="courier-validacion-2" role="status" aria-live="polite"></pre>
       </section>
       <section class="courier-card courier-wide"><h2>Últimas llamadas (API 1 y API 2)</h2><button class="btn" id="courier-refrescar">Actualizar estado</button><h3>Lo que GSG nos envió</h3><p>Pedidos, órdenes de cancelar o reintentar, y las pruebas hechas desde esta pantalla.</p><div id="courier-bitacora" class="courier-scroll"></div></section>
       <section class="courier-card courier-wide" id="courier-campos"><h2>Campos que envía Courier (API 1)</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
@@ -159,6 +180,28 @@ ${MENSAJE_ERROR_HTTP_JS}
   }
   $('courier-copiar-url').onclick = function() { copiar(endpoint); };
   $('courier-copiar-url-2').onclick = function() { copiar(endpoint2); };
+  Array.prototype.forEach.call(document.querySelectorAll('.postman'), function(caja) {
+    var dato = caja.querySelector('[data-url]');
+    var destino = caja.querySelector('.postman-url');
+    if (dato && destino) destino.textContent = location.origin + dato.getAttribute('data-url');
+  });
+  var ejemplo2 = $('courier-json-2').value;
+  $('courier-descargar-2').onclick = function() {
+    var url = URL.createObjectURL(new Blob([ejemplo2], {type:'application/json'}));
+    var a = document.createElement('a'); a.href = url; a.download = 'orden-api2-ejemplo.json'; a.click(); URL.revokeObjectURL(url);
+  };
+  $('courier-ejemplo-2').onclick = function() { $('courier-json-2').value = ejemplo2; $('courier-validacion-2').textContent = ''; };
+  $('courier-validar-2').onclick = async function() {
+    var b = this; b.disabled = true;
+    var cuerpo;
+    try { cuerpo = JSON.parse($('courier-json-2').value); }
+    catch(e) { $('courier-validacion-2').textContent = 'El texto no es un JSON válido: ' + e.message; b.disabled = false; return; }
+    if (!cuerpo || typeof cuerpo !== 'object' || Array.isArray(cuerpo)) { $('courier-validacion-2').textContent = 'La API 2 recibe un objeto: { "tracking": "...", "accion": "CANCELAR" | "REINTENTAR" }.'; b.disabled = false; return; }
+    cuerpo.simular = true;
+    try { var r = await api('/admin/entregas/flujo', 'POST', cuerpo); $('courier-validacion-2').textContent = 'Formato correcto · HTTP 200 · ' + (r.detalle || '') + '\nNo se cambió nada.\n\n' + JSON.stringify(r, null, 2); }
+    catch(e) { $('courier-validacion-2').textContent = e.message + (e.datos ? '\n\n' + JSON.stringify(e.datos, null, 2) : ''); }
+    finally { b.disabled = false; }
+  };
   $('courier-copiar-clave').onclick = function() { copiar($('courier-secreto').textContent); };
   function ocultar() { $('courier-secreto').textContent = ''; $('courier-secreto-titulo').textContent = ''; $('courier-nueva').hidden = true; }
   $('courier-ocultar').onclick = ocultar;
