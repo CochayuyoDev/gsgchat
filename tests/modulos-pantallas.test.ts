@@ -114,6 +114,10 @@ describe('cada módulo con lo suyo', () => {
     // Cómo probar cada una en Postman, y el validador de la API 2.
     for (const id of ['postman-1', 'postman-2', 'validar-2', 'courier-json-2', 'courier-validar-2', 'courier-descargar-2']) expect(hay.has(id), id).toBe(true);
     expect(html).toContain('data-url="/api/v1/flujo"');
+    // Cada API dice como sacar TODAS sus respuestas, no solo el 405.
+    for (const codigo of ['201', '400', '401', '403', '404', '405', '413', '415', '429']) expect(html).toContain(`<tr><td><b>${codigo}</b></td>`);
+    expect((html.match(/Cómo sacar <b>cada<\/b> respuesta/g) ?? []).length).toBe(2);
+    expect(html).not.toContain('(con GET responde 405)');
     // Cada API con su dirección.
     expect(html).toContain("location.origin + '/api/v1/entregas'");
     expect(html).toContain("location.origin + '/api/v1/flujo'");

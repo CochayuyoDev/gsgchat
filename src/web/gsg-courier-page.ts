@@ -34,13 +34,13 @@ const CAMPOS_ANTERIORES = ['driver', 'costServ', 'referenciaDireccion', 'fecRegi
 export const EJEMPLO_FLUJO = { tracking: 'GSG-E-205', accion: 'CANCELAR', motivo: 'El cliente anuló el pedido' };
 
 /** Como se arma la llamada en Postman: [paso, valor]. */
-function postman(id: string, url: string, cuerpo: string, extra: string): string {
+function postman(id: string, url: string, cuerpo: string, extra: string, tabla: string, codigos: string): string {
   return `<div class="postman" id="${id}"><h3>Probar en Postman</h3><ol>
-    <li>Método: <b>POST</b> (con GET responde 405).</li>
+    <li>Método: <b>POST</b>.</li>
     <li>URL: <code class="postman-url"></code></li>
     <li>Headers: <code>Content-Type: application/json</code> y <code>X-API-Key: TU_CLAVE</code> (la clave que creas abajo).</li>
     <li>Body → <b>raw</b> → <b>JSON</b>, y pega:</li></ol>
-    <pre class="api-json">${escapeHtml(cuerpo)}</pre>${extra}<span hidden data-url="${escapeHtml(url)}"></span></div>`;
+    <pre class="api-json">${escapeHtml(cuerpo)}</pre>${extra}<p class="postman-todas">Cómo sacar <b>cada</b> respuesta (${escapeHtml(codigos)}): <a href="#${tabla}">ver la tabla «Cómo sacarla en Postman»</a>.</p><span hidden data-url="${escapeHtml(url)}"></span></div>`;
 }
 
 /** API 2: los campos de una orden de cancelar o reintentar. [nombre JSON, obligatorio, detalle] */
@@ -110,7 +110,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <small>Hasta 600 pedidos por llamada. Máximo 120 llamadas por minuto y clave.</small>
         <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>
         <p>Cuerpo: un pedido, una lista o <code>{ pedidos: [...] }</code>. Sus campos y respuestas están más abajo: <a href="#courier-campos">campos</a> · <a href="#courier-respuestas">respuestas</a>.</p>
-        ${postman('postman-1', '/api/v1/entregas', JSON.stringify(EJEMPLO_COURIER.pedidos[0], null, 2), '<p>Respuesta esperada: <b>201</b> con el pedido creado (su <code>id</code>). Si lo mandas otra vez: <b>200</b>, repetido, sin duplicar.</p>')}
+        ${postman('postman-1', '/api/v1/entregas', JSON.stringify(EJEMPLO_COURIER.pedidos[0], null, 2), '<p>Respuesta esperada: <b>201</b> con el pedido creado (su <code>id</code>). Si lo mandas otra vez: <b>200</b>, repetido, sin duplicar.</p>', 'courier-respuestas', RESPUESTAS.map(([c]) => c).join(', '))}
         <a href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a> · <a href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
       </section>
       <section class="courier-card" id="api-2"><h2><span class="api-num">API 2</span> Cancelar o reintentar un pedido</h2>
@@ -118,10 +118,10 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <label for="courier-url-2">Enviar con POST</label><input id="courier-url-2" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url-2" type="button">Copiar dirección</button></div>
         <p><code>Content-Type: application/json</code><br><code>X-API-Key: CLAVE_DE_GSG</code> (la misma clave de la API 1)</p>
-        ${postman('postman-2', '/api/v1/flujo', JSON.stringify(EJEMPLO_FLUJO, null, 2), '<p><b>Antes</b>, crea el pedido con la API 1: la API 2 no crea pedidos, actúa sobre uno que ya existe. Usa su <code>tracking</code> de GSG (o su <code>referencia</code>). Para probar sin cambiar nada, añade <code>"simular": true</code>.</p><p>Respuesta esperada: <b>200</b> con <code>detalle</code>. Si el tracking no está en curso: <b>404</b>.</p><div class="courier-actions"><button class="btn" id="courier-descargar-2" type="button">Descargar JSON de ejemplo</button></div>')}
+        ${postman('postman-2', '/api/v1/flujo', JSON.stringify(EJEMPLO_FLUJO, null, 2), '<p><b>Antes</b>, crea el pedido con la API 1: la API 2 no crea pedidos, actúa sobre uno que ya existe. Usa su <code>tracking</code> de GSG (o su <code>referencia</code>). Para probar sin cambiar nada, añade <code>"simular": true</code>.</p><p>Respuesta esperada: <b>200</b> con <code>detalle</code>. Si el tracking no está en curso: <b>404</b>.</p><div class="courier-actions"><button class="btn" id="courier-descargar-2" type="button">Descargar JSON de ejemplo</button></div>', 'respuestas-2', RESPUESTAS_FLUJO.map(([c]) => c).join(', '))}
         <p>Para reintentar con el teléfono corregido: <code>{ "tracking": "GSG-E-205", "accion": "REINTENTAR", "telefono": "987654321" }</code></p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_FLUJO.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
-        <h3>Respuestas</h3>
+        <h3 id="respuestas-2">Respuestas</h3>
         <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th><th>Cómo sacarla en Postman</th></tr></thead><tbody>${RESPUESTAS_FLUJO.map(([c, t, como]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td><td>${conCodigo(como)}</td></tr>`).join('')}</tbody></table></div>
         <h3>Probar</h3>
         <p>La misma lógica que cuando GSG llama a la API 2. Por defecto se simula: dice lo que haría sin tocar el pedido.</p>
