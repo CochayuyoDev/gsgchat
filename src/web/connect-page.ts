@@ -492,6 +492,10 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <span class="hint">Lo que va después de la URL base, sin http:// ni «..». Por ejemplo v1/gsgchat/location</span></label>
     <input id="gsg-ruta" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/location" aria-describedby="gsg-url-final">
     <p class="ayuda" id="gsg-url-final" role="status" aria-live="polite"></p>
+    <label class="campo" for="gsg-ruta-incidencias">Ruta para reportar incidencias (opcional)
+      <span class="hint">El POST con cada incidencia del reparto (número sin WhatsApp, sin respuesta…). Vacía = la de siempre, incidencias. Por ejemplo v1/gsgchat/reported</span></label>
+    <input id="gsg-ruta-incidencias" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/reported" aria-describedby="gsg-url-incidencias">
+    <p class="ayuda" id="gsg-url-incidencias" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-estado">Ruta para consultar el estado de un envío (opcional)
       <span class="hint">El GET de GSG que dice si un tracking está cancelado, con el número o el tracking mal, o sin poder contactar. Vacía = no se le pregunta. Por ejemplo v1/gsgchat/estado</span></label>
     <input id="gsg-ruta-estado" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/estado" aria-describedby="gsg-url-estado">
@@ -1703,6 +1707,15 @@ function pintarUrlFinalGsg() {
   return r;
 }
 
+function pintarUrlIncidenciasGsg() {
+  var caja = $('gsg-url-incidencias');
+  if (!caja) return;
+  var ruta = $('gsg-ruta-incidencias').value.trim() || 'incidencias';
+  var r = unirUrlGsg($('gsg-url').value.trim(), ruta);
+  caja.textContent = r.ok ? 'Las incidencias se enviarán con POST a: ' + r.url : 'No vale: ' + r.error;
+  caja.className = r.ok ? 'ayuda' : 'ayuda error';
+}
+
 function pintarUrlEstadoGsg() {
   var caja = $('gsg-url-estado');
   if (!caja) return;
@@ -1753,6 +1766,8 @@ async function cargarGsg() {
     if (g.modo === 'real' && g.url && !$('gsg-url').value) $('gsg-url').value = g.url;
     if (g.modo === 'real' && g.rutaUbicacion && !$('gsg-ruta').value) $('gsg-ruta').value = g.rutaUbicacion;
     if (g.rutaEstado && !$('gsg-ruta-estado').value) $('gsg-ruta-estado').value = g.rutaEstado;
+    if (g.rutaIncidencias && !$('gsg-ruta-incidencias').value) $('gsg-ruta-incidencias').value = g.rutaIncidencias;
+    pintarUrlIncidenciasGsg();
     if (g.paramTracking && !$('gsg-param-tracking').value) $('gsg-param-tracking').value = g.paramTracking;
     if (g.paramTelefono && !$('gsg-param-telefono').value) $('gsg-param-telefono').value = g.paramTelefono;
     pintarUrlFinalGsg();
@@ -1795,6 +1810,7 @@ if ($('gsg')) {
   $('gsg-url').oninput = pintarUrlFinalGsg;
   $('gsg-ruta').oninput = pintarUrlFinalGsg;
   ['gsg-url', 'gsg-ruta-estado', 'gsg-param-tracking', 'gsg-param-telefono'].forEach(function (id) { $(id).addEventListener('input', pintarUrlEstadoGsg); });
+  ['gsg-url', 'gsg-ruta-incidencias'].forEach(function (id) { $(id).addEventListener('input', pintarUrlIncidenciasGsg); });
   $('gsg-consulta-form').onsubmit = async function (ev) {
     ev.preventDefault();
     var salida = $('gsg-consulta-resultado');
@@ -1838,7 +1854,7 @@ if ($('gsg')) {
     resultadoGsg('Guardando…', 'espera');
     try {
       var token = $('gsg-token').value.trim();
-      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
+      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), rutaIncidencias: $('gsg-ruta-incidencias').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
       $('gsg-token').value = '';
       await probarGsg();
     } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }
