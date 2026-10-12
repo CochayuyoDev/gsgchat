@@ -3,17 +3,15 @@
  * con cada tracking.
  *
  * Cuando un pedido que mando GSG trae un telefono o un tracking malo,
- * GSGchat se lo cuenta a GSG con su error concreto: UN reporte por tracking
- * + error (no uno en cada reintento ni en cada pasada del motor). El reporte
- * sale por la cola de siempre (`rutas_reportes`, tipo `numero_reportado`) a
- * la ruta configurable de GSG (URL base + ruta, como la ubicacion). Y se
- * guarda en `numeros_reportados` (migracion 006): es la bandeja que GSG lee
- * con GET /api/v1/reportados y que el equipo ve en Pedidos GSG. GSG corrige
+ * GSGchat lo guarda con su error concreto: UN reportado por tracking + error
+ * (no uno en cada reintento ni en cada pasada del motor). NO se le manda nada
+ * a GSG: se guarda en `numeros_reportados` (migracion 006), la bandeja que GSG
+ * lee con GET /api/v1/reportados y que el equipo ve en Pedidos GSG. GSG corrige
  * con POST /api/v1/reportados/{tracking}/correccion o con PATCH
  * /api/v1/entregas/{referencia}.
  *
  * GSGchat nunca le pregunta nada a GSG: todo lo que GSG manda se guarda al
- * llegar y se usa desde la base. Lo que se le manda son POST sueltos.
+ * llegar y se usa desde la base.
  *
  * Ademas, el «mapa» de trackings del dia (GET /api/v1/trackings) y los
  * avisos por pedido que acompanan cada respuesta a GSG (ya_contactado,
@@ -24,12 +22,11 @@
 
 import type { Pool } from '../db/pool.js';
 import type { RutasRepo, Solicitud } from '../db/rutas.js';
-import { despacharReportes, type PuertoGsg } from '../rutas/gsg.js';
 import { diaTexto, type Entrega, type EntregasRepo } from './repo.js';
 
 // ------------------------------------------------------------- errores
 
-/** Los errores que se le reportan a GSG. Codigos estables: GSG los lee. */
+/** Los errores de los numeros reportados. Codigos estables: GSG los lee. */
 export const ERRORES_REPORTADOS = [
   'telefono_invalido',
   'sin_whatsapp',
@@ -326,33 +323,15 @@ export function crearReportadosEnMemoria(): ReportadosRepo & { _filas: NumeroRep
 // ------------------------------------------------------------ reportar
 
 export interface DepsReportar {
-  repos: { rutas: RutasRepo; reportados?: ReportadosRepo };
-  /** Con puerto, el reporte sale al momento (una vez); si falla, lo reintenta la cola. */
-  gsg?: PuertoGsg | null;
+  repos: { reportados?: ReportadosRepo };
   ahora?: () => Date;
   log?: (m: string, d?: Record<string, unknown>) => void;
 }
 
-/** Lo que se le manda a GSG (POST a la ruta de reportados). Es el contrato: ver PAYLOADS en src/rutas/gsg.ts. */
-export function payloadReportado(r: NumeroReportado): Record<string, unknown> {
-  return {
-    tipo: 'numero_reportado',
-    tracking: r.tracking,
-    referencia: r.referencia,
-    telefono: r.telefono,
-    error: r.error,
-    mensaje: r.mensaje,
-    detalle: r.detalle,
-    reportadoAt: r.reportadoAt.toISOString(),
-    dia: r.dia,
-    // Estable por reporte: si GSG lo recibe dos veces (un reintento tras un corte), es el mismo.
-    idReporte: `gsgchat-reportado-${r.id}-${r.veces}`,
-  };
-}
-
 /**
- * Reporta un numero malo a GSG: lo guarda en la bandeja y encola UN POST.
- * Si ese tracking ya tiene ese error pendiente, no hace nada (null).
+ * Reporta un numero malo: SOLO lo guarda en la bandeja (GSG lo lee de
+ * GET /api/v1/reportados; no se le manda nada). Si ese tracking ya tiene ese
+ * error pendiente, no hace nada (null).
  */
 export async function reportarNumero(deps: DepsReportar, n: NuevoReportado): Promise<NumeroReportado | null> {
   const repo = deps.repos.reportados;
@@ -361,9 +340,7 @@ export async function reportarNumero(deps: DepsReportar, n: NuevoReportado): Pro
   const datos = { tracking: textoONulo(n.tracking), telefono: textoONulo(n.telefono) };
   const fila = await repo.reportar({ ...n, clave: claveDe(n), mensaje: TEXTOS_REPORTADOS[n.error].mensaje(datos) }, en);
   if (!fila) return null;
-  await deps.repos.rutas.encolarReporte({ solicitudId: null, loteId: null, tipo: 'numero_reportado', payload: payloadReportado(fila) });
-  deps.log?.('número reportado a GSG', { error: fila.error, tracking: fila.tracking });
-  if (deps.gsg) void despacharReportes({ rutas: deps.repos.rutas }, deps.gsg, 25, ['numero_reportado']).catch(() => undefined);
+  deps.log?.('número reportado (guardado para GSG)', { error: fila.error, tracking: fila.tracking });
   return fila;
 }
 

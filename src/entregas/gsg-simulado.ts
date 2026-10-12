@@ -370,7 +370,10 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
       if (sim.modo === 'rechaza') return { status: 422, body: { error: 'payload no válido: falta el campo pedido' } };
 
       const en = ahora().toISOString();
+      // El contrato vigente de GSG es POST /sendLocation con { tracking, lat, lng }.
+      if (camino === '/sendLocation' && c.referencia === undefined && c.tracking !== undefined) c.referencia = c.tracking;
       switch (camino) {
+        case '/sendLocation':
         case '/ubicaciones': {
           contadores.ubicaciones++;
           recibido.push({ tipo: 'ubicacion', cuerpo: c, en });
@@ -418,11 +421,6 @@ export function crearGsgSimulado(opts: OpcionesSimulador): GsgSimulado {
           contadores.incidencias++;
           recibido.push({ tipo: 'incidencia', cuerpo: c, en });
           return { status: 200, body: { id: `GSG-INC-${contadores.incidencias}` } };
-        }
-        case '/numeros-reportados': {
-          // Un telefono o tracking malo que GSGchat reporta (ver src/entregas/reportados.ts).
-          recibido.push({ tipo: 'numero_reportado', cuerpo: c, en });
-          return { status: 200, body: { id: `GSG-REP-${recibido.filter((r) => r.tipo === 'numero_reportado').length}` } };
         }
         case '/resumenes': {
           contadores.resumenes++;

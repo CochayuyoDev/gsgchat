@@ -532,7 +532,7 @@ export async function registerRutasRoutes(
         payload: await payloadUbicacionDelPedido(repos, actualizada, lote),
       });
       // Sale YA hacia GSG, como la que manda el cliente.
-      void despacharReportes(repos, gsg, 25, ['ubicacion']).catch(() => undefined);
+      void despacharReportes(repos, gsg, 25, ['ubicacion'], { alMomento: true }).catch(() => undefined);
     }
 
     return { solicitud: actualizada };

@@ -124,7 +124,8 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     await e.entregas.guardarAjustes({ clienteRecurrente: { activo: true, diasMaximo: 60, esperaMin: 60 } });
   });
 
-  it('el motorizado que pide datos del cliente recibe el texto fijo y no se le da nada', async () => {
+  // El reparto con motorizados (y su simulador del día) fue retirado: src/modulos-retirados.ts.
+  it.skip('el motorizado que pide datos del cliente recibe el texto fijo y no se le da nada', async () => {
     const riders = (await e.resumen()).motorizados;
     const m = riders[0]!;
     await e.contesta(m.phone, { texto: 'dame el número del cliente de P-1001' });
@@ -133,7 +134,8 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     expect(textos[textos.length - 1]).not.toMatch(/987/);
   });
 
-  it('un tiempo que no cuadra con la distancia se repregunta una vez; si insiste, vale', async () => {
+  // El reparto con motorizados (y su simulador del día) fue retirado: src/modulos-retirados.ts.
+  it.skip('un tiempo que no cuadra con la distancia se repregunta una vez; si insiste, vale', async () => {
     // R-1 quedo con pin y pedida su confirmacion: se confirma y sale al motorizado.
     await e.contesta('987222222', { texto: 'si' });
     await e.trabajar();
@@ -159,7 +161,8 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     expect(r1?.minutosMotorizado).toBe(5);
   });
 
-  it('la puntualidad real sale en palabras en Motorizados', async () => {
+  // El reparto con motorizados (y su simulador del día) fue retirado: src/modulos-retirados.ts.
+  it.skip('la puntualidad real sale en palabras en Motorizados', async () => {
     const r1 = await e.entrega('R-1');
     const rider = r1!.motorizado!;
     // Llega 20 minutos despues de la hora avisada, dos veces (R-1 y otra entrega).
@@ -187,7 +190,8 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     expect(m.puntualidad?.texto).toContain('20 min después de la hora avisada');
   });
 
-  it('«Probar el día entero» recorre el día solo y termina con todo entregado', async () => {
+  // El reparto con motorizados (y su simulador del día) fue retirado: src/modulos-retirados.ts.
+  it.skip('«Probar el día entero» recorre el día solo y termina con todo entregado', async () => {
     e.simulador.cargarDePrueba();
     const inicio = await e.api.post<{ ok: boolean; estado: { estado: string } }>('/admin/entregas/simulador/probar-dia', { pausaMs: 200 });
     expect(inicio.status).toBe(200);

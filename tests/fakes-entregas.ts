@@ -314,6 +314,13 @@ export function createFakeEntregas(reloj: () => Date = () => new Date(), encolar
     async pausadoPorTelefono(phone) {
       return entregas.some((e) => e.phone === phone && (Boolean(e.mensajesPausadosAt) || Boolean(e.pinPropuestoAt)) && ESTADOS_ENTREGA_VIVOS.includes(e.estado));
     },
+    async anterioresPorReferencia(referencias, antesDe) {
+      const salida = new Map<string, Entrega>();
+      const buscadas = new Set(referencias.map((r) => r.toLowerCase()));
+      const lista = entregas.filter((e) => e.dia < antesDe && buscadas.has(e.referencia.toLowerCase())).sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id);
+      for (const e of lista) if (!salida.has(e.referencia.toLowerCase())) salida.set(e.referencia.toLowerCase(), copiaE(e));
+      return salida;
+    },
     async ubicacionDelClienteDelDia(phone, dia) {
       const suyas = entregas
         .filter((e) => e.phone === phone && e.dia === dia && e.ubicacionEstado === 'recibida' && e.lat != null && e.lng != null && !['', 'gsg'].includes(e.ubicacionFuente ?? ''))

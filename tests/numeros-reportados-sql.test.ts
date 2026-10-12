@@ -29,9 +29,8 @@ describe('números reportados en MySQL', () => {
     expect(await reportarNumero({ repos }, n)).toBeNull();
     // Otro error del mismo tracking es otro reporte.
     expect(await reportarNumero({ repos }, { ...n, error: 'sin_whatsapp' })).toBeTruthy();
-    const cola = await repos.rutas.reportesRecientes(50, 'numero_reportado');
-    expect(cola).toHaveLength(2);
-    expect(cola.find((r) => r.payload.error === 'telefono_invalido')!.payload).toMatchObject({ tipo: 'numero_reportado', tracking: 'SQL-1', referencia: 'SQL-1', telefono: '12' });
+    // Solo se guarda: a GSG no se le encola nada.
+    expect(await repos.rutas.reportesPendientes(50)).toHaveLength(0);
 
     expect(await repos.reportados!.listar({ estado: 'pendiente' })).toHaveLength(2);
     const hechos = await repos.reportados!.marcarCorregidos('SQL-1', { telefono: '987000001', por: 'GSG' }, new Date('2026-10-10T15:00:00Z'));
@@ -43,7 +42,7 @@ describe('números reportados en MySQL', () => {
 
     const otraVez = await reportarNumero({ repos }, n);
     expect(otraVez).toMatchObject({ estado: 'pendiente', veces: 2, corregidoAt: null });
-    expect(await repos.rutas.reportesRecientes(50, 'numero_reportado')).toHaveLength(3);
+    expect(await repos.reportados!.listar({ clave: 'SQL-1' })).toHaveLength(2);
   });
 
   it('sin tracking, la clave es la referencia o el teléfono', async () => {

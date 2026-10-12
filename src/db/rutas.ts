@@ -162,10 +162,10 @@ export interface EventoSolicitud {
 /**
  * Lo que se le cuenta a GSG. `confirmacion` y `entrega` son del modulo de
  * entregas (src/entregas): que el cliente confirmo su pedido, y a que hora le
- * llega. `numero_reportado`: un telefono o tracking malo de un pedido de GSG
- * (ver src/entregas/reportados.ts).
+ * llega. Los telefonos y trackings malos ya NO se le mandan: se guardan en
+ * GSGchat y GSG los lee de GET /api/v1/reportados (ver src/entregas/reportados.ts).
  */
-export type TipoReporte = 'ubicacion' | 'incidencia' | 'resumen' | 'confirmacion' | 'entrega' | 'numero_reportado';
+export type TipoReporte = 'ubicacion' | 'incidencia' | 'resumen' | 'confirmacion' | 'entrega';
 export type EstadoReporte = 'pendiente' | 'enviado' | 'fallido';
 
 export type CifrasReportes = Record<EstadoReporte, number> & { atascado: number };

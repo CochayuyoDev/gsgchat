@@ -60,9 +60,11 @@ function crmDeGsg() {
         res.end(JSON.stringify({ error: 'token invalido' }));
         return;
       }
+      // «Caido»: GSG no lo procesa y pide esperar (429). Un 5xx sin clave
+      // idempotente seria resultado incierto y no se reintentaria solo.
       if (estado.modo === 'caido') {
-        res.writeHead(503, { 'content-type': 'text/html' });
-        res.end('<html>503</html>');
+        res.writeHead(429, { 'content-type': 'text/html', 'retry-after': '1' });
+        res.end('<html>429</html>');
         return;
       }
       if (estado.modo === 'rechaza') {
@@ -231,8 +233,12 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(JSON.stringify(reporte)).toContain('GSG-');
   });
 
-  it('5. el cliente pega un enlace de Google Maps: también sale a GSG', async () => {
+  it('5. el cliente pega un enlace de Google Maps: se le pregunta si es ahí y, con su SÍ, sale a GSG', async () => {
     await escribe('51987000002', { text: 'aqui esta https://www.google.com/maps?q=-12.0931,-77.0465' });
+    // Un enlace no se da por bueno a ciegas: se le enseña el punto y se espera su SÍ.
+    await esperar(() => /Esta es la ubicación de tu enlace/.test(textosA('51987000002')), 10_000, 'la pregunta del enlace');
+    expect(crm.ubicaciones().some((l) => l.cuerpo.tracking === 'P-002')).toBe(false);
+    await escribe('51987000002', { text: 'sí' });
     await esperar(() => crm.ubicaciones().some((l) => l.cuerpo.tracking === 'P-002'), 10_000, 'que GSG reciba P-002');
     const l = crm.ubicaciones().find((x) => x.cuerpo.tracking === 'P-002')!;
     expect(l.cuerpo).toMatchObject({ lat: -12.0931, lng: -77.0465 });
@@ -275,7 +281,7 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
       const clave = `${l.cuerpo.tracking}|${l.cuerpo.lat}|${l.cuerpo.lng}`;
       porClave.set(clave, (porClave.get(clave) ?? 0) + 1);
     }
-    // P-004 llego una vez al CRM caido (503) y otra ya aceptada: son dos intentos, un solo alta.
+    // P-004 llego una vez al CRM caido (429) y otra ya aceptada: son dos intentos, un solo alta.
     const repetidas = [...porClave].filter(([clave, n]) => n > 1 && !clave.startsWith('P-004'));
     expect(repetidas).toEqual([]);
     expect(porClave.get('P-004|-12.05|-77.04')).toBe(2);

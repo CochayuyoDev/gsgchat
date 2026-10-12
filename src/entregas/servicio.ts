@@ -68,7 +68,7 @@ import { despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidenc
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import type { CargaLote, ResultadoCarga } from '../rutas/cargar.js';
 import { revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
-import type { Solicitud } from '../db/rutas.js';
+import { CandadoOcupado, type Solicitud } from '../db/rutas.js';
 import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leerEntregado, leerEntregadoConReglas, leerFrasesPropias, leerMotorizadoCorta, leerMotorizadoFueraDeFlujo, leerPreguntaPorPedido, leerTiempo, pideCambioUbicacion, tiempoDudoso, type FrasesPropias, type LectorIA } from './interpretar.js';
 import { randomBytes } from 'node:crypto';
 import type { BoundingBox } from '../types.js';
@@ -285,6 +285,12 @@ export interface FilaEntrega extends Entrega {
   mismoCliente: string[];
   /** «cambió su ubicación (10:42)»: la marca que ven Hoy, Números del día y la ficha. null = nunca la cambió. */
   cambioUbicacion?: string | null;
+  /**
+   * El mismo tracking ya vino otro dia: es una reprogramacion. Lo de ese dia
+   * (direccion, ubicacion, como acabo) es solo un dato para quien mira: la
+   * ubicacion no se reutiliza, el cliente la vuelve a mandar o confirmar.
+   */
+  reprogramado?: { dia: string; estado: EstadoEntrega; direccion: string | null; distrito: string | null; lat: number | null; lng: number | null } | null;
 }
 
 /**
@@ -756,6 +762,13 @@ export interface ServicioEntregas {
   bandejaMensajes(): Promise<ItemBandejaMensajes[]>;
   /** «Reintentar mensaje»: el mismo disparador sobre el pedido existente. */
   reintentarMensaje(id: number, quien: string, opts?: { confirmarIncierto?: boolean }): Promise<ResultadoReintentoMensaje>;
+  /**
+   * «Volver a solicitar ubicación»: reinicia el flujo de ubicacion de ESE
+   * pedido (no crea otro ni toca los demas del mismo cliente), apunta quien
+   * lo pidio y manda otra vez la plantilla. Solo un reinicio explicito (o un
+   * pedido nuevo de GSG) vuelve a disparar el mensaje.
+   */
+  volverAPedirUbicacion(id: number, quien: string): Promise<ResultadoReintentoMensaje>;
 }
 
 export interface DepsEntregas {
@@ -882,7 +895,13 @@ export function situacionDe(e: Entrega, _motorizado: Motorizado | null, _ajustes
   if (e.estado === 'terminada') return 'Trámite completado.';
   if (e.envioRetenidoAt) return 'Espera que confirmes el envío.';
   if (e.requiereHumano || e.estado === 'incidencia') return 'Necesita atención: ' + (e.incidenciaDetalle || e.incidencia || 'revisar el pedido') + '.';
-  if (e.ubicacionEstado === 'pendiente') return 'Esperando la ubicación del cliente.';
+  if (e.ubicacionEstado === 'pendiente') {
+    // Lo que se espera de el, dicho para quien mira la ficha.
+    if (e.pinPropuestoAt) return 'Mandó una ubicación; espera que confirme si es ahí.';
+    if (e.ubicacionPropuestaLat != null) return e.ubicacionPropuestaAt ? 'Se le propuso la dirección de la última vez; espera que diga si es la misma.' : 'Se le va a proponer la dirección de la última vez.';
+    if (e.loteId) return 'Esperando la ubicación del cliente (el reparto se la pide).';
+    return 'Esperando la ubicación del cliente.';
+  }
   if (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') return 'Ubicación registrada; falta confirmar con el cliente.';
   return 'Ubicación y confirmación registradas.';
 }
@@ -896,6 +915,7 @@ function accionesDe(e: Entrega): string[] {
   // «Asignar motorizado sin ubicación»: espera la ubicación y todavía no lo lleva nadie.
   if (e.estado === 'avisada' || (e.estado === 'esperando_motorizado' && e.motorizadoEstado === 'respondio') || (e.estado === 'incidencia' && e.motorizadoId && ['no_entregado', 'no_llego', 'aviso_no_enviado'].includes(e.incidencia ?? ''))) acciones.push('marcar_entregada');
   if (e.estado === 'incidencia') acciones.push('reintentar');
+  if (!e.envioRetenidoAt) acciones.push('volver_a_pedir_ubicacion');
   // La segunda visita a mano: cuando el motorizado no pudo entregar y todavia no se hizo una.
   acciones.push('prioridad');
   acciones.push('cancelar');
@@ -1253,7 +1273,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // confirmado a mano o por el SI del pin lejano esperaba a la pasada de
     // cada minuto. Un fallo se queda en la cola y lo reintenta esa pasada.
     if (tipo === 'ubicacion') {
-      void despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion']).catch(() => undefined);
+      void despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion'], { alMomento: true }).catch(() => undefined);
     }
   }
 
@@ -1947,6 +1967,10 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
 
     if (!tocadas.length) return { atendida: true, resultado: 'propuesta_obsoleta', responder: 'La ubicación ya fue registrada o la propuesta cambió. Revisa la propuesta vigente antes de confirmar.' };
+    // La ubicacion sale YA hacia GSG, como con el pin del reparto: el SI del
+    // enlace de mapa, «la misma de la última vez» o la que pone una persona
+    // esperaban hasta la pasada de cada minuto. Un fallo queda en la cola.
+    void despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['ubicacion'], { alMomento: true }).catch(() => undefined);
     // La «única verdad»: desde aqui nadie le vuelve a pedir la ubicacion. Las
     // solicitudes abiertas del reparto de este telefono (de cualquier lote)
     // pasan a resueltas y la lista de envio automatico lo suelta. Vale para el
@@ -2336,7 +2360,10 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
     }
     const confirmaDireccion = leerConfirmacionConReglas(texto);
-    if (!propuestaDireccion && confirmaDireccion.decision === 'si') {
+    // Con «¿la misma dirección de la última vez?» abierta, el «sí» contesta a
+    // esa pregunta (respuestaAPropuesta, mas abajo), no a la direccion escrita.
+    const conPropuestaUltimaVez = confirmaDireccion.decision === 'si' && (await repo.vivasPorTelefono(contact.phone)).some((x) => x.ubicacionEstado === 'pendiente' && x.ubicacionPropuestaAt && x.ubicacionPropuestaLat != null);
+    if (!propuestaDireccion && !conPropuestaUltimaVez && confirmaDireccion.decision === 'si') {
       const pendiente = (await esperandoUbicacionDe(contact.phone)).find(x => x.direccion && x.confirmacionEstado !== 'pedida');
       if (pendiente) {
         const r = await alDireccionEscrita(contact, pendiente.direccion!, 'confirmó la dirección del pedido');
@@ -4175,7 +4202,7 @@ ${lista}
   const esDeGsg = (e: Entrega): boolean => Boolean(e.datosEnvio?.tracking || e.externoId);
 
   async function reportarNumeroInterno(n: Omit<NuevoReportado, 'dia'> & { dia?: string }): Promise<NumeroReportado | null> {
-    return reportarNumero({ repos, gsg: deps.gsg, ahora, log }, { ...n, dia: n.dia ?? hoy() });
+    return reportarNumero({ repos, ahora, log }, { ...n, dia: n.dia ?? hoy() });
   }
 
   /** El primer mensaje ya no sale y es por el numero: GSG se entera (una vez). */
@@ -4337,6 +4364,59 @@ ${lista}
     }
     const act = await asentarDisparo((await repo.entrega(id)) ?? armada);
     return { ok: true, entrega: act, mensaje: vistaMensaje(act) };
+  }
+
+  async function volverAPedirUbicacion(id: number, quien: string): Promise<ResultadoReintentoMensaje> {
+    const e = await repo.entrega(id);
+    if (!e) return { ok: false, status: 404, codigo: 'NO_EXISTE', motivo: 'Ese pedido no existe en esta tienda.' };
+    // Comprobar y reiniciar con el telefono apartado (GET_LOCK): cinco
+    // REINTENTAR a la vez reiniciaban los cinco y el cliente recibia varios.
+    try {
+      return await repos.rutas.conCandadoDeTelefono(e.phone, () => reiniciarUbicacion(id, quien));
+    } catch (error) {
+      if (error instanceof CandadoOcupado) return { ok: false, status: 409, codigo: 'MENSAJE_EN_CURSO', motivo: `La solicitud de ubicación de ${e.referencia} ya se está reiniciando.` };
+      throw error;
+    }
+  }
+
+  async function reiniciarUbicacion(id: number, quien: string): Promise<ResultadoReintentoMensaje> {
+    const e = await repo.entrega(id);
+    if (!e) return { ok: false, status: 404, codigo: 'NO_EXISTE', motivo: 'Ese pedido no existe en esta tienda.' };
+    if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `${e.referencia} ya está ${e.estado}: no se le escribe.` };
+    if (e.envioRetenidoAt || e.mensajeEstado === 'retenido') return { ok: false, status: 409, codigo: 'ESPERA_CONFIRMACION', motivo: `${e.referencia} espera que confirmes su envío («Confirmar y enviar»): la solicitud sale al confirmarlo.` };
+    if (e.mensajesPausadosAt) return { ok: false, status: 409, codigo: 'CONFLICTO', motivo: `Los mensajes a ${e.referencia} están en pausa (Números del día): reanúdalos primero.` };
+    // Un doble clic o una repeticion tecnica: la solicitud anterior todavia no salio.
+    if (e.ubicacionEstado === 'pendiente' && MENSAJE_EN_CURSO.includes(e.mensajeEstado ?? 'no_aplica')) {
+      const s = e.loteId ? await solicitudDe(e) : null;
+      if (!s || s.estado === 'pendiente') return { ok: false, status: 409, codigo: 'MENSAJE_EN_CURSO', motivo: `La solicitud de ubicación de ${e.referencia} ya está en camino: sale en cuanto le toque.` };
+    }
+    // La de antes queda en la actividad como dato; no se reutiliza: el cliente la vuelve a mandar o confirmar.
+    const anterior = e.lat != null && e.lng != null ? ` (la de antes: ${e.lat}, ${e.lng})` : '';
+    const s = e.loteId ? await solicitudDe(e) : null;
+    if (s && !['resuelto', 'cancelado'].includes(s.estado)) {
+      await repos.rutas.actualizarSolicitud(s.id, { estado: 'cancelado', proximoIntentoAt: null, requiereHumano: false }).catch(() => null);
+      await repos.rutas.registrarEvento(s.id, 'nota', `${quien} reinició la solicitud de ubicación del pedido ${e.referencia}`).catch(() => undefined);
+    }
+    const reiniciada = (await repo.actualizar(e.id, {
+      ubicacionEstado: 'pendiente',
+      lat: null,
+      lng: null,
+      mapsUrl: null,
+      ubicacionAt: null,
+      ubicacionPropuestaAt: null,
+      ubicacionPropuestaLat: null,
+      ubicacionPropuestaLng: null,
+      loteId: null,
+      ...(e.estado === 'incidencia' ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}),
+    })) ?? e;
+    await repo.cambiarMensaje(e.id, [e.mensajeEstado ?? 'no_aplica'], { mensajeEstado: 'pendiente', mensajeVia: 'ubicacion', mensajeReintentosAuto: 0, mensajeProximoAt: null, ...SIN_ERROR });
+    // El chat estaba cerrado tras «Ubicación registrada»: un reinicio explicito lo reabre (se vuelve a cerrar con la proxima).
+    const contacto = await repos.contacts.getByPhone(e.phone).catch(() => null);
+    if (contacto?.iaCerradaAt) await repos.contacts.cerrarIA(contacto.id, false, ahora()).catch(() => undefined);
+    await evento(reiniciada, 'nota', `${quien} volvió a solicitar la ubicación de este pedido${anterior}: se le manda otra vez la plantilla`);
+    const act = await alLoteDelReparto((await repo.entrega(id)) ?? reiniciada, `${quien} volvió a solicitar la ubicación`);
+    const asentada = await asentarDisparo(act, act.loteId ? undefined : 'no entró en la cola del reparto');
+    return { ok: true, entrega: asentada, mensaje: vistaMensaje(asentada) };
   }
 
   async function crearVarias(filas: FilaPegada[], quien: string, opts: { faltaUbicacion?: boolean; faltaConfirmacion?: boolean; descartadas?: ResultadoCargaVarias['descartadas']; retener?: boolean } = {}): Promise<ResultadoCargaVarias> {
@@ -4620,6 +4700,12 @@ ${lista}
     const porTelefono = new Map<string, string[]>();
     for (const e of entregas) if (!ESTADOS_FINALES.includes(e.estado)) porTelefono.set(e.phone, [...(porTelefono.get(e.phone) ?? []), e.referencia]);
     for (const f of filas) f.mismoCliente = (porTelefono.get(f.phone) ?? []).filter((r) => r !== f.referencia);
+    // El mismo tracking de otro dia: una reprogramacion (ver FilaEntrega.reprogramado).
+    const anteriores = typeof repo.anterioresPorReferencia === 'function' ? await repo.anterioresPorReferencia(entregas.map((e) => e.referencia), dia).catch(() => new Map<string, Entrega>()) : new Map<string, Entrega>();
+    for (const f of filas) {
+      const a = anteriores.get(f.referencia.toLowerCase());
+      f.reprogramado = a ? { dia: a.dia, estado: a.estado, direccion: a.direccion, distrito: a.distrito, lat: a.ubicacionEstado === 'recibida' ? a.lat : null, lng: a.ubicacionEstado === 'recibida' ? a.lng : null } : null;
+    }
     const cifras = { pendiente: 0, esperando_ubicacion: 0, esperando_confirmacion: 0, lista: 0, esperando_motorizado: 0, avisada: 0, entregada: 0, terminada: 0, cancelada: 0, incidencia: 0, total: entregas.length, faltaUbicacion: 0, faltaConfirmacion: 0, conMotorizado: 0, enCamino: 0, urgente: 0, esperandoSegundaVisita: 0 };
     for (const e of entregas) {
       // Una entrega apartada mientras el cliente decide si volvemos hoy no
@@ -5105,6 +5191,7 @@ ${lista}
     revisarMensajes,
     bandejaMensajes,
     reintentarMensaje,
+    volverAPedirUbicacion,
     conectarMotor(m) {
       motor = m;
     },

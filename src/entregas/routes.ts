@@ -11,6 +11,7 @@
  *  POST /admin/entregas/:id/reasignar        { motorizadoId? }
  *  POST /admin/entregas/:id/sin-ubicacion     { motorizadoId? } un motorizado para un pedido que espera la ubicacion (sin pin)
  *  POST /admin/entregas/:id/reintentar
+ *  POST /admin/entregas/:id/volver-a-pedir-ubicacion   reinicia el flujo de ubicacion de ese pedido y reenvia la plantilla
  *  POST /admin/entregas/:id/segunda-visita   el motorizado vuelve a pasar (sin preguntarle al cliente)
  *  POST /admin/entregas/:id/prioridad        { urgente: true|false }
  *  GET  /admin/entregas/numeros, POST /admin/entregas/masa   Numeros del dia (ver numeros.ts)
@@ -71,6 +72,15 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
     const r = await entregas.reintentarMensaje(id, quienEs(request.usuario), { confirmarIncierto: leido.data.confirmarIncierto });
     if (!r.ok) return enviarError(reply, r.status, r.codigo, r.motivo);
     return { ok: true, id, mensaje: r.mensaje, detalle: r.mensaje.estado === 'enviado' ? 'Mensaje enviado.' : 'Reintento en marcha: sale con el ritmo de siempre.' };
+  });
+
+  // «Volver a solicitar ubicación» de UN pedido: reinicia su flujo y le manda otra vez la plantilla.
+  app.post<{ Params: { id: string } }>('/admin/entregas/:id/volver-a-pedir-ubicacion', async (request, reply) => {
+    const id = Number(request.params.id);
+    if (!Number.isInteger(id) || id <= 0) return enviarError(reply, 400, 'VALIDACION', 'El id del pedido tiene que ser un número.', [{ campo: 'id', mensaje: 'no es un número' }]);
+    const r = await entregas.volverAPedirUbicacion(id, quienEs(request.usuario));
+    if (!r.ok) return enviarError(reply, r.status, r.codigo, r.motivo);
+    return { ok: true, id, mensaje: r.mensaje, detalle: 'Se le vuelve a pedir la ubicación: sale con el ritmo de siempre.' };
   });
 
   // Numeros del dia: la lista de GSG numero por numero y las acciones en masa (ver numeros.ts).
@@ -230,11 +240,10 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
       apiKey: z.string().max(500).nullable().optional(),
       token: z.string().max(500).nullable().optional(),
       urlUbicacion: z.string().trim().max(300).nullable().optional(),
-      rutaReportados: z.string().trim().max(300).nullable().optional(),
     }).parse(request.body ?? {});
 
     try {
-      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion, rutaReportados: body.rutaReportados }) };
+      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion }) };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }

@@ -28,7 +28,8 @@ describe('el horario de entregas amplía la franja del reparto', () => {
   });
   afterAll(() => e.cerrar());
 
-  it('a las 20:30, con entregas hasta las 22:00, el pin sale al motorizado', async () => {
+  // El reparto con motorizados (y su simulador del día) fue retirado: src/modulos-retirados.ts.
+  it.skip('a las 20:30, con entregas hasta las 22:00, el pin sale al motorizado', async () => {
     await e.entregas.guardarAjustes({ horarioEntregas: { desde: '14:00', hasta: '20:00', extendidoHasta: '22:00' } });
     expect(e.motorEntregas.enHorario()).toBe(true);
     await e.contesta('987000010', { pin: { lat: PIN_LIMA.lat + 0.01, lng: PIN_LIMA.lng - 0.01 } });
@@ -41,7 +42,9 @@ describe('el horario de entregas amplía la franja del reparto', () => {
   it('con el horario de entregas ya terminado se para y lo dice en palabras', async () => {
     await e.entregas.guardarAjustes({ horarioEntregas: { desde: '14:00', hasta: '19:00', extendidoHasta: '19:00' } });
     expect(e.motorEntregas.enHorario()).toBe(false);
-    const r = await e.motorEntregas.tick();
+    // A las 20:30 toca antes el cierre del día; la pasada siguiente ya se para.
+    let r = await e.motorEntregas.tick();
+    if (r.accion === 'cierre') r = await e.motorEntregas.tick();
     expect(r.accion).toBe('nada');
     expect(r.motivo).toMatch(/fuera del horario de envío \(9:00 a 19:00\)/);
   });

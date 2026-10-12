@@ -21,7 +21,6 @@ import { crearEscenarioEntregas, OBLIGATORIOS_GSG, PIN_LIMA, type EscenarioEntre
 import { CLAVE_API_PRUEBA, crearClaveDePrueba } from './fakes.js';
 import { WhatsAppApiError } from '../src/whatsapp/client.js';
 import { crearReportadosEnMemoria, reportarNumero, type ReportadosRepo } from '../src/entregas/reportados.js';
-import { crearPuertoHttp } from '../src/rutas/gsg.js';
 
 function hoyALas9(): Date {
   const d = new Date();
@@ -48,10 +47,8 @@ describe('números reportados a GSG', () => {
     const r = await e.app.inject({ method, url, headers: clave ? { 'x-api-key': clave } : {}, ...(body === undefined ? {} : { payload: body as Record<string, unknown> }) });
     return { status: r.statusCode, body: r.json() as Cuerpo };
   };
-  /** Los reportes de numeros que hay en la cola hacia GSG. */
-  const enCola = async () => (await e.repos.rutas.reportesRecientes(500, 'numero_reportado')).map((r) => r.payload);
-  /** Lo que el GSG falso recibio como numero reportado. */
-  const recibidos = () => e.simulador.recibido.filter((r) => r.tipo === 'numero_reportado').map((r) => r.cuerpo);
+  /** Los numeros reportados que quedaron guardados (la bandeja que lee GSG). */
+  const guardados = async () => (await reportados.listar({ limit: 500 })).map((r) => ({ ...r, reportadoAt: r.reportadoAt.toISOString() }) as Record<string, unknown>);
   const filas = (clave: string, error: string) => reportados._filas.filter((f) => f.clave === clave && f.error === error);
   const pedidasDeUbicacion = (telefono: string) => e.mensajesA(telefono).length;
 
@@ -71,13 +68,12 @@ describe('números reportados a GSG', () => {
     await e.despacharAGsg();
     await e.despacharAGsg();
     expect(filas('R-INV', 'telefono_invalido')).toHaveLength(1);
-    expect((await enCola()).filter((p) => p.tracking === 'R-INV')).toHaveLength(1);
-    const llegado = recibidos().filter((p) => p.tracking === 'R-INV');
-    expect(llegado).toHaveLength(1);
-    expect(llegado[0]).toMatchObject({ tipo: 'numero_reportado', tracking: 'R-INV', referencia: 'R-INV', telefono: '12', error: 'telefono_invalido' });
-    expect(String(llegado[0]!.mensaje)).toMatch(/no es un número válido/);
-    expect(Number.isNaN(Date.parse(String(llegado[0]!.reportadoAt)))).toBe(false);
-    expect(llegado[0]!.idempotencyKey).toBeUndefined();
+    expect((await guardados()).filter((p) => p.tracking === 'R-INV')).toHaveLength(1);
+    const guardado = (await guardados()).filter((p) => p.tracking === 'R-INV');
+    expect(guardado).toHaveLength(1);
+    expect(guardado[0]).toMatchObject({ tracking: 'R-INV', referencia: 'R-INV', telefono: '12', error: 'telefono_invalido', estado: 'pendiente' });
+    expect(String(guardado[0]!.mensaje)).toMatch(/no es un número válido/);
+    expect(Number.isNaN(Date.parse(String(guardado[0]!.reportadoAt)))).toBe(false);
   });
 
   it('tracking que falta o no vale: la llamada se rechaza (400) y se reporta una vez', async () => {
@@ -93,8 +89,8 @@ describe('números reportados a GSG', () => {
     await e.despacharAGsg();
     expect(reportados._filas.filter((f) => f.error === 'tracking_falta')).toHaveLength(1);
     expect(reportados._filas.filter((f) => f.error === 'tracking_invalido')).toHaveLength(2);
-    expect(recibidos().filter((p) => p.error === 'tracking_falta')).toHaveLength(1);
-    expect(recibidos().filter((p) => p.error === 'tracking_invalido')).toHaveLength(2);
+    expect((await guardados()).filter((p) => p.error === 'tracking_falta')).toHaveLength(1);
+    expect((await guardados()).filter((p) => p.error === 'tracking_invalido')).toHaveLength(2);
   });
 
   it('tracking duplicado en la llamada y tracking de otro pedido: no se guardan y se reportan una vez', async () => {
@@ -112,7 +108,7 @@ describe('números reportados a GSG', () => {
     await e.despacharAGsg();
     expect(filas('R-DUP', 'tracking_duplicado')).toHaveLength(1);
     expect(filas('R-DUP', 'tracking_de_otro_pedido')).toHaveLength(1);
-    expect(recibidos().filter((p) => p.tracking === 'R-DUP')).toHaveLength(2);
+    expect((await guardados()).filter((p) => p.tracking === 'R-DUP')).toHaveLength(2);
   });
 
   it('teléfono de un motorizado: no se le escribe como cliente y se reporta', async () => {
@@ -133,7 +129,7 @@ describe('números reportados a GSG', () => {
     e.avanzar(30);
     await e.trabajar();
     expect(filas('R-SINWA', 'sin_whatsapp')).toHaveLength(1);
-    expect((await enCola()).filter((p) => p.tracking === 'R-SINWA')).toHaveLength(1);
+    expect((await guardados()).filter((p) => p.tracking === 'R-SINWA')).toHaveLength(1);
     expect(pedidasDeUbicacion('987000177')).toBe(0);
   });
 
@@ -144,7 +140,7 @@ describe('números reportados a GSG', () => {
     e.avanzar(30);
     await e.trabajar();
     expect(filas('R-FALLA', 'envio_fallido')).toHaveLength(1);
-    expect((await enCola()).filter((p) => p.tracking === 'R-FALLA')).toHaveLength(1);
+    expect((await guardados()).filter((p) => p.tracking === 'R-FALLA')).toHaveLength(1);
   });
 
   it('«no soy yo»: se reporta una vez', async () => {
@@ -155,7 +151,7 @@ describe('números reportados a GSG', () => {
     await e.contesta('987000109', { texto: 'ya te dije, no soy yo' });
     expect(filas('R-NOSOY', 'no_soy_yo')).toHaveLength(1);
     await e.despacharAGsg();
-    expect(recibidos().filter((p) => p.tracking === 'R-NOSOY' && p.error === 'no_soy_yo')).toHaveLength(1);
+    expect((await guardados()).filter((p) => p.tracking === 'R-NOSOY' && p.error === 'no_soy_yo')).toHaveLength(1);
   });
 
   it('la bandeja de GSG lista lo reportado y exige una clave con permiso', async () => {
@@ -309,47 +305,27 @@ describe('números reportados a GSG', () => {
     expect(pedidasDeUbicacion('987000120')).toBe(antes + 1);
   });
 
-  it('a GSG solo le salen POST: ninguna consulta (GET)', () => {
+  it('a GSG solo le salen POST (ninguna consulta) y nada por los números reportados: GSG los lee de su bandeja', () => {
     expect(e.llamadasAGsg.length).toBeGreaterThan(0);
     expect(e.llamadasAGsg.every((l) => l.metodo === 'POST')).toBe(true);
-    expect(e.llamadasAGsg.some((l) => l.ruta === '/numeros-reportados')).toBe(true);
+    expect(e.llamadasAGsg.filter((l) => /report/i.test(l.ruta))).toEqual([]);
   });
 });
 
 describe('reportar un número (sin servidor)', () => {
   it('una vez por tracking + error; tras corregirlo, si vuelve, se reporta otra vez; sin temporizadores', async () => {
     const intervalos = vi.spyOn(globalThis, 'setInterval');
-    const cola: Array<Record<string, unknown>> = [];
-    const repos = { reportados: crearReportadosEnMemoria(), rutas: { encolarReporte: async (r: { payload: Record<string, unknown> }) => { cola.push(r.payload); return {} as never; } } as never };
+    const repos = { reportados: crearReportadosEnMemoria() };
     const n = { error: 'sin_whatsapp' as const, dia: '2026-10-10', tracking: 'X-1', referencia: 'X-1', telefono: '51987000001' };
     expect(await reportarNumero({ repos }, n)).toBeTruthy();
     expect(await reportarNumero({ repos }, n)).toBeNull();
-    expect(cola).toHaveLength(1);
+    expect(await repos.reportados.listar({})).toHaveLength(1);
     await repos.reportados.marcarCorregidos('X-1', { telefono: '51987000002' }, new Date());
     const otra = await reportarNumero({ repos }, n);
     expect(otra).toMatchObject({ estado: 'pendiente', veces: 2 });
-    expect(cola).toHaveLength(2);
-    expect(cola[0]!.idReporte).not.toBe(cola[1]!.idReporte);
+    expect(await repos.reportados.listar({ estado: 'pendiente' })).toHaveLength(1);
     expect(intervalos).not.toHaveBeenCalled();
     intervalos.mockRestore();
-  });
-
-  it('el POST a GSG va a la ruta configurable, con X-API-Key e Idempotency-Key', async () => {
-    const llamadas: Array<{ url: string; init: RequestInit }> = [];
-    const puerto = crearPuertoHttp({ url: 'https://gsg.example/api/', rutaUbicacion: 'v1/gsgchat/location', rutaReportados: 'v1/gsgchat/reportados', token: 'clave-de-gsg-123', fetchImpl: (async (url: string, init: RequestInit) => { llamadas.push({ url, init }); return new Response('{"id":"R1"}', { status: 201 }); }) as never });
-    const r = await puerto.enviar('numero_reportado', { tipo: 'numero_reportado', tracking: 'X-1', error: 'sin_whatsapp', idReporte: 'gsgchat-reportado-1-1', idempotencyKey: 'gsgchat-ubicacion-9' });
-    expect(r).toMatchObject({ ok: true, id: 'R1' });
-    expect(llamadas).toHaveLength(1);
-    expect(llamadas[0]!.url).toBe('https://gsg.example/api/v1/gsgchat/reportados');
-    expect(llamadas[0]!.init.method).toBe('POST');
-    const h = new Headers(llamadas[0]!.init.headers);
-    expect(h.get('x-api-key')).toBe('clave-de-gsg-123');
-    expect(h.get('idempotency-key')).toBe('gsgchat-reportado-1-1');
-    expect(JSON.parse(String(llamadas[0]!.init.body))).toEqual({ tipo: 'numero_reportado', tracking: 'X-1', error: 'sin_whatsapp', idReporte: 'gsgchat-reportado-1-1' });
-    // Sin ruta propia: <base>/numeros-reportados.
-    const porDefecto = crearPuertoHttp({ url: 'https://gsg.example/api/', rutaUbicacion: 'sendLocation', token: 'clave-de-gsg-123', fetchImpl: (async (url: string, init: RequestInit) => { llamadas.push({ url, init }); return new Response('{}', { status: 200 }); }) as never });
-    await porDefecto.enviar('numero_reportado', { idReporte: 'a' });
-    expect(llamadas[1]!.url).toBe('https://gsg.example/api/numeros-reportados');
   });
 });
 
