@@ -432,3 +432,47 @@ describe('lo nuevo de GSG por el servidor de la plataforma', () => {
     esErrorLimpio(falta, 'NO_EXISTE');
   });
 });
+
+describe('«Cómo sacarla en Postman»: cada ejemplo de la pantalla da su código', () => {
+  const pedidoGsg = (tracking: string, extra: Record<string, unknown> = {}) => ({ ...GSG, tracking, cliente: 'Cliente Postman', telefono: '987800099', ...extra });
+
+  it('API 1', async () => {
+    const t = 'GSG-E-PM1';
+    expect((await pedir('/api/v1/entregas', { clave: claveA, cuerpo: pedidoGsg(t) })).status).toBe(201);
+    expect((await pedir('/api/v1/entregas', { clave: claveA, cuerpo: pedidoGsg(t) })).status).toBe(200);
+    const { telefono: _sin, ...sinTelefono } = pedidoGsg('GSG-E-PM2');
+    for (const cuerpo of [sinTelefono, pedidoGsg('GSG-E-PM3', { telefono: '12' }), { pedidos: [] }]) {
+      expect((await pedir('/api/v1/entregas', { clave: claveA, cuerpo })).status, JSON.stringify(cuerpo)).toBe(400);
+    }
+    expect((await pedir('/api/v1/entregas', { clave: claveA, crudo: '{"tracking": "GSG-E-205"' })).status).toBe(400);
+    expect((await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { tracking: 'GSG-E-205', accion: 'CANCELAR' } })).status).toBe(400);
+    expect((await pedir('/api/v1/entregas', { cuerpo: pedidoGsg('GSG-E-PM4') })).status).toBe(401);
+    expect((await pedir('/api/v1/entregas', { clave: 'wak_inventada0123456789abcdefghijklmn', cuerpo: pedidoGsg('GSG-E-PM4') })).status).toBe(401);
+    expect((await pedir('/api/v1/entregas', { clave: revocada, cuerpo: pedidoGsg('GSG-E-PM4') })).status).toBe(401);
+    expect((await pedir('/api/v1/entregas', { clave: soloLeer, cuerpo: pedidoGsg('GSG-E-PM4') })).status).toBe(403);
+    expect((await pedir('/tienda/tienda-a/api/v1/entregas', { clave: claveA, cuerpo: pedidoGsg('GSG-E-PM4') })).status).toBe(404);
+    for (const metodo of ['PUT', 'DELETE']) expect((await pedir('/api/v1/entregas', { clave: claveA, metodo })).status, metodo).toBe(405);
+    expect((await pedir('/api/v1/entregas', { clave: claveA, tipoContenido: 'text/plain', cuerpo: pedidoGsg('GSG-E-PM4') })).status).toBe(415);
+  });
+
+  it('API 2', async () => {
+    const t = 'GSG-E-PM9';
+    expect((await pedir('/api/v1/entregas', { clave: claveA, cuerpo: pedidoGsg(t, { referencia: 'PED-PM9', telefono: '987800098' }) })).status).toBe(201);
+    const sim = await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: t, accion: 'CANCELAR', simular: true } });
+    expect(sim.status).toBe(200);
+    expect(sim.json.simulado).toBe(true);
+    for (const cuerpo of [{ tracking: t, accion: 'BORRAR' }, { accion: 'CANCELAR' }, { tracking: t, accion: 'REINTENTAR', telefono: '12' }]) {
+      expect((await pedir('/api/v1/flujo', { clave: claveA, cuerpo })).status, JSON.stringify(cuerpo)).toBe(400);
+    }
+    expect((await pedir('/api/v1/flujo', { cuerpo: { tracking: t, accion: 'CANCELAR' } })).status).toBe(401);
+    expect((await pedir('/api/v1/flujo', { clave: soloLeer, cuerpo: { tracking: t, accion: 'CANCELAR' } })).status).toBe(403);
+    expect((await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: 'NO-EXISTE-1', accion: 'CANCELAR' } })).status).toBe(404);
+    expect((await pedir('/api/v1/flujo', { clave: claveA, metodo: 'GET' })).status).toBe(405);
+    const primera = await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: t, accion: 'CANCELAR' } });
+    expect(primera.status).toBe(200);
+    const segunda = await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: t, accion: 'CANCELAR' } });
+    expect(segunda.status).toBe(200);
+    expect(segunda.json.sinCambios).toBe(true);
+    expect((await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: t, accion: 'REINTENTAR' } })).status).toBe(409);
+  });
+});

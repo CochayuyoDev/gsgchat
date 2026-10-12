@@ -52,34 +52,42 @@ const CAMPOS_FLUJO: Array<[string, boolean, string]> = [
   ['simular', false, 'true: dice lo que haría sin cambiar nada.'],
 ];
 
-/** API 2: lo que contesta una orden. */
-const RESPUESTAS_FLUJO: Array<[string, string]> = [
-  ['200', 'Hecho: «detalle» dice qué pasó. Con «sinCambios: true», ya estaba (una repetición no le escribe dos veces al cliente). Con «simulado: true», es lo que haría.'],
-  ['400', 'Falta el tracking, la acción no es CANCELAR o REINTENTAR, o el teléfono corregido no vale: «detalles» dice qué campo.'],
-  ['401 / 403', 'Lo mismo que en la API 1: sin clave, clave inválida o sin permiso de recepción.'],
-  ['404', 'No hay ningún pedido en curso con ese tracking (los de días anteriores se cierran con el día: mándalo como pedido nuevo).'],
-  ['405', 'Se usó GET u otro método: la API 2 solo acepta POST.'],
-  ['409', 'Ya está entregado, cancelado o terminado, o espera «Confirmar y enviar».'],
-  ['429', 'Más de 120 llamadas por minuto con la misma clave (se cuentan junto con la API 1).'],
-  ['400 en la API 1', 'Si se manda una orden con «accion» a la dirección de pedidos, se responde 400 indicando que va en /api/v1/flujo.'],
+/**
+ * API 2: lo que contesta una orden, y como sacar cada respuesta en Postman
+ * (con `codigo` entre comillas invertidas se pinta como codigo).
+ */
+const RESPUESTAS_FLUJO: Array<[string, string, string]> = [
+  ['200', 'Hecho: «detalle» dice qué pasó. Con «simulado: true», es lo que haría.', 'Crea el pedido con la API 1 y luego `POST /api/v1/flujo` con `{ "tracking": "GSG-E-205", "accion": "CANCELAR", "simular": true }`.'],
+  ['200 (sinCambios)', 'Ya estaba así: una repetición no le escribe dos veces al cliente.', 'Manda dos veces seguidas `{ "tracking": "GSG-E-205", "accion": "CANCELAR" }` (sin simular): la segunda trae `"sinCambios": true`.'],
+  ['400', 'Falta el tracking, la acción no es CANCELAR o REINTENTAR, o el teléfono corregido no vale: «detalles» dice qué campo.', '`{ "tracking": "GSG-E-205", "accion": "BORRAR" }`, o `{ "accion": "CANCELAR" }` (sin tracking), o `"telefono": "12"` con REINTENTAR.'],
+  ['401', 'Sin clave, o la clave no existe o fue revocada.', 'Quita la cabecera `X-API-Key`, o pon una clave inventada.'],
+  ['403', 'La clave es válida pero no tiene permiso de recepción.', 'Usa una clave creada solo para leer (sin `entregas:gestionar`).'],
+  ['404', 'No hay ningún pedido en curso con ese tracking (los de días anteriores se cierran con el día: mándalo como pedido nuevo).', '`{ "tracking": "NO-EXISTE-1", "accion": "CANCELAR" }`.'],
+  ['405', 'Se usó GET u otro método: la API 2 solo acepta POST.', 'Cambia el método a `GET` en `/api/v1/flujo`.'],
+  ['409', 'Ya está entregado, cancelado o terminado, o espera «Confirmar y enviar».', 'Cancela el pedido (`"accion": "CANCELAR"`, sin simular) y después manda `"accion": "REINTENTAR"` con el mismo tracking.'],
+  ['429', 'Más de 120 llamadas por minuto con la misma clave (se cuentan junto con la API 1).', 'Con el Runner de Postman, repite la llamada 125 veces en menos de un minuto.'],
 ];
 
-/** Lo que contesta POST /api/v1/entregas, código por código. */
-const RESPUESTAS: Array<[string, string]> = [
-  ['201', 'Al menos un pedido quedó guardado. Cada uno trae su id real (el de GSGchat) y el estado de su primer mensaje.'],
-  ['200', 'Todos ya estaban (repetidos): no se duplicó nada; vienen en «existentes» con su id.'],
-  ['400', 'Datos faltantes o con formato incorrecto: «detalles» dice qué campo de qué pedido. No se guarda ninguno.'],
-  ['401', 'Sin clave, o la clave no es válida o fue revocada.'],
-  ['403', 'La clave es válida pero no tiene permiso de recepción (entregas:gestionar), o la tienda está suspendida.'],
-  ['404', 'La ruta no existe (por ejemplo, con /tienda/<nombre> delante).'],
-  ['405', 'Método no permitido: los pedidos se mandan con POST (la cabecera Allow dice cuáles valen).'],
-  ['409', 'La clave está registrada en dos tiendas: no se sabe a cuál va.'],
-  ['413', 'El cuerpo pasa de 4 MiB: dividir los pedidos en varias llamadas (hasta 600 por llamada).'],
-  ['415', 'No es JSON: mandar Content-Type: application/json.'],
-  ['429', 'Más de 120 llamadas por minuto con la misma clave: esperar lo que dice Retry-After.'],
-  ['503', 'La base de datos no responde: repetir la misma llamada (lo ya guardado no se duplica).'],
-  ['500', 'Error interno inesperado: repetir la misma llamada; queda en el registro del servidor.'],
+/** API 1: lo que contesta POST /api/v1/entregas, y como sacar cada respuesta en Postman. */
+const RESPUESTAS: Array<[string, string, string]> = [
+  ['201', 'Al menos un pedido quedó guardado. Cada uno trae su id real (el de GSGchat) y el estado de su primer mensaje.', '`POST /api/v1/entregas` con el JSON de ejemplo y un `tracking` nuevo (por ejemplo `GSG-E-205`).'],
+  ['200', 'Todos ya estaban (repetidos): no se duplicó nada; vienen en «existentes» con su id.', 'Manda otra vez exactamente el mismo pedido, el mismo día.'],
+  ['400', 'Datos faltantes o con formato incorrecto: «detalles» dice qué campo de qué pedido. No se guarda ninguno.', 'Quita `"telefono"` del pedido, pon `"telefono": "12"`, manda `{ "pedidos": [] }` o un JSON roto (sin cerrar una llave).'],
+  ['400 (accion)', 'Se mandó una orden de la API 2 a la dirección de pedidos.', '`POST /api/v1/entregas` con `{ "tracking": "GSG-E-205", "accion": "CANCELAR" }`: dice que va en `/api/v1/flujo`.'],
+  ['401', 'Sin clave, o la clave no es válida o fue revocada.', 'Quita la cabecera `X-API-Key`, pon una clave inventada, o usa una clave revocada.'],
+  ['403', 'La clave es válida pero no tiene permiso de recepción (entregas:gestionar), o la tienda está suspendida.', 'Usa una clave creada solo para leer (sin `entregas:gestionar`).'],
+  ['404', 'La ruta no existe (por ejemplo, con /tienda/<nombre> delante).', '`POST /tienda/<nombre>/api/v1/entregas` (la recepción no lleva nombre de tienda: la clave la decide).'],
+  ['405', 'Método no permitido: los pedidos se mandan con POST (la cabecera Allow dice cuáles valen).', 'Cambia el método a `PUT` o `DELETE` en `/api/v1/entregas`.'],
+  ['409', 'La clave está registrada en dos tiendas: no se sabe a cuál va.', 'No se provoca a propósito: solo pasa si la misma clave quedó en dos tiendas.'],
+  ['413', 'El cuerpo pasa de 4 MiB: dividir los pedidos en varias llamadas (hasta 600 por llamada).', 'Manda un pedido con un campo de relleno de más de 4 MiB (más de 4 millones de letras).'],
+  ['415', 'No es JSON: mandar Content-Type: application/json.', 'Cambia el Body a `Text` (o la cabecera `Content-Type: text/plain`).'],
+  ['429', 'Más de 120 llamadas por minuto con la misma clave: esperar lo que dice Retry-After.', 'Con el Runner de Postman, repite la llamada 125 veces en menos de un minuto.'],
+  ['503', 'La base de datos no responde: repetir la misma llamada (lo ya guardado no se duplica).', 'No se provoca desde Postman: solo pasa si la base de datos está caída.'],
+  ['500', 'Error interno inesperado: repetir la misma llamada; queda en el registro del servidor.', 'No se provoca desde Postman: es un fallo del servidor.'],
 ];
+
+/** `texto` con comillas invertidas → <code>texto</code> (todo lo demas escapado). */
+const conCodigo = (t: string) => escapeHtml(t).replace(/`([^`]+)`/g, '<code>$1</code>');
 
 export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolean; demo?: boolean }): string {
   const ejemplo = JSON.stringify(EJEMPLO_COURIER, null, 2);
@@ -114,7 +122,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <p>Para reintentar con el teléfono corregido: <code>{ "tracking": "GSG-E-205", "accion": "REINTENTAR", "telefono": "987654321" }</code></p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_FLUJO.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
         <h3>Respuestas</h3>
-        <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS_FLUJO.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div>
+        <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th><th>Cómo sacarla en Postman</th></tr></thead><tbody>${RESPUESTAS_FLUJO.map(([c, t, como]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td><td>${conCodigo(como)}</td></tr>`).join('')}</tbody></table></div>
         <h3>Probar</h3>
         <p>La misma lógica que cuando GSG llama a la API 2. Por defecto se simula: dice lo que haría sin tocar el pedido.</p>
         <form id="np-flujo-form" novalidate>
@@ -150,7 +158,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       </section>
       <section class="courier-card courier-wide"><h2>Últimas llamadas (API 1 y API 2)</h2><button class="btn" id="courier-refrescar">Actualizar estado</button><h3>Lo que GSG nos envió</h3><p>Pedidos, órdenes de cancelar o reintentar, y las pruebas hechas desde esta pantalla.</p><div id="courier-bitacora" class="courier-scroll"></div></section>
       <section class="courier-card courier-wide" id="courier-campos"><h2>Campos que envía Courier (API 1)</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
-      <section class="courier-card courier-wide" id="courier-respuestas"><h2>Respuestas de la recepción (API 1)</h2><p>Los errores vienen en JSON: <code>{ "ok": false, "codigo": "...", "error": "...", "detalles": [...] }</code>.</p><div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS.map(([c, t]) => `<tr><td><b>${c}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div></section>
+      <section class="courier-card courier-wide" id="courier-respuestas"><h2>Respuestas de la recepción (API 1)</h2><p>Los errores vienen en JSON: <code>{ "ok": false, "codigo": "...", "error": "...", "detalles": [...] }</code>.</p><div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th><th>Cómo sacarla en Postman</th></tr></thead><tbody>${RESPUESTAS.map(([c, t, como]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td><td>${conCodigo(como)}</td></tr>`).join('')}</tbody></table></div></section>
     </div>`,
     script: String.raw`
 (function () {
