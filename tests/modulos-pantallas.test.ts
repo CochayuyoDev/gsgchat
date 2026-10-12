@@ -111,6 +111,9 @@ describe('cada módulo con lo suyo', () => {
     // Las dos APIs, cada una con su tarjeta.
     expect(html).toContain('API 1</span> Recibir pedidos');
     expect(html).toContain('API 2</span> Cancelar o reintentar un pedido');
+    // Cada API con su dirección.
+    expect(html).toContain("location.origin + '/api/v1/entregas'");
+    expect(html).toContain("location.origin + '/api/v1/flujo'");
     for (const id of ['card-wa', 'gsg-form', 'gsg-ruta-estado', 'courier-envios']) expect(hay.has(id), id).toBe(false);
     expect(html).toContain('Campos que envía Courier');
     expect(await correr(html)).toEqual([]);

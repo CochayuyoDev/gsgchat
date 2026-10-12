@@ -375,29 +375,26 @@ describe('aislamiento entre tiendas en la bandeja de errores', () => {
 });
 
 describe('lo nuevo de GSG por el servidor de la plataforma', () => {
-  it('POST /api/v1/entregas con la clave de una tienda que no es la principal llega a ESA tienda', async () => {
+  it('POST /api/v1/flujo con la clave de una tienda que no es la principal llega a ESA tienda', async () => {
     const alta = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: pedido('FLUJO-PLAT', '987800050') });
     expect(alta.status).toBe(201);
-    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
+    const r = await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
     expect(r.status, r.texto).toBe(200);
     expect(r.json).toMatchObject({ ok: true, accion: 'CANCELAR' });
     // Con la clave de la otra tienda, ese tracking no existe alli.
-    const otra = await pedir('/api/v1/entregas', { clave: claveB, cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
+    const otra = await pedir('/api/v1/flujo', { clave: claveB, cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
     expect(otra.status).toBe(404);
     esErrorLimpio(otra, 'NO_EXISTE');
     // Sin clave: 401 con su forma, no el 404 de la plataforma.
-    const sin = await pedir('/api/v1/entregas', { cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
+    const sin = await pedir('/api/v1/flujo', { cuerpo: { tracking: 'FLUJO-PLAT', accion: 'CANCELAR' } });
     expect(sin.status).toBe(401);
   });
 
-  it('ya no hay /api/v1/flujo aparte: todo va por /api/v1/entregas', async () => {
-    const r = await pedir('/api/v1/flujo', { clave: claveA, cuerpo: { tracking: 'X', accion: 'CANCELAR' } });
-    // Ya no se reparte por clave: cae en la tienda principal, donde esa clave no vale (o la ruta no existe).
-    expect([401, 404]).toContain(r.status);
-    expect(r.json.ok).toBe(false);
-    const enSuTienda = await a.app.inject({ method: 'POST', url: '/api/v1/flujo', headers: { 'x-api-key': claveA, 'content-type': 'application/json' }, payload: '{"tracking":"X","accion":"CANCELAR"}' });
-    expect(enSuTienda.statusCode).toBe(404);
-    expect(enSuTienda.json().codigo).toBe('RUTA_NO_EXISTE');
+  it('una orden con accion mandada a la dirección de pedidos: 400 que dice que va en /api/v1/flujo', async () => {
+    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { tracking: 'X', accion: 'CANCELAR' } });
+    expect(r.status).toBe(400);
+    esErrorLimpio(r, 'VALIDACION');
+    expect(r.json.error).toContain('/api/v1/flujo');
   });
 
   it('GET /api/v1/reportados y /api/v1/trackings con la clave van a su tienda', async () => {

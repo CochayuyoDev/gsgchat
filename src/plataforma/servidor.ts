@@ -116,9 +116,9 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
     // El catalogo de errores es el mismo en todas las tiendas: lo contesta la plataforma, sin clave.
     if (rutaApi === '/api/v1/errores' || rutaApi.startsWith('/api/v1/errores/')) return { tipo: 'plataforma', url };
     // Lo que usa GSG con su clave va a la tienda de esa clave (sin prefijo ni
-    // cookie): la recepcion (que tambien cancela o reintenta con «accion»), el
+    // cookie): la recepcion (API 1), cancelar o reintentar (API 2), el
     // seguimiento y la bandeja de reportados.
-    const deGsg = rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/') || (rutaApi === '/api/v1/seguimiento' && req.method === 'POST') || rutaApi === '/api/v1/reportados' || rutaApi.startsWith('/api/v1/reportados/') || rutaApi === '/api/v1/trackings';
+    const deGsg = rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/') || (rutaApi === '/api/v1/flujo' && req.method === 'POST') || (rutaApi === '/api/v1/seguimiento' && req.method === 'POST') || rutaApi === '/api/v1/reportados' || rutaApi.startsWith('/api/v1/reportados/') || rutaApi === '/api/v1/trackings';
     if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) && deGsg)) {
       const permiso = req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
       const r = await tiendaDeClaveGsg(plataforma, req.headers, permiso);

@@ -60,7 +60,7 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
   const extras = conexion.extras;
   if (deps.entregasDelDia) extras.usarEntregas(deps.entregasDelDia);
 
-  const esLlamadaDeGsg = (url: string) => url.startsWith(`${RUTA_SIMULADOR}/`) || url === RUTA_SIMULADOR || url.startsWith('/api/v1/entregas') || url === '/admin/entregas/flujo';
+  const esLlamadaDeGsg = (url: string) => url.startsWith(`${RUTA_SIMULADOR}/`) || url === RUTA_SIMULADOR || url.startsWith('/api/v1/entregas') || url === '/api/v1/flujo' || url === '/admin/entregas/flujo';
 
   // Gancho 1: el token caducable vale para el simulador.
   app.addHook('onRequest', async (request: ConUsuario, reply: FastifyReply) => {
@@ -102,8 +102,8 @@ export async function registerGsgExtrasRoutes(app: FastifyInstance, deps: DepsGs
       }
     }
     const quien = request.gsgQuien ?? (request.usuario?.porToken ? `clave de API «${request.usuario.nombre ?? 'api'}»` : request.usuario ? `una persona (${request.usuario.nombre ?? ''})` : 'sin token');
-    // Por la misma direccion llegan pedidos y ordenes: la orden se anota con su accion.
-    const orden = url === '/api/v1/entregas' && esOrdenDeFlujo(request.body) ? ` · accion ${String((request.body as { accion?: unknown }).accion ?? '').trim().toUpperCase()}` : '';
+    // Una orden de la API 2 se anota con su accion.
+    const orden = (url === '/api/v1/flujo' || url === '/admin/entregas/flujo') && esOrdenDeFlujo(request.body) ? ` · accion ${String((request.body as { accion?: unknown }).accion ?? '').trim().toUpperCase()}` : '';
     await extras.anotarLlamada({ que: `${request.method} ${url}${orden}`, status: reply.statusCode, resultado: resultadoEnPalabras(reply.statusCode, cuerpo), quien });
     return payload;
   });
