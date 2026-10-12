@@ -526,7 +526,7 @@ describe('una lista larga de 120 clientes', () => {
 
     await e.despacharAGsg();
     expect(e.gsg.incidencias()).toHaveLength(60);
-    expect(e.gsg.incidencias().map((i) => i.telefono).sort()).toEqual(NO_DAN.map((c) => conPais(c.telefono)).sort());
+    expect(e.gsg.incidencias().map((i) => i.telefonoOrigen).sort()).toEqual(NO_DAN.map((c) => conPais(c.telefono)).sort());
     expect(e.gsg.resumenes().at(-1)).toMatchObject({ total: 120, porEstado: { resuelto: 60, derivado: 60 } });
   });
 });
@@ -676,8 +676,10 @@ describe('los rechazos de Meta al enviar', () => {
   it('el número inválido va a GSG con su código y qué hacer', async () => {
     await e.despacharAGsg();
     const [inc] = e.gsg.incidencias();
-    expect(inc).toMatchObject({ codigo: 'numero_invalido', telefono: '51987600003', requiereHumano: true });
-    expect(inc!.queHacer).toMatch(/./);
+    // En el formato de GSG: número mal, con el teléfono y un comentario que dice qué pasó.
+    expect(inc).toMatchObject({ tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', telefonoOrigen: '51987600003' });
+    expect(inc!.comentario).toMatch(/./);
+    expect(inc!.eventoId).toMatch(/^gsgchat-/);
   });
 });
 

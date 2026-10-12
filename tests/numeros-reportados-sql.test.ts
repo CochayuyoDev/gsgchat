@@ -29,8 +29,11 @@ describe('números reportados en MySQL', () => {
     expect(await reportarNumero({ repos }, n)).toBeNull();
     // Otro error del mismo tracking es otro reporte.
     expect(await reportarNumero({ repos }, { ...n, error: 'sin_whatsapp' })).toBeTruthy();
-    // Solo se guarda: a GSG no se le encola nada.
-    expect(await repos.rutas.reportesPendientes(50)).toHaveLength(0);
+    // Y a GSG se le encola cada problema UNA vez (su endpoint de reportes, en su formato).
+    const cola = await repos.rutas.reportesPendientes(50);
+    expect(cola).toHaveLength(2);
+    expect(cola.every((r) => r.tipo === 'incidencia' && String(r.payload.eventoId).startsWith('gsgchat-SQL-1-'))).toBe(true);
+    expect(new Set(cola.map((r) => r.payload.eventoId)).size).toBe(2);
 
     expect(await repos.reportados!.listar({ estado: 'pendiente' })).toHaveLength(2);
     const hechos = await repos.reportados!.marcarCorregidos('SQL-1', { telefono: '987000001', por: 'GSG' }, new Date('2026-10-10T15:00:00Z'));

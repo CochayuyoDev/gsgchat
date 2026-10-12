@@ -23,6 +23,7 @@
 import type { Pool } from '../db/pool.js';
 import type { RutasRepo, Solicitud } from '../db/rutas.js';
 import { diaTexto, type Entrega, type EntregasRepo } from './repo.js';
+import { encolarProblemaGsg } from '../rutas/gsg.js';
 
 // ------------------------------------------------------------- errores
 
@@ -323,7 +324,8 @@ export function crearReportadosEnMemoria(): ReportadosRepo & { _filas: NumeroRep
 // ------------------------------------------------------------ reportar
 
 export interface DepsReportar {
-  repos: { reportados?: ReportadosRepo };
+  /** `rutas`: para mandarle a GSG el problema (su endpoint de reportes). Sin el, solo se guarda. */
+  repos: { reportados?: ReportadosRepo; rutas?: Pick<RutasRepo, 'encolarReporte' | 'reportesRecientes'> };
   ahora?: () => Date;
   log?: (m: string, d?: Record<string, unknown>) => void;
 }
@@ -341,6 +343,12 @@ export async function reportarNumero(deps: DepsReportar, n: NuevoReportado): Pro
   const fila = await repo.reportar({ ...n, clave: claveDe(n), mensaje: TEXTOS_REPORTADOS[n.error].mensaje(datos) }, en);
   if (!fila) return null;
   deps.log?.('número reportado (guardado para GSG)', { error: fila.error, tracking: fila.tracking });
+  // Y se le manda a GSG (su endpoint de reportes), una vez por tracking + error + dia.
+  const tracking = textoONulo(fila.tracking) ?? textoONulo(fila.referencia);
+  if (deps.repos.rutas && tracking) {
+    await encolarProblemaGsg(deps.repos.rutas, { tracking, referencia: fila.referencia, codigo: fila.error, telefono: fila.telefono, titulo: TEXTOS_REPORTADOS[fila.error]?.titulo ?? fila.error, mensaje: fila.mensaje, detalle: fila.detalle, origen: 'numero_reportado' }, { en })
+      .catch((error: unknown) => deps.log?.('no se pudo encolar el reporte para GSG', { detalle: String(error) }));
+  }
   return fila;
 }
 

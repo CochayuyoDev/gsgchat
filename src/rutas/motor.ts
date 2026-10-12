@@ -32,7 +32,7 @@ import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
-import { despacharReportes, payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
+import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
 import {
   DESCRIPCION_PASO,
@@ -372,12 +372,15 @@ export function crearMotor(deps: MotorDeps): Motor {
     if (ficha.reportable) {
       const lote = await repos.rutas.lote(solicitud.loteId);
       if (lote) {
-        await repos.rutas.encolarReporte({
-          solicitudId: solicitud.id,
-          loteId: lote.id,
-          tipo: 'incidencia',
-          payload: payloadIncidencia(actualizada, lote),
-        });
+        // Un reporte por tracking: un mismo numero puede tener varios envios de GSG en ese lote.
+        const ligadas = solicitud.phone && typeof repos.entregas?.vivasDeLoteYTelefono === 'function'
+          ? await repos.entregas.vivasDeLoteYTelefono(solicitud.loteId, solicitud.phone).catch(() => [])
+          : [];
+        const trackings = [...new Set(ligadas.map((e) => e.datosEnvio?.tracking ?? e.referencia).filter(Boolean))];
+        if (!trackings.length && solicitud.referencia) trackings.push(solicitud.referencia);
+        for (const tracking of trackings) {
+          await encolarProblemaGsg(repos.rutas, { ...payloadIncidencia(actualizada, lote), tracking, codigo }, { solicitudId: solicitud.id, loteId: lote.id, en: ahora() });
+        }
       }
     }
 
