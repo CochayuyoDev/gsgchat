@@ -196,21 +196,12 @@ describe('un reparto de 22 clientes: quién dio su ubicación y quién no', () =
     expect(aviso).toContain('4 sin contestar');
     expect(aviso).toMatch(/10 casos necesitan/);
 
-    // El avance se encoló para GSG con las cifras ya contestadas.
+    // El avance se encola, pero GSG todavia no tiene endpoint de resumenes: no
+    // se manda y no se reintenta (RUTAS_GSG.resumen es null). Lo que si sale
+    // son las ubicaciones, que es lo que GSG recibe hoy.
     const despacho = await e.despacharAGsg();
     expect(despacho.enviados).toBeGreaterThan(0);
-    expect(despacho.fallidos).toBe(0);
-    const [resumen] = e.gsg.resumenes();
-    expect(resumen).toMatchObject({
-      enCurso: true,
-      total: 22,
-      conUbicacion: 8,
-      contestaron: 14,
-      sinContestar: 4,
-      sinEscribir: 0,
-      necesitanPersona: 10,
-      lote: { externoId: 'GSG-2026-03-10' },
-    });
+    expect(e.gsg.resumenes()).toHaveLength(0);
     // Y las ocho ubicaciones ya están del otro lado, con su teléfono y su pedido.
     expect(e.gsg.telefonosConUbicacion().sort()).toEqual([...DAN_PIN, ...DAN_ENLACE].map(tel).sort());
     expect(e.gsg.ubicaciones().map((u) => u.referencia).sort()).toEqual(
@@ -527,7 +518,8 @@ describe('una lista larga de 120 clientes', () => {
     await e.despacharAGsg();
     expect(e.gsg.incidencias()).toHaveLength(60);
     expect(e.gsg.incidencias().map((i) => i.telefonoOrigen).sort()).toEqual(NO_DAN.map((c) => conPais(c.telefono)).sort());
-    expect(e.gsg.resumenes().at(-1)).toMatchObject({ total: 120, porEstado: { resuelto: 60, derivado: 60 } });
+    // Idem: el resumen no sale mientras GSG no tenga donde recibirlo.
+    expect(e.gsg.resumenes()).toHaveLength(0);
   });
 });
 
@@ -678,6 +670,10 @@ describe('los rechazos de Meta al enviar', () => {
     const [inc] = e.gsg.incidencias();
     // En el formato de GSG: número mal, con el teléfono y un comentario que dice qué pasó.
     expect(inc).toMatchObject({ tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', telefonoOrigen: '51987600003' });
+    // El codigo fino ademas del motivo: TELEFONO_MAL no distingue un numero
+    // corto de uno sin WhatsApp, y en GSG la accion del operador es distinta.
+    expect(inc!.codigo).toMatch(/./);
+    expect(inc!.queHacer).toMatch(/./);
     expect(inc!.comentario).toMatch(/./);
     expect(inc!.eventoId).toMatch(/^gsgchat-/);
   });

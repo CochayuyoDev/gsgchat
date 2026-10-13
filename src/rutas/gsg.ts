@@ -171,7 +171,7 @@ export interface OpcionesGsg {
 /**
  * Los problemas que GSGchat le reporta a GSG (su endpoint de reportes, p. ej.
  * POST v1/gsgchat/reported), con el contrato del plan de GSG (seccion 4):
- * { tracking, tipo: 'PROBLEMA', motivo, comentario, telefonoOrigen, fechaMensaje, eventoId }.
+ * { tracking, tipo: 'PROBLEMA', motivo, codigo, queHacer, comentario, telefonoOrigen, fechaMensaje, eventoId }.
  * `motivo` es su catalogo cerrado; cada codigo de GSGchat cae en uno.
  */
 export type MotivoGsg = 'DIRECCION_MAL' | 'TELEFONO_MAL' | 'NO_RECONOCE_PEDIDO' | 'RECHAZA' | 'REPROGRAMA' | 'OTRO';
@@ -209,6 +209,11 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
     tracking,
     tipo: 'PROBLEMA',
     motivo: texto(p.motivo) ?? motivoGsg(codigo),
+    // El codigo fino del catalogo de GSGchat, ademas del motivo: TELEFONO_MAL
+    // no distingue «no tiene WhatsApp» (pedir otro numero) de «es un fijo»
+    // (pedir un celular), y en GSG la accion del operador no es la misma.
+    codigo,
+    queHacer: texto(p.queHacer),
     comentario,
     telefonoOrigen: texto(p.telefonoOrigen) ?? texto(p.telefono),
     fechaMensaje: Number.isNaN(en.getTime()) ? new Date().toISOString() : en.toISOString(),
@@ -233,17 +238,26 @@ export async function encolarProblemaGsg(
   return true;
 }
 
-/** El camino de cada tipo dentro de la API de GSG. */
-export const RUTAS_GSG: Record<TipoReporte, string> = {
-  ubicacion: '/sendLocation',
-  incidencia: '/incidencias',
-  resumen: '/resumenes',
-  confirmacion: '/confirmaciones',
-  entrega: '/entregas',
+/**
+ * El camino de cada tipo dentro de la API de GSG, con los endpoints que GSG
+ * tiene de verdad (`src/routes/v1/gsgchat/gsgchat.routes.js` de su back).
+ *
+ * `null` = GSG no recibe ese tipo todavia: no se manda y no se reintenta, en vez
+ * de pegarle a una ruta inexistente y acumular 404 en la cola 24 horas.
+ */
+export const RUTAS_GSG: Record<TipoReporte, string | null> = {
+  ubicacion: '/send-location',
+  incidencia: '/reported',
+  resumen: null,
+  confirmacion: null,
+  entrega: null,
 };
 
-/** La ruta de la ubicacion cuando no se dio otra: la de siempre (`<base>/sendLocation`). */
-export const RUTA_UBICACION_POR_DEFECTO = 'sendLocation';
+/** Como se llamaba la ruta de la ubicacion antes del 12/10 (GSG la borro). */
+export const RUTA_UBICACION_ANTIGUA = '/sendLocation';
+
+/** La ruta de la ubicacion cuando no se dio otra: la de siempre (`<base>/send-location`). */
+export const RUTA_UBICACION_POR_DEFECTO = 'send-location';
 
 // ------------------------------------------------------- URL base + ruta
 
@@ -324,8 +338,11 @@ export function migrarUbicacionAntigua(direccion: string, urlUbicacionAntigua: s
 
   if (!antigua) {
     const limpia = sinFinal(dir);
-    const pegaronUbicacion = limpia.toLowerCase().endsWith(RUTAS_GSG.ubicacion.toLowerCase());
-    const base = normalizarBaseGsg(pegaronUbicacion ? limpia.slice(0, -RUTAS_GSG.ubicacion.length) : limpia);
+    // Se reconoce la ruta nueva y la vieja: una URL guardada antes del 12/10
+    // termina en `/sendLocation` y tambien hay que despegarla.
+    const pegada = [RUTAS_GSG.ubicacion!, RUTA_UBICACION_ANTIGUA]
+      .find((r) => limpia.toLowerCase().endsWith(r.toLowerCase()));
+    const base = normalizarBaseGsg(pegada ? limpia.slice(0, -pegada.length) : limpia);
     if (!base.ok) return base;
     return { ok: true, base: base.url, ruta: RUTA_UBICACION_POR_DEFECTO, regla: 'sin_url_antigua' };
   }
@@ -426,7 +443,9 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
   const limpio = (t: string) => sinClave(t, clave);
 
   const rutaEstado = (opts.rutaEstado ?? '').trim();
-  const rutaIncidencias = (opts.rutaIncidencias ?? '').trim() || RUTAS_GSG.incidencia;
+  // `incidencia` siempre tiene ruta (GSG la recibe): el `!` es por el tipo, que
+  // admite null para los tipos que GSG no recibe.
+  const rutaIncidencias = (opts.rutaIncidencias ?? '').trim() || RUTAS_GSG.incidencia!;
   const destinoIncidencias = destino.ok ? unirUrlGsg(destino.base, rutaIncidencias) : null;
   const destinoEstado = destino.ok && rutaEstado ? unirUrlGsg(destino.base, rutaEstado) : null;
   const paramTracking = (opts.paramTracking ?? '').trim() || 'trackingCode';
@@ -481,7 +500,11 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
       if (tipo === 'ubicacion') url = destino.urlUbicacion;
       else {
         // Las incidencias van a la ruta del panel (si la hay); lo demas, a la de siempre.
-        const u = unirUrlGsg(destino.base, tipo === 'incidencia' ? rutaIncidencias : RUTAS_GSG[tipo]);
+        const camino = tipo === 'incidencia' ? rutaIncidencias : RUTAS_GSG[tipo];
+        // GSG no tiene endpoint para este tipo: no se manda y no se reintenta.
+        // Reintentarlo solo acumula 404 en la cola durante 24 horas.
+        if (!camino) return { ok: false, error: `GSG no recibe ${tipo} todavía: no hay a dónde mandarlo.`, reintentable: false };
+        const u = unirUrlGsg(destino.base, camino);
         if (!u.ok) return { ok: false, error: `Configuración de GSG no válida: ${u.error}`, reintentable: true, configuracion: true };
         url = u.url;
       }

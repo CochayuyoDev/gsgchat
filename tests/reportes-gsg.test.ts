@@ -26,6 +26,7 @@ describe('el formato de GSG', () => {
     const p = problemaParaGsg({ tipo: 'incidencia', referencia: 'GSG-E-240268', tracking: 'GSG-E-240268', telefono: '51999999999', codigo: 'sin_whatsapp', titulo: 'El número no tiene WhatsApp', detalle: 'el número 51999999999 no tiene una cuenta de WhatsApp', detectadoEn: '2026-10-12T18:40:00.000Z' });
     expect(p).toEqual({
       tracking: 'GSG-E-240268', tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL',
+      codigo: 'sin_whatsapp', queHacer: null,
       comentario: 'El número no tiene WhatsApp: el número 51999999999 no tiene una cuenta de WhatsApp',
       telefonoOrigen: '51999999999', fechaMensaje: '2026-10-12T18:40:00.000Z',
       eventoId: 'gsgchat-GSG-E-240268-sin_whatsapp-2026-10-12',
