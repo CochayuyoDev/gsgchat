@@ -53,13 +53,19 @@ con `X-API-Key`) y los demás reportes. Si GSG rechaza la clave (401/403), se ve
 
 Ningún error guardado contiene la clave.
 
+### Las rutas de GSG (12/10)
+
+GSG renombró su endpoint de ubicaciones: ahora es `send-location`, el viejo `sendLocation` ya no existe.
+Los problemas van a `reported`. De los otros tres tipos (resumen, confirmación, entrega) GSG no tiene
+endpoint todavía: no se mandan y no se reintentan, para no acumular 404 en la cola 24 horas.
+
 ### Compatibilidad con lo configurado antes
 
 - La clave: si no hay `GSG_API_KEY` se lee `GSG_TOKEN`; si no hay `gsg.apiKey` guardada se lee `gsg.token`
   (cifrada). Al guardar una nueva desde la pantalla, `gsg.token` se borra.
 - La URL completa de antes (`urlUbicacion` guardada o `GSG_SEND_LOCATION_URL`) se convierte a base + ruta
   solo si es inequívoco (`migrarUbicacionAntigua`):
-  1. Sin URL antigua: base = la dirección (sin `/sendLocation` si lo tenía), ruta = `sendLocation`. Sale a la misma URL de siempre.
+  1. Sin URL antigua: base = la dirección (sin `/send-location` ni el viejo `/sendLocation` si lo tenía), ruta = `send-location`.
   2. La URL antigua empieza por la dirección + `/`: base = la dirección, ruta = el resto.
   3. Si no, se parte por `/api/` cuando aparece una sola vez y la dirección no apunta a otro sitio.
   En otro caso, la pantalla y el estado muestran el error y no se envía nada hasta escribir la base y la ruta.
@@ -77,13 +83,16 @@ contrato del plan de GSG:
 
 ```json
 { "tracking": "GSG-E-240268", "tipo": "PROBLEMA", "motivo": "TELEFONO_MAL",
+  "codigo": "sin_whatsapp", "queHacer": "Manda otro número del cliente",
   "comentario": "El número no tiene WhatsApp: el número 51999999999 no tiene una cuenta de WhatsApp",
   "telefonoOrigen": "51999999999", "fechaMensaje": "2026-10-12T18:40:00.000Z",
   "eventoId": "gsgchat-GSG-E-240268-sin_whatsapp-2026-10-12" }
 ```
 
 `motivo` es el catálogo de GSG (`TELEFONO_MAL`, `NO_RECONOCE_PEDIDO`, `RECHAZA`, `DIRECCION_MAL`, `REPROGRAMA`,
-`OTRO`); el `eventoId` va también en `Idempotency-Key` y es uno por tracking + error + día: el mismo problema que
+`OTRO`), y `codigo` el de GSGchat (los de la tabla de abajo): el motivo sirve para agrupar, el código dice qué
+hacer, porque `TELEFONO_MAL` no distingue un número sin WhatsApp (pedir otro) de un fijo (pedir un celular).
+El `eventoId` va también en `Idempotency-Key` y es uno por tracking + error + día: el mismo problema que
 llega por el reparto y por la bandeja sale una sola vez. Lo enviado se ve en Conexión con GSG → «Lo que enviamos a GSG».
 
 La bandeja sigue disponible: Luis (GSG) la lee con `GET /api/v1/reportados` y corrige con

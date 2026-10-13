@@ -291,7 +291,7 @@ function crearGsgFalso(): GsgFalsoInterno {
       if (gsg.modo === 'caido') return new Response('<html>502 Bad Gateway</html>', { status: 502 });
 
       const camino = url.slice(GSG_URL_FALSA.length);
-      const tipo = (Object.entries(RUTAS_GSG) as Array<[TipoReporte, string]>).find(([, ruta]) => ruta === camino)?.[0];
+      const tipo = (Object.entries(RUTAS_GSG) as Array<[TipoReporte, string | null]>).find(([, ruta]) => ruta === camino)?.[0];
       if (!tipo) return new Response(JSON.stringify({ error: `ruta desconocida ${camino}` }), { status: 404 });
 
       const headers = new Headers(init?.headers);

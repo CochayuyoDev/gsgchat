@@ -260,20 +260,25 @@ describe('la pantalla de Conexión', () => {
 });
 
 describe('la ruta de las incidencias se configura en el panel', () => {
-  it('sin ruta van a /incidencias (como siempre); con ruta, a la que diga el panel', async () => {
+  it('sin ruta van al /reported de GSG; con ruta, a la que diga el panel', async () => {
     const llamadas: string[] = [];
     const fetchImpl = (async (url: string) => { llamadas.push(url); return new Response('{}', { status: 201 }); }) as unknown as typeof fetch;
+    // Sin configurar nada se usa el endpoint que GSG tiene de verdad, no el
+    // viejo /incidencias, que de su lado nunca existio y respondia 404.
     const siempre = crearPuertoHttp({ url: 'https://gsg.example/api', token: 'clave-gsg-123', fetchImpl });
-    expect(siempre.urlIncidencias?.()).toBe('https://gsg.example/api/incidencias');
-    await siempre.enviar('incidencia', { referencia: 'X', codigo: 'sin_whatsapp' });
-    expect(llamadas.at(-1)).toBe('https://gsg.example/api/incidencias');
+    expect(siempre.urlIncidencias?.()).toBe('https://gsg.example/api/reported');
+    await siempre.enviar('incidencia', { referencia: 'X', tracking: 'X', codigo: 'sin_whatsapp' });
+    expect(llamadas.at(-1)).toBe('https://gsg.example/api/reported');
     const reported = crearPuertoHttp({ url: 'https://gsg.example/api', token: 'clave-gsg-123', rutaIncidencias: 'v1/gsgchat/reported', fetchImpl });
     expect(reported.urlIncidencias?.()).toBe('https://gsg.example/api/v1/gsgchat/reported');
-    await reported.enviar('incidencia', { referencia: 'X', codigo: 'sin_whatsapp' });
+    await reported.enviar('incidencia', { referencia: 'X', tracking: 'X', codigo: 'sin_whatsapp' });
     expect(llamadas.at(-1)).toBe('https://gsg.example/api/v1/gsgchat/reported');
-    // Lo demas no cambia de ruta.
-    await reported.enviar('confirmacion', { referencia: 'X' });
-    expect(llamadas.at(-1)).toBe('https://gsg.example/api/confirmaciones');
+    // Los tipos que GSG no recibe no se mandan y no se reintentan: pegarles a
+    // una ruta inexistente solo acumula 404 en la cola 24 horas.
+    const antes = llamadas.length;
+    const conf = await reported.enviar('confirmacion', { referencia: 'X' });
+    expect(conf).toMatchObject({ ok: false, reintentable: false });
+    expect(llamadas.length).toBe(antes);
   });
 
   it('se guarda desde Conexión, sobrevive al guardar otra vez sin ella, y una ruta mala no se guarda', async () => {
