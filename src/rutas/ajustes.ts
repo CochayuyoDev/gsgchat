@@ -86,9 +86,32 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
     maxIntentos: Math.min(3, ajustes.maxIntentos),
     pedirUbicacionCadaMinutos: Math.max(0, ajustes.pedirUbicacionCadaMinutos ?? opciones.pedirUbicacionCadaMinutos),
+    // El horario de aqui es solo el SUELO: en una instalacion sin ajustes
+    // generales (una suelta, las pruebas) sigue siendo el que manda. Donde si
+    // los hay -todas las tiendas- la franja general se pone encima con
+    // `conFranjaDeLaPolitica`, y es la unica que cuenta: antes convivian dos
+    // horarios y ganaba el mas estricto sin que la pantalla lo dijera.
     horaInicio: ajustes.horaInicio,
     horaFin: Math.max(ajustes.horaInicio + 1, ajustes.horaFin),
   };
+}
+
+/**
+ * La franja de envio de verdad: la de los ajustes generales.
+ *
+ * Es la UNICA fuente del horario (inicio, fin y zona horaria) para los dos
+ * motores y para el freno de ritmo de la salud, que ya la usaba. Sin politica
+ * -en las pruebas, o antes de que haya ajustes- se queda la de la
+ * configuracion del proceso.
+ */
+export function conFranjaDeLaPolitica(
+  opciones: OpcionesMotor,
+  politica?: { horaInicio: number; horaFin: number; timezone?: string } | null,
+): OpcionesMotor {
+  if (!politica) return opciones;
+  const inicio = Math.max(0, Math.min(23, Math.floor(politica.horaInicio)));
+  const fin = Math.max(inicio + 1, Math.min(24, Math.floor(politica.horaFin)));
+  return { ...opciones, horaInicio: inicio, horaFin: fin, timezone: politica.timezone || opciones.timezone };
 }
 
 /**

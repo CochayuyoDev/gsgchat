@@ -12,7 +12,7 @@ import { createSender, type SendJob, type SendOutcome, type Sender } from '../sr
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { crearMotor, OPCIONES_POR_DEFECTO, type OpcionesMotor } from '../src/rutas/motor.js';
 import { crearPuertoEnEspera } from '../src/rutas/gsg.js';
-import { ajustesPorDefecto, aplicarAjustes, rellenarTexto } from '../src/rutas/ajustes.js';
+import { ajustesPorDefecto, aplicarAjustes, conFranjaDeLaPolitica, rellenarTexto } from '../src/rutas/ajustes.js';
 import { textoLibre } from '../src/rutas/mensajes.js';
 import { approvedTemplate, createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, CLAVE_API_PRUEBA as ADMIN } from './fakes.js';
 
@@ -54,6 +54,14 @@ describe('ajustes: puros', () => {
     const v = aplicarAjustes(opciones, a);
     expect(v.pausaMaxSegundos).toBe(40);
     expect(v.horaFin).toBe(11);
+  });
+
+  it('la franja de la politica manda, y un fin antes del inicio se corrige', () => {
+    const v = conFranjaDeLaPolitica(opciones, { horaInicio: 8, horaFin: 22, timezone: 'America/Lima' });
+    expect([v.horaInicio, v.horaFin]).toEqual([8, 22]);
+    expect(conFranjaDeLaPolitica(opciones, { horaInicio: 10, horaFin: 8 }).horaFin).toBe(11);
+    // Sin politica (una instalacion sin ajustes generales): la configuracion.
+    expect(conFranjaDeLaPolitica(opciones, null).horaInicio).toBe(opciones.horaInicio);
   });
 
   it('rellenarTexto pone nombre, negocio y pedido, con relleno cuando faltan', () => {
@@ -130,11 +138,20 @@ describe('ajustes: el motor los usa', () => {
     expect(enviados.at(-1)?.interactive?.body).toMatch(/clip/);
   });
 
-  it('el horario guardado manda: a las 10:00 con horario de 12 a 18 no se escribe', async () => {
+  it('la franja general manda: a las 10:00 con horario de 12 a 18 no se escribe', async () => {
     await loteListo(repos, ['51987654321']);
-    await repos.rutas.ajustes.set({ horaInicio: 12, horaFin: 18 }, ajustesPorDefecto(opciones));
+    // El horario sale de los ajustes generales (la politica), no de los del
+    // reparto: ver src/rutas/ajustes.ts (`conFranjaDeLaPolitica`).
     const { sender, enviados } = senderFalso();
-    const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => HORA_BUENA });
+    const motor = crearMotor({
+      repos,
+      sender,
+      gsg: crearPuertoEnEspera(),
+      opciones,
+      usarPlantilla: () => false,
+      ahora: () => HORA_BUENA,
+      politica: () => ({ horaInicio: 12, horaFin: 18 }) as never,
+    });
     const salida = await motor.tick();
     expect(salida.accion).toBe('nada');
     expect(salida.motivo).toMatch(/12:00 a 18:00/);

@@ -35,7 +35,8 @@ import { cargarLote, ErrorCarga } from '../rutas/cargar.js';
 import { PLANES, revisarTelefono } from '../rutas/telefono.js';
 import { enHorario, type OpcionesMotor } from '../rutas/motor.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
-import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, PASOS } from '../rutas/ajustes.js';
+import type { ServicioAjustes } from '../ajustes/generales.js';
+import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, conFranjaDeLaPolitica, PASOS } from '../rutas/ajustes.js';
 import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js';
 import type { Monitor } from '../salud/monitor.js';
 import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
@@ -57,6 +58,13 @@ export interface RutasRoutesDeps {
   nombreNegocio?: () => string;
   /** La lista de envio automatico: un numero que entra en un lote sale de ella (el reparto se lo queda). */
   lista?: ServicioEnvioAutomatico;
+  /**
+   * Los ajustes generales: ahi vive la UNICA franja de envio del sistema
+   * (inicio, fin, dias y zona horaria). Esta pantalla la ensena y la guarda,
+   * pero el dato es el mismo que usa el freno de ritmo de la salud. Ver
+   * src/rutas/ajustes.ts (`conFranjaDeLaPolitica`).
+   */
+  ajustes?: ServicioAjustes;
 }
 
 const filaSchema = z.object({
@@ -190,6 +198,23 @@ export async function registerRutasRoutes(
   const { repos, config, gsg, opciones } = deps;
   const plan = PLANES[config.RUTAS_PAIS] ?? PLANES.peru!;
 
+  /**
+   * La franja de envio vigente: la de los ajustes generales. La pantalla tiene
+   * que ensenar la MISMA que frena al motor; antes ensenaba la del reparto y el
+   * motor obedecia a otra.
+   */
+  const franja = () => {
+    const a = deps.ajustes?.actual();
+    if (!a) return null;
+    const inicio = a.horario.inicio;
+    const fin = a.horario.fin;
+    if (inicio === null || fin === null) return null;
+    return { horaInicio: inicio, horaFin: fin, timezone: a.zonaHoraria || opciones.timezone };
+  };
+  /** Los ajustes del reparto guardados, con la franja general puesta encima. */
+  const vigentes = async () =>
+    conFranjaDeLaPolitica(aplicarAjustes(opciones, await repos.rutas.ajustes.get(ajustesPorDefecto(opciones))), franja());
+
   /** El estado de todo, que es lo primero que pinta la pantalla. */
   app.get('/admin/rutas', async () => {
     const [lotes, cifras, incidencias, cola] = await Promise.all([
@@ -201,7 +226,7 @@ export async function registerRutasRoutes(
 
     const pendientesDePersona = await repos.rutas.contarSolicitudes({ requiereHumano: true });
     // Lo que manda de verdad: la configuracion con los ajustes guardados encima.
-    const vigente = aplicarAjustes(opciones, await repos.rutas.ajustes.get(ajustesPorDefecto(opciones)));
+    const vigente = await vigentes();
 
     return {
       lotes,
@@ -240,7 +265,11 @@ export async function registerRutasRoutes(
   /** Los ajustes vigentes, los de la configuracion y las plantillas entre las que elegir. */
   app.get('/admin/rutas/ajustes', async () => {
     const porDefecto = ajustesPorDefecto(opciones);
-    const ajustes = await repos.rutas.ajustes.get(porDefecto);
+    const guardados = await repos.rutas.ajustes.get(porDefecto);
+    // El horario que se ensena es el general, no el que quedara guardado en la
+    // clave del reparto: hay una sola franja para todo el sistema.
+    const conFranja = conFranjaDeLaPolitica(aplicarAjustes(opciones, guardados), franja());
+    const ajustes = { ...guardados, horaInicio: conFranja.horaInicio, horaFin: conFranja.horaFin };
     const plantillas = (await repos.templates.list())
       .filter((t) => t.category === 'UTILITY' || t.propia)
       .map((t) => ({
@@ -286,9 +315,20 @@ export async function registerRutasRoutes(
         if (falta) return reply.code(400).send({ error: `La plantilla "${falta}" no esta en el registro.` });
       }
     }
+    // El horario se guarda donde vive la franja unica (ajustes generales), no
+    // en la clave del reparto: si no, convivirian dos horarios y ganaria el
+    // mas estricto sin decirlo.
+    if (deps.ajustes && (body.horaInicio !== undefined || body.horaFin !== undefined)) {
+      const actual = franja();
+      const inicio = body.horaInicio ?? actual?.horaInicio ?? opciones.horaInicio;
+      const fin = body.horaFin ?? actual?.horaFin ?? opciones.horaFin;
+      if (fin <= inicio) return reply.code(400).send({ error: 'La hora de fin tiene que ser mayor que la de inicio.' });
+      await deps.ajustes.guardar({ horario: { inicio, fin } });
+    }
     const porDefecto = ajustesPorDefecto(opciones);
     const ajustes = await repos.rutas.ajustes.set(body, porDefecto);
-    return { ok: true, ajustes, vigente: aplicarAjustes(opciones, ajustes) };
+    const vigente = conFranjaDeLaPolitica(aplicarAjustes(opciones, ajustes), franja());
+    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin }, vigente };
   });
 
   /** Volver a lo que diga la configuracion. */
@@ -621,7 +661,7 @@ export async function registerRutasRoutes(
       });
     }
 
-    const vigente = aplicarAjustes(opciones, await repos.rutas.ajustes.get(ajustesPorDefecto(opciones)));
+    const vigente = await vigentes();
     const timezone = vigente.timezone || opciones.timezone;
     const quien = request.usuario?.nombre || request.usuario?.usuario || null;
 
@@ -793,7 +833,14 @@ export async function registerRutasRoutes(
   // «Enviar ahora»: tambien reintenta las ubicaciones que fallaron (un 404 por
   // la direccion mal puesta se quedaba en «fallido» y salia «0 de 0»).
   app.post('/admin/rutas/cola/despachar', async () => {
-    if (gsg.conectado()) await repos.rutas.reencolarFallidos('ubicacion');
+    if (gsg.conectado()) {
+      await repos.rutas.reencolarFallidos('ubicacion');
+      // Los problemas (incidencias) tambien: antes solo volvian las
+      // ubicaciones y un error que fallo una vez se quedaba en 'fallido' para
+      // siempre, sin que nada lo reintentara. Tope de 10 intentos para que un
+      // reporte que GSG rechaza de verdad no de vueltas sin fin.
+      await repos.rutas.reencolarFallidos('incidencia', 10);
+    }
     // Lo pidio una persona: se intenta aunque la cola este parada por la clave.
     return despacharReportes(repos, gsg, 200, undefined, { manual: true });
   });

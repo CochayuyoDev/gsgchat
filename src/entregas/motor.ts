@@ -30,7 +30,7 @@ import type { Repos } from '../db/repos.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
 import { decidirRitmo } from '../salud/ritmo.js';
-import { ajustesPorDefecto, aplicarAjustes } from '../rutas/ajustes.js';
+import { ajustesPorDefecto, aplicarAjustes, conFranjaDeLaPolitica } from '../rutas/ajustes.js';
 import { enHorario, type OpcionesMotor } from '../rutas/motor.js';
 import type { ServicioEntregas } from './servicio.js';
 
@@ -85,6 +85,10 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
     try {
       const ajustes = await repos.rutas.ajustes.get(ajustesPorDefecto(deps.opciones));
       opciones = aplicarAjustes(deps.opciones, ajustes);
+      // La franja de envio es la general (ajustes generales), igual que la que
+      // usa el freno de ritmo: antes habia dos y la mas estricta ganaba sin
+      // que la pantalla lo dijera. Ver src/rutas/ajustes.ts.
+      opciones = conFranjaDeLaPolitica(opciones, deps.politica?.());
     } catch (error) {
       log('no se pudieron leer los ajustes del reparto para las entregas', { detalle: String(error) });
     }
