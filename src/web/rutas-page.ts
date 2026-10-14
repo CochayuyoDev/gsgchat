@@ -624,7 +624,7 @@ function queLePasa(s) {
 /* Cuántas veces se le escribió y cuándo fue la última. */
 function intentosDe(s, maxIntentos) {
   if (!s.intentos) return '';
-  return 'intento ' + s.intentos + (maxIntentos ? ' de ' + maxIntentos : '') +
+  return (s.estado === 'resuelto' ? s.intentos + ' mensajes enviados antes de recibir la ubicación' : 'intento ' + s.intentos + (maxIntentos ? ' de ' + maxIntentos : '')) +
     (s.ultimoEnvioAt ? ' · ' + cuando(s.ultimoEnvioAt) : '');
 }
 

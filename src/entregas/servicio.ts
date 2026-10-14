@@ -1,3 +1,4 @@
+import { solicitudDePedidos, PLANTILLA_PEDIDOS_GSG } from './solicitud-varios.js';
 /**
  * Las entregas del dia: que pasa con cada pedido desde que GSG lo manda
  * hasta que el cliente sabe a que hora le llega.
@@ -529,6 +530,7 @@ export interface ServicioEntregas {
    * ese telefono no tiene entrega viva: el reparto usa su texto de siempre.
    */
   textoSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<string | null>;
+  plantillaSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<{ name: string; variables: string[] } | null>;
   /** Los textos del agente operativo (por qué la ubicación, el cierre), con los datos de la entrega viva de ese teléfono si hay. */
   textoAgente(clave: 'porQueUbicacion' | 'cierreAgente', phone: string, nombre?: string | null): Promise<string>;
   /**
@@ -564,7 +566,7 @@ export interface ServicioEntregas {
    * «Enviar a GSG» de un pedido: manda YA su ubicacion ({tracking, lat, lng})
    * y dice como fue. Para lo que no salio solo por la razon que sea.
    */
-  enviarUbicacionAGsg(id: number, quien: string): Promise<{ ok: boolean; estado: 'enviado' | 'pendiente' | 'fallido' | 'sin_ubicacion' | 'no_existe'; error: string | null; cuerpo: Record<string, unknown> | null }>;
+  enviarUbicacionAGsg(id: number, quien: string): Promise<{ ok: boolean; estado: 'enviado' | 'pendiente' | 'fallido' | 'superado' | 'sin_ubicacion' | 'no_existe'; error: string | null; cuerpo: Record<string, unknown> | null }>;
   /** Lo que espera confirmar el envío ahora mismo. */
   porConfirmarEnvio(): Promise<PorConfirmarEnvio>;
   /** El cliente o un motorizado escribio algo (o pulso un boton: `boton` trae su id). */
@@ -4234,7 +4236,7 @@ ${lista}
    */
   async function asentarDisparo(e: Entrega, fallo?: string): Promise<Entrega> {
     const fresca = (await repo.entrega(e.id)) ?? e;
-    const desde: EstadoMensaje[] = ['pendiente', 'reintentando'];
+    const desde: EstadoMensaje[] = ['pendiente', 'reintentando', 'encolado'];
     if (!desde.includes(fresca.mensajeEstado ?? 'no_aplica')) return fresca;
     const via = viaDelMensaje(fresca);
     if (!via) return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'no_aplica', mensajeVia: null, mensajeProximoAt: null, ...SIN_ERROR })) ?? fresca;
@@ -4246,7 +4248,17 @@ ${lista}
     // Ya en manos de su motor; si el reparto ya le habia escrito (otro pedido suyo), cuenta como enviado.
     const s = via === 'ubicacion' && fresca.loteId ? await solicitudDe(fresca) : null;
     if (s && (s.estado === 'enviado' || s.estado === 'respondio' || s.estado === 'resuelto')) {
-      return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'enviado', mensajeVia: via, mensajeEnviadoAt: s.ultimoEnvioAt ?? ahora(), mensajeProximoAt: null, ...SIN_ERROR })) ?? fresca;
+      const marcada = await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'enviando', mensajeVia: via, mensajeUltimoIntentoAt: ahora() });
+      if (!marcada) return (await repo.entrega(fresca.id)) ?? fresca;
+      const mensaje = solicitudDePedidos([contexto(marcada)]);
+      const contacto = await repos.contacts.getByPhone(marcada.phone);
+      const ventana = Boolean(contacto?.lastInboundAt && ahora().getTime() - contacto.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
+      const base = { phone: marcada.phone, category: 'UTILITY' as const };
+      const salida = deps.usarPlantilla?.() && !ventana
+        ? await sender.send({ ...base, kind: 'template', templateName: PLANTILLA_PEDIDOS_GSG, templateLanguage: 'es', variables: mensaje.variables })
+        : await sender.send({ ...base, kind: 'freeform', text: mensaje.texto });
+      await aplicarDesenlace(marcada, desenlaceDeEnvio(salida));
+      return (await repo.entrega(fresca.id)) ?? fresca;
     }
     return (await repo.cambiarMensaje(fresca.id, desde, { mensajeEstado: 'encolado', mensajeVia: via, mensajeProximoAt: null })) ?? fresca;
   }
@@ -4254,6 +4266,20 @@ ${lista}
   /** Una persona pide otro intento (Números del día, Reintentar): lo fallido o incierto vuelve a pendiente. */
   async function rearmarMensaje(e: Entrega): Promise<Entrega | null> {
     return repo.cambiarMensaje(e.id, MENSAJE_REINTENTABLE, { mensajeEstado: 'pendiente', mensajeReintentosAuto: 0, mensajeProximoAt: null, mensajeVia: viaDelMensaje(e) ?? e.mensajeVia ?? null });
+  }
+
+  const pedidosEnEnvio = new Map<string, number[]>();
+
+  /** Solo pedidos activos del mismo lote, teléfono y día: sin mezclar rutas ni retenidos. */
+  async function pedidosDelMensaje(s: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<Entrega[]> {
+    if (!s.phone) return [];
+    const vivas = await repo.vivasPorTelefono(s.phone);
+    const seleccionados = pedidosEnEnvio.get(`${s.loteId}:${s.phone}`);
+    if (seleccionados) return vivas.filter((e) => seleccionados.includes(e.id)).sort((a, b) => a.id - b.id);
+    const principal = vivas.find((e) => e.loteId === s.loteId && (!s.referencia || e.referencia === s.referencia));
+    if (!principal) return [];
+    return vivas.filter((e) => e.loteId === principal.loteId && e.dia === principal.dia && !e.envioRetenidoAt && !e.mensajesPausadosAt && e.ubicacionEstado === 'pendiente')
+      .sort((a, b) => a.id - b.id);
   }
 
   /** Lo que el reparto hace con el primer mensaje de una solicitud que es de un pedido (ver PrimerMensajeReparto). */
@@ -4264,10 +4290,12 @@ ${lista}
       if (!ligadas.length) return true;
       if (ligadas.some((e) => e.mensajeEstado === 'enviando')) return false;
       let marcadas = 0;
-      for (const e of ligadas) {
+      const ids: number[] = [];
+      for (const e of ligadas.filter((e) => !e.envioRetenidoAt && !e.mensajesPausadosAt && e.ubicacionEstado === 'pendiente')) {
         const act = await repo.cambiarMensaje(e.id, ['pendiente', 'encolado', 'reintentando'], { mensajeEstado: 'enviando', mensajeVia: 'ubicacion', mensajeUltimoIntentoAt: ahora() });
-        if (act) marcadas++;
+        if (act) { marcadas++; ids.push(act.id); }
       }
+      if (ids.length) pedidosEnEnvio.set(`${s.loteId}:${s.phone}`, ids);
       // Ninguna se pudo marcar y alguna espera a una persona (fallida o incierta): no sale.
       return marcadas > 0 || !ligadas.some((e) => MENSAJE_REINTENTABLE.includes(e.mensajeEstado ?? 'no_aplica'));
     },
@@ -4275,11 +4303,13 @@ ${lista}
       if (!s.phone) return;
       const d = desenlaceDeEnvio(salida);
       let decision: { esperaMs?: number; detener?: string } = {};
+      const ids = pedidosEnEnvio.get(`${s.loteId}:${s.phone}`) ?? [];
       for (const e of await repo.vivasDeLoteYTelefono(s.loteId, s.phone)) {
-        if (e.mensajeEstado !== 'enviando') continue;
+        if (!ids.includes(e.id) || e.mensajeEstado !== 'enviando') continue;
         const r = await aplicarDesenlace(e, d);
         decision = { esperaMs: Math.max(decision.esperaMs ?? 0, r.esperaMs ?? 0) || undefined, detener: decision.detener ?? r.detener };
       }
+      pedidosEnEnvio.delete(`${s.loteId}:${s.phone}`);
       return decision;
     },
     async sinWhatsApp(s, detalle) {
@@ -4331,7 +4361,11 @@ ${lista}
       const s = via === 'ubicacion' && e.loteId ? await solicitudDe(e) : null;
       const yaEscrito = (via === 'confirmacion' && (e.confirmacionEstado === 'pedida' || e.confirmacionIntentos > 0)) || Boolean(e.ubicacionPropuestaAt) || Boolean(s && (s.estado === 'enviado' || s.estado === 'respondio' || s.estado === 'resuelto'));
       if (yaEscrito) {
-        if (await repo.cambiarMensaje(e.id, ['encolado'], { mensajeEstado: 'enviado', mensajeEnviadoAt: s?.ultimoEnvioAt ?? e.confirmacionPedidaAt ?? e.ubicacionPropuestaAt ?? en, mensajeProximoAt: null, ...SIN_ERROR })) puestosAlDia++;
+        if (via === 'ubicacion' && s) {
+          // Este tracking no estuvo en el envío anterior (los incluidos ya están «enviado»).
+          const avisada = await asentarDisparo(e);
+          if (avisada.mensajeEstado === 'enviado') puestosAlDia++;
+        } else if (await repo.cambiarMensaje(e.id, ['encolado'], { mensajeEstado: 'enviado', mensajeEnviadoAt: s?.ultimoEnvioAt ?? e.confirmacionPedidaAt ?? e.ubicacionPropuestaAt ?? en, mensajeProximoAt: null, ...SIN_ERROR })) puestosAlDia++;
       } else if (!via) {
         if (await repo.cambiarMensaje(e.id, ['encolado'], { mensajeEstado: 'no_aplica', mensajeProximoAt: null, ...SIN_ERROR })) puestosAlDia++;
       }
@@ -4559,6 +4593,11 @@ ${lista}
         // cliente recurrente: se le propone su ultima direccion en vez de meterlo al lote.
         const recurrente = (await aplicarUbicacionConocida(entrega)) ?? (await apuntarRecurrente(entrega, 'lista pegada'));
         if (!recurrente) {
+          const abierta = await repos.rutas.abiertaPorTelefono(entrega.phone);
+          if (abierta && ['pendiente', 'enviado', 'respondio'].includes(abierta.estado) && new Intl.DateTimeFormat('en-CA', { timeZone: tz(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(abierta.createdAt) === entrega.dia) {
+            await repo.actualizar(entrega.id, { loteId: abierta.loteId });
+            continue;
+          }
           conUbicacion.push(entrega);
           paraLote.push({ telefono: entrega.phone, nombre: entrega.nombre ?? undefined, referencia: entrega.referencia, direccion: entrega.direccion ?? undefined, distrito: entrega.distrito ?? undefined, notas: entrega.notas ?? undefined });
         }
@@ -4886,15 +4925,15 @@ ${lista}
     accionDesdeEnlace: async () => ({ ok: false, motivo: 'La gestión de repartidores fue retirada.' }),
     textoUbicacionRegistrada,
     async textoSolicitudUbicacion(solicitud) {
-      if (!solicitud.phone) return null;
-      const vivas = await repo.vivasPorTelefono(solicitud.phone).catch(() => [] as Entrega[]);
-      const e =
-        vivas.find((x) => solicitud.loteId && x.loteId === solicitud.loteId && (!solicitud.referencia || x.referencia === solicitud.referencia)) ??
-        vivas.find((x) => solicitud.referencia && x.referencia === solicitud.referencia) ??
-        vivas.find((x) => solicitud.loteId && x.loteId === solicitud.loteId) ??
-        null;
-      if (!e) return null;
-      return textoDe('solicitudUbicacion', ajustes, contexto(e));
+      const pedidos = await pedidosDelMensaje(solicitud);
+      if (!pedidos.length) return null;
+      if (pedidos.length === 1) return textoDe('solicitudUbicacion', ajustes, contexto(pedidos[0]!));
+      return solicitudDePedidos(pedidos.map((e) => contexto(e))).texto;
+    },
+    async plantillaSolicitudUbicacion(solicitud) {
+      const pedidos = await pedidosDelMensaje(solicitud);
+      if (pedidos.length < 2) return null;
+      return { name: PLANTILLA_PEDIDOS_GSG, variables: solicitudDePedidos(pedidos.map((e) => contexto(e))).variables };
     },
     async textoAgente(clave, phone, nombre) {
       const vivas = await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[]);

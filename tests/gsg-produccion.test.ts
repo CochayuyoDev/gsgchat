@@ -3,7 +3,7 @@
  * corre en produccion:
  *
  *   pedir la ubicacion por WhatsApp -> el cliente la manda -> sale YA al
- *   endpoint del CRM de GSG (POST /sendLocation, con su token).
+ *   endpoint del CRM de GSG (POST /send-location, con su token).
  *
  * Todo es lo de produccion (la tienda entera de `armarTienda`: base MySQL de
  * prueba real, motores y despachador reales, la conexion con GSG guardada desde la
@@ -76,7 +76,7 @@ function crmDeGsg() {
       res.end(JSON.stringify({ id: `GSG-${++estado.n}` }));
     });
   });
-  return { server, llegadas, estado, ubicaciones: () => llegadas.filter((l) => l.ruta === '/sendLocation') };
+  return { server, llegadas, estado, ubicaciones: () => llegadas.filter((l) => l.ruta === '/send-location') };
 }
 
 const esperar = async (cond: () => boolean | Promise<boolean>, ms = 60_000, que = 'la condicion'): Promise<void> => {

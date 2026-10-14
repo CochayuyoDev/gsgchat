@@ -340,7 +340,7 @@ export async function atenderRespuestaDeRuta(
       solicitud.id,
       'ubicacion',
       `ubicación recibida (${entrada.ubicacion.fuente ?? 'whatsapp'})${
-        estabaDerivado ? ' después de pasar al repartidor: ya no hace falta llamar' : ''
+        estabaDerivado ? ' después de quedar pendiente de atención: ya no hace falta llamar' : ''
       }`,
       { lat: entrada.ubicacion.lat, lng: entrada.ubicacion.lng },
     );

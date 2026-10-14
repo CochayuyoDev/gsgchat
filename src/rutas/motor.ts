@@ -149,6 +149,7 @@ export interface MotorDeps {
    * Los recordatorios siguen con sus textos cortos de siempre.
    */
   textoSolicitud?: (solicitud: Solicitud) => Promise<string | null>;
+  plantillaSolicitud?: (solicitud: Solicitud) => Promise<{ name: string; variables: string[] } | null>;
   /**
    * El seguimiento del primer mensaje de los pedidos (src/entregas/primer-mensaje.ts):
    * el reparto avisa antes y despues de mandar el primer mensaje de una
@@ -443,15 +444,6 @@ export function crearMotor(deps: MotorDeps): Motor {
     const contacto = await repos.contacts.getByPhone(phone).catch(() => null);
     const ventanaAbierta = Boolean(contacto?.lastInboundAt && ahora().getTime() - contacto.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
     const conPlantilla = deps.usarPlantilla() && !ventanaAbierta;
-    const elegida = conPlantilla ? await plantillaPara(paso, ahora()) : null;
-    // La primera solicitud de una entrega de GSG: la plantilla con los datos del envio.
-    const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud).catch(() => null) : null;
-    // La cadencia por cliente la fija el reparto (espera e intentos), no la
-    // politica general: ver `SendJob.limitesContacto`.
-    const limitesContacto = {
-      separacionMs: Math.min(opciones.esperaRespuestaMinutos * 60_000, 60_000),
-      maxPorDia: opciones.maxIntentos + 1,
-    };
     // El primer mensaje de un pedido: queda «enviando» en la base antes de
     // salir. Si otro intento ya esta en marcha (otro proceso, un reintento
     // manual) o el pedido espera a una persona, no se manda.
@@ -460,6 +452,16 @@ export function crearMotor(deps: MotorDeps): Motor {
       await repos.rutas.actualizarSolicitud(solicitud.id, { proximoIntentoAt: new Date(ahora().getTime() + 2 * 60_000) });
       return { accion: 'nada', solicitudId: solicitud.id, motivo: 'el primer mensaje de ese pedido ya está en curso o espera a una persona' };
     }
+    const agrupada = conPlantilla && paso === 'solicitud' ? await deps.plantillaSolicitud?.(solicitud) : null;
+    const elegida = conPlantilla ? (agrupada ? { name: agrupada.name, language: 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
+    // La primera solicitud de una entrega de GSG: la plantilla con los datos del envio.
+    const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud) : null;
+    // La cadencia por cliente la fija el reparto (espera e intentos), no la
+    // politica general: ver `SendJob.limitesContacto`.
+    const limitesContacto = {
+      separacionMs: Math.min(opciones.esperaRespuestaMinutos * 60_000, 60_000),
+      maxPorDia: opciones.maxIntentos + 1,
+    };
     const salida = conPlantilla
       ? await sender.send({
           phone,
@@ -467,7 +469,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           category: 'UTILITY',
           templateName: elegida!.name,
           templateLanguage: elegida!.language,
-          variables: variablesPara(elegida!.name, paso, ctx, elegida!.variables),
+          variables: agrupada?.variables ?? variablesPara(elegida!.name, paso, ctx, elegida!.variables),
           limitesContacto,
         })
       : await sender.send({

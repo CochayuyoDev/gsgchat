@@ -4,6 +4,16 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 describe('protecciones del transporte GSG', () => {
+  it.each([{ ok: false, error: 'tracking desconocido' }, { success: false, message: 'no se guardó la ubicación' }])('no marca como recibido un HTTP 200 que declara un fallo: %j', async cuerpo => {
+    const p = crearPuertoHttp({ url: 'https://gsg.example', token: 'secret', fetchImpl: (async () => new Response(JSON.stringify(cuerpo), { status: 200 })) as typeof fetch });
+    expect(await p.enviar('ubicacion', { tracking: 'P', lat: -12, lng: -77 })).toMatchObject({ ok: false, reintentable: false, error: expect.stringContaining('rechazó el reporte') });
+  });
+
+  it.each([new Response(null, { status: 204 }), new Response('OK', { status: 200 }), new Response(JSON.stringify({ ok: true, id: '1' }), { status: 201 })])('sigue aceptando respuestas correctas sin inventar fallos', async respuesta => {
+    const p = crearPuertoHttp({ url: 'https://gsg.example', token: 'secret', fetchImpl: (async () => respuesta) as typeof fetch });
+    expect(await p.enviar('ubicacion', { tracking: 'P', lat: -12, lng: -77 })).toMatchObject({ ok: true });
+  });
+
   it.each([undefined, '', '   '])('no reintenta un envío incierto con clave idempotente inválida %s', async idempotencyKey => {
     const fetchImpl = vi.fn(async () => new Response('error', { status: 503 })) as unknown as typeof fetch;
     const p = crearPuertoHttp({ url: 'https://gsg.example', token: 'secret', idempotenciaUbicacion: true, fetchImpl });

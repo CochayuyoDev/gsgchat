@@ -560,6 +560,10 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
         let id: string | null = null;
         try {
           const cuerpo = texto ? (JSON.parse(texto) as Record<string, unknown>) : {};
+          if (cuerpo && typeof cuerpo === 'object' && (cuerpo.ok === false || cuerpo.success === false)) {
+            const detalle = typeof cuerpo.error === 'string' ? cuerpo.error : typeof cuerpo.message === 'string' ? cuerpo.message : 'el backend indicó que no aceptó el reporte';
+            return { ok: false, reintentable: false, error: limpio(`GSG respondió HTTP ${respuesta.status}, pero rechazó el reporte: ${detalle}`).slice(0, 500) };
+          }
           id = (cuerpo.id ?? cuerpo.referencia ?? cuerpo.codigo ?? null) as string | null;
         } catch {
           // Una API que contesta 2xx con texto plano tambien vale.
@@ -876,6 +880,17 @@ async function despacharAhora(
   const resumen: DespachoResumen = { intentados: pendientes.length, enviados: 0, fallidos: 0 };
 
   for (const reporte of pendientes) {
+    // Un pin tardío supera la falta de respuesta. No enviar el problema viejo
+    // después de las coordenadas ni fingir que GSG recibió ese problema.
+    const codigo = String(reporte.payload.codigo ?? reporte.payload.error ?? '');
+    if (reporte.tipo === 'incidencia' && reporte.solicitudId && ['sin_respuesta', 'respondio_sin_ubicacion'].includes(codigo)) {
+      const vigente = await repos.rutas.solicitud(reporte.solicitudId);
+      if (vigente?.estado === 'resuelto' && vigente.lat != null && vigente.lng != null) {
+        await repos.rutas.marcarReporte(reporte.id, 'superado');
+        resumen.intentados--;
+        continue;
+      }
+    }
     // Un tipo que GSGchat ya no manda (p. ej. filas viejas de los numeros
     // reportados, que ahora GSG lee de GET /api/v1/reportados): se aparta con
     // el motivo a la vista, sin llamar a GSG ni atascar la cola.
