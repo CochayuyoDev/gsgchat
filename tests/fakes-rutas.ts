@@ -391,7 +391,7 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       const reporte = reportes.find((r) => r.id === id);
       if (!reporte) return;
       reporte.estado = estado;
-      reporte.intentos++;
+      if (estado !== 'superado') reporte.intentos++;
       if (extra?.externoId) reporte.externoId = extra.externoId;
       reporte.ultimoError = extra?.error ?? null;
       if (estado === 'enviado') reporte.enviadoAt = reloj();
@@ -400,7 +400,7 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
     async cifrasReportes() {
       const cifras: CifrasReportes = { pendiente: 0, enviado: 0, fallido: 0, atascado: 0 };
       for (const r of reportes) {
-        cifras[r.estado]++;
+        cifras[r.estado] = (cifras[r.estado] ?? 0) + 1;
         if (r.estado === 'pendiente' && r.intentos > 0) cifras.atascado++;
       }
       return cifras;

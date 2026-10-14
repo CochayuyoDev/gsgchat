@@ -249,13 +249,14 @@ describe('números reportados a GSG', () => {
     expect((g2.avisos as Cuerpo[]).find((a) => a.codigo === 'agrupado_con')).toMatchObject({ con: 'G-1' });
     await e.trabajar();
     expect(pedidasDeUbicacion('987000130')).toBe(1);
-    // Un tercer tracking mas tarde, con la peticion aun abierta: tampoco se le escribe otra vez.
+    // Un tracking posterior necesita su aviso propio: el mensaje anterior no lo incluía.
     const tarde = await llamar('POST', '/api/v1/entregas', pedido('G-3', '987000130'));
     expect(tarde.status).toBe(201);
     const g3 = (tarde.body.whatsapp as Cuerpo[]).find((w) => w.tracking === 'G-3')!;
     expect((g3.avisos as Cuerpo[]).map((a) => a.codigo)).toEqual(expect.arrayContaining(['ya_contactado', 'agrupado_con']));
     await e.trabajar();
-    expect(pedidasDeUbicacion('987000130')).toBe(1);
+    expect(pedidasDeUbicacion('987000130')).toBe(2);
+    expect(e.textosA('987000130').at(-1)).toContain('G-3');
     await e.contesta('987000130', { pin: PIN_LIMA });
     const ubicaciones = (await e.repos.rutas.reportesRecientes(500, 'ubicacion')).map((x) => x.payload.tracking);
     expect(ubicaciones).toEqual(expect.arrayContaining(['G-1', 'G-2', 'G-3']));

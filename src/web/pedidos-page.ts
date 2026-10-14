@@ -62,6 +62,12 @@ function envioGsg(e) {
   return '<p id="gsg-'+e.id+'">'+linea+'</p>';
 }
 /* El cliente cambió su ubicación: «Ubicación registrada» con la marca y la hora. */
+function historialUbicacion(e) {
+  if (!e.solicitud) return '';
+  var recibida = e.ubicacionEstado === 'recibida';
+  return '<p class="muted">' + (recibida ? 'Mensajes anteriores a la ubicación: ' : 'Intentos de ubicación: ') + esc(e.solicitud.intentos) +
+    (!recibida && e.incidencia === 'sin_respuesta' ? ' · Pendiente sin respuesta' : '') + '</p>';
+}
 function marcaCambio(e) {
   if (!e.ubicacionCambiadaAt) return '';
   var texto = e.cambioUbicacion || 'cambió su ubicación';
@@ -80,7 +86,7 @@ function pintar() {
   var lista=visibles(); $('total').textContent=lista.length+' pedidos';
   $('lista-pedidos').innerHTML=lista.length?lista.map(function(e){
     var mapa=e.lat!=null&&e.lng!=null?'https://www.google.com/maps?q='+encodeURIComponent(e.lat+','+e.lng):null;
-    return '<article class="pedido tarjeta"><b>'+esc(e.nombre||e.phone)+'</b><span class="chip">'+esc(etiquetas[etapa(e)])+'</span>'+marcaCambio(e)+'<p>'+esc(e.referencia)+' · '+esc(e.phone)+(e.distrito?' · '+esc(e.distrito):'')+'</p>'+(e.direccion?'<p class="muted">'+esc(e.direccion)+'</p>':'')+marcaReprogramado(e)+envioGsg(e)+(e.solicitud?'<p class="muted">Intentos de ubicación: '+esc(e.solicitud.intentos)+' / 3'+(e.incidencia==='sin_respuesta'?' · Pendiente sin respuesta':'')+'</p>':'')+'<div class="acciones"><a class="btn" href="/chat?phone='+encodeURIComponent(e.phone)+'">Chat</a>'+(mapa?'<a class="btn" href="'+esc(mapa)+'" target="_blank" rel="noopener">Ver ubicación</a>':'')+'<button class="btn" data-detalle="'+e.id+'">Detalle</button>'+(e.lat!=null&&e.lng!=null?'<button class="btn" data-gsg="'+e.id+'">Enviar a GSG</button>':'')+(etapa(e)==='por_confirmar_envio'?'<button class="btn" data-enviar="'+e.id+'">Confirmar y enviar</button>':'')+(etapa(e)==='falta_confirmar'?'<button class="btn" data-confirmar="'+e.id+'">Confirmar</button>':'')+((e.acciones||[]).indexOf('volver_a_pedir_ubicacion')>=0?'<button class="btn" data-repedir="'+e.id+'">Volver a solicitar ubicación</button>':'')+(e.estado!=='cancelada'&&e.estado!=='entregada'?'<button class="btn" data-cancelar="'+e.id+'">Cancelar</button>':'')+'</div><div id="detalle-'+e.id+'" class="detalle"></div></article>';
+    return '<article class="pedido tarjeta"><b>'+esc(e.nombre||e.phone)+'</b><span class="chip">'+esc(etiquetas[etapa(e)])+'</span>'+marcaCambio(e)+'<p>'+esc(e.referencia)+' · '+esc(e.phone)+(e.distrito?' · '+esc(e.distrito):'')+'</p>'+(e.direccion?'<p class="muted">'+esc(e.direccion)+'</p>':'')+marcaReprogramado(e)+envioGsg(e)+historialUbicacion(e)+'<div class="acciones"><a class="btn" href="/chat?phone='+encodeURIComponent(e.phone)+'">Chat</a>'+(mapa?'<a class="btn" href="'+esc(mapa)+'" target="_blank" rel="noopener">Ver ubicación</a>':'')+'<button class="btn" data-detalle="'+e.id+'">Detalle</button>'+(e.lat!=null&&e.lng!=null?'<button class="btn" data-gsg="'+e.id+'">Enviar a GSG</button>':'')+(etapa(e)==='por_confirmar_envio'?'<button class="btn" data-enviar="'+e.id+'">Confirmar y enviar</button>':'')+(etapa(e)==='falta_confirmar'?'<button class="btn" data-confirmar="'+e.id+'">Confirmar</button>':'')+((e.acciones||[]).indexOf('volver_a_pedir_ubicacion')>=0?'<button class="btn" data-repedir="'+e.id+'">Volver a solicitar ubicación</button>':'')+(e.estado!=='cancelada'&&e.estado!=='entregada'?'<button class="btn" data-cancelar="'+e.id+'">Cancelar</button>':'')+'</div><div id="detalle-'+e.id+'" class="detalle"></div></article>';
   }).join(''):'<div class="tarjeta muted">No hay pedidos en este filtro.</div>';
   document.querySelectorAll('[data-gsg]').forEach(function(b){b.onclick=async function(){b.disabled=true;var caja=$('gsg-'+b.dataset.gsg);try{var r=await api('/admin/entregas/'+b.dataset.gsg+'/enviar-gsg',{method:'POST',body:{}});var txt=r.ok?'Enviado a GSG: '+JSON.stringify(r.cuerpo):'No se pudo enviar a GSG. Error: '+(r.error||'desconocido');if(caja)caja.textContent=txt;toast(txt);}catch(e){toast('No se pudo enviar a GSG. Error: '+e.message);}finally{b.disabled=false;}};});
   document.querySelectorAll('[data-enviar]').forEach(function(b){b.onclick=function(){confirmarEnvio(b,{ids:[Number(b.dataset.enviar)]});};});

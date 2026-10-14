@@ -140,6 +140,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
     // El primer mensaje de una entrega de GSG: la plantilla con producto, empresa, codigo, monto...
     textoSolicitud: entregas ? (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) : undefined,
+    plantillaSolicitud: entregas ? (s) => entregas.plantillaSolicitudUbicacion(s) : undefined,
     primerMensaje: entregas?.primerMensajeReparto,
     // Antes de escribirle, GSG dice si ese envio sigue (si hay ruta de consulta configurada).
     antesDeEscribir: entregas ? (s) => entregas.antesDeEscribirReparto(s) : undefined,

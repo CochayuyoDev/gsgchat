@@ -21,6 +21,13 @@ export interface CatalogTemplate {
 
 export const CATALOG: CatalogTemplate[] = [
   {
+    name: 'solicitud_ubicacion_pedidos_gsg',
+    language: 'es',
+    category: 'UTILITY',
+    body: 'Hola, buenas tardes, {{1}}. Somos GSG Courier. Tenemos {{2}} pedido(s) para usted:\n\n{{3}}\n\nPor favor, ¿podría compartir su ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
+    variables: ['nombre del cliente', 'cantidad de pedidos', 'datos de cada pedido: producto, empresa, tracking, número de pedido, método de pago, monto y dirección'],
+  },
+  {
     name: 'confirmacion_pedido',
     language: 'es',
     category: 'UTILITY',

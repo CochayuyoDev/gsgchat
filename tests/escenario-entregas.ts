@@ -143,6 +143,7 @@ function urlDe(entrada: Parameters<typeof fetch>[0]): string {
 export const conPais = (telefono: string): string => (telefono.startsWith('51') ? telefono : `51${telefono}`);
 
 export async function crearEscenarioEntregas(opciones: {
+  usarPlantilla?: boolean;
   supervisor?: string;
   ia?: boolean;
   horario?: [number, number];
@@ -284,6 +285,7 @@ export async function crearEscenarioEntregas(opciones: {
     gsg: conexionGsg.puerto(),
     conexionGsg,
     cargarLote: (body) => cargarLote({ repos, plan: PLANES.peru!, timezone: config.timezone, ahora: reloj }, body),
+    usarPlantilla: () => opciones.usarPlantilla ?? false,
     nombreNegocio: () => config.businessName,
     supervisor: () => opciones.supervisor ?? '',
     ia: () => (ia.disponible ? ia : null),
@@ -340,7 +342,7 @@ export async function crearEscenarioEntregas(opciones: {
 
   const opcionesMotor = { ...OPCIONES_POR_DEFECTO, pausaMinSegundos: PAUSA_SEGUNDOS, pausaMaxSegundos: PAUSA_SEGUNDOS, horaInicio, horaFin, negocio: config.businessName };
   // Como en produccion (src/servicios.ts): la primera solicitud de una entrega sale con la plantilla de GSG.
-  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }), primerMensaje: entregas.primerMensajeReparto, antesDeEscribir: (s) => entregas.antesDeEscribirReparto(s) });
+  const motorReparto = crearMotor({ repos, sender, wa, gsg: conexionGsg.puerto(), opciones: opcionesMotor, usarPlantilla: () => opciones.usarPlantilla ?? false, ahora: reloj, azar: () => 0, textoSolicitud: (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }), plantillaSolicitud: (s) => entregas.plantillaSolicitudUbicacion(s), primerMensaje: entregas.primerMensajeReparto, antesDeEscribir: (s) => entregas.antesDeEscribirReparto(s) });
   const motorEntregas = crearMotorEntregas({ repos, entregas, opciones: opcionesMotor, ahora: reloj, azar: () => 0 });
 
   const auth = { 'x-api-key': CLAVE_API_PRUEBA };

@@ -56,6 +56,12 @@ function accionesPintadas(estado: string, extra: Record<string, unknown> = {}): 
 }
 
 describe('acciones del detalle en Automatización GSG', () => {
+  it('una ubicación recibida muestra los mensajes anteriores como historial, no como intentos pendientes', () => {
+    const intentos = new Function('cuando', funcionDe(scriptDeLaPagina(), 'function intentosDe(s, maxIntentos)') + '\nreturn intentosDe;')(() => 'hora') as (s: unknown, max: number) => string;
+    expect(intentos({ estado: 'resuelto', intentos: 3 }, 3)).toBe('3 mensajes enviados antes de recibir la ubicación');
+    expect(intentos({ estado: 'enviado', intentos: 2 }, 3)).toBe('intento 2 de 3');
+  });
+
   it('solo ofrece intervalo y máximo de mensajes, sin campos ni JS del modo ilimitado', () => {
     expect(html).toContain('id="aj-espera"');
     expect(html).toContain('id="aj-intentos"');

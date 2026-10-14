@@ -166,9 +166,9 @@ export interface EventoSolicitud {
  * GSGchat y GSG los lee de GET /api/v1/reportados (ver src/entregas/reportados.ts).
  */
 export type TipoReporte = 'ubicacion' | 'incidencia' | 'resumen' | 'confirmacion' | 'entrega';
-export type EstadoReporte = 'pendiente' | 'enviado' | 'fallido';
+export type EstadoReporte = 'pendiente' | 'enviado' | 'fallido' | 'superado';
 
-export type CifrasReportes = Record<EstadoReporte, number> & { atascado: number };
+export type CifrasReportes = Record<Exclude<EstadoReporte, 'superado'>, number> & { atascado: number; superado?: number };
 
 export interface Reporte {
   id: number;
@@ -866,7 +866,7 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       await pool.query(
         `update rutas_reportes
             set estado = $2,
-                intentos = intentos + 1,
+                intentos = intentos + case when $2 = 'superado' then 0 else 1 end,
                 externo_id = coalesce($3, externo_id),
                 ultimo_error = $4,
                 enviado_at = case when $2 = 'enviado' then now(3) else enviado_at end

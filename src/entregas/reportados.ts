@@ -363,6 +363,7 @@ export async function reportarNumero(deps: DepsReportar, n: NuevoReportado): Pro
  */
 export type EstadoReporteGsg =
   | 'sin_incidencia'
+  | 'superado'
   | 'pendiente_de_reportar'
   | 'enviando'
   | 'reportado'
@@ -382,6 +383,7 @@ export interface ReporteAGsg {
 
 const ETIQUETAS_REPORTE_GSG: Record<EstadoReporteGsg, string> = {
   sin_incidencia: 'Sin incidencia',
+  superado: 'Incidencia superada: ubicación recibida',
   pendiente_de_reportar: 'Error pendiente de reportar',
   enviando: 'Enviando a GSG',
   reportado: 'Error reportado a GSG',
@@ -400,6 +402,7 @@ export function estadoDelReporteAGsg(
     return { estado: 'pendiente_de_reportar', etiqueta: ETIQUETAS_REPORTE_GSG.pendiente_de_reportar, intentos: 0, error: null, enviadoEn: null, reporteId: null };
   }
   const base = { intentos: fila.intentos, error: fila.ultimoError ?? null, enviadoEn: fila.enviadoAt ? fila.enviadoAt.toISOString() : null, reporteId: fila.id };
+  if (fila.estado === 'superado') return { ...base, error: null, estado: 'superado', etiqueta: ETIQUETAS_REPORTE_GSG.superado };
   if (fila.estado === 'enviado') return { ...base, estado: 'reportado', etiqueta: ETIQUETAS_REPORTE_GSG.reportado };
   if (fila.estado === 'pendiente') {
     // Pendiente con intentos ya hechos: salio y no se sabe como acabo.
