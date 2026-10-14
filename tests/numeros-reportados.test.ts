@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, PIN_LIMA, type EscenarioEntregas } from './escenario-entregas.js';
 import { CLAVE_API_PRUEBA, crearClaveDePrueba } from './fakes.js';
 import { WhatsAppApiError } from '../src/whatsapp/client.js';
-import { crearReportadosEnMemoria, reportarNumero, type ReportadosRepo } from '../src/entregas/reportados.js';
+import { crearReportadosEnMemoria, estadoDelReporteAGsg, reportarNumero, type ReportadosRepo } from '../src/entregas/reportados.js';
 
 function hoyALas9(): Date {
   const d = new Date();
@@ -305,10 +305,12 @@ describe('números reportados a GSG', () => {
     expect(pedidasDeUbicacion('987000120')).toBe(antes + 1);
   });
 
-  it('a GSG solo le salen POST (ninguna consulta) y nada por los números reportados: GSG los lee de su bandeja', () => {
+  it('a GSG solo le salen POST (ninguna consulta), a las dos rutas que tiene: la ubicación y el problema', () => {
     expect(e.llamadasAGsg.length).toBeGreaterThan(0);
     expect(e.llamadasAGsg.every((l) => l.metodo === 'POST')).toBe(true);
-    expect(e.llamadasAGsg.filter((l) => /report/i.test(l.ruta))).toEqual([]);
+    // Desde el 12/10 el problema de un número SÍ se le manda (POST /reported):
+    // GSG ya no lo lee de su bandeja. Ninguna otra ruta, y ninguna consulta.
+    expect([...new Set(e.llamadasAGsg.map((l) => l.ruta))].sort()).toEqual(['/reported', '/send-location']);
   });
 });
 
@@ -326,6 +328,46 @@ describe('reportar un número (sin servidor)', () => {
     expect(await repos.reportados.listar({ estado: 'pendiente' })).toHaveLength(1);
     expect(intervalos).not.toHaveBeenCalled();
     intervalos.mockRestore();
+  });
+});
+
+describe('el estado del reporte a GSG (lo que ve el operador)', () => {
+  const fila = (estado: string, extra: Partial<{ intentos: number; ultimoError: string | null; enviadoAt: Date | null }> = {}) => ({
+    id: 7,
+    estado,
+    intentos: extra.intentos ?? 0,
+    ultimoError: extra.ultimoError ?? null,
+    enviadoAt: extra.enviadoAt ?? null,
+  });
+
+  it('solo dice «reportado» cuando GSG lo confirmo, no al ponerlo en la cola', () => {
+    const en = new Date('2026-10-13T12:00:00Z');
+    expect(estadoDelReporteAGsg(fila('enviado', { intentos: 1, enviadoAt: en }))).toMatchObject({
+      estado: 'reportado',
+      etiqueta: 'Error reportado a GSG',
+      enviadoEn: en.toISOString(),
+    });
+    // En la cola y sin intentar: pendiente de reportar, NO reportado.
+    expect(estadoDelReporteAGsg(fila('pendiente'))).toMatchObject({ estado: 'pendiente_de_reportar', etiqueta: 'Error pendiente de reportar' });
+    // Ya se intento y sigue en cola: esta saliendo.
+    expect(estadoDelReporteAGsg(fila('pendiente', { intentos: 2 }))).toMatchObject({ estado: 'enviando', etiqueta: 'Enviando a GSG', intentos: 2 });
+  });
+
+  it('distingue un rechazo conocido de una recepcion incierta', () => {
+    expect(estadoDelReporteAGsg(fila('fallido', { intentos: 1, ultimoError: 'Error 401: GSG rechazó la clave' }))).toMatchObject({
+      estado: 'fallo',
+      etiqueta: 'Falló el reporte a GSG',
+      error: 'Error 401: GSG rechazó la clave',
+    });
+    // Un timeout despues de mandarlo no es un rechazo: GSG pudo recibirlo.
+    expect(estadoDelReporteAGsg(fila('fallido', { intentos: 1, ultimoError: 'GSG no respondió a tiempo (20 s). Resultado incierto' }))).toMatchObject({
+      estado: 'sin_confirmar',
+      etiqueta: 'Recepción sin confirmar',
+    });
+  });
+
+  it('sin fila en la cola, el error esta pendiente de reportar y se puede mandar a mano', () => {
+    expect(estadoDelReporteAGsg(null)).toMatchObject({ estado: 'pendiente_de_reportar', reporteId: null, intentos: 0 });
   });
 });
 

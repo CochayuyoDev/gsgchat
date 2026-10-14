@@ -22,6 +22,10 @@ export const NUMEROS_REPORTADOS_CSS = `
   .numeros-reportados .estado-rep { font-weight: 600; }
   .numeros-reportados .estado-rep.pendiente { color: var(--rojo); }
   .numeros-reportados .estado-rep.corregido { color: var(--verde, inherit); }
+  /* El reporte a GSG es otra cosa que el estado del problema: se ve aparte. */
+  .numeros-reportados .rep-gsg { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--borde); }
+  .numeros-reportados .rep-gsg.reportado { color: var(--verde, inherit); }
+  .numeros-reportados .rep-gsg.fallo, .numeros-reportados .rep-gsg.sin_confirmar { color: var(--rojo, inherit); }
 `;
 
 export function numerosReportadosHtml(): string {
@@ -42,6 +46,25 @@ function fechaReportado(iso) {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return iso; }
 }
+/**
+ * El estado del reporte a GSG, aparte del estado del problema.
+ *
+ * «Corregido» lo decide GSG cuando manda el dato bueno; esto es otra cosa: si
+ * GSG se entero del error. Solo dice «reportado» cuando GSG lo confirmo, no
+ * cuando se puso en la cola.
+ */
+function repGsg(x) {
+  if (!x.gsg) return '';
+  return ' · <span class="rep-gsg ' + esc(x.gsg.estado) + '" title="' +
+    esc(x.gsg.error || (x.gsg.enviadoEn ? 'GSG lo confirmó el ' + fechaReportado(x.gsg.enviadoEn) : 'Todavía no hay confirmación de GSG')) +
+    '">' + esc(x.gsg.etiqueta) + (x.gsg.intentos > 1 ? ' (' + x.gsg.intentos + ' intentos)' : '') + '</span>';
+}
+/* Mandarlo a mano: solo cuando hace falta (nada que reportar si GSG ya lo confirmó). */
+function botonReportar(x) {
+  if (!x.gsg || x.gsg.estado === 'reportado' || x.gsg.estado === 'sin_incidencia') return '';
+  var texto = x.gsg.estado === 'fallo' || x.gsg.estado === 'sin_confirmar' ? 'Reintentar reporte' : 'Reportar error a GSG';
+  return '<button class="btn sm btn-reportar-gsg" type="button" data-clave="' + esc(x.clave) + '">' + texto + '</button>';
+}
 function pintarNumerosReportados(r) {
   var caja = $('numeros-reportados');
   if (!caja) return;
@@ -61,10 +84,11 @@ function pintarNumerosReportados(r) {
     return '<div class="caso" data-clave="' + esc(x.clave) + '">' +
       '<div class="que"><b>' + esc(quien) + '</b> · ' + esc(x.telefono || 'sin teléfono') + ' · ' + esc(x.titulo || x.error) +
         '<div class="sub"><span class="estado-rep ' + esc(x.estado) + '">' + (x.estado === 'corregido' ? 'Corregido ' + esc(fechaReportado(x.corregidoAt)) : 'Pendiente de GSG') + '</span>' +
-          ' · Reportado: ' + esc(fechaReportado(x.reportadoAt)) + ' · Error: <code>' + esc(x.error) + '</code></div>' +
+          ' · Reportado: ' + esc(fechaReportado(x.reportadoAt)) + ' · Error: <code>' + esc(x.error) + '</code>' + repGsg(x) + '</div>' +
         '<div class="motivo">' + esc(x.mensaje) + '</div>' +
       '</div>' +
       (x.estado === 'pendiente' ? '<button class="btn sm btn-corregir-reportado" type="button" data-clave="' + esc(x.clave) + '">Corregir</button>' : '') +
+      botonReportar(x) +
     '</div>';
   }).join('');
 }
@@ -99,10 +123,45 @@ async function corregirNumeroReportado(clave) {
     await cargarNumerosReportados();
   }
 }
+/**
+ * «Reportar error a GSG» a mano.
+ *
+ * Va por la misma cola que el envio automatico. El boton se deshabilita
+ * mientras procesa: dos clics seguidos no mandan dos reportes (la clave
+ * idempotente es la misma y el despacho hace fila).
+ */
+async function reportarAGsg(boton, clave) {
+  var item = reportadosItems.filter(function (x) { return x.clave === clave; })[0];
+  if (!item) return;
+  var quien = item.tracking || item.clave;
+  var ok = typeof confirmarDialogo === 'function'
+    ? await confirmarDialogo({
+        titulo: '¿Reportar este error a GSG?',
+        texto: quien + ' · ' + (item.titulo || item.error) + '. ' + (item.mensaje || '') + ' Se le manda a GSG por su API, igual que lo haría el sistema solo.',
+        boton: 'Sí, reportar',
+      })
+    : true;
+  if (!ok) return;
+  var antes = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = 'Reportando…';
+  try {
+    var r = await api('/admin/entregas/reportados/' + encodeURIComponent(clave) + '/reportar-a-gsg', { method: 'POST', body: {} });
+    toast(quien + ': ' + (r.detalle || (r.ok ? 'reportado.' : 'no se pudo reportar.')));
+  } catch (e) {
+    toast(quien + ': ' + e.message);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = antes;
+    await cargarNumerosReportados();
+  }
+}
 (function () {
   var lista = document.getElementById('numeros-reportados-lista');
   if (!lista) return;
   lista.addEventListener('click', function (ev) {
+    var rep = ev.target.closest ? ev.target.closest('.btn-reportar-gsg') : null;
+    if (rep && !rep.disabled) { reportarAGsg(rep, rep.getAttribute('data-clave')); return; }
     var b = ev.target.closest ? ev.target.closest('.btn-corregir-reportado') : null;
     if (!b || b.disabled) return;
     corregirNumeroReportado(b.getAttribute('data-clave'));

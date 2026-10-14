@@ -42,6 +42,9 @@ import { horarioGsgSchema } from '../../entregas/seguimiento-gsg.js';
 import { vistaMensaje, type VistaMensaje } from '../../entregas/primer-mensaje.js';
 import { enviarError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError, type DetalleCampo } from '../errores.js';
 import { avisosParaApi, reportadoParaApi, TEXTOS_REPORTADOS, type ErrorReportado, type ReportadosRepo } from '../../entregas/reportados.js';
+import { estadoDelReporteAGsg, type ReporteAGsg } from '../../entregas/reportados.js';
+import { despacharReportes, encolarProblemaGsg, problemaParaGsg, type PuertoGsg } from '../../rutas/gsg.js';
+import type { Reporte, RutasRepo } from '../../db/rutas.js';
 import type { Entrega } from '../../entregas/repo.js';
 
 export interface ApiEntregasGsgDeps {
@@ -52,6 +55,13 @@ export interface ApiEntregasGsgDeps {
   repo?: EntregasRepo;
   /** La bandeja de numeros reportados a GSG (ver src/entregas/reportados.ts). */
   reportados?: ReportadosRepo;
+  /**
+   * La cola de reportes a GSG y la puerta: con ellas la bandeja dice si GSG ya
+   * recibio cada problema, y una persona puede volver a mandarlo. Sin ellas la
+   * bandeja funciona igual, solo sin esa columna ni ese boton.
+   */
+  rutas?: RutasRepo;
+  gsg?: PuertoGsg;
   /** Peticiones por minuto y por clave (por defecto LIMITE_POR_MINUTO). */
   limitePorMinuto?: number;
   ahora?: () => number;
@@ -658,7 +668,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const corregidos = deps.reportados && (telefonoCorregido || trackingDespues !== trackingAntes)
       ? await deps.reportados.marcarCorregidos(trackingAntes, { telefono: telefonoCorregido, tracking: trackingDespues !== trackingAntes ? trackingDespues : null, por: quien, via: 'PATCH /api/v1/entregas' }, new Date()).catch(() => [])
       : [];
-    return { ok: true, cambios, entrega: fila ? entregaParaApi(fila) : null, corregidos: corregidos.map(reportadoParaApi), whatsapp: await whatsappDe([e.id]), detalle: `Pedido ${e.referencia} cambiado: ${cambios.join('; ')}.` };
+    return { ok: true, cambios, entrega: fila ? entregaParaApi(fila) : null, corregidos: corregidos.map((r) => reportadoParaApi(r)), whatsapp: await whatsappDe([e.id]), detalle: `Pedido ${e.referencia} cambiado: ${cambios.join('; ')}.` };
   });
 
   // ------------------------------------------------ numeros reportados
@@ -670,7 +680,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`estado` tiene que ser pendiente o corregido.', [{ campo: 'estado', mensaje: 'pendiente | corregido' }]);
     if (!deps.reportados) return { ok: true, total: 0, items: [] };
     const items = await deps.reportados.listar({ estado: q.data.estado, clave: q.data.tracking || undefined, limit: q.data.limit ?? 500 });
-    return { ok: true, total: items.length, items: items.map(reportadoParaApi) };
+    return { ok: true, total: items.length, items: items.map((r) => reportadoParaApi(r)) };
   });
 
   // GSG corrige un reportado: el telefono, el tracking o los dos.
@@ -744,7 +754,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     return {
       ok: true,
       tracking: trackingFinal,
-      corregidos: corregidos.map(reportadoParaApi),
+      corregidos: corregidos.map((r) => reportadoParaApi(r)),
       entrega: e ? entregaParaApi(e) : null,
       whatsapp: e ? await whatsappDe([e.id]) : [],
       detalle: `Corregido: ${[b.telefono ? `teléfono ${b.telefono}` : '', b.tracking ? `tracking ${b.tracking}` : ''].filter(Boolean).join(' y ')}. ${e?.envioRetenidoAt ? 'Espera «Confirmar y enviar» en Pedidos GSG.' : e?.ubicacionEstado === 'pendiente' ? 'Se le pide la ubicación al número corregido.' : ''}`.trim(),
@@ -752,12 +762,90 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   };
   app.post<{ Params: { tracking: string } }>('/api/v1/reportados/:tracking/correccion', { config: { permiso: 'entregas:gestionar' } }, corregirReportado);
 
+  /**
+   * El reporte a GSG de cada problema, buscado en la cola por tracking + codigo
+   * (la clave con la que se encola, ver `eventoIdProblema`). Una sola lectura
+   * para toda la lista: la bandeja se repinta cada diez segundos.
+   */
+  const reportesAGsg = async (): Promise<Map<string, Reporte>> => {
+    const mapa = new Map<string, Reporte>();
+    if (!deps.rutas) return mapa;
+    // Los mas nuevos primero: el primero de cada clave es el que vale.
+    for (const r of await deps.rutas.reportesRecientes(500, 'incidencia')) {
+      const problema = problemaParaGsg(r.payload);
+      const clave = `${String(problema.tracking ?? '')}|${String(problema.codigo ?? '')}`;
+      if (!mapa.has(clave)) mapa.set(clave, r);
+    }
+    return mapa;
+  };
+  const estadoDe = (mapa: Map<string, Reporte>, item: { tracking: string | null; error: string }): ReporteAGsg =>
+    estadoDelReporteAGsg(mapa.get(`${item.tracking ?? ''}|${item.error}`) ?? null);
+
   // Lo mismo para la pantalla (Pedidos GSG → Números reportados), con la sesión del panel.
   app.get('/admin/entregas/reportados', async (request, reply) => {
     const q = z.object({ estado: z.enum(['pendiente', 'corregido']).optional() }).safeParse(request.query ?? {});
     if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`estado` tiene que ser pendiente o corregido.');
     const items = deps.reportados ? await deps.reportados.listar({ estado: q.data.estado, limit: 500 }) : [];
-    return { ok: true, total: items.length, items: items.map(reportadoParaApi) };
+    const cola = await reportesAGsg();
+    return {
+      ok: true,
+      total: items.length,
+      // `conReporteGsg` dice si la columna «Reporte a GSG» tiene datos: sin la
+      // cola montada la pantalla no la ensena en vez de ensenarla vacia.
+      conReporteGsg: Boolean(deps.rutas),
+      items: items.map((r) => reportadoParaApi(r, deps.rutas ? estadoDe(cola, r) : null)),
+    };
+  });
+
+  /**
+   * «Reportar error a GSG» / «Reintentar reporte» de un problema, a mano.
+   *
+   * Reutiliza la MISMA cola y las mismas validaciones que el envio automatico:
+   * no hay un segundo camino hacia GSG. Un reporte que fallo vuelve a
+   * 'pendiente' y se despacha en el acto; dos clics seguidos no mandan dos
+   * veces (el despacho hace fila y la clave idempotente es la misma).
+   */
+  app.post<{ Params: { clave: string } }>('/admin/entregas/reportados/:clave/reportar-a-gsg', async (request, reply) => {
+    if (!deps.rutas || !deps.gsg) return enviarError(reply, 404, 'RUTA_NO_EXISTE', 'La cola de reportes a GSG no está montada en este arranque.');
+    if (!deps.reportados) return enviarError(reply, 404, 'RUTA_NO_EXISTE', 'La bandeja de números reportados no está montada en este arranque.');
+    const clave = String(request.params.clave ?? '').trim();
+    const item = (await deps.reportados.listar({ limit: 500 })).find((x) => x.clave === clave);
+    if (!item) return enviarError(reply, 404, 'NO_EXISTE', `No hay ningún problema con la clave «${clave}».`);
+    const quien = request.usuario?.nombre ?? request.usuario?.usuario ?? 'alguien del panel';
+    const cola = await reportesAGsg();
+    const fila = cola.get(`${item.tracking ?? ''}|${item.error}`) ?? null;
+    if (fila?.estado === 'enviado') {
+      return { ok: true, yaEstaba: true, gsg: estadoDelReporteAGsg(fila), detalle: 'GSG ya había confirmado la recepción de este error: no se manda otra vez.' };
+    }
+    if (fila && fila.estado !== 'pendiente') await deps.rutas.reencolarFallidos('incidencia');
+    if (!fila) {
+      // Nunca se encolo (p. ej. un problema de antes de que se le reportaran a
+      // GSG): se encola ahora con su formato, una sola vez por tracking+codigo.
+      await encolarProblemaGsg({ encolarReporte: deps.rutas.encolarReporte, reportesRecientes: deps.rutas.reportesRecientes }, {
+        tracking: item.tracking ?? item.clave,
+        referencia: item.referencia,
+        codigo: item.error,
+        telefono: item.telefono,
+        titulo: TEXTOS_REPORTADOS[item.error]?.titulo ?? item.error,
+        mensaje: item.mensaje,
+        detalle: item.detalle,
+        origen: 'numero_reportado',
+      }, { en: new Date() });
+    }
+    const resumen = await despacharReportes({ rutas: deps.rutas }, deps.gsg, 25, ['incidencia'], { manual: true });
+    const despues = await reportesAGsg();
+    const gsg = estadoDe(despues, item);
+    app.log?.info?.({ clave, quien, estado: gsg.estado }, 'reporte a GSG pedido a mano');
+    return {
+      ok: gsg.estado === 'reportado',
+      gsg,
+      por: quien,
+      detalle: gsg.estado === 'reportado'
+        ? 'GSG confirmó que recibió el error.'
+        : gsg.estado === 'sin_confirmar'
+          ? `No se sabe si GSG lo recibió: ${gsg.error ?? 'no contestó a tiempo'}. Míralo en GSG antes de volver a mandarlo.`
+          : `No se pudo reportar: ${gsg.error ?? resumen.errores?.[0] ?? resumen.motivo ?? 'GSG no contestó'}.`,
+    };
   });
   app.post<{ Params: { tracking: string } }>('/admin/entregas/reportados/:tracking/correccion', corregirReportado);
 
@@ -868,7 +956,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
       if (r.cambiado) {
         const corregidos = deps.reportados ? await deps.reportados.marcarCorregidos(e.datosEnvio?.tracking ?? e.referencia, { telefono: r.entrega.phone, tracking: null, por: quien, via: 'POST /api/v1/flujo (REINTENTAR)' }, new Date()).catch(() => []) : [];
         const fila = (await entregas.entrega(e.id))?.entrega ?? e;
-        return { ok: true, accion: b.accion, tracking: b.tracking, telefonoCorregido: r.entrega.phone, entrega: entregaParaApi(fila), corregidos: corregidos.map(reportadoParaApi), whatsapp: await whatsappDe([e.id]), detalle: `Teléfono de ${e.referencia} corregido a ${r.entrega.phone}: se le escribe al número nuevo.` };
+        return { ok: true, accion: b.accion, tracking: b.tracking, telefonoCorregido: r.entrega.phone, entrega: entregaParaApi(fila), corregidos: corregidos.map((r) => reportadoParaApi(r)), whatsapp: await whatsappDe([e.id]), detalle: `Teléfono de ${e.referencia} corregido a ${r.entrega.phone}: se le escribe al número nuevo.` };
       }
     }
     const r = await entregas.volverAPedirUbicacion(e.id, quien);

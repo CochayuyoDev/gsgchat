@@ -617,7 +617,10 @@ if ($('wrap').dataset.disponible === '1') {
 async function saludNumero(){try{var datos=await Promise.all([api('/health'),api('/admin/health')]);var h=datos[1];$('api-salud-estado').textContent='API: '+(datos[0].ok?'disponible':'no disponible')+' · WhatsApp: '+(datos[0].connected?'conectado':'sin conexión')+' · Riesgo: '+(h.salud?h.salud.nivel:'sin datos')+' · Mensajes hoy: '+h.sentToday+' / '+h.dailyCap+' · Envíos: '+(h.number.paused?'pausados':'activos');}catch(e){$('api-salud-estado').textContent=e.message;}}
 $('api-salud-evaluar').onclick=ocupado($('api-salud-evaluar'),'Evaluando…',async function(){await api('/admin/salud/evaluar',{method:'POST',body:{}});await saludNumero();});
 $('api-salud-pausa').onclick=ocupado($('api-salud-pausa'),'Pausando…',async function(){await api('/admin/pause',{method:'POST',body:{paused:true,reason:'Desde Salud'}});await saludNumero();});
-$('api-salud-reanudar').onclick=ocupado($('api-salud-reanudar'),'Reanudando…',async function(){await api('/admin/salud/reanudar',{method:'POST',body:{motivo:'Desde Salud'}});await saludNumero();});
+/* Reanudar no devuelve la velocidad de golpe: el monitor vuelve con una rampa
+   (empieza al 10 % y sube hasta el 100 %). Decirlo evita el «lo reanudé y sigue
+   lentísimo». Ver src/salud/monitor.ts. */
+$('api-salud-reanudar').onclick=ocupado($('api-salud-reanudar'),'Reanudando…',async function(){await api('/admin/salud/reanudar',{method:'POST',body:{motivo:'Desde Salud'}});await saludNumero();toast('Envíos reanudados. El número vuelve despacio: empieza al 10 % de velocidad y sube hasta el 100 % en las próximas horas, para no quemarlo otra vez.');});
 saludNumero();setInterval(saludNumero,30000);
 `;
 

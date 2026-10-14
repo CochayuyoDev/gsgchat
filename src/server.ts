@@ -141,6 +141,15 @@ export interface ServerDeps {
    * directorio de usuarios compartido. Sin esto, una instalacion suelta.
    */
   sesionLocal?: SesionLocal;
+  /** Para apuntar el telefono vinculado: la salud guarda el riesgo por numero (src/salud/numero.ts). */
+  anotarNumeroVigente?: (telefono: string | null | undefined) => void;
+  /**
+   * La clave con la que la salud guarda el estado del numero vigente
+   * (src/salud/numero.ts). La arma la tienda, que es quien sabe el telefono
+   * vinculado; las pantallas tienen que leer la MISMA fila que escribe el
+   * monitor, o ensenan cifras de otro numero.
+   */
+  numeroDeSalud?: () => string;
   authDir?: string;
   prefijoLog?: string;
   primeraCuentaRol?: 'superadmin' | 'admin';
@@ -343,6 +352,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   await registerAdminRoutes(app, {
+    numeroDeSalud: deps.numeroDeSalud,
     repos,
     config,
     queue,
@@ -368,9 +378,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
-  await registerApiV1(app, { repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
+  await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
-  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados });
+  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
 
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.
@@ -400,6 +410,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     settingsRepo: deps.settingsRepo,
     conexionGsg: deps.conexionGsg,
     sesionLocal: deps.sesionLocal,
+    anotarNumeroVigente: deps.anotarNumeroVigente,
     authDir: deps.authDir,
     mediaDir,
     prefijoLog: deps.prefijoLog,

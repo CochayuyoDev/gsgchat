@@ -44,6 +44,11 @@ export interface WahaRoutesDeps {
    * se crea uno con Docker cuando WAHA_AUTOARRANQUE esta activo.
    */
   wahaGestionado?: WahaGestionado | null;
+  /**
+   * El telefono de la sesion, en cuanto WAHA lo cuenta: la salud guarda el
+   * riesgo por numero y WAHA no lo dice en ningun otro sitio.
+   */
+  anotarNumero?: (telefono: string | null | undefined) => void;
 }
 
 type Resolucion =
@@ -291,8 +296,11 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
     try {
       const session = await getSession(connectionFrom(settings));
       if (!session) {
+        deps.anotarNumero?.('');
         return { ok: false, configured: true, status: 'STOPPED', detail: 'La sesion no existe todavia.' };
       }
+      // El numero vinculado, para la salud: WAHA solo lo cuenta aqui.
+      deps.anotarNumero?.(session.me?.id ? fromChatId(session.me.id) : '');
 
       const qr =
         session.status === 'SCAN_QR_CODE' ? await getQrCode(connectionFrom(settings)) : null;

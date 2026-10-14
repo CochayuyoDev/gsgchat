@@ -203,4 +203,36 @@ describe('/admin/ajustes', () => {
     expect(ajustes.nombreNegocio()).toBe('La Tienda');
     expect(ajustes.soloNumeros()).toEqual([]);
   });
+
+  it('una sola franja de envio: la que se guarda en Automatizacion GSG es la que frena al motor', async () => {
+    // El sintoma de antes: se ponia 08:00 en la pantalla y el motor seguia
+    // esperando a las 09:00, porque habia dos horarios guardados en sitios
+    // distintos. Ahora la pantalla del reparto escribe la franja general.
+    const guardar = await app.inject({
+      method: 'POST',
+      url: '/admin/rutas/ajustes',
+      headers: { cookie: admin },
+      payload: { horaInicio: 8, horaFin: 22 },
+    });
+    expect(guardar.statusCode).toBe(200);
+    expect(guardar.json().vigente).toMatchObject({ horaInicio: 8, horaFin: 22 });
+
+    // 1. Los ajustes generales (la unica fuente) ya lo tienen.
+    const generales = await app.inject({ method: 'GET', url: '/admin/ajustes', headers: { cookie: admin } });
+    expect(generales.json().efectivo.horario).toMatchObject({ inicio: 8, fin: 22 });
+
+    // 2. La pantalla del reparto ensena lo mismo, no otra cosa.
+    const delReparto = await app.inject({ method: 'GET', url: '/admin/rutas/ajustes', headers: { cookie: admin } });
+    expect(delReparto.json().ajustes).toMatchObject({ horaInicio: 8, horaFin: 22 });
+
+    // 3. Y el estado del modulo, que es lo que mira el motor.
+    const estado = await app.inject({ method: 'GET', url: '/admin/rutas', headers: { cookie: admin } });
+    expect(estado.json().motor.horario).toEqual([8, 22]);
+
+    // Un fin que no puede ser: se rechaza y no se guarda a medias.
+    const malo = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: { cookie: admin }, payload: { horaInicio: 20, horaFin: 20 } });
+    expect(malo.statusCode).toBe(400);
+    const despues = await app.inject({ method: 'GET', url: '/admin/ajustes', headers: { cookie: admin } });
+    expect(despues.json().efectivo.horario).toMatchObject({ inicio: 8, fin: 22 });
+  });
 });

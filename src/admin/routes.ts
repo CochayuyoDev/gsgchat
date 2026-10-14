@@ -52,6 +52,12 @@ import { atenderRespuestaDeRuta } from '../rutas/inbound.js';
 import { crearPuertoEnEspera } from '../rutas/gsg.js';
 
 export interface AdminDeps {
+  /**
+   * La clave de `number_state` del numero vigente (src/salud/numero.ts). Tiene
+   * que ser la misma que usa el monitor de salud: si no, la pantalla ensena las
+   * cifras de otro numero.
+   */
+  numeroDeSalud?: () => string;
   /** La conexion con Stoky configurable desde la pantalla (para el enlace al panel). */
   conexionStoky?: import('../stoky/conexion.js').ServicioConexionStoky;
   /** El entrenamiento del asistente (para la lista de primeros pasos del inicio). */
@@ -153,7 +159,10 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   const { repos, config, queue, sender, settings, wa, hub } = deps;
   // Sin Meta (cliente local o WAHA) no hay id de numero: se usa una clave fija
   // para que el estado, la pausa y el monitor hablen de la misma fila.
-  const phoneNumberId = () => settings.current().phoneNumberId || 'local';
+  // La fila de `number_state` del numero vigente: la misma que escribe el
+  // monitor de salud (ver src/salud/numero.ts). Sin la de la tienda, la de
+  // siempre: solo el id de Meta, o 'local'.
+  const phoneNumberId = deps.numeroDeSalud ?? (() => settings.current().phoneNumberId || 'local');
 
   // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
@@ -210,6 +219,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
     nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
     lista: deps.lista,
+    ajustes: deps.ajustes,
   });
 
   // --- ajustes generales: lo que se cambia desde la pantalla ----------------

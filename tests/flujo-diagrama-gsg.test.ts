@@ -37,7 +37,7 @@ describe('contrato del diagrama GSG', () => {
     expect(esc.mensajesA('987100001')).toHaveLength(3);
   });
 
-  it('manda tracking y coordenadas al endpoint HTTP sendLocation y conserva fallos para reintentar', async () => {
+  it('manda tracking y coordenadas al endpoint HTTP send-location y conserva fallos para reintentar', async () => {
     const llegadas: any[] = [];
     // 429: GSG pide esperar (no proceso nada). Un 5xx sin clave idempotente es
     // resultado incierto y no se reintenta solo (ver refuerzo-http-gsg.test.ts).
@@ -60,11 +60,11 @@ describe('contrato del diagrama GSG', () => {
       expect(await repos.rutas.cifrasReportes()).toMatchObject({ pendiente: 0, enviado: 1 });
       expect(llegadas).toHaveLength(2);
       // La clave sale SOLO en X-API-Key: sin Authorization.
-      expect(llegadas[1]).toEqual({ url: '/sendLocation', auth: undefined, apiKey: 'clave-backend', body: { tracking: 'TRACK-001', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
+      expect(llegadas[1]).toEqual({ url: '/send-location', auth: undefined, apiKey: 'clave-backend', body: { tracking: 'TRACK-001', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
     } finally { await new Promise<void>(r => server.close(() => r())); }
   });
 
-  it('si la dirección guardada ya es la de sendLocation no la duplica, y cada fallo dice su número y su causa', async () => {
+  it('si la dirección guardada ya es la de la ubicación no la duplica, y cada fallo dice su número y su causa', async () => {
     const llegadas: Array<{ url?: string; apiKey?: string | string[]; body: unknown }> = [];
     let status = 404;
     const server = http.createServer((req, res) => {
@@ -76,13 +76,13 @@ describe('contrato del diagrama GSG', () => {
     try {
       const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
       const puerto = crearPuertoHttp({ url: `${base}/sendLocation`, token: 'k-1' });
-      expect(puerto.urlUbicacion?.()).toBe(`${base}/sendLocation`);
+      expect(puerto.urlUbicacion?.()).toBe(`${base}/send-location`);
       const fallo = await puerto.enviar('ubicacion', { tracking: 'GSG-E-240255', lat: -12.0453, lng: -77.0311 });
       expect(fallo).toMatchObject({ ok: false, reintentable: false });
       expect(!fallo.ok && fallo.error).toMatch(/^Error 404: GSG no tiene esa ruta/);
       status = 201;
       expect((await puerto.enviar('ubicacion', { tracking: 'GSG-E-240255', lat: -12.0453, lng: -77.0311 })).ok).toBe(true);
-      expect(llegadas.at(-1)).toEqual({ url: '/api/sendLocation', apiKey: 'k-1', body: { tracking: 'GSG-E-240255', lat: -12.0453, lng: -77.0311 } });
+      expect(llegadas.at(-1)).toEqual({ url: '/api/send-location', apiKey: 'k-1', body: { tracking: 'GSG-E-240255', lat: -12.0453, lng: -77.0311 } });
       // El puerto solo manda: no tiene ninguna consulta (GSGchat nunca le pide nada a GSG).
       expect('consultar' in puerto).toBe(false);
       status = 401;
@@ -91,10 +91,10 @@ describe('contrato del diagrama GSG', () => {
     } finally { await new Promise<void>(r => server.close(() => r())); }
     const sinRed = await crearPuertoHttp({ url: 'http://127.0.0.1:9/api', token: 'k' }).enviar('ubicacion', { tracking: 'X', lat: 1, lng: 2 });
     expect(sinRed).toMatchObject({ ok: false, reintentable: true });
-    expect(!sinRed.ok && sinRed.error).toMatch(/No se pudo conectar con GSG en http:\/\/127\.0\.0\.1:9\/api\/sendLocation/);
+    expect(!sinRed.ok && sinRed.error).toMatch(/No se pudo conectar con GSG en http:\/\/127\.0\.0\.1:9\/api\/send-location/);
   });
 
-  it('con la URL exacta de ubicación guardada en la conexión, el POST va justo ahí, sin /sendLocation', async () => {
+  it('con la URL exacta de ubicación guardada en la conexión, el POST va justo ahí, sin /send-location', async () => {
     const llegadas: any[] = [];
     const server = http.createServer((req, res) => {
       let body = '';
@@ -153,7 +153,7 @@ describe('contrato del diagrama GSG', () => {
       status = 201;
       const bueno = await esc.api.post<any>(`/admin/entregas/${id}/enviar-gsg`, {});
       expect(bueno.body).toMatchObject({ ok: true, estado: 'enviado', error: null });
-      expect(llegadas.at(-1)).toEqual({ url: '/sendLocation', apiKey: 'clave-gsg', body: { tracking: 'GSG-E-240255', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
+      expect(llegadas.at(-1)).toEqual({ url: '/send-location', apiKey: 'clave-gsg', body: { tracking: 'GSG-E-240255', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
     } finally { await new Promise<void>(r => server.close(() => r())); }
   });
 
@@ -177,7 +177,7 @@ describe('contrato del diagrama GSG', () => {
       expect(esc.mensajesA('987100001')).toHaveLength(1);
       expect((await esc.contesta('987100001', { pin: PIN_LIMA })).status).toBe(200);
       for (let i = 0; i < 50 && !llegadas.length; i++) await new Promise(r => setTimeout(r, 20));
-      expect(llegadas).toContainEqual({ url: '/sendLocation', body: { tracking: 'TRACK-PIN-REAL', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
+      expect(llegadas).toContainEqual({ url: '/send-location', body: { tracking: 'TRACK-PIN-REAL', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
       expect(await esc.entrega('PIN-REAL')).toMatchObject({ ubicacionEstado: 'recibida', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng });
       const antes = esc.mensajesA('987100001').length;
       esc.avanzar(90); await esc.trabajar();

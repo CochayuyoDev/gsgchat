@@ -30,7 +30,7 @@ import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import { esLoteDePrueba } from './alertas.js';
 import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
-import { ajustesPorDefecto, aplicarAjustes, rellenarTexto, type AjustesRutas } from './ajustes.js';
+import { ajustesPorDefecto, aplicarAjustes, conFranjaDeLaPolitica, rellenarTexto, type AjustesRutas } from './ajustes.js';
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
 import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
@@ -247,6 +247,9 @@ export function crearMotor(deps: MotorDeps): Motor {
     try {
       ajustes = await repos.rutas.ajustes.get(ajustesPorDefecto(deps.opciones));
       opciones = aplicarAjustes(deps.opciones, ajustes);
+      // La franja de envio sale de los ajustes generales (una sola para todo
+      // el sistema), no de los del reparto. Ver src/rutas/ajustes.ts.
+      opciones = conFranjaDeLaPolitica(opciones, deps.politica?.());
       if (deps.nombreNegocio) opciones = { ...opciones, negocio: deps.nombreNegocio() };
       const extra = deps.horarioExtra?.();
       if (extra) {

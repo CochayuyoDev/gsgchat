@@ -221,6 +221,7 @@ export function rutasPage(opts: RutasOpts): string {
       <h3 class="aj-titulo">¿A qué ritmo?</h3>
       <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num" aria-label="Pausa mínima en segundos">
         y <input id="aj-pausa-max" type="number" min="1" class="aj-num" aria-label="Pausa máxima en segundos"> segundos, para parecer una persona y cuidar el número.</p>
+      <p class="aj-frase muted" id="aj-pausa-salud" hidden></p>
 
       <h3 class="aj-titulo">¿Qué se le dice?</h3>
       <p class="muted" style="margin-top:0">Tres momentos: el primer mensaje, el recordatorio si no contestó, y la insistencia si contestó pero sin ubicación.
@@ -427,6 +428,34 @@ function pintarProgreso(datos) {
     estadoDelMotor(datos.motor) +
     (datos.alertas.coordinador ? '' : '<span class="muted">Nadie recibe avisos por WhatsApp de los casos parados.</span>') +
     '<span class="fallo" id="fallo-refresco"></span>';
+  pintarPausaSalud();
+}
+
+/**
+ * Por qué la pausa real no es la que dice la cajita.
+ *
+ * El motor divide la pausa configurada por el factor de salud del número
+ * (src/entregas/motor.ts): en naranja, factor 0.2, las pausas de 30 s salen
+ * cada 150 s. Antes la cajita decía 30 y nadie entendía los 150: aquí se
+ * explica debajo del propio ajuste, con a dónde ir a verlo.
+ */
+function pintarPausaSalud() {
+  var caja = document.getElementById('aj-pausa-salud');
+  if (!caja) return;
+  var salud = resumen && resumen.motor ? resumen.motor.salud : null;
+  var a = ajustesCache ? ajustesCache.ajustes : null;
+  var factor = salud ? salud.factor : 1;
+  if (!salud || !a || factor >= 1) { caja.hidden = true; return; }
+  caja.hidden = false;
+  if (factor <= 0) {
+    caja.textContent = 'Ahora mismo no sale ningún mensaje: la salud del número está en ' + salud.nivel +
+      '. Mientras siga así, esta pausa no se usa. Míralo en Salud.';
+    return;
+  }
+  caja.textContent = 'Ojo: la salud del número está en ' + salud.nivel + ' (al ' + Math.round(factor * 100) +
+    ' %), así que estas pausas se multiplican y los mensajes salen cada ' +
+    Math.round(a.pausaMinSegundos / factor) + '-' + Math.round(a.pausaMaxSegundos / factor) +
+    ' segundos de verdad. Para que valga lo que escribes aquí, el número tiene que volver a verde: míralo en Salud.';
 }
 
 /* Una sola frase que explica por qué salen o no salen mensajes ahora mismo. */
@@ -1122,6 +1151,7 @@ function pintarAjustes(d) {
   document.getElementById('aj-cada').value = a.pedirUbicacionCadaMinutos || 0;
   document.getElementById('aj-hora-inicio').value = a.horaInicio;
   document.getElementById('aj-hora-fin').value = a.horaFin;
+  pintarPausaSalud();
 
   document.getElementById('aj-pasos').innerHTML = PASOS_AJ.map(function (p) {
     var paso = p[0];
