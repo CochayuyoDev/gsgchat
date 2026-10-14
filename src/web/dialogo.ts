@@ -273,6 +273,10 @@ function enlazarSalir() {
   var b = document.getElementById('logout');
   if (b) b.onclick = function () { salir(); };
 }
+/* El boton «Cerrar sesion» del armazon (shell.ts) se engancha aqui mismo: este
+   JS va al final del <body>, asi que el boton ya esta en la pagina. Sin esta
+   llamada el boton no hacia nada y la sesion seguia abierta. */
+enlazarSalir();
 
 /**
  * Un número de celular peruano, listo para WhatsApp.

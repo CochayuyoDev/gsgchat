@@ -379,7 +379,7 @@ describe('la lista de quien no mandó su ubicación', () => {
     // La pantalla entera vive dentro de una plantilla de texto: TypeScript no
     // mira lo que hay dentro, así que un paréntesis de menos deja la página
     // muerta con la suite en verde.
-    const html = (await app.inject({ url: '/rutas', headers: auth })).body;
+    const html = (await app.inject({ url: '/automatizacion-gsg', headers: auth })).body;
     const desde = html.lastIndexOf('<script>');
     const hasta = html.lastIndexOf('</script>');
     expect(desde).toBeGreaterThan(-1);
@@ -390,7 +390,7 @@ describe('la lista de quien no mandó su ubicación', () => {
     // La página redefinía --bg, --panel, --accent... con colores a pelo y su
     // propio modo oscuro: lo que se veía aquí no era lo que se veía en el
     // resto del sistema. Los tonos los pone `tokens.ts` y nadie más.
-    const html = (await app.inject({ url: '/rutas', headers: auth })).body;
+    const html = (await app.inject({ url: '/automatizacion-gsg', headers: auth })).body;
     expect(html).not.toMatch(/--(panel|line|accent|chip|muted|text):\s*#/);
     expect(html).not.toContain('#d9fdd3');
   });
