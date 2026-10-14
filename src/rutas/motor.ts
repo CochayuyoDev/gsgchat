@@ -51,12 +51,7 @@ export interface OpcionesMotor {
   esperaRespuestaMinutos: number;
   /** Mensajes por cliente antes de pasarlo a una persona. */
   maxIntentos: number;
-  /**
-   * Mientras no llegue su ubicacion, se le vuelve a pedir cada tantos
-   * minutos, sin tope de mensajes (el horario sigue mandando), y lo que
-   * escriba que no sea su ubicacion no se contesta (ver handlers/inbound).
-   * 0 = como antes: `esperaRespuestaMinutos` y `maxIntentos`.
-   */
+  /** Campo antiguo conservado por compatibilidad; no activa otro modo de envío. */
   pedirUbicacionCadaMinutos: number;
   /** Franja horaria en la que se puede escribir, hora del negocio. */
   horaInicio: number;
@@ -87,7 +82,7 @@ export function opcionesDesdeConfig(config: Config): OpcionesMotor {
     pausaMaxSegundos: Math.max(config.RUTAS_PAUSA_MIN_SEG, config.RUTAS_PAUSA_MAX_SEG),
     esperaRespuestaMinutos: config.RUTAS_ESPERA_MIN,
     maxIntentos: config.RUTAS_MAX_INTENTOS,
-    pedirUbicacionCadaMinutos: config.RUTAS_PEDIR_UBI_CADA_MIN,
+    pedirUbicacionCadaMinutos: 0,
     horaInicio: config.RUTAS_HORA_INICIO,
     horaFin: config.RUTAS_HORA_FIN,
     timezone: config.timezone,
@@ -216,8 +211,7 @@ export function enHorario(fecha: Date, opciones: OpcionesMotor): boolean {
 
 /** El paso que le toca a una solicitud, o null si ya no le toca ninguno. */
 export function pasoDe(solicitud: Solicitud, opciones: OpcionesMotor): PasoUbicacion | 'derivar' | null {
-  // Pidiendo la ubicacion cada tantos minutos no hay tope: se le pide hasta que la mande.
-  if (!(opciones.pedirUbicacionCadaMinutos > 0) && solicitud.intentos >= opciones.maxIntentos) return 'derivar';
+  if (solicitud.intentos >= opciones.maxIntentos) return 'derivar';
   if (solicitud.estado === 'pendiente') return 'solicitud';
   if (solicitud.estado === 'respondio') return 'insistencia';
   if (solicitud.estado === 'enviado') return 'recordatorio';
@@ -267,7 +261,7 @@ export function crearMotor(deps: MotorDeps): Motor {
   }
 
   /** Minutos hasta volver a pedirle la ubicacion: cada tantos minutos si esta encendido, si no la espera de siempre. */
-  const esperaHastaElSiguiente = (): number => (opciones.pedirUbicacionCadaMinutos > 0 ? opciones.pedirUbicacionCadaMinutos : opciones.esperaRespuestaMinutos);
+  const esperaHastaElSiguiente = (): number => opciones.esperaRespuestaMinutos;
 
   /** Cuando se mando el ultimo mensaje, para respetar la pausa. */
   let ultimoEnvio = 0;
@@ -407,13 +401,8 @@ export function crearMotor(deps: MotorDeps): Motor {
     await repos.rutas.registrarEvento(
       solicitud.id,
       'derivacion',
-      'Pendiente de atención: tres intentos sin ubicación',
+      `Pendiente de atención: ${solicitud.intentos} mensajes sin ubicación`,
     );
-
-    // Avisar al cliente solo si se puede escribir gratis y si alguna vez
-    // contesto: a quien ignoro tres mensajes, un cuarto solo le suma motivos
-    // para bloquear; y con plantilla, gastar una en despedirse no aporta.
-
 
     return { accion: 'derivacion', solicitudId: solicitud.id };
   }
@@ -459,11 +448,9 @@ export function crearMotor(deps: MotorDeps): Motor {
     const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud).catch(() => null) : null;
     // La cadencia por cliente la fija el reparto (espera e intentos), no la
     // politica general: ver `SendJob.limitesContacto`.
-    const cadaMin = opciones.pedirUbicacionCadaMinutos > 0 ? opciones.pedirUbicacionCadaMinutos : 0;
     const limitesContacto = {
-      separacionMs: Math.min((cadaMin || opciones.esperaRespuestaMinutos) * 60_000, 60_000),
-      // Sin tope de mensajes, el del dia es el que cabe en 24 h a ese ritmo.
-      maxPorDia: cadaMin ? Math.ceil((24 * 60) / cadaMin) + 1 : opciones.maxIntentos + 1,
+      separacionMs: Math.min(opciones.esperaRespuestaMinutos * 60_000, 60_000),
+      maxPorDia: opciones.maxIntentos + 1,
     };
     // El primer mensaje de un pedido: queda «enviando» en la base antes de
     // salir. Si otro intento ya esta en marcha (otro proceso, un reintento

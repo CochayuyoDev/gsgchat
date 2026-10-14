@@ -287,16 +287,11 @@ const schema = z.object({
    */
   RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(180),
 
-  /**
-   * Mientras el cliente no mande su ubicacion, se le vuelve a pedir cada
-   * tantos minutos, sin tope de mensajes (solo dentro del horario), y lo que
-   * escriba que no sea su ubicacion no se contesta. 0 = como antes: la espera
-   * de RUTAS_ESPERA_MIN y RUTAS_MAX_INTENTOS mensajes.
-   */
-  RUTAS_PEDIR_UBI_CADA_MIN: z.coerce.number().int().min(0).max(24 * 60).default(15),
+  /** Variable antigua ignorada; los envíos siempre tienen un máximo. */
+  RUTAS_PEDIR_UBI_CADA_MIN: z.coerce.number().int().min(0).max(24 * 60).default(0),
 
   /** Mensajes por cliente antes de pasarlo al repartidor. */
-  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(3).default(3),
+  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(3),
 
   /** Franja horaria en la que el motor puede escribir (hora del negocio). */
   RUTAS_HORA_INICIO: z.coerce.number().int().min(0).max(23).default(9),

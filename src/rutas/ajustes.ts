@@ -26,7 +26,7 @@ export interface AjustesRutas {
   esperaRespuestaMinutos: number;
   /** Mensajes por cliente antes de pasarlo al repartidor. */
   maxIntentos: number;
-  /** Sin ubicacion, se le vuelve a pedir cada tantos minutos y sin tope (0 = apagado). Ver OpcionesMotor. */
+  /** Campo antiguo: siempre desactivado, incluso al leer ajustes previos. */
   pedirUbicacionCadaMinutos: number;
   /** Franja horaria de envio, hora del negocio. */
   horaInicio: number;
@@ -51,8 +51,8 @@ export const ajustesSchema = z.object({
   pausaMinSegundos: z.coerce.number().int().min(1).max(600),
   pausaMaxSegundos: z.coerce.number().int().min(1).max(900),
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
-  maxIntentos: z.coerce.number().int().min(1).max(3),
-  pedirUbicacionCadaMinutos: z.coerce.number().int().min(0).max(24 * 60),
+  maxIntentos: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  pedirUbicacionCadaMinutos: z.literal(0),
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
   plantillas: z.object({ solicitud: listaDeNombres, recordatorio: listaDeNombres, insistencia: listaDeNombres }),
@@ -68,7 +68,7 @@ export function ajustesPorDefecto(opciones: OpcionesMotor): AjustesRutas {
     pausaMaxSegundos: opciones.pausaMaxSegundos,
     esperaRespuestaMinutos: opciones.esperaRespuestaMinutos,
     maxIntentos: opciones.maxIntentos,
-    pedirUbicacionCadaMinutos: opciones.pedirUbicacionCadaMinutos,
+    pedirUbicacionCadaMinutos: 0,
     horaInicio: opciones.horaInicio,
     horaFin: opciones.horaFin,
     plantillas: { solicitud: [], recordatorio: [], insistencia: [] },
@@ -84,8 +84,8 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     // El minimo manda si alguien pone el maximo por debajo.
     pausaMaxSegundos: Math.max(ajustes.pausaMinSegundos, ajustes.pausaMaxSegundos),
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
-    maxIntentos: Math.min(3, ajustes.maxIntentos),
-    pedirUbicacionCadaMinutos: Math.max(0, ajustes.pedirUbicacionCadaMinutos ?? opciones.pedirUbicacionCadaMinutos),
+    maxIntentos: ajustes.maxIntentos,
+    pedirUbicacionCadaMinutos: 0,
     // El horario de aqui es solo el SUELO: en una instalacion sin ajustes
     // generales (una suelta, las pruebas) sigue siendo el que manda. Donde si
     // los hay -todas las tiendas- la franja general se pone encima con
@@ -172,6 +172,7 @@ export function createAjustesRepo(pool: Pool): AjustesRepo {
   const fusionar = (base: AjustesRutas, guardado: Partial<AjustesRutas>): AjustesRutas => ({
     ...base,
     ...guardado,
+    pedirUbicacionCadaMinutos: 0,
     plantillas: { ...base.plantillas, ...(guardado.plantillas ?? {}) },
     textos: { ...base.textos, ...(guardado.textos ?? {}) },
   });
