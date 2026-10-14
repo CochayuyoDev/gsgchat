@@ -1511,6 +1511,16 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * otro lote o sea un cliente recurrente (se le propone su direccion). Lo que
    * espera confirmar el envio no se toca.
    */
+  async function solicitudParaAgrupar(phone: string, dia: string): Promise<Solicitud | null> {
+    const candidatas = await repos.rutas.listarSolicitudes({ q: phone, estados: ['pendiente', 'enviado', 'respondio'], limit: 100, offset: 0 });
+    for (const s of candidatas) {
+      if (s.phone !== phone || s.requiereHumano || s.incidencia || new Intl.DateTimeFormat('en-CA', { timeZone: tz(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(s.createdAt) !== dia) continue;
+      const lote = await repos.rutas.lote(s.loteId);
+      if (lote?.estado === 'enviando') return s;
+    }
+    return null;
+  }
+
   async function encaminarUbicaciones(lista: Entrega[], nombreLote: string, origen: 'gsg' | 'entregas', externoId?: string, notas?: string): Promise<{ entregas: Entrega[]; lote: ResultadoSincronizacion['lote']; pedidas: number; error?: string }> {
     const salida: Entrega[] = [];
     const paraLote: Array<{ telefono: string; nombre?: string; referencia?: string; direccion?: string; distrito?: string; notas?: string }> = [];
@@ -1523,8 +1533,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         salida.push(conocida);
         continue;
       }
-      const abierta = await repos.rutas.abiertaPorTelefono(e.phone);
-      if (abierta && ['pendiente', 'enviado', 'respondio', 'supervision'].includes(abierta.estado)) {
+      const abierta = await solicitudParaAgrupar(e.phone, e.dia);
+      if (abierta) {
         // El reparto ya se lo esta pidiendo por otro lote: se apunta y listo.
         salida.push((await repo.actualizar(e.id, { loteId: abierta.loteId })) ?? e);
         await evento(e, 'nota', `el reparto ya le pide la ubicación (lote ${abierta.loteId})`);
@@ -4359,6 +4369,16 @@ ${lista}
     for (const e of (await repo.listar({ dia: hoy(), limit: TOPE_DEL_DIA })).filter((x) => x.mensajeEstado === 'encolado')) {
       const via = viaDelMensaje(e);
       const s = via === 'ubicacion' && e.loteId ? await solicitudDe(e) : null;
+      if (s?.incidencia === 'ya_en_curso' && e.ubicacionEstado === 'pendiente' && !e.envioRetenidoAt && !e.mensajesPausadosAt) {
+        // Recuperar pedidos que una versión anterior dejó en un lote bloqueado.
+        // Se conserva la solicitud histórica; el tracking pendiente vuelve a su cola.
+        const limpia = (await repo.actualizar(e.id, { loteId: null, mensajeEstado: 'pendiente',
+          ...(e.incidencia === 'ya_en_curso' ? { estado: 'pendiente' as const, incidencia: null, incidenciaDetalle: null, requiereHumano: false } : {}) })) ?? e;
+        const recuperada = await alLoteDelReparto(limpia, 'pedido nuevo recuperado de un bloqueo por otro lote');
+        await asentarDisparo(recuperada);
+        disparados++;
+        continue;
+      }
       const yaEscrito = (via === 'confirmacion' && (e.confirmacionEstado === 'pedida' || e.confirmacionIntentos > 0)) || Boolean(e.ubicacionPropuestaAt) || Boolean(s && (s.estado === 'enviado' || s.estado === 'respondio' || s.estado === 'resuelto'));
       if (yaEscrito) {
         if (via === 'ubicacion' && s) {
@@ -4593,8 +4613,8 @@ ${lista}
         // cliente recurrente: se le propone su ultima direccion en vez de meterlo al lote.
         const recurrente = (await aplicarUbicacionConocida(entrega)) ?? (await apuntarRecurrente(entrega, 'lista pegada'));
         if (!recurrente) {
-          const abierta = await repos.rutas.abiertaPorTelefono(entrega.phone);
-          if (abierta && ['pendiente', 'enviado', 'respondio'].includes(abierta.estado) && new Intl.DateTimeFormat('en-CA', { timeZone: tz(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(abierta.createdAt) === entrega.dia) {
+          const abierta = await solicitudParaAgrupar(entrega.phone, entrega.dia);
+          if (abierta) {
             await repo.actualizar(entrega.id, { loteId: abierta.loteId });
             continue;
           }

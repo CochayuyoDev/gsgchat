@@ -15,7 +15,7 @@ import { createFakeRepos } from './fakes.js';
 import { createFakeRutas } from './fakes-rutas.js';
 
 describe('dos pedidos del mismo número el mismo día (con el reloj de la tienda)', () => {
-  it('la solicitud de hace un momento no se cancela como «de otro día»', async () => {
+  it('un tracking distinto no se cancela ni queda bloqueado por otro lote del día', async () => {
     // Un día que no es el de la máquina: el 15/01/2020, a las 10:00 de Lima.
     const reloj = () => new Date('2020-01-15T15:00:00Z');
     const repos = createFakeRepos();
@@ -29,7 +29,7 @@ describe('dos pedidos del mismo número el mismo día (con el reloj de la tienda
     const s2 = await repos.rutas.solicitud(segunda.solicitudes[0]!.id);
     // La primera sigue viva: se le sigue pidiendo por ella, una sola vez.
     expect(s1?.estado).not.toBe('cancelado');
-    expect(s2?.estado).toBe('incidencia');
-    expect(s2?.incidencia).toBe('ya_en_curso');
+    expect(s2?.estado).toBe('pendiente');
+    expect(s2?.incidencia).toBeNull();
   });
 });
