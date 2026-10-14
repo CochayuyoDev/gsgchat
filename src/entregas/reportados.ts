@@ -353,7 +353,67 @@ export async function reportarNumero(deps: DepsReportar, n: NuevoReportado): Pro
 }
 
 /** Un reportado tal como lo leen GSG (GET /api/v1/reportados) y la pantalla. */
-export function reportadoParaApi(r: NumeroReportado): Record<string, unknown> {
+/**
+ * Lo que ve el operador del reporte a GSG de un problema.
+ *
+ * Son tres cosas distintas que antes se mezclaban en una sola frase: que paso
+ * con el MENSAJE de WhatsApp, que INCIDENCIA tiene el pedido, y si GSG ya
+ * RECIBIO el aviso. Esto ultimo es lo de aqui, y solo dice «reportado» cuando
+ * GSG contesto que si: ponerlo en la cola no es haberlo recibido.
+ */
+export type EstadoReporteGsg =
+  | 'sin_incidencia'
+  | 'pendiente_de_reportar'
+  | 'enviando'
+  | 'reportado'
+  | 'fallo'
+  | 'sin_confirmar';
+
+export interface ReporteAGsg {
+  estado: EstadoReporteGsg;
+  /** En palabras, tal cual se ensena. */
+  etiqueta: string;
+  intentos: number;
+  error: string | null;
+  enviadoEn: string | null;
+  /** El id de la fila de la cola, para reintentarlo a mano. */
+  reporteId: number | null;
+}
+
+const ETIQUETAS_REPORTE_GSG: Record<EstadoReporteGsg, string> = {
+  sin_incidencia: 'Sin incidencia',
+  pendiente_de_reportar: 'Error pendiente de reportar',
+  enviando: 'Enviando a GSG',
+  reportado: 'Error reportado a GSG',
+  fallo: 'Falló el reporte a GSG',
+  sin_confirmar: 'Recepción sin confirmar',
+};
+
+/**
+ * La fila de la cola traducida. `null` = ese problema no tiene reporte en la
+ * cola todavia (se encola al reportarlo; si no esta, es que no salio nunca).
+ */
+export function estadoDelReporteAGsg(
+  fila: { id: number; estado: string; intentos: number; ultimoError: string | null; enviadoAt: Date | null } | null | undefined,
+): ReporteAGsg {
+  if (!fila) {
+    return { estado: 'pendiente_de_reportar', etiqueta: ETIQUETAS_REPORTE_GSG.pendiente_de_reportar, intentos: 0, error: null, enviadoEn: null, reporteId: null };
+  }
+  const base = { intentos: fila.intentos, error: fila.ultimoError ?? null, enviadoEn: fila.enviadoAt ? fila.enviadoAt.toISOString() : null, reporteId: fila.id };
+  if (fila.estado === 'enviado') return { ...base, estado: 'reportado', etiqueta: ETIQUETAS_REPORTE_GSG.reportado };
+  if (fila.estado === 'pendiente') {
+    // Pendiente con intentos ya hechos: salio y no se sabe como acabo.
+    const estado: EstadoReporteGsg = fila.intentos > 0 ? 'enviando' : 'pendiente_de_reportar';
+    return { ...base, estado, etiqueta: ETIQUETAS_REPORTE_GSG[estado] };
+  }
+  // 'fallido' con un resultado incierto (timeout, corte a mitad) no es un
+  // rechazo: GSG pudo haberlo recibido y hay que mirarlo.
+  const incierto = /incierto|no respondió a tiempo|reservado/i.test(fila.ultimoError ?? '');
+  const estado: EstadoReporteGsg = incierto ? 'sin_confirmar' : 'fallo';
+  return { ...base, estado, etiqueta: ETIQUETAS_REPORTE_GSG[estado] };
+}
+
+export function reportadoParaApi(r: NumeroReportado, gsg?: ReporteAGsg | null): Record<string, unknown> {
   return {
     id: r.id,
     clave: r.clave,
@@ -370,6 +430,9 @@ export function reportadoParaApi(r: NumeroReportado): Record<string, unknown> {
     corregidoAt: r.corregidoAt ? r.corregidoAt.toISOString() : null,
     correccion: r.correccion ? { telefono: r.correccion.telefono ?? null, tracking: r.correccion.tracking ?? null, por: r.correccion.por ?? null } : null,
     veces: r.veces,
+    // El estado del reporte a GSG, aparte del estado del problema: «corregido»
+    // es cosa de GSG; esto es si GSG se enteró.
+    ...(gsg ? { gsg } : {}),
   };
 }
 

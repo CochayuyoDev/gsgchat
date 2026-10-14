@@ -899,7 +899,10 @@ async function despacharAhora(
       continue;
     }
     if (!(await repos.rutas.reservarReporte(reporte.id))) continue;
-    const salida = await puerto.enviar(reporte.tipo, { ...reporte.payload, idempotencyKey: 'gsgchat-ubicacion-' + reporte.id });
+    // La clave idempotente lleva el tipo, no 'ubicacion' siempre: una
+    // incidencia ya trae la suya (`eventoId`), y asi la de la ubicacion no se
+    // confunde con la de otro tipo que se anada manana.
+    const salida = await puerto.enviar(reporte.tipo, { ...reporte.payload, idempotencyKey: `gsgchat-${reporte.tipo}-${reporte.id}` });
     if (salida.ok) {
       esperas.delete(reporte.id);
       await repos.rutas.marcarReporte(reporte.id, 'enviado', { externoId: salida.id ?? null });
