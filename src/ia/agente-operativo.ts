@@ -1,3 +1,4 @@
+import { enviarConfirmacionUbicacion } from '../entregas/confirmacion-ubicacion.js';
 /**
  * El agente operativo de GSG Courier: lo que el asistente es con el cliente
  * cuando GSGchat trabaja solo para las entregas.
@@ -1070,9 +1071,9 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
     return 'silencio';
   }
   if (r.tipo === 'registrada') {
-    await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: r.texto });
-    await cerrarChat(deps, contact, motivoUbicacionRegistrada(contact));
-    turno.respuesta = 'plantilla UBI REGISTRADA';
+    const acuse = await enviarConfirmacionUbicacion({ repos: deps.repos, sender: deps.sender, contact, ahora: deps.ahora?.(), job: { phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, text: r.texto } });
+    if (acuse.enviada || acuse.repetida) await cerrarChat(deps, contact, motivoUbicacionRegistrada(contact));
+    turno.respuesta = acuse.nota;
     return 'ubicacion_registrada';
   }
   if (r.tipo === 'no') {
@@ -1104,7 +1105,7 @@ async function atenderCambioUbicacion(deps: DepsAgente, contact: Contact, que: s
   return 'cambio_ubicacion';
 }
 
-async function atenderDireccionEscrita(deps: DepsAgente, contact: Contact, abierta: Solicitud | null, texto: string, como: string, ahora: Date): Promise<ResultadoRegla | null> {
+async function atenderDireccionEscrita(deps: DepsAgente, contact: Contact, abierta: Solicitud | null, texto: string, como: string, ahora: Date, turno: TurnoGsg): Promise<ResultadoRegla | null> {
   const { repos } = deps;
   const r = await deps.entregas!.alDireccionEscrita(contact, texto, como).catch((error: unknown) => {
     deps.log?.('no se pudo atender la dirección escrita', { detalle: error instanceof Error ? error.message : String(error) });
@@ -1112,8 +1113,9 @@ async function atenderDireccionEscrita(deps: DepsAgente, contact: Contact, abier
   });
   if (!r) return null;
   if (r.tipo === 'registrada') {
-    await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: r.texto });
-    await cerrarChat(deps, contact, motivoUbicacionRegistrada(contact));
+    const acuse = await enviarConfirmacionUbicacion({ repos: deps.repos, sender: deps.sender, contact, ahora: deps.ahora?.(), job: { phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, text: r.texto } });
+    if (acuse.enviada || acuse.repetida) await cerrarChat(deps, contact, motivoUbicacionRegistrada(contact));
+    turno.respuesta = acuse.nota;
     return 'ubicacion_registrada';
   }
   // Nunca dos veces seguidas el mismo texto (escribió la misma dirección otra vez).
@@ -1476,9 +1478,9 @@ async function atenderConReglaGsgEnFila(deps: DepsAgente, contact: Contact, entr
   if (categoria === 'direccion' && pendiente && deps.entregas) {
     turno.intencion = 'direccion_escrita';
     turno.dato = texto.slice(0, 120);
-    const r = await atenderDireccionEscrita(deps, contact, abierta, texto, como, ahora);
+    const r = await atenderDireccionEscrita(deps, contact, abierta, texto, como, ahora, turno);
     if (r) {
-      turno.respuesta = r === 'ubicacion_registrada' ? 'plantilla UBI REGISTRADA (dirección ubicada en el mapa)' : r === 'direccion_anotada' ? 'plantilla: dirección anotada, se pide el pin' : 'silencio (misma dirección otra vez)';
+      if (r !== 'ubicacion_registrada') turno.respuesta = r === 'direccion_anotada' ? 'plantilla: dirección anotada, se pide el pin' : 'silencio (misma dirección otra vez)';
       return r;
     }
   }

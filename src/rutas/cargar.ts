@@ -110,9 +110,10 @@ export async function cargarLote(deps: DepsCarga, body: CargaLote): Promise<Resu
       continue;
     }
 
-    // Si ya se le esta pidiendo la ubicacion en otro lote que no termino,
-    // no se abre una segunda conversacion por lo mismo: se aparta para
-    // que una persona decida (reintentar desde la ficha la vuelve a la cola).
+    // Solo la misma referencia se considera una solicitud duplicada.
+    // Un tracking diferente es otro pedido: no se cancela ni se aparta por
+    // una solicitud ajena en otro lote. Las entregas agrupables reutilizan
+    // su solicitud activa antes de llegar aquí.
     let abierta = await repos.rutas.abiertaPorTelefono(solicitud.phone, lote.id);
     // Una solicitud de OTRO DIA que quedo abierta no bloquea el pedido de hoy:
     // se cierra como reemplazada y el nuevo sale (paso con un numero real: un
@@ -128,7 +129,8 @@ export async function cargarLote(deps: DepsCarga, body: CargaLote): Promise<Resu
       await repos.rutas.registrarEvento(abierta.id, 'incidencia', 'llegó un pedido nuevo para este número: esta solicitud de otro día se cierra').catch(() => undefined);
       abierta = null;
     }
-    if (abierta && ['pendiente', 'enviado', 'respondio', 'supervision'].includes(abierta.estado)) {
+    const mismaReferencia = !solicitud.referencia || Boolean(abierta?.referencia && solicitud.referencia.trim().toLowerCase() === abierta.referencia.trim().toLowerCase());
+    if (abierta && mismaReferencia && ['pendiente', 'enviado', 'respondio', 'supervision'].includes(abierta.estado)) {
       await repos.rutas.actualizarSolicitud(solicitud.id, {
         estado: 'incidencia',
         incidencia: 'ya_en_curso',

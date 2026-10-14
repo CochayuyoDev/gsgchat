@@ -1,3 +1,4 @@
+import { enviarConfirmacionUbicacion, type ConfirmacionUbicacion } from '../entregas/confirmacion-ubicacion.js';
 /**
  * Logica de conversacion sobre los mensajes entrantes.
  *
@@ -738,6 +739,8 @@ export async function handleInboundMessage(
       let repetido = false;
       if (firma && antes && antes.firma === firma && !message.viejo) {
         repetido = antes.respuestaMs != null ? escrito <= antes.respuestaMs : escrito - antes.escritoMs < REPETIDO_MS;
+        // Si el acuse falló, el cliente puede volver a mandar el pin: no es una respuesta ya atendida.
+        if (message.type === 'location' && antes.respuestaMs == null) repetido = false;
         // Si desde el primero el sistema le escribió algo (la pregunta que le
         // tocaba en su turno), lo de ahora contesta a ESO: no es una copia.
         // Pasó con un «Sí» escrito antes de que se le preguntara (sin
@@ -986,10 +989,10 @@ async function handleInboundMessageEnFila(
         deps.entregas && s && s.lat !== null && s.lng !== null
           ? await deps.entregas.alUbicacion(contact, { lat: s.lat, lng: s.lng, mapsUrl: s.mapsUrl, fuente: s.ubicacionFuente ?? 'whatsapp', yaReportada: true }).catch(() => ({ atendida: false as const }))
           : { atendida: false as const };
-      if (enEntrega.atendida && enEntrega.responder) await responderEntrega(enEntrega);
+      if (enEntrega.atendida && enEntrega.responder && enEntrega.resultado !== 'propuesta_obsoleta') await responderEntrega(enEntrega);
       else if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
-        await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: s?.mapsUrl ?? null }), { traspasaSilencio: ubiTraspasaSilencio() });
-      } else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }));
+        await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: s?.mapsUrl ?? null }), { traspasaSilencio: ubiTraspasaSilencio(), confirmarUbicacion: true });
+      } else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }), { confirmarUbicacion: true });
       // Primero se cierra (con la regla del dueño, desde aqui silencio: ni el sticker sale).
       await cerrarTrasUbicacion();
       if (deps.stickers) await deps.stickers.automatico('gracias', phone);
@@ -1031,8 +1034,14 @@ async function handleInboundMessageEnFila(
     }
   };
 
-  const reply = (text: string, opts: { traspasaSilencio?: boolean } = {}) =>
-    sender.send({ phone, kind: 'freeform', category: 'UTILITY', text, ...(opts.traspasaSilencio ? { cierreTrasGracias: true } : {}) });
+  let confirmacionUbicacion: ConfirmacionUbicacion | null = null;
+  const confirmarUbicacion = async (job: import('../outbound/sender.js').SendJob) => {
+    confirmacionUbicacion = await enviarConfirmacionUbicacion({ repos, sender, contact, job, ahora: deps.entregas?.ahora?.(), timezone: config.timezone });
+    return confirmacionUbicacion.salida;
+  };
+  const reply = (text: string, opts: { traspasaSilencio?: boolean; confirmarUbicacion?: boolean } = {}) =>
+    opts.confirmarUbicacion ? confirmarUbicacion({ phone, kind: 'freeform', category: 'UTILITY', text })
+      : sender.send({ phone, kind: 'freeform', category: 'UTILITY', text, ...(opts.traspasaSilencio ? { cierreTrasGracias: true } : {}) });
 
   /**
    * UBI REGISTRADA sale SIEMPRE que llega su ubicacion, aunque el chat
@@ -1049,6 +1058,11 @@ async function handleInboundMessageEnFila(
    * solo a texto cuando no puede con los botones.
    */
   const responderEntrega = async (r: { entrega?: import("../entregas/repo.js").Entrega; responder?: string; botones?: Array<{ id: string; title: string }>; pedirUbicacion?: boolean; resultado?: string }) => {
+    if (r.resultado === 'ubicacion' || r.resultado === 'ubicacion_corregida') {
+      return confirmarUbicacion(r.botones?.length
+        ? { phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } }
+        : { phone, kind: 'freeform', category: 'UTILITY', text: r.responder ?? '' });
+    }
     const enviado = await (r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
       : r.pedirUbicacion
@@ -1067,7 +1081,7 @@ async function handleInboundMessageEnFila(
             r.resultado === 'pide_cambio_ubicacion' ||
             r.resultado === 'pide_cambio_ubicacion_tarde',
         }));
-    if (enviado.ok && r.entrega) await deps.entregas?.vincularPropuesta(r.entrega, enviado.wamid);
+    if (enviado?.ok && r.entrega) await deps.entregas?.vincularPropuesta(r.entrega, enviado.wamid);
     return enviado;
   };
 
@@ -1124,7 +1138,8 @@ async function handleInboundMessageEnFila(
       .catch((error: unknown) => request_log(deps, 'no se pudo guardar la decisión del turno', error));
   };
   const cerrarTrasUbicacion = async (): Promise<void> => {
-    await decisionUbicacion('plantilla UBI REGISTRADA');
+    await decisionUbicacion(confirmacionUbicacion?.nota ?? 'UBI REGISTRADA no enviada: no hubo intento de confirmación');
+    if (!confirmacionUbicacion?.enviada && !confirmacionUbicacion?.repetida) return;
     if (!agenteActivo() && !reglaGsg()) return;
     // Tras «no soy yo» el chat sigue con una persona tal cual. Si ya habia
     // recibido el cierre, se apunta: tras el agradecimiento no le toca otro.
@@ -1257,7 +1272,7 @@ async function handleInboundMessageEnFila(
       const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: 'pin de whatsapp' }).catch(() => ({ atendida: false as const }));
       if (enEntrega.atendida) {
         if (enEntrega.responder) await responderEntrega(enEntrega);
-        else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }));
+        else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true });
         await cerrarTrasUbicacion();
         return;
       }
@@ -1278,11 +1293,11 @@ async function handleInboundMessageEnFila(
     // Sin coordenadas a la vista: el enlace basta. En modo GSG, con el texto
     // editable de las entregas (motorizado, horario, soporte).
     if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
-      await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }));
+      await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }), { confirmarUbicacion: true });
       await cerrarTrasUbicacion();
       return;
     }
-    await reply(`Ubicación registrada.\n${result.mapsUrl}`);
+    await reply(`Ubicación registrada.\n${result.mapsUrl}`, { confirmarUbicacion: true });
     return;
   }
 
@@ -1496,7 +1511,7 @@ async function handleInboundMessageEnFila(
       const guardada = await repos.locations.save(contact.id, result, text);
       await repos.locations.confirm(guardada);
       if (enEntrega.responder) await responderEntrega(enEntrega);
-      else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }));
+      else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true });
       await cerrarTrasUbicacion();
       return;
     }
@@ -1560,11 +1575,11 @@ async function handleInboundMessageEnFila(
   // lo que sigue (motorizado, horario, soporte) con el texto editable de las
   // entregas, aunque este cliente no tenga pedido de hoy en la lista.
   if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
-    await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }));
+    await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }), { confirmarUbicacion: true });
     await cerrarTrasUbicacion();
     return;
   }
-  await reply(`Ubicación registrada.\n${result.mapsUrl}`);
+  await reply(`Ubicación registrada.\n${result.mapsUrl}`, { confirmarUbicacion: true });
 }
 
 /** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */

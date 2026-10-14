@@ -79,6 +79,8 @@ export interface SendJob {
    * algo después del agradecimiento. Es lo único que sale a un cliente en silencio.
    */
   cierreTrasGracias?: boolean;
+  /** Acuse de una ubicación recibida; queda identificado en el historial real. */
+  confirmacionUbicacion?: boolean;
   /**
    * Regla del dueño (10/10): tras UBI REGISTRADA, la respuesta de la IA a una
    * consulta del cliente sobre SU pedido (dónde está, cuándo llega, la
@@ -130,6 +132,7 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
   return {
     ...(payload ?? {}),
     origen,
+    ...(job.confirmacionUbicacion ? { confirmacionUbicacion: true } : {}),
     ...(nombre ? { autorNombre: nombre } : {}),
     // La cita se guarda con lo justo para pintarla: de quien era y que decia.
     // El id tambien, para poder saltar al original si sigue en el hilo.
