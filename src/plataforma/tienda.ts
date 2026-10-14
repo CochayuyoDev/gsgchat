@@ -50,6 +50,7 @@ import { CATALOG } from '../templates/catalog.js';
 import { countVariables } from '../templates/render.js';
 import { politicaDesdeConfig } from '../salud/politica.js';
 import { crearMonitor } from '../salud/monitor.js';
+import { crearNumeroVigente, identidadDeNumero } from '../salud/numero.js';
 import { arrancarServicios } from '../servicios.js';
 import { crearServicioAjustes, type ServicioAjustes } from '../ajustes/generales.js';
 import { crearServicioStickers } from '../stickers/stickers.js';
@@ -195,7 +196,22 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         sesion,
       });
 
-      const phoneNumberId = () => settings.current().phoneNumberId || 'local';
+      /**
+       * Quien es «el numero» para la salud. Con Baileys se lee del estado de la
+       * sesion; con WAHA, de lo ultimo que conto su pantalla de Conexion. Ver
+       * src/salud/numero.ts: antes era siempre 'local', asi que un telefono
+       * nuevo heredaba el castigo (y las pausas) del anterior.
+       */
+      const numeroVigente = crearNumeroVigente();
+      const phoneNumberId = () => {
+        const cred = settings.current();
+        const proveedor = providerOf(cred);
+        return identidadDeNumero({
+          proveedor,
+          phoneNumberId: cred.phoneNumberId,
+          telefono: proveedor === 'local' ? sesion.getLocalState().phone : numeroVigente.actual(),
+        });
+      };
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
       let queue: OutboundQueue;
@@ -429,6 +445,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         mediaDir: o.mediaDir,
         autoConectarLocal: o.autoConectarLocal,
         sesionLocal: sesion,
+        anotarNumeroVigente: numeroVigente.anotar,
+        numeroDeSalud: phoneNumberId,
         authDir: o.authDir,
         prefijoLog: `${o.prefijoLog}[wa]`,
         primeraCuentaRol: o.primeraCuentaRol,

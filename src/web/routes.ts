@@ -119,6 +119,11 @@ export interface WebDeps {
    * instalacion suelta.
    */
   sesionLocal?: SesionLocal;
+  /**
+   * Para apuntar el telefono vinculado en cuanto un proveedor lo cuenta: es la
+   * clave con la que la salud guarda el riesgo del numero (src/salud/numero.ts).
+   */
+  anotarNumeroVigente?: (telefono: string | null | undefined) => void;
   authDir?: string;
   mediaDir?: string;
   prefijoLog?: string;
@@ -251,7 +256,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
       entregasDelDia: async (dia) => (await repos.entregas.listar({ dia, limit: 5000 })).map((e) => ({ referencia: e.referencia, estado: e.estado })),
     });
   }
-  await registerWahaRoutes(app, { config, settings, repos });
+  await registerWahaRoutes(app, { config, settings, repos, anotarNumero: deps.anotarNumeroVigente });
   await registerLocalRoutes(app, {
     config,
     repos,

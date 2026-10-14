@@ -46,6 +46,12 @@ import { MAX_BYTES_ADJUNTO, tipoDeAdjuntoSaliente } from '../../admin/chat-route
 import { crearIdempotencia } from './idempotencia.js';
 
 export interface ApiV1Deps {
+  /**
+   * La clave de `number_state` del numero vigente (src/salud/numero.ts). Tiene
+   * que ser la misma que usa el monitor de salud: si no, la pantalla ensena las
+   * cifras de otro numero.
+   */
+  numeroDeSalud?: () => string;
   repos: Repos;
   config: Config;
   settings: SettingsService;
@@ -207,7 +213,8 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     }
   });
   const ventanaObliga = () => providerOf(settings.current()) === 'cloud';
-  const phoneNumberId = () => settings.current().phoneNumberId || 'local';
+  // La misma fila de `number_state` que escribe el monitor (src/salud/numero.ts).
+  const phoneNumberId = deps.numeroDeSalud ?? (() => settings.current().phoneNumberId || 'local');
   const politica = (): Politica =>
     deps.politica?.() ?? politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial');
   const ahora = () => deps.ahora?.() ?? new Date();
