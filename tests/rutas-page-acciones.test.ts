@@ -56,6 +56,14 @@ function accionesPintadas(estado: string, extra: Record<string, unknown> = {}): 
 }
 
 describe('acciones del detalle en Automatización GSG', () => {
+  it('solo ofrece intervalo y máximo de mensajes, sin campos ni JS del modo ilimitado', () => {
+    expect(html).toContain('id="aj-espera"');
+    expect(html).toContain('id="aj-intentos"');
+    expect(html).not.toContain('aj-cada');
+    expect(html).not.toContain('sin tope de mensajes');
+    expect(html).not.toContain('hasta que la mande');
+    expect(html).not.toContain('max="10" class="aj-num" aria-label="Mensajes como máximo"');
+  });
   it('el javascript de la página compila sin errores de sintaxis', () => {
     expect(() => new Function(scriptDeLaPagina())).not.toThrow();
   });

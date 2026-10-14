@@ -63,8 +63,6 @@ import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.
 import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
 import { horaEnPalabras, horarioEnPalabras, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
-import { opcionesDesdeConfig } from '../rutas/motor.js';
-import { ajustesPorDefecto, aplicarAjustes } from '../rutas/ajustes.js';
 import type { Solicitud } from '../db/rutas.js';
 import { ventanaDeEntrega } from '../entregas/horario-distrito.js';
 
@@ -784,62 +782,6 @@ function rafagaDe(deps: Pick<InboundDeps, 'rafagaMs' | 'config'>): number {
   return deps.rafagaMs ?? deps.config.RAFAGA_MS ?? 0;
 }
 
-/**
- * Un texto que trae su ubicacion (enlace de mapa o coordenadas): no es charla,
- * sigue al camino de la ubicacion aunque se este esperando solo eso.
- */
-function pareceUbicacionEscrita(message: InboundMessage): boolean {
-  const texto = String(message.text?.body ?? '');
-  return /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,})/i.test(texto);
-}
-
-/**
- * La solicitud del reparto que solo espera su ubicacion: ya se le pidio (al
- * menos un mensaje), sigue abierta y el reparto la pide cada tantos minutos.
- * null = el mensaje sigue su camino de siempre: un motorizado, un pin que se
- * le pregunto si es ahi, un «¿confirmas tu pedido?» por contestar, o con el
- * ajuste apagado.
- */
-async function esperaSoloSuUbicacion(deps: InboundDeps, contact: Contact): Promise<Solicitud | null> {
-  const { repos } = deps;
-  const solicitud = (await repos.rutas.abiertaPorContacto(contact.id)) ?? (await repos.rutas.abiertaPorTelefono(contact.phone));
-  if (!solicitud || !solicitud.intentos || (solicitud.estado !== 'enviado' && solicitud.estado !== 'respondio')) return null;
-  const base = opcionesDesdeConfig(deps.config);
-  const opciones = aplicarAjustes(base, await repos.rutas.ajustes.get(ajustesPorDefecto(base)));
-  if (!(opciones.pedirUbicacionCadaMinutos > 0)) return null;
-  if (deps.entregas) {
-    if (await deps.entregas.esMotorizado(contact.phone).catch(() => false)) return null;
-    if (await deps.entregas.pinLejosPendiente(contact.phone).catch(() => false)) return null;
-    if ((await deps.entregas.situacionGsg(contact.phone).catch(() => null))?.confirmar === 'pedida') return null;
-  }
-  return solicitud;
-}
-
-/**
- * Lo que escribio sin mandar su ubicacion: queda en la bitacora de la
- * solicitud (y en las decisiones), sin respuesta. No adelanta el siguiente
- * pedido de ubicacion: sale a su hora, no al ritmo de lo que escriba.
- */
-async function anotarSilencioSinUbicacion(deps: InboundDeps, contact: Contact, solicitud: Solicitud, message: InboundMessage, cuerpo: string): Promise<void> {
-  const { repos } = deps;
-  const texto = String(message.text?.body ?? message.media?.transcripcion ?? '').trim();
-  await repos.rutas.actualizarSolicitud(solicitud.id, {
-    estado: 'respondio',
-    ...(solicitud.primeraRespuestaAt ? {} : { primeraRespuestaAt: new Date() }),
-    ...(solicitud.contactId ? {} : { contactId: contact.id }),
-    incidencia: 'respondio_sin_ubicacion',
-    incidenciaDetalle: (texto || cuerpo || `(${message.type})`).slice(0, 300),
-  });
-  await repos.rutas.registrarEvento(
-    solicitud.id,
-    'respuesta',
-    `escribió sin mandar su ubicación («${(texto || cuerpo || message.type).slice(0, 160)}»): no se le contesta; se le vuelve a pedir a su hora`,
-  );
-  await repos.decisiones
-    ?.registrar({ contactId: contact.id, phone: contact.phone, mensajes: 1, intencion: texto ? 'ajena' : 'sin_texto', dato: message.type, respuesta: 'silencio (solo se contesta su ubicación)', como: 'reglas', esperaba: 'ubicación', detalle: null })
-    .catch(() => undefined);
-}
-
 /** Ultimo aviso de «esa es tu ubicacion en tiempo real» por telefono: las actualizaciones en vivo no lo repiten. */
 const avisosEnVivo = new Map<string, number>();
 function avisarUbicacionEnVivo(phone: string, ahora: number): boolean {
@@ -970,23 +912,6 @@ async function handleInboundMessageEnFila(
   // contestar, aunque el sistema despues se calle.
   if (deps.lista) {
     await deps.lista.alRecibir(contact, { ubicacion: message.type === 'location' && Boolean(message.location) }).catch(() => undefined);
-  }
-
-  // Se le pidio su ubicacion y todavia no la manda: solo eso se contesta. Un
-  // «hola», una pregunta, un audio o una foto quedan en el chat, sin
-  // respuesta y sin esperar a que termine de escribir; el reparto se la
-  // vuelve a pedir a los tantos minutos de su ultimo pedido (ajuste del
-  // reparto, 15 por defecto). Su pin, un enlace de mapa o un boton si pasan;
-  // y «no soy yo»: a un numero equivocado no se le insiste cada 15 minutos.
-  if (!atiendeYa(message) && !pareceUbicacionEscrita(message) && !pareceNumeroEquivocado(String(message.text?.body ?? ''))) {
-    const esperando = await esperaSoloSuUbicacion(deps, contact).catch((error) => {
-      request_log(deps, 'no se pudo mirar si espera su ubicacion', error);
-      return null;
-    });
-    if (esperando) {
-      await anotarSilencioSinUbicacion(deps, contact, esperando, message, leido.body).catch((error) => request_log(deps, 'no se pudo anotar el mensaje sin ubicacion', error));
-      return;
-    }
   }
 
   // Si sigue escribiendo, se espera: una rafaga se contesta UNA vez, con todo

@@ -243,19 +243,26 @@ describe('ajustes y plantillas propias: la API', () => {
   });
 
   it('POST guarda, valida y se refleja en el estado del modulo; DELETE vuelve a la configuracion', async () => {
-    const malo = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { maxIntentos: 99 } });
+    const malo = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { maxIntentos: 0 } });
     expect(malo.statusCode).toBe(400);
+    for (const payload of [{ maxIntentos: -1 }, { maxIntentos: 1.5 }, { pedirUbicacionCadaMinutos: 1440 }]) {
+      const rechazado = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload });
+      expect(rechazado.statusCode).toBe(400);
+    }
 
     const noExiste = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { plantillas: { solicitud: ['no_existe'], recordatorio: [], insistencia: [] } } });
     expect(noExiste.statusCode).toBe(400);
     expect(noExiste.json().error).toMatch(/no_existe/);
 
-    const ok = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { esperaRespuestaMinutos: 45, horaInicio: 10, horaFin: 18, textos: { solicitud: ['Hola {nombre}'], recordatorio: [], insistencia: [] } } });
+    const ok = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { esperaRespuestaMinutos: 45, maxIntentos: 7, horaInicio: 10, horaFin: 18, textos: { solicitud: ['Hola {nombre}'], recordatorio: [], insistencia: [] } } });
     expect(ok.statusCode).toBe(200);
-    expect(ok.json().vigente).toMatchObject({ esperaRespuestaMinutos: 45, horaInicio: 10, horaFin: 18 });
+    expect(ok.json().vigente).toMatchObject({ esperaRespuestaMinutos: 45, maxIntentos: 7, horaInicio: 10, horaFin: 18 });
+
+    const guardado = await app.inject({ method: 'GET', url: '/admin/rutas/ajustes', headers: auth });
+    expect(guardado.json().ajustes).toMatchObject({ esperaRespuestaMinutos: 45, maxIntentos: 7, pedirUbicacionCadaMinutos: 0 });
 
     const estado = await app.inject({ method: 'GET', url: '/admin/rutas', headers: auth });
-    expect(estado.json().motor).toMatchObject({ espera: 45, horario: [10, 18] });
+    expect(estado.json().motor).toMatchObject({ espera: 45, maxIntentos: 7, horario: [10, 18] });
 
     const reset = await app.inject({ method: 'DELETE', url: '/admin/rutas/ajustes', headers: auth });
     expect(reset.statusCode).toBe(200);

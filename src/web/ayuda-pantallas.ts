@@ -44,7 +44,7 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
   },
   "hoy": {
     "titulo": "Pedidos GSG",
-    "que": "Revisa pedidos, ubicaciones pendientes y errores. El cliente tiene como máximo tres intentos de ubicación.",
+    "que": "Revisa pedidos, ubicaciones pendientes y errores. El intervalo y el máximo de mensajes por cliente se configuran en Automatización GSG.",
     "preguntas": []
   },
   "chat": {
