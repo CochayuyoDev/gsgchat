@@ -210,7 +210,7 @@ async function loteListo(repos: Repos, telefonos: string[]) {
 describe('el motor', () => {
   let repos: FakeRepos;
   // Espera corta a proposito: con las 3 h reales, tres intentos seguidos se salen del horario de 9 a 19.
-  const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, esperaRespuestaMinutos: 30, timezone: 'America/Lima' };
+  const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, esperaRespuestaMinutos: 30, maxIntentos: 3, timezone: 'America/Lima' };
 
   beforeEach(() => {
     repos = createFakeRepos();

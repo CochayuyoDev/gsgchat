@@ -327,14 +327,22 @@ export async function registerRutasRoutes(
     }
     const porDefecto = ajustesPorDefecto(opciones);
     const ajustes = await repos.rutas.ajustes.set(body, porDefecto);
+    // El cambio es efectivo también para quienes ya esperan el siguiente
+    // mensaje: se vuelve a calcular desde el último envío real, no desde
+    // cuándo se guardaron los ajustes. Se hace también si la lista no cambió:
+    // repetir «Guardar» repara cualquier programación que hubiera quedado
+    // pendiente por una incidencia anterior.
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos);
     const vigente = conFranjaDeLaPolitica(aplicarAjustes(opciones, ajustes), franja());
-    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin }, vigente };
+    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin }, vigente, seguimientosReprogramados };
   });
 
   /** Volver a lo que diga la configuracion. */
   app.delete('/admin/rutas/ajustes', async () => {
     await repos.rutas.ajustes.reset();
-    return { ok: true, ajustes: ajustesPorDefecto(opciones) };
+    const ajustes = ajustesPorDefecto(opciones);
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos);
+    return { ok: true, ajustes, seguimientosReprogramados };
   });
 
   app.post('/admin/rutas/previsualizar', async (request) => {

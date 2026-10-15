@@ -212,7 +212,7 @@ export function rutasPage(opts: RutasOpts): string {
         Fuera de ese horario, los mensajes esperan al día siguiente.</p>
 
       <h3 class="aj-titulo">¿Cómo se insiste si no contesta?</h3>
-      <p class="aj-frase">El primer mensaje sale de inmediato. Define cuánto esperar después de cada mensaje antes de enviar el siguiente. Puedes configurar hasta 100 mensajes por cliente, incluido el primero; al llegar al último, queda pendiente de atención.</p>
+      <p class="aj-frase">El primer aviso sale de inmediato. Por defecto, los siguientes esperan 30, 25 y 20 minutos. Puedes configurar hasta 100 mensajes por cliente; al guardar, los cambios también recalculan los seguimientos que ya esperan, desde el último mensaje enviado. Al llegar al último, queda pendiente de atención.</p>
       <div id="aj-secuencia"></div>
       <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:var(--esp-2)">Agregar mensaje</button>
 
@@ -1343,16 +1343,18 @@ document.getElementById('aj-guardar').onclick = async function () {
     var v = r.vigente;
     estado.textContent = 'Guardado: de ' + v.horaInicio + ':00 a ' + v.horaFin + ':00, ' +
       v.maxIntentos + ' mensajes como máximo; esperas: ' + (v.esperasMensajesMinutos || []).join(', ') + ' min, ' +
-      v.pausaMinSegundos + '-' + v.pausaMaxSegundos + ' s entre clientes. Se aplica en el siguiente mensaje.';
+      v.pausaMinSegundos + '-' + v.pausaMaxSegundos + ' s entre clientes. Se actualizaron ' +
+      (r.seguimientosReprogramados || 0) + ' seguimientos activos desde su último envío.';
     await refrescar();
   } catch (e) { estado.textContent = e.message; }
 };
 
 document.getElementById('aj-reset').onclick = async function () {
   try {
-    await api('/admin/rutas/ajustes', { method: 'DELETE' });
+    var r = await api('/admin/rutas/ajustes', { method: 'DELETE' });
     await cargarAjustes();
-    document.getElementById('aj-estado').textContent = 'Listo: vuelven los valores y textos de siempre.';
+    document.getElementById('aj-estado').textContent = 'Listo: vuelven los valores y textos de siempre. Se actualizaron ' +
+      (r.seguimientosReprogramados || 0) + ' seguimientos activos.';
     await refrescar();
   } catch (e) { document.getElementById('aj-estado').textContent = e.message; }
 };
