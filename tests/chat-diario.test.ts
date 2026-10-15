@@ -8,11 +8,34 @@ import { registrarLimpiezaChat } from '../src/whatsapp/limpieza-chat.js';
 import { chatPage } from '../src/web/chat-page.js';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, PIN_LIMA } from './escenario-entregas.js';
 import { hashClave } from '../src/auth/usuarios.js';
+import { COOKIE_SESION, firmarSesion } from '../src/auth/sesion.js';
+import { secretoDeSesion } from '../src/auth/routes.js';
+import { alcanceChat } from '../src/web/alcance-chat.js';
 
 const config = loadConfig({ PUBLIC_BASE_URL: 'http://localhost:3000', DATABASE_URL: 'mysql://x/y', TIMEZONE: 'America/Lima', TRACKING_SECRET: 'x'.repeat(40) });
 afterEach(() => vi.useRealTimers());
 
 describe('chat del día, iniciado únicamente por GSGchat', () => {
+  it('una cookie antigua autenticada abre el chat sin cursor y conserva el límite de 24 horas', async () => {
+    const e = await crearEscenarioEntregas();
+    try {
+      const usuario = await e.repos.usuarios.crear({ usuario: 'operadorlegacy', nombre: 'Legacy', rol: 'admin', clave: hashClave('Clave-123-segura') });
+      const token = firmarSesion(secretoDeSesion(config), { u: usuario.id, v: usuario.sesionVersion });
+      const cookie = `${COOKIE_SESION}=${token}`;
+      const contacto = await e.repos.contacts.upsertFromInbound('51987603332', 'Cliente');
+      await e.repos.messages.add({ contactId: contacto.id, direction: 'out', kind: 'text', wamid: 'legacy.actual', body: 'pedido vigente', payload: { origen: 'sistema' } });
+      await e.repos.messages.add({ contactId: contacto.id, direction: 'out', kind: 'text', wamid: 'legacy.antiguo', body: 'pedido antiguo', payload: { origen: 'sistema' } });
+      e.repos.messages._all.find(m => m.wamid === 'legacy.antiguo')!.storedAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+      const lista = await e.app.inject({ url: '/admin/chat/conversations', headers: { cookie } });
+      expect(lista.statusCode).toBe(200);
+      expect(lista.json().items).toHaveLength(1);
+      const hilo = await e.app.inject({ url: `/admin/chat/${contacto.id}?limit=30`, headers: { cookie } });
+      expect(hilo.statusCode).toBe(200);
+      expect(hilo.json().messages.map((m: { body: string }) => m.body)).toEqual(['pedido vigente']);
+      expect(() => alcanceChat(null)).toThrow(expect.objectContaining({ statusCode: 401 }));
+    } finally { await e.cerrar(); }
+  });
+
   it('con la vista diaria activa un pedido de GSG recibe el pin, lo confirma y lo reporta', async () => {
     const e = await crearEscenarioEntregas({ agente: true });
     try {
