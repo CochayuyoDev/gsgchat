@@ -428,9 +428,22 @@ export async function registerRutasRoutes(
   /** Cuantos hay en cada vista: son las tarjetas de arriba de la pantalla. */
   app.get('/admin/rutas/vistas', async (request) => {
     const query = z.object({ loteId: z.string().optional() }).parse(request.query ?? {});
-    const cifras: Record<string, number> = {};
-    for (const [nombre, filtro] of Object.entries(VISTAS)) {
-      cifras[nombre] = await repos.rutas.contarSolicitudes({ ...filtro, loteId: query.loteId });
+    const grupos = await repos.rutas.resumenSolicitudes(query.loteId);
+    const cifras: Record<string, number> = Object.fromEntries(Object.keys(VISTAS).map((nombre) => [nombre, 0]));
+    const sumar = (nombre: string, n: number) => { cifras[nombre] = (cifras[nombre] ?? 0) + n; };
+    for (const grupo of grupos) {
+      const n = grupo.total;
+      sumar('todos', n);
+      if (grupo.estado === 'resuelto') sumar('resueltos', n);
+      if (ESTADOS_SIN_UBICACION.includes(grupo.estado)) sumar('sin_ubicacion', n);
+      if (grupo.estado === 'enviado') sumar('esperando', n);
+      if (grupo.estado === 'respondio') sumar('respondieron', n);
+      if (grupo.estado === 'pendiente') sumar('pendientes', n);
+      if (grupo.incidencia === 'sin_whatsapp') sumar('sin_whatsapp', n);
+      if (['numero_corto', 'numero_largo', 'numero_invalido', 'numero_fijo'].includes(grupo.incidencia ?? '')) sumar('numero_malo', n);
+      if (grupo.estado === 'derivado') sumar('derivados', n);
+      if (grupo.estado === 'supervision') sumar('supervision', n);
+      if (grupo.requiereHumano) sumar('requieren_persona', n);
     }
     return { cifras, nombres: NOMBRES_VISTA };
   });

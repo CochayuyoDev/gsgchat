@@ -283,7 +283,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     // Las entregas del dia: lo que necesita a alguien, GSG sin conectar, ningun motorizado.
     const modoGsg = (deps.ajustes?.modo() ?? 'gsg') === 'gsg';
     if (deps.entregas) {
-      const r = await deps.entregas.resumen().catch(() => null);
+      const r = await (deps.entregas.resumenAvisos ? deps.entregas.resumenAvisos() : deps.entregas.resumen()).catch(() => null);
       if (r) {
         // «Revisar y confirmar antes de enviar»: lo que llegó de GSG no sale hasta que alguien lo confirma.
         const pc = r.porConfirmarEnvio;
@@ -292,7 +292,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         const porTipo = new Map<TipoAlertaHoy, number>();
         for (const a of r.alertas ?? []) porTipo.set(a.tipo, (porTipo.get(a.tipo) ?? 0) + 1);
         for (const [tipo, cuantas] of porTipo) avisos.push({ tipo: `hay_que_mirar_${tipo}`, nivel: 'bad', texto: `Hay que mirar: ${TITULO_ALERTA[tipo](cuantas)}`, href: '/hoy', n: cuantas });
-        const n = r.cifras.incidencia;
+        const n = r.cifras.incidencia ?? 0;
         if (n > 0) avisos.push({ tipo: 'entregas', nivel: 'warn', texto: `${n} pedido${n === 1 ? '' : 's'} de hoy necesita${n === 1 ? '' : 'n'} a alguien`, href: '/hoy', n });
         if (r.cierrePendiente > 0) avisos.push({ tipo: 'cierre', nivel: 'info', texto: `${r.cierrePendiente} pedido${r.cierrePendiente === 1 ? '' : 's'} de ayer sigue${r.cierrePendiente === 1 ? '' : 'n'} sin cerrar`, href: '/hoy', n: r.cierrePendiente });
         if (r.gsg && !r.gsg.conectada) avisos.push({ tipo: 'gsg', nivel: 'info', texto: 'GSG no está conectado: los pedidos del día no entran solos', href: '/hoy' });
@@ -392,7 +392,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
     const politica = politicaVigente();
     // Las entregas del dia (GSG): en modo gsg es lo primero que se ve.
-    const resumenEntregas = deps.entregas ? await deps.entregas.resumen().catch(() => null) : null;
+    const resumenEntregas = deps.entregas
+      ? await (deps.entregas.resumenAvisos ? deps.entregas.resumenAvisos() : deps.entregas.resumen()).catch(() => null)
+      : null;
     const entregasHoy = resumenEntregas
       ? {
           dia: resumenEntregas.dia,

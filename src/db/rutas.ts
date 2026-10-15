@@ -225,6 +225,10 @@ export interface RutasRepo {
   agregarSolicitudes(loteId: string, filas: NuevaSolicitud[]): Promise<Solicitud[]>;
   solicitud(id: number): Promise<Solicitud | null>;
   listarSolicitudes(query: ConsultaSolicitudes): Promise<Solicitud[]>;
+  /** Solicitudes de un lote para varios teléfonos, en una sola lectura. */
+  solicitudesPorLoteYTelefonos(loteId: string, phones: string[]): Promise<Solicitud[]>;
+  /** Conteo agrupado para construir las vistas del tablero en una lectura. */
+  resumenSolicitudes(loteId?: string): Promise<Array<{ estado: EstadoSolicitud; incidencia: CodigoIncidencia | null; requiereHumano: boolean; total: number }>>;
   contarSolicitudes(query: Omit<ConsultaSolicitudes, 'limit' | 'offset'>): Promise<number>;
   actualizarSolicitud(id: number, patch: SolicitudPatch): Promise<Solicitud>;
   cifrasPorEstado(loteId?: string): Promise<Record<string, number>>;
@@ -603,6 +607,26 @@ export function createRutasRepo(pool: Pool): RutasRepo {
         [...params, Number(query.limit), Number(query.offset)],
       );
       return rows.map(toSolicitud);
+    },
+
+    async solicitudesPorLoteYTelefonos(loteId, phones) {
+      const unicos = [...new Set(phones.filter(Boolean))];
+      if (!unicos.length) return [];
+      const { rows } = await pool.query<SolicitudRow>(
+        `select * from rutas_solicitudes where lote_id = $1 and phone in ($2) order by updated_at desc, id desc`,
+        [loteId, unicos],
+      );
+      return rows.map(toSolicitud);
+    },
+
+    async resumenSolicitudes(loteId) {
+      const { rows } = await pool.query<{ estado: EstadoSolicitud; incidencia: CodigoIncidencia | null; requiere_humano: number | boolean; total: number }>(
+        `select estado, incidencia, requiere_humano, count(*) as total
+           from rutas_solicitudes ${loteId ? 'where lote_id = $1' : ''}
+          group by estado, incidencia, requiere_humano`,
+        loteId ? [loteId] : [],
+      );
+      return rows.map((r) => ({ estado: r.estado, incidencia: r.incidencia, requiereHumano: Boolean(r.requiere_humano), total: Number(r.total) }));
     },
 
     async contarSolicitudes(query) {

@@ -46,7 +46,7 @@ describe('ajustes: puros', () => {
     const a = ajustesPorDefecto(opciones);
     expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 180, maxIntentos: 3, horaInicio: 9, horaFin: 19 });
     expect(a.plantillas.solicitud).toEqual([]);
-    expect(aplicarAjustes(opciones, a)).toEqual(opciones);
+    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperasMensajesMinutos: [180, 180] });
   });
 
   it('aplicar corrige un maximo por debajo del minimo y un fin antes del inicio', () => {
@@ -123,7 +123,8 @@ describe('ajustes: el motor los usa', () => {
     expect(salida.accion).toBe('envio');
     expect(enviados[0]?.interactive?.body).toBe('Hola Cliente, nuestra tienda necesita su ubicación para P-1.');
     const [sol] = await repos.rutas.listarSolicitudes({ limit: 1, offset: 0 });
-    expect(sol!.proximoIntentoAt!.getTime() - HORA_BUENA.getTime()).toBe(5 * 60_000);
+    // El máximo incluye este primer mensaje: no debe quedar esperando el intervalo que ya no usará.
+    expect(sol!.proximoIntentoAt!.getTime()).toBe(HORA_BUENA.getTime());
 
     // Con maxIntentos = 1, a la siguiente vuelta pasa al repartidor.
     const motor2 = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => new Date(HORA_BUENA.getTime() + 6 * 60_000) });
@@ -136,6 +137,39 @@ describe('ajustes: el motor los usa', () => {
     const motor3 = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => new Date(HORA_BUENA.getTime() + 60 * 60_000), azar: () => 0 });
     await motor3.tick();
     expect(enviados.at(-1)?.interactive?.body).toMatch(/clip/);
+  });
+
+  it('respeta un intervalo distinto para cada seguimiento y permite más de tres mensajes', async () => {
+    await loteListo(repos, ['51987654321']);
+    await repos.rutas.ajustes.set({
+      esperasMensajesMinutos: [30, 20, 10, 5],
+      textosAdicionales: [['Mensaje 4 para {nombre}, pedido {pedido}.']],
+    }, ajustesPorDefecto(opciones));
+    const { sender, enviados } = senderFalso();
+    let momento = HORA_BUENA;
+    const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => momento, azar: () => 0 });
+
+    for (const [espera, numero] of [[30, 1], [20, 2], [10, 3], [5, 4]] as const) {
+      const salida = await motor.tick();
+      expect(salida.accion).toBe('envio');
+      expect(enviados).toHaveLength(numero);
+      const [solicitud] = await repos.rutas.listarSolicitudes({ limit: 1, offset: 0 });
+      expect(solicitud!.proximoIntentoAt!.getTime() - momento.getTime()).toBe(espera * 60_000);
+      if (numero === 4) expect(enviados[3]?.interactive?.body).toBe('Mensaje 4 para Cliente, pedido P-1.');
+      momento = new Date(momento.getTime() + espera * 60_000 + 1_000);
+    }
+
+    expect((await motor.tick()).accion).toBe('envio');
+    expect(enviados).toHaveLength(5);
+    momento = new Date(momento.getTime() + 31_000);
+    expect((await motor.tick()).accion).toBe('derivacion');
+
+    const [solicitud] = await repos.rutas.listarSolicitudes({ limit: 1, offset: 0 });
+    expect(solicitud!.intentos).toBe(5);
+    const ajuste = await repos.rutas.ajustes.get(ajustesPorDefecto(opciones));
+    expect(ajuste.maxIntentos).toBe(5);
+    expect(ajuste.esperasMensajesMinutos).toEqual([30, 20, 10, 5]);
+    expect(ajuste.textosAdicionales).toEqual([['Mensaje 4 para {nombre}, pedido {pedido}.']]);
   });
 
   it('la franja general manda: a las 10:00 con horario de 12 a 18 no se escribe', async () => {
@@ -268,6 +302,17 @@ describe('ajustes y plantillas propias: la API', () => {
     expect(reset.statusCode).toBe(200);
     const despues = await app.inject({ method: 'GET', url: '/admin/rutas', headers: auth });
     expect(despues.json().motor).toMatchObject({ espera: 180, horario: [9, 19] });
+
+    const secuencia = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { esperasMensajesMinutos: [30, 20, 10, 5], textosAdicionales: [['Hola {nombre}, mensaje 4.']] } });
+    expect(secuencia.statusCode).toBe(200);
+    expect(secuencia.json().vigente).toMatchObject({ esperasMensajesMinutos: [30, 20, 10, 5], maxIntentos: 5 });
+    expect(secuencia.json().ajustes.textosAdicionales).toEqual([['Hola {nombre}, mensaje 4.']]);
+    const secuenciaLeida = await app.inject({ method: 'GET', url: '/admin/rutas/ajustes', headers: auth });
+    expect(secuenciaLeida.json().ajustes.esperasMensajesMinutos).toEqual([30, 20, 10, 5]);
+    expect(secuenciaLeida.json().ajustes.textosAdicionales).toEqual([['Hola {nombre}, mensaje 4.']]);
+    for (const payload of [{ esperasMensajesMinutos: [0] }, { esperasMensajesMinutos: Array(100).fill(1) }]) {
+      expect((await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload })).statusCode).toBe(400);
+    }
   });
 
   it('una plantilla propia se crea con lint, aparece en el catalogo y se borra; las del catalogo no', async () => {

@@ -315,8 +315,10 @@ describe('ajustes del reparto y plantillas propias', () => {
   it('los ajustes se guardan encima de los valores por defecto y se pueden borrar', async () => {
     const porDefecto = {
       pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 3, pedirUbicacionCadaMinutos: 0, horaInicio: 9, horaFin: 19,
+      esperasMensajesMinutos: [30, 30],
       plantillas: { solicitud: [], recordatorio: [], insistencia: [] },
       textos: { solicitud: [], recordatorio: [], insistencia: [] },
+      textosAdicionales: [],
     };
     expect(await repos.rutas.ajustes.get(porDefecto)).toEqual(porDefecto);
     const guardado = await repos.rutas.ajustes.set({ esperaRespuestaMinutos: 45, textos: { solicitud: ['Hola {nombre}'], recordatorio: [], insistencia: [] } }, porDefecto);

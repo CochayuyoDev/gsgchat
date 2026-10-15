@@ -99,7 +99,6 @@ export interface AuthDeps {
    * repetirse entre tiendas y se reserva aqui antes de crearlo.
    */
   directorio?: DirectorioUsuarios;
-  ultimoChatId?: () => Promise<string>;
 }
 
 export interface DirectorioUsuarios {
@@ -371,7 +370,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     const t = ahora().getTime();
     const carga = existente?.chatSesion
       ? { u: u.id, v: u.sesionVersion, sid: existente.chatSesion.sid, iat: existente.chatSesion.desde.getTime(), chatAfterId: existente.chatSesion.afterId }
-      : nuevaCargaSesion(u.id, u.sesionVersion, await deps.ultimoChatId?.() ?? '0', t);
+      : nuevaCargaSesion(u.id, u.sesionVersion, '0', t);
     reply.header('set-cookie', cookieDeSesion(firmarSesion(secreto, carga, t), segura));
   };
 

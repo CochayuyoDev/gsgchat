@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { bootstrapSecrets, decrypt, encrypt, keyFromBase64 } from '../src/settings/crypto.js';
 import { createSettingsService } from '../src/settings/service.js';
 import { createDynamicWhatsAppClient, NotConfiguredError, checkConnection } from '../src/whatsapp/dynamic.js';
+import { createSender } from '../src/outbound/sender.js';
 import { loadConfig } from '../src/config.js';
-import { createMemorySettingsRepo, TEST_SETTINGS_KEY } from './fakes.js';
+import { createFakeRepos, createMemorySettingsRepo, TEST_SETTINGS_KEY } from './fakes.js';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -155,8 +156,15 @@ describe('cliente dinamico', () => {
     );
     const client = createDynamicWhatsAppClient(settings);
 
+    expect(client.conectado?.()).toBe(false);
     await expect(client.sendText('5215500000000', 'hola')).rejects.toThrow(NotConfiguredError);
     await expect(client.sendText('5215500000000', 'hola')).rejects.toThrow('/setup');
+
+    const repos = createFakeRepos();
+    const sender = createSender({ repos, wa: client, phoneNumberId: 'PNID', warmup: { startPerDay: 50, growth: 1.5, hardCap: 1000 }, maxMarketingPerContact7d: 2 });
+    const salida = await sender.send({ phone: '51987650000', kind: 'freeform', category: 'UTILITY', text: 'hola' });
+    expect(salida).toMatchObject({ ok: false, blocked: true, code: 'sin_conexion', retryAfterMs: 120_000 });
+    expect(repos._deliveries).toHaveLength(0);
   });
 });
 

@@ -490,6 +490,17 @@ export interface ServicioEntregas {
   recargar(): Promise<void>;
   /** El dia del reparto de hoy, AAAA-MM-DD en el reloj del negocio. */
   hoy(): string;
+  /** Conteos para campana e inicio, sin cargar y transformar cada pedido. */
+  resumenAvisos?(): Promise<{
+    dia: string;
+    porConfirmarEnvio: PorConfirmarEnvio;
+    cifras: Partial<ResumenEntregas['cifras']>;
+    gsg: ResumenEntregas['gsg'];
+    ultimoCierre: ResultadoCierre | null;
+    cierrePendiente: number;
+    gsgCola: ResumenEntregas['gsgCola'];
+    alertas: AlertaHoy[];
+  }>;
 
   /**
    * Mete en el sistema una lista del dia ya recibida (la del simulador de
@@ -4821,24 +4832,92 @@ ${lista}
 
   // ----------------------------------------------------------- pantalla
 
-  async function fila(e: Entrega, motorizados: Map<number, Motorizado>): Promise<FilaEntrega> {
+  async function fila(e: Entrega, motorizados: Map<number, Motorizado>, solicitudes: Map<string, Solicitud> = new Map()): Promise<FilaEntrega> {
     const m = e.motorizadoId ? (motorizados.get(e.motorizadoId) ?? null) : null;
     let solicitud: FilaEntrega['solicitud'] = null;
     if (e.loteId && e.ubicacionEstado === 'pendiente') {
-      const s = (await repos.rutas.listarSolicitudes({ loteId: e.loteId, q: e.phone, limit: 5, offset: 0 }).catch(() => [])).find((x) => x.phone === e.phone);
+      const s = solicitudes.get(`${e.loteId}\u0000${e.phone}`);
       if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId };
     }
     return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [], cambioUbicacion: marcaCambioUbicacion(e, tz()) };
   }
 
-  async function resumen(): Promise<ResumenEntregas> {
+  let resumenEnCurso: Promise<ResumenEntregas> | null = null;
+  function resumen(): Promise<ResumenEntregas> {
+    // /admin/resumen y /admin/avisos suelen cargarse juntos al abrir Inicio.
+    // Comparten la lectura completa si llegan en la misma ventana, en vez de
+    // recorrer hasta 20.000 pedidos dos veces al mismo tiempo.
+    if (resumenEnCurso) return resumenEnCurso;
+    const actual = calcularResumen();
+    resumenEnCurso = actual;
+    void actual.then(
+      () => { if (resumenEnCurso === actual) resumenEnCurso = null; },
+      () => { if (resumenEnCurso === actual) resumenEnCurso = null; },
+    );
+    return actual;
+  }
+
+  async function resumenAvisos(): Promise<{
+    dia: string;
+    porConfirmarEnvio: PorConfirmarEnvio;
+    cifras: Partial<ResumenEntregas['cifras']>;
+    gsg: ResumenEntregas['gsg'];
+    ultimoCierre: ResultadoCierre | null;
+    cierrePendiente: number;
+    gsgCola: ResumenEntregas['gsgCola'];
+    alertas: AlertaHoy[];
+  }> {
+    if (!repo.resumenLigero) {
+      const completo = await resumen();
+      return completo;
+    }
+    const [conteos, cola] = await Promise.all([
+      repo.resumenLigero(hoy()),
+      repos.rutas.cifrasReportes().catch(() => null),
+    ]);
+    const cifras = { ...conteos.estados, total: Object.values(conteos.estados).reduce((a, b) => a + b, 0), faltaUbicacion: conteos.faltaUbicacion, faltaConfirmacion: conteos.faltaConfirmacion } as Partial<ResumenEntregas['cifras']>;
+    cifras.enCamino = (conteos.estados.lista ?? 0) + (conteos.estados.esperando_motorizado ?? 0) + (conteos.estados.avisada ?? 0) + (conteos.estados.terminada ?? 0);
+    const gsgCola = cola ? { pendiente: cola.pendiente ?? 0, enviado: cola.enviado ?? 0, fallido: cola.fallido ?? 0, atascado: cola.atascado ?? 0 } : null;
+    return {
+      dia: hoy(),
+      porConfirmarEnvio: { total: conteos.retenidasTotal, ubicacion: conteos.retenidasUbicacion, confirmar: conteos.retenidasConfirmar, mas: conteos.envioLiberado, aviso: avisoPorConfirmar(conteos.retenidasTotal, conteos.retenidasUbicacion, conteos.retenidasConfirmar, conteos.envioLiberado) },
+      cifras,
+      gsg: deps.conexionGsg?.estado() ?? null,
+      ultimoCierre,
+      cierrePendiente: conteos.cierrePendiente,
+      gsgCola,
+      alertas: [],
+    };
+  }
+
+  async function calcularResumen(): Promise<ResumenEntregas> {
     const dia = hoy();
     // Sin tope bajo: con un tope de 1000 (y en orden de llegada) lo que entraba despues del 1000 del dia se guardaba pero no salia en Hoy.
     const entregas = await repo.listar({ dia, limit: TOPE_DEL_DIA });
     const motorizados: Motorizado[] = [];
     const porId = new Map<number, Motorizado>();
     const filas: FilaEntrega[] = [];
-    for (const e of entregas) filas.push(await fila(e, porId));
+    const solicitudes = new Map<string, Solicitud>();
+    const pendientesPorLote = new Map<string, Set<string>>();
+    for (const e of entregas) {
+      if (e.loteId && e.ubicacionEstado === 'pendiente') {
+        const telefonos = pendientesPorLote.get(e.loteId) ?? new Set<string>();
+        telefonos.add(e.phone);
+        pendientesPorLote.set(e.loteId, telefonos);
+      }
+    }
+    // El resumen de Hoy puede incluir miles de pedidos. Resolver solicitudes
+    // de ubicación en bloque evita una consulta secuencial por cada pedido.
+    await Promise.all([...pendientesPorLote].map(async ([loteId, telefonos]) => {
+      const filasLote = await repos.rutas.solicitudesPorLoteYTelefonos(loteId, [...telefonos]).catch(() => []);
+      for (const solicitud of filasLote) {
+        const clave = `${loteId}\u0000${solicitud.phone}`;
+        // Igual que el listado de solicitudes: se conserva la más reciente
+        // si el lote contiene más de una fila para el mismo teléfono.
+        if (!solicitudes.has(clave)) solicitudes.set(clave, solicitud);
+      }
+    }));
+    for (const e of entregas) filas.push(await fila(e, porId, solicitudes));
     // Un cliente con varios pedidos hoy: cada fila sabe de las otras.
     const porTelefono = new Map<string, string[]>();
     for (const e of entregas) if (!ESTADOS_FINALES.includes(e.estado)) porTelefono.set(e.phone, [...(porTelefono.get(e.phone) ?? []), e.referencia]);
@@ -4908,6 +4987,7 @@ ${lista}
   return {
     ahora,
     ajustes: () => ajustes,
+    resumenAvisos,
     async guardarAjustes(patch) {
       const siguiente = ajustesEntregasSchema.parse({ ...ajustes, ...patch, textos: { ...ajustes.textos, ...(patch.textos ?? {}) }, plantillas: { ...ajustes.plantillas, ...(patch.plantillas ?? {}) }, cierreDelDia: { ...ajustes.cierreDelDia, ...(patch.cierreDelDia ?? {}) }, segundaVisita: { ...ajustes.segundaVisita, ...(patch.segundaVisita ?? {}) }, horarioEntregas: { ...ajustes.horarioEntregas, ...(patch.horarioEntregas ?? {}) }, soporte: { ...ajustes.soporte, ...(patch.soporte ?? {}) }, clienteRecurrente: { ...ajustes.clienteRecurrente, ...(patch.clienteRecurrente ?? {}) } });
       await deps.settingsRepo.put(CLAVE_AJUSTES, JSON.stringify(siguiente), false);

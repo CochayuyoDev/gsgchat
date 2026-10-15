@@ -49,6 +49,8 @@ export interface OpcionesMotor {
   pausaMaxSegundos: number;
   /** Cuanto se espera una respuesta antes de volver a escribir. */
   esperaRespuestaMinutos: number;
+  /** Espera específica después de cada mensaje enviado, del 1 al 2 en índice 0. */
+  esperasMensajesMinutos?: number[];
   /** Mensajes por cliente antes de pasarlo a una persona. */
   maxIntentos: number;
   /** Campo antiguo conservado por compatibilidad; no activa otro modo de envío. */
@@ -261,8 +263,11 @@ export function crearMotor(deps: MotorDeps): Motor {
     }
   }
 
-  /** Minutos hasta volver a pedirle la ubicacion: cada tantos minutos si esta encendido, si no la espera de siempre. */
-  const esperaHastaElSiguiente = (): number => opciones.esperaRespuestaMinutos;
+  /** El primer intervalo es después del mensaje 1; si no hay secuencia, usar el valor antiguo. */
+  const esperaHastaElSiguiente = (intentosPrevios: number): number =>
+    intentosPrevios + 1 >= opciones.maxIntentos
+      ? 0
+      : opciones.esperasMensajesMinutos?.[intentosPrevios] ?? opciones.esperaRespuestaMinutos;
 
   /** Cuando se mando el ultimo mensaje, para respetar la pausa. */
   let ultimoEnvio = 0;
@@ -279,7 +284,9 @@ export function crearMotor(deps: MotorDeps): Motor {
    * El texto de un paso cuando se escribe libre: las redacciones guardadas
    * desde la pantalla si las hay, o las de siempre.
    */
-  function textoDelPaso(paso: PasoUbicacion, ctx: ContextoMensaje, clave: string): string {
+  function textoDelPaso(paso: PasoUbicacion, ctx: ContextoMensaje, clave: string, intentosPrevios: number): string {
+    const adicional = intentosPrevios >= 3 ? ajustes.textosAdicionales[intentosPrevios - 3] : undefined;
+    if (adicional?.length) return rellenarTexto(elegirVariante(adicional, clave), ctx);
     const propias = ajustes.textos[paso];
     if (propias.length) return rellenarTexto(elegirVariante(propias, clave), ctx);
     return textoLibre(paso, ctx, clave);
@@ -477,7 +484,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           kind: 'interactive',
           category: 'UTILITY',
           // La redaccion que le toca a este cliente en este intento.
-          interactive: { body: deEntrega || textoDelPaso(paso, ctx, `${phone}:${solicitud.intentos}`), locationRequest: true },
+          interactive: { body: deEntrega || textoDelPaso(paso, ctx, `${phone}:${solicitud.intentos}`, solicitud.intentos), locationRequest: true },
           limitesContacto,
         });
 
@@ -499,7 +506,7 @@ export function crearMotor(deps: MotorDeps): Motor {
         estado: solicitud.estado === 'respondio' ? 'respondio' : 'enviado',
         intentos: solicitud.intentos + 1,
         ultimoEnvioAt: momento,
-        proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente() * 60_000),
+        proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 60_000),
         // Un envio que sale bien deja atras cualquier incidencia de envio
         // anterior: si antes fallo y ahora salio, ya no hay nada que reportar.
         incidencia: null,
@@ -590,7 +597,7 @@ export function crearMotor(deps: MotorDeps): Motor {
     await repos.rutas.actualizarSolicitud(solicitud.id, {
       intentos,
       ultimoEnvioAt: momento,
-      proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente() * 60_000),
+      proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 60_000),
       incidencia: 'error_envio',
       incidenciaDetalle: salida.error.slice(0, 300),
     });

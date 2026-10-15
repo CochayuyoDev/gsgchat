@@ -314,7 +314,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las
   // pantallas privadas; va antes de cualquier ruta que lo necesite.
   const secretoInterno = deps.secretoInterno ?? randomBytes(24).toString('hex');
-  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, ultimoChatId: () => repos.messages.ultimoId(), nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName, modo: () => ajustes?.modo() ?? 'gsg', secretoInterno, plan: deps.plan, primeraCuentaRol: deps.primeraCuentaRol, directorio: deps.directorio });
+  await registerAuth(app, { config, usuarios: repos.usuarios, claves: repos.claves, actividad: repos.actividad, nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName, modo: () => ajustes?.modo() ?? 'gsg', secretoInterno, plan: deps.plan, primeraCuentaRol: deps.primeraCuentaRol, directorio: deps.directorio });
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });

@@ -191,7 +191,7 @@ document.querySelector('.wrap').addEventListener('click', async function (ev) {
 });
 
 cargar().catch(function (e) { document.getElementById('procesos').innerHTML = '<div class="vacio"><h3>No se pudieron leer los procesos</h3><p>' + esc(e.message) + '</p></div>'; });
-setInterval(function () { if (!document.hidden && !document.querySelector('.dlg-fondo')) cargar().catch(function () {}); }, 20000);
+setInterval(function () { if (!document.hidden && !document.querySelector('.dlg-fondo')) cargar().catch(function () {}); }, 60000);
 `;
 
   return appShell({

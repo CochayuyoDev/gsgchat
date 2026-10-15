@@ -62,13 +62,19 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(intentos({ estado: 'enviado', intentos: 2 }, 3)).toBe('intento 2 de 3');
   });
 
-  it('solo ofrece intervalo y máximo de mensajes, sin campos ni JS del modo ilimitado', () => {
-    expect(html).toContain('id="aj-espera"');
-    expect(html).toContain('id="aj-intentos"');
+  it('permite configurar intervalos por mensaje y agregar más de tres, sin modo ilimitado', () => {
+    expect(html).toContain('id="aj-secuencia"');
+    expect(html).toContain('id="aj-agregar-mensaje"');
+    expect(html).toContain('esperasMensajesMinutos');
+    expect(html).toContain('Máximo 100 mensajes por cliente');
     expect(html).not.toContain('aj-cada');
     expect(html).not.toContain('sin tope de mensajes');
     expect(html).not.toContain('hasta que la mande');
     expect(html).not.toContain('max="10" class="aj-num" aria-label="Mensajes como máximo"');
+    expect(html).toContain('id="aj-pasos-adicionales"');
+    expect(html).toContain('data-texto-adicional');
+    expect(html).toContain('textosAdicionales');
+    expect(html).toContain("numero = i + 4");
   });
   it('el javascript de la página compila sin errores de sintaxis', () => {
     expect(() => new Function(scriptDeLaPagina())).not.toThrow();

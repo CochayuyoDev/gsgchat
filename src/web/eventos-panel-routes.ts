@@ -12,7 +12,7 @@ export function registrarEventosPanel(app: FastifyInstance, bus?: Bus, repos?: R
 
   const epoch = randomUUID();
   let secuencia = 0;
-  type Conexion = { sid: string; afterId: string; raw: NodeJS.WritableStream & { writableLength?: number; destroyed?: boolean }; cerrar: () => void };
+  type Conexion = { sid: string; raw: NodeJS.WritableStream & { writableLength?: number; destroyed?: boolean }; cerrar: () => void };
   const conexiones = new Set<Conexion>();
   const mandar = (evento: string, payload: Record<string, unknown>, conexion?: Conexion) => {
     const destino = conexion ? [conexion] : [...conexiones];
@@ -41,7 +41,6 @@ export function registrarEventosPanel(app: FastifyInstance, bus?: Bus, repos?: R
     const ref = await repos.messages.referenciaVisiblePorWamid(wamid, new Date(Date.now() - 24 * 60 * 60 * 1000)).catch(() => null);
     if (!ref) return;
     for (const c of conexiones) {
-      if (BigInt(ref.id) <= BigInt(c.afterId)) continue;
       mandar(tipo, tipo === 'chat.status'
         ? { contactId: ref.contactId, messageId: ref.id, wamid, estado }
         : { contactId: ref.contactId, messageId: ref.id }, c);
@@ -65,7 +64,6 @@ export function registrarEventosPanel(app: FastifyInstance, bus?: Bus, repos?: R
     let cerrado = false;
     const conexion: Conexion = {
       sid: usuario.chatSesion.sid,
-      afterId: usuario.chatSesion.afterId,
       raw,
       cerrar() {
         if (cerrado) return;

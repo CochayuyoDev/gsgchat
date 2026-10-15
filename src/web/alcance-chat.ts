@@ -1,7 +1,7 @@
 import type { UsuarioSesion } from '../auth/routes.js';
 
 export interface AlcanceChat {
-  /** MAX(id) de la tienda al iniciar el login web, decimal bigint firmado. */
+  /** Filtro de mensajes de sesiones web; la retención de 24 h fija el límite temporal. */
   afterId: string;
   /** Retención global móvil de mensajes, se calcula por petición. */
   retenidosDesde: Date;
@@ -15,5 +15,8 @@ export function alcanceChat(usuario: UsuarioSesion | null, ahora = Date.now()): 
     Object.assign(error, { statusCode: 409, codigo: 'SESION_CHAT_REQUIERE_LOGIN', ir: '/login' });
     throw error;
   }
-  return { afterId: usuario.chatSesion.afterId, retenidosDesde };
+  // El chat permanece disponible durante toda su ventana de retención aunque
+  // la cookie expire o el usuario vuelva a iniciar sesión. El límite de 24 h
+  // evita recuperar historiales más antiguos.
+  return { afterId: '0', retenidosDesde };
 }

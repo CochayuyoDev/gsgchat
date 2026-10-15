@@ -24,7 +24,7 @@ export interface CargaSesion {
   sid?: string;
   /** Hora del login. */
   iat?: number;
-  /** Watermark bigint por tienda: mensajes existentes al iniciar sesión. */
+  /** Cursor legacy compatible; el alcance de chats vigentes usa retención de 24 h. */
   chatAfterId?: string;
 }
 

@@ -302,7 +302,9 @@ export async function crearEscenarioEntregas(opciones: {
   });
   entregasDeLaRegla = entregas;
   if (opciones.margenMinutos !== undefined) await entregas.guardarAjustes({ margenMinutos: opciones.margenMinutos });
-  if (!opciones.confirmarLista) await entregas.guardarAjustes({ confirmarListaGsg: false });
+  // El esquema deja la confirmación apagada por defecto; activar la opción
+  // del escenario también debe persistir el valor para las pruebas que la usan.
+  await entregas.guardarAjustes({ confirmarListaGsg: Boolean(opciones.confirmarLista) });
   const asistente = opciones.agente
     ? await crearServicioIA({
         settingsRepo,

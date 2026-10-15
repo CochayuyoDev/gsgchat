@@ -115,12 +115,15 @@ export function createDynamicWhatsAppClient(
     // Aqui no se falla: no saber si esta en linea no es un error, es no saberlo.
     presencia: async (to) => (await inner().presencia?.(to)) ?? null,
     // Sincrono a proposito: es una consulta de estado, no una llamada de red.
-    // Sin credenciales o sin proveedor con sesion propia, no se sabe (undefined).
+    // Sin credenciales no hay WhatsApp vinculado: se reporta desconectado para
+    // que el sender conserve el trabajo y lo reintente, sin marcarlo incierto.
+    // La Cloud API configurada no tiene presencia local: puede seguir devolviendo undefined.
     conectado: () => {
+      if (!settings.isConfigured()) return false;
       try {
         return inner().conectado?.();
       } catch {
-        return undefined;
+        return false;
       }
     },
     // El de Meta no lo implementa: ahi se devuelve null, que significa "no se

@@ -52,6 +52,28 @@ describe('motorizados', () => {
 });
 
 describe('entregas', () => {
+  it('obtiene conteos para inicio y avisos sin cargar las filas completas', async () => {
+    const primera = await nueva('P-RES-1', '51987000001', { envioRetenidoAt: new Date('2026-09-21T10:00:00Z') });
+    const segunda = await nueva('P-RES-2', '51987000002', {
+      ubicacionEstado: 'recibida', lat: -12, lng: -77,
+      envioRetenidoAt: new Date('2026-09-21T10:00:00Z'), estado: 'esperando_confirmacion',
+    });
+    await repos.entregas.actualizar(segunda.entrega.id, { envioLiberadoAt: new Date('2026-09-21T11:00:00Z'), ubicacionFuente: 'gsg' });
+
+    const cifras = await repos.entregas.resumenLigero!('2026-09-21');
+    expect(cifras).toMatchObject({
+      faltaUbicacion: 1,
+      faltaConfirmacion: 2,
+      retenidasTotal: 2,
+      retenidasUbicacion: 1,
+      retenidasConfirmar: 1,
+      envioLiberado: true,
+      estados: { pendiente: 1, esperando_confirmacion: 1 },
+    });
+    expect((await repos.entregas.resumenLigero!('2026-09-22')).cierrePendiente).toBe(2);
+    expect(primera.entrega.id).not.toBe(segunda.entrega.id);
+  });
+
   it('(dia, referencia) no se duplica; la misma referencia otro dia es otra entrega', async () => {
     const a = await nueva('P-1', '51987000001');
     const b = await nueva('P-1', '51987000001');

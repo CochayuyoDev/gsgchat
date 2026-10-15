@@ -72,25 +72,28 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
     expect(await perteneceAlChatActual(repos, settings, { ...entrada, viejo: true })).toBe(false);
   });
 
-  it('cada login fija su propio watermark; recargar no abre mensajes anteriores', async () => {
+  it('un nuevo login conserva los chats que aún están dentro de las últimas 24 horas', async () => {
     const e = await crearEscenarioEntregas();
     try {
       const c = await e.repos.contacts.upsertFromInbound('51987603331', 'Sesión');
       await e.repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', wamid: 'sesion.previo', body: 'anterior', status: 'sent', payload: { origen: 'sistema' } });
       await e.repos.messages.add({ contactId: c.id, direction: 'in', kind: 'text', wamid: 'sesion.previo.in', body: 'respuesta anterior' });
+      await e.repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', wamid: 'sesion.antiguo', body: 'fuera de retención', status: 'sent', payload: { origen: 'sistema' } });
+      const filaAntigua = e.repos.messages._all.find(m => m.wamid === 'sesion.antiguo');
+      if (filaAntigua) filaAntigua.storedAt = new Date(Date.now() - 24 * 60 * 60 * 1000 - 1000);
       await e.repos.usuarios.crear({ usuario: 'operadoruno', nombre: 'Uno', rol: 'admin', clave: hashClave('Clave-123-segura') });
       const login1 = await e.app.inject({ method: 'POST', url: '/login', payload: { usuario: 'operadoruno', clave: 'Clave-123-segura' } });
       const cookie1 = String(login1.headers['set-cookie']).split(';')[0]!;
-      expect((await e.app.inject({ url: '/admin/chat/conversations', headers: { cookie: cookie1 } })).json().items).toHaveLength(0);
+      expect((await e.app.inject({ url: '/admin/chat/conversations', headers: { cookie: cookie1 } })).json().items).toHaveLength(1);
       await e.repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', wamid: 'sesion.despues1', body: 'nuevo uno', status: 'sent', payload: { origen: 'sistema' } });
       await e.repos.messages.add({ contactId: c.id, direction: 'in', kind: 'text', wamid: 'sesion.respuesta1', body: 'respuesta uno' });
       expect((await e.app.inject({ url: '/admin/chat/conversations', headers: { cookie: cookie1 } })).json().items).toHaveLength(1);
       await e.repos.usuarios.crear({ usuario: 'operadordos', nombre: 'Dos', rol: 'admin', clave: hashClave('Clave-123-segura') });
       const login2 = await e.app.inject({ method: 'POST', url: '/login', payload: { usuario: 'operadordos', clave: 'Clave-123-segura' } });
       const cookie2 = String(login2.headers['set-cookie']).split(';')[0]!;
-      expect((await e.app.inject({ url: '/admin/chat/conversations', headers: { cookie: cookie2 } })).json().items).toHaveLength(0);
+      expect((await e.app.inject({ url: '/admin/chat/conversations', headers: { cookie: cookie2 } })).json().items).toHaveLength(1);
       const hilo1 = await e.app.inject({ url: `/admin/chat/${c.id}?limit=30`, headers: { cookie: cookie1 } });
-      expect(hilo1.json().messages.map((m: { body: string }) => m.body)).toEqual(['nuevo uno', 'respuesta uno']);
+      expect(hilo1.json().messages.map((m: { body: string }) => m.body)).toEqual(['anterior', 'respuesta anterior', 'nuevo uno', 'respuesta uno']);
     } finally { await e.cerrar(); }
   });
 
@@ -108,17 +111,19 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
     try {
       await app.ready();
       expect(repos.messages._all).toHaveLength(1);
-      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 30_000);
       expect(repos.messages._all).toHaveLength(1);
-      expect(await repos.messages.listConversations({ alcance: { afterId: '0', retenidosDesde: new Date(Date.now() - 24 * 60 * 60 * 1000) }, limit: 100, offset: 0 })).toHaveLength(1);
-      await vi.advanceTimersByTimeAsync(30000);
+      // La interfaz/API ya ocultan el mensaje al vencer; la siguiente pasada
+      // física corre a los cinco minutos cuando no hay lotes atrasados.
+      expect(await repos.messages.listConversations({ alcance: { afterId: '0', retenidosDesde: new Date(Date.now() - 24 * 60 * 60 * 1000) }, limit: 100, offset: 0 })).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(30_000);
       expect(repos.messages._all).toHaveLength(0);
       expect(await repos.messages.listConversations({ desde: settings.vistaChatDesde!(), limit: 100, offset: 0 })).toEqual([]);
       await repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', wamid: 'dia15', body: 'nuevo pedido', createdAt: new Date(), payload: { origen: 'sistema' } });
-      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
       expect(repos.messages._all.map(m => m.wamid)).toEqual(['dia15']);
       expect(await repos.contacts.getByPhone(c.phone)).toBeTruthy();
-      expect(borrar).toHaveBeenCalledTimes(2);
+      expect(borrar).toHaveBeenCalledTimes(3);
     } finally { await app.close(); }
   });
 
