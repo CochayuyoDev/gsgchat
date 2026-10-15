@@ -51,10 +51,9 @@ export async function buscarEnTodo(deps: BuscarDeps, q: string, limite = 6): Pro
 
   // Un numero escrito con espacios o guiones ("987 000 001") se busca por sus digitos.
   const qRepos = digitos.length >= 3 && /^[\d\s()+.-]+$/.test(texto) ? digitos : texto;
-  const [resumen, contactos, archivos] = await Promise.all([
+  const [resumen, contactos] = await Promise.all([
     deps.entregas ? deps.entregas.resumen().catch(() => null) : Promise.resolve(null),
     deps.repos.contacts.list({ q: qRepos, limit: limite, offset: 0 }).catch(() => ({ items: [], total: 0 })),
-    deps.repos.archives.list({ q: qRepos, limit: limite, offset: 0 }).catch(() => []),
   ]);
 
   const pedidos = (resumen?.entregas ?? [])
@@ -65,9 +64,9 @@ export async function buscarEnTodo(deps: BuscarDeps, q: string, limite = 6): Pro
   const clientes = contactos.items
     .filter((c) => c.tipo !== 'grupo')
     .slice(0, limite)
-    .map((c) => ({ id: c.id, nombre: c.name, telefono: c.phone, href: `/chat?phone=${encodeURIComponent(c.phone)}`, guardadosHref: `/guardados?tel=${encodeURIComponent(c.phone)}` }));
+    .map((c) => ({ id: c.id, nombre: c.name, telefono: c.phone, href: `/chat?phone=${encodeURIComponent(c.phone)}`, guardadosHref: '' }));
 
-  const guardados = archivos.slice(0, limite).map((a) => ({ id: a.id, nombre: a.name, telefono: a.phone, cerradoEn: a.createdAt, resumen: a.resumen, pedido: a.pedido, href: `/guardados?abrir=${a.id}` }));
+  const guardados: ResultadoBusqueda['guardados'] = [];
 
   return { q: texto, pedidos, clientes, guardados };
 }

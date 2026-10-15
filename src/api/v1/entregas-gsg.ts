@@ -34,6 +34,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { responderLectura } from '../../web/cache-lectura.js';
 import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
 import type { EntregasRepo } from '../../entregas/repo.js';
 import type { ActividadRepo } from '../../auth/actividad.js';
@@ -369,9 +370,9 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     });
   }
 
-  app.get('/admin/gsg/recepciones', async () => {
-    if (!deps.actividad) return { items: [] };
-    return deps.actividad.listar({ accion: 'gsg.api.recepcion', limit: 100, offset: 0 });
+  app.get('/admin/gsg/recepciones', async (request, reply) => {
+    const data = deps.actividad ? await deps.actividad.listar({ accion: 'gsg.api.recepcion', limit: 100, offset: 0 }) : { items: [] };
+    return responderLectura(request, reply, data);
   });
 
   // El tope por clave: se mira antes que nada (tras la autorizacion).

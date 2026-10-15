@@ -5,6 +5,7 @@ const RAICES = [
   '/admin/envio-automatico', '/admin/procesos', '/admin/grupos', '/admin/campaigns', '/admin/tracking', '/admin/conectores',
   '/admin/stoky', '/admin/embed', '/admin/web-visitantes', '/admin/membresia', '/admin/plan', '/admin/tiendas',
   '/admin/desarrollador', '/admin/entregas/motorizados', '/admin/entregas/simulador',
+  '/admin/archives',
   '/admin/fiabilidad/vigilante/simular', '/api/v1/procesos', '/api/v1/embed', '/api/v1/stoky', '/api/v1/conectores', '/api/plan',
 ];
 

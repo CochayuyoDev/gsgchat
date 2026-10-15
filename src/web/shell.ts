@@ -22,6 +22,8 @@ import { escapeHtml } from './login-page.js';
 import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
 import { VERSION } from '../version.js';
+import { CONSULTAS_JS } from './consultas.js';
+import { EVENTOS_PANEL_JS } from './eventos-panel.js';
 
 export interface ItemMenu {
   id: string;
@@ -108,11 +110,9 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Estado de la API, WhatsApp, pedidos y errores.' },
   { id: 'hoy', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos recibidos por API, solicitudes de ubicación y pendientes de atención.' },
   { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
-  { id: 'mapa', etiqueta: 'Ubicaciones', href: '/mapa', icono: 'mapa', descripcion: 'Ubicaciones registradas y coordenadas asociadas al tracking.' },
   { id: 'historial', etiqueta: 'Historial y errores', href: '/panel#historial', icono: 'historial', descripcion: 'Mensajes enviados, entregados y fallidos; reintentos de pedidos.' },
   { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
   { id: 'entrenamiento', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
-  { id: 'plantillas', etiqueta: 'Plantillas', href: '/panel#plantillas', icono: 'plantilla', descripcion: 'Crear, sincronizar y subir plantillas de WhatsApp.' },
   { id: 'conexion', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'QR, WAHA o API de Meta: el número de WhatsApp.' },
   { id: 'gsg-courier', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'URL y API Key de GSG, envío de ubicaciones y consulta de estado.', soloAdmin: true },
   { id: 'api-gsgchat', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
@@ -121,7 +121,6 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
   { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario y avisos del sistema.', soloAdmin: true },
   { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Registro de acciones del equipo.', soloAdmin: true },
-  { id: 'guardados', etiqueta: 'Chats guardados', href: '/guardados', icono: 'historial', descripcion: 'Conversaciones cerradas y respaldadas.' },
   { id: 'manual', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
   { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
 ];
@@ -705,7 +704,6 @@ const JS = String.raw`
     if (datos) {
       grupo('Pedidos de hoy', datos.pedidos.map(function (p) { return { href: p.href, titulo: p.referencia + (p.nombre ? ' · ' + p.nombre : ''), detalle: p.situacion, ir: 'Ver en Hoy', icono: 'moto' }; }));
       grupo('Clientes', datos.clientes.map(function (c) { return { href: c.href, titulo: c.nombre || telefonoBonito(c.telefono), detalle: (c.nombre ? telefonoBonito(c.telefono) + ' · ' : '') + 'abrir el chat', ir: 'Chat', icono: 'chat', extra: c.guardadosHref }; }));
-      grupo('Conversaciones guardadas', datos.guardados.map(function (g) { return { href: g.href, titulo: (g.nombre || telefonoBonito(g.telefono)) + (g.pedido ? ' · ' + g.pedido : ''), detalle: (g.resumen || 'sin resumen') + ' · ' + new Date(g.cerradoEn).toLocaleDateString('es-PE'), ir: 'Leer', icono: 'historial' }; }));
     }
     grupo('Pantallas', modulosQueCasan(t));
     if (!palItems.length) html = '<div class="s-pal-nada">' + (t ? 'Nada con «' + escapar(t) + '». Prueba con el nombre, el número o la referencia del pedido.' : 'Escribe un nombre, un número, una referencia (P-1001) o una pantalla.') + '</div>';
@@ -825,9 +823,9 @@ const JS = String.raw`
     document.dispatchEvent(new CustomEvent('senal-ia', { detail: c }));
   };
   function cargarSenalIA() {
-    fetch('/admin/ia/conexion', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) {
-      if (r.status === 404) return { estado: 'apagada', motivo: null, comprobada: null };
-      return r.ok ? r.json() : null;
+    return window.leerPanel('/admin/ia/conexion').catch(function (e) {
+      if (e.status === 404) return { estado: 'apagada', motivo: null, comprobada: null };
+      throw e;
     }).then(function (c) {
       if (!c) return;
       var a = document.getElementById('s-ia-senal');
@@ -838,20 +836,22 @@ const JS = String.raw`
   document.addEventListener('yo', function (ev) {
     if (!ev.detail || ev.detail.rol !== 'admin' || window.__senalIA) return;
     window.__senalIA = true;
-    cargarSenalIA();
-    setInterval(function () { if (!document.hidden) cargarSenalIA(); }, 60000);
+    window.sondearPanel(cargarSenalIA, 60000, true);
   });
   window.cargarSenalIA = cargarSenalIA;
 
   /* el globo de chats sin leer */
   function globoChats() {
-    fetch('/admin/chat/conversations?limit=1', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    return window.leerPanel('/admin/chat/conversations?limit=1').then(function (d) {
       var b = document.getElementById('s-badge-chats');
       if (b && d) b.textContent = d.unread > 0 ? String(d.unread) : '';
     }).catch(function () {});
   }
-  globoChats();
-  setInterval(globoChats, 30000);
+  window.actualizarNoLeidos = function (n) {
+    var b = document.getElementById('s-badge-chats');
+    if (b) b.textContent = n > 0 ? String(n) : '';
+  };
+  if (location.pathname !== '/chat') window.sondearPanel(globoChats, 60000, true);
 
   /* avisos: lo que espera a una persona, en todas las pantallas */
   var avisosBox = document.getElementById('s-avisos');
@@ -881,7 +881,7 @@ const JS = String.raw`
   function telefonoBonito(p) { p = String(p || ''); if (!p) return ''; if (p.length === 11 && p.indexOf('51') === 0) return '+51 ' + p.slice(2, 5) + ' ' + p.slice(5, 8) + ' ' + p.slice(8); return '+' + p; }
   window.telefonoBonito = telefonoBonito;
   function cargarAvisos() {
-    fetch('/admin/avisos', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    return window.leerPanel('/admin/avisos').then(function (d) {
       if (!d) return;
       var num = document.getElementById('s-avisos-num');
       var urgentes = d.avisos.filter(function (a) { return a.nivel !== 'info'; }).length;
@@ -896,8 +896,7 @@ const JS = String.raw`
       franja.className = 's-plan hidden';
     }).catch(function () {});
   }
-  cargarAvisos();
-  setInterval(function () { if (!document.hidden) cargarAvisos(); }, 30000);
+  window.sondearPanel(cargarAvisos, 60000, true);
 
   /* --- la ayuda de esta pantalla: "¿Qué hago si…?" --- */
   var ayudaDatos = {};
@@ -1208,7 +1207,7 @@ export function appShell(opts: ShellOpts): string {
     }),
   ].join('\n      ');
   // El pie del celular: las cuatro pantallas del dia. Con las entregas de courier, las de siempre; si no, las de los procesos.
-  const pieGsg = '<a href="/hoy" data-ir="/hoy">' + icono('plantilla') + '<span>Pedidos</span></a><a href="/chat" data-ir="/chat">' + icono('chat') + '<span>Chats</span></a><a href="/mapa" data-ir="/mapa">' + icono('mapa') + '<span>Ubicaciones</span></a><a href="/salud" data-ir="/salud">' + icono('salud') + '<span>Salud</span></a>';
+  const pieGsg = '<a href="/hoy" data-ir="/hoy">' + icono('plantilla') + '<span>Pedidos</span></a><a href="/chat" data-ir="/chat">' + icono('chat') + '<span>Chats</span></a><a href="/salud" data-ir="/salud">' + icono('salud') + '<span>Salud</span></a>';
   const dueno = `<div class="s-grupo" data-grupo="${MENU_GSG_DUENO.id}" data-solo-super-grupo="1" data-cerrado="1">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_GSG_DUENO.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
@@ -1325,6 +1324,8 @@ ${opts.contenido}
   </aside>
 </div>
 <script>
+${CONSULTAS_JS}
+${EVENTOS_PANEL_JS}
 ${DIALOGO_JS}
 ${DIALOGO_ELEGIR_JS}
 ${JS}

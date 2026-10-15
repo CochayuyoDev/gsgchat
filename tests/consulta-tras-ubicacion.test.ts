@@ -189,13 +189,12 @@ describe('«Solo lo de GSG»: tras UBI REGISTRADA la IA atiende las consultas de
     expect(await dice(tel, { texto: '¿dónde está mi pedido?' })).toEqual([]);
   }, 60_000);
 
-  it('antes del pin, todo como siempre: «¿por qué?» recibe la explicación y se le vuelve a pedir, sin la IA de consultas', async () => {
+  it('antes del pin, «¿por qué?» queda sin respuesta y no consulta la IA', async () => {
     const tel = await clienteSinPin();
     consultas = [];
     const salio = await dice(tel, { texto: '¿por qué necesitan mi ubicación?' });
     expect(consultas).toHaveLength(0);
-    expect(salio).toHaveLength(1);
-    expect(e.mensajesA(tel).slice(-1)[0]?.kind).toBe('location_request');
+    expect(salio).toHaveLength(0);
   }, 60_000);
 
   it('una sola respuesta de la IA por mensaje del cliente', async () => {

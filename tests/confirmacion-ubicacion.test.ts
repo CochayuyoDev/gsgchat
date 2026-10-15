@@ -21,10 +21,11 @@ describe('confirmación real de ubicación',()=>{
       expect(e.mensajesA(tel)).toHaveLength(antes+1);
       const c=(await e.repos.contacts.getByPhone('51'+tel))!;
       expect(c.iaCerradaMotivo).toMatch(/^ubicación registrada/);
-      expect(e.repos.decisiones._todas.at(-1)?.respuesta).toBe('UBI REGISTRADA enviada: aceptada por WhatsApp');
+      expect(e.repos.decisiones._todas).toHaveLength(0);
+      expect(e.mensajesA(tel).at(-1)?.body).toMatch(/ubicación/i);
       await e.contesta(tel,{pin:PIN_LIMA});
       expect(e.mensajesA(tel)).toHaveLength(antes+1);
-      expect(e.repos.decisiones._todas.at(-1)?.respuesta).toMatch(/enviada|ya enviada anteriormente/);
+      expect(e.repos.decisiones._todas).toHaveLength(0);
     } finally {await e.cerrar();}
   });
   it('un rechazo de WhatsApp no cierra el chat ni afirma que salió; un pin posterior permite volver a confirmar',async()=>{
@@ -37,11 +38,11 @@ describe('confirmación real de ubicación',()=>{
       expect(e.mensajesA(tel)).toHaveLength(antes);
       const c=(await e.repos.contacts.getByPhone('51'+tel))!;
       expect(c.iaCerradaAt).toBeFalsy();
-      expect(e.repos.decisiones._todas.at(-1)?.respuesta).toMatch(/UBI REGISTRADA no enviada/);
+      expect(e.repos.decisiones._todas).toHaveLength(0);
       expect((await e.entrega('ACUSE-1'))?.ubicacionEstado).toBe('recibida');
       await e.contesta(tel,{pin:PIN_LIMA});
       expect(e.mensajesA(tel)).toHaveLength(antes+1);
-      expect(e.repos.decisiones._todas.at(-1)?.respuesta).toMatch(/UBI REGISTRADA enviada/);
+      expect(e.repos.decisiones._todas).toHaveLength(0);
     } finally {await e.cerrar();}
   });
   it('reintenta una vez un fallo temporal explícito y no duplica la confirmación',async()=>{
@@ -52,7 +53,7 @@ describe('confirmación real de ubicación',()=>{
       const antes=e.mensajesA(tel).length;
       await e.contesta(tel,{pin:PIN_LIMA});
       expect(e.mensajesA(tel)).toHaveLength(antes+1);
-      expect(e.repos.decisiones._todas.at(-1)?.respuesta).toMatch(/enviada: aceptada/);
+      expect(e.repos.decisiones._todas).toHaveLength(0);
     } finally {await e.cerrar();}
   });
   it('el acuse dentro de la ventana no lo bloquean el cupo por contacto ni la separación de recordatorios',async()=>{
@@ -73,7 +74,7 @@ describe('confirmación real de ubicación',()=>{
       const antes=e.mensajesA(tel).length;
       await e.contesta(tel,{pin:PIN_LIMA});
       expect(e.mensajesA(tel)).toHaveLength(antes+1);
-      expect(e.repos.decisiones._todas.at(-1)?.respuesta).toMatch(/enviada: aceptada/);
+      expect(e.repos.decisiones._todas).toHaveLength(0);
     } finally {await e.cerrar();}
   });
   it('la confirmación persistida no se duplica al cruzar medianoche UTC dentro del mismo día de Lima',async()=>{

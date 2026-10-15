@@ -52,11 +52,6 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
     "que": "Atiende conversaciones y consulta los mensajes de WhatsApp.",
     "preguntas": []
   },
-  "guardados": {
-    "titulo": "Chats guardados",
-    "que": "Consulta y recupera conversaciones archivadas.",
-    "preguntas": []
-  },
   "ia": {
     "titulo": "IA",
     "que": "Configura el modelo, sus instrucciones y la ficha de productos.",
@@ -65,11 +60,6 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
   "entrenamiento": {
     "titulo": "Entrenamiento",
     "que": "Ajusta el conocimiento y las respuestas del asistente.",
-    "preguntas": []
-  },
-  "plantillas": {
-    "titulo": "Plantillas",
-    "que": "Administra los mensajes aprobados de WhatsApp.",
     "preguntas": []
   },
   "setup": {
@@ -92,14 +82,9 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
     "que": "Comprueba conexión, riesgo, cupos, pausas y copias de seguridad.",
     "preguntas": []
   },
-  "mapa": {
-    "titulo": "Ubicaciones",
-    "que": "Consulta las coordenadas recibidas de los clientes.",
-    "preguntas": []
-  },
   "historial": {
     "titulo": "Historial y errores",
-    "que": "Revisa mensajes fallidos y corrige pedidos desde Pedidos GSG.",
+    "que": "Revisa las recepciones del API y sus errores sin abrir un historial de conversaciones.",
     "preguntas": []
   },
   "usuarios": {

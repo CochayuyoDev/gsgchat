@@ -510,7 +510,6 @@ export function crearMotor(deps: MotorDeps): Motor {
         wamid: salida.wamid,
         via: conPlantilla ? `plantilla ${elegida!.name}` : ventanaAbierta && deps.usarPlantilla() ? 'texto con boton de ubicacion (ventana abierta: servicio, no plantilla)' : 'texto con boton de ubicacion',
       });
-      if (paso === 'solicitud' && deps.stickers) await deps.stickers.automatico('inicio', phone, { reparto: true });
 
       return { accion: 'envio', solicitudId: solicitud.id, paso };
     }

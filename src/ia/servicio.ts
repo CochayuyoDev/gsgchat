@@ -847,31 +847,6 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     return leida;
   }
 
-  /**
-   * Una decisión por turno, con su porqué (ver src/ia/decision.ts): así se ve
-   * en el chat por qué contestó o se calló el asistente.
-   */
-  async function anotarDecision(contact: Contact, entrante: string, mensajes: number, r: TurnoIA, respuesta: RespuestaIA | null): Promise<void> {
-    if (r.resultado === 'inactiva') return;
-    const intencion: IntencionGsg =
-      r.resultado === 'derivo' ? 'pedir_persona'
-      : respuesta?.silencio ? (esAcuse(entrante) ? 'acuse' : 'ajena')
-      : respuesta?.pedido ? 'pedido_tienda'
-      : respuesta?.pedirUbicacion ? 'enviar_ubicacion'
-      : 'consulta';
-    const que =
-      r.resultado === 'callado' ? 'silencio (queda anotado para el equipo)'
-      : r.resultado === 'derivo' ? 'derivado a una persona; bot en pausa'
-      : r.resultado === 'error' ? 'texto fijo de fallo; derivado a una persona'
-      : r.resultado === 'bloqueado' ? 'texto fijo ante un intento de manipulación'
-      : respuesta?.pedido ? 'respuesta del asistente con el resumen del pedido'
-      : respuesta?.pedirUbicacion ? 'respuesta del asistente con el botón de ubicación'
-      : 'respuesta del asistente';
-    await repos.decisiones
-      ?.registrar({ contactId: contact.id, phone: contact.phone, mensajes: Math.max(1, mensajes), intencion, dato: null, respuesta: que, como: respuesta?.porReglas || respuesta?.bloqueada === 'manipulacion' ? 'reglas' : 'ia', esperaba: null, detalle: r.detalle ?? respuesta?.detalle ?? null })
-      .catch((error: unknown) => log('no se pudo guardar la decisión del turno', { phone: contact.phone, detalle: String(error) }));
-  }
-
   async function consultaPedido(entrada: { contact: Contact; texto: string; contexto: string | null }): Promise<{ texto: string } | { derivar: true } | { cambioUbicacion: true } | null> {
     const { contact, contexto } = entrada;
     const texto = String(entrada.texto ?? '').trim();
@@ -915,11 +890,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     return { texto: limpia.texto };
   }
 
-  async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean; mensajes?: number } = {}): Promise<TurnoIA> {
-    let leida: RespuestaIA | null = null;
-    const r = await turnoSinAnotar(contact, entrante, opts, (x) => (leida = x));
-    await anotarDecision(contact, entrante, opts.mensajes ?? 1, r, leida);
-    return r;
+  async function turno(contact: Contact, entrante: string, opts: { esAudio?: boolean } = {}): Promise<TurnoIA> {
+    return turnoSinAnotar(contact, entrante, opts, () => undefined);
   }
 
   async function turnoSinAnotar(contact: Contact, entrante: string, opts: { esAudio?: boolean }, alLeer: (r: RespuestaIA) => void): Promise<TurnoIA> {
@@ -937,16 +909,8 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     // Lo que manda el asistente queda marcado (payload.origen = 'ia'): el
     // entrenamiento aprende de lo que contesta una persona, nunca de esto.
     const porEscrito = (t: string) => sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: t, origen: 'ia' });
-    // La respuesta principal puede salir como nota de voz (segun "cuando"
-    // en Mi asistente IA → Voz); lo demas (avisos, resumen de pedido con
-    // cifras, la despedida al derivar) va siempre por escrito.
-    const conVoz = Boolean(deps.voz?.contestarConAudio({ esAudio: Boolean(opts.esAudio) }));
-    const enviar = async (t: string) => {
-      if (!conVoz || !deps.voz) return porEscrito(t);
-      const r = await deps.voz.enviar({ phone, texto: t, origen: 'ia' });
-      if (r.enviadoComo === 'texto' && r.motivo) log('la respuesta del asistente salio por escrito', { phone, motivo: r.motivo });
-      return r.outcome;
-    };
+    // El asistente responde por escrito, sin llamar al proveedor de voz.
+    const enviar = porEscrito;
 
     // Quien insiste cien veces no consigue cien turnos del modelo (ni gasta
     // la cuota gratis en eso): a partir del tope, una persona. Un intento de

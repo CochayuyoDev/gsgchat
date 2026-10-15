@@ -452,6 +452,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   <div class="acciones">
     <button class="btn primario hidden" id="wa-conectar" type="button">Conectar y mostrar el QR</button>
     <a class="btn hidden" id="wa-chats" href="/chat">Ir a Chats</a>
+    <button class="btn peligro hidden" id="desconectar" type="button">Desvincular cuenta</button>
   </div>
 </section>
 ` : ''}${tarjetaGsg ? `<section class="tarjeta con-card" id="gsg">
@@ -610,7 +611,6 @@ ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
       </button>
       <button class="btn primario hidden" id="connect" type="button">Conectar</button>
       <button class="btn primario hidden" id="qr-connect" type="button">Mostrar el código QR</button>
-      <button class="btn peligro hidden" id="desconectar" type="button">Desconectar la cuenta</button>
       <span id="fb-state" class="chip hidden" role="status"></span>
     </div>
 
@@ -1249,15 +1249,13 @@ $('pair-ask').onclick = async function () {
   }
 };
 
-/* Antes habia dos botones para lo mismo ("Desconectar la cuenta" y
-   "Desvincular el teléfono"): los dos llamaban al mismo /logout. Queda uno,
-   con la pregunta de confirmacion del armazon. */
+/* Una sola acción, visible en la tarjeta principal de WhatsApp. */
 $('desconectar').onclick = async function () {
   var ok = await confirmarDialogo({
-    titulo: '¿Desconectar la cuenta de WhatsApp?',
+    titulo: '¿Desvincular la cuenta de WhatsApp?',
     texto: 'Se cierra la sesión de este sistema y el teléfono deja de verlo entre sus dispositivos vinculados. ' +
       'No se pierde nada de lo guardado aquí (chats, contactos, historial). Para volver, se escanea otro código.',
-    boton: 'Sí, desconectar',
+    boton: 'Sí, desvincular',
     peligro: true
   });
   if (!ok) return;
@@ -1269,7 +1267,7 @@ $('desconectar').onclick = async function () {
     qr.conectado = false;
     qr.parado = true;
     pintarQr('');
-    estado('fb-state', 'Cuenta desconectada. Pulsa «' + MODOS[modo].boton + '» para volver a conectar.', 'ambar');
+    estado('fb-state', 'Cuenta desvinculada. Pulsa «' + MODOS[modo].boton + '» y escanea un QR nuevo para volver a conectar.', 'ambar');
     await cargar();
   } catch (error) {
     estado('fb-state', error.message, 'rojo');

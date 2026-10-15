@@ -75,6 +75,10 @@ export interface SettingsRepo {
 }
 
 export interface SettingsService {
+  /** Corte fijo de la conexión de WhatsApp, no cambia a medianoche. */
+  conexionChatDesde?(): Date | null;
+  vistaChatDesde?(ahora?: Date): Date | null;
+  iniciarVistaChat?(at?: Date): Promise<void>;
   /** Credenciales vigentes: base de datos por encima de entorno. */
   current(): WhatsAppCredentials;
   reload(): Promise<void>;
@@ -125,10 +129,13 @@ export async function createSettingsService(
   });
 
   let cache: WhatsAppCredentials = fromEnv();
+  let vistaDesde: Date | null = null;
 
   async function load(): Promise<void> {
     const merged = fromEnv();
+    vistaDesde = null;
     for (const row of await repo.getAll()) {
+      if (row.key === 'chat.vistaDesde' && !Number.isNaN(Date.parse(row.value))) vistaDesde = new Date(row.value);
       if (!row.key.startsWith(KEY_PREFIX)) continue;
       const field = row.key.slice(KEY_PREFIX.length) as CredentialField;
       if (!(field in merged)) continue;
@@ -148,6 +155,13 @@ export async function createSettingsService(
   return {
     current: () => cache,
     reload: load,
+    conexionChatDesde: () => vistaDesde ? new Date(vistaDesde) : null,
+    // Alias legado: el corte de WhatsApp es fijo y no se redondea a medianoche.
+    vistaChatDesde: () => vistaDesde ? new Date(vistaDesde) : null,
+    async iniciarVistaChat(at = new Date()) {
+      await repo.put('chat.vistaDesde', at.toISOString(), false);
+      vistaDesde = new Date(at);
+    },
 
     async save(values) {
       for (const [field, value] of Object.entries(values) as Array<[CredentialField, string]>) {

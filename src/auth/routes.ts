@@ -22,7 +22,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { UsuariosRepo, Rol } from './usuarios.js';
 import { capacidadDe, claveAceptable, hashClave, usuarioAceptable, verificarClave, type Capacidad } from './usuarios.js';
-import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookies, leerSesion } from './sesion.js';
+import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookies, leerSesion, nuevaCargaSesion } from './sesion.js';
 import type { ClavesApiRepo } from './claves-api.js';
 import { ETIQUETAS, type ActividadRepo } from './actividad.js';
 import { claveApiVigente, generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
@@ -50,6 +50,8 @@ export interface UsuarioSesion {
    * limita. `telefono: null` = a todos los chats, como un operador.
    */
   embebido?: { telefono: string | null };
+  /** Alcance firmado del chat para este login web. */
+  chatSesion?: { sid: string; desde: Date; afterId: string };
 }
 
 declare module 'fastify' {
@@ -97,6 +99,7 @@ export interface AuthDeps {
    * repetirse entre tiendas y se reserva aqui antes de crearlo.
    */
   directorio?: DirectorioUsuarios;
+  ultimoChatId?: () => Promise<string>;
 }
 
 export interface DirectorioUsuarios {
@@ -153,7 +156,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       try {
         const u = JSON.parse(crudo) as UsuarioSesion;
         if (!u || typeof u.id !== 'string' || (u.rol !== 'admin' && u.rol !== 'operador')) return null;
-        return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, super: u.super === true, porToken: Boolean(u.porToken), permisos: Array.isArray(u.permisos) ? u.permisos : [], embebido: u.embebido };
+        return { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, super: u.super === true, porToken: Boolean(u.porToken), permisos: Array.isArray(u.permisos) ? u.permisos : [], embebido: u.embebido, chatSesion: u.chatSesion };
       } catch {
         return null;
       }
@@ -202,7 +205,9 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     if (!carga) return null;
     const u = await usuarios.porId(carga.u);
     if (!u || !u.activo || u.sesionVersion !== carga.v) return null;
-    return sesionDe(u);
+        const identidad = sesionDe(u);
+        if (carga.sid && carga.iat != null && carga.chatAfterId != null) identidad.chatSesion = { sid: carga.sid, desde: new Date(carga.iat), afterId: carga.chatAfterId };
+        return identidad;
   }
 
   /** Por que una peticion a la recepcion no entra (o null si entra). */
@@ -362,8 +367,12 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       .send(loginPage({ primeraCuenta, next: siguienteSeguro(query.next), nombreNegocio: nombreNegocio() }));
   });
 
-  const abrirSesion = (reply: FastifyReply, u: { id: string; sesionVersion: number }) => {
-    reply.header('set-cookie', cookieDeSesion(firmarSesion(secreto, { u: u.id, v: u.sesionVersion }, ahora().getTime()), segura));
+  const abrirSesion = async (reply: FastifyReply, u: { id: string; sesionVersion: number }, existente?: UsuarioSesion | null) => {
+    const t = ahora().getTime();
+    const carga = existente?.chatSesion
+      ? { u: u.id, v: u.sesionVersion, sid: existente.chatSesion.sid, iat: existente.chatSesion.desde.getTime(), chatAfterId: existente.chatSesion.afterId }
+      : nuevaCargaSesion(u.id, u.sesionVersion, await deps.ultimoChatId?.() ?? '0', t);
+    reply.header('set-cookie', cookieDeSesion(firmarSesion(secreto, carga, t), segura));
   };
 
   /** La sesion de una persona: su capacidad en el panel y si es superadministrador. */
@@ -398,7 +407,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     }
     fallos.delete(ip(request));
     await usuarios.tocarLogin(u.id, ahora());
-    abrirSesion(reply, u);
+    await abrirSesion(reply, u);
     // Para la bitacora: quien acaba de entrar, con su nombre.
     request.usuario = sesionDe(u);
     return { ok: true, usuario: { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol }, next: siguienteSeguro(body.next) };
@@ -428,7 +437,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     const u = await crearConReserva({ usuario: usuarioNorm, nombre: body.nombre, clave: hashClave(body.clave), rol: deps.primeraCuentaRol ?? 'superadmin' });
     if (!u) return reply.code(400).send({ error: 'Ese usuario ya existe. Elige otro.' });
     await usuarios.tocarLogin(u.id, ahora());
-    abrirSesion(reply, u);
+    await abrirSesion(reply, u);
     request.usuario = sesionDe(u);
     return { ok: true, usuario: { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol }, next: '/panel' };
   });
@@ -510,7 +519,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
       // Quien se cambia su propia contrasena sigue dentro con una cookie nueva.
       if (esUnoMismo && !request.usuario?.porToken) {
         const nuevo = await usuarios.porId(u.id);
-        if (nuevo) abrirSesion(reply, nuevo);
+        if (nuevo) await abrirSesion(reply, nuevo, request.usuario);
       }
     }
     if (body.rol !== undefined) {
@@ -610,7 +619,7 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     if (mal) return reply.code(400).send({ error: mal });
     await usuarios.cambiarClave(u.id, hashClave(body.nueva));
     const nuevo = await usuarios.porId(u.id);
-    if (nuevo) abrirSesion(reply, nuevo);
+    if (nuevo) await abrirSesion(reply, nuevo, request.usuario);
     return { ok: true };
   });
 }

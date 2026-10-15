@@ -113,10 +113,12 @@ create table pedidos (
   total decimal(12,2) not null,
   constraint pedidos_cliente foreign key (cliente_id) references clientes (id) on delete cascade
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin;
+create table messages (id int not null primary key, body text not null) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_bin;
 insert into clientes (nombre, nota, alta, activo, saldo, grande, datos, foto) values
   ('Rosa', 'dijo "hola" y luego \\'chau\\'\\ncon barra \\\\ y emoji 😀 ñ', '2026-09-21 07:30:00.123', 1, 1234.50, 9007199254740993, '{"a": [1, "dos"], "b": null}', x'00ff10'),
   ('Pedro', null, '2026-01-02 03:04:05.006', 0, null, null, null, null);
 insert into pedidos (cliente_id, total) select id, 99.90 from clientes where nombre = 'Rosa';
+insert into messages (id, body) values (1, 'mensaje temporal que no debe ir en respaldos nuevos');
 `;
 
 async function conexionCruda(multipleStatements = false) {
@@ -214,33 +216,33 @@ describe('la copia de seguridad', () => {
     expect(e.proxima).toBe('hoy a las 03:00');
   });
 
-  it('"Hacer copia ahora" deja la base y los respaldos en la carpeta, y la copia de la base se restaura igual', async () => {
+  it('"Hacer copia ahora" respalda pedidos sin guardar conversaciones y mantiene intactos los archivos históricos', async () => {
     const r = await respaldo.hacerCopia('Ali');
     expect(r.ok).toBe(true);
     expect(r.error).toBeNull();
-    expect(r.ficheros.map((f) => f.nombre).sort()).toEqual(['base-2026-09-21.sql.gz', 'respaldos-2026-09-21.tar.gz']);
+    expect(r.ficheros.map((f) => f.nombre).sort()).toEqual(['base-2026-09-21.sql.gz']);
     // Con mysqldump si esta en esta maquina (XAMPP lo trae); si no, con el volcado propio.
     expect(r.ficheros.find((f) => f.nombre.startsWith('base-'))!.que).toMatch(/mysqldump|volcado propio/);
     expect(r.notas.some((n) => n.includes('.wa-auth'))).toBe(true);
     const nombres = readdirSync(carpeta).sort();
-    expect(nombres).toEqual(['base-2026-09-21.sql.gz', 'respaldos-2026-09-21.tar.gz']);
+    expect(nombres).toEqual(['base-2026-09-21.sql.gz']);
     // La base: un volcado SQL comprimido con las dos tablas y sus filas...
     const sql = gunzipSync(readFileSync(path.join(carpeta, 'base-2026-09-21.sql.gz'))).toString('utf8');
     expect(sql).toMatch(/CREATE TABLE `clientes`/);
     expect(sql).toMatch(/CREATE TABLE `pedidos`/);
+    expect(sql).toMatch(/CREATE TABLE `messages`/);
+    expect(sql).not.toMatch(/INSERT INTO `messages`/i);
     // ...que se restaura y deja exactamente lo que habia.
     await restaurar(path.join(carpeta, 'base-2026-09-21.sql.gz'));
     expect(await contenido()).toEqual(original);
-    // Los respaldos: lo que había, con sus adjuntos.
-    const entradas = leerTar(gunzipSync(readFileSync(path.join(carpeta, 'respaldos-2026-09-21.tar.gz'))));
-    expect(entradas.map((e) => e.nombre)).toContain('respaldos/51987654321-2026-09-01.ndjson.gz');
-    expect(entradas.map((e) => e.nombre)).toContain('respaldos/51987654321-2026-09-01-adjuntos/foto.jpg');
+    expect(readdirSync(archiveDir)).toContain('51987654321-2026-09-01.ndjson.gz');
+    expect(r.notas.some((n) => n.includes('no se incluyen en copias nuevas'))).toBe(true);
     const guardada = (await settingsRepo.getAll()).find((x) => x.key === 'respaldo.ultima');
     expect(guardada).toBeTruthy();
     const e = await respaldo.estado();
     expect(e.alerta).toBeNull();
     expect(e.ultima?.quien).toBe('Ali');
-    expect(e.copias).toHaveLength(2);
+    expect(e.copias).toHaveLength(1);
     const f = await respaldo.ficheroDeCopia('base-2026-09-21.sql.gz');
     expect(f.ok).toBe(true);
     expect((await respaldo.ficheroDeCopia('../../etc/passwd')).ok).toBe(false);
@@ -260,6 +262,8 @@ describe('la copia de seguridad', () => {
     expect(bases).toContain('base-2026-09-21.sql.gz');
     expect(bases).not.toContain('base-2026-08-01.sql.gz');
     expect(bases).not.toContain('base-2026-08-02.sql.gz');
+    expect(readdirSync(carpeta).filter((n) => n.startsWith('respaldos-'))).toHaveLength(15);
+    expect(readdirSync(archiveDir)).toContain('51987654321-2026-09-01.ndjson.gz');
     expect(r.notas.some((n) => n.includes('copias viejas'))).toBe(true);
   }, 300_000);
 
@@ -331,9 +335,10 @@ describe('la copia de seguridad', () => {
       expect(r.ok).toBe(true);
       // Se probaron todos los sitios antes de rendirse.
       expect(probados).toEqual(['mysqldump', 'C:\\no\\existe\\mysqldump.exe']);
-      expect(r.ficheros.map((f) => f.nombre).sort()).toEqual(['base-2026-09-22.sql.gz', 'respaldos-2026-09-22.tar.gz']);
+      expect(r.ficheros.map((f) => f.nombre).sort()).toEqual(['base-2026-09-22.sql.gz']);
       expect(r.ficheros.find((f) => f.nombre.startsWith('base-'))!.que).toContain('volcado propio');
       expect(r.notas.some((n) => n.includes('no está mysqldump'))).toBe(true);
+      expect(r.notas.some((n) => n.includes('no se incluyen en copias nuevas'))).toBe(true);
       const sql = gunzipSync(readFileSync(path.join(carpeta2, 'base-2026-09-22.sql.gz'))).toString('utf8');
       expect(sql).toContain('SET FOREIGN_KEY_CHECKS = 0');
       expect(sql).toContain('INSERT INTO `clientes`');

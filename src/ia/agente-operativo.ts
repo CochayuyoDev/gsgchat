@@ -218,10 +218,6 @@ export async function cerrarChat(deps: Pick<DepsAgente, 'repos' | 'entregas' | '
 export async function atenderComoAgente(deps: DepsAgente, contact: Contact, texto: string, mensajes = 1): Promise<ResultadoAgente> {
   const turno: TurnoGsg = { intencion: texto.trim() ? 'ajena' : 'sin_texto', dato: null, respuesta: 'silencio', como: 'reglas', esperaba: null, detalle: null };
   const r = await atenderComoAgenteEnTurno(deps, contact, texto, turno);
-  // Una decisión por turno, con su porqué (ver src/ia/decision.ts).
-  await deps.repos.decisiones
-    ?.registrar({ contactId: contact.id, phone: contact.phone, mensajes: Math.max(1, mensajes), intencion: turno.intencion, dato: turno.dato, respuesta: turno.respuesta, como: turno.como, esperaba: turno.esperaba, detalle: turno.detalle })
-    .catch((error: unknown) => deps.log?.('no se pudo guardar la decisión del turno', { detalle: error instanceof Error ? error.message : String(error) }));
   return r;
 }
 
@@ -1172,10 +1168,6 @@ export async function atenderConReglaGsg(deps: DepsAgente, contact: Contact, ent
       const fresco = (await deps.repos.contacts.getById(contact.id).catch(() => null)) ?? contact;
       const t: TurnoGsg = { intencion: entrada.texto.trim() ? 'ajena' : 'sin_texto', dato: null, respuesta: 'silencio', como: 'reglas', esperaba: null, detalle: null };
       const resultado = await atenderConReglaGsgEnFila(deps, fresco, entrada, t);
-      // Una decisión por turno, con su porqué (ver src/ia/decision.ts).
-      await deps.repos.decisiones
-        ?.registrar({ contactId: fresco.id, phone: fresco.phone, mensajes: Math.max(1, entrada.mensajes ?? 1), intencion: t.intencion, dato: t.dato, respuesta: t.respuesta, como: t.como, esperaba: t.esperaba, detalle: t.detalle })
-        .catch((error: unknown) => deps.log?.('no se pudo guardar la decisión del turno', { detalle: error instanceof Error ? error.message : String(error) }));
       return resultado;
     });
   enCurso.set(clave, turno);

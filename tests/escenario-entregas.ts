@@ -70,6 +70,7 @@ export interface IAFalsa extends LectorIA {
 }
 
 export interface EscenarioEntregas {
+  settings: import('../src/settings/service.js').SettingsService;
   app: FastifyInstance;
   repos: FakeRepos;
   /** Los ajustes guardados (settings) del escenario: para dejar frases propias, ajustes, etc. */
@@ -363,6 +364,7 @@ export async function crearEscenarioEntregas(opciones: {
   };
 
   const escenario: EscenarioEntregas = {
+    settings,
     app,
     repos,
     settingsRepo,

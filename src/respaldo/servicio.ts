@@ -1,5 +1,5 @@
 /**
- * La copia de seguridad diaria: la base y los respaldos de chats, cada
+ * La copia de seguridad diaria: la base con datos operativos, cada
  * noche, a una carpeta que elige el dueno.
  *
  * Que se copia y como:
@@ -8,8 +8,9 @@
  *    XAMPP en C:\xampp\mysql\bin) y si no con un volcado propio escrito aqui
  *    (cada tabla con su `create table` y sus filas en INSERT). Se restaura
  *    con phpMyAdmin (Importar acepta el .sql.gz tal cual) o con `mysql`;
- *  - los respaldos de chats y sus adjuntos (`ARCHIVE_DIR`) ->
- *    `respaldos-AAAA-MM-DD.tar.gz` (tar propio, ver tar.ts);
+ *  - las tablas temporales del chat conservan su esquema, pero sus filas no
+ *    se incluyen. Los archivos históricos que ya existían se dejan intactos
+ *    y no se vuelven a empaquetar;
  *  - la vinculacion del telefono (`.wa-auth`) NO se copia: es la sesion de
  *    WhatsApp de ese servidor; en otro sitio hay que escanear el QR igual.
  *
@@ -27,8 +28,7 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import mysql from 'mysql2';
 import type { SettingsRepo } from '../settings/service.js';
-import { bytesEnPalabras, diaEn, minutosDe, minutosDelDia } from '../salud/fiabilidad.js';
-import { empaquetarCarpeta } from './tar.js';
+import { diaEn, minutosDe, minutosDelDia } from '../salud/fiabilidad.js';
 
 export const CLAVE_ULTIMA_COPIA = 'respaldo.ultima';
 export const CLAVE_ULTIMO_DIA_COPIA = 'respaldo.ultimoDia';
@@ -81,6 +81,9 @@ const PIE_VOLCADO = `
 SET FOREIGN_KEY_CHECKS = 1;
 SET UNIQUE_CHECKS = 1;
 `;
+
+/** Datos efímeros de chat que nunca deben convertirse en un historial permanente. */
+const TABLAS_SIN_DATOS_EN_RESPALDO = new Set(['messages', 'decisiones_bot', 'chat_archives', 'whatsapp_inbox']);
 
 /**
  * El volcado propio, para cuando no hay mysqldump: cada tabla con su
@@ -137,6 +140,7 @@ export async function volcarBaseEnJs(fuente: { url: string; base?: string }, des
       if (!ddl) continue;
       tablas += 1;
       await escribir(`\n-- Tabla ${t}\nDROP TABLE IF EXISTS ${id};\n${ddl};\n`);
+      if (TABLAS_SIN_DATOS_EN_RESPALDO.has(t)) continue;
       let lote: string[] = [];
       let bytes = 0;
       let columnas = '';
@@ -363,7 +367,7 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     const conservar = Math.max(2, deps.ajustes().conservar);
     const copias = await listarCopias(dir);
     let borradas = 0;
-    for (const que of ['base', 'respaldos'] as const) {
+    for (const que of ['base'] as const) {
       const de = copias.filter((c) => c.que === que);
       for (const vieja of de.slice(conservar)) {
         try {
@@ -391,7 +395,7 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
       for (const programa of dondeMysqldump()) {
         const r = await ejecutar(
           programa,
-          ['--host', d.host, '--port', String(d.port), '--user', d.user, '--single-transaction', '--no-tablespaces', '--hex-blob', '--default-character-set=utf8mb4', `--result-file=${temporal}`, d.base],
+          ['--host', d.host, '--port', String(d.port), '--user', d.user, '--single-transaction', '--no-tablespaces', '--hex-blob', '--default-character-set=utf8mb4', ...[...TABLAS_SIN_DATOS_EN_RESPALDO].map((tabla) => `--ignore-table-data=${d.base}.${tabla}`), `--result-file=${temporal}`, d.base],
           // La clave va por el entorno y no en la linea de comandos (que la ve cualquiera en el administrador de tareas).
           { env: { ...process.env, MYSQL_PWD: d.password } },
         );
@@ -433,22 +437,6 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     notas.push('En la demostración la base está en memoria: no hay base que copiar.');
   }
 
-  async function copiarRespaldos(dir: string, dia: string, ficheros: FicheroCopia[], notas: string[]): Promise<void> {
-    const origen = path.resolve(deps.archiveDir);
-    try {
-      const s = await stat(origen);
-      if (!s.isDirectory()) throw new Error('no es una carpeta');
-    } catch {
-      notas.push('Todavía no hay respaldos de chats que copiar (se crean al guardar la primera conversación).');
-      return;
-    }
-    const nombre = `respaldos-${dia}.tar.gz`;
-    const destino = path.join(dir, nombre);
-    const r = await empaquetarCarpeta(origen, destino, { raizDentro: 'respaldos' });
-    const s = await stat(destino);
-    ficheros.push({ nombre, bytes: s.size, que: `Los respaldos de chats y sus adjuntos (${r.ficheros} ${r.ficheros === 1 ? 'fichero' : 'ficheros'}, ${bytesEnPalabras(r.bytes)} sin comprimir)` });
-  }
-
   let enCurso: Promise<ResultadoCopia> | null = null;
 
   /** Una copia a la vez: quien llega mientras hay una en marcha espera a esa misma (no arranca otra). */
@@ -476,7 +464,7 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
       await new Promise((r) => setImmediate(r));
       await copiarBase(dir, dia, ficheros, notas);
       await new Promise((r) => setImmediate(r));
-      await copiarRespaldos(dir, dia, ficheros, notas);
+      notas.push('Los archivos históricos de chat existentes se conservan en su carpeta y no se incluyen en copias nuevas.');
       const borradas = await podar(dir);
       if (borradas) notas.push(`Se borraron ${borradas} ${borradas === 1 ? 'copia vieja' : 'copias viejas'} (se conservan las últimas ${deps.ajustes().conservar}).`);
     } catch (e) {
@@ -507,7 +495,7 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     if (f.tipo === 'mysql') {
       try {
         const d = datosDe(f);
-        return { tipo: 'mysql', detalle: `La base es «${d.base}», en el servidor MySQL/MariaDB ${d.host}:${d.port}: se copia entera a base-AAAA-MM-DD.sql.gz (con mysqldump si está; si no, con el volcado propio de GSGchat).` };
+        return { tipo: 'mysql', detalle: `La base es «${d.base}», en el servidor MySQL/MariaDB ${d.host}:${d.port}: el respaldo incluye esquema y datos operativos, pero omite filas temporales de messages, decisiones_bot, chat_archives y whatsapp_inbox.` };
       } catch (error) {
         return { tipo: 'mysql', detalle: error instanceof Error ? error.message : String(error) };
       }
@@ -526,9 +514,9 @@ export async function crearRespaldo(deps: DepsRespaldo): Promise<ServicioRespald
     return [
       'Para el servidor de GSGchat (cierra la ventana o Ctrl+C).',
       'Descarga la copia base-…sql.gz de aquí abajo.',
-      `Abre phpMyAdmin (con XAMPP: http://localhost/phpmyadmin), elige la base ${base ? `«${base}»` : 'de GSGchat'}, entra en «Importar», elige el fichero base-…sql.gz tal cual (no hace falta descomprimirlo) y pulsa «Continuar». La copia trae cada tabla entera: reemplaza lo que haya en ellas.`,
+      `Abre phpMyAdmin (con XAMPP: http://localhost/phpmyadmin), elige la base ${base ? `«${base}»` : 'de GSGchat'}, entra en «Importar», elige el fichero base-…sql.gz tal cual (no hace falta descomprimirlo) y pulsa «Continuar». La copia restaura pedidos y datos operativos; las tablas de chat se restauran vacías.`,
       `Sin phpMyAdmin: descomprime el .sql.gz (con 7-Zip, por ejemplo) y ejecuta: mysql -u usuario -p ${base || 'nombre_de_la_base'} < base-….sql`,
-      'Si también quieres los chats guardados, descomprime respaldos-…tar.gz encima de la carpeta de respaldos.',
+      'Los respaldos nuevos no incluyen mensajes ni conversaciones guardadas.',
       'Arranca el servidor otra vez y entra en Conexión: si pide el QR, escanéalo con el teléfono del número.',
     ];
   }

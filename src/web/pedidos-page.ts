@@ -19,7 +19,7 @@ export function pedidosPage(opts: { disponible: boolean; demo: boolean; nombreNe
     <div id="pedidos-error" role="alert" class="hidden"></div>
     <div id="reportes-gsg" class="tarjeta" role="status"></div>
     <div id="envios-pendientes" class="tarjeta hidden"></div>
-    <div class="acciones"><button class="btn" id="actualizar">Actualizar</button><a class="btn" href="/mapa">Ver ubicaciones</a><a class="btn" href="/chat">Abrir chats</a></div>
+    <div class="acciones"><button class="btn" id="actualizar">Actualizar</button><a class="btn" href="/chat">Abrir chats</a></div>
     <div class="filtros"><label>Buscar <input id="buscar" type="search" placeholder="Cliente, teléfono o pedido"></label><label>Estado <select id="filtro"><option value="todos">Todos</option><option value="por_confirmar_envio">Por confirmar el envío</option><option value="falta_ubicacion">Falta ubicación</option><option value="falta_confirmar">Falta confirmar</option><option value="contactados">Ubicación registrada</option><option value="necesita">Necesitan atención</option><option value="cancelada">Cancelados</option></select></label><span id="total" class="muted" aria-live="polite"></span></div>
     <div id="lista-pedidos" aria-live="polite">Cargando pedidos…</div>
     ${bandejaMensajesHtml()}

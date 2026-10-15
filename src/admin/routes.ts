@@ -28,9 +28,8 @@ import { syncTemplates } from '../templates/registry.js';
 import { pushTemplates } from '../templates/push.js';
 import { registerAutomationRoutes } from './automation-routes.js';
 import { registerChatRoutes } from './chat-routes.js';
+import { responderLectura } from '../web/cache-lectura.js';
 import { registerLeadsRoutes } from './leads-routes.js';
-import { registerArchiveRoutes } from './archive-routes.js';
-import { archivarConversacion } from '../archive/service.js';
 import { registerRutasRoutes } from './rutas-routes.js';
 import { crearPuertoGsg } from '../rutas/gsg.js';
 import { conexionGsgVigente } from '../rutas/conexion-gsg.js';
@@ -50,6 +49,7 @@ import { TITULO_ALERTA, type TipoAlertaHoy } from '../entregas/alertas-hoy.js';
 import { registerBuscarRoutes } from './buscar-routes.js';
 import { atenderRespuestaDeRuta } from '../rutas/inbound.js';
 import { crearPuertoEnEspera } from '../rutas/gsg.js';
+import { registrarEventosPanel } from '../web/eventos-panel-routes.js';
 
 export interface AdminDeps {
   /**
@@ -71,6 +71,7 @@ export interface AdminDeps {
   /** La conexion con GSG de ESTA tienda (sus descartes y su cuadre). */
   conexionGsg?: import('../rutas/conexion-gsg.js').ServicioConexionGsg;
   repos: Repos;
+  bus?: import('../eventos/bus.js').Bus;
   config: Config;
   settings: SettingsService;
   queue: OutboundQueue;
@@ -157,6 +158,7 @@ export function parseContactLines(text: string): Array<{ phone: string; name?: s
 
 export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps): Promise<void> {
   const { repos, config, queue, sender, settings, wa, hub } = deps;
+  registrarEventosPanel(app, deps.bus, deps.repos);
   // Sin Meta (cliente local o WAHA) no hay id de numero: se usa una clave fija
   // para que el estado, la pausa y el monitor hablen de la misma fila.
   // La fila de `number_state` del numero vigente: la misma que escribe el
@@ -173,38 +175,9 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.
     panelStoky: () => deps.conexionStoky?.estado().panelUrl || config.STOKY_PANEL_URL,
     // Cerrar la ficha cierra tambien la conversacion: se respalda y se limpia.
-    alCerrarFicha: config.ARCHIVE_ON_LEAD_CLOSE
-      ? async (contactId) => {
-          try {
-            await archivarConversacion(
-              { repos, dir: config.ARCHIVE_DIR, log: (m, d) => app.log.info(d ?? {}, m) },
-              contactId,
-              'lead',
-            );
-          } catch (error) {
-            // Que falle el respaldo no puede tumbar el guardado de la ficha:
-            // el operador acaba de cerrar una venta, no un backup.
-            app.log.warn(
-              { contactId, detalle: error instanceof Error ? error.message : String(error) },
-              'no se pudo respaldar la conversacion al cerrar la ficha',
-            );
-          }
-        }
-      : undefined,
+
   });
-  await registerArchiveRoutes(app, {
-    repos,
-    dir: config.ARCHIVE_DIR,
-    dias: () => deps.ajustes?.guardadosDias() ?? config.ARCHIVE_INACTIVE_DAYS,
-    ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
-    pedidoDe: deps.entregas ? (phone) => deps.entregas!.pedidoDe(phone) : undefined,
-    nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
-    telefonosTerminadosHoy: deps.entregas ? () => deps.entregas!.telefonosTerminadosHoy() : undefined,
-    mediaDir: deps.mediaDir,
-    secreto: config.TRACKING_SECRET,
-    entrenamiento: deps.entrenamiento,
-    publicBase: config.PUBLIC_BASE_URL,
-  });
+
 
   // El buscador global (Ctrl K) y "que paso con este mensaje". Ver buscar-routes.ts.
   await registerBuscarRoutes(app, { repos, entregas: deps.entregas });
@@ -711,7 +684,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
 
   // --- entregas: cada intento, salga o no ---------------------------------
-  app.get('/admin/deliveries', async (request) => {
+  app.get('/admin/deliveries', async (request, reply) => {
     const query = pageSchema
       .extend({
         status: z
@@ -721,10 +694,10 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         phone: z.string().optional(),
       })
       .parse(request.query ?? {});
-    return repos.deliveries.listRecent({
+    return responderLectura(request, reply, await repos.deliveries.listRecent({
       ...query,
       phone: query.phone ? normalizePhone(query.phone) : undefined,
-    });
+    }));
   });
 
   /** El historial entero (con los mismos filtros) para Excel. */

@@ -21,6 +21,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import QRCode from 'qrcode';
+import { contenidoLocalAdmitido } from '../entradas-admitidas.js';
 import type { AnuncioEntrada, ChangeValue, InboundMessage } from '../types.js';
 import { desenvolver, guardarMedia, mediaDirectory, tipoDeAdjunto, type MediaInfo } from './media.js';
 
@@ -127,6 +128,9 @@ export interface GrupoResumen {
 }
 
 export interface StartLocalOptions {
+  soloTextoUbicacion?: boolean;
+  importarHistorial?: boolean;
+  aceptarEntrante?: (phone: string, timestamp: string) => Promise<boolean>;
   /** Carpeta donde se guarda la vinculacion. Sobrevive a los reinicios. */
   authDir: string;
   /** A donde van los mensajes entrantes ya traducidos. */
@@ -134,7 +138,7 @@ export interface StartLocalOptions {
   /** Donde se guardan las fotos, audios y documentos que llegan. */
   mediaDir?: string;
   /** Inyectable para las pruebas: por defecto, Baileys de verdad. */
-  createSocket?: (deps: { authDir: string }) => Promise<{
+  createSocket?: (deps: { authDir: string; importarHistorial?: boolean }) => Promise<{
     sock: LocalSocket;
     saveCreds: () => Promise<void>;
   }>;
@@ -244,7 +248,7 @@ export function fromJid(jid: string): string {
 }
 
 /** Baileys de verdad. Se carga tarde para no pagarlo si nadie usa este modo. */
-async function baileysSocket(deps: { authDir: string }) {
+async function baileysSocket(deps: { authDir: string; importarHistorial?: boolean }) {
   const baileys = await import('@whiskeysockets/baileys');
   const make = (baileys as unknown as { default?: unknown }).default ?? baileys.makeWASocket;
   const { state, saveCreds } = await baileys.useMultiFileAuthState(deps.authDir);
@@ -255,6 +259,7 @@ async function baileysSocket(deps: { authDir: string }) {
     printQRInTerminal: false,
     browser: baileys.Browsers.ubuntu('Chrome'),
     syncFullHistory: false,
+    ...(deps.importarHistorial === false ? { shouldSyncHistoryMessage: () => false } : {}),
     markOnlineOnConnect: false,
   }) as LocalSocket;
 
@@ -1123,7 +1128,7 @@ export function crearSesionLocal(): SesionLocal {
     estado.pairingCode = null;
 
     const crear = opts.createSocket ?? baileysSocket;
-    const { sock, saveCreds } = await crear({ authDir: opts.authDir });
+    const { sock, saveCreds } = await crear({ authDir: opts.authDir, importarHistorial: opts.importarHistorial });
     socket = sock;
 
     // La promesa se resuelve en cuanto hay algo que enseñar: el QR o la
@@ -1177,7 +1182,7 @@ export function crearSesionLocal(): SesionLocal {
             estado.detail = 'Conectado.';
             log(`WhatsApp conectado: ${estado.phone}`);
             listo();
-            void cargarGrupos(sock, opts, log);
+            if (opts.importarHistorial !== false) void cargarGrupos(sock, opts, log);
           }
 
           if (update.connection === 'close') {
@@ -1302,6 +1307,8 @@ export function crearSesionLocal(): SesionLocal {
         reenvio: boolean,
         origen: 'upsert' | 'sobre' | 'historial',
       ): Promise<void> => {
+        if (origen === 'historial' && opts.importarHistorial === false) return;
+        if (opts.soloTextoUbicacion && !contenidoLocalAdmitido(desenvolver((mensaje as { message?: Record<string, unknown> }).message).contenido)) return;
         const key = (mensaje as { key?: { id?: string; remoteJid?: string; fromMe?: boolean; isViewOnce?: boolean } }).key;
         if (key?.fromMe) {
           await procesarPropio(mensaje, origen === 'historial' ? 'historial' : 'upsert');
@@ -1311,8 +1318,11 @@ export function crearSesionLocal(): SesionLocal {
         // `escucharSobres`): Baileys lo vuelve a emitir cuando trae la marca.
         if (origen === 'upsert' && key?.isViewOnce && key.id && sobresAtendidos.has(key.id) && !reenvio) return;
 
-        const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock, { resubida: origen !== 'historial' });
         const telefono = await resolverTelefono(sock, key);
+        const timestamp = String((mensaje as { messageTimestamp?: unknown }).messageTimestamp ?? Math.floor(Date.now() / 1000));
+        const remitente = telefonoDe(key) ?? telefono ?? (esGrupo(key?.remoteJid) ? key?.remoteJid : null);
+        if (opts.aceptarEntrante && (!remitente || !(await opts.aceptarEntrante(remitente, timestamp)))) return;
+        const media = await bajarAdjunto(mensaje, key?.id ?? '', opts, log, sock, { resubida: origen !== 'historial' });
         // Un grupo del que no se sabia el nombre todavia: se pregunta una
         // vez y se recuerda.
         if (esGrupo(key?.remoteJid) && !nombreDeGrupo(key?.remoteJid)) await aprenderNombreDeGrupo(sock, key!.remoteJid!, opts, log);
@@ -1350,6 +1360,7 @@ export function crearSesionLocal(): SesionLocal {
        * fuera entrante -es la misma forma- y se entrega como saliente.
        */
       const procesarPropio = async (mensaje: unknown, origen: 'upsert' | 'historial' = 'upsert'): Promise<void> => {
+        if (opts.importarHistorial === false) return;
         if (!opts.onPropio) return;
         const m = mensaje as { key?: { id?: string; remoteJid?: string; isViewOnce?: boolean }; status?: unknown };
         const jid = m.key?.remoteJid ?? '';
@@ -1375,6 +1386,7 @@ export function crearSesionLocal(): SesionLocal {
       // (y bajo demanda, las anteriores de un chat). Entra por aqui, no por
       // `messages.upsert`; sin esto el chat empezaba vacio.
       sock.ev.on('messaging-history.set', (((historial: { messages?: unknown[]; syncType?: unknown; progress?: unknown }) => {
+        if (opts.importarHistorial === false) return;
         if (!opts.onChange) return;
         const lista = historial.messages ?? [];
         log(`historial del telefono: ${lista.length} mensajes (tipo ${String(historial.syncType ?? '?')}${historial.progress != null ? `, ${String(historial.progress)}%` : ''})`);
@@ -1415,7 +1427,7 @@ export function crearSesionLocal(): SesionLocal {
       }) as unknown) as (arg: never) => void);
 
       // Los sobres de "ver una vez" que Baileys tira antes de avisar.
-      escucharSobres(sock, (mensaje, tipoEvento) => procesarEntrante(mensaje, tipoEvento, false, 'sobre'), log, sobresAtendidos);
+      if (!opts.soloTextoUbicacion) escucharSobres(sock, (mensaje, tipoEvento) => procesarEntrante(mensaje, tipoEvento, false, 'sobre'), log, sobresAtendidos);
 
       // Si el socket ya venia vinculado no llega ningun QR: se le da un margen
       // corto para que diga "open" y, si no, se contesta con lo que haya.

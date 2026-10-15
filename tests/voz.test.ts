@@ -370,36 +370,18 @@ describe('el asistente con voz', () => {
     await voz.guardar({ clave: 'xi-1234-5678', vozId: 'v-lucia', vozNombre: 'Lucía', activa: true, cuando: 'si-manda-audio' });
   });
 
-  it('una nota de voz del cliente se transcribe, el asistente la lee y contesta con audio; el hilo y el webhook lo llevan', async () => {
-    await cliente();
+  it('ignora el audio sin transcripción, IA, respuesta ni registro en el hilo', async () => {
+    const c = await cliente();
     await processChange('messages', entranteAudio(), deps);
-    // Se transcribio una vez y el modelo recibio lo que dijo, no "(audio)".
-    expect(eleven.estado.transcritos).toBe(1);
-    expect(modelo.recibido[0]!.at(-1)).toEqual({ role: 'user', content: 'quiero dos pares talla cuarenta y dos' });
-    // La respuesta salio como nota de voz (ptt) con el texto de pie, marcada como del asistente.
-    const salida = enviados()[0]!;
-    expect(salida).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, mimeType: 'audio/ogg; codecs=opus', caption: 'Claro, tenemos talla 42 en negro y marrón.' });
-    expect(eleven.estado.hablado).toEqual(['Claro, tenemos talla 42 en negro y marrón.']);
-    // El hilo: el entrante con lo que dijo, el saliente como audio del asistente.
-    const c = (await repos.contacts.getByPhone('51987654321'))!;
-    const hilo = await repos.messages.listMessages(c.id, 10);
-    const entrante = hilo.find((m) => m.direction === 'in')!;
-    expect(entrante).toMatchObject({ kind: 'audio', body: 'quiero dos pares talla cuarenta y dos', payload: { transcripcion: 'quiero dos pares talla cuarenta y dos', media: { transcripcion: 'quiero dos pares talla cuarenta y dos' } } });
-    const saliente = hilo.find((m) => m.direction === 'out')!;
-    expect(saliente).toMatchObject({ kind: 'audio', body: 'Claro, tenemos talla 42 en negro y marrón.', payload: { origen: 'ia', media: { kind: 'audio', voz: true } } });
-    expect(existsSync(path.join(mediaDir, (saliente.payload as { media: { id: string } }).media.id))).toBe(true);
-    // Los eventos para los webhooks: transcripcion en lo recibido, autor y voz en lo enviado.
-    const recibido = eventos.find((e) => e.nombre === 'mensaje.recibido')!;
-    expect(recibido.datos.mensaje).toMatchObject({ tipo: 'audio', texto: 'quiero dos pares talla cuarenta y dos', transcripcion: 'quiero dos pares talla cuarenta y dos' });
-    const enviado = eventos.find((e) => e.nombre === 'mensaje.enviado')!;
-    expect(enviado.datos.mensaje).toMatchObject({ tipo: 'audio', autor: 'ia', voz: true, texto: 'Claro, tenemos talla 42 en negro y marrón.' });
-    // Y la API de conversaciones lo expone con nombres fijos.
-    const conv = (await app.inject({ method: 'GET', url: '/api/v1/conversaciones/51987654321', headers: con(TODO) })).json();
-    expect(conv.mensajes.find((m: { direccion: string }) => m.direccion === 'entrante')).toMatchObject({ tipo: 'audio', transcripcion: 'quiero dos pares talla cuarenta y dos', autor: null });
-    expect(conv.mensajes.find((m: { direccion: string }) => m.direccion === 'saliente')).toMatchObject({ tipo: 'audio', autor: 'ia', voz: true });
+    expect(eleven.estado.transcritos).toBe(0);
+    expect(eleven.estado.hablado).toEqual([]);
+    expect(modelo.recibido).toEqual([]);
+    expect(enviados()).toHaveLength(0);
+    expect(await repos.messages.listMessages(c.id, 10)).toEqual([]);
+    expect(eventos.filter(e => e.nombre === 'mensaje.recibido' || e.nombre === 'mensaje.enviado')).toEqual([]);
   });
 
-  it('con "si manda audio", a un texto se contesta por escrito; con "siempre", con audio; con "nunca", nunca', async () => {
+  it('los ajustes antiguos de voz no generan audio y los audios entrantes se ignoran', async () => {
     await cliente();
     await processChange('messages', entranteTexto('tienen talla 42?'), deps);
     expect(enviados()[0]).toMatchObject({ kind: 'text', body: 'Claro, tenemos talla 42 en negro y marrón.' });
@@ -407,22 +389,24 @@ describe('el asistente con voz', () => {
 
     await voz.guardar({ cuando: 'siempre' });
     await processChange('messages', entranteTexto('y en marrón?'), deps);
-    expect(enviados()[1]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true });
+    expect(enviados()[1]).toMatchObject({ kind: 'text' });
 
     await voz.guardar({ cuando: 'nunca' });
     await processChange('messages', entranteAudio(), deps);
-    expect(enviados()[2]).toMatchObject({ kind: 'text' });
-    // Pero el audio se sigue entendiendo.
-    expect(modelo.recibido.at(-1)!.at(-1)).toEqual({ role: 'user', content: 'quiero dos pares talla cuarenta y dos' });
+    expect(enviados()).toHaveLength(2);
+    expect(eleven.estado.transcritos).toBe(0);
+    expect(eleven.estado.hablado).toEqual([]);
+    expect(modelo.recibido).toHaveLength(2);
   });
 
-  it('si ElevenLabs falla o el texto es largo, la respuesta sale por escrito y queda el motivo', async () => {
+  it('el proveedor de voz no se consulta aunque falle o la respuesta sea larga', async () => {
     await cliente();
     eleven.estado.fallar = new ErrorVoz('Se acabaron los caracteres del plan de ElevenLabs por este mes.', 402, 'cuota');
     await processChange('messages', entranteAudio(), deps);
     // Sin transcripcion posible es un archivo sin texto: no se contesta (pedido del dueño, 06/10).
     expect(enviados()).toHaveLength(0);
-    expect(voz.estado().ultimoError?.detalle).toContain('caracteres');
+    expect(voz.estado().ultimoError).toBeNull();
+    expect(eleven.estado.transcritos).toBe(0);
 
     eleven.estado.fallar = null;
     modelo.estado.siguiente = 'x'.repeat(700);

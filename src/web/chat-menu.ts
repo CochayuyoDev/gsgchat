@@ -241,7 +241,6 @@ function mensajePorId(id) {
 function opcionesDeMensaje(m) {
   var ops = [];
   var texto = (m.body || '').trim();
-  var media = m.payload && m.payload.media;
   var enGrupo = current && current.tipo === 'grupo';
   var citable = PUEDE.citar && m.wamid && !/^(local:|web:|waha:local:)/.test(m.wamid);
 
@@ -254,24 +253,18 @@ function opcionesDeMensaje(m) {
       if (el) abrirReaccionesRapidas(el, m.id);
     } });
   }
-  ops.push({ icono: '↪', texto: 'Reenviar', accion: function () { abrirReenviar([m.id]); } });
+  if (texto || m.kind === 'location') ops.push({ icono: '↪', texto: 'Reenviar', accion: function () { abrirReenviar([m.id]); } });
   if (texto) {
     ops.push({ icono: '⧉', texto: 'Copiar texto', accion: function () { copiar(texto); } });
   }
   var destacado = m.payload && m.payload.destacado;
   ops.push({ icono: destacado ? '☆' : '⭐', texto: destacado ? 'Quitar la estrella' : 'Destacar', accion: function () { destacar([m.id], !destacado); } });
-  if (media && media.id) {
-    ops.push({ icono: '⭳', texto: 'Descargar el adjunto', accion: function () { descargarAdjunto(media); } });
-  }
-  if (media && media.kind === 'sticker' && m.direction === 'in' && media.id) {
-    ops.push({ icono: '🙂', texto: 'Guardar en mis stickers', accion: function () { guardarSticker(media.id); } });
-  }
   if (m.direction === 'out' && PUEDE.editar && citable && texto) {
     ops.push({ icono: '✎', texto: 'Editar el mensaje', accion: function () { editarMensaje(m); } });
   }
 
   /* Ensenarle al asistente: en un grupo no atiende nadie automatico. */
-  var esTexto = m.kind === 'text' || (m.kind === 'audio' && m.payload && m.payload.transcripcion);
+  var esTexto = m.kind === 'text';
   if (!enGrupo && esTexto && texto) {
     if (m.direction === 'in') ops.push({ icono: '🎓', texto: 'Enseñarle la respuesta al asistente', accion: function () { ensenarDesdeMensaje(m, false); } });
     else if (m.payload && m.payload.origen === 'ia') ops.push({ icono: '🎓', texto: 'Corregir al asistente', accion: function () { ensenarDesdeMensaje(m, true); } });
@@ -336,18 +329,6 @@ function copiar(texto) {
   var listo = function () { toast('Copiado.'); };
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(texto).then(listo, function () { window.prompt('Copia el texto:', texto); });
   else window.prompt('Copia el texto:', texto);
-}
-
-/* Bajarse el adjunto ya cargado: el blob esta en memoria, no hace falta pedirlo otra vez. */
-function descargarAdjunto(media) {
-  var url = mediaCache[media.id];
-  if (!url) { toast('Espera a que termine de cargarse el adjunto.'); return; }
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = media.filename || media.id;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
 }
 
 /* ---------------------------------------------------------------- destacar */
