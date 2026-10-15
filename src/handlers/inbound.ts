@@ -59,7 +59,8 @@ import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
 import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
-import { atenderComoAgente, atenderConReglaGsg, cerrarChat, pideAsesor, type DepsAgente } from '../ia/agente-operativo.js';
+import { atenderComoAgente, atenderConReglaGsg, cerrarChat, clasificarPinLejos, pideAsesor, type DepsAgente } from '../ia/agente-operativo.js';
+import { entradaAdmitida } from '../whatsapp/entradas-admitidas.js';
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
@@ -313,45 +314,32 @@ export async function turnoDePreventa(
   if (Object.keys(patch).length) await repos.leads.update(contact.id, patch);
   if (!respuesta) return;
 
-  // El sticker que acompaña: al saludo la primera vez, y al cerrar la ficha.
-  const adorno = async (salida: { ok: boolean }) => {
-    if (!salida.ok || !deps.stickers) return;
-    if (entrada.esPrimerMensaje) await deps.stickers.automatico('inicio', contact.phone);
-    else if (patch.estado === 'calificado') await deps.stickers.automatico('gracias', contact.phone);
-  };
-
   if (respuesta.pedirUbicacion) {
-    await adorno(
       await sender.send({
         phone: contact.phone,
         kind: 'interactive',
         category: 'UTILITY',
         interactive: { body: respuesta.texto, locationRequest: true },
-      }),
-    );
+      });
     return;
   }
 
   if (respuesta.botones?.length) {
-    await adorno(
       await sender.send({
         phone: contact.phone,
         kind: 'interactive',
         category: 'UTILITY',
         interactive: { body: respuesta.texto, buttons: respuesta.botones },
-      }),
-    );
+      });
     return;
   }
 
-  await adorno(
     await sender.send({
       phone: contact.phone,
       kind: 'freeform',
       category: 'UTILITY',
       text: respuesta.texto,
-    }),
-  );
+    });
 }
 
 /**
@@ -707,6 +695,36 @@ export async function handleInboundMessage(
   profileName: string | undefined,
   deps: InboundDeps,
 ): Promise<void> {
+  if (!entradaAdmitida(message)) return;
+  // Reenvíos de un mismo wamid no pueden ejecutar dos veces una regla,
+  // aunque la fila del chat haya vencido y se haya borrado físicamente.
+  // El recibo conserva solo metadatos durante siete días; nunca el cuerpo.
+  // Los reenvíos multimedia son filtrados antes de llegar aquí.
+  const provider = message.provider ?? 'whatsapp';
+  const reservado = await deps.repos.messages.reservarEntrada(
+    provider,
+    message.id,
+    new Date(),
+    new Date(Date.now() + 7 * 24 * 60 * 60_000),
+  );
+  if (!reservado) return;
+  try {
+    await handleInboundMessageReservado(message, profileName, deps);
+    await deps.repos.messages.finalizarEntrada(provider, message.id, 'aceptado');
+  } catch (error) {
+    // Un fallo durante el turno puede ocurrir después de que un proveedor
+    // aceptara un envío. Se marca incierto y no se reproduce a ciegas.
+    await deps.repos.messages.finalizarEntrada(provider, message.id, 'incierto').catch(() => undefined);
+    throw error;
+  }
+}
+
+async function handleInboundMessageReservado(
+  message: InboundMessage,
+  profileName: string | undefined,
+  deps: InboundDeps,
+): Promise<void> {
+  if (!entradaAdmitida(message)) return;
   // Los grupos y los reenvios del telefono (la foto de un «ver una vez» que
   // espera el mensaje original) no hacen fila: la fila los bloquearia.
   if (message.grupo || message.reenvio) return handleInboundMessageEnFila(message, profileName, deps);
@@ -848,7 +866,7 @@ async function handleInboundMessageEnFila(
   const contact = await repos.contacts.upsertFromInbound(phone, profileName);
   // Antes de anotar el entrante: asi se sabe si es el primer mensaje.
   const isFirstMessage = !contact.lastInboundAt;
-  let leido = readInbound(message);
+  const leido = readInbound(message);
 
   // La segunda entrega de un mensaje que llego vacio (el telefono reenvio un
   // "ver una vez"): se completa la fila que ya existe con la foto y se acaba.
@@ -878,18 +896,6 @@ async function handleInboundMessageEnFila(
       createdAt: receivedAt,
     });
     return;
-  }
-
-  // Una nota de voz se transcribe ANTES de guardarla: asi el hilo, la API y
-  // el webhook llevan lo que dijo, y el asistente la atiende como texto. Lo
-  // viejo y lo reentregado (arriba) no se transcribe: no se gasta cuota en
-  // audios que nadie va a contestar.
-  if (message.type === 'audio' && message.media?.id && !message.media.transcripcion && deps.voz?.puedeTranscribir()) {
-    const transcripcion = await deps.voz.transcribirGuardado(message.media.id, message.media.mimeType).catch(() => null);
-    if (transcripcion) {
-      message.media.transcripcion = transcripcion;
-      leido = readInbound(message);
-    }
   }
 
   // El entrante abre la ventana de servicio de 24 h: sin esto el sender
@@ -995,7 +1001,6 @@ async function handleInboundMessageEnFila(
       } else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: respuesta.solicitud?.referencia }), { confirmarUbicacion: true });
       // Primero se cierra (con la regla del dueño, desde aqui silencio: ni el sticker sale).
       await cerrarTrasUbicacion();
-      if (deps.stickers) await deps.stickers.automatico('gracias', phone);
       return true;
     }
     if (respuesta.resultado === 'fuera_de_zona') {
@@ -1035,12 +1040,15 @@ async function handleInboundMessageEnFila(
   };
 
   let confirmacionUbicacion: ConfirmacionUbicacion | null = null;
-  const confirmarUbicacion = async (job: import('../outbound/sender.js').SendJob) => {
-    confirmacionUbicacion = await enviarConfirmacionUbicacion({ repos, sender, contact, job, ahora: deps.entregas?.ahora?.(), timezone: config.timezone });
+  const scopeDelPin = message.location
+    ? `${Number(message.location.latitude).toFixed(5)},${Number(message.location.longitude).toFixed(5)}`
+    : undefined;
+  const confirmarUbicacion = async (job: import('../outbound/sender.js').SendJob, scope?: string) => {
+    confirmacionUbicacion = await enviarConfirmacionUbicacion({ repos, sender, contact, job: { ...job, ...(scope || scopeDelPin ? { confirmationScope: scope ?? scopeDelPin } : {}) }, ahora: deps.entregas?.ahora?.(), timezone: config.timezone });
     return confirmacionUbicacion.salida;
   };
-  const reply = (text: string, opts: { traspasaSilencio?: boolean; confirmarUbicacion?: boolean } = {}) =>
-    opts.confirmarUbicacion ? confirmarUbicacion({ phone, kind: 'freeform', category: 'UTILITY', text })
+  const reply = (text: string, opts: { traspasaSilencio?: boolean; confirmarUbicacion?: boolean; confirmationScope?: string } = {}) =>
+    opts.confirmarUbicacion ? confirmarUbicacion({ phone, kind: 'freeform', category: 'UTILITY', text }, opts.confirmationScope)
       : sender.send({ phone, kind: 'freeform', category: 'UTILITY', text, ...(opts.traspasaSilencio ? { cierreTrasGracias: true } : {}) });
 
   /**
@@ -1059,9 +1067,10 @@ async function handleInboundMessageEnFila(
    */
   const responderEntrega = async (r: { entrega?: import("../entregas/repo.js").Entrega; responder?: string; botones?: Array<{ id: string; title: string }>; pedirUbicacion?: boolean; resultado?: string }) => {
     if (r.resultado === 'ubicacion' || r.resultado === 'ubicacion_corregida') {
+      const scope = r.entrega?.lat != null && r.entrega.lng != null ? `${r.entrega.lat.toFixed(5)},${r.entrega.lng.toFixed(5)}` : undefined;
       return confirmarUbicacion(r.botones?.length
         ? { phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } }
-        : { phone, kind: 'freeform', category: 'UTILITY', text: r.responder ?? '' });
+        : { phone, kind: 'freeform', category: 'UTILITY', text: r.responder ?? '' }, scope);
     }
     const enviado = await (r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
@@ -1128,17 +1137,7 @@ async function handleInboundMessageEnFila(
     log: (m, d) => console.warn(`[agente] ${m}`, d ?? ''),
     ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),
   });
-  /** Tras registrar la ubicacion, la IA se calla en este chat (su mensaje ya lleva el cierre). */
-  /** Con la regla del dueño, el pin (o enlace) también deja su decisión del turno (ver src/ia/decision.ts). */
-  const decisionUbicacion = async (respuesta: string): Promise<void> => {
-    if (!reglaGsg()) return;
-    const dato = message.type === 'location' ? 'pin de WhatsApp' : 'enlace de mapa';
-    await repos.decisiones
-      ?.registrar({ contactId: contact.id, phone, mensajes: message.rafaga ?? 1, intencion: 'enviar_ubicacion', dato, respuesta, como: 'reglas', esperaba: 'ubicación', detalle: null })
-      .catch((error: unknown) => request_log(deps, 'no se pudo guardar la decisión del turno', error));
-  };
   const cerrarTrasUbicacion = async (): Promise<void> => {
-    await decisionUbicacion(confirmacionUbicacion?.nota ?? 'UBI REGISTRADA no enviada: no hubo intento de confirmación');
     if (!confirmacionUbicacion?.enviada && !confirmacionUbicacion?.repetida) return;
     if (!agenteActivo() && !reglaGsg()) return;
     // Tras «no soy yo» el chat sigue con una persona tal cual. Si ya habia
@@ -1161,7 +1160,6 @@ async function handleInboundMessageEnFila(
     });
     if (!r.atendida) return false;
     if (r.responder) await responderEntrega(r);
-    await decisionUbicacion(r.responder ? 'una pregunta de aclaración: ¿es ahí? (pin lejos de su distrito)' : 'silencio');
     return true;
   };
 
@@ -1189,6 +1187,29 @@ async function handleInboundMessageEnFila(
     if (texto) {
       if (avisarUbicacionEnVivo(phone, Date.now())) await reply(texto);
       return;
+    }
+  }
+
+  // Mientras falta la ubicación, ningún texto entrante adelanta la petición
+  // ni cambia el contador o el próximo intento. Esto vale en ambos modos y
+  // antes de las plantillas, el agente y las automatizaciones por palabras.
+  // Solo pasan ubicaciones y la confirmación explícita de un pin ya recibido.
+  if (!(message.type === 'location' && message.location) && !(deps.entregas && await deps.entregas.esMotorizado(phone).catch(() => false))) {
+    const abierta = (await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ?? (await repos.rutas.abiertaPorTelefono(phone).catch(() => null));
+    const situacion = await deps.entregas?.situacionGsg(phone).catch(() => null);
+    const esperando = situacion?.ubicacion === 'pendiente' || (Boolean(abierta) && situacion?.ubicacion !== 'registrada');
+    if (esperando) {
+      const escrito = message.text?.body ?? message.media?.transcripcion ?? message.button?.text ?? message.interactive?.button_reply?.title ?? '';
+      const boton = message.interactive?.button_reply?.id ?? message.button?.payload ?? null;
+      const ubicacion = escrito && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(escrito)
+        ? await extractLocation(escrito, {}).catch(() => null) : null;
+      const confirmaPin = Boolean(deps.entregas && clasificarPinLejos(escrito, boton) !== 'otra' && await deps.entregas.pinLejosPendiente(phone).catch(() => false));
+      if (!ubicacion?.ok && !confirmaPin) {
+        // Un número equivocado se reporta por dentro, sin contestarle al cliente.
+        if (escrito && pareceNumeroEquivocado(escrito)) await deps.entregas?.alNoSoyYo(contact, escrito, 'reglas; sin respuesta al cliente').catch((error) => request_log(deps, 'no se pudo reportar el número equivocado', error));
+        if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `mensaje sin ubicación: no se contesta ni se adelanta el recordatorio (${escrito.slice(0, 160) || message.type})`).catch(() => undefined);
+        return;
+      }
     }
   }
 
@@ -1272,7 +1293,7 @@ async function handleInboundMessageEnFila(
       const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: 'pin de whatsapp' }).catch(() => ({ atendida: false as const }));
       if (enEntrega.atendida) {
         if (enEntrega.responder) await responderEntrega(enEntrega);
-        else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true });
+        else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
         await cerrarTrasUbicacion();
         return;
       }
@@ -1293,11 +1314,11 @@ async function handleInboundMessageEnFila(
     // Sin coordenadas a la vista: el enlace basta. En modo GSG, con el texto
     // editable de las entregas (motorizado, horario, soporte).
     if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
-      await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }), { confirmarUbicacion: true });
+      await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }), { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
       await cerrarTrasUbicacion();
       return;
     }
-    await reply(`Ubicación registrada.\n${result.mapsUrl}`, { confirmarUbicacion: true });
+    await reply(`Ubicación registrada.\n${result.mapsUrl}`, { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
     return;
   }
 
@@ -1383,13 +1404,8 @@ async function handleInboundMessageEnFila(
       await atenderComoAgente(depsAgente(), contact, '').catch((error) => request_log(deps, 'fallo el agente operativo', error));
       return;
     }
-    // Con la IA activa, un archivo sin texto no se contesta (pedido del dueño,
-    // 06/10): si era para un pedido activo ya lo atendieron las entregas o el
-    // reparto, arriba. Queda en el chat y la decisión, anotada.
+    // Con la IA activa, un archivo sin texto no se contesta.
     if (esAdjunto && message.type !== 'sticker' && deps.ia?.activa()) {
-      await repos.decisiones
-        ?.registrar({ contactId: contact.id, phone, mensajes: 1, intencion: 'sin_texto', dato: message.type, respuesta: 'silencio (archivo sin texto: queda en el chat)', como: 'reglas', esperaba: null, detalle: null })
-        .catch((error: unknown) => request_log(deps, 'no se pudo guardar la decisión del turno', error));
       return;
     }
     if (esAdjunto && (await preventaActiva())) {
@@ -1511,7 +1527,7 @@ async function handleInboundMessageEnFila(
       const guardada = await repos.locations.save(contact.id, result, text);
       await repos.locations.confirm(guardada);
       if (enEntrega.responder) await responderEntrega(enEntrega);
-      else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true });
+      else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
       await cerrarTrasUbicacion();
       return;
     }
@@ -1575,11 +1591,11 @@ async function handleInboundMessageEnFila(
   // lo que sigue (motorizado, horario, soporte) con el texto editable de las
   // entregas, aunque este cliente no tenga pedido de hoy en la lista.
   if (deps.entregas && (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg') {
-    await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }), { confirmarUbicacion: true });
+    await reply(deps.entregas.textoUbicacionRegistrada({ nombre: contact.name, mapa: result.mapsUrl }), { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
     await cerrarTrasUbicacion();
     return;
   }
-  await reply(`Ubicación registrada.\n${result.mapsUrl}`, { confirmarUbicacion: true });
+  await reply(`Ubicación registrada.\n${result.mapsUrl}`, { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
 }
 
 /** Como se presenta el negocio: lo de la pantalla si se cambio, si no lo del servidor. */

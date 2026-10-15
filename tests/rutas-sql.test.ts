@@ -62,6 +62,23 @@ describe('lotes y solicitudes', () => {
     expect(conCifras?.cifras).toMatchObject({ pendiente: 1, incidencia: 1 });
   });
 
+  it('consulta solicitudes de varios clientes y cifras de vistas por lote en bloque', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Resumen en bloque' });
+    await repos.rutas.agregarSolicitudes(lote.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111', estado: 'pendiente' },
+      { telefonoCrudo: '922222222', phone: '51922222222', estado: 'enviado' },
+      { telefonoCrudo: '933333333', phone: null, estado: 'incidencia', incidencia: 'numero_corto', requiereHumano: true },
+    ]);
+
+    const clientes = await repos.rutas.solicitudesPorLoteYTelefonos(lote.id, ['51911111111', '51922222222', '51900000000']);
+    expect(clientes.map((s) => s.phone).sort()).toEqual(['51911111111', '51922222222']);
+    expect(await repos.rutas.resumenSolicitudes(lote.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ estado: 'pendiente', total: 1 }),
+      expect.objectContaining({ estado: 'enviado', total: 1 }),
+      expect.objectContaining({ estado: 'incidencia', incidencia: 'numero_corto', requiereHumano: true, total: 1 }),
+    ]));
+  });
+
   it('la cola solo saca lo de los lotes en marcha y en orden de espera', async () => {
     const parado = await repos.rutas.crearLote({ nombre: 'Parado' });
     const enMarcha = await repos.rutas.crearLote({ nombre: 'En marcha' });

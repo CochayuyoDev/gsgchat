@@ -20,6 +20,7 @@ import { aMano } from '../salud/humano.js';
 import { codigoDeError } from '../salud/supresion.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { dailyCapFor, type WarmupPolicy } from './throttle.js';
+import { crearLimitadorEnvios } from './limitador-envios.js';
 import { esContactoWeb, nuevoIdMensajeWeb } from '../web-visitantes/canal.js';
 import {
   evaluateGates,
@@ -81,6 +82,8 @@ export interface SendJob {
   cierreTrasGracias?: boolean;
   /** Acuse de una ubicación recibida; queda identificado en el historial real. */
   confirmacionUbicacion?: boolean;
+  /** Huella de coordenadas normalizadas para distinguir una corrección del mismo pedido. */
+  confirmationScope?: string;
   /**
    * Regla del dueño (10/10): tras UBI REGISTRADA, la respuesta de la IA a una
    * consulta del cliente sobre SU pedido (dónde está, cuándo llega, la
@@ -193,6 +196,8 @@ export interface SenderDeps {
   phoneNumberId: string | (() => string);
   warmup: WarmupPolicy;
   maxMarketingPerContact7d: number;
+  maxConcurrentSends?: number;
+  sendsPerSecond?: number;
   /** Si la ventana de 24 h de Meta aplica. Ver `GateSnapshot`. */
   serviceWindowApplies?: boolean | (() => boolean);
   now?: () => Date;
@@ -230,6 +235,10 @@ export interface Sender {
 
 export function createSender(deps: SenderDeps): Sender {
   const { repos, wa, warmup, maxMarketingPerContact7d } = deps;
+  const limitarEnvio = crearLimitadorEnvios({
+    concurrencia: deps.maxConcurrentSends ?? (process.env.VITEST ? 10 : 2),
+    porSegundo: deps.sendsPerSecond ?? (process.env.VITEST ? 20 : 2),
+  });
   const now = deps.now ?? (() => new Date());
   const phoneId = () =>
     typeof deps.phoneNumberId === 'function' ? deps.phoneNumberId() : deps.phoneNumberId;
@@ -437,7 +446,7 @@ export function createSender(deps: SenderDeps): Sender {
       }
 
       try {
-        const result = job.manual ? await aMano(() => dispatch(wa, job, template)) : await dispatch(wa, job, template);
+        const result = await limitarEnvio(() => job.manual ? aMano(() => dispatch(wa, job, template)) : dispatch(wa, job, template));
         await repos.deliveries.markSent(deliveryId, result.wamid);
 
         // El chat lee de `messages`: sin esta fila el operador manda algo y no

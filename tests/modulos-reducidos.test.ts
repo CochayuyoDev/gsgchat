@@ -31,17 +31,20 @@ describe('aplicación centrada en API y WhatsApp', () => {
     }
   });
   it('conserva pantallas y scripts válidos sin formularios de módulos retirados', async () => {
-    for (const url of ['/panel', '/hoy', '/chat', '/mapa', '/setup', '/conexion-gsg', '/salud', '/automatizacion-gsg', '/cuentas', '/entrenamiento', '/manual']) {
+    for (const url of ['/panel', '/hoy', '/chat', '/setup', '/conexion-gsg', '/salud', '/automatizacion-gsg', '/cuentas', '/entrenamiento', '/manual']) {
       const r = await esc.app.inject({ url, headers: { cookie: cookies.get('superadmin')! } });
       expect(r.statusCode, url).toBe(200);
       expect(r.body).not.toMatch(/href="\/(?:procesos|personas|respuestas|pagar|panel#campanas|panel#grupos|panel#membresia)(?:"|\?)/);
       expect(r.body).not.toContain('id="tab-membresia"');
       expect(r.body).not.toContain('id="tab-campanas"');
+      expect(r.body).not.toContain('id="tab-plantillas"');
+      expect(r.body).not.toContain('href="/mapa"');
+      expect(r.body).not.toContain('Conversaciones guardadas');
       for (const m of r.body.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) expect(() => new Script(m[1]!)).not.toThrow();
     }
   });
   it('los enlaces de módulos fusionados llevan a la pantalla única', async () => {
-    for (const [origen, destino] of [['/numeros', '/hoy'], ['/tiendas', '/cuentas'], ['/fiabilidad', '/salud'], ['/rutas', '/automatizacion-gsg'], ['/envio-automatico', '/automatizacion-gsg']]) {
+    for (const [origen, destino] of [['/numeros', '/hoy'], ['/tiendas', '/cuentas'], ['/fiabilidad', '/salud'], ['/rutas', '/automatizacion-gsg'], ['/envio-automatico', '/automatizacion-gsg'], ['/mapa', '/hoy'], ['/guardados', '/chat']]) {
       const r = await esc.app.inject({ url: origen!, headers: { cookie: cookies.get('admin')! } });
       expect(r.statusCode).toBe(302);
       expect(r.headers.location).toBe(destino);

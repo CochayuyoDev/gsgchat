@@ -28,6 +28,9 @@ const schema = z.object({
     .min(1)
     .refine((v) => /^(mysql|mariadb):\/\//i.test(v.trim()), 'tiene que empezar por mysql:// (GSGchat guarda todo en MySQL o MariaDB)'),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  /** Límite conservador por tienda; la cola BullMQ usa los mismos valores. */
+  WA_SEND_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(process.env.VITEST ? 10 : 2),
+  WA_SEND_RATE_PER_SECOND: z.coerce.number().int().min(1).max(20).default(process.env.VITEST ? 20 : 2),
 
   // Por donde sale y entra WhatsApp. `cloud` es la API oficial de Meta;
   // `waha` es un contenedor de WAHA, que se conecta con codigo QR y funciona

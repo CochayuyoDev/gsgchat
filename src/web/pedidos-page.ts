@@ -19,7 +19,7 @@ export function pedidosPage(opts: { disponible: boolean; demo: boolean; nombreNe
     <div id="pedidos-error" role="alert" class="hidden"></div>
     <div id="reportes-gsg" class="tarjeta" role="status"></div>
     <div id="envios-pendientes" class="tarjeta hidden"></div>
-    <div class="acciones"><button class="btn" id="actualizar">Actualizar</button><a class="btn" href="/mapa">Ver ubicaciones</a><a class="btn" href="/chat">Abrir chats</a></div>
+    <div class="acciones"><button class="btn" id="actualizar">Actualizar</button><a class="btn" href="/chat">Abrir chats</a></div>
     <div class="filtros"><label>Buscar <input id="buscar" type="search" placeholder="Cliente, teléfono o pedido"></label><label>Estado <select id="filtro"><option value="todos">Todos</option><option value="por_confirmar_envio">Por confirmar el envío</option><option value="falta_ubicacion">Falta ubicación</option><option value="falta_confirmar">Falta confirmar</option><option value="contactados">Ubicación registrada</option><option value="necesita">Necesitan atención</option><option value="cancelada">Cancelados</option></select></label><span id="total" class="muted" aria-live="polite"></span></div>
     <div id="lista-pedidos" aria-live="polite">Cargando pedidos…</div>
     ${bandejaMensajesHtml()}
@@ -121,7 +121,7 @@ ${NUMEROS_REPORTADOS_JS}
 if(!DISPONIBLE)$('lista-pedidos').textContent='Los pedidos no están disponibles en este arranque.';
 if(location.hash==='#ajustes')$('ajustes').open=true;
 api('/admin/yo').then(function(yo){$('ajustes').hidden=!yo||yo.rol!=='admin';}).catch(function(){$('ajustes').hidden=true;});
-cargar();setInterval(function(){if(!document.hidden&&!document.querySelector('.dlg-fondo'))cargar();},10000);
+cargar();setInterval(function(){if(!document.hidden&&!document.querySelector('.dlg-fondo'))cargar();},30000);
 `;
   return appShell({ titulo, subtitulo: 'Pedidos, ubicación y confirmación', contenido, script, nombreNegocio: opts.nombreNegocio, demo: opts.demo, icono: '📋', css: `${BANDEJA_MENSAJES_CSS}\n${NUMEROS_REPORTADOS_CSS}\n.pedidos{display:grid;gap:20px;max-width:1300px;margin:auto}.acciones,.filtros{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.filtros label{display:grid;gap:6px}.horarios-distrito{border:1px solid var(--borde);border-radius:8px;padding:12px;margin:12px 0;display:grid;gap:8px;min-width:0}.horarios-distrito table{width:100%;border-collapse:collapse}.horarios-distrito th{text-align:left;font-weight:600;padding:4px}.horarios-distrito td{padding:4px}.horarios-distrito input{width:100%;box-sizing:border-box}.horarios-distrito .btn{justify-self:start}.pedido p{margin:8px 0}.pedido .chip{float:right}.pedido .chip-cambio{margin-right:8px;background:var(--ambar-suave)}.pedido .reprogramado .chip-reprogramado{float:none;margin-right:6px;background:var(--azul-suave)}.pedidos input:not([type=checkbox]),.pedidos select,.pedidos textarea{padding:10px;border:1px solid var(--borde);border-radius:8px;background:var(--superficie);color:var(--texto)}.pedidos textarea{display:block;width:100%;margin:10px 0}.pedidos .hidden{display:none}#pedidos-error{padding:12px;background:var(--ambar-suave);border-radius:8px}.tarjeta{padding:18px}.detalle{margin-top:10px}summary{cursor:pointer;font-weight:600}#lista-pedidos{display:grid;gap:12px}` });
 }

@@ -201,6 +201,8 @@ describe('entrar al sistema', () => {
     expect(res.json().usuario).toMatchObject({ usuario: 'ali', rol: 'superadmin' });
     cookie = cookieDe(res);
     expect(cookie.startsWith(`${COOKIE_SESION}=`)).toBe(true);
+    const carga = JSON.parse(Buffer.from(decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1)).split('.')[0]!, 'base64url').toString('utf8'));
+    expect(carga).toMatchObject({ u: expect.any(String), v: expect.any(Number), sid: expect.any(String), iat: expect.any(Number), chatAfterId: '0' });
 
     const otra = await app.inject({ method: 'POST', url: '/login/primera-cuenta', payload: { nombre: 'X', usuario: 'x', clave: 'clave-segura-2' } });
     expect(otra.statusCode).toBe(409);

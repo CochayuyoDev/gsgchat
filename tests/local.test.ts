@@ -182,6 +182,32 @@ function fakeSocket() {
   };
 }
 
+describe('conectar sin importar el WhatsApp personal', () => {
+  it('ignora el historial y los mensajes propios, y solo traduce los clientes permitidos', async () => {
+    resetLocalForTests();
+    const authDir = mkdtempSync(join(tmpdir(), 'wa-solo-sistema-'));
+    const fake = fakeSocket();
+    const onChange = vi.fn(), onPropio = vi.fn(), onSincronizacionInicial = vi.fn();
+    const aceptarEntrante = vi.fn(async (phone: string) => phone === '51987603111');
+    const arranque = startLocal({ authDir, importarHistorial: false, soloTextoUbicacion: true, aceptarEntrante, onChange, onPropio, onSincronizacionInicial, createSocket: async (o) => {
+      expect(o.importarHistorial).toBe(false);
+      return { sock: fake.sock, saveCreds: async () => {} };
+    } });
+    await fake.listo();
+    fake.emitir('connection.update', { connection: 'open' }); await arranque;
+    const mensaje = (phone: string, id: string, fromMe = false) => ({ key: { id, remoteJid: phone + '@s.whatsapp.net', fromMe }, messageTimestamp: Math.floor(Date.now()/1000), message: { conversation: 'hola' } });
+    fake.emitir('messaging-history.set', { messages: Array.from({length: 3000}, (_,i) => mensaje('51987603222', 'h'+i)), syncType: 3, progress: 100 });
+    fake.emitir('messages.upsert', { type: 'notify', messages: ['audioMessage', 'videoMessage', 'stickerMessage', 'imageMessage', 'documentMessage'].map((type,i) => ({ ...mensaje('51987603111', 'archivo'+i), message: { [type]: { url: 'https://archivo.invalid', mimetype: 'audio/ogg' } } })) });
+    fake.emitir('messages.upsert', { type: 'notify', messages: [mensaje('51987603222', 'personal'), mensaje('51987603222', 'propio', true), mensaje('51987603111', 'cliente')] });
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledOnce());
+    expect(onChange.mock.calls[0]?.[0].messages[0].from).toBe('51987603111');
+    expect(onPropio).not.toHaveBeenCalled();
+    expect(onSincronizacionInicial).not.toHaveBeenCalled();
+    expect(aceptarEntrante).toHaveBeenCalledTimes(2);
+    resetLocalForTests();
+  });
+});
+
 async function conectado() {
   const { sock, emitir, enviados, leidos, listo } = fakeSocket();
   const promesa = startLocal({

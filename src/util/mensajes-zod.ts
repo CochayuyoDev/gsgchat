@@ -191,6 +191,7 @@ export const NOMBRES_DE_CAMPO: Record<string, string> = {
   pausaMinSegundos: 'la pausa mínima entre mensajes (segundos)',
   pausaMaxSegundos: 'la pausa máxima entre mensajes (segundos)',
   esperaRespuestaMinutos: 'los minutos de espera de la respuesta',
+  esperasMensajesMinutos: 'los minutos de espera de cada mensaje',
   maxIntentos: 'el máximo de intentos',
   // Que todo funcione
   vigilante: 'el vigilante del WhatsApp',

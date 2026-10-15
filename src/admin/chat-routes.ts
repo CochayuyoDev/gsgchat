@@ -9,15 +9,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { normalizePhone, TOPE_DECISIONES, type Repos } from '../db/repos.js';
-import { resumenDecision } from '../ia/decision.js';
+import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
 import { extractLocation } from '../geo/extract.js';
-import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { extensionDe, idDeMedia, mediaDirectory } from '../whatsapp/local/media.js';
+import { responderLectura } from '../web/cache-lectura.js';
+import { alcanceChat } from '../web/alcance-chat.js';
 
 export interface ChatDeps {
   repos: Repos;
@@ -26,7 +23,7 @@ export interface ChatDeps {
   settings: SettingsService;
   /** Donde se guardan los ficheros que se mandan desde el chat (y los que llegan). */
   mediaDir?: string;
-  /** La voz del asistente (ver src/voz): con `voz: true`, el texto sale como nota de voz. */
+  /** Envío opcional de voz solicitado por la IA; los medios entrantes se ignoran. */
   voz?: import('../voz/servicio.js').ServicioVoz;
 }
 
@@ -69,21 +66,7 @@ export function esWamidPropio(wamid: string | null): boolean {
   return !wamid || /^(local:|web:|waha:local:)/.test(wamid);
 }
 
-const adjuntoSchema = z.object({
-  contactId: z.string().min(1),
-  /** El fichero en base64 (con o sin el prefijo data:...;base64,). */
-  datos: z.string().min(1),
-  mimeType: z.string().trim().min(3).max(120),
-  filename: z.string().trim().max(200).optional(),
-  caption: z.string().trim().max(1024).optional(),
-  /** Un audio grabado aqui mismo: sale como nota de voz, con su onda y su play. */
-  voz: z.boolean().optional(),
-  citaId: z.coerce.number().int().positive().optional(),
-  autor: z.enum(['persona', 'ia', 'sistema']).optional(),
-  autorNombre: z.string().trim().max(80).optional(),
-});
-
-/** Que es el fichero para WhatsApp, por su tipo. Un GIF va como documento: como foto llega quieto. */
+/** Clasificador compartido por el endpoint de integración GSG. */
 export function tipoDeAdjuntoSaliente(mimeType: string): 'image' | 'video' | 'audio' | 'document' {
   const limpio = mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
   if (['image/jpeg', 'image/png', 'image/webp'].includes(limpio)) return 'image';
@@ -100,7 +83,7 @@ const sendSchema = z.object({
   location: z.string().min(1).optional(),
   /** Boton nativo para pedirle la ubicacion al cliente. */
   askLocation: z.boolean().optional(),
-  /** Mandar el texto como nota de voz con la voz del asistente. Si no se puede, sale por escrito y se dice. */
+  /** Acción explícita de la IA para sintetizar texto como audio saliente. */
   voz: z.boolean().optional(),
   /** Quien lo manda, si no es quien esta en sesion (el chat embebido de otro sistema lo dice). */
   autor: z.enum(['persona', 'ia', 'sistema']).optional(),
@@ -197,20 +180,26 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     };
   };
 
-  app.get('/admin/chat/conversations', async (request) => {
+  app.get('/admin/chat/conversations', async (request, reply) => {
     const query = z
       .object({
         q: z.string().max(120).optional(),
-        limit: z.coerce.number().int().positive().max(200).default(50),
+        limit: z.coerce.number().int().positive().max(100).default(30),
         offset: z.coerce.number().int().nonnegative().default(0),
         /** Los chats apartados solo salen cuando se piden. */
-        incluirApartados: z.coerce.boolean().default(false),
+        incluirApartados: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
       })
       .parse(request.query ?? {});
-    return {
-      items: await repos.messages.listConversations(query),
-      unread: await repos.messages.unreadTotal(),
-    };
+    const alcance = alcanceChat(request.usuario);
+    const items = await repos.messages.listConversations({ ...query, limit: query.limit + 1, alcance });
+    return responderLectura(request, reply, {
+      items: items.slice(0, query.limit),
+      hasMore: items.length > query.limit,
+      siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
+      unread: await repos.messages.unreadTotal(undefined, alcance),
+      scopeId: request.usuario?.chatSesion?.sid ?? 'api',
+      vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+    });
   });
 
   /**
@@ -219,6 +208,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * cuantas conversaciones guardadas tiene. Solo lectura.
    */
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/ficha', async (request, reply) => {
+    const alcance = alcanceChat(request.usuario);
+    if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'contacto no encontrado' });
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
     const ubicacion = await repos.locations.latestFor(contact.id).catch(() => null);
@@ -233,7 +224,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     } catch {
       entrega = null;
     }
-    const guardadas = await repos.archives.count({ contactId: contact.id }).catch(() => 0);
+    const guardadas = 0;
     return {
       contacto: { id: contact.id, phone: contact.phone, name: contact.name, tipo: contact.tipo ?? 'persona', optInAt: contact.optInAt, optOutAt: contact.optOutAt, lastInboundAt: contact.lastInboundAt, botPausadoAt: contact.botPausadoAt ?? null, iaCerradaAt: contact.iaCerradaAt ?? null },
       ubicacion: ubicacion ? { lat: ubicacion.lat, lng: ubicacion.lng, mapa: `https://www.google.com/maps/search/?api=1&query=${ubicacion.lat},${ubicacion.lng}` } : null,
@@ -245,17 +236,21 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId', async (request, reply) => {
     const query = z
       .object({
-        limit: z.coerce.number().int().positive().max(200).default(60),
+        limit: z.coerce.number().int().positive().max(100).default(30),
         before: z.coerce.number().int().positive().optional(),
         /** Abrir el chat marca lo entrante como leido; refrescar en segundo plano no. */
-        read: z.coerce.boolean().default(false),
+        read: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
       })
       .parse(request.query ?? {});
 
+    const alcance = alcanceChat(request.usuario);
+    if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'contacto no encontrado' });
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
 
-    const messages = await repos.messages.listMessages(contact.id, query.limit, query.before);
+    const messages = await repos.messages.listMessages(contact.id, query.limit + 1, query.before, undefined, alcance);
+    const hasMore = messages.length > query.limit;
+    const pagina = messages.slice(-query.limit).map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString() }));
     if (query.read) await repos.messages.markRead(contact.id, new Date());
     // La solicitud de reparto abierta, si la hay: el pedido y en que punto va,
     // para que quien atiende lo vea sin cambiar de pantalla (y para {pedido}).
@@ -275,19 +270,22 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const puede = capacidadesDelChat(providerOf(settings.current()));
 
     if (contact.tipo === 'grupo') {
-      return {
+      return responderLectura(request, reply, {
         contact,
         reparto: null,
         windowOpen: true,
         canWrite: gruposDisponibles(),
         blockedReason: gruposDisponibles() ? null : SIN_GRUPOS,
-        messages,
-        hasMore: messages.length === query.limit,
+        messages: pagina,
+        scopeId: request.usuario?.chatSesion?.sid ?? 'api',
+        vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+        hasMore,
+        beforeCursor: pagina[0]?.id ?? null,
         puede,
-      };
+      });
     }
 
-    return {
+    return responderLectura(request, reply, {
       contact,
       reparto,
       windowOpen,
@@ -298,26 +296,38 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         : windowOpen || !ventanaObliga()
           ? null
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
-      messages,
-      hasMore: messages.length === query.limit,
+      messages: pagina,
+      scopeId: request.usuario?.chatSesion?.sid ?? 'api',
+      vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+      hasMore,
+      beforeCursor: pagina[0]?.id ?? null,
       puede,
-    };
+    });
   });
 
-  /**
-   * Por que respondio el bot en cada turno de este contacto (ver
-   * src/ia/decision.ts). La pantalla las pinta en el hilo como nota interna:
-   * el cliente no las ve. Van de la mas reciente a la mas vieja, cada una con
-   * su `resumen` ya escrito para que la pantalla no repita la regla.
-   */
-  app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/decisiones', async (request, reply) => {
-    const query = z
-      .object({ limit: z.coerce.number().int().positive().max(TOPE_DECISIONES).default(100) })
-      .parse(request.query ?? {});
-    const contact = await repos.contacts.getById(request.params.contactId);
-    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    const decisiones = await repos.decisiones.listarPorContacto(contact.id, query.limit);
-    return { decisiones: decisiones.map((d) => ({ ...d, resumen: resumenDecision(d) })) };
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/sync', async (request, reply) => {
+    const body = z.object({
+      afterId: z.string().regex(/^\d{1,20}$/),
+      knownIds: z.array(z.string().regex(/^\d{1,20}$/)).max(300).default([]),
+    }).parse(request.body ?? {});
+    const alcance = alcanceChat(request.usuario);
+    if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'contacto no encontrado' });
+    const limite = 30;
+    const filas = await repos.messages.syncMessages(request.params.contactId, body.afterId, body.knownIds, limite + 1 + body.knownIds.length, alcance);
+    const conocidos = new Set(body.knownIds);
+    const nuevos = filas.filter(m => BigInt(m.id) > BigInt(body.afterId) && !conocidos.has(String(m.id)));
+    const visiblesNuevos = nuevos.slice(0, limite);
+    const conocidasActualizadas = filas.filter(m => conocidos.has(String(m.id)));
+    const visibles = [...visiblesNuevos, ...conocidasActualizadas].sort((a,b) => a.id-b.id);
+    const goneIds = body.knownIds.filter(id => !conocidasActualizadas.some(m => String(m.id) === id));
+    const nextAfterId = visiblesNuevos.length ? String(visiblesNuevos.at(-1)!.id) : body.afterId;
+    return responderLectura(request, reply, {
+      messages: visibles.map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString() })),
+      goneIds,
+      hasMoreNew: nuevos.length > limite,
+      nextAfterId,
+      scopeId: request.usuario?.chatSesion?.sid ?? 'api',
+    });
   });
 
   app.post('/admin/chat/:contactId/read', async (request, reply) => {
@@ -495,59 +505,17 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if (body.voz) {
       if (!deps.voz) return reply.code(409).send({ error: 'La voz no está configurada: Mi asistente IA → Voz.' });
       const r = await deps.voz.enviar({ phone, texto: body.text, origen: firma.origen, autorNombre: firma.autorNombre, manual: aMano() });
-      // Si salio por escrito, se dice: quien pulso "audio" tiene que saber que no fue audio.
       return { ...r.outcome, voz: { enviada: r.enviadoComo === 'audio', motivo: r.motivo } };
     }
 
     return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), ...firma, ...(cita && !('error' in cita) ? { cita } : {}) });
   });
 
-  /**
-   * Una foto, un video, un audio o un documento escrito a mano desde el chat.
-   *
-   * Llega en base64 (pegado, arrastrado o elegido con el clip), se guarda en
-   * la misma carpeta que los adjuntos que entran -con el mismo tipo de id,
-   * para que el hilo lo pinte igual- y sale por el sender, con sus guardas.
-   * El limite del cuerpo va aparte del general: 4 MB no dan para un video.
-   */
-  app.post('/admin/chat/adjunto', { bodyLimit: Math.ceil(MAX_BYTES_ADJUNTO * 1.4) + 64 * 1024 }, async (request, reply) => {
-    const body = adjuntoSchema.parse(request.body ?? {});
-    const contact = await repos.contacts.getById(body.contactId);
-    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    if (contact.tipo === 'grupo' && !gruposDisponibles()) return reply.code(400).send({ error: SIN_GRUPOS });
-
-    const datos = Buffer.from(body.datos.replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (!datos.length) return reply.code(400).send({ error: 'El fichero llegó vacío.' });
-    if (datos.length > MAX_BYTES_ADJUNTO) return reply.code(400).send({ error: 'WhatsApp no acepta ficheros de más de 16 MB. Usa uno más ligero.' });
-
-    const kind = tipoDeAdjuntoSaliente(body.mimeType);
-    const mimeType = body.mimeType.split(';')[0]!.trim().toLowerCase();
-    const extension = extensionDe(mimeType, kind === 'document' ? 'document' : kind) === '.bin' && body.filename?.includes('.')
-      ? `.${body.filename.split('.').pop()!.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'}`
-      : extensionDe(mimeType, kind === 'document' ? 'document' : kind);
-    const id = idDeMedia(`chat:${randomUUID()}`, extension);
-    const dir = deps.mediaDir ?? mediaDirectory();
-    await writeFile(path.join(dir, id), datos);
-
-    let cita;
-    if (body.citaId) {
-      cita = await citaDelHilo(contact.id, body.citaId);
-      if ('error' in cita) return reply.code(400).send({ error: cita.error });
-    }
-
-    return sender.send({
-      phone: contact.phone,
-      kind: 'media',
-      category: 'UTILITY',
-      manual: aMano(),
-      ...quien(request, body),
-      ...(cita && !('error' in cita) ? { cita } : {}),
-      // Una nota de voz grabada aqui va como nota de voz de verdad (ptt), no
-      // como fichero de audio: es la diferencia entre la onda con el play y
-      // un adjunto que hay que descargar.
-      media: { id, kind, datos, mimeType, filename: body.filename || undefined, caption: body.caption || undefined, voz: body.voz === true && kind === 'audio' },
-    });
-  });
+  app.post('/admin/chat/adjunto', async (_request, reply) => reply.code(410).send({
+    ok: false,
+    codigo: 'MODULO_RETIRADO',
+    error: 'El envío de adjuntos desde el chat está retirado; el chat solo permite texto y ubicación.',
+  }));
 
   /** Abrir un chat con alguien que todavia no existe en la libreta. */
   app.post('/admin/chat/start', async (request) => {
@@ -654,7 +622,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const query = z
       .object({ contactId: z.string().optional(), limit: z.coerce.number().int().positive().max(200).default(60) })
       .parse(request.query ?? {});
-    return { items: await repos.messages.destacados(query) };
+    return { items: await repos.messages.destacados({ ...query, desde: settings.vistaChatDesde?.() }) };
   });
 
   /** Buscar dentro de una conversacion. Devuelve los mensajes que coinciden. */
@@ -664,7 +632,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       .parse(request.query ?? {});
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    return { items: await repos.messages.buscar({ contactId: contact.id, q: query.q, limit: query.limit }) };
+    return { items: await repos.messages.buscar({ contactId: contact.id, q: query.q, limit: query.limit, desde: settings.vistaChatDesde?.() }) };
   });
 
   /**
@@ -699,29 +667,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       if (destino.tipo === 'grupo' && !gruposDisponibles()) { fallos.push(SIN_GRUPOS); continue; }
 
       for (const m of mensajes) {
-        const media = (m.payload as { media?: { id: string; kind?: string; mimeType?: string; filename?: string; url?: string } } | null)?.media;
         try {
-          // Un adjunto se reenvia leyendo el fichero de donde ya esta; lo demas
-          // (texto, una ubicacion escrita, una plantilla ya renderizada) va como
-          // texto, que es lo que el cliente vio.
-          if (media?.id && media.kind !== 'sticker') {
-            const datos = await readFile(path.join(deps.mediaDir ?? mediaDirectory(), media.id));
-            const outcome = await sender.send({
-              phone: destino.phone,
-              kind: 'media',
-              category: 'UTILITY',
-              manual: aMano(),
-              reenviado: true,
-              ...firma,
-              media: {
-                id: media.id,
-                kind: (media.kind as 'image' | 'video' | 'audio' | 'document') ?? 'document',
-                datos,
-                mimeType: media.mimeType ?? 'application/octet-stream',
-                filename: media.filename,
-                caption: (m.body ?? '').trim() || undefined,
-              },
-            });
+          const location = (m.payload as { location?: { latitude?: number; longitude?: number; name?: string; address?: string } } | null)?.location;
+          if (m.kind === 'location' && location && Number.isFinite(location.latitude) && Number.isFinite(location.longitude)) {
+            const outcome = await sender.send({ phone: destino.phone, kind: 'location', category: 'UTILITY', manual: aMano(), reenviado: true, ...firma, location: { latitude: location.latitude!, longitude: location.longitude!, name: location.name, address: location.address } });
             if (outcome.ok) enviados++;
             else fallos.push('reason' in outcome ? outcome.reason : outcome.error);
             continue;

@@ -85,6 +85,18 @@ describe('lo reentregado no se contesta', () => {
     expect(wa.sent.length).toBe(enviados);
   });
 
+  it('la deduplicación sobrevive a que el mensaje temporal se purgue', async () => {
+    const { deps, repos, wa } = await build();
+    await processChange('messages', entrante({}), deps);
+    const enviados = wa.sent.length;
+    // Simula la expiración física de las filas de chat; el control de wamid
+    // sigue separado y por eso la reentrega no vuelve a ejecutar la IA.
+    repos.messages._all.splice(0);
+    await processChange('messages', entrante({}), deps);
+    expect(wa.sent.length).toBe(enviados);
+    expect(repos.messages._all).toHaveLength(0);
+  });
+
   it('esMensajeViejo: notify reciente se contesta; append solo si es fresco de verdad (28/09)', () => {
     const ahora = Date.now();
     const hace = (min: number) => String(Math.floor((ahora - min * 60_000) / 1000));
@@ -167,30 +179,25 @@ describe('sin socket no se intenta nada', () => {
   });
 });
 
-describe('modo prueba: SOLO_NUMEROS', () => {
-  it('sin lista, se escribe a todos', async () => {
+describe('modo prueba retirado', () => {
+  it('SOLO_NUMEROS legado no vuelve a activar un modo prueba', async () => {
     const { config } = await build();
     expect(config.soloNumeros).toEqual([]);
     expect(numeroPermitido(config, '5215500000001')).toBe(true);
   });
 
-  it('con lista, el sender bloquea a quien no este, tambien a mano, y lo anota', async () => {
+  it('una variable antigua SOLO_NUMEROS se ignora y los gates normales siguen activos', async () => {
     const { repos, sender, config } = await build({ SOLO_NUMEROS: '51 902 464 984, 51912426667' });
-    expect(config.soloNumeros).toEqual(['51902464984', '51912426667']);
-    await repos.templates.upsert(approvedTemplate());
+    expect(config.soloNumeros).toEqual([]);
     await repos.contacts.upsertFromInbound('51912426667');
     await repos.contacts.setOptIn('51912426667', 'x');
 
-    const ok = await sender.send({ phone: '51912426667', kind: 'template', category: 'UTILITY', templateName: 'confirmacion_pedido', templateLanguage: 'es', variables: ['a', 'b', 'c'] });
+    const ok = await sender.send({ phone: '51912426667', kind: 'freeform', category: 'UTILITY', text: 'hola', manual: true });
     expect(ok.ok).toBe(true);
 
     const otro = await sender.send({ phone: '51999999999', kind: 'freeform', category: 'UTILITY', text: 'hola', manual: true });
-    expect(otro.ok).toBe(false);
-    if (!otro.ok && otro.blocked) {
-      expect(otro.code).toBe('allowlist');
-      expect(otro.retryAfterMs).toBeUndefined();
-    }
-    expect(repos._deliveries.at(-1)).toMatchObject({ status: 'blocked_by_gate' });
+    expect(otro.ok).toBe(true);
+    expect(repos._deliveries.at(-1)).toMatchObject({ status: 'sent' });
   });
 
   it('lo que una persona escribe a mano en un grupo sale aunque el modo prueba este activo', async () => {
@@ -200,20 +207,18 @@ describe('modo prueba: SOLO_NUMEROS', () => {
     const aMano = await sender.send({ phone: grupo.phone, kind: 'freeform', category: 'UTILITY', text: 'salimos 8am', manual: true });
     expect(aMano.ok).toBe(true);
     expect(wa.sent.at(-1)).toMatchObject({ kind: 'text', to: '120363429041095888@g.us', body: 'salimos 8am' });
-    // Automatico (sin `manual`): sigue frenado, como todo lo que no esta en la lista.
+    // Automático: el gate de grupos sigue bloqueando conversaciones no autorizadas.
     const solo = await sender.send({ phone: grupo.phone, kind: 'freeform', category: 'UTILITY', text: 'hola' });
     expect(solo.ok).toBe(false);
-    if (!solo.ok && solo.blocked) expect(solo.code).toBe('allowlist');
+    if (!solo.ok && solo.blocked) expect(solo.code).toBe('no_opt_in');
   });
 
-  it('el asistente no contesta a quien no este en la lista, ni confirma la baja', async () => {
+  it('una lista antigua no impide que el flujo actual procese los mensajes', async () => {
     const { deps, wa } = await build({ SOLO_NUMEROS: '51912426667' });
+    expect(deps.config.soloNumeros).toEqual([]);
     await processChange('messages', entrante({ from: '5215599999999' }), deps);
-    expect(wa.sent.length).toBe(0);
+    expect(wa.sent.length).toBeGreaterThan(0);
     await processChange('messages', entrante({ id: 'wamid.in.2', from: '5215599999999', text: { body: 'BAJA' } }), deps);
-    expect(wa.sent.length).toBe(0);
-    // A uno de la lista, si.
-    await processChange('messages', entrante({ id: 'wamid.in.3', from: '51912426667' }), deps);
     expect(wa.sent.length).toBeGreaterThan(0);
   });
 });

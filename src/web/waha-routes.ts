@@ -179,6 +179,7 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
    * operador abre el chat y no ve nada de lo que sus bots hablaron antes.
    */
   app.post('/admin/waha/importar', async (request, reply) => {
+    if (settings.vistaChatDesde?.()) return reply.code(409).send({ error: 'La importación del historial está desactivada: solo se muestran conversaciones iniciadas por GSGchat.' });
     if (providerOf(settings.current()) !== 'waha') {
       return reply.code(409).send({
         error: 'Esto solo funciona con WAHA: es el único proveedor que guarda el historial y permite pedirlo.',
@@ -264,6 +265,7 @@ export async function registerWahaRoutes(app: FastifyInstance, deps: WahaRoutesD
         hmacKey: saved.verifyToken,
         engine: saved.wahaEngine || undefined,
       });
+      if (session.status === 'SCAN_QR_CODE' || !settings.vistaChatDesde?.()) await settings.iniciarVistaChat?.();
 
       return {
         ok: true,

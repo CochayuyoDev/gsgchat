@@ -24,6 +24,8 @@ export interface AjustesRutas {
   pausaMaxSegundos: number;
   /** Cuanto se espera una respuesta antes de volver a escribir. */
   esperaRespuestaMinutos: number;
+  /** Minutos entre cada mensaje y el siguiente; el primero es del 1 al 2. */
+  esperasMensajesMinutos: number[];
   /** Mensajes por cliente antes de pasarlo al repartidor. */
   maxIntentos: number;
   /** Campo antiguo: siempre desactivado, incluso al leer ajustes previos. */
@@ -42,21 +44,27 @@ export interface AjustesRutas {
    * Vacio = las tres de siempre de cada paso.
    */
   textos: Record<PasoUbicacion, string[]>;
+  /** Redacciones propias por mensaje a partir del cuarto. */
+  textosAdicionales: string[][];
 }
 
 const listaDeTextos = z.array(z.string().trim().min(1).max(1000)).max(10);
+const textosAdicionalesSchema = z.array(listaDeTextos).max(97);
 const listaDeNombres = z.array(z.string().trim().min(1).max(120)).max(10);
+const esperasSchema = z.array(z.coerce.number().int().min(1).max(24 * 60)).max(99);
 
 export const ajustesSchema = z.object({
   pausaMinSegundos: z.coerce.number().int().min(1).max(600),
   pausaMaxSegundos: z.coerce.number().int().min(1).max(900),
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
-  maxIntentos: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  esperasMensajesMinutos: esperasSchema,
+  maxIntentos: z.coerce.number().int().min(1).max(100),
   pedirUbicacionCadaMinutos: z.literal(0),
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
   plantillas: z.object({ solicitud: listaDeNombres, recordatorio: listaDeNombres, insistencia: listaDeNombres }),
   textos: z.object({ solicitud: listaDeTextos, recordatorio: listaDeTextos, insistencia: listaDeTextos }),
+  textosAdicionales: textosAdicionalesSchema,
 });
 
 export type AjustesPatch = Partial<z.infer<typeof ajustesSchema>>;
@@ -67,12 +75,14 @@ export function ajustesPorDefecto(opciones: OpcionesMotor): AjustesRutas {
     pausaMinSegundos: opciones.pausaMinSegundos,
     pausaMaxSegundos: opciones.pausaMaxSegundos,
     esperaRespuestaMinutos: opciones.esperaRespuestaMinutos,
+    esperasMensajesMinutos: Array(Math.max(0, opciones.maxIntentos - 1)).fill(opciones.esperaRespuestaMinutos),
     maxIntentos: opciones.maxIntentos,
     pedirUbicacionCadaMinutos: 0,
     horaInicio: opciones.horaInicio,
     horaFin: opciones.horaFin,
     plantillas: { solicitud: [], recordatorio: [], insistencia: [] },
     textos: { solicitud: [], recordatorio: [], insistencia: [] },
+    textosAdicionales: [],
   };
 }
 
@@ -84,6 +94,7 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     // El minimo manda si alguien pone el maximo por debajo.
     pausaMaxSegundos: Math.max(ajustes.pausaMinSegundos, ajustes.pausaMaxSegundos),
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
+    esperasMensajesMinutos: ajustes.esperasMensajesMinutos,
     maxIntentos: ajustes.maxIntentos,
     pedirUbicacionCadaMinutos: 0,
     // El horario de aqui es solo el SUELO: en una instalacion sin ajustes
@@ -159,23 +170,60 @@ export interface AjustesRepo {
 }
 
 export function createAjustesRepo(pool: Pool): AjustesRepo {
+  const VIGENCIA_CACHE_MS = 5_000;
+  let cacheAjustes: Partial<AjustesRutas> = {};
+  let cacheListo = false;
+  let cacheLeidoAt = 0;
+  let generacionCache = 0;
+  let lecturaEnCurso: Promise<Partial<AjustesRutas>> | null = null;
+
   async function leer(): Promise<Partial<AjustesRutas>> {
-    const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [AJUSTES_KEY]);
-    if (!rows[0]) return {};
-    try {
-      return JSON.parse(rows[0].value) as Partial<AjustesRutas>;
-    } catch {
-      return {};
-    }
+    if (cacheListo && Date.now() - cacheLeidoAt < VIGENCIA_CACHE_MS) return cacheAjustes;
+    if (lecturaEnCurso) return lecturaEnCurso;
+    const generacion = generacionCache;
+    const actual = pool.query<{ value: string }>('select value from settings where `key` = $1', [AJUSTES_KEY])
+      .then(({ rows }) => {
+        let valor: Partial<AjustesRutas> = {};
+        if (rows[0]) {
+          try { valor = JSON.parse(rows[0].value) as Partial<AjustesRutas>; } catch { valor = {}; }
+        }
+        if (generacion === generacionCache) {
+          cacheAjustes = valor;
+          cacheListo = true;
+          cacheLeidoAt = Date.now();
+        }
+        return valor;
+      })
+      .finally(() => { if (lecturaEnCurso === actual) lecturaEnCurso = null; });
+    lecturaEnCurso = actual;
+    return actual;
   }
 
-  const fusionar = (base: AjustesRutas, guardado: Partial<AjustesRutas>): AjustesRutas => ({
-    ...base,
-    ...guardado,
-    pedirUbicacionCadaMinutos: 0,
-    plantillas: { ...base.plantillas, ...(guardado.plantillas ?? {}) },
-    textos: { ...base.textos, ...(guardado.textos ?? {}) },
-  });
+  const fusionar = (base: AjustesRutas, guardado: Partial<AjustesRutas>): AjustesRutas => {
+    const intervalo = guardado.esperaRespuestaMinutos ?? base.esperaRespuestaMinutos;
+    const maxIntentos = Math.max(1, Math.min(100, guardado.maxIntentos ?? base.maxIntentos));
+    let esperas = guardado.esperasMensajesMinutos ?? base.esperasMensajesMinutos;
+    // Compatibilidad con ajustes previos: replicar el intervalo antiguo por
+    // cada seguimiento. Si el cliente solo cambia el máximo, conservar el
+    // ritmo actual y ajustar la longitud de la secuencia.
+    if (!guardado.esperasMensajesMinutos) {
+      const cantidad = guardado.maxIntentos !== undefined ? maxIntentos - 1 : esperas.length;
+      esperas = Array.from({ length: cantidad }, (_, i) =>
+        guardado.esperaRespuestaMinutos !== undefined || !esperas[i] ? intervalo : esperas[i]);
+    }
+    esperas = esperas.slice(0, 99);
+    return {
+      ...base,
+      ...guardado,
+      esperaRespuestaMinutos: esperas[0] ?? intervalo,
+      esperasMensajesMinutos: esperas,
+      maxIntentos: esperas.length + 1,
+      pedirUbicacionCadaMinutos: 0,
+      plantillas: { ...base.plantillas, ...(guardado.plantillas ?? {}) },
+      textos: { ...base.textos, ...(guardado.textos ?? {}) },
+      textosAdicionales: (guardado.textosAdicionales ?? base.textosAdicionales).slice(0, 97),
+    };
+  };
 
   return {
     async get(porDefecto) {
@@ -189,10 +237,20 @@ export function createAjustesRepo(pool: Pool): AjustesRepo {
          on duplicate key update value = values(value), updated_at = now(3)`,
         [AJUSTES_KEY, JSON.stringify(nuevo)],
       );
+      // El cambio local se aplica inmediatamente; los otros procesos que
+      // compartan la base lo verán al vencer el TTL corto.
+      generacionCache++;
+      cacheAjustes = nuevo;
+      cacheListo = true;
+      cacheLeidoAt = Date.now();
       return nuevo;
     },
     async reset() {
       await pool.query('delete from settings where `key` = $1', [AJUSTES_KEY]);
+      generacionCache++;
+      cacheAjustes = {};
+      cacheListo = true;
+      cacheLeidoAt = Date.now();
     },
   };
 }

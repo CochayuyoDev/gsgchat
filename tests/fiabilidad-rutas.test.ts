@@ -188,19 +188,15 @@ describe('/fiabilidad y /admin/fiabilidad', () => {
     expect(cupo.json().frase).toBeTruthy();
   });
 
-  it('"Hacer copia ahora" (solo admin) deja los respaldos en la carpeta y se pueden descargar', async () => {
+  it('"Hacer copia ahora" (solo admin) no crea respaldo histórico en modo memoria', async () => {
     const op = await app.inject({ method: 'POST', url: '/admin/fiabilidad/copia/ahora', headers: { cookie: operador } });
     expect(op.statusCode).toBe(403);
     const r = await app.inject({ method: 'POST', url: '/admin/fiabilidad/copia/ahora', headers: { cookie: admin } });
     expect(r.statusCode).toBe(200);
     const ficheros = r.json().resultado.ficheros as Array<{ nombre: string }>;
-    expect(ficheros).toHaveLength(1);
-    expect(ficheros[0]!.nombre).toMatch(/^respaldos-\d{4}-\d{2}-\d{2}\.tar\.gz$/);
+    expect(ficheros).toEqual([]);
     expect(r.json().resultado.notas.join(' ')).toContain('memoria');
-    const bajada = await app.inject({ method: 'GET', url: `/admin/fiabilidad/copia/descargar/${ficheros[0]!.nombre}`, headers: { cookie: operador } });
-    expect(bajada.statusCode).toBe(200);
-    expect(bajada.headers['content-type']).toContain('gzip');
-    expect(bajada.rawPayload.length).toBeGreaterThan(20);
+    expect(r.json().resultado.notas.join(' ')).toContain('no se incluyen en copias nuevas');
     const mala = await app.inject({ method: 'GET', url: '/admin/fiabilidad/copia/descargar/..%2F..%2Fetc', headers: { cookie: operador } });
     expect(mala.statusCode).toBe(404);
     const c = await app.inject({ method: 'POST', url: '/admin/fiabilidad/copia/carpeta', headers: { cookie: admin }, payload: { carpeta: path.join(archiveDir, 'uno.ndjson.gz') } });

@@ -378,6 +378,9 @@ describe('la pantalla de conexion (/setup)', () => {
   it('solo hay un boton para cerrar la sesion de WhatsApp: dos hacian lo mismo y confundian', () => {
     expect(pagina.match(/id="desconectar"/g)).toHaveLength(1);
     expect(pagina).not.toContain('id="waha-logout"');
+    const tarjeta = pagina.slice(pagina.indexOf('id="card-wa"'), pagina.indexOf('id="con-avanzado"'));
+    expect(tarjeta).toContain('id="desconectar"');
+    expect(tarjeta).toContain('Desvincular cuenta');
   });
 
   it('usa las clases compartidas del armazon y no colores a pelo (romperian el modo oscuro)', () => {

@@ -21,6 +21,8 @@ import { handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
 import type { SettingsService } from '../settings/service.js';
 import { TtlCache } from '../util/cache.js';
 import { esPausaAutomatica } from '../salud/monitor.js';
+import { perteneceAlChatActual } from './alcance-chat.js';
+import { entradaAdmitida } from './entradas-admitidas.js';
 
 export interface WebhookDeps extends InboundDeps {
   repos: Repos;
@@ -156,6 +158,8 @@ export async function processChange(
 
       const profileName = value.contacts?.[0]?.profile?.name;
       for (const message of value.messages ?? []) {
+        if (!entradaAdmitida(message)) continue;
+        if (!(await perteneceAlChatActual(repos, deps.settings, message))) continue;
         // La segunda entrega de un mensaje (el telefono reenvio un "ver una
         // vez") lleva el mismo id a proposito: no es un duplicado, es el
         // fichero que faltaba.
@@ -163,7 +167,7 @@ export async function processChange(
           if (seen.get(message.id)) continue;
           seen.set(message.id, true);
         }
-        await handleInboundMessage(message, profileName, deps);
+        await handleInboundMessage({ ...message, provider: message.provider ?? 'meta' }, profileName, deps);
       }
       return;
     }

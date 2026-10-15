@@ -234,6 +234,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           phoneNumberId,
           warmup: politica().warmup,
           maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
+          maxConcurrentSends: config.WA_SEND_CONCURRENCY,
+          sendsPerSecond: config.WA_SEND_RATE_PER_SECOND,
           serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
           salud,
           politica,
@@ -257,7 +259,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         appRef?.log.warn({ phone: job.phone, detail }, 'envio no realizado');
       };
       queue = o.redisUrl ? createOutboundQueue(o.redisUrl, o.nombreCola) : createMemoryOutboundQueue({ sender, onResult });
-      const worker = o.redisUrl ? createOutboundWorker({ redisUrl: o.redisUrl, sender, queue, onResult, nombre: o.nombreCola }) : null;
+      const worker = o.redisUrl ? createOutboundWorker({ redisUrl: o.redisUrl, sender, queue, onResult, nombre: o.nombreCola, concurrency: config.WA_SEND_CONCURRENCY, messagesPerSecond: config.WA_SEND_RATE_PER_SECOND }) : null;
       limpieza.push(() => queue.close(), () => worker?.close());
 
       const parteDeSalud: { dar: null | (() => Promise<EstadoInstancia>) } = { dar: null };

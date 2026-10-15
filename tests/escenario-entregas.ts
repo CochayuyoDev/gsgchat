@@ -70,6 +70,7 @@ export interface IAFalsa extends LectorIA {
 }
 
 export interface EscenarioEntregas {
+  settings: import('../src/settings/service.js').SettingsService;
   app: FastifyInstance;
   repos: FakeRepos;
   /** Los ajustes guardados (settings) del escenario: para dejar frases propias, ajustes, etc. */
@@ -301,7 +302,9 @@ export async function crearEscenarioEntregas(opciones: {
   });
   entregasDeLaRegla = entregas;
   if (opciones.margenMinutos !== undefined) await entregas.guardarAjustes({ margenMinutos: opciones.margenMinutos });
-  if (!opciones.confirmarLista) await entregas.guardarAjustes({ confirmarListaGsg: false });
+  // El esquema deja la confirmación apagada por defecto; activar la opción
+  // del escenario también debe persistir el valor para las pruebas que la usan.
+  await entregas.guardarAjustes({ confirmarListaGsg: Boolean(opciones.confirmarLista) });
   const asistente = opciones.agente
     ? await crearServicioIA({
         settingsRepo,
@@ -363,6 +366,7 @@ export async function crearEscenarioEntregas(opciones: {
   };
 
   const escenario: EscenarioEntregas = {
+    settings,
     app,
     repos,
     settingsRepo,

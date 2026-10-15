@@ -335,7 +335,7 @@ function refrescar() {
   if (ocupado || document.hidden || document.querySelector('.dlg-fondo')) return;
   cargar().catch(function () {});
 }
-setInterval(refrescar, 7000);
+setInterval(refrescar, 30000);
 document.addEventListener('visibilitychange', function () { if (!document.hidden) refrescar(); });
 cargar().catch(function (e) {
   document.getElementById('personas').innerHTML = '<tr><td colspan="' + COLS + '" class="mensaje">' + esc(e.message) + ' <a href="/procesos">Ir a Procesos</a></td></tr>';

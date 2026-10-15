@@ -20,7 +20,7 @@ afterAll(async () => esc?.cerrar());
 describe('flujo de pedidos sin gestión de repartidores', () => {
   it.each(['superadmin', 'admin', 'operador'])('retira el menú y las rutas para %s', async (rol) => {
     const cookie = cookies[['superadmin', 'admin', 'operador'].indexOf(rol)]!;
-    for (const url of ['/panel', '/hoy', '/mapa', '/setup']) {
+    for (const url of ['/panel', '/hoy', '/setup']) {
       const r = await esc.app.inject({ url, headers: { cookie } });
       expect(r.statusCode).toBe(200);
       expect(r.body).not.toContain('href="/motorizados"');
@@ -31,6 +31,7 @@ describe('flujo de pedidos sin gestión de repartidores', () => {
       expect(r.body).not.toContain('href="/desarrollador');
       for (const m of r.body.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) expect(() => new Script(m[1]!)).not.toThrow();
     }
+    expect((await esc.app.inject({ url: '/mapa', headers: { cookie } })).headers.location).toBe('/hoy');
     expect((await esc.app.inject({ url: '/numeros', headers: { cookie } })).headers.location).toBe('/hoy');
     for (const url of ['/motorizados', '/admin/motorizados', '/api/v1/motorizados', '/desarrollador', '/admin/entregas/simulador', '/simulador/gsg/reparto/pendientes']) {
       expect((await esc.app.inject({ url, headers: { cookie } })).statusCode).toBe(404);

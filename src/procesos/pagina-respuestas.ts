@@ -87,14 +87,16 @@ function pintar() {
       }).join('') + '</tr>';
   }).join('');
 }
-async function cargar() {
-  datos = await api('/admin/procesos/personas?respuestas=1&limit=5000');
+async function cargar(procesoId) {
+  var id = procesoId || procesoSel;
+  var consulta = '/admin/procesos/personas?respuestas=1&limit=5000' + (id ? '&procesoId=' + encodeURIComponent(id) : '');
+  datos = await api(consulta);
   pintar();
 }
-document.getElementById('proceso').addEventListener('change', function (ev) { procesoSel = ev.target.value; pintar(); });
+document.getElementById('proceso').addEventListener('change', function (ev) { procesoSel = ev.target.value; cargar(procesoSel).catch(function () {}); });
 document.getElementById('buscar').addEventListener('input', function () { if (datos) pintar(); });
 cargar().catch(function (e) { document.getElementById('filas').innerHTML = '<tr><td class="mensaje">' + esc(e.message) + '</td></tr>'; });
-setInterval(function () { if (!document.hidden) cargar().catch(function () {}); }, 15000);
+setInterval(function () { if (!document.hidden) cargar().catch(function () {}); }, 60000);
 `;
 
   return appShell({

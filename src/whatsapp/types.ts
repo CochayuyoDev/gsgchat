@@ -29,6 +29,8 @@ export interface AnuncioEntrada {
 
 export interface InboundMessage {
   id: string;
+  /** Fuente del wamid para deduplicar aunque expire la fila temporal del chat. */
+  provider?: 'meta' | 'waha' | 'local' | 'web' | 'whatsapp';
   from: string;
   timestamp: string;
   type: 'text' | 'location' | 'interactive' | 'button' | 'image' | 'audio' | string;

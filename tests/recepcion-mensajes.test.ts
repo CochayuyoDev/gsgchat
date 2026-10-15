@@ -116,6 +116,36 @@ describe('fallo de WhatsApp', () => {
     expect((await bandeja()).total).toBe(0);
   });
 
+  it('si el servidor arranca dentro del turno sin WhatsApp, conserva el pedido y lo envía al volver', async () => {
+    // 14:00 UTC = 09:00 en Lima. El turno empieza a las 8; si el servidor
+    // estuvo apagado a esa hora, procesa el pendiente al arrancar dentro del turno.
+    esc = await crearEscenarioEntregas({ horario: [8, 22], arranque: new Date('2026-10-15T14:00:00.000Z') });
+    (esc.wa as unknown as { conectado: () => boolean }).conectado = () => false;
+
+    const alta = await esc.api.post<Creadas>('/api/v1/entregas', pedido('GSG-SIN-WA', '987200009'));
+    expect(alta.status).toBe(201);
+    expect(alta.body.creadas[0]!.mensaje.estado).toBe('encolado');
+
+    await esc.trabajar();
+    let e = await mensajeDe('GSG-SIN-WA');
+    expect(e.estado).not.toBe('cancelada');
+    expect(e).toMatchObject({ mensajeEstado: 'reintentando', mensajeVia: 'ubicacion', mensajeIntentos: 0, mensajeReintentosAuto: 0, mensajeErrorCodigo: 'sin_conexion' });
+    expect(e.mensajeProximoAt).toBeTruthy();
+    expect(esc.wa.sent.filter((m) => m.to === conPais('987200009'))).toHaveLength(0);
+    expect(esc.repos._deliveries).toHaveLength(0);
+
+    // WhatsApp ya está vinculado. Pasada la espera, la siguiente pasada del
+    // motor toma el trabajo guardado y lo envía sin recrear el pedido.
+    esc.avanzar(3);
+    (esc.wa as unknown as { conectado: () => boolean }).conectado = () => true;
+    await esc.trabajar();
+
+    e = await mensajeDe('GSG-SIN-WA');
+    expect(e).toMatchObject({ mensajeEstado: 'enviado', mensajeVia: 'ubicacion', mensajeIntentos: 1, mensajeErrorCodigo: null });
+    expect(esc.wa.sent.filter((m) => m.to === conPais('987200009'))).toHaveLength(1);
+    expect((await esc.api.get<{ entrega: { referencia: string } }>('/api/v1/entregas/GSG-SIN-WA')).body.entrega.referencia).toBe('GSG-SIN-WA');
+  });
+
   it('un error permanente (no tiene WhatsApp) no se reintenta solo y queda en la bandeja para corregirlo', async () => {
     await esc.api.post('/api/v1/entregas', pedido('GSG-2002', '987200002'));
     esc.wa.failNext = new WhatsAppApiError('(#131026) Message undeliverable', 400, 131026, undefined, false);

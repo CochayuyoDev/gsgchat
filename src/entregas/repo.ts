@@ -406,6 +406,17 @@ export interface EntregasRepo {
   registrarUbicacionAtomica(id: number, patch: PatchEntrega, reporte: { loteId: string | null; payload: Record<string, unknown> } | null, propuestaAt?: Date): Promise<Entrega | null>;
   quitar(id: number): Promise<Entrega | null>;
   cifras(dia: string): Promise<Record<string, number>>;
+  /** Conteos para campana e inicio; no materializa todas las filas del día. */
+  resumenLigero?(dia: string): Promise<{
+    estados: Record<string, number>;
+    faltaUbicacion: number;
+    faltaConfirmacion: number;
+    retenidasTotal: number;
+    retenidasUbicacion: number;
+    retenidasConfirmar: number;
+    envioLiberado: boolean;
+    cierrePendiente: number;
+  }>;
   /** Las que toca pedir confirmacion ahora. */
   tocaPedirConfirmacion(ahora: Date, limite: number): Promise<Entrega[]>;
   /** Las que estan listas para un motorizado, esperando uno que no contesta, o con el aviso de llegada por reintentar. */
@@ -1105,6 +1116,44 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const cifras: Record<string, number> = {};
       for (const r of rows) cifras[r.estado] = Number(r.n);
       return cifras;
+    },
+    async resumenLigero(dia) {
+      const { rows } = await pool.query<{
+        estado: string; total_estado: number | string; falta_ubicacion: number | string;
+        falta_confirmacion: number | string; retenidas_total: number | string;
+        retenidas_ubicacion: number | string; retenidas_confirmar: number | string;
+        envio_liberado: number | string;
+      }>(
+        `select estado, count(*) as total_estado,
+                sum(case when ubicacion_estado = 'pendiente' and estado <> 'cancelada' then 1 else 0 end) as falta_ubicacion,
+                sum(case when confirmacion_estado in ('pendiente', 'pedida') and estado <> 'cancelada' then 1 else 0 end) as falta_confirmacion,
+                sum(case when envio_retenido_at is not null and estado not in ('cancelada', 'entregada', 'terminada') then 1 else 0 end) as retenidas_total,
+                sum(case when envio_retenido_at is not null and estado not in ('cancelada', 'entregada', 'terminada') and
+                  (ubicacion_estado = 'pendiente' or confirmacion_estado = 'no_hace_falta' or
+                   (ubicacion_estado = 'recibida' and coalesce(ubicacion_fuente, '') <> '' and ubicacion_fuente <> 'gsg' and ubicacion_fuente not like 'a mano%')) then 1 else 0 end) as retenidas_ubicacion,
+                sum(case when envio_retenido_at is not null and estado not in ('cancelada', 'entregada', 'terminada') and
+                  not (ubicacion_estado = 'pendiente' or confirmacion_estado = 'no_hace_falta' or
+                   (ubicacion_estado = 'recibida' and coalesce(ubicacion_fuente, '') <> '' and ubicacion_fuente <> 'gsg' and ubicacion_fuente not like 'a mano%')) then 1 else 0 end) as retenidas_confirmar,
+                max(case when envio_liberado_at is not null then 1 else 0 end) as envio_liberado
+           from entregas where dia = $1 group by estado`,
+        [dia],
+      );
+      const estados: Record<string, number> = {};
+      let faltaUbicacion = 0, faltaConfirmacion = 0, retenidasTotal = 0, retenidasUbicacion = 0, retenidasConfirmar = 0, envioLiberado = false;
+      for (const r of rows) {
+        estados[r.estado] = Number(r.total_estado);
+        faltaUbicacion += Number(r.falta_ubicacion ?? 0);
+        faltaConfirmacion += Number(r.falta_confirmacion ?? 0);
+        retenidasTotal += Number(r.retenidas_total ?? 0);
+        retenidasUbicacion += Number(r.retenidas_ubicacion ?? 0);
+        retenidasConfirmar += Number(r.retenidas_confirmar ?? 0);
+        envioLiberado ||= Number(r.envio_liberado ?? 0) > 0;
+      }
+      const anteriores = await pool.query<{ total: number | string }>(
+        `select count(*) as total from entregas where dia < $1 and estado in ($2)`,
+        [dia, ESTADOS_ENTREGA_VIVOS],
+      );
+      return { estados, faltaUbicacion, faltaConfirmacion, retenidasTotal, retenidasUbicacion, retenidasConfirmar, envioLiberado, cierrePendiente: Number(anteriores.rows[0]?.total ?? 0) };
     },
     async tocaPedirConfirmacion(ahora, limite) {
       const { rows } = await pool.query<EntregaRow>(

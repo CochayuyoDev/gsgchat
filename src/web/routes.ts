@@ -66,12 +66,10 @@ import type { ServicioEntregas } from '../entregas/servicio.js';
 import { entregasPage } from './entregas-page.js';
 
 import { fiabilidadPage } from './fiabilidad-page.js';
-import { guardadosPage } from './guardados-page.js';
 import { fijarModoVigente } from './shell.js';
 
 import { entrenamientoPage } from './entrenamiento-page.js';
 
-import { mapaPage } from './mapa-page.js';
 
 import { ICONO_192_PNG_BASE64, ICONO_512_PNG_BASE64 } from './iconos.js';
 import { NOMBRE_SISTEMA } from '../marca.js';
@@ -313,8 +311,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   }
 
   app.get('/guardados', async (_request, reply) => {
-    const page = html(guardadosPage({ demo: config.DEMO_MODE, nombreNegocio: negocio(), conIA: Boolean(deps.ia?.estado().tieneToken) }));
-    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+    return reply.redirect('/chat');
   });
 
   // El panel del dueño (solo superadministrador), el mapa del dia y la pantalla Pagar de esta instalacion. Constructor E.
@@ -323,10 +320,7 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
   });
 
-  app.get('/mapa', async (_request, reply) => {
-    const page = html(mapaPage({ disponible: Boolean(deps.entregas), demo: config.DEMO_MODE, nombreNegocio: negocio() }));
-    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
-  });
+  app.get('/mapa', async (_request, reply) => reply.redirect('/hoy'));
 
 
 

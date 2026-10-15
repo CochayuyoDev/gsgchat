@@ -28,6 +28,7 @@ import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
 import { readInbound } from '../handlers/inbound.js';
 import type { PuertoGsg } from '../rutas/gsg.js';
 import { defaultAuthDir, hayVinculacion, sesionLocalPorDefecto, toJid, type SesionLocal } from '../whatsapp/local/session.js';
+import { perteneceAlChatActual } from '../whatsapp/alcance-chat.js';
 
 /** El progreso del trabajo de traer todo el historial (uno a la vez). */
 interface ProgresoHistorial {
@@ -192,9 +193,13 @@ export async function registerLocalRoutes(
   const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg, seen: createSeenCache() };
 
   async function arrancar() {
+    if (!hayVinculacion(authDir)) await settings.iniciarVistaChat?.();
     return startLocal({
       authDir,
       mediaDir,
+      importarHistorial: false,
+      soloTextoUbicacion: true,
+      aceptarEntrante: (from, timestamp) => perteneceAlChatActual(repos, settings, { from, timestamp }),
       // console y no app.log a proposito: los arranques cortos corren con el
       // logger apagado, y con el se perdian justo las lineas que explican por
       // que un mensaje no aparece.
@@ -205,7 +210,10 @@ export async function registerLocalRoutes(
       },
       onChange: async (value) => {
         try {
-          await processChange('messages', value, webhookDeps);
+          await processChange('messages', {
+            ...value,
+            ...(value.messages ? { messages: value.messages.map((message) => ({ ...message, provider: message.provider ?? 'local' })) } : {}),
+          }, webhookDeps);
         } catch (error) {
           // Sin esto un entrante que revienta aguas abajo es indistinguible de
           // un entrante que no llego: el sintoma es el mismo, "no me llegan".
@@ -215,6 +223,7 @@ export async function registerLocalRoutes(
       // Los grupos del numero aparecen en el chat con su nombre desde que se
       // conecta, sin esperar a que alguien escriba en ellos.
       onGrupos: async (grupos) => {
+        if (settings.vistaChatDesde?.()) return;
         for (const g of grupos) {
           await repos.contacts.upsertGrupo(g.jid, g.nombre).catch((error: unknown) => console.error('[wa] no se pudo apuntar el grupo', g.jid, error));
         }
@@ -224,18 +233,8 @@ export async function registerLocalRoutes(
       // Al vincular, en cuanto el telefono termina de mandar lo reciente de
       // todos los chats, se le pide lo anterior de cada uno, sin que nadie
       // tenga que pulsar nada.
-      onSincronizacionInicial: async () => {
-        if (progresoHistorial.enMarcha) return;
-        console.log('[wa] arrancando la traida completa del historial tras vincular');
-        // Un respiro: el telefono acaba de mandar miles de mensajes. Y la
-        // conexion suele caerse y volver justo despues de vincular: se espera
-        // a que este de verdad conectada (hasta 3 minutos), si no cada chat
-        // se saltaba "sin conexion" y el trabajo acababa en cero.
-        await new Promise((r) => setTimeout(r, 10_000));
-        for (let i = 0; i < 36 && getLocalState().status !== 'WORKING'; i++) await new Promise((r) => setTimeout(r, 5_000));
-        await traerTodoElHistorial();
-      },
       onPropio: async ({ mensaje, status }) => {
+        if (settings.vistaChatDesde?.()) return;
         try {
           const contacto = mensaje.grupo
             ? await repos.contacts.upsertGrupo(mensaje.grupo.jid, mensaje.grupo.nombre ?? null)
@@ -299,6 +298,7 @@ export async function registerLocalRoutes(
    * pantalla solo tiene que refrescar.
    */
   app.post('/admin/local/historial/:contactId', async (request, reply) => {
+    if (settings.vistaChatDesde?.()) return reply.code(409).send({ error: 'La vista actual solo incluye conversaciones iniciadas por GSGchat; no se importa el historial del teléfono.' });
     const { contactId } = request.params as { contactId: string };
     const contacto = await repos.contacts.getById(contactId);
     if (!contacto) return reply.code(404).send({ error: 'contacto no encontrado' });
@@ -330,6 +330,7 @@ export async function registerLocalRoutes(
    * su id; lo que faltaba aparece.
    */
   app.post('/admin/local/sincronizar/:contactId', async (request, reply) => {
+    if (settings.vistaChatDesde?.()) return reply.code(409).send({ error: 'La importación del teléfono está desactivada en esta conexión.' });
     const { contactId } = request.params as { contactId: string };
     const contacto = await repos.contacts.getById(contactId);
     if (!contacto) return reply.code(404).send({ error: 'contacto no encontrado' });
@@ -363,6 +364,7 @@ export async function registerLocalRoutes(
    * mensaje aqui no tienen referencia y se saltan.
    */
   app.post('/admin/local/historial-todos', async (_request, reply) => {
+    if (settings.vistaChatDesde?.()) return reply.code(409).send({ error: 'La importación del teléfono está desactivada en esta conexión.' });
     if (getLocalState().status !== 'WORKING') {
       return reply.code(400).send({ error: 'WhatsApp no está conectado: conéctalo en Conexión de WhatsApp y vuelve a intentarlo.' });
     }

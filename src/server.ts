@@ -11,6 +11,7 @@ import { ZodError } from 'zod';
 import { codigoPorStatus, cuerpoError, ErrorApi, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError } from './api/errores.js';
 import { paginaError } from './web/pagina-error.js';
 import type { Config } from './config.js';
+import { registrarLimpiezaChat } from './whatsapp/limpieza-chat.js';
 import type { Repos } from './db/repos.js';
 import { WhatsAppApiError, type WhatsAppClient } from './whatsapp/client.js';
 import { NotConfiguredError } from './whatsapp/dynamic.js';
@@ -200,6 +201,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // (sin esto, `/%61dmin/...` se saltaba el de /admin). Ver util/ruta-normalizada.ts.
     rewriteUrl: (req) => normalizarRuta(req.url ?? '/'),
   });
+  registrarLimpiezaChat(app, repos);
 
   app.addHook('onRequest', async (request, reply) => {
     if (moduloRetirado(request.url)) return reply.code(404).send({ ok: false, codigo: 'RUTA_NO_EXISTE', error: 'Este módulo fue retirado. Usa API, WhatsApp o Pedidos GSG.' });
@@ -252,7 +254,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // y el cliente ve ECONNRESET en vez del 413: se lee (y descarta) el
       // resto antes de contestar, con tope de bytes y de tiempo.
       if (status === 413) await drenarCuerpo(request.raw);
-      return reply.code(status).send(cuerpoError(codigo, mensaje));
+      const cuerpo = cuerpoError(codigo, mensaje);
+      const ir = (error as { ir?: string }).ir;
+      return reply.code(status).send(ir ? { ...cuerpo, ir } : cuerpo);
     }
     request.log.error({ err: error }, 'error no controlado');
     // La base que no contesta no es un fallo nuestro: 503 y cuando volver.
@@ -353,6 +357,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   await registerAdminRoutes(app, {
     numeroDeSalud: deps.numeroDeSalud,
+    bus: deps.bus,
     repos,
     config,
     queue,

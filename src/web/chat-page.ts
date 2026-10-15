@@ -50,17 +50,6 @@ export function chatPage(opts: ChatOpts): string {
       : `<div class="aviso roto">Todavía no conectaste tu WhatsApp: aquí ves las conversaciones, pero no sale ningún mensaje.
            <a href="/setup">Conectar mi WhatsApp</a></div>`;
 
-  /**
-   * Traer el historial solo tiene sentido donde hay de donde traerlo: WAHA lo
-   * guarda y lo deja pedir, y con el QR lo tiene el telefono. Con la Cloud API
-   * de Meta no existe esa consulta, asi que la opcion no se pinta.
-   */
-  const opcionHistorial =
-    proveedor === 'waha'
-      ? `{ icono: '⭳', texto: 'Traer las conversaciones de este WhatsApp', accion: importarDeWaha }`
-      : proveedor === 'local'
-        ? `{ icono: '⤒', texto: 'Traer el historial de todos los chats', accion: traerTodoElHistorial }`
-        : '';
 
   const contenido = `
 ${bandaDemo}
@@ -131,27 +120,22 @@ ${bandaDemo}
     <div class="messages hidden" id="messages" tabindex="-1"></div>
     <button class="bajar hidden" id="bajar" title="Bajar al último mensaje" aria-label="Bajar al último mensaje">↓<span class="nuevos hidden" id="bajar-nuevos"></span></button>
 
-    <input type="file" id="archivo" class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip">
 
     <div class="cita-previa hidden" id="cita-previa">
       <div class="bloque"><span class="quien"></span><span class="que"></span></div>
       <button type="button" class="icon" id="cita-quitar" title="No responder a ese mensaje" aria-label="Quitar la cita">✕</button>
     </div>
-    <div class="previa hidden" id="adjunto-previa"></div>
     <div class="panel-bajo hidden" id="panel-atajos"></div>
-    <div class="panel-bajo hidden" id="panel-stickers"></div>
     <div class="panel-bajo emojis hidden" id="panel-emojis">
       <input class="buscador" id="emojis-buscar" placeholder="Buscar: caras, gestos, corazones, trabajo, comida" aria-label="Buscar emoji">
       <div id="emojis-rejillas"></div>
     </div>
     <div class="rapidas-barra hidden" id="rapidas-barra"></div>
 
-    <div class="grabando hidden" id="grabando"></div>
     <div class="composer hidden" id="composer">
-      <button class="ghost" id="boton-mas" title="Adjuntar, sticker, ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
+      <button class="ghost" id="boton-mas" title="Ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
       <button class="ghost" id="boton-emoji" title="Emoji" aria-label="Elegir un emoji" aria-expanded="false">😊</button>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje  ·  / para respuestas rápidas" aria-label="Escribe un mensaje"></textarea>
-      <button id="grabar" title="Grabar una nota de voz" aria-label="Grabar una nota de voz">🎤</button>
       <button id="send" class="hidden" title="Enviar" aria-label="Enviar">➤</button>
     </div>
 
@@ -164,6 +148,7 @@ ${bandaDemo}
 /* Se entra con la cookie de sesion (/login): si el servidor dice 401, alla. */
 async function api(path, options) {
   options = options || {};
+  if (!options.method || options.method === 'GET') return window.leerPanel(path);
   var res = await fetch(path, {
     method: options.method || 'GET',
     cache: 'no-store',
@@ -245,7 +230,10 @@ function ver(id, visible) {
   var el = document.getElementById(id);
   if (el) el.classList.toggle('hidden', !visible);
 }
+var ultimoAviso = { texto: '', cuando: 0 };
 function toast(text) {
+  if (ultimoAviso.texto === text && Date.now() - ultimoAviso.cuando < 60000) return;
+  ultimoAviso = { texto: text, cuando: Date.now() };
   var el = document.createElement('div');
   el.className = 'toast';
   el.setAttribute('role', 'status');
@@ -290,13 +278,15 @@ var input = document.getElementById('text');
 var nuevosSinVer = 0;
 /* El id del ultimo mensaje pintado: con el se sabe que es NUEVO de verdad. */
 var ultimoPintadoId = 0;
+var cursorNuevos = '0', syncActiva = false, syncPendiente = false;
+var expiryTimer = null;
 
 /* El hilo abierto: lo del servidor mas las paginas anteriores ya cargadas.
    El refresco trae solo lo ultimo y se funde aqui, para no perder lo viejo. */
-var hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false, decisiones: [] };
+var hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false };
 
 function fundirHilo(contactId, nuevos, masAntiguos) {
-  if (hilo.contactId !== contactId) hilo = { contactId: contactId, mensajes: [], masAntiguos: false, cargando: false, decisiones: [] };
+  if (hilo.contactId !== contactId) hilo = { contactId: contactId, mensajes: [], masAntiguos: false, cargando: false };
   var porId = {};
   hilo.mensajes.forEach(function (m) { porId[m.id] = m; });
   nuevos.forEach(function (m) { porId[m.id] = m; });
@@ -304,6 +294,10 @@ function fundirHilo(contactId, nuevos, masAntiguos) {
     var ta = new Date(a.createdAt).getTime(), tb = new Date(b.createdAt).getTime();
     return ta - tb || a.id - b.id;
   });
+  if (hilo.mensajes.length > 300) {
+    hilo.mensajes = hilo.mensajes.slice(-300);
+    hilo.masAntiguos = true;
+  }
   if (masAntiguos !== undefined) hilo.masAntiguos = masAntiguos;
   return hilo.mensajes;
 }
@@ -327,10 +321,28 @@ document.querySelectorAll('#filtros .f').forEach(function (b) {
   };
 });
 
-async function loadChats(keepScroll) {
+var peticionLista = 0, vistaActual = null, offsetChats = 0, hasMoreChats = false, cargandoMasChats = false;
+async function loadChats(keepScroll, anexar) {
+  var mia = ++peticionLista;
   try {
-    var data = await api('/admin/chat/conversations?limit=100&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim()));
-    conversations = data.items;
+    var offset = anexar ? offsetChats : 0;
+    if (anexar) cargandoMasChats = true;
+    var data = await api('/admin/chat/conversations?limit=30&offset=' + offset + '&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim()));
+    if (mia !== peticionLista) return;
+    if (vistaActual !== data.vistaDesde) {
+      vistaActual = data.vistaDesde;
+      current = null; deseado = null;
+      hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false };
+      ver('thread-head', false); ver('messages', false); ver('composer', false); ver('placeholder', true);
+    }
+    if (anexar) {
+      var porId = new Map(conversations.map(function (c) { return [c.contactId, c]; }));
+      data.items.forEach(function (c) { porId.set(c.contactId, c); });
+      conversations = Array.from(porId.values());
+      offsetChats = offset + data.items.length;
+    } else { conversations = data.items; offsetChats = data.items.length; }
+    hasMoreChats = Boolean(data.hasMore);
+    if (window.actualizarNoLeidos) window.actualizarNoLeidos(data.unread || 0);
     var badge = document.getElementById('unread');
     if (data.unread) { badge.textContent = data.unread; badge.classList.remove('hidden'); }
     else badge.classList.add('hidden');
@@ -346,9 +358,10 @@ async function loadChats(keepScroll) {
       pintarLista(box, '<div class="empty">Ninguna conversación con ese filtro.</div>', top);
       return;
     }
-    var html = visibles.map(filaDeChat).join('');
+    var html = visibles.map(filaDeChat).join('') + (hasMoreChats ? '<button class="cargar-chats" type="button" data-cargar-chats>Ver 30 conversaciones más</button>' : '');
     pintarLista(box, html, keepScroll ? top : 0);
   } catch (error) { toast(error.message); }
+  finally { cargandoMasChats = false; }
 }
 
 function filaDeChat(c) {
@@ -384,10 +397,14 @@ function pintarLista(box, html, scrollTop) {
 /* El clic se escucha en el contenedor: asi sigue funcionando aunque la fila
    se haya vuelto a pintar entre que la pulsas y la sueltas. */
 document.getElementById('chats').addEventListener('click', function (event) {
+  if (event.target.closest('[data-cargar-chats]')) { loadChats(true, true); return; }
   var menu = event.target.closest('[data-menu-fila]');
   if (menu) { event.stopPropagation(); return menuDeConversacion(menu, menu.getAttribute('data-menu-fila')); }
   var fila = event.target.closest('.chat');
   if (fila) openChat(fila.getAttribute('data-id'));
+});
+document.getElementById('chats').addEventListener('scroll', function () {
+  if (hasMoreChats && !cargandoMasChats && this.scrollTop + this.clientHeight >= this.scrollHeight - 100) loadChats(true, true);
 });
 document.getElementById('chats').addEventListener('contextmenu', function (event) {
   var fila = event.target.closest('.chat');
@@ -458,7 +475,7 @@ async function openChat(contactId, silent) {
   if (!silent) deseado = contactId;
   var mia = ++peticion;
   try {
-    var data = await api('/admin/chat/' + contactId + '?limit=80&read=' + (silent ? 'false' : 'true'));
+    var data = await api('/admin/chat/' + contactId + '?limit=30&read=' + (silent ? 'false' : 'true'));
     /* Dos guardas, en este orden: el usuario ya abrio otro chat (esta
        respuesta es de otro hilo), o ya se pinto algo mas nuevo de ESTE. */
     if (deseado && deseado !== contactId) return;
@@ -467,14 +484,10 @@ async function openChat(contactId, silent) {
     var nuevo = !current || current.id !== contactId;
     var otroHilo = hilo.contactId !== contactId;
     var mensajesHilo = fundirHilo(contactId, data.messages, otroHilo ? data.hasMore : undefined);
-    /* Por que respondio el bot en cada turno: nota interna que se intercala en
-       el hilo. Si no llegan, el chat se pinta igual, sin ellas. */
-    try {
-      var dec = await api('/admin/chat/' + contactId + '/decisiones?limit=200');
-      if (hilo.contactId === contactId) hilo.decisiones = (dec.decisiones || []).slice().reverse();
-    } catch (e) { /* sin decisiones: no es motivo para no abrir el chat */ }
+    if (otroHilo) cursorNuevos = data.messages.reduce(function (max, m) { return BigInt(String(m.id)) > BigInt(max) ? String(m.id) : max; }, '0');
     if (deseado && deseado !== contactId) return;
     current = data.contact;
+    hilo.scopeId = data.scopeId;
     current.pedido = data.reparto ? data.reparto.referencia : null;
     current.reparto = data.reparto || null;
     PUEDE = data.puede || PUEDE;
@@ -498,7 +511,7 @@ async function openChat(contactId, silent) {
 
     renderMessages(mensajesHilo, nuevo);
     renderComposer(data);
-    mirarPresencia();
+
     if (!silent) loadChats(true);
   } catch (error) { toast(error.message); }
 }
@@ -526,29 +539,6 @@ function pintarSubtitulo(data) {
  * Con la Cloud API de Meta ese dato no existe. En vez de inventarlo, no se
  * pinta nada: es la unica forma honesta de contarlo.
  */
-var relojPresencia = null;
-function mirarPresencia() {
-  clearInterval(relojPresencia);
-  if (!PUEDE.presencia || !current || current.tipo === 'grupo') return;
-  var idChat = current.id;
-  var pedir = async function () {
-    if (!current || current.id !== idChat) return clearInterval(relojPresencia);
-    try {
-      var r = await api('/admin/chat/' + idChat + '/presencia');
-      var el = document.getElementById('t-presencia');
-      if (!el || !current || current.id !== idChat) return;
-      var p = r.presencia;
-      el.innerHTML = !p ? ''
-        : p.estado === 'escribiendo' ? '<span class="escribiendo">escribiendo…</span> · '
-        : p.estado === 'grabando' ? '<span class="escribiendo">grabando un audio…</span> · '
-        : p.estado === 'en_linea' ? '<span class="escribiendo">en línea</span> · '
-        : 'últ. vez ' + esc(shortWhen(p.desde)) + ' · ';
-    } catch (error) { /* si no se puede preguntar no se inventa: se deja como esta */ }
-  };
-  pedir();
-  relojPresencia = setInterval(pedir, 6000);
-}
-
 /* ------------------------------------------------------------- el hilo */
 
 /** Trae la pagina anterior a lo mas viejo que hay en pantalla, sin mover la vista. */
@@ -562,7 +552,7 @@ async function cargarMasAntiguos() {
   var boton = box.querySelector('.mas-antiguos button');
   if (boton) { boton.disabled = true; boton.textContent = 'Cargando…'; }
   try {
-    var data = await api('/admin/chat/' + current.id + '?limit=80&before=' + primero.id);
+    var data = await api('/admin/chat/' + current.id + '?limit=30&before=' + primero.id);
     if (!current || hilo.contactId !== current.id) return;
     var mensajes = fundirHilo(current.id, data.messages, data.hasMore);
     renderMessages(mensajes, false, true);
@@ -605,7 +595,17 @@ document.getElementById('bajar').onclick = function () {
  * arriba, un refresco no le tira la vista al final.
  */
 function renderMessages(messages, scrollToEnd, mantenerVista) {
+  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive'].indexOf(m.kind) >= 0; });
+  messages = messages.filter(function (m) { return !m.expiresAt || Date.parse(m.expiresAt) > Date.now(); });
   pintados = messages;
+  clearTimeout(expiryTimer);
+  var proximas = messages.map(function (m) { return Date.parse(m.expiresAt || '') || Infinity; }).filter(function (t) { return t > Date.now(); });
+  if (proximas.length) expiryTimer = setTimeout(function () {
+    if (!current) return;
+    hilo.mensajes = hilo.mensajes.filter(function (m) { return !m.expiresAt || Date.parse(m.expiresAt) > Date.now(); });
+    renderMessages(hilo.mensajes, false, true);
+    loadChats(true);
+  }, Math.max(25, Math.min.apply(Math, proximas) - Date.now() + 20));
   var box = document.getElementById('messages');
   var cerca = estaAbajo();
   if (!messages.length) {
@@ -621,23 +621,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
   if (hilo.masAntiguos) {
     html += '<div class="mas-antiguos"><button type="button" data-mas-antiguos="1" title="También se cargan solos al subir">↑ Ver mensajes anteriores</button></div>';
   }
-  /* Las decisiones del bot van por fecha entre los mensajes. Con mensajes mas
-     viejos sin cargar, las anteriores al primero pintado esperan a que se
-     carguen: amontonadas arriba no dirian a que turno pertenecen. */
-  var decisiones = (hilo.contactId === (current && current.id) ? hilo.decisiones || [] : []).filter(function (x) {
-    return !hilo.masAntiguos || new Date(x.createdAt).getTime() >= new Date(messages[0].createdAt).getTime();
-  });
-  var di = 0;
-  function pintarDecisionesHasta(limite) {
-    while (di < decisiones.length && (limite === null || new Date(decisiones[di].createdAt).getTime() <= limite)) {
-      var dd = dayLabel(decisiones[di].createdAt);
-      if (dd !== dia) { dia = dd; html += '<div class="day">' + esc(dd) + '</div>'; }
-      html += decisionHtml(decisiones[di]);
-      di++;
-    }
-  }
   messages.forEach(function (m, i) {
-    pintarDecisionesHasta(new Date(m.createdAt).getTime());
     var d = dayLabel(m.createdAt);
     if (d !== dia) { dia = d; html += '<div class="day">' + esc(d) + '</div>'; }
     /* El primero de cada bloque lleva pico; los siguientes se pegan a el. */
@@ -659,14 +643,9 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       (m.payload && m.payload.reenviado ? '<span class="reenviado">↪ Reenviado</span>' : '') +
       (autor && primero ? autorHtml(autor) : '') +
       citaHtml(m) +
-      adjuntoHtml(m) +
       anuncioHtml(m) +
-      (m.payload && m.payload.transcripcion ? '<span class="transcrito" title="Lo que dijo en el audio, transcrito">🎤 dijo:</span> ' : '') +
-      (m.direction === 'out' && m.payload && m.payload.media && m.payload.media.voz ? '<span class="transcrito" title="Salió como nota de voz">🔊 nota de voz:</span> ' : '') +
       ubicacionHtml(m) +
       resaltar(withLinks(cuerpoVisible(m))) +
-      enlacePreviaHtml(m) +
-      verUnaVezHtml(m) +
       borradoHtml(m) +
       '<span class="meta">' +
         (m.payload && m.payload.editadoAt ? '<span class="editado" title="Se editó después de enviarlo">editado</span>' : '') +
@@ -677,11 +656,27 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       '<button type="button" class="abrir-menu" title="Opciones del mensaje" aria-label="Opciones del mensaje" aria-haspopup="menu">⌄</button>' +
       '</div>';
   });
-  pintarDecisionesHasta(null);
 
-  if (box.innerHTML !== html) box.innerHTML = html;
-  void cargarMedios(box);
-  void cargarPrevias(box);
+  if (box.innerHTML !== html) {
+    var previo = new Map();
+    Array.from(box.children).forEach(function (n) {
+      var clave = n.classList.contains('msg') ? 'm:' + n.getAttribute('data-id') : n.classList.contains('day') ? 'd:' + n.getAttribute('data-day') : n.classList.contains('mas-antiguos') ? 'older' : null;
+      if (clave) previo.set(clave, n);
+    });
+    var temporal = document.createElement('div'); temporal.innerHTML = html;
+    var usados = new Set();
+    var actual = box.firstChild;
+    Array.from(temporal.children).forEach(function (n) {
+      if (n.classList.contains('day')) n.setAttribute('data-day', n.textContent || '');
+      var clave = n.classList.contains('msg') ? 'm:' + n.getAttribute('data-id') : n.classList.contains('day') ? 'd:' + n.getAttribute('data-day') : n.classList.contains('mas-antiguos') ? 'older' : null;
+      var viejo = clave && previo.get(clave);
+      var elegido = viejo && viejo.outerHTML === n.outerHTML ? viejo : n;
+      usados.add(elegido);
+      if (elegido !== actual) box.insertBefore(elegido, actual);
+      actual = elegido.nextSibling;
+    });
+    Array.from(box.children).forEach(function (n) { if (!usados.has(n)) n.remove(); });
+  }
   if (seleccion && seleccion.length) pintarSeleccion();
 
   /* Lo nuevo se cuenta por id y no por cuantos hay: cargar mensajes ANTIGUOS
@@ -697,21 +692,6 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
   else if (nuevosAbajo && !mantenerVista) nuevosSinVer += nuevosAbajo;
   lastCount = messages.length;
   pintarBotonBajar();
-}
-
-/* Una decision del bot: linea gris, pequena y centrada, que deja claro que es
-   una nota interna. El cliente no la ve; esta para saber por que el bot dijo
-   lo que dijo (o se callo) y corregir la regla si se equivoco. */
-function decisionHtml(x) {
-  var extra = [];
-  if (x.esperaba) extra.push('esperaba: ' + x.esperaba);
-  if (x.detalle) extra.push(x.detalle);
-  return '<div class="decision-bot" role="note" title="Nota interna: el cliente no la ve">' +
-    '<span class="decision-etq">Nota interna · el cliente no la ve</span>' +
-    '<span class="decision-txt">' + esc(x.resumen || '') + '</span>' +
-    (extra.length ? '<span class="decision-extra">' + esc(extra.join(' · ')) + '</span>' : '') +
-    '<span class="decision-hora">' + esc(hhmm(x.createdAt)) + '</span>' +
-    '</div>';
 }
 
 function autorHtml(autor) {
@@ -731,17 +711,6 @@ function borradoHtml(m) {
   if (!m.payload || !m.payload.borradoPorRemitente) return '';
   var texto = m.direction === 'out' ? '🗑 Lo eliminaste para todos · aquí se conserva' : '🗑 Lo eliminó para todos · aquí se conserva';
   return '<span class="borrado" title="' + esc(hhmm(m.payload.borradoPorRemitente)) + '">' + texto + '</span>';
-}
-
-/*
- * El "ver una vez" que WhatsApp no entrego: el cuerpo ya lo explica; aqui va
- * el boton para pedirle al cliente que lo mande normal. En un grupo no se
- * pide: seria escribirle a todos.
- */
-function verUnaVezHtml(m) {
-  if (m.direction !== 'in' || !m.payload || !m.payload.viewOnce) return '';
-  if (current && current.tipo === 'grupo') return '';
-  return '<span class="solo-telefono"><button type="button" data-pedir-normal="1">Pedirle que la mande normal</button></span>';
 }
 
 /*
@@ -778,133 +747,6 @@ function ubicacionHtml(m) {
     '<span class="pin-nota">Las coordenadas las ves tú; al cliente solo le llega el enlace.</span></div>';
 }
 
-/**
- * El hueco del adjunto.
- *
- * Se pinta vacio y con su id: el fichero se pide despues, porque va detras de
- * la sesion de administracion y una etiqueta <img> no manda cabeceras.
- */
-function adjuntoHtml(m) {
-  var media = m.payload && m.payload.media;
-  if (!media || !media.id) return sinFicheroHtml(m.kind);
-
-  var kind = media.kind || m.kind;
-  if (kind === 'sticker' && media.url) return '<img class="adjunto sticker" src="' + esc(media.url) + '" alt="sticker">';
-  var attrs = ' class="adjunto' + (kind === 'sticker' ? ' sticker' : '') + '" data-media="' + esc(media.id) + '" data-kind="' + esc(kind) + '"';
-
-  /* Lo que en el telefono se abre una sola vez y desaparece, aqui se queda:
-     se dice para que el operador sepa que en el movil ya no lo encontrara. */
-  var unaVez = media.verUnaVez
-    ? '<span class="una-vez" title="El cliente la mandó como “ver una vez”: en el teléfono desaparece al abrirla, aquí queda guardada">👁 Ver una vez · guardada aquí</span>'
-    : '';
-
-  if (kind === 'image') return unaVez + '<img' + attrs + ' alt="foto">';
-  if (kind === 'sticker') return unaVez + '<img' + attrs + ' alt="sticker">';
-  if (kind === 'video') return unaVez + '<video' + attrs + ' controls playsinline></video>';
-  if (kind === 'audio') return unaVez + '<audio' + attrs + ' controls preload="none"></audio>';
-
-  var nombre = media.filename || 'documento';
-  return unaVez + '<a' + attrs + ' class="adjunto fichero" download="' + esc(nombre) + '">' +
-    '<span aria-hidden="true">📄</span><b>' + esc(nombre) + '</b>' +
-    (media.bytes ? '<span class="cargando">' + esc(pesoLegible(media.bytes)) + '</span>' : '') +
-    '</a>';
-}
-
-/*
- * El adjunto que nunca llego a bajarse.
- *
- * El mensaje se guarda igual -perderlo entero seria peor-, pero sin fichero el
- * hilo ensenaba un "(sticker)" suelto que se lee como un fallo de la pantalla.
- */
-function sinFicheroHtml(kind) {
-  var nombres = { sticker: 'un sticker', image: 'una foto', video: 'un video', audio: 'un audio', document: 'un documento' };
-  if (!nombres[kind]) return '';
-  return '<div class="cargando">Mandaron ' + nombres[kind] + ' y no se pudo descargar.</div>';
-}
-
-/* Un adjunto ya bajado no cambia nunca -su id sale del wamid-, asi que se
-   guarda la URL y no se vuelve a pedir en cada repintado del hilo. */
-var mediaCache = {};
-
-/**
- * Rellena los huecos de adjunto que haya en pantalla.
- *
- * Se pide con fetch y no con <img src>, porque asi la sesion viaja en la
- * cookie y no en la URL, que acabaria en el historial y en los logs.
- */
-async function cargarMedios(box) {
-  var pendientes = box.querySelectorAll('[data-media]:not([data-listo])');
-  for (var i = 0; i < pendientes.length; i++) {
-    var el = pendientes[i];
-    var id = el.getAttribute('data-media');
-    el.setAttribute('data-listo', '1');
-    try {
-      if (!mediaCache[id]) {
-        var res = await fetch('/admin/local/media/' + encodeURIComponent(id), { credentials: 'same-origin' });
-        if (!res.ok) throw new Error('no se pudo cargar');
-        mediaCache[id] = URL.createObjectURL(await res.blob());
-      }
-      if (el.tagName === 'A') el.setAttribute('href', mediaCache[id]);
-      else el.setAttribute('src', mediaCache[id]);
-    } catch (error) {
-      el.removeAttribute('data-listo');
-      if (el.tagName !== 'A') {
-        var aviso = document.createElement('div');
-        aviso.className = 'cargando';
-        aviso.textContent = 'No se pudo cargar el adjunto.';
-        el.replaceWith(aviso);
-      }
-    }
-  }
-}
-
-/* ---------------------------------------------------- previa de un enlace */
-
-var previasEnlace = {};
-
-/** El hueco de la previa. Se rellena despues, si el otro sitio contesta. */
-function enlacePreviaHtml(m) {
-  var media = m.payload && m.payload.media;
-  if (media && media.id) return '';
-  var url = primerEnlace(cuerpoVisible(m));
-  if (!url) return '';
-  var p = previasEnlace[url];
-  /* 'no' = ya se intento y no hay nada; 'pidiendo' = se esta trayendo. En los
-     dos casos no se pinta nada: un hueco a medias parece un fallo. */
-  if (p === 'no' || p === 'pidiendo') return '';
-  if (!p) return '<span data-previa="' + esc(url) + '"></span>';
-  return '<a class="enlace-previa" href="' + esc(url) + '" target="_blank" rel="noreferrer">' +
-    (p.imagen ? '<img src="' + esc(p.imagen) + '" alt="" loading="lazy">' : '') +
-    '<span class="txt">' + (p.titulo ? '<span class="t">' + esc(p.titulo) + '</span>' : '') +
-    (p.descripcion ? '<span class="d">' + esc(p.descripcion) + '</span>' : '') +
-    '<span class="s">' + esc(p.sitio) + '</span></span></a>';
-}
-
-/**
- * Pide las previas que falten.
- *
- * Una por enlace y para siempre: si el sitio no contesta se apunta 'no' y no
- * se vuelve a intentar, para no repetir la misma peticion en cada refresco.
- */
-async function cargarPrevias(box) {
-  var huecos = box.querySelectorAll('[data-previa]');
-  var urls = {};
-  for (var i = 0; i < huecos.length; i++) urls[huecos[i].getAttribute('data-previa')] = true;
-  var pendientes = Object.keys(urls).filter(function (u) { return !previasEnlace[u]; });
-  if (!pendientes.length) return;
-  for (var k = 0; k < Math.min(pendientes.length, 4); k++) {
-    var url = pendientes[k];
-    previasEnlace[url] = 'pidiendo';
-    try {
-      var p = await api('/admin/chat/previa?url=' + encodeURIComponent(url));
-      previasEnlace[url] = p.titulo || p.descripcion || p.imagen ? p : 'no';
-    } catch (error) {
-      previasEnlace[url] = 'no';
-    }
-  }
-  if (current) renderMessages(hilo.mensajes, false, true);
-}
-
 /* ---------------------------------------------------------- acciones sueltas */
 
 /* Copiar unas coordenadas (o cualquier cosa con data-copiar). */
@@ -912,30 +754,6 @@ document.addEventListener('click', function (ev) {
   var b = ev.target && ev.target.closest ? ev.target.closest('[data-copiar]') : null;
   if (!b) return;
   copiar(b.getAttribute('data-copiar') || '');
-});
-
-/* Pedir que manden la foto de "ver una vez" como foto normal. */
-document.addEventListener('click', function (event) {
-  var pedir = event.target.closest('[data-pedir-normal]');
-  if (!pedir || !current) return;
-  event.preventDefault();
-  if (!enviando) enviar({ text: TEXTO_VER_UNA_VEZ });
-});
-
-/* Clic en una foto o un video: se ve a tamano completo. */
-document.addEventListener('click', function (e) {
-  var el = e.target;
-  if (!el || !el.getAttribute || !el.getAttribute('data-media')) return;
-  if (el.tagName !== 'IMG' && el.tagName !== 'VIDEO') return;
-  if (seleccion && seleccion.length) return;
-  var visor = document.createElement('div');
-  visor.className = 'visor';
-  var copia = el.cloneNode(true);
-  copia.removeAttribute('data-media');
-  if (copia.tagName === 'VIDEO') copia.setAttribute('controls', '');
-  visor.appendChild(copia);
-  visor.onclick = function () { visor.remove(); };
-  document.body.appendChild(visor);
 });
 
 /* "¿Qué pasó con este mensaje?": la traza de punta a punta, en palabras. */
@@ -1037,7 +855,6 @@ async function abrirFicha() {
       var coords = Number(f.ubicacion.lat).toFixed(6) + ', ' + Number(f.ubicacion.lng).toFixed(6);
       html += '<div><h4>Su última ubicación</h4><div class="fila"><span class="pin-coords">' + coords + '</span></div><div class="fila" style="margin-top:6px"><a class="sm" href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">Abrir en el mapa</a><button class="sm" type="button" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></div><div class="muted" style="margin-top:4px;font-size:12px">Las coordenadas las ves tú; al cliente solo le llega el enlace.</div></div>';
     } else html += '<div><h4>Su última ubicación</h4><div class="muted">Todavía no ha mandado ninguna. Con «Pedirle su ubicación» (menú ＋) se le manda el botón.</div></div>';
-    html += '<div><h4>Conversaciones guardadas</h4><div class="fila">' + (f.guardadas ? '<a class="sm" href="/guardados?tel=' + encodeURIComponent(c.phone) + '">Ver las ' + f.guardadas + ' guardada' + (f.guardadas === 1 ? '' : 's') + '</a>' : '<span class="muted">Ninguna todavía.</span>') + '<a class="sm" href="/panel#contactos">Ficha completa</a></div></div>';
     cuerpo.innerHTML = html;
     document.getElementById('ficha-baja').onclick = async function () {
       this.disabled = true;
@@ -1118,13 +935,7 @@ document.getElementById('menu-chat').onclick = function () {
   ops.push({ icono: '📌', texto: c.fijadoAt ? 'Quitar de arriba' : 'Fijar arriba', accion: function () { ajustarLista(current.id, { fijado: !c.fijadoAt }); } });
   ops.push({ icono: c.silenciadoAt ? '🔔' : '🔕', texto: c.silenciadoAt ? 'Volver a avisar' : 'Silenciar', accion: function () { ajustarLista(current.id, { silenciado: !c.silenciadoAt }); } });
   ops.push({ icono: '🗂', texto: c.apartadoAt ? 'Devolver a la lista' : 'Apartar de la lista', accion: function () { ajustarLista(current.id, { apartado: !c.apartadoAt }); } });
-  if (PROVEEDOR === 'local') {
-    ops.push({ hr: true });
-    ops.push({ icono: '⤒', texto: 'Traer mensajes anteriores del teléfono', accion: traerHistorialDeEsteChat });
-    ops.push({ icono: '⟳', texto: 'Traer lo que falta del teléfono', accion: sincronizarEsteChat });
-  }
   ops.push({ hr: true });
-  ops.push({ icono: '🗄', texto: 'Guardar el chat y vaciarlo', accion: pedirCierre });
   if (!esGrupo) ops.push({ icono: '🗑', texto: 'Eliminar cliente', accion: function () { eliminarUnCliente({ contactId: current.id, name: current.name, phone: current.phone }); } });
   menuDeBoton(this, ops);
 };
@@ -1138,12 +949,7 @@ document.getElementById('abrir-busqueda').onclick = function () {
 
 document.getElementById('menu-lista').onclick = function () {
   var ops = [
-    // El lector de los chats guardados vive en /guardados y es mucho mejor
-    // que el que habia aqui (resumen, etiquetas, notas, adjuntos, buscador,
-    // PDF, compartir). Mantener dos era pagar cada mejora dos veces.
-    { icono: '📁', texto: 'Chats guardados', accion: function () { location.href = '/guardados'; } },
     { icono: '⭐', texto: 'Todos los mensajes destacados', accion: function () { verDestacados(false); } },
-    ${opcionHistorial ? `${opcionHistorial},` : ''}
     { hr: true },
     { icono: '🗑', texto: 'Eliminar clientes…', accion: eliminarClientes },
     { hr: true },
@@ -1193,7 +999,7 @@ function pintarPendiente(texto) {
 async function enviar(payload) {
   if (!current) return;
   var pendiente = null;
-  if (payload.text) pendiente = pintarPendiente((payload.voz ? '🔊 ' : '') + payload.text);
+  if (payload.text) pendiente = pintarPendiente(payload.text);
   else if (payload.askLocation) pendiente = pintarPendiente('📍 Solicitud de ubicación');
   else if (payload.location) pendiente = pintarPendiente('🗺 Pin: ' + payload.location);
   if (enviando && (payload.askLocation || payload.text)) { toast('Espera: todavía está saliendo el anterior.'); if (pendiente) pendiente.remove(); return; }
@@ -1211,8 +1017,6 @@ async function enviar(payload) {
     if (r.ok === false) {
       if (pendiente) pendiente.remove();
       toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas'));
-    } else if (payload.voz && r.voz && !r.voz.enviada) {
-      toast('Salió por escrito, no como audio: ' + (r.voz.motivo || 'la voz no está lista'));
     }
     await openChat(current.id, true);
     loadChats(true);
@@ -1279,6 +1083,10 @@ function renderComposer(data) {
     return;
   }
 
+  if (!templates.length && !templatesCargando) {
+    templatesCargando = true;
+    loadTemplates().then(function () { templatesCargando = false; if (current && current.id === data.contact.id) renderComposer(data); });
+  }
   var aprobadas = templates.filter(function (t) { return t.status === 'APPROVED'; });
   locked.innerHTML = '<b>Pasaron más de 24 horas desde su último mensaje.</b><br>' +
     'WhatsApp solo deja retomar la conversación con una plantilla aprobada. En cuanto conteste, puedes escribirle libre otra vez.' +
@@ -1290,7 +1098,7 @@ function renderComposer(data) {
           }).join('') + '</select>' +
           '<input id="tpl-vars" placeholder="Variables separadas por coma" aria-label="Variables de la plantilla">' +
           '<button class="primary" id="send-tpl">Enviar plantilla</button>'
-        : '<span>No tienes ninguna plantilla aprobada todavía. <a class="link" href="/panel#plantillas">Darlas de alta</a></span>') +
+        : '<span>No hay una plantilla aprobada disponible para retomar esta conversación.</span>') +
     '</div>';
 
   var boton = document.getElementById('send-tpl');
@@ -1305,6 +1113,7 @@ async function loadTemplates() {
   try { templates = await api('/admin/templates'); }
   catch (error) { templates = []; console.log('[chat] no se pudo leer el catálogo de plantillas:', error && error.message); }
 }
+var templatesCargando = false;
 
 /* --------------------------------------------------------------- teclado */
 
@@ -1370,76 +1179,6 @@ function ayudaTeclas() {
   document.body.appendChild(caja);
 }
 
-/* ------------------------------------------------- historial del telefono */
-
-async function sincronizarEsteChat() {
-  if (!current) return;
-  try {
-    await api('/admin/local/sincronizar/' + encodeURIComponent(current.id), { method: 'POST' });
-    toast('Pedido al teléfono lo último de este chat. Lo que faltaba aparece en unos segundos, si el teléfono lo manda.');
-    var id = current.id;
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
-  } catch (error) { toast(error.message); }
-}
-async function traerHistorialDeEsteChat() {
-  if (!current) return;
-  try {
-    var r = await api('/admin/local/historial/' + encodeURIComponent(current.id), { method: 'POST' });
-    toast(r.sinReferencia
-      ? 'Pedido al teléfono. Si tiene mensajes de este chat, aparecen en unos segundos; si no aparece nada, escribe algo o espera a que escriban y vuelve a pulsar.'
-      : 'Pedido al teléfono. Los mensajes anteriores a ' + (r.desde ? dayLabel(r.desde) : 'los de aquí') + ' aparecen arriba en unos segundos.');
-    var id = current.id;
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 4000);
-    setTimeout(function () { if (current && current.id === id) openChat(id, true); }, 9000);
-  } catch (error) { toast(error.message); }
-}
-
-var sondeoHistorial = null;
-async function traerTodoElHistorial() {
-  try {
-    var r = await api('/admin/local/historial-todos', { method: 'POST' });
-    toast(r.yaEnMarcha ? 'Ya se está trayendo el historial.' :
-      'Trayendo TODO el historial de ' + r.chats + ' chats: va chat por chat y tarda unos minutos.' +
-      (r.sinReferencia ? ' ' + r.sinReferencia + ' chats sin ningún mensaje aquí se saltan (el teléfono necesita uno de referencia).' : ''));
-    sondearHistorial();
-  } catch (error) { toast(error.message); }
-}
-async function sondearHistorial() {
-  try {
-    var p = await api('/admin/local/historial-todos');
-    if (p.enMarcha) {
-      if (!sondeoHistorial) sondeoHistorial = setInterval(sondearHistorial, 3000);
-      return;
-    }
-    if (!sondeoHistorial) return;
-    clearInterval(sondeoHistorial); sondeoHistorial = null;
-    toast((p.detalle || 'Historial traído.') + (p.sinReferencia
-      ? ' Quedan ' + p.sinReferencia + ' chats sin ningún mensaje aquí: el teléfono solo los manda al vincular.'
-      : ''));
-    loadChats(true);
-    if (current) openChat(current.id, true);
-  } catch (error) { /* sin sesion local no hay nada que sondear */ }
-}
-
-async function importarDeWaha() {
-  toast('Trayendo las conversaciones de WhatsApp, puede tardar un poco…');
-  try {
-    var r = await api('/admin/waha/importar', { method: 'POST', body: {} });
-    toast('Listo: ' + r.chats + ' conversaciones y ' + r.mensajes + ' mensajes.' + (r.omitidos ? ' Se omitieron ' + r.omitidos + ' grupos.' : ''));
-    loadChats();
-  } catch (error) { toast(error.message); }
-}
-
-/* ------------------------------------------------------------- refresco */
-
-/**
- * Estado de la conexion con WhatsApp.
- *
- * Solo tiene sentido con los proveedores que se vinculan por QR: con la Cloud
- * API de Meta no hay sesion que se caiga. En demostracion tampoco se avisa: la
- * banda de arriba ya dice que nada sale.
- */
 async function revisarConexion() {
   if (PROVEEDOR !== 'local' && PROVEEDOR !== 'waha') return;
   if (EN_DEMO) return;
@@ -1464,16 +1203,55 @@ async function revisarConexion() {
  */
 function ocupado() {
   return Boolean(menuAbierto) || (seleccion && seleccion.length > 0) ||
-    Boolean(adjuntoPendiente) || Boolean(grabadora) ||
     !document.getElementById('buscar-hilo').classList.contains('hidden') ||
     document.querySelector('.dlg-fondo, .visor, .ayuda-teclas') !== null;
 }
 
-setInterval(function () {
-  if (ocupado()) return;
+async function sincronizarChat() {
+  if (!current || syncActiva) { syncPendiente = Boolean(current); return; }
+  syncActiva = true;
+  try {
+    do {
+      syncPendiente = false;
+      var contactId = current.id;
+      var data = await api('/admin/chat/' + contactId + '/sync', { method: 'POST', body: { afterId: cursorNuevos, knownIds: hilo.mensajes.map(function (m) { return String(m.id); }).slice(-300) } });
+      if (!current || current.id !== contactId || data.scopeId !== hilo.scopeId) continue;
+      if (data.scopeId) hilo.scopeId = data.scopeId;
+      if (data.goneIds && data.goneIds.length) {
+        var vencidos = new Set(data.goneIds);
+        hilo.mensajes = hilo.mensajes.filter(function (m) { return !vencidos.has(String(m.id)); });
+      }
+      if (data.messages && data.messages.length) {
+        data.messages.forEach(function (m) { if (BigInt(String(m.id)) > BigInt(cursorNuevos)) cursorNuevos = String(m.id); });
+        fundirHilo(contactId, data.messages, hilo.masAntiguos);
+        if (!ocupado()) renderMessages(hilo.mensajes, false, false);
+      }
+      if (data.hasMoreNew) syncPendiente = true;
+    } while (syncPendiente && current);
+  } catch (error) { if (error.status === 409 || error.status === 401) location.href = '/login'; }
+  finally { syncActiva = false; }
+}
+var eventosPendientes = new Set(), eventoTimer = null;
+function procesarEventosChat() {
+  eventoTimer = null;
+  var ids = Array.from(eventosPendientes); eventosPendientes.clear();
   loadChats(true);
-  if (deseado) openChat(deseado, true);
-}, 5000);
+  if ((ids.includes('*') || (current && ids.includes(current.id))) && !ocupado()) sincronizarChat();
+}
+if (window.suscribirEventosPanel) window.suscribirEventosPanel(function (nombre, datos) {
+  if (nombre === 'panel.ready') return;
+  if (nombre === 'panel.resync') eventosPendientes.add('*');
+  else if (nombre === 'chat.changed' && datos.contactId) eventosPendientes.add(datos.contactId);
+  else if (nombre === 'chat.status') eventosPendientes.add('*');
+  else if (nombre === 'chat.expired') eventosPendientes.add(datos.contactId || '*');
+  if (eventosPendientes.size && !eventoTimer) eventoTimer = setTimeout(procesarEventosChat, 250);
+});
+/* El sondeo es solo respaldo cuando el stream falla; nunca reconstruye el hilo completo. */
+window.sondearPanel(async function () {
+  if (window.eventosPanelConectados || ocupado()) return;
+  await loadChats(true);
+  if (current) await sincronizarChat();
+}, 60000);
 
 /* ------------------------------------------------------ abrir desde fuera
 
@@ -1499,61 +1277,14 @@ async function abrirDesdeUrl() {
   } catch (error) { toast(error.message); }
 }
 
-/* --------------------------------------------------- guardar y vaciar
-
-   Guardar un chat escribe el hilo entero en un fichero y lo vacia de la base.
-   Es lo que hace que el historial sobreviva a perder el numero, y de paso lo
-   que evita que la base crezca sin fin. El servidor no borra nada hasta haber
-   escrito el respaldo y haberlo vuelto a leer entero.
-
-   LEER lo guardado no se hace aqui: para eso esta /guardados, que ademas trae
-   resumen, etiquetas, notas, adjuntos, buscador, PDF y "devolver al chat".
-   Aqui solo se guarda y se vacia, que es la accion que nace en la conversacion. */
-
-function pedirCierre() {
-  if (!current) return;
-  var caja = document.getElementById('confirmar-cierre');
-  caja.innerHTML =
-    '<p>Se guarda <b>todo el historial</b> de ' + esc(nombreDe(current)) +
-    ' en «Chats guardados» y el chat queda vacío aquí. Lo guardado se puede leer, descargar ' +
-    'y devolver al chat cuando quieras, aunque se pierda el número.</p>' +
-    '<div class="actions">' +
-      '<button class="primary" id="ok-cierre">Guardar y vaciar</button>' +
-      '<button id="no-cierre">Cancelar</button>' +
-    '</div>';
-  ver('confirmar-cierre', true);
-  document.getElementById('no-cierre').onclick = function () { ver('confirmar-cierre', false); };
-  document.getElementById('ok-cierre').onclick = cerrarChat;
-}
-
-async function cerrarChat() {
-  var boton = document.getElementById('ok-cierre');
-  boton.disabled = true;
-  boton.textContent = 'Guardando…';
-  try {
-    var r = await api('/admin/chat/' + current.id + '/archive', { method: 'POST' });
-    ver('confirmar-cierre', false);
-    toast('Guardados ' + r.archive.messageCount + ' mensajes. El chat quedó vacío; lo guardado está en Chats guardados.');
-    await openChat(current.id, true);
-    loadChats(true);
-  } catch (error) {
-    toast(error.message);
-    boton.disabled = false;
-    boton.textContent = 'Guardar y vaciar';
-  }
-}
 `;
 
   const arranque = String.raw`
 /* Se arranca al final, cuando ya existe todo lo de arriba. */
-pintarGrabandoVacio();
 pintarBotonDeEnviar();
 cargarAtajos();
-cargarStickers();
-loadTemplates();
-revisarConexion();
-setInterval(revisarConexion, 15000);
-sondearHistorial();
+window.sondearPanel(revisarConexion, 30000, true);
+
 loadChats().then(abrirDesdeUrl);
 `;
 

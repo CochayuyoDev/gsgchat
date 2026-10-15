@@ -8,6 +8,7 @@
 import type { AjustesRutas } from '../src/rutas/ajustes.js';
 import type {
   ConsultaSolicitudes,
+  EstadoSolicitud,
   EstadoLote,
   EstadoReporte,
   EventoSolicitud,
@@ -22,6 +23,7 @@ import type {
   TipoReporte,
   CifrasReportes,
 } from '../src/db/rutas.js';
+import type { CodigoIncidencia } from '../src/rutas/incidencias.js';
 
 let seqLote = 1;
 let seqSolicitud = 1;
@@ -64,12 +66,25 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
 
   // Ajustes en memoria: lo guardado por encima de lo que se pase por defecto.
   let ajustesGuardados: Record<string, unknown> = {};
-  const fusionar = (base: AjustesRutas, g: Record<string, unknown>): AjustesRutas => ({
-    ...base,
-    ...(g as Partial<AjustesRutas>),
-    plantillas: { ...base.plantillas, ...((g.plantillas as AjustesRutas['plantillas'] | undefined) ?? {}) },
-    textos: { ...base.textos, ...((g.textos as AjustesRutas['textos'] | undefined) ?? {}) },
-  });
+  const fusionar = (base: AjustesRutas, g: Record<string, unknown>): AjustesRutas => {
+    const combinado = { ...base, ...(g as Partial<AjustesRutas>) };
+    const legado = g.esperasMensajesMinutos === undefined && (g.maxIntentos !== undefined || g.esperaRespuestaMinutos !== undefined);
+    const total = Math.max(1, Math.min(100, Number(combinado.maxIntentos)));
+    const espera = Number(g.esperaRespuestaMinutos ?? base.esperaRespuestaMinutos);
+    const esperas = g.esperasMensajesMinutos !== undefined
+      ? g.esperasMensajesMinutos as number[]
+      : legado
+        ? Array.from({ length: total - 1 }, (_, i) => g.esperaRespuestaMinutos !== undefined ? espera : base.esperasMensajesMinutos[i] ?? espera)
+        : combinado.esperasMensajesMinutos;
+    return {
+      ...combinado,
+      esperasMensajesMinutos: esperas,
+      esperaRespuestaMinutos: esperas[0] ?? espera,
+      maxIntentos: esperas.length + 1,
+      plantillas: { ...base.plantillas, ...((g.plantillas as AjustesRutas['plantillas'] | undefined) ?? {}) },
+      textos: { ...base.textos, ...((g.textos as AjustesRutas['textos'] | undefined) ?? {}) },
+    };
+  };
 
   const repo: FakeRutas = {
     _lotes: lotes,
@@ -201,6 +216,26 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
         // Como el SQL: lo tocado hace poco arriba, y el id desempata.
         .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id - a.id)
         .slice(query.offset, query.offset + query.limit);
+    },
+
+    async solicitudesPorLoteYTelefonos(loteId, phones) {
+      const conjunto = new Set(phones);
+      return solicitudes.filter((s) => s.loteId === loteId && s.phone !== null && conjunto.has(s.phone))
+        .slice()
+        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id - a.id)
+        .map((s) => ({ ...s }));
+    },
+
+    async resumenSolicitudes(loteId) {
+      const grupos = new Map<string, { estado: EstadoSolicitud; incidencia: CodigoIncidencia | null; requiereHumano: boolean; total: number }>();
+      for (const s of solicitudes) {
+        if (loteId && s.loteId !== loteId) continue;
+        const clave = `${s.estado}\u0000${s.incidencia ?? ''}\u0000${s.requiereHumano}`;
+        const grupo = grupos.get(clave) ?? { estado: s.estado, incidencia: s.incidencia, requiereHumano: s.requiereHumano, total: 0 };
+        grupo.total++;
+        grupos.set(clave, grupo);
+      }
+      return [...grupos.values()];
     },
 
     async contarSolicitudes(query) {

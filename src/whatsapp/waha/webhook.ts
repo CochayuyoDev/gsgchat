@@ -122,6 +122,7 @@ export function toChangeValue(event: WahaEvent): ChangeValue | null {
     const message: InboundMessage = {
       ...(citado ? { context: { id: citado } } : {}),
       id,
+      provider: 'waha',
       from,
       timestamp: String(payload.timestamp ?? Math.floor(Date.now() / 1000)),
       type: enVivo ? 'livelocation' : location ? 'location' : payload.hasMedia === true ? 'image' : 'text',

@@ -15,9 +15,49 @@ export function createFakeMessages(
   contacts: () => Array<Contact & { chatReadAt?: Date | null }>,
 ): FakeMessages {
   const all: Message[] = [];
+  const receipts = new Map<string, { expiresAt: Date; estado: 'procesando' | 'aceptado' | 'incierto' }>();
+  const controls = new Map<string, { expiresAt: Date; estado: 'procesando' | 'aceptado' | 'fallido' | 'incierto'; wamid: string | null }>();
+  const visible = (m: Message, desde?: Date | null) => !desde || (m.createdAt >= desde && !m.payload?.historial && m.payload?.autorNombre !== 'Teléfono');
+  const visibleScope = (m: Message, scope?: { afterId: string; retenidosDesde: Date }) => !scope || (BigInt(m.id) > BigInt(scope.afterId) && Boolean(m.storedAt && m.storedAt > scope.retenidosDesde) && visible(m));
+  const iniciadoScope = (contactId: string, scope?: { afterId: string; retenidosDesde: Date }) => !scope || all.some(m => m.contactId === contactId && m.direction === 'out' && Boolean(m.wamid) && !['failed', 'blocked_by_gate'].includes(m.status ?? '') && visibleScope(m, scope));
+  const inicio = (contactId: string, desde: Date) => all.filter(m => m.contactId === contactId && m.direction === 'out' && m.wamid && visible(m, desde)).sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime())[0]?.createdAt ?? null;
 
   const repo: FakeMessages = {
     _all: all,
+
+    async reservarEntrada(provider, wamid, recibidoAt, expiresAt) {
+      const key = `${provider}:${wamid}`;
+      const old = receipts.get(key);
+      if (old && old.expiresAt > recibidoAt) return false;
+      receipts.set(key, { expiresAt, estado: 'procesando' });
+      return true;
+    },
+    async finalizarEntrada(provider, wamid, estado) {
+      const old = receipts.get(`${provider}:${wamid}`);
+      if (old && old.estado === 'procesando') old.estado = estado;
+    },
+    async limpiarEntradasAntes(ahora) {
+      let removed = 0;
+      for (const [key, receipt] of receipts) if (receipt.expiresAt <= ahora && removed < 1000) { receipts.delete(key); removed++; }
+      return removed;
+    },
+    async reservarAccionWhatsapp(input) {
+      const old = controls.get(input.key);
+      if (old && old.expiresAt > input.ahora && old.estado !== 'fallido') return false;
+      controls.set(input.key, { expiresAt: input.expira, estado: 'procesando', wamid: null });
+      return true;
+    },
+    async finalizarAccionWhatsapp(key, estado, wamidSaliente = null) {
+      const old = controls.get(key);
+      if (old?.estado === 'procesando') { old.estado = estado; old.wamid = wamidSaliente; }
+    },
+    async limpiarAccionesWhatsappAntes(ahora) {
+      let removed = 0;
+      for (const [key, control] of controls) if (control.expiresAt <= ahora && removed < 1000) { controls.delete(key); removed++; }
+      return removed;
+    },
+
+    async ultimoId() { return String(all.reduce((max,m) => Math.max(max,m.id), 0)); },
 
     async existsByWamid(wamid: string) {
       return all.some((m) => m.wamid === wamid);
@@ -98,6 +138,7 @@ export function createFakeMessages(
         status: message.status ?? null,
         deliveryId: message.deliveryId ?? null,
         createdAt: message.createdAt ?? new Date(),
+        storedAt: new Date(),
       };
       all.push(row);
       return row.id;
@@ -116,10 +157,11 @@ export function createFakeMessages(
       const lastId = new Map<string, number>();
       for (const m of all) lastId.set(m.contactId, Math.max(lastId.get(m.contactId) ?? 0, m.id));
       const rows = contacts()
+        .filter(c => query.alcance ? iniciadoScope(c.id, query.alcance) : !query.desde || Boolean(inicio(c.id, query.desde)))
         .filter((c) => !q || c.phone.includes(q) || (c.name ?? '').toLowerCase().includes(q))
         .map((c) => {
           const mine = all
-            .filter((m) => m.contactId === c.id)
+            .filter((m) => m.contactId === c.id && visible(m, query.desde) && visibleScope(m, query.alcance))
             .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
           const last = mine.at(-1);
           const readAt = c.chatReadAt ?? null;
@@ -163,12 +205,32 @@ export function createFakeMessages(
       return rows.slice(query.offset, query.offset + query.limit);
     },
 
-    async listMessages(contactId, limit, beforeId) {
+    async inicioSistemaDesde(contactId, desde) { return inicio(contactId, desde); },
+    async iniciadaEnAlcance(contactId, alcance) { return iniciadoScope(contactId, alcance); },
+    async referenciaVisiblePorWamid(wamid, retenidosDesde) {
+      const m = all.find(x => x.wamid === wamid && x.storedAt && x.storedAt > retenidosDesde && visible(x));
+      return m ? { contactId: m.contactId, id: String(m.id) } : null;
+    },
+    async limpiarAntes(desde) {
+      const ids = new Set(all.filter(m => !m.storedAt || m.storedAt <= desde).slice(0,1000).map(m => m.id));
+      for (let i = all.length - 1; i >= 0; i--) if (ids.has(all[i]!.id)) all.splice(i,1);
+      return ids.size;
+    },
+    async listMessages(contactId, limit, beforeId, desde, alcance) {
+      if (desde && !inicio(contactId, desde)) return [];
+      if (alcance && !iniciadoScope(contactId, alcance)) return [];
       return all
-        .filter((m) => m.contactId === contactId && (!beforeId || m.id < beforeId))
+        .filter(m => visible(m, desde))
+        .filter((m) => m.contactId === contactId && (!beforeId || m.id < beforeId) && visibleScope(m, alcance))
         .filter((m) => !(m.payload && 'eliminadoAqui' in m.payload))
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id)
         .slice(-limit);
+    },
+    async syncMessages(contactId, afterId, knownIds, limit, alcance) {
+      const conocidos = new Set(knownIds.slice(0, 300));
+      if (!iniciadoScope(contactId, alcance)) return [];
+      return all.filter(m => m.contactId === contactId && (BigInt(m.id) > BigInt(afterId) || conocidos.has(String(m.id))) && visibleScope(m, alcance) && !(m.payload && 'eliminadoAqui' in m.payload))
+        .sort((a,b) => a.id-b.id).slice(0,limit);
     },
 
     // --- citar, reaccionar, destacar, buscar ---
@@ -229,6 +291,7 @@ export function createFakeMessages(
       if (!q) return [];
       return all
         .filter((m) => m.contactId === query.contactId && (m.body ?? '').toLowerCase().includes(q))
+        .filter(m => visible(m, query.desde) && (!query.desde || Boolean(inicio(m.contactId, query.desde))))
         .filter((m) => !(m.payload && 'eliminadoAqui' in m.payload))
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id)
         .slice(-query.limit);
@@ -238,6 +301,7 @@ export function createFakeMessages(
       const porId = new Map(contacts().map((c) => [c.id, c]));
       return all
         .filter((m) => m.payload && 'destacado' in m.payload && !('eliminadoAqui' in m.payload))
+        .filter(m => visible(m, query.desde) && (!query.desde || Boolean(inicio(m.contactId, query.desde))))
         .filter((m) => !query.contactId || m.contactId === query.contactId)
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)
         .slice(0, query.limit)
@@ -249,13 +313,16 @@ export function createFakeMessages(
       if (contact) contact.chatReadAt = at;
     },
 
-    async unreadTotal() {
+    async unreadTotal(desde, alcance) {
       let total = 0;
       for (const c of contacts()) {
+        if (alcance && !iniciadoScope(c.id, alcance)) continue;
+        if (!alcance && desde && !inicio(c.id, desde)) continue;
         const readAt = c.chatReadAt ?? null;
         total += all.filter(
           (m) =>
             m.contactId === c.id &&
+            visible(m, desde) && visibleScope(m, alcance) &&
             m.direction === 'in' &&
             (!readAt || m.createdAt.getTime() > readAt.getTime()),
         ).length;

@@ -8,7 +8,7 @@
  * sitio y el JavaScript de la pagina no la ve.
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 export const COOKIE_SESION = 'wa_sesion';
 const DURACION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -20,6 +20,12 @@ export interface CargaSesion {
   v: number;
   /** Caducidad, ms desde epoch. */
   exp: number;
+  /** Identidad de este login, estable al recargar el navegador. */
+  sid?: string;
+  /** Hora del login. */
+  iat?: number;
+  /** Cursor legacy compatible; el alcance de chats vigentes usa retención de 24 h. */
+  chatAfterId?: string;
 }
 
 const b64 = (s: string | Buffer) => Buffer.from(s).toString('base64url');
@@ -28,6 +34,10 @@ const firma = (secreto: string, cuerpo: string) => createHmac('sha256', secreto)
 export function firmarSesion(secreto: string, carga: Omit<CargaSesion, 'exp'>, ahora = Date.now()): string {
   const cuerpo = b64(JSON.stringify({ ...carga, exp: ahora + DURACION_MS } satisfies CargaSesion));
   return `${cuerpo}.${firma(secreto, cuerpo)}`;
+}
+
+export function nuevaCargaSesion(u: string, v: number, chatAfterId: string, ahora = Date.now()): Omit<CargaSesion, 'exp'> {
+  return { u, v, sid: randomUUID(), iat: ahora, chatAfterId };
 }
 
 export function leerSesion(secreto: string, token: string | undefined, ahora = Date.now()): CargaSesion | null {
@@ -41,6 +51,7 @@ export function leerSesion(secreto: string, token: string | undefined, ahora = D
   try {
     const carga = JSON.parse(Buffer.from(cuerpo, 'base64url').toString('utf8')) as CargaSesion;
     if (typeof carga.u !== 'string' || typeof carga.v !== 'number' || typeof carga.exp !== 'number') return null;
+    if (carga.sid !== undefined && (typeof carga.sid !== 'string' || typeof carga.iat !== 'number' || typeof carga.chatAfterId !== 'string' || !/^\d+$/.test(carga.chatAfterId))) return null;
     if (carga.exp <= ahora) return null;
     return carga;
   } catch {
