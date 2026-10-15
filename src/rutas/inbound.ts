@@ -26,6 +26,7 @@ import type { Solicitud } from '../db/rutas.js';
 import { despacharReportes, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { resolverPorUbicacion } from '../entregas/ubicacion-unica.js';
+import { despertarMotorRutas } from './despertador.js';
 
 export interface EntradaRuta {
   texto?: string;
@@ -305,6 +306,7 @@ export async function atenderRespuestaDeRuta(
       'rechaza_contacto',
       'dado de baja por el equipo: no recibe más mensajes',
     );
+    despertarMotorRutas();
     return { atendida: true, resultado: 'rechazo', solicitud: actualizada };
   }
 
@@ -357,6 +359,7 @@ export async function atenderRespuestaDeRuta(
       referencia: solicitud.referencia,
     });
 
+    despertarMotorRutas();
     return { atendida: true, resultado: 'resuelta', solicitud: actualizada };
   }
 
@@ -408,6 +411,7 @@ export async function atenderRespuestaDeRuta(
       'numero_equivocado',
       `el cliente respondió: "${texto.slice(0, 160)}"`,
     );
+    despertarMotorRutas();
     return {
       atendida: true,
       resultado: 'numero_equivocado',
@@ -434,5 +438,6 @@ export async function atenderRespuestaDeRuta(
     proximoIntentoAt: new Date(momento.getTime() + 60_000),
   });
 
+  despertarMotorRutas();
   return { atendida: true, resultado: 'sin_ubicacion', solicitud: actualizada };
 }

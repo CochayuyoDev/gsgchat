@@ -15,6 +15,7 @@ import { providerOf, type SettingsService } from '../settings/service.js';
 import { extractLocation } from '../geo/extract.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { alcanceChat } from '../web/alcance-chat.js';
+import { esperaDeEnvio } from '../rutas/espera-envio.js';
 
 export interface ChatDeps {
   repos: Repos;
@@ -255,7 +256,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     // La solicitud de reparto abierta, si la hay: el pedido y en que punto va,
     // para que quien atiende lo vea sin cambiar de pantalla (y para {pedido}).
     const abierta = await repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null);
-    const reparto = abierta ? { id: abierta.id, referencia: abierta.referencia, estado: abierta.estado, direccion: abierta.direccion, distrito: abierta.distrito, intentos: abierta.intentos } : null;
+    const reparto = abierta ? { id: abierta.id, referencia: abierta.referencia, estado: abierta.estado, direccion: abierta.direccion, distrito: abierta.distrito, intentos: abierta.intentos, proximoIntentoAt: abierta.proximoIntentoAt, esperaEnvio: esperaDeEnvio(repos.rutas, abierta) } : null;
 
     const now = Date.now();
     const windowOpen = Boolean(

@@ -120,6 +120,72 @@ describe('lotes y solicitudes', () => {
     expect(await repos.rutas.tocaIntentar(new Date('2026-03-10T13:00:00Z'), 10)).toHaveLength(0);
   });
 
+  it('obtiene una sola vez la próxima fecha activa para dormir sin sondear la cola', async () => {
+    const enMarcha = await repos.rutas.crearLote({ nombre: 'Con trabajo' });
+    const preparado = await repos.rutas.crearLote({ nombre: 'Aún no inicia' });
+    await repos.rutas.cambiarEstadoLote(enMarcha.id, 'enviando');
+    const [primera, segunda] = await repos.rutas.agregarSolicitudes(enMarcha.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111' },
+      { telefonoCrudo: '922222222', phone: '51922222222' },
+    ]);
+    const [ignorada] = await repos.rutas.agregarSolicitudes(preparado.id, [
+      { telefonoCrudo: '933333333', phone: '51933333333' },
+    ]);
+    const primeraFecha = new Date('2026-03-10T18:00:00Z');
+    const segundaFecha = new Date('2026-03-10T17:00:00Z');
+    await repos.rutas.actualizarSolicitud(primera!.id, { proximoIntentoAt: primeraFecha });
+    await repos.rutas.actualizarSolicitud(segunda!.id, { proximoIntentoAt: segundaFecha });
+    await repos.rutas.actualizarSolicitud(ignorada!.id, { proximoIntentoAt: new Date('2026-03-10T12:00:00Z') });
+
+    expect((await repos.rutas.proximoIntentoAt())?.getTime()).toBe(segundaFecha.getTime());
+  });
+
+  it('prioriza el seguimiento vencido frente a primeras solicitudes más antiguas', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Seguimiento puntual' });
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    const [nuevo, seguimiento] = await repos.rutas.agregarSolicitudes(lote.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111' },
+      { telefonoCrudo: '922222222', phone: '51922222222' },
+    ]);
+    await repos.rutas.actualizarSolicitud(nuevo!.id, { proximoIntentoAt: new Date('2026-03-10T11:00:00Z') });
+    await repos.rutas.actualizarSolicitud(seguimiento!.id, { estado: 'enviado', intentos: 1, proximoIntentoAt: new Date('2026-03-10T12:00:00Z') });
+    expect((await repos.rutas.tocaIntentar(new Date('2026-03-10T13:00:00Z'), 1))[0]!.id).toBe(seguimiento!.id);
+  });
+
+  it('libera solo esperas heredadas de salud y deja intactos los fallos reales', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Sin frenos de salud' });
+    const [salud, desconectado, humano] = await repos.rutas.agregarSolicitudes(lote.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111' },
+      { telefonoCrudo: '922222222', phone: '51922222222' },
+      { telefonoCrudo: '933333333', phone: '51933333333' },
+    ]);
+    const despues = new Date(Date.now() + 3600000);
+    for (const s of [salud, desconectado, humano]) await repos.rutas.actualizarSolicitud(s!.id, {
+      incidencia: 'envio_bloqueado', incidenciaDetalle: s === desconectado ? 'sin_conexion: sin socket' : 'daily_cap: cupo interno',
+      proximoIntentoAt: despues, requiereHumano: s === humano,
+    });
+    expect(await repos.rutas.liberarFrenosCuenta()).toBe(1);
+    expect((await repos.rutas.solicitud(salud!.id))!.proximoIntentoAt!.getTime()).toBeLessThanOrEqual(Date.now());
+    expect((await repos.rutas.solicitud(desconectado!.id))!.proximoIntentoAt!.getTime()).toBe(despues.getTime());
+    expect((await repos.rutas.solicitud(humano!.id))!.requiereHumano).toBe(true);
+  });
+
+  it('libera el primer mensaje de un pedido frenado por salud sin reintentar resultados inciertos', async () => {
+    const registros = [];
+    for (const referencia of ['SALUD-ANTIGUA', 'RED-REAL', 'RESULTADO-INCIERTO']) {
+      const { entrega } = await repos.entregas.crearEntrega({ dia: '2026-10-15', referencia, phone: '51911111111',
+        ubicacionEstado: 'pendiente', confirmacionEstado: 'no_hace_falta', estado: 'esperando_ubicacion', mensajeEstado: 'pendiente' });
+      registros.push(entrega);
+      await repos.entregas.actualizar(entrega.id, { mensajeEstado: referencia === 'RESULTADO-INCIERTO' ? 'incierto' : 'reintentando',
+        mensajeErrorCodigo: referencia === 'RED-REAL' ? 'sin_conexion' : 'daily_cap', mensajeError: referencia,
+        mensajeProximoAt: new Date(Date.now() + 3600000) });
+    }
+    expect(await repos.entregas.liberarFrenosCuenta()).toBe(1);
+    expect(await repos.entregas.entrega(registros[0]!.id)).toMatchObject({ mensajeEstado: 'pendiente', mensajeErrorCodigo: null });
+    expect(await repos.entregas.entrega(registros[1]!.id)).toMatchObject({ mensajeEstado: 'reintentando', mensajeErrorCodigo: 'sin_conexion' });
+    expect(await repos.entregas.entrega(registros[2]!.id)).toMatchObject({ mensajeEstado: 'incierto' });
+  });
+
   it('reprograma en un solo cambio los seguimientos vivos desde el ultimo envio', async () => {
     const activo = await repos.rutas.crearLote({ nombre: 'Cadencia activa' });
     const pausado = await repos.rutas.crearLote({ nombre: 'Cadencia pausada' });

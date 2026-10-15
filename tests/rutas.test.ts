@@ -648,7 +648,7 @@ describe('la cola hacia GSG', () => {
 
     expect(salida).toMatchObject({ intentados: 1, enviados: 1 });
     expect(fetchFalso).toHaveBeenCalledWith(
-      'https://gsg.test/api/sendLocation',
+      'https://gsg.test/api/send-location',
       expect.objectContaining({ method: 'POST' }),
     );
     const cifras = await repos.rutas.cifrasReportes();
@@ -656,23 +656,23 @@ describe('la cola hacia GSG', () => {
     expect(repos.rutas._reportes[0]?.externoId).toBe('GSG-99');
   });
 
-  it('un 400 no se reintenta para siempre; un 500 si', async () => {
+  it('un 400 y un 500 incierto de ubicacion no se reintentan automaticamente', async () => {
     const repos = createFakeRepos();
-    await repos.rutas.encolarReporte({ tipo: 'incidencia', payload: { a: 1 } });
-    await repos.rutas.encolarReporte({ tipo: 'incidencia', payload: { b: 2 } });
+    await repos.rutas.encolarReporte({ tipo: 'ubicacion', payload: { referencia: 'P-400' } });
+    await repos.rutas.encolarReporte({ tipo: 'ubicacion', payload: { referencia: 'P-500' } });
 
     let llamada = 0;
     const fetchFalso = vi.fn(async () => {
       llamada++;
       return new Response('nope', { status: llamada === 1 ? 400 : 500 });
     });
-    const puerto = crearPuertoHttp({ url: 'https://gsg.test', token: '', fetchImpl: fetchFalso as never });
+    const puerto = crearPuertoHttp({ url: 'https://gsg.test', token: 't', fetchImpl: fetchFalso as never });
 
     await despacharReportes(repos, puerto);
 
     const cifras = await repos.rutas.cifrasReportes();
-    expect(cifras.fallido).toBe(1);
-    expect(cifras.pendiente).toBe(1);
+    expect(cifras.fallido).toBe(2);
+    expect(cifras.pendiente).toBe(0);
   });
 
   it('con GSG apagado los reportes quedan atascados (pendientes ya intentados), y la pantalla lo cuenta', async () => {

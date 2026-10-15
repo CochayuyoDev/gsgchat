@@ -6,6 +6,7 @@
  */
 
 import type { AjustesRutas } from '../src/rutas/ajustes.js';
+import { FRENOS_CUENTA_RETIRADOS } from '../src/salud/frenos-retirados.js';
 import type {
   ConsultaSolicitudes,
   EstadoSolicitud,
@@ -264,6 +265,16 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       return reprogramadas;
     },
 
+    async liberarFrenosCuenta() {
+      let n = 0;
+      for (const s of solicitudes) {
+        if (!['pendiente', 'enviado', 'respondio'].includes(s.estado) || s.requiereHumano || s.incidencia !== 'envio_bloqueado' ||
+            !FRENOS_CUENTA_RETIRADOS.includes((s.incidenciaDetalle ?? '').split(':')[0]!)) continue;
+        s.proximoIntentoAt = reloj(); s.incidencia = null; s.incidenciaDetalle = null; n++;
+      }
+      return n;
+    },
+
     async cifrasPorEstado(loteId) {
       const cifras: Record<string, number> = {};
       for (const s of solicitudes) {
@@ -295,11 +306,21 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
         )
         .sort(
           (a, b) =>
+            Number(a.intentos === 0) - Number(b.intentos === 0) ||
             (a.proximoIntentoAt ?? a.createdAt).getTime() -
               (b.proximoIntentoAt ?? b.createdAt).getTime() || a.id - b.id,
         )
         .slice(0, limite)
         .map((s) => ({ ...s }));
+    },
+
+    async proximoIntentoAt() {
+      const activos = new Set(lotes.filter((l) => l.estado === 'enviando').map((l) => l.id));
+      const fechas = solicitudes
+        .filter((s) => activos.has(s.loteId) && VIVOS.includes(s.estado) && Boolean(s.phone))
+        .map((s) => s.proximoIntentoAt ?? s.createdAt)
+        .sort((a, b) => a.getTime() - b.getTime());
+      return fechas[0] ?? null;
     },
 
     async abiertaPorContacto(contactId) {

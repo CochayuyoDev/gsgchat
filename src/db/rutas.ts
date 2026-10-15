@@ -6,6 +6,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { FRENOS_CUENTA_RETIRADOS } from '../salud/frenos-retirados.js';
 import { nuevoId, type Pool } from './pool.js';
 import type { CodigoIncidencia } from '../rutas/incidencias.js';
 import { createAjustesRepo, type AjustesRepo } from '../rutas/ajustes.js';
@@ -212,6 +213,7 @@ export interface EventoReciente extends EventoSolicitud {
 }
 
 export interface RutasRepo {
+  liberarFrenosCuenta(): Promise<number>;
   /** Los ajustes del reparto que se cambian desde la pantalla. */
   ajustes: AjustesRepo;
   crearLote(datos: { nombre: string; origen?: string; notas?: string | null; externoId?: string | null }): Promise<Lote>;
@@ -237,6 +239,8 @@ export interface RutasRepo {
   cifrasPorIncidencia(loteId?: string): Promise<Record<string, number>>;
   /** Las que toca intentar ahora, de los lotes en marcha y en orden de espera. */
   tocaIntentar(ahora: Date, limite: number): Promise<Solicitud[]>;
+  /** Próxima fecha de trabajo activo; permite dormir sin sondear la cola. */
+  proximoIntentoAt(): Promise<Date | null>;
   /** La solicitud viva de un contacto: con esto se lee su respuesta. */
   abiertaPorContacto(contactId: string): Promise<Solicitud | null>;
   /** Con `excluirLoteId`, la abierta en OTRO lote: para no escribir dos veces por lo mismo. */
@@ -682,6 +686,16 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       return rowCount;
     },
 
+    async liberarFrenosCuenta() {
+      const { rowCount } = await pool.query(
+        `update rutas_solicitudes set proximo_intento_at = now(3), incidencia = null, incidencia_detalle = null, updated_at = now(3)
+          where estado in ('pendiente','enviado','respondio') and requiere_humano = false
+            and incidencia = 'envio_bloqueado' and substring_index(incidencia_detalle, ':', 1) in ($1)`,
+        [FRENOS_CUENTA_RETIRADOS],
+      );
+      return rowCount;
+    },
+
     async cifrasPorEstado(loteId) {
       const { rows } = await pool.query<{ estado: string; total: number }>(
         `select estado, count(*) as total from rutas_solicitudes
@@ -710,13 +724,27 @@ export function createRutasRepo(pool: Pool): RutasRepo {
             and s.estado in ('pendiente','enviado','respondio')
             and s.phone is not null
             and (s.proximo_intento_at is null or s.proximo_intento_at <= $1)
-          -- El que lleva mas esperando, primero. Sin esto un lote nuevo
-          -- adelanta a los recordatorios del anterior y nadie recibe el suyo.
-          order by coalesce(s.proximo_intento_at, s.created_at) asc, s.id asc
+          -- Los seguimientos vencidos no quedan detrás de un lote nuevo.
+          -- Dentro de cada grupo, el que lleva más esperando sale primero.
+          order by case when s.intentos > 0 then 0 else 1 end,
+                   coalesce(s.proximo_intento_at, s.created_at) asc, s.id asc
           limit $2`,
         [ahora, Number(limite)],
       );
       return rows.map(toSolicitud);
+    },
+
+    async proximoIntentoAt() {
+      const { rows } = await pool.query<{ proximo: Date | string | null }>(
+        `select min(coalesce(s.proximo_intento_at, s.created_at)) as proximo
+           from rutas_solicitudes s
+           join rutas_lotes l on l.id = s.lote_id
+          where l.estado = 'enviando'
+            and s.estado in ('pendiente','enviado','respondio')
+            and s.phone is not null`,
+      );
+      const valor = rows[0]?.proximo;
+      return valor ? new Date(valor) : null;
     },
 
     async abiertaPorContacto(contactId) {

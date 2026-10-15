@@ -40,6 +40,8 @@ import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, conFranjaDeLaPolitica
 import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js';
 import type { Monitor } from '../salud/monitor.js';
 import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
+import { esperaDeEnvio, limpiarEsperasEnvio } from '../rutas/espera-envio.js';
+import { despertarMotorRutas } from '../rutas/despertador.js';
 
 export interface RutasRoutesDeps {
   repos: Repos;
@@ -197,6 +199,17 @@ export async function registerRutasRoutes(
 ): Promise<void> {
   const { repos, config, gsg, opciones } = deps;
   const plan = PLANES[config.RUTAS_PAIS] ?? PLANES.peru!;
+  // Migración del ritmo antiguo: una sola fuente para el sender y los motores.
+  if (deps.ajustes) {
+    const ritmo = deps.ajustes.actual().ritmo;
+    if (ritmo.pausaMinSeg === null || ritmo.pausaMaxSeg === null) {
+      const anteriores = await repos.rutas.ajustes.get(ajustesPorDefecto(opciones));
+      await deps.ajustes.guardar({ ritmo: {
+        pausaMinSeg: ritmo.pausaMinSeg ?? anteriores.pausaMinSegundos,
+        pausaMaxSeg: ritmo.pausaMaxSeg ?? anteriores.pausaMaxSegundos,
+      } });
+    }
+  }
 
   /**
    * La franja de envio vigente: la de los ajustes generales. La pantalla tiene
@@ -208,8 +221,9 @@ export async function registerRutasRoutes(
     if (!a) return null;
     const inicio = a.horario.inicio;
     const fin = a.horario.fin;
-    if (inicio === null || fin === null) return null;
-    return { horaInicio: inicio, horaFin: fin, timezone: a.zonaHoraria || opciones.timezone };
+    return { horaInicio: inicio ?? opciones.horaInicio, horaFin: fin ?? opciones.horaFin, timezone: a.zonaHoraria || opciones.timezone,
+      pausaMinMs: (a.ritmo.pausaMinSeg ?? opciones.pausaMinSegundos) * 1000,
+      pausaMaxMs: (a.ritmo.pausaMaxSeg ?? opciones.pausaMaxSegundos) * 1000 };
   };
   /** Los ajustes del reparto guardados, con la franja general puesta encima. */
   const vigentes = async () =>
@@ -245,7 +259,7 @@ export async function registerRutasRoutes(
         enHorario: enHorario(new Date(), vigente),
         trabajando: lotes.some((l) => l.estado === 'enviando'),
         // Lo que dice el monitor de salud: si esta frenado, cuanto y por que.
-        salud: deps.salud ? await deps.salud.resumen() : null,
+        salud: null,
       },
       alertas: {
         requierenPersona: pendientesDePersona,
@@ -269,7 +283,7 @@ export async function registerRutasRoutes(
     // El horario que se ensena es el general, no el que quedara guardado en la
     // clave del reparto: hay una sola franja para todo el sistema.
     const conFranja = conFranjaDeLaPolitica(aplicarAjustes(opciones, guardados), franja());
-    const ajustes = { ...guardados, horaInicio: conFranja.horaInicio, horaFin: conFranja.horaFin };
+    const ajustes = { ...guardados, horaInicio: conFranja.horaInicio, horaFin: conFranja.horaFin, pausaMinSegundos: conFranja.pausaMinSegundos, pausaMaxSegundos: conFranja.pausaMaxSegundos };
     const plantillas = (await repos.templates.list())
       .filter((t) => t.category === 'UTILITY' || t.propia)
       .map((t) => ({
@@ -327,21 +341,30 @@ export async function registerRutasRoutes(
     }
     const porDefecto = ajustesPorDefecto(opciones);
     const ajustes = await repos.rutas.ajustes.set(body, porDefecto);
+    if (deps.ajustes) await deps.ajustes.guardar({ ritmo: {
+      pausaMinSeg: body.pausaMinSegundos ?? deps.ajustes.actual().ritmo.pausaMinSeg ?? ajustes.pausaMinSegundos,
+      pausaMaxSeg: body.pausaMaxSegundos ?? deps.ajustes.actual().ritmo.pausaMaxSeg ?? ajustes.pausaMaxSegundos,
+    } });
     // El cambio es efectivo también para quienes ya esperan el siguiente
     // mensaje: se vuelve a calcular desde el último envío real, no desde
     // cuándo se guardaron los ajustes. Se hace también si la lista no cambió:
     // repetir «Guardar» repara cualquier programación que hubiera quedado
     // pendiente por una incidencia anterior.
     const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos);
+    limpiarEsperasEnvio(repos.rutas);
+    despertarMotorRutas();
     const vigente = conFranjaDeLaPolitica(aplicarAjustes(opciones, ajustes), franja());
-    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin }, vigente, seguimientosReprogramados };
+    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin, pausaMinSegundos: vigente.pausaMinSegundos, pausaMaxSegundos: vigente.pausaMaxSegundos }, vigente, seguimientosReprogramados };
   });
 
   /** Volver a lo que diga la configuracion. */
   app.delete('/admin/rutas/ajustes', async () => {
     await repos.rutas.ajustes.reset();
     const ajustes = ajustesPorDefecto(opciones);
+    if (deps.ajustes) await deps.ajustes.guardar({ ritmo: { pausaMinSeg: ajustes.pausaMinSegundos, pausaMaxSeg: ajustes.pausaMaxSegundos } });
     const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos);
+    limpiarEsperasEnvio(repos.rutas);
+    despertarMotorRutas();
     return { ok: true, ajustes, seguimientosReprogramados };
   });
 
@@ -401,6 +424,7 @@ export async function registerRutasRoutes(
       .parse(request.body ?? {});
     const lote = await repos.rutas.cambiarEstadoLote(request.params.id, body.estado);
     if (!lote) return reply.code(404).send({ error: 'Ese lote ya no existe.' });
+    despertarMotorRutas();
     return { lote };
   });
 
@@ -426,8 +450,12 @@ export async function registerRutasRoutes(
   app.get('/admin/rutas/solicitudes', async (request) => {
     const { vista, ...resto } = listaSchema.parse(request.query ?? {});
     const consulta = { ...resto, ...(vista ? VISTAS[vista] ?? {} : {}) };
+    const [items, vigente] = await Promise.all([repos.rutas.listarSolicitudes(consulta), vigentes()]);
+    const ahora = new Date();
     return {
-      items: await repos.rutas.listarSolicitudes(consulta),
+      items: items.map(s => ({ ...s, esperaEnvio: !['pendiente', 'enviado', 'respondio'].includes(s.estado) ? null
+        : !enHorario(ahora, vigente) ? { codigo: 'fuera_de_horario', motivo: `Fuera del horario de envío (${vigente.horaInicio}:00 a ${vigente.horaFin}:00).`, hasta: null }
+        : esperaDeEnvio(repos.rutas, s, ahora.getTime()) })),
       total: await repos.rutas.contarSolicitudes(consulta),
       vista: vista ?? 'todos',
     };
@@ -461,7 +489,7 @@ export async function registerRutasRoutes(
     const solicitud = Number.isInteger(id) ? await repos.rutas.solicitud(id) : null;
     if (!solicitud) return reply.code(404).send({ error: 'Ese cliente ya no está en la lista.' });
     return {
-      solicitud,
+      solicitud: { ...solicitud, esperaEnvio: esperaDeEnvio(repos.rutas, solicitud) },
       eventos: await repos.rutas.eventos(solicitud.id),
       lote: await repos.rutas.lote(solicitud.loteId),
       contacto: solicitud.contactId ? await repos.contacts.getById(solicitud.contactId) : null,
@@ -747,6 +775,7 @@ export async function registerRutasRoutes(
         // un lote cuya unica solicitud salio como baja o incidencia nunca
         // llega a estar «enviando» (ni el motor le cierra un resumen para GSG).
         await repos.rutas.cambiarEstadoLote(carga.lote.id, 'enviando');
+        despertarMotorRutas();
         await repos.rutas.registrarEvento(
           original.id,
           'nota',

@@ -122,12 +122,14 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
  */
 export function conFranjaDeLaPolitica(
   opciones: OpcionesMotor,
-  politica?: { horaInicio: number; horaFin: number; timezone?: string } | null,
+  politica?: { horaInicio: number; horaFin: number; timezone?: string; pausaMinMs?: number; pausaMaxMs?: number } | null,
 ): OpcionesMotor {
   if (!politica) return opciones;
   const inicio = Math.max(0, Math.min(23, Math.floor(politica.horaInicio)));
   const fin = Math.max(inicio + 1, Math.min(24, Math.floor(politica.horaFin)));
-  return { ...opciones, horaInicio: inicio, horaFin: fin, timezone: politica.timezone || opciones.timezone };
+  return { ...opciones, horaInicio: inicio, horaFin: fin, timezone: politica.timezone || opciones.timezone,
+    pausaMinSegundos: (politica.pausaMinMs ?? opciones.pausaMinSegundos * 1000) / 1000,
+    pausaMaxSegundos: (politica.pausaMaxMs ?? opciones.pausaMaxSegundos * 1000) / 1000 };
 }
 
 /**

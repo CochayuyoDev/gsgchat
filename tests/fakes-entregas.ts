@@ -1,4 +1,5 @@
 /** Doble en memoria de las entregas del dia y los motorizados. */
+import { FRENOS_CUENTA_RETIRADOS } from '../src/salud/frenos-retirados.js';
 
 import {
   datosEnvioLimpios,
@@ -233,6 +234,16 @@ export function createFakeEntregas(reloj: () => Date = () => new Date(), encolar
         .sort((a, b) => (a.mensajeProximoAt?.getTime() ?? 0) - (b.mensajeProximoAt?.getTime() ?? 0) || a.id - b.id)
         .slice(0, limite)
         .map(copiaE);
+    },
+    async liberarFrenosCuenta() {
+      let n = 0;
+      for (const e of entregas) {
+        if (!['pendiente', 'reintentando', 'encolado'].includes(e.mensajeEstado ?? '') || !FRENOS_CUENTA_RETIRADOS.includes(e.mensajeErrorCodigo ?? '') ||
+            e.mensajesPausadosAt || e.envioRetenidoAt || ESTADOS_ENTREGA_FINALES.includes(e.estado)) continue;
+        e.mensajeEstado = e.loteId ? 'encolado' : 'pendiente'; e.mensajeProximoAt = reloj();
+        e.mensajeErrorCodigo = null; e.mensajeError = null; e.mensajeReintentosAuto = 0; e.mensajePermanente = false; n++;
+      }
+      return n;
     },
     async mensajesEnviandoDesde(antes, limite) {
       return entregas.filter((e) => e.mensajeEstado === 'enviando' && (!e.mensajeUltimoIntentoAt || e.mensajeUltimoIntentoAt.getTime() < antes.getTime())).slice(0, limite).map(copiaE);

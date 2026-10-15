@@ -485,7 +485,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       queue: await queue.counts(),
       configured: settings.isConfigured(),
       missing: settings.missing(),
-      salud: deps.salud
+      salud: deps.salud && !politica.soloRitmo
         ? { nivel: state.nivel ?? 'verde', factor: deps.salud.factor(), motivos: state.motivos ?? [] }
         : null,
       // Lo que Meta cambia con fecha (solo con la API oficial). Ver src/whatsapp/avisos-meta.ts.
@@ -495,12 +495,14 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   // --- salud del numero: lo que mira el monitor y por que frena ---------
   app.get('/admin/salud', async (_request, reply) => {
+    if (politicaVigente().soloRitmo) return reply.code(410).send({ error: 'El control de salud de la cuenta fue retirado.' });
     if (!deps.salud) return reply.code(404).send({ error: 'el monitor de salud no esta activo en este arranque' });
     return deps.salud.snapshot();
   });
 
   /** Recalcular ahora, sin esperar al minuto. */
   app.post('/admin/salud/evaluar', async (_request, reply) => {
+    if (politicaVigente().soloRitmo) return reply.code(410).send({ error: 'El control de salud de la cuenta fue retirado.' });
     if (!deps.salud) return reply.code(404).send({ error: 'el monitor de salud no esta activo en este arranque' });
     const riesgo = await deps.salud.evaluar();
     return { ok: true, riesgo };
@@ -508,6 +510,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   /** Una persona levanta la pausa automatica; se vuelve despacio (rampa). */
   app.post('/admin/salud/reanudar', async (request, reply) => {
+    if (politicaVigente().soloRitmo) return reply.code(410).send({ error: 'Usa la pausa manual de envíos; ya no existe la rampa de salud.' });
     if (!deps.salud) return reply.code(404).send({ error: 'el monitor de salud no esta activo en este arranque' });
     const body = z.object({ motivo: z.string().max(200).optional() }).parse(request.body ?? {});
     await deps.salud.reanudar(body.motivo?.trim() || 'desde el panel');

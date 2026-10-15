@@ -263,7 +263,7 @@ export async function processChange(
       if (evento.includes('UNFLAG')) await repos.numberState.setEstado(phoneNumberId, 'CONNECTED');
       else if (evento.includes('FLAG')) await repos.numberState.setEstado(phoneNumberId, 'FLAGGED');
 
-      if (mapped === 'RED') {
+      if (mapped === 'RED' && !deps.salud?.soloRitmo) {
         await repos.numberState.setPaused(phoneNumberId, true, AUTO_PAUSE_REASON);
         await deps.salud?.evaluar().catch(() => undefined);
         return;
@@ -295,7 +295,7 @@ export async function processChange(
 
       if (grave) {
         await repos.numberState.setEstado(phoneNumberId, deshabilitada ? 'BANNED' : 'RESTRICTED');
-        await repos.numberState.setPaused(phoneNumberId, true, `salud: Meta restringio la cuenta (${detalle.slice(0, 200)})`);
+        if (!deps.salud?.soloRitmo) await repos.numberState.setPaused(phoneNumberId, true, `salud: Meta restringio la cuenta (${detalle.slice(0, 200)})`);
         await deps.salud?.evaluar().catch(() => undefined);
         return;
       }

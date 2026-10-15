@@ -7,6 +7,7 @@
  */
 
 import { esDuplicado, type Pool } from '../db/pool.js';
+import { FRENOS_CUENTA_RETIRADOS } from '../salud/frenos-retirados.js';
 
 export type EstadoUbicacion = 'no_hace_falta' | 'pendiente' | 'recibida';
 export type EstadoConfirmacion = 'no_hace_falta' | 'pendiente' | 'pedida' | 'confirmada' | 'rechazada';
@@ -375,6 +376,7 @@ export interface EventoEntrega {
 }
 
 export interface EntregasRepo {
+  liberarFrenosCuenta(): Promise<number>;
   // --- motorizados
   crearMotorizado(input: NuevoMotorizado): Promise<{ motorizado: Motorizado; nuevo: boolean }>;
   motorizado(id: number): Promise<Motorizado | null>;
@@ -1252,6 +1254,19 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
       return Number(rows[0]?.n ?? 0) > 0;
+    },
+
+    async liberarFrenosCuenta() {
+      const { rowCount } = await pool.query(
+        `update entregas set mensaje_estado = case when lote_id is null then 'pendiente' else 'encolado' end,
+                mensaje_proximo_at = now(3), mensaje_error_codigo = null, mensaje_error = null,
+                mensaje_reintentos_auto = 0, mensaje_permanente = false, updated_at = now(3)
+          where mensaje_estado in ('pendiente','reintentando','encolado') and mensaje_error_codigo in ($1)
+            and mensajes_pausados_at is null and envio_retenido_at is null
+            and estado not in ('cancelada','terminada','entregada')`,
+        [FRENOS_CUENTA_RETIRADOS],
+      );
+      return rowCount;
     },
     async anterioresPorReferencia(referencias, antesDe) {
       // Sin distinguir mayusculas, como la busqueda por referencia de la API.

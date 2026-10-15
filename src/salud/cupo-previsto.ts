@@ -23,6 +23,7 @@ export interface ConceptoCupo {
 }
 
 export interface CupoPrevisto {
+  sinCupoInterno?: boolean;
   cupoHoy: number;
   usadosHoy: number;
   puedenSalir: number;
@@ -39,6 +40,10 @@ export interface CupoPrevisto {
 const VIVAS_SIN_TERMINAR = new Set(['pendiente', 'esperando_ubicacion', 'esperando_confirmacion', 'lista', 'esperando_motorizado', 'avisada']);
 
 export async function cupoPrevisto(deps: DepsCupo): Promise<CupoPrevisto> {
+  if (deps.salud.soloRitmo) return {
+    sinCupoInterno: true, cupoHoy: 0, usadosHoy: 0, puedenSalir: 0, necesitan: 0, alcanza: true, margen: 0,
+    detalle: [], queRecortar: [], frase: 'Los envíos usan el horario y la pausa configurada.', at: deps.ahora().toISOString(),
+  };
   const foto = await deps.salud.snapshot();
   const cupoHoy = Math.max(0, foto.ritmo.cupoHoy);
   const usadosHoy = Math.max(0, foto.ritmo.hoy);

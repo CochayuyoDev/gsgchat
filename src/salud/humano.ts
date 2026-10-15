@@ -38,11 +38,16 @@ const POR_DEFECTO: Required<OpcionesEscritura> = {
  * parpadeo. Va por AsyncLocalStorage para no tener que pasar una bandera
  * por todas las capas hasta el socket.
  */
-const contextoEnvio = new AsyncLocalStorage<{ aMano: boolean }>();
+const contextoEnvio = new AsyncLocalStorage<{ aMano?: boolean; programado?: boolean }>();
 const ESPERA_A_MANO_MS = 700;
 
 export function aMano<T>(fn: () => Promise<T>): Promise<T> {
   return contextoEnvio.run({ aMano: true }, fn);
+}
+
+/** La cola ya aplicó la pausa configurada: no añadir escritura artificial. */
+export function envioProgramado<T>(fn: () => Promise<T>): Promise<T> {
+  return contextoEnvio.run({ programado: true }, fn);
 }
 
 export function enviandoAMano(): boolean {
@@ -108,6 +113,7 @@ export async function escribirComoHumano<T>(
   enviar: () => Promise<T>,
   opts: OpcionesEscritura & { dormir?: (ms: number) => Promise<void> } = {},
 ): Promise<T> {
+  if (contextoEnvio.getStore()?.programado) return enviar();
   const esperar = opts.dormir ?? dormir;
   await teclado.escribiendo().catch(() => undefined);
   // Lo que escribe una persona desde el chat no espera lo que tardaria en

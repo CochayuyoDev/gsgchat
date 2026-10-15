@@ -266,8 +266,8 @@ describe('marcapasos: cuando puede salir el siguiente', () => {
     }
     const hace4s = new Date(NOW.getTime() - 4000);
     expect(decidirRitmo(foto({ ultimoEnvioAt: hace4s, pausaSorteadaMs: 3000 }), POLITICA_CLOUD).ok).toBe(true);
-    // Con factor 0.5 la misma pausa dura el doble: 6 s.
-    expect(decidirRitmo(foto({ ultimoEnvioAt: hace4s, pausaSorteadaMs: 3000, factor: 0.5 }), POLITICA_CLOUD).ok).toBe(false);
+    // El riesgo mantiene los cupos, pero no estira la pausa configurada.
+    expect(decidirRitmo(foto({ ultimoEnvioAt: hace4s, pausaSorteadaMs: 3000, factor: 0.5 }), POLITICA_CLOUD).ok).toBe(true);
   });
 
   it('la pausa sorteada cae dentro del rango y se concentra en el centro', () => {
@@ -294,7 +294,7 @@ describe('marcapasos: cuando puede salir el siguiente', () => {
     // La pausa sorteada con azar 0.5 es el centro del rango.
     expect(m.pausaSorteadaMs()).toBe(4000);
     expect(m.proximoEnvioEn(new Date(t0.getTime() + 51_000), 1)).toBe(3000);
-    expect(m.proximoEnvioEn(new Date(t0.getTime() + 51_000), 0.5)).toBe(7000);
+    expect(m.proximoEnvioEn(new Date(t0.getTime() + 51_000), 0.5)).toBe(3000);
     // Una hora despues ya no queda nada en la ventana.
     expect(m.enUltimaHora(new Date(t0.getTime() + 2 * 60 * 60 * 1000))).toBe(0);
   });
