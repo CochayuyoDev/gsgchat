@@ -249,6 +249,21 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       return { ...solicitud };
     },
 
+    async reprogramarSeguimientos(esperasMensajesMinutos) {
+      const activos = new Set(lotes.filter((l) => l.estado === 'enviando' || l.estado === 'pausado').map((l) => l.id));
+      let reprogramadas = 0;
+      for (const solicitud of solicitudes) {
+        if (!activos.has(solicitud.loteId) || !['enviado', 'respondio'].includes(solicitud.estado) || solicitud.requiereHumano || !solicitud.ultimoEnvioAt) continue;
+        const maxIntentos = esperasMensajesMinutos.length + 1;
+        solicitud.proximoIntentoAt = solicitud.intentos >= maxIntentos
+          ? reloj()
+          : new Date(solicitud.ultimoEnvioAt.getTime() + (esperasMensajesMinutos[solicitud.intentos - 1] ?? esperasMensajesMinutos.at(-1) ?? 0) * 60_000);
+        solicitud.updatedAt = reloj();
+        reprogramadas++;
+      }
+      return reprogramadas;
+    },
+
     async cifrasPorEstado(loteId) {
       const cifras: Record<string, number> = {};
       for (const s of solicitudes) {

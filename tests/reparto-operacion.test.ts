@@ -337,8 +337,8 @@ describe('reintentar a mano', () => {
 
   it('el derivado vuelve a la cola desde cero y recibe la primera petición otra vez', async () => {
     const [derivado] = await e.buscar('988200001');
-    expect(derivado).toMatchObject({ estado: 'derivado', intentos: 3 });
-    expect(e.mensajesA('988200001')).toHaveLength(3);
+    expect(derivado).toMatchObject({ estado: 'derivado', intentos: 4 });
+    expect(e.mensajesA('988200001')).toHaveLength(4);
 
     const res = await e.api.post<{ solicitud: Solicitud }>(`/admin/rutas/solicitudes/${derivado!.id}/reintentar`);
     expect(res.status).toBe(200);
@@ -419,7 +419,7 @@ describe('el mismo cliente en el reparto de mañana', () => {
     await e.insistir();
     await e.insistir();
     expect((await e.buscar('AYER-2'))[0]).toMatchObject({ estado: 'derivado' });
-    expect(e.mensajesA('988300002')).toHaveLength(3);
+    expect(e.mensajesA('988300002')).toHaveLength(4);
 
     await e.cargarLote('Hoy 2', [{ telefono: '988300002', nombre: 'Luis', referencia: 'HOY-2' }]);
     await e.trabajar();
@@ -543,7 +543,7 @@ describe('los ajustes cambiados desde la pantalla', () => {
   it('borrar los ajustes vuelve a lo de la configuración', async () => {
     await e.api.delete('/admin/rutas/ajustes');
     const { body } = await e.api.get<{ ajustes: { maxIntentos: number; esperaRespuestaMinutos: number } }>('/admin/rutas/ajustes');
-    expect(body.ajustes).toMatchObject({ maxIntentos: 3, esperaRespuestaMinutos: 180 });
+    expect(body.ajustes).toMatchObject({ maxIntentos: 4, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20] });
   });
 });
 

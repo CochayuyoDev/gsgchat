@@ -96,7 +96,7 @@ beforeAll(async () => {
     sender,
     gsg: crearPuertoEnEspera(),
     // Espera corta a proposito: con las 3 h reales, tres intentos seguidos se salen del horario.
-    opciones: { ...OPCIONES_POR_DEFECTO, esperaRespuestaMinutos: 30, negocio: 'Tienda de prueba' },
+    opciones: { ...OPCIONES_POR_DEFECTO, esperaRespuestaMinutos: 30, maxIntentos: 3, negocio: 'Tienda de prueba' },
     usarPlantilla: () => false,
     ahora: () => ahora,
     // Pausa mínima siempre: la prueba controla el reloj.

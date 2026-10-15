@@ -283,18 +283,16 @@ const schema = z.object({
   RUTAS_PAUSA_MAX_SEG: z.coerce.number().int().positive().default(30),
 
   /**
-   * Cuanto se espera una respuesta antes de volver a escribir, en minutos.
-   * Tres horas: es lo que hace que el sistema escriba como una persona y no
-   * como un robot, y lo que evita llegar al cupo del dia (ver
-   * src/envio-automatico).
+   * Espera inicial entre mensajes de ubicación, en minutos. La secuencia
+   * predeterminada es 30, 25 y 20; esta variable aporta el primer intervalo.
    */
-  RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(180),
+  RUTAS_ESPERA_MIN: z.coerce.number().int().positive().default(30),
 
   /** Variable antigua ignorada; los envíos siempre tienen un máximo. */
   RUTAS_PEDIR_UBI_CADA_MIN: z.coerce.number().int().min(0).max(24 * 60).default(0),
 
   /** Mensajes por cliente antes de pasarlo al repartidor. */
-  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(3),
+  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(4),
 
   /** Franja horaria en la que el motor puede escribir (hora del negocio). */
   RUTAS_HORA_INICIO: z.coerce.number().int().min(0).max(23).default(9),

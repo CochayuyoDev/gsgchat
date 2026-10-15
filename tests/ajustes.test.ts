@@ -44,9 +44,9 @@ describe('ajustes: puros', () => {
 
   it('sin nada guardado, los ajustes son los de la configuracion', () => {
     const a = ajustesPorDefecto(opciones);
-    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 180, maxIntentos: 3, horaInicio: 9, horaFin: 19 });
+    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 4, esperasMensajesMinutos: [30, 25, 20], horaInicio: 9, horaFin: 19 });
     expect(a.plantillas.solicitud).toEqual([]);
-    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperasMensajesMinutos: [180, 180] });
+    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], maxIntentos: 4 });
   });
 
   it('aplicar corrige un maximo por debajo del minimo y un fin antes del inicio', () => {
@@ -265,7 +265,7 @@ describe('ajustes y plantillas propias: la API', () => {
     const r = await app.inject({ method: 'GET', url: '/admin/rutas/ajustes', headers: auth });
     expect(r.statusCode).toBe(200);
     const body = r.json();
-    expect(body.ajustes.maxIntentos).toBe(3);
+    expect(body.ajustes).toMatchObject({ maxIntentos: 4, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20] });
     expect(body.catalogo.solicitud).toEqual(['solicitud_ubicacion', 'solicitud_ubicacion_b']);
     expect(body.plantillas.map((t: { name: string }) => t.name)).toContain('solicitud_ubicacion');
     // Para la pantalla: un cliente de ejemplo y como le llegaria cada paso, en cristiano.
@@ -301,7 +301,7 @@ describe('ajustes y plantillas propias: la API', () => {
     const reset = await app.inject({ method: 'DELETE', url: '/admin/rutas/ajustes', headers: auth });
     expect(reset.statusCode).toBe(200);
     const despues = await app.inject({ method: 'GET', url: '/admin/rutas', headers: auth });
-    expect(despues.json().motor).toMatchObject({ espera: 180, horario: [9, 19] });
+    expect(despues.json().motor).toMatchObject({ espera: 30, maxIntentos: 4, horario: [9, 19] });
 
     const secuencia = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { esperasMensajesMinutos: [30, 20, 10, 5], textosAdicionales: [['Hola {nombre}, mensaje 4.']] } });
     expect(secuencia.statusCode).toBe(200);
@@ -313,6 +313,36 @@ describe('ajustes y plantillas propias: la API', () => {
     for (const payload of [{ esperasMensajesMinutos: [0] }, { esperasMensajesMinutos: Array(100).fill(1) }]) {
       expect((await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload })).statusCode).toBe(400);
     }
+  });
+
+  it('al cambiar la secuencia, reprograma los seguimientos activos desde su ultimo envio', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Cadencia activa' });
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    const [solicitud] = await repos.rutas.agregarSolicitudes(lote.id, [
+      { telefonoCrudo: '51987654322', phone: '51987654322' },
+    ]);
+    const ultimoEnvioAt = new Date(Date.now() - 10 * 60_000);
+    await repos.rutas.actualizarSolicitud(solicitud!.id, {
+      estado: 'enviado', intentos: 1, ultimoEnvioAt,
+      proximoIntentoAt: new Date(ultimoEnvioAt.getTime() + 60_000),
+    });
+
+    const cambiado = await app.inject({
+      method: 'POST', url: '/admin/rutas/ajustes', headers: auth,
+      payload: { esperasMensajesMinutos: [30, 25, 20] },
+    });
+    expect(cambiado.statusCode).toBe(200);
+    expect(cambiado.json().seguimientosReprogramados).toBeGreaterThanOrEqual(1);
+    expect((await repos.rutas.solicitud(solicitud!.id))!.proximoIntentoAt!.getTime())
+      .toBe(ultimoEnvioAt.getTime() + 30 * 60_000);
+
+    // Si la nueva espera ya venció desde el último envío, queda lista ahora.
+    await app.inject({
+      method: 'POST', url: '/admin/rutas/ajustes', headers: auth,
+      payload: { esperasMensajesMinutos: [5, 4, 3] },
+    });
+    expect((await repos.rutas.solicitud(solicitud!.id))!.proximoIntentoAt!.getTime())
+      .toBeLessThanOrEqual(Date.now());
   });
 
   it('una plantilla propia se crea con lint, aparece en el catalogo y se borra; las del catalogo no', async () => {

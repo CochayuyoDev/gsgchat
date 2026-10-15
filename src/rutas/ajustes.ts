@@ -71,11 +71,16 @@ export type AjustesPatch = Partial<z.infer<typeof ajustesSchema>>;
 
 /** Los ajustes que salen de la configuracion, sin nada guardado. */
 export function ajustesPorDefecto(opciones: OpcionesMotor): AjustesRutas {
+  const secuenciaPredeterminada = [opciones.esperaRespuestaMinutos, 25, 20];
+  const esperasMensajesMinutos = Array.from(
+    { length: Math.max(0, opciones.maxIntentos - 1) },
+    (_, i) => secuenciaPredeterminada[i] ?? 20,
+  );
   return {
     pausaMinSegundos: opciones.pausaMinSegundos,
     pausaMaxSegundos: opciones.pausaMaxSegundos,
     esperaRespuestaMinutos: opciones.esperaRespuestaMinutos,
-    esperasMensajesMinutos: Array(Math.max(0, opciones.maxIntentos - 1)).fill(opciones.esperaRespuestaMinutos),
+    esperasMensajesMinutos,
     maxIntentos: opciones.maxIntentos,
     pedirUbicacionCadaMinutos: 0,
     horaInicio: opciones.horaInicio,

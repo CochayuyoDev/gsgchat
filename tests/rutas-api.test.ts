@@ -361,7 +361,7 @@ describe('lo que se lleva GSG', () => {
     const cuerpo = res.json();
 
     expect(cuerpo.alertas.requierenPersona).toBe(1);
-    expect(cuerpo.motor).toMatchObject({ pausa: [15, 30], maxIntentos: 3, horario: [9, 19] });
+    expect(cuerpo.motor).toMatchObject({ pausa: [15, 30], maxIntentos: 4, horario: [9, 19] });
     expect(cuerpo.gsg.conectado).toBe(false);
     expect(cuerpo.catalogo.sin_whatsapp.titulo).toBe('El número no tiene WhatsApp');
   });

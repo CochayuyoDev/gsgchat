@@ -120,6 +120,39 @@ describe('lotes y solicitudes', () => {
     expect(await repos.rutas.tocaIntentar(new Date('2026-03-10T13:00:00Z'), 10)).toHaveLength(0);
   });
 
+  it('reprograma en un solo cambio los seguimientos vivos desde el ultimo envio', async () => {
+    const activo = await repos.rutas.crearLote({ nombre: 'Cadencia activa' });
+    const pausado = await repos.rutas.crearLote({ nombre: 'Cadencia pausada' });
+    await repos.rutas.cambiarEstadoLote(activo.id, 'enviando');
+    await repos.rutas.cambiarEstadoLote(pausado.id, 'pausado');
+    const [m2, m3, m4, maximo, humano, fueraDeLote] = await repos.rutas.agregarSolicitudes(activo.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111' },
+      { telefonoCrudo: '922222222', phone: '51922222222' },
+      { telefonoCrudo: '933333333', phone: '51933333333' },
+      { telefonoCrudo: '944444444', phone: '51944444444' },
+      { telefonoCrudo: '955555555', phone: '51955555555' },
+    ]);
+    const [enPausa] = await repos.rutas.agregarSolicitudes(pausado.id, [
+      { telefonoCrudo: '966666666', phone: '51966666666' },
+    ]);
+    const ultimoEnvioAt = new Date(Date.now() - 40 * 60_000);
+    for (const [solicitud, intentos] of [[m2, 1], [m3, 2], [m4, 3], [maximo, 4], [humano, 1], [enPausa, 1]] as const) {
+      await repos.rutas.actualizarSolicitud(solicitud!.id, {
+        estado: 'enviado', intentos, ultimoEnvioAt,
+        proximoIntentoAt: new Date(ultimoEnvioAt.getTime() + 60_000),
+        ...(solicitud === humano ? { requiereHumano: true } : {}),
+      });
+    }
+
+    expect(await repos.rutas.reprogramarSeguimientos([30, 25, 20])).toBe(5);
+    expect((await repos.rutas.solicitud(m2!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 30 * 60_000);
+    expect((await repos.rutas.solicitud(m3!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 25 * 60_000);
+    expect((await repos.rutas.solicitud(m4!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 20 * 60_000);
+    expect(Math.abs(Date.now() - (await repos.rutas.solicitud(maximo!.id))!.proximoIntentoAt!.getTime())).toBeLessThan(5_000);
+    expect((await repos.rutas.solicitud(humano!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 60_000);
+    expect((await repos.rutas.solicitud(enPausa!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 30 * 60_000);
+  });
+
   it('la bandeja ensena primero lo ultimo que se movio, y el id desempata', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Reparto' });
     const [a, b, c, d] = await repos.rutas.agregarSolicitudes(lote.id, [
