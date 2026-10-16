@@ -70,19 +70,16 @@ describe('solo la ubicación recibe respuesta mientras se espera el pin', () => 
       await e.contesta(tel, { texto: '¿A qué hora llega?' });
       const antes = e.mensajesA(tel).length;
       await e.contesta(tel, tipo === 'pin' ? { pin: PIN_LIMA } : { enlace: `https://www.google.com/maps?q=${PIN_LIMA.lat},${PIN_LIMA.lng}` });
-      if (tipo === 'mapa') {
-        expect(e.textosA(tel).at(-1)).toMatch(/ubicación de tu enlace/);
-        const antesDeOtroTexto = e.mensajesA(tel).length;
-        await e.contesta(tel, { texto: '¿a qué hora llegan?' });
-        expect(e.mensajesA(tel)).toHaveLength(antesDeOtroTexto);
-        await e.contesta(tel, { texto: 'sí' });
-      }
+      // Con el bot callado (sin IA) el enlace no lleva la pregunta «¿es la
+      // ubicación de tu enlace?»: se registra y se agradece, igual que un pin.
+      expect(e.textosA(tel).at(-1)).toMatch(/Ubicación registrada/);
+      await e.contesta(tel, { texto: '¿a qué hora llegan?' });
       expect((await e.entrega('SILENCIO-1'))?.ubicacionEstado).toBe('recibida');
-      expect(e.mensajesA(tel)).toHaveLength(antes + (tipo === 'mapa' ? 2 : 1));
+      expect(e.mensajesA(tel)).toHaveLength(antes + 1);
       expect(e.repos.decisiones._todas).toHaveLength(0);
       e.avanzar(60);
       await e.trabajar();
-      expect(e.mensajesA(tel)).toHaveLength(antes + (tipo === 'mapa' ? 2 : 1));
+      expect(e.mensajesA(tel)).toHaveLength(antes + 1);
     } finally { await e.cerrar(); }
   });
 });

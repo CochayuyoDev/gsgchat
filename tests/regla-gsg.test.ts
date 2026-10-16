@@ -43,8 +43,8 @@ const bonito = (tel: string) => {
   return `+51 ${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
 };
 
-async function armar(opts: { silencio?: boolean } = {}): Promise<EscenarioEntregas> {
-  const e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
+async function armar(opts: { silencio?: boolean; iaActiva?: boolean } = {}): Promise<EscenarioEntregas> {
+  const e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, iaActiva: opts.iaActiva });
   await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' }, ...(opts.silencio === false ? { silencioTrasUbi: false } : {}) });
   e.simulador.cargarDePrueba();
   await e.api.post('/admin/motorizados/de-prueba');
@@ -422,7 +422,7 @@ describe('regla del dueño: un día de entregas en «Solo lo de GSG»', () => {
 describe('regla del dueño apagada: como antes', () => {
   let e: EscenarioEntregas;
   beforeAll(async () => {
-    e = await armar({ silencio: false });
+    e = await armar({ silencio: false, iaActiva: true });
   });
   afterAll(() => e?.cerrar());
 

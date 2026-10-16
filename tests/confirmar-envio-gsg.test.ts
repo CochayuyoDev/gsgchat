@@ -112,7 +112,7 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
   const salidos = (tel: string) => e.mensajesA(tel).length;
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, confirmarLista: true });
+    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, iaActiva: true, confirmarLista: true });
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     await e.api.post('/admin/motorizados/de-prueba');
     e.simulador.cargar([deUbicacion(1), deUbicacion(2), deConfirmar(1), deConfirmar(2), deConfirmar(3), deConfirmar(4)]);

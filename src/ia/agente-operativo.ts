@@ -1089,7 +1089,7 @@ async function atenderPinLejos(deps: DepsAgente, contact: Contact, entrada: { te
  */
 /** «Me equivoqué de ubicación» con la ubicación ya registrada: el texto fijo de antes o después de la hora límite. */
 async function atenderCambioUbicacion(deps: DepsAgente, contact: Contact, que: string, como: string): Promise<ResultadoRegla | null> {
-  const cambio = await deps.entregas!.cambioDeUbicacionDetalle(contact.phone).catch(() => null);
+  const cambio = await deps.entregas!.cambioDeUbicacionDetalle(contact.phone, que).catch(() => null);
   if (!cambio) return null;
   // Antes de la hora límite: «Claro, {nombre}, por favor mándeme su nueva
   // ubicación», con el botón de ubicación como el primer mensaje. Después, el

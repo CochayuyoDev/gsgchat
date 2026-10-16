@@ -110,7 +110,7 @@ describe('«quiero cambiar mi ubicación»: plantilla con el nombre, pin nuevo y
   const reportes: Array<Record<string, unknown>> = [];
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
+    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, iaActiva: true });
     const original = e.repos.entregas.registrarUbicacionAtomica.bind(e.repos.entregas);
     e.repos.entregas.registrarUbicacionAtomica = async (id, patch, reporte, propuestaAt) => {
       if (reporte) reportes.push(reporte.payload);

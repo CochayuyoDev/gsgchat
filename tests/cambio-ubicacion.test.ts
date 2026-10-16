@@ -36,7 +36,7 @@ describe('cambio de ubicación antes y después de la 1:00 PM', () => {
   const alMotorizado = () => e.mensajesA(conPais(MOTO_GSG)).length;
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
+    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, iaActiva: true });
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     await e.api.post('/admin/motorizados/de-prueba');
     e.simulador.cargar([{ referencia: 'C-1', telefono: TEL, nombre: 'Rosa Cambio', direccion: 'Av. Larco 1', distrito: 'Miraflores', faltaUbicacion: true, faltaConfirmacion: false, telefonoMotorizado: MOTO_GSG } as never]);

@@ -67,7 +67,7 @@ const mismoMundo = (a: string, b: string): boolean => esNumeroDePrueba(a) === es
 const MEZCLA_PRUEBA = 'No se mezcla lo de prueba con lo real: los pedidos de prueba van solo a motorizados de prueba (51 000 1…) y los de verdad solo a motorizados de verdad.';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsRepo } from '../settings/service.js';
-import { DECISIONES_QUE_PARAN, despacharReportes, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, type ConsultaEstadoGsg, type PuertoGsg } from '../rutas/gsg.js';
+import { DECISIONES_QUE_PARAN, despacharReportes, encolarProblemaGsg, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, type ConsultaEstadoGsg, type PuertoGsg } from '../rutas/gsg.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import type { CargaLote, ResultadoCarga } from '../rutas/cargar.js';
 import { revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
@@ -554,7 +554,7 @@ export interface ServicioEntregas {
    */
   cambioDeUbicacion(phone: string): Promise<string | null>;
   /** Lo mismo, diciendo si ya pasó la hora límite (antes de ella se manda con el botón de ubicación). */
-  cambioDeUbicacionDetalle(phone: string): Promise<{ texto: string; tarde: boolean } | null>;
+  cambioDeUbicacionDetalle(phone: string, texto?: string): Promise<{ texto: string; tarde: boolean } | null>;
   /**
    * Si este telefono tiene alguna entrega en curso (aunque todavia no se le
    * haya escrito). A un cliente de entrega nunca se le ofrece «Cotizar envío»:
@@ -1893,7 +1893,24 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * dueño, sin cambios). null = no tiene pedidos en curso a los que aplique
    * (después de la hora, solo cuenta quien ya la tenía registrada).
    */
-  async function pedidoDeCambioDeUbicacion(phone: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean } | null> {
+  /** Pedir cambiar la ubicación también es una incidencia para GSG (regla del dueño, 16/10): una por tracking y día. */
+  async function reportarCambioUbicacion(lista: Entrega[], tarde: boolean, limite: string, texto?: string): Promise<void> {
+    const en = ahora();
+    for (const x of lista) {
+      if (!esDeGsg(x)) continue;
+      const encolado = await encolarProblemaGsg(repos.rutas, {
+        tracking: trackingDe(x),
+        referencia: x.referencia,
+        codigo: 'cambio_ubicacion',
+        telefono: x.phone,
+        titulo: tarde ? `El cliente pidió cambiar su ubicación después de la ${limite}` : 'El cliente pidió cambiar su ubicación',
+        ...(texto ? { detalle: `escribió: «${texto.slice(0, 200)}»` } : {}),
+      }, { loteId: x.loteId ?? null, en }).catch(() => false);
+      if (encolado) await evento(x, 'reporte', 'encolado para GSG: incidencia «pidió cambiar su ubicación»').catch(() => undefined);
+    }
+  }
+
+  async function pedidoDeCambioDeUbicacion(phone: string, texto?: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean } | null> {
     const enCurso = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
     const vivas = enCurso.filter((x) => x.ubicacionEstado === 'recibida');
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
@@ -1907,6 +1924,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
         await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
       }
+      await reportarCambioUbicacion(aCambiar, false, limite, texto);
       return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false };
     }
     if (!vivas.length) return null;
@@ -1915,6 +1933,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const m = await motorizadoDe(g).catch(() => null);
     const numero = numeroDeGsg(g, m);
     for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
+    await reportarCambioUbicacion(vivas, true, limite, texto);
     return { texto: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero }), entrega: g, tarde: true };
   }
 
@@ -2429,7 +2448,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // Va aquí (y no solo en el agente operativo) para que valga en todos los
     // modos: con «Todo el sistema» caía al menú de la preventa (30/09).
     if (!opts.boton && pideCambioUbicacion(texto)) {
-      const cambio = await pedidoDeCambioDeUbicacion(contact.phone);
+      const cambio = await pedidoDeCambioDeUbicacion(contact.phone, texto);
       if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto, ...(cambio.tarde ? {} : { pedirUbicacion: true }) };
     }
     // "¿Dónde está mi pedido?": se contesta segun el estado, sin IA. Vale
@@ -5040,8 +5059,8 @@ ${lista}
     async cambioDeUbicacion(phone) {
       return (await pedidoDeCambioDeUbicacion(phone))?.texto ?? null;
     },
-    async cambioDeUbicacionDetalle(phone) {
-      const r = await pedidoDeCambioDeUbicacion(phone);
+    async cambioDeUbicacionDetalle(phone, texto) {
+      const r = await pedidoDeCambioDeUbicacion(phone, texto);
       return r ? { texto: r.texto, tarde: r.tarde } : null;
     },
     async tieneEntregaEnCurso(phone) {

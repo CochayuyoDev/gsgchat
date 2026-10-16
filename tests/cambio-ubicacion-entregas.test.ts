@@ -257,7 +257,7 @@ describe('«Solo lo de GSG»: variantes del cambio y el cliente que escribe ante
         faltaConfirmacion: [{ tracking: 'GSG-A-2002', telefono: DIEGO, nombre: 'Diego Paz', direccion: 'Calle Las Begonias 415', distrito: 'San Isidro' }],
       },
     });
-    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, confirmarLista: true });
+    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, iaActiva: true, confirmarLista: true });
     await e.conexionGsg.conectarReal({ url: gsg.url, token: gsg.token });
     // GSG manda su lista (GSGchat no se la pide).
     await e.entregas.recibirListaGsg(gsg.lista as never);
