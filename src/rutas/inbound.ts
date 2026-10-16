@@ -23,7 +23,7 @@
 import type { Contact, Repos } from '../db/repos.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Solicitud } from '../db/rutas.js';
-import { despacharReportes, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
+import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { resolverPorUbicacion } from '../entregas/ubicacion-unica.js';
 import { despertarMotorRutas } from './despertador.js';
@@ -45,6 +45,8 @@ export interface EntradaRuta {
 
 export type ResultadoRuta =
   | 'resuelta'
+  /** Otra ubicación con la suya ya registrada: no se cambia, se le reporta a GSG (16/10). */
+  | 'cambio_reportado'
   | 'fuera_de_zona'
   | 'sin_ubicacion'
   | 'numero_equivocado'
@@ -223,37 +225,26 @@ async function corregirUbicacion(
     await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `volvió a mandar la misma ubicación (${ubicacion.fuente ?? 'whatsapp'})`).catch(() => undefined);
     return { atendida: true, resultado: 'resuelta', solicitud: resuelta };
   }
-  const anterior = resuelta.lat !== null && resuelta.lng !== null ? `${resuelta.lat.toFixed(5)}, ${resuelta.lng.toFixed(5)}` : 'sin coordenadas';
-  const actualizada = await deps.repos.rutas.actualizarSolicitud(resuelta.id, {
-    lat: ubicacion.lat,
-    lng: ubicacion.lng,
-    mapsUrl: ubicacion.mapsUrl ?? null,
-    precisionM: metrosEnteros(ubicacion.precisionM),
-    ubicacionFuente: ubicacion.fuente ?? 'whatsapp',
-    resueltoAt: momento,
-  });
-  await deps.repos.rutas.registrarEvento(
-    resuelta.id,
-    'ubicacion',
-    `ubicación corregida por el cliente (${ubicacion.fuente ?? 'whatsapp'}): sustituye a ${anterior}`,
-    { lat: ubicacion.lat, lng: ubicacion.lng, corregida: true },
-  );
-  const lote = await deps.repos.rutas.lote(resuelta.loteId);
-  if (lote) {
-    await deps.repos.rutas.encolarReporte({
-      solicitudId: resuelta.id,
-      loteId: lote.id,
-      tipo: 'ubicacion',
-      payload: { ...(await payloadUbicacionDelPedido(deps.repos, actualizada, lote)), corregida: true },
-    });
-    despacharYa(deps);
+  // Regla del dueño (16/10): otra ubicación no corrige la registrada. Se queda
+  // la primera y GSG la recibe como incidencia «cambio_ubicacion»; al cliente
+  // no se le contesta. (Con entregas del día, las entregas lo reportan igual
+  // y la cola no lo duplica: un evento por tracking, código y día.)
+  {
+    const lote = await deps.repos.rutas.lote(resuelta.loteId);
+    if (lote) {
+      const ligadas = resuelta.phone && typeof deps.repos.entregas?.vivasDeLoteYTelefono === 'function'
+        ? await deps.repos.entregas.vivasDeLoteYTelefono(resuelta.loteId, resuelta.phone).catch(() => [])
+        : [];
+      const trackings = [...new Set(ligadas.map((e) => e.datosEnvio?.tracking ?? e.referencia).filter(Boolean))];
+      if (!trackings.length && resuelta.referencia) trackings.push(resuelta.referencia);
+      const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se cambió, se queda la registrada`;
+      for (const tracking of trackings) {
+        await encolarProblemaGsg(deps.repos.rutas, { tracking, referencia: resuelta.referencia, codigo: 'cambio_ubicacion', telefono: resuelta.phone, titulo: 'El cliente pidió cambiar su ubicación', detalle }, { solicitudId: resuelta.id, loteId: lote.id, en: momento }).catch(() => false);
+      }
+    }
+    await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `mandó otra ubicación (${ubicacion.fuente ?? 'whatsapp'}): no se cambia, se le reporta a GSG como cambio de ubicación`).catch(() => undefined);
+    return { atendida: true, resultado: 'cambio_reportado', solicitud: resuelta };
   }
-  deps.log?.('ubicacion corregida por el cliente', {
-    solicitud: resuelta.id,
-    telefono: resuelta.phone,
-    referencia: resuelta.referencia,
-  });
-  return { atendida: true, resultado: 'resuelta', solicitud: actualizada };
 }
 
 /**

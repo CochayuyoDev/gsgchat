@@ -212,9 +212,11 @@ export function rutasPage(opts: RutasOpts): string {
         Fuera de ese horario, los mensajes esperan al día siguiente.</p>
 
       <h3 class="aj-titulo">¿Cómo se insiste si no contesta?</h3>
-      <p class="aj-frase">El primer aviso sale de inmediato. Por defecto, los siguientes esperan 30, 25 y 20 minutos. Puedes configurar hasta 100 mensajes por cliente; al guardar, los cambios también recalculan los seguimientos que ya esperan, desde el último mensaje enviado. Al llegar al último, queda pendiente de atención.</p>
+      <p class="aj-frase">El primer aviso sale de inmediato. Por defecto, los siguientes esperan 30, 25 y 20 minutos. Puedes configurar hasta 100 mensajes por cliente; al guardar, los cambios también recalculan los seguimientos que ya esperan, desde el último mensaje enviado.</p>
       <div id="aj-secuencia"></div>
       <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:var(--esp-2)">Agregar mensaje</button>
+      <p class="aj-frase" style="margin-top:var(--esp-3)">Después del último mensaje se espera <input id="aj-espera-final" type="number" min="0" max="1440" class="aj-num" aria-label="Minutos de espera tras el último mensaje"> minutos;
+        si en ese tiempo no manda su ubicación, queda «sin respuesta» y se le reporta a GSG. Con 0 se reporta en el momento.</p>
 
 
       <h3 class="aj-titulo">¿A qué ritmo?</h3>
@@ -1112,6 +1114,7 @@ function pintarAjustes(d) {
   pintarSecuencia(a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos), a.textosAdicionales || []);
   document.getElementById('aj-hora-inicio').value = a.horaInicio;
   document.getElementById('aj-hora-fin').value = a.horaFin;
+  document.getElementById('aj-espera-final').value = a.esperaFinalMinutos != null ? a.esperaFinalMinutos : 0;
 
   document.getElementById('aj-pasos').innerHTML = PASOS_AJ.map(function (p) {
     var paso = p[0];
@@ -1296,6 +1299,7 @@ document.getElementById('aj-guardar').onclick = async function () {
       pausaMinSegundos: Number(document.getElementById('aj-pausa-min').value),
       pausaMaxSegundos: Number(document.getElementById('aj-pausa-max').value),
       esperasMensajesMinutos: Array.prototype.slice.call(document.querySelectorAll('[data-espera-mensaje]')).map(function (i) { return Number(i.value); }),
+      esperaFinalMinutos: Number(document.getElementById('aj-espera-final').value),
       horaInicio: Number(document.getElementById('aj-hora-inicio').value),
       horaFin: Number(document.getElementById('aj-hora-fin').value),
       plantillas: plantillas,
@@ -1304,7 +1308,7 @@ document.getElementById('aj-guardar').onclick = async function () {
     }});
     var v = r.vigente;
     estado.textContent = 'Guardado: de ' + v.horaInicio + ':00 a ' + v.horaFin + ':00, ' +
-      v.maxIntentos + ' mensajes como máximo; esperas: ' + (v.esperasMensajesMinutos || []).join(', ') + ' min, ' +
+      v.maxIntentos + ' mensajes como máximo; esperas: ' + (v.esperasMensajesMinutos || []).join(', ') + ' min; tras el último, ' + (v.esperaFinalMinutos || 0) + ' min antes de reportarlo a GSG; ' +
       v.pausaMinSegundos + '-' + v.pausaMaxSegundos + ' s entre clientes. Se actualizaron ' +
       (r.seguimientosReprogramados || 0) + ' seguimientos activos desde su último envío.';
     await refrescar();

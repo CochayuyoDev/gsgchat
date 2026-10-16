@@ -182,6 +182,7 @@ const MOTIVOS_GSG: Record<string, MotivoGsg> = {
   numero_equivocado: 'NO_RECONOCE_PEDIDO', no_soy_yo: 'NO_RECONOCE_PEDIDO',
   rechaza_contacto: 'RECHAZA',
   ubicacion_fuera_de_zona: 'DIRECCION_MAL',
+  cambio_ubicacion: 'DIRECCION_MAL',
 };
 
 /** El motivo de GSG de un codigo de GSGchat (lo que no tiene uno propio es OTRO, con su comentario). */

@@ -193,6 +193,7 @@ export const NOMBRES_DE_CAMPO: Record<string, string> = {
   esperaRespuestaMinutos: 'los minutos de espera de la respuesta',
   esperasMensajesMinutos: 'los minutos de espera de cada mensaje',
   maxIntentos: 'el máximo de intentos',
+  esperaFinalMinutos: 'los minutos de espera tras el último mensaje',
   // Que todo funcione
   vigilante: 'el vigilante del WhatsApp',
   'vigilante.minutos': 'los minutos caído antes de avisar',

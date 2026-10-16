@@ -36,7 +36,8 @@ describe('un cliente con dos pedidos el mismo día', () => {
   });
   afterAll(() => e.cerrar());
 
-  it('su pin vale para los dos pedidos y se le pregunta por uno solo, nombrándolo', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('su pin vale para los dos pedidos y se le pregunta por uno solo, nombrándolo', async () => {
     const antes = e.textosA(conPais(DORA)).length;
     await e.contesta(DORA, { pin: pinDe(21) });
     const d1 = await e.entrega('D-1');
@@ -58,14 +59,16 @@ describe('un cliente con dos pedidos el mismo día', () => {
     expect(d2?.mismoCliente).toEqual(['D-1']);
   });
 
-  it('el motor no le hace la segunda pregunta mientras no conteste la primera', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el motor no le hace la segunda pregunta mientras no conteste la primera', async () => {
     const antes = e.textosA(conPais(DORA)).length;
     await e.trabajar();
     expect(e.textosA(conPais(DORA)).length).toBe(antes);
     expect((await e.entrega('D-2'))?.confirmacionEstado).toBe('pendiente');
   });
 
-  it('un "sí" confirma el que se preguntó y, en el mismo mensaje, pregunta por el otro con sus botones', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('un "sí" confirma el que se preguntó y, en el mismo mensaje, pregunta por el otro con sus botones', async () => {
     await e.contesta(DORA, { texto: 'si' });
     const d1 = await e.entrega('D-1');
     const d2 = await e.entrega('D-2');
@@ -79,7 +82,8 @@ describe('un cliente con dos pedidos el mismo día', () => {
     expect(botones[botones.length - 1]?.buttons[0]?.id).toBe(`entrega:si:${d2!.id}`);
   });
 
-  it('el botón del segundo pedido confirma ese pedido y los dos quedan listos', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el botón del segundo pedido confirma ese pedido y los dos quedan listos', async () => {
     const d2 = await e.entrega('D-2');
     await e.contesta(DORA, { boton: { id: `entrega:si:${d2!.id}`, title: 'Sí, recibo hoy' } });
     expect((await e.entrega('D-2'))?.confirmacionEstado).toBe('confirmada');

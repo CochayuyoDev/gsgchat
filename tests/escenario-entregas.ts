@@ -158,6 +158,12 @@ export async function crearEscenarioEntregas(opciones: {
    */
   agente?: boolean;
   /**
+   * La IA encendida (con clave de prueba). Sin ella, en «Solo lo de GSG» el
+   * bot no le contesta nada al cliente salvo el gracias tras su ubicacion
+   * (regla del dueño, 16/10). Requiere `agente: true`.
+   */
+  iaActiva?: boolean;
+  /**
    * «Confirmar la lista de GSG antes de enviar» (encendido de fabrica). Las
    * pruebas de siempre esperan que la lista salga sola: aqui va apagado salvo
    * que la prueba lo pida.
@@ -325,6 +331,7 @@ export async function crearEscenarioEntregas(opciones: {
         },
       })
     : undefined;
+  if (asistente && opciones.iaActiva) await asistente.guardar({ activa: true, proveedor: 'openai', servicio: 'openai', modelo: 'gpt-4o-mini', token: 'sk-prueba' });
 
   const app = await buildServer({
     config,

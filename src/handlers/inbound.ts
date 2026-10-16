@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { enviarConfirmacionUbicacion, type ConfirmacionUbicacion } from '../entregas/confirmacion-ubicacion.js';
 /**
  * Logica de conversacion sobre los mensajes entrantes.
@@ -823,9 +824,34 @@ async function handleInboundMessageEnFila(
   profileName: string | undefined,
   deps: InboundDeps,
 ): Promise<void> {
-  const { repos, sender, wa, config } = deps;
+  const { repos, wa, config } = deps;
   const phone = message.from;
   const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
+
+  /**
+   * El bot callado (regla del dueño, 16/10): con «Solo lo de GSG» y la IA
+   * apagada, el bot no le contesta NADA a lo que escribe el cliente. Lo unico
+   * que sale desde aqui es el agradecimiento tras registrar su ubicacion
+   * actual (`confirmarUbicacion`, que usa `senderBase`). La ubicacion en
+   * tiempo real, un «no soy yo», una pregunta o un SÍ/NO no reciben
+   * respuesta, pero se procesan igual: se registran, pasan a una persona y se
+   * le reportan a GSG. A un motorizado no le aplica. Lo automatico (la
+   * solicitud y los recordatorios) sale por los motores, no por aqui.
+   */
+  const senderBase = deps.sender;
+  const botCallado = (): boolean => (deps.ajustes ? deps.ajustes.modo() : 'completo') === 'gsg' && !deps.ia?.activa();
+  let esMotorizadoCache: Promise<boolean> | null = null;
+  const esMotorizadoQueEscribe = (): Promise<boolean> =>
+    (esMotorizadoCache ??= deps.entregas ? deps.entregas.esMotorizado(phone).catch(() => false) : Promise.resolve(false));
+  const soloDigitos = (t: string): string => t.replace(/\D+/g, '');
+  const sender: Sender = {
+    ...senderBase,
+    async send(job) {
+      if (job.manual || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
+      console.warn('[inbound] bot callado: no se le contesta al cliente', { phone, que: (job.text ?? job.interactive?.body ?? job.kind).slice(0, 60) });
+      return { ok: true, wamid: `silencio:${randomUUID()}`, deliveryId: -1 };
+    },
+  };
 
   // Un grupo de WhatsApp: se guarda y se ensena, y nada mas. Ni el asistente,
   // ni las reglas, ni el reparto, ni el acuse de lectura: un automatismo que
@@ -1044,7 +1070,8 @@ async function handleInboundMessageEnFila(
     ? `${Number(message.location.latitude).toFixed(5)},${Number(message.location.longitude).toFixed(5)}`
     : undefined;
   const confirmarUbicacion = async (job: import('../outbound/sender.js').SendJob, scope?: string) => {
-    confirmacionUbicacion = await enviarConfirmacionUbicacion({ repos, sender, contact, job: { ...job, ...(scope || scopeDelPin ? { confirmationScope: scope ?? scopeDelPin } : {}) }, ahora: deps.entregas?.ahora?.(), timezone: config.timezone });
+    // El agradecimiento tras la ubicacion sale siempre, tambien con el bot callado.
+    confirmacionUbicacion = await enviarConfirmacionUbicacion({ repos, sender: senderBase, contact, job: { ...job, ...(scope || scopeDelPin ? { confirmationScope: scope ?? scopeDelPin } : {}) }, ahora: deps.entregas?.ahora?.(), timezone: config.timezone });
     return confirmacionUbicacion.salida;
   };
   const reply = (text: string, opts: { traspasaSilencio?: boolean; confirmarUbicacion?: boolean; confirmationScope?: string } = {}) =>
@@ -1154,6 +1181,8 @@ async function handleInboundMessageEnFila(
    */
   const pinLejano = async (lat: number, lng: number, mapsUrl: string | null | undefined, fuente: string): Promise<boolean> => {
     if (!deps.entregas || (!reglaGsg() && !fuente.startsWith('enlace de mapa'))) return false;
+    // Con el bot callado no se le pregunta «¿es ahí?»: el pin se registra y se agradece.
+    if (botCallado()) return false;
     const r = await deps.entregas.revisarPin(contact, { lat, lng, mapsUrl: mapsUrl ?? null, fuente }).catch((error) => {
       request_log(deps, 'no se pudo revisar si el pin tiene sentido', error);
       return { atendida: false as const };
@@ -1234,7 +1263,8 @@ async function handleInboundMessageEnFila(
 
   // --- ubicacion nativa: el camino bueno -------------------------------
   if (message.type === 'location' && message.location) {
-    const result = fromWhatsAppLocation(message.location, { bbox: config.bbox });
+    // Mande la ubicación que mande, se acepta (regla del dueño, 16/10): sin caja de cobertura.
+    const result = fromWhatsAppLocation(message.location, {});
     if (!result.ok) {
       // Fuera de cobertura con una solicitud abierta: la ubicacion llego, lo
       // que falla es la zona. Es una incidencia para GSG, no un "no te
@@ -1291,6 +1321,8 @@ async function handleInboundMessageEnFila(
     // buena, o la pidio una persona): se guarda y se sigue el flujo.
     if (deps.entregas) {
       const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: 'pin de whatsapp' }).catch(() => ({ atendida: false as const }));
+      // Otra ubicación con la suya ya registrada: se reportó a GSG y no se le contesta.
+      if (enEntrega.atendida && enEntrega.resultado === 'cambio_reportado') return;
       if (enEntrega.atendida) {
         if (enEntrega.responder) await responderEntrega(enEntrega);
         else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
@@ -1422,7 +1454,7 @@ async function handleInboundMessageEnFila(
   const [rules, prefs, result] = await Promise.all([
     repos.automation.listRules(),
     repos.automation.getPrefs(),
-    extractLocation(text, { bbox: config.bbox }),
+    extractLocation(text, {}),
   ]);
 
   // Las entregas del dia: la respuesta a "¿confirmas tu pedido?" y lo que
@@ -1523,6 +1555,8 @@ async function handleInboundMessageEnFila(
   // una entrega del dia.
   if (result.ok && deps.entregas) {
     const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: `enlace de mapa (${result.source})` }).catch(() => ({ atendida: false as const }));
+    // Otra ubicación con la suya ya registrada: se reportó a GSG y no se le contesta.
+    if (enEntrega.atendida && enEntrega.resultado === 'cambio_reportado') return;
     if (enEntrega.atendida) {
       const guardada = await repos.locations.save(contact.id, result, text);
       await repos.locations.confirm(guardada);

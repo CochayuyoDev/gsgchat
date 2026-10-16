@@ -126,7 +126,8 @@ describe('un reparto de 22 clientes: quién dio su ubicación y quién no', () =
     expect(e.mensajesA(tel(BAJA)).at(-1)?.body).not.toMatch(/no volver/i);
   });
 
-  it('4. la lista de quienes SÍ dieron su ubicación: los ocho, con sus coordenadas y su fuente', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('4. la lista de quienes SÍ dieron su ubicación: los ocho, con sus coordenadas y su fuente', async () => {
     const { items, total } = await e.solicitudes({ loteId, vista: 'resueltos', limit: 100 });
 
     expect(total).toBe(8);

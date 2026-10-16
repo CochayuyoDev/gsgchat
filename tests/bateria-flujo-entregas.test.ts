@@ -117,7 +117,8 @@ describe('«Solo lo de GSG» con un modelo que se equivoca como gpt-4o-mini', ()
   }, 60_000);
   afterAll(() => e?.cerrar());
 
-  it('«ya», «ok», «dale», «simón» con el modelo diciendo OTRA: queda confirmado, sin cierre', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«ya», «ok», «dale», «simón» con el modelo diciendo OTRA: queda confirmado, sin cierre', async () => {
     for (const t of ['ya', 'ok', 'dale', 'simón', 'de hecho']) {
       const tel = await clienteConfirmar();
       const salio = await dice(tel, { texto: t }, 'OTRA');
@@ -126,7 +127,8 @@ describe('«Solo lo de GSG» con un modelo que se equivoca como gpt-4o-mini', ()
     }
   }, 120_000);
 
-  it('un «no» claro con el modelo diciendo OTRA tampoco se lleva el cierre de «otra cosa»: es un no', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('un «no» claro con el modelo diciendo OTRA tampoco se lleva el cierre de «otra cosa»: es un no', async () => {
     const tel = await clienteConfirmar();
     const salio = await dice(tel, { texto: 'no lo recibo' }, 'OTRA');
     expect(salio).toHaveLength(1);
@@ -161,7 +163,8 @@ describe('«Solo lo de GSG» con un modelo que se equivoca como gpt-4o-mini', ()
     expect(salio[0]).toMatch(/\d{1,2}:\d{2} (AM|PM)|a qué hora le llega/);
   }, 60_000);
 
-  it('«ya no estoy en casa, estoy en el trabajo» con el pin registrado (y el modelo diciendo OTRA): se le pide la nueva y el pin nuevo se registra', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«ya no estoy en casa, estoy en el trabajo» con el pin registrado (y el modelo diciendo OTRA): se le pide la nueva y el pin nuevo se registra', async () => {
     const tel = await clienteSinPin();
     await dice(tel, { pin: PIN_LIMA });
     const pide = await dice(tel, { texto: 'ya no estoy en casa, estoy en el trabajo' }, 'OTRA');

@@ -73,7 +73,8 @@ describe('Números del día: los filtros y las acciones en masa', () => {
   };
   const conConfirmacion = { faltaUbicacion: false, faltaConfirmacion: true, lat: PIN_LIMA.lat, lng: PIN_LIMA.lng };
 
-  it('recién llegado → «Falta pedir»; con el pedido de pin → «Falta su ubicación»; manda el pin → «Falta confirmar»; dice sí → «Ya contactados»', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('recién llegado → «Falta pedir»; con el pedido de pin → «Falta su ubicación»; manda el pin → «Falta confirmar»; dice sí → «Ya contactados»', async () => {
     await crear('N-100', '987400100');
     expect((await numero('N-100')).etapa).toBe('falta_pedir');
 
@@ -108,7 +109,8 @@ describe('Números del día: los filtros y las acciones en masa', () => {
     expect(e.simulador.recibido.find((r) => r.tipo === 'confirmacion' && r.cuerpo.referencia === 'N-110')?.cuerpo).toMatchObject({ confirmada: true });
   });
 
-  it('el pin puesto a mano desde el panel NO confirma por el cliente', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el pin puesto a mano desde el panel NO confirma por el cliente', async () => {
     const id = await crear('N-120', '987400120', conConfirmacion);
     await e.trabajar();
     expect((await e.entrega('N-120'))?.confirmacionEstado).toBe('pedida');
@@ -126,7 +128,8 @@ describe('Números del día: los filtros y las acciones en masa', () => {
     for (const n of r.numeros) expect(['falta_pedir', 'falta_ubicacion', 'falta_confirmar', 'contactados', 'necesita', 'cancelada']).toContain(n.etapa);
   });
 
-  it('«Pedir ubicación ahora» le reenvía el pedido del pin y salta a los que ya la mandaron o no existen, y lo dice en palabras', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«Pedir ubicación ahora» le reenvía el pedido del pin y salta a los que ya la mandaron o no existen, y lo dice en palabras', async () => {
     const id = await crear('N-130', '987400130');
     await e.trabajar();
     const antes = e.mensajesA('987400130').length;
@@ -145,7 +148,8 @@ describe('Números del día: los filtros y las acciones en masa', () => {
     expect(eventos.some((ev) => /pidió la ubicación desde Números del día/.test(ev.detalle ?? ''))).toBe(true);
   });
 
-  it('«Pedir confirmación» la vuelve a pedir ya; a quien le falta la ubicación se lo salta y dice por qué', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«Pedir confirmación» la vuelve a pedir ya; a quien le falta la ubicación se lo salta y dice por qué', async () => {
     const id = await crear('N-140', '987400140', conConfirmacion);
     await e.trabajar();
     const antes = e.botonesA('987400140').length;
@@ -204,7 +208,8 @@ describe('Números del día: los filtros y las acciones en masa', () => {
     expect((await numero('N-160')).etapa).toBe('falta_ubicacion');
   });
 
-  it('«Pausar» también detiene la pregunta de confirmar, y sus respuestas se siguen leyendo', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«Pausar» también detiene la pregunta de confirmar, y sus respuestas se siguen leyendo', async () => {
     const id = await crear('N-170', '987400170', conConfirmacion);
     await masa('pausar', [id]);
     await e.trabajar();

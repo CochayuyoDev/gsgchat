@@ -50,7 +50,7 @@ describe('los perfiles de instalación', () => {
 
     await s.aplicar('reparto', null);
     expect(generales()).toMatchObject({ modo: 'gsg', tono: 'auto' });
-    expect(guardado.at(-1)).toMatchObject({ responderDondeEsta: true, usarBotones: true, segundaVisita: { activa: true }, cierreDelDia: { activo: true }, clienteRecurrente: { activo: true } });
+    expect(guardado.at(-1)).toMatchObject({ responderDondeEsta: true, usarBotones: true, segundaVisita: { activa: true }, cierreDelDia: { activo: true }, clienteRecurrente: { activo: false } });
     // Ningun perfil toca textos.
     expect(guardado.every((g) => !('textos' in g))).toBe(true);
   });

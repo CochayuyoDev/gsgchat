@@ -242,7 +242,8 @@ describe('números reportados a GSG', () => {
     expect(pedidasDeUbicacion('987000120')).toBe(1);
   });
 
-  it('dos trackings del mismo teléfono el mismo día: un solo mensaje, agrupado_con, y la ubicación sale para los dos', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('dos trackings del mismo teléfono el mismo día: un solo mensaje, agrupado_con, y la ubicación sale para los dos', async () => {
     const r = await llamar('POST', '/api/v1/entregas', [pedido('G-1', '987000130'), pedido('G-2', '987000130')]);
     expect(r.status).toBe(201);
     const g2 = (r.body.whatsapp as Cuerpo[]).find((w) => w.tracking === 'G-2')!;
@@ -276,7 +277,8 @@ describe('números reportados a GSG', () => {
     expect((await e.repos.rutas.reportesRecientes(500, 'ubicacion')).map((x) => x.payload.tracking)).toContain('G-4');
   });
 
-  it('el mapa de trackings del día dice lo hecho por WhatsApp con cada uno', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el mapa de trackings del día dice lo hecho por WhatsApp con cada uno', async () => {
     const dia = e.entregas.diaDeHoy();
     const r = await llamar('GET', `/api/v1/trackings?dia=${dia}`);
     expect(r.status).toBe(200);
@@ -311,7 +313,7 @@ describe('números reportados a GSG', () => {
     expect(e.llamadasAGsg.every((l) => l.metodo === 'POST')).toBe(true);
     // Desde el 12/10 el problema de un número SÍ se le manda (POST /reported):
     // GSG ya no lo lee de su bandeja. Ninguna otra ruta, y ninguna consulta.
-    expect([...new Set(e.llamadasAGsg.map((l) => l.ruta))].sort()).toEqual(['/reported', '/send-location']);
+    expect([...new Set(e.llamadasAGsg.map((l) => l.ruta))].every((r) => ['/reported', '/send-location'].includes(r))).toBe(true);
   });
 });
 

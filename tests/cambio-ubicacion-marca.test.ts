@@ -110,7 +110,7 @@ describe('«quiero cambiar mi ubicación»: plantilla con el nombre, pin nuevo y
   const reportes: Array<Record<string, unknown>> = [];
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
+    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, iaActiva: true });
     const original = e.repos.entregas.registrarUbicacionAtomica.bind(e.repos.entregas);
     e.repos.entregas.registrarUbicacionAtomica = async (id, patch, reporte, propuestaAt) => {
       if (reporte) reportes.push(reporte.payload);
@@ -136,7 +136,8 @@ describe('«quiero cambiar mi ubicación»: plantilla con el nombre, pin nuevo y
     expect(c?.ubicacionCambiadaAt ?? null).toBeNull();
   });
 
-  it('el pin nuevo: «Ubicación registrada», marcada «cambió su ubicación», con la anterior guardada', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el pin nuevo: «Ubicación registrada», marcada «cambió su ubicación», con la anterior guardada', async () => {
     const salio = await nuevos(() => e.contesta(TEL, { pin: NUEVO }));
     expect(salio.some((m) => /Tu nueva ubicación se ha registrado correctamente/.test(String(m.body ?? '')))).toBe(true);
     const c = (await e.entrega('CM-1'))!;
@@ -156,7 +157,8 @@ describe('«quiero cambiar mi ubicación»: plantilla con el nombre, pin nuevo y
     expect(ev?.detalle).toContain(`ahora ${NUEVO.lat.toFixed(5)}, ${NUEVO.lng.toFixed(5)}`);
   });
 
-  it('Hoy y Números del día: «Ubicación registrada» con la marca y la hora', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('Hoy y Números del día: «Ubicación registrada» con la marca y la hora', async () => {
     const hoy = await e.api.get<{ entregas: Array<{ referencia: string; ubicacionEstado: string; ubicacionCambiadaAt: string | null; cambioUbicacion: string | null }> }>('/admin/entregas');
     const fila = hoy.body.entregas.find((x) => x.referencia === 'CM-1')!;
     expect(fila.ubicacionEstado).toBe('recibida');
@@ -173,7 +175,8 @@ describe('«quiero cambiar mi ubicación»: plantilla con el nombre, pin nuevo y
     if (typeof pagina.body.raw === 'string') expect(pagina.body.raw).toContain('chip-cambio');
   });
 
-  it('la API v1 y el reporte a GSG llevan el cambio', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('la API v1 y el reporte a GSG llevan el cambio', async () => {
     const api = entregaParaApi((await e.entrega('CM-1'))!) as { ubicacion: Record<string, unknown> };
     expect(api.ubicacion).toMatchObject({ estado: 'recibida', cambiada: true, cambios: 1 });
     expect(api.ubicacion.cambiadaEn).toEqual(expect.any(String));
@@ -186,7 +189,8 @@ describe('«quiero cambiar mi ubicación»: plantilla con el nombre, pin nuevo y
     expect(ubis.at(-1)).toMatchObject({ corregida: true, cambioUbicacion: true, cambios: 1, anterior: { lat: PIN_LIMA.lat, lng: PIN_LIMA.lng } });
   });
 
-  it('después de la 1:00 PM: lo de siempre, y la marca no cambia', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('después de la 1:00 PM: lo de siempre, y la marca no cambia', async () => {
     e.avanzar(5 * 60); // ~14:0x en Lima
     const salio = await nuevos(() => e.contesta(TEL, { texto: 'quiero cambiar mi ubicación' }));
     expect(salio).toHaveLength(1);
@@ -234,7 +238,8 @@ describe('con la IA configurada: lo que las reglas no ven lo reconoce el clasifi
   }, 60_000);
   afterAll(() => e?.cerrar());
 
-  it('una frase libre que las reglas no ven: el modelo dice CAMBIAR_UBICACION y sale la plantilla, nunca la etiqueta', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('una frase libre que las reglas no ven: el modelo dice CAMBIAR_UBICACION y sale la plantilla, nunca la etiqueta', async () => {
     const tel = await conUbicacion('Lucía Torres');
     const libre = 'oye mejor que vaya donde la señora del puesto 14';
     expect(pareceCambioUbicacion(libre)).toBe(false);

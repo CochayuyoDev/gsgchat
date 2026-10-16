@@ -37,7 +37,8 @@ async function pedidoAMano(e: EscenarioEntregas, tel: string, referencia: string
 const pidenUbicacion = (e: EscenarioEntregas, tel: string, desde: number) => e.mensajesA(tel).slice(desde).filter((m) => String(m.kind) === 'location_request');
 
 describe('la ubicación vale por día', () => {
-  it('el mismo día, el segundo tracking toma la ubicación registrada: no se le escribe otra vez y GSG recibe la lat/lng de los dos', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el mismo día, el segundo tracking toma la ubicación registrada: no se le escribe otra vez y GSG recibe la lat/lng de los dos', async () => {
     const e = await armar();
     try {
       const tel = '987720001';

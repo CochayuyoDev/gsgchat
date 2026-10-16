@@ -234,7 +234,7 @@ export interface RutasRepo {
   contarSolicitudes(query: Omit<ConsultaSolicitudes, 'limit' | 'offset'>): Promise<number>;
   actualizarSolicitud(id: number, patch: SolicitudPatch): Promise<Solicitud>;
   /** Recalcula de una vez el proximo seguimiento de clientes que siguen activos. */
-  reprogramarSeguimientos(esperasMensajesMinutos: number[]): Promise<number>;
+  reprogramarSeguimientos(esperasMensajesMinutos: number[], esperaFinalMinutos?: number): Promise<number>;
   cifrasPorEstado(loteId?: string): Promise<Record<string, number>>;
   cifrasPorIncidencia(loteId?: string): Promise<Record<string, number>>;
   /** Las que toca intentar ahora, de los lotes en marcha y en orden de espera. */
@@ -665,17 +665,19 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       return (await solicitud(id))!;
     },
 
-    async reprogramarSeguimientos(esperasMensajesMinutos) {
+    async reprogramarSeguimientos(esperasMensajesMinutos, esperaFinalMinutos = 0) {
       const esperas = esperasMensajesMinutos.map((n) => Math.max(1, Math.trunc(n)));
       const maxIntentos = esperas.length + 1;
+      const final = Math.max(0, Math.trunc(esperaFinalMinutos));
       const proximaFecha = esperas.length
         ? `date_add(s.ultimo_envio_at, interval case s.intentos ${esperas.map((_, i) => `when ${i + 1} then $${i + 1}`).join(' ')} else $${esperas.length} end minute)`
         : 'now(3)';
-      const params = esperas.length ? [...esperas, maxIntentos] : [maxIntentos];
+      const params = esperas.length ? [...esperas, final, maxIntentos] : [final, maxIntentos];
+      // Tras el último mensaje se espera la espera final antes de darlo por «sin respuesta».
       const { rowCount } = await pool.query(
         `update rutas_solicitudes s
            join rutas_lotes l on l.id = s.lote_id
-            set s.proximo_intento_at = case when s.intentos >= $${params.length} then now(3) else ${proximaFecha} end,
+            set s.proximo_intento_at = case when s.intentos >= $${params.length} then date_add(s.ultimo_envio_at, interval $${params.length - 1} minute) else ${proximaFecha} end,
                 s.updated_at = now(3)
           where l.estado in ('enviando', 'pausado')
             and s.estado in ('enviado', 'respondio')

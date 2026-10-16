@@ -69,7 +69,8 @@ describe('GSG por la API: pedir o confirmar la ubicación, gracias y cambio hast
     await gsg?.cerrar();
   });
 
-  it('1. GSG manda la lista (sin que se le pida) y cada cliente queda identificado por WhatsApp + tracking', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('1. GSG manda la lista (sin que se le pida) y cada cliente queda identificado por WhatsApp + tracking', async () => {
     const s = await e.entregas.recibirListaGsg(gsg.lista as never);
     expect(s).toMatchObject({ ok: true, nuevas: 3 });
     // A la API de GSG no se le hizo ninguna lectura.
@@ -81,7 +82,8 @@ describe('GSG por la API: pedir o confirmar la ubicación, gracias y cambio hast
     expect((await e.entregas.recibirListaGsg(gsg.lista as never)).nuevas).toBe(0);
   });
 
-  it('2. primer mensaje: a los de «falta ubicación» se les pide el pin; a los de «falta confirmar», SÍ/NO', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('2. primer mensaje: a los de «falta ubicación» se les pide el pin; a los de «falta confirmar», SÍ/NO', async () => {
     await e.api.post('/admin/entregas/confirmar-envio', { todos: true });
     await e.trabajar();
     for (const t of [ANA, BETO]) expect(e.mensajesA(t).some((m) => m.kind === 'location_request'), t).toBe(true);

@@ -237,7 +237,8 @@ describe('las frases propias del negocio (lo corregido en «Lo que la IA no ente
     expect(leerFrasesPropias('esto no es json')).toEqual({});
   });
 
-  it('el servicio las lee de settings: un "firme causa" corregido como sí confirma el pedido', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el servicio las lee de settings: un "firme causa" corregido como sí confirma el pedido', async () => {
     const e = await crearEscenarioEntregas({ supervisor: SUPERVISOR, arranque: hoyALas9() });
     try {
       await e.settingsRepo.put('entregas.frases', JSON.stringify({ si: ['firme causa'], no: [], duda: [], entregado: [], noEntregado: [], minutos: [] }), false);

@@ -21,7 +21,7 @@ describe('dos mensajes seguidos tras la ubicación registrada', () => {
   let e: EscenarioEntregas;
 
   beforeAll(async () => {
-    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true });
+    e = await crearEscenarioEntregas({ arranque: hoyALas9(), agente: true, iaActiva: true });
     await e.entregas.guardarAjustes({ soporte: { whatsapp: '987654321', llamadas: '' } });
     e.simulador.cargarDePrueba();
     await e.api.post('/admin/motorizados/de-prueba');

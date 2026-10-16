@@ -225,7 +225,8 @@ describe('un día de entregas con GSG simulado', () => {
     expect(e.simulador.pendientes().faltaConfirmacion.map((c) => c.referencia)).toContain('P-1008');
   });
 
-  it('algo que no se entiende (sin IA) se vuelve a preguntar con las opciones; un 👍 después confirma', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('algo que no se entiende (sin IA) se vuelve a preguntar con las opciones; un 👍 después confirma', async () => {
     await e.contesta('987000009', { texto: 'ehh, no sé, ¿quién habla?' });
     let textos = e.textosA('987000009');
     expect(textos[textos.length - 1]).toMatch(/no me quedó claro/i);
@@ -242,7 +243,8 @@ describe('un día de entregas con GSG simulado', () => {
     expect(lucia?.estado).toBe('lista');
   });
 
-  it('con la IA conectada, lee lo que las reglas no entienden (y queda apuntado que fue la IA)', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('con la IA conectada, lee lo que las reglas no entienden (y queda apuntado que fue la IA)', async () => {
     await e.contesta('987000002', { pin: pinDe(2) });
     e.ia.disponible = true;
     e.ia.respuestas.push('{"decision":"si","seguridad":0.92,"motivo":"quiere recibirlo hoy"}');
