@@ -118,7 +118,7 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'api-gsgchat', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
   { id: 'fiabilidad', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, reconexión, alertas y respaldos.', soloAdmin: true },
   { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
-  { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario y avisos del sistema.', soloAdmin: true },
+  { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Ajustes del sistema: nombre del negocio y supervisor de avisos.', soloAdmin: true },
   { id: 'manual', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
   { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
 ];

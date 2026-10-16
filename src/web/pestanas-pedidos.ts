@@ -23,7 +23,7 @@ export function pestanasPedidosHtml(): string {
   return `<nav class="pp-pestanas" aria-label="Pedidos GSG">
   <a href="/hoy" data-pp="pedidos">Pedidos</a>
   <a href="/automatizacion-gsg" data-pp="solicitud" data-pp-admin hidden>Solicitud de ubicación</a>
-  <a href="/automatizacion-gsg#ajustes" data-pp="ajustes" data-pp-admin hidden>Ajustes</a>
+  <a href="/automatizacion-gsg#ajustes" data-pp="ajustes" data-pp-admin hidden>Ajustes de chat</a>
 </nav>`;
 }
 
@@ -53,7 +53,7 @@ export const PESTANAS_PEDIDOS_JS = String.raw`
     });
   });
   /* Al abrir Ajustes por el ancla, el navegador baja hasta la caja: las pestañas quedan a la vista. */
-  window.pestanasArriba = function () { setTimeout(function () { window.scrollTo(0, 0); }, 30); };
+  window.pestanasArriba = function () { setTimeout(function () { if (window.scrollTo) window.scrollTo(0, 0); }, 30); };
   window.addEventListener('hashchange', window.marcarPestanaPedidos);
   window.marcarPestanaPedidos();
   fetch('/admin/yo', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (yo) {

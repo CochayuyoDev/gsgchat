@@ -317,6 +317,20 @@ const CSS = `
 .wrap { max-width: var(--ancho-max, 1600px); }
 .con-resumen { display: grid; gap: var(--esp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-bottom: var(--esp-6); }
 .con-resumen.una { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+/* Conexión con GSG: la tarjeta usa el ancho y reparte sus bloques en dos columnas. */
+.wrap:has(#gsg) { max-width: 1120px; }
+.con-resumen.una:has(> #gsg) { max-width: none; }
+#gsg .bloque.punteado { padding: var(--esp-4); border: 1px solid var(--borde); border-radius: 12px; background: var(--fondo, transparent); }
+#gsg .bloque.punteado h3 { margin-top: 0; }
+.gsg-destinos table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 13.5px; }
+.gsg-destinos th { text-align: left; font-weight: 600; color: var(--texto-suave); padding: 6px 8px; border-bottom: 1px solid var(--borde); }
+.gsg-destinos td { padding: 8px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+.gsg-destinos code { overflow-wrap: anywhere; }
+@media (min-width: 1000px) {
+  #gsg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--esp-5); row-gap: var(--esp-4); align-items: start; }
+  #gsg > * { grid-column: 1 / -1; }
+  #gsg > #gsg-consulta, #gsg > #gsg-envios-caja { grid-column: auto; }
+}
 @media (max-width: 820px) { .con-resumen { grid-template-columns: minmax(0, 1fr); } }
 .con-card { padding: var(--esp-5); display: flex; flex-direction: column; gap: var(--esp-3); min-width: 0; }
 @media (max-width: 640px) { .con-card { padding: var(--esp-4); } }
@@ -472,7 +486,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   </div>
   <div class="bloque punteado" id="gsg-envios-caja">
     <h3>Lo que enviamos a GSG</h3>
-    <p class="ayuda" id="gsg-envios-destino"></p>
+    <div id="gsg-envios-destino" class="gsg-destinos"></div>
     <div id="gsg-envios" class="ayuda">Cargando…</div>
     <p class="ayuda"><a id="gsg-envios-refrescar" href="#">Actualizar</a></p>
   </div>
@@ -1895,7 +1909,15 @@ if ($('gsg')) {
     try {
       var env = await api('/admin/gsg/envios');
       var ESTADOS = { enviado: 'Enviado a GSG', pendiente: 'Pendiente de enviar', fallido: 'Falló el envío' };
-      texto('gsg-envios-destino', env.aviso ? env.aviso : 'Ubicaciones: POST a ' + (env.destino || '(sin dirección)') + ' · Problemas (números mal y errores): POST a ' + (env.destinoProblemas || '(sin dirección)') + ' · con la cabecera X-API-Key.');
+      /* A dónde va cada cosa, como tabla: qué, método y dirección. */
+      var destinos = $('gsg-envios-destino');
+      if (destinos) {
+        if (env.aviso) destinos.textContent = env.aviso;
+        else destinos.innerHTML = '<table><thead><tr><th>Qué le enviamos</th><th>Método</th><th>Dirección</th></tr></thead><tbody>' +
+          '<tr><td>Ubicaciones</td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>' + esc(env.destino || '(sin dirección)') + '</code></td></tr>' +
+          '<tr><td>Problemas (números mal y errores)</td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>' + esc(env.destinoProblemas || '(sin dirección)') + '</code></td></tr>' +
+          '</tbody></table><p class="ayuda">Las dos llevan la cabecera <code>X-API-Key</code> con la API Key de GSG.</p>';
+      }
       caja.innerHTML = (env.items || []).length
         ? '<table><thead><tr><th>Fecha</th><th>Qué</th><th>Cuerpo enviado</th><th>Estado</th><th>Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
             return '<tr><td>' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td>' + (r.tipo === 'incidencia' ? 'Problema' : 'Ubicación') + '</td><td><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></td><td><b>' + esc(ESTADOS[r.estado] || r.estado) + '</b></td><td>' + esc(r.intentos) + '</td><td>' + esc(r.error || '') + '</td></tr>';

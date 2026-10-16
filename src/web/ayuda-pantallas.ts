@@ -94,7 +94,7 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
   },
   "configuracion": {
     "titulo": "Ajustes",
-    "que": "Configura el negocio, supervisor y horario.",
+    "que": "Configura el nombre del negocio y a quién se avisa. El horario y los mensajes al cliente están en Pedidos GSG → Ajustes de chat.",
     "preguntas": []
   },
   "actividad": {

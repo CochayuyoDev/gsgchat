@@ -135,7 +135,16 @@ const CSS = `${REPARTO_CSS}
   .resumen-carga .linea { padding: 4px 0; border-bottom: 1px dashed var(--borde); }
 
   /* Ajustes: frases con huecos, no un formulario de casillas sueltas. */
-  .aj .aj-titulo { font-size: var(--fs-h3); margin: 18px 0 4px; }
+  .aj .aj-titulo { font-size: var(--fs-h3); margin: 0 0 2px; display: flex; align-items: center; gap: 10px; }
+  .aj .aj-intro { margin: 0 0 16px; padding: 12px 14px; border-radius: 10px; background: var(--primario-suave); line-height: 1.6; }
+  .aj .aj-intro span { display: block; margin-top: 4px; font-size: 13.5px; color: var(--texto-suave); }
+  .aj .aj-bloques { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .aj .aj-bloque { border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; background: var(--superficie); min-width: 0; }
+  .aj .aj-ancho { grid-column: 1 / -1; }
+  .aj .aj-paso { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--primario); color: var(--primario-texto); font-size: 13px; font-weight: 700; flex: none; }
+  .aj .aj-que { margin: 0 0 8px 36px; font-size: 13.5px; color: var(--texto-suave); }
+  .aj .aj-guardar-barra { position: sticky; bottom: 0; margin-top: 14px; padding: 12px 0; background: var(--superficie); border-top: 1px solid var(--borde); z-index: 2; }
+  @media (max-width: 860px) { .aj .aj-bloques { grid-template-columns: 1fr; } .aj .aj-que { margin-left: 0; } }
   .aj .aj-frase { margin: 0; line-height: 2.1; font-size: var(--fs-cuerpo); }
   .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
   .aj .paso { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-2); background: var(--superficie-2); }
@@ -199,40 +208,54 @@ export function rutasPage(opts: RutasOpts): string {
     <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
   </div>
 
-  <!-- Ajustes del reparto: horario, espera, intentos, ritmo y qué se dice en cada paso -->
+  <!-- Ajustes de chat: cómo se le escribe al cliente (horario, ritmo, insistencia y textos) -->
   <div class="tarjeta panel hidden" id="caja-ajustes" style="margin-bottom:var(--esp-3)">
-    <h2>Ajustes del reparto <span class="sep"></span>
+    <h2>Ajustes de chat <span class="sep"></span>
       <button type="button" class="btn sm" id="cerrar-ajustes">Cerrar</button>
     </h2>
     <div class="cuerpo aj">
-      <p class="muted" style="margin-top:0">
-        Todo lo de aquí se aplica en el siguiente mensaje, sin reiniciar. Las horas son de Lima.
-        Los envíos respetan el horario y la pausa que configures aquí.
+      <p class="aj-intro">
+        <b>Cómo le escribe el sistema a cada cliente por WhatsApp</b> para pedirle su ubicación: cuándo, a qué ritmo, cuántas veces y con qué palabras.
+        Se aplica en el siguiente mensaje, sin reiniciar. Las horas son de Lima.
+        <span>El nombre del negocio, el teléfono del supervisor y los avisos están en el módulo <a href="/panel#configuracion">Ajustes</a> del sistema.</span>
       </p>
 
-      <h3 class="aj-titulo">¿A qué horas se escribe?</h3>
+      <div class="aj-bloques">
+      <section class="aj-bloque">
+      <h3 class="aj-titulo"><span class="aj-paso">1</span>Horario</h3>
+      <p class="aj-que">A qué horas se le puede escribir al cliente.</p>
       <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00.
         Fuera de ese horario, los mensajes esperan al día siguiente.</p>
+      </section>
 
-      <h3 class="aj-titulo">¿Cómo se insiste si no contesta?</h3>
+      <section class="aj-bloque">
+      <h3 class="aj-titulo"><span class="aj-paso">2</span>Ritmo</h3>
+      <p class="aj-que">Cuánto se espera entre un cliente y el siguiente.</p>
+      <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num" aria-label="Pausa mínima en segundos">
+        y <input id="aj-pausa-max" type="number" min="1" class="aj-num" aria-label="Pausa máxima en segundos"> segundos, para parecer una persona y cuidar el número.</p>
+      </section>
+
+      <section class="aj-bloque aj-ancho">
+      <h3 class="aj-titulo"><span class="aj-paso">3</span>Insistencia</h3>
+      <p class="aj-que">Cuántos mensajes se le mandan si no responde, cada cuánto, y cuándo se da por «sin respuesta».</p>
       <p class="aj-frase">El primer aviso sale de inmediato. Por defecto, los siguientes esperan 30, 25 y 20 minutos. Puedes configurar hasta 100 mensajes por cliente; al guardar, los cambios también recalculan los seguimientos que ya esperan, desde el último mensaje enviado.</p>
       <div id="aj-secuencia"></div>
       <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:var(--esp-2)">Agregar mensaje</button>
       <p class="aj-frase" style="margin-top:var(--esp-3)">Después del último mensaje se espera <input id="aj-espera-final" type="number" min="0" max="1440" class="aj-num" aria-label="Minutos de espera tras el último mensaje"> minutos;
         si en ese tiempo no manda su ubicación, queda «sin respuesta» y se le reporta a GSG. Con 0 se reporta en el momento.</p>
+      </section>
 
-
-      <h3 class="aj-titulo">¿A qué ritmo?</h3>
-      <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num" aria-label="Pausa mínima en segundos">
-        y <input id="aj-pausa-max" type="number" min="1" class="aj-num" aria-label="Pausa máxima en segundos"> segundos, para parecer una persona y cuidar el número.</p>
-
-      <h3 class="aj-titulo">¿Qué se le dice?</h3>
+      <section class="aj-bloque aj-ancho">
+      <h3 class="aj-titulo"><span class="aj-paso">4</span>Mensajes al cliente</h3>
+      <p class="aj-que">Qué se le dice en cada mensaje.</p>
       <p class="muted" style="margin-top:0">Edita los tres textos base y, desde el mensaje 4, el texto de cada mensaje adicional. Si dejas vacío un mensaje adicional, se usa el recordatorio o la insistencia según la respuesta del cliente.
         Debajo de cada uno ves cómo le llegaría a un cliente de ejemplo. Si no escribes nada, se usan los textos de siempre.</p>
       <div id="aj-pasos"></div>
       <div id="aj-pasos-adicionales"></div>
+      </section>
+      </div>
 
-      <div class="fila" style="margin-top:var(--esp-4)">
+      <div class="fila aj-guardar-barra">
         <button type="button" class="btn primario fijo" id="aj-guardar">Guardar</button>
         <button type="button" class="btn fijo" id="aj-reset">Volver a lo de siempre</button>
         <span class="muted" id="aj-estado" role="status"></span>
@@ -1274,7 +1297,7 @@ function sincronizarAjustes(abierta) {
   if (window.shellTitulo) {
     shellTitulo(
       'Pedidos GSG',
-      abierta ? 'Ajustes: horario, espera, intentos, textos y plantillas' : 'Solicitud de ubicación a cada cliente del día'
+      abierta ? 'Ajustes de chat: horario, ritmo, insistencia y mensajes al cliente' : 'Solicitud de ubicación a cada cliente del día'
     );
   }
 }
