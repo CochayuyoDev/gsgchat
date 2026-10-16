@@ -57,11 +57,9 @@ interface InfoModo {
  */
 const MODOS: Record<Modo, InfoModo> = {
   local: {
-    titulo: 'Escanear el QR y ya',
-    etiqueta: 'para pruebas',
-    pruebas: true,
+    titulo: 'Escanear el QR (WhatsApp normal o Business)',
     resumen:
-      'Sin cuenta de Meta y sin instalar nada: el código sale aquí mismo y sirve con cualquier WhatsApp, también el verde.',
+      'Escaneas el código desde tu WhatsApp, normal o Business, y queda conectado. Sin cuenta de Meta y sin instalar nada.',
     oficial: false,
     paso2: 'Este camino no pide ningún dato: la vinculación es el propio código QR.',
     paso3:
@@ -560,7 +558,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
 ` : ''}</div>
 
 ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
-  <summary><b>Conectar con Meta, paso a paso</b><span class="ayuda">WhatsApp Business por la API oficial, prueba de envío, conexiones de prueba (QR, WAHA) y datos para programadores.</span></summary>
+  <summary><b>Conectar WhatsApp, paso a paso</b><span class="ayuda">WhatsApp Business por la API oficial, conexión por QR, prueba de envío, WAHA y datos para programadores.</span></summary>
 <ol class="progreso" id="progreso" aria-label="Progreso de la conexión">
   <li data-paso="1"><span class="n">1</span><span class="t">Cómo</span></li>
   <li data-paso="2"><span class="n">2</span><span class="t">Datos</span></li>
@@ -583,8 +581,8 @@ ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
         : ''
     }
     <details class="mas-formas" id="solo-pruebas">
-      <summary>Solo para pruebas, sin Meta (QR, WAHA)</summary>
-      <p class="ayuda">Emulan WhatsApp Web: están fuera de las normas de Meta y el número puede acabar bloqueado. Úsalos con un número de pruebas, nunca con el del negocio.</p>
+      <summary>Solo para pruebas, sin Meta (WAHA)</summary>
+      <p class="ayuda">WAHA emula WhatsApp Web desde un contenedor en tu servidor. Úsalo para probar.</p>
       ${dePrueba.map(opcionHtml).join('')}
     </details>
     <div class="nota hidden" id="aviso-modo"></div>
@@ -678,20 +676,6 @@ ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
     </div>
   </div>
 </section>
-${
-  opts.conGsg
-    ? `
-<section class="tarjeta paso" id="perfil">
-  <h2>¿Para qué vas a usar GSGchat?</h2>
-  <p class="ayuda">El perfil deja de un clic el menú, qué contesta solo y los ajustes de las entregas. Tus textos y tus datos no se tocan.</p>
-  <div id="perfil-resumen"><span class="ok" id="perfil-resumen-texto"></span><button class="btn" type="button" id="perfil-cambiar">Cambiar</button></div>
-  <div id="perfil-lista" class="perfiles"></div>
-  <div class="acciones"><button class="btn primario" id="perfil-aplicar" type="button">Aplicar este perfil</button><span id="perfil-state" class="chip hidden" role="status"></span></div>
-</section>
-
-`
-    : ''
-}
 
 <details>
   <summary>Solo si te lo pide soporte: ver y editar todos los datos guardados</summary>
@@ -885,14 +869,11 @@ function abrirAvanzado(id) {
 
 $('wa-conectar').onclick = async function () {
   var boton = this;
-  /* Sin camino elegido, el de verdad: WhatsApp Business por la API de Meta,
-     conservando el numero en el telefono (coexistencia). Los QR son para
-     probar y se eligen a mano en «Solo para pruebas». */
+  /* Sin camino elegido, el de siempre: escanear el QR con el WhatsApp del
+     teléfono (normal o Business). La API de Meta se elige a mano. */
   if (!modo) {
-    var opcion = document.querySelector('input[name="modo"][value="coexistence"]');
+    var opcion = document.querySelector('input[name="modo"][value="local"]');
     if (opcion) opcion.click();
-    abrirAvanzado('paso1');
-    return;
   }
   if (!esQr()) { abrirAvanzado('paso' + pasoActual()); return; }
   boton.disabled = true;
@@ -967,8 +948,11 @@ function pintarPaso1() {
   aviso.innerHTML = esMeta()
     ? '<b>Necesitas WhatsApp Business</b> (el icono naranja), no el WhatsApp verde de siempre. ' +
       'Si usas el verde, instala WhatsApp Business y migra: es gratis y conservas número e historial.'
-    : '<b>Este camino no es oficial.</b> Emula WhatsApp Web, está fuera de los términos de Meta y el ' +
-      'número puede acabar baneado sin aviso y sin recuperación. Usa un número secundario.';
+    : modo === 'local'
+      ? '<b>Conexión por QR:</b> funciona con tu WhatsApp normal o Business. No es la API oficial de Meta: ' +
+        'si mandas muchos mensajes, WhatsApp puede limitar el número.'
+      : '<b>Este camino no es oficial.</b> Emula WhatsApp Web, está fuera de los términos de Meta y el ' +
+        'número puede acabar baneado sin aviso y sin recuperación. Usa un número secundario.';
   aviso.classList.remove('hidden');
 }
 
@@ -1218,6 +1202,9 @@ async function estadoQr() {
 
 $('qr-connect').onclick = async function () {
   var boton = this;
+  /* El código sale arriba, en la tarjeta de WhatsApp: se sube hasta ella. */
+  var tarjeta = $('card-wa');
+  if (tarjeta && tarjeta.scrollIntoView) tarjeta.scrollIntoView({ behavior: 'smooth', block: 'start' });
   boton.disabled = true;
   qr.parado = false;
   estado('fb-state', modo === 'local'
@@ -1609,6 +1596,8 @@ function cargar() {
 
       // Sin eleccion previa manda lo que ya este guardado en el servidor.
       if (!modo && (guardado.provider === 'waha' || guardado.provider === 'local')) modo = guardado.provider;
+      // Sin nada guardado, viene marcado escanear el QR (WhatsApp normal o Business).
+      if (!modo && !guardado.provider) modo = 'local';
 
       /* Si el navegador recuerda un camino y el servidor esta en otro (el
          guardado del proveedor fallo, o se cambio desde otra pantalla), los

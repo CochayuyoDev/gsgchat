@@ -107,20 +107,20 @@ export function gsgVigente(): boolean {
  * enciende desde Ajustes.
  */
 export const MENU_GSG: ItemMenu[] = [
-  { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Estado de la API, WhatsApp, pedidos y errores.' },
-  { id: 'hoy', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos del día, solicitud de ubicación y sus ajustes (horario, ritmo y mensajes).' },
-  { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
-  { id: 'historial', etiqueta: 'Historial', href: '/panel#historial', icono: 'historial', descripcion: 'Recepciones de la API de GSG con sus errores y, para administradores, las acciones del equipo.' },
-  { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
-  { id: 'entrenamiento', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
-  { id: 'conexion', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'QR, WAHA o API de Meta: el número de WhatsApp.' },
-  { id: 'gsg-courier', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'URL y API Key de GSG, envío de ubicaciones y consulta de estado.', soloAdmin: true },
-  { id: 'api-gsgchat', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
-  { id: 'fiabilidad', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, reconexión, alertas y respaldos.', soloAdmin: true },
-  { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
-  { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Ajustes del sistema: nombre del negocio y supervisor de avisos.', soloAdmin: true },
-  { id: 'manual', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
-  { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
+  { id: 'inicio', seccion: 'Inicio', etiqueta: 'Dashboard', href: '/panel#inicio', icono: 'inicio', descripcion: 'Estado de la API, WhatsApp, pedidos y errores.' },
+  { id: 'hoy', seccion: 'Inicio', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos del día, solicitud de ubicación y sus ajustes (horario, ritmo y mensajes).' },
+  { id: 'chats', seccion: 'Inicio', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
+  { id: 'historial', seccion: 'Flujo', etiqueta: 'Historial', href: '/panel#historial', icono: 'historial', descripcion: 'Recepciones de la API de GSG con sus errores y, para administradores, las acciones del equipo.' },
+  { id: 'conexion', seccion: 'Flujo', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'QR, WAHA o API de Meta: el número de WhatsApp.' },
+  { id: 'gsg-courier', seccion: 'Flujo', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'URL y API Key de GSG, envío de ubicaciones y consulta de estado.', soloAdmin: true },
+  { id: 'api-gsgchat', seccion: 'Flujo', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
+  { id: 'ia', seccion: 'IA GSG', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
+  { id: 'entrenamiento', seccion: 'IA GSG', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
+  { id: 'fiabilidad', seccion: 'Configuración', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, reconexión, alertas y respaldos.', soloAdmin: true },
+  { id: 'usuarios', seccion: 'Configuración', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
+  { id: 'configuracion', seccion: 'Configuración', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Ajustes del sistema: nombre del negocio y supervisor de avisos.', soloAdmin: true },
+  { id: 'manual', seccion: 'Configuración', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
+  { id: 'soporte', seccion: 'Configuración', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
 ];
 export const MENU_GSG_DUENO: GrupoMenu = {
   id: 'dueno', etiqueta: 'Superadministración', items: [
@@ -247,6 +247,7 @@ const CSS = `
   .s-grupo { margin-top: 2px; }
   .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11.5px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit; }
   .s-grupo-cab:hover { background: var(--s-hover); color: var(--s-text); }
+  .s-grupo.fijo > .s-grupo-cab { cursor: default; } .s-grupo.fijo > .s-grupo-cab:hover { background: transparent; color: var(--s-muted); } .s-grupo.fijo > .s-grupo-cab .s-ico { display: none; }
   .s-grupo-cab .s-ico { width: 16px; height: 16px; transition: transform .15s; }
   .s-grupo-cab .s-ico { transform: rotate(90deg); }
   .s-grupo-items { display: block; padding: 0 0 4px 4px; }
@@ -560,6 +561,8 @@ const JS = String.raw`
   /* grupos: todos abiertos; el que se cierre a mano queda cerrado hasta que se vuelva a abrir */
   document.querySelectorAll('.s-grupo').forEach(function (g) {
     var id = g.getAttribute('data-grupo');
+    /* Inicio (Dashboard, Pedidos GSG, Chats) siempre a la vista: no se pliega. */
+    if (id === 'gsg-inicio') { g.classList.add('fijo'); return; }
     var guardado = leer('s-grupo-' + id);
     if (guardado === 'cerrado' || (!guardado && g.hasAttribute('data-cerrado'))) g.classList.add('cerrado');
     g.querySelector('.s-grupo-cab').onclick = function () {
@@ -1196,7 +1199,8 @@ export function appShell(opts: ShellOpts): string {
     ...secciones.map((sec) => {
       const items = visiblesGsg.filter((i) => i.seccion === sec);
       // Sin la plantilla de GSG, los procesos son lo del dia a dia: esa seccion nace abierta.
-      const cerrada = !(sec === 'Procesos' && !conGsg);
+      // Inicio nace abierta; Flujo, IA GSG y Configuracion, cerradas (la del modulo abierto se abre sola).
+      const cerrada = sec !== 'Inicio';
       return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}"${cerrada ? ' data-cerrado="1"' : ''}>
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(sec)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
