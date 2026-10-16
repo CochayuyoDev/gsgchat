@@ -318,7 +318,22 @@ const CSS = `
 .con-resumen { display: grid; gap: var(--esp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-bottom: var(--esp-6); }
 .con-resumen.una { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
 /* Conexión con GSG: la tarjeta usa el ancho y reparte sus bloques en dos columnas. */
-.wrap:has(#gsg) { max-width: 1120px; }
+.wrap:has(#gsg), .wrap:has(#card-wa) { max-width: 1120px; }
+.con-resumen.una:has(> #card-wa) { max-width: none; }
+/* WhatsApp: el estado a la izquierda y los botones a la derecha, a todo el ancho. */
+@media (min-width: 900px) {
+  #card-wa { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--esp-5); row-gap: var(--esp-2); align-items: center; }
+  #card-wa > * { grid-column: 1; }
+  #card-wa > .acciones { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
+  #card-wa > #qr-box { grid-column: 1 / -1; }
+}
+/* «Conectar con Meta, paso a paso»: una tarjeta que se despliega, con su flecha. */
+#con-avanzado { border-top: none; padding-top: 0; margin-top: 16px; }
+#con-avanzado > summary { list-style: none; cursor: pointer; position: relative; border: 1px solid var(--borde); border-radius: 14px; padding: 16px 56px 16px 20px; background: var(--superficie); }
+#con-avanzado > summary::-webkit-details-marker { display: none; }
+#con-avanzado > summary::after { content: ''; position: absolute; right: 24px; top: 50%; width: 9px; height: 9px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: translateY(-70%) rotate(45deg); transition: transform .15s; }
+#con-avanzado[open] > summary::after { transform: translateY(-30%) rotate(-135deg); }
+#con-avanzado > summary:hover { border-color: var(--primario); }
 .con-resumen.una:has(> #gsg) { max-width: none; }
 #gsg .bloque.punteado { padding: var(--esp-4); border: 1px solid var(--borde); border-radius: 12px; background: var(--fondo, transparent); }
 #gsg .bloque.punteado h3 { margin-top: 0; }

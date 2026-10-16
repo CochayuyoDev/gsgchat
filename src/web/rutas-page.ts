@@ -32,6 +32,37 @@ import { PESTANAS_PEDIDOS_CSS, PESTANAS_PEDIDOS_JS, pestanasPedidosHtml } from '
 
 const CSS = `${REPARTO_CSS}
 .ref-pedido { white-space: nowrap; font-weight: 600; }
+/* Detalle de un cliente */
+.d-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.d-nombre { font-size: 17px; }
+.d-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 0 0 10px; }
+.d-meta span { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--gris-suave); font-size: 13.5px; overflow-wrap: anywhere; }
+.d-meta small { font-size: 11.5px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
+.d-dir { margin: 0 0 10px; font-size: 13.5px; color: var(--texto-suave); }
+.d-titulo { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); margin: 16px 0 8px; }
+.d-bloque { margin-top: 6px; padding: 4px 12px 12px; border: 1px solid var(--borde); border-radius: 10px; }
+.d-bloque .d-titulo { margin-top: 10px; }
+.d-bloque .campo label { font-size: 13px; font-weight: 600; }
+.d-acciones { gap: 8px; flex-wrap: wrap; }
+.d-peligro { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--borde); }
+.d-peligro .btn { color: var(--rojo); border-color: var(--rojo-suave); }
+.d-peligro .btn:hover { background: var(--rojo-suave); }
+.d-linea { list-style: none; margin: 0 0 0 6px !important; padding: 0 0 0 16px !important; border-left: 2px solid var(--borde); display: grid; gap: 10px; }
+.d-linea li { position: relative; font-size: 13.5px; padding: 0 !important; border: none !important; }
+.d-linea li::before { content: ''; position: absolute; left: -23px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--primario); border: 2px solid var(--superficie); }
+.d-linea .cuando { font-weight: 600; color: var(--texto); }
+/* Enviar a GSG */
+.g-estado { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.g-destino { font-size: 13px; color: var(--texto-suave); overflow-wrap: anywhere; }
+.g-nota { margin: 0 0 12px; font-size: 13px; }
+.g-cifras { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.g-cifra { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--gris-suave); }
+.g-cifra b { font-size: 22px; line-height: 1.1; }
+.g-cifra span { font-size: 12.5px; color: var(--texto-suave); }
+.g-cifra.g-verde b { color: var(--verde); }
+.g-cifra.g-ambar { background: var(--ambar-suave); } .g-cifra.g-ambar b { color: var(--ambar); }
+.g-cifra.g-rojo { background: var(--rojo-suave); } .g-cifra.g-rojo b { color: var(--rojo); }
+.g-botones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .wrap.modo-ajustes > :not(.pp-pestanas):not(#caja-ajustes):not(.demo):not(.aviso) { display: none !important; }
   * { box-sizing: border-box; }
   .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); }
@@ -490,21 +521,21 @@ function pintarBotonesDeMarcha() {
 function pintarGsg(datos) {
   var gsg = datos.gsg;
   var html =
-    '<p style="margin:0 0 8px">' +
-      (gsg.conectado ? '<span class="chip tono-verde">conectado</span>' : '<span class="chip tono-ambar">sin conectar</span>') +
-      ' <span class="muted">' + esc(gsg.descripcion) + '</span></p>' +
-    '<p class="muted" style="margin:0 0 10px;font-size:13px">' +
+    '<div class="g-estado">' +
+      (gsg.conectado ? '<span class="chip tono-verde">Conectado</span>' : '<span class="chip tono-ambar">Sin conectar</span>') +
+      '<span class="g-destino">' + esc(gsg.descripcion) + '</span></div>' +
+    '<p class="muted g-nota">' +
       'Cada ubicación conseguida y cada incidencia se guarda lista para GSG. ' +
       (gsg.conectado
         ? 'Se envían solas cada minuto, con un resumen del lote cada ' + datos.alertas.resumenCadaMin + ' min.'
         : 'Mientras no exista la API se acumulan aquí, y saldrán todas el día que se conecte.') +
     '</p>' +
-    '<div class="fila">' +
-      '<div><b>' + (gsg.cola.pendiente || 0) + '</b><div class="muted" style="font-size:12.5px">en cola</div></div>' +
-      '<div><b>' + (gsg.cola.enviado || 0) + '</b><div class="muted" style="font-size:12.5px">enviados</div></div>' +
-      '<div><b>' + (gsg.cola.fallido || 0) + '</b><div class="muted" style="font-size:12.5px">fallidos</div></div>' +
+    '<div class="g-cifras">' +
+      '<div class="g-cifra' + ((gsg.cola.pendiente || 0) ? ' g-ambar' : '') + '"><b>' + (gsg.cola.pendiente || 0) + '</b><span>en cola</span></div>' +
+      '<div class="g-cifra g-verde"><b>' + (gsg.cola.enviado || 0) + '</b><span>enviados</span></div>' +
+      '<div class="g-cifra' + ((gsg.cola.fallido || 0) ? ' g-rojo' : '') + '"><b>' + (gsg.cola.fallido || 0) + '</b><span>fallidos</span></div>' +
     '</div>' +
-    '<div class="fila" style="margin-top:10px">' +
+    '<div class="g-botones">' +
       '<button type="button" class="btn sm" id="gsg-descargar">Descargar la cola</button>' +
       '<button type="button" class="btn sm" id="gsg-enviar"' + (gsg.conectado ? '' : ' disabled') + '>Enviar ahora</button>' +
     '</div>';
@@ -692,13 +723,13 @@ function pintarDetalle(data) {
     : '';
 
   var info =
-    '<p style="margin:0 0 4px"><b>' + esc(s.nombre || 'Sin nombre') + '</b> ' + chipEstado(s.estado) + '</p>' +
-    '<p class="muted" style="margin:0 0 12px;font-size:13px">' +
-      esc(s.phone || s.telefonoCrudo) +
-      (s.referencia ? ' · pedido ' + esc(s.referencia) : '') +
-      (s.direccion ? '<br>' + esc(s.direccion) : '') +
-      (s.distrito ? ' (' + esc(s.distrito) + ')' : '') +
-    '</p>' +
+    '<div class="d-cab"><b class="d-nombre">' + esc(s.nombre || 'Sin nombre') + '</b>' + chipEstado(s.estado) + '</div>' +
+    '<div class="d-meta">' +
+      '<span><small>Teléfono</small>' + esc(s.phone || s.telefonoCrudo) + '</span>' +
+      (s.referencia ? '<span><small>Pedido</small>' + esc(s.referencia) + '</span>' : '') +
+      (s.distrito ? '<span><small>Distrito</small>' + esc(s.distrito) + '</span>' : '') +
+    '</div>' +
+    (s.direccion ? '<p class="d-dir">' + esc(s.direccion) + '</p>' : '') +
     mapa +
     explicacion;
 
@@ -709,8 +740,8 @@ function pintarDetalle(data) {
     return '<li><span class="cuando">' + esc(cuando(e.createdAt)) + '</span> · ' + esc(e.detalle || e.tipo) + '</li>';
   }).join('') || '<li class="muted">Todavía no hay movimientos.</li>';
   var historial =
-    '<h3 style="font-size:13px;margin:14px 0 6px">Historial</h3>' +
-    '<ul class="bitacora">' + bitacora + '</ul>';
+    '<h3 class="d-titulo">Historial</h3>' +
+    '<ul class="bitacora d-linea">' + bitacora + '</ul>';
   var zonaHistorial = document.getElementById('detalle-historial');
   if (zonaHistorial.innerHTML !== historial) zonaHistorial.innerHTML = historial;
 
@@ -721,7 +752,7 @@ function pintarDetalle(data) {
 
   var sinTelefono = !s.phone;
   var puede = accionesDeEstado(s.estado);
-  var enlaceChat = '<a class="fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>';
+  var enlaceChat = '<a class="btn sm fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>';
 
   // Quitada de la automatizacion: nada que pueda volver a escribirle. Solo
   // se dice que esta fuera y se deja abrir el chat.
@@ -734,13 +765,15 @@ function pintarDetalle(data) {
   }
 
   document.getElementById('detalle-acciones').innerHTML =
-    '<div class="campo"><label for="d-telefono">Corregir el teléfono</label>' +
+    '<div class="d-bloque"><h3 class="d-titulo">Corregir datos</h3>' +
+    '<div class="campo"><label for="d-telefono">Teléfono</label>' +
       '<div class="fila"><input id="d-telefono" value="' + esc(s.telefonoCrudo) + '">' +
       '<button type="button" class="btn sm fijo" id="d-guardar-tel">Guardar y reintentar</button></div></div>' +
-    '<div class="campo"><label for="d-ubicacion">Cargar la ubicación a mano (enlace de mapa o «lat, lng»)</label>' +
+    '<div class="campo"><label for="d-ubicacion">Ubicación a mano <span class="muted">(enlace de mapa o «lat, lng»)</span></label>' +
       '<div class="fila"><input id="d-ubicacion" placeholder="https://maps.app.goo.gl/… o -12.09, -77.03">' +
-      '<button type="button" class="btn sm fijo" id="d-guardar-ubi">Guardar</button></div></div>' +
-    '<div class="fila" style="margin:12px 0 4px">' +
+      '<button type="button" class="btn sm fijo" id="d-guardar-ubi">Guardar</button></div></div></div>' +
+    '<h3 class="d-titulo">Acciones</h3>' +
+    '<div class="fila d-acciones">' +
       '<button type="button" class="btn sm fijo" id="d-derivar"' + (s.estado === 'derivado' ? ' disabled title="Ya está con el repartidor"' : '') + '>Pasar al repartidor</button>' +
       (puede.reintentar
         ? '<button type="button" class="btn sm fijo" id="d-reintentar"' + (sinTelefono ? ' disabled title="Sin un teléfono al que escribir: corrígelo primero"' : '') + '>Reintentar esta solicitud</button>'
@@ -751,7 +784,7 @@ function pintarDetalle(data) {
       enlaceChat +
     '</div>' +
     (puede.quitar
-      ? '<div class="fila" style="margin:4px 0 4px"><button type="button" class="btn sm fijo" id="d-quitar">Quitar de esta automatización</button></div>'
+      ? '<div class="fila d-peligro"><button type="button" class="btn sm fijo" id="d-quitar">Quitar de esta automatización</button></div>'
       : '');
 
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
