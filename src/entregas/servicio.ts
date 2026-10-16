@@ -58,6 +58,8 @@ import { solicitudDePedidos, PLANTILLA_PEDIDOS_GSG } from './solicitud-varios.js
  */
 
 import type { Contact, Repos } from '../db/repos.js';
+import { enviarConfirmacionUbicacion } from './confirmacion-ubicacion.js';
+import { esperaDeEnvio, type EsperaEnvio } from '../rutas/espera-envio.js';
 import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 
 /** Los dos son de prueba o los dos son de verdad. Ver elegirMotorizado. */
@@ -281,7 +283,7 @@ export interface FilaEntrega extends Entrega {
   /** Que puede hacer una persona con ella. */
   acciones: string[];
   /** Si el reparto la tiene entre manos, su solicitud. */
-  solicitud?: Pick<Solicitud, 'id' | 'estado' | 'intentos' | 'incidencia' | 'loteId'> | null;
+  solicitud?: (Pick<Solicitud, 'id' | 'estado' | 'intentos' | 'incidencia' | 'loteId'> & { esperaEnvio?: EsperaEnvio | null }) | null;
   /** Las referencias de los OTROS pedidos vivos de hoy del mismo cliente (mismo telefono). */
   mismoCliente: string[];
   /** «cambió su ubicación (10:42)»: la marca que ven Hoy, Números del día y la ficha. null = nunca la cambió. */
@@ -1641,6 +1643,22 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     let marcadas = 0;
     const esperando = await repo.listar({ estados: ['esperando_ubicacion', 'pendiente'], limit: 500 });
     for (const e of esperando) {
+      // Compatibilidad: un pin fijo recibido antes de eliminar la pregunta
+      // por distancia ya es suficiente. Nunca rescata ubicaciones en vivo.
+      if (e.ubicacionEstado === 'pendiente' && e.pinPropuestoFuente === 'pin de whatsapp' && e.pinPropuestoAt &&
+          e.pinPropuestoLat != null && e.pinPropuestoLng != null && Number.isFinite(e.pinPropuestoLat) && Number.isFinite(e.pinPropuestoLng) &&
+          !fueraDeZona(e.pinPropuestoLat, e.pinPropuestoLng)) {
+        const c = await repos.contacts.getByPhone(e.phone);
+        if (c) {
+          const r = await registrarUbicacion(c, { lat: e.pinPropuestoLat, lng: e.pinPropuestoLng, fuente: 'pin de whatsapp', entregaId: e.id, propuestaAt: e.pinPropuestoAt });
+          if (r.entrega?.ubicacionEstado === 'recibida' && r.responder) {
+            const acuse = await enviarConfirmacionUbicacion({ repos, sender, contact: c, ahora: ahora(), job: { phone: e.phone, kind: 'freeform', category: 'UTILITY', text: r.responder, origen: 'sistema' } });
+            if (acuse.enviada || acuse.repetida) await repos.contacts.cerrarIA(c.id, true, ahora(), 'ubicación registrada');
+          }
+          marcadas++;
+          continue;
+        }
+      }
       if (!e.loteId || e.ubicacionEstado !== 'pendiente') continue;
       const solicitudes = await repos.rutas.listarSolicitudes({ loteId: e.loteId, q: e.phone, limit: 5, offset: 0 }).catch(() => []);
       const s = solicitudes.find((x) => x.phone === e.phone);
@@ -2090,6 +2108,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   }
 
   async function revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas> {
+    // El pin nativo fijo se registra directamente. La ubicación en vivo
+    // tiene otro tipo de entrada y nunca llega a este camino.
+    if (ubicacion.fuente === 'pin de whatsapp') return { atendida: false };
     if (ubicacion.fuente?.startsWith('enlace de mapa')) {
       const pendientes = await esperandoUbicacionDe(contact.phone);
       if (pendientes.length && Number.isFinite(ubicacion.lat) && Number.isFinite(ubicacion.lng) && !fueraDeZona(ubicacion.lat, ubicacion.lng)) {
@@ -2098,32 +2119,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         return { atendida: true, entrega: e, resultado: 'mapa_por_confirmar', responder: `Esta es la ubicación de tu enlace: ${enlaceMapa(ubicacion.lat, ubicacion.lng)}\n¿Sí es donde recibirás el pedido? Responde SÍ o NO, o comparte tu ubicación actual por WhatsApp.` };
       }
     }
-    if (!reglaGsgActiva()) return { atendida: false };
-    const vivas = await esperandoUbicacionDe(contact.phone);
-    if (!vivas.length) return { atendida: false };
-    const punto = { lat: ubicacion.lat, lng: ubicacion.lng };
-    // Vuelve a mandar el MISMO pin que ya se le preguntó: es ahí, se registra.
-    const yaPreguntado = vivas.find((x) => x.pinPropuestoAt && x.pinPropuestoLat != null && x.pinPropuestoLng != null);
-    if (yaPreguntado && haversineKm(punto, { lat: yaPreguntado.pinPropuestoLat!, lng: yaPreguntado.pinPropuestoLng! }) < 0.1) {
-      await evento(yaPreguntado, 'nota', 'volvió a mandar el mismo pin lejano: es ahí, se registra');
-      return { atendida: false };
-    }
-    // El distrito del pedido (el de GSG o el que nombra su dirección). Sin distrito conocido, se acepta como siempre.
-    const comparado = vivas.map((e) => ({ e, d: distanciaAlDistrito(punto, distritoDePedido(e)) })).find((x) => x.d);
-    if (!comparado || comparado.d!.kmFuera <= ajustes.pinDistanciaMaxKm) return { atendida: false };
-    const { e, d } = comparado as { e: Entrega; d: NonNullable<typeof comparado.d> };
-    const en = ahora();
-    for (const x of vivas) await repo.actualizar(x.id, { pinPropuestoLat: punto.lat, pinPropuestoLng: punto.lng, pinPropuestoAt: en, pinPropuestoFuente: ubicacion.fuente ?? 'pin de whatsapp', pinPropuestoDudas: 0 });
-    const km = `${d.kmCentro.toFixed(1).replace('.', ',')} km`;
-    for (const x of vivas) await evento(x, 'nota', `mandó un pin a ${km} de ${d.distrito} (${ubicacion.fuente ?? 'pin de whatsapp'}; más de ${ajustes.pinDistanciaMaxKm} km fuera del distrito): no se da por bueno a ciegas, se le pregunta si es ahí`, { lat: punto.lat, lng: punto.lng });
-    // El reparto deja de recordarle mientras decide (pausadoPorTelefono lo ve); su solicitud queda como «contestó».
-    for (const s of await solicitudesAbiertasDe(repos, contact.phone)) {
-      if (s.estado === 'enviado') await repos.rutas.actualizarSolicitud(s.id, { estado: 'respondio', ...(s.primeraRespuestaAt ? {} : { primeraRespuestaAt: en }) }).catch(() => undefined);
-      await repos.rutas.registrarEvento(s.id, 'respuesta', `mandó un pin lejos de ${d.distrito}: se le pregunta si es ahí (SÍ/NO)`, { lat: punto.lat, lng: punto.lng }).catch(() => undefined);
-    }
-    const act = (await repo.entrega(e.id)) ?? e;
-    log('pin lejos de su distrito: se le pregunta si es ahí', { phone: contact.phone, distrito: d.distrito, km: d.kmCentro });
-    return { atendida: true, entrega: act, resultado: 'pin_lejos', responder: textoDe('pinLejos', ajustes, { ...contexto(act), distrito: d.distrito }) };
+    return { atendida: false };
   }
 
   const confirmacionesPinEnCurso = new Map<string, Promise<RespuestaPinLejos | null>>();
@@ -4837,7 +4833,7 @@ ${lista}
     let solicitud: FilaEntrega['solicitud'] = null;
     if (e.loteId && e.ubicacionEstado === 'pendiente') {
       const s = solicitudes.get(`${e.loteId}\u0000${e.phone}`);
-      if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId };
+      if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId, esperaEnvio: esperaDeEnvio(repos.rutas, s, ahora().getTime()) };
     }
     return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [], cambioUbicacion: marcaCambioUbicacion(e, tz()) };
   }

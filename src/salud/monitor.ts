@@ -90,6 +90,8 @@ export interface SnapshotSalud {
 }
 
 export interface Monitor {
+  /** Adaptador de envío sin el antiguo control de salud de la cuenta. */
+  soloRitmo?: boolean;
   /** Recalcula el riesgo y aplica lo que toque. Devuelve el resultado. */
   evaluar(): Promise<Riesgo & { factorEfectivo: number }>;
   /** Factor efectivo vigente (riesgo x rampa), sin tocar la base. */

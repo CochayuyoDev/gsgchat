@@ -77,8 +77,7 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
   }
 
   function pausaEfectiva(): number {
-    const factor = deps.salud?.factor() ?? 1;
-    return pausaActual / Math.max(factor, 0.05);
+    return deps.salud && deps.politica ? 0 : pausaActual;
   }
 
   async function refrescar(): Promise<void> {
@@ -136,7 +135,9 @@ export function crearMotorEntregas(deps: MotorEntregasDeps): MotorEntregas {
   }
 
   const motor: MotorEntregas = {
-    proximoEnvioEn: () => Math.max(0, ultimoEnvio + pausaEfectiva() - Date.now()),
+    proximoEnvioEn: () => deps.salud && deps.politica
+      ? deps.salud.marcapasos.proximoEnvioEn(ahora(), deps.salud.factor())
+      : Math.max(0, ultimoEnvio + pausaEfectiva() - ahora().getTime()),
     parado: () => ultimoMotivo,
     enHorario: () => enHorario(ahora(), opcionesVigentes()),
 

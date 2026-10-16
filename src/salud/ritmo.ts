@@ -19,8 +19,7 @@
  *  3. Cupos por minuto y por hora, escalados por el factor de riesgo.
  *  4. Contactos nuevos por dia (no oficial): escribir a mucha gente que no
  *     te tiene agendada es la senal mas fuerte de spam en un cliente web.
- *  5. La pausa sorteada desde el ultimo envio, tambien escalada por el
- *     factor. Con factor 0.5 se espera el doble.
+ *  5. La pausa sorteada desde el ultimo envio, dentro del rango configurado.
  *
  * Es una funcion pura sobre una foto del estado, y una clase pequena que
  * guarda lo que no esta en la base: los envios del ultimo minuto y la pausa
@@ -132,6 +131,8 @@ export function decidirRitmo(foto: FotoRitmo, politica: Politica): DecisionRitmo
     };
   }
 
+  if (politica.soloRitmo) return decidirPausa(foto);
+
   if (foto.factor <= 0) {
     return {
       ok: false,
@@ -188,10 +189,15 @@ export function decidirRitmo(foto: FotoRitmo, politica: Politica): DecisionRitmo
     }
   }
 
+  return decidirPausa(foto);
+}
+
+function decidirPausa(foto: FotoRitmo): DecisionRitmo {
   if (foto.ultimoEnvioAt) {
-    // Con factor 0.5 la pausa dura el doble; con 0.2, cinco veces.
-    const pausa = foto.pausaSorteadaMs / Math.max(foto.factor, 0.05);
-    const transcurrido = ahora.getTime() - foto.ultimoEnvioAt.getTime();
+    // El riesgo limita cupos y puede detener el número, pero no modifica
+    // silenciosamente el intervalo que configuró el operador.
+    const pausa = foto.pausaSorteadaMs;
+    const transcurrido = foto.ahora.getTime() - foto.ultimoEnvioAt.getTime();
     if (transcurrido < pausa) {
       return {
         ok: false,
@@ -213,14 +219,13 @@ export function decidirRitmo(foto: FotoRitmo, politica: Politica): DecisionRitmo
 export class Marcapasos {
   private envios: number[] = [];
   private ultimo: Date | null = null;
-  private pausaMs: number;
+  private proporcion: number;
 
   constructor(
     private politica: () => Politica,
     private azar: () => number = Math.random,
   ) {
-    const p = politica();
-    this.pausaMs = sortearPausa(p.pausaMinMs, p.pausaMaxMs, azar);
+    this.proporcion = sortearPausa(0, 1_000_000, azar) / 1_000_000;
   }
 
   /** Al arrancar: el ultimo envio que consta en la base, para respetar la pausa tras un reinicio. */
@@ -232,8 +237,7 @@ export class Marcapasos {
   anotar(at: Date): void {
     this.envios.push(at.getTime());
     this.ultimo = at;
-    const p = this.politica();
-    this.pausaMs = sortearPausa(p.pausaMinMs, p.pausaMaxMs, this.azar);
+    this.proporcion = sortearPausa(0, 1_000_000, this.azar) / 1_000_000;
     this.podar(at);
   }
 
@@ -258,13 +262,14 @@ export class Marcapasos {
   }
 
   pausaSorteadaMs(): number {
-    return this.pausaMs;
+    const p = this.politica();
+    return Math.round(p.pausaMinMs + this.proporcion * Math.max(0, p.pausaMaxMs - p.pausaMinMs));
   }
 
   /** Cuando podra salir el proximo, para ensenarlo en pantalla. */
-  proximoEnvioEn(ahora: Date, factor: number): number {
+  proximoEnvioEn(ahora: Date, _factor: number): number {
     if (!this.ultimo) return 0;
-    const pausa = this.pausaMs / Math.max(factor, 0.05);
+    const pausa = this.pausaSorteadaMs();
     return Math.max(0, this.ultimo.getTime() + pausa - ahora.getTime());
   }
 }

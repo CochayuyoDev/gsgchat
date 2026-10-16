@@ -27,6 +27,8 @@ import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
 import { decidirRitmo } from '../salud/ritmo.js';
 import { esNumeroDePrueba } from '../desarrollador/numeros.js';
+import { anotarEsperaEnvio, anotarEsperaGlobal, limpiarEsperasEnvio } from './espera-envio.js';
+import { alDespertarMotorRutas } from './despertador.js';
 import { esLoteDePrueba } from './alertas.js';
 import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
@@ -93,6 +95,7 @@ export function opcionesDesdeConfig(config: Config): OpcionesMotor {
 }
 
 export interface MotorDeps {
+  esperaCambiada?: (solicitud: Solicitud) => void;
   repos: Repos;
   sender: Sender;
   wa?: WhatsAppClient;
@@ -132,7 +135,7 @@ export interface MotorDeps {
    *    factor de riesgo), en vez de descubrirlo en el rechazo del sender;
    *  - alterna entre las plantillas aprobadas de cada paso y deja fuera las
    *    que Meta tenga pausadas;
-   *  - estira su propia pausa segun el factor: en amarillo, el doble.
+   *  - usa la pausa global, sin sortear una segunda pausa independiente.
    * Opcionales para que las pruebas del motor sigan siendo pequenas.
    */
   salud?: Monitor;
@@ -225,12 +228,18 @@ export interface Motor {
   tick(): Promise<ResultadoTick>;
   /** Cuando podra salir el proximo mensaje, para ensenarlo en pantalla. */
   proximoEnvioEn(): number;
+  /** Milisegundos hasta la próxima tarea; null significa esperar una señal nueva. */
+  proximoDespertarEn(): Promise<number | null>;
 }
 
 export function crearMotor(deps: MotorDeps): Motor {
   const ahora = deps.ahora ?? (() => new Date());
   const azar = deps.azar ?? Math.random;
   const { repos, sender, gsg } = deps;
+  function esperar(s: Solicitud, codigo: string, motivo: string, ms?: number): void {
+    const en = ahora().getTime();
+    if (anotarEsperaEnvio(repos.rutas, s, { codigo, motivo, hasta: ms == null ? null : new Date(en + ms) }, en)) deps.esperaCambiada?.(s);
+  }
 
   /**
    * Las opciones vigentes: las de la configuracion con los ajustes que se
@@ -306,10 +315,9 @@ export function crearMotor(deps: MotorDeps): Motor {
     return [nombreCliente, pedido, ctx.negocio].slice(0, Math.max(0, cuantas));
   }
 
-  /** La pausa vigente, estirada por el factor de riesgo (0.5 = el doble). */
+  /** Solo los arranques sin monitor necesitan un reloj de pausa local. */
   function pausaEfectiva(): number {
-    const factor = deps.salud?.factor() ?? 1;
-    return pausaActual / Math.max(factor, 0.05);
+    return deps.salud && deps.politica ? 0 : pausaActual;
   }
 
   /**
@@ -473,6 +481,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       ? await sender.send({
           phone,
           kind: 'template',
+          programado: true,
           category: 'UTILITY',
           templateName: elegida!.name,
           templateLanguage: elegida!.language,
@@ -482,6 +491,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       : await sender.send({
           phone,
           kind: 'interactive',
+          programado: true,
           category: 'UTILITY',
           // La redaccion que le toca a este cliente en este intento.
           interactive: { body: deEntrega || textoDelPaso(paso, ctx, `${phone}:${solicitud.intentos}`, solicitud.intentos), locationRequest: true },
@@ -496,6 +506,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       : {};
 
     if (salida.ok) {
+      limpiarEsperasEnvio(repos.rutas, solicitud.id);
       // Lo de prueba no marca el ritmo del numero real (ver src/desarrollador).
       if (!esNumeroDePrueba(phone)) {
         ultimoEnvio = momento.getTime();
@@ -526,6 +537,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       // ni del numero, es que WhatsApp esta cerrado. Se vuelve a intentar en
       // dos minutos y el motor no vuelve a mirar hasta entonces.
       if (salida.code === 'sin_conexion') {
+        esperar(solicitud, salida.code, salida.reason, salida.retryAfterMs ?? 2 * 60_000);
         await repos.rutas.actualizarSolicitud(solicitud.id, {
           proximoIntentoAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)),
         });
@@ -546,6 +558,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       // Una guarda propia (cupo, calentamiento, opt-out). No cuenta como
       // intento: el cliente no ha recibido nada.
       const espera = salida.retryAfterMs ?? 15 * 60_000;
+      esperar(solicitud, salida.code, salida.reason, espera);
       await repos.rutas.actualizarSolicitud(solicitud.id, {
         proximoIntentoAt: new Date(momento.getTime() + espera),
         incidencia: 'envio_bloqueado',
@@ -578,6 +591,7 @@ export function crearMotor(deps: MotorDeps): Motor {
     // Un tropiezo pasajero (5xx, rate limit, socket caido a mitad) no gasta
     // un intento: el cliente no recibio nada. Se vuelve en unos minutos.
     if (salida.retryable) {
+      esperar(solicitud, 'error_whatsapp', salida.error, decision.esperaMs ?? 3 * 60_000);
       await repos.rutas.actualizarSolicitud(solicitud.id, {
         // La espera la decide el seguimiento del primer mensaje (progresiva); si no, la de siempre.
         proximoIntentoAt: new Date(momento.getTime() + (decision.esperaMs ?? 3 * 60_000)),
@@ -638,13 +652,53 @@ export function crearMotor(deps: MotorDeps): Motor {
   }
 
   return {
-    proximoEnvioEn: () => Math.max(0, ultimoEnvio + pausaEfectiva() - Date.now()),
+    proximoEnvioEn: () => deps.salud && deps.politica
+      ? deps.salud.marcapasos.proximoEnvioEn(ahora(), deps.salud.factor())
+      : Math.max(0, ultimoEnvio + pausaEfectiva() - ahora().getTime()),
+
+    async proximoDespertarEn() {
+      const proximo = await repos.rutas.proximoIntentoAt();
+      if (!proximo) return null;
+      const momento = ahora();
+      const pausaRestante = deps.salud && deps.politica
+        ? deps.salud.marcapasos.proximoEnvioEn(momento, deps.salud.factor())
+        : Math.max(0, ultimoEnvio + pausaEfectiva() - momento.getTime());
+      let espera = Math.max(proximo.getTime() - momento.getTime(), pausaRestante);
+      if (!enHorario(momento, opciones)) {
+        // Busca la siguiente apertura sin despertar repetidamente durante la noche.
+        let apertura: number | null = null;
+        for (let salto = 15; salto <= 48 * 60; salto += 15) {
+          if (enHorario(new Date(momento.getTime() + salto * 60_000), opciones)) {
+            const inicio = Math.max(0, salto - 15);
+            for (let minuto = inicio; minuto <= salto; minuto++) {
+              if (enHorario(new Date(momento.getTime() + minuto * 60_000), opciones)) {
+                apertura = minuto * 60_000;
+                break;
+              }
+            }
+            break;
+          }
+        }
+        if (apertura != null) espera = Math.max(espera, apertura);
+        else return null;
+      }
+      return Math.max(1, espera);
+    },
 
     async tick() {
       const momento = ahora();
       await refrescarAjustes();
+      // No inicia intentos ni escribe incidencias mientras no hay socket.
+      // Al reconectarse continúa en la siguiente pasada, sin espera de 2 min.
+      if (deps.wa?.conectado?.() === false) {
+        const motivo = 'WhatsApp está desconectado; el envío continúa al reconectarse.';
+        anotarEsperaGlobal(repos.rutas, { codigo: 'sin_conexion', motivo, hasta: null });
+        return { accion: 'nada', motivo };
+      }
+      anotarEsperaGlobal(repos.rutas, null);
 
       if (!enHorario(momento, opciones)) {
+        // No consulta la cola fuera de horario: la API muestra la franja.
         return {
           accion: 'nada',
           motivo: `fuera del horario de envio (${opciones.horaInicio}:00 a ${opciones.horaFin}:00)`,
@@ -685,6 +739,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           continue;
         }
         if (!(await pausado(siguiente.phone))) break;
+        esperar(siguiente, 'pausado', 'Mensajes detenidos o pin recibido pendiente de confirmación.', 5 * 60_000);
         await repos.rutas.actualizarSolicitud(siguiente.id, { proximoIntentoAt: new Date(momento.getTime() + 5 * 60_000) });
         [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
       }
@@ -700,11 +755,13 @@ export function crearMotor(deps: MotorDeps): Motor {
       // El ritmo. Es lo que separa "un negocio escribiendo a sus clientes" de
       // "un robot", y lo unico que de verdad evita el bloqueo del numero.
       if (!dePrueba && ultimoEnvio && momento.getTime() - ultimoEnvio < pausaEfectiva()) {
+        esperar(siguiente, 'pausa_entre_envios', 'Esperando la pausa configurada entre clientes.', ultimoEnvio + pausaEfectiva() - momento.getTime());
         return { accion: 'nada', motivo: 'esperando la pausa entre mensajes' };
       }
 
       // El monitor de salud manda sobre el ritmo propio: parado es parado.
       if (!dePrueba && deps.salud && deps.salud.factor() <= 0) {
+        esperar(siguiente, 'riesgo_parado', 'El monitor de salud tiene el número detenido.');
         return { accion: 'nada', motivo: 'el monitor de salud tiene el numero parado' };
       }
 
@@ -726,6 +783,7 @@ export function crearMotor(deps: MotorDeps): Motor {
         const contacto = await repos.contacts.upsertFromInbound(siguiente.phone);
         const decision = decidirRitmo(await deps.salud.fotoRitmo(contacto, momento), deps.politica());
         if (!decision.ok) {
+          esperar(siguiente, decision.codigo, decision.motivo, decision.esperaMs);
           return { accion: 'nada', motivo: `${decision.codigo}: ${decision.motivo}` };
         }
       }
@@ -737,18 +795,49 @@ export function crearMotor(deps: MotorDeps): Motor {
 }
 
 /**
- * Ticker del motor. Devuelve la funcion para pararlo.
- *
- * Corre cada pocos segundos aunque la pausa entre mensajes sea mayor: asi el
- * primer envio despues de una espera sale en cuanto toca y no al final del
- * siguiente intervalo largo.
+ * Trabajador del motor. Duerme si no hay tareas y se despierta por eventos o
+ * por un temporizador al vencer el siguiente envío programado.
  */
-export function startMotorRutas(deps: MotorDeps, intervalMs = 5_000): () => void {
+export function startMotorRutas(deps: MotorDeps): () => void {
   const motor = crearMotor(deps);
   let corriendo = false;
+  let parado = false;
+  let despertarPendiente = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const tick = async () => {
-    if (corriendo) return;
+  const programarDesconexion = () => {
+    timer = setTimeout(() => {
+      timer = null;
+      if (deps.wa?.conectado?.() === false) programarDesconexion();
+      else void despertar();
+    }, 30_000);
+    timer.unref?.();
+  };
+
+  const dormirHastaProximaTarea = async () => {
+    if (parado) return;
+    if (deps.wa?.conectado?.() === false) {
+      // Solo se comprueba el estado en memoria del socket: sin consultas SQL.
+      programarDesconexion();
+      return;
+    }
+    const espera = await motor.proximoDespertarEn();
+    if (espera == null || parado) return; // cola vacía: queda dormido hasta una señal.
+    timer = setTimeout(() => {
+      timer = null;
+      void despertar();
+    }, espera);
+    timer.unref?.();
+  };
+
+  const despertar = async () => {
+    if (parado) return;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (corriendo) {
+      despertarPendiente = true;
+      return;
+    }
     corriendo = true;
     try {
       // Lo de prueba no consume el ritmo: en la misma pasada se sigue con el
@@ -763,10 +852,20 @@ export function startMotorRutas(deps: MotorDeps, intervalMs = 5_000): () => void
       });
     } finally {
       corriendo = false;
+      if (despertarPendiente) {
+        despertarPendiente = false;
+        void despertar();
+      } else {
+        void dormirHastaProximaTarea().catch((error) => deps.log?.('no se pudo programar el siguiente trabajo de rutas', { detalle: String(error) }));
+      }
     }
   };
-
-  const timer = setInterval(() => void tick(), intervalMs);
-  timer.unref?.();
-  return () => clearInterval(timer);
+  const desuscribir = alDespertarMotorRutas(() => void despertar());
+  void despertar(); // Una lectura al iniciar recupera lo pendiente del reinicio.
+  return () => {
+    parado = true;
+    desuscribir();
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
 }

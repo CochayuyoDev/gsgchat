@@ -528,8 +528,9 @@ function pintarSubtitulo(data) {
      Lo demas (ventana de 24 h, bot callado, baja, conversaciones anteriores) va en la ficha (ⓘ). */
   current.windowOpen = Boolean(data.windowOpen);
   sub.innerHTML = '<span id="t-presencia"></span><span class="t-tel">' + esc(telefonoBonito(current.phone)) + '</span>' +
-    (current.iaCerradaAt ? '<span class="pill warn t-marca" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
-    (data.reparto ? '<a class="t-pedido" href="/hoy' + (data.reparto.referencia ? '?buscar=' + encodeURIComponent(data.reparto.referencia) : '') + '" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'Pedido ' + data.reparto.referencia : 'Reparto') + ': ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '');
+    (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada') ? '<span class="pill warn t-marca" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
+    (data.reparto ? '<a class="t-pedido" href="/hoy' + (data.reparto.referencia ? '?buscar=' + encodeURIComponent(data.reparto.referencia) : '') + '" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'Pedido ' + data.reparto.referencia : 'Reparto') + ': ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
+    (data.reparto && data.reparto.esperaEnvio ? '<span class="t-tel">' + esc(data.reparto.esperaEnvio.motivo) + (data.reparto.esperaEnvio.hasta ? ' · ' + esc(new Date(data.reparto.esperaEnvio.hasta).toLocaleTimeString()) : '') + '</span>' : '');
   /* Sus conversaciones anteriores ya guardadas se cuentan y se abren desde la ficha (ⓘ). */
 }
 
@@ -838,7 +839,7 @@ async function abrirFicha() {
     else if (current.windowOpen) marcas.push('<span class="pill ok">Puede recibir mensajes</span>');
     else marcas.push('<span class="pill warn" title="Pasaron más de 24 horas desde su último mensaje: solo se le puede escribir con una plantilla aprobada.">Fuera de las 24 h</span>');
     if (c.botPausadoAt || current.botPausadoAt) marcas.push('<span class="pill warn">Bot callado</span>');
-    if (current.iaCerradaAt) marcas.push('<span class="pill warn">Para una persona</span>');
+    if (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada')) marcas.push('<span class="pill warn">Para una persona</span>');
     var html = '<div><h4>Este chat</h4><div class="fila">' + marcas.join('') + '<button class="sm" type="button" id="ficha-baja">' + (c.optOutAt ? 'Dar de alta' : 'Dar de baja') + '</button></div></div>' +
       '<div><h4>Quién es</h4><div class="fila"><b>' + esc(c.name || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(c.phone)) + '</span></div>' +
       '<div class="muted" style="margin-top:4px">' + (c.optOutAt ? 'Dado de baja por el equipo: solo se le contesta si escribe.' : c.optInAt ? 'Se le puede escribir (dio su consentimiento).' : 'Sin consentimiento todavía: se le contesta cuando escribe; no se le inicia conversación.') + (c.botPausadoAt ? ' Las respuestas automáticas están calladas en este chat.' : '') + (c.lastInboundAt ? ' Último mensaje suyo: ' + hhmm(c.lastInboundAt) + '.' : '') + '</div></div>';

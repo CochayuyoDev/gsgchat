@@ -204,7 +204,7 @@ export function rutasPage(opts: RutasOpts): string {
     <div class="cuerpo aj">
       <p class="muted" style="margin-top:0">
         Todo lo de aquí se aplica en el siguiente mensaje, sin reiniciar. Las horas son de Lima.
-        Por encima de esto manda siempre la salud del número: si el monitor frena, frena.
+        Los envíos respetan el horario y la pausa que configures aquí.
       </p>
 
       <h3 class="aj-titulo">¿A qué horas se escribe?</h3>
@@ -220,7 +220,6 @@ export function rutasPage(opts: RutasOpts): string {
       <h3 class="aj-titulo">¿A qué ritmo?</h3>
       <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num" aria-label="Pausa mínima en segundos">
         y <input id="aj-pausa-max" type="number" min="1" class="aj-num" aria-label="Pausa máxima en segundos"> segundos, para parecer una persona y cuidar el número.</p>
-      <p class="aj-frase muted" id="aj-pausa-salud" hidden></p>
 
       <h3 class="aj-titulo">¿Qué se le dice?</h3>
       <p class="muted" style="margin-top:0">Edita los tres textos base y, desde el mensaje 4, el texto de cada mensaje adicional. Si dejas vacío un mensaje adicional, se usa el recordatorio o la insistencia según la respuesta del cliente.
@@ -428,55 +427,18 @@ function pintarProgreso(datos) {
     estadoDelMotor(datos.motor) +
     (datos.alertas.coordinador ? '' : '<span class="muted">Nadie recibe avisos por WhatsApp de los casos parados.</span>') +
     '<span class="fallo" id="fallo-refresco"></span>';
-  pintarPausaSalud();
-}
-
-/**
- * Por qué la pausa real no es la que dice la cajita.
- *
- * El motor divide la pausa configurada por el factor de salud del número
- * (src/entregas/motor.ts): en naranja, factor 0.2, las pausas de 30 s salen
- * cada 150 s. Antes la cajita decía 30 y nadie entendía los 150: aquí se
- * explica debajo del propio ajuste, con a dónde ir a verlo.
- */
-function pintarPausaSalud() {
-  var caja = document.getElementById('aj-pausa-salud');
-  if (!caja) return;
-  var salud = resumen && resumen.motor ? resumen.motor.salud : null;
-  var a = ajustesCache ? ajustesCache.ajustes : null;
-  var factor = salud ? salud.factor : 1;
-  if (!salud || !a || factor >= 1) { caja.hidden = true; return; }
-  caja.hidden = false;
-  if (factor <= 0) {
-    caja.textContent = 'Ahora mismo no sale ningún mensaje: la salud del número está en ' + salud.nivel +
-      '. Mientras siga así, esta pausa no se usa. Míralo en Salud.';
-    return;
-  }
-  caja.textContent = 'Ojo: la salud del número está en ' + salud.nivel + ' (al ' + Math.round(factor * 100) +
-    ' %), así que estas pausas se multiplican y los mensajes salen cada ' +
-    Math.round(a.pausaMinSegundos / factor) + '-' + Math.round(a.pausaMaxSegundos / factor) +
-    ' segundos de verdad. Para que valga lo que escribes aquí, el número tiene que volver a verde: míralo en Salud.';
 }
 
 /* Una sola frase que explica por qué salen o no salen mensajes ahora mismo. */
 function estadoDelMotor(m) {
-  var salud = m.salud;
   var clase = 'parado';
   var frase = 'En pausa: ningún lote en marcha';
-  if (m.trabajando && salud && salud.factor <= 0) {
-    // El monitor de salud manda sobre el motor: parado es parado, y hay que decir por qué.
-    clase = 'espera';
-    frase = 'Parado por la salud del número (' + salud.nivel + ')' +
-      (salud.pausadaHasta ? ', vuelve a las ' + hora(salud.pausadaHasta) : '') +
-      (salud.motivos && salud.motivos.length ? ': ' + salud.motivos[0] : '');
-  } else if (m.trabajando && !m.enHorario) {
+  if (m.trabajando && !m.enHorario) {
     clase = 'espera';
     frase = 'Esperando al horario de envío (' + m.horario[0] + ':00 a ' + m.horario[1] + ':00)';
   } else if (m.trabajando) {
-    var factor = salud ? salud.factor : 1;
     clase = 'va';
-    frase = 'Enviando, uno cada ' + Math.round(m.pausa[0] / factor) + '-' + Math.round(m.pausa[1] / factor) + ' segundos' +
-      (factor < 1 ? ' (salud en ' + salud.nivel + ': al ' + Math.round(factor * 100) + ' %)' : '');
+    frase = 'Enviando, uno cada ' + m.pausa[0] + '-' + m.pausa[1] + ' segundos';
   }
   return '<span class="motor ' + clase + '"><span class="punto"></span>' + esc(frase) + '</span>';
 }
@@ -614,6 +576,7 @@ function pintarListaVacia(cuantos, q) {
  */
 function queLePasa(s) {
   if (s.estado === 'resuelto') return 'Recibida a las ' + cuando(s.resueltoAt);
+  if (s.esperaEnvio) return s.esperaEnvio.motivo + (s.esperaEnvio.hasta ? ' Próxima revisión: ' + cuando(s.esperaEnvio.hasta) + '.' : '');
   if (s.incidencia && catalogo[s.incidencia]) {
     return catalogo[s.incidencia].titulo + (s.incidenciaDetalle ? ': ' + s.incidenciaDetalle : '');
   }
@@ -1149,7 +1112,6 @@ function pintarAjustes(d) {
   pintarSecuencia(a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos), a.textosAdicionales || []);
   document.getElementById('aj-hora-inicio').value = a.horaInicio;
   document.getElementById('aj-hora-fin').value = a.horaFin;
-  pintarPausaSalud();
 
   document.getElementById('aj-pasos').innerHTML = PASOS_AJ.map(function (p) {
     var paso = p[0];

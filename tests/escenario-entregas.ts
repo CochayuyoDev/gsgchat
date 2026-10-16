@@ -328,6 +328,7 @@ export async function crearEscenarioEntregas(opciones: {
 
   const app = await buildServer({
     config,
+    bus,
     repos,
     settings,
     wa,

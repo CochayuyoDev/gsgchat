@@ -49,7 +49,7 @@ import { versionDelPaquete } from '../util/version.js';
 import { CATALOG } from '../templates/catalog.js';
 import { countVariables } from '../templates/render.js';
 import { politicaDesdeConfig } from '../salud/politica.js';
-import { crearMonitor } from '../salud/monitor.js';
+import { crearControlEnvios } from '../salud/control-envios.js';
 import { crearNumeroVigente, identidadDeNumero } from '../salud/numero.js';
 import { arrancarServicios } from '../servicios.js';
 import { crearServicioAjustes, type ServicioAjustes } from '../ajustes/generales.js';
@@ -185,7 +185,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
 
       const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
       contexto.modo = () => ajustes.modo();
-      const politica = () => ajustes.politica(politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial'));
+      const politica = () => ({ ...ajustes.politica(politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial')), soloRitmo: true, autoPausa: false });
 
       const sesion = crearSesionLocal();
       limpieza.push(() => sesion.detener());
@@ -215,13 +215,11 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
       let queue: OutboundQueue;
-      const salud = crearMonitor({
+      const salud = await crearControlEnvios({
         repos,
         politica,
         phoneNumberId,
-        avisar: (texto) => (avisarSupervisor ? avisarSupervisor(texto) : Promise.resolve()),
-        cola: { pause: () => queue.pause(), resume: () => queue.resume() },
-        log: (mensaje, detalle) => console.log(`${o.prefijoLog}[salud] ${mensaje}`, detalle ?? ''),
+        reanudarCola: () => queue.resume(),
       });
 
       // La regla del dueño en «Solo lo de GSG» va en la unica puerta hacia el
@@ -259,6 +257,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         appRef?.log.warn({ phone: job.phone, detail }, 'envio no realizado');
       };
       queue = o.redisUrl ? createOutboundQueue(o.redisUrl, o.nombreCola) : createMemoryOutboundQueue({ sender, onResult });
+      if (!(await repos.numberState.get(phoneNumberId())).paused) await queue.resume();
       const worker = o.redisUrl ? createOutboundWorker({ redisUrl: o.redisUrl, sender, queue, onResult, nombre: o.nombreCola, concurrency: config.WA_SEND_CONCURRENCY, messagesPerSecond: config.WA_SEND_RATE_PER_SECOND }) : null;
       limpieza.push(() => queue.close(), () => worker?.close());
 

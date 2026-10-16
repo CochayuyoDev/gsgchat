@@ -66,7 +66,9 @@ function historialUbicacion(e) {
   if (!e.solicitud) return '';
   var recibida = e.ubicacionEstado === 'recibida';
   return '<p class="muted">' + (recibida ? 'Mensajes anteriores a la ubicación: ' : 'Intentos de ubicación: ') + esc(e.solicitud.intentos) +
-    (!recibida && e.incidencia === 'sin_respuesta' ? ' · Pendiente sin respuesta' : '') + '</p>';
+    (!recibida && e.incidencia === 'sin_respuesta' ? ' · Pendiente sin respuesta' : '') + '</p>' +
+    (!recibida && e.solicitud.esperaEnvio ? '<p class="muted">' + esc(e.solicitud.esperaEnvio.motivo) +
+      (e.solicitud.esperaEnvio.hasta ? ' · ' + esc(new Date(e.solicitud.esperaEnvio.hasta).toLocaleTimeString()) : '') + '</p>' : '');
 }
 function marcaCambio(e) {
   if (!e.ubicacionCambiadaAt) return '';

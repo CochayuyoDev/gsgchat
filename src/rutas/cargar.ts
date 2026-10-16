@@ -17,6 +17,7 @@ import { INCIDENCIAS } from './incidencias.js';
 import { payloadIncidencia } from './gsg.js';
 import { leerLote, prepararFilas, type FilaLote } from './lote.js';
 import type { PlanNumeracion } from './telefono.js';
+import { despertarMotorRutas } from './despertador.js';
 
 export interface CargaLote {
   nombre?: string;
@@ -167,6 +168,9 @@ export async function cargarLote(deps: DepsCarga, body: CargaLote): Promise<Resu
   }
 
   if (body.arrancar) await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+  if (body.arrancar && creadas.some((s) => ['pendiente', 'enviado', 'respondio'].includes(s.estado) && Boolean(s.phone))) {
+    despertarMotorRutas();
+  }
 
   return {
     lote: (await repos.rutas.lote(lote.id))!,

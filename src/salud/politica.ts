@@ -45,6 +45,8 @@ export interface Umbrales {
 }
 
 export interface Politica {
+  /** Usa únicamente horario y pausa configurada; sin evaluación de la cuenta. */
+  soloRitmo?: boolean;
   perfil: PerfilRitmo;
 
   /** Envios iniciados por la empresa por minuto y por hora. */

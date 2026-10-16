@@ -27,6 +27,7 @@ describe('contrato del diagrama GSG', () => {
 
   it('pide ubicación tres veces por cliente y luego aparece pendiente de atención', async () => {
     esc = await crearEscenarioEntregas({ confirmarLista: false, arranque: new Date('2026-10-04T13:00:00Z') });
+    await esc.api.post('/admin/rutas/ajustes', { esperasMensajesMinutos: [1, 1] });
     expect((await esc.api.post('/api/v1/entregas', { pedidos: [pedido('SIN-RESPUESTA'), pedido('MISMO-CLIENTE')] })).status).toBe(201);
     for (let i = 0; i < 4; i++) { await esc.trabajar(); esc.avanzar(181); }
     await esc.trabajar();

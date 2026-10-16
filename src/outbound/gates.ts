@@ -11,10 +11,12 @@
 import type { Contact, NumberState, Template, TemplateCategory } from '../db/repos.js';
 import type { DecisionRitmo } from '../salud/ritmo.js';
 import { contactoSuprimido } from '../salud/supresion.js';
+import { esPausaAutomatica } from '../salud/monitor.js';
 
 export type MessageKind = 'template' | 'freeform' | 'location' | 'interactive' | 'sticker' | 'media';
 
 export interface SendIntent {
+  programado?: boolean;
   contact: Contact;
   kind: MessageKind;
   category: TemplateCategory;
@@ -34,6 +36,7 @@ export interface SendIntent {
 }
 
 export interface GateSnapshot {
+  sinControlCuenta?: boolean;
   numberState: NumberState;
   /** Mensajes de marketing entregados a este contacto en los ultimos 7 dias. */
   marketingLast7d: number;
@@ -126,7 +129,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   }
 
   // 2. Circuit breaker manual o automatico sobre el numero.
-  if (snapshot.numberState.paused) {
+  if (snapshot.numberState.paused && !(snapshot.sinControlCuenta && esPausaAutomatica(snapshot.numberState.pausedReason))) {
     return {
       allow: false,
       code: 'number_paused',
@@ -141,7 +144,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   // 2b. Contacto apartado por el monitor: no tiene WhatsApp, ya recibio
   //     demasiado marketing, o pidio no recibirlo. En manual se deja pasar:
   //     si el operador insiste a mano es porque sabe algo que el sistema no.
-  if (!manual && contactoSuprimido(contact, category, now)) {
+  if (!snapshot.sinControlCuenta && !manual && contactoSuprimido(contact, category, now)) {
     const hasta = contact.suprimidoHasta!;
     return {
       allow: false,
@@ -207,7 +210,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   // 5. Calidad del numero. En rojo se corta todo lo iniciado por la empresa;
   //    en amarillo solo se frena marketing, que es lo que mas reportes trae.
   const quality = snapshot.numberState.quality;
-  if (businessInitiated) {
+  if (businessInitiated && !snapshot.sinControlCuenta) {
     if (quality === 'RED') {
       return {
         allow: false,
@@ -269,7 +272,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   // 6c. Techo por contacto y dia, y separacion entre dos automaticos al
   //     mismo contacto. Es lo que evita el 131056 de Meta (pair rate limit)
   //     y, en un cliente no oficial, la queja de "me escribe cada rato".
-  if (!manual && businessInitiated) {
+  if (!snapshot.sinControlCuenta && !manual && businessInitiated) {
     if (
       snapshot.maxPorContactoDia !== undefined &&
       snapshot.sentToContactToday !== undefined &&
@@ -296,7 +299,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   }
 
   // 7. Techo diario del numero (warm-up).
-  if (!manual && businessInitiated && snapshot.sentToday >= snapshot.dailyCap) {
+  if (!snapshot.sinControlCuenta && !manual && businessInitiated && snapshot.sentToday >= snapshot.dailyCap) {
     return {
       allow: false,
       code: 'daily_cap',
@@ -308,7 +311,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   // 8. El marcapasos: horario, tier de Meta, cupos por minuto y hora,
   //    contactos nuevos y la pausa entre envios. Va el ultimo porque es el
   //    unico rechazo que no dice nada del contacto: solo "todavia no".
-  if (!manual && businessInitiated && snapshot.ritmo && !snapshot.ritmo.ok) {
+  if (!manual && (businessInitiated || intent.programado) && snapshot.ritmo && !snapshot.ritmo.ok) {
     return {
       allow: false,
       code: 'rhythm',

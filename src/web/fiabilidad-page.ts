@@ -125,7 +125,7 @@ export function fiabilidadPage(opts: { disponible: boolean; demo: boolean; nombr
   const contenido = `
 <div class="wrap" id="wrap" data-disponible="${opts.disponible ? '1' : '0'}">
 
-<section class="tarjeta"><h2>API, número y ritmo</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones"><button class="btn" id="api-salud-evaluar" type="button">Evaluar riesgo</button><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a href="/panel#historial">Historial y errores</a></div></section>
+<section class="tarjeta"><h2>API y conexión</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones"><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a href="/panel#historial">Historial y errores</a></div></section>
 <section class="tarjeta veredicto" id="veredicto" aria-live="polite">
   <div class="cabecera"><span class="chip tono-gris" id="veredicto-chip">Comprobando</span><h2 id="veredicto-titulo">Mirando cómo está todo…</h2></div>
   <p class="muted" id="veredicto-pie">El sistema se vigila a sí mismo cada pocos segundos. Si algo falla, aquí sale qué pasa y a dónde ir.</p>
@@ -381,6 +381,10 @@ function pintarHumo(h) {
 
 /** El cupo de hoy: si alcanza para los pedidos cargados y, si no, qué recortar. */
 function pintarCupo(c) {
+  if (c.sinCupoInterno) {
+    $('caja-cupo').classList.add('hidden');
+    return { tono: 'verde', nombre: 'Envíos', titular: c.frase };
+  }
   var estado;
   // Sin cupo conocido no se puede decir ni que alcanza ni que no: decirlo es
   // mas honesto que pintar un rojo que no significa nada.
@@ -614,19 +618,15 @@ if ($('wrap').dataset.disponible === '1') {
   document.querySelectorAll('.caja button').forEach(function (b) { b.disabled = true; });
 }
 
-async function saludNumero(){try{var datos=await Promise.all([api('/health'),api('/admin/health')]);var h=datos[1];$('api-salud-estado').textContent='API: '+(datos[0].ok?'disponible':'no disponible')+' · WhatsApp: '+(datos[0].connected?'conectado':'sin conexión')+' · Riesgo: '+(h.salud?h.salud.nivel:'sin datos')+' · Mensajes hoy: '+h.sentToday+' / '+h.dailyCap+' · Envíos: '+(h.number.paused?'pausados':'activos');}catch(e){$('api-salud-estado').textContent=e.message;}}
-$('api-salud-evaluar').onclick=ocupado($('api-salud-evaluar'),'Evaluando…',async function(){await api('/admin/salud/evaluar',{method:'POST',body:{}});await saludNumero();});
+async function saludNumero(){try{var datos=await Promise.all([api('/health'),api('/admin/health')]);var h=datos[1];$('api-salud-estado').textContent='API: '+(datos[0].ok?'disponible':'no disponible')+' · WhatsApp: '+(datos[0].connected?'conectado':'sin conexión')+' · Mensajes hoy: '+h.sentToday+' · Envíos: '+(h.number.paused?'pausados':'activos');}catch(e){$('api-salud-estado').textContent=e.message;}}
 $('api-salud-pausa').onclick=ocupado($('api-salud-pausa'),'Pausando…',async function(){await api('/admin/pause',{method:'POST',body:{paused:true,reason:'Desde Salud'}});await saludNumero();});
-/* Reanudar no devuelve la velocidad de golpe: el monitor vuelve con una rampa
-   (empieza al 10 % y sube hasta el 100 %). Decirlo evita el «lo reanudé y sigue
-   lentísimo». Ver src/salud/monitor.ts. */
-$('api-salud-reanudar').onclick=ocupado($('api-salud-reanudar'),'Reanudando…',async function(){await api('/admin/salud/reanudar',{method:'POST',body:{motivo:'Desde Salud'}});await saludNumero();toast('Envíos reanudados. El número vuelve despacio: empieza al 10 % de velocidad y sube hasta el 100 % en las próximas horas, para no quemarlo otra vez.');});
-saludNumero();setInterval(saludNumero,30000);
+$('api-salud-reanudar').onclick=ocupado($('api-salud-reanudar'),'Reanudando…',async function(){await api('/admin/pause',{method:'POST',body:{paused:false}});await saludNumero();toast('Envíos reanudados con la pausa configurada.');});
+saludNumero();
 `;
 
   return appShell({
-    titulo: 'Salud',
-    subtitulo: 'API, conexión de WhatsApp, riesgo, cupo y respaldos',
+    titulo: 'Estado del sistema',
+    subtitulo: 'API, conexión de WhatsApp y respaldos',
     contenido,
     script,
     css: CSS,

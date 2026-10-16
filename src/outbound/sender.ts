@@ -16,7 +16,7 @@ import { renderTemplate, TemplateRenderError } from '../templates/render.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { Politica } from '../salud/politica.js';
 import { decidirRitmo, type DecisionRitmo } from '../salud/ritmo.js';
-import { aMano } from '../salud/humano.js';
+import { aMano, envioProgramado } from '../salud/humano.js';
 import { codigoDeError } from '../salud/supresion.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { dailyCapFor, type WarmupPolicy } from './throttle.js';
@@ -37,6 +37,8 @@ export interface SendJob {
   campaignId?: string | null;
   /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
   manual?: boolean;
+  /** Envío con cadencia propia: el transporte no añade escritura artificial. */
+  programado?: boolean;
   /**
    * Quien lo manda, para el hilo (payload.origen): 'ia' el asistente,
    * 'sistema' lo automatico (reglas, reparto, campanas). Lo manual va como
@@ -249,7 +251,7 @@ export function createSender(deps: SenderDeps): Sender {
 
   const permitidos = () => (typeof deps.soloNumeros === 'function' ? deps.soloNumeros() : deps.soloNumeros) ?? [];
 
-  return {
+  const puerto: Sender = {
     /**
      * Las acciones sobre un mensaje van directas al proveedor.
      *
@@ -382,7 +384,7 @@ export function createSender(deps: SenderDeps): Sender {
       // Iniciado por la empresa: con plantilla o fuera de la ventana. Es lo
       // que cuenta para el tier de Meta, el warm-up y el marcapasos.
       const businessInitiated = job.kind === 'template' || !isWithinServiceWindow(contact, at);
-      const automatico = businessInitiated && job.manual !== true;
+      const automatico = (businessInitiated || job.programado === true) && job.manual !== true;
 
       const [numberState, marketingLast7d, sentToday] = await Promise.all([
         repos.numberState.get(phoneId()),
@@ -415,8 +417,9 @@ export function createSender(deps: SenderDeps): Sender {
       });
 
       const decision = evaluateGates(
-        { contact, kind: job.kind, category: job.category, template, now: at, manual: job.manual },
+        { contact, kind: job.kind, category: job.category, template, now: at, manual: job.manual, programado: job.programado },
         {
+          sinControlCuenta: politica?.soloRitmo,
           numberState,
           marketingLast7d,
           sentToday,
@@ -446,7 +449,8 @@ export function createSender(deps: SenderDeps): Sender {
       }
 
       try {
-        const result = await limitarEnvio(() => job.manual ? aMano(() => dispatch(wa, job, template)) : dispatch(wa, job, template));
+        const result = await limitarEnvio(() => job.manual ? aMano(() => dispatch(wa, job, template)) : job.programado ? envioProgramado(() => dispatch(wa, job, template)) : dispatch(wa, job, template));
+        const enviadoAt = now();
         await repos.deliveries.markSent(deliveryId, result.wamid);
 
         // El chat lee de `messages`: sin esta fila el operador manda algo y no
@@ -474,17 +478,17 @@ export function createSender(deps: SenderDeps): Sender {
           ),
           status: 'sent',
           deliveryId,
-          createdAt: at,
+          createdAt: enviadoAt,
         });
 
         // Solo lo iniciado por la empresa consume cupo diario: responder
         // dentro de la ventana de servicio no gasta warm-up. Y es lo unico
         // que mueve el marcapasos y la cuenta de "sin respuesta" del contacto.
         if (businessInitiated) {
-          await repos.counters.increment(phoneId(), job.category, at);
-          await repos.contacts.anotarEnvioIniciado(contact.id, at);
-          if (job.manual !== true) deps.salud?.marcapasos.anotar(at);
+          await repos.counters.increment(phoneId(), job.category, enviadoAt);
+          await repos.contacts.anotarEnvioIniciado(contact.id, enviadoAt);
         }
+        if (automatico) deps.salud?.marcapasos.anotar(enviadoAt);
 
         return { ok: true, wamid: result.wamid, deliveryId };
       } catch (error) {
@@ -518,6 +522,15 @@ export function createSender(deps: SenderDeps): Sender {
       }
     },
   };
+  // La evaluación y el envío comparten turno: dos motores no pueden aprobar
+  // la misma pausa global en paralelo. Las respuestas manuales no esperan.
+  let turnoAutomatico: Promise<unknown> = Promise.resolve();
+  return { ...puerto, send(job) {
+    if (job.manual || !deps.salud || !deps.politica) return puerto.send(job);
+    const turno = turnoAutomatico.catch(() => undefined).then(() => puerto.send(job));
+    turnoAutomatico = turno.then(() => undefined, () => undefined);
+    return turno;
+  } };
 }
 
 /** Codigos con los que reintentar en la misma cola no tiene sentido. */

@@ -117,7 +117,7 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'gsg-courier', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'URL y API Key de GSG, envío de ubicaciones y consulta de estado.', soloAdmin: true },
   { id: 'api-gsgchat', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
   { id: 'rutas-ajustes', etiqueta: 'Automatización GSG', href: '/automatizacion-gsg', icono: 'ajustes', descripcion: 'Horarios, ritmo y máximo de mensajes de solicitud de ubicación.', soloAdmin: true },
-  { id: 'fiabilidad', etiqueta: 'Salud', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, riesgos, reconexión, alertas y respaldos.', soloAdmin: true },
+  { id: 'fiabilidad', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, reconexión, alertas y respaldos.', soloAdmin: true },
   { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
   { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario y avisos del sistema.', soloAdmin: true },
   { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Registro de acciones del equipo.', soloAdmin: true },

@@ -141,6 +141,12 @@ export async function prepararBase(o: OpcionesBanco, destino: string): Promise<b
     await migrate(o.url, destino);
     return false;
   }
+  // El banco se rellena en segundo plano al arrancar y despues de cada alta.
+  // Si llega un registro justo durante ese DDL, no iniciar a la vez otra
+  // migracion completa para la tienda: esperamos la reserva y la tomamos ya
+  // preparada. Asi evitamos que el alta compita con el trabajo del banco en
+  // MariaDB (y que dos tandas de ~50 tablas golpeen el disco simultaneamente).
+  if (rellenando) await rellenando;
   const firma = await firmaDeMigraciones();
   const tomada = await conAdmin(o.url, async (admin) => {
     for (const banco of await bancoListo(admin, o, firma)) {

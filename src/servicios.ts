@@ -11,7 +11,7 @@
  *  - el monitor de salud (cada minuto): riesgo, factor, pausa y rampa;
  *  - el ticker de secuencias y programados (cada 10 s);
  *  - el goteo de campanas (cada 10 s, cinco como mucho por pasada);
- *  - el motor de rutas (cada 5 s, pero con su pausa de 15-30 s entre envios);
+ *  - el motor de rutas (despierta al entrar trabajo y duerme hasta el siguiente vencimiento);
  *  - el motor de la lista de envio automatico (igual: cada 5 s, con la misma
  *    pausa y un mensaje por numero cada pocas horas);
  *  - los avisos de rutas (resumen a GSG y WhatsApp al coordinador);
@@ -30,7 +30,6 @@ import type { WhatsAppClient } from './whatsapp/client.js';
 import type { SettingsService } from './settings/service.js';
 import { providerOf } from './settings/service.js';
 import type { Monitor } from './salud/monitor.js';
-import { startMonitorSalud } from './salud/monitor.js';
 import type { Politica } from './salud/politica.js';
 import type { ServicioAjustes } from './ajustes/generales.js';
 import type { ServicioStickers } from './stickers/stickers.js';
@@ -88,8 +87,6 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   const warn = (mensaje: string, detalle?: Record<string, unknown>) => log.warn(detalle ?? {}, mensaje);
   const info = (mensaje: string, detalle?: Record<string, unknown>) => log.info(detalle ?? {}, mensaje);
 
-  // El monitor de salud evalua cada minuto (y una vez ahora).
-  const stopMonitor = startMonitorSalud(salud, warn);
 
   // Seguimientos y mensajes programados: se procesan cada 10 s.
   const stopScheduler = startScheduler({ repos, sender, log: warn });
@@ -123,9 +120,14 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   );
 
   // Solicitud de ubicacion por lotes: un mensaje cada 15-30 s, en horario y
-  // con tres intentos como maximo. Ver src/rutas/motor.ts.
+  // con tres intentos como maximo. Solo consulta al entrar trabajo o al vencer
+  // un seguimiento; con la cola vacia queda dormido. Ver src/rutas/motor.ts.
   const gsg = deps.gsg ?? crearPuertoGsg(config);
   const stopMotorRutas = startMotorRutas({
+    esperaCambiada: (s) => deps.bus?.emitir('reparto.solicitud.actualizada', {
+      solicitud: { id: s.id, loteId: s.loteId, telefono: s.phone ?? '', referencia: s.referencia, estado: s.estado, incidencia: s.incidencia },
+      ubicacion: null, fecha: new Date().toISOString(),
+    }),
     repos,
     sender,
     wa,
@@ -206,7 +208,6 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   return () => {
     desconectarBus();
     stopWebhooks();
-    stopMonitor();
     stopScheduler();
     stopGoteo();
     clearInterval(sincronizadorPlantillas);
@@ -224,6 +225,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
 /** Lo que se imprime al arrancar sobre el ritmo vigente. */
 export function resumenPolitica(politica: Politica): string {
+  if (politica.soloRitmo) return `horario ${politica.horaInicio}:00-${politica.horaFin}:00, pausa ${politica.pausaMinMs / 1000}-${politica.pausaMaxMs / 1000} s; sin control de salud de cuenta`;
   return (
     `perfil ${politica.perfil}: ${politica.maxPorMinuto}/min, ${politica.maxPorHora}/h, ` +
     `${politica.horaInicio}:00-${politica.horaFin}:00, warm-up desde ${politica.warmup.startPerDay}/dia` +
