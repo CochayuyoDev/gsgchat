@@ -108,19 +108,17 @@ export function gsgVigente(): boolean {
  */
 export const MENU_GSG: ItemMenu[] = [
   { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Estado de la API, WhatsApp, pedidos y errores.' },
-  { id: 'hoy', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos recibidos por API, solicitudes de ubicación y pendientes de atención.' },
+  { id: 'hoy', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos del día, solicitud de ubicación y sus ajustes (horario, ritmo y mensajes).' },
   { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
-  { id: 'historial', etiqueta: 'Historial y errores', href: '/panel#historial', icono: 'historial', descripcion: 'Mensajes enviados, entregados y fallidos; reintentos de pedidos.' },
+  { id: 'historial', etiqueta: 'Historial', href: '/panel#historial', icono: 'historial', descripcion: 'Recepciones de la API de GSG con sus errores y, para administradores, las acciones del equipo.' },
   { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
   { id: 'entrenamiento', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
   { id: 'conexion', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'QR, WAHA o API de Meta: el número de WhatsApp.' },
   { id: 'gsg-courier', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'URL y API Key de GSG, envío de ubicaciones y consulta de estado.', soloAdmin: true },
   { id: 'api-gsgchat', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
-  { id: 'rutas-ajustes', etiqueta: 'Automatización GSG', href: '/automatizacion-gsg', icono: 'ajustes', descripcion: 'Horarios, ritmo y máximo de mensajes de solicitud de ubicación.', soloAdmin: true },
   { id: 'fiabilidad', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, reconexión, alertas y respaldos.', soloAdmin: true },
   { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
   { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario y avisos del sistema.', soloAdmin: true },
-  { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Registro de acciones del equipo.', soloAdmin: true },
   { id: 'manual', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
   { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
 ];
@@ -537,7 +535,7 @@ const JS = String.raw`
     var ruta = location.pathname;
     document.querySelectorAll('#s-nav-movil a[data-ir]').forEach(function (a) {
       var p = a.getAttribute('data-ir').split('#')[0];
-      var activo = p === ruta || (p === '/hoy' && ruta === '/entregas') || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
+      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
       a.classList.toggle('activo', activo);
     });
   }
@@ -590,7 +588,8 @@ const JS = String.raw`
     /* el editor y las corridas son parte de Procesos */
     if (!activo && ruta.indexOf('/procesos/') === 0) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/procesos"]');
     /* /entregas y /hoy son la misma pantalla */
-    if (!activo && (ruta === '/entregas' || ruta === '/hoy')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
+    /* la solicitud de ubicación y sus ajustes son pestañas de Pedidos GSG */
+    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
     items.forEach(function (a) { a.classList.toggle('activo', a === activo); });
     var miga = document.getElementById('s-miga');
     if (activo) {

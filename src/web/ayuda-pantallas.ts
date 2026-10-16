@@ -83,8 +83,8 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
     "preguntas": []
   },
   "historial": {
-    "titulo": "Historial y errores",
-    "que": "Revisa las recepciones del API y sus errores sin abrir un historial de conversaciones.",
+    "titulo": "Historial",
+    "que": "Revisa las recepciones del API de GSG con sus errores y, si eres administrador, quién cambió qué en el panel.",
     "preguntas": []
   },
   "usuarios": {

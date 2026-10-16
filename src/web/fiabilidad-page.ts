@@ -125,7 +125,7 @@ export function fiabilidadPage(opts: { disponible: boolean; demo: boolean; nombr
   const contenido = `
 <div class="wrap" id="wrap" data-disponible="${opts.disponible ? '1' : '0'}">
 
-<section class="tarjeta"><h2>API y conexión</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones"><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a href="/panel#historial">Historial y errores</a></div></section>
+<section class="tarjeta"><h2>API y conexión</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones"><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a href="/panel#historial">Historial</a></div></section>
 <section class="tarjeta veredicto" id="veredicto" aria-live="polite">
   <div class="cabecera"><span class="chip tono-gris" id="veredicto-chip">Comprobando</span><h2 id="veredicto-titulo">Mirando cómo está todo…</h2></div>
   <p class="muted" id="veredicto-pie">El sistema se vigila a sí mismo cada pocos segundos. Si algo falla, aquí sale qué pasa y a dónde ir.</p>

@@ -28,8 +28,11 @@
 
 import { appShell } from './shell.js';
 import { REPARTO_CSS, REPARTO_JS } from './reparto-comun.js';
+import { PESTANAS_PEDIDOS_CSS, PESTANAS_PEDIDOS_JS, pestanasPedidosHtml } from './pestanas-pedidos.js';
 
 const CSS = `${REPARTO_CSS}
+.ref-pedido { white-space: nowrap; font-weight: 600; }
+.wrap.modo-ajustes > :not(.pp-pestanas):not(#caja-ajustes):not(.demo):not(.aviso) { display: none !important; }
   * { box-sizing: border-box; }
   .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); }
   .wrap a { color: var(--primario); }
@@ -183,6 +186,7 @@ export function rutasPage(opts: RutasOpts): string {
 
   const contenido = `
 <div class="wrap">
+  ${pestanasPedidosHtml()}
   ${bandaDemo}
   ${aviso}
 
@@ -192,12 +196,11 @@ export function rutasPage(opts: RutasOpts): string {
     <button type="button" class="btn primario sm" id="arrancar">Empezar a pedir</button>
     <button type="button" class="btn sm" id="pausar">Pausar</button>
     <span class="sep"></span>
-    <button type="button" class="btn sm" id="abrir-ajustes">Ajustes</button>
     <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
   </div>
 
   <!-- Ajustes del reparto: horario, espera, intentos, ritmo y qué se dice en cada paso -->
-  <div class="tarjeta panel hidden" id="ajustes" style="margin-bottom:var(--esp-3)">
+  <div class="tarjeta panel hidden" id="caja-ajustes" style="margin-bottom:var(--esp-3)">
     <h2>Ajustes del reparto <span class="sep"></span>
       <button type="button" class="btn sm" id="cerrar-ajustes">Cerrar</button>
     </h2>
@@ -534,7 +537,7 @@ async function cargarLista() {
     return '<tr data-id="' + s.id + '" tabindex="0"' + (seleccionada === s.id ? ' class="activa"' : '') + '>' +
       '<td><b>' + esc(s.nombre || 'Sin nombre') + '</b>' +
         '<div class="sub">' + esc(s.phone || s.telefonoCrudo) + '</div></td>' +
-      '<td>' + esc(s.referencia || '') +
+      '<td><span class="ref-pedido">' + esc(s.referencia || '') + '</span>' +
         (s.distrito ? '<div class="sub">' + esc(s.distrito) + '</div>' : '') + '</td>' +
       '<td>' + chipEstado(s.estado) +
         (s.requiereHumano ? ' <span class="chip tono-rojo">persona</span>' : '') + '</td>' +
@@ -922,7 +925,7 @@ async function guardarUbicacion(id) {
 
 function abrirCarga() {
   ver('carga', true);
-  ver('ajustes', false);
+  ver('caja-ajustes', false);
   sincronizarAjustes(false);
   document.getElementById('pegado').focus();
 }
@@ -1264,23 +1267,28 @@ function sincronizarAjustes(abierta) {
   if (abierta && location.hash !== '#ajustes') history.replaceState(null, '', '#ajustes');
   if (!abierta && location.hash === '#ajustes') history.replaceState(null, '', location.pathname);
   if (window.shellMarcarActivo) shellMarcarActivo();
+  if (window.marcarPestanaPedidos) marcarPestanaPedidos();
+  /* En la pestaña Ajustes solo se ven los ajustes; lo del envío queda en su pestaña. */
+  var envoltura = document.querySelector('.wrap');
+  if (envoltura) envoltura.classList.toggle('modo-ajustes', abierta);
   if (window.shellTitulo) {
     shellTitulo(
-      abierta ? 'Ajustes del reparto' : 'Ubicaciones para reparto',
-      abierta ? 'Horario, espera, intentos, textos y plantillas' : 'Pedir la ubicación a cada cliente del día'
+      'Pedidos GSG',
+      abierta ? 'Ajustes: horario, espera, intentos, textos y plantillas' : 'Solicitud de ubicación a cada cliente del día'
     );
   }
 }
 
 async function abrirAjustes() {
-  ver('ajustes', true);
+  ver('caja-ajustes', true);
   ver('carga', false);
   sincronizarAjustes(true);
   await cargarAjustes();
+  if (window.pestanasArriba) pestanasArriba();
 }
 
-document.getElementById('abrir-ajustes').onclick = abrirAjustes;
-document.getElementById('cerrar-ajustes').onclick = function () { ver('ajustes', false); sincronizarAjustes(false); };
+/* Los ajustes se abren desde la pestaña «Ajustes» (el ancla #ajustes). */
+document.getElementById('cerrar-ajustes').onclick = function () { ver('caja-ajustes', false); sincronizarAjustes(false); };
 
 document.getElementById('aj-guardar').onclick = async function () {
   var estado = document.getElementById('aj-estado');
@@ -1463,7 +1471,7 @@ setInterval(function () {
 /* Llegar con #ajustes (desde el menu) abre la caja; quitar el ancla la cierra. */
 function abrirSegunAncla() {
   if (location.hash === '#ajustes') abrirAjustes();
-  else { ver('ajustes', false); sincronizarAjustes(false); }
+  else { ver('caja-ajustes', false); sincronizarAjustes(false); }
 }
 window.addEventListener('hashchange', abrirSegunAncla);
 abrirSegunAncla();
@@ -1471,11 +1479,11 @@ refrescar();
 `;
 
   return appShell({
-    titulo: 'Automatización GSG',
-    subtitulo: 'Pedir la ubicación a cada cliente del día',
+    titulo: 'Pedidos GSG',
+    subtitulo: 'Solicitud de ubicación a cada cliente del día',
     contenido,
-    script,
-    css: CSS,
+    script: script + PESTANAS_PEDIDOS_JS,
+    css: CSS + PESTANAS_PEDIDOS_CSS,
     nombreNegocio: opts.nombreNegocio,
     demo,
     icono: '📍',
