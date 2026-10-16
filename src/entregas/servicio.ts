@@ -976,6 +976,8 @@ const LIBERA_CON_PIN = new Set(['sin_ubicacion', 'sin_respuesta', 'respondio_sin
 
 /** «No soy yo»: la incidencia con la que se aparta el pedido (y lo que cuenta la bitacora). */
 const INCIDENCIA_NO_SOY_YO = 'no_soy_yo';
+/** Pidió cambiar su ubicación (por texto o con otro pin): error para GSG (16/10). */
+const INCIDENCIA_CAMBIO_UBICACION = 'cambio_ubicacion';
 
 export async function crearServicioEntregas(deps: DepsEntregas): Promise<ServicioEntregas> {
   const { repos, repo, sender } = deps;
@@ -1906,6 +1908,21 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
   }
 
+  /**
+   * Pedir cambiar la ubicación es un error para GSG (regla del dueño, 16/10):
+   * se quita la ubicación registrada (la anterior queda solo como referencia),
+   * el pedido pasa a «Necesitan a alguien» con «cambio_ubicacion» y ya no se
+   * le escribe ni se registra otro pin suyo: lo resuelve GSG o una persona.
+   */
+  async function quitarUbicacionPorCambio(lista: Entrega[], detalle: string): Promise<void> {
+    const en = ahora();
+    for (const x of lista) {
+      if (x.ubicacionEstado !== 'recibida') continue;
+      const act = (await repo.actualizar(x.id, { ubicacionEstado: 'pendiente', lat: null, lng: null, mapsUrl: null, ubicacionAnteriorLat: x.lat ?? null, ubicacionAnteriorLng: x.lng ?? null, ubicacionCambioPedidoAt: en })) ?? x;
+      await marcarIncidencia(act, INCIDENCIA_CAMBIO_UBICACION, detalle);
+    }
+  }
+
   async function pedidoDeCambioDeUbicacion(phone: string, texto?: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean } | null> {
     const enCurso = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
     const vivas = enCurso.filter((x) => x.ubicacionEstado === 'recibida');
@@ -1921,6 +1938,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
       }
       await reportarCambioUbicacion(aCambiar, false, limite, texto ? `escribió: «${texto.slice(0, 200)}»` : undefined);
+      await quitarUbicacionPorCambio(aCambiar, `pidió cambiar su ubicación${texto ? `: «${texto.slice(0, 160)}»` : ''}`);
       return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false };
     }
     if (!vivas.length) return null;
@@ -1930,6 +1948,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const numero = numeroDeGsg(g, m);
     for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
     await reportarCambioUbicacion(vivas, true, limite, texto ? `escribió: «${texto.slice(0, 200)}»` : undefined);
+    await quitarUbicacionPorCambio(vivas, `pidió cambiar su ubicación después de la ${limite}${texto ? `: «${texto.slice(0, 160)}»` : ''}`);
     return { texto: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero }), entrega: g, tarde: true };
   }
 
@@ -1962,12 +1981,20 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const vivas = (await repo.vivasPorTelefono(contact.phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
     const distinto = (x: Entrega) => x.ubicacionEstado === 'recibida' && x.lat != null && x.lng != null && (Math.abs(x.lat - ubicacion.lat) >= 1e-6 || Math.abs(x.lng - ubicacion.lng) >= 1e-6);
     const yaTenian = vivas.filter(distinto);
-    if (!yaTenian.length) return null;
+    const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se registra`;
+    const pendientes = vivas.some((x) => x.ubicacionEstado === 'pendiente');
+    if (!yaTenian.length) {
+      // Ya pidió el cambio hoy (error puesto): su pin no se registra ni se contesta.
+      const conError = (await repo.listar({ dia: hoy(), estados: ['incidencia'], q: contact.phone, limit: 50 }).catch(() => [] as Entrega[]))
+        .filter((x) => x.phone === contact.phone && x.incidencia === INCIDENCIA_CAMBIO_UBICACION);
+      if (!conError.length || pendientes) return null;
+      for (const x of conError) await evento(x, 'nota', `${detalle} (ya pidió cambiar su ubicación: lo resuelve GSG o una persona)`).catch(() => undefined);
+      return { atendida: true, entrega: conError[0], resultado: 'cambio_reportado' };
+    }
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
-    const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se cambió, se queda la registrada`;
-    for (const x of yaTenian) await evento(x, 'nota', detalle).catch(() => undefined);
     await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, detalle);
-    if (vivas.some((x) => x.ubicacionEstado === 'pendiente')) return null;
+    await quitarUbicacionPorCambio(yaTenian, detalle);
+    if (pendientes) return null;
     return { atendida: true, entrega: yaTenian[0], resultado: 'cambio_reportado' };
   }
 
@@ -1997,7 +2024,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // (Las apartadas por otra cosa -«no soy yo», baja- tambien guardan el pin,
     // para que la ubicacion sea UNA en todo el sistema, pero siguen con una persona.)
     const apartadas = (await repo.listar({ dia: hoy(), estados: ['incidencia'], q: contact.phone, limit: 50 }).catch(() => [] as Entrega[])).filter(
-      (x) => x.phone === contact.phone && x.ubicacionEstado === 'pendiente' && !x.envioRetenidoAt,
+      (x) => x.phone === contact.phone && x.ubicacionEstado === 'pendiente' && !x.envioRetenidoAt && (ubicacion.aMano || x.incidencia !== INCIDENCIA_CAMBIO_UBICACION),
     );
     const todas = [...vivas, ...apartadas.filter((x) => !vivas.some((v) => v.id === x.id))].filter(x => ubicacion.entregaId == null || x.id === ubicacion.entregaId);
     if (!todas.length) return { atendida: false };

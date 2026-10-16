@@ -59,6 +59,8 @@ export interface RespuestaRuta {
   solicitud?: Solicitud;
   /** Lo que conviene contestarle ahora mismo, si algo. */
   responder?: string;
+  /** Con «cambio_reportado»: el pin nuevo, para que las entregas marquen el error. */
+  ubicacionNueva?: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null };
 }
 
 export interface RutaInboundDeps {
@@ -243,7 +245,7 @@ async function corregirUbicacion(
       }
     }
     await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `mandó otra ubicación (${ubicacion.fuente ?? 'whatsapp'}): no se cambia, se le reporta a GSG como cambio de ubicación`).catch(() => undefined);
-    return { atendida: true, resultado: 'cambio_reportado', solicitud: resuelta };
+    return { atendida: true, resultado: 'cambio_reportado', solicitud: resuelta, ubicacionNueva: { lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl: ubicacion.mapsUrl ?? null, fuente: ubicacion.fuente ?? 'whatsapp' } };
   }
 }
 

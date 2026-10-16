@@ -1029,6 +1029,12 @@ async function handleInboundMessageEnFila(
       await cerrarTrasUbicacion();
       return true;
     }
+    // Otra ubicación con la suya ya registrada: el reparto lo reportó; las
+    // entregas quitan la ubicación y marcan el error. Al cliente, nada.
+    if (respuesta.resultado === 'cambio_reportado') {
+      if (deps.entregas && respuesta.ubicacionNueva) await deps.entregas.alUbicacion(contact, respuesta.ubicacionNueva).catch((error) => request_log(deps, 'no se pudo marcar el cambio de ubicación en las entregas', error));
+      return true;
+    }
     if (respuesta.resultado === 'fuera_de_zona') {
       await reply(textoFueraDeZona(config.coverageName));
       return true;

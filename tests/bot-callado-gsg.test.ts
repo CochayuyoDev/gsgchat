@@ -39,9 +39,10 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
       await e.contesta(telefono, { texto: 'gracias' });
       expect(e.mensajesA(telefono)).toHaveLength(inicio + 1);
 
-      // Pedir cambiar la ubicación no recibe respuesta, pero es una incidencia para GSG.
+      // Pedir cambiar la ubicación no recibe respuesta: es un error para GSG y se quita la ubicación.
       const incidencias = (await e.repos.rutas.reportesRecientes(100, 'incidencia')).map((r) => r.payload as Record<string, unknown>);
       expect(incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(1);
+      expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ estado: 'incidencia', incidencia: 'cambio_ubicacion', ubicacionEstado: 'pendiente', lat: null });
       await e.contesta(telefono, { texto: 'me equivoqué de dirección, quiero cambiarla' });
       const otraVez = (await e.repos.rutas.reportesRecientes(100, 'incidencia')).map((r) => r.payload as Record<string, unknown>);
       expect(otraVez.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(1);
@@ -177,7 +178,7 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
     }
   });
 
-  it('otra ubicación con la suya ya registrada no la cambia: silencio y GSG recibe «cambio_ubicacion»', async () => {
+  it('otra ubicación con la suya ya registrada: silencio, se quita la ubicación, queda en error y GSG recibe solo «cambio_ubicacion»', async () => {
     const e = await crearEscenarioEntregas({ agente: true });
     try {
       await e.api.post('/api/v1/entregas', pedido);
@@ -188,7 +189,7 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
       await e.contesta(telefono, { pin: otro });
       await e.contesta(telefono, { enlace: `https://www.google.com/maps?q=${otro.lat},${otro.lng}` });
       expect(e.mensajesA(telefono)).toHaveLength(tras);
-      expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ ubicacionEstado: 'recibida', lat: fijo.lat, lng: fijo.lng });
+      expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ estado: 'incidencia', incidencia: 'cambio_ubicacion', ubicacionEstado: 'pendiente', lat: null, lng: null, ubicacionAnteriorLat: fijo.lat });
       const incidencias = (await e.repos.rutas.reportesRecientes(100, 'incidencia')).map((r) => r.payload as Record<string, unknown>);
       expect(incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(1);
       const ubicaciones = (await e.repos.rutas.reportesRecientes(100, 'ubicacion')).map((r) => r.payload as Record<string, unknown>);

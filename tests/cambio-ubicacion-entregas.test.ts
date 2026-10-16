@@ -208,7 +208,8 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     }
   });
 
-  it('5. lo que no se entiende: el menú SIN «Cotizar envío»; «1» da el horario y «2» pasa a una persona', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('5. lo que no se entiende: el menú SIN «Cotizar envío»; «1» da el horario y «2» pasa a una persona', async () => {
     const menu = await botonesNuevos(ANA, () => e.contesta(ANA, { texto: 'asdf qwer' }));
     expect(menu).toHaveLength(1);
     expect(menu[0]!.body).toBe('No reconocí ese mensaje. ¿En qué te ayudo?');
