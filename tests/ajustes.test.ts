@@ -44,9 +44,9 @@ describe('ajustes: puros', () => {
 
   it('sin nada guardado, los ajustes son los de la configuracion', () => {
     const a = ajustesPorDefecto(opciones);
-    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 4, esperasMensajesMinutos: [30, 25, 20], horaInicio: 9, horaFin: 19 });
+    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 4, esperasMensajesMinutos: [30, 25, 20], esperaFinalMinutos: 20, horaInicio: 9, horaFin: 19 });
     expect(a.plantillas.solicitud).toEqual([]);
-    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], maxIntentos: 4 });
+    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], maxIntentos: 4, esperaFinalMinutos: 20 });
   });
 
   it('aplicar corrige un maximo por debajo del minimo y un fin antes del inicio', () => {
@@ -112,6 +112,7 @@ describe('ajustes: el motor los usa', () => {
       {
         esperaRespuestaMinutos: 5,
         maxIntentos: 1,
+        esperaFinalMinutos: 0,
         textos: { solicitud: ['Hola {nombre}, {negocio} necesita su ubicación para {pedido}.'], recordatorio: [], insistencia: [] },
       },
       ajustesPorDefecto(opciones),
@@ -161,7 +162,10 @@ describe('ajustes: el motor los usa', () => {
 
     expect((await motor.tick()).accion).toBe('envio');
     expect(enviados).toHaveLength(5);
+    // Tras el último mensaje se espera lo mismo que la última espera (5 min) antes de darlo por perdido.
     momento = new Date(momento.getTime() + 31_000);
+    expect((await motor.tick()).accion).toBe('nada');
+    momento = new Date(momento.getTime() + 5 * 60_000);
     expect((await motor.tick()).accion).toBe('derivacion');
 
     const [solicitud] = await repos.rutas.listarSolicitudes({ limit: 1, offset: 0 });

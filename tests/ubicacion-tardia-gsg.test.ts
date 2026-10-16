@@ -18,7 +18,7 @@ describe('ubicación tardía después del máximo de intentos', () => {
     }) as typeof fetch;
     const e = await crearEscenarioEntregas({ arranque: new Date('2026-10-14T15:17:00Z'), fetchGsg });
     try {
-      await e.repos.rutas.ajustes.set({ esperaRespuestaMinutos: 1, maxIntentos: 3 }, ajustesPorDefecto(OPCIONES_POR_DEFECTO));
+      await e.repos.rutas.ajustes.set({ esperaRespuestaMinutos: 1, maxIntentos: 3, esperaFinalMinutos: 0 }, ajustesPorDefecto(OPCIONES_POR_DEFECTO));
       await e.api.post('/api/v1/entregas', [pedido('TARDIO-1'), pedido('TARDIO-2')]);
       for (let i = 0; i < 4; i++) { await e.trabajar(); e.avanzar(1); }
       const s = (await e.repos.rutas.listarSolicitudes({ q: '51987601234', limit: 10, offset: 0 }))[0]!;
@@ -73,7 +73,7 @@ describe('ubicación tardía después del máximo de intentos', () => {
       return new Response('{}', { status: 200 });
     }) as typeof fetch });
     try {
-      await e.repos.rutas.ajustes.set({ esperaRespuestaMinutos: 1, maxIntentos: 3 }, ajustesPorDefecto(OPCIONES_POR_DEFECTO));
+      await e.repos.rutas.ajustes.set({ esperaRespuestaMinutos: 1, maxIntentos: 3, esperaFinalMinutos: 0 }, ajustesPorDefecto(OPCIONES_POR_DEFECTO));
       await e.api.post('/api/v1/entregas', [pedido('YA-REPORTADO-1'), pedido('YA-REPORTADO-2')]);
       for (let i = 0; i < 4; i++) { await e.trabajar(); e.avanzar(1); }
       await e.despacharAGsg();

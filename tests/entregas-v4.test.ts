@@ -159,7 +159,8 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     expect((await e.entrega('L-1'))?.ubicacionEstado).toBe('recibida');
   });
 
-  it('un pin fuera de Lima no se registra: pasa a una persona y al cliente se le explica', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('un pin fuera de Lima no se registra: pasa a una persona y al cliente se le explica', async () => {
     e.simulador.cargar([{ referencia: 'V-5', telefono: '987410005', nombre: 'Fuera Zona', direccion: 'Km 30', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false }]);
     await e.gsgManda();
     await e.trabajar();

@@ -53,7 +53,7 @@ export const PERFILES: Perfil[] = [
     ventas: false,
     tono: 'auto',
     preventaActiva: false,
-    entregas: { responderDondeEsta: true, usarBotones: true, avisarEntregado: true, avisarCerca: true, clienteRecurrente: true, segundaVisita: true, cierreDelDia: true },
+    entregas: { responderDondeEsta: true, usarBotones: true, avisarEntregado: true, avisarCerca: true, clienteRecurrente: false, segundaVisita: true, cierreDelDia: true },
   },
   {
     id: 'tienda',
@@ -64,7 +64,7 @@ export const PERFILES: Perfil[] = [
     ventas: true,
     tono: 'tu',
     preventaActiva: false,
-    entregas: { responderDondeEsta: true, usarBotones: true, avisarEntregado: true, avisarCerca: true, clienteRecurrente: true, segundaVisita: true, cierreDelDia: true },
+    entregas: { responderDondeEsta: true, usarBotones: true, avisarEntregado: true, avisarCerca: true, clienteRecurrente: false, segundaVisita: true, cierreDelDia: true },
   },
   {
     id: 'chat',

@@ -55,6 +55,8 @@ export interface OpcionesMotor {
   esperasMensajesMinutos?: number[];
   /** Mensajes por cliente antes de pasarlo a una persona. */
   maxIntentos: number;
+  /** Minutos tras el último mensaje antes de darlo por «sin respuesta» (0 o sin dar = en el momento). */
+  esperaFinalMinutos?: number;
   /** Campo antiguo conservado por compatibilidad; no activa otro modo de envío. */
   pedirUbicacionCadaMinutos: number;
   /** Franja horaria en la que se puede escribir, hora del negocio. */
@@ -275,7 +277,7 @@ export function crearMotor(deps: MotorDeps): Motor {
   /** El primer intervalo es después del mensaje 1; si no hay secuencia, usar el valor antiguo. */
   const esperaHastaElSiguiente = (intentosPrevios: number): number =>
     intentosPrevios + 1 >= opciones.maxIntentos
-      ? 0
+      ? Math.max(0, opciones.esperaFinalMinutos ?? 0)
       : opciones.esperasMensajesMinutos?.[intentosPrevios] ?? opciones.esperaRespuestaMinutos;
 
   /** Cuando se mando el ultimo mensaje, para respetar la pausa. */

@@ -82,6 +82,10 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       esperasMensajesMinutos: esperas,
       esperaRespuestaMinutos: esperas[0] ?? espera,
       maxIntentos: esperas.length + 1,
+      // Como en src/rutas/ajustes.ts: sin guardar, sigue a la última espera.
+      esperaFinalMinutos: g.esperaFinalMinutos !== undefined
+        ? Number(g.esperaFinalMinutos)
+        : g.esperasMensajesMinutos !== undefined || base.esperaFinalMinutos === undefined ? esperas.at(-1) ?? espera : base.esperaFinalMinutos,
       plantillas: { ...base.plantillas, ...((g.plantillas as AjustesRutas['plantillas'] | undefined) ?? {}) },
       textos: { ...base.textos, ...((g.textos as AjustesRutas['textos'] | undefined) ?? {}) },
     };
@@ -250,14 +254,14 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       return { ...solicitud };
     },
 
-    async reprogramarSeguimientos(esperasMensajesMinutos) {
+    async reprogramarSeguimientos(esperasMensajesMinutos, esperaFinalMinutos = 0) {
       const activos = new Set(lotes.filter((l) => l.estado === 'enviando' || l.estado === 'pausado').map((l) => l.id));
       let reprogramadas = 0;
       for (const solicitud of solicitudes) {
         if (!activos.has(solicitud.loteId) || !['enviado', 'respondio'].includes(solicitud.estado) || solicitud.requiereHumano || !solicitud.ultimoEnvioAt) continue;
         const maxIntentos = esperasMensajesMinutos.length + 1;
         solicitud.proximoIntentoAt = solicitud.intentos >= maxIntentos
-          ? reloj()
+          ? new Date(solicitud.ultimoEnvioAt.getTime() + Math.max(0, esperaFinalMinutos) * 60_000)
           : new Date(solicitud.ultimoEnvioAt.getTime() + (esperasMensajesMinutos[solicitud.intentos - 1] ?? esperasMensajesMinutos.at(-1) ?? 0) * 60_000);
         solicitud.updatedAt = reloj();
         reprogramadas++;

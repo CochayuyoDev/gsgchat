@@ -134,7 +134,7 @@ export const ajustesEntregasSchema = z.object({
    */
   clienteRecurrente: z
     .object({
-      activo: z.boolean().default(true),
+      activo: z.boolean().default(false),
       diasMaximo: z.number().int().min(1).max(365).default(60),
       esperaMin: z.number().int().min(5).max(24 * 60).default(60),
     })

@@ -426,7 +426,8 @@ describe('regla del dueño apagada: como antes', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('con el pin vuelve la pregunta SÍ/NO, y el SÍ se contesta', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('con el pin vuelve la pregunta SÍ/NO, y el SÍ se contesta', async () => {
     expect(e.entregas.reglaGsgActiva()).toBe(false);
     const antes = e.textosA('987000001').length;
     await e.contesta('987000001', { pin: PIN_LIMA });

@@ -192,13 +192,15 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     expect(e.botonesA(ANA).length).toBe(antes);
   });
 
-  it('3. el pin nuevo → «Tu nueva ubicación se ha registrado»', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('3. el pin nuevo → «Tu nueva ubicación se ha registrado»', async () => {
     const r = await nuevos(ANA, () => e.contesta(ANA, { pin: { lat: -12.079, lng: -77.088 } }));
     expect(r.some((t) => /Tu nueva ubicación se ha registrado correctamente/.test(t)), r.join('\n---\n')).toBe(true);
     expect((await e.entrega('GSG-A-1001'))?.lat).toBeCloseTo(-12.079, 5);
   });
 
-  it('4. las variantes (sin tildes, con faltas) también piden la nueva', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('4. las variantes (sin tildes, con faltas) también piden la nueva', async () => {
     for (const texto of ['me equivoque de ubicacion', 'esa no es mi ubicación', 'mande mal la ubicacion', 'la ubicación está mal', 'me equiboque de ubicasion']) {
       const antes = e.botonesA(ANA).length;
       expect(await nuevos(ANA, () => e.contesta(ANA, { texto })), texto).toEqual([PIDE_LA_NUEVA]);
@@ -268,7 +270,8 @@ describe('«Solo lo de GSG»: variantes del cambio y el cliente que escribe ante
     await gsg?.cerrar();
   });
 
-  it('Diego escribe «Sí» antes de que se le pregunte: no se le contesta y queda dicho en su pedido', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('Diego escribe «Sí» antes de que se le pregunte: no se le contesta y queda dicho en su pedido', async () => {
     // Todavía no trabajó el motor: a Diego aún no le salió la pregunta.
     expect(e.textosA(DIEGO)).toEqual([]);
     await e.contesta(DIEGO, { texto: 'Sí' });
@@ -281,7 +284,8 @@ describe('«Solo lo de GSG»: variantes del cambio y el cliente que escribe ante
 
   // Segundos después del primer «Sí»: antes se tomaba por copia del primero
   // (la regla de las acciones repetidas) y se perdía sin respuesta.
-  it('luego le llega la pregunta en su turno y su «Sí» sí confirma (no es una copia del primero)', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('luego le llega la pregunta en su turno y su «Sí» sí confirma (no es una copia del primero)', async () => {
     await e.trabajar();
     expect(e.botonesA(DIEGO).at(-1)?.buttons.map((b) => b.title)).toEqual(['Sí, recibo hoy', 'No']);
     const r = await nuevos(DIEGO, () => e.contesta(DIEGO, { texto: 'Sí' }));
@@ -289,7 +293,8 @@ describe('«Solo lo de GSG»: variantes del cambio y el cliente que escribe ante
     expect((await e.entrega('GSG-A-2002'))?.confirmacionEstado).toBe('confirmada');
   });
 
-  it('Bruno: pin → registrada; «esa no es mi ubicación» → que mande la nueva; pin → «se ha registrado»', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('Bruno: pin → registrada; «esa no es mi ubicación» → que mande la nueva; pin → «se ha registrado»', async () => {
     const r = await nuevos(BRUNO, () => e.contesta(BRUNO, { pin: EN_CERCADO }));
     expect(r.some((t) => t.includes('Ubicación registrada correctamente')), r.join('\n---\n')).toBe(true);
     for (const texto of ['esa no es mi ubicación', 'me equiboque de ubicasion', 'la mandé mal']) {

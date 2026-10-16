@@ -15,7 +15,8 @@ describe('cierre de pendientes', () => {
     expect(normal?.horarioEntregaFechaDesde).toBeUndefined();
     expect(normal?.horarioEntregaHasta).toBe('17:00');
   });
-  it('confirmar un pedido no cierra la solicitud ni reutiliza el pin del otro pedido', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('confirmar un pedido no cierra la solicitud ni reutiliza el pin del otro pedido', async () => {
     const e=await crearEscenarioEntregas();
     try {
       const c=await e.repos.contacts.upsertFromInbound('51987777555','Rosa');

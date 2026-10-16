@@ -48,7 +48,8 @@ describe('cambio de ubicación antes y después de la 1:00 PM', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('antes de la 1:00 PM: se le pide la nueva y el pin nuevo se registra', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('antes de la 1:00 PM: se le pide la nueva y el pin nuevo se registra', async () => {
     expect(await pide({ texto: 'me equivoqué de ubicación' })).toEqual(['Claro, Rosa, por favor mándeme su nueva ubicación por WhatsApp (el botón de ubicación) para registrarla.']);
     await e.contesta(TEL, { pin: OTRO_PIN });
     const c1 = await e.entrega('C-1');

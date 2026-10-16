@@ -28,6 +28,12 @@ export interface AjustesRutas {
   esperasMensajesMinutos: number[];
   /** Mensajes por cliente antes de pasarlo al repartidor. */
   maxIntentos: number;
+  /**
+   * Minutos que se espera tras el ÚLTIMO mensaje antes de darlo por «sin
+   * respuesta» y reportarlo a GSG (0 = en el momento). Sin guardar: lo mismo
+   * que la última espera entre mensajes.
+   */
+  esperaFinalMinutos: number;
   /** Campo antiguo: siempre desactivado, incluso al leer ajustes previos. */
   pedirUbicacionCadaMinutos: number;
   /** Franja horaria de envio, hora del negocio. */
@@ -59,6 +65,7 @@ export const ajustesSchema = z.object({
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
   esperasMensajesMinutos: esperasSchema,
   maxIntentos: z.coerce.number().int().min(1).max(100),
+  esperaFinalMinutos: z.coerce.number().int().min(0).max(24 * 60),
   pedirUbicacionCadaMinutos: z.literal(0),
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
@@ -82,6 +89,7 @@ export function ajustesPorDefecto(opciones: OpcionesMotor): AjustesRutas {
     esperaRespuestaMinutos: opciones.esperaRespuestaMinutos,
     esperasMensajesMinutos,
     maxIntentos: opciones.maxIntentos,
+    esperaFinalMinutos: esperasMensajesMinutos.at(-1) ?? opciones.esperaRespuestaMinutos,
     pedirUbicacionCadaMinutos: 0,
     horaInicio: opciones.horaInicio,
     horaFin: opciones.horaFin,
@@ -101,6 +109,7 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
     esperasMensajesMinutos: ajustes.esperasMensajesMinutos,
     maxIntentos: ajustes.maxIntentos,
+    esperaFinalMinutos: ajustes.esperaFinalMinutos,
     pedirUbicacionCadaMinutos: 0,
     // El horario de aqui es solo el SUELO: en una instalacion sin ajustes
     // generales (una suelta, las pruebas) sigue siendo el que manda. Donde si
@@ -225,6 +234,9 @@ export function createAjustesRepo(pool: Pool): AjustesRepo {
       esperaRespuestaMinutos: esperas[0] ?? intervalo,
       esperasMensajesMinutos: esperas,
       maxIntentos: esperas.length + 1,
+      // Sin guardar, la espera final sigue a la última espera entre mensajes.
+      esperaFinalMinutos: guardado.esperaFinalMinutos
+        ?? (guardado.esperasMensajesMinutos || base.esperaFinalMinutos === undefined ? esperas.at(-1) ?? intervalo : base.esperaFinalMinutos),
       pedirUbicacionCadaMinutos: 0,
       plantillas: { ...base.plantillas, ...(guardado.plantillas ?? {}) },
       textos: { ...base.textos, ...(guardado.textos ?? {}) },

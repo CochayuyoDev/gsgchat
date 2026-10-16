@@ -119,12 +119,12 @@ import { errorDeEnvio, fichasDeTrackings, reportarNumero, type FichaTracking, ty
 /** La fuente de una ubicación que salió de la dirección escrita (no es un pin: es aproximada). */
 
 /**
- * Regla del dueño (10/10): la ubicacion vale por DIA. El mismo dia, otro
- * pedido del mismo numero (p. ej. dos trackings de dos tiendas) toma la ya
- * registrada: un solo mensaje al cliente y la lat/lng va a GSG para cada
- * tracking. Otro dia se le vuelve a pedir (cada dia es un pedido nuevo).
+ * Regla del dueño (16/10, reemplaza la del 10/10): cada pedido pide su
+ * ubicacion. Si el cliente ya la mando hoy por otro pedido y le llega uno
+ * nuevo (otro tracking), se le vuelve a pedir con el mensaje de siempre. Los
+ * pedidos que esperan a la vez se siguen agrupando: un solo pin los resuelve.
  */
-const PEDIR_UBICACION_EN_CADA_PEDIDO = false;
+const PEDIR_UBICACION_EN_CADA_PEDIDO = true;
 
 export const FUENTE_DIRECCION_ESCRITA = 'dirección escrita (aproximada)';
 /** Una dirección escrita vale si el mapa la pone a menos de esto (km) de su distrito. */
@@ -1438,7 +1438,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     };
 
     for (const c of cuerpo.faltaUbicacion ?? []) await upsert(c, 'ubicacion');
-    for (const c of cuerpo.faltaConfirmacion ?? []) await upsert(c, 'confirmacion');
+    // Sin confirmaciones (regla del dueño, 16/10): «falta confirmar» también
+    // recibe el mensaje de siempre pidiendo la ubicación, nunca la pregunta SÍ/NO.
+    for (const c of cuerpo.faltaConfirmacion ?? []) await upsert(c, 'ubicacion');
 
     // Lo que GSG ya da por terminado.
     for (const t of cuerpo.terminados ?? []) {
@@ -1646,8 +1648,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       // Compatibilidad: un pin fijo recibido antes de eliminar la pregunta
       // por distancia ya es suficiente. Nunca rescata ubicaciones en vivo.
       if (e.ubicacionEstado === 'pendiente' && e.pinPropuestoFuente === 'pin de whatsapp' && e.pinPropuestoAt &&
-          e.pinPropuestoLat != null && e.pinPropuestoLng != null && Number.isFinite(e.pinPropuestoLat) && Number.isFinite(e.pinPropuestoLng) &&
-          !fueraDeZona(e.pinPropuestoLat, e.pinPropuestoLng)) {
+          e.pinPropuestoLat != null && e.pinPropuestoLng != null && Number.isFinite(e.pinPropuestoLat) && Number.isFinite(e.pinPropuestoLng)) {
         const c = await repos.contacts.getByPhone(e.phone);
         if (c) {
           const r = await registrarUbicacion(c, { lat: e.pinPropuestoLat, lng: e.pinPropuestoLng, fuente: 'pin de whatsapp', entregaId: e.id, propuestaAt: e.pinPropuestoAt });
@@ -1719,10 +1720,10 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng;
   }
 
-  /** Dentro de la zona que se cubre pero fuera de Lima y Callao: se registra y lleva un extra. */
+  /** Fuera de Lima y Callao: se registra igual (se acepta cualquier ubicación) y lleva un extra. */
   function fueraDeLima(lat: number, lng: number): boolean {
     const b = deps.geo?.zonaSinExtra;
-    return Boolean(b) && !fueraDeZona(lat, lng) && !dentroDe(b!, lat, lng);
+    return Boolean(b) && !dentroDe(b!, lat, lng);
   }
 
   async function alUbicacionFueraDeZona(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; fuente?: string | null }): Promise<RespuestaEntregas> {
@@ -1758,15 +1759,16 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return act;
   }
 
-  /** La ultima ubicacion confirmada de ese telefono, si es de hace menos de `diasMaximo` dias. */
-  async function ultimaUbicacionDe(phone: string): Promise<{ lat: number; lng: number; dias: number } | null> {
-    if (!ajustes.clienteRecurrente.activo) return null;
-    const recientes = await repos.locations.listRecent({ limit: 5, offset: 0, phone }).catch(() => []);
-    const buena = recientes.find((l) => l.confirmed && Number.isFinite(l.lat) && Number.isFinite(l.lng));
-    if (!buena) return null;
-    const dias = Math.max(0, Math.floor((ahora().getTime() - new Date(buena.createdAt).getTime()) / 86_400_000));
-    if (dias > ajustes.clienteRecurrente.diasMaximo) return null;
-    return { lat: buena.lat, lng: buena.lng, dias };
+  /**
+   * La ultima ubicacion confirmada de ese telefono, para proponerla.
+   *
+   * Retirado (regla del dueño, 16/10): nunca se le propone «¿la misma
+   * dirección de la última vez?». Cada pedido es un tracking distinto y sale
+   * siempre con el mensaje de siempre, aunque el cliente ya haya mandado su
+   * ubicación otro día. El ajuste `clienteRecurrente` ya no lo enciende.
+   */
+  async function ultimaUbicacionDe(_phone: string): Promise<{ lat: number; lng: number; dias: number } | null> {
+    return null;
   }
 
   const botonesPropuesta = (e: Entrega) => [
@@ -1852,19 +1854,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   async function alUbicacion(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null; yaReportada?: boolean; aMano?: boolean }): Promise<RespuestaEntregas> {
     // Un pin fuera de la zona que se cubre no se registra: se aparta para
     // una persona y al cliente se le explica (venga por donde venga).
-    if (fueraDeZona(ubicacion.lat, ubicacion.lng)) return alUbicacionFueraDeZona(contact, ubicacion);
-    if (!ubicacion.aMano && !ubicacion.yaReportada) {
-      const pendientes = await esperandoUbicacionDe(contact.phone);
-      if (pendientes.length > 1) {
-        for (const e of pendientes) await repo.actualizar(e.id, { pinPropuestoLat: ubicacion.lat, pinPropuestoLng: ubicacion.lng, pinPropuestoAt: ahora(), pinPropuestoFuente: ubicacion.fuente ?? 'pin de whatsapp', pinPropuestoDudas: 0 });
-        return { atendida: true, entrega: (await repo.entrega(pendientes[0]!.id)) ?? pendientes[0]!, resultado: 'seleccionar_pedido', responder: `Recibimos tu ubicación. Tienes varios pedidos: ${pendientes.map(e => e.referencia).join(', ')}. Responde SÍ junto con el código del pedido al que corresponde esta ubicación.` };
-      }
-    }
-    // Otro pin después de la hora límite, con la ubicación ya registrada: no
-    // se cambia; se le pasa al motorizado y el cliente coordina con él.
-    if (!ubicacion.aMano && pasoLaHoraDeCambio()) {
-      const tardio = await pinTardio(contact, ubicacion);
-      if (tardio) return tardio;
+    // Mande la ubicación que mande, se acepta (regla del dueño, 16/10): ya no hay «fuera de zona».
+    // Con varios pedidos esperando, el pin vale para todos (16/10): ya no se le
+    // pregunta a cuál corresponde. Otro pin con la ubicación ya registrada no
+    // la cambia: se le reporta a GSG como cambio de ubicación, sin contestarle.
+    if (!ubicacion.aMano) {
+      const cambio = await pinDeCambio(contact, ubicacion);
+      if (cambio) return cambio;
     }
     const r = await registrarUbicacion(contact, ubicacion);
     // Fuera de Lima y Callao (pero cerca): se registra igual y sigue hacia el
@@ -1894,7 +1890,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * (después de la hora, solo cuenta quien ya la tenía registrada).
    */
   /** Pedir cambiar la ubicación también es una incidencia para GSG (regla del dueño, 16/10): una por tracking y día. */
-  async function reportarCambioUbicacion(lista: Entrega[], tarde: boolean, limite: string, texto?: string): Promise<void> {
+  async function reportarCambioUbicacion(lista: Entrega[], tarde: boolean, limite: string, detalle?: string): Promise<void> {
     const en = ahora();
     for (const x of lista) {
       if (!esDeGsg(x)) continue;
@@ -1904,7 +1900,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         codigo: 'cambio_ubicacion',
         telefono: x.phone,
         titulo: tarde ? `El cliente pidió cambiar su ubicación después de la ${limite}` : 'El cliente pidió cambiar su ubicación',
-        ...(texto ? { detalle: `escribió: «${texto.slice(0, 200)}»` } : {}),
+        ...(detalle ? { detalle: detalle.slice(0, 300) } : {}),
       }, { loteId: x.loteId ?? null, en }).catch(() => false);
       if (encolado) await evento(x, 'reporte', 'encolado para GSG: incidencia «pidió cambiar su ubicación»').catch(() => undefined);
     }
@@ -1924,7 +1920,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
         await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
       }
-      await reportarCambioUbicacion(aCambiar, false, limite, texto);
+      await reportarCambioUbicacion(aCambiar, false, limite, texto ? `escribió: «${texto.slice(0, 200)}»` : undefined);
       return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false };
     }
     if (!vivas.length) return null;
@@ -1933,7 +1929,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const m = await motorizadoDe(g).catch(() => null);
     const numero = numeroDeGsg(g, m);
     for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
-    await reportarCambioUbicacion(vivas, true, limite, texto);
+    await reportarCambioUbicacion(vivas, true, limite, texto ? `escribió: «${texto.slice(0, 200)}»` : undefined);
     return { texto: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero }), entrega: g, tarde: true };
   }
 
@@ -1954,6 +1950,27 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
    * es un cambio (le falta la ubicación a alguno de sus pedidos, o es el
    * mismo punto): sigue normal.
    */
+  /**
+   * Regla del dueño (16/10): un cliente con la ubicación ya registrada que
+   * manda OTRA no la cambia, antes o después de la hora límite. Se queda la
+   * primera, al cliente no se le contesta y GSG lo recibe como incidencia
+   * «cambio_ubicacion» con las coordenadas nuevas. null = no es un cambio
+   * (el mismo punto, o le falta la ubicación a todos sus pedidos); si además
+   * tiene pedidos esperando su ubicación, se reporta y el pin sigue para esos.
+   */
+  async function pinDeCambio(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; fuente?: string | null }): Promise<RespuestaEntregas | null> {
+    const vivas = (await repo.vivasPorTelefono(contact.phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
+    const distinto = (x: Entrega) => x.ubicacionEstado === 'recibida' && x.lat != null && x.lng != null && (Math.abs(x.lat - ubicacion.lat) >= 1e-6 || Math.abs(x.lng - ubicacion.lng) >= 1e-6);
+    const yaTenian = vivas.filter(distinto);
+    if (!yaTenian.length) return null;
+    const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
+    const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se cambió, se queda la registrada`;
+    for (const x of yaTenian) await evento(x, 'nota', detalle).catch(() => undefined);
+    await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, detalle);
+    if (vivas.some((x) => x.ubicacionEstado === 'pendiente')) return null;
+    return { atendida: true, entrega: yaTenian[0], resultado: 'cambio_reportado' };
+  }
+
   async function pinTardio(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; fuente?: string | null }): Promise<RespuestaEntregas | null> {
     const vivas = (await repo.vivasPorTelefono(contact.phone)).filter((x) => !ESTADOS_FINALES.includes(x.estado));
     if (!vivas.length || vivas.some((x) => x.ubicacionEstado !== 'recibida')) return null;
@@ -2001,6 +2018,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         tocadas.push(e);
         continue;
       }
+      // Un pin del cliente no pisa una ubicación ya registrada (16/10): eso
+      // es un cambio y ya se le reportó a GSG (pinDeCambio). Una persona sí puede.
+      if (!ubicacion.aMano && e.ubicacionEstado === 'recibida') continue;
       const corrige = e.ubicacionEstado === 'recibida';
       // «Cambió su ubicación»: ya tenía una registrada, o pidió cambiarla
       // antes de que llegara (queda en el pedido y lo ven las pantallas).
@@ -2132,7 +2152,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (ubicacion.fuente === 'pin de whatsapp') return { atendida: false };
     if (ubicacion.fuente?.startsWith('enlace de mapa')) {
       const pendientes = await esperandoUbicacionDe(contact.phone);
-      if (pendientes.length && Number.isFinite(ubicacion.lat) && Number.isFinite(ubicacion.lng) && !fueraDeZona(ubicacion.lat, ubicacion.lng)) {
+      if (pendientes.length && Number.isFinite(ubicacion.lat) && Number.isFinite(ubicacion.lng)) {
         for (const e of pendientes) await repo.actualizar(e.id, { pinPropuestoLat: ubicacion.lat, pinPropuestoLng: ubicacion.lng, pinPropuestoAt: ahora(), pinPropuestoFuente: ubicacion.fuente, pinPropuestoDudas: 0 });
         const e = (await repo.entrega(pendientes[0]!.id)) ?? pendientes[0]!;
         return { atendida: true, entrega: e, resultado: 'mapa_por_confirmar', responder: `Esta es la ubicación de tu enlace: ${enlaceMapa(ubicacion.lat, ubicacion.lng)}\n¿Sí es donde recibirás el pedido? Responde SÍ o NO, o comparte tu ubicación actual por WhatsApp.` };
@@ -2232,9 +2252,6 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       return { tipo: 'persona', texto: '', entrega: (await repo.entrega(e.id)) ?? e };
     }
     // SÍ: se registra como siempre.
-    if (fueraDeZona(e.pinPropuestoLat!, e.pinPropuestoLng!)) {
-      return { tipo: 'repregunta', entrega: e, texto: 'Esta ubicación está fuera de la zona de cobertura. Comparte otra ubicación o solicita ayuda de una persona para revisar el pedido.' };
-    }
     await evento(e, 'nota', `confirmó que es ahí (${que}; ${como}): se registra el pin`);
     const contacto = await repos.contacts.getByPhone(phone).catch(() => null);
     const r = await registrarUbicacion({ id: contacto?.id ?? '', phone, name: contacto?.name ?? e.nombre }, { lat: e.pinPropuestoLat!, lng: e.pinPropuestoLng!, fuente: e.pinPropuestoFuente ?? 'pin de whatsapp', entregaId: e.id, propuestaAt: e.pinPropuestoAt! });
@@ -3712,10 +3729,13 @@ ${lista}
     const referencia = (input.referencia ?? '').trim() || (await referenciaAutomatica());
     const lectura = leerCliente({ referencia, telefono: input.telefono });
     if (!lectura.ok) return { ok: false, motivo: lectura.motivo };
-    const conPin = typeof input.lat === 'number' && typeof input.lng === 'number';
+    // Sin confirmaciones (regla del dueño, 16/10): «falta confirmar» se trata
+    // como «falta la ubicación»; al cliente nunca se le pregunta SÍ/NO.
+    const pedirUbicacion = Boolean(input.faltaUbicacion || input.faltaConfirmacion);
+    const conPin = !input.faltaConfirmacion && typeof input.lat === 'number' && typeof input.lng === 'number';
     const dia = hoy();
-    const ubicacionEstado = input.faltaUbicacion && !conPin ? 'pendiente' : conPin ? 'recibida' : 'no_hace_falta';
-    const confirmacionEstado = input.faltaConfirmacion ? 'pendiente' : 'no_hace_falta';
+    const ubicacionEstado = pedirUbicacion && !conPin ? 'pendiente' : conPin ? 'recibida' : 'no_hace_falta';
+    const confirmacionEstado = 'no_hace_falta' as const;
     const retenida = Boolean(input.retener) && ajustes.confirmarListaGsg !== false;
     const { entrega, nueva } = await repo.crearEntrega({
       dia,
@@ -4615,10 +4635,11 @@ ${lista}
         direccion: f.direccion?.trim() || null,
         distrito: f.distrito?.trim() || null,
         notas: f.notas?.trim() || null,
-        ubicacionEstado: faltaUbicacion ? 'pendiente' : 'no_hace_falta',
+        // Sin confirmaciones (16/10): «falta confirmar» también pide la ubicación.
+        ubicacionEstado: faltaUbicacion || faltaConfirmacion ? 'pendiente' : 'no_hace_falta',
         lat: null,
         lng: null,
-        confirmacionEstado: faltaConfirmacion ? 'pendiente' : 'no_hace_falta',
+        confirmacionEstado: 'no_hace_falta',
         estado: 'pendiente',
         datosEnvio: f.datosEnvio ?? null,
         envioRetenidoAt: retener ? ahora() : null,
@@ -5091,10 +5112,16 @@ ${lista}
     async sanarUbicacion(phone) {
       const conocida = await repo.ubicacionDelClienteDelDia(phone, hoy()).catch(() => null);
       if (!conocida || conocida.lat == null || conocida.lng == null) return false;
-      // La ubicacion de hoy vale para todos sus pedidos de hoy (regla del dueño, 10/10).
-      const cerradas = await resolverPorUbicacion(repos, phone, { lat: conocida.lat, lng: conocida.lng, mapsUrl: conocida.mapsUrl, fuente: conocida.ubicacionFuente }, { ahora: ahora(), motivo: `ya estaba registrada (pedido ${conocida.referencia})` }).catch(() => []);
+      // Cada pedido pide su ubicacion (16/10): solo se cierran las solicitudes
+      // de los pedidos que ya la tienen; la de un pedido nuevo sigue abierta.
+      const referencias = PEDIR_UBICACION_EN_CADA_PEDIDO
+        ? (await repo.listar({ dia: hoy(), q: phone, limit: 100 }).catch(() => [] as Entrega[])).filter((x) => x.phone === phone && x.ubicacionEstado === 'recibida').map((x) => x.referencia)
+        : undefined;
+      const cerradas = await resolverPorUbicacion(repos, phone, { lat: conocida.lat, lng: conocida.lng, mapsUrl: conocida.mapsUrl, fuente: conocida.ubicacionFuente }, { ahora: ahora(), motivo: `ya estaba registrada (pedido ${conocida.referencia})`, ...(referencias ? { referencias } : {}) }).catch(() => []);
       if (cerradas.length) log('habia solicitudes del reparto abiertas para un cliente con la ubicación ya registrada: se cerraron', { phone, solicitudes: cerradas.map((s) => s.id) });
-      return true;
+      if (!PEDIR_UBICACION_EN_CADA_PEDIDO) return true;
+      // Con un pedido que todavia espera su ubicacion, al cliente le sigue faltando.
+      return (await solicitudesAbiertasDe(repos, phone).catch(() => [] as Solicitud[])).length === 0;
     },
     liberarEnvio,
     async enviarUbicacionAGsg(id, quien) {

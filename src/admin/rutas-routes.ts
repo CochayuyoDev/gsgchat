@@ -350,7 +350,7 @@ export async function registerRutasRoutes(
     // cuándo se guardaron los ajustes. Se hace también si la lista no cambió:
     // repetir «Guardar» repara cualquier programación que hubiera quedado
     // pendiente por una incidencia anterior.
-    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos);
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos, ajustes.esperaFinalMinutos);
     limpiarEsperasEnvio(repos.rutas);
     despertarMotorRutas();
     const vigente = conFranjaDeLaPolitica(aplicarAjustes(opciones, ajustes), franja());
@@ -362,7 +362,7 @@ export async function registerRutasRoutes(
     await repos.rutas.ajustes.reset();
     const ajustes = ajustesPorDefecto(opciones);
     if (deps.ajustes) await deps.ajustes.guardar({ ritmo: { pausaMinSeg: ajustes.pausaMinSegundos, pausaMaxSeg: ajustes.pausaMaxSegundos } });
-    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos);
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos, ajustes.esperaFinalMinutos);
     limpiarEsperasEnvio(repos.rutas);
     despertarMotorRutas();
     return { ok: true, ajustes, seguimientosReprogramados };

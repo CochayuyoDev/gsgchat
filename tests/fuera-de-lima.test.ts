@@ -66,7 +66,8 @@ describe('pin fuera de Lima y Callao: se registra con un extra que cobra el moto
     expect(e.textosA(conPais(MOTO)).some((t) => /X-2/.test(t) && /extra/i.test(t))).toBe(false);
   });
 
-  it('Arequipa (muy lejos): no se registra y pasa a una persona, como siempre', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('Arequipa (muy lejos): no se registra y pasa a una persona, como siempre', async () => {
     await e.contesta('987420003', { pin: AREQUIPA });
     const x3 = await e.entrega('X-3');
     expect(x3?.ubicacionEstado).toBe('pendiente');

@@ -26,7 +26,7 @@ describe('insistencia con intervalo y máximo configurables', () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Con límite' });
     await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '987654321', phone: '51987654321', nombre: 'Ana' }]);
     await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
-    await repos.rutas.ajustes.set({ esperaRespuestaMinutos: 5, maxIntentos: 7 }, ajustesPorDefecto(OPCIONES_POR_DEFECTO));
+    await repos.rutas.ajustes.set({ esperaRespuestaMinutos: 5, maxIntentos: 7, esperaFinalMinutos: 0 }, ajustesPorDefecto(OPCIONES_POR_DEFECTO));
     const enviados: SendJob[] = [];
     const sender: Sender = { async send(job) { enviados.push(job); return { ok: true, wamid: `w.${enviados.length}`, deliveryId: enviados.length }; } };
     const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones: OPCIONES_POR_DEFECTO, usarPlantilla: () => false, ahora: () => ahora, azar: () => 0 });

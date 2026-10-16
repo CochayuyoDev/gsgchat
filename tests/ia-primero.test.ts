@@ -402,7 +402,8 @@ describe('sin IA en «Solo lo de GSG»: reglas y botones (pedido del dueño, 06/
     ['ya pagué por yape, mándame la boleta', 'OTRA', /^$/],
   ];
 
-  it('«falta confirmar»: SI / NO / CAMBIO / POR_QUE / HORA / OTRA, cada uno con su texto fijo', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«falta confirmar»: SI / NO / CAMBIO / POR_QUE / HORA / OTRA, cada uno con su texto fijo', async () => {
     for (const [texto, categoria, espera] of BANCO_CONFIRMAR) {
       const tel = await clienteConfirmar();
       const llamadas = modelo.usuarios.length;
@@ -417,7 +418,8 @@ describe('sin IA en «Solo lo de GSG»: reglas y botones (pedido del dueño, 06/
     }
   }, 120_000);
 
-  it('«falta confirmar» con el modelo caído: deciden las reglas («sí» confirma, la hora recibe la hora)', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«falta confirmar» con el modelo caído: deciden las reglas («sí» confirma, la hora recibe la hora)', async () => {
     const t1 = await clienteConfirmar();
     expect(await dice(t1, 'sí, lo recibo hoy', new Error('caído'))).toEqual([expect.stringMatching(/queda confirmado para hoy/)]);
     const t2 = await clienteConfirmar();

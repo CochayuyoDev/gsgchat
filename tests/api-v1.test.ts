@@ -389,12 +389,13 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     for (const c of r.body.creadas) expect(typeof c.id).toBe('number');
     // En la pantalla, con lo que le falta a cada uno.
     const p1 = await esc.entrega('P-5001');
-    expect(p1).toMatchObject({ ubicacionEstado: 'pendiente', confirmacionEstado: 'pendiente', estado: 'esperando_ubicacion' });
+    // Sin confirmaciones (regla del dueño, 16/10): «falta confirmar» también pide la ubicación.
+    expect(p1).toMatchObject({ ubicacionEstado: 'pendiente', confirmacionEstado: 'no_hace_falta', estado: 'esperando_ubicacion' });
     const p2 = await esc.entrega('P-5002');
-    expect(p2).toMatchObject({ ubicacionEstado: 'recibida', confirmacionEstado: 'pendiente', lat: -12.1211, prioridad: 'urgente' });
+    expect(p2).toMatchObject({ ubicacionEstado: 'pendiente', confirmacionEstado: 'no_hace_falta', lat: null, prioridad: 'urgente' });
     const urgente = r.body.creadas.find((c) => c.referencia === 'P-5002')!;
     expect(urgente.prioridad).toBe('urgente');
-    expect(urgente.ubicacion).toMatchObject({ estado: 'recibida', lat: -12.1211 });
+    expect(urgente.ubicacion).toMatchObject({ estado: 'pendiente' });
     // Repetido: no se duplica.
     const otra = await esc.api.post<{ creadas: unknown[]; repetidas: string[] }>('/api/v1/entregas', { ...OBLIGATORIOS_GSG, referencia: 'P-5001', nombre: 'Ana Quispe', telefono: '987000101' });
     expect(otra.status).toBe(200);

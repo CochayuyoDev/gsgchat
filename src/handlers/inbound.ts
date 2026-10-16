@@ -1263,7 +1263,8 @@ async function handleInboundMessageEnFila(
 
   // --- ubicacion nativa: el camino bueno -------------------------------
   if (message.type === 'location' && message.location) {
-    const result = fromWhatsAppLocation(message.location, { bbox: config.bbox });
+    // Mande la ubicación que mande, se acepta (regla del dueño, 16/10): sin caja de cobertura.
+    const result = fromWhatsAppLocation(message.location, {});
     if (!result.ok) {
       // Fuera de cobertura con una solicitud abierta: la ubicacion llego, lo
       // que falla es la zona. Es una incidencia para GSG, no un "no te
@@ -1320,6 +1321,8 @@ async function handleInboundMessageEnFila(
     // buena, o la pidio una persona): se guarda y se sigue el flujo.
     if (deps.entregas) {
       const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: 'pin de whatsapp' }).catch(() => ({ atendida: false as const }));
+      // Otra ubicación con la suya ya registrada: se reportó a GSG y no se le contesta.
+      if (enEntrega.atendida && enEntrega.resultado === 'cambio_reportado') return;
       if (enEntrega.atendida) {
         if (enEntrega.responder) await responderEntrega(enEntrega);
         else await reply(textoGracias({ negocio: nombreNegocio(deps), referencia: enEntrega.entrega?.referencia }), { confirmarUbicacion: true, confirmationScope: `${result.lat.toFixed(5)},${result.lng.toFixed(5)}` });
@@ -1451,7 +1454,7 @@ async function handleInboundMessageEnFila(
   const [rules, prefs, result] = await Promise.all([
     repos.automation.listRules(),
     repos.automation.getPrefs(),
-    extractLocation(text, { bbox: config.bbox }),
+    extractLocation(text, {}),
   ]);
 
   // Las entregas del dia: la respuesta a "¿confirmas tu pedido?" y lo que
@@ -1552,6 +1555,8 @@ async function handleInboundMessageEnFila(
   // una entrega del dia.
   if (result.ok && deps.entregas) {
     const enEntrega = await deps.entregas.alUbicacion(contact, { lat: result.lat, lng: result.lng, mapsUrl: result.mapsUrl, fuente: `enlace de mapa (${result.source})` }).catch(() => ({ atendida: false as const }));
+    // Otra ubicación con la suya ya registrada: se reportó a GSG y no se le contesta.
+    if (enEntrega.atendida && enEntrega.resultado === 'cambio_reportado') return;
     if (enEntrega.atendida) {
       const guardada = await repos.locations.save(contact.id, result, text);
       await repos.locations.confirm(guardada);

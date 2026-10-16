@@ -126,7 +126,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     expect(e.entregas.reglaGsgActiva()).toBe(true);
   });
 
-  it('NADA sale solo: los seis quedan «Por confirmar el envío», con el aviso grande arriba', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('NADA sale solo: los seis quedan «Por confirmar el envío», con el aviso grande arriba', async () => {
     for (const t of ['987100001', '987100002', '987200001', '987200002', '987200003', '987200004']) expect(salidos(t), t).toBe(0);
     const n = await numeros();
     expect(n.cifras.por_confirmar_envio).toBe(6);
@@ -139,7 +140,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     expect((await e.entrega('C-1'))!.ubicacionEstado).toBe('recibida');
   });
 
-  it('el aviso sale también en Hoy (el resumen) y en la campana', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el aviso sale también en Hoy (el resumen) y en la campana', async () => {
     const r = await e.resumen();
     expect(r.porConfirmarEnvio.aviso).toBe('Llegaron 6 números de GSG: 2 para pedir ubicación · 4 para confirmar');
     const avisos = (await e.api.get<{ avisos: Array<{ tipo: string; texto: string; href: string; n?: number }> }>('/admin/avisos')).body.avisos;
@@ -169,7 +171,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     expect(otra.body.aviso).toContain('ya estaba enviado');
   });
 
-  it('«Confirmar y enviar a todos»: a los de ubicación se les pide el pin; a los de «falta confirmar» SOLO SÍ/NO, con los datos del envío y botones', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('«Confirmar y enviar a todos»: a los de ubicación se les pide el pin; a los de «falta confirmar» SOLO SÍ/NO, con los datos del envío y botones', async () => {
     const r = await e.api.post<{ liberadas: number; ubicacion: number; confirmar: number; aviso: string }>('/admin/entregas/confirmar-envio', { todos: true });
     expect(r.body).toMatchObject({ liberadas: 5, ubicacion: 1, confirmar: 4 });
     expect(r.body.aviso).toContain('1 para pedir ubicación · 4 para confirmar');
@@ -253,7 +256,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     expect(salidos('987200002')).toBe(despues);
   });
 
-  it('el botón NO también vale (y «otro día» es lo mismo que NO)', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el botón NO también vale (y «otro día» es lo mismo que NO)', async () => {
     const c3 = await e.entrega('C-3');
     await e.contesta('987200003', { boton: { id: `entrega:no:${c3!.id}`, title: 'No' } });
     expect(e.textosA('987200003').at(-1)).toMatch(NO_CONFIRMA);
@@ -279,7 +283,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     expect(salidos('987200005')).toBe(despues);
   });
 
-  it('sin respuesta, se le recuerda SÍ o NO (como con la ubicación), nunca la ubicación', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('sin respuesta, se le recuerda SÍ o NO (como con la ubicación), nunca la ubicación', async () => {
     const antes = e.botonesA('987200004').length;
     e.avanzar(e.entregas.ajustes().confirmacionEsperaMin + 1);
     await e.trabajar();
@@ -290,7 +295,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     expect(e.mensajesA('987200004').some((m) => m.kind === 'location_request')).toBe(false);
   });
 
-  it('el de ubicación manda su pin: UBI REGISTRADA y pasa solo a «Ya contactados»', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('el de ubicación manda su pin: UBI REGISTRADA y pasa solo a «Ya contactados»', async () => {
     // Su pin en su distrito (Lince): lejos de él se le preguntaría si es ahí (ver la matriz, sección G).
     await e.contesta('987100002', { pin: PIN_LINCE });
     expect(e.textosA('987100002').at(-1)).toMatch(/^✅ Ubicación registrada correctamente\./);
@@ -308,7 +314,8 @@ describe('revisar y confirmar antes de enviar, y «falta confirmar» con la regl
     expect(e.mensajesA('987300001').some((m) => m.kind === 'location_request')).toBe(true);
   });
 
-  it('lo que entra por POST /api/v1/entregas también espera', async () => {
+  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
+  it.skip('lo que entra por POST /api/v1/entregas también espera', async () => {
     const r = await e.api.post<{ creadas: Array<{ referencia: string }> }>('/api/v1/entregas', { pedidos: [{ ...OBLIGATORIOS_GSG, referencia: 'API-1', telefono: '987400001', nombre: 'Por La Api', distrito: 'Surco' }, { ...OBLIGATORIOS_GSG, referencia: 'API-2', telefono: '987400002', nombre: 'Api Con Pin', lat: PIN_LIMA.lat, lng: PIN_LIMA.lng, faltaConfirmar: true }] });
     expect(r.status).toBe(201);
     await e.trabajar();
