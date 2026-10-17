@@ -18,6 +18,7 @@ import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
 import { tiendaActual } from '../plataforma/contexto.js';
 import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
+import { SISTEMA_CSS } from './sistema-css.js';
 import { escapeHtml } from './login-page.js';
 import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
@@ -197,21 +198,13 @@ const CSS = `
   .chip.tono-rojo { background: var(--rojo-suave); color: var(--rojo); }
   .chip.tono-azul { background: var(--azul-suave); color: var(--azul); }
   .chip.tono-gris { background: var(--gris-suave); color: var(--gris); }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: var(--texto); font: inherit; font-weight: 600; line-height: 1.2; cursor: pointer; text-decoration: none; box-shadow: none; }
-  .btn:hover { border-color: var(--primario); color: var(--primario); }
-  .btn.primario { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
-  .btn.primario:hover { background: var(--primario-hover, var(--primario)); border-color: var(--primario-hover, var(--primario)); color: var(--primario-texto); }
-  .btn.secundario { background: var(--primario-suave); border-color: transparent; color: var(--primario); }
-  .btn.peligro { color: var(--rojo); border-color: var(--rojo-suave); background: var(--rojo-suave); }
-  .btn.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
-  .btn.sm { min-height: 34px; padding: 6px 12px; font-size: 13.5px; font-weight: 500; }
-  .btn:disabled { opacity: .55; cursor: default; }
   .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-4); box-shadow: var(--sombra); }
   .vacio { text-align: center; padding: var(--esp-6) var(--esp-4); color: var(--texto-suave); border: 1px dashed var(--borde); border-radius: var(--radio); background: var(--superficie); }
   .vacio h3 { margin: 0 0 6px; font-size: var(--fs-h3); font-weight: 700; color: var(--texto); }
   .vacio p { margin: 0; font-size: var(--fs-cuerpo); line-height: 1.5; max-width: 48ch; margin-inline: auto; }
   .vacio .acciones { display: flex; gap: var(--esp-2); justify-content: center; flex-wrap: wrap; margin-top: var(--esp-4); }
   .vacio .ico { font-size: 28px; line-height: 1; margin-bottom: var(--esp-2); }
+  ${SISTEMA_CSS}
   /* En pantallas táctiles, todo lo que se pulsa mide al menos 44 px. */
   @media (max-width: 960px), (pointer: coarse) {
     .btn, .s-boton, .s-menu, .s-salir, .s-plegar, .s-item, .s-content button, .s-content .btn, .s-content select, .s-content input:not([type=checkbox]):not([type=radio]) { min-height: 44px; }
@@ -1295,7 +1288,7 @@ ${TEMA_SCRIPT}
         <a class="s-chip" href="/panel#mi-cuenta" title="Mi cuenta"><div class="s-avatar">?</div><b id="s-chip-nombre"></b></a>
       </div>
     </header>
-    <div class="s-content${opts.lleno ? ' lleno' : ''}" id="s-content">
+    <div class="s-content${opts.lleno ? ' lleno' : ' s-base'}" id="s-content">
 ${opts.contenido}
     </div>
     <nav class="s-nav-movil" id="s-nav-movil" aria-label="Ir a">
