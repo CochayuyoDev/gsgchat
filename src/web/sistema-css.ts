@@ -106,6 +106,14 @@ export const SISTEMA_CSS = `
   .s-base :where(.tablewrap:has(> p, > .vacio)) { border: 0; background: none; }
   .s-base :where(.tablewrap) > :where(table th:first-child, table td:first-child) { padding-left: 16px; }
 
+  @media (max-width: 640px) {
+    .s-base :where(th) { padding: 9px 10px; }
+    .s-base :where(td) { padding: 10px; }
+    .s-base :where(fieldset) { padding: var(--esp-2) var(--esp-4) var(--esp-4); }
+    .barra-guardar { justify-content: stretch; }
+    .barra-guardar > .btn, .barra-guardar > button { flex: 1 1 auto; }
+  }
+
   /* --- desplegables (details) ------------------------------------------- */
   .s-base :where(summary) { cursor: pointer; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 10px; min-height: 36px; border-radius: var(--radio-xs); transition: color var(--dur) ease; }
   .s-base :where(summary)::-webkit-details-marker { display: none; }

@@ -198,7 +198,12 @@ const CSS = `${REPARTO_CSS}
     thead { display: none; }
     tbody tr { display: block; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
     tbody tr.activa { box-shadow: inset 3px 0 0 var(--primario); }
-    tbody td { display: block; border: 0; padding: 1px 0; }
+    .wrap tbody td { display: block; border: 0; padding: 1px 0; }
+    .wrap tbody tr:last-child { border-bottom: 0; }
+    /* Los filtros, en una fila que se desliza con el dedo. */
+    .filtros { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-left: -16px; margin-right: -16px; padding: 0 16px 2px; }
+    .filtros::-webkit-scrollbar { display: none; }
+    .filtro { flex: none; }
     tbody td:empty { display: none; }
   }
 `;
