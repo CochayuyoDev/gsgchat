@@ -24,6 +24,8 @@ export interface AjustesRutas {
   pausaMaxSegundos: number;
   /** Cuanto se espera una respuesta antes de volver a escribir. */
   esperaRespuestaMinutos: number;
+  /** Minutos que espera el primer mensaje desde que llega el pedido (0 = de inmediato). */
+  esperaPrimerMensajeMinutos?: number;
   /** Minutos entre cada mensaje y el siguiente; el primero es del 1 al 2. */
   esperasMensajesMinutos: number[];
   /** Mensajes por cliente antes de pasarlo al repartidor. */
@@ -46,7 +48,7 @@ export interface AjustesRutas {
   plantillas: Record<PasoUbicacion, string[]>;
   /**
    * Redacciones para cuando se escribe libre (cliente no oficial o dentro de
-   * la ventana), una por linea. Admiten {nombre}, {negocio} y {pedido}.
+   * la ventana), una por linea. Admiten {nombre}, {negocio}, {tienda} y {pedido}.
    * Vacio = las tres de siempre de cada paso.
    */
   textos: Record<PasoUbicacion, string[]>;
@@ -63,6 +65,7 @@ export const ajustesSchema = z.object({
   pausaMinSegundos: z.coerce.number().int().min(1).max(600),
   pausaMaxSegundos: z.coerce.number().int().min(1).max(900),
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
+  esperaPrimerMensajeMinutos: z.coerce.number().int().min(0).max(24 * 60),
   esperasMensajesMinutos: esperasSchema,
   maxIntentos: z.coerce.number().int().min(1).max(100),
   esperaFinalMinutos: z.coerce.number().int().min(0).max(24 * 60),
@@ -107,6 +110,7 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     // El minimo manda si alguien pone el maximo por debajo.
     pausaMaxSegundos: Math.max(ajustes.pausaMinSegundos, ajustes.pausaMaxSegundos),
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
+    esperaPrimerMensajeMinutos: ajustes.esperaPrimerMensajeMinutos,
     esperasMensajesMinutos: ajustes.esperasMensajesMinutos,
     maxIntentos: ajustes.maxIntentos,
     esperaFinalMinutos: ajustes.esperaFinalMinutos,
@@ -144,7 +148,7 @@ export function conFranjaDeLaPolitica(
 /**
  * Una redaccion propia con sus huecos rellenos.
  *
- * {nombre}, {negocio} y {pedido}, sin distinguir mayusculas. Lo que no se
+ * {nombre}, {negocio}, {tienda} y {pedido}, sin distinguir mayusculas. Lo que no se
  * sepa (un cliente sin nombre) se sustituye por lo mismo que usan los
  * textos de siempre, para que no quede un hueco raro.
  */
@@ -153,6 +157,10 @@ export function rellenarTexto(
   ctx: {
     nombre?: string | null;
     negocio: string;
+    /** La tienda que vende, como la manda GSG en el pedido («Mass»). */
+    tienda?: string | null;
+    /** El producto que manda GSG en el pedido; sin el, {producto} no sale. */
+    producto?: string | null;
     referencia?: string | null;
     direccion?: string | null;
     distrito?: string | null;
@@ -165,6 +173,8 @@ export function rellenarTexto(
   return plantilla
     .replace(/\{nombre\}/gi, nombre)
     .replace(/\{negocio\}/gi, ctx.negocio)
+    .replace(/\{tienda\}/gi, (ctx.tienda ?? '').trim() || 'la tienda')
+    .replace(/\{producto\}/gi, (ctx.producto ?? '').trim())
     .replace(/\{pedido\}/gi, pedido)
     .replace(/\{referencia\}/gi, pedido)
     .replace(/\{direccion\}/gi, (ctx.direccion ?? '').trim())

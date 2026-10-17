@@ -72,22 +72,13 @@ describe('ajustes: puros', () => {
   });
 });
 
-describe('los textos dicen como mandar la ubicacion segun haya boton o no, y de que pedido hablan', () => {
-  it('sin boton nativo explica el clip y nunca menciona un boton; con boton, lo contrario', () => {
-    const ctx = { nombre: 'Ana Ruiz', negocio: 'La Tienda', referencia: 'P-1', direccion: 'Av. Larco 123', distrito: 'Miraflores' };
-    for (const paso of ['solicitud', 'recordatorio', 'insistencia'] as const) {
-      for (let i = 0; i < 3; i++) {
-        const sinBoton = textoLibre(paso, { ...ctx, conBoton: false }, `x${i}`);
-        expect(sinBoton).toMatch(/clip/);
-        expect(sinBoton).not.toMatch(/bot[oó]n/);
-        expect(sinBoton).toMatch(/P-1 \(Miraflores, Av\. Larco 123\)/);
-        const conBoton = textoLibre(paso, { ...ctx, conBoton: true }, `x${i}`);
-        expect(conBoton).toMatch(/bot[oó]n/);
-        expect(conBoton).not.toMatch(/clip/);
-      }
-    }
-    // Sin direccion ni distrito no queda un parentesis vacio.
-    expect(textoLibre('solicitud', { nombre: 'Ana', negocio: 'X', referencia: 'P-2' })).not.toMatch(/\(\)/);
+describe('los textos de siempre: los del dueño, con la tienda del pedido', () => {
+  it('cada paso nombra al cliente y la tienda; sin tienda, «la tienda»; sin nombre, «¡Hola!»', () => {
+    const ctx = { nombre: 'Ana Ruiz', negocio: 'La Tienda', referencia: 'P-1', tienda: 'Mass' };
+    expect(textoLibre('solicitud', ctx)).toMatch(/^¡Hola, Ana! 👋 Somos GSG y estaremos llevando tu pedido de Mass\./);
+    expect(textoLibre('recordatorio', ctx)).toMatch(/^¡Hola de nuevo, Ana! 👋 .*tu pedido de Mass\./);
+    expect(textoLibre('insistencia', ctx)).toMatch(/^Hola, Ana\. 👋 .*tu pedido de Mass\..*próximos 10 minutos/s);
+    expect(textoLibre('solicitud', { negocio: 'X' })).toMatch(/^¡Hola! 👋 .*tu pedido de la tienda\./);
   });
 
   it('una redaccion propia admite {direccion}, {distrito} y {como}', () => {
@@ -132,12 +123,12 @@ describe('ajustes: el motor los usa', () => {
     const segunda = await motor2.tick();
     expect(segunda.accion).toBe('derivacion');
 
-    // Y sin redaccion propia, el texto de siempre explica el clip (no hay boton).
+    // Y sin redaccion propia, sale el texto de siempre.
     await repos.rutas.ajustes.reset();
     await loteListo(repos, ['51987654399']);
     const motor3 = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => new Date(HORA_BUENA.getTime() + 60 * 60_000), azar: () => 0 });
     await motor3.tick();
-    expect(enviados.at(-1)?.interactive?.body).toMatch(/clip/);
+    expect(enviados.at(-1)?.interactive?.body).toMatch(/^¡Hola, Cliente! 👋 Somos GSG/);
   });
 
   it('respeta un intervalo distinto para cada seguimiento y permite más de tres mensajes', async () => {
@@ -275,7 +266,7 @@ describe('ajustes y plantillas propias: la API', () => {
     // Para la pantalla: un cliente de ejemplo y como le llegaria cada paso, en cristiano.
     expect(body.ejemplo).toMatchObject({ nombre: 'Ana Ruiz', pedido: 'P-1024', distrito: 'Miraflores' });
     expect(body.textosDeSiempre.solicitud).toContain('Ana');
-    expect(body.textosDeSiempre.solicitud).toContain('P-1024');
+    expect(body.textosDeSiempre.solicitud).toContain('Mass');
     expect(body.textosDeSiempre.recordatorio).toContain('ubicación');
     expect(typeof body.usaPlantillas).toBe('boolean');
   });

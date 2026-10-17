@@ -23,6 +23,10 @@ export type PasoUbicacion = 'solicitud' | 'recordatorio' | 'insistencia';
 export interface ContextoMensaje {
   nombre?: string | null;
   negocio: string;
+  /** La tienda que vende, como la manda GSG en el pedido ({tienda}). */
+  tienda?: string | null;
+  /** El producto que manda GSG en el pedido ({producto}). */
+  producto?: string | null;
   referencia?: string | null;
   /** Lo que se sabe del pedido: el cliente tiene que reconocer de que hablamos. */
   direccion?: string | null;
@@ -98,53 +102,38 @@ export const PLANTILLAS: Record<PasoUbicacion, PlantillaPaso> = {
 };
 
 /**
- * Las redacciones de cada paso cuando se escribe libre.
- *
- * Varias por paso, y no por gusto: con un cliente no oficial el texto sale
- * tal cual, y doscientos mensajes identicos seguidos son la huella mas facil
- * de detectar que existe. A cada cliente le toca una (por su telefono y el
- * intento), asi que el mismo cliente no ve tres redacciones distintas del
- * mismo mensaje si algo se reintenta.
- *
- * Cada paso dice algo distinto a proposito. Mandarle el mismo mensaje tres
- * veces a alguien que ya contesto es lo que hace que la gente bloquee el
- * numero: la tercera vez tiene que reconocer que contesto y ofrecer la
- * salida (que le llamen), no repetir la peticion como si nadie leyera.
+ * Las redacciones de cada paso cuando se escribe libre: las del dueño
+ * (17/10), con {tienda} = la tienda del pedido de GSG. Cada paso dice algo
+ * distinto: el recordatorio reconoce que ya se le escribió y la insistencia
+ * le da un plazo antes de que lo llame el motorizado.
  */
+/** La tienda del pedido de GSG ({tienda}); sin ella, «la tienda». */
+const tiendaDe = (ctx: ContextoMensaje): string => (ctx.tienda ?? '').trim() || 'la tienda';
+/** «¡Hola, Ana!» o, sin nombre, «¡Hola!». */
+const conNombre = (antes: string, ctx: ContextoMensaje, despues: string): string => {
+  const pila = (ctx.nombre ?? '').trim().split(/\s+/)[0];
+  return pila ? `${antes}, ${pila}${despues}` : `${antes}${despues}`;
+};
+
 export const VARIANTES_TEXTO: Record<PasoUbicacion, Array<(ctx: ContextoMensaje) => string>> = {
   solicitud: [
     (ctx) =>
-      `Hola ${tratamiento(ctx.nombre)}, somos ${ctx.negocio} y le escribimos por ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
-      'Para llegar exacto a su dirección necesitamos su ubicación. ' +
-      `Puede enviarla ${comoEnviar(ctx)}.`,
-    (ctx) =>
-      `Buen día ${tratamiento(ctx.nombre)}, somos ${ctx.negocio} y tenemos ${pedido(ctx.referencia)}${detallePedido(ctx)} listo para entregar. ` +
-      `¿Nos comparte su ubicación ${comoEnviar(ctx)}? Así el repartidor llega sin dar vueltas.`,
-    (ctx) =>
-      `${tratamiento(ctx.nombre)}, somos ${ctx.negocio}. Vamos a entregarle ${pedido(ctx.referencia)}${detallePedido(ctx)} y ` +
-      `necesitamos el punto exacto: envíe su ubicación ${comoEnviar(ctx)}, por favor.`,
+      `${conNombre('¡Hola', ctx, '!')} 👋 Somos GSG y estaremos llevando tu pedido de ${tiendaDe(ctx)}. 📦\n\n` +
+      'Para llegar al punto indicado, por favor envíanos tu ubicación por WhatsApp y una referencia de tu dirección. 📍\n\n' +
+      'Las entregas se realizan de 2:00 p. m. a 8:00 p. m. El motorizado se comunicará contigo para coordinar la hora aproximada de llegada. 🛵',
   ],
   recordatorio: [
     (ctx) =>
-      `Hola ${tratamiento(ctx.nombre)}, seguimos pendientes de su ubicación para entregar ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
-      `Puede enviarla ${comoEnviar(ctx)}. Si prefiere, responda este mensaje y le llamamos.`,
-    (ctx) =>
-      `${tratamiento(ctx.nombre)}, todavía no recibimos su ubicación para ${pedido(ctx.referencia)}${detallePedido(ctx)}. ` +
-      `Cuando pueda, envíela ${comoEnviar(ctx)}. Si le viene mejor por teléfono, responda y le llamamos.`,
-    (ctx) =>
-      `Le escribimos otra vez por ${pedido(ctx.referencia)}${detallePedido(ctx)}, ${tratamiento(ctx.nombre)}: nos falta su ubicación ` +
-      `para poder salir a entregar. Puede mandarla ${comoEnviar(ctx)}. También podemos llamarle si responde este mensaje.`,
+      `${conNombre('¡Hola de nuevo', ctx, '!')} 👋 Aún estamos esperando tu ubicación para organizar la entrega de tu pedido de ${tiendaDe(ctx)}. 📦\n\n` +
+      '📍 Por favor, compártenos tu ubicación por WhatsApp y una referencia para que nuestro motorizado pueda llegar al lugar correcto.\n\n' +
+      'Recuerda que entregamos de 2:00 p. m. a 8:00 p. m. ¡Quedamos atentos!',
   ],
   insistencia: [
     (ctx) =>
-      `Gracias por responder, ${tratamiento(ctx.nombre)}. Para ${pedido(ctx.referencia)}${detallePedido(ctx)} nos falta el punto exacto: ` +
-      `comparta su ubicación ${comoEnviar(ctx)}. Si le resulta más cómodo, respóndanos y le llamamos.`,
-    (ctx) =>
-      `Recibimos su mensaje, ${tratamiento(ctx.nombre)}, gracias. Lo que nos falta para entregar ${pedido(ctx.referencia)}${detallePedido(ctx)} ` +
-      `es el punto en el mapa: envíe su ubicación ${comoEnviar(ctx)}. O respóndanos y le llamamos.`,
-    (ctx) =>
-      `${tratamiento(ctx.nombre)}, gracias por escribirnos. Para ${pedido(ctx.referencia)}${detallePedido(ctx)} necesitamos su ubicación exacta, ` +
-      `no solo la dirección: puede mandarla ${comoEnviar(ctx)}. Si prefiere, le llamamos.`,
+      `${conNombre('Hola', ctx, '.')} 👋 Aún no hemos recibido tu ubicación para la entrega de tu pedido de ${tiendaDe(ctx)}. 📦\n\n` +
+      '📍 Por favor, envíanos tu ubicación por WhatsApp dentro de los próximos 10 minutos.\n\n' +
+      'Si no la recibimos en ese tiempo, nuestro motorizado se comunicará contigo para coordinar la entrega.\n\n' +
+      'Recuerda que nuestro horario de entrega es de 2:00 p. m. a 8:00 p. m. 🛵',
   ],
 };
 
