@@ -226,7 +226,11 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
   const codigo = texto(p.codigo) ?? texto(p.error) ?? 'otro';
   const paraGsg = CODIGOS_PARA_GSG[codigo];
   const en = new Date(texto(p.detectadoEn) ?? texto(p.reportadoAt) ?? texto(p.fechaMensaje) ?? Date.now());
-  const comentario = sinPrefijoPeru([texto(p.comentario) ?? paraGsg?.titulo ?? texto(p.titulo) ?? texto(p.mensaje), texto(p.detalle)].filter(Boolean).join(': ')).slice(0, 500) || null;
+  const titulo = texto(p.comentario) ?? paraGsg?.titulo ?? texto(p.titulo) ?? texto(p.mensaje);
+  const detalle = texto(p.detalle);
+  // Si el detalle ya empieza por el titulo («Al número le faltan dígitos: …»), no se repite.
+  const partes = titulo && detalle?.startsWith(titulo) ? [detalle] : [titulo, detalle];
+  const comentario = sinPrefijoPeru(partes.filter(Boolean).join(': ')).slice(0, 500) || null;
   return {
     tracking,
     tipo: 'PROBLEMA',

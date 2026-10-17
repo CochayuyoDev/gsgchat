@@ -81,7 +81,7 @@ export function motivoLegible(codigo: string | null | undefined, detalle?: strin
   const c = codigo ?? '';
   const extra = detalle ? ` (${detalle.slice(0, 160)})` : '';
   if (c === 'numero_invalido' || c === 'telefono_invalido') return `El teléfono no es válido: corrígelo en GSG y vuelve a mandar el pedido.${extra}`;
-  if (c === 'sin_whatsapp') return 'Ese número no tiene WhatsApp: hay que llamar al cliente o corregir el teléfono.';
+  if (c === 'sin_whatsapp') return 'Ese número no tiene WhatsApp: corrige el teléfono del cliente y vuelve a mandar el pedido.';
   if (c === 'sin_plantilla' || c.startsWith('template_') || c === 'window_closed') return `Falta una plantilla aprobada para escribirle fuera de las 24 h: elige una en Hoy → Ajustes → Plantillas.${extra}`;
   if (c === 'opt_out' || c === 'no_opt_in') return 'El cliente pidió no recibir mensajes: no se le escribe.';
   if (c === 'allowlist') return 'El modo prueba está activo y este número no está en la lista de prueba.';

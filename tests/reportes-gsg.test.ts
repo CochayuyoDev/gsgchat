@@ -48,6 +48,9 @@ describe('el formato de GSG', () => {
     expect(p).toMatchObject({ codigo: 'no_soy_yo', motivo: 'NO_RECONOCE_PEDIDO', telefonoOrigen: '987654321' });
     expect(p.comentario).toMatch(/^No es la persona/);
     expect(p.comentario).not.toMatch(/no se le puede escribir/i);
+    // El titulo no se repite cuando el detalle ya empieza por el.
+    const corto = problemaParaGsg({ tracking: 'GSG-E-2', codigo: 'numero_corto', telefono: '98765432', titulo: TEXTOS_REPORTADOS.numero_corto.titulo, detalle: 'Al número le faltan dígitos: "98765432" tiene 8 dígitos y un celular necesita 9; falta 1' });
+    expect(corto.comentario).toBe('Al número le faltan dígitos: "98765432" tiene 8 dígitos y un celular necesita 9; falta 1');
   });
 
   it('el envío va a la ruta del panel, con Idempotency-Key = eventoId; sin tracking no se manda', async () => {
