@@ -51,6 +51,8 @@ export interface OpcionesMotor {
   pausaMaxSegundos: number;
   /** Cuanto se espera una respuesta antes de volver a escribir. */
   esperaRespuestaMinutos: number;
+  /** Minutos que espera el primer mensaje desde que llega el pedido (0 o sin dar = de inmediato). */
+  esperaPrimerMensajeMinutos?: number;
   /** Espera específica después de cada mensaje enviado, del 1 al 2 en índice 0. */
   esperasMensajesMinutos?: number[];
   /** Mensajes por cliente antes de pasarlo a una persona. */
@@ -353,6 +355,14 @@ export function crearMotor(deps: MotorDeps): Motor {
     return { name: primera.name, language: primera.language, variables: primera.variables };
   }
 
+  /** La tienda y el producto del pedido de GSG de esa solicitud ({tienda}, {producto}); sin pedido, null. */
+  async function datosDelPedido(solicitud: Solicitud): Promise<{ tienda: string | null; producto: string | null }> {
+    if (!solicitud.phone || !repos.entregas) return { tienda: null, producto: null };
+    const vinculadas = await repos.entregas.vivasDeLoteYTelefono(solicitud.loteId, solicitud.phone).catch(() => []);
+    const pedido = vinculadas.find((e) => e.referencia === solicitud.referencia) ?? vinculadas[0];
+    return { tienda: pedido?.datosEnvio?.empresaNombre?.trim() || null, producto: pedido?.datosEnvio?.producto?.trim() || null };
+  }
+
   const contexto = (solicitud: Solicitud): ContextoMensaje => ({
     nombre: solicitud.nombre,
     negocio: opciones.negocio,
@@ -428,7 +438,7 @@ export function crearMotor(deps: MotorDeps): Motor {
   /** Manda el mensaje del paso y deja la solicitud como corresponda. */
   async function enviarPaso(solicitud: Solicitud, paso: PasoUbicacion): Promise<ResultadoTick> {
     const phone = solicitud.phone!;
-    const ctx = contexto(solicitud);
+    const ctx = { ...contexto(solicitud), ...(await datosDelPedido(solicitud)) };
 
     // GSG puede haber cancelado el envio (o marcado el numero como malo) despues de encolarlo.
     if (deps.antesDeEscribir && !(await deps.antesDeEscribir(solicitud).catch(() => true))) {
@@ -737,7 +747,21 @@ export function crearMotor(deps: MotorDeps): Motor {
         deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
         return true;
       };
+      // El primer mensaje espera lo configurado desde que llegó el pedido. Solo
+      // si nadie le puso hora (un «reintentar ahora» la pone y sale ya).
+      const esperaPrimero = Math.max(0, opciones.esperaPrimerMensajeMinutos ?? 0) * 60_000;
+      const primeroTodaviaNo = (s: Solicitud): Date | null => {
+        if (!esperaPrimero || s.estado !== 'pendiente' || s.intentos > 0 || s.proximoIntentoAt) return null;
+        const sale = new Date(s.createdAt.getTime() + esperaPrimero);
+        return sale.getTime() > momento.getTime() ? sale : null;
+      };
       for (let vueltas = 0; siguiente && vueltas < 50; vueltas++) {
+        const sale = primeroTodaviaNo(siguiente);
+        if (sale) {
+          await repos.rutas.actualizarSolicitud(siguiente.id, { proximoIntentoAt: sale });
+          [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+          continue;
+        }
         if (await yaTieneUbicacion(siguiente)) {
           [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
           continue;

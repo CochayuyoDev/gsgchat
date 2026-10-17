@@ -300,8 +300,8 @@ export async function registerRutasRoutes(
     const usaPlantillas = deps.usaPlantillas?.() ?? false;
     const conBoton = deps.conBoton?.() ?? usaPlantillas;
     const negocio = deps.nombreNegocio?.() ?? opciones.negocio;
-    const ejemplo = { nombre: 'Ana Ruiz', pedido: 'P-1024', negocio, direccion: 'Av. Larco 123', distrito: 'Miraflores', como: conBoton ? 'con el botón de aquí abajo' : 'desde el clip 📎 → Ubicación → Enviar tu ubicación actual' };
-    const ctx = { nombre: ejemplo.nombre, referencia: ejemplo.pedido, negocio, direccion: ejemplo.direccion, distrito: ejemplo.distrito, conBoton };
+    const ejemplo = { nombre: 'Ana Ruiz', pedido: 'P-1024', negocio, tienda: 'Mass', producto: 'Zapatillas talla 40', direccion: 'Av. Larco 123', distrito: 'Miraflores', como: conBoton ? 'con el botón de aquí abajo' : 'desde el clip 📎 → Ubicación → Enviar tu ubicación actual' };
+    const ctx = { nombre: ejemplo.nombre, referencia: ejemplo.pedido, negocio, tienda: ejemplo.tienda, producto: ejemplo.producto, direccion: ejemplo.direccion, distrito: ejemplo.distrito, conBoton };
     const textosDeSiempre = Object.fromEntries(PASOS.map((p) => [p, textoLibre(p as PasoUbicacion, ctx)]));
     return {
       ajustes,
@@ -314,7 +314,7 @@ export async function registerRutasRoutes(
       plantillas,
       // Como se rellenan las plantillas propias: en orden, y solo las que tenga.
       variablesPropias: ['{{1}} nombre del cliente', '{{2}} pedido o guia', '{{3}} nombre del negocio'],
-      placeholders: ['{nombre}', '{pedido}', '{negocio}', '{direccion}', '{distrito}', '{como} (= "con el botón de aquí abajo" o "desde el clip 📎 → Ubicación...", según haya botón)'],
+      placeholders: ['{nombre}', '{pedido}', '{negocio}', '{tienda} (= la tienda del pedido de GSG; si no viene, "la tienda")', '{producto} (= el producto del pedido de GSG; si no viene, no sale)', '{direccion}', '{distrito}', '{como} (= "con el botón de aquí abajo" o "desde el clip 📎 → Ubicación...", según haya botón)'],
     };
   });
 
