@@ -36,6 +36,10 @@ export const SISTEMA_CSS = `
   .s-base :where(small) { font-size: var(--fs-small); }
   .s-base :where(a:not([class])) { color: var(--primario); font-weight: 500; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--primario) 35%, transparent); text-underline-offset: 3px; transition: text-decoration-color var(--dur) ease, color var(--dur) ease; }
   .s-base :where(a:not([class])):hover { text-decoration-color: currentColor; color: var(--primario-hover); }
+  /* "Ver instrucciones completas": el enlace de cada pantalla a su parte del Manual. */
+  .s-base :where(a.ver-manual) { color: var(--primario); font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .s-base :where(a.ver-manual)::after { content: ' →'; }
+  .s-base :where(a.ver-manual):hover { text-decoration: underline; text-underline-offset: 3px; }
   .s-base :where(code, kbd) { font-family: var(--mono); font-size: .88em; background: var(--superficie-2); border: 1px solid var(--borde); border-radius: var(--radio-xs); padding: 1px 5px; overflow-wrap: anywhere; }
   .s-base :where(pre) { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; background: var(--superficie-2); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: var(--esp-3); white-space: pre-wrap; overflow-wrap: anywhere; }
   .s-base :where(pre code) { background: none; border: 0; padding: 0; font-size: inherit; }
@@ -126,6 +130,8 @@ export const SISTEMA_CSS = `
      Siempre con icono y texto: el estado no depende solo del color. */
   .s-alerta { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: var(--radio-sm); border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); font-size: var(--fs-cuerpo); line-height: 1.45; animation: s-aparecer .2s var(--curva); }
   .s-alerta:empty { display: none; }
+  /* El siguiente paso de un error, debajo de su motivo. */
+  .s-paso { display: block; margin-top: 3px; font-size: var(--fs-small); font-weight: 600; }
   .s-alerta::before { content: ''; flex: none; width: 18px; height: 18px; margin-top: 1px; background: currentColor; -webkit-mask: ${ICO_INFO} center / contain no-repeat; mask: ${ICO_INFO} center / contain no-repeat; color: var(--azul); }
   .s-alerta > .txt, .s-alerta > span:not(.chip) { flex: 1; min-width: 0; }
   .s-alerta.ok { background: var(--verde-suave); border-color: color-mix(in srgb, var(--verde) 25%, transparent); }

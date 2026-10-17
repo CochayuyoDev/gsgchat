@@ -494,7 +494,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   <div class="bloque punteado" id="gsg-consulta">
     <h3>Consulta del estado de un envío en GSG</h3>
     <p class="ayuda" id="gsg-consulta-url">Sin ruta de consulta configurada: GSGchat no le pregunta nada a GSG. Configúrala en «Cambiar la URL o la API Key de GSG».</p>
-    <p class="ayuda">Antes de escribirle a un cliente, GSGchat pregunta por ese tracking. Si GSG dice <b>cancelado</b>, <b>número incorrecto</b>, <b>tracking incorrecto</b> o <b>no se puede contactar</b>, deja de escribir <b>solo por ese tracking</b>: los otros envíos del mismo cliente siguen. Si GSG no contesta o no se entiende, no se toma como cancelado.</p>
+    <p class="ayuda">Antes de escribirle a un cliente se pregunta por su tracking. Si GSG lo da por cancelado o con datos mal, se deja de escribir <b>solo por ese tracking</b>; si GSG no contesta, se le escribe igual.</p>
     <form id="gsg-consulta-form" class="ep-form" novalidate>
       <label class="campo" for="gsg-consulta-tracking">Tracking</label><input id="gsg-consulta-tracking" type="text" autocomplete="off" placeholder="GSG-E-205" required>
       <label class="campo" for="gsg-consulta-telefono">Teléfono (opcional)</label><input id="gsg-consulta-telefono" type="tel" autocomplete="off" placeholder="987654321">
@@ -517,7 +517,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   <div id="gsg-config-error" class="nota riesgo hidden" role="alert"></div>
   <details class="con-form" id="gsg-form-caja"><summary id="gsg-form-resumen">Cambiar la URL o la API Key de GSG</summary>
   <form id="gsg-form" novalidate>
-    <p class="ayuda">Esta es la conexión <b>saliente</b>: GSGchat le manda a GSG cada ubicación. La <b>API Key de GSG</b> te la da GSG y se guarda aquí. No la confundas con la clave que genera GSGchat («Crear la clave para GSG», más abajo): esa se copia al <code>.env</code> de GSG, no al de GSGchat.</p>
+    <p class="ayuda">Lo que GSGchat le manda a GSG: cada ubicación y los problemas. La API Key de aquí <b>la da GSG</b>; la que creamos para que GSG nos mande pedidos está en <a href="/api-gsgchat#t-claves">Nuestra API → Claves</a>. <a class="ver-manual" href="/manual#m-conexion-gsg">Ver instrucciones completas</a></p>
     <label class="campo" for="gsg-url">URL base de GSG
       <span class="hint">Te la dan sus programadores. Empieza por https:// y no lleva «?» ni «#». Por ejemplo https://backend.developer.gsgcorp.pe/api/</span></label>
     <input id="gsg-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://backend.developer.gsgcorp.pe/api/" aria-describedby="gsg-url-final">
@@ -526,7 +526,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
     <input id="gsg-ruta" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/location" aria-describedby="gsg-url-final">
     <p class="ayuda" id="gsg-url-final" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-incidencias">Ruta para reportar problemas: números mal y errores (opcional)
-      <span class="hint">El POST con cada problema: número mal (sin WhatsApp, inválido), no reconoce el pedido, rechaza, sin respuesta… en el formato de GSG ({ tracking, tipo: PROBLEMA, motivo, comentario, telefonoOrigen, fechaMensaje, eventoId }). Vacía = incidencias. Por ejemplo v1/gsgchat/reported</span></label>
+      <span class="hint">A donde va cada problema: número sin WhatsApp o inválido, no reconoce el pedido, rechaza… Vacía = incidencias. Por ejemplo v1/gsgchat/reported. El formato de cada aviso está en el Manual.</span></label>
     <input id="gsg-ruta-incidencias" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/reported" aria-describedby="gsg-url-incidencias">
     <p class="ayuda" id="gsg-url-incidencias" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-estado">Ruta para consultar el estado de un envío (opcional)

@@ -1159,6 +1159,27 @@ const JS = String.raw`
     }).catch(function () {});
   };
 
+  /* El siguiente paso de un error del servidor, por su codigo. El motivo lo
+     sigue diciendo el propio error; esto solo añade que hacer ahora. */
+  var PASOS_ERROR = {
+    VALIDACION: 'Revisa el campo que indica el mensaje y vuelve a guardar.',
+    JSON_INVALIDO: 'Revisa comillas, comas y llaves del texto pegado.',
+    SIN_PERMISO: 'Pide a un administrador que te dé acceso.',
+    NO_EXISTE: 'Actualiza la pantalla: puede que otra persona ya lo haya cambiado.',
+    CONFLICTO: 'Actualiza la pantalla y vuelve a intentarlo.',
+    ESPERA_CONFIRMACION: 'Confírmalo antes en Pedidos GSG con «Confirmar y enviar».',
+    MENSAJE_EN_CURSO: 'Espera unos segundos: se está enviando ahora mismo.',
+    DEMASIADAS_PETICIONES: 'Espera un momento y vuelve a intentarlo.',
+    BASE_NO_DISPONIBLE: 'Espera unos segundos y vuelve a intentarlo; no se perdió nada.',
+    ERROR_INTERNO: 'Vuelve a intentarlo. Si sigue, avísalo en Soporte con la hora.',
+    PAGO_REQUERIDO: 'Revisa la membresía en Ajustes.'
+  };
+  window.siguientePaso = function (err) {
+    if (!err) return '';
+    if (err.status === 0) return 'Revisa la conexión a internet y vuelve a intentarlo.';
+    return PASOS_ERROR[err.codigo] || '';
+  };
+
   window.shellTitulo = function (titulo, sub) {
     document.getElementById('s-h1').textContent = titulo;
     document.getElementById('s-sub').textContent = sub || '';

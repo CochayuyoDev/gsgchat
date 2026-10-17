@@ -251,7 +251,7 @@ export function rutasPage(opts: RutasOpts): string {
       <p class="aj-intro">
         <b>Cómo le escribe el sistema a cada cliente por WhatsApp</b> para pedirle su ubicación: cuándo, a qué ritmo, cuántas veces y con qué palabras.
         Se aplica en el siguiente mensaje, sin reiniciar. Las horas son de Lima.
-        <span>El nombre del negocio, el teléfono del supervisor y los avisos están en el módulo <a href="/panel#configuracion">Ajustes</a> del sistema.</span>
+        <span>El nombre del negocio, el teléfono del supervisor y los avisos están en el módulo <a href="/panel#configuracion">Ajustes</a> del sistema. <a class="ver-manual" href="/manual#m-automatizacion-gsg">Ver instrucciones completas</a></span>
       </p>
 
       <div class="aj-bloques">
