@@ -1,4 +1,4 @@
-import { appShell } from './shell.js';
+import { appShell, icono } from './shell.js';
 import { NOMBRE_SISTEMA } from '../marca.js';
 import { VERSION } from '../version.js';
 
@@ -12,47 +12,79 @@ label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px;font-wei
 .error{color:var(--rojo);white-space:pre-wrap}.notice{white-space:pre-wrap}.number{font-size:30px;font-weight:700}
 #panel-aviso{margin:0 0 16px}
 .aj-form{max-width:760px}.aj-form input{box-sizing:border-box}.aj-grupo{border:1px solid var(--borde);border-radius:12px;padding:6px 18px 16px;margin:0 0 16px}.aj-grupo legend{padding:0 6px;font-weight:700;font-size:15px}.aj-ayuda{margin:6px 0 0;font-size:13px;color:var(--texto-suave)}.aj-horas{display:grid;grid-template-columns:repeat(2,minmax(0,180px));gap:16px}.aj-mas{margin:26px 0 10px}.aj-enlaces{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}.aj-enlaces a{display:grid;gap:4px;padding:14px 16px;border:1px solid var(--borde);border-radius:12px;color:var(--texto);text-decoration:none;background:var(--superficie)}.aj-enlaces a:hover{border-color:var(--primario);box-shadow:var(--sombra)}.aj-enlaces b{color:var(--primario)}.aj-enlaces span{font-size:13px;color:var(--texto-suave)}
-.db .db-intro{margin:0 0 16px}
-.db-estado{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px}
-.db-ficha{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid var(--borde);border-radius:12px;background:var(--superficie)}
-.db-ficha small{display:block;font-size:12px;color:var(--texto-suave);text-transform:uppercase;letter-spacing:.05em}
-.db-ficha b{display:block;font-size:18px;margin:2px 0}.db-ficha span{font-size:13px;color:var(--texto-suave)}
-.db-punto{flex:none;width:12px;height:12px;border-radius:50%;margin-top:4px}.db-punto.ok{background:var(--verde);box-shadow:0 0 0 4px var(--verde-suave)}.db-punto.mal{background:var(--rojo);box-shadow:0 0 0 4px var(--rojo-suave)}
-.db-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-.db-card{padding:16px 18px;border:1px solid var(--borde);border-radius:12px;background:var(--superficie);min-width:0}
-.db-card h3{margin:0 0 10px;font-size:14px;color:var(--texto-suave);font-weight:600}
-.db-ancho{grid-column:span 1}
-.db-grande{font-size:34px;font-weight:700;line-height:1.1;margin-bottom:12px}.db-grande small{font-size:14px;font-weight:500;color:var(--texto-suave)}
-.db-barra{display:flex;gap:2px;height:12px;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.db{display:grid;gap:16px}
+/* Estado general: lo primero que se ve, con las tres conexiones separadas. */
+.db-hero{background:var(--superficie);border:1px solid var(--borde);border-radius:var(--radio);box-shadow:var(--sombra);overflow:hidden}
+.db-hero-cab{display:flex;align-items:center;gap:14px;padding:18px 22px;border-bottom:1px solid var(--borde);background:linear-gradient(180deg,var(--superficie-2),var(--superficie))}
+.db-hero-ico{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--gris-suave);color:var(--gris)}
+.db-hero-ico .s-ico{width:22px;height:22px}
+.db-hero[data-estado=ok] .db-hero-ico{background:var(--verde-suave);color:var(--verde)}
+.db-hero[data-estado=mal] .db-hero-ico{background:var(--rojo-suave);color:var(--rojo)}
+.db-hero-cab h2{margin:0;font-size:19px}
+.db-hero-cab p{margin:2px 0 0;color:var(--texto-suave);font-size:13.5px}
+.db-hero-cab .db-hora{margin-left:auto;font-size:12.5px;color:var(--texto-suave);white-space:nowrap}
+.db-estado{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.db-ficha{display:flex;gap:14px;align-items:flex-start;padding:18px 22px;color:var(--texto);text-decoration:none;border-right:1px solid var(--borde);transition:background-color var(--dur) ease}
+.db-ficha:last-child{border-right:0}
+a.db-ficha:hover{background:var(--fila-hover)}
+.db-servicio{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:var(--superficie-2);color:var(--texto);border:1px solid var(--borde)}
+.db-ficha[data-ok="1"] .db-servicio{color:var(--primario)}
+.db-ficha[data-ok="0"] .db-servicio{color:var(--rojo);background:var(--rojo-suave);border-color:transparent}
+.db-ficha-txt{min-width:0;display:grid;gap:4px}
+.db-ficha small{font-size:var(--fs-micro);font-weight:700;color:var(--texto-suave);text-transform:uppercase;letter-spacing:.07em}
+.db-ficha b{font-size:17px;line-height:1.2}
+.db-ficha span.sub{font-size:13px;color:var(--texto-suave)}
+.db-ficha .chip{justify-self:start}
+.db-avisos{padding:14px 22px 18px;border-top:1px solid var(--borde);display:grid;gap:8px}
+.db-avisos h3{margin:0;font-size:var(--fs-micro);text-transform:uppercase;letter-spacing:.07em;color:var(--texto-suave)}
+.db-avisos:empty{display:none}
+/* Las cifras del dia: un dato grande por tarjeta y el resto en segundo plano. */
+.db-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.db-card{padding:18px 20px;border:1px solid var(--borde);border-radius:var(--radio);background:var(--superficie);box-shadow:var(--sombra);min-width:0;display:flex;flex-direction:column}
+.db-card h3{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13.5px;color:var(--texto-suave);font-weight:600}
+.db-card h3 .s-ico{width:16px;height:16px}
+.db-card h3 a{margin-left:auto;font-size:13px;font-weight:600;color:var(--primario);text-decoration:none}
+.db-card h3 a:hover{text-decoration:underline}
+.db-grande{font-size:36px;font-weight:700;line-height:1;letter-spacing:-.02em;margin-bottom:14px;font-variant-numeric:tabular-nums}.db-grande small{font-size:14px;font-weight:500;color:var(--texto-suave);letter-spacing:0}
+.db-barra{display:flex;gap:2px;height:10px;border-radius:999px;overflow:hidden;margin-bottom:14px;background:var(--gris-suave)}
 .db-barra i{display:block;min-width:4px}
 .tono-ambar{background:var(--ambar)}.tono-azul{background:var(--azul)}.tono-verde{background:var(--verde)}.tono-rojo{background:var(--rojo)}.tono-gris{background:var(--gris)}.tono-vacio{background:var(--gris-suave)}
-.db-leyenda{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px;font-size:14px}
-.db-leyenda li{display:flex;align-items:center;gap:8px}.db-leyenda b{margin-left:auto}
+.db-leyenda{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 18px;font-size:13.5px}
+.db-leyenda li{display:flex;align-items:center;gap:8px;padding:3px 0}.db-leyenda b{margin-left:auto;font-variant-numeric:tabular-nums}
+.db-leyenda li.cero{color:var(--texto-suave)}.db-leyenda li.cero b{font-weight:500}.db-leyenda li.cero .db-mk{opacity:.35}
 .db-mk{width:10px;height:10px;border-radius:3px;flex:none}
-.db-ir{font-size:14px;font-weight:600;color:var(--primario)}
-.db-minis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:14px}
-.db-mini{padding:8px 10px;border-radius:8px;background:var(--gris-suave);display:grid;gap:2px}.db-mini b{font-size:18px}.db-mini span{font-size:12px;color:var(--texto-suave)}
-.db-mini.tono-rojo{background:var(--rojo-suave)}.db-mini.tono-rojo b{color:var(--rojo)}
-.db-cupo{display:flex;justify-content:space-between;font-size:13.5px;color:var(--texto-suave);margin-bottom:6px}.db-cupo b{color:var(--texto)}
-.db-progreso{height:8px;border-radius:4px;background:var(--gris-suave);overflow:hidden}.db-progreso i{display:block;height:100%;background:var(--primario);border-radius:4px}
-.db-barras{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;align-items:end;height:170px;padding-top:6px;border-bottom:1px solid var(--borde)}
+.db-minis{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 16px;padding:0;list-style:none;font-size:13px;color:var(--texto-suave)}
+.db-minis li b{color:var(--texto);font-weight:700;margin-right:3px;font-variant-numeric:tabular-nums}
+.db-minis li.mal b{color:var(--rojo)}
+.db-cupo{display:flex;justify-content:space-between;font-size:13px;color:var(--texto-suave);margin:auto 0 6px}.db-cupo b{color:var(--texto);font-variant-numeric:tabular-nums}
+.db-progreso{height:8px;border-radius:999px;background:var(--gris-suave);overflow:hidden}.db-progreso i{display:block;height:100%;background:var(--primario);border-radius:999px;transition:width .4s var(--curva)}
+.db-progreso.alto i{background:var(--ambar)}
+.db-barras{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;align-items:end;height:150px;padding-top:6px;border-bottom:1px solid var(--borde)}
 .db-col{position:relative;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;outline:none}
-.db-col i{display:block;width:60%;max-width:34px;background:var(--primario);border-radius:4px 4px 0 0}
-.db-col small{position:absolute;bottom:-20px;font-size:12px;color:var(--texto-suave)}
+.db-col i{display:block;width:60%;max-width:34px;background:color-mix(in srgb,var(--primario) 55%,transparent);border-radius:5px 5px 0 0;transition:background-color var(--dur) ease}
+.db-col.hoy i{background:var(--primario)}
+.db-col small{position:absolute;bottom:-22px;font-size:12px;color:var(--texto-suave)}
+.db-col.hoy small{color:var(--texto);font-weight:600}
 .db-valor{font-size:12px;font-weight:700;margin-bottom:4px;min-height:16px}
-.db-col:hover i,.db-col:focus-visible i{opacity:.8}
+.db-col:hover i,.db-col:focus-visible i{background:var(--primario)}
 .db-col:hover::after,.db-col:focus-visible::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 4px);white-space:nowrap;padding:6px 8px;border-radius:6px;background:var(--texto);color:var(--superficie);font-size:12px;z-index:3}
-#db-semana{padding-bottom:30px}
-.db-lista{list-style:none;margin:0;padding:0;display:grid;gap:6px}
-.db-lista a{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:8px;background:var(--gris-suave);color:var(--texto);text-decoration:none;font-size:14px}
-.db-lista a:hover{outline:1px solid var(--primario)}
-.db-lista b{min-width:28px;text-align:center;padding:2px 8px;border-radius:999px;background:var(--superficie);color:var(--texto-suave)}.db-lista b.hay{background:var(--rojo);color:#fff}
-.db-avisos{margin-top:14px}.db-avisos h3{font-size:14px;margin:0 0 8px}
-.db-aviso{margin:0 0 8px;padding:10px 14px;border-radius:10px;background:var(--ambar-suave);border-left:4px solid var(--ambar)}
-.db-sin-avisos{margin:0;padding:10px 14px;border-radius:10px;background:var(--verde-suave);color:var(--verde);font-weight:600}
-.db-atajos{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px}
-.db-atajos a{display:grid;gap:4px;padding:14px 16px;border:1px solid var(--borde);border-radius:12px;color:var(--texto);text-decoration:none;background:var(--superficie)}
-.db-atajos a:hover{border-color:var(--primario);box-shadow:var(--sombra)}.db-atajos b{color:var(--primario)}.db-atajos span{font-size:13px;color:var(--texto-suave)}
+#db-semana{padding-bottom:34px}
+.db-lista{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.db-lista a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radio-sm);color:var(--texto-suave);text-decoration:none;font-size:14px;transition:background-color var(--dur) ease}
+.db-lista a:hover{background:var(--superficie-2);color:var(--texto)}
+.db-lista a.hay{color:var(--texto);font-weight:600;background:var(--rojo-suave)}
+.db-lista b{margin-left:auto;min-width:28px;text-align:center;padding:2px 8px;border-radius:999px;background:var(--superficie-2);color:var(--texto-suave);font-variant-numeric:tabular-nums}.db-lista a.hay b{background:var(--rojo);color:#fff}
+.db-lista-ok{margin:12px 0 0;font-size:13px;color:var(--texto-suave)}
+/* Accesos directos: una fila de iconos, sin texto de mas. */
+.db-atajos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.db-atajos a{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid var(--borde);border-radius:var(--radio);color:var(--texto);text-decoration:none;background:var(--superficie);transition:border-color var(--dur) ease,box-shadow var(--dur) ease,transform var(--dur) var(--curva)}
+.db-atajos a:hover{border-color:var(--primario);box-shadow:var(--sombra-hover);transform:translateY(-1px)}
+.db-atajos .s-ico{flex:none;width:36px;height:36px;padding:8px;border-radius:9px;background:var(--primario-suave);color:var(--primario);box-sizing:border-box}
+.db-atajos b{display:block;font-size:14px}.db-atajos span{display:block;font-size:12.5px;color:var(--texto-suave);line-height:1.35}
+.db-pie{margin:0;font-size:12.5px;color:var(--texto-suave)}
+@media(max-width:1100px){.db-atajos{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.db-grid{grid-template-columns:1fr}.db-estado{grid-template-columns:1fr}.db-ficha{border-right:0;border-bottom:1px solid var(--borde);padding:14px 18px}.db-ficha:last-child{border-bottom:0}.db-hero-cab{padding:16px 18px}.db-hero-cab .db-hora{display:none}.db-avisos{padding:12px 18px 16px}}
+@media(max-width:560px){.db-atajos{grid-template-columns:1fr}.db-grande{font-size:30px}}
 .sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media(max-width:900px){.db-grid{grid-template-columns:1fr}.db-minis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .ia-senal-grande{display:flex;align-items:center;gap:12px;margin:14px 0 4px;padding:12px 14px;border:1px solid var(--borde);border-radius:10px}.ia-senal-grande i{width:14px!important;height:14px!important}.ia-senal-grande b{display:block;font-size:17px}.ia-senal-grande[data-estado="sin_conexion"] b{color:var(--rojo)}.ia-senal-grande span{display:block;font-size:13px}.hidden{display:none!important}code{overflow-wrap:anywhere}pre{white-space:pre-wrap}
@@ -62,7 +94,7 @@ export function panelPage(opts: PanelOpts): string {
   return appShell({ titulo: 'Dashboard', subtitulo: 'API, WhatsApp y atención de pedidos', nombreNegocio: opts.nombreNegocio, css: CSS,
     contenido: `<div class="wrap">
 <p id="panel-aviso" class="s-alerta" role="status"></p>
-<section id="tab-inicio" class="card db"><p class="muted db-intro">Los pedidos llegan cuando GSG los envía a GSGchat (POST /api/v1/entregas). GSGchat no le pide nada a GSG: solo le devuelve la ubicación y los reportes.</p><div id="inicio-cifras" class="db-estado" aria-live="polite"></div><div class="db-grid"><div class="db-card" id="db-pedidos"></div><div class="db-card" id="db-mensajes"></div><div class="db-card db-ancho" id="db-semana"></div><div class="db-card" id="db-atencion"></div></div><div id="inicio-avisos" class="db-avisos"></div><div class="db-atajos"><a href="/hoy"><b>Pedidos GSG</b><span>Pedidos del día y solicitud de ubicación</span></a><a href="/chat"><b>Chats</b><span>Conversaciones con los clientes</span></a><a href="/api-gsgchat"><b>Nuestra API</b><span>Dirección y claves para GSG</span></a><a href="/salud"><b>Estado del sistema</b><span>Conexión, ritmo y alertas</span></a></div></section>
+<section id="tab-inicio" class="db"><div class="db-hero" id="db-hero" data-estado="cargando"><div class="db-hero-cab"><span class="db-hero-ico" id="db-hero-ico" aria-hidden="true">${icono('salud')}</span><div><h2 id="db-hero-titulo"><span class="esqueleto titulo" style="width:200px;margin:0"></span></h2><p id="db-hero-sub">Comprobando la API, WhatsApp y GSG…</p></div><span class="db-hora" id="db-hora"></span></div><div id="inicio-cifras" class="db-estado" aria-live="polite">${[1, 2, 3].map(() => '<div class="db-ficha"><span class="db-servicio esqueleto"></span><div class="db-ficha-txt" style="flex:1"><span class="esqueleto linea corta"></span><span class="esqueleto linea media"></span></div></div>').join('')}</div><div id="inicio-avisos" class="db-avisos"></div></div><div class="db-grid">${['db-pedidos', 'db-mensajes', 'db-semana', 'db-atencion'].map((id) => `<div class="db-card" id="${id}"><span class="esqueleto linea corta"></span><span class="esqueleto titulo" style="width:80px"></span><span class="esqueleto linea"></span><span class="esqueleto linea media"></span></div>`).join('')}</div><nav class="db-atajos" aria-label="Accesos directos"><a href="/hoy">${icono('plantilla')}<div><b>Pedidos GSG</b><span>Pedidos del día y solicitud de ubicación</span></div></a><a href="/chat">${icono('chat')}<div><b>Chats</b><span>Conversaciones con los clientes</span></div></a><a href="/api-gsgchat">${icono('llave')}<div><b>Nuestra API</b><span>Dirección y claves para GSG</span></div></a><a href="/salud">${icono('salud')}<div><b>Estado del sistema</b><span>Conexión, ritmo y alertas</span></div></a></nav><p class="db-pie">Los pedidos llegan cuando GSG los envía a GSGchat (POST /api/v1/entregas). GSGchat no le pide nada a GSG: solo le devuelve la ubicación y los reportes.</p></section>
 <section id="tab-ia" class="card hidden"><p class="muted">Configura el modelo y carga la ficha de productos: nombres, precios, stock y condiciones que debe conocer.</p>
 <form id="ia-form"><div class="grid"><div><label><input id="ia-activa" type="checkbox"> Activar IA</label><label>Proveedor</label><select id="ia-proveedor"><option value="puter">Puter</option><option value="openai">API compatible con OpenAI</option></select><div id="ia-servicio-grupo"><label>Servicio de la API</label><select id="ia-servicio"><option value="openai">OpenAI</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="together">Together AI</option><option value="deepseek">DeepSeek</option><option value="google">Google AI Studio</option><option value="mistral">Mistral</option></select></div><label for="ia-modelo">Modelo</label><div class="actions"><select id="ia-modelo"><option value="">Pega la clave y pulsa «Actualizar lista»</option></select><button id="ia-modelos-cargar" type="button">Actualizar lista</button></div><p id="ia-modelos-estado" class="muted">Elige el servicio y detecta los modelos disponibles con tu API.</p><div id="ia-razonamiento-caja"><label for="ia-razonamiento">Razonamiento <small class="muted">(solo para modelos que razonan, como gpt-6-luna; con los demás déjalo en «Sin indicar»)</small></label><select id="ia-razonamiento"><option value="">Sin indicar</option><option value="minimo">Mínimo</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option></select></div><label>Clave API</label><input id="ia-token" type="password" autocomplete="new-password" placeholder="Vacío conserva la clave actual"><p id="ia-credencial" class="muted"></p></div><div><label>Nombre del asistente</label><input id="ia-nombre" maxlength="60"><label>Ficha de productos y conocimiento</label><textarea id="ia-conocimiento" maxlength="20000" rows="10"></textarea><label>Instrucciones de respuesta</label><textarea id="ia-instrucciones" maxlength="4000"></textarea><label>Cuando el cliente pide estas palabras, pasar a una persona</label><input id="ia-derivar" maxlength="500"><label><input id="ia-avisar" type="checkbox"> Avisar al supervisor al derivar</label></div></div><div class="actions" data-admin><button type="submit">Guardar IA</button><button id="ia-comprobar" type="button">Comprobar conexión</button><button id="ia-desvincular" type="button" class="hidden">Desvincular IA</button><a href="/entrenamiento">Entrenamiento</a></div><div id="ia-senal" class="ia-senal-grande" data-estado="" role="status" aria-live="polite"><i></i><div><b id="ia-senal-texto">IA…</b><span id="ia-senal-detalle" class="muted"></span><span class="muted">${NOMBRE_SISTEMA} v${VERSION}</span></div></div><p id="ia-comprobar-estado" class="muted" role="status" aria-live="polite"></p></form>
 
@@ -84,20 +116,29 @@ function tabla(id,cab,rows){$(id).innerHTML=rows.length?'<table><thead><tr>'+cab
 function fecha(d){return d?new Date(d).toLocaleString('es-PE'):'—';}
 function evento(id,fn,event){$(id).addEventListener(event||'click',async function(e){e.preventDefault();var b=e.currentTarget.tagName==='FORM'?e.currentTarget.querySelector('button[type=submit]'):e.currentTarget;if(b)b.disabled=true;try{await fn();}catch(err){aviso(err.message,true);}finally{if(b)b.disabled=false;}});}
 async function inicio(){var r=await Promise.all([api('/health'),api('/admin/health'),api('/admin/resumen'),api('/admin/avisos')]);var salud=r[0]||{},h=r[1]||{},res=r[2]||{},ent=res.entregas||{},hoy=res.hoy||{},chats=res.chats||{},rep=res.reparto||{},num=res.numero||{};
-function ficha(t,ok,v,sub){return '<div class="db-ficha"><span class="db-punto '+(ok?'ok':'mal')+'" aria-hidden="true"></span><div><small>'+esc(t)+'</small><b>'+esc(v)+'</b>'+(sub?'<span>'+esc(sub)+'</span>':'')+'</div></div>';}
-$('inicio-cifras').innerHTML=ficha('API',salud.ok,salud.ok?'Disponible':'No disponible','Recibe los pedidos de GSG')+ficha('WhatsApp',salud.connected,salud.connected?'Conectado':'Sin conexión',num.pausado?'Envíos en pausa':'Listo para enviar')+ficha('GSG',ent.gsgConectada,ent.gsgConectada?'Conectado':'Sin conectar','Ubicaciones y reportes');
+var ICO=${JSON.stringify({ api: icono('servidor'), whatsapp: icono('chat'), gsg: icono('moto'), ok: icono('ok'), alerta: icono('alerta'), pedidos: icono('plantilla'), mensajes: icono('enviar'), semana: icono('actividad'), atencion: icono('campana') })};
+function ficha(t,ok,v,sub,ico,href){return '<a class="db-ficha" href="'+href+'" data-ok="'+(ok?1:0)+'"><span class="db-servicio" aria-hidden="true">'+ICO[ico]+'</span><div class="db-ficha-txt"><small>'+esc(t)+'</small><b>'+esc(v)+'</b>'+(sub?'<span class="sub">'+esc(sub)+'</span>':'')+'</div></a>';}
+$('inicio-cifras').innerHTML=ficha('WhatsApp',salud.connected,salud.connected?'Conectado':'Sin conexión',num.pausado?'Envíos en pausa':'Listo para enviar','whatsapp','/setup')+ficha('API',salud.ok,salud.ok?'Disponible':'No disponible','Recibe los pedidos de GSG','api','/api-gsgchat')+ficha('GSG',ent.gsgConectada,ent.gsgConectada?'Conectado':'Sin conectar','Ubicaciones y reportes','gsg','/conexion-gsg');
+var caidos=[!salud.connected?'WhatsApp':'',!salud.ok?'la API':'',!ent.gsgConectada?'GSG':''].filter(Boolean);
+var avisos=r[3].avisos||[];
+$('db-hero').setAttribute('data-estado',caidos.length?'mal':'ok');$('db-hero-ico').innerHTML=caidos.length?ICO.alerta:ICO.ok;
+$('db-hero-titulo').textContent=caidos.length?'Revisa '+caidos.join(caidos.length>2?', ':' y ').replace(/, ([^,]*)$/,' y $1'):'Todo funciona';
+$('db-hero-sub').textContent=(caidos.length?'Sin conexión: '+caidos.join(', ')+'. Toca la tarjeta para ver qué pasa.':'WhatsApp, la API y GSG están conectados.')+(avisos.length?'':' Sin alertas pendientes.');
+$('db-hora').textContent='Actualizado a las '+new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'});
 var total=ent.total||0;var estados=[['Falta ubicación',ent.faltaUbicacion||0,'ambar'],['En camino',ent.enCamino||0,'azul'],['Entregados',ent.entregadas||0,'verde'],['Necesitan atención',ent.incidencia||0,'rojo'],['Cancelados',ent.canceladas||0,'gris']];
 var segmentos=estados.filter(function(e){return e[1]>0;}).map(function(e){return '<i class="tono-'+e[2]+'" style="flex:'+e[1]+'" title="'+esc(e[0])+': '+e[1]+'"></i>';}).join('');
-$('db-pedidos').innerHTML='<h3>Pedidos de hoy</h3><div class="db-grande">'+total+'</div><div class="db-barra" role="img" aria-label="Pedidos por estado">'+(segmentos||'<i class="tono-vacio" style="flex:1"></i>')+'</div><ul class="db-leyenda">'+estados.map(function(e){return '<li><span class="db-mk tono-'+e[2]+'" aria-hidden="true"></span>'+esc(e[0])+'<b>'+e[1]+'</b></li>';}).join('')+'</ul><a class="db-ir" href="/hoy">Ver los pedidos</a>';
+$('db-pedidos').innerHTML='<h3>'+ICO.pedidos+'Pedidos de hoy<a href="/hoy">Ver pedidos</a></h3><div class="db-grande">'+total+'</div><div class="db-barra" role="img" aria-label="Pedidos por estado">'+segmentos+'</div><ul class="db-leyenda">'+estados.map(function(e){return '<li'+(e[1]?'':' class="cero"')+'><span class="db-mk tono-'+e[2]+'" aria-hidden="true"></span>'+esc(e[0])+'<b>'+e[1]+'</b></li>';}).join('')+'</ul>';
 var enviados=hoy.enviados!=null?hoy.enviados:(h.sentToday||0),cupo=hoy.cupo||h.dailyCap||0,usados=hoy.usados!=null?hoy.usados:(h.sentToday||0),pct=cupo?Math.min(100,Math.round(usados*100/cupo)):0;
-function mini(t,v,tono){return '<div class="db-mini'+(tono&&v?' tono-'+tono:'')+'"><b>'+(v||0)+'</b><span>'+esc(t)+'</span></div>';}
-$('db-mensajes').innerHTML='<h3>Mensajes de hoy</h3><div class="db-grande">'+enviados+'<small> enviados</small></div><div class="db-minis">'+mini('Entregados',hoy.entregados)+mini('Leídos',hoy.leidos)+mini('Fallidos',hoy.fallidos,'rojo')+mini('Recibidos',hoy.entrantes)+'</div><div class="db-cupo"><span>Cupo del día</span><b>'+usados+' de '+cupo+'</b></div><div class="db-progreso" role="progressbar" aria-valuemin="0" aria-valuemax="'+cupo+'" aria-valuenow="'+usados+'"><i style="width:'+pct+'%"></i></div>';
+function mini(t,v,tono){return '<li'+(tono&&v?' class="mal"':'')+'><b>'+(v||0)+'</b>'+esc(t)+'</li>';}
+$('db-mensajes').innerHTML='<h3>'+ICO.mensajes+'Mensajes de hoy<a href="/chat">Ver chats</a></h3><div class="db-grande">'+enviados+'<small> enviados</small></div><ul class="db-minis">'+mini('entregados',hoy.entregados)+mini('leídos',hoy.leidos)+mini('fallidos',hoy.fallidos,'rojo')+mini('recibidos',hoy.entrantes)+'</ul><div class="db-cupo"><span>Cupo del día</span><b>'+usados+' de '+cupo+'</b></div><div class="db-progreso'+(pct>=80?' alto':'')+'" role="progressbar" aria-label="Cupo del día" aria-valuemin="0" aria-valuemax="'+cupo+'" aria-valuenow="'+usados+'"><i style="width:'+pct+'%"></i></div>';
 var sem=res.semana||[];var max=Math.max.apply(null,[1].concat(sem.map(function(d){return d.salientes||0;})));
 var dia=function(d){try{return new Date(d+'T12:00:00').toLocaleDateString('es-PE',{weekday:'short'}).replace('.','');}catch(e){return d.slice(5);}};
-$('db-semana').innerHTML='<h3>Mensajes enviados, últimos 7 días</h3>'+(sem.length?'<div class="db-barras">'+sem.map(function(d,i){var v=d.salientes||0;var ult=i===sem.length-1;return '<div class="db-col" tabindex="0" data-tip="'+esc(dia(d.dia))+' '+esc(d.dia.slice(8))+': '+v+' enviados, '+(d.entrantes||0)+' recibidos"><span class="db-valor">'+(ult?v:'')+'</span><i style="height:'+Math.max(v?4:0,Math.round(v*100/max))+'%"></i><small>'+esc(dia(d.dia))+'</small></div>';}).join('')+'</div><table class="sr"><caption>Mensajes enviados por día</caption><tr><th>Día</th><th>Enviados</th><th>Recibidos</th></tr>'+sem.map(function(d){return '<tr><td>'+esc(d.dia)+'</td><td>'+(d.salientes||0)+'</td><td>'+(d.entrantes||0)+'</td></tr>';}).join('')+'</table>':'<p class="muted">Todavía no hay movimiento.</p>');
+$('db-semana').innerHTML='<h3>'+ICO.semana+'Mensajes enviados, últimos 7 días</h3>'+(sem.length?'<div class="db-barras">'+sem.map(function(d,i){var v=d.salientes||0;var ult=i===sem.length-1;return '<div class="db-col'+(ult?' hoy':'')+'" tabindex="0" data-tip="'+esc(dia(d.dia))+' '+esc(d.dia.slice(8))+': '+v+' enviados, '+(d.entrantes||0)+' recibidos"><span class="db-valor">'+(ult?v:'')+'</span><i style="height:'+Math.max(v?4:0,Math.round(v*100/max))+'%"></i><small>'+esc(dia(d.dia))+'</small></div>';}).join('')+'</div><table class="sr"><caption>Mensajes enviados por día</caption><tr><th>Día</th><th>Enviados</th><th>Recibidos</th></tr>'+sem.map(function(d){return '<tr><td>'+esc(d.dia)+'</td><td>'+(d.salientes||0)+'</td><td>'+(d.entrantes||0)+'</td></tr>';}).join('')+'</table>':'<div class="vacio compacto sin-ico"><p>Todavía no hay movimiento esta semana.</p></div>');
 var atencion=[['Chats sin leer',chats.sinLeer||0,'/chat'],['Esperando respuesta',chats.esperandoRespuesta||0,'/chat'],['Casos para una persona',rep.requierenPersona||0,'/automatizacion-gsg'],['Pedidos con incidencia',ent.incidencia||0,'/hoy?filtro=incidencia']];
-$('db-atencion').innerHTML='<h3>Necesita atención</h3><ul class="db-lista">'+atencion.map(function(a){return '<li><a href="'+a[2]+'">'+esc(a[0])+'<b class="'+(a[1]?'hay':'')+'">'+a[1]+'</b></a></li>';}).join('')+'</ul>';
-var avisos=r[3].avisos||[];$('inicio-avisos').innerHTML=avisos.length?'<h3>Avisos</h3>'+avisos.map(function(a){return '<p class="db-aviso">'+esc(a.texto)+'</p>';}).join(''):'<p class="db-sin-avisos">Sin alertas pendientes.</p>';}
+var pendientes=atencion.filter(function(a){return a[1]>0;}).length;
+$('db-atencion').innerHTML='<h3>'+ICO.atencion+'Necesita atención</h3><ul class="db-lista">'+atencion.map(function(a){return '<li><a href="'+a[2]+'"'+(a[1]?' class="hay"':'')+'>'+esc(a[0])+'<b>'+a[1]+'</b></a></li>';}).join('')+'</ul>'+(pendientes?'':'<p class="db-lista-ok">Nada pendiente por ahora.</p>');
+var nivel={info:'info',warn:'warn',bad:'bad'};
+$('inicio-avisos').innerHTML=avisos.length?'<h3>Avisos</h3>'+avisos.map(function(a){return '<p class="s-alerta '+(nivel[a.nivel]||'warn')+'"><span>'+esc(a.texto)+'</span></p>';}).join(''):'';}
 /* La señal grande de Asistente IA: la misma que la de la cabecera, con el motivo y la hora. */
 var TEXTO_SENAL={conectada:'IA conectada',sin_conexion:'IA sin conexión',apagada:'IA apagada',sin_comprobar:'IA sin comprobar'};
 function senalGrande(c){if(!c||!TEXTO_SENAL[c.estado])return;$('ia-senal').setAttribute('data-estado',c.estado);$('ia-senal-texto').textContent=TEXTO_SENAL[c.estado];var det=c.estado==='sin_conexion'?(c.motivo||'La IA no respondió.')+' ':c.estado==='apagada'?'No está activa o le falta la clave. ':'';$('ia-senal-detalle').textContent=det+(c.comprobada?'Última comprobación: '+fecha(c.comprobada)+'.':'Aún sin comprobar desde que arrancó el sistema.');}

@@ -170,6 +170,9 @@ const ICONOS = {
   ayuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
   flujo: '<rect x="3" y="3" width="7" height="6" rx="1.5"/><rect x="14" y="15" width="7" height="6" rx="1.5"/><path d="M6.5 9v4a2 2 0 0 0 2 2H14"/><path d="m12 13 2 2-2 2"/>',
   lista: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  ok: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9.5"/>',
+  alerta: '<path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5"/><path d="M12 17.5h.01"/>',
+  servidor: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
 } as const;
 
 export function icono(nombre: keyof typeof ICONOS, clase = 's-ico'): string {
@@ -224,10 +227,13 @@ const CSS = `
   .s-logo-text { font-weight: 800; font-size: 17px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-logo-text small { color: var(--s-accent); font-weight: 700; font-size: 17px; }
   .s-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 10px 12px; }
-  .s-item { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px; color: var(--s-text); text-decoration: none; font-weight: 500; white-space: nowrap; }
+  .s-item { position: relative; display: flex; align-items: center; gap: 11px; padding: 8px 10px; margin: 1px 0; border-radius: var(--radio-sm); color: var(--s-text); text-decoration: none; font-weight: 500; white-space: nowrap; transition: background-color var(--dur) ease, color var(--dur) ease; }
   .s-item:hover { background: var(--s-hover); }
-  .s-item.activo { background: var(--s-accent-soft); color: var(--s-accent); font-weight: 600; box-shadow: inset 3px 0 0 var(--s-accent); }
-  .s-item .s-ico { flex: none; color: var(--s-muted); }
+  .s-item:hover .s-ico { color: var(--s-text); }
+  /* La seccion abierta: fondo suave, texto y icono en verde y una barra a la izquierda. */
+  .s-item.activo { background: var(--s-accent-soft); color: var(--s-accent); font-weight: 600; }
+  .s-item.activo::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--s-accent); }
+  .s-item .s-ico { flex: none; color: var(--s-muted); transition: color var(--dur) ease; }
   .s-item.activo .s-ico { color: var(--s-accent); }
   .s-item .s-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .s-item.sub { padding: 7px 10px 7px 12px; font-size: 14px; }
@@ -238,10 +244,12 @@ const CSS = `
   .s-buscar input:focus, .s-buscar input:focus-visible { border: 0; outline: 0; box-shadow: none; }
   .s-buscar kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; background: var(--s-kbd); border: 1px solid var(--s-line); border-radius: 5px; padding: 3px 5px; white-space: nowrap; }
   .s-grupo { margin-top: 2px; }
-  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11.5px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit; }
+  /* Cada categoria separada por una linea fina: se ve donde empieza y acaba cada una. */
+  .s-menu-gsg > .s-grupo + .s-grupo { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--s-line); }
+  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit; transition: background-color var(--dur) ease, color var(--dur) ease; }
   .s-grupo-cab:hover { background: var(--s-hover); color: var(--s-text); }
   .s-grupo.fijo > .s-grupo-cab { cursor: default; } .s-grupo.fijo > .s-grupo-cab:hover { background: transparent; color: var(--s-muted); } .s-grupo.fijo > .s-grupo-cab .s-ico { display: none; }
-  .s-grupo-cab .s-ico { width: 16px; height: 16px; transition: transform .15s; }
+  .s-grupo-cab .s-ico { width: 15px; height: 15px; transition: transform var(--dur) var(--curva); }
   .s-grupo-cab .s-ico { transform: rotate(90deg); }
   .s-grupo-items { display: block; padding: 0 0 4px 4px; }
   .s-grupo.cerrado .s-grupo-items { display: none; }
@@ -480,6 +488,13 @@ const CSS = `
     .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none; transition: opacity .18s; }
     .s-app.abierto .s-backdrop { opacity: 1; pointer-events: auto; }
     .s-chip b { display: none; }
+  }
+  /* En el telefono la barra de arriba deja solo el titulo y los botones: sin miga, subtitulo ni señal de la IA. */
+  @media (max-width: 560px) {
+    .s-miga, .s-titulo p, .s-ia-senal { display: none !important; }
+    .s-titulo h1 { font-size: 16px; }
+    .s-top-der { gap: 4px; }
+    .s-boton { width: 36px; height: 36px; }
   }
 `;
 
