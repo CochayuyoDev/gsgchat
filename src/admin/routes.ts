@@ -31,6 +31,7 @@ import { registerChatRoutes } from './chat-routes.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { registerLeadsRoutes } from './leads-routes.js';
 import { registerRutasRoutes } from './rutas-routes.js';
+import { alCambiarHorario } from '../rutas/despertador.js';
 import { crearPuertoGsg } from '../rutas/gsg.js';
 import { conexionGsgVigente } from '../rutas/conexion-gsg.js';
 import { opcionesDesdeConfig } from '../rutas/motor.js';
@@ -234,6 +235,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     }
     const patch = ajustesGeneralesPatchSchema.parse(request.body ?? {});
     const guardado = await deps.ajustes.guardar(patch);
+    // El horario nuevo vale ya: lo frenado hasta la apertura vieja sale ahora.
+    if (patch.horario || patch.zonaHoraria !== undefined) await alCambiarHorario(repos);
     return { ok: true, guardado };
   });
 

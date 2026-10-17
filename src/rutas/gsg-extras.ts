@@ -23,7 +23,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { SettingsRepo } from '../settings/service.js';
-import { PERU, revisarTelefono } from './telefono.js';
+import { motivoTelefono, PERU, revisarTelefono } from './telefono.js';
 
 const CLAVE_DESCARTES = 'gsg.descartes';
 const CLAVE_TOKENS = 'gsg.tokensSimulador';
@@ -81,7 +81,7 @@ export function revisarPedidoGsg(c: PedidoCrudo): { ok: true } | { ok: false; mo
   const referencia = String(c.referencia ?? '').trim();
   if (!referencia) return { ok: false, motivo: 'sin referencia' };
   const revision = revisarTelefono(String(c.telefono ?? ''), PERU);
-  if (!revision.ok) return { ok: false, motivo: `teléfono inválido: ${revision.detalle}` };
+  if (!revision.ok) return { ok: false, motivo: motivoTelefono(revision) };
   const tienePin = c.lat !== undefined && c.lat !== null && c.lng !== undefined && c.lng !== null;
   if (tienePin && !(typeof c.lat === 'number' && typeof c.lng === 'number' && Number.isFinite(c.lat) && Number.isFinite(c.lng))) {
     return { ok: false, motivo: 'el pin (lat, lng) no son números' };

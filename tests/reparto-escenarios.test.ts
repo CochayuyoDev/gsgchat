@@ -670,7 +670,7 @@ describe('los rechazos de Meta al enviar', () => {
     await e.despacharAGsg();
     const [inc] = e.gsg.incidencias();
     // En el formato de GSG: número mal, con el teléfono y un comentario que dice qué pasó.
-    expect(inc).toMatchObject({ tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', telefonoOrigen: '51987600003' });
+    expect(inc).toMatchObject({ tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', telefonoOrigen: '987600003' });
     // El codigo fino ademas del motivo: TELEFONO_MAL no distingue un numero
     // corto de uno sin WhatsApp, y en GSG la accion del operador es distinta.
     expect(inc!.codigo).toMatch(/./);

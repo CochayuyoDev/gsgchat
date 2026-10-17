@@ -372,8 +372,12 @@ var ESTADOS = {
   cancelado:   { texto: 'Cancelado', tono: 'gris' }
 };
 
-function chipEstado(estado) {
+/* Con un error, el error concreto («No es la persona», «Al número le faltan
+   dígitos»...), no uno general para todos. */
+function chipEstado(estado, incidencia) {
   var e = ESTADOS[estado] || { texto: String(estado || '').replace(/_/g, ' '), tono: 'gris' };
+  var ficha = incidencia && (estado === 'incidencia' || estado === 'supervision') ? catalogo[incidencia] : null;
+  if (ficha) e = { texto: ficha.titulo, tono: e.tono };
   return '<span class="chip tono-' + e.tono + '">' + esc(e.texto) + '</span>';
 }
 
@@ -536,7 +540,7 @@ async function cargarLista() {
         '<div class="sub">' + esc(s.phone || s.telefonoCrudo) + '</div></td>' +
       '<td>' + esc(s.referencia || '') +
         (s.distrito ? '<div class="sub">' + esc(s.distrito) + '</div>' : '') + '</td>' +
-      '<td>' + chipEstado(s.estado) +
+      '<td>' + chipEstado(s.estado, s.incidencia) +
         (s.requiereHumano ? ' <span class="chip tono-rojo">persona</span>' : '') + '</td>' +
       '<td>' + esc(queLePasa(s)) +
         (intentosDe(s, maxIntentos) ? '<div class="sub">' + esc(intentosDe(s, maxIntentos)) + '</div>' : '') + '</td>' +
@@ -666,7 +670,7 @@ function pintarDetalle(data) {
     : '';
 
   var info =
-    '<p style="margin:0 0 4px"><b>' + esc(s.nombre || 'Sin nombre') + '</b> ' + chipEstado(s.estado) + '</p>' +
+    '<p style="margin:0 0 4px"><b>' + esc(s.nombre || 'Sin nombre') + '</b> ' + chipEstado(s.estado, s.incidencia) + '</p>' +
     '<p class="muted" style="margin:0 0 12px;font-size:13px">' +
       esc(s.phone || s.telefonoCrudo) +
       (s.referencia ? ' · pedido ' + esc(s.referencia) : '') +

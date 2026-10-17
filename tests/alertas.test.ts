@@ -97,7 +97,7 @@ describe('cómo va el lote', () => {
     expect(texto).toContain('1 de 4 con ubicación');
     expect(texto).toContain('1 sin contestar');
     expect(texto).toMatch(/2 casos necesitan/);
-    expect(texto).toMatch(/número incompleto/i);
+    expect(texto).toMatch(/al número le faltan dígitos/i);
     expect(texto.length).toBeLessThan(320);
   });
 });
