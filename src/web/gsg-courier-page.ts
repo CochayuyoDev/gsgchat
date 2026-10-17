@@ -12,7 +12,7 @@ export const EJEMPLO_COURIER = { pedidos: [{
 }] };
 
 /** [campo de Courier, nombre JSON, obligatorio, detalle] */
-const CAMPOS: Array<[string, string, boolean, string]> = [
+export const CAMPOS: Array<[string, string, boolean, string]> = [
   ['Código de tracking', 'tracking', true, 'El que manda GSG; identifica el pedido (no se duplica en el día).'],
   ['Empresa', 'empresa', true, 'Nombre o {codigo, nombre}.'],
   ['Cliente', 'cliente', true, 'Nombre del cliente.'],
@@ -35,16 +35,13 @@ export const EJEMPLO_FLUJO = { tracking: 'GSG-E-205', accion: 'CANCELAR', motivo
 
 /** Como se arma la llamada en Postman: [paso, valor]. */
 function postman(id: string, url: string, cuerpo: string, extra: string, tabla: string, codigos: string): string {
-  return `<div class="postman" id="${id}"><h3>Probar en Postman</h3><ol>
-    <li>Método: <b>POST</b>.</li>
-    <li>URL: <code class="postman-url"></code></li>
-    <li>Headers: <code>Content-Type: application/json</code> y <code>X-API-Key: TU_CLAVE</code> (la clave que creas abajo).</li>
-    <li>Body → <b>raw</b> → <b>JSON</b>, y pega:</li></ol>
-    <pre class="api-json">${escapeHtml(cuerpo)}</pre>${extra}<p class="postman-todas">Cómo sacar <b>cada</b> respuesta (${escapeHtml(codigos)}): <a href="#${tabla}">ver la tabla «Cómo sacarla en Postman»</a>.</p><span hidden data-url="${escapeHtml(url)}"></span></div>`;
+  return `<div class="postman" id="${id}"><h3>Probar en Postman</h3>
+    <p><b>POST</b> <code class="postman-url"></code>, con <code>Content-Type: application/json</code> y <code>X-API-Key</code>, y este cuerpo:</p>
+    <pre class="api-json">${escapeHtml(cuerpo)}</pre>${extra}<p class="postman-todas">Cómo sacar <b>cada</b> respuesta (${escapeHtml(codigos)}): <a href="#${tabla}">ver la tabla «Cómo sacarla en Postman»</a>. La colección lista para importar, en <a class="ver-manual" href="/manual#m-postman">el Manual</a>.</p><span hidden data-url="${escapeHtml(url)}"></span></div>`;
 }
 
 /** API 2: los campos de una orden de cancelar o reintentar. [nombre JSON, obligatorio, detalle] */
-const CAMPOS_FLUJO: Array<[string, boolean, string]> = [
+export const CAMPOS_FLUJO: Array<[string, boolean, string]> = [
   ['tracking', true, 'El tracking del pedido en curso (texto o número).'],
   ['accion', true, '"CANCELAR": el bot deja de escribirle por ese tracking. "REINTENTAR": se le vuelve a escribir.'],
   ['telefono', false, 'Solo con REINTENTAR: el teléfono corregido; se le escribe al número nuevo.'],
@@ -116,7 +113,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
           <tr><td><a href="#t-api1"><span class="api-num">API 1</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/entregas</code></td><td>GSG nos manda los pedidos del día</td></tr>
           <tr><td><a href="#t-api2"><span class="api-num">API 2</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/flujo</code></td><td>GSG nos pide cancelar o reintentar un pedido</td></tr>
         </tbody></table>
-        <p class="na-clave">Las dos usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>.</p>
+        <p class="na-clave">Las dos usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>. <a class="ver-manual" href="/manual#m-api-gsgchat">Ver instrucciones completas</a></p>
         <a href="/hoy">Ver pedidos recibidos</a> · <a href="/conexion-gsg">Conexión con GSG (lo que le enviamos)</a>
         <small>Con «Confirmar la lista de GSG» activado, los pedidos esperan aprobación en Números del día. Desactivado, el motor los procesa automáticamente.</small>
       </section>
@@ -124,11 +121,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <p>GSG nos manda los pedidos del día. Entrega esta dirección al programador de GSG Courier.</p>
         <label for="courier-url">Enviar pedidos con POST</label><input id="courier-url" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url">Copiar dirección</button><button class="btn" id="courier-descargar">Descargar JSON de ejemplo</button></div>
-        <p><code>Content-Type: application/json</code><br><code>X-API-Key: CLAVE_DE_GSG</code></p>
-        <small>La clave identifica esta tienda y debe tener permiso de recepción. Sin clave, o con una clave inválida o revocada: 401. Con una clave sin permiso: 403.</small>
-        <small>Hasta 600 pedidos por llamada. Máximo 120 llamadas por minuto y clave.</small>
-        <small>El tracking evita duplicados por referencia y día. La respuesta distingue creadas, repetidas y descartadas.</small>
-        <p>Cuerpo: un pedido, una lista o <code>{ pedidos: [...] }</code>. Sus campos y respuestas están más abajo: <a href="#courier-campos">campos</a> · <a href="#courier-respuestas">respuestas</a>.</p>
+        <p>Cuerpo: un pedido, una lista o <code>{ pedidos: [...] }</code>, hasta 600 por llamada. Un pedido repetido el mismo día no se duplica. <a href="#courier-campos">Campos</a> · <a href="#courier-respuestas">respuestas</a> · <a class="ver-manual" href="/manual#m-gsg-courier">Ver instrucciones completas</a></p>
         ${postman('postman-1', '/api/v1/entregas', JSON.stringify(EJEMPLO_COURIER.pedidos[0], null, 2), '<p>Respuesta esperada: <b>201</b> con el pedido creado (su <code>id</code>). Si lo mandas otra vez: <b>200</b>, repetido, sin duplicar.</p>', 'courier-respuestas', RESPUESTAS.map(([c]) => c).join(', '))}
         <a href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a> · <a href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
       </section>
@@ -136,7 +129,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <p>GSG nos pide dejar de escribirle a un tracking, o volver a escribirle porque ya corrigió los datos.</p>
         <label for="courier-url-2">Enviar con POST</label><input id="courier-url-2" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url-2" type="button">Copiar dirección</button></div>
-        <p><code>Content-Type: application/json</code><br><code>X-API-Key: CLAVE_DE_GSG</code> (la misma clave de la API 1)</p>
+        <p>Misma clave que la API 1. <a class="ver-manual" href="/manual#m-gsg-flujo">Ver instrucciones completas</a></p>
         ${postman('postman-2', '/api/v1/flujo', JSON.stringify(EJEMPLO_FLUJO, null, 2), '<p><b>Antes</b>, crea el pedido con la API 1: la API 2 no crea pedidos, actúa sobre uno que ya existe. Usa su <code>tracking</code> de GSG (o su <code>referencia</code>). Para probar sin cambiar nada, añade <code>"simular": true</code>.</p><p>Respuesta esperada: <b>200</b> con <code>detalle</code>. Si el tracking no está en curso: <b>404</b>.</p><div class="courier-actions"><button class="btn" id="courier-descargar-2" type="button">Descargar JSON de ejemplo</button></div>', 'respuestas-2', RESPUESTAS_FLUJO.map(([c]) => c).join(', '))}
         <p>Para reintentar con el teléfono corregido: <code>{ "tracking": "GSG-E-205", "accion": "REINTENTAR", "telefono": "987654321" }</code></p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_FLUJO.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>

@@ -113,48 +113,29 @@ La bandeja sigue disponible: Luis (GSG) la lee con `GET /api/v1/reportados` y co
 | `telefono_de_motorizado` | El teléfono es de un motorizado registrado, no de un cliente. No se guarda. |
 | `no_soy_yo` | El cliente contestó que no es él (no hizo el pedido o el número no es suyo). |
 
-### La bandeja: `GET /api/v1/reportados`
+### Leer y corregir desde GSG
 
-Es como GSG se entera de los números malos. Con la clave de GSGchat (`entregas:leer`). Filtros: `?estado=pendiente|corregido`, `?tracking=GSG-123`.
-Cada elemento trae `clave`, `tracking`, `referencia`, `telefono`, `error`, `titulo`, `mensaje`, `detalle`,
-`reportadoAt`, `estado` (`pendiente` o `corregido`), `corregidoAt` y `correccion`. Sale de la base de GSGchat:
-GSG la lee cuando quiere. En el panel está en Pedidos GSG → «Números reportados», junto a la bandeja de errores.
+GSG lee la bandeja con `GET /api/v1/reportados` y corrige con `POST /api/v1/reportados/{tracking}/correccion`
+(o `PATCH /api/v1/entregas/{referencia}` con el teléfono nuevo). Al corregir, lo pendiente de ese tracking pasa
+a `corregido` y, si aún falta la ubicación, se le pide al número nuevo por el flujo normal.
 
-### Corregir (GSG → GSGchat)
+Cada respuesta de `POST /api/v1/entregas`, del `PATCH` y de la corrección trae `whatsapp`: lo que **ya** se hizo
+**hoy** con ese tracking o ese teléfono. Al cliente ya contactado no se le manda otro mensaje. Solo cuenta el
+mismo día: el mismo cliente otro día es un intento de entrega nuevo y se le vuelve a escribir. `GET /api/v1/trackings`
+da lo mismo para todos los trackings de un día; GSG lo lee cuando quiere y GSGchat nunca se lo empuja.
 
-- `POST /api/v1/reportados/{tracking}/correccion` con `{ "telefono": "987654321" }`, `{ "tracking": "GSG-124" }`
-  o los dos (`entregas:gestionar`). Sin tracking, se usa la `clave` que da la bandeja.
-- O `PATCH /api/v1/entregas/{referencia}` con `{ "telefono": "987654321" }` (y el `tracking` como siempre).
+## Dónde está cada cosa
 
-Al corregir: lo pendiente de ese tracking pasa a `corregido`, el pedido cambia y, si aún falta la ubicación, se le
-pide al número nuevo por el flujo normal (si «Confirmar y enviar» está encendido, espera a que una persona lo
-confirme). Si el pedido no se llegó a guardar (teléfono inválido, de un motorizado, tracking malo), se crea ahora con
-lo corregido. Respuestas: 200; 400 si lo corregido tampoco vale; 404 si no hay nada reportado; 409 si ya estaba
-corregido o el tracking nuevo ya es de otro pedido de hoy.
+Para no contar lo mismo en varios sitios:
 
-### Lo que ya se hizo por WhatsApp
-
-Cada respuesta a `POST /api/v1/entregas`, `PATCH /api/v1/entregas/{referencia}` y a la corrección trae `whatsapp`:
-por pedido, lo que **ya** se hizo **hoy** con ese tracking o ese teléfono. Al cliente ya contactado no se le manda
-otro mensaje.
-
-| `codigo` | Ejemplo de `mensaje` |
+| Qué | Dónde |
 |---|---|
-| `ya_contactado` | Este tracking ya se le envió mensaje por WhatsApp el 10/10/2026 a las 09:15. No se le manda otro. |
-| `agrupado_con` | Este teléfono ya tiene hoy el tracking «GSG-122»: va agrupado con ese y el cliente recibe un solo mensaje por los dos. (`con`: el otro tracking) |
-| `ubicacion_pedida` | Ya se pidió la ubicación (2 veces, la última el ...). (`veces`) |
-| `ubicacion_registrada` | Ubicación registrada el ... |
-| `ubicacion_cambiada` | El cliente cambió su ubicación el ... |
-| `confirmado` | El cliente confirmó el pedido el ... |
-| `reportado` / `corregido` | Lo reportado de ese tracking y si ya se corrigió (`error`). |
+| El contrato: rutas, campos, códigos de error, ejemplos | `src/api/v1/openapi.ts`, servido en `/api/v1/openapi.json` |
+| Llamadas listas para importar, con ejemplos de éxito y de error | `docs/postman/` (colección y entorno; se generan con `npx tsx scripts/generar-postman.ts`) |
+| Cómo se usa, paso a paso, para quien opera | El Manual del panel (`/manual`): Nuestra API, API 1, API 2, Postman y Conexión con GSG |
+| Los conceptos de la conexión y la cola de reportes | Este documento |
 
-Solo cuenta **el mismo día**: si GSG manda el mismo cliente (mismo teléfono, incluso el mismo tracking) otro día,
-es un intento de entrega nuevo y se le vuelve a escribir. Dos trackings con el mismo teléfono el mismo día reciben
-un solo mensaje, y la ubicación se le manda a GSG para los dos trackings.
-
-### El mapa de trackings: `GET /api/v1/trackings?dia=AAAA-MM-DD`
-
-Con `entregas:leer`; sin `dia`, hoy. Por tracking: `mensaje` (estado y `enviadoEn`), `contactado`/`contactadoEn`,
-`agrupadoCon`, `ubicacion` (`estado`: pendiente, registrada, cambiada o no_hace_falta; `pedida`, `pedidaEn`,
-`ultimaPeticionEn`, `veces`, `registradaEn`, `cambiadaEn`), `confirmacion`, `reportes` y `avisos` (los mismos
-códigos de arriba). GSG lo lee cuando quiere; GSGchat nunca lo empuja ni le pregunta nada a GSG.
+La colección sale de los mismos ejemplos que enseñan Nuestra API y el Manual. `tests/postman-coleccion.test.ts`
+comprueba que cada llamada existe en el OpenAPI, que sus ejemplos usan sus códigos y campos, que el archivo de
+`docs/postman/` está al día y que, lanzadas en orden contra el servidor, responden lo que dicen sus ejemplos.
+La API Key no va en la colección: es la variable secreta `apiKey` del entorno, vacía.
