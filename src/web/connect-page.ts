@@ -19,7 +19,7 @@
  * y acaba con el numero baneado. Por eso los caminos `local` y `waha` avisan.
  */
 
-import { appShell, modoVigente } from './shell.js';
+import { appShell, icono, modoVigente } from './shell.js';
 
 /* ------------------------------------------------------------------ modos */
 
@@ -183,7 +183,6 @@ const CSS = `
   .wrap a { color: var(--primario); }
   .wrap ol, .wrap ul { padding-left: 20px; margin: var(--esp-2) 0 0; }
   .wrap li { margin-bottom: 6px; }
-  .wrap code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--superficie-2); padding: 1px 6px; border-radius: var(--radio-sm); overflow-wrap: anywhere; }
   .ayuda { color: var(--texto-suave); font-size: var(--fs-small); }
   .wrap details { margin-top: var(--esp-3); }
   .wrap summary { cursor: pointer; font-size: var(--fs-cuerpo); font-weight: 600; color: var(--texto-suave); padding: 8px 0; min-height: 36px; }
@@ -225,8 +224,7 @@ const CSS = `
   /* Formularios. */
   .campo { display: block; font-size: 13px; font-weight: 600; margin: var(--esp-4) 0 var(--esp-1); }
   .campo .hint { display: block; font-weight: 400; color: var(--texto-suave); font-size: var(--fs-small); margin-top: 2px; }
-  .wrap input:not([type=radio]) { width: 100%; padding: 10px 12px; font: inherit; font-size: 14px; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); min-height: 42px; }
-  .wrap input:focus-visible { border-color: var(--primario); }
+  .wrap input:not([type=radio]):not([type=checkbox]) { width: 100%; }
   .acciones { display: flex; gap: var(--esp-2); align-items: center; margin-top: var(--esp-4); flex-wrap: wrap; }
   .corto { max-width: 220px; }
   .tel { display: flex; align-items: stretch; max-width: 280px; }
@@ -258,7 +256,7 @@ const CSS = `
   .codigo { font-family: ui-monospace, Consolas, monospace; font-size: 30px; letter-spacing: 6px; font-weight: 700; margin: var(--esp-3) 0 var(--esp-1); }
 
   /* El estado de la conexion en la barra de arriba no puede empujar el titulo. */
-  .s-top #state { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  .s-top #state { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* --- GSG y perfiles ---------------------------------------------------- */
   .bloque { margin-top: var(--esp-4); padding-top: var(--esp-3); border-top: 1px solid var(--borde); }
@@ -335,9 +333,10 @@ const CSS = `
 .con-resumen.una:has(> #gsg) { max-width: none; }
 #gsg .bloque.punteado { padding: var(--esp-4); border: 1px solid var(--borde); border-radius: 12px; background: var(--fondo, transparent); }
 #gsg .bloque.punteado h3 { margin-top: 0; }
-.gsg-destinos table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 13.5px; }
-.gsg-destinos th { text-align: left; font-weight: 600; color: var(--texto-suave); padding: 6px 8px; border-bottom: 1px solid var(--borde); }
-.gsg-destinos td { padding: 8px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+.gsg-destinos { margin: 6px 0 10px; overflow-x: auto; font-size: 13px; color: var(--texto-suave); }
+.gsg-destinos table { border: 1px solid var(--borde); border-radius: var(--radio-sm); border-collapse: separate; border-spacing: 0; overflow: hidden; margin-bottom: 8px; }
+.gsg-destinos td { font-size: 13px; color: var(--texto); }
+.gsg-destinos td code { background: none; border: 0; padding: 0; word-break: break-all; }
 .gsg-destinos code { overflow-wrap: anywhere; }
 @media (min-width: 1000px) {
   #gsg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--esp-5); row-gap: var(--esp-4); align-items: start; }
@@ -348,7 +347,8 @@ const CSS = `
 .con-card { padding: var(--esp-5); display: flex; flex-direction: column; gap: var(--esp-3); min-width: 0; }
 @media (max-width: 640px) { .con-card { padding: var(--esp-4); } }
 .con-cab { display: flex; align-items: center; gap: var(--esp-3); }
-.con-ico { flex: none; width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 24px; background: var(--primario-suave); }
+.con-ico { flex: none; width: 48px; height: 48px; border-radius: var(--radio); display: grid; place-items: center; background: var(--primario-suave); color: var(--primario); }
+.con-ico .s-ico { width: 24px; height: 24px; }
 .con-tit { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .con-tit h2 { font-size: 20px; }
 .con-frase { font-size: 14.5px; color: var(--texto-suave); }
@@ -364,8 +364,13 @@ const CSS = `
 .con-form[open] > summary { margin-bottom: var(--esp-2); }
 .con-form #gsg-form { margin-top: 0; }
 .con-avanzado { margin-top: 0; border-top: 1px solid var(--borde); padding-top: var(--esp-2); }
-.con-avanzado > summary { display: flex; flex-direction: column; gap: 2px; color: var(--texto); padding: var(--esp-3) 0; }
+.con-avanzado > summary { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; color: var(--texto); padding: var(--esp-3) 0; }
+.con-avanzado > summary::before, #con-avanzado > summary::before { display: none; }
 .con-avanzado > summary b { font-size: 15px; }
+/* Lo destructivo, aparte: a la derecha y tras una linea. */
+.con-pie { padding-top: var(--esp-4); border-top: 1px solid var(--borde); }
+.con-pie .peligro { margin-left: auto; }
+#card-wa > .acciones .peligro { margin-left: var(--esp-3); }
 .con-avanzado > summary .ayuda { font-weight: 400; }
 .con-avanzado[open] > summary { margin-bottom: var(--esp-3); }
 `;
@@ -457,7 +462,7 @@ export function connectPage(opts: ConnectOpts): string {
 
 <div class="con-resumen una">
 ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
-  <div class="con-cab"><span class="con-ico" aria-hidden="true">💬</span><div class="con-tit"><h2>WhatsApp</h2><span id="wa-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">${icono('chat')}</span><div class="con-tit"><h2>WhatsApp</h2><span id="wa-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="wa-frase">Revisando la conexión…</p>
   <div id="qr-box" class="hidden">
       <div class="qr-marco"><img id="qr-img" alt="Código QR para vincular WhatsApp"></div>
@@ -483,9 +488,9 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   </div>
 </section>
 ` : ''}${tarjetaGsg ? `<section class="tarjeta con-card" id="gsg">
-  <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">${icono('moto')}</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
-  <div id="gsg-estado" class="ayuda">Cargando…</div>
+  <div id="gsg-estado" class="ayuda"><span class="esqueleto linea media"></span></div>
   <div class="bloque punteado" id="gsg-consulta">
     <h3>Consulta del estado de un envío en GSG</h3>
     <p class="ayuda" id="gsg-consulta-url">Sin ruta de consulta configurada: GSGchat no le pregunta nada a GSG. Configúrala en «Cambiar la URL o la API Key de GSG».</p>
@@ -500,7 +505,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   <div class="bloque punteado" id="gsg-envios-caja">
     <h3>Lo que enviamos a GSG</h3>
     <div id="gsg-envios-destino" class="gsg-destinos"></div>
-    <div id="gsg-envios" class="ayuda">Cargando…</div>
+    <div id="gsg-envios" class="ayuda"><span class="esqueleto linea"></span><span class="esqueleto linea media"></span></div>
     <p class="ayuda"><a id="gsg-envios-refrescar" href="#">Actualizar</a></p>
   </div>
   <details><summary>Ubicación y seguimiento del cliente</summary>
@@ -539,15 +544,15 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <button class="btn sm" id="gsg-token-ver" type="button" aria-controls="gsg-token" aria-pressed="false">Mostrar</button>
     </div>
     <div class="acciones">
-      <button class="btn secundario" id="gsg-guardar" type="submit">Guardar y probar</button>
+      <button class="btn primario" id="gsg-guardar" type="submit">Guardar y probar</button>
     </div>
   </form>
   </details>
   <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
-  <div class="acciones">
+  <div class="acciones con-pie">
     <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
-    <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
     <span id="gsg-state" class="chip hidden" role="status"></span>
+    <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
   </div>
   <div id="gsg-descartes" class="nota riesgo hidden">
     <b id="gsg-descartes-titulo"></b>

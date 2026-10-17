@@ -39,6 +39,7 @@ export const SISTEMA_CSS = `
   .s-base :where(code, kbd) { font-family: var(--mono); font-size: .88em; background: var(--superficie-2); border: 1px solid var(--borde); border-radius: var(--radio-xs); padding: 1px 5px; overflow-wrap: anywhere; }
   .s-base :where(pre) { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; background: var(--superficie-2); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: var(--esp-3); white-space: pre-wrap; overflow-wrap: anywhere; }
   .s-base :where(pre code) { background: none; border: 0; padding: 0; font-size: inherit; }
+  .s-base :where(pre:empty) { display: none; }
   .s-base :where(hr) { border: 0; border-top: 1px solid var(--borde); margin: var(--esp-5) 0; }
 
   /* --- campos ------------------------------------------------------------- */
@@ -150,7 +151,16 @@ export const SISTEMA_CSS = `
   .vacio.compacto { padding: var(--esp-5) var(--esp-4); }
   .vacio.compacto::after { top: calc(var(--esp-5) + 10px); }
 
-  /* --- pestañas (las de Pedidos GSG, Nuestra API...) -------------------- */
+  /* --- pestañas (las de Pedidos GSG, Nuestra API...) --------------------
+     Una linea bajo todas; la abierta, en verde y subrayada. */
+  .s-pestanas { display: flex; gap: 2px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--borde); margin: 0 0 20px; }
+  .s-pestanas::-webkit-scrollbar { display: none; }
+  .s-pestanas a { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px 12px; color: var(--texto-suave); text-decoration: none; font-weight: 600; font-size: 14px; white-space: nowrap; border-radius: var(--radio-sm) var(--radio-sm) 0 0; transition: color var(--dur) ease, background-color var(--dur) ease; }
+  .s-pestanas a::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: transparent; transition: background-color var(--dur) ease; }
+  .s-pestanas a:hover { color: var(--texto); background: var(--superficie-2); }
+  .s-pestanas a.activa, .s-pestanas a[aria-current] { color: var(--primario); }
+  .s-pestanas a.activa::after, .s-pestanas a[aria-current]::after { background: var(--primario); }
+  .s-pestanas a[hidden] { display: none; }
   .s-base :where([role=tabpanel]:not([hidden]):not(.hidden)) { animation: s-aparecer .2s var(--curva); }
 
   @keyframes s-aparecer { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }

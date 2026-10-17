@@ -8,19 +8,14 @@
  * para el resto del equipo esas pestañas no se ven.
  */
 
+/** El aspecto de las pestañas es el comun del armazon (`.s-pestanas`, en sistema-css.ts). */
 export const PESTANAS_PEDIDOS_CSS = `
-.pp-pestanas { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--borde); margin: 0 0 18px; }
-.pp-pestanas a { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px 10px 0 0; color: var(--texto-suave); text-decoration: none; font-weight: 600; font-size: 14.5px; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; }
-.pp-pestanas a:hover { color: var(--texto); background: var(--gris-suave); }
-.pp-pestanas a.activa { color: var(--primario); background: var(--superficie); border-color: var(--borde); }
-.pp-pestanas a:focus-visible { outline: 2px solid var(--primario); outline-offset: 2px; }
 .pp-pestanas .pp-num { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--gris-suave); color: var(--gris); }
 .pp-pestanas a.activa .pp-num { background: var(--primario-suave); color: var(--primario); }
-@media (max-width: 640px) { .pp-pestanas a { padding: 10px 12px; font-size: 14px; } }
 `;
 
 export function pestanasPedidosHtml(): string {
-  return `<nav class="pp-pestanas" aria-label="Pedidos GSG">
+  return `<nav class="pp-pestanas s-pestanas" aria-label="Pedidos GSG">
   <a href="/hoy" data-pp="pedidos">Pedidos</a>
   <a href="/automatizacion-gsg" data-pp="solicitud" data-pp-admin hidden>Solicitud de ubicación</a>
   <a href="/automatizacion-gsg#ajustes" data-pp="ajustes" data-pp-admin hidden>Ajustes de chat</a>

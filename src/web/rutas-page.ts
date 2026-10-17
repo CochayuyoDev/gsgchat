@@ -45,8 +45,8 @@ const CSS = `${REPARTO_CSS}
 .d-bloque .campo label { font-size: 13px; font-weight: 600; }
 .d-acciones { gap: 8px; flex-wrap: wrap; }
 .d-peligro { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--borde); }
-.d-peligro .btn { color: var(--rojo); border-color: var(--rojo-suave); }
-.d-peligro .btn:hover { background: var(--rojo-suave); }
+.d-peligro .btn { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 35%, transparent); }
+.d-peligro .btn:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
 .d-linea { list-style: none; margin: 0 0 0 6px !important; padding: 0 0 0 16px !important; border-left: 2px solid var(--borde); display: grid; gap: 10px; }
 .d-linea li { position: relative; font-size: 13.5px; padding: 0 !important; border: none !important; }
 .d-linea li::before { content: ''; position: absolute; left: -23px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--primario); border: 2px solid var(--superficie); }
@@ -66,28 +66,18 @@ const CSS = `${REPARTO_CSS}
 .wrap.modo-ajustes > :not(.pp-pestanas):not(#caja-ajustes):not(.demo):not(.aviso) { display: none !important; }
   * { box-sizing: border-box; }
   .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); }
-  .wrap a { color: var(--primario); }
 
   /* Los dos avisos de arriba (demostración y WhatsApp sin conectar) hablan
      igual: fondo ámbar suave y texto ámbar, que pasa AA en los dos modos. */
-  .demo, .aviso {
-    background: var(--ambar-suave); color: var(--ambar);
-    border: 1px solid var(--ambar-suave); border-radius: var(--radio-sm);
-    padding: 10px 14px; margin-bottom: var(--esp-3); font-size: var(--fs-small);
-    display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap;
-  }
-  .demo { justify-content: center; text-align: center; }
-  .demo a, .aviso a { color: inherit; font-weight: 700; }
+  .demo, .aviso { margin-bottom: var(--esp-3); flex-wrap: wrap; }
+  .demo a, .aviso a { font-weight: 700; }
 
   .barra { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; padding: var(--esp-3); margin-bottom: var(--esp-3); }
   .barra .sep { flex: 1; }
   .barra label { font-size: var(--fs-small); color: var(--texto-suave); }
 
-  .wrap select, .wrap input, .wrap textarea {
-    font: inherit; color: var(--texto); background: var(--superficie);
-    border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px;
-  }
-  .wrap textarea { width: 100%; min-height: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  .wrap textarea { width: 100%; min-height: 150px; font-family: var(--mono); font-size: 13px; }
+  .barra select { min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; }
 
   /* Cuánto va y qué está haciendo el motor: la única cifra grande. */
   .progreso { display: flex; align-items: center; gap: var(--esp-3); flex-wrap: wrap; margin-bottom: var(--esp-3); }
@@ -105,13 +95,17 @@ const CSS = `${REPARTO_CSS}
 
   /* Los filtros: preguntas de la operación, no adornos. */
   .filtros { display: flex; gap: var(--esp-2); flex-wrap: wrap; margin-bottom: var(--esp-3); }
+  /* Los mismos contadores que la pestaña Pedidos: texto y cifra en su pastilla. */
   .filtro {
-    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 13px;
+    display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 5px 12px;
     border: 1px solid var(--borde); border-radius: 999px; background: var(--superficie);
-    color: var(--texto); font: inherit; font-size: 13.5px; cursor: pointer;
+    color: var(--texto); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer;
+    transition: border-color var(--dur) ease, background-color var(--dur) ease, color var(--dur) ease;
   }
-  .filtro:hover { border-color: var(--primario); }
-  .filtro .n { font-weight: 700; }
+  .filtro:hover { border-color: var(--texto-suave); }
+  .filtro .n { font-weight: 700; font-size: 13px; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--superficie-2); text-align: center; font-variant-numeric: tabular-nums; }
+  .filtro[aria-pressed="true"] .n { background: var(--primario); color: var(--primario-texto); }
+  .filtro.urge .n { background: var(--rojo-suave); }
   .filtro[aria-pressed="true"] { border-color: var(--primario); background: var(--primario-suave); color: var(--primario); font-weight: 600; }
   .filtro.urge { border-color: var(--rojo); color: var(--rojo); }
   .filtro.urge[aria-pressed="true"] { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
@@ -123,16 +117,17 @@ const CSS = `${REPARTO_CSS}
      relleno lo pone cada zona, no la tarjeta. */
   .panel { padding: 0; overflow: hidden; }
   .panel > h2 {
-    font-size: var(--fs-h3); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--borde);
-    display: flex; align-items: center; gap: var(--esp-2);
+    font-size: var(--fs-h3); margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--borde);
+    display: flex; align-items: center; gap: var(--esp-2); background: var(--superficie);
   }
   .panel > h2 .sep { flex: 1; }
+  .panel > h2 input { font-weight: 400; font-size: 13.5px; min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; }
   .panel .cuerpo { padding: var(--esp-4); }
   .panel .vacio { border: 0; background: transparent; }
 
   table { width: 100%; border-collapse: collapse; font-size: var(--fs-cuerpo); }
   th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .03em; color: var(--texto-suave); font-weight: 600; position: sticky; top: 0; background: var(--superficie); z-index: 1; }
+  th { position: sticky; top: 0; z-index: 1; }
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: var(--superficie-2); }
   tbody tr.activa { background: var(--primario-suave); box-shadow: inset 3px 0 0 var(--primario); }
@@ -174,7 +169,10 @@ const CSS = `${REPARTO_CSS}
   .aj .aj-ancho { grid-column: 1 / -1; }
   .aj .aj-paso { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--primario); color: var(--primario-texto); font-size: 13px; font-weight: 700; flex: none; }
   .aj .aj-que { margin: 0 0 8px 36px; font-size: 13.5px; color: var(--texto-suave); }
-  .aj .aj-guardar-barra { position: sticky; bottom: 0; margin-top: 14px; padding: 12px 0; background: var(--superficie); border-top: 1px solid var(--borde); z-index: 2; }
+  /* Guardar siempre a la vista, a la derecha; «Volver a lo de siempre» es secundario. */
+  .aj .aj-guardar-barra { position: sticky; bottom: 0; margin-top: 14px; padding: 12px 0; background: var(--superficie); border-top: 1px solid var(--borde); z-index: 2; justify-content: flex-end; }
+  .aj .aj-guardar-barra #aj-estado { order: -1; margin-right: auto; flex: 1 1 auto; }
+  .aj .aj-guardar-barra #aj-guardar { order: 2; min-width: 120px; }
   @media (max-width: 860px) { .aj .aj-bloques { grid-template-columns: 1fr; } .aj .aj-que { margin-left: 0; } }
   .aj .aj-frase { margin: 0; line-height: 2.1; font-size: var(--fs-cuerpo); }
   .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
@@ -183,7 +181,7 @@ const CSS = `${REPARTO_CSS}
   .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
   .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
   .aj .previa small { display: block; color: var(--texto-suave); font-size: 11px; margin-top: 4px; text-align: right; }
-  .aj .paso textarea { margin-top: 8px; min-height: 64px; }
+  .aj .paso textarea { margin-top: 8px; min-height: 64px; font-family: var(--fuente); font-size: 14px; }
   .aj .marcadores { font-size: var(--fs-small); color: var(--texto-suave); margin: 6px 0 0; }
   .aj .marcadores code { background: var(--superficie); border: 1px solid var(--borde); border-radius: 5px; padding: 1px 5px; font-size: 12px; cursor: pointer; }
   .aj .plantillas { margin-top: var(--esp-2); font-size: 13px; }
@@ -215,13 +213,13 @@ export function rutasPage(opts: RutasOpts): string {
   const { configured, demo = false } = opts;
   /** Ver el mismo aviso en `chat-page.ts`: aqui no sale ningun mensaje. */
   const bandaDemo = demo
-    ? `<div class="demo">Modo demostración: no se envía nada a ningún cliente.
+    ? `<div class="demo s-alerta info">Modo demostración: no se envía nada a ningún cliente.
          Para trabajar de verdad, conecta tu cuenta en <a href="/setup">/setup</a>.</div>`
     : '';
 
   const aviso = configured
     ? ''
-    : `<div class="aviso">Todavía no conectaste tu WhatsApp: puedes cargar la lista y revisarla, pero no saldrá ningún mensaje.
+    : `<div class="aviso s-alerta warn">Todavía no conectaste tu WhatsApp: puedes cargar la lista y revisarla, pero no saldrá ningún mensaje.
          <a href="/setup">Conectar ahora</a></div>`;
 
   const contenido = `
@@ -372,8 +370,8 @@ export function rutasPage(opts: RutasOpts): string {
 
       <div class="tarjeta panel" style="margin-top:var(--esp-3)">
         <h2>Enviar a GSG</h2>
-        <div class="cuerpo" id="gsg">
-          <p class="muted" style="margin:0">Cargando…</p>
+        <div class="cuerpo" id="gsg" aria-busy="true">
+          <span class="esqueleto linea corta"></span><span class="esqueleto linea"></span><span class="esqueleto bloque" style="height:64px;margin-top:12px"></span>
         </div>
       </div>
     </div>
@@ -613,7 +611,7 @@ function pintarListaVacia(cuantos, q) {
     return;
   }
   if (resumen && !resumen.lotes.length) {
-    caja.innerHTML = '<div class="vacio"><div class="ico">📍</div><h3>Todavía no hay ninguna lista</h3>' +
+    caja.innerHTML = '<div class="vacio"><h3>Todavía no hay ninguna lista</h3>' +
       '<p>Pega la lista del día (o trae a los clientes que nunca mandaron su ubicación) y el sistema les pedirá el pin uno a uno.</p>' +
       '<div class="acciones"><button type="button" class="btn primario" data-abrir-carga="1">Cargar la lista del día</button></div></div>';
     return;
@@ -681,7 +679,7 @@ async function abrirDetalle(id, silencioso) {
       detalleId = null;
       document.getElementById('detalle-acciones').innerHTML = '';
       document.getElementById('detalle-historial').innerHTML = '';
-      document.getElementById('detalle-info').innerHTML = '<p class="muted" style="margin:0">Cargando…</p>';
+      document.getElementById('detalle-info').innerHTML = '<span class="esqueleto titulo"></span><span class="esqueleto linea"></span><span class="esqueleto linea media"></span>';
     }
   }
 
