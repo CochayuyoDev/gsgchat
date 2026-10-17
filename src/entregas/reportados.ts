@@ -24,12 +24,16 @@ import type { Pool } from '../db/pool.js';
 import type { RutasRepo, Solicitud } from '../db/rutas.js';
 import { diaTexto, type Entrega, type EntregasRepo } from './repo.js';
 import { encolarProblemaGsg } from '../rutas/gsg.js';
+import { revisarTelefono } from '../rutas/telefono.js';
 
 // ------------------------------------------------------------- errores
 
 /** Los errores de los numeros reportados. Codigos estables: GSG los lee. */
 export const ERRORES_REPORTADOS = [
   'telefono_invalido',
+  'numero_corto',
+  'numero_largo',
+  'numero_fijo',
   'sin_whatsapp',
   'envio_fallido',
   'tracking_falta',
@@ -53,11 +57,23 @@ const trk = (d: DatosMensaje) => (d.tracking ? `«${d.tracking}»` : '');
 export const TEXTOS_REPORTADOS: Record<ErrorReportado, { titulo: string; mensaje: (d: DatosMensaje) => string }> = {
   telefono_invalido: {
     titulo: 'Teléfono inválido',
-    mensaje: (d) => `El teléfono ${tel(d)} no es un número válido: no se le puede escribir. Corrígelo y vuelve a mandarlo.`,
+    mensaje: (d) => `El teléfono ${tel(d)} no es un número válido. Corrígelo y vuelve a mandarlo.`,
+  },
+  numero_corto: {
+    titulo: 'Al número le faltan dígitos',
+    mensaje: (d) => `Al número ${tel(d)} le faltan dígitos: un celular tiene 9. Corrígelo y vuelve a mandarlo.`,
+  },
+  numero_largo: {
+    titulo: 'Al número le sobran dígitos',
+    mensaje: (d) => `El número ${tel(d)} tiene dígitos de más: un celular tiene 9. Corrígelo y vuelve a mandarlo.`,
+  },
+  numero_fijo: {
+    titulo: 'Es un teléfono fijo',
+    mensaje: (d) => `El ${tel(d)} es un teléfono fijo: no tiene WhatsApp. Manda un celular del cliente.`,
   },
   sin_whatsapp: {
-    titulo: 'Número sin WhatsApp',
-    mensaje: (d) => `El número ${tel(d)} no tiene WhatsApp: no se le puede pedir la ubicación. Manda otro número del cliente.`,
+    titulo: 'Número inválido: no tiene WhatsApp',
+    mensaje: (d) => `El número ${tel(d)} no es válido: no tiene WhatsApp. Corrige el número del cliente y vuelve a mandarlo.`,
   },
   envio_fallido: {
     titulo: 'Falló el envío por WhatsApp',
@@ -84,7 +100,7 @@ export const TEXTOS_REPORTADOS: Record<ErrorReportado, { titulo: string; mensaje
     mensaje: (d) => `El teléfono ${tel(d)} es de un motorizado, no de un cliente: no se le escribe como cliente. Manda el número del cliente.`,
   },
   no_soy_yo: {
-    titulo: '«No soy yo»',
+    titulo: 'No es la persona',
     mensaje: (d) => `El ${tel(d)} contestó que no es el cliente (no hizo el pedido o el número no es suyo). Manda el número correcto.`,
   },
 };
@@ -93,11 +109,28 @@ export const TEXTOS_REPORTADOS: Record<ErrorReportado, { titulo: string; mensaje
 export function errorDeEnvio(codigo: string | null | undefined): ErrorReportado | null {
   const c = codigo ?? '';
   if (c === 'sin_whatsapp') return 'sin_whatsapp';
+  if (c === 'numero_corto' || c === 'numero_largo' || c === 'numero_fijo') return c;
   if (c === 'numero_invalido' || c === 'telefono_invalido') return 'telefono_invalido';
   // Fallos de WhatsApp que ya no se reintentan solos. Las guardas propias
   // (baja, modo prueba, plantilla, regla del dueño) no son culpa del numero.
   if (c.startsWith('rechazado') || c === 'reintentos_agotados') return 'envio_fallido';
   return null;
+}
+
+/**
+ * El error concreto de un telefono que no sirve: que le faltan digitos, que
+ * le sobran o que es un fijo. «Telefono invalido» queda solo para lo que no
+ * es un numero (vacio, letras, un celular que no existe).
+ */
+export function telefonoNoSirve(telefono: unknown): boolean {
+  return !revisarTelefono(telefono === undefined || telefono === null ? '' : String(telefono)).ok;
+}
+
+export function errorDeTelefono(telefono: unknown): ErrorReportado {
+  const revision = revisarTelefono(telefono === undefined || telefono === null ? '' : String(telefono));
+  if (revision.ok) return 'telefono_invalido';
+  const c = revision.incidencia;
+  return c === 'numero_corto' || c === 'numero_largo' || c === 'numero_fijo' ? c : 'telefono_invalido';
 }
 
 // --------------------------------------------------------------- modelo
@@ -339,6 +372,8 @@ export async function reportarNumero(deps: DepsReportar, n: NuevoReportado): Pro
   const repo = deps.repos.reportados;
   if (!repo) return null;
   const en = (deps.ahora ?? (() => new Date()))();
+  // «Telefono invalido» con su error concreto (faltan digitos, sobran, fijo).
+  if (n.error === 'telefono_invalido' && textoONulo(n.telefono)) n = { ...n, error: errorDeTelefono(n.telefono) };
   const datos = { tracking: textoONulo(n.tracking), telefono: textoONulo(n.telefono) };
   const fila = await repo.reportar({ ...n, clave: claveDe(n), mensaje: TEXTOS_REPORTADOS[n.error].mensaje(datos) }, en);
   if (!fila) return null;

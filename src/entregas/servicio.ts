@@ -60,6 +60,7 @@ import { solicitudDePedidos, PLANTILLA_PEDIDOS_GSG } from './solicitud-varios.js
 import type { Contact, Repos } from '../db/repos.js';
 import { enviarConfirmacionUbicacion } from './confirmacion-ubicacion.js';
 import { esperaDeEnvio, type EsperaEnvio } from '../rutas/espera-envio.js';
+import { alCambiarHorario } from '../rutas/despertador.js';
 import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 
 /** Los dos son de prueba o los dos son de verdad. Ver elegirMotorizado. */
@@ -70,7 +71,7 @@ import type { SettingsRepo } from '../settings/service.js';
 import { DECISIONES_QUE_PARAN, despacharReportes, encolarProblemaGsg, payloadConfirmacion, payloadEntrega, payloadIncidencia, payloadUbicacion, type ConsultaEstadoGsg, type PuertoGsg } from '../rutas/gsg.js';
 import type { ServicioConexionGsg } from '../rutas/conexion-gsg.js';
 import type { CargaLote, ResultadoCarga } from '../rutas/cargar.js';
-import { revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
+import { motivoTelefono, revisarTelefono, PLANES, type PlanNumeracion } from '../rutas/telefono.js';
 import { CandadoOcupado, type Solicitud } from '../db/rutas.js';
 import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leerEntregado, leerEntregadoConReglas, leerFrasesPropias, leerMotorizadoCorta, leerMotorizadoFueraDeFlujo, leerPreguntaPorPedido, leerTiempo, pideCambioUbicacion, tiempoDudoso, type FrasesPropias, type LectorIA } from './interpretar.js';
 import { randomBytes } from 'node:crypto';
@@ -1317,7 +1318,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const referencia = String(c.referencia ?? c.tracking ?? '').trim();
     if (!referencia) return { ok: false, motivo: 'sin referencia ni código de tracking' };
     const revision = revisarTelefono(String(c.telefono ?? ''), plan);
-    if (!revision.ok) return { ok: false, motivo: `teléfono inválido: ${revision.detalle}` };
+    if (!revision.ok) return { ok: false, motivo: motivoTelefono(revision) };
     return { ok: true, phone: revision.phone, referencia };
   }
 
@@ -4640,7 +4641,7 @@ ${lista}
     for (const [i, f] of filas.entries()) {
       const revision = revisarTelefono(String(f.telefono ?? ''), plan);
       if (!revision.ok) {
-        resultado.descartadas.push({ linea: i + 1, texto: [f.telefono, f.nombre, f.referencia].filter(Boolean).join(', '), motivo: `teléfono inválido: ${revision.detalle}` });
+        resultado.descartadas.push({ linea: i + 1, texto: [f.telefono, f.nombre, f.referencia].filter(Boolean).join(', '), motivo: motivoTelefono(revision) });
         continue;
       }
       // Sin numero de pedido, el telefono hace de referencia: asi no se pierde la fila.
@@ -4728,7 +4729,7 @@ ${lista}
     if (!e) return { ok: false, codigo: 'no_existe', motivo: 'el pedido no existe' };
     if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, codigo: 'cerrada', motivo: `el pedido ${e.referencia} ya está cerrado (${e.estado})` };
     const revision = revisarTelefono(String(telefono ?? ''), plan);
-    if (!revision.ok) return { ok: false, codigo: 'telefono_invalido', motivo: `teléfono inválido: ${revision.detalle}` };
+    if (!revision.ok) return { ok: false, codigo: 'telefono_invalido', motivo: motivoTelefono(revision) };
     if (await repo.motorizadoPorTelefono(revision.phone).catch(() => null)) return { ok: false, codigo: 'telefono_de_motorizado', motivo: `el ${revision.phone} es el teléfono de un motorizado, no de un cliente` };
     if (revision.phone === e.phone) return { ok: true, entrega: e, cambiado: false };
     const viejo = e.phone;
@@ -5054,7 +5055,10 @@ ${lista}
     async guardarAjustes(patch) {
       const siguiente = ajustesEntregasSchema.parse({ ...ajustes, ...patch, textos: { ...ajustes.textos, ...(patch.textos ?? {}) }, plantillas: { ...ajustes.plantillas, ...(patch.plantillas ?? {}) }, cierreDelDia: { ...ajustes.cierreDelDia, ...(patch.cierreDelDia ?? {}) }, segundaVisita: { ...ajustes.segundaVisita, ...(patch.segundaVisita ?? {}) }, horarioEntregas: { ...ajustes.horarioEntregas, ...(patch.horarioEntregas ?? {}) }, soporte: { ...ajustes.soporte, ...(patch.soporte ?? {}) }, clienteRecurrente: { ...ajustes.clienteRecurrente, ...(patch.clienteRecurrente ?? {}) } });
       await deps.settingsRepo.put(CLAVE_AJUSTES, JSON.stringify(siguiente), false);
+      const horarioAntes = ajustes.horarioEntregas;
       ajustes = siguiente;
+      // El horario de entregas amplia la franja de envio: si cambio, vale ya.
+      if (horarioAntes.desde !== siguiente.horarioEntregas.desde || horarioAntes.extendidoHasta !== siguiente.horarioEntregas.extendidoHasta) await alCambiarHorario(repos);
       return ajustes;
     },
     recargar,

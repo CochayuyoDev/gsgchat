@@ -63,16 +63,17 @@ describe('números reportados a GSG', () => {
   it('teléfono inválido: un reporte y un POST a GSG, aunque GSG mande el pedido otra vez', async () => {
     const r = await llamar('POST', '/api/v1/entregas', { pedidos: [pedido('R-INV', '12'), pedido('R-OK', '987000101')] });
     expect(r.status).toBe(201);
-    expect(r.body.descartadas).toEqual([expect.objectContaining({ referencia: 'R-INV', error: 'telefono_invalido' })]);
+    // Le faltan digitos: ese es su error, no uno general de «teléfono inválido».
+    expect(r.body.descartadas).toEqual([expect.objectContaining({ referencia: 'R-INV', error: 'numero_corto' })]);
     await llamar('POST', '/api/v1/entregas', { pedidos: [pedido('R-INV', '12')] });
     await e.despacharAGsg();
     await e.despacharAGsg();
-    expect(filas('R-INV', 'telefono_invalido')).toHaveLength(1);
+    expect(filas('R-INV', 'numero_corto')).toHaveLength(1);
     expect((await guardados()).filter((p) => p.tracking === 'R-INV')).toHaveLength(1);
     const guardado = (await guardados()).filter((p) => p.tracking === 'R-INV');
     expect(guardado).toHaveLength(1);
-    expect(guardado[0]).toMatchObject({ tracking: 'R-INV', referencia: 'R-INV', telefono: '12', error: 'telefono_invalido', estado: 'pendiente' });
-    expect(String(guardado[0]!.mensaje)).toMatch(/no es un número válido/);
+    expect(guardado[0]).toMatchObject({ tracking: 'R-INV', referencia: 'R-INV', telefono: '12', error: 'numero_corto', estado: 'pendiente' });
+    expect(String(guardado[0]!.mensaje)).toMatch(/le faltan dígitos/);
     expect(Number.isNaN(Date.parse(String(guardado[0]!.reportadoAt)))).toBe(false);
   });
 
@@ -93,22 +94,27 @@ describe('números reportados a GSG', () => {
     expect((await guardados()).filter((p) => p.error === 'tracking_invalido')).toHaveLength(2);
   });
 
-  it('tracking duplicado en la llamada y tracking de otro pedido: no se guardan y se reportan una vez', async () => {
+  it('tracking duplicado en la llamada: no se guarda y se reporta una vez; el mismo tracking de hoy con otro teléfono corrige el número', async () => {
     const dup = await llamar('POST', '/api/v1/entregas', [pedido('R-DUP', '987000105'), pedido('R-DUP', '987000106')]);
     expect(dup.status).toBe(201);
     expect(dup.body.creadas).toHaveLength(1);
     expect(dup.body.descartadas).toEqual([expect.objectContaining({ error: 'tracking_duplicado' })]);
 
+    // GSG edita el numero en su sistema y vuelve a mandar el mismo tracking:
+    // no es otro pedido, es la correccion del telefono (17/10).
     const otro = await llamar('POST', '/api/v1/entregas', pedido('R-DUP', '987000107'));
-    expect(otro.status).toBe(400);
-    expect(JSON.stringify(otro.body)).toContain('tracking_de_otro_pedido');
-    await llamar('POST', '/api/v1/entregas', pedido('R-DUP', '987000107'));
-    // El pedido bueno sigue con su telefono.
-    expect((await e.entrega('R-DUP'))!.phone).toBe('51987000105');
+    expect(otro.status).toBe(200);
+    expect(otro.body.telefonosCorregidos).toEqual([expect.objectContaining({ referencia: 'R-DUP', ahora: '51987000107' })]);
+    expect(JSON.stringify(otro.body)).not.toContain('tracking_de_otro_pedido');
+    expect((await e.entrega('R-DUP'))!.phone).toBe('51987000107');
+    // Mandarlo otra vez igual no cambia nada.
+    const igual = await llamar('POST', '/api/v1/entregas', pedido('R-DUP', '987000107'));
+    expect(igual.status).toBe(200);
+    expect(igual.body.telefonosCorregidos).toBeUndefined();
     await e.despacharAGsg();
     expect(filas('R-DUP', 'tracking_duplicado')).toHaveLength(1);
-    expect(filas('R-DUP', 'tracking_de_otro_pedido')).toHaveLength(1);
-    expect((await guardados()).filter((p) => p.tracking === 'R-DUP')).toHaveLength(2);
+    expect(filas('R-DUP', 'tracking_de_otro_pedido')).toHaveLength(0);
+    expect((await guardados()).filter((p) => p.tracking === 'R-DUP')).toHaveLength(1);
   });
 
   it('teléfono de un motorizado: no se le escribe como cliente y se reporta', async () => {
@@ -163,7 +169,8 @@ describe('números reportados a GSG', () => {
     const r = await llamar('GET', '/api/v1/reportados?estado=pendiente', undefined, lectora);
     expect(r.status).toBe(200);
     const errores = (r.body.items as Cuerpo[]).map((i) => i.error);
-    for (const c of ['telefono_invalido', 'sin_whatsapp', 'envio_fallido', 'tracking_falta', 'tracking_invalido', 'tracking_duplicado', 'tracking_de_otro_pedido', 'telefono_de_motorizado', 'no_soy_yo']) expect(errores).toContain(c);
+    // El «tracking_duplicado» de R-DUP ya no esta pendiente: GSG corrigio el telefono.
+    for (const c of ['numero_corto', 'sin_whatsapp', 'envio_fallido', 'tracking_falta', 'tracking_invalido', 'telefono_de_motorizado', 'no_soy_yo']) expect(errores).toContain(c);
     const uno = (r.body.items as Cuerpo[]).find((i) => i.tracking === 'R-SINWA')!;
     expect(uno).toMatchObject({ tracking: 'R-SINWA', referencia: 'R-SINWA', telefono: '51987000177', error: 'sin_whatsapp', estado: 'pendiente', corregidoAt: null });
     expect(typeof uno.mensaje).toBe('string');
@@ -181,7 +188,7 @@ describe('números reportados a GSG', () => {
     const r = await llamar('POST', '/api/v1/reportados/R-SINWA/correccion', { telefono: '987000178' });
     expect(r.status).toBe(200);
     expect(r.body.corregidos).toEqual([expect.objectContaining({ error: 'sin_whatsapp', estado: 'corregido' })]);
-    expect(r.body.entrega).toMatchObject({ referencia: 'R-SINWA', telefono: '51987000178' });
+    expect(r.body.entrega).toMatchObject({ referencia: 'R-SINWA', telefono: '987000178' });
     await e.trabajar();
     expect(pedidasDeUbicacion('987000178')).toBe(1);
     expect((await e.entrega('R-SINWA'))!.phone).toBe('51987000178');
@@ -198,7 +205,7 @@ describe('números reportados a GSG', () => {
     expect(malo.status).toBe(400);
     const r = await llamar('POST', '/api/v1/reportados/R-INV/correccion', { telefono: '987000111' });
     expect(r.status).toBe(200);
-    expect(r.body.entrega).toMatchObject({ referencia: 'R-INV', telefono: '51987000111' });
+    expect(r.body.entrega).toMatchObject({ referencia: 'R-INV', telefono: '987000111' });
     await e.trabajar();
     expect(pedidasDeUbicacion('987000111')).toBe(1);
   });
@@ -290,7 +297,7 @@ describe('números reportados a GSG', () => {
     expect(por.get('G-1')!.agrupadoCon).toEqual(expect.arrayContaining(['G-2', 'G-3']));
     expect(por.get('R-SINWA')!.reportes).toEqual([expect.objectContaining({ error: 'sin_whatsapp', estado: 'corregido' })]);
     expect((por.get('R-SINWA')!.avisos as Cuerpo[]).map((a) => a.codigo)).toContain('corregido');
-    expect(por.get('R-OK')).toMatchObject({ telefono: '51987000101' });
+    expect(por.get('R-OK')).toMatchObject({ telefono: '987000101' });
     // Otro dia sin pedidos: vacio. Un dia mal escrito: 400. Sin clave: 401.
     expect((await llamar('GET', '/api/v1/trackings?dia=2001-01-01')).body.total).toBe(0);
     expect((await llamar('GET', '/api/v1/trackings?dia=ayer')).status).toBe(400);

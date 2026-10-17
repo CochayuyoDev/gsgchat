@@ -190,6 +190,26 @@ export function motivoGsg(codigo: string | null | undefined): MotivoGsg {
   return MOTIVOS_GSG[String(codigo ?? '')] ?? 'OTRO';
 }
 
+/**
+ * El codigo con el que GSG recibe algunos problemas, cuando no es el de
+ * GSGchat. «Sin WhatsApp» le llega como `numero_invalido`: es el codigo con el
+ * que GSG deja editar el numero desde su sistema (pedido del dueño, 17/10).
+ * El eventoId sigue saliendo del codigo de GSGchat, para no duplicar.
+ */
+const CODIGOS_PARA_GSG: Record<string, { codigo: string; titulo: string; queHacer: string }> = {
+  sin_whatsapp: { codigo: 'numero_invalido', titulo: 'Número inválido: no tiene WhatsApp', queHacer: 'Corrige el número del cliente y vuelve a mandar el pedido.' },
+};
+
+/** Un celular de Peru como lo maneja GSG: los 9 digitos, sin el 51 (ni el +51) delante. */
+export function nueveDigitosGsg(telefono: string | null): string | null {
+  if (!telefono) return telefono;
+  const d = telefono.replace(/\D/g, '');
+  return d.length === 11 && d.startsWith('51') ? d.slice(2) : telefono;
+}
+
+/** Lo mismo dentro de un texto: «el número 51987654321 no…» → «el número 987654321 no…». */
+const sinPrefijoPeru = (texto: string): string => texto.replace(/(?<!\d)\+?51[\s-]?(9\d{2})[\s-]?(\d{3})[\s-]?(\d{3})(?!\d)/g, '$1$2$3');
+
 /** El eventoId de un problema: uno por tracking, codigo y dia (un reenvio no duplica). */
 export function eventoIdProblema(tracking: string, codigo: string, en: Date): string {
   return `gsgchat-${tracking}-${codigo}-${en.toISOString().slice(0, 10)}`;
@@ -204,19 +224,21 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
   const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
   const tracking = texto(p.tracking) ?? texto(p.referencia);
   const codigo = texto(p.codigo) ?? texto(p.error) ?? 'otro';
+  const paraGsg = CODIGOS_PARA_GSG[codigo];
   const en = new Date(texto(p.detectadoEn) ?? texto(p.reportadoAt) ?? texto(p.fechaMensaje) ?? Date.now());
-  const comentario = [texto(p.comentario) ?? texto(p.titulo) ?? texto(p.mensaje), texto(p.detalle)].filter(Boolean).join(': ').slice(0, 500) || null;
+  const comentario = sinPrefijoPeru([texto(p.comentario) ?? paraGsg?.titulo ?? texto(p.titulo) ?? texto(p.mensaje), texto(p.detalle)].filter(Boolean).join(': ')).slice(0, 500) || null;
   return {
     tracking,
     tipo: 'PROBLEMA',
     motivo: texto(p.motivo) ?? motivoGsg(codigo),
     // El codigo fino del catalogo de GSGchat, ademas del motivo: TELEFONO_MAL
-    // no distingue «no tiene WhatsApp» (pedir otro numero) de «es un fijo»
+    // no distingue «numero invalido» (corregir el numero) de «es un fijo»
     // (pedir un celular), y en GSG la accion del operador no es la misma.
-    codigo,
-    queHacer: texto(p.queHacer),
+    codigo: paraGsg?.codigo ?? codigo,
+    queHacer: paraGsg?.queHacer ?? texto(p.queHacer),
     comentario,
-    telefonoOrigen: texto(p.telefonoOrigen) ?? texto(p.telefono),
+    // GSG maneja los 9 digitos: sin el 51 delante (pedido del dueño, 17/10).
+    telefonoOrigen: nueveDigitosGsg(texto(p.telefonoOrigen) ?? texto(p.telefono)),
     fechaMensaje: Number.isNaN(en.getTime()) ? new Date().toISOString() : en.toISOString(),
     eventoId: texto(p.eventoId) ?? (tracking ? eventoIdProblema(tracking, codigo, Number.isNaN(en.getTime()) ? new Date() : en) : null),
   };

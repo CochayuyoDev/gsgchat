@@ -41,7 +41,7 @@ import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js
 import type { Monitor } from '../salud/monitor.js';
 import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
 import { esperaDeEnvio, limpiarEsperasEnvio } from '../rutas/espera-envio.js';
-import { despertarMotorRutas } from '../rutas/despertador.js';
+import { alCambiarHorario, despertarMotorRutas } from '../rutas/despertador.js';
 
 export interface RutasRoutesDeps {
   repos: Repos;
@@ -337,7 +337,9 @@ export async function registerRutasRoutes(
       const inicio = body.horaInicio ?? actual?.horaInicio ?? opciones.horaInicio;
       const fin = body.horaFin ?? actual?.horaFin ?? opciones.horaFin;
       if (fin <= inicio) return reply.code(400).send({ error: 'La hora de fin tiene que ser mayor que la de inicio.' });
+      const antes = franja();
       await deps.ajustes.guardar({ horario: { inicio, fin } });
+      if (antes?.horaInicio !== inicio || antes?.horaFin !== fin) await alCambiarHorario(repos);
     }
     const porDefecto = ajustesPorDefecto(opciones);
     const ajustes = await repos.rutas.ajustes.set(body, porDefecto);

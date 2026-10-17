@@ -383,7 +383,7 @@ describe('GSG empuja sus pedidos por la API (POST /api/v1/entregas)', () => {
     expect(r.status).toBe(201);
     expect(r.body.creadas.map((c) => c.referencia).sort()).toEqual(['P-5001', 'P-5002']);
     expect(r.body.descartadas).toHaveLength(1);
-    expect(r.body.descartadas[0]!.motivo).toContain('tel');
+    expect(r.body.descartadas[0]!.motivo).toMatch(/le faltan dígitos/);
     expect(r.body.detalle).toContain('2 pedidos nuevos');
     // El id es el de la base (numero real), no null.
     for (const c of r.body.creadas) expect(typeof c.id).toBe('number');

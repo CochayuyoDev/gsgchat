@@ -659,6 +659,8 @@ export function crearMotor(deps: MotorDeps): Motor {
       : Math.max(0, ultimoEnvio + pausaEfectiva() - ahora().getTime()),
 
     async proximoDespertarEn() {
+      // Con el horario de ahora, no con el de la ultima pasada.
+      await refrescarAjustes();
       const proximo = await repos.rutas.proximoIntentoAt();
       if (!proximo) return null;
       const momento = ahora();

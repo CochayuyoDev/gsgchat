@@ -225,7 +225,7 @@ describe('la bandeja', () => {
     });
 
     const cuerpo = res.json();
-    expect(cuerpo.incidencia).toMatchObject({ titulo: 'Número incompleto' });
+    expect(cuerpo.incidencia).toMatchObject({ titulo: 'Al número le faltan dígitos' });
     expect(cuerpo.incidencia.queHacer).toMatch(/[Cc]orregir/);
     expect(cuerpo.eventos.length).toBeGreaterThan(0);
   });
@@ -363,7 +363,7 @@ describe('lo que se lleva GSG', () => {
     expect(cuerpo.alertas.requierenPersona).toBe(1);
     expect(cuerpo.motor).toMatchObject({ pausa: [15, 30], maxIntentos: 4, horario: [9, 19] });
     expect(cuerpo.gsg.conectado).toBe(false);
-    expect(cuerpo.catalogo.sin_whatsapp.titulo).toBe('El número no tiene WhatsApp');
+    expect(cuerpo.catalogo.sin_whatsapp.titulo).toBe('Número inválido: no tiene WhatsApp');
   });
 });
 
