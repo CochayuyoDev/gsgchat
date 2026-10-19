@@ -515,7 +515,7 @@ $('veredicto-acciones').addEventListener('click', function (evento) {
   var destino = $(boton.dataset.ir);
   if (!destino) return;
   if (destino.tagName === 'DETAILS') destino.open = true;
-  destino.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  destino.scrollIntoView({ behavior: 'auto', block: 'center' });
 });
 
 $('wa-mirar').onclick = ocupado($('wa-mirar'), 'Mirando…', async function () { await api('/admin/fiabilidad/vigilante/mirar', { method: 'POST', body: {} }); await cargar(); });

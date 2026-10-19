@@ -8,7 +8,7 @@
  */
 
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { registerEntregasRoutes } from '../src/entregas/routes.js';
 import { ajustesEntregasSchema, AJUSTES_ENTREGAS_POR_DEFECTO, horarioEnPalabras, rellenar, TEXTOS_POR_DEFECTO, VARIABLES_TEXTOS } from '../src/entregas/textos.js';
@@ -164,6 +164,19 @@ describe('de punta a punta: la pantalla de ajustes y el cliente', () => {
     const alReves = await post('/admin/entregas/ajustes', { horariosPorDistrito: [{ distrito: 'Comas', desde: '19:00', hasta: '17:00' }] });
     expect(alReves.status).toBe(400);
     expect(e.entregas.ajustes().horariosPorDistrito.map((f) => f.distrito)).toEqual(['Miraflores', 'Ancón']);
+  });
+
+  it('lee el texto inicial desde memoria sin consultar el resumen de pedidos', async () => {
+    const resumen = vi.spyOn(e.entregas, 'resumen');
+    const r = await admin.inject({ method: 'GET', url: '/admin/entregas/ajustes' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ textos: { solicitudUbicacion: expect.any(String) } });
+    expect(resumen).not.toHaveBeenCalled();
+    const guardado = await admin.inject({ method: 'POST', url: '/admin/entregas/ajustes', payload: { textos: { solicitudUbicacion: 'Prueba {nombreCompleto}' } } });
+    expect(guardado.statusCode).toBe(200);
+    const releido = await admin.inject({ method: 'GET', url: '/admin/entregas/ajustes' });
+    expect(releido.json()).toMatchObject({ textos: { solicitudUbicacion: 'Prueba {nombreCompleto}' } });
+    expect(resumen).not.toHaveBeenCalled();
   });
 
   it('el cliente de Miraflores recibe la ventana de Miraflores, y la IA la sabe con su origen', async () => {

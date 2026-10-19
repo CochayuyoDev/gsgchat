@@ -25,7 +25,7 @@ const CSS = `
      temas, como el lado del login. Por eso lleva sus propios tonos. */
   :root { --marca-fondo: #0f1a17; --marca-texto: #e8f1ee; --marca-suave: #a9bbb5; --marca-acento: #25d366; }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  html { scroll-behavior: auto; }
   body { margin: 0; background: var(--bg); color: var(--texto); font: 16px/1.6 var(--fuente); }
   a { color: var(--primario); }
   .ancho { max-width: 1120px; margin: 0 auto; padding: 0 22px; }

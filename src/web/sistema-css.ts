@@ -34,7 +34,7 @@ export const SISTEMA_CSS = `
   .s-base :where(h2, h3, h4):first-child { margin-top: 0; }
   .s-base :where(.muted, small.muted) { color: var(--texto-suave); }
   .s-base :where(small) { font-size: var(--fs-small); }
-  .s-base :where(a:not([class])) { color: var(--primario); font-weight: 500; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--primario) 35%, transparent); text-underline-offset: 3px; transition: text-decoration-color var(--dur) ease, color var(--dur) ease; }
+  .s-base :where(a:not([class])) { color: var(--primario); font-weight: 500; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--primario) 35%, transparent); text-underline-offset: 3px;  }
   .s-base :where(a:not([class])):hover { text-decoration-color: currentColor; color: var(--primario-hover); }
   /* "Ver instrucciones completas": el enlace de cada pantalla a su parte del Manual. */
   .s-base :where(a.ver-manual) { color: var(--primario); font-weight: 600; text-decoration: none; white-space: nowrap; }
@@ -52,7 +52,7 @@ export const SISTEMA_CSS = `
     font: inherit; font-size: var(--fs-cuerpo); color: var(--texto); background: var(--superficie);
     border: 1px solid var(--borde-fuerte); border-radius: var(--radio-sm); min-height: var(--alto-control);
     padding: 8px 12px; box-sizing: border-box; max-width: 100%;
-    transition: border-color var(--dur) ease, box-shadow var(--dur) ease, background-color var(--dur) ease;
+
   }
   .s-base :where(textarea) { line-height: 1.5; resize: vertical; }
   .s-base :where(input, select, textarea):hover:not(:disabled):not(:focus) { border-color: var(--gris-claro); }
@@ -74,10 +74,9 @@ export const SISTEMA_CSS = `
     min-height: var(--alto-control); padding: 8px 16px; border: 1px solid var(--borde-fuerte); border-radius: var(--radio-sm);
     background: var(--superficie); color: var(--texto); font: inherit; font-size: 14px; font-weight: 600; line-height: 1.2;
     cursor: pointer; text-decoration: none; box-shadow: var(--sombra); white-space: nowrap;
-    transition: background-color var(--dur) ease, border-color var(--dur) ease, color var(--dur) ease, box-shadow var(--dur) ease, transform .08s ease;
+
   }
   .btn:hover, .s-base :where(button:not([class])):hover { border-color: var(--primario); color: var(--primario); }
-  .btn:active:not(:disabled), .s-base :where(button:not([class])):active:not(:disabled) { transform: translateY(1px); }
   .s-base :where(button[type=submit]:not([class])), .btn.primario { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
   .s-base :where(button[type=submit]:not([class])):hover, .btn.primario:hover { background: var(--primario-hover); border-color: var(--primario-hover); color: var(--primario-texto); box-shadow: var(--sombra-hover); }
   .btn.secundario { background: var(--primario-suave); border-color: transparent; color: var(--primario); box-shadow: none; }
@@ -96,14 +95,14 @@ export const SISTEMA_CSS = `
   /* --- tarjetas ----------------------------------------------------------- */
   .s-base :where(.card) { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); }
   .s-base :where(.tarjeta) { border-radius: var(--radio); }
-  a.tarjeta-enlace, .s-base :where(.tarjeta-enlace) { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); color: var(--texto); text-decoration: none; transition: border-color var(--dur) ease, box-shadow var(--dur) ease, transform var(--dur) var(--curva); }
-  a.tarjeta-enlace:hover { border-color: var(--primario); box-shadow: var(--sombra-hover); transform: translateY(-1px); }
+  a.tarjeta-enlace, .s-base :where(.tarjeta-enlace) { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); color: var(--texto); text-decoration: none;  }
+  a.tarjeta-enlace:hover { border-color: var(--primario); box-shadow: var(--sombra-hover); }
 
   /* --- tablas ------------------------------------------------------------- */
   .s-base :where(table) { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
   .s-base :where(th) { text-align: left; padding: 10px 12px; font-size: var(--fs-micro); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--texto-suave); background: var(--superficie-2); border-bottom: 1px solid var(--borde); white-space: nowrap; vertical-align: bottom; }
   .s-base :where(td) { padding: 11px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; line-height: 1.45; }
-  .s-base :where(tbody tr) { transition: background-color var(--dur) ease; }
+  .s-base :where(tbody tr) {  }
   .s-base :where(tbody tr:hover) { background: var(--fila-hover); }
   .s-base :where(tbody tr:last-child > td) { border-bottom: 0; }
   .s-base :where(.tablewrap, .tabla-marco) { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
@@ -119,16 +118,16 @@ export const SISTEMA_CSS = `
   }
 
   /* --- desplegables (details) ------------------------------------------- */
-  .s-base :where(summary) { cursor: pointer; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 10px; min-height: 36px; border-radius: var(--radio-xs); transition: color var(--dur) ease; }
+  .s-base :where(summary) { cursor: pointer; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 10px; min-height: 36px; border-radius: var(--radio-xs);  }
   .s-base :where(summary)::-webkit-details-marker { display: none; }
-  .s-base :where(summary)::before { content: ''; flex: none; width: 7px; height: 7px; margin: 0 2px 0 3px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(-45deg); transition: transform var(--dur) var(--curva); }
+  .s-base :where(summary)::before { content: ''; flex: none; width: 7px; height: 7px; margin: 0 2px 0 3px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(-45deg);  }
   .s-base :where(details[open] > summary)::before { transform: rotate(45deg) translate(-2px, -1px); }
   .s-base :where(summary):hover { color: var(--primario); }
-  .s-base :where(details[open] > :not(summary)) { animation: s-aparecer .2s var(--curva); }
+  .s-base :where(details[open] > :not(summary)) {  }
 
   /* --- avisos: exito, informacion, advertencia y error ------------------
      Siempre con icono y texto: el estado no depende solo del color. */
-  .s-alerta { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: var(--radio-sm); border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); font-size: var(--fs-cuerpo); line-height: 1.45; animation: s-aparecer .2s var(--curva); }
+  .s-alerta { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: var(--radio-sm); border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); font-size: var(--fs-cuerpo); line-height: 1.45;  }
   .s-alerta:empty { display: none; }
   /* El siguiente paso de un error, debajo de su motivo. */
   .s-paso { display: block; margin-top: 3px; font-size: var(--fs-small); font-weight: 600; }
@@ -144,13 +143,13 @@ export const SISTEMA_CSS = `
   .s-alerta .cerrar { margin-left: auto; flex: none; border: 0; background: transparent; color: var(--texto-suave); cursor: pointer; border-radius: var(--radio-xs); width: 26px; height: 26px; min-height: 0; padding: 0; font-size: 18px; line-height: 1; box-shadow: none; }
   .s-alerta .cerrar:hover { background: color-mix(in srgb, var(--texto) 8%, transparent); color: var(--texto); }
   /* El aviso flotante de las pantallas (window.toast / .toast). */
-  .toast { display: flex; align-items: center; gap: 10px; border-radius: var(--radio-sm) !important; padding: 11px 16px !important; box-shadow: var(--sombra-2) !important; font-weight: 500; animation: s-subir .22s var(--curva); }
+  .toast { display: flex; align-items: center; gap: 10px; border-radius: var(--radio-sm) !important; padding: 11px 16px !important; box-shadow: var(--sombra-2) !important; font-weight: 500;  }
   .toast::before { content: ''; flex: none; width: 18px; height: 18px; background: currentColor; -webkit-mask: ${ICO_INFO} center / contain no-repeat; mask: ${ICO_INFO} center / contain no-repeat; opacity: .9; }
   .toast.ok::before, .toast.exito::before { -webkit-mask-image: ${ICO_OK}; mask-image: ${ICO_OK}; }
   .toast.error::before, .toast.bad::before, .toast.mal::before { -webkit-mask-image: ${ICO_ERROR}; mask-image: ${ICO_ERROR}; }
 
   /* --- cargas: esqueletos mientras llegan los datos --------------------- */
-  .esqueleto { display: block; border-radius: var(--radio-xs); background: linear-gradient(90deg, var(--superficie-2) 25%, color-mix(in srgb, var(--superficie-2) 40%, var(--superficie)) 50%, var(--superficie-2) 75%); background-size: 200% 100%; animation: s-brillo 1.3s ease-in-out infinite; color: transparent !important; user-select: none; }
+  .esqueleto { display: block; border-radius: var(--radio-xs); background: var(--superficie-2); color: transparent !important; user-select: none; }
   .esqueleto.linea { height: 12px; margin: 8px 0; }
   .esqueleto.linea.corta { width: 40%; } .esqueleto.linea.media { width: 65%; }
   .esqueleto.titulo { height: 22px; width: 50%; margin: 4px 0 12px; }
@@ -169,15 +168,15 @@ export const SISTEMA_CSS = `
      Una linea bajo todas; la abierta, en verde y subrayada. */
   .s-pestanas { display: flex; gap: 2px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--borde); margin: 0 0 20px; }
   .s-pestanas::-webkit-scrollbar { display: none; }
-  .s-pestanas a { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px 12px; color: var(--texto-suave); text-decoration: none; font-weight: 600; font-size: 14px; white-space: nowrap; border-radius: var(--radio-sm) var(--radio-sm) 0 0; transition: color var(--dur) ease, background-color var(--dur) ease; }
-  .s-pestanas a::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: transparent; transition: background-color var(--dur) ease; }
+  .s-pestanas a { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px 12px; color: var(--texto-suave); text-decoration: none; font-weight: 600; font-size: 14px; white-space: nowrap; border-radius: var(--radio-sm) var(--radio-sm) 0 0;  }
+  .s-pestanas a::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: transparent;  }
   .s-pestanas a:hover { color: var(--texto); background: var(--superficie-2); }
   .s-pestanas a.activa, .s-pestanas a[aria-current] { color: var(--primario); }
   .s-pestanas a.activa::after, .s-pestanas a[aria-current]::after { background: var(--primario); }
   .s-pestanas a[hidden] { display: none; }
-  .s-base :where([role=tabpanel]:not([hidden]):not(.hidden)) { animation: s-aparecer .2s var(--curva); }
+  .s-base :where([role=tabpanel]:not([hidden]):not(.hidden)) {  }
 
-  @keyframes s-aparecer { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-  @keyframes s-subir { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
-  @keyframes s-brillo { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+
+
 `;

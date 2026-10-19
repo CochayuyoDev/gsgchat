@@ -78,12 +78,8 @@ export const TOKENS_CSS = `
   }
   /* Fijado a mano con el boton de la barra de arriba. */
   :root[data-tema="oscuro"] {${OSCURO}}
-  /* El cambio de tema no da un salto: los colores pasan suave. */
-  body, .s-side, .s-top { transition: background-color .2s ease, border-color .2s ease, color .2s ease; }
-  /* Quien pide menos movimiento no ve transiciones ni animaciones. */
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
-  }
+  /* La interfaz es inmediata en todos los equipos; la geometría estática no depende de movimiento. */
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 `;
 
 /**

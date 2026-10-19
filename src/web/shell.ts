@@ -108,20 +108,20 @@ export function gsgVigente(): boolean {
  * enciende desde Ajustes.
  */
 export const MENU_GSG: ItemMenu[] = [
-  { id: 'inicio', seccion: 'Inicio', etiqueta: 'Dashboard', href: '/panel#inicio', icono: 'inicio', descripcion: 'Estado de la API, WhatsApp, pedidos y errores.' },
-  { id: 'hoy', seccion: 'Inicio', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos del día, solicitud de ubicación y sus ajustes (horario, ritmo y mensajes).' },
-  { id: 'chats', seccion: 'Inicio', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
-  { id: 'historial', seccion: 'Flujo', etiqueta: 'Historial', href: '/panel#historial', icono: 'historial', descripcion: 'Recepciones de la API de GSG con sus errores y, para administradores, las acciones del equipo.' },
-  { id: 'conexion', seccion: 'Flujo', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'QR, WAHA o API de Meta: el número de WhatsApp.' },
-  { id: 'gsg-courier', seccion: 'Flujo', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'URL y API Key de GSG, envío de ubicaciones y consulta de estado.', soloAdmin: true },
-  { id: 'api-gsgchat', seccion: 'Flujo', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
-  { id: 'ia', seccion: 'IA GSG', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
-  { id: 'entrenamiento', seccion: 'IA GSG', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
-  { id: 'fiabilidad', seccion: 'Configuración', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, reconexión, alertas y respaldos.', soloAdmin: true },
-  { id: 'usuarios', seccion: 'Configuración', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
-  { id: 'configuracion', seccion: 'Configuración', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Ajustes del sistema: nombre del negocio y supervisor de avisos.', soloAdmin: true },
-  { id: 'manual', seccion: 'Configuración', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
-  { id: 'soporte', seccion: 'Configuración', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
+  { id: 'inicio', seccion: 'Operación', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Conexiones, pedidos y casos que necesitan atención.' },
+  { id: 'hoy', seccion: 'Operación', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos, solicitudes de ubicación y ajustes de mensajes.' },
+  { id: 'chats', seccion: 'Operación', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
+  { id: 'historial', seccion: 'Operación', etiqueta: 'Historial y errores', href: '/panel#historial', icono: 'historial', descripcion: 'Recepciones de la API de GSG y actividad del equipo.' },
+  { id: 'conexion', seccion: 'Configuración', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'Vinculación y estado del número de WhatsApp.' },
+  { id: 'gsg-courier', seccion: 'Configuración', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Conexión y reportes de pedidos a GSG.', soloAdmin: true },
+  { id: 'api-gsgchat', seccion: 'Configuración', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Claves y estado de la conexión que recibe pedidos.', soloAdmin: true },
+  { id: 'configuracion', seccion: 'Configuración', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio y supervisor de avisos.', soloAdmin: true },
+  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
+  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
+  { id: 'fiabilidad', seccion: 'Avanzado', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'Estado y diagnóstico de conexiones.', soloAdmin: true },
+  { id: 'usuarios', seccion: 'Avanzado', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
+  { id: 'manual', seccion: 'Ayuda', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Instrucciones para usar GSGchat.' },
+  { id: 'soporte', seccion: 'Ayuda', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
 ];
 export const MENU_GSG_DUENO: GrupoMenu = {
   id: 'dueno', etiqueta: 'Superadministración', items: [
@@ -217,7 +217,7 @@ const CSS = `
 
   /* --- menu lateral ---------------------------------------------------- */
   .s-side { width: 262px; flex: none; background: var(--s-side); border-right: 1px solid var(--s-line);
-    display: flex; flex-direction: column; min-height: 0; transition: width .18s ease; }
+    display: flex; flex-direction: column; min-height: 0;  }
   .s-brand { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 14px; }
   .s-plegar, .s-menu, .s-salir { padding: 0; font: inherit; line-height: 1; box-shadow: none; }
   .s-plegar { width: 30px; height: 30px; border: 0; background: transparent; color: var(--s-muted); border-radius: 8px; cursor: pointer; display: grid; place-items: center; flex: none; }
@@ -227,13 +227,13 @@ const CSS = `
   .s-logo-text { font-weight: 800; font-size: 17px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-logo-text small { color: var(--s-accent); font-weight: 700; font-size: 17px; }
   .s-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 10px 12px; }
-  .s-item { position: relative; display: flex; align-items: center; gap: 11px; padding: 8px 10px; margin: 1px 0; border-radius: var(--radio-sm); color: var(--s-text); text-decoration: none; font-weight: 500; white-space: nowrap; transition: background-color var(--dur) ease, color var(--dur) ease; }
+  .s-item { position: relative; display: flex; align-items: center; gap: 11px; padding: 8px 10px; margin: 1px 0; border-radius: var(--radio-sm); color: var(--s-text); text-decoration: none; font-weight: 500; white-space: nowrap;  }
   .s-item:hover { background: var(--s-hover); }
   .s-item:hover .s-ico { color: var(--s-text); }
   /* La seccion abierta: fondo suave, texto y icono en verde y una barra a la izquierda. */
   .s-item.activo { background: var(--s-accent-soft); color: var(--s-accent); font-weight: 600; }
   .s-item.activo::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--s-accent); }
-  .s-item .s-ico { flex: none; color: var(--s-muted); transition: color var(--dur) ease; }
+  .s-item .s-ico { flex: none; color: var(--s-muted);  }
   .s-item.activo .s-ico { color: var(--s-accent); }
   .s-item .s-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .s-item.sub { padding: 7px 10px 7px 12px; font-size: 14px; }
@@ -246,10 +246,10 @@ const CSS = `
   .s-grupo { margin-top: 2px; }
   /* Cada categoria separada por una linea fina: se ve donde empieza y acaba cada una. */
   .s-menu-gsg > .s-grupo + .s-grupo { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--s-line); }
-  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit; transition: background-color var(--dur) ease, color var(--dur) ease; }
+  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit;  }
   .s-grupo-cab:hover { background: var(--s-hover); color: var(--s-text); }
   .s-grupo.fijo > .s-grupo-cab { cursor: default; } .s-grupo.fijo > .s-grupo-cab:hover { background: transparent; color: var(--s-muted); } .s-grupo.fijo > .s-grupo-cab .s-ico { display: none; }
-  .s-grupo-cab .s-ico { width: 15px; height: 15px; transition: transform var(--dur) var(--curva); }
+  .s-grupo-cab .s-ico { width: 15px; height: 15px;  }
   .s-grupo-cab .s-ico { transform: rotate(90deg); }
   .s-grupo-items { display: block; padding: 0 0 4px 4px; }
   .s-grupo.cerrado .s-grupo-items { display: none; }
@@ -343,14 +343,14 @@ const CSS = `
   .s-backdrop { display: none; }
   /* Fondo compartido de los cajones "a la derecha" (IA y Ayuda): antes se superponian
      sin avisar y tapaban texto; ahora oscurecen el resto y se cierran al tocar fuera. */
-  .s-panel-fondo { position: fixed; inset: 0; z-index: 79; background: rgba(10,16,20,.4); opacity: 0; visibility: hidden; transition: opacity .18s ease; }
+  .s-panel-fondo { position: fixed; inset: 0; z-index: 79; background: rgba(10,16,20,.4); opacity: 0; visibility: hidden;  }
   .s-panel-fondo.visible { opacity: 1; visibility: visible; }
 
   /* --- la IA operadora: un cajon a la derecha, en todas las pantallas ---- */
   .s-ia-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-weight: 700; font-size: 13.5px; color: var(--s-accent); border-color: var(--s-accent-soft); background: var(--s-accent-soft); }
   .s-ia-boton:hover { color: var(--primario-texto); background: var(--s-accent); }
-  .s-ia { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease, visibility 0s linear .2s; visibility: hidden; pointer-events: none; }
-  .s-ia.abierto { transform: translateX(0); transition: transform .2s ease; visibility: visible; pointer-events: auto; }
+  .s-ia { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%);  visibility: hidden; pointer-events: none; }
+  .s-ia.abierto { transform: translateX(0);  visibility: visible; pointer-events: auto; }
   .s-ia-cab { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--s-line); }
   .s-ia-cab b { font-size: 15px; }
   .s-ia-cab .s-ia-sub { color: var(--s-muted); font-size: 12px; display: block; }
@@ -440,15 +440,15 @@ const CSS = `
   /* --- la ayuda de cada pantalla: un cajon a la derecha, como la IA --- */
   .s-ayuda-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-size: 13.5px; white-space: nowrap; flex: none; }
   .s-top-der { flex: none; }
-  .s-ayuda-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease, visibility 0s linear .2s; visibility: hidden; pointer-events: none; }
-  .s-ayuda-panel.abierto { transform: translateX(0); transition: transform .2s ease; visibility: visible; pointer-events: auto; }
+  .s-ayuda-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%);  visibility: hidden; pointer-events: none; }
+  .s-ayuda-panel.abierto { transform: translateX(0);  visibility: visible; pointer-events: auto; }
   .s-ayuda-cuerpo { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 14px; }
   .s-ayuda-que { color: var(--s-muted); font-size: 13px; line-height: 1.45; margin: 8px 0 12px; }
   .s-ayuda-barra { display: none; color: var(--s-muted); font-size: 12.5px; line-height: 1.45; margin: -4px 0 12px; padding: 8px 10px; border-radius: var(--radio-sm); background: var(--superficie-2); }
   @media (max-width: 960px) { .s-ayuda-barra { display: block; } }
   .s-ayuda-p { border: 1px solid var(--s-line); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
   .s-ayuda-p > button { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: flex-start; gap: 8px; text-align: left; padding: 10px 12px; border: 0; border-radius: 0; background: transparent; color: var(--s-text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: none; filter: none; }
-  .s-ayuda-p > button .s-ico { flex: none; color: var(--s-muted); width: 16px; height: 16px; transition: transform .15s; }
+  .s-ayuda-p > button .s-ico { flex: none; color: var(--s-muted); width: 16px; height: 16px;  }
   .s-ayuda-p.abierto > button .s-ico { transform: rotate(90deg); }
   .s-ayuda-r { display: none; padding: 0 12px 12px; font-size: 13.5px; line-height: 1.5; color: var(--s-text); }
   .s-ayuda-p.abierto .s-ayuda-r { display: block; }
@@ -460,7 +460,7 @@ const CSS = `
   @media (max-width: 960px) { .s-ayuda-boton span { display: none; } .s-ayuda-boton { padding: 0; width: 38px; } .s-buscar-boton { min-width: 0; width: 38px; padding: 0; justify-content: center; } .s-buscar-boton span, .s-buscar-boton kbd { display: none; } }
 
   @media (max-width: 960px) {
-    .s-side { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%); transition: transform .18s ease; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+    .s-side { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%);  box-shadow: 0 10px 40px rgba(0,0,0,.25); }
     .s-app.abierto .s-side { transform: none; }
     .s-app.plegado .s-side { width: 262px; }
     .s-app.plegado .s-logo-text, .s-app.plegado .s-item .s-txt, .s-app.plegado .s-badge, .s-app.plegado .s-buscar input,
@@ -485,7 +485,7 @@ const CSS = `
     .s-nav-movil a.activo::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--s-accent); }
     .s-app.modo-gsg .s-nav-completo, .s-app.modo-completo .s-nav-gsg { display: none; }
     .s-app.sin-nav-movil .s-nav-movil { display: none; }
-    .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none; transition: opacity .18s; }
+    .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none;  }
     .s-app.abierto .s-backdrop { opacity: 1; pointer-events: auto; }
     .s-chip b { display: none; }
   }
@@ -793,7 +793,7 @@ const JS = String.raw`
     var p = String(n || '').trim().split(/\s+/);
     return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase();
   }
-  fetch('/admin/yo', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (u) {
+  window.obtenerUsuarioPanel().then(function (u) {
     if (!u) return;
     window.__yo = u;
     document.querySelectorAll('.s-avatar').forEach(function (a) { a.textContent = iniciales(u.nombre); });
@@ -1227,9 +1227,8 @@ export function appShell(opts: ShellOpts): string {
     ...visiblesGsg.filter((i) => !i.seccion).map((i) => itemHtml(i, false)),
     ...secciones.map((sec) => {
       const items = visiblesGsg.filter((i) => i.seccion === sec);
-      // Sin la plantilla de GSG, los procesos son lo del dia a dia: esa seccion nace abierta.
-      // Inicio nace abierta; Flujo, IA GSG y Configuracion, cerradas (la del modulo abierto se abre sola).
-      const cerrada = sec !== 'Inicio';
+      // La operación diaria queda visible; configuración, avanzado y ayuda empiezan plegados.
+      const cerrada = sec !== 'Operación';
       return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}"${cerrada ? ' data-cerrado="1"' : ''}>
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(sec)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
@@ -1238,8 +1237,8 @@ export function appShell(opts: ShellOpts): string {
       </div>`;
     }),
   ].join('\n      ');
-  // El pie del celular: las cuatro pantallas del dia. Con las entregas de courier, las de siempre; si no, las de los procesos.
-  const pieGsg = '<a href="/hoy" data-ir="/hoy">' + icono('plantilla') + '<span>Pedidos</span></a><a href="/chat" data-ir="/chat">' + icono('chat') + '<span>Chats</span></a><a href="/salud" data-ir="/salud">' + icono('salud') + '<span>Salud</span></a>';
+  // En móvil quedan a mano las dos tareas cotidianas y el acceso al menú completo.
+  const pieGsg = '<a href="/hoy" data-ir="/hoy">' + icono('plantilla') + '<span>Pedidos</span></a><a href="/chat" data-ir="/chat">' + icono('chat') + '<span>Chats</span></a>';
   const dueno = `<div class="s-grupo" data-grupo="${MENU_GSG_DUENO.id}" data-solo-super-grupo="1" data-cerrado="1">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_GSG_DUENO.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">

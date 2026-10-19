@@ -18,14 +18,14 @@ export const DIALOGO_CSS = `
   .dlg-fondo {
     position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
     background: rgba(11, 20, 26, .55); backdrop-filter: blur(2px);
-    padding: 20px; animation: dlg-aparece .12s ease-out;
+    padding: 20px;
   }
-  @keyframes dlg-aparece { from { opacity: 0 } to { opacity: 1 } }
-  @keyframes dlg-sube { from { transform: translateY(8px); opacity: .6 } to { transform: none; opacity: 1 } }
+
+
   .dlg {
     background: var(--panel, #fff); color: var(--text, #111b21);
     border-radius: 14px; width: min(430px, 100%); padding: 22px;
-    box-shadow: 0 18px 50px rgba(0,0,0,.28); animation: dlg-sube .14s ease-out;
+    box-shadow: 0 18px 50px rgba(0,0,0,.28);
   }
   .dlg h3 { margin: 0 0 8px; font-size: 17px; }
   .dlg p { margin: 0 0 14px; font-size: 13.5px; color: var(--muted, #667781); line-height: 1.45; }

@@ -260,7 +260,6 @@ ${TOKENS_CSS}
   /* Botones para el pulgar: 56 px, icono y texto, y los de minutos a cuatro por fila. */
   .btns { display: grid; grid-template-columns: 1fr 1fr; gap: var(--esp-2); }
   .btn { min-height: 56px; border-radius: var(--radio); border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); font: inherit; font-size: 17px; font-weight: 700; padding: 10px 14px; cursor: pointer; text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; -webkit-tap-highlight-color: transparent; }
-  .btn:active { transform: scale(.985); }
   .btn .ico { font-size: 22px; line-height: 1; }
   .btn.primario { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
   .btn.verde { background: var(--verde); border-color: var(--verde); color: #fff; }

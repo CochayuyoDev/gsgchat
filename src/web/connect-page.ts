@@ -327,7 +327,7 @@ const CSS = `
 #con-avanzado { border-top: none; padding-top: 0; margin-top: 16px; }
 #con-avanzado > summary { list-style: none; cursor: pointer; position: relative; border: 1px solid var(--borde); border-radius: 14px; padding: 16px 56px 16px 20px; background: var(--superficie); }
 #con-avanzado > summary::-webkit-details-marker { display: none; }
-#con-avanzado > summary::after { content: ''; position: absolute; right: 24px; top: 50%; width: 9px; height: 9px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: translateY(-70%) rotate(45deg); transition: transform .15s; }
+#con-avanzado > summary::after { content: ''; position: absolute; right: 24px; top: 50%; width: 9px; height: 9px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: translateY(-70%) rotate(45deg);  }
 #con-avanzado[open] > summary::after { transform: translateY(-30%) rotate(-135deg); }
 #con-avanzado > summary:hover { border-color: var(--primario); }
 .con-resumen.una:has(> #gsg) { max-width: none; }
@@ -869,7 +869,7 @@ function abrirAvanzado(id) {
   var det = $('con-avanzado');
   if (det) det.open = true;
   var el = $(id);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
 }
 
 $('wa-conectar').onclick = async function () {
@@ -1209,7 +1209,7 @@ $('qr-connect').onclick = async function () {
   var boton = this;
   /* El código sale arriba, en la tarjeta de WhatsApp: se sube hasta ella. */
   var tarjeta = $('card-wa');
-  if (tarjeta && tarjeta.scrollIntoView) tarjeta.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (tarjeta && tarjeta.scrollIntoView) tarjeta.scrollIntoView({ behavior: 'auto', block: 'start' });
   boton.disabled = true;
   qr.parado = false;
   estado('fb-state', modo === 'local'

@@ -85,12 +85,12 @@ const CSS = `${REPARTO_CSS}
   .cifra b { color: var(--texto); font-size: 21px; font-weight: 700; }
   .cifra:hover b { color: var(--primario); }
   .progreso-barra { flex: 1; min-width: 180px; height: 8px; border-radius: 999px; background: var(--superficie-2); overflow: hidden; }
-  .progreso-barra > span { display: block; height: 100%; background: var(--verde); transition: width .3s; }
+  .progreso-barra > span { display: block; height: 100%; background: var(--verde);  }
   .motor { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-small); color: var(--texto-suave); }
   .motor .punto { width: 9px; height: 9px; border-radius: 50%; background: var(--gris-claro); flex: none; }
-  .motor.va .punto { background: var(--verde); animation: latido 1.6s ease-in-out infinite; }
+  .motor.va .punto { background: var(--verde);  }
   .motor.espera .punto { background: var(--ambar); }
-  @keyframes latido { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+
   .fallo { color: var(--rojo); font-size: var(--fs-small); }
 
   /* Los filtros: preguntas de la operación, no adornos. */
@@ -100,7 +100,7 @@ const CSS = `${REPARTO_CSS}
     display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 5px 12px;
     border: 1px solid var(--borde); border-radius: 999px; background: var(--superficie);
     color: var(--texto); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer;
-    transition: border-color var(--dur) ease, background-color var(--dur) ease, color var(--dur) ease;
+
   }
   .filtro:hover { border-color: var(--texto-suave); }
   .filtro .n { font-weight: 700; font-size: 13px; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--superficie-2); text-align: center; font-variant-numeric: tabular-nums; }
@@ -275,6 +275,7 @@ export function rutasPage(opts: RutasOpts): string {
       <section class="aj-seccion aj-seccion-inicial">
         <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
+        <details class="aj-editor-inicial" id="aj-editor-inicial"><summary>Editar el texto de «Solicitud de ubicación»</summary><p class="muted">Este es el primer mensaje real que GSGchat envía al recibir el pedido. Si lo dejas vacío, usa el texto predeterminado. Límite: 2000 caracteres.</p><label for="aj-texto-inicial">Texto que recibe el cliente</label><textarea id="aj-texto-inicial" rows="6" maxlength="2000" placeholder="Escribe la solicitud inicial de ubicación"></textarea><p class="marcadores">Puedes usar {nombreCompleto}, {producto}, {empresa}, {tracking}, {monto}, {direccionCompleta} y otros datos del pedido.</p><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar texto inicial</button><span id="aj-estado-texto-inicial" class="muted" role="status"></span></div></details>
       </section>
 
       <section class="aj-seccion">
@@ -292,14 +293,15 @@ export function rutasPage(opts: RutasOpts): string {
 
       <section class="aj-seccion">
         <h3 class="aj-titulo">Textos de los recordatorios</h3>
-        <p class="muted" style="margin-top:4px">Edita el recordatorio para quien no responde y la insistencia para quien responde sin ubicación. El texto de solicitud inicial se edita en la pantalla Pedidos GSG.</p>
+        <p class="muted" style="margin-top:4px">Edita el recordatorio para quien no responde y la insistencia para quien responde sin ubicación.</p>
         <div id="aj-pasos"></div>
         <div id="aj-pasos-adicionales"></div>
       </section>
 
       <div class="fila aj-guardar-barra">
         <button type="button" class="btn primario fijo" id="aj-guardar">Guardar</button>
-        <button type="button" class="btn fijo" id="aj-reset">Volver a lo de siempre</button>
+        <button type="button" class="btn fijo hidden" id="aj-descartar">Descartar cambios</button>
+        <button type="button" class="btn fijo" id="aj-reset">Restablecer valores predeterminados</button>
         <span class="muted" id="aj-estado" role="status"></span>
       </div>
     </div>
@@ -405,7 +407,7 @@ var peticionDetalle = 0; /* numero de la ultima peticion de detalle lanzada */
 var catalogo = {};       /* incidencias: codigo -> ficha */
 var nombresVista = {};
 var cifrasVista = {};
-var ajustesCache = null;
+var ajustesCache = null, ajustesBase = null, ajustesSucios = false;
 var sinUbicacion = [];   /* contactos traidos, para el lote nuevo */
 var listasPegadas = 0;   /* filas utiles que dijo la ultima revision de lo pegado */
 
@@ -1182,6 +1184,8 @@ function pintarPrevia(paso) {
 
 function pintarAjustes(d) {
   ajustesCache = d;
+  if (ajustesSucios) return;
+  ajustesBase = d;
   var a = d.ajustes;
   var esperas = a.esperasMensajesSegundos || (a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos)).map(function (n) { return n * 60; });
   ponerDuracion('aj-pausa-min', a.pausaMinSegundos);
@@ -1202,7 +1206,7 @@ function pintarAjustes(d) {
   }).join('');
   pintarTextosAdicionales(esperas.length, a.textosAdicionales || []);
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
-  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 100 mensajes en total' : 'Agregar seguimiento';
+  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
 
   PASOS_AJ.forEach(function (p) {
     var paso = p[0];
@@ -1235,20 +1239,20 @@ function leerTextosAdicionales() {
 
 function controlTiempoInicialHtml(segundos) {
   var d = segundosEnUnidad(segundos);
-  return '<div class="aj-tiempo-inicial"><span>Después de recibir el pedido de GSG, enviar la plantilla tras</span><input id="aj-espera-primero" data-duracion type="number" min="0" max="86400" step="1" class="aj-num" aria-label="Espera antes de enviar la plantilla Solicitud de ubicación" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select id="aj-espera-primero-unidad" data-unidad-for="aj-espera-primero" aria-label="Unidad de espera de Solicitud de ubicación"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div><p class="cuando" style="margin:8px 0 0">Con 0, no hay espera individual; se conserva la pausa entre clientes.</p>';
+  return '<div class="aj-tiempo-inicial"><span>Después de recibir el pedido de GSG, enviar la plantilla tras</span><input id="aj-espera-primero" data-duracion type="number" min="0" max="86400" step="any" class="aj-num" aria-label="Espera antes de enviar la plantilla Solicitud de ubicación" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select id="aj-espera-primero-unidad" data-unidad-for="aj-espera-primero" aria-label="Unidad de espera de Solicitud de ubicación"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div><p class="cuando" style="margin:8px 0 0">Con 0, no hay espera individual; se conserva la pausa entre clientes.</p>';
 }
 
 function controlTiempoSecuenciaHtml(segundos, indice) {
   var d = segundosEnUnidad(segundos);
-  var antecedente = indice === 0 ? 'Después de la solicitud inicial' : 'Después del seguimiento ' + indice;
-  return '<div class="aj-tiempo-paso" data-seguimiento="' + indice + '"><h4>Seguimiento ' + (indice + 1) + '</h4><p class="cuando">' + antecedente + '</p><div class="aj-tiempo-control"><input data-espera-mensaje data-duracion data-indice-espera="' + indice + '" type="number" min="1" max="86400" step="1" class="aj-num" aria-label="Espera antes del seguimiento ' + (indice + 1) + '" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select data-unidad-secuencia="' + indice + '" aria-label="Unidad de espera del seguimiento ' + (indice + 1) + '"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div></div>';
+  var antecedente = indice === 0 ? 'Después de la solicitud inicial' : 'Después del recordatorio ' + indice;
+  return '<div class="aj-tiempo-paso" data-seguimiento="' + indice + '"><h4>Recordatorio ' + (indice + 1) + '</h4><p class="cuando">' + antecedente + '</p><div class="aj-tiempo-control"><input data-espera-mensaje data-duracion data-indice-espera="' + indice + '" type="number" min="1" max="86400" step="any" class="aj-num" aria-label="Espera antes del recordatorio ' + (indice + 1) + '" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select data-unidad-secuencia="' + indice + '" aria-label="Unidad de espera del recordatorio ' + (indice + 1) + '"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div><button type="button" class="btn sm" data-quitar-seguimiento="' + indice + '">Quitar</button></div>';
 }
 
 function pintarSecuencia(esperas) {
   var caja = document.getElementById('aj-secuencia');
   caja.innerHTML = esperas.map(function (segundos, indice) { return controlTiempoSecuenciaHtml(segundos, indice); }).join('');
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
-  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 100 mensajes en total' : 'Agregar seguimiento';
+  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
 }
 
 function pintarTextosAdicionales(cantidad, textos) {
@@ -1306,7 +1310,11 @@ function ponerDuracion(id, segundos) {
 }
 function leerDuracion(id) {
   var campo = document.getElementById(id), unidad = document.getElementById(id + '-unidad');
-  return Math.round((Number(campo.value) || 0) * Number(unidad.value));
+  var cantidad = Number(String(campo.value).trim().replace(',', '.'));
+  var segundos = cantidad * Number(unidad.value);
+  var minimoSegundos = id === 'aj-pausa-min' || id === 'aj-pausa-max' ? 1 : 0;
+  if (!campo.value.trim() || !Number.isFinite(segundos) || !Number.isInteger(segundos) || segundos < minimoSegundos || segundos > 86400) throw new Error('Revisa ' + (campo.getAttribute('aria-label') || 'el tiempo') + ': debe representar segundos enteros entre ' + minimoSegundos + ' y 86400.');
+  return segundos;
 }
 function duracionHumana(segundos) {
   var d = segundosEnUnidad(segundos);
@@ -1319,6 +1327,7 @@ document.querySelector('.cuerpo.aj').addEventListener('change', function (event)
   var id = select.getAttribute('data-unidad-for'), campo = document.getElementById(id);
   var segundos = Number(campo.value) * Number(campo.getAttribute('data-unidad-actual') || 1);
   var factor = Number(select.value);
+  if (!Number.isInteger(segundos) || segundos < 0) { select.value = String(Number(campo.getAttribute('data-unidad-actual') || 1)); return; }
   campo.value = segundos ? (segundos / factor).toString() : '0';
   campo.setAttribute('data-segundos', String(Math.round(segundos)));
   campo.setAttribute('data-unidad-actual', String(factor));
@@ -1330,6 +1339,7 @@ document.getElementById('aj-agregar-mensaje').onclick = function () {
   var textos = leerTextosAdicionales();
   pintarSecuencia(esperas);
   pintarTextosAdicionales(esperas.length, textos);
+  marcarAjustesSucios();
 };
 document.getElementById('aj-pasos-adicionales').onclick = function (event) {
   var indice = event.target && event.target.getAttribute('data-quitar-adicional');
@@ -1340,12 +1350,29 @@ document.getElementById('aj-pasos-adicionales').onclick = function (event) {
   textos.splice(Number(indice), 1);
   pintarSecuencia(esperas);
   pintarTextosAdicionales(esperas.length, textos);
+  marcarAjustesSucios();
+};
+function quitarSeguimiento(indice) {
+  var esperas = leerEsperasSecuencia();
+  var textos = leerTextosAdicionales();
+  esperas.splice(indice, 1);
+  if (indice >= 2) textos.splice(indice - 2, 1);
+  pintarSecuencia(esperas);
+  pintarTextosAdicionales(esperas.length, textos);
+  marcarAjustesSucios();
+}
+document.getElementById('aj-secuencia').onclick = function (event) {
+  var boton = event.target.closest('[data-quitar-seguimiento]');
+  if (boton) quitarSeguimiento(Number(boton.getAttribute('data-quitar-seguimiento')));
 };
 function leerEsperasSecuencia() {
   var campos = Array.prototype.slice.call(document.querySelectorAll('[data-espera-mensaje]')).sort(function (a, b) { return Number(a.getAttribute('data-indice-espera')) - Number(b.getAttribute('data-indice-espera')); });
   return campos.map(function (campo) {
     var select = campo.parentNode.querySelector('[data-unidad-secuencia]');
-    return Math.max(1, Math.round((Number(campo.value) || 1) * Number(select.value)));
+    var cantidad = Number(String(campo.value).trim().replace(',', '.'));
+    var segundos = cantidad * Number(select.value);
+    if (!campo.value.trim() || !Number.isFinite(segundos) || !Number.isInteger(segundos) || segundos < 1 || segundos > 86400) throw new Error('El tiempo del recordatorio ' + (Number(campo.getAttribute('data-indice-espera')) + 1) + ' debe ser de 1 segundo a 24 horas.');
+    return segundos;
   });
 }
 document.getElementById('aj-secuencia').addEventListener('change', cambiarUnidadSecuencia);
@@ -1355,6 +1382,7 @@ function cambiarUnidadSecuencia(event) {
   var campo = select.parentNode.querySelector('[data-espera-mensaje]');
   var segundos = Number(campo.value) * Number(campo.getAttribute('data-unidad-actual') || 60);
   var factor = Number(select.value);
+  if (!Number.isInteger(segundos) || segundos < 1) { select.value = String(Number(campo.getAttribute('data-unidad-actual') || 60)); return; }
   campo.value = segundos ? String(segundos / factor) : '0';
   campo.setAttribute('data-unidad-actual', String(factor));
 }
@@ -1374,6 +1402,52 @@ function marcadoresHtml() {
     return '<code data-marcador="' + m[0] + '" title="' + esc(m[1]) + '">' + m[0] + '</code>';
   }).join(' ');
 }
+
+function actualizarEstadoCambios() {
+  document.getElementById('aj-descartar').classList.toggle('hidden', !ajustesSucios);
+  if (ajustesSucios) document.getElementById('aj-estado').textContent = 'Tienes cambios sin guardar.';
+}
+function marcarAjustesSucios() { ajustesSucios = true; actualizarEstadoCambios(); }
+document.querySelector('.cuerpo.aj').addEventListener('input', function (event) {
+  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+});
+document.querySelector('.cuerpo.aj').addEventListener('change', function (event) {
+  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+});
+document.getElementById('aj-descartar').onclick = function () {
+  if (!ajustesBase) return;
+  ajustesSucios = false;
+  document.getElementById('aj-estado').textContent = 'Cambios descartados.';
+  pintarAjustes(ajustesBase);
+  actualizarEstadoCambios();
+};
+
+var textoInicialCargado = false, textoInicialOcupado = false;
+var editorTextoInicial = document.getElementById('aj-editor-inicial');
+editorTextoInicial.addEventListener('toggle', async function () {
+  if (!editorTextoInicial.open || textoInicialCargado || textoInicialOcupado) return;
+  textoInicialOcupado = true;
+  var estado = document.getElementById('aj-estado-texto-inicial');
+  estado.textContent = 'Cargando texto…';
+  try {
+    var d = await api('/admin/entregas/ajustes');
+    document.getElementById('aj-texto-inicial').value = d.textos.solicitudUbicacion || '';
+    textoInicialCargado = true;
+    estado.textContent = d.textos.solicitudUbicacion ? 'Texto personalizado guardado.' : 'Se usa el texto predeterminado.';
+  } catch (e) { estado.textContent = e.message; }
+  finally { textoInicialOcupado = false; }
+});
+document.getElementById('aj-guardar-texto-inicial').onclick = async function () {
+  var boton = this, estado = document.getElementById('aj-estado-texto-inicial');
+  boton.disabled = true;
+  estado.textContent = 'Guardando…';
+  try {
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: { solicitudUbicacion: document.getElementById('aj-texto-inicial').value } } });
+    textoInicialCargado = true;
+    estado.textContent = 'Texto inicial guardado.';
+  } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
+};
 
 /* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */
 async function cargarAjustes() {
@@ -1412,6 +1486,8 @@ document.getElementById('cerrar-ajustes').onclick = function () { ver('caja-ajus
 
 document.getElementById('aj-guardar').onclick = async function () {
   var estado = document.getElementById('aj-estado');
+  var boton = this;
+  boton.disabled = true;
   try {
     var plantillas = {}, textos = {};
     PASOS_AJ.forEach(function (p) {
@@ -1434,19 +1510,26 @@ document.getElementById('aj-guardar').onclick = async function () {
       textosAdicionales: leerTextosAdicionales()
     }});
     var v = r.vigente;
+    ajustesSucios = false;
+    actualizarEstadoCambios();
+    await cargarAjustes();
     estado.textContent = 'Guardado. «Solicitud de ubicación» sale ' + duracionHumana(v.esperaPrimerMensajeSegundos || 0) + ' después de recibir el pedido de GSG; recordatorios: ' + (v.esperasMensajesSegundos || []).map(duracionHumana).join(', ') + '. Se reprogramaron ' + (r.primerosReprogramados || 0) + ' solicitudes iniciales y ' + (r.seguimientosReprogramados || 0) + ' recordatorios activos. Ritmo entre clientes: ' + duracionHumana(v.pausaMinSegundos) + '-' + duracionHumana(v.pausaMaxSegundos) + '.';
-    await refrescar();
   } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
 };
 
 document.getElementById('aj-reset').onclick = async function () {
+  if (!window.confirm('¿Restablecer los tiempos y textos de seguimiento? Los seguimientos activos se reprogramarán con los valores predeterminados.')) return;
+  var boton = this; boton.disabled = true;
   try {
     var r = await api('/admin/rutas/ajustes', { method: 'DELETE' });
+    ajustesSucios = false;
     await cargarAjustes();
+    actualizarEstadoCambios();
     document.getElementById('aj-estado').textContent = 'Listo: vuelven los valores y textos de siempre. Se actualizaron ' +
       (r.seguimientosReprogramados || 0) + ' seguimientos activos.';
-    await refrescar();
   } catch (e) { document.getElementById('aj-estado').textContent = e.message; }
+  finally { boton.disabled = false; }
 };
 
 /* --- controles -------------------------------------------------------- */
@@ -1541,7 +1624,7 @@ function abrirDetalleDeFila(fila) {
   // En el teléfono el detalle queda debajo de la lista: sin esto, al tocar
   // una fila no pasa nada visible.
   if (window.matchMedia('(max-width: 1100px)').matches) {
-    document.getElementById('detalle').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('detalle').scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 }
 
@@ -1579,6 +1662,7 @@ function marcarFalloRefresco(mensaje) {
 /* Ni pisa lo que estas escribiendo ni gasta la conexion con la pestana al fondo. */
 setInterval(function () {
   if (document.hidden) return;
+  if (!document.getElementById('caja-ajustes').classList.contains('hidden')) return;
   var activo = document.activeElement;
   if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA' || activo.tagName === 'SELECT')) return;
   refrescar();
@@ -1591,7 +1675,7 @@ function abrirSegunAncla() {
 }
 window.addEventListener('hashchange', abrirSegunAncla);
 abrirSegunAncla();
-refrescar();
+if (location.hash !== '#ajustes') refrescar();
 `;
 
   return appShell({

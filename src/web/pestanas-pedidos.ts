@@ -51,7 +51,7 @@ export const PESTANAS_PEDIDOS_JS = String.raw`
   window.pestanasArriba = function () { setTimeout(function () { if (window.scrollTo) window.scrollTo(0, 0); }, 30); };
   window.addEventListener('hashchange', window.marcarPestanaPedidos);
   window.marcarPestanaPedidos();
-  fetch('/admin/yo', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (yo) {
+  window.obtenerUsuarioPanel().then(function (yo) {
     if (yo && yo.rol === 'admin') document.querySelectorAll('[data-pp-admin]').forEach(function (a) { a.hidden = false; });
   }).catch(function () {});
 })();

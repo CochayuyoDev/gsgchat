@@ -52,12 +52,12 @@ export const CHAT_CSS = `
   .filtros .f.activo { background: var(--accent); border-color: var(--accent); color: var(--primario-texto); }
   .chats { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .chat { display: flex; gap: 13px; padding: 10px 14px; cursor: pointer;
-    border-bottom: 1px solid var(--line); transition: background .12s; position: relative; }
+    border-bottom: 1px solid var(--line);  position: relative; }
   .chat:hover { background: var(--header); }
   .chat.active { background: var(--header); box-shadow: inset 4px 0 0 var(--accent); }
   .chat.active .name { color: var(--accent); }
   /* El menu de la fila solo asoma al pasar por encima; en el movil, siempre. */
-  .chat .fila-menu { position: absolute; right: 8px; bottom: 8px; opacity: 0; transition: opacity .12s; }
+  .chat .fila-menu { position: absolute; right: 8px; bottom: 8px; opacity: 0;  }
   .chat:hover .fila-menu, .chat .fila-menu:focus-visible { opacity: 1; }
   @media (hover: none) { .chat .fila-menu { opacity: .7; } }
   .avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--accent); color: #fff; flex: none;
@@ -155,11 +155,8 @@ export const CHAT_CSS = `
   .msg .estrella { position: absolute; left: -16px; top: 4px; font-size: 11px; color: var(--ambar); }
   .msg.out .estrella { left: auto; right: -16px; }
   /* El mensaje al que se salto desde una cita o desde la busqueda. */
-  .msg.resaltado { animation: parpadeo 1.6s ease-out; }
-  @keyframes parpadeo {
-    0%, 60% { box-shadow: 0 0 0 3px var(--primario); }
-    100% { box-shadow: var(--sombra); }
-  }
+  .msg.resaltado {  }
+
   .msg mark { background: var(--ambar-suave); color: var(--ambar); border-radius: 3px; padding: 0 1px; }
 
   /* --------------------------------------------------------------- citas */
@@ -188,13 +185,13 @@ export const CHAT_CSS = `
     background: var(--superficie); border: 1px solid var(--borde); box-shadow: var(--sombra-2);
   }
   .reac-rapidas button { border: 0; background: none; font-size: 20px; cursor: pointer; padding: 2px 4px; border-radius: 999px; line-height: 1; min-width: 32px; min-height: 32px; }
-  .reac-rapidas button:hover { background: var(--superficie-2); transform: scale(1.15); }
+  .reac-rapidas button:hover { background: var(--superficie-2); }
 
   /* ------------------------------------------------ el boton del menu del globo */
   .msg .abrir-menu {
     position: absolute; top: 2px; right: 2px; width: 26px; height: 26px; border: 0; cursor: pointer;
     background: none; color: var(--muted); font-size: 15px; line-height: 1; border-radius: 50%;
-    opacity: 0; transition: opacity .12s;
+    opacity: 0;
   }
   .msg:hover .abrir-menu, .msg .abrir-menu:focus-visible { opacity: 1; background: var(--superficie-2); }
   @media (hover: none) { .msg .abrir-menu { opacity: .75; } }
@@ -323,8 +320,8 @@ export const CHAT_CSS = `
   /* grabando una nota de voz */
   .grabando { display: flex; gap: 12px; align-items: center; padding: 10px 14px; background: var(--header);
     border-top: 1px solid var(--line); flex: none; }
-  .grabando .punto { width: 11px; height: 11px; border-radius: 50%; background: var(--rojo); animation: latido 1.1s infinite; flex: none; }
-  @keyframes latido { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+  .grabando .punto { width: 11px; height: 11px; border-radius: 50%; background: var(--rojo);  flex: none; }
+
   .grabando .tiempo { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; flex: none; }
   .grabando .onda { flex: 1; display: flex; gap: 2px; align-items: center; height: 26px; overflow: hidden; }
   .grabando .onda i { width: 3px; background: var(--accent); border-radius: 2px; min-height: 3px; }

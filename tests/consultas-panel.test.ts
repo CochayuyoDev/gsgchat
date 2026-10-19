@@ -127,7 +127,7 @@ describe('consultas del chat y panel sin sobrecargar el servidor', () => {
     const pendientes: Array<(data: unknown) => void> = [];
     const api = vi.fn(() => new Promise(r => pendientes.push(r)));
     const tabla = vi.fn();
-    const cargar = new Function('api', '$', 'tabla', 'fecha', 'location', 'document', html.slice(inicio, fin) + '\nreturn historial;')(api, () => filtro, tabla, (d: unknown) => d, { hash: '#historial' }, { hidden: false });
+    const cargar = new Function('api', '$', 'tabla', 'fecha', 'location', 'document', html.slice(inicio, fin) + '\nreturn historial;')(api, () => filtro, tabla, (d: unknown) => d, { hash: '#historial' }, { hidden: false, querySelectorAll: () => [] });
     const vieja = cargar();
     const nueva = cargar();
     pendientes[1]!({ items: [{ at: 'nueva', detalle: { http: 200 } }] });

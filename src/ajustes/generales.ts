@@ -290,12 +290,6 @@ export interface ServicioAjustes {
   restablecer(): Promise<AjustesGenerales>;
   /** La politica de ritmo con los ajustes encima. */
   politica(base: Politica): Politica;
-  /**
-   * Otra franja que AMPLIA el horario de envio del numero: la registran
-   * las entregas del dia (Hoy → Ajustes → horario de entregas), para que
-   * el marcapasos no frene a las 20:00 un pin que GSG entrega hasta las 22:00.
-   */
-  ampliarHorario(fn: () => { desde: string; hasta: string } | null): void;
   /** Modo prueba efectivo: vacio = a todos. */
   soloNumeros(): string[];
   nombreNegocio(): string;
@@ -334,7 +328,6 @@ export async function crearServicioAjustes(deps: {
   const releerCadaMs = deps.releerCadaMs ?? 60_000;
   let valor = await repo.get();
   let leidoEn = ahora();
-  const ampliaciones: Array<() => { desde: string; hasta: string } | null> = [];
 
   const fresco = (): AjustesGenerales => {
     if (releerCadaMs > 0 && ahora() - leidoEn > releerCadaMs) {
@@ -376,9 +369,6 @@ export async function crearServicioAjustes(deps: {
       leidoEn = ahora();
       return valor;
     },
-    ampliarHorario(fn) {
-      ampliaciones.push(fn);
-    },
     politica(base) {
       const a = fresco();
       const p: Politica = { ...base, warmup: { ...base.warmup }, umbrales: { ...base.umbrales } };
@@ -387,14 +377,6 @@ export async function crearServicioAjustes(deps: {
       if (a.horario.dias && a.horario.dias.length) p.diasPermitidos = [...a.horario.dias];
       if (a.zonaHoraria) p.timezone = a.zonaHoraria;
       if (p.horaFin <= p.horaInicio) p.horaFin = Math.min(24, p.horaInicio + 1);
-      for (const ampliar of ampliaciones) {
-        const extra = ampliar();
-        if (!extra) continue;
-        const desde = Number(extra.desde.slice(0, 2));
-        const hasta = Number(extra.hasta.slice(0, 2)) + (Number(extra.hasta.slice(3, 5)) > 0 ? 1 : 0);
-        if (Number.isFinite(desde)) p.horaInicio = Math.min(p.horaInicio, Math.max(0, desde));
-        if (Number.isFinite(hasta)) p.horaFin = Math.max(p.horaFin, Math.min(24, hasta));
-      }
       const r = a.ritmo;
       if (r.maxPorMinuto !== null && r.maxPorMinuto > 0) p.maxPorMinuto = r.maxPorMinuto;
       if (r.maxPorHora !== null && r.maxPorHora > 0) p.maxPorHora = r.maxPorHora;
