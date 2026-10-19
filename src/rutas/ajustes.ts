@@ -59,6 +59,7 @@ export interface AjustesRutas {
   textos: Record<PasoUbicacion, string[]>;
   /** Redacciones propias por mensaje a partir del cuarto. */
   textosAdicionales: string[][];
+  textosSeguimientos?: { recordatorio: string[]; insistencia: string[] }[];
 }
 
 const listaDeTextos = z.array(z.string().trim().min(1).max(1000)).max(10);
@@ -84,6 +85,7 @@ export const ajustesSchema = z.object({
   plantillas: z.object({ solicitud: listaDeNombres, recordatorio: listaDeNombres, insistencia: listaDeNombres }),
   textos: z.object({ solicitud: listaDeTextos, recordatorio: listaDeTextos, insistencia: listaDeTextos }),
   textosAdicionales: textosAdicionalesSchema,
+  textosSeguimientos: z.array(z.object({ recordatorio: listaDeTextos, insistencia: listaDeTextos })).max(99),
 });
 
 export type AjustesPatch = Partial<z.infer<typeof ajustesSchema>>;
