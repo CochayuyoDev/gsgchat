@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { crearPuertoHttp, motivoGsg, problemaParaGsg } from '../src/rutas/gsg.js';
 import { OPCIONES_POR_DEFECTO } from '../src/rutas/motor.js';
 import { ajustesPorDefecto } from '../src/rutas/ajustes.js';
+import { errorDeTelefono, TEXTOS_REPORTADOS } from '../src/entregas/reportados.js';
+import { INCIDENCIAS } from '../src/rutas/incidencias.js';
 import { crearEscenarioEntregas, PAUSA_SEGUNDOS, type EscenarioEntregas } from './escenario-entregas.js';
 
 describe('el formato de GSG', () => {
@@ -26,11 +28,29 @@ describe('el formato de GSG', () => {
     const p = problemaParaGsg({ tipo: 'incidencia', referencia: 'GSG-E-240268', tracking: 'GSG-E-240268', telefono: '51999999999', codigo: 'sin_whatsapp', titulo: 'El número no tiene WhatsApp', detalle: 'el número 51999999999 no tiene una cuenta de WhatsApp', detectadoEn: '2026-10-12T18:40:00.000Z' });
     expect(p).toEqual({
       tracking: 'GSG-E-240268', tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL',
-      codigo: 'sin_whatsapp', queHacer: null,
-      comentario: 'El número no tiene WhatsApp: el número 51999999999 no tiene una cuenta de WhatsApp',
-      telefonoOrigen: '51999999999', fechaMensaje: '2026-10-12T18:40:00.000Z',
+      // «Sin WhatsApp» le llega a GSG como numero invalido, para que edite el numero.
+      codigo: 'numero_invalido', queHacer: 'Corrige el número del cliente y vuelve a mandar el pedido.',
+      comentario: 'Número inválido: no tiene WhatsApp: el número 999999999 no tiene una cuenta de WhatsApp',
+      telefonoOrigen: '999999999', fechaMensaje: '2026-10-12T18:40:00.000Z',
       eventoId: 'gsgchat-GSG-E-240268-sin_whatsapp-2026-10-12',
     });
+  });
+
+  it('cada error con su nombre: faltan dígitos, no es la persona (no uno general)', () => {
+    expect(errorDeTelefono('98765432')).toBe('numero_corto');
+    expect(errorDeTelefono('+51 98765432')).toBe('numero_corto');
+    expect(errorDeTelefono('9876543210')).toBe('numero_largo');
+    expect(errorDeTelefono('hola')).toBe('telefono_invalido');
+    expect(TEXTOS_REPORTADOS.numero_corto.titulo).toBe('Al número le faltan dígitos');
+    expect(INCIDENCIAS.numero_corto.titulo).toBe('Al número le faltan dígitos');
+    expect(INCIDENCIAS.numero_equivocado.titulo).toBe('No es la persona');
+    const p = problemaParaGsg({ tracking: 'GSG-E-1', codigo: 'no_soy_yo', telefono: '51987654321', titulo: TEXTOS_REPORTADOS.no_soy_yo.titulo, detalle: 'contestó: "no es mi pedido"' });
+    expect(p).toMatchObject({ codigo: 'no_soy_yo', motivo: 'NO_RECONOCE_PEDIDO', telefonoOrigen: '987654321' });
+    expect(p.comentario).toMatch(/^No es la persona/);
+    expect(p.comentario).not.toMatch(/no se le puede escribir/i);
+    // El titulo no se repite cuando el detalle ya empieza por el.
+    const corto = problemaParaGsg({ tracking: 'GSG-E-2', codigo: 'numero_corto', telefono: '98765432', titulo: TEXTOS_REPORTADOS.numero_corto.titulo, detalle: 'Al número le faltan dígitos: "98765432" tiene 8 dígitos y un celular necesita 9; falta 1' });
+    expect(corto.comentario).toBe('Al número le faltan dígitos: "98765432" tiene 8 dígitos y un celular necesita 9; falta 1');
   });
 
   it('el envío va a la ruta del panel, con Idempotency-Key = eventoId; sin tracking no se manda', async () => {
@@ -39,7 +59,7 @@ describe('el formato de GSG', () => {
     const p = crearPuertoHttp({ url: 'https://gsg.example/api', token: 'clave-gsg-123', rutaIncidencias: 'v1/gsgchat/reported', fetchImpl });
     expect((await p.enviar('incidencia', { tracking: 'GSG-E-1', codigo: 'sin_whatsapp', telefono: '51999999999', titulo: 'Sin WhatsApp' })).ok).toBe(true);
     expect(llegadas[0]!.url).toBe('https://gsg.example/api/v1/gsgchat/reported');
-    expect(llegadas[0]!.cuerpo).toMatchObject({ tracking: 'GSG-E-1', tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', telefonoOrigen: '51999999999' });
+    expect(llegadas[0]!.cuerpo).toMatchObject({ tracking: 'GSG-E-1', tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', telefonoOrigen: '999999999' });
     expect(llegadas[0]!.idem).toBe(llegadas[0]!.cuerpo.eventoId);
     const sinTracking = await p.enviar('incidencia', { codigo: 'sin_whatsapp' });
     expect(sinTracking).toMatchObject({ ok: false, reintentable: false });
@@ -70,7 +90,7 @@ describe('de punta a punta', () => {
       await e.despacharAGsg();
       const reportes = llegadas.filter((l) => l.url.endsWith('/v1/gsgchat/reported'));
       expect(reportes, JSON.stringify(llegadas.map((l) => l.url))).toHaveLength(1);
-      expect(reportes[0]!.cuerpo).toMatchObject({ tracking: 'GSG-E-240268', tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', telefonoOrigen: '51999999999' });
+      expect(reportes[0]!.cuerpo).toMatchObject({ tracking: 'GSG-E-240268', tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', codigo: 'numero_invalido', telefonoOrigen: '999999999' });
       expect(reportes[0]!.cuerpo.comentario).toMatch(/WhatsApp/);
       // Y en «Lo que enviamos a GSG» se ve como Problema, enviado.
       const env = await e.api.get<any>('/admin/gsg/envios');

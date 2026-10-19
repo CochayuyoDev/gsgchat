@@ -14,7 +14,7 @@
  * cuando el mismo sistema se use fuera.
  */
 
-import type { CodigoIncidencia } from './incidencias.js';
+import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 
 export interface PlanNumeracion {
@@ -71,6 +71,14 @@ export const PLANES: Record<string, PlanNumeracion> = {
 export type RevisionTelefono =
   | { ok: true; phone: string; nacional: string; corregido: boolean }
   | { ok: false; incidencia: CodigoIncidencia; detalle: string };
+
+/**
+ * Por que no sirve un telefono, con el nombre de su error («Al número le
+ * faltan dígitos: ... falta 1»), no un «teléfono inválido» general.
+ */
+export function motivoTelefono(revision: Extract<RevisionTelefono, { ok: false }>): string {
+  return `${INCIDENCIAS[revision.incidencia]?.titulo ?? 'Número inválido'}: ${revision.detalle}`;
+}
 
 /** Deja solo digitos y quita las formas de escribir el prefijo internacional. */
 export function soloDigitos(entrada: string): string {

@@ -184,9 +184,23 @@ const CSS = `${REPARTO_CSS}
   .aj .paso textarea { margin-top: 8px; min-height: 64px; font-family: var(--fuente); font-size: 14px; }
   .aj .marcadores { font-size: var(--fs-small); color: var(--texto-suave); margin: 6px 0 0; }
   .aj .marcadores code { background: var(--superficie); border: 1px solid var(--borde); border-radius: 5px; padding: 1px 5px; font-size: 12px; cursor: pointer; }
-  .aj .plantillas { margin-top: var(--esp-2); font-size: 13px; }
-  .aj .plantillas label { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
-  .aj .plantillas input { width: auto; }
+  .aj-intro { margin: 0; padding: 12px 14px; border-radius: var(--radio-sm); background: var(--superficie-2); color: var(--texto-suave); }
+  .aj-seccion { margin-top: 18px; padding: 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
+  .aj-seccion-inicial { border-color: var(--primario); background: var(--primario-suave); }
+  .aj-seccion-cab { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 12px; }
+  .aj-seccion-cab h3 { margin: 0; font-size: var(--fs-h3); }
+  .aj-seccion-cab p { margin: 3px 0 0; color: var(--texto-suave); font-size: var(--fs-small); line-height: 1.5; }
+  .aj-paso-num { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--primario); color: #fff; font-size: 13px; font-weight: 700; }
+  .aj-tiempo-inicial { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; line-height: 1.6; }
+  .aj-tiempo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .aj .aj-tiempo-paso { min-width: 0; margin: 0; padding: 13px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
+  .aj-tiempo-paso h4 { margin: 0 0 5px; font-size: 15px; }
+  .aj-tiempo-paso .cuando { min-height: 18px; margin-bottom: 8px; }
+  .aj-tiempo-control { display: flex; align-items: center; gap: 7px; }
+  .aj-tiempo-control select { max-width: 120px; }
+  .aj-fin { margin: 13px 0 0; padding-top: 11px; border-top: 1px solid var(--borde); }
+  .aj-seccion .aj-titulo { margin-top: 0; }
+  @media (max-width: 780px) { .aj-tiempo-grid { grid-template-columns: 1fr; } }
 
   /* De pie y con una mano: la tabla deja de ser tabla y cada cliente es una
      ficha que se lee de arriba abajo. */
@@ -249,45 +263,39 @@ export function rutasPage(opts: RutasOpts): string {
     </h2>
     <div class="cuerpo aj">
       <p class="aj-intro">
-        <b>Cómo le escribe el sistema a cada cliente por WhatsApp</b> para pedirle su ubicación: cuándo, a qué ritmo, cuántas veces y con qué palabras.
-        Se aplica en el siguiente mensaje, sin reiniciar. Las horas son de Lima.
-        <span>El nombre del negocio, el teléfono del supervisor y los avisos están en el módulo <a href="/panel#configuracion">Ajustes</a> del sistema. <a class="ver-manual" href="/manual#m-automatizacion-gsg">Ver instrucciones completas</a></span>
+        <b>Configura cómo GSGchat pide la ubicación.</b> La solicitud inicial tiene su propio tiempo; los recordatorios empiezan después y esperan desde el mensaje anterior. Las horas son de Lima.
+        <span>El nombre del negocio, el teléfono del supervisor y los avisos están en <a href="/panel#configuracion">Ajustes</a>. <a class="ver-manual" href="/manual#m-automatizacion-gsg">Ver instrucciones completas</a></span>
       </p>
 
-      <div class="aj-bloques">
-      <section class="aj-bloque">
-      <h3 class="aj-titulo"><span class="aj-paso">1</span>Horario</h3>
-      <p class="aj-que">A qué horas se le puede escribir al cliente.</p>
-      <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00.
-        Fuera de ese horario, los mensajes esperan al día siguiente.</p>
+      <section class="aj-seccion">
+        <h3 class="aj-titulo">Horario de escritura</h3>
+        <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00. Fuera de ese horario, los mensajes esperan al día siguiente.</p>
       </section>
 
-      <section class="aj-bloque">
-      <h3 class="aj-titulo"><span class="aj-paso">2</span>Ritmo</h3>
-      <p class="aj-que">Cuánto se espera entre un cliente y el siguiente.</p>
-      <p class="aj-frase">Entre un cliente y el siguiente se espera entre <input id="aj-pausa-min" type="number" min="1" class="aj-num" aria-label="Pausa mínima en segundos">
-        y <input id="aj-pausa-max" type="number" min="1" class="aj-num" aria-label="Pausa máxima en segundos"> segundos, para parecer una persona y cuidar el número.</p>
+      <section class="aj-seccion aj-seccion-inicial">
+        <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
+        <div id="aj-tiempo-solicitud"></div>
       </section>
 
-      <section class="aj-bloque aj-ancho">
-      <h3 class="aj-titulo"><span class="aj-paso">3</span>Insistencia</h3>
-      <p class="aj-que">Cuántos mensajes se le mandan si no responde, cada cuánto, y cuándo se da por «sin respuesta».</p>
-      <p class="aj-frase">El primer aviso sale de inmediato. Por defecto, los siguientes esperan 30, 25 y 20 minutos. Puedes configurar hasta 100 mensajes por cliente; al guardar, los cambios también recalculan los seguimientos que ya esperan, desde el último mensaje enviado.</p>
-      <div id="aj-secuencia"></div>
-      <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:var(--esp-2)">Agregar mensaje</button>
-      <p class="aj-frase" style="margin-top:var(--esp-3)">Después del último mensaje se espera <input id="aj-espera-final" type="number" min="0" max="1440" class="aj-num" aria-label="Minutos de espera tras el último mensaje"> minutos;
-        si en ese tiempo no manda su ubicación, queda «sin respuesta» y se le reporta a GSG. Con 0 se reporta en el momento.</p>
+      <section class="aj-seccion">
+        <div class="aj-seccion-cab"><span class="aj-paso-num">2</span><div><h3>Recordatorios y seguimientos</h3><p>Salen después de la solicitud inicial: recordatorio si no respondió o insistencia si respondió sin ubicación.</p></div></div>
+        <p class="aj-frase" style="margin-bottom:12px">Cada espera se cuenta desde el envío anterior. Puedes configurar hasta 99 recordatorios (100 mensajes en total, incluida la solicitud inicial).</p>
+        <div id="aj-secuencia" class="aj-tiempo-grid"></div>
+        <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:12px">Agregar recordatorio</button>
+        <p class="aj-frase aj-fin">Al terminar la secuencia, esperar <input id="aj-espera-final" data-duracion type="number" min="0" max="86400" class="aj-num" aria-label="Espera tras el último recordatorio"> <select id="aj-espera-final-unidad" data-unidad-for="aj-espera-final" aria-label="Unidad de espera tras el último recordatorio"><option value="1">segundos</option><option value="60" selected>minutos</option><option value="3600">horas</option></select> para reportar a GSG si aún no llegó la ubicación. Con 0, se reporta de inmediato.</p>
       </section>
 
-      <section class="aj-bloque aj-ancho">
-      <h3 class="aj-titulo"><span class="aj-paso">4</span>Mensajes al cliente</h3>
-      <p class="aj-que">Qué se le dice en cada mensaje.</p>
-      <p class="muted" style="margin-top:0">Edita los tres textos base y, desde el mensaje 4, el texto de cada mensaje adicional. Si dejas vacío un mensaje adicional, se usa el recordatorio o la insistencia según la respuesta del cliente.
-        Debajo de cada uno ves cómo le llegaría a un cliente de ejemplo. Si no escribes nada, se usan los textos de siempre.</p>
-      <div id="aj-pasos"></div>
-      <div id="aj-pasos-adicionales"></div>
+      <section class="aj-seccion">
+        <h3 class="aj-titulo">Pausa entre clientes</h3>
+        <p class="aj-frase">Entre un cliente y el siguiente, esperar entre <input id="aj-pausa-min" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa mínima"> <select id="aj-pausa-min-unidad" data-unidad-for="aj-pausa-min" aria-label="Unidad de pausa mínima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select> y <input id="aj-pausa-max" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa máxima"> <select id="aj-pausa-max-unidad" data-unidad-for="aj-pausa-max" aria-label="Unidad de pausa máxima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select>. Esta pausa es independiente de los tiempos por pedido.</p>
       </section>
-      </div>
+
+      <section class="aj-seccion">
+        <h3 class="aj-titulo">Textos de los recordatorios</h3>
+        <p class="muted" style="margin-top:4px">Edita el recordatorio para quien no responde y la insistencia para quien responde sin ubicación. El texto de solicitud inicial se edita en la pantalla Pedidos GSG.</p>
+        <div id="aj-pasos"></div>
+        <div id="aj-pasos-adicionales"></div>
+      </section>
 
       <div class="fila aj-guardar-barra">
         <button type="button" class="btn primario fijo" id="aj-guardar">Guardar</button>
@@ -432,8 +440,12 @@ var ESTADOS = {
   cancelado:   { texto: 'Cancelado', tono: 'gris' }
 };
 
-function chipEstado(estado) {
+/* Con un error, el error concreto («No es la persona», «Al número le faltan
+   dígitos»...), no uno general para todos. */
+function chipEstado(estado, incidencia) {
   var e = ESTADOS[estado] || { texto: String(estado || '').replace(/_/g, ' '), tono: 'gris' };
+  var ficha = incidencia && (estado === 'incidencia' || estado === 'supervision') ? catalogo[incidencia] : null;
+  if (ficha) e = { texto: ficha.titulo, tono: e.tono };
   return '<span class="chip tono-' + e.tono + '">' + esc(e.texto) + '</span>';
 }
 
@@ -596,7 +608,7 @@ async function cargarLista() {
         '<div class="sub">' + esc(s.phone || s.telefonoCrudo) + '</div></td>' +
       '<td><span class="ref-pedido">' + esc(s.referencia || '') + '</span>' +
         (s.distrito ? '<div class="sub">' + esc(s.distrito) + '</div>' : '') + '</td>' +
-      '<td>' + chipEstado(s.estado) +
+      '<td>' + chipEstado(s.estado, s.incidencia) +
         (s.requiereHumano ? ' <span class="chip tono-rojo">persona</span>' : '') + '</td>' +
       '<td>' + esc(queLePasa(s)) +
         (intentosDe(s, maxIntentos) ? '<div class="sub">' + esc(intentosDe(s, maxIntentos)) + '</div>' : '') + '</td>' +
@@ -1144,15 +1156,15 @@ document.getElementById('traer-sin-ubicacion').onclick = async function () {
 /* --- ajustes del reparto ----------------------------------------------- */
 
 var PASOS_AJ = [
-  ['solicitud', '1. Primer mensaje', 'Cuando se le pide la ubicación por primera vez.'],
-  ['recordatorio', '2. Recordatorio', 'Si pasan los minutos de espera y no contestó nada.'],
-  ['insistencia', '3. Insistencia', 'Si contestó, pero sin mandar la ubicación.']
+  ['solicitud', 'Texto inicial de respaldo', 'Se usa solo cuando el canal envía texto libre en vez de la plantilla inicial. Su espera se configura arriba.'],
+  ['recordatorio', 'Texto base del recordatorio', 'Se usa en los seguimientos si el cliente no responde.'],
+  ['insistencia', 'Texto base de la insistencia', 'Se usa en los seguimientos si el cliente responde, pero no manda la ubicación.']
 ];
-var ESTADO_PLANTILLA = { APPROVED: 'aprobada', PENDING: 'pendiente de Meta', REJECTED: 'rechazada', PAUSED: 'pausada', DISABLED: 'deshabilitada' };
-
 /* Como le quedaria al cliente de ejemplo un texto escrito aqui. */
 function previaDe(texto, ej) {
   return texto.replace(/\{nombre\}/g, ej.nombre.split(' ')[0]).replace(/\{pedido\}/g, ej.pedido).replace(/\{negocio\}/g, ej.negocio)
+    .replace(/\{tienda\}/g, ej.tienda || 'la tienda')
+    .replace(/\{producto\}/g, ej.producto || '')
     .replace(/\{direccion\}/g, ej.direccion).replace(/\{distrito\}/g, ej.distrito).replace(/\{como\}/g, ej.como);
 }
 
@@ -1171,21 +1183,26 @@ function pintarPrevia(paso) {
 function pintarAjustes(d) {
   ajustesCache = d;
   var a = d.ajustes;
-  document.getElementById('aj-pausa-min').value = a.pausaMinSegundos;
-  document.getElementById('aj-pausa-max').value = a.pausaMaxSegundos;
-  pintarSecuencia(a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos), a.textosAdicionales || []);
+  var esperas = a.esperasMensajesSegundos || (a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos)).map(function (n) { return n * 60; });
+  ponerDuracion('aj-pausa-min', a.pausaMinSegundos);
+  ponerDuracion('aj-pausa-max', a.pausaMaxSegundos);
   document.getElementById('aj-hora-inicio').value = a.horaInicio;
   document.getElementById('aj-hora-fin').value = a.horaFin;
-  document.getElementById('aj-espera-final').value = a.esperaFinalMinutos != null ? a.esperaFinalMinutos : 0;
+  ponerDuracion('aj-espera-final', a.esperaFinalSegundos != null ? a.esperaFinalSegundos : (a.esperaFinalMinutos || 0) * 60);
+  document.getElementById('aj-tiempo-solicitud').innerHTML = controlTiempoInicialHtml(a.esperaPrimerMensajeSegundos != null ? a.esperaPrimerMensajeSegundos : (a.esperaPrimerMensajeMinutos || 0) * 60);
+  pintarSecuencia(esperas);
 
   document.getElementById('aj-pasos').innerHTML = PASOS_AJ.map(function (p) {
     var paso = p[0];
-    return '<div class="paso"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
+    return '<div class="paso" id="paso-' + paso + '"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
       '<div class="previa" id="aj-previa-' + paso + '"></div>' +
       '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Una redacción por línea: se van alternando.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
       '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
-      plantillasHtml(d, paso) + '</div>';
+      '</div>';
   }).join('');
+  pintarTextosAdicionales(esperas.length, a.textosAdicionales || []);
+  document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
+  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 100 mensajes en total' : 'Agregar seguimiento';
 
   PASOS_AJ.forEach(function (p) {
     var paso = p[0];
@@ -1216,22 +1233,40 @@ function leerTextosAdicionales() {
   return textos;
 }
 
+function controlTiempoInicialHtml(segundos) {
+  var d = segundosEnUnidad(segundos);
+  return '<div class="aj-tiempo-inicial"><span>Después de recibir el pedido de GSG, enviar la plantilla tras</span><input id="aj-espera-primero" data-duracion type="number" min="0" max="86400" step="1" class="aj-num" aria-label="Espera antes de enviar la plantilla Solicitud de ubicación" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select id="aj-espera-primero-unidad" data-unidad-for="aj-espera-primero" aria-label="Unidad de espera de Solicitud de ubicación"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div><p class="cuando" style="margin:8px 0 0">Con 0, no hay espera individual; se conserva la pausa entre clientes.</p>';
+}
+
+function controlTiempoSecuenciaHtml(segundos, indice) {
+  var d = segundosEnUnidad(segundos);
+  var antecedente = indice === 0 ? 'Después de la solicitud inicial' : 'Después del seguimiento ' + indice;
+  return '<div class="aj-tiempo-paso" data-seguimiento="' + indice + '"><h4>Seguimiento ' + (indice + 1) + '</h4><p class="cuando">' + antecedente + '</p><div class="aj-tiempo-control"><input data-espera-mensaje data-duracion data-indice-espera="' + indice + '" type="number" min="1" max="86400" step="1" class="aj-num" aria-label="Espera antes del seguimiento ' + (indice + 1) + '" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select data-unidad-secuencia="' + indice + '" aria-label="Unidad de espera del seguimiento ' + (indice + 1) + '"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div></div>';
+}
+
+function pintarSecuencia(esperas) {
+  var caja = document.getElementById('aj-secuencia');
+  caja.innerHTML = esperas.map(function (segundos, indice) { return controlTiempoSecuenciaHtml(segundos, indice); }).join('');
+  document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
+  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 100 mensajes en total' : 'Agregar seguimiento';
+}
+
 function pintarTextosAdicionales(cantidad, textos) {
   var caja = document.getElementById('aj-pasos-adicionales');
   if (!caja) return;
-  var adicionales = Math.max(0, cantidad - 3);
+  // Los dos primeros seguimientos usan el texto base de su rama. Desde el
+  // tercero puede agregarse un texto propio por posición.
+  var adicionales = Math.max(0, cantidad - 2);
   caja.innerHTML = Array.from({ length: adicionales }, function (_, i) {
-    var numero = i + 4;
+    var numero = i + 3;
     var lineas = textos[i] || [];
-    var notaMeta = ajustesCache && ajustesCache.usaPlantillas
-      ? '<p class="muted">Fuera de la ventana de 24 h, Meta enviará la plantilla aprobada de recordatorio o insistencia; este texto se usa cuando se permite texto libre.</p>'
-      : '';
-    return '<div class="paso"><h4>' + numero + '. Mensaje adicional</h4>' +
-      '<p class="cuando">Se envía después del intervalo configurado arriba. Si el cliente no responde, se usa como recordatorio; si responde sin ubicación, como insistencia.</p>' +
+    return '<div class="paso"><h4>Texto propio para el seguimiento ' + numero + '</h4>' +
+      '<p class="cuando">Si lo dejas vacío, se usa el recordatorio o la insistencia según la respuesta del cliente.</p>' +
       '<div class="previa" id="aj-previa-adicional-' + i + '">' + (lineas.length ? esc(previaDe(lineas[0], ajustesCache.ejemplo)) : 'Se usará el texto base según la respuesta del cliente.') +
       '<small>' + (lineas.length ? 'tu texto' : 'texto base') + ' · para ' + esc(ajustesCache.ejemplo.nombre) + ', pedido ' + esc(ajustesCache.ejemplo.pedido) + '</small></div>' +
       '<textarea data-texto-adicional="' + i + '" rows="3" aria-label="Texto del mensaje ' + numero + '" placeholder="Una redacción por línea; si pones varias, se alternan.">' + esc(lineas.join('\n')) + '</textarea>' +
-      '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' + notaMeta + '</div>';
+      '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
+      '<button type="button" class="btn sm" data-quitar-adicional="' + i + '">Quitar mensaje</button></div>';
   }).join('');
   caja.querySelectorAll('textarea[data-texto-adicional]').forEach(function (ta) {
     ta.addEventListener('input', function () {
@@ -1255,39 +1290,81 @@ function pintarTextosAdicionales(cantidad, textos) {
   });
 }
 
-function pintarSecuencia(esperas, textosAdicionales) {
-  var existentes = textosAdicionales || leerTextosAdicionales();
-  var caja = document.getElementById('aj-secuencia');
-  caja.innerHTML = esperas.map(function (minutos, i) {
-    return '<p class="aj-frase">Mensaje ' + (i + 2) + ': enviar <input data-espera-mensaje type="number" min="1" max="1440" step="1" class="aj-num" aria-label="Minutos antes del mensaje ' + (i + 2) + '" value="' + esc(String(minutos)) + '"> minutos después del mensaje ' + (i + 1) + ' ' +
-      '<button type="button" class="btn sm" data-quitar-mensaje="' + i + '" aria-label="Quitar mensaje ' + (i + 2) + '">Quitar</button></p>';
-  }).join('');
-  pintarTextosAdicionales(esperas.length + 1, existentes);
-  document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
-  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 100 mensajes por cliente' : 'Agregar mensaje (' + (esperas.length + 2) + ' en total)';
+function segundosEnUnidad(segundos) {
+  segundos = Number(segundos) || 0;
+  if (segundos && segundos % 3600 === 0) return { cantidad: segundos / 3600, unidad: 3600 };
+  if (segundos && segundos % 60 === 0) return { cantidad: segundos / 60, unidad: 60 };
+  return { cantidad: segundos, unidad: 1 };
 }
+function ponerDuracion(id, segundos) {
+  var campo = document.getElementById(id), unidad = document.getElementById(id + '-unidad');
+  var d = segundosEnUnidad(segundos);
+  campo.value = d.cantidad;
+  unidad.value = String(d.unidad);
+  campo.setAttribute('data-segundos', String(Number(segundos) || 0));
+  campo.setAttribute('data-unidad-actual', String(d.unidad));
+}
+function leerDuracion(id) {
+  var campo = document.getElementById(id), unidad = document.getElementById(id + '-unidad');
+  return Math.round((Number(campo.value) || 0) * Number(unidad.value));
+}
+function duracionHumana(segundos) {
+  var d = segundosEnUnidad(segundos);
+  var nombre = d.unidad === 3600 ? 'h' : d.unidad === 60 ? 'min' : 's';
+  return d.cantidad + ' ' + nombre;
+}
+document.querySelector('.cuerpo.aj').addEventListener('change', function (event) {
+  var select = event.target;
+  if (!select || !select.hasAttribute('data-unidad-for')) return;
+  var id = select.getAttribute('data-unidad-for'), campo = document.getElementById(id);
+  var segundos = Number(campo.value) * Number(campo.getAttribute('data-unidad-actual') || 1);
+  var factor = Number(select.value);
+  campo.value = segundos ? (segundos / factor).toString() : '0';
+  campo.setAttribute('data-segundos', String(Math.round(segundos)));
+  campo.setAttribute('data-unidad-actual', String(factor));
+});
 
 document.getElementById('aj-agregar-mensaje').onclick = function () {
-  var esperas = Array.prototype.slice.call(document.querySelectorAll('[data-espera-mensaje]')).map(function (i) { return Number(i.value) || 1; });
-  if (esperas.length < 99) esperas.push(esperas.length ? esperas[esperas.length - 1] : (ajustesCache && ajustesCache.ajustes.esperaRespuestaMinutos || 1));
-  pintarSecuencia(esperas, leerTextosAdicionales());
-};
-document.getElementById('aj-secuencia').onclick = function (event) {
-  var indice = event.target && event.target.getAttribute('data-quitar-mensaje');
-  if (indice === null || indice === undefined) return;
-  var esperas = Array.prototype.slice.call(document.querySelectorAll('[data-espera-mensaje]')).map(function (i) { return Number(i.value) || 1; });
-  esperas.splice(Number(indice), 1);
+  var esperas = leerEsperasSecuencia();
+  if (esperas.length < 99) esperas.push(esperas.length ? esperas[esperas.length - 1] : ((ajustesCache && ajustesCache.ajustes.esperaRespuestaMinutos || 1) * 60));
   var textos = leerTextosAdicionales();
-  var mensajeEliminado = Number(indice) + 2;
-  if (mensajeEliminado >= 4) textos.splice(mensajeEliminado - 4, 1);
-  else if (textos.length) textos.shift();
-  pintarSecuencia(esperas, textos);
+  pintarSecuencia(esperas);
+  pintarTextosAdicionales(esperas.length, textos);
 };
+document.getElementById('aj-pasos-adicionales').onclick = function (event) {
+  var indice = event.target && event.target.getAttribute('data-quitar-adicional');
+  if (indice === null || indice === undefined) return;
+  var esperas = leerEsperasSecuencia();
+  var textos = leerTextosAdicionales();
+  esperas.splice(Number(indice) + 2, 1);
+  textos.splice(Number(indice), 1);
+  pintarSecuencia(esperas);
+  pintarTextosAdicionales(esperas.length, textos);
+};
+function leerEsperasSecuencia() {
+  var campos = Array.prototype.slice.call(document.querySelectorAll('[data-espera-mensaje]')).sort(function (a, b) { return Number(a.getAttribute('data-indice-espera')) - Number(b.getAttribute('data-indice-espera')); });
+  return campos.map(function (campo) {
+    var select = campo.parentNode.querySelector('[data-unidad-secuencia]');
+    return Math.max(1, Math.round((Number(campo.value) || 1) * Number(select.value)));
+  });
+}
+document.getElementById('aj-secuencia').addEventListener('change', cambiarUnidadSecuencia);
+function cambiarUnidadSecuencia(event) {
+  var select = event.target;
+  if (!select || !select.hasAttribute('data-unidad-secuencia')) return;
+  var campo = select.parentNode.querySelector('[data-espera-mensaje]');
+  var segundos = Number(campo.value) * Number(campo.getAttribute('data-unidad-actual') || 60);
+  var factor = Number(select.value);
+  campo.value = segundos ? String(segundos / factor) : '0';
+  campo.setAttribute('data-unidad-actual', String(factor));
+}
 
 var MARCADORES = [
   ['{nombre}', 'El nombre del cliente'],
   ['{pedido}', 'El número de pedido o guía'],
   ['{negocio}', 'El nombre de tu negocio'],
+  ['{tienda}', 'La tienda del pedido de GSG (por ejemplo, Mass); si no viene, «la tienda»'],
+  ['{producto}', 'El producto del pedido de GSG; si no viene, no sale'],
   ['{direccion}', 'La dirección del pedido'],
   ['{distrito}', 'El distrito'],
   ['{como}', 'Cómo mandar la ubicación: con el botón o desde el clip, según toque']
@@ -1299,22 +1376,6 @@ function marcadoresHtml() {
 }
 
 /* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */
-function plantillasHtml(d, paso) {
-  if (!d.usaPlantillas) return '';
-  var elegidas = d.ajustes.plantillas[paso] || [];
-  var delPaso = d.catalogo[paso] || [];
-  var porNombre = {};
-  d.plantillas.forEach(function (t) { if (!porNombre[t.name]) porNombre[t.name] = t; });
-  var opciones = Object.keys(porNombre).sort().map(function (n) {
-    var t = porNombre[n];
-    var marcada = elegidas.length ? elegidas.indexOf(t.name) >= 0 : delPaso.indexOf(t.name) >= 0;
-    return '<label><input type="checkbox" data-paso="' + paso + '" value="' + esc(t.name) + '"' + (marcada ? ' checked' : '') + '> ' +
-      esc(t.name) + ' <span class="muted">(' + esc(ESTADO_PLANTILLA[t.status] || t.status) + (t.propia ? ', propia' : '') + ')</span></label>';
-  }).join('');
-  return '<div class="plantillas"><b>Plantillas de Meta para este paso</b> ' +
-    '<span class="muted">(fuera de las 24 h solo puede salir una plantilla aprobada; si marcas varias, se van alternando)</span>' + opciones + '</div>';
-}
-
 async function cargarAjustes() {
   try { pintarAjustes(await api('/admin/rutas/ajustes')); }
   catch (e) { document.getElementById('aj-estado').textContent = e.message; }
@@ -1333,7 +1394,7 @@ function sincronizarAjustes(abierta) {
   if (window.shellTitulo) {
     shellTitulo(
       'Pedidos GSG',
-      abierta ? 'Ajustes de chat: horario, ritmo, insistencia y mensajes al cliente' : 'Solicitud de ubicación a cada cliente del día'
+      abierta ? 'Ajustes de mensajes: solicitud inicial y recordatorios' : 'Solicitud de ubicación a cada cliente del día'
     );
   }
 }
@@ -1355,18 +1416,17 @@ document.getElementById('aj-guardar').onclick = async function () {
     var plantillas = {}, textos = {};
     PASOS_AJ.forEach(function (p) {
       var paso = p[0];
-      var marcadas = Array.prototype.slice.call(document.querySelectorAll('input[data-paso="' + paso + '"]:checked')).map(function (i) { return i.value; });
-      // Si lo marcado es exactamente el catalogo, se guarda vacio: "las de siempre".
-      var delPaso = (ajustesCache && ajustesCache.catalogo[paso]) || [];
-      var esCatalogo = marcadas.length === delPaso.length && marcadas.every(function (n) { return delPaso.indexOf(n) >= 0; });
-      plantillas[paso] = esCatalogo ? [] : marcadas;
+      // La elección de plantilla ya no se expone en esta pantalla; conservar
+      // el valor guardado para que editar el texto/tiempos no lo borre.
+      plantillas[paso] = (ajustesCache && ajustesCache.ajustes.plantillas[paso]) || [];
       textos[paso] = document.querySelector('textarea[data-textos="' + paso + '"]').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
     });
     var r = await api('/admin/rutas/ajustes', { method: 'POST', body: {
-      pausaMinSegundos: Number(document.getElementById('aj-pausa-min').value),
-      pausaMaxSegundos: Number(document.getElementById('aj-pausa-max').value),
-      esperasMensajesMinutos: Array.prototype.slice.call(document.querySelectorAll('[data-espera-mensaje]')).map(function (i) { return Number(i.value); }),
-      esperaFinalMinutos: Number(document.getElementById('aj-espera-final').value),
+      pausaMinSegundos: leerDuracion('aj-pausa-min'),
+      pausaMaxSegundos: leerDuracion('aj-pausa-max'),
+      esperasMensajesSegundos: leerEsperasSecuencia(),
+      esperaFinalSegundos: leerDuracion('aj-espera-final'),
+      esperaPrimerMensajeSegundos: leerDuracion('aj-espera-primero'),
       horaInicio: Number(document.getElementById('aj-hora-inicio').value),
       horaFin: Number(document.getElementById('aj-hora-fin').value),
       plantillas: plantillas,
@@ -1374,10 +1434,7 @@ document.getElementById('aj-guardar').onclick = async function () {
       textosAdicionales: leerTextosAdicionales()
     }});
     var v = r.vigente;
-    estado.textContent = 'Guardado: de ' + v.horaInicio + ':00 a ' + v.horaFin + ':00, ' +
-      v.maxIntentos + ' mensajes como máximo; esperas: ' + (v.esperasMensajesMinutos || []).join(', ') + ' min; tras el último, ' + (v.esperaFinalMinutos || 0) + ' min antes de reportarlo a GSG; ' +
-      v.pausaMinSegundos + '-' + v.pausaMaxSegundos + ' s entre clientes. Se actualizaron ' +
-      (r.seguimientosReprogramados || 0) + ' seguimientos activos desde su último envío.';
+    estado.textContent = 'Guardado. «Solicitud de ubicación» sale ' + duracionHumana(v.esperaPrimerMensajeSegundos || 0) + ' después de recibir el pedido de GSG; recordatorios: ' + (v.esperasMensajesSegundos || []).map(duracionHumana).join(', ') + '. Se reprogramaron ' + (r.primerosReprogramados || 0) + ' solicitudes iniciales y ' + (r.seguimientosReprogramados || 0) + ' recordatorios activos. Ritmo entre clientes: ' + duracionHumana(v.pausaMinSegundos) + '-' + duracionHumana(v.pausaMaxSegundos) + '.';
     await refrescar();
   } catch (e) { estado.textContent = e.message; }
 };

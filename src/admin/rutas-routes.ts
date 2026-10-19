@@ -41,7 +41,7 @@ import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js
 import type { Monitor } from '../salud/monitor.js';
 import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
 import { esperaDeEnvio, limpiarEsperasEnvio } from '../rutas/espera-envio.js';
-import { despertarMotorRutas } from '../rutas/despertador.js';
+import { alCambiarHorario, despertarMotorRutas } from '../rutas/despertador.js';
 
 export interface RutasRoutesDeps {
   repos: Repos;
@@ -300,8 +300,8 @@ export async function registerRutasRoutes(
     const usaPlantillas = deps.usaPlantillas?.() ?? false;
     const conBoton = deps.conBoton?.() ?? usaPlantillas;
     const negocio = deps.nombreNegocio?.() ?? opciones.negocio;
-    const ejemplo = { nombre: 'Ana Ruiz', pedido: 'P-1024', negocio, direccion: 'Av. Larco 123', distrito: 'Miraflores', como: conBoton ? 'con el botón de aquí abajo' : 'desde el clip 📎 → Ubicación → Enviar tu ubicación actual' };
-    const ctx = { nombre: ejemplo.nombre, referencia: ejemplo.pedido, negocio, direccion: ejemplo.direccion, distrito: ejemplo.distrito, conBoton };
+    const ejemplo = { nombre: 'Ana Ruiz', pedido: 'P-1024', negocio, tienda: 'Mass', producto: 'Zapatillas talla 40', direccion: 'Av. Larco 123', distrito: 'Miraflores', como: conBoton ? 'con el botón de aquí abajo' : 'desde el clip 📎 → Ubicación → Enviar tu ubicación actual' };
+    const ctx = { nombre: ejemplo.nombre, referencia: ejemplo.pedido, negocio, tienda: ejemplo.tienda, producto: ejemplo.producto, direccion: ejemplo.direccion, distrito: ejemplo.distrito, conBoton };
     const textosDeSiempre = Object.fromEntries(PASOS.map((p) => [p, textoLibre(p as PasoUbicacion, ctx)]));
     return {
       ajustes,
@@ -314,7 +314,7 @@ export async function registerRutasRoutes(
       plantillas,
       // Como se rellenan las plantillas propias: en orden, y solo las que tenga.
       variablesPropias: ['{{1}} nombre del cliente', '{{2}} pedido o guia', '{{3}} nombre del negocio'],
-      placeholders: ['{nombre}', '{pedido}', '{negocio}', '{direccion}', '{distrito}', '{como} (= "con el botón de aquí abajo" o "desde el clip 📎 → Ubicación...", según haya botón)'],
+      placeholders: ['{nombre}', '{pedido}', '{negocio}', '{tienda} (= la tienda del pedido de GSG; si no viene, "la tienda")', '{producto} (= el producto del pedido de GSG; si no viene, no sale)', '{direccion}', '{distrito}', '{como} (= "con el botón de aquí abajo" o "desde el clip 📎 → Ubicación...", según haya botón)'],
     };
   });
 
@@ -337,7 +337,9 @@ export async function registerRutasRoutes(
       const inicio = body.horaInicio ?? actual?.horaInicio ?? opciones.horaInicio;
       const fin = body.horaFin ?? actual?.horaFin ?? opciones.horaFin;
       if (fin <= inicio) return reply.code(400).send({ error: 'La hora de fin tiene que ser mayor que la de inicio.' });
+      const antes = franja();
       await deps.ajustes.guardar({ horario: { inicio, fin } });
+      if (antes?.horaInicio !== inicio || antes?.horaFin !== fin) await alCambiarHorario(repos);
     }
     const porDefecto = ajustesPorDefecto(opciones);
     const ajustes = await repos.rutas.ajustes.set(body, porDefecto);
@@ -350,11 +352,12 @@ export async function registerRutasRoutes(
     // cuándo se guardaron los ajustes. Se hace también si la lista no cambió:
     // repetir «Guardar» repara cualquier programación que hubiera quedado
     // pendiente por una incidencia anterior.
-    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos, ajustes.esperaFinalMinutos);
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientosSegundos(ajustes.esperasMensajesSegundos ?? ajustes.esperasMensajesMinutos.map((n) => n * 60), ajustes.esperaFinalSegundos ?? ajustes.esperaFinalMinutos * 60);
+    const primerosReprogramados = await repos.rutas.reprogramarPrimerosMensajesSegundos(ajustes.esperaPrimerMensajeSegundos ?? (ajustes.esperaPrimerMensajeMinutos ?? 0) * 60);
     limpiarEsperasEnvio(repos.rutas);
     despertarMotorRutas();
     const vigente = conFranjaDeLaPolitica(aplicarAjustes(opciones, ajustes), franja());
-    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin, pausaMinSegundos: vigente.pausaMinSegundos, pausaMaxSegundos: vigente.pausaMaxSegundos }, vigente, seguimientosReprogramados };
+    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin, pausaMinSegundos: vigente.pausaMinSegundos, pausaMaxSegundos: vigente.pausaMaxSegundos }, vigente, seguimientosReprogramados, primerosReprogramados };
   });
 
   /** Volver a lo que diga la configuracion. */
@@ -362,10 +365,11 @@ export async function registerRutasRoutes(
     await repos.rutas.ajustes.reset();
     const ajustes = ajustesPorDefecto(opciones);
     if (deps.ajustes) await deps.ajustes.guardar({ ritmo: { pausaMinSeg: ajustes.pausaMinSegundos, pausaMaxSeg: ajustes.pausaMaxSegundos } });
-    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos, ajustes.esperaFinalMinutos);
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientosSegundos(ajustes.esperasMensajesSegundos ?? ajustes.esperasMensajesMinutos.map((n) => n * 60), ajustes.esperaFinalSegundos ?? ajustes.esperaFinalMinutos * 60);
+    const primerosReprogramados = await repos.rutas.reprogramarPrimerosMensajesSegundos(ajustes.esperaPrimerMensajeSegundos ?? (ajustes.esperaPrimerMensajeMinutos ?? 0) * 60);
     limpiarEsperasEnvio(repos.rutas);
     despertarMotorRutas();
-    return { ok: true, ajustes, seguimientosReprogramados };
+    return { ok: true, ajustes, seguimientosReprogramados, primerosReprogramados };
   });
 
   app.post('/admin/rutas/previsualizar', async (request) => {

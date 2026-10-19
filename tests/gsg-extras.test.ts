@@ -21,7 +21,7 @@ describe('revisar cada pedido de GSG', () => {
     expect(revisarPedidoGsg(pedidoBueno)).toEqual({ ok: true });
     expect(revisarPedidoGsg({ ...pedidoBueno, referencia: '' })).toMatchObject({ ok: false, motivo: 'sin referencia' });
     expect(revisarPedidoGsg({ ...pedidoBueno, telefono: '12' })).toMatchObject({ ok: false });
-    expect(String((revisarPedidoGsg({ ...pedidoBueno, telefono: '12' }) as { motivo: string }).motivo)).toMatch(/teléfono inválido/);
+    expect(String((revisarPedidoGsg({ ...pedidoBueno, telefono: '12' }) as { motivo: string }).motivo)).toMatch(/le faltan dígitos/);
     expect(revisarPedidoGsg({ ...pedidoBueno, lat: 'x', lng: -77 })).toMatchObject({ ok: false, motivo: 'el pin (lat, lng) no son números' });
     expect(revisarPedidoGsg({ ...pedidoBueno, lat: -120, lng: -77 })).toMatchObject({ ok: false, motivo: 'el pin (lat, lng) está fuera del mapa' });
     expect(revisarPedidoGsg(null as never)).toMatchObject({ ok: false });
@@ -48,7 +48,7 @@ describe('el verificador del contrato: solo con lo que GSG nos mandó, sin llama
     expect(mal.resumen).toMatch(/3 problema/);
     expect(mal.hallazgos.some((h) => h.tipo === 'formato' && h.donde.startsWith('POST /api/v1/entregas'))).toBe(true);
     expect(mal.hallazgos.some((h) => h.tipo === 'falta' && h.donde.startsWith('PATCH'))).toBe(true);
-    expect(mal.hallazgos.some((h) => h.donde === 'pedido P-MAL' && /teléfono inválido/.test(h.detalle))).toBe(true);
+    expect(mal.hallazgos.some((h) => h.donde === 'pedido P-MAL' && /le faltan dígitos/.test(h.detalle))).toBe(true);
   });
 });
 
@@ -62,7 +62,7 @@ describe('los tokens del simulador, los descartes, la bitácora y el cuadre (ser
     const d = s.descartesDeHoy();
     expect(d.lista).toHaveLength(2);
     expect(d.lista.map((x) => x.referencia)).toEqual(['P-MAL', '(sin referencia, el n.º 1 de faltaConfirmacion)']);
-    expect(d.lista[0]?.motivo).toMatch(/teléfono inválido/);
+    expect(d.lista[0]?.motivo).toMatch(/le faltan dígitos/);
     // Sobrevive a un reinicio: se lee de settings.
     const s2 = await crearGsgExtras({ settingsRepo });
     expect(s2.descartesDeHoy().lista).toHaveLength(2);
@@ -143,7 +143,7 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
     expect(r.status).toBe(200);
     expect(r.body.conSimulador).toBe(true);
     expect(r.body.descartes.lista.map((d) => d.referencia)).toContain('P-ROTO');
-    expect(r.body.descartes.lista.find((d) => d.referencia === 'P-ROTO')?.motivo).toMatch(/teléfono inválido/);
+    expect(r.body.descartes.lista.find((d) => d.referencia === 'P-ROTO')?.motivo).toMatch(/le faltan dígitos/);
   });
 
   it('el verificador y el cuadre responden sin llamar a GSG', async () => {

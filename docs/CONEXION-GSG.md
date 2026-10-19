@@ -83,8 +83,8 @@ contrato del plan de GSG:
 
 ```json
 { "tracking": "GSG-E-240268", "tipo": "PROBLEMA", "motivo": "TELEFONO_MAL",
-  "codigo": "sin_whatsapp", "queHacer": "Manda otro número del cliente",
-  "comentario": "El número no tiene WhatsApp: el número 51999999999 no tiene una cuenta de WhatsApp",
+  "codigo": "numero_invalido", "queHacer": "Corrige el número del cliente y vuelve a mandar el pedido.",
+  "comentario": "Número inválido: no tiene WhatsApp: el número 999999999 no tiene una cuenta de WhatsApp",
   "telefonoOrigen": "51999999999", "fechaMensaje": "2026-10-12T18:40:00.000Z",
   "eventoId": "gsgchat-GSG-E-240268-sin_whatsapp-2026-10-12" }
 ```
@@ -103,15 +103,18 @@ La bandeja sigue disponible: Luis (GSG) la lee con `GET /api/v1/reportados` y co
 
 | `error` | Cuándo |
 |---|---|
-| `telefono_invalido` | El teléfono no es un número válido (o no vino). El pedido no se guarda. |
-| `sin_whatsapp` | El número no tiene WhatsApp. |
+| `telefono_invalido` | El teléfono no es un número (vacío, letras). El pedido no se guarda. |
+| `numero_corto` | Al número le faltan dígitos (un celular tiene 9). El pedido no se guarda. |
+| `numero_largo` | Al número le sobran dígitos. El pedido no se guarda. |
+| `numero_fijo` | Es un teléfono fijo, sin WhatsApp. El pedido no se guarda. |
+| `sin_whatsapp` | El número no tiene WhatsApp. A GSG le llega como `codigo: "numero_invalido"`, para que pueda editar el número. |
 | `envio_fallido` | WhatsApp rechazó el mensaje y ya no se reintenta solo. |
 | `tracking_falta` | El pedido llegó sin tracking (la llamada da 400). |
 | `tracking_invalido` | El tracking tiene más de 60 caracteres o caracteres de control (la llamada da 400). |
 | `tracking_duplicado` | El mismo tracking vino dos veces en la misma llamada con teléfonos distintos. Se guarda solo el primero. |
-| `tracking_de_otro_pedido` | El tracking ya es de otro pedido de hoy con otro teléfono. Este no se guarda. |
+| `tracking_de_otro_pedido` | El tracking es de un pedido de hoy que ya está cerrado y viene con otro teléfono. Este no se guarda. Si el pedido sigue abierto, el otro teléfono es una corrección: se cambia y se le escribe al número nuevo (`telefonosCorregidos` en la respuesta). |
 | `telefono_de_motorizado` | El teléfono es de un motorizado registrado, no de un cliente. No se guarda. |
-| `no_soy_yo` | El cliente contestó que no es él (no hizo el pedido o el número no es suyo). |
+| `no_soy_yo` | No es la persona: el cliente contestó que no hizo el pedido o que el número no es suyo. |
 
 ### Leer y corregir desde GSG
 

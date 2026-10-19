@@ -46,7 +46,7 @@ describe('ajustes: puros', () => {
     const a = ajustesPorDefecto(opciones);
     expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 4, esperasMensajesMinutos: [30, 25, 20], esperaFinalMinutos: 20, horaInicio: 9, horaFin: 19 });
     expect(a.plantillas.solicitud).toEqual([]);
-    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], maxIntentos: 4, esperaFinalMinutos: 20 });
+    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], esperasMensajesSegundos: [1800, 1500, 1200], esperaPrimerMensajeMinutos: 0, esperaPrimerMensajeSegundos: 0, maxIntentos: 4, esperaFinalMinutos: 20, esperaFinalSegundos: 1200 });
   });
 
   it('aplicar corrige un maximo por debajo del minimo y un fin antes del inicio', () => {
@@ -72,22 +72,13 @@ describe('ajustes: puros', () => {
   });
 });
 
-describe('los textos dicen como mandar la ubicacion segun haya boton o no, y de que pedido hablan', () => {
-  it('sin boton nativo explica el clip y nunca menciona un boton; con boton, lo contrario', () => {
-    const ctx = { nombre: 'Ana Ruiz', negocio: 'La Tienda', referencia: 'P-1', direccion: 'Av. Larco 123', distrito: 'Miraflores' };
-    for (const paso of ['solicitud', 'recordatorio', 'insistencia'] as const) {
-      for (let i = 0; i < 3; i++) {
-        const sinBoton = textoLibre(paso, { ...ctx, conBoton: false }, `x${i}`);
-        expect(sinBoton).toMatch(/clip/);
-        expect(sinBoton).not.toMatch(/bot[oó]n/);
-        expect(sinBoton).toMatch(/P-1 \(Miraflores, Av\. Larco 123\)/);
-        const conBoton = textoLibre(paso, { ...ctx, conBoton: true }, `x${i}`);
-        expect(conBoton).toMatch(/bot[oó]n/);
-        expect(conBoton).not.toMatch(/clip/);
-      }
-    }
-    // Sin direccion ni distrito no queda un parentesis vacio.
-    expect(textoLibre('solicitud', { nombre: 'Ana', negocio: 'X', referencia: 'P-2' })).not.toMatch(/\(\)/);
+describe('los textos de siempre: los del dueño, con la tienda del pedido', () => {
+  it('cada paso nombra al cliente y la tienda; sin tienda, «la tienda»; sin nombre, «¡Hola!»', () => {
+    const ctx = { nombre: 'Ana Ruiz', negocio: 'La Tienda', referencia: 'P-1', tienda: 'Mass' };
+    expect(textoLibre('solicitud', ctx)).toMatch(/^¡Hola, Ana! 👋 Somos GSG y estaremos llevando tu pedido de Mass\./);
+    expect(textoLibre('recordatorio', ctx)).toMatch(/^¡Hola de nuevo, Ana! 👋 .*tu pedido de Mass\./);
+    expect(textoLibre('insistencia', ctx)).toMatch(/^Hola, Ana\. 👋 .*tu pedido de Mass\..*próximos 10 minutos/s);
+    expect(textoLibre('solicitud', { negocio: 'X' })).toMatch(/^¡Hola! 👋 .*tu pedido de la tienda\./);
   });
 
   it('una redaccion propia admite {direccion}, {distrito} y {como}', () => {
@@ -132,12 +123,12 @@ describe('ajustes: el motor los usa', () => {
     const segunda = await motor2.tick();
     expect(segunda.accion).toBe('derivacion');
 
-    // Y sin redaccion propia, el texto de siempre explica el clip (no hay boton).
+    // Y sin redaccion propia, sale el texto de siempre.
     await repos.rutas.ajustes.reset();
     await loteListo(repos, ['51987654399']);
     const motor3 = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => new Date(HORA_BUENA.getTime() + 60 * 60_000), azar: () => 0 });
     await motor3.tick();
-    expect(enviados.at(-1)?.interactive?.body).toMatch(/clip/);
+    expect(enviados.at(-1)?.interactive?.body).toMatch(/^¡Hola, Cliente! 👋 Somos GSG/);
   });
 
   it('respeta un intervalo distinto para cada seguimiento y permite más de tres mensajes', async () => {
@@ -194,6 +185,28 @@ describe('ajustes: el motor los usa', () => {
     expect(salida.accion).toBe('nada');
     expect(salida.motivo).toMatch(/12:00 a 18:00/);
     expect(enviados).toHaveLength(0);
+  });
+
+  it('al abrir a las 08:00, no envía antes y procesa el primer pedido desde las 08:00 de Lima', async () => {
+    await loteListo(repos, ['51987654324']);
+    const { sender, enviados } = senderFalso();
+    let momento = new Date('2026-03-10T12:59:59.000Z'); // 07:59:59 en Lima
+    const motor = crearMotor({
+      repos,
+      sender,
+      gsg: crearPuertoEnEspera(),
+      opciones,
+      usarPlantilla: () => false,
+      ahora: () => momento,
+      politica: () => ({ horaInicio: 8, horaFin: 19, timezone: 'America/Lima' }) as never,
+    });
+
+    expect((await motor.tick()).accion).toBe('nada');
+    expect(enviados).toHaveLength(0);
+
+    momento = new Date('2026-03-10T13:00:00.000Z'); // 08:00:00 en Lima
+    expect((await motor.tick()).accion).toBe('envio');
+    expect(enviados).toHaveLength(1);
   });
 
   it('con plantilla, usa la propia elegida y rellena sus variables en el orden fijo', async () => {
@@ -275,7 +288,7 @@ describe('ajustes y plantillas propias: la API', () => {
     // Para la pantalla: un cliente de ejemplo y como le llegaria cada paso, en cristiano.
     expect(body.ejemplo).toMatchObject({ nombre: 'Ana Ruiz', pedido: 'P-1024', distrito: 'Miraflores' });
     expect(body.textosDeSiempre.solicitud).toContain('Ana');
-    expect(body.textosDeSiempre.solicitud).toContain('P-1024');
+    expect(body.textosDeSiempre.solicitud).toContain('Mass');
     expect(body.textosDeSiempre.recordatorio).toContain('ubicación');
     expect(typeof body.usaPlantillas).toBe('boolean');
   });
@@ -317,6 +330,18 @@ describe('ajustes y plantillas propias: la API', () => {
     for (const payload of [{ esperasMensajesMinutos: [0] }, { esperasMensajesMinutos: Array(100).fill(1) }]) {
       expect((await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload })).statusCode).toBe(400);
     }
+  });
+
+  it('al cambiar el tiempo de «Solicitud de ubicación», reprograma pedidos iniciales que aún no han salido', async () => {
+    const lote = await loteListo(repos, ['51987654320']);
+    const [solicitud] = await repos.rutas.listarSolicitudes({ loteId: lote.id, limit: 1, offset: 0 });
+    const fechaPedido = solicitud!.createdAt;
+    await repos.rutas.actualizarSolicitud(solicitud!.id, { proximoIntentoAt: new Date(fechaPedido.getTime() + 10 * 60_000) });
+
+    const r = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { esperaPrimerMensajeSegundos: 30 } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().primerosReprogramados).toBe(1);
+    expect((await repos.rutas.solicitud(solicitud!.id))!.proximoIntentoAt!.getTime()).toBe(fechaPedido.getTime() + 30_000);
   });
 
   it('al cambiar la secuencia, reprograma los seguimientos activos desde su ultimo envio', async () => {

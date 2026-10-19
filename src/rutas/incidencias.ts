@@ -45,7 +45,7 @@ export interface Incidencia {
 export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
   numero_corto: {
     codigo: 'numero_corto',
-    titulo: 'Número incompleto',
+    titulo: 'Al número le faltan dígitos',
     explicacion: 'El número tiene menos dígitos de los que necesita un celular. Casi siempre falta uno al copiarlo.',
     queHacer: 'Corregir el número en la ficha del cliente y volver a intentarlo.',
     requiereHumano: true,
@@ -54,7 +54,7 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
   },
   numero_largo: {
     codigo: 'numero_largo',
-    titulo: 'Número con dígitos de más',
+    titulo: 'Al número le sobran dígitos',
     explicacion: 'El número trae más dígitos de los que existen. Suele ser un pegado doble o un prefijo repetido.',
     queHacer: 'Corregir el número en la ficha del cliente y volver a intentarlo.',
     requiereHumano: true,
@@ -63,7 +63,7 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
   },
   numero_invalido: {
     codigo: 'numero_invalido',
-    titulo: 'Número que no se puede marcar',
+    titulo: 'Número inválido',
     explicacion: 'Lo que vino en el campo del teléfono no es un número marcable: letras, guiones sueltos o un campo vacío.',
     queHacer: 'Pedir el teléfono correcto a quien tomó el pedido.',
     requiereHumano: true,
@@ -81,7 +81,7 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
   },
   sin_whatsapp: {
     codigo: 'sin_whatsapp',
-    titulo: 'El número no tiene WhatsApp',
+    titulo: 'Número inválido: no tiene WhatsApp',
     explicacion: 'El número existe y está bien escrito, pero no hay una cuenta de WhatsApp detrás.',
     queHacer: 'El motorizado lo llama por teléfono; no hay nada que mandar por aquí.',
     requiereHumano: true,
@@ -90,7 +90,7 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
   },
   numero_equivocado: {
     codigo: 'numero_equivocado',
-    titulo: 'Contestó alguien que no es el cliente',
+    titulo: 'No es la persona',
     explicacion: 'Quien respondió dice que no es esa persona o que no espera ningún envío. El número está mal en el pedido.',
     queHacer: 'Avisar a GSG para que corrija el contacto del pedido. No insistir a este número.',
     requiereHumano: true,

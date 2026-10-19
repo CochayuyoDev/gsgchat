@@ -36,13 +36,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { responderLectura } from '../../web/cache-lectura.js';
 import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
+import { telefonoParaGsg } from '../../entregas/servicio.js';
 import type { EntregasRepo } from '../../entregas/repo.js';
 import type { ActividadRepo } from '../../auth/actividad.js';
 import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio } from '../../entregas/datos-envio.js';
 import { horarioGsgSchema } from '../../entregas/seguimiento-gsg.js';
 import { vistaMensaje, type VistaMensaje } from '../../entregas/primer-mensaje.js';
 import { enviarError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError, type DetalleCampo } from '../errores.js';
-import { avisosParaApi, reportadoParaApi, TEXTOS_REPORTADOS, type ErrorReportado, type ReportadosRepo } from '../../entregas/reportados.js';
+import { avisosParaApi, errorDeTelefono, telefonoNoSirve, reportadoParaApi, TEXTOS_REPORTADOS, type ErrorReportado, type ReportadosRepo } from '../../entregas/reportados.js';
 import { estadoDelReporteAGsg, type ReporteAGsg } from '../../entregas/reportados.js';
 import { despacharReportes, encolarProblemaGsg, problemaParaGsg, type PuertoGsg } from '../../rutas/gsg.js';
 import type { Reporte, RutasRepo } from '../../db/rutas.js';
@@ -261,7 +262,8 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     id: e.id,
     idExterno: e.externoId ?? null,
     dia: e.dia,
-    telefono: e.phone,
+    // Los 9 digitos, como los maneja GSG (sin el 51 delante).
+    telefono: telefonoParaGsg(e.phone),
     nombre: e.nombre,
     direccion: e.direccion,
     distrito: e.distrito,
@@ -435,6 +437,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const creadas: Array<{ referencia: string; id: number; urgente?: boolean }> = [];
     const repetidas: string[] = [];
     const descartadas: Descartada[] = [];
+    const telefonosCorregidos: Array<{ referencia: string; tracking: string; antes: string; ahora: string }> = [];
     const indiceDe = new Map(lectura.map((p, i) => [p, i]));
 
     // Antes de guardar: el tracking repetido en la llamada con otro telefono,
@@ -467,7 +470,21 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
       }
       const otro = delDia.find((e) => e.estado !== 'cancelada' && e.phone !== phone && (e.referencia.toLowerCase() === p.referencia.toLowerCase() || String(e.datosEnvio?.tracking ?? '').toLowerCase() === k));
       if (otro) {
-        await descartar('tracking_de_otro_pedido', `el tracking ${tracking} ya es del pedido ${otro.referencia} de hoy, con otro teléfono`);
+        // El mismo tracking de hoy con otro telefono: GSG corrigio el numero
+        // desde su sistema (p. ej. tras un «numero invalido»). Se cambia el
+        // telefono del pedido y se le escribe al numero nuevo.
+        const r = await entregas.corregirTelefono(otro.id, String(p.telefono), quien);
+        if (r.ok) {
+          if (!repetidas.includes(otro.referencia)) repetidas.push(otro.referencia);
+          telefonosCorregidos.push({ referencia: otro.referencia, tracking, antes: otro.phone, ahora: r.entrega.phone });
+          const datos = deps.repo ? fusionarDatosEnvio(r.entrega.datosEnvio, datosEnvioDeCrudo(p)) : null;
+          if (datos && deps.repo) await deps.repo.actualizar(otro.id, { datosEnvio: datos });
+          if (deps.reportados) await deps.reportados.marcarCorregidos(otro.datosEnvio?.tracking ?? otro.referencia, { telefono: r.entrega.phone, tracking: null, por: quien, via: 'POST /api/v1/entregas' }, new Date()).catch(() => []);
+          continue;
+        }
+        if (r.codigo === 'telefono_de_motorizado') await descartar('telefono_de_motorizado', r.motivo);
+        else if (r.codigo === 'telefono_invalido') await descartar(errorDeTelefono(p.telefono), r.motivo);
+        else await descartar('tracking_de_otro_pedido', `el tracking ${tracking} ya es del pedido ${otro.referencia} de hoy, con otro teléfono, y ese pedido ya está cerrado`);
         continue;
       }
       if (deps.repo && (await deps.repo.motorizadoPorTelefono(phone).catch(() => null))) {
@@ -484,7 +501,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const urgentes = new Set(aceptados.filter((p) => p.urgente).map((p) => p.referencia.trim().toLowerCase()));
     const externo = (p: Pedido) => (p.id === null || p.id === undefined || p.id === '' ? null : String(p.id));
     const telefonoMalo = async (p: Pedido, motivo: string) => {
-      if (/tel[eé]fono inv[aá]lido/i.test(motivo)) await reportar('telefono_invalido', p as unknown as Record<string, unknown>, motivo);
+      if (telefonoNoSirve(p.telefono)) await reportar(errorDeTelefono(p.telefono), p as unknown as Record<string, unknown>, motivo);
     };
 
     try {
@@ -494,8 +511,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         const r = await entregas.crearVarias(filas, quien, { retener: true });
         for (const d of r.descartadas) {
           const p = sinPin[d.linea - 1];
-          const malo = /tel[eé]fono inv[aá]lido/i.test(d.motivo);
-          descartadas.push({ referencia: p?.referencia ?? d.texto, motivo: d.motivo, indice: p ? (indiceDe.get(p) ?? d.linea - 1) : d.linea - 1, ...(malo ? { error: 'telefono_invalido' as const } : {}) });
+          const malo = Boolean(p) && telefonoNoSirve(p!.telefono);
+          descartadas.push({ referencia: p?.referencia ?? d.texto, motivo: d.motivo, indice: p ? (indiceDe.get(p) ?? d.linea - 1) : d.linea - 1, ...(malo ? { error: errorDeTelefono(p?.telefono) } : {}) });
           if (p) await telefonoMalo(p, d.motivo);
         }
         for (const rep of r.repetidas) if (!repetidas.includes(rep)) repetidas.push(rep);
@@ -511,7 +528,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
           const datos = ya ? fusionarDatosEnvio(ya.datosEnvio, datosEnvioDeCrudo(p)) : null;
           if (ya && datos && deps.repo) await deps.repo.actualizar(ya.id, { datosEnvio: datos });
         } else {
-          descartadas.push({ referencia: p.referencia, motivo: r.motivo, indice: indiceDe.get(p) ?? 0, ...(/tel[eé]fono/i.test(r.motivo) ? { error: 'telefono_invalido' as const } : {}) });
+          descartadas.push({ referencia: p.referencia, motivo: r.motivo, indice: indiceDe.get(p) ?? 0, ...(telefonoNoSirve(p.telefono) ? { error: errorDeTelefono(p.telefono) } : {}) });
           await telefonoMalo(p, r.motivo);
         }
       }
@@ -553,9 +570,10 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         repetidas,
         existentes,
         descartadas: descartadas.map(({ referencia, motivo, error }) => ({ referencia, motivo, ...(error ? { error } : {}) })),
+        ...(telefonosCorregidos.length ? { telefonosCorregidos } : {}),
         whatsapp,
         ...(conAviso.length ? { avisosMensaje: conAviso.map((e) => ({ referencia: e.referencia, id: e.id, estado: (e.mensaje as VistaMensaje).estado, motivo: (e.mensaje as VistaMensaje).motivo })) } : {}),
-        detalle: `${creadas.length} pedido${creadas.length === 1 ? '' : 's'} nuevo${creadas.length === 1 ? '' : 's'}${repetidas.length ? `, ${repetidas.length} ya estaba${repetidas.length === 1 ? '' : 'n'}` : ''}${descartadas.length ? `, ${descartadas.length} descartado${descartadas.length === 1 ? '' : 's'}` : ''}.${conAviso.length ? ` ${conAviso.length} quedaron guardados pero su primer mensaje no salió (se reintenta o está en la bandeja de errores).` : ''}`,
+        detalle: `${creadas.length} pedido${creadas.length === 1 ? '' : 's'} nuevo${creadas.length === 1 ? '' : 's'}${repetidas.length ? `, ${repetidas.length} ya estaba${repetidas.length === 1 ? '' : 'n'}` : ''}${telefonosCorregidos.length ? `, ${telefonosCorregidos.length} con el teléfono corregido` : ''}${descartadas.length ? `, ${descartadas.length} descartado${descartadas.length === 1 ? '' : 's'}` : ''}.${conAviso.length ? ` ${conAviso.length} quedaron guardados pero su primer mensaje no salió (se reintenta o está en la bandeja de errores).` : ''}`,
       } };
     } catch (error) {
       log.error({ err: error }, 'no se pudieron guardar los pedidos de GSG');
@@ -857,7 +875,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`dia` va como AAAA-MM-DD (por ejemplo 2026-10-10).', [{ campo: 'dia', mensaje: 'AAAA-MM-DD' }]);
     const dia = q.data.dia ?? entregas.diaDeHoy();
     const fichas = await entregas.fichasTrackings(dia);
-    return { ok: true, dia, total: fichas.length, trackings: fichas };
+    // Los telefonos con los 9 digitos, como los maneja GSG.
+    return { ok: true, dia, total: fichas.length, trackings: fichas.map((f) => ({ ...f, telefono: telefonoParaGsg(f.telefono) })) };
   });
 
   app.delete<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {

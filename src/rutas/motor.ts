@@ -51,12 +51,17 @@ export interface OpcionesMotor {
   pausaMaxSegundos: number;
   /** Cuanto se espera una respuesta antes de volver a escribir. */
   esperaRespuestaMinutos: number;
+  /** Minutos que espera el primer mensaje desde que llega el pedido (0 o sin dar = de inmediato). */
+  esperaPrimerMensajeMinutos?: number;
+  esperaPrimerMensajeSegundos?: number;
   /** Espera específica después de cada mensaje enviado, del 1 al 2 en índice 0. */
   esperasMensajesMinutos?: number[];
+  esperasMensajesSegundos?: number[];
   /** Mensajes por cliente antes de pasarlo a una persona. */
   maxIntentos: number;
   /** Minutos tras el último mensaje antes de darlo por «sin respuesta» (0 o sin dar = en el momento). */
   esperaFinalMinutos?: number;
+  esperaFinalSegundos?: number;
   /** Campo antiguo conservado por compatibilidad; no activa otro modo de envío. */
   pedirUbicacionCadaMinutos: number;
   /** Franja horaria en la que se puede escribir, hora del negocio. */
@@ -277,8 +282,8 @@ export function crearMotor(deps: MotorDeps): Motor {
   /** El primer intervalo es después del mensaje 1; si no hay secuencia, usar el valor antiguo. */
   const esperaHastaElSiguiente = (intentosPrevios: number): number =>
     intentosPrevios + 1 >= opciones.maxIntentos
-      ? Math.max(0, opciones.esperaFinalMinutos ?? 0)
-      : opciones.esperasMensajesMinutos?.[intentosPrevios] ?? opciones.esperaRespuestaMinutos;
+      ? Math.max(0, opciones.esperaFinalSegundos ?? (opciones.esperaFinalMinutos ?? 0) * 60)
+      : opciones.esperasMensajesSegundos?.[intentosPrevios] ?? (opciones.esperasMensajesMinutos?.[intentosPrevios] ?? opciones.esperaRespuestaMinutos) * 60;
 
   /** Cuando se mando el ultimo mensaje, para respetar la pausa. */
   let ultimoEnvio = 0;
@@ -351,6 +356,14 @@ export function crearMotor(deps: MotorDeps): Motor {
     }
     const primera = candidatas[0]!;
     return { name: primera.name, language: primera.language, variables: primera.variables };
+  }
+
+  /** La tienda y el producto del pedido de GSG de esa solicitud ({tienda}, {producto}); sin pedido, null. */
+  async function datosDelPedido(solicitud: Solicitud): Promise<{ tienda: string | null; producto: string | null }> {
+    if (!solicitud.phone || !repos.entregas) return { tienda: null, producto: null };
+    const vinculadas = await repos.entregas.vivasDeLoteYTelefono(solicitud.loteId, solicitud.phone).catch(() => []);
+    const pedido = vinculadas.find((e) => e.referencia === solicitud.referencia) ?? vinculadas[0];
+    return { tienda: pedido?.datosEnvio?.empresaNombre?.trim() || null, producto: pedido?.datosEnvio?.producto?.trim() || null };
   }
 
   const contexto = (solicitud: Solicitud): ContextoMensaje => ({
@@ -428,7 +441,7 @@ export function crearMotor(deps: MotorDeps): Motor {
   /** Manda el mensaje del paso y deja la solicitud como corresponda. */
   async function enviarPaso(solicitud: Solicitud, paso: PasoUbicacion): Promise<ResultadoTick> {
     const phone = solicitud.phone!;
-    const ctx = contexto(solicitud);
+    const ctx = { ...contexto(solicitud), ...(await datosDelPedido(solicitud)) };
 
     // GSG puede haber cancelado el envio (o marcado el numero como malo) despues de encolarlo.
     if (deps.antesDeEscribir && !(await deps.antesDeEscribir(solicitud).catch(() => true))) {
@@ -519,7 +532,7 @@ export function crearMotor(deps: MotorDeps): Motor {
         estado: solicitud.estado === 'respondio' ? 'respondio' : 'enviado',
         intentos: solicitud.intentos + 1,
         ultimoEnvioAt: momento,
-        proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 60_000),
+        proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 1000),
         // Un envio que sale bien deja atras cualquier incidencia de envio
         // anterior: si antes fallo y ahora salio, ya no hay nada que reportar.
         incidencia: null,
@@ -613,7 +626,7 @@ export function crearMotor(deps: MotorDeps): Motor {
     await repos.rutas.actualizarSolicitud(solicitud.id, {
       intentos,
       ultimoEnvioAt: momento,
-      proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 60_000),
+      proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 1000),
       incidencia: 'error_envio',
       incidenciaDetalle: salida.error.slice(0, 300),
     });
@@ -659,6 +672,8 @@ export function crearMotor(deps: MotorDeps): Motor {
       : Math.max(0, ultimoEnvio + pausaEfectiva() - ahora().getTime()),
 
     async proximoDespertarEn() {
+      // Con el horario de ahora, no con el de la ultima pasada.
+      await refrescarAjustes();
       const proximo = await repos.rutas.proximoIntentoAt();
       if (!proximo) return null;
       const momento = ahora();
@@ -735,7 +750,21 @@ export function crearMotor(deps: MotorDeps): Motor {
         deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
         return true;
       };
+      // El primer mensaje espera lo configurado desde que llegó el pedido. Solo
+      // si nadie le puso hora (un «reintentar ahora» la pone y sale ya).
+      const esperaPrimero = Math.max(0, opciones.esperaPrimerMensajeSegundos ?? (opciones.esperaPrimerMensajeMinutos ?? 0) * 60) * 1000;
+      const primeroTodaviaNo = (s: Solicitud): Date | null => {
+        if (!esperaPrimero || s.estado !== 'pendiente' || s.intentos > 0 || s.proximoIntentoAt) return null;
+        const sale = new Date(s.createdAt.getTime() + esperaPrimero);
+        return sale.getTime() > momento.getTime() ? sale : null;
+      };
       for (let vueltas = 0; siguiente && vueltas < 50; vueltas++) {
+        const sale = primeroTodaviaNo(siguiente);
+        if (sale) {
+          await repos.rutas.actualizarSolicitud(siguiente.id, { proximoIntentoAt: sale });
+          [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+          continue;
+        }
         if (await yaTieneUbicacion(siguiente)) {
           [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
           continue;
