@@ -66,7 +66,7 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(html).toContain('id="aj-secuencia"');
     expect(html).toContain('id="aj-agregar-mensaje"');
     expect(html).toContain('esperasMensajesMinutos');
-    expect(html).toContain('Máximo 100 mensajes por cliente');
+    expect(html).toContain('Máximo 100 mensajes en total');
     expect(html).not.toContain('aj-cada');
     expect(html).not.toContain('sin tope de mensajes');
     expect(html).not.toContain('hasta que la mande');
@@ -74,7 +74,27 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(html).toContain('id="aj-pasos-adicionales"');
     expect(html).toContain('data-texto-adicional');
     expect(html).toContain('textosAdicionales');
-    expect(html).toContain("numero = i + 4");
+    expect(html).toContain('numero = i + 3');
+    expect(html).toContain('Solicitud inicial de ubicación');
+    expect(html).toContain('class="aj-seccion aj-seccion-inicial"');
+    expect(html).toContain('id="aj-tiempo-solicitud"');
+    expect(html).toContain('Plantilla «Solicitud de ubicación»');
+    expect(html).toContain('Recordatorios y seguimientos');
+    expect(html).toContain('class="aj-tiempo-grid"');
+    expect(html).toContain("' + antecedente + '");
+    expect(html).toContain('Seguimiento ');
+    expect(html).toContain('id="aj-secuencia"');
+    expect(html).toContain('id="aj-espera-primero-unidad"');
+    expect(html).toContain("indice === 0 ? 'Después de la solicitud inicial' : 'Después del seguimiento ' + indice");
+    expect(html).toContain('data-indice-espera');
+    expect(html).toContain('data-quitar-adicional');
+    expect(html).toContain('data-unidad-secuencia');
+    expect(html).toContain('id="aj-pausa-min-unidad"');
+    expect(html).toContain('horas</option>');
+    expect(html).toContain('Pausa entre clientes');
+    expect(html).toContain('Textos de los seguimientos');
+    expect(html).not.toContain('Plantillas de Meta para este paso');
+    expect(html).not.toContain('data-paso=');
   });
   it('el javascript de la página compila sin errores de sintaxis', () => {
     expect(() => new Function(scriptDeLaPagina())).not.toThrow();

@@ -26,8 +26,12 @@ export interface AjustesRutas {
   esperaRespuestaMinutos: number;
   /** Minutos que espera el primer mensaje desde que llega el pedido (0 = de inmediato). */
   esperaPrimerMensajeMinutos?: number;
+  /** Campo canónico: espera antes de la primera plantilla, en segundos. */
+  esperaPrimerMensajeSegundos?: number;
   /** Minutos entre cada mensaje y el siguiente; el primero es del 1 al 2. */
   esperasMensajesMinutos: number[];
+  /** Campo canónico: esperas de seguimiento, en segundos. */
+  esperasMensajesSegundos?: number[];
   /** Mensajes por cliente antes de pasarlo al repartidor. */
   maxIntentos: number;
   /**
@@ -36,6 +40,7 @@ export interface AjustesRutas {
    * que la última espera entre mensajes.
    */
   esperaFinalMinutos: number;
+  esperaFinalSegundos?: number;
   /** Campo antiguo: siempre desactivado, incluso al leer ajustes previos. */
   pedirUbicacionCadaMinutos: number;
   /** Franja horaria de envio, hora del negocio. */
@@ -60,15 +65,19 @@ const listaDeTextos = z.array(z.string().trim().min(1).max(1000)).max(10);
 const textosAdicionalesSchema = z.array(listaDeTextos).max(97);
 const listaDeNombres = z.array(z.string().trim().min(1).max(120)).max(10);
 const esperasSchema = z.array(z.coerce.number().int().min(1).max(24 * 60)).max(99);
+const esperasSegundosSchema = z.array(z.coerce.number().int().min(1).max(24 * 60 * 60)).max(99);
 
 export const ajustesSchema = z.object({
-  pausaMinSegundos: z.coerce.number().int().min(1).max(600),
-  pausaMaxSegundos: z.coerce.number().int().min(1).max(900),
+  pausaMinSegundos: z.coerce.number().int().min(1).max(24 * 60 * 60),
+  pausaMaxSegundos: z.coerce.number().int().min(1).max(24 * 60 * 60),
   esperaRespuestaMinutos: z.coerce.number().int().min(1).max(24 * 60),
   esperaPrimerMensajeMinutos: z.coerce.number().int().min(0).max(24 * 60),
+  esperaPrimerMensajeSegundos: z.coerce.number().int().min(0).max(24 * 60 * 60),
   esperasMensajesMinutos: esperasSchema,
+  esperasMensajesSegundos: esperasSegundosSchema,
   maxIntentos: z.coerce.number().int().min(1).max(100),
   esperaFinalMinutos: z.coerce.number().int().min(0).max(24 * 60),
+  esperaFinalSegundos: z.coerce.number().int().min(0).max(24 * 60 * 60),
   pedirUbicacionCadaMinutos: z.literal(0),
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
@@ -93,6 +102,9 @@ export function ajustesPorDefecto(opciones: OpcionesMotor): AjustesRutas {
     esperasMensajesMinutos,
     maxIntentos: opciones.maxIntentos,
     esperaFinalMinutos: esperasMensajesMinutos.at(-1) ?? opciones.esperaRespuestaMinutos,
+    esperaPrimerMensajeSegundos: 0,
+    esperasMensajesSegundos: esperasMensajesMinutos.map((n) => n * 60),
+    esperaFinalSegundos: (esperasMensajesMinutos.at(-1) ?? opciones.esperaRespuestaMinutos) * 60,
     pedirUbicacionCadaMinutos: 0,
     horaInicio: opciones.horaInicio,
     horaFin: opciones.horaFin,
@@ -110,10 +122,13 @@ export function aplicarAjustes(opciones: OpcionesMotor, ajustes: AjustesRutas): 
     // El minimo manda si alguien pone el maximo por debajo.
     pausaMaxSegundos: Math.max(ajustes.pausaMinSegundos, ajustes.pausaMaxSegundos),
     esperaRespuestaMinutos: ajustes.esperaRespuestaMinutos,
-    esperaPrimerMensajeMinutos: ajustes.esperaPrimerMensajeMinutos,
-    esperasMensajesMinutos: ajustes.esperasMensajesMinutos,
+    esperaPrimerMensajeMinutos: ajustes.esperaPrimerMensajeSegundos !== undefined ? ajustes.esperaPrimerMensajeSegundos / 60 : ajustes.esperaPrimerMensajeMinutos,
+    esperaPrimerMensajeSegundos: ajustes.esperaPrimerMensajeSegundos ?? (ajustes.esperaPrimerMensajeMinutos ?? 0) * 60,
+    esperasMensajesMinutos: ajustes.esperasMensajesSegundos?.map((n) => n / 60) ?? ajustes.esperasMensajesMinutos,
+    esperasMensajesSegundos: ajustes.esperasMensajesSegundos ?? ajustes.esperasMensajesMinutos.map((n) => n * 60),
     maxIntentos: ajustes.maxIntentos,
-    esperaFinalMinutos: ajustes.esperaFinalMinutos,
+    esperaFinalMinutos: ajustes.esperaFinalSegundos !== undefined ? ajustes.esperaFinalSegundos / 60 : ajustes.esperaFinalMinutos,
+    esperaFinalSegundos: ajustes.esperaFinalSegundos ?? ajustes.esperaFinalMinutos * 60,
     pedirUbicacionCadaMinutos: 0,
     // El horario de aqui es solo el SUELO: en una instalacion sin ajustes
     // generales (una suelta, las pruebas) sigue siendo el que manda. Donde si
@@ -228,25 +243,36 @@ export function createAjustesRepo(pool: Pool): AjustesRepo {
   const fusionar = (base: AjustesRutas, guardado: Partial<AjustesRutas>): AjustesRutas => {
     const intervalo = guardado.esperaRespuestaMinutos ?? base.esperaRespuestaMinutos;
     const maxIntentos = Math.max(1, Math.min(100, guardado.maxIntentos ?? base.maxIntentos));
-    let esperas = guardado.esperasMensajesMinutos ?? base.esperasMensajesMinutos;
+    let esperasSegundos = guardado.esperasMensajesSegundos
+      ?? (guardado.esperasMensajesMinutos ? guardado.esperasMensajesMinutos.map((n) => n * 60) : undefined)
+      ?? base.esperasMensajesSegundos
+      ?? base.esperasMensajesMinutos.map((n) => n * 60);
+    let esperas = guardado.esperasMensajesMinutos ?? esperasSegundos.map((n) => n / 60);
     // Compatibilidad con ajustes previos: replicar el intervalo antiguo por
     // cada seguimiento. Si el cliente solo cambia el máximo, conservar el
     // ritmo actual y ajustar la longitud de la secuencia.
-    if (!guardado.esperasMensajesMinutos) {
+    if (!guardado.esperasMensajesMinutos && !guardado.esperasMensajesSegundos) {
       const cantidad = guardado.maxIntentos !== undefined ? maxIntentos - 1 : esperas.length;
       esperas = Array.from({ length: cantidad }, (_, i) =>
         guardado.esperaRespuestaMinutos !== undefined || !esperas[i] ? intervalo : esperas[i]);
+      esperasSegundos = esperas.map((n) => n * 60);
     }
     esperas = esperas.slice(0, 99);
+    esperasSegundos = esperasSegundos.slice(0, 99);
+    const primerSegundos = guardado.esperaPrimerMensajeSegundos ?? (guardado.esperaPrimerMensajeMinutos !== undefined ? guardado.esperaPrimerMensajeMinutos * 60 : base.esperaPrimerMensajeSegundos ?? (base.esperaPrimerMensajeMinutos ?? 0) * 60);
+    const finalSegundos = guardado.esperaFinalSegundos ?? (guardado.esperaFinalMinutos !== undefined ? guardado.esperaFinalMinutos * 60 : guardado.esperasMensajesSegundos || guardado.esperasMensajesMinutos ? esperasSegundos.at(-1) ?? intervalo * 60 : base.esperaFinalSegundos ?? base.esperaFinalMinutos * 60);
     return {
       ...base,
       ...guardado,
       esperaRespuestaMinutos: esperas[0] ?? intervalo,
       esperasMensajesMinutos: esperas,
+      esperaPrimerMensajeSegundos: primerSegundos,
+      esperaPrimerMensajeMinutos: primerSegundos / 60,
+      esperasMensajesSegundos: esperasSegundos,
       maxIntentos: esperas.length + 1,
       // Sin guardar, la espera final sigue a la última espera entre mensajes.
-      esperaFinalMinutos: guardado.esperaFinalMinutos
-        ?? (guardado.esperasMensajesMinutos || base.esperaFinalMinutos === undefined ? esperas.at(-1) ?? intervalo : base.esperaFinalMinutos),
+      esperaFinalMinutos: finalSegundos / 60,
+      esperaFinalSegundos: finalSegundos,
       pedirUbicacionCadaMinutos: 0,
       plantillas: { ...base.plantillas, ...(guardado.plantillas ?? {}) },
       textos: { ...base.textos, ...(guardado.textos ?? {}) },

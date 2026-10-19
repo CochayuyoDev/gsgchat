@@ -85,8 +85,8 @@ export const ajustesGeneralesSchema = z.object({
   ritmo: z.object({
     maxPorMinuto: enteroONada(60),
     maxPorHora: enteroONada(2000),
-    pausaMinSeg: enteroONada(600),
-    pausaMaxSeg: enteroONada(900),
+    pausaMinSeg: enteroONada(24 * 60 * 60),
+    pausaMaxSeg: enteroONada(24 * 60 * 60),
     nuevosContactosPorDia: enteroONada(5000),
     maxPorContactoDia: enteroONada(20),
     separacionContactoMin: enteroONada(24 * 60),

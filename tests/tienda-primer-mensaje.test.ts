@@ -98,6 +98,9 @@ describe('la espera del primer mensaje', () => {
     expect(ajustesSchema.partial().parse({ esperaPrimerMensajeMinutos: 15 }).esperaPrimerMensajeMinutos).toBe(15);
     expect(() => ajustesSchema.partial().parse({ esperaPrimerMensajeMinutos: -1 })).toThrow();
     expect(ajustesPorDefecto(opciones).esperaPrimerMensajeMinutos ?? 0).toBe(0);
+    expect(ajustesSchema.partial().parse({ esperaPrimerMensajeSegundos: 30 }).esperaPrimerMensajeSegundos).toBe(30);
+    expect(ajustesSchema.partial().parse({ esperasMensajesSegundos: [30, 3600] }).esperasMensajesSegundos).toEqual([30, 3600]);
+    expect(ajustesSchema.partial().parse({ pausaMinSegundos: 3600, pausaMaxSegundos: 7200 })).toMatchObject({ pausaMinSegundos: 3600, pausaMaxSegundos: 7200 });
   });
 
   it('el primer mensaje sale a los minutos configurados desde que llegó el pedido', async () => {
@@ -127,5 +130,22 @@ describe('la espera del primer mensaje', () => {
     const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => HORA_BUENA, azar: () => 0 });
     expect((await motor.tick()).accion).toBe('envio');
     expect(enviados).toHaveLength(1);
+  });
+
+  it('acepta el retraso inicial exacto en segundos desde la llegada del pedido', async () => {
+    const repos = createFakeRepos();
+    repos.rutas = createFakeRutas(() => HORA_BUENA);
+    await loteListo(repos, '51987654323', 'GSG-3');
+    await repos.rutas.ajustes.set({ esperaPrimerMensajeSegundos: 30, esperasMensajesSegundos: [45] }, ajustesPorDefecto(opciones));
+    const { sender, enviados } = senderFalso();
+    let momento = new Date(HORA_BUENA.getTime() + 29_000);
+    const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => momento, azar: () => 0 });
+    expect((await motor.tick()).accion).toBe('nada');
+    expect(enviados).toHaveLength(0);
+    momento = new Date(HORA_BUENA.getTime() + 30_000);
+    expect((await motor.tick()).accion).toBe('envio');
+    expect(enviados).toHaveLength(1);
+    const [sol] = await repos.rutas.listarSolicitudes({ limit: 1, offset: 0 });
+    expect(sol!.proximoIntentoAt!.getTime()).toBe(HORA_BUENA.getTime() + 75_000);
   });
 });

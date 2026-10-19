@@ -352,11 +352,12 @@ export async function registerRutasRoutes(
     // cuándo se guardaron los ajustes. Se hace también si la lista no cambió:
     // repetir «Guardar» repara cualquier programación que hubiera quedado
     // pendiente por una incidencia anterior.
-    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos, ajustes.esperaFinalMinutos);
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientosSegundos(ajustes.esperasMensajesSegundos ?? ajustes.esperasMensajesMinutos.map((n) => n * 60), ajustes.esperaFinalSegundos ?? ajustes.esperaFinalMinutos * 60);
+    const primerosReprogramados = await repos.rutas.reprogramarPrimerosMensajesSegundos(ajustes.esperaPrimerMensajeSegundos ?? (ajustes.esperaPrimerMensajeMinutos ?? 0) * 60);
     limpiarEsperasEnvio(repos.rutas);
     despertarMotorRutas();
     const vigente = conFranjaDeLaPolitica(aplicarAjustes(opciones, ajustes), franja());
-    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin, pausaMinSegundos: vigente.pausaMinSegundos, pausaMaxSegundos: vigente.pausaMaxSegundos }, vigente, seguimientosReprogramados };
+    return { ok: true, ajustes: { ...ajustes, horaInicio: vigente.horaInicio, horaFin: vigente.horaFin, pausaMinSegundos: vigente.pausaMinSegundos, pausaMaxSegundos: vigente.pausaMaxSegundos }, vigente, seguimientosReprogramados, primerosReprogramados };
   });
 
   /** Volver a lo que diga la configuracion. */
@@ -364,10 +365,11 @@ export async function registerRutasRoutes(
     await repos.rutas.ajustes.reset();
     const ajustes = ajustesPorDefecto(opciones);
     if (deps.ajustes) await deps.ajustes.guardar({ ritmo: { pausaMinSeg: ajustes.pausaMinSegundos, pausaMaxSeg: ajustes.pausaMaxSegundos } });
-    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientos(ajustes.esperasMensajesMinutos, ajustes.esperaFinalMinutos);
+    const seguimientosReprogramados = await repos.rutas.reprogramarSeguimientosSegundos(ajustes.esperasMensajesSegundos ?? ajustes.esperasMensajesMinutos.map((n) => n * 60), ajustes.esperaFinalSegundos ?? ajustes.esperaFinalMinutos * 60);
+    const primerosReprogramados = await repos.rutas.reprogramarPrimerosMensajesSegundos(ajustes.esperaPrimerMensajeSegundos ?? (ajustes.esperaPrimerMensajeMinutos ?? 0) * 60);
     limpiarEsperasEnvio(repos.rutas);
     despertarMotorRutas();
-    return { ok: true, ajustes, seguimientosReprogramados };
+    return { ok: true, ajustes, seguimientosReprogramados, primerosReprogramados };
   });
 
   app.post('/admin/rutas/previsualizar', async (request) => {
