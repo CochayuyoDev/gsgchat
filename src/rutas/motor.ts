@@ -53,12 +53,15 @@ export interface OpcionesMotor {
   esperaRespuestaMinutos: number;
   /** Minutos que espera el primer mensaje desde que llega el pedido (0 o sin dar = de inmediato). */
   esperaPrimerMensajeMinutos?: number;
+  esperaPrimerMensajeSegundos?: number;
   /** Espera específica después de cada mensaje enviado, del 1 al 2 en índice 0. */
   esperasMensajesMinutos?: number[];
+  esperasMensajesSegundos?: number[];
   /** Mensajes por cliente antes de pasarlo a una persona. */
   maxIntentos: number;
   /** Minutos tras el último mensaje antes de darlo por «sin respuesta» (0 o sin dar = en el momento). */
   esperaFinalMinutos?: number;
+  esperaFinalSegundos?: number;
   /** Campo antiguo conservado por compatibilidad; no activa otro modo de envío. */
   pedirUbicacionCadaMinutos: number;
   /** Franja horaria en la que se puede escribir, hora del negocio. */
@@ -279,8 +282,8 @@ export function crearMotor(deps: MotorDeps): Motor {
   /** El primer intervalo es después del mensaje 1; si no hay secuencia, usar el valor antiguo. */
   const esperaHastaElSiguiente = (intentosPrevios: number): number =>
     intentosPrevios + 1 >= opciones.maxIntentos
-      ? Math.max(0, opciones.esperaFinalMinutos ?? 0)
-      : opciones.esperasMensajesMinutos?.[intentosPrevios] ?? opciones.esperaRespuestaMinutos;
+      ? Math.max(0, opciones.esperaFinalSegundos ?? (opciones.esperaFinalMinutos ?? 0) * 60)
+      : opciones.esperasMensajesSegundos?.[intentosPrevios] ?? (opciones.esperasMensajesMinutos?.[intentosPrevios] ?? opciones.esperaRespuestaMinutos) * 60;
 
   /** Cuando se mando el ultimo mensaje, para respetar la pausa. */
   let ultimoEnvio = 0;
@@ -529,7 +532,7 @@ export function crearMotor(deps: MotorDeps): Motor {
         estado: solicitud.estado === 'respondio' ? 'respondio' : 'enviado',
         intentos: solicitud.intentos + 1,
         ultimoEnvioAt: momento,
-        proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 60_000),
+        proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 1000),
         // Un envio que sale bien deja atras cualquier incidencia de envio
         // anterior: si antes fallo y ahora salio, ya no hay nada que reportar.
         incidencia: null,
@@ -623,7 +626,7 @@ export function crearMotor(deps: MotorDeps): Motor {
     await repos.rutas.actualizarSolicitud(solicitud.id, {
       intentos,
       ultimoEnvioAt: momento,
-      proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 60_000),
+      proximoIntentoAt: new Date(momento.getTime() + esperaHastaElSiguiente(solicitud.intentos) * 1000),
       incidencia: 'error_envio',
       incidenciaDetalle: salida.error.slice(0, 300),
     });
@@ -749,7 +752,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       };
       // El primer mensaje espera lo configurado desde que llegó el pedido. Solo
       // si nadie le puso hora (un «reintentar ahora» la pone y sale ya).
-      const esperaPrimero = Math.max(0, opciones.esperaPrimerMensajeMinutos ?? 0) * 60_000;
+      const esperaPrimero = Math.max(0, opciones.esperaPrimerMensajeSegundos ?? (opciones.esperaPrimerMensajeMinutos ?? 0) * 60) * 1000;
       const primeroTodaviaNo = (s: Solicitud): Date | null => {
         if (!esperaPrimero || s.estado !== 'pendiente' || s.intentos > 0 || s.proximoIntentoAt) return null;
         const sale = new Date(s.createdAt.getTime() + esperaPrimero);

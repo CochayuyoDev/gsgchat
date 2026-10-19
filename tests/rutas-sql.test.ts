@@ -219,6 +219,20 @@ describe('lotes y solicitudes', () => {
     expect((await repos.rutas.solicitud(enPausa!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 30 * 60_000);
   });
 
+  it('reprograma el envío inicial pendiente de Solicitud de ubicación desde que llegó el pedido', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Solicitud inicial' });
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    const [pendiente] = await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '977777777', phone: '51977777777' }]);
+    await repos.rutas.actualizarSolicitud(pendiente!.id, { proximoIntentoAt: new Date(Date.now() + 10 * 60_000) });
+
+    expect(await repos.rutas.reprogramarPrimerosMensajesSegundos(30)).toBe(1);
+    const reprogramada = (await repos.rutas.solicitud(pendiente!.id))!;
+    expect(Math.abs(reprogramada.proximoIntentoAt!.getTime() - (reprogramada.createdAt.getTime() + 30_000))).toBeLessThan(1_000);
+
+    expect(await repos.rutas.reprogramarPrimerosMensajesSegundos(0)).toBe(1);
+    expect((await repos.rutas.solicitud(pendiente!.id))!.proximoIntentoAt).toBeNull();
+  });
+
   it('la bandeja ensena primero lo ultimo que se movio, y el id desempata', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Reparto' });
     const [a, b, c, d] = await repos.rutas.agregarSolicitudes(lote.id, [

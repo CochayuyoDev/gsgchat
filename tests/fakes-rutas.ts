@@ -77,15 +77,38 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       : legado
         ? Array.from({ length: total - 1 }, (_, i) => g.esperaRespuestaMinutos !== undefined ? espera : base.esperasMensajesMinutos[i] ?? espera)
         : combinado.esperasMensajesMinutos;
+    const esperasSegundos = g.esperasMensajesSegundos !== undefined
+      ? g.esperasMensajesSegundos as number[]
+      : g.esperasMensajesMinutos !== undefined
+        ? (g.esperasMensajesMinutos as number[]).map((n) => n * 60)
+        : legado
+          ? esperas.map((n) => n * 60)
+        : combinado.esperasMensajesSegundos ?? esperas.map((n) => n * 60);
+    const esperaPrimerMensajeSegundos = g.esperaPrimerMensajeSegundos !== undefined
+      ? Number(g.esperaPrimerMensajeSegundos)
+      : g.esperaPrimerMensajeMinutos !== undefined
+        ? Number(g.esperaPrimerMensajeMinutos) * 60
+        : combinado.esperaPrimerMensajeSegundos ?? Number(combinado.esperaPrimerMensajeMinutos ?? 0) * 60;
+    const esperaFinalSegundos = g.esperaFinalSegundos !== undefined
+      ? Number(g.esperaFinalSegundos)
+      : g.esperaFinalMinutos !== undefined
+        ? Number(g.esperaFinalMinutos) * 60
+        : g.esperasMensajesSegundos !== undefined || g.esperasMensajesMinutos !== undefined
+          ? esperasSegundos.at(-1) ?? espera * 60
+          : combinado.esperaFinalSegundos ?? Number(combinado.esperaFinalMinutos ?? 0) * 60;
     return {
       ...combinado,
       esperasMensajesMinutos: esperas,
+      esperasMensajesSegundos: esperasSegundos,
+      esperaPrimerMensajeSegundos,
+      esperaPrimerMensajeMinutos: esperaPrimerMensajeSegundos / 60,
       esperaRespuestaMinutos: esperas[0] ?? espera,
       maxIntentos: esperas.length + 1,
       // Como en src/rutas/ajustes.ts: sin guardar, sigue a la última espera.
       esperaFinalMinutos: g.esperaFinalMinutos !== undefined
         ? Number(g.esperaFinalMinutos)
-        : g.esperasMensajesMinutos !== undefined || base.esperaFinalMinutos === undefined ? esperas.at(-1) ?? espera : base.esperaFinalMinutos,
+        : esperaFinalSegundos / 60,
+      esperaFinalSegundos,
       plantillas: { ...base.plantillas, ...((g.plantillas as AjustesRutas['plantillas'] | undefined) ?? {}) },
       textos: { ...base.textos, ...((g.textos as AjustesRutas['textos'] | undefined) ?? {}) },
     };
@@ -255,14 +278,31 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
     },
 
     async reprogramarSeguimientos(esperasMensajesMinutos, esperaFinalMinutos = 0) {
+      return this.reprogramarSeguimientosSegundos(esperasMensajesMinutos.map((n) => n * 60), esperaFinalMinutos * 60);
+    },
+    async reprogramarSeguimientosSegundos(esperasMensajesSegundos, esperaFinalSegundos = 0) {
       const activos = new Set(lotes.filter((l) => l.estado === 'enviando' || l.estado === 'pausado').map((l) => l.id));
       let reprogramadas = 0;
       for (const solicitud of solicitudes) {
         if (!activos.has(solicitud.loteId) || !['enviado', 'respondio'].includes(solicitud.estado) || solicitud.requiereHumano || !solicitud.ultimoEnvioAt) continue;
-        const maxIntentos = esperasMensajesMinutos.length + 1;
+        const maxIntentos = esperasMensajesSegundos.length + 1;
         solicitud.proximoIntentoAt = solicitud.intentos >= maxIntentos
-          ? new Date(solicitud.ultimoEnvioAt.getTime() + Math.max(0, esperaFinalMinutos) * 60_000)
-          : new Date(solicitud.ultimoEnvioAt.getTime() + (esperasMensajesMinutos[solicitud.intentos - 1] ?? esperasMensajesMinutos.at(-1) ?? 0) * 60_000);
+          ? new Date(solicitud.ultimoEnvioAt.getTime() + Math.max(0, esperaFinalSegundos) * 1000)
+          : new Date(solicitud.ultimoEnvioAt.getTime() + (esperasMensajesSegundos[solicitud.intentos - 1] ?? esperasMensajesSegundos.at(-1) ?? 0) * 1000);
+        solicitud.updatedAt = reloj();
+        reprogramadas++;
+      }
+      return reprogramadas;
+    },
+
+    async reprogramarPrimerosMensajesSegundos(esperaSegundos) {
+      const activos = new Set(lotes.filter((l) => l.estado === 'enviando' || l.estado === 'pausado').map((l) => l.id));
+      const esperaMs = Math.max(0, Math.trunc(esperaSegundos)) * 1000;
+      let reprogramadas = 0;
+      for (const solicitud of solicitudes) {
+        if (!activos.has(solicitud.loteId) || solicitud.estado !== 'pendiente' || solicitud.intentos !== 0 ||
+            !solicitud.proximoIntentoAt || solicitud.incidencia || solicitud.requiereHumano) continue;
+        solicitud.proximoIntentoAt = esperaMs ? new Date(solicitud.createdAt.getTime() + esperaMs) : null;
         solicitud.updatedAt = reloj();
         reprogramadas++;
       }

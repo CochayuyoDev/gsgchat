@@ -46,7 +46,7 @@ describe('ajustes: puros', () => {
     const a = ajustesPorDefecto(opciones);
     expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 4, esperasMensajesMinutos: [30, 25, 20], esperaFinalMinutos: 20, horaInicio: 9, horaFin: 19 });
     expect(a.plantillas.solicitud).toEqual([]);
-    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], maxIntentos: 4, esperaFinalMinutos: 20 });
+    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], esperasMensajesSegundos: [1800, 1500, 1200], esperaPrimerMensajeMinutos: 0, esperaPrimerMensajeSegundos: 0, maxIntentos: 4, esperaFinalMinutos: 20, esperaFinalSegundos: 1200 });
   });
 
   it('aplicar corrige un maximo por debajo del minimo y un fin antes del inicio', () => {
@@ -187,6 +187,28 @@ describe('ajustes: el motor los usa', () => {
     expect(enviados).toHaveLength(0);
   });
 
+  it('al abrir a las 08:00, no envía antes y procesa el primer pedido desde las 08:00 de Lima', async () => {
+    await loteListo(repos, ['51987654324']);
+    const { sender, enviados } = senderFalso();
+    let momento = new Date('2026-03-10T12:59:59.000Z'); // 07:59:59 en Lima
+    const motor = crearMotor({
+      repos,
+      sender,
+      gsg: crearPuertoEnEspera(),
+      opciones,
+      usarPlantilla: () => false,
+      ahora: () => momento,
+      politica: () => ({ horaInicio: 8, horaFin: 19, timezone: 'America/Lima' }) as never,
+    });
+
+    expect((await motor.tick()).accion).toBe('nada');
+    expect(enviados).toHaveLength(0);
+
+    momento = new Date('2026-03-10T13:00:00.000Z'); // 08:00:00 en Lima
+    expect((await motor.tick()).accion).toBe('envio');
+    expect(enviados).toHaveLength(1);
+  });
+
   it('con plantilla, usa la propia elegida y rellena sus variables en el orden fijo', async () => {
     await loteListo(repos, ['51987654321']);
     await repos.templates.upsert(approvedTemplate({ name: 'mi_solicitud', language: 'es', category: 'UTILITY', variables: 2, body: 'Hola {{1}}, su pedido {{2}}.', propia: true }));
@@ -308,6 +330,18 @@ describe('ajustes y plantillas propias: la API', () => {
     for (const payload of [{ esperasMensajesMinutos: [0] }, { esperasMensajesMinutos: Array(100).fill(1) }]) {
       expect((await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload })).statusCode).toBe(400);
     }
+  });
+
+  it('al cambiar el tiempo de «Solicitud de ubicación», reprograma pedidos iniciales que aún no han salido', async () => {
+    const lote = await loteListo(repos, ['51987654320']);
+    const [solicitud] = await repos.rutas.listarSolicitudes({ loteId: lote.id, limit: 1, offset: 0 });
+    const fechaPedido = solicitud!.createdAt;
+    await repos.rutas.actualizarSolicitud(solicitud!.id, { proximoIntentoAt: new Date(fechaPedido.getTime() + 10 * 60_000) });
+
+    const r = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { esperaPrimerMensajeSegundos: 30 } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().primerosReprogramados).toBe(1);
+    expect((await repos.rutas.solicitud(solicitud!.id))!.proximoIntentoAt!.getTime()).toBe(fechaPedido.getTime() + 30_000);
   });
 
   it('al cambiar la secuencia, reprograma los seguimientos activos desde su ultimo envio', async () => {
