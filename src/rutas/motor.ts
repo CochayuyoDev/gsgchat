@@ -301,6 +301,12 @@ export function crearMotor(deps: MotorDeps): Motor {
    * desde la pantalla si las hay, o las de siempre.
    */
   function textoDelPaso(paso: PasoUbicacion, ctx: ContextoMensaje, clave: string, intentosPrevios: number): string {
+    const seguimiento = intentosPrevios > 0 && paso !== 'solicitud' ? ajustes.textosSeguimientos?.[intentosPrevios - 1] : undefined;
+    if (seguimiento && paso !== 'solicitud') {
+      const lineas = seguimiento[paso];
+      if (lineas.length) return rellenarTexto(elegirVariante(lineas, clave), ctx);
+      return textoLibre(paso, ctx, clave);
+    }
     const adicional = intentosPrevios >= 3 ? ajustes.textosAdicionales[intentosPrevios - 3] : undefined;
     if (adicional?.length) return rellenarTexto(elegirVariante(adicional, clave), ctx);
     const propias = ajustes.textos[paso];

@@ -131,6 +131,31 @@ describe('ajustes: el motor los usa', () => {
     expect(enviados.at(-1)?.interactive?.body).toMatch(/^¡Hola, Cliente! 👋 Somos GSG/);
   });
 
+  it('envía el texto de la posición y rama del seguimiento guardado', async () => {
+    for (const respondio of [false, true]) {
+      repos = createFakeRepos();
+      await loteListo(repos, ['51987654321']);
+      await repos.rutas.ajustes.set({
+        esperasMensajesMinutos: [1, 1],
+        textosSeguimientos: [
+          { recordatorio: ['Primero sin respuesta'], insistencia: ['Primero con respuesta'] },
+          { recordatorio: ['Segundo sin respuesta'], insistencia: ['Segundo con respuesta'] },
+        ],
+      }, ajustesPorDefecto(opciones));
+      const { sender, enviados } = senderFalso();
+      let momento = HORA_BUENA;
+      const motor = crearMotor({ repos, sender, gsg: crearPuertoEnEspera(), opciones, usarPlantilla: () => false, ahora: () => momento, azar: () => 0 });
+      await motor.tick();
+      const [sol] = await repos.rutas.listarSolicitudes({ limit: 1, offset: 0 });
+      if (respondio) await repos.rutas.actualizarSolicitud(sol!.id, { estado: 'respondio' });
+      for (const titulo of ['Primero', 'Segundo']) {
+        momento = new Date(momento.getTime() + 61_000);
+        expect((await motor.tick()).accion).toBe('envio');
+        expect(enviados.at(-1)?.interactive?.body).toBe(titulo + (respondio ? ' con respuesta' : ' sin respuesta'));
+      }
+    }
+  });
+
   it('respeta un intervalo distinto para cada seguimiento y permite más de tres mensajes', async () => {
     await loteListo(repos, ['51987654321']);
     await repos.rutas.ajustes.set({
@@ -291,6 +316,18 @@ describe('ajustes y plantillas propias: la API', () => {
     expect(body.textosDeSiempre.solicitud).toContain('Mass');
     expect(body.textosDeSiempre.recordatorio).toContain('ubicación');
     expect(typeof body.usaPlantillas).toBe('boolean');
+  });
+
+  it('guarda y recupera las dos variantes por seguimiento', async () => {
+    const textosSeguimientos = [
+      { recordatorio: ['No respondió 1'], insistencia: ['Respondió 1'] },
+      { recordatorio: ['No respondió 2'], insistencia: [] },
+    ];
+    const r = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { textosSeguimientos } });
+    expect(r.statusCode).toBe(200);
+    const leido = await app.inject({ method: 'GET', url: '/admin/rutas/ajustes', headers: auth });
+    expect(leido.json().ajustes.textosSeguimientos).toEqual(textosSeguimientos);
+    await repos.rutas.ajustes.reset();
   });
 
   it('POST guarda, valida y se refleja en el estado del modulo; DELETE vuelve a la configuracion', async () => {
