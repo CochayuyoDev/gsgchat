@@ -11,6 +11,8 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { createServer, type Server } from 'node:http';
+import { crearPuertoGsg } from '../src/rutas/gsg.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
@@ -61,6 +63,11 @@ const queue: OutboundQueue = {
 // carpeta temporal, no en la .wa-media de verdad.
 const mediaDir = mkdtempSync(join(tmpdir(), 'wa-chat-media-'));
 
+// Un GSG de mentira: guarda lo que le llega para ver que saldria al real.
+const recibido: Array<{ metodo: string; url: string; clave: string | undefined; cuerpo: Record<string, unknown> }> = [];
+let responder: { status: number; cuerpo: unknown } = { status: 200, cuerpo: { ok: true, id: 'gsg-123' } };
+let mock: Server;
+let mockPort = 0;
 let app: FastifyInstance;
 let repos: FakeRepos;
 let wa: FakeWhatsApp;
@@ -80,13 +87,27 @@ async function build() {
   });
   const settings = await createFakeSettings(config);
   deps = { repos, wa, sender, config, settings };
-  return buildServer({ config, repos, settings, wa, sender, queue, logger: false, mediaDir });
+  const gsg = crearPuertoGsg({ GSG_URL: `http://127.0.0.1:${mockPort}/api/`, GSG_TOKEN: '', GSG_API_KEY: 'clave-de-prueba-gsg' });
+  return buildServer({ config, repos, settings, wa, sender, queue, logger: false, mediaDir, gsg });
 }
 
 
-beforeAll(async () => { app = await build(); await app.ready(); });
-afterAll(async () => { await app.close(); });
-beforeEach(async () => { await app.close(); app = await build(); await app.ready(); });
+beforeAll(async () => {
+  mock = createServer((req, res) => {
+    let texto = '';
+    req.on('data', (c) => (texto += c));
+    req.on('end', () => {
+      recibido.push({ metodo: req.method ?? '', url: req.url ?? '', clave: req.headers['x-api-key'] as string | undefined, cuerpo: texto ? JSON.parse(texto) : {} });
+      res.writeHead(responder.status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(responder.cuerpo));
+    });
+  });
+  await new Promise<void>((r) => mock.listen(0, '127.0.0.1', () => r()));
+  mockPort = (mock.address() as { port: number }).port;
+  app = await build(); await app.ready();
+});
+afterAll(async () => { await app.close(); mock.close(); });
+beforeEach(async () => { recibido.length = 0; responder = { status: 200, cuerpo: { ok: true, id: 'gsg-123' } }; await app.close(); app = await build(); await app.ready(); });
 
 describe('incidencia manual', () => {
   const telefono = '51987654321';
@@ -110,5 +131,29 @@ describe('incidencia manual', () => {
 
     const op = await app.inject({ method: 'GET', url: `/admin/incidencia-manual?phone=${telefono}`, headers: auth });
     expect(op.json().tipos.map((t: { codigo: string }) => t.codigo)).toContain('incidencia-manual');
+  });
+
+  it('lo que le llega a GSG: ruta, clave y cuerpo; y el estado queda Enviada', async () => {
+    await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
+    expect(recibido).toHaveLength(1);
+    const r = recibido[0]!;
+    console.log('GSG RECIBE:', r.metodo, r.url, 'x-api-key:', r.clave, JSON.stringify(r.cuerpo, null, 2));
+    expect(r.metodo).toBe('POST');
+    expect(r.url).toBe('/api/reported');
+    expect(r.clave).toBe('clave-de-prueba-gsg');
+    expect(r.cuerpo).toMatchObject({ tracking: 'GSG-1', tipo: 'PROBLEMA', motivo: 'OTRO', codigo: 'incidencia-manual', comentario: cuerpo.resumen, telefonoOrigen: '987654321' });
+    expect(String(r.cuerpo.eventoId)).toMatch(/^gsgchat-GSG-1-incidencia-manual-/);
+    const op = await app.inject({ method: 'GET', url: `/admin/incidencia-manual?phone=${telefono}`, headers: auth });
+    expect(op.json().enviadas[0]).toMatchObject({ estado: 'Enviada', tipo: 'incidencia-manual' });
+  });
+
+  it('si GSG rechaza, queda Fallida o Pendiente de reintento y se puede reintentar sin duplicar', async () => {
+    responder = { status: 500, cuerpo: { error: 'caido' } };
+    await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
+    const op = await app.inject({ method: 'GET', url: `/admin/incidencia-manual?phone=${telefono}`, headers: auth });
+    console.log('ESTADO CON GSG CAIDO:', JSON.stringify(op.json().enviadas));
+    expect(op.json().enviadas[0].estado).not.toBe('Enviada');
+    const reintento = await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
+    expect(reintento.json()).toMatchObject({ duplicada: true });
   });
 });
