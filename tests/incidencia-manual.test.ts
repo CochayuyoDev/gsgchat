@@ -107,7 +107,13 @@ beforeAll(async () => {
   app = await build(); await app.ready();
 });
 afterAll(async () => { await app.close(); mock.close(); });
-beforeEach(async () => { recibido.length = 0; responder = { status: 200, cuerpo: { ok: true, id: 'gsg-123' } }; await app.close(); app = await build(); await app.ready(); });
+let entregaGuardada: { id: number };
+beforeEach(async () => {
+  recibido.length = 0; responder = { status: 200, cuerpo: { ok: true, id: 'gsg-123' } };
+  await app.close(); app = await build(); await app.ready();
+  // El cliente tiene su pedido guardado: de ahi sale siempre el tracking.
+  entregaGuardada = (await repos.entregas.crearEntrega({ dia: '2026-10-20', referencia: 'GSG-1', phone: '51987654321', nombre: 'Rosa', ubicacionEstado: 'pendiente', estado: 'esperando_ubicacion' } as never)).entrega;
+});
 
 describe('incidencia manual', () => {
   const telefono = '51987654321';
@@ -160,11 +166,25 @@ describe('incidencia manual', () => {
   it('el pedido y la solicitud pasan a «reportada a GSG» solos', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Reparto' });
     const [sol] = await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '987654321', phone: telefono, nombre: 'Rosa', referencia: 'GSG-1', estado: 'respondio' }]);
-    const { entrega } = await repos.entregas.crearEntrega({ dia: '2026-10-20', referencia: 'GSG-1', phone: telefono, nombre: 'Rosa', ubicacionEstado: 'pendiente', estado: 'esperando_ubicacion' } as never);
 
     await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
 
     expect(await repos.rutas.solicitud(sol!.id)).toMatchObject({ estado: 'incidencia', incidencia: 'incidencia_manual', requiereHumano: true });
-    expect(await repos.entregas.entrega(entrega.id)).toMatchObject({ estado: 'incidencia', incidencia: 'incidencia_manual', requiereHumano: true });
+    expect(await repos.entregas.entrega(entregaGuardada.id)).toMatchObject({ estado: 'incidencia', incidencia: 'incidencia_manual', requiereHumano: true });
+  });
+
+  it('el tracking sale siempre del guardado: no se acepta otro ni se inventa', async () => {
+    const otro = await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: { ...cuerpo, tracking: 'INVENTADO-9' } });
+    expect(otro.statusCode).toBe(400);
+    expect(recibido).toHaveLength(0);
+
+    // Sin decir cual, y con un solo pedido guardado, usa ese.
+    const { tracking: _omitido, ...sinTracking } = cuerpo;
+    const ok = await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: sinTracking });
+    expect(ok.statusCode).toBe(200);
+    expect(recibido[0]!.cuerpo.tracking).toBe('GSG-1');
+
+    const sinPedido = await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: { ...cuerpo, phone: '51900000000' } });
+    expect(sinPedido.statusCode).toBe(400);
   });
 });

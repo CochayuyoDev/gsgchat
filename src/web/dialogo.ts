@@ -283,10 +283,12 @@ async function abrirIncidenciaManual(opciones) {
       '<div class="campo"><label for="im-tipo">Tipo de error</label><select id="im-tipo">' +
         (datos.tipos || []).map(function (t) { return '<option value="' + esc(t.codigo) + '"' + (t.codigo === 'incidencia-manual' ? ' selected' : '') + '>' + esc(t.titulo) + ' (' + esc(t.codigo) + ')</option>'; }).join('') +
       '</select></div>' +
-      '<div class="campo"><label for="im-tracking">Pedido y tracking que se envían</label>' +
+      '<div class="campo"><label for="im-tracking">Pedido y tracking guardados (es el que se envía)</label>' +
         (pedidos.length > 1
           ? '<select id="im-tracking">' + pedidos.map(function (p) { return '<option value="' + esc(p.tracking) + '">' + esc(p.tracking) + (p.cliente ? ' - ' + esc(p.cliente) : '') + '</option>'; }).join('') + '</select>'
-          : '<input id="im-tracking" autocomplete="off" value="' + esc(pedidos.length ? pedidos[0].tracking : (opciones.tracking || '')) + '" placeholder="Tracking del pedido">') +
+          : pedidos.length === 1
+            ? '<input id="im-tracking" value="' + esc(pedidos[0].tracking) + '" readonly>'
+            : '<input id="im-tracking" value="" readonly placeholder="Sin pedido con tracking guardado">') +
         '<div class="muted">Teléfono del cliente: ' + esc(phone) + '</div></div>' +
       '<div class="campo"><label for="im-resumen">Resumen para GSG (obligatorio)</label><textarea id="im-resumen" rows="4" maxlength="500" placeholder="Por qué reportas el error"></textarea></div>' +
       '<div class="mal" id="im-mal"></div>' +
@@ -300,7 +302,7 @@ async function abrirIncidenciaManual(opciones) {
   si.onclick = async function () {
     var resumen = fondo.querySelector('#im-resumen').value.trim();
     var tracking = fondo.querySelector('#im-tracking').value.trim();
-    if (!tracking) { mal.textContent = 'Falta el tracking del pedido.'; return; }
+    if (!tracking) { mal.textContent = 'Este cliente no tiene un pedido con tracking guardado.'; return; }
     if (resumen.length < 5) { mal.textContent = 'Escribe el resumen para GSG.'; return; }
     si.disabled = true; si.textContent = 'Enviando…'; mal.textContent = '';
     try {
