@@ -170,7 +170,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
   await registerAutomationRoutes(app, { repos, sender });
-  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz });
+  const gsg = deps.gsg ?? crearPuertoGsg(config);
+  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg });
   await registerLeadsRoutes(app, {
     repos,
     // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.
@@ -185,7 +186,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   await registerRutasRoutes(app, {
     repos,
     config,
-    gsg: deps.gsg ?? crearPuertoGsg(config),
+    gsg,
     opciones: opcionesDesdeConfig(config),
     salud: deps.salud,
     supervisor: () => deps.ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,

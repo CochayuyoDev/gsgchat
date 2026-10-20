@@ -99,7 +99,9 @@ export type GateCode =
   | 'contact_spacing'
   | 'rhythm'
   // regla del dueño en «Solo lo de GSG»: un texto del modelo nunca sale a un cliente
-  | 'regla_gsg';
+  | 'regla_gsg'
+  // "De este me encargo yo": con el bot callado en el chat, lo automatico no sale
+  | 'bot_pausado';
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;

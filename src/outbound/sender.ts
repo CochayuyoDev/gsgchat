@@ -84,6 +84,8 @@ export interface SendJob {
   cierreTrasGracias?: boolean;
   /** Acuse de una ubicación recibida; queda identificado en el historial real. */
   confirmacionUbicacion?: boolean;
+  /** Respuesta a lo que el cliente contesto con el bot callado (ubicacion pedida, boton de entrega): sale igual. */
+  traspasaPausa?: boolean;
   /** Huella de coordenadas normalizadas para distinguir una corrección del mismo pedido. */
   confirmationScope?: string;
   /**
@@ -336,6 +338,27 @@ export function createSender(deps: SenderDeps): Sender {
           createdAt: at,
         });
         return { ok: true, wamid, deliveryId };
+      }
+
+      // "De este me encargo yo": con el bot callado en este chat no sale nada
+      // automatico (respuestas, seguimientos, rutas, campanas), venga de la
+      // cola que venga. Lo escrito a mano (manual u origen 'persona', que es lo de la
+      // Cloud API) pasa, y el acuse de una ubicacion
+      // recibida tambien (regla del dueño, 25/09). No se reintenta: al volver a
+      // activar el bot no tiene que salir lo que quedo pendiente durante la pausa.
+      if (contact.botPausadoAt && job.manual !== true && job.origen !== 'persona' && job.confirmacionUbicacion !== true && job.traspasaPausa !== true) {
+        const deliveryId = await repos.deliveries.create({
+          contactId: contact.id,
+          campaignId: job.campaignId ?? null,
+          kind: job.kind,
+          templateName: job.templateName ?? null,
+          category: job.category,
+          variables: job.variables,
+          businessInitiated: false,
+        });
+        const reason = 'el bot esta callado en este chat: lo atiende una persona';
+        await repos.deliveries.markBlocked(deliveryId, `bot_pausado: ${reason}`);
+        return { ok: false, blocked: true, code: 'bot_pausado', reason, deliveryId };
       }
 
       // Sin socket no hay nada que intentar: se devuelve "espera" sin dejar
