@@ -78,7 +78,7 @@ const CSS = `
   .plegable { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); }
   .plegable > summary { cursor: pointer; padding: 14px 18px; font-weight: 600; font-size: 15px; list-style: none; display: flex; align-items: center; gap: 10px; }
   .plegable > summary::-webkit-details-marker { display: none; }
-  .plegable > summary::after { content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(45deg); transition: transform .15s; }
+  .plegable > summary::after { content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: rotate(45deg);  }
   .plegable[open] > summary::after { transform: rotate(-135deg); }
   .plegable > summary .muted { font-weight: 400; font-size: var(--fs-small); }
   .plegable .dentro { padding: 0 18px 16px; }

@@ -573,7 +573,7 @@ function mostrarToken(tienda, token, pasos) {
   el('ti-url-plan').textContent = tienda.urlPlan;
   el('ti-pasos').innerHTML = (pasos || []).map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('');
   el('ti-nueva').classList.remove('hidden');
-  el('ti-nueva').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el('ti-nueva').scrollIntoView({ behavior: 'auto', block: 'center' });
 }
 
 function pintarCobro(c) {
@@ -696,7 +696,7 @@ async function cargar(opciones) {
 }
 
 function irAlAlta() {
-  el('caja-alta').scrollIntoView({ behavior: 'smooth' });
+  el('caja-alta').scrollIntoView({ behavior: 'auto' });
   el('ti-nombre').focus();
 }
 

@@ -66,7 +66,7 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(html).toContain('id="aj-secuencia"');
     expect(html).toContain('id="aj-agregar-mensaje"');
     expect(html).toContain('esperasMensajesMinutos');
-    expect(html).toContain('Máximo 100 mensajes en total');
+    expect(html).toContain('Máximo 99 recordatorios');
     expect(html).not.toContain('aj-cada');
     expect(html).not.toContain('sin tope de mensajes');
     expect(html).not.toContain('hasta que la mande');
@@ -82,10 +82,10 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(html).toContain('Recordatorios y seguimientos');
     expect(html).toContain('class="aj-tiempo-grid"');
     expect(html).toContain("' + antecedente + '");
-    expect(html).toContain('Seguimiento ');
+    expect(html).toContain('Recordatorio ');
     expect(html).toContain('id="aj-secuencia"');
     expect(html).toContain('id="aj-espera-primero-unidad"');
-    expect(html).toContain("indice === 0 ? 'Después de la solicitud inicial' : 'Después del seguimiento ' + indice");
+    expect(html).toContain("indice === 0 ? 'Después de la solicitud inicial' : 'Después del recordatorio ' + indice");
     expect(html).toContain('data-indice-espera');
     expect(html).toContain('data-quitar-adicional');
     expect(html).toContain('data-unidad-secuencia');
@@ -98,9 +98,9 @@ describe('acciones del detalle en Automatización GSG', () => {
   });
   it('muestra exactamente un cuadro de texto por seguimiento, incluso al agregar y quitar', () => {
     const caja = { innerHTML: '', querySelectorAll: () => [] };
-    const pintar = new Function('document', 'esc', 'marcadoresHtml',
+    const pintar = new Function('document', 'esc', 'marcadoresHtml', 'textoDeLineas', 'AYUDA_REDACCION',
       funcionDe(scriptDeLaPagina(), 'function pintarTextosAdicionales(cantidad, textos)') + '\nreturn pintarTextosAdicionales;')(
-        { getElementById: () => caja }, String, () => '',
+        { getElementById: () => caja }, String, () => '', (l: string[]) => (l || []).join('\n---\n'), '',
       );
     for (const cantidad of [0, 2, 3, 2, 1]) {
       pintar(cantidad, []);

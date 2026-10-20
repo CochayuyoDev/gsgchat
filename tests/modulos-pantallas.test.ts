@@ -67,7 +67,7 @@ async function correr(html: string): Promise<string[]> {
     location: { origin: 'http://x', pathname: '/', hash: '', href: '' }, navigator: { clipboard: { writeText: async () => undefined } },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, sessionStorage: { getItem: () => null, setItem() {} },
     fetch: async () => respuesta, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
-    console: { log() {}, error() {}, warn() {} }, URL, Blob: class {}, Promise, JSON, Math, Date, Object, Array, String, Number, Boolean, Error, encodeURIComponent, decodeURIComponent, isNaN, parseInt, parseFloat,
+    console: { log() {}, error() {}, warn() {} }, URL, Blob: class {}, AbortController, Promise, JSON, Math, Date, Object, Array, String, Number, Boolean, Error, encodeURIComponent, decodeURIComponent, isNaN, parseInt, parseFloat,
     confirmarDialogo: async () => false, history: { replaceState() {} }, requestAnimationFrame: () => 0, matchMedia: () => ({ matches: false, addEventListener() {} }),
   });
   (ctx as Record<string, unknown>).window = Object.assign((ctx as Record<string, unknown>).window as object, ctx);

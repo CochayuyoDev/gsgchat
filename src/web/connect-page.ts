@@ -19,7 +19,7 @@
  * y acaba con el numero baneado. Por eso los caminos `local` y `waha` avisan.
  */
 
-import { appShell, modoVigente } from './shell.js';
+import { appShell, icono, modoVigente } from './shell.js';
 
 /* ------------------------------------------------------------------ modos */
 
@@ -57,11 +57,9 @@ interface InfoModo {
  */
 const MODOS: Record<Modo, InfoModo> = {
   local: {
-    titulo: 'Escanear el QR y ya',
-    etiqueta: 'para pruebas',
-    pruebas: true,
+    titulo: 'Escanear el QR (WhatsApp normal o Business)',
     resumen:
-      'Sin cuenta de Meta y sin instalar nada: el código sale aquí mismo y sirve con cualquier WhatsApp, también el verde.',
+      'Escaneas el código desde tu WhatsApp, normal o Business, y queda conectado. Sin cuenta de Meta y sin instalar nada.',
     oficial: false,
     paso2: 'Este camino no pide ningún dato: la vinculación es el propio código QR.',
     paso3:
@@ -185,7 +183,6 @@ const CSS = `
   .wrap a { color: var(--primario); }
   .wrap ol, .wrap ul { padding-left: 20px; margin: var(--esp-2) 0 0; }
   .wrap li { margin-bottom: 6px; }
-  .wrap code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--superficie-2); padding: 1px 6px; border-radius: var(--radio-sm); overflow-wrap: anywhere; }
   .ayuda { color: var(--texto-suave); font-size: var(--fs-small); }
   .wrap details { margin-top: var(--esp-3); }
   .wrap summary { cursor: pointer; font-size: var(--fs-cuerpo); font-weight: 600; color: var(--texto-suave); padding: 8px 0; min-height: 36px; }
@@ -227,8 +224,7 @@ const CSS = `
   /* Formularios. */
   .campo { display: block; font-size: 13px; font-weight: 600; margin: var(--esp-4) 0 var(--esp-1); }
   .campo .hint { display: block; font-weight: 400; color: var(--texto-suave); font-size: var(--fs-small); margin-top: 2px; }
-  .wrap input:not([type=radio]) { width: 100%; padding: 10px 12px; font: inherit; font-size: 14px; color: var(--texto); background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-sm); min-height: 42px; }
-  .wrap input:focus-visible { border-color: var(--primario); }
+  .wrap input:not([type=radio]):not([type=checkbox]) { width: 100%; }
   .acciones { display: flex; gap: var(--esp-2); align-items: center; margin-top: var(--esp-4); flex-wrap: wrap; }
   .corto { max-width: 220px; }
   .tel { display: flex; align-items: stretch; max-width: 280px; }
@@ -260,7 +256,7 @@ const CSS = `
   .codigo { font-family: ui-monospace, Consolas, monospace; font-size: 30px; letter-spacing: 6px; font-weight: 700; margin: var(--esp-3) 0 var(--esp-1); }
 
   /* El estado de la conexion en la barra de arriba no puede empujar el titulo. */
-  .s-top #state { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  .s-top #state { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* --- GSG y perfiles ---------------------------------------------------- */
   .bloque { margin-top: var(--esp-4); padding-top: var(--esp-3); border-top: 1px solid var(--borde); }
@@ -317,11 +313,50 @@ const CSS = `
 .wrap { max-width: var(--ancho-max, 1600px); }
 .con-resumen { display: grid; gap: var(--esp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-bottom: var(--esp-6); }
 .con-resumen.una { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+/* Conexión con GSG: la tarjeta usa el ancho y reparte sus bloques en dos columnas. */
+.wrap:has(#gsg), .wrap:has(#card-wa) { max-width: 1120px; }
+.con-resumen.una:has(> #card-wa) { max-width: none; }
+/* WhatsApp: el estado a la izquierda y los botones a la derecha, a todo el ancho. */
+@media (min-width: 900px) {
+  #card-wa { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--esp-5); row-gap: var(--esp-2); align-items: center; }
+  #card-wa > * { grid-column: 1; }
+  #card-wa > .acciones { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
+  #card-wa > #qr-box { grid-column: 1 / -1; }
+}
+/* «Conectar con Meta, paso a paso»: una tarjeta que se despliega, con su flecha. */
+#con-avanzado { border-top: none; padding-top: 0; margin-top: 16px; }
+#con-avanzado > summary { list-style: none; cursor: pointer; position: relative; border: 1px solid var(--borde); border-radius: 14px; padding: 16px 56px 16px 20px; background: var(--superficie); }
+#con-avanzado > summary::-webkit-details-marker { display: none; }
+#con-avanzado > summary::after { content: ''; position: absolute; right: 24px; top: 50%; width: 9px; height: 9px; border-right: 2px solid var(--texto-suave); border-bottom: 2px solid var(--texto-suave); transform: translateY(-70%) rotate(45deg);  }
+#con-avanzado[open] > summary::after { transform: translateY(-30%) rotate(-135deg); }
+#con-avanzado > summary:hover { border-color: var(--primario); }
+.con-resumen.una:has(> #gsg) { max-width: none; }
+#gsg .bloque.punteado { padding: var(--esp-4); border: 1px solid var(--borde); border-radius: 12px; background: var(--fondo, transparent); }
+#gsg .bloque.punteado h3 { margin-top: 0; }
+.gsg-destinos { margin: 6px 0 10px; overflow-x: auto; font-size: 13px; color: var(--texto-suave); }
+.gsg-destinos table { border: 1px solid var(--borde); border-radius: var(--radio-sm); border-collapse: separate; border-spacing: 0; overflow: hidden; margin-bottom: 8px; }
+.gsg-destinos td { font-size: 13px; color: var(--texto); }
+.gsg-destinos td code { background: none; border: 0; padding: 0; word-break: break-all; }
+.gsg-destinos code { overflow-wrap: anywhere; }
+.gsg-cuerpo summary { min-height: 0; font-size: 12.5px; font-weight: 600; color: var(--primario); }
+.gsg-cuerpo code { display: block; margin-top: 6px; max-width: 420px; font-size: 11.5px; white-space: pre-wrap; }
+#gsg-envios .tablewrap { margin-top: 4px; color: var(--texto); font-size: 13px; }
+#gsg-envios .vacio { text-align: left; padding: 4px 0; }
+#gsg-envios .vacio::before, #gsg-envios .vacio::after { display: none; }
+#gsg-envios .vacio h3 { margin: 0 0 2px; font-size: 13.5px; }
+#gsg-envios .vacio p { margin: 0; }
+#gsg > #gsg-envios-caja:has(table) { grid-column: 1 / -1; }
+@media (min-width: 1000px) {
+  #gsg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--esp-5); row-gap: var(--esp-4); align-items: start; }
+  #gsg > * { grid-column: 1 / -1; }
+  #gsg > #gsg-consulta, #gsg > #gsg-envios-caja { grid-column: auto; }
+}
 @media (max-width: 820px) { .con-resumen { grid-template-columns: minmax(0, 1fr); } }
 .con-card { padding: var(--esp-5); display: flex; flex-direction: column; gap: var(--esp-3); min-width: 0; }
 @media (max-width: 640px) { .con-card { padding: var(--esp-4); } }
 .con-cab { display: flex; align-items: center; gap: var(--esp-3); }
-.con-ico { flex: none; width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 24px; background: var(--primario-suave); }
+.con-ico { flex: none; width: 48px; height: 48px; border-radius: var(--radio); display: grid; place-items: center; background: var(--primario-suave); color: var(--primario); }
+.con-ico .s-ico { width: 24px; height: 24px; }
 .con-tit { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .con-tit h2 { font-size: 20px; }
 .con-frase { font-size: 14.5px; color: var(--texto-suave); }
@@ -337,8 +372,13 @@ const CSS = `
 .con-form[open] > summary { margin-bottom: var(--esp-2); }
 .con-form #gsg-form { margin-top: 0; }
 .con-avanzado { margin-top: 0; border-top: 1px solid var(--borde); padding-top: var(--esp-2); }
-.con-avanzado > summary { display: flex; flex-direction: column; gap: 2px; color: var(--texto); padding: var(--esp-3) 0; }
+.con-avanzado > summary { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; color: var(--texto); padding: var(--esp-3) 0; }
+.con-avanzado > summary::before, #con-avanzado > summary::before { display: none; }
 .con-avanzado > summary b { font-size: 15px; }
+/* Lo destructivo, aparte: a la derecha y tras una linea. */
+.con-pie { padding-top: var(--esp-4); border-top: 1px solid var(--borde); }
+.con-pie .peligro { margin-left: auto; }
+#card-wa > .acciones .peligro { margin-left: var(--esp-3); }
 .con-avanzado > summary .ayuda { font-weight: 400; }
 .con-avanzado[open] > summary { margin-bottom: var(--esp-3); }
 `;
@@ -430,7 +470,7 @@ export function connectPage(opts: ConnectOpts): string {
 
 <div class="con-resumen una">
 ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
-  <div class="con-cab"><span class="con-ico" aria-hidden="true">💬</span><div class="con-tit"><h2>WhatsApp</h2><span id="wa-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">${icono('chat')}</span><div class="con-tit"><h2>WhatsApp</h2><span id="wa-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="wa-frase">Revisando la conexión…</p>
   <div id="qr-box" class="hidden">
       <div class="qr-marco"><img id="qr-img" alt="Código QR para vincular WhatsApp"></div>
@@ -456,13 +496,13 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   </div>
 </section>
 ` : ''}${tarjetaGsg ? `<section class="tarjeta con-card" id="gsg">
-  <div class="con-cab"><span class="con-ico" aria-hidden="true">📦</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">${icono('moto')}</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
-  <div id="gsg-estado" class="ayuda">Cargando…</div>
+  <div id="gsg-estado" class="ayuda"><span class="esqueleto linea media"></span></div>
   <div class="bloque punteado" id="gsg-consulta">
     <h3>Consulta del estado de un envío en GSG</h3>
     <p class="ayuda" id="gsg-consulta-url">Sin ruta de consulta configurada: GSGchat no le pregunta nada a GSG. Configúrala en «Cambiar la URL o la API Key de GSG».</p>
-    <p class="ayuda">Antes de escribirle a un cliente, GSGchat pregunta por ese tracking. Si GSG dice <b>cancelado</b>, <b>número incorrecto</b>, <b>tracking incorrecto</b> o <b>no se puede contactar</b>, deja de escribir <b>solo por ese tracking</b>: los otros envíos del mismo cliente siguen. Si GSG no contesta o no se entiende, no se toma como cancelado.</p>
+    <p class="ayuda">Antes de escribirle a un cliente se pregunta por su tracking. Si GSG lo da por cancelado o con datos mal, se deja de escribir <b>solo por ese tracking</b>; si GSG no contesta, se le escribe igual.</p>
     <form id="gsg-consulta-form" class="ep-form" novalidate>
       <label class="campo" for="gsg-consulta-tracking">Tracking</label><input id="gsg-consulta-tracking" type="text" autocomplete="off" placeholder="GSG-E-205" required>
       <label class="campo" for="gsg-consulta-telefono">Teléfono (opcional)</label><input id="gsg-consulta-telefono" type="tel" autocomplete="off" placeholder="987654321">
@@ -472,8 +512,8 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   </div>
   <div class="bloque punteado" id="gsg-envios-caja">
     <h3>Lo que enviamos a GSG</h3>
-    <p class="ayuda" id="gsg-envios-destino"></p>
-    <div id="gsg-envios" class="ayuda">Cargando…</div>
+    <div id="gsg-envios-destino" class="gsg-destinos"></div>
+    <div id="gsg-envios" class="ayuda"><span class="esqueleto linea"></span><span class="esqueleto linea media"></span></div>
     <p class="ayuda"><a id="gsg-envios-refrescar" href="#">Actualizar</a></p>
   </div>
   <details><summary>Ubicación y seguimiento del cliente</summary>
@@ -485,7 +525,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   <div id="gsg-config-error" class="nota riesgo hidden" role="alert"></div>
   <details class="con-form" id="gsg-form-caja"><summary id="gsg-form-resumen">Cambiar la URL o la API Key de GSG</summary>
   <form id="gsg-form" novalidate>
-    <p class="ayuda">Esta es la conexión <b>saliente</b>: GSGchat le manda a GSG cada ubicación. La <b>API Key de GSG</b> te la da GSG y se guarda aquí. No la confundas con la clave que genera GSGchat («Crear la clave para GSG», más abajo): esa se copia al <code>.env</code> de GSG, no al de GSGchat.</p>
+    <p class="ayuda">Lo que GSGchat le manda a GSG: cada ubicación y los problemas. La API Key de aquí <b>la da GSG</b>; la que creamos para que GSG nos mande pedidos está en <a href="/api-gsgchat#t-claves">Nuestra API → Claves</a>. <a class="ver-manual" href="/manual#m-conexion-gsg">Ver instrucciones completas</a></p>
     <label class="campo" for="gsg-url">URL base de GSG
       <span class="hint">Te la dan sus programadores. Empieza por https:// y no lleva «?» ni «#». Por ejemplo https://backend.developer.gsgcorp.pe/api/</span></label>
     <input id="gsg-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://backend.developer.gsgcorp.pe/api/" aria-describedby="gsg-url-final">
@@ -494,7 +534,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
     <input id="gsg-ruta" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/location" aria-describedby="gsg-url-final">
     <p class="ayuda" id="gsg-url-final" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-incidencias">Ruta para reportar problemas: números mal y errores (opcional)
-      <span class="hint">El POST con cada problema: número mal (sin WhatsApp, inválido), no reconoce el pedido, rechaza, sin respuesta… en el formato de GSG ({ tracking, tipo: PROBLEMA, motivo, comentario, telefonoOrigen, fechaMensaje, eventoId }). Vacía = incidencias. Por ejemplo v1/gsgchat/reported</span></label>
+      <span class="hint">A donde va cada problema: número sin WhatsApp o inválido, no reconoce el pedido, rechaza… Vacía = incidencias. Por ejemplo v1/gsgchat/reported. El formato de cada aviso está en el Manual.</span></label>
     <input id="gsg-ruta-incidencias" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/reported" aria-describedby="gsg-url-incidencias">
     <p class="ayuda" id="gsg-url-incidencias" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-estado">Ruta para consultar el estado de un envío (opcional)
@@ -512,15 +552,15 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <button class="btn sm" id="gsg-token-ver" type="button" aria-controls="gsg-token" aria-pressed="false">Mostrar</button>
     </div>
     <div class="acciones">
-      <button class="btn secundario" id="gsg-guardar" type="submit">Guardar y probar</button>
+      <button class="btn primario" id="gsg-guardar" type="submit">Guardar y probar</button>
     </div>
   </form>
   </details>
   <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
-  <div class="acciones">
+  <div class="acciones con-pie">
     <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
-    <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
     <span id="gsg-state" class="chip hidden" role="status"></span>
+    <button class="btn peligro" id="gsg-quitar" type="button">Desconectar</button>
   </div>
   <div id="gsg-descartes" class="nota riesgo hidden">
     <b id="gsg-descartes-titulo"></b>
@@ -531,7 +571,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
 ` : ''}</div>
 
 ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
-  <summary><b>Conectar con Meta, paso a paso</b><span class="ayuda">WhatsApp Business por la API oficial, prueba de envío, conexiones de prueba (QR, WAHA) y datos para programadores.</span></summary>
+  <summary><b>Conectar WhatsApp, paso a paso</b><span class="ayuda">WhatsApp Business por la API oficial, conexión por QR, prueba de envío, WAHA y datos para programadores.</span></summary>
 <ol class="progreso" id="progreso" aria-label="Progreso de la conexión">
   <li data-paso="1"><span class="n">1</span><span class="t">Cómo</span></li>
   <li data-paso="2"><span class="n">2</span><span class="t">Datos</span></li>
@@ -554,8 +594,8 @@ ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
         : ''
     }
     <details class="mas-formas" id="solo-pruebas">
-      <summary>Solo para pruebas, sin Meta (QR, WAHA)</summary>
-      <p class="ayuda">Emulan WhatsApp Web: están fuera de las normas de Meta y el número puede acabar bloqueado. Úsalos con un número de pruebas, nunca con el del negocio.</p>
+      <summary>Solo para pruebas, sin Meta (WAHA)</summary>
+      <p class="ayuda">WAHA emula WhatsApp Web desde un contenedor en tu servidor. Úsalo para probar.</p>
       ${dePrueba.map(opcionHtml).join('')}
     </details>
     <div class="nota hidden" id="aviso-modo"></div>
@@ -649,20 +689,6 @@ ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
     </div>
   </div>
 </section>
-${
-  opts.conGsg
-    ? `
-<section class="tarjeta paso" id="perfil">
-  <h2>¿Para qué vas a usar GSGchat?</h2>
-  <p class="ayuda">El perfil deja de un clic el menú, qué contesta solo y los ajustes de las entregas. Tus textos y tus datos no se tocan.</p>
-  <div id="perfil-resumen"><span class="ok" id="perfil-resumen-texto"></span><button class="btn" type="button" id="perfil-cambiar">Cambiar</button></div>
-  <div id="perfil-lista" class="perfiles"></div>
-  <div class="acciones"><button class="btn primario" id="perfil-aplicar" type="button">Aplicar este perfil</button><span id="perfil-state" class="chip hidden" role="status"></span></div>
-</section>
-
-`
-    : ''
-}
 
 <details>
   <summary>Solo si te lo pide soporte: ver y editar todos los datos guardados</summary>
@@ -851,19 +877,16 @@ function abrirAvanzado(id) {
   var det = $('con-avanzado');
   if (det) det.open = true;
   var el = $(id);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
 }
 
 $('wa-conectar').onclick = async function () {
   var boton = this;
-  /* Sin camino elegido, el de verdad: WhatsApp Business por la API de Meta,
-     conservando el numero en el telefono (coexistencia). Los QR son para
-     probar y se eligen a mano en «Solo para pruebas». */
+  /* Sin camino elegido, el de siempre: escanear el QR con el WhatsApp del
+     teléfono (normal o Business). La API de Meta se elige a mano. */
   if (!modo) {
-    var opcion = document.querySelector('input[name="modo"][value="coexistence"]');
+    var opcion = document.querySelector('input[name="modo"][value="local"]');
     if (opcion) opcion.click();
-    abrirAvanzado('paso1');
-    return;
   }
   if (!esQr()) { abrirAvanzado('paso' + pasoActual()); return; }
   boton.disabled = true;
@@ -938,8 +961,11 @@ function pintarPaso1() {
   aviso.innerHTML = esMeta()
     ? '<b>Necesitas WhatsApp Business</b> (el icono naranja), no el WhatsApp verde de siempre. ' +
       'Si usas el verde, instala WhatsApp Business y migra: es gratis y conservas número e historial.'
-    : '<b>Este camino no es oficial.</b> Emula WhatsApp Web, está fuera de los términos de Meta y el ' +
-      'número puede acabar baneado sin aviso y sin recuperación. Usa un número secundario.';
+    : modo === 'local'
+      ? '<b>Conexión por QR:</b> funciona con tu WhatsApp normal o Business. No es la API oficial de Meta: ' +
+        'si mandas muchos mensajes, WhatsApp puede limitar el número.'
+      : '<b>Este camino no es oficial.</b> Emula WhatsApp Web, está fuera de los términos de Meta y el ' +
+        'número puede acabar baneado sin aviso y sin recuperación. Usa un número secundario.';
   aviso.classList.remove('hidden');
 }
 
@@ -1189,6 +1215,9 @@ async function estadoQr() {
 
 $('qr-connect').onclick = async function () {
   var boton = this;
+  /* El código sale arriba, en la tarjeta de WhatsApp: se sube hasta ella. */
+  var tarjeta = $('card-wa');
+  if (tarjeta && tarjeta.scrollIntoView) tarjeta.scrollIntoView({ behavior: 'auto', block: 'start' });
   boton.disabled = true;
   qr.parado = false;
   estado('fb-state', modo === 'local'
@@ -1580,6 +1609,8 @@ function cargar() {
 
       // Sin eleccion previa manda lo que ya este guardado en el servidor.
       if (!modo && (guardado.provider === 'waha' || guardado.provider === 'local')) modo = guardado.provider;
+      // Sin nada guardado, viene marcado escanear el QR (WhatsApp normal o Business).
+      if (!modo && !guardado.provider) modo = 'local';
 
       /* Si el navegador recuerda un camino y el servidor esta en otro (el
          guardado del proveedor fallo, o se cambio desde otra pantalla), los
@@ -1895,12 +1926,23 @@ if ($('gsg')) {
     try {
       var env = await api('/admin/gsg/envios');
       var ESTADOS = { enviado: 'Enviado a GSG', pendiente: 'Pendiente de enviar', fallido: 'Falló el envío' };
-      texto('gsg-envios-destino', env.aviso ? env.aviso : 'Ubicaciones: POST a ' + (env.destino || '(sin dirección)') + ' · Problemas (números mal y errores): POST a ' + (env.destinoProblemas || '(sin dirección)') + ' · con la cabecera X-API-Key.');
+      /* A dónde va cada cosa, como tabla: qué, método y dirección. */
+      var destinos = $('gsg-envios-destino');
+      if (destinos) {
+        if (env.aviso) destinos.textContent = env.aviso;
+        else destinos.innerHTML = '<table><thead><tr><th>Qué le enviamos</th><th>Método</th><th>Dirección</th></tr></thead><tbody>' +
+          '<tr><td>Ubicaciones</td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>' + esc(env.destino || '(sin dirección)') + '</code></td></tr>' +
+          '<tr><td>Problemas (números mal y errores)</td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>' + esc(env.destinoProblemas || '(sin dirección)') + '</code></td></tr>' +
+          '</tbody></table><p class="ayuda">Las dos llevan la cabecera <code>X-API-Key</code> con la API Key de GSG.</p>';
+      }
       caja.innerHTML = (env.items || []).length
-        ? '<table><thead><tr><th>Fecha</th><th>Qué</th><th>Cuerpo enviado</th><th>Estado</th><th>Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
-            return '<tr><td>' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td>' + (r.tipo === 'incidencia' ? 'Problema' : 'Ubicación') + '</td><td><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></td><td><b>' + esc(ESTADOS[r.estado] || r.estado) + '</b></td><td>' + esc(r.intentos) + '</td><td>' + esc(r.error || '') + '</td></tr>';
-          }).join('') + '</tbody></table>'
-        : 'Todavía no se ha enviado ninguna ubicación a GSG. Se envía sola cuando un cliente manda su ubicación por WhatsApp.';
+        ? '<div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Qué</th><th>Cuerpo enviado</th><th>Estado</th><th class="num">Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
+            var tono = { enviado: 'verde', pendiente: 'ambar', fallido: 'rojo' }[r.estado] || 'gris';
+            var ref = r.cuerpo && (r.cuerpo.tracking || r.cuerpo.referencia);
+            return '<tr><td class="nowrap suave">' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td class="nowrap">' + (r.tipo === 'incidencia' ? 'Problema' : 'Ubicación') + (ref ? ' <span class="ref">' + esc(ref) + '</span>' : '') + '</td><td><details class="gsg-cuerpo"><summary>Ver cuerpo</summary><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></details></td><td><span class="chip tono-' + tono + '">' + esc(ESTADOS[r.estado] || r.estado) + '</span></td><td class="num">' + esc(r.intentos) + '</td><td class="error-celda">' + esc(r.error || '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<div class="vacio compacto"><h3>Todavía no se ha enviado nada a GSG</h3><p>Cada ubicación se envía sola cuando un cliente la manda por WhatsApp.</p></div>';
+      if (window.filtroDeTabla) window.filtroDeTabla(caja.querySelector('.tablewrap'));
     } catch (error) { caja.textContent = 'No se pudo consultar lo enviado a GSG: ' + error.message; }
   }
   if ($('gsg-envios-refrescar')) $('gsg-envios-refrescar').onclick = function (ev) { ev.preventDefault(); cargarEnvios(); };
