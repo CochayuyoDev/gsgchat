@@ -423,6 +423,18 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       contactId: contact.id,
       origen: 'incidencia_manual',
     }, { en, eventoId });
+    // El pedido y la solicitud pasan a «reportada a GSG»: se ven asi en Hoy y en Automatizacion GSG.
+    const detalleEstado = resumen.slice(0, 300);
+    const entregas = await repos.entregas.vivasPorTelefono(contact.phone).catch(() => []);
+    for (const e of entregas.filter((x) => trackingDe(x) === tracking || x.referencia === tracking)) {
+      await repos.entregas.actualizar(e.id, { estado: 'incidencia', incidencia: 'incidencia_manual', incidenciaDetalle: detalleEstado, requiereHumano: true }).catch(() => undefined);
+      await repos.entregas.registrarEvento(e.id, 'incidencia', `reportada a GSG (${tipo}): ${detalleEstado}`, { tipo, usuario }).catch(() => undefined);
+    }
+    const solicitud = await repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null);
+    if (solicitud) {
+      await repos.rutas.actualizarSolicitud(solicitud.id, { estado: 'incidencia', incidencia: 'incidencia_manual', incidenciaDetalle: detalleEstado, requiereHumano: true, proximoIntentoAt: null }).catch(() => undefined);
+      await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `Reportada a GSG (${tipo}): ${detalleEstado}`, { codigo: 'incidencia_manual', tipo, usuario }).catch(() => undefined);
+    }
     // Reportar a mano es tomar el caso: el bot se calla en ese chat hasta que alguien lo reactive.
     await repos.contacts.pausarBot(contact.id, true, en);
     if (deps.gsg) await despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['incidencia'], { manual: true }).catch(() => undefined);

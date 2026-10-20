@@ -156,4 +156,15 @@ describe('incidencia manual', () => {
     const reintento = await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
     expect(reintento.json()).toMatchObject({ duplicada: true });
   });
+
+  it('el pedido y la solicitud pasan a «reportada a GSG» solos', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Reparto' });
+    const [sol] = await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '987654321', phone: telefono, nombre: 'Rosa', referencia: 'GSG-1', estado: 'respondio' }]);
+    const { entrega } = await repos.entregas.crearEntrega({ dia: '2026-10-20', referencia: 'GSG-1', phone: telefono, nombre: 'Rosa', ubicacionEstado: 'pendiente', estado: 'esperando_ubicacion' } as never);
+
+    await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
+
+    expect(await repos.rutas.solicitud(sol!.id)).toMatchObject({ estado: 'incidencia', incidencia: 'incidencia_manual', requiereHumano: true });
+    expect(await repos.entregas.entrega(entrega.id)).toMatchObject({ estado: 'incidencia', incidencia: 'incidencia_manual', requiereHumano: true });
+  });
 });
