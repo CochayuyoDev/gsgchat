@@ -74,7 +74,7 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(html).toContain('id="aj-pasos-adicionales"');
     expect(html).toContain('data-texto-adicional');
     expect(html).toContain('textosAdicionales');
-    expect(html).toContain('numero = i + 3');
+    expect(html).toContain('textosSeguimientos');
     expect(html).toContain('Solicitud inicial de ubicación');
     expect(html).toContain('class="aj-seccion aj-seccion-inicial"');
     expect(html).toContain('id="aj-tiempo-solicitud"');
@@ -92,10 +92,34 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(html).toContain('id="aj-pausa-min-unidad"');
     expect(html).toContain('horas</option>');
     expect(html).toContain('Pausa entre clientes');
-    expect(html).toContain('Textos de los recordatorios');
+    expect(html).toContain('Textos de los seguimientos');
     expect(html).not.toContain('Plantillas de Meta para este paso');
     expect(html).not.toContain('data-paso=');
   });
+  it('muestra exactamente un cuadro de texto por seguimiento, incluso al agregar y quitar', () => {
+    const caja = { innerHTML: '', querySelectorAll: () => [] };
+    const pintar = new Function('document', 'esc', 'marcadoresHtml',
+      funcionDe(scriptDeLaPagina(), 'function pintarTextosAdicionales(cantidad, textos)') + '\nreturn pintarTextosAdicionales;')(
+        { getElementById: () => caja }, String, () => '',
+      );
+    for (const cantidad of [0, 2, 3, 2, 1]) {
+      pintar(cantidad, []);
+      expect((caja.innerHTML.match(/data-texto-seguimiento=/g) || []).length).toBe(cantidad);
+      expect((caja.innerHTML.match(/data-rama="recordatorio"/g) || []).length).toBe(cantidad);
+      expect((caja.innerHTML.match(/data-rama="insistencia"/g) || []).length).toBe(cantidad);
+    }
+  });
+
+  it('conserva las redacciones anteriores al convertirlas en seguimientos', () => {
+    const convertir = new Function(funcionDe(scriptDeLaPagina(), 'function textosSeguimientosDe(a, cantidad)') + '\nreturn textosSeguimientosDe;')();
+    const a = { textos: { recordatorio: ['R'], insistencia: ['I'] }, textosAdicionales: [['Tercero']] };
+    expect(convertir(a, 3)).toEqual([
+      { recordatorio: ['R'], insistencia: ['I'] },
+      { recordatorio: ['R'], insistencia: ['I'] },
+      { recordatorio: ['Tercero'], insistencia: ['Tercero'] },
+    ]);
+  });
+
   it('el javascript de la página compila sin errores de sintaxis', () => {
     expect(() => new Function(scriptDeLaPagina())).not.toThrow();
   });

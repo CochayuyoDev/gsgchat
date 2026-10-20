@@ -70,7 +70,7 @@ export const SISTEMA_CSS = `
        destructivo (.btn.peligro): rojo, siempre aparte de los demas.
      Y uno discreto (.btn.fantasma) para acciones de poco peso. */
   .btn, .s-base :where(button:not([class])) {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box;
     min-height: var(--alto-control); padding: 8px 16px; border: 1px solid var(--borde-fuerte); border-radius: var(--radio-sm);
     background: var(--superficie); color: var(--texto); font: inherit; font-size: 14px; font-weight: 600; line-height: 1.2;
     cursor: pointer; text-decoration: none; box-shadow: var(--sombra); white-space: nowrap;
@@ -108,6 +108,21 @@ export const SISTEMA_CSS = `
   .s-base :where(.tablewrap, .tabla-marco) { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
   .s-base :where(.tablewrap:has(> p, > .vacio)) { border: 0; background: none; }
   .s-base :where(.tablewrap) > :where(table th:first-child, table td:first-child) { padding-left: 16px; }
+  /* Columnas de cifras a la derecha; referencias en letra fija; texto secundario apagado. */
+  .s-base :where(th.num, td.num) { text-align: right; white-space: nowrap; }
+  .s-base :where(td.suave) { color: var(--texto-suave); }
+  .s-base :where(td.nowrap) { white-space: nowrap; }
+  .s-base :where(td.error-celda) { color: var(--rojo); font-size: var(--fs-small); }
+  .s-base :where(td .refs) { display: flex; flex-wrap: wrap; gap: 4px; }
+  .s-base :where(td .ref) { font-family: var(--mono); font-size: 12px; font-weight: 600; background: var(--superficie-2); border-radius: var(--radio-xs); padding: 1px 6px; white-space: nowrap; }
+  .s-base :where(td .cero) { color: var(--gris-claro); }
+
+  /* --- control segmentado: dos o tres vistas de la misma caja ------------ */
+  .s-segmento { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radio-sm); background: var(--superficie-2); border: 1px solid var(--borde); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .s-segmento > button, .s-segmento > a { min-height: 32px !important; padding: 5px 14px; border: 0; border-radius: var(--radio-xs); background: transparent; color: var(--texto-suave); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; box-shadow: none; white-space: nowrap; text-decoration: none; display: inline-flex; align-items: center; }
+  .s-segmento > button:hover, .s-segmento > a:hover { color: var(--texto); border-color: transparent; }
+  .s-segmento > [aria-pressed=true], .s-segmento > .activo { background: var(--superficie); color: var(--primario); box-shadow: var(--sombra); }
+  .s-segmento > [hidden] { display: none; }
 
   @media (max-width: 640px) {
     .s-base :where(th) { padding: 9px 10px; }

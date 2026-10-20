@@ -178,6 +178,14 @@ const CSS = `${REPARTO_CSS}
   .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
   .aj .paso { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-2); background: var(--superficie-2); }
   .aj .paso h4 { margin: 0 0 6px; font-size: var(--fs-h3); }
+  /* Cada seguimiento: sus dos variantes lado a lado en pantallas anchas. */
+  #aj-pasos-adicionales .paso { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px var(--esp-4); }
+  #aj-pasos-adicionales .paso > h4, #aj-pasos-adicionales .paso > [data-quitar-adicional] { grid-column: 1 / -1; }
+  #aj-pasos-adicionales .paso > [data-quitar-adicional] { justify-self: end; }
+  #aj-pasos-adicionales .variante { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; border-radius: var(--radio-sm); background: var(--superficie); border: 1px solid var(--borde); }
+  #aj-pasos-adicionales .variante h5 { margin: 0 0 6px; font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); }
+  #aj-pasos-adicionales .variante .previa { flex: 1; }
+  @media (max-width: 900px) { #aj-pasos-adicionales .paso { grid-template-columns: minmax(0, 1fr); } }
   .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
   .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
   .aj .previa small { display: block; color: var(--texto-suave); font-size: 11px; margin-top: 4px; text-align: right; }
@@ -275,6 +283,7 @@ export function rutasPage(opts: RutasOpts): string {
       <section class="aj-seccion aj-seccion-inicial">
         <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
+        <div id="aj-pasos"></div>
         <details class="aj-editor-inicial" id="aj-editor-inicial"><summary>Editar el texto de «Solicitud de ubicación»</summary><p class="muted">Este es el primer mensaje real que GSGchat envía al recibir el pedido. Si lo dejas vacío, usa el texto predeterminado. Límite: 2000 caracteres.</p><label for="aj-texto-inicial">Texto que recibe el cliente</label><textarea id="aj-texto-inicial" rows="6" maxlength="2000" placeholder="Escribe la solicitud inicial de ubicación"></textarea><p class="marcadores">Puedes usar {nombreCompleto}, {producto}, {empresa}, {tracking}, {monto}, {direccionCompleta} y otros datos del pedido.</p><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar texto inicial</button><span id="aj-estado-texto-inicial" class="muted" role="status"></span></div></details>
       </section>
 
@@ -292,9 +301,8 @@ export function rutasPage(opts: RutasOpts): string {
       </section>
 
       <section class="aj-seccion">
-        <h3 class="aj-titulo">Textos de los recordatorios</h3>
-        <p class="muted" style="margin-top:4px">Edita el recordatorio para quien no responde y la insistencia para quien responde sin ubicación.</p>
-        <div id="aj-pasos"></div>
+        <h3 class="aj-titulo">Textos de los seguimientos</h3>
+        <p class="muted" style="margin-top:4px">Edita el recordatorio para quien no responde y la insistencia para quien responde sin ubicación. Cada seguimiento tiene sus dos variantes; se envía la que corresponde a la respuesta del cliente.</p>
         <div id="aj-pasos-adicionales"></div>
       </section>
 
@@ -1196,7 +1204,7 @@ function pintarAjustes(d) {
   document.getElementById('aj-tiempo-solicitud').innerHTML = controlTiempoInicialHtml(a.esperaPrimerMensajeSegundos != null ? a.esperaPrimerMensajeSegundos : (a.esperaPrimerMensajeMinutos || 0) * 60);
   pintarSecuencia(esperas);
 
-  document.getElementById('aj-pasos').innerHTML = PASOS_AJ.map(function (p) {
+  document.getElementById('aj-pasos').innerHTML = PASOS_AJ.slice(0, 1).map(function (p) {
     var paso = p[0];
     return '<div class="paso" id="paso-' + paso + '"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
       '<div class="previa" id="aj-previa-' + paso + '"></div>' +
@@ -1204,11 +1212,11 @@ function pintarAjustes(d) {
       '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
       '</div>';
   }).join('');
-  pintarTextosAdicionales(esperas.length, a.textosAdicionales || []);
+  pintarTextosAdicionales(esperas.length, textosSeguimientosDe(a, esperas.length));
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
   document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
 
-  PASOS_AJ.forEach(function (p) {
+  PASOS_AJ.slice(0, 1).forEach(function (p) {
     var paso = p[0];
     pintarPrevia(paso);
     document.querySelector('textarea[data-textos="' + paso + '"]')
@@ -1216,7 +1224,7 @@ function pintarAjustes(d) {
   });
   document.querySelectorAll('#aj-pasos [data-marcador]').forEach(function (c) {
     c.onclick = function () {
-      var ta = c.closest('.paso').querySelector('textarea');
+      var ta = c.closest('.variante, .paso').querySelector('textarea');
       var ini = ta.selectionStart || ta.value.length, fin = ta.selectionEnd || ini;
       ta.value = ta.value.slice(0, ini) + c.getAttribute('data-marcador') + ta.value.slice(fin);
       ta.focus();
@@ -1229,10 +1237,20 @@ function lineasDeTextoMensaje(valor) {
   return String(valor || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
 }
 
+function textosSeguimientosDe(a, cantidad) {
+  return Array.from({ length: cantidad }, function (_, i) {
+    if (a.textosSeguimientos && a.textosSeguimientos[i]) return a.textosSeguimientos[i];
+    var antiguo = i >= 2 && (a.textosAdicionales || [])[i - 2];
+    return { recordatorio: antiguo && antiguo.length ? antiguo : (a.textos.recordatorio || []), insistencia: antiguo && antiguo.length ? antiguo : (a.textos.insistencia || []) };
+  });
+}
+
 function leerTextosAdicionales() {
   var textos = [];
   document.querySelectorAll('#aj-pasos-adicionales textarea[data-texto-adicional]').forEach(function (ta) {
-    textos[Number(ta.getAttribute('data-texto-adicional'))] = lineasDeTextoMensaje(ta.value);
+    var i = Number(ta.getAttribute('data-texto-adicional'));
+    if (!textos[i]) textos[i] = { recordatorio: [], insistencia: [] };
+    textos[i][ta.getAttribute('data-rama')] = lineasDeTextoMensaje(ta.value);
   });
   return textos;
 }
@@ -1258,34 +1276,31 @@ function pintarSecuencia(esperas) {
 function pintarTextosAdicionales(cantidad, textos) {
   var caja = document.getElementById('aj-pasos-adicionales');
   if (!caja) return;
-  // Los dos primeros seguimientos usan el texto base de su rama. Desde el
-  // tercero puede agregarse un texto propio por posición.
-  var adicionales = Math.max(0, cantidad - 2);
-  caja.innerHTML = Array.from({ length: adicionales }, function (_, i) {
-    var numero = i + 3;
-    var lineas = textos[i] || [];
-    return '<div class="paso"><h4>Texto propio para el seguimiento ' + numero + '</h4>' +
-      '<p class="cuando">Si lo dejas vacío, se usa el recordatorio o la insistencia según la respuesta del cliente.</p>' +
-      '<div class="previa" id="aj-previa-adicional-' + i + '">' + (lineas.length ? esc(previaDe(lineas[0], ajustesCache.ejemplo)) : 'Se usará el texto base según la respuesta del cliente.') +
-      '<small>' + (lineas.length ? 'tu texto' : 'texto base') + ' · para ' + esc(ajustesCache.ejemplo.nombre) + ', pedido ' + esc(ajustesCache.ejemplo.pedido) + '</small></div>' +
-      '<textarea data-texto-adicional="' + i + '" rows="3" aria-label="Texto del mensaje ' + numero + '" placeholder="Una redacción por línea; si pones varias, se alternan.">' + esc(lineas.join('\n')) + '</textarea>' +
-      '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
-      '<button type="button" class="btn sm" data-quitar-adicional="' + i + '">Quitar mensaje</button></div>';
+  caja.innerHTML = Array.from({ length: cantidad }, function (_, i) {
+    var variantes = textos[i] || { recordatorio: [], insistencia: [] };
+    return '<div class="paso" data-texto-seguimiento="' + i + '"><h4>Seguimiento ' + (i + 1) + '</h4>' +
+      ['recordatorio', 'insistencia'].map(function (rama) {
+        var lineas = variantes[rama] || [];
+        var titulo = rama === 'recordatorio' ? 'Si no respondió' : 'Si respondió sin ubicación';
+        return '<div class="variante"><h5>' + titulo + '</h5>' +
+          '<div class="previa" id="aj-previa-adicional-' + i + '-' + rama + '"></div>' +
+          '<textarea data-texto-adicional="' + i + '" data-rama="' + rama + '" rows="3" aria-label="Seguimiento ' + (i + 1) + ': ' + titulo + '" placeholder="Vacío: usar el texto de siempre. Una redacción por línea.">' + esc(lineas.join('\n')) + '</textarea>' +
+          '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p></div>';
+      }).join('') + '<button type="button" class="btn sm" data-quitar-adicional="' + i + '">Quitar seguimiento</button></div>';
   }).join('');
   caja.querySelectorAll('textarea[data-texto-adicional]').forEach(function (ta) {
-    ta.addEventListener('input', function () {
-      var i = Number(ta.getAttribute('data-texto-adicional'));
+    function actualizar() {
+      var i = ta.getAttribute('data-texto-adicional'), rama = ta.getAttribute('data-rama');
       var lineas = lineasDeTextoMensaje(ta.value);
-      var previa = document.getElementById('aj-previa-adicional-' + i);
-      if (!previa) return;
-      var texto = lineas.length ? esc(previaDe(lineas[0], ajustesCache.ejemplo)) : 'Se usará el texto base según la respuesta del cliente.';
-      var pie = lineas.length ? 'tu texto' : 'texto base';
-      previa.innerHTML = texto + '<small>' + pie + ' · para ' + esc(ajustesCache.ejemplo.nombre) + ', pedido ' + esc(ajustesCache.ejemplo.pedido) + '</small>';
-    });
+      var texto = lineas.length ? previaDe(lineas[0], ajustesCache.ejemplo) : ajustesCache.textosDeSiempre[rama];
+      document.getElementById('aj-previa-adicional-' + i + '-' + rama).textContent = texto;
+    }
+    ta.addEventListener('input', actualizar);
+    actualizar();
   });
   caja.querySelectorAll('[data-marcador]').forEach(function (c) {
     c.onclick = function () {
-      var ta = c.closest('.paso').querySelector('textarea');
+      var ta = c.closest('.variante, .paso').querySelector('textarea');
       var ini = ta.selectionStart || ta.value.length, fin = ta.selectionEnd || ini;
       ta.value = ta.value.slice(0, ini) + c.getAttribute('data-marcador') + ta.value.slice(fin);
       ta.focus();
@@ -1346,7 +1361,7 @@ document.getElementById('aj-pasos-adicionales').onclick = function (event) {
   if (indice === null || indice === undefined) return;
   var esperas = leerEsperasSecuencia();
   var textos = leerTextosAdicionales();
-  esperas.splice(Number(indice) + 2, 1);
+  esperas.splice(Number(indice), 1);
   textos.splice(Number(indice), 1);
   pintarSecuencia(esperas);
   pintarTextosAdicionales(esperas.length, textos);
@@ -1430,10 +1445,11 @@ editorTextoInicial.addEventListener('toggle', async function () {
   var estado = document.getElementById('aj-estado-texto-inicial');
   estado.textContent = 'Cargando texto…';
   try {
-    var d = await api('/admin/entregas/ajustes');
-    document.getElementById('aj-texto-inicial').value = d.textos.solicitudUbicacion || '';
+    var d = await api('/admin/entregas');
+    var guardado = (d.ajustes && d.ajustes.textos && d.ajustes.textos.solicitudUbicacion) || '';
+    document.getElementById('aj-texto-inicial').value = guardado;
     textoInicialCargado = true;
-    estado.textContent = d.textos.solicitudUbicacion ? 'Texto personalizado guardado.' : 'Se usa el texto predeterminado.';
+    estado.textContent = guardado ? 'Texto personalizado guardado.' : 'Se usa el texto predeterminado.';
   } catch (e) { estado.textContent = e.message; }
   finally { textoInicialOcupado = false; }
 });
@@ -1495,7 +1511,8 @@ document.getElementById('aj-guardar').onclick = async function () {
       // La elección de plantilla ya no se expone en esta pantalla; conservar
       // el valor guardado para que editar el texto/tiempos no lo borre.
       plantillas[paso] = (ajustesCache && ajustesCache.ajustes.plantillas[paso]) || [];
-      textos[paso] = document.querySelector('textarea[data-textos="' + paso + '"]').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      var campo = document.querySelector('textarea[data-textos="' + paso + '"]');
+      textos[paso] = campo ? lineasDeTextoMensaje(campo.value) : ajustesCache.ajustes.textos[paso];
     });
     var r = await api('/admin/rutas/ajustes', { method: 'POST', body: {
       pausaMinSegundos: leerDuracion('aj-pausa-min'),
@@ -1507,7 +1524,7 @@ document.getElementById('aj-guardar').onclick = async function () {
       horaFin: Number(document.getElementById('aj-hora-fin').value),
       plantillas: plantillas,
       textos: textos,
-      textosAdicionales: leerTextosAdicionales()
+      textosSeguimientos: leerTextosAdicionales()
     }});
     var v = r.vigente;
     ajustesSucios = false;

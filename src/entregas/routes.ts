@@ -58,12 +58,6 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   const soloAdmin = (request: { usuario?: { rol?: string; porToken?: boolean } | null }) => request.usuario?.rol === 'admin' && !request.usuario.porToken;
 
   app.get('/admin/entregas', async () => entregas.resumen());
-  // El editor de la solicitud inicial lee solo el ajuste ya cargado en memoria.
-  // No llama a resumen() ni vuelve a leer pedidos para abrir el formulario.
-  app.get('/admin/entregas/ajustes', async (request, reply) => {
-    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador puede consultar estos ajustes.' });
-    return { textos: { solicitudUbicacion: entregas.ajustes().textos.solicitudUbicacion } };
-  });
   app.get('/admin/entregas/seguimiento/estado', async () => entregas.estadoSeguimiento());
 
   // La bandeja de errores de mensajes: los pedidos de ESTA tienda (cada tienda

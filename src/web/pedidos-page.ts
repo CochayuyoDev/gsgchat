@@ -160,7 +160,8 @@ ${PESTANAS_PEDIDOS_CSS}
 .pp-barra{display:grid;gap:12px;padding:12px 14px}
 .pp-contadores{display:flex;flex-wrap:wrap;gap:6px}
 .pp-contadores:empty{display:none}
-.pp-contador{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:5px 12px;border-radius:999px;border:1px solid var(--borde);background:var(--superficie);color:var(--texto);font:inherit;font-size:13.5px;font-weight:500;cursor:pointer;font-weight:700;min-width:22px;padding:1px 7px;border-radius:999px;background:var(--superficie-2);text-align:center;font-variant-numeric:tabular-nums}
+.pp-contador{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:4px 6px 4px 12px;border-radius:999px;border:1px solid var(--borde);background:var(--superficie);color:var(--texto);font:inherit;font-size:13.5px;font-weight:500;cursor:pointer;box-shadow:none;white-space:nowrap}
+.pp-contador b{font-weight:700;font-size:12.5px;line-height:20px;min-width:22px;padding:0 7px;border-radius:999px;background:var(--superficie-2);text-align:center;font-variant-numeric:tabular-nums;box-sizing:border-box}
 .pp-contador:hover{border-color:var(--texto-suave)}
 .pp-contador.activo{border-color:var(--primario);background:var(--primario-suave);color:var(--primario);font-weight:600}
 .pp-contador.tono-ambar b{color:var(--ambar);background:var(--ambar-suave)}.pp-contador.tono-verde b{color:var(--verde);background:var(--verde-suave)}.pp-contador.tono-rojo b{color:var(--rojo);background:var(--rojo-suave)}.pp-contador.tono-azul b{color:var(--azul);background:var(--azul-suave)}.pp-contador.tono-gris b{color:var(--gris);background:var(--gris-suave)}
@@ -176,7 +177,10 @@ ${PESTANAS_PEDIDOS_CSS}
 .pp-reportes:empty{display:none}
 .pp-lista{display:grid;gap:6px}
 /* Una fila por pedido: quien, en que estado esta y que se puede hacer. */
-.pedido{display:grid;grid-template-columns:minmax(200px,1fr) minmax(240px,1.5fr) auto;gap:6px 20px;align-items:center;padding:12px 16px;background:var(--superficie);border:1px solid var(--borde);border-left:3px solid var(--borde);border-radius:var(--radio-sm);gap:3px;min-width:0}.p-quien b{font-size:14.5px;line-height:1.3}
+.pedido{display:grid;grid-template-columns:minmax(200px,1fr) minmax(240px,1.5fr) auto;gap:6px 20px;align-items:center;padding:12px 16px;background:var(--superficie);border:1px solid var(--borde);border-left:3px solid var(--borde);border-radius:var(--radio-sm);min-width:0}
+.pedido:hover{border-color:var(--borde-fuerte)}
+.pedido.tono-ambar{border-left-color:var(--ambar)}.pedido.tono-verde{border-left-color:var(--verde)}.pedido.tono-rojo{border-left-color:var(--rojo)}.pedido.tono-azul{border-left-color:var(--azul)}.pedido.tono-gris{border-left-color:var(--gris-claro)}
+.p-quien{display:grid;gap:3px;min-width:0}.p-quien b{font-size:14.5px;line-height:1.3}
 .p-datos,.p-dir{font-size:12.5px;color:var(--texto-suave);overflow-wrap:anywhere}
 .p-ref{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--texto);background:var(--superficie-2);border-radius:var(--radio-xs);padding:1px 6px;margin-right:6px}
 .p-estado{display:grid;gap:4px;min-width:0}.p-chips{display:flex;flex-wrap:wrap;gap:6px}

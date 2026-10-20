@@ -338,6 +338,14 @@ const CSS = `
 .gsg-destinos td { font-size: 13px; color: var(--texto); }
 .gsg-destinos td code { background: none; border: 0; padding: 0; word-break: break-all; }
 .gsg-destinos code { overflow-wrap: anywhere; }
+.gsg-cuerpo summary { min-height: 0; font-size: 12.5px; font-weight: 600; color: var(--primario); }
+.gsg-cuerpo code { display: block; margin-top: 6px; max-width: 420px; font-size: 11.5px; white-space: pre-wrap; }
+#gsg-envios .tablewrap { margin-top: 4px; color: var(--texto); font-size: 13px; }
+#gsg-envios .vacio { text-align: left; padding: 4px 0; }
+#gsg-envios .vacio::before, #gsg-envios .vacio::after { display: none; }
+#gsg-envios .vacio h3 { margin: 0 0 2px; font-size: 13.5px; }
+#gsg-envios .vacio p { margin: 0; }
+#gsg > #gsg-envios-caja:has(table) { grid-column: 1 / -1; }
 @media (min-width: 1000px) {
   #gsg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--esp-5); row-gap: var(--esp-4); align-items: start; }
   #gsg > * { grid-column: 1 / -1; }
@@ -1928,10 +1936,12 @@ if ($('gsg')) {
           '</tbody></table><p class="ayuda">Las dos llevan la cabecera <code>X-API-Key</code> con la API Key de GSG.</p>';
       }
       caja.innerHTML = (env.items || []).length
-        ? '<table><thead><tr><th>Fecha</th><th>Qué</th><th>Cuerpo enviado</th><th>Estado</th><th>Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
-            return '<tr><td>' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td>' + (r.tipo === 'incidencia' ? 'Problema' : 'Ubicación') + '</td><td><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></td><td><b>' + esc(ESTADOS[r.estado] || r.estado) + '</b></td><td>' + esc(r.intentos) + '</td><td>' + esc(r.error || '') + '</td></tr>';
-          }).join('') + '</tbody></table>'
-        : 'Todavía no se ha enviado ninguna ubicación a GSG. Se envía sola cuando un cliente manda su ubicación por WhatsApp.';
+        ? '<div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Qué</th><th>Cuerpo enviado</th><th>Estado</th><th class="num">Intentos</th><th>Error</th></tr></thead><tbody>' + env.items.map(function (r) {
+            var tono = { enviado: 'verde', pendiente: 'ambar', fallido: 'rojo' }[r.estado] || 'gris';
+            var ref = r.cuerpo && (r.cuerpo.tracking || r.cuerpo.referencia);
+            return '<tr><td class="nowrap suave">' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td class="nowrap">' + (r.tipo === 'incidencia' ? 'Problema' : 'Ubicación') + (ref ? ' <span class="ref">' + esc(ref) + '</span>' : '') + '</td><td><details class="gsg-cuerpo"><summary>Ver cuerpo</summary><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></details></td><td><span class="chip tono-' + tono + '">' + esc(ESTADOS[r.estado] || r.estado) + '</span></td><td class="num">' + esc(r.intentos) + '</td><td class="error-celda">' + esc(r.error || '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<div class="vacio compacto"><h3>Todavía no se ha enviado nada a GSG</h3><p>Cada ubicación se envía sola cuando un cliente la manda por WhatsApp.</p></div>';
     } catch (error) { caja.textContent = 'No se pudo consultar lo enviado a GSG: ' + error.message; }
   }
   if ($('gsg-envios-refrescar')) $('gsg-envios-refrescar').onclick = function (ev) { ev.preventDefault(); cargarEnvios(); };

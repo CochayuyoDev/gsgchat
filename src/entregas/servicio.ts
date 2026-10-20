@@ -826,6 +826,7 @@ export interface DepsEntregas {
   /** El bus de eventos: los webhooks salientes se enteran de confirmaciones, avisos, entregas e incidencias. */
   bus?: Bus;
   /** El gancho de Ajustes para ampliar el horario del numero con el de entregas (Hoy → Ajustes). */
+  ampliarHorario?: (fn: () => { desde: string; hasta: string } | null) => void;
   /**
    * La zona que se cubre: un pin fuera de `bbox` no se registra, se aparta
    * para una persona. Uno dentro de `bbox` pero fuera de `zonaSinExtra` (Lima
@@ -1007,6 +1008,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   const plan = deps.plan ?? PLANES.peru!;
 
   let ajustes: AjustesEntregas = AJUSTES_ENTREGAS_POR_DEFECTO;
+  // El marcapasos del numero deja pasar los mensajes de las entregas hasta
+  // el horario extendido: sin esto, a las 20:00 se frenaban los pines.
+  deps.ampliarHorario?.(() => ({ desde: ajustes.horarioEntregas.desde, hasta: ajustes.horarioEntregas.extendidoHasta }));
   let ultimaSync: ResultadoSincronizacion | null = null;
   let ultimoCierre: ResultadoCierre | null = null;
   let motor: { proximoEnvioEn(): number; parado(): string | null; enHorario(): boolean } | null = null;

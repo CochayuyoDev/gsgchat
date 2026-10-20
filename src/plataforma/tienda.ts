@@ -289,6 +289,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         gsg: conexionGsg.puerto(),
         conexionGsg,
         cargarLote: (body) => cargarLote({ repos, plan: plantillaPais, timezone: config.timezone, lista }, body),
+        ampliarHorario: (fn) => ajustes.ampliarHorario(fn),
         nombreNegocio: () => ajustes.nombreNegocio(),
         supervisor: () => politica().avisarA,
         ia: () => (ia.estado().tieneToken ? { completar: (mensajes, opts) => ia.completar(mensajes, opts) } : null),

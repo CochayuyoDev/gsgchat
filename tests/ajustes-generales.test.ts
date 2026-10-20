@@ -50,15 +50,22 @@ function cookieDe(res: { headers: Record<string, unknown> }): string {
 }
 
 describe('servicio de ajustes', () => {
-  it('el horario configurado del número no se amplía por el horario de entregas', async () => {
+  it('el horario de entregas amplía el del número (los pines salen hasta el horario extendido)', async () => {
     const config = loadConfig(ENV_BASE);
     const repos = createFakeRepos();
     const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0 });
     const base = politicaDesdeConfig(config, 'cloud');
     expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18 });
-    // El horario de entrega del negocio es independiente; el número solo usa estos ajustes.
-    await ajustes.guardar({ horario: { inicio: 8, fin: 19 } });
-    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 8, horaFin: 19 });
+    // Lo que registran las entregas del día: desde las 14:00 hasta las 22:30 → el número deja pasar hasta las 23:00.
+    let franja: { desde: string; hasta: string } | null = { desde: '14:00', hasta: '22:30' };
+    ajustes.ampliarHorario(() => franja);
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 23 });
+    // Un horario de entregas más corto que el del número no lo recorta.
+    franja = { desde: '10:00', hasta: '16:00' };
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18 });
+    // Sin franja (por ejemplo, sin el módulo de entregas) no cambia nada.
+    franja = null;
+    expect(ajustes.politica(base)).toMatchObject({ horaInicio: 9, horaFin: 18 });
   });
 
   it('la zona horaria elegida en Ajustes manda en la política de envío; una zona inventada se rechaza', async () => {

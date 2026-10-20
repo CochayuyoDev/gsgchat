@@ -127,7 +127,7 @@ describe('consultas del chat y panel sin sobrecargar el servidor', () => {
     const pendientes: Array<(data: unknown) => void> = [];
     const api = vi.fn(() => new Promise(r => pendientes.push(r)));
     const tabla = vi.fn();
-    const cargar = new Function('api', '$', 'tabla', 'fecha', 'location', 'document', html.slice(inicio, fin) + '\nreturn historial;')(api, () => filtro, tabla, (d: unknown) => d, { hash: '#historial' }, { hidden: false, querySelectorAll: () => [] });
+    const cargar = new Function('api', '$', 'tablaHtml', 'fecha', 'location', 'document', 'esc', 'cifra', html.slice(inicio, fin) + '\nreturn historial;')(api, () => filtro, tabla, (d: unknown) => d, { hash: '#historial' }, { hidden: false, querySelectorAll: () => [] }, (v: unknown) => String(v ?? ''), (n: unknown) => String(Number(n) || 0));
     const vieja = cargar();
     const nueva = cargar();
     pendientes[1]!({ items: [{ at: 'nueva', detalle: { http: 200 } }] });
@@ -135,6 +135,9 @@ describe('consultas del chat y panel sin sobrecargar el servidor', () => {
     pendientes[0]!({ items: [{ at: 'antigua', detalle: { http: 400 } }] });
     await vieja;
     expect(tabla).toHaveBeenCalledTimes(1);
-    expect(tabla.mock.calls[0]?.[2]).toEqual([['nueva', 200, '', 0, 0, 0, 0, '', '']]);
+    const filas = tabla.mock.calls[0]?.[2] as string[][];
+    expect(filas).toHaveLength(1);
+    expect(filas[0]![0]).toBe('nueva');
+    expect(filas[0]![1]).toContain('200');
   });
 });

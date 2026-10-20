@@ -115,6 +115,7 @@ export interface MotorDeps {
    * reparto, nunca lo recorta. Sin el, a las 20:00 el reparto dejaba de pedir
    * pines aunque GSG entregue hasta las 22:00.
    */
+  horarioExtra?: () => { desde: string; hasta: string } | null;
   /** Los stickers automaticos (tras el primer mensaje, tras la despedida). Ver src/stickers. */
   stickers?: ServicioStickers;
   /**
@@ -263,6 +264,14 @@ export function crearMotor(deps: MotorDeps): Motor {
       // el sistema), no de los del reparto. Ver src/rutas/ajustes.ts.
       opciones = conFranjaDeLaPolitica(opciones, deps.politica?.());
       if (deps.nombreNegocio) opciones = { ...opciones, negocio: deps.nombreNegocio() };
+      const extra = deps.horarioExtra?.();
+      if (extra) {
+        const desde = Number(extra.desde.slice(0, 2));
+        const hasta = Number(extra.hasta.slice(0, 2)) + (Number(extra.hasta.slice(3, 5)) > 0 ? 1 : 0);
+        if (Number.isFinite(desde) && Number.isFinite(hasta)) {
+          opciones = { ...opciones, horaInicio: Math.min(opciones.horaInicio, Math.max(0, desde)), horaFin: Math.max(opciones.horaFin, Math.min(24, hasta)) };
+        }
+      }
     } catch (error) {
       // Sin ajustes legibles se sigue con los de la configuracion: el
       // reparto no se para por una fila corrupta en settings.
@@ -292,6 +301,12 @@ export function crearMotor(deps: MotorDeps): Motor {
    * desde la pantalla si las hay, o las de siempre.
    */
   function textoDelPaso(paso: PasoUbicacion, ctx: ContextoMensaje, clave: string, intentosPrevios: number): string {
+    const seguimiento = intentosPrevios > 0 && paso !== 'solicitud' ? ajustes.textosSeguimientos?.[intentosPrevios - 1] : undefined;
+    if (seguimiento && paso !== 'solicitud') {
+      const lineas = seguimiento[paso];
+      if (lineas.length) return rellenarTexto(elegirVariante(lineas, clave), ctx);
+      return textoLibre(paso, ctx, clave);
+    }
     const adicional = intentosPrevios >= 3 ? ajustes.textosAdicionales[intentosPrevios - 3] : undefined;
     if (adicional?.length) return rellenarTexto(elegirVariante(adicional, clave), ctx);
     const propias = ajustes.textos[paso];
