@@ -55,7 +55,9 @@ import {
 import type { MessageKind } from '../db/messages.js';
 import { enrollContact, matchRule, onInboundReply, renderPlaceholders, saludoPorHora } from '../automation/engine.js';
 
-import { atenderRespuestaDeRuta, pareceNumeroEquivocado, type RespuestaRuta } from '../rutas/inbound.js';
+import { atenderRespuestaDeRuta, cerradaPorPlazo, pareceNumeroEquivocado, type RespuestaRuta } from '../rutas/inbound.js';
+import { ajustesPorDefecto, aplicarAjustes } from '../rutas/ajustes.js';
+import { opcionesDesdeConfig } from '../rutas/motor.js';
 import { crearPuertoEnEspera, type PuertoGsg } from '../rutas/gsg.js';
 import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
@@ -941,6 +943,34 @@ async function handleInboundMessageEnFila(
     createdAt: receivedAt,
   });
 
+  // Regla del dueño (20/10): pasado el plazo para marcar la incidencia, el
+  // sistema ya no hace nada con ese cliente: se marca la incidencia, se le
+  // reporta a GSG y aqui se acaba. Ni respuesta, ni pin registrado, ni IA,
+  // ni acuse de lectura. El mensaje ya quedo guardado en el chat.
+  const maxIntentosRutas = async (): Promise<number> => {
+    const base = opcionesDesdeConfig(config);
+    return aplicarAjustes(base, await repos.rutas.ajustes.get(ajustesPorDefecto(base))).maxIntentos;
+  };
+  const plazoCerrado = await cerradaPorPlazo(
+    {
+      repos,
+      gsg: deps.gsg ?? crearPuertoEnEspera(),
+      timezone: config.timezone,
+      maxIntentos: maxIntentosRutas,
+      log: (m, d) => console.warn(`[inbound] ${m}`, d ?? ''),
+      ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),
+    },
+    contact,
+    deps.entregas?.ahora?.() ?? new Date(),
+  ).catch((error) => {
+    request_log(deps, 'no se pudo revisar el plazo de la incidencia', error);
+    return null;
+  });
+  if (plazoCerrado) {
+    console.warn('[inbound] plazo de la incidencia vencido: no se atiende al cliente', { phone, solicitud: plazoCerrado.id });
+    return;
+  }
+
   // La lista de envio automatico se entera de que contesto: si era lo que
   // se buscaba (su ubicacion, una respuesta), sale de la lista aqui mismo.
   // Va antes de la rafaga y de la pausa del bot a proposito: contestar es
@@ -1010,7 +1040,7 @@ async function handleInboundMessageEnFila(
    * pidiendole exactamente esto. Si no tiene ninguna solicitud abierta,
    * devuelve `atendida: false` y el mensaje sigue su camino de siempre.
    */
-  const rutasDeps = { repos, gsg: deps.gsg ?? crearPuertoEnEspera(), salud: deps.salud };
+  const rutasDeps = { repos, gsg: deps.gsg ?? crearPuertoEnEspera(), salud: deps.salud, maxIntentos: maxIntentosRutas };
   const contestarRuta = async (respuesta: RespuestaRuta): Promise<boolean> => {
     if (!respuesta.atendida) return false;
     if (respuesta.resultado === 'resuelta') {

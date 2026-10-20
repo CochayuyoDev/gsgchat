@@ -244,6 +244,10 @@ export interface RutasRepo {
   tocaIntentar(ahora: Date, limite: number): Promise<Solicitud[]>;
   /** Próxima fecha de trabajo activo; permite dormir sin sondear la cola. */
   proximoIntentoAt(): Promise<Date | null>;
+  /** Las que agotaron sus mensajes y vencio su espera final: toca marcarlas como incidencia, con horario o sin el. */
+  plazosVencidos(ahora: Date, maxIntentos: number, limite: number): Promise<Solicitud[]>;
+  /** Cuando vence el proximo de esos plazos: el motor despierta a esa hora aunque este fuera de horario. */
+  proximoPlazoAt(maxIntentos: number): Promise<Date | null>;
   /** La solicitud viva de un contacto: con esto se lee su respuesta. */
   abiertaPorContacto(contactId: string): Promise<Solicitud | null>;
   /** Con `excluirLoteId`, la abierta en OTRO lote: para no escribir dos veces por lo mismo. */
@@ -689,7 +693,9 @@ export function createRutasRepo(pool: Pool): RutasRepo {
           where l.estado in ('enviando', 'pausado')
             and s.estado in ('enviado', 'respondio')
             and s.ultimo_envio_at is not null
-            and s.requiere_humano = false`,
+            -- El plazo final vale tambien para quien contesto otra cosa: si no,
+            -- cambiar la espera final no le llegaba y seguia con la vieja.
+            and (s.requiere_humano = false or s.intentos >= $${params.length})`,
         params,
       );
       return rowCount;
@@ -769,6 +775,35 @@ export function createRutasRepo(pool: Pool): RutasRepo {
           where l.estado = 'enviando'
             and s.estado in ('pendiente','enviado','respondio')
             and s.phone is not null`,
+      );
+      const valor = rows[0]?.proximo;
+      return valor ? new Date(valor) : null;
+    },
+
+    async plazosVencidos(ahora, maxIntentos, limite) {
+      const { rows } = await pool.query<SolicitudRow>(
+        `select s.* from rutas_solicitudes s
+           join rutas_lotes l on l.id = s.lote_id
+          where l.estado <> 'terminado'
+            and s.estado in ('pendiente','enviado','respondio')
+            and s.intentos >= $2
+            and (s.proximo_intento_at is null or s.proximo_intento_at <= $1)
+          order by coalesce(s.proximo_intento_at, s.created_at) asc, s.id asc
+          limit $3`,
+        [ahora, Number(maxIntentos), Number(limite)],
+      );
+      return rows.map(toSolicitud);
+    },
+
+    async proximoPlazoAt(maxIntentos) {
+      const { rows } = await pool.query<{ proximo: Date | string | null }>(
+        `select min(coalesce(s.proximo_intento_at, s.created_at)) as proximo
+           from rutas_solicitudes s
+           join rutas_lotes l on l.id = s.lote_id
+          where l.estado <> 'terminado'
+            and s.estado in ('pendiente','enviado','respondio')
+            and s.intentos >= $1`,
+        [Number(maxIntentos)],
       );
       const valor = rows[0]?.proximo;
       return valor ? new Date(valor) : null;

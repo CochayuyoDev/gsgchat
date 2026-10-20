@@ -222,6 +222,87 @@ export function enHorario(fecha: Date, opciones: OpcionesMotor): boolean {
   return hora >= opciones.horaInicio && hora < opciones.horaFin;
 }
 
+export interface ContextoIncidencia {
+  repos: Repos;
+  ahora: () => Date;
+  log?: (mensaje: string, detalle?: Record<string, unknown>) => void;
+}
+
+/** Marca la incidencia, la apunta en la bitacora y la encola para GSG. */
+export async function anotarIncidenciaDeSolicitud(
+  ctx: ContextoIncidencia,
+  solicitud: Solicitud,
+  codigo: CodigoIncidencia,
+  detalle: string,
+  estado: 'incidencia' | 'supervision' | 'derivado' = 'incidencia',
+): Promise<void> {
+  const { repos } = ctx;
+  const ficha = INCIDENCIAS[codigo];
+  const actualizada = await repos.rutas.actualizarSolicitud(solicitud.id, {
+    estado,
+    incidencia: codigo,
+    incidenciaDetalle: detalle,
+    requiereHumano: ficha.requiereHumano,
+    proximoIntentoAt: null,
+  });
+
+  await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `${ficha.titulo}: ${detalle}`, {
+    codigo,
+    estado,
+  });
+
+  if (ficha.reportable) {
+    const lote = await repos.rutas.lote(solicitud.loteId);
+    if (lote) {
+      // Un reporte por tracking: un mismo numero puede tener varios envios de GSG en ese lote.
+      const ligadas = solicitud.phone && typeof repos.entregas?.vivasDeLoteYTelefono === 'function'
+        ? await repos.entregas.vivasDeLoteYTelefono(solicitud.loteId, solicitud.phone).catch(() => [])
+        : [];
+      const trackings = [...new Set(ligadas.map((e) => e.datosEnvio?.tracking ?? e.referencia).filter(Boolean))];
+      if (!trackings.length && solicitud.referencia) trackings.push(solicitud.referencia);
+      for (const tracking of trackings) {
+        await encolarProblemaGsg(repos.rutas, { ...payloadIncidencia(actualizada, lote), tracking, codigo }, { solicitudId: solicitud.id, loteId: lote.id, en: ctx.ahora() });
+      }
+    }
+  }
+
+  ctx.log?.('incidencia en una solicitud de ubicacion', {
+    solicitud: solicitud.id,
+    telefono: solicitud.phone,
+    codigo,
+    detalle,
+  });
+}
+
+/** Pasa el caso a una persona: se acabaron los intentos del bot y su espera final. */
+export async function derivarSolicitud(ctx: ContextoIncidencia, solicitud: Solicitud): Promise<void> {
+  const respondio = Boolean(solicitud.primeraRespuestaAt);
+  const codigo: CodigoIncidencia = respondio ? 'respondio_sin_ubicacion' : 'sin_respuesta';
+  const detalle = respondio
+    ? `contestó pero no envió ubicación después de ${solicitud.intentos} mensajes`
+    : `no contestó a ${solicitud.intentos} mensajes`;
+
+  await anotarIncidenciaDeSolicitud(ctx, solicitud, codigo, detalle, 'derivado');
+  await ctx.repos.rutas.registrarEvento(
+    solicitud.id,
+    'derivacion',
+    `Pendiente de atención: ${solicitud.intentos} mensajes sin ubicación`,
+  );
+}
+
+/**
+ * Si ya agoto sus mensajes y vencio la espera final: le toca la incidencia.
+ * Sin hora (`proximoIntentoAt` nulo) cuenta como vencida, igual que en la
+ * cola del motor (`tocaIntentar`): «sale en cuanto le toque».
+ */
+export function plazoVencido(solicitud: Solicitud, maxIntentos: number, momento: Date): boolean {
+  return (
+    ['pendiente', 'enviado', 'respondio'].includes(solicitud.estado) &&
+    solicitud.intentos >= maxIntentos &&
+    (solicitud.proximoIntentoAt === null || solicitud.proximoIntentoAt.getTime() <= momento.getTime())
+  );
+}
+
 /** El paso que le toca a una solicitud, o null si ya no le toca ninguno. */
 export function pasoDe(solicitud: Solicitud, opciones: OpcionesMotor): PasoUbicacion | 'derivar' | null {
   if (solicitud.intentos >= opciones.maxIntentos) return 'derivar';
@@ -382,66 +463,74 @@ export function crearMotor(deps: MotorDeps): Motor {
     conBoton: deps.conBoton?.() ?? false,
   });
 
-  /** Marca la incidencia, la apunta en la bitacora y la encola para GSG. */
-  async function anotarIncidencia(
+  const contextoIncidencia: ContextoIncidencia = { repos, ahora, log: deps.log };
+  const anotarIncidencia = (
     solicitud: Solicitud,
     codigo: CodigoIncidencia,
     detalle: string,
     estado: 'incidencia' | 'supervision' | 'derivado' = 'incidencia',
-  ): Promise<void> {
-    const ficha = INCIDENCIAS[codigo];
-    const actualizada = await repos.rutas.actualizarSolicitud(solicitud.id, {
-      estado,
-      incidencia: codigo,
-      incidenciaDetalle: detalle,
-      requiereHumano: ficha.requiereHumano,
-      proximoIntentoAt: null,
-    });
-
-    await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `${ficha.titulo}: ${detalle}`, {
-      codigo,
-      estado,
-    });
-
-    if (ficha.reportable) {
-      const lote = await repos.rutas.lote(solicitud.loteId);
-      if (lote) {
-        // Un reporte por tracking: un mismo numero puede tener varios envios de GSG en ese lote.
-        const ligadas = solicitud.phone && typeof repos.entregas?.vivasDeLoteYTelefono === 'function'
-          ? await repos.entregas.vivasDeLoteYTelefono(solicitud.loteId, solicitud.phone).catch(() => [])
-          : [];
-        const trackings = [...new Set(ligadas.map((e) => e.datosEnvio?.tracking ?? e.referencia).filter(Boolean))];
-        if (!trackings.length && solicitud.referencia) trackings.push(solicitud.referencia);
-        for (const tracking of trackings) {
-          await encolarProblemaGsg(repos.rutas, { ...payloadIncidencia(actualizada, lote), tracking, codigo }, { solicitudId: solicitud.id, loteId: lote.id, en: ahora() });
-        }
-      }
-    }
-
-    deps.log?.('incidencia en una solicitud de ubicacion', {
-      solicitud: solicitud.id,
-      telefono: solicitud.phone,
-      codigo,
-      detalle,
-    });
-  }
+  ): Promise<void> => anotarIncidenciaDeSolicitud(contextoIncidencia, solicitud, codigo, detalle, estado);
 
   /** Pasa el caso a una persona: se acabaron los intentos del bot. */
   async function derivar(solicitud: Solicitud): Promise<ResultadoTick> {
-    const respondio = Boolean(solicitud.primeraRespuestaAt);
-    const codigo: CodigoIncidencia = respondio ? 'respondio_sin_ubicacion' : 'sin_respuesta';
-    const detalle = respondio
-      ? `contestó pero no envió ubicación después de ${solicitud.intentos} mensajes`
-      : `no contestó a ${solicitud.intentos} mensajes`;
-
-    await anotarIncidencia(solicitud, codigo, detalle, 'derivado');
-    await repos.rutas.registrarEvento(
-      solicitud.id,
-      'derivacion',
-      `Pendiente de atención: ${solicitud.intentos} mensajes sin ubicación`,
-    );
-
+    await derivarSolicitud(contextoIncidencia, solicitud);
     return { accion: 'derivacion', solicitudId: solicitud.id };
+  }
+
+  // Numeros del dia: una persona detuvo los mensajes automaticos a ese
+  // numero. No se le escribe; se aparta unos minutos para que no tape la
+  // cola y se vuelve a mirar (al reanudarlo sale en cuanto le toque).
+  const pausado = async (phone: string | null): Promise<boolean> =>
+    Boolean(phone) && typeof repos.entregas?.pausadoPorTelefono === 'function' && (await repos.entregas.pausadoPorTelefono(phone!).catch(() => false));
+  // La red de seguridad de la «única verdad» de la ubicacion: si ese
+  // telefono ya tiene hoy su ubicacion registrada en las entregas (venga
+  // por donde venga), NO se le pide otra vez: la solicitud (y cualquier
+  // otra abierta de ese telefono) pasa a resuelta con ese punto y el motor
+  // sigue con el siguiente. Asi un recordatorio nunca le llega a quien ya
+  // mando su pin, aunque algun camino se haya olvidado de cerrarla.
+  const yaTieneUbicacion = async (s: Solicitud, momento: Date): Promise<boolean> => {
+    const registrada = await ubicacionYaRegistrada(repos, s.phone, diaEnZona(momento, opciones.timezone), s.referencia);
+    if (!registrada || registrada.lat == null || registrada.lng == null) return false;
+    const cerradas = await resolverPorUbicacion(repos, s.phone!, { lat: registrada.lat, lng: registrada.lng, mapsUrl: registrada.mapsUrl, fuente: registrada.ubicacionFuente }, { ahora: momento, motivo: `ya la había mandado (pedido ${registrada.referencia})`, referencias: [registrada.referencia] });
+    // Si era de OTRO pedido del mismo cliente (que aun no la tenia), GSG se
+    // entera por aqui, como cuando el reparto la resuelve.
+    for (const c of cerradas) {
+      if (!c.referencia || c.referencia === registrada.referencia) continue;
+      const lote = await repos.rutas.lote(c.loteId).catch(() => null);
+      if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: await payloadUbicacionDelPedido(repos, c, lote) }).catch(() => undefined);
+    }
+    // La ubicacion sale YA hacia GSG, sin esperar a la pasada de cada minuto.
+    if (cerradas.length) void despacharReportes({ rutas: repos.rutas }, gsg, 25, ['ubicacion'], { alMomento: true }).catch(() => undefined);
+    deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
+    return true;
+  };
+
+  /**
+   * Regla del dueño (20/10): la incidencia sale a la hora del plazo, no
+   * cuando al motor le toca mirar. Va antes del horario, de la pausa entre
+   * envios y del monitor de salud, porque marcarla no le escribe a nadie:
+   * antes, un plazo que vencia de noche se marcaba a la apertura del dia
+   * siguiente y mientras tanto el pin se seguia aceptando.
+   */
+  async function derivarVencidas(momento: Date): Promise<Solicitud[]> {
+    if (typeof repos.rutas.plazosVencidos !== 'function') return [];
+    const derivadas: Solicitud[] = [];
+    for (const s of await repos.rutas.plazosVencidos(momento, opciones.maxIntentos, 50)) {
+      // Lo mismo que antes de escribirle: quien ya tiene su ubicacion de hoy
+      // queda resuelto, no en incidencia. Solo si de verdad quedo cerrada: si
+      // no, se volveria a ver vencida en cada pasada.
+      if ((await yaTieneUbicacion(s, momento)) && (await repos.rutas.solicitud(s.id))?.estado === 'resuelto') continue;
+      // Un pin que espera su «¿es ahí?» o un numero que lleva una persona: la
+      // incidencia no sale sola mientras tanto. Se vuelve a mirar en minutos.
+      if (await pausado(s.phone)) {
+        esperar(s, 'pausado', 'Mensajes detenidos o pin recibido pendiente de confirmación.', 5 * 60_000);
+        await repos.rutas.actualizarSolicitud(s.id, { proximoIntentoAt: new Date(momento.getTime() + 5 * 60_000) });
+        continue;
+      }
+      await derivar(s);
+      derivadas.push(s);
+    }
+    return derivadas;
   }
 
   /** Manda el mensaje del paso y deja la solicitud como corresponda. */
@@ -680,9 +769,15 @@ export function crearMotor(deps: MotorDeps): Motor {
     async proximoDespertarEn() {
       // Con el horario de ahora, no con el de la ultima pasada.
       await refrescarAjustes();
-      const proximo = await repos.rutas.proximoIntentoAt();
-      if (!proximo) return null;
       const momento = ahora();
+      // El plazo de la incidencia despierta a su hora, con horario o sin el.
+      const plazo = typeof repos.rutas.proximoPlazoAt === 'function' ? await repos.rutas.proximoPlazoAt(opciones.maxIntentos) : null;
+      // Un segundo como minimo: si marcarla falla, no se reintenta en bucle.
+      const hastaPlazo = plazo ? Math.max(1_000, plazo.getTime() - momento.getTime()) : null;
+      const conPlazo = (espera: number | null): number | null =>
+        hastaPlazo === null ? espera : espera === null ? hastaPlazo : Math.min(espera, hastaPlazo);
+      const proximo = await repos.rutas.proximoIntentoAt();
+      if (!proximo) return conPlazo(null);
       const pausaRestante = deps.salud && deps.politica
         ? deps.salud.marcapasos.proximoEnvioEn(momento, deps.salud.factor())
         : Math.max(0, ultimoEnvio + pausaEfectiva() - momento.getTime());
@@ -703,9 +798,9 @@ export function crearMotor(deps: MotorDeps): Motor {
           }
         }
         if (apertura != null) espera = Math.max(espera, apertura);
-        else return null;
+        else return conPlazo(null);
       }
-      return Math.max(1, espera);
+      return conPlazo(Math.max(1, espera));
     },
 
     async tick() {
@@ -720,6 +815,9 @@ export function crearMotor(deps: MotorDeps): Motor {
       }
       anotarEsperaGlobal(repos.rutas, null);
 
+      const derivadas = await derivarVencidas(momento);
+      if (derivadas.length) return { accion: 'derivacion', solicitudId: derivadas[0]!.id };
+
       if (!enHorario(momento, opciones)) {
         // No consulta la cola fuera de horario: la API muestra la franja.
         return {
@@ -729,33 +827,6 @@ export function crearMotor(deps: MotorDeps): Motor {
       }
 
       let [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
-      // Numeros del dia: una persona detuvo los mensajes automaticos a ese
-      // numero. No se le escribe; se aparta unos minutos para que no tape la
-      // cola y se vuelve a mirar (al reanudarlo sale en cuanto le toque).
-      const pausado = async (phone: string | null): Promise<boolean> =>
-        Boolean(phone) && typeof repos.entregas?.pausadoPorTelefono === 'function' && (await repos.entregas.pausadoPorTelefono(phone!).catch(() => false));
-      // La red de seguridad de la «única verdad» de la ubicacion: si ese
-      // telefono ya tiene hoy su ubicacion registrada en las entregas (venga
-      // por donde venga), NO se le pide otra vez: la solicitud (y cualquier
-      // otra abierta de ese telefono) pasa a resuelta con ese punto y el motor
-      // sigue con el siguiente. Asi un recordatorio nunca le llega a quien ya
-      // mando su pin, aunque algun camino se haya olvidado de cerrarla.
-      const yaTieneUbicacion = async (s: Solicitud): Promise<boolean> => {
-        const registrada = await ubicacionYaRegistrada(repos, s.phone, diaEnZona(momento, opciones.timezone), s.referencia);
-        if (!registrada || registrada.lat == null || registrada.lng == null) return false;
-        const cerradas = await resolverPorUbicacion(repos, s.phone!, { lat: registrada.lat, lng: registrada.lng, mapsUrl: registrada.mapsUrl, fuente: registrada.ubicacionFuente }, { ahora: momento, motivo: `ya la había mandado (pedido ${registrada.referencia})`, referencias: [registrada.referencia] });
-        // Si era de OTRO pedido del mismo cliente (que aun no la tenia), GSG se
-        // entera por aqui, como cuando el reparto la resuelve.
-        for (const c of cerradas) {
-          if (!c.referencia || c.referencia === registrada.referencia) continue;
-          const lote = await repos.rutas.lote(c.loteId).catch(() => null);
-          if (lote) await repos.rutas.encolarReporte({ solicitudId: c.id, loteId: lote.id, tipo: 'ubicacion', payload: await payloadUbicacionDelPedido(repos, c, lote) }).catch(() => undefined);
-        }
-        // La ubicacion sale YA hacia GSG, sin esperar a la pasada de cada minuto.
-        if (cerradas.length) void despacharReportes({ rutas: repos.rutas }, gsg, 25, ['ubicacion'], { alMomento: true }).catch(() => undefined);
-        deps.log?.('el cliente ya tenía su ubicación registrada: no se le vuelve a pedir', { telefono: s.phone, solicitud: s.id });
-        return true;
-      };
       // El primer mensaje espera lo configurado desde que llegó el pedido. Solo
       // si nadie le puso hora (un «reintentar ahora» la pone y sale ya).
       const esperaPrimero = Math.max(0, opciones.esperaPrimerMensajeSegundos ?? (opciones.esperaPrimerMensajeMinutos ?? 0) * 60) * 1000;
@@ -771,7 +842,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
           continue;
         }
-        if (await yaTieneUbicacion(siguiente)) {
+        if (await yaTieneUbicacion(siguiente, momento)) {
           [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
           continue;
         }

@@ -219,6 +219,50 @@ describe('lotes y solicitudes', () => {
     expect((await repos.rutas.solicitud(enPausa!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 30 * 60_000);
   });
 
+  it('la espera final se reprograma también para quien contestó (requiere humano) y ya agotó sus mensajes', async () => {
+    const lote = await repos.rutas.crearLote({ nombre: 'Plazo final' });
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    const [contesto] = await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '977777777', phone: '51977777777' }]);
+    const ultimoEnvioAt = new Date(Date.now() - 5 * 60_000);
+    await repos.rutas.actualizarSolicitud(contesto!.id, { estado: 'respondio', intentos: 4, requiereHumano: true, ultimoEnvioAt, proximoIntentoAt: new Date(ultimoEnvioAt.getTime() + 60 * 60_000) });
+
+    expect(await repos.rutas.reprogramarSeguimientosSegundos([60, 60, 60], 20 * 60)).toBe(1);
+    expect((await repos.rutas.solicitud(contesto!.id))!.proximoIntentoAt!.getTime()).toBe(ultimoEnvioAt.getTime() + 20 * 60_000);
+  });
+
+  it('los plazos vencidos salen con horario o sin él, de lotes en marcha o en pausa, y nunca de un lote terminado', async () => {
+    const enMarcha = await repos.rutas.crearLote({ nombre: 'En marcha' });
+    const enPausa = await repos.rutas.crearLote({ nombre: 'En pausa' });
+    const terminado = await repos.rutas.crearLote({ nombre: 'Terminado' });
+    await repos.rutas.cambiarEstadoLote(enMarcha.id, 'enviando');
+    await repos.rutas.cambiarEstadoLote(enPausa.id, 'pausado');
+    await repos.rutas.cambiarEstadoLote(terminado.id, 'terminado');
+    const ahora = new Date();
+    const hace = (min: number) => new Date(ahora.getTime() - min * 60_000);
+    const [vencida, futura, sinHora, faltanMensajes] = await repos.rutas.agregarSolicitudes(enMarcha.id, [
+      { telefonoCrudo: '911111111', phone: '51911111111' },
+      { telefonoCrudo: '922222222', phone: '51922222222' },
+      { telefonoCrudo: '933333333', phone: '51933333333' },
+      { telefonoCrudo: '944444444', phone: '51944444444' },
+    ]);
+    const [pausada] = await repos.rutas.agregarSolicitudes(enPausa.id, [{ telefonoCrudo: '955555555', phone: '51955555555' }]);
+    const [cerrada] = await repos.rutas.agregarSolicitudes(terminado.id, [{ telefonoCrudo: '966666666', phone: '51966666666' }]);
+    await repos.rutas.actualizarSolicitud(vencida!.id, { estado: 'enviado', intentos: 4, proximoIntentoAt: hace(10) });
+    await repos.rutas.actualizarSolicitud(futura!.id, { estado: 'respondio', intentos: 4, proximoIntentoAt: new Date(ahora.getTime() + 15 * 60_000) });
+    await repos.rutas.actualizarSolicitud(sinHora!.id, { estado: 'enviado', intentos: 4, proximoIntentoAt: null });
+    await repos.rutas.actualizarSolicitud(faltanMensajes!.id, { estado: 'enviado', intentos: 2, proximoIntentoAt: hace(30) });
+    await repos.rutas.actualizarSolicitud(pausada!.id, { estado: 'enviado', intentos: 5, proximoIntentoAt: hace(5) });
+    await repos.rutas.actualizarSolicitud(cerrada!.id, { estado: 'enviado', intentos: 4, proximoIntentoAt: hace(60) });
+
+    const ids = (await repos.rutas.plazosVencidos(ahora, 4, 50)).map((s) => s.id).sort((a, b) => a - b);
+    expect(ids).toEqual([vencida!.id, sinHora!.id, pausada!.id].sort((a, b) => a - b));
+    // El proximo plazo es el mas antiguo de esos (el sin hora cuenta desde que se creo).
+    expect((await repos.rutas.proximoPlazoAt(4))!.getTime()).toBeLessThanOrEqual(hace(10).getTime());
+
+    for (const id of ids) await repos.rutas.actualizarSolicitud(id, { estado: 'derivado', proximoIntentoAt: null });
+    expect((await repos.rutas.proximoPlazoAt(4))!.getTime()).toBe(ahora.getTime() + 15 * 60_000);
+  });
+
   it('reprograma el envío inicial pendiente de Solicitud de ubicación desde que llegó el pedido', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Solicitud inicial' });
     await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');

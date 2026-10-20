@@ -202,6 +202,52 @@ export function rellenarTexto(
     .trim();
 }
 
+/**
+ * Lo guardado encima de la base. La secuencia de esperas manda: el maximo de
+ * mensajes es siempre `esperas + 1`, y sin espera final guardada sigue a la
+ * ultima espera. Exportada para que el repo en memoria de las pruebas haga
+ * exactamente lo mismo que el de la base.
+ */
+export const fusionarAjustesRutas = (base: AjustesRutas, guardado: Partial<AjustesRutas>): AjustesRutas => {
+  const intervalo = guardado.esperaRespuestaMinutos ?? base.esperaRespuestaMinutos;
+  const maxIntentos = Math.max(1, Math.min(100, guardado.maxIntentos ?? base.maxIntentos));
+  let esperasSegundos = guardado.esperasMensajesSegundos
+    ?? (guardado.esperasMensajesMinutos ? guardado.esperasMensajesMinutos.map((n) => n * 60) : undefined)
+    ?? base.esperasMensajesSegundos
+    ?? base.esperasMensajesMinutos.map((n) => n * 60);
+  let esperas = guardado.esperasMensajesMinutos ?? esperasSegundos.map((n) => n / 60);
+  // Compatibilidad con ajustes previos: replicar el intervalo antiguo por
+  // cada seguimiento. Si el cliente solo cambia el máximo, conservar el
+  // ritmo actual y ajustar la longitud de la secuencia.
+  if (!guardado.esperasMensajesMinutos && !guardado.esperasMensajesSegundos) {
+    const cantidad = guardado.maxIntentos !== undefined ? maxIntentos - 1 : esperas.length;
+    esperas = Array.from({ length: cantidad }, (_, i) =>
+      guardado.esperaRespuestaMinutos !== undefined || !esperas[i] ? intervalo : esperas[i]);
+    esperasSegundos = esperas.map((n) => n * 60);
+  }
+  esperas = esperas.slice(0, 99);
+  esperasSegundos = esperasSegundos.slice(0, 99);
+  const primerSegundos = guardado.esperaPrimerMensajeSegundos ?? (guardado.esperaPrimerMensajeMinutos !== undefined ? guardado.esperaPrimerMensajeMinutos * 60 : base.esperaPrimerMensajeSegundos ?? (base.esperaPrimerMensajeMinutos ?? 0) * 60);
+  const finalSegundos = guardado.esperaFinalSegundos ?? (guardado.esperaFinalMinutos !== undefined ? guardado.esperaFinalMinutos * 60 : guardado.esperasMensajesSegundos || guardado.esperasMensajesMinutos ? esperasSegundos.at(-1) ?? intervalo * 60 : base.esperaFinalSegundos ?? base.esperaFinalMinutos * 60);
+  return {
+    ...base,
+    ...guardado,
+    esperaRespuestaMinutos: esperas[0] ?? intervalo,
+    esperasMensajesMinutos: esperas,
+    esperaPrimerMensajeSegundos: primerSegundos,
+    esperaPrimerMensajeMinutos: primerSegundos / 60,
+    esperasMensajesSegundos: esperasSegundos,
+    maxIntentos: esperas.length + 1,
+    // Sin guardar, la espera final sigue a la última espera entre mensajes.
+    esperaFinalMinutos: finalSegundos / 60,
+    esperaFinalSegundos: finalSegundos,
+    pedirUbicacionCadaMinutos: 0,
+    plantillas: { ...base.plantillas, ...(guardado.plantillas ?? {}) },
+    textos: { ...base.textos, ...(guardado.textos ?? {}) },
+    textosAdicionales: (guardado.textosAdicionales ?? base.textosAdicionales).slice(0, 97),
+  };
+};
+
 export const AJUSTES_KEY = 'rutas.ajustes';
 
 export interface AjustesRepo {
@@ -242,53 +288,13 @@ export function createAjustesRepo(pool: Pool): AjustesRepo {
     return actual;
   }
 
-  const fusionar = (base: AjustesRutas, guardado: Partial<AjustesRutas>): AjustesRutas => {
-    const intervalo = guardado.esperaRespuestaMinutos ?? base.esperaRespuestaMinutos;
-    const maxIntentos = Math.max(1, Math.min(100, guardado.maxIntentos ?? base.maxIntentos));
-    let esperasSegundos = guardado.esperasMensajesSegundos
-      ?? (guardado.esperasMensajesMinutos ? guardado.esperasMensajesMinutos.map((n) => n * 60) : undefined)
-      ?? base.esperasMensajesSegundos
-      ?? base.esperasMensajesMinutos.map((n) => n * 60);
-    let esperas = guardado.esperasMensajesMinutos ?? esperasSegundos.map((n) => n / 60);
-    // Compatibilidad con ajustes previos: replicar el intervalo antiguo por
-    // cada seguimiento. Si el cliente solo cambia el máximo, conservar el
-    // ritmo actual y ajustar la longitud de la secuencia.
-    if (!guardado.esperasMensajesMinutos && !guardado.esperasMensajesSegundos) {
-      const cantidad = guardado.maxIntentos !== undefined ? maxIntentos - 1 : esperas.length;
-      esperas = Array.from({ length: cantidad }, (_, i) =>
-        guardado.esperaRespuestaMinutos !== undefined || !esperas[i] ? intervalo : esperas[i]);
-      esperasSegundos = esperas.map((n) => n * 60);
-    }
-    esperas = esperas.slice(0, 99);
-    esperasSegundos = esperasSegundos.slice(0, 99);
-    const primerSegundos = guardado.esperaPrimerMensajeSegundos ?? (guardado.esperaPrimerMensajeMinutos !== undefined ? guardado.esperaPrimerMensajeMinutos * 60 : base.esperaPrimerMensajeSegundos ?? (base.esperaPrimerMensajeMinutos ?? 0) * 60);
-    const finalSegundos = guardado.esperaFinalSegundos ?? (guardado.esperaFinalMinutos !== undefined ? guardado.esperaFinalMinutos * 60 : guardado.esperasMensajesSegundos || guardado.esperasMensajesMinutos ? esperasSegundos.at(-1) ?? intervalo * 60 : base.esperaFinalSegundos ?? base.esperaFinalMinutos * 60);
-    return {
-      ...base,
-      ...guardado,
-      esperaRespuestaMinutos: esperas[0] ?? intervalo,
-      esperasMensajesMinutos: esperas,
-      esperaPrimerMensajeSegundos: primerSegundos,
-      esperaPrimerMensajeMinutos: primerSegundos / 60,
-      esperasMensajesSegundos: esperasSegundos,
-      maxIntentos: esperas.length + 1,
-      // Sin guardar, la espera final sigue a la última espera entre mensajes.
-      esperaFinalMinutos: finalSegundos / 60,
-      esperaFinalSegundos: finalSegundos,
-      pedirUbicacionCadaMinutos: 0,
-      plantillas: { ...base.plantillas, ...(guardado.plantillas ?? {}) },
-      textos: { ...base.textos, ...(guardado.textos ?? {}) },
-      textosAdicionales: (guardado.textosAdicionales ?? base.textosAdicionales).slice(0, 97),
-    };
-  };
-
   return {
     async get(porDefecto) {
-      return fusionar(porDefecto, await leer());
+      return fusionarAjustesRutas(porDefecto, await leer());
     },
     async set(patch, porDefecto) {
-      const actual = fusionar(porDefecto, await leer());
-      const nuevo = fusionar(actual, patch as Partial<AjustesRutas>);
+      const actual = fusionarAjustesRutas(porDefecto, await leer());
+      const nuevo = fusionarAjustesRutas(actual, patch as Partial<AjustesRutas>);
       await pool.query(
         `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
          on duplicate key update value = values(value), updated_at = now(3)`,
