@@ -256,9 +256,9 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
 export async function encolarProblemaGsg(
   rutas: { encolarReporte: RutasRepo['encolarReporte']; reportesRecientes: RutasRepo['reportesRecientes'] },
   payload: Record<string, unknown> & { tracking: string; codigo: string },
-  opts: { solicitudId?: number | null; loteId?: string | null; en: Date },
+  opts: { solicitudId?: number | null; loteId?: string | null; en: Date; eventoId?: string },
 ): Promise<boolean> {
-  const eventoId = eventoIdProblema(payload.tracking, payload.codigo, opts.en);
+  const eventoId = opts.eventoId ?? eventoIdProblema(payload.tracking, payload.codigo, opts.en);
   const recientes = await rutas.reportesRecientes(500, 'incidencia').catch(() => []);
   if (recientes.some((r) => (r.payload as Record<string, unknown>)?.eventoId === eventoId)) return false;
   await rutas.encolarReporte({ solicitudId: opts.solicitudId ?? null, loteId: opts.loteId ?? null, tipo: 'incidencia', payload: { ...payload, eventoId, detectadoEn: opts.en.toISOString() } });

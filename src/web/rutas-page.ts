@@ -718,7 +718,12 @@ function pintarDetalle(data) {
 
   var sinTelefono = !s.phone;
   var puede = accionesDeEstado(s.estado);
-  var enlaceChat = '<a class="fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>';
+  var enlaceChat = '<a class="fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>' +
+    (sinTelefono ? '' : '<a href="#" class="fijo" id="d-incidencia">Enviar incidencia manual</a>');
+  var abrirIncidencia = function (evento) {
+    if (evento) evento.preventDefault();
+    abrirIncidenciaManual({ phone: s.phone, tracking: s.referencia || '', alTerminar: function () { detalleId = null; refrescar(); } });
+  };
 
   // Quitada de la automatizacion: nada que pueda volver a escribirle. Solo
   // se dice que esta fuera y se deja abrir el chat.
@@ -727,6 +732,7 @@ function pintarDetalle(data) {
       '<div class="aviso" style="margin:12px 0 8px"><div><b>Quitada de esta automatización</b><br>' +
         'No se le volverá a escribir por esta solicitud. El chat, el contacto y el historial se conservan.</div></div>' +
       '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>';
+    if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
     return;
   }
 
@@ -751,6 +757,7 @@ function pintarDetalle(data) {
       ? '<div class="fila" style="margin:4px 0 4px"><button type="button" class="btn sm fijo" id="d-quitar">Quitar de esta automatización</button></div>'
       : '');
 
+  if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
   document.getElementById('d-guardar-ubi').onclick = function () { guardarUbicacion(s.id); };
   document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.', this); };

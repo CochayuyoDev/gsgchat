@@ -844,9 +844,12 @@ async function handleInboundMessageEnFila(
   const esMotorizadoQueEscribe = (): Promise<boolean> =>
     (esMotorizadoCache ??= deps.entregas ? deps.entregas.esMotorizado(phone).catch(() => false) : Promise.resolve(false));
   const soloDigitos = (t: string): string => t.replace(/\D+/g, '');
+  // La excepcion de la pausa (ubicacion pedida, boton de entrega): su respuesta sale.
+  let pausaTraspasada = false;
   const sender: Sender = {
     ...senderBase,
     async send(job) {
+      if (pausaTraspasada && !job.traspasaPausa) job = { ...job, traspasaPausa: true };
       if (job.manual || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
       console.warn('[inbound] bot callado: no se le contesta al cliente', { phone, que: (job.text ?? job.interactive?.body ?? job.kind).slice(0, 60) });
       return { ok: true, wamid: `silencio:${randomUUID()}`, deliveryId: -1 };
@@ -983,6 +986,7 @@ async function handleInboundMessageEnFila(
       Boolean(await repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null)) ||
       (deps.entregas ? (await deps.entregas.estadoUbicacionDe(contact.phone).catch(() => 'sin_entrega')) === 'pendiente' : false);
     if (!esBotonDeEntrega && !pideUbicacion) return;
+    pausaTraspasada = true;
     if (!esBotonDeEntrega) request_log(deps, 'bot en pausa, pero llegó la ubicación que el sistema pidió: se registra y se contesta', null);
   }
 
