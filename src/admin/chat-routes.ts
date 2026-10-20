@@ -473,7 +473,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   };
 
   const responderManual = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }, r: Awaited<ReturnType<typeof reportarManual>>) =>
-    r.status === 200 ? r : reply.code(r.status).send({ error: r.error });
+    r.status === 200 ? { ok: r.ok, duplicada: r.duplicada, botPausado: r.botPausado } : reply.code(r.status).send({ error: r.error });
 
   app.get('/admin/chat/:contactId/incidencia-manual', async (request, reply) => {
     const { contactId } = request.params as { contactId: string };
