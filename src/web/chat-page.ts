@@ -892,56 +892,6 @@ async function alternarBot() {
 }
 
 /**
- * Reportar a GSG un error del pedido con el tipo y el resumen que pone la
- * persona. Muestra el pedido y el tracking antes de enviar; el boton queda
- * apagado mientras sale, y si falla se conserva lo escrito para reintentar.
- */
-async function enviarIncidenciaManual() {
-  if (!current) return;
-  var datos;
-  try { datos = await api('/admin/chat/' + current.id + '/incidencia-manual'); }
-  catch (e) { toast('No se pudo abrir: ' + (e.message || e)); return; }
-  var fondo = document.createElement('div');
-  fondo.className = 'dlg-fondo';
-  var pedidos = datos.pedidos || [];
-  fondo.innerHTML =
-    '<div class="dlg leccion" role="dialog" aria-modal="true">' +
-      '<h3>Enviar incidencia manual a GSG</h3>' +
-      '<div class="campo"><label for="im-tipo">Tipo de error</label><select id="im-tipo">' +
-        (datos.tipos || []).map(function (t) { return '<option value="' + esc(t.codigo) + '"' + (t.codigo === 'incidencia-manual' ? ' selected' : '') + '>' + esc(t.titulo) + ' (' + esc(t.codigo) + ')</option>'; }).join('') +
-      '</select></div>' +
-      '<div class="campo"><label for="im-tracking">Pedido y tracking que se envían</label>' +
-        (pedidos.length > 1
-          ? '<select id="im-tracking">' + pedidos.map(function (p) { return '<option value="' + esc(p.tracking) + '">' + esc(p.tracking) + (p.cliente ? ' - ' + esc(p.cliente) : '') + '</option>'; }).join('') + '</select>'
-          : '<input id="im-tracking" autocomplete="off" value="' + esc(pedidos.length ? pedidos[0].tracking : '') + '" placeholder="Tracking del pedido">') +
-        '<div class="muted">Teléfono del cliente: ' + esc(current.phone || '') + '</div></div>' +
-      '<div class="campo"><label for="im-resumen">Resumen para GSG (obligatorio)</label><textarea id="im-resumen" rows="4" maxlength="500" placeholder="Por qué reportas el error"></textarea></div>' +
-      '<div class="mal" id="im-mal"></div>' +
-      '<div class="botones"><button type="button" id="im-no">Cancelar</button><button type="button" class="principal" id="im-si">Enviar a GSG</button></div>' +
-    '</div>';
-  document.body.appendChild(fondo);
-  var si = fondo.querySelector('#im-si');
-  var mal = fondo.querySelector('#im-mal');
-  var cerrar = function () { fondo.remove(); };
-  fondo.querySelector('#im-no').onclick = cerrar;
-  si.onclick = async function () {
-    var resumen = fondo.querySelector('#im-resumen').value.trim();
-    var tracking = fondo.querySelector('#im-tracking').value.trim();
-    if (!tracking) { mal.textContent = 'Falta el tracking del pedido.'; return; }
-    if (resumen.length < 5) { mal.textContent = 'Escribe el resumen para GSG.'; return; }
-    si.disabled = true; si.textContent = 'Enviando…'; mal.textContent = '';
-    try {
-      var r = await api('/admin/chat/' + current.id + '/incidencia-manual', { method: 'POST', body: { tipo: fondo.querySelector('#im-tipo').value, tracking: tracking, resumen: resumen } });
-      toast(r.duplicada ? 'Ese reporte ya se había enviado: no se repite.' : 'Incidencia enviada a GSG.');
-      cerrar();
-    } catch (e) {
-      mal.textContent = 'No se pudo enviar (' + (e.message || e) + '). Lo escrito se conserva: puedes reintentar.';
-      si.disabled = false; si.textContent = 'Reintentar';
-    }
-  };
-}
-
-/**
  * El agente operativo cerró este chat (mandó su cierre o registró la
  * ubicación): una persona lo atiende. Esto lo devuelve al asistente.
  */
@@ -979,7 +929,7 @@ document.getElementById('menu-chat').onclick = function () {
     ops.push({ icono: '📞', texto: 'Llamar', accion: function () { location.href = 'tel:+' + current.phone; } });
   }
   if (!esGrupo) ops.push({ icono: '🤖', texto: current.botPausadoAt ? 'Reactivar bot' : 'Callar bot', accion: alternarBot });
-  if (!esGrupo) ops.push({ icono: '⚑', texto: 'Enviar incidencia manual', accion: enviarIncidenciaManual });
+  if (!esGrupo) ops.push({ icono: '⚑', texto: 'Enviar incidencia manual', accion: function () { abrirIncidenciaManual({ phone: current.phone, contactId: current.id, alTerminar: function () { openChat(current.id, true); } }); } });
   if (!esGrupo && current.iaCerradaAt) ops.push({ icono: '↩', texto: 'Que el asistente vuelva a atender este chat', accion: reabrirAsistente });
   if (!esGrupo) ops.push({ icono: '⟲', texto: 'Volver a empezar con este cliente', accion: function () { volverAEmpezar(current.id); } });
   ops.push({ icono: '⭐', texto: 'Mensajes destacados de este chat', accion: function () { verDestacados(true); } });

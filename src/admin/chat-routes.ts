@@ -378,10 +378,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   ];
   const trackingDe = (e: { referencia: string; datosEnvio?: { tracking?: string | null } | null }) => e.datosEnvio?.tracking || e.referencia;
 
-  app.get('/admin/chat/:contactId/incidencia-manual', async (request, reply) => {
-    const { contactId } = request.params as { contactId: string };
-    const contact = await repos.contacts.getById(contactId);
-    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
+  const opcionesDe = async (contact: { id: string; phone: string }) => {
     const pedidos = (await repos.entregas.vivasPorTelefono(contact.phone).catch(() => [])).map((e) => ({ tracking: trackingDe(e), referencia: e.referencia, cliente: e.nombre, dia: e.dia }));
     const enviadas = (await repos.rutas.reportesRecientes(500, 'incidencia').catch(() => []))
       .filter((r) => r.payload.origen === 'incidencia_manual' && r.payload.contactId === contact.id)
@@ -396,21 +393,20 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         estado: r.estado === 'enviado' ? 'Enviada' : r.estado === 'fallido' ? 'Fallida' : 'Pendiente de reintento',
         respuesta: r.estado === 'enviado' ? (r.externoId ?? 'GSG la recibió') : r.ultimoError,
       }));
-    return { tipos: tiposManuales(), pedidos, enviadas };
+    return { tipos: tiposManuales(), pedidos, enviadas, botPausadoAt: (await repos.contacts.getById(contact.id))?.botPausadoAt ?? null };
+  };
+
+  const datosManuales = z.object({
+    tipo: z.string().trim().min(1, 'Elige el tipo de error.'),
+    resumen: z.string().trim().min(5, 'Cuéntale a GSG por qué reportas el error.').max(500),
+    tracking: z.string().trim().min(1, 'Falta el tracking del pedido.').max(80),
   });
 
-  app.post('/admin/chat/:contactId/incidencia-manual', async (request, reply) => {
-    const { contactId } = request.params as { contactId: string };
-    const body = z.object({
-      tipo: z.string().trim().min(1, 'Elige el tipo de error.'),
-      resumen: z.string().trim().min(5, 'Cuéntale a GSG por qué reportas el error.').max(500),
-      tracking: z.string().trim().min(1, 'Falta el tracking del pedido.').max(80),
-    }).safeParse(request.body ?? {});
-    if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message ?? 'Datos incompletos.' });
-    if (!tiposManuales().some((t) => t.codigo === body.data.tipo)) return reply.code(400).send({ error: 'Ese tipo de error no existe.' });
-    const contact = await repos.contacts.getById(contactId);
-    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
-
+  /** Valida, calla al bot de ese cliente y manda el reporte a GSG por la cola de siempre. */
+  const reportarManual = async (contact: { id: string; phone: string }, cuerpo: unknown, request: { usuario?: { nombre?: string | null; usuario?: string } | null }) => {
+    const body = datosManuales.safeParse(cuerpo ?? {});
+    if (!body.success) return { status: 400, error: body.error.issues[0]?.message ?? 'Datos incompletos.' } as const;
+    if (!tiposManuales().some((t) => t.codigo === body.data.tipo)) return { status: 400, error: 'Ese tipo de error no existe.' } as const;
     const { tipo, resumen, tracking } = body.data;
     const en = new Date();
     const usuario = (request.usuario?.nombre || request.usuario?.usuario || 'operador') as string;
@@ -427,8 +423,41 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       contactId: contact.id,
       origen: 'incidencia_manual',
     }, { en, eventoId });
+    // Reportar a mano es tomar el caso: el bot se calla en ese chat hasta que alguien lo reactive.
+    await repos.contacts.pausarBot(contact.id, true, en);
     if (deps.gsg) await despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['incidencia'], { manual: true }).catch(() => undefined);
-    return { ok: true, duplicada: !nuevo };
+    return { status: 200, ok: true, duplicada: !nuevo, botPausado: true } as const;
+  };
+
+  const responderManual = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }, r: Awaited<ReturnType<typeof reportarManual>>) =>
+    r.status === 200 ? r : reply.code(r.status).send({ error: r.error });
+
+  app.get('/admin/chat/:contactId/incidencia-manual', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
+    return opcionesDe(contact);
+  });
+
+  app.post('/admin/chat/:contactId/incidencia-manual', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
+    return responderManual(reply, await reportarManual(contact, request.body, request));
+  });
+
+  // Lo mismo desde Automatizacion GSG, donde se elige al cliente por su telefono.
+  app.get('/admin/incidencia-manual', async (request, reply) => {
+    const telefono = normalizePhone(String((request.query as { phone?: string }).phone ?? ''));
+    if (!telefono) return reply.code(400).send({ error: 'Falta el teléfono del cliente.' });
+    return opcionesDe(await repos.contacts.upsertFromInbound(telefono));
+  });
+
+  app.post('/admin/incidencia-manual', async (request, reply) => {
+    const { phone, ...resto } = (request.body ?? {}) as { phone?: string };
+    const telefono = normalizePhone(String(phone ?? ''));
+    if (!telefono) return reply.code(400).send({ error: 'Falta el teléfono del cliente.' });
+    return responderManual(reply, await reportarManual(await repos.contacts.upsertFromInbound(telefono), resto, request));
   });
 
   /**
