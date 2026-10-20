@@ -1942,6 +1942,7 @@ if ($('gsg')) {
             return '<tr><td class="nowrap suave">' + esc(new Date(r.enviadoEn || r.en).toLocaleString('es-PE')) + '</td><td class="nowrap">' + (r.tipo === 'incidencia' ? 'Problema' : 'Ubicación') + (ref ? ' <span class="ref">' + esc(ref) + '</span>' : '') + '</td><td><details class="gsg-cuerpo"><summary>Ver cuerpo</summary><code>' + esc(JSON.stringify(r.cuerpo)) + '</code></details></td><td><span class="chip tono-' + tono + '">' + esc(ESTADOS[r.estado] || r.estado) + '</span></td><td class="num">' + esc(r.intentos) + '</td><td class="error-celda">' + esc(r.error || '') + '</td></tr>';
           }).join('') + '</tbody></table></div>'
         : '<div class="vacio compacto"><h3>Todavía no se ha enviado nada a GSG</h3><p>Cada ubicación se envía sola cuando un cliente la manda por WhatsApp.</p></div>';
+      if (window.filtroDeTabla) window.filtroDeTabla(caja.querySelector('.tablewrap'));
     } catch (error) { caja.textContent = 'No se pudo consultar lo enviado a GSG: ' + error.message; }
   }
   if ($('gsg-envios-refrescar')) $('gsg-envios-refrescar').onclick = function (ev) { ev.preventDefault(); cargarEnvios(); };

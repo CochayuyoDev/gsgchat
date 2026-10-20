@@ -98,9 +98,9 @@ describe('acciones del detalle en Automatización GSG', () => {
   });
   it('muestra exactamente un cuadro de texto por seguimiento, incluso al agregar y quitar', () => {
     const caja = { innerHTML: '', querySelectorAll: () => [] };
-    const pintar = new Function('document', 'esc', 'marcadoresHtml',
+    const pintar = new Function('document', 'esc', 'marcadoresHtml', 'textoDeLineas', 'AYUDA_REDACCION',
       funcionDe(scriptDeLaPagina(), 'function pintarTextosAdicionales(cantidad, textos)') + '\nreturn pintarTextosAdicionales;')(
-        { getElementById: () => caja }, String, () => '',
+        { getElementById: () => caja }, String, () => '', (l: string[]) => (l || []).join('\n---\n'), '',
       );
     for (const cantidad of [0, 2, 3, 2, 1]) {
       pintar(cantidad, []);

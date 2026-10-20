@@ -134,6 +134,18 @@ const CSS = `${REPARTO_CSS}
   td b { font-weight: 600; }
   td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
   .tabla-scroll { max-height: 62vh; overflow: auto; }
+  .filtro-dia { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--borde); }
+  .fd-fila { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .fd-fila #buscar { flex: 1 1 260px; max-width: 380px; min-height: var(--alto-control-sm); }
+  .fd-fila .s-segmento { flex: none; }
+  .fd-fila #f-estado { flex: 0 1 210px; min-height: var(--alto-control-sm); }
+  .fd-resumen button { border: 0; background: none; color: var(--primario); font: inherit; font-weight: 600; cursor: pointer; padding: 0; text-decoration: underline; }
+  .fd-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; padding: 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
+  .fd-campos[hidden] { display: none; }
+  .fd-campos label { display: grid; gap: 4px; font-size: var(--fs-micro); color: var(--texto-suave); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
+  .fd-campos input, .fd-campos select { width: 100%; min-height: var(--alto-control-sm); font-weight: 400; font-size: 13.5px; color: var(--texto); text-transform: none; letter-spacing: 0; }
+  .fd-resumen { margin: 0; font-size: var(--fs-small); }
+  .fd-resumen:empty { display: none; }
 
   .campo { margin-bottom: var(--esp-3); }
   .campo label { display: block; font-size: var(--fs-small); color: var(--texto-suave); margin-bottom: 4px; }
@@ -178,8 +190,9 @@ const CSS = `${REPARTO_CSS}
   .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
   .aj .paso { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-2); background: var(--superficie-2); }
   .aj .paso h4 { margin: 0 0 6px; font-size: var(--fs-h3); }
-  /* Cada seguimiento: sus dos variantes lado a lado en pantallas anchas. */
-  #aj-pasos-adicionales .paso { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px var(--esp-4); }
+  /* Cada seguimiento: un solo texto. */
+  #aj-pasos-adicionales .paso { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px var(--esp-4); }
+  #aj-pasos-adicionales .variante[hidden] { display: none; }
   #aj-pasos-adicionales .paso > h4, #aj-pasos-adicionales .paso > [data-quitar-adicional] { grid-column: 1 / -1; }
   #aj-pasos-adicionales .paso > [data-quitar-adicional] { justify-self: end; }
   #aj-pasos-adicionales .variante { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; border-radius: var(--radio-sm); background: var(--superficie); border: 1px solid var(--borde); }
@@ -188,6 +201,8 @@ const CSS = `${REPARTO_CSS}
   @media (max-width: 900px) { #aj-pasos-adicionales .paso { grid-template-columns: minmax(0, 1fr); } }
   .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
   .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
+  .aj .previa .previa-msg + .previa-msg { margin-top: 8px; padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--verde) 35%, transparent); }
+  .aj .previa .previa-n { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--texto-suave); margin-bottom: 2px; }
   .aj .previa small { display: block; color: var(--texto-suave); font-size: 11px; margin-top: 4px; text-align: right; }
   .aj .paso textarea { margin-top: 8px; min-height: 64px; font-family: var(--fuente); font-size: 14px; }
   .aj .marcadores { font-size: var(--fs-small); color: var(--texto-suave); margin: 6px 0 0; }
@@ -288,7 +303,7 @@ export function rutasPage(opts: RutasOpts): string {
       </section>
 
       <section class="aj-seccion">
-        <div class="aj-seccion-cab"><span class="aj-paso-num">2</span><div><h3>Recordatorios y seguimientos</h3><p>Salen después de la solicitud inicial: recordatorio si no respondió o insistencia si respondió sin ubicación.</p></div></div>
+        <div class="aj-seccion-cab"><span class="aj-paso-num">2</span><div><h3>Recordatorios y seguimientos</h3><p>Salen después de la solicitud inicial, uno tras otro.</p></div></div>
         <p class="aj-frase" style="margin-bottom:12px">Cada espera se cuenta desde el envío anterior. Puedes configurar hasta 99 recordatorios (100 mensajes en total, incluida la solicitud inicial).</p>
         <div id="aj-secuencia" class="aj-tiempo-grid"></div>
         <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:12px">Agregar recordatorio</button>
@@ -302,7 +317,7 @@ export function rutasPage(opts: RutasOpts): string {
 
       <section class="aj-seccion">
         <h3 class="aj-titulo">Textos de los seguimientos</h3>
-        <p class="muted" style="margin-top:4px">Edita el recordatorio para quien no responde y la insistencia para quien responde sin ubicación. Cada seguimiento tiene sus dos variantes; se envía la que corresponde a la respuesta del cliente.</p>
+        <p class="muted" style="margin-top:4px">Escribe el texto de cada seguimiento. Puedes dejar líneas en blanco entre párrafos.</p>
         <div id="aj-pasos-adicionales"></div>
       </section>
 
@@ -361,9 +376,29 @@ export function rutasPage(opts: RutasOpts): string {
       <h2>
         <span id="titulo-lista">Clientes</span>
         <span class="sep"></span>
-        <input id="buscar" placeholder="Buscar cliente o pedido" aria-label="Buscar cliente o pedido" style="max-width:230px">
         <button type="button" class="btn sm" id="csv">Descargar CSV</button>
       </h2>
+      <div class="filtro-dia" id="filtro-dia">
+        <div class="fd-fila">
+          <input id="buscar" type="search" placeholder="Buscar cliente, tracking o celular" aria-label="Buscar cliente, tracking o celular">
+          <div class="s-segmento" role="group" aria-label="Día">
+            <button type="button" class="seg activo" data-rango="hoy" aria-pressed="true">Hoy</button>
+            <button type="button" class="seg" data-rango="ayer" aria-pressed="false">Ayer</button>
+            <button type="button" class="seg" data-rango="semana" aria-pressed="false">7 días</button>
+            <button type="button" class="seg" data-rango="todos" aria-pressed="false">Todos</button>
+          </div>
+          <select id="f-estado" aria-label="Estado"><option value="">Todos los estados</option></select>
+          <button type="button" class="btn sm" id="f-mas" aria-expanded="false" aria-controls="f-campos">Más filtros</button>
+        </div>
+        <div class="fd-campos" id="f-campos" hidden>
+          <label>Fecha desde <input type="date" id="f-desde"></label>
+          <label>Fecha hasta <input type="date" id="f-hasta"></label>
+          <label>Hora desde <input type="time" id="f-hora-desde"></label>
+          <label>Hora hasta <input type="time" id="f-hora-hasta"></label>
+          <label>Distrito <select id="f-distrito"><option value="">Todos</option></select></label>
+        </div>
+        <p class="muted fd-resumen" id="f-resumen" role="status"></p>
+      </div>
       <div class="tabla-scroll">
         <table>
           <thead><tr>
@@ -601,14 +636,26 @@ async function cargarFiltros() {
 }
 
 async function cargarLista() {
-  var params = ['vista=' + encodeURIComponent(vista), 'limit=300'];
+  var params = ['vista=' + encodeURIComponent(vista), 'limit=500'];
   if (loteActual) params.push('loteId=' + encodeURIComponent(loteActual));
   var q = document.getElementById('buscar').value.trim();
-  if (q) params.push('q=' + encodeURIComponent(q));
+  /* Un celular se busca igual escrito con espacios, guiones, «+51» o sin nada. */
+  var qEnvio = /^[\d\s+()\-]+$/.test(q) ? q.replace(/\D/g, '').replace(/^51(?=\d{9}$)/, '') : q;
+  if (qEnvio) params.push('q=' + encodeURIComponent(qEnvio));
 
   var data = await api('/admin/rutas/solicitudes?' + params.join('&'));
+  /* La lista muestra por defecto solo el día de hoy; lo anterior sigue guardado y se ve con las fechas. */
+  var visibles = data.items.filter(pasaFiltroDia);
+  llenarDistritos(data.items);
   document.getElementById('titulo-lista').textContent =
-    (nombresVista[vista] || 'Clientes') + ' (' + data.total + ')';
+    (nombresVista[vista] || 'Clientes') + ' (' + visibles.length + (visibles.length !== data.total ? ' de ' + data.total : '') + ')';
+  var ocultos = data.items.length - visibles.length;
+  var aviso = document.getElementById('f-resumen');
+  if (ocultos > 0) {
+    aviso.innerHTML = esc(ocultos + (ocultos === 1 ? ' resultado queda' : ' resultados quedan')) + ' fuera de los filtros de día, hora, distrito o estado. <button type="button" id="f-ver-todos">Ver todos los días</button>';
+    document.getElementById('f-ver-todos').onclick = function () { aplicarRango('todos'); document.getElementById('f-estado').value = ''; cargarLista().catch(function () {}); };
+  } else aviso.textContent = '';
+  data = { items: visibles, total: data.total };
 
   // Pidiendo la ubicación cada tantos minutos no hay tope: «intento 5», sin «de 3».
   var maxIntentos = resumen ? resumen.motor.maxIntentos : 0;
@@ -627,6 +674,76 @@ async function cargarLista() {
 
   pintarListaVacia(data.items.length, q);
 }
+
+/* --- filtro por día, hora y distrito (solo vista: los datos no se tocan) --- */
+function aIsoLocal(fecha) {
+  var m = fecha.getMonth() + 1, d = fecha.getDate();
+  return fecha.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+}
+function pasaFiltroDia(s) {
+  var f = new Date(s.createdAt || s.updatedAt || 0);
+  if (isNaN(f.getTime())) return true;
+  var dia = aIsoLocal(f);
+  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value;
+  if (desde && dia < desde) return false;
+  if (hasta && dia > hasta) return false;
+  var hm = (f.getHours() < 10 ? '0' : '') + f.getHours() + ':' + (f.getMinutes() < 10 ? '0' : '') + f.getMinutes();
+  var h1 = document.getElementById('f-hora-desde').value, h2 = document.getElementById('f-hora-hasta').value;
+  if (h1 && hm < h1) return false;
+  if (h2 && hm > h2) return false;
+  var d = document.getElementById('f-distrito').value;
+  if (d && (s.distrito || '') !== d) return false;
+  var e = document.getElementById('f-estado').value;
+  if (e && s.estado !== e) return false;
+  return true;
+}
+function llenarDistritos(items) {
+  var lista = document.getElementById('f-distrito'), actual = lista.value, vistos = [];
+  items.forEach(function (s) { if (s.distrito && vistos.indexOf(s.distrito) < 0) vistos.push(s.distrito); });
+  vistos.sort(function (a, b) { return a.localeCompare(b, 'es'); });
+  if (actual && vistos.indexOf(actual) < 0) vistos.push(actual);
+  var html = '<option value="">Todos</option>' + vistos.map(function (v) { return '<option value="' + esc(v) + '">' + esc(v) + '</option>'; }).join('');
+  if (lista.innerHTML !== html) { lista.innerHTML = html; lista.value = actual; }
+}
+var CAMPOS_DIA = ['f-desde', 'f-hasta', 'f-hora-desde', 'f-hora-hasta', 'f-distrito', 'f-estado'];
+(function () {
+  document.getElementById('f-estado').innerHTML = '<option value="">Todos los estados</option>' + Object.keys(ESTADOS).map(function (k) {
+    return '<option value="' + k + '">' + esc(ESTADOS[k].texto) + '</option>';
+  }).join('');
+})();
+function aplicarRango(rango) {
+  var hoy = new Date(), desde = '', hasta = '';
+  if (rango === 'hoy') { desde = hasta = aIsoLocal(hoy); }
+  else if (rango === 'ayer') { var a = new Date(hoy.getTime() - 86400000); desde = hasta = aIsoLocal(a); }
+  else if (rango === 'semana') { desde = aIsoLocal(new Date(hoy.getTime() - 6 * 86400000)); hasta = aIsoLocal(hoy); }
+  document.getElementById('f-desde').value = desde;
+  document.getElementById('f-hasta').value = hasta;
+  ['f-hora-desde', 'f-hora-hasta', 'f-distrito'].forEach(function (id) { document.getElementById(id).value = ''; });
+  marcarRango(rango);
+}
+function marcarRango(rango) {
+  document.querySelectorAll('#filtro-dia [data-rango]').forEach(function (b) {
+    var on = b.getAttribute('data-rango') === rango;
+    b.classList.toggle('activo', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+aplicarRango('hoy');
+document.getElementById('f-mas').onclick = function () {
+  var caja = document.getElementById('f-campos'), abrir = caja.hidden;
+  caja.hidden = !abrir;
+  this.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  this.textContent = abrir ? 'Menos filtros' : 'Más filtros';
+};
+CAMPOS_DIA.forEach(function (id) {
+  document.getElementById(id).addEventListener('change', function () { marcarRango(''); cargarLista().catch(function () {}); });
+});
+document.getElementById('filtro-dia').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-rango]');
+  if (!b) return;
+  aplicarRango(b.getAttribute('data-rango'));
+  cargarLista().catch(function () {});
+});
 
 /* El hueco cuando no hay nada: siempre dice qué hacer a continuación. */
 function pintarListaVacia(cuantos, q) {
@@ -777,7 +894,12 @@ function pintarDetalle(data) {
 
   var sinTelefono = !s.phone;
   var puede = accionesDeEstado(s.estado);
-  var enlaceChat = '<a class="btn sm fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>';
+  var enlaceChat = '<a class="btn sm fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>' +
+    (sinTelefono ? '' : '<a href="#" class="btn sm fijo" id="d-incidencia">Enviar incidencia manual</a>');
+  var abrirIncidencia = function (evento) {
+    if (evento) evento.preventDefault();
+    abrirIncidenciaManual({ phone: s.phone, tracking: s.referencia || '', alTerminar: function () { detalleId = null; refrescar(); } });
+  };
 
   // Quitada de la automatizacion: nada que pueda volver a escribirle. Solo
   // se dice que esta fuera y se deja abrir el chat.
@@ -786,6 +908,7 @@ function pintarDetalle(data) {
       '<div class="aviso" style="margin:12px 0 8px"><div><b>Quitada de esta automatización</b><br>' +
         'No se le volverá a escribir por esta solicitud. El chat, el contacto y el historial se conservan.</div></div>' +
       '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>';
+    if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
     return;
   }
 
@@ -812,6 +935,7 @@ function pintarDetalle(data) {
       ? '<div class="fila d-peligro"><button type="button" class="btn sm fijo" id="d-quitar">Quitar de esta automatización</button></div>'
       : '');
 
+  if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
   document.getElementById('d-guardar-ubi').onclick = function () { guardarUbicacion(s.id); };
   document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.', this); };
@@ -1178,16 +1302,23 @@ function previaDe(texto, ej) {
     .replace(/\{direccion\}/g, ej.direccion).replace(/\{distrito\}/g, ej.distrito).replace(/\{como\}/g, ej.como);
 }
 
+/* Cada redaccion se ve entera, con sus parrafos; si hay varias, cada una con su rotulo. */
+function previaHtml(lineas, ej, defecto) {
+  if (!lineas.length) return esc(defecto);
+  return lineas.map(function (t, i) {
+    return '<div class="previa-msg">' + (lineas.length > 1 ? '<b class="previa-n">Redacción ' + (i + 1) + ' de ' + lineas.length + '</b>' : '') + esc(previaDe(t, ej)) + '</div>';
+  }).join('');
+}
+
 function pintarPrevia(paso) {
   var d = ajustesCache;
   if (!d) return;
   var ta = document.querySelector('textarea[data-textos="' + paso + '"]');
-  var lineas = ta ? ta.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean) : [];
-  var texto = lineas.length ? previaDe(lineas[0], d.ejemplo) : d.textosDeSiempre[paso];
+  var lineas = ta ? lineasDeTextoMensaje(ta.value) : [];
   var caja = document.getElementById('aj-previa-' + paso);
   if (!caja) return;
-  var pie = lineas.length > 1 ? 'tu primer texto (se alternan ' + lineas.length + ')' : lineas.length ? 'tu texto' : 'texto de siempre';
-  caja.innerHTML = esc(texto) + '<small>' + pie + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
+  var pie = lineas.length > 1 ? 'tus ' + lineas.length + ' redacciones (se alternan)' : lineas.length ? 'tu texto' : 'texto de siempre';
+  caja.innerHTML = previaHtml(lineas, d.ejemplo, d.textosDeSiempre[paso]) + '<small>' + pie + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
 }
 
 function pintarAjustes(d) {
@@ -1208,8 +1339,9 @@ function pintarAjustes(d) {
     var paso = p[0];
     return '<div class="paso" id="paso-' + paso + '"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
       '<div class="previa" id="aj-previa-' + paso + '"></div>' +
-      '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Una redacción por línea: se van alternando.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
+      '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Puedes dejar líneas en blanco entre párrafos.">' + esc(textoDeLineas(a.textos[paso])) + '</textarea>' +
       '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
+      '<p class="marcadores">' + AYUDA_REDACCION + '</p>' +
       '</div>';
   }).join('');
   pintarTextosAdicionales(esperas.length, textosSeguimientosDe(a, esperas.length));
@@ -1233,9 +1365,19 @@ function pintarAjustes(d) {
   });
 }
 
+/* Una redaccion puede tener varios parrafos (con lineas en blanco). Si quieres
+   varias redacciones para que se alternen, sepáralas con una línea que solo diga ---. */
 function lineasDeTextoMensaje(valor) {
-  return String(valor || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+  var bloques = [], actual = [];
+  String(valor || '').replace(/\r\n?/g, '\n').split('\n').forEach(function (l) {
+    if (/^\s*-{3,}\s*$/.test(l)) { bloques.push(actual); actual = []; } else actual.push(l.replace(/\s+$/, ''));
+  });
+  bloques.push(actual);
+  return bloques.map(function (b) { return b.join('\n').replace(/\n{3,}/g, '\n\n').trim(); }).filter(Boolean);
 }
+/* Lo guardado vuelve al cuadro con cada redaccion separada por --- */
+function textoDeLineas(lineas) { return (lineas || []).join('\n---\n'); }
+var AYUDA_REDACCION = 'Puedes dejar líneas en blanco entre párrafos. Para alternar varias redacciones, sepáralas con una línea que diga ---.';
 
 function textosSeguimientosDe(a, cantidad) {
   return Array.from({ length: cantidad }, function (_, i) {
@@ -1282,18 +1424,18 @@ function pintarTextosAdicionales(cantidad, textos) {
       ['recordatorio', 'insistencia'].map(function (rama) {
         var lineas = variantes[rama] || [];
         var titulo = rama === 'recordatorio' ? 'Si no respondió' : 'Si respondió sin ubicación';
-        return '<div class="variante"><h5>' + titulo + '</h5>' +
+        /* La variante «respondió sin ubicación» ya no se muestra; queda oculta para guardar lo que tenía. */
+        return '<div class="variante"' + (rama === 'insistencia' ? ' hidden' : '') + '>' + (rama === 'insistencia' ? '' : '<h5>' + titulo + '</h5>') +
           '<div class="previa" id="aj-previa-adicional-' + i + '-' + rama + '"></div>' +
-          '<textarea data-texto-adicional="' + i + '" data-rama="' + rama + '" rows="3" aria-label="Seguimiento ' + (i + 1) + ': ' + titulo + '" placeholder="Vacío: usar el texto de siempre. Una redacción por línea.">' + esc(lineas.join('\n')) + '</textarea>' +
-          '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p></div>';
+          '<textarea data-texto-adicional="' + i + '" data-rama="' + rama + '" rows="3" aria-label="Seguimiento ' + (i + 1) + ': ' + titulo + '" placeholder="Vacío: usar el texto de siempre. Puedes dejar líneas en blanco entre párrafos.">' + esc(textoDeLineas(lineas)) + '</textarea>' +
+          '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p><p class="marcadores">' + AYUDA_REDACCION + '</p></div>';
       }).join('') + '<button type="button" class="btn sm" data-quitar-adicional="' + i + '">Quitar seguimiento</button></div>';
   }).join('');
   caja.querySelectorAll('textarea[data-texto-adicional]').forEach(function (ta) {
     function actualizar() {
       var i = ta.getAttribute('data-texto-adicional'), rama = ta.getAttribute('data-rama');
       var lineas = lineasDeTextoMensaje(ta.value);
-      var texto = lineas.length ? previaDe(lineas[0], ajustesCache.ejemplo) : ajustesCache.textosDeSiempre[rama];
-      document.getElementById('aj-previa-adicional-' + i + '-' + rama).textContent = texto;
+      document.getElementById('aj-previa-adicional-' + i + '-' + rama).innerHTML = previaHtml(lineas, ajustesCache.ejemplo, ajustesCache.textosDeSiempre[rama]);
     }
     ta.addEventListener('input', actualizar);
     actualizar();

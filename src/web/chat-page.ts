@@ -928,7 +928,8 @@ document.getElementById('menu-chat').onclick = function () {
   if (!esGrupo && /^\d{8,}$/.test(String(current.phone || ''))) {
     ops.push({ icono: '📞', texto: 'Llamar', accion: function () { location.href = 'tel:+' + current.phone; } });
   }
-  if (!esGrupo) ops.push({ icono: '🤖', texto: current.botPausadoAt ? 'Que el bot vuelva a contestar' : 'Callar al bot en este chat', accion: alternarBot });
+  if (!esGrupo) ops.push({ icono: '🤖', texto: current.botPausadoAt ? 'Reactivar bot' : 'Callar bot', accion: alternarBot });
+  if (!esGrupo) ops.push({ icono: '⚑', texto: 'Enviar incidencia manual', accion: function () { abrirIncidenciaManual({ phone: current.phone, contactId: current.id, alTerminar: function () { openChat(current.id, true); } }); } });
   if (!esGrupo && current.iaCerradaAt) ops.push({ icono: '↩', texto: 'Que el asistente vuelva a atender este chat', accion: reabrirAsistente });
   if (!esGrupo) ops.push({ icono: '⟲', texto: 'Volver a empezar con este cliente', accion: function () { volverAEmpezar(current.id); } });
   ops.push({ icono: '⭐', texto: 'Mensajes destacados de este chat', accion: function () { verDestacados(true); } });

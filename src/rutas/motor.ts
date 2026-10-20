@@ -564,6 +564,13 @@ export function crearMotor(deps: MotorDeps): Motor {
         });
         return { accion: 'nada', solicitudId: solicitud.id, motivo: salida.reason };
       }
+      // «De este me encargo yo»: una persona atiende el chat. No es incidencia
+      // ni intento gastado; se vuelve a mirar mas tarde, por si lo suelta.
+      if (salida.code === 'bot_pausado') {
+        esperar(solicitud, salida.code, salida.reason, 30 * 60_000);
+        await repos.rutas.actualizarSolicitud(solicitud.id, { proximoIntentoAt: new Date(momento.getTime() + 30 * 60_000) });
+        return { accion: 'nada', solicitudId: solicitud.id, motivo: salida.reason };
+      }
       // El monitor aparto a este contacto porque Meta dijo que no tiene
       // WhatsApp: es una incidencia con nombre, no una espera de un mes.
       if (salida.code === 'contact_suppressed' && /131026|no tiene whatsapp/i.test(salida.reason)) {

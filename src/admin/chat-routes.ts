@@ -16,6 +16,9 @@ import { extractLocation } from '../geo/extract.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { alcanceChat } from '../web/alcance-chat.js';
 import { esperaDeEnvio } from '../rutas/espera-envio.js';
+import { createHash } from 'node:crypto';
+import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
+import { INCIDENCIAS } from '../rutas/incidencias.js';
 
 export interface ChatDeps {
   repos: Repos;
@@ -26,6 +29,8 @@ export interface ChatDeps {
   mediaDir?: string;
   /** Envío opcional de voz solicitado por la IA; los medios entrantes se ignoran. */
   voz?: import('../voz/servicio.js').ServicioVoz;
+  /** El puerto hacia GSG: por aqui sale la incidencia manual. Sin el, queda en la cola. */
+  gsg?: import('../rutas/gsg.js').PuertoGsg;
 }
 
 /** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
@@ -358,6 +363,144 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     await repos.contacts.pausarBot(contact.id, body.pausado, new Date());
     return { ok: true, pausado: body.pausado };
+  });
+
+  /**
+   * Incidencia manual a GSG: una persona reporta un error del pedido con el
+   * tipo que elige y un resumen propio. Sale por la misma cola y el mismo
+   * conector que el resto de incidencias (`problemaParaGsg`): el tipo viaja
+   * como `codigo` y el resumen como `comentario`.
+   */
+  const TIPO_MANUAL = 'incidencia-manual';
+  const tiposManuales = () => [
+    ...Object.values(INCIDENCIAS).filter((i) => i.reportable).map((i) => ({ codigo: i.codigo as string, titulo: i.titulo })),
+    { codigo: TIPO_MANUAL, titulo: 'Incidencia manual (explicada en el resumen)' },
+  ];
+  const trackingDe = (e: { referencia: string; datosEnvio?: { tracking?: string | null } | null }) => e.datosEnvio?.tracking || e.referencia;
+
+  /** Los trackings que el cliente tiene GUARDADOS (pedidos vivos y solicitud abierta): la unica fuente de lo que se manda a GSG. */
+  const trackingsGuardados = async (phone: string) => {
+    const vistos = new Map<string, { tracking: string; referencia: string; cliente: string | null; dia: string | null; entregaId: number | null }>();
+    for (const e of await repos.entregas.vivasPorTelefono(phone).catch(() => [])) {
+      vistos.set(trackingDe(e), { tracking: trackingDe(e), referencia: e.referencia, cliente: e.nombre, dia: e.dia, entregaId: e.id });
+    }
+    const sol = await repos.rutas.abiertaPorTelefono(phone).catch(() => null);
+    if (sol?.referencia && !vistos.has(sol.referencia) && ![...vistos.values()].some((v) => v.referencia === sol.referencia)) {
+      vistos.set(sol.referencia, { tracking: sol.referencia, referencia: sol.referencia, cliente: sol.nombre, dia: null, entregaId: null });
+    }
+    // Los que ya se reportaron a mano siguen siendo suyos (el pedido pasa a «incidencia» y deja de estar vivo):
+    // asi reintentar o repetir el mismo reporte se reconoce y no se duplica.
+    for (const r of await repos.rutas.reportesRecientes(500, 'incidencia').catch(() => [])) {
+      const t = r.payload.origen === 'incidencia_manual' && r.payload.telefono === phone ? String(r.payload.tracking ?? '') : '';
+      if (t && !vistos.has(t)) vistos.set(t, { tracking: t, referencia: t, cliente: null, dia: null, entregaId: null });
+    }
+    return [...vistos.values()];
+  };
+
+  const opcionesDe = async (contact: { id: string; phone: string }) => {
+    const pedidos = await trackingsGuardados(contact.phone);
+    const enviadas = (await repos.rutas.reportesRecientes(500, 'incidencia').catch(() => []))
+      .filter((r) => r.payload.origen === 'incidencia_manual' && r.payload.contactId === contact.id)
+      .slice(0, 20)
+      .map((r) => ({
+        id: r.id,
+        tracking: r.payload.tracking,
+        tipo: r.payload.tipoSeleccionado,
+        resumen: r.payload.comentario,
+        usuario: r.payload.usuario,
+        fecha: r.createdAt,
+        estado: r.estado === 'enviado' ? 'Enviada' : r.estado === 'fallido' ? 'Fallida' : 'Pendiente de reintento',
+        respuesta: r.estado === 'enviado' ? (r.externoId ?? 'GSG la recibió') : r.ultimoError,
+      }));
+    return { tipos: tiposManuales(), pedidos, enviadas, botPausadoAt: (await repos.contacts.getById(contact.id))?.botPausadoAt ?? null };
+  };
+
+  const datosManuales = z.object({
+    tipo: z.string().trim().min(1, 'Elige el tipo de error.'),
+    resumen: z.string().trim().min(5, 'Cuéntale a GSG por qué reportas el error.').max(500),
+    // Opcional: solo sirve para elegir entre los pedidos guardados; nunca se escribe a mano.
+    tracking: z.string().trim().max(80).optional(),
+  });
+
+  /** Valida, calla al bot de ese cliente y manda el reporte a GSG por la cola de siempre. */
+  const reportarManual = async (contact: { id: string; phone: string }, cuerpo: unknown, request: { usuario?: { nombre?: string | null; usuario?: string } | null }) => {
+    const body = datosManuales.safeParse(cuerpo ?? {});
+    if (!body.success) return { status: 400, error: body.error.issues[0]?.message ?? 'Datos incompletos.' } as const;
+    if (!tiposManuales().some((t) => t.codigo === body.data.tipo)) return { status: 400, error: 'Ese tipo de error no existe.' } as const;
+    const { tipo, resumen } = body.data;
+    // El tracking sale SIEMPRE de lo guardado del cliente, tal cual esta guardado.
+    const guardados = await trackingsGuardados(contact.phone);
+    const pedido = body.data.tracking
+      ? guardados.find((g) => g.tracking === body.data.tracking || g.referencia === body.data.tracking)
+      : guardados.length === 1 ? guardados[0] : undefined;
+    if (!pedido) {
+      return { status: 400, error: guardados.length === 0
+        ? 'Este cliente no tiene un pedido con tracking guardado: no hay nada que reportar.'
+        : 'Elige uno de los pedidos guardados de este cliente.' } as const;
+    }
+    const tracking = pedido.tracking;
+    const en = new Date();
+    const usuario = (request.usuario?.nombre || request.usuario?.usuario || 'operador') as string;
+    // Mismo pedido, tipo y resumen el mismo dia = el mismo reporte (doble clic, reintento).
+    const huella = createHash('sha1').update(`${tipo}|${resumen.toLowerCase()}`).digest('hex').slice(0, 8);
+    const eventoId = `gsgchat-${tracking}-${TIPO_MANUAL}-${huella}-${en.toISOString().slice(0, 10)}`;
+    const nuevo = await encolarProblemaGsg(repos.rutas, {
+      tracking,
+      codigo: tipo,
+      telefono: contact.phone,
+      comentario: resumen,
+      tipoSeleccionado: tipo,
+      usuario,
+      contactId: contact.id,
+      origen: 'incidencia_manual',
+    }, { en, eventoId });
+    // El pedido y la solicitud pasan a «reportada a GSG»: se ven asi en Hoy y en Automatizacion GSG.
+    const detalleEstado = resumen.slice(0, 300);
+    const entregas = await repos.entregas.vivasPorTelefono(contact.phone).catch(() => []);
+    for (const e of entregas.filter((x) => trackingDe(x) === tracking || x.referencia === tracking)) {
+      await repos.entregas.actualizar(e.id, { estado: 'incidencia', incidencia: 'incidencia_manual', incidenciaDetalle: detalleEstado, requiereHumano: true }).catch(() => undefined);
+      await repos.entregas.registrarEvento(e.id, 'incidencia', `reportada a GSG (${tipo}): ${detalleEstado}`, { tipo, usuario }).catch(() => undefined);
+    }
+    const solicitud = await repos.rutas.abiertaPorTelefono(contact.phone).catch(() => null);
+    if (solicitud) {
+      await repos.rutas.actualizarSolicitud(solicitud.id, { estado: 'incidencia', incidencia: 'incidencia_manual', incidenciaDetalle: detalleEstado, requiereHumano: true, proximoIntentoAt: null }).catch(() => undefined);
+      await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `Reportada a GSG (${tipo}): ${detalleEstado}`, { codigo: 'incidencia_manual', tipo, usuario }).catch(() => undefined);
+    }
+    // Reportar a mano es tomar el caso: el bot se calla en ese chat hasta que alguien lo reactive.
+    await repos.contacts.pausarBot(contact.id, true, en);
+    if (deps.gsg) await despacharReportes({ rutas: repos.rutas }, deps.gsg, 25, ['incidencia'], { manual: true }).catch(() => undefined);
+    return { status: 200, ok: true, duplicada: !nuevo, botPausado: true } as const;
+  };
+
+  const responderManual = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }, r: Awaited<ReturnType<typeof reportarManual>>) =>
+    r.status === 200 ? r : reply.code(r.status).send({ error: r.error });
+
+  app.get('/admin/chat/:contactId/incidencia-manual', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
+    return opcionesDe(contact);
+  });
+
+  app.post('/admin/chat/:contactId/incidencia-manual', async (request, reply) => {
+    const { contactId } = request.params as { contactId: string };
+    const contact = await repos.contacts.getById(contactId);
+    if (!contact) return reply.code(404).send({ error: 'Ese chat ya no existe.' });
+    return responderManual(reply, await reportarManual(contact, request.body, request));
+  });
+
+  // Lo mismo desde Automatizacion GSG, donde se elige al cliente por su telefono.
+  app.get('/admin/incidencia-manual', async (request, reply) => {
+    const telefono = normalizePhone(String((request.query as { phone?: string }).phone ?? ''));
+    if (!telefono) return reply.code(400).send({ error: 'Falta el teléfono del cliente.' });
+    return opcionesDe(await repos.contacts.upsertFromInbound(telefono));
+  });
+
+  app.post('/admin/incidencia-manual', async (request, reply) => {
+    const { phone, ...resto } = (request.body ?? {}) as { phone?: string };
+    const telefono = normalizePhone(String(phone ?? ''));
+    if (!telefono) return reply.code(400).send({ error: 'Falta el teléfono del cliente.' });
+    return responderManual(reply, await reportarManual(await repos.contacts.upsertFromInbound(telefono), resto, request));
   });
 
   /**

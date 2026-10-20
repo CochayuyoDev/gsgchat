@@ -24,6 +24,7 @@ import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
 import { VERSION } from '../version.js';
 import { CONSULTAS_JS } from './consultas.js';
+import { FILTRO_TABLA_JS, FILTRO_TABLA_CSS } from './filtro-tabla.js';
 import { EVENTOS_PANEL_JS } from './eventos-panel.js';
 
 export interface ItemMenu {
@@ -208,6 +209,7 @@ const CSS = `
   .vacio .acciones { display: flex; gap: var(--esp-2); justify-content: center; flex-wrap: wrap; margin-top: var(--esp-4); }
   .vacio .ico { font-size: 28px; line-height: 1; margin-bottom: var(--esp-2); }
   ${SISTEMA_CSS}
+  ${FILTRO_TABLA_CSS}
   /* En pantallas táctiles, todo lo que se pulsa mide al menos 44 px. */
   @media (max-width: 960px), (pointer: coarse) {
     .btn, .s-boton, .s-menu, .s-salir, .s-plegar, .s-item, .s-content button, .s-content .btn, .s-content select, .s-content input:not([type=checkbox]):not([type=radio]) { min-height: 44px; }
@@ -1356,6 +1358,7 @@ ${opts.contenido}
 </div>
 <script>
 ${CONSULTAS_JS}
+${FILTRO_TABLA_JS}
 ${EVENTOS_PANEL_JS}
 ${DIALOGO_JS}
 ${DIALOGO_ELEGIR_JS}
