@@ -172,7 +172,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   await registerAutomationRoutes(app, { repos, sender });
   const gsg = deps.gsg ?? crearPuertoGsg(config);
-  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg });
+  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes });
   await registerLeadsRoutes(app, {
     repos,
     // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.

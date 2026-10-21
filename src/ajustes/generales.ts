@@ -30,6 +30,17 @@ const horaONada = z.coerce.number().int().min(0).max(24).nullable();
 const enteroONada = (max: number) => z.coerce.number().int().min(0).max(max).nullable();
 
 export const ajustesGeneralesSchema = z.object({
+  /** Catálogo exclusivo del reporte manual; no alimenta la automatización. */
+  erroresManuales: z.array(z.object({
+    id: z.string().regex(/^manual-[a-z0-9-]{1,70}$/),
+    nombre: z.string().trim().min(1).max(100),
+    activo: z.boolean(),
+  })).max(100).superRefine((lista, ctx) => {
+    if (new Set(lista.map(e => e.id)).size !== lista.length)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Los identificadores de errores no pueden repetirse.' });
+    if (new Set(lista.map(e => e.nombre.normalize('NFKC').toLocaleLowerCase('es'))).size !== lista.length)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Ya existe un error manual con ese nombre.' });
+  }).default([]),
   /** Como se presenta el negocio en los mensajes y en las pantallas. */
   nombreNegocio: z.string().trim().min(1).max(80).nullable(),
   /**
@@ -186,6 +197,7 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   humanizar: null,
   autoPausa: null,
   pedirVerUnaVezNormal: null,
+  erroresManuales: [],
   atajos: null,
   stickers: null,
   embebido: null,
@@ -207,6 +219,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   humanizar: ajustesGeneralesSchema.shape.humanizar.optional(),
   autoPausa: ajustesGeneralesSchema.shape.autoPausa.optional(),
   pedirVerUnaVezNormal: ajustesGeneralesSchema.shape.pedirVerUnaVezNormal.optional(),
+  erroresManuales: ajustesGeneralesSchema.shape.erroresManuales.optional(),
   atajos: ajustesGeneralesSchema.shape.atajos.optional(),
   stickers: ajustesGeneralesSchema.shape.stickers.optional(),
   embebido: ajustesGeneralesSchema.shape.embebido.optional(),
@@ -230,6 +243,7 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     humanizar: patch.humanizar !== undefined ? patch.humanizar : base.humanizar,
     autoPausa: patch.autoPausa !== undefined ? patch.autoPausa : base.autoPausa,
     pedirVerUnaVezNormal: patch.pedirVerUnaVezNormal !== undefined ? patch.pedirVerUnaVezNormal : base.pedirVerUnaVezNormal,
+    erroresManuales: patch.erroresManuales !== undefined ? patch.erroresManuales : base.erroresManuales,
     atajos: patch.atajos !== undefined ? patch.atajos : base.atajos,
     stickers: patch.stickers !== undefined ? patch.stickers : base.stickers,
     embebido: patch.embebido !== undefined ? patch.embebido : base.embebido,
@@ -250,7 +264,7 @@ export function createAjustesGeneralesRepo(pool: Pool): AjustesGeneralesRepo {
     const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [AJUSTES_GENERALES_KEY]);
     if (!rows[0]) return AJUSTES_GENERALES_VACIOS;
     try {
-      const parsed = ajustesGeneralesPatchSchema.safeParse(JSON.parse(rows[0].value));
+      const parsed = ajustesGeneralesSchema.safeParse({ ...AJUSTES_GENERALES_VACIOS, ...JSON.parse(rows[0].value) });
       return parsed.success ? fusionarAjustes(AJUSTES_GENERALES_VACIOS, parsed.data) : AJUSTES_GENERALES_VACIOS;
     } catch {
       return AJUSTES_GENERALES_VACIOS;
