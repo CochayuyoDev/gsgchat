@@ -18,10 +18,11 @@ import { alcanceChat } from '../web/alcance-chat.js';
 import { esperaDeEnvio } from '../rutas/espera-envio.js';
 import { createHash } from 'node:crypto';
 import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
-import { INCIDENCIAS } from '../rutas/incidencias.js';
+import type { ServicioAjustes } from '../ajustes/generales.js';
 
 export interface ChatDeps {
   repos: Repos;
+  ajustes?: ServicioAjustes;
   sender: Sender;
   config: Config;
   settings: SettingsService;
@@ -372,10 +373,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * como `codigo` y el resumen como `comentario`.
    */
   const TIPO_MANUAL = 'incidencia-manual';
-  const tiposManuales = () => [
-    ...Object.values(INCIDENCIAS).filter((i) => i.reportable).map((i) => ({ codigo: i.codigo as string, titulo: i.titulo })),
-    { codigo: TIPO_MANUAL, titulo: 'Incidencia manual (explicada en el resumen)' },
-  ];
+  const tiposManuales = () => (deps.ajustes?.actual().erroresManuales ?? [])
+    .filter(e => e.activo).map(e => ({ codigo: e.id, titulo: e.nombre }));
   const trackingDe = (e: { referencia: string; datosEnvio?: { tracking?: string | null } | null }) => e.datosEnvio?.tracking || e.referencia;
 
   /** Los trackings que el cliente tiene GUARDADOS (pedidos vivos y solicitud abierta): la unica fuente de lo que se manda a GSG. */
@@ -426,7 +425,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   const reportarManual = async (contact: { id: string; phone: string }, cuerpo: unknown, request: { usuario?: { nombre?: string | null; usuario?: string } | null }) => {
     const body = datosManuales.safeParse(cuerpo ?? {});
     if (!body.success) return { status: 400, error: body.error.issues[0]?.message ?? 'Datos incompletos.' } as const;
-    if (!tiposManuales().some((t) => t.codigo === body.data.tipo)) return { status: 400, error: 'Ese tipo de error no existe.' } as const;
+    const errorManual = tiposManuales().find(t => t.codigo === body.data.tipo);
+    if (!errorManual) return { status: 400, error: 'Ese tipo de error no existe.' } as const;
     const { tipo, resumen } = body.data;
     // El tracking sale SIEMPRE de lo guardado del cliente, tal cual esta guardado.
     const guardados = await trackingsGuardados(contact.phone);
@@ -446,10 +446,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const eventoId = `gsgchat-${tracking}-${TIPO_MANUAL}-${huella}-${en.toISOString().slice(0, 10)}`;
     const nuevo = await encolarProblemaGsg(repos.rutas, {
       tracking,
-      codigo: tipo,
+      codigo: errorManual.titulo,
+      motivo: 'OTRO',
+      nombreError: errorManual.titulo,
       telefono: contact.phone,
       comentario: resumen,
-      tipoSeleccionado: tipo,
+      tipoSeleccionado: errorManual.titulo,
+      errorManualId: tipo,
       usuario,
       contactId: contact.id,
       origen: 'incidencia_manual',

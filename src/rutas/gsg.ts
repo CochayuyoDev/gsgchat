@@ -224,7 +224,7 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
   const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
   const tracking = texto(p.tracking) ?? texto(p.referencia);
   const codigo = texto(p.codigo) ?? texto(p.error) ?? 'otro';
-  const paraGsg = CODIGOS_PARA_GSG[codigo];
+  const paraGsg = p.origen === 'incidencia_manual' ? undefined : CODIGOS_PARA_GSG[codigo];
   const en = new Date(texto(p.detectadoEn) ?? texto(p.reportadoAt) ?? texto(p.fechaMensaje) ?? Date.now());
   const titulo = texto(p.comentario) ?? paraGsg?.titulo ?? texto(p.titulo) ?? texto(p.mensaje);
   const detalle = texto(p.detalle);

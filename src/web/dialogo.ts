@@ -284,8 +284,8 @@ async function abrirIncidenciaManual(opciones) {
       '<h3>Enviar incidencia manual a GSG</h3>' +
       '<p>Al enviarla, el bot se calla en este chat hasta que lo reactives.</p>' +
       '<div class="campo"><label for="im-tipo">Tipo de error</label><select id="im-tipo">' +
-        (datos.tipos || []).map(function (t) { return '<option value="' + esc(t.codigo) + '"' + (t.codigo === 'incidencia-manual' ? ' selected' : '') + '>' + esc(t.titulo) + ' (' + esc(t.codigo) + ')</option>'; }).join('') +
-      '</select></div>' +
+        (datos.tipos || []).map(function (t) { return '<option value="' + esc(t.codigo) + '">' + esc(t.titulo) + '</option>'; }).join('') +
+      '</select><div class="muted">Errores exclusivos del reporte manual. Se administran en Ajustes.</div></div>' +
       '<div class="campo"><label for="im-tracking">Pedido y tracking guardados (es el que se envía)</label>' +
         (pedidos.length > 1
           ? '<select id="im-tracking">' + pedidos.map(function (p) { return '<option value="' + esc(p.tracking) + '"' + (reportados[p.tracking] ? ' disabled' : '') + '>' + esc(p.tracking) + (p.cliente ? ' - ' + esc(p.cliente) : '') + (reportados[p.tracking] ? ' (ya reportado)' : '') + '</option>'; }).join('') + '</select>'
@@ -307,7 +307,8 @@ async function abrirIncidenciaManual(opciones) {
   var marcarYa = function () {
     var ya = yaReportado();
     fondo.querySelector('#im-ya').textContent = ya ? 'Este pedido ya fue reportado a GSG: no se puede reportar de nuevo.' : '';
-    si.disabled = ya;
+    si.disabled = ya || !(datos.tipos || []).length;
+    if (!(datos.tipos || []).length) mal.textContent = 'Crea y activa un error en Ajustes antes de reportar.';
   };
   var selTracking = fondo.querySelector('select#im-tracking');
   if (selTracking) {
