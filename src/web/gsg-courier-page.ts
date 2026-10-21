@@ -33,13 +33,6 @@ const CAMPOS_ANTERIORES = ['driver', 'costServ', 'referenciaDireccion', 'fecRegi
 /** Un cuerpo de ejemplo de la API 2 (el mismo tracking que el ejemplo de la API 1). */
 export const EJEMPLO_FLUJO = { tracking: 'GSG-E-205', accion: 'CANCELAR', motivo: 'El cliente anuló el pedido' };
 
-/** Como se arma la llamada en Postman: [paso, valor]. */
-function postman(id: string, url: string, cuerpo: string, extra: string, tabla: string, codigos: string): string {
-  return `<div class="postman" id="${id}"><h3>Probar en Postman</h3>
-    <p><b>POST</b> <code class="postman-url"></code>, con <code>Content-Type: application/json</code> y <code>X-API-Key</code>, y este cuerpo:</p>
-    <pre class="api-json">${escapeHtml(cuerpo)}</pre>${extra}<p class="postman-todas">Cómo sacar <b>cada</b> respuesta (${escapeHtml(codigos)}): <a href="#${tabla}">ver la tabla «Cómo sacarla en Postman»</a>. La colección lista para importar, en <a class="ver-manual" href="/manual#m-postman">el Manual</a>.</p><span hidden data-url="${escapeHtml(url)}"></span></div>`;
-}
-
 /** API 2: los campos de una orden de cancelar o reintentar. [nombre JSON, obligatorio, detalle] */
 export const CAMPOS_FLUJO: Array<[string, boolean, string]> = [
   ['tracking', true, 'El tracking del pedido en curso (texto o número).'],
@@ -83,9 +76,6 @@ const RESPUESTAS: Array<[string, string, string]> = [
   ['500', 'Error interno inesperado: repetir la misma llamada; queda en el registro del servidor.', 'No se provoca desde Postman: es un fallo del servidor.'],
 ];
 
-/** `texto` con comillas invertidas → <code>texto</code> (todo lo demas escapado). */
-const conCodigo = (t: string) => escapeHtml(t).replace(/`([^`]+)`/g, '<code>$1</code>');
-
 export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolean; demo?: boolean }): string {
   const ejemplo = JSON.stringify(EJEMPLO_COURIER, null, 2);
   return appShell({ titulo: 'Nuestra API', subtitulo: 'El endpoint de GSGchat para GSG: dirección, claves, validación y recepciones',
@@ -113,7 +103,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
           <tr><td><a href="#t-api1"><span class="api-num">API 1</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/entregas</code></td><td>GSG nos manda los pedidos del día</td></tr>
           <tr><td><a href="#t-api2"><span class="api-num">API 2</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/flujo</code></td><td>GSG nos pide cancelar o reintentar un pedido</td></tr>
         </tbody></table>
-        <p class="na-clave">Las dos usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>. <a class="ver-manual" href="/manual#m-api-gsgchat">Ver instrucciones completas</a></p>
+        <p class="na-clave">Las dos usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>. <a class="btn sm" href="/soporte#pruebas-api-gsg">Ver instrucciones de pruebas</a></p>
         <a href="/hoy">Ver pedidos recibidos</a> · <a href="/conexion-gsg">Conexión con GSG (lo que le enviamos)</a>
         <small>Con «Confirmar la lista de GSG» activado, los pedidos esperan aprobación en Números del día. Desactivado, el motor los procesa automáticamente.</small>
       </section>
@@ -121,20 +111,18 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <p>GSG nos manda los pedidos del día. Entrega esta dirección al programador de GSG Courier.</p>
         <label for="courier-url">Enviar pedidos con POST</label><input id="courier-url" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url">Copiar dirección</button><button class="btn" id="courier-descargar">Descargar JSON de ejemplo</button></div>
-        <p>Cuerpo: un pedido, una lista o <code>{ pedidos: [...] }</code>, hasta 600 por llamada. Un pedido repetido el mismo día no se duplica. <a href="#courier-campos">Campos</a> · <a href="#courier-respuestas">respuestas</a> · <a class="ver-manual" href="/manual#m-gsg-courier">Ver instrucciones completas</a></p>
-        ${postman('postman-1', '/api/v1/entregas', JSON.stringify(EJEMPLO_COURIER.pedidos[0], null, 2), '<p>Respuesta esperada: <b>201</b> con el pedido creado (su <code>id</code>). Si lo mandas otra vez: <b>200</b>, repetido, sin duplicar.</p>', 'courier-respuestas', RESPUESTAS.map(([c]) => c).join(', '))}
+        <p>Cuerpo: un pedido, una lista o <code>{ pedidos: [...] }</code>, hasta 600 por llamada. Un pedido repetido el mismo día no se duplica. <a href="#courier-campos">Campos</a> · <a href="#courier-respuestas">respuestas</a> · <a class="ver-manual" href="/soporte#pruebas-api-gsg">Ver instrucciones de pruebas</a></p>
         <a href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a> · <a href="/api/v1/openapi.json" download="contrato-gsgchat.json">Descargar el OpenAPI</a>
       </section>
       <section class="courier-card" id="api-2" data-na="api2"><h2><span class="api-num">API 2</span> Cancelar o reintentar un pedido</h2>
         <p>GSG nos pide dejar de escribirle a un tracking, o volver a escribirle porque ya corrigió los datos.</p>
         <label for="courier-url-2">Enviar con POST</label><input id="courier-url-2" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url-2" type="button">Copiar dirección</button></div>
-        <p>Misma clave que la API 1. <a class="ver-manual" href="/manual#m-gsg-flujo">Ver instrucciones completas</a></p>
-        ${postman('postman-2', '/api/v1/flujo', JSON.stringify(EJEMPLO_FLUJO, null, 2), '<p><b>Antes</b>, crea el pedido con la API 1: la API 2 no crea pedidos, actúa sobre uno que ya existe. Usa su <code>tracking</code> de GSG (o su <code>referencia</code>). Para probar sin cambiar nada, añade <code>"simular": true</code>.</p><p>Respuesta esperada: <b>200</b> con <code>detalle</code>. Si el tracking no está en curso: <b>404</b>.</p><div class="courier-actions"><button class="btn" id="courier-descargar-2" type="button">Descargar JSON de ejemplo</button></div>', 'respuestas-2', RESPUESTAS_FLUJO.map(([c]) => c).join(', '))}
+        <p>Misma clave que la API 1. <a class="ver-manual" href="/soporte#pruebas-api-gsg">Ver instrucciones de pruebas</a></p>
         <p>Para reintentar con el teléfono corregido: <code>{ "tracking": "GSG-E-205", "accion": "REINTENTAR", "telefono": "987654321" }</code></p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_FLUJO.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
         <h3 id="respuestas-2">Respuestas</h3>
-        <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th><th>Cómo sacarla en Postman</th></tr></thead><tbody>${RESPUESTAS_FLUJO.map(([c, t, como]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td><td>${conCodigo(como)}</td></tr>`).join('')}</tbody></table></div>
+        <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS_FLUJO.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div>
         <h3>Probar</h3>
         <p>La misma lógica que cuando GSG llama a la API 2. Por defecto se simula: dice lo que haría sin tocar el pedido.</p>
         <form id="np-flujo-form" novalidate>
@@ -170,7 +158,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       </section>
       <section class="courier-card courier-wide" data-na="llamadas"><div class="courier-cab"><div><h2>Últimas llamadas (API 1 y API 2)</h2><p class="muted">Lo que GSG nos envió: pedidos, órdenes de cancelar o reintentar, y las pruebas hechas desde esta pantalla.</p></div><button class="btn sm" id="courier-refrescar">Actualizar estado</button></div><div id="courier-bitacora" class="courier-scroll tablewrap"></div></section>
       <section class="courier-card courier-wide" id="courier-campos" data-na="api1"><h2>Campos que envía Courier (API 1)</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
-      <section class="courier-card courier-wide" id="courier-respuestas" data-na="api1"><h2>Respuestas de la recepción (API 1)</h2><p>Los errores vienen en JSON: <code>{ "ok": false, "codigo": "...", "error": "...", "detalles": [...] }</code>.</p><div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th><th>Cómo sacarla en Postman</th></tr></thead><tbody>${RESPUESTAS.map(([c, t, como]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td><td>${conCodigo(como)}</td></tr>`).join('')}</tbody></table></div></section>
+      <section class="courier-card courier-wide" id="courier-respuestas" data-na="api1"><h2>Respuestas de la recepción (API 1)</h2><p>Los errores vienen en JSON: <code>{ "ok": false, "codigo": "...", "error": "...", "detalles": [...] }</code>. Para probar respuestas concretas, sigue la guía de <a href="/soporte#pruebas-api-gsg">Soporte → Pruebas de Nuestra API</a>.</p><div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div></section>
     </div>`,
     script: String.raw`
 (function () {
@@ -204,13 +192,8 @@ ${MENSAJE_ERROR_HTTP_JS}
   }
   $('courier-copiar-url').onclick = function() { copiar(endpoint); };
   $('courier-copiar-url-2').onclick = function() { copiar(endpoint2); };
-  Array.prototype.forEach.call(document.querySelectorAll('.postman'), function(caja) {
-    var dato = caja.querySelector('[data-url]');
-    var destino = caja.querySelector('.postman-url');
-    if (dato && destino) destino.textContent = location.origin + dato.getAttribute('data-url');
-  });
   var ejemplo2 = $('courier-json-2').value;
-  $('courier-descargar-2').onclick = function() {
+  if ($('courier-descargar-2')) $('courier-descargar-2').onclick = function() {
     var url = URL.createObjectURL(new Blob([ejemplo2], {type:'application/json'}));
     var a = document.createElement('a'); a.href = url; a.download = 'orden-api2-ejemplo.json'; a.click(); URL.revokeObjectURL(url);
   };

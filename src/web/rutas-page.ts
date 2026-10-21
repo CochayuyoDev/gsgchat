@@ -299,7 +299,7 @@ export function rutasPage(opts: RutasOpts): string {
         <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
         <div id="aj-pasos"></div>
-        <details class="aj-editor-inicial" id="aj-editor-inicial"><summary>Editar el texto de «Solicitud de ubicación»</summary><p class="muted">Este es el primer mensaje real que GSGchat envía al recibir el pedido. Si lo dejas vacío, usa el texto predeterminado. Límite: 2000 caracteres.</p><label for="aj-texto-inicial">Texto que recibe el cliente</label><textarea id="aj-texto-inicial" rows="6" maxlength="2000" placeholder="Escribe la solicitud inicial de ubicación"></textarea><p class="marcadores">Puedes usar {nombreCompleto}, {producto}, {empresa}, {tracking}, {monto}, {direccionCompleta} y otros datos del pedido.</p><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar texto inicial</button><span id="aj-estado-texto-inicial" class="muted" role="status"></span></div></details>
+        <details class="aj-editor-inicial" id="aj-editor-inicial"><summary>Editar el texto de «Solicitud de ubicación»</summary><p class="muted">Este es el primer mensaje real que GSGchat envía al recibir el pedido. Si lo dejas vacío, usa el texto predeterminado. El horario se toma de Pedidos GSG → Ajustes de entrega. Límite: 2000 caracteres.</p><label for="aj-texto-inicial">Texto que recibe el cliente</label><textarea id="aj-texto-inicial" rows="6" maxlength="2000" placeholder="Escribe la solicitud inicial de ubicación"></textarea><p class="marcadores">Puedes usar {nombreCompleto}, {producto}, {empresa}, {tracking}, {monto}, {direccionCompleta}, {horario}, {desde}, {hasta} y otros datos del pedido.</p><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar texto inicial</button><span id="aj-estado-texto-inicial" class="muted" role="status"></span></div></details>
       </section>
 
       <section class="aj-seccion">
@@ -1552,6 +1552,10 @@ var MARCADORES = [
   ['{producto}', 'El producto del pedido de GSG; si no viene, no sale'],
   ['{direccion}', 'La dirección del pedido'],
   ['{distrito}', 'El distrito'],
+  ['{horario}', 'Horario de entrega de Pedidos GSG'],
+  ['{desde}', 'Hora de inicio de entrega'],
+  ['{hasta}', 'Hora final de entrega'],
+  ['{hastaExtendido}', 'Hora final del horario extendido'],
   ['{como}', 'Cómo mandar la ubicación: con el botón o desde el clip, según toque']
 ];
 function marcadoresHtml() {

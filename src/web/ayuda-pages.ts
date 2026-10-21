@@ -150,7 +150,7 @@ ${tablaCampos(CAMPOS.map(([nombre, json, obligatorio, detalle]) => [json, obliga
 <li><b>200</b>: todos ya estaban hoy; no se duplica nada. Repetir la misma llamada es seguro.</li>
 <li><b>400</b>: falta un campo o no tiene el formato. <code>detalles</code> dice qué campo de qué pedido, y no se guarda ninguno de la llamada.</li>
 <li><b>401</b> sin clave o con una que no vale; <b>403</b> si la clave no tiene permiso; <b>429</b> con más de 120 llamadas por minuto.</li></ul>
-<p>Cómo provocar cada respuesta en Postman: <a href="/api-gsgchat#courier-respuestas">Nuestra API → Respuestas de la recepción</a>.</p>` },
+<p>Cómo probar las respuestas en Postman: <a href="/soporte#pruebas-api-gsg">Soporte → Pruebas de Nuestra API</a>.</p>` },
   { clave: 'gsg-flujo', titulo: 'API 2: cancelar o reintentar un pedido', cuerpo: `<p>GSG pide dejar de escribirle a un tracking (<code>CANCELAR</code>) o volver a escribirle porque ya corrigió los datos (<code>REINTENTAR</code>). Actúa sobre un pedido que ya llegó por la API 1: no crea pedidos.</p>
 <h3>Cabeceras</h3>${bloque(CABECERAS)}
 <h3>Cuerpo</h3>${bloque(JSON.stringify(EJEMPLO_FLUJO, null, 2))}
@@ -395,6 +395,34 @@ document.getElementById('ay-limpiar').onclick = function () { AY_HISTORIAL = [];
 export function soportePage(opts: { nombreNegocio: string; demo?: boolean; version: string }): string {
   const contenido = `
 <div class="wrap">
+<section class="tarjeta" id="pruebas-api-gsg">
+  <h2>Pruebas de Nuestra API</h2>
+  <p class="muted">La pantalla <a href="/api-gsgchat">Nuestra API</a> conserva direcciones, claves y validadores. Aquí tienes cómo hacer las pruebas y leer sus respuestas.</p>
+  <h3>Recibir un pedido (API 1)</h3>
+  <ol>
+    <li>En <a href="/api-gsgchat#t-claves">Nuestra API → Claves</a>, crea una clave con permiso para recibir pedidos y cópiala. No la compartas en capturas ni la pongas en la URL.</li>
+    <li>En Postman, crea una petición <b>POST</b> a <code>https://tu-servidor/api/v1/entregas</code>.</li>
+    <li>En <b>Headers</b>, agrega <code>Content-Type: application/json</code> y <code>X-API-Key</code> con la clave.</li>
+    <li>En <b>Body → raw → JSON</b>, pega este ejemplo y reemplaza el teléfono por uno de pruebas autorizado. Una recepción válida crea el pedido y puede iniciar el flujo de WhatsApp.</li>
+  </ol>
+  ${bloque(JSON.stringify(EJEMPLO_COURIER, null, 2))}
+  <p><b>Resultado:</b> <code>201</code> significa que se creó al menos un pedido. Si repites la llamada ese día, responde <code>200</code> y no duplica el pedido. Revisa el resultado en <a href="/hoy">Pedidos GSG</a> o en <a href="/panel#historial">Historial y errores → Recepciones de GSG</a>.</p>
+  <h3>Cancelar o reintentar sin cambiar el pedido (API 2)</h3>
+  <p>Usa el tracking de un pedido existente. Envía un <b>POST</b> a <code>https://tu-servidor/api/v1/flujo</code> con las mismas cabeceras y este cuerpo:</p>
+  ${bloque(JSON.stringify({ ...EJEMPLO_FLUJO, simular: true }, null, 2))}
+  <p>Con <code>"simular": true</code>, el resultado explica qué haría sin cancelar el pedido ni volver a escribir al cliente. Para ejecutar una orden real, quita <code>simular</code> solo después de validar el resultado y usa un pedido de prueba.</p>
+  <h3>Cómo comprobar errores comunes</h3>
+  <ul>
+    <li><code>400</code>: manda un cuerpo incompleto o un campo con formato incorrecto; la respuesta indica el campo.</li>
+    <li><code>401</code>: omite <code>X-API-Key</code> o usa una clave inválida.</li>
+    <li><code>403</code>: la clave existe, pero no tiene el permiso que requiere esa API.</li>
+    <li><code>404</code>: revisa la ruta y, en API 2, que el tracking exista y siga en curso.</li>
+    <li><code>405</code>: usa <code>POST</code>.</li>
+    <li><code>429</code>: espera el tiempo indicado en <code>Retry-After</code>.</li>
+  </ul>
+  <p class="muted">No provoques errores de carga ni repitas muchas llamadas en producción. La colección de Postman y el detalle completo están en <a href="/manual#m-postman">Manual → Probar con Postman</a>.</p>
+</section>
+
 <section class="tarjeta">
   <h2>Diagnóstico en vivo</h2>
   <p class="muted">Lo que el propio sistema dice de sí mismo ahora mismo. Si algo sale en rojo, empieza por ahí.</p>

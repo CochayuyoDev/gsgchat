@@ -67,7 +67,7 @@ async function correr(html: string): Promise<string[]> {
     location: { origin: 'http://x', pathname: '/', hash: '', href: '' }, navigator: { clipboard: { writeText: async () => undefined } },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, sessionStorage: { getItem: () => null, setItem() {} },
     fetch: async () => respuesta, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
-    console: { log() {}, error() {}, warn() {} }, URL, Blob: class {}, AbortController, Promise, JSON, Math, Date, Object, Array, String, Number, Boolean, Error, encodeURIComponent, decodeURIComponent, isNaN, parseInt, parseFloat,
+    console: { log() {}, error() {}, warn() {} }, URL, URLSearchParams, Blob: class {}, AbortController, Promise, JSON, Math, Date, Object, Array, String, Number, Boolean, Error, encodeURIComponent, decodeURIComponent, isNaN, parseInt, parseFloat,
     confirmarDialogo: async () => false, history: { replaceState() {} }, requestAnimationFrame: () => 0, matchMedia: () => ({ matches: false, addEventListener() {} }),
   });
   (ctx as Record<string, unknown>).window = Object.assign((ctx as Record<string, unknown>).window as object, ctx);
@@ -100,6 +100,9 @@ describe('cada módulo con lo suyo', () => {
     const html = await pagina('/conexion-gsg');
     const hay = ids(html);
     for (const id of ['gsg', 'gsg-form', 'gsg-url', 'gsg-ruta', 'gsg-token', 'gsg-ruta-estado', 'gsg-consulta-form', 'gsg-envios', 'seguimiento-refrescar']) expect(hay.has(id), id).toBe(true);
+    expect(html).toMatch(/<details[^>]*id="gsg-envios-caja"/);
+    expect(html).not.toMatch(/<details[^>]*id="gsg-envios-caja"[^>]*\sopen(?:\s|>)/);
+    expect(html).toContain('Lo que enviamos a GSG');
     for (const id of ['card-wa', 'paso1', 'gsg-avanzado', 'gsg-endpoints', 'courier-claves', 'courier-validar']) expect(hay.has(id), id).toBe(false);
     expect(await correr(html)).toEqual([]);
   });
@@ -111,19 +114,39 @@ describe('cada módulo con lo suyo', () => {
     // Las dos APIs, cada una con su tarjeta.
     expect(html).toContain('API 1</span> Recibir pedidos');
     expect(html).toContain('API 2</span> Cancelar o reintentar un pedido');
-    // Cómo probar cada una en Postman, y el validador de la API 2.
-    for (const id of ['postman-1', 'postman-2', 'validar-2', 'courier-json-2', 'courier-validar-2', 'courier-descargar-2']) expect(hay.has(id), id).toBe(true);
-    expect(html).toContain('data-url="/api/v1/flujo"');
+    // La API remite a la guía de pruebas de Soporte; los controles locales siguen disponibles.
+    for (const id of ['validar-2', 'courier-json-2', 'courier-validar-2']) expect(hay.has(id), id).toBe(true);
+    for (const id of ['postman-1', 'postman-2', 'courier-descargar-2']) expect(hay.has(id), id).toBe(false);
+    expect(html).toContain('href="/soporte#pruebas-api-gsg"');
+    expect(html).not.toContain('Probar en Postman');
     // Cada API dice como sacar TODAS sus respuestas, no solo el 405.
     for (const codigo of ['201', '400', '401', '403', '404', '405', '413', '415', '429']) expect(html).toContain(`<tr><td><b>${codigo}</b></td>`);
-    expect((html.match(/Cómo sacar <b>cada<\/b> respuesta/g) ?? []).length).toBe(2);
+    expect(html).not.toContain('Cómo sacar <b>cada</b> respuesta');
     expect(html).not.toContain('(con GET responde 405)');
     // Cada API con su dirección.
-    expect(html).toContain("location.origin + '/api/v1/entregas'");
-    expect(html).toContain("location.origin + '/api/v1/flujo'");
     for (const id of ['card-wa', 'gsg-form', 'gsg-ruta-estado', 'courier-envios']) expect(hay.has(id), id).toBe(false);
     expect(html).toContain('Campos que envía Courier');
-    expect(await correr(html)).toEqual([]);
+    const errores = await correr(html);
+    expect(errores, errores.join('\n')).toEqual([]);
+  });
+
+  it('Hoy ya no muestra Cargar pedidos y mantiene los ajustes de horario en Pedidos GSG', async () => {
+    const html = await pagina('/hoy');
+    const hay = ids(html);
+    expect(hay.has('cargar-lote')).toBe(false);
+    expect(html).not.toContain('Cargar pedidos');
+    expect(html).toContain('Horarios de entrega y textos de entrega');
+    const errores = await correr(html);
+    expect(errores, errores.join('\n')).toEqual([]);
+  });
+
+  it('Soporte contiene las instrucciones y ejemplos de prueba de Nuestra API', async () => {
+    const html = await pagina('/soporte');
+    expect(html).toContain('id="pruebas-api-gsg"');
+    expect(html).toContain('Body → raw → JSON');
+    expect(html).toContain('GSG-E-205');
+    const errores = await correr(html);
+    expect(errores, errores.join('\n')).toEqual([]);
   });
 
   it('el menú: tres entradas, cada una a su pantalla', () => {
