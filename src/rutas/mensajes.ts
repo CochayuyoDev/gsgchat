@@ -31,6 +31,11 @@ export interface ContextoMensaje {
   /** Lo que se sabe del pedido: el cliente tiene que reconocer de que hablamos. */
   direccion?: string | null;
   distrito?: string | null;
+  /** Horario vigente en Pedidos GSG, ya redactado para incluir en el mensaje. */
+  horario?: string | null;
+  desde?: string | null;
+  hasta?: string | null;
+  hastaExtendido?: string | null;
   /**
    * Si el mensaje va a llevar un boton nativo de ubicacion.
    *
@@ -109,6 +114,7 @@ export const PLANTILLAS: Record<PasoUbicacion, PlantillaPaso> = {
  */
 /** La tienda del pedido de GSG ({tienda}); sin ella, «la tienda». */
 const tiendaDe = (ctx: ContextoMensaje): string => (ctx.tienda ?? '').trim() || 'la tienda';
+const horarioDe = (ctx: ContextoMensaje): string => (ctx.horario ?? '').trim() || 'de 2:00 p. m. a 8:00 p. m.';
 /** «¡Hola, Ana!» o, sin nombre, «¡Hola!». */
 const conNombre = (antes: string, ctx: ContextoMensaje, despues: string): string => {
   const pila = (ctx.nombre ?? '').trim().split(/\s+/)[0];
@@ -120,20 +126,20 @@ export const VARIANTES_TEXTO: Record<PasoUbicacion, Array<(ctx: ContextoMensaje)
     (ctx) =>
       `${conNombre('¡Hola', ctx, '!')} 👋 Somos GSG y estaremos llevando tu pedido de ${tiendaDe(ctx)}. 📦\n\n` +
       'Para llegar al punto indicado, por favor envíanos tu ubicación por WhatsApp y una referencia de tu dirección. 📍\n\n' +
-      'Las entregas se realizan de 2:00 p. m. a 8:00 p. m. El motorizado se comunicará contigo para coordinar la hora aproximada de llegada. 🛵',
+      `Las entregas se realizan ${horarioDe(ctx)}. El motorizado se comunicará contigo para coordinar la hora aproximada de llegada. 🛵`,
   ],
   recordatorio: [
     (ctx) =>
       `${conNombre('¡Hola de nuevo', ctx, '!')} 👋 Aún estamos esperando tu ubicación para organizar la entrega de tu pedido de ${tiendaDe(ctx)}. 📦\n\n` +
       '📍 Por favor, compártenos tu ubicación por WhatsApp y una referencia para que nuestro motorizado pueda llegar al lugar correcto.\n\n' +
-      'Recuerda que entregamos de 2:00 p. m. a 8:00 p. m. ¡Quedamos atentos!',
+      `Recuerda que entregamos ${horarioDe(ctx)}. ¡Quedamos atentos!`,
   ],
   insistencia: [
     (ctx) =>
       `${conNombre('Hola', ctx, '.')} 👋 Aún no hemos recibido tu ubicación para la entrega de tu pedido de ${tiendaDe(ctx)}. 📦\n\n` +
       '📍 Por favor, envíanos tu ubicación por WhatsApp dentro de los próximos 10 minutos.\n\n' +
       'Si no la recibimos en ese tiempo, nuestro motorizado se comunicará contigo para coordinar la entrega.\n\n' +
-      'Recuerda que nuestro horario de entrega es de 2:00 p. m. a 8:00 p. m. 🛵',
+      `Recuerda que nuestro horario de entrega es ${horarioDe(ctx)}. 🛵`,
   ],
 };
 

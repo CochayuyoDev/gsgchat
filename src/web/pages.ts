@@ -50,6 +50,7 @@ a.db-ficha:hover{background:var(--fila-hover)}
 .db-avisos{padding:14px 22px 18px;border-top:1px solid var(--borde);display:grid;gap:8px}
 .db-avisos h3{margin:0;font-size:var(--fs-micro);text-transform:uppercase;letter-spacing:.07em;color:var(--texto-suave)}
 .db-avisos:empty{display:none}
+.db-aviso-linea{display:flex;align-items:center;gap:12px}.db-aviso-linea>span{flex:1;min-width:0}.db-aviso-cerrar{flex:none;border:0;background:transparent;color:var(--texto-suave);font-size:20px;line-height:1;padding:3px 7px;border-radius:var(--radio-xs);cursor:pointer}.db-aviso-cerrar:hover{background:color-mix(in srgb,var(--texto) 8%,transparent);color:var(--texto)}
 /* Las cifras del dia: un dato grande por tarjeta y el resto en segundo plano. */
 .db-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .db-card{padding:18px 20px;border:1px solid var(--borde);border-radius:var(--radio);background:var(--superficie);box-shadow:var(--sombra);min-width:0;display:flex;flex-direction:column}
@@ -151,7 +152,11 @@ var atencion=[['Chats sin leer',chats.sinLeer||0,'/chat'],['Esperando respuesta'
 var pendientes=atencion.filter(function(a){return a[1]>0;}).length;
 $('db-atencion').innerHTML='<h3>'+ICO.atencion+'Necesita atención</h3><ul class="db-lista">'+atencion.map(function(a){return '<li><a href="'+a[2]+'"'+(a[1]?' class="hay"':'')+'>'+esc(a[0])+'<b>'+a[1]+'</b></a></li>';}).join('')+'</ul>'+(pendientes?'':'<p class="db-lista-ok">Nada pendiente por ahora.</p>');
 var nivel={info:'info',warn:'warn',bad:'bad'};
-$('inicio-avisos').innerHTML=avisos.length?'<h3>Avisos</h3>'+avisos.map(function(a){return '<p class="s-alerta '+(nivel[a.nivel]||'warn')+'"><span>'+esc(a.texto)+'</span></p>';}).join(''):'';}
+var avisoStore='gsgchat:avisos-ocultos:v1:'+${JSON.stringify(opts.nombreNegocio)};
+var avisosOcultos=[];try{avisosOcultos=JSON.parse(sessionStorage.getItem(avisoStore)||'[]');if(!Array.isArray(avisosOcultos))avisosOcultos=[];}catch(e){avisosOcultos=[];}
+var visibles=avisos.filter(function(a){return avisosOcultos.indexOf(String(a.tipo||'aviso')+'|'+String(a.texto||''))<0;});
+$('inicio-avisos').innerHTML=visibles.length?'<h3>Avisos</h3>'+visibles.map(function(a){var id=String(a.tipo||'aviso')+'|'+String(a.texto||'');return '<div class="s-alerta '+(nivel[a.nivel]||'warn')+' db-aviso-linea" data-aviso-id="'+esc(id)+'"><span>'+esc(a.texto)+'</span><button class="db-aviso-cerrar" type="button" data-cerrar-aviso aria-label="Cerrar aviso" title="Cerrar aviso">×</button></div>';}).join(''):'';}
+document.getElementById('inicio-avisos').addEventListener('click',function(ev){var boton=ev.target.closest('[data-cerrar-aviso]');if(!boton)return;var fila=boton.closest('[data-aviso-id]');if(!fila)return;var id=fila.getAttribute('data-aviso-id'),key='gsgchat:avisos-ocultos:v1:'+${JSON.stringify(opts.nombreNegocio)};try{var guardados=JSON.parse(sessionStorage.getItem(key)||'[]');if(!Array.isArray(guardados))guardados=[];if(guardados.indexOf(id)<0)guardados.push(id);sessionStorage.setItem(key,JSON.stringify(guardados.slice(-50)));}catch(e){}fila.remove();if(!this.querySelector('.db-aviso-linea'))this.innerHTML='';});
 /* La señal grande de Asistente IA: la misma que la de la cabecera, con el motivo y la hora. */
 var TEXTO_SENAL={conectada:'IA conectada',sin_conexion:'IA sin conexión',apagada:'IA apagada',sin_comprobar:'IA sin comprobar'};
 function senalGrande(c){if(!c||!TEXTO_SENAL[c.estado])return;$('ia-senal').setAttribute('data-estado',c.estado);$('ia-senal-texto').textContent=TEXTO_SENAL[c.estado];var det=c.estado==='sin_conexion'?(c.motivo||'La IA no respondió.')+' ':c.estado==='apagada'?'No está activa o le falta la clave. ':'';$('ia-senal-detalle').textContent=det+(c.comprobada?'Última comprobación: '+fecha(c.comprobada)+'.':'Aún sin comprobar desde que arrancó el sistema.');}

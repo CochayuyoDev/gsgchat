@@ -510,12 +510,14 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
     </form>
     <pre id="gsg-consulta-resultado" class="ep-resultado hidden" role="status" aria-live="polite"></pre>
   </div>
-  <div class="bloque punteado" id="gsg-envios-caja">
-    <h3>Lo que enviamos a GSG</h3>
+  <details class="bloque punteado" id="gsg-envios-caja">
+    <summary>Lo que enviamos a GSG</summary>
+    <div class="gsg-envios-contenido">
     <div id="gsg-envios-destino" class="gsg-destinos"></div>
     <div id="gsg-envios" class="ayuda"><span class="esqueleto linea"></span><span class="esqueleto linea media"></span></div>
     <p class="ayuda"><a id="gsg-envios-refrescar" href="#">Actualizar</a></p>
-  </div>
+    </div>
+  </details>
   <details><summary>Ubicación y seguimiento del cliente</summary>
     <p>Las direcciones escritas y los enlaces de Maps se confirman antes de reportar la ubicación. Los horarios y el orden de reparto proceden de GSG.</p>
     <p id="seguimiento-estado" role="status" aria-live="polite">Revisando seguimiento…</p>
@@ -1946,6 +1948,7 @@ if ($('gsg')) {
     } catch (error) { caja.textContent = 'No se pudo consultar lo enviado a GSG: ' + error.message; }
   }
   if ($('gsg-envios-refrescar')) $('gsg-envios-refrescar').onclick = function (ev) { ev.preventDefault(); cargarEnvios(); };
+  if ($('gsg-envios-caja')) $('gsg-envios-caja').addEventListener('toggle', function () { if (this.open) cargarEnvios(); });
 
   if ($('gsg-bitacora-refrescar')) $('gsg-bitacora-refrescar').onclick = function (ev) { ev.preventDefault(); cargarExtras(); };
   async function cargarSeguimiento() {
@@ -1969,7 +1972,7 @@ if ($('gsg')) {
     boton.disabled = true;
     boton.textContent = 'Revisando…';
     sinEstado('seguimiento-cuando');
-    await Promise.all([cargarSeguimiento(), cargarGsg(), cargarExtras(), cargarEnvios()]);
+    await Promise.all([cargarSeguimiento(), cargarGsg(), cargarExtras(), $('gsg-envios-caja') && $('gsg-envios-caja').open ? cargarEnvios() : Promise.resolve()]);
     boton.disabled = false;
     boton.textContent = 'Actualizar diagnóstico';
     var ahora = new Date();
@@ -1978,7 +1981,7 @@ if ($('gsg')) {
   cargarSeguimiento();
   cargarGsg();
   cargarExtras();
-  cargarEnvios();
+  if ($('gsg-envios-caja') && $('gsg-envios-caja').open) cargarEnvios();
 }
 `;
   const script = scriptComun + (vistaWa ? scriptWa : '') + (tarjetaGsg ? scriptGsg : '');

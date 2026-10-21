@@ -46,6 +46,7 @@ import { avisosDeMeta } from '../whatsapp/avisos-meta.js';
 
 
 import { TITULO_ALERTA, type TipoAlertaHoy } from '../entregas/alertas-hoy.js';
+import { ventanaDeEntrega } from '../entregas/horario-distrito.js';
 
 import { registerBuscarRoutes } from './buscar-routes.js';
 import { atenderRespuestaDeRuta } from '../rutas/inbound.js';
@@ -192,6 +193,12 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     supervisor: () => deps.ajustes?.supervisor() ?? config.RUTAS_SUPERVISOR,
     usaPlantillas: () => providerOf(settings.current()) === 'cloud',
     conBoton: () => providerOf(settings.current()) === 'cloud' || config.WHATSAPP_NATIVE_BUTTONS,
+    horarioMensaje: (pedido) => {
+      if (!deps.entregas) return null;
+      const a = deps.entregas.ajustes();
+      const v = ventanaDeEntrega(pedido, a);
+      return { desde: v.desde, hasta: v.hasta, extendidoHasta: v.extendidoHasta };
+    },
     nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
     lista: deps.lista,
     ajustes: deps.ajustes,

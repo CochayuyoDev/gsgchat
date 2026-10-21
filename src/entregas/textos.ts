@@ -361,7 +361,7 @@ export interface ContextoTexto {
  * Las variables de los datos del envio: si una viene vacia, se quita la LINEA
  * entera (nada de «Monto a Cobrar: » suelto ni «undefined»).
  */
-const VARIABLES_DE_LINEA = ['producto', 'empresa', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'direccionCompleta'] as const;
+const VARIABLES_DE_LINEA = ['producto', 'empresa', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'direccionCompleta', 'horario', 'desde', 'hasta', 'hastaExtendido'] as const;
 
 /** «516 - Zapatería Lima», o lo que haya de los dos. */
 export function empresaEnPalabras(envio?: DatosEnvio | null): string {
@@ -547,7 +547,7 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   // Es a la vez el cierre del agente operativo: despues de esto la IA ya no
   // contesta en ese chat (el sistema sigue con la hora de llegada y el entregado).
   ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.`,
-  solicitudUbicacion: '¡Hola {nombreCompleto}! Somos GSG Courier, tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
+  solicitudUbicacion: '¡Hola {nombreCompleto}! Somos GSG Courier, tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n🕑 Horario de entrega: {horario}.\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
   porQueUbicacion: 'Es necesaria para registrar correctamente la dirección de entrega. ¿Podrías compartir tu ubicación por WhatsApp, por favor? (clip 📎 → Ubicación)',
   cierreAgente: TEXTO_CIERRE,
   proponerUbicacion: 'Hola {nombre}, somos {negocio}: hoy le llevamos {pedido}. ¿Se lo llevamos a la misma dirección de la última vez?\nResponda SÍ si es la misma; si es otra, mándenos su ubicación desde el clip 📎 → Ubicación.',
@@ -628,16 +628,26 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
 /** El texto que toca: el guardado desde la pantalla si lo hay, si no el de siempre. */
 export function textoDe(clave: keyof AjustesEntregas['textos'], ajustes: AjustesEntregas, ctx: ContextoTexto): string {
   const propio = ajustes.textos[clave]?.trim();
+  // Los mensajes de ubicación usan el horario configurado en Pedidos GSG.
+  // Si el pedido trae una ventana propia (por distrito o desde GSG), respetamos
+  // esos valores; si no, completamos las variables con el horario general.
+  const ctxConHorario: ContextoTexto = {
+    ...ctx,
+    desde: ctx.desde ?? horaEnPalabras(ajustes.horarioEntregas.desde),
+    hasta: ctx.hasta ?? horaEnPalabras(ajustes.horarioEntregas.hasta),
+    hastaExtendido: ctx.hastaExtendido ?? horaEnPalabras(ajustes.horarioEntregas.extendidoHasta),
+    horario: ctx.horario ?? horarioEnPalabras(ajustes.horarioEntregas.desde, ajustes.horarioEntregas.hasta),
+  };
   if (clave === 'solicitudUbicacion' && !propio) {
     const completa = tieneNumeracion(ctx.direccion ?? '') && Boolean(ctx.distrito?.trim() || distritoEnDireccion(ctx.direccion));
     const base = TEXTOS_POR_DEFECTO.solicitudUbicacion;
     const pedido = completa
       ? 'Por favor, confirma si la dirección indicada es correcta compartiendo tu ubicación actual por WhatsApp. También puedes escribir tu dirección completa con número y distrito para buscarla en el mapa y confirmarla contigo.'
       : 'La dirección todavía no permite ubicar una puerta exacta. Por favor, comparte tu ubicación actual por WhatsApp o completa la dirección con número de puerta (o manzana y lote) y distrito.';
-    return rellenar(base.replace('Por favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!', pedido), ctx);
+    return rellenar(base.replace('Por favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!', pedido), ctxConHorario);
   }
   // La hora límite sale de los ajustes si quien llama no la trae (si no, quedaba «antes de la  para…»).
-  return rellenar(propio || TEXTOS_POR_DEFECTO[clave], { ...ctx, horaLimite: ctx.horaLimite || horaEnPalabras(ajustes.cambioUbicacionHasta) });
+  return rellenar(propio || TEXTOS_POR_DEFECTO[clave], { ...ctxConHorario, horaLimite: ctx.horaLimite || horaEnPalabras(ajustes.cambioUbicacionHasta) });
 }
 /** El texto para el motorizado, con el distrito entre paréntesis si lo hay. */
 export function contextoMotorizado(ctx: ContextoTexto): ContextoTexto {
@@ -716,7 +726,7 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   cambioUbicacionTarde: ['{nombre}', '{pedido}', '{negocio}', '{horaLimite}', '{motorizado}', '{telefonoMotorizado}'],
   ubicacionCambiada: ['{nombre}', '{pedido}', '{negocio}', '{mapa}', '{horaLimite}'],
   clienteCanceladoGsg: ['{nombre}', '{pedido}', '{negocio}', '{tienda}'],
-  solicitudUbicacion: ['{nombreCompleto}', '{nombre}', '{remitente}', '{producto}', '{empresa}', '{tracking}', '{nroPedido}', '{metodoPago}', '{monto}', '{direccionCompleta}', '{direccion}', '{distrito}', '{pedido}', '{negocio}', '{tienda}'],
+  solicitudUbicacion: ['{nombreCompleto}', '{nombre}', '{remitente}', '{producto}', '{empresa}', '{tracking}', '{nroPedido}', '{metodoPago}', '{monto}', '{direccionCompleta}', '{direccion}', '{distrito}', '{pedido}', '{negocio}', '{tienda}', '{horario}', '{desde}', '{hasta}', '{hastaExtendido}'],
   porQueUbicacion: ['{nombre}', '{pedido}', '{negocio}', '{tienda}', '{soporte}', '{telefonoMotorizado}'],
   cierreAgente: ['{nombre}', '{pedido}', '{negocio}', '{tienda}', '{soporte}', '{telefonoMotorizado}'],
   confirmarEntregaGsg: ['{nombreCompleto}', '{nombre}', '{remitente}', '{producto}', '{empresa}', '{tracking}', '{nroPedido}', '{metodoPago}', '{monto}', '{direccionCompleta}', '{direccion}', '{distrito}', '{pedido}', '{negocio}', '{tienda}'],

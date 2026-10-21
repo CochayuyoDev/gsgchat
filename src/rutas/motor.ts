@@ -36,6 +36,7 @@ import { ajustesPorDefecto, aplicarAjustes, conFranjaDeLaPolitica, rellenarTexto
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
 import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
+import { horaEnPalabras, horarioEnPalabras } from '../entregas/textos.js';
 import {
   DESCRIPCION_PASO,
   PLANTILLAS,
@@ -116,6 +117,8 @@ export interface MotorDeps {
    * pines aunque GSG entregue hasta las 22:00.
    */
   horarioExtra?: () => { desde: string; hasta: string } | null;
+  /** Franja de Pedidos GSG para redactar las solicitudes y recordatorios. */
+  horarioMensaje?: (pedido: Pick<Solicitud, 'distrito' | 'direccion'>) => { desde: string; hasta: string; extendidoHasta?: string } | null;
   /** Los stickers automaticos (tras el primer mensaje, tras la despedida). Ver src/stickers. */
   stickers?: ServicioStickers;
   /**
@@ -372,15 +375,24 @@ export function crearMotor(deps: MotorDeps): Motor {
     return { tienda: pedido?.datosEnvio?.empresaNombre?.trim() || null, producto: pedido?.datosEnvio?.producto?.trim() || null };
   }
 
-  const contexto = (solicitud: Solicitud): ContextoMensaje => ({
-    nombre: solicitud.nombre,
-    negocio: opciones.negocio,
-    referencia: solicitud.referencia,
-    direccion: solicitud.direccion,
-    distrito: solicitud.distrito,
-    // Sin boton nativo, el texto explica el clip en vez de un boton que no existe.
-    conBoton: deps.conBoton?.() ?? false,
-  });
+  const contexto = (solicitud: Solicitud): ContextoMensaje => {
+    const horario = deps.horarioMensaje?.(solicitud);
+    return {
+      nombre: solicitud.nombre,
+      negocio: opciones.negocio,
+      referencia: solicitud.referencia,
+      direccion: solicitud.direccion,
+      distrito: solicitud.distrito,
+      ...(horario ? {
+        desde: horaEnPalabras(horario.desde),
+        hasta: horaEnPalabras(horario.hasta),
+        hastaExtendido: horario.extendidoHasta ? horaEnPalabras(horario.extendidoHasta) : undefined,
+        horario: horarioEnPalabras(horario.desde, horario.hasta),
+      } : {}),
+      // Sin boton nativo, el texto explica el clip en vez de un boton que no existe.
+      conBoton: deps.conBoton?.() ?? false,
+    };
+  };
 
   /** Marca la incidencia, la apunta en la bitacora y la encola para GSG. */
   async function anotarIncidencia(
