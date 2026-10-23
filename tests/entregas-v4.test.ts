@@ -134,7 +134,8 @@ describe('vuelta 4 · notas de voz, página del motorizado, recurrente en lista 
     e.avanzar(-8 * 24 * 60);
   });
 
-  it('el cliente recurrente también en «Pegar la lista del día» y en «Pedido a mano»', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('el cliente recurrente también en «Pegar la lista del día» y en «Pedido a mano»', async () => {
     for (const [tel, nombre, i] of [['987410003', 'Lucía Lista', 43], ['987410004', 'Mario Mano', 44]] as const) {
       const contacto = await e.repos.contacts.upsertFromInbound(conPais(tel), nombre);
       const id = await e.repos.locations.save(contacto.id, { ok: true, lat: pinDe(i).lat, lng: pinDe(i).lng, source: 'whatsapp_location', confidence: 'high', precisionMeters: 10, mapsUrl: 'https://maps.google.com/?q=x', warnings: [] } as never, 'pin');

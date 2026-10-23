@@ -227,7 +227,8 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     expect(e.botonesA(ANA).flatMap((b) => b.buttons.map((x) => x.title))).not.toContain('Cotizar envío');
   });
 
-  it('6. después de la 1:00 PM: «me equivoqué» → que coordine con el motorizado, y el pin no se registra', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('6. después de la 1:00 PM: «me equivoqué» → que coordine con el motorizado, y el pin no se registra', async () => {
     e.avanzar(5 * 60); // ~14:0x en Lima
     const r = await nuevos(ANA, () => e.contesta(ANA, { texto: 'me equivoqué de ubicación' }));
     expect(r.at(-1)).toMatch(/después de la 1:00 PM, por favor comunícate directamente con el motorizado.*999 ?888 ?777/);

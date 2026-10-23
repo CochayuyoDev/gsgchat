@@ -92,7 +92,8 @@ describe('un cliente con dos pedidos el mismo día', () => {
     expect((await e.entrega('D-2'))?.estado).toBe('lista');
   });
 
-  it('los dos van al mismo motorizado en un solo mensaje y con un solo pin', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('los dos van al mismo motorizado en un solo mensaje y con un solo pin', async () => {
     await e.trabajar();
     const d1 = await e.entrega('D-1');
     const d2 = await e.entrega('D-2');
@@ -108,7 +109,8 @@ describe('un cliente con dos pedidos el mismo día', () => {
     expect(e.mensajesA(rider.phone).filter((m) => m.kind === 'location')).toHaveLength(1);
   });
 
-  it('el tiempo del motorizado vale para los dos: un solo aviso a la clienta, y GSG se entera de cada uno', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('el tiempo del motorizado vale para los dos: un solo aviso a la clienta, y GSG se entera de cada uno', async () => {
     const antes = e.textosA(conPais(DORA)).length;
     await e.contesta(rider.phone, { texto: '30' });
     const d1 = await e.entrega('D-1');
@@ -128,7 +130,8 @@ describe('un cliente con dos pedidos el mismo día', () => {
     expect(entregas).toContain('D-2');
   });
 
-  it('"entregado" cierra los dos y a la clienta se le da las gracias una sola vez', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('"entregado" cierra los dos y a la clienta se le da las gracias una sola vez', async () => {
     const antes = e.textosA(conPais(DORA)).length;
     await e.contesta(rider.phone, { texto: 'entregado' });
     expect((await e.entrega('D-1'))?.estado).toBe('entregada');

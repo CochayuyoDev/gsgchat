@@ -238,7 +238,8 @@ describe('el plan dentro del sistema', () => {
     return { app, repos, wa, ia, plan, modelo, contacto: c };
   }
 
-  it('con el plan vigente todo funciona y cada respuesta de la IA cuenta', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): plan y membresía.
+  it.skip('con el plan vigente todo funciona y cada respuesta de la IA cuenta', async () => {
     // Con el reloj de verdad: el vencimiento cuenta desde hoy (con la fecha
     // fija del 29/09/2026 la prueba caducó sola el 30/09).
     const s = await levantar(() => planRemoto({ vencimiento: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString() }));
@@ -252,7 +253,8 @@ describe('el plan dentro del sistema', () => {
     expect(info.json()).toMatchObject({ origen: 'maestro', plan: { nombre: 'Prueba' }, iaTurnosMes: 1 });
   });
 
-  it('vencido: la IA calla sin llamar al modelo, las campañas no se crean, y el panel lo dice arriba de todo', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): plan y membresía.
+  it.skip('vencido: la IA calla sin llamar al modelo, las campañas no se crean, y el panel lo dice arriba de todo', async () => {
     const s = await levantar(() => planRemoto({ vencimiento: '2026-01-01T00:00:00.000Z', vencido: true, diasRestantes: -100, aviso: 'Tu prueba gratis terminó el 1 de enero: el asistente IA y las campañas están en pausa. Los chats siguen funcionando.', contacto: 'Escríbenos al +51 999' }));
     const r = await s.ia.turno(s.contacto, 'hola');
     expect(r).toMatchObject({ resultado: 'inactiva', detalle: 'El plan está vencido: el asistente IA está en pausa.' });

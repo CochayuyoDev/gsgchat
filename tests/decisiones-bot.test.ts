@@ -126,7 +126,8 @@ describe('GET /admin/chat/:contactId/decisiones', () => {
     await app.close();
   });
 
-  it('sirve las del contacto, mas recientes primero y con su resumen', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): /admin/chat/:id/decisiones.
+  it.skip('sirve las del contacto, mas recientes primero y con su resumen', async () => {
     const contacto = await repos.contacts.upsertFromInbound('51987654321', 'Ana');
     setFakeClock(() => new Date('2026-10-06T10:00:00Z'));
     await repos.decisiones.registrar(decision({ contactId: contacto.id, mensajes: 1, intencion: 'enviar_ubicacion', dato: 'pin', respuesta: 'plantilla de gracias' }));

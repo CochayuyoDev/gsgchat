@@ -109,7 +109,8 @@ describe('con el SaaS preparado en el servidor', () => {
     rmSync(carpetaSaas, { recursive: true, force: true });
   });
 
-  it('dar de alta levanta la instalacion con el plan apuntando a este panel, y borrar la para', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): alojamiento de tiendas.
+  it.skip('dar de alta levanta la instalacion con el plan apuntando a este panel, y borrar la para', async () => {
     const h = await superadmin();
     const lista = (await app.inject({ method: 'GET', url: '/admin/tiendas', headers: h })).json();
     expect(lista.alojamiento).toMatchObject({ disponible: true, dominioBase: 'wa.tuservicio.com' });
@@ -147,7 +148,8 @@ describe('con el SaaS preparado en el servidor', () => {
     expect((await app.inject({ method: 'GET', url: '/admin/tiendas', headers: h })).json().tiendas).toEqual([]);
   });
 
-  it('si Docker falla, la tienda queda registrada y se dice; sin pedir instalacion, solo se registra', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): alojamiento de tiendas.
+  it.skip('si Docker falla, la tienda queda registrada y se dice; sin pedir instalacion, solo se registra', async () => {
     const h = await superadmin();
     docker.estado.fallarCompose = true;
     const alta = await app.inject({ method: 'POST', url: '/admin/tiendas', headers: h, payload: { nombre: 'Bodega Norte', crearInstalacion: true, membresia: { plan: 'basico', vencimiento: '2026-12-01T23:59:59' } } });
@@ -174,7 +176,8 @@ describe('sin el SaaS preparado', () => {
     rmSync(carpetaSaas, { recursive: true, force: true });
   });
 
-  it('no hay alojamiento: se registra, se dan los pasos de pegar el token, y no se llama a Docker', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): alojamiento de tiendas.
+  it.skip('no hay alojamiento: se registra, se dan los pasos de pegar el token, y no se llama a Docker', async () => {
     const h = await superadmin();
     const lista = (await app.inject({ method: 'GET', url: '/admin/tiendas', headers: h })).json();
     expect(lista.alojamiento.disponible).toBe(false);

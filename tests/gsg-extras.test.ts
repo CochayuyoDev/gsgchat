@@ -135,7 +135,8 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
   });
   afterAll(() => e.cerrar());
 
-  it('un pedido de GSG con teléfono inválido queda a la vista en /admin/gsg', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): simulador de GSG.
+  it.skip('un pedido de GSG con teléfono inválido queda a la vista en /admin/gsg', async () => {
     e.simulador.cargarDePrueba();
     e.simulador.cargar([{ referencia: 'P-ROTO', telefono: '123456', nombre: 'Sin número' }]);
     await e.gsgManda();
@@ -146,7 +147,8 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
     expect(r.body.descartes.lista.find((d) => d.referencia === 'P-ROTO')?.motivo).toMatch(/le faltan dígitos/);
   });
 
-  it('el verificador y el cuadre responden sin llamar a GSG', async () => {
+  // Desactualizada: Módulo retirado: simulador de GSG.
+  it.skip('el verificador y el cuadre responden sin llamar a GSG', async () => {
     const v = await e.app.inject({ method: 'POST', url: '/admin/gsg/verificar-contrato', headers: admin, payload: {} });
     expect(v.statusCode).toBe(200);
     const cuerpo = v.json() as { ok: boolean; verificacion: { hallazgos: Array<{ donde: string; tipo: string }> } };
@@ -173,7 +175,8 @@ describe('las rutas: el token del simulador vale desde fuera y todo queda en la 
     expect(fila?.resultado).toMatch(/creados 1/);
   });
 
-  it('crear o anular tokens exige un administrador de la pantalla', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): simulador de GSG.
+  it.skip('crear o anular tokens exige un administrador de la pantalla', async () => {
     const r = await e.api.post('/admin/gsg/tokens-simulador', { nombre: 'x' });
     expect(r.status).toBe(403);
   });
@@ -199,7 +202,8 @@ describe('el token del simulador vale desde fuera (servidor mínimo con el simul
   });
   afterAll(() => app.close());
 
-  it('con un token vigente entra; caducado o anulado, se le explica; y queda en la bitácora', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): simulador de GSG.
+  it.skip('con un token vigente entra; caducado o anulado, se le explica; y queda en la bitácora', async () => {
     const creado = await app.inject({ method: 'POST', url: '/admin/gsg/tokens-simulador', headers: admin, payload: { nombre: 'Equipo GSG', dias: 5 } });
     expect(creado.statusCode, creado.body).toBe(201);
     const { token, registro } = creado.json() as { token: string; registro: { id: string } };
@@ -241,7 +245,8 @@ describe('las pruebas del espejo de cambios desde la pantalla (cancelar uno / ca
   });
   afterAll(() => app.close());
 
-  it('sin pedidos pendientes lo dice; con pedidos, cancela uno y lo deja en cancelados con cancelado:true', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): simulador de GSG.
+  it.skip('sin pedidos pendientes lo dice; con pedidos, cancela uno y lo deja en cancelados con cancelado:true', async () => {
     const vacio = await app.inject({ method: 'POST', url: '/admin/gsg/simulador/cancelar-uno', payload: {} });
     expect(vacio.statusCode).toBe(409);
     expect((vacio.json() as { error: string }).error).toContain('ningún pedido de prueba vivo');
@@ -255,7 +260,8 @@ describe('las pruebas del espejo de cambios desde la pantalla (cancelar uno / ca
     expect(String(c!.motivoCancelacion)).toContain('Prueba');
   });
 
-  it('cambia la dirección de uno y la lista lo devuelve con la nueva', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): simulador de GSG.
+  it.skip('cambia la dirección de uno y la lista lo devuelve con la nueva', async () => {
     const r = await app.inject({ method: 'POST', url: '/admin/gsg/simulador/cambiar-uno', payload: {} });
     expect(r.statusCode).toBe(200);
     const { referencia, direccion, distrito } = r.json() as { referencia: string; direccion: string; distrito: string };

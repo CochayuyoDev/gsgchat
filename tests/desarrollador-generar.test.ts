@@ -94,7 +94,8 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(c.notas).toMatch(/^Cobrar S\/ \d+\.\d{2}/);
   });
 
-  it('una persona que no es administradora, o una clave de API, no puede usarlo', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('una persona que no es administradora, o una clave de API, no puede usarlo', async () => {
     const op = await api('POST', '/admin/usuarios', { nombre: 'Operadora', usuario: 'opera', clave: 'opera-2026-wa', rol: 'operador' });
     expect(op.status).toBe(200);
     const login = await tienda.app.inject({ method: 'POST', url: '/login', payload: { usuario: 'opera', clave: 'opera-2026-wa' } });
@@ -107,7 +108,8 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect((await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 1 }, { 'x-api-key': clave })).status).toBe(403);
   });
 
-  it('el tope es de 500 clientes por tanda y los errores se dicen en palabras', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('el tope es de 500 clientes por tanda y los errores se dicen en palabras', async () => {
     const mucho = await api('POST', '/admin/desarrollador/generar', { faltaConfirmar: 300, faltaUbicacion: 201 });
     expect(mucho.status).toBe(400);
     expect(mucho.body.error).toContain('500');
@@ -118,7 +120,8 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(nada.body.error).toContain('al menos uno');
   });
 
-  it('20 contactados + 20 sin ubicación + 5 motorizados entran por la API con la clave de prueba', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('20 contactados + 20 sin ubicación + 5 motorizados entran por la API con la clave de prueba', async () => {
     // Un cliente REAL al lado, que tiene que sobrevivir al borrado.
     const real = await tienda.app.inject({ method: 'POST', url: '/admin/dev/inbound', headers: { cookie, 'content-type': 'application/json' }, payload: JSON.stringify({ phone: '51987654321', name: 'Cliente real', text: 'hola' }) });
     expect([200, 404]).toContain(real.statusCode);
@@ -173,7 +176,8 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(listaMotos.filter((m) => m.phone.startsWith('510001')).length).toBe(5);
   }, 180_000 * LENTO);
 
-  it('NADA pasó por el WhatsApp: el sender lo simuló y quedó en el hilo como enviado', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('NADA pasó por el WhatsApp: el sender lo simuló y quedó en el hilo como enviado', async () => {
     // Un respiro para que el motor del reparto pida alguna ubicación.
     await new Promise((r) => setTimeout(r, 8000));
     expect(wa.sent.filter((m) => esNumeroDePrueba(String(m.to ?? ''))).length).toBe(0);
@@ -185,13 +189,15 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(estado.body).toMatchObject({ clientes: 40, motorizados: 5 });
   }, 60_000 * LENTO);
 
-  it('una segunda tanda no pisa los números de la primera', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('una segunda tanda no pisa los números de la primera', async () => {
     const r = await api('POST', '/admin/desarrollador/generar', { faltaUbicacion: 3, motorizados: 1 });
     expect(r.body.creados).toEqual({ faltaConfirmar: 0, faltaUbicacion: 3, motorizados: 1 });
     expect((await api('GET', '/admin/desarrollador/prueba')).body).toMatchObject({ clientes: 43, motorizados: 6 });
   }, 120_000 * LENTO);
 
-  it('«Borrar todo lo de prueba» deja todo limpio y lo real intacto', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('«Borrar todo lo de prueba» deja todo limpio y lo real intacto', async () => {
     const r = await api('DELETE', '/admin/desarrollador/prueba');
     expect(r.status).toBe(200);
     expect(r.body.borrado.entregas).toBe(43);
@@ -214,7 +220,8 @@ describe('Módulo desarrollador: clientes de prueba', () => {
     expect(otra.body.detalle).toContain('No había nada de prueba');
   }, 120_000 * LENTO);
 
-  it('la pestaña se pinta dentro del módulo, sin jerga y con su botón de borrar', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('la pestaña se pinta dentro del módulo, sin jerga y con su botón de borrar', async () => {
     const r = await tienda.app.inject({ method: 'GET', url: '/desarrollador', headers: { cookie } });
     expect(r.statusCode).toBe(200);
     expect(r.body).toContain('Falta que confirme');

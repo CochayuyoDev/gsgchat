@@ -155,7 +155,8 @@ describe('servicio: guardar, mandar y automaticos', () => {
 });
 
 describe('tras el saludo del asistente', () => {
-  it('a un cliente nuevo le llega el saludo y, detras, el sticker de inicio', async () => {
+  // Desactualizada: Los stickers automáticos ya no se envían desde el flujo (quitados en 2b40f3e).
+  it.skip('a un cliente nuevo le llega el saludo y, detras, el sticker de inicio', async () => {
     const config = loadConfig(ENV);
     const repos = createFakeRepos();
     const wa = createFakeWhatsApp();
@@ -179,7 +180,8 @@ describe('tras el saludo del asistente', () => {
     expect(wa.sent.slice(n).map((m) => m.kind)).not.toContain('sticker');
   });
 
-  it('cuando el cliente manda su ubicacion para el reparto, sale el gracias y su sticker', async () => {
+  // Desactualizada: Los stickers automáticos ya no se envían desde el flujo (quitados en 2b40f3e).
+  it.skip('cuando el cliente manda su ubicacion para el reparto, sale el gracias y su sticker', async () => {
     const config = loadConfig(ENV);
     const repos = createFakeRepos();
     const wa = createFakeWhatsApp();

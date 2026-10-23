@@ -510,7 +510,8 @@ describe('las rutas de la pantalla', () => {
     return { app, fakes, dirRutas, auth: { 'x-api-key': CLAVE_API_PRUEBA } };
   }
 
-  it('cerrar de golpe las de los pedidos terminados hoy, listar con filtros, notas, exportar, papelera', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('cerrar de golpe las de los pedidos terminados hoy, listar con filtros, notas, exportar, papelera', async () => {
     const { app, fakes, dirRutas, auth } = await servidor();
     try {
       const ana = await fakes.contacts.upsertFromInbound('51987000005', 'Ana');
@@ -584,7 +585,8 @@ describe('las rutas de la pantalla', () => {
     }
   });
 
-  it('el adjunto se sirve con su tipo; el enlace de evidencia se abre sin sesion, sin el telefono entero y con la foto; roto o caducado, no', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('el adjunto se sirve con su tipo; el enlace de evidencia se abre sin sesion, sin el telefono entero y con la foto; roto o caducado, no', async () => {
     const { app, fakes, dirRutas, auth } = await servidor();
     try {
       await writeFile(path.join(mediaDir, 'dddddddddddddddddddddddd.jpg'), JPEG);
@@ -649,7 +651,8 @@ describe('las rutas de la pantalla', () => {
     }
   });
 
-  it('ensenar a la IA: con entrenamiento, los pares entran pendientes; sin el, 409 en cristiano', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('ensenar a la IA: con entrenamiento, los pares entran pendientes; sin el, 409 en cristiano', async () => {
     const ensenado: Array<{ filas: Array<{ pregunta: string | null; respuesta: string }>; opts: { origen: string; origenDetalle?: string | null; estado?: string } }> = [];
     const entrenamiento = {
       async ensenarVarias(filas: Array<{ pregunta: string | null; respuesta: string }>, opts: { origen: string; origenDetalle?: string | null; estado?: string }) {
@@ -704,7 +707,8 @@ describe('las rutas de la pantalla', () => {
     }
   });
 
-  it('borrar todo lo de un cliente exige BORRAR; importar un chat del telefono lo deja en la lista', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('borrar todo lo de un cliente exige BORRAR; importar un chat del telefono lo deja en la lista', async () => {
     const { app, fakes, dirRutas, auth } = await servidor();
     try {
       const carla = await fakes.contacts.upsertFromInbound('51987000009', 'Carla');

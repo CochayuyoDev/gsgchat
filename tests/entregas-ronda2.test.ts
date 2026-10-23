@@ -50,7 +50,8 @@ function hoyALas9(): Date {
   return d;
 }
 
-describe('botones, segunda visita, cerca, sin moto, urgentes y ruta', () => {
+// Desactualizada: flujo de motorizados, segunda visita y confirmaciones retirado (956c298, modulos-retirados).
+describe.skip('botones, segunda visita, cerca, sin moto, urgentes y ruta', () => {
   let e: EscenarioEntregas;
   let riders: Array<{ id: number; phone: string; nombre: string }>;
 

@@ -233,7 +233,8 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(JSON.stringify(reporte)).toContain('GSG-');
   });
 
-  it('5. el cliente pega un enlace de Google Maps: se le pregunta si es ahí y, con su SÍ, sale a GSG', async () => {
+  // Desactualizada: ya no se pregunta «¿es ahí?» (ubicación sin confirmar, 20/10) ni hay SÍ/NO; el enlace se registra directo.
+  it.skip('5. el cliente pega un enlace de Google Maps: se le pregunta si es ahí y, con su SÍ, sale a GSG', async () => {
     await escribe('51987000002', { text: 'aqui esta https://www.google.com/maps?q=-12.0931,-77.0465' });
     // Un enlace no se da por bueno a ciegas: se le enseña el punto y se espera su SÍ.
     await esperar(() => /Esta es la ubicación de tu enlace/.test(textosA('51987000002')), 10_000, 'la pregunta del enlace');
@@ -265,7 +266,8 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(crm.ubicaciones().filter((l) => l.cuerpo.tracking === 'P-004').length).toBe(2);
   });
 
-  it('8. un segundo pin corrige el primero: GSG recibe el nuevo marcado como corrección', async () => {
+  // Desactualizada: otro pin con la ubicación ya registrada no la cambia; GSG recibe la incidencia cambio_ubicacion (956c298).
+  it.skip('8. un segundo pin corrige el primero: GSG recibe el nuevo marcado como corrección', async () => {
     await escribe('51987000005', { location: { latitude: -12.1, longitude: -77.02 } });
     await esperar(() => crm.ubicaciones().filter((l) => l.cuerpo.tracking === 'P-005').length === 1, 10_000, 'el primer pin de P-005');
     await escribe('51987000005', { location: { latitude: -12.11, longitude: -77.021 } });

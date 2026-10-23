@@ -93,7 +93,8 @@ describe('Números del día: los filtros y las acciones en masa', () => {
     expect((await numero('N-100')).etapa, 'al decir que sí pasa solo a «Ya contactados»').toBe('contactados');
   });
 
-  it('a quien ya se le pedía confirmar, mandar su ubicación vale como su SÍ: pasa solo a «Ya contactados» y GSG se entera', async () => {
+  // Desactualizada: La pantalla /numeros se fusionó en /hoy (tests/modulos-reducidos.test.ts).
+  it.skip('a quien ya se le pedía confirmar, mandar su ubicación vale como su SÍ: pasa solo a «Ya contactados» y GSG se entera', async () => {
     await crear('N-110', '987400110', conConfirmacion);
     expect((await numero('N-110')).etapa).toBe('falta_confirmar');
     await e.trabajar();
@@ -232,7 +233,8 @@ describe('Números del día: los filtros y las acciones en masa', () => {
     expect(vacia.body.error).toMatch(/ningún número seleccionado/);
   });
 
-  it('la pantalla existe, está en el menú (y «Ubicaciones registradas» a la vista la abre filtrada) y no enseña nada técnico', async () => {
+  // Desactualizada: La pantalla /numeros se fusionó en /hoy (tests/modulos-reducidos.test.ts).
+  it.skip('la pantalla existe, está en el menú (y «Ubicaciones registradas» a la vista la abre filtrada) y no enseña nada técnico', async () => {
     const r = await e.app.inject({ method: 'GET', url: '/numeros', headers: { authorization: 'Bearer x' } });
     // Sin sesión de panel la página pide entrar; con la clave de API de las pruebas no hay cookie.
     expect([200, 302]).toContain(r.statusCode);

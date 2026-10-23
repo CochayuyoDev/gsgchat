@@ -121,7 +121,8 @@ describe('las piezas del canal', () => {
 describe('desde la web de la tienda', () => {
   const desde = { origin: ORIGEN_TIENDA, 'content-type': 'application/json' };
 
-  it('otra web no puede usar el chat (403); la de la tienda si, con CORS', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): visitantes web.
+  it.skip('otra web no puede usar el chat (403); la de la tienda si, con CORS', async () => {
     const ajena = await app.inject({ method: 'POST', url: '/web/sesion', headers: { origin: 'https://otra.com', 'content-type': 'application/json' }, payload: {} });
     expect(ajena.statusCode).toBe(403);
     expect(ajena.json().error).toContain('otra.com');
@@ -130,7 +131,8 @@ describe('desde la web de la tienda', () => {
     expect(pre.headers['access-control-allow-origin']).toBe(ORIGEN_TIENDA);
   });
 
-  it('un visitante abre sesion, escribe, el asistente le contesta por el flujo web (no por WhatsApp) y el equipo lo ve en Chats', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): visitantes web.
+  it.skip('un visitante abre sesion, escribe, el asistente le contesta por el flujo web (no por WhatsApp) y el equipo lo ve en Chats', async () => {
     const sesion = await app.inject({ method: 'POST', url: '/web/sesion', headers: desde, payload: { nombre: 'Carla', pagina: `${ORIGEN_TIENDA}/relojes` } });
     expect(sesion.statusCode).toBe(200);
     expect(sesion.headers['access-control-allow-origin']).toBe(ORIGEN_TIENDA);
@@ -180,7 +182,8 @@ describe('desde la web de la tienda', () => {
     expect(otra.json().contactoId).toBe(s.contactoId);
   });
 
-  it('el operador contesta desde Chats y le llega al visitante por el mismo canal', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): visitantes web.
+  it.skip('el operador contesta desde Chats y le llega al visitante por el mismo canal', async () => {
     const sesion = (await app.inject({ method: 'POST', url: '/web/sesion', headers: desde, payload: { nombre: 'Luis' } })).json() as { sesion: string; contactoId: string };
     const r = await app.inject({ method: 'POST', url: '/admin/chat/send', headers: { 'x-api-key': TODO }, payload: { contactId: sesion.contactoId, text: 'Hola Luis, ¿en qué te ayudo?' } });
     expect(r.statusCode).toBe(200);
@@ -191,14 +194,16 @@ describe('desde la web de la tienda', () => {
     expect(hist.json().mensajes[0]).toMatchObject({ direccion: 'negocio', texto: 'Hola Luis, ¿en qué te ayudo?' });
   });
 
-  it('una sesion falsa o caducada no abre nada', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): visitantes web.
+  it.skip('una sesion falsa o caducada no abre nada', async () => {
     expect((await app.inject({ method: 'POST', url: '/web/mensajes', headers: desde, payload: { sesion: 'wvs_falsa.firma', texto: 'x' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/web/historial?sesion=nada', headers: { origin: ORIGEN_TIENDA } })).statusCode).toBe(401);
     const vieja = firmarSesionWeb(secretoDeCanalWeb(config), nuevoIdVisitante(), Date.now() - 40 * 24 * 3600_000);
     expect((await app.inject({ method: 'POST', url: '/web/mensajes', headers: desde, payload: { sesion: vieja, texto: 'x' } })).statusCode).toBe(401);
   });
 
-  it('el widget y la demo se sirven a cualquiera (son publicos), apuntando a este servidor', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): visitantes web.
+  it.skip('el widget y la demo se sirven a cualquiera (son publicos), apuntando a este servidor', async () => {
     const w = await app.inject({ method: 'GET', url: '/web/widget.js' });
     expect(w.statusCode).toBe(200);
     expect(w.body).toContain('var ORIGEN = "http://localhost:3000"');

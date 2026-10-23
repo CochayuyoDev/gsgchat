@@ -94,7 +94,8 @@ async function tienda(opciones: Parameters<typeof crearEscenarioEntregas>[0] = {
 }
 
 describe('pedidos de hoy: tarjeta primero, «Hacerlo» después, lo mismo que la pantalla', () => {
-  it('«asígnale el pedido GSG-IA-001 a Carlos»: sin Hacerlo no cambia nada; con Hacerlo, igual que el botón de Hoy, y a la bitácora', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«asígnale el pedido GSG-IA-001 a Carlos»: sin Hacerlo no cambia nada; con Hacerlo, igual que el botón de Hoy, y a la bitácora', async () => {
     const t = await tienda();
     const enviados = t.wa.sent.length;
     const j = await ordenar(t.app, t.h, 'asígnale el pedido GSG-IA-001 a Carlos', t.dice(bloque({ accion: 'entregas.reasignar', cliente: 'GSG-IA-001', motorizado: 'Carlos' })));
@@ -126,7 +127,8 @@ describe('pedidos de hoy: tarjeta primero, «Hacerlo» después, lo mismo que la
     expect(t.repos._actividad.find((e) => e.accion === 'ia.hecho')).toMatchObject({ usuario: 'Ali', detalle: expect.objectContaining({ bien: 1, mal: 0 }) });
   });
 
-  it('ubicación, entregado y cancelar: antes → después en la tarjeta y el cambio real al pulsar', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('ubicación, entregado y cancelar: antes → después en la tarjeta y el cambio real al pulsar', async () => {
     const t = await tienda();
     const j = await ordenar(
       t.app,
@@ -153,7 +155,8 @@ describe('pedidos de hoy: tarjeta primero, «Hacerlo» después, lo mismo que la
     expect(otra.hechas[0]).toMatchObject({ ok: false, resumen: 'GSG-IA-004 ya está cancelado.' });
   });
 
-  it('orden múltiple: una tarjeta, un solo Hacerlo, en orden; dice cuáles salieron y cuáles no y por qué', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('orden múltiple: una tarjeta, un solo Hacerlo, en orden; dice cuáles salieron y cuáles no y por qué', async () => {
     const t = await tienda();
     const j = await ordenar(t.app, t.h, 'pasa a descanso al motorizado Ali y asígnale el GSG-IA-003 a Ali', t.dice(bloque({ accion: 'motorizados.estado', motorizado: 'Ali', estado: 'descanso' }, { accion: 'entregas.reasignar', cliente: 'GSG-IA-003', motorizado: 'Ali' })));
     expect(j.pendientes).toHaveLength(2);
@@ -169,7 +172,8 @@ describe('pedidos de hoy: tarjeta primero, «Hacerlo» después, lo mismo que la
     expect(t.repos._actividad.find((e) => e.accion === 'ia.hecho')!.detalle).toMatchObject({ bien: 1, mal: 1 });
   });
 
-  it('ambigüedad: dos Carlos → opciones con botones (no adivina); elegir prepara la tarjeta del elegido', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('ambigüedad: dos Carlos → opciones con botones (no adivina); elegir prepara la tarjeta del elegido', async () => {
     const t = await tienda();
     await t.api.post('/admin/motorizados', { telefono: '999000009', nombre: 'Carlos Mendoza' });
     const j = await ordenar(t.app, t.h, 'asígnale el GSG-IA-002 a Carlos', t.dice(bloque({ accion: 'entregas.reasignar', cliente: 'GSG-IA-002', motorizado: 'Carlos' })));
@@ -195,7 +199,8 @@ describe('pedidos de hoy: tarjeta primero, «Hacerlo» después, lo mismo que la
     expect(k.elegir[0].opciones.map((o: Json) => o.etiqueta.split(' · ')[0]).sort()).toEqual(['GSG-IA-001', 'GSG-IA-009']);
   });
 
-  it('las consultas se hacen al momento: pedidos sin ubicación, cuántos entregó Carlos, qué pasó con un pedido', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('las consultas se hacen al momento: pedidos sin ubicación, cuántos entregó Carlos, qué pasó con un pedido', async () => {
     const t = await tienda();
     const sin = await ordenar(t.app, t.h, 'dame los pedidos sin ubicación', t.dice(bloque({ accion: 'entregas.sinUbicacion' }), 'Son 4.'));
     expect(sin.hechas[0]).toMatchObject({ accion: 'entregas.sinUbicacion', tipo: 'consulta', ok: true });
@@ -218,7 +223,8 @@ describe('pedidos de hoy: tarjeta primero, «Hacerlo» después, lo mismo que la
 });
 
 describe('ajustes, textos, números del día y respuestas rápidas', () => {
-  it('«cambia el horario de entrega a 3 PM - 9 PM y sube el margen a 45 minutos»: antes → después; nada cambia hasta Hacerlo', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«cambia el horario de entrega a 3 PM - 9 PM y sube el margen a 45 minutos»: antes → después; nada cambia hasta Hacerlo', async () => {
     const t = await tienda();
     const j = await ordenar(t.app, t.h, 'cambia el horario de entrega a 3 PM - 9 PM y sube el margen a 45 minutos', t.dice(bloque({ accion: 'entregas.ajustes', horario: { desde: '3 PM', hasta: '9 PM' }, margenMinutos: 45 })));
     const tj = j.pendientes[0].tarjeta;
@@ -232,7 +238,8 @@ describe('ajustes, textos, números del día y respuestas rápidas', () => {
     expect(t.entregas.ajustes()).toMatchObject({ margenMinutos: 45, horarioEntregas: { desde: '15:00', hasta: '21:00', extendidoHasta: '22:00' } });
   });
 
-  it('«cambia el texto de ubicación registrada por …»: enseña el de ahora y avisa de las variables que se pierden', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«cambia el texto de ubicación registrada por …»: enseña el de ahora y avisa de las variables que se pierden', async () => {
     const t = await tienda();
     const nuevo = 'Listo {nombre}, ya tenemos tu ubicación. Te escribe el motorizado.';
     const j = await ordenar(t.app, t.h, `cambia el texto de ubicación registrada por "${nuevo}"`, t.dice(bloque({ accion: 'entregas.texto', clave: 'ubicacionRegistrada', texto: nuevo })));
@@ -245,7 +252,8 @@ describe('ajustes, textos, números del día y respuestas rápidas', () => {
     expect(t.entregas.ajustes().textos.ubicacionRegistrada).toBe(nuevo);
   });
 
-  it('permisos por rol: un operador puede cancelar un pedido (su pantalla lo deja) pero no tocar los ajustes; se le dice a quién pedírselo', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('permisos por rol: un operador puede cancelar un pedido (su pantalla lo deja) pero no tocar los ajustes; se le dice a quién pedírselo', async () => {
     const t = await tienda();
     const ope = await t.op();
     const aj = await ordenar(t.app, ope, 'sube el margen a 45 minutos', t.dice(bloque({ accion: 'entregas.ajustes', margenMinutos: 45 }), 'Eso lo cambia un administrador.'));
@@ -265,7 +273,8 @@ describe('ajustes, textos, números del día y respuestas rápidas', () => {
     expect(t.repos._actividad.find((e) => e.accion === 'entrega.cancelar')!.usuario).toBe('Operadora (por la IA)');
   });
 
-  it('«confirma el envío de todos los números del día»: la tarjeta dice cuántos; Hacerlo los suelta como el botón', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«confirma el envío de todos los números del día»: la tarjeta dice cuántos; Hacerlo los suelta como el botón', async () => {
     const t = await tienda({ confirmarLista: true });
     t.simulador.cargar([
       { referencia: 'GSG-N-1', telefono: '51911000001', nombre: 'Uno', faltaUbicacion: true },
@@ -285,7 +294,8 @@ describe('ajustes, textos, números del día y respuestas rápidas', () => {
     expect(await porConfirmar()).toBe(0);
   });
 
-  it('«crea una respuesta rápida /envio con …» (solo admin) y «manda la ruta a Carlos»', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«crea una respuesta rápida /envio con …» (solo admin) y «manda la ruta a Carlos»', async () => {
     const t = await tienda();
     const j = await ordenar(t.app, t.h, 'crea una respuesta rápida /envio con "El envío a Lima cuesta S/ 10"', t.dice(bloque({ accion: 'respuestas.guardar', atajo: '/envio', texto: 'El envío a Lima cuesta S/ 10' })));
     expect(j.pendientes[0].tarjeta).toMatchObject({ que: 'Crear la respuesta rápida /envio', antes: 'no existe', despues: 'El envío a Lima cuesta S/ 10' });
@@ -310,7 +320,8 @@ describe('ajustes, textos, números del día y respuestas rápidas', () => {
     expect(enviadosACarlos()).toBe(antes + 1);
   });
 
-  it('con «Solo lo de GSG» las campañas no se ofrecen ni se hacen: lo dice y ofrece parar todos los envíos', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('con «Solo lo de GSG» las campañas no se ofrecen ni se hacen: lo dice y ofrece parar todos los envíos', async () => {
     const t = await tienda();
     const j = await ordenar(t.app, t.h, 'pausa las campañas', t.dice(bloque({ accion: 'campanas.todas', accionCampana: 'pausar' }), 'En este modo no hay campañas.'));
     expect(j.pendientes).toEqual([]);
@@ -319,7 +330,8 @@ describe('ajustes, textos, números del día y respuestas rápidas', () => {
 });
 
 describe('otra tienda intacta', () => {
-  it('lo que se hace en una tienda no toca la otra, ni con los datos de la primera', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('lo que se hace en una tienda no toca la otra, ni con los datos de la primera', async () => {
     const a = await tienda();
     const b = await tienda();
     const j = await ordenar(a.app, a.h, 'asígnale el pedido GSG-IA-001 a Carlos', a.dice(bloque({ accion: 'entregas.reasignar', cliente: 'GSG-IA-001', motorizado: 'Carlos' })));
@@ -391,7 +403,8 @@ async function tiendaDeChats(): Promise<{ app: FastifyInstance; repos: FakeRepos
 }
 
 describe('chats, mensajes a clientes y modo prueba', () => {
-  it('«cierra el chat de Luis», «apaga el bot en el chat de 912426667» y «mándale a 51912426667: ya salió tu pedido»: una tarjeta, un Hacerlo', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«cierra el chat de Luis», «apaga el bot en el chat de 912426667» y «mándale a 51912426667: ya salió tu pedido»: una tarjeta, un Hacerlo', async () => {
     const t = await tiendaDeChats();
     const luis = await t.repos.contacts.upsertFromInbound('51913000111', 'Luis Huamán');
     await t.repos.messages.add({ contactId: luis.id, direction: 'in', wamid: 'l1', kind: 'text', body: 'hola, ¿y mi pedido?', payload: null, createdAt: new Date() });
@@ -418,7 +431,8 @@ describe('chats, mensajes a clientes y modo prueba', () => {
     expect(t.wa.sent.find((s) => s.kind === 'text')).toMatchObject({ to: '51912426667', body: 'ya salió tu pedido' });
   });
 
-  it('modo prueba: «activa el modo prueba solo con mi número» pide el número si no lo hay; activo, un mensaje a otro número se ve frenado en la tarjeta y NO sale', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('modo prueba: «activa el modo prueba solo con mi número» pide el número si no lo hay; activo, un mensaje a otro número se ve frenado en la tarjeta y NO sale', async () => {
     const t = await tiendaDeChats();
     const sin = await ordenar(t.app, t.h, 'activa el modo prueba solo con mi número', t.dice(bloque({ accion: 'ajustes.modoPrueba', activo: true }), '¿Con qué número?'));
     expect(sin.hechas[0]).toMatchObject({ ok: false, resumen: expect.stringContaining('¿Con qué número?') });
@@ -440,7 +454,8 @@ describe('chats, mensajes a clientes y modo prueba', () => {
     expect(t.wa.sent.find((s) => s.to === '51999111222')).toMatchObject({ body: 'prueba' });
   });
 
-  it('«pausa las campañas» (modo completo) y «programa un mensaje»: tarjeta con cuántos; Hacerlo cambia lo mismo que la pantalla', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«pausa las campañas» (modo completo) y «programa un mensaje»: tarjeta con cuántos; Hacerlo cambia lo mismo que la pantalla', async () => {
     const t = await tiendaDeChats();
     await t.repos.contacts.upsertFromInbound('51987654321', 'Juan');
     await t.repos.contacts.setOptIn('51987654321', 'x');
@@ -484,7 +499,8 @@ describe('piezas', () => {
     expect(horaHHMM('25:00')).toBeNull();
   });
 
-  it('todo cambio del catálogo es «Hacerlo» y lo nuevo está: las acciones del dueño existen', () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('todo cambio del catálogo es «Hacerlo» y lo nuevo está: las acciones del dueño existen', () => {
     const nombres = ACCIONES.map((a) => a.nombre);
     for (const n of ['entregas.reasignar', 'entregas.ubicacion', 'entregas.entregada', 'entregas.cancelar', 'entregas.ajustes', 'entregas.texto', 'entregas.detalle', 'entregas.sinUbicacion', 'numeros.confirmarEnvio', 'numeros.masa', 'motorizados.estado', 'motorizados.mandarRuta', 'motorizados.hoy', 'chat.cerrar', 'chat.atenderPersona', 'mensaje.enviar', 'mensaje.programar', 'ajustes.modoPrueba', 'respuestas.guardar', 'campanas.todas']) expect(nombres).toContain(n);
     expect(new Set(nombres).size).toBe(nombres.length);

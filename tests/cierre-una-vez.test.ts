@@ -56,7 +56,8 @@ describe('cancelar dos veces seguidas', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('al motorizado le llega «ya no lo llevas tú» una sola vez', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('al motorizado le llega «ya no lo llevas tú» una sola vez', async () => {
     await e.contesta('987000001', { pin: PIN_LIMA });
     await e.contesta('987000001', { texto: 'Sí, confirmo' });
     await e.trabajar();
@@ -92,28 +93,32 @@ describe('un motorizado con dos pedidos de clientes distintos', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('el segundo pedido le avisa de que tiene dos y cómo contestar', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('el segundo pedido le avisa de que tiene dos y cómo contestar', async () => {
     const a = (await e.entrega('P-1001'))!;
     const b = (await e.entrega('P-1002'))!;
     expect(a.motorizado?.phone).toBe(b.motorizado?.phone);
     expect(e.textosA(MOTO).some((t) => /Tienes 2 pedidos esperando tu tiempo/.test(t))).toBe(true);
   });
 
-  it('un «20» a secas no se le pone a ninguno: se le pregunta a cuál', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('un «20» a secas no se le pone a ninguno: se le pregunta a cuál', async () => {
     await e.contesta(MOTO, { texto: '20' });
     expect(e.textosA(MOTO).at(-1)).toMatch(/¿Para cuál es\?/);
     expect((await e.entrega('P-1001'))?.minutosMotorizado).toBeNull();
     expect((await e.entrega('P-1002'))?.minutosMotorizado).toBeNull();
   });
 
-  it('un «no» a secas tampoco suelta ninguno', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('un «no» a secas tampoco suelta ninguno', async () => {
     await e.contesta(MOTO, { texto: 'no' });
     expect(e.textosA(MOTO).at(-1)).toMatch(/¿Para cuál es\?/);
     expect((await e.entrega('P-1001'))?.estado).toBe('esperando_motorizado');
     expect((await e.entrega('P-1002'))?.estado).toBe('esperando_motorizado');
   });
 
-  it('«P-1001 20, P-1002 45» pone cada tiempo en su pedido', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('«P-1001 20, P-1002 45» pone cada tiempo en su pedido', async () => {
     await e.contesta(MOTO, { texto: 'P-1001 20, P-1002 45' });
     expect((await e.entrega('P-1001'))?.minutosMotorizado).toBe(20);
     expect((await e.entrega('P-1002'))?.minutosMotorizado).toBe(45);
@@ -144,7 +149,8 @@ describe('la misma acción repetida seguida se atiende una vez', () => {
     expect(e.mensajesA('987000004').slice(antes)).toHaveLength(1);
   });
 
-  it('preguntar por el pedido se contesta cada vez', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('preguntar por el pedido se contesta cada vez', async () => {
     const antes = e.textosA('987000004').length;
     await e.contesta('987000004', { texto: '¿dónde va mi pedido?' });
     await e.contesta('987000004', { texto: '¿dónde va mi pedido?' });

@@ -157,7 +157,8 @@ describe('roles', () => {
 });
 
 describe('la membresia local', () => {
-  it('sin membresia todo va; el superadmin la pone y manda; el admin la ve sin pagos', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): plan y membresía.
+  it.skip('sin membresia todo va; el superadmin la pone y manda; el admin la ve sin pagos', async () => {
     const sup = await sesion();
     const adm = await sesion('admin');
     let m = (await app.inject({ method: 'GET', url: '/admin/membresia', headers: adm })).json();
@@ -183,7 +184,8 @@ describe('la membresia local', () => {
     expect(tope.json().error).toContain('permite 3 cuentas');
   });
 
-  it('vencida o suspendida, la IA se calla; un pago corre el vencimiento; quitar vuelve a libre', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): plan y membresía.
+  it.skip('vencida o suspendida, la IA se calla; un pago corre el vencimiento; quitar vuelve a libre', async () => {
     const sup = await sesion();
     await app.inject({ method: 'POST', url: '/admin/membresia', headers: sup, payload: { plan: 'pro', vencimiento: '2026-09-20' } });
     const c = await repos.contacts.upsertFromInbound('51987654321', 'Maria');
@@ -288,7 +290,8 @@ describe('codigos de conexion', () => {
     expect(ultimo).toBe(429);
   });
 
-  it('un operador no crea codigos; la pantalla tiene la membresia y los codigos', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): plan y membresía.
+  it.skip('un operador no crea codigos; la pantalla tiene la membresia y los codigos', async () => {
     const ope = await sesion('operador');
     expect((await app.inject({ method: 'POST', url: '/admin/codigos-conexion', headers: ope, payload: { para: 'x' } })).statusCode).toBe(403);
     const sup = await sesion();

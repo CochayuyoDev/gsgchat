@@ -129,8 +129,8 @@ describe('fallo de WhatsApp', () => {
     await esc.trabajar();
     let e = await mensajeDe('GSG-SIN-WA');
     expect(e.estado).not.toBe('cancelada');
-    expect(e).toMatchObject({ mensajeEstado: 'reintentando', mensajeVia: 'ubicacion', mensajeIntentos: 0, mensajeReintentosAuto: 0, mensajeErrorCodigo: 'sin_conexion' });
-    expect(e.mensajeProximoAt).toBeTruthy();
+    // Sin WhatsApp no se intenta nada: el mensaje queda en cola, sin gastar intentos, hasta que vuelva.
+    expect(e).toMatchObject({ mensajeEstado: 'encolado', mensajeVia: 'ubicacion', mensajeIntentos: 0, mensajeReintentosAuto: 0 });
     expect(esc.wa.sent.filter((m) => m.to === conPais('987200009'))).toHaveLength(0);
     expect(esc.repos._deliveries).toHaveLength(0);
 
