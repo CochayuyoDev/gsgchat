@@ -88,7 +88,6 @@ async function build() {
     maxMarketingPerContact7d: 2,
   });
   ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
-  await ajustes.guardar({ erroresManuales: [{ id: 'manual-numero', nombre: 'Número ajeno al cliente', activo: true }] });
   const settings = await createFakeSettings(config);
   deps = { repos, wa, sender, config, settings };
   const gsg = crearPuertoGsg({ GSG_URL: `http://127.0.0.1:${mockPort}/api/`, GSG_TOKEN: '', GSG_API_KEY: 'clave-de-prueba-gsg' });
@@ -121,26 +120,13 @@ beforeEach(async () => {
 
 describe('incidencia manual', () => {
   const telefono = '51987654321';
-  const cuerpo = { phone: telefono, tipo: 'manual-numero', tracking: 'GSG-1', resumen: 'El numero no corresponde al cliente' };
+  const cuerpo = { phone: telefono, tipo: 'manual-numero-sin-whatsapp', tracking: 'GSG-1', resumen: 'El numero no corresponde al cliente' };
 
-  it('rechaza errores automáticos, desactivados y eliminados sin enviar a GSG', async () => {
-    for (const tipo of ['sin_whatsapp', 'incidencia-manual', 'manual-inexistente']) {
+  it('rechaza errores automáticos o inventados sin enviar a GSG', async () => {
+    for (const tipo of ['sin_whatsapp', 'incidencia-manual', 'manual-inexistente', 'Número sin WhatsApp']) {
       expect((await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: { ...cuerpo, tipo } })).statusCode).toBe(400);
     }
-    await ajustes.guardar({ erroresManuales: [{ id: 'manual-numero', nombre: 'Número ajeno al cliente', activo: false }] });
-    expect((await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo })).statusCode).toBe(400);
-    await ajustes.guardar({ erroresManuales: [] });
-    expect((await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo })).statusCode).toBe(400);
     expect(recibido).toHaveLength(0);
-  });
-
-  it('conserva el nombre enviado aunque se renombre o elimine el error', async () => {
-    await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
-    await ajustes.guardar({ erroresManuales: [{ id: 'manual-numero', nombre: 'Otro nombre', activo: true }] });
-    await ajustes.guardar({ erroresManuales: [] });
-    const opciones = await app.inject({ url: '/admin/incidencia-manual?phone='+telefono, headers: auth });
-    expect(opciones.json().enviadas[0].tipo).toBe('Número ajeno al cliente');
-    expect(opciones.json().tipos).toEqual([]);
   });
 
   it('exige resumen, calla al bot, encola para GSG y no duplica', async () => {
@@ -153,14 +139,14 @@ describe('incidencia manual', () => {
     expect((await repos.contacts.getByPhone(telefono))?.botPausadoAt).toBeTruthy();
     const cola = await repos.rutas.reportesRecientes(10, 'incidencia');
     expect(cola).toHaveLength(1);
-    expect(cola[0]!.payload).toMatchObject({ tracking: 'GSG-1', codigo: 'Número ajeno al cliente', comentario: cuerpo.resumen });
+    expect(cola[0]!.payload).toMatchObject({ tracking: 'GSG-1', codigo: 'Número sin WhatsApp', comentario: cuerpo.resumen });
 
     const otra = await app.inject({ method: 'POST', url: '/admin/incidencia-manual', headers: auth, payload: cuerpo });
     expect(otra.json()).toMatchObject({ duplicada: true });
     expect(await repos.rutas.reportesRecientes(10, 'incidencia')).toHaveLength(1);
 
     const op = await app.inject({ method: 'GET', url: `/admin/incidencia-manual?phone=${telefono}`, headers: auth });
-    expect(op.json().tipos.map((t: { codigo: string }) => t.codigo)).toEqual(['manual-numero']);
+    expect(op.json().tipos.map((t: { titulo: string }) => t.titulo)).toEqual(['Asignar a otro motorizado', 'Cliente en otro distrito', 'Enviará ubicación después', 'Llegué al punto', 'No conoce el pedido', 'No contesta WSP ni llamadas', 'Número sin WhatsApp', 'Números incorrectos', 'Otro', 'Zona de mayor tarifa']);
   });
 
   it('lo que le llega a GSG: ruta, clave y cuerpo; y el estado queda Enviada', async () => {
@@ -171,10 +157,10 @@ describe('incidencia manual', () => {
     expect(r.metodo).toBe('POST');
     expect(r.url).toBe('/api/reported');
     expect(r.clave).toBe('clave-de-prueba-gsg');
-    expect(r.cuerpo).toMatchObject({ tracking: 'GSG-1', tipo: 'PROBLEMA', motivo: 'OTRO', codigo: 'Número ajeno al cliente', comentario: cuerpo.resumen, telefonoOrigen: '987654321' });
+    expect(r.cuerpo).toMatchObject({ tracking: 'GSG-1', tipo: 'PROBLEMA', motivo: 'OTRO', codigo: 'Número sin WhatsApp', comentario: cuerpo.resumen, telefonoOrigen: '987654321' });
     expect(String(r.cuerpo.eventoId)).toMatch(/^gsgchat-GSG-1-incidencia-manual-/);
     const op = await app.inject({ method: 'GET', url: `/admin/incidencia-manual?phone=${telefono}`, headers: auth });
-    expect(op.json().enviadas[0]).toMatchObject({ estado: 'Enviada', tipo: 'Número ajeno al cliente' });
+    expect(op.json().enviadas[0]).toMatchObject({ estado: 'Enviada', tipo: 'Número sin WhatsApp' });
   });
 
   it('si GSG rechaza, queda Fallida o Pendiente de reintento y se puede reintentar sin duplicar', async () => {

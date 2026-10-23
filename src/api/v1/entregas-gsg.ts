@@ -871,7 +871,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   // El mapa de trackings de un dia: lo que ya se hizo por WhatsApp con cada
   // uno. GSG lo lee cuando quiere; GSGchat nunca se lo empuja.
   app.get('/api/v1/trackings', { config: { permiso: 'entregas:leer' } }, async (request, reply) => {
-    const q = z.object({ dia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).safeParse(request.query ?? {});
+    // `?dia=` vacío es lo mismo que no mandarlo: hoy (así lo dicen el Manual y la colección de Postman).
+    const q = z.object({ dia: z.preprocess((v) => (v === '' ? undefined : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()) }).safeParse(request.query ?? {});
     if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`dia` va como AAAA-MM-DD (por ejemplo 2026-10-10).', [{ campo: 'dia', mensaje: 'AAAA-MM-DD' }]);
     const dia = q.data.dia ?? entregas.diaDeHoy();
     const fichas = await entregas.fichasTrackings(dia);

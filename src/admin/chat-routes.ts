@@ -18,6 +18,7 @@ import { alcanceChat } from '../web/alcance-chat.js';
 import { esperaDeEnvio } from '../rutas/espera-envio.js';
 import { createHash } from 'node:crypto';
 import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
+import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 
 export interface ChatDeps {
@@ -373,8 +374,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * como `codigo` y el resumen como `comentario`.
    */
   const TIPO_MANUAL = 'incidencia-manual';
-  const tiposManuales = () => (deps.ajustes?.actual().erroresManuales ?? [])
-    .filter(e => e.activo).map(e => ({ codigo: e.id, titulo: e.nombre }));
+  const tiposManuales = () => ERRORES_MANUALES_GSG.map(e => ({ codigo: e.codigo, titulo: e.titulo }));
   const trackingDe = (e: { referencia: string; datosEnvio?: { tracking?: string | null } | null }) => e.datosEnvio?.tracking || e.referencia;
 
   /** Los trackings que el cliente tiene GUARDADOS (pedidos vivos y solicitud abierta): la unica fuente de lo que se manda a GSG. */
