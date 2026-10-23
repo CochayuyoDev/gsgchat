@@ -81,8 +81,23 @@ describe('el primer mensaje con los datos del envío de GSG', () => {
   it('sin nombre ni datos queda un mensaje limpio que igual pide la ubicación', () => {
     const t = textoDe('solicitudUbicacion', AJUSTES_ENTREGAS_POR_DEFECTO, { negocio: 'GSG Courier' });
     expect(t.startsWith('¡Hola! Somos GSG Courier, tengo una entrega para ti:')).toBe(true);
-    expect(t).toContain('¿podrías compartir tu ubicación por WhatsApp');
+    expect(t).toContain('comparte tu ubicación actual por WhatsApp');
+    expect(t).toContain('Horario de entrega:');
     expect(t).not.toContain('📦');
+  });
+
+  it('el horario de Pedidos GSG llega al mensaje inicial de ubicación, también con texto personalizado', () => {
+    const horarioEntregas = { ...AJUSTES_ENTREGAS_POR_DEFECTO.horarioEntregas, desde: '08:00', hasta: '10:00', extendidoHasta: '12:00' };
+    const base = { ...AJUSTES_ENTREGAS_POR_DEFECTO, horarioEntregas };
+    const normal = textoDe('solicitudUbicacion', base, { negocio: 'GSG Courier' });
+    expect(normal).toContain('Horario de entrega: de 8 a 10 de la mañana.');
+
+    const personalizado = {
+      ...base,
+      textos: { ...base.textos, solicitudUbicacion: 'Hola {nombre}. Entregamos {horario} ({desde} a {hasta}; extendido hasta {hastaExtendido}).' },
+    };
+    const t = textoDe('solicitudUbicacion', personalizado, { nombre: 'Ana Ruiz', negocio: 'GSG Courier' });
+    expect(t).toBe('Hola Ana. Entregamos de 8 a 10 de la mañana (8:00 AM a 10:00 AM; extendido hasta 12:00 PM).');
   });
 
   it('el cierre lleva el número del motorizado (regla del dueño)', () => {

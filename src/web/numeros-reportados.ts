@@ -9,10 +9,11 @@
  */
 
 export const NUMEROS_REPORTADOS_CSS = `
-  .numeros-reportados { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 14px 18px; margin-top: var(--esp-3); }
+  .numeros-reportados { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); padding: 14px 18px; margin-top: var(--esp-3); }
+  .numeros-reportados .nada { color: var(--texto-suave); font-size: 13.5px; padding: 4px 0 2px; }
   .numeros-reportados h3 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .numeros-reportados .insignia { display: inline-block; min-width: 22px; padding: 1px 8px; border-radius: 999px; background: var(--rojo); color: #fff; font-size: 12px; text-align: center; }
-  .numeros-reportados .insignia.cero { background: var(--gris-claro); color: var(--texto); }
+  .numeros-reportados .insignia.cero { background: var(--gris-suave); color: var(--gris); }
   .numeros-reportados .filtro-reportados { margin-left: auto; font-weight: 400; font-size: 13px; }
   .numeros-reportados .caso { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--borde); }
   .numeros-reportados .caso:last-child { border-bottom: 0; padding-bottom: 0; }

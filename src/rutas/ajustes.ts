@@ -182,6 +182,10 @@ export function rellenarTexto(
     direccion?: string | null;
     distrito?: string | null;
     conBoton?: boolean;
+    horario?: string | null;
+    desde?: string | null;
+    hasta?: string | null;
+    hastaExtendido?: string | null;
   },
 ): string {
   const nombre = (ctx.nombre ?? '').trim().split(/\s+/)[0] || 'buenas tardes';
@@ -197,6 +201,10 @@ export function rellenarTexto(
     .replace(/\{direccion\}/gi, (ctx.direccion ?? '').trim())
     .replace(/\{distrito\}/gi, (ctx.distrito ?? '').trim())
     .replace(/\{como\}/gi, como)
+    .replace(/\{horario\}/gi, (ctx.horario ?? '').trim())
+    .replace(/\{desde\}/gi, (ctx.desde ?? '').trim())
+    .replace(/\{hasta\}/gi, (ctx.hasta ?? '').trim())
+    .replace(/\{hastaExtendido\}/gi, (ctx.hastaExtendido ?? '').trim())
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/ ,/g, ',')
     .trim();

@@ -29,7 +29,9 @@ const OSCURO = `
     --rojo: #f87171; --rojo-suave: rgba(248,113,113,.16);
     --azul: #60a5fa; --azul-suave: rgba(96,165,250,.16);
     --gris: #b3bdb8; --gris-suave: rgba(255,255,255,.07); --gris-claro: #6b7a73;
+    --borde-fuerte: #34463d; --placeholder: #7f948a; --fila-hover: rgba(255,255,255,.03);
     --sombra: 0 1px 2px rgba(0,0,0,.45); --sombra-2: 0 12px 32px rgba(0,0,0,.55);
+    --sombra-hover: 0 4px 14px rgba(0,0,0,.45);
 `;
 
 export const TOKENS_CSS = `
@@ -47,12 +49,20 @@ export const TOKENS_CSS = `
     --rojo: #b91c1c; --rojo-suave: #fde8e8;
     --azul: #1d4ed8; --azul-suave: #e4ecfd;
     --gris: #4b5563; --gris-suave: #edf1ef; --gris-claro: #9aa8a1;
-    --radio: 14px; --radio-sm: 9px;
+    --borde-fuerte: #c8d6cf; --placeholder: #74857d; --fila-hover: #f7faf8;
+    /* Radios: tarjetas (--radio), controles y botones (--radio-sm), etiquetas (--radio-pill). */
+    --radio: 12px; --radio-sm: 8px; --radio-xs: 6px; --radio-pill: 999px;
     --sombra: 0 1px 2px rgba(16,40,30,.05), 0 1px 3px rgba(16,40,30,.04);
+    --sombra-hover: 0 4px 14px rgba(16,40,30,.09);
     --sombra-2: 0 12px 32px rgba(16,40,30,.12);
+    --anillo: 0 0 0 3px var(--primario-suave);
     --esp-1: 4px; --esp-2: 8px; --esp-3: 12px; --esp-4: 16px; --esp-5: 24px; --esp-6: 32px;
     --fuente: "Inter", "Segoe UI Variable Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --fs-h1: 22px; --fs-h2: 17px; --fs-h3: 14.5px; --fs-cuerpo: 14.5px; --fs-small: 12.5px;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    /* Escala de texto: titulo de pagina, seccion, bloque, cuerpo, pequeño y etiqueta. */
+    --fs-h1: 22px; --fs-h2: 17px; --fs-h3: 15px; --fs-cuerpo: 14.5px; --fs-small: 12.5px; --fs-micro: 11.5px;
+    --alto-control: 40px; --alto-control-sm: 34px;
+    --dur: .16s; --curva: cubic-bezier(.2,.7,.2,1);
     /* alias de los nombres que ya usaban las paginas */
     --accent: var(--primario); --accent-ink: var(--primario-texto); --accent-soft: var(--primario-suave);
     --ok: var(--verde); --warn: var(--ambar); --bad: var(--rojo); --info: var(--azul);
@@ -68,8 +78,8 @@ export const TOKENS_CSS = `
   }
   /* Fijado a mano con el boton de la barra de arriba. */
   :root[data-tema="oscuro"] {${OSCURO}}
-  /* El cambio de tema no da un salto: los colores pasan suave. */
-  body, .card, .tarjeta, .s-side, .s-top { transition: background-color .2s ease, border-color .2s ease, color .2s ease; }
+  /* La interfaz es inmediata en todos los equipos; la geometría estática no depende de movimiento. */
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 `;
 
 /**

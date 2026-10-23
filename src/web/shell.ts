@@ -18,11 +18,13 @@ import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
 import { tiendaActual } from '../plataforma/contexto.js';
 import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
+import { SISTEMA_CSS } from './sistema-css.js';
 import { escapeHtml } from './login-page.js';
 import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
 import { VERSION } from '../version.js';
 import { CONSULTAS_JS } from './consultas.js';
+import { FILTRO_TABLA_JS, FILTRO_TABLA_CSS } from './filtro-tabla.js';
 import { EVENTOS_PANEL_JS } from './eventos-panel.js';
 
 export interface ItemMenu {
@@ -107,22 +109,20 @@ export function gsgVigente(): boolean {
  * enciende desde Ajustes.
  */
 export const MENU_GSG: ItemMenu[] = [
-  { id: 'inicio', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Estado de la API, WhatsApp, pedidos y errores.' },
-  { id: 'hoy', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos recibidos por API, solicitudes de ubicación y pendientes de atención.' },
-  { id: 'chats', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
-  { id: 'historial', etiqueta: 'Historial y errores', href: '/panel#historial', icono: 'historial', descripcion: 'Mensajes enviados, entregados y fallidos; reintentos de pedidos.' },
-  { id: 'ia', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
-  { id: 'entrenamiento', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
-  { id: 'conexion', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'QR, WAHA o API de Meta: el número de WhatsApp.' },
-  { id: 'gsg-courier', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'URL y API Key de GSG, envío de ubicaciones y consulta de estado.', soloAdmin: true },
-  { id: 'api-gsgchat', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Nuestro endpoint: dirección, claves API, validar pedidos, últimas recepciones, campos y respuestas.', soloAdmin: true },
-  { id: 'rutas-ajustes', etiqueta: 'Automatización GSG', href: '/automatizacion-gsg', icono: 'ajustes', descripcion: 'Horarios, ritmo y máximo de mensajes de solicitud de ubicación.', soloAdmin: true },
-  { id: 'fiabilidad', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'WhatsApp, API, reconexión, alertas y respaldos.', soloAdmin: true },
-  { id: 'usuarios', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
-  { id: 'configuracion', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre, horario y avisos del sistema.', soloAdmin: true },
-  { id: 'actividad', etiqueta: 'Actividad', href: '/panel#actividad', icono: 'historial', descripcion: 'Registro de acciones del equipo.', soloAdmin: true },
-  { id: 'manual', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Uso de API, WhatsApp y atención de pedidos.' },
-  { id: 'soporte', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
+  { id: 'inicio', seccion: 'Operación', etiqueta: 'Inicio', href: '/panel#inicio', icono: 'inicio', descripcion: 'Conexiones, pedidos y casos que necesitan atención.' },
+  { id: 'hoy', seccion: 'Operación', etiqueta: 'Pedidos GSG', href: '/hoy', icono: 'plantilla', descripcion: 'Pedidos, solicitudes de ubicación y ajustes de mensajes.' },
+  { id: 'chats', seccion: 'Operación', etiqueta: 'Chats', href: '/chat', icono: 'chat', descripcion: 'Conversaciones de WhatsApp y atención humana.' },
+  { id: 'historial', seccion: 'Operación', etiqueta: 'Historial y errores', href: '/panel#historial', icono: 'historial', descripcion: 'Recepciones de la API de GSG y actividad del equipo.' },
+  { id: 'conexion', seccion: 'Configuración', etiqueta: 'Conexión WhatsApp', href: '/setup', icono: 'enchufe', descripcion: 'Vinculación y estado del número de WhatsApp.' },
+  { id: 'gsg-courier', seccion: 'Configuración', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Conexión y reportes de pedidos a GSG.', soloAdmin: true },
+  { id: 'api-gsgchat', seccion: 'Configuración', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Claves y estado de la conexión que recibe pedidos.', soloAdmin: true },
+  { id: 'configuracion', seccion: 'Configuración', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio y supervisor de avisos.', soloAdmin: true },
+  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
+  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
+  { id: 'fiabilidad', seccion: 'Avanzado', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'Estado y diagnóstico de conexiones.', soloAdmin: true },
+  { id: 'usuarios', seccion: 'Avanzado', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
+  { id: 'manual', seccion: 'Ayuda', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Instrucciones para usar GSGchat.' },
+  { id: 'soporte', seccion: 'Ayuda', etiqueta: 'Soporte', href: '/soporte', icono: 'soporte', descripcion: 'Diagnóstico de conexión y errores.' },
 ];
 export const MENU_GSG_DUENO: GrupoMenu = {
   id: 'dueno', etiqueta: 'Superadministración', items: [
@@ -171,6 +171,9 @@ const ICONOS = {
   ayuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
   flujo: '<rect x="3" y="3" width="7" height="6" rx="1.5"/><rect x="14" y="15" width="7" height="6" rx="1.5"/><path d="M6.5 9v4a2 2 0 0 0 2 2H14"/><path d="m12 13 2 2-2 2"/>',
   lista: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  ok: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9.5"/>',
+  alerta: '<path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5"/><path d="M12 17.5h.01"/>',
+  servidor: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
 } as const;
 
 export function icono(nombre: keyof typeof ICONOS, clase = 's-ico'): string {
@@ -199,21 +202,14 @@ const CSS = `
   .chip.tono-rojo { background: var(--rojo-suave); color: var(--rojo); }
   .chip.tono-azul { background: var(--azul-suave); color: var(--azul); }
   .chip.tono-gris { background: var(--gris-suave); color: var(--gris); }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: var(--texto); font: inherit; font-weight: 600; line-height: 1.2; cursor: pointer; text-decoration: none; box-shadow: none; }
-  .btn:hover { border-color: var(--primario); color: var(--primario); }
-  .btn.primario { background: var(--primario); border-color: var(--primario); color: var(--primario-texto); }
-  .btn.primario:hover { background: var(--primario-hover, var(--primario)); border-color: var(--primario-hover, var(--primario)); color: var(--primario-texto); }
-  .btn.secundario { background: var(--primario-suave); border-color: transparent; color: var(--primario); }
-  .btn.peligro { color: var(--rojo); border-color: var(--rojo-suave); background: var(--rojo-suave); }
-  .btn.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
-  .btn.sm { min-height: 34px; padding: 6px 12px; font-size: 13.5px; font-weight: 500; }
-  .btn:disabled { opacity: .55; cursor: default; }
   .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-4); box-shadow: var(--sombra); }
   .vacio { text-align: center; padding: var(--esp-6) var(--esp-4); color: var(--texto-suave); border: 1px dashed var(--borde); border-radius: var(--radio); background: var(--superficie); }
   .vacio h3 { margin: 0 0 6px; font-size: var(--fs-h3); font-weight: 700; color: var(--texto); }
   .vacio p { margin: 0; font-size: var(--fs-cuerpo); line-height: 1.5; max-width: 48ch; margin-inline: auto; }
   .vacio .acciones { display: flex; gap: var(--esp-2); justify-content: center; flex-wrap: wrap; margin-top: var(--esp-4); }
   .vacio .ico { font-size: 28px; line-height: 1; margin-bottom: var(--esp-2); }
+  ${SISTEMA_CSS}
+  ${FILTRO_TABLA_CSS}
   /* En pantallas táctiles, todo lo que se pulsa mide al menos 44 px. */
   @media (max-width: 960px), (pointer: coarse) {
     .btn, .s-boton, .s-menu, .s-salir, .s-plegar, .s-item, .s-content button, .s-content .btn, .s-content select, .s-content input:not([type=checkbox]):not([type=radio]) { min-height: 44px; }
@@ -223,7 +219,7 @@ const CSS = `
 
   /* --- menu lateral ---------------------------------------------------- */
   .s-side { width: 262px; flex: none; background: var(--s-side); border-right: 1px solid var(--s-line);
-    display: flex; flex-direction: column; min-height: 0; transition: width .18s ease; }
+    display: flex; flex-direction: column; min-height: 0;  }
   .s-brand { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 14px; }
   .s-plegar, .s-menu, .s-salir { padding: 0; font: inherit; line-height: 1; box-shadow: none; }
   .s-plegar { width: 30px; height: 30px; border: 0; background: transparent; color: var(--s-muted); border-radius: 8px; cursor: pointer; display: grid; place-items: center; flex: none; }
@@ -233,10 +229,13 @@ const CSS = `
   .s-logo-text { font-weight: 800; font-size: 17px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-logo-text small { color: var(--s-accent); font-weight: 700; font-size: 17px; }
   .s-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 10px 12px; }
-  .s-item { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px; color: var(--s-text); text-decoration: none; font-weight: 500; white-space: nowrap; }
+  .s-item { position: relative; display: flex; align-items: center; gap: 11px; padding: 8px 10px; margin: 1px 0; border-radius: var(--radio-sm); color: var(--s-text); text-decoration: none; font-weight: 500; white-space: nowrap;  }
   .s-item:hover { background: var(--s-hover); }
-  .s-item.activo { background: var(--s-accent-soft); color: var(--s-accent); font-weight: 600; box-shadow: inset 3px 0 0 var(--s-accent); }
-  .s-item .s-ico { flex: none; color: var(--s-muted); }
+  .s-item:hover .s-ico { color: var(--s-text); }
+  /* La seccion abierta: fondo suave, texto y icono en verde y una barra a la izquierda. */
+  .s-item.activo { background: var(--s-accent-soft); color: var(--s-accent); font-weight: 600; }
+  .s-item.activo::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--s-accent); }
+  .s-item .s-ico { flex: none; color: var(--s-muted);  }
   .s-item.activo .s-ico { color: var(--s-accent); }
   .s-item .s-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .s-item.sub { padding: 7px 10px 7px 12px; font-size: 14px; }
@@ -247,9 +246,12 @@ const CSS = `
   .s-buscar input:focus, .s-buscar input:focus-visible { border: 0; outline: 0; box-shadow: none; }
   .s-buscar kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; background: var(--s-kbd); border: 1px solid var(--s-line); border-radius: 5px; padding: 3px 5px; white-space: nowrap; }
   .s-grupo { margin-top: 2px; }
-  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11.5px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit; }
+  /* Cada categoria separada por una linea fina: se ve donde empieza y acaba cada una. */
+  .s-menu-gsg > .s-grupo + .s-grupo { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--s-line); }
+  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit;  }
   .s-grupo-cab:hover { background: var(--s-hover); color: var(--s-text); }
-  .s-grupo-cab .s-ico { width: 16px; height: 16px; transition: transform .15s; }
+  .s-grupo.fijo > .s-grupo-cab { cursor: default; } .s-grupo.fijo > .s-grupo-cab:hover { background: transparent; color: var(--s-muted); } .s-grupo.fijo > .s-grupo-cab .s-ico { display: none; }
+  .s-grupo-cab .s-ico { width: 15px; height: 15px;  }
   .s-grupo-cab .s-ico { transform: rotate(90deg); }
   .s-grupo-items { display: block; padding: 0 0 4px 4px; }
   .s-grupo.cerrado .s-grupo-items { display: none; }
@@ -343,14 +345,14 @@ const CSS = `
   .s-backdrop { display: none; }
   /* Fondo compartido de los cajones "a la derecha" (IA y Ayuda): antes se superponian
      sin avisar y tapaban texto; ahora oscurecen el resto y se cierran al tocar fuera. */
-  .s-panel-fondo { position: fixed; inset: 0; z-index: 79; background: rgba(10,16,20,.4); opacity: 0; visibility: hidden; transition: opacity .18s ease; }
+  .s-panel-fondo { position: fixed; inset: 0; z-index: 79; background: rgba(10,16,20,.4); opacity: 0; visibility: hidden;  }
   .s-panel-fondo.visible { opacity: 1; visibility: visible; }
 
   /* --- la IA operadora: un cajon a la derecha, en todas las pantallas ---- */
   .s-ia-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-weight: 700; font-size: 13.5px; color: var(--s-accent); border-color: var(--s-accent-soft); background: var(--s-accent-soft); }
   .s-ia-boton:hover { color: var(--primario-texto); background: var(--s-accent); }
-  .s-ia { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease, visibility 0s linear .2s; visibility: hidden; pointer-events: none; }
-  .s-ia.abierto { transform: translateX(0); transition: transform .2s ease; visibility: visible; pointer-events: auto; }
+  .s-ia { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%);  visibility: hidden; pointer-events: none; }
+  .s-ia.abierto { transform: translateX(0);  visibility: visible; pointer-events: auto; }
   .s-ia-cab { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--s-line); }
   .s-ia-cab b { font-size: 15px; }
   .s-ia-cab .s-ia-sub { color: var(--s-muted); font-size: 12px; display: block; }
@@ -440,15 +442,15 @@ const CSS = `
   /* --- la ayuda de cada pantalla: un cajon a la derecha, como la IA --- */
   .s-ayuda-boton { width: auto; padding: 0 12px 0 10px; gap: 7px; font-size: 13.5px; white-space: nowrap; flex: none; }
   .s-top-der { flex: none; }
-  .s-ayuda-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease, visibility 0s linear .2s; visibility: hidden; pointer-events: none; }
-  .s-ayuda-panel.abierto { transform: translateX(0); transition: transform .2s ease; visibility: visible; pointer-events: auto; }
+  .s-ayuda-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--s-top); border-left: 1px solid var(--s-line); box-shadow: -18px 0 48px rgba(0,0,0,.16); z-index: 80; display: flex; flex-direction: column; transform: translateX(105%);  visibility: hidden; pointer-events: none; }
+  .s-ayuda-panel.abierto { transform: translateX(0);  visibility: visible; pointer-events: auto; }
   .s-ayuda-cuerpo { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 14px; }
   .s-ayuda-que { color: var(--s-muted); font-size: 13px; line-height: 1.45; margin: 8px 0 12px; }
   .s-ayuda-barra { display: none; color: var(--s-muted); font-size: 12.5px; line-height: 1.45; margin: -4px 0 12px; padding: 8px 10px; border-radius: var(--radio-sm); background: var(--superficie-2); }
   @media (max-width: 960px) { .s-ayuda-barra { display: block; } }
   .s-ayuda-p { border: 1px solid var(--s-line); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
   .s-ayuda-p > button { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: flex-start; gap: 8px; text-align: left; padding: 10px 12px; border: 0; border-radius: 0; background: transparent; color: var(--s-text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: none; filter: none; }
-  .s-ayuda-p > button .s-ico { flex: none; color: var(--s-muted); width: 16px; height: 16px; transition: transform .15s; }
+  .s-ayuda-p > button .s-ico { flex: none; color: var(--s-muted); width: 16px; height: 16px;  }
   .s-ayuda-p.abierto > button .s-ico { transform: rotate(90deg); }
   .s-ayuda-r { display: none; padding: 0 12px 12px; font-size: 13.5px; line-height: 1.5; color: var(--s-text); }
   .s-ayuda-p.abierto .s-ayuda-r { display: block; }
@@ -460,7 +462,7 @@ const CSS = `
   @media (max-width: 960px) { .s-ayuda-boton span { display: none; } .s-ayuda-boton { padding: 0; width: 38px; } .s-buscar-boton { min-width: 0; width: 38px; padding: 0; justify-content: center; } .s-buscar-boton span, .s-buscar-boton kbd { display: none; } }
 
   @media (max-width: 960px) {
-    .s-side { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%); transition: transform .18s ease; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+    .s-side { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%);  box-shadow: 0 10px 40px rgba(0,0,0,.25); }
     .s-app.abierto .s-side { transform: none; }
     .s-app.plegado .s-side { width: 262px; }
     .s-app.plegado .s-logo-text, .s-app.plegado .s-item .s-txt, .s-app.plegado .s-badge, .s-app.plegado .s-buscar input,
@@ -485,9 +487,16 @@ const CSS = `
     .s-nav-movil a.activo::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--s-accent); }
     .s-app.modo-gsg .s-nav-completo, .s-app.modo-completo .s-nav-gsg { display: none; }
     .s-app.sin-nav-movil .s-nav-movil { display: none; }
-    .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none; transition: opacity .18s; }
+    .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none;  }
     .s-app.abierto .s-backdrop { opacity: 1; pointer-events: auto; }
     .s-chip b { display: none; }
+  }
+  /* En el telefono la barra de arriba deja solo el titulo y los botones: sin miga, subtitulo ni señal de la IA. */
+  @media (max-width: 560px) {
+    .s-miga, .s-titulo p, .s-ia-senal { display: none !important; }
+    .s-titulo h1 { font-size: 16px; }
+    .s-top-der { gap: 4px; }
+    .s-boton { width: 36px; height: 36px; }
   }
 `;
 
@@ -537,7 +546,7 @@ const JS = String.raw`
     var ruta = location.pathname;
     document.querySelectorAll('#s-nav-movil a[data-ir]').forEach(function (a) {
       var p = a.getAttribute('data-ir').split('#')[0];
-      var activo = p === ruta || (p === '/hoy' && ruta === '/entregas') || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
+      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
       a.classList.toggle('activo', activo);
     });
   }
@@ -562,6 +571,8 @@ const JS = String.raw`
   /* grupos: todos abiertos; el que se cierre a mano queda cerrado hasta que se vuelva a abrir */
   document.querySelectorAll('.s-grupo').forEach(function (g) {
     var id = g.getAttribute('data-grupo');
+    /* Inicio (Dashboard, Pedidos GSG, Chats) siempre a la vista: no se pliega. */
+    if (id === 'gsg-inicio') { g.classList.add('fijo'); return; }
     var guardado = leer('s-grupo-' + id);
     if (guardado === 'cerrado' || (!guardado && g.hasAttribute('data-cerrado'))) g.classList.add('cerrado');
     g.querySelector('.s-grupo-cab').onclick = function () {
@@ -590,7 +601,8 @@ const JS = String.raw`
     /* el editor y las corridas son parte de Procesos */
     if (!activo && ruta.indexOf('/procesos/') === 0) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/procesos"]');
     /* /entregas y /hoy son la misma pantalla */
-    if (!activo && (ruta === '/entregas' || ruta === '/hoy')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
+    /* la solicitud de ubicación y sus ajustes son pestañas de Pedidos GSG */
+    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
     items.forEach(function (a) { a.classList.toggle('activo', a === activo); });
     var miga = document.getElementById('s-miga');
     if (activo) {
@@ -783,7 +795,7 @@ const JS = String.raw`
     var p = String(n || '').trim().split(/\s+/);
     return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase();
   }
-  fetch('/admin/yo', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (u) {
+  window.obtenerUsuarioPanel().then(function (u) {
     if (!u) return;
     window.__yo = u;
     document.querySelectorAll('.s-avatar').forEach(function (a) { a.textContent = iniciales(u.nombre); });
@@ -1149,6 +1161,27 @@ const JS = String.raw`
     }).catch(function () {});
   };
 
+  /* El siguiente paso de un error del servidor, por su codigo. El motivo lo
+     sigue diciendo el propio error; esto solo añade que hacer ahora. */
+  var PASOS_ERROR = {
+    VALIDACION: 'Revisa el campo que indica el mensaje y vuelve a guardar.',
+    JSON_INVALIDO: 'Revisa comillas, comas y llaves del texto pegado.',
+    SIN_PERMISO: 'Pide a un administrador que te dé acceso.',
+    NO_EXISTE: 'Actualiza la pantalla: puede que otra persona ya lo haya cambiado.',
+    CONFLICTO: 'Actualiza la pantalla y vuelve a intentarlo.',
+    ESPERA_CONFIRMACION: 'Confírmalo antes en Pedidos GSG con «Confirmar y enviar».',
+    MENSAJE_EN_CURSO: 'Espera unos segundos: se está enviando ahora mismo.',
+    DEMASIADAS_PETICIONES: 'Espera un momento y vuelve a intentarlo.',
+    BASE_NO_DISPONIBLE: 'Espera unos segundos y vuelve a intentarlo; no se perdió nada.',
+    ERROR_INTERNO: 'Vuelve a intentarlo. Si sigue, avísalo en Soporte con la hora.',
+    PAGO_REQUERIDO: 'Revisa la membresía en Ajustes.'
+  };
+  window.siguientePaso = function (err) {
+    if (!err) return '';
+    if (err.status === 0) return 'Revisa la conexión a internet y vuelve a intentarlo.';
+    return PASOS_ERROR[err.codigo] || '';
+  };
+
   window.shellTitulo = function (titulo, sub) {
     document.getElementById('s-h1').textContent = titulo;
     document.getElementById('s-sub').textContent = sub || '';
@@ -1196,8 +1229,8 @@ export function appShell(opts: ShellOpts): string {
     ...visiblesGsg.filter((i) => !i.seccion).map((i) => itemHtml(i, false)),
     ...secciones.map((sec) => {
       const items = visiblesGsg.filter((i) => i.seccion === sec);
-      // Sin la plantilla de GSG, los procesos son lo del dia a dia: esa seccion nace abierta.
-      const cerrada = !(sec === 'Procesos' && !conGsg);
+      // La operación diaria queda visible; configuración, avanzado y ayuda empiezan plegados.
+      const cerrada = sec !== 'Operación';
       return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}"${cerrada ? ' data-cerrado="1"' : ''}>
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(sec)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
@@ -1206,8 +1239,8 @@ export function appShell(opts: ShellOpts): string {
       </div>`;
     }),
   ].join('\n      ');
-  // El pie del celular: las cuatro pantallas del dia. Con las entregas de courier, las de siempre; si no, las de los procesos.
-  const pieGsg = '<a href="/hoy" data-ir="/hoy">' + icono('plantilla') + '<span>Pedidos</span></a><a href="/chat" data-ir="/chat">' + icono('chat') + '<span>Chats</span></a><a href="/salud" data-ir="/salud">' + icono('salud') + '<span>Salud</span></a>';
+  // En móvil quedan a mano las dos tareas cotidianas y el acceso al menú completo.
+  const pieGsg = '<a href="/hoy" data-ir="/hoy">' + icono('plantilla') + '<span>Pedidos</span></a><a href="/chat" data-ir="/chat">' + icono('chat') + '<span>Chats</span></a>';
   const dueno = `<div class="s-grupo" data-grupo="${MENU_GSG_DUENO.id}" data-solo-super-grupo="1" data-cerrado="1">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(MENU_GSG_DUENO.etiqueta)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
@@ -1292,7 +1325,7 @@ ${TEMA_SCRIPT}
         <a class="s-chip" href="/panel#mi-cuenta" title="Mi cuenta"><div class="s-avatar">?</div><b id="s-chip-nombre"></b></a>
       </div>
     </header>
-    <div class="s-content${opts.lleno ? ' lleno' : ''}" id="s-content">
+    <div class="s-content${opts.lleno ? ' lleno' : ' s-base'}" id="s-content">
 ${opts.contenido}
     </div>
     <nav class="s-nav-movil" id="s-nav-movil" aria-label="Ir a">
@@ -1325,6 +1358,7 @@ ${opts.contenido}
 </div>
 <script>
 ${CONSULTAS_JS}
+${FILTRO_TABLA_JS}
 ${EVENTOS_PANEL_JS}
 ${DIALOGO_JS}
 ${DIALOGO_ELEGIR_JS}

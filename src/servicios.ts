@@ -34,6 +34,7 @@ import type { Politica } from './salud/politica.js';
 import type { ServicioAjustes } from './ajustes/generales.js';
 import type { ServicioStickers } from './stickers/stickers.js';
 import { startScheduler } from './automation/engine.js';
+import { ventanaDeEntrega } from './entregas/horario-distrito.js';
 
 import { startArchiveSweeper } from './archive/service.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
@@ -135,6 +136,12 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     opciones: opcionesDesdeConfig(config),
     nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
     horarioExtra: () => (entregas ? { desde: entregas.ajustes().horarioEntregas.desde, hasta: entregas.ajustes().horarioEntregas.extendidoHasta } : null),
+    horarioMensaje: (pedido) => {
+      if (!entregas) return null;
+      const ajustesEntrega = entregas.ajustes();
+      const ventana = ventanaDeEntrega(pedido, ajustesEntrega);
+      return { desde: ventana.desde, hasta: ventana.hasta, extendidoHasta: ventana.extendidoHasta };
+    },
     stickers,
     usarPlantilla: () => providerOf(settings.current()) === 'cloud',
     // Boton nativo de ubicacion: la Cloud API lo tiene; el cliente no oficial

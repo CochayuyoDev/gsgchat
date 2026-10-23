@@ -85,7 +85,7 @@ const CSS = `
   .caja > h2 .cab { display: flex; align-items: center; gap: var(--esp-2); width: 100%; padding: var(--esp-3) var(--esp-4); font: inherit; color: inherit; flex-wrap: wrap; }
   .caja > h2 button.cab { border: 0; background: transparent; text-align: left; cursor: pointer; }
   .caja > h2 button.cab:hover { color: var(--primario); }
-  .caja > h2 .flecha { transition: transform .15s; }
+  .caja > h2 .flecha {  }
   .caja.cerrada > h2 .flecha { transform: rotate(-90deg); }
   .caja.cerrada .cuerpo { display: none; }
   .caja .cuerpo { padding: var(--esp-4); }
@@ -126,11 +126,11 @@ const CSS = `
   /* --- trabajos largos: la barra dice siempre por donde va -------------- */
   .progreso { margin: var(--esp-2) 0; }
   .progreso .barra { height: 10px; background: var(--superficie-2); border: 1px solid var(--borde); border-radius: 999px; overflow: hidden; }
-  .progreso .barra i { display: block; height: 100%; background: var(--primario); transition: width .4s; }
+  .progreso .barra i { display: block; height: 100%; background: var(--primario);  }
   .progreso .barra.mal i { background: var(--rojo); }
-  .progreso .barra.indef i { width: 35%; animation: desliza 1.2s linear infinite; }
-  @keyframes desliza { from { margin-left: -35%; } to { margin-left: 100%; } }
-  @media (prefers-reduced-motion: reduce) { .progreso .barra.indef i { animation: none; width: 100%; } }
+  .progreso .barra.indef i { width: 35%;  }
+
+  @media (prefers-reduced-motion: reduce) { .progreso .barra.indef i {  width: 100%; } }
   .progreso .texto { display: flex; gap: var(--esp-2); align-items: center; flex-wrap: wrap; margin-top: var(--esp-1); font-size: var(--fs-small); color: var(--texto-suave); }
 
   .porcentaje { font-weight: 700; }
@@ -489,7 +489,7 @@ el('tarjetas').addEventListener('click', function (ev) {
   el('f-examen').value = f.get('examen') || '';
   pagina = 1;
   intentar(cargarLecciones);
-  el('caja-lecciones').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el('caja-lecciones').scrollIntoView({ behavior: 'auto', block: 'start' });
 });
 
 function abrirCaja(id) {
@@ -497,7 +497,7 @@ function abrirCaja(id) {
   caja.classList.remove('cerrada');
   var b = caja.querySelector('.plegador');
   if (b) b.setAttribute('aria-expanded', 'true');
-  caja.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  caja.scrollIntoView({ behavior: 'auto', block: 'start' });
 }
 
 /* ------------------------------------------------------ trabajos largos */
@@ -780,7 +780,7 @@ el('filas').addEventListener('click', function (ev) {
     intentar(cargarLecciones);
     return;
   }
-  if (b.id === 'ir-ensenar') { el('e-pregunta').focus(); el('e-pregunta').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  if (b.id === 'ir-ensenar') { el('e-pregunta').focus(); el('e-pregunta').scrollIntoView({ behavior: 'auto', block: 'center' }); return; }
   if (b.id === 'reintentar') { location.reload(); return; }
   if (b.hasAttribute('data-mas')) { abrirMasMenu(b); return; }
   accionDeLeccion(b);

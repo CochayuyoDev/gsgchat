@@ -40,6 +40,7 @@ import { ajustesPorDefecto, ajustesSchema, aplicarAjustes, conFranjaDeLaPolitica
 import { PLANTILLAS, textoLibre, type PasoUbicacion } from '../rutas/mensajes.js';
 import type { Monitor } from '../salud/monitor.js';
 import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
+import { horaEnPalabras, horarioEnPalabras } from '../entregas/textos.js';
 import { esperaDeEnvio, limpiarEsperasEnvio } from '../rutas/espera-envio.js';
 import { alCambiarHorario, despertarMotorRutas } from '../rutas/despertador.js';
 
@@ -56,6 +57,8 @@ export interface RutasRoutesDeps {
   usaPlantillas?: () => boolean;
   /** Si el mensaje puede llevar el boton nativo de ubicacion. */
   conBoton?: () => boolean;
+  /** Horario de entrega vigente en Pedidos GSG; se usa también en las vistas previas. */
+  horarioMensaje?: (pedido: Pick<Solicitud, 'distrito' | 'direccion'>) => { desde: string; hasta: string; extendidoHasta?: string } | null;
   /** Como se llama el negocio ahora mismo. */
   nombreNegocio?: () => string;
   /** La lista de envio automatico: un numero que entra en un lote sale de ella (el reparto se lo queda). */
@@ -301,7 +304,8 @@ export async function registerRutasRoutes(
     const conBoton = deps.conBoton?.() ?? usaPlantillas;
     const negocio = deps.nombreNegocio?.() ?? opciones.negocio;
     const ejemplo = { nombre: 'Ana Ruiz', pedido: 'P-1024', negocio, tienda: 'Mass', producto: 'Zapatillas talla 40', direccion: 'Av. Larco 123', distrito: 'Miraflores', como: conBoton ? 'con el botón de aquí abajo' : 'desde el clip 📎 → Ubicación → Enviar tu ubicación actual' };
-    const ctx = { nombre: ejemplo.nombre, referencia: ejemplo.pedido, negocio, tienda: ejemplo.tienda, producto: ejemplo.producto, direccion: ejemplo.direccion, distrito: ejemplo.distrito, conBoton };
+    const horario = deps.horarioMensaje?.(ejemplo);
+    const ctx = { nombre: ejemplo.nombre, referencia: ejemplo.pedido, negocio, tienda: ejemplo.tienda, producto: ejemplo.producto, direccion: ejemplo.direccion, distrito: ejemplo.distrito, ...(horario ? { desde: horaEnPalabras(horario.desde), hasta: horaEnPalabras(horario.hasta), hastaExtendido: horario.extendidoHasta ? horaEnPalabras(horario.extendidoHasta) : undefined, horario: horarioEnPalabras(horario.desde, horario.hasta) } : {}), conBoton };
     const textosDeSiempre = Object.fromEntries(PASOS.map((p) => [p, textoLibre(p as PasoUbicacion, ctx)]));
     return {
       ajustes,
@@ -314,7 +318,7 @@ export async function registerRutasRoutes(
       plantillas,
       // Como se rellenan las plantillas propias: en orden, y solo las que tenga.
       variablesPropias: ['{{1}} nombre del cliente', '{{2}} pedido o guia', '{{3}} nombre del negocio'],
-      placeholders: ['{nombre}', '{pedido}', '{negocio}', '{tienda} (= la tienda del pedido de GSG; si no viene, "la tienda")', '{producto} (= el producto del pedido de GSG; si no viene, no sale)', '{direccion}', '{distrito}', '{como} (= "con el botón de aquí abajo" o "desde el clip 📎 → Ubicación...", según haya botón)'],
+      placeholders: ['{nombre}', '{pedido}', '{negocio}', '{tienda} (= la tienda del pedido de GSG; si no viene, "la tienda")', '{producto} (= el producto del pedido de GSG; si no viene, no sale)', '{direccion}', '{distrito}', '{horario}, {desde}, {hasta}, {hastaExtendido} (= los ajustes de entrega en Pedidos GSG)', '{como} (= "con el botón de aquí abajo" o "desde el clip 📎 → Ubicación...", según haya botón)'],
     };
   });
 

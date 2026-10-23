@@ -45,6 +45,11 @@ export const CONSULTAS_JS = String.raw`
     pendientes.set(url, consulta);
     return consulta;
   };
+  var usuarioCompartido = null;
+  window.obtenerUsuarioPanel = function () {
+    if (!usuarioCompartido) usuarioCompartido = window.leerPanel('/admin/yo').catch(function (error) { usuarioCompartido = null; throw error; });
+    return usuarioCompartido;
+  };
   window.sondearPanel = function (tarea, intervalo, inmediato) {
     var reloj = null, trabajando = false, detenido = false;
     function programar() {

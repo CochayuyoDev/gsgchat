@@ -28,32 +28,56 @@
 
 import { appShell } from './shell.js';
 import { REPARTO_CSS, REPARTO_JS } from './reparto-comun.js';
+import { PESTANAS_PEDIDOS_CSS, PESTANAS_PEDIDOS_JS, pestanasPedidosHtml } from './pestanas-pedidos.js';
 
 const CSS = `${REPARTO_CSS}
+.ref-pedido { white-space: nowrap; font-weight: 600; }
+/* Detalle de un cliente */
+.d-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.d-nombre { font-size: 17px; }
+.d-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 0 0 10px; }
+.d-meta span { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--gris-suave); font-size: 13.5px; overflow-wrap: anywhere; }
+.d-meta small { font-size: 11.5px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
+.d-dir { margin: 0 0 10px; font-size: 13.5px; color: var(--texto-suave); }
+.d-titulo { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); margin: 16px 0 8px; }
+.d-bloque { margin-top: 6px; padding: 4px 12px 12px; border: 1px solid var(--borde); border-radius: 10px; }
+.d-bloque .d-titulo { margin-top: 10px; }
+.d-bloque .campo label { font-size: 13px; font-weight: 600; }
+.d-acciones { gap: 8px; flex-wrap: wrap; }
+.d-peligro { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--borde); }
+.d-peligro .btn { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 35%, transparent); }
+.d-peligro .btn:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
+.d-linea { list-style: none; margin: 0 0 0 6px !important; padding: 0 0 0 16px !important; border-left: 2px solid var(--borde); display: grid; gap: 10px; }
+.d-linea li { position: relative; font-size: 13.5px; padding: 0 !important; border: none !important; }
+.d-linea li::before { content: ''; position: absolute; left: -23px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--primario); border: 2px solid var(--superficie); }
+.d-linea .cuando { font-weight: 600; color: var(--texto); }
+/* Enviar a GSG */
+.g-estado { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.g-destino { font-size: 13px; color: var(--texto-suave); overflow-wrap: anywhere; }
+.g-nota { margin: 0 0 12px; font-size: 13px; }
+.g-cifras { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.g-cifra { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--gris-suave); }
+.g-cifra b { font-size: 22px; line-height: 1.1; }
+.g-cifra span { font-size: 12.5px; color: var(--texto-suave); }
+.g-cifra.g-verde b { color: var(--verde); }
+.g-cifra.g-ambar { background: var(--ambar-suave); } .g-cifra.g-ambar b { color: var(--ambar); }
+.g-cifra.g-rojo { background: var(--rojo-suave); } .g-cifra.g-rojo b { color: var(--rojo); }
+.g-botones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.wrap.modo-ajustes > :not(.pp-pestanas):not(#caja-ajustes):not(.demo):not(.aviso) { display: none !important; }
   * { box-sizing: border-box; }
   .wrap { color: var(--texto); font: var(--fs-cuerpo)/1.5 var(--fuente); }
-  .wrap a { color: var(--primario); }
 
   /* Los dos avisos de arriba (demostración y WhatsApp sin conectar) hablan
      igual: fondo ámbar suave y texto ámbar, que pasa AA en los dos modos. */
-  .demo, .aviso {
-    background: var(--ambar-suave); color: var(--ambar);
-    border: 1px solid var(--ambar-suave); border-radius: var(--radio-sm);
-    padding: 10px 14px; margin-bottom: var(--esp-3); font-size: var(--fs-small);
-    display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap;
-  }
-  .demo { justify-content: center; text-align: center; }
-  .demo a, .aviso a { color: inherit; font-weight: 700; }
+  .demo, .aviso { margin-bottom: var(--esp-3); flex-wrap: wrap; }
+  .demo a, .aviso a { font-weight: 700; }
 
   .barra { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; padding: var(--esp-3); margin-bottom: var(--esp-3); }
   .barra .sep { flex: 1; }
   .barra label { font-size: var(--fs-small); color: var(--texto-suave); }
 
-  .wrap select, .wrap input, .wrap textarea {
-    font: inherit; color: var(--texto); background: var(--superficie);
-    border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 8px 11px;
-  }
-  .wrap textarea { width: 100%; min-height: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  .wrap textarea { width: 100%; min-height: 150px; font-family: var(--mono); font-size: 13px; }
+  .barra select { min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; }
 
   /* Cuánto va y qué está haciendo el motor: la única cifra grande. */
   .progreso { display: flex; align-items: center; gap: var(--esp-3); flex-wrap: wrap; margin-bottom: var(--esp-3); }
@@ -61,23 +85,27 @@ const CSS = `${REPARTO_CSS}
   .cifra b { color: var(--texto); font-size: 21px; font-weight: 700; }
   .cifra:hover b { color: var(--primario); }
   .progreso-barra { flex: 1; min-width: 180px; height: 8px; border-radius: 999px; background: var(--superficie-2); overflow: hidden; }
-  .progreso-barra > span { display: block; height: 100%; background: var(--verde); transition: width .3s; }
+  .progreso-barra > span { display: block; height: 100%; background: var(--verde);  }
   .motor { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-small); color: var(--texto-suave); }
   .motor .punto { width: 9px; height: 9px; border-radius: 50%; background: var(--gris-claro); flex: none; }
-  .motor.va .punto { background: var(--verde); animation: latido 1.6s ease-in-out infinite; }
+  .motor.va .punto { background: var(--verde);  }
   .motor.espera .punto { background: var(--ambar); }
-  @keyframes latido { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+
   .fallo { color: var(--rojo); font-size: var(--fs-small); }
 
   /* Los filtros: preguntas de la operación, no adornos. */
   .filtros { display: flex; gap: var(--esp-2); flex-wrap: wrap; margin-bottom: var(--esp-3); }
+  /* Los mismos contadores que la pestaña Pedidos: texto y cifra en su pastilla. */
   .filtro {
-    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 13px;
+    display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 5px 12px;
     border: 1px solid var(--borde); border-radius: 999px; background: var(--superficie);
-    color: var(--texto); font: inherit; font-size: 13.5px; cursor: pointer;
+    color: var(--texto); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer;
+
   }
-  .filtro:hover { border-color: var(--primario); }
-  .filtro .n { font-weight: 700; }
+  .filtro:hover { border-color: var(--texto-suave); }
+  .filtro .n { font-weight: 700; font-size: 13px; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--superficie-2); text-align: center; font-variant-numeric: tabular-nums; }
+  .filtro[aria-pressed="true"] .n { background: var(--primario); color: var(--primario-texto); }
+  .filtro.urge .n { background: var(--rojo-suave); }
   .filtro[aria-pressed="true"] { border-color: var(--primario); background: var(--primario-suave); color: var(--primario); font-weight: 600; }
   .filtro.urge { border-color: var(--rojo); color: var(--rojo); }
   .filtro.urge[aria-pressed="true"] { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
@@ -89,22 +117,35 @@ const CSS = `${REPARTO_CSS}
      relleno lo pone cada zona, no la tarjeta. */
   .panel { padding: 0; overflow: hidden; }
   .panel > h2 {
-    font-size: var(--fs-h3); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--borde);
-    display: flex; align-items: center; gap: var(--esp-2);
+    font-size: var(--fs-h3); margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--borde);
+    display: flex; align-items: center; gap: var(--esp-2); background: var(--superficie);
   }
   .panel > h2 .sep { flex: 1; }
+  .panel > h2 input { font-weight: 400; font-size: 13.5px; min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; }
   .panel .cuerpo { padding: var(--esp-4); }
   .panel .vacio { border: 0; background: transparent; }
 
   table { width: 100%; border-collapse: collapse; font-size: var(--fs-cuerpo); }
   th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .03em; color: var(--texto-suave); font-weight: 600; position: sticky; top: 0; background: var(--superficie); z-index: 1; }
+  th { position: sticky; top: 0; z-index: 1; }
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: var(--superficie-2); }
   tbody tr.activa { background: var(--primario-suave); box-shadow: inset 3px 0 0 var(--primario); }
   td b { font-weight: 600; }
   td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
   .tabla-scroll { max-height: 62vh; overflow: auto; }
+  .filtro-dia { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--borde); }
+  .fd-fila { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .fd-fila #buscar { flex: 1 1 260px; max-width: 380px; min-height: var(--alto-control-sm); }
+  .fd-fila .s-segmento { flex: none; }
+  .fd-fila #f-estado { flex: 0 1 210px; min-height: var(--alto-control-sm); }
+  .fd-resumen button { border: 0; background: none; color: var(--primario); font: inherit; font-weight: 600; cursor: pointer; padding: 0; text-decoration: underline; }
+  .fd-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; padding: 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
+  .fd-campos[hidden] { display: none; }
+  .fd-campos label { display: grid; gap: 4px; font-size: var(--fs-micro); color: var(--texto-suave); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
+  .fd-campos input, .fd-campos select { width: 100%; min-height: var(--alto-control-sm); font-weight: 400; font-size: 13.5px; color: var(--texto); text-transform: none; letter-spacing: 0; }
+  .fd-resumen { margin: 0; font-size: var(--fs-small); }
+  .fd-resumen:empty { display: none; }
 
   .campo { margin-bottom: var(--esp-3); }
   .campo label { display: block; font-size: var(--fs-small); color: var(--texto-suave); margin-bottom: 4px; }
@@ -132,15 +173,38 @@ const CSS = `${REPARTO_CSS}
   .resumen-carga .linea { padding: 4px 0; border-bottom: 1px dashed var(--borde); }
 
   /* Ajustes: frases con huecos, no un formulario de casillas sueltas. */
-  .aj .aj-titulo { font-size: var(--fs-h3); margin: 18px 0 4px; }
+  .aj .aj-titulo { font-size: var(--fs-h3); margin: 0 0 2px; display: flex; align-items: center; gap: 10px; }
+  .aj .aj-intro { margin: 0 0 16px; padding: 12px 14px; border-radius: 10px; background: var(--primario-suave); line-height: 1.6; }
+  .aj .aj-intro span { display: block; margin-top: 4px; font-size: 13.5px; color: var(--texto-suave); }
+  .aj .aj-bloques { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .aj .aj-bloque { border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; background: var(--superficie); min-width: 0; }
+  .aj .aj-ancho { grid-column: 1 / -1; }
+  .aj .aj-paso { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--primario); color: var(--primario-texto); font-size: 13px; font-weight: 700; flex: none; }
+  .aj .aj-que { margin: 0 0 8px 36px; font-size: 13.5px; color: var(--texto-suave); }
+  /* Guardar siempre a la vista, a la derecha; «Volver a lo de siempre» es secundario. */
+  .aj .aj-guardar-barra { position: sticky; bottom: 0; margin-top: 14px; padding: 12px 0; background: var(--superficie); border-top: 1px solid var(--borde); z-index: 2; justify-content: flex-end; }
+  .aj .aj-guardar-barra #aj-estado { order: -1; margin-right: auto; flex: 1 1 auto; }
+  .aj .aj-guardar-barra #aj-guardar { order: 2; min-width: 120px; }
+  @media (max-width: 860px) { .aj .aj-bloques { grid-template-columns: 1fr; } .aj .aj-que { margin-left: 0; } }
   .aj .aj-frase { margin: 0; line-height: 2.1; font-size: var(--fs-cuerpo); }
   .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
   .aj .paso { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-2); background: var(--superficie-2); }
   .aj .paso h4 { margin: 0 0 6px; font-size: var(--fs-h3); }
+  /* Cada seguimiento: un solo texto. */
+  #aj-pasos-adicionales .paso { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px var(--esp-4); }
+  #aj-pasos-adicionales .variante[hidden] { display: none; }
+  #aj-pasos-adicionales .paso > h4, #aj-pasos-adicionales .paso > [data-quitar-adicional] { grid-column: 1 / -1; }
+  #aj-pasos-adicionales .paso > [data-quitar-adicional] { justify-self: end; }
+  #aj-pasos-adicionales .variante { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; border-radius: var(--radio-sm); background: var(--superficie); border: 1px solid var(--borde); }
+  #aj-pasos-adicionales .variante h5 { margin: 0 0 6px; font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); }
+  #aj-pasos-adicionales .variante .previa { flex: 1; }
+  @media (max-width: 900px) { #aj-pasos-adicionales .paso { grid-template-columns: minmax(0, 1fr); } }
   .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
   .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
+  .aj .previa .previa-msg + .previa-msg { margin-top: 8px; padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--verde) 35%, transparent); }
+  .aj .previa .previa-n { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--texto-suave); margin-bottom: 2px; }
   .aj .previa small { display: block; color: var(--texto-suave); font-size: 11px; margin-top: 4px; text-align: right; }
-  .aj .paso textarea { margin-top: 8px; min-height: 64px; }
+  .aj .paso textarea { margin-top: 8px; min-height: 64px; font-family: var(--fuente); font-size: 14px; }
   .aj .marcadores { font-size: var(--fs-small); color: var(--texto-suave); margin: 6px 0 0; }
   .aj .marcadores code { background: var(--superficie); border: 1px solid var(--borde); border-radius: 5px; padding: 1px 5px; font-size: 12px; cursor: pointer; }
   .aj-intro { margin: 0; padding: 12px 14px; border-radius: var(--radio-sm); background: var(--superficie-2); color: var(--texto-suave); }
@@ -171,7 +235,12 @@ const CSS = `${REPARTO_CSS}
     thead { display: none; }
     tbody tr { display: block; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
     tbody tr.activa { box-shadow: inset 3px 0 0 var(--primario); }
-    tbody td { display: block; border: 0; padding: 1px 0; }
+    .wrap tbody td { display: block; border: 0; padding: 1px 0; }
+    .wrap tbody tr:last-child { border-bottom: 0; }
+    /* Los filtros, en una fila que se desliza con el dedo. */
+    .filtros { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-left: -16px; margin-right: -16px; padding: 0 16px 2px; }
+    .filtros::-webkit-scrollbar { display: none; }
+    .filtro { flex: none; }
     tbody td:empty { display: none; }
   }
 `;
@@ -186,17 +255,18 @@ export function rutasPage(opts: RutasOpts): string {
   const { configured, demo = false } = opts;
   /** Ver el mismo aviso en `chat-page.ts`: aqui no sale ningun mensaje. */
   const bandaDemo = demo
-    ? `<div class="demo">Modo demostración: no se envía nada a ningún cliente.
+    ? `<div class="demo s-alerta info">Modo demostración: no se envía nada a ningún cliente.
          Para trabajar de verdad, conecta tu cuenta en <a href="/setup">/setup</a>.</div>`
     : '';
 
   const aviso = configured
     ? ''
-    : `<div class="aviso">Todavía no conectaste tu WhatsApp: puedes cargar la lista y revisarla, pero no saldrá ningún mensaje.
+    : `<div class="aviso s-alerta warn">Todavía no conectaste tu WhatsApp: puedes cargar la lista y revisarla, pero no saldrá ningún mensaje.
          <a href="/setup">Conectar ahora</a></div>`;
 
   const contenido = `
 <div class="wrap">
+  ${pestanasPedidosHtml()}
   ${bandaDemo}
   ${aviso}
 
@@ -206,35 +276,38 @@ export function rutasPage(opts: RutasOpts): string {
     <button type="button" class="btn primario sm" id="arrancar">Empezar a pedir</button>
     <button type="button" class="btn sm" id="pausar">Pausar</button>
     <span class="sep"></span>
-    <button type="button" class="btn sm" id="abrir-ajustes">Ajustes</button>
     <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
   </div>
 
-  <!-- Ajustes del reparto: horario, espera, intentos, ritmo y qué se dice en cada paso -->
-  <div class="tarjeta panel hidden" id="ajustes" style="margin-bottom:var(--esp-3)">
-    <h2>Ajustes del reparto <span class="sep"></span>
+  <!-- Ajustes de chat: cómo se le escribe al cliente (horario, ritmo, insistencia y textos) -->
+  <div class="tarjeta panel hidden" id="caja-ajustes" style="margin-bottom:var(--esp-3)">
+    <h2>Ajustes de chat <span class="sep"></span>
       <button type="button" class="btn sm" id="cerrar-ajustes">Cerrar</button>
     </h2>
     <div class="cuerpo aj">
-      <p class="aj-intro">Configura el orden de envío. La solicitud inicial de GSGchat va primero; después se aplican estos seguimientos. Los cambios se aplican sin reiniciar.</p>
+      <p class="aj-intro">
+        <b>Configura cómo GSGchat pide la ubicación.</b> La solicitud inicial tiene su propio tiempo; los recordatorios empiezan después y esperan desde el mensaje anterior. Las horas son de Lima.
+        <span>El nombre del negocio, el teléfono del supervisor y los avisos están en <a href="/panel#configuracion">Ajustes</a>. <a class="ver-manual" href="/manual#m-automatizacion-gsg">Ver instrucciones completas</a></span>
+      </p>
 
       <section class="aj-seccion">
-        <h3 class="aj-titulo">Horario de envío</h3>
-        <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00. Fuera de ese horario, los mensajes esperan al día siguiente. Horas de Lima.</p>
+        <h3 class="aj-titulo">Horario de escritura</h3>
+        <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00. Fuera de ese horario, los mensajes esperan al día siguiente.</p>
       </section>
 
       <section class="aj-seccion aj-seccion-inicial">
-        <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación», al llegar un pedido nuevo de GSG. Este no es un recordatorio.</p></div></div>
+        <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
         <div id="aj-pasos"></div>
+        <details class="aj-editor-inicial" id="aj-editor-inicial"><summary>Editar el texto de «Solicitud de ubicación»</summary><p class="muted">Este es el primer mensaje real que GSGchat envía al recibir el pedido. Si lo dejas vacío, usa el texto predeterminado. El horario se toma de Pedidos GSG → Ajustes de entrega. Límite: 2000 caracteres.</p><label for="aj-texto-inicial">Texto que recibe el cliente</label><textarea id="aj-texto-inicial" rows="6" maxlength="2000" placeholder="Escribe la solicitud inicial de ubicación"></textarea><p class="marcadores">Puedes usar {nombreCompleto}, {producto}, {empresa}, {tracking}, {monto}, {direccionCompleta}, {horario}, {desde}, {hasta} y otros datos del pedido.</p><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar texto inicial</button><span id="aj-estado-texto-inicial" class="muted" role="status"></span></div></details>
       </section>
 
       <section class="aj-seccion">
-        <div class="aj-seccion-cab"><span class="aj-paso-num">2</span><div><h3>Recordatorios y seguimientos</h3><p>Estos mensajes salen después de la solicitud inicial. El sistema usa el recordatorio si no contestó o la insistencia si contestó sin ubicación.</p></div></div>
-        <p class="aj-frase" style="margin-bottom:12px">Cada espera se cuenta desde el mensaje anterior. Puedes agregar más, hasta 100 mensajes en total.</p>
+        <div class="aj-seccion-cab"><span class="aj-paso-num">2</span><div><h3>Recordatorios y seguimientos</h3><p>Salen después de la solicitud inicial, uno tras otro.</p></div></div>
+        <p class="aj-frase" style="margin-bottom:12px">Cada espera se cuenta desde el envío anterior. Puedes configurar hasta 99 recordatorios (100 mensajes en total, incluida la solicitud inicial).</p>
         <div id="aj-secuencia" class="aj-tiempo-grid"></div>
-        <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:12px">Agregar seguimiento</button>
-        <p class="aj-frase aj-fin">Al terminar la secuencia, esperar <input id="aj-espera-final" data-duracion type="number" min="0" max="86400" class="aj-num" aria-label="Espera tras el último mensaje"> <select id="aj-espera-final-unidad" data-unidad-for="aj-espera-final" aria-label="Unidad de espera tras el último mensaje"><option value="1">segundos</option><option value="60" selected>minutos</option><option value="3600">horas</option></select> para reportar a GSG si aún no llegó la ubicación. Con 0, se reporta de inmediato.</p>
+        <button type="button" class="btn sm" id="aj-agregar-mensaje" style="margin-top:12px">Agregar recordatorio</button>
+        <p class="aj-frase aj-fin">Al terminar la secuencia, esperar <input id="aj-espera-final" data-duracion type="number" min="0" max="86400" class="aj-num" aria-label="Espera tras el último recordatorio"> <select id="aj-espera-final-unidad" data-unidad-for="aj-espera-final" aria-label="Unidad de espera tras el último recordatorio"><option value="1">segundos</option><option value="60" selected>minutos</option><option value="3600">horas</option></select> para reportar a GSG si aún no llegó la ubicación. Con 0, se reporta de inmediato.</p>
       </section>
 
       <section class="aj-seccion">
@@ -244,13 +317,14 @@ export function rutasPage(opts: RutasOpts): string {
 
       <section class="aj-seccion">
         <h3 class="aj-titulo">Textos de los seguimientos</h3>
-        <p class="muted" style="margin-top:4px">Edita el recordatorio para quien no responde y la insistencia para quien responde sin ubicación. Cada seguimiento tiene sus dos variantes; se envía la que corresponde a la respuesta del cliente.</p>
+        <p class="muted" style="margin-top:4px">Escribe el texto de cada seguimiento. Puedes dejar líneas en blanco entre párrafos.</p>
         <div id="aj-pasos-adicionales"></div>
       </section>
 
-      <div class="fila" style="margin-top:var(--esp-4)">
+      <div class="fila aj-guardar-barra">
         <button type="button" class="btn primario fijo" id="aj-guardar">Guardar</button>
-        <button type="button" class="btn fijo" id="aj-reset">Volver a lo de siempre</button>
+        <button type="button" class="btn fijo hidden" id="aj-descartar">Descartar cambios</button>
+        <button type="button" class="btn fijo" id="aj-reset">Restablecer valores predeterminados</button>
         <span class="muted" id="aj-estado" role="status"></span>
       </div>
     </div>
@@ -302,9 +376,29 @@ export function rutasPage(opts: RutasOpts): string {
       <h2>
         <span id="titulo-lista">Clientes</span>
         <span class="sep"></span>
-        <input id="buscar" placeholder="Buscar cliente o pedido" aria-label="Buscar cliente o pedido" style="max-width:230px">
         <button type="button" class="btn sm" id="csv">Descargar CSV</button>
       </h2>
+      <div class="filtro-dia" id="filtro-dia">
+        <div class="fd-fila">
+          <input id="buscar" type="search" placeholder="Buscar cliente, tracking o celular" aria-label="Buscar cliente, tracking o celular">
+          <div class="s-segmento" role="group" aria-label="Día">
+            <button type="button" class="seg activo" data-rango="hoy" aria-pressed="true">Hoy</button>
+            <button type="button" class="seg" data-rango="ayer" aria-pressed="false">Ayer</button>
+            <button type="button" class="seg" data-rango="semana" aria-pressed="false">7 días</button>
+            <button type="button" class="seg" data-rango="todos" aria-pressed="false">Todos</button>
+          </div>
+          <select id="f-estado" aria-label="Estado"><option value="">Todos los estados</option></select>
+          <button type="button" class="btn sm" id="f-mas" aria-expanded="false" aria-controls="f-campos">Más filtros</button>
+        </div>
+        <div class="fd-campos" id="f-campos" hidden>
+          <label>Fecha desde <input type="date" id="f-desde"></label>
+          <label>Fecha hasta <input type="date" id="f-hasta"></label>
+          <label>Hora desde <input type="time" id="f-hora-desde"></label>
+          <label>Hora hasta <input type="time" id="f-hora-hasta"></label>
+          <label>Distrito <select id="f-distrito"><option value="">Todos</option></select></label>
+        </div>
+        <p class="muted fd-resumen" id="f-resumen" role="status"></p>
+      </div>
       <div class="tabla-scroll">
         <table>
           <thead><tr>
@@ -334,8 +428,8 @@ export function rutasPage(opts: RutasOpts): string {
 
       <div class="tarjeta panel" style="margin-top:var(--esp-3)">
         <h2>Enviar a GSG</h2>
-        <div class="cuerpo" id="gsg">
-          <p class="muted" style="margin:0">Cargando…</p>
+        <div class="cuerpo" id="gsg" aria-busy="true">
+          <span class="esqueleto linea corta"></span><span class="esqueleto linea"></span><span class="esqueleto bloque" style="height:64px;margin-top:12px"></span>
         </div>
       </div>
     </div>
@@ -356,7 +450,7 @@ var peticionDetalle = 0; /* numero de la ultima peticion de detalle lanzada */
 var catalogo = {};       /* incidencias: codigo -> ficha */
 var nombresVista = {};
 var cifrasVista = {};
-var ajustesCache = null;
+var ajustesCache = null, ajustesBase = null, ajustesSucios = false;
 var sinUbicacion = [];   /* contactos traidos, para el lote nuevo */
 var listasPegadas = 0;   /* filas utiles que dijo la ultima revision de lo pegado */
 
@@ -487,21 +581,21 @@ function pintarBotonesDeMarcha() {
 function pintarGsg(datos) {
   var gsg = datos.gsg;
   var html =
-    '<p style="margin:0 0 8px">' +
-      (gsg.conectado ? '<span class="chip tono-verde">conectado</span>' : '<span class="chip tono-ambar">sin conectar</span>') +
-      ' <span class="muted">' + esc(gsg.descripcion) + '</span></p>' +
-    '<p class="muted" style="margin:0 0 10px;font-size:13px">' +
+    '<div class="g-estado">' +
+      (gsg.conectado ? '<span class="chip tono-verde">Conectado</span>' : '<span class="chip tono-ambar">Sin conectar</span>') +
+      '<span class="g-destino">' + esc(gsg.descripcion) + '</span></div>' +
+    '<p class="muted g-nota">' +
       'Cada ubicación conseguida y cada incidencia se guarda lista para GSG. ' +
       (gsg.conectado
         ? 'Se envían solas cada minuto, con un resumen del lote cada ' + datos.alertas.resumenCadaMin + ' min.'
         : 'Mientras no exista la API se acumulan aquí, y saldrán todas el día que se conecte.') +
     '</p>' +
-    '<div class="fila">' +
-      '<div><b>' + (gsg.cola.pendiente || 0) + '</b><div class="muted" style="font-size:12.5px">en cola</div></div>' +
-      '<div><b>' + (gsg.cola.enviado || 0) + '</b><div class="muted" style="font-size:12.5px">enviados</div></div>' +
-      '<div><b>' + (gsg.cola.fallido || 0) + '</b><div class="muted" style="font-size:12.5px">fallidos</div></div>' +
+    '<div class="g-cifras">' +
+      '<div class="g-cifra' + ((gsg.cola.pendiente || 0) ? ' g-ambar' : '') + '"><b>' + (gsg.cola.pendiente || 0) + '</b><span>en cola</span></div>' +
+      '<div class="g-cifra g-verde"><b>' + (gsg.cola.enviado || 0) + '</b><span>enviados</span></div>' +
+      '<div class="g-cifra' + ((gsg.cola.fallido || 0) ? ' g-rojo' : '') + '"><b>' + (gsg.cola.fallido || 0) + '</b><span>fallidos</span></div>' +
     '</div>' +
-    '<div class="fila" style="margin-top:10px">' +
+    '<div class="g-botones">' +
       '<button type="button" class="btn sm" id="gsg-descargar">Descargar la cola</button>' +
       '<button type="button" class="btn sm" id="gsg-enviar"' + (gsg.conectado ? '' : ' disabled') + '>Enviar ahora</button>' +
     '</div>';
@@ -542,14 +636,26 @@ async function cargarFiltros() {
 }
 
 async function cargarLista() {
-  var params = ['vista=' + encodeURIComponent(vista), 'limit=300'];
+  var params = ['vista=' + encodeURIComponent(vista), 'limit=500'];
   if (loteActual) params.push('loteId=' + encodeURIComponent(loteActual));
   var q = document.getElementById('buscar').value.trim();
-  if (q) params.push('q=' + encodeURIComponent(q));
+  /* Un celular se busca igual escrito con espacios, guiones, «+51» o sin nada. */
+  var qEnvio = /^[\d\s+()\-]+$/.test(q) ? q.replace(/\D/g, '').replace(/^51(?=\d{9}$)/, '') : q;
+  if (qEnvio) params.push('q=' + encodeURIComponent(qEnvio));
 
   var data = await api('/admin/rutas/solicitudes?' + params.join('&'));
+  /* La lista muestra por defecto solo el día de hoy; lo anterior sigue guardado y se ve con las fechas. */
+  var visibles = data.items.filter(pasaFiltroDia);
+  llenarDistritos(data.items);
   document.getElementById('titulo-lista').textContent =
-    (nombresVista[vista] || 'Clientes') + ' (' + data.total + ')';
+    (nombresVista[vista] || 'Clientes') + ' (' + visibles.length + (visibles.length !== data.total ? ' de ' + data.total : '') + ')';
+  var ocultos = data.items.length - visibles.length;
+  var aviso = document.getElementById('f-resumen');
+  if (ocultos > 0) {
+    aviso.innerHTML = esc(ocultos + (ocultos === 1 ? ' resultado queda' : ' resultados quedan')) + ' fuera de los filtros de día, hora, distrito o estado. <button type="button" id="f-ver-todos">Ver todos los días</button>';
+    document.getElementById('f-ver-todos').onclick = function () { aplicarRango('todos'); document.getElementById('f-estado').value = ''; cargarLista().catch(function () {}); };
+  } else aviso.textContent = '';
+  data = { items: visibles, total: data.total };
 
   // Pidiendo la ubicación cada tantos minutos no hay tope: «intento 5», sin «de 3».
   var maxIntentos = resumen ? resumen.motor.maxIntentos : 0;
@@ -557,7 +663,7 @@ async function cargarLista() {
     return '<tr data-id="' + s.id + '" tabindex="0"' + (seleccionada === s.id ? ' class="activa"' : '') + '>' +
       '<td><b>' + esc(s.nombre || 'Sin nombre') + '</b>' +
         '<div class="sub">' + esc(s.phone || s.telefonoCrudo) + '</div></td>' +
-      '<td>' + esc(s.referencia || '') +
+      '<td><span class="ref-pedido">' + esc(s.referencia || '') + '</span>' +
         (s.distrito ? '<div class="sub">' + esc(s.distrito) + '</div>' : '') + '</td>' +
       '<td>' + chipEstado(s.estado, s.incidencia) +
         (s.requiereHumano ? ' <span class="chip tono-rojo">persona</span>' : '') + '</td>' +
@@ -569,6 +675,76 @@ async function cargarLista() {
   pintarListaVacia(data.items.length, q);
 }
 
+/* --- filtro por día, hora y distrito (solo vista: los datos no se tocan) --- */
+function aIsoLocal(fecha) {
+  var m = fecha.getMonth() + 1, d = fecha.getDate();
+  return fecha.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+}
+function pasaFiltroDia(s) {
+  var f = new Date(s.createdAt || s.updatedAt || 0);
+  if (isNaN(f.getTime())) return true;
+  var dia = aIsoLocal(f);
+  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value;
+  if (desde && dia < desde) return false;
+  if (hasta && dia > hasta) return false;
+  var hm = (f.getHours() < 10 ? '0' : '') + f.getHours() + ':' + (f.getMinutes() < 10 ? '0' : '') + f.getMinutes();
+  var h1 = document.getElementById('f-hora-desde').value, h2 = document.getElementById('f-hora-hasta').value;
+  if (h1 && hm < h1) return false;
+  if (h2 && hm > h2) return false;
+  var d = document.getElementById('f-distrito').value;
+  if (d && (s.distrito || '') !== d) return false;
+  var e = document.getElementById('f-estado').value;
+  if (e && s.estado !== e) return false;
+  return true;
+}
+function llenarDistritos(items) {
+  var lista = document.getElementById('f-distrito'), actual = lista.value, vistos = [];
+  items.forEach(function (s) { if (s.distrito && vistos.indexOf(s.distrito) < 0) vistos.push(s.distrito); });
+  vistos.sort(function (a, b) { return a.localeCompare(b, 'es'); });
+  if (actual && vistos.indexOf(actual) < 0) vistos.push(actual);
+  var html = '<option value="">Todos</option>' + vistos.map(function (v) { return '<option value="' + esc(v) + '">' + esc(v) + '</option>'; }).join('');
+  if (lista.innerHTML !== html) { lista.innerHTML = html; lista.value = actual; }
+}
+var CAMPOS_DIA = ['f-desde', 'f-hasta', 'f-hora-desde', 'f-hora-hasta', 'f-distrito', 'f-estado'];
+(function () {
+  document.getElementById('f-estado').innerHTML = '<option value="">Todos los estados</option>' + Object.keys(ESTADOS).map(function (k) {
+    return '<option value="' + k + '">' + esc(ESTADOS[k].texto) + '</option>';
+  }).join('');
+})();
+function aplicarRango(rango) {
+  var hoy = new Date(), desde = '', hasta = '';
+  if (rango === 'hoy') { desde = hasta = aIsoLocal(hoy); }
+  else if (rango === 'ayer') { var a = new Date(hoy.getTime() - 86400000); desde = hasta = aIsoLocal(a); }
+  else if (rango === 'semana') { desde = aIsoLocal(new Date(hoy.getTime() - 6 * 86400000)); hasta = aIsoLocal(hoy); }
+  document.getElementById('f-desde').value = desde;
+  document.getElementById('f-hasta').value = hasta;
+  ['f-hora-desde', 'f-hora-hasta', 'f-distrito'].forEach(function (id) { document.getElementById(id).value = ''; });
+  marcarRango(rango);
+}
+function marcarRango(rango) {
+  document.querySelectorAll('#filtro-dia [data-rango]').forEach(function (b) {
+    var on = b.getAttribute('data-rango') === rango;
+    b.classList.toggle('activo', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+aplicarRango('hoy');
+document.getElementById('f-mas').onclick = function () {
+  var caja = document.getElementById('f-campos'), abrir = caja.hidden;
+  caja.hidden = !abrir;
+  this.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  this.textContent = abrir ? 'Menos filtros' : 'Más filtros';
+};
+CAMPOS_DIA.forEach(function (id) {
+  document.getElementById(id).addEventListener('change', function () { marcarRango(''); cargarLista().catch(function () {}); });
+});
+document.getElementById('filtro-dia').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-rango]');
+  if (!b) return;
+  aplicarRango(b.getAttribute('data-rango'));
+  cargarLista().catch(function () {});
+});
+
 /* El hueco cuando no hay nada: siempre dice qué hacer a continuación. */
 function pintarListaVacia(cuantos, q) {
   var caja = document.getElementById('lista-vacia');
@@ -579,7 +755,7 @@ function pintarListaVacia(cuantos, q) {
     return;
   }
   if (resumen && !resumen.lotes.length) {
-    caja.innerHTML = '<div class="vacio"><div class="ico">📍</div><h3>Todavía no hay ninguna lista</h3>' +
+    caja.innerHTML = '<div class="vacio"><h3>Todavía no hay ninguna lista</h3>' +
       '<p>Pega la lista del día (o trae a los clientes que nunca mandaron su ubicación) y el sistema les pedirá el pin uno a uno.</p>' +
       '<div class="acciones"><button type="button" class="btn primario" data-abrir-carga="1">Cargar la lista del día</button></div></div>';
     return;
@@ -647,7 +823,7 @@ async function abrirDetalle(id, silencioso) {
       detalleId = null;
       document.getElementById('detalle-acciones').innerHTML = '';
       document.getElementById('detalle-historial').innerHTML = '';
-      document.getElementById('detalle-info').innerHTML = '<p class="muted" style="margin:0">Cargando…</p>';
+      document.getElementById('detalle-info').innerHTML = '<span class="esqueleto titulo"></span><span class="esqueleto linea"></span><span class="esqueleto linea media"></span>';
     }
   }
 
@@ -689,13 +865,13 @@ function pintarDetalle(data) {
     : '';
 
   var info =
-    '<p style="margin:0 0 4px"><b>' + esc(s.nombre || 'Sin nombre') + '</b> ' + chipEstado(s.estado, s.incidencia) + '</p>' +
-    '<p class="muted" style="margin:0 0 12px;font-size:13px">' +
-      esc(s.phone || s.telefonoCrudo) +
-      (s.referencia ? ' · pedido ' + esc(s.referencia) : '') +
-      (s.direccion ? '<br>' + esc(s.direccion) : '') +
-      (s.distrito ? ' (' + esc(s.distrito) + ')' : '') +
-    '</p>' +
+    '<div class="d-cab"><b class="d-nombre">' + esc(s.nombre || 'Sin nombre') + '</b>' + chipEstado(s.estado) + '</div>' +
+    '<div class="d-meta">' +
+      '<span><small>Teléfono</small>' + esc(s.phone || s.telefonoCrudo) + '</span>' +
+      (s.referencia ? '<span><small>Pedido</small>' + esc(s.referencia) + '</span>' : '') +
+      (s.distrito ? '<span><small>Distrito</small>' + esc(s.distrito) + '</span>' : '') +
+    '</div>' +
+    (s.direccion ? '<p class="d-dir">' + esc(s.direccion) + '</p>' : '') +
     mapa +
     explicacion;
 
@@ -706,8 +882,8 @@ function pintarDetalle(data) {
     return '<li><span class="cuando">' + esc(cuando(e.createdAt)) + '</span> · ' + esc(e.detalle || e.tipo) + '</li>';
   }).join('') || '<li class="muted">Todavía no hay movimientos.</li>';
   var historial =
-    '<h3 style="font-size:13px;margin:14px 0 6px">Historial</h3>' +
-    '<ul class="bitacora">' + bitacora + '</ul>';
+    '<h3 class="d-titulo">Historial</h3>' +
+    '<ul class="bitacora d-linea">' + bitacora + '</ul>';
   var zonaHistorial = document.getElementById('detalle-historial');
   if (zonaHistorial.innerHTML !== historial) zonaHistorial.innerHTML = historial;
 
@@ -718,7 +894,12 @@ function pintarDetalle(data) {
 
   var sinTelefono = !s.phone;
   var puede = accionesDeEstado(s.estado);
-  var enlaceChat = '<a class="fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>';
+  var enlaceChat = '<a class="btn sm fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>' +
+    (sinTelefono ? '' : '<a href="#" class="btn sm fijo" id="d-incidencia">Enviar incidencia manual</a>');
+  var abrirIncidencia = function (evento) {
+    if (evento) evento.preventDefault();
+    abrirIncidenciaManual({ phone: s.phone, tracking: s.referencia || '', alTerminar: function () { detalleId = null; refrescar(); } });
+  };
 
   // Quitada de la automatizacion: nada que pueda volver a escribirle. Solo
   // se dice que esta fuera y se deja abrir el chat.
@@ -727,17 +908,20 @@ function pintarDetalle(data) {
       '<div class="aviso" style="margin:12px 0 8px"><div><b>Quitada de esta automatización</b><br>' +
         'No se le volverá a escribir por esta solicitud. El chat, el contacto y el historial se conservan.</div></div>' +
       '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>';
+    if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
     return;
   }
 
   document.getElementById('detalle-acciones').innerHTML =
-    '<div class="campo"><label for="d-telefono">Corregir el teléfono</label>' +
+    '<div class="d-bloque"><h3 class="d-titulo">Corregir datos</h3>' +
+    '<div class="campo"><label for="d-telefono">Teléfono</label>' +
       '<div class="fila"><input id="d-telefono" value="' + esc(s.telefonoCrudo) + '">' +
       '<button type="button" class="btn sm fijo" id="d-guardar-tel">Guardar y reintentar</button></div></div>' +
-    '<div class="campo"><label for="d-ubicacion">Cargar la ubicación a mano (enlace de mapa o «lat, lng»)</label>' +
+    '<div class="campo"><label for="d-ubicacion">Ubicación a mano <span class="muted">(enlace de mapa o «lat, lng»)</span></label>' +
       '<div class="fila"><input id="d-ubicacion" placeholder="https://maps.app.goo.gl/… o -12.09, -77.03">' +
-      '<button type="button" class="btn sm fijo" id="d-guardar-ubi">Guardar</button></div></div>' +
-    '<div class="fila" style="margin:12px 0 4px">' +
+      '<button type="button" class="btn sm fijo" id="d-guardar-ubi">Guardar</button></div></div></div>' +
+    '<h3 class="d-titulo">Acciones</h3>' +
+    '<div class="fila d-acciones">' +
       '<button type="button" class="btn sm fijo" id="d-derivar"' + (s.estado === 'derivado' ? ' disabled title="Ya está con el repartidor"' : '') + '>Pasar al repartidor</button>' +
       (puede.reintentar
         ? '<button type="button" class="btn sm fijo" id="d-reintentar"' + (sinTelefono ? ' disabled title="Sin un teléfono al que escribir: corrígelo primero"' : '') + '>Reintentar esta solicitud</button>'
@@ -748,9 +932,10 @@ function pintarDetalle(data) {
       enlaceChat +
     '</div>' +
     (puede.quitar
-      ? '<div class="fila" style="margin:4px 0 4px"><button type="button" class="btn sm fijo" id="d-quitar">Quitar de esta automatización</button></div>'
+      ? '<div class="fila d-peligro"><button type="button" class="btn sm fijo" id="d-quitar">Quitar de esta automatización</button></div>'
       : '');
 
+  if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
   document.getElementById('d-guardar-ubi').onclick = function () { guardarUbicacion(s.id); };
   document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.', this); };
@@ -945,7 +1130,7 @@ async function guardarUbicacion(id) {
 
 function abrirCarga() {
   ver('carga', true);
-  ver('ajustes', false);
+  ver('caja-ajustes', false);
   sincronizarAjustes(false);
   document.getElementById('pegado').focus();
 }
@@ -1117,20 +1302,29 @@ function previaDe(texto, ej) {
     .replace(/\{direccion\}/g, ej.direccion).replace(/\{distrito\}/g, ej.distrito).replace(/\{como\}/g, ej.como);
 }
 
+/* Cada redaccion se ve entera, con sus parrafos; si hay varias, cada una con su rotulo. */
+function previaHtml(lineas, ej, defecto) {
+  if (!lineas.length) return esc(defecto);
+  return lineas.map(function (t, i) {
+    return '<div class="previa-msg">' + (lineas.length > 1 ? '<b class="previa-n">Redacción ' + (i + 1) + ' de ' + lineas.length + '</b>' : '') + esc(previaDe(t, ej)) + '</div>';
+  }).join('');
+}
+
 function pintarPrevia(paso) {
   var d = ajustesCache;
   if (!d) return;
   var ta = document.querySelector('textarea[data-textos="' + paso + '"]');
-  var lineas = ta ? ta.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean) : [];
-  var texto = lineas.length ? previaDe(lineas[0], d.ejemplo) : d.textosDeSiempre[paso];
+  var lineas = ta ? lineasDeTextoMensaje(ta.value) : [];
   var caja = document.getElementById('aj-previa-' + paso);
   if (!caja) return;
-  var pie = lineas.length > 1 ? 'tu primer texto (se alternan ' + lineas.length + ')' : lineas.length ? 'tu texto' : 'texto de siempre';
-  caja.innerHTML = esc(texto) + '<small>' + pie + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
+  var pie = lineas.length > 1 ? 'tus ' + lineas.length + ' redacciones (se alternan)' : lineas.length ? 'tu texto' : 'texto de siempre';
+  caja.innerHTML = previaHtml(lineas, d.ejemplo, d.textosDeSiempre[paso]) + '<small>' + pie + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
 }
 
 function pintarAjustes(d) {
   ajustesCache = d;
+  if (ajustesSucios) return;
+  ajustesBase = d;
   var a = d.ajustes;
   var esperas = a.esperasMensajesSegundos || (a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos)).map(function (n) { return n * 60; });
   ponerDuracion('aj-pausa-min', a.pausaMinSegundos);
@@ -1145,13 +1339,14 @@ function pintarAjustes(d) {
     var paso = p[0];
     return '<div class="paso" id="paso-' + paso + '"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
       '<div class="previa" id="aj-previa-' + paso + '"></div>' +
-      '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Una redacción por línea: se van alternando.">' + esc((a.textos[paso] || []).join('\n')) + '</textarea>' +
+      '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Puedes dejar líneas en blanco entre párrafos.">' + esc(textoDeLineas(a.textos[paso])) + '</textarea>' +
       '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
+      '<p class="marcadores">' + AYUDA_REDACCION + '</p>' +
       '</div>';
   }).join('');
   pintarTextosAdicionales(esperas.length, textosSeguimientosDe(a, esperas.length));
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
-  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 100 mensajes en total' : 'Agregar seguimiento';
+  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
 
   PASOS_AJ.slice(0, 1).forEach(function (p) {
     var paso = p[0];
@@ -1170,9 +1365,19 @@ function pintarAjustes(d) {
   });
 }
 
+/* Una redaccion puede tener varios parrafos (con lineas en blanco). Si quieres
+   varias redacciones para que se alternen, sepáralas con una línea que solo diga ---. */
 function lineasDeTextoMensaje(valor) {
-  return String(valor || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+  var bloques = [], actual = [];
+  String(valor || '').replace(/\r\n?/g, '\n').split('\n').forEach(function (l) {
+    if (/^\s*-{3,}\s*$/.test(l)) { bloques.push(actual); actual = []; } else actual.push(l.replace(/\s+$/, ''));
+  });
+  bloques.push(actual);
+  return bloques.map(function (b) { return b.join('\n').replace(/\n{3,}/g, '\n\n').trim(); }).filter(Boolean);
 }
+/* Lo guardado vuelve al cuadro con cada redaccion separada por --- */
+function textoDeLineas(lineas) { return (lineas || []).join('\n---\n'); }
+var AYUDA_REDACCION = 'Puedes dejar líneas en blanco entre párrafos. Para alternar varias redacciones, sepáralas con una línea que diga ---.';
 
 function textosSeguimientosDe(a, cantidad) {
   return Array.from({ length: cantidad }, function (_, i) {
@@ -1194,20 +1399,20 @@ function leerTextosAdicionales() {
 
 function controlTiempoInicialHtml(segundos) {
   var d = segundosEnUnidad(segundos);
-  return '<div class="aj-tiempo-inicial"><span>Después de recibir el pedido de GSG, enviar la plantilla tras</span><input id="aj-espera-primero" data-duracion type="number" min="0" max="86400" step="1" class="aj-num" aria-label="Espera antes de enviar la plantilla Solicitud de ubicación" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select id="aj-espera-primero-unidad" data-unidad-for="aj-espera-primero" aria-label="Unidad de espera de Solicitud de ubicación"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div><p class="cuando" style="margin:8px 0 0">Con 0, no hay espera individual; se conserva la pausa entre clientes.</p>';
+  return '<div class="aj-tiempo-inicial"><span>Después de recibir el pedido de GSG, enviar la plantilla tras</span><input id="aj-espera-primero" data-duracion type="number" min="0" max="86400" step="any" class="aj-num" aria-label="Espera antes de enviar la plantilla Solicitud de ubicación" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select id="aj-espera-primero-unidad" data-unidad-for="aj-espera-primero" aria-label="Unidad de espera de Solicitud de ubicación"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div><p class="cuando" style="margin:8px 0 0">Con 0, no hay espera individual; se conserva la pausa entre clientes.</p>';
 }
 
 function controlTiempoSecuenciaHtml(segundos, indice) {
   var d = segundosEnUnidad(segundos);
-  var antecedente = indice === 0 ? 'Después de la solicitud inicial' : 'Después del seguimiento ' + indice;
-  return '<div class="aj-tiempo-paso" data-seguimiento="' + indice + '"><h4>Seguimiento ' + (indice + 1) + '</h4><p class="cuando">' + antecedente + '</p><div class="aj-tiempo-control"><input data-espera-mensaje data-duracion data-indice-espera="' + indice + '" type="number" min="1" max="86400" step="1" class="aj-num" aria-label="Espera antes del seguimiento ' + (indice + 1) + '" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select data-unidad-secuencia="' + indice + '" aria-label="Unidad de espera del seguimiento ' + (indice + 1) + '"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div></div>';
+  var antecedente = indice === 0 ? 'Después de la solicitud inicial' : 'Después del recordatorio ' + indice;
+  return '<div class="aj-tiempo-paso" data-seguimiento="' + indice + '"><h4>Recordatorio ' + (indice + 1) + '</h4><p class="cuando">' + antecedente + '</p><div class="aj-tiempo-control"><input data-espera-mensaje data-duracion data-indice-espera="' + indice + '" type="number" min="1" max="86400" step="any" class="aj-num" aria-label="Espera antes del recordatorio ' + (indice + 1) + '" value="' + esc(String(d.cantidad)) + '" data-unidad-actual="' + d.unidad + '"><select data-unidad-secuencia="' + indice + '" aria-label="Unidad de espera del recordatorio ' + (indice + 1) + '"><option value="1" ' + (d.unidad === 1 ? 'selected' : '') + '>segundos</option><option value="60" ' + (d.unidad === 60 ? 'selected' : '') + '>minutos</option><option value="3600" ' + (d.unidad === 3600 ? 'selected' : '') + '>horas</option></select></div><button type="button" class="btn sm" data-quitar-seguimiento="' + indice + '">Quitar</button></div>';
 }
 
 function pintarSecuencia(esperas) {
   var caja = document.getElementById('aj-secuencia');
   caja.innerHTML = esperas.map(function (segundos, indice) { return controlTiempoSecuenciaHtml(segundos, indice); }).join('');
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
-  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 100 mensajes en total' : 'Agregar seguimiento';
+  document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
 }
 
 function pintarTextosAdicionales(cantidad, textos) {
@@ -1219,18 +1424,18 @@ function pintarTextosAdicionales(cantidad, textos) {
       ['recordatorio', 'insistencia'].map(function (rama) {
         var lineas = variantes[rama] || [];
         var titulo = rama === 'recordatorio' ? 'Si no respondió' : 'Si respondió sin ubicación';
-        return '<div class="variante"><h5>' + titulo + '</h5>' +
+        /* La variante «respondió sin ubicación» ya no se muestra; queda oculta para guardar lo que tenía. */
+        return '<div class="variante"' + (rama === 'insistencia' ? ' hidden' : '') + '>' + (rama === 'insistencia' ? '' : '<h5>' + titulo + '</h5>') +
           '<div class="previa" id="aj-previa-adicional-' + i + '-' + rama + '"></div>' +
-          '<textarea data-texto-adicional="' + i + '" data-rama="' + rama + '" rows="3" aria-label="Seguimiento ' + (i + 1) + ': ' + titulo + '" placeholder="Vacío: usar el texto de siempre. Una redacción por línea.">' + esc(lineas.join('\n')) + '</textarea>' +
-          '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p></div>';
+          '<textarea data-texto-adicional="' + i + '" data-rama="' + rama + '" rows="3" aria-label="Seguimiento ' + (i + 1) + ': ' + titulo + '" placeholder="Vacío: usar el texto de siempre. Puedes dejar líneas en blanco entre párrafos.">' + esc(textoDeLineas(lineas)) + '</textarea>' +
+          '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p><p class="marcadores">' + AYUDA_REDACCION + '</p></div>';
       }).join('') + '<button type="button" class="btn sm" data-quitar-adicional="' + i + '">Quitar seguimiento</button></div>';
   }).join('');
   caja.querySelectorAll('textarea[data-texto-adicional]').forEach(function (ta) {
     function actualizar() {
       var i = ta.getAttribute('data-texto-adicional'), rama = ta.getAttribute('data-rama');
       var lineas = lineasDeTextoMensaje(ta.value);
-      var texto = lineas.length ? previaDe(lineas[0], ajustesCache.ejemplo) : ajustesCache.textosDeSiempre[rama];
-      document.getElementById('aj-previa-adicional-' + i + '-' + rama).textContent = texto;
+      document.getElementById('aj-previa-adicional-' + i + '-' + rama).innerHTML = previaHtml(lineas, ajustesCache.ejemplo, ajustesCache.textosDeSiempre[rama]);
     }
     ta.addEventListener('input', actualizar);
     actualizar();
@@ -1262,7 +1467,11 @@ function ponerDuracion(id, segundos) {
 }
 function leerDuracion(id) {
   var campo = document.getElementById(id), unidad = document.getElementById(id + '-unidad');
-  return Math.round((Number(campo.value) || 0) * Number(unidad.value));
+  var cantidad = Number(String(campo.value).trim().replace(',', '.'));
+  var segundos = cantidad * Number(unidad.value);
+  var minimoSegundos = id === 'aj-pausa-min' || id === 'aj-pausa-max' ? 1 : 0;
+  if (!campo.value.trim() || !Number.isFinite(segundos) || !Number.isInteger(segundos) || segundos < minimoSegundos || segundos > 86400) throw new Error('Revisa ' + (campo.getAttribute('aria-label') || 'el tiempo') + ': debe representar segundos enteros entre ' + minimoSegundos + ' y 86400.');
+  return segundos;
 }
 function duracionHumana(segundos) {
   var d = segundosEnUnidad(segundos);
@@ -1275,6 +1484,7 @@ document.querySelector('.cuerpo.aj').addEventListener('change', function (event)
   var id = select.getAttribute('data-unidad-for'), campo = document.getElementById(id);
   var segundos = Number(campo.value) * Number(campo.getAttribute('data-unidad-actual') || 1);
   var factor = Number(select.value);
+  if (!Number.isInteger(segundos) || segundos < 0) { select.value = String(Number(campo.getAttribute('data-unidad-actual') || 1)); return; }
   campo.value = segundos ? (segundos / factor).toString() : '0';
   campo.setAttribute('data-segundos', String(Math.round(segundos)));
   campo.setAttribute('data-unidad-actual', String(factor));
@@ -1286,6 +1496,7 @@ document.getElementById('aj-agregar-mensaje').onclick = function () {
   var textos = leerTextosAdicionales();
   pintarSecuencia(esperas);
   pintarTextosAdicionales(esperas.length, textos);
+  marcarAjustesSucios();
 };
 document.getElementById('aj-pasos-adicionales').onclick = function (event) {
   var indice = event.target && event.target.getAttribute('data-quitar-adicional');
@@ -1296,12 +1507,29 @@ document.getElementById('aj-pasos-adicionales').onclick = function (event) {
   textos.splice(Number(indice), 1);
   pintarSecuencia(esperas);
   pintarTextosAdicionales(esperas.length, textos);
+  marcarAjustesSucios();
+};
+function quitarSeguimiento(indice) {
+  var esperas = leerEsperasSecuencia();
+  var textos = leerTextosAdicionales();
+  esperas.splice(indice, 1);
+  if (indice >= 2) textos.splice(indice - 2, 1);
+  pintarSecuencia(esperas);
+  pintarTextosAdicionales(esperas.length, textos);
+  marcarAjustesSucios();
+}
+document.getElementById('aj-secuencia').onclick = function (event) {
+  var boton = event.target.closest('[data-quitar-seguimiento]');
+  if (boton) quitarSeguimiento(Number(boton.getAttribute('data-quitar-seguimiento')));
 };
 function leerEsperasSecuencia() {
   var campos = Array.prototype.slice.call(document.querySelectorAll('[data-espera-mensaje]')).sort(function (a, b) { return Number(a.getAttribute('data-indice-espera')) - Number(b.getAttribute('data-indice-espera')); });
   return campos.map(function (campo) {
     var select = campo.parentNode.querySelector('[data-unidad-secuencia]');
-    return Math.max(1, Math.round((Number(campo.value) || 1) * Number(select.value)));
+    var cantidad = Number(String(campo.value).trim().replace(',', '.'));
+    var segundos = cantidad * Number(select.value);
+    if (!campo.value.trim() || !Number.isFinite(segundos) || !Number.isInteger(segundos) || segundos < 1 || segundos > 86400) throw new Error('El tiempo del recordatorio ' + (Number(campo.getAttribute('data-indice-espera')) + 1) + ' debe ser de 1 segundo a 24 horas.');
+    return segundos;
   });
 }
 document.getElementById('aj-secuencia').addEventListener('change', cambiarUnidadSecuencia);
@@ -1311,6 +1539,7 @@ function cambiarUnidadSecuencia(event) {
   var campo = select.parentNode.querySelector('[data-espera-mensaje]');
   var segundos = Number(campo.value) * Number(campo.getAttribute('data-unidad-actual') || 60);
   var factor = Number(select.value);
+  if (!Number.isInteger(segundos) || segundos < 1) { select.value = String(Number(campo.getAttribute('data-unidad-actual') || 60)); return; }
   campo.value = segundos ? String(segundos / factor) : '0';
   campo.setAttribute('data-unidad-actual', String(factor));
 }
@@ -1323,6 +1552,10 @@ var MARCADORES = [
   ['{producto}', 'El producto del pedido de GSG; si no viene, no sale'],
   ['{direccion}', 'La dirección del pedido'],
   ['{distrito}', 'El distrito'],
+  ['{horario}', 'Horario de entrega de Pedidos GSG'],
+  ['{desde}', 'Hora de inicio de entrega'],
+  ['{hasta}', 'Hora final de entrega'],
+  ['{hastaExtendido}', 'Hora final del horario extendido'],
   ['{como}', 'Cómo mandar la ubicación: con el botón o desde el clip, según toque']
 ];
 function marcadoresHtml() {
@@ -1330,6 +1563,53 @@ function marcadoresHtml() {
     return '<code data-marcador="' + m[0] + '" title="' + esc(m[1]) + '">' + m[0] + '</code>';
   }).join(' ');
 }
+
+function actualizarEstadoCambios() {
+  document.getElementById('aj-descartar').classList.toggle('hidden', !ajustesSucios);
+  if (ajustesSucios) document.getElementById('aj-estado').textContent = 'Tienes cambios sin guardar.';
+}
+function marcarAjustesSucios() { ajustesSucios = true; actualizarEstadoCambios(); }
+document.querySelector('.cuerpo.aj').addEventListener('input', function (event) {
+  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+});
+document.querySelector('.cuerpo.aj').addEventListener('change', function (event) {
+  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+});
+document.getElementById('aj-descartar').onclick = function () {
+  if (!ajustesBase) return;
+  ajustesSucios = false;
+  document.getElementById('aj-estado').textContent = 'Cambios descartados.';
+  pintarAjustes(ajustesBase);
+  actualizarEstadoCambios();
+};
+
+var textoInicialCargado = false, textoInicialOcupado = false;
+var editorTextoInicial = document.getElementById('aj-editor-inicial');
+editorTextoInicial.addEventListener('toggle', async function () {
+  if (!editorTextoInicial.open || textoInicialCargado || textoInicialOcupado) return;
+  textoInicialOcupado = true;
+  var estado = document.getElementById('aj-estado-texto-inicial');
+  estado.textContent = 'Cargando texto…';
+  try {
+    var d = await api('/admin/entregas');
+    var guardado = (d.ajustes && d.ajustes.textos && d.ajustes.textos.solicitudUbicacion) || '';
+    document.getElementById('aj-texto-inicial').value = guardado;
+    textoInicialCargado = true;
+    estado.textContent = guardado ? 'Texto personalizado guardado.' : 'Se usa el texto predeterminado.';
+  } catch (e) { estado.textContent = e.message; }
+  finally { textoInicialOcupado = false; }
+});
+document.getElementById('aj-guardar-texto-inicial').onclick = async function () {
+  var boton = this, estado = document.getElementById('aj-estado-texto-inicial');
+  boton.disabled = true;
+  estado.textContent = 'Guardando…';
+  try {
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: { solicitudUbicacion: document.getElementById('aj-texto-inicial').value } } });
+    textoInicialCargado = true;
+    estado.textContent = 'Texto inicial guardado.';
+  } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
+};
 
 /* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */
 async function cargarAjustes() {
@@ -1343,26 +1623,33 @@ function sincronizarAjustes(abierta) {
   if (abierta && location.hash !== '#ajustes') history.replaceState(null, '', '#ajustes');
   if (!abierta && location.hash === '#ajustes') history.replaceState(null, '', location.pathname);
   if (window.shellMarcarActivo) shellMarcarActivo();
+  if (window.marcarPestanaPedidos) marcarPestanaPedidos();
+  /* En la pestaña Ajustes solo se ven los ajustes; lo del envío queda en su pestaña. */
+  var envoltura = document.querySelector('.wrap');
+  if (envoltura) envoltura.classList.toggle('modo-ajustes', abierta);
   if (window.shellTitulo) {
     shellTitulo(
-    abierta ? 'Ajustes del reparto' : 'Ubicaciones para reparto',
-      abierta ? 'Horario, solicitud inicial y seguimientos' : 'Pedir la ubicación a cada cliente del día'
+      'Pedidos GSG',
+      abierta ? 'Ajustes de mensajes: solicitud inicial y recordatorios' : 'Solicitud de ubicación a cada cliente del día'
     );
   }
 }
 
 async function abrirAjustes() {
-  ver('ajustes', true);
+  ver('caja-ajustes', true);
   ver('carga', false);
   sincronizarAjustes(true);
   await cargarAjustes();
+  if (window.pestanasArriba) pestanasArriba();
 }
 
-document.getElementById('abrir-ajustes').onclick = abrirAjustes;
-document.getElementById('cerrar-ajustes').onclick = function () { ver('ajustes', false); sincronizarAjustes(false); };
+/* Los ajustes se abren desde la pestaña «Ajustes» (el ancla #ajustes). */
+document.getElementById('cerrar-ajustes').onclick = function () { ver('caja-ajustes', false); sincronizarAjustes(false); };
 
 document.getElementById('aj-guardar').onclick = async function () {
   var estado = document.getElementById('aj-estado');
+  var boton = this;
+  boton.disabled = true;
   try {
     var plantillas = {}, textos = {};
     PASOS_AJ.forEach(function (p) {
@@ -1386,19 +1673,26 @@ document.getElementById('aj-guardar').onclick = async function () {
       textosSeguimientos: leerTextosAdicionales()
     }});
     var v = r.vigente;
+    ajustesSucios = false;
+    actualizarEstadoCambios();
+    await cargarAjustes();
     estado.textContent = 'Guardado. «Solicitud de ubicación» sale ' + duracionHumana(v.esperaPrimerMensajeSegundos || 0) + ' después de recibir el pedido de GSG; recordatorios: ' + (v.esperasMensajesSegundos || []).map(duracionHumana).join(', ') + '. Se reprogramaron ' + (r.primerosReprogramados || 0) + ' solicitudes iniciales y ' + (r.seguimientosReprogramados || 0) + ' recordatorios activos. Ritmo entre clientes: ' + duracionHumana(v.pausaMinSegundos) + '-' + duracionHumana(v.pausaMaxSegundos) + '.';
-    await refrescar();
   } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
 };
 
 document.getElementById('aj-reset').onclick = async function () {
+  if (!window.confirm('¿Restablecer los tiempos y textos de seguimiento? Los seguimientos activos se reprogramarán con los valores predeterminados.')) return;
+  var boton = this; boton.disabled = true;
   try {
     var r = await api('/admin/rutas/ajustes', { method: 'DELETE' });
+    ajustesSucios = false;
     await cargarAjustes();
+    actualizarEstadoCambios();
     document.getElementById('aj-estado').textContent = 'Listo: vuelven los valores y textos de siempre. Se actualizaron ' +
       (r.seguimientosReprogramados || 0) + ' seguimientos activos.';
-    await refrescar();
   } catch (e) { document.getElementById('aj-estado').textContent = e.message; }
+  finally { boton.disabled = false; }
 };
 
 /* --- controles -------------------------------------------------------- */
@@ -1493,7 +1787,7 @@ function abrirDetalleDeFila(fila) {
   // En el teléfono el detalle queda debajo de la lista: sin esto, al tocar
   // una fila no pasa nada visible.
   if (window.matchMedia('(max-width: 1100px)').matches) {
-    document.getElementById('detalle').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('detalle').scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 }
 
@@ -1531,6 +1825,7 @@ function marcarFalloRefresco(mensaje) {
 /* Ni pisa lo que estas escribiendo ni gasta la conexion con la pestana al fondo. */
 setInterval(function () {
   if (document.hidden) return;
+  if (!document.getElementById('caja-ajustes').classList.contains('hidden')) return;
   var activo = document.activeElement;
   if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA' || activo.tagName === 'SELECT')) return;
   refrescar();
@@ -1539,19 +1834,19 @@ setInterval(function () {
 /* Llegar con #ajustes (desde el menu) abre la caja; quitar el ancla la cierra. */
 function abrirSegunAncla() {
   if (location.hash === '#ajustes') abrirAjustes();
-  else { ver('ajustes', false); sincronizarAjustes(false); }
+  else { ver('caja-ajustes', false); sincronizarAjustes(false); }
 }
 window.addEventListener('hashchange', abrirSegunAncla);
 abrirSegunAncla();
-refrescar();
+if (location.hash !== '#ajustes') refrescar();
 `;
 
   return appShell({
-    titulo: 'Automatización GSG',
-    subtitulo: 'Pedir la ubicación a cada cliente del día',
+    titulo: 'Pedidos GSG',
+    subtitulo: 'Solicitud de ubicación a cada cliente del día',
     contenido,
-    script,
-    css: CSS,
+    script: script + PESTANAS_PEDIDOS_JS,
+    css: CSS + PESTANAS_PEDIDOS_CSS,
     nombreNegocio: opts.nombreNegocio,
     demo,
     icono: '📍',

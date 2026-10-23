@@ -44,8 +44,21 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
   },
   "hoy": {
     "titulo": "Pedidos GSG",
-    "que": "Revisa pedidos, ubicaciones pendientes y errores. El intervalo y el máximo de mensajes por cliente se configuran en Automatización GSG.",
-    "preguntas": []
+    "que": "Revisa los pedidos del día, las ubicaciones pendientes y los errores. Las esperas y los intentos están en Ajustes de chat.",
+    "preguntas": [
+      {
+        "p": "¿Cómo llegan los pedidos?",
+        "r": "GSG los manda a Nuestra API (POST /api/v1/entregas). Si no aparece ninguno, mira en Nuestra API las últimas llamadas y su respuesta.",
+        "ir": "/api-gsgchat#t-llamadas",
+        "irTexto": "Últimas llamadas"
+      },
+      {
+        "p": "¿Qué hago con un pedido marcado en rojo?",
+        "r": "Necesita a una persona: abre su detalle, corrige el dato o vuelve a pedir la ubicación desde ahí.",
+        "ir": "/manual#m-hoy",
+        "irTexto": "Ver instrucciones completas"
+      }
+    ]
   },
   "chat": {
     "titulo": "Chats",
@@ -68,14 +81,40 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
     "preguntas": []
   },
   "conexion-gsg": {
-    "titulo": "API y endpoint GSG",
-    "que": "Revisa las claves, campos obligatorios y recepciones. La respuesta 400 detalla lo que falta por cliente.",
-    "preguntas": []
+    "titulo": "Conexión con GSG",
+    "que": "Configura a dónde le mandamos a GSG las ubicaciones y los problemas: URL base, ruta y la API Key que da GSG.",
+    "preguntas": [
+      {
+        "p": "¿Qué va en la URL base y qué en la ruta?",
+        "r": "La base es la dirección de la API de GSG (https://…/api/); la ruta, lo que va después (v1/gsgchat/location). La pantalla enseña la URL final antes de guardar.",
+        "ir": "/manual#m-conexion-gsg",
+        "irTexto": "Ver instrucciones completas"
+      },
+      {
+        "p": "¿Qué API Key va aquí?",
+        "r": "La que te da GSG. La que creamos nosotros para que GSG nos mande pedidos está en Nuestra API, Claves.",
+        "ir": "/api-gsgchat#t-claves",
+        "irTexto": "Nuestra API, Claves"
+      }
+    ]
   },
   "automatizacion-gsg": {
-    "titulo": "Automatización GSG",
-    "que": "Configura las solicitudes de ubicación y los reintentos.",
-    "preguntas": []
+    "titulo": "Solicitud de ubicación",
+    "que": "Sigue a quién se le está pidiendo la ubicación. El horario, las esperas y los textos están en la pestaña Ajustes de chat.",
+    "preguntas": [
+      {
+        "p": "¿Por qué no sale ningún mensaje?",
+        "r": "Fuera del horario de Ajustes de chat no se le escribe a nadie; sigue solo a la hora de inicio.",
+        "ir": "/automatizacion-gsg#ajustes",
+        "irTexto": "Ajustes de chat"
+      },
+      {
+        "p": "¿Cómo cambio lo que se le dice al cliente?",
+        "r": "En Ajustes de chat, en los textos. Los datos entre llaves se rellenan con lo que mandó GSG.",
+        "ir": "/manual#m-automatizacion-gsg",
+        "irTexto": "Ver instrucciones completas"
+      }
+    ]
   },
   "salud": {
     "titulo": "Salud",
@@ -83,8 +122,8 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
     "preguntas": []
   },
   "historial": {
-    "titulo": "Historial y errores",
-    "que": "Revisa las recepciones del API y sus errores sin abrir un historial de conversaciones.",
+    "titulo": "Historial",
+    "que": "Revisa las recepciones del API de GSG con sus errores y, si eres administrador, quién cambió qué en el panel.",
     "preguntas": []
   },
   "usuarios": {
@@ -94,7 +133,7 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
   },
   "configuracion": {
     "titulo": "Ajustes",
-    "que": "Configura el negocio, supervisor y horario.",
+    "que": "Configura el nombre del negocio y a quién se avisa. El horario y los mensajes al cliente están en Pedidos GSG → Ajustes de chat.",
     "preguntas": []
   },
   "actividad": {
@@ -111,6 +150,24 @@ export const AYUDA_PANTALLAS: Record<string, AyudaPantalla> = {
     "titulo": "Cuentas",
     "que": "El superadministrador administra cuentas independientes.",
     "preguntas": []
+  },
+  "api-gsgchat": {
+    "titulo": "Nuestra API",
+    "que": "Las dos direcciones por las que GSG nos llama (pedidos y cancelar o reintentar) y la clave que usan.",
+    "preguntas": [
+      {
+        "p": "¿Cómo lo pruebo en Postman?",
+        "r": "Descarga la colección y el entorno del Manual, pega la clave en apiKey y lanza las llamadas en orden.",
+        "ir": "/manual#m-postman",
+        "irTexto": "Ver instrucciones completas"
+      },
+      {
+        "p": "¿Por qué responde 400?",
+        "r": "Falta un campo obligatorio o no tiene el formato. «detalles» dice qué campo de qué pedido; no se guarda ninguno de esa llamada.",
+        "ir": "/manual#m-gsg-courier",
+        "irTexto": "Ver los campos"
+      }
+    ]
   }
 };
 

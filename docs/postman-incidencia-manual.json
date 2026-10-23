@@ -1,0 +1,195 @@
+{
+  "info": {
+    "name": "GSGchat - incidencia manual",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://localhost:3100"
+    },
+    {
+      "key": "gsgchat_api_key",
+      "value": ""
+    },
+    {
+      "key": "gsg_url",
+      "value": "https://backend.gsg.pe/api/"
+    },
+    {
+      "key": "gsg_api_key",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Opciones (tipos, pedidos, enviadas)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{gsgchat_api_key}}"
+          }
+        ],
+        "url": "{{base}}/admin/incidencia-manual?phone=51987654321"
+      }
+    },
+    {
+      "name": "2. Enviar incidencia manual (calla al bot)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{gsgchat_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base}}/admin/incidencia-manual",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"51987654321\",\n  \"tipo\": \"incidencia-manual\",\n  \"tracking\": \"GSG-1001\",\n  \"resumen\": \"El cliente confirmo que el numero de contacto no corresponde\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "3. Repetir (debe decir duplicada: true)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{gsgchat_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base}}/admin/incidencia-manual",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"51987654321\",\n  \"tipo\": \"incidencia-manual\",\n  \"tracking\": \"GSG-1001\",\n  \"resumen\": \"El cliente confirmo que el numero de contacto no corresponde\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "4. Sin resumen (debe dar 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{gsgchat_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base}}/admin/incidencia-manual",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"51987654321\",\n  \"tipo\": \"incidencia-manual\",\n  \"tracking\": \"GSG-1001\",\n  \"resumen\": \"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "5. Callar bot",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{gsgchat_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base}}/admin/chat/{{contactId}}/bot",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pausado\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "6. Reactivar bot",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{gsgchat_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base}}/admin/chat/{{contactId}}/bot",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pausado\": false\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "7. DIRECTO A GSG: lo que GSGchat le manda (usa gsg_url y gsg_api_key)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{gsg_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{gsg_url}}reported",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tracking\": \"GSG-1001\",\n  \"tipo\": \"PROBLEMA\",\n  \"motivo\": \"OTRO\",\n  \"codigo\": \"incidencia-manual\",\n  \"queHacer\": null,\n  \"comentario\": \"Prueba desde Postman\",\n  \"telefonoOrigen\": \"987654321\",\n  \"fechaMensaje\": \"2026-10-20T16:00:00.000Z\",\n  \"eventoId\": \"gsgchat-GSG-1001-incidencia-manual-prueba-2026-10-20\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

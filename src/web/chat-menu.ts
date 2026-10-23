@@ -224,7 +224,7 @@ document.addEventListener('click', function (ev) {
 function irAlMensaje(id) {
   var el = document.querySelector('[data-id="' + id + '"].msg');
   if (!el) { toast('Ese mensaje ya no está cargado. Sube para traer los anteriores.'); return; }
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.scrollIntoView({ block: 'center', behavior: 'auto' });
   el.classList.remove('resaltado');
   void el.offsetWidth; /* reinicia la animacion aunque sea el mismo globo */
   el.classList.add('resaltado');

@@ -24,7 +24,8 @@ export type CodigoIncidencia =
   | 'rechaza_contacto'
   | 'ya_en_curso'
   | 'envio_bloqueado'
-  | 'error_envio';
+  | 'error_envio'
+  | 'incidencia_manual';
 
 export interface Incidencia {
   codigo: CodigoIncidencia;
@@ -159,6 +160,17 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     requiereHumano: false,
     reintentable: true,
     reportable: true,
+  },
+  // La marca que deja el reporte manual (src/admin/chat-routes.ts) en el pedido y la solicitud.
+  // No se ofrece en el selector: ahi va `incidencia-manual` con su resumen.
+  incidencia_manual: {
+    codigo: 'incidencia_manual',
+    titulo: 'Reportada a GSG (incidencia manual)',
+    explicacion: 'Una persona reportó este pedido a GSG con su propio resumen. El bot queda callado en este chat.',
+    queHacer: 'Esperar la respuesta de GSG o atender al cliente a mano.',
+    requiereHumano: true,
+    reintentable: false,
+    reportable: false,
   },
 };
 

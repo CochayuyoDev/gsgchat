@@ -11,7 +11,7 @@ import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { politicaDesdeConfig } from '../src/salud/politica.js';
-import { crearServicioAjustes, type ServicioAjustes } from '../src/ajustes/generales.js';
+import { crearServicioAjustes, createAjustesGeneralesRepo, type ServicioAjustes } from '../src/ajustes/generales.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, CLAVE_API_PRUEBA } from './fakes.js';
 
 const ENV_BASE = {
@@ -50,6 +50,34 @@ function cookieDe(res: { headers: Record<string, unknown> }): string {
 }
 
 describe('servicio de ajustes', () => {
+  it('relee el catálogo persistido aunque el registro incluya el modo de prueba retirado', async () => {
+    let valor: string | undefined;
+    const pool = { async query(sql: string, params: unknown[]) {
+      if (sql.startsWith('insert')) valor = String(params[1]);
+      return { rows: valor ? [{ value: valor }] : [] };
+    }} as unknown as Parameters<typeof createAjustesGeneralesRepo>[0];
+    const repo = createAjustesGeneralesRepo(pool);
+    const erroresManuales = [{ id: 'manual-persistido', nombre: 'Paquete dañado', activo: true }];
+    await repo.set({ erroresManuales });
+    expect((await repo.get()).erroresManuales).toEqual(erroresManuales);
+  });
+
+  it('guarda el catálogo manual, permite administrarlo y rechaza nombres duplicados', async () => {
+    const config = loadConfig(ENV_BASE);
+    const repos = createFakeRepos();
+    const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
+    const error = { id: 'manual-direccion', nombre: 'Dirección incompleta', activo: true };
+    await ajustes.guardar({ erroresManuales: [error] });
+    const recargado = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
+    expect(recargado.actual().erroresManuales).toEqual([error]);
+    await expect(ajustes.guardar({ erroresManuales: [error, { ...error, id: 'manual-otro', nombre: ' DIRECCIÓN INCOMPLETA ' }] })).rejects.toThrow();
+    await expect(ajustes.guardar({ erroresManuales: [{ ...error, nombre: ' ' }] })).rejects.toThrow();
+    await ajustes.guardar({ erroresManuales: [{ ...error, nombre: 'Corregir dirección', activo: false }] });
+    expect(ajustes.actual().erroresManuales[0]).toMatchObject({ nombre: 'Corregir dirección', activo: false });
+    await ajustes.guardar({ erroresManuales: [] });
+    expect(ajustes.actual().erroresManuales).toEqual([]);
+  });
+
   it('el horario de entregas amplía el del número (los pines salen hasta el horario extendido)', async () => {
     const config = loadConfig(ENV_BASE);
     const repos = createFakeRepos();

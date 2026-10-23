@@ -36,6 +36,7 @@ import { ajustesPorDefecto, aplicarAjustes, conFranjaDeLaPolitica, rellenarTexto
 import { INCIDENCIAS, incidenciaDeErrorDeEnvio, type CodigoIncidencia } from './incidencias.js';
 import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadResumen, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { diaEnZona, resolverPorUbicacion, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
+import { horaEnPalabras, horarioEnPalabras } from '../entregas/textos.js';
 import {
   DESCRIPCION_PASO,
   PLANTILLAS,
@@ -116,6 +117,8 @@ export interface MotorDeps {
    * pines aunque GSG entregue hasta las 22:00.
    */
   horarioExtra?: () => { desde: string; hasta: string } | null;
+  /** Franja de Pedidos GSG para redactar las solicitudes y recordatorios. */
+  horarioMensaje?: (pedido: Pick<Solicitud, 'distrito' | 'direccion'>) => { desde: string; hasta: string; extendidoHasta?: string } | null;
   /** Los stickers automaticos (tras el primer mensaje, tras la despedida). Ver src/stickers. */
   stickers?: ServicioStickers;
   /**
@@ -453,15 +456,24 @@ export function crearMotor(deps: MotorDeps): Motor {
     return { tienda: pedido?.datosEnvio?.empresaNombre?.trim() || null, producto: pedido?.datosEnvio?.producto?.trim() || null };
   }
 
-  const contexto = (solicitud: Solicitud): ContextoMensaje => ({
-    nombre: solicitud.nombre,
-    negocio: opciones.negocio,
-    referencia: solicitud.referencia,
-    direccion: solicitud.direccion,
-    distrito: solicitud.distrito,
-    // Sin boton nativo, el texto explica el clip en vez de un boton que no existe.
-    conBoton: deps.conBoton?.() ?? false,
-  });
+  const contexto = (solicitud: Solicitud): ContextoMensaje => {
+    const horario = deps.horarioMensaje?.(solicitud);
+    return {
+      nombre: solicitud.nombre,
+      negocio: opciones.negocio,
+      referencia: solicitud.referencia,
+      direccion: solicitud.direccion,
+      distrito: solicitud.distrito,
+      ...(horario ? {
+        desde: horaEnPalabras(horario.desde),
+        hasta: horaEnPalabras(horario.hasta),
+        hastaExtendido: horario.extendidoHasta ? horaEnPalabras(horario.extendidoHasta) : undefined,
+        horario: horarioEnPalabras(horario.desde, horario.hasta),
+      } : {}),
+      // Sin boton nativo, el texto explica el clip en vez de un boton que no existe.
+      conBoton: deps.conBoton?.() ?? false,
+    };
+  };
 
   const contextoIncidencia: ContextoIncidencia = { repos, ahora, log: deps.log };
   const anotarIncidencia = (
@@ -651,6 +663,13 @@ export function crearMotor(deps: MotorDeps): Motor {
         await repos.rutas.actualizarSolicitud(solicitud.id, {
           proximoIntentoAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)),
         });
+        return { accion: 'nada', solicitudId: solicitud.id, motivo: salida.reason };
+      }
+      // «De este me encargo yo»: una persona atiende el chat. No es incidencia
+      // ni intento gastado; se vuelve a mirar mas tarde, por si lo suelta.
+      if (salida.code === 'bot_pausado') {
+        esperar(solicitud, salida.code, salida.reason, 30 * 60_000);
+        await repos.rutas.actualizarSolicitud(solicitud.id, { proximoIntentoAt: new Date(momento.getTime() + 30 * 60_000) });
         return { accion: 'nada', solicitudId: solicitud.id, motivo: salida.reason };
       }
       // El monitor aparto a este contacto porque Meta dijo que no tiene

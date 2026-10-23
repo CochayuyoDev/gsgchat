@@ -87,7 +87,7 @@ const CSS = `
     .mas-filtros-cb:checked ~ .filtros-mas { display: grid; }
   }
 
-  .lista { max-height: 70vh; overflow: auto; transition: opacity .15s ease; }
+  .lista { max-height: 70vh; overflow: auto;  }
   .lista[aria-busy="true"] { opacity: .45; }
   @media (max-width: 1100px) { .lista { max-height: 60vh; } }
   .fila { display: block; width: 100%; text-align: left; padding: 10px var(--esp-4); border: 0; border-bottom: 1px solid var(--borde); border-radius: 0; background: none; font: inherit; color: inherit; cursor: pointer; min-height: 0; }
@@ -646,7 +646,7 @@ async function abrir(id) {
       if (Number(f.getAttribute('data-id')) === id) f.setAttribute('aria-current', 'true');
       else f.removeAttribute('aria-current');
     });
-    $('lector').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('lector').scrollIntoView({ behavior: 'auto', block: 'start' });
   } catch (e) { toast(e.message); }
 }
 
@@ -668,7 +668,7 @@ function actualizarBusquedaEnHilo(indice) {
   $('l-buscar-n').textContent = !buscaEnHilo ? '' : hay ? (marcaActual + 1) + '/' + hay : 'nada';
   $('l-buscar-antes').disabled = hay < 2;
   $('l-buscar-despues').disabled = hay < 2;
-  if (hay) marcas[marcaActual].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (hay) marcas[marcaActual].scrollIntoView({ block: 'center', behavior: 'auto' });
 }
 
 function moverBusqueda(paso) { if ($('l-hilo').querySelectorAll('mark').length) actualizarBusquedaEnHilo(marcaActual + paso); }

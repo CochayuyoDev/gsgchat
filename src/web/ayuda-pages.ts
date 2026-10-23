@@ -19,6 +19,8 @@
 
 import { appShell, todosLosModulos, icono } from './shell.js';
 import { escapeHtml } from './login-page.js';
+import { CAMPOS, CAMPOS_FLUJO, EJEMPLO_COURIER, EJEMPLO_FLUJO } from './gsg-courier-page.js';
+import { coleccionPostman, entornoPostman, CARPETAS_POSTMAN } from './postman-coleccion.js';
 
 const CSS = `
   /* La paleta y las clases compartidas (.tarjeta, .btn, .chip) vienen del
@@ -35,6 +37,10 @@ const CSS = `
   li { margin-bottom: 4px; }
   code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--superficie-2); padding: 1px 5px; border-radius: 5px; }
   pre { background: var(--superficie-2); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px; overflow: auto; font-size: 12.5px; margin: 8px 0 0; }
+  .tarjeta .tablewrap { margin: 10px 0 4px; }
+  .tarjeta td code { white-space: nowrap; }
+  @media (max-width: 560px) { .tarjeta td code { white-space: normal; overflow-wrap: anywhere; } }
+  .acciones-manual { display: flex; gap: var(--esp-2); flex-wrap: wrap; margin: 12px 0 4px; }
 
   /* --- el indice y el buscador del manual --- */
   .buscador { display: flex; gap: var(--esp-2); flex-wrap: wrap; align-items: center; }
@@ -94,22 +100,115 @@ interface Capitulo {
   secciones: Seccion[];
 }
 
+/** Un bloque de codigo del manual (JSON o cabeceras), escapado. */
+const bloque = (texto: string) => `<pre>${escapeHtml(texto)}</pre>`;
+
+/** La tabla de campos de una API, desde la misma lista que pinta Nuestra API. */
+const tablaCampos = (filas: Array<[string, boolean, string]>) =>
+  `<div class="tablewrap"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${filas
+    .map(([campo, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(campo)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`)
+    .join('')}</tbody></table></div>`;
+
+const CABECERAS = 'Content-Type: application/json\nX-API-Key: <la API Key de GSGchat>';
+
+/** Lo que GSGchat le manda a GSG por cada problema (el contrato del plan de GSG; ver docs/CONEXION-GSG.md). */
+const EJEMPLO_PROBLEMA = {
+  tracking: 'GSG-E-240268', tipo: 'PROBLEMA', motivo: 'TELEFONO_MAL', codigo: 'sin_whatsapp',
+  queHacer: 'Manda otro número del cliente', comentario: 'El número no tiene WhatsApp',
+  telefonoOrigen: '51999999999', fechaMensaje: '2026-10-12T18:40:00.000Z',
+  eventoId: 'gsgchat-GSG-E-240268-sin_whatsapp-2026-10-12',
+};
+
 /**
  * El manual, por capitulos. El orden es el del recorrido de quien acaba de
- * llegar: primero poner el sistema en marcha, luego el dia a dia, y al final
- * lo que se toca una vez (la IA, el numero, las conexiones y las cuentas).
+ * llegar: primero conectar GSG (las dos direcciones), luego el dia a dia, y
+ * al final lo que se toca una vez.
+ *
+ * Lo tecnico de las APIs (campos, ejemplos) sale de las mismas listas que
+ * pinta Nuestra API y que usa la coleccion de Postman: aqui no se escribe
+ * dos veces. El contrato completo es /api/v1/openapi.json.
  */
 const MANUAL: Capitulo[] = [
- { titulo: 'API y WhatsApp', secciones: [
-  { clave: 'empezar', titulo: 'Puesta en marcha', cuerpo: '<p>Conecta WhatsApp en Conexión, configura la IA y revisa Salud. Cada cuenta tiene sus datos y su número independientes.</p>' },
-  { clave: 'gsg-courier', titulo: 'Recibir pedidos de GSG', cuerpo: '<p>GSG envía hasta 600 pedidos a POST /api/v1/entregas con su clave en la cabecera X-API-Key. Tracking, empresa, cliente, teléfono, método de pago y monto a cobrar son obligatorios. El 400 identifica al cliente y detalla los campos faltantes. Los pedidos guardados aparecen en Pedidos GSG.</p>' },
-  { clave: 'hoy', titulo: 'Pedidos y ubicación', cuerpo: '<p>Se solicita ubicación hasta tres veces por cliente. Un pin o enlace válido se registra y se devuelve a GSG con tracking, latitud y longitud. Los errores y pedidos sin respuesta quedan visibles para atención humana. Se puede corregir o reintentar desde Pedidos GSG.</p>' },
+ { titulo: 'Conectar con GSG', secciones: [
+  { clave: 'api-gsgchat', titulo: 'Nuestra API: cómo nos llama GSG', cuerpo: `<p>GSG llama a GSGchat por dos direcciones. Las dos usan <b>POST</b>, el mismo servidor y la misma API Key.</p>
+<div class="tablewrap"><table><thead><tr><th>API</th><th>Dirección</th><th>Para qué</th></tr></thead><tbody>
+<tr><td>API 1</td><td><code>POST /api/v1/entregas</code></td><td>GSG nos manda los pedidos del día.</td></tr>
+<tr><td>API 2</td><td><code>POST /api/v1/flujo</code></td><td>GSG nos pide cancelar o reintentar un pedido.</td></tr>
+</tbody></table></div>
+<h3>La API Key</h3>
+<ol><li>En <a href="/api-gsgchat#t-claves">Nuestra API → Claves</a>, escribe para quién es (por ejemplo «GSG principal») y pulsa <b>Crear clave</b>.</li>
+<li>Cópiala en ese momento: después no se vuelve a ver. Si se pierde, se renueva y la anterior deja de valer.</li>
+<li>Entrégala al programador de GSG. Va en la cabecera <code>X-API-Key</code>, nunca en la URL ni en el cuerpo.</li></ol>
+<p class="muted">No es la misma clave que la «API Key de GSG» de <a href="#m-conexion-gsg">Conexión con GSG</a>: esa la da GSG y sirve para lo que nosotros le mandamos.</p>
+<p>El contrato completo, con todos los campos y errores, está en <a href="/api/v1/openapi.json" target="_blank" rel="noopener">/api/v1/openapi.json</a>.</p>` },
+  { clave: 'gsg-courier', titulo: 'API 1: recibir pedidos', cuerpo: `<p>GSG manda los pedidos del día a <code>POST /api/v1/entregas</code> en cuanto los tiene. GSGchat no se los pide.</p>
+<h3>Cabeceras</h3>${bloque(CABECERAS)}
+<h3>Cuerpo</h3><p>Un pedido, una lista <code>[...]</code> o <code>{ "pedidos": [...] }</code>, hasta 600 por llamada:</p>${bloque(JSON.stringify(EJEMPLO_COURIER, null, 2))}
+${tablaCampos(CAMPOS.map(([nombre, json, obligatorio, detalle]) => [json, obligatorio, detalle || nombre]))}
+<h3>Qué responde</h3>
+<ul><li><b>201</b>: al menos un pedido quedó guardado; cada uno trae su <code>id</code>. Aparecen en <a href="/hoy">Pedidos GSG</a>.</li>
+<li><b>200</b>: todos ya estaban hoy; no se duplica nada. Repetir la misma llamada es seguro.</li>
+<li><b>400</b>: falta un campo o no tiene el formato. <code>detalles</code> dice qué campo de qué pedido, y no se guarda ninguno de la llamada.</li>
+<li><b>401</b> sin clave o con una que no vale; <b>403</b> si la clave no tiene permiso; <b>429</b> con más de 120 llamadas por minuto.</li></ul>
+<p>Cómo probar las respuestas en Postman: <a href="/soporte#pruebas-api-gsg">Soporte → Pruebas de Nuestra API</a>.</p>` },
+  { clave: 'gsg-flujo', titulo: 'API 2: cancelar o reintentar un pedido', cuerpo: `<p>GSG pide dejar de escribirle a un tracking (<code>CANCELAR</code>) o volver a escribirle porque ya corrigió los datos (<code>REINTENTAR</code>). Actúa sobre un pedido que ya llegó por la API 1: no crea pedidos.</p>
+<h3>Cabeceras</h3>${bloque(CABECERAS)}
+<h3>Cuerpo</h3>${bloque(JSON.stringify(EJEMPLO_FLUJO, null, 2))}
+${tablaCampos(CAMPOS_FLUJO)}
+<h3>Qué responde</h3>
+<ul><li><b>200</b> con <code>detalle</code>. Repetir la misma orden responde 200 con <code>"sinCambios": true</code> y no le escribe dos veces al cliente.</li>
+<li><b>404</b> si no hay ningún pedido en curso con ese tracking; <b>409</b> si ya está entregado, cancelado o terminado.</li></ul>
+<p>Para probar sin cambiar nada, añade <code>"simular": true</code>, o usa <a href="/api-gsgchat#t-api2">Nuestra API → API 2 → Probar</a>. Cada respuesta y cómo provocarla: <a href="/api-gsgchat#respuestas-2">Nuestra API → API 2 → Respuestas</a>.</p>` },
+  { clave: 'postman', titulo: 'Probar con Postman', cuerpo: `<p>La colección trae todas las llamadas ya armadas: recibir pedidos, cancelar o reintentar, consultar y corregir, con ejemplos de éxito y de error.</p>
+<div class="acciones-manual"><button type="button" class="btn primario" id="manual-postman">Descargar la colección</button><button type="button" class="btn" id="manual-postman-entorno">Descargar el entorno</button></div>
+<h3>Importar</h3>
+<ol><li>En Postman: <b>Import</b> y arrastra los dos archivos.</li>
+<li>En <b>Environments</b>, abre «GSGchat». <code>baseUrl</code> ya trae la dirección de este servidor; en <code>apiKey</code> pega la API Key creada en <a href="/api-gsgchat#t-claves">Nuestra API → Claves</a>. Es un campo secreto: no se ve en pantalla.</li>
+<li>Arriba a la derecha, elige el entorno «GSGchat».</li></ol>
+<h3>Probar en orden</h3>
+<ol>${CARPETAS_POSTMAN.map((c) => `<li><b>${escapeHtml(c.nombre.replace(/^\d+\.\s*/, ''))}</b>: ${escapeHtml(c.descripcion)}</li>`).join('')}</ol>
+<p>Todas usan la variable <code>tracking</code> de la colección (<code>${escapeHtml(EJEMPLO_FLUJO.tracking)}</code>). Para crear otro pedido, cámbiala por un tracking nuevo.</p>
+<h3>Armar una llamada a mano</h3>
+<ol><li>Método: <b>POST</b> (o el de la llamada).</li>
+<li>URL: la dirección del servidor más la ruta, por ejemplo <code>https://tu-servidor/api/v1/entregas</code>.</li>
+<li><b>Headers</b>: <code>Content-Type: application/json</code> y <code>X-API-Key</code> con la clave.</li>
+<li><b>Body</b> → <b>raw</b> → <b>JSON</b>, y pega el cuerpo de la API.</li></ol>
+<p class="muted">Los archivos también están en el repositorio, en <code>docs/postman/</code>. Salen de los mismos ejemplos que esta página, y una prueba comprueba que coinciden con el contrato OpenAPI.</p>` },
+  { clave: 'conexion-gsg', titulo: 'Conexión con GSG: lo que le mandamos', cuerpo: `<p>Es la dirección contraria: GSGchat le manda a GSG cada ubicación que registra un cliente y los problemas (número sin WhatsApp, inválido, «no soy yo»…). Se configura en <a href="/conexion-gsg">Conexión con GSG</a> → «Cambiar la URL o la API Key de GSG».</p>
+<div class="tablewrap"><table><thead><tr><th>Campo</th><th>Qué va</th><th>Ejemplo</th></tr></thead><tbody>
+<tr><td>URL base de GSG</td><td>La dirección de su API, con https y sin «?» ni «#». La dan sus programadores.</td><td><code>https://backend.developer.gsgcorp.pe/api/</code></td></tr>
+<tr><td>Ruta para enviar la ubicación</td><td>Lo que va después de la base, sin http:// ni «..».</td><td><code>v1/gsgchat/location</code></td></tr>
+<tr><td>Ruta para reportar problemas</td><td>Opcional. Vacía, se usa <code>incidencias</code>.</td><td><code>v1/gsgchat/reported</code></td></tr>
+<tr><td>Ruta para consultar el estado</td><td>Opcional. Vacía, no se le pregunta nada a GSG.</td><td><code>v1/gsgchat/estado</code></td></tr>
+<tr><td>API Key de GSG</td><td>La da GSG. Se guarda cifrada y va solo en la cabecera <code>X-API-Key</code>.</td><td>(la da GSG)</td></tr>
+</tbody></table></div>
+<p>La URL final es la base más la ruta: <code>https://backend.developer.gsgcorp.pe/api/v1/gsgchat/location</code>. La pantalla la enseña antes de guardar.</p>
+<h3>Probar</h3>
+<p>«Guardar y probar» no llama a GSG: revisa que la base, las rutas y la clave tengan buena forma. Si GSG rechaza la clave (401 o 403), se ve en «Lo que enviamos a GSG» y la cola se detiene hasta que cambie la configuración o alguien pulse «Enviar ahora».</p>
+<h3>Cómo le llegan los problemas a GSG</h3>
+<p>Un POST a la ruta de problemas, uno por tracking y error, con este formato:</p>${bloque(JSON.stringify(EJEMPLO_PROBLEMA, null, 2))}
+<p class="muted">Qué pasa con cada respuesta de GSG (2xx, 401, 429, 5xx…) está en <code>docs/CONEXION-GSG.md</code>.</p>` },
+ ] },
+ { titulo: 'El día a día', secciones: [
+  { clave: 'empezar', titulo: 'Puesta en marcha', cuerpo: `<ol><li>Conecta el número en <a href="/setup">Conexión WhatsApp</a>.</li>
+<li>Crea la API Key para GSG en <a href="/api-gsgchat#t-claves">Nuestra API</a> y pon la de GSG en <a href="/conexion-gsg">Conexión con GSG</a>.</li>
+<li>Revisa el horario y los mensajes en <a href="/automatizacion-gsg#ajustes">Pedidos GSG → Ajustes de chat</a>.</li>
+<li>Comprueba en el <a href="/panel#inicio">Dashboard</a> que WhatsApp, la API y GSG salen conectados.</li></ol>` },
+  { clave: 'hoy', titulo: 'Pedidos y ubicación', cuerpo: '<p>Se solicita ubicación hasta tres veces por cliente. Un pin o enlace válido se registra y se devuelve a GSG con tracking, latitud y longitud. Los errores y pedidos sin respuesta quedan visibles para atención humana. Se puede corregir o reintentar desde <a href="/hoy">Pedidos GSG</a>.</p>' },
+  { clave: 'automatizacion-gsg', titulo: 'Solicitud de ubicación y ajustes de chat', cuerpo: `<p>En <a href="/automatizacion-gsg">Pedidos GSG → Solicitud de ubicación</a> se ve a quién se le está pidiendo la ubicación y en qué punto va cada uno.</p>
+<p>En <a href="/automatizacion-gsg#ajustes">Ajustes de chat</a> se configura:</p>
+<ul><li><b>Horario</b>: fuera de él no se le escribe a nadie; sigue solo a la hora de inicio.</li>
+<li><b>Esperas e intentos</b>: cuánto se espera entre un mensaje y el siguiente, y cuántas veces se pide la ubicación antes de dejarlo a una persona.</li>
+<li><b>Textos</b>: lo que se le dice al cliente. Los datos entre llaves, como el tracking o el producto, se rellenan con lo que mandó GSG.</li></ul>
+<p>Los cambios se guardan con <b>Guardar</b> y valen para los mensajes siguientes, no para los que ya salieron.</p>` },
   { clave: 'chat', titulo: 'Chats', cuerpo: '<p>Lee y responde conversaciones, envía adjuntos y solicita ubicación. Las conversaciones cerradas se conservan en Chats guardados.</p>' },
+  { clave: 'salud', titulo: 'Salud y errores', cuerpo: '<p>Revisa conexión, reconexión, riesgo, cupo, ritmo, alertas y respaldos. Historial y errores muestra si cada mensaje se envió, se entregó o falló. Un pedido guardado no significa que WhatsApp ya lo haya entregado.</p>' },
+ ] },
+ { titulo: 'Configuración', secciones: [
   { clave: 'ia', titulo: 'IA y ficha de productos', cuerpo: '<p>Configura el modelo y su clave. En Conocimiento carga productos, precios, stock y condiciones. Entrenamiento conserva ejemplos y reglas. Cuando se requiere una persona, el bot deja la conversación al equipo.</p>' },
   { clave: 'plantillas', titulo: 'Plantillas de WhatsApp', cuerpo: '<p>Crea o edita plantillas propias, sincroniza su aprobación y súbelas a Meta. Fuera de la ventana de atención de Meta se necesita una plantilla aprobada.</p>' },
-  { clave: 'salud', titulo: 'Salud y errores', cuerpo: '<p>Revisa conexión, reconexión, riesgo, cupo, ritmo, alertas y respaldos. Historial y errores muestra si cada mensaje se envió, se entregó o falló. Un pedido guardado no significa que WhatsApp ya lo haya entregado.</p>' },
   { clave: 'cuentas', titulo: 'Usuarios y cuentas', cuerpo: '<p>El superadministrador gestiona cuentas independientes; cada administrador configura su cuenta y crea operadores. Usuarios conserva roles y contraseñas, y Actividad registra cambios.</p>' },
- ] }
+ ] },
 ];
 
 /** El ancla del manual para un modulo: /panel#enviar -> enviar, /rutas#ajustes -> rutas-ajustes. */
@@ -199,7 +298,23 @@ ${secciones}
 </section>
 </div>`;
 
-  const script = String.raw`
+  const datosPostman = JSON.stringify({ coleccion: coleccionPostman(), entorno: entornoPostman() }).replace(/</g, '\\u003c');
+  const script = 'var POSTMAN = ' + datosPostman + ';' + String.raw`
+/* --- la coleccion de Postman: se baja con la direccion de este servidor --- */
+function bajarJson(nombre, datos) {
+  var url = URL.createObjectURL(new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' }));
+  var a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+document.getElementById('manual-postman').onclick = function () { bajarJson('gsgchat.postman_collection.json', POSTMAN.coleccion); };
+document.getElementById('manual-postman-entorno').onclick = function () {
+  var entorno = JSON.parse(JSON.stringify(POSTMAN.entorno));
+  entorno.values.forEach(function (v) { if (v.key === 'baseUrl') v.value = location.origin; });
+  bajarJson('gsgchat.postman_environment.json', entorno);
+};
+
 /* --- el buscador: esconde las secciones que no hablan de lo buscado ------ */
 var SECCIONES = [].slice.call(document.querySelectorAll('[data-buscar]'));
 var SIN = document.getElementById('sin-resultados');
@@ -280,6 +395,34 @@ document.getElementById('ay-limpiar').onclick = function () { AY_HISTORIAL = [];
 export function soportePage(opts: { nombreNegocio: string; demo?: boolean; version: string }): string {
   const contenido = `
 <div class="wrap">
+<section class="tarjeta" id="pruebas-api-gsg">
+  <h2>Pruebas de Nuestra API</h2>
+  <p class="muted">La pantalla <a href="/api-gsgchat">Nuestra API</a> conserva direcciones, claves y validadores. Aquí tienes cómo hacer las pruebas y leer sus respuestas.</p>
+  <h3>Recibir un pedido (API 1)</h3>
+  <ol>
+    <li>En <a href="/api-gsgchat#t-claves">Nuestra API → Claves</a>, crea una clave con permiso para recibir pedidos y cópiala. No la compartas en capturas ni la pongas en la URL.</li>
+    <li>En Postman, crea una petición <b>POST</b> a <code>https://tu-servidor/api/v1/entregas</code>.</li>
+    <li>En <b>Headers</b>, agrega <code>Content-Type: application/json</code> y <code>X-API-Key</code> con la clave.</li>
+    <li>En <b>Body → raw → JSON</b>, pega este ejemplo y reemplaza el teléfono por uno de pruebas autorizado. Una recepción válida crea el pedido y puede iniciar el flujo de WhatsApp.</li>
+  </ol>
+  ${bloque(JSON.stringify(EJEMPLO_COURIER, null, 2))}
+  <p><b>Resultado:</b> <code>201</code> significa que se creó al menos un pedido. Si repites la llamada ese día, responde <code>200</code> y no duplica el pedido. Revisa el resultado en <a href="/hoy">Pedidos GSG</a> o en <a href="/panel#historial">Historial y errores → Recepciones de GSG</a>.</p>
+  <h3>Cancelar o reintentar sin cambiar el pedido (API 2)</h3>
+  <p>Usa el tracking de un pedido existente. Envía un <b>POST</b> a <code>https://tu-servidor/api/v1/flujo</code> con las mismas cabeceras y este cuerpo:</p>
+  ${bloque(JSON.stringify({ ...EJEMPLO_FLUJO, simular: true }, null, 2))}
+  <p>Con <code>"simular": true</code>, el resultado explica qué haría sin cancelar el pedido ni volver a escribir al cliente. Para ejecutar una orden real, quita <code>simular</code> solo después de validar el resultado y usa un pedido de prueba.</p>
+  <h3>Cómo comprobar errores comunes</h3>
+  <ul>
+    <li><code>400</code>: manda un cuerpo incompleto o un campo con formato incorrecto; la respuesta indica el campo.</li>
+    <li><code>401</code>: omite <code>X-API-Key</code> o usa una clave inválida.</li>
+    <li><code>403</code>: la clave existe, pero no tiene el permiso que requiere esa API.</li>
+    <li><code>404</code>: revisa la ruta y, en API 2, que el tracking exista y siga en curso.</li>
+    <li><code>405</code>: usa <code>POST</code>.</li>
+    <li><code>429</code>: espera el tiempo indicado en <code>Retry-After</code>.</li>
+  </ul>
+  <p class="muted">No provoques errores de carga ni repitas muchas llamadas en producción. La colección de Postman y el detalle completo están en <a href="/manual#m-postman">Manual → Probar con Postman</a>.</p>
+</section>
+
 <section class="tarjeta">
   <h2>Diagnóstico en vivo</h2>
   <p class="muted">Lo que el propio sistema dice de sí mismo ahora mismo. Si algo sale en rojo, empieza por ahí.</p>

@@ -18,14 +18,14 @@ export const DIALOGO_CSS = `
   .dlg-fondo {
     position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
     background: rgba(11, 20, 26, .55); backdrop-filter: blur(2px);
-    padding: 20px; animation: dlg-aparece .12s ease-out;
+    padding: 20px;
   }
-  @keyframes dlg-aparece { from { opacity: 0 } to { opacity: 1 } }
-  @keyframes dlg-sube { from { transform: translateY(8px); opacity: .6 } to { transform: none; opacity: 1 } }
+
+
   .dlg {
     background: var(--panel, #fff); color: var(--text, #111b21);
     border-radius: 14px; width: min(430px, 100%); padding: 22px;
-    box-shadow: 0 18px 50px rgba(0,0,0,.28); animation: dlg-sube .14s ease-out;
+    box-shadow: 0 18px 50px rgba(0,0,0,.28);
   }
   .dlg h3 { margin: 0 0 8px; font-size: 17px; }
   .dlg p { margin: 0 0 14px; font-size: 13.5px; color: var(--muted, #667781); line-height: 1.45; }
@@ -258,6 +258,81 @@ function confirmarDialogo(opciones) {
     document.body.appendChild(fondo);
     si.focus();
   });
+}
+
+/**
+ * Reportar a GSG un error de un cliente con el tipo y el resumen de una
+ * persona (chat y Automatizacion GSG). Muestra el pedido y el tracking antes
+ * de enviar; el boton se apaga mientras sale y, si falla, se conserva lo
+ * escrito. Enviarla tambien calla al bot de ese cliente.
+ *
+ * opciones: phone (obligatorio), alTerminar (se llama tras enviar).
+ */
+async function abrirIncidenciaManual(opciones) {
+  var phone = String(opciones.phone || '');
+  var datos;
+  try { datos = await api('/admin/incidencia-manual?phone=' + encodeURIComponent(phone)); }
+  catch (e) { toast('No se pudo abrir: ' + (e.message || e)); return; }
+  var fondo = document.createElement('div');
+  fondo.className = 'dlg-fondo';
+  var pedidos = datos.pedidos || [];
+  /* Un pedido ya reportado a GSG no se vuelve a reportar: solo se reintenta uno que falló. */
+  var reportados = {};
+  (datos.enviadas || []).forEach(function (r) { if (r.estado === 'Enviada' && r.tracking) reportados[r.tracking] = true; });
+  fondo.innerHTML =
+    '<div class="dlg leccion" role="dialog" aria-modal="true">' +
+      '<h3>Enviar incidencia manual a GSG</h3>' +
+      '<p>Al enviarla, el bot se calla en este chat hasta que lo reactives.</p>' +
+      '<div class="campo"><label for="im-tipo">Tipo de error</label><select id="im-tipo">' +
+        (datos.tipos || []).map(function (t) { return '<option value="' + esc(t.codigo) + '">' + esc(t.titulo) + '</option>'; }).join('') +
+      '</select><div class="muted">Errores exclusivos del reporte manual. Se administran en Ajustes.</div></div>' +
+      '<div class="campo"><label for="im-tracking">Pedido y tracking guardados (es el que se envía)</label>' +
+        (pedidos.length > 1
+          ? '<select id="im-tracking">' + pedidos.map(function (p) { return '<option value="' + esc(p.tracking) + '"' + (reportados[p.tracking] ? ' disabled' : '') + '>' + esc(p.tracking) + (p.cliente ? ' - ' + esc(p.cliente) : '') + (reportados[p.tracking] ? ' (ya reportado)' : '') + '</option>'; }).join('') + '</select>'
+          : pedidos.length === 1
+            ? '<input id="im-tracking" value="' + esc(pedidos[0].tracking) + '" readonly>'
+            : '<input id="im-tracking" value="" readonly placeholder="Sin pedido con tracking guardado">') +
+        '<div class="muted">Teléfono del cliente: ' + esc(phone) + '</div></div>' +
+      '<div class="campo"><label for="im-resumen">Resumen para GSG (obligatorio)</label><textarea id="im-resumen" rows="4" maxlength="500" placeholder="Por qué reportas el error"></textarea></div>' +
+      '<div class="muted" id="im-ya"></div>' +
+      '<div class="mal" id="im-mal"></div>' +
+      '<div class="botones"><button type="button" id="im-no">Cancelar</button><button type="button" class="principal" id="im-si">Enviar a GSG</button></div>' +
+    '</div>';
+  document.body.appendChild(fondo);
+  var si = fondo.querySelector('#im-si');
+  var mal = fondo.querySelector('#im-mal');
+  var cerrar = function () { fondo.remove(); };
+  fondo.querySelector('#im-no').onclick = cerrar;
+  var yaReportado = function () { var t = fondo.querySelector('#im-tracking'); return !!(t && reportados[t.value.trim()]); };
+  var marcarYa = function () {
+    var ya = yaReportado();
+    fondo.querySelector('#im-ya').textContent = ya ? 'Este pedido ya fue reportado a GSG: no se puede reportar de nuevo.' : '';
+    si.disabled = ya || !(datos.tipos || []).length;
+    if (!(datos.tipos || []).length) mal.textContent = 'Crea y activa un error en Ajustes antes de reportar.';
+  };
+  var selTracking = fondo.querySelector('select#im-tracking');
+  if (selTracking) {
+    for (var k = 0; k < selTracking.options.length; k++) { if (!selTracking.options[k].disabled) { selTracking.selectedIndex = k; break; } }
+    selTracking.addEventListener('change', marcarYa);
+  }
+  marcarYa();
+  si.onclick = async function () {
+    var resumen = fondo.querySelector('#im-resumen').value.trim();
+    var tracking = fondo.querySelector('#im-tracking').value.trim();
+    if (reportados[tracking]) { marcarYa(); return; }
+    if (!tracking) { mal.textContent = 'Este cliente no tiene un pedido con tracking guardado.'; return; }
+    if (resumen.length < 5) { mal.textContent = 'Escribe el resumen para GSG.'; return; }
+    si.disabled = true; si.textContent = 'Enviando…'; mal.textContent = '';
+    try {
+      var r = await api('/admin/incidencia-manual', { method: 'POST', body: { phone: phone, tipo: fondo.querySelector('#im-tipo').value, tracking: tracking, resumen: resumen } });
+      toast(r.duplicada ? 'Ese reporte ya se había enviado: no se repite. El bot sigue callado.' : 'Incidencia enviada a GSG. Bot callado en este chat.');
+      cerrar();
+      if (opciones.alTerminar) opciones.alTerminar();
+    } catch (e) {
+      mal.textContent = 'No se pudo enviar (' + (e.message || e) + '). Lo escrito se conserva: puedes reintentar.';
+      si.disabled = false; si.textContent = 'Reintentar';
+    }
+  };
 }
 
 /** Sin sesion: a la pantalla de entrar, y de vuelta aqui despues. */
