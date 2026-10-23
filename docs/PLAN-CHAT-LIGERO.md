@@ -14,7 +14,7 @@ No envíes mensajes a clientes reales, no llames a GSG real y no muestres claves
 
 1. Una sesión web nueva empieza sin mensajes anteriores a ese login; una recarga conserva su alcance.
 2. El navegador muestra únicamente conversaciones iniciadas por GSGchat dentro de esa sesión y sus respuestas visibles. Nunca importa el WhatsApp personal.
-3. La base conserva mensajes de trabajo temporalmente, hasta 24 horas desde su incorporación al sistema. No se archivan ni se generan resúmenes de conversaciones.
+3. La base conserva mensajes de trabajo temporalmente, hasta 72 horas desde su incorporación al sistema. No se archivan ni se generan resúmenes de conversaciones.
 4. Chat inicial: últimos 30 mensajes. Más mensajes: páginas de 30 al subir, siempre dentro del alcance de la sesión y de la retención.
 5. Chat y errores se actualizan por eventos, sin polling normal de conversaciones completas. Los eventos no reemplazan ni duplican el envío real.
 6. Un mensaje nuevo no reconstruye el hilo, no mueve al operador que está leyendo arriba y no sobrescribe el texto que está escribiendo.
@@ -28,7 +28,7 @@ No envíes mensajes a clientes reales, no llames a GSG real y no muestres claves
 - Sesión web: cookie de autenticación emitida por un login correcto. No es escanear QR, abrir `/chat`, recargar, recuperar una conexión SSE ni reiniciar el servidor.
 - Alcance visual: particular de esa cookie. El login de un operador NO reinicia la vista de otros ni borra mensajes globales.
 - Sesión de WhatsApp: vínculo del proveedor con una tienda. Mantiene su exclusión del historial personal, independientemente de los operadores conectados.
-- Retención: 24 horas móviles por mensaje, no medianoche de Lima y no 24 horas desde el último login.
+- Retención: 72 horas móviles por mensaje, no medianoche de Lima y no 72 horas desde el último login.
 - Estado operativo: pedidos, trackings, coordenadas, intentos, vencimientos, aceptación del proveedor e idempotencia. Puede sobrevivir al mensaje temporal porque hace funcionar el servicio.
 - Sin historial: no se crean archivos/exportaciones/copias específicas de chat ni se ofrece consulta de conversaciones vencidas. Los backups generales de base ya existentes no se borran silenciosamente; documentar su retención aparte.
 
@@ -83,7 +83,7 @@ Contrato propuesto:
 ```ts
 type AlcanceChatPanel = {
   afterId: string;          // watermark firmado del login
-  retenidosDesde: Date;     // ahora - 24 horas
+  retenidosDesde: Date;     // ahora - 72 horas
   conexionDesde: Date | null; // corte de WhatsApp, sin redondear a medianoche
 };
 ```
@@ -91,7 +91,7 @@ type AlcanceChatPanel = {
 Condiciones obligatorias en SQL ANTES de ordenar/paginar:
 
 1. ID del mensaje mayor que `afterId` para lectores del panel.
-2. Fecha de incorporación del mensaje mayor que `ahora - 24h`.
+2. Fecha de incorporación del mensaje mayor que `ahora - 72h`.
 3. No es historial importado ni mensaje propio del teléfono.
 4. La conversación tiene una salida real de GSGchat con wamid válido dentro del mismo alcance; excluir marcadores `silencio:`/`regla-gsg:` y estados `failed`/`blocked_by_gate` para habilitar un chat nuevo.
 5. La pertenencia a la tienda procede del contexto servidor, nunca de un parámetro libre.
@@ -115,7 +115,7 @@ Agregar en una migración NUEVA, previsiblemente `009_chat_temporal.sql` si sigu
 El motor de limpieza:
 
 - Corre cada 60 segundos y al arrancar, sin superponerse.
-- En cada ejecución calcula un corte NUEVO `ahora - 24h`; retirar la optimización `terminadoHasta === desde` que asume un corte fijo por día.
+- En cada ejecución calcula un corte NUEVO `ahora - 72h`; retirar la optimización `terminadoHasta === desde` que asume un corte fijo por día.
 - Ejecuta un lote de hasta 1000 filas ordenado por `(stored_at,id)`. Una pasada por minuto, sin bucles ilimitados que vacíen toda la tabla bloqueando el servicio.
 - El API excluye el mensaje exactamente al vencer aunque la limpieza física ocurra en la siguiente pasada. Sin backlog, la eliminación física demora como máximo aproximadamente un intervalo de limpieza.
 - Emitir una invalidación liviana si eliminó filas. El navegador tiene además un temporizador para la próxima expiración de los mensajes que mantiene visibles.
@@ -193,7 +193,7 @@ Conservar los campos existentes que aún usa la interfaz y agregar datos de pagi
 
 `sync` debe consultar solo IDs del contacto y del alcance autenticado, con parámetros SQL y límites. No confiar en IDs suministrados. Si llegan más de 30 nuevos, continuar por cursor, secuencialmente, sin saltar al máximo global antes de terminar. El cursor de nuevos IDs no cambia por una página antigua cargada al subir.
 
-Exponer `expiresAt = storedAt + 24h` para retirar mensajes vencidos sin esperar un evento nuevo. Reconciliar también metadatos del contacto/reparto que realmente cambien. Conservar ETag para lecturas puntuales y fallback, sin presentarlo como ahorro de consultas SQL.
+Exponer `expiresAt = storedAt + 72h` para retirar mensajes vencidos sin esperar un evento nuevo. Reconciliar también metadatos del contacto/reparto que realmente cambien. Conservar ETag para lecturas puntuales y fallback, sin presentarlo como ahorro de consultas SQL.
 
 ### C2. Actualización del navegador
 
@@ -316,7 +316,7 @@ Actualmente cada tienda construye su bus y servicios en el proceso que la atiend
 1. Inventario y baseline, sin modificar producción. Guardar informe de tests existentes y contratos tocados.
 2. Contratos de alcance/retención, nuevas migraciones y controles de idempotencia. Probar SQL antes de habilitar limpieza.
 3. Login y filtros de sesión. Tests de dos operadores, mismo segundo, recarga y login nuevo.
-4. Limpieza móvil de 24 h y supervivencia de controles operativos. Tests con reloj controlado y reinicio.
+4. Limpieza móvil de 72 h y supervivencia de controles operativos. Tests con reloj controlado y reinicio.
 5. Retirar notas/módulos/multimedia. Tests de que no existe escritura/consulta ni descargas, y confirmación real intacta.
 6. Lectura de 30, paginación, sync y DOM incremental. Mantener polling antiguo solo hasta validar esta etapa; luego retirarlo con SSE.
 7. Hub/SSE y cliente compartido, recuperación y fallback. Probar por el proxy de plataforma.
@@ -333,7 +333,7 @@ Crear o ampliar suites por comportamiento, incluyendo `tests/fakes-messages.ts`,
 - Mensaje anterior al login invisible en lista/hilo/búsqueda/destacados/acceso por ID; uno insertado después, en el mismo segundo, visible si corresponde al flujo.
 - F5, otra pestaña con la misma cookie y reinicio conservan el corte; nuevo login lo renueva. Otro operador no cambia su vista.
 - Cookie legacy recibe 409 del chat; cookie falsa/expirada recibe 401. La query no puede ampliar el corte.
-- A las 23:59:59.999 de edad el mensaje es visible; al cumplir 24 h deja de serlo. Medianoche no es una frontera especial.
+- A las 71:59:59.999 de edad el mensaje es visible; al cumplir 72 h deja de serlo. Medianoche no es una frontera especial.
 - Limpieza de 2500 mensajes: lotes 1000/1000/500 en pasadas, sin solapamiento. Sobreviven mensajes recientes y todos los pedidos/coords/estados necesarios.
 - Eliminar el primer mensaje no bloquea ubicación tardía ni provoca otra confirmación. Reentrega del mismo wamid después de la purga y de reiniciar no vuelve a actuar.
 

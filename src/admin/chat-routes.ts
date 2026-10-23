@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
 import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
+import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 
 export interface ChatDeps {
   repos: Repos;
@@ -258,7 +259,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     const messages = await repos.messages.listMessages(contact.id, query.limit + 1, query.before, undefined, alcance);
     const hasMore = messages.length > query.limit;
-    const pagina = messages.slice(-query.limit).map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString() }));
+    const pagina = messages.slice(-query.limit).map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + RETENCION_CHAT_MS).toISOString() }));
     if (query.read) await repos.messages.markRead(contact.id, new Date());
     // La solicitud de reparto abierta, si la hay: el pedido y en que punto va,
     // para que quien atiende lo vea sin cambiar de pantalla (y para {pedido}).

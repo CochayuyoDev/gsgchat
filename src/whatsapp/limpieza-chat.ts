@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Repos } from '../db/repos.js';
+import { RETENCION_CHAT_MS } from './retencion-chat.js';
 
 /** Borra mensajes vencidos en lotes; conserva pedidos, coordenadas y auditoría. */
 export function registrarLimpiezaChat(app: FastifyInstance, repos: Repos): void {
@@ -10,7 +11,7 @@ export function registrarLimpiezaChat(app: FastifyInstance, repos: Repos): void 
   let timer: ReturnType<typeof setTimeout> | null = null;
   async function limpiar(): Promise<boolean> {
     if (trabajo) return true;
-    const desde = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const desde = new Date(Date.now() - RETENCION_CHAT_MS);
     trabajo = (async () => {
       const mensajes = await repos.messages.limpiarAntes(desde);
       // La deduplicación no comparte la retención de mensajes: 7 días cubren
