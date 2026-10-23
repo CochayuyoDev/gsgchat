@@ -159,6 +159,8 @@ describe('incidencia manual', () => {
     expect(r.clave).toBe('clave-de-prueba-gsg');
     expect(r.cuerpo).toMatchObject({ tracking: 'GSG-1', tipo: 'PROBLEMA', motivo: 'OTRO', codigo: 'Número sin WhatsApp', comentario: cuerpo.resumen, telefonoOrigen: '987654321' });
     expect(String(r.cuerpo.eventoId)).toMatch(/^gsgchat-GSG-1-incidencia-manual-/);
+    // Una incidencia manual no manda «queHacer» (ni vacío): GSG recibe solo el motivo y el resumen.
+    expect(r.cuerpo).not.toHaveProperty('queHacer');
     const op = await app.inject({ method: 'GET', url: `/admin/incidencia-manual?phone=${telefono}`, headers: auth });
     expect(op.json().enviadas[0]).toMatchObject({ estado: 'Enviada', tipo: 'Número sin WhatsApp' });
   });

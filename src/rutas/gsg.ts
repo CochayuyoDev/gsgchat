@@ -231,7 +231,7 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
   // Si el detalle ya empieza por el titulo («Al número le faltan dígitos: …»), no se repite.
   const partes = titulo && detalle?.startsWith(titulo) ? [detalle] : [titulo, detalle];
   const comentario = sinPrefijoPeru(partes.filter(Boolean).join(': ')).slice(0, 500) || null;
-  return {
+  const cuerpo: Record<string, unknown> = {
     tracking,
     tipo: 'PROBLEMA',
     motivo: texto(p.motivo) ?? motivoGsg(codigo),
@@ -246,6 +246,9 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
     fechaMensaje: Number.isNaN(en.getTime()) ? new Date().toISOString() : en.toISOString(),
     eventoId: texto(p.eventoId) ?? (tracking ? eventoIdProblema(tracking, codigo, Number.isNaN(en.getTime()) ? new Date() : en) : null),
   };
+  // La incidencia manual la escribe una persona con su resumen: no lleva «queHacer».
+  if (p.origen === 'incidencia_manual') delete cuerpo.queHacer;
+  return cuerpo;
 }
 
 /**
