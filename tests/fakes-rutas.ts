@@ -5,7 +5,7 @@
  * verdad tiene sus propias pruebas sobre PGlite en `rutas.test.ts`.
  */
 
-import type { AjustesRutas } from '../src/rutas/ajustes.js';
+import { fusionarAjustesRutas, type AjustesRutas } from '../src/rutas/ajustes.js';
 import { FRENOS_CUENTA_RETIRADOS } from '../src/salud/frenos-retirados.js';
 import type {
   ConsultaSolicitudes,
@@ -67,52 +67,8 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
 
   // Ajustes en memoria: lo guardado por encima de lo que se pase por defecto.
   let ajustesGuardados: Record<string, unknown> = {};
-  const fusionar = (base: AjustesRutas, g: Record<string, unknown>): AjustesRutas => {
-    const combinado = { ...base, ...(g as Partial<AjustesRutas>) };
-    const legado = g.esperasMensajesMinutos === undefined && (g.maxIntentos !== undefined || g.esperaRespuestaMinutos !== undefined);
-    const total = Math.max(1, Math.min(100, Number(combinado.maxIntentos)));
-    const espera = Number(g.esperaRespuestaMinutos ?? base.esperaRespuestaMinutos);
-    const esperas = g.esperasMensajesMinutos !== undefined
-      ? g.esperasMensajesMinutos as number[]
-      : legado
-        ? Array.from({ length: total - 1 }, (_, i) => g.esperaRespuestaMinutos !== undefined ? espera : base.esperasMensajesMinutos[i] ?? espera)
-        : combinado.esperasMensajesMinutos;
-    const esperasSegundos = g.esperasMensajesSegundos !== undefined
-      ? g.esperasMensajesSegundos as number[]
-      : g.esperasMensajesMinutos !== undefined
-        ? (g.esperasMensajesMinutos as number[]).map((n) => n * 60)
-        : legado
-          ? esperas.map((n) => n * 60)
-        : combinado.esperasMensajesSegundos ?? esperas.map((n) => n * 60);
-    const esperaPrimerMensajeSegundos = g.esperaPrimerMensajeSegundos !== undefined
-      ? Number(g.esperaPrimerMensajeSegundos)
-      : g.esperaPrimerMensajeMinutos !== undefined
-        ? Number(g.esperaPrimerMensajeMinutos) * 60
-        : combinado.esperaPrimerMensajeSegundos ?? Number(combinado.esperaPrimerMensajeMinutos ?? 0) * 60;
-    const esperaFinalSegundos = g.esperaFinalSegundos !== undefined
-      ? Number(g.esperaFinalSegundos)
-      : g.esperaFinalMinutos !== undefined
-        ? Number(g.esperaFinalMinutos) * 60
-        : g.esperasMensajesSegundos !== undefined || g.esperasMensajesMinutos !== undefined
-          ? esperasSegundos.at(-1) ?? espera * 60
-          : combinado.esperaFinalSegundos ?? Number(combinado.esperaFinalMinutos ?? 0) * 60;
-    return {
-      ...combinado,
-      esperasMensajesMinutos: esperas,
-      esperasMensajesSegundos: esperasSegundos,
-      esperaPrimerMensajeSegundos,
-      esperaPrimerMensajeMinutos: esperaPrimerMensajeSegundos / 60,
-      esperaRespuestaMinutos: esperas[0] ?? espera,
-      maxIntentos: esperas.length + 1,
-      // Como en src/rutas/ajustes.ts: sin guardar, sigue a la última espera.
-      esperaFinalMinutos: g.esperaFinalMinutos !== undefined
-        ? Number(g.esperaFinalMinutos)
-        : esperaFinalSegundos / 60,
-      esperaFinalSegundos,
-      plantillas: { ...base.plantillas, ...((g.plantillas as AjustesRutas['plantillas'] | undefined) ?? {}) },
-      textos: { ...base.textos, ...((g.textos as AjustesRutas['textos'] | undefined) ?? {}) },
-    };
-  };
+  // La misma fusion que el repo de la base: si no, las pruebas validaban otra logica.
+  const fusionar = (base: AjustesRutas, g: Record<string, unknown>): AjustesRutas => fusionarAjustesRutas(base, g as Partial<AjustesRutas>);
 
   const repo: FakeRutas = {
     _lotes: lotes,
@@ -284,10 +240,10 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       const activos = new Set(lotes.filter((l) => l.estado === 'enviando' || l.estado === 'pausado').map((l) => l.id));
       let reprogramadas = 0;
       for (const solicitud of solicitudes) {
-        if (!activos.has(solicitud.loteId) || !['enviado', 'respondio'].includes(solicitud.estado) || solicitud.requiereHumano || !solicitud.ultimoEnvioAt) continue;
         const maxIntentos = esperasMensajesSegundos.length + 1;
+        if (!activos.has(solicitud.loteId) || !['enviado', 'respondio'].includes(solicitud.estado) || (solicitud.requiereHumano && solicitud.intentos < maxIntentos) || !solicitud.ultimoEnvioAt) continue;
         solicitud.proximoIntentoAt = solicitud.intentos >= maxIntentos
-          ? new Date(solicitud.ultimoEnvioAt.getTime() + Math.max(0, esperaFinalSegundos) * 1000)
+          ? new Date(Math.max(solicitud.ultimoEnvioAt.getTime() + Math.max(0, esperaFinalSegundos) * 1000, reloj().getTime()))
           : new Date(solicitud.ultimoEnvioAt.getTime() + (esperasMensajesSegundos[solicitud.intentos - 1] ?? esperasMensajesSegundos.at(-1) ?? 0) * 1000);
         solicitud.updatedAt = reloj();
         reprogramadas++;
@@ -362,6 +318,24 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       const activos = new Set(lotes.filter((l) => l.estado === 'enviando').map((l) => l.id));
       const fechas = solicitudes
         .filter((s) => activos.has(s.loteId) && VIVOS.includes(s.estado) && Boolean(s.phone))
+        .map((s) => s.proximoIntentoAt ?? s.createdAt)
+        .sort((a, b) => a.getTime() - b.getTime());
+      return fechas[0] ?? null;
+    },
+
+    async plazosVencidos(ahora, maxIntentos, limite) {
+      const vigentes = new Set(lotes.filter((l) => l.estado !== 'terminado').map((l) => l.id));
+      return solicitudes
+        .filter((s) => vigentes.has(s.loteId) && VIVOS.includes(s.estado) && s.intentos >= maxIntentos && (!s.proximoIntentoAt || s.proximoIntentoAt.getTime() <= ahora.getTime()))
+        .sort((a, b) => (a.proximoIntentoAt ?? a.createdAt).getTime() - (b.proximoIntentoAt ?? b.createdAt).getTime() || a.id - b.id)
+        .slice(0, limite)
+        .map((s) => ({ ...s }));
+    },
+
+    async proximoPlazoAt(maxIntentos) {
+      const vigentes = new Set(lotes.filter((l) => l.estado !== 'terminado').map((l) => l.id));
+      const fechas = solicitudes
+        .filter((s) => vigentes.has(s.loteId) && VIVOS.includes(s.estado) && s.intentos >= maxIntentos)
         .map((s) => s.proximoIntentoAt ?? s.createdAt)
         .sort((a, b) => a.getTime() - b.getTime());
       return fechas[0] ?? null;

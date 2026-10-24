@@ -15,7 +15,8 @@ describe('confirmación real de ubicación',()=>{
     try {
       await e.api.post('/api/v1/entregas',pedido);await e.trabajar();
       const s=e.repos.rutas._solicitudes[0]!;
-      await e.repos.rutas.actualizarSolicitud(s.id,{estado:'derivado',intentos:3,incidencia:'sin_respuesta',requiereHumano:true});
+      // Tres intentos y todavia dentro de su plazo: pasado el plazo ya no se atiende (regla del dueño, 20/10).
+      await e.repos.rutas.actualizarSolicitud(s.id,{estado:'enviado',intentos:3,proximoIntentoAt:new Date(e.ahora().getTime()+20*60_000)});
       const antes=e.mensajesA(tel).length;
       await e.contesta(tel,{pin:PIN_LIMA});
       expect(e.mensajesA(tel)).toHaveLength(antes+1);

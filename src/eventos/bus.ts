@@ -39,12 +39,18 @@ export interface Eventos {
     };
     /** Si se puede contestar con texto libre por la API de Meta. */
     ventanaAbierta: boolean;
+    /** El chat en GSG: `chatId` es el tracking (el mas reciente de ese WhatsApp) y vale para GET /api/v1/chat y POST /api/v1/chat; `trackings` son todos los del cliente. Sin pedido de GSG: null y []. */
+    chatId: string | null;
+    trackings: string[];
   };
   /** Salio un mensaje hacia el cliente (a mano, por el bot, por campana). */
   'mensaje.enviado': {
     contacto: ContactoEvento;
     /** `autor`: quien lo mando: 'persona' (a mano), 'ia' (el asistente) o 'sistema' (reglas, reparto, campanas, la API). `voz`: salio como nota de voz. */
     mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string; datos: Record<string, unknown> | null };
+    /** Igual que en `mensaje.recibido`: el chat de GSG al que pertenece. */
+    chatId: string | null;
+    trackings: string[];
   };
   /** Meta (o el proveedor) dice como va: sent, delivered, read, failed. */
   'mensaje.estado': { mensajeId: string; estado: string; fecha: string };

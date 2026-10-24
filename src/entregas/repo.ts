@@ -44,6 +44,9 @@ export const ESTADOS_ENTREGA: EstadoEntrega[] = [
 ];
 
 /** Estados en los que la entrega sigue viva (todavia pasa algo con ella). */
+/** El tracking de GSG de una entrega: el de `datosEnvio` o, sin el, la referencia. Es el id del chat para GSG. */
+export const trackingDeEntrega = (e: { referencia: string; datosEnvio?: { tracking?: string | null } | null }): string => e.datosEnvio?.tracking || e.referencia;
+
 export const ESTADOS_ENTREGA_VIVOS: EstadoEntrega[] = [
   'pendiente',
   'esperando_ubicacion',
@@ -392,10 +395,14 @@ export interface EntregasRepo {
   crearEntrega(input: NuevaEntrega): Promise<{ entrega: Entrega; nueva: boolean }>;
   entrega(id: number): Promise<Entrega | null>;
   porDiaYReferencia(dia: string, referencia: string): Promise<Entrega | null>;
+  /** La entrega mas reciente (viva o no) con ese tracking de GSG (el de `datosEnvio` o, sin el, la referencia), sin distinguir mayusculas. */
+  porTracking(tracking: string): Promise<Entrega | null>;
   /** La entrega viva mas reciente de ese cliente. */
   vivaPorTelefono(phone: string): Promise<Entrega | null>;
   /** TODAS las vivas de un telefono (un cliente puede tener dos pedidos el mismo dia), de la mas antigua a la mas nueva. */
   vivasPorTelefono(phone: string): Promise<Entrega[]>;
+  /** La entrega mas reciente de ese telefono, viva o no: el chat de un cliente sigue abierto despues de entregar. */
+  ultimaPorTelefono(phone: string): Promise<Entrega | null>;
   /**
    * La puntualidad real de cada motorizado desde `desde`: sobre las entregadas
    * con hora avisada, cuantas fueron y el desvio medio en minutos entre la hora
@@ -939,6 +946,18 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
       const { rows } = await pool.query<EntregaRow>('select * from entregas where dia = $1 and referencia = $2', [dia, referencia]);
       return rows[0] ? entregaDeFila(rows[0]) : null;
     },
+    async porTracking(tracking) {
+      const buscado = tracking.trim();
+      // Primero exacto (usa el indice); la API 1 compara los trackings sin distinguir mayusculas, esta tambien.
+      for (const [donde, valor] of [
+        ["json_unquote(json_extract(datos_envio, '$.tracking')) = $1 or referencia = $1", buscado],
+        ["lower(json_unquote(json_extract(datos_envio, '$.tracking'))) = $1 or lower(referencia) = $1", buscado.toLowerCase()],
+      ] as const) {
+        const { rows } = await pool.query<EntregaRow>(`select * from entregas where ${donde} order by dia desc, id desc limit 1`, [valor]);
+        if (rows[0]) return entregaDeFila(rows[0]);
+      }
+      return null;
+    },
     async vivaPorTelefono(phone) {
       const { rows } = await pool.query<EntregaRow>(
         `select * from entregas
@@ -946,6 +965,10 @@ export function createEntregasRepo(pool: Pool): EntregasRepo {
           order by dia desc, id desc limit 1`,
         [phone, ESTADOS_ENTREGA_VIVOS],
       );
+      return rows[0] ? entregaDeFila(rows[0]) : null;
+    },
+    async ultimaPorTelefono(phone) {
+      const { rows } = await pool.query<EntregaRow>('select * from entregas where phone = $1 order by dia desc, id desc limit 1', [phone]);
       return rows[0] ? entregaDeFila(rows[0]) : null;
     },
     async vivasPorTelefono(phone) {

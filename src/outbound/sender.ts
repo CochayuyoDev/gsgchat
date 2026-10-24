@@ -48,6 +48,14 @@ export interface SendJob {
   /** El nombre de pila de quien lo manda (un asesor), para el hilo y el webhook. */
   autorNombre?: string;
   /**
+   * Lo escribio una persona de verdad (en el chat de GSGchat o en el de GSG): al salir, el bot se
+   * calla en ese chat hasta que alguien lo reactive. No es lo mismo que `origen: 'persona'`, que
+   * tambien usan envios automaticos que pasan como si fueran a mano.
+   */
+  atiendePersona?: boolean;
+  /** Si lo escribio un usuario de otro sistema (GSG): quien, con que rol y para que tracking. Se guarda en el hilo (payload.emisor). */
+  emisor?: { tipo: string; usuarioId: string; rol: string | null; tracking: string; idExterno: string };
+  /**
    * Limites por contacto propios de quien manda, por encima de la politica.
    *
    * El motor de rutas lleva su propia cadencia (la espera entre mensajes y
@@ -141,6 +149,7 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
     origen,
     ...(job.confirmacionUbicacion ? { confirmacionUbicacion: true } : {}),
     ...(nombre ? { autorNombre: nombre } : {}),
+    ...(job.emisor ? { emisor: job.emisor } : {}),
     // La cita se guarda con lo justo para pintarla: de quien era y que decia.
     // El id tambien, para poder saltar al original si sigue en el hilo.
     ...(job.cita ? { cita: { id: job.cita.id, deMi: job.cita.fromMe, texto: job.cita.texto ?? '', autor: job.cita.autor ?? null } } : {}),
@@ -512,6 +521,8 @@ export function createSender(deps: SenderDeps): Sender {
           await repos.contacts.anotarEnvioIniciado(contact.id, enviadoAt);
         }
         if (automatico) deps.salud?.marcapasos.anotar(enviadoAt);
+        // Una persona acaba de escribir en este chat: el bot se calla (lo atiende ella). Se reactiva a mano.
+        if (job.atiendePersona) await repos.contacts.pausarBot(contact.id, true, enviadoAt).catch(() => undefined);
 
         return { ok: true, wamid: result.wamid, deliveryId };
       } catch (error) {

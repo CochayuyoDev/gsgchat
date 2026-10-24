@@ -9,12 +9,12 @@ import { estadoDelReporteAGsg } from '../src/entregas/reportados.js';
 const pedido = (tracking: string) => ({ ...OBLIGATORIOS_GSG, tracking, cliente: 'Cliente de prueba', telefono: '987601234' });
 
 describe('ubicación tardía después del máximo de intentos', () => {
-  it('resuelve ambos trackings y no reenvía incidencias antiguas después del pin', async () => {
+  it('pasado el plazo el pin no se registra: la incidencia sale a GSG para ambos trackings y no se manda ubicación', async () => {
+    // Regla del dueño (20/10): marcada la incidencia, el sistema ya no hace nada mas con ese cliente.
     const llegadas: Array<{ url: string; body: any }> = [];
-    let aceptaProblemas = false;
     const fetchGsg = (async (url: any, init: any) => {
       llegadas.push({ url: String(url), body: JSON.parse(String(init.body)) });
-      return new Response('{}', { status: String(url).includes('reported') && !aceptaProblemas ? 503 : 200 });
+      return new Response('{}', { status: 200 });
     }) as typeof fetch;
     const e = await crearEscenarioEntregas({ arranque: new Date('2026-10-14T15:17:00Z'), fetchGsg });
     try {
@@ -25,18 +25,16 @@ describe('ubicación tardía después del máximo de intentos', () => {
       expect(s).toMatchObject({ estado: 'derivado', intentos: 3, requiereHumano: true });
       expect((await e.repos.rutas.reportesRecientes(100, 'incidencia')).filter(r => r.payload.codigo === 'sin_respuesta')).toHaveLength(2);
       e.avanzar(3);
+      const antes = e.mensajesA('987601234').length;
       await e.contesta('987601234', { pin: PIN_LIMA });
-      expect(await e.repos.rutas.solicitud(s.id)).toMatchObject({ estado: 'resuelto', intentos: 3, incidencia: null, requiereHumano: false, proximoIntentoAt: null });
+      expect(e.mensajesA('987601234')).toHaveLength(antes);
+      expect(await e.repos.rutas.solicitud(s.id)).toMatchObject({ estado: 'derivado', intentos: 3, incidencia: 'sin_respuesta', lat: null });
       for (const tracking of ['TARDIO-1', 'TARDIO-2']) {
-        expect(await e.entrega(tracking)).toMatchObject({ ubicacionEstado: 'recibida', incidencia: null, requiereHumano: false });
+        expect((await e.entrega(tracking))?.ubicacionEstado).not.toBe('recibida');
       }
-      const desde = llegadas.length;
-      aceptaProblemas = true;
       await e.despacharAGsg();
-      expect(llegadas.slice(desde).filter(r => r.url.includes('reported') && r.body.codigo === 'sin_respuesta')).toHaveLength(0);
-      expect((await e.repos.rutas.reportesRecientes(100, 'incidencia')).filter(r => r.payload.codigo === 'sin_respuesta').map(r => r.estado)).toEqual(['superado', 'superado']);
-      const ubicaciones = llegadas.filter(r => r.url.includes('send-location')).map(r => r.body.tracking);
-      expect(ubicaciones).toEqual(expect.arrayContaining(['TARDIO-1', 'TARDIO-2']));
+      expect(llegadas.filter(r => r.url.includes('reported') && r.body.codigo === 'sin_respuesta').map(r => r.body.tracking)).toEqual(expect.arrayContaining(['TARDIO-1', 'TARDIO-2']));
+      expect(llegadas.filter(r => r.url.includes('send-location'))).toHaveLength(0);
     } finally { await e.cerrar(); }
   });
 
@@ -65,7 +63,7 @@ describe('ubicación tardía después del máximo de intentos', () => {
     } finally { await e.cerrar(); }
   });
 
-  it('el pin posterior a una incidencia ya enviada también se manda para ambos pedidos', async () => {
+  it('el pin posterior a una incidencia ya enviada no se manda a GSG', async () => {
     const estados = new Map<string, string>();
     const e = await crearEscenarioEntregas({ arranque: new Date('2026-10-14T15:17:00Z'), fetchGsg: (async (url: any, init: any) => {
       const p = JSON.parse(String(init.body));
@@ -80,7 +78,7 @@ describe('ubicación tardía después del máximo de intentos', () => {
       expect([...estados.values()]).toEqual(['sin_respuesta', 'sin_respuesta']);
       await e.contesta('987601234', { pin: PIN_LIMA });
       await e.despacharAGsg();
-      expect([...estados.values()]).toEqual(['ubicacion_recibida', 'ubicacion_recibida']);
+      expect([...estados.values()]).toEqual(['sin_respuesta', 'sin_respuesta']);
       expect((await e.repos.rutas.reportesRecientes(100, 'incidencia')).map(r => r.estado)).toEqual(['enviado', 'enviado']);
     } finally { await e.cerrar(); }
   });

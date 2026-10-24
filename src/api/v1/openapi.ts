@@ -227,6 +227,137 @@ export function openApi(baseUrl: string): Json {
         },
       },
 
+      '/chat': {
+        get: {
+          tags: ['conversaciones'],
+          summary: 'API 3 (GET): el historial de mensajes de un tracking',
+          description: [
+            'GSG pide el historial cuando el motorizado abre el chat de un tracking, y GSGchat responde en esa misma llamada con los mensajes del WhatsApp vinculado a ese tracking.',
+            'GSG manda SOLO el tracking: el telefono ya lo dio en `POST /entregas` y esta guardado en el pedido (si GSG lo corrigio despues, vale el corregido). Si un cliente tiene varios trackings, comparten chat (`tracking` los lista, el pedido por el que se pregunto primero). El tracking no distingue mayusculas.',
+            'La respuesta trae `tracking` (lista), `contacto` {id, telefono, nombre} y los mensajes (id de WhatsApp, tipo, texto, transcripcion, anuncio, datos, fecha, direccion, autor, emisor, estado y `cursor`, que es lo que se manda en `antesDe`).',
+            'Esta llamada solo lee el chat. Para escribirle al cliente desde GSG, `POST /chat`.',
+            'Los mismos handlers responden tambien en `GET /messages?chat_id=` y `POST /send-message` (con `chat_id` en lugar de `tracking`): `chat_id` es el tracking. Los webhooks `mensaje.recibido` y `mensaje.enviado` traen `chatId` y `trackings` para saber a que chat van.',
+          ].join(' '),
+          ...permiso('conversaciones:leer'),
+          parameters: [
+            { name: 'tracking', in: 'query', required: true, schema: { type: 'string' }, description: 'codigo de seguimiento de GSG ("GSG-A-102345"), el mismo que mando en POST /entregas' },
+            { name: 'limite', in: 'query', schema: { type: 'integer', default: 60, maximum: 200 }, description: 'Cuantos mensajes devolver' },
+            { name: 'antesDe', in: 'query', schema: { type: 'integer' }, description: 'el `cursor` del mensaje mas antiguo ya recibido, para pedir los anteriores' },
+          ],
+          responses: {
+            200: json({
+              type: 'object',
+              properties: {
+                tracking: { type: 'array', items: { type: 'string' }, description: 'Los trackings de ese WhatsApp: primero el pedido por el que se pregunto, luego los demas en curso' },
+                contacto: { type: 'object', properties: { id: { type: 'string' }, telefono: { type: 'string' }, nombre: { type: 'string', nullable: true } } },
+                mensajes: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string', nullable: true, description: 'El id de WhatsApp' },
+                      cursor: { type: 'integer', description: 'El numero interno del mensaje: es lo que se manda en `antesDe`' },
+                      direccion: { type: 'string', enum: ['entrante', 'saliente'] },
+                      tipo: { type: 'string' },
+                      texto: { type: 'string', nullable: true },
+                      transcripcion: { type: 'string', nullable: true },
+                      anuncio: { type: 'object', nullable: true },
+                      datos: { type: 'object', nullable: true },
+                      fecha: { type: 'string', format: 'date-time' },
+                      autor: { type: 'string', enum: ['persona', 'ia', 'sistema'], nullable: true, description: 'Solo en los salientes' },
+                      autorNombre: { type: 'string', nullable: true },
+                      emisor: { type: 'object', nullable: true, description: 'Si lo escribio un usuario de GSG (POST /chat): { tipo, usuarioId, rol, tracking, idExterno }' },
+                      voz: { type: 'boolean' },
+                      estado: { type: 'string', nullable: true },
+                    },
+                  },
+                },
+                hayMas: { type: 'boolean', description: 'true si llegaron exactamente `limite` mensajes: puede haber mas antiguos' },
+              },
+            }, 'El chat del tracking'),
+            400: error('Falta el tracking, o limite fuera de 1 a 200'),
+            404: error('No hay ningun pedido con ese tracking, o ese pedido todavia no tiene chat'),
+          },
+        },
+        post: {
+          tags: ['conversaciones'],
+          summary: 'API 4 (POST): recibir un mensaje que escribe un usuario de GSG',
+          description: [
+            'Un usuario de GSG (p. ej. el motorizado) escribe en el chat de un tracking: GSG manda el tracking, el texto, quien lo escribio y el id que GSG le puso al mensaje. GSGchat lo envia por WhatsApp al numero de ese pedido (el telefono no se manda), lo guarda en el chat firmado como una persona con el usuario y el rol de GSG, y el bot se calla en ese chat hasta que alguien lo reactive.',
+            'Con `idExterno`, un reintento de GSG no se manda dos veces: responde 200 con `duplicado: true` y no escribe al cliente. Un mismo `idExterno` con otro tracking responde 409.',
+            'Pasa por las mismas guardas de WhatsApp que `POST /mensajes` (ventana de 24 h con la API de Meta, bajas): la respuesta dice si salio (200), si quedo bloqueado (202, con el motivo) o si fallo (502). En 202 y 502 no se apunta el `idExterno`, asi que el mismo mensaje se puede reintentar.',
+          ].join(' '),
+          ...permiso('mensajes:enviar'),
+          requestBody: { required: true, content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['tracking', 'texto', 'idExterno', 'usuario'],
+            properties: {
+              tracking: { type: 'string', description: 'El tracking del pedido, el mismo que GSG mando en POST /entregas' },
+              texto: { type: 'string', maxLength: 4000, description: 'Lo que se le escribe al cliente' },
+              idExterno: { type: 'string', maxLength: 191, description: 'El id que GSG le puso a este mensaje: evita duplicados en los reintentos' },
+              usuario: {
+                type: 'object',
+                required: ['id'],
+                properties: {
+                  id: { type: 'string', description: 'El id del usuario de GSG que escribe (texto o numero)' },
+                  nombre: { type: 'string', maxLength: 80, description: 'Su nombre, que se ve en el chat (p. ej. el del motorizado)' },
+                  rol: { type: 'string', maxLength: 60, description: 'Su rol en GSG al momento de escribir (p. ej. motorizado, operador)' },
+                },
+              },
+            },
+          } } } },
+          responses: {
+            200: json(ref('EnvioOk'), 'Salio por WhatsApp (o ya habia salido: `duplicado: true`)'),
+            202: json(ref('EnvioBloqueado'), 'Una guarda lo freno; el motivo dice cual (p. ej. la ventana de 24 h esta cerrada)'),
+            400: error('Falta el tracking, el texto, el idExterno o el usuario'),
+            404: error('No hay ningun pedido con ese tracking'),
+            409: error('El idExterno ya se uso con otro tracking, o ese mensaje se esta enviando ahora mismo'),
+            502: json(ref('EnvioError'), 'El proveedor de WhatsApp lo rechazo'),
+          },
+        },
+      },
+
+      '/messages': {
+        get: {
+          tags: ['conversaciones'],
+          summary: 'El historial de un chat (alias de GET /chat: `chat_id` es el tracking)',
+          description: 'Igual que `GET /chat?tracking=`, con `chat_id` en lugar de `tracking`. La respuesta es la misma. El `chatId` de los webhooks `mensaje.recibido` y `mensaje.enviado` es el valor que va aqui.',
+          ...permiso('conversaciones:leer'),
+          parameters: [
+            { name: 'chat_id', in: 'query', required: true, schema: { type: 'string' }, description: 'El tracking del pedido (el `chatId` del webhook)' },
+            { name: 'limite', in: 'query', schema: { type: 'integer', default: 60, maximum: 200 }, description: 'Cuantos mensajes devolver' },
+            { name: 'antesDe', in: 'query', schema: { type: 'integer' }, description: 'El `cursor` del mensaje mas antiguo ya recibido' },
+          ],
+          responses: { 200: json({ type: 'object' }, 'Igual que GET /chat'), 400: error('Falta chat_id, o limite fuera de 1 a 200'), 404: error('No hay ningun pedido con ese tracking, o todavia no tiene chat') },
+        },
+      },
+      '/send-message': {
+        post: {
+          tags: ['conversaciones'],
+          summary: 'Escribirle al cliente desde GSG (alias de POST /chat: `chat_id` es el tracking)',
+          description: 'Igual que `POST /chat`, con `chat_id` en lugar de `tracking`: mismas guardas, mismo `idExterno` anti-duplicados y mismas respuestas (200, 202, 502).',
+          ...permiso('mensajes:enviar'),
+          requestBody: { required: true, content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['chat_id', 'texto', 'idExterno', 'usuario'],
+            properties: {
+              chat_id: { type: 'string', description: 'El tracking del pedido (el `chatId` del webhook)' },
+              texto: { type: 'string', maxLength: 4000 },
+              idExterno: { type: 'string', maxLength: 191, description: 'El id que GSG le puso al mensaje: evita duplicados en los reintentos' },
+              usuario: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, nombre: { type: 'string', maxLength: 80 }, rol: { type: 'string', maxLength: 60 } } },
+            },
+          } } } },
+          responses: {
+            200: json(ref('EnvioOk'), 'Salio por WhatsApp (o ya habia salido: `duplicado: true`)'),
+            202: json(ref('EnvioBloqueado'), 'Una guarda lo freno; el motivo dice cual'),
+            400: error('Faltan datos'),
+            404: error('No hay ningun pedido con ese tracking'),
+            409: error('El idExterno ya se uso con otro tracking, o se esta enviando ahora mismo'),
+            502: json(ref('EnvioError'), 'El proveedor de WhatsApp lo rechazo'),
+          },
+        },
+      },
+
       '/conversaciones/{telefono}/leido': {
         post: {
           tags: ['conversaciones'],

@@ -1014,6 +1014,7 @@ async function enviar(payload) {
   quitarCita();
   try {
     payload.contactId = current.id;
+    payload.atiendePersona = true;
     if (cita) payload.citaId = cita;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
     if (r.ok === false) {

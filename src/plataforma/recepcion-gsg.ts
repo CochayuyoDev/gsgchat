@@ -116,7 +116,7 @@ export function rechazoSinClave(headers: Cabeceras): RechazoRecepcion {
 export async function tiendaDeClaveGsg(
   plataforma: Pick<Plataforma, 'directorio' | 'tiendaPorSlug' | 'consultarClaveGsg'>,
   headers: Parameters<typeof claveDeCabeceras>[0],
-  permiso: 'entregas:gestionar' | 'entregas:leer' = 'entregas:gestionar',
+  permiso: 'entregas:gestionar' | 'entregas:leer' | 'conversaciones:leer' | 'mensajes:enviar' = 'entregas:gestionar',
 ): Promise<{ tienda: TiendaViva } | { rechazo: RechazoRecepcion }> {
   const clave = claveDeCabeceras(headers);
   if (!clave) return { rechazo: rechazoSinClave(headers) };

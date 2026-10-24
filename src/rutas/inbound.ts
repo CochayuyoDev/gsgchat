@@ -25,8 +25,9 @@ import type { Monitor } from '../salud/monitor.js';
 import type { Solicitud } from '../db/rutas.js';
 import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
-import { resolverPorUbicacion } from '../entregas/ubicacion-unica.js';
+import { diaEnZona, resolverPorUbicacion, solicitudesAbiertasDe, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
 import { despertarMotorRutas } from './despertador.js';
+import { derivarSolicitud, plazoVencido } from './motor.js';
 
 export interface EntradaRuta {
   texto?: string;
@@ -70,6 +71,10 @@ export interface RutaInboundDeps {
   salud?: Monitor;
   ahora?: () => Date;
   log?: (mensaje: string, detalle?: Record<string, unknown>) => void;
+  /** Mensajes por cliente antes de la incidencia (los ajustes vigentes del reparto). */
+  maxIntentos?: () => Promise<number>;
+  /** La zona horaria del negocio: el silencio tras el plazo vale por dia. */
+  timezone?: string;
 }
 
 const sinTildes = (texto: string): string =>
@@ -419,6 +424,11 @@ export async function atenderRespuestaDeRuta(
     texto ? `contestó: "${texto.slice(0, 200)}"` : 'contestó sin texto (adjunto)',
   );
 
+  // Con los mensajes agotados, lo que conteste no adelanta la incidencia: el
+  // plazo para mandar el pin sigue siendo el de la espera final.
+  const maxIntentos = await deps.maxIntentos?.().catch(() => undefined);
+  const enEsperaFinal = maxIntentos !== undefined && solicitud.intentos >= maxIntentos && solicitud.proximoIntentoAt !== null;
+
   // Se aparta para que lo mire una persona: lo que escribio puede ser una
   // direccion buena. El motor le insistira igual, con su ritmo.
   const actualizada = await repos.rutas.actualizarSolicitud(solicitud.id, {
@@ -428,9 +438,60 @@ export async function atenderRespuestaDeRuta(
     incidenciaDetalle: texto ? texto.slice(0, 300) : 'respondió con un adjunto',
     // Un minuto: lo justo para que no parezca una respuesta automatica
     // instantanea y siga entrando por la pausa general del motor.
-    proximoIntentoAt: new Date(momento.getTime() + 60_000),
+    proximoIntentoAt: enEsperaFinal ? solicitud.proximoIntentoAt : new Date(momento.getTime() + 60_000),
   });
 
   despertarMotorRutas();
   return { atendida: true, resultado: 'sin_ubicacion', solicitud: actualizada };
+}
+
+/**
+ * Regla del dueño (20/10): pasado el plazo para marcar la incidencia, el
+ * sistema ya no atiende nada de ese cliente. Se marca la incidencia, se le
+ * reporta a GSG y nada mas: ni se le contesta, ni se registra un pin, ni lo
+ * ve la IA. El mensaje queda guardado en el chat para quien lo mire.
+ *
+ * Si el motor todavia no marco la incidencia vencida (`momento` ya paso el
+ * plazo), se marca aqui: el pin que llega un segundo tarde no se cuela.
+ *
+ * Devuelve la solicitud cerrada por plazo, o null si hay que atenderlo. Si
+ * el mismo numero tiene otro pedido todavia en curso, se atiende por ese.
+ * Vale por dia: un caso derivado ayer no calla al cliente hoy. Tampoco calla
+ * una derivacion a mano (antes de agotar los mensajes), ni a quien tiene un
+ * pin esperando su «¿es ahí?» o un numero que lleva una persona: ahi la
+ * respuesta es justo lo que se espera.
+ */
+export async function cerradaPorPlazo(deps: RutaInboundDeps, contact: Contact, momento: Date): Promise<Solicitud | null> {
+  const { repos } = deps;
+  if (!contact.phone) return null;
+  const abiertas = await solicitudesAbiertasDe(repos, contact.phone);
+  if (!abiertas.length) return null;
+  // Sin ajustes legibles no se da nada por vencido: solo cuenta lo ya derivado.
+  const maxIntentos = (await deps.maxIntentos?.().catch(() => undefined)) ?? Number.NaN;
+  const ahora = deps.ahora ?? (() => new Date());
+  const dia = (fecha: Date): string => (deps.timezone ? diaEnZona(fecha, deps.timezone) : fecha.toISOString().slice(0, 10));
+  if (typeof repos.entregas?.pausadoPorTelefono === 'function' && (await repos.entregas.pausadoPorTelefono(contact.phone).catch(() => false))) return null;
+
+  let cerrada: Solicitud | null = null;
+  for (const s of abiertas) {
+    if (plazoVencido(s, maxIntentos, momento)) {
+      // Ya tiene su ubicacion de hoy (por otro camino): no es incidencia; el
+      // flujo de siempre la deja resuelta.
+      if (await ubicacionYaRegistrada(repos, s.phone, dia(momento), s.referencia).catch(() => null)) return null;
+      await derivarSolicitud({ repos, ahora, log: deps.log }, s);
+      cerrada ??= s;
+    } else if (s.estado === 'pendiente' || s.estado === 'enviado' || s.estado === 'respondio') {
+      return null;
+    } else if (
+      s.estado === 'derivado' &&
+      (s.incidencia === 'sin_respuesta' || s.incidencia === 'respondio_sin_ubicacion') &&
+      // Lo derivo el plazo (agoto sus mensajes), no una persona a mano. Sin
+      // ajustes legibles (NaN) se da por agotado.
+      !(s.intentos < maxIntentos) &&
+      dia(s.ultimoEnvioAt ?? s.updatedAt) === dia(momento)
+    ) {
+      cerrada ??= s;
+    }
+  }
+  return cerrada;
 }
