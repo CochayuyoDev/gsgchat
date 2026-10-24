@@ -95,6 +95,8 @@ const sendSchema = z.object({
   /** Quien lo manda, si no es quien esta en sesion (el chat embebido de otro sistema lo dice). */
   autor: z.enum(['persona', 'ia', 'sistema']).optional(),
   autorNombre: z.string().trim().max(80).optional(),
+  /** Lo escribio una persona en el chat (no la IA del panel ni una regla): el bot se calla en ese chat. */
+  atiendePersona: z.boolean().optional(),
   /** Responder citando un mensaje del hilo (su id de fila, no el wamid). */
   citaId: z.coerce.number().int().positive().optional(),
   /** Fuera de la ventana de 24 h solo sale una plantilla aprobada. */
@@ -548,10 +550,11 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * salvo que el cuerpo diga otra cosa (el chat embebido de otro sistema
    * manda en nombre de su asesor). Va al hilo y al webhook (`autorNombre`).
    */
-  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string }) => ({
+  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string; atiendePersona?: boolean }) => ({
     // Sin decir nada, quien escribe desde el chat es una persona: que el
     // hilo no lo apunte como 'sistema' solo porque la ventana de Meta obligue.
     origen: body.autor ?? 'persona',
+    atiendePersona: body.atiendePersona === true && (body.autor ?? 'persona') === 'persona',
     autorNombre: body.autorNombre?.trim() || (request.usuario?.nombre || request.usuario?.usuario || '').split(' ')[0] || undefined,
   });
 

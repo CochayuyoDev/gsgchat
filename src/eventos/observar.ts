@@ -14,6 +14,7 @@
 
 import type { Repos } from '../db/repos.js';
 import type { Bus, ContactoEvento, Eventos } from './bus.js';
+import { trackingDeEntrega } from '../entregas/repo.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
 
@@ -35,6 +36,20 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
     const c = await repos.contacts.getById(id);
     return c ? { id: c.id, telefono: c.phone, nombre: c.name } : null;
   };
+  /** El chat de GSG de un telefono: sus trackings en curso (el mas reciente al final) o, sin ninguno, el del ultimo pedido. Nunca rompe el guardado. */
+  const chatDe = async (phone: string): Promise<{ chatId: string | null; trackings: string[] }> => {
+    try {
+      const vivas = (await repos.entregas?.vivasPorTelefono(phone)) ?? [];
+      const trackings = [...new Set(vivas.map(trackingDeEntrega))];
+      if (trackings.length === 0) {
+        const ultima = await repos.entregas?.ultimaPorTelefono(phone);
+        if (ultima) trackings.push(trackingDeEntrega(ultima));
+      }
+      return { chatId: trackings.length ? trackings[trackings.length - 1]! : null, trackings };
+    } catch {
+      return { chatId: null, trackings: [] };
+    }
+  };
   const ventanaAbierta = (lastInboundAt: Date | null | undefined, ahora: Date) =>
     Boolean(lastInboundAt && ahora.getTime() - lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
 
@@ -55,6 +70,7 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
       const quien: ContactoEvento = { id: c.id, telefono: c.phone, nombre: c.name };
       const fecha = iso(message.createdAt);
 
+      const chat = await chatDe(c.phone);
       const payload = (message.payload ?? {}) as { transcripcion?: unknown; anuncio?: unknown; origen?: unknown; autorNombre?: unknown; media?: { voz?: unknown } };
       if (message.direction === 'in') {
         bus.emitir('mensaje.recibido', {
@@ -69,6 +85,7 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
             fecha,
           },
           ventanaAbierta: ventanaAbierta(c.lastInboundAt, message.createdAt ?? new Date()),
+          ...chat,
         });
       } else {
         bus.emitir('mensaje.enviado', {
@@ -85,6 +102,7 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
             // para que el otro sistema baje la foto o el sticker mandado desde el telefono.
             datos: message.payload ?? null,
           },
+          ...chat,
         });
       }
       return id;

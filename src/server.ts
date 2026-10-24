@@ -38,6 +38,7 @@ import type { ServicioStickers } from './stickers/stickers.js';
 import { registerStickersRoutes } from './admin/stickers-routes.js';
 import { registerApiV1 } from './api/v1/routes.js';
 import { registerApiEntregasGsg } from './api/v1/entregas-gsg.js';
+import { registerApiConversacionesGsg } from './api/v1/conversaciones-gsg.js';
 import type { Bus } from './eventos/bus.js';
 
 
@@ -385,6 +386,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // nombres estables y un permiso por ruta. Ver src/api/v1.
   await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
+  // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
+  await registerApiConversacionesGsg(app, { repos, sender });
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
 

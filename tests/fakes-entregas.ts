@@ -175,9 +175,20 @@ export function createFakeEntregas(reloj: () => Date = () => new Date(), encolar
       const e = entregas.find((x) => x.dia === dia && x.referencia === referencia);
       return e ? copiaE(e) : null;
     },
+    async porTracking(tracking) {
+      const buscado = tracking.trim().toLowerCase();
+      const e = entregas
+        .filter((x) => (x.datosEnvio?.tracking ?? '').toLowerCase() === buscado || x.referencia.toLowerCase() === buscado)
+        .sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id)[0];
+      return e ? copiaE(e) : null;
+    },
     async vivaPorTelefono(phone) {
       const vivas = entregas.filter((x) => x.phone === phone && ESTADOS_ENTREGA_VIVOS.includes(x.estado)).sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id);
       return vivas[0] ? copiaE(vivas[0]) : null;
+    },
+    async ultimaPorTelefono(phone) {
+      const e = entregas.filter((x) => x.phone === phone).sort((a, b) => b.dia.localeCompare(a.dia) || b.id - a.id)[0];
+      return e ? copiaE(e) : null;
     },
     async vivasPorTelefono(phone) {
       return entregas

@@ -48,6 +48,7 @@ import { createFakeArchives, type FakeArchives } from './fakes-archives.js';
 import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
 import { crearProcesosEnMemoria } from '../src/procesos/repo-memoria.js';
 import { crearReportadosEnMemoria } from '../src/entregas/reportados.js';
+import { crearMensajesGsgEnMemoria } from '../src/db/mensajes-gsg.js';
 import { crearDecisionesEnMemoria, type DecisionesEnMemoria } from '../src/db/decisiones-memoria.js';
 import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
 import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
@@ -362,6 +363,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     entregas: createFakeEntregas(() => new Date(), r => repos.rutas.encolarReporte(r)),
     procesos: crearProcesosEnMemoria(),
     reportados: crearReportadosEnMemoria(),
+    mensajesGsg: crearMensajesGsgEnMemoria(),
     decisiones: crearDecisionesEnMemoria(fakeNow),
     archives: createFakeArchives(),
     rutas: createFakeRutas(),

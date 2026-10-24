@@ -58,6 +58,61 @@ const RESPUESTAS_FLUJO: Array<[string, string, string]> = [
   ['429', 'Más de 120 llamadas por minuto con la misma clave (se cuentan junto con la API 1).', 'Con el Runner de Postman, repite la llamada 125 veces en menos de un minuto.'],
 ];
 
+/** API 3 (GET): los parametros de GET /api/v1/chat. [nombre, obligatorio, detalle] */
+export const CAMPOS_CHAT: Array<[string, string, string]> = [
+  ['tracking', 'Sí', 'El tracking del pedido, el mismo que GSG mandó en la API 1. El WhatsApp del chat sale del pedido: no se manda.'],
+  ['limite', 'No', 'Cuántos mensajes devolver (1 a 200; 60 por defecto).'],
+  ['antesDe', 'No', 'El «cursor» del mensaje más antiguo ya recibido, para pedir los anteriores.'],
+];
+
+/** API 3 (GET): un ejemplo de la dirección. */
+export const EJEMPLO_CHAT = 'GET /api/v1/chat?tracking=GSG-E-205';
+
+/** API 3 (GET): un ejemplo de la respuesta. */
+export const EJEMPLO_RESPUESTA_CHAT = {
+  tracking: ['GSG-E-205'],
+  contacto: { id: '8c7dbdc1-6bb9-462b-b379-1cddbf830002', telefono: '51987654321', nombre: 'Ana Perez' },
+  mensajes: [
+    { id: 'wamid.HBgL...', cursor: 12, direccion: 'entrante', tipo: 'text', texto: 'Hola, ya estoy en casa', transcripcion: null, anuncio: null, datos: null, fecha: '2026-10-24T15:29:10.000Z', autor: null, autorNombre: null, emisor: null, voz: false, estado: 'delivered' },
+  ],
+  hayMas: false,
+};
+
+/** API 3 (GET): lo que contesta GET /api/v1/chat, y como sacar cada respuesta en Postman. */
+const RESPUESTAS_CHAT: Array<[string, string, string]> = [
+  ['200', 'El chat del WhatsApp de ese tracking: «tracking» (lista), «contacto», «mensajes» y «hayMas».', '`GET /api/v1/chat?tracking=GSG-E-205`, con el pedido creado antes con la API 1 y un cliente que ya tenga mensajes.'],
+  ['400', 'Falta el tracking, o «limite» no vale (fuera de 1 a 200).', '`GET /api/v1/chat` sin parámetros, o `?tracking=GSG-E-205&limite=500`.'],
+  ['401', 'Sin clave, o la clave no existe o fue revocada.', 'Quita la cabecera `X-API-Key`, o pon una clave inventada.'],
+  ['403', 'La clave no tiene el permiso de leer conversaciones (conversaciones:leer).', 'Usa una clave creada solo con `entregas:gestionar`.'],
+  ['404', 'No hay ningún pedido con ese tracking, o ese pedido todavía no tiene chat.', '`?tracking=NO-EXISTE-1`.'],
+  ['429', 'Más de 120 intentos con claves que no valen, en un minuto, desde la misma dirección: esperar lo que dice Retry-After. (Con claves buenas no hay límite por minuto en esta API.)', 'Con el Runner de Postman, repite la llamada 125 veces con una clave inventada en menos de un minuto.'],
+];
+
+/** API 4 (POST): los campos del cuerpo de POST /api/v1/chat. [nombre, obligatorio, detalle] */
+export const CAMPOS_MENSAJE: Array<[string, string, string]> = [
+  ['tracking', 'Sí', 'El tracking del pedido, el mismo que GSG mandó en la API 1. El mensaje sale al WhatsApp de ese pedido: el teléfono no se manda.'],
+  ['texto', 'Sí', 'Lo que se le escribe al cliente (hasta 4000 caracteres).'],
+  ['idExterno', 'Sí', 'El id que GSG le puso a este mensaje. Evita duplicados: si GSG reintenta el mismo mensaje, no se manda otra vez al cliente.'],
+  ['usuario.id', 'Sí', 'El id del usuario de GSG que escribe (texto o número).'],
+  ['usuario.nombre', 'No', 'Su nombre, que se ve en el chat (por ejemplo el del motorizado).'],
+  ['usuario.rol', 'No', 'Su rol en GSG al momento de escribir (por ejemplo motorizado u operador).'],
+];
+
+/** API 4 (POST): un ejemplo del cuerpo. */
+export const EJEMPLO_MENSAJE = { tracking: 'GSG-E-205', texto: 'Hola, soy tu motorizado, llego en 10 minutos', idExterno: 'gsg-msg-998', usuario: { id: 77, nombre: 'Juan', rol: 'motorizado' } };
+
+/** API 4 (POST): lo que contesta POST /api/v1/chat. */
+const RESPUESTAS_MENSAJE: Array<[string, string, string]> = [
+  ['200', 'Salió por WhatsApp («estado: enviado», con el id del mensaje). Si el mismo «idExterno» ya había salido: «duplicado: true» y no se escribe otra vez al cliente.', '`POST /api/v1/chat` con el JSON de ejemplo y una clave con `mensajes:enviar`. Repite la misma llamada: la segunda trae `"duplicado": true`.'],
+  ['202', 'No salió porque una guarda lo frenó (por ejemplo, la ventana de 24 h de WhatsApp está cerrada o el cliente se dio de baja): «motivo» dice cuál. Ese «idExterno» no se apunta: se puede reintentar.', 'Escríbele a un cliente que no ha escrito en las últimas 24 h con el proveedor oficial de Meta.'],
+  ['400', 'Falta el tracking, el texto, el «idExterno» o el «usuario.id», o el texto está vacío.', '`{ "tracking": "GSG-E-205", "texto": "Hola" }` (sin idExterno ni usuario).'],
+  ['401', 'Sin clave, o la clave no existe o fue revocada.', 'Quita la cabecera `X-API-Key`.'],
+  ['403', 'La clave no tiene el permiso de mandar mensajes (mensajes:enviar).', 'Usa una clave creada antes de este cambio o solo con `conversaciones:leer`.'],
+  ['404', 'No hay ningún pedido con ese tracking.', '`{ "tracking": "NO-EXISTE-1", ... }`.'],
+  ['409', 'El «idExterno» ya se usó con otro tracking, o ese mismo mensaje se está enviando ahora mismo.', 'Manda el mismo `idExterno` con un tracking distinto.'],
+  ['502', 'WhatsApp rechazó el envío: «error» dice por qué. Ese «idExterno» no se apunta.', 'No se provoca desde Postman: depende de WhatsApp.'],
+];
+
 /** API 1: lo que contesta POST /api/v1/entregas, y como sacar cada respuesta en Postman. */
 const RESPUESTAS: Array<[string, string, string]> = [
   ['201', 'Al menos un pedido quedó guardado. Cada uno trae su id real (el de GSGchat) y el estado de su primer mensaje.', '`POST /api/v1/entregas` con el JSON de ejemplo y un `tracking` nuevo (por ejemplo `GSG-E-205`).'],
@@ -91,19 +146,23 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       <a href="#t-resumen" data-na="resumen">Resumen</a>
       <a href="#t-api1" data-na="api1"><span class="api-num">API 1</span>Pedidos</a>
       <a href="#t-api2" data-na="api2"><span class="api-num">API 2</span>Cancelar o reintentar</a>
+      <a href="#t-api3" data-na="api3"><span class="api-num">API 3</span>Historial del chat</a>
+      <a href="#t-api4" data-na="api4"><span class="api-num">API 4</span>Recibir mensajes</a>
       <a href="#t-claves" data-na="claves">Claves</a>
       <a href="#t-validar" data-na="validar">Probar y validar</a>
       <a href="#t-llamadas" data-na="llamadas">Últimas llamadas</a>
     </nav>
     <div class="courier-grid">
       <section class="courier-card courier-wide" data-na="resumen"><h2>GSG llama → GSGchat recibe → el sistema procesa</h2>
-        <p>Estas son <b>nuestras dos APIs</b>, las que GSG llama: la <b>API 1</b> para mandarnos los pedidos y la <b>API 2</b> para pedirnos cancelar o reintentar uno. Cada una tiene su dirección; las dos usan la misma clave. Lo que GSGchat le manda o le pregunta a GSG está en <a href="/conexion-gsg">Conexión con GSG</a>.</p>
+        <p>Estas son <b>nuestras cuatro APIs</b>, las que GSG llama: la <b>API 1</b> para mandarnos los pedidos, la <b>API 2</b> para pedirnos cancelar o reintentar uno, la <b>API 3</b> para pedirnos el historial del chat de un tracking y la <b>API 4</b> para mandarnos un mensaje que escribe un usuario de GSG. Cada una tiene su dirección; todas usan la misma clave. Lo que GSGchat le manda o le pregunta a GSG está en <a href="/conexion-gsg">Conexión con GSG</a>.</p>
         ${opts.disponible ? '<p id="courier-estado" class="courier-status" role="status">Consultando claves y últimas recepciones…</p>' : '<p class="courier-status">El módulo de entregas no está disponible en este servidor.</p>'}
         <table class="na-apis"><thead><tr><th>API</th><th>Método</th><th>Dirección</th><th>Para qué</th></tr></thead><tbody>
           <tr><td><a href="#t-api1"><span class="api-num">API 1</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/entregas</code></td><td>GSG nos manda los pedidos del día</td></tr>
           <tr><td><a href="#t-api2"><span class="api-num">API 2</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/flujo</code></td><td>GSG nos pide cancelar o reintentar un pedido</td></tr>
+          <tr><td><a href="#t-api3"><span class="api-num">API 3</span></a></td><td><span class="chip tono-verde sin-punto">GET</span></td><td><code>/api/v1/chat?tracking=…</code></td><td>GSG pide el historial del chat de un tracking y GSGchat responde con sus mensajes</td></tr>
+          <tr><td><a href="#t-api4"><span class="api-num">API 4</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/chat</code></td><td>GSG nos manda un mensaje que escribe uno de sus usuarios y GSGchat lo envía al cliente</td></tr>
         </tbody></table>
-        <p class="na-clave">Las dos usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>. <a class="btn sm" href="/soporte#pruebas-api-gsg">Ver instrucciones de pruebas</a></p>
+        <p class="na-clave">Las cuatro usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>. <a class="btn sm" href="/soporte#pruebas-api-gsg">Ver instrucciones de pruebas</a></p>
         <a href="/hoy">Ver pedidos recibidos</a> · <a href="/conexion-gsg">Conexión con GSG (lo que le enviamos)</a>
         <small>Con «Confirmar la lista de GSG» activado, los pedidos esperan aprobación en Números del día. Desactivado, el motor los procesa automáticamente.</small>
       </section>
@@ -134,8 +193,35 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         </form>
         <pre id="np-flujo-resultado" role="status" aria-live="polite"></pre>
       </section>
-      <section class="courier-card courier-wide" data-na="claves"><h2>Claves API de GSGchat (para las dos APIs)</h2>
-        <p>Administra el acceso de cada integración: la misma clave sirve para la API 1 y la API 2. El sistema guarda únicamente la huella de la clave.</p>
+      <section class="courier-card" id="api-3" data-na="api3"><h2><span class="api-num">API 3</span> Historial del chat de un pedido <span class="chip tono-verde sin-punto">GET</span></h2>
+        <p>Cuando el motorizado abre el chat de un tracking en GSG, GSG hace un <b>GET</b> a esta dirección con <b>solo el tracking</b> y GSGchat le responde, en la misma llamada, con el historial del chat del WhatsApp de ese pedido. El teléfono no se manda: GSG ya lo dio en la <a href="#t-api1">API 1</a> y queda guardado en el pedido. Esta llamada solo devuelve el chat: no envía mensajes ni cambia el pedido. Para escribirle al cliente está la <a href="#t-api4">API 4</a>.</p>
+        <label for="courier-url-3">Pedir el historial con GET</label><input id="courier-url-3" readonly>
+        <div class="courier-actions"><button class="btn" id="courier-copiar-url-3" type="button">Copiar dirección</button></div>
+        <p>Misma clave que las otras APIs, con el permiso <code>conversaciones:leer</code> (las claves nuevas ya lo traen). Ejemplo:</p>
+        <pre class="api-json">${escapeHtml(EJEMPLO_CHAT)}</pre>
+        <p>Si un cliente tiene varios trackings, todos muestran el mismo chat (el de su WhatsApp). El tracking no distingue mayúsculas.</p>
+        <div class="courier-scroll"><table><thead><tr><th>Parámetro</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_CHAT.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${escapeHtml(obligatorio)}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
+        <h3>Lo que responde GSGchat</h3>
+        <p><code>tracking</code> es una lista (el pedido por el que se preguntó va primero), <code>contacto</code> trae <code>id</code>, <code>telefono</code> y <code>nombre</code>, y cada mensaje trae <code>id</code> (el de WhatsApp), <code>tipo</code>, <code>texto</code>, <code>transcripcion</code>, <code>anuncio</code>, <code>datos</code> y <code>fecha</code>, más <code>direccion</code>, <code>autor</code>, <code>emisor</code> (si lo escribió un usuario de GSG con la API 4), <code>estado</code> y <code>cursor</code>. El <code>cursor</code> de cada mensaje es lo que se manda en <code>antesDe</code> para pedir los anteriores.</p>
+        <pre class="api-json">${escapeHtml(JSON.stringify(EJEMPLO_RESPUESTA_CHAT, null, 2))}</pre>
+        <h3 id="respuestas-3">Respuestas</h3>
+        <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS_CHAT.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div>
+        <a href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a>
+      </section>
+      <section class="courier-card" id="api-4" data-na="api4"><h2><span class="api-num">API 4</span> Recibir un mensaje de un usuario de GSG <span class="chip tono-azul sin-punto">POST</span></h2>
+        <p>Cuando un usuario de GSG (por ejemplo el motorizado) escribe en el chat de un tracking, GSG nos lo manda con un <b>POST</b>. GSGchat lo envía por WhatsApp al número de ese pedido, lo guarda en el chat firmado como una persona (con el usuario y el rol de GSG) y <b>el bot se calla</b> en ese chat hasta que alguien lo reactive con «Reactivar bot». Lo que escriba el equipo desde GSGchat sale por el mismo chat, así que se ve en los dos sistemas.</p>
+        <label for="courier-url-4">Mandar el mensaje con POST</label><input id="courier-url-4" readonly>
+        <div class="courier-actions"><button class="btn" id="courier-copiar-url-4" type="button">Copiar dirección</button></div>
+        <p>Misma clave que las otras APIs, con el permiso <code>mensajes:enviar</code> (las claves nuevas ya lo traen; las creadas antes no). Pasa por las mismas reglas de WhatsApp que el resto de GSGchat. Ejemplo de cuerpo:</p>
+        <pre class="api-json">${escapeHtml(JSON.stringify(EJEMPLO_MENSAJE, null, 2))}</pre>
+        <p><b>Sin duplicados:</b> el <code>idExterno</code> es el id que GSG le pone al mensaje. Si GSG no recibe la respuesta y reintenta con el mismo <code>idExterno</code>, GSGchat contesta 200 con <code>duplicado: true</code> y no vuelve a escribirle al cliente.</p>
+        <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_MENSAJE.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${escapeHtml(obligatorio)}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
+        <h3 id="respuestas-4">Respuestas</h3>
+        <div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS_MENSAJE.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div>
+        <a href="/api/v1/openapi.json" target="_blank" rel="noopener">Ver el OpenAPI</a>
+      </section>
+      <section class="courier-card courier-wide" data-na="claves"><h2>Claves API de GSGchat (para las cuatro APIs)</h2>
+        <p>Administra el acceso de cada integración: la misma clave sirve para las cuatro APIs. El sistema guarda únicamente la huella de la clave.</p>
         <form id="courier-form"><div class="clave-form-grid"><div class="clave-field"><label for="courier-nombre">¿Para quién es esta clave?</label><input id="courier-nombre" required minlength="2" maxlength="80" autocomplete="off" placeholder="Ejemplo: GSG principal"></div>
         <div class="clave-field"><label for="courier-vigencia">Vencimiento</label><select id="courier-vigencia"><option value="nunca">No se acaba nunca</option><option value="7">En 7 días</option><option value="30">En 30 días</option><option value="90">En 90 días</option><option value="365">En 1 año (365 días)</option><option value="fecha">Digitar una fecha</option></select></div>
         <div class="clave-field" id="courier-fecha-campo" hidden><label for="courier-vence">Fecha y hora de vencimiento</label><input id="courier-vence" type="text" maxlength="16" placeholder="DD/MM/AAAA HH:mm" autocomplete="off" aria-describedby="courier-fecha-ayuda"><small id="courier-fecha-ayuda">Puedes escribir solo la fecha; vencerá a las 23:59. Se usa la hora local de tu navegador.</small></div></div>
@@ -169,6 +255,9 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
   $('courier-url').value = endpoint;
   var endpoint2 = location.origin + '/api/v1/flujo';
   $('courier-url-2').value = endpoint2;
+  var endpoint3 = location.origin + '/api/v1/chat';
+  $('courier-url-3').value = endpoint3 + '?tracking=GSG-E-205';
+  $('courier-url-4').value = endpoint3;
   function aviso(t) { $('courier-aviso').textContent = t; }
   function esc(t) { var el = document.createElement('span'); el.textContent = String(t == null ? '' : t); return el.innerHTML; }
 ${MENSAJE_ERROR_HTTP_JS}
@@ -192,6 +281,8 @@ ${MENSAJE_ERROR_HTTP_JS}
   }
   $('courier-copiar-url').onclick = function() { copiar(endpoint); };
   $('courier-copiar-url-2').onclick = function() { copiar(endpoint2); };
+  $('courier-copiar-url-3').onclick = function() { copiar(endpoint3 + '?tracking='); };
+  $('courier-copiar-url-4').onclick = function() { copiar(endpoint3); };
   var ejemplo2 = $('courier-json-2').value;
   if ($('courier-descargar-2')) $('courier-descargar-2').onclick = function() {
     var url = URL.createObjectURL(new Blob([ejemplo2], {type:'application/json'}));
@@ -282,7 +373,7 @@ ${MENSAJE_ERROR_HTTP_JS}
     var venceAt;
     try { venceAt = calcularVencimiento($('courier-vigencia').value, $('courier-vence').value); } catch(e) { aviso(e.message); return; }
     var body = {nombre:$('courier-nombre').value.trim(), venceAt:venceAt};
-    if (!editando) body.permisos = ['entregas:gestionar', 'entregas:leer'];
+    if (!editando) body.permisos = ['entregas:gestionar', 'entregas:leer', 'conversaciones:leer', 'mensajes:enviar'];
     ocupada = true; $('courier-crear').disabled = true;
     try {
       ocultar();

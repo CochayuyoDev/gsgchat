@@ -166,7 +166,7 @@ async function bajarMedia(url: string, fetchImpl: typeof fetch): Promise<{ ok: t
 }
 
 /** Lo que devuelve un envio, con nombres que no cambian. */
-function respuestaDeEnvio(outcome: SendOutcome) {
+export function respuestaDeEnvio(outcome: SendOutcome) {
   if (outcome.ok) return { codigo: 200, cuerpo: { ok: true, estado: 'enviado', mensajeId: outcome.wamid, entregaId: outcome.deliveryId } };
   if (outcome.blocked) {
     return {
@@ -400,18 +400,13 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     };
   });
 
-  app.get<{ Params: { telefono: string } }>('/api/v1/conversaciones/:telefono', { config: { permiso: 'conversaciones:leer' } }, async (request, reply) => {
-    const q = z
-      .object({
-        limite: z.coerce.number().int().positive().max(200).default(60),
-        antesDe: z.coerce.number().int().positive().optional(),
-      })
-      .parse(request.query ?? {});
-    const phone = normalizePhone(request.params.telefono);
-    if (fueraDeAlcance(request.usuario, phone)) return reply.code(403).send(ERROR_ALCANCE);
-    const contact = await repos.contacts.getByPhone(phone);
-    if (!contact) return reply.code(404).send({ error: 'no hay ningun contacto con ese telefono' });
+  const hiloSchema = z.object({
+    limite: z.coerce.number().int().positive().max(200).default(60),
+    antesDe: z.coerce.number().int().positive().optional(),
+  });
 
+  /** El hilo de un contacto: lo comparten la consulta por telefono y la consulta por tracking. */
+  const hiloDe = async (contact: NonNullable<Awaited<ReturnType<typeof repos.contacts.getByPhone>>>, q: z.infer<typeof hiloSchema>) => {
     const messages = await repos.messages.listMessages(contact.id, q.limite, q.antesDe);
     const ventanaAbierta = Boolean(contact.lastInboundAt && Date.now() - contact.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
     const puedeEscribir = (ventanaAbierta || !ventanaObliga()) && !contact.optOutAt;
@@ -445,6 +440,15 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
       }),
       hayMas: messages.length === q.limite,
     };
+  };
+
+  app.get<{ Params: { telefono: string } }>('/api/v1/conversaciones/:telefono', { config: { permiso: 'conversaciones:leer' } }, async (request, reply) => {
+    const q = hiloSchema.parse(request.query ?? {});
+    const phone = normalizePhone(request.params.telefono);
+    if (fueraDeAlcance(request.usuario, phone)) return reply.code(403).send(ERROR_ALCANCE);
+    const contact = await repos.contacts.getByPhone(phone);
+    if (!contact) return reply.code(404).send({ error: 'no hay ningun contacto con ese telefono' });
+    return hiloDe(contact, q);
   });
 
   /** Abrir el chat en la pantalla embebida marca lo entrante como leido. */
