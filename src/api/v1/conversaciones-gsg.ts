@@ -150,6 +150,11 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
         origen: 'persona',
         autorNombre: b.usuario.nombre,
         atiendePersona: true,
+        // Y lo tecleo de verdad, en la pantalla de GSG: igual que en el chat de
+        // aqui. Asi el envio no finge el tecleo (hasta 9 s de "escribiendo...")
+        // ni espera turno detras de la cola automatica, y las guardas de
+        // consentimiento y volumen no aplican, que son para las campanas.
+        manual: true,
         emisor: { tipo: 'gsg', usuarioId: b.usuario.id, rol: b.usuario.rol ?? null, tracking, idExterno: b.idExterno },
       });
       if (outcome.ok) {
