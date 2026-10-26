@@ -52,6 +52,32 @@ describe('ciclo de vida de claves API', () => {
     expect((await panel('PATCH', url, { activo: true })).statusCode).toBe(404);
     expect((await panel('POST', url + '/renovar', {})).statusCode).toBe(404);
   });
+  it('editar permisos cambia lo que puede la MISMA clave, al instante', async () => {
+    const k = await crear({ permisos: ['entregas:gestionar', 'entregas:leer'] }); const url = '/admin/claves-api/' + k.registro.id;
+    const chat = () => esc.app.inject({ url: '/api/v1/historial?tracking=GSG-NO-HAY', headers: { 'x-api-key': k.clave } });
+    expect((await chat()).statusCode).toBe(403);
+    const edit = await panel('PATCH', url, { permisos: ['entregas:gestionar', 'entregas:leer', 'conversaciones:leer'] });
+    expect(edit.statusCode).toBe(200); expect(edit.json()).not.toHaveProperty('clave');
+    expect((await chat()).statusCode).not.toBe(403);
+    expect((await usar(k.clave)).statusCode).toBe(200);
+  });
+  it('poner al día añade los permisos de GSG que faltan sin cambiar la clave', async () => {
+    const k = await crear({ permisos: ['entregas:gestionar', 'entregas:leer', 'conversaciones:leer', 'contactos:leer'] }); const url = '/admin/claves-api/' + k.registro.id;
+    const r = await panel('POST', url + '/poner-al-dia', {});
+    expect(r.statusCode).toBe(200);
+    expect(r.json().agregados).toEqual(['mensajes:enviar']);
+    expect(r.json()).not.toHaveProperty('clave');
+    expect(r.json().registro.permisos).toEqual(['entregas:gestionar', 'entregas:leer', 'conversaciones:leer', 'contactos:leer', 'mensajes:enviar']);
+    expect(r.json().registro.prefijo).toBe(k.registro.prefijo);
+    expect((await usar(k.clave)).statusCode).toBe(200);
+    const otra = await panel('POST', url + '/poner-al-dia', {});
+    expect(otra.json().agregados).toEqual([]);
+    const total = await crear({ permisos: ['*'] });
+    expect((await panel('POST', '/admin/claves-api/' + total.registro.id + '/poner-al-dia', {})).json()).toMatchObject({ ok: true, agregados: [], registro: { permisos: ['*'] } });
+    await esc.app.inject({ method: 'DELETE', url, headers: { cookie } });
+    expect((await panel('POST', url + '/poner-al-dia', {})).statusCode).toBe(404);
+    expect((await panel('POST', '/admin/claves-api/no-existe/poner-al-dia', {})).statusCode).toBe(404);
+  });
   it('una revocada histórica no se reactiva ni renueva', async () => {
     const k = await crear(); const url = '/admin/claves-api/' + k.registro.id;
     await esc.app.inject({ method: 'DELETE', url, headers: { cookie } });
