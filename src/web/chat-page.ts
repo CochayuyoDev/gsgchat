@@ -327,7 +327,16 @@ async function loadChats(keepScroll, anexar) {
   try {
     var offset = anexar ? offsetChats : 0;
     if (anexar) cargandoMasChats = true;
-    var data = await api('/admin/chat/conversations?limit=30&offset=' + offset + '&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim()));
+    var qs = '&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim());
+    var data = await api('/admin/chat/conversations?limit=30&offset=' + offset + qs);
+    /* Al refrescar (no al anexar) se vuelve a pedir lo que ya estaba cargado: si solo
+       se trajeran las primeras 30, la lista se acortaria y el scroll saltaria arriba. */
+    var yaCargados = keepScroll && !anexar ? offsetChats : 0;
+    while (mia === peticionLista && data.hasMore && data.items.length < yaCargados) {
+      var mas = await api('/admin/chat/conversations?limit=100&offset=' + data.items.length + qs);
+      data.items = data.items.concat(mas.items);
+      data.hasMore = mas.hasMore;
+    }
     if (mia !== peticionLista) return;
     if (vistaActual !== data.vistaDesde) {
       vistaActual = data.vistaDesde;

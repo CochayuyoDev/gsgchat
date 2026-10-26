@@ -281,6 +281,27 @@ describe('la ruta de las incidencias se configura en el panel', () => {
     expect(llamadas.length).toBe(antes);
   });
 
+  it('la ruta del webhook de GSG se guarda, da su URL completa, sobrevive a otro guardado y una mala no se guarda', async () => {
+    const gsg = gsgFalso();
+    const e = await armar(gsg);
+    try {
+      const sin = await e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaUbicacion: 'v1/gsgchat/send-location', apiKey: 'clave-gsg-123' });
+      expect(sin).toMatchObject({ rutaWebhook: '', destinoWebhook: null });
+      const con = await e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaUbicacion: 'v1/gsgchat/send-location', rutaWebhook: '/v1/gsgchat/webhook' });
+      expect(con).toMatchObject({ rutaWebhook: 'v1/gsgchat/webhook', destinoWebhook: 'https://gsg.example/api/v1/gsgchat/webhook' });
+      const otraVez = await e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaUbicacion: 'v1/gsgchat/send-location' });
+      expect(otraVez.rutaWebhook).toBe('v1/gsgchat/webhook');
+      await expect(e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaWebhook: '../x' })).rejects.toThrow(/webhook no vale/);
+      expect(e.conexionGsg.estado().rutaWebhook).toBe('v1/gsgchat/webhook');
+      const vacia = await e.conexionGsg.conectarReal({ url: 'https://gsg.example/api', rutaUbicacion: 'v1/gsgchat/send-location', rutaWebhook: '' });
+      expect(vacia).toMatchObject({ rutaWebhook: '', destinoWebhook: null });
+      const html = connectPage({ labels: {} as never, nombreNegocio: 'Prueba', demo: false, conGsg: true, vista: 'gsg' });
+      expect(html).toContain('id="gsg-ruta-webhook"');
+    } finally {
+      await e.cerrar();
+    }
+  });
+
   it('se guarda desde Conexión, sobrevive al guardar otra vez sin ella, y una ruta mala no se guarda', async () => {
     const gsg = gsgFalso();
     const e = await armar(gsg);
