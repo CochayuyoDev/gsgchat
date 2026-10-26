@@ -19,7 +19,8 @@ export function pedidosPage(opts: { disponible: boolean; demo: boolean; nombreNe
     ${pestanasPedidosHtml()}
     <div id="pedidos-error" role="alert" class="s-alerta warn hidden"></div>
     <div id="envios-pendientes" class="tarjeta hidden"></div>
-    <div class="pp-barra tarjeta"><div class="pp-contadores" id="contadores" role="group" aria-label="Filtrar por estado"></div><div class="pp-fila"><label class="pp-buscar"><span class="sr">Buscar</span><input id="buscar" type="search" placeholder="Buscar cliente, teléfono o pedido"></label><select id="filtro" class="sr" aria-label="Estado"><option value="todos">Todos</option><option value="por_confirmar_envio">Por confirmar el envío</option><option value="falta_ubicacion">Falta ubicación</option><option value="falta_confirmar">Falta confirmar</option><option value="contactados">Ubicación registrada</option><option value="necesita">Necesitan atención</option><option value="cancelada">Cancelados</option></select><span id="total" class="muted" aria-live="polite"></span><span class="pp-sep"></span><a class="btn sm" href="/chat">Abrir chats</a><button class="btn sm" id="actualizar">Actualizar</button></div></div>
+    <div id="dia-bloqueado" class="tarjeta hidden"></div>
+    <div class="pp-barra tarjeta"><div class="pp-contadores" id="contadores" role="group" aria-label="Filtrar por estado"></div><div class="pp-fila"><label class="pp-buscar"><span class="sr">Buscar</span><input id="buscar" type="search" placeholder="Buscar cliente, teléfono o pedido"></label><select id="filtro" class="sr" aria-label="Estado"><option value="todos">Todos</option><option value="por_confirmar_envio">Por confirmar el envío</option><option value="falta_escribir">Falta escribir</option><option value="falta_ubicacion">Falta ubicación</option><option value="falta_confirmar">Falta confirmar</option><option value="contactados">Ubicación registrada</option><option value="necesita">Necesitan atención</option><option value="cancelada">Cancelados</option></select><span id="total" class="muted" aria-live="polite"></span><span class="pp-sep"></span><a class="btn sm" href="/chat">Abrir chats</a><button class="btn sm" id="actualizar">Actualizar</button></div></div>
     <p id="reportes-gsg" class="pp-reportes" role="status"></p>
     <div id="lista-pedidos" class="pp-lista" aria-live="polite" aria-busy="true">${'<div class="pedido pp-esqueleto" aria-hidden="true"><div><span class="esqueleto linea media"></span><span class="esqueleto linea corta"></span></div><div><span class="esqueleto linea corta"></span><span class="esqueleto linea"></span></div><div class="p-acciones"><span class="esqueleto" style="width:180px;height:30px"></span></div></div>'.repeat(4)}<span class="sr">Cargando pedidos…</span></div>
     ${bandejaMensajesHtml()}
@@ -55,14 +56,14 @@ function etapa(e) {
   if (e.estado === 'cancelada') return 'cancelada';
   if (e.envioRetenidoAt) return 'por_confirmar_envio';
   if (e.requiereHumano || e.estado === 'incidencia') return 'necesita';
-  if (e.ubicacionEstado === 'pendiente') return 'falta_ubicacion';
+  if (e.ubicacionEstado === 'pendiente') return e.solicitud && !e.solicitud.intentos ? 'falta_escribir' : 'falta_ubicacion';
   if (e.confirmacionEstado === 'pendiente' || e.confirmacionEstado === 'pedida') return 'falta_confirmar';
   return 'contactados';
 }
 function visibles() { var q=$('buscar').value.trim().toLowerCase(), f=$('filtro').value; return filas.filter(function(e) { return (f==='todos'||etapa(e)===f) && (!q||[e.nombre,e.phone,e.referencia,e.distrito].join(' ').toLowerCase().includes(q)); }); }
-var etiquetas = { por_confirmar_envio:'Por confirmar el envío', falta_ubicacion:'Falta ubicación', falta_confirmar:'Falta confirmar', contactados:'Ubicación registrada', necesita:'Necesita atención', cancelada:'Cancelado' };
-var tonos = { por_confirmar_envio:'azul', falta_ubicacion:'ambar', falta_confirmar:'ambar', contactados:'verde', necesita:'rojo', cancelada:'gris' };
-var ORDEN_CONTADORES = [['todos','Todos'],['falta_ubicacion','Falta ubicación'],['contactados','Ubicación registrada'],['necesita','Necesitan atención'],['por_confirmar_envio','Por confirmar el envío'],['falta_confirmar','Falta confirmar'],['cancelada','Cancelados']];
+var etiquetas = { por_confirmar_envio:'Por confirmar el envío', falta_escribir:'Falta escribir', falta_ubicacion:'Falta ubicación', falta_confirmar:'Falta confirmar', contactados:'Ubicación registrada', necesita:'Necesita atención', cancelada:'Cancelado' };
+var tonos = { por_confirmar_envio:'azul', falta_escribir:'ambar', falta_ubicacion:'ambar', falta_confirmar:'ambar', contactados:'verde', necesita:'rojo', cancelada:'gris' };
+var ORDEN_CONTADORES = [['todos','Todos'],['falta_escribir','Falta escribir'],['falta_ubicacion','Falta ubicación'],['contactados','Ubicación registrada'],['necesita','Necesitan atención'],['por_confirmar_envio','Por confirmar el envío'],['falta_confirmar','Falta confirmar'],['cancelada','Cancelados']];
 /* Los contadores por estado son el filtro: un clic y la lista muestra solo esos. */
 function pintarContadores() {
   var cuenta = { todos: filas.length };
@@ -113,7 +114,7 @@ function pintar() {
     return '<article class="pedido tono-'+tonos[k]+'">'+
       '<div class="p-quien"><b>'+esc(e.nombre||e.phone)+'</b><span class="p-datos"><span class="p-ref">'+esc(e.referencia)+'</span>'+esc(e.phone)+(e.distrito?' · '+esc(e.distrito):'')+'</span>'+(e.direccion?'<span class="p-dir">'+esc(e.direccion)+'</span>':'')+'</div>'+
       '<div class="p-estado"><div class="p-chips"><span class="chip tono-'+tonos[k]+'">'+esc(etiquetas[k])+'</span>'+marcaCambio(e)+'</div><div class="p-nota">'+marcaReprogramado(e)+envioGsg(e)+historialUbicacion(e)+'</div></div>'+
-      '<div class="p-acciones"><a class="btn sm" href="/chat?phone='+encodeURIComponent(e.phone)+'">Chat</a>'+(mapa?'<a class="btn sm" href="'+esc(mapa)+'" target="_blank" rel="noopener">Ver ubicación</a>':'')+'<button class="btn sm" data-detalle="'+e.id+'">Detalle</button>'+(e.lat!=null&&e.lng!=null?'<button class="btn sm" data-gsg="'+e.id+'">Enviar a GSG</button>':'')+(k==='por_confirmar_envio'?'<button class="btn sm primario" data-enviar="'+e.id+'">Confirmar y enviar</button>':'')+(k==='falta_confirmar'?'<button class="btn sm" data-confirmar="'+e.id+'">Confirmar</button>':'')+((e.acciones||[]).indexOf('volver_a_pedir_ubicacion')>=0?'<button class="btn sm" data-repedir="'+e.id+'" title="Volver a solicitar la ubicación">Pedir de nuevo</button>':'')+(e.estado!=='cancelada'&&e.estado!=='entregada'?'<button class="btn sm peligro p-peligro" data-cancelar="'+e.id+'">Cancelar</button>':'')+'</div>'+
+      '<div class="p-acciones">'+(k==='falta_escribir'?'<button class="btn sm" disabled title="Todavía no se le ha escrito: el chat se abre cuando salga el primer mensaje">Chat</button>':'<a class="btn sm" href="/chat?phone='+encodeURIComponent(e.phone)+'">Chat</a>')+(mapa?'<a class="btn sm" href="'+esc(mapa)+'" target="_blank" rel="noopener">Ver ubicación</a>':'')+'<button class="btn sm" data-detalle="'+e.id+'">Detalle</button>'+(e.lat!=null&&e.lng!=null?'<button class="btn sm" data-gsg="'+e.id+'">Enviar a GSG</button>':'')+(k==='por_confirmar_envio'?'<button class="btn sm primario" data-enviar="'+e.id+'">Confirmar y enviar</button>':'')+(k==='falta_confirmar'?'<button class="btn sm" data-confirmar="'+e.id+'">Confirmar</button>':'')+((e.acciones||[]).indexOf('volver_a_pedir_ubicacion')>=0?'<button class="btn sm" data-repedir="'+e.id+'" title="Volver a solicitar la ubicación">Pedir de nuevo</button>':'')+(e.estado!=='cancelada'&&e.estado!=='entregada'?'<button class="btn sm peligro p-peligro" data-cancelar="'+e.id+'">Cancelar</button>':'')+'</div>'+
       '<div id="detalle-'+e.id+'" class="detalle"></div></article>';
   }).join(''):'<div class="vacio"><h3>No hay pedidos en este filtro</h3><p>Prueba con otro estado o borra la búsqueda.</p></div>';$('lista-pedidos').removeAttribute('aria-busy');
   document.querySelectorAll('[data-gsg]').forEach(function(b){b.onclick=async function(){b.disabled=true;var caja=$('gsg-'+b.dataset.gsg);try{var r=await api('/admin/entregas/'+b.dataset.gsg+'/enviar-gsg',{method:'POST',body:{}});var txt=r.ok?'Enviado a GSG: '+JSON.stringify(r.cuerpo):'No se pudo enviar a GSG. Error: '+(r.error||'desconocido');if(caja)caja.textContent=txt;toast(txt);}catch(e){toast('No se pudo enviar a GSG. Error: '+e.message);}finally{b.disabled=false;}};});
@@ -127,6 +128,23 @@ function pintar() {
   $('envios-pendientes').innerHTML=pendientes?'<b>'+pendientes+(pendientes===1?' pedido espera':' pedidos esperan')+' autorización de envío.</b><p><button class="btn" id="enviar-todos">Confirmar y enviar a todos ('+pendientes+')</button></p>':'';
   if(pendientes)$('enviar-todos').onclick=function(){confirmarEnvio(this,{todos:true});};
 }
+/* Hoy no toca escribir por el día (los domingos, de fábrica): lo dice y deja enviar igual, con confirmación. */
+function pintarDiaBloqueado(hoy) {
+  var caja = $('dia-bloqueado');
+  var esperan = filas.filter(function(e){ return etapa(e) === 'falta_escribir'; }).length;
+  var mostrar = Boolean(hoy && !hoy.tocaHoy);
+  caja.classList.toggle('hidden', !mostrar);
+  if (!mostrar) { caja.innerHTML = ''; return; }
+  caja.innerHTML = '<b>Hoy es ' + esc(hoy.dia) + ': no se escribe a los clientes.</b><p class="muted">' + (esperan ? (esperan === 1 ? '1 pedido espera a que se le escriba. ' : esperan + ' pedidos esperan a que se les escriba. ') : '') + 'Si lo envías, hoy se escribe con el horario de siempre; mañana vuelve la regla de los días.</p><p><button class="btn primario" id="escribir-hoy">Enviar aunque sea ' + esc(hoy.dia) + '</button></p>';
+  $('escribir-hoy').onclick = async function() {
+    var b = this;
+    var si = await confirmarDialogo({ titulo: 'Enviar aunque sea ' + hoy.dia, texto: 'Hoy se les escribirá a los clientes que esperan, aunque sea ' + hoy.dia + '. ¿Aceptas?', boton: 'Aceptar' });
+    if (!si) return;
+    b.disabled = true;
+    try { var r = await api('/admin/ajustes/escribir-hoy', { method: 'POST', body: {} }); toast(r.detalle || 'Listo.'); await cargar(); }
+    catch (e) { toast(e.message, e); b.disabled = false; }
+  };
+}
 async function confirmarEnvio(boton,body) { boton.disabled=true; try { var r=await api('/admin/entregas/confirmar-envio',{method:'POST',body:body}); toast(r.detalle||r.aviso||'Envío confirmado.'); await cargar(); }catch(e){toast(e.message, e); boton.disabled=false;} }
 async function accionIndividual(id,accion,body) { try { await api('/admin/entregas/'+id+'/'+accion,{method:'POST',body:body}); await cargar(); }catch(e){toast(e.message, e);} }
 function pintarReportes() { var c=resumen.gsgCola; var g=resumen.gsg; $('reportes-gsg').innerHTML = '<span class="muted">Reportes a GSG:</span> '+(c?'<span class="chip tono-verde">'+c.enviado+' enviados</span> <span class="chip tono-'+(c.pendiente?'ambar':'gris')+'">'+c.pendiente+' pendientes</span> <span class="chip tono-'+(c.fallido?'rojo':'gris')+'">'+c.fallido+' fallidos</span>':'<span class="chip tono-gris">no disponibles</span>')+(!g||!g.conectada?' <span class="muted">Configura el backend de GSG en Conexión para enviar las ubicaciones.</span>':''); }
@@ -134,7 +152,7 @@ function filaHorario(f) { var tr=document.createElement('tr'); tr.innerHTML='<td
 function pintarHorarios(lista) { $('horarios-distrito').innerHTML=''; (lista||[]).forEach(filaHorario); }
 function leerHorarios() { return Array.prototype.map.call($('horarios-distrito').querySelectorAll('tr'),function(tr){return {distrito:tr.querySelector('.hd-distrito').value.trim(),desde:tr.querySelector('.hd-desde').value,hasta:tr.querySelector('.hd-hasta').value};}); }
 function pintarAjustes(a) { if(ajustesEditados||!a)return; var defecto=resumen.textos?resumen.textos.porDefecto:{}; $('desde').value=a.horarioEntregas.desde; $('hasta').value=a.horarioEntregas.hasta; $('extendido').value=a.horarioEntregas.extendidoHasta; pintarHorarios(a.horariosPorDistrito); $('soporte').value=a.soporte.whatsapp||''; $('texto-registrada').value=a.textos.ubicacionRegistrada||defecto.ubicacionRegistrada||''; $('texto-confirmacion').value=a.textos.confirmacion||defecto.confirmacion||''; }
-async function cargar(){if(ocupada||!DISPONIBLE)return; ocupada=true; try{resumen=await api('/admin/entregas');filas=resumen.entregas||[];envios={};try{(await api('/admin/gsg/envios?limit=500')).items.slice().reverse().forEach(function(r){if(r.cuerpo&&r.cuerpo.tracking)envios[r.cuerpo.tracking]=r;});}catch(e){}pintar();pintarReportes();pintarAjustes(resumen.ajustes);if(typeof cargarBandejaMensajes==='function')await cargarBandejaMensajes();if(typeof cargarNumerosReportados==='function')await cargarNumerosReportados();}catch(e){toast(e.message, e);}finally{ocupada=false;}}
+async function cargar(){if(ocupada||!DISPONIBLE)return; ocupada=true; try{resumen=await api('/admin/entregas');filas=resumen.entregas||[];envios={};try{(await api('/admin/gsg/envios?limit=500')).items.slice().reverse().forEach(function(r){if(r.cuerpo&&r.cuerpo.tracking)envios[r.cuerpo.tracking]=r;});}catch(e){}pintar();pintarReportes();pintarAjustes(resumen.ajustes);try{pintarDiaBloqueado(await api('/admin/ajustes/hoy'));}catch(e){pintarDiaBloqueado(null);}if(typeof cargarBandejaMensajes==='function')await cargarBandejaMensajes();if(typeof cargarNumerosReportados==='function')await cargarNumerosReportados();}catch(e){toast(e.message, e);}finally{ocupada=false;}}
 $('buscar').value=new URLSearchParams(location.search).get('buscar')||'';
 var filtroViejo = new URLSearchParams(location.search).get('filtro');
 $('filtro').value = ({ faltaUbicacion: 'falta_ubicacion', faltaConfirmacion: 'falta_confirmar', incidencia: 'necesita' })[filtroViejo] || ETAPA;

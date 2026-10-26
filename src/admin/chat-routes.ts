@@ -255,7 +255,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       .parse(request.query ?? {});
 
     const alcance = alcanceChat(request.usuario);
-    if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'contacto no encontrado' });
+    // El chat existe cuando el sistema le escribio (ver iniciadaEnAlcance): antes no hay nada que abrir.
+    if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'Todavía no hay chat con este cliente: el sistema aún no le ha escrito. El chat aparece cuando sale el primer mensaje.' });
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
 

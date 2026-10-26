@@ -11,6 +11,7 @@ import { loadConfig } from '../src/config.js';
 import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { politicaDesdeConfig } from '../src/salud/politica.js';
+import { horaLocal } from '../src/salud/ritmo.js';
 import { crearServicioAjustes, createAjustesGeneralesRepo, type ServicioAjustes } from '../src/ajustes/generales.js';
 import { createFakeRepos, createFakeSettings, createFakeWhatsApp, type FakeRepos, CLAVE_API_PRUEBA } from './fakes.js';
 
@@ -120,6 +121,24 @@ describe('servicio de ajustes', () => {
     expect(ajustes.politica(base).horaFin).toBe(18);
   });
 
+  it('«Enviar aunque sea domingo» deja escribir solo ese día (fecha de Lima); al siguiente vuelve la regla', async () => {
+    const config = loadConfig(ENV_BASE);
+    const repos = createFakeRepos();
+    let reloj = Date.parse('2026-10-25T17:00:00Z'); // domingo 25/10, 12:00 en Lima
+    const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config, releerCadaMs: 0, ahora: () => reloj });
+    const base = politicaDesdeConfig(config, 'cloud');
+    expect(base.diasPermitidos).not.toContain(0);
+    expect(ajustes.politica(base).diasPermitidos).not.toContain(0);
+    await ajustes.guardar({ horario: { diaExtra: '2026-10-25' } });
+    expect(ajustes.politica(base).diasPermitidos).toContain(0);
+    // Domingo 23:59 en Lima (ya lunes en UTC): sigue valiendo.
+    reloj = Date.parse('2026-10-26T04:59:00Z');
+    expect(ajustes.politica(base).diasPermitidos).toContain(0);
+    // El domingo siguiente ya no.
+    reloj = Date.parse('2026-11-01T17:00:00Z');
+    expect(ajustes.politica(base).diasPermitidos).not.toContain(0);
+  });
+
   it('retira el modo prueba, incluso si había una lista guardada o en el servidor', async () => {
     const config = loadConfig({ ...ENV_BASE, SOLO_NUMEROS: '51902464984' });
     const repos = createFakeRepos();
@@ -180,6 +199,21 @@ describe('/admin/ajustes', () => {
     expect(r.efectivo).toMatchObject({ nombreNegocio: 'Reparto GSG', horario: { inicio: 7, fin: 21, dias: [1, 2, 3, 4, 5] }, soloNumeros: [] });
     expect((await app.inject({ method: 'GET', url: '/' })).body).toContain('Reparto GSG');
     expect((await app.inject({ method: 'GET', url: '/panel', headers: { cookie: admin } })).body).toContain('Reparto GSG');
+  });
+
+  it('/admin/ajustes/hoy dice si hoy toca escribir y «escribir-hoy» lo abre solo por hoy', async () => {
+    const { dia } = horaLocal(new Date(), 'America/Lima');
+    // Todos los días menos hoy: hoy no toca.
+    await app.inject({ method: 'POST', url: '/admin/ajustes', headers: { cookie: admin }, payload: { horario: { dias: [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== dia), diaExtra: null } } });
+    const antes = (await app.inject({ method: 'GET', url: '/admin/ajustes/hoy', headers: { cookie: operador } })).json();
+    expect(antes).toMatchObject({ tocaHoy: false });
+    expect(typeof antes.dia).toBe('string');
+    const r = await app.inject({ method: 'POST', url: '/admin/ajustes/escribir-hoy', headers: { cookie: operador }, payload: {} });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().detalle).toContain(antes.dia);
+    expect((await app.inject({ method: 'GET', url: '/admin/ajustes/hoy', headers: { cookie: admin } })).json()).toMatchObject({ tocaHoy: true });
+    expect(ajustes.actual().horario.diaExtra).toBe(antes.fecha);
+    expect((await app.inject({ method: 'GET', url: '/admin/ajustes/hoy' })).statusCode).toBe(401);
   });
 
   it('rechaza un numero mal escrito y valida los rangos', async () => {
