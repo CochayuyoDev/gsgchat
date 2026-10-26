@@ -322,4 +322,26 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     await escribe('51987000006', { location: { latitude: -12.13, longitude: -77.0 } });
     await esperar(() => crm.ubicaciones().some((l) => l.cuerpo.tracking === 'P-006'), 10_000, 'que GSG reciba P-006 tras reiniciar');
   }, 180_000);
+
+  it('12. la ruta del webhook de GSG crea el webhook y el secreto sale una sola vez', async () => {
+    const guardar = () => api('POST', '/admin/entregas/gsg', { modo: 'real', url: urlCrm, token: crm.estado.token, rutaWebhook: 'v1/gsgchat/webhook' });
+    const r = await guardar();
+    expect(r.status).toBe(200);
+    expect(r.body.gsg.destinoWebhook).toBe(`${urlCrm}/v1/gsgchat/webhook`);
+    expect(r.body.webhookGsg).toMatchObject({ creado: true, webhook: { url: `${urlCrm}/v1/gsgchat/webhook`, activo: true } });
+    expect(r.body.webhookGsg.secreto).toMatch(/^whsec_[0-9a-f]{48}$/);
+    // Guardar otra vez: ya existe, el secreto no vuelve a salir.
+    const otra = await guardar();
+    expect(otra.body.webhookGsg).toMatchObject({ creado: false, secreto: null });
+    // Uno nuevo solo por la ruta de rotar.
+    const rotado = await api('POST', '/admin/entregas/gsg/webhook/secreto', {});
+    expect(rotado.body.secreto).toMatch(/^whsec_[0-9a-f]{48}$/);
+    expect(rotado.body.secreto).not.toBe(r.body.webhookGsg.secreto);
+    // Con la ruta guardada pero sin webhook (p. ej. guardada antes de que existiera), «secreto nuevo» lo crea.
+    await api('DELETE', `/api/v1/webhooks/${r.body.webhookGsg.webhook.id}`);
+    const recreado = await api('POST', '/admin/entregas/gsg/webhook/secreto', {});
+    expect(recreado.status).toBe(200);
+    expect(recreado.body).toMatchObject({ creado: true });
+    expect(recreado.body.secreto).toMatch(/^whsec_[0-9a-f]{48}$/);
+  });
 });
