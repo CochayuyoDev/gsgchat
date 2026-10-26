@@ -39,7 +39,7 @@ export interface Eventos {
     };
     /** Si se puede contestar con texto libre por la API de Meta. */
     ventanaAbierta: boolean;
-    /** El chat en GSG: `chatId` es el tracking (el mas reciente de ese WhatsApp) y vale para GET /api/v1/chat y POST /api/v1/chat; `trackings` son todos los del cliente. Sin pedido de GSG: null y []. */
+    /** El chat en GSG: `chatId` es el tracking (el mas reciente de ese WhatsApp) y vale para GET /api/v1/historial y POST /api/v1/chat; `trackings` son todos los del cliente. Sin pedido de GSG: null y []. */
     chatId: string | null;
     trackings: string[];
   };

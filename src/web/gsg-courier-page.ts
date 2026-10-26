@@ -2,6 +2,16 @@ import { calcularVencimientoClave } from './vencimiento-clave.js';
 import { appShell } from './shell.js';
 import { escapeHtml } from './login-page.js';
 import { MENSAJE_ERROR_HTTP_JS } from './bandeja-mensajes.js';
+import { NOMBRES_PERMISOS, PERMISOS, PERMISOS_GSG } from '../auth/permisos.js';
+
+/** Los permisos del paquete de GSG con la API que abre cada uno (ver las rutas de src/api/v1). */
+const PARA_QUE_API: Record<(typeof PERMISOS_GSG)[number], string> = {
+  'entregas:gestionar': 'API 1 y API 2',
+  'entregas:leer': 'Consultar pedidos',
+  'conversaciones:leer': 'API 3',
+  'mensajes:enviar': 'API 4',
+};
+const PAQUETE_GSG = PERMISOS_GSG.map((p) => ({ permiso: p, api: PARA_QUE_API[p], texto: PERMISOS[p] }));
 
 /** Los 12 campos del contrato con GSG Courier. */
 export const EJEMPLO_COURIER = { pedidos: [{
@@ -58,7 +68,7 @@ const RESPUESTAS_FLUJO: Array<[string, string, string]> = [
   ['429', 'Más de 120 llamadas por minuto con la misma clave (se cuentan junto con la API 1).', 'Con el Runner de Postman, repite la llamada 125 veces en menos de un minuto.'],
 ];
 
-/** API 3 (GET): los parametros de GET /api/v1/chat. [nombre, obligatorio, detalle] */
+/** API 3 (GET): los parametros de GET /api/v1/historial. [nombre, obligatorio, detalle] */
 export const CAMPOS_CHAT: Array<[string, string, string]> = [
   ['tracking', 'Sí', 'El tracking del pedido, el mismo que GSG mandó en la API 1. El WhatsApp del chat sale del pedido: no se manda.'],
   ['limite', 'No', 'Cuántos mensajes devolver (1 a 200; 60 por defecto).'],
@@ -66,7 +76,7 @@ export const CAMPOS_CHAT: Array<[string, string, string]> = [
 ];
 
 /** API 3 (GET): un ejemplo de la dirección. */
-export const EJEMPLO_CHAT = 'GET /api/v1/chat?tracking=GSG-E-205';
+export const EJEMPLO_CHAT = 'GET /api/v1/historial?tracking=GSG-E-205';
 
 /** API 3 (GET): un ejemplo de la respuesta. */
 export const EJEMPLO_RESPUESTA_CHAT = {
@@ -78,10 +88,10 @@ export const EJEMPLO_RESPUESTA_CHAT = {
   hayMas: false,
 };
 
-/** API 3 (GET): lo que contesta GET /api/v1/chat, y como sacar cada respuesta en Postman. */
+/** API 3 (GET): lo que contesta GET /api/v1/historial, y como sacar cada respuesta en Postman. */
 const RESPUESTAS_CHAT: Array<[string, string, string]> = [
-  ['200', 'El chat del WhatsApp de ese tracking: «tracking» (lista), «contacto», «mensajes» y «hayMas».', '`GET /api/v1/chat?tracking=GSG-E-205`, con el pedido creado antes con la API 1 y un cliente que ya tenga mensajes.'],
-  ['400', 'Falta el tracking, o «limite» no vale (fuera de 1 a 200).', '`GET /api/v1/chat` sin parámetros, o `?tracking=GSG-E-205&limite=500`.'],
+  ['200', 'El chat del WhatsApp de ese tracking: «tracking» (lista), «contacto», «mensajes» y «hayMas».', '`GET /api/v1/historial?tracking=GSG-E-205`, con el pedido creado antes con la API 1 y un cliente que ya tenga mensajes.'],
+  ['400', 'Falta el tracking, o «limite» no vale (fuera de 1 a 200).', '`GET /api/v1/historial` sin parámetros, o `?tracking=GSG-E-205&limite=500`.'],
   ['401', 'Sin clave, o la clave no existe o fue revocada.', 'Quita la cabecera `X-API-Key`, o pon una clave inventada.'],
   ['403', 'La clave no tiene el permiso de leer conversaciones (conversaciones:leer).', 'Usa una clave creada solo con `entregas:gestionar`.'],
   ['404', 'No hay ningún pedido con ese tracking, o ese pedido todavía no tiene chat.', '`?tracking=NO-EXISTE-1`.'],
@@ -159,7 +169,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <table class="na-apis"><thead><tr><th>API</th><th>Método</th><th>Dirección</th><th>Para qué</th></tr></thead><tbody>
           <tr><td><a href="#t-api1"><span class="api-num">API 1</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/entregas</code></td><td>GSG nos manda los pedidos del día</td></tr>
           <tr><td><a href="#t-api2"><span class="api-num">API 2</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/flujo</code></td><td>GSG nos pide cancelar o reintentar un pedido</td></tr>
-          <tr><td><a href="#t-api3"><span class="api-num">API 3</span></a></td><td><span class="chip tono-verde sin-punto">GET</span></td><td><code>/api/v1/chat?tracking=…</code></td><td>GSG pide el historial del chat de un tracking y GSGchat responde con sus mensajes</td></tr>
+          <tr><td><a href="#t-api3"><span class="api-num">API 3</span></a></td><td><span class="chip tono-verde sin-punto">GET</span></td><td><code>/api/v1/historial?tracking=…</code></td><td>GSG pide el historial del chat de un tracking y GSGchat responde con sus mensajes</td></tr>
           <tr><td><a href="#t-api4"><span class="api-num">API 4</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/chat</code></td><td>GSG nos manda un mensaje que escribe uno de sus usuarios y GSGchat lo envía al cliente</td></tr>
         </tbody></table>
         <p class="na-clave">Las cuatro usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>. <a class="btn sm" href="/soporte#pruebas-api-gsg">Ver instrucciones de pruebas</a></p>
@@ -212,7 +222,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <p>Cuando un usuario de GSG (por ejemplo el motorizado) escribe en el chat de un tracking, GSG nos lo manda con un <b>POST</b>. GSGchat lo envía por WhatsApp al número de ese pedido, lo guarda en el chat firmado como una persona (con el usuario y el rol de GSG) y <b>el bot se calla</b> en ese chat hasta que alguien lo reactive con «Reactivar bot». Lo que escriba el equipo desde GSGchat sale por el mismo chat, así que se ve en los dos sistemas.</p>
         <label for="courier-url-4">Mandar el mensaje con POST</label><input id="courier-url-4" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url-4" type="button">Copiar dirección</button></div>
-        <p>Misma clave que las otras APIs, con el permiso <code>mensajes:enviar</code> (las claves nuevas ya lo traen; las creadas antes no). Pasa por las mismas reglas de WhatsApp que el resto de GSGchat. Ejemplo de cuerpo:</p>
+        <p>Misma clave que las otras APIs, con el permiso <code>mensajes:enviar</code> (las claves nuevas ya lo traen; a una creada antes se le añade en Claves con «Poner al día», sin cambiar la clave). Pasa por las mismas reglas de WhatsApp que el resto de GSGchat. Ejemplo de cuerpo:</p>
         <pre class="api-json">${escapeHtml(JSON.stringify(EJEMPLO_MENSAJE, null, 2))}</pre>
         <p><b>Sin duplicados:</b> el <code>idExterno</code> es el id que GSG le pone al mensaje. Si GSG no recibe la respuesta y reintenta con el mismo <code>idExterno</code>, GSGchat contesta 200 con <code>duplicado: true</code> y no vuelve a escribirle al cliente.</p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_MENSAJE.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${escapeHtml(obligatorio)}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
@@ -225,6 +235,11 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <form id="courier-form"><div class="clave-form-grid"><div class="clave-field"><label for="courier-nombre">¿Para quién es esta clave?</label><input id="courier-nombre" required minlength="2" maxlength="80" autocomplete="off" placeholder="Ejemplo: GSG principal"></div>
         <div class="clave-field"><label for="courier-vigencia">Vencimiento</label><select id="courier-vigencia"><option value="nunca">No se acaba nunca</option><option value="7">En 7 días</option><option value="30">En 30 días</option><option value="90">En 90 días</option><option value="365">En 1 año (365 días)</option><option value="fecha">Digitar una fecha</option></select></div>
         <div class="clave-field" id="courier-fecha-campo" hidden><label for="courier-vence">Fecha y hora de vencimiento</label><input id="courier-vence" type="text" maxlength="16" placeholder="DD/MM/AAAA HH:mm" autocomplete="off" aria-describedby="courier-fecha-ayuda"><small id="courier-fecha-ayuda">Puedes escribir solo la fecha; vencerá a las 23:59. Se usa la hora local de tu navegador.</small></div></div>
+        <fieldset class="clave-permisos" id="courier-permisos"><legend>Qué puede hacer esta clave</legend>
+          <p id="courier-permisos-total" class="muted" hidden>Esta clave tiene acceso total: ya puede todo y sus permisos no se cambian aquí.</p>
+          <div class="clave-permisos-grid">${PAQUETE_GSG.map((p) => `<label class="clave-permiso"><input type="checkbox" name="courier-permiso" value="${escapeHtml(p.permiso)}" checked><span><b>${escapeHtml(p.api)}</b><br>${escapeHtml(p.texto)}</span></label>`).join('')}</div>
+          <small>Al editar, los permisos cambian en la misma clave y valen al instante: GSG no tiene que cambiar nada.</small>
+        </fieldset>
 
         <div class="courier-actions"><button class="btn primario" id="courier-crear" type="submit" ${opts.disponible ? '' : 'disabled'}>Crear clave</button><button class="btn" id="courier-cancelar" type="button" hidden>Cancelar edición</button></div></form>
         <div id="courier-nueva" hidden class="clave-secret-panel"><h3 id="courier-secreto-titulo"></h3><p><strong>Guarda esta clave en un lugar seguro porque luego no la volverás a ver.</strong></p><p>Solo se muestra ahora. Si la pierdes, renueva la clave: la anterior dejará de funcionar.</p><code id="courier-secreto" class="courier-secret"></code><div class="courier-actions"><button class="btn" id="courier-copiar-clave">Copiar clave</button><button class="btn" id="courier-ocultar">Ocultar clave (ya la copié)</button></div></div>
@@ -249,15 +264,34 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
     script: String.raw`
 (function () {
   var $ = function(id) { return document.getElementById(id); };
-  var editando = null, ocupada = false;
+  var editando = null, editandoClave = null, ocupada = false;
+  var PAQUETE = ${JSON.stringify(PAQUETE_GSG)};
+  var EN_PAQUETE = PAQUETE.map(function(p) { return p.permiso; });
+  var VALIDOS = ${JSON.stringify(NOMBRES_PERMISOS)};
+  function casillas() { return Array.prototype.slice.call(document.querySelectorAll('[name="courier-permiso"]')); }
+  function marcados() { return casillas().filter(function(x) { return x.checked; }).map(function(x) { return x.value; }); }
+  function accesoTotal(c) { return (c.permisos || []).indexOf('*') >= 0; }
+  function faltan(c) { return accesoTotal(c) ? [] : PAQUETE.filter(function(p) { return (c.permisos || []).indexOf(p.permiso) < 0; }); }
+  function permisosDe(c) {
+    if (accesoTotal(c)) return 'Acceso total';
+    var lista = PAQUETE.filter(function(p) { return c.permisos.indexOf(p.permiso) >= 0; }).map(function(p) { return esc(p.api); });
+    var otros = c.permisos.filter(function(p) { return EN_PAQUETE.indexOf(p) < 0; }).map(function(p) { return '<code>' + esc(p) + '</code>'; });
+    return lista.concat(otros).join(' · ') || 'Ninguno';
+  }
+  function ponerCasillas(c) {
+    var total = Boolean(c && accesoTotal(c));
+    $('courier-permisos-total').hidden = !total;
+    casillas().forEach(function(x) { x.checked = !c || total || c.permisos.indexOf(x.value) >= 0; x.disabled = total; });
+  }
   var ejemplo = $('courier-json').value;
   var endpoint = location.origin + '/api/v1/entregas';
   $('courier-url').value = endpoint;
   var endpoint2 = location.origin + '/api/v1/flujo';
   $('courier-url-2').value = endpoint2;
-  var endpoint3 = location.origin + '/api/v1/chat';
+  var endpoint3 = location.origin + '/api/v1/historial';
   $('courier-url-3').value = endpoint3 + '?tracking=GSG-E-205';
-  $('courier-url-4').value = endpoint3;
+  var endpoint4 = location.origin + '/api/v1/chat';
+  $('courier-url-4').value = endpoint4;
   function aviso(t) { $('courier-aviso').textContent = t; }
   function esc(t) { var el = document.createElement('span'); el.textContent = String(t == null ? '' : t); return el.innerHTML; }
 ${MENSAJE_ERROR_HTTP_JS}
@@ -282,7 +316,7 @@ ${MENSAJE_ERROR_HTTP_JS}
   $('courier-copiar-url').onclick = function() { copiar(endpoint); };
   $('courier-copiar-url-2').onclick = function() { copiar(endpoint2); };
   $('courier-copiar-url-3').onclick = function() { copiar(endpoint3 + '?tracking='); };
-  $('courier-copiar-url-4').onclick = function() { copiar(endpoint3); };
+  $('courier-copiar-url-4').onclick = function() { copiar(endpoint4); };
   var ejemplo2 = $('courier-json-2').value;
   if ($('courier-descargar-2')) $('courier-descargar-2').onclick = function() {
     var url = URL.createObjectURL(new Blob([ejemplo2], {type:'application/json'}));
@@ -311,7 +345,7 @@ ${MENSAJE_ERROR_HTTP_JS}
   var calcularVencimiento = ${calcularVencimientoClave.toString()};
   function cambiarVigencia() { var manual = $('courier-vigencia').value === 'fecha'; $('courier-fecha-campo').hidden = !manual; $('courier-vence').required = manual; }
   $('courier-vigencia').onchange = cambiarVigencia;
-  function cancelar() { editando = null; $('courier-form').reset(); cambiarVigencia(); $('courier-crear').textContent = 'Crear clave'; $('courier-cancelar').hidden = true; }
+  function cancelar() { editando = null; editandoClave = null; $('courier-form').reset(); ponerCasillas(null); cambiarVigencia(); $('courier-crear').textContent = 'Crear clave'; $('courier-cancelar').hidden = true; }
   $('courier-cancelar').onclick = cancelar;
   $('courier-descargar').onclick = function() {
     var url = URL.createObjectURL(new Blob([ejemplo], {type:'application/json'}));
@@ -322,16 +356,18 @@ ${MENSAJE_ERROR_HTTP_JS}
     try {
       var claves = await api('/admin/claves-api');
       var activas = claves.filter(function(c) { return estadoClave(c) === 'Activa' && (c.permisos || []).some(function(p) { return p === '*' || p === 'entregas:gestionar'; }); });
-      $('courier-claves').innerHTML = claves.length ? '<table><thead><tr><th>Nombre / identificador</th><th>Creación / vencimiento</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' + claves.map(function(c) {
+      $('courier-claves').innerHTML = claves.length ? '<table><thead><tr><th>Nombre / identificador</th><th>Permisos</th><th>Creación / vencimiento</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' + claves.map(function(c) {
         var estado = estadoClave(c);
-        return '<tr><td><b>' + esc(c.nombre) + '</b><br><small>' + esc(c.id) + '</small></td><td>' + esc(fecha(c.createdAt)) + '<br>' + esc(fecha(c.venceAt)) + '</td><td>' + esc(c.ultimoUsoAt ? fecha(c.ultimoUsoAt) : 'Nunca se usó') + '</td><td>' + estado + '</td><td>' + (c.revocadaAt ? '' : '<button class="btn sm" data-accion="estado" data-id="' + esc(c.id) + '" ' + (estado === 'Vencida' ? 'disabled' : '') + '>' + (c.desactivadaAt ? 'Activar' : 'Desactivar') + '</button> <button class="btn sm" data-accion="renovar" data-id="' + esc(c.id) + '">Renovar</button> <button class="btn sm" data-accion="editar" data-id="' + esc(c.id) + '">Editar</button> ') + '<button class="btn sm peligro" data-accion="eliminar" data-id="' + esc(c.id) + '">Eliminar</button></td></tr>';
+        var falta = c.revocadaAt ? [] : faltan(c);
+        var permisos = permisosDe(c) + (falta.length ? '<br><span class="chip tono-ambar">Le falta: ' + falta.map(function(p) { return esc(p.api); }).join(', ') + '</span>' : '');
+        return '<tr><td><b>' + esc(c.nombre) + '</b><br><small>' + esc(c.id) + '</small></td><td>' + permisos + '</td><td>' + esc(fecha(c.createdAt)) + '<br>' + esc(fecha(c.venceAt)) + '</td><td>' + esc(c.ultimoUsoAt ? fecha(c.ultimoUsoAt) : 'Nunca se usó') + '</td><td>' + estado + '</td><td>' + (c.revocadaAt ? '' : (falta.length ? '<button class="btn sm primario" data-accion="al-dia" data-id="' + esc(c.id) + '">Poner al día</button> ' : '') + '<button class="btn sm" data-accion="estado" data-id="' + esc(c.id) + '" ' + (estado === 'Vencida' ? 'disabled' : '') + '>' + (c.desactivadaAt ? 'Activar' : 'Desactivar') + '</button> <button class="btn sm" data-accion="renovar" data-id="' + esc(c.id) + '">Renovar</button> <button class="btn sm" data-accion="editar" data-id="' + esc(c.id) + '">Editar</button> ') + '<button class="btn sm peligro" data-accion="eliminar" data-id="' + esc(c.id) + '">Eliminar</button></td></tr>';
       }).join('') + '</tbody></table>' : '<p>No hay claves creadas.</p>';
       $('courier-claves').querySelectorAll('[data-accion]').forEach(function(b) {
         b.onclick = async function() {
           if (ocupada) return;
           var c = claves.find(function(c) { return c.id === b.dataset.id; });
           if (b.dataset.accion === 'editar') {
-            editando = c.id; $('courier-nombre').value = c.nombre;
+            editando = c.id; editandoClave = c; $('courier-nombre').value = c.nombre; ponerCasillas(c);
             $('courier-vigencia').value = c.venceAt ? 'fecha' : 'nunca';
             var vencimiento = c.venceAt ? new Date(c.venceAt) : null;
             var dos = function(n) { return String(n).padStart(2, '0'); };
@@ -341,6 +377,16 @@ ${MENSAJE_ERROR_HTTP_JS}
             $('courier-crear').textContent = 'Guardar cambios'; $('courier-cancelar').hidden = false; $('courier-nombre').focus(); return;
           }
           var accion = b.dataset.accion;
+          if (accion === 'al-dia') {
+            var nuevos = faltan(c).map(function(p) { return p.api; }).join(', ');
+            if (!(await confirmarDialogo({titulo:'Poner al día «' + c.nombre + '»', texto:'Se le añade: ' + nuevos + '. La clave no cambia: GSG sigue usando la misma y vale al instante.', boton:'Poner al día'}))) return;
+            ocupada = true; b.disabled = true;
+            try {
+              await api('/admin/claves-api/' + encodeURIComponent(c.id) + '/poner-al-dia', 'POST', {});
+              cancelar(); aviso('Listo: «' + c.nombre + '» ya puede usar ' + nuevos + ' con la misma clave.'); await cargar();
+            } catch(e) { aviso(e.message); } finally { ocupada = false; b.disabled = false; }
+            return;
+          }
           var nombre;
           if (accion === 'eliminar') { nombre = window.prompt('Eliminar definitivamente «' + c.nombre + '». Escribe su nombre exacto para confirmar.'); if (nombre !== c.nombre) { aviso('Eliminación cancelada: el nombre no coincide.'); return; } }
           else if (!(await confirmarDialogo({titulo:accion === 'renovar' ? 'Renovar clave' : c.desactivadaAt ? 'Activar clave' : 'Desactivar clave',texto:accion === 'renovar' ? 'La clave anterior dejará de funcionar. Guarda la nueva y actualízala en el sistema externo.' : c.desactivadaAt ? 'Esta integración recuperará sus permisos.' : 'Las próximas peticiones con esta clave serán rechazadas.',boton:'Confirmar',peligro:true}))) return;
@@ -373,7 +419,13 @@ ${MENSAJE_ERROR_HTTP_JS}
     var venceAt;
     try { venceAt = calcularVencimiento($('courier-vigencia').value, $('courier-vence').value); } catch(e) { aviso(e.message); return; }
     var body = {nombre:$('courier-nombre').value.trim(), venceAt:venceAt};
-    if (!editando) body.permisos = ['entregas:gestionar', 'entregas:leer', 'conversaciones:leer', 'mensajes:enviar'];
+    // Al editar se conservan los permisos que la clave tenga fuera del paquete de GSG.
+    if (!editandoClave || !accesoTotal(editandoClave)) {
+      // Los retirados (p. ej. embed:emitir) ya no valen: reenviarlos haría rechazar el cambio entero.
+      var otros = editandoClave ? editandoClave.permisos.filter(function(p) { return EN_PAQUETE.indexOf(p) < 0 && VALIDOS.indexOf(p) >= 0; }) : [];
+      body.permisos = marcados().concat(otros);
+      if (!body.permisos.length) { aviso('Marca al menos un permiso: sin ninguno, la clave no podría usar ninguna API.'); return; }
+    }
     ocupada = true; $('courier-crear').disabled = true;
     try {
       ocultar();

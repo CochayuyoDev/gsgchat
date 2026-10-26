@@ -26,7 +26,7 @@ import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookie
 import type { ClavesApiRepo } from './claves-api.js';
 import { ETIQUETAS, type ActividadRepo } from './actividad.js';
 import { claveApiVigente, generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
-import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
+import { permisosAceptables, permisosGsgQueFaltan, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
@@ -580,6 +580,20 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     const registro = await claves.actualizar(request.params.id, { ...body, permisos: permisos && 'permisos' in permisos ? permisos.permisos : undefined, venceAt: body.venceAt === undefined ? undefined : body.venceAt === null ? null : new Date(body.venceAt) });
     if (!registro) return reply.code(404).send({ error: 'Clave no disponible, revocada o vencida para activación.' });
     return { ok: true, registro };
+  });
+  /**
+   * Le añade a la clave los permisos del paquete de GSG que le faltan (los de
+   * una API nueva). La clave no cambia: GSG sigue usando la misma y vale al
+   * instante. Los permisos que ya tenía se conservan.
+   */
+  app.post<{ Params: { id: string } }>('/admin/claves-api/:id/poner-al-dia', async (request, reply) => {
+    const actual = (await claves.listar()).find((c) => c.id === request.params.id);
+    if (!actual || actual.revocadaAt) return reply.code(404).send({ error: 'Clave no disponible o revocada.' });
+    const agregados = permisosGsgQueFaltan(actual.permisos);
+    if (!agregados.length) return { ok: true, agregados, registro: actual };
+    const registro = await claves.actualizar(actual.id, { permisos: [...actual.permisos, ...agregados] });
+    if (!registro) return reply.code(404).send({ error: 'Clave no disponible o revocada.' });
+    return { ok: true, agregados, registro };
   });
   app.post<{ Params: { id: string } }>('/admin/claves-api/:id/renovar', async (request, reply) => {
     const clave = generarClaveApi();

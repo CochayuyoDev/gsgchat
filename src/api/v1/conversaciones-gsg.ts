@@ -1,7 +1,7 @@
 /**
  * Los chats de GSG: lo que usa el motorizado desde la web de GSG.
  *
- *  GET  /api/v1/chat?tracking=…   el historial de mensajes del WhatsApp de ese tracking (conversaciones:leer).
+ *  GET  /api/v1/historial?tracking=…  el historial de mensajes del WhatsApp de ese tracking (conversaciones:leer).
  *                                 GSG lo pide al abrir un chat y GSGchat responde en esa misma llamada.
  *  POST /api/v1/chat              un usuario de GSG escribe: GSGchat lo manda por WhatsApp al numero de ese
  *                                 tracking, lo apunta con quien lo escribio y calla al bot (mensajes:enviar).
@@ -111,7 +111,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
       hayMas: messages.length === q.limite,
     };
   };
-  app.get('/api/v1/chat', { config: { permiso: 'conversaciones:leer' } }, leerChat);
+  app.get('/api/v1/historial', { config: { permiso: 'conversaciones:leer' } }, leerChat);
   // Los mismos handlers con los nombres del diagrama de integracion: `chat_id` es el tracking.
   app.get('/api/v1/messages', { config: { permiso: 'conversaciones:leer' } }, leerChat);
 

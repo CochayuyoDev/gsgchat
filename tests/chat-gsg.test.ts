@@ -4,7 +4,7 @@ import { crearBus } from '../src/eventos/bus.js';
 import { observarRepos } from '../src/eventos/observar.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 
-// El chat de GSG, en /api/v1/chat:
+// El chat de GSG: GET /api/v1/historial y POST /api/v1/chat:
 //  - GET: el motorizado abre el chat de un tracking; GSG manda SOLO el tracking y GSGchat responde con el historial
 //    del WhatsApp que GSG ya dio en POST /api/v1/entregas.
 //  - POST: un usuario de GSG escribe; GSGchat lo manda por WhatsApp a ese numero, lo apunta con quien lo escribio y calla al bot.
@@ -15,7 +15,7 @@ let sinPermiso: string; // solo entregas
 
 const consultar = (params: Record<string, string | number>, key: string | null = clave) => {
   const q = new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])));
-  return e.app.inject({ method: 'GET', url: `/api/v1/chat?${q.toString()}`, headers: key ? { 'x-api-key': key } : {} });
+  return e.app.inject({ method: 'GET', url: `/api/v1/historial?${q.toString()}`, headers: key ? { 'x-api-key': key } : {} });
 };
 const escribir = (cuerpo: unknown, key: string | null = escritor) =>
   e.app.inject({ method: 'POST', url: '/api/v1/chat', headers: { ...(key ? { 'x-api-key': key } : {}), 'content-type': 'application/json' }, payload: JSON.stringify(cuerpo) });
@@ -41,7 +41,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { await e.cerrar(); });
 
-describe('GET /api/v1/chat?tracking=… (el historial)', () => {
+describe('GET /api/v1/historial?tracking=… (el historial)', () => {
   it('devuelve el chat del WhatsApp que GSG dio para ese tracking, con los mensajes', async () => {
     const r = await consultar({ tracking: 'Chat-1' });
     expect(r.statusCode).toBe(200);
@@ -159,7 +159,7 @@ describe('POST /api/v1/chat (un usuario de GSG escribe)', () => {
 });
 
 describe('el flujo del diagrama: /api/v1/messages, webhook con chatId y /api/v1/send-message', () => {
-  it('GET /api/v1/messages?chat_id= devuelve el mismo historial que /api/v1/chat?tracking=', async () => {
+  it('GET /api/v1/messages?chat_id= devuelve el mismo historial que /api/v1/historial?tracking=', async () => {
     const r = await e.app.inject({ method: 'GET', url: '/api/v1/messages?chat_id=Chat-1', headers: { 'x-api-key': clave } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual((await consultar({ tracking: 'Chat-1' })).json());

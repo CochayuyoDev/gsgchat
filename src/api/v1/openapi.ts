@@ -227,7 +227,7 @@ export function openApi(baseUrl: string): Json {
         },
       },
 
-      '/chat': {
+      '/historial': {
         get: {
           tags: ['conversaciones'],
           summary: 'API 3 (GET): el historial de mensajes de un tracking',
@@ -279,6 +279,9 @@ export function openApi(baseUrl: string): Json {
             404: error('No hay ningun pedido con ese tracking, o ese pedido todavia no tiene chat'),
           },
         },
+      },
+
+      '/chat': {
         post: {
           tags: ['conversaciones'],
           summary: 'API 4 (POST): recibir un mensaje que escribe un usuario de GSG',
@@ -320,15 +323,15 @@ export function openApi(baseUrl: string): Json {
       '/messages': {
         get: {
           tags: ['conversaciones'],
-          summary: 'El historial de un chat (alias de GET /chat: `chat_id` es el tracking)',
-          description: 'Igual que `GET /chat?tracking=`, con `chat_id` en lugar de `tracking`. La respuesta es la misma. El `chatId` de los webhooks `mensaje.recibido` y `mensaje.enviado` es el valor que va aqui.',
+          summary: 'El historial de un chat (alias de GET /historial: `chat_id` es el tracking)',
+          description: 'Igual que `GET /historial?tracking=`, con `chat_id` en lugar de `tracking`. La respuesta es la misma. El `chatId` de los webhooks `mensaje.recibido` y `mensaje.enviado` es el valor que va aqui.',
           ...permiso('conversaciones:leer'),
           parameters: [
             { name: 'chat_id', in: 'query', required: true, schema: { type: 'string' }, description: 'El tracking del pedido (el `chatId` del webhook)' },
             { name: 'limite', in: 'query', schema: { type: 'integer', default: 60, maximum: 200 }, description: 'Cuantos mensajes devolver' },
             { name: 'antesDe', in: 'query', schema: { type: 'integer' }, description: 'El `cursor` del mensaje mas antiguo ya recibido' },
           ],
-          responses: { 200: json({ type: 'object' }, 'Igual que GET /chat'), 400: error('Falta chat_id, o limite fuera de 1 a 200'), 404: error('No hay ningun pedido con ese tracking, o todavia no tiene chat') },
+          responses: { 200: json({ type: 'object' }, 'Igual que GET /historial'), 400: error('Falta chat_id, o limite fuera de 1 a 200'), 404: error('No hay ningun pedido con ese tracking, o todavia no tiene chat') },
         },
       },
       '/send-message': {
