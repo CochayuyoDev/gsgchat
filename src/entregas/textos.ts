@@ -543,10 +543,10 @@ const CIERRE_UBICACION = '¡Muchas gracias!';
 
 /** Los textos de siempre. Se usan cuando la pantalla no guardo otros. */
 export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string> = {
-  // Solo el enlace del mapa: nada de latitud y longitud a la vista del cliente.
+  // Sin enlace de mapa, sin latitud y longitud, sin distrito a la vista del cliente.
   // Es a la vez el cierre del agente operativo: despues de esto la IA ya no
   // contesta en ese chat (el sistema sigue con la hora de llegada y el entregado).
-  ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.`,
+  ubicacionRegistrada: `✅ Ubicación registrada correctamente.\n\n${CIERRE_UBICACION}\n\n🕑 Horario aproximado de llegada {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.`,
   solicitudUbicacion: '¡Hola {nombreCompleto}! Somos GSG Courier, tengo una entrega para ti:\n📦 Producto: {producto}\n🏢 Empresa: {empresa}\n📝 Código: {tracking}\n🧾 Nro. de pedido: {nroPedido}\n💳 Método de Pago: {metodoPago}\n💰 Monto a Cobrar: {monto}\n🏠 Dirección: {direccionCompleta}\n🕑 Horario de entrega: {horario}.\n\nPor favor, ¿podrías compartir tu ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!',
   porQueUbicacion: 'Es necesaria para registrar correctamente la dirección de entrega. ¿Podrías compartir tu ubicación por WhatsApp, por favor? (clip 📎 → Ubicación)',
   cierreAgente: TEXTO_CIERRE,
@@ -558,13 +558,13 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   insistirConfirmacion: 'Hola {nombre}, seguimos pendientes de {pedido} de {negocio}. ¿Lo recibe hoy? Responda SÍ o NO, por favor.',
   preguntarOtraVez: 'Disculpe, no me quedó claro. ¿Recibe hoy {pedido}? Responda SÍ para confirmar, NO para cancelar, o cuéntenos si prefiere otro día u otra dirección.',
   // El mismo aviso completo que «Ubicación registrada» y, al final, la pregunta.
-  graciasYConfirmar: `✅ Ubicación registrada correctamente.\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.`,
-  graciasYConfirmarVarios: `✅ Ubicación registrada correctamente ({pedidos}).\n{mapa}\n\n${CIERRE_UBICACION}\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.`,
+  graciasYConfirmar: `✅ Ubicación registrada correctamente.\n\n${CIERRE_UBICACION}\n\n🕑 Horario aproximado de llegada {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nUna cosa más: ¿nos confirma que va a poder recibirlo hoy? Responda SÍ o NO.`,
+  graciasYConfirmarVarios: `✅ Ubicación registrada correctamente ({pedidos}).\n\n${CIERRE_UBICACION}\n\n🕑 Horario aproximado de llegada {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📍 Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la {horaLimite} para tenerla en cuenta el mismo día.\n\nVamos uno por uno: ¿nos confirma que va a poder recibir {pedido} hoy? Responda SÍ o NO.`,
   confirmarOtroPedido: 'Y {pedido}, ¿también lo recibe hoy? Responda SÍ o NO.',
   // El mismo aviso del motorizado, horario y soporte que «Ubicación registrada».
   // Si ya recibio el aviso completo al mandar su ubicacion: solo el ok, sin repetirlo.
   confirmadaYaAvisado: 'Perfecto, {pedido} queda confirmado para hoy. ¡Gracias!',
-  confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\nLa ubicación queda registrada para coordinar tu entrega. Para cualquier consulta, comunícate con soporte: {soporte}.\n\n🕑 Horario aproximado de llegada para {distrito}: {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
+  confirmada: 'Perfecto, {pedido} queda confirmado para hoy.\n\n🕑 Horario aproximado de llegada {horario}. Por algunas casuísticas, el horario se puede extender hasta las {hastaExtendido}.\n\n📞 Para cualquier consulta, comunícate a nuestro número de soporte: {soporte}.',
   cancelada: 'Entendido, dejamos {pedido} sin entregar por hoy. Si cambia de opinión, escríbanos por aquí. Gracias.',
   cambio: 'Entendido, tomamos nota. Un compañero de {negocio} se comunicará con usted para coordinar {pedido}. Gracias.',
   motorizadoNuevo: '🛵 {urgente}Nuevo pedido: {pedido}\nCliente: {nombreCompleto}{distrito}\n{notas}\n¿En cuántos minutos lo entregas? Responde solo con los minutos (ej. 40).',

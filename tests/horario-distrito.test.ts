@@ -92,17 +92,17 @@ describe('quién manda en la ventana de un pedido', () => {
 });
 
 describe('los textos al cliente', () => {
-  it('«Ubicación registrada» dice la ventana de su distrito', () => {
+  it('«Ubicación registrada» dice la ventana de su distrito, sin nombrarlo, sin mapa ni párrafo de soporte', () => {
     const v = variablesDeVentana(ventanaDeEntrega({ distrito: 'Ancón' }, AJUSTES));
     const t = rellenar(TEXTOS_POR_DEFECTO.ubicacionRegistrada, { negocio: 'GSG', nombre: 'Ana', distrito: 'Ancón', ...v });
-    expect(t).toContain('Horario aproximado de llegada para Ancón: de 6 a 8 de la noche.');
+    expect(t).toContain('Horario aproximado de llegada de 6 a 8 de la noche.');
     expect(t).toContain('hasta las 10:00 PM');
   });
 
-  it('sin distrito se quita el «para» y queda el horario general', () => {
+  it('el horario sale sin distrito, también el general', () => {
     const v = variablesDeVentana(ventanaDeEntrega(null, AJUSTES));
     const t = rellenar(TEXTOS_POR_DEFECTO.confirmada, { negocio: 'GSG', pedido: 'P-1', ...v });
-    expect(t).toContain('Horario aproximado de llegada: de 2 de la tarde a 8 de la noche.');
+    expect(t).toContain('Horario aproximado de llegada de 2 de la tarde a 8 de la noche.');
   });
 
   it('{distrito} y {horario} se enseñan junto a los textos que llevan el horario', () => {
@@ -170,7 +170,7 @@ describe('de punta a punta: la pantalla de ajustes y el cliente', () => {
     const antes = e.textosA('987000001').length;
     await e.contesta('987000001', { pin: PIN_LIMA });
     const nuevos = e.textosA('987000001').slice(antes).join('\n');
-    expect(nuevos).toContain('Horario aproximado de llegada para Miraflores: de 4 a 6 de la tarde');
+    expect(nuevos).toContain('Horario aproximado de llegada de 4 a 6 de la tarde');
     const ctx = (await e.entregas.contextoDeCliente('51987000001')) ?? '';
     expect(ctx).toContain('de 4:00 PM a 6:00 PM');
     expect(ctx).toContain('horario por distrito de Miraflores');
