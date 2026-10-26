@@ -563,6 +563,17 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   </form>
   </details>
   <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
+  <div id="gsg-webhook-caja" class="bloque punteado hidden">
+    <h3>Webhook de GSG</h3>
+    <p class="ayuda" id="gsg-webhook-destino"></p>
+    <div id="gsg-webhook-secreto-caja" class="nota hidden" role="status" aria-live="polite">
+      <b>Secreto del webhook: cópialo ahora, no se vuelve a mostrar.</b>
+      <p><code id="gsg-webhook-secreto" style="word-break:break-all;user-select:all"></code></p>
+      <div class="acciones"><button class="btn sm" id="gsg-webhook-copiar" type="button">Copiar</button><button class="btn sm" id="gsg-webhook-ocultar" type="button">Ya lo copié</button></div>
+      <p class="ayuda">Se le da a GSG: cada aviso sale firmado en la cabecera X-Firma (t=…,v1=hmac sha256 de «t.cuerpo» con este secreto).</p>
+    </div>
+    <div class="acciones"><button class="btn sm" id="gsg-webhook-rotar" type="button">Generar un secreto nuevo</button></div>
+  </div>
   <div class="acciones con-pie">
     <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
     <span id="gsg-state" class="chip hidden" role="status"></span>
@@ -1815,6 +1826,8 @@ async function cargarGsg() {
     pintarUrlIncidenciasGsg();
     if (g.rutaWebhook && !$('gsg-ruta-webhook').value) $('gsg-ruta-webhook').value = g.rutaWebhook;
     pintarUrlWebhookGsg();
+    ver('gsg-webhook-caja', Boolean(g.destinoWebhook));
+    texto('gsg-webhook-destino', g.destinoWebhook ? 'GSGchat le manda los avisos con POST a: ' + g.destinoWebhook : '');
     if (g.paramTracking && !$('gsg-param-tracking').value) $('gsg-param-tracking').value = g.paramTracking;
     if (g.paramTelefono && !$('gsg-param-telefono').value) $('gsg-param-telefono').value = g.paramTelefono;
     pintarUrlFinalGsg();
@@ -1902,16 +1915,35 @@ if ($('gsg')) {
     resultadoGsg('Guardando…', 'espera');
     try {
       var token = $('gsg-token').value.trim();
-      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), rutaIncidencias: $('gsg-ruta-incidencias').value.trim(), rutaWebhook: $('gsg-ruta-webhook').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
+      var guardado = await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), rutaIncidencias: $('gsg-ruta-incidencias').value.trim(), rutaWebhook: $('gsg-ruta-webhook').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
       $('gsg-token').value = '';
+      if (guardado.webhookGsg && guardado.webhookGsg.secreto) mostrarSecretoWebhook(guardado.webhookGsg.secreto);
       await probarGsg();
     } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }
     boton.disabled = false;
   };
+  /* El secreto sale una sola vez: aqui se ve, y al cerrar o recargar ya no hay forma de verlo. */
+  function mostrarSecretoWebhook(secreto) {
+    texto('gsg-webhook-secreto', secreto);
+    ver('gsg-webhook-caja', true);
+    ver('gsg-webhook-secreto-caja', true);
+  }
+  function ocultarSecretoWebhook() { texto('gsg-webhook-secreto', ''); ver('gsg-webhook-secreto-caja', false); }
+  $('gsg-webhook-ocultar').onclick = ocultarSecretoWebhook;
+  $('gsg-webhook-copiar').onclick = async function () {
+    try { await navigator.clipboard.writeText($('gsg-webhook-secreto').textContent); this.textContent = 'Copiado'; }
+    catch (e) { this.textContent = 'Selecciónalo y cópialo a mano'; }
+  };
+  $('gsg-webhook-rotar').onclick = async function () {
+    var ok = await confirmarDialogo({ titulo: 'Generar un secreto nuevo', texto: 'El secreto anterior deja de valer en el acto: GSG tendrá que usar el nuevo.', boton: 'Generar', peligro: true });
+    if (!ok) return;
+    try { var r = await api('/admin/entregas/gsg/webhook/secreto', { method: 'POST', body: {} }); mostrarSecretoWebhook(r.secreto); }
+    catch (error) { resultadoGsg('✗ ' + error.message, 'mal'); }
+  };
   $('gsg-quitar').onclick = async function () {
     var ok = await confirmarDialogo({ titulo: 'Desconectar GSG', texto: 'Lo reportable se guarda en la cola y saldrá entero cuando se vuelva a conectar.', boton: 'Desconectar', peligro: true });
     if (!ok) return;
-    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); $('gsg-url').value = ''; $('gsg-ruta').value = ''; pintarUrlFinalGsg(); resultadoGsg('', ''); estado('gsg-state', 'Desconectado: lo que haya que mandarle a GSG se guarda y saldrá entero al volver a conectar.', 'verde'); cargarGsg(); }
+    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); $('gsg-url').value = ''; $('gsg-ruta').value = ''; ocultarSecretoWebhook(); pintarUrlFinalGsg(); resultadoGsg('', ''); estado('gsg-state', 'Desconectado: lo que haya que mandarle a GSG se guarda y saldrá entero al volver a conectar.', 'verde'); cargarGsg(); }
     catch (error) { estado('gsg-state', error.message, 'rojo'); }
   };
 

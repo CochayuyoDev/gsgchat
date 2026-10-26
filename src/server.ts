@@ -321,7 +321,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
   await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas });
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
-  if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, simulador: deps.simuladorGsg, config });
+  if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, webhooks: repos.webhooks, simulador: deps.simuladorGsg, config });
   if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });
   // El resumen del dia por WhatsApp (Ajustes → Resumen del dia). Ver src/resumenes.
   if (deps.resumenes) await registerResumenesRoutes(app, { resumenes: deps.resumenes });
