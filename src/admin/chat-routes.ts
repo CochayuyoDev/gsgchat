@@ -21,6 +21,11 @@ import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
 import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
+import type { ServicioIA } from '../ia/servicio.js';
+import { nombreDeEtiqueta } from '../archive/clasificar.js';
+import { crearEtiquetador, numeroNormalizado, type Etiquetador } from '../chat/etiquetar.js';
+import { fechaDelNegocio } from '../ajustes/generales.js';
+import type { EtiquetaChat } from '../db/chat-etiquetas.js';
 
 export interface ChatDeps {
   repos: Repos;
@@ -34,6 +39,15 @@ export interface ChatDeps {
   voz?: import('../voz/servicio.js').ServicioVoz;
   /** El puerto hacia GSG: por aqui sale la incidencia manual. Sin el, queda en la cola. */
   gsg?: import('../rutas/gsg.js').PuertoGsg;
+  /** La IA del asistente: la usa el boton «Etiquetar los chats de hoy». */
+  ia?: ServicioIA;
+}
+
+/** La etiqueta como la pinta la pantalla, junto al nombre del cliente. */
+export function etiquetaParaPantalla(e: EtiquetaChat | undefined, hoy: string) {
+  if (!e) return null;
+  if (!e.etiqueta) return { id: null, nombre: 'Sin clasificar', dia: e.dia, hoy: e.dia === hoy, motivo: e.motivo };
+  return { id: e.etiqueta, nombre: nombreDeEtiqueta(e.etiqueta), dia: e.dia, hoy: e.dia === hoy, motivo: null };
 }
 
 /** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
@@ -127,6 +141,116 @@ export function decodificarEntidades(texto: string): string {
 
 export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): Promise<void> {
   const { repos, sender, config, settings } = deps;
+  const zonaHoraria = () => deps.ajustes?.zonaHoraria() ?? config.timezone;
+  // Se crea al primer uso: hay arranques (y pruebas) que registran el chat sin base.
+  let etiquetadorCreado: Etiquetador | null | undefined;
+  const etiquetadorDe = (): Etiquetador | null => {
+    if (etiquetadorCreado !== undefined) return etiquetadorCreado;
+    const repo = repos?.chatEtiquetas;
+    etiquetadorCreado = repo
+      ? crearEtiquetador({
+          repo,
+          ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
+          gsg: () => deps.gsg ?? null,
+          zonaHoraria,
+          nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
+          log: (mensaje, detalle) => app.log.warn({ ...detalle }, mensaje),
+        })
+      : null;
+    return etiquetadorCreado;
+  };
+  /** Las etiquetas de esos chats (por su numero normalizado), listas para la pantalla. */
+  const etiquetasDe = async (phones: string[]) => {
+    const hoy = fechaDelNegocio(new Date(), zonaHoraria());
+    const ultimas = repos.chatEtiquetas ? await repos.chatEtiquetas.ultimas([...new Set(phones.map(numeroNormalizado))]).catch(() => new Map<string, EtiquetaChat>()) : new Map<string, EtiquetaChat>();
+    return (phone: string) => etiquetaParaPantalla(ultimas.get(numeroNormalizado(phone)), hoy);
+  };
+
+  const SIN_ETIQUETAS = 'Esta instalación no guarda etiquetas de chats.';
+  const quienEs = (u: { nombre?: string; usuario?: string } | null | undefined): string | null => u?.nombre || u?.usuario || null;
+  const diaValido = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'El día va como AAAA-MM-DD.');
+
+  /**
+   * «Etiquetar los chats de hoy»: arranca el lote (analisis + envio a GSG) en
+   * segundo plano, o devuelve el que ya corre. La pantalla pregunta por el avance.
+   */
+  app.post('/admin/chat/etiquetar', async (request, reply) => {
+    const etiquetador = etiquetadorDe();
+    if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    try {
+      return reply.code(202).send(etiquetador.iniciar(alcance, { iniciadoPor: quienEs(request.usuario) }));
+    } catch (error) {
+      return reply.code(409).send({ error: error instanceof Error ? error.message : String(error), ir: '/panel#ia' });
+    }
+  });
+
+  /** El lote en marcha, o el ultimo (aunque el servidor se haya reiniciado). */
+  app.get('/admin/chat/etiquetar', async (_request, reply) => {
+    const etiquetador = etiquetadorDe();
+    if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    return { ...(await etiquetador.estado()), hayIA: etiquetador.hayIA(), destinoGsg: deps.gsg?.urlEtiquetas?.() ?? null };
+  });
+
+  /**
+   * Reintenta SOLO los envios a GSG que fallaron ese dia (por defecto hoy),
+   * con la etiqueta guardada: no vuelve a la IA. 202 con el lote de reintento;
+   * 200 con `nada: true` si no hay ninguno fallido.
+   */
+  app.post('/admin/chat/etiquetar/reintentar', async (request, reply) => {
+    const etiquetador = etiquetadorDe();
+    if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    alcanceChat(request.usuario);
+    const body = z.object({ dia: diaValido.optional() }).parse(request.body ?? {});
+    const r = await etiquetador.reintentar({ dia: body.dia, iniciadoPor: quienEs(request.usuario) });
+    if (!r) return { nada: true, detalle: 'No hay envíos a GSG fallidos que reintentar.' };
+    return reply.code(202).send(r);
+  });
+
+  /** Los ultimos lotes (completos y reintentos), el mas reciente primero. */
+  app.get('/admin/chat/etiquetar/lotes', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const q = z.object({ limit: z.coerce.number().int().positive().max(100).default(20) }).parse(request.query ?? {});
+    return { items: await repos.chatEtiquetas.lotes(q.limit) };
+  });
+
+  /** Un lote con su registro de eventos y las conversaciones de ese dia con el estado de su envio. */
+  app.get<{ Params: { id: string } }>('/admin/chat/etiquetar/lotes/:id', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const lote = await repos.chatEtiquetas.lote(request.params.id);
+    if (!lote) return reply.code(404).send({ error: 'Ese lote no existe.' });
+    const [eventos, filas] = await Promise.all([repos.chatEtiquetas.eventos({ loteId: lote.id, limite: 500 }), repos.chatEtiquetas.delDia(lote.dia)]);
+    return {
+      lote,
+      eventos,
+      conversaciones: filas.map((f) => ({
+        phone: f.phone,
+        etiqueta: f.etiqueta,
+        nombre: f.etiqueta ? nombreDeEtiqueta(f.etiqueta) : 'Sin clasificar',
+        origen: f.origen,
+        motivo: f.motivo,
+        loteId: f.loteId,
+        sync: { estado: f.syncEstado, intentos: f.syncIntentos, error: f.syncError, en: f.syncAt },
+      })),
+    };
+  });
+
+  /** El registro de lo que paso al etiquetar y al mandar a GSG, filtrable. */
+  app.get('/admin/chat/etiquetar/eventos', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const q = z
+      .object({
+        loteId: z.string().uuid().optional(),
+        nivel: z.enum(['info', 'aviso', 'error']).optional(),
+        fase: z.enum(['lote', 'analisis', 'sincronizacion']).optional(),
+        telefono: z.string().trim().max(40).optional(),
+        limit: z.coerce.number().int().positive().max(500).default(100),
+      })
+      .parse(request.query ?? {});
+    return {
+      items: await repos.chatEtiquetas.eventos({ loteId: q.loteId, nivel: q.nivel, fase: q.fase, phone: q.telefono ? numeroNormalizado(q.telefono) : undefined, limite: q.limit }),
+    };
+  });
 
   /**
    * Si la ventana de 24 h impide escribir texto libre.
@@ -203,8 +327,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       .parse(request.query ?? {});
     const alcance = alcanceChat(request.usuario);
     const items = await repos.messages.listConversations({ ...query, limit: query.limit + 1, alcance });
+    const pagina = items.slice(0, query.limit);
+    const etiqueta = await etiquetasDe(pagina.filter((c) => c.tipo !== 'grupo').map((c) => c.phone));
     return responderLectura(request, reply, {
-      items: items.slice(0, query.limit),
+      items: pagina.map((c) => ({ ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) })),
       hasMore: items.length > query.limit,
       siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
       unread: await repos.messages.unreadTotal(undefined, alcance),
@@ -297,8 +423,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       });
     }
 
+    const etiqueta = (await etiquetasDe([contact.phone]))(contact.phone);
     return responderLectura(request, reply, {
       contact,
+      etiqueta,
       reparto,
       windowOpen,
       // Lo que el operador puede escribir ahora mismo, y por que.

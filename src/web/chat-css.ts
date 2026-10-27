@@ -93,6 +93,34 @@ export const CHAT_CSS = `
   .thread header .sub .t-pedido:hover { text-decoration: underline; }
   .thread header .sub .t-marca { font-size: 12px; }
 
+  /* La etiqueta que puso la IA, junto al nombre (bandeja y cabecera del hilo). */
+  .etq { flex: none; display: inline-block; max-width: 46%; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; background: var(--gris-suave); color: var(--gris); }
+  .etq.rojo { background: var(--rojo-suave); color: var(--rojo); }
+  .etq.ambar { background: var(--ambar-suave); color: var(--ambar); }
+  .etq.azul { background: var(--azul-suave); color: var(--azul); }
+  .etq.verde { background: var(--verde-suave); color: var(--verde); }
+  /* De otro dia o sin clasificar: se ve, pero no compite con la de hoy. */
+  .etq.vieja, .etq.sin { opacity: .7; font-weight: 500; }
+  .etq.sin { border: 1px dashed currentColor; background: transparent; }
+  /* Nombre y etiqueta en la misma linea; si no caben (telefono, nombre largo) la etiqueta baja, el nombre nunca desaparece. */
+  .thread header .t-nombre { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+  .thread header .t-nombre .name { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+  .thread header .t-nombre #t-etiqueta { display: flex; min-width: 0; max-width: 100%; }
+  .thread header .t-nombre #t-etiqueta:empty { display: none; }
+  .thread header .t-nombre .etq { max-width: 100%; }
+
+  /* El avance del etiquetado, bajo los filtros. */
+  .etiquetado { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .etiquetado .que { flex: 1; min-width: 0; }
+  .etiquetado.error { color: var(--rojo); }
+  .etiquetado .barra { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 4px; }
+  .etiquetado .barra i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .etiquetado .reintentar { border: 1px solid currentColor !important; border-radius: 999px; padding: 3px 10px !important; font-size: 12px; font-weight: 600; }
+  .etiquetado button { flex: none; border: 0; background: none; color: inherit; cursor: pointer; font: inherit; padding: 2px 6px; }
+  #etiquetar.girando { animation: etiquetando 1.2s linear infinite; }
+  @keyframes etiquetando { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { #etiquetar.girando { animation: none; } }
+
   .ficha { position: absolute; top: 58px; right: 8px; width: min(360px, calc(100% - 16px)); max-height: calc(100% - 70px); overflow: auto; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra-2); z-index: 6; }
   .ficha-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
   .ficha-cuerpo { padding: 10px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 10px; }

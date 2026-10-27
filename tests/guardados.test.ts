@@ -128,8 +128,8 @@ describe('guardar una conversacion deja lo que hace falta para encontrarla', () 
     expect(a.cerradoPor).toBe('Ali (ali)');
     expect(a.pedido).toBe('P-1001');
     expect(a.resumen).toMatch(/Ana Quispe escribió 1 mensaje/);
-    expect(a.etiquetas).toContain('reclamo');
-    expect(a.etiquetas).toContain('motorizado');
+    // Una sola etiqueta, la de lo ultimo que pidio.
+    expect(a.etiquetas).toEqual(['reclamo']);
     // Del primer mensaje del cliente (minuto 1) a la respuesta de la persona (minuto 2): 60 s.
     expect(a.primeraRespuestaSeg).toBe(60);
     expect(a.adjuntos).toEqual([]);
@@ -142,28 +142,30 @@ describe('guardar una conversacion deja lo que hace falta para encontrarla', () 
     expect((await repos.archives.list({ reason: 'inactividad', limit: 10, offset: 0 })).length).toBe(0);
   });
 
-  it('con la IA, el resumen y las etiquetas salen del modelo (JSON estricto, leido a la defensiva)', async () => {
+  it('con la IA, el resumen y la etiqueta salen del modelo (JSON estricto, leido a la defensiva)', async () => {
     const c = await conversacion('51987000002', 'Luis', [['in', 'quiero cancelar'], ['out', 'Listo.']]);
-    const deps: ArchiveDeps = { repos, dir, ia: () => iaFalsa('Claro: {"resumen":"El cliente canceló su pedido.","etiquetas":["cancelacion","otra_que_no_existe"],"pendiente":"nada"} y ya') };
+    const deps: ArchiveDeps = { repos, dir, ia: () => iaFalsa('Claro: {"resumen":"El cliente canceló su pedido.","pendiente":"nada","etiqueta":"cancelar_entrega"} y ya') };
     const salida = await archivarConversacion(deps, c.id, 'manual');
     const a = (await resumirRespaldo(deps, salida.archive!.id, { forzar: true }))!;
     expect(a.resumen).toBe('El cliente canceló su pedido. Pendiente: nada');
-    expect(a.etiquetas).toEqual(['cancelacion']);
-    // Si la IA contesta basura, quedan las reglas.
+    expect(a.etiquetas).toEqual(['cancelar_entrega']);
+    // Si la IA contesta basura, quedan las reglas (una sola etiqueta del catalogo).
     const b = (await resumirRespaldo({ ...deps, ia: () => iaFalsa('no sé') }, salida.archive!.id, { forzar: true }))!;
     expect(b.resumen).toMatch(/Luis escribió/);
-    expect(b.etiquetas).toContain('cancelacion');
+    expect(b.etiquetas).toEqual(['cancelar_entrega']);
     // Y si falla, tambien.
     const cc = (await resumirRespaldo({ ...deps, ia: () => ({ completar: async () => { throw new Error('caída'); } }) }, salida.archive!.id, { forzar: true }))!;
     expect(cc.resumen).toMatch(/Luis escribió/);
+    expect(cc.etiquetas).toEqual(['cancelar_entrega']);
   });
 
-  it('las reglas entienden lo basico: sin respuesta, cambio, pago, venta', () => {
+  it('las reglas ponen una sola etiqueta del catalogo: sin respuesta es otro, y lo ultimo manda', () => {
     const m = (direction: 'in' | 'out', body: string): Message => ({ id: 1, contactId: 'c', direction, wamid: null, kind: 'text', body, payload: null, status: null, deliveryId: null, createdAt: new Date() }) as unknown as Message;
-    expect(resumirConReglas([m('out', 'Hola')], 'Ana').etiquetas).toEqual(['sin_respuesta']);
-    expect(resumirConReglas([m('in', 'mejor mañana a otra dirección')], 'Ana').etiquetas).toContain('cambio');
-    expect(resumirConReglas([m('in', 'ya pagué por Yape')], 'Ana').etiquetas).toContain('pago');
-    expect(resumirConReglas([m('in', 'quiero comprar dos, cuánto cuesta')], 'Ana').etiquetas).toContain('venta');
+    expect(resumirConReglas([m('out', 'Hola')], 'Ana').etiquetas).toEqual(['otro']);
+    expect(resumirConReglas([m('in', 'mejor mañana a otra dirección')], 'Ana').etiquetas).toEqual(['cambiar_ubicacion']);
+    expect(resumirConReglas([m('in', 'tengo billete de 100, ¿tienen vuelto?')], 'Ana').etiquetas).toEqual(['problema_de_pago']);
+    // Una venta no es una necesidad del reparto.
+    expect(resumirConReglas([m('in', 'quiero comprar dos, cuánto cuesta')], 'Ana').etiquetas).toEqual(['otro']);
     expect(resumirConReglas([m('in', 'jajaja')], null).etiquetas).toEqual(['otro']);
   });
 

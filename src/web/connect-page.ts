@@ -539,6 +539,10 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <span class="hint">A donde va cada problema: número sin WhatsApp o inválido, no reconoce el pedido, rechaza… Vacía = incidencias. Por ejemplo v1/gsgchat/reported. El formato de cada aviso está en el Manual.</span></label>
     <input id="gsg-ruta-incidencias" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/reported" aria-describedby="gsg-url-incidencias">
     <p class="ayuda" id="gsg-url-incidencias" role="status" aria-live="polite"></p>
+    <label class="campo" for="gsg-ruta-etiquetas">Ruta para etiquetas de chats (opcional)
+      <span class="hint">A donde va la etiqueta que la IA pone a cada chat del día (reagendar, cambiar ubicación, reclamo…), identificada por el número de WhatsApp. Vacía = no se mandan. Por ejemplo v1/gsgchat/labels</span></label>
+    <input id="gsg-ruta-etiquetas" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/labels" aria-describedby="gsg-url-etiquetas">
+    <p class="ayuda" id="gsg-url-etiquetas" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-webhook">Ruta del webhook de GSG (opcional)
       <span class="hint">Lo que va después de la URL base, sin http:// ni «..». Vacía = sin webhook. Por ejemplo v1/gsgchat/webhook</span></label>
     <input id="gsg-ruta-webhook" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/webhook" aria-describedby="gsg-url-webhook">
@@ -1762,6 +1766,16 @@ function pintarUrlIncidenciasGsg() {
   caja.className = r.ok ? 'ayuda' : 'ayuda error';
 }
 
+function pintarUrlEtiquetasGsg() {
+  var caja = $('gsg-url-etiquetas');
+  if (!caja) return;
+  var ruta = $('gsg-ruta-etiquetas').value.trim();
+  if (!ruta) { caja.textContent = 'Sin ruta: las etiquetas de los chats no se mandan a GSG.'; caja.className = 'ayuda'; return; }
+  var r = unirUrlGsg($('gsg-url').value.trim(), ruta);
+  caja.textContent = r.ok ? 'Las etiquetas de los chats se enviarán con POST a: ' + r.url : 'No vale: ' + r.error;
+  caja.className = r.ok ? 'ayuda' : 'ayuda error';
+}
+
 function pintarUrlWebhookGsg() {
   var caja = $('gsg-url-webhook');
   if (!caja) return;
@@ -1824,6 +1838,8 @@ async function cargarGsg() {
     if (g.rutaEstado && !$('gsg-ruta-estado').value) $('gsg-ruta-estado').value = g.rutaEstado;
     if (g.rutaIncidencias && !$('gsg-ruta-incidencias').value) $('gsg-ruta-incidencias').value = g.rutaIncidencias;
     pintarUrlIncidenciasGsg();
+    if (g.rutaEtiquetas && !$('gsg-ruta-etiquetas').value) $('gsg-ruta-etiquetas').value = g.rutaEtiquetas;
+    pintarUrlEtiquetasGsg();
     if (g.rutaWebhook && !$('gsg-ruta-webhook').value) $('gsg-ruta-webhook').value = g.rutaWebhook;
     pintarUrlWebhookGsg();
     ver('gsg-webhook-caja', Boolean(g.destinoWebhook));
@@ -1871,6 +1887,7 @@ if ($('gsg')) {
   $('gsg-ruta').oninput = pintarUrlFinalGsg;
   ['gsg-url', 'gsg-ruta-estado', 'gsg-param-tracking', 'gsg-param-telefono'].forEach(function (id) { $(id).addEventListener('input', pintarUrlEstadoGsg); });
   ['gsg-url', 'gsg-ruta-incidencias'].forEach(function (id) { $(id).addEventListener('input', pintarUrlIncidenciasGsg); });
+  ['gsg-url', 'gsg-ruta-etiquetas'].forEach(function (id) { $(id).addEventListener('input', pintarUrlEtiquetasGsg); });
   ['gsg-url', 'gsg-ruta-webhook'].forEach(function (id) { $(id).addEventListener('input', pintarUrlWebhookGsg); });
   $('gsg-consulta-form').onsubmit = async function (ev) {
     ev.preventDefault();
@@ -1915,7 +1932,7 @@ if ($('gsg')) {
     resultadoGsg('Guardando…', 'espera');
     try {
       var token = $('gsg-token').value.trim();
-      var guardado = await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), rutaIncidencias: $('gsg-ruta-incidencias').value.trim(), rutaWebhook: $('gsg-ruta-webhook').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
+      var guardado = await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), rutaIncidencias: $('gsg-ruta-incidencias').value.trim(), rutaEtiquetas: $('gsg-ruta-etiquetas').value.trim(), rutaWebhook: $('gsg-ruta-webhook').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
       $('gsg-token').value = '';
       if (guardado.webhookGsg && guardado.webhookGsg.secreto) mostrarSecretoWebhook(guardado.webhookGsg.secreto);
       await probarGsg();
