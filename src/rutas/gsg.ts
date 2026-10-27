@@ -78,6 +78,39 @@ export interface PuertoGsg {
    * en X-API-Key. Nunca lanza: un fallo vuelve como decision 'desconocido'.
    */
   consultarEstado?(consulta: { tracking: string; telefono: string }): Promise<ConsultaEstadoGsg>;
+  /** A donde salen las etiquetas de los chats (base + ruta), o null si no esta configurada. */
+  urlEtiquetas?(): string | null;
+  /**
+   * Manda a GSG la etiqueta de la conversacion de un dia, identificada por el
+   * numero de WhatsApp (sin tracking). Nunca lanza: el fallo vuelve en el resultado.
+   */
+  enviarEtiqueta?(etiqueta: EtiquetaParaGsg): Promise<ResultadoEnvio>;
+}
+
+/**
+ * Lo que GSG recibe por cada conversacion etiquetada en Chats (POST a la base
+ * + la «Ruta para etiquetas de chats» de Conexion, con X-API-Key). El
+ * identificador es el numero: una misma persona puede tener varios pedidos
+ * (o ninguno) ese dia. `eventoId` va tambien en Idempotency-Key: es el mismo
+ * mientras no cambie la conversacion, asi un reintento no duplica nada.
+ */
+export interface EtiquetaParaGsg {
+  /** 51987654321 */
+  telefono: string;
+  /** Los 9 digitos (987654321), como los guarda GSG; null si no es un celular peruano. */
+  telefonoNacional: string | null;
+  /** AAAA-MM-DD en la zona del negocio. */
+  dia: string;
+  /** Del catalogo de src/archive/clasificar.ts. */
+  etiqueta: string;
+  etiquetaNombre: string;
+  /** Quien la puso: la IA, o las reglas cuando la IA fallo o el cliente no escribio. */
+  origen: 'ia' | 'reglas';
+  /** Cuantos mensajes del dia se miraron. */
+  mensajes: number;
+  /** Cuando se clasifico. */
+  clasificadoEn: string;
+  eventoId: string;
 }
 
 /**
@@ -159,6 +192,12 @@ export interface OpcionesGsg {
    * (p. ej. v1/gsgchat/reported). Sin ella, la de siempre: RUTAS_GSG.incidencia.
    */
   rutaIncidencias?: string;
+  /**
+   * La ruta, relativa a la base, a la que se hace POST con la etiqueta de cada
+   * chat (p. ej. v1/gsgchat/labels). Sin ella no se manda ninguna: GSG no
+   * tiene un endpoint de siempre para esto.
+   */
+  rutaEtiquetas?: string;
   /** Como llama GSG al parametro del tracking (por defecto trackingCode). */
   paramTracking?: string;
   /** Como llama GSG al parametro del telefono (por defecto phone). */
@@ -469,7 +508,7 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
   const doFetch = opts.fetchImpl ?? fetch;
   const clave = opts.token ?? '';
   const errorConfig = !destino.ok ? destino.error : !clave.trim() ? 'Falta la API Key de GSG.' : null;
-  const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}|${opts.rutaEstado ?? ''}|${opts.rutaIncidencias ?? ''}`);
+  const firma = huella(`${base}|${destino.ok ? destino.urlUbicacion : errorConfig}|${huella(clave)}|${opts.rutaEstado ?? ''}|${opts.rutaIncidencias ?? ''}|${opts.rutaEtiquetas ?? ''}`);
   const limpio = (t: string) => sinClave(t, clave);
 
   const rutaEstado = (opts.rutaEstado ?? '').trim();
@@ -478,6 +517,8 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
   const rutaIncidencias = (opts.rutaIncidencias ?? '').trim() || RUTAS_GSG.incidencia!;
   const destinoIncidencias = destino.ok ? unirUrlGsg(destino.base, rutaIncidencias) : null;
   const destinoEstado = destino.ok && rutaEstado ? unirUrlGsg(destino.base, rutaEstado) : null;
+  const rutaEtiquetas = (opts.rutaEtiquetas ?? '').trim();
+  const destinoEtiquetas = destino.ok && rutaEtiquetas ? unirUrlGsg(destino.base, rutaEtiquetas) : null;
   const paramTracking = (opts.paramTracking ?? '').trim() || 'trackingCode';
   const paramTelefono = (opts.paramTelefono ?? '').trim() || 'phone';
 
@@ -487,6 +528,69 @@ export function crearPuertoHttp(opts: OpcionesGsg): PuertoGsg {
     urlUbicacion: () => (crudo && destino.ok ? destino.urlUbicacion : null),
     urlEstado: () => (crudo && destinoEstado?.ok ? destinoEstado.url : null),
     urlIncidencias: () => (crudo && destinoIncidencias?.ok ? destinoIncidencias.url : null),
+    urlEtiquetas: () => (crudo && destinoEtiquetas?.ok ? destinoEtiquetas.url : null),
+
+    async enviarEtiqueta(etiqueta) {
+      if (!destino.ok) return { ok: false, error: `Configuración de GSG no válida: ${destino.error} No se envía nada hasta corregirla.`, reintentable: true, configuracion: true };
+      if (!clave.trim()) return { ok: false, error: 'Falta la API Key de GSG. Configúrala antes de enviar.', reintentable: true, configuracion: true };
+      if (!rutaEtiquetas) return { ok: false, error: 'Falta la «Ruta para etiquetas de chats» en Conexión con GSG: no hay a dónde mandarlas.', reintentable: true, configuracion: true };
+      if (!destinoEtiquetas?.ok) return { ok: false, error: `La ruta de las etiquetas no vale${destinoEtiquetas && !destinoEtiquetas.ok ? `: ${destinoEtiquetas.error}` : ''}.`, reintentable: true, configuracion: true };
+      if (!etiqueta.telefono) return { ok: false, error: 'La etiqueta no tiene número: GSG no podría saber de quién es. No se envía.', reintentable: false };
+      const url = destinoEtiquetas.url;
+      const control = new AbortController();
+      const corte = setTimeout(() => control.abort(), (opts.timeoutSegundos ?? 20) * 1000);
+      try {
+        const r = await doFetch(url, {
+          method: 'POST',
+          redirect: 'error',
+          headers: { 'content-type': 'application/json', ...cabecerasDeClave(clave), 'Idempotency-Key': etiqueta.eventoId },
+          body: JSON.stringify(etiqueta),
+          signal: control.signal,
+        });
+        const texto = await r.text();
+        if (!r.ok) {
+          const auth = r.status === 401 || r.status === 403 ? (r.status as 401 | 403) : undefined;
+          const causa = auth
+            ? motivoAutenticacion(auth)
+            : r.status === 404
+              ? `GSG no tiene esa ruta (${url}): revisa la ruta de etiquetas`
+              : r.status === 400 || r.status === 422
+                ? 'GSG no aceptó los datos de la etiqueta'
+                : r.status === 429
+                  ? 'GSG pidió esperar (demasiadas llamadas)'
+                  : r.status >= 500
+                    ? 'GSG tuvo un error en su servidor'
+                    : 'GSG no aceptó el envío';
+          return {
+            ok: false,
+            error: limpio(`Error ${r.status}: ${causa}.${texto.trim() ? ` Respuesta de GSG: ${limpio(texto.trim()).slice(0, 200)}` : ''}`),
+            // Con Idempotency-Key, repetir un 5xx/429/408 no duplica nada.
+            reintentable: r.status >= 500 || r.status === 429 || r.status === 408,
+            ...(auth ? { autenticacion: auth } : {}),
+          };
+        }
+        let id: string | null = null;
+        try {
+          const cuerpo = texto ? (JSON.parse(texto) as Record<string, unknown>) : {};
+          if (cuerpo && typeof cuerpo === 'object' && (cuerpo.ok === false || cuerpo.success === false)) {
+            const detalle = typeof cuerpo.error === 'string' ? cuerpo.error : typeof cuerpo.message === 'string' ? cuerpo.message : 'el backend indicó que no aceptó la etiqueta';
+            return { ok: false, reintentable: false, error: limpio(`GSG respondió HTTP ${r.status}, pero rechazó la etiqueta: ${detalle}`).slice(0, 500) };
+          }
+          id = (cuerpo.id ?? null) as string | null;
+        } catch {
+          // Un 2xx con texto plano tambien vale.
+        }
+        return { ok: true, id };
+      } catch (error) {
+        const codigo = error instanceof Error ? (error.cause as { code?: string } | undefined)?.code : undefined;
+        const motivo = control.signal.aborted
+          ? `GSG no respondió a tiempo (${opts.timeoutSegundos ?? 20} s)`
+          : `No se pudo conectar con GSG en ${url}: ${error instanceof Error ? (codigo ?? (error.cause as { message?: string } | undefined)?.message ?? error.message) : String(error)}`;
+        return { ok: false, error: limpio(`${motivo}.`), reintentable: true };
+      } finally {
+        clearTimeout(corte);
+      }
+    },
 
     async consultarEstado({ tracking, telefono }) {
       if (!rutaEstado) return { decision: 'desconocido', motivo: 'No hay ruta de consulta de estado configurada: no se le pregunta a GSG.', configurada: false };
@@ -655,6 +759,9 @@ export function crearPuertoGsg(config: { GSG_URL: string; GSG_TOKEN: string; GSG
  * saber que significa cada campo sin leer el motor.
  */
 export const PAYLOADS = {
+  etiqueta:
+    'telefono (51 + 9 digitos, el identificador: no hay tracking), telefonoNacional, dia (AAAA-MM-DD), etiqueta (catalogo de src/archive/clasificar.ts),' +
+    ' etiquetaNombre, origen (ia | reglas), mensajes, clasificadoEn, eventoId (= Idempotency-Key; cambia solo si cambia la conversacion)',
   ubicacion:
     'referencia, telefono, nombre, lat, lng, mapsUrl, precisionMetros, fuente, recibidoEn, lote' +
     ' (+ corregida: true cuando el cliente mando un segundo pin: sustituye al anterior de la misma referencia)' +

@@ -49,6 +49,7 @@ import { createFakeRutas, type FakeRutas } from './fakes-rutas.js';
 import { crearProcesosEnMemoria } from '../src/procesos/repo-memoria.js';
 import { crearReportadosEnMemoria } from '../src/entregas/reportados.js';
 import { crearMensajesGsgEnMemoria } from '../src/db/mensajes-gsg.js';
+import { crearChatEtiquetasEnMemoria } from '../src/db/chat-etiquetas.js';
 import { crearDecisionesEnMemoria, type DecisionesEnMemoria } from '../src/db/decisiones-memoria.js';
 import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
 import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
@@ -364,6 +365,14 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     procesos: crearProcesosEnMemoria(),
     reportados: crearReportadosEnMemoria(),
     mensajesGsg: crearMensajesGsgEnMemoria(),
+    // Los mensajes de los repos falsos, con el telefono de su contacto (sin grupos).
+    chatEtiquetas: crearChatEtiquetasEnMemoria(() => {
+      const porId = new Map([...contactsByPhone.values()].map((c) => [c.id, c]));
+      return repos.messages._all.flatMap((m) => {
+        const c = porId.get(m.contactId);
+        return c && c.tipo !== 'grupo' ? [{ id: Number(m.id), contactId: m.contactId, phone: c.phone, name: c.name, direction: m.direction, kind: m.kind, body: m.body, createdAt: m.createdAt }] : [];
+      });
+    }),
     decisiones: crearDecisionesEnMemoria(fakeNow),
     archives: createFakeArchives(),
     rutas: createFakeRutas(),

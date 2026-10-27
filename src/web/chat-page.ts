@@ -59,6 +59,7 @@ ${bandaDemo}
     <header>
       <h1>Chats</h1>
       <span id="unread" class="badge hidden" aria-label="mensajes sin leer"></span>
+      <button class="icon" id="etiquetar" title="Etiquetar con IA los chats de hoy" aria-label="Etiquetar con IA los chats de hoy"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.4"/></svg></button>
       <button class="icon" id="nuevo" title="Escribir a un número nuevo" aria-label="Escribir a un número nuevo">✚</button>
       <button class="icon" id="menu-lista" title="Más opciones" aria-label="Más opciones" aria-haspopup="menu" aria-expanded="false">⋮</button>
     </header>
@@ -71,6 +72,7 @@ ${bandaDemo}
       <button class="f" type="button" data-filtro="grupos">Grupos</button>
       <button class="f" type="button" data-filtro="apartados">Apartados</button>
     </div>
+    <div class="etiquetado hidden" id="etiquetado" role="status" aria-live="polite"></div>
     <div class="chats" id="chats"></div>
   </div>
 
@@ -79,7 +81,7 @@ ${bandaDemo}
       <button class="icon" id="back" title="Volver a la lista" aria-label="Volver a la lista">‹</button>
       <div class="avatar" id="t-avatar" aria-hidden="true"></div>
       <div style="flex:1;min-width:0">
-        <div class="name" id="t-name"></div>
+        <div class="t-nombre"><div class="name" id="t-name"></div><span id="t-etiqueta"></span></div>
         <div class="sub" id="t-sub"></div>
       </div>
       <button class="icon" id="abrir-ficha" title="Ficha del cliente: su pedido, su ubicación y el estado del chat" aria-label="Ficha del cliente">ⓘ</button>
@@ -385,7 +387,7 @@ function filaDeChat(c) {
     (grupo ? '<div class="avatar grupo" title="Grupo de WhatsApp">👥</div>'
            : '<div class="avatar ' + colorDe(c.phone) + '" aria-hidden="true">' + esc(inicial(c.name, c.phone)) + '</div>') +
     '<div class="body"><div class="top">' +
-      '<span class="name">' + esc(nombreDe(c)) + '</span>' +
+      '<span class="name">' + esc(nombreDe(c)) + '</span>' + chipEtiqueta(c.etiqueta) +
       (marcas ? '<span class="marcas">' + marcas + '</span>' : '') +
       '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
     '</div><div class="last">' + prefijo + esc(texto.slice(0, 70)) +
@@ -394,6 +396,117 @@ function filaDeChat(c) {
     '<button class="icon fila-menu" data-menu-fila="' + esc(c.contactId) + '" title="Opciones de esta conversación" aria-label="Opciones de esta conversación">⋮</button>' +
     '</div>';
 }
+
+/* ------------------------------------------------ etiquetas de la IA */
+
+/* Los mismos tonos que la pantalla de guardados: rojo lo que se pierde, ambar lo que hay que mover, azul lo que hay que atender. */
+var TONO_ETIQUETA = {
+  reclamo: 'rojo', cancelar_entrega: 'rojo', pedido_no_reconocido: 'rojo',
+  reagendar_entrega: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
+  horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
+  confirmar_recepcion: 'verde', otro: 'gris'
+};
+
+/* 'AAAA-MM-DD' -> 'DD/MM' sin pasar por Date (la medianoche UTC cae el dia anterior en Lima). */
+function diaCorto(dia) { return dia ? String(dia).slice(8, 10) + '/' + String(dia).slice(5, 7) : ''; }
+
+function chipEtiqueta(e) {
+  if (!e) return '';
+  var clase = e.id ? (TONO_ETIQUETA[e.id] || 'gris') : 'sin';
+  var titulo = e.id
+    ? 'Etiqueta puesta por la IA' + (e.hoy ? ' hoy' : ' el ' + diaCorto(e.dia))
+    : 'No se pudo clasificar' + (e.motivo ? ' (' + e.motivo + ')' : '') + '. Vuelve a etiquetar los chats para intentarlo de nuevo.';
+  return '<span class="etq ' + clase + (e.hoy ? '' : ' vieja') + '" title="' + esc(titulo) + '">' + esc(e.nombre) + '</span>';
+}
+
+var sondeoEtiquetado = null, hechasVistas = -1;
+
+function plural(n, uno, varios) { return n + ' ' + (n === 1 ? uno : varios); }
+
+/* Lo que paso con el envio a GSG, en una frase; vacio si no habia nada que mandar. */
+function textoEnvioGsg(e) {
+  if (!e.syncTotal) return '';
+  var partes = [];
+  if (e.syncEnviadas) partes.push(plural(e.syncEnviadas, 'enviada', 'enviadas'));
+  if (e.syncFallidas) partes.push(plural(e.syncFallidas, 'sin enviar', 'sin enviar'));
+  return ' GSG: ' + partes.join(' · ') + ' de ' + e.syncTotal + '.' + (e.syncMotivo ? ' ' + e.syncMotivo : '');
+}
+
+function pintarEtiquetado(e, error) {
+  var box = document.getElementById('etiquetado');
+  var boton = document.getElementById('etiquetar');
+  var corriendo = Boolean(e && e.enCurso);
+  boton.classList.toggle('girando', corriendo);
+  boton.disabled = corriendo;
+  var cerrar = '<button type="button" data-cerrar-etiquetado title="Cerrar el aviso" aria-label="Cerrar el aviso">✕</button>';
+  /* Solo se ofrece reintentar lo que no llego a GSG: no vuelve a pasar por la IA. */
+  var reintentar = e && !corriendo && e.syncFallidas ? '<button type="button" class="reintentar" data-reintentar-envios title="Vuelve a mandar a GSG solo lo que falló, con la etiqueta ya puesta (no vuelve a preguntar a la IA)">Reintentar envíos</button>' : '';
+  if (!error && e && e.error) error = e.error;
+  if (error) { box.className = 'etiquetado error'; box.innerHTML = '<span class="que">' + esc(error) + '</span>' + reintentar + cerrar; return; }
+  if (!e || (!corriendo && !e.termino)) { box.className = 'etiquetado hidden'; box.innerHTML = ''; return; }
+  var texto, pct = 0;
+  if (corriendo && e.fase === 'sincronizacion') {
+    var hechasGsg = e.syncEnviadas + e.syncFallidas;
+    texto = e.syncTotal ? 'Enviando a GSG: ' + hechasGsg + ' de ' + e.syncTotal + '…' : 'Enviando a GSG…';
+    pct = e.syncTotal ? Math.round((hechasGsg * 100) / e.syncTotal) : 0;
+  } else if (corriendo) {
+    texto = e.total ? 'Etiquetando con IA: ' + e.hechas + ' de ' + e.total + ' chats de hoy…' : 'Leyendo los chats de hoy…';
+    pct = e.total ? Math.round((e.hechas * 100) / e.total) : 0;
+  } else if (e.tipo === 'reintento') {
+    texto = 'Reintento de envíos a GSG terminado.' + textoEnvioGsg(e);
+  } else if (!e.total) {
+    texto = 'Hoy todavía no hay chats que etiquetar.';
+  } else {
+    var partes = [];
+    if (e.clasificadas) partes.push(e.clasificadas + ' etiquetado' + (e.clasificadas === 1 ? '' : 's'));
+    if (e.reutilizadas) partes.push(e.reutilizadas + ' sin cambios desde la última vez (no se volvió a preguntar a la IA)');
+    if (e.sinClasificar) partes.push(e.sinClasificar + ' sin clasificar (se reintentan la próxima vez)');
+    texto = 'Listo: ' + e.total + ' chat' + (e.total === 1 ? '' : 's') + ' de hoy. ' + partes.join(' · ') + '.' +
+      (e.recortado ? ' Hoy hay demasiados mensajes: se miraron los primeros.' : '') + textoEnvioGsg(e);
+  }
+  box.className = 'etiquetado' + (!corriendo && e.syncFallidas ? ' error' : '');
+  box.innerHTML = '<div class="que">' + esc(texto) + (corriendo ? '<div class="barra"><i style="width:' + pct + '%"></i></div>' : '') + '</div>' + reintentar + (corriendo ? '' : cerrar);
+}
+
+/* Pregunta por el avance mientras corre; al terminar, repinta la lista y la cabecera. */
+async function seguirEtiquetado(alArrancar) {
+  clearTimeout(sondeoEtiquetado);
+  try {
+    var e = await api('/admin/chat/etiquetar');
+    /* Al abrir la pantalla solo interesa un lote en marcha, no el aviso de uno viejo. */
+    if (alArrancar && !e.enCurso) return;
+    pintarEtiquetado(e);
+    if (e.enCurso) {
+      if (e.hechas !== hechasVistas) { hechasVistas = e.hechas; loadChats(true); }
+      sondeoEtiquetado = setTimeout(seguirEtiquetado, 1500);
+      return;
+    }
+    hechasVistas = -1;
+    await loadChats(true);
+    if (current) openChat(current.id, true);
+  } catch (error) {
+    if (!alArrancar) pintarEtiquetado(null, error.message);
+  }
+}
+
+document.getElementById('etiquetar').onclick = async function () {
+  try {
+    pintarEtiquetado(await api('/admin/chat/etiquetar', { method: 'POST', body: {} }));
+    seguirEtiquetado();
+  } catch (error) { pintarEtiquetado(null, error.message); }
+};
+document.getElementById('etiquetado').addEventListener('click', async function (event) {
+  if (event.target.closest('[data-cerrar-etiquetado]')) { pintarEtiquetado(null); return; }
+  var boton = event.target.closest('[data-reintentar-envios]');
+  if (!boton) return;
+  boton.disabled = true;
+  try {
+    var r = await api('/admin/chat/etiquetar/reintentar', { method: 'POST', body: {} });
+    if (r.nada) { toast(r.detalle || 'No hay envíos fallidos que reintentar.'); pintarEtiquetado(null); return; }
+    pintarEtiquetado(r);
+    seguirEtiquetado();
+  } catch (error) { pintarEtiquetado(null, error.message); }
+});
 
 /* Solo se repinta si de verdad cambio algo: antes se reescribia la lista
    entera cada 5 s y un clic que caia justo en ese instante se perdia. */
@@ -516,6 +629,7 @@ async function openChat(contactId, silent) {
     avatar.classList.toggle('grupo', esGrupo);
     avatar.className = 'avatar ' + (esGrupo ? 'grupo' : colorDe(current.phone));
     document.getElementById('t-name').textContent = nombreDe(current);
+    document.getElementById('t-etiqueta').innerHTML = esGrupo ? '' : chipEtiqueta(data.etiqueta);
     pintarSubtitulo(data);
 
     renderMessages(mensajesHilo, nuevo);
@@ -1298,6 +1412,7 @@ cargarAtajos();
 window.sondearPanel(revisarConexion, 30000, true);
 
 loadChats().then(abrirDesdeUrl);
+seguirEtiquetado(true);
 `;
 
   const script =

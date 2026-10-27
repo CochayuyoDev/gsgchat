@@ -127,6 +127,54 @@ Cada respuesta de `POST /api/v1/entregas`, del `PATCH` y de la corrección trae 
 mismo día: el mismo cliente otro día es un intento de entrega nuevo y se le vuelve a escribir. `GET /api/v1/trackings`
 da lo mismo para todos los trackings de un día; GSG lo lee cuando quiere y GSGchat nunca se lo empuja.
 
+## Etiquetas de los chats (GSGchat → GSG)
+
+En Chats, el botón de la etiqueta clasifica con la IA las conversaciones del día (catálogo en
+`src/archive/clasificar.ts`) y le manda a GSG la etiqueta de cada una. **El identificador es el número de
+WhatsApp, no un tracking**: un mismo cliente puede tener varios pedidos o ninguno ese día. Si el cliente está
+guardado con dos formatos (`987654321` y `51987654321`) es una sola conversación.
+
+POST a la «Ruta para etiquetas de chats» de Conexión con GSG (por ejemplo `v1/gsgchat/labels`; vacía = no se
+mandan), con la API Key de GSG en `X-API-Key` y el `eventoId` también en `Idempotency-Key`:
+
+```json
+{ "telefono": "51987654321", "telefonoNacional": "987654321", "dia": "2026-10-27",
+  "etiqueta": "reagendar_entrega", "etiquetaNombre": "Reagendar entrega", "origen": "ia",
+  "mensajes": 4, "clasificadoEn": "2026-10-27T15:20:00.000Z",
+  "eventoId": "gsgchat-etiqueta-51987654321-2026-10-27-ab12cd34ef56" }
+```
+
+`origen` es `ia`, o `reglas` cuando la IA falló o el cliente no escribió ese día. El `eventoId` es el mismo
+mientras la conversación no cambie: un reintento no duplica nada, y una conversación que cambió (y se volvió a
+clasificar) llega con otro. Una conversación que no se pudo clasificar no se manda.
+
+| Respuesta de GSG | Qué pasa |
+|---|---|
+| 2xx | `enviado`; no se vuelve a mandar mientras la conversación siga igual |
+| 401 / 403 | `fallido`; las demás del lote no se intentan (quedan `fallido` «No se intentó…», sin contar intento) |
+| 429, 408, 5xx, sin red | `fallido` |
+| otro 4xx, o 2xx con `{ "ok": false }` | `fallido` |
+| sin ruta, sin clave o sin GSG conectado | nada sale; todas `fallido` con el motivo, sin contar intento |
+
+Nada se reintenta solo. «Reintentar envíos» (en Chats, o `POST /admin/chat/etiquetar/reintentar`) manda
+**solo** las `fallido` de ese día, con la etiqueta ya guardada: no vuelve a leer los mensajes ni a llamar a la IA.
+El siguiente «Etiquetar» también recoge las que quedaron fallidas.
+
+Cada pulsación es un lote (`completo` o `reintento`) con su estado (`en_curso`, `completado`,
+`completado_con_errores`, `fallido`) y sus cifras, y lo que pasa en él queda en un registro (inicio y fin del
+lote, fallos de la IA, cada envío y cada rechazo de GSG). Ni la API Key ni el texto de los mensajes van al registro.
+
+| Ruta (sesión del panel) | Para qué |
+|---|---|
+| `POST /admin/chat/etiquetar` | Empieza un lote completo (análisis + envío); 202 |
+| `GET /admin/chat/etiquetar` | El lote en marcha o el último, con el avance |
+| `POST /admin/chat/etiquetar/reintentar` | `{ dia? }`: reintenta los envíos fallidos; 202, o 200 `{ nada: true }` |
+| `GET /admin/chat/etiquetar/lotes` | Los últimos lotes |
+| `GET /admin/chat/etiquetar/lotes/{id}` | Un lote, su registro y el estado del envío de cada conversación del día |
+| `GET /admin/chat/etiquetar/eventos` | El registro, filtrable por `loteId`, `nivel`, `fase` y `telefono` |
+
+Las pruebas de punta a punta con Postman están en `docs/postman/etiquetas/`.
+
 ## Dónde está cada cosa
 
 Para no contar lo mismo en varios sitios:

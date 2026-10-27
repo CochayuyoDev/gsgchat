@@ -39,6 +39,7 @@ import { z } from 'zod';
 import type { Repos } from '../db/repos.js';
 import type { ArchiveReason, ChatArchive } from '../db/archives.js';
 import type { ServicioEntrenamiento } from '../entrenamiento/servicio.js';
+import { ETIQUETAS_ANTERIORES, esEtiquetaConocida, nombreDeEtiqueta } from '../archive/clasificar.js';
 import {
   archivarConversacion,
   barrerInactivas,
@@ -206,6 +207,8 @@ export async function registerArchiveRoutes(app: FastifyInstance, deps: ArchiveR
       // Lo que el panel necesita para explicar la limpieza automatica.
       inactividadDias: diasDe(),
       etiquetas: ETIQUETAS.map((e) => ({ id: e, nombre: NOMBRE_ETIQUETA[e] })),
+      // Las del catalogo de antes: ya no se ponen, pero las guardadas con ellas se ven y se filtran.
+      etiquetasAnteriores: ETIQUETAS_ANTERIORES.map((e) => ({ id: e, nombre: nombreDeEtiqueta(e) })),
       conIA: Boolean(deps.ia?.()),
       conAdjuntos,
       conEnlaces: Boolean(deps.secreto),
@@ -385,7 +388,7 @@ export async function registerArchiveRoutes(app: FastifyInstance, deps: ArchiveR
   app.post<{ Params: { id: string } }>('/admin/archives/:id/notas', async (request, reply) => {
     const id = idDe(request.params.id);
     if (id === null) return reply.code(400).send({ error: 'Identificador no válido.' });
-    const body = z.object({ notas: z.string().max(2000).nullable().optional(), etiquetas: z.array(z.enum(ETIQUETAS)).max(5).optional(), pedido: z.string().trim().max(120).nullable().optional() }).parse(request.body ?? {});
+    const body = z.object({ notas: z.string().max(2000).nullable().optional(), etiquetas: z.array(z.string().refine(esEtiquetaConocida, 'Esa etiqueta no existe.')).max(5).optional(), pedido: z.string().trim().max(120).nullable().optional() }).parse(request.body ?? {});
     const a = await repos.archives.update(id, { notas: body.notas === undefined ? undefined : body.notas?.trim() || null, etiquetas: body.etiquetas, pedido: body.pedido === undefined ? undefined : body.pedido || null });
     if (!a) return reply.code(404).send({ error: 'Esa conversación guardada ya no existe.' });
     return { ok: true, archive: a };
