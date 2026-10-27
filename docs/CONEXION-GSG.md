@@ -129,10 +129,38 @@ da lo mismo para todos los trackings de un día; GSG lo lee cuando quiere y GSGc
 
 ## Etiquetas de los chats (GSGchat → GSG)
 
-En Chats, el botón de la etiqueta clasifica con la IA las conversaciones del día (catálogo en
-`src/archive/clasificar.ts`) y le manda a GSG la etiqueta de cada una. **El identificador es el número de
-WhatsApp, no un tracking**: un mismo cliente puede tener varios pedidos o ninguno ese día. Si el cliente está
-guardado con dos formatos (`987654321` y `51987654321`) es una sola conversación.
+En Chats, el botón «Etiquetar chats con IA» clasifica con la IA las conversaciones del día y le manda a GSG
+la etiqueta de cada una. **El identificador es el número de WhatsApp, no un tracking**: un mismo cliente puede
+tener varios pedidos o ninguno ese día. Si el cliente está guardado con dos formatos (`987654321` y
+`51987654321`) es una sola conversación.
+
+Cómo va un lote:
+
+1. **Captura.** Se reúnen los chats con actividad de hoy (zona del negocio), se agrupan por número normalizado
+   y se guarda una copia de sus mensajes. El lote procesa esa copia: lo que entre mientras corre no cambia lo
+   que se está clasificando. La copia se vacía a las 72 horas, como el chat.
+2. **IA.** En segundo plano, cada número va a la IA con sus mensajes del día y el catálogo del negocio. La IA
+   solo clasifica (no contesta al cliente) y devuelve el código de una etiqueta; si ninguna corresponde, `otro`.
+3. **Validación.** El código tiene que estar en el catálogo. Se guarda con el número, el día, el lote y los
+   mensajes procesados. Al volver a pulsar el botón **solo se leen los chats que aún no tienen etiqueta** (nuevos,
+   o que la IA no pudo clasificar): un chat ya etiquetado se queda con su etiqueta aunque le lleguen mensajes.
+   Solo se relee si su etiqueta ya no está en el catálogo del negocio.
+4. **Error de IA.** Si la IA falla o contesta algo que no está en el catálogo, ese chat queda como error, sin
+   etiqueta y sin mandarse a GSG. No se adivina por palabras clave: `otro` es solo lo que la IA asigna cuando
+   ninguna etiqueta corresponde. El siguiente lote lo vuelve a intentar.
+5. **Envío a GSG**, detallado abajo.
+
+**La IA solo lee y etiqueta: no responde ni manda mensajes.** Quien habla con el cliente es el bot. El
+etiquetado solo necesita la clave de la IA guardada en Avanzado → Asistente IA; **no** hace falta activar el
+asistente (activarlo es lo que hace que el bot conteste con IA, y es otra decisión). El módulo de etiquetado no
+tiene acceso al envío de mensajes.
+
+El **catálogo** es del negocio: en Chats → ⋮ → «Catálogo de etiquetas…» (solo un administrador) se editan los
+códigos, los nombres y la descripción que lee la IA de cada una. `otro` está siempre. Mientras el negocio no
+guarde uno, vale el de fábrica (17 etiquetas, en `src/archive/clasificar.ts`; `sin_novedad` es el flujo feliz: el
+cliente manda su ubicación, confirma o agradece y no pide nada más; `otro` queda para lo que no tiene que ver con la
+entrega). Tras cambiar el catálogo, ⋮ → «Volver a etiquetar todo» relee también los chats ya etiquetados. Las conversaciones guardadas
+(Guardados) usan el mismo catálogo.
 
 POST a la «Ruta para etiquetas de chats» de Conexión con GSG (por ejemplo `v1/gsgchat/labels`; vacía = no se
 mandan), con la API Key de GSG en `X-API-Key` y el `eventoId` también en `Idempotency-Key`:
@@ -144,7 +172,8 @@ mandan), con la API Key de GSG en `X-API-Key` y el `eventoId` también en `Idemp
   "eventoId": "gsgchat-etiqueta-51987654321-2026-10-27-ab12cd34ef56" }
 ```
 
-`origen` es `ia`, o `reglas` cuando la IA falló o el cliente no escribió ese día. El `eventoId` es el mismo
+`etiqueta` es el código del catálogo del negocio y `etiquetaNombre` su nombre. `origen` es `ia` si la puso la
+IA o `manual` si la puso una persona (ver «Etiquetar a mano»). El `eventoId` es el mismo
 mientras la conversación no cambie: un reintento no duplica nada, y una conversación que cambió (y se volvió a
 clasificar) llega con otro. Una conversación que no se pudo clasificar no se manda.
 
@@ -170,10 +199,45 @@ lote, fallos de la IA, cada envío y cada rechazo de GSG). Ni la API Key ni el t
 | `GET /admin/chat/etiquetar` | El lote en marcha o el último, con el avance |
 | `POST /admin/chat/etiquetar/reintentar` | `{ dia? }`: reintenta los envíos fallidos; 202, o 200 `{ nada: true }` |
 | `GET /admin/chat/etiquetar/lotes` | Los últimos lotes |
-| `GET /admin/chat/etiquetar/lotes/{id}` | Un lote, su registro y el estado del envío de cada conversación del día |
+| `GET /admin/chat/etiquetar/lotes/{id}` | Un lote, su registro y cada chat: su estado en el lote (`pendiente`, `reutilizada`, `clasificada`, `error`, `solo_envio`) y su envío a GSG |
+| `GET /admin/chat/etiquetar/lotes/{id}/chats/{telefono}` | La copia de los mensajes de ese chat que el lote le mandó a la IA |
 | `GET /admin/chat/etiquetar/eventos` | El registro, filtrable por `loteId`, `nivel`, `fase` y `telefono` |
+| `GET /admin/chat/conversations?etiqueta=…` | La bandeja filtrada: un código del catálogo, `sin_etiquetar`, `sin_clasificar` o `gsg_fallido` |
+| `GET /admin/chat/etiquetas/conteo` | Cuántos chats de la bandeja hay con cada etiqueta |
+| `POST /admin/chat/{contactId}/etiqueta` | `{ etiqueta: "codigo" }` la pone a mano hoy; `{ etiqueta: null }` la quita. 400 si no está en el catálogo o es un grupo |
+| `GET /admin/chat/etiquetas/embudo?dia=hoy\|ayer\|AAAA-MM-DD` | El embudo del día: resumen (IA, a mano, sin etiquetar, sin clasificar, GSG), cuántos chats por etiqueta y la lista |
+| `GET /admin/chat/etiquetas/catalogo` | El catálogo vigente (`propio: false` = el de fábrica) |
+| `PUT /admin/chat/etiquetas/catalogo` | `{ items: [{ codigo, nombre, descripcion }] }`: guarda el del negocio (solo administrador); 400 si no vale |
+| `DELETE /admin/chat/etiquetas/catalogo` | Vuelve al de fábrica (solo administrador) |
 
-Las pruebas de punta a punta con Postman están en `docs/postman/etiquetas/`.
+En la pantalla, el aviso del lote muestra el avance y «Ver chats del lote» abre la lista con el estado de cada
+chat. Encima de la lista, una fila de filtros por etiqueta (con cuántos chats tiene cada una, más «Sin etiquetar»,
+«Sin clasificar» y «Sin enviar a GSG») filtra toda la bandeja. Un envío que ni se intentó (GSG sin conectar o
+sin ruta) se ve como «Sin enviar a GSG», no como un fallo del chat.
+
+### Etiquetar a mano
+
+En la cabecera de un chat, la etiqueta es un botón (o «+ Etiqueta» si no tiene): abre el catálogo para ponerla o
+cambiarla, o «Quitar la etiqueta». También desde Pedidos GSG → Embudo de chats, con «Etiquetar ▾» en cada fila.
+Solo vale para el día de hoy y no le escribe nada al cliente.
+
+- Queda con `origen: manual` (en la pantalla, con ✎). **La IA no la pisa**: ningún lote la vuelve a leer, ni
+  «Volver a etiquetar todo».
+- Se manda a GSG al momento, con `origen: "manual"` y un `eventoId` nuevo en cada cambio. Si GSG no la acepta (o
+  no está conectado) queda como `fallido` y sale con «Reintentar envíos».
+- Quitarla deja el chat «sin etiquetar»: el siguiente lote lo vuelve a leer con la IA. A GSG no se le manda nada
+  al quitarla.
+- Cada cambio queda en el registro (`etiqueta_manual`, `etiqueta_quitada`) con quién lo hizo.
+
+### Embudo de chats (Pedidos GSG)
+
+Una pestaña de Pedidos GSG (`/embudo-chats`). Hoy o ayer: arriba, cuántos chats hubo, cuántos etiquetó la IA y
+cuántos una persona, los que faltan por etiquetar, los que la IA no pudo clasificar y cuántos llegaron a GSG. En
+medio, una barra por etiqueta partida en «puesta por la IA» y «puesta a mano»; al pulsarla, la lista de abajo se
+queda con esos chats. Abajo, cada chat con su etiqueta, quién la puso y su envío a GSG, con «Etiquetar ▾» (solo
+hoy) y «Abrir chat». No hace falta migración: usa las mismas tablas.
+
+Lo que hay que hacer en la base al desplegarlo: `docs/MIGRACIONES-ETIQUETAS.md`.
 
 ## Dónde está cada cosa
 

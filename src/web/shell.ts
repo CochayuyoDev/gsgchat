@@ -545,7 +545,7 @@ const JS = String.raw`
     var ruta = location.pathname;
     document.querySelectorAll('#s-nav-movil a[data-ir]').forEach(function (a) {
       var p = a.getAttribute('data-ir').split('#')[0];
-      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
+      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg' || ruta === '/embudo-chats')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
       a.classList.toggle('activo', activo);
     });
   }
@@ -598,7 +598,7 @@ const JS = String.raw`
     if (!activo && ruta.indexOf('/procesos/') === 0) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/procesos"]');
     /* /entregas y /hoy son la misma pantalla */
     /* la solicitud de ubicación y sus ajustes son pestañas de Pedidos GSG */
-    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
+    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg' || ruta === '/embudo-chats')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
     items.forEach(function (a) { a.classList.toggle('activo', a === activo); });
     var miga = document.getElementById('s-miga');
     if (activo) {

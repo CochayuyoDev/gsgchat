@@ -104,8 +104,8 @@ export interface EtiquetaParaGsg {
   /** Del catalogo de src/archive/clasificar.ts. */
   etiqueta: string;
   etiquetaNombre: string;
-  /** Quien la puso: la IA, o las reglas cuando la IA fallo o el cliente no escribio. */
-  origen: 'ia' | 'reglas';
+  /** Quien la puso: la IA, una persona a mano (`manual`) o las reglas (respaldo de antes). */
+  origen: 'ia' | 'reglas' | 'manual';
   /** Cuantos mensajes del dia se miraron. */
   mensajes: number;
   /** Cuando se clasifico. */

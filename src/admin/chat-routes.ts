@@ -22,8 +22,8 @@ import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import type { ServicioIA } from '../ia/servicio.js';
-import { nombreDeEtiqueta } from '../archive/clasificar.js';
-import { crearEtiquetador, numeroNormalizado, type Etiquetador } from '../chat/etiquetar.js';
+import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, TOPE_CATALOGO, nombreDeEtiqueta, validarCatalogo, type Catalogo } from '../archive/clasificar.js';
+import { catalogoVigente, crearEtiquetador, numeroNormalizado, type Etiquetador } from '../chat/etiquetar.js';
 import { fechaDelNegocio } from '../ajustes/generales.js';
 import type { EtiquetaChat } from '../db/chat-etiquetas.js';
 
@@ -44,10 +44,12 @@ export interface ChatDeps {
 }
 
 /** La etiqueta como la pinta la pantalla, junto al nombre del cliente. */
-export function etiquetaParaPantalla(e: EtiquetaChat | undefined, hoy: string) {
+export function etiquetaParaPantalla(e: EtiquetaChat | undefined, hoy: string, catalogo?: Catalogo) {
   if (!e) return null;
-  if (!e.etiqueta) return { id: null, nombre: 'Sin clasificar', dia: e.dia, hoy: e.dia === hoy, motivo: e.motivo };
-  return { id: e.etiqueta, nombre: nombreDeEtiqueta(e.etiqueta), dia: e.dia, hoy: e.dia === hoy, motivo: null };
+  // El envio a GSG de esa etiqueta, para avisar en el chip si no llego.
+  const gsg = { estado: e.syncEstado, error: e.syncError, intentos: e.syncIntentos };
+  if (!e.etiqueta) return { id: null, nombre: 'Sin clasificar', dia: e.dia, hoy: e.dia === hoy, motivo: e.motivo, origen: e.origen, gsg };
+  return { id: e.etiqueta, nombre: nombreDeEtiqueta(e.etiqueta, catalogo), dia: e.dia, hoy: e.dia === hoy, motivo: null, origen: e.origen, gsg };
 }
 
 /** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
@@ -163,7 +165,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   const etiquetasDe = async (phones: string[]) => {
     const hoy = fechaDelNegocio(new Date(), zonaHoraria());
     const ultimas = repos.chatEtiquetas ? await repos.chatEtiquetas.ultimas([...new Set(phones.map(numeroNormalizado))]).catch(() => new Map<string, EtiquetaChat>()) : new Map<string, EtiquetaChat>();
-    return (phone: string) => etiquetaParaPantalla(ultimas.get(numeroNormalizado(phone)), hoy);
+    const catalogo = repos.chatEtiquetas && ultimas.size ? await catalogoVigente(repos.chatEtiquetas).catch(() => CATALOGO_POR_DEFECTO) : CATALOGO_POR_DEFECTO;
+    return (phone: string) => etiquetaParaPantalla(ultimas.get(numeroNormalizado(phone)), hoy, catalogo);
   };
 
   const SIN_ETIQUETAS = 'Esta instalación no guarda etiquetas de chats.';
@@ -178,8 +181,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const etiquetador = etiquetadorDe();
     if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
     const alcance = alcanceChat(request.usuario);
+    // releer: tambien los ya etiquetados (por ejemplo tras cambiar el catalogo). Por defecto, solo lo que falta.
+    const { releer } = z.object({ releer: z.boolean().optional() }).parse(request.body ?? {});
     try {
-      return reply.code(202).send(etiquetador.iniciar(alcance, { iniciadoPor: quienEs(request.usuario) }));
+      return reply.code(202).send(etiquetador.iniciar(alcance, { iniciadoPor: quienEs(request.usuario), releer }));
     } catch (error) {
       return reply.code(409).send({ error: error instanceof Error ? error.message : String(error), ir: '/panel#ia' });
     }
@@ -207,6 +212,93 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     return reply.code(202).send(r);
   });
 
+  /**
+   * Poner o quitar a mano la etiqueta de hoy de un chat (`etiqueta: null` la
+   * quita). Queda como manual: la IA no la pisa. Se manda a GSG al momento.
+   * No se le escribe nada al cliente.
+   */
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/etiqueta', async (request, reply) => {
+    const etiquetador = etiquetadorDe();
+    if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    alcanceChat(request.usuario);
+    const body = z.object({ etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').nullable() }).parse(request.body ?? {});
+    const contacto = await repos.contacts.getById(request.params.contactId);
+    if (!contacto) return reply.code(404).send({ error: 'Ese chat no existe.' });
+    if (contacto.tipo === 'grupo') return reply.code(400).send({ error: 'Los grupos no se etiquetan.' });
+    try {
+      await etiquetador.etiquetarAMano({ phone: contacto.phone, etiqueta: body.etiqueta, quien: quienEs(request.usuario) });
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+    return { ok: true, etiqueta: (await etiquetasDe([contacto.phone]))(contacto.phone) };
+  });
+
+  /**
+   * El embudo de chats de un dia (hoy por defecto): cuantos hay de cada
+   * etiqueta, cuantos los puso la IA y cuantos una persona, los que faltan y
+   * como va el envio a GSG; y la lista de chats con su etiqueta.
+   */
+  app.get('/admin/chat/etiquetas/embudo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    const q = z.object({ dia: z.string().regex(/^(hoy|ayer|\d{4}-\d{2}-\d{2})$/, 'El día va como hoy, ayer o AAAA-MM-DD.').default('hoy') }).parse(request.query ?? {});
+    const zona = zonaHoraria();
+    const hoy = fechaDelNegocio(new Date(), zona);
+    const dia = q.dia === 'hoy' ? hoy : q.dia === 'ayer' ? fechaDelNegocio(new Date(Date.now() - 86_400_000), zona) : q.dia;
+    const [filas, catalogo, bandeja] = await Promise.all([
+      repos.chatEtiquetas.delDia(dia),
+      catalogoVigente(repos.chatEtiquetas),
+      conversacionesConEtiqueta({ incluirApartados: true }, alcance),
+    ]);
+    const deBandeja = new Map(bandeja.map((c) => [numeroNormalizado(c.phone), c]));
+    const conEtiqueta = new Set(filas.map((f) => f.phone));
+    const chats = filas.map((f) => {
+      const c = deBandeja.get(f.phone);
+      return {
+        phone: f.phone,
+        contactId: c?.contactId ?? null,
+        nombre: c?.name ?? null,
+        ultimoMensaje: c?.lastMessage ? { body: c.lastMessage.body, direction: c.lastMessage.direction, at: c.lastMessage.createdAt } : null,
+        etiqueta: f.etiqueta,
+        nombreEtiqueta: f.etiqueta ? nombreDeEtiqueta(f.etiqueta, catalogo) : 'Sin clasificar',
+        origen: f.origen,
+        motivo: f.motivo,
+        en: f.updatedAt,
+        gsg: { estado: f.syncEstado, intentos: f.syncIntentos, error: f.syncError },
+      };
+    });
+    // Los chats de ese dia que aun no tienen etiqueta (los de la bandeja cuyo ultimo mensaje es de ese dia).
+    const sinEtiquetar = bandeja
+      .filter((c) => c.lastMessage && fechaDelNegocio(new Date(c.lastMessage.createdAt), zona) === dia && !conEtiqueta.has(numeroNormalizado(c.phone)))
+      .map((c) => ({ phone: numeroNormalizado(c.phone), contactId: c.contactId, nombre: c.name, ultimoMensaje: c.lastMessage ? { body: c.lastMessage.body, direction: c.lastMessage.direction, at: c.lastMessage.createdAt } : null }));
+    const etapas = new Map(catalogo.map((e) => [e.codigo, { codigo: e.codigo, nombre: e.nombre, ia: 0, manual: 0 }]));
+    for (const f of filas) {
+      if (!f.etiqueta) continue;
+      const e = etapas.get(f.etiqueta) ?? { codigo: f.etiqueta, nombre: nombreDeEtiqueta(f.etiqueta, catalogo), ia: 0, manual: 0 };
+      if (f.origen === 'manual') e.manual++;
+      else e.ia++;
+      etapas.set(f.etiqueta, e);
+    }
+    const etiquetadas = filas.filter((f) => f.etiqueta);
+    return {
+      dia,
+      hoy: dia === hoy,
+      resumen: {
+        chats: filas.length + sinEtiquetar.length,
+        etiquetados: etiquetadas.length,
+        porIA: etiquetadas.filter((f) => f.origen !== 'manual').length,
+        manual: etiquetadas.filter((f) => f.origen === 'manual').length,
+        sinClasificar: filas.length - etiquetadas.length,
+        sinEtiquetar: sinEtiquetar.length,
+        enviadosGsg: etiquetadas.filter((f) => f.syncEstado === 'enviado').length,
+        sinEnviarGsg: etiquetadas.filter((f) => f.syncEstado !== 'enviado').length,
+      },
+      etapas: [...etapas.values()].map((e) => ({ ...e, total: e.ia + e.manual })).sort((a, b) => b.total - a.total),
+      chats,
+      sinEtiquetar,
+    };
+  });
+
   /** Los ultimos lotes (completos y reintentos), el mas reciente primero. */
   app.get('/admin/chat/etiquetar/lotes', async (request, reply) => {
     if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
@@ -219,20 +311,77 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
     const lote = await repos.chatEtiquetas.lote(request.params.id);
     if (!lote) return reply.code(404).send({ error: 'Ese lote no existe.' });
-    const [eventos, filas] = await Promise.all([repos.chatEtiquetas.eventos({ loteId: lote.id, limite: 500 }), repos.chatEtiquetas.delDia(lote.dia)]);
+    const [eventos, filas, chats, catalogo] = await Promise.all([
+      repos.chatEtiquetas.eventos({ loteId: lote.id, limite: 500 }),
+      repos.chatEtiquetas.delDia(lote.dia),
+      repos.chatEtiquetas.chatsDelLote(lote.id),
+      catalogoVigente(repos.chatEtiquetas),
+    ]);
+    const envio = new Map(filas.map((f) => [f.phone, f]));
+    const syncDe = (f: EtiquetaChat | undefined) => (f ? { estado: f.syncEstado, intentos: f.syncIntentos, error: f.syncError, en: f.syncAt } : null);
     return {
       lote,
       eventos,
+      // Los chats de ESTE lote: como le fue a cada uno en el analisis y como va su envio a GSG.
+      chats: chats.map((c) => ({
+        phone: c.phone,
+        nombre: c.nombre,
+        mensajes: c.totalMensajes,
+        estado: c.estado,
+        etiqueta: c.etiqueta,
+        nombreEtiqueta: c.etiqueta ? nombreDeEtiqueta(c.etiqueta, catalogo) : null,
+        error: c.error,
+        procesadoAt: c.procesadoAt,
+        sync: syncDe(envio.get(c.phone)),
+      })),
+      // Todas las conversaciones de ese dia, con su etiqueta vigente.
       conversaciones: filas.map((f) => ({
         phone: f.phone,
         etiqueta: f.etiqueta,
-        nombre: f.etiqueta ? nombreDeEtiqueta(f.etiqueta) : 'Sin clasificar',
+        nombre: f.etiqueta ? nombreDeEtiqueta(f.etiqueta, catalogo) : 'Sin clasificar',
         origen: f.origen,
         motivo: f.motivo,
         loteId: f.loteId,
-        sync: { estado: f.syncEstado, intentos: f.syncIntentos, error: f.syncError, en: f.syncAt },
+        sync: syncDe(f),
       })),
     };
+  });
+
+  /** La copia de los mensajes que el lote le mando a la IA de un chat (mientras no pase la retencion). */
+  app.get<{ Params: { id: string; telefono: string } }>('/admin/chat/etiquetar/lotes/:id/chats/:telefono', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const chat = await repos.chatEtiquetas.chatDelLote(request.params.id, numeroNormalizado(request.params.telefono));
+    if (!chat) return reply.code(404).send({ error: 'Ese chat no está en ese lote.' });
+    return {
+      chat: { ...chat, nombreEtiqueta: chat.etiqueta ? nombreDeEtiqueta(chat.etiqueta, await catalogoVigente(repos.chatEtiquetas)) : null },
+      ...(chat.mensajes === null && chat.estado !== 'solo_envio' ? { aviso: 'La copia de los mensajes ya no se guarda: pasaron las 72 horas de retención del chat.' } : {}),
+    };
+  });
+
+  /** El catalogo de etiquetas del negocio: codigos, nombres y lo que lee la IA de cada una. */
+  app.get('/admin/chat/etiquetas/catalogo', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const propio = await repos.chatEtiquetas.catalogo();
+    return { items: propio ?? CATALOGO_POR_DEFECTO, propio: Boolean(propio), codigoOtro: CODIGO_OTRO, tope: TOPE_CATALOGO };
+  });
+
+  /** Guarda el catalogo entero. Solo un administrador. Lo ya etiquetado con otro catalogo se vuelve a mirar en el siguiente lote. */
+  app.put('/admin/chat/etiquetas/catalogo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'Solo un administrador cambia el catálogo de etiquetas.' });
+    const body = z.object({ items: z.array(z.object({ codigo: z.string().max(80), nombre: z.string().max(200), descripcion: z.string().max(400) })).max(100) }).parse(request.body ?? {});
+    const r = validarCatalogo(body.items);
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    await repos.chatEtiquetas.guardarCatalogo(r.catalogo);
+    return { ok: true, items: r.catalogo, propio: true };
+  });
+
+  /** Vuelve al catalogo de fabrica. Solo un administrador. */
+  app.delete('/admin/chat/etiquetas/catalogo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'Solo un administrador cambia el catálogo de etiquetas.' });
+    await repos.chatEtiquetas.borrarCatalogo();
+    return { ok: true, items: CATALOGO_POR_DEFECTO, propio: false };
   });
 
   /** El registro de lo que paso al etiquetar y al mandar a GSG, filtrable. */
@@ -315,6 +464,35 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     };
   };
 
+  /**
+   * Todas las conversaciones de la bandeja (sin grupos) con su etiqueta, para
+   * filtrar y contar por etiqueta. La bandeja es la de las ultimas 72 horas:
+   * se leen de a 100 hasta un tope, que de sobra cubre un dia de reparto.
+   */
+  const TOPE_FILTRO_ETIQUETA = 3000;
+  const conversacionesConEtiqueta = async (filtro: { q?: string; incluirApartados?: boolean }, alcance: ReturnType<typeof alcanceChat>) => {
+    const todas: Awaited<ReturnType<typeof repos.messages.listConversations>> = [];
+    for (let offset = 0; offset < TOPE_FILTRO_ETIQUETA; offset += 100) {
+      const tanda = await repos.messages.listConversations({ ...filtro, limit: 100, offset, alcance });
+      todas.push(...tanda);
+      if (tanda.length < 100) break;
+    }
+    const personas = todas.filter((c) => c.tipo !== 'grupo');
+    const etiqueta = await etiquetasDe(personas.map((c) => c.phone));
+    return personas.map((c) => ({ ...c, etiqueta: etiqueta(c.phone) }));
+  };
+  /**
+   * Si una conversacion pasa el filtro de etiqueta: un codigo del catalogo,
+   * `sin_clasificar` (la IA no pudo), `sin_etiquetar` (aun no se etiqueto) o
+   * `gsg_fallido` (tiene etiqueta pero no llego a GSG).
+   */
+  const pasaEtiqueta = (e: ReturnType<typeof etiquetaParaPantalla>, filtro: string): boolean => {
+    if (filtro === 'sin_etiquetar') return !e;
+    if (filtro === 'sin_clasificar') return Boolean(e && !e.id);
+    if (filtro === 'gsg_fallido') return Boolean(e && e.id && e.gsg.estado === 'fallido');
+    return Boolean(e && e.id === filtro);
+  };
+
   app.get('/admin/chat/conversations', async (request, reply) => {
     const query = z
       .object({
@@ -323,9 +501,23 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         offset: z.coerce.number().int().nonnegative().default(0),
         /** Los chats apartados solo salen cuando se piden. */
         incluirApartados: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
+        /** Solo los de esa etiqueta (codigo del catalogo, sin_clasificar, sin_etiquetar o gsg_fallido). */
+        etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').optional(),
       })
       .parse(request.query ?? {});
     const alcance = alcanceChat(request.usuario);
+    const comun = {
+      unread: await repos.messages.unreadTotal(undefined, alcance),
+      scopeId: request.usuario?.chatSesion?.sid ?? 'api',
+      vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+    };
+    if (query.etiqueta) {
+      // Se filtra en el servidor sobre TODA la bandeja, no sobre la pagina cargada.
+      const filtradas = (await conversacionesConEtiqueta(query, alcance)).filter((c) => pasaEtiqueta(c.etiqueta, query.etiqueta!));
+      const pagina = filtradas.slice(query.offset, query.offset + query.limit);
+      const hay = filtradas.length > query.offset + query.limit;
+      return responderLectura(request, reply, { items: pagina, hasMore: hay, siguienteOffset: hay ? query.offset + query.limit : null, total: filtradas.length, ...comun });
+    }
     const items = await repos.messages.listConversations({ ...query, limit: query.limit + 1, alcance });
     const pagina = items.slice(0, query.limit);
     const etiqueta = await etiquetasDe(pagina.filter((c) => c.tipo !== 'grupo').map((c) => c.phone));
@@ -333,10 +525,35 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       items: pagina.map((c) => ({ ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) })),
       hasMore: items.length > query.limit,
       siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
-      unread: await repos.messages.unreadTotal(undefined, alcance),
-      scopeId: request.usuario?.chatSesion?.sid ?? 'api',
-      vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+      ...comun,
     });
+  });
+
+  /**
+   * Cuantas conversaciones de la bandeja hay con cada etiqueta, para el
+   * filtro: las del catalogo vigente (aunque tengan 0) y las de antes que aun
+   * se vean, mas sin clasificar, sin etiquetar y las que no llegaron a GSG.
+   */
+  app.get('/admin/chat/etiquetas/conteo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    const [todas, catalogo] = await Promise.all([conversacionesConEtiqueta({ incluirApartados: true }, alcance), catalogoVigente(repos.chatEtiquetas)]);
+    const porCodigo = new Map<string, { codigo: string; nombre: string; n: number }>(catalogo.map((e) => [e.codigo, { codigo: e.codigo, nombre: e.nombre, n: 0 }]));
+    let sinClasificar = 0;
+    let sinEtiquetar = 0;
+    let gsgFallido = 0;
+    for (const c of todas) {
+      const e = c.etiqueta;
+      if (!e) sinEtiquetar++;
+      else if (!e.id) sinClasificar++;
+      else {
+        const fila = porCodigo.get(e.id) ?? { codigo: e.id, nombre: e.nombre, n: 0 };
+        fila.n++;
+        porCodigo.set(e.id, fila);
+        if (e.gsg.estado === 'fallido') gsgFallido++;
+      }
+    }
+    return { total: todas.length, etiquetas: [...porCodigo.values()], sinClasificar, sinEtiquetar, gsgFallido };
   });
 
   /**

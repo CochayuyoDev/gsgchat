@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { MensajeIA } from '../src/ia/proveedores.js';
 import { crearChatEtiquetasEnMemoria, crearChatEtiquetasRepo, type ChatEtiquetasRepo, type MensajeDelDia } from '../src/db/chat-etiquetas.js';
-import { crearEtiquetador, etiquetaParaGsg, etiquetarDelDia, reintentarEnvios, type EtiquetadoDeps } from '../src/chat/etiquetar.js';
+import { crearEtiquetador, etiquetaParaGsg, etiquetarAMano, etiquetarDelDia, reintentarEnvios, type EtiquetadoDeps } from '../src/chat/etiquetar.js';
 import { crearPuertoHttp, type EtiquetaParaGsg, type PuertoGsg, type ResultadoEnvio } from '../src/rutas/gsg.js';
 import { crearConexionGsg } from '../src/rutas/conexion-gsg.js';
 import type { Pool } from '../src/db/pool.js';
@@ -159,6 +159,61 @@ describe('el puerto manda la etiqueta por numero, sin tracking', () => {
 
 // ------------------------------------------------------------- los lotes
 
+describe('etiquetar a mano', () => {
+  let mensajes: MensajeDelDia[];
+  let repo: ChatEtiquetasRepo;
+  beforeEach(() => {
+    mensajes = [msg('51911000002', 'in', 'mejor mañana', 1), msg('51911000003', 'in', 'tráigalo a las 3', 2)];
+    repo = crearChatEtiquetasEnMemoria(() => mensajes);
+  });
+
+  it('queda como manual, sale a GSG al momento con origen manual, y la IA no la pisa ni al volver a etiquetar todo', async () => {
+    const g = gsgDePrueba();
+    const d = deps(repo, () => iaDePrueba().ia, g.puerto);
+    const fila = (await etiquetarAMano(d, { phone: '911000002', etiqueta: 'sin_novedad', quien: 'Ali' }))!;
+    expect(fila).toMatchObject({ phone: '51911000002', etiqueta: 'sin_novedad', origen: 'manual', syncEstado: 'enviado' });
+    expect(g.recibidas).toHaveLength(1);
+    expect(g.recibidas[0]).toMatchObject({ telefono: '51911000002', etiqueta: 'sin_novedad', etiquetaNombre: 'Sin novedad', origen: 'manual' });
+    expect((await repo.eventos({ phone: '51911000002', limite: 5 })).map((e) => e.codigo)).toEqual(expect.arrayContaining(['etiqueta_manual', 'gsg_enviada']));
+
+    // El lote de la IA: la manual se queda; solo el otro chat va a la IA.
+    const ia = iaDePrueba();
+    const r = await etiquetarDelDia(deps(repo, () => ia.ia, g.puerto), ALCANCE);
+    expect(ia.llamadas).toHaveLength(1);
+    expect(r).toMatchObject({ reutilizadas: 1, clasificadas: 1 });
+    // Ni «volver a etiquetar todo» la toca.
+    const ia2 = iaDePrueba();
+    await etiquetarDelDia(deps(repo, () => ia2.ia, g.puerto), ALCANCE, undefined, { releer: true });
+    expect(ia2.llamadas).toHaveLength(1);
+    expect((await repo.ultimas(['51911000002'])).get('51911000002')).toMatchObject({ etiqueta: 'sin_novedad', origen: 'manual' });
+
+    // Cambiarla a mano: otro envio a GSG con otro eventoId.
+    await etiquetarAMano(d, { phone: '51911000002', etiqueta: 'reclamo', quien: 'Ali' });
+    expect(g.recibidas.at(-1)).toMatchObject({ etiqueta: 'reclamo', origen: 'manual' });
+    expect(g.recibidas.at(-1)!.eventoId).not.toBe(g.recibidas[0]!.eventoId);
+  });
+
+  it('quitarla deja el chat sin etiquetar y la IA lo vuelve a leer; un codigo fuera del catalogo no vale', async () => {
+    const d = deps(repo, () => iaDePrueba().ia, gsgDePrueba().puerto);
+    await etiquetarAMano(d, { phone: '51911000002', etiqueta: 'reclamo' });
+    expect(await etiquetarAMano(d, { phone: '51911000002', etiqueta: null, quien: 'Ali' })).toBeNull();
+    expect(await repo.delDia(DIA, ['51911000002'])).toEqual([]);
+    const ia = iaDePrueba();
+    await etiquetarDelDia(deps(repo, () => ia.ia, gsgDePrueba().puerto), ALCANCE);
+    expect(ia.llamadas).toHaveLength(2);
+    await expect(etiquetarAMano(d, { phone: '51911000002', etiqueta: 'inventada' })).rejects.toThrow(/no está en el catálogo/);
+  });
+
+  it('sin GSG conectado queda sin enviar (sin contar intento) para reintentarlo', async () => {
+    const fila = (await etiquetarAMano(deps(repo, () => null, null), { phone: '51911000003', etiqueta: 'horario_fijo' }))!;
+    expect(fila).toMatchObject({ origen: 'manual', syncEstado: 'fallido', syncIntentos: 0 });
+    const g = gsgDePrueba();
+    const re = (await reintentarEnvios(deps(repo, () => null, g.puerto)))!;
+    expect(re).toMatchObject({ syncEnviadas: 1 });
+    expect(g.recibidas[0]).toMatchObject({ telefono: '51911000003', origen: 'manual' });
+  });
+});
+
 describe('el lote: analisis, envio a GSG y reintentos', () => {
   let mensajes: MensajeDelDia[];
   let repo: ChatEtiquetasRepo;
@@ -200,12 +255,16 @@ describe('el lote: analisis, envio a GSG y reintentos', () => {
     expect(g.recibidas).toHaveLength(3);
     expect(r2).toMatchObject({ estado: 'completado', reutilizadas: 3, syncTotal: 0 });
 
+    // Luis escribe otra vez: ya estaba etiquetado y enviado; no se relee ni se reenvia.
     mensajes.push(msg('51911000003', 'in', '¿dónde está el motorizado?', 9));
     const r3 = await etiquetarDelDia(deps(repo, () => iaDePrueba().ia, g.puerto), ALCANCE);
-    expect(r3).toMatchObject({ syncTotal: 1, syncEnviadas: 1 });
-    expect(g.recibidas.at(-1)).toMatchObject({ telefono: '51911000003', etiqueta: 'consultar_entrega' });
-    // Conversacion nueva = eventoId nuevo: GSG no la toma por un duplicado.
-    expect(g.recibidas.at(-1)!.eventoId).not.toBe(g.recibidas.find((e) => e.telefono === '51911000003')!.eventoId);
+    expect(r3).toMatchObject({ reutilizadas: 3, syncTotal: 0 });
+    // Un chat nuevo: se etiqueta y solo ese sale hacia GSG.
+    mensajes.push(msg('51911000009', 'in', 'mejor mañana', 10));
+    const r4 = await etiquetarDelDia(deps(repo, () => iaDePrueba().ia, g.puerto), ALCANCE);
+    expect(r4).toMatchObject({ clasificadas: 1, syncTotal: 1, syncEnviadas: 1 });
+    expect(g.recibidas.at(-1)).toMatchObject({ telefono: '51911000009', etiqueta: 'reagendar_entrega' });
+    expect(g.recibidas).toHaveLength(4);
   });
 
   it('un envio que falla queda fallido; el reintento manda SOLO ese y sin volver a la IA', async () => {
