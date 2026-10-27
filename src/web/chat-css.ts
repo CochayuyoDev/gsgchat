@@ -153,7 +153,7 @@ export const CHAT_CSS = `
   .lista-filtro .lf-op:hover, .lista-filtro .lf-op:focus-visible { background: var(--primario-suave); outline: none; }
   .lista-filtro .lf-op.activo { color: var(--accent); font-weight: 600; }
   .lista-filtro .lf-marca { flex: none; width: 14px; font-size: 12px; color: var(--accent); }
-  .lista-filtro .lf-texto { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lista-filtro .lf-texto { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: 1.3; }
   .lista-filtro .lf-n { flex: none; min-width: 26px; padding: 1px 8px; border-radius: 999px; background: var(--gris-suave); color: inherit; font-size: 12px; font-weight: 600; text-align: center; }
   .punto { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gris); }
   .punto.rojo { background: var(--rojo); }
@@ -161,7 +161,7 @@ export const CHAT_CSS = `
   .punto.azul { background: var(--azul); }
   .punto.verde { background: var(--verde); }
   .punto.sin { background: transparent; border: 1px dashed currentColor; }
-  .punto.vacio { background: transparent; border: 1px solid currentColor; }
+  .punto.hueco { background: transparent; border: 1px solid currentColor; }
   .etiquetar-boton:hover:not(:disabled) { background: var(--accent); color: var(--primario-texto); }
   .etiquetar-boton:disabled { opacity: .6; cursor: progress; }
   #etiquetar.girando { animation: etiquetando 1.2s linear infinite; }

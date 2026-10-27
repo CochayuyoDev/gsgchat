@@ -55,7 +55,7 @@ ${PESTANAS_PEDIDOS_CSS}
 
 .punto { flex: none; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--gris); }
 .punto.rojo { background: var(--rojo); } .punto.ambar { background: var(--ambar); } .punto.azul { background: var(--azul); } .punto.verde { background: var(--verde); }
-.punto.sin { background: transparent; border: 1px dashed currentColor; } .punto.vacio { background: transparent; border: 1px solid currentColor; }
+.punto.sin { background: transparent; border: 1px dashed currentColor; } .punto.hueco { background: transparent; border: 1px solid currentColor; }
 
 .em-filtros { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
 .em-filtro { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 3px 6px 3px 12px; border-radius: 999px; border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); font: inherit; font-size: 13px; cursor: pointer; }

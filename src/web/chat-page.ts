@@ -550,7 +550,7 @@ function opcionesEtiqueta() {
   if (!d) return [];
   var con = d.etiquetas.filter(function (e) { return e.n > 0; }).sort(function (a, b) { return b.n - a.n; });
   var estados = [];
-  if (d.sinEtiquetar) estados.push({ valor: 'sin_etiquetar', texto: 'Sin etiquetar', n: d.sinEtiquetar, tono: 'vacio' });
+  if (d.sinEtiquetar) estados.push({ valor: 'sin_etiquetar', texto: 'Sin etiquetar', n: d.sinEtiquetar, tono: 'hueco' });
   if (d.sinClasificar) estados.push({ valor: 'sin_clasificar', texto: 'Sin clasificar', n: d.sinClasificar, tono: 'sin' });
   if (d.gsgFallido) estados.push({ valor: 'gsg_fallido', texto: 'Sin enviar a GSG', n: d.gsgFallido, tono: 'gris' });
   return [
@@ -607,7 +607,7 @@ function abrirListaFiltro(boton, grupos, actual, elegir) {
   }).join('');
   document.body.appendChild(panel);
   var r = boton.getBoundingClientRect();
-  var ancho = Math.min(Math.max(r.width, 250), window.innerWidth - 16);
+  var ancho = Math.min(Math.max(r.width, 290), window.innerWidth - 16);
   panel.style.width = ancho + 'px';
   panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - ancho - 8)) + 'px';
   panel.style.top = (r.bottom + 6) + 'px';
