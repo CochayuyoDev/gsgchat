@@ -17,7 +17,7 @@ export function solicitudDePedidos(contextos: ContextoTexto[]) {
   const detalles = bloques.join('\n\n');
   const cantidad = contextos.length;
   return {
-    texto: `Hola, buenas tardes, ${nombre}. Somos GSG Courier. Tenemos ${cantidad} ${cantidad === 1 ? 'pedido' : 'pedidos'} para usted:\n\n${detalles}\n\nPor favor, ¿podría compartir su ubicación por WhatsApp para poder llegar sin problemas? ¡Gracias!`,
+    texto: `Hola, buenas tardes, ${nombre}. Somos GSG Courier. Tenemos ${cantidad} ${cantidad === 1 ? 'pedido' : 'pedidos'} para usted:\n\n${detalles}\n\nPor favor, ¿podría compartir su ubicación por WhatsApp para que el motorizado pueda armar su ruta? ¡Gracias!`,
     // Las variables de texto de Meta no llevan saltos de línea.
     variables: [nombre, String(cantidad), bloques.map((b) => b.replace(/[\n\r\t]+/g, ' | ')).join(' / ')],
   };

@@ -27,6 +27,7 @@
  */
 
 import { appShell } from './shell.js';
+import { TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 import { REPARTO_CSS, REPARTO_JS } from './reparto-comun.js';
 import { PESTANAS_PEDIDOS_CSS, PESTANAS_PEDIDOS_JS, pestanasPedidosHtml } from './pestanas-pedidos.js';
 
@@ -198,6 +199,19 @@ const CSS = `${REPARTO_CSS}
   #aj-pasos-adicionales .variante { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; border-radius: var(--radio-sm); background: var(--superficie); border: 1px solid var(--borde); }
   #aj-pasos-adicionales .variante h5 { margin: 0 0 6px; font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); }
   #aj-pasos-adicionales .variante .previa { flex: 1; }
+  .aj-editor-inicial { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
+  .aj-editor-inicial .aj-ei-cab { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .aj-editor-inicial .aj-ei-cab h4 { margin: 0; font-size: 15px; }
+  .aj-editor-inicial .aj-ei-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; margin: 8px 0 10px; }
+  .aj-editor-inicial textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; line-height: 1.45; }
+  .aj-editor-inicial .aj-ei-previa { white-space: pre-wrap; margin-top: 6px; }
+  .aj-editor-inicial .fila { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+  .aj-editor-inicial .fila .btn { flex: 0 0 auto; width: auto; }
+  .aj-editor-inicial .aj-ei-ayuda { font-size: 12.5px; color: var(--texto-suave); margin: 8px 0 6px; }
+  .aj-editor-inicial .aj-ei-datos { display: flex; flex-wrap: wrap; gap: 6px; }
+  .aj-editor-inicial .aj-ei-datos button { border: 1px solid var(--borde); background: var(--superficie-2); color: inherit; font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+  .aj-editor-inicial .aj-ei-datos button:hover, .aj-editor-inicial .aj-ei-datos button:focus-visible { border-color: var(--primario); color: var(--primario); }
+  @media (max-width: 760px) { .aj-editor-inicial .aj-ei-cols { grid-template-columns: 1fr; } }
   @media (max-width: 900px) { #aj-pasos-adicionales .paso { grid-template-columns: minmax(0, 1fr); } }
   .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
   .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
@@ -299,7 +313,7 @@ export function rutasPage(opts: RutasOpts): string {
         <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
         <div id="aj-pasos"></div>
-        <details class="aj-editor-inicial" id="aj-editor-inicial"><summary>Editar el texto de «Solicitud de ubicación»</summary><p class="muted">Este es el primer mensaje real que GSGchat envía al recibir el pedido. Si lo dejas vacío, usa el texto predeterminado. El horario se toma de Pedidos GSG → Ajustes de entrega. Límite: 2000 caracteres.</p><label for="aj-texto-inicial">Texto que recibe el cliente</label><textarea id="aj-texto-inicial" rows="6" maxlength="2000" placeholder="Escribe la solicitud inicial de ubicación"></textarea><p class="marcadores">Puedes usar {nombreCompleto}, {producto}, {empresa}, {tracking}, {monto}, {direccionCompleta}, {horario}, {desde}, {hasta} y otros datos del pedido.</p><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar texto inicial</button><span id="aj-estado-texto-inicial" class="muted" role="status"></span></div></details>
+        <div class="aj-editor-inicial" id="aj-editor-inicial"><div class="aj-ei-cab"><h4>Primer mensaje que recibe el cliente</h4><span id="aj-estado-texto-inicial" class="chip" role="status">Cargando…</span></div><p class="muted">Es lo que le llega al cliente cuando GSG manda su pedido. Cámbialo como quieras: a la derecha ves cómo le llega.</p><div class="aj-ei-cols"><div><label for="aj-texto-inicial">Texto</label><textarea id="aj-texto-inicial" rows="13" maxlength="2000" spellcheck="true"></textarea><p class="aj-ei-ayuda">Toca un dato para ponerlo donde está el cursor. Si a un pedido le falta un dato, esa línea no sale.</p><div class="aj-ei-datos" id="aj-datos-inicial"></div></div><div><span class="muted">Así le llega</span><div class="previa aj-ei-previa" id="aj-previa-inicial"></div></div></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar el primer mensaje</button><button type="button" class="btn sm" id="aj-fabrica-texto-inicial">Volver al texto de fábrica</button></div></div>
       </section>
 
       <section class="aj-seccion">
@@ -1335,25 +1349,14 @@ function pintarAjustes(d) {
   document.getElementById('aj-tiempo-solicitud').innerHTML = controlTiempoInicialHtml(a.esperaPrimerMensajeSegundos != null ? a.esperaPrimerMensajeSegundos : (a.esperaPrimerMensajeMinutos || 0) * 60);
   pintarSecuencia(esperas);
 
-  document.getElementById('aj-pasos').innerHTML = PASOS_AJ.slice(0, 1).map(function (p) {
-    var paso = p[0];
-    return '<div class="paso" id="paso-' + paso + '"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
-      '<div class="previa" id="aj-previa-' + paso + '"></div>' +
-      '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Puedes dejar líneas en blanco entre párrafos.">' + esc(textoDeLineas(a.textos[paso])) + '</textarea>' +
-      '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
-      '<p class="marcadores">' + AYUDA_REDACCION + '</p>' +
-      '</div>';
-  }).join('');
+  /* El «Texto inicial de respaldo» del reparto ya no se muestra (28/10): el que de verdad recibe el
+     cliente es el «Primer mensaje» de abajo. Lo guardado no se pierde: al guardar, un texto sin su caja
+     conserva lo que tenía (ver textos[paso] más abajo). */
+  document.getElementById('aj-pasos').innerHTML = '';
   pintarTextosAdicionales(esperas.length, textosSeguimientosDe(a, esperas.length));
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
   document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
 
-  PASOS_AJ.slice(0, 1).forEach(function (p) {
-    var paso = p[0];
-    pintarPrevia(paso);
-    document.querySelector('textarea[data-textos="' + paso + '"]')
-      .addEventListener('input', function () { pintarPrevia(paso); });
-  });
   document.querySelectorAll('#aj-pasos [data-marcador]').forEach(function (c) {
     c.onclick = function () {
       var ta = c.closest('.variante, .paso').querySelector('textarea');
@@ -1583,33 +1586,77 @@ document.getElementById('aj-descartar').onclick = function () {
   actualizarEstadoCambios();
 };
 
-var textoInicialCargado = false, textoInicialOcupado = false;
-var editorTextoInicial = document.getElementById('aj-editor-inicial');
-editorTextoInicial.addEventListener('toggle', async function () {
-  if (!editorTextoInicial.open || textoInicialCargado || textoInicialOcupado) return;
-  textoInicialOcupado = true;
+/*
+ * El primer mensaje que recibe el cliente (textos.solicitudUbicacion de
+ * Pedidos GSG): a la vista y editable aquí. Vacío en la base = el de fábrica;
+ * por eso, si se guarda igual al de fábrica, se guarda vacío (y el de fábrica
+ * sigue cambiando su última frase cuando la dirección no trae número).
+ */
+var TEXTO_INICIAL_FABRICA = ${JSON.stringify(TEXTOS_POR_DEFECTO.solicitudUbicacion)};
+var EJEMPLO_INICIAL = { nombreCompleto: 'Daniel Rufrán Méndez', nombre: 'Daniel', producto: 'PARLANTE', empresa: 'RGTECHNOLOGY', tracking: 'GSG-E-260541', nroPedido: '', metodoPago: 'YAPE', monto: '544.00', direccionCompleta: 'CARABAYLLO - Carabayllo Torreblanca', direccion: 'Carabayllo Torreblanca', distrito: 'Carabayllo', horario: 'de 2 a 8 de la noche', desde: '2:00 p. m.', hasta: '8:00 p. m.', hastaExtendido: '9:00 p. m.', negocio: 'GSG Courier', pedido: 'GSG-E-260541' };
+var DATOS_INICIAL = [
+  ['{nombreCompleto}', 'Nombre del cliente'], ['{nombre}', 'Solo el nombre'], ['{producto}', 'Producto'], ['{empresa}', 'Empresa'],
+  ['{tracking}', 'Código'], ['{nroPedido}', 'Nro. de pedido'], ['{metodoPago}', 'Método de pago'], ['{monto}', 'Monto a cobrar'],
+  ['{direccionCompleta}', 'Dirección'], ['{horario}', 'Horario de entrega']
+];
+document.getElementById('aj-datos-inicial').innerHTML = DATOS_INICIAL.map(function (d) {
+  return '<button type="button" data-dato-inicial="' + d[0] + '" title="Pone ' + d[0] + ': en el mensaje sale el dato de cada pedido">' + esc(d[1]) + '</button>';
+}).join('');
+document.getElementById('aj-datos-inicial').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-dato-inicial]');
+  if (!b) return;
+  var ta = document.getElementById('aj-texto-inicial');
+  var ini = ta.selectionStart != null ? ta.selectionStart : ta.value.length, fin = ta.selectionEnd != null ? ta.selectionEnd : ini;
+  var dato = b.getAttribute('data-dato-inicial');
+  ta.value = ta.value.slice(0, ini) + dato + ta.value.slice(fin);
+  ta.focus();
+  ta.setSelectionRange(ini + dato.length, ini + dato.length);
+  previaInicial();
+});
+var textoInicialGuardado = null;
+function previaInicial() {
+  var texto = document.getElementById('aj-texto-inicial').value;
+  /* Como en el envío: una línea con un dato que no vino no sale. */
+  var lineas = texto.split('\n').filter(function (l) {
+    var vacia = false;
+    l.replace(/\{(\w+)\}/g, function (_, k) { if (EJEMPLO_INICIAL[k] === '') vacia = true; return ''; });
+    return !vacia;
+  }).map(function (l) { return l.replace(/\{(\w+)\}/g, function (todo, k) { return EJEMPLO_INICIAL[k] != null ? EJEMPLO_INICIAL[k] : todo; }); });
+  document.getElementById('aj-previa-inicial').innerHTML = esc(lineas.join('\n')) + '<small>para ' + esc(EJEMPLO_INICIAL.nombreCompleto) + ', pedido ' + esc(EJEMPLO_INICIAL.tracking) + '</small>';
   var estado = document.getElementById('aj-estado-texto-inicial');
-  estado.textContent = 'Cargando texto…';
+  var propio = texto.trim() !== TEXTO_INICIAL_FABRICA.trim();
+  var cambiado = textoInicialGuardado !== null && texto !== (textoInicialGuardado || TEXTO_INICIAL_FABRICA);
+  estado.textContent = cambiado ? 'Sin guardar' : propio ? 'Texto propio' : 'Texto de fábrica';
+  estado.className = 'chip ' + (cambiado ? 'tono-ambar' : propio ? 'tono-azul' : 'tono-gris');
+  document.getElementById('aj-fabrica-texto-inicial').disabled = !propio;
+}
+async function cargarTextoInicial() {
   try {
     var d = await api('/admin/entregas');
-    var guardado = (d.ajustes && d.ajustes.textos && d.ajustes.textos.solicitudUbicacion) || '';
-    document.getElementById('aj-texto-inicial').value = guardado;
-    textoInicialCargado = true;
-    estado.textContent = guardado ? 'Texto personalizado guardado.' : 'Se usa el texto predeterminado.';
-  } catch (e) { estado.textContent = e.message; }
-  finally { textoInicialOcupado = false; }
-});
-document.getElementById('aj-guardar-texto-inicial').onclick = async function () {
-  var boton = this, estado = document.getElementById('aj-estado-texto-inicial');
+    textoInicialGuardado = (d.ajustes && d.ajustes.textos && d.ajustes.textos.solicitudUbicacion) || '';
+    document.getElementById('aj-texto-inicial').value = textoInicialGuardado || TEXTO_INICIAL_FABRICA;
+    previaInicial();
+  } catch (e) { document.getElementById('aj-estado-texto-inicial').textContent = e.message; }
+}
+async function guardarTextoInicial(valor) {
+  var boton = document.getElementById('aj-guardar-texto-inicial');
+  var estado = document.getElementById('aj-estado-texto-inicial');
   boton.disabled = true;
   estado.textContent = 'Guardando…';
   try {
-    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: { solicitudUbicacion: document.getElementById('aj-texto-inicial').value } } });
-    textoInicialCargado = true;
-    estado.textContent = 'Texto inicial guardado.';
+    var guardar = valor.trim() === TEXTO_INICIAL_FABRICA.trim() ? '' : valor;
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: { solicitudUbicacion: guardar } } });
+    textoInicialGuardado = guardar;
+    document.getElementById('aj-texto-inicial').value = guardar || TEXTO_INICIAL_FABRICA;
+    previaInicial();
+    toast(guardar ? 'Primer mensaje guardado.' : 'Se usa el texto de fábrica.');
   } catch (e) { estado.textContent = e.message; }
   finally { boton.disabled = false; }
-};
+}
+document.getElementById('aj-texto-inicial').addEventListener('input', previaInicial);
+document.getElementById('aj-guardar-texto-inicial').onclick = function () { guardarTextoInicial(document.getElementById('aj-texto-inicial').value); };
+document.getElementById('aj-fabrica-texto-inicial').onclick = function () { guardarTextoInicial(TEXTO_INICIAL_FABRICA); };
+cargarTextoInicial();
 
 /* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */
 async function cargarAjustes() {

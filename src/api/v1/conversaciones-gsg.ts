@@ -2,7 +2,8 @@
  * Los chats de GSG: lo que usa el motorizado desde la web de GSG.
  *
  *  GET  /api/v1/historial?tracking=…  el historial de mensajes del WhatsApp de ese tracking (conversaciones:leer).
- *                                 GSG lo pide al abrir un chat y GSGchat responde en esa misma llamada.
+ *                                 GSG lo pide al abrir un chat y GSGchat responde en esa misma llamada, con
+ *                                 la nota automatica del chat (`nota`: la etiqueta que le puso la IA).
  *  POST /api/v1/chat              un usuario de GSG escribe: GSGchat lo manda por WhatsApp al numero de ese
  *                                 tracking, lo apunta con quien lo escribio y calla al bot (mensajes:enviar).
  *
@@ -19,6 +20,8 @@ import type { Repos } from '../../db/repos.js';
 import type { Sender } from '../../outbound/sender.js';
 import { respuestaDeEnvio } from './routes.js';
 import { trackingDeEntrega } from '../../entregas/repo.js';
+import { nombreDeEtiqueta } from '../../archive/clasificar.js';
+import { catalogoVigente, numeroNormalizado } from '../../chat/etiquetar.js';
 
 export interface ApiConversacionesGsgDeps {
   repos: Repos;
@@ -90,6 +93,33 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     };
   };
 
+  /**
+   * La nota automatica del chat: la ultima etiqueta que le puso la IA (o una
+   * persona a mano) a ese WhatsApp, con su nombre del catalogo del negocio.
+   * Viaja en el historial que GSG ya pide al abrir el chat: GSG no necesita
+   * otro endpoint. null si el chat aun no tiene etiqueta.
+   */
+  const notaDe = async (phone: string) => {
+    const repo = repos.chatEtiquetas;
+    if (!repo) return null;
+    try {
+      const e = (await repo.ultimas([numeroNormalizado(phone)])).get(numeroNormalizado(phone));
+      if (!e?.etiqueta) return null;
+      const catalogo = await catalogoVigente(repo);
+      return {
+        codigo: e.etiqueta,
+        nombre: nombreDeEtiqueta(e.etiqueta, catalogo),
+        descripcion: catalogo.find((x) => x.codigo === e.etiqueta)?.descripcion ?? null,
+        dia: e.dia,
+        origen: e.origen,
+        actualizadaEn: e.updatedAt,
+      };
+    } catch {
+      // La nota es un extra: si falla, el historial sale igual.
+      return null;
+    }
+  };
+
   // --- GET: el historial -----------------------------------------------------
 
   const leerChat = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -107,6 +137,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     return {
       tracking,
       contacto: { id: contact.id, telefono: contact.phone, nombre: contact.name },
+      nota: await notaDe(contact.phone),
       mensajes: messages.map(mensajeDeChat),
       hayMas: messages.length === q.limite,
     };

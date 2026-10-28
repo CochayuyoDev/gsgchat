@@ -248,14 +248,13 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
       urlUbicacion: z.string().trim().max(300).nullable().optional(),
       rutaEstado: z.string().trim().max(300).nullable().optional(),
       rutaIncidencias: z.string().trim().max(300).nullable().optional(),
-      rutaEtiquetas: z.string().trim().max(300).nullable().optional(),
       rutaWebhook: z.string().trim().max(300).nullable().optional(),
       paramTracking: z.string().trim().max(60).nullable().optional(),
       paramTelefono: z.string().trim().max(60).nullable().optional(),
     }).parse(request.body ?? {});
 
     try {
-      const gsg = await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion , rutaEstado: body.rutaEstado, paramTracking: body.paramTracking, paramTelefono: body.paramTelefono, rutaIncidencias: body.rutaIncidencias, rutaEtiquetas: body.rutaEtiquetas, rutaWebhook: body.rutaWebhook });
+      const gsg = await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion , rutaEstado: body.rutaEstado, paramTracking: body.paramTracking, paramTelefono: body.paramTelefono, rutaIncidencias: body.rutaIncidencias, rutaWebhook: body.rutaWebhook });
       // El webhook de GSG apunta a base + ruta; el secreto sale aqui, una sola vez, y solo si nace ahora.
       const webhookGsg = webhooks ? await sincronizarWebhookGsg(webhooks, gsg.destinoWebhook, request.usuario?.id ?? null) : null;
       return { ok: true, gsg, webhookGsg };

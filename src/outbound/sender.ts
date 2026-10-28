@@ -94,6 +94,11 @@ export interface SendJob {
   confirmacionUbicacion?: boolean;
   /** Respuesta a lo que el cliente contesto con el bot callado (ubicacion pedida, boton de entrega): sale igual. */
   traspasaPausa?: boolean;
+  /**
+   * La respuesta del bot a «cambiar ubicación» (regla del dueño, 28/10: el
+   * cambio lo atiende el bot): sale también con el bot callado de «Solo lo de GSG».
+   */
+  cambioUbicacion?: boolean;
   /** Huella de coordenadas normalizadas para distinguir una corrección del mismo pedido. */
   confirmationScope?: string;
   /**

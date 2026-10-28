@@ -127,14 +127,36 @@ Cada respuesta de `POST /api/v1/entregas`, del `PATCH` y de la corrección trae 
 mismo día: el mismo cliente otro día es un intento de entrega nuevo y se le vuelve a escribir. `GET /api/v1/trackings`
 da lo mismo para todos los trackings de un día; GSG lo lee cuando quiere y GSGchat nunca se lo empuja.
 
-## Etiquetas de los chats (GSGchat → GSG)
+## Las notas de los chats (etiquetas) y cómo las ve GSG
 
-En Chats, el botón «Etiquetar chats con IA» clasifica con la IA las conversaciones del día y le manda a GSG
-la etiqueta de cada una. **El identificador es el número de WhatsApp, no un tracking**: un mismo cliente puede
+En Chats, el botón «Etiquetar chats con IA» clasifica con la IA las conversaciones del día: cada chat queda con
+**una nota**, la etiqueta del catálogo que dice qué necesita el cliente (reagendar, cambiar la ubicación, recibe
+otra persona, sin novedad…). **El identificador es el número de WhatsApp, no un tracking**: un mismo cliente puede
 tener varios pedidos o ninguno ese día. Si el cliente está guardado con dos formatos (`987654321` y
 `51987654321`) es una sola conversación.
 
-Cómo va un lote:
+### Cómo la recibe GSG: en el historial que ya pide
+
+GSG no recibe nada aparte. La nota viaja en la respuesta del **historial del chat**, la misma llamada que GSG ya
+hace al abrir un chat (`GET /api/v1/historial?tracking=…`, o su alias `GET /api/v1/messages?chat_id=…`, con la
+clave de permiso `conversaciones:leer`). Junto a `tracking`, `contacto` y `mensajes` llega:
+
+```json
+"nota": { "codigo": "reagendar_entrega", "nombre": "Reagendar entrega",
+          "descripcion": "solicita entregar otro día.", "dia": "2026-10-28",
+          "origen": "ia", "actualizadaEn": "2026-10-28T15:20:00.000Z" }
+```
+
+`codigo` y `nombre` son los del catálogo del negocio; `origen` es `ia` (la puso la IA), `manual` (una persona) o
+`reglas` (el bot, p. ej. al cambiar el cliente su ubicación). Es la **última** nota de ese WhatsApp: si se vuelve a
+etiquetar, cambia. `null` si el chat aún no tiene ninguna (o la IA no pudo clasificarlo). En cuanto se guarda,
+GSG la ve en la siguiente llamada: no hay envíos que fallen ni reintentos. Ver `src/api/v1/conversaciones-gsg.ts`
+y la documentación de la API (`/api/v1/openapi.json`).
+
+(Hasta el 28/10 hubo además un envío aparte, un POST a una «Ruta para etiquetas de chats» de GSG con reintentos.
+Se quitó: GSG lee la nota en el historial. Las columnas `sync_*` de la migración 014 quedan sin uso.)
+
+### Cómo va un lote
 
 1. **Captura.** Se reúnen los chats con actividad de hoy (zona del negocio), se agrupan por número normalizado
    y se guarda una copia de sus mensajes. El lote procesa esa copia: lo que entre mientras corre no cambia lo
@@ -144,76 +166,70 @@ Cómo va un lote:
 3. **Validación.** El código tiene que estar en el catálogo. Se guarda con el número, el día, el lote y los
    mensajes procesados. Al volver a pulsar el botón **solo se leen los chats que aún no tienen etiqueta** (nuevos,
    o que la IA no pudo clasificar): un chat ya etiquetado se queda con su etiqueta aunque le lleguen mensajes.
-   Solo se relee si su etiqueta ya no está en el catálogo del negocio.
-4. **Error de IA.** Si la IA falla o contesta algo que no está en el catálogo, ese chat queda como error, sin
-   etiqueta y sin mandarse a GSG. No se adivina por palabras clave: `otro` es solo lo que la IA asigna cuando
-   ninguna etiqueta corresponde. El siguiente lote lo vuelve a intentar.
-5. **Envío a GSG**, detallado abajo.
+   Solo se relee si su etiqueta ya no está en el catálogo del negocio. Si mientras la IA leía un chat una persona
+   le puso la etiqueta a mano, se queda la de la persona.
+4. **Error de IA.** Si la IA contesta un código que no está en el catálogo, algo que no es JSON o dos respuestas
+   pegadas («No, espera…»), se le da **una** segunda oportunidad recordándole la lista exacta de códigos. Si
+   tampoco, o si la IA falla, ese chat queda «Sin clasificar», sin nota. No se adivina por palabras clave: `otro`
+   es solo lo que la IA asigna cuando ninguna etiqueta corresponde. El siguiente lote lo vuelve a intentar. Se le
+   pide con temperatura 0: la misma conversación da la misma etiqueta.
 
 **La IA solo lee y etiqueta: no responde ni manda mensajes.** Quien habla con el cliente es el bot. El
 etiquetado solo necesita la clave de la IA guardada en Avanzado → Asistente IA; **no** hace falta activar el
 asistente (activarlo es lo que hace que el bot conteste con IA, y es otra decisión). El módulo de etiquetado no
-tiene acceso al envío de mensajes.
+tiene acceso al envío de mensajes. En «Uso de la IA» el etiquetado se cuenta aparte (`etiquetas`).
 
 El **catálogo** es del negocio: en Chats → ⋮ → «Catálogo de etiquetas…» (solo un administrador) se editan los
 códigos, los nombres y la descripción que lee la IA de cada una. `otro` está siempre. Mientras el negocio no
 guarde uno, vale el de fábrica (17 etiquetas, en `src/archive/clasificar.ts`; `sin_novedad` es el flujo feliz: el
-cliente manda su ubicación, confirma o agradece y no pide nada más; `otro` queda para lo que no tiene que ver con la
-entrega). Tras cambiar el catálogo, ⋮ → «Volver a etiquetar todo» relee también los chats ya etiquetados. Las conversaciones guardadas
+cliente manda una ubicación, agradece, avisa que ya pagó o que ya recibió, y no pide nada más (decir que estará
+para recibir es `confirmar_recepcion`); `otro` queda para lo que no tiene que ver con la entrega). Tras cambiar
+el catálogo, ⋮ → «Volver a etiquetar todo» relee también los chats ya etiquetados. Las conversaciones guardadas
 (Guardados) usan el mismo catálogo.
 
-POST a la «Ruta para etiquetas de chats» de Conexión con GSG (por ejemplo `v1/gsgchat/labels`; vacía = no se
-mandan), con la API Key de GSG en `X-API-Key` y el `eventoId` también en `Idempotency-Key`:
-
-```json
-{ "telefono": "51987654321", "telefonoNacional": "987654321", "dia": "2026-10-27",
-  "etiqueta": "reagendar_entrega", "etiquetaNombre": "Reagendar entrega", "origen": "ia",
-  "mensajes": 4, "clasificadoEn": "2026-10-27T15:20:00.000Z",
-  "eventoId": "gsgchat-etiqueta-51987654321-2026-10-27-ab12cd34ef56" }
-```
-
-`etiqueta` es el código del catálogo del negocio y `etiquetaNombre` su nombre. `origen` es `ia` si la puso la
-IA o `manual` si la puso una persona (ver «Etiquetar a mano»). El `eventoId` es el mismo
-mientras la conversación no cambie: un reintento no duplica nada, y una conversación que cambió (y se volvió a
-clasificar) llega con otro. Una conversación que no se pudo clasificar no se manda.
-
-| Respuesta de GSG | Qué pasa |
-|---|---|
-| 2xx | `enviado`; no se vuelve a mandar mientras la conversación siga igual |
-| 401 / 403 | `fallido`; las demás del lote no se intentan (quedan `fallido` «No se intentó…», sin contar intento) |
-| 429, 408, 5xx, sin red | `fallido` |
-| otro 4xx, o 2xx con `{ "ok": false }` | `fallido` |
-| sin ruta, sin clave o sin GSG conectado | nada sale; todas `fallido` con el motivo, sin contar intento |
-
-Nada se reintenta solo. «Reintentar envíos» (en Chats, o `POST /admin/chat/etiquetar/reintentar`) manda
-**solo** las `fallido` de ese día, con la etiqueta ya guardada: no vuelve a leer los mensajes ni a llamar a la IA.
-El siguiente «Etiquetar» también recoge las que quedaron fallidas.
-
-Cada pulsación es un lote (`completo` o `reintento`) con su estado (`en_curso`, `completado`,
-`completado_con_errores`, `fallido`) y sus cifras, y lo que pasa en él queda en un registro (inicio y fin del
-lote, fallos de la IA, cada envío y cada rechazo de GSG). Ni la API Key ni el texto de los mensajes van al registro.
+Cada pulsación es un lote con su estado (`en_curso`, `completado`, `completado_con_errores` si alguno quedó sin
+clasificar, `fallido`) y sus cifras, y lo que pasa en él queda en un registro (inicio y fin del lote, fallos de la
+IA, cambios a mano). El texto de los mensajes no va al registro.
 
 | Ruta (sesión del panel) | Para qué |
 |---|---|
-| `POST /admin/chat/etiquetar` | Empieza un lote completo (análisis + envío); 202 |
+| `POST /admin/chat/etiquetar` | Empieza un lote; 202 |
 | `GET /admin/chat/etiquetar` | El lote en marcha o el último, con el avance |
-| `POST /admin/chat/etiquetar/reintentar` | `{ dia? }`: reintenta los envíos fallidos; 202, o 200 `{ nada: true }` |
 | `GET /admin/chat/etiquetar/lotes` | Los últimos lotes |
-| `GET /admin/chat/etiquetar/lotes/{id}` | Un lote, su registro y cada chat: su estado en el lote (`pendiente`, `reutilizada`, `clasificada`, `error`, `solo_envio`) y su envío a GSG |
+| `GET /admin/chat/etiquetar/lotes/{id}` | Un lote, su registro y cada chat con su estado en el lote (`pendiente`, `reutilizada`, `clasificada`, `error`) |
 | `GET /admin/chat/etiquetar/lotes/{id}/chats/{telefono}` | La copia de los mensajes de ese chat que el lote le mandó a la IA |
 | `GET /admin/chat/etiquetar/eventos` | El registro, filtrable por `loteId`, `nivel`, `fase` y `telefono` |
-| `GET /admin/chat/conversations?etiqueta=…` | La bandeja filtrada: un código del catálogo, `sin_etiquetar`, `sin_clasificar` o `gsg_fallido` |
+| `GET /admin/chat/conversations?etiqueta=…` | La bandeja filtrada: un código del catálogo, `sin_etiquetar` o `sin_clasificar` |
 | `GET /admin/chat/etiquetas/conteo` | Cuántos chats de la bandeja hay con cada etiqueta |
 | `POST /admin/chat/{contactId}/etiqueta` | `{ etiqueta: "codigo" }` la pone a mano hoy; `{ etiqueta: null }` la quita. 400 si no está en el catálogo o es un grupo |
-| `GET /admin/chat/etiquetas/embudo?dia=hoy\|ayer\|AAAA-MM-DD` | El embudo del día: resumen (IA, a mano, sin etiquetar, sin clasificar, GSG), cuántos chats por etiqueta y la lista |
+| `GET /admin/chat/etiquetas/embudo?dia=hoy\|ayer\|AAAA-MM-DD` | El embudo del día: resumen (IA, a mano, sin etiquetar, sin clasificar), cuántos chats por etiqueta y la lista |
 | `GET /admin/chat/etiquetas/catalogo` | El catálogo vigente (`propio: false` = el de fábrica) |
 | `PUT /admin/chat/etiquetas/catalogo` | `{ items: [{ codigo, nombre, descripcion }] }`: guarda el del negocio (solo administrador); 400 si no vale |
 | `DELETE /admin/chat/etiquetas/catalogo` | Vuelve al de fábrica (solo administrador) |
+| `POST /admin/chat/etiquetas/evaluar` | «Probar la IA»: pasa el banco de conversaciones de prueba por la IA del negocio; 202 |
+| `GET /admin/chat/etiquetas/evaluar` | La prueba en marcha o la última de este proceso, con el informe |
+| `POST /admin/chat/etiquetas/probar` | `{ texto }` (una línea por mensaje, `cliente:` / `negocio:`): qué etiqueta le pondría la IA. No guarda nada |
 
 En la pantalla, el aviso del lote muestra el avance y «Ver chats del lote» abre la lista con el estado de cada
-chat. Encima de la lista, una fila de filtros por etiqueta (con cuántos chats tiene cada una, más «Sin etiquetar»,
-«Sin clasificar» y «Sin enviar a GSG») filtra toda la bandeja. Un envío que ni se intentó (GSG sin conectar o
-sin ruta) se ve como «Sin enviar a GSG», no como un fallo del chat.
+chat. Encima de la lista, el filtro de etiquetas (con cuántos chats tiene cada una, más «Sin etiquetar» y «Sin
+clasificar») filtra toda la bandeja.
+
+### Probar la IA
+
+Chats → ⋮ → «Probar la IA…» (también desde el catálogo). Mide, antes de fiarse de ella, si la IA del negocio pone
+bien las etiquetas, con su catálogo y el mismo clasificador que el botón. No toca ningún chat ni cambia ninguna nota.
+
+- **Prueba completa**: 50 conversaciones típicas del reparto con la etiqueta que les toca (`src/archive/evaluacion.ts`):
+  todas las etiquetas, chats donde todo va bien que suenan a otra cosa («ya pagué por Yape»), temas ajenos a la
+  entrega (los únicos que van a `otro`), peticiones resueltas seguidas de otra pendiente y mensajes que intentan
+  manipular a la IA. El informe dice el % de aciertos, cuántas veces puso `otro` de más o de menos, los aciertos
+  por etiqueta y cada fallo con su conversación. Los casos cuya etiqueta no está en el catálogo se saltan.
+- **Probar una conversación**: se escribe o pega una conversación y dice qué etiqueta le pondría.
+
+Con ese banco se afinaron las instrucciones del clasificador (28/10): con un modelo capaz (Claude Sonnet) acierta
+50 de 50 y usa `otro` solo cuando corresponde; con uno pequeño (Claude Haiku) ronda el 93 %. Si un negocio ve
+menos del 90 %, lo primero es un modelo más capaz en Asistente IA y luego mejorar la descripción de las etiquetas
+que fallan.
 
 ### Etiquetar a mano
 
@@ -222,20 +238,48 @@ cambiarla, o «Quitar la etiqueta». También desde Pedidos GSG → Embudo de ch
 Solo vale para el día de hoy y no le escribe nada al cliente.
 
 - Queda con `origen: manual` (en la pantalla, con ✎). **La IA no la pisa**: ningún lote la vuelve a leer, ni
-  «Volver a etiquetar todo».
-- Se manda a GSG al momento, con `origen: "manual"` y un `eventoId` nuevo en cada cambio. Si GSG no la acepta (o
-  no está conectado) queda como `fallido` y sale con «Reintentar envíos».
-- Quitarla deja el chat «sin etiquetar»: el siguiente lote lo vuelve a leer con la IA. A GSG no se le manda nada
-  al quitarla.
-- Cada cambio queda en el registro (`etiqueta_manual`, `etiqueta_quitada`) con quién lo hizo.
+  «Volver a etiquetar todo». GSG la ve al momento en el historial.
+- Quitarla deja el chat «sin etiquetar» (en el historial, `nota: null`): el siguiente lote lo vuelve a leer con la IA.
+- Cada cambio queda en el registro (`etiqueta_manual`, `etiqueta_quitada`) con quién lo hizo. Si cambia una que
+  puso la IA, queda además `correccion_ia` (antes>ahora), para enseñarle a la IA con esos casos.
 
 ### Embudo de chats (Pedidos GSG)
 
 Una pestaña de Pedidos GSG (`/embudo-chats`). Hoy o ayer: arriba, cuántos chats hubo, cuántos etiquetó la IA y
-cuántos una persona, los que faltan por etiquetar, los que la IA no pudo clasificar y cuántos llegaron a GSG. En
-medio, una barra por etiqueta partida en «puesta por la IA» y «puesta a mano»; al pulsarla, la lista de abajo se
-queda con esos chats. Abajo, cada chat con su etiqueta, quién la puso y su envío a GSG, con «Etiquetar ▾» (solo
-hoy) y «Abrir chat». No hace falta migración: usa las mismas tablas.
+cuántos una persona, los que faltan por etiquetar y los que la IA no pudo clasificar. En medio, una barra por
+etiqueta partida en «puesta por la IA» y «puesta a mano»; al pulsarla, la lista de abajo se queda con esos chats.
+Abajo, cada chat con su etiqueta y quién la puso, con «Etiquetar ▾» (solo hoy) y «Abrir chat».
+
+## Cambiar la ubicación (regla del dueño, 28/10)
+
+El cliente puede cambiar su ubicación **hasta 2 veces al día** (ajuste `cambiosUbicacionMax`), antes de la hora
+límite (`cambioUbicacionHasta`, 1:00 PM por defecto). Lo atiende el bot, también con el bot callado de «Solo lo de
+GSG»:
+
+1. Debajo de «Ubicación registrada» va: *📍 Si desea cambiar su ubicación, solo diga: cambiar ubicación (hasta la
+   1:00 PM).*
+2. «cambiar ubicación» (o «me equivoqué de dirección», «te mando otra»…) → *Por favor, comparta su nueva ubicación
+   📍*, con el botón de ubicación. **Mientras, se queda la que tenía**: el pedido no pasa a «Necesitan a alguien».
+3. La nueva → *✅ Su nueva ubicación se registró correctamente… 📍 Si quiere volver a cambiar su ubicación, solo
+   diga: cambiar ubicación. Le queda 1 cambio más.* A GSG le llega la nueva con `cambioUbicacion: true`, `cambios`
+   y `anterior`. Mandar otro pin sin decir nada también cuenta como cambio, si le quedan.
+4. Al tercero → *Ya cambió su ubicación 2 veces, que es el máximo…* con el contacto de soporte; se queda la última
+   y GSG recibe la incidencia `cambio_ubicacion`.
+5. Después de la hora límite, como siempre: se le da el número del motorizado y GSG recibe la incidencia.
+
+En el sistema: la marca «Cambió su ubicación (hora)» en Hoy y Números del día; en el detalle del pedido,
+**todas las ubicaciones guardadas** (la primera y cada cambio, con su hora y su mapa, y la que vale marcada); y la
+nota del chat `cambiar_ubicacion` (origen `reglas`), que GSG ve en el historial. Los textos se editan en Pedidos
+GSG → Horarios de entrega y textos de entrega (`invitarCambioUbicacion`, `invitarOtroCambioUbicacion`,
+`cambioUbicacionAntes`, `ubicacionCambiada`, `cambiosUbicacionAgotados`).
+
+## El primer mensaje al cliente
+
+En Automatización GSG → Ajustes de chat → «Primer mensaje que recibe el cliente» se ve y se edita el texto real
+(`textos.solicitudUbicacion`), con la vista previa de un pedido de ejemplo. El de fábrica termina en *Por favor,
+¿podrías compartir tu ubicación por WhatsApp para que el motorizado pueda armar su ruta? ¡Gracias!* Si se guarda
+igual al de fábrica, se guarda vacío (y el de fábrica sigue avisando cuando la dirección no trae número de puerta).
+La plantilla de Meta para varios pedidos (`templates/catalog.ts`) no se cambió: cambiarla exige volver a aprobarla.
 
 Lo que hay que hacer en la base al desplegarlo: `docs/MIGRACIONES-ETIQUETAS.md`.
 

@@ -234,6 +234,7 @@ export function openApi(baseUrl: string): Json {
           description: [
             'GSG pide el historial cuando el motorizado abre el chat de un tracking, y GSGchat responde en esa misma llamada con los mensajes del WhatsApp vinculado a ese tracking.',
             'GSG manda SOLO el tracking: el telefono ya lo dio en `POST /entregas` y esta guardado en el pedido (si GSG lo corrigio despues, vale el corregido). Si un cliente tiene varios trackings, comparten chat (`tracking` los lista, el pedido por el que se pregunto primero). El tracking no distingue mayusculas.',
+            'Trae tambien `nota`: la nota automatica del chat, es decir la etiqueta que la IA (o una persona, `origen: manual`) le puso a ese WhatsApp con «Etiquetar chats con IA» (codigo y nombre del catalogo del negocio, el dia y cuando se puso); null si aun no tiene. Es la ultima: si se vuelve a etiquetar, cambia.',
             'La respuesta trae `tracking` (lista), `contacto` {id, telefono, nombre} y los mensajes (id de WhatsApp, tipo, texto, transcripcion, anuncio, datos, fecha, direccion, autor, emisor, estado y `cursor`, que es lo que se manda en `antesDe`).',
             'Esta llamada solo lee el chat. Para escribirle al cliente desde GSG, `POST /chat`.',
             'Los mismos handlers responden tambien en `GET /messages?chat_id=` y `POST /send-message` (con `chat_id` en lugar de `tracking`): `chat_id` es el tracking. Los webhooks `mensaje.recibido` y `mensaje.enviado` traen `chatId` y `trackings` para saber a que chat van.',
@@ -250,6 +251,19 @@ export function openApi(baseUrl: string): Json {
               properties: {
                 tracking: { type: 'array', items: { type: 'string' }, description: 'Los trackings de ese WhatsApp: primero el pedido por el que se pregunto, luego los demas en curso' },
                 contacto: { type: 'object', properties: { id: { type: 'string' }, telefono: { type: 'string' }, nombre: { type: 'string', nullable: true } } },
+                nota: {
+                  type: 'object',
+                  nullable: true,
+                  description: 'La nota automatica del chat (la ultima etiqueta puesta); null si aun no tiene',
+                  properties: {
+                    codigo: { type: 'string', description: 'Codigo del catalogo de etiquetas (p. ej. reagendar_entrega, sin_novedad, otro)' },
+                    nombre: { type: 'string', description: 'Como se ve (p. ej. «Reagendar entrega»)' },
+                    descripcion: { type: 'string', nullable: true, description: 'Que significa, segun el catalogo del negocio' },
+                    dia: { type: 'string', format: 'date', description: 'El dia de la conversacion etiquetada (AAAA-MM-DD, hora de Lima)' },
+                    origen: { type: 'string', enum: ['ia', 'manual', 'reglas'] },
+                    actualizadaEn: { type: 'string', format: 'date-time' },
+                  },
+                },
                 mensajes: {
                   type: 'array',
                   items: {

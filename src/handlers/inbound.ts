@@ -852,7 +852,8 @@ async function handleInboundMessageEnFila(
     ...senderBase,
     async send(job) {
       if (pausaTraspasada && !job.traspasaPausa) job = { ...job, traspasaPausa: true };
-      if (job.manual || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
+      // La respuesta del bot a «cambiar ubicación» sale también con el bot callado (28/10).
+      if (job.manual || job.cambioUbicacion || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
       console.warn('[inbound] bot callado: no se le contesta al cliente', { phone, que: (job.text ?? job.interactive?.body ?? job.kind).slice(0, 60) });
       return { ok: true, wamid: `silencio:${randomUUID()}`, deliveryId: -1 };
     },
@@ -1063,10 +1064,18 @@ async function handleInboundMessageEnFila(
       await cerrarTrasUbicacion();
       return true;
     }
-    // Otra ubicación con la suya ya registrada: el reparto lo reportó; las
-    // entregas quitan la ubicación y marcan el error. Al cliente, nada.
+    // Otra ubicación con la suya ya registrada: la atienden las entregas (28/10).
+    // Antes de la hora límite y con cambios que le queden, se registra como su
+    // cambio y se le confirma; sin cambios, se le dice; después de la hora, como
+    // siempre (se reporta a GSG y al cliente no se le contesta).
     if (respuesta.resultado === 'cambio_reportado') {
-      if (deps.entregas && respuesta.ubicacionNueva) await deps.entregas.alUbicacion(contact, respuesta.ubicacionNueva).catch((error) => request_log(deps, 'no se pudo marcar el cambio de ubicación en las entregas', error));
+      if (deps.entregas && respuesta.ubicacionNueva) {
+        const r = await deps.entregas.alUbicacion(contact, respuesta.ubicacionNueva).catch((error) => {
+          request_log(deps, 'no se pudo atender el cambio de ubicación en las entregas', error);
+          return { atendida: false as const };
+        });
+        if (r.atendida && r.responder && r.resultado !== 'cambio_reportado' && r.resultado !== 'propuesta_obsoleta') await responderEntrega(r);
+      }
       return true;
     }
     if (respuesta.resultado === 'fuera_de_zona') {
@@ -1139,13 +1148,18 @@ async function handleInboundMessageEnFila(
         ? { phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } }
         : { phone, kind: 'freeform', category: 'UTILITY', text: r.responder ?? '' }, scope);
     }
+    // «cambiar ubicación» lo atiende el bot (regla del dueño, 28/10): su respuesta
+    // sale también con el bot callado, como «Ubicación registrada».
+    const delCambio = r.resultado === 'pide_cambio_ubicacion' || r.resultado === 'pide_cambio_ubicacion_tarde' || r.resultado === 'cambio_ubicacion_agotado';
     const enviado = await (r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
       : r.pedirUbicacion
-        // «Claro, {nombre}, por favor mándeme su nueva ubicación»: con el botón
-        // de ubicación, como el primer mensaje; sale aunque el chat esté en silencio.
-        ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', cierreTrasGracias: true, interactive: { body: r.responder ?? '', locationRequest: true } })
-        : reply(r.responder ?? '', {
+        // «Por favor, comparta su nueva ubicación»: con el botón de ubicación,
+        // como el primer mensaje; sale aunque el chat esté en silencio.
+        ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', cierreTrasGracias: true, ...(delCambio ? { cambioUbicacion: true } : {}), interactive: { body: r.responder ?? '', locationRequest: true } })
+        : delCambio
+          ? sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: r.responder ?? '', cierreTrasGracias: true, cambioUbicacion: true })
+          : reply(r.responder ?? '', {
           // La ubicación nueva (el cliente la cambió antes de la hora límite) se
           // le confirma aunque el chat esté en silencio tras UBI REGISTRADA,
           // igual que el «después de la 1:00 PM»: es la respuesta a su cambio.

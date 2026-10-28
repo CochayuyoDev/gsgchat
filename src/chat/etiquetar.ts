@@ -1,11 +1,9 @@
 /**
  * «Etiquetar los chats de hoy»: el boton de Chats que le pone a cada
  * conversacion del dia su etiqueta (la necesidad pendiente mas reciente del
- * cliente, catalogo de src/archive/clasificar.ts) y se la manda a GSG.
+ * cliente, catalogo de src/archive/clasificar.ts): la nota automatica del chat.
  *
- * Un lote completo tiene dos fases:
- *
- * Analisis
+ * Un lote:
  *  1. Se leen los mensajes de hoy (zona del negocio) de los chats que se ven
  *     en la bandeja, sin grupos.
  *  2. Se juntan por numero de WhatsApp normalizado: un mismo cliente guardado
@@ -16,58 +14,39 @@
  *     la IA no pudo clasificar). Un chat ya etiquetado se queda con su
  *     etiqueta aunque le lleguen mensajes: no vuelve a la IA. La excepcion es
  *     una etiqueta que ya no esta en el catalogo del negocio, que ya no vale.
- *     La huella (los mensajes tal cual) queda apuntada para el envio a GSG.
  *  5. Las demas van a la IA con el catalogo, pocas a la vez. La IA devuelve
  *     el codigo de una etiqueta (o `otro` si ninguna corresponde); se valida
  *     contra el catalogo. Si la IA falla o contesta algo que no vale, el chat
  *     queda como error, sin etiqueta: aqui no hay reglas que adivinen.
  *
- * Sincronizacion
- *  6. Cada etiqueta que GSG aun no tiene (nueva, cambiada o que fallo antes)
- *     se le manda por el numero de WhatsApp, sin tracking. Lo que GSG ya
- *     acepto con la misma huella no se vuelve a mandar.
- *
- * Todo lo que no llega a GSG queda 'fallido' con su motivo, aunque no se
- * llegara a intentar (falta la ruta, GSG rechazo la clave): asi «Reintentar»
- * (un lote de tipo reintento) recoge exactamente lo que falta, y lo manda con
- * la etiqueta ya guardada, sin volver a la IA.
+ * GSG no recibe nada aparte: lee la etiqueta como la nota del chat en el
+ * historial que ya pide al abrirlo (GET /api/v1/historial, ver
+ * src/api/v1/conversaciones-gsg.ts). En cuanto se guarda, GSG la ve.
  *
  * Cada lote queda apuntado (chat_etiquetas_lotes) con su estado y sus cifras,
- * y lo que pasa en el (inicio, fin, fallos de la IA, rechazos de GSG) en
- * chat_etiquetas_eventos. Clasificar no contesta nada al cliente ni toca su
- * pedido: solo apunta.
+ * y lo que pasa en el (inicio, fin, fallos de la IA) en chat_etiquetas_eventos.
+ * Clasificar no contesta nada al cliente ni toca su pedido: solo apunta.
  */
 
 import { createHash } from 'node:crypto';
 import { CATALOGO_POR_DEFECTO, clasificarConIA, firmaCatalogo, nombreDeEtiqueta, type Catalogo, type IAQueCompleta } from '../archive/clasificar.js';
-import type {
-  AlcanceMensajes,
-  ChatEtiquetasRepo,
-  EstadoLote,
-  EtiquetaChat,
-  EventoEtiquetas,
-  LoteEtiquetas,
-  MensajeCapturado,
-  MensajeDelDia,
-  TipoLote,
-} from '../db/chat-etiquetas.js';
+import type { AlcanceMensajes, ChatEtiquetasRepo, EstadoLote, EtiquetaChat, EventoEtiquetas, LoteEtiquetas, MensajeCapturado, MensajeDelDia, TipoLote } from '../db/chat-etiquetas.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import { fechaDelNegocio } from '../ajustes/generales.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { revisarTelefono, soloDigitos } from '../rutas/telefono.js';
-import { nueveDigitosGsg, type EtiquetaParaGsg, type PuertoGsg } from '../rutas/gsg.js';
 
 /** Cuantos mensajes del dia se leen como mucho en un lote. */
 export const TOPE_MENSAJES = 20_000;
 /** Cuantas conversaciones se mandan a la IA a la vez. */
 const A_LA_VEZ = 3;
+/** El evento de cuando una persona cambia la etiqueta que puso la IA (ver src/chat/ejemplos-etiquetado.ts). */
+export const CODIGO_CORRECCION = 'correccion_ia';
 
 export interface EtiquetadoDeps {
   repo: ChatEtiquetasRepo;
   /** La IA, si esta configurada. */
   ia: () => IAQueCompleta | null;
-  /** El puerto hacia GSG (el vigente). Sin el, las etiquetas quedan sin mandar. */
-  gsg?: () => PuertoGsg | null;
   zonaHoraria: () => string;
   nombreNegocio: () => string;
   log?: (mensaje: string, detalle?: Record<string, unknown>) => void;
@@ -145,47 +124,24 @@ export function sePuedeReutilizar(guardada: EtiquetaChat | undefined, huella: st
   return Boolean(guardada && guardada.huella === huella && guardada.etiqueta && !guardada.motivo);
 }
 
-/** Lo que se le manda a GSG por una etiqueta guardada. El eventoId cambia solo si cambia la conversacion. */
-export function etiquetaParaGsg(e: EtiquetaChat, catalogo?: Catalogo): EtiquetaParaGsg {
-  return {
-    telefono: e.phone,
-    telefonoNacional: nueveDigitosGsg(e.phone),
-    dia: e.dia,
-    etiqueta: e.etiqueta!,
-    etiquetaNombre: nombreDeEtiqueta(e.etiqueta!, catalogo),
-    origen: e.origen,
-    mensajes: e.mensajes,
-    clasificadoEn: e.updatedAt.toISOString(),
-    eventoId: `gsgchat-etiqueta-${e.phone}-${e.dia}-${e.huella.slice(0, 12)}`,
-  };
-}
-
 export interface EstadoEtiquetado {
   enCurso: boolean;
   loteId: string | null;
   tipo: TipoLote | null;
   /** El estado del lote: en_curso, completado, completado_con_errores, fallido (null = nunca hubo). */
   estado: EstadoLote | null;
-  /** En que fase va (null cuando termino). */
-  fase: 'analisis' | 'sincronizacion' | null;
   dia: string | null;
-  /** Conversaciones de hoy (en un reintento: envios a reintentar). */
+  /** Conversaciones de hoy. */
   total: number;
-  /** Las que ya se miraron en el analisis (reutilizadas + clasificadas + sin clasificar). */
+  /** Las que ya se miraron (reutilizadas + clasificadas + sin clasificar). */
   hechas: number;
   reutilizadas: number;
   clasificadas: number;
-  /** De las clasificadas, las que puso la IA (el resto, las reglas). */
+  /** De las clasificadas, las que puso la IA. */
   porIA: number;
   sinClasificar: number;
   /** true si habia mas mensajes de los que se leen en un lote. */
   recortado: boolean;
-  /** El envio a GSG en este lote. */
-  syncTotal: number;
-  syncEnviadas: number;
-  syncFallidas: number;
-  /** Por que no se mando nada a GSG (sin conexion, sin ruta...), o null. */
-  syncMotivo: string | null;
   empezo: string | null;
   termino: string | null;
   error: string | null;
@@ -196,7 +152,6 @@ const VACIO: EstadoEtiquetado = {
   loteId: null,
   tipo: null,
   estado: null,
-  fase: null,
   dia: null,
   total: 0,
   hechas: 0,
@@ -205,10 +160,6 @@ const VACIO: EstadoEtiquetado = {
   porIA: 0,
   sinClasificar: 0,
   recortado: false,
-  syncTotal: 0,
-  syncEnviadas: 0,
-  syncFallidas: 0,
-  syncMotivo: null,
   empezo: null,
   termino: null,
   error: null,
@@ -224,14 +175,11 @@ export function estadoDeLote(l: LoteEtiquetas): EstadoEtiquetado {
     estado: l.estado,
     dia: l.dia,
     total: l.total,
-    hechas: l.tipo === 'completo' ? l.reutilizadas + l.clasificadas + l.sinClasificar : 0,
+    hechas: l.reutilizadas + l.clasificadas + l.sinClasificar,
     reutilizadas: l.reutilizadas,
     clasificadas: l.clasificadas,
     porIA: l.porIA,
     sinClasificar: l.sinClasificar,
-    syncTotal: l.syncEnviadas + l.syncFallidas + l.syncPendientes,
-    syncEnviadas: l.syncEnviadas,
-    syncFallidas: l.syncFallidas,
     empezo: l.empezoAt.toISOString(),
     termino: l.terminoAt?.toISOString() ?? null,
     error: l.error,
@@ -259,82 +207,9 @@ function registrador(deps: EtiquetadoDeps, loteId: string | null) {
 }
 type Registrar = ReturnType<typeof registrador>;
 
-/** El estado final de un lote segun lo que paso. */
-function estadoFinal(e: EstadoEtiquetado): EstadoLote {
-  return e.sinClasificar || e.syncFallidas || e.syncMotivo ? 'completado_con_errores' : 'completado';
-}
-
-/**
- * La fase de envio: manda a GSG las etiquetas del dia en esos estados, de una
- * en una. Lo que no sale queda 'fallido' con el motivo (sin contar intento si
- * ni se intento). Nunca vuelve a la IA.
- */
-async function sincronizar(
-  deps: EtiquetadoDeps,
-  dia: string,
-  filas: EtiquetaChat[],
-  estado: EstadoEtiquetado,
-  registrar: Registrar,
-  alAvanzar: (e: EstadoEtiquetado) => void,
-  catalogo: Catalogo,
-): Promise<void> {
-  estado.fase = 'sincronizacion';
-  estado.syncTotal = filas.length;
-  alAvanzar({ ...estado });
-  if (!filas.length) return;
-
-  const puerto = deps.gsg?.() ?? null;
-  // Sin a donde mandar: todas quedan fallidas con el motivo, sin gastar intento.
-  const sinDestino = !puerto || !puerto.enviarEtiqueta ? 'GSG no está conectado: conecta GSG en Conexión con GSG y reintenta los envíos.' : null;
-  const apartar = async (resto: EtiquetaChat[], motivo: string) => {
-    for (const f of resto) {
-      await deps.repo.marcarSync(f.phone, dia, { estado: 'fallido', error: motivo, contarIntento: false });
-      estado.syncFallidas++;
-    }
-    estado.syncMotivo = motivo;
-    alAvanzar({ ...estado });
-  };
-  if (sinDestino) {
-    await registrar({ phone: null, fase: 'sincronizacion', nivel: 'error', codigo: 'gsg_sin_conexion', detalle: `${sinDestino} (${filas.length} sin enviar)` });
-    await apartar(filas, sinDestino);
-    return;
-  }
-
-  for (let i = 0; i < filas.length; i++) {
-    const f = filas[i]!;
-    const r = await puerto!.enviarEtiqueta!(etiquetaParaGsg(f, catalogo));
-    if (r.ok) {
-      await deps.repo.marcarSync(f.phone, dia, { estado: 'enviado', error: null, huella: f.huella });
-      estado.syncEnviadas++;
-      await registrar({ phone: f.phone, fase: 'sincronizacion', nivel: 'info', codigo: 'gsg_enviada', detalle: `${f.etiqueta}${r.id ? ` (id de GSG ${r.id})` : ''}` });
-      alAvanzar({ ...estado });
-      continue;
-    }
-    const error = r.error ?? 'GSG no aceptó la etiqueta.';
-    if (r.configuracion) {
-      // Falta la ruta o la clave: no se intento ninguna. Todas fallidas con el motivo.
-      await registrar({ phone: null, fase: 'sincronizacion', nivel: 'error', codigo: 'gsg_sin_configurar', detalle: `${error} (${filas.length - i} sin enviar)` });
-      await apartar(filas.slice(i), error);
-      return;
-    }
-    await deps.repo.marcarSync(f.phone, dia, { estado: 'fallido', error });
-    estado.syncFallidas++;
-    if (r.autenticacion) {
-      // La clave no vale: las de detras fallarian igual. Se apartan sin intentarlas.
-      await registrar({ phone: f.phone, fase: 'sincronizacion', nivel: 'error', codigo: 'gsg_clave', detalle: error });
-      const resto = filas.slice(i + 1);
-      if (resto.length) await apartar(resto, `No se intentó: ${error}`);
-      else estado.syncMotivo = error;
-      return;
-    }
-    await registrar({ phone: f.phone, fase: 'sincronizacion', nivel: 'error', codigo: r.reintentable ? 'gsg_no_disponible' : 'gsg_rechazo', detalle: error });
-    alAvanzar({ ...estado });
-  }
-}
-
 type ChatDeLoteConMensajes = Awaited<ReturnType<ChatEtiquetasRepo['chatsDelLote']>>[number];
 
-/** Un lote completo: analisis y envio. `alAvanzar` recibe el estado cada vez que algo avanza. */
+/** Un lote completo. `alAvanzar` recibe el estado cada vez que algo avanza. */
 export async function etiquetarDelDia(
   deps: EtiquetadoDeps,
   alcance: AlcanceMensajes,
@@ -349,7 +224,7 @@ export async function etiquetarDelDia(
   const dia = fechaDelNegocio(ahora, zona);
   const lote = await deps.repo.crearLote({ dia, tipo: 'completo', iniciadoPor: opciones.iniciadoPor ?? null });
   const registrar = registrador(deps, lote.id);
-  const estado: EstadoEtiquetado = { ...VACIO, enCurso: true, loteId: lote.id, tipo: 'completo', estado: 'en_curso', fase: 'analisis', dia, empezo: ahora.toISOString() };
+  const estado: EstadoEtiquetado = { ...VACIO, enCurso: true, loteId: lote.id, tipo: 'completo', estado: 'en_curso', dia, empezo: ahora.toISOString() };
   alAvanzar({ ...estado });
   await registrar({ phone: null, fase: 'lote', nivel: 'info', codigo: 'lote_inicio', detalle: `${opciones.releer ? 'Volver a etiquetar todo' : 'Etiquetado'} del ${dia}${opciones.iniciadoPor ? ` (lo pidió ${opciones.iniciadoPor})` : ''}.` });
 
@@ -393,7 +268,12 @@ export async function etiquetarDelDia(
       const base = { phone: c.phone, dia, huella: c.huella, mensajes: c.totalMensajes, loteId: lote.id };
       try {
         const r = await clasificarConIA(ia, c.mensajes ?? [], c.nombre, negocio, { catalogo, conReglas: false });
-        if (r.estado === 'clasificada') {
+        // Mientras la IA leia, una persona pudo ponerla a mano: esa manda y no se pisa.
+        const mientras = (await deps.repo.delDia(dia, [c.phone]))[0];
+        if (mientras?.origen === 'manual') {
+          await deps.repo.marcarChatLote(lote.id, c.phone, { estado: 'reutilizada', etiqueta: mientras.etiqueta });
+          estado.reutilizadas++;
+        } else if (r.estado === 'clasificada') {
           await deps.repo.guardar({ ...base, etiqueta: r.etiqueta, origen: 'ia', motivo: null });
           await deps.repo.marcarChatLote(lote.id, c.phone, { estado: 'clasificada', etiqueta: r.etiqueta });
           estado.clasificadas++;
@@ -421,38 +301,6 @@ export async function etiquetarDelDia(
         while (siguiente < pendientes.length) await una(pendientes[siguiente++]!);
       }),
     );
-    await deps.repo.actualizarLote(lote.id, { total: estado.total, reutilizadas: estado.reutilizadas, clasificadas: estado.clasificadas, porIA: estado.porIA, sinClasificar: estado.sinClasificar });
-
-    // 4. Lo que GSG aun no tiene: nuevo, cambiado, o que fallo en un lote anterior.
-    await sincronizar(deps, dia, await deps.repo.porSincronizar(dia, ['pendiente', 'fallido']), estado, registrar, alAvanzar, catalogo);
-  } catch (error) {
-    return terminar(deps, estado, registrar, alAvanzar, error);
-  }
-  return terminar(deps, estado, registrar, alAvanzar);
-}
-
-/**
- * Reintenta SOLO los envios a GSG que fallaron ese dia, con la etiqueta ya
- * guardada: no lee mensajes ni llama a la IA. null si no hay nada que reintentar.
- */
-export async function reintentarEnvios(
-  deps: EtiquetadoDeps,
-  alAvanzar: (estado: EstadoEtiquetado) => void = () => undefined,
-  opciones: { dia?: string; iniciadoPor?: string | null } = {},
-): Promise<EstadoEtiquetado | null> {
-  const ahora = deps.ahora?.() ?? new Date();
-  const dia = opciones.dia ?? fechaDelNegocio(ahora, deps.zonaHoraria());
-  const fallidas = await deps.repo.porSincronizar(dia, ['fallido']);
-  if (!fallidas.length) return null;
-  const lote = await deps.repo.crearLote({ dia, tipo: 'reintento', iniciadoPor: opciones.iniciadoPor ?? null });
-  const registrar = registrador(deps, lote.id);
-  const estado: EstadoEtiquetado = { ...VACIO, enCurso: true, loteId: lote.id, tipo: 'reintento', estado: 'en_curso', dia, total: fallidas.length, empezo: ahora.toISOString() };
-  await deps.repo.actualizarLote(lote.id, { total: fallidas.length });
-  // Que conste que chats tocaba este reintento (sin mensajes: no se miran).
-  await deps.repo.capturar(lote.id, dia, fallidas.map((f) => ({ phone: f.phone, nombre: null, huella: f.huella, mensajes: null, estado: 'solo_envio' as const })));
-  await registrar({ phone: null, fase: 'lote', nivel: 'info', codigo: 'lote_inicio', detalle: `Reintento de ${fallidas.length} envío(s) fallido(s) a GSG del ${dia}, sin volver a la IA${opciones.iniciadoPor ? ` (lo pidió ${opciones.iniciadoPor})` : ''}.` });
-  try {
-    await sincronizar(deps, dia, fallidas, estado, registrar, alAvanzar, await catalogoVigente(deps.repo));
   } catch (error) {
     return terminar(deps, estado, registrar, alAvanzar, error);
   }
@@ -461,9 +309,8 @@ export async function reintentarEnvios(
 
 /**
  * Una persona pone (o quita, con `etiqueta: null`) la etiqueta de hoy a un
- * chat. Queda como `manual`: ningun lote de la IA la pisa. Se le manda a GSG
- * en el momento; si no sale, queda para «Reintentar envios». No le escribe
- * nada al cliente.
+ * chat. Queda como `manual`: ningun lote de la IA la pisa. GSG la ve en el
+ * historial del chat al momento. No le escribe nada al cliente.
  */
 export async function etiquetarAMano(
   deps: EtiquetadoDeps,
@@ -481,21 +328,16 @@ export async function etiquetarAMano(
   }
   if (!catalogo.some((e) => e.codigo === entrada.etiqueta)) throw new Error('Esa etiqueta no está en el catálogo del negocio.');
   const antes = (await deps.repo.delDia(dia, [phone]))[0];
-  // Una huella propia: cada cambio a mano es un envio nuevo para GSG (otro eventoId).
   const huella = createHash('sha256').update(`manual|${phone}|${dia}|${entrada.etiqueta}|${Date.now()}`).digest('hex');
   await deps.repo.guardar({ phone, dia, etiqueta: entrada.etiqueta, origen: 'manual', huella, mensajes: antes?.mensajes ?? 0, motivo: null, loteId: null });
   await registrar({ phone, fase: 'analisis', nivel: 'info', codigo: 'etiqueta_manual', detalle: `${quien} puso «${nombreDeEtiqueta(entrada.etiqueta, catalogo)}»${antes?.etiqueta ? ` (antes «${nombreDeEtiqueta(antes.etiqueta, catalogo)}»)` : ''}.` });
-
-  // Al momento hacia GSG; lo que no sale queda fallido para reintentar.
-  const fila = (await deps.repo.delDia(dia, [phone]))[0]!;
-  const puerto = deps.gsg?.() ?? null;
-  if (!puerto?.enviarEtiqueta) {
-    await deps.repo.marcarSync(phone, dia, { estado: 'fallido', error: 'GSG no está conectado: se enviará al reintentar los envíos.', contarIntento: false });
-  } else {
-    const r = await puerto.enviarEtiqueta(etiquetaParaGsg(fila, catalogo));
-    if (r.ok) await deps.repo.marcarSync(phone, dia, { estado: 'enviado', huella: fila.huella });
-    else await deps.repo.marcarSync(phone, dia, { estado: 'fallido', error: r.error ?? 'GSG no aceptó la etiqueta.', contarIntento: !r.configuracion });
-    await registrar({ phone, fase: 'sincronizacion', nivel: r.ok ? 'info' : 'error', codigo: r.ok ? 'gsg_enviada' : r.configuracion ? 'gsg_sin_configurar' : 'gsg_rechazo', detalle: r.ok ? `${entrada.etiqueta} (a mano)` : r.error ?? null });
+  // Corregir lo que puso la IA es una leccion: queda apuntado con el lote que la
+  // clasifico (donde esta la copia de la conversacion) para ofrecerla como ejemplo
+  // en Entrenamiento IA. Detalle: «antes>ahora» (codigos).
+  if (antes?.etiqueta && antes.origen !== 'manual' && antes.etiqueta !== entrada.etiqueta && antes.loteId) {
+    await deps.repo
+      .registrar({ loteId: antes.loteId, phone, fase: 'analisis', nivel: 'info', codigo: CODIGO_CORRECCION, detalle: `${antes.etiqueta}>${entrada.etiqueta}` })
+      .catch(() => undefined);
   }
   return (await deps.repo.delDia(dia, [phone]))[0] ?? null;
 }
@@ -512,8 +354,7 @@ async function terminar(
   const final: EstadoEtiquetado = {
     ...estado,
     enCurso: false,
-    fase: null,
-    estado: detalleError ? 'fallido' : estadoFinal(estado),
+    estado: detalleError ? 'fallido' : estado.sinClasificar ? 'completado_con_errores' : 'completado',
     error: detalleError,
     termino: (deps.ahora?.() ?? new Date()).toISOString(),
   };
@@ -526,10 +367,7 @@ async function terminar(
         clasificadas: final.clasificadas,
         porIA: final.porIA,
         sinClasificar: final.sinClasificar,
-        syncEnviadas: final.syncEnviadas,
-        syncFallidas: final.syncFallidas,
-        syncPendientes: Math.max(0, final.syncTotal - final.syncEnviadas - final.syncFallidas),
-        error: detalleError ?? final.syncMotivo,
+        error: detalleError,
         terminoAt: new Date(final.termino!),
       });
     } catch (e) {
@@ -541,36 +379,18 @@ async function terminar(
     fase: 'lote',
     nivel: final.estado === 'completado' ? 'info' : final.estado === 'fallido' ? 'error' : 'aviso',
     codigo: final.estado === 'fallido' ? 'lote_fallido' : 'lote_fin',
-    detalle:
-      detalleError ??
-      `${final.estado}: ${final.tipo === 'completo' ? `${final.total} conversación(es), ${final.reutilizadas} reutilizada(s), ${final.clasificadas} clasificada(s), ${final.sinClasificar} sin clasificar; ` : ''}` +
-        `GSG ${final.syncEnviadas} enviada(s), ${final.syncFallidas} fallida(s) de ${final.syncTotal}.`,
+    detalle: detalleError ?? `${final.estado}: ${final.total} conversación(es), ${final.reutilizadas} reutilizada(s), ${final.clasificadas} clasificada(s), ${final.sinClasificar} sin clasificar.`,
   });
   alAvanzar(final);
   return final;
 }
 
-/**
- * Los lotes en segundo plano, uno a la vez (completo o reintento): pulsar
- * mientras ya corre uno devuelve el que esta en marcha en vez de empezar otro.
- */
+/** Los lotes en segundo plano, uno a la vez: pulsar mientras ya corre uno devuelve el que esta en marcha. */
 export function crearEtiquetador(deps: EtiquetadoDeps) {
   let estado: EstadoEtiquetado | null = null;
   let enMarcha: Promise<EstadoEtiquetado | null> | null = null;
   // Un lote que quedo 'en_curso' es de un proceso que se apago a mitad.
-  const colgados = deps.repo.cerrarLotesColgados('El servidor se reinició con el lote a mitad: vuelve a etiquetar o reintenta los envíos.').catch(() => 0);
-
-  const lanzar = (trabajo: (alAvanzar: (e: EstadoEtiquetado) => void) => Promise<EstadoEtiquetado | null>, inicial: EstadoEtiquetado) => {
-    estado = inicial;
-    enMarcha = colgados
-      .then(() => trabajo((e) => (estado = e)))
-      .catch((error) => {
-        estado = { ...(estado ?? VACIO), enCurso: false, estado: 'fallido', fase: null, termino: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) };
-        deps.log?.('el etiquetado de chats falló', { detalle: estado.error });
-        return estado;
-      })
-      .finally(() => (enMarcha = null));
-  };
+  const colgados = deps.repo.cerrarLotesColgados('El servidor se reinició con el lote a mitad: vuelve a etiquetar.').catch(() => 0);
 
   return {
     /** Lo del lote en marcha o el ultimo de este proceso; si no hay, el ultimo guardado. */
@@ -582,25 +402,20 @@ export function crearEtiquetador(deps: EtiquetadoDeps) {
     },
     hayIA: (): boolean => Boolean(deps.ia()),
     enCurso: (): boolean => Boolean(enMarcha),
-    /** Empieza un lote completo (o devuelve el que corre). Lanza si no hay IA. */
+    /** Empieza un lote (o devuelve el que corre). Lanza si no hay IA. */
     iniciar(alcance: AlcanceMensajes, opciones: { iniciadoPor?: string | null; releer?: boolean } = {}): EstadoEtiquetado {
       if (enMarcha && estado) return { ...estado };
       if (!deps.ia()) throw new Error(NO_HAY_IA);
-      lanzar((alAvanzar) => etiquetarDelDia(deps, alcance, alAvanzar, opciones), { ...VACIO, enCurso: true, tipo: 'completo', estado: 'en_curso', fase: 'analisis', empezo: (deps.ahora?.() ?? new Date()).toISOString() });
-      return { ...estado! };
-    },
-    /**
-     * Reintenta solo los envios fallidos de ese dia (por defecto hoy). Devuelve
-     * el estado del reintento, el del lote en marcha si ya corre uno, o null si
-     * no hay ningun envio fallido.
-     */
-    async reintentar(opciones: { dia?: string; iniciadoPor?: string | null } = {}): Promise<EstadoEtiquetado | null> {
-      if (enMarcha && estado) return { ...estado };
-      const dia = opciones.dia ?? fechaDelNegocio(deps.ahora?.() ?? new Date(), deps.zonaHoraria());
-      if (!(await deps.repo.porSincronizar(dia, ['fallido'])).length) return null;
-      if (enMarcha && estado) return { ...estado };
-      lanzar((alAvanzar) => reintentarEnvios(deps, alAvanzar, { ...opciones, dia }), { ...VACIO, enCurso: true, tipo: 'reintento', estado: 'en_curso', fase: 'sincronizacion', dia, empezo: (deps.ahora?.() ?? new Date()).toISOString() });
-      return { ...estado! };
+      estado = { ...VACIO, enCurso: true, tipo: 'completo', estado: 'en_curso', empezo: (deps.ahora?.() ?? new Date()).toISOString() };
+      enMarcha = colgados
+        .then(() => etiquetarDelDia(deps, alcance, (e) => (estado = e), opciones))
+        .catch((error) => {
+          estado = { ...(estado ?? VACIO), enCurso: false, estado: 'fallido', termino: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) };
+          deps.log?.('el etiquetado de chats falló', { detalle: estado.error });
+          return estado;
+        })
+        .finally(() => (enMarcha = null));
+      return { ...estado };
     },
     /** Pone o quita a mano la etiqueta de hoy de un chat (ver etiquetarAMano). */
     etiquetarAMano: (entrada: { phone: string; etiqueta: string | null; quien?: string | null }) => etiquetarAMano(deps, entrada),

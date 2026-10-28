@@ -31,7 +31,7 @@ Las tres solo **añaden**: no modifican ni borran datos existentes. Tardan menos
 | Migración | Qué hace |
 |---|---|
 | `013_etiquetas_chat.sql` | Crea la tabla `chat_etiquetas` (la etiqueta de cada conversación del día). |
-| `014_etiquetas_chat_sync.sql` | Añade a `chat_etiquetas` las columnas del envío a GSG (`lote_id`, `sync_estado`, `sync_intentos`, `sync_error`, `sync_at`, `sync_huella`) y el índice `chat_etiquetas_sync_idx`. Crea las tablas `chat_etiquetas_lotes` y `chat_etiquetas_eventos`. |
+| `014_etiquetas_chat_sync.sql` | Añade a `chat_etiquetas` la columna `lote_id` y las columnas `sync_*` con su índice `chat_etiquetas_sync_idx`. Crea las tablas `chat_etiquetas_lotes` y `chat_etiquetas_eventos`. Las `sync_*` eran del envío aparte a GSG, que se quitó el 28/10 (GSG lee la nota en el historial): quedan sin uso, no estorban y no hace falta borrarlas. |
 | `015_etiquetas_lote_chats_catalogo.sql` | Crea `chat_etiquetas_lote_chats` (cada chat de cada lote, con la copia de sus mensajes en una columna `json` y su estado) y `chat_etiquetas_catalogo` (el catálogo de etiquetas del negocio; vacía = el de fábrica). |
 
 La 014 altera una tabla que acaba de crear la 013 (vacía), así que el `ALTER` no bloquea nada.
@@ -116,17 +116,16 @@ delete from schema_migrations
  where name in ('013_etiquetas_chat.sql', '014_etiquetas_chat_sync.sql', '015_etiquetas_lote_chats_catalogo.sql');
 ```
 
-Se pierden las etiquetas de los chats, su historial de envíos a GSG y el catálogo propio de cada negocio. No
-afecta a pedidos, mensajes ni contactos.
+Se pierden las etiquetas de los chats, su registro y el catálogo propio de cada negocio. No afecta a pedidos,
+mensajes ni contactos.
 
 ## Después del despliegue (no es de base de datos)
 
-Para que las etiquetas salgan hacia GSG, cada tienda tiene que tener:
+Para etiquetar, cada tienda necesita la clave de la IA guardada (Avanzado → Asistente IA; no hace falta activar
+el asistente). **GSG no necesita configurar nada nuevo**: la nota de cada chat le llega en el historial que ya
+pide al abrir un chat (`GET /api/v1/historial`, campo `nota`). Cada negocio puede ajustar su catálogo de
+etiquetas en Chats → ⋮ → «Catálogo de etiquetas…»; si no lo toca, usa el de fábrica. Detalle en
+`docs/CONEXION-GSG.md` → «Las notas de los chats».
 
-- la IA conectada (Avanzado → Asistente IA),
-- y en Conexión con GSG la «Ruta para etiquetas de chats» (por ejemplo `v1/gsgchat/labels`), cuando GSG tenga ese endpoint.
-
-Sin esa ruta el etiquetado funciona igual, pero no se manda nada a GSG: los envíos quedan como fallidos con el
-motivo y se pueden reintentar después desde Chats. Cada negocio puede ajustar su catálogo de etiquetas en
-Chats → ⋮ → «Catálogo de etiquetas…»; si no lo toca, usa el de fábrica. El contrato del envío está en
-`docs/CONEXION-GSG.md` → «Etiquetas de los chats».
+Los ejemplos de etiquetado del negocio y el máximo de cambios de ubicación (2) se guardan en `settings` como el
+resto de ajustes: **no hay migraciones nuevas** por eso.

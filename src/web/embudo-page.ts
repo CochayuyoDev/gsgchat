@@ -1,12 +1,12 @@
 /**
  * «Embudo de chats», dentro de Pedidos GSG: los chats del dia por etiqueta.
  *
- * Arriba, cuantos hay, cuantos etiqueto la IA y cuantos una persona, los que
- * faltan y como va el envio a GSG. En medio, el embudo: una barra por
- * etiqueta, partida en lo de la IA y lo puesto a mano; al pulsarla, la lista
- * de abajo se queda con esos chats. Abajo, la lista: cada chat con su
- * etiqueta, quien la puso y su envio a GSG, con «Cambiar» para ponerla a mano
- * (solo hoy) y «Abrir chat».
+ * Arriba, cuantos hay, cuantos etiqueto la IA y cuantos una persona y los
+ * que faltan. En medio, el embudo: una barra por etiqueta, partida en lo de
+ * la IA y lo puesto a mano; al pulsarla, la lista de abajo se queda con esos
+ * chats. Abajo, la lista: cada chat con su etiqueta y quien la puso, con
+ * «Cambiar» para ponerla a mano (solo hoy) y «Abrir chat». GSG ve cada
+ * etiqueta como la nota del chat en el historial (GET /api/v1/historial).
  *
  * Etiquetar a mano no le escribe nada al cliente: solo apunta. Lo que se pone
  * a mano no lo cambia la IA. Datos: GET /admin/chat/etiquetas/embudo.
@@ -78,8 +78,6 @@ ${PESTANAS_PEDIDOS_CSS}
 .em-chip.sin { background: transparent; border: 1px dashed currentColor; }
 .em-mini { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--borde); color: var(--texto-suave); white-space: nowrap; }
 .em-mini.mano { border-color: var(--azul); color: var(--azul); }
-.em-mini.gsg-ok { border-color: var(--verde); color: var(--verde); }
-.em-mini.gsg-mal { border-color: var(--rojo); color: var(--rojo); }
 .em-acciones { display: flex; gap: 6px; }
 .em-acciones .btn { white-space: nowrap; }
 .em-vacio { padding: 26px 8px; text-align: center; color: var(--texto-suave); }
@@ -181,8 +179,7 @@ function pintar() {
     kpi(r.chats, 'chats ' + (datos.hoy ? 'de hoy' : 'de ese día'), '') +
     kpi(r.etiquetados, 'etiquetados', r.porIA + ' por la IA · ' + r.manual + ' a mano', 'verde') +
     kpi(r.sinEtiquetar, 'sin etiquetar', datos.hoy ? 'se etiquetan con «Etiquetar chats con IA»' : '', r.sinEtiquetar ? 'ambar' : '') +
-    kpi(r.sinClasificar, 'sin clasificar', 'la IA no pudo', r.sinClasificar ? 'rojo' : '') +
-    kpi(r.enviadosGsg, 'enviados a GSG', r.sinEnviarGsg ? r.sinEnviarGsg + ' sin enviar' : 'todo enviado', r.enviadosGsg ? 'azul' : '');
+    kpi(r.sinClasificar, 'sin clasificar', 'la IA no pudo', r.sinClasificar ? 'rojo' : '');
 
   var max = Math.max.apply(null, datos.etapas.map(function (e) { return e.total; }).concat([1]));
   var conChats = datos.etapas.filter(function (e) { return e.total > 0; });
@@ -193,7 +190,7 @@ function pintar() {
       '<span class="cuantos">' + e.total + '</span></button>';
   }).join('') : '<div class="em-vacio">' + (datos.hoy ? 'Hoy todavía no hay chats etiquetados. Etiquétalos desde Chats con «Etiquetar chats con IA».' : 'Ese día no hubo chats etiquetados.') + '</div>';
 
-  var f = [['todas', 'Todos', r.chats], ['ia', 'Por la IA', r.porIA], ['manual', 'A mano', r.manual], ['sin_etiquetar', 'Sin etiquetar', r.sinEtiquetar], ['sin_clasificar', 'Sin clasificar', r.sinClasificar], ['sin_gsg', 'Sin enviar a GSG', r.sinEnviarGsg]];
+  var f = [['todas', 'Todos', r.chats], ['ia', 'Por la IA', r.porIA], ['manual', 'A mano', r.manual], ['sin_etiquetar', 'Sin etiquetar', r.sinEtiquetar], ['sin_clasificar', 'Sin clasificar', r.sinClasificar]];
   $('em-filtros').innerHTML = f.filter(function (x) { return x[0] === 'todas' || x[2] > 0; }).map(function (x) {
     return '<button type="button" class="em-filtro' + (filtro === x[0] ? ' activo' : '') + '" data-filtro="' + x[0] + '" aria-pressed="' + (filtro === x[0] ? 'true' : 'false') + '">' + esc(x[1]) + '<b>' + x[2] + '</b></button>';
   }).join('');
@@ -202,7 +199,7 @@ function pintar() {
 
 function filas() {
   var todos = datos.chats.map(function (c) { return Object.assign({ tipo: c.etiqueta ? 'etiquetado' : 'sin_clasificar' }, c); })
-    .concat(datos.sinEtiquetar.map(function (c) { return Object.assign({ tipo: 'sin_etiquetar', etiqueta: null, origen: null, gsg: null }, c); }));
+    .concat(datos.sinEtiquetar.map(function (c) { return Object.assign({ tipo: 'sin_etiquetar', etiqueta: null, origen: null }, c); }));
   var q = texto.trim().toLowerCase();
   return todos.filter(function (c) {
     if (etapa && c.etiqueta !== etapa) return false;
@@ -210,7 +207,6 @@ function filas() {
     if (filtro === 'manual' && c.origen !== 'manual') return false;
     if (filtro === 'sin_etiquetar' && c.tipo !== 'sin_etiquetar') return false;
     if (filtro === 'sin_clasificar' && c.tipo !== 'sin_clasificar') return false;
-    if (filtro === 'sin_gsg' && !(c.etiqueta && c.gsg && c.gsg.estado !== 'enviado')) return false;
     if (q && (String(c.nombre || '').toLowerCase().indexOf(q) < 0 && String(c.phone).indexOf(q.replace(/\D+/g, '') || '¬') < 0)) return false;
     return true;
   }).sort(function (a, b) { return new Date(b.ultimoMensaje ? b.ultimoMensaje.at : 0) - new Date(a.ultimoMensaje ? a.ultimoMensaje.at : 0); });
@@ -226,12 +222,11 @@ function pintarLista() {
       : c.tipo === 'sin_clasificar' ? '<span class="em-chip sin" title="' + esc(c.motivo || '') + '">Sin clasificar</span>'
       : '<span class="em-chip ' + (TONO[c.etiqueta] || 'gris') + '">' + esc(c.nombreEtiqueta) + '</span>';
     var origen = c.etiqueta ? (c.origen === 'manual' ? '<span class="em-mini mano" title="Puesta a mano: la IA no la cambia">✎ A mano</span>' : '<span class="em-mini">IA</span>') : '';
-    var gsg = c.etiqueta && c.gsg ? (c.gsg.estado === 'enviado' ? '<span class="em-mini gsg-ok">✓ GSG</span>' : c.gsg.intentos ? '<span class="em-mini gsg-mal" title="' + esc(c.gsg.error || '') + '">No llegó a GSG</span>' : '<span class="em-mini" title="' + esc(c.gsg.error || '') + '">Sin enviar a GSG</span>') : '';
     var ultimo = c.ultimoMensaje ? (c.ultimoMensaje.direction === 'out' ? 'Tú: ' : '') + (c.ultimoMensaje.body || '(adjunto)') : '';
     return '<div class="em-fila">' +
       '<span class="em-av" style="background:' + color + '" aria-hidden="true">' + esc(String(nombre).replace(/^\+/, '').charAt(0).toUpperCase()) + '</span>' +
       '<span class="em-quien"><b>' + esc(nombre) + '</b><small>' + esc(bonito(c.phone)) + (ultimo ? ' · ' + esc(hora(c.ultimoMensaje.at)) + ' · ' + esc(ultimo) : '') + '</small></span>' +
-      '<span class="em-estado">' + chip + origen + gsg + '</span>' +
+      '<span class="em-estado">' + chip + origen + '</span>' +
       '<span class="em-acciones">' +
         (datos.hoy && c.contactId ? '<button type="button" class="btn sm" data-cambiar="' + esc(c.contactId) + '" data-actual="' + esc(c.origen === 'manual' ? c.etiqueta : '') + '" data-tiene="' + (c.etiqueta || c.tipo === 'sin_clasificar' ? '1' : '') + '" aria-haspopup="listbox">Etiquetar ▾</button>' : '') +
         '<a class="btn sm" href="/chat?phone=' + encodeURIComponent(c.phone) + '">Abrir chat</a>' +

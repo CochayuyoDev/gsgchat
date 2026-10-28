@@ -12,11 +12,14 @@ const telefono = '987601316';
 const phone = '51' + telefono;
 const fijo = { lat: -12.0464, lng: -77.0428 };
 const pedido = { ...OBLIGATORIOS_GSG, tracking: 'GSG-CALLADO-1', cliente: 'Rosa', telefono, distrito: 'Lima' };
+// 10:00 y 2:00 PM en Lima: antes y después de la hora límite para cambiar la ubicación (1:00 PM).
+const MANANA = new Date('2026-10-28T15:00:00Z');
+const TARDE = new Date('2026-10-28T19:00:00Z');
 afterEach(() => setFakeClock(null));
 
 describe('bot callado en «Solo lo de GSG» sin IA', () => {
-  it('no contesta textos ni la ubicación en tiempo real; agradece la ubicación actual', async () => {
-    const e = await crearEscenarioEntregas({ agente: true });
+  it('no contesta textos ni la ubicación en tiempo real; agradece la ubicación actual; «cambiar ubicación» sí lo atiende', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: MANANA });
     try {
       await e.api.post('/api/v1/entregas', pedido);
       await e.trabajar();
@@ -35,17 +38,18 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
       expect(e.textosA(telefono).at(-1)).toMatch(/ubicación registrada/i);
 
       await e.contesta(telefono, { texto: '¿A qué hora llega mi pedido?' });
-      await e.contesta(telefono, { texto: 'quiero cambiar mi ubicación' });
-      await e.contesta(telefono, { texto: 'gracias' });
       expect(e.mensajesA(telefono)).toHaveLength(inicio + 1);
-
-      // Pedir cambiar la ubicación no recibe respuesta: es un error para GSG y se quita la ubicación.
+      // «cambiar ubicación» lo atiende el bot aunque esté callado (regla del dueño, 28/10):
+      // le pide la nueva y, mientras, se queda la que tenía. No es un error para GSG.
+      await e.contesta(telefono, { texto: 'quiero cambiar mi ubicación' });
+      expect(e.mensajesA(telefono)).toHaveLength(inicio + 2);
+      expect(String(e.mensajesA(telefono).at(-1)!.body)).toBe('Por favor, comparta su nueva ubicación 📍');
+      await e.contesta(telefono, { texto: 'gracias' });
+      expect(e.mensajesA(telefono)).toHaveLength(inicio + 2);
       const incidencias = (await e.repos.rutas.reportesRecientes(100, 'incidencia')).map((r) => r.payload as Record<string, unknown>);
-      expect(incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(1);
-      expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ estado: 'incidencia', incidencia: 'cambio_ubicacion', ubicacionEstado: 'pendiente', lat: null });
-      await e.contesta(telefono, { texto: 'me equivoqué de dirección, quiero cambiarla' });
-      const otraVez = (await e.repos.rutas.reportesRecientes(100, 'incidencia')).map((r) => r.payload as Record<string, unknown>);
-      expect(otraVez.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(1);
+      expect(incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(0);
+      expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ ubicacionEstado: 'recibida', lat: fijo.lat });
+      expect((await e.entrega('GSG-CALLADO-1'))!.estado).not.toBe('incidencia');
     } finally {
       await e.cerrar();
     }
@@ -178,8 +182,27 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
     }
   });
 
-  it('otra ubicación con la suya ya registrada: silencio, se quita la ubicación, queda en error y GSG recibe solo «cambio_ubicacion»', async () => {
-    const e = await crearEscenarioEntregas({ agente: true });
+  it('otra ubicación con la suya ya registrada, antes de la hora límite: es su cambio, se registra y se le confirma', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: MANANA });
+    try {
+      await e.api.post('/api/v1/entregas', pedido);
+      await e.trabajar();
+      await e.contesta(telefono, { pin: fijo });
+      const tras = e.mensajesA(telefono).length;
+      const otro = { lat: -12.1211, lng: -77.0301 };
+      await e.contesta(telefono, { pin: otro });
+      expect(e.mensajesA(telefono)).toHaveLength(tras + 1);
+      expect(String(e.mensajesA(telefono).at(-1)!.text ?? e.mensajesA(telefono).at(-1)!.body)).toMatch(/Su nueva ubicación se registró correctamente/);
+      expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ ubicacionEstado: 'recibida', lat: otro.lat, lng: otro.lng, ubicacionCambios: 1, ubicacionAnteriorLat: fijo.lat });
+      const incidencias = (await e.repos.rutas.reportesRecientes(100, 'incidencia')).map((r) => r.payload as Record<string, unknown>);
+      expect(incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(0);
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('otra ubicación con la suya ya registrada, DESPUÉS de la hora límite: silencio, se quita la ubicación, queda en error y GSG recibe solo «cambio_ubicacion»', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
     try {
       await e.api.post('/api/v1/entregas', pedido);
       await e.trabajar();

@@ -45,7 +45,9 @@ function iaDePrueba(contestar: (usuario: string) => string | Error = () => '{"et
     llamadas,
     ia: {
       async completar(m: MensajeIA[]) {
-        const usuario = String(m[m.length - 1]?.content ?? '');
+        // La conversacion es el primer mensaje del usuario: en la segunda oportunidad
+        // (tras una respuesta que no vale) sigue siendo la misma, y contesta lo mismo.
+        const usuario = String(m.find((x) => x.role === 'user')?.content ?? '');
         llamadas.push(usuario);
         const r = contestar(usuario);
         if (r instanceof Error) throw r;
@@ -94,7 +96,7 @@ describe('agrupar por numero normalizado', () => {
   });
 
   it('solo se reutiliza lo definitivo', () => {
-    const base = { phone: '1', dia: '2026-10-27', origen: 'ia' as const, mensajes: 2, updatedAt: new Date(), loteId: null, syncEstado: 'pendiente' as const, syncIntentos: 0, syncError: null, syncAt: null, syncHuella: null };
+    const base = { phone: '1', dia: '2026-10-27', origen: 'ia' as const, mensajes: 2, updatedAt: new Date(), loteId: null };
     expect(sePuedeReutilizar({ ...base, huella: 'x', etiqueta: 'otro', motivo: null }, 'x')).toBe(true);
     expect(sePuedeReutilizar({ ...base, huella: 'x', etiqueta: 'otro', motivo: null }, 'y')).toBe(false);
     expect(sePuedeReutilizar({ ...base, huella: 'x', etiqueta: null, motivo: 'caída' }, 'x')).toBe(false);
@@ -165,9 +167,9 @@ describe('el lote del dia', () => {
     const caida = iaDePrueba(() => new Error('sin saldo'));
     const r = await etiquetarDelDia(deps(repo, () => caida.ia), ALCANCE);
     // Aunque «mañana» o «a las 3» se reconocerian por palabras, aqui no se adivina: todo es error.
-    expect(r).toMatchObject({ total: 4, clasificadas: 0, porIA: 0, sinClasificar: 4, syncTotal: 0 });
+    expect(r).toMatchObject({ total: 4, clasificadas: 0, porIA: 0, sinClasificar: 4 });
     const filas = new Map((await repo.delDia('2026-10-27')).map((e) => [e.phone, e]));
-    expect(filas.get('51911000002')).toMatchObject({ etiqueta: null, syncEstado: 'no_aplica' });
+    expect(filas.get('51911000002')).toMatchObject({ etiqueta: null });
     expect(filas.get('51911000002')!.motivo).toMatch(/sin saldo/);
     // Cada chat del lote dice que fallo y por que.
     const chats = await repo.chatsDelLote(r.loteId!);

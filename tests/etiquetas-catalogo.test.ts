@@ -82,9 +82,9 @@ describe('el catalogo', () => {
 
   it('con sin_novedad en el catalogo, el flujo feliz va ahi y otro queda para lo ajeno a la entrega', () => {
     const conSN = instruccionesDeEtiqueta(false).join('\n');
-    expect(conSN).toContain('- sin_novedad: sigue el flujo sin pedir nada más');
-    expect(conSN).toMatch(/usa sin_novedad: es el caso de que todo va bien/);
-    expect(conSN).toMatch(/otro es solo para lo que no tiene que ver con la entrega/);
+    expect(conSN).toContain('- sin_novedad: todo va bien');
+    expect(conSN).toMatch(/sin_novedad es solo cuando todo va bien y el cliente no pide ni avisa nada/);
+    expect(conSN).toMatch(/otro es solo para lo que no tiene que ver con esta entrega/);
     // Ya no se le dice que los agradecimientos van a otro.
     expect(conSN).not.toMatch(/agradecimientos, preguntas ajenas\) o no se entiende, usa otro/);
     // Un catalogo propio sin sin_novedad conserva la regla de siempre.
@@ -127,12 +127,12 @@ describe('el repo: la copia del lote y el catalogo', () => {
     ];
     await repo.capturar(lote.id, '2026-10-27', [
       { phone: '51911000040', nombre: 'Rosa', huella: 'a'.repeat(64), mensajes },
-      { phone: '51911000041', nombre: null, huella: 'b'.repeat(64), mensajes: null, estado: 'solo_envio' },
+      { phone: '51911000041', nombre: null, huella: 'b'.repeat(64), mensajes: [] },
     ]);
     const sin = await repo.chatsDelLote(lote.id);
     expect(sin.map((c) => [c.phone, c.estado, c.totalMensajes, c.mensajes])).toEqual([
       ['51911000040', 'pendiente', 3, null],
-      ['51911000041', 'solo_envio', 0, null],
+      ['51911000041', 'pendiente', 0, null],
     ]);
     const con = await repo.chatsDelLote(lote.id, true);
     expect(con[0]!.mensajes).toEqual(mensajes);
@@ -147,7 +147,7 @@ describe('el repo: la copia del lote y el catalogo', () => {
 
     // Pasada la retencion, la copia se vacia; el estado se queda.
     expect(await repo.vaciarCopiasAntes(new Date(Date.now() - 60_000))).toBe(0);
-    expect(await repo.vaciarCopiasAntes(new Date(Date.now() + 60_000))).toBe(1);
+    expect(await repo.vaciarCopiasAntes(new Date(Date.now() + 60_000))).toBe(2);
     expect((await repo.chatDelLote(lote.id, '51911000040'))!).toMatchObject({ mensajes: null, estado: 'clasificada', totalMensajes: 3 });
   });
 
@@ -205,18 +205,19 @@ describe('Chats: el catalogo y el detalle del lote por API', () => {
         await new Promise((r) => setTimeout(r, 20));
         estado = (await pedir('GET', '/admin/chat/etiquetar')).json();
       }
-      expect(estado).toMatchObject({ estado: 'completado_con_errores', clasificadas: 1, sinClasificar: 0 });
+      expect(estado).toMatchObject({ estado: 'completado', clasificadas: 1, sinClasificar: 0 });
       // La IA recibio el catalogo del negocio.
       expect(e.ia.llamadas.at(-1)!.sistema).toContain('- cambio_de_dia: El cliente pide que se lo entreguen otro día.');
 
-      // La bandeja: el nombre del catalogo del negocio y el estado del envio a GSG (sin GSG conectado: fallido).
+      // La bandeja: el nombre del catalogo del negocio. Nada de envios a GSG: GSG la lee en el historial.
       const item = (await pedir('GET', '/admin/chat/conversations')).json().items[0];
-      expect(item.etiqueta).toMatchObject({ id: 'cambio_de_dia', nombre: 'Cambio de día', gsg: { estado: 'fallido' } });
+      expect(item.etiqueta).toMatchObject({ id: 'cambio_de_dia', nombre: 'Cambio de día' });
+      expect(item.etiqueta).not.toHaveProperty('gsg');
 
-      // El detalle del lote: cada chat con su estado de analisis y de envio.
+      // El detalle del lote: cada chat con su estado.
       const detalle = (await pedir('GET', `/admin/chat/etiquetar/lotes/${estado.loteId}`)).json();
       expect(detalle.chats).toEqual([
-        expect.objectContaining({ phone: '51987650077', nombre: 'Rosa', mensajes: 2, estado: 'clasificada', etiqueta: 'cambio_de_dia', nombreEtiqueta: 'Cambio de día', sync: expect.objectContaining({ estado: 'fallido' }) }),
+        expect.objectContaining({ phone: '51987650077', nombre: 'Rosa', mensajes: 2, estado: 'clasificada', etiqueta: 'cambio_de_dia', nombreEtiqueta: 'Cambio de día' }),
       ]);
       // Y la copia de los mensajes que se le mandaron a la IA (tambien con el numero de 9 digitos).
       const copia = (await pedir('GET', `/admin/chat/etiquetar/lotes/${estado.loteId}/chats/987650077`)).json();
@@ -260,8 +261,8 @@ describe('Chats: el catalogo y el detalle del lote por API', () => {
       expect(conteo.etiquetas.find((x: { codigo: string }) => x.codigo === 'reagendar_entrega')).toMatchObject({ n: 2, nombre: 'Reagendar entrega' });
       // Las del catalogo sin chats tambien salen, con 0.
       expect(conteo.etiquetas.find((x: { codigo: string }) => x.codigo === 'reclamo')).toMatchObject({ n: 0 });
-      // Sin GSG conectado, las dos etiquetadas no llegaron.
-      expect(conteo.gsgFallido).toBe(2);
+      // Ya no hay estado de envio a GSG.
+      expect(conteo).not.toHaveProperty('gsgFallido');
 
       const reagendar = (await get('/admin/chat/conversations?etiqueta=reagendar_entrega')).json();
       expect(reagendar).toMatchObject({ total: 2, hasMore: false });
@@ -272,7 +273,8 @@ describe('Chats: el catalogo y el detalle del lote por API', () => {
       expect(primera.items).toHaveLength(1);
       expect((await get('/admin/chat/conversations?etiqueta=reagendar_entrega&limit=1&offset=1')).json()).toMatchObject({ hasMore: false });
       expect((await get('/admin/chat/conversations?etiqueta=sin_clasificar')).json().items.map((c: { phone: string }) => c.phone)).toEqual(['51987650083']);
-      expect((await get('/admin/chat/conversations?etiqueta=gsg_fallido')).json().total).toBe(2);
+      // El filtro de envios a GSG ya no existe: es un codigo cualquiera, sin chats.
+      expect((await get('/admin/chat/conversations?etiqueta=gsg_fallido')).json().total).toBe(0);
       expect((await get('/admin/chat/conversations?etiqueta=reclamo')).json()).toMatchObject({ total: 0, items: [] });
       expect((await get('/admin/chat/conversations?etiqueta=Mal%20Codigo')).statusCode).toBe(400);
       // Sin filtro, la bandeja de siempre.
