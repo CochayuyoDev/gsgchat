@@ -157,6 +157,20 @@ const CSS = `
   .elegidas .item { margin: var(--esp-1) 0; padding: var(--esp-2) var(--esp-3); border-left: 3px solid var(--primario); border-radius: 0 var(--radio-sm) var(--radio-sm) 0; background: var(--superficie-2); font-size: var(--fs-small); white-space: pre-wrap; }
   .elegidas .item .sub { display: block; color: var(--texto-suave); }
 
+  /* --- enseñarle a etiquetar --------------------------------------------- */
+  #etiquetar > h2 .cab { box-sizing: border-box; }
+  .et-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
+  @media (max-width: 900px) { .et-cols { grid-template-columns: 1fr; } }
+  .et-h { margin: var(--esp-3) 0 var(--esp-2); font-size: var(--fs-small); color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
+  .et-cols > div > .et-h:first-child { margin-top: 0; }
+  .et-item { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: var(--esp-3); margin-bottom: var(--esp-2); }
+  .et-cambio { display: flex; gap: var(--esp-2); align-items: center; flex-wrap: wrap; font-size: var(--fs-small); }
+  .et-conv { margin: var(--esp-2) 0; padding: var(--esp-2) var(--esp-3); background: var(--superficie-2); border-radius: var(--radio-sm); font: inherit; font-size: var(--fs-small); white-space: pre-wrap; word-break: break-word; }
+  .et-item .acciones { margin-top: var(--esp-2); flex-wrap: wrap; }
+  .et-item textarea { margin-top: var(--esp-2); }
+  .pausa { margin-top: var(--esp-4); padding: var(--esp-3) var(--esp-4); border: 1px dashed var(--borde); border-radius: var(--radio); }
+  .pausa > summary { cursor: pointer; font-weight: 600; color: var(--texto-suave); }
+  .pausa[open] > summary { margin-bottom: var(--esp-3); }
   .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 50; max-width: 90vw; padding: 10px 16px; border-radius: var(--radio); background: var(--texto); color: var(--superficie); font-size: var(--fs-cuerpo); box-shadow: var(--sombra-2); }
 `;
 
@@ -191,11 +205,40 @@ export function entrenamientoPage(opts: EntrenamientoPageOpts): string {
 
   const avisoIA = conIA
     ? ''
-    : `<div class="aviso"><b>La IA no está conectada.</b> Puedes enseñarle e importar igual; para examinarla o pulir con la IA, conecta Puter en <a href="/panel#ia">Mi asistente IA</a>.</div>`;
+    : `<div class="aviso"><b>La IA no tiene clave.</b> Puedes enseñarle ejemplos igual, pero para etiquetar los chats (y para «Probar la IA») guarda su clave en <a href="/panel#ia">Asistente IA</a>.</div>`;
 
   const contenido = `
 <div class="wrap">
 ${avisoIA}
+
+<section class="tarjeta caja" id="etiquetar" aria-labelledby="et-titulo">
+  <h2><span class="cab" id="et-titulo">🏷 Enséñale a etiquetar los chats <span class="sep"></span><span class="muted nota" id="et-cuantos"></span></span></h2>
+  <div class="cuerpo">
+    <p>Por ahora la IA hace una sola cosa: le pone a cada chat su <b>nota</b> (la etiqueta que GSG ve en el historial). Cuando se equivoque en un caso, enséñale cómo es: cada ejemplo lo usa cada vez que etiqueta.
+      <a href="/chat#probar-ia">Probar la IA</a> · <a href="/chat#catalogo">Catálogo de etiquetas</a></p>
+    <div class="et-cols">
+      <div>
+        <h3 class="et-h">Correcciones de tu equipo</h3>
+        <p class="nota">Chats donde una persona cambió la etiqueta que había puesto la IA. Conviértelos en ejemplo para que no se vuelva a equivocar.</p>
+        <div id="et-correcciones" aria-live="polite"><p class="muted">Cargando…</p></div>
+      </div>
+      <div>
+        <h3 class="et-h">Lo que ya sabe</h3>
+        <div id="et-ejemplos" aria-live="polite"><p class="muted">Cargando…</p></div>
+        <h3 class="et-h">Enséñale un caso</h3>
+        <label for="et-texto">La conversación: una línea por mensaje, empezando por «cliente:» o «negocio:». Para un pin, «[ubicación]».</label>
+        <textarea id="et-texto" rows="5" placeholder="negocio: ¿Nos manda su ubicación?&#10;cliente: [ubicación]&#10;cliente: déjelo con la señora del puesto 14"></textarea>
+        <label for="et-etiqueta">La etiqueta que le toca</label>
+        <select id="et-etiqueta"></select>
+        <div class="fila" style="margin-top:var(--esp-3)"><div class="fijo"><button class="btn primario" id="et-guardar" type="button">Enseñar</button></div><div class="muted" id="et-resultado" role="status"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<details class="pausa" id="respuestas-en-pausa">
+<summary>Lecciones para responder (en pausa)</summary>
+<p class="muted">Por ahora la IA solo etiqueta los chats: no le contesta a nadie. Lo que le enseñaste para responder queda guardado aquí para cuando vuelva a hacerlo.</p>
 
 <p class="intro">Cada cosa que aprende es una <b>lección</b>: un ejemplo, un dato o una regla. Pueden ser miles: en cada mensaje usa solo las que vienen al caso.
   <button class="btn sm" id="abrir-ia" type="button">🤖 Pedírselo a la IA</button>
@@ -323,6 +366,7 @@ ${avisoIA}
     </section>
   </div>
 </div>
+</details>
 </div>
 `;
 
@@ -1057,6 +1101,92 @@ async function cargar() {
   await cargarLecciones();
 }
 
+/* ------------------------------------------- enseñarle a etiquetar los chats */
+
+var etCatalogo = [];
+function etOpciones(elegida) {
+  return etCatalogo.map(function (c) { return '<option value="' + esc(c.codigo) + '"' + (c.codigo === elegida ? ' selected' : '') + '>' + esc(c.nombre) + '</option>'; }).join('');
+}
+async function etCargar() {
+  try {
+    var r = await Promise.all([api('/admin/chat/etiquetas/catalogo'), api('/admin/chat/etiquetas/ejemplos'), api('/admin/chat/etiquetas/correcciones')]);
+    etCatalogo = r[0].items;
+    if (!el('et-etiqueta').options.length) el('et-etiqueta').innerHTML = etOpciones('');
+    etPintarEjemplos(r[1]);
+    etPintarCorrecciones(r[2].items);
+  } catch (e) {
+    el('et-ejemplos').innerHTML = '<p class="muted">' + esc(e.message) + '</p>';
+    el('et-correcciones').innerHTML = '';
+  }
+}
+function etPintarEjemplos(d) {
+  el('et-cuantos').textContent = d.items.length + ' de ' + d.tope + ' ejemplos';
+  el('et-guardar').disabled = d.items.length >= d.tope;
+  el('et-ejemplos').innerHTML = d.items.length ? d.items.map(function (e) {
+    return '<div class="et-item"><div class="et-cambio"><span class="chip tono-verde">' + esc(e.nombreEtiqueta) + '</span>' +
+      (e.enCatalogo ? '' : '<span class="chip tono-ambar" title="Esa etiqueta ya no está en el catálogo: la IA no usa este ejemplo">fuera del catálogo</span>') +
+      '<span class="nota">' + (e.origen === 'correccion' ? 'de una corrección' : 'a mano') + (e.creadoPor ? ' · ' + esc(e.creadoPor) : '') + ' · ' + esc(cuando(e.creadoEn)) + '</span></div>' +
+      '<pre class="et-conv">' + esc(e.texto) + '</pre>' +
+      '<div class="acciones"><button class="btn sm" type="button" data-et-quitar="' + esc(e.id) + '">Quitar</button></div></div>';
+  }).join('') : '<p class="muted">Todavía no le enseñaste ningún caso. Usa una corrección de tu equipo o escribe uno abajo.</p>';
+}
+var etCorrecciones = [];
+function etPintarCorrecciones(lista) {
+  etCorrecciones = lista;
+  el('et-correcciones').innerHTML = lista.length ? lista.map(function (c, i) {
+    return '<div class="et-item" data-et-corr="' + i + '"><div class="et-cambio"><span class="chip tono-rojo" title="Lo que puso la IA">IA: ' + esc(c.antesNombre) + '</span><span aria-hidden="true">→</span><span class="chip tono-verde" title="Lo que puso tu equipo">' + esc(c.ahoraNombre) + '</span><span class="nota">' + esc(cuando(c.en)) + '</span></div>' +
+      (c.texto ? '<pre class="et-conv">' + esc(c.texto) + '</pre><div class="acciones"><button class="btn sm primario" type="button" data-et-usar="' + i + '">Usar como ejemplo</button></div>'
+        : '<p class="nota">La conversación ya no se guarda (pasaron las 72 horas del chat): puedes escribirla abajo si la recuerdas.</p>') + '</div>';
+  }).join('') : '<p class="muted">Sin correcciones por ahora. Cuando alguien cambie en Chats la etiqueta que puso la IA, aparecerá aquí.</p>';
+}
+async function etGuardar(cuerpo, resultado) {
+  var r = await api('/admin/chat/etiquetas/ejemplos', { method: 'POST', body: cuerpo });
+  toast('Aprendido: ya lo usa al etiquetar.');
+  await etCargar();
+  return r;
+}
+el('et-correcciones').addEventListener('click', async function (ev) {
+  var usar = ev.target.closest('[data-et-usar]');
+  if (usar) {
+    var c = etCorrecciones[Number(usar.getAttribute('data-et-usar'))];
+    var caja = usar.closest('.et-item');
+    /* Se puede retocar antes de guardar: lo personal ya va tapado. */
+    caja.querySelector('.et-conv').outerHTML = '<textarea rows="6" aria-label="Conversación del ejemplo">' + esc(c.texto) + '</textarea><label>La etiqueta que le toca</label><select aria-label="Etiqueta del ejemplo">' + etOpciones(c.ahora) + '</select>';
+    caja.querySelector('.acciones').innerHTML = '<button class="btn sm primario" type="button" data-et-confirmar>Guardar el ejemplo</button><button class="btn sm" type="button" data-et-cancelar>Cancelar</button>';
+    caja.querySelector('textarea').focus();
+    return;
+  }
+  if (ev.target.closest('[data-et-cancelar]')) { etPintarCorrecciones(etCorrecciones); return; }
+  var confirmar = ev.target.closest('[data-et-confirmar]');
+  if (confirmar) {
+    var item = confirmar.closest('.et-item');
+    var corr = etCorrecciones[Number(item.getAttribute('data-et-corr'))];
+    confirmar.disabled = true;
+    try { await etGuardar({ texto: item.querySelector('textarea').value, etiqueta: item.querySelector('select').value, fuente: corr.fuente }); }
+    catch (e) { toast(e.message); confirmar.disabled = false; }
+  }
+});
+el('et-ejemplos').addEventListener('click', async function (ev) {
+  var b = ev.target.closest('[data-et-quitar]');
+  if (!b) return;
+  b.disabled = true;
+  try { await api('/admin/chat/etiquetas/ejemplos/' + encodeURIComponent(b.getAttribute('data-et-quitar')), { method: 'DELETE' }); toast('Ejemplo quitado.'); await etCargar(); }
+  catch (e) { toast(e.message); b.disabled = false; }
+});
+el('et-guardar').onclick = async function () {
+  var b = this;
+  b.disabled = true;
+  el('et-resultado').textContent = 'Guardando…';
+  try {
+    await etGuardar({ texto: el('et-texto').value, etiqueta: el('et-etiqueta').value });
+    el('et-texto').value = '';
+    el('et-resultado').textContent = 'Aprendido.';
+  } catch (e) { el('et-resultado').textContent = e.message; }
+  finally { b.disabled = false; }
+};
+etCargar().then(function () { if (location.hash === '#etiquetar') el('etiquetar').scrollIntoView({ block: 'start' }); });
+
+if (location.hash === '#pendientes' || location.hash === '#examen') el('respuestas-en-pausa').open = true;
 if (location.hash === '#pendientes') el('f-estado').value = 'pendiente';
 
 cargar().then(function () {
@@ -1095,7 +1225,7 @@ setInterval(function () {
 
   return appShell({
     titulo: 'Entrenar a la IA',
-    subtitulo: 'Enséñale a gran escala: ejemplos, datos y reglas; aprende de tus chats; examínala',
+    subtitulo: 'Enséñale a etiquetar los chats con tus propios casos',
     contenido,
     script,
     css: CSS,

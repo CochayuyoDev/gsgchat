@@ -18,7 +18,7 @@
  */
 
 import type { Message } from '../db/messages.js';
-import { CODIGO_OTRO, clasificarConIA, nombreDeEtiqueta, type Catalogo, type IAQueCompleta } from './clasificar.js';
+import { CODIGO_OTRO, clasificarConIA, nombreDeEtiqueta, type Catalogo, type EjemploNegocio, type IAQueCompleta } from './clasificar.js';
 
 /** Una linea de la conversacion: del bot/negocio, del cliente, o un adjunto del cliente. */
 export type LineaCaso = ['bot' | 'cliente', string] | ['ubicacion'] | ['foto'] | ['audio'];
@@ -190,8 +190,9 @@ export function informeDe(resultados: ResultadoCaso[], saltados: number, catalog
 }
 
 /** Un caso por la IA, con el mismo clasificador del boton de Chats (sin reglas que adivinen). */
-export async function evaluarCaso(ia: IAQueCompleta, caso: CasoEvaluacion, catalogo: Catalogo, negocio: string): Promise<ResultadoCaso> {
-  const r = await clasificarConIA(ia, mensajesDeCaso(caso), null, negocio, { catalogo, conReglas: false });
+export async function evaluarCaso(ia: IAQueCompleta, caso: CasoEvaluacion, catalogo: Catalogo, negocio: string, ejemplos: EjemploNegocio[] = []): Promise<ResultadoCaso> {
+  // Con los ejemplos del negocio, como etiqueta de verdad; cuenta como prueba en «Uso de la IA».
+  const r = await clasificarConIA(ia, mensajesDeCaso(caso), null, negocio, { catalogo, conReglas: false, ejemplos, uso: 'pruebas' });
   const obtenida = r.estado === 'clasificada' ? r.etiqueta : null;
   const aceptables = (caso.aceptables ?? []).filter((c) => catalogo.some((e) => e.codigo === c));
   return {
@@ -216,7 +217,7 @@ export async function evaluarClasificador(
   ia: IAQueCompleta,
   catalogo: Catalogo,
   negocio: string,
-  opciones: { aLaVez?: number; casos?: CasoEvaluacion[]; alAvanzar?: (hechos: number, total: number) => void } = {},
+  opciones: { aLaVez?: number; casos?: CasoEvaluacion[]; alAvanzar?: (hechos: number, total: number) => void; ejemplos?: EjemploNegocio[] } = {},
 ): Promise<InformeEvaluacion> {
   const { usar, saltados } = casosParaCatalogo(catalogo, opciones.casos);
   const resultados: ResultadoCaso[] = new Array(usar.length);
@@ -226,7 +227,7 @@ export async function evaluarClasificador(
     Array.from({ length: Math.min(opciones.aLaVez ?? 3, usar.length) }, async () => {
       while (siguiente < usar.length) {
         const i = siguiente++;
-        resultados[i] = await evaluarCaso(ia, usar[i]!, catalogo, negocio);
+        resultados[i] = await evaluarCaso(ia, usar[i]!, catalogo, negocio, opciones.ejemplos);
         opciones.alAvanzar?.(++hechos, usar.length);
       }
     }),

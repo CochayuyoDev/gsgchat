@@ -231,6 +231,35 @@ Con ese banco se afinaron las instrucciones del clasificador (28/10): con un mod
 menos del 90 %, lo primero es un modelo más capaz en Asistente IA y luego mejorar la descripción de las etiquetas
 que fallan.
 
+### Asistente IA y Entrenamiento IA: por ahora la IA solo etiqueta
+
+Por ahora la IA hace una sola cosa: lee los chats y les pone su nota. No le contesta a nadie (quien habla con el
+cliente es el bot). Las dos pantallas de la IA están hechas para eso:
+
+- **Asistente IA** (`/panel#ia`): arriba, solo lo que usa el etiquetado (proveedor, servicio, modelo, razonamiento y
+  clave) y la tarjeta «Notas de los chats»: si puede etiquetar y con qué modelo, el último lote, cuántas llamadas
+  gastó el etiquetado (hoy y en 30 días), la nota de la última «Probar la IA» (avisa si se probó con otro modelo) y
+  cuántos ejemplos le enseñó el equipo, con enlaces a Probar la IA, Enseñarle a etiquetar, el catálogo y el Embudo.
+  Lo de contestar a los clientes (activarla, nombre, ficha de productos, instrucciones, derivar) queda plegado en
+  «Respuestas al cliente (en pausa)», guardado para cuando vuelva a contestar.
+- La señal de la IA arriba de todo dice «IA apagada» solo si falta la clave: con clave, la IA trabaja (etiqueta)
+  aunque no conteste.
+- **Entrenamiento IA** (`/entrenamiento`): arriba, «Enséñale a etiquetar los chats».
+  - *Correcciones de tu equipo*: los chats donde una persona cambió la etiqueta que puso la IA (evento
+    `correccion_ia`), con la conversación que leyó la IA (mientras dure la copia de 72 h) y «Usar como ejemplo».
+  - *Lo que ya sabe*: los ejemplos del negocio (como mucho 15), con «Quitar».
+  - *Enséñale un caso*: una conversación escrita (`cliente:` / `negocio:` por línea) y su etiqueta.
+  Los ejemplos van en las instrucciones del clasificador cada vez que etiqueta (y en «Probar la IA», para medir si
+  ayudan). Teléfonos, DNI y correos se tapan al guardarlos. Se guardan en `settings` (`etiquetas.ejemplos`).
+  Las lecciones para responder quedan plegadas en «Lecciones para responder (en pausa)».
+
+| Ruta (sesión del panel) | Para qué |
+|---|---|
+| `GET /admin/chat/etiquetas/ejemplos` | Los ejemplos del negocio, con el tope |
+| `POST /admin/chat/etiquetas/ejemplos` | `{ texto, etiqueta, fuente? }`: enseña uno (400 si la etiqueta no está, si no hay mensaje del cliente o si ya hay 15) |
+| `DELETE /admin/chat/etiquetas/ejemplos/{id}` | Lo quita |
+| `GET /admin/chat/etiquetas/correcciones` | Las correcciones del equipo que aún no son ejemplo |
+
 ### Etiquetar a mano
 
 En la cabecera de un chat, la etiqueta es un botón (o «+ Etiqueta» si no tiene): abre el catálogo para ponerla o

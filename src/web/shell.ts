@@ -117,8 +117,8 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'gsg-courier', seccion: 'Configuración', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Conexión y reportes de pedidos a GSG.', soloAdmin: true },
   { id: 'api-gsgchat', seccion: 'Configuración', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Claves y estado de la conexión que recibe pedidos.', soloAdmin: true },
   { id: 'configuracion', seccion: 'Configuración', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio y supervisor de avisos.', soloAdmin: true },
-  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
-  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
+  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'La IA que le pone su nota a cada chat: servicio, modelo y clave.' },
+  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Enséñale a etiquetar los chats con tus propios casos.' },
   { id: 'fiabilidad', seccion: 'Avanzado', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'Estado y diagnóstico de conexiones.', soloAdmin: true },
   { id: 'usuarios', seccion: 'Avanzado', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
   { id: 'manual', seccion: 'Ayuda', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Instrucciones para usar GSGchat.' },
@@ -819,7 +819,7 @@ const JS = String.raw`
   window.pintarSenalIA = function (c) {
     if (!c || !SENAL_IA[c.estado]) return;
     var texto = SENAL_IA[c.estado];
-    var detalle = c.estado === 'sin_conexion' ? (c.motivo || 'La IA no respondió.') : c.estado === 'apagada' ? 'La IA no está activa o le falta la clave.' : c.estado === 'sin_comprobar' ? 'Aún no se le ha preguntado nada desde que arrancó el sistema.' : 'La última llamada al modelo respondió bien.';
+    var detalle = c.estado === 'sin_conexion' ? (c.motivo || 'La IA no respondió.') : c.estado === 'apagada' ? 'A la IA le falta la clave: guárdala en Asistente IA para etiquetar los chats.' : c.estado === 'sin_comprobar' ? 'Aún no se le ha preguntado nada desde que arrancó el sistema.' : 'La última llamada al modelo respondió bien.';
     var cuando = c.comprobada ? ' (comprobado: ' + horaCorta(c.comprobada) + ')' : '';
     var a = document.getElementById('s-ia-senal');
     if (a) {

@@ -24,6 +24,8 @@ import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, TOPE_CATALOGO, clasificarConIA, nombreDeEtiqueta, validarCatalogo, type Catalogo } from '../archive/clasificar.js';
 import { casosParaCatalogo, evaluarClasificador, leerConversacionEscrita, type InformeEvaluacion } from '../archive/evaluacion.js';
+import { agregarEjemplo, correccionesRecientes, ejemplosParaIA, quitarEjemplo, TOPE_TEXTO_EJEMPLO } from '../chat/ejemplos-etiquetado.js';
+import { TOPE_EJEMPLOS_NEGOCIO } from '../archive/clasificar.js';
 import { catalogoVigente, crearEtiquetador, numeroNormalizado, type Etiquetador } from '../chat/etiquetar.js';
 import { fechaDelNegocio } from '../ajustes/generales.js';
 import type { EtiquetaChat } from '../db/chat-etiquetas.js';
@@ -388,9 +390,11 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if (!ia) return reply.code(409).send({ error: NO_HAY_IA_PRUEBA, ir: '/panel#ia' });
     if (evaluacion?.enCurso) return reply.code(202).send(evaluacion);
     const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const ejemplos = await ejemplosParaIA(repos.chatEtiquetas, catalogo);
     const actual = (evaluacion = { enCurso: true, hechos: 0, total: casosParaCatalogo(catalogo).usar.length, modelo: modeloDeIA(), empezo: new Date().toISOString(), termino: null, error: null, informe: null });
     void evaluarClasificador(ia, catalogo, deps.ajustes?.nombreNegocio() ?? config.businessName, {
       alAvanzar: (hechos, total) => Object.assign(actual, { hechos, total }),
+      ejemplos,
     })
       .then((informe) => Object.assign(actual, { informe }))
       .catch((error) => Object.assign(actual, { error: error instanceof Error ? error.message : String(error) }))
@@ -416,10 +420,43 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const mensajes = leerConversacionEscrita(texto);
     if (!mensajes.some((m) => m.direction === 'in')) return reply.code(400).send({ error: 'Escribe al menos un mensaje del cliente (una línea que empiece por «cliente:»).' });
     const catalogo = await catalogoVigente(repos.chatEtiquetas);
-    const r = await clasificarConIA(ia, mensajes, null, deps.ajustes?.nombreNegocio() ?? config.businessName, { catalogo, conReglas: false });
+    const ejemplos = await ejemplosParaIA(repos.chatEtiquetas, catalogo);
+    const r = await clasificarConIA(ia, mensajes, null, deps.ajustes?.nombreNegocio() ?? config.businessName, { catalogo, conReglas: false, ejemplos, uso: 'pruebas' });
     if (r.estado !== 'clasificada') return { etiqueta: null, nombre: null, motivo: r.motivo, mensajes: mensajes.length, modelo: modeloDeIA() };
     const e = catalogo.find((x) => x.codigo === r.etiqueta);
     return { etiqueta: r.etiqueta, nombre: nombreDeEtiqueta(r.etiqueta, catalogo), descripcion: e?.descripcion ?? null, motivo: null, mensajes: mensajes.length, modelo: modeloDeIA() };
+  });
+
+  // ------------------------------------------ «Enséñale a etiquetar» (Entrenamiento IA)
+
+  /** Los ejemplos de etiquetado del negocio (van en cada llamada del clasificador). */
+  app.get('/admin/chat/etiquetas/ejemplos', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const items = (await repos.chatEtiquetas.ejemplos()).map((e) => ({ ...e, nombreEtiqueta: nombreDeEtiqueta(e.etiqueta, catalogo), enCatalogo: catalogo.some((c) => c.codigo === e.etiqueta) }));
+    return { items, tope: TOPE_EJEMPLOS_NEGOCIO, topeTexto: TOPE_TEXTO_EJEMPLO };
+  });
+
+  /** Enseña un ejemplo: `{ texto, etiqueta, fuente? }` (fuente = la corrección de la que sale). Lo personal se tapa. */
+  app.post('/admin/chat/etiquetas/ejemplos', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const body = z.object({ texto: z.string().max(4000), etiqueta: z.string().trim().max(60), fuente: z.string().trim().max(200).nullable().optional() }).parse(request.body ?? {});
+    const r = await agregarEjemplo(repos.chatEtiquetas, await catalogoVigente(repos.chatEtiquetas), { ...body, quien: quienEs(request.usuario) });
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    return { ok: true, ejemplo: r.ejemplo };
+  });
+
+  /** Quita un ejemplo. */
+  app.delete<{ Params: { id: string } }>('/admin/chat/etiquetas/ejemplos/:id', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (!(await quitarEjemplo(repos.chatEtiquetas, request.params.id))) return reply.code(404).send({ error: 'Ese ejemplo ya no existe.' });
+    return { ok: true };
+  });
+
+  /** Las correcciones de la etiqueta de la IA que hizo el equipo y aún no son ejemplo, con la conversación que leyó la IA. */
+  app.get('/admin/chat/etiquetas/correcciones', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    return { items: await correccionesRecientes(repos.chatEtiquetas, await catalogoVigente(repos.chatEtiquetas)) };
   });
 
   /** El registro de lo que paso al etiquetar y al mandar a GSG, filtrable. */

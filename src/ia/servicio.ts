@@ -117,7 +117,7 @@ export interface EstadoIA extends ConfigIA {
 
 /**
  * Si la IA responde, en una palabra:
- *  - `apagada`: no está activa o le falta la clave.
+ *  - `apagada`: le falta la clave (con clave trabaja aunque no conteste: etiqueta los chats).
  *  - `conectada`: la última llamada real (o «Comprobar conexión») respondió bien.
  *  - `sin_conexion`: la última falló; `motivo` lo dice en cristiano, sin claves.
  *  - `sin_comprobar`: activa, pero desde que arrancó aún no se le ha preguntado nada.
@@ -615,7 +615,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   }
   const huellaConexion = (): string => [cfg.activa, cfg.proveedor, cfg.servicio, cfg.modelo, cfg.baseUrl, cfg.razonamiento, token].join('|');
   function conexion(): ConexionIA {
-    if (!(cfg.activa && token)) return { estado: 'apagada', motivo: null, comprobada: ultimaConexion?.en.toISOString() ?? null, origen: ultimaConexion?.origen ?? null };
+    // Con la clave guardada la IA trabaja aunque no conteste a los clientes: etiqueta
+    // los chats (28/10). «Apagada» es solo sin clave.
+    if (!token) return { estado: 'apagada', motivo: null, comprobada: ultimaConexion?.en.toISOString() ?? null, origen: ultimaConexion?.origen ?? null };
     if (!ultimaConexion) {
       // Recién arrancado pero con el aviso de saldo guardado: ya se sabe que no responde.
       const sin = uso.resumen().sinSaldo;

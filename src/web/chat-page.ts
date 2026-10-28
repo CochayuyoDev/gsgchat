@@ -1921,6 +1921,15 @@ window.sondearPanel(revisarConexion, 30000, true);
 loadChats().then(abrirDesdeUrl);
 seguirEtiquetado(true);
 cargarConteoEtiquetas();
+/* Los enlaces de Asistente IA y Entrenamiento IA: /chat#probar-ia y /chat#catalogo abren su ventana
+   (al entrar, o si ya se estaba en Chats y solo cambia el #). */
+function abrirSegunHash() {
+  if (location.hash !== '#probar-ia' && location.hash !== '#catalogo') return;
+  if (location.hash === '#probar-ia') probarIA(); else editarCatalogo();
+  history.replaceState(null, '', location.pathname + location.search);
+}
+abrirSegunHash();
+window.addEventListener('hashchange', abrirSegunHash);
 `;
 
   const script =

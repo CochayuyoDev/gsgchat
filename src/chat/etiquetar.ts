@@ -35,13 +35,14 @@ import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import { fechaDelNegocio } from '../ajustes/generales.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { revisarTelefono, soloDigitos } from '../rutas/telefono.js';
+import { CODIGO_CORRECCION, ejemplosParaIA } from './ejemplos-etiquetado.js';
+
+export { CODIGO_CORRECCION };
 
 /** Cuantos mensajes del dia se leen como mucho en un lote. */
 export const TOPE_MENSAJES = 20_000;
 /** Cuantas conversaciones se mandan a la IA a la vez. */
 const A_LA_VEZ = 3;
-/** El evento de cuando una persona cambia la etiqueta que puso la IA (ver src/chat/ejemplos-etiquetado.ts). */
-export const CODIGO_CORRECCION = 'correccion_ia';
 
 export interface EtiquetadoDeps {
   repo: ChatEtiquetasRepo;
@@ -234,6 +235,8 @@ export async function etiquetarDelDia(
     await deps.repo.vaciarCopiasAntes(new Date(ahora.getTime() - RETENCION_CHAT_MS)).catch(() => 0);
     const catalogo = await catalogoVigente(deps.repo);
     const firma = firmaCatalogo(catalogo);
+    // Los ejemplos que enseñó el negocio (Entrenamiento IA): van en cada llamada.
+    const ejemplos = await ejemplosParaIA(deps.repo, catalogo);
     const mensajes = await deps.repo.mensajesDelDia(inicioDelDia(ahora, zona), alcance, TOPE_MENSAJES);
     const conversaciones = agruparPorNumero(mensajes);
     estado.recortado = mensajes.length >= TOPE_MENSAJES;
@@ -267,7 +270,7 @@ export async function etiquetarDelDia(
     const una = async (c: ChatDeLoteConMensajes) => {
       const base = { phone: c.phone, dia, huella: c.huella, mensajes: c.totalMensajes, loteId: lote.id };
       try {
-        const r = await clasificarConIA(ia, c.mensajes ?? [], c.nombre, negocio, { catalogo, conReglas: false });
+        const r = await clasificarConIA(ia, c.mensajes ?? [], c.nombre, negocio, { catalogo, conReglas: false, ejemplos });
         // Mientras la IA leia, una persona pudo ponerla a mano: esa manda y no se pisa.
         const mientras = (await deps.repo.delDia(dia, [c.phone]))[0];
         if (mientras?.origen === 'manual') {
