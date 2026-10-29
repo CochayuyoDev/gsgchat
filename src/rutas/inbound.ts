@@ -26,6 +26,7 @@ import type { Solicitud } from '../db/rutas.js';
 import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { diaEnZona, resolverPorUbicacion, solicitudesAbiertasDe, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
+import { canonicalMapsUrl } from '../geo/extract.js';
 import { despertarMotorRutas } from './despertador.js';
 import { derivarSolicitud, plazoVencido } from './motor.js';
 
@@ -248,7 +249,8 @@ async function corregirUbicacion(
       // 28/10: hasta 2 cambios antes de la hora límite) y ellas reportan a GSG
       // lo que no se pudo cambiar. Sin pedidos del día, como siempre: se reporta aquí.
       if (!ligadas.length) {
-        const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se cambió, se queda la registrada`;
+        // A GSG solo el enlace de la ubicación que mandó (regla del dueño, 29/10).
+        const detalle = canonicalMapsUrl(ubicacion.lat, ubicacion.lng);
         for (const tracking of trackings) {
           await encolarProblemaGsg(deps.repos.rutas, { tracking, referencia: resuelta.referencia, codigo: 'cambio_ubicacion', telefono: resuelta.phone, titulo: 'El cliente pidió cambiar su ubicación', detalle }, { solicitudId: resuelta.id, loteId: lote.id, en: momento }).catch(() => false);
         }

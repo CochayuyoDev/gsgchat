@@ -77,6 +77,7 @@ import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leer
 import { randomBytes } from 'node:crypto';
 import type { BoundingBox } from '../types.js';
 import { dentroDe } from '../geo/validate.js';
+import { canonicalMapsUrl } from '../geo/extract.js';
 import { distanciaEnPalabras, haversineKm } from './geo.js';
 import type { Bus, EventoEntregaDelDia } from '../eventos/bus.js';
 import { leerLote, type FilaLote } from '../rutas/lote.js';
@@ -1273,6 +1274,33 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', text: texto, manual: true, origen: 'sistema' }).catch(() => undefined);
   }
 
+  /**
+   * Un pedido nuevo vuelve a encender el bot en el chat de ese cliente (pedido
+   * del dueño, 29/10): si quedó callado o con la IA cerrada por un pedido
+   * anterior, el primer mensaje del nuevo no salía. Es «Volver a empezar» del
+   * chat, solo para lo que se apagó ANTES de este pedido: si una persona se
+   * hizo cargo después, manda ella. La baja («no me escriban») no se toca.
+   */
+  async function despertarChat(e: Entrega): Promise<void> {
+    try {
+      const c = await repos.contacts.getByPhone(e.phone);
+      if (!c) return;
+      const desde = ahora();
+      const que: string[] = [];
+      if (c.botPausadoAt && c.botPausadoAt < desde) {
+        await repos.contacts.pausarBot(c.id, false, ahora());
+        que.push('el bot estaba callado');
+      }
+      if (c.iaCerradaAt && c.iaCerradaAt < desde) {
+        await repos.contacts.cerrarIA(c.id, false, ahora(), null);
+        que.push('el chat estaba cerrado');
+      }
+      if (que.length) await evento(e, 'nota', `pedido nuevo: ${que.join(' y ')} por un pedido anterior; se vuelve a encender para escribirle`);
+    } catch (error) {
+      deps.log?.('no se pudo volver a encender el bot del chat', { phone: e.phone, detalle: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   async function marcarIncidencia(e: Entrega, codigo: string, detalle: string, opts: { avisar?: boolean; cerradaPorDia?: boolean } = {}): Promise<Entrega> {
     const actualizada = (await repo.actualizar(e.id, { estado: 'incidencia', incidencia: codigo, incidenciaDetalle: detalle, requiereHumano: true, ...(opts.cerradaPorDia ? { cerradaPorDia: true } : {}) })) ?? e;
     await evento(e, 'incidencia', `${codigo}: ${detalle}`);
@@ -1385,6 +1413,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         if (e.envioRetenidoAt) resultado.retenidas = (resultado.retenidas ?? 0) + 1;
         if (conPin && que !== 'ubicacion') e = (await repo.actualizar(e.id, { ubicacionFuente: 'gsg', ubicacionAt: ahora(), mapsUrl: enlaceMapa(c.lat!, c.lng!) })) ?? e;
         await evento(e, 'sincronizada', `llegó de GSG: falta ${que === 'ubicacion' ? 'la ubicación' : 'confirmar'}`);
+        await despertarChat(e);
       } else {
         // Ya la teniamos: GSG puede decir ahora que ademas falta lo otro.
         const patch: Partial<Entrega> = {};
@@ -2107,7 +2136,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       return { atendida: true, entrega: conError[0], resultado: 'cambio_reportado' };
     }
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
-    await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, detalle);
+    // A GSG solo el enlace de la ubicación que mandó (regla del dueño, 29/10).
+    await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, canonicalMapsUrl(ubicacion.lat, ubicacion.lng));
     await quitarUbicacionPorCambio(yaTenian, detalle);
     if (pendientes) return null;
     return { atendida: true, entrega: yaTenian[0], resultado: 'cambio_reportado' };
@@ -3913,6 +3943,7 @@ ${lista}
     let e = entrega;
     if (conPin) e = (await repo.actualizar(e.id, { mapsUrl: enlaceMapa(input.lat!, input.lng!), ubicacionFuente: `a mano (${quien})`, ubicacionAt: ahora() })) ?? e;
     await evento(e, 'sincronizada', `creada a mano por ${quien}`);
+    await despertarChat(e);
     const contacto = await repos.contacts.upsertFromInbound(e.phone, e.nombre ?? undefined);
     if (!contacto.optInAt) await repos.contacts.setOptIn(e.phone, `entrega: pedido ${e.referencia} (a mano)`);
     // Hoy ya mando su ubicacion (por otro pedido): vale la misma, no se le pide.
@@ -4804,6 +4835,7 @@ ${lista}
         continue;
       }
       await evento(entrega, 'sincronizada', `creada desde la lista pegada por ${quien}`);
+      await despertarChat(entrega);
       const contacto = await repos.contacts.upsertFromInbound(entrega.phone, entrega.nombre ?? undefined);
       if (!contacto.optInAt) await repos.contacts.setOptIn(entrega.phone, `entrega: pedido ${entrega.referencia} (lista pegada)`);
       resultado.creadas.push(entrega);
