@@ -67,6 +67,8 @@ import { entradaAdmitida, esMediaAdmitida } from '../whatsapp/entradas-admitidas
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
+import { soltarSolicitudes } from '../entregas/ubicacion-unica.js';
+import { clasificarConReglas } from '../archive/clasificar.js';
 import { horaEnPalabras, horarioEnPalabras, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 import type { Solicitud } from '../db/rutas.js';
 import { ventanaDeEntrega } from '../entregas/horario-distrito.js';
@@ -1320,6 +1322,15 @@ async function handleInboundMessageEnFila(
       if (!ubicacion?.ok && !confirmaPin) {
         // Un número equivocado se reporta por dentro, sin contestarle al cliente.
         if (escrito && pareceNumeroEquivocado(escrito)) await deps.entregas?.alNoSoyYo(contact, escrito, 'reglas; sin respuesta al cliente').catch((error) => request_log(deps, 'no se pudo reportar el número equivocado', error));
+        // Pide cancelar o la entrega otro día: tampoco se le contesta (la nota la
+        // pone la IA para GSG), pero ya no se le manda «aún esperamos tu
+        // ubicación»: lo ve una persona (regla del dueño, 29/10).
+        const pide = escrito && !pareceNumeroEquivocado(escrito) ? clasificarConReglas([{ direction: 'in', kind: 'text', body: escrito }]) : null;
+        if (pide === 'cancelar_entrega' || pide === 'reagendar_entrega') {
+          const que = pide === 'cancelar_entrega' ? 'pidió cancelar el pedido' : 'pidió la entrega otro día';
+          await soltarSolicitudes(repos, phone, { ahora: new Date(), motivo: `${que} («${escrito.slice(0, 160)}»)`, estado: 'supervision', incidencia: 'respondio_sin_ubicacion' }).catch((error) => request_log(deps, 'no se pudieron parar los recordatorios', error));
+          return;
+        }
         if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `mensaje sin ubicación: no se contesta ni se adelanta el recordatorio (${escrito.slice(0, 160) || message.type})`).catch(() => undefined);
         return;
       }
