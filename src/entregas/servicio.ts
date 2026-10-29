@@ -77,6 +77,7 @@ import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leer
 import { randomBytes } from 'node:crypto';
 import type { BoundingBox } from '../types.js';
 import { dentroDe } from '../geo/validate.js';
+import { canonicalMapsUrl } from '../geo/extract.js';
 import { distanciaEnPalabras, haversineKm } from './geo.js';
 import type { Bus, EventoEntregaDelDia } from '../eventos/bus.js';
 import { leerLote, type FilaLote } from '../rutas/lote.js';
@@ -2135,7 +2136,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       return { atendida: true, entrega: conError[0], resultado: 'cambio_reportado' };
     }
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
-    await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, detalle);
+    // A GSG solo el enlace de la ubicación que mandó (regla del dueño, 29/10).
+    await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, canonicalMapsUrl(ubicacion.lat, ubicacion.lng));
     await quitarUbicacionPorCambio(yaTenian, detalle);
     if (pendientes) return null;
     return { atendida: true, entrega: yaTenian[0], resultado: 'cambio_reportado' };

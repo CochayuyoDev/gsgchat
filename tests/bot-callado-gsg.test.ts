@@ -219,7 +219,11 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
       expect(e.mensajesA(telefono)).toHaveLength(tras);
       expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ estado: 'incidencia', incidencia: 'cambio_ubicacion', ubicacionEstado: 'pendiente', lat: null, lng: null, ubicacionAnteriorLat: fijo.lat });
       const incidencias = (await e.repos.rutas.reportesRecientes(100, 'incidencia')).map((r) => r.payload as Record<string, unknown>);
-      expect(incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(1);
+      const cambio = incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion');
+      expect(cambio).toHaveLength(1);
+      // A GSG le llega solo el enlace de la ubicación que mandó, sin coordenadas sueltas (regla del dueño, 29/10).
+      expect(JSON.stringify(cambio[0])).toContain(`https://www.google.com/maps/search/?api=1&query=${otro.lat},${otro.lng}`);
+      expect(JSON.stringify(cambio[0])).not.toMatch(/mandó otra ubicación/);
       const ubicaciones = (await e.repos.rutas.reportesRecientes(100, 'ubicacion')).map((r) => r.payload as Record<string, unknown>);
       expect(ubicaciones.some((p) => p.lat === otro.lat)).toBe(false);
     } finally {
