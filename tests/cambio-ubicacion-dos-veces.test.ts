@@ -72,13 +72,14 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       expect(ent).toMatchObject({ lat: C.lat, lng: C.lng, ubicacionCambios: 2 });
       expect(ent.cambioUbicacion).toMatch(/cambió su ubicación 2 veces/);
 
-      // 5. Un tercero: no. Se queda la última, y un pin nuevo tampoco la cambia.
+      // 5. Un tercero: no. Con el último cambio registrado el bot ya se calla
+      // (regla del dueño, 29/10): ni a «cambiar ubicación» ni a otro pin. Lo ve soporte por la nota.
+      const antes = e.mensajesA(telefono).length;
       e.avanzar(5);
       await e.contesta(telefono, { texto: 'cambiar ubicación' });
-      expect(cuerpos(e.mensajesA(telefono)).at(-1)).toMatch(/Ya cambió su ubicación 2 veces, que es el máximo/);
       e.avanzar(1);
       await e.contesta(telefono, { pin: D });
-      expect(cuerpos(e.mensajesA(telefono)).at(-1)).toMatch(/Ya cambió su ubicación 2 veces/);
+      expect(e.mensajesA(telefono)).toHaveLength(antes);
       ent = (await e.entrega('GSG-CAMBIO-2'))!;
       expect(ent).toMatchObject({ lat: C.lat, lng: C.lng, ubicacionCambios: 2 });
       expect(ent.estado).not.toBe('incidencia');

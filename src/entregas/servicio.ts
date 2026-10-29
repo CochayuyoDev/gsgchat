@@ -2026,9 +2026,10 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
       const hechos = cambiosHechos(vivas);
       if (max <= 0 || hechos >= max) {
-        for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación otra vez, pero ya la cambió ${hechos} ${hechos === 1 ? 'vez' : 'veces'} (máximo ${max}): se queda la última y se le dio el contacto de soporte${dijo}`).catch(() => undefined);
+        for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación otra vez, pero ya la cambió ${hechos} ${hechos === 1 ? 'vez' : 'veces'} (máximo ${max}): se queda la última y no se le contesta (lo ve soporte por la nota)${dijo}`).catch(() => undefined);
         await reportarCambioUbicacion(vivas, false, limite, `pidió un cambio más de los ${max} permitidos${dijo}`);
-        return { texto: textoDe('cambiosUbicacionAgotados', ajustes, { ...contexto(e), cambiosMax: max }), entrega: e, tarde: false, pedirPin: false, agotado: true };
+        // Con el último cambio registrado el bot ya se calla (regla del dueño, 29/10): no se le contesta.
+        return { texto: '', entrega: e, tarde: false, pedirPin: false, agotado: true };
       }
       for (const x of vivas) {
         await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
@@ -2092,7 +2093,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       const e = yaTenian[0]!;
       for (const x of yaTenian) await evento(x, 'nota', `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}), pero ya la cambió ${hechos} veces (máximo ${ajustes.cambiosUbicacionMax}): no se registra, se queda la última`).catch(() => undefined);
-      return { atendida: true, entrega: e, resultado: 'cambio_ubicacion_agotado', responder: textoDe('cambiosUbicacionAgotados', ajustes, { ...contexto(e), cambiosMax: ajustes.cambiosUbicacionMax }) };
+      // Sin cambios que le queden, el bot se calla: lo ve soporte por la nota (regla del dueño, 29/10).
+      return { atendida: true, entrega: e, resultado: 'cambio_ubicacion_agotado' };
     }
     const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se registra`;
     const pendientes = vivas.some((x) => x.ubicacionEstado === 'pendiente');

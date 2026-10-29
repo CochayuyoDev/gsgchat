@@ -33,7 +33,8 @@ function hoyALas9(): Date {
 const pideLaNueva = (_nombre: string): string => 'Por favor, comparta su nueva ubicación 📍';
 const PIDE_LA_NUEVA = pideLaNueva('Ana');
 // Desde el 28/10: cómo cambiarla, con la hora límite.
-const AVISO_1PM = /Si desea cambiar su ubicación, solo diga: \*cambiar ubicación\* \(hasta la 1:00 PM\)\./;
+// La hora límite sigue mandando, pero el texto ya no la dice (pedido del dueño, 29/10).
+const AVISO_1PM = /Si desea cambiar su ubicación, solo diga: \*cambiar ubicación\*\.$/m;
 const MOTO = '999888777';
 
 // ------------------------------------------------------------------ reglas
@@ -185,6 +186,7 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     const gracias = r.find((t) => t.includes('Ubicación registrada correctamente'));
     expect(gracias, r.join('\n---\n')).toBeTruthy();
     expect(gracias).toMatch(AVISO_1PM);
+    expect(gracias).not.toMatch(/\(hasta la /);
   });
 
   it('2. «me equivoqué de ubicación» → que mande la nueva; nada de «No reconocí» ni menú', async () => {
