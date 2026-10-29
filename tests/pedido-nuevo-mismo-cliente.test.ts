@@ -82,6 +82,43 @@ describe('el mismo cliente puede volver a pedir', () => {
     }
   }, 90_000);
 
+  it('con el bot callado y el chat cerrado por el pedido de ayer, el pedido nuevo lo vuelve a encender y se le escribe', async () => {
+    const e = await armar();
+    try {
+      const tel = '987730005';
+      await desdeGsg(e, 'PED-400', tel);
+      const contacto = (await e.repos.contacts.getByPhone('51' + tel))!;
+      // Ayer: una persona se hizo cargo («de este me encargo yo») y el chat quedó cerrado.
+      await e.repos.contacts.pausarBot(contacto.id, true, e.ahora());
+      await e.repos.contacts.cerrarIA(contacto.id, true, e.ahora(), 'cierre');
+      e.avanzar(24 * 60);
+      const antes = e.mensajesA(tel).length;
+      await desdeGsg(e, 'PED-401', tel);
+      expect(e.mensajesA(tel).length, 'pedido nuevo: sale su primer mensaje').toBeGreaterThan(antes);
+      const despues = (await e.repos.contacts.getByPhone('51' + tel))!;
+      expect(despues.botPausadoAt ?? null).toBeNull();
+      expect(despues.iaCerradaAt ?? null).toBeNull();
+    } finally {
+      await e.cerrar();
+    }
+  }, 90_000);
+
+  it('si una persona calla el bot DESPUÉS de que llegó el pedido, se respeta', async () => {
+    const e = await armar();
+    try {
+      const tel = '987730006';
+      await desdeGsg(e, 'PED-500', tel);
+      const contacto = (await e.repos.contacts.getByPhone('51' + tel))!;
+      e.avanzar(5);
+      await e.repos.contacts.pausarBot(contacto.id, true, e.ahora());
+      // El mismo pedido reenviado por GSG no es un pedido nuevo: sigue callado.
+      await desdeGsg(e, 'PED-500', tel);
+      expect((await e.repos.contacts.getByPhone('51' + tel))!.botPausadoAt).toBeTruthy();
+    } finally {
+      await e.cerrar();
+    }
+  }, 90_000);
+
   it('cancelar un pedido no toca el otro del mismo cliente', async () => {
     const e = await armar();
     try {
