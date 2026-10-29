@@ -50,6 +50,11 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
       expect(incidencias.filter((p) => p.tracking === 'GSG-CALLADO-1' && p.codigo === 'cambio_ubicacion')).toHaveLength(0);
       expect(await e.entrega('GSG-CALLADO-1')).toMatchObject({ ubicacionEstado: 'recibida', lat: fijo.lat });
       expect((await e.entrega('GSG-CALLADO-1'))!.estado).not.toBe('incidencia');
+      // Es un texto fijo del negocio, no lo escribió la IA: queda marcado así en el hilo
+      // (el chat no le pone el 🤖 y GSG lo ve con autor «sistema»).
+      const contacto = (await e.repos.contacts.getByPhone(phone))!;
+      const pide = (await e.repos.messages.listMessages(contacto.id, 50)).find((m) => m.direction === 'out' && m.body?.startsWith('Por favor, comparta su nueva ubicación'));
+      expect(pide?.payload).toMatchObject({ origen: 'ia', textoFijo: true });
     } finally {
       await e.cerrar();
     }

@@ -80,7 +80,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
   const trackingDe = trackingDeEntrega;
 
   const mensajeDeChat = (m: Awaited<ReturnType<Repos['messages']['listMessages']>>[number]) => {
-    const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; emisor?: unknown; media?: { voz?: unknown; transcripcion?: unknown } };
+    const p = (m.payload ?? {}) as { origen?: unknown; textoFijo?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; emisor?: unknown; media?: { voz?: unknown; transcripcion?: unknown } };
     // GSG no recibe la transcripción de los audios (regla del dueño, 28/10): el
     // audio se escucha con `archivo.url`. Un audio transcrito se guarda con lo que
     // dijo como cuerpo; aquí sale como «(audio)» y sin la transcripción en `datos`.
@@ -101,7 +101,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
       datos,
       fecha: m.createdAt,
       // Quien lo mando (solo salientes): persona | ia | sistema. Si lo escribio un usuario de GSG, `emisor` dice cual.
-      autor: m.direction === 'out' ? (p.origen === 'persona' || p.origen === 'ia' ? p.origen : 'sistema') : null,
+      autor: m.direction === 'out' ? (p.origen === 'persona' || (p.origen === 'ia' && !p.textoFijo) ? p.origen : 'sistema') : null,
       autorNombre: m.direction === 'out' && typeof p.autorNombre === 'string' ? p.autorNombre : null,
       emisor: m.direction === 'out' && p.emisor && typeof p.emisor === 'object' ? p.emisor : null,
       voz: p.media?.voz === true,

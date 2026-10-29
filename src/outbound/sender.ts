@@ -158,6 +158,8 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
     ...(payload ?? {}),
     origen,
     ...(job.confirmacionUbicacion ? { confirmacionUbicacion: true } : {}),
+    // Un texto fijo del negocio que manda el asistente: en el chat y para GSG es del sistema, no de la IA.
+    ...(job.textoFijo ? { textoFijo: true } : {}),
     ...(nombre ? { autorNombre: nombre } : {}),
     ...(job.emisor ? { emisor: job.emisor } : {}),
     // La cita se guarda con lo justo para pintarla: de quien era y que decia.

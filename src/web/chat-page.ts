@@ -1279,7 +1279,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       borradoHtml(m) +
       '<span class="meta">' +
         (m.payload && m.payload.editadoAt ? '<span class="editado" title="Se editó después de enviarlo">editado</span>' : '') +
-        (m.direction === 'out' && m.payload && m.payload.origen === 'ia' ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') +
+        (m.direction === 'out' && m.payload && m.payload.origen === 'ia' && !m.payload.textoFijo ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') +
         esc(hhmm(m.createdAt)) + (m.direction === 'out' ? ' ' + tick(m.status) : '') +
       '</span>' +
       reaccionesHtml(m) +
@@ -1355,9 +1355,11 @@ function cuerpoVisible(m) {
   if (m.kind === 'location' && m.payload && m.payload.location) return '';
   /* La nota de voz se escucha: su transcripcion no se enseña (regla del dueño, 28/10). */
   if (m.kind === 'audio') return '';
-  var cuerpo = (m.body || '').trim();
+  /* «(se pidio la ubicacion)» es una marca interna del hilo: el cliente ve el texto con el botón de ubicación. */
+  var cuerpo = (m.body || '').replace(/\n\n\(se pidio la ubicacion\)$/, '').trim();
   var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
-  return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
+  if (relleno.indexOf(cuerpo) !== -1) return '';
+  return m.payload && m.payload.interactive && m.payload.interactive.locationRequest ? cuerpo + '\n\n📍 [Enviar ubicación]' : cuerpo;
 }
 
 /**
