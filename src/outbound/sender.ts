@@ -99,6 +99,11 @@ export interface SendJob {
    * cambio lo atiende el bot): sale también con el bot callado de «Solo lo de GSG».
    */
   cambioUbicacion?: boolean;
+  /**
+   * La respuesta del bot a un enlace de mapa del que no sale una ubicación segura
+   * (se le pide el pin): sale también con el bot callado, como la de cambiar ubicación.
+   */
+  respuestaUbicacion?: boolean;
   /** Huella de coordenadas normalizadas para distinguir una corrección del mismo pedido. */
   confirmationScope?: string;
   /**

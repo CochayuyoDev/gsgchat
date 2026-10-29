@@ -418,6 +418,10 @@ export const CHAT_CSS = `
   /* ubicacion que mando el cliente */
   .pin-cliente { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px; padding: 8px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
   .pin-cliente .pin-titulo { font-weight: 600; font-size: 13px; }
+  .adjunto { display: block; margin: 2px 0 6px; max-width: min(320px, 100%); }
+  .adjunto-foto img, .adjunto-video video { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 8px; background: var(--borde); }
+  .adjunto-audio { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
+  .adjunto-audio audio { width: min(280px, 100%); }
   .pin-cliente .pin-coords { font-family: ui-monospace, Consolas, monospace; font-size: 13px; user-select: all; }
   .pin-cliente .pin-acciones { display: flex; gap: 10px; align-items: center; font-size: 13px; }
   .pin-cliente .pin-copiar { border: 1px solid var(--borde); background: var(--superficie); border-radius: var(--radio-sm); padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; min-height: 32px; color: var(--texto); }

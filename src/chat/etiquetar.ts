@@ -210,6 +210,10 @@ type Registrar = ReturnType<typeof registrador>;
 
 type ChatDeLoteConMensajes = Awaited<ReturnType<ChatEtiquetasRepo['chatsDelLote']>>[number];
 
+/** La nota que puso el bot al registrar un hecho (p. ej. «cambió su ubicación», ver entregas/servicio.ts): no se relee. */
+const esDelBot = <T extends { origen: string; etiqueta: string | null; huella: string }>(e: T | undefined): e is T =>
+  Boolean(e && e.origen === 'reglas' && e.etiqueta && e.huella.startsWith('bot-'));
+
 /** Un lote completo. `alAvanzar` recibe el estado cada vez que algo avanza. */
 export async function etiquetarDelDia(
   deps: EtiquetadoDeps,
@@ -258,7 +262,8 @@ export async function etiquetarDelDia(
     for (const c of copia) {
       const antes = ya.get(c.phone);
       // Lo que puso una persona a mano no lo pisa la IA, ni al «volver a etiquetar todo».
-      if (antes?.origen === 'manual' || (!opciones.releer && yaEtiquetado(antes, catalogo))) {
+      // Tampoco lo que puso el bot (el cliente cambió su ubicación): es un hecho, no una lectura.
+      if (antes?.origen === 'manual' || esDelBot(antes) || (!opciones.releer && yaEtiquetado(antes, catalogo))) {
         await deps.repo.marcarChatLote(lote.id, c.phone, { estado: 'reutilizada', etiqueta: antes!.etiqueta });
         estado.reutilizadas++;
         estado.hechas++;
@@ -273,7 +278,7 @@ export async function etiquetarDelDia(
         const r = await clasificarConIA(ia, c.mensajes ?? [], c.nombre, negocio, { catalogo, conReglas: false, ejemplos });
         // Mientras la IA leia, una persona pudo ponerla a mano: esa manda y no se pisa.
         const mientras = (await deps.repo.delDia(dia, [c.phone]))[0];
-        if (mientras?.origen === 'manual') {
+        if (mientras?.origen === 'manual' || esDelBot(mientras)) {
           await deps.repo.marcarChatLote(lote.id, c.phone, { estado: 'reutilizada', etiqueta: mientras.etiqueta });
           estado.reutilizadas++;
         } else if (r.estado === 'clasificada') {

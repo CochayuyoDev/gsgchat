@@ -548,7 +548,7 @@ export interface ServicioEntregas {
   textoSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<string | null>;
   plantillaSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<{ name: string; variables: string[] } | null>;
   /** Los textos del agente operativo (por qué la ubicación, el cierre), con los datos de la entrega viva de ese teléfono si hay. */
-  textoAgente(clave: 'porQueUbicacion' | 'cierreAgente', phone: string, nombre?: string | null): Promise<string>;
+  textoAgente(clave: 'porQueUbicacion' | 'cierreAgente' | 'enlaceSinUbicacion' | 'variosEnlaces', phone: string, nombre?: string | null): Promise<string>;
   /**
    * El cliente, con su ubicación ya registrada, pide cambiarla («me equivoqué
    * de ubicación»). Antes de la hora límite: que mande la nueva. Después:

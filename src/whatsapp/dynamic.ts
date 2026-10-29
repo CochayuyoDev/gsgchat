@@ -91,6 +91,11 @@ export function createDynamicWhatsAppClient(
       if (!cliente.sendMedia) throw new Error('este proveedor no manda fotos ni archivos');
       return cliente.sendMedia(to, media);
     },
+    downloadMedia: async (mediaId) => {
+      const cliente = inner();
+      if (!cliente.downloadMedia) throw new Error('este proveedor guarda los archivos al recibirlos');
+      return cliente.downloadMedia(mediaId);
+    },
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),

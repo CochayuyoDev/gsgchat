@@ -153,6 +153,33 @@ etiquetar, cambia. `null` si el chat aún no tiene ninguna (o la IA no pudo clas
 GSG la ve en la siguiente llamada: no hay envíos que fallen ni reintentos. Ver `src/api/v1/conversaciones-gsg.ts`
 y la documentación de la API (`/api/v1/openapi.json`).
 
+### Las fotos, videos, audios y documentos del chat (28/10)
+
+GSGchat recibe las **fotos, audios (también notas de voz) y videos** del cliente: se guardan en el chat con su
+archivo y nada más (no se transcriben, el bot no contesta y no cuentan como respuesta ni mueven el pedido). Los
+documentos y stickers se ignoran. Los archivos se borran del disco a las 72 horas, con sus mensajes.
+
+En el mismo historial, cada mensaje que lleva un archivo trae `archivo`; los demás, `null`:
+
+```json
+"archivo": { "url": "https://gsgchat.midominio.com/tienda/gsg/archivos/eyJj….firma",
+             "tipo": "imagen", "mimeType": "image/jpeg", "nombre": null, "segundos": null,
+             "bytes": 48213, "voz": false, "verUnaVez": false, "caducaEn": "2026-11-04T15:20:00.000Z" }
+```
+
+- `url` abre el fichero tal cual, **sin clave de API** (va firmada con `TRACKING_SECRET`): GSG la pone directo en
+  un `<img>`, `<video>` o `<audio>`. La firma cubre el chat y el mensaje: no se puede cambiar para abrir otro.
+- Caduca a los **7 días** (responde 410): cada vez que GSG pide el historial llegan enlaces nuevos.
+- `tipo`: `imagen`, `video`, `audio`, `documento` o `sticker`. En un audio, `segundos` y `voz` (nota de voz).
+- **Los audios no llevan transcripción** (regla del dueño, 28/10): se escuchan con `url`. Su `texto` sale como
+  `(audio)`.
+- Lo que llega por QR ya está en el disco (`.wa-media`). Con la API oficial de Meta el mensaje solo trae el id de
+  Meta: la primera vez que se abre el enlace se baja de Meta y queda en el disco.
+- Fotos, video, audio y PDF se abren en la página; cualquier otro documento (un HTML, un SVG) se **descarga**, para
+  que un archivo del cliente no pueda ejecutar nada.
+
+Ver `src/api/v1/archivos-gsg.ts`.
+
 (Hasta el 28/10 hubo además un envío aparte, un POST a una «Ruta para etiquetas de chats» de GSG con reintentos.
 Se quitó: GSG lee la nota en el historial. Las columnas `sync_*` de la migración 014 quedan sin uso.)
 
@@ -309,6 +336,28 @@ En Automatización GSG → Ajustes de chat → «Primer mensaje que recibe el cl
 ¿podrías compartir tu ubicación por WhatsApp para que el motorizado pueda armar su ruta? ¡Gracias!* Si se guarda
 igual al de fábrica, se guarda vacío (y el de fábrica sigue avisando cuando la dirección no trae número de puerta).
 La plantilla de Meta para varios pedidos (`templates/catalog.ts`) no se cambió: cambiarla exige volver a aprobarla.
+
+## La ubicación por enlace de mapa (28/10)
+
+Si el cliente manda un enlace (`https://maps.app.goo.gl/…`, Google Maps, Waze, Apple Maps) en lugar del pin,
+GSGchat saca las coordenadas del enlace con el mismo algoritmo que el admin de GSG (`gmaps_coords.php`), sin API de
+Google ni clave, y las registra y las manda a GSG igual que un pin (`send-location`).
+
+- **Orden por precisión** (`src/geo/parsers.ts`): primero el pin del lugar (`!3d!4d`, el último), luego `?query=`,
+  `?q=`, `?destination=`, `?daddr=`, `?ll=`, `?coordinate=`, `?to=ll.`, `?center=`, `geo:`, el `/lat,lng` de
+  `/maps/dir/` o `/maps/search/` y, como último recurso, el centro de la cámara (`@`). Se prueban todas las
+  coincidencias de cada patrón, sobre la URL tal cual y decodificada (`%2C`, `,+`).
+- **Solo Perú** (`PERU_BBOX`): un par que cae fuera (ids, zoom, Nueva York) se descarta y se prueba el siguiente.
+- **Enlaces cortos** (`src/geo/resolve.ts`): se siguen los saltos a mano (hasta 15, 8 s cada uno, solo https y
+  solo hosts de la lista de `src/util/net-guard.ts`). Si la URL final no trae coordenadas (consentimiento,
+  «continuar a Maps»), se leen los enlaces de Maps que hay DENTRO de la página (cortada en 256 KB, con `\/`
+  desescapado), uno por uno; nunca el HTML entero, y nunca la imagen del mapa (`staticmap`), que es el centro de
+  la vista y no el lugar.
+- **Cuando no sale** (un lugar compartido como dirección, sin coordenadas, como el de Av. Jorge Chávez 865) o el
+  mensaje trae **dos enlaces distintos**, no se adivina: el bot le pide el pin con el botón de ubicación, en la
+  misma conversación y también con el bot callado (textos `enlaceSinUbicacion` y `variosEnlaces`). Queda anotado
+  en el pedido.
+- Un mismo mensaje de WhatsApp no se procesa dos veces (por su `wamid`): un reintento no manda dos ubicaciones.
 
 Lo que hay que hacer en la base al desplegarlo: `docs/MIGRACIONES-ETIQUETAS.md`.
 

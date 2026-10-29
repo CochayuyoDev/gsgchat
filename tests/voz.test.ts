@@ -370,15 +370,17 @@ describe('el asistente con voz', () => {
     await voz.guardar({ clave: 'xi-1234-5678', vozId: 'v-lucia', vozNombre: 'Lucía', activa: true, cuando: 'si-manda-audio' });
   });
 
-  it('ignora el audio sin transcripción, IA, respuesta ni registro en el hilo', async () => {
+  it('el audio se guarda en el hilo sin transcripción, IA ni respuesta (regla del dueño, 28/10)', async () => {
     const c = await cliente();
     await processChange('messages', entranteAudio(), deps);
     expect(eleven.estado.transcritos).toBe(0);
     expect(eleven.estado.hablado).toEqual([]);
     expect(modelo.recibido).toEqual([]);
     expect(enviados()).toHaveLength(0);
-    expect(await repos.messages.listMessages(c.id, 10)).toEqual([]);
-    expect(eventos.filter(e => e.nombre === 'mensaje.recibido' || e.nombre === 'mensaje.enviado')).toEqual([]);
+    const hilo = await repos.messages.listMessages(c.id, 10);
+    expect(hilo.map((m) => [m.direction, m.kind])).toEqual([['in', 'audio']]);
+    expect(JSON.stringify(hilo[0]!.payload ?? {})).not.toMatch(/transcripcion/);
+    expect(eventos.filter(e => e.nombre === 'mensaje.enviado')).toEqual([]);
   });
 
   it('los ajustes antiguos de voz no generan audio y los audios entrantes se ignoran', async () => {

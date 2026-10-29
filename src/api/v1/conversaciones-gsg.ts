@@ -19,6 +19,7 @@ import { z } from 'zod';
 import type { Repos } from '../../db/repos.js';
 import type { Sender } from '../../outbound/sender.js';
 import { respuestaDeEnvio } from './routes.js';
+import { archivoDeMensaje } from './archivos-gsg.js';
 import { trackingDeEntrega } from '../../entregas/repo.js';
 import { nombreDeEtiqueta } from '../../archive/clasificar.js';
 import { catalogoVigente, numeroNormalizado } from '../../chat/etiquetar.js';
@@ -26,6 +27,12 @@ import { catalogoVigente, numeroNormalizado } from '../../chat/etiquetar.js';
 export interface ApiConversacionesGsgDeps {
   repos: Repos;
   sender: Sender;
+  /**
+   * Para los enlaces de los archivos del chat (`archivo.url`): la direccion
+   * publica de la tienda y la clave que los firma. Sin ellos el historial sale
+   * sin enlaces. Ver src/api/v1/archivos-gsg.ts.
+   */
+  archivos?: { publicBase: string; secreto: string };
 }
 
 /** Un token del chat embebido solo abre la conversacion para la que se emitio. */
@@ -73,22 +80,33 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
   const trackingDe = trackingDeEntrega;
 
   const mensajeDeChat = (m: Awaited<ReturnType<Repos['messages']['listMessages']>>[number]) => {
-    const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; emisor?: unknown; media?: { voz?: unknown } };
+    const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; emisor?: unknown; media?: { voz?: unknown; transcripcion?: unknown } };
+    // GSG no recibe la transcripción de los audios (regla del dueño, 28/10): el
+    // audio se escucha con `archivo.url`. Un audio transcrito se guarda con lo que
+    // dijo como cuerpo; aquí sale como «(audio)» y sin la transcripción en `datos`.
+    const audio = m.kind === 'audio';
+    let datos = m.payload;
+    if (audio && datos) {
+      const { transcripcion: _t, ...resto } = datos as Record<string, unknown>;
+      const media = resto.media && typeof resto.media === 'object' ? (({ transcripcion: _mt, ...r }) => r)(resto.media as Record<string, unknown>) : resto.media;
+      datos = { ...resto, ...(media !== undefined ? { media } : {}) };
+    }
     return {
       id: m.wamid,
       cursor: m.id,
       direccion: m.direction === 'in' ? 'entrante' : 'saliente',
       tipo: m.kind,
-      texto: m.body,
-      transcripcion: typeof p.transcripcion === 'string' ? p.transcripcion : null,
+      texto: audio && typeof p.transcripcion === 'string' ? '(audio)' : m.body,
       anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,
-      datos: m.payload,
+      datos,
       fecha: m.createdAt,
       // Quien lo mando (solo salientes): persona | ia | sistema. Si lo escribio un usuario de GSG, `emisor` dice cual.
       autor: m.direction === 'out' ? (p.origen === 'persona' || p.origen === 'ia' ? p.origen : 'sistema') : null,
       autorNombre: m.direction === 'out' && typeof p.autorNombre === 'string' ? p.autorNombre : null,
       emisor: m.direction === 'out' && p.emisor && typeof p.emisor === 'object' ? p.emisor : null,
       voz: p.media?.voz === true,
+      // La foto, el video, el audio o el documento: un enlace firmado que abre el fichero tal cual.
+      archivo: deps.archivos ? archivoDeMensaje(m, deps.archivos) : null,
       estado: m.status,
     };
   };

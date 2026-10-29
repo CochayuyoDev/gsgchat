@@ -73,6 +73,12 @@ export interface BoundingBox {
 }
 
 export interface ExtractOptions {
+  /**
+   * El pais donde tiene sentido la coordenada (p. ej. PERU_BBOX). Una
+   * coincidencia fuera se descarta y se prueba la siguiente del mismo patron;
+   * es aparte de `bbox` (la zona que se cubre).
+   */
+  pais?: BoundingBox;
   /** Resolver acortadores (maps.app.goo.gl) haciendo peticion HTTP. Default true. */
   resolveShortLinks?: boolean;
   /** Timeout por salto de redireccion, en ms. Default 5000. */

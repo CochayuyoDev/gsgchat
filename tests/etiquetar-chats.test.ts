@@ -277,6 +277,18 @@ describe('el lote del dia', () => {
     expect((await repo.eventos({ loteId: r.loteId!, fase: 'lote', limite: 5 })).some((e) => /Volver a etiquetar todo/.test(e.detalle ?? ''))).toBe(true);
   });
 
+  it('la nota que puso el bot («cambió su ubicación») no la pisa la IA, ni al volver a etiquetar todo', async () => {
+    await repo.guardar({ phone: '51911000003', dia: '2026-10-27', etiqueta: 'cambiar_ubicacion', origen: 'reglas', huella: 'bot-cambio-ubicacion-1-1', mensajes: 1, motivo: null, loteId: null });
+    // La de «la IA falló: puesta por las reglas» (de antes) sí se vuelve a leer.
+    await repo.guardar({ phone: '51911000004', dia: '2026-10-27', etiqueta: 'reclamo', origen: 'reglas', huella: 'x', mensajes: 1, motivo: 'la IA falló: puesta por las reglas', loteId: null });
+    const todo = iaDePrueba(() => '{"etiqueta":"sin_novedad"}');
+    await etiquetarDelDia(deps(repo, () => todo.ia), ALCANCE, undefined, { releer: true });
+    expect(todo.llamadas).toHaveLength(2);
+    const filas = new Map((await repo.delDia('2026-10-27')).map((e) => [e.phone, e]));
+    expect(filas.get('51911000003')).toMatchObject({ etiqueta: 'cambiar_ubicacion', origen: 'reglas' });
+    expect(filas.get('51911000004')).toMatchObject({ etiqueta: 'sin_novedad', origen: 'ia' });
+  });
+
   it('en segundo plano: pulsar dos veces no lanza dos lotes', async () => {
     let soltar: () => void = () => undefined;
     const espera = new Promise<void>((r) => (soltar = r));

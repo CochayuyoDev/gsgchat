@@ -166,11 +166,14 @@ describe('la conversacion se guarda sola', () => {
     expect(hilo.json().canWrite).toBe(true);
   });
 
-  it('una foto se ignora sin crear contacto ni descargar o guardar mensajes', async () => {
-    await processChange('messages', inbound({ type: 'image', text: undefined }), deps);
+  it('una foto se guarda en el chat y no se le contesta (regla del dueño, 28/10)', async () => {
+    const antes = repos.messages._all.length;
+    await processChange('messages', inbound({ type: 'image', text: undefined, image: { id: 'meta-foto-1', mime_type: 'image/jpeg', caption: 'mi fachada' } } as Partial<InboundMessage>), deps);
 
-    expect(await repos.contacts.getByPhone('5215500001111')).toBeNull();
-    expect(repos.messages._all).toHaveLength(0);
+    expect(await repos.contacts.getByPhone('5215500001111')).not.toBeNull();
+    const nuevos = repos.messages._all.slice(antes);
+    expect(nuevos).toHaveLength(1);
+    expect(nuevos[0]).toMatchObject({ direction: 'in', kind: 'image', payload: { media: { id: 'meta-foto-1', mimeType: 'image/jpeg', caption: 'mi fachada' } } });
   });
 
   it('el estado de entrega llega al mensaje', async () => {
@@ -227,12 +230,19 @@ describe('lista de conversaciones', () => {
     expect(cambiado.body).toContain('segundo');
   });
 
-  it('descarta archivos entrantes antes de crear contactos o registrar mensajes', async () => {
-    for (const type of ['audio', 'video', 'sticker', 'image', 'document']) {
+  it('descarta documentos y stickers antes de crear contactos o registrar mensajes', async () => {
+    for (const type of ['sticker', 'document']) {
       await processChange('messages', inbound({ type } as Partial<InboundMessage>), deps);
     }
     expect(await repos.contacts.getByPhone('5215500001111')).toBeNull();
     expect(repos.messages._all).toHaveLength(0);
+  });
+
+  it('fotos, audios y videos se guardan sin respuesta del bot', async () => {
+    for (const type of ['audio', 'video', 'image']) {
+      await processChange('messages', inbound({ type, [type]: { id: `meta-${type}`, mime_type: type === 'audio' ? 'audio/ogg' : type === 'video' ? 'video/mp4' : 'image/jpeg' } } as Partial<InboundMessage>), deps);
+    }
+    expect(repos.messages._all.map((m) => [m.direction, m.kind])).toEqual([['in', 'audio'], ['in', 'video'], ['in', 'image']]);
   });
   it('ordena por lo mas reciente y cuenta los no leidos', async () => {
     await processChange('messages', inbound({ text: { body: 'primero' } }, '5215500004444'), deps);

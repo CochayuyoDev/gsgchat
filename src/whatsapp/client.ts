@@ -190,6 +190,11 @@ export interface WhatsAppClient {
    * primero a Meta y lo manda por id; WAHA lo manda en base64.
    */
   sendMedia?(to: string, media: MediaSaliente): Promise<SendResult>;
+  /**
+   * Baja un archivo que llegó por la API oficial de Meta, que en el mensaje
+   * solo trae su id. Los demás proveedores ya lo guardan al recibirlo.
+   */
+  downloadMedia?(mediaId: string): Promise<{ datos: Buffer; mimeType: string }>;
   sendButtons(
     to: string,
     body: string,
@@ -458,6 +463,21 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
           },
         },
       });
+    },
+
+    async downloadMedia(mediaId) {
+      // Dos pasos: Meta da una URL temporal y esa URL pide el mismo token.
+      const info = await call<{ url?: string; mime_type?: string }>(`${baseUrl}/${graphVersion}/${encodeURIComponent(mediaId)}`, { method: 'GET' });
+      if (!info.url) throw new WhatsAppApiError('Meta no devolvió la dirección del archivo', 502, undefined, undefined, true);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs * 4);
+      try {
+        const response = await fetchImpl(info.url, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal });
+        if (!response.ok) throw new WhatsAppApiError(`no se pudo bajar el archivo (HTTP ${response.status})`, response.status, undefined, undefined, response.status >= 500);
+        return { datos: Buffer.from(await response.arrayBuffer()), mimeType: info.mime_type ?? response.headers.get('content-type') ?? 'application/octet-stream' };
+      } finally {
+        clearTimeout(timer);
+      }
     },
 
     sendTemplate(to, name, language, components) {

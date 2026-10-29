@@ -20,7 +20,7 @@ import { enviarConfirmacionUbicacion, type ConfirmacionUbicacion } from '../entr
 
 import { esperarRafaga, marcarLlegada, olvidarLlegada } from './rafaga.js';
 import { TEXTO_VER_UNA_VEZ } from './textos.js';
-import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
+import { enlacesDeMapa, extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
@@ -63,7 +63,7 @@ import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { atenderComoAgente, atenderConReglaGsg, cerrarChat, clasificarPinLejos, pideAsesor, type DepsAgente } from '../ia/agente-operativo.js';
-import { entradaAdmitida } from '../whatsapp/entradas-admitidas.js';
+import { entradaAdmitida, esMediaAdmitida } from '../whatsapp/entradas-admitidas.js';
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
@@ -853,7 +853,7 @@ async function handleInboundMessageEnFila(
     async send(job) {
       if (pausaTraspasada && !job.traspasaPausa) job = { ...job, traspasaPausa: true };
       // La respuesta del bot a «cambiar ubicación» sale también con el bot callado (28/10).
-      if (job.manual || job.cambioUbicacion || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
+      if (job.manual || job.cambioUbicacion || job.respuestaUbicacion || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
       console.warn('[inbound] bot callado: no se le contesta al cliente', { phone, que: (job.text ?? job.interactive?.body ?? job.kind).slice(0, 60) });
       return { ok: true, wamid: `silencio:${randomUUID()}`, deliveryId: -1 };
     },
@@ -946,6 +946,11 @@ async function handleInboundMessageEnFila(
     payload: leido.payload,
     createdAt: receivedAt,
   });
+
+  // Una foto, un audio o un video (regla del dueño, 28/10): queda en el chat para
+  // que lo vean aquí y GSG desde el historial, y nada más. No se transcribe, no
+  // se contesta, no cuenta como respuesta ni mueve el pedido ni el recordatorio.
+  if (esMediaAdmitida(message)) return;
 
   // Regla del dueño (20/10): pasado el plazo para marcar la incidencia, el
   // sistema ya no hace nada con ese cliente: se marca la incidencia, se le
@@ -1273,6 +1278,31 @@ async function handleInboundMessageEnFila(
     }
   }
 
+  // --- un enlace de mapa sin ubicación segura -----------------------------
+  // El cliente con una entrega en curso manda un enlace de mapa en vez del pin.
+  // Si de ese enlace sale su ubicación, la registra el camino de siempre (abajo).
+  // Si no sale (un lugar o una dirección compartida, sin coordenadas) o manda
+  // dos enlaces distintos, no se adivina: se le pide el pin con el botón, en la
+  // misma conversación (como GSG, 26/10). Sale también con el bot callado.
+  if (message.type === 'text' && deps.entregas && !(await deps.entregas.esMotorizado(phone).catch(() => false))) {
+    const enlaces = enlacesDeMapa(message.text?.body ?? '');
+    if (enlaces.length && (await deps.entregas.tieneEntregaEnCurso(phone).catch(() => false))) {
+      const leida = enlaces.length === 1 ? await extractLocation(enlaces[0]!, { pais: deps.config.pais }).catch(() => null) : null;
+      // Fuera del país (o de la zona) lo atiende el camino de fuera de zona, más abajo.
+      const sinUbicacion = enlaces.length > 1 || !leida || (!leida.ok && leida.reason !== 'outside_bbox');
+      if (sinUbicacion) {
+        const clave = enlaces.length > 1 ? 'variosEnlaces' : 'enlaceSinUbicacion';
+        const texto = await deps.entregas.textoAgente(clave, phone, contact.name);
+        await sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: texto, locationRequest: true }, respuestaUbicacion: true });
+        const motivo = enlaces.length > 1 ? `mandó ${enlaces.length} enlaces de mapa distintos` : `mandó un enlace de mapa sin la ubicación exacta (${leida && !leida.ok ? leida.reason : 'no se pudo leer'})`;
+        await deps.entregas.anotarAgente(phone, `${motivo}: se le pidió el pin (${enlaces[0]!.slice(0, 120)})`).catch(() => undefined);
+        const abierta = (await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ?? (await repos.rutas.abiertaPorTelefono(phone).catch(() => null));
+        if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `${motivo}: se le pidió el pin`).catch(() => undefined);
+        return;
+      }
+    }
+  }
+
   // Mientras falta la ubicación, ningún texto entrante adelanta la petición
   // ni cambia el contador o el próximo intento. Esto vale en ambos modos y
   // antes de las plantillas, el agente y las automatizaciones por palabras.
@@ -1285,7 +1315,7 @@ async function handleInboundMessageEnFila(
       const escrito = message.text?.body ?? message.media?.transcripcion ?? message.button?.text ?? message.interactive?.button_reply?.title ?? '';
       const boton = message.interactive?.button_reply?.id ?? message.button?.payload ?? null;
       const ubicacion = escrito && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(escrito)
-        ? await extractLocation(escrito, {}).catch(() => null) : null;
+        ? await extractLocation(escrito, { pais: deps.config.pais }).catch(() => null) : null;
       const confirmaPin = Boolean(deps.entregas && clasificarPinLejos(escrito, boton) !== 'otra' && await deps.entregas.pinLejosPendiente(phone).catch(() => false));
       if (!ubicacion?.ok && !confirmaPin) {
         // Un número equivocado se reporta por dentro, sin contestarle al cliente.
@@ -1308,7 +1338,7 @@ async function handleInboundMessageEnFila(
     const cuerpo = message.text?.body ?? '';
     const escrito = cuerpo || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.media?.transcripcion || '';
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
-    const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
+    const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, { pais: deps.config.pais }).catch(() => null) : null;
     if (!esPin && !enlace?.ok) {
       await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1, citaId: message.context?.id ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
@@ -1508,7 +1538,7 @@ async function handleInboundMessageEnFila(
   const [rules, prefs, result] = await Promise.all([
     repos.automation.listRules(),
     repos.automation.getPrefs(),
-    extractLocation(text, {}),
+    extractLocation(text, { pais: deps.config.pais }),
   ]);
 
   // Las entregas del dia: la respuesta a "¿confirmas tu pedido?" y lo que

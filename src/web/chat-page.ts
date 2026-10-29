@@ -1224,7 +1224,7 @@ document.getElementById('bajar').onclick = function () {
  * arriba, un refresco no le tira la vista al final.
  */
 function renderMessages(messages, scrollToEnd, mantenerVista) {
-  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive'].indexOf(m.kind) >= 0; });
+  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive', 'image', 'audio', 'video'].indexOf(m.kind) >= 0; });
   messages = messages.filter(function (m) { return !m.expiresAt || Date.parse(m.expiresAt) > Date.now(); });
   pintados = messages;
   clearTimeout(expiryTimer);
@@ -1274,6 +1274,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       citaHtml(m) +
       anuncioHtml(m) +
       ubicacionHtml(m) +
+      adjuntoHtml(m) +
       resaltar(withLinks(cuerpoVisible(m))) +
       borradoHtml(m) +
       '<span class="meta">' +
@@ -1352,9 +1353,26 @@ function borradoHtml(m) {
  */
 function cuerpoVisible(m) {
   if (m.kind === 'location' && m.payload && m.payload.location) return '';
+  /* La nota de voz se escucha: su transcripcion no se enseña (regla del dueño, 28/10). */
+  if (m.kind === 'audio') return '';
   var cuerpo = (m.body || '').trim();
   var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
   return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
+}
+
+/**
+ * La foto, el audio o el video que mando el cliente, para verlo o escucharlo
+ * aqui. El enlace es el mismo que recibe GSG en el historial (firmado). Si el
+ * archivo ya no esta guardado, el navegador lo dice en su sitio.
+ */
+function adjuntoHtml(m) {
+  var a = m.archivo;
+  if (!a || !a.url) return '';
+  var url = esc(a.url);
+  if (m.kind === 'image') return '<a class="adjunto adjunto-foto" href="' + url + '" target="_blank" rel="noopener" title="Abrir la foto"><img src="' + url + '" alt="Foto del cliente" loading="lazy"></a>';
+  if (m.kind === 'audio') return '<div class="adjunto adjunto-audio"><span>🎤 Nota de voz</span><audio controls preload="none" src="' + url + '"></audio></div>';
+  if (m.kind === 'video') return '<div class="adjunto adjunto-video"><video controls preload="metadata" src="' + url + '"></video></div>';
+  return '';
 }
 
 /**

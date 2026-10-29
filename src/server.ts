@@ -39,6 +39,7 @@ import { registerStickersRoutes } from './admin/stickers-routes.js';
 import { registerApiV1 } from './api/v1/routes.js';
 import { registerApiEntregasGsg } from './api/v1/entregas-gsg.js';
 import { registerApiConversacionesGsg } from './api/v1/conversaciones-gsg.js';
+import { registerArchivosGsg } from './api/v1/archivos-gsg.js';
 import type { Bus } from './eventos/bus.js';
 
 
@@ -202,7 +203,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // (sin esto, `/%61dmin/...` se saltaba el de /admin). Ver util/ruta-normalizada.ts.
     rewriteUrl: (req) => normalizarRuta(req.url ?? '/'),
   });
-  registrarLimpiezaChat(app, repos);
+  registrarLimpiezaChat(app, repos, mediaDir);
 
   app.addHook('onRequest', async (request, reply) => {
     if (moduloRetirado(request.url)) return reply.code(404).send({ ok: false, codigo: 'RUTA_NO_EXISTE', error: 'Este módulo fue retirado. Usa API, WhatsApp o Pedidos GSG.' });
@@ -387,7 +388,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
-  await registerApiConversacionesGsg(app, { repos, sender });
+  await registerApiConversacionesGsg(app, { repos, sender, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
+  // Los archivos de ese historial (`archivo.url`): enlace firmado, sin clave. Ver src/api/v1/archivos-gsg.ts.
+  await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa });
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
 

@@ -78,7 +78,10 @@ function pintarContadores() {
 function envioGsg(e) {
   if (e.lat == null || e.lng == null) return '';
   var r = envios[(e.datosEnvio && e.datosEnvio.tracking) || e.referencia];
-  var linea = !r ? '<span class="chip">Sin enviar a GSG</span> <span class="muted">Tiene ubicación pero no salió hacia GSG: usa «Enviar a GSG».</span>'
+  /* Un cliente de prueba (51 000 0…) nunca se manda a la API real de GSG: no es un fallo. */
+  var dePrueba = r && r.estado === 'fallido' && /^Reporte de prueba/.test(r.error || '');
+  var linea = dePrueba ? '<span class="chip">Prueba: no se manda a GSG</span> <span class="muted">Es un cliente de prueba: lo suyo solo va al simulador de GSG, nunca a la API real.</span>'
+    : !r ? '<span class="chip">Sin enviar a GSG</span> <span class="muted">Tiene ubicación pero no salió hacia GSG: usa «Enviar a GSG».</span>'
     : r.estado === 'enviado' ? '<span class="chip">Enviado a GSG</span> <span class="muted">'+esc(new Date(r.enviadoEn||r.en).toLocaleString('es-PE'))+'</span>'
     : '<span class="chip">'+(r.estado === 'fallido' ? 'Falló el envío a GSG' : 'Pendiente de enviar a GSG')+'</span>'+(r.error?' <span class="muted">Error: '+esc(r.error)+'</span>':'');
   return '<p id="gsg-'+e.id+'">'+linea+'</p>';

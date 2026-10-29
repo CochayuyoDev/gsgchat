@@ -19,6 +19,7 @@ No envíes mensajes a clientes reales, no llames a GSG real y no muestres claves
 5. Chat y errores se actualizan por eventos, sin polling normal de conversaciones completas. Los eventos no reemplazan ni duplican el envío real.
 6. Un mensaje nuevo no reconstruye el hilo, no mueve al operador que está leyendo arriba y no sobrescribe el texto que está escribiendo.
 7. Solo se procesan mensajes de texto, ubicaciones y controles necesarios para esos flujos. Se ignoran audio, foto, video, documento, sticker y contenido de una sola visualización antes de descargar, transcribir, registrar o llamar a IA.
+   **Cambio del dueño (28/10):** las fotos, los audios y los videos SÍ se reciben y se guardan en el chat (con su archivo, 72 h como los mensajes) para que GSG los vea y los escuche desde el historial. No se transcriben, no se contestan y no mueven el pedido. Documentos y stickers se siguen ignorando antes de descargar. Ver `src/whatsapp/entradas-admitidas.ts` y `docs/CONEXION-GSG.md`.
 8. No hay generación, escritura, consulta ni renderizado de notas internas por turno.
 9. Se retiran de la web Plantillas, Ubicaciones, Chats guardados e Historial de mensajes. Se conserva Historial y errores como diagnóstico operativo, sin cuerpos de conversaciones y con incidencias agrupadas.
 10. Se controla la concurrencia de operaciones costosas y se conservan las garantías de entrega, idempotencia y confirmación de ubicación.

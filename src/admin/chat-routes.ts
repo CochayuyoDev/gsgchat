@@ -21,6 +21,7 @@ import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
 import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
+import { archivoDeMensaje } from '../api/v1/archivos-gsg.js';
 import type { ServicioIA } from '../ia/servicio.js';
 import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, TOPE_CATALOGO, clasificarConIA, nombreDeEtiqueta, validarCatalogo, type Catalogo } from '../archive/clasificar.js';
 import { casosParaCatalogo, evaluarClasificador, leerConversacionEscrita, type InformeEvaluacion } from '../archive/evaluacion.js';
@@ -676,7 +677,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     const messages = await repos.messages.listMessages(contact.id, query.limit + 1, query.before, undefined, alcance);
     const hasMore = messages.length > query.limit;
-    const pagina = messages.slice(-query.limit).map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + RETENCION_CHAT_MS).toISOString() }));
+    // Foto, audio o video del cliente: el mismo enlace firmado que recibe GSG en el historial
+    // (relativo, para que valga con el prefijo de la tienda), para verlo o escucharlo aquí.
+    const pagina = messages.slice(-query.limit).map(m => ({
+      ...m,
+      expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + RETENCION_CHAT_MS).toISOString(),
+      archivo: archivoDeMensaje(m, { publicBase: '.', secreto: config.TRACKING_SECRET }),
+    }));
     if (query.read) await repos.messages.markRead(contact.id, new Date());
     // La solicitud de reparto abierta, si la hay: el pedido y en que punto va,
     // para que quien atiende lo vea sin cambiar de pantalla (y para {pedido}).
